@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #0a0a0b;
+  --color-foreground: #ededed;
+  --color-primary: #ffb800; /* Vibrant Gold */
+  --color-primary-foreground: #000000;
+  --color-card: #141416;
+  --color-card-foreground: #ededed;
+  --color-muted: #1e1e21;
+  --color-border: #26262a;
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 4%;
+    --foreground: 0 0% 93%;
+    --card: 240 10% 4%;
+    --card-foreground: 0 0% 93%;
+    --primary: 43 100% 50%;
+    --primary-foreground: 0 0% 0%;
+    --muted: 240 5% 12%;
+    --muted-foreground: 240 5% 65%;
+    --border: 240 5% 16%;
+    --radius: 0.75rem;
+  }
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui;
+}
+
+.glass {
+  background: rgba(20, 20, 22, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.gold-gradient {
+  background: linear-gradient(135deg, #ffb800 0%, #ff8a00 100%);
+}
+
+.gold-glow {
+  box-shadow: 0 0 20px rgba(255, 184, 0, 0.2);
+}

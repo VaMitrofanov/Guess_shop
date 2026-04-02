@@ -1,0 +1,57 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String   // Hashed
+  name      String?
+  role      String   @default("ADMIN")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  robuxAmount Int
+  rubPrice    Float
+  type        String   // Gamepass, Group Funds, etc.
+  isActive    Boolean  @default(true)
+  orders      Order[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FULFILLED
+  FAILED
+}
+
+model Order {
+  id                  String      @id @default(cuid())
+  customerRobloxUser  String
+  productId           String
+  product             Product     @relation(fields: [productId], references: [id])
+  amountRUB           Float
+  amountRobux         Int
+  tinkoffPaymentID    String?     @unique
+  paymentUrl          String?
+  status              OrderStatus @default(PENDING)
+  botStatus           String?     // e.g., "PROCESSING", "ERROR", "SUCCESS"
+  externalId          String?     // ID from the bot or supplier
+  gamepassId          String?
+  method              String      // e.g., "Gamepass"
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+}
