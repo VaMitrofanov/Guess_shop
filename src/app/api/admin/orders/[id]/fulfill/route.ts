@@ -3,17 +3,20 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const session = await getServerSession(authOptions);
     if (!session || (session.user as any).role !== "ADMIN") {
         return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    const orderId = params.id;
+    const orderId = id;
     const updatedOrder = await prisma.order.update({
         where: { id: orderId },
         data: { status: "FULFILLED" },
