@@ -40,18 +40,18 @@ export default async function AdminDashboard() {
   });
 
   return (
-    <main className="min-h-screen bg-[#0a0a0b]">
+    <main className="min-h-screen bg-[#05070a]">
         <Navbar />
         <div className="container mx-auto px-4 py-12">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
                 <div className="space-y-1">
-                    <h1 className="text-3xl font-black italic gold-gradient bg-clip-text text-transparent uppercase tracking-tight">Панель управления</h1>
+                    <h1 className="text-3xl font-black italic gold-text uppercase tracking-tight">Панель управления</h1>
                     <p className="text-zinc-500 font-medium">Мониторинг заказов и финансов.</p>
                 </div>
                 <div className="flex items-center gap-3">
                     <Link 
                         href="/admin/products"
-                        className="h-11 px-6 bg-[#ffb800] text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:scale-[1.02] transition-all"
+                        className="h-11 px-6 gold-gradient text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:scale-[1.02] transition-all"
                     >
                         <Package className="w-4 h-4" />
                         ТОВАРЫ
@@ -76,7 +76,7 @@ export default async function AdminDashboard() {
 
             {/* Stats Grid */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-12">
-                <div className="bg-[#141416] p-8 rounded-3xl border border-white/5 space-y-4 shadow-xl">
+                <div className="bg-[#0d1117] p-8 rounded-3xl border border-white/5 space-y-4 shadow-xl">
                     <div className="w-12 h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center">
                         <TrendingUp className="w-6 h-6 text-blue-500" />
                     </div>
@@ -85,7 +85,7 @@ export default async function AdminDashboard() {
                         <p className="text-3xl font-black tracking-tight">{(totalRevenue._sum.amountRUB || 0).toLocaleString()} ₽</p>
                     </div>
                 </div>
-                <div className="bg-[#141416] p-8 rounded-3xl border border-white/5 space-y-4 shadow-xl">
+                <div className="bg-[#0d1117] p-8 rounded-3xl border border-white/5 space-y-4 shadow-xl">
                     <div className="w-12 h-12 rounded-2xl bg-yellow-500/10 flex items-center justify-center">
                         <Clock className="w-6 h-6 text-yellow-500" />
                     </div>
@@ -115,7 +115,7 @@ export default async function AdminDashboard() {
             </div>
 
             {/* Orders Manager Table */}
-            <div className="bg-[#141416] border border-white/5 rounded-[2rem] overflow-hidden shadow-2xl">
+            <div className="bg-[#0d1117] border border-white/5 rounded-[2rem] overflow-hidden shadow-2xl">
                 <div className="p-8 border-b border-white/5 flex items-center justify-between">
                     <h2 className="text-lg font-bold tracking-tight uppercase">Последние транзакции</h2>
                     <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Топ 50</span>

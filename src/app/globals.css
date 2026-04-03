@@ -51,6 +51,7 @@ body {
   -webkit-text-fill-color: transparent;
   background-clip: text;
   color: transparent;
+  padding-right: 0.1em; /* Fix for italic/clipping cutting off letters */
 }
 
 .gold-glow {

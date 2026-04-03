@@ -18,7 +18,7 @@ export default async function AdminFAQPage() {
   });
 
   return (
-    <main className="min-h-screen bg-[#0a0a0b]">
+    <main className="min-h-screen bg-[#05070a]">
         <Navbar />
         <div className="container mx-auto px-4 py-12">
             <div className="flex items-center gap-4 mb-8">
@@ -28,10 +28,10 @@ export default async function AdminFAQPage() {
                 <h1 className="text-2xl font-black uppercase italic gold-text">Управление FAQ</h1>
             </div>
 
-            <div className="bg-[#141416] border border-white/5 rounded-[2rem] overflow-hidden shadow-2xl">
+            <div className="bg-[#0d1117] border border-white/5 rounded-[2rem] overflow-hidden shadow-2xl">
                 <div className="p-8 border-b border-white/5 flex items-center justify-between">
                     <h2 className="text-lg font-bold tracking-tight uppercase flex items-center gap-3">
-                        <HelpCircle className="w-5 h-5 text-[#ffb800]" />
+                        <HelpCircle className="w-5 h-5 text-[#00f2fe]" />
                         Вопросы и Ответы
                     </h2>
                     <button className="h-10 px-6 bg-white/5 border border-white/5 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-white/10 transition-all flex items-center gap-2">

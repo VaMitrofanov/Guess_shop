@@ -33,13 +33,13 @@ export default function AdminLoginPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#0a0a0b]">
+    <main className="min-h-screen bg-[#05070a]">
       <Navbar />
       <div className="container mx-auto px-4 pt-32 flex justify-center">
         <div className="w-full max-w-md glass p-10 rounded-[2.5rem] border border-white/5 shadow-2xl">
           <div className="text-center mb-10 space-y-2">
-            <h1 className="text-3xl font-black uppercase italic gold-gradient bg-clip-text text-transparent">Admin Access</h1>
-            <p className="text-zinc-500 text-sm font-medium">Enterprise Security Protocol Active</p>
+            <h1 className="text-3xl font-black uppercase italic gold-text">Admin Access</h1>
+            <p className="text-zinc-500 text-sm font-medium uppercase tracking-widest opacity-50">Enterprise Security Protocol Active</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -52,7 +52,7 @@ export default function AdminLoginPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full h-14 bg-white/5 border border-white/5 rounded-xl pl-12 pr-4 outline-none focus:border-[#ffb800]/40 transition-all font-bold"
+                  className="w-full h-14 bg-white/5 border border-white/5 rounded-xl pl-12 pr-4 outline-none focus:border-[#00f2fe]/40 transition-all font-bold"
                   placeholder="admin@vadi.robux"
                 />
               </div>
@@ -67,7 +67,7 @@ export default function AdminLoginPage() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full h-14 bg-white/5 border border-white/5 rounded-xl pl-12 pr-4 outline-none focus:border-[#ffb800]/40 transition-all font-bold"
+                  className="w-full h-14 bg-white/5 border border-white/5 rounded-xl pl-12 pr-4 outline-none focus:border-[#00f2fe]/40 transition-all font-bold"
                   placeholder="••••••••"
                 />
               </div>
