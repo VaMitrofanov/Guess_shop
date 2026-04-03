@@ -11,7 +11,7 @@ export default function Calculator() {
   const RATE = 0.85; // 1 Robux = 0.85 RUB (Placeholder)
 
   useEffect(() => {
-    const amount = parseInt(robux) || 0;
+    const amount = Math.max(0, parseInt(robux) || 0);
     setRub(Math.round(amount * RATE));
   }, [robux]);
 
@@ -29,8 +29,12 @@ export default function Calculator() {
             <input
               type="number"
               value={robux}
-              onChange={(e) => setRobux(e.target.value)}
-              className="w-full h-16 bg-[#0a0a0b] border border-white/5 rounded-2xl px-6 pt-2 text-2xl font-bold outline-none focus:border-[#ffb800]/50 transition-all group-hover:border-white/10"
+              onChange={(e) => {
+                const val = e.target.value;
+                if (parseInt(val) < 0) return;
+                setRobux(val);
+              }}
+              className="w-full h-16 bg-[#05070a] border border-white/5 rounded-2xl px-6 pt-2 text-2xl font-bold outline-none focus:border-[#00f2fe]/50 transition-all group-hover:border-white/10"
               placeholder="0"
             />
             <Coins className="absolute right-6 top-1/2 -translate-y-1/2 w-6 h-6 text-[#00f2fe]" />

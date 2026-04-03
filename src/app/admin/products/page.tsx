@@ -3,8 +3,9 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import Navbar from "@/components/navbar";
-import { Package, Plus, ChevronLeft } from "lucide-react";
+import { Package, ChevronLeft, Plus } from "lucide-react";
 import ProductList from "@/components/admin/product-list";
+import AddProductModal from "@/components/admin/add-product-modal";
 
 export default async function ProductsPage() {
   const session = await getServerSession(authOptions);
@@ -40,10 +41,8 @@ export default async function ProductsPage() {
                         <Package className="w-5 h-5 text-[#00f2fe]" />
                         Список товаров
                     </h2>
-                    {/* Add Product trigger could be here */}
-                    <button className="h-10 px-6 gold-gradient text-black font-bold uppercase tracking-widest hover:scale-[1.02] transition-all rounded-xl flex items-center gap-2">
-                        <Plus className="w-4 h-4" /> Добавить товар
-                    </button>
+                    {/* Add Product trigger */}
+                    <AddProductModal onProductAdded={() => {}} />
                 </div>
                 <div className="overflow-x-auto p-4">
                     <ProductList initialProducts={JSON.parse(JSON.stringify(products))} />

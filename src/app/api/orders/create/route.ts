@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 import { initTinkoffPayment } from "@/lib/tinkoff";
 import { getRobloxUser } from "@/lib/roblox";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
 const CreateOrderSchema = z.object({
   username: z.string().min(1),
@@ -18,11 +20,12 @@ const DEFAULT_RATE = 0.85; // 1 Robux = 0.85 RUB
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getServerSession(authOptions);
     const body = await req.json();
     const validated = CreateOrderSchema.safeParse(body);
 
     if (!validated.success) {
-      return NextResponse.json({ error: "Invalid data", details: validated.error.issues }, { status: 400 });
+      return NextResponse.json({ error: "Сумма должна быть не менее 100 Robux", details: validated.error.issues }, { status: 400 });
     }
 
     const { username, amountRobux, productId, method, gamepassId } = validated.data;
@@ -50,6 +53,7 @@ export async function POST(req: NextRequest) {
     // 3. Create the order in DB
     const order = await prisma.order.create({
       data: {
+        userId: (session?.user as any)?.id || null,
         customerRobloxUser: username,
         amountRobux,
         amountRUB,

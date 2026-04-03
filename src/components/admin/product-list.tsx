@@ -21,6 +21,10 @@ export default function ProductList({ initialProducts }: { initialProducts: any[
   };
 
   const handleSave = async (id: string) => {
+    if (editForm.rubPrice < 0 || editForm.robuxAmount < 0) {
+        alert("Цены и количество не могут быть отрицательными!");
+        return;
+    }
     setLoading(true);
     try {
         const res = await fetch(`/api/admin/products/${id}`, {
@@ -37,6 +41,20 @@ export default function ProductList({ initialProducts }: { initialProducts: any[
         console.error(err);
     } finally {
         setLoading(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Вы уверены, что хотите удалить этот товар?")) return;
+    try {
+        const res = await fetch(`/api/admin/products/${id}`, {
+            method: "DELETE",
+        });
+        if (res.ok) {
+            setProducts(products.filter(p => p.id !== id));
+        }
+    } catch (err) {
+        console.error(err);
     }
   };
 
@@ -84,7 +102,7 @@ export default function ProductList({ initialProducts }: { initialProducts: any[
                         <button 
                             onClick={() => handleSave(product.id)}
                             disabled={loading}
-                            className="h-10 px-4 bg-[#ffb800] text-black font-bold rounded-lg text-xs uppercase transition-all"
+                            className="h-10 px-4 gold-gradient text-black font-bold rounded-lg text-xs uppercase transition-all"
                         >
                             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "СОХРАНИТЬ"}
                         </button>
@@ -99,7 +117,7 @@ export default function ProductList({ initialProducts }: { initialProducts: any[
             ) : (
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-6">
-                        <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center font-black text-[#ffb800]">
+                        <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center font-black text-[#00f2fe]">
                             R$
                         </div>
                         <div>
@@ -114,7 +132,7 @@ export default function ProductList({ initialProducts }: { initialProducts: any[
                     
                     <div className="flex items-center gap-12">
                         <div className="text-right">
-                             <div className="text-2xl font-black text-[#ffb800] tracking-tight">{product.rubPrice} ₽</div>
+                             <div className="text-2xl font-black text-[#00f2fe] tracking-tight">{product.rubPrice} ₽</div>
                              <div className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest">ТЕКУЩАЯ СТОИМОСТЬ</div>
                         </div>
                         
@@ -125,7 +143,10 @@ export default function ProductList({ initialProducts }: { initialProducts: any[
                             >
                                 <Edit className="w-4 h-4" />
                             </button>
-                             <button className="w-9 h-9 bg-red-500/10 text-red-500 rounded-lg flex items-center justify-center hover:bg-red-500 hover:text-white transition-all shadow-xl">
+                             <button 
+                                onClick={() => handleDelete(product.id)}
+                                className="w-9 h-9 bg-red-500/10 text-red-500 rounded-lg flex items-center justify-center hover:bg-red-500 hover:text-white transition-all shadow-xl"
+                            >
                                 <Trash className="w-4 h-4" />
                             </button>
                         </div>

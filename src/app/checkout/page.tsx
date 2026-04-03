@@ -16,10 +16,13 @@ function CheckoutContent() {
   const [username, setUsername] = useState("");
   const [method, setMethod] = useState("Gamepass");
   const [gamepassId, setGamepassId] = useState("");
+  const [gamepasses, setGamepasses] = useState<any[]>([]);
+  const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const robux = parseInt(amountStr) || (productId ? 0 : 0);
+  const robuxRaw = parseInt(amountStr) || (productId ? 0 : 0);
+  const robux = Math.max(0, robuxRaw);
   const price = Math.round(robux * 0.85);
 
   const handlePay = async () => {
@@ -32,6 +35,10 @@ function CheckoutContent() {
         return;
     }
     
+    if (robux < 100) {
+        setError("Минимальная сумма — 100 Robux");
+        return;
+    }
     setError("");
     setLoading(true);
 
@@ -62,13 +69,33 @@ function CheckoutContent() {
     }
   };
 
+  const handleUsernameSearch = async () => {
+    if (!username) return;
+    setSearching(true);
+    setGamepasses([]);
+    try {
+        const res = await fetch(`/api/roblox/gamepasses?username=${username}`);
+        const data = await res.json();
+        if (data.success) {
+            setGamepasses(data.gamepasses);
+            if (data.gamepasses.length === 0) {
+                setError("У этого пользователя нет публичных геймпассов");
+            }
+        }
+    } catch (err) {
+        console.error(err);
+    } finally {
+        setSearching(false);
+    }
+  };
+
   return (
     <div className="container mx-auto px-4 pt-12 pb-32 max-w-4xl">
       <div className="flex flex-col md:flex-row gap-8 items-start">
         {/* Left Side: Order Form */}
         <div className="flex-1 space-y-8">
             <div className="space-y-2">
-                <h1 className="text-3xl font-black uppercase italic gold-gradient bg-clip-text text-transparent">Оформление заказа</h1>
+                <h1 className="text-3xl font-black uppercase italic gold-text">Оформление заказа</h1>
                 <p className="text-zinc-500 font-medium">Пожалуйста, укажите верные данные для быстрой доставки.</p>
             </div>
 
@@ -92,7 +119,7 @@ function CheckoutContent() {
                         onClick={() => setMethod("Gamepass")}
                         className={cn(
                             "flex flex-col items-center gap-3 p-6 rounded-2xl border transition-all",
-                            method === "Gamepass" ? "bg-[#ffb800]/10 border-[#ffb800] text-[#ffb800]" : "bg-white/5 border-white/5 text-zinc-600"
+                            method === "Gamepass" ? "bg-[#00f2fe]/10 border-[#00f2fe] text-[#00f2fe]" : "bg-white/5 border-white/5 text-zinc-600"
                         )}
                     >
                         <Gamepad2 className="w-8 h-8" />
@@ -102,7 +129,7 @@ function CheckoutContent() {
                          onClick={() => setMethod("Group")}
                         className={cn(
                             "flex flex-col items-center gap-3 p-6 rounded-2xl border transition-all opacity-50 cursor-not-allowed",
-                            method === "Group" ? "bg-[#ffb800]/10 border-[#ffb800] text-[#ffb800]" : "bg-white/5 border-white/5 text-zinc-600"
+                            method === "Group" ? "bg-[#00f2fe]/10 border-[#00f2fe] text-[#00f2fe]" : "bg-white/5 border-white/5 text-zinc-600"
                         )}
                     >
                         <User className="w-8 h-8" />
@@ -111,19 +138,60 @@ function CheckoutContent() {
                 </div>
 
                 {method === "Gamepass" && (
-                    <div className="animate-in fade-in slide-in-from-top-2 duration-300">
-                        <label className="text-sm font-bold text-zinc-400 mb-3 block">ID ГЕЙМПАССА</label>
-                        <input 
-                            type="text" 
-                            value={gamepassId}
-                            onChange={(e) => setGamepassId(e.target.value)}
-                            placeholder="Напр., 12345678"
-                            className="w-full h-14 bg-white/5 border border-white/5 rounded-xl px-6 outline-none focus:border-[#ffb800]/40 transition-all font-bold"
-                        />
-                        <div className="mt-4 p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 flex gap-3">
-                            <Info className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
-                            <p className="text-xs text-blue-300/80 leading-relaxed">
-                                Убедитесь, что ваш геймпасс публичный и его цена соответствует сумме, которую вы хотите получить (с учетом налога Roblox).
+                    <div className="animate-in fade-in slide-in-from-top-2 duration-300 space-y-6">
+                        <div className="flex items-end gap-3">
+                            <div className="flex-1 space-y-2">
+                                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Никнейм или ID</label>
+                                <div className="relative">
+                                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-600" />
+                                    <input 
+                                        type="text" 
+                                        value={username}
+                                        onChange={(e) => setUsername(e.target.value)}
+                                        placeholder="Напр., Builderman"
+                                        className="w-full h-14 bg-white/5 border border-white/5 rounded-xl pl-12 pr-4 outline-none focus:border-[#00f2fe]/40 transition-all font-bold"
+                                    />
+                                </div>
+                            </div>
+                            <button 
+                                onClick={handleUsernameSearch}
+                                disabled={searching}
+                                className="h-14 px-6 glass border-white/5 rounded-xl font-bold text-xs uppercase hover:bg-white/10 transition-all flex items-center justify-center gap-2"
+                            >
+                                {searching ? <Loader2 className="w-5 h-5 animate-spin" /> : "НАЙТИ"}
+                            </button>
+                        </div>
+
+                        {gamepasses.length > 0 && (
+                            <div className="space-y-4">
+                                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Выберите геймпасс</label>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-2 scrollbar-hide">
+                                    {gamepasses.map((gp) => (
+                                        <button
+                                            key={gp.id}
+                                            onClick={() => setGamepassId(gp.id)}
+                                            className={cn(
+                                                "p-4 rounded-xl border text-left flex items-center gap-4 transition-all hover:scale-[1.02]",
+                                                gamepassId === gp.id.toString() || gamepassId === gp.id ? "bg-[#00f2fe]/10 border-[#00f2fe] text-[#00f2fe]" : "bg-white/5 border-white/5"
+                                            )}
+                                        >
+                                            <div className="w-12 h-12 rounded-lg bg-black/40 overflow-hidden flex-shrink-0">
+                                                <img src={gp.image} alt={gp.name} className="w-full h-full object-cover" />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-xs font-bold truncate uppercase tracking-tighter">{gp.name}</p>
+                                                <p className="text-[10px] text-zinc-500 font-bold">{gp.price || 0} R$</p>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="p-4 rounded-xl bg-[#00f2fe]/5 border border-[#00f2fe]/10 flex gap-4 shadow-xl">
+                            <Info className="w-6 h-6 text-[#00f2fe] shrink-0 mt-0.5" />
+                            <p className="text-xs text-[#00f2fe]/80 leading-relaxed font-medium">
+                                Найдите свой никнейм и выберите нужный геймпасс. Цена на геймпассе должна соответствовать сумме к получению (с учетом 30% налога Roblox).
                             </p>
                         </div>
                     </div>
@@ -147,7 +215,7 @@ function CheckoutContent() {
                 <div className="h-px w-full bg-white/5 my-2" />
                 <div className="flex justify-between items-center pt-2">
                     <span className="text-zinc-300 font-bold uppercase">Общая сумма</span>
-                    <span className="text-3xl font-black text-[#ffb800] tracking-tight">{price} ₽</span>
+                    <span className="text-3xl font-black text-[#00f2fe] tracking-tight">{price} ₽</span>
                 </div>
             </div>
 
@@ -179,7 +247,7 @@ export default function CheckoutPage() {
   return (
     <main className="min-h-screen">
       <Navbar />
-      <Suspense fallback={<div className="h-screen flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-[#ffb800]" /></div>}>
+      <Suspense fallback={<div className="h-screen flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-[#00f2fe]" /></div>}>
         <CheckoutContent />
       </Suspense>
     </main>

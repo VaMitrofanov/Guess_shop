@@ -31,6 +31,32 @@ export async function getGamepassDetails(gamepassId: string) {
   }
 }
 
+export async function getUserGamepasses(username: string) {
+  try {
+    const user = await getRobloxUser(username);
+    if (!user) return [];
+
+    // Search catalog for gamepasses by this user
+    // Note: catalog API sometimes requires specific headers or has different query params
+    // Another way is to get their games and then gamepasses.
+    // Let's try the direct catalog search first
+    const res = await fetch(`https://catalog.roblox.com/v1/search/items/details?category=Gamepasses&creatorName=${username}&limit=30`);
+    if (!res.ok) return [];
+    
+    const data = await res.json();
+    return (data.data || []).map((item: any) => ({
+      id: item.id,
+      name: item.name,
+      price: item.price,
+      productId: item.productId,
+      image: item.imageUri || `https://www.roblox.com/asset-thumbnail/image?assetId=${item.id}&width=150&height=150&format=png`
+    }));
+  } catch (error) {
+    console.error("Error fetching user gamepasses:", error);
+    return [];
+  }
+}
+
 export async function verifyUserGamepass(username: string, gamepassId: string, requiredRobux: number) {
   const user = await getRobloxUser(username);
   if (!user) return { success: false, message: "User not found" };
