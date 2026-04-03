@@ -1,27 +1,27 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #0a0a0b;
-  --color-foreground: #ededed;
-  --color-primary: #ffb800; /* Vibrant Gold */
+  --color-background: #05070a;
+  --color-foreground: #f0f4f8;
+  --color-primary: #00f2fe; /* Cyber Cyan */
   --color-primary-foreground: #000000;
-  --color-card: #141416;
-  --color-card-foreground: #ededed;
-  --color-muted: #1e1e21;
-  --color-border: #26262a;
+  --color-card: #0d1117;
+  --color-card-foreground: #f0f4f8;
+  --color-muted: #1a1f26;
+  --color-border: #1e293b;
 }
 
 @layer base {
   :root {
-    --background: 0 0% 4%;
-    --foreground: 0 0% 93%;
-    --card: 240 10% 4%;
-    --card-foreground: 0 0% 93%;
-    --primary: 43 100% 50%;
-    --primary-foreground: 0 0% 0%;
-    --muted: 240 5% 12%;
-    --muted-foreground: 240 5% 65%;
-    --border: 240 5% 16%;
+    --background: 222 47% 4%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 6%;
+    --card-foreground: 210 40% 98%;
+    --primary: 187 100% 50%;
+    --primary-foreground: 222 47% 4%;
+    --muted: 217 33% 13%;
+    --muted-foreground: 215 20% 65%;
+    --border: 217 33% 17%;
     --radius: 0.75rem;
   }
 }
@@ -30,18 +30,29 @@ body {
   background-color: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui;
+  background-image: 
+    radial-gradient(circle at 50% -20%, rgba(0, 242, 254, 0.05) 0%, transparent 50%),
+    radial-gradient(circle at 0% 0%, rgba(0, 242, 254, 0.02) 0%, transparent 30%);
 }
 
 .glass {
-  background: rgba(20, 20, 22, 0.7);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(13, 17, 23, 0.7);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.03);
 }
 
 .gold-gradient {
-  background: linear-gradient(135deg, #ffb800 0%, #ff8a00 100%);
+  background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+}
+
+.gold-text {
+  background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  color: transparent;
 }
 
 .gold-glow {
-  box-shadow: 0 0 20px rgba(255, 184, 0, 0.2);
+  box-shadow: 0 0 30px rgba(0, 242, 254, 0.15);
 }

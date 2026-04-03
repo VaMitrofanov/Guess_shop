@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Coins, Flame, ChevronRight } from "lucide-react";
+import { Coins, Diamond, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 
@@ -18,7 +18,7 @@ export default function Calculator() {
   return (
     <div className="w-full max-w-xl mx-auto glass p-8 rounded-3xl gold-glow border border-[#ffffff10]">
       <div className="flex items-center gap-2 mb-8">
-        <Flame className="w-6 h-6 text-[#ffb800] fill-[#ffb800]" />
+        <Diamond className="w-6 h-6 text-[#00f2fe] fill-[#00f2fe]/20" />
         <h2 className="text-xl font-bold tracking-tight">КАЛЬКУЛЯТОР ROBUX</h2>
       </div>
 
@@ -33,7 +33,7 @@ export default function Calculator() {
               className="w-full h-16 bg-[#0a0a0b] border border-white/5 rounded-2xl px-6 pt-2 text-2xl font-bold outline-none focus:border-[#ffb800]/50 transition-all group-hover:border-white/10"
               placeholder="0"
             />
-            <Coins className="absolute right-6 top-1/2 -translate-y-1/2 w-6 h-6 text-[#ffb800]" />
+            <Coins className="absolute right-6 top-1/2 -translate-y-1/2 w-6 h-6 text-[#00f2fe]" />
           </div>
         </div>
 
@@ -46,7 +46,7 @@ export default function Calculator() {
         <div className="space-y-2">
           <label className="text-sm font-medium text-zinc-400 ml-1">К оплате (RUB)</label>
           <div className="relative">
-            <div className="w-full h-16 bg-[#ffffff05] border border-white/5 rounded-2xl px-6 pt-4 text-2xl font-black text-[#ffb800]">
+            <div className="w-full h-16 bg-white/[0.02] border border-white/5 rounded-2xl px-6 pt-4 text-2xl font-black text-[#00f2fe]">
               {rub.toLocaleString("ru-RU")} <span className="text-sm font-medium text-zinc-500">₽</span>
             </div>
           </div>
@@ -54,7 +54,7 @@ export default function Calculator() {
 
         <Link
           href={`/checkout?amount=${robux}`}
-          className="w-full block h-16 gold-gradient rounded-2xl flex items-center justify-center gap-2 font-bold text-lg text-black hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg shadow-[#ffb800]/20"
+          className="w-full block h-16 gold-gradient rounded-2xl flex items-center justify-center gap-2 font-bold text-lg text-black hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg shadow-[#00f2fe]/20"
         >
           КУПИТЬ СЕЙЧАС
         </Link>

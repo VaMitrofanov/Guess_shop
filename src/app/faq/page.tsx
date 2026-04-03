@@ -17,9 +17,9 @@ export default async function FAQPage() {
       <section className="pt-32 pb-20 px-4">
         <div className="container mx-auto max-w-4xl">
           <div className="space-y-4 mb-16">
-            <span className="text-[#ffb800] font-black tracking-widest text-sm uppercase">Помощь и поддержка</span>
+            <span className="text-[#00f2fe] font-black tracking-widest text-sm uppercase">Помощь и поддержка</span>
             <h1 className="text-5xl md:text-7xl font-black uppercase leading-none">
-                ЧАСТО ЗАДАВАЕМЫЕ <br/> <span className="gold-gradient bg-clip-text text-transparent italic">ВОПРОСЫ</span>
+                ЧАСТО ЗАДАВАЕМЫЕ <br/> <span className="gold-text italic">ВОПРОСЫ</span>
             </h1>
           </div>
 

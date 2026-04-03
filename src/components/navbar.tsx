@@ -8,24 +8,24 @@ export default function Navbar() {
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
         <Link 
           href="/" 
-          className="text-2xl font-bold gold-gradient bg-clip-text text-transparent flex items-center gap-2"
+          className="text-2xl font-bold gold-text flex items-center gap-2"
         >
-          <ShoppingBag className="w-8 h-8 text-[#ffb800]" />
-          ROBUX-VADI
+          <ShoppingBag className="w-8 h-8 text-[#00f2fe]" />
+          GUESS-SHOP
         </Link>
 
         <div className="hidden md:flex items-center gap-8">
-          <Link href="/" className="text-sm font-medium hover:text-[#ffb800] transition-colors">
+          <Link href="/" className="text-sm font-medium hover:text-[#00f2fe] transition-colors">
             КУПИТЬ ROBUX
           </Link>
-          <Link href="/reviews" className="text-sm font-medium hover:text-[#ffb800] transition-colors">
+          <Link href="/reviews" className="text-sm font-medium hover:text-[#00f2fe] transition-colors">
             ОТЗЫВЫ
           </Link>
-          <Link href="/faq" className="text-sm font-medium hover:text-[#ffb800] transition-colors">
+          <Link href="/faq" className="text-sm font-medium hover:text-[#00f2fe] transition-colors">
             F.A.Q.
           </Link>
-          <Link href="/guarantees" className="text-sm font-medium hover:text-[#ffb800] transition-colors flex items-center gap-1">
-            <ShieldCheck className="w-4 h-4 text-green-500" />
+          <Link href="/guarantees" className="text-sm font-medium hover:text-[#00f2fe] transition-colors flex items-center gap-1">
+            <ShieldCheck className="w-4 h-4 text-emerald-500" />
             ГАРАНТИИ
           </Link>
         </div>

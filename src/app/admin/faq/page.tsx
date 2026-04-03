@@ -25,7 +25,7 @@ export default async function AdminFAQPage() {
                 <Link href="/admin" className="p-2 glass rounded-lg text-zinc-500 hover:text-white transition-colors">
                     <ChevronLeft className="w-5 h-5" />
                 </Link>
-                <h1 className="text-2xl font-black uppercase italic gold-gradient bg-clip-text text-transparent">Управление FAQ</h1>
+                <h1 className="text-2xl font-black uppercase italic gold-text">Управление FAQ</h1>
             </div>
 
             <div className="bg-[#141416] border border-white/5 rounded-[2rem] overflow-hidden shadow-2xl">
