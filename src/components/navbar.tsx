@@ -37,10 +37,10 @@ export default function Navbar() {
 
         <div className="flex items-center gap-2 md:gap-4">
           <Link 
-            href="/admin" 
-            className="p-2 rounded-full hover:bg-white/5 transition-all hidden md:block"
+            href="/register" 
+            className="p-2 rounded-full bg-white/5 hover:bg-[#00f2fe]/10 transition-all hidden md:block border border-white/5 hover:border-[#00f2fe]/30"
           >
-            <User className="w-5 h-5 text-zinc-400 hover:text-white" />
+            <User className="w-5 h-5 text-zinc-400 hover:text-[#00f2fe]" />
           </Link>
 
           {/* Mobile Toggle */}
@@ -55,7 +55,7 @@ export default function Navbar() {
 
       {/* Mobile Menu Overlay */}
       {isOpen && (
-        <div className="md:hidden absolute top-16 left-0 w-full glass border-b border-[#ffffff10] slide-down animate-in fade-in py-8 px-4 flex flex-col gap-6 z-40 bg-[#05070a]/95">
+        <div className="md:hidden absolute top-16 left-0 w-full border-b border-[#ffffff10] slide-down animate-in fade-in py-8 px-4 flex flex-col gap-6 z-40 bg-[#05070a] backdrop-blur-none">
           <Link 
             href="/" 
             onClick={() => setIsOpen(false)}
@@ -88,13 +88,13 @@ export default function Navbar() {
             ГАРАНТИИ
             <ChevronRight className="w-5 h-5 opacity-0 group-hover:opacity-100 transition-all" />
           </Link>
-          <div className="h-px w-full bg-white/5 my-4" />
+          <div className="h-px w-full bg-white/10 my-2" />
           <Link 
-            href="/admin" 
+            href="/register" 
             onClick={() => setIsOpen(false)}
-            className="flex items-center gap-3 text-zinc-400 py-2 hover:text-white"
+            className="flex items-center gap-3 text-[#00f2fe] font-black text-lg py-3 px-4 rounded-2xl bg-[#00f2fe]/10 border border-[#00f2fe]/20 hover:bg-[#00f2fe]/20 transition-all"
           >
-            <User className="w-5 h-5" />
+            <User className="w-6 h-6" />
             Личный кабинет
           </Link>
         </div>

@@ -27,15 +27,24 @@ export default function ProductList({ initialProducts }: { initialProducts: any[
     }
     setLoading(true);
     try {
+        const payload = {
+            name: editForm.name,
+            robuxAmount: parseInt(String(editForm.robuxAmount)) || 0,
+            rubPrice: parseFloat(String(editForm.rubPrice)) || 0,
+            type: editForm.type,
+            isActive: editForm.isActive,
+        };
         const res = await fetch(`/api/admin/products/${id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(editForm),
+            body: JSON.stringify(payload),
         });
-        
-        if (res.ok) {
-            setProducts(products.map(p => p.id === id ? editForm : p));
+        const data = await res.json();
+        if (res.ok && data.success) {
+            setProducts(products.map(p => p.id === id ? { ...p, ...payload } : p));
             setEditingId(null);
+        } else {
+            alert(data.error || "Ошибка сохранения");
         }
     } catch (err) {
         console.error(err);
@@ -136,7 +145,7 @@ export default function ProductList({ initialProducts }: { initialProducts: any[
                              <div className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest">ТЕКУЩАЯ СТОИМОСТЬ</div>
                         </div>
                         
-                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                        <div className="flex items-center gap-2 md:opacity-0 md:group-hover:opacity-100 transition-all">
                              <button 
                                 onClick={() => startEdit(product)}
                                 className="w-9 h-9 bg-blue-500/10 text-blue-500 rounded-lg flex items-center justify-center hover:bg-blue-500 hover:text-white transition-all shadow-xl"

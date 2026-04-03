@@ -239,15 +239,15 @@ function CheckoutContent() {
                 ) : (
                     /* ШАГ 2: ПОДТВЕРЖДЕНИЕ */
                     <div className="animate-in fade-in slide-in-from-right-8 duration-700 space-y-10">
-                        <div className="glass p-10 rounded-[3rem] border border-white/5 space-y-10 relative overflow-hidden backdrop-blur-2xl">
+                        <div className="glass p-5 sm:p-10 rounded-[2rem] sm:rounded-[3rem] border border-white/5 space-y-6 sm:space-y-10 relative overflow-hidden backdrop-blur-2xl">
                             <div className="absolute top-0 right-0 w-64 h-64 bg-[#00f2fe]/5 blur-[100px] rounded-full -translate-y-1/2 translate-x-1/2" />
 
-                            <div className="flex flex-col sm:flex-row items-center gap-8 relative z-10">
-                                <div className="w-32 h-32 rounded-[2rem] bg-black border border-white/10 overflow-hidden shadow-2xl">
+                            <div className="flex flex-col sm:flex-row items-center gap-5 sm:gap-8 relative z-10">
+                                <div className="w-20 h-20 sm:w-32 sm:h-32 rounded-2xl sm:rounded-[2rem] bg-black border border-white/10 overflow-hidden shadow-2xl">
                                     <img src={selectedGp?.image} className="w-full h-full object-cover" />
                                 </div>
                                 <div className="text-center sm:text-left space-y-3">
-                                    <h3 className="text-3xl font-black uppercase tracking-tight leading-none">{selectedGp?.name}</h3>
+                                    <h3 className="text-xl sm:text-3xl font-black uppercase tracking-tight leading-none">{selectedGp?.name}</h3>
                                     <div className="flex flex-wrap justify-center sm:justify-start items-center gap-3">
                                         <span className="text-[10px] font-black text-[#00f2fe] uppercase tracking-widest bg-[#00f2fe]/10 px-3 py-1 rounded-full border border-[#00f2fe]/30">ID: {gamepassId}</span>
                                         <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">АККАУНТ: {username}</span>
@@ -255,23 +255,23 @@ function CheckoutContent() {
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                                <div className="bg-white/[0.03] p-8 rounded-[2rem] border border-white/5 space-y-2">
-                                    <span className="text-[10px] font-black text-zinc-600 uppercase tracking-widest block">Сумма к получению</span>
-                                    <div className="flex items-center gap-3">
-                                        <Diamond className="w-6 h-6 text-[#00f2fe]" />
-                                        <span className="text-4xl font-black text-white">{robux.toLocaleString()}</span>
+                            <div className="grid grid-cols-2 gap-3 sm:gap-6">
+                                <div className="bg-white/[0.03] p-4 sm:p-8 rounded-2xl sm:rounded-[2rem] border border-white/5 space-y-2">
+                                    <span className="text-[9px] sm:text-[10px] font-black text-zinc-600 uppercase tracking-widest block">Вы получите</span>
+                                    <div className="flex items-center gap-2">
+                                        <Diamond className="w-4 h-4 sm:w-6 sm:h-6 text-[#00f2fe]" />
+                                        <span className="text-2xl sm:text-4xl font-black text-white">{robux.toLocaleString()}</span>
                                     </div>
                                 </div>
-                                <div className="bg-white/[0.03] p-8 rounded-[2rem] border border-white/5 space-y-2">
-                                    <span className="text-[10px] font-black text-zinc-600 uppercase tracking-widest block">Итого к оплате</span>
+                                <div className="bg-white/[0.03] p-4 sm:p-8 rounded-2xl sm:rounded-[2rem] border border-white/5 space-y-2">
+                                    <span className="text-[9px] sm:text-[10px] font-black text-zinc-600 uppercase tracking-widest block">К оплате</span>
                                     <div className="flex items-center gap-2">
-                                        <span className="text-4xl font-black text-[#00f2fe]">{price.toLocaleString()} ₽</span>
+                                        <span className="text-2xl sm:text-4xl font-black text-[#00f2fe]">{price.toLocaleString()} ₽</span>
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="p-8 rounded-3xl bg-[#00f2fe]/5 border border-[#00f2fe]/20 space-y-4">
+                            <div className="p-4 sm:p-8 rounded-2xl sm:rounded-3xl bg-[#00f2fe]/5 border border-[#00f2fe]/20 space-y-3 sm:space-y-4">
                                 <h4 className="text-[10px] font-black text-[#00f2fe] uppercase tracking-widest flex items-center gap-3">
                                     <Info className="w-5 h-5" /> ИНФОРМАЦИЯ ПО ВЫКУПУ
                                 </h4>
