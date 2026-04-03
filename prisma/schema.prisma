@@ -56,3 +56,22 @@ model Order {
   createdAt           DateTime    @default(now())
   updatedAt           DateTime    @updatedAt
 }
+model FAQ {
+  id        String   @id @default(cuid())
+  question  String
+  answer    String
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  author    String
+  content   String
+  rating    Int      @default(5)
+  date      String   // Can be human readable or real date
+  isVerified Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

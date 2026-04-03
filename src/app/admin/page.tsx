@@ -54,7 +54,19 @@ export default async function AdminDashboard() {
                         className="h-11 px-6 bg-[#ffb800] text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:scale-[1.02] transition-all"
                     >
                         <Package className="w-4 h-4" />
-                        УПРАВЛЕНИЕ ТОВАРАМИ
+                        ТОВАРЫ
+                    </Link>
+                    <Link 
+                        href="/admin/faq"
+                        className="h-11 px-6 bg-white/5 border border-white/5 text-white font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-white/10 transition-all"
+                    >
+                        F.A.Q.
+                    </Link>
+                    <Link 
+                        href="/admin/reviews"
+                        className="h-11 px-6 bg-white/5 border border-white/5 text-white font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-white/10 transition-all"
+                    >
+                        ОТЗЫВЫ
                     </Link>
                     <div className="p-2 glass rounded-lg flex items-center gap-2 border-[#ffffff05]">
                          <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-2">Роль: Администратор</span>
