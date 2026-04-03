@@ -19,15 +19,29 @@ export async function getRobloxUser(username: string) {
 
 export async function getGamepassDetails(gamepassId: string) {
   try {
-    const res = await fetch(`https://economy.roblox.com/v1/game-passes/${gamepassId}/details`);
-    if (!res.ok) return null;
-    const data = await res.json();
+    // Primary: use the modern API
+    const res = await fetch(`https://apis.roblox.com/game-passes/v1/game-passes/${gamepassId}`);
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        id: data.id || gamepassId,
+        name: data.name || data.displayName,
+        price: data.price ?? 0,
+        creatorId: data.sellerId || data.creatorId || 0,
+        isActive: data.isForSale !== false,
+      };
+    }
+    
+    // Fallback: economy API (works with some IPs)
+    const res2 = await fetch(`https://economy.roblox.com/v1/game-passes/${gamepassId}/details`);
+    if (!res2.ok) return null;
+    const data2 = await res2.json();
     return {
-      id: data.TargetId,
-      name: data.Name,
-      price: data.PriceInRobux,
-      creatorId: data.Creator.Id,
-      isActive: data.IsForSale,
+      id: data2.TargetId,
+      name: data2.Name,
+      price: data2.PriceInRobux,
+      creatorId: data2.Creator?.Id || 0,
+      isActive: data2.IsForSale,
     };
   } catch (error) {
     console.error("Error fetching Gamepass details:", error);

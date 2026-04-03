@@ -12,25 +12,35 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const query = q.trim();
-    // 1. Try to extract ID from URL (catalog or game-pass)
-    const urlMatch = query.match(/(?:game-pass|catalog)\/(\d+)/i);
+    let query = q.trim();
+    // Support links with extra params like ?id=...
+    const cleanUrl = query.split('?')[0];
+
+    // 1. Try to extract ID from various Roblox URL formats
+    const urlMatch = cleanUrl.match(/(?:game-pass|catalog|library|assets)\/(\d+)/i);
     const idMatch = query.match(/^\d+$/);
     const targetId = urlMatch ? urlMatch[1] : (idMatch ? query : null);
-
-    console.log("Roblox Search Query:", query, "Extracted ID:", targetId);
+    
+    const isUrl = !!urlMatch;
 
     if (targetId) {
       const { getGamepassById } = await import("@/lib/roblox");
       const gp = await getGamepassById(targetId);
-      console.log("Found Single Gamepass:", gp?.id);
-      return NextResponse.json({ success: true, gamepasses: gp ? [gp] : [] });
+      return NextResponse.json({ 
+        success: true, 
+        gamepasses: gp ? [gp] : [],
+        isDirect: true // Flag for frontend to know it was a direct ID/URL search
+      });
     }
 
     // 2. Otherwise assume it's a username
     const gamepasses = await getUserGamepasses(query);
-    console.log("Found Gamepasses for User:", gamepasses.length);
-    return NextResponse.json({ success: true, gamepasses });
+    return NextResponse.json({ 
+        success: true, 
+        gamepasses,
+        isDirect: false,
+        detectedUsername: gamepasses.length > 0 ? query : null 
+    });
   } catch (error) {
     console.error("Gamepasses API Error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
