@@ -4,7 +4,11 @@
 
 export async function getRobloxUser(username: string) {
   try {
-    const res = await fetch(`https://users.roblox.com/v1/users/search?keyword=${username}&limit=1`);
+    const res = await fetch(`https://users.roblox.com/v1/usernames/users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ usernames: [username], excludeBannedUsers: true })
+    });
     const data = await res.json();
     return data.data?.[0] || null;
   } catch (error) {
@@ -36,24 +40,80 @@ export async function getUserGamepasses(username: string) {
     const user = await getRobloxUser(username);
     if (!user) return [];
 
-    // Search catalog for gamepasses by this user
-    // Note: catalog API sometimes requires specific headers or has different query params
-    // Another way is to get their games and then gamepasses.
-    // Let's try the direct catalog search first
-    const res = await fetch(`https://catalog.roblox.com/v1/search/items/details?category=Gamepasses&creatorName=${username}&limit=30`);
-    if (!res.ok) return [];
+    const userId = user.id;
     
-    const data = await res.json();
-    return (data.data || []).map((item: any) => ({
-      id: item.id,
-      name: item.name,
-      price: item.price,
-      productId: item.productId,
-      image: item.imageUri || `https://www.roblox.com/asset-thumbnail/image?assetId=${item.id}&width=150&height=150&format=png`
+    // 1. Get user's public games (universes)
+    const gamesRes = await fetch(`https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=10`);
+    if (!gamesRes.ok) return [];
+    
+    const gamesData = await gamesRes.json();
+    const universes = gamesData.data || [];
+    
+    if (universes.length === 0) return [];
+
+    let allGamepasses: any[] = [];
+
+    // 2. For each universe, fetch its gamepasses
+    // We use Promise.all to fetch in parallel for speed
+    const passPromises = universes.map(async (game: any) => {
+      try {
+        const universeId = game.id;
+        // Replacement 2025 endpoint returns { "gamePasses": [...] }
+        const res = await fetch(`https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes?passView=Full&pageSize=30`);
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data.gamePasses || [];
+      } catch (e) {
+        return [];
+      }
+    });
+
+    const results = await Promise.all(passPromises);
+    allGamepasses = results.flat();
+
+    if (allGamepasses.length === 0) return [];
+
+    // 3. Batch fetch thumbnails for ALL gamepasses for better performance
+    const ids = allGamepasses.map(gp => gp.id).join(',');
+    const thumbRes = await fetch(`https://thumbnails.roblox.com/v1/game-passes?gamePassIds=${ids}&size=150x150&format=Png&isCircular=false`);
+    const thumbData = await thumbRes.ok ? await thumbRes.json() : { data: [] };
+    const thumbMap = Object.fromEntries((thumbData.data || []).map((t: any) => [t.targetId, t.imageUrl]));
+
+    return allGamepasses.map((gp: any) => ({
+      id: gp.id,
+      name: gp.name || gp.displayName,
+      price: gp.price || 0,
+      productId: gp.productId,
+      image: thumbMap[gp.id] || `https://www.roblox.com/asset-thumbnail/image?assetId=${gp.id}&width=150&height=150&format=png`
     }));
   } catch (error) {
     console.error("Error fetching user gamepasses:", error);
     return [];
+  }
+}
+
+export async function getGamepassById(gamepassId: string) {
+  try {
+    const details = await getGamepassDetails(gamepassId);
+    if (!details) return null;
+
+    // Get thumbnail for the single gamepass
+    const thumbRes = await fetch(`https://thumbnails.roblox.com/v1/game-passes?gamePassIds=${gamepassId}&size=150x150&format=Png&isCircular=false`);
+    const thumbData = await thumbRes.ok ? await thumbRes.json() : { data: [] };
+    const imageUrl = thumbData.data?.[0]?.imageUrl || `https://www.roblox.com/asset-thumbnail/image?assetId=${gamepassId}&width=150&height=150&format=png`;
+
+    const creator = await getRobloxUserById(details.creatorId.toString());
+
+    return {
+      id: gamepassId,
+      name: details.name,
+      price: details.price,
+      image: imageUrl,
+      creatorName: creator?.name || creator?.requestedName || details.creatorId.toString()
+    };
+  } catch (error) {
+    console.error("Error fetching single gamepass:", error);
+    return null;
   }
 }
 
@@ -78,4 +138,16 @@ export async function verifyUserGamepass(username: string, gamepassId: string, r
   // Let's assume the gamepass price must be around the expected robux + tax.
   
   return { success: true, user, gamepass };
+}
+
+export async function getRobloxUserById(userId: string) {
+  try {
+    const res = await fetch(`https://users.roblox.com/v1/users/${userId}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data;
+  } catch (error) {
+    console.error("Error fetching Roblox user by ID:", error);
+    return null;
+  }
 }
