@@ -55,7 +55,7 @@ export default function FAQList({ initialFaqs }: { initialFaqs: any[] }) {
   return (
     <div className="space-y-6">
       <div className="flex justify-end">
-          <AddFAQModal onAdd={(newFaq) => setFaqs([newFaq, ...faqs])} />
+          <AddFAQModal />
       </div>
       
       <div className="space-y-4">

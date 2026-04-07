@@ -55,7 +55,7 @@ export default function ReviewList({ initialReviews }: { initialReviews: any[] }
   return (
     <div className="space-y-6">
       <div className="flex justify-end">
-          <AddReviewModal onAdd={(newReview) => setReviews([newReview, ...reviews])} />
+          <AddReviewModal />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

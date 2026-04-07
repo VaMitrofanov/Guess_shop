@@ -1,17 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Plus, X, Loader2 } from "lucide-react";
 
-export default function AddProductModal({ onProductAdded }: { onProductAdded: (p: any) => void }) {
+export default function AddProductModal() {
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({
-    name: "",
-    robuxAmount: "",
-    rubPrice: "",
-    type: "Gamepass"
-  });
+  const [form, setForm] = useState({ name: "", robuxAmount: "", rubPrice: "", type: "Gamepass" });
+  const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,13 +17,18 @@ export default function AddProductModal({ onProductAdded }: { onProductAdded: (p
       const res = await fetch("/api/admin/products", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          name: form.name,
+          robuxAmount: Number(form.robuxAmount),
+          rubPrice: Number(form.rubPrice),
+          type: form.type,
+        }),
       });
       const data = await res.json();
       if (data.success) {
-        onProductAdded(data.product);
         setIsOpen(false);
         setForm({ name: "", robuxAmount: "", rubPrice: "", type: "Gamepass" });
+        router.refresh();
       }
     } catch (err) {
       console.error(err);
@@ -39,7 +41,7 @@ export default function AddProductModal({ onProductAdded }: { onProductAdded: (p
     <>
       <button 
         onClick={() => setIsOpen(true)}
-        className="h-10 px-6 gold-gradient text-black font-bold uppercase tracking-widest hover:scale-[1.02] transition-all rounded-xl flex items-center gap-2"
+        className="h-10 px-5 gold-gradient font-black text-[10px] uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none flex items-center gap-2"
       >
         <Plus className="w-4 h-4" /> Добавить товар
       </button>

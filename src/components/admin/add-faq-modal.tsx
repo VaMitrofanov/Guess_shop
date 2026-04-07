@@ -1,79 +1,85 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Plus, X, Loader2 } from 'lucide-react';
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Plus, X, Loader2 } from "lucide-react";
 
-export default function AddFAQModal({ onAdd }: { onAdd: (faq: any) => void }) {
-  const [isOpen, setIsOpen] = useState(false);
+export default function AddFAQModal() {
+  const [isOpen, setIsOpen]   = useState(false);
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({ question: '', answer: '' });
+  const [form, setForm]       = useState({ question: "", answer: "" });
+  const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-        const res = await fetch('/api/admin/faq', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(form)
-        });
-        if (res.ok) {
-            const newFaq = await res.json();
-            onAdd(newFaq);
-            setIsOpen(false);
-            setForm({ question: '', answer: '' });
-        }
+      const res = await fetch("/api/admin/faq", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      if (res.ok) {
+        setIsOpen(false);
+        setForm({ question: "", answer: "" });
+        router.refresh();
+      }
     } catch (err) {
-        console.error(err);
+      console.error(err);
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
   };
 
-  if (!isOpen) return (
-    <button 
-        onClick={() => setIsOpen(true)}
-        className="h-10 px-6 bg-white/5 border border-white/5 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-white/10 transition-all flex items-center gap-2"
-    >
-        <Plus className="w-4 h-4" /> Добавить вопрос
-    </button>
-  );
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-        <div className="bg-[#141416] border border-white/5 w-full max-w-lg p-8 rounded-[2rem] shadow-2xl relative">
-            <button onClick={() => setIsOpen(false)} className="absolute top-6 right-6 text-zinc-500 hover:text-white">
-                <X className="w-5 h-5" />
+    <>
+      <button
+        onClick={() => setIsOpen(true)}
+        className="h-10 px-5 gold-gradient font-black text-[10px] uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none flex items-center gap-2"
+      >
+        <Plus className="w-4 h-4" /> Добавить вопрос
+      </button>
+
+      {isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="pixel-card border-2 border-[#1e2a45] w-full max-w-lg p-8 relative">
+            <button onClick={() => setIsOpen(false)} className="absolute top-5 right-5 text-zinc-500 hover:text-white">
+              <X className="w-5 h-5" />
             </button>
-            <h2 className="text-xl font-black uppercase italic gold-gradient bg-clip-text text-transparent mb-8">Новый вопрос</h2>
-            
-            <form onSubmit={handleSubmit} className="space-y-6">
-                <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase">Вопрос</label>
-                    <input 
-                        required
-                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm font-bold outline-none"
-                        value={form.question}
-                        onChange={e => setForm({...form, question: e.target.value})}
-                    />
-                </div>
-                <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase">Ответ</label>
-                    <textarea 
-                        required
-                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm font-bold outline-none h-32"
-                        value={form.answer}
-                        onChange={e => setForm({...form, answer: e.target.value})}
-                    />
-                </div>
-                <button 
-                    disabled={loading}
-                    className="w-full h-12 bg-[#ffb800] text-black font-black uppercase rounded-xl flex items-center justify-center gap-2"
-                >
-                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'СОЗДАТЬ'}
-                </button>
+            <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider mb-2">FAQ</div>
+            <h2 className="text-xl font-black uppercase tracking-tight mb-6">Новый вопрос</h2>
+
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <div className="space-y-2">
+                <label className="font-pixel text-[9px] text-zinc-500 tracking-wider">ВОПРОС</label>
+                <input
+                  required maxLength={500}
+                  className="w-full h-12 bg-[#080c18] border-2 border-[#1e2a45] px-4 outline-none focus:border-[#00b06f]/40 transition-colors font-medium text-sm"
+                  value={form.question}
+                  onChange={(e) => setForm({ ...form, question: e.target.value })}
+                  placeholder="Как долго ждать?"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="font-pixel text-[9px] text-zinc-500 tracking-wider">ОТВЕТ</label>
+                <textarea
+                  required maxLength={5000}
+                  className="w-full bg-[#080c18] border-2 border-[#1e2a45] px-4 py-3 outline-none focus:border-[#00b06f]/40 transition-colors font-medium text-sm h-28 resize-none"
+                  value={form.answer}
+                  onChange={(e) => setForm({ ...form, answer: e.target.value })}
+                  placeholder="Заказ обрабатывается до 24 часов..."
+                />
+              </div>
+              <button
+                disabled={loading}
+                className="w-full h-12 gold-gradient font-black text-[10px] uppercase tracking-widest text-white hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Создать вопрос"}
+              </button>
             </form>
+          </div>
         </div>
-    </div>
+      )}
+    </>
   );
 }
