@@ -1,6 +1,9 @@
 import Navbar from "@/components/navbar";
 import { Metadata } from "next";
-import { AlertTriangle, CheckCircle2, ExternalLink, ArrowRight } from "lucide-react";
+import {
+  AlertTriangle, CheckCircle2, ExternalLink, ArrowRight, ChevronRight,
+  Globe, Gamepad2, Ticket, Tag, Copy, ShoppingCart,
+} from "lucide-react";
 import Link from "next/link";
 
 export const metadata: Metadata = {
@@ -11,73 +14,104 @@ export const metadata: Metadata = {
 const STEPS = [
   {
     num: "01",
+    icon: Globe,
     title: "Открой Creator Hub",
-    desc: "Зайди на create.roblox.com и авторизуйся в аккаунт Roblox.",
-    detail: "Это официальный портал для создателей. Здесь управляешь играми и монетизацией.",
+    desc: "Зайди на create.roblox.com и войди в аккаунт.",
+    detail: "Официальный портал для создателей. Работает в любом браузере — на компьютере или телефоне. Никаких программ скачивать не нужно.",
+    tip: null,
     warn: null,
   },
   {
     num: "02",
-    title: "Перейди в «Creations»",
-    desc: "В левом меню нажми «Creations» → выбери любую игру или создай новую.",
-    detail: "Если игры нет — создай пустую через «Create Experience». Название и контент не важны.",
+    icon: Gamepad2,
+    title: "Выбери или создай игру",
+    desc: "Нажми «Creations» → выбери игру. Нет игр — создай пустую.",
+    detail: "Кнопка «Create Experience» в правом верхнем углу. Введи любое название — оно не важно. Игру не нужно публиковать или наполнять.",
+    tip: "Игра нужна только как контейнер для геймпасса — название и содержимое не важны.",
     warn: null,
   },
   {
     num: "03",
-    title: "Открой раздел «Passes»",
+    icon: Ticket,
+    title: "Создай геймпасс",
     desc: "В настройках игры: «Monetization» → «Passes» → «Create a Pass».",
-    detail: "Геймпасс — это то, через что происходит передача Robux на твой аккаунт.",
+    detail: "Придумай любое название: «VIP», «Donate», «Premium». Иконку загружать необязательно — Roblox подставит стандартную. Нажми «Save».",
+    tip: null,
     warn: null,
   },
   {
     num: "04",
-    title: "Загрузи иконку и название",
-    desc: "Загрузи любое изображение (мин. 150×150px) и придумай название: «VIP», «Donate» и т.д.",
-    detail: "Иконка должна соответствовать правилам Roblox — без брендинга и контента 18+.",
-    warn: null,
+    icon: Tag,
+    title: "Установи цену",
+    desc: "Настройки пасса → включи «For Sale» → укажи цену → сохрани.",
+    detail: "Цена пасса должна быть выше нужной суммы — Roblox берёт 30% комиссии. Используй формулу: цена = нужная сумма ÷ 0.7",
+    tip: null,
+    warn: "Хочешь получить 1000 R$ → ставь цену 1430 R$. Формула: нужная сумма ÷ 0.7",
   },
   {
     num: "05",
-    title: "Установи цену",
-    desc: "После создания → настройки пасса → включи «For Sale» → установи цену в Robux.",
-    detail: "Цена пасса = желаемая сумма ÷ 0.7. Если хочешь получить 1000 R$ — ставь 1430 R$.",
-    warn: "Цена пасса = нужная сумма ÷ 0.7. Пример: хочешь 1000 R$ → ставишь 1430 R$",
+    icon: Copy,
+    title: "Скопируй ID пасса",
+    desc: "Открой страницу пасса — в URL найди числовой ID.",
+    detail: "URL: roblox.com/game-pass/123456789/название — нужны только цифры. ID также виден в Creator Hub → Basic Settings.",
+    tip: "ID пасса можно найти в Creator Hub в разделе Basic Settings.",
+    warn: null,
   },
   {
     num: "06",
-    title: "Скопируй ID геймпасса",
-    desc: "В URL страницы пасса найди числовой ID: roblox.com/game-pass/XXXXXXXX/название",
-    detail: "Именно этот ID вставляй при поиске на нашем сайте при оформлении заказа.",
+    icon: ShoppingCart,
+    title: "Оформи заказ",
+    desc: "Вернись на robloxbank.ru → введи никнейм → найди пасс → оплати.",
+    detail: "После оплаты система автоматически купит твой геймпасс в течение 24ч. Robux появятся на балансе через 5–7 дней по правилам Roblox.",
+    tip: null,
     warn: null,
   },
 ];
 
 const TABLE = [
   [100, 143, "~55 ₽"],
+  [300, 429, "~165 ₽"],
   [500, 715, "~275 ₽"],
+  [800, 1143, "~440 ₽"],
   [1000, 1430, "~550 ₽"],
+  [1500, 2143, "~825 ₽"],
   [2000, 2858, "~1100 ₽"],
+  [3000, 4286, "~1650 ₽"],
   [5000, 7143, "~2750 ₽"],
 ];
 
 const FAQ = [
   {
-    q: "Сколько времени занимает весь процесс?",
-    a: "Создание пасса — 5 минут. Обработка заказа — до 24 часов. Зачисление R$ от Roblox — 5–7 дней.",
+    q: "Сколько времени занимает создание?",
+    a: "Около 5 минут. Создать игру (1 мин) → создать пасс (2 мин) → установить цену (1 мин) → скопировать ID (30 сек).",
   },
   {
-    q: "Можно ли удалить геймпасс после оплаты?",
-    a: "Нет. Не удаляй и не меняй цену до получения уведомления о завершении заказа.",
+    q: "Когда придут Robux после оплаты?",
+    a: "Заказ обрабатывается до 24 часов. После покупки пасса Roblox зачисляет средства через 5–7 дней — это стандартная политика платформы.",
   },
   {
-    q: "Что если у меня нет игры в Roblox?",
-    a: "Создай пустую через Creator Hub — 1 минута. Публиковать и наполнять контентом не нужно.",
+    q: "Можно удалить геймпасс после оплаты?",
+    a: "Нет! Не удаляй и не меняй цену до получения подтверждения о завершении. Иначе заказ не выполнится и придётся делать возврат.",
+  },
+  {
+    q: "Нет игры в Roblox — что делать?",
+    a: "Создай пустую через Creator Hub за 1 минуту. Публиковать и наполнять контентом не нужно — игра нужна только как контейнер для пасса.",
   },
   {
     q: "Почему цена пасса выше нужной суммы?",
-    a: "Roblox берёт 30% с каждой продажи. Калькулятор на нашем сайте учитывает это автоматически.",
+    a: "Roblox удерживает 30% с каждой продажи. Чтобы получить 1000 R$ — пасс должен стоить 1430 R$. Калькулятор на главной учитывает это автоматически.",
   },
+  {
+    q: "Геймпасс не находится при поиске по нику?",
+    a: "Убедись что игра с пассом существует. Можно вставить прямую ссылку на пасс или его числовой ID — поиск поддерживает все форматы.",
+  },
+];
+
+const MISTAKES = [
+  { wrong: "Цена пасса = нужная сумма",        right: "Цена пасса = нужная сумма ÷ 0.7" },
+  { wrong: "Удаляю пасс сразу после оплаты",   right: "Жду уведомления о завершении заказа" },
+  { wrong: "Меняю цену пока идёт заказ",        right: "Цена неизменна до завершения" },
+  { wrong: "Robux придут сразу",                right: "Roblox зачисляет R$ через 5–7 дней" },
 ];
 
 export default function GuidePage() {
@@ -85,147 +119,275 @@ export default function GuidePage() {
     <main className="min-h-screen">
       <Navbar />
 
-      <div className="container mx-auto px-4 pt-16 pb-24 max-w-3xl">
+      {/* ── HERO ─────────────────────────────────────────── */}
+      <section className="border-b border-[#1e2a45] bg-[#080c18]">
+        <div className="container mx-auto px-6 py-16 max-w-6xl">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
 
-        {/* Header */}
-        <div className="mb-10 space-y-4">
-          <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">TUTORIAL</div>
-          <h1 className="text-4xl md:text-6xl font-black uppercase tracking-[-0.03em] leading-none">
-            Создай<br />
-            <span className="gold-text">геймпасс</span>
-          </h1>
-          <p className="text-zinc-400 font-medium leading-relaxed max-w-md">
-            Для получения Robux нужен геймпасс в Roblox. Это займёт{" "}
-            <span className="text-white font-bold">5 минут</span>.
-          </p>
-        </div>
-
-        {/* Quick stats */}
-        <div className="grid grid-cols-3 gap-3 mb-8">
-          {[
-            { label: "Время", value: "5 мин" },
-            { label: "Сложность", value: "Легко" },
-            { label: "Наша комиссия", value: "0 ₽" },
-          ].map(({ label, value }) => (
-            <div key={label} className="pixel-card border-2 border-[#1e2a45] p-4 text-center space-y-1">
-              <div className="font-pixel text-[10px] text-[#00b06f]">{value}</div>
-              <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">{label}</div>
+            {/* Left: headline */}
+            <div className="space-y-6">
+              <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">TUTORIAL</div>
+              <h1 className="text-6xl md:text-7xl font-black uppercase tracking-[-0.04em] leading-[0.85]">
+                Как создать<br />
+                <span className="gold-text">геймпасс</span>
+              </h1>
+              <p className="text-zinc-300 font-medium leading-relaxed text-lg max-w-md">
+                Геймпасс — способ получить Robux через наш сервис.
+                Создаётся за <span className="text-white font-black">5 минут</span> прямо
+                в браузере.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <Link
+                  href="/checkout"
+                  className="h-12 px-7 gold-gradient font-black text-[11px] uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none flex items-center gap-2"
+                >
+                  Оформить заказ <ArrowRight className="w-4 h-4" />
+                </Link>
+                <a
+                  href="https://create.roblox.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="h-12 px-7 border-2 border-[#1e2a45] hover:border-[#00b06f]/30 font-black text-[11px] uppercase tracking-widest transition-all rounded-none flex items-center gap-2 text-zinc-300"
+                >
+                  Creator Hub <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
             </div>
-          ))}
-        </div>
 
-        {/* Warning */}
-        <div className="border-l-2 border-amber-500/60 bg-amber-500/5 px-5 py-4 mb-10 flex gap-3">
-          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-[9px] font-black text-amber-400 uppercase tracking-widest mb-1">Важно</p>
-            <p className="text-xs text-amber-200/60 font-medium leading-relaxed">
-              Не удаляй и не меняй цену геймпасса после оформления заказа — до получения уведомления о завершении.
-            </p>
+            {/* Right: stats + warning */}
+            <div className="space-y-4">
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  { label: "Время",      value: "5 мин" },
+                  { label: "Сложность",  value: "Легко" },
+                  { label: "Комиссия",   value: "0 ₽"   },
+                  { label: "Шагов",      value: "6"     },
+                ].map(({ label, value }) => (
+                  <div key={label} className="pixel-card border-2 border-[#1e2a45] p-4 text-center space-y-2">
+                    <div className="font-pixel text-[11px] text-[#00b06f]">{value}</div>
+                    <div className="text-xs font-black text-zinc-400 uppercase tracking-wider">{label}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="border-2 border-amber-500/30 bg-amber-500/5 p-5 flex gap-4">
+                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-xs font-black text-amber-400 uppercase tracking-widest">Важно</p>
+                  <p className="text-base text-amber-200/70 font-medium leading-relaxed">
+                    После оплаты — <strong className="text-amber-300">не удаляй геймпасс и не меняй цену</strong>{" "}
+                    до уведомления о завершении заказа.
+                  </p>
+                </div>
+              </div>
+
+              {/* Formula highlight */}
+              <div className="pixel-card border-2 border-[#00b06f]/30 bg-[#00b06f]/5 p-5">
+                <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-3">ГЛАВНАЯ ФОРМУЛА</div>
+                <div className="flex items-center gap-4">
+                  <div className="text-center">
+                    <div className="text-3xl font-black text-zinc-300">1000</div>
+                    <div className="text-xs text-zinc-500 uppercase tracking-widest font-black">Хочу R$</div>
+                  </div>
+                  <div className="text-zinc-600 font-black text-2xl">÷ 0.7 =</div>
+                  <div className="text-center">
+                    <div className="text-3xl font-black text-[#00b06f]">1430</div>
+                    <div className="text-xs text-zinc-500 uppercase tracking-widest font-black">Цена пасса</div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
+      </section>
 
-        <div className="accent-line mb-10" />
+      <div className="accent-line" />
 
-        {/* Steps */}
-        <div className="space-y-3 mb-10">
-          {STEPS.map((step, i) => (
-            <div key={step.num} className="pixel-card border-2 border-[#1e2a45] hover:border-[#00b06f]/20 transition-colors">
-              <div className="p-6 flex gap-5">
-                {/* Number */}
-                <div className="flex flex-col items-center gap-2 flex-shrink-0">
-                  <div className="w-10 h-10 border-2 border-[#00b06f]/30 bg-[#00b06f]/10 flex items-center justify-center">
-                    <span className="font-pixel text-[8px] text-[#00b06f]">{step.num}</span>
+      {/* ── STEPS ─────────────────────────────────────────── */}
+      <section className="container mx-auto px-6 py-16 max-w-6xl">
+        <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-8">ПОШАГОВАЯ ИНСТРУКЦИЯ</div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {STEPS.map((step) => {
+            const StepIcon = step.icon;
+            return (
+              <div
+                key={step.num}
+                className="pixel-card border-2 border-[#1e2a45] hover:border-[#00b06f]/30 transition-colors group p-6 flex gap-5"
+              >
+                {/* Step number + icon */}
+                <div className="flex-shrink-0 flex flex-col items-center gap-2">
+                  <div className="w-12 h-12 border-2 border-[#00b06f]/30 bg-[#00b06f]/10 flex items-center justify-center group-hover:border-[#00b06f]/60 group-hover:bg-[#00b06f]/15 transition-colors">
+                    <StepIcon className="w-5 h-5 text-[#00b06f]" />
                   </div>
-                  {i < STEPS.length - 1 && (
-                    <div className="w-px flex-1 min-h-[20px] bg-[#1e2a45]" />
-                  )}
+                  <span className="font-pixel text-[8px] text-[#00b06f]/40">{step.num}</span>
                 </div>
 
-                <div className="space-y-2 flex-1 pb-2">
-                  <h2 className="font-black uppercase tracking-tight">{step.title}</h2>
-                  <p className="text-sm text-white/80 font-medium leading-relaxed">{step.desc}</p>
-                  <p className="text-xs text-zinc-500 font-medium leading-relaxed">{step.detail}</p>
+                <div className="space-y-2 flex-1 min-w-0">
+                  <h2 className="text-xl font-black uppercase tracking-tight">{step.title}</h2>
+                  <p className="text-base text-white/90 font-semibold leading-relaxed">{step.desc}</p>
+                  <p className="text-sm text-zinc-400 font-medium leading-relaxed">{step.detail}</p>
+
+                  {step.tip && (
+                    <div className="flex gap-2 items-start bg-[#00b06f]/5 border border-[#00b06f]/15 px-3 py-2 mt-2">
+                      <span className="font-pixel text-[9px] text-[#00b06f] mt-0.5 flex-shrink-0">TIP</span>
+                      <p className="text-sm text-[#00b06f]/80 font-bold leading-relaxed">{step.tip}</p>
+                    </div>
+                  )}
                   {step.warn && (
-                    <div className="flex gap-2 mt-3 border-l-2 border-amber-500/40 pl-3 py-1">
-                      <p className="text-[10px] text-amber-400/80 font-bold leading-relaxed">{step.warn}</p>
+                    <div className="flex gap-2 items-start border-l-2 border-amber-500/50 pl-3 py-1 mt-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <p className="text-sm text-amber-300/80 font-bold leading-relaxed">{step.warn}</p>
                     </div>
                   )}
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Done */}
-        <div className="pixel-card border-2 border-[#00b06f]/30 bg-[#00b06f]/5 p-6 flex flex-col sm:flex-row items-center gap-5 mb-10">
-          <div className="w-12 h-12 bg-[#00b06f]/20 border border-[#00b06f]/30 flex items-center justify-center flex-shrink-0">
-            <CheckCircle2 className="w-6 h-6 text-[#00b06f]" />
+        <div className="pixel-card border-2 border-[#00b06f]/40 bg-[#00b06f]/5 p-6 mt-4 flex flex-col sm:flex-row items-center gap-5">
+          <div className="w-14 h-14 bg-[#00b06f]/20 border-2 border-[#00b06f]/30 flex items-center justify-center flex-shrink-0">
+            <CheckCircle2 className="w-7 h-7 text-[#00b06f]" />
           </div>
           <div className="text-center sm:text-left space-y-1">
-            <p className="font-pixel text-[9px] text-[#00b06f]">ГОТОВО</p>
-            <p className="text-sm text-zinc-300 font-medium">Геймпасс создан! Возвращайся на главную и оформляй заказ.</p>
+            <p className="font-pixel text-[10px] text-[#00b06f]">ГОТОВО!</p>
+            <p className="font-black uppercase tracking-tight text-lg">Геймпасс создан — оформляй заказ</p>
+            <p className="text-sm text-zinc-400 font-medium">Введи никнейм, найди свой пасс в поиске и оплати</p>
           </div>
           <Link
             href="/checkout"
-            className="ml-auto h-10 px-6 gold-gradient font-black text-[10px] uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none flex items-center gap-2 flex-shrink-0"
+            className="ml-auto h-12 px-8 gold-gradient font-black text-[10px] uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none flex items-center gap-2 flex-shrink-0"
           >
-            Купить R$ <ArrowRight className="w-3 h-3" />
+            Купить R$ <ArrowRight className="w-3.5 h-3.5" />
           </Link>
         </div>
+      </section>
 
-        {/* Price table */}
-        <div className="pixel-card border-2 border-[#1e2a45] p-6 mb-10">
-          <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider mb-4">PRICE TABLE</div>
-          <h3 className="font-black uppercase tracking-tight mb-5">Правильная цена геймпасса</h3>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b-2 border-[#1e2a45]">
-                <th className="text-left py-2 text-[9px] font-black text-zinc-500 uppercase tracking-widest">Хочу получить</th>
-                <th className="text-left py-2 text-[9px] font-black text-zinc-500 uppercase tracking-widest">Цена пасса</th>
-                <th className="text-left py-2 text-[9px] font-black text-zinc-500 uppercase tracking-widest">В рублях</th>
-              </tr>
-            </thead>
-            <tbody>
-              {TABLE.map(([get, price, rub]) => (
-                <tr key={get} className="border-b border-[#1e2a45]/50 hover:bg-[#00b06f]/3 transition-colors">
-                  <td className="py-3 font-black text-[#00b06f]">{get} R$</td>
-                  <td className="py-3 font-bold text-white">{price} R$</td>
-                  <td className="py-3 font-bold text-zinc-400">{rub}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="mt-4 font-pixel text-[7px] text-zinc-600">
-            ФОРМУЛА: ЦЕНА ПАССА = НУЖНАЯ СУММА ÷ 0.7
-          </p>
-        </div>
+      <div className="accent-line" />
 
-        {/* FAQ */}
-        <div className="space-y-3 mb-10">
-          <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider mb-6">FAQ</div>
-          {FAQ.map((item) => (
-            <div key={item.q} className="pixel-card border-2 border-[#1e2a45] p-5 space-y-2">
-              <h3 className="font-black uppercase tracking-tight text-sm">{item.q}</h3>
-              <p className="text-xs text-zinc-400 font-medium leading-relaxed">{item.a}</p>
-            </div>
-          ))}
-        </div>
+      {/* ── MISTAKES + TABLE ──────────────────────────────── */}
+      <section className="container mx-auto px-6 py-16 max-w-6xl">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
 
-        {/* Creator Hub link */}
-        <a
-          href="https://create.roblox.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center justify-between p-5 pixel-card border-2 border-[#1e2a45] hover:border-[#00b06f]/30 transition-colors group"
-        >
+          {/* Mistakes */}
           <div>
-            <p className="font-pixel text-[8px] text-zinc-500 tracking-wider mb-1">OFFICIAL SITE</p>
-            <p className="font-black uppercase">Roblox Creator Hub</p>
+            <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-2">ЧАСТЫЕ ОШИБКИ</div>
+            <h2 className="text-4xl font-black uppercase tracking-tight mb-6">Чего не делать</h2>
+            <div className="space-y-2">
+              {MISTAKES.map(({ wrong, right }) => (
+                <div key={wrong} className="pixel-card border-2 border-[#1e2a45] p-5">
+                  <div className="flex gap-3 items-start mb-3">
+                    <div className="w-6 h-6 border border-red-500/40 bg-red-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <span className="text-red-400 text-sm font-black leading-none">✕</span>
+                    </div>
+                    <p className="text-base text-red-400/80 font-medium">{wrong}</p>
+                  </div>
+                  <div className="flex gap-3 items-start border-t border-[#1e2a45] pt-3">
+                    <div className="w-6 h-6 border border-[#00b06f]/40 bg-[#00b06f]/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <span className="text-[#00b06f] text-sm font-black leading-none">✓</span>
+                    </div>
+                    <p className="text-base text-[#00b06f]/80 font-medium">{right}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-          <ExternalLink className="w-5 h-5 text-zinc-500 group-hover:text-[#00b06f] transition-colors" />
-        </a>
-      </div>
+
+          {/* Price table */}
+          <div>
+            <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-2">PRICE TABLE</div>
+            <h2 className="text-4xl font-black uppercase tracking-tight mb-2">Таблица цен</h2>
+            <p className="text-base text-zinc-500 font-medium mb-5">Цена пасса с учётом 30% комиссии Roblox.</p>
+            <div className="pixel-card border-2 border-[#1e2a45] overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b-2 border-[#1e2a45] bg-[#080c18]">
+                    <th className="text-left px-5 py-4 text-xs font-black text-zinc-400 uppercase tracking-wider">Получишь</th>
+                    <th className="text-left px-5 py-4 text-xs font-black text-zinc-400 uppercase tracking-wider">Цена пасса</th>
+                    <th className="text-left px-5 py-4 text-xs font-black text-zinc-400 uppercase tracking-wider">Стоимость</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {TABLE.map(([get, price, rub]) => (
+                    <tr key={get} className="border-b border-[#1e2a45]/40 hover:bg-[#00b06f]/3 transition-colors">
+                      <td className="px-5 py-3.5 font-black text-[#00b06f] text-base">{get} R$</td>
+                      <td className="px-5 py-3.5 font-bold text-white text-base">{price} R$</td>
+                      <td className="px-5 py-3.5 font-bold text-zinc-400 text-base">{rub}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="px-5 py-3.5 bg-[#080c18] border-t border-[#1e2a45] flex items-center gap-3">
+                <span className="font-pixel text-[9px] text-[#00b06f] border border-[#00b06f]/20 bg-[#00b06f]/10 px-2 py-1">ФОРМУЛА</span>
+                <span className="text-sm font-bold text-zinc-300">цена пасса = нужная сумма ÷ 0.7</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="accent-line" />
+
+      {/* ── FAQ ───────────────────────────────────────────── */}
+      <section className="container mx-auto px-6 py-16 max-w-6xl">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+
+          {/* Left: heading + CTA */}
+          <div className="space-y-6">
+            <div>
+              <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-2">FAQ</div>
+              <h2 className="text-4xl font-black uppercase tracking-tight">Частые вопросы</h2>
+            </div>
+            <p className="text-zinc-400 text-base font-medium leading-relaxed">
+              Не нашёл ответа? Напиши нам в Telegram — ответим в течение 10 минут.
+            </p>
+            <div className="space-y-2">
+              <a
+                href="https://create.roblox.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-between p-5 pixel-card border-2 border-[#1e2a45] hover:border-[#00b06f]/30 transition-colors group"
+              >
+                <div>
+                  <p className="font-pixel text-[9px] text-zinc-500 tracking-wider">OFFICIAL</p>
+                  <p className="font-black uppercase text-base">Creator Hub</p>
+                </div>
+                <ExternalLink className="w-4 h-4 text-zinc-500 group-hover:text-[#00b06f] transition-colors" />
+              </a>
+              <Link
+                href="/checkout"
+                className="flex items-center justify-between p-5 pixel-card border-2 border-[#00b06f]/20 bg-[#00b06f]/5 hover:border-[#00b06f]/40 transition-colors group"
+              >
+                <div>
+                  <p className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">READY?</p>
+                  <p className="font-black uppercase text-base">Купить Robux</p>
+                </div>
+                <ArrowRight className="w-4 h-4 text-[#00b06f]" />
+              </Link>
+            </div>
+          </div>
+
+          {/* Right: FAQ accordion */}
+          <div className="lg:col-span-2 space-y-2">
+            {FAQ.map((item) => (
+              <details
+                key={item.q}
+                className="pixel-card border-2 border-[#1e2a45] hover:border-[#00b06f]/20 transition-colors group"
+              >
+                <summary className="px-6 py-5 cursor-pointer flex items-center justify-between gap-3 list-none">
+                  <h3 className="font-black uppercase tracking-tight text-base">{item.q}</h3>
+                  <ChevronRight className="w-4 h-4 text-zinc-500 flex-shrink-0 group-open:rotate-90 transition-transform duration-200" />
+                </summary>
+                <div className="px-6 pb-5 border-t border-[#1e2a45]">
+                  <p className="text-base text-zinc-300 font-medium leading-relaxed pt-4">{item.a}</p>
+                </div>
+              </details>
+            ))}
+          </div>
+        </div>
+      </section>
     </main>
   );
 }

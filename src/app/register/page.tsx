@@ -2,210 +2,226 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Mail, Lock, User, Loader2, ChevronRight, CheckCircle2, Eye, EyeOff, ShieldCheck, Zap, Gift } from "lucide-react";
+import {
+  Mail, Lock, User, Loader2, CheckCircle2,
+  Eye, EyeOff, ShieldCheck, Zap, Gift, ArrowRight, ChevronRight
+} from "lucide-react";
 import Navbar from "@/components/navbar";
 import Link from "next/link";
 
 export default function RegisterPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
+  const [email, setEmail]           = useState("");
+  const [password, setPassword]     = useState("");
+  const [name, setName]             = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState("");
+  const [success, setSuccess]       = useState(false);
   const router = useRouter();
 
-  const passwordStrength = password.length >= 12 ? 3 : password.length >= 8 ? 2 : password.length >= 4 ? 1 : 0;
+  const strength =
+    password.length >= 12 ? 3 : password.length >= 8 ? 2 : password.length >= 4 ? 1 : 0;
+  const strengthLabel = ["", "Слабый", "Средний", "Надёжный"][strength];
+  const strengthColor = ["", "text-red-400", "text-amber-400", "text-[#00b06f]"][strength];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (password.length < 8) {
-      setError("Пароль должен быть не менее 8 символов");
-      return;
-    }
-    setLoading(true);
-    setError("");
-
+    if (password.length < 8) { setError("Пароль должен быть не менее 8 символов"); return; }
+    setLoading(true); setError("");
     try {
-      const res = await fetch("/api/auth/register", {
+      const res  = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password, name }),
       });
-
       const data = await res.json();
-
       if (data.success) {
         setSuccess(true);
-        setTimeout(() => {
-          router.push("/admin/login");
-        }, 2000);
+        setTimeout(() => router.push("/login"), 2200);
       } else {
-        setError(data.error || "Ошибка регистрации");
+        setError(data.error === "Email already in use"
+          ? "Этот email уже зарегистрирован"
+          : data.error || "Ошибка регистрации");
       }
-    } catch (err) {
-      setError("Ошибка сети. Попробуйте еще раз.");
+    } catch {
+      setError("Ошибка сети. Попробуйте ещё раз.");
     } finally {
       setLoading(false);
     }
   };
 
+  /* ── SUCCESS ── */
   if (success) {
     return (
-      <main className="min-h-screen bg-[#05070a] flex items-center justify-center p-4">
-        <div className="text-center space-y-6 animate-in fade-in zoom-in duration-500">
-          <div className="w-24 h-24 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto border border-emerald-500/20 shadow-2xl shadow-emerald-500/10">
-            <CheckCircle2 className="w-12 h-12 text-emerald-500" />
+      <main className="min-h-screen flex items-center justify-center p-6">
+        <div className="pixel-card border-2 border-[#00b06f]/40 p-10 text-center space-y-6 max-w-sm w-full">
+          <div className="w-16 h-16 mx-auto border-2 border-[#00b06f]/40 bg-[#00b06f]/10 flex items-center justify-center">
+            <CheckCircle2 className="w-8 h-8 text-[#00b06f]" />
           </div>
-          <h1 className="text-4xl font-black uppercase gold-text">Добро пожаловать!</h1>
-          <p className="text-zinc-500 font-bold text-sm">Аккаунт создан. Перенаправляем на вход...</p>
+          <div>
+            <div className="font-pixel text-[10px] text-[#00b06f] tracking-wider mb-2">SUCCESS</div>
+            <h1 className="text-2xl font-black uppercase tracking-tight gold-text">Аккаунт создан!</h1>
+          </div>
+          <p className="text-sm text-zinc-400 font-medium">Перенаправляем на страницу входа…</p>
+          <div className="h-1 w-full bg-[#1e2a45] overflow-hidden">
+            <div className="h-full bg-[#00b06f] animate-[progress_2.2s_linear_forwards]" style={{ width: "0%" }} />
+          </div>
         </div>
       </main>
     );
   }
 
+  /* ── MAIN ── */
   return (
-    <main className="min-h-screen bg-[#05070a]">
+    <main className="min-h-screen">
       <Navbar />
-      <div className="container mx-auto px-4 pt-16 sm:pt-20 pb-20 flex flex-col lg:flex-row gap-12 items-center justify-center">
-        
-        {/* Left: Benefits */}
-        <div className="w-full max-w-sm space-y-8 hidden lg:block">
-          <div className="space-y-3">
-            <h2 className="text-3xl font-black uppercase tracking-tight">Зачем аккаунт?</h2>
-            <div className="h-1 w-12 bg-[#00f2fe] rounded-full" />
-          </div>
-          
-          <div className="space-y-6">
-            <div className="flex gap-4 items-start group">
-              <div className="w-12 h-12 rounded-2xl bg-[#00f2fe]/10 border border-[#00f2fe]/20 flex items-center justify-center shrink-0 group-hover:bg-[#00f2fe]/20 transition-all">
-                <Zap className="w-5 h-5 text-[#00f2fe]" />
-              </div>
-              <div>
-                <h3 className="font-black text-sm uppercase mb-1">Быстрый заказ</h3>
-                <p className="text-xs text-zinc-500 leading-relaxed">Данные сохраняются — не нужно вводить ник каждый раз</p>
-              </div>
-            </div>
-            <div className="flex gap-4 items-start group">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0 group-hover:bg-emerald-500/20 transition-all">
-                <ShieldCheck className="w-5 h-5 text-emerald-500" />
-              </div>
-              <div>
-                <h3 className="font-black text-sm uppercase mb-1">История заказов</h3>
-                <p className="text-xs text-zinc-500 leading-relaxed">Отслеживайте статус каждой покупки в личном кабинете</p>
-              </div>
-            </div>
-            <div className="flex gap-4 items-start group">
-              <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0 group-hover:bg-amber-500/20 transition-all">
-                <Gift className="w-5 h-5 text-amber-500" />
-              </div>
-              <div>
-                <h3 className="font-black text-sm uppercase mb-1">Бонусы</h3>
-                <p className="text-xs text-zinc-500 leading-relaxed">Скидки и акции для зарегистрированных пользователей</p>
-              </div>
-            </div>
-          </div>
+
+      <div className="container mx-auto px-6 py-16 max-w-6xl">
+
+        {/* Header */}
+        <div className="mb-12">
+          <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-3">ACCOUNT</div>
+          <h1 className="text-5xl md:text-6xl font-black uppercase tracking-[-0.03em] leading-none">
+            Создать<br />
+            <span className="gold-text">аккаунт</span>
+          </h1>
         </div>
 
-        {/* Right: Form */}
-        <div className="w-full max-w-md space-y-6">
-          <div className="text-center space-y-2">
-             <span className="text-[#00f2fe] font-black tracking-[0.3em] text-[10px] uppercase opacity-60">Присоединяйся</span>
-             <h1 className="text-4xl sm:text-5xl font-black uppercase gold-text leading-none">Создать <br/> аккаунт</h1>
+        <div className="accent-line mb-12" />
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+          {/* ── Benefits ── */}
+          <div className="space-y-4">
+            <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-4">ЗАЧЕМ АККАУНТ?</div>
+
+            {[
+              { icon: Zap,         color: "text-[#00b06f]", border: "border-[#00b06f]/20", bg: "bg-[#00b06f]/5",
+                tag: "SPEED", title: "Быстрый заказ",
+                desc: "Данные сохранены — не нужно вводить ник при каждой покупке" },
+              { icon: ShieldCheck, color: "text-amber-400", border: "border-amber-500/20", bg: "bg-amber-500/5",
+                tag: "HISTORY", title: "История заказов",
+                desc: "Отслеживай статус каждой покупки в личном кабинете" },
+              { icon: Gift,        color: "text-blue-400", border: "border-blue-500/20", bg: "bg-blue-500/5",
+                tag: "BONUSES", title: "Бонусы",
+                desc: "Скидки и акции только для зарегистрированных пользователей" },
+            ].map(({ icon: Icon, color, border, bg, tag, title, desc }) => (
+              <div key={tag} className={`pixel-card border-2 ${border} ${bg} p-5 flex gap-4`}>
+                <div className={`w-10 h-10 border-2 ${border} flex items-center justify-center flex-shrink-0`}>
+                  <Icon className={`w-5 h-5 ${color}`} />
+                </div>
+                <div>
+                  <div className={`font-pixel text-[9px] ${color} tracking-wider mb-1`}>{tag}</div>
+                  <p className="font-black uppercase text-sm mb-1">{title}</p>
+                  <p className="text-sm text-zinc-400 font-medium leading-relaxed">{desc}</p>
+                </div>
+              </div>
+            ))}
+
+            <div className="pt-2 text-sm text-zinc-500 font-medium">
+              Уже есть аккаунт?{" "}
+              <Link href="/login" className="text-[#00b06f] font-black hover:underline">
+                Войти →
+              </Link>
+            </div>
           </div>
 
-          <div className="glass p-6 sm:p-10 rounded-[2rem] sm:rounded-[2.5rem] border border-white/5 shadow-2xl relative overflow-hidden group">
-            <div className="absolute -top-24 -right-24 w-48 h-48 bg-[#00f2fe]/5 blur-[80px] rounded-full pointer-events-none group-hover:bg-[#00f2fe]/10 transition-all duration-700" />
-            
-            <form onSubmit={handleSubmit} className="space-y-5 relative z-10">
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] ml-1">Имя</label>
-                <div className="relative">
-                  <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-600" />
-                  <input
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full h-14 bg-white/5 border border-white/5 rounded-2xl pl-12 pr-4 outline-none focus:border-[#00f2fe]/50 transition-all font-bold placeholder:text-zinc-700"
-                    placeholder="Как вас зовут?"
-                  />
-                </div>
-              </div>
+          {/* ── Form ── */}
+          <div className="lg:col-span-2">
+            <div className="pixel-card border-2 border-[#1e2a45] p-8">
 
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] ml-1">Email</label>
-                <div className="relative">
-                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-600" />
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full h-14 bg-white/5 border border-white/5 rounded-2xl pl-12 pr-4 outline-none focus:border-[#00f2fe]/50 transition-all font-bold placeholder:text-zinc-700"
-                    placeholder="example@mail.ru"
-                  />
-                </div>
-              </div>
+              <form onSubmit={handleSubmit} className="space-y-6">
 
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] ml-1">Пароль</label>
-                <div className="relative">
-                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-600" />
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full h-14 bg-white/5 border border-white/5 rounded-2xl pl-12 pr-12 outline-none focus:border-[#00f2fe]/50 transition-all font-bold placeholder:text-zinc-700"
-                    placeholder="Минимум 8 символов"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 transition-colors"
-                  >
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                  </button>
+                {/* Name */}
+                <div className="space-y-2">
+                  <label className="font-pixel text-[9px] text-zinc-500 tracking-wider">ИМЯ</label>
+                  <div className="relative">
+                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
+                    <input
+                      type="text"
+                      required
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Как вас зовут?"
+                      className="w-full h-14 bg-[#080c18] border-2 border-[#1e2a45] pl-11 pr-4 outline-none focus:border-[#00b06f]/40 transition-colors font-bold text-base placeholder:text-zinc-700"
+                    />
+                  </div>
                 </div>
-                {/* Password strength indicator */}
-                {password.length > 0 && (
-                  <div className="flex gap-1.5 mt-2 px-1">
-                    {[1, 2, 3].map((level) => (
-                      <div
-                        key={level}
-                        className={`h-1 flex-1 rounded-full transition-all ${
-                          passwordStrength >= level
-                            ? level === 1 ? "bg-red-500" : level === 2 ? "bg-amber-500" : "bg-emerald-500"
-                            : "bg-white/5"
-                        }`}
-                      />
-                    ))}
+
+                {/* Email */}
+                <div className="space-y-2">
+                  <label className="font-pixel text-[9px] text-zinc-500 tracking-wider">EMAIL</label>
+                  <div className="relative">
+                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="example@mail.ru"
+                      className="w-full h-14 bg-[#080c18] border-2 border-[#1e2a45] pl-11 pr-4 outline-none focus:border-[#00b06f]/40 transition-colors font-bold text-base placeholder:text-zinc-700"
+                    />
+                  </div>
+                </div>
+
+                {/* Password */}
+                <div className="space-y-2">
+                  <label className="font-pixel text-[9px] text-zinc-500 tracking-wider">ПАРОЛЬ</label>
+                  <div className="relative">
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Минимум 8 символов"
+                      className="w-full h-14 bg-[#080c18] border-2 border-[#1e2a45] pl-11 pr-12 outline-none focus:border-[#00b06f]/40 transition-colors font-bold text-base placeholder:text-zinc-700"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 transition-colors"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+
+                  {/* Strength bar */}
+                  {password.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="flex gap-1">
+                        {[1,2,3].map((l) => (
+                          <div key={l} className={`h-1 flex-1 transition-all ${
+                            strength >= l
+                              ? l===1 ? "bg-red-500" : l===2 ? "bg-amber-500" : "bg-[#00b06f]"
+                              : "bg-[#1e2a45]"
+                          }`} />
+                        ))}
+                      </div>
+                      <span className={`text-xs font-black ${strengthColor}`}>{strengthLabel}</span>
+                    </div>
+                  )}
+                </div>
+
+                {error && (
+                  <div className="pixel-card border-2 border-red-500/30 bg-red-500/5 p-4 text-sm text-red-400 font-bold">
+                    {error}
                   </div>
                 )}
-              </div>
 
-              {error && (
-                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-bold text-center">
-                  {error}
-                </div>
-              )}
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full h-14 gold-gradient font-black text-[11px] uppercase tracking-widest text-white hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-3"
+                >
+                  {loading
+                    ? <Loader2 className="w-5 h-5 animate-spin" />
+                    : <><span>Создать аккаунт</span><ArrowRight className="w-4 h-4" /></>
+                  }
+                </button>
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full h-16 gold-gradient rounded-2xl flex items-center justify-center gap-3 font-black text-black hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 shadow-xl shadow-[#00f2fe]/10"
-              >
-                {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <>СОЗДАТЬ АККАУНТ <ChevronRight className="w-5 h-5" /></>}
-              </button>
-              
-              <div className="text-center pt-1">
-                <Link href="/admin/login" className="text-[10px] font-black text-zinc-600 hover:text-[#00f2fe] uppercase tracking-widest transition-colors">
-                  Уже есть аккаунт? Войти →
-                </Link>
-              </div>
-            </form>
+              </form>
+            </div>
           </div>
         </div>
       </div>

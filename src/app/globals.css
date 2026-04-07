@@ -29,23 +29,33 @@
 
 .font-pixel {
   font-family: 'Press Start 2P', monospace;
+  line-height: 1.8;
+}
+
+/* Unified pixel label — used for small tags/badges */
+.pixel-tag {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
   line-height: 1.6;
 }
 
 body {
   background-color: #0a0e1a;
   color: #eef2ff;
+  font-size: 16px;
+  line-height: 1.6;
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui;
   background-image:
-    radial-gradient(ellipse 70% 40% at 50% -5%, rgba(0, 176, 111, 0.08) 0%, transparent 55%),
-    radial-gradient(ellipse 50% 30% at 100% 20%, rgba(88, 101, 242, 0.05) 0%, transparent 50%),
-    radial-gradient(ellipse 40% 30% at 0% 80%, rgba(0, 176, 111, 0.04) 0%, transparent 50%);
+    radial-gradient(ellipse 70% 40% at 50% -5%, rgba(0,176,111,0.08) 0%, transparent 55%),
+    radial-gradient(ellipse 50% 30% at 100% 20%, rgba(88,101,242,0.05) 0%, transparent 50%),
+    radial-gradient(ellipse 40% 30% at 0% 80%, rgba(0,176,111,0.04) 0%, transparent 50%);
 }
 
 .glass {
   background: rgba(15, 21, 40, 0.8);
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255,255,255,0.05);
 }
 
 .gold-gradient {
@@ -62,13 +72,17 @@ body {
 }
 
 .gold-glow {
-  box-shadow: 0 0 40px rgba(0, 176, 111, 0.1), 0 1px 0 rgba(0, 176, 111, 0.12) inset;
+  box-shadow: 0 0 40px rgba(0,176,111,0.1), 0 1px 0 rgba(0,176,111,0.12) inset;
 }
 
 .pixel-card {
   background: #0f1528;
   border: 2px solid #1e2a45;
   position: relative;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.pixel-card:hover {
+  box-shadow: 0 0 0 1px rgba(0,176,111,0.08), 0 4px 24px rgba(0,0,0,0.3);
 }
 .pixel-card::before,
 .pixel-card::after {
@@ -94,6 +108,17 @@ body {
 }
 .pixel-float { animation: float-pixel 4s ease-in-out infinite; }
 
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fade-up 0.35s ease both; }
+
+@keyframes progress {
+  from { width: 0%; }
+  to   { width: 100%; }
+}
+
 .scanlines::after {
   content: '';
   position: absolute;
@@ -108,14 +133,10 @@ body {
 
 .accent-line {
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(0, 176, 111, 0.35), transparent);
+  background: linear-gradient(90deg, transparent, rgba(0,176,111,0.35), transparent);
 }
 
-.rb-progress {
-  height: 4px;
-  background: #1e2a45;
-  overflow: hidden;
-}
+.rb-progress { height: 4px; background: #1e2a45; overflow: hidden; }
 .rb-progress-fill {
   height: 100%;
   background: linear-gradient(90deg, #00b06f, #00d084);

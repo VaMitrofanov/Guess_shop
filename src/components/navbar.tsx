@@ -2,14 +2,14 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { User, ShieldCheck, Menu, X, BookOpen } from "lucide-react";
+import { User, ShieldCheck, Menu, X, BookOpen, ShoppingCart, MessageSquare, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV_LINKS = [
-  { href: "/", label: "Купить" },
+  { href: "/", label: "Купить", icon: ShoppingCart },
   { href: "/guide", label: "Инструкция", icon: BookOpen, accent: true },
-  { href: "/reviews", label: "Отзывы" },
-  { href: "/faq", label: "FAQ" },
+  { href: "/reviews", label: "Отзывы", icon: MessageSquare },
+  { href: "/faq", label: "FAQ", icon: HelpCircle },
   { href: "/guarantees", label: "Гарантии", icon: ShieldCheck },
 ];
 
@@ -47,7 +47,7 @@ export default function Navbar() {
                 key={href}
                 href={href}
                 className={cn(
-                  "px-4 py-2 text-xs font-black uppercase tracking-widest transition-all flex items-center gap-1.5 rounded-none border-b-2",
+                  "px-4 py-2 text-[11px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 rounded-none border-b-2",
                   active
                     ? "border-[#00b06f] text-[#00b06f]"
                     : accent
@@ -65,10 +65,11 @@ export default function Navbar() {
         {/* Right */}
         <div className="flex items-center gap-2">
           <Link
-            href="/register"
-            className="hidden md:flex w-9 h-9 border border-[#1e2a45] hover:border-[#00b06f]/40 items-center justify-center transition-all rounded-none"
+            href="/login"
+            className="hidden md:flex h-9 px-4 border border-[#1e2a45] hover:border-[#00b06f]/40 items-center justify-center gap-2 transition-all rounded-none text-zinc-400 hover:text-[#00b06f] text-[10px] font-black uppercase tracking-widest"
           >
-            <User className="w-4 h-4 text-zinc-500 hover:text-[#00b06f]" />
+            <User className="w-3.5 h-3.5" />
+            Кабинет
           </Link>
 
           <Link
@@ -104,7 +105,7 @@ export default function Navbar() {
                   href={href}
                   onClick={() => setIsOpen(false)}
                   className={cn(
-                    "flex items-center justify-between px-4 py-3 font-black text-sm uppercase tracking-widest transition-all border-l-2",
+                    "flex items-center justify-between px-4 py-3 font-black text-[13px] uppercase tracking-widest transition-all border-l-2",
                     active
                       ? "border-[#00b06f] text-[#00b06f] bg-[#00b06f]/5"
                       : accent
@@ -120,11 +121,22 @@ export default function Navbar() {
                 </Link>
               );
             })}
+            <Link
+              href="/login"
+              onClick={() => setIsOpen(false)}
+              className="flex items-center justify-between px-4 py-3 font-black text-[13px] uppercase tracking-widest border-l-2 border-transparent text-zinc-400 hover:border-white/20 hover:text-white transition-all"
+            >
+              <div className="flex items-center gap-2">
+                <User className="w-4 h-4" />
+                Личный кабинет
+              </div>
+              <span className="text-[10px] opacity-40">→</span>
+            </Link>
             <div className="pt-3">
               <Link
                 href="/checkout"
                 onClick={() => setIsOpen(false)}
-                className="w-full h-12 gold-gradient flex items-center justify-center font-black text-sm uppercase tracking-widest text-white rounded-none"
+                className="w-full h-12 gold-gradient flex items-center justify-center font-black text-[13px] uppercase tracking-widest text-white rounded-none"
               >
                 Купить Robux
               </Link>
