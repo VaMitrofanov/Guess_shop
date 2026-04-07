@@ -1,113 +1,115 @@
-'use client';
-
-import { motion } from 'framer-motion';
-import Navbar from '@/components/navbar';
-import { ShieldCheck, Zap, Users, Star, Lock, HeartHandshake } from 'lucide-react';
+import Navbar from "@/components/navbar";
+import Link from "next/link";
+import { ShieldCheck, Zap, Users, Star, Lock, HeartHandshake, ArrowRight } from "lucide-react";
 
 const guarantees = [
   {
-    title: "100% БЕЗОПАСНЫЕ ПЛАТЕЖИ",
-    description: "Все транзакции проходят через официальный шлюз Тинькофф. Мы не храним данные ваших карт, и все операции защищены 3D-Secure протоколами.",
-    icon: <Lock className="w-8 h-8 text-cyan-400" />
+    title: "Безопасные платежи",
+    desc: "Все транзакции проходят через официальный шлюз Тинькофф. Мы не храним данные карт. Все операции защищены 3D-Secure.",
+    icon: Lock,
+    tag: "SECURITY",
   },
   {
-    title: "МГНОВЕННАЯ ДОСТАВКА",
-    description: "Наш бот автоматически покупает ваш геймпас сразу после оплаты. Никаких ожиданий — робуксы уходят в 'Pending' моментально.",
-    icon: <Zap className="w-8 h-8 text-[#00f2fe]" />
+    title: "Мгновенная обработка",
+    desc: "Система автоматически обрабатывает заказ сразу после оплаты. Никаких ожиданий оператора.",
+    icon: Zap,
+    tag: "AUTO",
   },
   {
-    title: "ЧЕСТНЫЙ КУРС",
-    description: "Мы работаем напрямую с поставщиками и крупными биржами, поэтому предлагаем один из самых выгодных курсов на рынке СНГ.",
-    icon: <HeartHandshake className="w-8 h-8 text-blue-400" />
+    title: "Официальный курс",
+    desc: "Работаем напрямую с поставщиками. Предлагаем один из лучших курсов на рынке СНГ.",
+    icon: HeartHandshake,
+    tag: "FAIR PRICE",
   },
   {
-    title: "ТЕХПОДДЕРЖКА 24/7",
-    description: "Наша команда всегда онлайн. Если у вас возникла проблема — мы ответим в течение нескольких минут и поможем разобраться.",
-    icon: <ShieldCheck className="w-8 h-8 text-emerald-400" />
+    title: "Поддержка 24/7",
+    desc: "Наша команда всегда онлайн. Если возникла проблема — ответим в течение нескольких минут.",
+    icon: ShieldCheck,
+    tag: "SUPPORT",
   },
   {
-    title: "ОПЫТ РАБОТЫ",
-    description: "Мы на рынке уже более двух лет и обработали свыше 10,000 заказов. Ваша покупка в надежных руках.",
-    icon: <Users className="w-8 h-8 text-cyan-500" />
+    title: "Опыт и репутация",
+    desc: "Работаем с 2024 года. Более 5 000 выполненных заказов. Ваша покупка в надёжных руках.",
+    icon: Users,
+    tag: "TRUSTED",
   },
   {
-    title: "РЕАЛЬНЫЕ ОТЗЫВЫ",
-    description: "Тысячи довольных клиентов в нашем Telegram и VK. Вы можете убедиться в этом сами, почитав реальные истории покупателей.",
-    icon: <Star className="w-8 h-8 text-[#00f2fe]" />
-  }
+    title: "Реальные отзывы",
+    desc: "Тысячи довольных клиентов в Telegram и VK. Проверьте сами, почитав реальные истории.",
+    icon: Star,
+    tag: "VERIFIED",
+  },
 ];
-
-const container = {
-  hidden: { opacity: 0 },
-  show: {
-    opacity: 1,
-    transition: { staggerChildren: 0.1 }
-  }
-};
-
-const item = {
-  hidden: { scale: 0.95, opacity: 0 },
-  show: { scale: 1, opacity: 1 }
-};
 
 export default function GuaranteesPage() {
   return (
-    <main className="min-h-screen bg-[#0a0a0b] text-white">
+    <main className="min-h-screen">
       <Navbar />
 
-      <section className="pt-32 pb-48 px-4">
-        <div className="container mx-auto">
-          <motion.div 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="space-y-6 mb-24 max-w-4xl"
-          >
-            <span className="text-[#00f2fe] font-black tracking-widest text-sm uppercase">Надежность прежде всего</span>
-            <h1 className="text-5xl md:text-8xl font-black uppercase leading-tight tracking-tighter">
-                МЫ ДАЕМ <br/> <span className="gold-text">100% ГАРАНТИЙ</span>
-            </h1>
-          </motion.div>
+      <section className="container mx-auto px-4 pt-16 pb-24 max-w-5xl">
 
-          <motion.div 
-            variants={container}
-            initial="hidden"
-            animate="show"
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
-          >
-            {guarantees.map((g, index) => (
-              <motion.div 
-                key={index}
-                variants={item}
-                className="bg-[#05070a] border border-white/5 p-10 rounded-3xl hover:border-[#00f2fe]/50 transition-all flex flex-col gap-10 group shadow-lg"
-              >
-                <div className="p-4 bg-white/5 w-fit rounded-sm group-hover:scale-110 transition-transform">
-                    {g.icon}
-                </div>
-                <div className="space-y-4">
-                  <h3 className="text-xl font-bold uppercase tracking-tight">{g.title}</h3>
-                  <p className="text-zinc-500 leading-relaxed font-medium">
-                    {g.description}
-                  </p>
-                </div>
-              </motion.div>
-            ))}
-          </motion.div>
+        {/* Header */}
+        <div className="mb-14 space-y-4">
+          <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">TRUST & SAFETY</div>
+          <h1 className="text-4xl md:text-6xl font-black uppercase tracking-[-0.03em] leading-none">
+            Наши<br />
+            <span className="gold-text">гарантии</span>
+          </h1>
+          <p className="text-zinc-400 font-medium max-w-lg">
+            Мы несём полную ответственность за каждый заказ. Вот почему тысячи игроков доверяют нам.
+          </p>
+        </div>
 
-          <motion.div 
-            initial={{ opacity: 0, y: 100 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5 }}
-            className="mt-32 p-16 gold-gradient text-black rounded-[2.5rem] text-center space-y-8 overflow-hidden relative shadow-2xl"
+        <div className="accent-line mb-10" />
+
+        {/* Guarantees grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-16">
+          {guarantees.map(({ title, desc, icon: Icon, tag }) => (
+            <div
+              key={title}
+              className="pixel-card border-2 border-[#1e2a45] p-6 space-y-5 hover:border-[#00b06f]/30 transition-colors group"
+            >
+              <div className="flex items-start justify-between">
+                <div className="w-10 h-10 bg-[#00b06f]/10 border border-[#00b06f]/20 flex items-center justify-center group-hover:bg-[#00b06f]/15 transition-colors">
+                  <Icon className="w-5 h-5 text-[#00b06f]" />
+                </div>
+                <span className="font-pixel text-[7px] text-[#00b06f]/50 border border-[#00b06f]/15 px-2 py-1">{tag}</span>
+              </div>
+              <div className="space-y-2">
+                <h3 className="font-black uppercase tracking-tight">{title}</h3>
+                <p className="text-sm text-zinc-500 font-medium leading-relaxed">{desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* CTA banner */}
+        <div className="pixel-card border-2 border-[#00b06f]/30 bg-[#00b06f]/3 p-8 md:p-12 relative overflow-hidden">
+          {/* Decorative background text */}
+          <div
+            className="absolute inset-0 flex items-center justify-center font-black text-[80px] md:text-[120px] uppercase tracking-tighter text-[#00b06f]/[0.03] pointer-events-none select-none whitespace-nowrap"
+            aria-hidden
           >
-            <div className="relative z-10 space-y-4">
-                <h2 className="text-4xl md:text-6xl font-black uppercase italic leading-none">Тысячи игроков уже <br/> выбирают нас каждый день</h2>
-                <p className="text-black/70 max-w-xl mx-auto font-bold uppercase tracking-widest text-sm">Присоединяйся к самому надежному магазину в СНГ</p>
+            ROBLOX BANK
+          </div>
+
+          <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-8 text-center md:text-left">
+            <div className="space-y-3">
+              <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">JOIN US</div>
+              <h2 className="text-2xl md:text-4xl font-black uppercase tracking-tight leading-tight">
+                Тысячи игроков<br />выбирают нас каждый день
+              </h2>
+              <p className="text-zinc-500 text-sm font-medium">
+                Присоединяйся к самому надёжному сервису в СНГ
+              </p>
             </div>
-            
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[200px] font-black opacity-5 pointer-events-none select-none tracking-tighter italic">
-                GUESS
-            </div>
-          </motion.div>
+            <Link
+              href="/checkout"
+              className="h-14 px-10 gold-gradient font-black text-sm uppercase tracking-widest text-white hover:opacity-90 active:scale-[0.97] transition-all rounded-none flex items-center gap-3 flex-shrink-0"
+            >
+              Купить Robux <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
         </div>
       </section>
     </main>

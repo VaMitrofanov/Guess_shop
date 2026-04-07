@@ -1,123 +1,137 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { User, ShoppingBag, ShieldCheck, Menu, X } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { User, ShieldCheck, Menu, X, BookOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+const NAV_LINKS = [
+  { href: "/", label: "Купить" },
+  { href: "/guide", label: "Инструкция", icon: BookOpen, accent: true },
+  { href: "/reviews", label: "Отзывы" },
+  { href: "/faq", label: "FAQ" },
+  { href: "/guarantees", label: "Гарантии", icon: ShieldCheck },
+];
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
+  const pathname = usePathname();
 
   return (
-    <nav className="sticky top-0 z-50 w-full glass border-b border-[#ffffff10]">
+    <nav className="sticky top-0 z-50 w-full border-b border-[#00b06f]/10 bg-[#0a0e1a]/90 backdrop-blur-xl">
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-        <Link 
-          href="/" 
-          className="text-2xl font-bold gold-text flex items-center gap-2"
-        >
-          <ShoppingBag className="w-8 h-8 text-[#00f2fe]" />
-          GUESS-SHOP
+
+        {/* Logo — pixel block style */}
+        <Link href="/" className="flex items-center gap-3 group">
+          {/* Roblox-style block logo */}
+          <div className="relative w-9 h-9 flex-shrink-0">
+            <div className="absolute inset-0 bg-[#00b06f] rounded-[4px] group-hover:bg-[#00d084] transition-colors" />
+            <div className="absolute top-0 right-0 w-2 h-2 bg-[#0a0e1a] rounded-none" />
+            <div className="absolute bottom-0 left-0 w-2 h-2 bg-[#0a0e1a] rounded-none" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-white font-black text-[11px] tracking-wider relative z-10">RB</span>
+            </div>
+          </div>
+          <div className="hidden sm:flex flex-col leading-none">
+            <span className="text-[11px] font-black uppercase tracking-[0.2em] text-white">Roblox</span>
+            <span className="text-[11px] font-black uppercase tracking-[0.2em] text-[#00b06f]">Bank</span>
+          </div>
         </Link>
 
-        {/* Desktop Menu */}
-        <div className="hidden md:flex items-center gap-8">
-          <Link href="/" className="text-sm font-medium hover:text-[#00f2fe] transition-colors">
-            КУПИТЬ ROBUX
-          </Link>
-          <Link href="/reviews" className="text-sm font-medium hover:text-[#00f2fe] transition-colors">
-            ОТЗЫВЫ
-          </Link>
-          <Link href="/faq" className="text-sm font-medium hover:text-[#00f2fe] transition-colors">
-            F.A.Q.
-          </Link>
-          <Link href="/guarantees" className="text-sm font-medium hover:text-[#00f2fe] transition-colors flex items-center gap-1">
-            <ShieldCheck className="w-4 h-4 text-emerald-500" />
-            ГАРАНТИИ
-          </Link>
+        {/* Desktop nav */}
+        <div className="hidden md:flex items-center gap-1">
+          {NAV_LINKS.map(({ href, label, icon: Icon, accent }) => {
+            const active = pathname === href;
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  "px-4 py-2 text-xs font-black uppercase tracking-widest transition-all flex items-center gap-1.5 rounded-none border-b-2",
+                  active
+                    ? "border-[#00b06f] text-[#00b06f]"
+                    : accent
+                      ? "border-transparent text-[#00b06f]/60 hover:text-[#00b06f] hover:border-[#00b06f]/30"
+                      : "border-transparent text-zinc-400 hover:text-white hover:border-white/20"
+                )}
+              >
+                {Icon && <Icon className="w-3.5 h-3.5" />}
+                {label}
+              </Link>
+            );
+          })}
         </div>
 
-        <div className="flex items-center gap-2 md:gap-4">
-          <Link 
-            href="/register" 
-            className="p-2 rounded-full bg-white/5 hover:bg-[#00f2fe]/10 transition-all hidden md:block border border-white/5 hover:border-[#00f2fe]/30"
+        {/* Right */}
+        <div className="flex items-center gap-2">
+          <Link
+            href="/register"
+            className="hidden md:flex w-9 h-9 border border-[#1e2a45] hover:border-[#00b06f]/40 items-center justify-center transition-all rounded-none"
           >
-            <User className="w-5 h-5 text-zinc-400 hover:text-[#00f2fe]" />
+            <User className="w-4 h-4 text-zinc-500 hover:text-[#00b06f]" />
           </Link>
 
-          {/* Mobile Toggle */}
-          <button 
-            onClick={() => setIsOpen(!isOpen)}
-            className="md:hidden p-2 text-zinc-400 hover:text-white transition-all"
+          <Link
+            href="/checkout"
+            className="hidden md:flex h-9 px-5 gold-gradient items-center justify-center font-black text-[10px] uppercase tracking-widest text-white hover:opacity-90 active:scale-[0.97] transition-all rounded-none"
           >
-            {isOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            Купить R$
+          </Link>
+
+          <button
+            onClick={() => setIsOpen(!isOpen)}
+            className="md:hidden w-9 h-9 border border-[#1e2a45] flex items-center justify-center text-zinc-400 hover:text-white hover:border-[#00b06f]/40 transition-all rounded-none"
+          >
+            {isOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
           </button>
         </div>
       </div>
 
-      {/* Mobile Menu Overlay */}
+      {/* Pixel progress line */}
+      <div className="rb-progress">
+        <div className="rb-progress-fill" style={{ width: "100%" }} />
+      </div>
+
+      {/* Mobile menu */}
       {isOpen && (
-        <div className="md:hidden absolute top-16 left-0 w-full border-b border-[#ffffff10] slide-down animate-in fade-in py-8 px-4 flex flex-col gap-6 z-40 bg-[#05070a] backdrop-blur-none">
-          <Link 
-            href="/" 
-            onClick={() => setIsOpen(false)}
-            className="text-lg font-bold hover:text-[#00f2fe] flex items-center justify-between group"
-          >
-            КУПИТЬ ROBUX
-            <ChevronRight className="w-5 h-5 opacity-0 group-hover:opacity-100 transition-all" />
-          </Link>
-          <Link 
-            href="/reviews" 
-            onClick={() => setIsOpen(false)}
-            className="text-lg font-bold hover:text-[#00f2fe] flex items-center justify-between group"
-          >
-            ОТЗЫВЫ
-            <ChevronRight className="w-5 h-5 opacity-0 group-hover:opacity-100 transition-all" />
-          </Link>
-          <Link 
-            href="/faq" 
-            onClick={() => setIsOpen(false)}
-            className="text-lg font-bold hover:text-[#00f2fe] flex items-center justify-between group"
-          >
-            F.A.Q.
-            <ChevronRight className="w-5 h-5 opacity-0 group-hover:opacity-100 transition-all" />
-          </Link>
-          <Link 
-            href="/guarantees" 
-            onClick={() => setIsOpen(false)}
-            className="text-lg font-bold hover:text-[#00f2fe] flex items-center justify-between group"
-          >
-            ГАРАНТИИ
-            <ChevronRight className="w-5 h-5 opacity-0 group-hover:opacity-100 transition-all" />
-          </Link>
-          <div className="h-px w-full bg-white/10 my-2" />
-          <Link 
-            href="/register" 
-            onClick={() => setIsOpen(false)}
-            className="flex items-center gap-3 text-[#00f2fe] font-black text-lg py-3 px-4 rounded-2xl bg-[#00f2fe]/10 border border-[#00f2fe]/20 hover:bg-[#00f2fe]/20 transition-all"
-          >
-            <User className="w-6 h-6" />
-            Личный кабинет
-          </Link>
+        <div className="md:hidden border-t border-[#00b06f]/10 bg-[#0a0e1a] animate-in fade-in slide-in-from-top-2 duration-150">
+          <div className="container mx-auto px-4 py-4 flex flex-col gap-0.5">
+            {NAV_LINKS.map(({ href, label, icon: Icon, accent }) => {
+              const active = pathname === href;
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  onClick={() => setIsOpen(false)}
+                  className={cn(
+                    "flex items-center justify-between px-4 py-3 font-black text-sm uppercase tracking-widest transition-all border-l-2",
+                    active
+                      ? "border-[#00b06f] text-[#00b06f] bg-[#00b06f]/5"
+                      : accent
+                        ? "border-transparent text-[#00b06f]/60 hover:border-[#00b06f]/40 hover:text-[#00b06f]"
+                        : "border-transparent text-zinc-400 hover:border-white/20 hover:text-white"
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    {Icon && <Icon className="w-4 h-4" />}
+                    {label}
+                  </div>
+                  <span className="text-[10px] opacity-40">→</span>
+                </Link>
+              );
+            })}
+            <div className="pt-3">
+              <Link
+                href="/checkout"
+                onClick={() => setIsOpen(false)}
+                className="w-full h-12 gold-gradient flex items-center justify-center font-black text-sm uppercase tracking-widest text-white rounded-none"
+              >
+                Купить Robux
+              </Link>
+            </div>
+          </div>
         </div>
       )}
     </nav>
-  );
-}
-
-function ChevronRight(props: any) {
-  return (
-    <svg 
-      {...props} 
-      xmlns="http://www.w3.org/2000/svg" 
-      width="24" 
-      height="24" 
-      viewBox="0 0 24 24" 
-      fill="none" 
-      stroke="currentColor" 
-      strokeWidth="2" 
-      strokeLinecap="round" 
-      strokeLinejoin="round"
-    >
-      <path d="m9 18 6-6-6-6"/>
-    </svg>
   );
 }

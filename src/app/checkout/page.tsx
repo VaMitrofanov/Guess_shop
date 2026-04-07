@@ -1,17 +1,34 @@
 "use client";
 
 import { useState, Suspense } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
-import Image from "next/image";
+import { useSearchParams } from "next/navigation";
 import Navbar from "@/components/navbar";
-import { User, Wallet, Gamepad2, Info, ArrowRight, Loader2, Search, ChevronRight, Diamond } from "lucide-react";
+import { User, Gamepad2, Info, ArrowRight, Loader2, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { usePricing } from "@/hooks/usePricing";
+
+function RobuxIcon({ className }: { className?: string }) {
+    return (
+        <svg className={className} viewBox="0 0 24 24" fill="none">
+            <rect x="9" y="2" width="6" height="3" fill="currentColor" />
+            <rect x="6" y="5" width="3" height="3" fill="currentColor" />
+            <rect x="15" y="5" width="3" height="3" fill="currentColor" />
+            <rect x="3" y="8" width="3" height="8" fill="currentColor" />
+            <rect x="18" y="8" width="3" height="8" fill="currentColor" />
+            <rect x="6" y="16" width="3" height="3" fill="currentColor" />
+            <rect x="15" y="16" width="3" height="3" fill="currentColor" />
+            <rect x="9" y="19" width="6" height="3" fill="currentColor" />
+            <rect x="6" y="8" width="6" height="6" fill="currentColor" />
+        </svg>
+    );
+}
 
 function CheckoutContent() {
     const searchParams = useSearchParams();
-    const router = useRouter();
     const amountStr = searchParams.get("amount") || "0";
     const productId = searchParams.get("productId") || null;
+
+    const { rubPerRobux, loading: priceLoading, getPrice } = usePricing();
 
     const [step, setStep] = useState<"form" | "confirm">("form");
     const [searchQuery, setSearchQuery] = useState("");
@@ -24,292 +41,285 @@ function CheckoutContent() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
 
-    const robuxRaw = parseInt(amountStr) || (productId ? 0 : 0);
-    const [robux, setRobux] = useState(Math.max(0, robuxRaw));
-    const price = Math.round(robux * 0.85);
+    const [robux, setRobux] = useState(Math.max(0, parseInt(amountStr) || 0));
+    const price = getPrice(robux);
 
     const handlePay = async () => {
-        if (!username) {
-            setError("Введите ваш никнейм в Roblox");
-            return;
-        }
-        if (method === 'Gamepass' && !gamepassId) {
-            setError("Введите ID вашего Gamepass");
-            return;
-        }
-
-        if (robux < 100) {
-            setError("Минимальная сумма — 100 Robux");
-            return;
-        }
-        setError("");
-        setLoading(true);
-
+        if (!username) { setError("Введите ваш никнейм в Roblox"); return; }
+        if (method === "Gamepass" && !gamepassId) { setError("Выберите геймпасс"); return; }
+        if (robux < 100) { setError("Минимальная сумма — 100 Robux"); return; }
+        setError(""); setLoading(true);
         try {
             const res = await fetch("/api/orders/create", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    username,
-                    amountRobux: robux,
-                    productId,
-                    method,
-                    gamepassId,
-                }),
+                body: JSON.stringify({ username, amountRobux: robux, productId, method, gamepassId }),
             });
-
             const data = await res.json();
-
-            if (data.success && data.paymentUrl) {
-                window.location.href = data.paymentUrl;
-            } else {
-                setError(data.error || "Ошибка инициализации оплаты");
-            }
-        } catch (err) {
-            setError("Ошибка сети. Попробуйте еще раз.");
-        } finally {
-            setLoading(false);
-        }
+            if (data.success && data.paymentUrl) window.location.href = data.paymentUrl;
+            else setError(data.error || "Ошибка инициализации оплаты");
+        } catch { setError("Ошибка сети. Попробуйте еще раз."); }
+        finally { setLoading(false); }
     };
 
     const handleSearch = async () => {
         if (!searchQuery) return;
-        setSearching(true);
-        setGamepasses([]);
-        setError("");
+        setSearching(true); setGamepasses([]); setError("");
         try {
             const res = await fetch(`/api/roblox/gamepasses?query=${encodeURIComponent(searchQuery)}`);
             const data = await res.json();
             if (data.success) {
                 setGamepasses(data.gamepasses);
-                if (data.gamepasses.length === 0) {
-                    setError("Геймпассы не найдены. Проверьте ссылку или никнейм.");
-                } else if (data.gamepasses.length === 1 && data.gamepasses[0].creatorName) {
-                    // Auto-set username if found via direct link/ID
-                    setUsername(data.gamepasses[0].creatorName);
-                } else if (data.detectedUsername) {
-                    // Search was by username — save it
-                    setUsername(data.detectedUsername);
-                } else if (!searchQuery.includes('/') && !searchQuery.match(/^\d+$/) && data.gamepasses.length > 0) {
-                    // Looks like a username search, use the query as username
-                    setUsername(searchQuery.trim());
-                }
+                if (data.gamepasses.length === 0) setError("Геймпассы не найдены. Проверьте ссылку или никнейм.");
+                else if (data.gamepasses.length === 1 && data.gamepasses[0].creatorName) setUsername(data.gamepasses[0].creatorName);
+                else if (data.detectedUsername) setUsername(data.detectedUsername);
+                else if (!searchQuery.includes("/") && !searchQuery.match(/^\d+$/) && data.gamepasses.length > 0) setUsername(searchQuery.trim());
             }
-        } catch (err) {
-            console.error(err);
-            setError("Ошибка при поиске");
-        } finally {
-            setSearching(false);
-        }
+        } catch { setError("Ошибка при поиске"); }
+        finally { setSearching(false); }
     };
 
     return (
-        <div className="container mx-auto px-4 pt-12 pb-32 max-w-4xl">
-            <div className="max-w-2xl mx-auto">
-                {/* Progress Header */}
-                <div className="flex items-center justify-between mb-12">
-                    <div className="space-y-3">
-                        <h1 className="text-5xl font-black tracking-tighter uppercase tracking-[-0.05em] animate-in fade-in slide-in-from-left-4 duration-700">
-                            {step === "form" ? "Оформление" : "Проверка"}
-                        </h1>
-                        <div className="flex items-center gap-2">
-                            <div className={cn("h-1 w-10 rounded-full transition-all duration-500", step === "form" ? "bg-[#00f2fe] shadow-[0_0_10px_#00f2fe]" : "bg-white/10")} />
-                            <div className={cn("h-1 w-10 rounded-full transition-all duration-500", step === "confirm" ? "bg-[#00f2fe] shadow-[0_0_10px_#00f2fe]" : "bg-white/10")} />
+        <div className="container mx-auto px-4 pt-10 pb-24 max-w-2xl">
+
+            {/* ── Header ── */}
+            <div className="flex items-start justify-between mb-10">
+                <div className="space-y-3">
+                    <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">
+                        {step === "form" ? "STEP 01 / 02" : "STEP 02 / 02"}
+                    </div>
+                    <h1 className="text-4xl font-black uppercase tracking-[-0.03em]">
+                        {step === "form" ? "Оформление" : "Подтверждение"}
+                    </h1>
+                </div>
+                <div className="flex gap-2 mt-2">
+                    <div className={cn("h-1 w-12 transition-all duration-500", step === "form" ? "bg-[#00b06f]" : "bg-[#1e2a45]")} />
+                    <div className={cn("h-1 w-12 transition-all duration-500", step === "confirm" ? "bg-[#00b06f]" : "bg-[#1e2a45]")} />
+                </div>
+            </div>
+
+            {step === "form" ? (
+                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+
+                    {/* Method selector */}
+                    <div className="grid grid-cols-2 gap-3">
+                        <button
+                            onClick={() => setMethod("Gamepass")}
+                            className={cn(
+                                "pixel-card p-5 flex flex-col gap-3 text-left transition-all border-2",
+                                method === "Gamepass" ? "border-[#00b06f] bg-[#00b06f]/5" : "border-[#1e2a45]"
+                            )}
+                        >
+                            <Gamepad2 className={cn("w-6 h-6", method === "Gamepass" ? "text-[#00b06f]" : "text-zinc-600")} />
+                            <span className="text-[10px] font-black uppercase tracking-widest">По геймпассу</span>
+                            {method === "Gamepass" && (
+                                <span className="font-pixel text-[7px] text-[#00b06f]">ВЫБРАНО</span>
+                            )}
+                        </button>
+                        <button className="pixel-card p-5 flex flex-col gap-3 text-left opacity-30 cursor-not-allowed border-2 border-[#1e2a45]">
+                            <User className="w-6 h-6 text-zinc-600" />
+                            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-600">Через группу</span>
+                            <span className="font-pixel text-[7px] text-zinc-600">СКОРО</span>
+                        </button>
+                    </div>
+
+                    {/* Search */}
+                    <div className="space-y-2">
+                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.25em] flex items-center gap-1.5">
+                            <Search className="w-3 h-3" /> Поиск геймпасса
+                        </label>
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                                placeholder="Никнейм или ссылка на пасс..."
+                                className="flex-1 h-14 bg-[#080c18] border-2 border-[#1e2a45] focus:border-[#00b06f]/50 rounded-none px-4 outline-none transition-all font-bold text-sm text-white placeholder:text-zinc-600"
+                            />
+                            <button
+                                onClick={handleSearch}
+                                disabled={searching}
+                                className="h-14 px-6 gold-gradient font-black text-[10px] uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none flex items-center gap-2"
+                            >
+                                {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : "НАЙТИ"}
+                            </button>
                         </div>
                     </div>
-                    <div className="text-right hidden sm:block">
-                        <p className="text-[10px] font-black text-zinc-600 uppercase tracking-widest leading-none">ШАГ {step === "form" ? "01" : "02"}</p>
-                        <p className="text-xs font-black text-white uppercase tracking-widest mt-1 opacity-20">{step === "form" ? "ДАННЫЕ" : "ИТОГО"}</p>
-                    </div>
+
+                    {/* Detected username */}
+                    {username && (
+                        <div className="flex items-center gap-3 p-4 border-l-2 border-[#00b06f] bg-[#00b06f]/5">
+                            <div className="w-8 h-8 bg-[#00b06f]/20 border border-[#00b06f]/30 flex items-center justify-center font-black text-[#00b06f] text-xs rounded-none">
+                                {username[0].toUpperCase()}
+                            </div>
+                            <div>
+                                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Аккаунт</p>
+                                <p className="text-sm font-black uppercase">{username}</p>
+                            </div>
+                            <span className="ml-auto font-pixel text-[7px] text-[#00b06f]">OK</span>
+                        </div>
+                    )}
+
+                    {/* Gamepasses grid */}
+                    {gamepasses.length > 0 && (
+                        <div className="space-y-3">
+                            <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.25em]">
+                                Выберите геймпасс
+                            </label>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-96 overflow-y-auto">
+                                {gamepasses.map((gp) => {
+                                    const netRobux = Math.floor(gp.price * 0.7);
+                                    const netPrice = getPrice(netRobux);
+                                    const selected = gamepassId === gp.id.toString();
+                                    return (
+                                        <button
+                                            key={gp.id}
+                                            onClick={() => {
+                                                setGamepassId(gp.id.toString());
+                                                setSelectedGp(gp);
+                                                setRobux(netRobux);
+                                            }}
+                                            className={cn(
+                                                "pixel-card p-4 text-left flex gap-4 transition-all border-2",
+                                                selected ? "border-[#00b06f] bg-[#00b06f]/5" : "border-[#1e2a45] hover:border-[#1e2a45]/80"
+                                            )}
+                                        >
+                                            <div className="w-12 h-12 bg-black border border-[#1e2a45] overflow-hidden flex-shrink-0 rounded-none">
+                                                <img src={gp.image} alt={gp.name} className="w-full h-full object-cover" />
+                                            </div>
+                                            <div className="flex-1 min-w-0 space-y-1.5">
+                                                <p className="text-xs font-black truncate uppercase">{gp.name}</p>
+                                                <p className="text-xs font-bold text-zinc-400">
+                                                    Цена: <span className="text-[#00b06f]">{gp.price} R$</span>
+                                                </p>
+                                                <div className="inline-flex items-center gap-1 bg-[#00b06f]/10 border border-[#00b06f]/20 px-2 py-0.5">
+                                                    <RobuxIcon className="w-2.5 h-2.5 text-[#00b06f]" />
+                                                    <span className="font-pixel text-[7px] text-[#00b06f]">
+                                                        {netRobux} R$ ≈ {priceLoading ? "..." : `${netPrice}₽`}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            {selected && (
+                                                <div className="w-2 h-2 bg-[#00b06f] self-start mt-1 flex-shrink-0" />
+                                            )}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Error */}
+                    {error && (
+                        <div className="border-l-2 border-red-500 bg-red-500/5 px-4 py-3">
+                            <p className="text-[10px] font-black text-red-400 uppercase tracking-widest">{error}</p>
+                        </div>
+                    )}
+
+                    {/* Next step */}
+                    <button
+                        onClick={() => {
+                            if (!username || !gamepassId) { setError("Укажите ник и выберите геймпасс"); return; }
+                            setStep("confirm");
+                        }}
+                        className="w-full h-14 gold-gradient font-black text-sm uppercase tracking-widest text-white hover:opacity-90 active:scale-[0.98] transition-all rounded-none flex items-center justify-center gap-3"
+                    >
+                        К ПОДТВЕРЖДЕНИЮ <ArrowRight className="w-4 h-4" />
+                    </button>
                 </div>
 
-                {step === "form" ? (
-                    /* ШАГ 1: ВВОД ДАННЫХ */
-                    <div className="space-y-10 animate-in fade-in slide-in-from-bottom-8 duration-700">
-                        <div className="grid grid-cols-2 gap-4">
-                            <button
-                                onClick={() => setMethod("Gamepass")}
-                                className={cn(
-                                    "group p-6 rounded-3xl border transition-all relative overflow-hidden",
-                                    method === "Gamepass" ? "bg-[#00f2fe]/10 border-[#00f2fe]/40 text-[#00f2fe]" : "bg-white/[0.02] border-white/5 text-zinc-600"
-                                )}
-                            >
-                                {method === "Gamepass" && <div className="absolute inset-0 bg-gradient-to-br from-[#00f2fe]/5 to-transparent animate-pulse" />}
-                                <Gamepad2 className={cn("w-8 h-8 mb-4 relative z-10", method === "Gamepass" ? "drop-shadow-[0_0_8px_#00f2fe]" : "")} />
-                                <span className="text-[10px] font-black uppercase tracking-widest block relative z-10">По геймпассу</span>
-                            </button>
-                            <button
-                                className="p-6 rounded-3xl border border-white/5 bg-white/[0.02] text-zinc-600 opacity-40 cursor-not-allowed flex flex-col items-center"
-                            >
-                                <User className="w-8 h-8 mb-4" />
-                                <span className="text-[10px] font-black uppercase tracking-widest block">Через группу (Скоро)</span>
-                            </button>
-                        </div>
+            ) : (
+                /* ── STEP 2: CONFIRM ── */
+                <div className="space-y-5 animate-in fade-in slide-in-from-right-4 duration-300">
 
-                        <div className="space-y-8">
-                            <div className="space-y-4">
-                                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] ml-1">Данные для поиска</label>
-                                <div className="flex gap-3">
-                                    <div className="relative flex-1 group">
-                                        <div className="absolute -inset-1 bg-gradient-to-r from-[#00f2fe]/20 to-[#4facfe]/20 rounded-3xl blur opacity-0 group-focus-within:opacity-100 transition-all duration-500" />
-                                        <div className="relative">
-                                            <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500 group-focus-within:text-[#00f2fe] transition-colors" />
-                                            <input
-                                                type="text"
-                                                value={searchQuery}
-                                                onChange={(e) => setSearchQuery(e.target.value)}
-                                                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                                                placeholder="Никнейм или ссылка на пас..."
-                                                className="w-full h-16 bg-[#05070a]/90 backdrop-blur-xl border border-white/5 rounded-2xl pl-16 pr-6 outline-none focus:border-[#00f2fe]/40 transition-all font-bold text-lg"
-                                            />
-                                        </div>
-                                    </div>
-                                    <button
-                                        onClick={handleSearch}
-                                        disabled={searching}
-                                        className="h-16 px-8 gold-gradient text-black font-black text-xs uppercase rounded-2xl hover:scale-[1.05] active:scale-95 transition-all flex items-center justify-center gap-3"
-                                    >
-                                        {searching ? <Loader2 className="w-5 h-5 animate-spin" /> : "НАЙТИ"}
-                                    </button>
+                    {/* Gamepass info */}
+                    <div className="pixel-card border-2 border-[#1e2a45] p-6 space-y-5">
+                        <div className="flex gap-5 items-center">
+                            <div className="w-16 h-16 border-2 border-[#1e2a45] overflow-hidden flex-shrink-0">
+                                <img src={selectedGp?.image} className="w-full h-full object-cover" />
+                            </div>
+                            <div className="space-y-2">
+                                <h3 className="font-black uppercase tracking-tight">{selectedGp?.name}</h3>
+                                <div className="flex flex-wrap gap-2">
+                                    <span className="font-pixel text-[7px] text-[#00b06f] border border-[#00b06f]/30 bg-[#00b06f]/10 px-2 py-1">
+                                        ID: {gamepassId}
+                                    </span>
+                                    <span className="font-pixel text-[7px] text-zinc-500 border border-[#1e2a45] px-2 py-1">
+                                        {username}
+                                    </span>
                                 </div>
                             </div>
-
-                            {username && (
-                                <div className="flex items-center gap-4 p-4 rounded-2xl bg-white/[0.02] border border-white/5 animate-in slide-in-from-left-4">
-                                    <div className="w-10 h-10 rounded-full bg-[#00f2fe]/10 flex items-center justify-center text-[#00f2fe] font-black text-xs">{username[0].toUpperCase()}</div>
-                                    <div>
-                                        <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest leading-none mb-1">Распознан аккаунт</p>
-                                        <p className="text-sm font-black uppercase text-white">{username}</p>
-                                    </div>
-                                </div>
-                            )}
-
-                            {gamepasses.length > 0 && (
-                                <div className="space-y-6 pt-4">
-                                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">📦 Выберите геймпасс</label>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[420px] overflow-y-auto pr-2 custom-scrollbar">
-                                        {gamepasses.map((gp) => (
-                                            <button
-                                                key={gp.id}
-                                                onClick={() => {
-                                                    setGamepassId(gp.id.toString());
-                                                    setSelectedGp(gp);
-                                                    const amount = Math.floor(gp.price * 0.7);
-                                                    setRobux(amount);
-                                                }}
-                                                className={cn(
-                                                    "p-5 rounded-3xl border text-left flex items-center gap-5 transition-all group/item relative overflow-hidden",
-                                                    gamepassId === gp.id.toString() ? "bg-[#00f2fe]/10 border-[#00f2fe] ring-1 ring-[#00f2fe]/20" : "bg-white/[0.02] border-white/5 hover:border-white/10"
-                                                )}
-                                            >
-                                                <div className="w-14 h-14 rounded-2xl bg-black/60 overflow-hidden flex-shrink-0 border border-white/5">
-                                                    <img src={gp.image} alt={gp.name} className="w-full h-full object-cover" />
-                                                </div>
-                                                <div className="flex-1 min-w-0 space-y-2">
-                                                    <p className="text-sm font-black truncate uppercase tracking-tight">{gp.name}</p>
-                                                    <p className="text-sm font-black text-white">Цена: <span className="text-[#00f2fe]">{gp.price} R$</span></p>
-                                                    <p className="text-xs font-black text-emerald-400 bg-emerald-400/10 px-2.5 py-1 rounded-lg inline-block border border-emerald-400/20">→ Вы получите: {Math.floor(gp.price * 0.7)} R$</p>
-                                                </div>
-                                                {gamepassId === gp.id.toString() && (
-                                                    <div className="absolute top-4 right-4 w-2 h-2 bg-[#00f2fe] rounded-full shadow-[0_0_10px_#00f2fe]" />
-                                                )}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
                         </div>
 
-                        <div className="pt-4">
-                            {error && <p className="text-red-500 text-[10px] font-black mb-4 uppercase tracking-widest text-center animate-pulse">{error}</p>}
-                            <button
-                                onClick={() => {
-                                    if (!username || !gamepassId) {
-                                        setError("Укажите ник и выберите геймпасс");
-                                        return;
-                                    }
-                                    setStep("confirm");
-                                }}
-                                className="w-full h-20 gold-gradient text-black font-black text-sm uppercase tracking-[0.2em] rounded-3xl hover:scale-[1.02] active:scale-[0.98] transition-all shadow-2xl shadow-[#00f2fe]/10 flex items-center justify-center gap-3"
-                            >
-                                ПЕРЕЙТИ К ПРОВЕРКЕ <ArrowRight className="w-5 h-5" />
-                            </button>
+                        {/* Amount / price */}
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="bg-[#080c18] border border-[#1e2a45] p-5 space-y-2">
+                                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Вы получите</p>
+                                <div className="flex items-center gap-2">
+                                    <RobuxIcon className="w-5 h-5 text-[#00b06f]" />
+                                    <span className="text-3xl font-black">{robux.toLocaleString()}</span>
+                                </div>
+                                <p className="font-pixel text-[7px] text-zinc-600">чистых R$</p>
+                            </div>
+                            <div className="bg-[#080c18] border border-[#1e2a45] p-5 space-y-2">
+                                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">К оплате</p>
+                                <span className="text-3xl font-black text-[#00b06f]">
+                                    {priceLoading ? "..." : `${price.toLocaleString()}₽`}
+                                </span>
+                                <p className="font-pixel text-[7px] text-zinc-600">{rubPerRobux} ₽/R$</p>
+                            </div>
                         </div>
                     </div>
-                ) : (
-                    /* ШАГ 2: ПОДТВЕРЖДЕНИЕ */
-                    <div className="animate-in fade-in slide-in-from-right-8 duration-700 space-y-10">
-                        <div className="glass p-5 sm:p-10 rounded-[2rem] sm:rounded-[3rem] border border-white/5 space-y-6 sm:space-y-10 relative overflow-hidden backdrop-blur-2xl">
-                            <div className="absolute top-0 right-0 w-64 h-64 bg-[#00f2fe]/5 blur-[100px] rounded-full -translate-y-1/2 translate-x-1/2" />
 
-                            <div className="flex flex-col sm:flex-row items-center gap-5 sm:gap-8 relative z-10">
-                                <div className="w-20 h-20 sm:w-32 sm:h-32 rounded-2xl sm:rounded-[2rem] bg-black border border-white/10 overflow-hidden shadow-2xl">
-                                    <img src={selectedGp?.image} className="w-full h-full object-cover" />
-                                </div>
-                                <div className="text-center sm:text-left space-y-3">
-                                    <h3 className="text-xl sm:text-3xl font-black uppercase tracking-tight leading-none">{selectedGp?.name}</h3>
-                                    <div className="flex flex-wrap justify-center sm:justify-start items-center gap-3">
-                                        <span className="text-[10px] font-black text-[#00f2fe] uppercase tracking-widest bg-[#00f2fe]/10 px-3 py-1 rounded-full border border-[#00f2fe]/30">ID: {gamepassId}</span>
-                                        <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">АККАУНТ: {username}</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3 sm:gap-6">
-                                <div className="bg-white/[0.03] p-4 sm:p-8 rounded-2xl sm:rounded-[2rem] border border-white/5 space-y-2">
-                                    <span className="text-[9px] sm:text-[10px] font-black text-zinc-600 uppercase tracking-widest block">Вы получите</span>
-                                    <div className="flex items-center gap-2">
-                                        <Diamond className="w-4 h-4 sm:w-6 sm:h-6 text-[#00f2fe]" />
-                                        <span className="text-2xl sm:text-4xl font-black text-white">{robux.toLocaleString()}</span>
-                                    </div>
-                                </div>
-                                <div className="bg-white/[0.03] p-4 sm:p-8 rounded-2xl sm:rounded-[2rem] border border-white/5 space-y-2">
-                                    <span className="text-[9px] sm:text-[10px] font-black text-zinc-600 uppercase tracking-widest block">К оплате</span>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-2xl sm:text-4xl font-black text-[#00f2fe]">{price.toLocaleString()} ₽</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="p-4 sm:p-8 rounded-2xl sm:rounded-3xl bg-[#00f2fe]/5 border border-[#00f2fe]/20 space-y-3 sm:space-y-4">
-                                <h4 className="text-[10px] font-black text-[#00f2fe] uppercase tracking-widest flex items-center gap-3">
-                                    <Info className="w-5 h-5" /> ИНФОРМАЦИЯ ПО ВЫКУПУ
-                                </h4>
-                                <div className="space-y-4 text-[11px] text-zinc-400 font-bold uppercase tracking-tight leading-relaxed">
-                                    <div className="flex gap-4">
-                                        <span className="w-6 h-6 rounded-full bg-[#00f2fe]/10 text-[#00f2fe] flex items-center justify-center shrink-0">1</span>
-                                        <p>Заказ переходит в очередь выкупа <span className="text-white">СРАЗУ ПОСЛЕ ОПЛАТЫ</span>. Не нужно писать в поддержку.</p>
-                                    </div>
-                                    <div className="flex gap-4">
-                                        <span className="w-6 h-6 rounded-full bg-[#00f2fe]/10 text-[#00f2fe] flex items-center justify-center shrink-0">2</span>
-                                        <p><span className="text-white font-black underline decoration-[#00f2fe]">НЕ УДАЛЯЙТЕ</span> геймпасс и не меняйте его цену до завершения заказа (обычно 24ч).</p>
-                                    </div>
-                                    <div className="flex gap-4">
-                                        <span className="w-6 h-6 rounded-full bg-[#00f2fe]/10 text-[#00f2fe] flex items-center justify-center shrink-0">3</span>
-                                        <p>Roblox начисляет валюту через <span className="text-white">5-7 ДНЕЙ</span> после покупки геймпасса нашим ботом.</p>
-                                    </div>
-                                </div>
-                            </div>
+                    {/* Instructions */}
+                    <div className="border-2 border-[#00b06f]/20 bg-[#00b06f]/3 p-5 space-y-4">
+                        <div className="flex items-center gap-2">
+                            <Info className="w-4 h-4 text-[#00b06f]" />
+                            <span className="font-pixel text-[8px] text-[#00b06f] tracking-wider">ВАЖНО</span>
                         </div>
-
-                        <div className="flex flex-col sm:flex-row gap-4">
-                            <button
-                                onClick={() => setStep("form")}
-                                className="flex-1 h-16 bg-white/[0.03] border border-white/5 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-white/10 transition-all flex items-center justify-center gap-2"
-                            >
-                                ОТМЕНА
-                            </button>
-                            <button
-                                onClick={handlePay}
-                                disabled={loading}
-                                className="flex-[2] h-16 gold-gradient text-black font-black text-xs uppercase tracking-[0.2em] rounded-2xl hover:scale-[1.02] shadow-2xl shadow-[#00f2fe]/10 flex items-center justify-center gap-3"
-                            >
-                                {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <>ПОДТВЕРДИТЬ И ОПЛАТИТЬ <ArrowRight className="w-4 h-4" /></>}
-                            </button>
+                        <div className="space-y-3">
+                            {[
+                                "Заказ уходит в обработку сразу после оплаты. Писать в поддержку не нужно.",
+                                "Не удаляй геймпасс и не меняй цену до завершения заказа (обычно 24ч).",
+                                "Roblox зачисляет R$ через 5–7 дней после покупки.",
+                            ].map((text, i) => (
+                                <div key={i} className="flex gap-3 items-start">
+                                    <span className="font-pixel text-[8px] text-[#00b06f]/60 mt-0.5 flex-shrink-0">0{i + 1}</span>
+                                    <p className="text-xs text-zinc-400 font-medium leading-relaxed">{text}</p>
+                                </div>
+                            ))}
                         </div>
                     </div>
-                )}
-            </div>
+
+                    {/* Error */}
+                    {error && (
+                        <div className="border-l-2 border-red-500 bg-red-500/5 px-4 py-3">
+                            <p className="text-[10px] font-black text-red-400 uppercase tracking-widest">{error}</p>
+                        </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className="flex gap-3">
+                        <button
+                            onClick={() => setStep("form")}
+                            className="flex-1 h-14 border-2 border-[#1e2a45] hover:border-[#1e2a45]/60 font-black text-[10px] uppercase tracking-widest transition-all rounded-none"
+                        >
+                            НАЗАД
+                        </button>
+                        <button
+                            onClick={handlePay}
+                            disabled={loading}
+                            className="flex-[2] h-14 gold-gradient font-black text-xs uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none flex items-center justify-center gap-3"
+                        >
+                            {loading
+                                ? <Loader2 className="w-5 h-5 animate-spin" />
+                                : <> ОПЛАТИТЬ <ArrowRight className="w-4 h-4" /> </>
+                            }
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -318,7 +328,11 @@ export default function CheckoutPage() {
     return (
         <main className="min-h-screen">
             <Navbar />
-            <Suspense fallback={<div className="h-screen flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-[#00f2fe]" /></div>}>
+            <Suspense fallback={
+                <div className="h-screen flex items-center justify-center">
+                    <Loader2 className="w-8 h-8 animate-spin text-[#00b06f]" />
+                </div>
+            }>
                 <CheckoutContent />
             </Suspense>
         </main>

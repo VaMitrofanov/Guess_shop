@@ -1,9 +1,6 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
+// schema.prisma
 generator client {
-  provider   = "prisma-client-js"
-  engineType = "library"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -13,7 +10,7 @@ datasource db {
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
-  password  String   // Hashed
+  password  String
   name      String?
   role      String   @default("USER")
   orders    Order[]
@@ -26,7 +23,7 @@ model Product {
   name        String
   robuxAmount Int
   rubPrice    Float
-  type        String   // Gamepass, Group Funds, etc.
+  type        String
   isActive    Boolean  @default(true)
   orders      Order[]
   createdAt   DateTime @default(now())
@@ -41,24 +38,25 @@ enum OrderStatus {
 }
 
 model Order {
-  id                  String      @id @default(cuid())
-  userId              String?
-  user                User?       @relation(fields: [userId], references: [id])
-  customerRobloxUser  String
-  productId           String
-  product             Product     @relation(fields: [productId], references: [id])
-  amountRUB           Float
-  amountRobux         Int
-  tinkoffPaymentID    String?     @unique
-  paymentUrl          String?
-  status              OrderStatus @default(PENDING)
-  botStatus           String?     // e.g., "PROCESSING", "ERROR", "SUCCESS"
-  externalId          String?     // ID from the bot or supplier
-  gamepassId          String?
-  method              String      // e.g., "Gamepass"
-  createdAt           DateTime    @default(now())
-  updatedAt           DateTime    @updatedAt
+  id                 String      @id @default(cuid())
+  userId             String?
+  user               User?       @relation(fields: [userId], references: [id])
+  customerRobloxUser String
+  productId          String
+  product            Product     @relation(fields: [productId], references: [id])
+  amountRUB          Float
+  amountRobux        Int
+  tinkoffPaymentID   String?     @unique
+  paymentUrl         String?
+  status             OrderStatus @default(PENDING)
+  botStatus          String?
+  externalId         String?
+  gamepassId         String?
+  method             String
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
 }
+
 model FAQ {
   id        String   @id @default(cuid())
   question  String
@@ -69,12 +67,39 @@ model FAQ {
 }
 
 model Review {
-  id        String   @id @default(cuid())
-  author    String
-  content   String
-  rating    Int      @default(5)
-  date      String   // Can be human readable or real date
+  id         String   @id @default(cuid())
+  author     String
+  content    String
+  rating     Int      @default(5)
+  date       String
   isVerified Boolean  @default(true)
-  createdAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// --- NEW MODELS ---
+
+/// Stores the latest scraped data from each supplier marketplace.
+model MarketRate {
+  id        String   @id @default(cuid())
+  /// Unique identifier for the provider, e.g. "rbx120h" or "bossrobux"
+  provider  String   @unique
+  /// Rate in USD per 1000 Robux (or per transaction unit as seen on site)
+  rateUSD   Float
+  /// Total Robux available on the platform
+  inventory Int
+  /// Maximum Robux purchasable in one transaction
+  maxLimit  Int
   updatedAt DateTime @updatedAt
+
+  @@index([provider])
+}
+
+/// Global system settings — single-row config table.
+/// Always upsert with id = "global".
+model GlobalSettings {
+  id          String   @id @default("global")
+  /// Current USD → RUB exchange rate fetched from external API
+  usdToRub    Float
+  lastUpdated DateTime @updatedAt
 }

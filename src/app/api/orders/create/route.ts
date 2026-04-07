@@ -1,22 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-
-export const dynamic = "force-dynamic";
 import { initTinkoffPayment } from "@/lib/tinkoff";
 import { getRobloxUser } from "@/lib/roblox";
+import { getStorefrontPricing } from "@/lib/pricing";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+
+export const dynamic = "force-dynamic";
 
 const CreateOrderSchema = z.object({
   username: z.string().min(1),
   amountRobux: z.number().int().min(100),
   productId: z.string().optional(),
   method: z.string().default("Gamepass"),
-  gamepassId: z.string().optional(), // If method is gamepass
+  gamepassId: z.string().optional(),
 });
-
-const DEFAULT_RATE = 0.85; // 1 Robux = 0.85 RUB
 
 export async function POST(req: NextRequest) {
   try {
@@ -25,7 +24,10 @@ export async function POST(req: NextRequest) {
     const validated = CreateOrderSchema.safeParse(body);
 
     if (!validated.success) {
-      return NextResponse.json({ error: "Сумма должна быть не менее 100 Robux", details: validated.error.issues }, { status: 400 });
+      return NextResponse.json(
+        { error: "Сумма должна быть не менее 100 Robux", details: validated.error.issues },
+        { status: 400 }
+      );
     }
 
     const { username, amountRobux, productId, method, gamepassId } = validated.data;
@@ -36,18 +38,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Roblox user not found" }, { status: 404 });
     }
 
-    // 2. Fetch product or calculate price
+    // 2. Calculate price dynamically
     let amountRUB = 0;
-    let finalProductId = productId || null;
+    const finalProductId = productId || null;
 
     if (productId) {
+      // Fixed-price product from catalog
       const product = await prisma.product.findUnique({ where: { id: productId } });
       if (!product || !product.isActive) {
         return NextResponse.json({ error: "Product not found or inactive" }, { status: 404 });
       }
       amountRUB = product.rubPrice;
     } else {
-      amountRUB = Math.round(amountRobux * DEFAULT_RATE);
+      // Dynamic pricing from market rates (includes Roblox 30% tax + margins)
+      const pricing = await getStorefrontPricing();
+      amountRUB = Math.round(amountRobux * pricing.finalRubPerRobux);
     }
 
     // 3. Create the order in DB
@@ -60,7 +65,7 @@ export async function POST(req: NextRequest) {
         status: "PENDING",
         method,
         gamepassId,
-        productId: finalProductId || "default-calc", 
+        productId: finalProductId || "default-calc",
       },
     });
 
@@ -69,7 +74,10 @@ export async function POST(req: NextRequest) {
 
     if (!payment.Success) {
       await prisma.order.update({ where: { id: order.id }, data: { status: "FAILED" } });
-      return NextResponse.json({ error: "Payment initialization failed", details: payment.Message }, { status: 500 });
+      return NextResponse.json(
+        { error: "Payment initialization failed", details: payment.Message },
+        { status: 500 }
+      );
     }
 
     // 5. Save payment details and return URL

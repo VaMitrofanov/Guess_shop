@@ -1,47 +1,67 @@
-import Navbar from '@/components/navbar';
-import { prisma } from '@/lib/prisma';
-import ReviewsClient from '@/components/reviews-client';
-import { Star } from 'lucide-react';
+import Navbar from "@/components/navbar";
+import { prisma } from "@/lib/prisma";
+import ReviewsClient from "@/components/reviews-client";
+import Link from "next/link";
+
+function StarRow({ count = 5 }: { count?: number }) {
+  return (
+    <div className="flex gap-1">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <svg key={i} className={`w-4 h-4 ${i < count ? "text-[#00b06f]" : "text-zinc-700"}`} viewBox="0 0 24 24" fill="currentColor">
+          <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
+        </svg>
+      ))}
+    </div>
+  );
+}
 
 export default async function ReviewsPage() {
-  const reviews = await prisma.review.findMany({
-    orderBy: { createdAt: 'desc' },
-  });
+  const reviews = await prisma.review.findMany({ orderBy: { createdAt: "desc" } });
 
   return (
-    <main className="min-h-screen bg-[#05070a] text-white selection:bg-[#00f2fe] selection:text-black">
+    <main className="min-h-screen">
       <Navbar />
 
-      <section className="pt-32 pb-48 px-4">
-        <div className="container mx-auto">
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-12 mb-24">
-            <div className="space-y-6 max-w-2xl">
-              <span className="text-[#00f2fe] font-black tracking-widest text-sm uppercase">Наши достижения</span>
-              <h1 className="text-5xl md:text-8xl font-black uppercase tracking-tighter leading-none italic">
-                  ЧТО О НАС <br/> <span className="gold-text">ГОВОРЯТ</span>
-              </h1>
-              <p className="text-zinc-500 text-lg font-medium">Более 10,000 довольных клиентов уже оставили свои отзывы в наших социальных сетях.</p>
-            </div>
+      <section className="container mx-auto px-4 pt-16 pb-24 max-w-5xl">
 
-            <div className="p-8 bg-[#0d1117] border border-white/5 rounded-2xl flex flex-col gap-4 text-center min-w-[280px]">
-                <div className="flex justify-center gap-1">
-                    {[1,2,3,4,5].map(i => <Star key={i} className="w-5 h-5 fill-[#00f2fe] text-[#00f2fe]" />)}
-                </div>
-                <div className="text-4xl font-black text-[#00f2fe]">4.9 / 5</div>
-                <div className="text-xs font-bold uppercase tracking-widest text-zinc-500">Средний рейтинг</div>
-            </div>
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-10 mb-14">
+          <div className="space-y-4">
+            <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">REVIEWS</div>
+            <h1 className="text-4xl md:text-6xl font-black uppercase tracking-[-0.03em] leading-none">
+              Что говорят<br />
+              <span className="gold-text">покупатели</span>
+            </h1>
+            <p className="text-zinc-400 font-medium max-w-md">
+              Более 5 000 выполненных заказов. Реальные отзывы реальных покупателей.
+            </p>
           </div>
 
-          <ReviewsClient initialReviews={JSON.parse(JSON.stringify(reviews))} />
-
-          {/* Call to action */}
-          <div className="mt-32 flex flex-col items-center gap-8 text-center">
-              <h2 className="text-3xl font-black uppercase italic">Хочешь оставить свой отзыв?</h2>
-              <button className="h-16 px-12 gold-gradient text-black font-black uppercase tracking-widest hover:scale-[1.02] active:scale-[0.98] transition-all rounded-2xl flex items-center gap-4">
-                  НАПИСАТЬ ОТЗЫВ
-              </button>
-              <p className="text-zinc-600 text-xs font-bold uppercase tracking-widest">Отзывы проходят модерацию перед публикацией</p>
+          {/* Rating card */}
+          <div className="pixel-card border-2 border-[#1e2a45] p-6 space-y-3 min-w-[200px]">
+            <StarRow count={5} />
+            <div className="font-pixel text-2xl text-[#00b06f]">4.9</div>
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Средний рейтинг</p>
+            <div className="accent-line" />
+            <p className="font-pixel text-[8px] text-zinc-600">{reviews.length}+ отзывов</p>
           </div>
+        </div>
+
+        <div className="accent-line mb-10" />
+
+        {/* Reviews grid */}
+        <ReviewsClient initialReviews={JSON.parse(JSON.stringify(reviews))} />
+
+        {/* CTA */}
+        <div className="mt-16 pixel-card border-2 border-[#1e2a45] p-8 flex flex-col sm:flex-row items-center justify-between gap-6">
+          <div className="space-y-2">
+            <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">YOUR TURN</div>
+            <h2 className="text-xl font-black uppercase">Оставь свой отзыв</h2>
+            <p className="text-zinc-500 text-sm font-medium">Отзывы проходят модерацию перед публикацией</p>
+          </div>
+          <button className="h-12 px-8 gold-gradient font-black text-[10px] uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none flex-shrink-0">
+            Написать отзыв →
+          </button>
         </div>
       </section>
     </main>
