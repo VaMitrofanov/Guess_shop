@@ -2,7 +2,8 @@ import Navbar from "@/components/navbar";
 import { Metadata } from "next";
 import {
   AlertTriangle, CheckCircle2, ExternalLink, ArrowRight, ChevronRight,
-  Globe, Gamepad2, Ticket, Tag, Copy, ShoppingCart,
+  Globe, Gamepad2, Ticket, Tag, Search, ShoppingCart,
+  User, Link2, Hash,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -50,21 +51,38 @@ const STEPS = [
   },
   {
     num: "05",
-    icon: Copy,
-    title: "Скопируй ID пасса",
-    desc: "Открой страницу пасса — в URL найди числовой ID.",
-    detail: "URL: roblox.com/game-pass/123456789/название — нужны только цифры. ID также виден в Creator Hub → Basic Settings.",
-    tip: "ID пасса можно найти в Creator Hub в разделе Basic Settings.",
+    icon: Search,
+    title: "Найди свой геймпасс",
+    desc: "Зайди на robloxbank.ru → нажми «Купить» → найди пасс одним из 3 способов.",
+    detail: "Выбери любой удобный вариант — все они работают одинаково.",
+    tip: "Самый быстрый способ — вставить ссылку прямо из адресной строки браузера.",
     warn: null,
+    methods: [
+      {
+        icon: User,
+        label: "По никнейму",
+        desc: "Введи свой Roblox-никнейм — система найдёт все твои пассы автоматически.",
+      },
+      {
+        icon: Link2,
+        label: "По ссылке",
+        desc: "Вставь URL страницы пасса: roblox.com/game-pass/123456789/название",
+      },
+      {
+        icon: Hash,
+        label: "По ID пасса",
+        desc: "Введи числовой ID из URL. Он виден в Creator Hub → Basic Settings.",
+      },
+    ],
   },
   {
     num: "06",
     icon: ShoppingCart,
     title: "Оформи заказ",
-    desc: "Вернись на robloxbank.ru → введи никнейм → найди пасс → оплати.",
-    detail: "После оплаты система автоматически купит твой геймпасс в течение 24ч. Robux появятся на балансе через 5–7 дней по правилам Roblox.",
+    desc: "Выбери пасс из списка → нажми «Оформить» → оплати через Tinkoff.",
+    detail: "После оплаты система автоматически купит твой геймпасс в течение 24ч. Robux поступят на баланс через 5–7 дней — стандартное время зачисления по правилам Roblox.",
     tip: null,
-    warn: null,
+    warn: "Не удаляй геймпасс и не меняй цену до получения уведомления о завершении заказа.",
   },
 ];
 
@@ -210,10 +228,11 @@ export default function GuidePage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {STEPS.map((step) => {
             const StepIcon = step.icon;
+            const hasMethods = "methods" in step && Array.isArray(step.methods);
             return (
               <div
                 key={step.num}
-                className="pixel-card border-2 border-[#1e2a45] hover:border-[#00b06f]/30 transition-colors group p-6 flex gap-5"
+                className={`pixel-card border-2 border-[#1e2a45] hover:border-[#00b06f]/30 transition-colors group p-6 flex gap-5 ${hasMethods ? "md:col-span-2" : ""}`}
               >
                 {/* Step number + icon */}
                 <div className="flex-shrink-0 flex flex-col items-center gap-2">
@@ -223,10 +242,30 @@ export default function GuidePage() {
                   <span className="font-pixel text-[8px] text-[#00b06f]/40">{step.num}</span>
                 </div>
 
-                <div className="space-y-2 flex-1 min-w-0">
+                <div className="space-y-3 flex-1 min-w-0">
                   <h2 className="text-xl font-black uppercase tracking-tight">{step.title}</h2>
                   <p className="text-base text-white/90 font-semibold leading-relaxed">{step.desc}</p>
                   <p className="text-sm text-zinc-400 font-medium leading-relaxed">{step.detail}</p>
+
+                  {/* 3 ways to search — rendered as a mini-grid */}
+                  {hasMethods && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+                      {(step as any).methods.map((m: any) => {
+                        const MethodIcon = m.icon;
+                        return (
+                          <div key={m.label} className="bg-[#080c18] border border-[#1e2a45] p-4 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <div className="w-7 h-7 border border-[#00b06f]/30 bg-[#00b06f]/10 flex items-center justify-center flex-shrink-0">
+                                <MethodIcon className="w-3.5 h-3.5 text-[#00b06f]" />
+                              </div>
+                              <span className="font-black text-[11px] uppercase tracking-widest text-white">{m.label}</span>
+                            </div>
+                            <p className="text-sm text-zinc-400 font-medium leading-relaxed">{m.desc}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
 
                   {step.tip && (
                     <div className="flex gap-2 items-start bg-[#00b06f]/5 border border-[#00b06f]/15 px-3 py-2 mt-2">
@@ -254,7 +293,7 @@ export default function GuidePage() {
           <div className="text-center sm:text-left space-y-1">
             <p className="font-pixel text-[10px] text-[#00b06f]">ГОТОВО!</p>
             <p className="font-black uppercase tracking-tight text-lg">Геймпасс создан — оформляй заказ</p>
-            <p className="text-sm text-zinc-400 font-medium">Введи никнейм, найди свой пасс в поиске и оплати</p>
+            <p className="text-sm text-zinc-400 font-medium">Найди пасс по нику, ссылке или ID — и оплати</p>
           </div>
           <Link
             href="/checkout"

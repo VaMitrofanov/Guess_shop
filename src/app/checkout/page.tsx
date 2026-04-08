@@ -3,7 +3,7 @@
 import { useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Navbar from "@/components/navbar";
-import { User, Gamepad2, Info, ArrowRight, Loader2, Search } from "lucide-react";
+import { User, Gamepad2, Info, ArrowRight, Loader2, Search, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePricing } from "@/hooks/usePricing";
 
@@ -85,7 +85,7 @@ function CheckoutContent() {
             {/* ── Header ── */}
             <div className="flex items-start justify-between mb-10">
                 <div className="space-y-3">
-                    <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">
+                    <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">
                         {step === "form" ? "STEP 01 / 02" : "STEP 02 / 02"}
                     </div>
                     <h1 className="text-4xl font-black uppercase tracking-[-0.03em]">
@@ -111,22 +111,22 @@ function CheckoutContent() {
                             )}
                         >
                             <Gamepad2 className={cn("w-6 h-6", method === "Gamepass" ? "text-[#00b06f]" : "text-zinc-600")} />
-                            <span className="text-[10px] font-black uppercase tracking-widest">По геймпассу</span>
+                            <span className="text-xs font-black uppercase tracking-widest">По геймпассу</span>
                             {method === "Gamepass" && (
-                                <span className="font-pixel text-[7px] text-[#00b06f]">ВЫБРАНО</span>
+                                <span className="font-pixel text-[9px] text-[#00b06f]">ВЫБРАНО</span>
                             )}
                         </button>
                         <button className="pixel-card p-5 flex flex-col gap-3 text-left opacity-30 cursor-not-allowed border-2 border-[#1e2a45]">
                             <User className="w-6 h-6 text-zinc-600" />
-                            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-600">Через группу</span>
-                            <span className="font-pixel text-[7px] text-zinc-600">СКОРО</span>
+                            <span className="text-xs font-black uppercase tracking-widest text-zinc-600">Через группу</span>
+                            <span className="font-pixel text-[9px] text-zinc-600">СКОРО</span>
                         </button>
                     </div>
 
                     {/* Search */}
                     <div className="space-y-2">
-                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.25em] flex items-center gap-1.5">
-                            <Search className="w-3 h-3" /> Поиск геймпасса
+                        <label className="text-xs font-black text-zinc-400 uppercase tracking-[0.2em] flex items-center gap-1.5">
+                            <Search className="w-3.5 h-3.5" /> Поиск геймпасса
                         </label>
                         <div className="flex gap-2">
                             <input
@@ -154,7 +154,7 @@ function CheckoutContent() {
                                 {username[0].toUpperCase()}
                             </div>
                             <div>
-                                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Аккаунт</p>
+                                <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Аккаунт</p>
                                 <p className="text-sm font-black uppercase">{username}</p>
                             </div>
                             <span className="ml-auto font-pixel text-[7px] text-[#00b06f]">OK</span>
@@ -164,9 +164,16 @@ function CheckoutContent() {
                     {/* Gamepasses grid */}
                     {gamepasses.length > 0 && (
                         <div className="space-y-3">
-                            <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.25em]">
-                                Выберите геймпасс
-                            </label>
+                            <div className="flex items-center justify-between">
+                                <label className="text-xs font-black text-zinc-400 uppercase tracking-[0.2em]">
+                                    Выберите геймпасс
+                                </label>
+                                {selectedGp && (
+                                    <span className="font-pixel text-[9px] text-[#00b06f]">
+                                        {gamepasses.length} шт.
+                                    </span>
+                                )}
+                            </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-96 overflow-y-auto">
                                 {gamepasses.map((gp) => {
                                     const netRobux = Math.floor(gp.price * 0.7);
@@ -181,39 +188,74 @@ function CheckoutContent() {
                                                 setRobux(netRobux);
                                             }}
                                             className={cn(
-                                                "pixel-card p-4 text-left flex gap-4 transition-all border-2",
-                                                selected ? "border-[#00b06f] bg-[#00b06f]/5" : "border-[#1e2a45] hover:border-[#1e2a45]/80"
+                                                "pixel-card p-4 text-left flex gap-4 transition-all relative",
+                                                selected
+                                                    ? "border-2 border-[#00b06f] bg-[#00b06f]/8 shadow-[0_0_0_1px_#00b06f33]"
+                                                    : "border-2 border-[#1e2a45] hover:border-[#00b06f]/30 hover:bg-[#00b06f]/3"
                                             )}
                                         >
-                                            <div className="w-12 h-12 bg-black border border-[#1e2a45] overflow-hidden flex-shrink-0 rounded-none">
+                                            {/* Selected checkmark badge */}
+                                            {selected && (
+                                                <div className="absolute top-0 right-0 bg-[#00b06f] px-2 py-1 flex items-center gap-1">
+                                                    <CheckCircle2 className="w-3 h-3 text-white" />
+                                                    <span className="font-pixel text-[8px] text-white leading-none">ВЫБРАН</span>
+                                                </div>
+                                            )}
+
+                                            <div className={cn(
+                                                "w-12 h-12 overflow-hidden flex-shrink-0 rounded-none border",
+                                                selected ? "border-[#00b06f]/40" : "border-[#1e2a45]"
+                                            )}>
                                                 <img src={gp.image} alt={gp.name} className="w-full h-full object-cover" />
                                             </div>
-                                            <div className="flex-1 min-w-0 space-y-1.5">
-                                                <p className="text-xs font-black truncate uppercase">{gp.name}</p>
-                                                <p className="text-xs font-bold text-zinc-400">
+                                            <div className="flex-1 min-w-0 space-y-1.5 pr-1">
+                                                <p className={cn(
+                                                    "text-sm font-black truncate uppercase",
+                                                    selected ? "text-white" : "text-zinc-200"
+                                                )}>{gp.name}</p>
+                                                <p className="text-sm font-bold text-zinc-400">
                                                     Цена: <span className="text-[#00b06f]">{gp.price} R$</span>
                                                 </p>
-                                                <div className="inline-flex items-center gap-1 bg-[#00b06f]/10 border border-[#00b06f]/20 px-2 py-0.5">
-                                                    <RobuxIcon className="w-2.5 h-2.5 text-[#00b06f]" />
-                                                    <span className="font-pixel text-[7px] text-[#00b06f]">
+                                                <div className={cn(
+                                                    "inline-flex items-center gap-1 px-2 py-0.5 border",
+                                                    selected
+                                                        ? "bg-[#00b06f]/20 border-[#00b06f]/40"
+                                                        : "bg-[#00b06f]/10 border-[#00b06f]/20"
+                                                )}>
+                                                    <RobuxIcon className="w-3 h-3 text-[#00b06f]" />
+                                                    <span className="font-pixel text-[9px] text-[#00b06f]">
                                                         {netRobux} R$ ≈ {priceLoading ? "..." : `${netPrice}₽`}
                                                     </span>
                                                 </div>
                                             </div>
-                                            {selected && (
-                                                <div className="w-2 h-2 bg-[#00b06f] self-start mt-1 flex-shrink-0" />
-                                            )}
                                         </button>
                                     );
                                 })}
                             </div>
+
+                            {/* Selected summary */}
+                            {selectedGp && (
+                                <div className="flex items-center gap-4 p-4 border-2 border-[#00b06f] bg-[#00b06f]/5 mt-1">
+                                    <CheckCircle2 className="w-5 h-5 text-[#00b06f] flex-shrink-0" />
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-black text-[#00b06f] uppercase tracking-widest mb-0.5">Выбран пасс</p>
+                                        <p className="text-sm font-black uppercase truncate">{selectedGp.name}</p>
+                                    </div>
+                                    <div className="text-right flex-shrink-0">
+                                        <p className="font-pixel text-[9px] text-zinc-500">получишь</p>
+                                        <p className="text-base font-black text-[#00b06f]">
+                                            {Math.floor(selectedGp.price * 0.7)} R$
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
 
                     {/* Error */}
                     {error && (
                         <div className="border-l-2 border-red-500 bg-red-500/5 px-4 py-3">
-                            <p className="text-[10px] font-black text-red-400 uppercase tracking-widest">{error}</p>
+                            <p className="text-xs font-black text-red-400 uppercase tracking-widest">{error}</p>
                         </div>
                     )}
 
@@ -255,19 +297,19 @@ function CheckoutContent() {
                         {/* Amount / price */}
                         <div className="grid grid-cols-2 gap-3">
                             <div className="bg-[#080c18] border border-[#1e2a45] p-5 space-y-2">
-                                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Вы получите</p>
+                                <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Вы получите</p>
                                 <div className="flex items-center gap-2">
                                     <RobuxIcon className="w-5 h-5 text-[#00b06f]" />
                                     <span className="text-3xl font-black">{robux.toLocaleString()}</span>
                                 </div>
-                                <p className="font-pixel text-[7px] text-zinc-600">чистых R$</p>
+                                <p className="font-pixel text-[9px] text-zinc-500">чистых R$</p>
                             </div>
                             <div className="bg-[#080c18] border border-[#1e2a45] p-5 space-y-2">
-                                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">К оплате</p>
+                                <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">К оплате</p>
                                 <span className="text-3xl font-black text-[#00b06f]">
                                     {priceLoading ? "..." : `${price.toLocaleString()}₽`}
                                 </span>
-                                <p className="font-pixel text-[7px] text-zinc-600">{rubPerRobux} ₽/R$</p>
+                                <p className="font-pixel text-[9px] text-zinc-500">{rubPerRobux} ₽/R$</p>
                             </div>
                         </div>
                     </div>
@@ -276,7 +318,7 @@ function CheckoutContent() {
                     <div className="border-2 border-[#00b06f]/20 bg-[#00b06f]/3 p-5 space-y-4">
                         <div className="flex items-center gap-2">
                             <Info className="w-4 h-4 text-[#00b06f]" />
-                            <span className="font-pixel text-[8px] text-[#00b06f] tracking-wider">ВАЖНО</span>
+                            <span className="font-pixel text-[10px] text-[#00b06f] tracking-wider">ВАЖНО</span>
                         </div>
                         <div className="space-y-3">
                             {[
@@ -285,8 +327,8 @@ function CheckoutContent() {
                                 "Roblox зачисляет R$ через 5–7 дней после покупки.",
                             ].map((text, i) => (
                                 <div key={i} className="flex gap-3 items-start">
-                                    <span className="font-pixel text-[8px] text-[#00b06f]/60 mt-0.5 flex-shrink-0">0{i + 1}</span>
-                                    <p className="text-xs text-zinc-400 font-medium leading-relaxed">{text}</p>
+                                    <span className="font-pixel text-[9px] text-[#00b06f]/60 mt-0.5 flex-shrink-0">0{i + 1}</span>
+                                    <p className="text-sm text-zinc-300 font-medium leading-relaxed">{text}</p>
                                 </div>
                             ))}
                         </div>
@@ -295,7 +337,7 @@ function CheckoutContent() {
                     {/* Error */}
                     {error && (
                         <div className="border-l-2 border-red-500 bg-red-500/5 px-4 py-3">
-                            <p className="text-[10px] font-black text-red-400 uppercase tracking-widest">{error}</p>
+                            <p className="text-xs font-black text-red-400 uppercase tracking-widest">{error}</p>
                         </div>
                     )}
 

@@ -55,22 +55,21 @@ export default function Calculator() {
             <RobuxIcon className="w-4 h-4 text-[#00b06f]" />
           </div>
           <div>
-            <div className="text-[9px] font-pixel text-[#00b06f] tracking-wider">ROBLOX BANK</div>
-            <div className="text-xs font-black uppercase tracking-widest text-zinc-300 mt-0.5">Калькулятор</div>
+            <div className="text-[10px] font-pixel text-[#00b06f] tracking-wider">ROBLOX BANK</div>
+            <div className="text-sm font-black uppercase tracking-widest text-zinc-300 mt-0.5">Калькулятор</div>
           </div>
         </div>
         {/* Live indicator */}
         <div className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-none bg-[#00b06f] animate-pulse block" />
-          <span className="text-[9px] font-black uppercase tracking-widest text-[#00b06f]/70">Live курс</span>
+          <span className="text-xs font-black uppercase tracking-widest text-[#00b06f]/70">Live курс</span>
         </div>
       </div>
 
       <div className="space-y-5">
         {/* Robux input */}
         <div className="space-y-2">
-          <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.25em] flex items-center gap-1.5">
-            <RobuxIcon className="w-3 h-3 text-[#00b06f]" />
+          <label className="text-xs font-black text-zinc-400 uppercase tracking-[0.2em]">
             Вы получите (Robux)
           </label>
           <div className="relative">
@@ -99,8 +98,8 @@ export default function Calculator() {
 
         {/* RUB input */}
         <div className="space-y-2">
-          <label className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.25em]">
-            ₽ Вы потратите (рублей)
+          <label className="text-xs font-black text-zinc-400 uppercase tracking-[0.2em]">
+            Вы потратите (рублей)
           </label>
           <div className="relative">
             <input
@@ -117,8 +116,8 @@ export default function Calculator() {
         {/* Rate badge */}
         {!loading && rubPerRobux > 0 && (
           <div className="flex items-center justify-between px-3 py-2 bg-[#00b06f]/5 border border-[#00b06f]/15 rounded-none">
-            <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Текущий курс</span>
-            <span className="text-[9px] font-pixel text-[#00b06f]">{rubPerRobux} ₽/R$</span>
+            <span className="text-xs font-black uppercase tracking-widest text-zinc-400">Текущий курс</span>
+            <span className="text-[10px] font-pixel text-[#00b06f]">{rubPerRobux} ₽/R$</span>
           </div>
         )}
 
@@ -132,7 +131,7 @@ export default function Calculator() {
         </Link>
       </div>
 
-      <p className="mt-5 text-center text-[9px] text-zinc-600 uppercase tracking-widest">
+      <p className="mt-5 text-center text-xs text-zinc-500 uppercase tracking-widest">
         * Цена включает 30% комиссию Roblox
       </p>
     </div>

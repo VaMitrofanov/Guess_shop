@@ -100,10 +100,10 @@ export default async function DashboardPage() {
         {/* ── Stats ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-12">
           {[
-            { label: "Заказов",      value: orders.length,                tag: "TOTAL",     color: "text-white"         },
-            { label: "Выполнено",    value: fulfilledCount,               tag: "DONE",      color: "text-[#00b06f]"     },
-            { label: "В обработке",  value: pendingCount,                 tag: "ACTIVE",    color: "text-amber-400"     },
-            { label: "Потрачено",    value: `${totalSpent.toFixed(0)} ₽`, tag: "SPENT",     color: "text-zinc-300"      },
+            { label: "Заказов",      value: orders.length,                tag: "ИТОГО",      color: "text-white"         },
+            { label: "Выполнено",    value: fulfilledCount,               tag: "ГОТОВО",     color: "text-[#00b06f]"     },
+            { label: "В обработке",  value: pendingCount,                 tag: "АКТИВНЫЕ",   color: "text-amber-400"     },
+            { label: "Потрачено",    value: `${totalSpent.toFixed(0)} ₽`, tag: "ПОТРАЧЕНО",  color: "text-zinc-300"      },
           ].map(({ label, value, tag, color }) => (
             <div key={tag} className="pixel-card border-2 border-[#1e2a45] p-6 space-y-3">
               <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">{tag}</div>
@@ -127,12 +127,14 @@ export default async function DashboardPage() {
               </div>
             </div>
             <div className="border-t border-[#1e2a45] pt-4 space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-zinc-500 font-black uppercase tracking-wider">Роль</span>
-                <span className="font-pixel text-[9px] text-[#00b06f] border border-[#00b06f]/20 bg-[#00b06f]/10 px-2 py-1">
-                  {user.role === "ADMIN" ? "ADMIN" : "USER"}
-                </span>
-              </div>
+              {user.role === "ADMIN" && (
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-zinc-500 font-black uppercase tracking-wider">Роль</span>
+                  <span className="font-pixel text-[9px] text-amber-400 border border-amber-400/20 bg-amber-400/10 px-2 py-1">
+                    АДМИНИСТРАТОР
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between items-center">
                 <span className="text-xs text-zinc-500 font-black uppercase tracking-wider">С нами с</span>
                 <span className="text-sm font-black text-zinc-300">{formatDate(user.createdAt)}</span>
@@ -143,8 +145,8 @@ export default async function DashboardPage() {
           {/* Quick actions */}
           <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
             {[
-              { href: "/checkout", icon: ShoppingCart, tag: "NEW ORDER", title: "Купить Robux",  desc: "Оформить новый заказ на R$",   accent: true  },
-              { href: "/guide",    icon: Package,      tag: "TUTORIAL",  title: "Инструкция",    desc: "Как создать геймпасс",         accent: false },
+              { href: "/checkout", icon: ShoppingCart, tag: "НОВЫЙ ЗАКАЗ",  title: "Купить Robux",  desc: "Оформить новый заказ на R$",   accent: true  },
+              { href: "/guide",    icon: Package,      tag: "ИНСТРУКЦИЯ",  title: "Инструкция",    desc: "Как создать геймпасс",         accent: false },
             ].map(({ href, icon: Icon, tag, title, desc, accent }) => (
               <Link
                 key={href}
@@ -170,7 +172,7 @@ export default async function DashboardPage() {
         <div>
           <div className="flex items-center justify-between mb-6">
             <div>
-              <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider mb-1">ORDER HISTORY</div>
+              <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider mb-1">ИСТОРИЯ</div>
               <h2 className="text-2xl font-black uppercase tracking-tight">История заказов</h2>
             </div>
           </div>

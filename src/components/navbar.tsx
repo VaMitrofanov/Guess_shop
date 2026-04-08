@@ -2,20 +2,25 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { User, ShieldCheck, Menu, X, BookOpen, ShoppingCart, MessageSquare, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV_LINKS = [
-  { href: "/", label: "Купить", icon: ShoppingCart },
-  { href: "/guide", label: "Инструкция", icon: BookOpen, accent: true },
-  { href: "/reviews", label: "Отзывы", icon: MessageSquare },
-  { href: "/faq", label: "FAQ", icon: HelpCircle },
-  { href: "/guarantees", label: "Гарантии", icon: ShieldCheck },
+  { href: "/",           label: "Купить",      icon: ShoppingCart, accent: false },
+  { href: "/guide",      label: "Инструкция",  icon: BookOpen,     accent: true  },
+  { href: "/reviews",    label: "Отзывы",      icon: MessageSquare,accent: false },
+  { href: "/faq",        label: "FAQ",          icon: HelpCircle,   accent: false },
+  { href: "/guarantees", label: "Гарантии",    icon: ShieldCheck,  accent: false },
 ];
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
   const pathname = usePathname();
+  const { data: session, status } = useSession();
+  const isLoggedIn = status === "authenticated" && !!session?.user;
+  const displayName = (session?.user as any)?.name ?? session?.user?.email?.split("@")[0] ?? "Кабинет";
+  const isAdmin = (session?.user as any)?.role === "ADMIN";
 
   return (
     <nav className="sticky top-0 z-50 w-full border-b border-[#00b06f]/10 bg-[#0a0e1a]/90 backdrop-blur-xl">
@@ -47,12 +52,12 @@ export default function Navbar() {
                 key={href}
                 href={href}
                 className={cn(
-                  "px-4 py-2 text-[11px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 rounded-none border-b-2",
+                  "px-4 py-2 text-[12px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 rounded-none border-b-2",
                   active
                     ? "border-[#00b06f] text-[#00b06f]"
                     : accent
-                      ? "border-transparent text-[#00b06f]/60 hover:text-[#00b06f] hover:border-[#00b06f]/30"
-                      : "border-transparent text-zinc-400 hover:text-white hover:border-white/20"
+                      ? "border-[#00b06f]/40 text-[#00b06f] hover:border-[#00b06f] hover:text-[#00d084]"
+                      : "border-transparent text-zinc-300 hover:text-white hover:border-white/20"
                 )}
               >
                 {Icon && <Icon className="w-3.5 h-3.5" />}
@@ -64,17 +69,27 @@ export default function Navbar() {
 
         {/* Right */}
         <div className="flex items-center gap-2">
-          <Link
-            href="/login"
-            className="hidden md:flex h-9 px-4 border border-[#1e2a45] hover:border-[#00b06f]/40 items-center justify-center gap-2 transition-all rounded-none text-zinc-400 hover:text-[#00b06f] text-[10px] font-black uppercase tracking-widest"
-          >
-            <User className="w-3.5 h-3.5" />
-            Кабинет
-          </Link>
+          {isLoggedIn ? (
+            <Link
+              href={isAdmin ? "/admin" : "/dashboard"}
+              className="hidden md:flex h-9 px-4 border border-[#00b06f]/30 bg-[#00b06f]/5 hover:border-[#00b06f]/60 items-center justify-center gap-2 transition-all rounded-none text-[#00b06f] text-[11px] font-black uppercase tracking-widest"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-[#00b06f] animate-pulse flex-shrink-0" />
+              {displayName}
+            </Link>
+          ) : (
+            <Link
+              href="/login"
+              className="hidden md:flex h-9 px-4 border border-[#1e2a45] hover:border-[#00b06f]/40 items-center justify-center gap-2 transition-all rounded-none text-zinc-300 hover:text-[#00b06f] text-[11px] font-black uppercase tracking-widest"
+            >
+              <User className="w-3.5 h-3.5" />
+              Кабинет
+            </Link>
+          )}
 
           <Link
             href="/checkout"
-            className="hidden md:flex h-9 px-5 gold-gradient items-center justify-center font-black text-[10px] uppercase tracking-widest text-white hover:opacity-90 active:scale-[0.97] transition-all rounded-none"
+            className="hidden md:flex h-9 px-5 gold-gradient items-center justify-center font-black text-[11px] uppercase tracking-widest text-white hover:opacity-90 active:scale-[0.97] transition-all rounded-none"
           >
             Купить R$
           </Link>
@@ -121,17 +136,31 @@ export default function Navbar() {
                 </Link>
               );
             })}
-            <Link
-              href="/login"
-              onClick={() => setIsOpen(false)}
-              className="flex items-center justify-between px-4 py-3 font-black text-[13px] uppercase tracking-widest border-l-2 border-transparent text-zinc-400 hover:border-white/20 hover:text-white transition-all"
-            >
-              <div className="flex items-center gap-2">
-                <User className="w-4 h-4" />
-                Личный кабинет
-              </div>
-              <span className="text-[10px] opacity-40">→</span>
-            </Link>
+            {isLoggedIn ? (
+              <Link
+                href={isAdmin ? "/admin" : "/dashboard"}
+                onClick={() => setIsOpen(false)}
+                className="flex items-center justify-between px-4 py-3 font-black text-[13px] uppercase tracking-widest border-l-2 border-[#00b06f]/40 text-[#00b06f] bg-[#00b06f]/5 transition-all"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-[#00b06f] animate-pulse" />
+                  {displayName}
+                </div>
+                <span className="text-[10px] opacity-40">→</span>
+              </Link>
+            ) : (
+              <Link
+                href="/login"
+                onClick={() => setIsOpen(false)}
+                className="flex items-center justify-between px-4 py-3 font-black text-[13px] uppercase tracking-widest border-l-2 border-transparent text-zinc-400 hover:border-white/20 hover:text-white transition-all"
+              >
+                <div className="flex items-center gap-2">
+                  <User className="w-4 h-4" />
+                  Личный кабинет
+                </div>
+                <span className="text-[10px] opacity-40">→</span>
+              </Link>
+            )}
             <div className="pt-3">
               <Link
                 href="/checkout"

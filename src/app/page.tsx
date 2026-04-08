@@ -71,7 +71,7 @@ export default function Home() {
 
           {/* Status badge */}
           <div className="flex justify-center mb-10">
-            <div className="inline-flex items-center gap-2 px-4 py-2 border border-[#00b06f]/20 bg-[#00b06f]/5 text-[#00b06f] text-[9px] font-black uppercase tracking-[0.2em] rounded-none">
+            <div className="inline-flex items-center gap-2 px-4 py-2 border border-[#00b06f]/20 bg-[#00b06f]/5 text-[#00b06f] text-xs font-black uppercase tracking-[0.15em] rounded-none">
               <span className="w-1.5 h-1.5 bg-[#00b06f] animate-pulse block rounded-none" />
               Система активна · Заказы обрабатываются
             </div>
@@ -82,7 +82,7 @@ export default function Home() {
 
             {/* Pixel-style label */}
             <div className="flex justify-center">
-              <span className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">
+              <span className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">
                 ROBLOX BANK v2.0
               </span>
             </div>
@@ -119,7 +119,7 @@ export default function Home() {
               <div key={label} className="pixel-card p-4 flex flex-col items-center gap-2 text-center rounded-none">
                 <Icon className="w-5 h-5 text-[#00b06f]" />
                 <span className="text-xs font-black uppercase tracking-wider text-white">{label}</span>
-                <span className="text-[9px] text-zinc-500 uppercase tracking-widest">{sub}</span>
+                <span className="text-xs text-zinc-500 uppercase tracking-wider">{sub}</span>
               </div>
             ))}
           </div>
@@ -142,7 +142,7 @@ export default function Home() {
             ].map(({ value, label }) => (
               <div key={label} className="text-center space-y-2">
                 <div className="font-pixel text-[#00b06f] text-sm md:text-base">{value}</div>
-                <div className="text-[9px] font-black uppercase tracking-widest text-zinc-500">{label}</div>
+                <div className="text-xs font-black uppercase tracking-wider text-zinc-400">{label}</div>
               </div>
             ))}
           </div>
@@ -157,7 +157,7 @@ export default function Home() {
           <div className="flex items-center gap-4 mb-14">
             <div className="h-px flex-1 bg-[#1e2a45]" />
             <div className="text-center space-y-1">
-              <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">TUTORIAL</div>
+              <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">TUTORIAL</div>
               <h2 className="text-2xl md:text-3xl font-black uppercase tracking-tight">Как это работает</h2>
             </div>
             <div className="h-px flex-1 bg-[#1e2a45]" />
@@ -195,7 +195,7 @@ export default function Home() {
             ].map(({ step, icon, title, desc, link, cta, color }) => (
               <div key={step} className="pixel-card p-6 space-y-4 rounded-none">
                 <div className="flex items-center justify-between">
-                  <span className="font-pixel text-[9px] tracking-wider" style={{ color }}>{step}</span>
+                  <span className="font-pixel text-[10px] tracking-wider" style={{ color }}>{step}</span>
                   <span className="text-2xl">{icon}</span>
                 </div>
                 <div className="rb-progress">
@@ -204,7 +204,7 @@ export default function Home() {
                 <h3 className="text-lg font-black uppercase tracking-tight">{title}</h3>
                 <p className="text-sm text-zinc-400 font-medium leading-relaxed">{desc}</p>
                 {link && (
-                  <Link href={link} className="text-[9px] font-black uppercase tracking-widest hover:opacity-70 transition-opacity flex items-center gap-1" style={{ color }}>
+                  <Link href={link} className="text-xs font-black uppercase tracking-widest hover:opacity-70 transition-opacity flex items-center gap-1" style={{ color }}>
                     {cta} →
                   </Link>
                 )}
@@ -222,7 +222,7 @@ export default function Home() {
           <div className="flex items-center gap-4 mb-14">
             <div className="h-px flex-1 bg-[#1e2a45]" />
             <div className="text-center space-y-1">
-              <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">PERKS</div>
+              <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">PERKS</div>
               <h2 className="text-2xl md:text-3xl font-black uppercase tracking-tight">Почему мы</h2>
             </div>
             <div className="h-px flex-1 bg-[#1e2a45]" />
@@ -259,9 +259,9 @@ export default function Home() {
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <h3 className="font-black uppercase tracking-tight text-sm">{title}</h3>
-                    <span className="font-pixel text-[7px] text-[#00b06f]/60 border border-[#00b06f]/20 px-1.5 py-0.5">{tag}</span>
+                    <span className="font-pixel text-[9px] text-[#00b06f]/60 border border-[#00b06f]/20 px-1.5 py-0.5">{tag}</span>
                   </div>
-                  <p className="text-xs text-zinc-500 font-medium leading-relaxed">{desc}</p>
+                  <p className="text-sm text-zinc-400 font-medium leading-relaxed">{desc}</p>
                 </div>
               </div>
             ))}
@@ -275,7 +275,7 @@ export default function Home() {
       <section className="py-20 bg-[#080c18] relative overflow-hidden">
         <PixelBlocks />
         <div className="container mx-auto px-4 max-w-2xl text-center space-y-8 relative z-10">
-          <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">READY?</div>
+          <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">READY?</div>
           <h2 className="text-4xl md:text-6xl font-black uppercase tracking-[-0.03em] leading-tight">
             Начни<br />
             <span className="gold-text flex items-center justify-center gap-3">
@@ -316,7 +316,7 @@ export default function Home() {
               <div className="font-pixel text-[9px] text-[#00b06f] tracking-wider">ROBLOX BANK</div>
             </div>
 
-            <div className="flex items-center gap-5 text-[9px] font-black uppercase tracking-widest text-zinc-600">
+            <div className="flex items-center gap-5 text-xs font-black uppercase tracking-widest text-zinc-500">
               {[
                 { href: "/guide", label: "Инструкция" },
                 { href: "/faq", label: "FAQ" },
@@ -333,10 +333,10 @@ export default function Home() {
           <div className="accent-line mb-6" />
 
           <div className="text-center space-y-1.5">
-            <p className="text-zinc-600 text-[10px] font-medium uppercase tracking-widest">
+            <p className="text-zinc-500 text-xs font-medium uppercase tracking-widest">
               ROBLOX BANK не связан с Roblox Corporation
             </p>
-            <p className="text-zinc-700 text-[9px] max-w-xl mx-auto">
+            <p className="text-zinc-600 text-xs max-w-xl mx-auto">
               Roblox и логотип Roblox — зарегистрированные торговые марки Roblox Corporation
             </p>
           </div>

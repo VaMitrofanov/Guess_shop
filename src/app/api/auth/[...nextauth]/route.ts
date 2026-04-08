@@ -48,8 +48,12 @@ export const authOptions = {
         return session;
     }
   },
+  session: {
+    strategy: "jwt" as const,
+    maxAge: 30 * 24 * 60 * 60, // 30 дней
+  },
   pages: {
-    signIn: "/admin/login",
+    signIn: "/login",
   },
   secret: process.env.NEXTAUTH_SECRET,
 };
