@@ -5,8 +5,8 @@ import Link from "next/link";
 import Navbar from "@/components/navbar";
 import {
   AlertTriangle, CheckCircle2, ExternalLink, ArrowRight, ChevronRight,
-  Globe, Gamepad2, Ticket, Tag, Search, ShoppingCart,
-  User, Link2, Hash, Lock, Send, ShoppingBag,
+  Globe, Gamepad2, Ticket, Tag, Link2, ShoppingCart,
+  Lock, Send, ShoppingBag,
 } from "lucide-react";
 
 // ─── Step data ────────────────────────────────────────────────────────────────
@@ -43,23 +43,18 @@ const STEPS = [
     warn: "Хочешь получить 1000 R$ → ставь цену 1430 R$. Формула: нужная сумма ÷ 0.7",
   },
   {
-    num: "05", icon: Search,
-    title: "Найди свой геймпасс",
-    desc: "Зайди на robloxbank.ru → нажми «Купить» → найди пасс одним из 3 способов.",
-    detail: "Выбери любой удобный вариант — все они работают одинаково.",
-    tip: "Самый быстрый способ — вставить ссылку прямо из адресной строки браузера.",
+    num: "05", icon: Link2,
+    title: "Скопируй ссылку на геймпасс",
+    desc: "В Creator Hub открой игру → «Monetization» → «Passes» → кликни на созданный пасс → скопируй URL из адресной строки.",
+    detail: "Ссылка выглядит так: roblox.com/game-pass/1234567/название — скопируй её целиком, она понадобится для следующего шага.",
+    tip: "URL можно скопировать прямо из адресной строки браузера — нажми на неё и выдели весь текст.",
     warn: null,
-    methods: [
-      { icon: User,  label: "По никнейму", desc: "Введи свой Roblox-никнейм — система найдёт все твои пассы автоматически." },
-      { icon: Link2, label: "По ссылке",   desc: "Вставь URL страницы пасса: roblox.com/game-pass/123456789/название" },
-      { icon: Hash,  label: "По ID пасса", desc: "Введи числовой ID из URL. Он виден в Creator Hub → Basic Settings." },
-    ],
   },
   {
     num: "06", icon: ShoppingCart,
-    title: "Оформи заказ",
-    desc: "Выбери пасс из списка → нажми «Оформить» → оплати через Tinkoff.",
-    detail: "После оплаты система автоматически купит твой геймпасс в течение 24ч. Robux поступят на баланс через 5–7 дней — стандартное время зачисления по правилам Roblox.",
+    title: "Отправь ссылку менеджеру",
+    desc: "Скопируй ссылку на геймпасс и отправь её нам — в Telegram или ВКонтакте.",
+    detail: "Менеджер выкупит пасс вручную и пришлёт подтверждение. Robux поступят на баланс через 5–7 дней — стандартное время зачисления по правилам Roblox.",
     tip: null,
     warn: "Не удаляй геймпасс и не меняй цену до получения уведомления о завершении заказа.",
   },
@@ -89,12 +84,25 @@ const MISTAKES = [
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
-function StepsGrid() {
+function StepsGrid({ denomination, isWB }: { denomination?: number; isWB?: boolean }) {
+  // Рассчитываем цену пасса для конкретного номинала
+  const passPrice = denomination && denomination > 0 ? Math.round(denomination / 0.7) : null;
+
+  // Для WB-режима скрываем шаг 06 (он заменён WBManagerBlock)
+  const steps = isWB ? STEPS.filter((s) => s.num !== "06") : STEPS;
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {STEPS.map((step) => {
+      {steps.map((step) => {
         const StepIcon = step.icon;
         const hasMethods = "methods" in step && Array.isArray(step.methods);
+
+        // Динамически добавляем номинал и цену в пункт 04 (для WB)
+        const isStep04 = step.num === "04";
+        const dynamicWarn =
+          isStep04 && passPrice && denomination
+            ? `Твой номинал: ${denomination} R$ → ставь цену пасса ${passPrice} R$. Формула: нужная сумма ÷ 0.7`
+            : step.warn;
         return (
           <div
             key={step.num}
@@ -137,10 +145,10 @@ function StepsGrid() {
                   <p className="text-sm text-[#00b06f]/80 font-bold leading-relaxed">{step.tip}</p>
                 </div>
               )}
-              {step.warn && (
+              {dynamicWarn && (
                 <div className="flex gap-2 items-start border-l-2 border-amber-500/50 pl-3 py-1 mt-2">
                   <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                  <p className="text-sm text-amber-300/80 font-bold leading-relaxed">{step.warn}</p>
+                  <p className="text-sm text-amber-300/80 font-bold leading-relaxed">{dynamicWarn}</p>
                 </div>
               )}
             </div>
@@ -151,33 +159,45 @@ function StepsGrid() {
   );
 }
 
-// WB: вместо калькулятора — блок связи с менеджером
+// WB: финальный блок — связь с менеджером (объединён со шагом 06)
 function WBManagerBlock({ denomination }: { denomination?: number }) {
+  const passPrice = denomination && denomination > 0 ? Math.round(denomination / 0.7) : null;
+
   return (
     <div className="pixel-card border-2 border-amber-500/30 bg-amber-500/5 p-8 mt-4">
       <div className="text-center mb-8">
         <div className="w-16 h-16 border-2 border-amber-500/40 bg-amber-500/10 flex items-center justify-center mx-auto mb-4">
-          <ShoppingBag className="w-8 h-8 text-amber-400" />
+          <Send className="w-8 h-8 text-amber-400" />
         </div>
-        <div className="font-pixel text-[10px] text-amber-500/60 tracking-wider mb-3">СЛЕДУЮЩИЙ ШАГ</div>
-        {denomination ? (
-          <div className="inline-flex items-center gap-3 border border-[#c9a84c]/40 bg-[#c9a84c]/10 px-5 py-2 mb-4">
-            <span className="font-pixel text-[9px] text-[#c9a84c]/60">НОМИНАЛ</span>
-            <span className="text-3xl font-black" style={{ color: "#f0c040" }}>{denomination} R$</span>
+        <div className="font-pixel text-[10px] text-amber-500/60 tracking-wider mb-3">ПОСЛЕДНИЙ ШАГ</div>
+
+        {/* Персональный номинал + цена */}
+        {denomination && passPrice ? (
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-6">
+            <div className="inline-flex items-center gap-3 border border-[#c9a84c]/40 bg-[#c9a84c]/10 px-5 py-3">
+              <span className="font-pixel text-[9px] text-[#c9a84c]/60">ПОЛУЧИШЬ</span>
+              <span className="text-3xl font-black" style={{ color: "#f0c040" }}>{denomination} R$</span>
+            </div>
+            <div className="text-amber-500/40 font-black text-xl hidden sm:block">→</div>
+            <div className="inline-flex items-center gap-3 border border-amber-500/30 bg-amber-500/10 px-5 py-3">
+              <span className="font-pixel text-[9px] text-amber-500/60">ЦЕНА ПАССА</span>
+              <span className="text-3xl font-black text-amber-300">{passPrice} R$</span>
+            </div>
           </div>
         ) : null}
+
         <h3 className="text-3xl font-black uppercase tracking-tight text-amber-200 mb-3">
-          Связаться с менеджером
+          Отправь ссылку менеджеру
         </h3>
         <p className="text-amber-200/70 font-medium text-base max-w-md mx-auto leading-relaxed">
-          Скопируйте ссылку на геймпасс и отправьте её нам для ручной выдачи.
-          Менеджер выкупит пасс и пришлёт подтверждение.
+          Скопируй ссылку на геймпасс и отправь нам — менеджер выкупит пасс
+          и пришлёт подтверждение. Robux поступят через 5–7 дней.
         </p>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-4 justify-center max-w-sm mx-auto">
         <a
-          href="https://t.me/robloxbank_support"
+          href="https://t.me/RobloxBank_PA"
           target="_blank"
           rel="noopener noreferrer"
           className="flex-1 h-14 flex items-center justify-center gap-3 bg-[#229ED9] hover:bg-[#1a8ec9] transition-colors font-black text-[11px] uppercase tracking-widest text-white"
@@ -188,7 +208,7 @@ function WBManagerBlock({ denomination }: { denomination?: number }) {
           Telegram
         </a>
         <a
-          href="https://vk.com/robloxbank"
+          href="https://vk.ru/bankroblox"
           target="_blank"
           rel="noopener noreferrer"
           className="flex-1 h-14 flex items-center justify-center gap-3 bg-[#0077FF] hover:bg-[#0066ee] transition-colors font-black text-[11px] uppercase tracking-widest text-white"
@@ -196,13 +216,16 @@ function WBManagerBlock({ denomination }: { denomination?: number }) {
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
             <path d="M15.684 0H8.316C1.592 0 0 1.592 0 8.316v7.368C0 22.408 1.592 24 8.316 24h7.368C22.408 24 24 22.408 24 15.684V8.316C24 1.592 22.408 0 15.684 0zm3.692 17.123h-1.744c-.66 0-.864-.525-2.05-1.727-1.033-1-1.49-1.135-1.744-1.135-.356 0-.458.102-.458.593v1.575c0 .424-.135.678-1.253.678-1.846 0-3.896-1.118-5.335-3.202C4.624 10.857 4.03 8.57 4.03 8.096c0-.254.102-.491.593-.491h1.744c.44 0 .61.203.78.677.863 2.49 2.303 4.675 2.896 4.675.22 0 .322-.102.322-.66V9.721c-.068-1.186-.695-1.287-.695-1.71 0-.203.169-.407.44-.407h2.744c.373 0 .508.203.508.643v3.473c0 .372.169.508.271.508.22 0 .407-.136.813-.542 1.253-1.406 2.151-3.574 2.151-3.574.119-.254.322-.491.762-.491h1.744c.525 0 .644.27.525.643-.22 1.017-2.354 4.031-2.354 4.031-.186.305-.254.44 0 .78.186.254.796.779 1.203 1.253.745.847 1.32 1.558 1.473 2.05.17.49-.085.745-.576.745z"/>
           </svg>
-          VKontakte
+          ВКонтакте
         </a>
       </div>
 
-      <p className="text-center text-amber-500/50 text-xs font-black uppercase tracking-widest mt-6">
-        Среднее время ответа — 10 минут
-      </p>
+      <div className="flex items-center justify-center gap-2 mt-6">
+        <AlertTriangle className="w-3.5 h-3.5 text-amber-500/50" />
+        <p className="text-amber-500/50 text-xs font-black uppercase tracking-widest">
+          Не удаляй геймпасс до подтверждения · Среднее время ответа — 10 минут
+        </p>
+      </div>
     </div>
   );
 }
@@ -242,15 +265,15 @@ function WBGate({ onSuccess }: WBGateProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 6);
+    const raw = e.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 7);
     setCode(raw);
     setError(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (code.length < 4) {
-      setError("Введите корректный код с карточки");
+    if (code.length < 7) {
+      setError("Введите полный 7-значный код с карточки");
       inputRef.current?.focus();
       return;
     }
@@ -338,7 +361,7 @@ function WBGate({ onSuccess }: WBGateProps) {
                   type="text"
                   value={code}
                   onChange={handleInput}
-                  placeholder="XXXXXX"
+                  placeholder="XXXXXXX"
                   autoFocus
                   autoComplete="off"
                   spellCheck={false}
@@ -349,8 +372,8 @@ function WBGate({ onSuccess }: WBGateProps) {
                   <p className="text-[11px] text-zinc-600 font-medium">
                     Код напечатан на карточке в заказе
                   </p>
-                  <span className={`text-[11px] font-black tabular-nums ${code.length === 6 ? "text-[#c9a84c]" : "text-zinc-600"}`}>
-                    {code.length}/6
+                  <span className={`text-[11px] font-black tabular-nums ${code.length === 7 ? "text-[#c9a84c]" : "text-zinc-600"}`}>
+                    {code.length}/7
                   </span>
                 </div>
               </div>
@@ -365,13 +388,13 @@ function WBGate({ onSuccess }: WBGateProps) {
 
               <button
                 type="submit"
-                disabled={loading || code.length < 4}
+                disabled={loading || code.length < 7}
                 className="w-full h-14 flex items-center justify-center gap-3 font-black text-[12px] uppercase tracking-widest text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{
-                  background: loading || code.length < 4
+                  background: loading || code.length < 7
                     ? "linear-gradient(135deg, #4a3a10, #2a2008)"
                     : "linear-gradient(135deg, #c9a84c 0%, #f0c040 50%, #c9a84c 100%)",
-                  color: loading || code.length < 4 ? "#888" : "#0a0c14",
+                  color: loading || code.length < 7 ? "#888" : "#0a0c14",
                 }}
               >
                 {loading ? (
@@ -413,12 +436,40 @@ function WBGate({ onSuccess }: WBGateProps) {
   );
 }
 
+// ─── WB-only static header (no interactive links) ────────────────────────────
+
+function WBStaticHeader() {
+  return (
+    <header className="sticky top-0 z-50 w-full border-b border-[#c9a84c]/10 bg-[#0a0e1a]/95 backdrop-blur-xl pointer-events-none select-none">
+      <div className="container mx-auto px-4 h-16 flex items-center justify-between">
+        {/* Logo — no link, just branding */}
+        <div className="flex items-center gap-3">
+          <div className="relative w-9 h-9 flex-shrink-0">
+            <div className="absolute inset-0 bg-[#c9a84c] rounded-[4px]" />
+            <div className="absolute top-0 right-0 w-2 h-2 bg-[#0a0e1a] rounded-none" />
+            <div className="absolute bottom-0 left-0 w-2 h-2 bg-[#0a0e1a] rounded-none" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-[#0a0e1a] font-black text-[11px] tracking-wider relative z-10">WB</span>
+            </div>
+          </div>
+          <div className="hidden sm:flex flex-col leading-none">
+            <span className="text-[11px] font-black uppercase tracking-[0.2em] text-white">Wildberries</span>
+            <span className="text-[11px] font-black uppercase tracking-[0.2em] text-[#c9a84c]">× RobloxBank</span>
+          </div>
+        </div>
+        <div className="font-pixel text-[9px] text-[#c9a84c]/50 tracking-widest">ИНСТРУКЦИЯ ПО ПОЛУЧЕНИЮ</div>
+      </div>
+      <div className="h-[2px] bg-gradient-to-r from-transparent via-[#c9a84c]/30 to-transparent" />
+    </header>
+  );
+}
+
 // ─── Instruction (shared structure, WB vs Standard endings) ──────────────────
 
 function Instruction({ isWB, denomination }: { isWB: boolean; denomination?: number }) {
   return (
     <main className="min-h-screen">
-      <Navbar />
+      {isWB ? <WBStaticHeader /> : <Navbar />}
 
       {/* ── HERO ─────────────────────────────────────────── */}
       <section className="border-b border-[#1e2a45] bg-[#080c18]">
@@ -445,7 +496,7 @@ function Instruction({ isWB, denomination }: { isWB: boolean; denomination?: num
               <div className="flex flex-wrap gap-3">
                 {isWB ? (
                   <a
-                    href="https://t.me/robloxbank_support"
+                    href="https://t.me/RobloxBank_PA"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="h-12 px-7 gold-gradient font-black text-[11px] uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none flex items-center gap-2"
@@ -501,17 +552,36 @@ function Instruction({ isWB, denomination }: { isWB: boolean; denomination?: num
 
               <div className="pixel-card border-2 border-[#00b06f]/30 bg-[#00b06f]/5 p-5">
                 <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-3">ГЛАВНАЯ ФОРМУЛА</div>
-                <div className="flex items-center gap-4">
-                  <div className="text-center">
-                    <div className="text-3xl font-black text-zinc-300">1000</div>
-                    <div className="text-xs text-zinc-500 uppercase tracking-widest font-black">Хочу R$</div>
+                {isWB && denomination && denomination > 0 ? (
+                  <>
+                    <div className="flex items-center gap-4 mb-3">
+                      <div className="text-center">
+                        <div className="text-3xl font-black" style={{ color: "#f0c040" }}>{denomination}</div>
+                        <div className="text-xs text-zinc-500 uppercase tracking-widest font-black">Твой номинал</div>
+                      </div>
+                      <div className="text-zinc-600 font-black text-2xl">÷ 0.7 =</div>
+                      <div className="text-center">
+                        <div className="text-3xl font-black text-[#00b06f]">{Math.round(denomination / 0.7)}</div>
+                        <div className="text-xs text-zinc-500 uppercase tracking-widest font-black">Цена пасса</div>
+                      </div>
+                    </div>
+                    <div className="font-pixel text-[9px] text-[#c9a84c]/60 border border-[#c9a84c]/20 bg-[#c9a84c]/5 px-3 py-2 text-center">
+                      Установи именно эту цену на геймпасс
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-center gap-4">
+                    <div className="text-center">
+                      <div className="text-3xl font-black text-zinc-300">1000</div>
+                      <div className="text-xs text-zinc-500 uppercase tracking-widest font-black">Хочу R$</div>
+                    </div>
+                    <div className="text-zinc-600 font-black text-2xl">÷ 0.7 =</div>
+                    <div className="text-center">
+                      <div className="text-3xl font-black text-[#00b06f]">1430</div>
+                      <div className="text-xs text-zinc-500 uppercase tracking-widest font-black">Цена пасса</div>
+                    </div>
                   </div>
-                  <div className="text-zinc-600 font-black text-2xl">÷ 0.7 =</div>
-                  <div className="text-center">
-                    <div className="text-3xl font-black text-[#00b06f]">1430</div>
-                    <div className="text-xs text-zinc-500 uppercase tracking-widest font-black">Цена пасса</div>
-                  </div>
-                </div>
+                )}
               </div>
             </div>
           </div>
@@ -523,7 +593,7 @@ function Instruction({ isWB, denomination }: { isWB: boolean; denomination?: num
       {/* ── STEPS ─────────────────────────────────────────── */}
       <section className="container mx-auto px-6 py-16 max-w-6xl">
         <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-8">ПОШАГОВАЯ ИНСТРУКЦИЯ</div>
-        <StepsGrid />
+        <StepsGrid denomination={denomination} isWB={isWB} />
 
         {/* Done block — differs by mode */}
         {isWB ? <WBManagerBlock denomination={denomination} /> : <StandardDoneBlock />}

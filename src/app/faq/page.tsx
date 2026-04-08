@@ -38,7 +38,7 @@ export default async function FAQPage() {
             Наша поддержка работает круглосуточно. Отвечаем в течение 10 минут.
           </p>
           <Link
-            href="https://t.me/your_support"
+            href="https://t.me/RobloxBank_PA"
             className="inline-flex h-12 px-8 gold-gradient font-black text-[10px] uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none items-center gap-2"
           >
             Написать в Telegram →

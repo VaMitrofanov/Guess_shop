@@ -10,9 +10,9 @@ export async function POST(request: Request) {
     const body = await request.json();
     const rawCode: string = (body?.code ?? "").toString().trim().toUpperCase();
 
-    if (!rawCode || rawCode.length < 4) {
+    if (!rawCode || rawCode.length < 7) {
       return NextResponse.json(
-        { error: "Введите корректный код с карточки" },
+        { error: "Введите полный 7-значный код с карточки" },
         { status: 400 }
       );
     }
