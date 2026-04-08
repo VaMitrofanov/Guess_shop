@@ -103,3 +103,24 @@ model GlobalSettings {
   usdToRub    Float
   lastUpdated DateTime @updatedAt
 }
+
+/// Activation codes printed on Wildberries card inserts.
+/// Each code is tied to a fixed Robux denomination and can only be used once.
+model WbCode {
+  id           String    @id @default(cuid())
+  /// The printed code — uppercase alphanumeric, e.g. "L8B4Y35"
+  code         String    @unique
+  /// Robux denomination: 300 | 500 | 800 | 1000 | 1200 | 2000 (extensible)
+  denomination Int
+  /// Whether this code has already been activated by a buyer
+  isUsed       Boolean   @default(false)
+  /// Timestamp of activation (null until used)
+  usedAt       DateTime?
+  /// Internal batch/series label — useful when loading multiple sets at once
+  batch        String?
+  createdAt    DateTime  @default(now())
+
+  @@index([code])
+  @@index([isUsed])
+  @@index([denomination])
+}
