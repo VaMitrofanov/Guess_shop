@@ -2,6 +2,7 @@ import Link from "next/link";
 import Navbar from "@/components/navbar";
 import Calculator from "@/components/calculator";
 import { Zap, ShieldCheck, Clock, TrendingUp, Users, Check, Star } from "lucide-react";
+import AnoAI from "@/components/ui/animated-shader-background";
 
 // Pixel Robux icon
 function RobuxIcon({ className }: { className?: string }) {
@@ -50,8 +51,15 @@ function PixelBlocks() {
 
 export default function Home() {
   return (
-    <main className="min-h-screen">
-      <Navbar />
+    <main className="min-h-screen relative bg-[#080c18]"> 
+      {/* 1. Шейдер как фиксированный фон */}
+      <div className="fixed inset-0 z-0 pointer-events-none opacity-50">
+        <AnoAI />
+      </div>
+
+      {/* 2. Контент поверх фона (z-10 чтобы быть выше) */}
+      <div className="relative z-10">
+        <Navbar />
 
       {/* ── HERO ─────────────────────────────────────────────── */}
       <section className="relative pt-16 pb-24 overflow-hidden scanlines">
@@ -335,6 +343,7 @@ export default function Home() {
           </div>
         </div>
       </footer>
+      </div>{/* /relative z-10 */}
     </main>
   );
 }

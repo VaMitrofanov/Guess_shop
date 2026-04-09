@@ -8,6 +8,7 @@ import {
   Globe, Gamepad2, Ticket, Tag, Link2, ShoppingCart,
   Lock, Send, ShoppingBag, Copy, Check, Search, CreditCard,
 } from "lucide-react";
+import { ParticleTextEffect } from "@/components/ui/particle-text-effect";
 
 // ─── localStorage WB session helpers ──────────────────────────────────────────
 const WB_SESSION_KEY = "rb_wb_session";
@@ -636,7 +637,7 @@ function Anim04Price({ passPrice }: { passPrice: number | null }) {
         </div>
 
         {/* Main content */}
-        <div style={{ flex: 1, background: "#111", padding: "10px 12px", minHeight: 250, position: "relative" }}>
+        <div style={{ flex: 1, background: "#111", padding: "10px 12px", minHeight: 272, position: "relative" }}>
           {/* Breadcrumb */}
           <div style={{ fontSize: 7, color: "#444", marginBottom: 6, display: "flex", flexWrap: "wrap", gap: 2 }}>
             {"Creations / My Place / Passes / VIP Pass /".split(" ").map((t, i) => (
@@ -1116,7 +1117,7 @@ function StepsGrid({
                 </div>
               )}
               {isStep04 && (
-                <div style={{ minHeight: 280 }}>
+                <div style={{ minHeight: 300 }}>
                   <Anim04Price passPrice={passPrice} />
                 </div>
               )}
@@ -1294,6 +1295,7 @@ function WBGate({ onSuccess }: WBGateProps) {
   return (
     <main className="min-h-screen flex flex-col">
       <Navbar />
+
       <div className="flex-1 flex items-center justify-center px-4 py-16 bg-[#080c18]">
         <div className="fixed inset-0 opacity-[0.02] pointer-events-none"
           style={{
@@ -1486,24 +1488,22 @@ function FormulaCalculator({
             <div className="text-xs text-zinc-500 uppercase tracking-widest font-black">Твой номинал</div>
           </div>
           <div className="text-zinc-600 font-black text-2xl">÷ 0.7 =</div>
-          <div className="text-center">
-            <div className="text-3xl font-black text-[#00b06f]">{fixedPrice}</div>
-            <div className="text-xs text-zinc-500 uppercase tracking-widest font-black">Цена пасса</div>
-          </div>
-        </div>
-        {/* Copy row */}
-        <div className="mt-2 flex items-center gap-1.5">
-          <span className="font-pixel text-[9px] text-[#00b06f]/50 tracking-wider">УСТАНОВИ ЭТУ ЦЕНУ:</span>
-          <span className="text-2xl font-black text-[#00b06f] tracking-tight ml-1">{fixedPrice}</span>
-          <span className="text-sm font-black text-[#00b06f]/70">R$</span>
           <button
             onClick={onCopyPassPrice}
-            title={priceCopied ? "Скопировано!" : "Скопировать"}
-            className="ml-1 p-1.5 rounded-none text-[#00b06f]/30 hover:text-[#00b06f]/80 hover:bg-[#00b06f]/10 transition-all"
+            title={priceCopied ? "Скопировано!" : "Нажми, чтобы скопировать"}
+            className="text-center group cursor-pointer"
           >
-            {priceCopied ? <Check className="w-3.5 h-3.5 text-[#00b06f]" /> : <Copy className="w-3.5 h-3.5" />}
+            <div className="text-3xl font-black text-[#00b06f] flex items-center gap-1.5 justify-center">
+              {fixedPrice}
+              {priceCopied
+                ? <Check className="w-4 h-4 text-[#00b06f]" />
+                : <Copy className="w-3.5 h-3.5 text-[#00b06f]/20 group-hover:text-[#00b06f]/55 transition-colors" />
+              }
+            </div>
+            <div className="text-xs uppercase tracking-widest font-black transition-colors" style={{ color: priceCopied ? "#00b06f99" : "#52525b" }}>
+              {priceCopied ? "скопировано" : "Цена пасса · нажми"}
+            </div>
           </button>
-          {priceCopied && <span className="text-[10px] text-[#00b06f]/60 font-bold">скопировано</span>}
         </div>
         {/* Regional pricing warning */}
         <div className="mt-3 flex gap-2.5 items-start bg-amber-500/10 border border-amber-500/40 px-3 py-2.5">
@@ -1543,41 +1543,47 @@ function FormulaCalculator({
           <div className="text-zinc-600 font-black text-lg">÷ 0.7 =</div>
         </div>
 
-        {/* Result */}
+        {/* Result — click to copy */}
         <div className="flex-1 space-y-1">
           <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Цена пасса (R$)</div>
-          <div className="h-12 bg-[#080c18] border-2 border-[#00b06f]/30 px-3 flex items-center justify-between">
-            <span className="text-xl font-black text-[#00b06f]">
-              {calcPrice ?? "—"}
-            </span>
-            <span className="text-xs text-zinc-500 font-bold">R$</span>
-          </div>
+          <button
+            onClick={calcPrice ? onCopyPassPrice : undefined}
+            disabled={!calcPrice}
+            className={`h-12 w-full bg-[#080c18] border-2 px-3 flex items-center justify-between transition-all group ${
+              calcPrice
+                ? "border-[#00b06f]/30 hover:border-[#00b06f]/60 hover:bg-[#00b06f]/5 cursor-pointer"
+                : "border-[#1e2a45] cursor-default"
+            }`}
+          >
+            <span className="text-xl font-black text-[#00b06f]">{calcPrice ?? "—"}</span>
+            <div className="flex items-center gap-2">
+              {calcPrice && !priceCopied && (
+                <span className="text-[10px] font-medium text-zinc-600 group-hover:text-zinc-500 transition-colors">
+                  нажми, чтобы скопировать
+                </span>
+              )}
+              {priceCopied && (
+                <span className="text-[10px] font-medium text-[#00b06f]/70">
+                  ✓ скопировано
+                </span>
+              )}
+              <span className="text-xs text-zinc-500 font-bold">R$</span>
+              {calcPrice && (
+                priceCopied
+                  ? <Check className="w-3 h-3 text-[#00b06f]" />
+                  : <Copy className="w-3 h-3 text-zinc-700 group-hover:text-[#00b06f]/50 transition-colors" />
+              )}
+            </div>
+          </button>
         </div>
       </div>
 
       {calcPrice && (
-        <div className="mt-3 border border-[#00b06f]/20 bg-[#00b06f]/5 px-4 py-3 space-y-2.5">
-          <div className="font-pixel text-[8px] text-[#00b06f]/40 tracking-widest">УСТАНОВИ ЭТУ ЦЕНУ НА ПАСС</div>
-          {/* Price + copy */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-3xl font-black text-[#00b06f] tracking-tight">{calcPrice}</span>
-            <span className="text-lg font-black text-[#00b06f]/70 mt-1">R$</span>
-            <button
-              onClick={onCopyPassPrice}
-              title={priceCopied ? "Скопировано!" : "Скопировать"}
-              className="ml-1 p-1.5 rounded-none text-[#00b06f]/30 hover:text-[#00b06f]/80 hover:bg-[#00b06f]/10 transition-all"
-            >
-              {priceCopied ? <Check className="w-3.5 h-3.5 text-[#00b06f]" /> : <Copy className="w-3.5 h-3.5" />}
-            </button>
-            {priceCopied && <span className="text-[10px] text-[#00b06f]/60 font-bold">скопировано</span>}
-          </div>
-          {/* Regional pricing warning — prominent */}
-          <div className="flex gap-2.5 items-start bg-amber-500/10 border border-amber-500/40 px-3 py-2.5">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-            <p className="text-sm text-amber-300 font-bold leading-snug">
-              Убери галочку <span className="text-amber-200">«Enable regional pricing»</span> — иначе Roblox изменит цену для других стран.
-            </p>
-          </div>
+        <div className="mt-3 flex gap-2.5 items-start bg-amber-500/10 border border-amber-500/40 px-3 py-2.5">
+          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <p className="text-sm text-amber-300 font-bold leading-snug">
+            Убери галочку <span className="text-amber-200">«Enable regional pricing»</span> — иначе Roblox изменит цену для других стран.
+          </p>
         </div>
       )}
     </div>
@@ -1868,15 +1874,65 @@ function Instruction({ isWB, denomination, onReset }: { isWB: boolean; denominat
   );
 }
 
+// ─── WB full-screen intro splash ───────────────────────────────────────────────
+
+function WBIntro({ onDone }: { onDone: () => void }) {
+  const [fading, setFading] = useState(false);
+
+  const handleDone = useCallback(() => {
+    if (fading) return;
+    setFading(true);
+    setTimeout(onDone, 750);
+  }, [fading, onDone]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[9999] bg-black flex flex-col"
+      style={{
+        transition: "opacity 0.75s ease",
+        opacity: fading ? 0 : 1,
+        pointerEvents: fading ? "none" : "auto",
+      }}
+    >
+      {/* Particle canvas fills the whole screen */}
+      <div className="flex-1 relative">
+        <ParticleTextEffect
+          words={["СПАСИБО!", "ЗА ПОКУПКУ", "ROBLOXBANK"]}
+          fullScreen
+          showHint={false}
+          onComplete={handleDone}
+        />
+      </div>
+
+      {/* Bottom bar */}
+      <div className="flex items-center justify-between px-8 py-5 border-t border-white/5">
+        <div className="flex items-center gap-3">
+          <div className="w-1.5 h-1.5 rounded-full bg-[#c9a84c] animate-pulse" />
+          <span className="font-pixel text-[9px] text-[#c9a84c]/60 tracking-widest">
+            WILDBERRIES × ROBLOXBANK
+          </span>
+        </div>
+        <button
+          onClick={handleDone}
+          className="font-pixel text-[9px] text-zinc-600 hover:text-[#c9a84c] tracking-widest uppercase transition-colors"
+        >
+          Пропустить →
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main export ───────────────────────────────────────────────────────────────
 
 export default function GuideClient({ isWB }: { isWB: boolean }) {
-  const [phase, setPhase] = useState<"gate" | "instruction">(
-    isWB ? "gate" : "instruction"
+  const [phase, setPhase] = useState<"intro" | "gate" | "instruction">(
+    isWB ? "intro" : "instruction"
   );
   const [denomination, setDenomination] = useState<number>(0);
 
-  // Restore WB session from localStorage on mount
+  // Restore WB session from localStorage on mount —
+  // skip intro if the user already activated a code this session
   useEffect(() => {
     if (!isWB) return;
     const saved = loadWBSession();
@@ -1891,6 +1947,10 @@ export default function GuideClient({ isWB }: { isWB: boolean }) {
     setDenomination(0);
     setPhase("gate");
   };
+
+  if (phase === "intro") {
+    return <WBIntro onDone={() => setPhase("gate")} />;
+  }
 
   if (phase === "gate") {
     return (

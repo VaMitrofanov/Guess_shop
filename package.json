@@ -14,6 +14,7 @@
     "@neondatabase/serverless": "^1.0.2",
     "@prisma/adapter-pg": "^7.6.0",
     "@prisma/client": "^7.7.0",
+    "@types/three": "^0.183.1",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "dotenv": "^17.3.1",
@@ -25,6 +26,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "tailwind-merge": "^3.5.0",
+    "three": "^0.183.2",
     "ws": "^8.20.0",
     "zod": "^4.3.6"
   },
