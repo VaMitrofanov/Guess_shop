@@ -53,7 +53,7 @@ export function calcFinalRubPerRobux(rateUSD: number, usdToRub: number): number 
  * suspends the DB after ~5 min of inactivity).
  */
 export async function getStorefrontPricing(minInventory = 100): Promise<PricingData> {
-  const DEFAULT_RATE_RUB = 0.85;
+  const DEFAULT_RATE_RUB = 0.65;
   const FALLBACK: PricingData = {
     rateUSD: 0, usdToRub: 90,
     finalRubPerRobux: DEFAULT_RATE_RUB,

@@ -3,11 +3,13 @@ import { getStorefrontPricing } from "@/lib/pricing";
 
 export const dynamic = "force-dynamic";
 
+const FIXED_RATE_RUB = 0.65;
+
 export async function GET() {
   try {
     const pricing = await getStorefrontPricing();
     return NextResponse.json({
-      rubPerRobux: pricing.finalRubPerRobux,
+      rubPerRobux: FIXED_RATE_RUB,
       usdToRub: pricing.usdToRub,
       provider: pricing.provider,
       inventory: pricing.inventory,

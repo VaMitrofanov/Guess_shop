@@ -64,7 +64,7 @@ const STEPS_COMMON = [
     num: "04", icon: Tag,
     title: "Установи цену",
     desc: "Настройки пасса → включи «For Sale» → укажи рассчитанную цену → сохрани.",
-    detail: "Roblox удерживает 30% с каждой продажи. Поэтому цена пасса должна быть выше суммы, которую ты хочешь получить. Используй калькулятор выше — он уже посчитал нужную цену.",
+    detail: "Roblox удерживает 30% с каждой продажи. Поэтому цена пасса должна быть выше суммы, которую ты хочешь получить. Используй калькулятор ниже — он поможет посчитать цену геймпасса.",
     tip: null,
     warn: "Установи точную цену из калькулятора — она учитывает 30% комиссию Roblox.",
   },
@@ -201,54 +201,101 @@ function SItem({ label, active, sub, expanded, highlight }: { label: string; act
 function Anim01() {
   const [f, setF] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setF(v => (v + 1) % 4), 1600);
+    const id = setInterval(() => setF(v => (v + 1) % 4), 1700);
     return () => clearInterval(id);
   }, []);
+  // f=0: typing URL, f=1: loading, f=2: page shown cursor at btn, f=3: Creations active in nav
 
-  const urlTexts = ["", "create.rob", "create.roblox.com", "create.roblox.com"];
   const showPage = f >= 2;
-  const highlightCreations = f === 3;
 
   return (
     <>
-    <RCHBrowser url={urlTexts[f] + (f < 2 ? "|" : "")}>
-      {showPage ? (
-        <>
-          <RCHTopNav />
-          <div style={{ display: "flex", background: "#fff" }}>
-            {/* Left nav */}
-            <div style={{ width: 110, background: "#f5f5f5", borderRight: "1px solid #e0e0e0", padding: "6px 4px" }}>
-              <div style={{ fontSize: 8, color: "#888", padding: "2px 6px 4px", fontWeight: 700, letterSpacing: "0.08em" }}>НАВИГАЦИЯ</div>
-              <SItem label="Dashboard" active={!highlightCreations} />
-              <SItem label="Creations" highlight={highlightCreations} active={highlightCreations} />
-              <SItem label="Marketplace" />
-              <SItem label="Community" />
+    <div style={{
+      marginTop: 12, overflow: "hidden", border: "1px solid #2a2a2a",
+      background: "#111", fontSize: 10, userSelect: "none", position: "relative",
+    }}>
+      {/* Mac chrome */}
+      <div style={{ background: "#1c1c1c", padding: "5px 10px", display: "flex", alignItems: "center", gap: 5, borderBottom: "1px solid #2a2a2a" }}>
+        <div style={{ display: "flex", gap: 4 }}>
+          {(["#ff5f57","#febc2e","#28c840"] as string[]).map((c,i) => (
+            <div key={i} style={{ width:8, height:8, borderRadius:"50%", background:c }} />
+          ))}
+        </div>
+        <div style={{ flex:1, height:14, background:"#2d2d2d", borderRadius:3, marginLeft:6, display:"flex", alignItems:"center", paddingLeft:8, overflow:"hidden" }}>
+          <span style={{ color: f<=1 ? "#eee" : "#888", fontSize:8, fontFamily:"monospace" }}>
+            {f===0 ? "create.rob|" : "create.roblox.com"}
+          </span>
+        </div>
+      </div>
+
+      {/* Body */}
+      {!showPage ? (
+        <div style={{ background:"#111", minHeight:124, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8 }}>
+          <div style={{ color:"#333", fontSize:9 }}>Загрузка create.roblox.com...</div>
+          <div style={{ width:90, height:2, background:"#222", overflow:"hidden", borderRadius:1 }}>
+            <div style={{ width: f===1 ? "70%" : "15%", height:"100%", background:"#0e6fff", transition:"width 1.4s ease" }} />
+          </div>
+        </div>
+      ) : (
+        <div style={{ display:"flex", minHeight:124 }}>
+          {/* Icon sidebar */}
+          <div style={{ width:40, background:"#181818", borderRight:"1px solid #252525", display:"flex", flexDirection:"column", alignItems:"center", paddingTop:8, gap:3, flexShrink:0 }}>
+            <div style={{ width:22, height:22, background:"#e32f4a", borderRadius:3, display:"flex", alignItems:"center", justifyContent:"center", marginBottom:3 }}>
+              <span style={{ color:"white", fontWeight:900, fontSize:10 }}>R</span>
             </div>
-            {/* Content */}
-            <div style={{ flex: 1, padding: "10px 12px" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#1a1a1a", marginBottom: 6 }}>Welcome to Creator Hub</div>
-              <div style={{ fontSize: 9, color: "#666", marginBottom: 8 }}>Build, publish and monetize your Roblox experiences.</div>
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#0e6fff", borderRadius: 3, padding: "4px 10px", color: "white", fontWeight: 700, fontSize: 9, boxShadow: highlightCreations ? "0 0 0 3px #0e6fff44" : "none", transition: "box-shadow 0.3s" }}>
-                {highlightCreations && <span>→ </span>}Creations
+            {(["⌂","✦","◈","⊞"] as string[]).map((ic,i) => (
+              <div key={i} style={{ width:26, height:20, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                <span style={{ fontSize:8, color:"#333" }}>{ic}</span>
               </div>
+            ))}
+          </div>
+          {/* Text nav */}
+          <div style={{ width:100, background:"#1a1a1a", borderRight:"1px solid #252525", paddingTop:8, flexShrink:0 }}>
+            <div style={{ padding:"0 8px 6px", fontSize:7, color:"#444", fontWeight:700, letterSpacing:"0.08em" }}>НАВИГАЦИЯ</div>
+            {([
+              { label:"Dashboard", active: f===2 },
+              { label:"Creations", active: f===3 },
+              { label:"Marketplace", active: false },
+              { label:"Community",  active: false },
+            ] as {label:string; active:boolean}[]).map(it => (
+              <div key={it.label} style={{
+                padding:"5px 10px", fontSize:8,
+                color: it.active ? "#fff" : "#555",
+                background: it.active ? "#242424" : "transparent",
+                borderLeft: it.active ? "2px solid #4a9eff" : "2px solid transparent",
+                fontWeight: it.active ? 700 : 400,
+              }}>{it.label}</div>
+            ))}
+          </div>
+          {/* Content */}
+          <div style={{ flex:1, background:"#111", padding:"10px 12px", position:"relative" }}>
+            <div style={{ fontSize:12, fontWeight:800, color:"#eee", marginBottom:5 }}>Creator Hub</div>
+            <div style={{ fontSize:8, color:"#555", marginBottom:10 }}>Build and monetize your Roblox experiences.</div>
+            <div style={{
+              display:"inline-flex", alignItems:"center", gap:4,
+              background: f===3 ? "#0a55d4" : "#0e6fff",
+              color:"white", fontWeight:700, fontSize:9,
+              padding:"4px 10px", borderRadius:3,
+              boxShadow: f===2 ? "0 0 0 3px #0e6fff55" : "none",
+              transition:"all 0.3s",
+            }}>
+              {f===3 && "→ "}Creations
             </div>
           </div>
-          {/* Cursor */}
-          {highlightCreations && (
-            <div style={{ position: "absolute", top: 52, left: 85, pointerEvents: "none", zIndex: 10 }}>
-              <RCursor />
-            </div>
-          )}
-        </>
-      ) : (
-        <div style={{ background: "#fff", padding: "20px 16px", textAlign: "center" }}>
-          <div style={{ color: "#bbb", fontSize: 10 }}>Загрузка...</div>
-          <div style={{ margin: "6px auto", width: 60, height: 3, background: "#f0f0f0", borderRadius: 2, overflow: "hidden" }}>
-            <div style={{ width: f === 1 ? "60%" : "10%", height: "100%", background: "#0e6fff", transition: "width 1s ease" }} />
+
+          {/* Cursor — absolute over entire body */}
+          <div style={{
+            position:"absolute",
+            top:  f===2 ? 69 : 63,
+            left: f===2 ? 152 : 47,
+            pointerEvents:"none", zIndex:20,
+            transition:"top 0.45s cubic-bezier(0.4,0,0.2,1), left 0.45s cubic-bezier(0.4,0,0.2,1)",
+          }}>
+            <RCursor />
           </div>
         </div>
       )}
-    </RCHBrowser>
+    </div>
     <div className="flex justify-center mt-4">
       <a
         href="https://create.roblox.com"
@@ -270,72 +317,121 @@ function Anim02() {
     const id = setInterval(() => setF(v => (v + 1) % 4), 1700);
     return () => clearInterval(id);
   }, []);
+  // f=0: My Creations grid, f=1: hover game card, f=2: hover Create btn, f=3: modal open
 
-  // 0=grid shown, 1=hover game1, 2=hover "Create Experience", 3=create dialog
   const games = [
-    { name: "My Game", color: "#4f46e5" },
+    { name: "My Game",    color: "#4f46e5" },
     { name: "Test Place", color: "#0891b2" },
   ];
-  const showCreate = f === 3;
 
   return (
-    <RCHBrowser>
-      <RCHTopNav />
-      <div style={{ background: "#fff", padding: "8px 10px", position: "relative" }}>
-        {/* Header row */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#1a1a1a" }}>My Creations</div>
-          <div style={{
-            fontSize: 9, fontWeight: 700, color: "white", background: "#0e6fff",
-            padding: "3px 8px", borderRadius: 3,
-            boxShadow: f === 2 ? "0 0 0 3px #0e6fff55" : "none",
-            outline: f === 2 ? "2px solid #0e6fff" : "none",
-            outlineOffset: 1,
-            transition: "all 0.3s",
-          }}>+ Create Experience</div>
+    <div style={{
+      marginTop: 12, overflow: "hidden", border: "1px solid #2a2a2a",
+      background: "#111", fontSize: 10, userSelect: "none", position: "relative",
+    }}>
+      {/* Mac chrome */}
+      <div style={{ background: "#1c1c1c", padding: "5px 10px", display: "flex", alignItems: "center", gap: 5, borderBottom: "1px solid #2a2a2a" }}>
+        <div style={{ display: "flex", gap: 4 }}>
+          {(["#ff5f57","#febc2e","#28c840"] as string[]).map((c,i) => (
+            <div key={i} style={{ width:8, height:8, borderRadius:"50%", background:c }} />
+          ))}
         </div>
-        {/* Games grid */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-          {games.map((g, i) => (
-            <div key={i} style={{
-              background: "#f9f9f9",
-              border: (f === 1 && i === 0) ? "2px solid #0e6fff" : "1px solid #e0e0e0",
-              borderRadius: 4, overflow: "hidden",
-              boxShadow: (f === 1 && i === 0) ? "0 0 0 2px #0e6fff33" : "none",
-              transition: "all 0.3s",
-            }}>
-              <div style={{ height: 28, background: g.color, opacity: 0.85 }} />
-              <div style={{ padding: "4px 6px" }}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: "#1a1a1a" }}>{g.name}</div>
-                <div style={{ fontSize: 8, color: "#888", marginTop: 1 }}>Private · 0 visits</div>
-              </div>
+        <div style={{ flex:1, height:14, background:"#2d2d2d", borderRadius:3, marginLeft:6, display:"flex", alignItems:"center", paddingLeft:8 }}>
+          <span style={{ color:"#888", fontSize:8 }}>create.roblox.com/creations</span>
+        </div>
+      </div>
+
+      <div style={{ display:"flex", minHeight:124 }}>
+        {/* Icon sidebar */}
+        <div style={{ width:40, background:"#181818", borderRight:"1px solid #252525", display:"flex", flexDirection:"column", alignItems:"center", paddingTop:8, gap:3, flexShrink:0 }}>
+          <div style={{ width:22, height:22, background:"#e32f4a", borderRadius:3, display:"flex", alignItems:"center", justifyContent:"center", marginBottom:3 }}>
+            <span style={{ color:"white", fontWeight:900, fontSize:10 }}>R</span>
+          </div>
+          {(["⌂","✦","◈","⊞"] as string[]).map((ic,i) => (
+            <div key={i} style={{ width:26, height:20, display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <span style={{ fontSize:8, color: i===0 ? "#4a9eff" : "#333" }}>{ic}</span>
             </div>
           ))}
         </div>
-
-        {/* Create modal overlay */}
-        {showCreate && (
-          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
-            <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 6, padding: "10px 14px", width: "80%", boxShadow: "0 8px 24px rgba(0,0,0,0.15)" }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#1a1a1a", marginBottom: 6 }}>Create New Experience</div>
-              <div style={{ fontSize: 8, color: "#666", marginBottom: 4 }}>Experience Name</div>
-              <div style={{ border: "2px solid #0e6fff", borderRadius: 3, padding: "3px 6px", fontSize: 9, color: "#1a1a1a", background: "#f8f9ff" }}>
-                My Game<span style={{ animation: "rb-cursor-blink 0.8s step-end infinite", borderLeft: "1.5px solid #1a1a1a", marginLeft: 1 }}>&nbsp;</span>
+        {/* Text nav */}
+        <div style={{ width:100, background:"#1a1a1a", borderRight:"1px solid #252525", paddingTop:8, flexShrink:0 }}>
+          <div style={{ padding:"0 8px 6px", fontSize:7, color:"#444", fontWeight:700, letterSpacing:"0.08em" }}>НАВИГАЦИЯ</div>
+          {([
+            { label:"Dashboard",   active:false },
+            { label:"Creations",   active:true  },
+            { label:"Marketplace", active:false },
+          ] as {label:string;active:boolean}[]).map(it => (
+            <div key={it.label} style={{
+              padding:"5px 10px", fontSize:8,
+              color: it.active ? "#fff" : "#555",
+              background: it.active ? "#242424" : "transparent",
+              borderLeft: it.active ? "2px solid #4a9eff" : "2px solid transparent",
+              fontWeight: it.active ? 700 : 400,
+            }}>{it.label}</div>
+          ))}
+        </div>
+        {/* Content */}
+        <div style={{ flex:1, background:"#111", padding:"8px 10px", position:"relative" }}>
+          {/* Header */}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:7 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:"#eee" }}>My Creations</div>
+            <div style={{
+              fontSize:8, fontWeight:700, color:"white",
+              background: f===2 ? "#0a55d4" : "#0e6fff",
+              padding:"3px 7px", borderRadius:3,
+              boxShadow: f===2 ? "0 0 0 3px #0e6fff44" : "none",
+              transition:"all 0.3s",
+            }}>+ Create</div>
+          </div>
+          {/* Games grid */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5 }}>
+            {games.map((g,i) => (
+              <div key={i} style={{
+                background:"#1a1a1a",
+                border: (f===1 && i===0) ? "1.5px solid #4a9eff" : "1px solid #252525",
+                borderRadius:3, overflow:"hidden",
+                boxShadow: (f===1 && i===0) ? "0 0 0 2px #4a9eff22" : "none",
+                transition:"all 0.3s",
+              }}>
+                <div style={{ height:24, background:g.color, opacity:0.9 }} />
+                <div style={{ padding:"3px 5px" }}>
+                  <div style={{ fontSize:8, fontWeight:700, color:"#ddd" }}>{g.name}</div>
+                  <div style={{ fontSize:7, color:"#555", marginTop:1 }}>Private · 0 visits</div>
+                </div>
               </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 5, marginTop: 8 }}>
-                <div style={{ fontSize: 9, fontWeight: 600, color: "#555", background: "#f0f0f0", borderRadius: 3, padding: "3px 8px" }}>Cancel</div>
-                <div style={{ fontSize: 9, fontWeight: 700, color: "white", background: "#0e6fff", borderRadius: 3, padding: "3px 8px" }}>Create</div>
+            ))}
+          </div>
+
+          {/* Create modal */}
+          {f===3 && (
+            <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:10 }}>
+              <div style={{ background:"#1c1c1c", border:"1px solid #333", borderRadius:6, padding:"10px 12px", width:"80%", boxShadow:"0 8px 32px rgba(0,0,0,0.5)" }}>
+                <div style={{ fontSize:10, fontWeight:700, color:"#eee", marginBottom:6 }}>Create New Experience</div>
+                <div style={{ fontSize:7, color:"#666", marginBottom:3 }}>Experience Name</div>
+                <div style={{ border:"2px solid #4a9eff", borderRadius:3, padding:"4px 7px", fontSize:9, color:"#eee", background:"#111" }}>
+                  My Game<span style={{ borderLeft:"1.5px solid #eee", marginLeft:1 }}>&nbsp;</span>
+                </div>
+                <div style={{ display:"flex", justifyContent:"flex-end", gap:5, marginTop:8 }}>
+                  <div style={{ fontSize:8, fontWeight:600, color:"#666", background:"#252525", borderRadius:3, padding:"3px 8px" }}>Cancel</div>
+                  <div style={{ fontSize:8, fontWeight:700, color:"white", background:"#0e6fff", borderRadius:3, padding:"3px 8px" }}>Create</div>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Cursor */}
-        <div style={{ position: "absolute", top: f === 1 ? 40 : f === 2 ? 12 : 40, left: f === 1 ? 20 : f === 2 ? 148 : 148, pointerEvents: "none", zIndex: 20, transition: "top 0.4s ease, left 0.4s ease" }}>
-          {f <= 2 && <RCursor />}
+          {/* Cursor */}
+          <div style={{
+            position:"absolute",
+            top:  f===0 ? 52 : f===1 ? 52 : f===2 ? 8 : 52,
+            left: f===0 ? 10 : f===1 ? 10 : f===2 ? 118 : 10,
+            pointerEvents:"none", zIndex:20,
+            transition:"top 0.4s cubic-bezier(0.4,0,0.2,1), left 0.4s cubic-bezier(0.4,0,0.2,1)",
+          }}>
+            {f <= 2 && <RCursor />}
+          </div>
         </div>
       </div>
-    </RCHBrowser>
+    </div>
   );
 }
 
@@ -343,103 +439,132 @@ function Anim02() {
 function Anim03() {
   const [f, setF] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setF(v => (v + 1) % 6), 1500);
+    const id = setInterval(() => setF(v => (v + 1) % 6), 1550);
     return () => clearInterval(id);
   }, []);
+  // f=0: Overview, f=1: click Monetization, f=2: Game Passes sub shown,
+  // f=3: click "+ Create", f=4: modal typing "VIP", f=5: Save highlighted
 
-  // 0=overview sidebar, 1=click Monetization, 2=Game Passes visible,
-  // 3=click Create a Game Pass, 4=modal typing name, 5=save button highlighted
   const monoExpanded = f >= 2;
-  const passesHighlight = f === 2;
-  const showCreateBtn = f >= 2;
-  const showModal = f >= 4;
-  const typedName = f >= 4 ? (f === 4 ? "VIP|" : "VIP") : "";
-  const saveHighlight = f === 5;
+  const showModal    = f >= 4;
+  const typedName    = f >= 4 ? (f === 4 ? "VIP|" : "VIP") : "";
+  const saveHL       = f === 5;
+
+  // Cursor positions (absolute within the animation container)
+  // Chrome: 24px. Nav item height ~18px each, paddingTop:8, header:13px
+  // Item tops: Overview=45, BasicSettings=63, Monetization=81, GamePasses(sub)=99+12=111
+  // Content starts at x=140, y=24. Padding 8px → first content y=32
+  // Create btn: y=32+15+4=51. Modal input: y~80. Save: y~110
+  const cursorTop  = [45, 81, 111, 51, 80, 110][f];
+  const cursorLeft = [47, 47,  55,152,152, 175][f];
 
   return (
-    <RCHBrowser>
-      <RCHTopNav />
-      <div style={{ display: "flex", background: "#fff", position: "relative" }}>
-        {/* Sidebar */}
-        <div style={{ width: 108, background: "#f5f5f5", borderRight: "1px solid #e0e0e0", padding: "4px 4px", flexShrink: 0 }}>
-          <div style={{ fontSize: 8, color: "#888", padding: "2px 6px 3px", fontWeight: 700 }}>CONFIGURE</div>
-          <SItem label="Overview" active={f === 0} />
-          <SItem label="Basic Settings" />
-          <SItem label="Monetization" active={f >= 1} highlight={f === 1} expanded={monoExpanded} />
-          {monoExpanded && <>
-            <SItem label="Dev Products" sub />
-            <SItem label="Game Passes" sub active={f >= 2} highlight={passesHighlight} />
-            <SItem label="Paid Access" sub />
-          </>}
-          <SItem label="Analytics" />
+    <div style={{
+      marginTop: 12, overflow: "hidden", border: "1px solid #2a2a2a",
+      background: "#111", fontSize: 10, userSelect: "none", position: "relative",
+    }}>
+      {/* Mac chrome */}
+      <div style={{ background: "#1c1c1c", padding: "5px 10px", display: "flex", alignItems: "center", gap: 5, borderBottom: "1px solid #2a2a2a" }}>
+        <div style={{ display: "flex", gap: 4 }}>
+          {(["#ff5f57","#febc2e","#28c840"] as string[]).map((c,i) => (
+            <div key={i} style={{ width:8, height:8, borderRadius:"50%", background:c }} />
+          ))}
+        </div>
+        <div style={{ flex:1, height:14, background:"#2d2d2d", borderRadius:3, marginLeft:6, display:"flex", alignItems:"center", paddingLeft:8, overflow:"hidden" }}>
+          <span style={{ color:"#888", fontSize:8 }}>create.roblox.com · My Game</span>
+        </div>
+      </div>
+
+      <div style={{ display:"flex", minHeight:124 }}>
+        {/* Icon sidebar */}
+        <div style={{ width:40, background:"#181818", borderRight:"1px solid #252525", display:"flex", flexDirection:"column", alignItems:"center", paddingTop:8, gap:3, flexShrink:0 }}>
+          <div style={{ width:22, height:22, background:"#e32f4a", borderRadius:3, display:"flex", alignItems:"center", justifyContent:"center", marginBottom:3 }}>
+            <span style={{ color:"white", fontWeight:900, fontSize:10 }}>R</span>
+          </div>
+          {(["⌂","✦","◈","⊞"] as string[]).map((ic,i) => (
+            <div key={i} style={{ width:26, height:20, display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <span style={{ fontSize:8, color:"#333" }}>{ic}</span>
+            </div>
+          ))}
         </div>
 
-        {/* Main content */}
-        <div style={{ flex: 1, padding: "8px 10px", minHeight: 110, position: "relative" }}>
-          {!showCreateBtn ? (
-            <div style={{ fontSize: 10, color: "#aaa" }}>Select a section from the sidebar.</div>
-          ) : !showModal ? (
+        {/* Text nav */}
+        <div style={{ width:100, background:"#1a1a1a", borderRight:"1px solid #252525", paddingTop:8, flexShrink:0 }}>
+          <div style={{ padding:"0 8px 6px", fontSize:7, color:"#444", fontWeight:700, letterSpacing:"0.08em" }}>CONFIGURE</div>
+          <div style={{ padding:"5px 10px", fontSize:8, color: f===0 ? "#fff" : "#555", background: f===0 ? "#242424" : "transparent", borderLeft: f===0 ? "2px solid #4a9eff" : "2px solid transparent", fontWeight: f===0 ? 700 : 400 }}>Overview</div>
+          <div style={{ padding:"5px 10px", fontSize:8, color:"#555", borderLeft:"2px solid transparent" }}>Basic Settings</div>
+          <div style={{ padding:"5px 10px", fontSize:8, color: f>=1 ? "#fff" : "#555", background: f>=1 ? "#1e1e1e" : "transparent", borderLeft: f>=1 ? "2px solid #4a9eff" : "2px solid transparent", fontWeight: f>=1 ? 700 : 400, display:"flex", justifyContent:"space-between" }}>
+            <span>Monetization</span>
+            {f>=1 && <span style={{ fontSize:7, color:"#555" }}>▾</span>}
+          </div>
+          {monoExpanded && (
             <>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#1a1a1a", marginBottom: 7 }}>Game Passes</div>
-              <div style={{
-                display: "inline-flex", alignItems: "center", gap: 4,
-                background: f === 3 ? "#0a55d4" : "#0e6fff",
-                color: "white", fontWeight: 700, fontSize: 9,
-                padding: "4px 10px", borderRadius: 3,
-                boxShadow: f === 3 ? "0 0 0 3px #0e6fff55" : "none",
-                outline: f === 3 ? "2px solid #0e6fff" : "none",
-                outlineOffset: 1,
-                transition: "all 0.2s",
-              }}>
-                + Create a Game Pass
-              </div>
-              <div style={{ marginTop: 10, textAlign: "center", color: "#bbb", fontSize: 9 }}>No game passes yet.</div>
+              <div style={{ padding:"3px 6px 3px 18px", fontSize:7, color:"#555", borderLeft:"2px solid transparent" }}>Dev Products</div>
+              <div style={{ padding:"3px 6px 3px 18px", fontSize:7, color: f>=2 ? "#4a9eff" : "#555", background: f>=2 ? "#1a2a3a" : "transparent", borderLeft: f>=2 ? "2px solid #4a9eff" : "2px solid transparent", fontWeight: f>=2 ? 700 : 400 }}>Game Passes</div>
+              <div style={{ padding:"3px 6px 3px 18px", fontSize:7, color:"#555", borderLeft:"2px solid transparent" }}>Paid Access</div>
             </>
-          ) : (
-            /* Modal */
-            <div style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 6, padding: "10px 12px", boxShadow: "0 4px 16px rgba(0,0,0,0.12)" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#1a1a1a", marginBottom: 8, borderBottom: "1px solid #eee", paddingBottom: 5 }}>
-                Create Game Pass
-              </div>
-              <div style={{ fontSize: 8, color: "#555", fontWeight: 600, marginBottom: 3 }}>Pass Name <span style={{ color: "#e31e24" }}>*</span></div>
-              <div style={{
-                border: f === 4 ? "2px solid #0e6fff" : "1px solid #ccc",
-                borderRadius: 3, padding: "4px 7px", fontSize: 10, color: "#1a1a1a",
-                background: f === 4 ? "#f8f9ff" : "#fff",
-                marginBottom: 7, transition: "all 0.3s",
-              }}>
-                {typedName || <span style={{ color: "#bbb" }}>Enter pass name…</span>}
-              </div>
-              <div style={{ fontSize: 8, color: "#555", fontWeight: 600, marginBottom: 3 }}>Pass Description <span style={{ color: "#999" }}>(optional)</span></div>
-              <div style={{ border: "1px solid #ccc", borderRadius: 3, padding: "3px 7px", fontSize: 9, color: "#bbb", marginBottom: 8, height: 18 }}>Add a description…</div>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 5 }}>
-                <div style={{ fontSize: 9, fontWeight: 600, color: "#555", background: "#f0f0f0", borderRadius: 3, padding: "4px 10px" }}>Cancel</div>
+          )}
+          <div style={{ padding:"5px 10px", fontSize:8, color:"#555", borderLeft:"2px solid transparent" }}>Analytics</div>
+        </div>
+
+        {/* Content */}
+        <div style={{ flex:1, background:"#111", padding:"8px 10px", minHeight:124, position:"relative" }}>
+          {!showModal ? (
+            f < 2 ? (
+              <div style={{ fontSize:9, color:"#444", marginTop:4 }}>Выбери раздел в боковом меню.</div>
+            ) : (
+              <>
+                <div style={{ fontSize:11, fontWeight:700, color:"#eee", marginBottom:6 }}>Game Passes</div>
                 <div style={{
-                  fontSize: 9, fontWeight: 700, color: "white",
-                  background: saveHighlight ? "#0a55d4" : "#0e6fff",
-                  borderRadius: 3, padding: "4px 10px",
-                  boxShadow: saveHighlight ? "0 0 0 3px #0e6fff55" : "none",
-                  outline: saveHighlight ? "2px solid #0e6fff" : "none",
-                  outlineOffset: 1,
-                  transition: "all 0.3s",
-                }}>Save</div>
+                  display:"inline-flex", alignItems:"center", gap:4,
+                  background: f===3 ? "#0a55d4" : "#0e6fff",
+                  color:"white", fontWeight:700, fontSize:9,
+                  padding:"4px 10px", borderRadius:3,
+                  boxShadow: f===3 ? "0 0 0 3px #0e6fff44" : "none",
+                  transition:"all 0.2s",
+                }}>+ Create a Game Pass</div>
+                <div style={{ marginTop:8, fontSize:8, color:"#333", textAlign:"center" }}>No game passes yet.</div>
+              </>
+            )
+          ) : (
+            <div style={{ background:"#1c1c1c", border:"1px solid #333", borderRadius:5, padding:"10px 12px", boxShadow:"0 4px 20px rgba(0,0,0,0.4)" }}>
+              <div style={{ fontSize:10, fontWeight:700, color:"#eee", marginBottom:7, borderBottom:"1px solid #2a2a2a", paddingBottom:5 }}>Create Game Pass</div>
+              <div style={{ fontSize:7, color:"#888", fontWeight:600, marginBottom:3 }}>Pass Name <span style={{ color:"#e31e24" }}>*</span></div>
+              <div style={{
+                border: f===4 ? "2px solid #4a9eff" : "1px solid #333",
+                borderRadius:3, padding:"4px 7px", fontSize:9, color:"#eee",
+                background: f===4 ? "#0d1520" : "#161616",
+                marginBottom:6, transition:"all 0.3s",
+              }}>
+                {typedName || <span style={{ color:"#444" }}>Enter pass name…</span>}
+              </div>
+              <div style={{ fontSize:7, color:"#888", fontWeight:600, marginBottom:3 }}>Description <span style={{ color:"#555" }}>(optional)</span></div>
+              <div style={{ border:"1px solid #2a2a2a", borderRadius:3, padding:"3px 7px", fontSize:8, color:"#444", marginBottom:7, height:16 }}>Add a description…</div>
+              <div style={{ display:"flex", justifyContent:"flex-end", gap:5 }}>
+                <div style={{ fontSize:8, fontWeight:600, color:"#666", background:"#252525", borderRadius:3, padding:"4px 10px" }}>Cancel</div>
+                <div style={{
+                  fontSize:8, fontWeight:700, color:"white",
+                  background: saveHL ? "#1d4ed8" : "#4a9eff",
+                  borderRadius:3, padding:"4px 10px",
+                  boxShadow: saveHL ? "0 0 0 3px #4a9eff33" : "none",
+                  transition:"all 0.3s",
+                }}>{saveHL ? "✓ Saved!" : "Save"}</div>
               </div>
             </div>
           )}
-        </div>
 
-        {/* Cursor */}
-        <div style={{
-          position: "absolute",
-          top: f === 0 ? 30 : f === 1 ? 55 : f === 2 ? 67 : f === 3 ? 42 : f === 4 ? 72 : 105,
-          left: f === 0 ? 50 : f === 1 ? 55 : f === 2 ? 60 : f === 3 ? 145 : f === 4 ? 145 : 190,
-          pointerEvents: "none", zIndex: 20,
-          transition: "top 0.45s cubic-bezier(0.4,0,0.2,1), left 0.45s cubic-bezier(0.4,0,0.2,1)",
-        }}>
-          <RCursor />
         </div>
       </div>
-    </RCHBrowser>
+
+      {/* Single cursor — absolute within whole animation */}
+      <div style={{
+        position:"absolute", top: cursorTop, left: cursorLeft,
+        pointerEvents:"none", zIndex:20,
+        transition:"top 0.45s cubic-bezier(0.4,0,0.2,1), left 0.45s cubic-bezier(0.4,0,0.2,1)",
+      }}>
+        <RCursor />
+      </div>
+    </div>
   );
 }
 
@@ -812,65 +937,83 @@ function Anim05WB() {
 function Anim06WB() {
   const [f, setF] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setF(v => (v + 1) % 4), 1600);
+    const id = setInterval(() => setF(v => (v + 1) % 5), 1800);
     return () => clearInterval(id);
   }, []);
-  // 0=tg open, 1=pasting link, 2=sending, 3=reply received
+  // f=0: chat open (manager first msg), f=1: user typing link,
+  // f=2: user msg sent, f=3: manager "Спасибо за покупку!", f=4: manager "Выкупаем..."
 
   return (
-    <div className="mt-4 overflow-hidden border border-[#1e2a45]">
-      {/* TG header */}
-      <div style={{ background: "#2d2d2d", padding: "5px 8px", display: "flex", alignItems: "center", gap: 6 }}>
-        <div style={{ display: "flex", gap: 4 }}>
-          <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#ff5f57" }} />
-          <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#ffbd2e" }} />
-          <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#28ca41" }} />
+    <div style={{ marginTop: 12, overflow: "hidden", border: "1px solid #1e2a45" }}>
+      {/* TG-style header */}
+      <div style={{ background: "#232e3c", padding: "6px 10px", display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid #1e2a45" }}>
+        <div style={{ width: 28, height: 28, borderRadius: "50%", background: "linear-gradient(135deg,#229ED9,#0f7ab8)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <svg viewBox="0 0 24 24" fill="white" style={{ width:14, height:14 }}>
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z"/>
+          </svg>
         </div>
-        <div style={{ fontSize: 9, color: "#aaa", fontWeight: 600 }}>Telegram · @RobloxBank_PA</div>
+        <div>
+          <div style={{ fontSize: 9, fontWeight: 700, color: "#eee" }}>@RobloxBank_PA</div>
+          <div style={{ fontSize: 7, color: "#5a7a8a" }}>менеджер · онлайн</div>
+        </div>
       </div>
-      {/* Chat area */}
-      <div style={{ background: "#17212b", padding: "8px 10px", minHeight: 90, position: "relative" }}>
-        <div style={{ fontSize: 8, color: "#666", textAlign: "center", marginBottom: 6 }}>Manager RobloxBank</div>
 
-        {/* Manager message */}
-        <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 5 }}>
-          <div style={{ background: "#182533", border: "1px solid #1e2a45", borderRadius: "2px 8px 8px 8px", padding: "4px 8px", maxWidth: "75%" }}>
-            <div style={{ fontSize: 9, color: "#eee" }}>Привет! Пришли ссылку на геймпасс 👋</div>
-            <div style={{ fontSize: 7, color: "#5f6368", marginTop: 2 }}>10:30</div>
+      {/* Chat area */}
+      <div style={{ background: "#17212b", padding: "8px 10px", paddingBottom: 40, minHeight: 130, position: "relative" }}>
+        <div style={{ fontSize: 7, color: "#445566", textAlign: "center", marginBottom: 8 }}>Сегодня</div>
+
+        {/* Manager first message */}
+        <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 6 }}>
+          <div style={{ background: "#182533", borderRadius: "2px 10px 10px 10px", padding: "5px 9px", maxWidth: "78%" }}>
+            <div style={{ fontSize: 9, color: "#ddd", lineHeight: 1.4 }}>Привет! Пришлите ссылку на геймпасс 👋</div>
+            <div style={{ fontSize: 7, color: "#445566", marginTop: 2, textAlign: "right" }}>10:30</div>
           </div>
         </div>
 
-        {/* User message (appears at frame 1+) */}
+        {/* User sends link (f=1+) */}
         {f >= 1 && (
-          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 5 }}>
-            <div style={{ background: "#2b5278", borderRadius: "8px 2px 8px 8px", padding: "4px 8px", maxWidth: "80%", opacity: f === 1 ? 0.7 : 1, transition: "opacity 0.3s" }}>
-              <div style={{ fontSize: 9, color: "#eee", wordBreak: "break-all" }}>
-                {f === 1 ? "roblox.com/game-pass/1234567…|" : "roblox.com/game-pass/1234567/VIP"}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+            <div style={{ background: "#2b5278", borderRadius: "10px 2px 10px 10px", padding: "5px 9px", maxWidth: "82%", opacity: f===1 ? 0.7 : 1, transition: "opacity 0.3s" }}>
+              <div style={{ fontSize: 9, color: "#eee", wordBreak: "break-all", lineHeight: 1.4 }}>
+                {f===1 ? "roblox.com/game-pass/123…|" : "roblox.com/game-pass/1234567/VIP"}
               </div>
-              <div style={{ fontSize: 7, color: "#5f6368", marginTop: 2, textAlign: "right" }}>
+              <div style={{ fontSize: 7, color: "#4a6a8a", marginTop: 2, textAlign: "right" }}>
                 {f >= 2 ? "10:31 ✓✓" : "10:31"}
               </div>
             </div>
           </div>
         )}
 
-        {/* Manager reply */}
+        {/* Manager: "Спасибо за покупку!" (f=3+) */}
         {f >= 3 && (
-          <div style={{ display: "flex", justifyContent: "flex-start" }}>
-            <div style={{ background: "#182533", border: "1px solid #22c55e33", borderRadius: "2px 8px 8px 8px", padding: "4px 8px", maxWidth: "75%" }}>
-              <div style={{ fontSize: 9, color: "#22c55e" }}>✅ Принято! Выкупаем пасс, ожидайте уведомление.</div>
-              <div style={{ fontSize: 7, color: "#5f6368", marginTop: 2 }}>10:31</div>
+          <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 5 }}>
+            <div style={{ background: "#182533", border: "1px solid #22c55e22", borderRadius: "2px 10px 10px 10px", padding: "5px 9px", maxWidth: "84%" }}>
+              <div style={{ fontSize: 9, color: "#22c55e", fontWeight: 700, marginBottom: 2 }}>✅ Спасибо за покупку!</div>
+              <div style={{ fontSize: 8, color: "#aaa", lineHeight: 1.4 }}>Геймпасс получен, выкупаем прямо сейчас.</div>
+              <div style={{ fontSize: 7, color: "#445566", marginTop: 2 }}>10:31</div>
             </div>
           </div>
         )}
 
-        {/* Input area */}
-        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "#17212b", borderTop: "1px solid #1e2a45", padding: "4px 8px", display: "flex", gap: 5, alignItems: "center" }}>
-          <div style={{ flex: 1, background: "#182533", border: "1px solid #1e2a45", borderRadius: 12, padding: "3px 8px", fontSize: 9, color: f <= 1 ? "#eee" : "#555" }}>
-            {f === 0 ? <span style={{ color: "#555" }}>Сообщение…</span> : f === 1 ? "roblox.com/game-pass/…|" : <span style={{ color: "#555" }}>Сообщение…</span>}
+        {/* Manager: время зачисления (f=4) */}
+        {f >= 4 && (
+          <div style={{ display: "flex", justifyContent: "flex-start" }}>
+            <div style={{ background: "#182533", borderRadius: "2px 10px 10px 10px", padding: "5px 9px", maxWidth: "84%" }}>
+              <div style={{ fontSize: 8, color: "#ddd", lineHeight: 1.4 }}>⏳ Robux поступят на баланс через <span style={{ color: "#4a9eff", fontWeight: 700 }}>5–7 дней</span> по правилам Roblox.</div>
+              <div style={{ fontSize: 7, color: "#445566", marginTop: 2 }}>10:31</div>
+            </div>
           </div>
-          <div style={{ width: 22, height: 22, borderRadius: "50%", background: f === 1 ? "#229ED9" : "#1e2a45", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.3s" }}>
-            <span style={{ fontSize: 10, color: f === 1 ? "white" : "#555" }}>↑</span>
+        )}
+
+        {/* Input bar */}
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "#232e3c", borderTop: "1px solid #1e2a45", padding: "5px 8px", display: "flex", gap: 6, alignItems: "center" }}>
+          <div style={{ flex: 1, background: "#17212b", border: "1px solid #1e2a45", borderRadius: 14, padding: "4px 10px", fontSize: 8, color: f===1 ? "#ddd" : "#445" }}>
+            {f===0 ? <span style={{ color:"#33475a" }}>Сообщение…</span>
+             : f===1 ? "roblox.com/game-pass/123…|"
+             : <span style={{ color:"#33475a" }}>Сообщение…</span>}
+          </div>
+          <div style={{ width: 24, height: 24, borderRadius: "50%", background: f===1 ? "#229ED9" : "#1e2a45", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.3s", flexShrink: 0 }}>
+            <span style={{ fontSize: 11, color: f===1 ? "white" : "#445" }}>↑</span>
           </div>
         </div>
       </div>
@@ -953,55 +1096,34 @@ function StepsGrid({
                 </div>
               )}
 
-              {/* Step 04: calculator + price copy — fully inline */}
+              {/* Step 04: calculator (contains copy + warning inline) */}
               {isStep04 && (
-                <div className="mt-3 space-y-3">
-                  {/* Inline formula calculator */}
+                <div className="mt-3">
                   <FormulaCalculator
                     denomination={denomination}
                     isWB={!!isWB}
                     onPassPriceChange={onPassPriceChange}
+                    onCopyPassPrice={onCopyPassPrice}
+                    priceCopied={priceCopied}
                   />
-
-                  {/* Price + copy + regional pricing warning */}
-                  {passPrice && (
-                    <div className="border-2 border-[#00b06f]/25 bg-[#00b06f]/5 px-4 py-3 space-y-2">
-                      <div className="font-pixel text-[8px] text-[#00b06f]/50 tracking-widest">УСТАНОВИ ЭТУ ЦЕНУ НА ПАСС</div>
-                      {/* Price + inline copy button */}
-                      <div className="flex items-center gap-3">
-                        <span className="text-3xl font-black text-[#00b06f] tracking-tight">{passPrice} <span className="text-xl">R$</span></span>
-                        <button
-                          onClick={onCopyPassPrice}
-                          className="flex items-center gap-1.5 px-3 py-1.5 border border-[#00b06f]/30 hover:border-[#00b06f]/70 hover:bg-[#00b06f]/10 transition-all group/copy"
-                        >
-                          {priceCopied
-                            ? <Check className="w-3.5 h-3.5 text-[#00b06f]" />
-                            : <Copy className="w-3.5 h-3.5 text-[#00b06f]/50 group-hover/copy:text-[#00b06f] transition-all" />
-                          }
-                          <span className="font-pixel text-[7px] text-[#00b06f]/50 group-hover/copy:text-[#00b06f] transition-all">
-                            {priceCopied ? "СКОПИРОВАНО" : "СКОПИРОВАТЬ"}
-                          </span>
-                        </button>
-                      </div>
-                      {/* Regional pricing note */}
-                      <div className="flex gap-2 items-start pt-1 border-t border-[#00b06f]/10">
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                        <p className="text-xs text-amber-300/70 font-semibold leading-snug">
-                          Убери галочку «Enable regional pricing» — иначе Roblox изменит цену для других стран.
-                        </p>
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
 
-              {/* Step animations */}
-              {ANIM_MAP[step.num]?.()}
-              {isStep04 && <Anim04Price passPrice={passPrice} />}
-              {isStep05WB && <Anim05WB />}
-              {isStep06WB && <Anim06WB />}
-              {isStep05Std && <Anim05Standard />}
-              {isStep06Std && <Anim06Standard />}
+              {/* Step animations — wrapper with minHeight prevents layout shift */}
+              {ANIM_MAP[step.num] && (
+                <div style={{ minHeight: 172 }}>
+                  {ANIM_MAP[step.num]!()}
+                </div>
+              )}
+              {isStep04 && (
+                <div style={{ minHeight: 280 }}>
+                  <Anim04Price passPrice={passPrice} />
+                </div>
+              )}
+              {isStep05WB  && <div style={{ minHeight: 150 }}><Anim05WB /></div>}
+              {isStep06WB  && <div style={{ minHeight: 150 }}><Anim06WB /></div>}
+              {isStep05Std && <div style={{ minHeight: 150 }}><Anim05Standard /></div>}
+              {isStep06Std && <div style={{ minHeight: 150 }}><Anim06Standard /></div>}
             </div>
           </div>
         );
@@ -1061,13 +1183,17 @@ function WBManagerBlock({ denomination }: { denomination?: number }) {
         </p>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-4 justify-center max-w-sm mx-auto">
+      <div className="flex flex-col sm:flex-row gap-3 justify-center max-w-xs mx-auto w-full">
         <a
           href="https://t.me/RobloxBank_PA"
           target="_blank" rel="noopener noreferrer"
-          className="flex-1 h-14 flex items-center justify-center gap-3 bg-[#229ED9] hover:bg-[#1a8ec9] transition-colors font-black text-[11px] uppercase tracking-widest text-white"
+          className="flex-1 h-16 sm:h-14 flex items-center justify-center gap-3 rounded-lg font-black text-[12px] uppercase tracking-widest text-white active:scale-95 transition-all"
+          style={{
+            background: "linear-gradient(135deg, #229ED9 0%, #1a8ec9 100%)",
+            boxShadow: "0 4px 16px rgba(34,158,217,0.35), 0 2px 4px rgba(0,0,0,0.3)",
+          }}
         >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0">
             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z"/>
           </svg>
           Telegram
@@ -1075,9 +1201,13 @@ function WBManagerBlock({ denomination }: { denomination?: number }) {
         <a
           href="https://vk.ru/bankroblox"
           target="_blank" rel="noopener noreferrer"
-          className="flex-1 h-14 flex items-center justify-center gap-3 bg-[#0077FF] hover:bg-[#0066ee] transition-colors font-black text-[11px] uppercase tracking-widest text-white"
+          className="flex-1 h-16 sm:h-14 flex items-center justify-center gap-3 rounded-lg font-black text-[12px] uppercase tracking-widest text-white active:scale-95 transition-all"
+          style={{
+            background: "linear-gradient(135deg, #0077FF 0%, #005fcc 100%)",
+            boxShadow: "0 4px 16px rgba(0,119,255,0.35), 0 2px 4px rgba(0,0,0,0.3)",
+          }}
         >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0">
             <path d="M15.684 0H8.316C1.592 0 0 1.592 0 8.316v7.368C0 22.408 1.592 24 8.316 24h7.368C22.408 24 24 22.408 24 15.684V8.316C24 1.592 22.408 0 15.684 0zm3.692 17.123h-1.744c-.66 0-.864-.525-2.05-1.727-1.033-1-1.49-1.135-1.744-1.135-.356 0-.458.102-.458.593v1.575c0 .424-.135.678-1.253.678-1.846 0-3.896-1.118-5.335-3.202C4.624 10.857 4.03 8.57 4.03 8.096c0-.254.102-.491.593-.491h1.744c.44 0 .61.203.78.677.863 2.49 2.303 4.675 2.896 4.675.22 0 .322-.102.322-.66V9.721c-.068-1.186-.695-1.287-.695-1.71 0-.203.169-.407.44-.407h2.744c.373 0 .508.203.508.643v3.473c0 .372.169.508.271.508.22 0 .407-.136.813-.542 1.253-1.406 2.151-3.574 2.151-3.574.119-.254.322-.491.762-.491h1.744c.525 0 .644.27.525.643-.22 1.017-2.354 4.031-2.354 4.031-.186.305-.254.44 0 .78.186.254.796.779 1.203 1.253.745.847 1.32 1.558 1.473 2.05.17.49-.085.745-.576.745z"/>
           </svg>
           ВКонтакте
@@ -1275,10 +1405,10 @@ function WBGate({ onSuccess }: WBGateProps) {
 
 // ─── WB-only static header ─────────────────────────────────────────────────────
 
-function WBStaticHeader() {
+function WBStaticHeader({ denomination, onReset }: { denomination?: number; onReset?: () => void }) {
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-[#c9a84c]/10 bg-[#0a0e1a]/95 backdrop-blur-xl pointer-events-none select-none">
-      <div className="container mx-auto px-4 h-16 flex items-center justify-between">
+    <header className="sticky top-0 z-50 w-full border-b border-[#c9a84c]/10 bg-[#0a0e1a]/95 backdrop-blur-xl select-none">
+      <div className="container mx-auto px-4 h-16 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="relative w-9 h-9 flex-shrink-0">
             <div className="absolute inset-0 bg-[#c9a84c] rounded-[4px]" />
@@ -1293,7 +1423,25 @@ function WBStaticHeader() {
             <span className="text-[11px] font-black uppercase tracking-[0.2em] text-[#c9a84c]">× RobloxBank</span>
           </div>
         </div>
-        <div className="font-pixel text-[9px] text-[#c9a84c]/50 tracking-widest">ИНСТРУКЦИЯ ПО ПОЛУЧЕНИЮ</div>
+
+        {/* Denomination badge */}
+        {denomination && denomination > 0 && (
+          <div className="flex items-center gap-2 px-3 py-1.5 border border-[#c9a84c]/30 bg-[#c9a84c]/10">
+            <span className="font-pixel text-[8px] text-[#c9a84c]/60 tracking-widest hidden sm:block">НОМИНАЛ</span>
+            <span className="font-black text-lg leading-none" style={{ color: "#f0c040" }}>{denomination} R$</span>
+          </div>
+        )}
+
+        {/* Enter new code button */}
+        {onReset && (
+          <button
+            onClick={onReset}
+            className="flex items-center gap-1.5 h-8 px-3 border border-[#c9a84c]/20 hover:border-[#c9a84c]/50 text-[#c9a84c]/50 hover:text-[#c9a84c] transition-all font-black text-[10px] uppercase tracking-widest"
+          >
+            <ArrowRight className="w-3 h-3 rotate-180" />
+            <span className="hidden sm:inline">Новый код</span>
+          </button>
+        )}
       </div>
       <div className="h-[2px] bg-gradient-to-r from-transparent via-[#c9a84c]/30 to-transparent" />
     </header>
@@ -1306,10 +1454,14 @@ function FormulaCalculator({
   denomination,
   isWB,
   onPassPriceChange,
+  onCopyPassPrice,
+  priceCopied,
 }: {
   denomination?: number;
   isWB: boolean;
   onPassPriceChange: (p: number | null) => void;
+  onCopyPassPrice: () => void;
+  priceCopied: boolean;
 }) {
   const [wantedRobux, setWantedRobux] = useState<string>(
     denomination && denomination > 0 ? String(denomination) : "1000"
@@ -1339,8 +1491,26 @@ function FormulaCalculator({
             <div className="text-xs text-zinc-500 uppercase tracking-widest font-black">Цена пасса</div>
           </div>
         </div>
-        <div className="font-pixel text-[9px] text-[#c9a84c]/60 border border-[#c9a84c]/20 bg-[#c9a84c]/5 px-3 py-2 text-center">
-          Установи именно эту цену на геймпасс
+        {/* Copy row */}
+        <div className="mt-2 flex items-center gap-1.5">
+          <span className="font-pixel text-[9px] text-[#00b06f]/50 tracking-wider">УСТАНОВИ ЭТУ ЦЕНУ:</span>
+          <span className="text-2xl font-black text-[#00b06f] tracking-tight ml-1">{fixedPrice}</span>
+          <span className="text-sm font-black text-[#00b06f]/70">R$</span>
+          <button
+            onClick={onCopyPassPrice}
+            title={priceCopied ? "Скопировано!" : "Скопировать"}
+            className="ml-1 p-1.5 rounded-none text-[#00b06f]/30 hover:text-[#00b06f]/80 hover:bg-[#00b06f]/10 transition-all"
+          >
+            {priceCopied ? <Check className="w-3.5 h-3.5 text-[#00b06f]" /> : <Copy className="w-3.5 h-3.5" />}
+          </button>
+          {priceCopied && <span className="text-[10px] text-[#00b06f]/60 font-bold">скопировано</span>}
+        </div>
+        {/* Regional pricing warning */}
+        <div className="mt-3 flex gap-2.5 items-start bg-amber-500/10 border border-amber-500/40 px-3 py-2.5">
+          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <p className="text-sm text-amber-300 font-bold leading-snug">
+            Убери галочку <span className="text-amber-200">«Enable regional pricing»</span> — иначе Roblox изменит цену для других стран.
+          </p>
         </div>
       </div>
     );
@@ -1386,14 +1556,28 @@ function FormulaCalculator({
       </div>
 
       {calcPrice && (
-        <div className="mt-3 flex items-center gap-3 border border-[#00b06f]/20 bg-[#00b06f]/5 px-4 py-3">
-          <div className="w-6 h-6 rounded-none bg-[#00b06f]/15 border border-[#00b06f]/30 flex items-center justify-center flex-shrink-0">
-            <span className="text-[#00b06f] text-xs font-black">↓</span>
+        <div className="mt-3 border border-[#00b06f]/20 bg-[#00b06f]/5 px-4 py-3 space-y-2.5">
+          <div className="font-pixel text-[8px] text-[#00b06f]/40 tracking-widest">УСТАНОВИ ЭТУ ЦЕНУ НА ПАСС</div>
+          {/* Price + copy */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-3xl font-black text-[#00b06f] tracking-tight">{calcPrice}</span>
+            <span className="text-lg font-black text-[#00b06f]/70 mt-1">R$</span>
+            <button
+              onClick={onCopyPassPrice}
+              title={priceCopied ? "Скопировано!" : "Скопировать"}
+              className="ml-1 p-1.5 rounded-none text-[#00b06f]/30 hover:text-[#00b06f]/80 hover:bg-[#00b06f]/10 transition-all"
+            >
+              {priceCopied ? <Check className="w-3.5 h-3.5 text-[#00b06f]" /> : <Copy className="w-3.5 h-3.5" />}
+            </button>
+            {priceCopied && <span className="text-[10px] text-[#00b06f]/60 font-bold">скопировано</span>}
           </div>
-          <p className="text-sm font-black text-white/80 leading-snug">
-            Установи цену <span className="text-[#00b06f]">{calcPrice} R$</span> на геймпасс —
-            в шаге <span className="text-white">04</span> появится кнопка «Скопировать»
-          </p>
+          {/* Regional pricing warning — prominent */}
+          <div className="flex gap-2.5 items-start bg-amber-500/10 border border-amber-500/40 px-3 py-2.5">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-sm text-amber-300 font-bold leading-snug">
+              Убери галочку <span className="text-amber-200">«Enable regional pricing»</span> — иначе Roblox изменит цену для других стран.
+            </p>
+          </div>
         </div>
       )}
     </div>
@@ -1402,7 +1586,7 @@ function FormulaCalculator({
 
 // ─── Instruction page ──────────────────────────────────────────────────────────
 
-function Instruction({ isWB, denomination }: { isWB: boolean; denomination?: number }) {
+function Instruction({ isWB, denomination, onReset }: { isWB: boolean; denomination?: number; onReset?: () => void }) {
   const [passPrice, setPassPrice] = useState<number | null>(
     denomination && denomination > 0 ? Math.ceil(denomination / 0.7) : null
   );
@@ -1428,7 +1612,7 @@ function Instruction({ isWB, denomination }: { isWB: boolean; denomination?: num
 
   return (
     <main className="min-h-screen">
-      {isWB ? <WBStaticHeader /> : <Navbar />}
+      {isWB ? <WBStaticHeader denomination={denomination} onReset={onReset} /> : <Navbar />}
 
       {/* ── HERO ── */}
       <section className="border-b border-[#1e2a45] bg-[#080c18]">
@@ -1702,6 +1886,12 @@ export default function GuideClient({ isWB }: { isWB: boolean }) {
     }
   }, [isWB]);
 
+  const handleWBReset = () => {
+    try { localStorage.removeItem(WB_SESSION_KEY); } catch {}
+    setDenomination(0);
+    setPhase("gate");
+  };
+
   if (phase === "gate") {
     return (
       <WBGate
@@ -1714,5 +1904,5 @@ export default function GuideClient({ isWB }: { isWB: boolean }) {
     );
   }
 
-  return <Instruction isWB={isWB} denomination={denomination} />;
+  return <Instruction isWB={isWB} denomination={denomination} onReset={isWB ? handleWBReset : undefined} />;
 }

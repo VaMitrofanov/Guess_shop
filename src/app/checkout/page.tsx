@@ -181,30 +181,45 @@ function CheckoutContent() {
                         </button>
                     </div>
 
-                    {/* Search */}
-                    <div className="space-y-2">
+                    {/* Search — step indicator */}
+                    <div className="space-y-3">
+                        {/* Mini step line */}
+                        <div className="flex items-center gap-2">
+                            {[
+                              { n: "1", label: "Ник / ссылка", done: !!username },
+                              { n: "2", label: "Игра",          done: !!selectedPlace || (gamepasses.length > 0 && !selectedPlace) },
+                              { n: "3", label: "Геймпасс",      done: !!gamepassId },
+                            ].map((s, i) => (
+                              <div key={i} className="flex items-center gap-1.5">
+                                <div className={`w-5 h-5 flex items-center justify-center font-black text-[9px] transition-all ${s.done ? "bg-[#00b06f] text-white" : "border border-[#1e2a45] text-zinc-500"}`}>{s.n}</div>
+                                <span className={`text-[10px] font-bold uppercase tracking-widest transition-colors ${s.done ? "text-[#00b06f]" : "text-zinc-600"}`}>{s.label}</span>
+                                {i < 2 && <div className="w-4 h-px bg-[#1e2a45]" />}
+                              </div>
+                            ))}
+                        </div>
+
                         <label className="text-xs font-black text-zinc-400 uppercase tracking-[0.2em] flex items-center gap-1.5">
-                            <Search className="w-3.5 h-3.5" /> Поиск геймпасса
+                            <Search className="w-3.5 h-3.5" /> Никнейм или ссылка на пасс
                         </label>
                         <div className="flex gap-2">
                             <input
                                 type="text"
                                 value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
+                                onChange={(e) => { setSearchQuery(e.target.value); }}
                                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                                placeholder="Никнейм или ссылка/ID геймпасса..."
+                                placeholder="PlayerNick123 или roblox.com/game-pass/..."
                                 className="flex-1 h-14 bg-[#080c18] border-2 border-[#1e2a45] focus:border-[#00b06f]/50 rounded-none px-4 outline-none transition-all font-bold text-sm text-white placeholder:text-zinc-600"
                             />
                             <button
                                 onClick={handleSearch}
-                                disabled={searching}
-                                className="h-14 px-6 gold-gradient font-black text-[10px] uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none flex items-center gap-2"
+                                disabled={searching || !searchQuery.trim()}
+                                className="h-14 px-5 gold-gradient font-black text-[10px] uppercase tracking-widest text-white hover:opacity-90 active:scale-[0.98] transition-all rounded-none flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : "НАЙТИ"}
+                                {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Search className="w-4 h-4" /><span className="hidden sm:inline">НАЙТИ</span></>}
                             </button>
                         </div>
-                        <p className="text-[11px] text-zinc-600 font-medium">
-                            Введите никнейм → выберите игру → выберите пасс. Или вставьте прямую ссылку на пасс / его ID.
+                        <p className="text-[11px] text-zinc-600 font-medium leading-relaxed">
+                            По нику: выберешь игру → пасс. По ссылке/ID — сразу найдём пасс.
                         </p>
                     </div>
 
@@ -222,36 +237,37 @@ function CheckoutContent() {
                         </div>
                     )}
 
-                    {/* ── Places grid (step 2 of selection) ── */}
+                    {/* ── Places grid (step 2) ── */}
                     {places.length > 0 && !selectedPlace && gamepasses.length === 0 && (
-                        <div className="space-y-3">
-                            <label className="text-xs font-black text-zinc-400 uppercase tracking-[0.2em] flex items-center gap-1.5">
-                                <LayoutGrid className="w-3.5 h-3.5" />
-                                Выберите игру
-                            </label>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-72 overflow-y-auto">
+                        <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                            <div className="flex items-center gap-2 pb-1">
+                                <LayoutGrid className="w-3.5 h-3.5 text-[#00b06f]" />
+                                <label className="text-xs font-black text-zinc-300 uppercase tracking-[0.2em]">
+                                    Выберите игру
+                                </label>
+                                <span className="ml-auto font-pixel text-[9px] text-zinc-500">{places.length} шт.</span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-64 overflow-y-auto pr-1">
                                 {places.map((place) => (
                                     <button
                                         key={place.universeId}
                                         onClick={() => handleSelectPlace(place)}
-                                        className="pixel-card p-4 text-left flex gap-3 items-center border-2 border-[#1e2a45] hover:border-[#00b06f]/40 hover:bg-[#00b06f]/3 transition-all"
+                                        className="pixel-card p-3 text-left flex gap-3 items-center border-2 border-[#1e2a45] hover:border-[#00b06f]/50 hover:bg-[#00b06f]/5 transition-all group"
                                     >
                                         {place.image ? (
-                                            <div className="w-12 h-12 border border-[#1e2a45] overflow-hidden flex-shrink-0">
+                                            <div className="w-10 h-10 border border-[#1e2a45] overflow-hidden flex-shrink-0 rounded-sm">
                                                 <img src={place.image} alt={place.name} className="w-full h-full object-cover" />
                                             </div>
                                         ) : (
-                                            <div className="w-12 h-12 border border-[#1e2a45] bg-[#080c18] flex items-center justify-center flex-shrink-0">
-                                                <Gamepad2 className="w-5 h-5 text-zinc-600" />
+                                            <div className="w-10 h-10 border border-[#1e2a45] bg-[#080c18] flex items-center justify-center flex-shrink-0">
+                                                <Gamepad2 className="w-4 h-4 text-zinc-600" />
                                             </div>
                                         )}
                                         <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-black truncate uppercase">{place.name}</p>
-                                            <p className="text-xs text-zinc-500 font-medium mt-0.5">
-                                                ID: {place.rootPlaceId}
-                                            </p>
+                                            <p className="text-sm font-black truncate uppercase group-hover:text-white transition-colors">{place.name}</p>
+                                            <p className="text-xs text-zinc-600 font-medium mt-0.5">ID: {place.rootPlaceId}</p>
                                         </div>
-                                        <ChevronRight className="w-4 h-4 text-zinc-600 flex-shrink-0" />
+                                        <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-[#00b06f] transition-colors flex-shrink-0" />
                                     </button>
                                 ))}
                             </div>

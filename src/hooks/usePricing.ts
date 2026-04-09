@@ -10,8 +10,10 @@ interface PricingState {
 }
 
 export function usePricing() {
+  const FIXED_RATE = 0.65;
+
   const [pricing, setPricing] = useState<PricingState>({
-    rubPerRobux: 0.85,
+    rubPerRobux: FIXED_RATE,
     inventory: 0,
     maxLimit: 0,
     loading: true,
@@ -21,16 +23,14 @@ export function usePricing() {
     fetch("/api/pricing")
       .then((r) => r.json())
       .then((data) => {
-        if (data.rubPerRobux) {
-          setPricing({
-            rubPerRobux: data.rubPerRobux,
-            inventory: data.inventory,
-            maxLimit: data.maxLimit,
-            loading: false,
-          });
-        }
+        setPricing({
+          rubPerRobux: FIXED_RATE,
+          inventory: data.inventory ?? 0,
+          maxLimit: data.maxLimit ?? 0,
+          loading: false,
+        });
       })
-      .catch(() => setPricing((p) => ({ ...p, loading: false })));
+      .catch(() => setPricing((p) => ({ ...p, rubPerRobux: FIXED_RATE, loading: false })));
   }, []);
 
   const getPrice = (amountRobux: number) =>
