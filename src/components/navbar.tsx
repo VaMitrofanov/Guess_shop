@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { User, ShieldCheck, Menu, X, BookOpen, ShoppingCart, MessageSquare, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { NavbarLampGlow } from "@/components/ui/lamp";
 
 const NAV_LINKS = [
   { href: "/",           label: "Купить",      icon: ShoppingCart, accent: false },
@@ -23,8 +24,11 @@ export default function Navbar() {
   const isAdmin = (session?.user as any)?.role === "ADMIN";
 
   return (
-    <nav className="sticky top-0 z-50 w-full border-b border-[#00b06f]/10 bg-[#0a0e1a]/90 backdrop-blur-xl">
-      <div className="container mx-auto px-4 h-16 flex items-center justify-between">
+    <nav className="sticky top-0 z-50 w-full border-b border-[#00b06f]/10 bg-[#0a0e1a]/90 backdrop-blur-xl relative">
+      {/* Lamp glow effect — sits behind all navbar content */}
+      <NavbarLampGlow />
+
+      <div className="container mx-auto px-4 h-16 flex items-center justify-between relative z-10">
 
         {/* Logo — pixel block style */}
         <Link href="/" className="flex items-center gap-3 group">

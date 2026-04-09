@@ -3,6 +3,7 @@ import Navbar from "@/components/navbar";
 import Calculator from "@/components/calculator";
 import { Zap, ShieldCheck, Clock, TrendingUp, Users, Check, Star } from "lucide-react";
 import AnoAI from "@/components/ui/animated-shader-background";
+import { GlowCard } from "@/components/ui/spotlight-card";
 
 // Pixel Robux icon
 function RobuxIcon({ className }: { className?: string }) {
@@ -117,11 +118,16 @@ export default function Home() {
               { icon: RobuxIcon, label: "5 000+ заказов", sub: "С 2024 года" },
               { icon: TrendingUp, label: "Лучший курс", sub: "Авто-обновление" },
             ].map(({ icon: Icon, label, sub }) => (
-              <div key={label} className="pixel-card p-4 flex flex-col items-center gap-2 text-center rounded-none">
+              <GlowCard
+                key={label}
+                customSize
+                glowColor="green"
+                className="bg-[#0f1528] p-4 flex flex-col items-center gap-2 text-center"
+              >
                 <Icon className="w-5 h-5 text-[#00b06f]" />
                 <span className="text-xs font-black uppercase tracking-wider text-white">{label}</span>
                 <span className="text-xs text-zinc-500 uppercase tracking-wider">{sub}</span>
-              </div>
+              </GlowCard>
             ))}
           </div>
         </div>
@@ -194,7 +200,12 @@ export default function Home() {
                 color: "#00b06f",
               },
             ].map(({ step, icon, title, desc, link, cta, color }) => (
-              <div key={step} className="pixel-card p-6 space-y-4 rounded-none">
+              <GlowCard
+                key={step}
+                customSize
+                glowColor="green"
+                className="bg-[#0f1528] p-6 space-y-4"
+              >
                 <div className="flex items-center justify-between">
                   <span className="font-pixel text-[10px] tracking-wider" style={{ color }}>{step}</span>
                   <span className="text-2xl">{icon}</span>
@@ -209,7 +220,7 @@ export default function Home() {
                     {cta} →
                   </Link>
                 )}
-              </div>
+              </GlowCard>
             ))}
           </div>
         </div>
@@ -253,7 +264,12 @@ export default function Home() {
               },
 
             ].map(({ title, desc, tag }) => (
-              <div key={title} className="glass border border-[#1e2a45] hover:border-[#00b06f]/20 transition-colors p-6 flex gap-4 rounded-none">
+              <GlowCard
+                key={title}
+                customSize
+                glowColor="green"
+                className="bg-[#0f1528]/80 backdrop-blur-xl p-6 flex gap-4"
+              >
                 <div className="w-2 h-full min-h-[60px] bg-[#00b06f]/20 flex-shrink-0 relative">
                   <div className="absolute top-0 left-0 w-full h-1/2 bg-[#00b06f]" />
                 </div>
@@ -264,7 +280,7 @@ export default function Home() {
                   </div>
                   <p className="text-sm text-zinc-400 font-medium leading-relaxed">{desc}</p>
                 </div>
-              </div>
+              </GlowCard>
             ))}
           </div>
         </div>
