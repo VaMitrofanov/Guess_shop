@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 
 const NAV_LINKS = [
   { href: "/",           label: "Купить",      icon: ShoppingCart, accent: false },
-  { href: "/guide",      label: "Инструкция",  icon: BookOpen,     accent: true  },
+  { href: "/guide",      label: "Инструкция",  icon: BookOpen,     accent: false },
   { href: "/reviews",    label: "Отзывы",      icon: MessageSquare,accent: false },
   { href: "/faq",        label: "FAQ",          icon: HelpCircle,   accent: false },
   { href: "/guarantees", label: "Гарантии",    icon: ShieldCheck,  accent: false },
@@ -103,10 +103,8 @@ export default function Navbar() {
         </div>
       </div>
 
-      {/* Pixel progress line */}
-      <div className="rb-progress">
-        <div className="rb-progress-fill" style={{ width: "100%" }} />
-      </div>
+      {/* Accent separator line */}
+      <div className="accent-line" />
 
       {/* Mobile menu */}
       {isOpen && (

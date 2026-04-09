@@ -136,6 +136,49 @@ body {
   background: linear-gradient(90deg, transparent, rgba(0,176,111,0.35), transparent);
 }
 
+/* ── Page enter animation ──────────────────────────────── */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+.page-enter {
+  animation: page-enter 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ── Top loading bar ───────────────────────────────────── */
+@keyframes loader-slide {
+  0%   { transform: translateX(-100%); }
+  60%  { transform: translateX(-10%);  }
+  100% { transform: translateX(0%);    }
+}
+@keyframes loader-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+.page-loader {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  z-index: 9999;
+  background: linear-gradient(90deg, #00b06f, #00d084, #00b06f);
+  background-size: 200% 100%;
+  animation:
+    loader-slide 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards,
+    loader-fade-out 0.3s ease 1.1s forwards;
+}
+@keyframes loader-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.page-loader::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 30%, rgba(255,255,255,0.4) 50%, transparent 70%);
+  background-size: 200% 100%;
+  animation: loader-shimmer 1s ease infinite;
+}
+
 .rb-progress { height: 4px; background: #1e2a45; overflow: hidden; }
 .rb-progress-fill {
   height: 100%;
@@ -170,6 +213,36 @@ body {
 .animate-delay-100 { animation-delay: 0.1s; }
 .animate-delay-200 { animation-delay: 0.2s; }
 .animate-delay-300 { animation-delay: 0.3s; }
+
+/* ── Step card preview animations ──────────────────────── */
+@keyframes rb-cursor-blink { 0%,100% { opacity:1 } 50% { opacity:0 } }
+@keyframes type-cursor    { 0%,100% { opacity:1 } 50% { opacity:0 } }
+@keyframes url-type       { 0%,10% { width:0 } 55%,90% { width:100% } 100% { width:100% } }
+@keyframes btn-pulse      { 0%,80%,100% { transform:scale(1);background:#00b06f22 }
+                            40% { transform:scale(0.93);background:#00b06f44 } }
+@keyframes game-glow      { 0%,100% { box-shadow:0 0 0 0 #00b06f33 }
+                            50%      { box-shadow:0 0 0 6px #00b06f22 } }
+@keyframes slide-up-fade  { 0%,100% { opacity:0;transform:translateY(6px) }
+                            20%,75%  { opacity:1;transform:translateY(0) } }
+@keyframes copy-done      { 0%,100%{ opacity:0;transform:scale(.8) }
+                            20%,70% { opacity:1;transform:scale(1) } }
+@keyframes step-check-pop { 0%   { transform:scale(0);opacity:0 }
+                            60%  { transform:scale(1.25);opacity:1 }
+                            100% { transform:scale(1);opacity:1  } }
+@keyframes tg-msg         { 0%   { opacity:0;transform:translateX(16px) }
+                            15%,85% { opacity:1;transform:translateX(0) }
+                            100% { opacity:0;transform:translateX(16px) } }
+@keyframes progress-anim  { from { width:0 } to { width:100% } }
+@keyframes kb-type        { 0%,100% { opacity:.3 } 50% { opacity:1 } }
+.anim-url-type        { overflow:hidden;white-space:nowrap;
+                        animation: url-type 3.5s ease-in-out infinite; }
+.anim-type-cursor     { animation: type-cursor .7s ease-in-out infinite; }
+.anim-btn-pulse       { animation: btn-pulse 2.5s ease-in-out infinite; }
+.anim-game-glow       { animation: game-glow 1.8s ease-in-out infinite; }
+.anim-slide-up        { animation: slide-up-fade 3s ease-in-out infinite; }
+.anim-copy-done       { animation: copy-done 2s ease-in-out infinite; }
+.anim-check-pop       { animation: step-check-pop .6s ease both; }
+.anim-tg-msg          { animation: tg-msg 3s ease-in-out infinite; }
 
 /* Gold input — WB code field */
 .wb-input {

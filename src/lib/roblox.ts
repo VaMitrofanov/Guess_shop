@@ -93,7 +93,24 @@ export async function getGamepassDetails(gamepassId: string) {
       }
     }
 
-    console.warn(`[Roblox] getGamepassDetails: all APIs failed for id=${gamepassId}`);
+    // Attempt 4: legacy marketplace productinfo API
+    const res4 = await rFetch(
+      `https://api.roblox.com/marketplace/productinfo?assetId=${gamepassId}`
+    );
+    if (res4.ok) {
+      const d = await res4.json();
+      if (d?.AssetId) {
+        return {
+          id:        String(gamepassId),
+          name:      d.Name ?? "Gamepass",
+          price:     d.PriceInRobux ?? 0,
+          creatorId: d.Creator?.Id ?? 0,
+          isActive:  d.IsForSale ?? false,
+        };
+      }
+    }
+
+    console.warn(`[Roblox] getGamepassDetails: all 4 APIs failed for id=${gamepassId}`);
     return null;
   } catch (error) {
     console.error("[Roblox] getGamepassDetails:", error);
@@ -126,6 +143,80 @@ export async function getGamepassById(gamepassId: string) {
   } catch (error) {
     console.error("[Roblox] getGamepassById:", error);
     return null;
+  }
+}
+
+/** Returns public games (universes) for a given username */
+export async function getUserGames(username: string) {
+  try {
+    const user = await getRobloxUser(username);
+    if (!user) return [];
+
+    const res = await rFetch(
+      `https://games.roblox.com/v2/users/${user.id}/games?accessFilter=Public&limit=25&sortOrder=Desc`
+    );
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    const universes: any[] = data.data ?? [];
+    if (universes.length === 0) return [];
+
+    // Batch-fetch game icons
+    const ids = universes.map((g: any) => g.id).join(",");
+    const thumbRes = await rFetch(
+      `https://thumbnails.roblox.com/v1/games/icons?universeIds=${ids}&returnPolicy=PlaceHolder&size=150x150&format=Png&isCircular=false`
+    );
+    const thumbData = thumbRes.ok ? await thumbRes.json() : { data: [] };
+    const thumbMap = Object.fromEntries(
+      (thumbData.data ?? []).map((t: any) => [String(t.targetId), t.imageUrl])
+    );
+
+    return universes.map((game: any) => ({
+      universeId: String(game.id),
+      rootPlaceId: game.rootPlaceId,
+      name: game.name ?? "Game",
+      image: thumbMap[String(game.id)] ?? null,
+    }));
+  } catch (error) {
+    console.error("[Roblox] getUserGames:", error);
+    return [];
+  }
+}
+
+/** Returns gamepasses for a specific universe ID */
+export async function getUniverseGamepasses(universeId: string) {
+  try {
+    const res = await rFetch(
+      `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes?passView=Full&pageSize=50`
+    );
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    const passes: any[] = data.gamePasses ?? [];
+    if (passes.length === 0) return [];
+
+    // Batch thumbnails
+    const ids = passes.map((gp: any) => gp.id).join(",");
+    const thumbRes = await rFetch(
+      `https://thumbnails.roblox.com/v1/game-passes?gamePassIds=${ids}&size=150x150&format=Png&isCircular=false`
+    );
+    const thumbData = thumbRes.ok ? await thumbRes.json() : { data: [] };
+    const thumbMap = Object.fromEntries(
+      (thumbData.data ?? []).map((t: any) => [t.targetId, t.imageUrl])
+    );
+
+    return passes.map((gp: any) => ({
+      id: gp.id,
+      name: gp.name ?? gp.displayName,
+      price: gp.price ?? 0,
+      productId: gp.productId,
+      image:
+        thumbMap[gp.id] ??
+        `https://www.roblox.com/asset-thumbnail/image?assetId=${gp.id}&width=150&height=150&format=png`,
+    }));
+  } catch (error) {
+    console.error("[Roblox] getUniverseGamepasses:", error);
+    return [];
   }
 }
 

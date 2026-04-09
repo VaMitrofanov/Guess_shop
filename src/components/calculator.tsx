@@ -77,13 +77,10 @@ export default function Calculator() {
               type="number"
               value={robux}
               onChange={(e) => handleRobuxChange(e.target.value)}
-              className="w-full h-16 bg-[#080c18] border-2 border-[#1e2a45] focus:border-[#00b06f]/60 rounded-none px-5 text-2xl font-black outline-none transition-all hover:border-[#1e2a45]/80 text-white"
+              className="w-full h-16 bg-[#080c18] border-2 border-[#1e2a45] focus:border-[#00b06f]/60 rounded-none pl-5 pr-16 text-2xl font-black outline-none transition-all hover:border-[#1e2a45]/80 text-white"
               placeholder="0"
             />
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
-              <RobuxIcon className="w-5 h-5 text-[#00b06f]" />
-              <span className="text-xs font-black text-[#00b06f] uppercase">R$</span>
-            </div>
+            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-2xl font-black text-[#00b06f]">R$</span>
           </div>
         </div>
 

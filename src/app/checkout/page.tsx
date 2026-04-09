@@ -3,7 +3,10 @@
 import { useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Navbar from "@/components/navbar";
-import { User, Gamepad2, Info, ArrowRight, Loader2, Search, CheckCircle2 } from "lucide-react";
+import {
+    User, Gamepad2, Info, ArrowRight, Loader2, Search,
+    CheckCircle2, ChevronRight, LayoutGrid,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePricing } from "@/hooks/usePricing";
 
@@ -35,9 +38,15 @@ function CheckoutContent() {
     const [username, setUsername] = useState("");
     const [method, setMethod] = useState("Gamepass");
     const [gamepassId, setGamepassId] = useState("");
+
+    // Place selection state
+    const [places, setPlaces] = useState<any[]>([]);
+    const [selectedPlace, setSelectedPlace] = useState<any>(null);
+
     const [gamepasses, setGamepasses] = useState<any[]>([]);
     const [selectedGp, setSelectedGp] = useState<any>(null);
     const [searching, setSearching] = useState(false);
+    const [loadingPasses, setLoadingPasses] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
 
@@ -62,21 +71,70 @@ function CheckoutContent() {
         finally { setLoading(false); }
     };
 
+    // Detect if query is a direct gamepass ID or URL
+    function isDirectQuery(q: string): boolean {
+        const trimmed = q.trim();
+        if (/^\d+$/.test(trimmed)) return true;
+        return /game-pass(?:es)?\/\d+/i.test(trimmed) ||
+            /catalog\/\d+/i.test(trimmed) ||
+            /library\/\d+/i.test(trimmed);
+    }
+
     const handleSearch = async () => {
         if (!searchQuery) return;
-        setSearching(true); setGamepasses([]); setError("");
+        setSearching(true);
+        setGamepasses([]); setPlaces([]); setSelectedPlace(null); setSelectedGp(null);
+        setGamepassId(""); setError("");
+
+        if (isDirectQuery(searchQuery)) {
+            // Direct ID or URL → bypass place selection, find gamepass directly
+            try {
+                const res = await fetch(`/api/roblox/gamepasses?query=${encodeURIComponent(searchQuery)}`);
+                const data = await res.json();
+                if (data.success) {
+                    setGamepasses(data.gamepasses);
+                    if (data.gamepasses.length === 0) setError("Геймпасс не найден. Проверьте ссылку или ID.");
+                    else if (data.gamepasses[0]?.creatorName) setUsername(data.gamepasses[0].creatorName);
+                } else {
+                    setError("Ошибка поиска геймпасса");
+                }
+            } catch { setError("Ошибка при поиске"); }
+            finally { setSearching(false); }
+            return;
+        }
+
+        // Username → show places first
         try {
-            const res = await fetch(`/api/roblox/gamepasses?query=${encodeURIComponent(searchQuery)}`);
+            const res = await fetch(`/api/roblox/games?username=${encodeURIComponent(searchQuery.trim())}`);
             const data = await res.json();
-            if (data.success) {
-                setGamepasses(data.gamepasses);
-                if (data.gamepasses.length === 0) setError("Геймпассы не найдены. Проверьте ссылку или никнейм.");
-                else if (data.gamepasses.length === 1 && data.gamepasses[0].creatorName) setUsername(data.gamepasses[0].creatorName);
-                else if (data.detectedUsername) setUsername(data.detectedUsername);
-                else if (!searchQuery.includes("/") && !searchQuery.match(/^\d+$/) && data.gamepasses.length > 0) setUsername(searchQuery.trim());
+            if (data.success && data.games.length > 0) {
+                setPlaces(data.games);
+                setUsername(searchQuery.trim());
+            } else if (data.success && data.games.length === 0) {
+                setError("Игры не найдены. Проверьте никнейм или вставьте ссылку/ID на геймпасс.");
+            } else {
+                setError("Пользователь не найден");
             }
         } catch { setError("Ошибка при поиске"); }
         finally { setSearching(false); }
+    };
+
+    const handleSelectPlace = async (place: any) => {
+        setSelectedPlace(place);
+        setGamepasses([]); setSelectedGp(null); setGamepassId(""); setError("");
+        setLoadingPasses(true);
+        try {
+            const res = await fetch(`/api/roblox/games?universeId=${place.universeId}`);
+            const data = await res.json();
+            if (data.success) {
+                setGamepasses(data.gamepasses);
+                if (data.gamepasses.length === 0)
+                    setError("В этой игре нет геймпассов. Выберите другую или создайте пасс.");
+            } else {
+                setError("Не удалось загрузить геймпассы");
+            }
+        } catch { setError("Ошибка при загрузке геймпассов"); }
+        finally { setLoadingPasses(false); }
     };
 
     return (
@@ -134,7 +192,7 @@ function CheckoutContent() {
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                                placeholder="Никнейм или ссылка на пасс..."
+                                placeholder="Никнейм или ссылка/ID геймпасса..."
                                 className="flex-1 h-14 bg-[#080c18] border-2 border-[#1e2a45] focus:border-[#00b06f]/50 rounded-none px-4 outline-none transition-all font-bold text-sm text-white placeholder:text-zinc-600"
                             />
                             <button
@@ -145,10 +203,13 @@ function CheckoutContent() {
                                 {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : "НАЙТИ"}
                             </button>
                         </div>
+                        <p className="text-[11px] text-zinc-600 font-medium">
+                            Введите никнейм → выберите игру → выберите пасс. Или вставьте прямую ссылку на пасс / его ID.
+                        </p>
                     </div>
 
                     {/* Detected username */}
-                    {username && (
+                    {username && !searching && (
                         <div className="flex items-center gap-3 p-4 border-l-2 border-[#00b06f] bg-[#00b06f]/5">
                             <div className="w-8 h-8 bg-[#00b06f]/20 border border-[#00b06f]/30 flex items-center justify-center font-black text-[#00b06f] text-xs rounded-none">
                                 {username[0].toUpperCase()}
@@ -161,6 +222,69 @@ function CheckoutContent() {
                         </div>
                     )}
 
+                    {/* ── Places grid (step 2 of selection) ── */}
+                    {places.length > 0 && !selectedPlace && gamepasses.length === 0 && (
+                        <div className="space-y-3">
+                            <label className="text-xs font-black text-zinc-400 uppercase tracking-[0.2em] flex items-center gap-1.5">
+                                <LayoutGrid className="w-3.5 h-3.5" />
+                                Выберите игру
+                            </label>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-72 overflow-y-auto">
+                                {places.map((place) => (
+                                    <button
+                                        key={place.universeId}
+                                        onClick={() => handleSelectPlace(place)}
+                                        className="pixel-card p-4 text-left flex gap-3 items-center border-2 border-[#1e2a45] hover:border-[#00b06f]/40 hover:bg-[#00b06f]/3 transition-all"
+                                    >
+                                        {place.image ? (
+                                            <div className="w-12 h-12 border border-[#1e2a45] overflow-hidden flex-shrink-0">
+                                                <img src={place.image} alt={place.name} className="w-full h-full object-cover" />
+                                            </div>
+                                        ) : (
+                                            <div className="w-12 h-12 border border-[#1e2a45] bg-[#080c18] flex items-center justify-center flex-shrink-0">
+                                                <Gamepad2 className="w-5 h-5 text-zinc-600" />
+                                            </div>
+                                        )}
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-sm font-black truncate uppercase">{place.name}</p>
+                                            <p className="text-xs text-zinc-500 font-medium mt-0.5">
+                                                ID: {place.rootPlaceId}
+                                            </p>
+                                        </div>
+                                        <ChevronRight className="w-4 h-4 text-zinc-600 flex-shrink-0" />
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Loading passes */}
+                    {loadingPasses && (
+                        <div className="flex items-center gap-3 p-5 border border-[#1e2a45] text-zinc-400">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span className="text-sm font-bold">Загружаю геймпассы...</span>
+                        </div>
+                    )}
+
+                    {/* Selected place breadcrumb */}
+                    {selectedPlace && gamepasses.length > 0 && (
+                        <div className="flex items-center gap-2 text-xs text-zinc-500 font-bold">
+                            <button
+                                onClick={() => {
+                                    setSelectedPlace(null);
+                                    setGamepasses([]);
+                                    setSelectedGp(null);
+                                    setGamepassId("");
+                                }}
+                                className="hover:text-white transition-colors underline underline-offset-2"
+                            >
+                                {username}
+                            </button>
+                            <ChevronRight className="w-3 h-3" />
+                            <span className="text-white font-black uppercase truncate max-w-[180px]">{selectedPlace.name}</span>
+                        </div>
+                    )}
+
                     {/* Gamepasses grid */}
                     {gamepasses.length > 0 && (
                         <div className="space-y-3">
@@ -168,11 +292,7 @@ function CheckoutContent() {
                                 <label className="text-xs font-black text-zinc-400 uppercase tracking-[0.2em]">
                                     Выберите геймпасс
                                 </label>
-                                {selectedGp && (
-                                    <span className="font-pixel text-[9px] text-[#00b06f]">
-                                        {gamepasses.length} шт.
-                                    </span>
-                                )}
+                                <span className="font-pixel text-[9px] text-zinc-500">{gamepasses.length} шт.</span>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-96 overflow-y-auto">
                                 {gamepasses.map((gp) => {
@@ -194,14 +314,12 @@ function CheckoutContent() {
                                                     : "border-2 border-[#1e2a45] hover:border-[#00b06f]/30 hover:bg-[#00b06f]/3"
                                             )}
                                         >
-                                            {/* Selected checkmark badge */}
                                             {selected && (
                                                 <div className="absolute top-0 right-0 bg-[#00b06f] px-2 py-1 flex items-center gap-1">
                                                     <CheckCircle2 className="w-3 h-3 text-white" />
                                                     <span className="font-pixel text-[8px] text-white leading-none">ВЫБРАН</span>
                                                 </div>
                                             )}
-
                                             <div className={cn(
                                                 "w-12 h-12 overflow-hidden flex-shrink-0 rounded-none border",
                                                 selected ? "border-[#00b06f]/40" : "border-[#1e2a45]"

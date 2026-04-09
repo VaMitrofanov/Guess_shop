@@ -80,13 +80,6 @@ export default function Home() {
           {/* Main headline */}
           <div className="text-center max-w-5xl mx-auto mb-4 space-y-6">
 
-            {/* Pixel-style label */}
-            <div className="flex justify-center">
-              <span className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">
-                ROBLOX BANK v2.0
-              </span>
-            </div>
-
             <h1 className="text-5xl md:text-7xl lg:text-8xl font-black tracking-[-0.04em] leading-[0.88] uppercase">
               Купи{" "}
               <span className="inline-flex items-center gap-3">
@@ -111,7 +104,7 @@ export default function Home() {
           {/* Trust row */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-w-3xl mx-auto">
             {[
-              { icon: Zap, label: "Доставка 24ч", sub: "После оплаты" },
+              { icon: Zap, label: "~10 мин", sub: "Время доставки" },
               { icon: ShieldCheck, label: "Гарантия", sub: "Возврат денег" },
               { icon: RobuxIcon, label: "5 000+ заказов", sub: "С 2024 года" },
               { icon: TrendingUp, label: "Лучший курс", sub: "Авто-обновление" },
@@ -138,7 +131,7 @@ export default function Home() {
             {[
               { value: "5 247", label: "Выполнено заказов", pixel: true },
               { value: "99.8%", label: "Успешных сделок", pixel: true },
-              { value: "< 24ч", label: "Среднее время", pixel: true },
+              { value: "~10 мин", label: "Среднее время", pixel: true },
             ].map(({ value, label }) => (
               <div key={label} className="text-center space-y-2">
                 <div className="font-pixel text-[#00b06f] text-sm md:text-base">{value}</div>
