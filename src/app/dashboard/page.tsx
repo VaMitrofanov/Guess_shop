@@ -72,7 +72,7 @@ export default async function DashboardPage() {
             <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-3">ЛИЧНЫЙ КАБИНЕТ</div>
             <h1 className="text-4xl md:text-5xl font-black uppercase tracking-[-0.03em] leading-none">
               Привет,{" "}
-              <span className="gold-text">{user.name ?? user.email.split("@")[0]}</span>
+              <span className="gold-text">{user.name ?? user.email?.split("@")[0] ?? "User"}</span>
             </h1>
             <p className="text-zinc-400 font-medium mt-2">{user.email}</p>
           </div>
