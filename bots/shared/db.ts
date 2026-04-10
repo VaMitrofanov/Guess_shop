@@ -1,26 +1,53 @@
 /**
- * Prisma client for bot processes.
+ * Universal Prisma client for bot processes.
  *
- * Bots run as long-lived Node.js processes — we use the standard
- * PrismaClient without the Neon/PrismaPg serverless adapter (which is
- * only needed for Vercel edge functions).
+ * Root cause of "engine type 'client' requires adapter":
+ *   Prisma 7.x defaults to engineType = "client" (JS-based, no native binary),
+ *   which always requires a driver adapter — even on a bare VPS.
+ *   prisma.config.ts in the project root locks this in for the whole monorepo.
  *
- * NOTE: Run `npx prisma generate` after any schema migration so the
- * generated types match the new schema fields (vkId, tgId, balance, etc.).
- * Until then all bot code casts to `(db as any)` for new fields.
+ * Solution:
+ *   Mirror exactly what src/lib/prisma.ts does in the web app:
+ *   use PrismaPg (from @prisma/adapter-pg) backed by a standard pg.Pool.
+ *   On Vercel this uses the same Neon TCP endpoint.
+ *   On VPS it uses the same standard TCP connection — no WebSocket needed.
+ *
+ * NOTE: Run `npx prisma generate` after any schema migration.
+ *       Until then, cast to `(db as any)` for new schema fields.
  */
 
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 
-// Singleton so hot-reload (tsx watch) doesn't open multiple connections
-const globalAny = globalThis as Record<string, unknown>;
+function createBotClient(): PrismaClient {
+  if (!process.env.DATABASE_URL) {
+    throw new Error("[bots/db] DATABASE_URL is not set");
+  }
 
-export const db: PrismaClient =
-  (globalAny.__botPrisma as PrismaClient | undefined) ??
-  new PrismaClient({
-    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : [],
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    // Bots are long-lived processes: keep the pool small to avoid
+    // exhausting Neon's connection limit on the free tier.
+    max: 3,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 10_000,
   });
 
-globalAny.__botPrisma = db;
+  const adapter = new PrismaPg(pool);
+
+  return new PrismaClient({
+    adapter,
+    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : [],
+  });
+}
+
+// Singleton: prevents multiple Pool instances on tsx --watch hot-reloads.
+const g = globalThis as Record<string, unknown>;
+
+export const db: PrismaClient =
+  (g.__botPrisma as PrismaClient | undefined) ?? createBotClient();
+
+g.__botPrisma = db;
 
 export default db;

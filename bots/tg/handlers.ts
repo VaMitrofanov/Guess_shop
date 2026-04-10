@@ -6,7 +6,8 @@
  */
 
 import { Telegraf, Markup } from "telegraf";
-import type { User as TGUser } from "telegraf/typings/core/types/typegram";
+// telegraf/types re-exports the full typegram surface (official subpath export)
+import type { User as TGUser } from "telegraf/types";
 import { db } from "../shared/db";
 import { vkSend, stripHtml } from "../shared/notify";
 import { sendAdminOrderCard, sendAdminReviewCard, CB } from "../shared/admin";
@@ -109,7 +110,7 @@ export function registerStart(bot: Telegraf): void {
       `   (формула: ${wbCode.denomination} ÷ 0.7 = ${passPrice})\n` +
       `3. Скопируй ссылку на геймпасс\n` +
       `4. Отправь её сюда 👇`,
-      { parse_mode: "HTML", disable_web_page_preview: true }
+      { parse_mode: "HTML", link_preview_options: { is_disabled: true } }
     );
   });
 }
@@ -162,7 +163,7 @@ export function registerStatus(bot: Telegraf): void {
       `🔗 <a href="${order.gamepassUrl}">Геймпасс</a>\n` +
       `📊 Статус: <b>${label[order.status] ?? order.status}</b>` +
       calmNote,
-      { parse_mode: "HTML", disable_web_page_preview: true }
+      { parse_mode: "HTML", link_preview_options: { is_disabled: true } }
     );
   });
 }
