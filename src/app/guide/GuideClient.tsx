@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { signIn } from "next-auth/react";
 import Link from "next/link";
 import Navbar from "@/components/navbar";
 import {
@@ -14,22 +15,28 @@ import { ParticleTextEffect } from "@/components/ui/particle-text-effect";
 const WB_SESSION_KEY = "rb_wb_session";
 const WB_SESSION_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-function saveWBSession(denomination: number) {
+interface WBSession {
+  denomination: number;
+  code: string;
+  ts: number;
+}
+
+function saveWBSession(denomination: number, code: string) {
   try {
-    localStorage.setItem(WB_SESSION_KEY, JSON.stringify({ denomination, ts: Date.now() }));
+    localStorage.setItem(WB_SESSION_KEY, JSON.stringify({ denomination, code, ts: Date.now() } satisfies WBSession));
   } catch {}
 }
 
-function loadWBSession(): number | null {
+function loadWBSession(): { denomination: number; code: string } | null {
   try {
     const raw = localStorage.getItem(WB_SESSION_KEY);
     if (!raw) return null;
-    const { denomination, ts } = JSON.parse(raw);
+    const { denomination, code, ts } = JSON.parse(raw) as WBSession;
     if (Date.now() - ts > WB_SESSION_TTL) {
       localStorage.removeItem(WB_SESSION_KEY);
       return null;
     }
-    return denomination > 0 ? denomination : null;
+    return denomination > 0 ? { denomination, code: code ?? "" } : null;
   } catch {
     return null;
   }
@@ -1150,7 +1157,7 @@ function StepsGrid({
 
 // ─── WB Manager done block ─────────────────────────────────────────────────────
 
-function WBManagerBlock({ denomination }: { denomination?: number }) {
+function WBManagerBlock({ denomination, code }: { denomination?: number; code?: string }) {
   const passPrice = denomination && denomination > 0 ? Math.ceil(denomination / 0.7) : null;
 
   return (
@@ -1185,8 +1192,9 @@ function WBManagerBlock({ denomination }: { denomination?: number }) {
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3 justify-center max-w-xs mx-auto w-full">
+        {/* Telegram — deep-link with WB code as start parameter */}
         <a
-          href="https://t.me/RobloxBank_PA"
+          href={code ? `https://t.me/RobloxBank_PA?start=${code}` : "https://t.me/RobloxBank_PA"}
           target="_blank" rel="noopener noreferrer"
           className="flex-1 h-16 sm:h-14 flex items-center justify-center gap-3 rounded-lg font-black text-[12px] uppercase tracking-widest text-white active:scale-95 transition-all"
           style={{
@@ -1199,10 +1207,18 @@ function WBManagerBlock({ denomination }: { denomination?: number }) {
           </svg>
           Telegram
         </a>
-        <a
-          href="https://vk.ru/bankroblox"
-          target="_blank" rel="noopener noreferrer"
-          className="flex-1 h-16 sm:h-14 flex items-center justify-center gap-3 rounded-lg font-black text-[12px] uppercase tracking-widest text-white active:scale-95 transition-all"
+
+        {/* VK — OAuth corridor: save code in cookie, then trigger VK sign-in */}
+        <button
+          type="button"
+          onClick={() => {
+            if (code) {
+              // SameSite=Lax keeps the cookie through the OAuth redirect chain
+              document.cookie = `wb_code=${code}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+            }
+            signIn("vk", { callbackUrl: "/api/wb-link" });
+          }}
+          className="flex-1 h-16 sm:h-14 flex items-center justify-center gap-3 rounded-lg font-black text-[12px] uppercase tracking-widest text-white active:scale-95 transition-all cursor-pointer"
           style={{
             background: "linear-gradient(135deg, #0077FF 0%, #005fcc 100%)",
             boxShadow: "0 4px 16px rgba(0,119,255,0.35), 0 2px 4px rgba(0,0,0,0.3)",
@@ -1212,7 +1228,7 @@ function WBManagerBlock({ denomination }: { denomination?: number }) {
             <path d="M15.684 0H8.316C1.592 0 0 1.592 0 8.316v7.368C0 22.408 1.592 24 8.316 24h7.368C22.408 24 24 22.408 24 15.684V8.316C24 1.592 22.408 0 15.684 0zm3.692 17.123h-1.744c-.66 0-.864-.525-2.05-1.727-1.033-1-1.49-1.135-1.744-1.135-.356 0-.458.102-.458.593v1.575c0 .424-.135.678-1.253.678-1.846 0-3.896-1.118-5.335-3.202C4.624 10.857 4.03 8.57 4.03 8.096c0-.254.102-.491.593-.491h1.744c.44 0 .61.203.78.677.863 2.49 2.303 4.675 2.896 4.675.22 0 .322-.102.322-.66V9.721c-.068-1.186-.695-1.287-.695-1.71 0-.203.169-.407.44-.407h2.744c.373 0 .508.203.508.643v3.473c0 .372.169.508.271.508.22 0 .407-.136.813-.542 1.253-1.406 2.151-3.574 2.151-3.574.119-.254.322-.491.762-.491h1.744c.525 0 .644.27.525.643-.22 1.017-2.354 4.031-2.354 4.031-.186.305-.254.44 0 .78.186.254.796.779 1.203 1.253.745.847 1.32 1.558 1.473 2.05.17.49-.085.745-.576.745z"/>
           </svg>
           ВКонтакте
-        </a>
+        </button>
       </div>
 
       <div className="flex items-center justify-center gap-2 mt-6">
@@ -1249,7 +1265,7 @@ function StandardDoneBlock() {
 // ─── WB Gate Screen ────────────────────────────────────────────────────────────
 
 interface WBGateProps {
-  onSuccess: (denomination: number) => void;
+  onSuccess: (denomination: number, code: string) => void;
 }
 
 function WBGate({ onSuccess }: WBGateProps) {
@@ -1282,8 +1298,8 @@ function WBGate({ onSuccess }: WBGateProps) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error ?? "Ошибка отправки");
       const denomination = data.denomination ?? 0;
-      saveWBSession(denomination);
-      onSuccess(denomination);
+      saveWBSession(denomination, code);
+      onSuccess(denomination, code);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Неизвестная ошибка";
       setError(msg);
@@ -1592,7 +1608,7 @@ function FormulaCalculator({
 
 // ─── Instruction page ──────────────────────────────────────────────────────────
 
-function Instruction({ isWB, denomination, onReset }: { isWB: boolean; denomination?: number; onReset?: () => void }) {
+function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; denomination?: number; code?: string; onReset?: () => void }) {
   const [passPrice, setPassPrice] = useState<number | null>(
     denomination && denomination > 0 ? Math.ceil(denomination / 0.7) : null
   );
@@ -1732,7 +1748,7 @@ function Instruction({ isWB, denomination, onReset }: { isWB: boolean; denominat
           priceCopied={priceCopied}
           onPassPriceChange={setPassPrice}
         />
-        {isWB ? <WBManagerBlock denomination={denomination} /> : <StandardDoneBlock />}
+        {isWB ? <WBManagerBlock denomination={denomination} code={code} /> : <StandardDoneBlock />}
       </section>
 
       {/* WB: no extra sections */}
@@ -1930,6 +1946,7 @@ export default function GuideClient({ isWB }: { isWB: boolean }) {
     isWB ? "intro" : "instruction"
   );
   const [denomination, setDenomination] = useState<number>(0);
+  const [activeCode, setActiveCode] = useState<string>("");
 
   // Restore WB session from localStorage on mount —
   // skip intro if the user already activated a code this session
@@ -1937,7 +1954,8 @@ export default function GuideClient({ isWB }: { isWB: boolean }) {
     if (!isWB) return;
     const saved = loadWBSession();
     if (saved !== null) {
-      setDenomination(saved);
+      setDenomination(saved.denomination);
+      setActiveCode(saved.code);
       setPhase("instruction");
     }
   }, [isWB]);
@@ -1945,6 +1963,7 @@ export default function GuideClient({ isWB }: { isWB: boolean }) {
   const handleWBReset = () => {
     try { localStorage.removeItem(WB_SESSION_KEY); } catch {}
     setDenomination(0);
+    setActiveCode("");
     setPhase("gate");
   };
 
@@ -1955,14 +1974,22 @@ export default function GuideClient({ isWB }: { isWB: boolean }) {
   if (phase === "gate") {
     return (
       <WBGate
-        onSuccess={(d) => {
-          saveWBSession(d);
+        onSuccess={(d, c) => {
+          saveWBSession(d, c);
           setDenomination(d);
+          setActiveCode(c);
           setPhase("instruction");
         }}
       />
     );
   }
 
-  return <Instruction isWB={isWB} denomination={denomination} onReset={isWB ? handleWBReset : undefined} />;
+  return (
+    <Instruction
+      isWB={isWB}
+      denomination={denomination}
+      code={activeCode}
+      onReset={isWB ? handleWBReset : undefined}
+    />
+  );
 }

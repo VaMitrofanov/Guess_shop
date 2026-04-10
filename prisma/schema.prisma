@@ -8,14 +8,21 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  password  String
-  name      String?
-  role      String   @default("USER")
-  orders    Order[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                 String    @id @default(cuid())
+  vkId               String?   @unique
+  tgId               String?   @unique
+  email              String?   @unique
+  password           String?
+  name               String?
+  image              String?
+  balance            Int       @default(0)
+  role               String    @default("USER")
+  reviewBonusClaimed Boolean   @default(false)
+  orders             Order[]
+  wbCodes            WbCode[]
+  wbOrders           WbOrder[]
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 }
 
 model Product {
@@ -57,6 +64,36 @@ model Order {
   updatedAt          DateTime    @updatedAt
 }
 
+enum Platform {
+  VK
+  TG
+}
+
+enum WbOrderStatus {
+  PENDING
+  COMPLETED
+  REJECTED
+}
+
+/// WB withdrawal order: tracks gamepass link submissions from WB card buyers.
+model WbOrder {
+  id          String        @id @default(cuid())
+  amount      Int
+  gamepassUrl String
+  status      WbOrderStatus @default(PENDING)
+  platform    Platform
+  userId      String
+  user        User          @relation(fields: [userId], references: [id])
+  wbCode      String
+  adminId     String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([wbCode])
+}
+
 model FAQ {
   id        String   @id @default(cuid())
   question  String
@@ -77,18 +114,12 @@ model Review {
   updatedAt  DateTime @updatedAt
 }
 
-// --- NEW MODELS ---
-
 /// Stores the latest scraped data from each supplier marketplace.
 model MarketRate {
   id        String   @id @default(cuid())
-  /// Unique identifier for the provider, e.g. "rbx120h" or "bossrobux"
   provider  String   @unique
-  /// Rate in USD per 1000 Robux (or per transaction unit as seen on site)
   rateUSD   Float
-  /// Total Robux available on the platform
   inventory Int
-  /// Maximum Robux purchasable in one transaction
   maxLimit  Int
   updatedAt DateTime @updatedAt
 
@@ -99,28 +130,25 @@ model MarketRate {
 /// Always upsert with id = "global".
 model GlobalSettings {
   id          String   @id @default("global")
-  /// Current USD → RUB exchange rate fetched from external API
   usdToRub    Float
   lastUpdated DateTime @updatedAt
 }
 
 /// Activation codes printed on Wildberries card inserts.
-/// Each code is tied to a fixed Robux denomination and can only be used once.
 model WbCode {
-  id           String    @id @default(cuid())
-  /// The printed code — uppercase alphanumeric, e.g. "L8B4Y35"
-  code         String    @unique
-  /// Robux denomination: 300 | 500 | 800 | 1000 | 1200 | 2000 (extensible)
-  denomination Int
-  /// Whether this code has already been activated by a buyer
-  isUsed       Boolean   @default(false)
-  /// Timestamp of activation (null until used)
-  usedAt       DateTime?
-  /// Internal batch/series label — useful when loading multiple sets at once
-  batch        String?
-  createdAt    DateTime  @default(now())
+  id                 String    @id @default(cuid())
+  code               String    @unique
+  denomination       Int
+  isUsed             Boolean   @default(false)
+  usedAt             DateTime?
+  batch              String?
+  reviewBonusClaimed Boolean   @default(false)
+  userId             String?
+  user               User?     @relation(fields: [userId], references: [id])
+  createdAt          DateTime  @default(now())
 
   @@index([code])
   @@index([isUsed])
   @@index([denomination])
+  @@index([userId])
 }
