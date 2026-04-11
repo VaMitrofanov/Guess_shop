@@ -46,8 +46,12 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Clear the cookie and redirect back to the WB guide
-  const response = NextResponse.redirect(new URL(GUIDE_URL, request.url));
+  // Redirect to VK group messages with the reference code
+  const targetUrl = wbCode 
+    ? `https://vk.me/bankroblox?ref=${wbCode}`
+    : "https://vk.me/bankroblox";
+
+  const response = NextResponse.redirect(new URL(targetUrl));
   response.cookies.set("wb_code", "", { maxAge: 0, path: "/" });
   return response;
 }

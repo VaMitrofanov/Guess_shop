@@ -1161,85 +1161,84 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
   const passPrice = denomination && denomination > 0 ? Math.ceil(denomination / 0.7) : null;
 
   return (
-    <div className="pixel-card border-2 border-amber-500/30 bg-amber-500/5 p-8 mt-4">
-      <div className="text-center mb-8">
-        <div className="w-16 h-16 border-2 border-amber-500/40 bg-amber-500/10 flex items-center justify-center mx-auto mb-4">
-          <Send className="w-8 h-8 text-amber-400" />
+    <div className="pixel-card border-2 border-[#c9a84c]/30 bg-[#c9a84c]/5 p-8 sm:p-12 mt-8 relative overflow-hidden group">
+      {/* Background glow effects */}
+      <div className="absolute -top-24 -right-24 w-64 h-64 bg-[#c9a84c]/10 rounded-full blur-[80px] pointer-events-none" />
+      <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-[#c9a84c]/5 rounded-full blur-[80px] pointer-events-none" />
+
+      <div className="relative z-10 text-center mb-10">
+        <div className="w-20 h-20 border-2 border-[#c9a84c]/40 bg-[#c9a84c]/10 flex items-center justify-center mx-auto mb-6 relative">
+          <Send className="w-10 h-10 text-[#c9a84c] animate-pulse" />
+          <div className="absolute inset-0 border border-[#c9a84c]/20 scale-125 opacity-20" />
         </div>
-        <div className="font-pixel text-[10px] text-amber-500/60 tracking-wider mb-3">ПОСЛЕДНИЙ ШАГ</div>
+        
+        <div className="font-pixel text-[10px] text-[#c9a84c]/60 tracking-[0.3em] mb-4 uppercase">
+          Finalizing Order
+        </div>
 
         {denomination && passPrice ? (
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-6">
-            <div className="inline-flex items-center gap-3 border border-[#c9a84c]/40 bg-[#c9a84c]/10 px-5 py-3">
-              <span className="font-pixel text-[9px] text-[#c9a84c]/60">ПОЛУЧИШЬ</span>
-              <span className="text-3xl font-black" style={{ color: "#f0c040" }}>{denomination} R$</span>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-6 mb-10">
+            <div className="flex flex-col items-center gap-1 border-2 border-[#c9a84c]/20 bg-[#c9a84c]/5 px-8 py-4 min-w-[180px]">
+              <span className="font-pixel text-[8px] text-[#c9a84c]/40">YOU RECEIVE</span>
+              <span className="text-4xl font-black text-white">{denomination} R$</span>
             </div>
-            <div className="text-amber-500/40 font-black text-xl hidden sm:block">→</div>
-            <div className="inline-flex items-center gap-3 border border-amber-500/30 bg-amber-500/10 px-5 py-3">
-              <span className="font-pixel text-[9px] text-amber-500/60">ЦЕНА ПАССА</span>
-              <span className="text-3xl font-black text-amber-300">{passPrice} R$</span>
+            <div className="bg-[#c9a84c]/20 w-8 h-[2px] hidden sm:block" />
+            <div className="flex flex-col items-center gap-1 border-2 border-[#c9a84c]/40 bg-[#c9a84c]/10 px-8 py-4 min-w-[180px]">
+              <span className="font-pixel text-[8px] text-[#c9a84c]/60">PASS PRICE</span>
+              <span className="text-4xl font-black text-[#f0c040]">{passPrice} R$</span>
             </div>
           </div>
         ) : null}
 
-        <h3 className="text-3xl font-black uppercase tracking-tight text-amber-200 mb-3">
-          Отправь ссылку менеджеру
+        <h3 className="text-3xl md:text-4xl font-black uppercase tracking-tight text-white mb-4">
+          Почти готово!
         </h3>
-        <p className="text-amber-200/70 font-medium text-base max-w-md mx-auto leading-relaxed">
-          Скопируй ссылку на геймпасс и отправь нам — менеджер выкупит пасс
-          и пришлёт подтверждение. Robux поступят через 5–7 дней.
+        <p className="text-zinc-400 font-medium text-base max-w-lg mx-auto leading-relaxed">
+          Чтобы мы могли выкупить ваш геймпасс, отправьте ссылку на него боту в Telegram или нашему сообществу ВКонтакте.
         </p>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3 justify-center max-w-xs mx-auto w-full">
-        {/* Telegram — deep-link with WB code as start parameter */}
+      <div className="relative z-10 flex flex-col md:flex-row gap-4 justify-center max-w-2xl mx-auto w-full">
+        {/* Telegram Button */}
         <a
-          href={code ? `https://t.me/RobloxBank_PA?start=${code}` : "https://t.me/RobloxBank_PA"}
+          href={code ? `https://t.me/wb228_notifier_bot?start=${code}` : "https://t.me/wb228_notifier_bot"}
           target="_blank" rel="noopener noreferrer"
-          className="flex-1 h-16 sm:h-14 flex items-center justify-center gap-3 rounded-lg font-black text-[12px] uppercase tracking-widest text-white active:scale-95 transition-all"
-          style={{
-            background: "linear-gradient(135deg, #229ED9 0%, #1a8ec9 100%)",
-            boxShadow: "0 4px 16px rgba(34,158,217,0.35), 0 2px 4px rgba(0,0,0,0.3)",
-          }}
+          className="flex-1 h-16 flex items-center justify-center gap-4 border-2 border-[#229ED9]/30 bg-[#229ED9]/10 hover:bg-[#229ED9]/20 hover:border-[#229ED9]/60 transition-all font-black text-[13px] uppercase tracking-widest text-white group/btn"
         >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0">
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 flex-shrink-0 text-[#229ED9] group-hover/btn:scale-110 transition-transform">
             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z"/>
           </svg>
-          Telegram
+          Получить с помощью ТГ
         </a>
 
-        {/* VK — OAuth corridor: save code in cookie, then trigger VK sign-in */}
+        {/* VK Button */}
         <button
           type="button"
           onClick={() => {
             if (code) {
-              // SameSite=Lax keeps the cookie through the OAuth redirect chain
               document.cookie = `wb_code=${code}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
             }
             signIn("vk", { callbackUrl: "/api/wb-link" });
           }}
-          className="flex-1 h-16 sm:h-14 flex items-center justify-center gap-3 rounded-lg font-black text-[12px] uppercase tracking-widest text-white active:scale-95 transition-all cursor-pointer"
-          style={{
-            background: "linear-gradient(135deg, #0077FF 0%, #005fcc 100%)",
-            boxShadow: "0 4px 16px rgba(0,119,255,0.35), 0 2px 4px rgba(0,0,0,0.3)",
-          }}
+          className="flex-1 h-16 flex items-center justify-center gap-4 border-2 border-[#0077FF]/30 bg-[#0077FF]/10 hover:bg-[#0077FF]/20 hover:border-[#0077FF]/60 transition-all font-black text-[13px] uppercase tracking-widest text-white group/btn cursor-pointer"
         >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0">
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 flex-shrink-0 text-[#0077FF] group-hover/btn:scale-110 transition-transform">
             <path d="M15.684 0H8.316C1.592 0 0 1.592 0 8.316v7.368C0 22.408 1.592 24 8.316 24h7.368C22.408 24 24 22.408 24 15.684V8.316C24 1.592 22.408 0 15.684 0zm3.692 17.123h-1.744c-.66 0-.864-.525-2.05-1.727-1.033-1-1.49-1.135-1.744-1.135-.356 0-.458.102-.458.593v1.575c0 .424-.135.678-1.253.678-1.846 0-3.896-1.118-5.335-3.202C4.624 10.857 4.03 8.57 4.03 8.096c0-.254.102-.491.593-.491h1.744c.44 0 .61.203.78.677.863 2.49 2.303 4.675 2.896 4.675.22 0 .322-.102.322-.66V9.721c-.068-1.186-.695-1.287-.695-1.71 0-.203.169-.407.44-.407h2.744c.373 0 .508.203.508.643v3.473c0 .372.169.508.271.508.22 0 .407-.136.813-.542 1.253-1.406 2.151-3.574 2.151-3.574.119-.254.322-.491.762-.491h1.744c.525 0 .644.27.525.643-.22 1.017-2.354 4.031-2.354 4.031-.186.305-.254.44 0 .78.186.254.796.779 1.203 1.253.745.847 1.32 1.558 1.473 2.05.17.49-.085.745-.576.745z"/>
           </svg>
-          ВКонтакте
+          Получить с помощью ВК
         </button>
       </div>
 
-      <div className="flex items-center justify-center gap-2 mt-6">
-        <AlertTriangle className="w-3.5 h-3.5 text-amber-500/50" />
-        <p className="text-amber-500/50 text-xs font-black uppercase tracking-widest">
-          Не удаляй геймпасс до подтверждения · Среднее время ответа — 10 минут
+      <div className="relative z-10 flex items-center justify-center gap-2 mt-8 opacity-60">
+        <AlertTriangle className="w-4 h-4 text-[#c9a84c]" />
+        <p className="text-[#c9a84c] text-[10px] font-black uppercase tracking-widest text-center">
+          Среднее время ответа — 10 минут • Работаем круглосуточно
         </p>
       </div>
     </div>
   );
 }
+
 
 function StandardDoneBlock() {
   return (
