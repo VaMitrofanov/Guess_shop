@@ -173,11 +173,19 @@ export function ParticleTextEffect({
 
     // Scale font to canvas width so it always fills nicely
     const fontSize = Math.round(Math.min(canvas.width / 6.5, 160))
+    const lines = word.split("\n")
+    const lineSpacing = 1.1
+    const totalLinesHeight = (lines.length - 1) * fontSize * lineSpacing
+
     octx.fillStyle    = "white"
     octx.font         = `bold ${fontSize}px Arial`
     octx.textAlign    = "center"
     octx.textBaseline = "middle"
-    octx.fillText(word, canvas.width / 2, canvas.height / 2)
+
+    lines.forEach((line, i) => {
+      const yOffset = (i * fontSize * lineSpacing) - (totalLinesHeight / 2)
+      octx.fillText(line.trim(), canvas.width / 2, (canvas.height / 2) + yOffset)
+    })
 
     const { data: pixels } = octx.getImageData(0, 0, canvas.width, canvas.height)
     const newColor = { r: Math.random() * 255, g: Math.random() * 255, b: Math.random() * 255 }

@@ -1,4 +1,5 @@
 import Navbar from "@/components/navbar";
+import Footer from "@/components/footer";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import FAQClient from "@/components/faq-client";
@@ -45,6 +46,8 @@ export default async function FAQPage() {
           </Link>
         </div>
       </section>
+      
+      <Footer />
     </main>
   );
 }

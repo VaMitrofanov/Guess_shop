@@ -1262,6 +1262,51 @@ function StandardDoneBlock() {
   );
 }
 
+// ─── WB-only static header ─────────────────────────────────────────────────────
+
+function WBStaticHeader({ denomination, onReset }: { denomination?: number; onReset?: () => void }) {
+  return (
+    <header className="sticky top-0 z-50 w-full border-b border-[#c9a84c]/10 bg-[#0a0e1a]/95 backdrop-blur-xl select-none">
+      <div className="container mx-auto px-4 h-16 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="relative w-9 h-9 flex-shrink-0">
+            <div className="absolute inset-0 bg-[#c9a84c] rounded-[4px]" />
+            <div className="absolute top-0 right-0 w-2 h-2 bg-[#0a0e1a] rounded-none" />
+            <div className="absolute bottom-0 left-0 w-2 h-2 bg-[#0a0e1a] rounded-none" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-[#0a0e1a] font-black text-[11px] tracking-wider relative z-10">WB</span>
+            </div>
+          </div>
+          <div className="hidden sm:flex flex-col leading-none">
+            <span className="text-[11px] font-black uppercase tracking-[0.2em] text-white">Wildberries</span>
+            <span className="text-[11px] font-black uppercase tracking-[0.2em] text-[#c9a84c]">× RobloxBank</span>
+          </div>
+        </div>
+
+        {/* Denomination badge */}
+        {denomination && denomination > 0 && (
+          <div className="flex items-center gap-2 px-3 py-1.5 border border-[#c9a84c]/30 bg-[#c9a84c]/10">
+            <span className="font-pixel text-[8px] text-[#c9a84c]/60 tracking-widest hidden sm:block">НОМИНАЛ</span>
+            <span className="font-black text-lg leading-none" style={{ color: "#f0c040" }}>{denomination} R$</span>
+          </div>
+        )}
+
+        {/* Enter new code button */}
+        {onReset && (
+          <button
+            onClick={onReset}
+            className="flex items-center gap-1.5 h-8 px-3 border border-[#c9a84c]/20 hover:border-[#c9a84c]/50 text-[#c9a84c]/50 hover:text-[#c9a84c] transition-all font-black text-[10px] uppercase tracking-widest"
+          >
+            <ArrowRight className="w-3 h-3 rotate-180" />
+            <span className="hidden sm:inline">Новый код</span>
+          </button>
+        )}
+      </div>
+      <div className="h-[2px] bg-gradient-to-r from-transparent via-[#c9a84c]/30 to-transparent" />
+    </header>
+  );
+}
+
 // ─── WB Gate Screen ────────────────────────────────────────────────────────────
 
 interface WBGateProps {
@@ -1310,7 +1355,8 @@ function WBGate({ onSuccess }: WBGateProps) {
 
   return (
     <main className="min-h-screen flex flex-col">
-      <Navbar />
+      <WBStaticHeader />
+
 
       <div className="flex-1 flex items-center justify-center px-4 py-16 bg-[#080c18]">
         <div className="fixed inset-0 opacity-[0.02] pointer-events-none"
@@ -1418,51 +1464,6 @@ function WBGate({ onSuccess }: WBGateProps) {
         </div>
       </div>
     </main>
-  );
-}
-
-// ─── WB-only static header ─────────────────────────────────────────────────────
-
-function WBStaticHeader({ denomination, onReset }: { denomination?: number; onReset?: () => void }) {
-  return (
-    <header className="sticky top-0 z-50 w-full border-b border-[#c9a84c]/10 bg-[#0a0e1a]/95 backdrop-blur-xl select-none">
-      <div className="container mx-auto px-4 h-16 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="relative w-9 h-9 flex-shrink-0">
-            <div className="absolute inset-0 bg-[#c9a84c] rounded-[4px]" />
-            <div className="absolute top-0 right-0 w-2 h-2 bg-[#0a0e1a] rounded-none" />
-            <div className="absolute bottom-0 left-0 w-2 h-2 bg-[#0a0e1a] rounded-none" />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-[#0a0e1a] font-black text-[11px] tracking-wider relative z-10">WB</span>
-            </div>
-          </div>
-          <div className="hidden sm:flex flex-col leading-none">
-            <span className="text-[11px] font-black uppercase tracking-[0.2em] text-white">Wildberries</span>
-            <span className="text-[11px] font-black uppercase tracking-[0.2em] text-[#c9a84c]">× RobloxBank</span>
-          </div>
-        </div>
-
-        {/* Denomination badge */}
-        {denomination && denomination > 0 && (
-          <div className="flex items-center gap-2 px-3 py-1.5 border border-[#c9a84c]/30 bg-[#c9a84c]/10">
-            <span className="font-pixel text-[8px] text-[#c9a84c]/60 tracking-widest hidden sm:block">НОМИНАЛ</span>
-            <span className="font-black text-lg leading-none" style={{ color: "#f0c040" }}>{denomination} R$</span>
-          </div>
-        )}
-
-        {/* Enter new code button */}
-        {onReset && (
-          <button
-            onClick={onReset}
-            className="flex items-center gap-1.5 h-8 px-3 border border-[#c9a84c]/20 hover:border-[#c9a84c]/50 text-[#c9a84c]/50 hover:text-[#c9a84c] transition-all font-black text-[10px] uppercase tracking-widest"
-          >
-            <ArrowRight className="w-3 h-3 rotate-180" />
-            <span className="hidden sm:inline">Новый код</span>
-          </button>
-        )}
-      </div>
-      <div className="h-[2px] bg-gradient-to-r from-transparent via-[#c9a84c]/30 to-transparent" />
-    </header>
   );
 }
 
@@ -1913,7 +1914,7 @@ function WBIntro({ onDone }: { onDone: () => void }) {
       {/* Particle canvas fills the whole screen */}
       <div className="flex-1 relative">
         <ParticleTextEffect
-          words={["СПАСИБО!", "ЗА ПОКУПКУ", "ROBLOXBANK"]}
+          words={["СПАСИБО\nЗА ПОКУПКУ!", "ROBLOXBANK"]}
           fullScreen
           showHint={false}
           onComplete={handleDone}

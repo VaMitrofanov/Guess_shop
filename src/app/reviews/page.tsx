@@ -1,4 +1,5 @@
 import Navbar from "@/components/navbar";
+import Footer from "@/components/footer";
 import { prisma } from "@/lib/prisma";
 import ReviewsClient from "@/components/reviews-client";
 import Link from "next/link";
@@ -64,6 +65,7 @@ export default async function ReviewsPage() {
           </button>
         </div>
       </section>
+      <Footer />
     </main>
   );
 }
