@@ -137,7 +137,7 @@ interface ParticleTextEffectProps {
 }
 
 const DEFAULT_WORDS = ["HELLO", "21st.dev", "ParticleTextEffect", "BY", "KAINXU"]
-const FRAMES_PER_WORD = 240 // ≈ 4 s at 60 fps
+const FRAMES_PER_WORD = 360 // ≈ 6 s at 60 fps
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
@@ -172,7 +172,7 @@ export function ParticleTextEffect({
     const octx = offscreen.getContext("2d")!
 
     // Scale font to canvas width so it always fills nicely
-    const fontSize = Math.round(Math.min(canvas.width / 6.5, 160))
+    const fontSize = Math.round(Math.min(canvas.width / 8.5, 160))
     const lines = word.split("\n")
     const lineSpacing = 1.1
     const totalLinesHeight = (lines.length - 1) * fontSize * lineSpacing

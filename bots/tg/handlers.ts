@@ -19,9 +19,8 @@ const GAMEPASS_RE = /^https?:\/\/(www\.)?roblox\.com\/game-pass\/\d+/i;
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
 function userDisplay(from: TGUser): string {
-  return from.username
-    ? `@${from.username}`
-    : `<a href="tg://user?id=${from.id}">${from.first_name}</a>`;
+  const name = from.username ? `@${from.username}` : from.first_name;
+  return `${name} (ID: ${from.id})`;
 }
 
 async function checkSubscription(bot: Telegraf, userId: number): Promise<boolean> {
@@ -104,12 +103,9 @@ export function registerStart(bot: Telegraf): void {
     await ctx.reply(
       `✅ Код <b>${code}</b> активирован!\n` +
       `💎 Номинал: <b>${wbCode.denomination} R$</b>\n\n` +
-      `📋 <b>Что делать дальше:</b>\n` +
-      `1. Открой <a href="https://create.roblox.com">create.roblox.com</a>\n` +
-      `2. Создай геймпасс и установи цену <b>${passPrice} R$</b>\n` +
-      `   (формула: ${wbCode.denomination} ÷ 0.7 = ${passPrice})\n` +
-      `3. Скопируй ссылку на геймпасс\n` +
-      `4. Отправь её сюда 👇`,
+      `• 📋 <b>Что делать дальше:</b>\n` +
+      `1. Скопируй ссылку на геймпасс (убедись, что цена в нем <b>${passPrice} R$</b>)\n` +
+      `2. Отправь её сюда 👇`,
       { parse_mode: "HTML", link_preview_options: { is_disabled: true } }
     );
   });
@@ -305,11 +301,9 @@ export function registerCallbacks(bot: Telegraf): void {
       });
       const user = await (db as any).user.findUnique({ where: { id: order.userId } });
 
-      const badge = newStatus === "COMPLETED" ? "✅" : "❌";
-      const verb  = newStatus === "COMPLETED" ? "Выкуплено" : "Ошибка";
-      const editedText =
-        `${badge} <b>${verb}</b> — ${adminTag}\n` +
-        `Заказ #${orderId.slice(-6).toUpperCase()} · ${order.amount} R$`;
+      const editedText = newStatus === "COMPLETED"
+        ? `✅ <b>Выполнено админом ${adminTag}</b>\nЗаказ #${orderId.slice(-6).toUpperCase()} · ${order.amount} R$`
+        : `❌ <b>Ошибка в заказе (Отклонил: ${adminTag})</b>\nЗаказ #${orderId.slice(-6).toUpperCase()} · ${order.amount} R$`;
 
       try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch { /* stale message */ }
 
@@ -380,10 +374,8 @@ async function notifyUserCompleted(
   amount: number
 ): Promise<void> {
   const msg =
-    `🎉 <b>Заявка #${orderId.slice(-6).toUpperCase()} выполнена!</b>\n\n` +
-    `Геймпасс на <b>${amount} R$</b> выкуплен. Robux поступят на баланс ` +
-    `Roblox в течение 5–7 дней.\n\n` +
-    `⭐ Оставь отзыв на Wildberries и пришли скриншот — получишь <b>+50 R$</b>!`;
+    `✅ Ваш заказ #${orderId.slice(-6).toUpperCase()} выкуплен! ` +
+    `Робуксы придут через 5-7 дней.`;
 
   if (user.tgId) {
     try {
@@ -402,8 +394,8 @@ async function notifyUserRejected(
   orderId: string
 ): Promise<void> {
   const msg =
-    `❌ <b>Заявка #${orderId.slice(-6).toUpperCase()} отклонена.</b>\n` +
-    `Обратись в поддержку для уточнения причины.`;
+    `❌ Ошибка в вашем заказе #${orderId.slice(-6).toUpperCase()}. ` +
+    `Проверьте цену геймпасса и отправьте ссылку заново или напишите в поддержку.`;
 
   if (user.tgId) {
     try { await bot.telegram.sendMessage(user.tgId, msg, { parse_mode: "HTML" }); } catch {}
