@@ -1124,14 +1124,14 @@ function StepsGrid({
                 </div>
               )}
               {isStep04 && (
-                <div style={{ minHeight: 440 }} className="flex flex-col justify-end">
+                <div style={{ minHeight: 460 }} className="flex flex-col justify-end">
                   <Anim04Price passPrice={passPrice} />
                 </div>
               )}
               {isStep05Std && <div style={{ minHeight: 180 }}><Anim05Standard /></div>}
               {isStep06Std && <div style={{ minHeight: 180 }}><Anim06Standard /></div>}
               {isStep05WB  && <div style={{ minHeight: 180 }}><Anim05WB /></div>}
-              {isStep06WB  && <div style={{ minHeight: 280 }}><Anim06WB /></div>}
+              {isStep06WB  && <div style={{ minHeight: 320 }}><Anim06WB /></div>}
             </div>
           </div>
         );
@@ -1203,7 +1203,7 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
         <a
           href={code ? `https://t.me/wb228_notifier_bot?start=${code}` : "https://t.me/wb228_notifier_bot"}
           target="_blank" rel="noopener noreferrer"
-          className="flex-1 h-16 flex items-center justify-center gap-4 border-2 border-b-4 border-[#229ED9]/40 bg-[#229ED9]/10 hover:bg-[#229ED9]/20 hover:border-[#229ED9]/60 active:translate-y-[2px] active:border-b-2 transition-all duration-75 font-black text-[13px] uppercase tracking-widest text-white group/btn"
+          className="flex-1 h-20 flex items-center justify-center gap-4 border-2 border-b-[6px] border-[#229ED9]/40 bg-[#229ED9]/10 hover:bg-[#229ED9]/20 hover:border-[#229ED9]/60 active:translate-y-[4px] active:border-b-[2px] shadow-[0_4px_20px_rgba(34,158,217,0.15)] transition-all duration-75 font-black text-[13px] uppercase tracking-widest text-white group/btn"
         >
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 flex-shrink-0 text-[#229ED9] group-hover/btn:scale-110 transition-transform">
             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z"/>
@@ -1220,7 +1220,7 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
             }
             signIn("vk", { callbackUrl: "/api/wb-link" });
           }}
-          className="flex-1 h-16 flex items-center justify-center gap-4 border-2 border-b-4 border-[#0077FF]/40 bg-[#0077FF]/10 hover:bg-[#0077FF]/20 hover:border-[#0077FF]/60 active:translate-y-[2px] active:border-b-2 transition-all duration-75 font-black text-[13px] uppercase tracking-widest text-white group/btn cursor-pointer"
+          className="flex-1 h-20 flex items-center justify-center gap-4 border-2 border-b-[6px] border-[#0077FF]/40 bg-[#0077FF]/10 hover:bg-[#0077FF]/20 hover:border-[#0077FF]/60 active:translate-y-[4px] active:border-b-[2px] shadow-[0_4px_20px_rgba(0,119,255,0.15)] transition-all duration-75 font-black text-[13px] uppercase tracking-widest text-white group/btn cursor-pointer"
         >
           <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 flex-shrink-0 text-[#0077FF] group-hover/btn:scale-110 transition-transform">
             <path d="M15.684 0H8.316C1.592 0 0 1.592 0 8.316v7.368C0 22.408 1.592 24 8.316 24h7.368C22.408 24 24 22.408 24 15.684V8.316C24 1.592 22.408 0 15.684 0zm3.692 17.123h-1.744c-.66 0-.864-.525-2.05-1.727-1.033-1-1.49-1.135-1.744-1.135-.356 0-.458.102-.458.593v1.575c0 .424-.135.678-1.253.678-1.846 0-3.896-1.118-5.335-3.202C4.624 10.857 4.03 8.57 4.03 8.096c0-.254.102-.491.593-.491h1.744c.44 0 .61.203.78.677.863 2.49 2.303 4.675 2.896 4.675.22 0 .322-.102.322-.66V9.721c-.068-1.186-.695-1.287-.695-1.71 0-.203.169-.407.44-.407h2.744c.373 0 .508.203.508.643v3.473c0 .372.169.508.271.508.22 0 .407-.136.813-.542 1.253-1.406 2.151-3.574 2.151-3.574.119-.254.322-.491.762-.491h1.744c.525 0 .644.27.525.643-.22 1.017-2.354 4.031-2.354 4.031-.186.305-.254.44 0 .78.186.254.796.779 1.203 1.253.745.847 1.32 1.558 1.473 2.05.17.49-.085.745-.576.745z"/>
@@ -1534,7 +1534,7 @@ function FormulaCalculator({
 
   // Standard — interactive calculator
   return (
-    <div className="pixel-card border-2 border-[#00b06f]/30 bg-[#00b06f]/5 p-5 min-h-[200px]">
+    <div className="pixel-card border-2 border-[#00b06f]/30 bg-[#00b06f]/5 p-5 min-h-[220px]">
       <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-4">КАЛЬКУЛЯТОР ЦЕНЫ ПАССА</div>
 
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">

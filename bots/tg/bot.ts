@@ -24,6 +24,7 @@ import {
   registerText,
   registerPhoto,
   registerCallbacks,
+  registerAdmin,
 } from "./handlers";
 
 const token = process.env.TG_TOKEN;
@@ -34,6 +35,7 @@ export const bot = new Telegraf(token);
 // Register all handlers (order matters: commands → text → photo → callbacks)
 registerStart(bot);
 registerStatus(bot);
+registerAdmin(bot);
 registerCallbacks(bot); // must be before generic text/photo to capture button presses
 registerText(bot);
 registerPhoto(bot);

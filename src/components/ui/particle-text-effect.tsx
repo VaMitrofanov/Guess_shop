@@ -137,7 +137,7 @@ interface ParticleTextEffectProps {
 }
 
 const DEFAULT_WORDS = ["HELLO", "21st.dev", "ParticleTextEffect", "BY", "KAINXU"]
-const FRAMES_PER_WORD = 360 // ≈ 6 s at 60 fps
+const FRAMES_PER_WORD = 240 // ≈ 4 s at 60 fps
 
 // ─── Component ──────────────────────────────────────────────────────────────
 

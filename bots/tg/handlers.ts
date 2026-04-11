@@ -10,7 +10,7 @@ import { Telegraf, Markup } from "telegraf";
 import type { User as TGUser } from "telegraf/types";
 import { db } from "../shared/db";
 import { vkSend, stripHtml } from "../shared/notify";
-import { sendAdminOrderCard, sendAdminReviewCard, CB } from "../shared/admin";
+import { sendAdminOrderCard, sendAdminReviewCard, CB, ADMIN_IDS } from "../shared/admin";
 import { pendingLink, pendingReview } from "./session";
 
 // ── Regex for a valid Roblox gamepass URL ─────────────────────────────────────
@@ -103,7 +103,7 @@ export function registerStart(bot: Telegraf): void {
     await ctx.reply(
       `✅ Код <b>${code}</b> активирован!\n` +
       `💎 Номинал: <b>${wbCode.denomination} R$</b>\n\n` +
-      `• 📋 <b>Что делать дальше:</b>\n` +
+      `📋 <b>Что делать дальше:</b>\n\n` +
       `1. Скопируй ссылку на геймпасс (убедись, что цена в нем <b>${passPrice} R$</b>)\n` +
       `2. Отправь её сюда 👇`,
       { parse_mode: "HTML", link_preview_options: { is_disabled: true } }
@@ -117,51 +117,54 @@ export function registerStart(bot: Telegraf): void {
 
 export function registerStatus(bot: Telegraf): void {
   bot.command("status", async (ctx) => {
-    const tgId = String(ctx.from.id);
-    const user  = await (db as any).user.findUnique({ where: { tgId } });
-
-    if (!user) {
-      await ctx.reply(
-        "У тебя пока нет заказов. Активируй код с карточки Wildberries через /start."
-      );
-      return;
-    }
-
-    const order = await (db as any).wbOrder.findFirst({
-      where:   { userId: user.id },
-      orderBy: { createdAt: "desc" },
+    const text = await getStatusText(String(ctx.from.id));
+    await ctx.reply(text, {
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+      ...Markup.inlineKeyboard([[
+        Markup.button.callback("🔄 Обновить", CB.refreshStatus)
+      ]])
     });
-
-    if (!order) {
-      await ctx.reply(
-        "У тебя пока нет заявок. Отправь ссылку на геймпасс, чтобы создать заявку."
-      );
-      return;
-    }
-
-    const label: Record<string, string> = {
-      PENDING:   "⏳ В обработке",
-      COMPLETED: "✅ Выполнен",
-      REJECTED:  "❌ Отклонён",
-    };
-
-    const calmNote =
-      order.status === "PENDING"
-        ? "\n\n💬 <i>Менеджеры работают в порядке очереди — среднее время обработки " +
-          "15–30 минут. Дополнительно писать не нужно: мы сами пришлём уведомление " +
-          "при изменении статуса.</i>"
-        : "";
-
-    await ctx.reply(
-      `📦 <b>Заявка #${order.id.slice(-6).toUpperCase()}</b>\n` +
-      `📅 ${new Date(order.createdAt).toLocaleDateString("ru-RU")}\n` +
-      `💎 Номинал: <b>${order.amount} R$</b>\n` +
-      `🔗 <a href="${order.gamepassUrl}">Геймпасс</a>\n` +
-      `📊 Статус: <b>${label[order.status] ?? order.status}</b>` +
-      calmNote,
-      { parse_mode: "HTML", link_preview_options: { is_disabled: true } }
-    );
   });
+}
+
+/** Helper for /status and refresh callback */
+async function getStatusText(tgId: string): Promise<string> {
+  const user = await (db as any).user.findUnique({ where: { tgId } });
+  if (!user) {
+    return "У тебя пока нет заказов. Активируй код с карточки Wildberries через /start.";
+  }
+
+  const order = await (db as any).wbOrder.findFirst({
+    where:   { userId: user.id },
+    orderBy: { createdAt: "desc" },
+  });
+
+  if (!order) {
+    return "У тебя пока нет заявок. Отправь ссылку на геймпасс, чтобы создать заявку.";
+  }
+
+  const label: Record<string, string> = {
+    PENDING:   "⏳ В обработке",
+    COMPLETED: "✅ Выполнен",
+    REJECTED:  "❌ Отклонён",
+  };
+
+  const calmNote =
+    order.status === "PENDING"
+      ? "\n\n💬 <i>Менеджеры работают в порядке очереди — среднее время обработки " +
+        "15–30 минут. Дополнительно писать не нужно: мы сами пришлём уведомление " +
+        "при изменении статуса.</i>"
+      : "";
+
+  return (
+    `📦 <b>Заявка #${order.id.slice(-6).toUpperCase()}</b>\n` +
+    `📅 ${new Date(order.createdAt).toLocaleDateString("ru-RU")}\n` +
+    `💎 Номинал: <b>${order.amount} R$</b>\n` +
+    `🔗 <a href="${order.gamepassUrl}">Геймпасс</a>\n` +
+    `📊 Статус: <b>${label[order.status] ?? order.status}</b>` +
+    calmNote
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -276,6 +279,25 @@ export function registerPhoto(bot: Telegraf): void {
   });
 }
 
+export function registerAdmin(bot: Telegraf): void {
+  bot.command("admin", async (ctx) => {
+    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
+
+    await ctx.reply(
+      "🛠️ <b>Панель управления</b>\n\n" +
+      "Выбери раздел для управления магазином:",
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("📊 Статистика", CB.adminStats)],
+          [Markup.button.callback("🕒 Очередь", CB.adminQueue)],
+          [Markup.button.callback("🔑 Остаток кодов", CB.adminCodes)],
+        ])
+      }
+    );
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Callback queries — admin interactive actions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -357,6 +379,140 @@ export function registerCallbacks(bot: Telegraf): void {
       try { await ctx.editMessageCaption(caption, { parse_mode: "HTML" }); } catch {}
       await ctx.answerCbQuery(approve ? "+50 R$ начислено" : "Отклонено");
       return;
+    }
+
+    // ── 📊 admin_stats: stats for day/week ────────────────────────────────
+    if (data === CB.adminStats) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("Доступ запрещен");
+
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const startOfWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      const dayStats = await (db as any).wbOrder.aggregate({
+        _count: true,
+        _sum: { amount: true },
+        where: { status: "COMPLETED", updatedAt: { gte: startOfDay } }
+      });
+
+      const weekStats = await (db as any).wbOrder.aggregate({
+        _count: true,
+        _sum: { amount: true },
+        where: { status: "COMPLETED", updatedAt: { gte: startOfWeek } }
+      });
+
+      const statsText = 
+        `📊 <b>СТАТИСТИКА (RobloxBank)</b>\n\n` +
+        `📅 <b>ЗА СЕГОДНЯ:</b>\n` +
+        `• Кол-во: <b>${dayStats._count}</b>\n` +
+        `• Сумма: <b>${dayStats._sum.amount || 0} R$</b>\n\n` +
+        `📅 <b>ЗА 7 ДНЕЙ:</b>\n` +
+        `• Кол-во: <b>${weekStats._count}</b>\n` +
+        `• Сумма: <b>${weekStats._sum.amount || 0} R$</b>`;
+
+      try {
+        await ctx.editMessageText(statsText, {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[Markup.button.callback("← Назад", "admin_main")]])
+        });
+      } catch {}
+      return ctx.answerCbQuery();
+    }
+
+    // ── 🕒 admin_queue: list pending orders ────────────────────────────────
+    if (data === CB.adminQueue) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("Доступ запрещен");
+
+      const pending = await (db as any).wbOrder.findMany({
+        where: { status: "PENDING" },
+        orderBy: { createdAt: "asc" },
+        take: 10
+      });
+
+      if (pending.length === 0) {
+        await ctx.editMessageText("🕒 Очередь пуста. Все заказы выкуплены!", {
+          ...Markup.inlineKeyboard([[Markup.button.callback("← Назад", "admin_main")]])
+        });
+        return ctx.answerCbQuery();
+      }
+
+      let qText = `🕒 <b>ОЧЕРЕДЬ (PENDING)</b>\n\n`;
+      pending.forEach((o: any, i: number) => {
+        const shortId = o.id.slice(-6).toUpperCase();
+        qText += `${i+1}. <code>${shortId}</code> — <b>${o.amount} R$</b> (<a href="${o.gamepassUrl}">пасс</a>)\n`;
+      });
+
+      try {
+        await ctx.editMessageText(qText, {
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+          ...Markup.inlineKeyboard([[Markup.button.callback("← Назад", "admin_main")]])
+        });
+      } catch {}
+      return ctx.answerCbQuery();
+    }
+
+    // ── 🔑 admin_codes: check remain codes ────────────────────────────────
+    if (data === CB.adminCodes) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("Доступ запрещен");
+
+      const codes = await (db as any).wbCode.groupBy({
+        by: ['denomination'],
+        _count: { _all: true },
+        where: { isUsed: false }
+      });
+
+      let cText = `🔑 <b>ОСТАТОК КОДОВ:</b>\n\n`;
+      let total = 0;
+      codes.sort((a: any, b: any) => a.denomination - b.denomination).forEach((group: any) => {
+        cText += `• <b>${group.denomination} R$</b>: ${group._count._all} шт.\n`;
+        total += group._count._all;
+      });
+      cText += `\n📦 <b>ВСЕГО: ${total} шт.</b>`;
+
+      if (total === 0) cText = "🔑 Коды закончились! Пора загрузить новые.";
+
+      try {
+        await ctx.editMessageText(cText, {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[Markup.button.callback("← Назад", "admin_main")]])
+        });
+      } catch {}
+      return ctx.answerCbQuery();
+    }
+
+    // ── 🔄 admin_main: back to admin menu ───────────────────────────────
+    if (data === "admin_main") {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("Доступ запрещен");
+      try {
+        await ctx.editMessageText(
+          "🛠️ <b>Панель управления</b>\n\nВыбери раздел для управления магазином:",
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback("📊 Статистика", CB.adminStats)],
+              [Markup.button.callback("🕒 Очередь", CB.adminQueue)],
+              [Markup.button.callback("🔑 Остаток кодов", CB.adminCodes)],
+            ])
+          }
+        );
+      } catch {}
+      return ctx.answerCbQuery();
+    }
+
+    // ── 🔄 refresh_status: user refresh ──────────────────────────────────
+    if (data === CB.refreshStatus) {
+      const text = await getStatusText(adminId);
+      try {
+        await ctx.editMessageText(text, {
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+          ...Markup.inlineKeyboard([[
+            Markup.button.callback("🔄 Обновить", CB.refreshStatus)
+          ]])
+        });
+      } catch {}
+      return ctx.answerCbQuery("Обновлено");
     }
 
     await ctx.answerCbQuery();

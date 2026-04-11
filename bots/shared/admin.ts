@@ -23,6 +23,14 @@ export const CB = {
   adminErr:   (orderId: string) => `admin_err:${orderId}`,  // 35 b
   reviewOk:   (orderId: string, userId: string) => `review_ok:${orderId}:${userId}`, // 61 b
   reviewNo:   (orderId: string, userId: string) => `review_no:${orderId}:${userId}`, // 61 b
+
+  // Admin menu
+  adminStats: "admin_stats",
+  adminQueue: "admin_queue",
+  adminCodes: "admin_codes",
+  
+  // User actions
+  refreshStatus: "refresh_status",
 } as const;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
