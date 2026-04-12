@@ -68,11 +68,31 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             },
           });
         } else {
-          // Optional: update name/image if changed
+          // Update name/image if changed
           user = await prisma.user.update({
             where: { id: user.id },
             data: { name, image },
           });
+        }
+
+        // Link WB code if present in cookies during login
+        const { cookies } = await import("next/headers");
+        const cookieStore = await cookies();
+        const wbCode = cookieStore.get("wb_code")?.value?.trim().toUpperCase();
+
+        if (wbCode && wbCode.length === 7) {
+          try {
+            const { prisma: db } = await import("@/lib/prisma"); 
+            // We use the imported prisma from top level but cast to needed type if needed
+            // Actually prisma is already imported at top level as prisma
+            await (prisma as any).wbCode.update({
+              where: { code: wbCode },
+              data: { userId: user.id },
+            });
+            console.log(`[auth] Linked user ${user.id} to WbCode ${wbCode} during login`);
+          } catch (err) {
+            console.error("[auth] Failed to link WbCode during login:", err);
+          }
         }
 
         return {

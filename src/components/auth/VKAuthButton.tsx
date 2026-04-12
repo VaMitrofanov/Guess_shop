@@ -64,50 +64,48 @@ export default function VKAuthButton({
             VKID.Auth.exchangeCode(code, deviceId)
               .then(async (data) => {
                 const idToken = data.id_token;
-                const userId = data.user_id;
 
                 try {
-                  // 2. Декодируем JWT (ID Token) вместо запроса к API VK
-                  // Это на 100% исправляет ошибку CORS, так как мы не делаем сетевой запрос
+                  // 2. Декодируем JWT (ID Token) для получения данных профиля
                   let name = "VK User";
                   let image = "";
 
                   if (idToken) {
-                    try {
-                      const base64Url = idToken.split('.')[1];
-                      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-                      const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
-                          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-                      }).join(''));
-                      const payload = JSON.parse(jsonPayload);
-                      
-                      // Стандартные OIDC поля: name, picture, given_name, family_name
-                      name = payload.name || `${payload.first_name || ""} ${payload.last_name || ""}`.trim() || "VK User";
-                      image = payload.picture || payload.photo_200 || "";
-                    } catch (jwtErr) {
-                      console.error("JWT Decode Error:", jwtErr);
-                    }
+                    const base64Url = idToken.split('.')[1];
+                    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                    const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+                        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                    }).join(''));
+                    const payload = JSON.parse(jsonPayload);
+                    name = payload.name || `${payload.first_name || ""} ${payload.last_name || ""}`.trim() || "VK User";
+                    image = payload.picture || payload.photo_200 || "";
                   }
 
-                  // 3. Отправляем готовые данные на наш сервер
-                  const res = await fetch("/api/auth/vk-callback", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      user_id: userId,
-                      name: name,
-                      image: image,
-                    }),
+                  // 3. Выполняем вход через NextAuth (signIn)
+                  // Используем redirect: false, чтобы самим управлять переходом
+                  const { signIn } = await import("next-auth/react");
+                  const result = await signIn("vk-id", {
+                    vk_id: String(data.user_id),
+                    name,
+                    image,
+                    redirect: false,
                   });
 
-                  if (res.ok) {
-                    const resData = await res.json();
-                    const target = resData.redirectUrl || "/dashboard";
-                    router.push(target);
-                    router.refresh();
+                  if (result?.ok) {
+                    // Проверяем, есть ли кука wb_code (через document.cookie)
+                    const wbCodeMatch = document.cookie.match(/wb_code=([^;]+)/);
+                    const wbCode = wbCodeMatch ? wbCodeMatch[1].trim() : null;
+
+                    if (wbCode) {
+                      // Если это Гайд WB -> Редирект в ВК
+                      window.location.href = `https://vk.me/bankroblox?ref=${wbCode}`;
+                    } else {
+                      // Если обычный вход -> В личный кабинет
+                      router.push("/dashboard");
+                      router.refresh();
+                    }
                   } else {
-                    const errData = await res.json();
-                    setError(errData.error || "Ошибка авторизации на сервере");
+                    setError(result?.error || "Ошибка авторизации");
                   }
                 } catch (e) {
                   console.error("VK Auth Flow Error:", e);
