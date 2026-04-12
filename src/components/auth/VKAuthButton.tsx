@@ -37,7 +37,10 @@ export default function VKAuthButton({
           app: appId,
           redirectUrl: redirectUrl,
           responseMode: VKID.ConfigResponseMode.Callback,
-          source: VKID.ConfigSource.LOWCODE,
+        VKID.Config.init({
+          app: appId,
+          redirectUrl: redirectUrl,
+          responseMode: VKID.ConfigResponseMode.Callback,
           scope: "",
         });
 
@@ -48,13 +51,14 @@ export default function VKAuthButton({
             container: containerRef.current,
             showAlternativeLogin: true,
             contentId: 2,
-            styles: {
-              width: "100%",
-            }
           })
           .on(VKID.WidgetEvents.ERROR, (err) => {
             console.error("VK ID Error:", err);
-            setError(`Ошибка инициализации VK ID: ${err.text || "неизвестная ошибка"}`);
+            // Игнорируем ошибку "NEW TAB HAS BEEN CLOSED", так как она техническая 
+            // и часто возникает при фоновых проверках SDK.
+            if (err.text !== "NEW TAB HAS BEEN CLOSED") {
+              setError(`Ошибка VK ID: ${err.text || "неизвестная ошибка"}`);
+            }
           })
           .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, function (payload) {
             const code = payload.code;
