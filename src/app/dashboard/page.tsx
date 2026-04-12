@@ -132,12 +132,18 @@ export default async function DashboardPage() {
                 <div className="w-1.5 h-1.5 rounded-full bg-[#0077FF] animate-pulse" />
                 <div className="font-pixel text-[8px] text-[#0077FF]/60 tracking-widest uppercase">Авторизация VK ID</div>
               </div>
-              <div className="bg-[#0077FF]/5 border border-[#0077FF]/20 p-4 relative group">
-                <VKAuthButton />
-                <div className="absolute inset-0 border border-[#0077FF]/10 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+              
+              <div className="relative group overflow-hidden">
+                {/* Decorative border */}
+                <div className="absolute inset-0 border border-[#0077FF]/10 pointer-events-none" />
+                
+                <div className="bg-[#0077FF]/5 border-2 border-[#0077FF]/20 p-5 transition-all hover:bg-[#0077FF]/10">
+                  <VKAuthButton />
+                </div>
               </div>
+
               <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider mt-3 text-center opacity-60">
-                Свяжите аккаунт для быстрого входа
+                Свяжите аккаунт для быстрой авторизации в один клик
               </p>
             </div>
             <div className="border-t border-[#1e2a45] pt-4 space-y-2">

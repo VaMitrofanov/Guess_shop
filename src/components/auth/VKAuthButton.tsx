@@ -14,6 +14,7 @@ export default function VKAuthButton({
 }: VKAuthButtonProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isSdkLoading, setIsSdkLoading] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
@@ -50,8 +51,7 @@ export default function VKAuthButton({
           })
           .on(VKID.WidgetEvents.ERROR, (err) => {
             console.error("VK ID Error:", err);
-            // Игнорируем ошибку "NEW TAB HAS BEEN CLOSED", так как она техническая 
-            // и часто возникает при фоновых проверках SDK.
+            setIsSdkLoading(false);
             if (err.text !== "NEW TAB HAS BEEN CLOSED") {
               setError(`Ошибка VK ID: ${err.text || "неизвестная ошибка"}`);
             }
@@ -60,8 +60,6 @@ export default function VKAuthButton({
             const code = payload.code;
             const deviceId = payload.device_id;
 
-            // Теперь мы не обмениваем код на клиенте, 
-            // а сразу отправляем его на сервер для безопасного обмена
             fetch("/api/auth/vk-callback", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -86,6 +84,9 @@ export default function VKAuthButton({
               setError("Сетевая ошибка при авторизации");
             });
           });
+
+          // Скрываем лоадер через небольшую паузу после команды рендера
+          setTimeout(() => setIsSdkLoading(false), 500);
         }
       } else {
         setTimeout(initVK, 300);
@@ -96,8 +97,19 @@ export default function VKAuthButton({
   }, [appId, customRedirectUrl, router]);
 
   return (
-    <div className="flex flex-col items-center gap-2 w-full min-h-[44px]">
-      <div ref={containerRef} className="w-full flex justify-center" />
+    <div className="flex flex-col items-center gap-2 w-full min-h-[44px] justify-center text-center">
+      {isSdkLoading && !error && (
+        <div className="flex items-center gap-2 py-2">
+          <div className="w-3 h-3 border-2 border-[#0077FF] border-t-transparent animate-spin" />
+          <span className="font-pixel text-[8px] text-[#0077FF]/60 uppercase tracking-widest">
+            Загрузка VK ID...
+          </span>
+        </div>
+      )}
+      <div 
+        ref={containerRef} 
+        className={`w-full flex justify-center ${isSdkLoading ? "hidden" : "block"}`} 
+      />
       {error && (
         <p className="text-red-500 text-[10px] sm:text-xs mt-2 font-bold text-center uppercase tracking-wider">
           {error}
