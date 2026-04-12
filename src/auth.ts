@@ -44,6 +44,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         vk_id: { label: "VK ID", type: "text" },
         name: { label: "Name", type: "text" },
         image: { label: "Image", type: "text" },
+        wb_code: { label: "WB Code", type: "text" }, // Добавляем опциональный код зациты
       },
       async authorize(credentials) {
         if (!credentials?.vk_id) return null;
@@ -51,56 +52,57 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const vkId = credentials.vk_id as string;
         const name = credentials.name as string;
         const image = credentials.image as string;
+        const wbCode = (credentials.wb_code as string)?.trim().toUpperCase();
 
-        // Upsert user in DB
-        let user = await prisma.user.findUnique({
-          where: { vkId },
-        });
-
-        if (!user) {
-          user = await prisma.user.create({
-            data: {
-              vkId,
-              name,
-              image,
-              role: "USER",
-              balance: 0,
-            },
+        try {
+          // Upsert user in DB
+          let user = await prisma.user.findUnique({
+            where: { vkId },
           });
-        } else {
-          // Update name/image if changed
-          user = await prisma.user.update({
-            where: { id: user.id },
-            data: { name, image },
-          });
-        }
 
-        // Link WB code if present in cookies during login
-        const { cookies } = await import("next/headers");
-        const cookieStore = await cookies();
-        const wbCode = cookieStore.get("wb_code")?.value?.trim().toUpperCase();
-
-        if (wbCode && wbCode.length === 7) {
-          try {
-            const { prisma: db } = await import("@/lib/prisma"); 
-            // We use the imported prisma from top level but cast to needed type if needed
-            // Actually prisma is already imported at top level as prisma
-            await (prisma as any).wbCode.update({
-              where: { code: wbCode },
-              data: { userId: user.id },
+          if (!user) {
+            user = await prisma.user.create({
+              data: {
+                vkId,
+                name,
+                image,
+                role: "USER",
+                balance: 0,
+              },
             });
-            console.log(`[auth] Linked user ${user.id} to WbCode ${wbCode} during login`);
-          } catch (err) {
-            console.error("[auth] Failed to link WbCode during login:", err);
+          } else {
+            // Update name/image if changed
+            user = await prisma.user.update({
+              where: { id: user.id },
+              data: { name, image },
+            });
           }
-        }
 
-        return {
-          id: user.id,
-          name: user.name,
-          image: user.image,
-          role: user.role,
-        };
+          // Link WB code if passed in credentials
+          if (wbCode && wbCode.length === 7) {
+            try {
+              // Пытаемся привязать код к пользователю
+              await (prisma as any).wbCode.update({
+                where: { code: wbCode },
+                data: { userId: user.id },
+              });
+              console.log(`[auth] Linked user ${user.id} to WbCode ${wbCode} via credentials`);
+            } catch (linkErr) {
+              console.error("[auth] Failed to link WbCode during authorize:", linkErr);
+              // Не прерываем вход, если привязка кода не удалась (например, код уже использован)
+            }
+          }
+
+          return {
+            id: user.id,
+            name: user.name,
+            image: user.image,
+            role: user.role,
+          };
+        } catch (dbErr) {
+          console.error("[auth] Database error during VK authorize:", dbErr);
+          return null;
+        }
       },
     }),
   ],

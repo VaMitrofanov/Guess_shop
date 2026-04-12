@@ -71,41 +71,54 @@ export default function VKAuthButton({
                   let image = "";
 
                   if (idToken) {
-                    const base64Url = idToken.split('.')[1];
-                    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-                    const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
-                        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-                    }).join(''));
-                    const payload = JSON.parse(jsonPayload);
-                    name = payload.name || `${payload.first_name || ""} ${payload.last_name || ""}`.trim() || "VK User";
-                    image = payload.picture || payload.photo_200 || "";
+                    try {
+                      const base64Url = idToken.split('.')[1];
+                      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                      const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+                          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                      }).join(''));
+                      const payload = JSON.parse(jsonPayload);
+                      
+                      // Поля VK ID v2: first_name, last_name, nickname, photo_max, picture
+                      const firstName = payload.first_name || "";
+                      const lastName = payload.last_name || "";
+                      const nickname = payload.nickname || "";
+                      
+                      name = payload.name || `${firstName} ${lastName}`.trim() || nickname || "VK User";
+                      image = payload.picture || payload.photo_max || payload.photo_200 || "";
+                    } catch (jwtErr) {
+                      console.error("JWT Decode Error:", jwtErr);
+                    }
                   }
 
                   // 3. Выполняем вход через NextAuth (signIn)
-                  // Используем redirect: false, чтобы самим управлять переходом
+                  // Получаем wb_code из URL или кук (URL приоритетнее)
+                  const urlParams = new URLSearchParams(window.location.search);
+                  const wbCodeFromUrl = urlParams.get("code") || urlParams.get("wb_code");
+                  const wbCodeMatch = document.cookie.match(/wb_code=([^;]+)/);
+                  const wbCodeFromCookie = wbCodeMatch ? wbCodeMatch[1].trim() : null;
+                  const wbCode = (wbCodeFromUrl || wbCodeFromCookie || "").toUpperCase();
+
                   const { signIn } = await import("next-auth/react");
                   const result = await signIn("vk-id", {
                     vk_id: String(data.user_id),
                     name,
                     image,
+                    wb_code: wbCode,
                     redirect: false,
                   });
 
                   if (result?.ok) {
-                    // Проверяем, есть ли кука wb_code (через document.cookie)
-                    const wbCodeMatch = document.cookie.match(/wb_code=([^;]+)/);
-                    const wbCode = wbCodeMatch ? wbCodeMatch[1].trim() : null;
-
-                    if (wbCode) {
-                      // Если это Гайд WB -> Редирект в ВК
-                      window.location.href = `https://vk.me/bankroblox?ref=${wbCode}`;
+                    if (wbCode && wbCode.length === 7) {
+                      // Если есть код -> Редирект в ВК (по вашему желанию vk.ru/bankroblox)
+                      window.location.href = `https://vk.ru/bankroblox?ref=${wbCode}`;
                     } else {
                       // Если обычный вход -> В личный кабинет
                       router.push("/dashboard");
                       router.refresh();
                     }
                   } else {
-                    setError(result?.error || "Ошибка авторизации");
+                    setError(result?.error || "Ошибка авторизации на сервере");
                   }
                 } catch (e) {
                   console.error("VK Auth Flow Error:", e);
