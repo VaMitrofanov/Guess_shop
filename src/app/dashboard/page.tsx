@@ -1,5 +1,4 @@
-import { getServerSession } from "next-auth";
-import { authOptions }      from "@/app/api/auth/[...nextauth]/route";
+import { auth } from "@/auth";
 import { prisma }           from "@/lib/prisma";
 import Navbar               from "@/components/navbar";
 import Link                 from "next/link";
@@ -8,6 +7,7 @@ import {
   User, Package, Clock, CheckCircle2, XCircle,
   ArrowRight, ShoppingCart, LogOut, Zap,
 } from "lucide-react";
+import VKAuthButton from "@/components/auth/VKAuthButton";
 
 /* ── Status helpers ── */
 const STATUS_META: Record<string, { label: string; color: string; icon: typeof Clock }> = {
@@ -33,7 +33,7 @@ function formatDate(d: Date) {
 }
 
 export default async function DashboardPage() {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
 
   if (!session?.user) {
     redirect("/login");
@@ -125,6 +125,20 @@ export default async function DashboardPage() {
                 <p className="font-black text-base uppercase">{user.name ?? "—"}</p>
                 <p className="text-sm text-zinc-400 font-medium">{user.email}</p>
               </div>
+            </div>
+            {/* VK ID Link Section */}
+            <div className="border-t border-[#1e2a45]/50 pt-5 pb-2">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-1.5 h-1.5 rounded-full bg-[#0077FF] animate-pulse" />
+                <div className="font-pixel text-[8px] text-[#0077FF]/60 tracking-widest uppercase">Авторизация VK ID</div>
+              </div>
+              <div className="bg-[#0077FF]/5 border border-[#0077FF]/20 p-4 relative group">
+                <VKAuthButton />
+                <div className="absolute inset-0 border border-[#0077FF]/10 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+              </div>
+              <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider mt-3 text-center opacity-60">
+                Свяжите аккаунт для быстрого входа
+              </p>
             </div>
             <div className="border-t border-[#1e2a45] pt-4 space-y-2">
               {user.role === "ADMIN" && (

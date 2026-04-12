@@ -1,5 +1,4 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import {
@@ -22,7 +21,7 @@ const STATUS_META: Record<string, { label: string; color: string; dot: string }>
 };
 
 export default async function AdminDashboard() {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   const adminName = (session?.user as any)?.name ?? "Admin";
 
   const [

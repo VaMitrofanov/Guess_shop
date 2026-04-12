@@ -8,9 +8,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import { auth } from "@/auth";
 import { cookies } from "next/headers";
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { prisma } from "@/lib/prisma";
 import type { PrismaClientWithWb } from "@/types/prisma-wb";
 
@@ -19,7 +18,7 @@ const db = prisma as unknown as PrismaClientWithWb;
 const GUIDE_URL = "/guide?source=wb";
 
 export async function GET(request: NextRequest) {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
 
   if (!session?.user) {
     // Not authenticated — redirect to guide without linking

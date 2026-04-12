@@ -86,8 +86,9 @@ model WbOrder {
   user        User          @relation(fields: [userId], references: [id])
   wbCode      String
   adminId     String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  rejectionReason String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   @@index([userId])
   @@index([status])

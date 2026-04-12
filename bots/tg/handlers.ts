@@ -11,7 +11,7 @@ import type { User as TGUser } from "telegraf/types";
 import { db } from "../shared/db";
 import { vkSend, stripHtml } from "../shared/notify";
 import { sendAdminOrderCard, sendAdminReviewCard, CB, ADMIN_IDS } from "../shared/admin";
-import { pendingLink, pendingReview } from "./session";
+import { pendingLink, pendingReview, pendingRejectionReason } from "./session";
 
 // ── Regex for a valid Roblox gamepass URL ─────────────────────────────────────
 const GAMEPASS_RE = /^https?:\/\/(www\.)?roblox\.com\/game-pass\/\d+/i;
@@ -45,11 +45,13 @@ export function registerStart(bot: Telegraf): void {
 
     // No code payload — generic greeting
     if (!code) {
+      const isAdmin = ADMIN_IDS.includes(tgId);
       await ctx.reply(
         "👋 Привет!\n\n" +
         "Для активации кода с карточки Wildberries перейди по ссылке, " +
         "напечатанной на вкладыше.\n\n" +
-        "📦 Статус заказа: /status"
+        "📦 Статус заказа: /status",
+        isAdmin ? getAdminKeyboard() : {}
       );
       return;
     }
@@ -100,15 +102,28 @@ export function registerStart(bot: Telegraf): void {
     pendingLink.set(ctx.from.id, { wbCode: code, denomination: wbCode.denomination });
 
     const passPrice = Math.ceil(wbCode.denomination / 0.7);
+    const isAdmin = ADMIN_IDS.includes(tgId);
+
     await ctx.reply(
       `✅ Код <b>${code}</b> активирован!\n` +
       `💎 Номинал: <b>${wbCode.denomination} R$</b>\n\n` +
       `📋 <b>Что делать дальше:</b>\n\n` +
       `1. Скопируй ссылку на геймпасс (убедись, что цена в нем <b>${passPrice} R$</b>)\n` +
       `2. Отправь её сюда 👇`,
-      { parse_mode: "HTML", link_preview_options: { is_disabled: true } }
+      {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        ...(isAdmin ? getAdminKeyboard() : {})
+      }
     );
   });
+}
+
+function getAdminKeyboard() {
+  return Markup.keyboard([
+    ["📊 Статистика", "🕒 Очередь"],
+    ["📜 История", "🔑 Остаток кодов"]
+  ]).resize();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -172,15 +187,54 @@ async function getStatusText(tgId: string): Promise<string> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function registerText(bot: Telegraf): void {
+  // --- Admin Menu Buttons (Fixed Keyboard) ---
+  bot.hears("📊 Статистика", async (ctx) => {
+    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
+    await showAdminStats(ctx);
+  });
+
+  bot.hears("🕒 Очередь", async (ctx) => {
+    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
+    await showAdminQueue(ctx);
+  });
+
+  bot.hears("📜 История", async (ctx) => {
+    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
+    await showAdminHistory(ctx);
+  });
+
+  bot.hears("🔑 Остаток кодов", async (ctx) => {
+    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
+    await showAdminCodes(ctx);
+  });
+
+  // --- Main Text Handler ---
   bot.on("text", async (ctx) => {
-    if (ctx.message.text.startsWith("/")) return; // let commands pass through
+    if (ctx.message.text.startsWith("/")) return;
 
+    const tgId = String(ctx.from.id);
+    const isAdmin = ADMIN_IDS.includes(tgId);
+    const text = ctx.message.text.trim();
+
+    // 1. ADMIN REJECTION REASON flow
+    const rejectOrderId = pendingRejectionReason.get(ctx.from.id);
+    if (isAdmin && rejectOrderId) {
+      pendingRejectionReason.delete(ctx.from.id);
+      await performAdminReject(bot, ctx, rejectOrderId, text);
+      return;
+    }
+
+    // 2. ADMIN SEARCH (if not in a user flow)
     const state = pendingLink.get(ctx.from.id);
-    if (!state) return; // not in an active flow
+    if (isAdmin && !state) {
+      await handleAdminSearch(ctx, text);
+      return;
+    }
 
-    const url = ctx.message.text.trim();
+    // 2. USER GAMEPASS LINK flow
+    if (!state) return;
 
-    if (!GAMEPASS_RE.test(url)) {
+    if (!GAMEPASS_RE.test(text)) {
       await ctx.reply(
         "⚠️ Некорректная ссылка.\n\n" +
         "Ссылка должна быть в формате:\n" +
@@ -191,45 +245,133 @@ export function registerText(bot: Telegraf): void {
       return;
     }
 
-    const tgId = String(ctx.from.id);
-    const user  = await (db as any).user.findUnique({ where: { tgId } });
-    if (!user) {
-      await ctx.reply("Ошибка сессии. Пожалуйста, пройди активацию кода повторно через /start.");
-      return;
+    try {
+      const user = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
+      if (!user) {
+        await ctx.reply("Ошибка сессии. Пожалуйста, пройди активацию кода повторно через /start.");
+        return;
+      }
+
+      const order = await (db as any).wbOrder.create({
+        data: {
+          amount:      state.denomination,
+          gamepassUrl: text,
+          status:      "PENDING",
+          platform:    "TG",
+          userId:      user.id,
+          wbCode:      state.wbCode,
+        },
+      });
+
+      pendingLink.delete(ctx.from.id);
+
+      await ctx.reply(
+        `✅ <b>Заявка принята!</b>\n\n` +
+        `🆔 Номер: <code>${order.id.slice(-6).toUpperCase()}</code>\n` +
+        `Менеджер обработает её и пришлёт уведомление.\n\n` +
+        `📊 Проверить статус в любой момент: /status`,
+        { parse_mode: "HTML" }
+      );
+
+      // Notify all Telegram admins
+      const fullOrder = await (db as any).wbOrder.findUnique({
+        where: { id: order.id },
+        include: { user: true }
+      });
+      if (fullOrder) {
+        const { text: cardText, reply_markup } = renderOrderCard(fullOrder);
+        for (const adminId of ADMIN_IDS) {
+          try { await bot.telegram.sendMessage(adminId, cardText, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } }); } catch {}
+        }
+      }
+    } catch (err) {
+      console.error("[TG] Link save error:", err);
+      await ctx.reply("❌ Ошибка при создании заявки. Попробуй позже или напиши в поддержку.");
     }
-
-    // Create WbOrder
-    const order = await (db as any).wbOrder.create({
-      data: {
-        amount:      state.denomination,
-        gamepassUrl: url,
-        status:      "PENDING",
-        platform:    "TG",
-        userId:      user.id,
-        wbCode:      state.wbCode,
-      },
-    });
-
-    pendingLink.delete(ctx.from.id);
-
-    await ctx.reply(
-      `✅ <b>Заявка принята!</b>\n\n` +
-      `🆔 Номер: <code>${order.id.slice(-6).toUpperCase()}</code>\n` +
-      `Менеджер обработает её и пришлёт уведомление.\n\n` +
-      `📊 Проверить статус в любой момент: /status`,
-      { parse_mode: "HTML" }
-    );
-
-    // Notify all Telegram admins
-    await sendAdminOrderCard({
-      id:          order.id,
-      amount:      order.amount,
-      gamepassUrl: url,
-      platform:    "TG",
-      wbCode:      state.wbCode,
-      userDisplay: userDisplay(ctx.from),
-    });
   });
+}
+
+/** 
+ * Universal renderer for the admin order card.
+ * Returns text and reply_markup ready for ctx.reply or edit.
+ */
+function renderOrderCard(order: any) {
+  const shortId = order.id.slice(-6).toUpperCase();
+  const passPrice = Math.ceil(order.amount / 0.7);
+  const statusLabels: any = { PENDING: "⏳ В обработке", COMPLETED: "✅ Выполнен", REJECTED: "❌ Отклонён" };
+  
+  // User profile link
+  let userLabel = "Неизвестен";
+  if (order.user) {
+    if (order.user.vkId) {
+      userLabel = `<a href="https://vk.com/id${order.user.vkId}">VK Профиль</a>`;
+    } else if (order.user.tgId) {
+      const name = order.user.name || "Пользователь";
+      userLabel = `<a href="tg://user?id=${order.user.tgId}">${name}</a> (ID: ${order.user.tgId})`;
+    }
+  }
+
+  const reasonLine = order.status === "REJECTED" && order.rejectionReason 
+    ? `\n💬 Причина: <i>${order.rejectionReason}</i>` 
+    : "";
+
+  const text =
+    `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
+    `━━━━━━━━━━━━━━━━\n` +
+    `📱 Платформа: <b>[${order.platform}]</b>\n` +
+    `👤 Юзер: ${userLabel}\n` +
+    `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
+    `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
+    `📊 Статус: <b>${statusLabels[order.status] || order.status}</b>${reasonLine}\n` +
+    `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>`;
+
+  // Inline buttons only for PENDING orders
+  const reply_markup = order.status === "PENDING" ? {
+    inline_keyboard: [[
+      { text: "✅ ВЫКУПЛЕНО", callback_data: CB.adminOk(order.id) },
+      { text: "❌ ОШИБКА",    callback_data: `admin_reject_init:${order.id}` }
+    ]]
+  } : undefined;
+
+  return { text, reply_markup };
+}
+
+/** Admin search logic by ID or WB Code */
+async function handleAdminSearch(ctx: any, query: string) {
+  const q = query.trim().toUpperCase();
+  const lowerQ = query.trim().toLowerCase();
+  
+  // Try search by order ID (full or short suffix)
+  let order = await (db as any).wbOrder.findFirst({
+    where: { OR: [
+      { id: lowerQ }, 
+      { id: { endsWith: lowerQ } }
+    ]},
+    include: { user: true },
+    orderBy: { createdAt: "desc" }
+  });
+
+  // Try search by WB code
+  if (!order) {
+    const wbCode = await (db as any).wbCode.findUnique({ where: { code: q } });
+    if (wbCode) {
+      order = await (db as any).wbOrder.findFirst({
+        where: { wbCode: wbCode.code },
+        include: { user: true },
+        orderBy: { createdAt: "desc" }
+      });
+      if (!order) {
+        return ctx.reply(`🔑 Код <b>${wbCode.code}</b> (${wbCode.denomination} R$) найден, но пока не привязан к заказу.`, { parse_mode: "HTML" });
+      }
+    }
+  }
+
+  if (order) {
+    const { text, reply_markup } = renderOrderCard(order);
+    return ctx.reply(text, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } });
+  }
+
+  return ctx.reply("🔎 Ничего не найдено. Введи ID заказа (последние 6-8 символов) или код WB.");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -281,21 +423,163 @@ export function registerPhoto(bot: Telegraf): void {
 
 export function registerAdmin(bot: Telegraf): void {
   bot.command("admin", async (ctx) => {
-    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
+    const tgId = String(ctx.from.id);
+    if (!ADMIN_IDS.includes(tgId)) {
+      return ctx.reply(`⛔ Доступ запрещен. Ваш ID: <code>${tgId}</code>`, { parse_mode: "HTML" });
+    }
 
     await ctx.reply(
       "🛠️ <b>Панель управления</b>\n\n" +
-      "Выбери раздел для управления магазином:",
-      {
-        parse_mode: "HTML",
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback("📊 Статистика", CB.adminStats)],
-          [Markup.button.callback("🕒 Очередь", CB.adminQueue)],
-          [Markup.button.callback("🔑 Остаток кодов", CB.adminCodes)],
-        ])
-      }
+      "Меню команд теперь всегда доступно внизу экрана.\n" +
+      "Также ты можешь отправить боту ID заказа или код ВБ для быстрого поиска.",
+      getAdminKeyboard()
     );
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared Admin View Logics
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function showAdminStats(ctx: any) {
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  const dayStats = await (db as any).wbOrder.aggregate({
+    _count: true,
+    _sum: { amount: true },
+    where: { status: "COMPLETED", updatedAt: { gte: startOfDay } }
+  });
+
+  const weekStats = await (db as any).wbOrder.aggregate({
+    _count: true,
+    _sum: { amount: true },
+    where: { status: "COMPLETED", updatedAt: { gte: startOfWeek } }
+  });
+
+  const statsText = 
+    `📊 <b>СТАТИСТИКА (RobloxBank)</b>\n\n` +
+    `📅 <b>ЗА СЕГОДНЯ:</b>\n` +
+    `• Кол-во: <b>${dayStats._count}</b>\n` +
+    `• Сумма: <b>${dayStats._sum.amount || 0} R$</b>\n\n` +
+    `📅 <b>ЗА 7 ДНЕЙ:</b>\n` +
+    `• Кол-во: <b>${weekStats._count}</b>\n` +
+    `• Сумма: <b>${weekStats._sum.amount || 0} R$</b>`;
+
+  await ctx.reply(statsText, { parse_mode: "HTML" });
+}
+
+async function showAdminQueue(ctx: any) {
+  const pending = await (db as any).wbOrder.findMany({
+    where: { status: "PENDING" },
+    include: { user: true },
+    orderBy: { createdAt: "asc" },
+    take: 15
+  });
+
+  if (pending.length === 0) {
+    return ctx.reply("🕒 Очередь пуста. Все заказы выкуплены!");
+  }
+
+  let qText = `🕒 <b>ОЧЕРЕДЬ (${pending.length} заказов)</b>\n\n`;
+  const buttons: any[] = [];
+
+  pending.forEach((o: any, i: number) => {
+    const shortId = o.id.slice(-6).toUpperCase();
+    qText += `${i+1}. <code>${shortId}</code> — <b>${o.amount} R$</b>\n`;
+    buttons.push({ text: `🔍 ${shortId}`, callback_data: `admin_view:${o.id}` });
+  });
+
+  const keyboard: any[][] = [];
+  for (let i = 0; i < buttons.length; i += 3) {
+    keyboard.push(buttons.slice(i, i + 3));
+  }
+
+  await ctx.reply(qText, { 
+    parse_mode: "HTML", 
+    reply_markup: { inline_keyboard: keyboard }
+  });
+}
+
+async function showAdminHistory(ctx: any) {
+  const history = await (db as any).wbOrder.findMany({
+    where: { status: "COMPLETED" },
+    include: { user: true },
+    orderBy: { updatedAt: "desc" },
+    take: 15
+  });
+
+  if (history.length === 0) {
+    return ctx.reply("📜 История пуста.");
+  }
+
+  let hText = `📜 <b>ПОСЛЕДНИЕ ВЫПОЛНЕННЫЕ</b>\n\n`;
+  const buttons: any[] = [];
+
+  history.forEach((o: any, i: number) => {
+    const shortId = o.id.slice(-6).toUpperCase();
+    const date = new Date(o.updatedAt).toLocaleDateString("ru-RU", { day: '2-digit', month: '2-digit' });
+    hText += `${i+1}. <code>${shortId}</code> — <b>${o.amount} R$</b> (${date})\n`;
+    buttons.push({ text: `🔍 ${shortId}`, callback_data: `admin_view:${o.id}` });
+  });
+
+  const keyboard: any[][] = [];
+  for (let i = 0; i < buttons.length; i += 3) {
+    keyboard.push(buttons.slice(i, i + 3));
+  }
+
+  await ctx.reply(hText, { 
+    parse_mode: "HTML", 
+    reply_markup: { inline_keyboard: keyboard }
+  });
+}
+
+async function showAdminCodes(ctx: any) {
+  const codes = await (db as any).wbCode.groupBy({
+    by: ['denomination'],
+    _count: { _all: true },
+    where: { isUsed: false }
+  });
+
+  let cText = `🔑 <b>ОСТАТОК КОДОВ:</b>\n\n`;
+  let total = 0;
+  codes.sort((a: any, b: any) => a.denomination - b.denomination).forEach((group: any) => {
+    cText += `• <b>${group.denomination} R$</b>: ${group._count._all} шт.\n`;
+    total += group._count._all;
+  });
+  cText += `\n📦 <b>ВСЕГО: ${total} шт.</b>`;
+
+  if (total === 0) cText = "🔑 Коды закончились! Пора загрузить новые.";
+  await ctx.reply(cText, { parse_mode: "HTML" });
+}
+
+/** Helper to perform rejection logic for both text and button callbacks */
+async function performAdminReject(bot: Telegraf, ctx: any, orderId: string, reason: string) {
+  const tgId = String(ctx.from.id);
+  const displayReason = reason.trim() || "не указана";
+  
+  try {
+    const order = await (db as any).wbOrder.update({
+      where: { id: orderId },
+      data: { 
+        status: "REJECTED", 
+        rejectionReason: reason.trim() || null, 
+        adminId: tgId 
+      },
+      include: { user: true }
+    });
+
+    const shortId = order.id.slice(-6).toUpperCase();
+    await ctx.reply(`❌ <b>Заказ #${shortId} отклонён.</b>\nПричина: <i>${displayReason}</i>`, { parse_mode: "HTML" });
+
+    if (order.user) {
+      await notifyUserRejected(bot, order.user, order.id, displayReason, order.amount, order.wbCode);
+    }
+  } catch (err) {
+    console.error("[TG] Reject error:", err);
+    await ctx.reply("❌ Ошибка при отклонении заказа. Возможно, он был удален.");
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -312,33 +596,65 @@ export function registerCallbacks(bot: Telegraf): void {
     const adminTag = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "Админ";
 
     // ── ✅ admin_ok: order completed ──────────────────────────────────────
-    // ── ❌ admin_err: order rejected ──────────────────────────────────────
-    if (data.startsWith("admin_ok:") || data.startsWith("admin_err:")) {
-      const [action, orderId] = data.split(":");
-      const newStatus = action === "admin_ok" ? "COMPLETED" : "REJECTED";
-
+    if (data.startsWith("admin_ok:")) {
+      const orderId = data.split(":")[1];
       const order = await (db as any).wbOrder.update({
         where: { id: orderId },
-        data:  { status: newStatus, adminId },
+        data:  { status: "COMPLETED", adminId },
       });
       const user = await (db as any).user.findUnique({ where: { id: order.userId } });
 
-      const editedText = newStatus === "COMPLETED"
-        ? `✅ <b>Выполнено админом ${adminTag}</b>\nЗаказ #${orderId.slice(-6).toUpperCase()} · ${order.amount} R$`
-        : `❌ <b>Ошибка в заказе (Отклонил: ${adminTag})</b>\nЗаказ #${orderId.slice(-6).toUpperCase()} · ${order.amount} R$`;
+      const editedText = `✅ <b>Выполнено админом ${adminTag}</b>\nЗаказ #${orderId.slice(-6).toUpperCase()} · ${order.amount} R$`;
+      try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch {}
 
-      try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch { /* stale message */ }
+      if (user) await notifyUserCompleted(bot, user, orderId, order.amount);
+      await ctx.answerCbQuery("✅ Выполнено");
+      return;
+    }
 
-      // Notify the user on their platform
-      if (user) {
-        if (newStatus === "COMPLETED") {
-          await notifyUserCompleted(bot, user, orderId, order.amount);
-        } else {
-          await notifyUserRejected(bot, user, orderId);
+    // ── ❌ admin_reject_init: ask for reason ─────────────────────────────────
+    if (data.startsWith("admin_reject_init:")) {
+      const orderId = data.split(":")[1];
+      pendingRejectionReason.set(ctx.from.id, orderId);
+      await ctx.reply(
+        `⚠️ Введи причину отклонения для заказа <code>${orderId.slice(-6).toUpperCase()}</code>:`, 
+        { 
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[
+            Markup.button.callback("❌ Без причины", `admin_reject_none:${orderId}`)
+          ]])
         }
-      }
+      );
+      await ctx.answerCbQuery();
+      return;
+    }
 
-      await ctx.answerCbQuery(newStatus === "COMPLETED" ? "✅ Выполнено" : "❌ Отклонено");
+    // ── ❌ admin_reject_none: reject without reason ─────────────────────────
+    if (data.startsWith("admin_reject_none:")) {
+      const orderId = data.split(":")[1];
+      pendingRejectionReason.delete(ctx.from.id); // cleanup if any
+      await performAdminReject(bot, ctx, orderId, "");
+      await ctx.answerCbQuery("Отклонено без причины");
+      return;
+    }
+
+    // ── 🔄 user_resubmit: user wants to fix link ─────────────────────────────
+    if (data.startsWith("user_resubmit:")) {
+      const parts = data.split(":");
+      const code = parts[1];
+      const denomination = parseInt(parts[2]);
+      
+      pendingLink.set(ctx.from.id, { wbCode: code, denomination });
+      const passPrice = Math.ceil(denomination / 0.7);
+      
+      await ctx.reply(
+        `🔄 <b>Исправление ссылки</b>\n\n` +
+        `💎 Номинал: <b>${denomination} R$</b>\n` +
+        `1. Убедись, что цена в геймпассе <b>${passPrice} R$</b>\n` +
+        `2. Отправь новую ссылку 👇`,
+        { parse_mode: "HTML" }
+      );
+      await ctx.answerCbQuery();
       return;
     }
 
@@ -381,122 +697,39 @@ export function registerCallbacks(bot: Telegraf): void {
       return;
     }
 
+    // ── 🔍 admin_view: open full order card ────────────────────────────────
+    if (data.startsWith("admin_view:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("Доступ запрещен");
+      const orderId = data.split(":")[1];
+      const order = await (db as any).wbOrder.findUnique({
+        where: { id: orderId },
+        include: { user: true }
+      });
+      if (!order) return ctx.answerCbQuery("Заказ не найден");
+      
+      const { text, reply_markup } = renderOrderCard(order);
+      await ctx.reply(text, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } });
+      return ctx.answerCbQuery();
+    }
+
     // ── 📊 admin_stats: stats for day/week ────────────────────────────────
     if (data === CB.adminStats) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("Доступ запрещен");
-
-      const now = new Date();
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const startOfWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-      const dayStats = await (db as any).wbOrder.aggregate({
-        _count: true,
-        _sum: { amount: true },
-        where: { status: "COMPLETED", updatedAt: { gte: startOfDay } }
-      });
-
-      const weekStats = await (db as any).wbOrder.aggregate({
-        _count: true,
-        _sum: { amount: true },
-        where: { status: "COMPLETED", updatedAt: { gte: startOfWeek } }
-      });
-
-      const statsText = 
-        `📊 <b>СТАТИСТИКА (RobloxBank)</b>\n\n` +
-        `📅 <b>ЗА СЕГОДНЯ:</b>\n` +
-        `• Кол-во: <b>${dayStats._count}</b>\n` +
-        `• Сумма: <b>${dayStats._sum.amount || 0} R$</b>\n\n` +
-        `📅 <b>ЗА 7 ДНЕЙ:</b>\n` +
-        `• Кол-во: <b>${weekStats._count}</b>\n` +
-        `• Сумма: <b>${weekStats._sum.amount || 0} R$</b>`;
-
-      try {
-        await ctx.editMessageText(statsText, {
-          parse_mode: "HTML",
-          ...Markup.inlineKeyboard([[Markup.button.callback("← Назад", "admin_main")]])
-        });
-      } catch {}
+      await showAdminStats(ctx);
       return ctx.answerCbQuery();
     }
 
     // ── 🕒 admin_queue: list pending orders ────────────────────────────────
     if (data === CB.adminQueue) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("Доступ запрещен");
-
-      const pending = await (db as any).wbOrder.findMany({
-        where: { status: "PENDING" },
-        orderBy: { createdAt: "asc" },
-        take: 10
-      });
-
-      if (pending.length === 0) {
-        await ctx.editMessageText("🕒 Очередь пуста. Все заказы выкуплены!", {
-          ...Markup.inlineKeyboard([[Markup.button.callback("← Назад", "admin_main")]])
-        });
-        return ctx.answerCbQuery();
-      }
-
-      let qText = `🕒 <b>ОЧЕРЕДЬ (PENDING)</b>\n\n`;
-      pending.forEach((o: any, i: number) => {
-        const shortId = o.id.slice(-6).toUpperCase();
-        qText += `${i+1}. <code>${shortId}</code> — <b>${o.amount} R$</b> (<a href="${o.gamepassUrl}">пасс</a>)\n`;
-      });
-
-      try {
-        await ctx.editMessageText(qText, {
-          parse_mode: "HTML",
-          link_preview_options: { is_disabled: true },
-          ...Markup.inlineKeyboard([[Markup.button.callback("← Назад", "admin_main")]])
-        });
-      } catch {}
+      await showAdminQueue(ctx);
       return ctx.answerCbQuery();
     }
 
     // ── 🔑 admin_codes: check remain codes ────────────────────────────────
     if (data === CB.adminCodes) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("Доступ запрещен");
-
-      const codes = await (db as any).wbCode.groupBy({
-        by: ['denomination'],
-        _count: { _all: true },
-        where: { isUsed: false }
-      });
-
-      let cText = `🔑 <b>ОСТАТОК КОДОВ:</b>\n\n`;
-      let total = 0;
-      codes.sort((a: any, b: any) => a.denomination - b.denomination).forEach((group: any) => {
-        cText += `• <b>${group.denomination} R$</b>: ${group._count._all} шт.\n`;
-        total += group._count._all;
-      });
-      cText += `\n📦 <b>ВСЕГО: ${total} шт.</b>`;
-
-      if (total === 0) cText = "🔑 Коды закончились! Пора загрузить новые.";
-
-      try {
-        await ctx.editMessageText(cText, {
-          parse_mode: "HTML",
-          ...Markup.inlineKeyboard([[Markup.button.callback("← Назад", "admin_main")]])
-        });
-      } catch {}
-      return ctx.answerCbQuery();
-    }
-
-    // ── 🔄 admin_main: back to admin menu ───────────────────────────────
-    if (data === "admin_main") {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("Доступ запрещен");
-      try {
-        await ctx.editMessageText(
-          "🛠️ <b>Панель управления</b>\n\nВыбери раздел для управления магазином:",
-          {
-            parse_mode: "HTML",
-            ...Markup.inlineKeyboard([
-              [Markup.button.callback("📊 Статистика", CB.adminStats)],
-              [Markup.button.callback("🕒 Очередь", CB.adminQueue)],
-              [Markup.button.callback("🔑 Остаток кодов", CB.adminCodes)],
-            ])
-          }
-        );
-      } catch {}
+      await showAdminCodes(ctx);
       return ctx.answerCbQuery();
     }
 
@@ -547,15 +780,31 @@ async function notifyUserCompleted(
 async function notifyUserRejected(
   bot: Telegraf,
   user: { tgId?: string | null; vkId?: string | null },
-  orderId: string
+  orderId: string,
+  reason: string,
+  amount: number,
+  wbCode: string
 ): Promise<void> {
+  const shortId = orderId.slice(-6).toUpperCase();
+  const reasonLine = reason && reason !== "не указана" 
+    ? `💬 Причина: <i>${reason}</i>\n\n` 
+    : "";
+
   const msg =
-    `❌ Ошибка в вашем заказе #${orderId.slice(-6).toUpperCase()}. ` +
-    `Проверьте цену геймпасса и отправьте ссылку заново или напишите в поддержку.`;
+    `❌ <b>Ошибка в вашем заказе #${shortId}</b>\n\n` +
+    reasonLine +
+    `Нажми на кнопку ниже, чтобы отправить исправленную ссылку:`;
 
   if (user.tgId) {
-    try { await bot.telegram.sendMessage(user.tgId, msg, { parse_mode: "HTML" }); } catch {}
+    try { 
+      await bot.telegram.sendMessage(user.tgId, msg, { 
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[
+          Markup.button.callback("🔄 Исправить ссылку", `user_resubmit:${wbCode}:${amount}`)
+        ]])
+      }); 
+    } catch {}
   } else if (user.vkId) {
-    await vkSend(user.vkId, stripHtml(msg));
+    await vkSend(user.vkId, stripHtml(msg) + "\n\n(Исправьте ссылку в меню бота)");
   }
 }

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import Script from "next/script";
 import SessionProvider from "@/components/session-provider";
 import { PageLoader } from "@/components/page-loader";
 
@@ -40,6 +41,10 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <SessionProvider>
+          <Script 
+            src="https://unpkg.com/@vkid/sdk@<3.0.0/dist-sdk/umd/index.js" 
+            strategy="afterInteractive"
+          />
           <PageLoader />
           {children}
         </SessionProvider>

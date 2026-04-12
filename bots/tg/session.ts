@@ -22,3 +22,8 @@ export const pendingLink = new Map<number, LinkState>();
  * Key: Telegram numeric user ID → WbOrder.id they should review.
  */
 export const pendingReview = new Map<number, string>();
+/**
+ * Admins currently writing a rejection reason for an order.
+ * Key: Admin Telegram ID → WbOrder.id
+ */
+export const pendingRejectionReason = new Map<number, string>();

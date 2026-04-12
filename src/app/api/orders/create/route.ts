@@ -4,8 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { initTinkoffPayment } from "@/lib/tinkoff";
 import { getRobloxUser } from "@/lib/roblox";
 import { getStorefrontPricing } from "@/lib/pricing";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { auth } from "@/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +18,7 @@ const CreateOrderSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
+    const session = await auth();
     const body = await req.json();
     const validated = CreateOrderSchema.safeParse(body);
 
