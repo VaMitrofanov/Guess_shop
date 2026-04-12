@@ -60,35 +60,31 @@ export default function VKAuthButton({
             const code = payload.code;
             const deviceId = payload.device_id;
 
-            VKID.Auth.exchangeCode(code, deviceId)
-              .then(async (data) => {
-                try {
-                  const res = await fetch("/api/auth/vk-callback", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      access_token: data.access_token,
-                      user_id: data.user_id,
-                    }),
-                  });
-
-                  if (res.ok) {
-                    const resData = await res.json();
-                    const target = resData.redirectUrl || "/dashboard";
-                    router.push(target);
-                    router.refresh();
-                  } else {
-                    const errData = await res.json();
-                    setError(errData.error || "Ошибка авторизации на сервере");
-                  }
-                } catch (e) {
-                  setError("Сетевая ошибка при авторизации");
-                }
-              })
-              .catch((err) => {
-                console.error("Exchange Code Error:", err);
-                setError("Ошибка обмена кодом VK");
-              });
+            // Теперь мы не обмениваем код на клиенте, 
+            // а сразу отправляем его на сервер для безопасного обмена
+            fetch("/api/auth/vk-callback", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                code: code,
+                device_id: deviceId,
+              }),
+            })
+            .then(async (res) => {
+              if (res.ok) {
+                const resData = await res.json();
+                const target = resData.redirectUrl || "/dashboard";
+                router.push(target);
+                router.refresh();
+              } else {
+                const errData = await res.json();
+                setError(errData.error || "Ошибка авторизации на сервере");
+              }
+            })
+            .catch((e) => {
+              console.error("Fetch Error:", e);
+              setError("Сетевая ошибка при авторизации");
+            });
           });
         }
       } else {
