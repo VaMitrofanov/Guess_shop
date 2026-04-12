@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Mail, Lock, Loader2, ArrowRight, Eye, EyeOff, User } from "lucide-react";
 import Navbar from "@/components/navbar";
 import Link from "next/link";
+import VKAuthButton from "@/components/auth/VKAuthButton";
 
 export default function LoginPage() {
   const [email, setEmail]           = useState("");
@@ -148,6 +149,19 @@ export default function LoginPage() {
                     : <><span>Войти в кабинет</span><ArrowRight className="w-4 h-4" /></>
                   }
                 </button>
+
+                {/* VK ID Login Option */}
+                <div className="pt-6 border-t border-[#1e2a45]/50">
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="h-px flex-1 bg-[#1e2a45]" />
+                    <span className="font-pixel text-[8px] text-zinc-500 uppercase tracking-widest">ИЛИ ВОЙТИ ЧЕРЕЗ</span>
+                    <div className="h-px flex-1 bg-[#1e2a45]" />
+                  </div>
+                  
+                  <div className="bg-[#0077FF]/5 border border-[#0077FF]/20 p-4 transition-all hover:bg-[#0077FF]/10">
+                    <VKAuthButton />
+                  </div>
+                </div>
 
               </form>
             </div>

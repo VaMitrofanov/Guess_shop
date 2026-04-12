@@ -15,7 +15,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing code or device_id" }, { status: 400 });
     }
 
-    const appId = process.env.NEXT_PUBLIC_VK_APP_ID;
+    const appId = process.env.NEXT_PUBLIC_VK_APP_ID || "54539012";
     const clientSecret = process.env.VK_CLIENT_SECRET;
 
     if (!clientSecret) {
