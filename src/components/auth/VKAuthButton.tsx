@@ -61,33 +61,32 @@ export default function VKAuthButton({
             const deviceId = payload.device_id;
 
             // 1. Обмениваем код на токен прямо на КЛИЕНТЕ
-            // Это решает проблему с Verifier (PKCE)
             VKID.Auth.exchangeCode(code, deviceId)
               .then(async (data) => {
-                const accessToken = data.access_token;
+                const idToken = data.id_token;
                 const userId = data.user_id;
 
                 try {
-                  // 2. Получаем данные пользователя прямо на КЛИЕНТЕ
-                  // Это решает проблему с IP Address (запрос с IP пользователя)
-                  // Используем JSONP или просто fetch к API VK (для клиентских токенов это Ок)
-                  const vkApiUrl = `https://api.vk.com/method/users.get?user_ids=${userId}&fields=photo_200&access_token=${accessToken}&v=5.131`;
-                  
-                  // В браузере может быть CORS, поэтому используем наш прокси или просто передаем токен
-                  // Но лучше получить имя прямо тут если возможно, либо отправить на сервер токен и пусть он пробует
-                  // На самом деле, если мы передадим accessToken на сервер, он снова упадет по IP.
-                  
-                  // Давайте попробуем получить данные через fetch (VK API поддерживает CORS для некоторых методов)
-                  const vkRes = await fetch(vkApiUrl);
-                  const vkData = await vkRes.json();
-                  
+                  // 2. Декодируем JWT (ID Token) вместо запроса к API VK
+                  // Это на 100% исправляет ошибку CORS, так как мы не делаем сетевой запрос
                   let name = "VK User";
                   let image = "";
 
-                  if (vkData.response?.[0]) {
-                    const u = vkData.response[0];
-                    name = `${u.first_name} ${u.last_name}`.trim();
-                    image = u.photo_200;
+                  if (idToken) {
+                    try {
+                      const base64Url = idToken.split('.')[1];
+                      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                      const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+                          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                      }).join(''));
+                      const payload = JSON.parse(jsonPayload);
+                      
+                      // Стандартные OIDC поля: name, picture, given_name, family_name
+                      name = payload.name || `${payload.first_name || ""} ${payload.last_name || ""}`.trim() || "VK User";
+                      image = payload.picture || payload.photo_200 || "";
+                    } catch (jwtErr) {
+                      console.error("JWT Decode Error:", jwtErr);
+                    }
                   }
 
                   // 3. Отправляем готовые данные на наш сервер
@@ -111,13 +110,13 @@ export default function VKAuthButton({
                     setError(errData.error || "Ошибка авторизации на сервере");
                   }
                 } catch (e) {
-                  console.error("VK Info Error:", e);
-                  setError("Ошибка получения данных профиля VK");
+                  console.error("VK Auth Flow Error:", e);
+                  setError("Ошибка обработки данных профиля VK");
                 }
               })
               .catch((err) => {
                 console.error("Exchange Error:", err);
-                setError("Ошибка обмена кодом (Verifier error)");
+                setError("Ошибка авторизации (Код ошибки: " + (err.error || "unknown") + ")");
               });
           });
 
