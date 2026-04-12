@@ -37,10 +37,6 @@ export default function VKAuthButton({
           app: appId,
           redirectUrl: redirectUrl,
           responseMode: VKID.ConfigResponseMode.Callback,
-        VKID.Config.init({
-          app: appId,
-          redirectUrl: redirectUrl,
-          responseMode: VKID.ConfigResponseMode.Callback,
           scope: "",
         });
 
