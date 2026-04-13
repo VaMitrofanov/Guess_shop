@@ -15,7 +15,20 @@ import { sendAdminOrderCard, sendAdminReviewCard } from "../shared/admin";
 import { vkGetName } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
 
-const GAMEPASS_RE = /^https?:\/\/(www\.)?roblox\.com\/game-pass\/\d+/i;
+/**
+ * Extract a Roblox game-pass ID from user input.
+ * Accepts:
+ *   - Pure numeric ID:           "12345678"
+ *   - Standard URL:              "https://www.roblox.com/game-pass/12345678/..."
+ *   - Creator dashboard URL:     "https://create.roblox.com/dashboard/creations/passes/12345678/..."
+ * Returns the ID string, or null if nothing was recognised.
+ */
+function extractPassId(input: string): string | null {
+  const s = input.trim();
+  if (/^\d+$/.test(s)) return s;
+  const m = s.match(/(?:game-pass|passes)\/(\d+)/i);
+  return m ? m[1] : null;
+}
 
 // ── DB-based state recovery ───────────────────────────────────────────────────
 
@@ -207,18 +220,24 @@ async function handleRefActivation(
 async function handleGamepassLink(
   ctx: MessageContext,
   vkUserId: number,
-  url: string,
+  input: string,
   wbCode: string,
   denomination: number
 ): Promise<void> {
-  if (!GAMEPASS_RE.test(url)) {
+  const passId = extractPassId(input);
+
+  if (!passId) {
     await ctx.reply(
-      "⚠️ Некорректная ссылка.\n\n" +
-      "Нужна ссылка вида:\nhttps://www.roblox.com/game-pass/1234567/название\n\n" +
-      "Скопируй её из адресной строки браузера на странице своего геймпасса."
+      "⚠️ Не удалось распознать геймпасс.\n\n" +
+      "Пришли одно из:\n" +
+      "• Ссылку: https://www.roblox.com/game-pass/1234567/...\n" +
+      "• Ссылку из конструктора: https://create.roblox.com/...\n" +
+      "• Просто ID (только цифры): 1234567"
     );
     return;
   }
+
+  const cleanLink = `https://www.roblox.com/game-pass/${passId}`;
 
   const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
   if (!user) {
@@ -230,7 +249,7 @@ async function handleGamepassLink(
   const order = await (db as any).wbOrder.create({
     data: {
       amount:      denomination,
-      gamepassUrl: url,
+      gamepassUrl: cleanLink,
       status:      "PENDING",
       platform:    "VK",
       userId:      user.id,
@@ -241,10 +260,9 @@ async function handleGamepassLink(
   clearState(vkUserId);
 
   await ctx.reply(
-    `✅ Заявка принята!\n\n` +
-    `🆔 Номер: ${order.id.slice(-6).toUpperCase()}\n` +
-    `Менеджер обработает её и пришлёт уведомление.\n\n` +
-    `Чтобы узнать статус, напиши: статус`
+    `✅ Принял геймпасс №${passId}! Ожидайте выкупа.\n\n` +
+    `🆔 Номер заявки: ${order.id.slice(-6).toUpperCase()}\n` +
+    `Напиши "статус" чтобы узнать статус обработки.`
   );
 
   // Fetch real name for admin card (non-blocking — fallback is "VK #id")
@@ -254,7 +272,7 @@ async function handleGamepassLink(
   await sendAdminOrderCard({
     id:          order.id,
     amount:      denomination,
-    gamepassUrl: url,
+    gamepassUrl: cleanLink,
     platform:    "VK",
     wbCode,
     userDisplay: vkUserDisplay(vkName, vkUserId),
@@ -331,9 +349,9 @@ async function handleIdleMessage(
 ): Promise<void> {
   const lower = text.toLowerCase();
 
-  // Guard: user sent a gamepass URL but state machine has no active code.
+  // Guard: user sent a gamepass URL/ID but state machine has no active code.
   // Try DB auto-pickup first — they may have activated the code on the site.
-  if (GAMEPASS_RE.test(text)) {
+  if (extractPassId(text) !== null) {
     const restored = await tryRestoreState(vkUserId);
     if (restored) {
       // State is now AWAITING_LINK — re-dispatch to gamepass handler

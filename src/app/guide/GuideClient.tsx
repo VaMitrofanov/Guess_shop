@@ -8,7 +8,9 @@ import {
   AlertTriangle, CheckCircle2, ExternalLink, ArrowRight, ChevronRight,
   Globe, Gamepad2, Ticket, Tag, Link2, ShoppingCart,
   Lock, Send, ShoppingBag, Copy, Check, Search, CreditCard,
+  Monitor, Smartphone, MoreHorizontal, Hash,
 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { ParticleTextEffect } from "@/components/ui/particle-text-effect";
 import VKAuthButton from "@/components/auth/VKAuthButton";
 
@@ -45,77 +47,192 @@ function loadWBSession(): { denomination: number; code: string } | null {
 
 // ─── Step definitions ──────────────────────────────────────────────────────────
 
+interface StepDef {
+  num: string;
+  icon: React.ElementType;
+  title: string;
+  desc: string;
+  detail: string;
+  tip: string | null;
+  warn: string | null;
+  // Platform-specific overrides
+  mobileDesc?: string;
+  mobileDetail?: string;
+  mobileTip?: string;
+  pcTip?: string;
+  // Icon-based bullet points for description
+  bullets?: { icon: React.ElementType; text: string }[];
+  mobileBullets?: { icon: React.ElementType; text: string }[];
+}
+
 // Steps shared between standard and WB (01–04)
-const STEPS_COMMON = [
+const STEPS_COMMON: StepDef[] = [
   {
     num: "01", icon: Globe,
     title: "Открой Creator Hub",
-    desc: "Зайди на create.roblox.com и войди в аккаунт.",
+    desc: "Перейди по ссылке ниже и войди в аккаунт Roblox.",
     detail: "Официальный портал для создателей. Работает в любом браузере — на компьютере или телефоне. Никаких программ скачивать не нужно.",
     tip: null, warn: null,
+    pcTip: "Используй прямую ссылку ниже — откроется нужный раздел сразу.",
+    mobileDesc: "Открой мобильный браузер и перейди по ссылке ниже.",
+    mobileDetail: "Сайт работает в Chrome, Safari и любом другом браузере. Войди в аккаунт Roblox.",
+    mobileTip: "На телефоне удобнее повернуть экран горизонтально — интерфейс шире.",
+    bullets: [
+      { icon: Globe, text: "Перейди на create.roblox.com/dashboard/creations" },
+      { icon: Lock, text: "Войди в аккаунт Roblox" },
+      { icon: CheckCircle2, text: "Попадёшь сразу в раздел Creations" },
+    ],
+    mobileBullets: [
+      { icon: Smartphone, text: "Открой Chrome или Safari на телефоне" },
+      { icon: Globe, text: "Введи create.roblox.com/dashboard/creations" },
+      { icon: Lock, text: "Войди в аккаунт" },
+    ],
   },
   {
     num: "02", icon: Gamepad2,
-    title: "Выбери или создай игру",
-    desc: "Нажми «Creations» → выбери игру. Нет игр — создай пустую.",
-    detail: "Кнопка «Create Experience» в правом верхнем углу. Введи любое название — оно не важно. Игру не нужно публиковать или наполнять.",
-    tip: "Игра нужна только как контейнер для геймпасса — название и содержимое не важны.",
+    title: "Выбери свой Place",
+    desc: "В списке Creations найди свой Place — оно обычно называется по нику.",
+    detail: "Нажми на иконку своего Place",
+    tip: "Place обычно называется по нику или «My Place»",
     warn: null,
+    pcTip: "Нажми на карточку игры → появится боковое меню настроек.",
+    mobileDesc: "Найди своё Place в списке и нажми на него.",
+    mobileDetail: "Place обычно называется по нику или «My Place»",
+    mobileTip: "Прокрути список Creations — все твои игры находятся там.",
+    bullets: [
+      { icon: Search, text: "Найди своё Place в списке Creations" },
+      { icon: Gamepad2, text: "Нажми на карточку игры" },
+      { icon: CheckCircle2, text: "Если нет игр — создай пустую через «Create Experience»" },
+    ],
+    mobileBullets: [
+      { icon: Search, text: "Листай список Creations сверху вниз" },
+      { icon: Gamepad2, text: "Нажми на своё Place (обычно по нику)" },
+      { icon: CheckCircle2, text: "Нет Place? Создай через кнопку «+»" },
+    ],
   },
   {
     num: "03", icon: Ticket,
-    title: "Создай геймпасс",
-    desc: "В настройках игры: «Monetization» → «Passes» → «Create a Pass».",
-    detail: "Придумай любое название: «VIP», «Donate», «Premium». Иконку загружать необязательно — Roblox подставит стандартную. Нажми «Save».",
-    tip: null, warn: null,
+    title: "Создай или выбери геймпасс",
+    desc: "Monetization → Passes → Create a Pass (синяя кнопка).",
+    detail: "Придумай любое название: «VIP», «Donate», «Premium». Иконку загружать необязательно. После сохранения пасс появится в списке.",
+    tip: "Можно выбрать уже созданный геймпасс — не обязательно создавать новый.",
+    warn: null,
+    pcTip: "Можно выбрать уже созданный геймпасс — не обязательно создавать новый.",
+    mobileDesc: "Зайди в настройки игры → Monetization → Passes.",
+    mobileDetail: "Нажми «Create a Pass» или выбери уже существующий из списка. Название не важно.",
+    mobileTip: "На мобильном меню Monetization может быть скрыто — ищи значок ≡ или пролистай боковую панель.",
+    bullets: [
+      { icon: ChevronRight, text: "В боковом меню выбери «Monetization»" },
+      { icon: Ticket, text: "Нажми «Passes» → «Create a Pass»" },
+      { icon: Tag, text: "Введи любое название и нажми «Save»" },
+    ],
+    mobileBullets: [
+      { icon: ChevronRight, text: "Нажми ⋮ → «Monetization»" },
+      { icon: Ticket, text: "Открой «Passes» → «Create a Pass»" },
+      { icon: Tag, text: "Придумай название и сохрани" },
+    ],
   },
   {
     num: "04", icon: Tag,
     title: "Установи цену",
-    desc: "Настройки пасса → включи «For Sale» → укажи рассчитанную цену → сохрани.",
-    detail: "Roblox удерживает 30% с каждой продажи. Поэтому цена пасса должна быть выше суммы, которую ты хочешь получить. Используй калькулятор ниже — он поможет посчитать цену геймпасса.",
+    desc: "В меню пасса: Sales → включи «Item for Sale» → введи цену → сохрани.",
+    detail: "Roblox удерживает 30% с каждой продажи. Поэтому цена пасса должна быть выше суммы, которую ты хочешь получить. Используй готовую цену ниже.",
     tip: null,
     warn: "Установи точную цену из калькулятора — она учитывает 30% комиссию Roblox.",
+
+    mobileDesc: "Открой пасс → Sales → включи «Item for Sale» → введи готовую цену из формулы ниже.",
+    mobileDetail: "Прокрути страницу вниз, чтобы увидеть поле Default Price. Скопируй цену из калькулятора и вставь её.",
+    mobileTip: "После ввода цены нажми «Save Changes» — страница обновится.",
+    bullets: [
+      { icon: ChevronRight, text: "В боковом меню выбери «Sales»" },
+      { icon: CheckCircle2, text: "Включи переключатель «Item for Sale»" },
+      { icon: Tag, text: "В поле Default Price введи цену из калькулятора" },
+      { icon: Check, text: "Нажми «Save Changes»" },
+    ],
+    mobileBullets: [
+      { icon: ChevronRight, text: "Перейди в раздел «Sales» пасса" },
+      { icon: CheckCircle2, text: "Включи тоггл «Item for Sale»" },
+      { icon: Tag, text: "Введи цену из калькулятора в поле Price" },
+      { icon: Check, text: "Сохрани" },
+    ],
   },
 ];
 
 // Steps 05 & 06 for standard (website) flow
-const STEPS_STANDARD = [
+const STEPS_STANDARD: StepDef[] = [
   {
     num: "05", icon: Search,
     title: "Найди пасс на сайте",
-    desc: "Вернись на robloxbank.ru → нажми «Купить Robux» → введи свой ник в поле поиска.",
+    desc: "Вернись на robloxbank.ru → нажми «Купить Robux» → введи свой ник в поиске.",
     detail: "На странице оформления выбери игру, в которой создал пасс, затем выбери нужный геймпасс из списка. Цена подтянется автоматически.",
     tip: "Можно вставить прямую ссылку на пасс или его числовой ID — это самый быстрый способ.",
     warn: null,
+    pcTip: "Вставь ник или ID прямо в поисковое поле — игры загрузятся за несколько секунд.",
+    mobileDesc: "Открой robloxbank.ru в браузере → найди свой пасс по нику.",
+    mobileDetail: "Введи ник в поле поиска — появится список твоих игр. Выбери нужную и пасс.",
+    mobileTip: "Скопируй ник из профиля Roblox и вставь в поле поиска.",
+    bullets: [
+      { icon: ArrowRight, text: "Перейди на robloxbank.ru" },
+      { icon: Search, text: "Введи свой ник Roblox в поле поиска" },
+      { icon: Gamepad2, text: "Выбери игру и нужный геймпасс" },
+    ],
+    mobileBullets: [
+      { icon: ArrowRight, text: "Открой robloxbank.ru в браузере" },
+      { icon: Search, text: "Вставь ник из Roblox" },
+      { icon: Ticket, text: "Выбери пасс из списка" },
+    ],
   },
   {
     num: "06", icon: CreditCard,
     title: "Оплати заказ",
-    desc: "Выбери геймпасс → нажми «К подтверждению» → «Оплатить» банковской картой.",
+    desc: "Выбери геймпасс → «К подтверждению» → «Оплатить» банковской картой.",
     detail: "Оплата проходит через Tinkoff — безопасно и мгновенно. Сразу после оплаты заказ уходит в обработку. Писать в поддержку не нужно — всё автоматически.",
     tip: null,
     warn: "Не удаляй геймпасс и не меняй цену до получения уведомления о завершении заказа.",
+    pcTip: "Оплата через Tinkoff — стандартная форма оплаты картой.",
+    mobileDesc: "Нажми «К подтверждению» и оплати картой.",
+    mobileDetail: "На мобильном откроется страница Tinkoff. Введи данные карты или используй Apple Pay / Google Pay.",
+    mobileTip: "Поддерживается Apple Pay и Google Pay — быстрая оплата без ввода карты.",
   },
 ];
 
 // Steps 05 & 06 for WB (manager) flow
-const STEPS_WB = [
+const STEPS_WB: StepDef[] = [
   {
-    num: "05", icon: Link2,
-    title: "Скопируй ссылку на геймпасс",
-    desc: "В Creator Hub открой игру → «Monetization» → «Passes» → кликни на пасс → скопируй URL.",
-    detail: "Ссылка выглядит так: roblox.com/game-pass/1234567/название — скопируй её целиком из адресной строки.",
-    tip: "URL можно скопировать прямо из адресной строки — нажми на неё и выдели весь текст.",
+    num: "05", icon: Hash,
+    title: "Скопируй ID геймпасса",
+    desc: "В списке пассов нажми ⋮ рядом с пассом → выбери «Copy Asset ID».",
+    detail: "Asset ID — числовой идентификатор пасса (например: 1234567). Это самый быстрый способ передать пасс менеджеру без ошибок в ссылке.",
+    tip: "Нажми три точки (⋮) справа от названия пасса в списке — откроется контекстное меню.",
     warn: null,
+    pcTip: "В Creator Hub: Monetization → Passes → три точки (⋮) → «Copy Asset ID».",
+    mobileDesc: "В списке пассов нажми ⋮ рядом с нужным пассом.",
+    mobileDetail: "В выпавшем меню выбери «Copy Asset ID». Цифры из буфера обмена и есть ID пасса.",
+    mobileTip: "На телефоне нажми долго на пасс или ищи кнопку ⋮ в правом углу строки.",
+    bullets: [
+      { icon: Ticket, text: "Открой Monetization → Passes" },
+      { icon: MoreHorizontal, text: "Нажми ⋮ рядом с нужным пассом" },
+      { icon: Copy, text: "Выбери «Copy Asset ID»" },
+      { icon: Check, text: "ID скопирован — отправь его менеджеру" },
+    ],
+    mobileBullets: [
+      { icon: Ticket, text: "Открой список пассов игры" },
+      { icon: MoreHorizontal, text: "Нажми ⋯ или долго удержи строку пасса" },
+      { icon: Copy, text: "Выбери «Copy Asset ID»" },
+      { icon: Send, text: "Отправь скопированный ID менеджеру" },
+    ],
   },
   {
     num: "06", icon: Send,
-    title: "Отправь ссылку менеджеру",
-    desc: "Скопируй ссылку на геймпасс и отправь её нам — в Telegram или ВКонтакте.",
+    title: "Отправь ID менеджеру",
+    desc: "Перешли скопированный Asset ID нам — в Telegram или ВКонтакте.",
     detail: "Менеджер выкупит пасс вручную и пришлёт подтверждение. Robux поступят на баланс через 5–7 дней — стандартное время зачисления по правилам Roblox.",
     tip: null,
     warn: "Не удаляй геймпасс и не меняй цену до получения уведомления о завершении заказа.",
+    pcTip: "Скопируй ID → нажми кнопку Telegram или VK ниже → вставь ID в сообщение.",
+    mobileDesc: "Отправь ID нам в Telegram или VK — кнопки внизу страницы.",
+    mobileDetail: "Просто вставь скопированный ID в сообщение менеджеру.",
+    mobileTip: "Нажми на кнопку Telegram или VK ниже — откроется чат с менеджером.",
   },
 ];
 
@@ -304,16 +421,6 @@ function Anim01() {
           </div>
         </div>
       )}
-    </div>
-    <div className="flex justify-center mt-4">
-      <a
-        href="https://create.roblox.com"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="h-12 px-7 border-2 border-[#1e2a45] hover:border-[#00b06f]/50 hover:text-[#00b06f] font-black text-[11px] uppercase tracking-widest transition-all rounded-none flex items-center gap-2 text-zinc-300"
-      >
-        Открыть Creator Hub <ExternalLink className="w-3.5 h-3.5" />
-      </a>
     </div>
     </>
   );
@@ -645,7 +752,7 @@ function Anim04Price({ passPrice }: { passPrice: number | null }) {
         </div>
 
         {/* Main content */}
-        <div style={{ flex: 1, background: "#111", padding: "10px 12px", minHeight: 272, position: "relative" }}>
+        <div style={{ flex: 1, background: "#111", padding: "10px 12px", minHeight: 310, position: "relative" }}>
           {/* Breadcrumb */}
           <div style={{ fontSize: 7, color: "#444", marginBottom: 6, display: "flex", flexWrap: "wrap", gap: 2 }}>
             {"Creations / My Place / Passes / VIP Pass /".split(" ").map((t, i) => (
@@ -673,12 +780,22 @@ function Anim04Price({ passPrice }: { passPrice: number | null }) {
           <div style={{ fontSize: 8, fontWeight: 700, color: "#666", marginBottom: 6, letterSpacing: "0.05em" }}>Price</div>
 
           {/* Item for Sale toggle */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, position: "relative" }}>
+            {/* Pulse ring around toggle when hovered */}
+            {f === 1 && (
+              <div style={{
+                position:"absolute", left:-4, top:"50%", transform:"translateY(-50%)",
+                width:42, height:28, borderRadius:10,
+                border:"2px solid #4a9eff",
+                pointerEvents:"none", zIndex:5,
+                animation:"pulseGlow 1s ease-in-out infinite",
+              }} />
+            )}
             <div style={{
               width: 30, height: 16, borderRadius: 8,
               background: toggleOn ? "#4a9eff" : "#333",
               position: "relative", transition: "background 0.3s",
-              boxShadow: f === 1 ? "0 0 0 3px #4a9eff44" : "none",
+              boxShadow: f === 1 ? "0 0 0 4px #4a9eff33" : toggleOn ? "0 0 8px #4a9eff44" : "none",
               cursor: "pointer", flexShrink: 0,
             }}>
               <div style={{
@@ -689,17 +806,37 @@ function Anim04Price({ passPrice }: { passPrice: number | null }) {
               }} />
             </div>
             <span style={{ fontSize: 10, color: "#ddd", fontWeight: 600 }}>Item for Sale</span>
+            {toggleOn && (
+              <span style={{ marginLeft:"auto", fontSize:7, color:"#22c55e", fontWeight:700, background:"#22c55e15", padding:"1px 6px", borderRadius:2 }}>● ON</span>
+            )}
           </div>
+          <style>{`
+            @keyframes pulseGlow {
+              0%   { opacity:1; box-shadow:0 0 0 0 #4a9eff44; }
+              50%  { opacity:0.6; box-shadow:0 0 0 5px #4a9eff22; }
+              100% { opacity:1; box-shadow:0 0 0 0 #4a9eff00; }
+            }
+          `}</style>
 
           {/* Default Price field */}
           {toggleOn && (
-            <div style={{ marginBottom: 8 }}>
+            <div style={{ marginBottom: 8, position:"relative" }}>
               <div style={{ fontSize: 7, color: "#555", marginBottom: 3 }}>Default Price</div>
+              {/* Pulse ring when focusing the price field */}
+              {f === 3 && (
+                <div style={{
+                  position:"absolute", inset:-3, borderRadius:5,
+                  border:"2px solid #4a9eff",
+                  pointerEvents:"none", zIndex:5,
+                  animation:"pulseGlow 0.9s ease-in-out infinite",
+                }} />
+              )}
               <div style={{
                 border: priceFocus ? "2px solid #4a9eff" : "1px solid #2a2a2a",
                 borderRadius: 3, background: "#1a1a1a",
                 padding: "5px 10px", display: "flex", alignItems: "center", gap: 6,
                 transition: "border-color 0.3s",
+                boxShadow: priceFocus ? "0 0 0 3px #4a9eff22" : "none",
               }}>
                 <div style={{ width: 9, height: 9, borderRadius: "50%", border: "2px solid #4a9eff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                   <div style={{ width: 3, height: 3, borderRadius: "50%", background: "#4a9eff" }} />
@@ -708,6 +845,9 @@ function Anim04Price({ passPrice }: { passPrice: number | null }) {
                   {priceVal || <span style={{ color: "#444" }}>0</span>}
                   {priceFocus && f <= 4 ? <span style={{ borderLeft: "1.5px solid #eee", marginLeft: 1 }}>&nbsp;</span> : null}
                 </span>
+                {priceVal && !priceFocus && (
+                  <span style={{ marginLeft:"auto", fontSize:7, color:"#22c55e", fontWeight:700 }}>✓</span>
+                )}
               </div>
             </div>
           )}
@@ -1030,6 +1170,235 @@ function Anim06WB() {
   );
 }
 
+// ── Anim 05 WB: Copy Asset ID via three-dot menu ───────────────────────────────
+function Anim05ID() {
+  const [f, setF] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setF(v => (v + 1) % 5), 1700);
+    return () => clearInterval(id);
+  }, []);
+  // f=0: passes list, f=1: cursor near three dots, f=2: dropdown open, f=3: hover Copy Asset ID, f=4: copied!
+
+  const showMenu = f >= 2;
+  const hoverCopy = f >= 3;
+  const copied = f === 4;
+
+  const passes = [
+    { name: "VIP Pass", id: "1234567", price: "1430 R$" },
+    { name: "Donate", id: "7654321", price: "715 R$" },
+  ];
+
+  return (
+    <div style={{
+      marginTop: 12, overflow: "hidden", border: "1px solid #2a2a2a",
+      background: "#111", fontSize: 10, userSelect: "none", position: "relative",
+    }}>
+      {/* Mac chrome */}
+      <div style={{ background: "#1c1c1c", padding: "5px 10px", display: "flex", alignItems: "center", gap: 5, borderBottom: "1px solid #2a2a2a" }}>
+        <div style={{ display: "flex", gap: 4 }}>
+          {(["#ff5f57","#febc2e","#28c840"] as string[]).map((c,i) => (
+            <div key={i} style={{ width:8, height:8, borderRadius:"50%", background:c }} />
+          ))}
+        </div>
+        <div style={{ flex:1, height:14, background:"#2d2d2d", borderRadius:3, marginLeft:6, display:"flex", alignItems:"center", paddingLeft:8 }}>
+          <span style={{ color:"#888", fontSize:8 }}>create.roblox.com · Monetization · Passes</span>
+        </div>
+      </div>
+
+      <div style={{ display:"flex", minHeight:144 }}>
+        {/* Icon sidebar */}
+        <div style={{ width:40, background:"#181818", borderRight:"1px solid #252525", display:"flex", flexDirection:"column", alignItems:"center", paddingTop:8, gap:3, flexShrink:0 }}>
+          <div style={{ width:22, height:22, background:"#e32f4a", borderRadius:3, display:"flex", alignItems:"center", justifyContent:"center", marginBottom:3 }}>
+            <span style={{ color:"white", fontWeight:900, fontSize:10 }}>R</span>
+          </div>
+          {(["⌂","✦","◈","⊞"] as string[]).map((ic,i) => (
+            <div key={i} style={{ width:26, height:20, display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <span style={{ fontSize:8, color:"#333" }}>{ic}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Left nav */}
+        <div style={{ width:100, background:"#1a1a1a", borderRight:"1px solid #252525", paddingTop:8, flexShrink:0 }}>
+          <div style={{ padding:"0 8px 6px", fontSize:7, color:"#444", fontWeight:700, letterSpacing:"0.08em" }}>MONETIZATION</div>
+          {["Dev Products","Game Passes","Paid Access"].map((lbl) => (
+            <div key={lbl} style={{
+              padding:"5px 10px", fontSize:8,
+              color: lbl === "Game Passes" ? "#fff" : "#555",
+              background: lbl === "Game Passes" ? "#242424" : "transparent",
+              borderLeft: lbl === "Game Passes" ? "2px solid #4a9eff" : "2px solid transparent",
+              fontWeight: lbl === "Game Passes" ? 700 : 400,
+            }}>{lbl}</div>
+          ))}
+        </div>
+
+        {/* Content */}
+        <div style={{ flex:1, background:"#111", padding:"8px 10px", position:"relative" }}>
+          <div style={{ fontSize:11, fontWeight:700, color:"#eee", marginBottom:6 }}>Game Passes</div>
+
+          {/* Pass list */}
+          <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+            {passes.map((pass, i) => (
+              <div key={pass.id} style={{
+                display:"flex", alignItems:"center", gap:8,
+                background:"#1a1a1a", border: i === 0 ? "1px solid #333" : "1px solid #252525",
+                padding:"6px 8px", borderRadius:3, position:"relative",
+              }}>
+                {/* Thumbnail */}
+                <div style={{ width:28, height:28, background: i===0 ? "#4f46e5" : "#0891b2", borderRadius:3, flexShrink:0 }} />
+                {/* Info */}
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:9, fontWeight:700, color:"#eee" }}>{pass.name}</div>
+                  <div style={{ fontSize:7, color:"#22c55e" }}>● For Sale · {pass.price}</div>
+                </div>
+                {/* Three dots button — ONLY show for first pass */}
+                {i === 0 && (
+                  <div style={{
+                    width:20, height:20, display:"flex", alignItems:"center", justifyContent:"center",
+                    background: f >= 1 ? "#2a2a2a" : "transparent",
+                    borderRadius:3,
+                    border: f >= 1 ? "1px solid #444" : "1px solid transparent",
+                    flexShrink:0, cursor:"pointer",
+                    transition:"all 0.3s",
+                    boxShadow: f === 1 ? "0 0 0 3px #4a9eff33" : "none",
+                  }}>
+                    <span style={{ color: f >= 1 ? "#eee" : "#444", fontSize:10, letterSpacing:"0px", fontWeight:900 }}>···</span>
+                  </div>
+                )}
+                {i !== 0 && (
+                  <div style={{ width:20, height:20, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    <span style={{ color:"#333", fontSize:10, fontWeight:900 }}>···</span>
+                  </div>
+                )}
+
+                {/* PULSE RING around three dots when cursor is near */}
+                {i === 0 && f === 1 && (
+                  <div style={{
+                    position:"absolute", right:4, top:"50%", transform:"translateY(-50%)",
+                    width:28, height:28,
+                    border:"2px solid #4a9eff",
+                    borderRadius:4,
+                    animation:"pulseRing 1s ease-in-out infinite",
+                    pointerEvents:"none",
+                    zIndex:5,
+                  }} />
+                )}
+
+                {/* Context menu */}
+                {i === 0 && showMenu && (
+                  <div style={{
+                    position:"absolute", right:8, top:28, zIndex:30,
+                    background:"#1e1e1e", border:"1px solid #333",
+                    borderRadius:4, overflow:"hidden", minWidth:130,
+                    boxShadow:"0 4px 20px rgba(0,0,0,0.6)",
+                  }}>
+                    {["Edit Pass","Manage Sales","Copy Asset ID","Delete Pass"].map((item) => (
+                      <div key={item} style={{
+                        padding:"6px 12px", fontSize:9,
+                        color: item === "Copy Asset ID" ? (hoverCopy ? "white" : "#4a9eff") : "#aaa",
+                        background: item === "Copy Asset ID" && hoverCopy ? "#0e6fff" : "transparent",
+                        fontWeight: item === "Copy Asset ID" ? 700 : 400,
+                        display:"flex", alignItems:"center", gap:6,
+                        cursor:"pointer",
+                        transition:"all 0.2s",
+                        outline: item === "Copy Asset ID" && hoverCopy ? "none" : "none",
+                        boxShadow: item === "Copy Asset ID" && hoverCopy ? "inset 0 0 0 2px #4a9eff55" : "none",
+                      }}>
+                        {item === "Copy Asset ID" && (
+                          <span style={{ fontSize:8 }}>{copied ? "✓" : "#"}</span>
+                        )}
+                        {item}
+                        {item === "Copy Asset ID" && copied && (
+                          <span style={{ marginLeft:"auto", fontSize:7, color:"#7dff9a", fontWeight:700 }}>Copied!</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Copied toast */}
+          {copied && (
+            <div style={{
+              position:"absolute", bottom:8, left:"50%", transform:"translateX(-50%)",
+              background:"#0e6fff", color:"white", fontWeight:700, fontSize:9,
+              padding:"5px 12px", borderRadius:3,
+              display:"flex", alignItems:"center", gap:5,
+              animation:"fadeInUp 0.3s ease",
+              zIndex:40,
+            }}>
+              <span>✓</span> Asset ID скопирован
+            </div>
+          )}
+
+          {/* Cursor */}
+          <div style={{
+            position:"absolute",
+            top:  f===0 ? 30 : f===1 ? 32 : f===2 ? 32 : f===3 ? 68 : 30,
+            left: f===0 ? 120 : f===1 ? 188 : f===2 ? 188 : f===3 ? 175 : 120,
+            pointerEvents:"none", zIndex:20,
+            transition:"top 0.4s cubic-bezier(0.4,0,0.2,1), left 0.4s cubic-bezier(0.4,0,0.2,1)",
+          }}>
+            {f <= 3 && <RCursor />}
+          </div>
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes pulseRing {
+          0%   { opacity:0.8; transform:translateY(-50%) scale(1); }
+          50%  { opacity:0.3; transform:translateY(-50%) scale(1.25); }
+          100% { opacity:0.8; transform:translateY(-50%) scale(1); }
+        }
+        @keyframes fadeInUp {
+          from { opacity:0; transform:translateX(-50%) translateY(8px); }
+          to   { opacity:1; transform:translateX(-50%) translateY(0); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// ── Platform Switcher ──────────────────────────────────────────────────────────
+function PlatformSwitcher({
+  platform,
+  onChange,
+}: {
+  platform: "pc" | "mobile";
+  onChange: (p: "pc" | "mobile") => void;
+}) {
+  return (
+    <div className="flex items-center gap-4 mb-8">
+      <span className="font-pixel text-[9px] text-zinc-500 uppercase tracking-widest hidden sm:block">Платформа создания геймпасса:</span>
+      <div className="relative inline-flex bg-[#0a0e1a] border-2 border-[#1e2a45] p-1">
+        {/* Sliding highlight */}
+        <motion.div
+          className="absolute inset-y-1 bg-[#00b06f]/15 border border-[#00b06f]/40"
+          style={{ width: "calc(50% - 4px)" }}
+          animate={{ left: platform === "pc" ? 4 : "calc(50%)" }}
+          transition={{ type: "spring", stiffness: 380, damping: 36 }}
+        />
+        {([
+          { id: "pc" as const, label: "Компьютер", icon: Monitor },
+          { id: "mobile" as const, label: "Телефон", icon: Smartphone },
+        ] as const).map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => onChange(id)}
+            className="relative z-10 flex items-center gap-2 px-5 py-2.5 font-black text-[11px] uppercase tracking-widest transition-colors duration-200"
+            style={{ color: platform === id ? "#00b06f" : "#52525b" }}
+          >
+            <Icon style={{ width:14, height:14 }} />
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const ANIM_MAP: Record<string, () => React.ReactElement> = {
   "01": () => <Anim01 />,
   "02": () => <Anim02 />,
@@ -1045,6 +1414,7 @@ function StepsGrid({
   onCopyPassPrice,
   priceCopied,
   onPassPriceChange,
+  platform,
 }: {
   denomination?: number;
   isWB?: boolean;
@@ -1052,7 +1422,9 @@ function StepsGrid({
   onCopyPassPrice: () => void;
   priceCopied: boolean;
   onPassPriceChange: (p: number | null) => void;
+  platform: "pc" | "mobile";
 }) {
+  const isMobile = platform === "mobile";
   const steps05 = isWB ? STEPS_WB : STEPS_STANDARD;
   const allSteps = [...STEPS_COMMON, ...steps05];
 
@@ -1060,13 +1432,19 @@ function StepsGrid({
   const step04      = allSteps.find(s => s.num === "04")!;
   const stepsBottom = allSteps.filter(s => ["05","06"].includes(s.num));
 
-  const renderCard = (step: (typeof allSteps)[0]) => {
+  const renderCard = (step: StepDef) => {
         const StepIcon = step.icon;
         const isStep04 = step.num === "04";
-        const isStep05WB = isWB && step.num === "05";
-        const isStep06WB = isWB && step.num === "06";
+        const isStep05WB  = isWB && step.num === "05";
+        const isStep06WB  = isWB && step.num === "06";
         const isStep05Std = !isWB && step.num === "05";
         const isStep06Std = !isWB && step.num === "06";
+
+        // Pick platform-specific content
+        const displayDesc   = isMobile && step.mobileDesc   ? step.mobileDesc   : step.desc;
+        const displayDetail = isMobile && step.mobileDetail ? step.mobileDetail : step.detail;
+        const displayTip    = isMobile && step.mobileTip    ? step.mobileTip    : (isMobile ? null : (step.pcTip ?? step.tip));
+        const displayBullets = isMobile ? (step.mobileBullets ?? step.bullets) : step.bullets;
 
         // Dynamic warn for step 04
         const dynamicWarn = isStep04 && passPrice
@@ -1084,56 +1462,107 @@ function StepsGrid({
                 <StepIcon className="w-4 h-4 text-[#00b06f]" />
               </div>
               <span className="font-pixel text-[9px] text-[#00b06f]/40">{step.num}</span>
+              {isMobile && (
+                <span className="ml-auto flex items-center gap-1 text-[9px] font-black text-zinc-600 uppercase tracking-wider">
+                  <Smartphone className="w-3 h-3" /> mobile
+                </span>
+              )}
             </div>
 
-            <div className="space-y-2">
-              <h2 className="text-lg font-black uppercase tracking-tight leading-tight">{step.title}</h2>
-              <p className="text-sm text-white/90 font-semibold leading-relaxed">{step.desc}</p>
-              <p className="text-sm text-zinc-400 font-medium leading-relaxed">{step.detail}</p>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={platform + step.num}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.22 }}
+                className="space-y-2"
+              >
+                <h2 className="text-lg font-black uppercase tracking-tight leading-tight">{step.title}</h2>
+                <p className="text-sm text-white/90 font-semibold leading-relaxed">{displayDesc}</p>
+                <p className="text-sm text-zinc-400 font-medium leading-relaxed">{displayDetail}</p>
 
-              {step.tip && (
-                <div className="flex gap-2 items-start bg-[#00b06f]/5 border border-[#00b06f]/15 px-3 py-2 mt-2">
-                  <span className="font-pixel text-[9px] text-[#00b06f] mt-0.5 flex-shrink-0">TIP</span>
-                  <p className="text-sm text-[#00b06f]/80 font-bold leading-relaxed">{step.tip}</p>
-                </div>
-              )}
+                {/* Bullet points with icons */}
+                {displayBullets && displayBullets.length > 0 && (
+                  <div className="mt-2 space-y-1.5">
+                    {displayBullets.map((bullet, bi) => {
+                      const BIcon = bullet.icon;
+                      return (
+                        <div key={bi} className="flex items-start gap-2.5">
+                          <div className="w-5 h-5 border border-[#1e2a45] bg-[#0a0e1a] flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <BIcon className="w-2.5 h-2.5 text-[#00b06f]/60" />
+                          </div>
+                          <span className="text-sm text-zinc-300 font-medium leading-snug">{bullet.text}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
-              {dynamicWarn && !isStep04 && (
-                <div className="flex gap-2 items-start border-l-2 border-amber-500/50 pl-3 py-1 mt-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                  <p className="text-sm text-amber-300/80 font-bold leading-relaxed">{dynamicWarn}</p>
-                </div>
-              )}
+                {displayTip && (
+                  <div className="flex gap-2 items-start bg-[#00b06f]/5 border border-[#00b06f]/15 px-3 py-2 mt-2">
+                    <span className="font-pixel text-[9px] text-[#00b06f] mt-0.5 flex-shrink-0">TIP</span>
+                    <p className="text-sm text-[#00b06f]/80 font-bold leading-relaxed">{displayTip}</p>
+                  </div>
+                )}
 
-              {/* Step 04: calculator (contains copy + warning inline) */}
-              {isStep04 && (
-                <div className="mt-3">
-                  <FormulaCalculator
-                    denomination={denomination}
-                    isWB={!!isWB}
-                    onPassPriceChange={onPassPriceChange}
-                    onCopyPassPrice={onCopyPassPrice}
-                    priceCopied={priceCopied}
-                  />
-                </div>
-              )}
+                {dynamicWarn && !isStep04 && (
+                  <div className="flex gap-2 items-start border-l-2 border-amber-500/50 pl-3 py-1 mt-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <p className="text-sm text-amber-300/80 font-bold leading-relaxed">{dynamicWarn}</p>
+                  </div>
+                )}
 
-              {/* Step animations — wrapper with minHeight prevents layout shift */}
-              {ANIM_MAP[step.num] && (
-                <div style={{ minHeight: 200 }} className="flex flex-col justify-end">
-                  {ANIM_MAP[step.num]!()}
-                </div>
-              )}
-              {isStep04 && (
-                <div style={{ minHeight: 460 }} className="flex flex-col justify-end">
-                  <Anim04Price passPrice={passPrice} />
-                </div>
-              )}
-              {isStep05Std && <div style={{ minHeight: 180 }}><Anim05Standard /></div>}
-              {isStep06Std && <div style={{ minHeight: 180 }}><Anim06Standard /></div>}
-              {isStep05WB  && <div style={{ minHeight: 180 }}><Anim05WB /></div>}
-              {isStep06WB  && <div style={{ minHeight: 320 }}><Anim06WB /></div>}
-            </div>
+                {/* Step 04: calculator */}
+                {isStep04 && (
+                  <div className="mt-3">
+                    <FormulaCalculator
+                      denomination={denomination}
+                      isWB={!!isWB}
+                      onPassPriceChange={onPassPriceChange}
+                      onCopyPassPrice={onCopyPassPrice}
+                      priceCopied={priceCopied}
+                    />
+                  </div>
+                )}
+
+                {/* Animations (PC only — skip on mobile to keep it simple) */}
+                {!isMobile && ANIM_MAP[step.num] && (
+                  <div style={{ minHeight: 200 }} className="flex flex-col justify-end">
+                    {ANIM_MAP[step.num]!()}
+                  </div>
+                )}
+                {!isMobile && isStep04 && (
+                  <div className="mt-2">
+                    <Anim04Price passPrice={passPrice} />
+                  </div>
+                )}
+                {!isMobile && isStep05Std && <div style={{ minHeight: 180 }}><Anim05Standard /></div>}
+                {!isMobile && isStep06Std && <div style={{ minHeight: 180 }}><Anim06Standard /></div>}
+                {!isMobile && isStep05WB  && <div style={{ minHeight: 220 }}><Anim05ID /></div>}
+                {!isMobile && isStep06WB  && <div style={{ minHeight: 320 }}><Anim06WB /></div>}
+
+                {/* Step 01 PC: direct link button */}
+                {step.num === "01" && !isMobile && (
+                  <div className="mt-2">
+                    <a
+                      href="https://create.roblox.com/dashboard/creations"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 h-10 px-5 border-2 border-[#1e2a45] hover:border-[#00b06f]/50 hover:text-[#00b06f] font-black text-[10px] uppercase tracking-widest transition-all text-zinc-300"
+                    >
+                      Открыть Creator Hub <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                )}
+                {step.num === "01" && isMobile && (
+                  <div className="mt-2 flex items-center gap-2 p-3 bg-[#0a0e1a] border border-[#1e2a45]">
+                    <Smartphone className="w-4 h-4 text-zinc-500 flex-shrink-0" />
+                    <code className="text-xs text-[#00b06f] font-bold break-all">create.roblox.com/dashboard/creations</code>
+                  </div>
+                )}
+              </motion.div>
+            </AnimatePresence>
           </div>
         );
   };
@@ -1199,28 +1628,35 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
         </p>
       </div>
 
-      <div className="relative z-10 flex flex-col md:flex-row gap-4 justify-center max-w-2xl mx-auto w-full">
+      <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto w-full">
         {/* Telegram Button */}
-        <a
-          href={code ? `https://t.me/wb228_notifier_bot?start=${code}` : "https://t.me/wb228_notifier_bot"}
-          target="_blank" rel="noopener noreferrer"
-          className="flex-1 h-20 flex items-center justify-center gap-4 border-2 border-b-[6px] border-[#229ED9]/40 bg-[#229ED9]/10 hover:bg-[#229ED9]/20 hover:border-[#229ED9]/60 active:translate-y-[4px] active:border-b-[2px] shadow-[0_4px_20px_rgba(34,158,217,0.15)] transition-all duration-75 font-black text-[13px] uppercase tracking-widest text-white group/btn"
-        >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 flex-shrink-0 text-[#229ED9] group-hover/btn:scale-110 transition-transform">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z"/>
-          </svg>
-          Получить с помощью ТГ
-        </a>
+        <div className="h-16 flex items-center justify-center border-2 border-b-[6px] border-[#229ED9]/40 bg-[#229ED9]/10 hover:bg-[#229ED9]/20 hover:border-[#229ED9]/60 active:translate-y-[4px] active:border-b-[2px] shadow-[0_4px_20px_rgba(34,158,217,0.15)] transition-all duration-75 group/tg">
+          <a
+            href={code ? `https://t.me/wb228_notifier_bot?start=${code}` : "https://t.me/wb228_notifier_bot"}
+            target="_blank" rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2.5 w-full h-full font-black text-[11px] uppercase tracking-widest text-white"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0 text-[#229ED9] group-hover/tg:scale-110 transition-transform">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z"/>
+            </svg>
+            Telegram
+          </a>
+        </div>
 
         {/* VK Button */}
-        <div className="flex-1 flex flex-col gap-2">
-          <div className="h-20 flex flex-col items-center justify-center p-2 border-2 border-b-[6px] border-[#0077FF]/40 bg-[#0077FF]/10 shadow-[0_4px_20px_rgba(0,119,255,0.15)] transition-all duration-75">
-            <VKAuthButton mode="order" wbCode={code} />
-          </div>
-          <p className="text-[9px] text-zinc-500 font-black uppercase tracking-widest text-center">
-            Быстрая авторизация VK ID
-          </p>
+        <div className="h-16 flex items-center justify-center border-2 border-b-[6px] border-[#0077FF]/40 bg-[#0077FF]/10 hover:bg-[#0077FF]/20 hover:border-[#0077FF]/60 active:translate-y-[4px] active:border-b-[2px] shadow-[0_4px_20px_rgba(0,119,255,0.15)] transition-all duration-75 group/vk">
+          <VKAuthButton mode="order" wbCode={code} />
         </div>
+      </div>
+
+      {/* Subtitle under buttons */}
+      <div className="relative z-10 flex flex-col sm:flex-row items-center justify-center gap-6 mt-4 max-w-2xl mx-auto w-full">
+        <p className="text-[9px] text-zinc-600 font-black uppercase tracking-widest text-center flex-1">
+          Бот открывается автоматически
+        </p>
+        <p className="text-[9px] text-zinc-600 font-black uppercase tracking-widest text-center flex-1">
+          Быстрая авторизация VK ID
+        </p>
       </div>
 
       <div className="relative z-10 flex items-center justify-center gap-2 mt-8 opacity-60">
@@ -1511,9 +1947,13 @@ function FormulaCalculator({
               }
             </div>
             <div className="text-xs uppercase tracking-widest font-black transition-colors" style={{ color: priceCopied ? "#00b06f99" : "#52525b" }}>
-              {priceCopied ? "скопировано" : "Цена пасса · нажми"}
+              {priceCopied ? "скопировано" : "Цена пасса"}
             </div>
           </button>
+        </div>
+        <div className="flex gap-2 items-start bg-[#00b06f]/5 border border-[#00b06f]/15 px-3 py-2 mt-2">
+          <span className="font-pixel text-[9px] text-[#00b06f] mt-0.5 flex-shrink-0">TIP</span>
+          <p className="text-sm text-[#00b06f]/80 font-bold leading-relaxed">Нажми на цену пасса, чтобы скопировать</p>
         </div>
         {/* Regional pricing warning */}
         <div className="mt-3 flex gap-2.5 items-start bg-amber-500/10 border border-amber-500/40 px-3 py-2.5">
@@ -1607,6 +2047,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
     denomination && denomination > 0 ? Math.ceil(denomination / 0.7) : null
   );
   const [priceCopied, setPriceCopied] = useState(false);
+  const [platform, setPlatform] = useState<"pc" | "mobile">("pc");
 
   const handleCopyPassPrice = useCallback(() => {
     if (!passPrice) return;
@@ -1705,7 +2146,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
                   "Аккаунт Roblox (любой уровень)",
                   "Браузер — создаём прямо на сайте",
                   "5 минут свободного времени",
-                  "Калькулятор цены — в шаге 04",
+                  "Готовая цена — в шаге 04",
                 ].map((item, i) => (
                   <div key={i} className="flex items-start gap-3">
                     <div className="w-4 h-4 border border-[#00b06f]/40 bg-[#00b06f]/10 flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -1724,7 +2165,10 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
 
       {/* ── STEPS ── */}
       <section className="container mx-auto px-6 py-16 max-w-6xl">
-        <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-8">ПОШАГОВАЯ ИНСТРУКЦИЯ</div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+          <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">ПОШАГОВАЯ ИНСТРУКЦИЯ</div>
+          <PlatformSwitcher platform={platform} onChange={setPlatform} />
+        </div>
         <StepsGrid
           denomination={denomination}
           isWB={isWB}
@@ -1732,6 +2176,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
           onCopyPassPrice={handleCopyPassPrice}
           priceCopied={priceCopied}
           onPassPriceChange={setPassPrice}
+          platform={platform}
         />
         {isWB ? <WBManagerBlock denomination={denomination} code={code} /> : <StandardDoneBlock />}
 

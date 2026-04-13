@@ -13,8 +13,22 @@ import { vkSend, stripHtml } from "../shared/notify";
 import { sendAdminOrderCard, sendAdminReviewCard, CB, ADMIN_IDS } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason } from "./session";
 
-// ── Regex for a valid Roblox gamepass URL ─────────────────────────────────────
-const GAMEPASS_RE = /^https?:\/\/(www\.)?roblox\.com\/game-pass\/\d+/i;
+// ── Gamepass ID extractor ─────────────────────────────────────────────────────
+
+/**
+ * Extract a Roblox game-pass ID from user input.
+ * Accepts:
+ *   - Pure numeric ID:           "12345678"
+ *   - Standard URL:              "https://www.roblox.com/game-pass/12345678/..."
+ *   - Creator dashboard URL:     "https://create.roblox.com/dashboard/creations/passes/12345678/..."
+ * Returns the ID string, or null if nothing was recognised.
+ */
+function extractPassId(input: string): string | null {
+  const s = input.trim();
+  if (/^\d+$/.test(s)) return s;
+  const m = s.match(/(?:game-pass|passes)\/(\d+)/i);
+  return m ? m[1] : null;
+}
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
@@ -234,16 +248,21 @@ export function registerText(bot: Telegraf): void {
     // 2. USER GAMEPASS LINK flow
     if (!state) return;
 
-    if (!GAMEPASS_RE.test(text)) {
+    const passId = extractPassId(text);
+
+    if (!passId) {
       await ctx.reply(
-        "⚠️ Некорректная ссылка.\n\n" +
-        "Ссылка должна быть в формате:\n" +
-        "<code>https://www.roblox.com/game-pass/1234567/название</code>\n\n" +
-        "Скопируй её из адресной строки браузера на странице своего геймпасса.",
+        "⚠️ Не удалось распознать геймпасс.\n\n" +
+        "Пришли одно из:\n" +
+        "• Ссылку: <code>https://www.roblox.com/game-pass/1234567/...</code>\n" +
+        "• Ссылку из конструктора: <code>https://create.roblox.com/...</code>\n" +
+        "• Просто ID (только цифры): <code>1234567</code>",
         { parse_mode: "HTML" }
       );
       return;
     }
+
+    const cleanLink = `https://www.roblox.com/game-pass/${passId}`;
 
     try {
       const user = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
@@ -255,7 +274,7 @@ export function registerText(bot: Telegraf): void {
       const order = await (db as any).wbOrder.create({
         data: {
           amount:      state.denomination,
-          gamepassUrl: text,
+          gamepassUrl: cleanLink,
           status:      "PENDING",
           platform:    "TG",
           userId:      user.id,
@@ -266,9 +285,8 @@ export function registerText(bot: Telegraf): void {
       pendingLink.delete(ctx.from.id);
 
       await ctx.reply(
-        `✅ <b>Заявка принята!</b>\n\n` +
-        `🆔 Номер: <code>${order.id.slice(-6).toUpperCase()}</code>\n` +
-        `Менеджер обработает её и пришлёт уведомление.\n\n` +
+        `✅ Принял геймпасс №${passId}! Ожидайте выкупа.\n\n` +
+        `🆔 Номер заявки: <code>${order.id.slice(-6).toUpperCase()}</code>\n` +
         `📊 Проверить статус в любой момент: /status`,
         { parse_mode: "HTML" }
       );
