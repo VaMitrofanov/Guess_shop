@@ -25,32 +25,32 @@ const GAMEPASS_RE = /^https?:\/\/(www\.)?roblox\.com\/game-pass\/\d+/i;
  * Returns true if state was restored.
  */
 async function tryRestoreState(vkUserId: number): Promise<boolean> {
-  const userWithCode = await (db as any).user.findUnique({
-    where:   { vkId: String(vkUserId) },
-    include: {
-      wbCodes: {
-        where:   { isUsed: true },
-        orderBy: { usedAt: "desc" },
-        take:    1,
-      },
-    },
-  });
+  try {
+    // Query wbCode directly via relation filter — avoids loading the full User
+    // object with a deep include, which was causing ETIMEDOUT on Neon.
+    const lastCode = await (db as any).wbCode.findFirst({
+      where:   { user: { vkId: String(vkUserId) }, isUsed: true },
+      orderBy: { usedAt: "desc" },
+    });
+    if (!lastCode) return false;
 
-  const lastCode = userWithCode?.wbCodes?.[0];
-  if (!lastCode) return false;
+    // Skip if a gamepass order was already submitted for this code
+    const existingOrder = await (db as any).wbOrder.findFirst({
+      where: { wbCode: lastCode.code },
+    });
+    if (existingOrder) return false;
 
-  // Skip if an order was already submitted for this code
-  const existingOrder = await (db as any).wbOrder.findFirst({
-    where: { wbCode: lastCode.code },
-  });
-  if (existingOrder) return false;
-
-  setState(vkUserId, {
-    type:         "AWAITING_LINK",
-    wbCode:       lastCode.code,
-    denomination: lastCode.denomination,
-  });
-  return true;
+    setState(vkUserId, {
+      type:         "AWAITING_LINK",
+      wbCode:       lastCode.code,
+      denomination: lastCode.denomination,
+    });
+    return true;
+  } catch (err) {
+    // Non-fatal: DB timeout or connectivity issue — bot continues without auto-restore
+    console.error("[VK] tryRestoreState failed:", err);
+    return false;
+  }
 }
 
 // ── Util ──────────────────────────────────────────────────────────────────────

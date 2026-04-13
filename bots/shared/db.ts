@@ -27,11 +27,12 @@ function createBotClient(): PrismaClient {
 
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    // Bots are long-lived processes: keep the pool small to avoid
-    // exhausting Neon's connection limit on the free tier.
+    // Keep the pool small — bots are long-lived and Neon free tier has low connection limits.
     max: 3,
-    idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 10_000,
+    idleTimeoutMillis:    30_000,
+    connectionTimeoutMillis: 15_000, // Neon may need ~10 s to wake from cold state
+    // Kill individual queries that exceed 8 s — prevents ETIMEDOUT from hanging the process.
+    options: "--statement_timeout=8000",
   });
 
   const adapter = new PrismaPg(pool);

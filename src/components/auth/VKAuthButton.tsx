@@ -100,19 +100,21 @@ export default function VKAuthButton({
                 }
 
                 // ── Resolve wb_code ───────────────────────────────────────
-                // For login mode: NEVER pass wb_code — explicitly cleared to
-                // prevent URL params or cookies from leaking into signIn and
-                // triggering the order-mode TG notification in auth.ts.
-                let resolvedWbCode = "";
-                if (mode === "order") {
-                  const urlParams   = new URLSearchParams(window.location.search);
-                  const fromUrl     = urlParams.get("code") || urlParams.get("wb_code") || "";
-                  const cookieMatch = document.cookie.match(/wb_code=([^;]+)/);
-                  const fromCookie  = cookieMatch ? cookieMatch[1].trim() : "";
-                  resolvedWbCode    = (wbCodeProp || fromUrl || fromCookie).toUpperCase();
-                }
-                // Safety guard: if somehow we're in login mode with a non-empty code, discard it
-                if (mode === "login") resolvedWbCode = "";
+                const isLoginMode = mode === "login";
+
+                const urlParams   = new URLSearchParams(window.location.search);
+                const queryWbCode = urlParams.get("code") || urlParams.get("wb_code") || "";
+                const cookieMatch = document.cookie.match(/wb_code=([^;]+)/);
+                const cookieWbCode = cookieMatch ? cookieMatch[1].trim() : "";
+
+                // Login mode ALWAYS ignores any wb_code — even if URL/cookies contain one.
+                // Order mode: prop takes priority, then URL param, then cookie.
+                const finalWbCode = isLoginMode
+                  ? null
+                  : (wbCodeProp || queryWbCode || cookieWbCode || null);
+                const resolvedWbCode = finalWbCode ? finalWbCode.toUpperCase() : "";
+
+                console.log("SUCCESS_HANDLER: Mode is", mode, "Final WB Code is", finalWbCode);
 
                 // ── signIn via NextAuth ───────────────────────────────────
                 const { signIn } = await import("next-auth/react");
@@ -122,18 +124,24 @@ export default function VKAuthButton({
                   image,
                   redirect: false,
                 };
-                if (mode === "order" && resolvedWbCode) {
+                if (resolvedWbCode) {
                   params.wb_code = resolvedWbCode;
                 }
 
                 const result = await signIn("vk-id", params);
 
                 if (result?.ok) {
-                  if (mode === "order" && resolvedWbCode) {
+                  // Login mode: always go to dashboard, no VK redirect
+                  if (isLoginMode) {
+                    window.location.href = customRedirectUrl || "/dashboard";
+                    return;
+                  }
+                  // Order mode: go to VK community with ref if code is present
+                  if (resolvedWbCode) {
                     console.log("Redirecting to VK Community with ref:", resolvedWbCode);
                     window.location.href = customRedirectUrl || `${VK_CLUB_HREF}?ref=${resolvedWbCode}`;
                   } else {
-                    console.log("Redirecting to Dashboard");
+                    console.log("Redirecting to Dashboard (order mode, no code)");
                     window.location.href = customRedirectUrl || "/dashboard";
                   }
                 } else {
