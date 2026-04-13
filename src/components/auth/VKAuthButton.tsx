@@ -118,17 +118,16 @@ export default function VKAuthButton({
 
                 // ── signIn via NextAuth ───────────────────────────────────
                 const { signIn } = await import("next-auth/react");
-                const params: Record<string, string | boolean> = {
-                  vk_id:    String(data.user_id),
+                const credentials: Record<string, string> = {
+                  vk_id: String(data.user_id),
                   name,
                   image,
-                  redirect: false,
                 };
                 if (resolvedWbCode) {
-                  params.wb_code = resolvedWbCode;
+                  credentials.wb_code = resolvedWbCode;
                 }
 
-                const result = await signIn("vk-id", params);
+                const result = await signIn("vk-id", { ...credentials, redirect: false });
 
                 if (result?.ok) {
                   // Login mode: always go to dashboard, no VK redirect
