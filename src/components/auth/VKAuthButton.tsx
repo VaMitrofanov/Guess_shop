@@ -19,9 +19,9 @@ export default function VKAuthButton({
 
   useEffect(() => {
     // Определяем redirectUrl: либо переданный пропс, либо динамический для текущего домена
-    const defaultRedirect = typeof window !== "undefined" 
-      ? `${window.location.origin}/api/auth/callback/vk`
-      : "https://www.robloxbank.ru/api/auth/callback/vk";
+    const defaultRedirect = typeof window !== "undefined"
+      ? window.location.origin
+      : "https://www.robloxbank.ru";
     
     const redirectUrl = customRedirectUrl || defaultRedirect;
 
@@ -109,15 +109,9 @@ export default function VKAuthButton({
                   });
 
                   if (result?.ok) {
-                    if (wbCode && wbCode.length === 7) {
-                      // Если есть код -> Редирект в ВК (по вашему желанию vk.ru/bankroblox)
-                      window.location.href = `https://vk.ru/bankroblox?ref=${wbCode}`;
-                    } else {
-                      // Если обычный вход -> В личный кабинет
-                      router.push("/dashboard");
-                      router.refresh();
-                    }
+                    window.location.href = "https://vk.me/bankroblox";
                   } else {
+                    console.error("VK signIn error:", result?.error);
                     setError(result?.error || "Ошибка авторизации на сервере");
                   }
                 } catch (e) {

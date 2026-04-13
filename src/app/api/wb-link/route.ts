@@ -1,15 +1,13 @@
 /**
  * /api/wb-link — "Corridor" endpoint.
  *
- * After VK OAuth completes, next-auth redirects here (callbackUrl).
- * We read the `wb_code` cookie that was set on the client before triggering
- * signIn, find the WbCode record, and attach the authenticated userId to it.
- * Then we clear the cookie and redirect back to the WB guide page.
+ * Reads wb_code from the JWT session (set during VK login in auth.ts authorize).
+ * If not yet linked, attaches the userId to the WbCode record, then redirects
+ * to the VK group messages page.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import type { PrismaClientWithWb } from "@/types/prisma-wb";
 
@@ -21,7 +19,6 @@ export async function GET(request: NextRequest) {
   const session = await auth();
 
   if (!session?.user) {
-    // Not authenticated — redirect to guide without linking
     return NextResponse.redirect(new URL(GUIDE_URL, request.url));
   }
 
@@ -30,8 +27,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL(GUIDE_URL, request.url));
   }
 
-  const cookieStore = await cookies();
-  const wbCode = cookieStore.get("wb_code")?.value?.trim().toUpperCase();
+  // wb_code comes from the JWT session (saved during authorize in auth.ts)
+  const wbCode = ((session.user as any).wb_code as string | null)?.trim().toUpperCase();
 
   if (wbCode && wbCode.length === 7) {
     try {
@@ -40,17 +37,14 @@ export async function GET(request: NextRequest) {
         data: { userId },
       });
     } catch (err) {
-      // Non-fatal: code may not exist or already have a userId
+      // Non-fatal: code may already be linked or not exist
       console.error("[wb-link] Failed to link WbCode:", err);
     }
   }
 
-  // Redirect to VK group messages with the reference code
-  const targetUrl = wbCode 
+  const targetUrl = wbCode
     ? `https://vk.me/bankroblox?ref=${wbCode}`
     : "https://vk.me/bankroblox";
 
-  const response = NextResponse.redirect(new URL(targetUrl));
-  response.cookies.set("wb_code", "", { maxAge: 0, path: "/" });
-  return response;
+  return NextResponse.redirect(new URL(targetUrl));
 }

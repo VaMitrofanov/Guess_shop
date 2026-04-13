@@ -93,11 +93,37 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             }
           }
 
+          // Telegram notification
+          try {
+            const tgToken = process.env.TG_TOKEN;
+            const tgChatIds = process.env.TG_CHAT_ID?.split(",").map((id) => id.trim()) ?? [];
+            if (tgToken && tgChatIds.length > 0) {
+              const isNew = !user || user.createdAt.getTime() === user.updatedAt.getTime();
+              const msg =
+                `${isNew ? "🆕 <b>Новый пользователь</b>" : "🔑 <b>Вход</b>"}\n` +
+                `👤 ${name}\n` +
+                `🆔 VK ID: <code>${vkId}</code>` +
+                (wbCode && wbCode.length === 7 ? `\n🏷 WB код: <code>${wbCode}</code>` : "");
+              await Promise.all(
+                tgChatIds.map((chatId) =>
+                  fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: "HTML" }),
+                  })
+                )
+              );
+            }
+          } catch (tgErr) {
+            console.error("[auth] Telegram notification failed:", tgErr);
+          }
+
           return {
             id: user.id,
             name: user.name,
             image: user.image,
             role: user.role,
+            wb_code: wbCode && wbCode.length === 7 ? wbCode : null,
           };
         } catch (dbErr) {
           console.error("[auth] Database error during VK authorize:", dbErr);
@@ -107,12 +133,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
-    async jwt({ token, user, account }) {
+    async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
         token.role = (user as any).role;
         token.vkId = (user as any).vkId;
         token.balance = (user as any).balance;
+        token.wb_code = (user as any).wb_code ?? null;
       }
       return token;
     },
@@ -122,6 +149,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         (session.user as any).role = token.role;
         (session.user as any).vkId = token.vkId;
         (session.user as any).balance = token.balance;
+        (session.user as any).wb_code = token.wb_code ?? null;
       }
       return session;
     },
