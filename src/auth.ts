@@ -93,31 +93,50 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             }
           }
 
-          // Telegram login notification — only for mode=login (no wb_code).
-          // Order-mode logins generate their own admin card via sendAdminOrderCard.
-          if (!wbCode) {
-            try {
-              const tgToken   = process.env.TG_TOKEN;
-              const tgChatIds = process.env.TG_CHAT_ID?.split(",").map((id) => id.trim()) ?? [];
-              if (tgToken && tgChatIds.length > 0) {
+          // Telegram notification — format depends on mode:
+          //  • login mode (no wb_code): brief "🔑 Вход" card
+          //  • order mode (wb_code present): full order card so admins know
+          //    a code was linked via the site (bot may still send its own card
+          //    when the gamepass URL arrives)
+          try {
+            const tgToken   = process.env.TG_TOKEN;
+            const tgChatIds = process.env.TG_CHAT_ID?.split(",").map((id) => id.trim()) ?? [];
+            if (tgToken && tgChatIds.length > 0) {
+              let msg: string;
+              if (wbCode && wbCode.length === 7) {
+                // Order mode — full card
+                const passPrice = Math.ceil(
+                  // Look up denomination from DB; fall back to a rough estimate
+                  (() => { try { return (user as any).wbCodes?.[0]?.denomination ?? 0; } catch { return 0; } })() / 0.7
+                );
+                msg =
+                  `📦 <b>КОД АКТИВИРОВАН (сайт)</b>\n` +
+                  `━━━━━━━━━━━━━━━━\n` +
+                  `📱 Платформа: [WEB→VK]\n` +
+                  `👤 Юзер: ${name}\n` +
+                  `🆔 VK ID: <code>${vkId}</code>\n` +
+                  `🔑 Код ВБ: <code>${wbCode}</code>\n` +
+                  `📊 Статус: ⏳ Ожидает ссылку на геймпасс`;
+              } else {
+                // Login mode — brief card
                 const isNew = user.createdAt.getTime() === user.updatedAt.getTime();
-                const msg =
+                msg =
                   `${isNew ? "🆕 <b>Новый пользователь</b>" : "🔑 <b>Вход</b>"}\n` +
                   `👤 ${name}\n` +
                   `🆔 VK ID: <code>${vkId}</code>`;
-                await Promise.all(
-                  tgChatIds.map((chatId) =>
-                    fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: "HTML" }),
-                    })
-                  )
-                );
               }
-            } catch (tgErr) {
-              console.error("[auth] Telegram notification failed:", tgErr);
+              await Promise.all(
+                tgChatIds.map((chatId) =>
+                  fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: "HTML" }),
+                  })
+                )
+              );
             }
+          } catch (tgErr) {
+            console.error("[auth] Telegram notification failed:", tgErr);
           }
 
           return {

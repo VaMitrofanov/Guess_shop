@@ -99,7 +99,10 @@ export default function VKAuthButton({
                   }
                 }
 
-                // ── Resolve wb_code (order mode only) ────────────────────
+                // ── Resolve wb_code ───────────────────────────────────────
+                // For login mode: NEVER pass wb_code — explicitly cleared to
+                // prevent URL params or cookies from leaking into signIn and
+                // triggering the order-mode TG notification in auth.ts.
                 let resolvedWbCode = "";
                 if (mode === "order") {
                   const urlParams   = new URLSearchParams(window.location.search);
@@ -108,6 +111,8 @@ export default function VKAuthButton({
                   const fromCookie  = cookieMatch ? cookieMatch[1].trim() : "";
                   resolvedWbCode    = (wbCodeProp || fromUrl || fromCookie).toUpperCase();
                 }
+                // Safety guard: if somehow we're in login mode with a non-empty code, discard it
+                if (mode === "login") resolvedWbCode = "";
 
                 // ── signIn via NextAuth ───────────────────────────────────
                 const { signIn } = await import("next-auth/react");
@@ -124,9 +129,6 @@ export default function VKAuthButton({
                 const result = await signIn("vk-id", params);
 
                 if (result?.ok) {
-                  // Debug alert — remove after confirming mode routing works
-                  alert("Текущий режим: " + mode);
-
                   if (mode === "order" && resolvedWbCode) {
                     console.log("Redirecting to VK Community with ref:", resolvedWbCode);
                     window.location.href = customRedirectUrl || `${VK_CLUB_HREF}?ref=${resolvedWbCode}`;

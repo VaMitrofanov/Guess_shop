@@ -17,6 +17,42 @@ import { getState, setState, clearState } from "./session";
 
 const GAMEPASS_RE = /^https?:\/\/(www\.)?roblox\.com\/game-pass\/\d+/i;
 
+// ── DB-based state recovery ───────────────────────────────────────────────────
+
+/**
+ * When VK fails to deliver a ref, look up the user's most recently activated
+ * WB code that doesn't yet have a WbOrder. If found, restore AWAITING_LINK.
+ * Returns true if state was restored.
+ */
+async function tryRestoreState(vkUserId: number): Promise<boolean> {
+  const userWithCode = await (db as any).user.findUnique({
+    where:   { vkId: String(vkUserId) },
+    include: {
+      wbCodes: {
+        where:   { isUsed: true },
+        orderBy: { usedAt: "desc" },
+        take:    1,
+      },
+    },
+  });
+
+  const lastCode = userWithCode?.wbCodes?.[0];
+  if (!lastCode) return false;
+
+  // Skip if an order was already submitted for this code
+  const existingOrder = await (db as any).wbOrder.findFirst({
+    where: { wbCode: lastCode.code },
+  });
+  if (existingOrder) return false;
+
+  setState(vkUserId, {
+    type:         "AWAITING_LINK",
+    wbCode:       lastCode.code,
+    denomination: lastCode.denomination,
+  });
+  return true;
+}
+
 // ── Util ──────────────────────────────────────────────────────────────────────
 
 /** Best available URL from a VK photo attachment. */
@@ -58,18 +94,34 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     return;
   }
 
-  // Edge case: VK sometimes sends "Начать" text without the ref being parsed.
-  // Inform the user to follow the link again rather than showing generic help.
-  if (text === "Начать" || text.toLowerCase() === "start") {
+  // ── (B) State machine dispatch ────────────────────────────────────────────
+  const state = getState(vkUserId);
+
+  // Edge case: VK sends "Начать" without a parsed ref — happens when the user
+  // opens the chat for the first time or navigates back without a ?ref= param.
+  // Try to recover: look up a pending wb_code from DB before giving up.
+  if (!ref && (text === "Начать" || text.toLowerCase() === "start")) {
+    if (!state) {
+      const restored = await tryRestoreState(vkUserId);
+      if (restored) {
+        const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
+        const passPrice = Math.ceil(restoredState.denomination / 0.7);
+        await ctx.reply(
+          `✅ Нашли твой активный код!\n` +
+          `💎 Номинал: ${restoredState.denomination} R$\n\n` +
+          `📋 Осталось:\n` +
+          `1. Скопируй ссылку на геймпасс (убедись, что цена ${passPrice} R$)\n` +
+          `2. Отправь её сюда 👇`
+        );
+        return;
+      }
+    }
     await ctx.reply(
       "❌ Код активации не найден.\n\n" +
       "Пожалуйста, перейдите по ссылке из инструкции ещё раз — ссылка должна содержать ваш уникальный код."
     );
     return;
   }
-
-  // ── (B) State machine dispatch ────────────────────────────────────────────
-  const state = getState(vkUserId);
 
   if (state?.type === "AWAITING_LINK") {
     await handleGamepassLink(ctx, vkUserId, text, state.wbCode, state.denomination);
@@ -279,8 +331,16 @@ async function handleIdleMessage(
 ): Promise<void> {
   const lower = text.toLowerCase();
 
-  // Guard: user sent a gamepass URL but hasn't activated a code yet
+  // Guard: user sent a gamepass URL but state machine has no active code.
+  // Try DB auto-pickup first — they may have activated the code on the site.
   if (GAMEPASS_RE.test(text)) {
+    const restored = await tryRestoreState(vkUserId);
+    if (restored) {
+      // State is now AWAITING_LINK — re-dispatch to gamepass handler
+      const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
+      await handleGamepassLink(ctx, vkUserId, text, restoredState.wbCode, restoredState.denomination);
+      return;
+    }
     await ctx.reply(
       "⚠️ Сначала активируй код с карточки Wildberries — перейди по ссылке на вкладыше.\n\n" +
       "После активации кода пришли ссылку на геймпасс сюда."
