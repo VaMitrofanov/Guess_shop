@@ -25,15 +25,7 @@ export default function VKAuthButton({
   const [isSdkLoading, setLoading]  = useState(true);
 
   useEffect(() => {
-    // Prevent double-init: React StrictMode fires useEffect twice in dev;
-    // navigating between pages must not reinitialise an already-running SDK.
-    if ((window as any).VKIDSDK_INITIALIZED) {
-      setLoading(false);
-      return;
-    }
-
     // redirectUrl must exactly match the entry in VK Business panel.
-    // Using origin only (no path) avoids trailing-slash mismatches.
     const origin = window.location.origin.replace(/\/$/, "");
 
     const initVK = () => {
@@ -44,23 +36,28 @@ export default function VKAuthButton({
 
       const VKID = window.VKIDSDK;
 
+      // Always clear container before rendering to avoid duplicate widgets.
       if (containerRef.current) {
         containerRef.current.innerHTML = "";
       }
 
-      VKID.Config.init({
-        app:          54539012,               // always numeric
-        redirectUrl:  origin,
-        responseMode: VKID.ConfigResponseMode.Callback,
-        source:       VKID.ConfigSource.LOWCODE, // required for OneTap / low-code
-      });
-
-      (window as any).VKIDSDK_INITIALIZED = true;
-
-      const oneTap = new VKID.OneTap();
+      // Config.init must run only once per page load — calling it twice
+      // causes the SDK to hang. Widget rendering (below) runs every mount.
+      if (!(window as any).VKIDSDK_INITIALIZED) {
+        VKID.Config.init({
+          app:          54539012,
+          redirectUrl:  origin,
+          responseMode: VKID.ConfigResponseMode.Callback,
+          source:       VKID.ConfigSource.LOWCODE,
+        });
+        (window as any).VKIDSDK_INITIALIZED = true;
+      }
 
       if (!containerRef.current) return;
 
+      // Fresh OneTap instance every mount — registers correct mode/wbCode
+      // in the closure, even after page navigation.
+      const oneTap = new VKID.OneTap();
       oneTap
         .render({
           container:            containerRef.current,
@@ -68,7 +65,7 @@ export default function VKAuthButton({
           contentId:            2,
         })
         .on(VKID.WidgetEvents.ERROR, (err) => {
-          console.error("VK SDK Full Error:", err);
+          console.error("VK SDK Error:", err);
           setLoading(false);
           if (err.text !== "NEW TAB HAS BEEN CLOSED") {
             setError(`Ошибка VK ID: ${err.text || "неизвестная ошибка"}`);
@@ -92,9 +89,9 @@ export default function VKAuthButton({
                         "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2)
                       ).join("")
                     );
-                    const decoded     = JSON.parse(jsonPayload);
-                    const firstName   = decoded.first_name || "";
-                    const lastName    = decoded.last_name  || "";
+                    const decoded   = JSON.parse(jsonPayload);
+                    const firstName = decoded.first_name || "";
+                    const lastName  = decoded.last_name  || "";
                     name  = decoded.name || `${firstName} ${lastName}`.trim() || decoded.nickname || "VK User";
                     image = decoded.picture || decoded.photo_max || decoded.photo_200 || "";
                   } catch (jwtErr) {
@@ -127,11 +124,14 @@ export default function VKAuthButton({
                 const result = await signIn("vk-id", params);
 
                 if (result?.ok) {
-                  // Strict check: only redirect to VK when both order mode AND a code exist
+                  // Debug alert — remove after confirming mode routing works
+                  alert("Текущий режим: " + mode);
+
                   if (mode === "order" && resolvedWbCode) {
+                    console.log("Redirecting to VK Community with ref:", resolvedWbCode);
                     window.location.href = customRedirectUrl || `${VK_CLUB_HREF}?ref=${resolvedWbCode}`;
                   } else {
-                    // mode === 'login', or order mode without a code — go to dashboard
+                    console.log("Redirecting to Dashboard");
                     window.location.href = customRedirectUrl || "/dashboard";
                   }
                 } else {
@@ -153,7 +153,7 @@ export default function VKAuthButton({
     };
 
     initVK();
-  // mode / wbCodeProp captured at mount — intentionally no deps
+  // mode / wbCodeProp are captured in the closure at mount — intentionally no deps
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -44,14 +44,27 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   const text     = ctx.text?.trim() ?? "";
 
   // ── (A) VK ref parameter — user clicked vk.me/club?ref=CODE ──────────────
-  // VK may deliver the ref in different fields depending on the SDK version
+  // VK can deliver the ref in several different fields depending on client/SDK version.
+  const msgPayload = (ctx as any).messagePayload;
   const ref = (
     (ctx as any).ref ||
-    (ctx as any).messagePayload?.ref ||
-    (ctx as any).startPayload
+    msgPayload?.ref ||
+    (ctx as any).startPayload ||
+    (msgPayload?.command === "start" ? msgPayload?.ref : null)
   ) as string | undefined;
+
   if (ref) {
     await handleRefActivation(ctx, vkUserId, ref.trim().toUpperCase());
+    return;
+  }
+
+  // Edge case: VK sometimes sends "Начать" text without the ref being parsed.
+  // Inform the user to follow the link again rather than showing generic help.
+  if (text === "Начать" || text.toLowerCase() === "start") {
+    await ctx.reply(
+      "❌ Код активации не найден.\n\n" +
+      "Пожалуйста, перейдите по ссылке из инструкции ещё раз — ссылка должна содержать ваш уникальный код."
+    );
     return;
   }
 
