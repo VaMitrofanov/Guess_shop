@@ -75,6 +75,7 @@ export default function VKAuthButton({
           }
         })
         .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, function (payload) {
+          console.log("VK Auth Clicked. Mode:", mode, "WB Code:", wbCodeProp);
           VKID.Auth.exchangeCode(payload.code, payload.device_id)
             .then(async (data) => {
               try {
@@ -126,12 +127,11 @@ export default function VKAuthButton({
                 const result = await signIn("vk-id", params);
 
                 if (result?.ok) {
-                  if (mode === "order") {
-                    const dest = resolvedWbCode
-                      ? `${VK_CLUB_HREF}?ref=${resolvedWbCode}`
-                      : VK_CLUB_HREF;
-                    window.location.href = customRedirectUrl || dest;
+                  // Strict check: only redirect to VK when both order mode AND a code exist
+                  if (mode === "order" && resolvedWbCode) {
+                    window.location.href = customRedirectUrl || `${VK_CLUB_HREF}?ref=${resolvedWbCode}`;
                   } else {
+                    // mode === 'login', or order mode without a code — go to dashboard
                     window.location.href = customRedirectUrl || "/dashboard";
                   }
                 } else {

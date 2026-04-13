@@ -69,7 +69,7 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
     `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
     `📊 Статус: ⏳ В обработке\n` +
-    `🔗 <a href="${order.gamepassUrl}">Ссылка на Gamepass</a>`;
+    `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>`;
 
   const reply_markup = {
     inline_keyboard: [[

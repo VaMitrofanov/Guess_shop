@@ -93,29 +93,31 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             }
           }
 
-          // Telegram notification
-          try {
-            const tgToken = process.env.TG_TOKEN;
-            const tgChatIds = process.env.TG_CHAT_ID?.split(",").map((id) => id.trim()) ?? [];
-            if (tgToken && tgChatIds.length > 0) {
-              const isNew = !user || user.createdAt.getTime() === user.updatedAt.getTime();
-              const msg =
-                `${isNew ? "🆕 <b>Новый пользователь</b>" : "🔑 <b>Вход</b>"}\n` +
-                `👤 ${name}\n` +
-                `🆔 VK ID: <code>${vkId}</code>` +
-                (wbCode && wbCode.length === 7 ? `\n🏷 WB код: <code>${wbCode}</code>` : "");
-              await Promise.all(
-                tgChatIds.map((chatId) =>
-                  fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: "HTML" }),
-                  })
-                )
-              );
+          // Telegram login notification — only for mode=login (no wb_code).
+          // Order-mode logins generate their own admin card via sendAdminOrderCard.
+          if (!wbCode) {
+            try {
+              const tgToken   = process.env.TG_TOKEN;
+              const tgChatIds = process.env.TG_CHAT_ID?.split(",").map((id) => id.trim()) ?? [];
+              if (tgToken && tgChatIds.length > 0) {
+                const isNew = user.createdAt.getTime() === user.updatedAt.getTime();
+                const msg =
+                  `${isNew ? "🆕 <b>Новый пользователь</b>" : "🔑 <b>Вход</b>"}\n` +
+                  `👤 ${name}\n` +
+                  `🆔 VK ID: <code>${vkId}</code>`;
+                await Promise.all(
+                  tgChatIds.map((chatId) =>
+                    fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: "HTML" }),
+                    })
+                  )
+                );
+              }
+            } catch (tgErr) {
+              console.error("[auth] Telegram notification failed:", tgErr);
             }
-          } catch (tgErr) {
-            console.error("[auth] Telegram notification failed:", tgErr);
           }
 
           return {

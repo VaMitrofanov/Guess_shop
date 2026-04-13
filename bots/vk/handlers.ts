@@ -44,7 +44,12 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   const text     = ctx.text?.trim() ?? "";
 
   // ── (A) VK ref parameter — user clicked vk.me/club?ref=CODE ──────────────
-  const ref = (ctx as any).ref as string | undefined;
+  // VK may deliver the ref in different fields depending on the SDK version
+  const ref = (
+    (ctx as any).ref ||
+    (ctx as any).messagePayload?.ref ||
+    (ctx as any).startPayload
+  ) as string | undefined;
   if (ref) {
     await handleRefActivation(ctx, vkUserId, ref.trim().toUpperCase());
     return;
@@ -87,11 +92,28 @@ async function handleRefActivation(
     return;
   }
 
-  // Lazy registration
+  // Fetch real name from VK API (ctx.vk is the VK instance attached to the context)
+  let fullName = "VK User";
+  try {
+    const [userData] = await (ctx as any).vk.api.users.get({ user_ids: [vkUserId] });
+    if (userData?.first_name) {
+      fullName = [userData.first_name, userData.last_name].filter(Boolean).join(" ");
+    }
+  } catch (nameErr) {
+    console.error("[VK] users.get failed, using fallback name:", nameErr);
+  }
+
+  // Lazy registration — always persist the real name
   let user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
   if (!user) {
     user = await (db as any).user.create({
-      data: { vkId: String(vkUserId) },
+      data: { vkId: String(vkUserId), name: fullName },
+    });
+  } else if (!user.name || user.name.startsWith("VK #")) {
+    // Update only if name is missing or was a fallback placeholder
+    user = await (db as any).user.update({
+      where: { vkId: String(vkUserId) },
+      data:  { name: fullName },
     });
   }
 
