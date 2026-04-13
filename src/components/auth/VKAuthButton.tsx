@@ -1,45 +1,45 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 
 interface VKAuthButtonProps {
   appId?: number;
   redirectUrl?: string;
 }
 
-export default function VKAuthButton({ 
-  appId = 54539012, 
-  redirectUrl: customRedirectUrl 
+export default function VKAuthButton({
+  appId = 54539012,
+  redirectUrl: customRedirectUrl
 }: VKAuthButtonProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSdkLoading, setIsSdkLoading] = useState(true);
-  const router = useRouter();
 
   useEffect(() => {
-    // Определяем redirectUrl: либо переданный пропс, либо динамический для текущего домена
-    const defaultRedirect = typeof window !== "undefined"
-      ? window.location.origin
-      : "https://www.robloxbank.ru";
-    
-    const redirectUrl = customRedirectUrl || defaultRedirect;
+    // Prevent double-init (React StrictMode fires useEffect twice in dev)
+    if ((window as any).VKIDSDK_INITIALIZED) return;
+
+    // redirectUrl must exactly match what is registered in VK Business panel.
+    // Strip any trailing slash to avoid mismatch.
+    const origin = window.location.origin.replace(/\/$/, "");
+    const redirectUrl = (customRedirectUrl || origin).replace(/\/$/, "");
 
     const initVK = () => {
-      if (typeof window !== "undefined" && window.VKIDSDK) {
+      if (window.VKIDSDK) {
         const VKID = window.VKIDSDK;
 
-        // Очищаем контейнер перед рендером, чтобы избежать дублей
         if (containerRef.current) {
           containerRef.current.innerHTML = "";
         }
 
         VKID.Config.init({
-          app: appId,
-          redirectUrl: redirectUrl,
+          app: Number(appId),         // explicit Number cast — guards against string prop
+          redirectUrl,
           responseMode: VKID.ConfigResponseMode.Callback,
-          scope: "",
+          source: VKID.ConfigSource.LOWCODE, // required for low-code / OneTap integration
         });
+
+        (window as any).VKIDSDK_INITIALIZED = true;
 
         const oneTap = new VKID.OneTap();
 
@@ -50,7 +50,7 @@ export default function VKAuthButton({
             contentId: 2,
           })
           .on(VKID.WidgetEvents.ERROR, (err) => {
-            console.error("VK ID Error:", err);
+            console.error("VK SDK Full Error:", err);
             setIsSdkLoading(false);
             if (err.text !== "NEW TAB HAS BEEN CLOSED") {
               setError(`Ошибка VK ID: ${err.text || "неизвестная ошибка"}`);
@@ -134,7 +134,8 @@ export default function VKAuthButton({
     };
 
     initVK();
-  }, [appId, customRedirectUrl, router]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="flex flex-col items-center gap-2 w-full min-h-[44px] justify-center text-center">
