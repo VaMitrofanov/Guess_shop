@@ -62,13 +62,14 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   const shortId   = order.id.slice(-6).toUpperCase();
 
   const text =
-    `📦 <b>НОВЫЙ ЗАКАЗ #${shortId}</b>\n` +
+    `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
     `📱 Платформа: [${order.platform}]\n` +
     `👤 Юзер: ${order.userDisplay}\n` +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
     `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
-    `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>`;
+    `📊 Статус: ⏳ В обработке\n` +
+    `🔗 <a href="${order.gamepassUrl}">Ссылка на Gamepass</a>`;
 
   const reply_markup = {
     inline_keyboard: [[

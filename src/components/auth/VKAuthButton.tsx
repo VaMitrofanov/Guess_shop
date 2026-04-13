@@ -2,138 +2,158 @@
 
 import { useEffect, useRef, useState } from "react";
 
+// VK community ID for order-mode redirect
+const VK_CLUB_HREF = "https://vk.me/club237309399";
+
 interface VKAuthButtonProps {
-  appId?: number;
-  redirectUrl?: string;
+  /** 'login' — sign in to the site dashboard (default).
+   *  'order' — sign in and redirect to VK community with ref code. */
+  mode?: "login" | "order";
+  /** WB activation code (order mode). Falls back to URL param / cookie. */
+  wbCode?: string;
+  /** Override the final redirect URL for either mode. */
+  customRedirectUrl?: string;
 }
 
 export default function VKAuthButton({
-  appId = 54539012,
-  redirectUrl: customRedirectUrl
+  mode = "login",
+  wbCode: wbCodeProp,
+  customRedirectUrl,
 }: VKAuthButtonProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isSdkLoading, setIsSdkLoading] = useState(true);
+  const [error, setError]           = useState<string | null>(null);
+  const [isSdkLoading, setLoading]  = useState(true);
 
   useEffect(() => {
-    // Prevent double-init (React StrictMode fires useEffect twice in dev)
-    if ((window as any).VKIDSDK_INITIALIZED) return;
+    // Prevent double-init: React StrictMode fires useEffect twice in dev;
+    // navigating between pages must not reinitialise an already-running SDK.
+    if ((window as any).VKIDSDK_INITIALIZED) {
+      setLoading(false);
+      return;
+    }
 
-    // redirectUrl must exactly match what is registered in VK Business panel.
-    // Strip any trailing slash to avoid mismatch.
+    // redirectUrl must exactly match the entry in VK Business panel.
+    // Using origin only (no path) avoids trailing-slash mismatches.
     const origin = window.location.origin.replace(/\/$/, "");
-    const redirectUrl = (customRedirectUrl || origin).replace(/\/$/, "");
 
     const initVK = () => {
-      if (window.VKIDSDK) {
-        const VKID = window.VKIDSDK;
+      if (!window.VKIDSDK) {
+        setTimeout(initVK, 300);
+        return;
+      }
 
-        if (containerRef.current) {
-          containerRef.current.innerHTML = "";
-        }
+      const VKID = window.VKIDSDK;
 
-        VKID.Config.init({
-          app: Number(appId),         // explicit Number cast — guards against string prop
-          redirectUrl,
-          responseMode: VKID.ConfigResponseMode.Callback,
-          source: VKID.ConfigSource.LOWCODE, // required for low-code / OneTap integration
+      if (containerRef.current) {
+        containerRef.current.innerHTML = "";
+      }
+
+      VKID.Config.init({
+        app:          54539012,               // always numeric
+        redirectUrl:  origin,
+        responseMode: VKID.ConfigResponseMode.Callback,
+        source:       VKID.ConfigSource.LOWCODE, // required for OneTap / low-code
+      });
+
+      (window as any).VKIDSDK_INITIALIZED = true;
+
+      const oneTap = new VKID.OneTap();
+
+      if (!containerRef.current) return;
+
+      oneTap
+        .render({
+          container:            containerRef.current,
+          showAlternativeLogin: true,
+          contentId:            2,
+        })
+        .on(VKID.WidgetEvents.ERROR, (err) => {
+          console.error("VK SDK Full Error:", err);
+          setLoading(false);
+          if (err.text !== "NEW TAB HAS BEEN CLOSED") {
+            setError(`Ошибка VK ID: ${err.text || "неизвестная ошибка"}`);
+          }
+        })
+        .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, function (payload) {
+          VKID.Auth.exchangeCode(payload.code, payload.device_id)
+            .then(async (data) => {
+              try {
+                // ── Decode ID token for profile data ──────────────────────
+                let name  = "VK User";
+                let image = "";
+
+                if (data.id_token) {
+                  try {
+                    const base64Url   = data.id_token.split(".")[1];
+                    const base64      = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+                    const jsonPayload = decodeURIComponent(
+                      window.atob(base64).split("").map((c) =>
+                        "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2)
+                      ).join("")
+                    );
+                    const decoded     = JSON.parse(jsonPayload);
+                    const firstName   = decoded.first_name || "";
+                    const lastName    = decoded.last_name  || "";
+                    name  = decoded.name || `${firstName} ${lastName}`.trim() || decoded.nickname || "VK User";
+                    image = decoded.picture || decoded.photo_max || decoded.photo_200 || "";
+                  } catch (jwtErr) {
+                    console.error("JWT Decode Error:", jwtErr);
+                  }
+                }
+
+                // ── Resolve wb_code (order mode only) ────────────────────
+                let resolvedWbCode = "";
+                if (mode === "order") {
+                  const urlParams   = new URLSearchParams(window.location.search);
+                  const fromUrl     = urlParams.get("code") || urlParams.get("wb_code") || "";
+                  const cookieMatch = document.cookie.match(/wb_code=([^;]+)/);
+                  const fromCookie  = cookieMatch ? cookieMatch[1].trim() : "";
+                  resolvedWbCode    = (wbCodeProp || fromUrl || fromCookie).toUpperCase();
+                }
+
+                // ── signIn via NextAuth ───────────────────────────────────
+                const { signIn } = await import("next-auth/react");
+                const params: Record<string, string | boolean> = {
+                  vk_id:    String(data.user_id),
+                  name,
+                  image,
+                  redirect: false,
+                };
+                if (mode === "order" && resolvedWbCode) {
+                  params.wb_code = resolvedWbCode;
+                }
+
+                const result = await signIn("vk-id", params);
+
+                if (result?.ok) {
+                  if (mode === "order") {
+                    const dest = resolvedWbCode
+                      ? `${VK_CLUB_HREF}?ref=${resolvedWbCode}`
+                      : VK_CLUB_HREF;
+                    window.location.href = customRedirectUrl || dest;
+                  } else {
+                    window.location.href = customRedirectUrl || "/dashboard";
+                  }
+                } else {
+                  console.error("VK signIn error:", result?.error);
+                  setError(result?.error || "Ошибка авторизации на сервере");
+                }
+              } catch (e) {
+                console.error("VK Auth Flow Error:", e);
+                setError("Ошибка обработки данных профиля VK");
+              }
+            })
+            .catch((err) => {
+              console.error("Exchange Error:", err);
+              setError("Ошибка авторизации (Код ошибки: " + (err.error || "unknown") + ")");
+            });
         });
 
-        (window as any).VKIDSDK_INITIALIZED = true;
-
-        const oneTap = new VKID.OneTap();
-
-        if (containerRef.current) {
-          oneTap.render({
-            container: containerRef.current,
-            showAlternativeLogin: true,
-            contentId: 2,
-          })
-          .on(VKID.WidgetEvents.ERROR, (err) => {
-            console.error("VK SDK Full Error:", err);
-            setIsSdkLoading(false);
-            if (err.text !== "NEW TAB HAS BEEN CLOSED") {
-              setError(`Ошибка VK ID: ${err.text || "неизвестная ошибка"}`);
-            }
-          })
-          .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, function (payload) {
-            const code = payload.code;
-            const deviceId = payload.device_id;
-
-            // 1. Обмениваем код на токен прямо на КЛИЕНТЕ
-            VKID.Auth.exchangeCode(code, deviceId)
-              .then(async (data) => {
-                const idToken = data.id_token;
-
-                try {
-                  // 2. Декодируем JWT (ID Token) для получения данных профиля
-                  let name = "VK User";
-                  let image = "";
-
-                  if (idToken) {
-                    try {
-                      const base64Url = idToken.split('.')[1];
-                      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-                      const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
-                          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-                      }).join(''));
-                      const payload = JSON.parse(jsonPayload);
-                      
-                      // Поля VK ID v2: first_name, last_name, nickname, photo_max, picture
-                      const firstName = payload.first_name || "";
-                      const lastName = payload.last_name || "";
-                      const nickname = payload.nickname || "";
-                      
-                      name = payload.name || `${firstName} ${lastName}`.trim() || nickname || "VK User";
-                      image = payload.picture || payload.photo_max || payload.photo_200 || "";
-                    } catch (jwtErr) {
-                      console.error("JWT Decode Error:", jwtErr);
-                    }
-                  }
-
-                  // 3. Выполняем вход через NextAuth (signIn)
-                  // Получаем wb_code из URL или кук (URL приоритетнее)
-                  const urlParams = new URLSearchParams(window.location.search);
-                  const wbCodeFromUrl = urlParams.get("code") || urlParams.get("wb_code");
-                  const wbCodeMatch = document.cookie.match(/wb_code=([^;]+)/);
-                  const wbCodeFromCookie = wbCodeMatch ? wbCodeMatch[1].trim() : null;
-                  const wbCode = (wbCodeFromUrl || wbCodeFromCookie || "").toUpperCase();
-
-                  const { signIn } = await import("next-auth/react");
-                  const result = await signIn("vk-id", {
-                    vk_id: String(data.user_id),
-                    name,
-                    image,
-                    wb_code: wbCode,
-                    redirect: false,
-                  });
-
-                  if (result?.ok) {
-                    window.location.href = "https://vk.me/bankroblox";
-                  } else {
-                    console.error("VK signIn error:", result?.error);
-                    setError(result?.error || "Ошибка авторизации на сервере");
-                  }
-                } catch (e) {
-                  console.error("VK Auth Flow Error:", e);
-                  setError("Ошибка обработки данных профиля VK");
-                }
-              })
-              .catch((err) => {
-                console.error("Exchange Error:", err);
-                setError("Ошибка авторизации (Код ошибки: " + (err.error || "unknown") + ")");
-              });
-          });
-
-          // Скрываем лоадер через небольшую паузу после команды рендера
-          setTimeout(() => setIsSdkLoading(false), 500);
-        }
-      } else {
-        setTimeout(initVK, 300);
-      }
+      setTimeout(() => setLoading(false), 500);
     };
 
     initVK();
+  // mode / wbCodeProp captured at mount — intentionally no deps
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -147,9 +167,9 @@ export default function VKAuthButton({
           </span>
         </div>
       )}
-      <div 
-        ref={containerRef} 
-        className={`w-full flex justify-center ${isSdkLoading ? "hidden" : "block"}`} 
+      <div
+        ref={containerRef}
+        className={`w-full flex justify-center ${isSdkLoading ? "hidden" : "block"}`}
       />
       {error && (
         <p className="text-red-500 text-[10px] sm:text-xs mt-2 font-bold text-center uppercase tracking-wider">

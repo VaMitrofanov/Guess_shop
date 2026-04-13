@@ -92,6 +92,34 @@ function vkApiUrl(method: string): string {
   return `https://api.vk.com/method/${method}`;
 }
 
+/**
+ * Fetch a VK user's first + last name via users.get.
+ * Returns "VK #<id>" as fallback so callers never get undefined.
+ */
+export async function vkGetName(vkUserId: number): Promise<string> {
+  try {
+    const params = new URLSearchParams({
+      user_ids:     String(vkUserId),
+      fields:       "first_name,last_name",
+      access_token: process.env.VK_TOKEN ?? "",
+      v:            "5.131",
+    });
+    const res  = await fetch(vkApiUrl("users.get"), {
+      method:  "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body:    params.toString(),
+    });
+    const json = (await res.json()) as any;
+    const u    = json?.response?.[0];
+    if (u?.first_name) {
+      return [u.first_name, u.last_name].filter(Boolean).join(" ");
+    }
+  } catch {
+    // non-fatal — fall through to default
+  }
+  return `VK #${vkUserId}`;
+}
+
 /** Send a text message to a VK user. */
 export async function vkSend(
   vkUserId: string | number,

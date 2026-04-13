@@ -1215,7 +1215,7 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
         {/* VK Button */}
         <div className="flex-1 flex flex-col gap-2">
           <div className="h-20 flex flex-col items-center justify-center p-2 border-2 border-b-[6px] border-[#0077FF]/40 bg-[#0077FF]/10 shadow-[0_4px_20px_rgba(0,119,255,0.15)] transition-all duration-75">
-            <VKAuthButton />
+            <VKAuthButton mode="order" wbCode={code} />
           </div>
           <p className="text-[9px] text-zinc-500 font-black uppercase tracking-widest text-center">
             Быстрая авторизация VK ID

@@ -138,7 +138,7 @@ export default async function DashboardPage() {
                 <div className="absolute inset-0 border border-[#0077FF]/10 pointer-events-none" />
                 
                 <div className="bg-[#0077FF]/5 border-2 border-[#0077FF]/20 p-5 transition-all hover:bg-[#0077FF]/10">
-                  <VKAuthButton />
+                  <VKAuthButton mode="login" />
                 </div>
               </div>
 

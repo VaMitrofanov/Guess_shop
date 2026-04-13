@@ -12,6 +12,7 @@
 import type { MessageContext } from "vk-io";
 import { db } from "../shared/db";
 import { sendAdminOrderCard, sendAdminReviewCard } from "../shared/admin";
+import { vkGetName } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
 
 const GAMEPASS_RE = /^https?:\/\/(www\.)?roblox\.com\/game-pass\/\d+/i;
@@ -28,14 +29,16 @@ function photoUrl(attachment: unknown): string | undefined {
   return sizes.sort((a, b) => (b.width ?? 0) - (a.width ?? 0))[0]?.url;
 }
 
-function vkUserDisplay(vkUserId: number): string {
-  return `<a href="https://vk.com/id${vkUserId}">VK #${vkUserId}</a>`;
+function vkUserDisplay(name: string, vkUserId: number): string {
+  return `${name} (<a href="https://vk.com/id${vkUserId}">ID: ${vkUserId}</a>)`;
 }
 
 // ── Entry point: called for every message_new event ───────────────────────────
 
 export async function handleMessage(ctx: MessageContext): Promise<void> {
   if (ctx.isOutbox) return; // skip messages sent by the community itself
+
+  console.log(">>> [VK DEBUG] Message Received! Context:", JSON.stringify(ctx));
 
   const vkUserId = ctx.senderId;
   const text     = ctx.text?.trim() ?? "";
@@ -105,9 +108,8 @@ async function handleRefActivation(
     `✅ Код ${code} активирован!\n` +
     `💎 Номинал: ${wbCode.denomination} R$\n\n` +
     `📋 Что делать дальше:\n` +
-    `1. Открой https://create.roblox.com\n` +
-    `2. Создай геймпасс с ценой ${passPrice} R$\n` +
-    `3. Скопируй ссылку на геймпасс и отправь сюда`
+    `1. Скопируй ссылку на геймпасс (убедись, что цена в нём ${passPrice} R$)\n` +
+    `2. Отправь её сюда 👇`
   );
 }
 
@@ -158,6 +160,9 @@ async function handleGamepassLink(
     `Чтобы узнать статус, напиши: статус`
   );
 
+  // Fetch real name for admin card (non-blocking — fallback is "VK #id")
+  const vkName = user.name ?? await vkGetName(vkUserId);
+
   // Notify Telegram admins
   await sendAdminOrderCard({
     id:          order.id,
@@ -165,7 +170,7 @@ async function handleGamepassLink(
     gamepassUrl: url,
     platform:    "VK",
     wbCode,
-    userDisplay: vkUserDisplay(vkUserId),
+    userDisplay: vkUserDisplay(vkName, vkUserId),
   });
 }
 
@@ -218,11 +223,13 @@ async function handleReviewScreenshot(
     "✅ Скриншот получен! Администратор рассмотрит его в течение 30 минут."
   );
 
+  const reviewerName = user.name ?? await vkGetName(vkUserId);
+
   await sendAdminReviewCard({
     orderId,
     userId:      user.id as string,
     photoSource: url,
-    userDisplay: vkUserDisplay(vkUserId),
+    userDisplay: vkUserDisplay(reviewerName, vkUserId),
   });
 }
 
@@ -237,7 +244,16 @@ async function handleIdleMessage(
 ): Promise<void> {
   const lower = text.toLowerCase();
 
-  // "статус" keyword → show last order
+  // Guard: user sent a gamepass URL but hasn't activated a code yet
+  if (GAMEPASS_RE.test(text)) {
+    await ctx.reply(
+      "⚠️ Сначала активируй код с карточки Wildberries — перейди по ссылке на вкладыше.\n\n" +
+      "После активации кода пришли ссылку на геймпасс сюда."
+    );
+    return;
+  }
+
+  // "статус" keyword → show last order in rich format
   if (lower.includes("статус") || lower.includes("заказ")) {
     const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
     if (!user) {
@@ -261,22 +277,29 @@ async function handleIdleMessage(
       REJECTED:  "❌ Отклонён",
     };
 
+    const passPrice = Math.ceil((order.amount as number) / 0.7);
+    const shortId   = (order.id as string).slice(-6).toUpperCase();
+    const statusStr = label[order.status] ?? order.status;
+
     const calm =
       order.status === "PENDING"
         ? "\n\nНе переживай — менеджер работает в порядке очереди, среднее время 15–30 мин. Напишем сами."
         : "";
 
     await ctx.reply(
-      `📦 Заявка #${(order.id as string).slice(-6).toUpperCase()}\n` +
-      `💎 Номинал: ${order.amount} R$\n` +
-      `📊 Статус: ${label[order.status] ?? order.status}${calm}`
+      `📦 Заявка #${shortId}\n` +
+      `━━━━━━━━━━━━━━━━\n` +
+      `💎 Сумма: ${order.amount} R$ (Геймпасс: ${passPrice} R$)\n` +
+      `🔑 Код ВБ: ${order.wbCode}\n` +
+      `🔗 ${order.gamepassUrl}\n` +
+      `📊 Статус: ${statusStr}` +
+      calm
     );
     return;
   }
 
   // Default help message
   await ctx.reply(
-    "👋 Привет! Активируй код с карточки Wildberries по ссылке на вкладыше.\n\n" +
-    'Написать "статус" — узнать статус последнего заказа.'
+    "[DEBUG] Код обновился! Напиши статус для проверки."
   );
 }

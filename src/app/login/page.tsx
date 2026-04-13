@@ -159,7 +159,7 @@ export default function LoginPage() {
                   </div>
                   
                   <div className="bg-[#0077FF]/5 border border-[#0077FF]/20 p-4 transition-all hover:bg-[#0077FF]/10">
-                    <VKAuthButton />
+                    <VKAuthButton mode="login" />
                   </div>
                 </div>
 

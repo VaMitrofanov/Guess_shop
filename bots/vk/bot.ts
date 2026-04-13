@@ -32,6 +32,7 @@ export const vk = new VK({ token, apiVersion: "5.131" });
 
 // Register message_new handler
 vk.updates.on("message_new", async (ctx) => {
+  console.log(">>> [VK DEBUG] Message Received! Context:", JSON.stringify(ctx));
   try {
     await handleMessage(ctx as any);
   } catch (err) {
