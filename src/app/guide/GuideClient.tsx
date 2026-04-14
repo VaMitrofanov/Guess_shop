@@ -1526,21 +1526,21 @@ function StepsGrid({
                   </div>
                 )}
 
-                {/* Animations (PC only — skip on mobile to keep it simple) */}
+                {/* Animations (PC only — hidden on real mobile screens via CSS + toggle guard) */}
                 {!isMobile && ANIM_MAP[step.num] && (
-                  <div style={{ minHeight: 200 }} className="flex flex-col justify-end">
+                  <div style={{ minHeight: 200 }} className="hidden md:flex flex-col justify-end">
                     {ANIM_MAP[step.num]!()}
                   </div>
                 )}
                 {!isMobile && isStep04 && (
-                  <div className="mt-2">
+                  <div className="mt-2 hidden md:block">
                     <Anim04Price passPrice={passPrice} />
                   </div>
                 )}
-                {!isMobile && isStep05Std && <div style={{ minHeight: 180 }}><Anim05Standard /></div>}
-                {!isMobile && isStep06Std && <div style={{ minHeight: 180 }}><Anim06Standard /></div>}
-                {!isMobile && isStep05WB  && <div style={{ minHeight: 220 }}><Anim05ID /></div>}
-                {!isMobile && isStep06WB  && <div style={{ minHeight: 320 }}><Anim06WB /></div>}
+                {!isMobile && isStep05Std && <div style={{ minHeight: 180 }} className="hidden md:block"><Anim05Standard /></div>}
+                {!isMobile && isStep06Std && <div style={{ minHeight: 180 }} className="hidden md:block"><Anim06Standard /></div>}
+                {!isMobile && isStep05WB  && <div style={{ minHeight: 220 }} className="hidden md:block"><Anim05ID /></div>}
+                {!isMobile && isStep06WB  && <div style={{ minHeight: 320 }} className="hidden md:block"><Anim06WB /></div>}
 
                 {/* Step 01 PC: direct link button */}
                 {step.num === "01" && !isMobile && (
@@ -1556,10 +1556,16 @@ function StepsGrid({
                   </div>
                 )}
                 {step.num === "01" && isMobile && (
-                  <div className="mt-2 flex items-center gap-2 p-3 bg-[#0a0e1a] border border-[#1e2a45]">
+                  <a
+                    href="https://create.roblox.com/dashboard/creations"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2 flex items-center gap-2 p-3 bg-[#0a0e1a] border border-[#1e2a45] hover:border-[#00b06f]/40 transition-colors"
+                  >
                     <Smartphone className="w-4 h-4 text-zinc-500 flex-shrink-0" />
                     <code className="text-xs text-[#00b06f] font-bold break-all">create.roblox.com/dashboard/creations</code>
-                  </div>
+                    <ExternalLink className="w-3 h-3 text-zinc-600 flex-shrink-0 ml-auto" />
+                  </a>
                 )}
               </motion.div>
             </AnimatePresence>
@@ -2102,13 +2108,6 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
                     Оформить заказ <ArrowRight className="w-4 h-4" />
                   </Link>
                 )}
-                <a
-                  href="https://create.roblox.com"
-                  target="_blank" rel="noopener noreferrer"
-                  className="h-12 px-7 border-2 border-[#1e2a45] hover:border-[#00b06f]/30 font-black text-[11px] uppercase tracking-widest transition-all rounded-none flex items-center gap-2 text-zinc-300"
-                >
-                  Creator Hub <ExternalLink className="w-3.5 h-3.5" />
-                </a>
               </div>
             </div>
 
