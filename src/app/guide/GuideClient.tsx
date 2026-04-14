@@ -96,7 +96,7 @@ const STEPS_COMMON: StepDef[] = [
     tip: "Place обычно называется по нику или «My Place»",
     warn: null,
     pcTip: "Нажми на карточку игры → появится боковое меню настроек.",
-    mobileDesc: "Найди своё Place в списке и нажми на него.",
+    mobileDesc: "Найди свой Place в списке и нажми на него.",
     mobileDetail: "Place обычно называется по нику или «My Place»",
     mobileTip: "Прокрути список Creations — все твои игры находятся там.",
     bullets: [
@@ -118,7 +118,7 @@ const STEPS_COMMON: StepDef[] = [
     tip: "Можно выбрать уже созданный геймпасс — не обязательно создавать новый.",
     warn: null,
     pcTip: "Можно выбрать уже созданный геймпасс — не обязательно создавать новый.",
-    mobileDesc: "Зайди в настройки игры → Monetization → Passes.",
+    mobileDesc: "Открой бокове меню, нажав на ≡ в левой верхней части экрана → Monetization → Passes.",
     mobileDetail: "Нажми «Create a Pass» или выбери уже существующий из списка. Название не важно.",
     mobileTip: "На мобильном меню Monetization может быть скрыто — ищи значок ≡ или пролистай боковую панель.",
     bullets: [
@@ -129,19 +129,19 @@ const STEPS_COMMON: StepDef[] = [
     mobileBullets: [
       { icon: ChevronRight, text: "Нажми ⋮ → «Monetization»" },
       { icon: Ticket, text: "Открой «Passes» → «Create a Pass»" },
-      { icon: Tag, text: "Придумай название и сохрани" },
+      { icon: Tag, text: "Придумай название и нажми Create a Pass" },
     ],
   },
   {
     num: "04", icon: Tag,
     title: "Установи цену",
-    desc: "В меню пасса: Sales → включи «Item for Sale» → введи цену → сохрани.",
+    desc: "Нажми на созданный геймпасс, слева появится меню пасса: Sales → включи «Item for Sale» → введи цену, которая указана ниже → сохрани (Синяя кнопка Save Changes станет серой).",
     detail: "Roblox удерживает 30% с каждой продажи. Поэтому цена пасса должна быть выше суммы, которую ты хочешь получить. Используй готовую цену ниже.",
     tip: null,
     warn: "Установи точную цену из калькулятора — она учитывает 30% комиссию Roblox.",
 
-    mobileDesc: "Открой пасс → Sales → включи «Item for Sale» → введи готовую цену из формулы ниже.",
-    mobileDetail: "Прокрути страницу вниз, чтобы увидеть поле Default Price. Скопируй цену из калькулятора и вставь её.",
+    mobileDesc: "Нажми на созданный геймпасс → нажми на ≡ (откроется бокове меню) → Sales → включи «Item for Sale» → введи готовую цену из формулы ниже.",
+    mobileDetail: "Прокрути страницу вниз, чтобы увидеть поле Default Price. Скопируй цену из главной формулы ниже и вставь её.",
     mobileTip: "После ввода цены нажми «Save Changes» — страница обновится.",
     bullets: [
       { icon: ChevronRight, text: "В боковом меню выбери «Sales»" },
@@ -151,8 +151,8 @@ const STEPS_COMMON: StepDef[] = [
     ],
     mobileBullets: [
       { icon: ChevronRight, text: "Перейди в раздел «Sales» пасса" },
-      { icon: CheckCircle2, text: "Включи тоггл «Item for Sale»" },
-      { icon: Tag, text: "Введи цену из калькулятора в поле Price" },
+      { icon: CheckCircle2, text: "Включи ползунок «Item for Sale» (он должен гореть синим)" },
+      { icon: Tag, text: "Введи цену из главной формулы ниже в поле Default Price" },
       { icon: Check, text: "Сохрани" },
     ],
   },
@@ -201,14 +201,14 @@ const STEPS_WB: StepDef[] = [
   {
     num: "05", icon: Hash,
     title: "Скопируй ID геймпасса",
-    desc: "В списке пассов нажми ⋮ рядом с пассом → выбери «Copy Asset ID».",
+    desc: "В списке пассов нажми ⋮ рядом с названием пасса → выбери «Copy Asset ID».",
     detail: "Asset ID — числовой идентификатор пасса (например: 1234567). Это самый быстрый способ передать пасс менеджеру без ошибок в ссылке.",
     tip: "Нажми три точки (⋮) справа от названия пасса в списке — откроется контекстное меню.",
     warn: null,
     pcTip: "В Creator Hub: Monetization → Passes → три точки (⋮) → «Copy Asset ID».",
-    mobileDesc: "В списке пассов нажми ⋮ рядом с нужным пассом.",
-    mobileDetail: "В выпавшем меню выбери «Copy Asset ID». Цифры из буфера обмена и есть ID пасса.",
-    mobileTip: "На телефоне нажми долго на пасс или ищи кнопку ⋮ в правом углу строки.",
+    mobileDesc: "Снова открой боковое меню, нажав на ≡ в левой верхей части экрана → нажми три точки (⋮) рядом с названием пасса.",
+    mobileDetail: "В выпавшем меню выбери «Copy Asset ID».",
+    mobileTip: "На телефоне нажми долго на пасс или ищи кнопку (⋮) в левом верхнем углу.",
     bullets: [
       { icon: Ticket, text: "Открой Monetization → Passes" },
       { icon: MoreHorizontal, text: "Нажми ⋮ рядом с нужным пассом" },
