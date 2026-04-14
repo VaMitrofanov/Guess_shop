@@ -102,12 +102,12 @@ const STEPS_COMMON: StepDef[] = [
     bullets: [
       { icon: Search, text: "Найди своё Place в списке Creations" },
       { icon: Gamepad2, text: "Нажми на карточку игры" },
-      { icon: CheckCircle2, text: "Если нет игр — создай пустую через «Create Experience»" },
+      { icon: CheckCircle2, text: "Даже если ты ничего не создавал, там автоматически висит проект с твоим никнеймом" },
     ],
     mobileBullets: [
       { icon: Search, text: "Листай список Creations сверху вниз" },
       { icon: Gamepad2, text: "Нажми на своё Place (обычно по нику)" },
-      { icon: CheckCircle2, text: "Нет Place? Создай через кнопку «+»" },
+      { icon: CheckCircle2, text: "Даже если ты ничего не создавал, там автоматически висит проект с твоим никнеймом" },
     ],
   },
   {
@@ -1556,10 +1556,16 @@ function StepsGrid({
                   </div>
                 )}
                 {step.num === "01" && isMobile && (
-                  <div className="mt-2 flex items-center gap-2 p-3 bg-[#0a0e1a] border border-[#1e2a45]">
+                  <a
+                    href="https://create.roblox.com/dashboard/creations"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2 flex items-center gap-2 p-3 bg-[#0a0e1a] border border-[#1e2a45] hover:border-[#00b06f]/40 transition-colors"
+                  >
                     <Smartphone className="w-4 h-4 text-zinc-500 flex-shrink-0" />
-                    <code className="text-xs text-[#00b06f] font-bold break-all">create.roblox.com/dashboard/creations</code>
-                  </div>
+                    <span className="text-xs text-[#00b06f] font-black uppercase tracking-widest">Creator Hub</span>
+                    <ExternalLink className="w-3 h-3 text-zinc-600 flex-shrink-0 ml-auto" />
+                  </a>
                 )}
               </motion.div>
             </AnimatePresence>
