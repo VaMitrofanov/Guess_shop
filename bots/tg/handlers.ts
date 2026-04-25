@@ -264,6 +264,7 @@ export function registerText(bot: Telegraf): void {
 
     const cleanLink = `https://www.roblox.com/game-pass/${passId}`;
 
+    let order: any;
     try {
       const user = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
       if (!user) {
@@ -271,7 +272,7 @@ export function registerText(bot: Telegraf): void {
         return;
       }
 
-      const order = await (db as any).wbOrder.create({
+      order = await (db as any).wbOrder.create({
         data: {
           amount:      state.denomination,
           gamepassUrl: cleanLink,
@@ -281,17 +282,23 @@ export function registerText(bot: Telegraf): void {
           wbCode:      state.wbCode,
         },
       });
+    } catch (err) {
+      console.error("[TG] Order create error:", err);
+      await ctx.reply("❌ Ошибка при создании заявки. Попробуй позже или напиши в поддержку.");
+      return;
+    }
 
-      pendingLink.delete(ctx.from.id);
+    pendingLink.delete(ctx.from.id);
 
-      await ctx.reply(
-        `✅ Принял геймпасс №${passId}! Ожидайте выкупа.\n\n` +
-        `🆔 Номер заявки: <code>${order.id.slice(-6).toUpperCase()}</code>\n` +
-        `📊 Проверить статус в любой момент: /status`,
-        { parse_mode: "HTML" }
-      );
+    await ctx.reply(
+      `✅ Принял геймпасс №${passId}! Ожидайте выкупа.\n\n` +
+      `🆔 Номер заявки: <code>${order.id.slice(-6).toUpperCase()}</code>\n` +
+      `📊 Проверить статус в любой момент: /status`,
+      { parse_mode: "HTML" }
+    );
 
-      // Notify all Telegram admins
+    // Notify all Telegram admins (non-fatal — errors don't affect user)
+    try {
       const fullOrder = await (db as any).wbOrder.findUnique({
         where: { id: order.id },
         include: { user: true }
@@ -303,8 +310,7 @@ export function registerText(bot: Telegraf): void {
         }
       }
     } catch (err) {
-      console.error("[TG] Link save error:", err);
-      await ctx.reply("❌ Ошибка при создании заявки. Попробуй позже или напиши в поддержку.");
+      console.error("[TG] Admin notify error:", err);
     }
   });
 }
