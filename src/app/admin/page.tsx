@@ -6,6 +6,11 @@ import {
   Package, MessageSquare, HelpCircle, ArrowRight,
 } from "lucide-react";
 
+
+// DB-dependent page; do not attempt to prerender at build time.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function fmt(n: number) {
   return new Intl.NumberFormat("ru-RU").format(n);
 }

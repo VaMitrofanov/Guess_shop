@@ -4,6 +4,11 @@ import { prisma } from "@/lib/prisma";
 import ReviewsClient from "@/components/reviews-client";
 import Link from "next/link";
 
+// Public reviews list lives in DB. Force dynamic so `next build` doesn't try
+// to prerender it (Coolify build container may have no DB access).
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function StarRow({ count = 5 }: { count?: number }) {
   return (
     <div className="flex gap-1">
@@ -17,7 +22,13 @@ function StarRow({ count = 5 }: { count?: number }) {
 }
 
 export default async function ReviewsPage() {
-  const reviews = await prisma.review.findMany({ orderBy: { createdAt: "desc" } });
+  let reviews: Awaited<ReturnType<typeof prisma.review.findMany>> = [];
+  try {
+    reviews = await prisma.review.findMany({ orderBy: { createdAt: "desc" } });
+  } catch (err) {
+    console.error("[reviews] failed to load reviews from DB:", err);
+    reviews = [];
+  }
 
   return (
     <main className="min-h-screen">

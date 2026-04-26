@@ -4,8 +4,22 @@ import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import FAQClient from "@/components/faq-client";
 
+// Force dynamic rendering — the FAQ list lives in DB, so we don't want
+// `next build` to try and prerender this page (Coolify build env may not
+// have network access to Neon DB, which caused the previous build to fail).
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function FAQPage() {
-  const faqs = await prisma.fAQ.findMany({ orderBy: { order: "asc" } });
+  // Wrap DB call in try/catch so a transient DB outage during SSR
+  // (or a build-time prerender attempt) doesn't 500 the whole page.
+  let faqs: Awaited<ReturnType<typeof prisma.fAQ.findMany>> = [];
+  try {
+    faqs = await prisma.fAQ.findMany({ orderBy: { order: "asc" } });
+  } catch (err) {
+    console.error("[faq] failed to load FAQs from DB:", err);
+    faqs = [];
+  }
 
   return (
     <main className="min-h-screen">

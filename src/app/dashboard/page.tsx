@@ -9,6 +9,10 @@ import {
 } from "lucide-react";
 import VKAuthButton from "@/components/auth/VKAuthButton";
 
+// DB-dependent page; do not attempt to prerender at build time.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 /* ── Status helpers ── */
 const STATUS_META: Record<string, { label: string; color: string; icon: typeof Clock }> = {
   PENDING:   { label: "Ожидает оплаты", color: "text-amber-400",  icon: Clock        },
