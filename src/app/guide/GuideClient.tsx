@@ -1638,7 +1638,7 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
         {/* Telegram Button */}
         <div className="h-16 flex items-center justify-center border-2 border-b-[6px] border-[#229ED9]/40 bg-[#229ED9]/10 hover:bg-[#229ED9]/20 hover:border-[#229ED9]/60 active:translate-y-[4px] active:border-b-[2px] shadow-[0_4px_20px_rgba(34,158,217,0.15)] transition-all duration-75 group/tg">
           <a
-            href={code ? `https://t.me/wb228_notifier_bot?start=${code}` : "https://t.me/wb228_notifier_bot"}
+            href={code ? `https://t.me/RobloxBankBot?start=${code}` : "https://t.me/RobloxBankBot"}
             target="_blank" rel="noopener noreferrer"
             className="flex items-center justify-center gap-2.5 w-full h-full font-black text-[11px] uppercase tracking-widest text-white"
           >
@@ -1752,12 +1752,32 @@ function WBGate({ onSuccess }: WBGateProps) {
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<"guide" | "ready">("guide");
+  const [quickTarget, setQuickTarget] = useState<"tg" | "vk" | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 7);
     setCode(raw);
     setError(null);
+  };
+
+  // Validate code on the server (shared by both modes).
+  // On success returns the denomination — and persists the WB session so the
+  // quick redirects below see a valid wb_code cookie / localStorage entry.
+  const validateAndPersist = async (): Promise<number> => {
+    const res = await fetch("/api/wb-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error ?? "Ошибка отправки");
+    const denomination: number = data.denomination ?? 0;
+    saveWBSession(denomination, code);
+    // Cookie is needed by VKAuthButton (order mode) for ref code resolution.
+    document.cookie = `wb_code=${code}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+    return denomination;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1770,15 +1790,7 @@ function WBGate({ onSuccess }: WBGateProps) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/wb-code", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error ?? "Ошибка отправки");
-      const denomination = data.denomination ?? 0;
-      saveWBSession(denomination, code);
+      const denomination = await validateAndPersist();
       onSuccess(denomination, code);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Неизвестная ошибка";
@@ -1787,6 +1799,35 @@ function WBGate({ onSuccess }: WBGateProps) {
       setLoading(false);
     }
   };
+
+  // Quick path — user already has a gamepass and wants to go straight to a bot.
+  const handleQuickRedirect = async (target: "tg" | "vk") => {
+    if (code.length < 7) {
+      setError("Сначала введите 7-значный код с карточки");
+      inputRef.current?.focus();
+      return;
+    }
+    setLoading(true);
+    setQuickTarget(target);
+    setError(null);
+    try {
+      await validateAndPersist();
+      const url =
+        target === "tg"
+          ? `https://t.me/RobloxBankBot?start=${code}`
+          : `https://vk.me/club237309399?ref=${code}`;
+      // Same-tab redirect: keeps WB session; bot picks the code up via deep-link.
+      window.location.href = url;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Неизвестная ошибка";
+      setError(msg);
+      setLoading(false);
+      setQuickTarget(null);
+    }
+  };
+
+  const codeReady = code.length === 7;
+  const isGuideMode = mode === "guide";
 
   return (
     <main className="min-h-screen flex flex-col">
@@ -1847,10 +1888,38 @@ function WBGate({ onSuccess }: WBGateProps) {
                   <p className="text-[11px] text-zinc-600 font-medium">
                     Код напечатан на карточке в заказе
                   </p>
-                  <span className={`text-[11px] font-black tabular-nums ${code.length === 7 ? "text-[#c9a84c]" : "text-zinc-600"}`}>
+                  <span className={`text-[11px] font-black tabular-nums ${codeReady ? "text-[#c9a84c]" : "text-zinc-600"}`}>
                     {code.length}/7
                   </span>
                 </div>
+              </div>
+
+              {/* Mode toggle: guide vs. ready */}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => { setMode("guide"); setError(null); }}
+                  className={`h-11 flex flex-col items-center justify-center px-2 border-2 transition-all text-[10px] font-black uppercase tracking-widest ${
+                    isGuideMode
+                      ? "border-[#c9a84c]/70 bg-[#c9a84c]/10 text-[#f0c040]"
+                      : "border-zinc-800 bg-zinc-900/40 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
+                  }`}
+                  aria-pressed={isGuideMode}
+                >
+                  Нужна инструкция
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setMode("ready"); setError(null); }}
+                  className={`h-11 flex flex-col items-center justify-center px-2 border-2 transition-all text-[10px] font-black uppercase tracking-widest ${
+                    !isGuideMode
+                      ? "border-[#00b06f]/60 bg-[#00b06f]/10 text-[#00d484]"
+                      : "border-zinc-800 bg-zinc-900/40 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
+                  }`}
+                  aria-pressed={!isGuideMode}
+                >
+                  Уже есть геймпасс
+                </button>
               </div>
 
               {error && (
@@ -1860,23 +1929,65 @@ function WBGate({ onSuccess }: WBGateProps) {
                 </div>
               )}
 
-              <button
-                type="submit"
-                disabled={loading || code.length < 7}
-                className="w-full h-14 flex items-center justify-center gap-3 font-black text-[12px] uppercase tracking-widest text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{
-                  background: loading || code.length < 7
-                    ? "linear-gradient(135deg, #4a3a10, #2a2008)"
-                    : "linear-gradient(135deg, #c9a84c 0%, #f0c040 50%, #c9a84c 100%)",
-                  color: loading || code.length < 7 ? "#888" : "#0a0c14",
-                }}
-              >
-                {loading ? (
-                  <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Проверяем...</>
-                ) : (
-                  <><Send className="w-4 h-4" />Получить инструкцию</>
-                )}
-              </button>
+              {isGuideMode ? (
+                <button
+                  type="submit"
+                  disabled={loading || !codeReady}
+                  className="w-full h-14 flex items-center justify-center gap-3 font-black text-[12px] uppercase tracking-widest text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{
+                    background: loading || !codeReady
+                      ? "linear-gradient(135deg, #4a3a10, #2a2008)"
+                      : "linear-gradient(135deg, #c9a84c 0%, #f0c040 50%, #c9a84c 100%)",
+                    color: loading || !codeReady ? "#888" : "#0a0c14",
+                  }}
+                >
+                  {loading ? (
+                    <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Проверяем...</>
+                  ) : (
+                    <><Send className="w-4 h-4" />Получить инструкцию</>
+                  )}
+                </button>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-[11px] text-zinc-500 font-medium leading-relaxed text-center">
+                    Геймпасс уже создан? Отправьте ссылку или ID пасса напрямую — менеджер выкупит вручную.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickRedirect("tg")}
+                    disabled={loading || !codeReady}
+                    className="w-full h-14 flex items-center justify-center gap-3 font-black text-[12px] uppercase tracking-widest border-2 border-b-[6px] border-[#229ED9]/50 bg-[#229ED9]/15 hover:bg-[#229ED9]/25 hover:border-[#229ED9]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {loading && quickTarget === "tg" ? (
+                      <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем Telegram...</>
+                    ) : (
+                      <>
+                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0 text-[#229ED9]">
+                          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z"/>
+                        </svg>
+                        Перейти в Telegram-бот
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickRedirect("vk")}
+                    disabled={loading || !codeReady}
+                    className="w-full h-14 flex items-center justify-center gap-3 font-black text-[12px] uppercase tracking-widest border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 hover:bg-[#0077FF]/25 hover:border-[#0077FF]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {loading && quickTarget === "vk" ? (
+                      <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем VK...</>
+                    ) : (
+                      <>
+                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0 text-[#0077FF]">
+                          <path d="M12.785 16.241s.288-.032.435-.194c.135-.149.13-.43.13-.43s-.019-1.306.572-1.497c.582-.188 1.331 1.252 2.124 1.806.6.42 1.056.328 1.056.328l2.122-.03s1.111-.07.585-.957c-.043-.073-.306-.658-1.578-1.853-1.331-1.252-1.153-1.049.451-3.224.977-1.323 1.367-2.13 1.245-2.474-.116-.328-.834-.241-.834-.241l-2.387.015s-.177-.024-.308.056c-.128.078-.21.262-.21.262s-.378 1.022-.882 1.892c-1.062 1.834-1.487 1.931-1.661 1.816-.405-.267-.304-1.069-.304-1.638 0-1.778.267-2.519-.51-2.711-.258-.064-.448-.106-1.108-.113-.847-.009-1.564.003-1.97.207-.27.136-.479.439-.351.456.157.022.514.099.703.363.244.341.236 1.108.236 1.108s.14 2.083-.328 2.342c-.32.178-.76-.185-1.706-1.85-.484-.853-.85-1.795-.85-1.795s-.07-.176-.196-.27c-.152-.114-.365-.15-.365-.15l-2.268.015s-.34.01-.466.16c-.111.135-.009.412-.009.412s1.776 4.221 3.787 6.349c1.844 1.95 3.938 1.822 3.938 1.822h.949z"/>
+                        </svg>
+                        Перейти в VK
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </form>
 
             <p className="text-center text-[11px] text-zinc-600 font-medium animate-in fade-in zoom-in animate-delay-300">
@@ -1896,11 +2007,31 @@ function WBGate({ onSuccess }: WBGateProps) {
               </div>
             ))}
           </div>
+
+          {/* Direct manager contact — fallback if anything goes wrong */}
+          <a
+            href="https://t.me/RobloxBank_PA"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-6 group flex items-center justify-center gap-3 px-5 py-4 border-2 border-zinc-800 hover:border-[#c9a84c]/40 bg-zinc-950/60 hover:bg-[#c9a84c]/5 transition-all animate-in fade-in zoom-in animate-delay-300"
+          >
+            <AlertTriangle className="w-4 h-4 text-zinc-500 group-hover:text-[#c9a84c] transition-colors flex-shrink-0" />
+            <div className="flex flex-col text-left leading-tight">
+              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 group-hover:text-zinc-300 transition-colors">
+                Возникли трудности?
+              </span>
+              <span className="text-[12px] font-black text-white group-hover:text-[#f0c040] transition-colors">
+                Связаться с менеджером — @RobloxBank_PA
+              </span>
+            </div>
+            <ExternalLink className="w-4 h-4 text-zinc-600 group-hover:text-[#c9a84c] transition-colors flex-shrink-0 ml-auto" />
+          </a>
         </div>
       </div>
     </main>
   );
 }
+
 
 // ─── Interactive Formula Calculator ──────────────────────────────────────────
 
