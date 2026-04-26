@@ -4,6 +4,28 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 
+// ── Startup-time env validation ────────────────────────────────────────────
+// NextAuth produces a generic "Server error - Configuration" page when
+// required env vars are missing. Logging at module init makes the root
+// cause obvious in Coolify/Vercel runtime logs.
+(() => {
+  const required = ["NEXTAUTH_SECRET", "NEXTAUTH_URL", "DATABASE_URL"];
+  const missing = required.filter((k) => !process.env[k]);
+  if (missing.length > 0) {
+    console.error(
+      `[auth][startup] MISSING REQUIRED ENV: ${missing.join(", ")}. ` +
+        `NextAuth will return Configuration error until set in Coolify.`
+    );
+  } else {
+    console.log("[auth][startup] all required env vars present");
+  }
+  const optional = ["TG_TOKEN", "TG_CHAT_ID", "NEXT_PUBLIC_VK_APP_ID", "VK_TOKEN", "VK_GROUP_ID"];
+  const missingOpt = optional.filter((k) => !process.env[k]);
+  if (missingOpt.length > 0) {
+    console.warn(`[auth][startup] missing optional env: ${missingOpt.join(", ")}`);
+  }
+})();
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
   providers: [
@@ -47,7 +69,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         wb_code: { label: "WB Code", type: "text" }, // Добавляем опциональный код зациты
       },
       async authorize(credentials) {
-        if (!credentials?.vk_id) return null;
+        console.log("[auth][vk-id] authorize() called", {
+          hasVkId: !!credentials?.vk_id,
+          hasWbCode: !!(credentials as any)?.wb_code,
+        });
+
+        if (!credentials?.vk_id) {
+          console.warn("[auth][vk-id] no vk_id in credentials — abort");
+          return null;
+        }
 
         const vkId = credentials.vk_id as string;
         const name = credentials.name as string;
@@ -56,26 +86,34 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         try {
           // Upsert user in DB
-          let user = await prisma.user.findUnique({
-            where: { vkId },
-          });
+          let user;
+          try {
+            user = await prisma.user.findUnique({ where: { vkId } });
+          } catch (findErr) {
+            console.error("[auth][vk-id] prisma.user.findUnique failed — DB unreachable or schema mismatch:", findErr);
+            throw findErr;
+          }
 
           if (!user) {
-            user = await prisma.user.create({
-              data: {
-                vkId,
-                name,
-                image,
-                role: "USER",
-                balance: 0,
-              },
-            });
+            try {
+              user = await prisma.user.create({
+                data: { vkId, name, image, role: "USER", balance: 0 },
+              });
+              console.log(`[auth][vk-id] created new user id=${user.id} vkId=${vkId}`);
+            } catch (createErr) {
+              console.error("[auth][vk-id] prisma.user.create failed:", createErr);
+              throw createErr;
+            }
           } else {
-            // Update name/image if changed
-            user = await prisma.user.update({
-              where: { id: user.id },
-              data: { name, image },
-            });
+            try {
+              user = await prisma.user.update({
+                where: { id: user.id },
+                data: { name, image },
+              });
+            } catch (updErr) {
+              console.error("[auth][vk-id] prisma.user.update failed:", updErr);
+              throw updErr;
+            }
           }
 
           // Link WB code if passed in credentials
@@ -147,7 +185,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             wb_code: wbCode && wbCode.length === 7 ? wbCode : null,
           };
         } catch (dbErr) {
-          console.error("[auth] Database error during VK authorize:", dbErr);
+          console.error("[auth][vk-id] FATAL — authorize() threw:", {
+            message: (dbErr as Error)?.message,
+            code: (dbErr as any)?.code,
+            stack: (dbErr as Error)?.stack,
+          });
+          // Return null so NextAuth shows a clean failure page instead of
+          // bubbling Configuration error. The root cause is now in the logs.
           return null;
         }
       },
