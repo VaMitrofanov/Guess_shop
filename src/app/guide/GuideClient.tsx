@@ -13,6 +13,22 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { ParticleTextEffect } from "@/components/ui/particle-text-effect";
 import VKAuthButton from "@/components/auth/VKAuthButton";
+import dynamic from "next/dynamic";
+
+// Heavy visual components — lazy-loaded to keep initial JS bundle small.
+// SSR disabled because they all touch window / WebGL / IntersectionObserver.
+const AnimatedShaderBackground = dynamic(
+  () => import("@/components/ui/animated-shader-background"),
+  { ssr: false, loading: () => null }
+);
+const InstructionRevealCurtain = dynamic(
+  () => import("@/components/ui/instruction-reveal-curtain"),
+  { ssr: false, loading: () => null }
+);
+const ScrollFeatureTeaser = dynamic(
+  () => import("@/components/ui/scroll-feature-teaser"),
+  { ssr: false, loading: () => null }
+);
 
 // ─── localStorage WB session helpers ──────────────────────────────────────────
 const WB_SESSION_KEY = "rb_wb_session";
@@ -1842,11 +1858,14 @@ function WBGate({ onSuccess }: WBGateProps) {
   const isGuideMode = mode === "guide";
 
   return (
-    <main className="min-h-screen flex flex-col">
+    <main className="min-h-screen flex flex-col relative">
       <WBStaticHeader />
 
+      {/* Lazy WebGL shader background — desktop-only inside the component;
+          on mobile it self-degrades to a static CSS gradient. */}
+      <AnimatedShaderBackground className="-z-10" />
 
-      <div className="flex-1 flex items-center justify-center px-4 py-16 bg-[#080c18]">
+      <div className="flex-1 flex items-center justify-center px-4 py-16 bg-[#080c18]/70 relative">
         <div className="fixed inset-0 opacity-[0.02] pointer-events-none"
           style={{
             backgroundImage: `linear-gradient(rgba(201,168,76,0.8) 1px, transparent 1px),
@@ -2202,7 +2221,7 @@ function FormulaCalculator({
 
 // ─── Instruction page ──────────────────────────────────────────────────────────
 
-function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; denomination?: number; code?: string; onReset?: () => void }) {
+function Instruction({ isWB, denomination, code, onReset, freshFromGate = false }: { isWB: boolean; denomination?: number; code?: string; onReset?: () => void; freshFromGate?: boolean }) {
   const [passPrice, setPassPrice] = useState<number | null>(
     denomination && denomination > 0 ? Math.ceil(denomination / 0.7) : null
   );
@@ -2323,21 +2342,42 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
 
       <div className="accent-line" />
 
-      {/* ── STEPS ── */}
+      {/* ── TEASER (WB only) — мини-секция между hero и шагами ── */}
+      {isWB && (
+        <ScrollFeatureTeaser className="bg-[#080c18]" />
+      )}
+
+      <div className="accent-line" />
+
+      {/* ── STEPS ── (curtain reveal только при свежем переходе из gate) */}
       <section className="container mx-auto px-6 py-16 max-w-6xl">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">ПОШАГОВАЯ ИНСТРУКЦИЯ</div>
           <PlatformSwitcher platform={platform} onChange={setPlatform} />
         </div>
-        <StepsGrid
-          denomination={denomination}
-          isWB={isWB}
-          passPrice={passPrice}
-          onCopyPassPrice={handleCopyPassPrice}
-          priceCopied={priceCopied}
-          onPassPriceChange={setPassPrice}
-          platform={platform}
-        />
+        {isWB && freshFromGate ? (
+          <InstructionRevealCurtain active giantText="ИНСТРУКЦИЯ">
+            <StepsGrid
+              denomination={denomination}
+              isWB={isWB}
+              passPrice={passPrice}
+              onCopyPassPrice={handleCopyPassPrice}
+              priceCopied={priceCopied}
+              onPassPriceChange={setPassPrice}
+              platform={platform}
+            />
+          </InstructionRevealCurtain>
+        ) : (
+          <StepsGrid
+            denomination={denomination}
+            isWB={isWB}
+            passPrice={passPrice}
+            onCopyPassPrice={handleCopyPassPrice}
+            priceCopied={priceCopied}
+            onPassPriceChange={setPassPrice}
+            platform={platform}
+          />
+        )}
         {isWB ? <WBManagerBlock denomination={denomination} code={code} /> : <StandardDoneBlock />}
 
         {/* Support at the bottom for WB users */}
@@ -2553,6 +2593,10 @@ export default function GuideClient({ isWB }: { isWB: boolean }) {
   );
   const [denomination, setDenomination] = useState<number>(0);
   const [activeCode, setActiveCode] = useState<string>("");
+  // Tracks whether the user has just passed the WB gate in THIS render —
+  // used to play the cinematic curtain reveal. False on localStorage restore
+  // so returning users don't see the animation every page-load.
+  const [freshFromGate, setFreshFromGate] = useState(false);
 
   // Restore WB session from localStorage on mount —
   // skip intro if the user already activated a code this session
@@ -2586,6 +2630,7 @@ export default function GuideClient({ isWB }: { isWB: boolean }) {
           document.cookie = `wb_code=${c}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
           setDenomination(d);
           setActiveCode(c);
+          setFreshFromGate(true);
           setPhase("instruction");
         }}
       />
@@ -2598,6 +2643,7 @@ export default function GuideClient({ isWB }: { isWB: boolean }) {
       denomination={denomination}
       code={activeCode}
       onReset={isWB ? handleWBReset : undefined}
+      freshFromGate={freshFromGate}
     />
   );
 }
