@@ -43,6 +43,7 @@ export default function VKAuthButton({
 
       // Config.init must run only once per page load — calling it twice
       // causes the SDK to hang. Widget rendering (below) runs every mount.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (!(window as any).VKIDSDK_INITIALIZED) {
         VKID.Config.init({
           app:          54539012,
@@ -50,6 +51,7 @@ export default function VKAuthButton({
           responseMode: VKID.ConfigResponseMode.Callback,
           source:       VKID.ConfigSource.LOWCODE,
         });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (window as any).VKIDSDK_INITIALIZED = true;
       }
 
@@ -58,12 +60,25 @@ export default function VKAuthButton({
       // Fresh OneTap instance every mount — registers correct mode/wbCode
       // in the closure, even after page navigation.
       const oneTap = new VKID.OneTap();
+
+      // Visual options — make the VK widget visually match our pixel-style
+      // Telegram button (square corners, full width, 56px height).
+      // SDK silently ignores keys it doesn't know, so unsupported props
+      // (e.g. styles in older SDKs) won't break older runtimes.
+      const renderOptions = {
+        container:            containerRef.current,
+        showAlternativeLogin: false,
+        contentId:            2,
+        styles: {
+          borderRadius: 0,
+          height:       56,
+          width:        320,
+        },
+        scheme: "dark",
+      } as Parameters<InstanceType<typeof VKID.OneTap>["render"]>[0];
+
       oneTap
-        .render({
-          container:            containerRef.current,
-          showAlternativeLogin: true,
-          contentId:            2,
-        })
+        .render(renderOptions)
         .on(VKID.WidgetEvents.ERROR, (err) => {
           console.error("VK SDK Error:", err);
           setLoading(false);
@@ -167,21 +182,23 @@ export default function VKAuthButton({
   }, []);
 
   return (
-    <div className="flex flex-col items-center gap-2 w-full min-h-[44px] justify-center text-center">
+    <div className="vk-auth-shell w-full flex flex-col items-stretch justify-center gap-2 min-h-[56px]">
       {isSdkLoading && !error && (
-        <div className="flex items-center gap-2 py-2">
-          <div className="w-3 h-3 border-2 border-[#0077FF] border-t-transparent animate-spin" />
-          <span className="font-pixel text-[8px] text-[#0077FF]/60 uppercase tracking-widest">
-            Загрузка VK ID...
+        // Skeleton matches the visual weight of the Telegram button while
+        // the VK SDK widget is still booting — prevents layout jank.
+        <div className="w-full h-11 flex items-center justify-center gap-3 border border-[#0077FF]/30 bg-[#0077FF]/10 animate-pulse">
+          <div className="w-3.5 h-3.5 border-2 border-[#0077FF] border-t-transparent rounded-full animate-spin" />
+          <span className="font-black text-[11px] uppercase tracking-widest text-[#0077FF]">
+            Загрузка VK ID…
           </span>
         </div>
       )}
       <div
         ref={containerRef}
-        className={`w-full flex justify-center ${isSdkLoading ? "hidden" : "block"}`}
+        className={`vk-auth-widget w-full flex justify-center ${isSdkLoading ? "hidden" : "block"}`}
       />
       {error && (
-        <p className="text-red-500 text-[10px] sm:text-xs mt-2 font-bold text-center uppercase tracking-wider">
+        <p className="text-red-500 text-[10px] sm:text-xs font-bold text-center uppercase tracking-wider">
           {error}
         </p>
       )}

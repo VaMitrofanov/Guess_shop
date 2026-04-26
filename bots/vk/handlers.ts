@@ -411,8 +411,28 @@ async function handleIdleMessage(
     return;
   }
 
-  // Default help message
+  // Default help message — try one last DB lookup before giving up.
+  // If the user has any used-but-unlinked wb code attached to them (via
+  // VK ID auth on the site), restore the AWAITING_LINK state automatically.
+  const restored = await tryRestoreState(vkUserId);
+  if (restored) {
+    const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
+    const passPrice = Math.ceil(restoredState.denomination / 0.7);
+    await ctx.reply(
+      `✅ Нашли твой активный код ${restoredState.wbCode}!\n` +
+      `💎 Номинал: ${restoredState.denomination} R$\n\n` +
+      `📋 Осталось:\n` +
+      `1. Скопируй ссылку на геймпасс (цена должна быть ${passPrice} R$)\n` +
+      `2. Отправь её сюда 👇`
+    );
+    return;
+  }
+
   await ctx.reply(
-    "[DEBUG] Код обновился! Напиши статус для проверки."
+    "👋 Привет! Я бот RobloxBank.\n\n" +
+    "Чтобы активировать код с карточки Wildberries, перейди на сайт:\n" +
+    "https://robloxbank.ru/guide?source=wb\n\n" +
+    "Напиши \"статус\" — узнать статус последнего заказа.\n" +
+    "Возникли трудности? Пиши менеджеру: https://t.me/RobloxBank_PA"
   );
 }

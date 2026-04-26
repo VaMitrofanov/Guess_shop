@@ -53,23 +53,32 @@ export async function POST(request: Request) {
       );
     }
 
-    if (wbCode.isUsed) {
+    // Code is "used and linked to a different user" → reject.
+    // Code is "used but no user yet" → idempotent re-entry (caller switched
+    // modes, refreshed the page, etc.). Skip the TG notification but still
+    // return the denomination so the UI can render correctly.
+    const alreadyLinked = wbCode.isUsed && (wbCode as any).userId;
+    if (alreadyLinked) {
       return NextResponse.json(
         { error: "Этот код уже был активирован ранее." },
         { status: 409 }
       );
     }
 
-    // ── 2. Mark as used (atomic update) ───────────────────────────────────
-    await db.wbCode.update({
-      where: { id: wbCode.id },
-      data: {
-        isUsed: true,
-        usedAt: new Date(),
-      },
-    });
+    const isFirstActivation = !wbCode.isUsed;
 
-    // ── 3. Telegram notification ───────────────────────────────────────────
+    // ── 2. Mark as used (atomic update) — only on first activation ────────
+    if (isFirstActivation) {
+      await db.wbCode.update({
+        where: { id: wbCode.id },
+        data: {
+          isUsed: true,
+          usedAt: new Date(),
+        },
+      });
+    }
+
+    // ── 3. Telegram notification (first activation only) ──────────────────
     // TG_CHAT_ID may contain multiple IDs separated by commas, e.g. "111,222,333"
     const token = process.env.TG_TOKEN;
     const chatIds = (process.env.TG_CHAT_ID ?? "")
@@ -77,15 +86,24 @@ export async function POST(request: Request) {
       .map((id) => id.trim())
       .filter(Boolean);
 
-    if (token && chatIds.length > 0) {
-      const text =
-        `✅ Код ${wbCode.code} (Номинал ${wbCode.denomination} R$) активирован, пользователь читает инструкцию`;
+    if (isFirstActivation) {
+      if (token && chatIds.length > 0) {
+        const text =
+          `✅ Код ${wbCode.code} (Номинал ${wbCode.denomination} R$) активирован, пользователь читает инструкцию`;
 
-      // Await all sends — Vercel terminates the function after response is sent,
-      // so fire-and-forget fetch calls are silently dropped.
-      await Promise.all(chatIds.map((chatId) => sendTelegramMessage(token, chatId, text)));
-    } else {
-      console.warn("[wb-code] TG_TOKEN or TG_CHAT_ID not set — skipping notify");
+        // Await all sends — Vercel terminates the function after response is sent,
+        // so fire-and-forget fetch calls are silently dropped.
+        const results = await Promise.all(
+          chatIds.map((chatId) => sendTelegramMessage(token, chatId, text))
+        );
+        const sent = results.filter(Boolean).length;
+        console.log(`[wb-code] TG notify: ${sent}/${chatIds.length} delivered for code ${wbCode.code}`);
+      } else {
+        console.warn(
+          "[wb-code] TG_TOKEN or TG_CHAT_ID not set — skipping notify. " +
+          "Check env vars in Vercel/Coolify deploy settings."
+        );
+      }
     }
 
     // ── 4. Return denomination so the client can personalise the UI ────────

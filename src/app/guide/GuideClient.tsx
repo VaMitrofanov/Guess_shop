@@ -1636,7 +1636,7 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
 
       <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto w-full">
         {/* Telegram Button */}
-        <div className="h-16 flex items-center justify-center border-2 border-b-[6px] border-[#229ED9]/40 bg-[#229ED9]/10 hover:bg-[#229ED9]/20 hover:border-[#229ED9]/60 active:translate-y-[4px] active:border-b-[2px] shadow-[0_4px_20px_rgba(34,158,217,0.15)] transition-all duration-75 group/tg">
+        <div className="h-14 flex items-stretch border-2 border-b-[6px] border-[#229ED9]/40 bg-[#229ED9]/10 hover:bg-[#229ED9]/20 hover:border-[#229ED9]/60 active:translate-y-[4px] active:border-b-[2px] shadow-[0_4px_20px_rgba(34,158,217,0.15)] transition-all duration-75 group/tg">
           <a
             href={code ? `https://t.me/RobloxBankBot?start=${code}` : "https://t.me/RobloxBankBot"}
             target="_blank" rel="noopener noreferrer"
@@ -1649,9 +1649,13 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
           </a>
         </div>
 
-        {/* VK Button */}
-        <div className="h-16 flex items-center justify-center border-2 border-b-[6px] border-[#0077FF]/40 bg-[#0077FF]/10 hover:bg-[#0077FF]/20 hover:border-[#0077FF]/60 active:translate-y-[4px] active:border-b-[2px] shadow-[0_4px_20px_rgba(0,119,255,0.15)] transition-all duration-75 group/vk">
-          <VKAuthButton mode="order" wbCode={code} />
+        {/* VK Button — wrapper height matches Telegram exactly; VKAuthButton
+            renders the VK ID widget which we visually constrain via globals.css
+            (.vk-auth-widget overrides) so both buttons share the same metrics. */}
+        <div className="h-14 flex items-stretch border-2 border-b-[6px] border-[#0077FF]/40 bg-[#0077FF]/10 hover:bg-[#0077FF]/20 hover:border-[#0077FF]/60 active:translate-y-[4px] active:border-b-[2px] shadow-[0_4px_20px_rgba(0,119,255,0.15)] transition-all duration-75 group/vk">
+          <div className="w-full h-full flex items-center justify-center px-2">
+            <VKAuthButton mode="order" wbCode={code} />
+          </div>
         </div>
       </div>
 
@@ -1754,6 +1758,7 @@ function WBGate({ onSuccess }: WBGateProps) {
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<"guide" | "ready">("guide");
   const [quickTarget, setQuickTarget] = useState<"tg" | "vk" | null>(null);
+  const [showVkAuth, setShowVkAuth] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1800,7 +1805,7 @@ function WBGate({ onSuccess }: WBGateProps) {
     }
   };
 
-  // Quick path — user already has a gamepass and wants to go straight to a bot.
+  // Quick TG redirect — TG bot picks up the code via /start deep-link payload.
   const handleQuickRedirect = async (target: "tg" | "vk") => {
     if (code.length < 7) {
       setError("Сначала введите 7-значный код с карточки");
@@ -1812,15 +1817,22 @@ function WBGate({ onSuccess }: WBGateProps) {
     setError(null);
     try {
       await validateAndPersist();
-      const url =
-        target === "tg"
-          ? `https://t.me/RobloxBankBot?start=${code}`
-          : `https://vk.me/club237309399?ref=${code}`;
-      // Same-tab redirect: keeps WB session; bot picks the code up via deep-link.
-      window.location.href = url;
+      if (target === "tg") {
+        window.location.href = `https://t.me/RobloxBankBot?start=${code}`;
+        return;
+      }
+      // VK path: don't redirect blindly to vk.me/club?ref=… — VK does NOT
+      // forward `ref` reliably through messenger deep-links, and the bot
+      // can't recover state without a vk_id↔wbCode link in DB.
+      // Instead, surface the VKAuthButton inline; VK ID auth attaches the
+      // user's vkId to the code (see auth.ts → vk-id authorize) and then
+      // VKAuthButton itself redirects to the community.
+      setShowVkAuth(true);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Неизвестная ошибка";
       setError(msg);
+      setShowVkAuth(false);
+    } finally {
       setLoading(false);
       setQuickTarget(null);
     }
@@ -1898,7 +1910,7 @@ function WBGate({ onSuccess }: WBGateProps) {
               <div className="grid grid-cols-2 gap-2 pt-1">
                 <button
                   type="button"
-                  onClick={() => { setMode("guide"); setError(null); }}
+                  onClick={() => { setMode("guide"); setShowVkAuth(false); setError(null); }}
                   className={`h-11 flex flex-col items-center justify-center px-2 border-2 transition-all text-[10px] font-black uppercase tracking-widest ${
                     isGuideMode
                       ? "border-[#c9a84c]/70 bg-[#c9a84c]/10 text-[#f0c040]"
@@ -1969,23 +1981,34 @@ function WBGate({ onSuccess }: WBGateProps) {
                       </>
                     )}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickRedirect("vk")}
-                    disabled={loading || !codeReady}
-                    className="w-full h-14 flex items-center justify-center gap-3 font-black text-[12px] uppercase tracking-widest border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 hover:bg-[#0077FF]/25 hover:border-[#0077FF]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {loading && quickTarget === "vk" ? (
-                      <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем VK...</>
-                    ) : (
-                      <>
-                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0 text-[#0077FF]">
-                          <path d="M12.785 16.241s.288-.032.435-.194c.135-.149.13-.43.13-.43s-.019-1.306.572-1.497c.582-.188 1.331 1.252 2.124 1.806.6.42 1.056.328 1.056.328l2.122-.03s1.111-.07.585-.957c-.043-.073-.306-.658-1.578-1.853-1.331-1.252-1.153-1.049.451-3.224.977-1.323 1.367-2.13 1.245-2.474-.116-.328-.834-.241-.834-.241l-2.387.015s-.177-.024-.308.056c-.128.078-.21.262-.21.262s-.378 1.022-.882 1.892c-1.062 1.834-1.487 1.931-1.661 1.816-.405-.267-.304-1.069-.304-1.638 0-1.778.267-2.519-.51-2.711-.258-.064-.448-.106-1.108-.113-.847-.009-1.564.003-1.97.207-.27.136-.479.439-.351.456.157.022.514.099.703.363.244.341.236 1.108.236 1.108s.14 2.083-.328 2.342c-.32.178-.76-.185-1.706-1.85-.484-.853-.85-1.795-.85-1.795s-.07-.176-.196-.27c-.152-.114-.365-.15-.365-.15l-2.268.015s-.34.01-.466.16c-.111.135-.009.412-.009.412s1.776 4.221 3.787 6.349c1.844 1.95 3.938 1.822 3.938 1.822h.949z"/>
-                        </svg>
-                        Перейти в VK
-                      </>
-                    )}
-                  </button>
+                  {!showVkAuth ? (
+                    <button
+                      type="button"
+                      onClick={() => handleQuickRedirect("vk")}
+                      disabled={loading || !codeReady}
+                      className="w-full h-14 flex items-center justify-center gap-3 font-black text-[12px] uppercase tracking-widest border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 hover:bg-[#0077FF]/25 hover:border-[#0077FF]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {loading && quickTarget === "vk" ? (
+                        <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем VK...</>
+                      ) : (
+                        <>
+                          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0 text-[#0077FF]">
+                            <path d="M12.785 16.241s.288-.032.435-.194c.135-.149.13-.43.13-.43s-.019-1.306.572-1.497c.582-.188 1.331 1.252 2.124 1.806.6.42 1.056.328 1.056.328l2.122-.03s1.111-.07.585-.957c-.043-.073-.306-.658-1.578-1.853-1.331-1.252-1.153-1.049.451-3.224.977-1.323 1.367-2.13 1.245-2.474-.116-.328-.834-.241-.834-.241l-2.387.015s-.177-.024-.308.056c-.128.078-.21.262-.21.262s-.378 1.022-.882 1.892c-1.062 1.834-1.487 1.931-1.661 1.816-.405-.267-.304-1.069-.304-1.638 0-1.778.267-2.519-.51-2.711-.258-.064-.448-.106-1.108-.113-.847-.009-1.564.003-1.97.207-.27.136-.479.439-.351.456.157.022.514.099.703.363.244.341.236 1.108.236 1.108s.14 2.083-.328 2.342c-.32.178-.76-.185-1.706-1.85-.484-.853-.85-1.795-.85-1.795s-.07-.176-.196-.27c-.152-.114-.365-.15-.365-.15l-2.268.015s-.34.01-.466.16c-.111.135-.009.412-.009.412s1.776 4.221 3.787 6.349c1.844 1.95 3.938 1.822 3.938 1.822h.949z"/>
+                          </svg>
+                          Перейти в VK
+                        </>
+                      )}
+                    </button>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-[10px] text-[#0077FF]/80 font-black uppercase tracking-widest text-center">
+                        Авторизуйтесь через VK ID — после этого откроется чат с менеджером
+                      </p>
+                      <div className="border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 px-4 py-3 flex items-center justify-center min-h-[64px]">
+                        <VKAuthButton mode="order" wbCode={code} />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </form>

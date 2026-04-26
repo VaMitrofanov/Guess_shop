@@ -273,3 +273,33 @@ body {
   box-shadow: 0 0 0 3px rgba(240, 192, 64, 0.15), 0 0 20px rgba(240, 192, 64, 0.08);
 }
 .wb-input::placeholder { color: rgba(240, 192, 64, 0.25); letter-spacing: 0.2em; }
+
+/* ─── VK ID widget visual normalisation ──────────────────────────────────────
+ * VKID SDK renders the OneTap button inside .vk-auth-widget. Without overrides
+ * the widget uses its own metrics (rounded corners, fixed inner height,
+ * extra margins) and visually clashes with our pixel-style buttons. These
+ * rules force the widget to be square, full-width, and the same height as
+ * the surrounding Telegram button.
+ */
+.vk-auth-widget {
+  width: 100%;
+  align-self: stretch;
+}
+.vk-auth-widget > * {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+.vk-auth-widget iframe,
+.vk-auth-widget [class*="VkIdWebSdk"],
+.vk-auth-widget [class*="vkidButton"],
+.vk-auth-widget [class*="OneTapButton"],
+.vk-auth-widget button {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  border-radius: 0 !important;
+}
+.vk-auth-widget * {
+  border-radius: 0 !important;
+}
