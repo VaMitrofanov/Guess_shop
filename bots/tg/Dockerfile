@@ -32,7 +32,7 @@ COPY bots/tg/package.json ./package.json
 COPY prisma ./prisma
 
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install --no-audit --no-fund --prefer-offline --ignore-scripts
+    npm install --include=dev --no-audit --no-fund --prefer-offline --ignore-scripts
 
 RUN npx prisma generate --schema ./prisma/schema.prisma
 

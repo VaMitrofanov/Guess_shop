@@ -51,7 +51,7 @@ COPY prisma ./prisma
 # `npm install` (not `ci`) — the per-bot lockfile may not yet be committed
 # on first deploy. Switch to `npm ci` once bots/vk/package-lock.json lands.
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install --no-audit --no-fund --prefer-offline --ignore-scripts
+    npm install --include=dev --no-audit --no-fund --prefer-offline --ignore-scripts
 
 # Generate the Prisma client against the *image's* schema path. The
 # bot script's relative path (../../prisma) is meant for local dev; here
@@ -142,4 +142,4 @@ WORKDIR /app/bots/vk
 #   • If npx's local-resolution stumbles, it fetches `tsx` from
 #     registry.npmjs.org — production containers should never hit the
 #     registry on cold start.
-CMD ["sh", "-c", "node /app/node_modules/tsx/dist/cli.mjs bot.ts"]
+CMD ["../../node_modules/.bin/tsx", "bot.ts"]
