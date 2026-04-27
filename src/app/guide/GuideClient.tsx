@@ -2262,23 +2262,16 @@ function Instruction({ isWB, denomination, code, onReset, freshFromGate = false 
                 Геймпасс — способ получить Robux через наш сервис.
                 Создаётся за <span className="text-white font-black">5 минут</span> прямо в браузере.
               </p>
-              <div className="flex flex-wrap gap-3">
-                {!isWB && (
+              {!isWB && (
+                <div className="flex flex-wrap gap-3">
                   <Link
                     href="/checkout"
                     className="h-12 px-7 gold-gradient font-black text-[11px] uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none flex items-center gap-2"
                   >
                     Оформить заказ <ArrowRight className="w-4 h-4" />
                   </Link>
-                )}
-                <a
-                  href="https://create.roblox.com"
-                  target="_blank" rel="noopener noreferrer"
-                  className="h-12 px-7 border-2 border-[#1e2a45] hover:border-[#00b06f]/30 font-black text-[11px] uppercase tracking-widest transition-all rounded-none flex items-center gap-2 text-zinc-300"
-                >
-                  Creator Hub <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              </div>
+                </div>
+              )}
             </div>
 
             {/* Right: stats + warning + calculator */}

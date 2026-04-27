@@ -274,12 +274,13 @@ body {
 }
 .wb-input::placeholder { color: rgba(240, 192, 64, 0.25); letter-spacing: 0.2em; }
 
-/* ─── VK ID widget visual normalisation ──────────────────────────────────────
- * VKID SDK renders the OneTap button inside .vk-auth-widget. Without overrides
- * the widget uses its own metrics (rounded corners, fixed inner height,
- * extra margins) and visually clashes with our pixel-style buttons. These
- * rules force the widget to be square, full-width, and the same height as
- * the surrounding Telegram button.
+/* ─── VK ID widget — invisible-mount overrides ───────────────────────────────
+ * The OneTap widget is mounted inside .vk-auth-widget--ghost (opacity:0,
+ * pointer-events:none). We only need it to exist in the DOM so we can
+ * dispatch click() to its internal button programmatically — its UI is
+ * never shown to the user. We still constrain the widget to fixed metrics
+ * to prevent layout-shift artefacts (some SDK versions briefly flash size
+ * during init even with opacity:0).
  */
 .vk-auth-widget {
   width: 100%;
@@ -299,6 +300,29 @@ body {
   height: 44px !important;
   min-height: 44px !important;
   border-radius: 0 !important;
+}
+.vk-auth-widget--ghost {
+  /* The OneTap widget renders a solid blue card with avatar + "Получить для
+   * Nick" label. Even with opacity:0 / pointer-events:none on the wrapper,
+   * some SDK builds inject inline styles that defeat opacity (notably the
+   * iframe's own background-color). To be 100% sure the widget is invisible
+   * regardless of SDK version, we punt the wrapper off-screen entirely.
+   *
+   * We KEEP non-zero dimensions so the inner button retains a bounding box
+   * — required by the .click() forwarder in VKAuthButton (which filters
+   * candidates by getBoundingClientRect().width > 0).
+   */
+  position: absolute !important;
+  left: -10000px !important;
+  top: 0 !important;
+  width: 320px !important;
+  height: 56px !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  overflow: hidden !important;
+  /* Prevent it from ever creating a stacking context above the visible button. */
+  z-index: -1 !important;
 }
 .vk-auth-widget * {
   border-radius: 0 !important;

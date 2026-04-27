@@ -19,9 +19,9 @@
 import { motion, useReducedMotion } from "framer-motion";
 import {
   ShieldCheck,
-  Sparkles,
-  Wallet,
-  Timer,
+  ShoppingBag,
+  Smartphone,
+  MessageCircle,
   type LucideIcon,
 } from "lucide-react";
 
@@ -35,12 +35,12 @@ type Slide = {
 
 const SLIDES: Slide[] = [
   {
-    id: "speed",
-    title: "Зачисление за минуты",
+    id: "wb-protected",
+    title: "Заказ уже оплачен и защищён",
     body:
-      "Автоматическая система фулфилмента запускает доставку Robux сразу после оплаты. В среднем — 3–7 минут.",
-    Icon: Timer,
-    accent: "text-emerald-400",
+      "Деньги вы оставили на Wildberries — это официальный посредник. Мы получаем оплату только после того, как Robux окажутся у вас.",
+    Icon: ShoppingBag,
+    accent: "text-amber-300",
   },
   {
     id: "safe",
@@ -48,22 +48,22 @@ const SLIDES: Slide[] = [
     body:
       "Передача только через официальный механизм Roblox — никаких передач пароля, никаких рисков для аккаунта.",
     Icon: ShieldCheck,
-    accent: "text-amber-300",
-  },
-  {
-    id: "price",
-    title: "Цена ниже официальной",
-    body:
-      "Парсим рынок круглосуточно и автоматически держим курс ниже Roblox.com. Платите рублями — получаете больше Robux.",
-    Icon: Wallet,
     accent: "text-emerald-300",
   },
   {
-    id: "magic",
-    title: "Поддержка 24/7",
+    id: "easy-flow",
+    title: "Без установок и сложностей",
     body:
-      "Если что-то пошло не так — пишите в чат: ответим, проверим заказ и вернём средства, если зачисление не прошло.",
-    Icon: Sparkles,
+      "Активация прямо в браузере по короткой инструкции. Получится с телефона за 5 минут — даже если вы делаете это впервые.",
+    Icon: Smartphone,
+    accent: "text-emerald-400",
+  },
+  {
+    id: "human-support",
+    title: "Менеджер всегда на связи",
+    body:
+      "Если что-то пошло не так — напишите нам в чат, ответим за минуту. Не получится активировать — Wildberries вернёт деньги по гарантии.",
+    Icon: MessageCircle,
     accent: "text-amber-200",
   },
 ];
