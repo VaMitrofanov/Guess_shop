@@ -123,19 +123,23 @@ USER botuser
 
 WORKDIR /app/bots/vk
 
-# Runtime entrypoint: invoke the *local* tsx binary directly.
+# Runtime entrypoint: invoke the *local* tsx bin via its package-published
+# shim. Path is relative to WORKDIR (= /app/bots/{vk,tg}), so `../..`
+# climbs out to /app and lands in /app/node_modules/.bin/tsx.
+#
+# Why this form rather than the absolute path to dist/cli.mjs:
+#   • `.bin/tsx` is the *published* entrypoint — its location is part of
+#     tsx's package contract (declared in its package.json `bin` field).
+#     The `dist/cli.mjs` path is an internal detail and has changed
+#     between tsx 3.x and 4.x. Pinning to the bin shim insulates us from
+#     future tsx upgrades.
+#   • Short and self-documenting — anyone reading the Dockerfile
+#     immediately sees that we're invoking a local dependency.
 #
 # Why not `npx tsx`:
-#   • npx tries to write to ~/.npm before resolving the local binary; if
-#     HOME isn't writable that's an immediate EACCES (root cause of the
-#     `mkdir /home/botuser` error in your logs).
-#   • If npx's local-resolution logic stumbles, it falls back to fetching
-#     `tsx` from registry.npmjs.org — that's the `FetchError: Invalid
-#     response body while trying to fetch https://registry.npmjs.org/tsx`
-#     in the logs. A production container has no business hitting the npm
-#     registry on every cold start.
-#
-# Calling node + the absolute path to tsx's CLI module bypasses npm/npx
-# entirely. Equivalent to `../../node_modules/.bin/tsx` from this WORKDIR
-# but uses an absolute path so it survives any future CWD changes.
-CMD ["node", "/app/node_modules/tsx/dist/cli.mjs", "bot.ts"]
+#   • npx writes to ~/.npm before resolving the local binary; if HOME
+#     isn't writable that's an immediate EACCES.
+#   • If npx's local-resolution stumbles, it fetches `tsx` from
+#     registry.npmjs.org — production containers should never hit the
+#     registry on cold start.
+CMD ["../../node_modules/.bin/tsx", "bot.ts"]

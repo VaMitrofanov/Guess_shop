@@ -68,6 +68,16 @@ model Order {
   externalId         String?
   gamepassId         String?
   method             String
+
+  // ── Acceptance of public offer (ст. 437–438 ГК РФ + ФЗ-152) ─────────────
+  // Captured server-side at the moment /api/orders/create accepts the
+  // request, so the timestamp/IP/version triple is independent of anything
+  // the client could forge after the fact. Nullable for backwards-compat
+  // with rows created before this migration.
+  termsAcceptedAt    DateTime?
+  termsVersion       String?
+  termsIpAddress     String?
+
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
 }
