@@ -71,30 +71,71 @@ RUN apt-get update -y \
     && apt-get install -y --no-install-recommends openssl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# Build-time defaults only.
+#
+# Coolify injects DATABASE_URL, VK_TOKEN, VK_GROUP_ID, TG_TOKEN, ADMIN_IDS,
+# TG_CHAT_ID at *runtime* — they pass through to the process automatically
+# without any ENV declaration here. Listing them with empty defaults would
+# silently overwrite Coolify's values on container start, so we don't.
+#
+# HOME and NPM_CONFIG_CACHE are set so any tooling that touches the npm cache
+# (e.g. transitive `npm config` lookups, prisma engine extraction) writes to
+# a directory the unprivileged user actually owns, instead of trying to
+# mkdir /home/botuser at runtime and crashing with EACCES.
 ENV NODE_ENV=production \
-    # Bot is I/O-bound; 256 MB heap is plenty and prevents runaway memory
-    # in case of a handler bug holding references.
-    NODE_OPTIONS="--max-old-space-size=256"
+    NODE_OPTIONS="--max-old-space-size=256" \
+    HOME=/home/botuser \
+    NPM_CONFIG_CACHE=/home/botuser/.npm
 
-# Non-root user — defence in depth + sane volume permissions.
+# Non-root user with a real home dir.
+#   --create-home (-m): creates /home/botuser, otherwise npm/npx crash with
+#                        EACCES on `mkdir /home/botuser` at first start.
+#   --shell /usr/sbin/nologin: defence in depth — no interactive login.
 RUN groupadd --system --gid 1001 nodejs \
-    && useradd --system --uid 1001 --gid nodejs botuser
+    && useradd --system --create-home --home-dir /home/botuser \
+       --shell /usr/sbin/nologin --uid 1001 --gid nodejs botuser
 
-# Bring over installed deps + generated client.
-COPY --from=deps --chown=botuser:nodejs /app/node_modules ./node_modules
-COPY --from=deps --chown=botuser:nodejs /app/prisma       ./prisma
-COPY --from=deps --chown=botuser:nodejs /app/package.json ./package.json
+# Bring over installed deps + generated client. We intentionally drop the
+# per-COPY --chown flags here: a single explicit `chown -R` after all COPYs
+# is deterministic across multi-stage caching and harder to accidentally skip.
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/prisma       ./prisma
+COPY --from=deps /app/package.json ./package.json
 
 # Bot source, preserving the on-disk repo layout. Order: shared first
 # (most stable), bot-specific last (changes most often).
-COPY --chown=botuser:nodejs bots/shared      ./bots/shared
-COPY --chown=botuser:nodejs bots/vk/bot.ts       ./bots/vk/bot.ts
-COPY --chown=botuser:nodejs bots/vk/handlers.ts  ./bots/vk/handlers.ts
-COPY --chown=botuser:nodejs bots/vk/session.ts   ./bots/vk/session.ts
-COPY --chown=botuser:nodejs bots/tsconfig.json   ./bots/tsconfig.json
+COPY bots/shared            ./bots/shared
+COPY bots/vk/bot.ts         ./bots/vk/bot.ts
+COPY bots/vk/handlers.ts    ./bots/vk/handlers.ts
+COPY bots/vk/session.ts     ./bots/vk/session.ts
+COPY bots/tsconfig.json     ./bots/tsconfig.json
+
+# Explicit ownership transfer for the entire app tree AFTER all COPYs.
+# Required because:
+#   • Default COPY ownership is root:root and `USER botuser` cannot write
+#     into root-owned directories (Prisma engines extract on first DB call,
+#     tsx caches transpiled files, etc.).
+#   • /home/botuser also handed over so HOME-rooted writes (npm cache,
+#     dotfiles created by node libs) don't fail.
+RUN chown -R botuser:nodejs /app /home/botuser
 
 USER botuser
 
-# `tsx` resolves up the tree → finds /app/node_modules.
 WORKDIR /app/bots/vk
-CMD ["npx", "tsx", "bot.ts"]
+
+# Runtime entrypoint: invoke the *local* tsx binary directly.
+#
+# Why not `npx tsx`:
+#   • npx tries to write to ~/.npm before resolving the local binary; if
+#     HOME isn't writable that's an immediate EACCES (root cause of the
+#     `mkdir /home/botuser` error in your logs).
+#   • If npx's local-resolution logic stumbles, it falls back to fetching
+#     `tsx` from registry.npmjs.org — that's the `FetchError: Invalid
+#     response body while trying to fetch https://registry.npmjs.org/tsx`
+#     in the logs. A production container has no business hitting the npm
+#     registry on every cold start.
+#
+# Calling node + the absolute path to tsx's CLI module bypasses npm/npx
+# entirely. Equivalent to `../../node_modules/.bin/tsx` from this WORKDIR
+# but uses an absolute path so it survives any future CWD changes.
+CMD ["node", "/app/node_modules/tsx/dist/cli.mjs", "bot.ts"]
