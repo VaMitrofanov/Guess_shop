@@ -142,4 +142,4 @@ WORKDIR /app/bots/vk
 #   • If npx's local-resolution stumbles, it fetches `tsx` from
 #     registry.npmjs.org — production containers should never hit the
 #     registry on cold start.
-CMD ["sh", "-c", "../../node_modules/.bin/tsx bot.ts"]
+CMD ["sh", "-c", "node /app/node_modules/tsx/dist/cli.mjs bot.ts"]
