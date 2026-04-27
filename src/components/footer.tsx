@@ -3,12 +3,19 @@
 import Link from "next/link";
 
 export default function Footer() {
-  const links = [
+  // Two link buckets so the layout stays balanced as we add more legal docs
+  // (e.g. user agreement, cookie policy). Marketing/utility links on top
+  // row, legal-required docs below.
+  const navLinks = [
     { href: "/guide", label: "Инструкция" },
     { href: "/faq", label: "FAQ" },
     { href: "/guarantees", label: "Гарантии" },
     { href: "/reviews", label: "Отзывы" },
-    { href: "/privacy", label: "Приватность" },
+  ];
+
+  const legalLinks = [
+    { href: "/legal/offer", label: "Публичная оферта" },
+    { href: "/legal/policy", label: "Политика конфиденциальности" },
   ];
 
   return (
@@ -30,7 +37,7 @@ export default function Footer() {
           </div>
 
           <div className="flex flex-wrap justify-center items-center gap-x-6 gap-y-2 text-xs font-black uppercase tracking-widest text-zinc-500">
-            {links.map(({ href, label }) => (
+            {navLinks.map(({ href, label }) => (
               <Link key={href} href={href} className="hover:text-[#00b06f] transition-colors">
                 {label}
               </Link>
@@ -40,6 +47,21 @@ export default function Footer() {
 
         <div className="accent-line mb-6" />
 
+        {/* Legal row — separated visually from nav links so users (and
+            regulators) immediately see the offer + privacy policy links
+            required by ФЗ-152 / ЗоЗПП. */}
+        <div className="flex flex-wrap justify-center items-center gap-x-6 gap-y-2 mb-6 text-[10px] font-black uppercase tracking-widest text-zinc-500">
+          {legalLinks.map(({ href, label }) => (
+            <Link
+              key={href}
+              href={href}
+              className="hover:text-[#00b06f] transition-colors"
+            >
+              {label}
+            </Link>
+          ))}
+        </div>
+
         <div className="text-center space-y-2">
           <p className="text-zinc-500 text-[10px] font-medium uppercase tracking-widest">
             ROBLOX BANK не связан с Roblox Corporation
@@ -48,9 +70,9 @@ export default function Footer() {
             Roblox и логотип Roblox — зарегистрированные торговые марки Roblox Corporation
           </p>
           <div className="pt-2">
-            <a 
-              href="https://vk.ru/bankroblox" 
-              target="_blank" 
+            <a
+              href="https://vk.ru/bankroblox"
+              target="_blank"
               rel="noopener noreferrer"
               className="text-[#00b06f] text-[10px] font-black uppercase tracking-widest hover:underline"
             >

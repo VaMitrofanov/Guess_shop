@@ -8,13 +8,67 @@ import { auth } from "@/auth";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Current public-offer version stamp.
+ *
+ * Update this string EVERY time the legal copy at /legal/offer changes
+ * materially (not for typos). The value is persisted on every Order so we
+ * can prove which exact revision the user accepted in case of a dispute.
+ *
+ * Format: ISO date — matches the `lastUpdated` line at the top of the
+ * offer page, which is what the user actually sees.
+ */
+const TERMS_VERSION = "2026-04-28";
+
 const CreateOrderSchema = z.object({
   username: z.string().min(1),
   amountRobux: z.number().int().min(100),
   productId: z.string().optional(),
   method: z.string().default("Gamepass"),
   gamepassId: z.string().optional(),
+  /**
+   * Mandatory acceptance of the public offer + privacy policy.
+   *
+   * `z.literal(true)` rejects anything that isn't exactly `true` — guards
+   * against the front-end forgetting the field, sending `"true"` as a
+   * string, or sending `false`. The check below short-circuits with 400
+   * before any DB write or Tinkoff call happens.
+   */
+  agreedToTerms: z.literal(true, {
+    error: "Необходимо согласие с офертой и политикой конфиденциальности",
+  }),
 });
+
+/**
+ * Resolve the originating client IP for audit logging.
+ *
+ * Order of precedence (matches what's typically configured in Vercel /
+ * Coolify-Caddy / nginx-proxy):
+ *   1. `x-forwarded-for` — comma-separated list, first entry is the real
+ *      client. Trimmed defensively because some proxies emit whitespace.
+ *   2. `x-real-ip`       — single value set by nginx/Caddy when XFF isn't
+ *      present.
+ *   3. `cf-connecting-ip` — Cloudflare-specific header, the only reliable
+ *      source when traffic enters via the CF tunnel from the X280.
+ *   4. `null`            — record explicitly that we couldn't determine
+ *      the IP, rather than logging a misleading "127.0.0.1".
+ *
+ * Note: NextRequest.ip is null in Node runtime — it only resolves on the
+ * Edge runtime, which we're not using here (Prisma needs Node). So we
+ * read the headers ourselves.
+ */
+function resolveClientIp(req: NextRequest): string | null {
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) {
+    const first = xff.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  const real = req.headers.get("x-real-ip");
+  if (real) return real.trim();
+  const cf = req.headers.get("cf-connecting-ip");
+  if (cf) return cf.trim();
+  return null;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,13 +77,35 @@ export async function POST(req: NextRequest) {
     const validated = CreateOrderSchema.safeParse(body);
 
     if (!validated.success) {
+      // Surface the first error verbatim so the front-end can display the
+      // exact reason — particularly for the consent guard, where the
+      // distinction between "missing field" and "unchecked" matters.
+      const firstIssue = validated.error.issues[0];
+      const message =
+        firstIssue?.path.includes("agreedToTerms")
+          ? "Необходимо согласие с офертой и политикой конфиденциальности"
+          : firstIssue?.message ?? "Некорректные параметры заказа";
+
       return NextResponse.json(
-        { error: "Сумма должна быть не менее 100 Robux", details: validated.error.issues },
-        { status: 400 }
+        { error: message, details: validated.error.issues },
+        { status: 400 },
       );
     }
 
-    const { username, amountRobux, productId, method, gamepassId } = validated.data;
+    const {
+      username,
+      amountRobux,
+      productId,
+      method,
+      gamepassId,
+    } = validated.data;
+
+    // Acceptance evidence triple. Captured here, on the server, BEFORE any
+    // external call — so even if the rest of the flow fails (Tinkoff down,
+    // Roblox API rejects), we still know who accepted what and when, in
+    // case the user later disputes the consent itself.
+    const termsAcceptedAt = new Date();
+    const termsIpAddress = resolveClientIp(req);
 
     // 1. Verify user exists on Roblox
     const robloxUser = await getRobloxUser(username);
@@ -54,10 +130,12 @@ export async function POST(req: NextRequest) {
       amountRUB = Math.round(amountRobux * pricing.finalRubPerRobux);
     }
 
-    // 3. Create the order in DB
+    // 3. Create the order in DB. The terms-acceptance triple is written
+    //    atomically with the rest of the row — there is no window in
+    //    which an Order exists without its consent record.
     const order = await prisma.order.create({
       data: {
-        userId: (session?.user as any)?.id || null,
+        userId: (session?.user as { id?: string } | undefined)?.id ?? null,
         customerRobloxUser: username,
         amountRobux,
         amountRUB,
@@ -65,6 +143,9 @@ export async function POST(req: NextRequest) {
         method,
         gamepassId,
         productId: finalProductId || "default-calc",
+        termsAcceptedAt,
+        termsVersion: TERMS_VERSION,
+        termsIpAddress,
       },
     });
 
@@ -75,7 +156,7 @@ export async function POST(req: NextRequest) {
       await prisma.order.update({ where: { id: order.id }, data: { status: "FAILED" } });
       return NextResponse.json(
         { error: "Payment initialization failed", details: payment.Message },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -93,7 +174,6 @@ export async function POST(req: NextRequest) {
       orderId: updatedOrder.id,
       paymentUrl: payment.PaymentURL,
     });
-
   } catch (error) {
     console.error("Order Creation Error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

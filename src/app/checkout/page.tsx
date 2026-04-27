@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, Suspense } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import Navbar from "@/components/navbar";
 import {
@@ -9,6 +10,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePricing } from "@/hooks/usePricing";
+import { Checkbox } from "@/components/ui/checkbox";
 
 function RobuxIcon({ className }: { className?: string }) {
     return (
@@ -49,6 +51,11 @@ function CheckoutContent() {
     const [loadingPasses, setLoadingPasses] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
+    // Mandatory consent — ст. 26.1 ЗоЗПП + ФЗ-152. Acts as legal acceptance
+    // of the public offer; without it we cannot lawfully process the
+    // payment, so handlePay() short-circuits below and the button is
+    // disabled in the UI as well (defence in depth).
+    const [agreedToTerms, setAgreedToTerms] = useState(false);
 
     const [robux, setRobux] = useState(Math.max(0, parseInt(amountStr) || 0));
     const price = getPrice(robux);
@@ -57,12 +64,16 @@ function CheckoutContent() {
         if (!username) { setError("Введите ваш никнейм в Roblox"); return; }
         if (method === "Gamepass" && !gamepassId) { setError("Выберите геймпасс"); return; }
         if (robux < 100) { setError("Минимальная сумма — 100 Robux"); return; }
+        if (!agreedToTerms) {
+            setError("Необходимо согласие с офертой и политикой конфиденциальности");
+            return;
+        }
         setError(""); setLoading(true);
         try {
             const res = await fetch("/api/orders/create", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username, amountRobux: robux, productId, method, gamepassId }),
+                body: JSON.stringify({ username, amountRobux: robux, productId, method, gamepassId, agreedToTerms }),
             });
             const data = await res.json();
             if (data.success && data.paymentUrl) window.location.href = data.paymentUrl;
@@ -475,6 +486,41 @@ function CheckoutContent() {
                         </div>
                     )}
 
+                    {/* Mandatory consent — must be ticked before payment.
+                        Required by ст. 437–438 ГК РФ (acceptance of offer)
+                        and ФЗ-152 (informed consent for personal data
+                        processing). The checkbox label is the legal
+                        equivalent of a wet signature. */}
+                    <label className="flex items-start gap-3 p-4 border border-[#1e2a45] bg-[#080c18] cursor-pointer select-none hover:border-[#00b06f]/40 transition-colors">
+                        <Checkbox
+                            checked={agreedToTerms}
+                            onChange={(e) => setAgreedToTerms(e.target.checked)}
+                            aria-describedby="terms-consent-text"
+                            className="mt-0.5"
+                        />
+                        <span id="terms-consent-text" className="text-xs text-zinc-300 leading-relaxed">
+                            Я согласен с условиями{" "}
+                            <Link
+                                href="/legal/offer"
+                                target="_blank"
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-[#00b06f] underline underline-offset-2 hover:opacity-80"
+                            >
+                                оферты
+                            </Link>
+                            {" "}и{" "}
+                            <Link
+                                href="/legal/policy"
+                                target="_blank"
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-[#00b06f] underline underline-offset-2 hover:opacity-80"
+                            >
+                                политикой конфиденциальности
+                            </Link>
+                            . Подтверждаю, что ознакомлен с тем, что цифровой товар надлежащего качества возврату и обмену не подлежит после момента передачи кода активации (ст. 26.1 ЗоЗПП).
+                        </span>
+                    </label>
+
                     {/* Actions */}
                     <div className="flex gap-3">
                         <button
@@ -485,8 +531,14 @@ function CheckoutContent() {
                         </button>
                         <button
                             onClick={handlePay}
-                            disabled={loading}
-                            className="flex-[2] h-14 gold-gradient font-black text-xs uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none flex items-center justify-center gap-3"
+                            disabled={loading || !agreedToTerms}
+                            className={cn(
+                                "flex-[2] h-14 font-black text-xs uppercase tracking-widest text-white transition-all rounded-none flex items-center justify-center gap-3",
+                                agreedToTerms && !loading
+                                    ? "gold-gradient hover:opacity-90 active:scale-[0.98] cursor-pointer"
+                                    : "bg-[#1e2a45] text-zinc-500 cursor-not-allowed",
+                            )}
+                            title={!agreedToTerms ? "Необходимо согласие с офертой и политикой конфиденциальности" : undefined}
                         >
                             {loading
                                 ? <Loader2 className="w-5 h-5 animate-spin" />
