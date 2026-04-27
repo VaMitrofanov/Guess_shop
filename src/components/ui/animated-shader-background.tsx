@@ -3,9 +3,9 @@
 /**
  * Animated GLSL-shader background — adaptive performance profile.
  *
- *   • Full quality on desktop with 35 ray-march iterations and DPR up to 2.
+ *   • Full quality on desktop with 24 ray-march iterations and DPR up to 2.
  *   • Lite quality on mobile (≤768px or pointer:coarse): DPR clamped to 1
- *     and iterations reduced to 18, which roughly halves GPU cost.
+ *     and iterations reduced to 12, which roughly halves GPU cost.
  *   • Pauses RAF when the canvas leaves the viewport (IntersectionObserver)
  *     or when the document is hidden (visibilitychange) — saves battery
  *     while the user reads the steps below the hero.
@@ -150,7 +150,9 @@ export default function ShaderBackground({ className }: ShaderBackgroundProps) {
     const isNarrow = window.innerWidth < 768;
     const lite = isCoarse || isNarrow;
     const dprCap = lite ? 1 : 2;
-    const iterations = lite ? 18 : 35;
+    // Reduced from 18/35 → 12/24: enough fidelity for the aurora effect,
+    // measurably easier on weaker GPUs (especially integrated mobile chips).
+    const iterations = lite ? 12 : 24;
 
     let cancelled = false;
 
