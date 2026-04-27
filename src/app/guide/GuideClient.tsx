@@ -13,22 +13,12 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { ParticleTextEffect } from "@/components/ui/particle-text-effect";
 import VKAuthButton from "@/components/auth/VKAuthButton";
-import dynamic from "next/dynamic";
-// Lightweight motion-only components — imported directly to keep chunk count
-// low. They reuse the framer-motion + lucide-react bundle already loaded by
-// GuideClient, so a separate chunk would only hurt deployment reliability
-// without saving real bytes.
+// Visual components imported directly. None of them tug in heavy deps now
+// (three.js was dropped in favour of CSS gradients), so dynamic chunk
+// splitting just adds round-trips and deploy fragility for zero kB win.
+import AnimatedShaderBackground from "@/components/ui/animated-shader-background";
 import InstructionRevealCurtain from "@/components/ui/instruction-reveal-curtain";
 import ScrollFeatureTeaser from "@/components/ui/scroll-feature-teaser";
-
-// Only the WebGL shader stays lazy — it pulls in ~150 kB of three.js that
-// must NOT enter the SSR bundle. If the chunk ever fails to load (bad deploy,
-// blocked CDN, etc.), `loading: () => null` keeps the page rendering with the
-// inert CSS fallback gradient that lives inside the component itself.
-const AnimatedShaderBackground = dynamic(
-  () => import("@/components/ui/animated-shader-background"),
-  { ssr: false, loading: () => null }
-);
 
 // ─── localStorage WB session helpers ──────────────────────────────────────────
 const WB_SESSION_KEY = "rb_wb_session";

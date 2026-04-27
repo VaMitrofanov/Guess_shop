@@ -1,6 +1,14 @@
 // schema.prisma
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // engineType=library is the default in Prisma 7, declared explicitly
+  // because the project guidelines require it for cross-platform build
+  // reproducibility (Mac M1 dev → Linux x86 production).
+  engineType    = "library"
+  // Generate engines for both the dev host (native) and the Linux runtime
+  // image. Without this, `prisma migrate deploy` from the container fails
+  // with "Engine binary not found" on Debian (bookworm-slim => openssl 3.x).
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
