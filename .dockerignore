@@ -1,48 +1,64 @@
 # ────────────────────────────────────────────────────────────────────────────
-# Build context exclusions for `docker build`.
-# Anything matched here never enters the image — keeps build context small
-# and prevents leaks of dev/secret files into the runtime image.
+# Universal .dockerignore for the Guess_shop monorepo.
+#
+# Applies to ALL three Docker builds (site, bots/vk, bots/tg) since they
+# share a single build context (= repo root). The rules below only exclude
+# files that NO build needs in any image.
+#
+# Per-service exclusions (e.g. "site doesn't need /bots") are NOT done here —
+# instead, each Dockerfile uses selective COPY to pull only what it needs.
+# This keeps a single source of truth and avoids per-Dockerfile ignore files.
 # ────────────────────────────────────────────────────────────────────────────
 
-# --- Node / Next.js ---
+# --- Node / Next.js / build artifacts ---
 node_modules
+**/node_modules
 .next
+**/.next
 out
+dist
+**/dist
 .swc
 .turbo
+*.tsbuildinfo
+**/*.tsbuildinfo
 
-# --- Local environment / secrets ---
+# --- Local environment / secrets — must NEVER ship inside any image ---
 .env
 .env.*
 !.env.example
+!**/.env.example
 
-# --- VCS / IDE ---
+# --- VCS / IDE / OS metadata ---
 .git
 .gitignore
 .gitattributes
 .vscode
 .idea
 .DS_Store
+**/.DS_Store
 *.swp
 
 # --- Logs ---
 *.log
+**/*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# --- Tests / coverage ---
+# --- Tests / coverage (not needed at runtime in any service) ---
 coverage
 .nyc_output
 **/__tests__
 **/*.test.ts
 **/*.test.tsx
 **/*.spec.ts
+jest.config.js
 
-# --- Python automation engine + bots (live on the X280, not in the web image) ---
-bots
+# --- Python automation engine (lives only on the X280, never in any container) ---
 venv
 __pycache__
+**/__pycache__
 *.py
 *.pyc
 adspower.py
@@ -55,13 +71,22 @@ n8n_workflow.json
 credentials.json
 qr_wb_*.png
 
-# --- Project metadata not needed at runtime ---
+# --- Project metadata / docs not needed at runtime ---
 .claude
 .agent
+AGENTS.md
+PLAN.md
+CLAUDE.md
 *.md
 !README.md
+!**/README.md
 
-# --- Docker meta ---
-Dockerfile
-.dockerignore
+# --- Scratch / one-off scripts that should never be in an image ---
+test_write.tmp
+_write_test_ok
+scripts/codes_example.csv
+scripts/setup-swap.sh
+
+# --- Docker meta (the daemon already has these — copying them in is wasteful
+# and risks the "nested context" anti-pattern) ---
 docker-compose*.yml
