@@ -34,6 +34,10 @@ export async function sendTelegramMessage(
 
     if (!res.ok) {
       const body = await res.text();
+      // Suppress "chat not found" noise — stale admin IDs that no longer exist
+      if (res.status === 400 && body.includes("chat not found")) {
+        return false;
+      }
       console.error(`[telegram] error for chat_id=${chatId}: HTTP ${res.status} — ${body}`);
       return false;
     }
