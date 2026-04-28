@@ -12,6 +12,12 @@
  *   TG_TOKEN     — Telegram bot token (for cross-platform admin cards)
  *   ADMIN_IDS / TG_CHAT_ID — Telegram admin chat IDs
  *
+ * Optional:
+ *   VALIDATOR_KEY        — shared secret; starts the bridge server when set
+ *   VALIDATOR_PORT       — bridge server port (default: 3000)
+ *   VALIDATOR_SOURCE_URL — URL of the Singapore bridge; when set, Roblox calls
+ *                          are routed through it instead of hitting Roblox directly.
+ *
  * VK community setup:
  *   1. Enable "Messages" in community settings
  *   2. Create a community token with "messages" and "photos" permissions
@@ -21,6 +27,7 @@
 import "dotenv/config";
 import { VK } from "vk-io";
 import { handleMessage } from "./handlers";
+import { startBridgeServer } from "../shared/bridge";
 
 const token   = process.env.VK_TOKEN;
 const groupId = process.env.VK_GROUP_ID ? parseInt(process.env.VK_GROUP_ID) : undefined;
@@ -40,7 +47,18 @@ vk.updates.on("message_new", async (ctx) => {
   }
 });
 
-// Start long polling
+// ── Bridge server ────────────────────────────────────────────────────────────
+// Start when VALIDATOR_KEY is set.
+if (process.env.VALIDATOR_KEY) {
+  startBridgeServer();
+} else {
+  console.log(
+    "[VK] VALIDATOR_KEY not set — bridge server not started. " +
+    "Add VALIDATOR_KEY in Coolify to enable the validation bridge."
+  );
+}
+
+// ── Start long polling ───────────────────────────────────────────────────────
 vk.updates
   .startPolling()
   .then(() => {

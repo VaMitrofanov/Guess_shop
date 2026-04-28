@@ -3,6 +3,12 @@
  *
  * Mirrors the subset of src/lib/roblox.ts needed by bots — kept here because
  * the bots/ TypeScript project has its own rootDir and cannot import from src/.
+ *
+ * Export surface:
+ *   getGamepassDetails()       — public API: uses bridge if VALIDATOR_SOURCE_URL
+ *                                is set, falls back to direct Roblox calls
+ *   getGamepassDetailsDirect() — always hits Roblox directly; used by the
+ *                                bridge server itself to avoid recursion
  */
 
 // Realistic browser UA — plain bot strings are rate-limited by Roblox edge nodes
@@ -23,7 +29,6 @@ function sleep(ms: number): Promise<void> {
  *  • AbortController-based 30 s timeout
  *  • Chrome User-Agent + Accept headers
  *  • 3-attempt retry on: AbortError, TimeoutError, or TypeError "fetch failed"
- *    (network-level failures — DNS, TLS, connection refused, etc.)
  *  • Retry also on 5xx responses
  */
 async function rFetch(
@@ -46,7 +51,6 @@ async function rFetch(
       signal: controller.signal,
     });
 
-    // Retry on 5xx (transient server-side failures)
     if (res.status >= 500 && attempt < MAX_RETRIES) {
       const body = await res.text().catch(() => "");
       console.warn(
@@ -81,6 +85,8 @@ async function rFetch(
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface GamepassDetails {
   id:        string;
   name:      string;
@@ -88,30 +94,29 @@ export interface GamepassDetails {
   creatorId: number;
   isActive:  boolean;
   /**
-   * true when every Roblox endpoint threw a network error (no HTTP response
-   * received at all). Price and isActive are unreliable — callers should skip
-   * those checks and accept the order for manual admin review.
+   * true when every Roblox endpoint threw a network error (no HTTP response).
+   * Callers should skip price/isActive checks and accept the order for manual
+   * admin review.
    */
   validationSkipped?: boolean;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Direct Roblox calls
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Fetches gamepass metadata from Roblox, trying 4 API endpoints in sequence.
- *
- * Returns:
- *  • GamepassDetails          — on success
- *  • { validationSkipped: true } — when the server cannot reach Roblox at all
- *  • null                     — when Roblox is reachable but the gamepass was
- *                               not found / is invalid
+ * Hits Roblox APIs directly — no bridge routing.
+ * Exported so the bridge server can call this without recursion.
  */
-export async function getGamepassDetails(
+export async function getGamepassDetailsDirect(
   gamepassId: string
 ): Promise<GamepassDetails | null> {
-  // Counts how many endpoints returned an HTTP response (even 404/403).
-  // If this stays 0 after all attempts, the server has no network path to Roblox.
+  // Counts endpoints that returned any HTTP response (even 404/403).
+  // If this stays 0, the server has no network path to Roblox at all.
   let httpResponses = 0;
 
-  // ── Attempt 1: modern game-passes API ──────────────────────────────────────
+  // Attempt 1 — modern game-passes API
   try {
     const res = await rFetch(
       `https://apis.roblox.com/game-passes/v1/game-passes/${gamepassId}`
@@ -134,11 +139,9 @@ export async function getGamepassDetails(
         (body ? ` — ${body.slice(0, 200)}` : "")
       );
     }
-  } catch {
-    // network error — httpResponses stays unchanged
-  }
+  } catch { /* network error — httpResponses unchanged */ }
 
-  // ── Attempt 2: economy game-passes API ────────────────────────────────────
+  // Attempt 2 — economy game-passes API
   try {
     const res = await rFetch(
       `https://economy.roblox.com/v1/game-passes/${gamepassId}/details`
@@ -161,13 +164,9 @@ export async function getGamepassDetails(
         (body ? ` — ${body.slice(0, 200)}` : "")
       );
     }
-  } catch {
-    // network error
-  }
+  } catch { /* network error */ }
 
-  // ── Attempt 3: economy assets API (gamepasses are asset type 34) ───────────
-  // Different path from game-passes endpoint — sometimes one works when the
-  // other returns 404 for recently created or private passes.
+  // Attempt 3 — economy assets API (GamePasses are asset type 34)
   try {
     const res = await rFetch(
       `https://economy.roblox.com/v1/assets/${gamepassId}/details`
@@ -192,12 +191,10 @@ export async function getGamepassDetails(
         (body ? ` — ${body.slice(0, 200)}` : "")
       );
     }
-  } catch {
-    // network error
-  }
+  } catch { /* network error */ }
 
-  // ── Attempt 4: www.roblox.com productinfo ─────────────────────────────────
-  // Uses www.roblox.com (not api.roblox.com which is blocked on DC IPs).
+  // Attempt 4 — www.roblox.com productinfo
+  // (api.roblox.com is blocked on DC IPs; www.roblox.com serves the same data)
   try {
     const res = await rFetch(
       `https://www.roblox.com/marketplace/productinfo?assetId=${gamepassId}`
@@ -222,33 +219,119 @@ export async function getGamepassDetails(
         (body ? ` — ${body.slice(0, 200)}` : "")
       );
     }
-  } catch {
-    // network error
-  }
+  } catch { /* network error */ }
 
-  // ── All endpoints exhausted ────────────────────────────────────────────────
+  // All endpoints exhausted
   if (httpResponses === 0) {
-    // Server received zero HTTP responses — no network path to Roblox at all.
-    // Return a "skipped" sentinel so callers can accept the order for manual
-    // admin review rather than silently blocking every user.
+    // Zero HTTP responses = server has no network path to Roblox
     console.warn(
-      `[Roblox/bots] All endpoints unreachable (network down) for id=${gamepassId}. ` +
-      `Returning validationSkipped=true — admin must verify manually.`
+      `[Roblox/bots] All endpoints unreachable for id=${gamepassId}. ` +
+      `validationSkipped=true — admin must verify manually.`
     );
     return {
-      id:               gamepassId,
-      name:             "Неизвестно (Roblox недоступен)",
-      price:            0,
-      creatorId:        0,
-      isActive:         true,
+      id:                gamepassId,
+      name:              "Неизвестно (Roblox недоступен)",
+      price:             0,
+      creatorId:         0,
+      isActive:          true,
       validationSkipped: true,
     };
   }
 
-  // At least one HTTP response was received → Roblox is reachable, gamepass not found.
   console.error(
     `[Roblox/bots] All 4 endpoints failed for id=${gamepassId} ` +
-    `(${httpResponses} HTTP response(s) received, none successful)`
+    `(${httpResponses} HTTP response(s), none successful)`
   );
   return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bridge consumer
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Sentinel: bridge was unreachable (network error) → fall back to direct calls
+const BRIDGE_UNAVAILABLE = Symbol("BRIDGE_UNAVAILABLE");
+
+async function fetchViaBridge(
+  gamepassId: string,
+  bridgeUrl: string,
+  bridgeKey: string | undefined
+): Promise<GamepassDetails | null | typeof BRIDGE_UNAVAILABLE> {
+  const url =
+    `${bridgeUrl.replace(/\/+$/, "")}/check-pass?id=${encodeURIComponent(gamepassId)}`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000); // 15 s bridge timeout
+
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "Accept": "application/json",
+        ...(bridgeKey ? { "x-validator-key": bridgeKey } : {}),
+      },
+      signal: controller.signal,
+    });
+
+    if (res.status === 401) {
+      console.error("[Roblox/bots] Bridge returned 401 — check VALIDATOR_KEY on both sides");
+      // Treat auth error as unavailable so we fall back rather than blocking forever
+      return BRIDGE_UNAVAILABLE;
+    }
+
+    const body = await res.json().catch(() => null);
+    if (!body?.ok) {
+      console.warn(
+        `[Roblox/bots] Bridge non-ok response for id=${gamepassId}: ` +
+        `HTTP ${res.status} — ${body?.error ?? "unknown"}`
+      );
+      return null; // bridge responded but said not found / error
+    }
+
+    // body.data may be null (gamepass not found) or a GamepassDetails object
+    return (body.data ?? null) as GamepassDetails | null;
+  } catch (err: any) {
+    console.warn(
+      `[Roblox/bots] Bridge unreachable for id=${gamepassId}: ${err?.message ?? err}`
+    );
+    return BRIDGE_UNAVAILABLE; // network error → caller will fall back to direct
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public API
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Fetches gamepass metadata.
+ *
+ * Routing priority:
+ *   1. If VALIDATOR_SOURCE_URL is set → call Singapore validation bridge.
+ *      If bridge responds → return its result (trusted, no further calls).
+ *      If bridge is unreachable (network error) → fall through to step 2.
+ *   2. Direct Roblox API calls with retry + graceful degradation.
+ */
+export async function getGamepassDetails(
+  gamepassId: string
+): Promise<GamepassDetails | null> {
+  const bridgeUrl = process.env.VALIDATOR_SOURCE_URL?.trim();
+
+  if (bridgeUrl) {
+    const result = await fetchViaBridge(
+      gamepassId,
+      bridgeUrl,
+      process.env.VALIDATOR_KEY?.trim()
+    );
+    if (result !== BRIDGE_UNAVAILABLE) {
+      // Bridge gave a definitive answer (found, not found, or error) — trust it
+      return result;
+    }
+    // Bridge is down → fall through to direct calls as last resort
+    console.warn(
+      `[Roblox/bots] Bridge unavailable — falling back to direct Roblox calls for id=${gamepassId}`
+    );
+  }
+
+  return getGamepassDetailsDirect(gamepassId);
 }
