@@ -48,9 +48,12 @@ async function tryRestoreState(vkUserId: number): Promise<boolean> {
     });
     if (!lastCode) return false;
 
-    // Skip if a gamepass order was already submitted for this code
+    // Skip if a gamepass order was already submitted for this code and is still active
     const existingOrder = await (db as any).wbOrder.findFirst({
-      where: { wbCode: lastCode.code },
+      where: { 
+        wbCode: lastCode.code,
+        status: { in: ["PENDING", "COMPLETED"] }
+      },
     });
     if (existingOrder) return false;
 
@@ -327,6 +330,7 @@ async function handleGamepassLink(
     platform:    "VK",
     wbCode,
     userDisplay: vkUserDisplay(vkName, vkUserId),
+    createdAt:   order.createdAt,
   });
 }
 

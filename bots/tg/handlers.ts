@@ -327,6 +327,10 @@ function renderOrderCard(order: any) {
   const passPrice = Math.ceil(order.amount / 0.7);
   const statusLabels: any = { PENDING: "⏳ В обработке", COMPLETED: "✅ Выполнен", REJECTED: "❌ Отклонён" };
   
+  const dateStr = order.createdAt 
+    ? new Date(order.createdAt).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " МСК" 
+    : "";
+
   // User profile link
   let userLabel = "Неизвестен";
   if (order.user) {
@@ -342,14 +346,18 @@ function renderOrderCard(order: any) {
     ? `\n💬 Причина: <i>${order.rejectionReason}</i>` 
     : "";
 
+  const platformEmojis: Record<string, string> = { TG: "📱", VK: "📘", WEB: "🌐" };
+  const platformEmoji = platformEmojis[order.platform] || "📦";
+
   const text =
     `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
-    `📱 Платформа: <b>[${order.platform}]</b>\n` +
+    `${platformEmoji} Источник: <b>${order.platform}</b>\n` +
+    (dateStr ? `📅 Время: <b>${dateStr}</b>\n` : "") +
     `👤 Юзер: ${userLabel}\n` +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
     `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
-    `📊 Статус: <b>${statusLabels[order.status] || order.status}</b>${reasonLine}\n` +
+    `📊 Статус: <b>${statusLabels[order.status] || order.status}</b>${reasonLine}\n\n` +
     `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>`;
 
   // Inline buttons only for PENDING orders
@@ -445,6 +453,12 @@ export function registerPhoto(bot: Telegraf): void {
       photoSource: fileId,
       userDisplay: userDisplay(ctx.from),
     });
+  });
+
+  bot.on("document", async (ctx) => {
+    await ctx.reply(
+      "📸 Пожалуйста, отправь скриншот в виде фотографии (сжатым изображением), а не файлом (документом)."
+    );
   });
 }
 
@@ -793,8 +807,10 @@ async function notifyUserCompleted(
   amount: number
 ): Promise<void> {
   const msg =
-    `✅ Ваш заказ #${orderId.slice(-6).toUpperCase()} выкуплен! ` +
-    `Робуксы придут через 5-7 дней.`;
+    `✅ Ваш заказ #${orderId.slice(-6).toUpperCase()} успешно выкуплен!\n` +
+    `Робуксы поступят на ваш баланс через 5-7 дней (по правилам самого Roblox).\n\n` +
+    `🎁 <b>Оставь отзыв и получи 50 R$!</b>\n` +
+    `Напиши отзыв о покупке на Wildberries, сделай скриншот и отправь его прямо сюда (в виде <b>фотографии</b>, а не файлом). После проверки администратором мы сразу начислим бонус!`;
 
   if (user.tgId) {
     try {
@@ -803,6 +819,7 @@ async function notifyUserCompleted(
     } catch {}
   } else if (user.vkId) {
     // VK bot will detect the COMPLETED state on next message; also notify directly
+    // vkSend removes HTML tags via stripHtml
     await vkSend(user.vkId, stripHtml(msg));
   }
 }
@@ -835,6 +852,6 @@ async function notifyUserRejected(
       }); 
     } catch {}
   } else if (user.vkId) {
-    await vkSend(user.vkId, stripHtml(msg) + "\n\n(Исправьте ссылку в меню бота)");
+    await vkSend(user.vkId, stripHtml(msg) + "\n\n(Чтобы исправить, просто отправьте новую ссылку на геймпасс в этот чат)");
   }
 }

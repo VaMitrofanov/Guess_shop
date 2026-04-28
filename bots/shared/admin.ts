@@ -20,7 +20,7 @@ export const ADMIN_IDS: string[] = (
 // ── callback_data constants (≤ 64 bytes guaranteed with CUID ~25 chars) ────────
 export const CB = {
   adminOk:    (orderId: string) => `admin_ok:${orderId}`,   // 34 b
-  adminErr:   (orderId: string) => `admin_err:${orderId}`,  // 35 b
+  adminErr:   (orderId: string) => `admin_reject_init:${orderId}`,  // 43 b
   reviewOk:   (orderId: string, userId: string) => `review_ok:${orderId}:${userId}`, // 61 b
   reviewNo:   (orderId: string, userId: string) => `review_no:${orderId}:${userId}`, // 61 b
 
@@ -42,6 +42,7 @@ export interface OrderCardPayload {
   platform:    "TG" | "VK";
   wbCode:      string;
   userDisplay: string; // e.g. "@username" or "VK: https://vk.com/id123"
+  createdAt?:  Date;
 }
 
 export interface ReviewCardPayload {
@@ -61,14 +62,22 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   const passPrice = Math.ceil(order.amount / 0.7);
   const shortId   = order.id.slice(-6).toUpperCase();
 
+  const dateStr = order.createdAt 
+    ? new Date(order.createdAt).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " МСК" 
+    : new Date().toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " МСК";
+
+  const platformEmojis: Record<string, string> = { TG: "📱", VK: "📘", WEB: "🌐" };
+  const platformEmoji = platformEmojis[order.platform] || "📦";
+
   const text =
     `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
-    `📱 Платформа: [${order.platform}]\n` +
+    `${platformEmoji} Источник: <b>${order.platform}</b>\n` +
+    `📅 Время: <b>${dateStr}</b>\n` +
     `👤 Юзер: ${order.userDisplay}\n` +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
     `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
-    `📊 Статус: ⏳ В обработке\n` +
+    `📊 Статус: ⏳ В обработке\n\n` +
     `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>`;
 
   const reply_markup = {
