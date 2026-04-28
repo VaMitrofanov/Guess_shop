@@ -99,9 +99,11 @@ export async function POST(request: Request) {
         const sent = results.filter(Boolean).length;
         console.log(`[wb-code] TG notify: ${sent}/${chatIds.length} delivered for code ${wbCode.code}`);
       } else {
-        console.warn(
-          "[wb-code] TG_TOKEN or TG_CHAT_ID not set — skipping notify. " +
-          "Check env vars in Vercel/Coolify deploy settings."
+        console.error(
+          `[wb-code] CANNOT NOTIFY: TG_TOKEN=${token ? "set" : "MISSING"}, ` +
+          `TG_CHAT_ID parsed ids count=${chatIds.length}. ` +
+          `Code ${wbCode.code} (${wbCode.denomination} R$) was activated but ` +
+          `no message will reach Telegram. Set both env vars in Coolify and redeploy.`
         );
       }
     }

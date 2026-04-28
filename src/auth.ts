@@ -9,12 +9,22 @@ import bcrypt from "bcryptjs";
 // required env vars are missing. Logging at module init makes the root
 // cause obvious in Coolify/Vercel runtime logs.
 (() => {
-  const required = ["NEXTAUTH_SECRET", "NEXTAUTH_URL", "DATABASE_URL"];
-  const missing = required.filter((k) => !process.env[k]);
+  // NextAuth v5 (Auth.js) prefers AUTH_SECRET, but we also accept the
+  // legacy NEXTAUTH_SECRET name for backwards compatibility with Vercel/Coolify
+  // environments that were already configured for v4.
+  const hasSecret = !!(process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET);
+  const hasUrl = !!(process.env.AUTH_URL || process.env.NEXTAUTH_URL);
+  const hasDb = !!process.env.DATABASE_URL;
+
+  const missing: string[] = [];
+  if (!hasSecret) missing.push("AUTH_SECRET (or NEXTAUTH_SECRET)");
+  if (!hasUrl) missing.push("AUTH_URL (or NEXTAUTH_URL)");
+  if (!hasDb) missing.push("DATABASE_URL");
+
   if (missing.length > 0) {
     console.error(
       `[auth][startup] MISSING REQUIRED ENV: ${missing.join(", ")}. ` +
-        `NextAuth will return Configuration error until set in Coolify.`
+        `NextAuth will return Configuration error until set in deploy env.`
     );
   } else {
     console.log("[auth][startup] all required env vars present");
@@ -223,5 +233,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   pages: {
     signIn: "/login",
   },
-  secret: process.env.NEXTAUTH_SECRET,
+  // Trust the X-Forwarded-Host header — required when running behind any
+  // reverse proxy (Coolify/Traefik, Vercel, Cloudflare Tunnel). Without
+  // this, NextAuth v5 rejects the request and renders the generic
+  // "Server error - There is a problem with the server configuration"
+  // page seen in production.
+  trustHost: true,
+  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
 });
