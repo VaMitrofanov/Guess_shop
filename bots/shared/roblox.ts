@@ -59,13 +59,20 @@ async function rFetch(
 
     return res;
   } catch (err: any) {
-    // AbortError = our timeout fired; TimeoutError = alternative name in some runtimes
-    const isTimeout = err?.name === "AbortError" || err?.name === "TimeoutError";
+    // AbortError/TimeoutError = our timeout fired.
+    // TypeError "fetch failed" = Node.js undici network-level error (DNS, TLS,
+    // connection refused, etc.) — also transient and worth retrying.
+    const isRetryable =
+      err?.name === "AbortError" ||
+      err?.name === "TimeoutError" ||
+      (err?.name === "TypeError" && typeof err?.message === "string" &&
+        err.message.toLowerCase().includes("fetch failed"));
+
     console.warn(
       `[Roblox/bots] rFetch attempt ${attempt}/${MAX_RETRIES}: ` +
       `${err?.name ?? "Error"} for ${url} — ${err?.message ?? String(err)}`
     );
-    if (isTimeout && attempt < MAX_RETRIES) {
+    if (isRetryable && attempt < MAX_RETRIES) {
       await sleep(RETRY_DELAY);
       return rFetch(url, init, attempt + 1);
     }

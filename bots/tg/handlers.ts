@@ -254,14 +254,24 @@ export function registerText(bot: Telegraf): void {
       return;
     }
 
-    // 2. ADMIN SEARCH (if not in a user flow)
     const state = pendingLink.get(ctx.from.id);
-    if (isAdmin && !state) {
-      await handleAdminSearch(ctx, text);
-      return;
+
+    // 2. ADMIN SEARCH
+    // Run for admins whenever the text is NOT a recognisable gamepass URL/ID.
+    // This covers the case where an admin has a pendingLink state (e.g. tested
+    // an activation) but is now trying to search for an order — their search
+    // query (order-ID suffix or WB code) won't parse as a gamepass, so we
+    // route correctly. If admin intentionally sends a gamepass URL/numeric ID
+    // while in an activation session, the gamepass handler runs instead.
+    if (isAdmin) {
+      const looksLikeGamepass = state && extractPassId(text) !== null;
+      if (!looksLikeGamepass) {
+        await handleAdminSearch(ctx, text);
+        return;
+      }
     }
 
-    // 2. USER GAMEPASS LINK flow
+    // 3. USER GAMEPASS LINK flow
     if (!state) return;
 
     const passId = extractPassId(text);
