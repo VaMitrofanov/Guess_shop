@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Dark navy rounded square background -->
+  <rect width="32" height="32" rx="7" fill="#0D0D1A"/>
+  <!-- Gold coin outer ring -->
+  <circle cx="16" cy="16" r="12" fill="#9A6F00"/>
+  <!-- Gold coin face -->
+  <circle cx="16" cy="16" r="10.5" fill="#F0B429"/>
+  <!-- Bold "R" letterform -->
+  <text
+    x="16"
+    y="21.5"
+    text-anchor="middle"
+    font-family="'Arial Black', 'Arial', sans-serif"
+    font-weight="900"
+    font-size="15"
+    fill="#0D0D1A"
+    letter-spacing="-0.5"
+  >R</text>
+</svg>
