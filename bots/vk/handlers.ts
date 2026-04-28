@@ -701,7 +701,7 @@ async function handleIdleMessage(
   if (status.isReturning) {
     await ctx.reply(
       `${greeting}\n\n` +
-      `Ты знаешь, что делать — просто пришли код с карточки WB или ссылку на геймпасс, и мы всё оформим!`
+      `Ты знаешь, что делать — просто пришли ID геймпасса или ссылку, и мы всё оформим!`
     );
   } else {
     await ctx.reply(
