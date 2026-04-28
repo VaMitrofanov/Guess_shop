@@ -3,6 +3,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
+import { sendTelegramMessage } from "@/lib/telegram";
 
 // ── Startup-time env validation ────────────────────────────────────────────
 // NextAuth produces a generic "Server error - Configuration" page when
@@ -174,13 +175,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                   `🆔 VK ID: <code>${vkId}</code>`;
               }
               await Promise.all(
-                tgChatIds.map((chatId) =>
-                  fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: "HTML" }),
-                  })
-                )
+                tgChatIds.map((chatId) => sendTelegramMessage(tgToken, chatId, msg))
               );
             }
           } catch (tgErr) {
