@@ -8,7 +8,7 @@
 import { Telegraf, Markup } from "telegraf";
 // telegraf/types re-exports the full typegram surface (official subpath export)
 import type { User as TGUser } from "telegraf/types";
-import { db } from "../shared/db";
+import { db, getCustomerStatus } from "../shared/db";
 import { vkSend, stripHtml } from "../shared/notify";
 import { sendAdminOrderCard, sendAdminReviewCard, CB, ADMIN_IDS } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason } from "./session";
@@ -61,13 +61,23 @@ export function registerStart(bot: Telegraf): void {
     // No code payload — generic greeting
     if (!code) {
       const isAdmin = ADMIN_IDS.includes(tgId);
-      await ctx.reply(
-        "👋 Привет!\n\n" +
-        "Для активации кода с карточки Wildberries перейди по ссылке, " +
-        "напечатанной на вкладыше.\n\n" +
-        "📦 Статус заказа: /status",
-        isAdmin ? getAdminKeyboard() : {}
-      );
+      const { isReturning } = await getCustomerStatus(tgId, "TG");
+      if (isReturning && !isAdmin) {
+        await ctx.reply(
+          "🎖️ С возвращением в RobloxBank! Спасибо за доверие. " +
+          "Твои заказы всегда в приоритете. Ожидаем твой код или ссылку!\n\n" +
+          "📦 Статус заказа: /status",
+          { parse_mode: "HTML" }
+        );
+      } else {
+        await ctx.reply(
+          "👋 Привет!\n\n" +
+          "Для активации кода с карточки Wildberries перейди по ссылке, " +
+          "напечатанной на вкладыше.\n\n" +
+          "📦 Статус заказа: /status",
+          isAdmin ? getAdminKeyboard() : {}
+        );
+      }
       return;
     }
 
@@ -493,8 +503,8 @@ async function renderOrderCard(order: any) {
     }
   }
 
-  const reasonLine = order.status === "REJECTED" && order.rejectionReason 
-    ? `\n💬 Причина: <i>${order.rejectionReason}</i>` 
+  const reasonLine = order.status === "REJECTED" && order.rejectionReason
+    ? `\n💬 Причина: <i>${order.rejectionReason}</i>`
     : "";
 
   const platformEmojis: Record<string, string> = { TG: "📱", VK: "📘", WEB: "🌐" };
@@ -505,9 +515,18 @@ async function renderOrderCard(order: any) {
   const bonusLine = bonus > 0 ? `🎁 Использован бонус: <b>${bonus} R$</b>\n` : "";
   const reviewLine = wbCode?.reviewBonusClaimed ? `🌟 Отзыв: <b>Оставлен (+50 R$)</b>\n` : `🌟 Отзыв: <b>Нет</b>\n`;
 
+  // Loyalty tag — subtract 1 to get count of orders BEFORE the current one
+  const totalOrders = await (db as any).wbOrder.count({ where: { userId: order.userId } }).catch(() => 1);
+  const prev = Math.max(0, totalOrders - 1);
+  const loyaltyLine =
+    prev >= 5 ? `👑 <b>VIP КЛИЕНТ (${prev} заказов)</b>\n` :
+    prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>\n`              :
+    "";
+
   const text =
     `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
+    loyaltyLine +
     `${platformEmoji} Источник: <b>${order.platform}</b>\n` +
     (dateStr ? `📅 Время: <b>${dateStr}</b>\n` : "") +
     `👤 Юзер: ${userLabel}\n` +

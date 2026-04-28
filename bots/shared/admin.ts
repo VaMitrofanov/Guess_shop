@@ -36,14 +36,16 @@ export const CB = {
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface OrderCardPayload {
-  id:          string;
-  amount:      number;
-  gamepassUrl: string;
-  platform:    "TG" | "VK";
-  wbCode:      string;
-  userDisplay: string; // e.g. "@username" or "VK: https://vk.com/id123"
-  createdAt?:  Date;
-  bonusApplied?: number;
+  id:                  string;
+  amount:              number;
+  gamepassUrl:         string;
+  platform:            "TG" | "VK";
+  wbCode:              string;
+  userDisplay:         string; // e.g. "@username" or "VK: https://vk.com/id123"
+  createdAt?:          Date;
+  bonusApplied?:       number;
+  /** Number of WbOrders placed BEFORE this one. Used to render loyalty badge. */
+  previousOrderCount?: number;
 }
 
 export interface ReviewCardPayload {
@@ -70,13 +72,20 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   const platformEmojis: Record<string, string> = { TG: "📱", VK: "📘", WEB: "🌐" };
   const platformEmoji = platformEmojis[order.platform] || "📦";
 
-  const bonusLine = order.bonusApplied && order.bonusApplied > 0 
+  const bonusLine = order.bonusApplied && order.bonusApplied > 0
     ? `🎁 Использован бонус: <b>${order.bonusApplied} R$</b>\n`
     : "";
+
+  const prev = order.previousOrderCount ?? 0;
+  const loyaltyLine =
+    prev >= 5 ? `👑 <b>VIP КЛИЕНТ (${prev} заказов)</b>\n` :
+    prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>\n`              :
+    "";
 
   const text =
     `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
+    loyaltyLine +
     `${platformEmoji} Источник: <b>${order.platform}</b>\n` +
     `📅 Время: <b>${dateStr}</b>\n` +
     `👤 Юзер: ${order.userDisplay}\n` +

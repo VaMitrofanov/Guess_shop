@@ -10,7 +10,7 @@
  */
 
 import type { MessageContext } from "vk-io";
-import { db } from "../shared/db";
+import { db, getCustomerStatus } from "../shared/db";
 import { sendAdminOrderCard, sendAdminReviewCard } from "../shared/admin";
 import { vkGetName } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
@@ -410,6 +410,9 @@ async function handleGamepassLink(
     return;
   }
 
+  // Count BEFORE the transaction so the badge reflects orders prior to this one
+  const previousOrderCount = await (db as any).wbOrder.count({ where: { userId: user.id } }).catch(() => 0);
+
   // ── Atomic claim + order creation ──────────────────────────────────────
   // Roblox validation passed above — now commit in a single transaction:
   //  1. Claim the code (userId:null covers both fresh and web-pre-activated codes)
@@ -481,14 +484,15 @@ async function handleGamepassLink(
 
   // Notify Telegram admins
   await sendAdminOrderCard({
-    id:          order.id,
-    amount:      denomination,
-    gamepassUrl: cleanLink,
-    platform:    "VK",
+    id:                  order.id,
+    amount:              denomination,
+    gamepassUrl:         cleanLink,
+    platform:            "VK",
     wbCode,
-    userDisplay: vkUserDisplay(vkName, vkUserId),
-    createdAt:   order.createdAt,
-    bonusApplied: user.balance || 0,
+    userDisplay:         vkUserDisplay(vkName, vkUserId),
+    createdAt:           order.createdAt,
+    bonusApplied:        user.balance || 0,
+    previousOrderCount,
   });
 }
 
@@ -661,10 +665,20 @@ async function handleIdleMessage(
   }
 
   // Smart fallback: only show the activation guide to genuinely new/inactive users.
-  // If the user has any order history, show a short status nudge instead —
-  // dumping the "how to activate" guide at someone who already ordered is confusing.
-  // Exception: explicit greetings always get the full guide.
+  // Exception: explicit greetings → personalize based on order history.
   const isGreeting = /^(привет|hello|hi|приветик)$/i.test(lower.trim());
+
+  if (isGreeting) {
+    const { isReturning } = await getCustomerStatus(String(vkUserId), "VK");
+    if (isReturning) {
+      await ctx.reply(
+        "👋 Рады видеть тебя снова в RobloxBank! Приятно работать с постоянными клиентами. " +
+        "Ты знаешь, что делать — просто пришли свой новый код или ссылку на геймпас, и мы всё оформим!"
+      );
+      return;
+    }
+    // New user — fall through to the full guide below
+  }
 
   if (!isGreeting) {
     try {

@@ -52,3 +52,33 @@ export const db: PrismaClient =
 g.__botPrisma = db;
 
 export default db;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Customer recognition
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CustomerStatus {
+  isReturning: boolean;
+  orderCount:  number; // total WbOrders ever placed
+}
+
+/**
+ * Checks whether a user has placed at least one WbOrder before.
+ * Always fail-open (returns isReturning=false on any DB error) so it never
+ * blocks the message path.
+ */
+export async function getCustomerStatus(
+  platformId: string,
+  platform:   "TG" | "VK"
+): Promise<CustomerStatus> {
+  try {
+    const where = platform === "TG" ? { tgId: platformId } : { vkId: platformId };
+    const user  = await (db as any).user.findUnique({ where, select: { id: true } });
+    if (!user) return { isReturning: false, orderCount: 0 };
+
+    const orderCount = await (db as any).wbOrder.count({ where: { userId: user.id } });
+    return { isReturning: orderCount > 0, orderCount };
+  } catch {
+    return { isReturning: false, orderCount: 0 };
+  }
+}
