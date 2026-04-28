@@ -57,10 +57,13 @@ async function tryRestoreState(vkUserId: number): Promise<boolean> {
     });
     if (existingOrder) return false;
 
+    const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+    const totalAmount = lastCode.denomination + (user?.balance || 0);
+
     setState(vkUserId, {
       type:         "AWAITING_LINK",
       wbCode:       lastCode.code,
-      denomination: lastCode.denomination,
+      denomination: totalAmount,
     });
     return true;
   } catch (err) {
@@ -251,13 +254,23 @@ async function handleRefActivation(
     data:  { userId: user.id, isUsed: true, usedAt: new Date() },
   });
 
-  setState(vkUserId, { type: "AWAITING_LINK", wbCode: code, denomination: wbCode.denomination });
+  const totalAmount = wbCode.denomination + (user.balance || 0);
+  setState(vkUserId, { type: "AWAITING_LINK", wbCode: code, denomination: totalAmount });
 
-  const passPrice = Math.ceil(wbCode.denomination / 0.7);
+  const passPrice = Math.ceil(totalAmount / 0.7);
+
+  let bonusText = "";
+  if (user.balance && user.balance > 0) {
+    bonusText = `🎁 Использован бонус: ${user.balance} R$!\n` +
+                `💎 Итого к выдаче: ${totalAmount} R$\n\n`;
+  } else {
+    bonusText = `💎 Номинал: ${wbCode.denomination} R$\n\n`;
+  }
+
   await ctx.reply(
     `✅ Код ${code} активирован!\n` +
-    `💎 Номинал: ${wbCode.denomination} R$\n\n` +
-    `📋 Осталось сделать всего один шаг:\n` +
+    bonusText +
+    `📋 Осталось сделать всего один шаг:\n\n` +
     `Пришли нам Asset ID, либо ссылку на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на ${passPrice} R$ 🪙\n\n` +
     `💡 Пример ссылки:\n` +
     `https://www.roblox.com/game-pass/1234567/...\n\n` +
@@ -311,6 +324,13 @@ async function handleGamepassLink(
     },
   });
 
+  if (user.balance && user.balance > 0) {
+    await (db as any).user.update({
+      where: { id: user.id },
+      data: { balance: 0 }
+    });
+  }
+
   clearState(vkUserId);
 
   await ctx.reply(
@@ -331,6 +351,7 @@ async function handleGamepassLink(
     wbCode,
     userDisplay: vkUserDisplay(vkName, vkUserId),
     createdAt:   order.createdAt,
+    bonusApplied: user.balance || 0,
   });
 }
 

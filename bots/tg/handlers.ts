@@ -112,15 +112,25 @@ export function registerStart(bot: Telegraf): void {
       data:  { userId: user.id, isUsed: true, usedAt: new Date() },
     });
 
-    // Enter "waiting for gamepass link" state
-    pendingLink.set(ctx.from.id, { wbCode: code, denomination: wbCode.denomination });
+    const totalAmount = wbCode.denomination + (user.balance || 0);
 
-    const passPrice = Math.ceil(wbCode.denomination / 0.7);
+    // Enter "waiting for gamepass link" state
+    pendingLink.set(ctx.from.id, { wbCode: code, denomination: totalAmount });
+
+    const passPrice = Math.ceil(totalAmount / 0.7);
     const isAdmin = ADMIN_IDS.includes(tgId);
+
+    let bonusText = "";
+    if (user.balance && user.balance > 0) {
+      bonusText = `🎁 Использован бонус: <b>${user.balance} R$</b>\n` +
+                  `💎 Итого к выдаче: <b>${totalAmount} R$</b>\n\n`;
+    } else {
+      bonusText = `💎 Номинал: <b>${wbCode.denomination} R$</b>\n\n`;
+    }
 
     await ctx.reply(
       `✅ Код <b>${code}</b> активирован!\n` +
-      `💎 Номинал: <b>${wbCode.denomination} R$</b>\n\n` +
+      bonusText +
       `📋 <b>Осталось сделать всего один шаг:</b>\n\n` +
       `Пришли нам <b>Asset ID</b>, либо <b>ссылку</b> на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на <b>${passPrice} R$</b> 🪙\n\n` +
       `💡 <i>Пример ссылки:</i>\n` +
@@ -285,6 +295,13 @@ export function registerText(bot: Telegraf): void {
           wbCode:      state.wbCode,
         },
       });
+
+      if (user.balance && user.balance > 0) {
+        await (db as any).user.update({
+          where: { id: user.id },
+          data: { balance: 0 }
+        });
+      }
     } catch (err) {
       console.error("[TG] Order create error:", err);
       await ctx.reply("❌ Ошибка при создании заявки. Попробуй позже или напиши в поддержку.");
@@ -307,7 +324,7 @@ export function registerText(bot: Telegraf): void {
         include: { user: true }
       });
       if (fullOrder) {
-        const { text: cardText, reply_markup } = renderOrderCard(fullOrder);
+        const { text: cardText, reply_markup } = await renderOrderCard(fullOrder);
         for (const adminId of ADMIN_IDS) {
           try { await bot.telegram.sendMessage(adminId, cardText, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } }); } catch {}
         }
@@ -322,7 +339,7 @@ export function registerText(bot: Telegraf): void {
  * Universal renderer for the admin order card.
  * Returns text and reply_markup ready for ctx.reply or edit.
  */
-function renderOrderCard(order: any) {
+async function renderOrderCard(order: any) {
   const shortId = order.id.slice(-6).toUpperCase();
   const passPrice = Math.ceil(order.amount / 0.7);
   const statusLabels: any = { PENDING: "⏳ В обработке", COMPLETED: "✅ Выполнен", REJECTED: "❌ Отклонён" };
@@ -349,12 +366,19 @@ function renderOrderCard(order: any) {
   const platformEmojis: Record<string, string> = { TG: "📱", VK: "📘", WEB: "🌐" };
   const platformEmoji = platformEmojis[order.platform] || "📦";
 
+  const wbCode = await (db as any).wbCode.findUnique({ where: { code: order.wbCode } });
+  const bonus = wbCode && order.amount > wbCode.denomination ? order.amount - wbCode.denomination : 0;
+  const bonusLine = bonus > 0 ? `🎁 Использован бонус: <b>${bonus} R$</b>\n` : "";
+  const reviewLine = wbCode?.reviewBonusClaimed ? `🌟 Отзыв: <b>Оставлен (+50 R$)</b>\n` : `🌟 Отзыв: <b>Нет</b>\n`;
+
   const text =
     `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
     `${platformEmoji} Источник: <b>${order.platform}</b>\n` +
     (dateStr ? `📅 Время: <b>${dateStr}</b>\n` : "") +
     `👤 Юзер: ${userLabel}\n` +
+    bonusLine +
+    reviewLine +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
     `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
     `📊 Статус: <b>${statusLabels[order.status] || order.status}</b>${reasonLine}\n\n` +
@@ -402,7 +426,7 @@ async function handleAdminSearch(ctx: any, query: string) {
   }
 
   if (order) {
-    const { text, reply_markup } = renderOrderCard(order);
+    const { text, reply_markup } = await renderOrderCard(order);
     return ctx.reply(text, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } });
   }
 
@@ -555,13 +579,21 @@ async function showAdminHistory(ctx: any) {
     return ctx.reply("📜 История пуста.");
   }
 
+  const codes = await (db as any).wbCode.findMany({
+    where: { code: { in: history.map((h: any) => h.wbCode) } }
+  });
+  const codeMap = Object.fromEntries(codes.map((c: any) => [c.code, c]));
+
   let hText = `📜 <b>ПОСЛЕДНИЕ ВЫПОЛНЕННЫЕ</b>\n\n`;
   const buttons: any[] = [];
 
   history.forEach((o: any, i: number) => {
     const shortId = o.id.slice(-6).toUpperCase();
     const date = new Date(o.updatedAt).toLocaleDateString("ru-RU", { day: '2-digit', month: '2-digit' });
-    hText += `${i+1}. <code>${shortId}</code> — <b>${o.amount} R$</b> (${date})\n`;
+    const hasReview = codeMap[o.wbCode]?.reviewBonusClaimed;
+    const reviewIcon = hasReview ? " 🌟" : "";
+
+    hText += `${i+1}. <code>${shortId}</code> — <b>${o.amount} R$</b> (${date})${reviewIcon}\n`;
     buttons.push({ text: `🔍 ${shortId}`, callback_data: `admin_view:${o.id}` });
   });
 
@@ -751,7 +783,7 @@ export function registerCallbacks(bot: Telegraf): void {
       });
       if (!order) return ctx.answerCbQuery("Заказ не найден");
       
-      const { text, reply_markup } = renderOrderCard(order);
+      const { text, reply_markup } = await renderOrderCard(order);
       await ctx.reply(text, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } });
       return ctx.answerCbQuery();
     }
@@ -806,16 +838,24 @@ async function notifyUserCompleted(
   orderId: string,
   amount: number
 ): Promise<void> {
-  const msg =
-    `✅ Ваш заказ #${orderId.slice(-6).toUpperCase()} успешно выкуплен!\n` +
-    `Робуксы поступят на ваш баланс через 5-7 дней (по правилам самого Roblox).\n\n` +
-    `🎁 <b>Оставь отзыв и получи 50 R$!</b>\n` +
-    `Напиши отзыв о покупке на Wildberries, сделай скриншот и отправь его прямо сюда (в виде <b>фотографии</b>, а не файлом). После проверки администратором мы сразу начислим бонус!`;
+  const completedCount = await (db as any).wbOrder.count({
+    where: { userId: user.id, status: "COMPLETED" }
+  });
+
+  let msg = `✅ Ваш заказ #${orderId.slice(-6).toUpperCase()} успешно выкуплен!\n` +
+            `Робуксы поступят на ваш баланс через 5-7 дней (по правилам самого Roblox).\n\n`;
+
+  if (completedCount === 1) {
+    msg += `🎁 <b>Оставь отзыв и получи 50 R$!</b>\n` +
+           `Напиши отзыв о покупке на Wildberries, сделай скриншот и отправь его прямо сюда (в виде <b>фотографии</b>, а не файлом). После проверки администратором мы сразу начислим бонус, который учтется при следующем заказе!`;
+  } else {
+    msg += `Спасибо, что выбираете нас! 💛`;
+  }
 
   if (user.tgId) {
     try {
       await bot.telegram.sendMessage(user.tgId, msg, { parse_mode: "HTML" });
-      pendingReview.set(parseInt(user.tgId), orderId);
+      if (completedCount === 1) pendingReview.set(parseInt(user.tgId), orderId);
     } catch {}
   } else if (user.vkId) {
     // VK bot will detect the COMPLETED state on next message; also notify directly
