@@ -116,114 +116,59 @@ export async function getGamepassDetailsDirect(
   // If this stays 0, the server has no network path to Roblox at all.
   let httpResponses = 0;
 
-  // Attempt 1 — modern game-passes API
+  // ── Helper: parse product-info shape (apis.roblox.com / roproxy) ──────────
+  const parseProductInfo = (d: any): GamepassDetails => ({
+    id:        String(d.id ?? gamepassId),
+    name:      d.name ?? d.displayName ?? "Gamepass",
+    price:     d.price ?? 0,
+    creatorId: d.sellerId ?? d.creatorId ?? 0,
+    isActive:  d.isForSale !== false,
+  });
+
+  // ── Helper: parse economy shape ────────────────────────────────────────────
+  const parseEconomy = (d: any): GamepassDetails => ({
+    id:        String(d.TargetId ?? gamepassId),
+    name:      d.Name ?? "Gamepass",
+    price:     d.PriceInRobux ?? 0,
+    creatorId: d.Creator?.Id ?? 0,
+    isActive:  d.IsForSale ?? false,
+  });
+
+  // Attempt 1 — apis.roblox.com /product-info (correct endpoint)
   try {
     const res = await rFetch(
-      `https://apis.roblox.com/game-passes/v1/game-passes/${gamepassId}`
+      `https://apis.roblox.com/game-passes/v1/game-passes/${gamepassId}/product-info`
     );
     httpResponses++;
-    if (res.ok) {
-      const d = await res.json();
-      return {
-        id:        String(d.id ?? gamepassId),
-        name:      d.name ?? d.displayName ?? "Gamepass",
-        price:     d.price ?? 0,
-        creatorId: d.sellerId ?? d.creatorId ?? 0,
-        isActive:  d.isForSale !== false,
-      };
-    }
-    {
-      const body = await res.text().catch(() => "");
-      console.warn(
-        `[Roblox/bots] endpoint 1 failed: HTTP ${res.status} for id=${gamepassId}` +
-        (body ? ` — ${body.slice(0, 200)}` : "")
-      );
-    }
+    if (res.ok) return parseProductInfo(await res.json());
+    const body = await res.text().catch(() => "");
+    console.warn(`[Roblox/bots] endpoint 1 failed: HTTP ${res.status} for id=${gamepassId} — ${body.slice(0, 200)}`);
   } catch { /* network error — httpResponses unchanged */ }
 
-  // Attempt 2 — economy game-passes API
+  // Attempt 2 — roproxy mirror of the same endpoint (fallback if direct is blocked)
+  try {
+    const res = await rFetch(
+      `https://apis.roproxy.com/game-passes/v1/game-passes/${gamepassId}/product-info`
+    );
+    httpResponses++;
+    if (res.ok) return parseProductInfo(await res.json());
+    const body = await res.text().catch(() => "");
+    console.warn(`[Roblox/bots] endpoint 2 failed: HTTP ${res.status} for id=${gamepassId} — ${body.slice(0, 200)}`);
+  } catch { /* network error */ }
+
+  // Attempt 3 — economy game-passes API
   try {
     const res = await rFetch(
       `https://economy.roblox.com/v1/game-passes/${gamepassId}/details`
     );
     httpResponses++;
-    if (res.ok) {
-      const d = await res.json();
-      return {
-        id:        String(d.TargetId ?? gamepassId),
-        name:      d.Name ?? "Gamepass",
-        price:     d.PriceInRobux ?? 0,
-        creatorId: d.Creator?.Id ?? 0,
-        isActive:  d.IsForSale ?? false,
-      };
-    }
-    {
-      const body = await res.text().catch(() => "");
-      console.warn(
-        `[Roblox/bots] endpoint 2 failed: HTTP ${res.status} for id=${gamepassId}` +
-        (body ? ` — ${body.slice(0, 200)}` : "")
-      );
-    }
-  } catch { /* network error */ }
-
-  // Attempt 3 — economy assets API (GamePasses are asset type 34)
-  try {
-    const res = await rFetch(
-      `https://economy.roblox.com/v1/assets/${gamepassId}/details`
-    );
-    httpResponses++;
-    if (res.ok) {
-      const d = await res.json();
-      if (d?.TargetId || d?.Name) {
-        return {
-          id:        String(d.TargetId ?? gamepassId),
-          name:      d.Name ?? "Gamepass",
-          price:     d.PriceInRobux ?? 0,
-          creatorId: d.Creator?.Id ?? 0,
-          isActive:  d.IsForSale ?? false,
-        };
-      }
-    }
-    {
-      const body = await res.text().catch(() => "");
-      console.warn(
-        `[Roblox/bots] endpoint 3 failed: HTTP ${res.status} for id=${gamepassId}` +
-        (body ? ` — ${body.slice(0, 200)}` : "")
-      );
-    }
-  } catch { /* network error */ }
-
-  // Attempt 4 — www.roblox.com productinfo
-  // (api.roblox.com is blocked on DC IPs; www.roblox.com serves the same data)
-  try {
-    const res = await rFetch(
-      `https://www.roblox.com/marketplace/productinfo?assetId=${gamepassId}`
-    );
-    httpResponses++;
-    if (res.ok) {
-      const d = await res.json();
-      if (d?.AssetId) {
-        return {
-          id:        String(gamepassId),
-          name:      d.Name ?? "Gamepass",
-          price:     d.PriceInRobux ?? 0,
-          creatorId: d.Creator?.Id ?? 0,
-          isActive:  d.IsForSale ?? false,
-        };
-      }
-    }
-    {
-      const body = await res.text().catch(() => "");
-      console.warn(
-        `[Roblox/bots] endpoint 4 failed: HTTP ${res.status} for id=${gamepassId}` +
-        (body ? ` — ${body.slice(0, 200)}` : "")
-      );
-    }
+    if (res.ok) return parseEconomy(await res.json());
+    const body = await res.text().catch(() => "");
+    console.warn(`[Roblox/bots] endpoint 3 failed: HTTP ${res.status} for id=${gamepassId} — ${body.slice(0, 200)}`);
   } catch { /* network error */ }
 
   // All endpoints exhausted
   if (httpResponses === 0) {
-    // Zero HTTP responses = server has no network path to Roblox
     console.warn(
       `[Roblox/bots] All endpoints unreachable for id=${gamepassId}. ` +
       `validationSkipped=true — admin must verify manually.`
@@ -239,7 +184,7 @@ export async function getGamepassDetailsDirect(
   }
 
   console.error(
-    `[Roblox/bots] All 4 endpoints failed for id=${gamepassId} ` +
+    `[Roblox/bots] All 3 endpoints failed for id=${gamepassId} ` +
     `(${httpResponses} HTTP response(s), none successful)`
   );
   return null;
