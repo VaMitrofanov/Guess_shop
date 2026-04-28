@@ -25,6 +25,9 @@ const ROBLOX_HEADERS: Record<string, string> = {
   "Referer":         "https://www.roblox.com/",
 };
 
+// Persisted across calls — updated whenever Roblox returns a fresh token on 403.
+let lastCsrfToken: string | null = null;
+
 const TIMEOUT_MS  = 30_000; // 30 s — Roblox APIs can be slow from DC IPs
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1_000;  // 1 s between retry attempts
@@ -43,7 +46,8 @@ function sleep(ms: number): Promise<void> {
 async function rFetch(
   url: string,
   init: RequestInit = {},
-  attempt = 1
+  attempt = 1,
+  _csrfRetried = false
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -53,10 +57,22 @@ async function rFetch(
       ...init,
       headers: {
         ...ROBLOX_HEADERS,
+        ...(lastCsrfToken ? { "x-csrf-token": lastCsrfToken } : {}),
         ...(init.headers ?? {}),
       },
       signal: controller.signal,
     });
+
+    // CSRF bypass: Roblox sends the valid token back on a 403 — update + retry once.
+    if (res.status === 403 && !_csrfRetried) {
+      const csrfToken = res.headers.get("x-csrf-token");
+      if (csrfToken) {
+        lastCsrfToken = csrfToken;
+        console.log(`[Roblox/bots] CSRF 403 — token updated, retrying: ${url}`);
+        clearTimeout(timer);
+        return rFetch(url, init, attempt, true);
+      }
+    }
 
     if (res.status >= 500 && attempt < MAX_RETRIES) {
       const body = await res.text().catch(() => "");
@@ -66,7 +82,7 @@ async function rFetch(
         (body ? ` — body: ${body.slice(0, 300)}` : "")
       );
       await sleep(RETRY_DELAY);
-      return rFetch(url, init, attempt + 1);
+      return rFetch(url, init, attempt + 1, _csrfRetried);
     }
 
     return res;
@@ -84,7 +100,7 @@ async function rFetch(
     );
     if (isRetryable && attempt < MAX_RETRIES) {
       await sleep(RETRY_DELAY);
-      return rFetch(url, init, attempt + 1);
+      return rFetch(url, init, attempt + 1, _csrfRetried);
     }
     throw err;
   } finally {
@@ -95,11 +111,12 @@ async function rFetch(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface GamepassDetails {
-  id:        string;
-  name:      string;
-  price:     number;
-  creatorId: number;
-  isActive:  boolean;
+  id:          string;
+  name:        string;
+  price:       number;
+  creatorId:   number;
+  creatorName?: string;
+  isActive:    boolean;
   /**
    * true when every Roblox endpoint threw a network error (no HTTP response).
    * Callers should skip price/isActive checks and accept the order for manual
@@ -126,7 +143,10 @@ export async function getGamepassDetailsDirect(
   // Logs the full object when isForSale=true but price is missing — this
   // surfaces any unexpected field names from Roblox's API for debugging.
   const parseItem = (d: any, source: string): GamepassDetails | null => {
-    if (!d || typeof d !== "object") return null;
+    if (!d || typeof d !== "object") {
+      console.log("[Roblox/Debug] Raw Response:", JSON.stringify(d));
+      return null;
+    }
 
     const price: number =
       d.price          ?? // marketplace-items shape
@@ -140,6 +160,13 @@ export async function getGamepassDetailsDirect(
       d.isPurchasable  !== undefined ? !!d.isPurchasable  :
       false;
 
+    const creatorName: string | undefined =
+      d.creatorName      ??
+      d.sellerName       ??
+      d.Creator?.Name    ??
+      d.creatorTargetName ??
+      undefined;
+
     if (isActive && price === 0) {
       console.warn(
         `[Roblox/bots] ${source}: isForSale=true but price=0 — full object: ` +
@@ -147,11 +174,16 @@ export async function getGamepassDetailsDirect(
       );
     }
 
+    if (!creatorName) {
+      console.log("[Roblox/Debug] Raw Response:", JSON.stringify(d));
+    }
+
     return {
-      id:        String(d.id ?? d.assetId ?? d.TargetId ?? gamepassId),
-      name:      d.name ?? d.Name ?? d.displayName ?? "Gamepass",
+      id:          String(d.id ?? d.assetId ?? d.TargetId ?? gamepassId),
+      name:        d.name ?? d.Name ?? d.displayName ?? "Gamepass",
       price,
-      creatorId: d.creatorId ?? d.sellerId ?? d.Creator?.Id ?? 0,
+      creatorId:   d.creatorId ?? d.sellerId ?? d.Creator?.Id ?? 0,
+      creatorName,
       isActive,
     };
   };
@@ -245,6 +277,7 @@ export async function getGamepassDetailsDirect(
       name:              "Неизвестно (Roblox недоступен)",
       price:             0,
       creatorId:         0,
+      creatorName:       undefined,
       isActive:          true,
       validationSkipped: true,
     };

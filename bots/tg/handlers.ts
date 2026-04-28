@@ -324,6 +324,17 @@ export function registerText(bot: Telegraf): void {
         );
         return;
       }
+
+      // Notify user that the gamepass was found and validated
+      const creatorLine = gamepassInfo.creatorName
+        ? `\n👤 Создатель: ${gamepassInfo.creatorName}`
+        : "";
+      await ctx.reply(
+        `✅ Геймпасс найден!` +
+        creatorLine +
+        `\n💰 Цена: ${gamepassInfo.price} R$`,
+        { parse_mode: "HTML" }
+      );
     } else {
       // Network-down fallback — log for audit, proceed to order creation
       console.warn(
@@ -361,7 +372,14 @@ export function registerText(bot: Telegraf): void {
           `[TG] $transaction: wbCode.updateMany count=${claimed.count} for code=${state.wbCode}`
         );
         if (claimed.count === 0) {
-          throw Object.assign(new Error("Code already claimed"), { isClaimed: true });
+          // Check whether the code already belongs to this user (retry after crash/resubmit)
+          const existingCode = await tx.wbCode.findFirst({
+            where: { code: { equals: state.wbCode, mode: "insensitive" } },
+          });
+          if (!existingCode || existingCode.userId !== user.id) {
+            throw Object.assign(new Error("Code already claimed"), { isClaimed: true });
+          }
+          // Code already assigned to this user — allow retry, skip re-update
         }
 
         const newOrder = await tx.wbOrder.create({
@@ -436,7 +454,8 @@ async function renderOrderCard(order: any) {
   let userLabel = "Неизвестен";
   if (order.user) {
     if (order.user.vkId) {
-      userLabel = `<a href="https://vk.com/id${order.user.vkId}">VK Профиль</a>`;
+      const vkName = order.user.name || "VK Пользователь";
+      userLabel = `<a href="https://vk.com/id${order.user.vkId}">${vkName}</a>`;
     } else if (order.user.tgId) {
       const name = order.user.name || "Пользователь";
       userLabel = `<a href="tg://user?id=${order.user.tgId}">${name}</a> (ID: ${order.user.tgId})`;

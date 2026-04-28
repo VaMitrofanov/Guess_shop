@@ -87,7 +87,7 @@ function photoUrl(attachment: unknown): string | undefined {
 }
 
 function vkUserDisplay(name: string, vkUserId: number): string {
-  return `${name} (<a href="https://vk.com/id${vkUserId}">ID: ${vkUserId}</a>)`;
+  return `<a href="https://vk.com/id${vkUserId}">${name}</a>`;
 }
 
 // ── Entry point: called for every message_new event ───────────────────────────
@@ -341,6 +341,16 @@ async function handleGamepassLink(
       );
       return;
     }
+
+    // Notify user that the gamepass was found and validated
+    const creatorLine = gamepassInfo.creatorName
+      ? `\n👤 Создатель: ${gamepassInfo.creatorName}`
+      : "";
+    await ctx.reply(
+      `✅ Геймпасс найден!` +
+      creatorLine +
+      `\n💰 Цена: ${gamepassInfo.price} R$`
+    );
   } else {
     // Network-down fallback — log for audit, proceed to order creation
     console.warn(
@@ -379,7 +389,14 @@ async function handleGamepassLink(
         `[VK] $transaction: wbCode.updateMany count=${claimed.count} for code=${wbCode}`
       );
       if (claimed.count === 0) {
-        throw Object.assign(new Error("Code already claimed"), { isClaimed: true });
+        // Check whether the code already belongs to this user (retry after a crash/resubmit)
+        const existingCode = await tx.wbCode.findFirst({
+          where: { code: { equals: wbCode, mode: "insensitive" } },
+        });
+        if (!existingCode || existingCode.userId !== user.id) {
+          throw Object.assign(new Error("Code already claimed"), { isClaimed: true });
+        }
+        // Code already assigned to this user — allow retry (skip re-update, proceed to order)
       }
 
       const newOrder = await tx.wbOrder.create({
