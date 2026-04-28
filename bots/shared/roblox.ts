@@ -11,11 +11,19 @@
  *                                bridge server itself to avoid recursion
  */
 
-// Mobile UA — economy.roblox.com returns JSON for mobile clients; desktop UA
-// can trigger HTML responses or login-wall redirects from Roblox edge nodes.
+// Mobile UA + Roblox-origin headers — mirrors what the Roblox Android app sends.
+// Origin/Referer trick the API into treating the request as same-site frontend.
 const UA =
   "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/124.0.6367.82 Mobile Safari/537.36";
+
+const ROBLOX_HEADERS: Record<string, string> = {
+  "User-Agent":      UA,
+  "Accept":          "application/json",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Origin":          "https://www.roblox.com",
+  "Referer":         "https://www.roblox.com/",
+};
 
 const TIMEOUT_MS  = 30_000; // 30 s — Roblox APIs can be slow from DC IPs
 const MAX_RETRIES = 3;
@@ -44,9 +52,7 @@ async function rFetch(
     const res = await fetch(url, {
       ...init,
       headers: {
-        "User-Agent":      UA,
-        "Accept":          "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
+        ...ROBLOX_HEADERS,
         ...(init.headers ?? {}),
       },
       signal: controller.signal,
@@ -113,62 +119,122 @@ export interface GamepassDetails {
 export async function getGamepassDetailsDirect(
   gamepassId: string
 ): Promise<GamepassDetails | null> {
-  // Counts endpoints that returned any HTTP response (even 404/403).
-  // If this stays 0, the server has no network path to Roblox at all.
   let httpResponses = 0;
+  const numId = parseInt(gamepassId, 10);
 
-  // ── Helper: parse product-info shape (apis.roblox.com / roproxy) ──────────
-  const parseProductInfo = (d: any): GamepassDetails => ({
-    id:        String(d.id ?? gamepassId),
-    name:      d.name ?? d.displayName ?? "Gamepass",
-    price:     d.price ?? 0,
-    creatorId: d.sellerId ?? d.creatorId ?? 0,
-    isActive:  d.isForSale !== false,
-  });
+  // ── Shared parser: handles both POST response shapes ─────────────────────
+  // Logs the full object when isForSale=true but price is missing — this
+  // surfaces any unexpected field names from Roblox's API for debugging.
+  const parseItem = (d: any, source: string): GamepassDetails | null => {
+    if (!d || typeof d !== "object") return null;
 
-  // ── Helper: parse economy shape ────────────────────────────────────────────
-  const parseEconomy = (d: any): GamepassDetails => ({
-    id:        String(d.TargetId ?? gamepassId),
-    name:      d.Name ?? "Gamepass",
-    price:     d.PriceInRobux ?? 0,
-    creatorId: d.Creator?.Id ?? 0,
-    isActive:  d.IsForSale ?? false,
-  });
+    const price: number =
+      d.price          ?? // marketplace-items shape
+      d.priceInRobux   ?? // catalog shape (camelCase)
+      d.PriceInRobux   ?? // economy shape (PascalCase)
+      0;
 
-  // Attempt 1 — economy public API (no login required; returns PriceInRobux + IsForSale)
+    const isActive: boolean =
+      d.isForSale      !== undefined ? !!d.isForSale      :
+      d.IsForSale      !== undefined ? !!d.IsForSale      :
+      d.isPurchasable  !== undefined ? !!d.isPurchasable  :
+      false;
+
+    if (isActive && price === 0) {
+      console.warn(
+        `[Roblox/bots] ${source}: isForSale=true but price=0 — full object: ` +
+        JSON.stringify(d)
+      );
+    }
+
+    return {
+      id:        String(d.id ?? d.assetId ?? d.TargetId ?? gamepassId),
+      name:      d.name ?? d.Name ?? d.displayName ?? "Gamepass",
+      price,
+      creatorId: d.creatorId ?? d.sellerId ?? d.Creator?.Id ?? 0,
+      isActive,
+    };
+  };
+
+  // ── Attempt 1 — marketplace-items (Roblox mobile app endpoint) ───────────
+  try {
+    const res = await rFetch(
+      "https://apis.roblox.com/marketplace-items/v1/items/details",
+      {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ itemIds: [String(numId)], itemType: "GamePass" }),
+      }
+    );
+    httpResponses++;
+    if (res.ok) {
+      const json = await res.json();
+      // Response is either an array or { data: [...] }
+      const items: any[] = Array.isArray(json) ? json : (json?.data ?? []);
+      const item = items.find((x: any) => String(x?.id) === gamepassId || String(x?.assetId) === gamepassId) ?? items[0];
+      const parsed = parseItem(item, "marketplace-items");
+      if (parsed) return parsed;
+    } else {
+      const body = await res.text().catch(() => "");
+      console.warn(`[Roblox/bots] endpoint 1 (marketplace-items) failed: HTTP ${res.status} for id=${gamepassId} — ${body.slice(0, 300)}`);
+    }
+  } catch { /* network error — httpResponses unchanged */ }
+
+  // ── Attempt 2 — catalog items/details (POST) ─────────────────────────────
+  try {
+    const res = await rFetch(
+      "https://catalog.roblox.com/v1/catalog/items/details",
+      {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ items: [{ itemType: "Asset", id: numId }] }),
+      }
+    );
+    httpResponses++;
+    if (res.ok) {
+      const json = await res.json();
+      const items: any[] = Array.isArray(json) ? json : (json?.data ?? []);
+      const item = items[0];
+      const parsed = parseItem(item, "catalog/items/details");
+      if (parsed) return parsed;
+    } else {
+      const body = await res.text().catch(() => "");
+      console.warn(`[Roblox/bots] endpoint 2 (catalog/items/details) failed: HTTP ${res.status} for id=${gamepassId} — ${body.slice(0, 300)}`);
+    }
+  } catch { /* network error */ }
+
+  // ── Attempt 3 — economy game-passes details (GET, public) ────────────────
   try {
     const res = await rFetch(
       `https://economy.roblox.com/v1/game-passes/${gamepassId}/details`
     );
     httpResponses++;
-    if (res.ok) return parseEconomy(await res.json());
-    const body = await res.text().catch(() => "");
-    console.warn(`[Roblox/bots] endpoint 1 failed: HTTP ${res.status} for id=${gamepassId} — ${body.slice(0, 200)}`);
-  } catch { /* network error — httpResponses unchanged */ }
+    if (res.ok) {
+      const d = await res.json();
+      const parsed = parseItem(d, "economy/game-passes");
+      if (parsed) return parsed;
+    } else {
+      const body = await res.text().catch(() => "");
+      console.warn(`[Roblox/bots] endpoint 3 (economy/game-passes) failed: HTTP ${res.status} for id=${gamepassId} — ${body.slice(0, 300)}`);
+    }
+  } catch { /* network error */ }
 
-  // Attempt 2 — roproxy mirror of product-info (fallback)
+  // ── Attempt 4 — roproxy product-info mirror ───────────────────────────────
   try {
     const res = await rFetch(
       `https://apis.roproxy.com/game-passes/v1/game-passes/${gamepassId}/product-info`
     );
     httpResponses++;
-    if (res.ok) return parseProductInfo(await res.json());
-    const body = await res.text().catch(() => "");
-    console.warn(`[Roblox/bots] endpoint 2 failed: HTTP ${res.status} for id=${gamepassId} — ${body.slice(0, 200)}`);
+    if (res.ok) {
+      const parsed = parseItem(await res.json(), "roproxy/product-info");
+      if (parsed) return parsed;
+    } else {
+      const body = await res.text().catch(() => "");
+      console.warn(`[Roblox/bots] endpoint 4 (roproxy/product-info) failed: HTTP ${res.status} for id=${gamepassId} — ${body.slice(0, 300)}`);
+    }
   } catch { /* network error */ }
 
-  // Attempt 3 — apis.roblox.com product-info (last resort)
-  try {
-    const res = await rFetch(
-      `https://apis.roblox.com/game-passes/v1/game-passes/${gamepassId}/product-info`
-    );
-    httpResponses++;
-    if (res.ok) return parseProductInfo(await res.json());
-    const body = await res.text().catch(() => "");
-    console.warn(`[Roblox/bots] endpoint 3 failed: HTTP ${res.status} for id=${gamepassId} — ${body.slice(0, 200)}`);
-  } catch { /* network error */ }
-
-  // All endpoints exhausted
+  // ── All exhausted ─────────────────────────────────────────────────────────
   if (httpResponses === 0) {
     console.warn(
       `[Roblox/bots] All endpoints unreachable for id=${gamepassId}. ` +
@@ -185,7 +251,7 @@ export async function getGamepassDetailsDirect(
   }
 
   console.error(
-    `[Roblox/bots] All 3 endpoints failed for id=${gamepassId} ` +
+    `[Roblox/bots] All 4 endpoints failed for id=${gamepassId} ` +
     `(${httpResponses} HTTP response(s), none successful)`
   );
   return null;
