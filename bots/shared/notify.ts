@@ -17,6 +17,28 @@ export async function tgSend(
   text: string,
   extra: Record<string, unknown> = {}
 ): Promise<Record<string, unknown>> {
+  const bridgeUrl   = process.env.VALIDATOR_SOURCE_URL?.trim();
+  const validatorKey = process.env.VALIDATOR_KEY?.trim();
+
+  if (bridgeUrl) {
+    // Route through the Singapore bridge (Russia cannot reach api.telegram.org)
+    const res = await fetch(`${bridgeUrl}/tg-proxy`, {
+      method:  "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(validatorKey ? { "x-validator-key": validatorKey } : {}),
+      },
+      body: JSON.stringify({
+        token:                    process.env.TG_TOKEN,
+        chat_id:                  chatId,
+        text,
+        disable_web_page_preview: true,
+        ...extra,
+      }),
+    });
+    return (res.json() as Promise<Record<string, unknown>>).catch(() => ({}));
+  }
+
   const res = await fetch(tgUrl("sendMessage"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -79,6 +101,28 @@ export async function tgSendPhoto(
   caption: string,
   extra: Record<string, unknown> = {}
 ): Promise<void> {
+  const bridgeUrl    = process.env.VALIDATOR_SOURCE_URL?.trim();
+  const validatorKey = process.env.VALIDATOR_KEY?.trim();
+
+  if (bridgeUrl) {
+    // Route through bridge — method auto-detected as 'sendPhoto' by the bridge
+    await fetch(`${bridgeUrl}/tg-proxy`, {
+      method:  "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(validatorKey ? { "x-validator-key": validatorKey } : {}),
+      },
+      body: JSON.stringify({
+        token:   process.env.TG_TOKEN,
+        chat_id: chatId,
+        photo,
+        caption,
+        ...extra,
+      }),
+    }).catch((err) => console.warn("[notify] tgSendPhoto bridge error:", err?.message));
+    return;
+  }
+
   await fetch(tgUrl("sendPhoto"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },

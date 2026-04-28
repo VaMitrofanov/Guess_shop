@@ -74,6 +74,16 @@ async function rFetch(
       }
     }
 
+    // Rate-limited — back off 2.5 s then retry
+    if (res.status === 429 && attempt < MAX_RETRIES) {
+      console.warn(
+        `[Roblox/bots] rFetch attempt ${attempt}/${MAX_RETRIES}: ` +
+        `HTTP 429 (rate limited) from ${url} — waiting 2500ms`
+      );
+      await sleep(2_500);
+      return rFetch(url, init, attempt + 1, _csrfRetried);
+    }
+
     if (res.status >= 500 && attempt < MAX_RETRIES) {
       const body = await res.text().catch(() => "");
       console.warn(
@@ -143,10 +153,7 @@ export async function getGamepassDetailsDirect(
   // Logs the full object when isForSale=true but price is missing — this
   // surfaces any unexpected field names from Roblox's API for debugging.
   const parseItem = (d: any, source: string): GamepassDetails | null => {
-    if (!d || typeof d !== "object") {
-      console.log("[Roblox/Debug] Raw Response:", JSON.stringify(d));
-      return null;
-    }
+    if (!d || typeof d !== "object") return null; // caller already logged HTTP status
 
     const price: number =
       d.price          ?? // marketplace-items shape
@@ -175,7 +182,7 @@ export async function getGamepassDetailsDirect(
     }
 
     if (!creatorName) {
-      console.log("[Roblox/Debug] Raw Response:", JSON.stringify(d));
+      console.log(`[Roblox/Debug] ${source} — creatorName missing. Raw:`, JSON.stringify(d));
     }
 
     return {
@@ -200,7 +207,7 @@ export async function getGamepassDetailsDirect(
     );
     httpResponses++;
     if (res.ok) {
-      const json = await res.json();
+      const json: any = await res.json();
       // Response is either an array or { data: [...] }
       const items: any[] = Array.isArray(json) ? json : (json?.data ?? []);
       const item = items.find((x: any) => String(x?.id) === gamepassId || String(x?.assetId) === gamepassId) ?? items[0];
@@ -224,7 +231,7 @@ export async function getGamepassDetailsDirect(
     );
     httpResponses++;
     if (res.ok) {
-      const json = await res.json();
+      const json: any = await res.json();
       const items: any[] = Array.isArray(json) ? json : (json?.data ?? []);
       const item = items[0];
       const parsed = parseItem(item, "catalog/items/details");
@@ -323,7 +330,7 @@ async function fetchViaBridge(
       return BRIDGE_UNAVAILABLE;
     }
 
-    const body = await res.json().catch(() => null);
+    const body = await (res.json().catch(() => null) as Promise<any>);
     if (!body?.ok) {
       console.warn(
         `[Roblox/bots] Bridge non-ok response for id=${gamepassId}: ` +

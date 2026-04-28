@@ -70,8 +70,12 @@ export function startBridgeServer(): http.Server {
     }
 
     // ── POST /tg-proxy ──────────────────────────────────────────────────────
+    // Accepts any Telegram Bot API call. Required fields: token, chat_id.
+    // Optional 'method' overrides the TG method (default: auto-detect).
+    // All other fields are forwarded verbatim (text, photo, caption,
+    // reply_markup, inline_keyboard, etc.).
     if (isTgProxy) {
-      let body: { token?: string; chat_id?: string; text?: string };
+      let body: Record<string, unknown>;
       try {
         const raw = await new Promise<string>((resolve, reject) => {
           let data = "";
@@ -85,25 +89,50 @@ export function startBridgeServer(): http.Server {
         return;
       }
 
-      const { token, chat_id, text } = body;
-      if (!token || !chat_id || !text) {
+      const { token, method: tgMethod, chat_id, ...rest } = body as any;
+      if (!token || !chat_id) {
+        respond(400, { ok: false, error: "missing_fields" });
+        return;
+      }
+
+      // Auto-detect method if not explicitly provided
+      const resolvedMethod: string =
+        typeof tgMethod === "string" ? tgMethod :
+        rest.photo                  ? "sendPhoto" :
+                                      "sendMessage";
+
+      if (resolvedMethod === "sendMessage" && !rest.text) {
         respond(400, { ok: false, error: "missing_fields" });
         return;
       }
 
       try {
-        const tgRes = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-          method:  "POST",
-          headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify({ chat_id, text, parse_mode: "HTML" }),
-        });
+        const tgRes = await fetch(
+          `https://api.telegram.org/bot${token}/${resolvedMethod}`,
+          {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            // parse_mode default; individual callers can override via rest
+            body:    JSON.stringify({ parse_mode: "HTML", ...rest, chat_id }),
+          }
+        );
         const tgBody = await tgRes.json();
         if (!tgRes.ok) {
-          console.error(`[Bridge/tg-proxy] TG error for chat_id=${chat_id}: HTTP ${tgRes.status}`, tgBody);
+          // Suppress "chat not found" noise from stale admin IDs
+          const desc: string = (tgBody as any)?.description ?? "";
+          if (tgRes.status === 400 && desc.includes("chat not found")) {
+            respond(200, { ok: true, warning: "chat_not_found" });
+            return;
+          }
+          console.error(
+            `[Bridge/tg-proxy] TG error for chat_id=${chat_id} ` +
+            `method=${resolvedMethod}: HTTP ${tgRes.status}`,
+            tgBody
+          );
           respond(502, { ok: false, error: "tg_error", detail: tgBody });
           return;
         }
-        console.log(`[Bridge/tg-proxy] → chat_id=${chat_id} delivered`);
+        console.log(`[Bridge/tg-proxy] → chat_id=${chat_id} method=${resolvedMethod} delivered`);
         respond(200, { ok: true });
       } catch (err: any) {
         console.error("[Bridge/tg-proxy] fetch failed:", err?.message ?? err);
