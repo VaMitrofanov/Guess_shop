@@ -74,13 +74,20 @@ export function registerStart(bot: Telegraf): void {
     // Subscription gate (optional — skip if TG_CHANNEL_ID not set)
     const subscribed = await checkSubscription(bot, ctx.from.id);
     if (!subscribed) {
-      const channelId = process.env.TG_CHANNEL_ID!;
-      const url = channelId.startsWith("@")
-        ? `https://t.me/${channelId.slice(1)}`
-        : `https://t.me/c/${channelId.replace("-100", "")}`;
       await ctx.reply(
-        "⚠️ Для использования сервиса подпишись на наш канал и снова перейди по ссылке с карточки.",
-        Markup.inlineKeyboard([[Markup.button.url("📢 Подписаться", url)]])
+        `💎 Почти готово! Подпишись на наш канал, чтобы активировать код.\n` +
+        `Там мы публикуем секретные промокоды на робуксы: https://t.me/Roblox_Bank_Tg\n\n` +
+        `Подписавшись, ты получишь доступ к:\n` +
+        `1. 🏆 Приоритетной очереди выкупа.\n` +
+        `2. 🎰 Розыгрышам робуксов каждый понедельник.\n` +
+        `3. 💬 Моментальной поддержке 24/7.`,
+        {
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+          ...Markup.inlineKeyboard([[
+            Markup.button.url("📢 Подписаться", "https://t.me/Roblox_Bank_Tg")
+          ]]),
+        }
       );
       return;
     }
@@ -286,6 +293,30 @@ export function registerText(bot: Telegraf): void {
         { parse_mode: "HTML" }
       );
       return;
+    }
+
+    // Re-check subscription — pendingLink state may have been set before subscribing.
+    if (!isAdmin) {
+      const subscribed = await checkSubscription(bot, ctx.from.id);
+      if (!subscribed) {
+        await ctx.reply(
+          `💎 Почти готово! Подпишись на наш канал, чтобы отправить геймпасс.\n` +
+          `Там мы публикуем секретные промокоды на робуксы: https://t.me/Roblox_Bank_Tg\n\n` +
+          `Подписавшись, ты получишь доступ к:\n` +
+          `1. 🏆 Приоритетной очереди выкупа.\n` +
+          `2. 🎰 Розыгрышам робуксов каждый понедельник.\n` +
+          `3. 💬 Моментальной поддержке 24/7.\n\n` +
+          `После подписки просто отправь ссылку на геймпасс ещё раз.`,
+          {
+            parse_mode: "HTML",
+            link_preview_options: { is_disabled: true },
+            ...Markup.inlineKeyboard([[
+              Markup.button.url("📢 Подписаться", "https://t.me/Roblox_Bank_Tg")
+            ]]),
+          }
+        );
+        return; // pendingLink preserved — user re-sends the link after subscribing
+      }
     }
 
     // ── Roblox API validation ─────────────────────────────────────────────

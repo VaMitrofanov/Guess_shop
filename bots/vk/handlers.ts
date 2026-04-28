@@ -100,12 +100,45 @@ function vkUserDisplay(name: string, vkUserId: number): string {
   return `<a href="https://vk.com/id${vkUserId}">${name}</a>`;
 }
 
+/** Returns false only when the group ID is configured AND the API confirms non-membership. Fail-open. */
+async function isVkSubscribed(ctx: MessageContext, vkUserId: number): Promise<boolean> {
+  const groupId = process.env.VK_GROUP_ID;
+  if (!groupId) return true;
+  try {
+    return !!(await (ctx as any).vk.api.groups.isMember({ group_id: groupId, user_id: vkUserId }));
+  } catch {
+    return true; // don't block users on API errors
+  }
+}
+
+/** Sends the subscription prompt with benefits list and inline buttons. */
+async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null): Promise<void> {
+  const groupId  = process.env.VK_GROUP_ID;
+  const groupUrl = groupId ? `https://vk.com/club${groupId}` : "https://vk.com";
+  await ctx.reply({
+    message:
+      `🚀 Чтобы активировать код и получить бонусные +5%, подпишись на наше сообщество!\n\n` +
+      `Подписавшись, ты получишь доступ к:\n` +
+      `1. 🏆 Приоритетной очереди выкупа.\n` +
+      `2. 🎰 Розыгрышам робуксов каждый понедельник.\n` +
+      `3. 💬 Моментальной поддержке 24/7.\n\n` +
+      `Это поможет не пропустить новости о раздачах: ${groupUrl}`,
+    keyboard: Keyboard.builder()
+      .urlButton({ label: "🔔 Подписаться", url: groupUrl })
+      .row()
+      .textButton({
+        label:   "✅ Я подписался",
+        payload: refCode ? { command: "check_sub", ref: refCode } : { command: "check_sub" },
+        color:   "positive",
+      })
+      .inline(),
+  });
+}
+
 // ── Entry point: called for every message_new event ───────────────────────────
 
 export async function handleMessage(ctx: MessageContext): Promise<void> {
   if (ctx.isOutbox) return; // skip messages sent by the community itself
-
-  console.log(">>> [VK DEBUG] Message Received! Context:", JSON.stringify(ctx));
 
   const vkUserId = ctx.senderId;
   const text     = ctx.text?.trim() ?? "";
@@ -127,23 +160,30 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
 
   if (msgPayload?.command === "check_sub" || text === "✅ Я подписался") {
     try {
-      const groupId = process.env.VK_GROUP_ID;
-      const isMember = await (ctx as any).vk.api.groups.isMember({ group_id: groupId, user_id: vkUserId });
-      if (!isMember) {
+      if (!(await isVkSubscribed(ctx, vkUserId))) {
         await ctx.reply("Ты всё ещё не подписан! 😢 Подпишись и нажми кнопку снова.");
         return;
       }
-      // If subscribed, check if there's a ref to activate
       const refToActivate = msgPayload?.ref;
       if (refToActivate) {
+        // Came from the code-activation gate — continue activation
         await handleRefActivation(ctx, vkUserId, refToActivate);
         return;
+      }
+      // Came from the gamepass-submission gate — AWAITING_LINK state is still active
+      const existingState = getState(vkUserId);
+      if (existingState?.type === "AWAITING_LINK") {
+        const passPrice = Math.ceil(existingState.denomination / 0.7);
+        await ctx.reply(
+          `✅ Подписка подтверждена! Теперь отправь ссылку на геймпасс.\n` +
+          `Цена должна быть ровно ${passPrice} R$ 🪙`
+        );
       } else {
         await ctx.reply("✅ Спасибо за подписку! Теперь ты можешь активировать свой код с карточки Wildberries.");
-        return;
       }
+      return;
     } catch (err) {
-      console.error("[VK] isMember check failed:", err);
+      console.error("[VK] check_sub handler failed:", err);
     }
   }
 
@@ -203,24 +243,9 @@ async function handleRefActivation(
   vkUserId: number,
   code: string
 ): Promise<void> {
-  const groupId = process.env.VK_GROUP_ID;
-  if (groupId) {
-    try {
-      const isMember = await (ctx as any).vk.api.groups.isMember({ group_id: groupId, user_id: vkUserId });
-      if (!isMember) {
-        await ctx.reply({
-          message: "❗️ Для активации кода, пожалуйста, подпишись на нашу группу!",
-          keyboard: Keyboard.builder()
-            .urlButton({ label: "Подписаться", url: `https://vk.com/club${groupId}` })
-            .row()
-            .textButton({ label: "✅ Я подписался", payload: { command: "check_sub", ref: code }, color: "positive" })
-            .inline()
-        });
-        return;
-      }
-    } catch (err) {
-      console.error("[VK] isMember check failed:", err);
-    }
+  if (!(await isVkSubscribed(ctx, vkUserId))) {
+    await sendVkSubPrompt(ctx, code);
+    return;
   }
 
   // Case-insensitive code lookup
@@ -305,6 +330,12 @@ async function handleGamepassLink(
   wbCode: string,
   denomination: number
 ): Promise<void> {
+  // Re-check subscription — state could have been set before the user subscribed.
+  if (!(await isVkSubscribed(ctx, vkUserId))) {
+    await sendVkSubPrompt(ctx, null); // no ref; AWAITING_LINK state preserved for retry
+    return;
+  }
+
   const passId = extractPassId(input);
 
   if (!passId) {
