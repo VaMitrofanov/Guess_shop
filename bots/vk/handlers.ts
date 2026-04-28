@@ -15,6 +15,7 @@ import { sendAdminOrderCard, sendAdminReviewCard } from "../shared/admin";
 import { vkGetName } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
+import { getGamepassDetails } from "../shared/roblox";
 
 /**
  * Extract a Roblox game-pass ID from user input.
@@ -248,11 +249,17 @@ async function handleRefActivation(
     });
   }
 
-  // Link code to user
-  await (db as any).wbCode.update({
-    where: { id: wbCode.id },
+  // Atomically link code to user.
+  // updateMany with isUsed:false ensures only one concurrent request wins.
+  const activated = await (db as any).wbCode.updateMany({
+    where: { id: wbCode.id, isUsed: false },
     data:  { userId: user.id, isUsed: true, usedAt: new Date() },
   });
+
+  if (activated.count === 0) {
+    await ctx.reply("⚠️ Этот код уже был активирован. Если это ошибка — напишите в поддержку.");
+    return;
+  }
 
   const totalAmount = wbCode.denomination + (user.balance || 0);
   setState(vkUserId, { type: "AWAITING_LINK", wbCode: code, denomination: totalAmount });
@@ -303,6 +310,38 @@ async function handleGamepassLink(
     );
     return;
   }
+
+  // ── Roblox API validation ─────────────────────────────────────────────
+  const expectedPrice = Math.ceil(denomination / 0.7);
+  const gamepassInfo  = await getGamepassDetails(passId);
+
+  if (!gamepassInfo) {
+    await ctx.reply(
+      "⚠️ Не удалось получить информацию о геймпассе от Roblox.\n\n" +
+      "Проверь правильность ссылки/ID и попробуй ещё раз. " +
+      "Если проблема повторяется — обратись в поддержку: https://t.me/RobloxBank_PA"
+    );
+    return;
+  }
+
+  if (!gamepassInfo.isActive) {
+    await ctx.reply(
+      `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
+      `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.`
+    );
+    return;
+  }
+
+  if (Math.abs(gamepassInfo.price - expectedPrice) > 2) {
+    await ctx.reply(
+      `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
+      `Установлено: ${gamepassInfo.price} R$\n` +
+      `Ожидается:   ${expectedPrice} R$\n\n` +
+      `Измени цену геймпасса в настройках Roblox и пришли ссылку снова.`
+    );
+    return;
+  }
+  // ── End Roblox validation ─────────────────────────────────────────────
 
   const cleanLink = `https://www.roblox.com/game-pass/${passId}`;
 

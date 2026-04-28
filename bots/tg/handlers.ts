@@ -12,6 +12,7 @@ import { db } from "../shared/db";
 import { vkSend, stripHtml } from "../shared/notify";
 import { sendAdminOrderCard, sendAdminReviewCard, CB, ADMIN_IDS } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason } from "./session";
+import { getGamepassDetails } from "../shared/roblox";
 
 // ── Gamepass ID extractor ─────────────────────────────────────────────────────
 
@@ -106,11 +107,19 @@ export function registerStart(bot: Telegraf): void {
       });
     }
 
-    // Atomically link code to user
-    await (db as any).wbCode.update({
-      where: { id: wbCode.id },
+    // Atomically link code to user.
+    // updateMany with isUsed:false in the WHERE clause is a single SQL UPDATE —
+    // only the first concurrent request wins; subsequent ones see count=0.
+    const activated = await (db as any).wbCode.updateMany({
+      where: { id: wbCode.id, isUsed: false },
       data:  { userId: user.id, isUsed: true, usedAt: new Date() },
     });
+
+    if (activated.count === 0) {
+      // A concurrent request already claimed this code.
+      await ctx.reply("⚠️ Этот код уже был активирован ранее.");
+      return;
+    }
 
     const totalAmount = wbCode.denomination + (user.balance || 0);
 
@@ -274,6 +283,44 @@ export function registerText(bot: Telegraf): void {
       );
       return;
     }
+
+    // ── Roblox API validation ─────────────────────────────────────────────
+    // Verify the gamepass exists and has the correct price BEFORE creating
+    // the order. Without this check, users could submit any numeric ID and
+    // the admin would discover the problem only at fulfillment time.
+    const expectedPrice = Math.ceil(state.denomination / 0.7);
+    const gamepassInfo  = await getGamepassDetails(passId);
+
+    if (!gamepassInfo) {
+      await ctx.reply(
+        "⚠️ Не удалось получить информацию о геймпассе от Roblox.\n\n" +
+        "Проверь правильность ссылки/ID и попробуй ещё раз. " +
+        "Если проблема повторяется — обратись в поддержку.",
+        { parse_mode: "HTML" }
+      );
+      return;
+    }
+
+    if (!gamepassInfo.isActive) {
+      await ctx.reply(
+        `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
+        `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.`,
+        { parse_mode: "HTML" }
+      );
+      return;
+    }
+
+    if (Math.abs(gamepassInfo.price - expectedPrice) > 2) {
+      await ctx.reply(
+        `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
+        `Установлено: <b>${gamepassInfo.price} R$</b>\n` +
+        `Ожидается:   <b>${expectedPrice} R$</b>\n\n` +
+        `Измени цену геймпасса в настройках Roblox и пришли ссылку снова.`,
+        { parse_mode: "HTML" }
+      );
+      return;
+    }
+    // ── End Roblox validation ─────────────────────────────────────────────
 
     const cleanLink = `https://www.roblox.com/game-pass/${passId}`;
 
@@ -670,6 +717,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
     // ── ✅ admin_ok: order completed ──────────────────────────────────────
     if (data.startsWith("admin_ok:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const orderId = data.split(":")[1];
       const order = await (db as any).wbOrder.update({
         where: { id: orderId },
@@ -687,6 +735,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
     // ── ❌ admin_reject_init: ask for reason ─────────────────────────────────
     if (data.startsWith("admin_reject_init:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const orderId = data.split(":")[1];
       pendingRejectionReason.set(ctx.from.id, orderId);
       await ctx.reply(
@@ -704,6 +753,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
     // ── ❌ admin_reject_none: reject without reason ─────────────────────────
     if (data.startsWith("admin_reject_none:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const orderId = data.split(":")[1];
       pendingRejectionReason.delete(ctx.from.id); // cleanup if any
       await performAdminReject(bot, ctx, orderId, "");
@@ -737,6 +787,7 @@ export function registerCallbacks(bot: Telegraf): void {
     // ── 🎁 review_ok: approve review bonus ───────────────────────────────
     // ── ❌ review_no: reject review bonus ────────────────────────────────
     if (data.startsWith("review_ok:") || data.startsWith("review_no:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const [action, orderId, userId] = data.split(":");
       const approve = action === "review_ok";
 
