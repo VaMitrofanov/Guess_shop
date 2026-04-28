@@ -20,10 +20,11 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * fetch wrapper with:
- *  • AbortController-based 30 s timeout (explicit, works on all Node 18+ builds)
- *  • Chrome User-Agent + Accept headers to bypass bot-detection
- *  • 3-attempt retry on AbortError/TimeoutError or 5xx response
- *  • Diagnostic logging of every non-2xx status and error body
+ *  • AbortController-based 30 s timeout
+ *  • Chrome User-Agent + Accept headers
+ *  • 3-attempt retry on: AbortError, TimeoutError, or TypeError "fetch failed"
+ *    (network-level failures — DNS, TLS, connection refused, etc.)
+ *  • Retry also on 5xx responses
  */
 async function rFetch(
   url: string,
@@ -59,13 +60,11 @@ async function rFetch(
 
     return res;
   } catch (err: any) {
-    // AbortError/TimeoutError = our timeout fired.
-    // TypeError "fetch failed" = Node.js undici network-level error (DNS, TLS,
-    // connection refused, etc.) — also transient and worth retrying.
     const isRetryable =
       err?.name === "AbortError" ||
       err?.name === "TimeoutError" ||
-      (err?.name === "TypeError" && typeof err?.message === "string" &&
+      (err?.name === "TypeError" &&
+        typeof err?.message === "string" &&
         err.message.toLowerCase().includes("fetch failed"));
 
     console.warn(
@@ -88,22 +87,38 @@ export interface GamepassDetails {
   price:     number;
   creatorId: number;
   isActive:  boolean;
+  /**
+   * true when every Roblox endpoint threw a network error (no HTTP response
+   * received at all). Price and isActive are unreliable — callers should skip
+   * those checks and accept the order for manual admin review.
+   */
+  validationSkipped?: boolean;
 }
 
 /**
  * Fetches gamepass metadata from Roblox, trying 4 API endpoints in sequence.
- * Returns null when all endpoints fail or the pass does not exist.
+ *
+ * Returns:
+ *  • GamepassDetails          — on success
+ *  • { validationSkipped: true } — when the server cannot reach Roblox at all
+ *  • null                     — when Roblox is reachable but the gamepass was
+ *                               not found / is invalid
  */
 export async function getGamepassDetails(
   gamepassId: string
 ): Promise<GamepassDetails | null> {
+  // Counts how many endpoints returned an HTTP response (even 404/403).
+  // If this stays 0 after all attempts, the server has no network path to Roblox.
+  let httpResponses = 0;
+
+  // ── Attempt 1: modern game-passes API ──────────────────────────────────────
   try {
-    // Attempt 1: modern game-passes API
-    const res1 = await rFetch(
+    const res = await rFetch(
       `https://apis.roblox.com/game-passes/v1/game-passes/${gamepassId}`
     );
-    if (res1.ok) {
-      const d = await res1.json();
+    httpResponses++;
+    if (res.ok) {
+      const d = await res.json();
       return {
         id:        String(d.id ?? gamepassId),
         name:      d.name ?? d.displayName ?? "Gamepass",
@@ -113,19 +128,24 @@ export async function getGamepassDetails(
       };
     }
     {
-      const body = await res1.text().catch(() => "");
+      const body = await res.text().catch(() => "");
       console.warn(
-        `[Roblox/bots] endpoint 1 failed: HTTP ${res1.status} for id=${gamepassId}` +
+        `[Roblox/bots] endpoint 1 failed: HTTP ${res.status} for id=${gamepassId}` +
         (body ? ` — ${body.slice(0, 200)}` : "")
       );
     }
+  } catch {
+    // network error — httpResponses stays unchanged
+  }
 
-    // Attempt 2: economy API
-    const res2 = await rFetch(
+  // ── Attempt 2: economy game-passes API ────────────────────────────────────
+  try {
+    const res = await rFetch(
       `https://economy.roblox.com/v1/game-passes/${gamepassId}/details`
     );
-    if (res2.ok) {
-      const d = await res2.json();
+    httpResponses++;
+    if (res.ok) {
+      const d = await res.json();
       return {
         id:        String(d.TargetId ?? gamepassId),
         name:      d.Name ?? "Gamepass",
@@ -135,51 +155,56 @@ export async function getGamepassDetails(
       };
     }
     {
-      const body = await res2.text().catch(() => "");
+      const body = await res.text().catch(() => "");
       console.warn(
-        `[Roblox/bots] endpoint 2 failed: HTTP ${res2.status} for id=${gamepassId}` +
+        `[Roblox/bots] endpoint 2 failed: HTTP ${res.status} for id=${gamepassId}` +
         (body ? ` — ${body.slice(0, 200)}` : "")
       );
     }
+  } catch {
+    // network error
+  }
 
-    // Attempt 3: catalog details endpoint
-    const res3 = await rFetch(
-      "https://catalog.roblox.com/v1/catalog/items/details",
-      {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          items: [{ itemType: "GamePass", id: Number(gamepassId) }],
-        }),
-      }
+  // ── Attempt 3: economy assets API (gamepasses are asset type 34) ───────────
+  // Different path from game-passes endpoint — sometimes one works when the
+  // other returns 404 for recently created or private passes.
+  try {
+    const res = await rFetch(
+      `https://economy.roblox.com/v1/assets/${gamepassId}/details`
     );
-    if (res3.ok) {
-      const d = await res3.json();
-      const item = d.data?.[0];
-      if (item) {
+    httpResponses++;
+    if (res.ok) {
+      const d = await res.json();
+      if (d?.TargetId || d?.Name) {
         return {
-          id:        String(gamepassId),
-          name:      item.name ?? "Gamepass",
-          price:     item.lowestPrice ?? item.price ?? 0,
-          creatorId: item.creatorTargetId ?? 0,
-          isActive:  item.itemStatus !== "Offsale",
+          id:        String(d.TargetId ?? gamepassId),
+          name:      d.Name ?? "Gamepass",
+          price:     d.PriceInRobux ?? 0,
+          creatorId: d.Creator?.Id ?? 0,
+          isActive:  d.IsForSale ?? false,
         };
       }
     }
     {
-      const body = await res3.text().catch(() => "");
+      const body = await res.text().catch(() => "");
       console.warn(
-        `[Roblox/bots] endpoint 3 failed: HTTP ${res3.status} for id=${gamepassId}` +
+        `[Roblox/bots] endpoint 3 failed: HTTP ${res.status} for id=${gamepassId}` +
         (body ? ` — ${body.slice(0, 200)}` : "")
       );
     }
+  } catch {
+    // network error
+  }
 
-    // Attempt 4: legacy marketplace productinfo
-    const res4 = await rFetch(
-      `https://api.roblox.com/marketplace/productinfo?assetId=${gamepassId}`
+  // ── Attempt 4: www.roblox.com productinfo ─────────────────────────────────
+  // Uses www.roblox.com (not api.roblox.com which is blocked on DC IPs).
+  try {
+    const res = await rFetch(
+      `https://www.roblox.com/marketplace/productinfo?assetId=${gamepassId}`
     );
-    if (res4.ok) {
-      const d = await res4.json();
+    httpResponses++;
+    if (res.ok) {
+      const d = await res.json();
       if (d?.AssetId) {
         return {
           id:        String(gamepassId),
@@ -191,22 +216,39 @@ export async function getGamepassDetails(
       }
     }
     {
-      const body = await res4.text().catch(() => "");
+      const body = await res.text().catch(() => "");
       console.warn(
-        `[Roblox/bots] endpoint 4 failed: HTTP ${res4.status} for id=${gamepassId}` +
+        `[Roblox/bots] endpoint 4 failed: HTTP ${res.status} for id=${gamepassId}` +
         (body ? ` — ${body.slice(0, 200)}` : "")
       );
     }
-
-    console.error(
-      `[Roblox/bots] getGamepassDetails: all 4 endpoints exhausted for id=${gamepassId}`
-    );
-    return null;
-  } catch (error: any) {
-    console.error(
-      `[Roblox/bots] getGamepassDetails: unhandled error for id=${gamepassId}:`,
-      error?.message ?? error
-    );
-    return null;
+  } catch {
+    // network error
   }
+
+  // ── All endpoints exhausted ────────────────────────────────────────────────
+  if (httpResponses === 0) {
+    // Server received zero HTTP responses — no network path to Roblox at all.
+    // Return a "skipped" sentinel so callers can accept the order for manual
+    // admin review rather than silently blocking every user.
+    console.warn(
+      `[Roblox/bots] All endpoints unreachable (network down) for id=${gamepassId}. ` +
+      `Returning validationSkipped=true — admin must verify manually.`
+    );
+    return {
+      id:               gamepassId,
+      name:             "Неизвестно (Roblox недоступен)",
+      price:            0,
+      creatorId:        0,
+      isActive:         true,
+      validationSkipped: true,
+    };
+  }
+
+  // At least one HTTP response was received → Roblox is reachable, gamepass not found.
+  console.error(
+    `[Roblox/bots] All 4 endpoints failed for id=${gamepassId} ` +
+    `(${httpResponses} HTTP response(s) received, none successful)`
+  );
+  return null;
 }

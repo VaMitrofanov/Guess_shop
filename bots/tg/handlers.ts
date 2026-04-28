@@ -289,13 +289,11 @@ export function registerText(bot: Telegraf): void {
     }
 
     // ── Roblox API validation ─────────────────────────────────────────────
-    // Verify the gamepass exists and has the correct price BEFORE creating
-    // the order. Without this check, users could submit any numeric ID and
-    // the admin would discover the problem only at fulfillment time.
     const expectedPrice = Math.ceil(state.denomination / 0.7);
     const gamepassInfo  = await getGamepassDetails(passId);
 
     if (!gamepassInfo) {
+      // Roblox is reachable but returned no data → gamepass likely doesn't exist
       await ctx.reply(
         "⚠️ Не удалось получить информацию о геймпассе от Roblox.\n\n" +
         "Проверь правильность ссылки/ID и попробуй ещё раз. " +
@@ -305,24 +303,33 @@ export function registerText(bot: Telegraf): void {
       return;
     }
 
-    if (!gamepassInfo.isActive) {
-      await ctx.reply(
-        `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
-        `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.`,
-        { parse_mode: "HTML" }
-      );
-      return;
-    }
+    if (!gamepassInfo.validationSkipped) {
+      // Normal validation — only runs when Roblox API was reachable
+      if (!gamepassInfo.isActive) {
+        await ctx.reply(
+          `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
+          `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.`,
+          { parse_mode: "HTML" }
+        );
+        return;
+      }
 
-    if (Math.abs(gamepassInfo.price - expectedPrice) > 2) {
-      await ctx.reply(
-        `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
-        `Установлено: <b>${gamepassInfo.price} R$</b>\n` +
-        `Ожидается:   <b>${expectedPrice} R$</b>\n\n` +
-        `Измени цену геймпасса в настройках Roblox и пришли ссылку снова.`,
-        { parse_mode: "HTML" }
+      if (Math.abs(gamepassInfo.price - expectedPrice) > 2) {
+        await ctx.reply(
+          `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
+          `Установлено: <b>${gamepassInfo.price} R$</b>\n` +
+          `Ожидается:   <b>${expectedPrice} R$</b>\n\n` +
+          `Измени цену геймпасса в настройках Roblox и пришли ссылку снова.`,
+          { parse_mode: "HTML" }
+        );
+        return;
+      }
+    } else {
+      // Network-down fallback — log for audit, proceed to order creation
+      console.warn(
+        `[TG] Roblox API unreachable — accepting passId=${passId} without validation. ` +
+        `Admin must verify price manually.`
       );
-      return;
     }
     // ── End Roblox validation ─────────────────────────────────────────────
 

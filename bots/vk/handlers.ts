@@ -313,6 +313,7 @@ async function handleGamepassLink(
   const gamepassInfo  = await getGamepassDetails(passId);
 
   if (!gamepassInfo) {
+    // Roblox is reachable but returned no data → gamepass likely doesn't exist
     await ctx.reply(
       "⚠️ Не удалось получить информацию о геймпассе от Roblox.\n\n" +
       "Проверь правильность ссылки/ID и попробуй ещё раз. " +
@@ -321,22 +322,31 @@ async function handleGamepassLink(
     return;
   }
 
-  if (!gamepassInfo.isActive) {
-    await ctx.reply(
-      `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
-      `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.`
-    );
-    return;
-  }
+  if (!gamepassInfo.validationSkipped) {
+    // Normal validation — only runs when Roblox API was reachable
+    if (!gamepassInfo.isActive) {
+      await ctx.reply(
+        `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
+        `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.`
+      );
+      return;
+    }
 
-  if (Math.abs(gamepassInfo.price - expectedPrice) > 2) {
-    await ctx.reply(
-      `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
-      `Установлено: ${gamepassInfo.price} R$\n` +
-      `Ожидается:   ${expectedPrice} R$\n\n` +
-      `Измени цену геймпасса в настройках Roblox и пришли ссылку снова.`
+    if (Math.abs(gamepassInfo.price - expectedPrice) > 2) {
+      await ctx.reply(
+        `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
+        `Установлено: ${gamepassInfo.price} R$\n` +
+        `Ожидается:   ${expectedPrice} R$\n\n` +
+        `Измени цену геймпасса в настройках Roblox и пришли ссылку снова.`
+      );
+      return;
+    }
+  } else {
+    // Network-down fallback — log for audit, proceed to order creation
+    console.warn(
+      `[VK] Roblox API unreachable — accepting passId=${passId} without validation. ` +
+      `Admin must verify price manually.`
     );
-    return;
   }
   // ── End Roblox validation ─────────────────────────────────────────────
 
