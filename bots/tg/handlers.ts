@@ -121,9 +121,12 @@ export function registerStart(bot: Telegraf): void {
     await ctx.reply(
       `✅ Код <b>${code}</b> активирован!\n` +
       `💎 Номинал: <b>${wbCode.denomination} R$</b>\n\n` +
-      `📋 <b>Что делать дальше:</b>\n\n` +
-      `1. Скопируй ссылку на геймпасс (убедись, что цена в нем <b>${passPrice} R$</b>)\n` +
-      `2. Отправь её сюда 👇`,
+      `📋 <b>Осталось сделать всего один шаг:</b>\n\n` +
+      `Пришли нам <b>Asset ID</b>, либо <b>ссылку</b> на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на <b>${passPrice} R$</b> 🪙\n\n` +
+      `💡 <i>Пример ссылки:</i>\n` +
+      `<code>https://www.roblox.com/game-pass/1234567/...</code>\n\n` +
+      `💡 <i>Пример Asset ID:</i>\n` +
+      `<code>1234567</code>`,
       {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
@@ -674,8 +677,11 @@ export function registerCallbacks(bot: Telegraf): void {
       await ctx.reply(
         `🔄 <b>Исправление ссылки</b>\n\n` +
         `💎 Номинал: <b>${denomination} R$</b>\n` +
-        `1. Убедись, что цена в геймпассе <b>${passPrice} R$</b>\n` +
-        `2. Отправь новую ссылку 👇`,
+        `Пришли нам <b>Asset ID</b>, либо <b>ссылку</b> на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на <b>${passPrice} R$</b> 🪙\n\n` +
+        `💡 <i>Пример ссылки:</i>\n` +
+        `<code>https://www.roblox.com/game-pass/1234567/...</code>\n\n` +
+        `💡 <i>Пример Asset ID:</i>\n` +
+        `<code>1234567</code>`,
         { parse_mode: "HTML" }
       );
       await ctx.answerCbQuery();
