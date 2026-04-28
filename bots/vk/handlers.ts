@@ -10,7 +10,7 @@
  */
 
 import type { MessageContext } from "vk-io";
-import { db, getCustomerStatus, getGreeting } from "../shared/db";
+import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { sendAdminOrderCard, sendAdminReviewCard } from "../shared/admin";
 import { vkGetName } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
@@ -610,6 +610,25 @@ async function handleIdleMessage(
 ): Promise<void> {
   const lower = text.toLowerCase();
 
+  // ── PRIORITY 0: Subscription gate for idle messages ────────────────────
+  // Runs before loyalty/state logic. Fail-open: if the VK API is down,
+  // isVkSubscribed returns true and the user is not blocked.
+  if (process.env.VK_GROUP_ID) {
+    const subbed = await isVkSubscribed(ctx, vkUserId);
+    if (!subbed) {
+      const groupUrl = `https://vk.com/club${process.env.VK_GROUP_ID}`;
+      await ctx.reply({
+        message:
+          `✨ Мы очень ждем твою заявку! Но чтобы система могла закрепить её за тобой и выдать робуксы, нужно сначала заглянуть в наше сообщество: ${groupUrl}\n\n` +
+          `Как только подпишешься — присылай код или ссылку, и мы всё сделаем! 💛`,
+        keyboard: Keyboard.builder()
+          .urlButton({ label: "🔔 Подписаться", url: groupUrl })
+          .inline(),
+      });
+      return;
+    }
+  }
+
   // ── PRIORITY 1: Loyalty check FIRST for every idle message ─────────────
   const status = await getCustomerStatus(String(vkUserId), "VK");
   console.log(`[VK] User ${vkUserId} isReturning: ${status.isReturning}, orderCount: ${status.orderCount}`);
@@ -693,16 +712,14 @@ async function handleIdleMessage(
     return;
   }
 
-  // ── PRIORITY 2: Greeting via shared helper ─────────────────────────────
+  // ── PRIORITY 2: IDLE greeting ──────────────────────────────────────────
   const firstName = await vkGetName(vkUserId);
-  const greeting = getGreeting(status, firstName);
 
   if (status.isReturning) {
-    await ctx.reply(
-      `${greeting}\n\n` +
-      `Ты знаешь, что делать — просто пришли ID геймпасса или ссылку, и мы всё оформим!`
-    );
+    // IDLE state: upsell to direct sales, no gamepass instructions
+    await ctx.reply(getIdleGreeting(status, firstName));
   } else {
+    const greeting = getGreeting(status, firstName);
     await ctx.reply(
       `${greeting}Твой личный проводник в мир робуксов.\n\n` +
       `Чтобы начать, перейди на сайт и активируй код с карточки Wildberries:\n` +

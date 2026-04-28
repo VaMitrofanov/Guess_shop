@@ -97,8 +97,8 @@ export async function getCustomerStatus(
 }
 
 /**
- * Premium tiered greeting based on loyalty status.
- * Single source of truth — both bots import this.
+ * Short greeting prefix used inside the ACTIVE flow (code activation / gamepass step).
+ * Caller appends operational instructions ("send gamepass", etc.) after it.
  *
  * Tiers:
  *   VIP  (5+ orders)  — crown, priority, concierge tone
@@ -109,21 +109,42 @@ export function getGreeting(status: CustomerStatus, name?: string): string {
   const n = name ?? "";
 
   if (status.orderCount >= 5) {
-    // VIP tier
     return n
       ? `👑 С возвращением, наш VIP-клиент, ${n}! Спасибо, что ты с нами. `
       : `👑 С возвращением, наш VIP-клиент! Спасибо, что ты с нами. `;
   }
 
   if (status.isReturning) {
-    // Returning tier (1–4 orders)
     return n
       ? `👋 Рады тебя видеть снова, ${n}! `
       : `👋 Рады тебя видеть снова! `;
   }
 
-  // New user
   return n
     ? `👋 Привет, ${n}! Добро пожаловать в RobloxBank. `
     : `👋 Привет! Добро пожаловать в RobloxBank. `;
+}
+
+/**
+ * Full standalone greeting for IDLE state (no active code / gamepass in session).
+ * Returns a self-contained message with a direct-sales upsell for returning/VIP tiers.
+ * New users fall back to the short getGreeting prefix (caller appends onboarding copy).
+ */
+export function getIdleGreeting(status: CustomerStatus, name?: string): string {
+  const n = name ?? "";
+
+  if (status.orderCount >= 5) {
+    return n
+      ? `👑 С возвращением, наш VIP-клиент, ${n}! Всегда рады тебя видеть.\n\nПланируешь пополнить баланс? Напоминаем, что покупка напрямую через нас или сайт — это самый быстрый способ получить робуксы по лучшему курсу. 💎`
+      : `👑 С возвращением, наш VIP-клиент! Всегда рады тебя видеть.\n\nПланируешь пополнить баланс? Напоминаем, что покупка напрямую через нас или сайт — это самый быстрый способ получить робуксы по лучшему курсу. 💎`;
+  }
+
+  if (status.isReturning) {
+    return n
+      ? `👋 Рады видеть тебя снова, ${n}! Если ты здесь за робуксами — мы на связи.\n\nКстати, покупка напрямую у нас выходит выгоднее, чем на маркетплейсах. Попробуем? 💛`
+      : `👋 Рады видеть тебя снова! Если ты здесь за робуксами — мы на связи.\n\nКстати, покупка напрямую у нас выходит выгоднее, чем на маркетплейсах. Попробуем? 💛`;
+  }
+
+  // New users: return the short prefix — caller appends onboarding instructions
+  return getGreeting(status, name);
 }

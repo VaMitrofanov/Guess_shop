@@ -8,7 +8,7 @@
 import { Telegraf, Markup } from "telegraf";
 // telegraf/types re-exports the full typegram surface (official subpath export)
 import type { User as TGUser } from "telegraf/types";
-import { db, getCustomerStatus, getGreeting } from "../shared/db";
+import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, stripHtml } from "../shared/notify";
 import { sendAdminOrderCard, sendAdminReviewCard, CB, ADMIN_IDS } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason } from "./session";
@@ -59,23 +59,23 @@ async function checkSubscription(bot: Telegraf, userId: number): Promise<boolean
 export function registerStart(bot: Telegraf): void {
   bot.start(async (ctx) => {
     const tgId = String(ctx.from.id);
-    const code  = ctx.startPayload?.trim().toUpperCase() ?? "";
+    const code = ctx.startPayload?.trim().toUpperCase() ?? "";
 
-    // No code payload — greeting via shared helper
+    // No code payload — IDLE greeting
     if (!code) {
       const isAdmin = ADMIN_IDS.includes(tgId);
       const custStatus = await getCustomerStatus(tgId, "TG");
       const firstName = ctx.from.first_name || undefined;
-      const greeting = getGreeting(custStatus, firstName);
 
       if (custStatus.isReturning && !isAdmin) {
+        // IDLE state: upsell to direct sales, no gamepass instructions
+        const idleMsg = getIdleGreeting(custStatus, firstName);
         await ctx.reply(
-          `${greeting}\n\n` +
-          `Твои заказы всегда в приоритете — отправь код или ссылку, и мы всё оформим!\n\n` +
-          `📦 Статус заказа: /status`,
+          `${idleMsg}\n\n📦 Статус заказа: /status`,
           { parse_mode: "HTML" }
         );
       } else {
+        const greeting = getGreeting(custStatus, firstName);
         await ctx.reply(
           `${greeting}Твой личный проводник в мир робуксов.\n\n` +
           `Для активации кода с карточки Wildberries перейди по ссылке на вкладыше.\n\n` +
@@ -83,23 +83,6 @@ export function registerStart(bot: Telegraf): void {
           isAdmin ? getAdminKeyboard() : {}
         );
       }
-      return;
-    }
-
-    // Subscription gate (optional — skip if TG_CHANNEL_ID not set)
-    const subscribed = await checkSubscription(bot, ctx.from.id);
-    if (!subscribed) {
-      await ctx.reply(
-        `✨ Почти готово! Чтобы мы могли моментально уведомлять тебя о выкупе и присылать секретные бонусы, загляни в наш канал: https://t.me/Roblox_Bank_Tg\n\n` +
-        `Подпишись и просто отправь код еще раз — мы сразу возьмем его в работу! 💛`,
-        {
-          parse_mode: "HTML",
-          link_preview_options: { is_disabled: true },
-          ...Markup.inlineKeyboard([[
-            Markup.button.url("📢 Подписаться", "https://t.me/Roblox_Bank_Tg")
-          ]]),
-        }
-      );
       return;
     }
 
@@ -132,11 +115,28 @@ export function registerStart(bot: Telegraf): void {
 
     const totalAmount = wbCode.denomination + (user.balance || 0);
 
-    // ── Defer isUsed write to the gamepass step ────────────────────────────
-    // The code is claimed atomically (userId:null → user.id, isUsed→true) only
-    // after Roblox validates the gamepass — see the $transaction in registerText.
-    // This prevents orphaned "used" codes when Roblox times out or rejects.
+    // ── Set pendingLink BEFORE the sub-gate ───────────────────────────────
+    // The session must survive the "please subscribe" detour. If the gate fires
+    // and the user later subscribes and sends a gamepass, registerText picks up
+    // this state and processes it immediately — no silent dead-end.
     pendingLink.set(ctx.from.id, { wbCode: wbCode.code, denomination: totalAmount });
+
+    // Subscription gate (optional — skip if TG_CHANNEL_ID not set)
+    const subscribed = await checkSubscription(bot, ctx.from.id);
+    if (!subscribed) {
+      await ctx.reply(
+        `✨ Почти готово! Чтобы мы могли моментально уведомлять тебя о выкупе и присылать секретные бонусы, загляни в наш канал: https://t.me/Roblox_Bank_Tg\n\n` +
+        `Подпишись и просто пришли Asset ID или ссылку на геймпасс — мы сразу возьмем его в работу! 💛`,
+        {
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+          ...Markup.inlineKeyboard([[
+            Markup.button.url("📢 Подписаться", "https://t.me/Roblox_Bank_Tg")
+          ]]),
+        }
+      );
+      return; // pendingLink preserved — user sends gamepass after subscribing
+    }
 
     const passPrice = Math.ceil(totalAmount / 0.7);
     const isAdmin = ADMIN_IDS.includes(tgId);
@@ -148,7 +148,7 @@ export function registerStart(bot: Telegraf): void {
     let bonusText = "";
     if (user.balance && user.balance > 0) {
       bonusText = `🎁 Использован бонус: <b>${user.balance} R$</b>\n` +
-                  `💎 Итого к выдаче: <b>${totalAmount} R$</b>\n\n`;
+        `💎 Итого к выдаче: <b>${totalAmount} R$</b>\n\n`;
     } else {
       bonusText = `💎 Номинал: <b>${wbCode.denomination} R$</b>\n\n`;
     }
@@ -201,7 +201,7 @@ async function getStatusText(tgId: string): Promise<string> {
   }
 
   const order = await (db as any).wbOrder.findFirst({
-    where:   { userId: user.id },
+    where: { userId: user.id },
     orderBy: { createdAt: "desc" },
   });
 
@@ -210,16 +210,16 @@ async function getStatusText(tgId: string): Promise<string> {
   }
 
   const label: Record<string, string> = {
-    PENDING:   "⏳ В обработке",
+    PENDING: "⏳ В обработке",
     COMPLETED: "✅ Выполнен",
-    REJECTED:  "❌ Отклонён",
+    REJECTED: "❌ Отклонён",
   };
 
   const calmNote =
     order.status === "PENDING"
       ? "\n\n💬 <i>Менеджеры работают в порядке очереди — среднее время обработки " +
-        "15–30 минут. Дополнительно писать не нужно: мы сами пришлём уведомление " +
-        "при изменении статуса.</i>"
+      "15–30 минут. Дополнительно писать не нужно: мы сами пришлём уведомление " +
+      "при изменении статуса.</i>"
       : "";
 
   return (
@@ -292,7 +292,26 @@ export function registerText(bot: Telegraf): void {
     }
 
     // 3. USER GAMEPASS LINK flow
-    if (!state) return;
+    if (!state) {
+      // Gentle gate — unsubscribed user with no active code session
+      if (!isAdmin && process.env.TG_CHANNEL_ID) {
+        const subbed = await checkSubscription(bot, ctx.from.id);
+        if (!subbed) {
+          await ctx.reply(
+            `✨ Мы очень ждем твою заявку! Но чтобы система могла закрепить её за тобой и выдать робуксы, нужно сначала заглянуть в наш канал: https://t.me/Roblox_Bank_Tg\n\n` +
+            `Как только подпишешься — присылай код или ссылку, и мы всё сделаем! 💛`,
+            {
+              parse_mode: "HTML",
+              link_preview_options: { is_disabled: true },
+              ...Markup.inlineKeyboard([[
+                Markup.button.url("📢 Подписаться", "https://t.me/Roblox_Bank_Tg")
+              ]]),
+            }
+          );
+        }
+      }
+      return;
+    }
 
     const passId = extractPassId(text);
 
@@ -329,7 +348,7 @@ export function registerText(bot: Telegraf): void {
 
     // ── Roblox API validation ─────────────────────────────────────────────
     const expectedPrice = Math.ceil(state.denomination / 0.7);
-    const gamepassInfo  = await getGamepassDetails(passId);
+    const gamepassInfo = await getGamepassDetails(passId);
 
     if (!gamepassInfo) {
       // Roblox is reachable but returned no data → gamepass likely doesn't exist
@@ -402,7 +421,7 @@ export function registerText(bot: Telegraf): void {
       order = await (db as any).$transaction(async (tx: any) => {
         const claimed = await tx.wbCode.updateMany({
           where: {
-            code:   { equals: state.wbCode, mode: "insensitive" },
+            code: { equals: state.wbCode, mode: "insensitive" },
             userId: null, // matches fresh (isUsed=false) AND web-activated (isUsed=true,userId=null)
           },
           data: { userId: user.id, isUsed: true, usedAt: new Date() },
@@ -423,12 +442,12 @@ export function registerText(bot: Telegraf): void {
 
         const newOrder = await tx.wbOrder.create({
           data: {
-            amount:      state.denomination,
+            amount: state.denomination,
             gamepassUrl: cleanLink,
-            status:      "PENDING",
-            platform:    "TG",
-            userId:      user.id,
-            wbCode:      state.wbCode,
+            status: "PENDING",
+            platform: "TG",
+            userId: user.id,
+            wbCode: state.wbCode,
           },
         });
 
@@ -467,7 +486,7 @@ export function registerText(bot: Telegraf): void {
       if (fullOrder) {
         const { text: cardText, reply_markup } = await renderOrderCard(fullOrder);
         for (const adminId of ADMIN_IDS) {
-          try { await bot.telegram.sendMessage(adminId, cardText, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } }); } catch {}
+          try { await bot.telegram.sendMessage(adminId, cardText, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } }); } catch { }
         }
       }
     } catch (err) {
@@ -484,9 +503,9 @@ async function renderOrderCard(order: any) {
   const shortId = order.id.slice(-6).toUpperCase();
   const passPrice = Math.ceil(order.amount / 0.7);
   const statusLabels: any = { PENDING: "⏳ В обработке", COMPLETED: "✅ Выполнен", REJECTED: "❌ Отклонён" };
-  
-  const dateStr = order.createdAt 
-    ? new Date(order.createdAt).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " МСК" 
+
+  const dateStr = order.createdAt
+    ? new Date(order.createdAt).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " МСК"
     : "";
 
   // User profile link
@@ -518,8 +537,8 @@ async function renderOrderCard(order: any) {
   const prev = Math.max(0, totalOrders - 1);
   const loyaltyLine =
     prev >= 5 ? `👑 <b>VIP КЛИЕНТ (${prev} заказов)</b>\n` :
-    prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>\n`              :
-    "";
+      prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>\n` :
+        "";
 
   const text =
     `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
@@ -539,7 +558,7 @@ async function renderOrderCard(order: any) {
   const reply_markup = order.status === "PENDING" ? {
     inline_keyboard: [[
       { text: "✅ ВЫКУПЛЕНО", callback_data: CB.adminOk(order.id) },
-      { text: "❌ ОШИБКА",    callback_data: `admin_reject_init:${order.id}` }
+      { text: "❌ ОШИБКА", callback_data: `admin_reject_init:${order.id}` }
     ]]
   } : undefined;
 
@@ -550,13 +569,15 @@ async function renderOrderCard(order: any) {
 async function handleAdminSearch(ctx: any, query: string) {
   const q = query.trim().toUpperCase();
   const lowerQ = query.trim().toLowerCase();
-  
+
   // Try search by order ID (full or short suffix)
   let order = await (db as any).wbOrder.findFirst({
-    where: { OR: [
-      { id: lowerQ }, 
-      { id: { endsWith: lowerQ } }
-    ]},
+    where: {
+      OR: [
+        { id: lowerQ },
+        { id: { endsWith: lowerQ } }
+      ]
+    },
     include: { user: true },
     orderBy: { createdAt: "desc" }
   });
@@ -591,7 +612,7 @@ async function handleAdminSearch(ctx: any, query: string) {
 export function registerPhoto(bot: Telegraf): void {
   bot.on("photo", async (ctx) => {
     const tgId = String(ctx.from.id);
-    const user  = await (db as any).user.findUnique({ where: { tgId } });
+    const user = await (db as any).user.findUnique({ where: { tgId } });
     if (!user) return;
 
     // 1. Check in-memory state first (fastest path)
@@ -600,13 +621,13 @@ export function registerPhoto(bot: Telegraf): void {
     // 2. DB fallback: latest COMPLETED order whose review bonus is not yet claimed
     if (!orderId) {
       const order = await (db as any).wbOrder.findFirst({
-        where:   { userId: user.id, status: "COMPLETED" },
+        where: { userId: user.id, status: "COMPLETED" },
         orderBy: { updatedAt: "desc" },
       });
       const linked = order
         ? await (db as any).wbCode.findFirst({
-            where: { userId: user.id, reviewBonusClaimed: false },
-          })
+          where: { userId: user.id, reviewBonusClaimed: false },
+        })
         : null;
 
       if (!order || !linked) return; // user has nothing to review
@@ -624,7 +645,7 @@ export function registerPhoto(bot: Telegraf): void {
 
     await sendAdminReviewCard({
       orderId,
-      userId:      user.id as string,
+      userId: user.id as string,
       photoSource: fileId,
       userDisplay: userDisplay(ctx.from),
     });
@@ -674,7 +695,7 @@ async function showAdminStats(ctx: any) {
     where: { status: "COMPLETED", updatedAt: { gte: startOfWeek } }
   });
 
-  const statsText = 
+  const statsText =
     `📊 <b>СТАТИСТИКА (RobloxBank)</b>\n\n` +
     `📅 <b>ЗА СЕГОДНЯ:</b>\n` +
     `• Кол-во: <b>${dayStats._count}</b>\n` +
@@ -703,7 +724,7 @@ async function showAdminQueue(ctx: any) {
 
   pending.forEach((o: any, i: number) => {
     const shortId = o.id.slice(-6).toUpperCase();
-    qText += `${i+1}. <code>${shortId}</code> — <b>${o.amount} R$</b>\n`;
+    qText += `${i + 1}. <code>${shortId}</code> — <b>${o.amount} R$</b>\n`;
     buttons.push({ text: `🔍 ${shortId}`, callback_data: `admin_view:${o.id}` });
   });
 
@@ -712,8 +733,8 @@ async function showAdminQueue(ctx: any) {
     keyboard.push(buttons.slice(i, i + 3));
   }
 
-  await ctx.reply(qText, { 
-    parse_mode: "HTML", 
+  await ctx.reply(qText, {
+    parse_mode: "HTML",
     reply_markup: { inline_keyboard: keyboard }
   });
 }
@@ -744,7 +765,7 @@ async function showAdminHistory(ctx: any) {
     const hasReview = codeMap[o.wbCode]?.reviewBonusClaimed;
     const reviewIcon = hasReview ? " 🌟" : "";
 
-    hText += `${i+1}. <code>${shortId}</code> — <b>${o.amount} R$</b> (${date})${reviewIcon}\n`;
+    hText += `${i + 1}. <code>${shortId}</code> — <b>${o.amount} R$</b> (${date})${reviewIcon}\n`;
     buttons.push({ text: `🔍 ${shortId}`, callback_data: `admin_view:${o.id}` });
   });
 
@@ -753,8 +774,8 @@ async function showAdminHistory(ctx: any) {
     keyboard.push(buttons.slice(i, i + 3));
   }
 
-  await ctx.reply(hText, { 
-    parse_mode: "HTML", 
+  await ctx.reply(hText, {
+    parse_mode: "HTML",
     reply_markup: { inline_keyboard: keyboard }
   });
 }
@@ -782,14 +803,14 @@ async function showAdminCodes(ctx: any) {
 async function performAdminReject(bot: Telegraf, ctx: any, orderId: string, reason: string) {
   const tgId = String(ctx.from.id);
   const displayReason = reason.trim() || "не указана";
-  
+
   try {
     const order = await (db as any).wbOrder.update({
       where: { id: orderId },
-      data: { 
-        status: "REJECTED", 
-        rejectionReason: reason.trim() || null, 
-        adminId: tgId 
+      data: {
+        status: "REJECTED",
+        rejectionReason: reason.trim() || null,
+        adminId: tgId
       },
       include: { user: true }
     });
@@ -815,7 +836,7 @@ export function registerCallbacks(bot: Telegraf): void {
     const cbq = ctx.callbackQuery;
     if (!("data" in cbq)) return ctx.answerCbQuery();
 
-    const data    = cbq.data;
+    const data = cbq.data;
     const adminId = String(ctx.from.id);
     const adminTag = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "Админ";
 
@@ -825,12 +846,12 @@ export function registerCallbacks(bot: Telegraf): void {
       const orderId = data.split(":")[1];
       const order = await (db as any).wbOrder.update({
         where: { id: orderId },
-        data:  { status: "COMPLETED", adminId },
+        data: { status: "COMPLETED", adminId },
       });
       const user = await (db as any).user.findUnique({ where: { id: order.userId } });
 
       const editedText = `✅ <b>Выполнено админом ${adminTag}</b>\nЗаказ #${orderId.slice(-6).toUpperCase()} · ${order.amount} R$`;
-      try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch {}
+      try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch { }
 
       if (user) await notifyUserCompleted(bot, user, orderId, order.amount);
       await ctx.answerCbQuery("✅ Выполнено");
@@ -843,8 +864,8 @@ export function registerCallbacks(bot: Telegraf): void {
       const orderId = data.split(":")[1];
       pendingRejectionReason.set(ctx.from.id, orderId);
       await ctx.reply(
-        `⚠️ Введи причину отклонения для заказа <code>${orderId.slice(-6).toUpperCase()}</code>:`, 
-        { 
+        `⚠️ Введи причину отклонения для заказа <code>${orderId.slice(-6).toUpperCase()}</code>:`,
+        {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([[
             Markup.button.callback("❌ Без причины", `admin_reject_none:${orderId}`)
@@ -870,10 +891,10 @@ export function registerCallbacks(bot: Telegraf): void {
       const parts = data.split(":");
       const code = parts[1];
       const denomination = parseInt(parts[2]);
-      
+
       pendingLink.set(ctx.from.id, { wbCode: code, denomination });
       const passPrice = Math.ceil(denomination / 0.7);
-      
+
       await ctx.reply(
         `🔄 <b>Исправление ссылки</b>\n\n` +
         `💎 Номинал: <b>${denomination} R$</b>\n` +
@@ -899,11 +920,11 @@ export function registerCallbacks(bot: Telegraf): void {
         // Award +50 R$ and mark bonus as claimed
         await (db as any).user.update({
           where: { id: userId },
-          data:  { balance: { increment: 50 } },
+          data: { balance: { increment: 50 } },
         });
         await (db as any).wbCode.updateMany({
           where: { userId, reviewBonusClaimed: false },
-          data:  { reviewBonusClaimed: true },
+          data: { reviewBonusClaimed: true },
         });
 
         const user = await (db as any).user.findUnique({ where: { id: userId } });
@@ -912,7 +933,7 @@ export function registerCallbacks(bot: Telegraf): void {
           `Спасибо за отзыв — бонус доступен при следующей покупке 💛`;
 
         if (user?.tgId) {
-          try { await bot.telegram.sendMessage(user.tgId, bonusMsg, { parse_mode: "HTML" }); } catch {}
+          try { await bot.telegram.sendMessage(user.tgId, bonusMsg, { parse_mode: "HTML" }); } catch { }
         } else if (user?.vkId) {
           await vkSend(user.vkId, stripHtml(bonusMsg));
         }
@@ -923,7 +944,7 @@ export function registerCallbacks(bot: Telegraf): void {
         : `❌ Отклонено — ${adminTag}`;
       const caption = `${result}\nЗаказ #${orderId.slice(-6).toUpperCase()}`;
 
-      try { await ctx.editMessageCaption(caption, { parse_mode: "HTML" }); } catch {}
+      try { await ctx.editMessageCaption(caption, { parse_mode: "HTML" }); } catch { }
       await ctx.answerCbQuery(approve ? "+50 R$ начислено" : "Отклонено");
       return;
     }
@@ -937,7 +958,7 @@ export function registerCallbacks(bot: Telegraf): void {
         include: { user: true }
       });
       if (!order) return ctx.answerCbQuery("Заказ не найден");
-      
+
       const { text, reply_markup } = await renderOrderCard(order);
       await ctx.reply(text, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } });
       return ctx.answerCbQuery();
@@ -975,7 +996,7 @@ export function registerCallbacks(bot: Telegraf): void {
             Markup.button.callback("🔄 Обновить", CB.refreshStatus)
           ]])
         });
-      } catch {}
+      } catch { }
       return ctx.answerCbQuery("Обновлено");
     }
 
@@ -1032,7 +1053,7 @@ async function notifyUserCompleted(
     try {
       await bot.telegram.sendMessage(user.tgId, tgMsg, { parse_mode: "HTML" });
       if (completedCount === 1) pendingReview.set(parseInt(user.tgId), orderId);
-    } catch {}
+    } catch { }
   } else if (user.vkId) {
     await vkSend(user.vkId, vkMsg);
   }
@@ -1047,8 +1068,8 @@ async function notifyUserRejected(
   wbCode: string
 ): Promise<void> {
   const shortId = orderId.slice(-6).toUpperCase();
-  const reasonLine = reason && reason !== "не указана" 
-    ? `💬 Причина: <i>${reason}</i>\n\n` 
+  const reasonLine = reason && reason !== "не указана"
+    ? `💬 Причина: <i>${reason}</i>\n\n`
     : "";
 
   const msg =
@@ -1057,14 +1078,14 @@ async function notifyUserRejected(
     `Нажми на кнопку ниже, чтобы отправить исправленную ссылку:`;
 
   if (user.tgId) {
-    try { 
-      await bot.telegram.sendMessage(user.tgId, msg, { 
+    try {
+      await bot.telegram.sendMessage(user.tgId, msg, {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([[
           Markup.button.callback("🔄 Исправить ссылку", `user_resubmit:${wbCode}:${amount}`)
         ]])
-      }); 
-    } catch {}
+      });
+    } catch { }
   } else if (user.vkId) {
     await vkSend(user.vkId, stripHtml(msg) + "\n\n(Чтобы исправить, просто отправьте новую ссылку на геймпасс в этот чат)");
   }
