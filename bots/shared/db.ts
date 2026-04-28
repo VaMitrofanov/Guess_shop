@@ -97,12 +97,33 @@ export async function getCustomerStatus(
 }
 
 /**
- * Unified greeting string based on loyalty status.
- * Keeps all UI strings in one place — both bots import this.
+ * Premium tiered greeting based on loyalty status.
+ * Single source of truth — both bots import this.
+ *
+ * Tiers:
+ *   VIP  (5+ orders)  — crown, priority, concierge tone
+ *   Returning (1–4)   — warm, personal, encouraging
+ *   New  (0 orders)   — welcoming, intro to service
  */
 export function getGreeting(status: CustomerStatus, name?: string): string {
-  const namePart = name ? `, ${name}` : "";
-  return status.isReturning
-    ? `👋 Рады видеть тебя снова${namePart}! `
-    : `👋 Привет${namePart}! `;
+  const n = name ?? "";
+
+  if (status.orderCount >= 5) {
+    // VIP tier
+    return n
+      ? `👑 С возвращением, наш VIP-клиент, ${n}! Спасибо, что ты с нами. `
+      : `👑 С возвращением, наш VIP-клиент! Спасибо, что ты с нами. `;
+  }
+
+  if (status.isReturning) {
+    // Returning tier (1–4 orders)
+    return n
+      ? `👋 Рады тебя видеть снова, ${n}! `
+      : `👋 Рады тебя видеть снова! `;
+  }
+
+  // New user
+  return n
+    ? `👋 Привет, ${n}! Добро пожаловать в RobloxBank. `
+    : `👋 Привет! Добро пожаловать в RobloxBank. `;
 }

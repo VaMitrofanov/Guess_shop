@@ -199,15 +199,12 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       const custStatus = await getCustomerStatus(String(vkUserId), "VK");
       const firstName = await vkGetName(vkUserId);
       await ctx.reply(
-        `${getGreeting(custStatus, firstName)}✅ Нашли твой активный код!\n` +
+        `${getGreeting(custStatus, firstName)}\n` +
+        `✅ У тебя есть активный код!\n` +
         `💎 Номинал: ${state.denomination} R$\n\n` +
-        `📋 Осталось сделать всего один шаг:\n` +
-        `Пришли нам Asset ID, либо ссылку на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на ${passPrice} R$ 🪙\n\n` +
-        `💡 Пример ссылки:\n` +
-        `https://www.roblox.com/game-pass/1234567/...\n\n` +
-        `💡 Пример Asset ID:\n` +
-        `1234567\n\n` +
-        `Отправь её сюда 👇`
+        `Осталось совсем чуть-чуть — пришли Asset ID или ссылку на геймпасс.\n` +
+        `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
+        `Жду ссылку 👇`
       );
       return;
     }
@@ -220,15 +217,12 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       const custStatus = await getCustomerStatus(String(vkUserId), "VK");
       const firstName = await vkGetName(vkUserId);
       await ctx.reply(
-        `${getGreeting(custStatus, firstName)}✅ Нашли твой активный код!\n` +
+        `${getGreeting(custStatus, firstName)}\n` +
+        `✅ У тебя есть активный код!\n` +
         `💎 Номинал: ${restoredState.denomination} R$\n\n` +
-        `📋 Осталось сделать всего один шаг:\n` +
-        `Пришли нам Asset ID, либо ссылку на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на ${passPrice} R$ 🪙\n\n` +
-        `💡 Пример ссылки:\n` +
-        `https://www.roblox.com/game-pass/1234567/...\n\n` +
-        `💡 Пример Asset ID:\n` +
-        `1234567\n\n` +
-        `Отправь её сюда 👇`
+        `Осталось совсем чуть-чуть — пришли Asset ID или ссылку на геймпасс.\n` +
+        `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
+        `Жду ссылку 👇`
       );
       return;
     }
@@ -239,9 +233,8 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     if (custStatus.isReturning) {
       const firstName = await vkGetName(vkUserId);
       await ctx.reply(
-        `${getGreeting(custStatus, firstName)}\n` +
-        `Чтобы начать новый обмен, просто отправь код с карточки Wildberries ` +
-        `или ссылку на геймпасс — и мы всё оформим!`
+        `${getGreeting(custStatus, firstName)}\n\n` +
+        `Чтобы начать новый обмен — отправь код с карточки Wildberries или ссылку на геймпасс, и мы всё сделаем!`
       );
       return;
     }
@@ -347,16 +340,12 @@ async function handleRefActivation(
   const greetLine = getGreeting(custStatus, firstName);
 
   await ctx.reply(
-    greetLine +
+    greetLine + `\n` +
     `✅ Код ${code} активирован!\n` +
     bonusText +
-    `📋 Осталось сделать всего один шаг:\n\n` +
-    `Пришли нам Asset ID, либо ссылку на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на ${passPrice} R$ 🪙\n\n` +
-    `💡 Пример ссылки:\n` +
-    `https://www.roblox.com/game-pass/1234567/...\n\n` +
-    `💡 Пример Asset ID:\n` +
-    `1234567\n\n` +
-    `Отправь её сюда 👇`
+    `Осталось совсем чуть-чуть — пришли Asset ID или ссылку на геймпасс.\n` +
+    `📌 Убедись, что цена геймпасса ровно ${passPrice} R$\n\n` +
+    `Жду ссылку 👇`
   );
 }
 
@@ -695,15 +684,12 @@ async function handleIdleMessage(
     const passPrice = Math.ceil(restoredState.denomination / 0.7);
     const firstName = await vkGetName(vkUserId);
     await ctx.reply(
-      `${getGreeting(status, firstName)}✅ Нашли твой активный код ${restoredState.wbCode}!\n` +
+      `${getGreeting(status, firstName)}\n` +
+      `✅ У тебя есть активный код ${restoredState.wbCode}!\n` +
       `💎 Номинал: ${restoredState.denomination} R$\n\n` +
-      `📋 Осталось сделать всего один шаг:\n` +
-      `Пришли нам Asset ID, либо ссылку на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на ${passPrice} R$ 🪙\n\n` +
-      `💡 Пример ссылки:\n` +
-      `https://www.roblox.com/game-pass/1234567/...\n\n` +
-      `💡 Пример Asset ID:\n` +
-      `1234567\n\n` +
-      `Отправь её сюда 👇`
+      `Осталось совсем чуть-чуть — пришли Asset ID или ссылку на геймпасс.\n` +
+      `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
+      `Жду ссылку 👇`
     );
     return;
   }
@@ -714,16 +700,16 @@ async function handleIdleMessage(
 
   if (status.isReturning) {
     await ctx.reply(
-      `${greeting}Приятно работать с постоянными клиентами. ` +
-      `Ты знаешь, что делать — просто пришли свой новый код или ссылку на геймпасс, и мы всё оформим!`
+      `${greeting}\n\n` +
+      `Ты знаешь, что делать — просто пришли код с карточки WB или ссылку на геймпасс, и мы всё оформим!`
     );
   } else {
     await ctx.reply(
-      `${greeting}Я бот RobloxBank.\n\n` +
-      `Чтобы активировать код с карточки Wildberries, перейди на сайт:\n` +
-      `https://robloxbank.ru/guide?source=wb\n\n` +
+      `${greeting}Твой личный проводник в мир робуксов.\n\n` +
+      `Чтобы начать, перейди на сайт и активируй код с карточки Wildberries:\n` +
+      `🔗 https://robloxbank.ru/guide?source=wb\n\n` +
       `Напиши "статус" — узнать статус последнего заказа.\n` +
-      `Возникли трудности? Пиши менеджеру: https://t.me/RobloxBank_PA`
+      `Нужна помощь? Пиши менеджеру: https://t.me/RobloxBank_PA`
     );
   }
 }

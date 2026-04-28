@@ -67,16 +67,15 @@ export function registerStart(bot: Telegraf): void {
 
       if (custStatus.isReturning && !isAdmin) {
         await ctx.reply(
-          `${greeting}Спасибо за доверие. ` +
-          `Твои заказы всегда в приоритете. Ожидаем твой код или ссылку!\n\n` +
+          `${greeting}\n\n` +
+          `Твои заказы всегда в приоритете — отправь код или ссылку, и мы всё оформим!\n\n` +
           `📦 Статус заказа: /status`,
           { parse_mode: "HTML" }
         );
       } else {
         await ctx.reply(
-          `${greeting}👋\n\n` +
-          `Для активации кода с карточки Wildberries перейди по ссылке, ` +
-          `напечатанной на вкладыше.\n\n` +
+          `${greeting}Твой личный проводник в мир робуксов.\n\n` +
+          `Для активации кода с карточки Wildberries перейди по ссылке на вкладыше.\n\n` +
           `📦 Статус заказа: /status`,
           isAdmin ? getAdminKeyboard() : {}
         );
@@ -156,14 +155,12 @@ export function registerStart(bot: Telegraf): void {
     }
 
     await ctx.reply(
-      `${greetLine}✅ Код <b>${code}</b> активирован!\n` +
+      `${greetLine}\n` +
+      `✅ Код <b>${code}</b> активирован!\n` +
       bonusText +
-      `📋 <b>Осталось сделать всего один шаг:</b>\n\n` +
-      `Пришли нам <b>Asset ID</b>, либо <b>ссылку</b> на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на <b>${passPrice} R$</b> 🪙\n\n` +
-      `💡 <i>Пример ссылки:</i>\n` +
-      `<code>https://www.roblox.com/game-pass/1234567/...</code>\n\n` +
-      `💡 <i>Пример Asset ID:</i>\n` +
-      `<code>1234567</code>`,
+      `Осталось совсем чуть-чуть — пришли <b>Asset ID</b> или <b>ссылку</b> на геймпасс.\n` +
+      `📌 Убедись, что цена геймпасса ровно <b>${passPrice} R$</b>\n\n` +
+      `Жду ссылку 👇`,
       {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
