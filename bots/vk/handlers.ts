@@ -79,11 +79,21 @@ async function tryRestoreState(vkUserId: number): Promise<boolean> {
 /** Best available URL from a VK photo attachment. */
 function photoUrl(attachment: unknown): string | undefined {
   const ph = attachment as any;
-  // vk-io v4: largeSizeUrl getter
+  // vk-io v4: computed largeSizeUrl getter
   if (typeof ph?.largeSizeUrl === "string") return ph.largeSizeUrl;
-  // fallback: walk sizes array (sorted desc by width)
-  const sizes: Array<{ width?: number; url?: string }> = ph?.sizes ?? [];
-  return sizes.sort((a, b) => (b.width ?? 0) - (a.width ?? 0))[0]?.url;
+  // Walk sizes array — present on vk-io objects and raw VK API payloads.
+  // ph.photo.sizes covers raw attachment objects where photo is nested.
+  const sizes: Array<{ width?: number; height?: number; url?: string }> =
+    ph?.sizes ?? ph?.photo?.sizes ?? [];
+  if (sizes.length > 0) {
+    return sizes
+      .filter((s) => s.url)
+      .sort((a, b) =>
+        (b.width ?? 0) * (b.height ?? 0) - (a.width ?? 0) * (a.height ?? 0)
+      )[0]?.url;
+  }
+  // Last resort: bare url property
+  return typeof ph?.url === "string" ? ph.url : undefined;
 }
 
 function vkUserDisplay(name: string, vkUserId: number): string {
@@ -460,25 +470,38 @@ async function handleReviewScreenshot(
   vkUserId: number,
   knownOrderId?: string
 ): Promise<void> {
-  if (!ctx.hasAttachments("photo")) {
-    await ctx.reply(
-      "📸 Пришли скриншот отзыва в виде фотографии (не файлом).\n" +
-      "После проверки администратором ты получишь +50 R$."
-    );
-    return;
+  // Try vk-io parsed attachments first, then walk raw message attachments
+  // as a fallback (some VK clients deliver photos in a different structure).
+  let url: string | undefined;
+
+  if (ctx.hasAttachments("photo")) {
+    url = photoUrl(ctx.getAttachments("photo")[0]);
+  }
+  if (!url) {
+    const rawAttachments: any[] =
+      (ctx as any).message?.attachments ??
+      (ctx as any).attachments ??
+      [];
+    const rawPhoto = rawAttachments.find((a: any) => a.type === "photo")?.photo;
+    if (rawPhoto) url = photoUrl(rawPhoto);
   }
 
-  const photos = ctx.getAttachments("photo");
-  const url    = photoUrl(photos[0]);
+  // If we still don't have a URL — stay silent (do not feedback user)
   if (!url) {
-    await ctx.reply("Не удалось получить фото. Попробуй ещё раз.");
+    if (knownOrderId) {
+      // User is in AWAITING_REVIEW state but sent no photo — guide them
+      await ctx.reply(
+        "📸 Пришли скриншот отзыва в виде фотографии (не файлом).\n" +
+        "После проверки администратором ты получишь +50 R$."
+      );
+    }
     return;
   }
 
   const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
   if (!user) return;
 
-  // Determine the order to review
+  // Resolve the order to attach this review to
   let orderId = knownOrderId;
   if (!orderId) {
     const order = await (db as any).wbOrder.findFirst({
@@ -490,24 +513,26 @@ async function handleReviewScreenshot(
           where: { userId: user.id, reviewBonusClaimed: false },
         })
       : null;
-    if (!order || !linked) return; // nothing to review
+    if (!order || !linked) return; // nothing to review — stay silent
     orderId = order.id as string;
   }
 
   clearState(vkUserId);
 
-  await ctx.reply(
-    "✅ Скриншот получен! Администратор рассмотрит его в течение 30 минут."
-  );
+  await ctx.reply("✅ Отзыв получен! Менеджер проверит его в ближайшее время и начислит бонус.");
 
-  const reviewerName = user.name ?? await vkGetName(vkUserId);
-
-  await sendAdminReviewCard({
-    orderId,
-    userId:      user.id as string,
-    photoSource: url,
-    userDisplay: vkUserDisplay(reviewerName, vkUserId),
-  });
+  // Forward to Telegram admins — silent fail so user never sees a broken state
+  try {
+    const reviewerName = user.name ?? await vkGetName(vkUserId);
+    await sendAdminReviewCard({
+      orderId,
+      userId:      user.id as string,
+      photoSource: url,
+      userDisplay: vkUserDisplay(reviewerName, vkUserId),
+    });
+  } catch (err) {
+    console.error("[VK] sendAdminReviewCard failed (silent):", err);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -602,6 +627,40 @@ async function handleIdleMessage(
       `Отправь её сюда 👇`
     );
     return;
+  }
+
+  // Smart fallback: only show the activation guide to genuinely new/inactive users.
+  // If the user has any order history, show a short status nudge instead —
+  // dumping the "how to activate" guide at someone who already ordered is confusing.
+  // Exception: explicit greetings always get the full guide.
+  const isGreeting = /^(привет|hello|hi|приветик)$/i.test(lower.trim());
+
+  if (!isGreeting) {
+    try {
+      const idleUser = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+      if (idleUser) {
+        const recentOrder = await (db as any).wbOrder.findFirst({
+          where:   { userId: idleUser.id },
+          orderBy: { createdAt: "desc" },
+        });
+        if (recentOrder) {
+          const label: Record<string, string> = {
+            PENDING:   "⏳ В обработке",
+            COMPLETED: "✅ Выполнен",
+            REJECTED:  "❌ Отклонён",
+          };
+          const shortId = (recentOrder.id as string).slice(-6).toUpperCase();
+          await ctx.reply(
+            `📦 Последняя заявка #${shortId}: ${label[recentOrder.status] ?? recentOrder.status}\n\n` +
+            `Напиши "статус" для подробностей.\n` +
+            `Возникли трудности? Пиши менеджеру: https://t.me/RobloxBank_PA`
+          );
+          return;
+        }
+      }
+    } catch {
+      // non-fatal DB error — fall through to guide
+    }
   }
 
   await ctx.reply(
