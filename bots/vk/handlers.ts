@@ -14,6 +14,7 @@ import { db } from "../shared/db";
 import { sendAdminOrderCard, sendAdminReviewCard } from "../shared/admin";
 import { vkGetName } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
+import { Keyboard } from "vk-io";
 
 /**
  * Extract a Roblox game-pass ID from user input.
@@ -107,6 +108,28 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     return;
   }
 
+  if (msgPayload?.command === "check_sub" || text === "✅ Я подписался") {
+    try {
+      const groupId = process.env.VK_GROUP_ID;
+      const isMember = await (ctx as any).vk.api.groups.isMember({ group_id: groupId, user_id: vkUserId });
+      if (!isMember) {
+        await ctx.reply("Ты всё ещё не подписан! 😢 Подпишись и нажми кнопку снова.");
+        return;
+      }
+      // If subscribed, check if there's a ref to activate
+      const refToActivate = msgPayload?.ref;
+      if (refToActivate) {
+        await handleRefActivation(ctx, vkUserId, refToActivate);
+        return;
+      } else {
+        await ctx.reply("✅ Спасибо за подписку! Теперь ты можешь активировать свой код с карточки Wildberries.");
+        return;
+      }
+    } catch (err) {
+      console.error("[VK] isMember check failed:", err);
+    }
+  }
+
   // ── (B) State machine dispatch ────────────────────────────────────────────
   const state = getState(vkUserId);
 
@@ -127,7 +150,8 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
           `💡 Пример ссылки:\n` +
           `https://www.roblox.com/game-pass/1234567/...\n\n` +
           `💡 Пример Asset ID:\n` +
-          `1234567`
+          `1234567\n\n` +
+          `Отправь её сюда 👇`
         );
         return;
       }
@@ -162,6 +186,26 @@ async function handleRefActivation(
   vkUserId: number,
   code: string
 ): Promise<void> {
+  const groupId = process.env.VK_GROUP_ID;
+  if (groupId) {
+    try {
+      const isMember = await (ctx as any).vk.api.groups.isMember({ group_id: groupId, user_id: vkUserId });
+      if (!isMember) {
+        await ctx.reply({
+          message: "❗️ Для активации кода, пожалуйста, подпишись на нашу группу!",
+          keyboard: Keyboard.builder()
+            .urlButton({ label: "Подписаться", url: `https://vk.com/club${groupId}` })
+            .row()
+            .textButton({ label: "✅ Я подписался", payload: { command: "check_sub", ref: code }, color: "positive" })
+            .inline()
+        });
+        return;
+      }
+    } catch (err) {
+      console.error("[VK] isMember check failed:", err);
+    }
+  }
+
   // Validate code
   const wbCode = await (db as any).wbCode.findUnique({ where: { code } });
   if (!wbCode) {
@@ -215,7 +259,8 @@ async function handleRefActivation(
     `💡 Пример ссылки:\n` +
     `https://www.roblox.com/game-pass/1234567/...\n\n` +
     `💡 Пример Asset ID:\n` +
-    `1234567`
+    `1234567\n\n` +
+    `Отправь её сюда 👇`
   );
 }
 
@@ -432,7 +477,8 @@ async function handleIdleMessage(
       `💡 Пример ссылки:\n` +
       `https://www.roblox.com/game-pass/1234567/...\n\n` +
       `💡 Пример Asset ID:\n` +
-      `1234567`
+      `1234567\n\n` +
+      `Отправь её сюда 👇`
     );
     return;
   }
