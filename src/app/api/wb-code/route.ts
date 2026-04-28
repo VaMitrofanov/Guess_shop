@@ -41,10 +41,43 @@ export async function POST(request: Request) {
       );
     }
 
-    // ── 1. Lookup code in DB ───────────────────────────────────────────────
-    const wbCode = await db.wbCode.findUnique({
-      where: { code: rawCode },
-    });
+    // ── 1 + 2. Atomic lookup + web-activation in a single transaction ────────
+    //
+    // findFirst with mode:"insensitive" handles any stored-case variations.
+    // updateMany with isUsed:false is a single SQL UPDATE — only one concurrent
+    // web request can flip isUsed to true; all others get count=0.
+    //
+    // NOTE: the bot flow defers its own isUsed write to the gamepass-submission
+    // step (wrapped in a separate $transaction there). The WHERE clause in bot
+    // handlers targets userId:null, so a web-activated code (isUsed=true,
+    // userId=null) can still be claimed by the bot without conflict.
+    let wbCode: any   = null;
+    let isFirstActivation = false;
+
+    try {
+      const txResult = await (db as any).$transaction(async (tx: any) => {
+        const found = await tx.wbCode.findFirst({
+          where: { code: { equals: rawCode, mode: "insensitive" } },
+        });
+        if (!found) return { wbCode: null, count: 0 };
+
+        const upd = await tx.wbCode.updateMany({
+          where: { code: { equals: rawCode, mode: "insensitive" }, isUsed: false },
+          data:  { isUsed: true, usedAt: new Date() },
+        });
+        console.log(`[wb-code] updateMany count=${upd.count} for code=${found.code}`);
+        return { wbCode: found, count: upd.count };
+      });
+
+      wbCode            = txResult.wbCode;
+      isFirstActivation = txResult.count > 0;
+    } catch (txErr) {
+      console.error("[wb-code] Transaction error:", txErr);
+      return NextResponse.json(
+        { error: "Внутренняя ошибка сервера" },
+        { status: 500 }
+      );
+    }
 
     if (!wbCode) {
       return NextResponse.json(
@@ -53,37 +86,23 @@ export async function POST(request: Request) {
       );
     }
 
-    // ── 2. Atomic activation — eliminates the check-then-act race condition ─
-    //
-    // `updateMany` with `isUsed: false` in the WHERE clause is a single atomic
-    // SQL UPDATE. PostgreSQL acquires a row-level lock, so only ONE concurrent
-    // request can flip isUsed to true — all others see count=0 and are
-    // rejected. This replaces the old non-atomic "read isUsed → write isUsed"
-    // two-step that allowed duplicate activations.
-    const activated = await db.wbCode.updateMany({
-      where: { code: rawCode, isUsed: false },
-      data:  { isUsed: true, usedAt: new Date() },
-    });
-
-    const isFirstActivation = activated.count > 0;
-
     if (!isFirstActivation) {
-      // The row was already marked used (either by a concurrent request or a
-      // previous activation session). Re-read the current owner to give the
-      // right response.
-      const current = await db.wbCode.findUnique({ where: { code: rawCode } });
+      // Re-read to determine why updateMany returned 0
+      const current = await (db as any).wbCode.findFirst({
+        where: { code: { equals: rawCode, mode: "insensitive" } },
+      });
 
       if (current?.userId) {
-        // Truly claimed by someone — reject.
+        // Code is fully claimed by a linked user — hard reject
         return NextResponse.json(
           { error: "Этот код уже был активирован ранее." },
           { status: 409 }
         );
       }
 
-      // isUsed=true but userId still null: unusual intermediate state (e.g.
-      // site activated it but user hasn't been linked yet). Allow idempotent
-      // re-entry so the UI can still render the denomination.
+      // isUsed=true but userId=null: a previous web session already activated
+      // this code and the bot hasn't linked a user yet. Allow idempotent
+      // re-entry so the UI can still display the denomination.
     }
 
     // ── 3. Telegram notification (first activation only) ──────────────────
