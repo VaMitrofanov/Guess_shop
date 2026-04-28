@@ -190,11 +190,11 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // ── (B) State machine dispatch ────────────────────────────────────────────
   const state = getState(vkUserId);
 
-  // Edge case: VK sends "Начать" without a parsed ref — happens when the user
-  // opens the chat for the first time or navigates back without a ?ref= param.
-  // Try to recover: look up a pending wb_code from DB before giving up.
+  // Edge case: VK sends "Начать" without a parsed ref — user opened chat manually
+  // or tapped the Start button without a ?ref= param.
   if (!ref && (text === "Начать" || text.toLowerCase() === "start")) {
     if (!state) {
+      // 1. Try to recover a pending WB code from DB
       const restored = await tryRestoreState(vkUserId);
       if (restored) {
         const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
@@ -209,6 +209,16 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
           `💡 Пример Asset ID:\n` +
           `1234567\n\n` +
           `Отправь её сюда 👇`
+        );
+        return;
+      }
+
+      // 2. No pending code — recognize returning customers instead of showing an error
+      const { isReturning } = await getCustomerStatus(String(vkUserId), "VK");
+      if (isReturning) {
+        await ctx.reply(
+          "👋 Рады видеть тебя снова в RobloxBank! Чтобы начать новый обмен, " +
+          "просто отправь код с карточки Wildberries или ссылку на геймпасс — и мы всё оформим!"
         );
         return;
       }
@@ -643,9 +653,7 @@ async function handleIdleMessage(
     return;
   }
 
-  // Default help message — try one last DB lookup before giving up.
-  // If the user has any used-but-unlinked wb code attached to them (via
-  // VK ID auth on the site), restore the AWAITING_LINK state automatically.
+  // Try to restore a pending WB code before falling back to the greeting.
   const restored = await tryRestoreState(vkUserId);
   if (restored) {
     const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
@@ -664,55 +672,22 @@ async function handleIdleMessage(
     return;
   }
 
-  // Smart fallback: only show the activation guide to genuinely new/inactive users.
-  // Exception: explicit greetings → personalize based on order history.
-  const isGreeting = /^(привет|hello|hi|приветик)$/i.test(lower.trim());
+  // Single DB call — determines the response for ALL idle messages regardless of wording.
+  // vkUserId is a number; DB field vkId is a string — always coerce with String().
+  const { isReturning } = await getCustomerStatus(String(vkUserId), "VK");
 
-  if (isGreeting) {
-    const { isReturning } = await getCustomerStatus(String(vkUserId), "VK");
-    if (isReturning) {
-      await ctx.reply(
-        "👋 Рады видеть тебя снова в RobloxBank! Приятно работать с постоянными клиентами. " +
-        "Ты знаешь, что делать — просто пришли свой новый код или ссылку на геймпас, и мы всё оформим!"
-      );
-      return;
-    }
-    // New user — fall through to the full guide below
+  if (isReturning) {
+    await ctx.reply(
+      "👋 Рады видеть тебя снова в RobloxBank! Приятно работать с постоянными клиентами. " +
+      "Ты знаешь, что делать — просто пришли свой новый код или ссылку на геймпасс, и мы всё оформим!"
+    );
+  } else {
+    await ctx.reply(
+      "👋 Привет! Я бот RobloxBank.\n\n" +
+      "Чтобы активировать код с карточки Wildberries, перейди на сайт:\n" +
+      "https://robloxbank.ru/guide?source=wb\n\n" +
+      "Напиши \"статус\" — узнать статус последнего заказа.\n" +
+      "Возникли трудности? Пиши менеджеру: https://t.me/RobloxBank_PA"
+    );
   }
-
-  if (!isGreeting) {
-    try {
-      const idleUser = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
-      if (idleUser) {
-        const recentOrder = await (db as any).wbOrder.findFirst({
-          where:   { userId: idleUser.id },
-          orderBy: { createdAt: "desc" },
-        });
-        if (recentOrder) {
-          const label: Record<string, string> = {
-            PENDING:   "⏳ В обработке",
-            COMPLETED: "✅ Выполнен",
-            REJECTED:  "❌ Отклонён",
-          };
-          const shortId = (recentOrder.id as string).slice(-6).toUpperCase();
-          await ctx.reply(
-            `📦 Последняя заявка #${shortId}: ${label[recentOrder.status] ?? recentOrder.status}\n\n` +
-            `Напиши "статус" для подробностей.\n` +
-            `Возникли трудности? Пиши менеджеру: https://t.me/RobloxBank_PA`
-          );
-          return;
-        }
-      }
-    } catch {
-      // non-fatal DB error — fall through to guide
-    }
-  }
-
-  await ctx.reply(
-    "👋 Привет! Я бот RobloxBank.\n\n" +
-    "Чтобы активировать код с карточки Wildberries, перейди на сайт:\n" +
-    "https://robloxbank.ru/guide?source=wb\n\n" +
-    "Напиши \"статус\" — узнать статус последнего заказа.\n" +
-    "Возникли трудности? Пиши менеджеру: https://t.me/RobloxBank_PA"
-  );
 }
