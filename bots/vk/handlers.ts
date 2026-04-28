@@ -105,24 +105,23 @@ async function isVkSubscribed(ctx: MessageContext, vkUserId: number): Promise<bo
   const groupId = process.env.VK_GROUP_ID;
   if (!groupId) return true;
   try {
-    return !!(await (ctx as any).vk.api.groups.isMember({ group_id: groupId, user_id: vkUserId }));
-  } catch {
-    return true; // don't block users on API errors
+    const isMember = !!(await (ctx as any).vk.api.groups.isMember({ group_id: groupId, user_id: vkUserId }));
+    console.log(isMember ? `[Gate] User ${vkUserId} passed sub check` : `[Gate] User ${vkUserId} failed sub check`);
+    return isMember;
+  } catch (err) {
+    console.error(`[Gate] isMember error for user ${vkUserId}:`, err);
+    return true; // fail-open: don't block users on API errors
   }
 }
 
-/** Sends the subscription prompt with benefits list and inline buttons. */
+/** Sends the subscription prompt and inline buttons. */
 async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null): Promise<void> {
   const groupId  = process.env.VK_GROUP_ID;
   const groupUrl = groupId ? `https://vk.com/club${groupId}` : "https://vk.com";
   await ctx.reply({
     message:
-      `🚀 Чтобы активировать код и получить бонусные +5%, подпишись на наше сообщество!\n\n` +
-      `Подписавшись, ты получишь доступ к:\n` +
-      `1. 🏆 Приоритетной очереди выкупа.\n` +
-      `2. 🎰 Розыгрышам робуксов каждый понедельник.\n` +
-      `3. 💬 Моментальной поддержке 24/7.\n\n` +
-      `Это поможет не пропустить новости о раздачах: ${groupUrl}`,
+      `🎁 Чтобы твоя заявка прошла в приоритетном режиме и ты получил доступ к закрытым розыгрышам, подпишись на наше сообщество: ${groupUrl}\n\n` +
+      `Как только подпишешься, присылай код — и мы начнем магию обмена! ✨`,
     keyboard: Keyboard.builder()
       .urlButton({ label: "🔔 Подписаться", url: groupUrl })
       .row()

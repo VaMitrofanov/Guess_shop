@@ -43,8 +43,11 @@ async function checkSubscription(bot: Telegraf, userId: number): Promise<boolean
   if (!channelId) return true;
   try {
     const m = await bot.telegram.getChatMember(channelId, userId);
-    return ["member", "administrator", "creator"].includes(m.status);
-  } catch {
+    const passed = ["member", "administrator", "creator"].includes(m.status);
+    console.log(passed ? `[Gate] User ${userId} passed sub check` : `[Gate] User ${userId} failed sub check`);
+    return passed;
+  } catch (err) {
+    console.error(`[Gate] getChatMember error for user ${userId}:`, err);
     return true; // fail-open: don't block users if the check itself fails
   }
 }
@@ -87,12 +90,8 @@ export function registerStart(bot: Telegraf): void {
     const subscribed = await checkSubscription(bot, ctx.from.id);
     if (!subscribed) {
       await ctx.reply(
-        `💎 Почти готово! Подпишись на наш канал, чтобы активировать код.\n` +
-        `Там мы публикуем секретные промокоды на робуксы: https://t.me/Roblox_Bank_Tg\n\n` +
-        `Подписавшись, ты получишь доступ к:\n` +
-        `1. 🏆 Приоритетной очереди выкупа.\n` +
-        `2. 🎰 Розыгрышам робуксов каждый понедельник.\n` +
-        `3. 💬 Моментальной поддержке 24/7.`,
+        `✨ Почти готово! Чтобы мы могли моментально уведомлять тебя о выкупе и присылать секретные бонусы, загляни в наш канал: https://t.me/Roblox_Bank_Tg\n\n` +
+        `Подпишись и просто отправь код еще раз — мы сразу возьмем его в работу! 💛`,
         {
           parse_mode: "HTML",
           link_preview_options: { is_disabled: true },
@@ -314,13 +313,8 @@ export function registerText(bot: Telegraf): void {
       const subscribed = await checkSubscription(bot, ctx.from.id);
       if (!subscribed) {
         await ctx.reply(
-          `💎 Почти готово! Подпишись на наш канал, чтобы отправить геймпасс.\n` +
-          `Там мы публикуем секретные промокоды на робуксы: https://t.me/Roblox_Bank_Tg\n\n` +
-          `Подписавшись, ты получишь доступ к:\n` +
-          `1. 🏆 Приоритетной очереди выкупа.\n` +
-          `2. 🎰 Розыгрышам робуксов каждый понедельник.\n` +
-          `3. 💬 Моментальной поддержке 24/7.\n\n` +
-          `После подписки просто отправь ссылку на геймпасс ещё раз.`,
+          `✨ Почти готово! Чтобы мы могли моментально уведомлять тебя о выкупе и присылать секретные бонусы, загляни в наш канал: https://t.me/Roblox_Bank_Tg\n\n` +
+          `Подпишись и просто отправь ссылку на геймпасс еще раз — мы сразу возьмем его в работу! 💛`,
           {
             parse_mode: "HTML",
             link_preview_options: { is_disabled: true },
@@ -999,36 +993,48 @@ async function notifyUserCompleted(
   orderId: string,
   amount: number
 ): Promise<void> {
+  // Count includes the order just marked COMPLETED — satisfies "current order counts"
   const completedCount = await (db as any).wbOrder.count({
     where: { userId: user.id, status: "COMPLETED" }
   });
 
-  let msg = `✅ Заказ #${orderId.slice(-6).toUpperCase()} успешно выкуплен!\n` +
-            `Робуксы поступят на баланс в течение 5–7 дней (стандартное правило Roblox).\n\n`;
+  let tgMsg: string;
+  let vkMsg: string;
 
   if (completedCount === 1) {
-    // First order — review incentive
-    msg += `🎁 <b>Оставь отзыв и получи 50 R$!</b>\n` +
-           `Напиши отзыв о покупке на Wildberries, сделай скриншот и отправь его прямо сюда (в виде <b>фотографии</b>, а не файлом). После проверки администратором мы сразу начислим бонус!`;
-  } else if (completedCount >= 5) {
-    // VIP tier
-    msg += `👑 Ты наш VIP-клиент — это уже ${completedCount}-й выкуп! Мы ценим твоё доверие.\n` +
-           `Готовы к следующему заказу в любое время — просто пришли ID геймпасса. 💎`;
+    // TIER 1: First-Time Buyer — Review & Social Proof
+    tgMsg =
+      `✅ Заказ выкуплен! Робуксы придут через 5-7 дней.\n\n` +
+      `🎁 <b>Оставь отзыв и получи 50 R$ в подарок!</b>\n` +
+      `Напиши отзыв на Wildberries, сделай скриншот и отправь его сюда (фотографией, не файлом). После проверки администратором бонус начислим сразу!\n\n` +
+      `Ты уже в нашем канале, так что не пропустишь секретные раздачи! 🎰`;
+    vkMsg =
+      `✅ Заказ выкуплен! Робуксы придут через 5-7 дней.\n\n` +
+      `Оставь отзыв и получи 50 R$ в подарок!\n` +
+      `Напиши отзыв на Wildberries, сделай скриншот и отправь его в этот чат. После проверки бонус начислим сразу!\n\n` +
+      `Ты уже в нашем сообществе, так что не пропустишь секретные раздачи! 🎰`;
   } else {
-    // Returning tier (2-4)
-    msg += `🤝 С тобой приятно работать! Это уже ${completedCount}-й успешный заказ.\n` +
-           `Ждём тебя снова — просто пришли новый ID геймпасса, когда будешь готов! 💛`;
+    // TIER 2: Returning & VIP — Direct pitch to @RobloxBank_PA
+    console.log(`[CRM] Direct pitch sent for order #${completedCount}`);
+    tgMsg =
+      `✅ Заказ выкуплен! Это уже твой <b>${completedCount}-й</b> заказ в RobloxBank. Спасибо за доверие! 💛\n\n` +
+      `Кстати, для постоянных клиентов у нас есть закрытый формат. Чтобы не ждать поставок на Wildberries и оформлять заказы по самому выгодному курсу (без лишних комиссий), пиши нам в поддержку напрямую: @RobloxBank_PA\n\n` +
+      `Это <b>быстрее, проще и всегда выгоднее</b>. Мы закрепим за тобой персональное обслуживание.\n\n` +
+      `Всё ли было удобно в этот раз? Если есть идеи по улучшению — напиши в поддержку, мы читаем каждое сообщение!`;
+    vkMsg =
+      `✅ Заказ выкуплен! Это уже твой ${completedCount}-й заказ в RobloxBank. Спасибо за доверие! 💛\n\n` +
+      `Кстати, для постоянных клиентов у нас есть закрытый формат. Чтобы не ждать поставок на Wildberries и оформлять заказы по самому выгодному курсу (без лишних комиссий), пиши нам в поддержку напрямую: t.me/RobloxBank_PA\n\n` +
+      `Это быстрее, проще и всегда выгоднее. Мы закрепим за тобой персональное обслуживание.\n\n` +
+      `Всё ли было удобно в этот раз? Если есть идеи по улучшению — напиши в поддержку, мы читаем каждое сообщение!`;
   }
 
   if (user.tgId) {
     try {
-      await bot.telegram.sendMessage(user.tgId, msg, { parse_mode: "HTML" });
+      await bot.telegram.sendMessage(user.tgId, tgMsg, { parse_mode: "HTML" });
       if (completedCount === 1) pendingReview.set(parseInt(user.tgId), orderId);
     } catch {}
   } else if (user.vkId) {
-    // VK bot will detect the COMPLETED state on next message; also notify directly
-    // vkSend removes HTML tags via stripHtml
-    await vkSend(user.vkId, stripHtml(msg));
+    await vkSend(user.vkId, vkMsg);
   }
 }
 
