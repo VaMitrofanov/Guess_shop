@@ -53,29 +53,37 @@ export async function POST(request: Request) {
       );
     }
 
-    // Code is "used and linked to a different user" → reject.
-    // Code is "used but no user yet" → idempotent re-entry (caller switched
-    // modes, refreshed the page, etc.). Skip the TG notification but still
-    // return the denomination so the UI can render correctly.
-    const alreadyLinked = wbCode.isUsed && (wbCode as any).userId;
-    if (alreadyLinked) {
-      return NextResponse.json(
-        { error: "Этот код уже был активирован ранее." },
-        { status: 409 }
-      );
-    }
+    // ── 2. Atomic activation — eliminates the check-then-act race condition ─
+    //
+    // `updateMany` with `isUsed: false` in the WHERE clause is a single atomic
+    // SQL UPDATE. PostgreSQL acquires a row-level lock, so only ONE concurrent
+    // request can flip isUsed to true — all others see count=0 and are
+    // rejected. This replaces the old non-atomic "read isUsed → write isUsed"
+    // two-step that allowed duplicate activations.
+    const activated = await db.wbCode.updateMany({
+      where: { code: rawCode, isUsed: false },
+      data:  { isUsed: true, usedAt: new Date() },
+    });
 
-    const isFirstActivation = !wbCode.isUsed;
+    const isFirstActivation = activated.count > 0;
 
-    // ── 2. Mark as used (atomic update) — only on first activation ────────
-    if (isFirstActivation) {
-      await db.wbCode.update({
-        where: { id: wbCode.id },
-        data: {
-          isUsed: true,
-          usedAt: new Date(),
-        },
-      });
+    if (!isFirstActivation) {
+      // The row was already marked used (either by a concurrent request or a
+      // previous activation session). Re-read the current owner to give the
+      // right response.
+      const current = await db.wbCode.findUnique({ where: { code: rawCode } });
+
+      if (current?.userId) {
+        // Truly claimed by someone — reject.
+        return NextResponse.json(
+          { error: "Этот код уже был активирован ранее." },
+          { status: 409 }
+        );
+      }
+
+      // isUsed=true but userId still null: unusual intermediate state (e.g.
+      // site activated it but user hasn't been linked yet). Allow idempotent
+      // re-entry so the UI can still render the denomination.
     }
 
     // ── 3. Telegram notification (first activation only) ──────────────────

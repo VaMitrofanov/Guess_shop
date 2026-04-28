@@ -18,32 +18,79 @@ export async function POST(req: NextRequest) {
     const { OrderId, Status } = body;
 
     if (Status === "CONFIRMED") {
+      // Mark as PAID and record that fulfillment has not yet been triggered.
+      // botStatus="AWAITING_FULFILLMENT" is the durable signal that lets an
+      // admin (or a future retry job) identify orders where payment succeeded
+      // but the automation call failed. Without this, a failed fetch() leaves
+      // the order stuck in PAID with no indication that fulfillment is missing.
       const order = await prisma.order.update({
         where: { id: OrderId },
-        data:  { status: "PAID" },
+        data:  { status: "PAID", botStatus: "AWAITING_FULFILLMENT" },
       });
 
-      console.log(`[Tinkoff Webhook] Order ${OrderId} marked as PAID.`);
+      console.log(
+        `[Tinkoff Webhook] Order ${OrderId} marked as PAID/AWAITING_FULFILLMENT.`,
+        {
+          orderId:   order.id,
+          paymentId: body.PaymentId,
+          amount:    body.Amount,
+          ip:        req.headers.get("x-forwarded-for"),
+          timestamp: new Date().toISOString(),
+        }
+      );
 
-      // Trigger fulfillment via internal endpoint with secret token
+      // Trigger fulfillment — separated from the status update so that a
+      // failure here does NOT prevent Tinkoff from receiving "OK" (which would
+      // cause Tinkoff to retry the whole webhook, potentially double-updating).
       const internalSecret = process.env.INTERNAL_WEBHOOK_SECRET;
       const appUrl         = process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru";
 
       if (internalSecret) {
-        await fetch(`${appUrl}/api/orders/webhook-to-automation`, {
-          method:  "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${internalSecret}`,
-          },
-          body: JSON.stringify({
-            orderId:            order.id,
-            customerRobloxUser: order.customerRobloxUser,
-            amountRobux:        order.amountRobux,
-            method:             order.method,
-          }),
-          signal: AbortSignal.timeout(10_000),
-        }).catch((e) => console.error("[Tinkoff Webhook] Failed to trigger automation:", e));
+        try {
+          const fulfillRes = await fetch(
+            `${appUrl}/api/orders/webhook-to-automation`,
+            {
+              method:  "POST",
+              headers: {
+                "Content-Type":  "application/json",
+                "Authorization": `Bearer ${internalSecret}`,
+              },
+              body: JSON.stringify({
+                orderId:            order.id,
+                customerRobloxUser: order.customerRobloxUser,
+                amountRobux:        order.amountRobux,
+                method:             order.method,
+              }),
+              signal: AbortSignal.timeout(10_000),
+            }
+          );
+
+          if (fulfillRes.ok) {
+            // Fulfillment service accepted the job — update botStatus so we
+            // know the handoff happened. The service itself is responsible for
+            // transitioning status → FULFILLED when done.
+            await prisma.order.update({
+              where: { id: order.id },
+              data:  { botStatus: "FULFILLMENT_TRIGGERED" },
+            });
+            console.log(`[Tinkoff Webhook] Fulfillment triggered for order ${OrderId}.`);
+          } else {
+            const errBody = await fulfillRes.text().catch(() => "(unreadable)");
+            console.error(
+              `[Tinkoff Webhook] Fulfillment returned HTTP ${fulfillRes.status} for order ${OrderId}: ${errBody}. ` +
+              `Order stays in PAID/AWAITING_FULFILLMENT — manual retry required.`
+            );
+            // botStatus intentionally left as "AWAITING_FULFILLMENT"
+          }
+        } catch (fulfillErr) {
+          console.error(
+            `[Tinkoff Webhook] Fulfillment fetch threw for order ${OrderId}:`,
+            fulfillErr,
+            `— Order is PAID but fulfillment was NOT triggered. ` +
+            `Search botStatus=AWAITING_FULFILLMENT to find retryable orders.`
+          );
+          // botStatus intentionally left as "AWAITING_FULFILLMENT"
+        }
       }
     }
 

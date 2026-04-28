@@ -37,6 +37,17 @@ const CreateOrderSchema = z.object({
   agreedToTerms: z.literal(true, {
     error: "Необходимо согласие с офертой и политикой конфиденциальности",
   }),
+  /**
+   * Optional client-generated idempotency key (UUID v4 recommended).
+   *
+   * If provided, the server will return the existing order rather than
+   * creating a duplicate. This prevents double charges from double-clicks
+   * or network retries. The client should generate a fresh UUID per
+   * user-initiated checkout attempt and reuse it on retries.
+   *
+   * Stored in the Order.externalId field (no schema migration required).
+   */
+  idempotencyKey: z.string().uuid().optional(),
 });
 
 /**
@@ -98,7 +109,31 @@ export async function POST(req: NextRequest) {
       productId,
       method,
       gamepassId,
+      idempotencyKey,
     } = validated.data;
+
+    // ── Idempotency guard ─────────────────────────────────────────────────────
+    // If the client sent a key we've already processed, return the existing
+    // order instead of creating a duplicate. Protects against double-clicks and
+    // network-level retries that would otherwise trigger two Tinkoff charges.
+    if (idempotencyKey) {
+      const existing = await prisma.order.findFirst({
+        where:  { externalId: idempotencyKey },
+        select: { id: true, paymentUrl: true, status: true },
+      });
+      if (existing) {
+        console.log(
+          `[orders/create] Idempotency hit for key=${idempotencyKey}, ` +
+          `returning existing order ${existing.id}`
+        );
+        return NextResponse.json({
+          success:      true,
+          orderId:      existing.id,
+          paymentUrl:   existing.paymentUrl,
+          alreadyExists: true,
+        });
+      }
+    }
 
     // Acceptance evidence triple. Captured here, on the server, BEFORE any
     // external call — so even if the rest of the flow fails (Tinkoff down,
@@ -133,6 +168,8 @@ export async function POST(req: NextRequest) {
     // 3. Create the order in DB. The terms-acceptance triple is written
     //    atomically with the rest of the row — there is no window in
     //    which an Order exists without its consent record.
+    //    externalId is used as the idempotency key storage (nullable String,
+    //    no schema migration required).
     const order = await prisma.order.create({
       data: {
         userId: (session?.user as { id?: string } | undefined)?.id ?? null,
@@ -146,6 +183,7 @@ export async function POST(req: NextRequest) {
         termsAcceptedAt,
         termsVersion: TERMS_VERSION,
         termsIpAddress,
+        externalId: idempotencyKey ?? null,
       },
     });
 
