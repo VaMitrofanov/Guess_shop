@@ -193,36 +193,59 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // Edge case: VK sends "Начать" without a parsed ref — user opened chat manually
   // or tapped the Start button without a ?ref= param.
   if (!ref && (text === "Начать" || text.toLowerCase() === "start")) {
-    if (!state) {
-      // 1. Try to recover a pending WB code from DB
-      const restored = await tryRestoreState(vkUserId);
-      if (restored) {
-        const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
-        const passPrice = Math.ceil(restoredState.denomination / 0.7);
-        await ctx.reply(
-          `✅ Нашли твой активный код!\n` +
-          `💎 Номинал: ${restoredState.denomination} R$\n\n` +
-          `📋 Осталось сделать всего один шаг:\n` +
-          `Пришли нам Asset ID, либо ссылку на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на ${passPrice} R$ 🪙\n\n` +
-          `💡 Пример ссылки:\n` +
-          `https://www.roblox.com/game-pass/1234567/...\n\n` +
-          `💡 Пример Asset ID:\n` +
-          `1234567\n\n` +
-          `Отправь её сюда 👇`
-        );
-        return;
-      }
-
-      // 2. No pending code — recognize returning customers instead of showing an error
+    // 1. If already in AWAITING_LINK, remind user about pending code
+    if (state?.type === "AWAITING_LINK") {
+      const passPrice = Math.ceil(state.denomination / 0.7);
       const { isReturning } = await getCustomerStatus(String(vkUserId), "VK");
-      if (isReturning) {
-        await ctx.reply(
-          "👋 Рады видеть тебя снова в RobloxBank! Чтобы начать новый обмен, " +
-          "просто отправь код с карточки Wildberries или ссылку на геймпасс — и мы всё оформим!"
-        );
-        return;
-      }
+      const greetPrefix = isReturning ? "👋 С возвращением! " : "";
+      await ctx.reply(
+        `${greetPrefix}✅ Нашли твой активный код!\n` +
+        `💎 Номинал: ${state.denomination} R$\n\n` +
+        `📋 Осталось сделать всего один шаг:\n` +
+        `Пришли нам Asset ID, либо ссылку на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на ${passPrice} R$ 🪙\n\n` +
+        `💡 Пример ссылки:\n` +
+        `https://www.roblox.com/game-pass/1234567/...\n\n` +
+        `💡 Пример Asset ID:\n` +
+        `1234567\n\n` +
+        `Отправь её сюда 👇`
+      );
+      return;
     }
+
+    // 2. Try to recover a pending WB code from DB
+    const restored = await tryRestoreState(vkUserId);
+    if (restored) {
+      const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
+      const passPrice = Math.ceil(restoredState.denomination / 0.7);
+      const { isReturning } = await getCustomerStatus(String(vkUserId), "VK");
+      const greetPrefix = isReturning ? "👋 С возвращением! " : "";
+      await ctx.reply(
+        `${greetPrefix}✅ Нашли твой активный код!\n` +
+        `💎 Номинал: ${restoredState.denomination} R$\n\n` +
+        `📋 Осталось сделать всего один шаг:\n` +
+        `Пришли нам Asset ID, либо ссылку на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на ${passPrice} R$ 🪙\n\n` +
+        `💡 Пример ссылки:\n` +
+        `https://www.roblox.com/game-pass/1234567/...\n\n` +
+        `💡 Пример Asset ID:\n` +
+        `1234567\n\n` +
+        `Отправь её сюда 👇`
+      );
+      return;
+    }
+
+    // 3. No pending code — recognize returning customers instead of showing an error
+    const { isReturning } = await getCustomerStatus(String(vkUserId), "VK");
+    console.log(`[VK] Начать command: vkUserId=${vkUserId}, isReturning=${isReturning}`);
+    if (isReturning) {
+      const firstName = await vkGetName(vkUserId);
+      await ctx.reply(
+        `👋 С возвращением, ${firstName}! Рады тебя видеть снова в RobloxBank.\n\n` +
+        `Чтобы начать новый обмен, просто отправь код с карточки Wildberries ` +
+        `или ссылку на геймпасс — и мы всё оформим!`
+      );
+      return;
+    }
+
     await ctx.reply(
       "❌ Код активации не найден.\n\n" +
       "Пожалуйста, перейдите по ссылке из инструкции ещё раз — ссылка должна содержать ваш уникальный код."
@@ -301,6 +324,10 @@ async function handleRefActivation(
 
   const totalAmount = wbCode.denomination + (user.balance || 0);
 
+  // ── Check returning status for personalized greeting ──────────────────
+  const { isReturning } = await getCustomerStatus(String(vkUserId), "VK");
+  const firstName = fullName.split(" ")[0] || "друг";
+
   // ── Defer isUsed write to the gamepass step ────────────────────────────
   // The code is claimed atomically (userId:null → user.id) only after Roblox
   // validates the gamepass — see the $transaction in handleGamepassLink.
@@ -316,7 +343,13 @@ async function handleRefActivation(
     bonusText = `💎 Номинал: ${wbCode.denomination} R$\n\n`;
   }
 
+  // Prepend returning greeting if user has previous orders
+  const greetLine = isReturning
+    ? `👋 С возвращением, ${firstName}! Рады тебя видеть.\n`
+    : "";
+
   await ctx.reply(
+    greetLine +
     `✅ Код ${code} активирован!\n` +
     bonusText +
     `📋 Осталось сделать всего один шаг:\n\n` +
