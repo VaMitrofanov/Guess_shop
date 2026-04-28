@@ -106,6 +106,8 @@ export function startBridgeServer(): http.Server {
         return;
       }
 
+      console.log(`[Bridge] Routing ${resolvedMethod} to chat ${chat_id}`);
+
       try {
         const tgRes = await fetch(
           `https://api.telegram.org/bot${token}/${resolvedMethod}`,

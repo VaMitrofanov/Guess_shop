@@ -113,10 +113,11 @@ export async function tgSendPhoto(
         ...(validatorKey ? { "x-validator-key": validatorKey } : {}),
       },
       body: JSON.stringify({
-        token:   process.env.TG_TOKEN,
-        chat_id: chatId,
+        token:      process.env.TG_TOKEN,
+        chat_id:    chatId,
         photo,
         caption,
+        parse_mode: "HTML",
         ...extra,
       }),
     }).catch((err) => console.warn("[notify] tgSendPhoto bridge error:", err?.message));
