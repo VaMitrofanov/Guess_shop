@@ -5,19 +5,74 @@
  * the bots/ TypeScript project has its own rootDir and cannot import from src/.
  */
 
-const UA = "Mozilla/5.0 (compatible; RobloxBank/1.0; +https://robloxbank.ru)";
-const TIMEOUT_MS = 8_000;
+// Realistic browser UA — plain bot strings are rate-limited by Roblox edge nodes
+const UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
-function rFetch(url: string, init: RequestInit = {}) {
-  return fetch(url, {
-    ...init,
-    headers: {
-      "User-Agent": UA,
-      Accept: "application/json",
-      ...(init.headers ?? {}),
-    },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+const TIMEOUT_MS  = 30_000; // 30 s — Roblox APIs can be slow from DC IPs
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 1_000;  // 1 s between retry attempts
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((res) => setTimeout(res, ms));
+}
+
+/**
+ * fetch wrapper with:
+ *  • AbortController-based 30 s timeout (explicit, works on all Node 18+ builds)
+ *  • Chrome User-Agent + Accept headers to bypass bot-detection
+ *  • 3-attempt retry on AbortError/TimeoutError or 5xx response
+ *  • Diagnostic logging of every non-2xx status and error body
+ */
+async function rFetch(
+  url: string,
+  init: RequestInit = {},
+  attempt = 1
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  try {
+    const res = await fetch(url, {
+      ...init,
+      headers: {
+        "User-Agent":      UA,
+        "Accept":          "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        ...(init.headers ?? {}),
+      },
+      signal: controller.signal,
+    });
+
+    // Retry on 5xx (transient server-side failures)
+    if (res.status >= 500 && attempt < MAX_RETRIES) {
+      const body = await res.text().catch(() => "");
+      console.warn(
+        `[Roblox/bots] rFetch attempt ${attempt}/${MAX_RETRIES}: ` +
+        `HTTP ${res.status} from ${url}` +
+        (body ? ` — body: ${body.slice(0, 300)}` : "")
+      );
+      await sleep(RETRY_DELAY);
+      return rFetch(url, init, attempt + 1);
+    }
+
+    return res;
+  } catch (err: any) {
+    // AbortError = our timeout fired; TimeoutError = alternative name in some runtimes
+    const isTimeout = err?.name === "AbortError" || err?.name === "TimeoutError";
+    console.warn(
+      `[Roblox/bots] rFetch attempt ${attempt}/${MAX_RETRIES}: ` +
+      `${err?.name ?? "Error"} for ${url} — ${err?.message ?? String(err)}`
+    );
+    if (isTimeout && attempt < MAX_RETRIES) {
+      await sleep(RETRY_DELAY);
+      return rFetch(url, init, attempt + 1);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export interface GamepassDetails {
@@ -50,6 +105,13 @@ export async function getGamepassDetails(
         isActive:  d.isForSale !== false,
       };
     }
+    {
+      const body = await res1.text().catch(() => "");
+      console.warn(
+        `[Roblox/bots] endpoint 1 failed: HTTP ${res1.status} for id=${gamepassId}` +
+        (body ? ` — ${body.slice(0, 200)}` : "")
+      );
+    }
 
     // Attempt 2: economy API
     const res2 = await rFetch(
@@ -64,6 +126,13 @@ export async function getGamepassDetails(
         creatorId: d.Creator?.Id ?? 0,
         isActive:  d.IsForSale ?? false,
       };
+    }
+    {
+      const body = await res2.text().catch(() => "");
+      console.warn(
+        `[Roblox/bots] endpoint 2 failed: HTTP ${res2.status} for id=${gamepassId}` +
+        (body ? ` — ${body.slice(0, 200)}` : "")
+      );
     }
 
     // Attempt 3: catalog details endpoint
@@ -90,6 +159,13 @@ export async function getGamepassDetails(
         };
       }
     }
+    {
+      const body = await res3.text().catch(() => "");
+      console.warn(
+        `[Roblox/bots] endpoint 3 failed: HTTP ${res3.status} for id=${gamepassId}` +
+        (body ? ` — ${body.slice(0, 200)}` : "")
+      );
+    }
 
     // Attempt 4: legacy marketplace productinfo
     const res4 = await rFetch(
@@ -107,13 +183,23 @@ export async function getGamepassDetails(
         };
       }
     }
+    {
+      const body = await res4.text().catch(() => "");
+      console.warn(
+        `[Roblox/bots] endpoint 4 failed: HTTP ${res4.status} for id=${gamepassId}` +
+        (body ? ` — ${body.slice(0, 200)}` : "")
+      );
+    }
 
-    console.warn(
-      `[Roblox/bots] getGamepassDetails: all 4 APIs failed for id=${gamepassId}`
+    console.error(
+      `[Roblox/bots] getGamepassDetails: all 4 endpoints exhausted for id=${gamepassId}`
     );
     return null;
-  } catch (error) {
-    console.error("[Roblox/bots] getGamepassDetails:", error);
+  } catch (error: any) {
+    console.error(
+      `[Roblox/bots] getGamepassDetails: unhandled error for id=${gamepassId}:`,
+      error?.message ?? error
+    );
     return null;
   }
 }

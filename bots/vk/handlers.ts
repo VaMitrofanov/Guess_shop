@@ -213,13 +213,18 @@ async function handleRefActivation(
     }
   }
 
-  // Validate code
-  const wbCode = await (db as any).wbCode.findUnique({ where: { code } });
+  // Case-insensitive code lookup
+  const wbCode = await (db as any).wbCode.findFirst({
+    where: { code: { equals: code, mode: "insensitive" } },
+  });
   if (!wbCode) {
     await ctx.reply("❌ Код не найден. Проверь правильность ввода на карточке.");
     return;
   }
-  if (wbCode.isUsed && wbCode.userId) {
+  // Only hard-block when code is definitively claimed (isUsed + userId set).
+  // isUsed=true with userId=null means the site pre-activated it — the bot
+  // will link the user atomically at the gamepass-submission step.
+  if (wbCode.isUsed && wbCode.userId != null) {
     await ctx.reply("⚠️ Этот код уже был активирован.");
     return;
   }
@@ -249,20 +254,12 @@ async function handleRefActivation(
     });
   }
 
-  // Atomically link code to user.
-  // updateMany with isUsed:false ensures only one concurrent request wins.
-  const activated = await (db as any).wbCode.updateMany({
-    where: { id: wbCode.id, isUsed: false },
-    data:  { userId: user.id, isUsed: true, usedAt: new Date() },
-  });
-
-  if (activated.count === 0) {
-    await ctx.reply("⚠️ Этот код уже был активирован. Если это ошибка — напишите в поддержку.");
-    return;
-  }
-
   const totalAmount = wbCode.denomination + (user.balance || 0);
-  setState(vkUserId, { type: "AWAITING_LINK", wbCode: code, denomination: totalAmount });
+
+  // ── Defer isUsed write to the gamepass step ────────────────────────────
+  // The code is claimed atomically (userId:null → user.id) only after Roblox
+  // validates the gamepass — see the $transaction in handleGamepassLink.
+  setState(vkUserId, { type: "AWAITING_LINK", wbCode: wbCode.code, denomination: totalAmount });
 
   const passPrice = Math.ceil(totalAmount / 0.7);
 
@@ -352,22 +349,55 @@ async function handleGamepassLink(
     return;
   }
 
-  const order = await (db as any).wbOrder.create({
-    data: {
-      amount:      denomination,
-      gamepassUrl: cleanLink,
-      status:      "PENDING",
-      platform:    "VK",
-      userId:      user.id,
-      wbCode,
-    },
-  });
+  // ── Atomic claim + order creation ──────────────────────────────────────
+  // Roblox validation passed above — now commit in a single transaction:
+  //  1. Claim the code (userId:null covers both fresh and web-pre-activated codes)
+  //  2. Create the order
+  //  3. Clear bonus balance
+  // If any step fails the whole transaction rolls back — code stays unclaimed.
+  let order: any;
+  try {
+    order = await (db as any).$transaction(async (tx: any) => {
+      const claimed = await tx.wbCode.updateMany({
+        where: {
+          code:   { equals: wbCode, mode: "insensitive" },
+          userId: null, // matches fresh (isUsed=false) AND web-activated (isUsed=true,userId=null)
+        },
+        data: { userId: user.id, isUsed: true, usedAt: new Date() },
+      });
+      console.log(
+        `[VK] $transaction: wbCode.updateMany count=${claimed.count} for code=${wbCode}`
+      );
+      if (claimed.count === 0) {
+        throw Object.assign(new Error("Code already claimed"), { isClaimed: true });
+      }
 
-  if (user.balance && user.balance > 0) {
-    await (db as any).user.update({
-      where: { id: user.id },
-      data: { balance: 0 }
+      const newOrder = await tx.wbOrder.create({
+        data: {
+          amount:      denomination,
+          gamepassUrl: cleanLink,
+          status:      "PENDING",
+          platform:    "VK",
+          userId:      user.id,
+          wbCode,
+        },
+      });
+
+      if (user.balance && user.balance > 0) {
+        await tx.user.update({ where: { id: user.id }, data: { balance: 0 } });
+      }
+
+      return newOrder;
     });
+  } catch (err: any) {
+    if (err.isClaimed) {
+      clearState(vkUserId);
+      await ctx.reply("⚠️ Этот код уже был активирован другим пользователем. Обратитесь в поддержку.");
+      return;
+    }
+    console.error("[VK] Order/transaction error:", err);
+    await ctx.reply("❌ Ошибка при создании заявки. Попробуй позже или напишите в поддержку.");
+    return;
   }
 
   clearState(vkUserId);

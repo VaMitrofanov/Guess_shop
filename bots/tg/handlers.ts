@@ -85,13 +85,18 @@ export function registerStart(bot: Telegraf): void {
       return;
     }
 
-    // Validate WB code
-    const wbCode = await (db as any).wbCode.findUnique({ where: { code } });
+    // Case-insensitive code lookup (handles any stored-case variations)
+    const wbCode = await (db as any).wbCode.findFirst({
+      where: { code: { equals: code, mode: "insensitive" } },
+    });
     if (!wbCode) {
       await ctx.reply("❌ Код не найден. Проверь правильность ввода или обратись в поддержку.");
       return;
     }
-    if (wbCode.isUsed && wbCode.userId) {
+    // Only hard-block when code is definitively claimed (isUsed + userId set).
+    // isUsed=true with userId=null means the site pre-activated it — the bot
+    // will link the user atomically at the gamepass-submission step below.
+    if (wbCode.isUsed && wbCode.userId != null) {
       await ctx.reply("⚠️ Этот код уже был активирован ранее.");
       return;
     }
@@ -107,24 +112,13 @@ export function registerStart(bot: Telegraf): void {
       });
     }
 
-    // Atomically link code to user.
-    // updateMany with isUsed:false in the WHERE clause is a single SQL UPDATE —
-    // only the first concurrent request wins; subsequent ones see count=0.
-    const activated = await (db as any).wbCode.updateMany({
-      where: { id: wbCode.id, isUsed: false },
-      data:  { userId: user.id, isUsed: true, usedAt: new Date() },
-    });
-
-    if (activated.count === 0) {
-      // A concurrent request already claimed this code.
-      await ctx.reply("⚠️ Этот код уже был активирован ранее.");
-      return;
-    }
-
     const totalAmount = wbCode.denomination + (user.balance || 0);
 
-    // Enter "waiting for gamepass link" state
-    pendingLink.set(ctx.from.id, { wbCode: code, denomination: totalAmount });
+    // ── Defer isUsed write to the gamepass step ────────────────────────────
+    // The code is claimed atomically (userId:null → user.id, isUsed→true) only
+    // after Roblox validates the gamepass — see the $transaction in registerText.
+    // This prevents orphaned "used" codes when Roblox times out or rejects.
+    pendingLink.set(ctx.from.id, { wbCode: wbCode.code, denomination: totalAmount });
 
     const passPrice = Math.ceil(totalAmount / 0.7);
     const isAdmin = ADMIN_IDS.includes(tgId);
@@ -324,32 +318,58 @@ export function registerText(bot: Telegraf): void {
 
     const cleanLink = `https://www.roblox.com/game-pass/${passId}`;
 
+    const user = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
+    if (!user) {
+      await ctx.reply("Ошибка сессии. Пожалуйста, пройди активацию кода повторно через /start.");
+      return;
+    }
+
+    // ── Atomic claim + order creation ──────────────────────────────────────
+    // Roblox validation passed above — now commit in a single transaction:
+    //  1. Claim the code (userId:null covers both fresh and web-pre-activated codes)
+    //  2. Create the order
+    //  3. Clear bonus balance
+    // If any step fails the whole transaction rolls back — the code stays unclaimed.
     let order: any;
     try {
-      const user = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
-      if (!user) {
-        await ctx.reply("Ошибка сессии. Пожалуйста, пройди активацию кода повторно через /start.");
+      order = await (db as any).$transaction(async (tx: any) => {
+        const claimed = await tx.wbCode.updateMany({
+          where: {
+            code:   { equals: state.wbCode, mode: "insensitive" },
+            userId: null, // matches fresh (isUsed=false) AND web-activated (isUsed=true,userId=null)
+          },
+          data: { userId: user.id, isUsed: true, usedAt: new Date() },
+        });
+        console.log(
+          `[TG] $transaction: wbCode.updateMany count=${claimed.count} for code=${state.wbCode}`
+        );
+        if (claimed.count === 0) {
+          throw Object.assign(new Error("Code already claimed"), { isClaimed: true });
+        }
+
+        const newOrder = await tx.wbOrder.create({
+          data: {
+            amount:      state.denomination,
+            gamepassUrl: cleanLink,
+            status:      "PENDING",
+            platform:    "TG",
+            userId:      user.id,
+            wbCode:      state.wbCode,
+          },
+        });
+
+        if (user.balance && user.balance > 0) {
+          await tx.user.update({ where: { id: user.id }, data: { balance: 0 } });
+        }
+
+        return newOrder;
+      });
+    } catch (err: any) {
+      if (err.isClaimed) {
+        pendingLink.delete(ctx.from.id);
+        await ctx.reply("⚠️ Этот код уже был активирован другим пользователем. Обратитесь в поддержку.");
         return;
       }
-
-      order = await (db as any).wbOrder.create({
-        data: {
-          amount:      state.denomination,
-          gamepassUrl: cleanLink,
-          status:      "PENDING",
-          platform:    "TG",
-          userId:      user.id,
-          wbCode:      state.wbCode,
-        },
-      });
-
-      if (user.balance && user.balance > 0) {
-        await (db as any).user.update({
-          where: { id: user.id },
-          data: { balance: 0 }
-        });
-      }
-    } catch (err) {
       console.error("[TG] Order create error:", err);
       await ctx.reply("❌ Ошибка при создании заявки. Попробуй позже или напиши в поддержку.");
       return;
