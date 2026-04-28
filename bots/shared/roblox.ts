@@ -11,10 +11,11 @@
  *                                bridge server itself to avoid recursion
  */
 
-// Realistic browser UA — plain bot strings are rate-limited by Roblox edge nodes
+// Mobile UA — economy.roblox.com returns JSON for mobile clients; desktop UA
+// can trigger HTML responses or login-wall redirects from Roblox edge nodes.
 const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+  "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/124.0.6367.82 Mobile Safari/537.36";
 
 const TIMEOUT_MS  = 30_000; // 30 s — Roblox APIs can be slow from DC IPs
 const MAX_RETRIES = 3;
@@ -134,18 +135,18 @@ export async function getGamepassDetailsDirect(
     isActive:  d.IsForSale ?? false,
   });
 
-  // Attempt 1 — apis.roblox.com /product-info (correct endpoint)
+  // Attempt 1 — economy public API (no login required; returns PriceInRobux + IsForSale)
   try {
     const res = await rFetch(
-      `https://apis.roblox.com/game-passes/v1/game-passes/${gamepassId}/product-info`
+      `https://economy.roblox.com/v1/game-passes/${gamepassId}/details`
     );
     httpResponses++;
-    if (res.ok) return parseProductInfo(await res.json());
+    if (res.ok) return parseEconomy(await res.json());
     const body = await res.text().catch(() => "");
     console.warn(`[Roblox/bots] endpoint 1 failed: HTTP ${res.status} for id=${gamepassId} — ${body.slice(0, 200)}`);
   } catch { /* network error — httpResponses unchanged */ }
 
-  // Attempt 2 — roproxy mirror of the same endpoint (fallback if direct is blocked)
+  // Attempt 2 — roproxy mirror of product-info (fallback)
   try {
     const res = await rFetch(
       `https://apis.roproxy.com/game-passes/v1/game-passes/${gamepassId}/product-info`
@@ -156,13 +157,13 @@ export async function getGamepassDetailsDirect(
     console.warn(`[Roblox/bots] endpoint 2 failed: HTTP ${res.status} for id=${gamepassId} — ${body.slice(0, 200)}`);
   } catch { /* network error */ }
 
-  // Attempt 3 — economy game-passes API
+  // Attempt 3 — apis.roblox.com product-info (last resort)
   try {
     const res = await rFetch(
-      `https://economy.roblox.com/v1/game-passes/${gamepassId}/details`
+      `https://apis.roblox.com/game-passes/v1/game-passes/${gamepassId}/product-info`
     );
     httpResponses++;
-    if (res.ok) return parseEconomy(await res.json());
+    if (res.ok) return parseProductInfo(await res.json());
     const body = await res.text().catch(() => "");
     console.warn(`[Roblox/bots] endpoint 3 failed: HTTP ${res.status} for id=${gamepassId} — ${body.slice(0, 200)}`);
   } catch { /* network error */ }
