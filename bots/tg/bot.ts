@@ -26,6 +26,8 @@ import "dotenv/config";
 import { Telegraf } from "telegraf";
 import { startBridgeServer } from "../shared/bridge";
 
+console.log("🚀 DEPLOY_VERSION: 4.0 - LOYALTY_HARD_SYNC");
+
 import {
   registerStart,
   registerStatus,

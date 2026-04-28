@@ -71,18 +71,27 @@ export async function getCustomerStatus(
   platformId: string,
   platform:   "TG" | "VK"
 ): Promise<CustomerStatus> {
-  console.log(`[DB DEBUG] Checking loyalty for ${platformId} on ${platform}`);
+  console.log(`[DB DEBUG] Querying loyalty for ID: ${platformId} (platform: ${platform}, type: ${typeof platformId})`);
   try {
-    const where = platform === "TG" ? { tgId: platformId } : { vkId: platformId };
-    const user  = await (db as any).user.findUnique({ where, select: { id: true } });
+    const where = platform === "TG"
+      ? { tgId: String(platformId) }
+      : { vkId: String(platformId) };
+    console.log(`[DB DEBUG] findUnique where:`, JSON.stringify(where));
+
+    const user = await (db as any).user.findUnique({ where, select: { id: true } });
     console.log(`[DB DEBUG] User lookup for ${platformId}: ${user ? `found (id=${user.id})` : "NOT FOUND"}`);
     if (!user) return { isReturning: false, orderCount: 0 };
 
     const orderCount = await (db as any).wbOrder.count({ where: { userId: user.id } });
     console.log(`[DB DEBUG] Found ${orderCount} orders for user ${platformId} (userId=${user.id})`);
     return { isReturning: orderCount > 0, orderCount };
-  } catch (err) {
-    console.error(`[DB DEBUG] getCustomerStatus FAILED for ${platformId} on ${platform}:`, err);
+  } catch (err: unknown) {
+    const errObj = err instanceof Error ? err : new Error(String(err));
+    console.error(
+      `[DB DEBUG] getCustomerStatus FAILED for ${platformId} on ${platform}:\n` +
+      `  message: ${errObj.message}\n` +
+      `  stack: ${errObj.stack}`
+    );
     return { isReturning: false, orderCount: 0 };
   }
 }

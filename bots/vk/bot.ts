@@ -29,6 +29,8 @@ import { VK } from "vk-io";
 import { handleMessage } from "./handlers";
 import { startBridgeServer } from "../shared/bridge";
 
+console.log("🚀 DEPLOY_VERSION: 4.0 - LOYALTY_HARD_SYNC");
+
 const token   = process.env.VK_TOKEN;
 const groupId = process.env.VK_GROUP_ID ? parseInt(process.env.VK_GROUP_ID) : undefined;
 
@@ -39,7 +41,6 @@ export const vk = new VK({ token, apiVersion: "5.131" });
 
 // Register message_new handler
 vk.updates.on("message_new", async (ctx) => {
-  console.log(">>> [VK DEBUG] Message Received! Context:", JSON.stringify(ctx));
   try {
     await handleMessage(ctx as any);
   } catch (err) {

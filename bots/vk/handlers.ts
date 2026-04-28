@@ -624,6 +624,10 @@ async function handleIdleMessage(
 ): Promise<void> {
   const lower = text.toLowerCase();
 
+  // ── PRIORITY 1: Loyalty check FIRST for every idle message ─────────────
+  const status = await getCustomerStatus(String(vkUserId), "VK");
+  console.log(`[VK] User ${vkUserId} isReturning: ${status.isReturning}, orderCount: ${status.orderCount}`);
+
   // Guard: user sent a gamepass URL/ID but state machine has no active code.
   // Try DB auto-pickup first — they may have activated the code on the site.
   if (extractPassId(text) !== null) {
@@ -691,8 +695,9 @@ async function handleIdleMessage(
   if (restored) {
     const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
     const passPrice = Math.ceil(restoredState.denomination / 0.7);
+    const greetPrefix = status.isReturning ? "👋 С возвращением! " : "";
     await ctx.reply(
-      `✅ Нашли твой активный код ${restoredState.wbCode}!\n` +
+      `${greetPrefix}✅ Нашли твой активный код ${restoredState.wbCode}!\n` +
       `💎 Номинал: ${restoredState.denomination} R$\n\n` +
       `📋 Осталось сделать всего один шаг:\n` +
       `Пришли нам Asset ID, либо ссылку на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на ${passPrice} R$ 🪙\n\n` +
@@ -705,13 +710,11 @@ async function handleIdleMessage(
     return;
   }
 
-  // Single DB call — determines the response for ALL idle messages regardless of wording.
-  // vkUserId is a number; DB field vkId is a string — always coerce with String().
-  const { isReturning } = await getCustomerStatus(String(vkUserId), "VK");
-
-  if (isReturning) {
+  // ── PRIORITY 2: Returning vs. new user greeting ────────────────────────
+  if (status.isReturning) {
     await ctx.reply(
-      "👋 Рады видеть тебя снова в RobloxBank! Приятно работать с постоянными клиентами. " +
+      "👋 С возвращением! Рады видеть тебя снова в RobloxBank. " +
+      "Приятно работать с постоянными клиентами. " +
       "Ты знаешь, что делать — просто пришли свой новый код или ссылку на геймпасс, и мы всё оформим!"
     );
   } else {
