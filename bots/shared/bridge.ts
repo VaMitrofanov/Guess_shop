@@ -47,8 +47,11 @@ export function startBridgeServer(): http.Server {
       return;
     }
 
-    // Only serve GET /check-pass
-    if (req.method !== "GET" || url.pathname !== "/check-pass") {
+    // ── Route dispatcher ────────────────────────────────────────────────────
+    const isCheckPass = req.method === "GET"  && url.pathname === "/check-pass";
+    const isTgProxy   = req.method === "POST" && url.pathname === "/tg-proxy";
+
+    if (!isCheckPass && !isTgProxy) {
       respond(404, { ok: false, error: "not_found" });
       return;
     }
@@ -66,6 +69,50 @@ export function startBridgeServer(): http.Server {
       }
     }
 
+    // ── POST /tg-proxy ──────────────────────────────────────────────────────
+    if (isTgProxy) {
+      let body: { token?: string; chat_id?: string; text?: string };
+      try {
+        const raw = await new Promise<string>((resolve, reject) => {
+          let data = "";
+          req.on("data", (chunk) => { data += chunk; });
+          req.on("end",  () => resolve(data));
+          req.on("error", reject);
+        });
+        body = JSON.parse(raw);
+      } catch {
+        respond(400, { ok: false, error: "bad_request" });
+        return;
+      }
+
+      const { token, chat_id, text } = body;
+      if (!token || !chat_id || !text) {
+        respond(400, { ok: false, error: "missing_fields" });
+        return;
+      }
+
+      try {
+        const tgRes = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ chat_id, text, parse_mode: "HTML" }),
+        });
+        const tgBody = await tgRes.json();
+        if (!tgRes.ok) {
+          console.error(`[Bridge/tg-proxy] TG error for chat_id=${chat_id}: HTTP ${tgRes.status}`, tgBody);
+          respond(502, { ok: false, error: "tg_error", detail: tgBody });
+          return;
+        }
+        console.log(`[Bridge/tg-proxy] → chat_id=${chat_id} delivered`);
+        respond(200, { ok: true });
+      } catch (err: any) {
+        console.error("[Bridge/tg-proxy] fetch failed:", err?.message ?? err);
+        respond(502, { ok: false, error: "tg_unreachable" });
+      }
+      return;
+    }
+
+    // ── GET /check-pass ─────────────────────────────────────────────────────
     // ── Validate asset ID ───────────────────────────────────────────────────
     const passId = url.searchParams.get("id") ?? "";
     if (!passId || !/^\d{1,20}$/.test(passId)) {
