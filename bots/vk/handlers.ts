@@ -10,7 +10,7 @@
  */
 
 import type { MessageContext } from "vk-io";
-import { db, getCustomerStatus } from "../shared/db";
+import { db, getCustomerStatus, getGreeting } from "../shared/db";
 import { sendAdminOrderCard, sendAdminReviewCard } from "../shared/admin";
 import { vkGetName } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
@@ -196,10 +196,10 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     // 1. If already in AWAITING_LINK, remind user about pending code
     if (state?.type === "AWAITING_LINK") {
       const passPrice = Math.ceil(state.denomination / 0.7);
-      const { isReturning } = await getCustomerStatus(String(vkUserId), "VK");
-      const greetPrefix = isReturning ? "👋 С возвращением! " : "";
+      const custStatus = await getCustomerStatus(String(vkUserId), "VK");
+      const firstName = await vkGetName(vkUserId);
       await ctx.reply(
-        `${greetPrefix}✅ Нашли твой активный код!\n` +
+        `${getGreeting(custStatus, firstName)}✅ Нашли твой активный код!\n` +
         `💎 Номинал: ${state.denomination} R$\n\n` +
         `📋 Осталось сделать всего один шаг:\n` +
         `Пришли нам Asset ID, либо ссылку на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на ${passPrice} R$ 🪙\n\n` +
@@ -217,10 +217,10 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     if (restored) {
       const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
       const passPrice = Math.ceil(restoredState.denomination / 0.7);
-      const { isReturning } = await getCustomerStatus(String(vkUserId), "VK");
-      const greetPrefix = isReturning ? "👋 С возвращением! " : "";
+      const custStatus = await getCustomerStatus(String(vkUserId), "VK");
+      const firstName = await vkGetName(vkUserId);
       await ctx.reply(
-        `${greetPrefix}✅ Нашли твой активный код!\n` +
+        `${getGreeting(custStatus, firstName)}✅ Нашли твой активный код!\n` +
         `💎 Номинал: ${restoredState.denomination} R$\n\n` +
         `📋 Осталось сделать всего один шаг:\n` +
         `Пришли нам Asset ID, либо ссылку на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на ${passPrice} R$ 🪙\n\n` +
@@ -233,13 +233,13 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       return;
     }
 
-    // 3. No pending code — recognize returning customers instead of showing an error
-    const { isReturning } = await getCustomerStatus(String(vkUserId), "VK");
-    console.log(`[VK] Начать command: vkUserId=${vkUserId}, isReturning=${isReturning}`);
-    if (isReturning) {
+    // 3. No pending code — greet based on loyalty status
+    const custStatus = await getCustomerStatus(String(vkUserId), "VK");
+    console.log(`[VK] Начать command: vkUserId=${vkUserId}, isReturning=${custStatus.isReturning}`);
+    if (custStatus.isReturning) {
       const firstName = await vkGetName(vkUserId);
       await ctx.reply(
-        `👋 С возвращением, ${firstName}! Рады тебя видеть снова в RobloxBank.\n\n` +
+        `${getGreeting(custStatus, firstName)}\n` +
         `Чтобы начать новый обмен, просто отправь код с карточки Wildberries ` +
         `или ссылку на геймпасс — и мы всё оформим!`
       );
@@ -325,7 +325,7 @@ async function handleRefActivation(
   const totalAmount = wbCode.denomination + (user.balance || 0);
 
   // ── Check returning status for personalized greeting ──────────────────
-  const { isReturning } = await getCustomerStatus(String(vkUserId), "VK");
+  const custStatus = await getCustomerStatus(String(vkUserId), "VK");
   const firstName = fullName.split(" ")[0] || "друг";
 
   // ── Defer isUsed write to the gamepass step ────────────────────────────
@@ -343,10 +343,8 @@ async function handleRefActivation(
     bonusText = `💎 Номинал: ${wbCode.denomination} R$\n\n`;
   }
 
-  // Prepend returning greeting if user has previous orders
-  const greetLine = isReturning
-    ? `👋 С возвращением, ${firstName}! Рады тебя видеть.\n`
-    : "";
+  // Greeting from shared helper — no double-up, single source of truth
+  const greetLine = getGreeting(custStatus, firstName);
 
   await ctx.reply(
     greetLine +
@@ -695,9 +693,9 @@ async function handleIdleMessage(
   if (restored) {
     const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
     const passPrice = Math.ceil(restoredState.denomination / 0.7);
-    const greetPrefix = status.isReturning ? "👋 С возвращением! " : "";
+    const firstName = await vkGetName(vkUserId);
     await ctx.reply(
-      `${greetPrefix}✅ Нашли твой активный код ${restoredState.wbCode}!\n` +
+      `${getGreeting(status, firstName)}✅ Нашли твой активный код ${restoredState.wbCode}!\n` +
       `💎 Номинал: ${restoredState.denomination} R$\n\n` +
       `📋 Осталось сделать всего один шаг:\n` +
       `Пришли нам Asset ID, либо ссылку на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на ${passPrice} R$ 🪙\n\n` +
@@ -710,20 +708,22 @@ async function handleIdleMessage(
     return;
   }
 
-  // ── PRIORITY 2: Returning vs. new user greeting ────────────────────────
+  // ── PRIORITY 2: Greeting via shared helper ─────────────────────────────
+  const firstName = await vkGetName(vkUserId);
+  const greeting = getGreeting(status, firstName);
+
   if (status.isReturning) {
     await ctx.reply(
-      "👋 С возвращением! Рады видеть тебя снова в RobloxBank. " +
-      "Приятно работать с постоянными клиентами. " +
-      "Ты знаешь, что делать — просто пришли свой новый код или ссылку на геймпасс, и мы всё оформим!"
+      `${greeting}Приятно работать с постоянными клиентами. ` +
+      `Ты знаешь, что делать — просто пришли свой новый код или ссылку на геймпасс, и мы всё оформим!`
     );
   } else {
     await ctx.reply(
-      "👋 Привет! Я бот RobloxBank.\n\n" +
-      "Чтобы активировать код с карточки Wildberries, перейди на сайт:\n" +
-      "https://robloxbank.ru/guide?source=wb\n\n" +
-      "Напиши \"статус\" — узнать статус последнего заказа.\n" +
-      "Возникли трудности? Пиши менеджеру: https://t.me/RobloxBank_PA"
+      `${greeting}Я бот RobloxBank.\n\n` +
+      `Чтобы активировать код с карточки Wildberries, перейди на сайт:\n` +
+      `https://robloxbank.ru/guide?source=wb\n\n` +
+      `Напиши "статус" — узнать статус последнего заказа.\n` +
+      `Возникли трудности? Пиши менеджеру: https://t.me/RobloxBank_PA`
     );
   }
 }

@@ -95,3 +95,14 @@ export async function getCustomerStatus(
     return { isReturning: false, orderCount: 0 };
   }
 }
+
+/**
+ * Unified greeting string based on loyalty status.
+ * Keeps all UI strings in one place — both bots import this.
+ */
+export function getGreeting(status: CustomerStatus, name?: string): string {
+  const namePart = name ? `, ${name}` : "";
+  return status.isReturning
+    ? `👋 Рады видеть тебя снова${namePart}! `
+    : `👋 Привет${namePart}! `;
+}

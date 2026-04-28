@@ -8,7 +8,7 @@
 import { Telegraf, Markup } from "telegraf";
 // telegraf/types re-exports the full typegram surface (official subpath export)
 import type { User as TGUser } from "telegraf/types";
-import { db, getCustomerStatus } from "../shared/db";
+import { db, getCustomerStatus, getGreeting } from "../shared/db";
 import { vkSend, stripHtml } from "../shared/notify";
 import { sendAdminOrderCard, sendAdminReviewCard, CB, ADMIN_IDS } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason } from "./session";
@@ -58,23 +58,26 @@ export function registerStart(bot: Telegraf): void {
     const tgId = String(ctx.from.id);
     const code  = ctx.startPayload?.trim().toUpperCase() ?? "";
 
-    // No code payload — generic greeting
+    // No code payload — greeting via shared helper
     if (!code) {
       const isAdmin = ADMIN_IDS.includes(tgId);
-      const { isReturning } = await getCustomerStatus(tgId, "TG");
-      if (isReturning && !isAdmin) {
+      const custStatus = await getCustomerStatus(tgId, "TG");
+      const firstName = ctx.from.first_name || undefined;
+      const greeting = getGreeting(custStatus, firstName);
+
+      if (custStatus.isReturning && !isAdmin) {
         await ctx.reply(
-          "🎖️ С возвращением в RobloxBank! Спасибо за доверие. " +
-          "Твои заказы всегда в приоритете. Ожидаем твой код или ссылку!\n\n" +
-          "📦 Статус заказа: /status",
+          `${greeting}Спасибо за доверие. ` +
+          `Твои заказы всегда в приоритете. Ожидаем твой код или ссылку!\n\n` +
+          `📦 Статус заказа: /status`,
           { parse_mode: "HTML" }
         );
       } else {
         await ctx.reply(
-          "👋 Привет!\n\n" +
-          "Для активации кода с карточки Wildberries перейди по ссылке, " +
-          "напечатанной на вкладыше.\n\n" +
-          "📦 Статус заказа: /status",
+          `${greeting}👋\n\n` +
+          `Для активации кода с карточки Wildberries перейди по ссылке, ` +
+          `напечатанной на вкладыше.\n\n` +
+          `📦 Статус заказа: /status`,
           isAdmin ? getAdminKeyboard() : {}
         );
       }
@@ -140,6 +143,10 @@ export function registerStart(bot: Telegraf): void {
     const passPrice = Math.ceil(totalAmount / 0.7);
     const isAdmin = ADMIN_IDS.includes(tgId);
 
+    // Loyalty-aware greeting for code activation
+    const custStatus = await getCustomerStatus(tgId, "TG");
+    const greetLine = getGreeting(custStatus, ctx.from.first_name || undefined);
+
     let bonusText = "";
     if (user.balance && user.balance > 0) {
       bonusText = `🎁 Использован бонус: <b>${user.balance} R$</b>\n` +
@@ -149,7 +156,7 @@ export function registerStart(bot: Telegraf): void {
     }
 
     await ctx.reply(
-      `✅ Код <b>${code}</b> активирован!\n` +
+      `${greetLine}✅ Код <b>${code}</b> активирован!\n` +
       bonusText +
       `📋 <b>Осталось сделать всего один шаг:</b>\n\n` +
       `Пришли нам <b>Asset ID</b>, либо <b>ссылку</b> на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на <b>${passPrice} R$</b> 🪙\n\n` +
