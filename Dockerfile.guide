@@ -1,0 +1,106 @@
+# syntax=docker/dockerfile:1.7
+
+# ────────────────────────────────────────────────────────────────────────────
+# Guide service — port 3001. Handles /guide, /api/wb-code, /api/wb-link.
+#
+# Key difference from the main Dockerfile:
+#   • next.config.ts is swapped for next.config.guide.ts before `next build`
+#     so the standalone output has assetPrefix="/_next-guide" baked in.
+#   • PORT=3001 in the runner stage.
+#   • Healthcheck targets /guide, not /.
+#
+# Traefik strips /_next-guide from static asset requests before forwarding
+# to this container, so server.js sees the canonical /_next/static/... path.
+# ────────────────────────────────────────────────────────────────────────────
+
+ARG NODE_VERSION=22-bookworm-slim
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Stage 1 — deps
+# ────────────────────────────────────────────────────────────────────────────
+FROM node:${NODE_VERSION} AS deps
+WORKDIR /app
+
+RUN apt-get update -y \
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV NODE_OPTIONS="--max-old-space-size=1024"
+
+COPY package.json package-lock.json ./
+COPY prisma ./prisma
+
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm ci --no-audit --no-fund --prefer-offline
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Stage 2 — builder
+# ────────────────────────────────────────────────────────────────────────────
+FROM node:${NODE_VERSION} AS builder
+WORKDIR /app
+
+RUN apt-get update -y \
+    && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    NODE_ENV=production \
+    NODE_OPTIONS="--max-old-space-size=1536"
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# Swap in the guide config. next.config.ts.web is kept for auditability but
+# is never read by next build (which only looks for next.config.{ts,js}).
+RUN mv next.config.ts next.config.ts.web \
+    && cp next.config.guide.ts next.config.ts
+
+RUN npx prisma generate
+
+RUN npm run build
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Stage 3 — runner  (~250 MB final image)
+# ────────────────────────────────────────────────────────────────────────────
+FROM node:${NODE_VERSION} AS runner
+WORKDIR /app
+
+RUN apt-get update -y \
+    && apt-get install -y --no-install-recommends openssl ca-certificates wget \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3001 \
+    HOSTNAME=0.0.0.0 \
+    NODE_OPTIONS="--max-old-space-size=512"
+
+RUN groupadd --system --gid 1001 nodejs \
+    && useradd --system --uid 1001 --gid nodejs nextjs
+
+# 1) Standalone server bundle.
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+
+# 2) Static chunks — must be copied explicitly (standalone omits them by design).
+#    Served at /_next/static/... by server.js; browser requests them via
+#    /_next-guide/_next/static/... (Traefik strips /_next-guide before forwarding).
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# 3) Public assets.
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+
+# 4) Prisma client + engine (insurance against silent file-tracing misses).
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma  ./node_modules/.prisma
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma  ./node_modules/@prisma
+
+USER nextjs
+
+EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://127.0.0.1:3001/guide || exit 1
+
+CMD ["node", "server.js"]
