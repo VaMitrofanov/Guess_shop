@@ -15,5 +15,16 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
   const { source } = await searchParams;
   const isWB = source === "wb";
 
-  return <GuideClient isWB={isWB} />;
+  return (
+    <>
+      {/* Visible in "View Source" — confirms this response came from RobloxBank-Guide container */}
+      <span
+        id="__svc"
+        data-served-by="RobloxBank-Guide"
+        style={{ display: "none" }}
+        aria-hidden="true"
+      />
+      <GuideClient isWB={isWB} />
+    </>
+  );
 }
