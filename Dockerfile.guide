@@ -79,29 +79,29 @@ RUN mv next.config.ts next.config.ts.web \
 # Only route-level directories are removed. Shared code under src/components/,
 # src/lib/, src/hooks/, and src/auth.ts is untouched — GuideClient imports it.
 RUN rm -rf \
-      src/app/admin \
-      src/app/checkout \
-      src/app/dashboard \
-      src/app/faq \
-      src/app/guarantees \
-      src/app/legal \
-      src/app/login \
-      src/app/payment \
-      src/app/privacy \
-      src/app/register \
-      src/app/reviews \
-      src/app/api/admin \
-      src/app/api/bot \
-      src/app/api/orders \
-      src/app/api/pricing \
-      src/app/api/roblox \
-      src/app/api/webhooks \
-      src/app/api/auth/register \
+    src/app/admin \
+    src/app/checkout \
+    src/app/dashboard \
+    src/app/faq \
+    src/app/guarantees \
+    src/app/legal \
+    src/app/login \
+    src/app/payment \
+    src/app/privacy \
+    src/app/register \
+    src/app/reviews \
+    src/app/api/admin \
+    src/app/api/bot \
+    src/app/api/orders \
+    src/app/api/pricing \
+    src/app/api/roblox \
+    src/app/api/webhooks \
+    src/app/api/auth/register \
     && rm -f \
-      src/app/page.tsx \
-      src/app/apple-icon.tsx \
-      "src/app/api/auth/route.ts 1.md" \
-      src/app/api/auth/route.ts.md
+    src/app/page.tsx \
+    src/app/apple-icon.tsx \
+    "src/app/api/auth/route.ts 1.md" \
+    src/app/api/auth/route.ts.md
 
 # ── 3. Generate Prisma client ────────────────────────────────────────────────
 RUN npx prisma generate
@@ -110,7 +110,7 @@ RUN npx prisma generate
 #
 # Next.js 16 no longer runs ESLint during `next build`, so --no-lint is a
 # no-op but is passed for forward-compatibility with older CI environments.
-RUN npx next build --no-lint
+RUN npx next build
 
 
 # ────────────────────────────────────────────────────────────────────────────
