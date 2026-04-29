@@ -24,6 +24,16 @@ export const CB = {
   reviewOk:   (orderId: string, userId: string) => `review_ok:${orderId}:${userId}`, // 61 b
   reviewNo:   (orderId: string, userId: string) => `review_no:${orderId}:${userId}`, // 61 b
 
+  // Safety confirmation steps
+  confirmRejectOrder:  (orderId: string) => `confirm_reject:${orderId}`,
+  cancelRejectOrder:   (orderId: string) => `cancel_reject:${orderId}`,
+  confirmReviewReject: (orderId: string, userId: string) => `confirm_rev_no:${orderId}:${userId}`,
+  cancelReviewReject:  (orderId: string, userId: string) => `cancel_rev_no:${orderId}:${userId}`,
+
+  // Preset review rejection reasons (encoded as short keys)
+  reviewRejectReason: (orderId: string, userId: string, key: string) =>
+    `rev_reason:${orderId}:${userId}:${key}`,
+
   // Admin menu
   adminStats: "admin_stats",
   adminQueue: "admin_queue",

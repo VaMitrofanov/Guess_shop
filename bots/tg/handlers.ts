@@ -858,12 +858,30 @@ export function registerCallbacks(bot: Telegraf): void {
       return;
     }
 
-    // ── ❌ admin_reject_init: ask for reason ─────────────────────────────────
+    // ── ❌ admin_reject_init: safety confirmation step ─────────────────────────
     if (data.startsWith("admin_reject_init:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const orderId = data.split(":")[1];
-      pendingRejectionReason.set(ctx.from.id, orderId);
       await ctx.reply(
+        `⚠️ Отклонить заказ <code>${orderId.slice(-6).toUpperCase()}</code>?\n\nЭто действие уведомит пользователя.`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[
+            Markup.button.callback("✅ Да, отклонить", `confirm_reject:${orderId}`),
+            Markup.button.callback("❌ Отмена", `cancel_reject:${orderId}`),
+          ]])
+        }
+      );
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    // ── ✅ confirm_reject: confirmed → ask for reason ────────────────────────
+    if (data.startsWith("confirm_reject:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      const orderId = data.split(":")[1];
+      pendingRejectionReason.set(ctx.from.id, orderId);
+      try { await ctx.editMessageText(
         `⚠️ Введи причину отклонения для заказа <code>${orderId.slice(-6).toUpperCase()}</code>:`,
         {
           parse_mode: "HTML",
@@ -871,8 +889,16 @@ export function registerCallbacks(bot: Telegraf): void {
             Markup.button.callback("❌ Без причины", `admin_reject_none:${orderId}`)
           ]])
         }
-      );
+      ); } catch { }
       await ctx.answerCbQuery();
+      return;
+    }
+
+    // ── ❌ cancel_reject: admin cancelled rejection ──────────────────────────
+    if (data.startsWith("cancel_reject:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      try { await ctx.editMessageText("✅ Отклонение отменено."); } catch { }
+      await ctx.answerCbQuery("Отменено");
       return;
     }
 
@@ -910,42 +936,105 @@ export function registerCallbacks(bot: Telegraf): void {
     }
 
     // ── 🎁 review_ok: approve review bonus ───────────────────────────────
-    // ── ❌ review_no: reject review bonus ────────────────────────────────
-    if (data.startsWith("review_ok:") || data.startsWith("review_no:")) {
+    if (data.startsWith("review_ok:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
-      const [action, orderId, userId] = data.split(":");
-      const approve = action === "review_ok";
+      const [, orderId, userId] = data.split(":");
 
-      if (approve) {
-        // Award +50 R$ and mark bonus as claimed
-        await (db as any).user.update({
-          where: { id: userId },
-          data: { balance: { increment: 50 } },
-        });
-        await (db as any).wbCode.updateMany({
-          where: { userId, reviewBonusClaimed: false },
-          data: { reviewBonusClaimed: true },
-        });
+      // Award +50 R$ and mark bonus as claimed
+      await (db as any).user.update({
+        where: { id: userId },
+        data: { balance: { increment: 50 } },
+      });
+      await (db as any).wbCode.updateMany({
+        where: { userId, reviewBonusClaimed: false },
+        data: { reviewBonusClaimed: true },
+      });
 
-        const user = await (db as any).user.findUnique({ where: { id: userId } });
-        const bonusMsg =
-          `🎁 <b>+50 R$ зачислено на счёт!</b>\n` +
-          `Спасибо за отзыв — бонус доступен при следующей покупке 💛`;
+      const user = await (db as any).user.findUnique({ where: { id: userId } });
+      const bonusMsg =
+        `🎁 <b>+50 R$ зачислено на счёт!</b>\n` +
+        `Спасибо за отзыв — бонус доступен при следующей покупке 💛`;
 
-        if (user?.tgId) {
-          try { await bot.telegram.sendMessage(user.tgId, bonusMsg, { parse_mode: "HTML" }); } catch { }
-        } else if (user?.vkId) {
-          await vkSend(user.vkId, stripHtml(bonusMsg));
-        }
+      if (user?.tgId) {
+        try { await bot.telegram.sendMessage(user.tgId, bonusMsg, { parse_mode: "HTML" }); } catch { }
+      } else if (user?.vkId) {
+        await vkSend(user.vkId, stripHtml(bonusMsg));
       }
 
-      const result = approve
-        ? `🎁 Бонус начислен — ${adminTag}`
-        : `❌ Отклонено — ${adminTag}`;
-      const caption = `${result}\nЗаказ #${orderId.slice(-6).toUpperCase()}`;
-
+      const caption = `🎁 Бонус начислен — ${adminTag}\nЗаказ #${orderId.slice(-6).toUpperCase()}`;
       try { await ctx.editMessageCaption(caption, { parse_mode: "HTML" }); } catch { }
-      await ctx.answerCbQuery(approve ? "+50 R$ начислено" : "Отклонено");
+      await ctx.answerCbQuery("+50 R$ начислено");
+      return;
+    }
+
+    // ── ❌ review_no: safety confirmation step ────────────────────────────
+    if (data.startsWith("review_no:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      const [, orderId, userId] = data.split(":");
+      await ctx.reply(
+        `⚠️ Отклонить скриншот отзыва для заказа <code>${orderId.slice(-6).toUpperCase()}</code>?\n\nПользователь будет уведомлён и сможет отправить скриншот повторно.`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[
+            Markup.button.callback("✅ Да, отклонить", CB.confirmReviewReject(orderId, userId)),
+            Markup.button.callback("❌ Отмена", CB.cancelReviewReject(orderId, userId)),
+          ]])
+        }
+      );
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    // ── ✅ confirm_rev_no: confirmed → show preset reasons ───────────────
+    if (data.startsWith("confirm_rev_no:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      const [, orderId, userId] = data.split(":");
+      try { await ctx.editMessageText(
+        `📋 Выбери причину отклонения:`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("📸 Скриншот нечёткий", CB.reviewRejectReason(orderId, userId, "blur"))],
+            [Markup.button.callback("⏳ Отзыв ещё не опубликован", CB.reviewRejectReason(orderId, userId, "notpub"))],
+            [Markup.button.callback("📦 Не тот товар", CB.reviewRejectReason(orderId, userId, "wrong"))],
+          ])
+        }
+      ); } catch { }
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    // ── ❌ cancel_rev_no: admin cancelled review rejection ───────────────
+    if (data.startsWith("cancel_rev_no:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      try { await ctx.editMessageText("✅ Отклонение отзыва отменено."); } catch { }
+      await ctx.answerCbQuery("Отменено");
+      return;
+    }
+
+    // ── 📋 rev_reason: preset review rejection reason selected ───────────
+    if (data.startsWith("rev_reason:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      const parts = data.split(":");
+      const orderId = parts[1];
+      const userId  = parts[2];
+      const key     = parts[3];
+
+      const reasonMap: Record<string, string> = {
+        blur:   "Скриншот нечёткий",
+        notpub: "Отзыв ещё не опубликован",
+        wrong:  "Не тот товар",
+      };
+      const reason = reasonMap[key] ?? key;
+
+      // Update admin card
+      const caption = `❌ Отзыв отклонён — ${adminTag}\nЗаказ #${orderId.slice(-6).toUpperCase()}\nПричина: ${reason}`;
+      try { await ctx.editMessageText(caption, { parse_mode: "HTML" }); } catch { }
+
+      // Notify user and restore review state
+      await notifyReviewRejected(bot, userId, orderId, reason);
+
+      await ctx.answerCbQuery(`Отклонено: ${reason}`);
       return;
     }
 
@@ -1088,5 +1177,44 @@ async function notifyUserRejected(
     } catch { }
   } else if (user.vkId) {
     await vkSend(user.vkId, stripHtml(msg) + "\n\n(Чтобы исправить, просто отправьте новую ссылку на геймпасс в этот чат)");
+  }
+}
+
+/**
+ * Notify a user that their review screenshot was rejected, and restore
+ * the AWAITING_REVIEW state so they can immediately send a new one.
+ */
+async function notifyReviewRejected(
+  bot: Telegraf,
+  userId: string,
+  orderId: string,
+  reason: string
+): Promise<void> {
+  const user = await (db as any).user.findUnique({ where: { id: userId } });
+  if (!user) return;
+
+  const tgMsg =
+    `❌ Ой, возникла проблемка с твоим отзывом!\n` +
+    `Админ указал причину: <b>${reason}</b>.\n\n` +
+    `Исправь это, пожалуйста, и пришли скриншот снова — бонус 50 R$ всё еще ждет тебя! 🎁`;
+
+  const vkMsg =
+    `❌ Ой, возникла проблемка с твоим отзывом!\n` +
+    `Админ указал причину: ${reason}.\n\n` +
+    `Исправь это, пожалуйста, и пришли скриншот снова — бонус 50 R$ всё еще ждет тебя! 🎁`;
+
+  if (user.tgId) {
+    try {
+      await bot.telegram.sendMessage(user.tgId, tgMsg, { parse_mode: "HTML" });
+      // Restore review state so the next photo from this user is processed
+      pendingReview.set(parseInt(user.tgId), orderId);
+    } catch { }
+  } else if (user.vkId) {
+    await vkSend(user.vkId, vkMsg);
+    // Restore VK review state — lazy import to avoid circular deps
+    try {
+      const { setState } = await import("../vk/session");
+      setState(parseInt(user.vkId), { type: "AWAITING_REVIEW", orderId });
+    } catch { }
   }
 }
