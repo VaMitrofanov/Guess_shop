@@ -28,7 +28,14 @@ const nextConfig: NextConfig = {
   },
 
   typescript: {
-    ignoreBuildErrors: false,
+    // Partial-route build: TS check is skipped entirely to save memory & time.
+    // Type safety is enforced by the full build (Dockerfile / CI).
+    ignoreBuildErrors: true,
+  },
+
+  experimental: {
+    // Reduces peak Webpack memory if Turbopack is unavailable in this env.
+    webpackMemoryOptimizations: true,
   },
 };
 

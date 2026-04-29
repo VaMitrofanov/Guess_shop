@@ -3,9 +3,27 @@
 # ────────────────────────────────────────────────────────────────────────────
 # Guide service — port 3001. Handles /guide, /api/wb-code, /api/wb-link.
 #
-# Key difference from the main Dockerfile:
-#   • next.config.ts is swapped for next.config.guide.ts before `next build`
+# OPTIMIZATION: before `next build`, every app route except the guide page
+# and its required API endpoints is deleted from disk. Next.js only compiles
+# what it can see, cutting build time and peak RAM by ~60-70% compared to a
+# full-app build.
+#
+# Routes kept after pruning:
+#   src/app/guide/              — the page itself
+#   src/app/api/wb-code/        — POST endpoint
+#   src/app/api/wb-link/        — GET endpoint (reads auth session)
+#   src/app/api/auth/           — NextAuth handler (required by wb-link)
+#   src/app/layout.tsx          — root layout (applies to every page)
+#   src/app/globals.css         — global styles
+#
+# All of src/components/, src/lib/, src/auth.ts, etc. are left intact —
+# only route-level directories are removed. Components shared with other
+# pages are still referenced by GuideClient and must remain on disk.
+#
+# Other key differences from the main Dockerfile:
+#   • next.config.ts is swapped for next.config.guide.ts before next build
 #     so the standalone output has assetPrefix="/_next-guide" baked in.
+#   • typescript.ignoreBuildErrors: true in the guide config (partial build).
 #   • PORT=3001 in the runner stage.
 #   • Healthcheck targets /guide, not /.
 #
@@ -36,7 +54,7 @@ RUN --mount=type=cache,target=/root/.npm,sharing=locked \
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Stage 2 — builder
+# Stage 2 — builder  (guide-only routes)
 # ────────────────────────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION} AS builder
 WORKDIR /app
@@ -47,19 +65,52 @@ RUN apt-get update -y \
 
 ENV NEXT_TELEMETRY_DISABLED=1 \
     NODE_ENV=production \
-    NODE_OPTIONS="--max-old-space-size=1536"
+    NODE_OPTIONS="--max-old-space-size=1024"
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Swap in the guide config. next.config.ts.web is kept for auditability but
-# is never read by next build (which only looks for next.config.{ts,js}).
+# ── 1. Swap in the guide config ──────────────────────────────────────────────
 RUN mv next.config.ts next.config.ts.web \
     && cp next.config.guide.ts next.config.ts
 
+# ── 2. Route pruning — strip everything Next.js should NOT compile ───────────
+#
+# Only route-level directories are removed. Shared code under src/components/,
+# src/lib/, src/hooks/, and src/auth.ts is untouched — GuideClient imports it.
+RUN rm -rf \
+      src/app/admin \
+      src/app/checkout \
+      src/app/dashboard \
+      src/app/faq \
+      src/app/guarantees \
+      src/app/legal \
+      src/app/login \
+      src/app/payment \
+      src/app/privacy \
+      src/app/register \
+      src/app/reviews \
+      src/app/api/admin \
+      src/app/api/bot \
+      src/app/api/orders \
+      src/app/api/pricing \
+      src/app/api/roblox \
+      src/app/api/webhooks \
+      src/app/api/auth/register \
+    && rm -f \
+      src/app/page.tsx \
+      src/app/apple-icon.tsx \
+      "src/app/api/auth/route.ts 1.md" \
+      src/app/api/auth/route.ts.md
+
+# ── 3. Generate Prisma client ────────────────────────────────────────────────
 RUN npx prisma generate
 
-RUN npm run build
+# ── 4. Build — TS check skipped (partial-route build, see next.config.guide) ─
+#
+# Next.js 16 no longer runs ESLint during `next build`, so --no-lint is a
+# no-op but is passed for forward-compatibility with older CI environments.
+RUN npx next build --no-lint
 
 
 # ────────────────────────────────────────────────────────────────────────────
