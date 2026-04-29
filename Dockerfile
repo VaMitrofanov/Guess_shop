@@ -60,7 +60,7 @@ COPY prisma ./prisma
 
 # BuildKit cache mount keeps ~/.npm warm across rebuilds.
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm ci --no-audit --no-fund --prefer-offline
+    npm ci --include=dev --no-audit --no-fund --prefer-offline
 
 
 # ────────────────────────────────────────────────────────────────────────────

@@ -32,7 +32,7 @@ COPY package.json package-lock.json ./
 COPY prisma ./prisma
 
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm ci --no-audit --no-fund --prefer-offline
+    npm ci --include=dev --no-audit --no-fund --prefer-offline
 
 
 # ────────────────────────────────────────────────────────────────────────────
