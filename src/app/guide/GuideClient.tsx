@@ -19,6 +19,7 @@ import VKAuthButton from "@/components/auth/VKAuthButton";
 import AnimatedShaderBackground from "@/components/ui/animated-shader-background";
 import InstructionRevealCurtain from "@/components/ui/instruction-reveal-curtain";
 import ScrollFeatureTeaser from "@/components/ui/scroll-feature-teaser";
+import { ConnectivityAssistant } from "@/components/connectivity-assistant";
 
 // ─── localStorage WB session helpers ──────────────────────────────────────────
 const WB_SESSION_KEY = "rb_wb_session";
@@ -1640,6 +1641,8 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
         </p>
       </div>
 
+      <ConnectivityAssistant />
+
       <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto w-full">
         {/* Telegram Button */}
         <div className="h-14 flex items-stretch border-2 border-b-[6px] border-[#229ED9]/40 bg-[#229ED9]/10 hover:bg-[#229ED9]/20 hover:border-[#229ED9]/60 active:translate-y-[4px] active:border-b-[2px] shadow-[0_4px_20px_rgba(34,158,217,0.15)] transition-all duration-75 group/tg">
@@ -1973,6 +1976,7 @@ function WBGate({ onSuccess }: WBGateProps) {
                   <p className="text-[11px] text-zinc-500 font-medium leading-relaxed text-center">
                     Геймпасс уже создан? Отправьте ссылку или ID пасса напрямую — менеджер выкупит вручную.
                   </p>
+                  <ConnectivityAssistant />
                   <button
                     type="button"
                     onClick={() => handleQuickRedirect("tg")}
