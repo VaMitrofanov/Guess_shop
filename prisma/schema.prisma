@@ -89,22 +89,26 @@ enum Platform {
 
 enum WbOrderStatus {
   PENDING
+  IN_PROGRESS
   COMPLETED
   REJECTED
 }
 
 /// WB withdrawal order: tracks gamepass link submissions from WB card buyers.
 model WbOrder {
-  id          String        @id @default(cuid())
-  amount      Int
-  gamepassUrl String
-  status      WbOrderStatus @default(PENDING)
-  platform    Platform
-  userId      String
-  user        User          @relation(fields: [userId], references: [id])
-  wbCode      String
-  adminId     String?
+  id              String        @id @default(cuid())
+  amount          Int
+  gamepassUrl     String
+  status          WbOrderStatus @default(PENDING)
+  platform        Platform
+  userId          String
+  user            User          @relation(fields: [userId], references: [id])
+  wbCode          String
+  adminId         String?
   rejectionReason String?
+  /// Snapshot of the purchase rate (R$/₽) at the time of fulfillment.
+  /// Allows accurate historical profit calculations.
+  purchaseRate    Float?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
@@ -148,9 +152,11 @@ model MarketRate {
 /// Global system settings — single-row config table.
 /// Always upsert with id = "global".
 model GlobalSettings {
-  id          String   @id @default("global")
-  usdToRub    Float
-  lastUpdated DateTime @updatedAt
+  id           String   @id @default("global")
+  usdToRub     Float
+  /// Manual purchase rate in ₽ per R$ — set by admin via bot.
+  purchaseRate Float?
+  lastUpdated  DateTime @updatedAt
 }
 
 /// Activation codes printed on Wildberries card inserts.

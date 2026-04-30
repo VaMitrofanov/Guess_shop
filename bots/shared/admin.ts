@@ -34,11 +34,47 @@ export const CB = {
   reviewRejectReason: (orderId: string, userId: string, key: string) =>
     `rev_reason:${orderId}:${userId}:${key}`,
 
-  // Admin menu
+  // ── Hub navigation ─────────────────────────────────────────────────────────
+  hubOrders:       "hub_orders",
+  hubStats:        "hub_stats",
+  hubWildberries:  "hub_wb",
+  hubSystem:       "hub_sys",
+
+  // ── Orders hub ─────────────────────────────────────────────────────────────
+  ordersActive:    "ord_active",
+  ordersSearch:    "ord_search",
+  ordersHistory:   "ord_hist",
+  ordersBatch:     "ord_batch",
+  ordersBatchConfirm: "ord_batch_ok",
+  orderTakeWork:   (id: string) => `ord_work:${id}`,
+  orderComplete:   (id: string) => `ord_done:${id}`,
+  orderView:       (id: string) => `admin_view:${id}`,
+  orderContact:    (id: string, p: string) => `ord_ct:${id}:${p}`,
+  ordersBack:      "ord_back",
+
+  // ── Stats hub ──────────────────────────────────────────────────────────────
+  statsChangeRate: "stat_rate",
+  statsRefresh:    "stat_refresh",
+
+  // ── WB hub ─────────────────────────────────────────────────────────────────
+  wbAddCodes:      "wb_add",
+  wbAddDenom:      (d: number) => `wb_denom:${d}`,
+  wbAnalytics:     "wb_analytics",
+  wbDownload:      "wb_download",
+  wbRefresh:       "wb_refresh",
+
+  // ── System hub ─────────────────────────────────────────────────────────────
+  sysLogs:            (name: string) => `sys_log:${name}`,
+  sysRestart:         (name: string) => `sys_rst:${name}`,
+  sysConfirmRestart:  (name: string) => `sys_crst:${name}`,
+  sysCancelRestart:   (name: string) => `sys_xrst:${name}`,
+  sysRefresh:         "sys_refresh",
+
+  // ── Legacy (kept for backwards compatibility) ──────────────────────────────
   adminStats: "admin_stats",
   adminQueue: "admin_queue",
   adminCodes: "admin_codes",
-  
+
   // User actions
   refreshStatus: "refresh_status",
 } as const;

@@ -27,3 +27,20 @@ export const pendingReview = new Map<number, string>();
  * Key: Admin Telegram ID → WbOrder.id
  */
 export const pendingRejectionReason = new Map<number, string>();
+
+// ── Admin dashboard session states ───────────────────────────────────────────
+
+/** Admin's last widget message_id per hub — for editMessageText reuse. */
+export const adminWidgetMsg = new Map<number, number>();
+
+/** Admin is in "add codes" input mode. Value = denomination for the codes. */
+export const pendingCodesInput = new Map<number, { denomination: number }>();
+
+/** Admin is in "change purchase rate" input mode. */
+export const pendingRateInput = new Map<number, true>();
+
+/** Admin is in "search order" input mode. */
+export const pendingAdminSearch = new Map<number, true>();
+
+/** Admin is in "batch fulfillment" input mode — waiting for confirmation. */
+export const pendingBatchFulfill = new Map<number, true>();

@@ -13,6 +13,8 @@ import { vkSend, stripHtml } from "../shared/notify";
 import { sendAdminOrderCard, sendAdminReviewCard, CB, ADMIN_IDS } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason } from "./session";
 import { getGamepassDetails } from "../shared/roblox";
+import { buildAdminKeyboard, updateMainMenu, routeAdminCallback } from "./admin";
+import { renderExtendedCard } from "./admin/hub-orders";
 
 // ── Gamepass ID extractor ─────────────────────────────────────────────────────
 
@@ -76,11 +78,12 @@ export function registerStart(bot: Telegraf): void {
         );
       } else {
         const greeting = getGreeting(custStatus, firstName);
+        const kb = isAdmin ? await getAdminKeyboard() : {};
         await ctx.reply(
           `${greeting}Твой личный проводник в мир робуксов.\n\n` +
           `Для активации кода с карточки Wildberries перейди по ссылке на вкладыше.\n\n` +
           `📦 Статус заказа: /status`,
-          isAdmin ? getAdminKeyboard() : {}
+          kb
         );
       }
       return;
@@ -140,6 +143,7 @@ export function registerStart(bot: Telegraf): void {
 
     const passPrice = Math.ceil(totalAmount / 0.7);
     const isAdmin = ADMIN_IDS.includes(tgId);
+    const adminKb = isAdmin ? await getAdminKeyboard() : {};
 
     // Loyalty-aware greeting for code activation
     const custStatus = await getCustomerStatus(tgId, "TG");
@@ -163,17 +167,21 @@ export function registerStart(bot: Telegraf): void {
       {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
-        ...(isAdmin ? getAdminKeyboard() : {})
+        ...(isAdmin ? adminKb : {})
       }
     );
   });
 }
 
-function getAdminKeyboard() {
-  return Markup.keyboard([
-    ["📊 Статистика", "🕒 Очередь"],
-    ["📜 История", "🔑 Остаток кодов"]
-  ]).resize();
+// Admin keyboard is now dynamic — see admin/menu.ts
+let _cachedKeyboard: any = null;
+async function getAdminKeyboard() {
+  // Cache for 30s to avoid DB hits on every /start
+  if (!_cachedKeyboard) {
+    _cachedKeyboard = await buildAdminKeyboard();
+    setTimeout(() => { _cachedKeyboard = null; }, 30_000);
+  }
+  return _cachedKeyboard;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -211,6 +219,7 @@ async function getStatusText(tgId: string): Promise<string> {
 
   const label: Record<string, string> = {
     PENDING: "⏳ В обработке",
+    IN_PROGRESS: "🔧 В работе",
     COMPLETED: "✅ Выполнен",
     REJECTED: "❌ Отклонён",
   };
@@ -237,26 +246,8 @@ async function getStatusText(tgId: string): Promise<string> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function registerText(bot: Telegraf): void {
-  // --- Admin Menu Buttons (Fixed Keyboard) ---
-  bot.hears("📊 Статистика", async (ctx) => {
-    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
-    await showAdminStats(ctx);
-  });
-
-  bot.hears("🕒 Очередь", async (ctx) => {
-    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
-    await showAdminQueue(ctx);
-  });
-
-  bot.hears("📜 История", async (ctx) => {
-    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
-    await showAdminHistory(ctx);
-  });
-
-  bot.hears("🔑 Остаток кодов", async (ctx) => {
-    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
-    await showAdminCodes(ctx);
-  });
+  // Admin menu buttons are now handled by admin/index.ts (registerAdminHubs).
+  // The old hears handlers have been removed.
 
   // --- Main Text Handler ---
   bot.on("text", async (ctx) => {
@@ -502,7 +493,7 @@ export function registerText(bot: Telegraf): void {
 async function renderOrderCard(order: any) {
   const shortId = order.id.slice(-6).toUpperCase();
   const passPrice = Math.ceil(order.amount / 0.7);
-  const statusLabels: any = { PENDING: "⏳ В обработке", COMPLETED: "✅ Выполнен", REJECTED: "❌ Отклонён" };
+  const statusLabels: any = { PENDING: "⏳ В обработке", IN_PROGRESS: "🔧 В работе", COMPLETED: "✅ Выполнен", REJECTED: "❌ Отклонён" };
 
   const dateStr = order.createdAt
     ? new Date(order.createdAt).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " МСК"
@@ -669,135 +660,13 @@ export function registerAdmin(bot: Telegraf): void {
       "🛠️ <b>Панель управления</b>\n\n" +
       "Меню команд теперь всегда доступно внизу экрана.\n" +
       "Также ты можешь отправить боту ID заказа или код ВБ для быстрого поиска.",
-      getAdminKeyboard()
+      await getAdminKeyboard()
     );
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared Admin View Logics
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function showAdminStats(ctx: any) {
-  const now = new Date();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startOfWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-  const dayStats = await (db as any).wbOrder.aggregate({
-    _count: true,
-    _sum: { amount: true },
-    where: { status: "COMPLETED", updatedAt: { gte: startOfDay } }
-  });
-
-  const weekStats = await (db as any).wbOrder.aggregate({
-    _count: true,
-    _sum: { amount: true },
-    where: { status: "COMPLETED", updatedAt: { gte: startOfWeek } }
-  });
-
-  const statsText =
-    `📊 <b>СТАТИСТИКА (RobloxBank)</b>\n\n` +
-    `📅 <b>ЗА СЕГОДНЯ:</b>\n` +
-    `• Кол-во: <b>${dayStats._count}</b>\n` +
-    `• Сумма: <b>${dayStats._sum.amount || 0} R$</b>\n\n` +
-    `📅 <b>ЗА 7 ДНЕЙ:</b>\n` +
-    `• Кол-во: <b>${weekStats._count}</b>\n` +
-    `• Сумма: <b>${weekStats._sum.amount || 0} R$</b>`;
-
-  await ctx.reply(statsText, { parse_mode: "HTML" });
-}
-
-async function showAdminQueue(ctx: any) {
-  const pending = await (db as any).wbOrder.findMany({
-    where: { status: "PENDING" },
-    include: { user: true },
-    orderBy: { createdAt: "asc" },
-    take: 15
-  });
-
-  if (pending.length === 0) {
-    return ctx.reply("🕒 Очередь пуста. Все заказы выкуплены!");
-  }
-
-  let qText = `🕒 <b>ОЧЕРЕДЬ (${pending.length} заказов)</b>\n\n`;
-  const buttons: any[] = [];
-
-  pending.forEach((o: any, i: number) => {
-    const shortId = o.id.slice(-6).toUpperCase();
-    qText += `${i + 1}. <code>${shortId}</code> — <b>${o.amount} R$</b>\n`;
-    buttons.push({ text: `🔍 ${shortId}`, callback_data: `admin_view:${o.id}` });
-  });
-
-  const keyboard: any[][] = [];
-  for (let i = 0; i < buttons.length; i += 3) {
-    keyboard.push(buttons.slice(i, i + 3));
-  }
-
-  await ctx.reply(qText, {
-    parse_mode: "HTML",
-    reply_markup: { inline_keyboard: keyboard }
-  });
-}
-
-async function showAdminHistory(ctx: any) {
-  const history = await (db as any).wbOrder.findMany({
-    where: { status: "COMPLETED" },
-    include: { user: true },
-    orderBy: { updatedAt: "desc" },
-    take: 15
-  });
-
-  if (history.length === 0) {
-    return ctx.reply("📜 История пуста.");
-  }
-
-  const codes = await (db as any).wbCode.findMany({
-    where: { code: { in: history.map((h: any) => h.wbCode) } }
-  });
-  const codeMap = Object.fromEntries(codes.map((c: any) => [c.code, c]));
-
-  let hText = `📜 <b>ПОСЛЕДНИЕ ВЫПОЛНЕННЫЕ</b>\n\n`;
-  const buttons: any[] = [];
-
-  history.forEach((o: any, i: number) => {
-    const shortId = o.id.slice(-6).toUpperCase();
-    const date = new Date(o.updatedAt).toLocaleDateString("ru-RU", { day: '2-digit', month: '2-digit' });
-    const hasReview = codeMap[o.wbCode]?.reviewBonusClaimed;
-    const reviewIcon = hasReview ? " 🌟" : "";
-
-    hText += `${i + 1}. <code>${shortId}</code> — <b>${o.amount} R$</b> (${date})${reviewIcon}\n`;
-    buttons.push({ text: `🔍 ${shortId}`, callback_data: `admin_view:${o.id}` });
-  });
-
-  const keyboard: any[][] = [];
-  for (let i = 0; i < buttons.length; i += 3) {
-    keyboard.push(buttons.slice(i, i + 3));
-  }
-
-  await ctx.reply(hText, {
-    parse_mode: "HTML",
-    reply_markup: { inline_keyboard: keyboard }
-  });
-}
-
-async function showAdminCodes(ctx: any) {
-  const codes = await (db as any).wbCode.groupBy({
-    by: ['denomination'],
-    _count: { _all: true },
-    where: { isUsed: false }
-  });
-
-  let cText = `🔑 <b>ОСТАТОК КОДОВ:</b>\n\n`;
-  let total = 0;
-  codes.sort((a: any, b: any) => a.denomination - b.denomination).forEach((group: any) => {
-    cText += `• <b>${group.denomination} R$</b>: ${group._count._all} шт.\n`;
-    total += group._count._all;
-  });
-  cText += `\n📦 <b>ВСЕГО: ${total} шт.</b>`;
-
-  if (total === 0) cText = "🔑 Коды закончились! Пора загрузить новые.";
-  await ctx.reply(cText, { parse_mode: "HTML" });
-}
+// Old admin view functions (showAdminStats, showAdminQueue, showAdminHistory,
+// showAdminCodes) have been moved to admin/hub-*.ts modules.
 
 /** Helper to perform rejection logic for both text and button callbacks */
 async function performAdminReject(bot: Telegraf, ctx: any, orderId: string, reason: string) {
@@ -840,13 +709,22 @@ export function registerCallbacks(bot: Telegraf): void {
     const adminId = String(ctx.from.id);
     const adminTag = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "Админ";
 
+    // ── Route to admin hub handlers first ─────────────────────────────────
+    const hubHandled = await routeAdminCallback(bot, ctx, data, adminId);
+    if (hubHandled) return;
+
     // ── ✅ admin_ok: order completed ──────────────────────────────────────
     if (data.startsWith("admin_ok:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const orderId = data.split(":")[1];
+
+      // Snapshot purchase rate at fulfillment time
+      const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
+      const currentRate = settings?.purchaseRate ?? null;
+
       const order = await (db as any).wbOrder.update({
         where: { id: orderId },
-        data: { status: "COMPLETED", adminId },
+        data: { status: "COMPLETED", adminId, purchaseRate: currentRate },
       });
       const user = await (db as any).user.findUnique({ where: { id: order.userId } });
 
@@ -854,6 +732,7 @@ export function registerCallbacks(bot: Telegraf): void {
       try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch { }
 
       if (user) await notifyUserCompleted(bot, user, orderId, order.amount);
+      await updateMainMenu(bot);
       await ctx.answerCbQuery("✅ Выполнено");
       return;
     }
@@ -1053,26 +932,9 @@ export function registerCallbacks(bot: Telegraf): void {
       return ctx.answerCbQuery();
     }
 
-    // ── 📊 admin_stats: stats for day/week ────────────────────────────────
-    if (data === CB.adminStats) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("Доступ запрещен");
-      await showAdminStats(ctx);
-      return ctx.answerCbQuery();
-    }
+    // Legacy admin_stats / admin_queue / admin_codes callbacks are now
+    // handled by routeAdminCallback() above (hub system).
 
-    // ── 🕒 admin_queue: list pending orders ────────────────────────────────
-    if (data === CB.adminQueue) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("Доступ запрещен");
-      await showAdminQueue(ctx);
-      return ctx.answerCbQuery();
-    }
-
-    // ── 🔑 admin_codes: check remain codes ────────────────────────────────
-    if (data === CB.adminCodes) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("Доступ запрещен");
-      await showAdminCodes(ctx);
-      return ctx.answerCbQuery();
-    }
 
     // ── 🔄 refresh_status: user refresh ──────────────────────────────────
     if (data === CB.refreshStatus) {

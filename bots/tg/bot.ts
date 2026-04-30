@@ -36,13 +36,17 @@ import {
   registerCallbacks,
   registerAdmin,
 } from "./handlers";
+import { registerAdminHubs } from "./admin";
 
 const token = process.env.TG_TOKEN;
 if (!token) throw new Error("[TG] TG_TOKEN is not set");
 
 export const bot = new Telegraf(token);
 
-// Register all handlers (order matters: commands → callbacks → text → photo)
+// Register all handlers (order matters: admin hubs → commands → callbacks → text → photo)
+// Admin hubs must be registered FIRST so their text interceptors (search, codes, rate)
+// fire before the generic text handler in handlers.ts.
+registerAdminHubs(bot);
 registerStart(bot);
 registerStatus(bot);
 registerAdmin(bot);
