@@ -82,6 +82,7 @@ COPY bots/shared            ./bots/shared
 COPY bots/tg/bot.ts         ./bots/tg/bot.ts
 COPY bots/tg/handlers.ts    ./bots/tg/handlers.ts
 COPY bots/tg/session.ts     ./bots/tg/session.ts
+COPY bots/tg/admin          ./bots/tg/admin
 COPY bots/tsconfig.json     ./bots/tsconfig.json
 
 # Explicit ownership transfer for the entire app tree AFTER all COPYs.
