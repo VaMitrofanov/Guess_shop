@@ -54,13 +54,13 @@ function Card({
       <span style={{ color: highlighted ? color : `${color}66` }}>{icon}</span>
       <div className="flex flex-col min-w-0">
         <span
-          className="font-black text-[10px] uppercase tracking-widest leading-none"
+          className="font-black text-[11px] md:text-xs uppercase tracking-widest leading-none"
           style={{ color: highlighted ? "#fff" : "#666" }}
         >
           {label}
         </span>
         <span
-          className="text-[9px] font-semibold mt-0.5 leading-none"
+          className="text-[10px] font-semibold mt-0.5 leading-none"
           style={{ color: highlighted ? color : "#555" }}
         >
           {hint}
@@ -157,7 +157,7 @@ export function ConnectivityAssistant() {
         </div>
 
         {/* Body */}
-        <p className="text-[11px] text-zinc-400 font-medium leading-relaxed mb-3">
+        <p className="text-xs md:text-sm text-zinc-400 font-medium leading-relaxed mb-3">
           {isVpnOn
             ? "Мы позаботились о каждой детали. VPN помогает Telegram стабильнее работать в РФ — вы в выигрыше. ВКонтакте, напротив, иногда блокирует авторизацию через VPN, поэтому для VK лучше его отключить."
             : "Всё отлично — прямое соединение идеально для ВКонтакте. Если бот Telegram не открывается сразу, попробуйте включить VPN или прокси: Telegram в некоторых регионах РФ работает только через него."}

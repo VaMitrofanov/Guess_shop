@@ -1394,7 +1394,7 @@ function PlatformSwitcher({
           <button
             key={id}
             onClick={() => onChange(id)}
-            className="relative z-10 flex items-center gap-2 px-5 py-2.5 font-black text-[11px] uppercase tracking-widest transition-colors duration-200"
+            className="relative z-10 flex items-center gap-2 px-5 py-2.5 font-black text-xs uppercase tracking-widest transition-colors duration-200"
             style={{ color: platform === id ? "#00b06f" : "#52525b" }}
           >
             <Icon style={{ width:14, height:14 }} />
@@ -1461,7 +1461,7 @@ function StepsGrid({
         return (
           <div
             key={step.num}
-            className="pixel-card border-2 border-[#1e2a45] hover:border-[#00b06f]/30 transition-colors group p-5 flex flex-col gap-3"
+            className="pixel-card border-2 border-[#1e2a45] hover:border-[#00b06f]/30 transition-colors group p-5 md:p-7 lg:p-8 flex flex-col gap-3 md:gap-4"
           >
             {/* Header row: icon + step number */}
             <div className="flex items-center gap-3">
@@ -1485,9 +1485,9 @@ function StepsGrid({
                 transition={{ duration: 0.22 }}
                 className="space-y-2"
               >
-                <h2 className="text-lg font-black uppercase tracking-tight leading-tight">{step.title}</h2>
-                <p className="text-sm text-white/90 font-semibold leading-relaxed">{displayDesc}</p>
-                <p className="text-sm text-zinc-400 font-medium leading-relaxed">{displayDetail}</p>
+                <h2 className="text-xl md:text-2xl font-black uppercase tracking-tight leading-tight">{step.title}</h2>
+                <p className="text-sm md:text-base text-white/90 font-semibold leading-relaxed">{displayDesc}</p>
+                <p className="text-sm md:text-base text-zinc-400 font-medium leading-relaxed">{displayDetail}</p>
 
                 {/* Bullet points with icons */}
                 {displayBullets && displayBullets.length > 0 && (
@@ -1499,7 +1499,7 @@ function StepsGrid({
                           <div className="w-5 h-5 border border-[#1e2a45] bg-[#0a0e1a] flex items-center justify-center flex-shrink-0 mt-0.5">
                             <BIcon className="w-2.5 h-2.5 text-[#00b06f]/60" />
                           </div>
-                          <span className="text-sm text-zinc-300 font-medium leading-snug">{bullet.text}</span>
+                          <span className="text-sm md:text-base text-zinc-300 font-medium leading-snug">{bullet.text}</span>
                         </div>
                       );
                     })}
@@ -1509,14 +1509,14 @@ function StepsGrid({
                 {displayTip && (
                   <div className="flex gap-2 items-start bg-[#00b06f]/5 border border-[#00b06f]/15 px-3 py-2 mt-2">
                     <span className="font-pixel text-[9px] text-[#00b06f] mt-0.5 flex-shrink-0">TIP</span>
-                    <p className="text-sm text-[#00b06f]/80 font-bold leading-relaxed">{displayTip}</p>
+                    <p className="text-sm md:text-base text-[#00b06f]/80 font-bold leading-relaxed">{displayTip}</p>
                   </div>
                 )}
 
                 {dynamicWarn && !isStep04 && (
                   <div className="flex gap-2 items-start border-l-2 border-amber-500/50 pl-3 py-1 mt-2">
                     <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <p className="text-sm text-amber-300/80 font-bold leading-relaxed">{dynamicWarn}</p>
+                    <p className="text-sm md:text-base text-amber-300/80 font-bold leading-relaxed">{dynamicWarn}</p>
                   </div>
                 )}
 
@@ -1643,15 +1643,15 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
 
       <ConnectivityAssistant />
 
-      <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto w-full">
+      <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6 max-w-3xl mx-auto w-full">
         {/* Telegram Button */}
-        <div className="h-14 flex items-stretch border-2 border-b-[6px] border-[#229ED9]/40 bg-[#229ED9]/10 hover:bg-[#229ED9]/20 hover:border-[#229ED9]/60 active:translate-y-[4px] active:border-b-[2px] shadow-[0_4px_20px_rgba(34,158,217,0.15)] transition-all duration-75 group/tg">
+        <div className="h-16 md:h-20 flex items-stretch border-2 border-b-[6px] border-[#229ED9]/40 bg-[#229ED9]/10 hover:bg-[#229ED9]/20 hover:border-[#229ED9]/60 active:translate-y-[4px] active:border-b-[2px] shadow-[0_4px_20px_rgba(34,158,217,0.15)] transition-all duration-75 group/tg">
           <a
             href={code ? `https://t.me/RobloxBankBot?start=${code}` : "https://t.me/RobloxBankBot"}
             target="_blank" rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2.5 w-full h-full font-black text-[11px] uppercase tracking-widest text-white"
+            className="flex items-center justify-center gap-2.5 md:gap-4 w-full h-full font-black text-[11px] md:text-sm uppercase tracking-widest text-white"
           >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0 text-[#229ED9] group-hover/tg:scale-110 transition-transform">
+            <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 md:w-6 md:h-6 flex-shrink-0 text-[#229ED9] group-hover/tg:scale-110 transition-transform">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z"/>
             </svg>
             Telegram
@@ -1661,7 +1661,7 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
         {/* VK Button — wrapper height matches Telegram exactly; VKAuthButton
             renders the VK ID widget which we visually constrain via globals.css
             (.vk-auth-widget overrides) so both buttons share the same metrics. */}
-        <div className="h-14 flex items-stretch border-2 border-b-[6px] border-[#0077FF]/40 bg-[#0077FF]/10 hover:bg-[#0077FF]/20 hover:border-[#0077FF]/60 active:translate-y-[4px] active:border-b-[2px] shadow-[0_4px_20px_rgba(0,119,255,0.15)] transition-all duration-75 group/vk">
+        <div className="h-16 md:h-20 flex items-stretch border-2 border-b-[6px] border-[#0077FF]/40 bg-[#0077FF]/10 hover:bg-[#0077FF]/20 hover:border-[#0077FF]/60 active:translate-y-[4px] active:border-b-[2px] shadow-[0_4px_20px_rgba(0,119,255,0.15)] transition-all duration-75 group/vk">
           <div className="w-full h-full flex items-center justify-center px-2">
             <VKAuthButton mode="order" wbCode={code} />
           </div>
@@ -1670,10 +1670,10 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
 
       {/* Subtitle under buttons */}
       <div className="relative z-10 flex flex-col sm:flex-row items-center justify-center gap-6 mt-4 max-w-2xl mx-auto w-full">
-        <p className="text-[9px] text-zinc-600 font-black uppercase tracking-widest text-center flex-1">
+        <p className="text-[10px] md:text-xs text-zinc-600 font-black uppercase tracking-widest text-center flex-1">
           Бот открывается автоматически
         </p>
-        <p className="text-[9px] text-zinc-600 font-black uppercase tracking-widest text-center flex-1">
+        <p className="text-[10px] md:text-xs text-zinc-600 font-black uppercase tracking-widest text-center flex-1">
           Быстрая авторизация VK ID
         </p>
       </div>
@@ -1866,8 +1866,8 @@ function WBGate({ onSuccess }: WBGateProps) {
             backgroundSize: "40px 40px",
           }}
         />
-        <div className="w-full max-w-md animate-in fade-in zoom-in">
-          <div className="pixel-card border-2 border-[#c9a84c]/40 bg-[#0a0c14] p-8 sm:p-10 space-y-8 relative">
+        <div className="w-full max-w-xl animate-in fade-in zoom-in">
+          <div className="pixel-card border-2 border-[#c9a84c]/40 bg-[#0a0c14] p-8 sm:p-12 lg:p-14 space-y-8 relative">
             <div className="absolute top-0 left-0 w-12 h-12 border-t-2 border-l-2 border-[#c9a84c]/60" />
             <div className="absolute bottom-0 right-0 w-12 h-12 border-b-2 border-r-2 border-[#c9a84c]/60" />
 
@@ -1923,7 +1923,7 @@ function WBGate({ onSuccess }: WBGateProps) {
                 <button
                   type="button"
                   onClick={() => { setMode("guide"); setShowVkAuth(false); setError(null); }}
-                  className={`h-11 flex flex-col items-center justify-center px-2 border-2 transition-all text-[10px] font-black uppercase tracking-widest ${
+                  className={`h-12 md:h-14 flex flex-col items-center justify-center px-3 border-2 transition-all text-[10px] md:text-[11px] font-black uppercase tracking-widest ${
                     isGuideMode
                       ? "border-[#c9a84c]/70 bg-[#c9a84c]/10 text-[#f0c040]"
                       : "border-zinc-800 bg-zinc-900/40 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
@@ -1935,7 +1935,7 @@ function WBGate({ onSuccess }: WBGateProps) {
                 <button
                   type="button"
                   onClick={() => { setMode("ready"); setError(null); }}
-                  className={`h-11 flex flex-col items-center justify-center px-2 border-2 transition-all text-[10px] font-black uppercase tracking-widest ${
+                  className={`h-12 md:h-14 flex flex-col items-center justify-center px-3 border-2 transition-all text-[10px] md:text-[11px] font-black uppercase tracking-widest ${
                     !isGuideMode
                       ? "border-[#00b06f]/60 bg-[#00b06f]/10 text-[#00d484]"
                       : "border-zinc-800 bg-zinc-900/40 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
@@ -1957,7 +1957,7 @@ function WBGate({ onSuccess }: WBGateProps) {
                 <button
                   type="submit"
                   disabled={loading || !codeReady}
-                  className="w-full h-14 flex items-center justify-center gap-3 font-black text-[12px] uppercase tracking-widest text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-[12px] md:text-sm uppercase tracking-widest text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{
                     background: loading || !codeReady
                       ? "linear-gradient(135deg, #4a3a10, #2a2008)"
@@ -1981,7 +1981,7 @@ function WBGate({ onSuccess }: WBGateProps) {
                     type="button"
                     onClick={() => handleQuickRedirect("tg")}
                     disabled={loading || !codeReady}
-                    className="w-full h-14 flex items-center justify-center gap-3 font-black text-[12px] uppercase tracking-widest border-2 border-b-[6px] border-[#229ED9]/50 bg-[#229ED9]/15 hover:bg-[#229ED9]/25 hover:border-[#229ED9]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-[12px] md:text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#229ED9]/50 bg-[#229ED9]/15 hover:bg-[#229ED9]/25 hover:border-[#229ED9]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {loading && quickTarget === "tg" ? (
                       <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем Telegram...</>
@@ -1999,7 +1999,7 @@ function WBGate({ onSuccess }: WBGateProps) {
                       type="button"
                       onClick={() => handleQuickRedirect("vk")}
                       disabled={loading || !codeReady}
-                      className="w-full h-14 flex items-center justify-center gap-3 font-black text-[12px] uppercase tracking-widest border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 hover:bg-[#0077FF]/25 hover:border-[#0077FF]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-[12px] md:text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 hover:bg-[#0077FF]/25 hover:border-[#0077FF]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {loading && quickTarget === "vk" ? (
                         <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем VK...</>
@@ -2026,7 +2026,7 @@ function WBGate({ onSuccess }: WBGateProps) {
               )}
             </form>
 
-            <p className="text-center text-[11px] text-zinc-600 font-medium animate-in fade-in zoom-in animate-delay-300">
+            <p className="text-center text-xs text-zinc-600 font-medium animate-in fade-in zoom-in animate-delay-300">
               Код одноразовый · Хранить не нужно
             </p>
           </div>
@@ -2039,7 +2039,7 @@ function WBGate({ onSuccess }: WBGateProps) {
             ].map(({ label, icon: Icon }) => (
               <div key={label} className="flex items-center gap-1.5 text-zinc-600">
                 <Icon className="w-3.5 h-3.5" />
-                <span className="text-[11px] font-black uppercase tracking-wide">{label}</span>
+                <span className="text-xs font-black uppercase tracking-wide">{label}</span>
               </div>
             ))}
           </div>
@@ -2154,7 +2154,7 @@ function FormulaCalculator({
               min="0"
               value={wantedRobux}
               onChange={(e) => setWantedRobux(e.target.value)}
-              className="w-full h-12 bg-[#080c18] border-2 border-[#1e2a45] focus:border-[#00b06f]/60 px-3 text-xl font-black outline-none transition-all text-white"
+              className="w-full h-12 md:h-14 bg-[#080c18] border-2 border-[#1e2a45] focus:border-[#00b06f]/60 px-3 text-xl md:text-2xl font-black outline-none transition-all text-white"
               placeholder="1000"
             />
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-500 font-bold">R$</span>
@@ -2172,13 +2172,13 @@ function FormulaCalculator({
           <button
             onClick={calcPrice ? onCopyPassPrice : undefined}
             disabled={!calcPrice}
-            className={`h-12 w-full bg-[#080c18] border-2 px-3 flex items-center justify-between transition-all group ${
+            className={`h-12 md:h-14 w-full bg-[#080c18] border-2 px-3 flex items-center justify-between transition-all group ${
               calcPrice
                 ? "border-[#00b06f]/30 hover:border-[#00b06f]/60 hover:bg-[#00b06f]/5 cursor-pointer"
                 : "border-[#1e2a45] cursor-default"
             }`}
           >
-            <span className="text-xl font-black text-[#00b06f]">{calcPrice ?? "—"}</span>
+            <span className="text-xl md:text-2xl font-black text-[#00b06f]">{calcPrice ?? "—"}</span>
             <div className="flex items-center gap-2">
               {calcPrice && !priceCopied && (
                 <span className="text-[10px] font-medium text-zinc-600 group-hover:text-zinc-500 transition-colors">
@@ -2246,7 +2246,7 @@ function Instruction({ isWB, denomination, code, onReset, freshFromGate = false 
 
       {/* ── HERO ── */}
       <section className="border-b border-[#1e2a45] bg-[#080c18]">
-        <div className="container mx-auto px-6 py-16 max-w-6xl">
+        <div className="container mx-auto px-6 py-16 max-w-7xl">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
 
             {/* Left: headline */}
@@ -2337,7 +2337,7 @@ function Instruction({ isWB, denomination, code, onReset, freshFromGate = false 
       <div className="accent-line" />
 
       {/* ── STEPS ── (curtain reveal только при свежем переходе из gate) */}
-      <section className="container mx-auto px-6 py-16 max-w-6xl">
+      <section className="container mx-auto px-6 py-16 max-w-7xl">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">ПОШАГОВАЯ ИНСТРУКЦИЯ</div>
           <PlatformSwitcher platform={platform} onChange={setPlatform} />
@@ -2390,7 +2390,7 @@ function Instruction({ isWB, denomination, code, onReset, freshFromGate = false 
           <div className="accent-line" />
 
           {/* ── MISTAKES + TABLE ── */}
-          <section className="container mx-auto px-6 py-16 max-w-6xl">
+          <section className="container mx-auto px-6 py-16 max-w-7xl">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
               <div>
                 <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-2">ЧАСТЫЕ ОШИБКИ</div>
@@ -2450,7 +2450,7 @@ function Instruction({ isWB, denomination, code, onReset, freshFromGate = false 
           <div className="accent-line" />
 
           {/* ── FAQ ── */}
-          <section className="container mx-auto px-6 py-16 max-w-6xl">
+          <section className="container mx-auto px-6 py-16 max-w-7xl">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
               <div className="space-y-6">
                 <div>
@@ -2508,7 +2508,7 @@ function Instruction({ isWB, denomination, code, onReset, freshFromGate = false 
 
       {!isWB && (
         <section className="border-t border-[#1e2a45] py-8">
-          <div className="container mx-auto px-6 max-w-6xl flex justify-center">
+          <div className="container mx-auto px-6 max-w-7xl flex justify-center">
             <Link
               href="/"
               className="h-12 px-8 border-2 border-[#1e2a45] hover:border-[#00b06f]/30 font-black text-[11px] uppercase tracking-widest transition-all rounded-none flex items-center gap-2 text-zinc-400 hover:text-white"

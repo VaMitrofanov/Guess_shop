@@ -256,23 +256,30 @@ body {
 /* Gold input — WB code field */
 .wb-input {
   background: #080c18;
-  border: 2px solid #c9a84c;
+  border: 3px solid #c9a84c;
   color: #f0c040;
   font-family: 'Courier New', Courier, monospace;
-  letter-spacing: 0.45em;
-  font-size: 1.75rem;
+  letter-spacing: 0.5em;
+  font-size: 2rem;
   font-weight: 900;
   text-align: center;
-  padding: 1rem;
+  padding: 1.25rem 1rem;
   width: 100%;
   outline: none;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
+@media (min-width: 768px) {
+  .wb-input {
+    font-size: 2.5rem;
+    padding: 1.5rem 1rem;
+    letter-spacing: 0.6em;
+  }
+}
 .wb-input:focus {
   border-color: #f0c040;
-  box-shadow: 0 0 0 3px rgba(240, 192, 64, 0.15), 0 0 20px rgba(240, 192, 64, 0.08);
+  box-shadow: 0 0 0 4px rgba(240, 192, 64, 0.18), 0 0 24px rgba(240, 192, 64, 0.1);
 }
-.wb-input::placeholder { color: rgba(240, 192, 64, 0.25); letter-spacing: 0.2em; }
+.wb-input::placeholder { color: rgba(240, 192, 64, 0.22); letter-spacing: 0.25em; }
 
 /* ─── VK ID widget — invisible-mount overrides ───────────────────────────────
  * The OneTap widget is mounted inside .vk-auth-widget--ghost (opacity:0,
