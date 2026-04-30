@@ -130,24 +130,31 @@ export async function renderExtendedCard(order: any) {
     hour: "2-digit", minute: "2-digit",
   }) + " МСК";
 
-  // User profile link
+  // ── Clickable user label ───────────────────────────────────────────────
+  // Priority: @username (auto-linked by TG) → tg://user?id= deep link → VK
   let userLabel = "Неизвестен";
-  let contactButtons: any[] = [];
+  let contactUrl = "";
 
   if (order.user) {
-    if (order.user.tgId) {
-      const name = order.user.name || "Пользователь";
-      userLabel = `<a href="tg://user?id=${order.user.tgId}">${name}</a> (ID: ${order.user.tgId})`;
-      contactButtons.push(
-        Markup.button.callback("💬 ТГ", CB.orderContact(order.id, "tg"))
-      );
-    }
-    if (order.user.vkId) {
+    if (order.platform === "TG" && order.user.tgId) {
+      const storedName = order.user.name || "";
+      // Username: alphanumeric + underscores, 5-32 chars
+      const usernameMatch = storedName.match(/^@?([a-zA-Z]\w{4,31})$/);
+
+      if (usernameMatch) {
+        userLabel = `@${usernameMatch[1]}`;
+        contactUrl = `https://t.me/${usernameMatch[1]}`;
+      } else {
+        const displayName = storedName || "Пользователь";
+        userLabel = `<a href="tg://user?id=${order.user.tgId}">${displayName}</a>`;
+        contactUrl = `tg://user?id=${order.user.tgId}`;
+      }
+    } else if (order.platform === "VK" && order.user.vkId) {
       const vkName = order.user.name || "VK Пользователь";
       userLabel = `<a href="https://vk.com/id${order.user.vkId}">${vkName}</a>`;
-      contactButtons.push(
-        Markup.button.callback("💬 ВК", CB.orderContact(order.id, "vk"))
-      );
+      contactUrl = VK_GROUP_ID
+        ? `https://vk.com/gim${VK_GROUP_ID}?sel=${order.user.vkId}`
+        : `https://vk.com/id${order.user.vkId}`;
     }
   }
 
@@ -158,12 +165,10 @@ export async function renderExtendedCard(order: any) {
     prev >= 5 ? `👑 <b>VIP КЛИЕНТ (${prev} заказов)</b>\n` :
     prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>\n` : "";
 
-  // Bonus
+  // Review
   const wbCode = await (db as any).wbCode.findFirst({
     where: { code: { equals: order.wbCode, mode: "insensitive" } },
   });
-  const bonus = wbCode && order.amount > wbCode.denomination ? order.amount - wbCode.denomination : 0;
-  const bonusLine = bonus > 0 ? `🎁 Бонус: <b>${bonus} R$</b>\n` : "";
   const reviewLine = wbCode?.reviewBonusClaimed
     ? `🌟 Отзыв: <b>Оставлен (+50 R$)</b>\n`
     : `🌟 Отзыв: <b>Нет</b>\n`;
@@ -174,6 +179,7 @@ export async function renderExtendedCard(order: any) {
   const platformEmojis: Record<string, string> = { TG: "📱", VK: "📘" };
   const pe = platformEmojis[order.platform] || "📦";
 
+  // ── Card text ──────────────────────────────────────────────────────────
   const text =
     `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
@@ -182,36 +188,46 @@ export async function renderExtendedCard(order: any) {
     `📅 Время: <b>${dateStr}</b>\n` +
     `⏱ Ожидание: <b>${wait}</b>\n` +
     `👤 Юзер: ${userLabel}\n` +
-    bonusLine + reviewLine +
+    reviewLine +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
     `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
-    `📊 Статус: <b>${STATUS_LABELS[order.status] || order.status}</b>${reasonLine}\n\n` +
-    `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>`;
+    `📊 Статус: <b>${STATUS_LABELS[order.status] || order.status}</b>${reasonLine}`;
 
-  // Build keyboard based on status
-  let keyboard: any[][] | undefined;
+  // ── Inline keyboard ────────────────────────────────────────────────────
+  // Row 1: 🔗 Открыть Gamepass (wide URL button)
+  // Row N: 💬 Написать | ⬅️ Назад
+  const gamepassRow = [Markup.button.url("🔗 Открыть Gamepass", order.gamepassUrl)];
+
+  const bottomRow: any[] = [];
+  if (contactUrl) {
+    const contactLabel = order.platform === "VK" ? "💬 Написать в ВК" : "💬 Написать в ТГ";
+    bottomRow.push(Markup.button.url(contactLabel, contactUrl));
+  }
+  bottomRow.push(Markup.button.callback("⬅️ Назад", CB.ordersBack));
+
+  let keyboard: any[][];
 
   if (order.status === "PENDING") {
     keyboard = [
+      gamepassRow,
       [Markup.button.callback("🔧 В работу", CB.orderTakeWork(order.id))],
       [
         Markup.button.callback("✅ Выполнил", CB.adminOk(order.id)),
         Markup.button.callback("❌ Отклонить", CB.adminErr(order.id)),
       ],
-      [...contactButtons, Markup.button.callback("⬅️ Назад", CB.ordersBack)],
+      bottomRow,
     ];
   } else if (order.status === "IN_PROGRESS") {
     keyboard = [
+      gamepassRow,
       [
         Markup.button.callback("✅ Выполнил", CB.adminOk(order.id)),
         Markup.button.callback("❌ Отклонить", CB.adminErr(order.id)),
       ],
-      [...contactButtons, Markup.button.callback("⬅️ Назад", CB.ordersBack)],
+      bottomRow,
     ];
   } else {
-    keyboard = [
-      [...contactButtons, Markup.button.callback("⬅️ Назад", CB.ordersBack)],
-    ];
+    keyboard = [gamepassRow, bottomRow];
   }
 
   return { text, keyboard };
@@ -274,14 +290,12 @@ export async function handleSearchQuery(ctx: Context, query: string): Promise<vo
   const upper = q.toUpperCase();
   const lower = q.toLowerCase();
 
-  // Search by order ID suffix
   let order = await (db as any).wbOrder.findFirst({
     where: { OR: [{ id: lower }, { id: { endsWith: lower } }] },
     include: { user: true },
     orderBy: { createdAt: "desc" },
   });
 
-  // Search by WB code
   if (!order) {
     const wbCode = await (db as any).wbCode.findFirst({
       where: { code: { equals: upper, mode: "insensitive" } },
@@ -295,7 +309,6 @@ export async function handleSearchQuery(ctx: Context, query: string): Promise<vo
     }
   }
 
-  // Search by user name/tgId
   if (!order) {
     const user = await (db as any).user.findFirst({
       where: {
@@ -409,7 +422,6 @@ export async function confirmBatchFulfill(
     return;
   }
 
-  // Get current purchase rate for snapshot
   const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
   const currentRate = settings?.purchaseRate ?? null;
 
@@ -419,7 +431,6 @@ export async function confirmBatchFulfill(
     data: { status: "COMPLETED", adminId, purchaseRate: currentRate },
   });
 
-  // Notify users (non-fatal)
   for (const order of orders) {
     if (order.user?.tgId) {
       try {
@@ -440,37 +451,4 @@ export async function confirmBatchFulfill(
 
   await updateMainMenu(bot);
   await ctx.answerCbQuery(`✅ ${orders.length} заказов выполнено`);
-}
-
-// ── Contact link generator ───────────────────────────────────────────────────
-
-export async function showContactLink(ctx: Context, orderId: string, platform: string): Promise<void> {
-  const order = await (db as any).wbOrder.findUnique({
-    where: { id: orderId },
-    include: { user: true },
-  });
-
-  if (!order?.user) {
-    await ctx.answerCbQuery("Пользователь не найден");
-    return;
-  }
-
-  let link = "";
-  if (platform === "tg" && order.user.tgId) {
-    link = `tg://user?id=${order.user.tgId}`;
-  } else if (platform === "vk" && order.user.vkId) {
-    link = VK_GROUP_ID
-      ? `https://vk.com/gim${VK_GROUP_ID}?sel=${order.user.vkId}`
-      : `https://vk.com/id${order.user.vkId}`;
-  }
-
-  if (link) {
-    await ctx.answerCbQuery();
-    await ctx.reply(`💬 <a href="${link}">Открыть диалог</a>`, {
-      parse_mode: "HTML",
-      link_preview_options: { is_disabled: true },
-    });
-  } else {
-    await ctx.answerCbQuery("Контакт недоступен");
-  }
 }

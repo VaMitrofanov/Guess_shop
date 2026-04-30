@@ -13,7 +13,7 @@ import { buildAdminKeyboard, updateMainMenu } from "./menu";
 import {
   showOrdersHub, showActiveOrders, showOrderCard, enterSearchMode,
   showHistory24h, showBatchView, confirmBatchFulfill, takeOrderInWork,
-  showContactLink, handleSearchQuery,
+  handleSearchQuery,
 } from "./hub-orders";
 import { showStatsHub, refreshStats, enterRateInput, handleRateInput } from "./hub-stats";
 import {
@@ -146,11 +146,7 @@ export async function routeAdminCallback(
     await ctx.answerCbQuery();
     return true;
   }
-  if (data.startsWith("ord_ct:")) {
-    const parts = data.split(":");
-    await showContactLink(ctx, parts[1], parts[2]);
-    return true;
-  }
+  // ord_ct: contact links are now URL buttons — no callback handler needed.
 
   // ── Stats hub ──────────────────────────────────────────────────────────
   if (data === CB.hubStats) {
