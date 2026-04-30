@@ -1,0 +1,133 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# docker-compose.yml — robloxbank.ru  (Traefik path-based routing)
+#
+# Два контейнера, один домен. Traefik маршрутизирует запросы:
+#
+#   /guide?source=wb        → guide  :3001   priority 100
+#   /_next-guide/*          → guide  :3001   priority  90  (StripPrefix)
+#   /api/wb-code            → guide  :3001   priority  80
+#   /api/wb-link            → guide  :3001   priority  80
+#   всё остальное           → main   :3000   priority   1
+#
+# ─── Как деплоить ────────────────────────────────────────────────────────────
+#
+# 1. Если оба ресурса уже существуют в Coolify — отключи для них Proxy
+#    (Settings → Advanced → Custom Traefik Labels) или удали ресурсы.
+#    Иначе Coolify впишет свои лейблы поверх наших.
+#
+# 2. Создай один ресурс типа «Docker Compose» в Coolify, указав этот файл.
+#
+# 3. В Coolify выставь Environment Variables:
+#      DATABASE_URL, NEXTAUTH_SECRET, NEXTAUTH_URL
+#    Они пробросятся через env_file или environment.
+#
+# 4. Убедись, что внешняя сеть совпадает с proxy-сетью Coolify.
+#    Узнать:  docker network ls | grep -i coolify
+#    Если имя отличается — поменяй в секции «networks» внизу.
+#
+# ─── TLS / Cloudflare ────────────────────────────────────────────────────────
+#
+# Если Cloudflare проксирует (оранжевое облако) и SSL Mode = Full:
+#   • Traefik раздаёт HTTPS → entrypoints=https, tls=true — ОК как есть.
+#   • certresolver=letsencrypt — стандарт Coolify. Если используешь
+#     Cloudflare Origin Certificate, убери строки certresolver и задай
+#     tls.options через Coolify.
+#
+# Если Cloudflare SSL Mode = Flexible (origin без TLS):
+#   • Замени entrypoints=https → entrypoints=http
+#   • Убери все строки с tls
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # MAIN — основной сайт (порт 3000)
+  # ═══════════════════════════════════════════════════════════════════════════
+  main:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: robloxbank-main
+    restart: unless-stopped
+    env_file: .env
+    labels:
+      - "traefik.enable=true"
+
+      # ── Catch-all: весь трафик robloxbank.ru → main ────────────────
+      - "traefik.http.routers.rb-main.rule=Host(`robloxbank.ru`)"
+      - "traefik.http.routers.rb-main.priority=1"
+      - "traefik.http.routers.rb-main.entrypoints=https"
+      - "traefik.http.routers.rb-main.tls=true"
+      - "traefik.http.routers.rb-main.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.rb-main.service=rb-main-svc"
+
+      # ── Service ────────────────────────────────────────────────────
+      - "traefik.http.services.rb-main-svc.loadbalancer.server.port=3000"
+    networks:
+      - coolify
+
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # GUIDE — микросервис guide-страницы (порт 3001)
+  # ═══════════════════════════════════════════════════════════════════════════
+  guide:
+    build:
+      context: .
+      dockerfile: Dockerfile.guide
+    container_name: robloxbank-guide
+    restart: unless-stopped
+    env_file: .env
+    labels:
+      - "traefik.enable=true"
+
+      # ── Router 1: /guide?source=wb → guide   (priority 100) ───────
+      #
+      # Path(`/guide`) — точное совпадение (не prefix, /guide/foo не матчит).
+      # Query(`source`, `wb`) матчит наличие source=wb в query string.
+      # Допматчится и /guide?source=wb&foo=bar — порядок/кол-во не важны.
+      - "traefik.http.routers.rb-guide-page.rule=Host(`robloxbank.ru`) && Path(`/guide`) && Query(`source`, `wb`)"
+      - "traefik.http.routers.rb-guide-page.priority=100"
+      - "traefik.http.routers.rb-guide-page.entrypoints=https"
+      - "traefik.http.routers.rb-guide-page.tls=true"
+      - "traefik.http.routers.rb-guide-page.service=rb-guide-svc"
+
+      # ── Router 2: /_next-guide/* → guide     (priority 90) ────────
+      #
+      # Браузер загружает JS/CSS по /_next-guide/_next/static/...
+      # (assetPrefix в next.config.guide.ts).
+      # StripPrefix убирает /_next-guide → server.js видит /_next/static/...
+      - "traefik.http.routers.rb-guide-assets.rule=Host(`robloxbank.ru`) && PathPrefix(`/_next-guide`)"
+      - "traefik.http.routers.rb-guide-assets.priority=90"
+      - "traefik.http.routers.rb-guide-assets.entrypoints=https"
+      - "traefik.http.routers.rb-guide-assets.tls=true"
+      - "traefik.http.routers.rb-guide-assets.service=rb-guide-svc"
+      - "traefik.http.routers.rb-guide-assets.middlewares=strip-next-guide"
+
+      # ── Router 3: /api/wb-code, /api/wb-link → guide  (priority 80)
+      #
+      # Эти API — часть guide-микросервиса. Если main упадёт,
+      # guide + его API продолжат работать автономно.
+      - "traefik.http.routers.rb-guide-api.rule=Host(`robloxbank.ru`) && (PathPrefix(`/api/wb-code`) || PathPrefix(`/api/wb-link`))"
+      - "traefik.http.routers.rb-guide-api.priority=80"
+      - "traefik.http.routers.rb-guide-api.entrypoints=https"
+      - "traefik.http.routers.rb-guide-api.tls=true"
+      - "traefik.http.routers.rb-guide-api.service=rb-guide-svc"
+
+      # ── Middleware: strip /_next-guide prefix ──────────────────────
+      - "traefik.http.middlewares.strip-next-guide.stripprefix.prefixes=/_next-guide"
+
+      # ── Service ────────────────────────────────────────────────────
+      - "traefik.http.services.rb-guide-svc.loadbalancer.server.port=3001"
+    networks:
+      - coolify
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# NETWORKS
+#
+# «coolify» — внешняя сеть, созданная Coolify для своего Traefik-прокси.
+# Если у тебя другое имя (docker network ls), поменяй ниже.
+# ═════════════════════════════════════════════════════════════════════════════
+networks:
+  coolify:
+    external: true
