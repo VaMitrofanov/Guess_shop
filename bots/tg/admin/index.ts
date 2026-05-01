@@ -19,7 +19,7 @@ import { showStatsHub, refreshStats, enterRateInput, handleRateInput } from "./h
 import { showRatesHub, refreshRates, showRatesAnalytics } from "./hub-rates";
 import {
   showWildberriesHub, refreshWb, showAddCodesDenom, enterCodesInput,
-  showAnalytics, downloadUnusedCodes, handleCodesInput,
+  showAnalytics, showAnalyticsForPeriod, downloadUnusedCodes, handleCodesInput, showWbProducts,
 } from "./hub-wildberries";
 import {
   showSystemHub, showLogs, showRestartConfirm, handleRestartConfirm,
@@ -204,6 +204,15 @@ export async function routeAdminCallback(
   }
   if (data === CB.wbAnalytics) {
     await showAnalytics(ctx);
+    return true;
+  }
+  if (data.startsWith("wb_stat_p:")) {
+    const period = data.split(":")[1];
+    await showAnalyticsForPeriod(ctx, period);
+    return true;
+  }
+  if (data === CB.wbProducts) {
+    await showWbProducts(ctx);
     return true;
   }
   if (data === CB.wbDownload) {

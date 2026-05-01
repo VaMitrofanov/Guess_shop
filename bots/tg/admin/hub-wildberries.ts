@@ -3,7 +3,7 @@
  *
  * Shows WB code inventory with stock level indicators,
  * code addition via text parser, activation analytics,
- * and unused codes download.
+ * unused codes download, and WB API stats.
  */
 
 import { Markup, type Context } from "telegraf";
@@ -11,6 +11,7 @@ import { db } from "../../shared/db";
 import { CB } from "../../shared/admin";
 import { sendOrEditWidget, editWidget } from "./widgets";
 import { pendingCodesInput } from "../session";
+import { getTodayStats, getStocks, getCampaignsStatus, getProducts } from "./wb-client";
 
 // ── Stock level indicators ───────────────────────────────────────────────────
 
@@ -26,24 +27,30 @@ export async function showWildberriesHub(ctx: Context): Promise<void> {
   const text = await buildWbText();
 
   await sendOrEditWidget(ctx, text, Markup.inlineKeyboard([
-    [Markup.button.callback("➕ Добавить коды", CB.wbAddCodes)],
+    [Markup.button.callback("🔄 Обновить данные", CB.wbRefresh)],
     [
       Markup.button.callback("📊 Аналитика", CB.wbAnalytics),
-      Markup.button.callback("📥 Выгрузить", CB.wbDownload),
+      Markup.button.callback("🏷️ Мои товары", CB.wbProducts),
     ],
-    [Markup.button.callback("🔄 Обновить", CB.wbRefresh)],
+    [
+      Markup.button.callback("➕ Добавить коды", CB.wbAddCodes),
+      Markup.button.callback("📥 Выгрузить остатки", CB.wbDownload),
+    ],
   ]));
 }
 
 export async function refreshWb(ctx: Context): Promise<void> {
   const text = await buildWbText();
   await editWidget(ctx, text, Markup.inlineKeyboard([
-    [Markup.button.callback("➕ Добавить коды", CB.wbAddCodes)],
+    [Markup.button.callback("🔄 Обновить данные", CB.wbRefresh)],
     [
       Markup.button.callback("📊 Аналитика", CB.wbAnalytics),
-      Markup.button.callback("📥 Выгрузить", CB.wbDownload),
+      Markup.button.callback("🏷️ Мои товары", CB.wbProducts),
     ],
-    [Markup.button.callback("🔄 Обновить", CB.wbRefresh)],
+    [
+      Markup.button.callback("➕ Добавить коды", CB.wbAddCodes),
+      Markup.button.callback("📥 Выгрузить остатки", CB.wbDownload),
+    ],
   ]));
 }
 
@@ -51,42 +58,94 @@ async function buildWbText(): Promise<string> {
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-  const [groups, todayUsed, totalUsed] = await Promise.all([
+  // 1. Fetch DB stats
+  const [groups, totalAvailable] = await Promise.all([
     (db as any).wbCode.groupBy({
       by: ["denomination"],
       _count: { _all: true },
       where: { isUsed: false },
     }),
-    (db as any).wbCode.count({
-      where: { isUsed: true, usedAt: { gte: startOfDay } },
-    }),
-    (db as any).wbCode.count({ where: { isUsed: true } }),
+    (db as any).wbCode.count({ where: { isUsed: false } }),
   ]);
 
   groups.sort((a: any, b: any) => a.denomination - b.denomination);
-
-  let stockLines = "";
-  let totalAvailable = 0;
-
+  let dbCodesLines = "";
   for (const g of groups) {
     const count = g._count._all;
-    totalAvailable += count;
-    stockLines += `• <b>${g.denomination} R$</b>: ${count} шт. ${stockIcon(count)}\n`;
+    dbCodesLines += `• <b>${g.denomination} R$</b>: ${count} шт. ${stockIcon(count)}\n`;
   }
+  if (groups.length === 0) dbCodesLines = "⚠️ <b>Нет кодов в БД!</b>\n";
 
-  if (groups.length === 0) {
-    stockLines = "⚠️ <b>Коды закончились!</b>\n";
+  // 2. Fetch WB API stats
+  const [stats, stocks, campaigns] = await Promise.all([
+    getTodayStats(),
+    getStocks(),
+    getCampaignsStatus()
+  ]);
+
+  const hasApiError = !stats && !stocks && !campaigns;
+
+  let apiText = "";
+  if (hasApiError) {
+    apiText = `\n⚠️ <b>API недоступно или неверный токен</b>\nПроверьте WB_API_TOKEN в .env\n`;
+  } else {
+    // Finance
+    const ordersStr = stats ? `${stats.ordersCount} шт. / ${stats.ordersSum} ₽` : "Ошибка";
+    const salesStr = stats ? `${stats.salesCount} шт. / ${stats.salesSum} ₽` : "Ошибка";
+    
+    // Warehouse stocks
+    let warehouseLines = "";
+    if (stocks && stocks.length > 0) {
+      for (const s of stocks) {
+        warehouseLines += `• Арт. ${s.article}: <b>${s.quantity} шт.</b>\n`;
+      }
+    } else if (stocks) {
+      warehouseLines = "Пусто\n";
+    } else {
+      warehouseLines = "Ошибка загрузки\n";
+    }
+
+    const campStr = campaigns || "Ошибка загрузки";
+
+    apiText = 
+      `💰 <b>ФИНАНСЫ (СЕГОДНЯ)</b>\n` +
+      `Заказы: <b>${ordersStr}</b>\n` +
+      `Выкупы: <b>${salesStr}</b>\n\n` +
+      `📦 <b>СКЛАД WB</b>\n${warehouseLines}\n` +
+      `📈 <b>РЕКЛАМА</b>\nСтатус: ${campStr}\n`;
   }
 
   return (
-    `🟣 <b>WILDBERRIES</b>\n` +
-    `━━━━━━━━━━━━━━━━\n` +
-    `📦 Остатки кодов:\n` +
-    stockLines +
-    `\n📊 Всего доступно: <b>${totalAvailable} шт.</b>\n` +
-    `📈 Активировано сегодня: <b>${todayUsed}</b>\n` +
-    `📈 Активировано всего: <b>${totalUsed}</b>`
+    `🟣 <b>WILDBERRIES DASHBOARD</b> 🟢\n` +
+    `━━━━━━━━━━━━━━━━\n\n` +
+    apiText +
+    `\n📊 <b>КОДЫ В БД (Готовы к выдаче: ${totalAvailable})</b>\n` +
+    dbCodesLines
   );
+}
+
+// ── Products ────────────────────────────────────────────────────────────────
+
+export async function showWbProducts(ctx: Context): Promise<void> {
+  const products = await getProducts();
+  
+  let text = `🏷️ <b>МОИ ТОВАРЫ</b>\n━━━━━━━━━━━━━━━━\n\n`;
+  
+  if (!products) {
+    text += `⚠️ <b>Ошибка загрузки товаров.</b>\nВозможно, токен не указан или API недоступно.`;
+  } else if (products.length === 0) {
+    text += `У вас пока нет активных карточек.`;
+  } else {
+    for (const p of products) {
+      text += `• <b>${p.title}</b>\n  Арт: <code>${p.vendorCode}</code> (ID: ${p.nmID})\n\n`;
+    }
+    text += `<i>Управление ценами и описанием будет добавлено в будущих обновлениях.</i>`;
+  }
+
+  await editWidget(ctx, text, Markup.inlineKeyboard([
+    [Markup.button.callback("⬅️ Назад", CB.hubWildberries)],
+  ]));
+  await ctx.answerCbQuery();
 }
 
 // ── Add codes — denomination picker ──────────────────────────────────────────
@@ -172,13 +231,26 @@ export async function handleCodesInput(ctx: Context, text: string): Promise<bool
 // ── Analytics ────────────────────────────────────────────────────────────────
 
 export async function showAnalytics(ctx: Context): Promise<void> {
-  const now = new Date();
+  const text = `📊 <b>ВЫБЕРИТЕ ПЕРИОД АНАЛИТИКИ</b>\n━━━━━━━━━━━━━━━━`;
+  await editWidget(ctx, text, Markup.inlineKeyboard([
+    [Markup.button.callback("Вчера", CB.wbAnalyticsPeriod("yesterday"))],
+    [Markup.button.callback("Неделя", CB.wbAnalyticsPeriod("week"))],
+    [Markup.button.callback("Месяц", CB.wbAnalyticsPeriod("month"))],
+    [Markup.button.callback("⬅️ Назад", CB.hubWildberries)],
+  ]));
+  await ctx.answerCbQuery();
+}
 
-  // Last 7 days histogram
+export async function showAnalyticsForPeriod(ctx: Context, period: string): Promise<void> {
+  const now = new Date();
   const days: string[] = [];
   const counts: number[] = [];
 
-  for (let i = 6; i >= 0; i--) {
+  let daysCount = 7;
+  if (period === "yesterday") daysCount = 1;
+  else if (period === "month") daysCount = 30;
+
+  for (let i = daysCount - 1; i >= 0; i--) {
     const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
     const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
 
@@ -200,13 +272,17 @@ export async function showAnalytics(ctx: Context): Promise<void> {
     chart += `${days[i]} ${bar} ${counts[i]}\n`;
   }
 
+  let periodStr = "7 ДНЕЙ";
+  if (period === "yesterday") periodStr = "ВЧЕРА";
+  else if (period === "month") periodStr = "30 ДНЕЙ";
+
   const text =
-    `📊 <b>АНАЛИТИКА АКТИВАЦИЙ (7 дней)</b>\n` +
+    `📊 <b>АНАЛИТИКА АКТИВАЦИЙ (${periodStr})</b>\n` +
     `━━━━━━━━━━━━━━━━\n\n` +
     `<code>${chart}</code>`;
 
   await editWidget(ctx, text, Markup.inlineKeyboard([
-    [Markup.button.callback("⬅️ Назад", CB.hubWildberries)],
+    [Markup.button.callback("⬅️ Назад", CB.wbAnalytics)],
   ]));
   await ctx.answerCbQuery();
 }

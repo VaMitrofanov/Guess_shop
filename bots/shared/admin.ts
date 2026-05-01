@@ -60,6 +60,8 @@ export const CB = {
   wbAddCodes:      "wb_add",
   wbAddDenom:      (d: number) => `wb_denom:${d}`,
   wbAnalytics:     "wb_analytics",
+  wbAnalyticsPeriod: (p: string) => `wb_stat_p:${p}`,
+  wbProducts:      "wb_prods",
   wbDownload:      "wb_download",
   wbRefresh:       "wb_refresh",
 
