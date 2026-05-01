@@ -61,7 +61,7 @@ ALTER TABLE "WbCode"
 CREATE INDEX IF NOT EXISTS "WbCode_userId_idx" ON "WbCode"("userId");
 
 ALTER TABLE "WbCode"
-  ADD CONSTRAINT IF NOT EXISTS "WbCode_userId_fkey"
+  ADD CONSTRAINT "WbCode_userId_fkey"
     FOREIGN KEY ("userId") REFERENCES "User"("id")
     ON DELETE SET NULL ON UPDATE CASCADE;
 
@@ -71,7 +71,7 @@ ALTER TABLE "Order"
   ADD COLUMN IF NOT EXISTS "userId" TEXT;
 
 ALTER TABLE "Order"
-  ADD CONSTRAINT IF NOT EXISTS "Order_userId_fkey"
+  ADD CONSTRAINT "Order_userId_fkey"
     FOREIGN KEY ("userId") REFERENCES "User"("id")
     ON DELETE SET NULL ON UPDATE CASCADE;
 
@@ -98,7 +98,7 @@ CREATE INDEX IF NOT EXISTS "WbOrder_status_idx"  ON "WbOrder"("status");
 CREATE INDEX IF NOT EXISTS "WbOrder_wbCode_idx"  ON "WbOrder"("wbCode");
 
 ALTER TABLE "WbOrder"
-  ADD CONSTRAINT IF NOT EXISTS "WbOrder_userId_fkey"
+  ADD CONSTRAINT "WbOrder_userId_fkey"
     FOREIGN KEY ("userId") REFERENCES "User"("id")
     ON DELETE RESTRICT ON UPDATE CASCADE;
 

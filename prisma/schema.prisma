@@ -149,6 +149,20 @@ model MarketRate {
   @@index([provider])
 }
 
+/// Historical rate snapshots — one row per parser cycle per provider.
+/// Used for trend analysis, sub-$4 episode tracking, and admin dashboards.
+model RateSnapshot {
+  id        String   @id @default(cuid())
+  provider  String
+  rateUSD   Float
+  inventory Int
+  maxLimit  Int
+  createdAt DateTime @default(now())
+
+  @@index([provider, createdAt])
+  @@index([rateUSD, createdAt])
+}
+
 /// Global system settings — single-row config table.
 /// Always upsert with id = "global".
 model GlobalSettings {

@@ -16,6 +16,7 @@ import {
   handleSearchQuery,
 } from "./hub-orders";
 import { showStatsHub, refreshStats, enterRateInput, handleRateInput } from "./hub-stats";
+import { showRatesHub, refreshRates, showRatesAnalytics } from "./hub-rates";
 import {
   showWildberriesHub, refreshWb, showAddCodesDenom, enterCodesInput,
   showAnalytics, downloadUnusedCodes, handleCodesInput,
@@ -60,6 +61,11 @@ export function registerAdminHubs(bot: Telegraf): void {
   bot.hears("🛠 Состояние", async (ctx) => {
     if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
     await showSystemHub(ctx);
+  });
+
+  bot.hears("💱 Курс", async (ctx) => {
+    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
+    await showRatesHub(ctx);
   });
 
   // ── Text input interceptors for admin modes ──────────────────────────────
@@ -161,6 +167,23 @@ export async function routeAdminCallback(
   if (data === CB.statsRefresh) {
     await refreshStats(ctx);
     await ctx.answerCbQuery("Обновлено");
+    return true;
+  }
+
+  // ── Rates hub ──────────────────────────────────────────────────────────
+  if (data === CB.hubRates) {
+    await showRatesHub(ctx);
+    await ctx.answerCbQuery();
+    return true;
+  }
+  if (data === CB.ratesRefresh) {
+    await refreshRates(ctx);
+    await ctx.answerCbQuery("Обновлено");
+    return true;
+  }
+  if (data === CB.ratesAnalytics) {
+    await showRatesAnalytics(ctx);
+    await ctx.answerCbQuery();
     return true;
   }
 

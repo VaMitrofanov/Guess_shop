@@ -70,6 +70,11 @@ export const CB = {
   sysCancelRestart:   (name: string) => `sys_xrst:${name}`,
   sysRefresh:         "sys_refresh",
 
+  // ── Rates hub ──────────────────────────────────────────────────────────────
+  hubRates:        "hub_rates",
+  ratesRefresh:    "rates_refresh",
+  ratesAnalytics:  "rates_analytics",
+
   // ── Legacy (kept for backwards compatibility) ──────────────────────────────
   adminStats: "admin_stats",
   adminQueue: "admin_queue",
