@@ -139,12 +139,14 @@ model Review {
 
 /// Stores the latest scraped data from each supplier marketplace.
 model MarketRate {
-  id        String   @id @default(cuid())
-  provider  String   @unique
-  rateUSD   Float
-  inventory Int
-  maxLimit  Int
-  updatedAt DateTime @updatedAt
+  id            String   @id @default(cuid())
+  provider      String   @unique
+  rateUSD       Float
+  inventory     Int
+  maxLimit      Int
+  purchaseRate  Float?
+  accountsCount Int?
+  updatedAt     DateTime @updatedAt
 
   @@index([provider])
 }
@@ -152,12 +154,14 @@ model MarketRate {
 /// Historical rate snapshots — one row per parser cycle per provider.
 /// Used for trend analysis, sub-$4 episode tracking, and admin dashboards.
 model RateSnapshot {
-  id        String   @id @default(cuid())
-  provider  String
-  rateUSD   Float
-  inventory Int
-  maxLimit  Int
-  createdAt DateTime @default(now())
+  id            String   @id @default(cuid())
+  provider      String
+  rateUSD       Float
+  inventory     Int
+  maxLimit      Int
+  purchaseRate  Float?
+  accountsCount Int?
+  createdAt     DateTime @default(now())
 
   @@index([provider, createdAt])
   @@index([rateUSD, createdAt])

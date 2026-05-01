@@ -93,12 +93,27 @@ async function buildRatesText(): Promise<string> {
       hour: "2-digit", minute: "2-digit",
     });
 
+    const providerLinks: Record<string, string> = {
+      "rbx120h": "https://rbx120h.com/",
+      "bossrobux": "https://bossrobux.com/"
+    };
+    const providerLink = providerLinks[r.provider] || `https://${r.provider}.com/`;
+    const providerDisplay = `<a href="${providerLink}">${r.provider}</a>`;
+
+    let extraLines = "";
+    if (r.purchaseRate != null && r.purchaseRate > 0) {
+      extraLines += `\n   Закуп: $${r.purchaseRate}`;
+    }
+    if (r.accountsCount != null && r.accountsCount > 0) {
+      extraLines += `\n   Аккаунтов: ${r.accountsCount}`;
+    }
+
     lines.push(
-      `🏪 <b>${r.provider}</b>\n` +
+      `🏪 <b>${providerDisplay}</b>\n` +
       `   💵 $${r.rateUSD}/1K R$${diffLine}\n` +
       `   💰 ${rateRub} ₽/1K R$\n` +
       `   📦 ${fmtNum(r.inventory)} R$ в наличии\n` +
-      `   🕐 ${updatedAt}`
+      `   🕐 ${updatedAt}${extraLines}`
     );
 
     if (r.rateUSD < bestRate) {
