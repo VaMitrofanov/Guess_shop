@@ -148,6 +148,8 @@ async function fetchWb<T>(url: string, schema: z.ZodType<T>, options: RequestIni
 
 // ── Aggregated Statistics ────────────────────────────────────────────────────
 
+let lastKnownStats: any = null;
+
 /**
  * Fetches and caches orders/sales for the last 30 days.
  * This prevents 429 errors by combining today/weekly/recent requests.
@@ -159,19 +161,30 @@ async function getAggregatedStats(): Promise<{ orders: z.infer<typeof OrderSchem
 
   const dateFrom = formatDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
   
-  const [ordersRaw, salesRaw] = await Promise.all([
-    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${encodeURIComponent(dateFrom)}&flag=0`, z.array(OrderSchema)),
-    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${encodeURIComponent(dateFrom)}`, z.array(SaleSchema)),
-  ]);
+  // Sequential fetching to avoid burst 429
+  const ordersRaw = await fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${encodeURIComponent(dateFrom)}&flag=0`, z.array(OrderSchema));
+  
+  // Brief pause to satisfy WB rate limiter
+  await new Promise(r => setTimeout(r, 2000));
 
-  if (!ordersRaw && !salesRaw) return null;
+  const salesRaw = await fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${encodeURIComponent(dateFrom)}`, z.array(SaleSchema));
+
+  if (!ordersRaw || !salesRaw) {
+    // If we hit 429 or other error, fallback to last known good data
+    if (lastKnownStats) {
+      console.log("WB Statistics API Limit reached. Using last known stats fallback.");
+      return lastKnownStats;
+    }
+    return null;
+  }
 
   const result = {
     orders: ordersRaw || [],
     sales: salesRaw || [],
   };
 
-  setToCache(cacheKey, result, 5 * 60 * 1000); // 5 min cache
+  lastKnownStats = result;
+  setToCache(cacheKey, result, 10 * 60 * 1000); // Increased to 10 min cache
   return result;
 }
 

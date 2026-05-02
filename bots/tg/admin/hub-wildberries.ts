@@ -123,8 +123,12 @@ async function buildWbText(): Promise<string> {
 
     const fbsCount = fbs ? fbs.length : 0;
     const fbsLine = fbsCount > 0 ? `🚚 <b>АКТИВНЫЕ FBS: ${fbsCount} шт.</b>\n` : "";
+    
+    const isStale = !stats && (stocks || campaigns);
+    const staleWarning = isStale ? `\n⚠️ <b>Данные устарели (API WB занят)</b>\n` : "";
 
     apiText = 
+      staleWarning +
       `💰 <b>ФИНАНСЫ (СЕГОДНЯ)</b>\n` +
       `Заказы: <b>${ordersStr}</b>\n` +
       `Выкупы: <b>${salesStr}</b>\n` +
