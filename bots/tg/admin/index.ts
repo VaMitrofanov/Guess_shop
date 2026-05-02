@@ -21,6 +21,10 @@ import {
   showWildberriesHub, refreshWb, showAddCodesDenom, enterCodesInput,
   showAnalytics, showAnalyticsForPeriod, downloadUnusedCodes, handleCodesInput, showWbProducts,
   enterPriceInput, handlePriceInput, showRecentOrders,
+  showStocksHub, showDynamicsHub, showUnitEconHub, enterCostInput, handleCostInput,
+  enterLogisticsInput, handleLogisticsInput,
+  showReviewsHub, enterReviewAnswer, handleReviewAnswer,
+  showFbsHub, startWbMonitor,
 } from "./hub-wildberries";
 import {
   showSystemHub, showLogs, showRestartConfirm, handleRestartConfirm,
@@ -28,6 +32,7 @@ import {
 } from "./hub-system";
 import {
   pendingAdminSearch, pendingCodesInput, pendingRateInput, pendingPriceInput,
+  pendingReviewAnswer, pendingCostInput, pendingLogisticsInput,
 } from "../session";
 
 // Re-export for external use
@@ -40,6 +45,9 @@ export { updateMainMenu, buildAdminKeyboard };
 export function registerAdminHubs(bot: Telegraf): void {
   // Start log capture for the System hub
   initLogCapture();
+
+  // Start WB background monitor — pushes alerts every 15 min
+  startWbMonitor(bot);
 
   /**
    * Wrapper for admin menu commands (Zero-Spam UI).
@@ -99,6 +107,24 @@ export function registerAdminHubs(bot: Telegraf): void {
     // 4. Price input
     if (pendingPriceInput.has(ctx.from.id)) {
       const handled = await handlePriceInput(ctx, text);
+      if (handled) return;
+    }
+
+    // 5. Review / question answer
+    if (pendingReviewAnswer.has(ctx.from.id)) {
+      const handled = await handleReviewAnswer(ctx, text);
+      if (handled) return;
+    }
+
+    // 6. Cost price input
+    if (pendingCostInput.has(ctx.from.id)) {
+      const handled = await handleCostInput(ctx, text);
+      if (handled) return;
+    }
+
+    // 7. Logistics cost input
+    if (pendingLogisticsInput.has(ctx.from.id)) {
+      const handled = await handleLogisticsInput(ctx, text);
       if (handled) return;
     }
 
@@ -236,8 +262,53 @@ export async function routeAdminCallback(
     return true;
   }
   if (data === CB.wbRefresh) {
-    await refreshWb(ctx);
+    await refreshWb(ctx, bot);
     await ctx.answerCbQuery("Обновлено");
+    return true;
+  }
+  if (data === CB.wbStocks) {
+    await showStocksHub(ctx);
+    return true;
+  }
+  if (data === CB.wbDynamics) {
+    await showDynamicsHub(ctx);
+    return true;
+  }
+  if (data === CB.wbUnitEcon) {
+    await showUnitEconHub(ctx);
+    return true;
+  }
+  if (data.startsWith("wb_ue:")) {
+    const nmID = parseInt(data.split(":")[1]);
+    await showUnitEconHub(ctx);
+    return true;
+  }
+  if (data === CB.wbReviews) {
+    await showReviewsHub(ctx);
+    return true;
+  }
+  if (data.startsWith("wb_ans_r:")) {
+    const id = data.slice("wb_ans_r:".length);
+    await enterReviewAnswer(ctx, id, false);
+    return true;
+  }
+  if (data.startsWith("wb_ans_q:")) {
+    const id = data.slice("wb_ans_q:".length);
+    await enterReviewAnswer(ctx, id, true);
+    return true;
+  }
+  if (data === CB.wbFbs) {
+    await showFbsHub(ctx);
+    return true;
+  }
+  if (data.startsWith("wb_cost:")) {
+    const nmID = parseInt(data.split(":")[1]);
+    await enterCostInput(ctx, nmID);
+    return true;
+  }
+  if (data.startsWith("wb_log:")) {
+    const nmID = parseInt(data.split(":")[1]);
+    await enterLogisticsInput(ctx, nmID);
     return true;
   }
 

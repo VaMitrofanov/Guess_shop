@@ -67,6 +67,16 @@ export const CB = {
   wbUpdatePrice:   (nmID: number, price: number) => `wb_upd_p:${nmID}:${price}`,
   wbDownload:      "wb_download",
   wbRefresh:       "wb_refresh",
+  wbStocks:        "wb_stocks",
+  wbDynamics:      "wb_dynamics",
+  wbUnitEcon:      "wb_unit_econ",
+  wbUnitEconItem:  (nmID: number) => `wb_ue:${nmID}`,
+  wbReviews:       "wb_reviews",
+  wbAnswerReview:  (id: string) => `wb_ans_r:${id}`,
+  wbAnswerQuestion: (id: string) => `wb_ans_q:${id}`,
+  wbFbs:           "wb_fbs",
+  wbEditCost:      (nmID: number) => `wb_cost:${nmID}`,
+  wbEditLogistics: (nmID: number) => `wb_log:${nmID}`,
 
   // ── System hub ─────────────────────────────────────────────────────────────
   sysLogs:            (name: string) => `sys_log:${name}`,

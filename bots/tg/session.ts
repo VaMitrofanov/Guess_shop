@@ -47,3 +47,12 @@ export const pendingBatchFulfill = new Map<number, true>();
 
 /** Admin is in "edit product price" input mode. Value = nmID. */
 export const pendingPriceInput = new Map<number, { nmID: number }>();
+
+/** Admin is typing an answer to a WB review or question. */
+export const pendingReviewAnswer = new Map<number, { id: string; isQuestion: boolean; article: string }>();
+
+/** Admin is setting the cost price for a WB product. */
+export const pendingCostInput = new Map<number, { nmID: number; vendorCode: string }>();
+
+/** Admin is updating logistics cost for a WB product. */
+export const pendingLogisticsInput = new Map<number, { nmID: number; vendorCode: string }>();

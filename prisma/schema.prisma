@@ -182,6 +182,20 @@ model GlobalSettings {
   lastUpdated  DateTime @updatedAt
 }
 
+/// Cost basis for WB products — used for unit economics calculation.
+/// One row per nmID. Admin sets costPrice via bot; WB commission/tax defaults cover 95% of cases.
+model WbProductCost {
+  // @id creates PRIMARY KEY — automatically UNIQUE + indexed in PostgreSQL.
+  // No separate @unique or @@index needed.
+  nmID         Int      @id
+  vendorCode   String
+  costPrice    Int      // Purchase/production cost in RUB
+  wbCommission Float    @default(0.15) // WB commission rate (0–1), e.g. 0.15 = 15%
+  logisticsCost Int     @default(80)   // Per-unit WB logistics cost in RUB
+  taxRate      Float    @default(0.06) // Simplified tax rate (0–1)
+  updatedAt    DateTime @updatedAt
+}
+
 /// Activation codes printed on Wildberries card inserts.
 model WbCode {
   id                 String       @id @default(cuid())

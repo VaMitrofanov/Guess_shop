@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const wbCodeEnv = process.env.WB_API_TOKEN || "";
 
-// ── Zod Schemas ──────────────────────────────────────────────────────────────
+// ── Zod Schemas ─────────────────────────────────────────────────────────────
 
 const OrderSchema = z.object({
   date: z.string(),
@@ -37,6 +37,32 @@ const StockSchema = z.object({
 
 const AdvertCountSchema = z.object({
   campCount: z.number().optional().default(0),
+});
+
+const FeedbackItemSchema = z.object({
+  id: z.string(),
+  text: z.string().optional().default(""),
+  productValuation: z.number().optional(),
+  createdDate: z.string(),
+  userName: z.string().optional().default("Аноним"),
+  productDetails: z.object({
+    nmId: z.number().optional(),
+    supplierArticle: z.string().optional().default(""),
+  }).optional(),
+});
+
+const FeedbacksResponseSchema = z.object({
+  data: z.object({
+    feedbacks: z.array(FeedbackItemSchema).optional().default([]),
+    countUnanswered: z.number().optional().default(0),
+  }).optional(),
+});
+
+const QuestionsResponseSchema = z.object({
+  data: z.object({
+    questions: z.array(FeedbackItemSchema).optional().default([]),
+    countUnanswered: z.number().optional().default(0),
+  }).optional(),
 });
 
 const CardsListSchema = z.object({
@@ -107,6 +133,35 @@ export interface WbProduct {
   title: string;
   price?: number;
   discountedPrice?: number;
+}
+
+export interface WbReview {
+  id: string;
+  text: string;
+  stars?: number;
+  date: string;
+  author: string;
+  article: string;
+  nmId?: number;
+  kind: "review" | "question";
+}
+
+export interface WbTopProduct {
+  article: string;
+  sum: number;
+  count: number;
+}
+
+export interface WbStockWithRunway extends WbStock {
+  avgDailySales: number;
+  runwayDays: number;
+}
+
+export interface WbDayStats {
+  date: string;        // "DD.MM" for display
+  dateRaw: string;     // "YYYY-MM-DD" for comparison
+  count: number;
+  sum: number;
 }
 
 // ── Helper ───────────────────────────────────────────────────────────────────
@@ -377,6 +432,206 @@ export async function getProducts(): Promise<WbProduct[] | null> {
 
   setToCache(cacheKey, result, 15 * 60 * 1000); // 15 min cache
   return result;
+}
+
+// ── Sync analytics helpers (use lastKnownStats cache, no extra API calls) ───
+
+/** Top N products by revenue for today — derived from cached 30d stats. */
+export function getTopProducts(limit = 5): WbTopProduct[] {
+  if (!lastKnownStats) return [];
+  const todayStr = new Date().toISOString().split("T")[0];
+  const byArticle = new Map<string, { sum: number; count: number }>();
+  for (const o of lastKnownStats.orders) {
+    if (!o.date.startsWith(todayStr) || o.isCancel) continue;
+    const e = byArticle.get(o.supplierArticle) ?? { sum: 0, count: 0 };
+    e.sum += o.priceWithDisc;
+    e.count++;
+    byArticle.set(o.supplierArticle, e);
+  }
+  return [...byArticle.entries()]
+    .map(([article, d]) => ({ article, ...d }))
+    .sort((a, b) => b.sum - a.sum)
+    .slice(0, limit);
+}
+
+/** Stats for yesterday — derived from cached 30d stats. */
+export function getYesterdayStats(): TodayStats | null {
+  if (!lastKnownStats) return null;
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  const str = d.toISOString().split("T")[0];
+  const orders = lastKnownStats.orders.filter((o: any) => o.date.startsWith(str) && !o.isCancel);
+  const sales  = lastKnownStats.sales.filter((s: any) => s.date.startsWith(str));
+  return {
+    ordersCount: orders.length,
+    ordersSum:   orders.reduce((a: number, o: any) => a + o.priceWithDisc, 0),
+    salesCount:  sales.length,
+    salesSum:    sales.reduce((a: number, s: any) => a + s.priceWithDisc, 0),
+  };
+}
+
+/** Stats for the previous 7-day window (days -14..-8) — for weekly delta. */
+export function getPrevWeekStats(): { orders: number; salesSum: number } | null {
+  if (!lastKnownStats) return null;
+  const now = Date.now();
+  const from = now - 14 * 864e5;
+  const to   = now - 7  * 864e5;
+  const orders = lastKnownStats.orders.filter((o: any) => {
+    const t = new Date(o.date).getTime();
+    return t >= from && t < to && !o.isCancel;
+  });
+  return { orders: orders.length, salesSum: orders.reduce((a: number, o: any) => a + o.priceWithDisc, 0) };
+}
+
+/** Daily breakdown for the last N days — for bar chart. */
+export function getDailyBreakdown(days: number): WbDayStats[] {
+  const result: WbDayStats[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const day = new Date();
+    day.setDate(day.getDate() - i);
+    const raw = day.toISOString().split("T")[0];
+    const dayOrders = lastKnownStats?.orders.filter((o: any) => o.date.startsWith(raw) && !o.isCancel) ?? [];
+    result.push({
+      date:    day.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }),
+      dateRaw: raw,
+      count:   dayOrders.length,
+      sum:     dayOrders.reduce((a: number, o: any) => a + o.priceWithDisc, 0),
+    });
+  }
+  return result;
+}
+
+/**
+ * Stocks enriched with runway (days of remaining inventory).
+ * Runway = current_stock / avg_daily_orders over last 14 days.
+ */
+export async function getStocksWithRunway(): Promise<WbStockWithRunway[] | null> {
+  const stocks = await getStocks();
+  if (!stocks) return null;
+
+  // avg daily orders per article from last 14 days
+  const avgMap = new Map<string, number>();
+  if (lastKnownStats) {
+    const cutoff = Date.now() - 14 * 864e5;
+    const byArticle = new Map<string, number>();
+    for (const o of lastKnownStats.orders) {
+      if (new Date(o.date).getTime() < cutoff || o.isCancel) continue;
+      byArticle.set(o.supplierArticle, (byArticle.get(o.supplierArticle) ?? 0) + 1);
+    }
+    for (const [article, total] of byArticle.entries()) {
+      avgMap.set(article, total / 14);
+    }
+  }
+
+  return stocks.map(s => {
+    const avg = avgMap.get(s.article) ?? 0;
+    const runway = avg > 0 ? Math.round(s.quantity / avg) : 999;
+    return { ...s, avgDailySales: Math.round(avg * 10) / 10, runwayDays: runway };
+  }).sort((a, b) => a.runwayDays - b.runwayDays);
+}
+
+// ── Reviews & Questions ─────────────────────────────────────────────────────
+
+export async function getUnansweredReviews(): Promise<WbReview[]> {
+  const cacheKey = "wb_reviews";
+  const cached = getFromCache<WbReview[]>(cacheKey);
+  if (cached) return cached;
+  if (!wbCodeEnv) return [];
+
+  const [fbRes, qRes] = await Promise.all([
+    fetchWb(
+      "https://feedbacks-api.wildberries.ru/api/v1/feedbacks?isAnswered=false&take=10&skip=0&order=dateDesc",
+      FeedbacksResponseSchema
+    ),
+    (async () => {
+      await new Promise(r => setTimeout(r, 1500));
+      return fetchWb(
+        "https://feedbacks-api.wildberries.ru/api/v1/questions?isAnswered=false&take=10&skip=0&order=dateDesc",
+        QuestionsResponseSchema
+      );
+    })(),
+  ]);
+
+  const reviews: WbReview[] = (fbRes?.data?.feedbacks ?? []).map(f => ({
+    id: f.id, text: f.text, stars: f.productValuation,
+    date: f.createdDate, author: f.userName ?? "Аноним",
+    article: f.productDetails?.supplierArticle ?? "",
+    nmId: f.productDetails?.nmId,
+    kind: "review" as const,
+  }));
+
+  const questions: WbReview[] = (qRes?.data?.questions ?? []).map(q => ({
+    id: q.id, text: q.text, stars: undefined,
+    date: q.createdDate, author: q.userName ?? "Аноним",
+    article: q.productDetails?.supplierArticle ?? "",
+    nmId: q.productDetails?.nmId,
+    kind: "question" as const,
+  }));
+
+  const result = [...reviews, ...questions]
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  setToCache(cacheKey, result, 5 * 60 * 1000);
+  return result;
+}
+
+export async function answerReview(id: string, text: string, isQuestion: boolean): Promise<boolean> {
+  if (!wbCodeEnv) return false;
+  const url = isQuestion
+    ? "https://feedbacks-api.wildberries.ru/api/v1/questions"
+    : "https://feedbacks-api.wildberries.ru/api/v1/feedbacks";
+  try {
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: { Authorization: wbCodeEnv, "Content-Type": "application/json" },
+      body: JSON.stringify(isQuestion ? { id, text, state: "wbGoodsQA" } : { id, text }),
+    });
+    if (!res.ok) {
+      console.error(`WB Answer ${isQuestion ? "question" : "review"} error: ${res.status} ${await res.text()}`);
+      return false;
+    }
+    wbCache.delete("wb_reviews");
+    return true;
+  } catch (err) {
+    console.error("WB answerReview error:", err);
+    return false;
+  }
+}
+
+// ── Push notification state ─────────────────────────────────────────────────
+
+interface WbPushState {
+  fbsCount: number;
+  reviewCount: number;
+  lowStockArticles: string[];
+}
+let lastPushState: WbPushState | null = null;
+
+// Hourly FBS digest: accumulate delta between flushes (avoids spam at high volume)
+let pendingFbsDelta  = 0;
+let lastFbsDigestAt  = 0;
+const FBS_DIGEST_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+
+export function captureNotifyState(fbsCount: number, reviewCount: number, lowStock: string[]): WbPushState | null {
+  const prev = lastPushState;
+  lastPushState = { fbsCount, reviewCount, lowStockArticles: lowStock };
+  return prev;
+}
+
+/**
+ * Accumulate new FBS orders into the hourly digest bucket.
+ * Returns the batch count to send (non-zero only once per hour),
+ * or 0 if the digest window hasn't elapsed yet.
+ */
+export function flushFbsDigest(newOrders: number): number {
+  pendingFbsDelta += Math.max(0, newOrders);
+  if (pendingFbsDelta === 0) return 0;
+  const now = Date.now();
+  if (now - lastFbsDigestAt < FBS_DIGEST_INTERVAL_MS) return 0;
+  const batch = pendingFbsDelta;
+  pendingFbsDelta  = 0;
+  lastFbsDigestAt  = now;
+  return batch;
 }
 
 /**
