@@ -40,33 +40,33 @@ export function registerAdminHubs(bot: Telegraf): void {
   // Start log capture for the System hub
   initLogCapture();
 
+  /**
+   * Wrapper for admin menu commands (Zero-Spam UI).
+   * Deletes the user's menu text message and invokes the handler.
+   * The handler uses sendOrEditWidget to update the bot's last message.
+   */
+  const handleAdminMenu = async (ctx: any, handler: (ctx: any) => Promise<void>) => {
+    if (!ADMIN_IDS.includes(String(ctx.from?.id))) return;
+
+    if (ctx.message?.message_id) {
+      try {
+        await ctx.deleteMessage(ctx.message.message_id);
+      } catch {
+        // Silently ignore "Bad Request: message to delete not found" or >48h
+      }
+    }
+
+    await handler(ctx);
+  };
+
   // ── Reply Keyboard handlers (hears) ──────────────────────────────────────
   // Dynamic button text includes counters, so we match with regex.
 
-  bot.hears(/^📦 Заказы/, async (ctx) => {
-    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
-    await showOrdersHub(ctx);
-  });
-
-  bot.hears("📈 Статистика", async (ctx) => {
-    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
-    await showStatsHub(ctx);
-  });
-
-  bot.hears(/^🟣 Wildberries/, async (ctx) => {
-    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
-    await showWildberriesHub(ctx);
-  });
-
-  bot.hears("🛠 Состояние", async (ctx) => {
-    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
-    await showSystemHub(ctx);
-  });
-
-  bot.hears("💱 Курс", async (ctx) => {
-    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
-    await showRatesHub(ctx);
-  });
+  bot.hears(/^📦 Заказы/, (ctx) => handleAdminMenu(ctx, showOrdersHub));
+  bot.hears("📈 Статистика", (ctx) => handleAdminMenu(ctx, showStatsHub));
+  bot.hears(/^🟣 Wildberries/, (ctx) => handleAdminMenu(ctx, showWildberriesHub));
+  bot.hears("🛠 Состояние", (ctx) => handleAdminMenu(ctx, showSystemHub));
+  bot.hears("💱 Курс", (ctx) => handleAdminMenu(ctx, showRatesHub));
 
   // ── Text input interceptors for admin modes ──────────────────────────────
   // These run BEFORE the main text handler in handlers.ts.
