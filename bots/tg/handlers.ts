@@ -474,16 +474,42 @@ export function registerText(bot: Telegraf): void {
           // Code already assigned to this user — allow retry, skip re-update
         }
 
-        const newOrder = await tx.wbOrder.create({
-          data: {
-            amount: state.denomination,
-            gamepassUrl: cleanLink,
-            status: "PENDING",
-            platform: "TG",
-            userId: user.id,
-            wbCode: state.wbCode,
-          },
+        // Check if an order already exists for this WB code.
+        // Since wbCode is @unique, we can only have one record per code.
+        const existingOrder = await tx.wbOrder.findUnique({
+          where: { wbCode: state.wbCode }
         });
+
+        let newOrder;
+        if (existingOrder) {
+          if (existingOrder.status === "REJECTED") {
+            // Allow resubmission: update the rejected order back to PENDING with the new link
+            newOrder = await tx.wbOrder.update({
+              where: { id: existingOrder.id },
+              data: {
+                gamepassUrl: cleanLink,
+                status: "PENDING",
+                rejectionReason: null,
+                adminId: null, // Reset admin assignment
+              },
+            });
+          } else {
+            // Already processing or completed
+            throw Object.assign(new Error("Order already exists"), { code: "P2002" });
+          }
+        } else {
+          // Fresh order
+          newOrder = await tx.wbOrder.create({
+            data: {
+              amount: state.denomination,
+              gamepassUrl: cleanLink,
+              status: "PENDING",
+              platform: "TG",
+              userId: user.id,
+              wbCode: state.wbCode,
+            },
+          });
+        }
 
         if (user.balance && user.balance > 0) {
           await tx.user.update({ where: { id: user.id }, data: { balance: 0 } });
