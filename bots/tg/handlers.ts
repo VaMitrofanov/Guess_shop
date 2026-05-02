@@ -152,12 +152,14 @@ export function registerStart(bot: Telegraf): void {
     // this state and processes it immediately — no silent dead-end.
     pendingLink.set(ctx.from.id, { wbCode: wbCode.code, denomination: totalAmount });
 
+    const passPrice = Math.ceil(totalAmount / 0.7);
+
     // Subscription gate (optional — skip if TG_CHANNEL_ID not set)
     const subscribed = await checkSubscription(bot, ctx.from.id);
     if (!subscribed) {
       await ctx.reply(
         `✨ Почти готово! Чтобы мы могли моментально уведомлять тебя о выкупе и присылать секретные бонусы, загляни в наш канал: https://t.me/Roblox_Bank_Tg\n\n` +
-        `Подпишись и просто пришли Asset ID или ссылку на геймпасс — мы сразу возьмем его в работу! 💛`,
+        `Подпишись и просто пришли Asset ID или ссылку на геймпасс с ценой ровно <b>${passPrice} R$</b> — мы сразу возьмем его в работу! 💛`,
         {
           parse_mode: "HTML",
           link_preview_options: { is_disabled: true },
@@ -168,8 +170,6 @@ export function registerStart(bot: Telegraf): void {
       );
       return; // pendingLink preserved — user sends gamepass after subscribing
     }
-
-    const passPrice = Math.ceil(totalAmount / 0.7);
     const isAdmin = ADMIN_IDS.includes(tgId);
     const adminKb = isAdmin ? await getAdminKeyboard() : {};
 
@@ -312,22 +312,33 @@ export function registerText(bot: Telegraf): void {
 
     // 3. USER GAMEPASS LINK flow
     if (!state) {
-      // Gentle gate — unsubscribed user with no active code session
-      if (!isAdmin && process.env.TG_CHANNEL_ID) {
-        const subbed = await checkSubscription(bot, ctx.from.id);
-        if (!subbed) {
-          await ctx.reply(
-            `✨ Мы очень ждем твою заявку! Но чтобы система могла закрепить её за тобой и выдать робуксы, нужно сначала заглянуть в наш канал: https://t.me/Roblox_Bank_Tg\n\n` +
-            `Как только подпишешься — присылай код или ссылку, и мы всё сделаем! 💛`,
-            {
-              parse_mode: "HTML",
-              link_preview_options: { is_disabled: true },
-              ...Markup.inlineKeyboard([[
-                Markup.button.url("📢 Подписаться", "https://t.me/Roblox_Bank_Tg")
-              ]]),
-            }
-          );
+      if (!isAdmin) {
+        // Gentle gate — unsubscribed user with no active code session
+        if (process.env.TG_CHANNEL_ID) {
+          const subbed = await checkSubscription(bot, ctx.from.id);
+          if (!subbed) {
+            await ctx.reply(
+              `✨ Мы очень ждем твою заявку! Но чтобы система могла закрепить её за тобой и выдать робуксы, нужно сначала заглянуть в наш канал: https://t.me/Roblox_Bank_Tg\n\n` +
+              `Как только подпишешься — присылай код или ссылку, и мы всё сделаем! 💛`,
+              {
+                parse_mode: "HTML",
+                link_preview_options: { is_disabled: true },
+                ...Markup.inlineKeyboard([[
+                  Markup.button.url("📢 Подписаться", "https://t.me/Roblox_Bank_Tg")
+                ]]),
+              }
+            );
+            return;
+          }
         }
+        
+        // Fallback for subscribed users with no active session (fixes the "black hole")
+        await ctx.reply(
+          "У тебя сейчас нет активных заявок для ввода ссылки.\n\n" +
+          "📦 Проверить статус старых заказов: /status\n" +
+          "💬 Если нужна помощь — обратись в поддержку.",
+          { parse_mode: "HTML" }
+        );
       }
       return;
     }
@@ -346,13 +357,15 @@ export function registerText(bot: Telegraf): void {
       return;
     }
 
+    const expectedPrice = Math.ceil(state.denomination / 0.7);
+
     // Re-check subscription — pendingLink state may have been set before subscribing.
     if (!isAdmin) {
       const subscribed = await checkSubscription(bot, ctx.from.id);
       if (!subscribed) {
         await ctx.reply(
           `✨ Почти готово! Чтобы мы могли моментально уведомлять тебя о выкупе и присылать секретные бонусы, загляни в наш канал: https://t.me/Roblox_Bank_Tg\n\n` +
-          `Подпишись и просто отправь ссылку на геймпасс еще раз — мы сразу возьмем его в работу! 💛`,
+          `Подпишись и просто отправь ссылку на геймпасс за <b>${expectedPrice} R$</b> еще раз — мы сразу возьмем его в работу! 💛`,
           {
             parse_mode: "HTML",
             link_preview_options: { is_disabled: true },
@@ -366,7 +379,6 @@ export function registerText(bot: Telegraf): void {
     }
 
     // ── Roblox API validation ─────────────────────────────────────────────
-    const expectedPrice = Math.ceil(state.denomination / 0.7);
     const gamepassInfo = await getGamepassDetails(passId);
 
     if (!gamepassInfo) {
