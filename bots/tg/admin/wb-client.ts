@@ -61,7 +61,6 @@ const PriceSchema = z.object({
       })),
     })).optional().default([]),
   }),
-  }),
 });
 
 // ── Cache mechanism ─────────────────────────────────────────────────────────
