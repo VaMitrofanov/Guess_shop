@@ -6,7 +6,7 @@
  * Inline callback_data → hub sub-views via editMessageText.
  */
 
-import type { Telegraf } from "telegraf";
+import type { Telegraf, Context } from "telegraf";
 import { Markup } from "telegraf";
 import { ADMIN_IDS, CB } from "../../shared/admin";
 import { buildAdminKeyboard, updateMainMenu } from "./menu";
@@ -45,7 +45,7 @@ export function registerAdminHubs(bot: Telegraf): void {
    * Deletes the user's menu text message and invokes the handler.
    * The handler uses sendOrEditWidget to update the bot's last message.
    */
-  const handleAdminMenu = async (ctx: any, handler: (ctx: any) => Promise<void>) => {
+  const handleAdminMenu = async (ctx: Context, handler: (ctx: Context) => Promise<void>) => {
     if (!ADMIN_IDS.includes(String(ctx.from?.id))) return;
 
     if (ctx.message?.message_id) {
