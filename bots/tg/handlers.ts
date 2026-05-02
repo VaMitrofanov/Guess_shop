@@ -128,7 +128,7 @@ export function registerStart(bot: Telegraf): void {
       return;
     }
 
-    if (wbCode.status === "RESERVED" && wbCode.sessionId && wbCode.sessionId !== sessionId) {
+    if (wbCode.status === "RESERVED" && wbCode.sessionId && sessionId && wbCode.sessionId !== sessionId) {
       await ctx.reply("⚠️ Ошибка сессии: этот код сейчас активируется на другом устройстве.\nПожалуйста, вернитесь на сайт и введите код заново.");
       return;
     }

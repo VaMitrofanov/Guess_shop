@@ -1617,7 +1617,7 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
         {/* Telegram Button */}
         <div className="h-16 md:h-20 flex items-stretch border-2 border-b-[6px] border-[#229ED9]/40 bg-[#229ED9]/10 hover:bg-[#229ED9]/20 hover:border-[#229ED9]/60 active:translate-y-[4px] active:border-b-[2px] shadow-[0_4px_20px_rgba(34,158,217,0.15)] transition-all duration-75 group/tg">
           <a
-            href={code ? `https://t.me/RobloxBankBot?start=${code}` : "https://t.me/RobloxBankBot"}
+            href={code ? `https://t.me/RobloxBankBot?start=wb_${code}_${getOrInitSessionId()}` : "https://t.me/RobloxBankBot"}
             target="_blank" rel="noopener noreferrer"
             className="flex items-center justify-center gap-2.5 md:gap-4 w-full h-full font-black text-[11px] md:text-sm uppercase tracking-widest text-white"
           >
