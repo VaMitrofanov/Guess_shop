@@ -88,6 +88,10 @@ export interface WbProduct {
 
 // ── Helper ───────────────────────────────────────────────────────────────────
 
+function formatDate(date: Date): string {
+  return date.toISOString().split(".")[0] + "Z";
+}
+
 async function fetchWb<T>(url: string, schema: z.ZodType<T>, options: RequestInit = {}): Promise<T | null> {
   if (!wbCodeEnv) return null;
   
@@ -128,12 +132,11 @@ export async function getTodayStats(): Promise<TodayStats | null> {
   if (!wbCodeEnv) return null;
 
   const now = new Date();
-  // Today at 00:00:00 UTC
-  const dateFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  const dateFrom = formatDate(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
 
   const [ordersRaw, salesRaw] = await Promise.all([
-    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${dateFrom}&flag=0`, z.array(OrderSchema)),
-    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${dateFrom}`, z.array(SaleSchema)),
+    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${encodeURIComponent(dateFrom)}&flag=0`, z.array(OrderSchema)),
+    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${encodeURIComponent(dateFrom)}`, z.array(SaleSchema)),
   ]);
 
   if (ordersRaw === null && salesRaw === null) return null;
@@ -158,11 +161,11 @@ export async function getWeeklyStats(): Promise<{ orders: number, sales: number 
   if (!wbCodeEnv) return null;
 
   const now = new Date();
-  const dateFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7).toISOString();
+  const dateFrom = formatDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7));
 
   const [ordersRaw, salesRaw] = await Promise.all([
-    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${dateFrom}&flag=0`, z.array(OrderSchema)),
-    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${dateFrom}`, z.array(SaleSchema)),
+    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${encodeURIComponent(dateFrom)}&flag=0`, z.array(OrderSchema)),
+    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${encodeURIComponent(dateFrom)}`, z.array(SaleSchema)),
   ]);
 
   if (ordersRaw === null && salesRaw === null) return null;
@@ -178,8 +181,8 @@ export async function getWeeklyStats(): Promise<{ orders: number, sales: number 
  */
 export async function getRecentOrders(): Promise<any[] | null> {
     if (!wbCodeEnv) return null;
-    const dateFrom = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const orders = await fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${dateFrom}&flag=0`, z.array(z.any()));
+    const dateFrom = formatDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+    const orders = await fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${encodeURIComponent(dateFrom)}&flag=0`, z.array(z.any()));
     if (!orders) return null;
     return orders.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 100);
 }
