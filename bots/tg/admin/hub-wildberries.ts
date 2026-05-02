@@ -10,7 +10,7 @@ import { Markup, type Context } from "telegraf";
 import { db } from "../../shared/db";
 import { CB } from "../../shared/admin";
 import { sendOrEditWidget, editWidget } from "./widgets";
-import { getTodayStats, getStocks, getCampaignsStatus, getProducts, getWeeklyStats, updatePrice, getRecentOrders } from "./wb-client";
+import { getTodayStats, getStocks, getCampaignsStatus, getProducts, getWeeklyStats, updatePrice, getRecentOrders, getFbsOrders } from "./wb-client";
 import { pendingCodesInput, pendingPriceInput } from "../session";
 
 // ── Stock level indicators ───────────────────────────────────────────────────
@@ -83,11 +83,12 @@ async function buildWbText(): Promise<string> {
   if (groups.length === 0) dbCodesLines = "⚠️ <b>Нет кодов в БД!</b>\n";
 
   // 2. Fetch WB API stats
-  const [stats, stocks, campaigns, weekly] = await Promise.all([
+  const [stats, stocks, campaigns, weekly, fbs] = await Promise.all([
     getTodayStats(),
     getStocks(),
     getCampaignsStatus(),
-    getWeeklyStats()
+    getWeeklyStats(),
+    getFbsOrders()
   ]);
 
   const hasApiError = !stats && !stocks && !campaigns;
@@ -120,15 +121,19 @@ async function buildWbText(): Promise<string> {
 
     const campStr = campaigns || "Ошибка загрузки";
 
+    const fbsCount = fbs ? fbs.length : 0;
+    const fbsLine = fbsCount > 0 ? `🚚 <b>АКТИВНЫЕ FBS: ${fbsCount} шт.</b>\n` : "";
+
     apiText = 
       `💰 <b>ФИНАНСЫ (СЕГОДНЯ)</b>\n` +
       `Заказы: <b>${ordersStr}</b>\n` +
       `Выкупы: <b>${salesStr}</b>\n` +
       `💵 Чистыми (прим.): <b>~${netSum} ₽</b>\n\n` +
+      fbsLine +
       `📅 <b>ЗА 7 ДНЕЙ</b>\n` +
       `Всего заказов: <b>${weeklyOrders}</b>\n` +
       `Всего выкупов: <b>${weeklySales}</b>\n\n` +
-      `📦 <b>СКЛАД WB</b>\n${warehouseLines}\n` +
+      `📦 <b>СКЛАД WB (FBO)</b>\n${warehouseLines}\n` +
       `📈 <b>РЕКЛАМА</b>\nСтатус: ${campStr}\n`;
   }
 
@@ -175,20 +180,44 @@ export async function showWbProducts(ctx: Context): Promise<void> {
 }
 
 export async function showRecentOrders(ctx: Context): Promise<void> {
-    const orders = await getRecentOrders();
+    const [orders, fbs] = await Promise.all([getRecentOrders(), getFbsOrders()]);
     let text = `📜 <b>ПОСЛЕДНИЕ ЗАКАЗЫ (WB)</b>\n━━━━━━━━━━━━━━━━\n\n`;
 
-    if (!orders || orders.length === 0) {
+    const allOrders: any[] = [];
+    
+    // Add FBO orders
+    if (orders) {
+        orders.forEach(o => allOrders.push({
+            date: new Date(o.date),
+            price: o.priceWithDisc,
+            article: o.supplierArticle,
+            status: o.isCancel ? "❌ Отмена" : "✅ FBO (Активен)",
+            isFbs: false
+        }));
+    }
+
+    // Add FBS orders
+    if (fbs) {
+        fbs.forEach(o => allOrders.push({
+            date: new Date(o.createdAt),
+            price: o.convertedPrice / 100, // FBS API usually returns cents/kopeks
+            article: o.article,
+            status: "🚚 FBS (В работе)",
+            isFbs: true
+        }));
+    }
+
+    allOrders.sort((a, b) => b.date.getTime() - a.date.getTime());
+
+    if (allOrders.length === 0) {
         text += `За последние 30 дней заказов не найдено.`;
     } else {
-        // Show last 15
-        const slice = orders.slice(0, 15);
+        const slice = allOrders.slice(0, 20);
         for (const o of slice) {
-            const date = new Date(o.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-            const status = o.isCancel ? "❌ Отмена" : "✅ Активен";
-            text += `• <b>${date}</b> — ${o.priceWithDisc} ₽\n  Арт: <code>${o.supplierArticle}</code> (${status})\n\n`;
+            const dateStr = o.date.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+            text += `• <b>${dateStr}</b> — ${o.price} ₽\n  Арт: <code>${o.article}</code> (${o.status})\n\n`;
         }
-        if (orders.length > 15) text += `<i>...и еще ${orders.length - 15} заказов.</i>`;
+        if (allOrders.length > 20) text += `<i>...и еще ${allOrders.length - 20} заказов.</i>`;
     }
 
     await editWidget(ctx, text, Markup.inlineKeyboard([

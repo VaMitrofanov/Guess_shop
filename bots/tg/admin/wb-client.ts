@@ -188,6 +188,23 @@ export async function getRecentOrders(): Promise<any[] | null> {
 }
 
 /**
+ * Get Marketplace (FBS) orders.
+ */
+export async function getFbsOrders(): Promise<any[] | null> {
+    if (!wbCodeEnv) return null;
+    
+    // 1. Get NEW orders
+    const newRes = await fetchWb(`https://marketplace-api.wildberries.ru/api/v3/orders/new`, z.object({ orders: z.array(z.any()) }));
+    const newOrders = newRes?.orders || [];
+    
+    // 2. Get IN-PROCESS orders
+    const procRes = await fetchWb(`https://marketplace-api.wildberries.ru/api/v3/orders?limit=50&next=0`, z.object({ orders: z.array(z.any()) }));
+    const procOrders = procRes?.orders || [];
+    
+    return [...newOrders, ...procOrders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+/**
  * Get current stocks. Grouped by supplierArticle.
  */
 export async function getStocks(): Promise<WbStock[] | null> {
