@@ -120,8 +120,8 @@ async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null): Pro
   const groupUrl = groupId ? `https://vk.com/club${groupId}` : "https://vk.com";
   await ctx.reply({
     message:
-      `🎁 Чтобы твоя заявка прошла в приоритетном режиме и ты получил доступ к закрытым розыгрышам, подпишись на наше сообщество: ${groupUrl}\n\n` +
-      `Как только подпишешься, присылай код — и мы начнем магию обмена! ✨`,
+      `✨ Мы очень ждем твою заявку! Но чтобы система могла закрепить её за тобой и выдать робуксы, нужно сначала заглянуть в наше сообщество: ${groupUrl}\n\n` +
+      `Как только подпишешься — нажми кнопку «✅ Я подписался» ниже, и мы всё сделаем! 💛`,
     keyboard: Keyboard.builder()
       .urlButton({ label: "🔔 Подписаться", url: groupUrl })
       .row()
@@ -577,7 +577,13 @@ async function handleReviewScreenshot(
           where: { userId: user.id, reviewBonusClaimed: false },
         })
       : null;
-    if (!order || !linked) return; // nothing to review — stay silent
+    if (!order || !linked) {
+      await ctx.reply(
+        "📸 У тебя сейчас нет выполненных заказов, ожидающих отзыва.\n\n" +
+        "Если у тебя возникла проблема или вопрос — напиши в поддержку: https://t.me/RobloxBank_PA"
+      );
+      return;
+    }
     orderId = order.id as string;
   }
 
@@ -616,15 +622,7 @@ async function handleIdleMessage(
   if (process.env.VK_GROUP_ID) {
     const subbed = await isVkSubscribed(ctx, vkUserId);
     if (!subbed) {
-      const groupUrl = `https://vk.com/club${process.env.VK_GROUP_ID}`;
-      await ctx.reply({
-        message:
-          `✨ Мы очень ждем твою заявку! Но чтобы система могла закрепить её за тобой и выдать робуксы, нужно сначала заглянуть в наше сообщество: ${groupUrl}\n\n` +
-          `Как только подпишешься — присылай код или ссылку, и мы всё сделаем! 💛`,
-        keyboard: Keyboard.builder()
-          .urlButton({ label: "🔔 Подписаться", url: groupUrl })
-          .inline(),
-      });
+      await sendVkSubPrompt(ctx, null);
       return;
     }
   }
