@@ -21,17 +21,18 @@ interface ServiceConfig {
 function getServices(): ServiceConfig[] {
   const containers = (process.env.DOCKER_CONTAINERS ?? "").split(",").map(s => s.trim()).filter(Boolean);
 
-  // Default services if env not set
+  // Default services pointing to production URLs
   const defaults: ServiceConfig[] = [
-    { name: "Main",  url: process.env.MAIN_HEALTH_URL  ?? "", icon: "🌐" },
-    { name: "Guide", url: process.env.GUIDE_HEALTH_URL ?? "", icon: "🌐" },
+    { name: "Main (Web)",  url: process.env.MAIN_HEALTH_URL  ?? "https://www.robloxbank.ru", icon: "🌐" },
+    { name: "Guide (Web)", url: process.env.GUIDE_HEALTH_URL ?? "https://www.robloxbank.ru/guide", icon: "🌐" },
+    { name: "VK Bot",      url: process.env.VK_BOT_HEALTH_URL ?? "http://5.223.95.11:3000", icon: "🤖" },
   ];
 
   if (containers.length > 0) {
     return containers.map(name => ({
       name,
       url: process.env[`${name.toUpperCase().replace(/-/g, "_")}_HEALTH_URL`] ?? "",
-      icon: "🌐",
+      icon: name.includes("bot") ? "🤖" : "🌐",
     }));
   }
 
@@ -45,7 +46,9 @@ async function checkHealth(url: string): Promise<{ ok: boolean; ms: number }> {
   const start = Date.now();
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    return { ok: res.ok, ms: Date.now() - start };
+    // The VK bridge server returns 404 for the root URL, so we accept it as "online"
+    const isOk = res.ok || (res.status === 404 && url.includes(":3000"));
+    return { ok: isOk, ms: Date.now() - start };
   } catch {
     return { ok: false, ms: Date.now() - start };
   }
