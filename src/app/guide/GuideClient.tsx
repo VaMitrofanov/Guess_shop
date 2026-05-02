@@ -20,37 +20,7 @@ import AnimatedShaderBackground from "@/components/ui/animated-shader-background
 import InstructionRevealCurtain from "@/components/ui/instruction-reveal-curtain";
 import ScrollFeatureTeaser from "@/components/ui/scroll-feature-teaser";
 import { ConnectivityAssistant } from "@/components/connectivity-assistant";
-
-// ─── localStorage WB session helpers ──────────────────────────────────────────
-const WB_SESSION_KEY = "rb_wb_session";
-const WB_SESSION_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
-
-interface WBSession {
-  denomination: number;
-  code: string;
-  ts: number;
-}
-
-function saveWBSession(denomination: number, code: string) {
-  try {
-    localStorage.setItem(WB_SESSION_KEY, JSON.stringify({ denomination, code, ts: Date.now() } satisfies WBSession));
-  } catch {}
-}
-
-function loadWBSession(): { denomination: number; code: string } | null {
-  try {
-    const raw = localStorage.getItem(WB_SESSION_KEY);
-    if (!raw) return null;
-    const { denomination, code, ts } = JSON.parse(raw) as WBSession;
-    if (Date.now() - ts > WB_SESSION_TTL) {
-      localStorage.removeItem(WB_SESSION_KEY);
-      return null;
-    }
-    return denomination > 0 ? { denomination, code: code ?? "" } : null;
-  } catch {
-    return null;
-  }
-}
+import { getOrInitSessionId, loadWBSession, saveWBSession, clearWBSession } from "@/lib/wb-session";
 
 // ─── Step definitions ──────────────────────────────────────────────────────────
 
@@ -1783,7 +1753,7 @@ function WBGate({ onSuccess }: WBGateProps) {
     const res = await fetch("/api/wb-code", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ code, sessionId: getOrInitSessionId() }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data?.error ?? "Ошибка отправки");
@@ -1827,7 +1797,7 @@ function WBGate({ onSuccess }: WBGateProps) {
     try {
       await validateAndPersist();
       if (target === "tg") {
-        window.location.href = `https://t.me/RobloxBankBot?start=${code}`;
+        window.location.href = `https://t.me/RobloxBankBot?start=wb_${code}_${getOrInitSessionId()}`;
         return;
       }
       // VK path: don't redirect blindly to vk.me/club?ref=… — VK does NOT
@@ -2580,29 +2550,63 @@ export default function GuideClient({ isWB }: { isWB: boolean }) {
   );
   const [denomination, setDenomination] = useState<number>(0);
   const [activeCode, setActiveCode] = useState<string>("");
-  // Tracks whether the user has just passed the WB gate in THIS render —
-  // used to play the cinematic curtain reveal. False on localStorage restore
-  // so returning users don't see the animation every page-load.
   const [freshFromGate, setFreshFromGate] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(true);
 
-  // Restore WB session from localStorage on mount —
-  // skip intro if the user already activated a code this session
   useEffect(() => {
-    if (!isWB) return;
-    const saved = loadWBSession();
-    if (saved !== null) {
-      setDenomination(saved.denomination);
-      setActiveCode(saved.code);
-      setPhase("instruction");
+    if (!isWB) {
+      setIsRestoring(false);
+      return;
     }
+    const restoreSession = async () => {
+      const saved = loadWBSession();
+      if (!saved) {
+        setIsRestoring(false);
+        return;
+      }
+      try {
+        const sessionId = getOrInitSessionId();
+        const res = await fetch("/api/wb-code", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: saved.code, sessionId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.denomination) {
+          setDenomination(data.denomination);
+          setActiveCode(saved.code);
+          setPhase("instruction");
+        } else {
+          clearWBSession();
+        }
+      } catch {
+        // Network error - keep saved session and fallback to gate
+      } finally {
+        setIsRestoring(false);
+      }
+    };
+    restoreSession();
   }, [isWB]);
 
   const handleWBReset = () => {
-    try { localStorage.removeItem(WB_SESSION_KEY); } catch {}
+    clearWBSession();
     setDenomination(0);
     setActiveCode("");
     setPhase("gate");
   };
+
+  if (isRestoring) {
+    return (
+      <div className="min-h-screen bg-[#0a0e1a] flex flex-col items-center justify-center p-4">
+        <div className="w-16 h-16 rounded-full bg-[#1c1c1e] animate-pulse mb-6 border border-[#c9a84c]/20" />
+        <div className="w-48 h-4 bg-[#1c1c1e] rounded animate-pulse mb-3" />
+        <div className="w-32 h-3 bg-[#1c1c1e] rounded animate-pulse" />
+        <div className="mt-8 text-[10px] uppercase tracking-widest text-[#c9a84c]/50 font-pixel animate-pulse">
+          Восстановление сессии...
+        </div>
+      </div>
+    );
+  }
 
   if (phase === "intro") {
     return <WBIntro onDone={() => setPhase("gate")} />;

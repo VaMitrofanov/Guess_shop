@@ -58,10 +58,35 @@ async function checkSubscription(bot: Telegraf, userId: number): Promise<boolean
 // /start [CODE]
 // ─────────────────────────────────────────────────────────────────────────────
 
+const startRateLimiter = new Map<string, { attempts: number, resetAt: number }>();
+
 export function registerStart(bot: Telegraf): void {
   bot.start(async (ctx) => {
     const tgId = String(ctx.from.id);
-    const code = ctx.startPayload?.trim().toUpperCase() ?? "";
+    const rawPayload = ctx.startPayload?.trim() ?? "";
+    let code = rawPayload.toUpperCase();
+    let sessionId: string | null = null;
+
+    if (rawPayload.toLowerCase().startsWith("wb_")) {
+      const parts = rawPayload.split("_");
+      code = (parts[1] || "").toUpperCase();
+      sessionId = parts[2] || null;
+    }
+
+    // Rate Limiting
+    const rateKey = sessionId || tgId;
+    const now = Date.now();
+    const rateData = startRateLimiter.get(rateKey) || { attempts: 0, resetAt: now + 60000 };
+    if (rateData.resetAt < now) {
+      rateData.attempts = 0;
+      rateData.resetAt = now + 60000;
+    }
+    rateData.attempts++;
+    startRateLimiter.set(rateKey, rateData);
+    if (rateData.attempts > 5) {
+      console.warn(`[TG] Rate limit exceeded for start command by ${rateKey}`);
+      return; // Silently drop to protect against parsers
+    }
 
     // No code payload — IDLE greeting
     if (!code) {
@@ -97,11 +122,14 @@ export function registerStart(bot: Telegraf): void {
       await ctx.reply("❌ Код не найден. Проверь правильность ввода или обратись в поддержку.");
       return;
     }
-    // Only hard-block when code is definitively claimed (isUsed + userId set).
-    // isUsed=true with userId=null means the site pre-activated it — the bot
-    // will link the user atomically at the gamepass-submission step below.
-    if (wbCode.isUsed && wbCode.userId != null) {
+
+    if (wbCode.status === "CLAIMED" || (wbCode.isUsed && wbCode.userId != null)) {
       await ctx.reply("⚠️ Этот код уже был активирован ранее.");
+      return;
+    }
+
+    if (wbCode.status === "RESERVED" && wbCode.sessionId && wbCode.sessionId !== sessionId) {
+      await ctx.reply("⚠️ Ошибка сессии: этот код сейчас активируется на другом устройстве.\nПожалуйста, вернитесь на сайт и введите код заново.");
       return;
     }
 
@@ -413,9 +441,12 @@ export function registerText(bot: Telegraf): void {
         const claimed = await tx.wbCode.updateMany({
           where: {
             code: { equals: state.wbCode, mode: "insensitive" },
-            userId: null, // matches fresh (isUsed=false) AND web-activated (isUsed=true,userId=null)
+            OR: [
+              { status: "RESERVED" },
+              { userId: null }
+            ]
           },
-          data: { userId: user.id, isUsed: true, usedAt: new Date() },
+          data: { userId: user.id, isUsed: true, status: "CLAIMED", usedAt: new Date() },
         });
         console.log(
           `[TG] $transaction: wbCode.updateMany count=${claimed.count} for code=${state.wbCode}`
@@ -452,6 +483,11 @@ export function registerText(bot: Telegraf): void {
       if (err.isClaimed) {
         pendingLink.delete(ctx.from.id);
         await ctx.reply("⚠️ Этот код уже был активирован другим пользователем. Обратитесь в поддержку.");
+        return;
+      }
+      if (err.code === "P2002") {
+        pendingLink.delete(ctx.from.id);
+        await ctx.reply("⚠️ Заказ по этому коду уже был создан и сейчас обрабатывается.");
         return;
       }
       console.error("[TG] Order create error:", err);

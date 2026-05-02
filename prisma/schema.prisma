@@ -94,6 +94,12 @@ enum WbOrderStatus {
   REJECTED
 }
 
+enum WbCodeStatus {
+  AVAILABLE
+  RESERVED
+  CLAIMED
+}
+
 /// WB withdrawal order: tracks gamepass link submissions from WB card buyers.
 model WbOrder {
   id              String        @id @default(cuid())
@@ -103,7 +109,7 @@ model WbOrder {
   platform        Platform
   userId          String
   user            User          @relation(fields: [userId], references: [id])
-  wbCode          String
+  wbCode          String        @unique
   adminId         String?
   rejectionReason String?
   /// Snapshot of the purchase rate (R$/₽) at the time of fulfillment.
@@ -114,7 +120,6 @@ model WbOrder {
 
   @@index([userId])
   @@index([status])
-  @@index([wbCode])
 }
 
 model FAQ {
@@ -179,19 +184,23 @@ model GlobalSettings {
 
 /// Activation codes printed on Wildberries card inserts.
 model WbCode {
-  id                 String    @id @default(cuid())
-  code               String    @unique
+  id                 String       @id @default(cuid())
+  code               String       @unique
   denomination       Int
-  isUsed             Boolean   @default(false)
+  status             WbCodeStatus @default(AVAILABLE)
+  sessionId          String?
+  reservedUntil      DateTime?
+  isUsed             Boolean      @default(false)
   usedAt             DateTime?
   batch              String?
-  reviewBonusClaimed Boolean   @default(false)
+  reviewBonusClaimed Boolean      @default(false)
   userId             String?
-  user               User?     @relation(fields: [userId], references: [id])
-  createdAt          DateTime  @default(now())
+  user               User?        @relation(fields: [userId], references: [id])
+  createdAt          DateTime     @default(now())
 
   @@index([code])
-  @@index([isUsed])
+  @@index([status])
+  @@index([sessionId])
   @@index([denomination])
   @@index([userId])
 }
