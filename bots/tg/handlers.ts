@@ -85,7 +85,13 @@ export function registerStart(bot: Telegraf): void {
     startRateLimiter.set(rateKey, rateData);
     if (rateData.attempts > 5) {
       console.warn(`[TG] Rate limit exceeded for start command by ${rateKey}`);
-      return; // Silently drop to protect against parsers
+      if (rateData.attempts === 6) {
+        await ctx.reply(
+          "⏳ Ты уже активировал этот код. Подожди — бот обрабатывает заявку.\n\n" +
+          "Если ждёшь больше 2 минут — напиши в поддержку: @RobloxBank_PA"
+        );
+      }
+      return;
     }
 
     // No code payload — IDLE greeting
@@ -129,8 +135,11 @@ export function registerStart(bot: Telegraf): void {
     }
 
     if (wbCode.status === "RESERVED" && wbCode.sessionId && sessionId && wbCode.sessionId !== sessionId) {
-      await ctx.reply("⚠️ Ошибка сессии: этот код сейчас активируется на другом устройстве.\nПожалуйста, вернитесь на сайт и введите код заново.");
-      return;
+      // SessionId mismatch — user likely opened the site on two devices. Since they
+      // possess both the physical card and this deep link, proceed instead of blocking.
+      console.warn(
+        `[TG] SessionId mismatch for code=${code}: db=${wbCode.sessionId} link=${sessionId}. Proceeding.`
+      );
     }
 
     // Lazy registration: find or create user
@@ -382,11 +391,14 @@ export function registerText(bot: Telegraf): void {
     const gamepassInfo = await getGamepassDetails(passId);
 
     if (!gamepassInfo) {
-      // Roblox is reachable but returned no data → gamepass likely doesn't exist
+      // Roblox returned HTTP responses but no usable data → gamepass doesn't exist
       await ctx.reply(
-        "⚠️ Не удалось получить информацию о геймпассе от Roblox.\n\n" +
-        "Проверь правильность ссылки/ID и попробуй ещё раз. " +
-        "Если проблема повторяется — обратись в поддержку.",
+        "❌ Геймпасс не найден на Roblox.\n\n" +
+        "Убедись, что:\n" +
+        "• Геймпасс <b>опубликован</b> (не в черновиках)\n" +
+        "• Ссылка ведёт именно на Game Pass, а не на саму игру\n" +
+        "• Ты скопировал ссылку прямо из браузера Roblox\n\n" +
+        "Если геймпасс точно существует — напиши в поддержку: @RobloxBank_PA",
         { parse_mode: "HTML" }
       );
       return;
@@ -796,10 +808,22 @@ export function registerCallbacks(bot: Telegraf): void {
       const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
       const currentRate = settings?.purchaseRate ?? null;
 
-      const order = await (db as any).wbOrder.update({
-        where: { id: orderId },
+      // Atomic guard: only update if the order is still in an actionable state.
+      // Prevents double-notification when two admins click simultaneously.
+      const updatedCount = await (db as any).wbOrder.updateMany({
+        where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
         data: { status: "COMPLETED", adminId, purchaseRate: currentRate },
       });
+
+      if (updatedCount.count === 0) {
+        await ctx.answerCbQuery("⚠️ Уже обработан другим админом");
+        try {
+          await ctx.editMessageText("✅ Выполнено (другим админом)", { parse_mode: "HTML" });
+        } catch {}
+        return;
+      }
+
+      const order = await (db as any).wbOrder.findUnique({ where: { id: orderId } });
       const user = await (db as any).user.findUnique({ where: { id: order.userId } });
 
       const editedText = `✅ <b>Выполнено админом ${adminTag}</b>\nЗаказ #${orderId.slice(-6).toUpperCase()} · ${order.amount} R$`;

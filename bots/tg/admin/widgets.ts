@@ -12,6 +12,11 @@
 import type { Context } from "telegraf";
 import { adminWidgetMsg } from "../session";
 
+// Timestamp of the current process start — used to detect the first admin
+// interaction after a bot restart and prepend a restart banner.
+const BOT_STARTED_AT = Date.now();
+const RESTART_BANNER_TTL_MS = 120_000; // show banner only within 2 min of startup
+
 /**
  * Send a new widget message (or edit existing one) and track its message_id.
  *
@@ -43,8 +48,15 @@ export async function sendOrEditWidget(
     }
   }
 
-  // Send new widget message and track it
-  const sent = await ctx.reply(text, {
+  // First interaction after a restart: prepend a one-time banner so admins know
+  // the bot was reloaded and the previous widget session is gone.
+  const isJustRestarted =
+    !existingMsgId && Date.now() - BOT_STARTED_AT < RESTART_BANNER_TTL_MS;
+  const finalText = isJustRestarted
+    ? `🔄 <i>Бот перезапущен. Сессия обновлена.</i>\n\n${text}`
+    : text;
+
+  const sent = await ctx.reply(finalText, {
     parse_mode: "HTML",
     link_preview_options: { is_disabled: true },
     ...extra,

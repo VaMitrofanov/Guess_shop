@@ -157,7 +157,12 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     return;
   }
 
-  if (msgPayload?.command === "check_sub" || text === "✅ Я подписался") {
+  // Accept "✅ Я подписался" as text only when the user is in AWAITING_LINK state
+  // (old VK desktop clients that don't send inline-keyboard payloads). Without
+  // the context guard any user sending that phrase would trigger a spurious sub-check.
+  const isSubConfirmText =
+    text === "✅ Я подписался" && getState(vkUserId)?.type === "AWAITING_LINK";
+  if (msgPayload?.command === "check_sub" || isSubConfirmText) {
     try {
       if (!(await isVkSubscribed(ctx, vkUserId))) {
         await ctx.reply("Ты всё ещё не подписан! 😢 Подпишись и нажми кнопку снова.");
@@ -383,11 +388,14 @@ async function handleGamepassLink(
   const gamepassInfo  = await getGamepassDetails(passId);
 
   if (!gamepassInfo) {
-    // Roblox is reachable but returned no data → gamepass likely doesn't exist
+    // Roblox returned HTTP responses but no usable data → gamepass doesn't exist
     await ctx.reply(
-      "⚠️ Не удалось получить информацию о геймпассе от Roblox.\n\n" +
-      "Проверь правильность ссылки/ID и попробуй ещё раз. " +
-      "Если проблема повторяется — обратись в поддержку: https://t.me/RobloxBank_PA"
+      "❌ Геймпасс не найден на Roblox.\n\n" +
+      "Убедись, что:\n" +
+      "• Геймпасс опубликован (не в черновиках)\n" +
+      "• Ссылка ведёт именно на Game Pass, а не на саму игру\n" +
+      "• Ты скопировал ссылку прямо из браузера Roblox\n\n" +
+      "Если геймпасс точно существует — напиши в поддержку: https://t.me/RobloxBank_PA"
     );
     return;
   }
