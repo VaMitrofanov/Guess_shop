@@ -48,6 +48,18 @@ export const pendingBatchFulfill = new Map<number, true>();
 /** Admin is in "edit product price" input mode. Value = nmID. */
 export const pendingPriceInput = new Map<number, { nmID: number }>();
 
+// ── Progressive Disclosure: per-session failure counters ─────────────────────
+// Tracks how many times a user has hit each validation error in their current
+// active session. Reset when pendingLink is cleared (success or new session).
+
+export interface LinkFailState {
+  priceMismatch: number; // wrong game-pass price
+  formatError:   number; // text didn't parse as a gamepass URL/ID
+  notActive:     number; // gamepass not published/active
+}
+
+export const linkFailCounts = new Map<number, LinkFailState>();
+
 /** Admin is typing an answer to a WB review or question. */
 export const pendingReviewAnswer = new Map<number, { id: string; isQuestion: boolean; article: string }>();
 

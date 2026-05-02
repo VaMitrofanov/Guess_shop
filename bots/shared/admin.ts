@@ -27,12 +27,15 @@ export const CB = {
   // Safety confirmation steps
   confirmRejectOrder:  (orderId: string) => `confirm_reject:${orderId}`,
   cancelRejectOrder:   (orderId: string) => `cancel_reject:${orderId}`,
-  confirmReviewReject: (orderId: string, userId: string) => `confirm_rev_no:${orderId}:${userId}`,
-  cancelReviewReject:  (orderId: string, userId: string) => `cancel_rev_no:${orderId}:${userId}`,
+  // Shortened to fit Telegram's 64-byte callback_data limit (CUID×2 = 50 bytes used).
+  // confirm_rev_no: was 66 b, cancel_rev_no: was 65 b — both exceeded the limit.
+  confirmReviewReject: (orderId: string, userId: string) => `crn:${orderId}:${userId}`,
+  cancelReviewReject:  (orderId: string, userId: string) => `xrn:${orderId}:${userId}`,
 
   // Preset review rejection reasons (encoded as short keys)
+  // rev_reason: was 69 b max — shortened to rr: (61 b max with "notpub" key).
   reviewRejectReason: (orderId: string, userId: string, key: string) =>
-    `rev_reason:${orderId}:${userId}:${key}`,
+    `rr:${orderId}:${userId}:${key}`,
 
   // ── Hub navigation ─────────────────────────────────────────────────────────
   hubOrders:       "hub_orders",

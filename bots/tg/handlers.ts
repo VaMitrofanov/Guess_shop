@@ -11,10 +11,40 @@ import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, stripHtml } from "../shared/notify";
 import { sendAdminOrderCard, sendAdminReviewCard, CB, ADMIN_IDS } from "../shared/admin";
-import { pendingLink, pendingReview, pendingRejectionReason } from "./session";
+import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, type LinkFailState } from "./session";
 import { getGamepassDetails } from "../shared/roblox";
 import { buildAdminKeyboard, updateMainMenu, routeAdminCallback } from "./admin";
 import { renderExtendedCard } from "./admin/hub-orders";
+
+// ── Support contact (Progressive Disclosure) ────────────────────────────────
+
+const SUPPORT_URL = "https://t.me/RobloxBank_PA";
+
+/** Inline URL button linking to support. Label is kept neutral to avoid spam. */
+function supportBtn(label = "💬 Написать в поддержку") {
+  return Markup.button.url(label, SUPPORT_URL);
+}
+
+/**
+ * Returns inlineKeyboard rows. Pass extra rows (e.g. refresh button) as the
+ * first argument; support button is always appended as the last row.
+ */
+function withSupportKb(extraRows: any[][] = []): ReturnType<typeof Markup.inlineKeyboard> {
+  return Markup.inlineKeyboard([...extraRows, [supportBtn()]]);
+}
+
+/** Get or init the fail-counter object for a user's current session. */
+function getFailCounts(userId: number): LinkFailState {
+  if (!linkFailCounts.has(userId)) {
+    linkFailCounts.set(userId, { priceMismatch: 0, formatError: 0, notActive: 0 });
+  }
+  return linkFailCounts.get(userId)!;
+}
+
+/** Clear fail counters when a session ends (success or new /start). */
+function clearFailCounts(userId: number): void {
+  linkFailCounts.delete(userId);
+}
 
 // ── Gamepass ID extractor ─────────────────────────────────────────────────────
 
@@ -160,6 +190,7 @@ export function registerStart(bot: Telegraf): void {
     // and the user later subscribes and sends a gamepass, registerText picks up
     // this state and processes it immediately — no silent dead-end.
     pendingLink.set(ctx.from.id, { wbCode: wbCode.code, denomination: totalAmount });
+    clearFailCounts(ctx.from.id); // fresh session — reset progressive disclosure counters
 
     const passPrice = Math.ceil(totalAmount / 0.7);
 
@@ -227,22 +258,30 @@ async function getAdminKeyboard() {
 
 export function registerStatus(bot: Telegraf): void {
   bot.command("status", async (ctx) => {
-    const text = await getStatusText(String(ctx.from.id));
+    const { text, keyboard } = await buildStatusMessage(String(ctx.from.id));
     await ctx.reply(text, {
       parse_mode: "HTML",
       link_preview_options: { is_disabled: true },
-      ...Markup.inlineKeyboard([[
-        Markup.button.callback("🔄 Обновить", CB.refreshStatus)
-      ]])
+      ...keyboard,
     });
   });
 }
 
-/** Helper for /status and refresh callback */
-async function getStatusText(tgId: string): Promise<string> {
+interface StatusMessage {
+  text: string;
+  keyboard: ReturnType<typeof Markup.inlineKeyboard>;
+}
+
+/** Builds /status text + keyboard. Shows support button when PENDING > 60 min. */
+async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
+  const refreshRow = [Markup.button.callback("🔄 Обновить", CB.refreshStatus)];
+
   const user = await (db as any).user.findUnique({ where: { tgId } });
   if (!user) {
-    return "У тебя пока нет заказов. Активируй код с карточки Wildberries через /start.";
+    return {
+      text: "У тебя пока нет заказов. Активируй код с карточки Wildberries через /start.",
+      keyboard: Markup.inlineKeyboard([refreshRow]),
+    };
   }
 
   const order = await (db as any).wbOrder.findFirst({
@@ -251,31 +290,50 @@ async function getStatusText(tgId: string): Promise<string> {
   });
 
   if (!order) {
-    return "У тебя пока нет заявок. Отправь ссылку на геймпасс, чтобы создать заявку.";
+    return {
+      text: "У тебя пока нет заявок. Отправь ссылку на геймпасс, чтобы создать заявку.",
+      keyboard: Markup.inlineKeyboard([refreshRow]),
+    };
   }
 
   const label: Record<string, string> = {
-    PENDING: "⏳ В обработке",
+    PENDING:     "⏳ В обработке",
     IN_PROGRESS: "🔧 В работе",
-    COMPLETED: "✅ Выполнен",
-    REJECTED: "❌ Отклонён",
+    COMPLETED:   "✅ Выполнен",
+    REJECTED:    "❌ Отклонён",
   };
 
-  const calmNote =
-    order.status === "PENDING"
-      ? "\n\n💬 <i>Менеджеры работают в порядке очереди — среднее время обработки " +
-      "15–30 минут. Дополнительно писать не нужно: мы сами пришлём уведомление " +
-      "при изменении статуса.</i>"
-      : "";
+  const pendingAgeMs = Date.now() - new Date(order.createdAt).getTime();
+  const pendingOver60  = order.status === "PENDING" && pendingAgeMs > 60  * 60 * 1000;
+  const pendingOver120 = order.status === "PENDING" && pendingAgeMs > 120 * 60 * 1000;
 
-  return (
+  // Progressive note: calm up to 60 min, nudge to check at 60+, support at 120+
+  let note = "";
+  if (order.status === "PENDING") {
+    if (pendingOver120) {
+      note = "\n\n⏰ <i>Заявка обрабатывается дольше обычного. Если нужна помощь — напишите нам.</i>";
+    } else if (pendingOver60) {
+      note = "\n\n💬 <i>Обработка занимает чуть дольше обычного — скоро возьмём в работу.</i>";
+    } else {
+      note = "\n\n💬 <i>Менеджеры работают в порядке очереди — среднее время 15–30 минут. " +
+             "Мы сами пришлём уведомление при изменении статуса.</i>";
+    }
+  }
+
+  const text =
     `📦 <b>Заявка #${order.id.slice(-6).toUpperCase()}</b>\n` +
     `📅 ${new Date(order.createdAt).toLocaleDateString("ru-RU")}\n` +
     `💎 Номинал: <b>${order.amount} R$</b>\n` +
     `🔗 <a href="${order.gamepassUrl}">Геймпасс</a>\n` +
     `📊 Статус: <b>${label[order.status] ?? order.status}</b>` +
-    calmNote
-  );
+    note;
+
+  // Support button appears only when the wait is genuinely long (> 60 min PENDING)
+  const keyboard = pendingOver60
+    ? Markup.inlineKeyboard([refreshRow, [supportBtn("Нужна помощь?")]])
+    : Markup.inlineKeyboard([refreshRow]);
+
+  return { text, keyboard };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -341,12 +399,39 @@ export function registerText(bot: Telegraf): void {
           }
         }
         
-        // Fallback for subscribed users with no active session (fixes the "black hole")
+        // Fallback for subscribed users with no active session.
+        // If this looks like a gamepass URL, check whether the user has a
+        // rejected order — in that case they probably skipped the button.
+        if (extractPassId(text) !== null) {
+          const tgUser = await (db as any).user.findUnique({
+            where: { tgId },
+            select: { id: true },
+          });
+          if (tgUser) {
+            const rejected = await (db as any).wbOrder.findFirst({
+              where: { userId: tgUser.id, status: "REJECTED" },
+              orderBy: { updatedAt: "desc" },
+              select: { id: true },
+            });
+            if (rejected) {
+              await ctx.reply(
+                `👆 <b>Сначала нажми кнопку «🔄 Исправить ссылку»</b> в сообщении об отклонении заказа.\n\n` +
+                `Без этого бот не знает, к какому заказу прикрепить твою ссылку — просто найди то сообщение и нажми кнопку, а потом снова пришли ссылку.`,
+                { parse_mode: "HTML" }
+              );
+              return;
+            }
+          }
+        }
+
         await ctx.reply(
-          "У тебя сейчас нет активных заявок для ввода ссылки.\n\n" +
-          "📦 Проверить статус старых заказов: /status\n" +
-          "💬 Если нужна помощь — обратись в поддержку.",
-          { parse_mode: "HTML" }
+          "У тебя сейчас нет активных заявок.\n\n" +
+          "📦 Проверить статус: /status\n" +
+          "🔑 Активировать код: перейди по ссылке на вкладыше",
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[supportBtn("Нужна помощь?")]]),
+          }
         );
       }
       return;
@@ -355,14 +440,19 @@ export function registerText(bot: Telegraf): void {
     const passId = extractPassId(text);
 
     if (!passId) {
-      await ctx.reply(
+      const fc = getFailCounts(ctx.from.id);
+      fc.formatError++;
+      const formatHint =
         "⚠️ Не удалось распознать геймпасс.\n\n" +
         "Пришли одно из:\n" +
         "• Ссылку: <code>https://www.roblox.com/game-pass/1234567/...</code>\n" +
         "• Ссылку из конструктора: <code>https://create.roblox.com/...</code>\n" +
-        "• Просто ID (только цифры): <code>1234567</code>",
-        { parse_mode: "HTML" }
-      );
+        "• Просто ID (только цифры): <code>1234567</code>";
+      if (fc.formatError >= 2) {
+        await ctx.reply(formatHint, { parse_mode: "HTML", ...withSupportKb() });
+      } else {
+        await ctx.reply(formatHint, { parse_mode: "HTML" });
+      }
       return;
     }
 
@@ -391,15 +481,16 @@ export function registerText(bot: Telegraf): void {
     const gamepassInfo = await getGamepassDetails(passId);
 
     if (!gamepassInfo) {
-      // Roblox returned HTTP responses but no usable data → gamepass doesn't exist
+      // Roblox returned HTTP responses but no usable data → gamepass doesn't exist.
+      // "Тупик" — user can't fix this without external help, show support immediately.
       await ctx.reply(
         "❌ Геймпасс не найден на Roblox.\n\n" +
         "Убедись, что:\n" +
         "• Геймпасс <b>опубликован</b> (не в черновиках)\n" +
         "• Ссылка ведёт именно на Game Pass, а не на саму игру\n" +
         "• Ты скопировал ссылку прямо из браузера Roblox\n\n" +
-        "Если геймпасс точно существует — напиши в поддержку: @RobloxBank_PA",
-        { parse_mode: "HTML" }
+        "Если геймпасс точно существует — мы поможем разобраться:",
+        { parse_mode: "HTML", ...withSupportKb("💬 Написать нам") }
       );
       return;
     }
@@ -407,22 +498,32 @@ export function registerText(bot: Telegraf): void {
     if (!gamepassInfo.validationSkipped) {
       // Normal validation — only runs when Roblox API was reachable
       if (!gamepassInfo.isActive) {
-        await ctx.reply(
+        const fc = getFailCounts(ctx.from.id);
+        fc.notActive++;
+        const notActiveText =
           `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
-          `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.`,
-          { parse_mode: "HTML" }
-        );
+          `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.`;
+        if (fc.notActive >= 2) {
+          await ctx.reply(notActiveText, { parse_mode: "HTML", ...withSupportKb("Нужна помощь?") });
+        } else {
+          await ctx.reply(notActiveText, { parse_mode: "HTML" });
+        }
         return;
       }
 
       if (Math.abs(gamepassInfo.price - expectedPrice) > 2) {
-        await ctx.reply(
+        const fc = getFailCounts(ctx.from.id);
+        fc.priceMismatch++;
+        const priceMismatchText =
           `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
           `Установлено: <b>${gamepassInfo.price} R$</b>\n` +
           `Ожидается:   <b>${expectedPrice} R$</b>\n\n` +
-          `Измени цену геймпасса в настройках Roblox и пришли ссылку снова.`,
-          { parse_mode: "HTML" }
-        );
+          `Измени цену в настройках Roblox (Creator Dashboard → Passes → Edit) и пришли ссылку снова.`;
+        if (fc.priceMismatch >= 2) {
+          await ctx.reply(priceMismatchText, { parse_mode: "HTML", ...withSupportKb("Нужна помощь с ценой?") });
+        } else {
+          await ctx.reply(priceMismatchText, { parse_mode: "HTML" });
+        }
         return;
       }
 
@@ -532,20 +633,33 @@ export function registerText(bot: Telegraf): void {
     } catch (err: any) {
       if (err.isClaimed) {
         pendingLink.delete(ctx.from.id);
-        await ctx.reply("⚠️ Этот код уже был активирован другим пользователем. Обратитесь в поддержку.");
+        clearFailCounts(ctx.from.id);
+        // "Тупик" — user cannot resolve this themselves
+        await ctx.reply(
+          "⚠️ Этот код уже был активирован другим пользователем.\n\nЕсли вы уверены, что код ваш — напишите нам:",
+          { parse_mode: "HTML", ...withSupportKb() }
+        );
         return;
       }
       if (err.code === "P2002") {
         pendingLink.delete(ctx.from.id);
-        await ctx.reply("⚠️ Заказ по этому коду уже был создан и сейчас обрабатывается.");
+        clearFailCounts(ctx.from.id);
+        await ctx.reply(
+          "⚠️ Заказ по этому коду уже создан и сейчас обрабатывается.\n\nПроверь статус: /status"
+        );
         return;
       }
       console.error("[TG] Order create error:", err);
-      await ctx.reply("❌ Ошибка при создании заявки. Попробуй позже или напиши в поддержку.");
+      // "Тупик" — DB/infrastructure error, user helpless
+      await ctx.reply(
+        "❌ Ошибка при создании заявки. Попробуй ещё раз через минуту.\n\nЕсли ошибка повторяется:",
+        { parse_mode: "HTML", ...withSupportKb() }
+      );
       return;
     }
 
     pendingLink.delete(ctx.from.id);
+    clearFailCounts(ctx.from.id); // success — reset progressive disclosure counters
 
     await ctx.reply(
       `✅ Принял геймпасс №${passId}! Ожидайте выкупа.\n\n` +
@@ -962,8 +1076,8 @@ export function registerCallbacks(bot: Telegraf): void {
       return;
     }
 
-    // ── ✅ confirm_rev_no: confirmed → show preset reasons ───────────────
-    if (data.startsWith("confirm_rev_no:")) {
+    // ── ✅ crn: confirmed → show preset reasons ──────────────────────────
+    if (data.startsWith("crn:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const [, orderId, userId] = data.split(":");
       try { await ctx.editMessageText(
@@ -981,16 +1095,16 @@ export function registerCallbacks(bot: Telegraf): void {
       return;
     }
 
-    // ── ❌ cancel_rev_no: admin cancelled review rejection ───────────────
-    if (data.startsWith("cancel_rev_no:")) {
+    // ── ❌ xrn: admin cancelled review rejection ─────────────────────────
+    if (data.startsWith("xrn:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       try { await ctx.editMessageText("✅ Отклонение отзыва отменено."); } catch { }
       await ctx.answerCbQuery("Отменено");
       return;
     }
 
-    // ── 📋 rev_reason: preset review rejection reason selected ───────────
-    if (data.startsWith("rev_reason:")) {
+    // ── 📋 rr: preset review rejection reason selected ───────────────────
+    if (data.startsWith("rr:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const parts = data.split(":");
       const orderId = parts[1];
@@ -1036,14 +1150,12 @@ export function registerCallbacks(bot: Telegraf): void {
 
     // ── 🔄 refresh_status: user refresh ──────────────────────────────────
     if (data === CB.refreshStatus) {
-      const text = await getStatusText(adminId);
+      const { text, keyboard } = await buildStatusMessage(adminId);
       try {
         await ctx.editMessageText(text, {
           parse_mode: "HTML",
           link_preview_options: { is_disabled: true },
-          ...Markup.inlineKeyboard([[
-            Markup.button.callback("🔄 Обновить", CB.refreshStatus)
-          ]])
+          ...keyboard,
         });
       } catch { }
       return ctx.answerCbQuery("Обновлено");
