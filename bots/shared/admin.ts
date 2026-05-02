@@ -62,6 +62,9 @@ export const CB = {
   wbAnalytics:     "wb_analytics",
   wbAnalyticsPeriod: (p: string) => `wb_stat_p:${p}`,
   wbProducts:      "wb_prods",
+  wbRecentOrders:  "wb_recent",
+  wbEditPrice:     (nmID: number) => `wb_edit_p:${nmID}`,
+  wbUpdatePrice:   (nmID: number, price: number) => `wb_upd_p:${nmID}:${price}`,
   wbDownload:      "wb_download",
   wbRefresh:       "wb_refresh",
 

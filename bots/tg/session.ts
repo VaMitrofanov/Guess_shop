@@ -44,3 +44,6 @@ export const pendingAdminSearch = new Map<number, true>();
 
 /** Admin is in "batch fulfillment" input mode — waiting for confirmation. */
 export const pendingBatchFulfill = new Map<number, true>();
+
+/** Admin is in "edit product price" input mode. Value = nmID. */
+export const pendingPriceInput = new Map<number, { nmID: number }>();

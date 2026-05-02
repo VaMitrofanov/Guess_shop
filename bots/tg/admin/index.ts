@@ -20,13 +20,14 @@ import { showRatesHub, refreshRates, showRatesAnalytics } from "./hub-rates";
 import {
   showWildberriesHub, refreshWb, showAddCodesDenom, enterCodesInput,
   showAnalytics, showAnalyticsForPeriod, downloadUnusedCodes, handleCodesInput, showWbProducts,
+  enterPriceInput, handlePriceInput, showRecentOrders,
 } from "./hub-wildberries";
 import {
   showSystemHub, showLogs, showRestartConfirm, handleRestartConfirm,
   initLogCapture,
 } from "./hub-system";
 import {
-  pendingAdminSearch, pendingCodesInput, pendingRateInput,
+  pendingAdminSearch, pendingCodesInput, pendingRateInput, pendingPriceInput,
 } from "../session";
 
 // Re-export for external use
@@ -92,6 +93,12 @@ export function registerAdminHubs(bot: Telegraf): void {
     // 3. Rate input
     if (pendingRateInput.has(ctx.from.id)) {
       const handled = await handleRateInput(ctx, text);
+      if (handled) return;
+    }
+
+    // 4. Price input
+    if (pendingPriceInput.has(ctx.from.id)) {
+      const handled = await handlePriceInput(ctx, text);
       if (handled) return;
     }
 
@@ -215,8 +222,17 @@ export async function routeAdminCallback(
     await showWbProducts(ctx);
     return true;
   }
+  if (data === CB.wbRecentOrders) {
+    await showRecentOrders(ctx);
+    return true;
+  }
   if (data === CB.wbDownload) {
     await downloadUnusedCodes(ctx);
+    return true;
+  }
+  if (data.startsWith("wb_edit_p:")) {
+    const nmID = parseInt(data.split(":")[1]);
+    await enterPriceInput(ctx, nmID);
     return true;
   }
   if (data === CB.wbRefresh) {

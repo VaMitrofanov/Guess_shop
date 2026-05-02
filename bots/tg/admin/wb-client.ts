@@ -176,6 +176,17 @@ export async function getWeeklyStats(): Promise<{ orders: number, sales: number 
 }
 
 /**
+ * Get the most recent 100 orders.
+ */
+export async function getRecentOrders(): Promise<any[] | null> {
+    if (!wbCodeEnv) return null;
+    const dateFrom = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const orders = await fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${dateFrom}`, z.array(z.any()));
+    if (!orders) return null;
+    return orders.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 100);
+}
+
+/**
  * Get current stocks. Grouped by supplierArticle.
  */
 export async function getStocks(): Promise<WbStock[] | null> {
@@ -271,4 +282,39 @@ export async function getProducts(): Promise<WbProduct[] | null> {
     };
   });
 }
+
+/**
+ * Update price for a product.
+ * @param nmID Product ID
+ * @param price New price (base)
+ * @param discount New discount percentage
+ */
+export async function updatePrice(nmID: number, price: number): Promise<boolean> {
+  if (!wbCodeEnv) return false;
+
+  try {
+    const res = await fetch("https://discounts-prices-api.wildberries.ru/api/v2/upload/price", {
+      method: "POST",
+      headers: {
+        Authorization: wbCodeEnv,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify([{
+        nmID,
+        price
+      }])
+    });
+
+    if (!res.ok) {
+        const err = await res.text();
+        console.error(`WB Price Update Error: ${res.status} - ${err}`);
+        return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("WB API Error (Update Price):", err);
+    return false;
+  }
+}
+
 

@@ -10,8 +10,8 @@ import { Markup, type Context } from "telegraf";
 import { db } from "../../shared/db";
 import { CB } from "../../shared/admin";
 import { sendOrEditWidget, editWidget } from "./widgets";
-import { pendingCodesInput } from "../session";
-import { getTodayStats, getStocks, getCampaignsStatus, getProducts, getWeeklyStats } from "./wb-client";
+import { getTodayStats, getStocks, getCampaignsStatus, getProducts, getWeeklyStats, updatePrice, getRecentOrders } from "./wb-client";
+import { pendingCodesInput, pendingPriceInput } from "../session";
 
 // ── Stock level indicators ───────────────────────────────────────────────────
 
@@ -33,6 +33,9 @@ export async function showWildberriesHub(ctx: Context): Promise<void> {
       Markup.button.callback("🏷️ Мои товары", CB.wbProducts),
     ],
     [
+      Markup.button.callback("📜 История заказов", CB.wbRecentOrders),
+    ],
+    [
       Markup.button.callback("➕ Добавить коды", CB.wbAddCodes),
       Markup.button.callback("📥 Выгрузить остатки", CB.wbDownload),
     ],
@@ -46,6 +49,9 @@ export async function refreshWb(ctx: Context): Promise<void> {
     [
       Markup.button.callback("📊 Аналитика", CB.wbAnalytics),
       Markup.button.callback("🏷️ Мои товары", CB.wbProducts),
+    ],
+    [
+      Markup.button.callback("📜 История заказов", CB.wbRecentOrders),
     ],
     [
       Markup.button.callback("➕ Добавить коды", CB.wbAddCodes),
@@ -94,6 +100,9 @@ async function buildWbText(): Promise<string> {
     const ordersStr = stats ? `${stats.ordersCount} шт. / ${stats.ordersSum} ₽` : "Ошибка";
     const salesStr = stats ? `${stats.salesCount} шт. / ${stats.salesSum} ₽` : "Ошибка";
     
+    // Estimate net (WB commission e.g. 15%)
+    const netSum = stats ? Math.round(stats.salesSum * 0.85) : 0;
+    
     const weeklyOrders = weekly ? weekly.orders : "0";
     const weeklySales = weekly ? weekly.sales : "0";
 
@@ -114,7 +123,8 @@ async function buildWbText(): Promise<string> {
     apiText = 
       `💰 <b>ФИНАНСЫ (СЕГОДНЯ)</b>\n` +
       `Заказы: <b>${ordersStr}</b>\n` +
-      `Выкупы: <b>${salesStr}</b>\n\n` +
+      `Выкупы: <b>${salesStr}</b>\n` +
+      `💵 Чистыми (прим.): <b>~${netSum} ₽</b>\n\n` +
       `📅 <b>ЗА 7 ДНЕЙ</b>\n` +
       `Всего заказов: <b>${weeklyOrders}</b>\n` +
       `Всего выкупов: <b>${weeklySales}</b>\n\n` +
@@ -135,6 +145,7 @@ async function buildWbText(): Promise<string> {
 
 export async function showWbProducts(ctx: Context): Promise<void> {
   const products = await getProducts();
+  const buttons: any[] = [];
   
   let text = `🏷️ <b>МОИ ТОВАРЫ</b>\n━━━━━━━━━━━━━━━━\n\n`;
   
@@ -152,14 +163,75 @@ export async function showWbProducts(ctx: Context): Promise<void> {
         `🔸 <b>${p.title}</b>\n` +
         `   Арт: <code>${p.vendorCode}</code> (ID: ${p.nmID})\n` +
         `   ${priceStr}\n\n`;
+        
+      buttons.push([Markup.button.callback(`✏️ Изменить цену (${p.vendorCode})`, CB.wbEditPrice(p.nmID))]);
     }
-    text += `<i>Для изменения цен используйте портал WB.</i>`;
+    text += `<i>Для изменения цен выберите товар ниже.</i>`;
   }
 
-  await editWidget(ctx, text, Markup.inlineKeyboard([
-    [Markup.button.callback("⬅️ Назад", CB.hubWildberries)],
-  ]));
+  buttons.push([Markup.button.callback("⬅️ Назад", CB.hubWildberries)]);
+  await editWidget(ctx, text, Markup.inlineKeyboard(buttons));
   await ctx.answerCbQuery();
+}
+
+export async function showRecentOrders(ctx: Context): Promise<void> {
+    const orders = await getRecentOrders();
+    let text = `📜 <b>ПОСЛЕДНИЕ ЗАКАЗЫ (WB)</b>\n━━━━━━━━━━━━━━━━\n\n`;
+
+    if (!orders || orders.length === 0) {
+        text += `За последние 30 дней заказов не найдено.`;
+    } else {
+        // Show last 15
+        const slice = orders.slice(0, 15);
+        for (const o of slice) {
+            const date = new Date(o.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+            const status = o.isCancel ? "❌ Отмена" : "✅ Активен";
+            text += `• <b>${date}</b> — ${o.priceWithDisc} ₽\n  Арт: <code>${o.supplierArticle}</code> (${status})\n\n`;
+        }
+        if (orders.length > 15) text += `<i>...и еще ${orders.length - 15} заказов.</i>`;
+    }
+
+    await editWidget(ctx, text, Markup.inlineKeyboard([
+        [Markup.button.callback("⬅️ Назад", CB.hubWildberries)],
+    ]));
+    await ctx.answerCbQuery();
+}
+
+// ── Price editing ────────────────────────────────────────────────────────────
+
+export async function enterPriceInput(ctx: Context, nmID: number): Promise<void> {
+  pendingPriceInput.set(ctx.from!.id, { nmID });
+  await editWidget(
+    ctx,
+    `✏️ <b>ИЗМЕНЕНИЕ ЦЕНЫ</b>\n━━━━━━━━━━━━━━━━\n\n` +
+    `Введите <b>НОВУЮ БАЗОВУЮ ЦЕНУ</b> (до скидки) для товара <code>${nmID}</code>.\n\n` +
+    `⚠️ <i>Внимание: скидка на WB останется прежней, итоговая цена пересчитается автоматически.</i>\n\n` +
+    `<i>Ожидаю число…</i>`,
+    Markup.inlineKeyboard([[Markup.button.callback("⬅️ Отмена", CB.wbProducts)]])
+  );
+  await ctx.answerCbQuery();
+}
+
+export async function handlePriceInput(ctx: Context, text: string): Promise<boolean> {
+  const state = pendingPriceInput.get(ctx.from!.id);
+  if (!state) return false;
+  pendingPriceInput.delete(ctx.from!.id);
+
+  const price = parseInt(text.trim());
+  if (isNaN(price) || price <= 0) {
+    await ctx.reply("❌ Некорректная цена. Введите положительное число.");
+    return true;
+  }
+
+  const ok = await updatePrice(state.nmID, price);
+  if (ok) {
+    await ctx.reply(`✅ Базовая цена для товара <code>${state.nmID}</code> успешно изменена на <b>${price} ₽</b>! Обновление на сайте WB может занять до 10-15 минут.`, { parse_mode: "HTML" });
+    await showWbProducts(ctx);
+  } else {
+    await ctx.reply("❌ Ошибка при обновлении цены. Проверьте логи сервера или токен.");
+  }
+
+  return true;
 }
 
 // ── Add codes — denomination picker ──────────────────────────────────────────
