@@ -61,7 +61,31 @@ const PriceSchema = z.object({
       })),
     })).optional().default([]),
   }),
+  }),
 });
+
+// ── Cache mechanism ─────────────────────────────────────────────────────────
+
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+
+const wbCache = new Map<string, CacheEntry<any>>();
+
+function getFromCache<T>(key: string): T | null {
+  const entry = wbCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    wbCache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+function setToCache<T>(key: string, data: T, ttlMs: number = 5 * 60 * 1000): void {
+  wbCache.set(key, { data, expiresAt: Date.now() + ttlMs });
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -123,32 +147,52 @@ async function fetchWb<T>(url: string, schema: z.ZodType<T>, options: RequestIni
   }
 }
 
+// ── Aggregated Statistics ────────────────────────────────────────────────────
+
+/**
+ * Fetches and caches orders/sales for the last 30 days.
+ * This prevents 429 errors by combining today/weekly/recent requests.
+ */
+async function getAggregatedStats(): Promise<{ orders: z.infer<typeof OrderSchema>[], sales: z.infer<typeof SaleSchema>[] } | null> {
+  const cacheKey = "wb_stats_30d";
+  const cached = getFromCache<any>(cacheKey);
+  if (cached) return cached;
+
+  const dateFrom = formatDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+  
+  const [ordersRaw, salesRaw] = await Promise.all([
+    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${encodeURIComponent(dateFrom)}&flag=0`, z.array(OrderSchema)),
+    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${encodeURIComponent(dateFrom)}`, z.array(SaleSchema)),
+  ]);
+
+  if (!ordersRaw && !salesRaw) return null;
+
+  const result = {
+    orders: ordersRaw || [],
+    sales: salesRaw || [],
+  };
+
+  setToCache(cacheKey, result, 5 * 60 * 1000); // 5 min cache
+  return result;
+}
+
 // ── API Methods ──────────────────────────────────────────────────────────────
 
 /**
  * Get orders and sales for today.
  */
 export async function getTodayStats(): Promise<TodayStats | null> {
-  if (!wbCodeEnv) return null;
+  const aggregated = await getAggregatedStats();
+  if (!aggregated) return null;
 
-  const now = new Date();
-  const dateFrom = formatDate(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
-
-  const [ordersRaw, salesRaw] = await Promise.all([
-    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${encodeURIComponent(dateFrom)}&flag=0`, z.array(OrderSchema)),
-    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${encodeURIComponent(dateFrom)}`, z.array(SaleSchema)),
-  ]);
-
-  if (ordersRaw === null && salesRaw === null) return null;
-
-  const orders = ordersRaw || [];
-  const sales = salesRaw || [];
-
-  const activeOrders = orders.filter(o => !o.isCancel);
+  const todayStr = new Date().toISOString().split('T')[0];
+  
+  const orders = aggregated.orders.filter(o => o.date.startsWith(todayStr) && !o.isCancel);
+  const sales = aggregated.sales.filter(s => s.date.startsWith(todayStr));
 
   return {
-    ordersCount: activeOrders.length,
-    ordersSum: activeOrders.reduce((acc, o) => acc + o.priceWithDisc, 0),
+    ordersCount: orders.length,
+    ordersSum: orders.reduce((acc, o) => acc + o.priceWithDisc, 0),
     salesCount: sales.length,
     salesSum: sales.reduce((acc, s) => acc + s.priceWithDisc, 0),
   };
@@ -158,21 +202,17 @@ export async function getTodayStats(): Promise<TodayStats | null> {
  * Get orders and sales for the last 7 days.
  */
 export async function getWeeklyStats(): Promise<{ orders: number, sales: number } | null> {
-  if (!wbCodeEnv) return null;
+  const aggregated = await getAggregatedStats();
+  if (!aggregated) return null;
 
-  const now = new Date();
-  const dateFrom = formatDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7));
-
-  const [ordersRaw, salesRaw] = await Promise.all([
-    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${encodeURIComponent(dateFrom)}&flag=0`, z.array(OrderSchema)),
-    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${encodeURIComponent(dateFrom)}`, z.array(SaleSchema)),
-  ]);
-
-  if (ordersRaw === null && salesRaw === null) return null;
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  
+  const orders = aggregated.orders.filter(o => new Date(o.date).getTime() >= sevenDaysAgo && !o.isCancel);
+  const sales = aggregated.sales.filter(s => new Date(s.date).getTime() >= sevenDaysAgo);
 
   return {
-    orders: (ordersRaw || []).filter(o => !o.isCancel).length,
-    sales: (salesRaw || []).length,
+    orders: orders.length,
+    sales: sales.length,
   };
 }
 
@@ -180,17 +220,22 @@ export async function getWeeklyStats(): Promise<{ orders: number, sales: number 
  * Get the most recent 100 orders.
  */
 export async function getRecentOrders(): Promise<any[] | null> {
-    if (!wbCodeEnv) return null;
-    const dateFrom = formatDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
-    const orders = await fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${encodeURIComponent(dateFrom)}&flag=0`, z.array(z.any()));
-    if (!orders) return null;
-    return orders.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 100);
+    const aggregated = await getAggregatedStats();
+    if (!aggregated) return null;
+    
+    return [...aggregated.orders]
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .slice(0, 100);
 }
 
 /**
  * Get Marketplace (FBS) orders.
  */
 export async function getFbsOrders(): Promise<any[] | null> {
+    const cacheKey = "wb_fbs_orders";
+    const cached = getFromCache<any[]>(cacheKey);
+    if (cached) return cached;
+
     if (!wbCodeEnv) return null;
     
     // 1. Get NEW orders
@@ -201,13 +246,19 @@ export async function getFbsOrders(): Promise<any[] | null> {
     const procRes = await fetchWb(`https://marketplace-api.wildberries.ru/api/v3/orders?limit=50&next=0`, z.object({ orders: z.array(z.any()) }));
     const procOrders = procRes?.orders || [];
     
-    return [...newOrders, ...procOrders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const result = [...newOrders, ...procOrders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    setToCache(cacheKey, result, 2 * 60 * 1000); // 2 min cache for FBS (more frequent updates needed)
+    return result;
 }
 
 /**
  * Get current stocks. Grouped by supplierArticle.
  */
 export async function getStocks(): Promise<WbStock[] | null> {
+  const cacheKey = "wb_stocks";
+  const cached = getFromCache<WbStock[]>(cacheKey);
+  if (cached) return cached;
+
   if (!wbCodeEnv) return null;
 
   const dateFrom = "2023-01-01T00:00:00Z";
@@ -235,6 +286,7 @@ export async function getStocks(): Promise<WbStock[] | null> {
     });
   }
 
+  setToCache(cacheKey, res, 10 * 60 * 1000); // 10 min cache for stocks
   return res;
 }
 
@@ -242,17 +294,24 @@ export async function getStocks(): Promise<WbStock[] | null> {
  * Get active ad campaigns status.
  */
 export async function getCampaignsStatus(): Promise<string | null> {
+  const cacheKey = "wb_campaigns";
+  const cached = getFromCache<string>(cacheKey);
+  if (cached) return cached;
+
   if (!wbCodeEnv) return null;
 
   try {
     const res = await fetchWb(`https://advert-api.wildberries.ru/adv/v1/promotion/count`, z.any());
     if (!res) return null;
     
+    let result = "Подключено ✅";
     if (res.adverts && Array.isArray(res.adverts)) {
         const active = res.adverts.filter((a: any) => a.status === 9 || a.status === 11).length;
-        return `Активно: ${active} / Всего: ${res.adverts.length}`;
+        result = `Активно: ${active} / Всего: ${res.adverts.length}`;
     }
-    return `Подключено ✅`;
+    
+    setToCache(cacheKey, result, 10 * 60 * 1000); // 10 min cache
+    return result;
   } catch {
     return "Ошибка загрузки ❌";
   }
@@ -262,6 +321,10 @@ export async function getCampaignsStatus(): Promise<string | null> {
  * Get list of products with their prices.
  */
 export async function getProducts(): Promise<WbProduct[] | null> {
+  const cacheKey = "wb_products";
+  const cached = getFromCache<WbProduct[]>(cacheKey);
+  if (cached) return cached;
+
   if (!wbCodeEnv) return null;
 
   // 1. Get cards from Content API
@@ -289,7 +352,7 @@ export async function getProducts(): Promise<WbProduct[] | null> {
     }
   }
 
-  return cardsRaw.cards.map(c => {
+  const result = cardsRaw.cards.map(c => {
     const priceData = priceMap.get(c.nmID);
     return {
       nmID: c.nmID,
@@ -299,6 +362,9 @@ export async function getProducts(): Promise<WbProduct[] | null> {
       discountedPrice: priceData?.dp,
     };
   });
+
+  setToCache(cacheKey, result, 15 * 60 * 1000); // 15 min cache
+  return result;
 }
 
 /**

@@ -137,12 +137,16 @@ async function buildWbText(): Promise<string> {
       `📈 <b>РЕКЛАМА</b>\nСтатус: ${campStr}\n`;
   }
 
+  const timeStr = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+
   return (
     `🟣 <b>WILDBERRIES DASHBOARD</b> 🟢\n` +
     `━━━━━━━━━━━━━━━━\n\n` +
     apiText +
     `\n📊 <b>КОДЫ В БД (Готовы к выдаче: ${totalAvailable})</b>\n` +
-    dbCodesLines
+    dbCodesLines +
+    `━━━━━━━━━━━━━━━━\n` +
+    `<i>Обновлено в ${timeStr}</i>`
   );
 }
 
