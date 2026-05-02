@@ -50,6 +50,19 @@ const CardsListSchema = z.object({
   ).optional().default([]),
 });
 
+const PriceSchema = z.object({
+  data: z.object({
+    listGoods: z.array(z.object({
+      nmID: z.number(),
+      vendorCode: z.string(),
+      sizes: z.array(z.object({
+        price: z.number(),
+        discountedPrice: z.number(),
+      })),
+    })).optional().default([]),
+  }),
+});
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface TodayStats {
@@ -69,25 +82,31 @@ export interface WbProduct {
   nmID: number;
   vendorCode: string;
   title: string;
+  price?: number;
+  discountedPrice?: number;
 }
 
 // ── Helper ───────────────────────────────────────────────────────────────────
 
-async function fetchWb<T>(url: string, schema: z.ZodType<T>, headers: any = {}): Promise<T | null> {
+async function fetchWb<T>(url: string, schema: z.ZodType<T>, options: RequestInit = {}): Promise<T | null> {
   if (!wbCodeEnv) return null;
   
   try {
     const res = await fetch(url, {
+      ...options,
       headers: {
         Authorization: wbCodeEnv,
-        ...headers,
+        "Content-Type": "application/json",
+        ...options.headers,
       },
     });
     
     if (!res.ok) {
       if (res.status === 401 || res.status === 403) {
         console.error(`WB API Auth Error: ${url} -> ${res.status}`);
-        return null;
+      } else {
+        const errText = await res.text().catch(() => "");
+        console.error(`WB API HTTP ${res.status} for ${url}: ${errText}`);
       }
       return null;
     }
@@ -119,7 +138,6 @@ export async function getTodayStats(): Promise<TodayStats | null> {
     fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${dateFrom}`, z.array(SaleSchema)),
   ]);
 
-  // If both failed or token invalid
   if (ordersRaw === null && salesRaw === null) return null;
 
   const orders = ordersRaw || [];
@@ -136,14 +154,34 @@ export async function getTodayStats(): Promise<TodayStats | null> {
 }
 
 /**
+ * Get orders and sales for the last 7 days.
+ */
+export async function getWeeklyStats(): Promise<{ orders: number, sales: number } | null> {
+  if (!wbCodeEnv) return null;
+
+  const now = new Date();
+  const dateFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7).toISOString().split('T')[0];
+
+  const [ordersRaw, salesRaw] = await Promise.all([
+    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${dateFrom}`, z.array(OrderSchema)),
+    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${dateFrom}`, z.array(SaleSchema)),
+  ]);
+
+  if (ordersRaw === null && salesRaw === null) return null;
+
+  return {
+    orders: (ordersRaw || []).filter(o => !o.isCancel).length,
+    sales: (salesRaw || []).length,
+  };
+}
+
+/**
  * Get current stocks. Grouped by supplierArticle.
  */
 export async function getStocks(): Promise<WbStock[] | null> {
   if (!wbCodeEnv) return null;
 
-  // Stocks API requires dateFrom, we can use a date from the past 
   const dateFrom = "2023-01-01";
-  
   const stocks = await fetchWb(
     `https://statistics-api.wildberries.ru/api/v1/supplier/stocks?dateFrom=${dateFrom}`, 
     z.array(StockSchema)
@@ -156,7 +194,7 @@ export async function getStocks(): Promise<WbStock[] | null> {
   
   for (const s of stocks) {
     const existing = grouped.get(s.supplierArticle) || { q: 0, p: s.Price };
-    existing.q += s.quantity; // Or quantityFull depending on logic, but quantity is safe
+    existing.q += s.quantity;
     grouped.set(s.supplierArticle, existing);
   }
 
@@ -172,20 +210,18 @@ export async function getStocks(): Promise<WbStock[] | null> {
 }
 
 /**
- * Get active ad campaigns status. (We just get the count for now)
+ * Get active ad campaigns status.
  */
 export async function getCampaignsStatus(): Promise<string | null> {
   if (!wbCodeEnv) return null;
 
-  // Advert API has /adv/v1/promotion/count endpoint
   try {
     const res = await fetchWb(`https://advert-api.wildberries.ru/adv/v1/promotion/count`, z.any());
     if (!res) return null;
     
-    // Attempt to extract some info, advert api returns { adverts: [...] } or { campCount: X }
-    // As a simple fallback:
     if (res.adverts && Array.isArray(res.adverts)) {
-        return `Активно кампаний: ${res.adverts.length}`;
+        const active = res.adverts.filter((a: any) => a.status === 9 || a.status === 11).length;
+        return `Активно: ${active} / Всего: ${res.adverts.length}`;
     }
     return `Подключено ✅`;
   } catch {
@@ -194,39 +230,45 @@ export async function getCampaignsStatus(): Promise<string | null> {
 }
 
 /**
- * Get list of products (cards).
+ * Get list of products with their prices.
  */
 export async function getProducts(): Promise<WbProduct[] | null> {
   if (!wbCodeEnv) return null;
 
-  const body = {
-    settings: {
-      cursor: { limit: 100 },
-      filter: { withPhoto: -1 }
+  // 1. Get cards from Content API
+  const cardsRaw = await fetchWb("https://content-api.wildberries.ru/content/v2/get/cards/list", CardsListSchema, {
+    method: "POST",
+    body: JSON.stringify({
+      settings: { cursor: { limit: 100 }, filter: { withPhoto: -1 } }
+    })
+  });
+
+  if (!cardsRaw || !cardsRaw.cards) return null;
+
+  // 2. Get prices from Price API
+  const pricesRaw = await fetchWb("https://discounts-prices-api.wildberries.ru/api/v2/list/goods/filter?limit=100&offset=0", PriceSchema);
+  
+  const priceMap = new Map<number, { p: number, dp: number }>();
+  if (pricesRaw?.data?.listGoods) {
+    for (const g of pricesRaw.data.listGoods) {
+      if (g.sizes && g.sizes[0]) {
+        priceMap.set(g.nmID, {
+          p: g.sizes[0].price,
+          dp: g.sizes[0].discountedPrice
+        });
+      }
     }
-  };
+  }
 
-  try {
-    const res = await fetch("https://suppliers-api.wildberries.ru/content/v2/get/cards/list", {
-      method: "POST",
-      headers: {
-        Authorization: wbCodeEnv,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(body)
-    });
-
-    if (!res.ok) return null;
-    const data = await res.json();
-    const parsed = CardsListSchema.parse(data);
-
-    return parsed.cards.map(c => ({
+  return cardsRaw.cards.map(c => {
+    const priceData = priceMap.get(c.nmID);
+    return {
       nmID: c.nmID,
       vendorCode: c.vendorCode,
       title: c.title,
-    }));
-  } catch (err) {
-    console.error("WB API Error (Products):", err);
-    return null;
-  }
+      price: priceData?.p,
+      discountedPrice: priceData?.dp,
+    };
+  });
 }
+

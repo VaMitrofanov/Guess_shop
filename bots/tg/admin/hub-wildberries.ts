@@ -11,7 +11,7 @@ import { db } from "../../shared/db";
 import { CB } from "../../shared/admin";
 import { sendOrEditWidget, editWidget } from "./widgets";
 import { pendingCodesInput } from "../session";
-import { getTodayStats, getStocks, getCampaignsStatus, getProducts } from "./wb-client";
+import { getTodayStats, getStocks, getCampaignsStatus, getProducts, getWeeklyStats } from "./wb-client";
 
 // ── Stock level indicators ───────────────────────────────────────────────────
 
@@ -77,10 +77,11 @@ async function buildWbText(): Promise<string> {
   if (groups.length === 0) dbCodesLines = "⚠️ <b>Нет кодов в БД!</b>\n";
 
   // 2. Fetch WB API stats
-  const [stats, stocks, campaigns] = await Promise.all([
+  const [stats, stocks, campaigns, weekly] = await Promise.all([
     getTodayStats(),
     getStocks(),
-    getCampaignsStatus()
+    getCampaignsStatus(),
+    getWeeklyStats()
   ]);
 
   const hasApiError = !stats && !stocks && !campaigns;
@@ -93,6 +94,9 @@ async function buildWbText(): Promise<string> {
     const ordersStr = stats ? `${stats.ordersCount} шт. / ${stats.ordersSum} ₽` : "Ошибка";
     const salesStr = stats ? `${stats.salesCount} шт. / ${stats.salesSum} ₽` : "Ошибка";
     
+    const weeklyOrders = weekly ? weekly.orders : "0";
+    const weeklySales = weekly ? weekly.sales : "0";
+
     // Warehouse stocks
     let warehouseLines = "";
     if (stocks && stocks.length > 0) {
@@ -111,6 +115,9 @@ async function buildWbText(): Promise<string> {
       `💰 <b>ФИНАНСЫ (СЕГОДНЯ)</b>\n` +
       `Заказы: <b>${ordersStr}</b>\n` +
       `Выкупы: <b>${salesStr}</b>\n\n` +
+      `📅 <b>ЗА 7 ДНЕЙ</b>\n` +
+      `Всего заказов: <b>${weeklyOrders}</b>\n` +
+      `Всего выкупов: <b>${weeklySales}</b>\n\n` +
       `📦 <b>СКЛАД WB</b>\n${warehouseLines}\n` +
       `📈 <b>РЕКЛАМА</b>\nСтатус: ${campStr}\n`;
   }
@@ -132,14 +139,21 @@ export async function showWbProducts(ctx: Context): Promise<void> {
   let text = `🏷️ <b>МОИ ТОВАРЫ</b>\n━━━━━━━━━━━━━━━━\n\n`;
   
   if (!products) {
-    text += `⚠️ <b>Ошибка загрузки товаров.</b>\nВозможно, токен не указан или API недоступно.`;
+    text += `⚠️ <b>Ошибка загрузки товаров.</b>\nПроверьте WB_API_TOKEN или доступность API.`;
   } else if (products.length === 0) {
     text += `У вас пока нет активных карточек.`;
   } else {
     for (const p of products) {
-      text += `• <b>${p.title}</b>\n  Арт: <code>${p.vendorCode}</code> (ID: ${p.nmID})\n\n`;
+      const priceStr = p.price 
+        ? `💰 Цена: <b>${p.discountedPrice} ₽</b>` + (p.price !== p.discountedPrice ? ` (<s>${p.price}</s>)` : "")
+        : "💰 Цена: <i>не указана</i>";
+      
+      text += 
+        `🔸 <b>${p.title}</b>\n` +
+        `   Арт: <code>${p.vendorCode}</code> (ID: ${p.nmID})\n` +
+        `   ${priceStr}\n\n`;
     }
-    text += `<i>Управление ценами и описанием будет добавлено в будущих обновлениях.</i>`;
+    text += `<i>Для изменения цен используйте портал WB.</i>`;
   }
 
   await editWidget(ctx, text, Markup.inlineKeyboard([
