@@ -904,21 +904,24 @@ export async function getAdvertStats(): Promise<WbAdvertSummary | null> {
 
   if (!wbCodeEnv) return null;
 
-  // 1. Get active campaign list (status 9 = active, status 11 = active search)
+  // 1. Get active campaign list — try v2 first, fall back to v1
   let campaigns: z.infer<typeof AdvertCampaignSchema>[] = [];
-  const list9 = await fetchWb(
-    `https://advert-api.wildberries.ru/adv/v1/promotion/adverts?status=9&limit=50&offset=0`,
-    z.array(AdvertCampaignSchema)
-  );
-  if (list9 && list9.length > 0) campaigns.push(...list9);
+  for (const status of [9, 11]) {
+    const res = await fetchWb(
+      `https://advert-api.wildberries.ru/adv/v2/promotion/adverts?status=${status}&limit=50&offset=0`,
+      z.array(AdvertCampaignSchema)
+    ) ?? await fetchWb(
+      `https://advert-api.wildberries.ru/adv/v1/promotion/adverts?status=${status}&limit=50&offset=0`,
+      z.array(AdvertCampaignSchema)
+    );
+    if (res && res.length > 0) campaigns.push(...res);
+  }
 
-  const list11 = await fetchWb(
-    `https://advert-api.wildberries.ru/adv/v1/promotion/adverts?status=11&limit=50&offset=0`,
-    z.array(AdvertCampaignSchema)
-  );
-  if (list11 && list11.length > 0) campaigns.push(...list11);
-
-  if (campaigns.length === 0) return null;
+  // Cache null on failure so we don't spam 404s on every open
+  if (campaigns.length === 0) {
+    setToCache(cacheKey, null as any, 30 * 60 * 1000);
+    return null;
+  }
 
   const ids = campaigns.map(c => c.advertId).slice(0, 50);
 
