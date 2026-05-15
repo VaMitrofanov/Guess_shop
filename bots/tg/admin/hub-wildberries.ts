@@ -494,7 +494,9 @@ export async function showRealizationPeriod(ctx: Context, period: string): Promi
   lines.push(`${pad("Выручка:",     16)} ${rub(Math.round(data.totalRevenue))}`);
   lines.push(`${pad("К выплате:",   16)} ${rub(Math.round(data.totalPayout))}  (${marginPct}%)`);
   lines.push(`──────────────────────────`);
-  lines.push(`${pad("Комиссия WB:", 16)} −${rub(Math.round(Math.abs(data.totalCommission)))}`);
+  const commPct = data.totalRevenue > 0
+    ? Math.round((data.totalCommission / data.totalRevenue) * 100 * 10) / 10 : 0;
+  lines.push(`${pad("Комиссия WB:", 16)} −${rub(Math.round(data.totalCommission))}  (${commPct}%)`);
   const avgLog = data.salesCount > 0 ? Math.round(data.totalLogistics / data.salesCount) : 0;
   lines.push(`${pad("Логистика:",   16)} −${rub(Math.round(data.totalLogistics))}  (≈${avgLog}₽/шт)`);
   if (data.totalStorage > 0)
@@ -613,6 +615,31 @@ export async function showUnitEconHub(ctx: Context): Promise<void> {
   });
   const costMap = new Map(costs.map((c: any) => [c.nmID, c]));
 
+  // Auto-detect denominations from numeric vendorCodes
+  const autoUpserts: Promise<any>[] = [];
+  for (const p of products) {
+    const existing = costMap.get(p.nmID);
+    if (!existing?.denomination && /^\d+$/.test(p.vendorCode.trim())) {
+      const denom = parseInt(p.vendorCode.trim());
+      autoUpserts.push(
+        (db as any).wbProductCost.upsert({
+          where:  { nmID: p.nmID },
+          update: { denomination: denom },
+          create: {
+            nmID: p.nmID, vendorCode: p.vendorCode, costPrice: 0,
+            denomination: denom, wbCommission: 0.245, taxRate: 0.07, logisticsCost: 87.5,
+          },
+        })
+      );
+    }
+  }
+  if (autoUpserts.length > 0) {
+    await Promise.all(autoUpserts);
+    // Reload costs so the calculation below uses fresh data
+    const refreshed: any[] = await (db as any).wbProductCost.findMany({ where: { nmID: { in: nmIds } } });
+    refreshed.forEach((c: any) => costMap.set(c.nmID, c));
+  }
+
   const buttons: any[] = [];
 
   for (const p of products) {
@@ -622,61 +649,66 @@ export async function showUnitEconHub(ctx: Context): Promise<void> {
 
     lines.push(`🔸 <b>${title}</b>  <code>${p.vendorCode}</code>`);
 
-    if (!cost || !cost.denomination) {
+    if (!cost?.denomination) {
       lines.push(`  <i>⚙️ Не указан номинал Robux</i>`);
       buttons.push([Markup.button.callback(`🔢 Номинал (${p.vendorCode})`, CB.wbEditDenom(p.nmID))]);
     } else {
-      const commission  = cost.wbCommission;
-      const tax         = cost.taxRate;
-      const fixedCost   = cost.logisticsCost;
-      const robuxCost   = settings.kursRb * settings.kursUsd * cost.denomination / 700;
-      const netRevenue  = price * (1 - commission) * (1 - tax);
-      const margBase    = netRevenue - fixedCost;
-      const profitBeforeAd = margBase - robuxCost;
-      const adCost      = cost.adCostPerUnit ?? 0;
-      const profitAfterAd  = profitBeforeAd - adCost;
-      const marginPct   = margBase > 0 ? Math.round((profitBeforeAd / margBase) * 100) : 0;
+      const commission   = cost.wbCommission;  // e.g. 0.245
+      const tax          = cost.taxRate;        // e.g. 0.07
+      const fixedCost    = cost.logisticsCost;  // e.g. 87.5
+      const robuxCost    = settings.kursRb * settings.kursUsd * cost.denomination / 700;
+      const afterComm    = price * (1 - commission);
+      const afterTax     = afterComm * (1 - tax);
+      const profitBefore = afterTax - fixedCost - robuxCost;
+      const adCost       = cost.adCostPerUnit ?? 0;
+      const profitAfter  = profitBefore - adCost;
+      const marginPct    = afterTax - fixedCost > 0
+        ? Math.round((profitBefore / (afterTax - fixedCost)) * 100) : 0;
+      const profitUsd    = settings.kursUsd > 0
+        ? Math.round((profitAfter / settings.kursUsd) * 100) / 100 : 0;
 
       lines.push(
         `<code>` +
-        `  Цена продажи:    ${pad(rub(price), 10)}\n` +
-        `  Номинал:         ${pad(`${cost.denomination} R$`, 10)}\n` +
-        `  Чистая выручка:  ${pad(rub(Math.round(netRevenue)), 10)}  (−${Math.round(commission*100)}% комса, −${Math.round(tax*100)}% налог)\n` +
-        `  Себест. Robux:  −${pad(rub(Math.round(robuxCost)), 10)}  (${settings.kursRb}×${settings.kursUsd}×${cost.denomination}/700)\n` +
-        `  Фикс. затраты: −${pad(rub(fixedCost), 10)}\n` +
-        `  ────────────────────────────\n` +
-        `  До рекламы:      ${pad(rub(Math.round(profitBeforeAd)), 10)}  (${marginPct}%)\n` +
-        (adCost > 0
-          ? `  Реклама:        −${pad(rub(Math.round(adCost)), 10)}\n` +
-            `  С карточки:      ${pad(rub(Math.round(profitAfterAd)), 10)}`
-          : `  Реклама:         не указана`) +
+        `  Цена продажи:       ${pad(rub(price), 10)}\n` +
+        `  −Комса WB ${pad(`(${Math.round(commission*100)}%):`, 7)} ${pad(rub(Math.round(price - afterComm)), 10)}\n` +
+        `  −Налог УСН ${pad(`(${Math.round(tax*100)}%):`, 6)} ${pad(rub(Math.round(afterComm - afterTax)), 10)}\n` +
+        `  −Фикс. затраты:     ${pad(rub(fixedCost), 10)}\n` +
+        `  −Себест. Robux:     ${pad(rub(Math.round(robuxCost)), 10)}` +
+        `  (${settings.kursRb}×${settings.kursUsd}×${cost.denomination}/700)\n` +
+        (adCost > 0 ? `  −Реклама/ед:        ${pad(rub(Math.round(adCost)), 10)}\n` : `  −Реклама/ед:        не указана\n`) +
+        `  ${"─".repeat(34)}\n` +
+        `  Чистая прибыль:     ${pad(rub(Math.round(profitAfter)), 10)}  (${marginPct}%)\n` +
+        `  В долларах:         $${profitUsd}` +
         `</code>`
       );
 
-      // Реализация overlay (actual data from WB report)
+      // Реализация overlay
       const realArt = realizData?.byArticle.find(a =>
         a.saName === p.vendorCode || a.nmId === p.nmID
       );
-      if (realArt && realArt.salesCount > 0 && cost.denomination) {
-        const realComis  = Math.round(realArt.avgCommissionPct * 10) / 10;
-        const realLog    = Math.round(realArt.avgLogisticsPerUnit);
-        const realNetRev = price * (1 - realArt.avgCommissionPct / 100) * (1 - cost.taxRate);
-        const realRobuxCost = settings.kursRb * settings.kursUsd * cost.denomination / 700;
-        const realProfit    = realNetRev - realLog - realRobuxCost - (cost.adCostPerUnit ?? 0);
+      if (realArt && realArt.salesCount > 0) {
+        const realCommPct   = realArt.totalRevenue > 0
+          ? Math.round(((realArt.totalRevenue - realArt.totalPayout) / realArt.totalRevenue) * 100 * 10) / 10
+          : 0;
+        const realLog       = Math.round(realArt.avgLogisticsPerUnit);
         const retPct        = Math.round(realArt.returnRate * 100);
+        const realAfterComm = price * (1 - realCommPct / 100);
+        const realAfterTax  = realAfterComm * (1 - tax);
+        const realProfit    = realAfterTax - fixedCost - robuxCost - realLog - adCost;
+        const realProfitUsd = settings.kursUsd > 0
+          ? Math.round((realProfit / settings.kursUsd) * 100) / 100 : 0;
         lines.push(
           `<code>` +
-          `  📊 По реализации (факт, ${realArt.salesCount}шт):\n` +
-          `  Факт. комиссия: ${realComis}%  Факт. логист: ${realLog}₽/шт\n` +
-          `  Факт. выкуп:   ${100 - retPct}%  Возвраты: ${retPct}%\n` +
-          `  Уточнённая прибыль: ~${rub(Math.round(realProfit))}` +
+          `  📊 По реализации (факт, ${realArt.salesCount} шт):\n` +
+          `  Факт. комса: ${realCommPct}%  Лог: ${realLog}₽  Возвр: ${retPct}%\n` +
+          `  Уточн. прибыль: ${rub(Math.round(realProfit))}  ($${realProfitUsd})` +
           `</code>`
         );
       }
 
       buttons.push([
         Markup.button.callback(`🔢 Номинал (${p.vendorCode})`,  CB.wbEditDenom(p.nmID)),
-        Markup.button.callback(`📣 Реклама (${p.vendorCode})`,   CB.wbEditAd(p.nmID)),
+        Markup.button.callback(`📣 Реклама (${p.vendorCode})`,  CB.wbEditAd(p.nmID)),
       ]);
     }
     lines.push("");

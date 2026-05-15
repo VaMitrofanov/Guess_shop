@@ -819,7 +819,7 @@ export async function getRealizationReport(weeks = 4): Promise<WbRealizationSumm
   for (const row of rows) {
     const docType = row.doc_type_name.toLowerCase();
     const key     = row.sa_name || String(row.nm_id);
-    if (!key) continue;
+    if (!key || key === "0") continue;
 
     let art = byArticle.get(key);
     if (!art) {
@@ -834,22 +834,29 @@ export async function getRealizationReport(weeks = 4): Promise<WbRealizationSumm
 
     if (docType.includes("продажа")) {
       const qty = Math.abs(row.quantity) || 1;
-      const oldCount = art.salesCount;
+      const rowRevenue   = row.retail_price_withdisc_rub * qty;
+      const rowPayout    = row.ppvz_for_pay;
+      const rowLogistics = row.delivery_rub;
+      // Effective commission = what WB actually keeps (revenue minus payout minus logistics)
+      const rowCommission = rowRevenue - rowPayout - rowLogistics;
+      const rowCommPct    = rowRevenue > 0 ? rowCommission / rowRevenue : 0;
+
       art.salesCount      += qty;
-      art.totalRevenue    += row.retail_price_withdisc_rub * qty;
-      art.totalPayout     += row.ppvz_for_pay;
-      art.totalLogistics  += row.delivery_rub;
-      art.totalCommission += row.ppvz_sales_commission;
+      art.totalRevenue    += rowRevenue;
+      art.totalPayout     += rowPayout;
+      art.totalLogistics  += rowLogistics;
+      art.totalCommission += rowCommission;
       art.totalPenalties  += row.penalty;
-      totalRevenue    += row.retail_price_withdisc_rub * qty;
-      totalPayout     += row.ppvz_for_pay;
-      totalLogistics  += row.delivery_rub;
-      totalCommission += row.ppvz_sales_commission;
+      totalRevenue    += rowRevenue;
+      totalPayout     += rowPayout;
+      totalLogistics  += rowLogistics;
+      totalCommission += rowCommission;
       salesCount      += qty;
-      // accumulate commission % weighted by quantity: newAvg = (oldAvg * oldCount + newValue * newQty) / newCount
+
+      // Weighted average commission %
       art.avgCommissionPct = art.salesCount > 0
-        ? (art.avgCommissionPct * oldCount + row.ppvz_kvw_prc * qty) / art.salesCount
-        : row.ppvz_kvw_prc;
+        ? (art.avgCommissionPct * (art.salesCount - qty) + rowCommPct * qty) / art.salesCount
+        : rowCommPct;
     } else if (docType.includes("возврат")) {
       const qty = Math.abs(row.quantity) || 1;
       art.returnCount  += qty;
