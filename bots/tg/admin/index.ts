@@ -23,8 +23,12 @@ import {
   enterPriceInput, handlePriceInput, showRecentOrders,
   showStocksHub, showDynamicsHub, showUnitEconHub, enterCostInput, handleCostInput,
   enterLogisticsInput, handleLogisticsInput,
+  enterDenomInput, handleDenomInput,
+  enterAdInput, handleAdInput,
+  showUeSettings, enterUeSettingInput, handleUeSettingInput,
   showReviewsHub, enterReviewAnswer, handleReviewAnswer,
   showFbsHub, startWbMonitor,
+  showRealizationHub, showRealizationPeriod, showAdvertHub,
 } from "./hub-wildberries";
 import {
   showSystemHub, showLogs, showRestartConfirm, handleRestartConfirm,
@@ -33,6 +37,7 @@ import {
 import {
   pendingAdminSearch, pendingCodesInput, pendingRateInput, pendingPriceInput,
   pendingReviewAnswer, pendingCostInput, pendingLogisticsInput,
+  pendingAdInput, pendingDenomInput, pendingUeSettingInput,
 } from "../session";
 
 // Re-export for external use
@@ -125,6 +130,24 @@ export function registerAdminHubs(bot: Telegraf): void {
     // 7. Logistics cost input
     if (pendingLogisticsInput.has(ctx.from.id)) {
       const handled = await handleLogisticsInput(ctx, text);
+      if (handled) return;
+    }
+
+    // 8. Denomination input
+    if (pendingDenomInput.has(ctx.from.id)) {
+      const handled = await handleDenomInput(ctx, text);
+      if (handled) return;
+    }
+
+    // 9. Ad cost input
+    if (pendingAdInput.has(ctx.from.id)) {
+      const handled = await handleAdInput(ctx, text);
+      if (handled) return;
+    }
+
+    // 10. UE settings input
+    if (pendingUeSettingInput.has(ctx.from.id)) {
+      const handled = await handleUeSettingInput(ctx, text);
       if (handled) return;
     }
 
@@ -309,6 +332,49 @@ export async function routeAdminCallback(
   if (data.startsWith("wb_log:")) {
     const nmID = parseInt(data.split(":")[1]);
     await enterLogisticsInput(ctx, nmID);
+    return true;
+  }
+  if (data.startsWith("wb_denom_ue:")) {
+    const nmID = parseInt(data.split(":")[1]);
+    await enterDenomInput(ctx, nmID);
+    return true;
+  }
+  if (data.startsWith("wb_ad:")) {
+    const nmID = parseInt(data.split(":")[1]);
+    await enterAdInput(ctx, nmID);
+    return true;
+  }
+  if (data === CB.wbUeSettings) {
+    await showUeSettings(ctx);
+    return true;
+  }
+  if (data === CB.wbUeKursRb) {
+    await enterUeSettingInput(ctx, "kursRb");
+    return true;
+  }
+  if (data === CB.wbUeKursUsd) {
+    await enterUeSettingInput(ctx, "kursUsd");
+    return true;
+  }
+  if (data === CB.wbUeFixedCost) {
+    await enterUeSettingInput(ctx, "fixedCost");
+    return true;
+  }
+  if (data === CB.wbRealization) {
+    await showRealizationHub(ctx);
+    return true;
+  }
+  if (data.startsWith("wb_realiz_p:")) {
+    const period = data.split(":")[1];
+    await showRealizationPeriod(ctx, period);
+    return true;
+  }
+  if (data === CB.wbAdvert) {
+    await showAdvertHub(ctx);
+    return true;
+  }
+  if (data === CB.wbAdvertRefresh) {
+    await showAdvertHub(ctx);
     return true;
   }
 

@@ -22,12 +22,15 @@ import {
   getStocks, getStocksWithRunway, getCampaignsStatus,
   getProducts, getWeeklyStats, getPrevWeekStats, getDailyBreakdown,
   getUnansweredReviews, answerReview, captureNotifyState, flushFbsDigest,
-  getFbsOrders, updatePrice,
-  type WbStockWithRunway,
+  getFbsOrders, updatePrice, getWbSettings, updateWbSetting,
+  getRealizationReport, getAdvertStats,
+  type WbStockWithRunway, type WbRealizationSummary, type WbRealizationArticle,
+  type WbAdvertSummary,
 } from "./wb-client";
 import {
   pendingCodesInput, pendingPriceInput,
   pendingReviewAnswer, pendingCostInput, pendingLogisticsInput,
+  pendingAdInput, pendingDenomInput, pendingUeSettingInput,
 } from "../session";
 
 // ── Formatting helpers ───────────────────────────────────────────────────────
@@ -78,6 +81,10 @@ function mainKeyboard(reviewCount: number, fbsCount: number) {
     ],
     [
       Markup.button.callback(fbsCount > 0 ? `🚚 FBS (${fbsCount})` : "🚚 FBS заказы", CB.wbFbs),
+      Markup.button.callback("📋 Реализация", CB.wbRealization),
+    ],
+    [
+      Markup.button.callback("📣 Реклама", CB.wbAdvert),
       Markup.button.callback("🏷️ Товары", CB.wbProducts),
     ],
     [
@@ -371,16 +378,17 @@ export async function showStocksHub(ctx: Context): Promise<void> {
   } else {
     // Bloomberg-style pipe table — all groups in one block for fast scanning
     lines.push(`<code>`);
-    lines.push(`Артикул       | Склад |  Ср/д | Дней`);
-    lines.push(`──────────────|───────|───────|──────`);
+    lines.push(`Артикул       | В наличии | Резерв |  Ср/д | Дней`);
+    lines.push(`──────────────|───────────|────────|───────|──────`);
     for (const s of stocks) {
-      const icon     = runwayIcon(s.runwayDays);
-      const runway   = s.runwayDays > 998 ? "  ∞" : pad(String(s.runwayDays), 3);
-      const alert    = s.runwayDays < 7 ? " ⚠️" : "";
-      const art      = pad(s.article.slice(0, 12), 12);
-      const qty      = pad(String(s.quantity), 5);
-      const avg      = pad(String(s.avgDailySales), 5);
-      lines.push(`${art} | ${qty} | ${avg} | ${runway} ${icon}${alert}`);
+      const icon        = runwayIcon(s.runwayDays);
+      const runway      = s.runwayDays > 998 ? "  ∞" : pad(String(s.runwayDays), 3);
+      const alert       = s.runwayDays < 7 ? " ⚠️" : "";
+      const art         = pad(s.article.slice(0, 12), 12);
+      const qty         = pad(String(s.quantity), 9);
+      const reservedQty = pad(String(s.quantityFull - s.quantity), 6);
+      const avg         = pad(String(s.avgDailySales), 5);
+      lines.push(`${art} | ${qty} | ${reservedQty} | ${avg} | ${runway} ${icon}${alert}`);
     }
     lines.push(`</code>`);
     lines.push("");
@@ -441,17 +449,156 @@ export async function showDynamicsHub(ctx: Context): Promise<void> {
   ]));
 }
 
+// ── Realization Report ────────────────────────────────────────────────────────
+
+export async function showRealizationHub(ctx: Context): Promise<void> {
+  await ctx.answerCbQuery();
+  await editWidget(ctx, `📋 <b>ОТЧЁТ РЕАЛИЗАЦИИ</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n<i>Выберите период:</i>`, Markup.inlineKeyboard([
+    [Markup.button.callback("📅 За 2 недели", CB.wbRealizPeriod("2w"))],
+    [Markup.button.callback("📅 За месяц",    CB.wbRealizPeriod("4w"))],
+    [Markup.button.callback("◀️ Назад",        CB.hubWildberries)],
+  ]));
+}
+
+export async function showRealizationPeriod(ctx: Context, period: string): Promise<void> {
+  await ctx.answerCbQuery("Загружаю отчёт…");
+
+  const weeks = period === "2w" ? 2 : 4;
+  const data  = await getRealizationReport(weeks);
+
+  const backKbd = Markup.inlineKeyboard([
+    [Markup.button.callback("◀️ Назад", CB.wbRealization)],
+  ]);
+
+  if (!data) {
+    await editWidget(ctx,
+      `📋 <b>РЕАЛИЗАЦИЯ</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n⚠️ Данные недоступны.\nПроверьте токен или попробуйте позже.`,
+      backKbd
+    );
+    return;
+  }
+
+  const periodLabel = period === "2w" ? "2 НЕДЕЛИ" : "МЕСЯЦ";
+  const retPct      = Math.round(data.returnRate * 100);
+  const marginPct   = data.totalRevenue > 0
+    ? Math.round((data.totalPayout / data.totalRevenue) * 100) : 0;
+
+  let lines: string[] = [];
+  lines.push(`📋 <b>РЕАЛИЗАЦИЯ — ${periodLabel}</b>`);
+  lines.push(`<i>${data.period.from} — ${data.period.to}</i>`);
+  lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+  lines.push(``);
+
+  lines.push(`<code>`);
+  lines.push(`${pad("Продажи:",     16)} ${data.salesCount} шт`);
+  lines.push(`${pad("Выручка:",     16)} ${rub(Math.round(data.totalRevenue))}`);
+  lines.push(`${pad("К выплате:",   16)} ${rub(Math.round(data.totalPayout))}  (${marginPct}%)`);
+  lines.push(`──────────────────────────`);
+  lines.push(`${pad("Комиссия WB:", 16)} −${rub(Math.round(Math.abs(data.totalCommission)))}`);
+  const avgLog = data.salesCount > 0 ? Math.round(data.totalLogistics / data.salesCount) : 0;
+  lines.push(`${pad("Логистика:",   16)} −${rub(Math.round(data.totalLogistics))}  (≈${avgLog}₽/шт)`);
+  if (data.totalStorage > 0)
+    lines.push(`${pad("Хранение:",  16)} −${rub(Math.round(data.totalStorage))}`);
+  if (data.totalPenalties > 0)
+    lines.push(`${pad("Штрафы:",    16)} −${rub(Math.round(data.totalPenalties))}`);
+  lines.push(`──────────────────────────`);
+  lines.push(`${pad("Возвраты:",    16)} ${data.returnCount} шт  (${retPct}%)`);
+  lines.push(`</code>`);
+  lines.push(``);
+
+  if (data.byArticle.length > 0) {
+    lines.push(`<b>По артикулам:</b>`);
+    lines.push(`<code>`);
+    lines.push(`${pad("Артикул", 12)} ${pad("Продаж",6)} ${pad("Выплата",10)} ${pad("Комис.",7)} ${pad("Лог/шт",7)} ${pad("Возвр.",6)}`);
+    lines.push(`${"─".repeat(52)}`);
+    for (const art of data.byArticle.slice(0, 8)) {
+      const retP  = Math.round(art.returnRate * 100);
+      const comP  = Math.round(art.avgCommissionPct * 10) / 10;
+      const logU  = Math.round(art.avgLogisticsPerUnit);
+      lines.push(
+        `${pad(art.saName.slice(0, 12), 12)} ` +
+        `${pad(String(art.salesCount), 6)} ` +
+        `${pad(rub(Math.round(art.totalPayout)), 10)} ` +
+        `${pad(`${comP}%`, 7)} ` +
+        `${pad(`${logU}₽`, 7)} ` +
+        `${retP}%`
+      );
+    }
+    lines.push(`</code>`);
+  }
+
+  await editWidget(ctx, lines.join("\n"), Markup.inlineKeyboard([
+    [Markup.button.callback("◀️ Назад", CB.wbRealization)],
+  ]));
+}
+
+// ── Advert Hub ────────────────────────────────────────────────────────────────
+
+export async function showAdvertHub(ctx: Context): Promise<void> {
+  await ctx.answerCbQuery("Загружаю…");
+
+  const data = await getAdvertStats();
+
+  const backKbd = Markup.inlineKeyboard([
+    [Markup.button.callback("◀️ Назад", CB.hubWildberries), Markup.button.callback("🔄 Обновить", CB.wbAdvertRefresh)],
+  ]);
+
+  if (!data) {
+    await editWidget(ctx,
+      `📣 <b>РЕКЛАМА</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n⚠️ Нет активных кампаний или ошибка токена.`,
+      backKbd
+    );
+    return;
+  }
+
+  let lines: string[] = [];
+  lines.push(`📣 <b>РЕКЛАМА — последние 7 дней</b>`);
+  lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+  lines.push(``);
+  lines.push(`<code>`);
+  lines.push(`${pad("Активных кампаний:", 22)} ${data.totalActive}`);
+  lines.push(`${pad("Расход:",            22)} ${rub(Math.round(data.totalSpend))}`);
+  lines.push(`${pad("Заказов с рекламы:", 22)} ${data.totalOrders} шт`);
+  lines.push(`${pad("Средний CPO:",       22)} ${data.avgCpo > 0 ? rub(data.avgCpo) : "—"}`);
+  lines.push(`</code>`);
+  lines.push(``);
+
+  if (data.campaigns.length > 0) {
+    lines.push(`<b>Кампании:</b>`);
+    lines.push(`<code>`);
+    for (const c of data.campaigns.slice(0, 10)) {
+      const cpoStr  = c.orders > 0 ? `CPO ${rub(c.cpo)}` : "нет заказов";
+      const ctrStr  = c.ctr > 0 ? ` CTR ${c.ctr}%` : "";
+      lines.push(`▸ ${c.name.slice(0, 20)}`);
+      lines.push(`  ${rub(Math.round(c.spend))}  ${c.orders}шт  ${cpoStr}${ctrStr}`);
+    }
+    lines.push(`</code>`);
+
+    if (data.avgCpo > 0) {
+      lines.push(``);
+      lines.push(`<i>💡 Средний CPO ${rub(data.avgCpo)} — используй как «реклама на единицу» в юнит-экономике.</i>`);
+    }
+  }
+
+  await editWidget(ctx, lines.join("\n"), backKbd);
+}
+
 // ── Unit Economics ────────────────────────────────────────────────────────────
 
 const LOGISTICS_STALE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 export async function showUnitEconHub(ctx: Context): Promise<void> {
   await ctx.answerCbQuery();
-  const products = await getProducts();
+  const [products, settings, realizData] = await Promise.all([
+    getProducts(),
+    getWbSettings(),
+    getRealizationReport(4),
+  ]);
 
   let lines: string[] = [];
   lines.push(`🧩 <b>ЮНИТ-ЭКОНОМИКА</b>`);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
+  lines.push(`<code>Курс: ${settings.kursRb} руб/ед · $1=${settings.kursUsd}₽ · Фикс: ${settings.fixedCost}₽</code>`);
   lines.push("");
 
   if (!products || products.length === 0) {
@@ -466,62 +613,236 @@ export async function showUnitEconHub(ctx: Context): Promise<void> {
   });
   const costMap = new Map(costs.map((c: any) => [c.nmID, c]));
 
-  // ── Logistics staleness check ────────────────────────────────────────────
-  // WB changes logistics rates unilaterally. Warn if any record is >30 days old.
-  const now = Date.now();
-  const staleLogistics = costs.filter(c =>
-    now - new Date(c.updatedAt).getTime() > LOGISTICS_STALE_MS
-  );
-  if (staleLogistics.length > 0) {
-    lines.push(
-      `⚠️ <b>Внимание: логистика устарела!</b>\n` +
-      `${staleLogistics.length} товар(а) не обновлялись >30 дней.\n` +
-      `Сверьтесь с отчётом реализации WB и обновите ставку ниже.`
-    );
-    lines.push("");
-  }
-
   const buttons: any[] = [];
 
   for (const p of products) {
     const cost  = costMap.get(p.nmID);
     const price = p.discountedPrice ?? p.price ?? 0;
-    const title = (p.title || p.vendorCode).slice(0, 20);
+    const title = (p.title || p.vendorCode).slice(0, 22);
 
     lines.push(`🔸 <b>${title}</b>  <code>${p.vendorCode}</code>`);
-    if (!cost) {
-      lines.push(`  <i>⚙️ Себестоимость не указана</i>`);
-      buttons.push([Markup.button.callback(`✏️ Добавить себест. (${p.vendorCode})`, CB.wbEditCost(p.nmID))]);
+
+    if (!cost || !cost.denomination) {
+      lines.push(`  <i>⚙️ Не указан номинал Robux</i>`);
+      buttons.push([Markup.button.callback(`🔢 Номинал (${p.vendorCode})`, CB.wbEditDenom(p.nmID))]);
     } else {
-      const commission = Math.round(price * cost.wbCommission);
-      const tax        = Math.round(price * cost.taxRate);
-      const logistics  = cost.logisticsCost;
-      const netProfit  = price - cost.costPrice - commission - logistics - tax;
-      const margin     = price > 0 ? Math.round((netProfit / price) * 100) : 0;
-      const logStale   = now - new Date(cost.updatedAt).getTime() > LOGISTICS_STALE_MS;
+      const commission  = cost.wbCommission;
+      const tax         = cost.taxRate;
+      const fixedCost   = cost.logisticsCost;
+      const robuxCost   = settings.kursRb * settings.kursUsd * cost.denomination / 700;
+      const netRevenue  = price * (1 - commission) * (1 - tax);
+      const margBase    = netRevenue - fixedCost;
+      const profitBeforeAd = margBase - robuxCost;
+      const adCost      = cost.adCostPerUnit ?? 0;
+      const profitAfterAd  = profitBeforeAd - adCost;
+      const marginPct   = margBase > 0 ? Math.round((profitBeforeAd / margBase) * 100) : 0;
 
       lines.push(
         `<code>` +
         `  Цена продажи:    ${pad(rub(price), 10)}\n` +
-        `  Себестоимость: −${pad(rub(cost.costPrice), 10)}\n` +
-        `  Комиссия WB:   −${pad(rub(commission), 10)}  (${Math.round(cost.wbCommission * 100)}%)\n` +
-        `  Логистика:     −${pad(rub(logistics), 10)}${logStale ? "  ⚠️" : ""}\n` +
-        `  Налог:         −${pad(rub(tax), 10)}  (${Math.round(cost.taxRate * 100)}%)\n` +
+        `  Номинал:         ${pad(`${cost.denomination} R$`, 10)}\n` +
+        `  Чистая выручка:  ${pad(rub(Math.round(netRevenue)), 10)}  (−${Math.round(commission*100)}% комса, −${Math.round(tax*100)}% налог)\n` +
+        `  Себест. Robux:  −${pad(rub(Math.round(robuxCost)), 10)}  (${settings.kursRb}×${settings.kursUsd}×${cost.denomination}/700)\n` +
+        `  Фикс. затраты: −${pad(rub(fixedCost), 10)}\n` +
         `  ────────────────────────────\n` +
-        `  Прибыль:        ${pad(rub(netProfit), 10)}  (${margin}%)` +
+        `  До рекламы:      ${pad(rub(Math.round(profitBeforeAd)), 10)}  (${marginPct}%)\n` +
+        (adCost > 0
+          ? `  Реклама:        −${pad(rub(Math.round(adCost)), 10)}\n` +
+            `  С карточки:      ${pad(rub(Math.round(profitAfterAd)), 10)}`
+          : `  Реклама:         не указана`) +
         `</code>`
       );
-      // Two edit buttons per product: cost price + logistics cost
+
+      // Реализация overlay (actual data from WB report)
+      const realArt = realizData?.byArticle.find(a =>
+        a.saName === p.vendorCode || a.nmId === p.nmID
+      );
+      if (realArt && realArt.salesCount > 0 && cost.denomination) {
+        const realComis  = Math.round(realArt.avgCommissionPct * 10) / 10;
+        const realLog    = Math.round(realArt.avgLogisticsPerUnit);
+        const realNetRev = price * (1 - realArt.avgCommissionPct / 100) * (1 - cost.taxRate);
+        const realRobuxCost = settings.kursRb * settings.kursUsd * cost.denomination / 700;
+        const realProfit    = realNetRev - realLog - realRobuxCost - (cost.adCostPerUnit ?? 0);
+        const retPct        = Math.round(realArt.returnRate * 100);
+        lines.push(
+          `<code>` +
+          `  📊 По реализации (факт, ${realArt.salesCount}шт):\n` +
+          `  Факт. комиссия: ${realComis}%  Факт. логист: ${realLog}₽/шт\n` +
+          `  Факт. выкуп:   ${100 - retPct}%  Возвраты: ${retPct}%\n` +
+          `  Уточнённая прибыль: ~${rub(Math.round(realProfit))}` +
+          `</code>`
+        );
+      }
+
       buttons.push([
-        Markup.button.callback(`✏️ Себест. (${p.vendorCode})`,   CB.wbEditCost(p.nmID)),
-        Markup.button.callback(`🚚 Логист. (${p.vendorCode})`,    CB.wbEditLogistics(p.nmID)),
+        Markup.button.callback(`🔢 Номинал (${p.vendorCode})`,  CB.wbEditDenom(p.nmID)),
+        Markup.button.callback(`📣 Реклама (${p.vendorCode})`,   CB.wbEditAd(p.nmID)),
       ]);
     }
     lines.push("");
   }
 
+  buttons.push([Markup.button.callback("⚙️ Курсы и ставки", CB.wbUeSettings)]);
   buttons.push([Markup.button.callback("◀️ Назад", CB.hubWildberries)]);
   await editWidget(ctx, lines.join("\n"), Markup.inlineKeyboard(buttons));
+}
+
+export async function enterDenomInput(ctx: Context, nmID: number): Promise<void> {
+  await ctx.answerCbQuery();
+  const products = await getProducts();
+  const product  = products?.find(p => p.nmID === nmID);
+  if (!product) { await ctx.answerCbQuery("Товар не найден"); return; }
+
+  pendingDenomInput.set(ctx.from!.id, { nmID, vendorCode: product.vendorCode });
+  const existing: any = await (db as any).wbProductCost.findUnique({ where: { nmID } });
+
+  await editWidget(
+    ctx,
+    `🔢 <b>НОМИНАЛ — ${product.vendorCode}</b>\n━━━━━━━━━━━━━━━━\n\n` +
+    (existing?.denomination ? `Текущий: <b>${existing.denomination} R$</b>\n\n` : "") +
+    `Введите <b>количество Robux</b> на этой карточке (например: 300, 500, 800, 1000).\n\n` +
+    `<i>Себестоимость рассчитается автоматически по формуле:\nкурс_рб × курс_usd × номинал / 700</i>`,
+    Markup.inlineKeyboard([[Markup.button.callback("⬅️ Отмена", CB.wbUnitEcon)]])
+  );
+}
+
+export async function handleDenomInput(ctx: Context, text: string): Promise<boolean> {
+  const state = pendingDenomInput.get(ctx.from!.id);
+  if (!state) return false;
+  pendingDenomInput.delete(ctx.from!.id);
+
+  const denom = parseInt(text.trim());
+  if (isNaN(denom) || denom <= 0 || denom > 100000) {
+    await ctx.reply("❌ Некорректное число. Введите количество Robux (например 300).");
+    return true;
+  }
+
+  await (db as any).wbProductCost.upsert({
+    where:  { nmID: state.nmID },
+    update: { denomination: denom, vendorCode: state.vendorCode },
+    create: {
+      nmID: state.nmID,
+      vendorCode: state.vendorCode,
+      costPrice: 0,
+      denomination: denom,
+      wbCommission: 0.245,
+      taxRate: 0.07,
+      logisticsCost: 87.5,
+    },
+  });
+
+  await ctx.reply(`✅ Номинал для <code>${state.vendorCode}</code> — <b>${denom} R$</b> сохранён.`, { parse_mode: "HTML" });
+  await showUnitEconHub(ctx);
+  return true;
+}
+
+export async function enterAdInput(ctx: Context, nmID: number): Promise<void> {
+  await ctx.answerCbQuery();
+  const products = await getProducts();
+  const product  = products?.find(p => p.nmID === nmID);
+  if (!product) { await ctx.answerCbQuery("Товар не найден"); return; }
+
+  pendingAdInput.set(ctx.from!.id, { nmID, vendorCode: product.vendorCode });
+  const existing: any = await (db as any).wbProductCost.findUnique({ where: { nmID } });
+
+  await editWidget(
+    ctx,
+    `📣 <b>РЕКЛАМА НА ЕДИНИЦУ — ${product.vendorCode}</b>\n━━━━━━━━━━━━━━━━\n\n` +
+    (existing?.adCostPerUnit ? `Текущая: <b>${existing.adCostPerUnit} ₽</b>\n\n` : "") +
+    `Введите <b>стоимость рекламы на 1 заказ</b> в рублях:\n\n` +
+    `<i>Формула: общий бюджет рекламы ÷ кол-во заказов с этой рекламы.\nВведите 0 чтобы сбросить.</i>`,
+    Markup.inlineKeyboard([[Markup.button.callback("⬅️ Отмена", CB.wbUnitEcon)]])
+  );
+}
+
+export async function handleAdInput(ctx: Context, text: string): Promise<boolean> {
+  const state = pendingAdInput.get(ctx.from!.id);
+  if (!state) return false;
+  pendingAdInput.delete(ctx.from!.id);
+
+  const cost = parseFloat(text.trim().replace(",", "."));
+  if (isNaN(cost) || cost < 0) {
+    await ctx.reply("❌ Некорректное число. Введите стоимость в ₽ (или 0 для сброса).");
+    return true;
+  }
+
+  await (db as any).wbProductCost.upsert({
+    where:  { nmID: state.nmID },
+    update: { adCostPerUnit: cost },
+    create: {
+      nmID: state.nmID,
+      vendorCode: state.vendorCode,
+      costPrice: 0,
+      adCostPerUnit: cost,
+      wbCommission: 0.245,
+      taxRate: 0.07,
+      logisticsCost: 87.5,
+    },
+  });
+
+  await ctx.reply(
+    `✅ Реклама для <code>${state.vendorCode}</code> — <b>${cost} ₽/заказ</b> сохранена.`,
+    { parse_mode: "HTML" }
+  );
+  await showUnitEconHub(ctx);
+  return true;
+}
+
+export async function showUeSettings(ctx: Context): Promise<void> {
+  await ctx.answerCbQuery();
+  const s = await getWbSettings();
+
+  const text =
+    `⚙️ <b>НАСТРОЙКИ ЮНИТ-ЭКОНОМИКИ</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `<code>` +
+    `  Курс закупки (kursRb):   ${s.kursRb}\n` +
+    `  Курс USD/RUB (kursUsd):  ${s.kursUsd} ₽\n` +
+    `  Фикс. затраты:           ${s.fixedCost} ₽\n` +
+    `</code>\n\n` +
+    `<i>Себестоимость = kursRb × kursUsd × номинал / 700\nПример: ${s.kursRb} × ${s.kursUsd} × 300 / 700 = ${Math.round(s.kursRb * s.kursUsd * 300 / 700)} ₽ для 300 R$</i>`;
+
+  await editWidget(ctx, text, Markup.inlineKeyboard([
+    [Markup.button.callback(`✏️ Курс закупки (${s.kursRb})`,   CB.wbUeKursRb)],
+    [Markup.button.callback(`✏️ Курс USD (${s.kursUsd} ₽)`,   CB.wbUeKursUsd)],
+    [Markup.button.callback(`✏️ Фикс. затраты (${s.fixedCost} ₽)`, CB.wbUeFixedCost)],
+    [Markup.button.callback("◀️ Назад", CB.wbUnitEcon)],
+  ]));
+}
+
+export async function enterUeSettingInput(ctx: Context, field: "kursRb" | "kursUsd" | "fixedCost"): Promise<void> {
+  await ctx.answerCbQuery();
+  pendingUeSettingInput.set(ctx.from!.id, { field });
+  const labels: Record<string, string> = {
+    kursRb:    "курс закупки (kursRb)",
+    kursUsd:   "курс USD/RUB",
+    fixedCost: "фиксированные затраты на единицу (₽)",
+  };
+  const s = await getWbSettings();
+  const current = s[field];
+
+  await editWidget(
+    ctx,
+    `✏️ <b>ИЗМЕНИТЬ: ${labels[field].toUpperCase()}</b>\n━━━━━━━━━━━━━━━━\n\n` +
+    `Текущее: <b>${current}</b>\n\nВведите новое значение:`,
+    Markup.inlineKeyboard([[Markup.button.callback("⬅️ Отмена", CB.wbUeSettings)]])
+  );
+}
+
+export async function handleUeSettingInput(ctx: Context, text: string): Promise<boolean> {
+  const state = pendingUeSettingInput.get(ctx.from!.id);
+  if (!state) return false;
+  pendingUeSettingInput.delete(ctx.from!.id);
+
+  const value = parseFloat(text.trim().replace(",", "."));
+  if (isNaN(value) || value <= 0) {
+    await ctx.reply("❌ Некорректное число. Введите положительное значение.");
+    return true;
+  }
+
+  await updateWbSetting(state.field, value);
+  await ctx.reply(`✅ Настройка <b>${state.field}</b> обновлена: <b>${value}</b>`, { parse_mode: "HTML" });
+  await showUeSettings(ctx);
+  return true;
 }
 
 export async function enterCostInput(ctx: Context, nmID: number): Promise<void> {
@@ -542,7 +863,7 @@ export async function enterCostInput(ctx: Context, nmID: number): Promise<void> 
     `✏️ <b>СЕБЕСТОИМОСТЬ — ${product.vendorCode}</b>\n━━━━━━━━━━━━━━━━\n\n` +
     (existing ? `Текущая: <b>${rub(existing.costPrice)}</b>\n\n` : "") +
     `Введите <b>себестоимость в рублях</b> (цена закупки/производства одной единицы).\n\n` +
-    `<i>Комиссия WB (15%) и налог (6%) рассчитаются автоматически.\nЧтобы изменить ставки — обратитесь к разработчику.</i>`,
+    `<i>Комиссия WB (24.5%) и налог (7%) рассчитаются автоматически.\nЧтобы изменить ставки — обратитесь к разработчику.</i>`,
     Markup.inlineKeyboard([[Markup.button.callback("⬅️ Отмена", CB.wbUnitEcon)]])
   );
 }

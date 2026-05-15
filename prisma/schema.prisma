@@ -187,13 +187,23 @@ model GlobalSettings {
 model WbProductCost {
   // @id creates PRIMARY KEY — automatically UNIQUE + indexed in PostgreSQL.
   // No separate @unique or @@index needed.
-  nmID         Int      @id
-  vendorCode   String
-  costPrice    Int      // Purchase/production cost in RUB
-  wbCommission Float    @default(0.15) // WB commission rate (0–1), e.g. 0.15 = 15%
-  logisticsCost Int     @default(80)   // Per-unit WB logistics cost in RUB
-  taxRate      Float    @default(0.06) // Simplified tax rate (0–1)
-  updatedAt    DateTime @updatedAt
+  nmID          Int      @id
+  vendorCode    String
+  costPrice     Int      @default(0)   // Purchase/production cost in RUB
+  wbCommission  Float    @default(0.245) // WB commission rate (0–1), e.g. 0.245 = 24.5%
+  logisticsCost Float    @default(87.5)  // Per-unit WB logistics cost in RUB
+  taxRate       Float    @default(0.07)  // Simplified tax rate (0–1)
+  denomination  Int?                     // Robux denomination (300, 500, 800, etc.)
+  adCostPerUnit Float    @default(0)     // Advertising cost per unit (₽)
+  updatedAt     DateTime @updatedAt
+}
+
+/// Global Wildberries unit economics settings (singleton, id=1).
+model WbSettings {
+  id        Int   @id @default(1)
+  kursRb    Float @default(4)    // закупочный курс (руб. за единицу)
+  kursUsd   Float @default(75)   // курс USD/RUB
+  fixedCost Float @default(87.5) // фиксированные затраты на единицу (₽)
 }
 
 /// Activation codes printed on Wildberries card inserts.

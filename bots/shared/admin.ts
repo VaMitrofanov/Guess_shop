@@ -80,6 +80,16 @@ export const CB = {
   wbFbs:           "wb_fbs",
   wbEditCost:      (nmID: number) => `wb_cost:${nmID}`,
   wbEditLogistics: (nmID: number) => `wb_log:${nmID}`,
+  wbEditAd:        (nmID: number) => `wb_ad:${nmID}`,
+  wbEditDenom:     (nmID: number) => `wb_denom_ue:${nmID}`,
+  wbUeSettings:    "wb_ue_settings",
+  wbUeKursRb:      "wb_ue_kurs_rb",
+  wbUeKursUsd:     "wb_ue_kurs_usd",
+  wbUeFixedCost:   "wb_ue_fixed",
+  wbRealization:       "wb_realiz",
+  wbRealizPeriod:      (p: string) => `wb_realiz_p:${p}`,
+  wbAdvert:            "wb_advert",
+  wbAdvertRefresh:     "wb_advert_refresh",
 
   // ── System hub ─────────────────────────────────────────────────────────────
   sysLogs:            (name: string) => `sys_log:${name}`,

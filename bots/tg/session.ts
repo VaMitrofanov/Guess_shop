@@ -68,3 +68,12 @@ export const pendingCostInput = new Map<number, { nmID: number; vendorCode: stri
 
 /** Admin is updating logistics cost for a WB product. */
 export const pendingLogisticsInput = new Map<number, { nmID: number; vendorCode: string }>();
+
+/** Admin is setting advertising cost per unit for a WB product. */
+export const pendingAdInput = new Map<number, { nmID: number; vendorCode: string }>();
+
+/** Admin is setting a denomination (Robux count) for a WB product. */
+export const pendingDenomInput = new Map<number, { nmID: number; vendorCode: string }>();
+
+/** Admin is updating a global WB unit econ setting. */
+export const pendingUeSettingInput = new Map<number, { field: "kursRb" | "kursUsd" | "fixedCost" }>();
