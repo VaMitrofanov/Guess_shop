@@ -30,6 +30,7 @@ export default function CalcScreen({ token }: { token: string }) {
   const [loading,     setLoading]     = useState(true);
   const [attributing, setAttributing] = useState(false);
   const [attributed,  setAttributed]  = useState<{ amount: number; at: string } | null>(null);
+  const [withAds,     setWithAds]     = useState(true);
 
   // The one thing the user inputs: purchase rate
   // kursMode: "rate" = kursRb directly | "rub" = total ₽ for denom | "usd" = total $ for denom
@@ -83,7 +84,8 @@ export default function CalcScreen({ token }: { token: string }) {
   const commission = costEntry?.commission ?? 0.245;
   const taxRate    = costEntry?.taxRate    ?? 0.07;
   const fixedCost  = ud?.fixedCost ?? 87.5;
-  const cpo        = ud?.cpo ?? 0;
+  const rawCpo     = ud?.cpo ?? 0;
+  const cpo        = withAds ? rawCpo : 0;
   const storage    = ud?.storagePerUnit ?? 0;
 
   // Profit chain
@@ -228,7 +230,28 @@ export default function CalcScreen({ token }: { token: string }) {
 
       {/* Calculation breakdown */}
       <div style={{ background: "#2c2c2e", borderRadius: 14, padding: 16, display: "flex", flexDirection: "column", gap: 2, opacity: canCalc ? 1 : 0.45 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: "#8e8e93", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Юнит-экономика</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "#8e8e93", textTransform: "uppercase", letterSpacing: 0.5 }}>Юнит-экономика</div>
+          {rawCpo > 0 && (
+            <button onClick={() => setWithAds(v => !v)} style={{
+              display: "flex", alignItems: "center", gap: 5, background: "none", border: "none",
+              cursor: "pointer", padding: "2px 0",
+            }}>
+              <div style={{
+                width: 32, height: 18, borderRadius: 9, position: "relative", flexShrink: 0,
+                background: withAds ? "#bf5af2" : "#48484a", transition: "background 0.2s",
+              }}>
+                <div style={{
+                  position: "absolute", top: 2, left: withAds ? 14 : 2, width: 14, height: 14,
+                  borderRadius: "50%", background: "#fff", transition: "left 0.2s",
+                }} />
+              </div>
+              <span style={{ fontSize: 11, color: withAds ? "#bf5af2" : "#636366" }}>
+                {withAds ? `реклама ${Math.round(rawCpo)}₽` : "без рекламы"}
+              </span>
+            </button>
+          )}
+        </div>
 
         {row("Цена продажи", hasPrice ? fmt(sellPrice) : "нет данных WB")}
         {row(`−Комса WB (${Math.round(commission * 100)}%)`, hasPrice ? "−" + fmt(Math.round(sellPrice - afterComm)) : "—", true)}
@@ -237,7 +260,7 @@ export default function CalcScreen({ token }: { token: string }) {
         {row(`−Себест. Robux`, hasKurs ? "−" + fmt(Math.round(robuxCost)) : "—", true,
           hasKurs ? `${kursRb}×${kursUsd}×${denom}/700` : undefined
         )}
-        {cpo > 0 && row("−Реклама/ед", "−" + fmt(Math.round(cpo)), true, "WB CPO")}
+        {withAds && cpo > 0 && row("−Реклама/ед", "−" + fmt(Math.round(cpo)), true, "WB CPO")}
         {storage > 0 && row("−Хранение/ед", "−" + fmt(Math.round(storage)), true, "из реализации")}
 
         <div style={{ borderTop: "1px solid #3a3a3c", margin: "8px 0 6px" }} />
@@ -257,8 +280,8 @@ export default function CalcScreen({ token }: { token: string }) {
         </div>
       </div>
 
-      {/* Mark order complete */}
-      <div style={{ background: "#1c1c1e", borderRadius: 14, border: "1px solid #2c2c2e", padding: 14 }}>
+      {/* Mark order complete — only relevant when ads are included */}
+      {withAds && <div style={{ background: "#1c1c1e", borderRadius: 14, border: "1px solid #2c2c2e", padding: 14 }}>
         <div style={{ fontSize: 12, color: "#8e8e93", marginBottom: 4 }}>
           Реклама считается с{" "}
           <span style={{ color: "#e5e5ea" }}>
@@ -278,13 +301,13 @@ export default function CalcScreen({ token }: { token: string }) {
           </div>
         )}
 
-        {cpo === 0 && !attributed ? (
+        {rawCpo === 0 && !attributed ? (
           <div style={{ background: "#2c2c2e", borderRadius: 10, padding: "12px 14px", textAlign: "center", color: "#636366", fontSize: 14 }}>
             Нет расходов на рекламу за этот период
           </div>
         ) : (
           <button
-            disabled={attributing || cpo === 0}
+            disabled={attributing || rawCpo === 0}
             onClick={async () => {
               setAttributing(true);
               try {
@@ -312,7 +335,7 @@ export default function CalcScreen({ token }: { token: string }) {
             {attributing ? "Фиксируем…" : "✓ Заказ выполнен — зафиксировать рекламу"}
           </button>
         )}
-      </div>
+      </div>}
 
       <div style={{ fontSize: 11, color: "#3a3a3c", textAlign: "center" }}>
         Настройки (комиссия, налог, курс USD) меняются в боте → ⚙️ Юнит-экономика
