@@ -14,9 +14,22 @@ async function fetchWb<T>(url: string, schema: z.ZodType<T>, options: RequestIni
       ...options,
       headers: { Authorization: token, "Content-Type": "application/json", ...options.headers },
     });
-    if (!res.ok) return null;
-    return schema.parse(await res.json());
-  } catch { return null; }
+    if (!res.ok) {
+      const path = url.replace(/^https?:\/\/[^/]+/, "").split("?")[0];
+      console.error(`[wb-api] ${res.status} ${path}`);
+      return null;
+    }
+    const parsed = schema.safeParse(await res.json());
+    if (!parsed.success) {
+      const path = url.replace(/^https?:\/\/[^/]+/, "").split("?")[0];
+      console.error(`[wb-api] schema error ${path}:`, parsed.error.issues[0]);
+    }
+    return parsed.success ? parsed.data : null;
+  } catch (e: any) {
+    const path = url.replace(/^https?:\/\/[^/]+/, "").split("?")[0];
+    console.error(`[wb-api] fetch error ${path}:`, e?.message ?? e);
+    return null;
+  }
 }
 
 // ── Schemas ────────────────────────────────────────────────────────────────
