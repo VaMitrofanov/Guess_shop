@@ -34,13 +34,16 @@ export default function TwaApp() {
   useEffect(() => {
     let cancelled = false;
 
-    // Read initData directly from URL hash — works regardless of SDK load timing.
-    // Telegram always passes #tgWebAppData=<url-encoded-initData>&...
-    function getInitDataFromHash(): string {
-      const hash = window.location.hash.slice(1);
-      if (!hash) return "";
-      const params = new URLSearchParams(hash);
-      return params.get("tgWebAppData") ?? "";
+    // SDK is loaded via beforeInteractive in root layout — it should be ready.
+    // Poll briefly as a safety net for any edge-case ordering.
+    async function waitForInitData(maxMs = 3000): Promise<string> {
+      const deadline = Date.now() + maxMs;
+      while (Date.now() < deadline) {
+        const id = window.Telegram?.WebApp?.initData;
+        if (id) return id;
+        await new Promise(r => setTimeout(r, 100));
+      }
+      return "";
     }
 
     async function doAuth(id: string) {
@@ -63,13 +66,11 @@ export default function TwaApp() {
       setToken(data.token);
       setFirstName(data.firstName ?? "Admin");
       setAuth("ok");
-      // call SDK UI methods if available (non-critical)
       window.Telegram?.WebApp?.ready();
       window.Telegram?.WebApp?.expand();
     }
 
     (async () => {
-      const initData = getInitDataFromHash();
       const stored = localStorage.getItem("twa_token");
 
       if (stored) {
@@ -85,15 +86,16 @@ export default function TwaApp() {
         localStorage.removeItem("twa_token");
       }
 
+      const initData = await waitForInitData();
+      if (cancelled) return;
+
       if (initData) {
         doAuth(initData);
         return;
       }
 
       if (!cancelled) {
-        // Show first 80 chars of hash for debugging
-        const hashPreview = window.location.hash.slice(0, 80) || "(empty)";
-        setDebugMsg(`no tgWebAppData | hash: ${hashPreview}`);
+        setDebugMsg(`SDK: ${window.Telegram?.WebApp ? "ok" : "missing"} | initData empty`);
         setAuth("error");
       }
     })();

@@ -41,8 +41,12 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <SessionProvider>
-          <Script 
-            src="https://unpkg.com/@vkid/sdk@<3.0.0/dist-sdk/umd/index.js" 
+          <Script
+            src="https://telegram.org/js/telegram-web-app.js"
+            strategy="beforeInteractive"
+          />
+          <Script
+            src="https://unpkg.com/@vkid/sdk@<3.0.0/dist-sdk/umd/index.js"
             strategy="afterInteractive"
           />
           <PageLoader />
