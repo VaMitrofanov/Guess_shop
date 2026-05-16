@@ -37,7 +37,15 @@ const StockSchema = z.object({
 });
 
 const AdvertCountSchema = z.object({
-  campCount: z.number().optional().default(0),
+  all: z.number().optional().default(0),
+  adverts: z.array(z.object({
+    type:   z.number().optional().default(0),
+    status: z.number().optional().default(0),
+    count:  z.number().optional().default(0),
+    advert_list: z.array(z.object({
+      advertId: z.number(),
+    })).optional().default([]),
+  })).optional().default([]),
 });
 
 const FeedbackItemSchema = z.object({
@@ -249,23 +257,17 @@ export interface WbRealizationSummary {
 }
 
 export interface WbAdvertSummary {
-  totalActive:  number;
-  totalSpend:   number;
-  totalOrders:  number;
-  avgCpo:       number;
-  totalBudget:  number;
-  campaigns:    {
+  totalActive:   number;
+  totalPaused:   number;
+  totalBudget:   number;
+  // spend stats unavailable — WB removed fullstats API
+  totalSpend:    number;
+  totalOrders:   number;
+  avgCpo:        number;
+  campaigns:     {
     id: number;
-    name: string;
     status: number;
-    spend: number;
-    orders: number;
-    cpo: number;
-    views: number;
-    clicks: number;
-    ctr: number;
-    budget: number;
-    dailyBudget: number;
+    budgetBalance: number;
   }[];
 }
 
@@ -475,17 +477,16 @@ export async function getCampaignsStatus(): Promise<string | null> {
   if (!wbCodeEnv) return null;
 
   try {
-    const res = await fetchWb(`https://advert-api.wildberries.ru/adv/v1/promotion/count`, z.any());
+    const res = await fetchWb(`https://advert-api.wildberries.ru/adv/v1/promotion/count`, AdvertCountSchema);
     if (!res) return null;
 
-    let result = "Подключено ✅";
-    if (res.adverts && Array.isArray(res.adverts)) {
-      // status 7 = активна, 9 = на паузе (advertiser), 11 = на паузе (budget)
-      const active = res.adverts.filter((a: any) => a.status === 7 || a.status === 9 || a.status === 11);
-      const totalActive = active.reduce((s: number, a: any) => s + (a.count ?? 0), 0);
-      const totalAll    = res.adverts.reduce((s: number, a: any) => s + (a.count ?? 0), 0);
-      result = totalActive > 0 ? `Активно/пауза: ${totalActive} / Всего: ${totalAll}` : `Всего кампаний: ${totalAll}`;
-    }
+    const active = res.adverts.filter(a => a.status === 11).reduce((s, a) => s + a.count, 0);
+    const paused = res.adverts.filter(a => a.status === 9).reduce((s, a) => s + a.count, 0);
+    const total  = res.all ?? res.adverts.reduce((s, a) => s + a.count, 0);
+
+    let result = total > 0
+      ? `▶ ${active} акт · ⏸ ${paused} пауза · всего ${total}`
+      : "Кампаний нет";
 
     setToCache(cacheKey, result, 10 * 60 * 1000);
     return result;
@@ -903,6 +904,8 @@ export async function getRealizationReport(weeks = 4): Promise<WbRealizationSumm
 }
 
 // ── Advert statistics ─────────────────────────────────────────────────────────
+// WB removed /adv/v1/promotion/adverts and /adv/v2/fullstats endpoints.
+// Working endpoints: /adv/v1/promotion/count (IDs+statuses) + /adv/v1/budget?id=X
 
 export async function getAdvertStats(): Promise<WbAdvertSummary | null> {
   const cacheKey = "wb_advert_stats";
@@ -911,83 +914,69 @@ export async function getAdvertStats(): Promise<WbAdvertSummary | null> {
 
   if (!wbCodeEnv) return null;
 
-  // 1. Get campaign list via v1 only — v2 is a POST endpoint, not GET.
-  // WB status codes: 7 = активна, 9 = пауза (advertiser), 11 = пауза (budget).
-  let campaigns: z.infer<typeof AdvertCampaignSchema>[] = [];
-  for (const status of [7, 9, 11]) {
-    const res = await fetchWb(
-      `https://advert-api.wildberries.ru/adv/v1/promotion/adverts?status=${status}&limit=50&offset=0`,
-      z.array(AdvertCampaignSchema)
-    );
-    if (res && res.length > 0) campaigns.push(...res);
-  }
+  // 1. Get all campaigns with IDs from count endpoint
+  const countData = await fetchWb(
+    `https://advert-api.wildberries.ru/adv/v1/promotion/count`,
+    AdvertCountSchema
+  );
 
-  // Short cache on empty — might be a transient API outage, retry in 5 min
-  if (campaigns.length === 0) {
+  if (!countData || countData.adverts.length === 0) {
     setToCache(cacheKey, null as any, 5 * 60 * 1000);
     return null;
   }
 
-  const ids = campaigns.map(c => c.advertId).slice(0, 50);
+  // status 11 = активна, 9 = на паузе (advertiser), others = готова/завершена
+  const ACTIVE_STATUS  = 11;
+  const PAUSED_STATUS  = 9;
 
-  // 2. Get full stats with correct body format
-  await new Promise(r => setTimeout(r, 1000)); // rate limit pause
-  const dateFrom = new Date(Date.now() - 7 * 864e5).toISOString().split("T")[0];
-  const dateTo   = new Date().toISOString().split("T")[0];
-  const body = ids.map(id => ({ id, interval: { begin: dateFrom, end: dateTo } }));
+  const allCampaigns: { id: number; status: number }[] = [];
+  let totalActive = 0, totalPaused = 0;
 
-  const statsRaw = await fetchWb(
-    `https://advert-api.wildberries.ru/adv/v2/fullstats`,
-    AdvertFullStatsSchema,
-    { method: "POST", body: JSON.stringify(body) }
-  );
+  for (const group of countData.adverts) {
+    const isActive = group.status === ACTIVE_STATUS;
+    const isPaused = group.status === PAUSED_STATUS;
+    if (isActive) totalActive += group.count;
+    if (isPaused) totalPaused += group.count;
+    for (const c of group.advert_list) {
+      allCampaigns.push({ id: c.advertId, status: group.status });
+    }
+  }
 
-  let totalSpend = 0, totalOrders = 0, totalViews = 0, totalClicks = 0, totalBudget = 0;
+  if (allCampaigns.length === 0) {
+    setToCache(cacheKey, null as any, 5 * 60 * 1000);
+    return null;
+  }
+
+  // 2. Fetch budget balance for each campaign (sequential, rate-limit safe)
+  const BudgetSchema = z.object({
+    total: z.number().optional().default(0),
+  });
+
+  let totalBudget = 0;
   const campaignStats: WbAdvertSummary["campaigns"] = [];
 
-  for (const camp of campaigns) {
-    const stat = statsRaw?.find(s => s.advertId === camp.advertId);
-    let spend = 0, orders = 0, views = 0, clicks = 0;
-    if (stat) {
-      for (const day of stat.days) {
-        for (const app of day.apps) {
-          spend  += app.sum;
-          orders += app.orders;
-          views  += app.views;
-          clicks += app.clicks;
-        }
-      }
-    }
-    totalSpend  += spend;
-    totalOrders += orders;
-    totalViews  += views;
-    totalClicks += clicks;
-    totalBudget += camp.budget ?? 0;
-    campaignStats.push({
-      id:          camp.advertId,
-      name:        camp.name || String(camp.advertId),
-      status:      camp.status ?? 0,
-      spend,
-      orders,
-      cpo:         orders > 0 ? Math.round(spend / orders) : 0,
-      views,
-      clicks,
-      ctr:         views > 0 ? Math.round((clicks / views) * 1000) / 10 : 0,
-      budget:      camp.budget ?? 0,
-      dailyBudget: camp.dailyBudget ?? 0,
-    });
+  for (const camp of allCampaigns.slice(0, 20)) {
+    await new Promise(r => setTimeout(r, 300)); // avoid 429
+    const budget = await fetchWb(
+      `https://advert-api.wildberries.ru/adv/v1/budget?id=${camp.id}`,
+      BudgetSchema
+    );
+    const balance = budget?.total ?? 0;
+    totalBudget += balance;
+    campaignStats.push({ id: camp.id, status: camp.status, budgetBalance: balance });
   }
 
   const result: WbAdvertSummary = {
-    totalActive:  campaigns.length,
-    totalSpend,
-    totalOrders,
-    avgCpo:       totalOrders > 0 ? Math.round(totalSpend / totalOrders) : 0,
+    totalActive,
+    totalPaused,
     totalBudget,
-    campaigns:    campaignStats.sort((a, b) => b.spend - a.spend),
+    totalSpend:  0,
+    totalOrders: 0,
+    avgCpo:      0,
+    campaigns:   campaignStats,
   };
 
-  setToCache(cacheKey, result, 15 * 60 * 1000); // 15 min cache
+  setToCache(cacheKey, result, 15 * 60 * 1000);
   return result;
 }
 
