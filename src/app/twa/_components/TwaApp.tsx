@@ -34,14 +34,13 @@ export default function TwaApp() {
   useEffect(() => {
     let cancelled = false;
 
-    async function waitForTg(maxMs = 4000) {
-      const deadline = Date.now() + maxMs;
-      while (Date.now() < deadline) {
-        const tg = window.Telegram?.WebApp;
-        if (tg?.initData) return tg;
-        await new Promise(r => setTimeout(r, 150));
-      }
-      return window.Telegram?.WebApp;
+    // Read initData directly from URL hash — works regardless of SDK load timing.
+    // Telegram always passes #tgWebAppData=<url-encoded-initData>&...
+    function getInitDataFromHash(): string {
+      const hash = window.location.hash.slice(1);
+      if (!hash) return "";
+      const params = new URLSearchParams(hash);
+      return params.get("tgWebAppData") ?? "";
     }
 
     async function doAuth(id: string) {
@@ -64,31 +63,37 @@ export default function TwaApp() {
       setToken(data.token);
       setFirstName(data.firstName ?? "Admin");
       setAuth("ok");
+      // call SDK UI methods if available (non-critical)
+      window.Telegram?.WebApp?.ready();
+      window.Telegram?.WebApp?.expand();
     }
 
     (async () => {
-      const tg = await waitForTg();
-      if (cancelled) return;
-
-      tg?.ready();
-      tg?.expand();
-
+      const initData = getInitDataFromHash();
       const stored = localStorage.getItem("twa_token");
-      const initData = tg?.initData ?? "";
 
       if (stored) {
         const r = await fetch("/api/twa/dashboard", { headers: { Authorization: `Bearer ${stored}` } }).catch(() => null);
         if (cancelled) return;
-        if (r?.ok) { setToken(stored); setAuth("ok"); return; }
-        if (initData) { doAuth(initData); return; }
+        if (r?.ok) {
+          setToken(stored);
+          setAuth("ok");
+          window.Telegram?.WebApp?.ready();
+          window.Telegram?.WebApp?.expand();
+          return;
+        }
         localStorage.removeItem("twa_token");
-      } else if (initData) {
+      }
+
+      if (initData) {
         doAuth(initData);
         return;
       }
 
       if (!cancelled) {
-        setDebugMsg(initData ? "token+initData failed" : "no initData");
+        // Show first 80 chars of hash for debugging
+        const hashPreview = window.location.hash.slice(0, 80) || "(empty)";
+        setDebugMsg(`no tgWebAppData | hash: ${hashPreview}`);
         setAuth("error");
       }
     })();
