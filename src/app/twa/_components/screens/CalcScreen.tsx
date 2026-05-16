@@ -278,34 +278,40 @@ export default function CalcScreen({ token }: { token: string }) {
           </div>
         )}
 
-        <button
-          disabled={attributing}
-          onClick={async () => {
-            setAttributing(true);
-            try {
-              const res = await fetch("/api/twa/ad-attr", {
-                method: "POST",
-                headers: { Authorization: `Bearer ${token}` },
-              });
-              if (res.ok) {
-                const data = await res.json();
-                setAttributed({ amount: data.attributed ?? 0, at: data.lastAttributedAt });
-                const ueRes = await fetch("/api/twa/ue", { headers: { Authorization: `Bearer ${token}` } });
-                if (ueRes.ok) setUeData(await ueRes.json());
+        {cpo === 0 && !attributed ? (
+          <div style={{ background: "#2c2c2e", borderRadius: 10, padding: "12px 14px", textAlign: "center", color: "#636366", fontSize: 14 }}>
+            Нет расходов на рекламу за этот период
+          </div>
+        ) : (
+          <button
+            disabled={attributing || cpo === 0}
+            onClick={async () => {
+              setAttributing(true);
+              try {
+                const res = await fetch("/api/twa/ad-attr", {
+                  method: "POST",
+                  headers: { Authorization: `Bearer ${token}` },
+                });
+                if (res.ok) {
+                  const data = await res.json();
+                  setAttributed({ amount: data.attributed ?? 0, at: data.lastAttributedAt });
+                  const ueRes = await fetch("/api/twa/ue", { headers: { Authorization: `Bearer ${token}` } });
+                  if (ueRes.ok) setUeData(await ueRes.json());
+                }
+              } finally {
+                setAttributing(false);
               }
-            } finally {
-              setAttributing(false);
-            }
-          }}
-          style={{
-            width: "100%", padding: "12px 0", borderRadius: 10, border: "none",
-            cursor: attributing ? "default" : "pointer",
-            background: attributing ? "#2c2c2e" : "#bf5af2",
-            color: "#fff", fontSize: 15, fontWeight: 600,
-          }}
-        >
-          {attributing ? "Фиксируем…" : "✓ Заказ выполнен — зафиксировать рекламу"}
-        </button>
+            }}
+            style={{
+              width: "100%", padding: "12px 0", borderRadius: 10, border: "none",
+              cursor: attributing ? "default" : "pointer",
+              background: attributing ? "#2c2c2e" : "#bf5af2",
+              color: "#fff", fontSize: 15, fontWeight: 600,
+            }}
+          >
+            {attributing ? "Фиксируем…" : "✓ Заказ выполнен — зафиксировать рекламу"}
+          </button>
+        )}
       </div>
 
       <div style={{ fontSize: 11, color: "#3a3a3c", textAlign: "center" }}>
