@@ -103,6 +103,12 @@ const RealizRowSchema = z.object({
   sale_dt:                   z.string().optional().default(""),
 });
 
+// ── In-memory cache (survives across requests, resets on container restart) ─
+
+const TTL = 90_000; // WB statistics API: ~1 req/minute per endpoint
+type CacheEntry<T> = { data: T; ts: number };
+const cache: { stats?: CacheEntry<TwaStats30d>; stocks?: CacheEntry<TwaStockItem[]> } = {};
+
 // ── Public API ─────────────────────────────────────────────────────────────
 
 export interface TwaStats30d {
@@ -111,13 +117,20 @@ export interface TwaStats30d {
 }
 
 export async function getStats30d(): Promise<TwaStats30d | null> {
+  if (cache.stats && Date.now() - cache.stats.ts < TTL) return cache.stats.data;
+
   const dateFrom = new Date(Date.now() - 30 * 864e5).toISOString().split(".")[0] + "Z";
   const [orders, sales] = await Promise.all([
     fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${encodeURIComponent(dateFrom)}&flag=0`, z.array(OrderSchema)),
     (async () => { await new Promise(r => setTimeout(r, 1500)); return fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${encodeURIComponent(dateFrom)}`, z.array(SaleSchema)); })(),
   ]);
-  if (!orders || !sales) return null;
-  return { orders, sales };
+
+  if (orders && sales) {
+    cache.stats = { data: { orders, sales }, ts: Date.now() };
+    return cache.stats.data;
+  }
+  // Return stale cache on 429 / temporary failure rather than showing "API unavailable"
+  return cache.stats?.data ?? null;
 }
 
 export interface TwaStockItem {
@@ -130,11 +143,13 @@ export interface TwaStockItem {
 }
 
 export async function getStocks(): Promise<TwaStockItem[] | null> {
+  if (cache.stocks && Date.now() - cache.stocks.ts < TTL) return cache.stocks.data;
+
   const raw = await fetchWb(
     "https://statistics-api.wildberries.ru/api/v1/supplier/stocks?dateFrom=2023-01-01T00:00:00Z",
     z.array(StockSchema)
   );
-  if (!raw) return null;
+  if (!raw) return cache.stocks?.data ?? null;
 
   const grouped = new Map<string, TwaStockItem>();
   for (const s of raw) {
@@ -145,7 +160,9 @@ export async function getStocks(): Promise<TwaStockItem[] | null> {
     ex.inWayFromClient += s.inWayFromClient;
     grouped.set(s.supplierArticle, ex);
   }
-  return [...grouped.values()];
+  const result = [...grouped.values()];
+  cache.stocks = { data: result, ts: Date.now() };
+  return result;
 }
 
 export interface TwaAdvertData {
