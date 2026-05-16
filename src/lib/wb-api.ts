@@ -1,14 +1,13 @@
 import { z } from "zod";
 
-const WB_TOKEN = process.env.WB_API_TOKEN ?? "";
-
 async function fetchWb<T>(url: string, schema: z.ZodType<T>, options: RequestInit = {}): Promise<T | null> {
-  if (!WB_TOKEN) return null;
+  const token = process.env.WB_API_TOKEN ?? "";
+  if (!token) return null;
   try {
     const res = await fetch(url, {
-      next: { revalidate: 300 }, // 5 min Next.js cache
+      cache: "no-store",
       ...options,
-      headers: { Authorization: WB_TOKEN, "Content-Type": "application/json", ...options.headers },
+      headers: { Authorization: token, "Content-Type": "application/json", ...options.headers },
     });
     if (!res.ok) return null;
     return schema.parse(await res.json());
