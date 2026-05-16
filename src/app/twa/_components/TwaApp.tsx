@@ -46,11 +46,11 @@ export default function TwaApp() {
       return "";
     }
 
-    async function doAuth(id: string) {
+    async function doAuth(payload: Record<string, unknown>) {
       const res = await fetch("/api/twa/auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initData: id }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -90,12 +90,20 @@ export default function TwaApp() {
       if (cancelled) return;
 
       if (initData) {
-        doAuth(initData);
+        doAuth({ initData });
+        return;
+      }
+
+      // Fallback: initData absent on some Telegram iOS builds — use initDataUnsafe
+      const unsafeUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
+      if (unsafeUser?.id) {
+        doAuth({ userId: unsafeUser.id, firstName: unsafeUser.first_name });
         return;
       }
 
       if (!cancelled) {
-        setDebugMsg(`SDK: ${window.Telegram?.WebApp ? "ok" : "missing"} | initData empty`);
+        const sdk = window.Telegram?.WebApp;
+        setDebugMsg(`SDK:${sdk ? "ok" : "no"} initData:"${sdk?.initData ?? ""}" unsafe:${JSON.stringify(sdk?.initDataUnsafe?.user ?? null)}`);
         setAuth("error");
       }
     })();
