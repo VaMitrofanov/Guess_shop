@@ -9,6 +9,7 @@ interface DashData {
   codes:    { denom: number; count: number }[];
   wbOrders: number;
   apiAvailable: boolean;
+  tokenPresent?: boolean;
 }
 
 function rub(n: number) { return n.toLocaleString("ru-RU") + " ₽"; }
@@ -33,6 +34,11 @@ export default function Dashboard({ token }: { token: string }) {
       {!data.apiAvailable && (
         <div style={{ background: "#3a2c00", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#ffd60a" }}>
           ⚠️ WB API недоступен — данные только из БД
+          {data.tokenPresent === false && (
+            <div style={{ fontSize: 11, marginTop: 4, color: "#ff9f0a" }}>
+              WB_API_TOKEN не задан в Coolify
+            </div>
+          )}
         </div>
       )}
 

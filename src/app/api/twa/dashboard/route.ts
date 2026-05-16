@@ -38,5 +38,6 @@ export async function GET(req: NextRequest) {
     codes: codes.sort((a: any, b: any) => a.denomination - b.denomination).map((g: any) => ({ denom: g.denomination, count: g._count._all })),
     wbOrders,
     apiAvailable: !!stats,
+    tokenPresent: !!(process.env.WB_API_TOKEN),
   });
 }
