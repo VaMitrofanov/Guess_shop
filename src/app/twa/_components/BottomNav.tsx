@@ -6,6 +6,7 @@ const TABS = [
   { id: "stocks",    icon: "📦", label: "Склад" },
   { id: "advert",    icon: "📣", label: "Реклама" },
   { id: "codes",     icon: "🗃",  label: "Коды" },
+  { id: "calc",      icon: "🧮", label: "Расчёт" },
 ] as const;
 
 type Screen = typeof TABS[number]["id"];

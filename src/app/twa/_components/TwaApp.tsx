@@ -6,6 +6,7 @@ import DynamicsScreen from "./screens/DynamicsScreen";
 import StocksScreen from "./screens/StocksScreen";
 import AdvertScreen from "./screens/AdvertScreen";
 import CodesScreen from "./screens/CodesScreen";
+import CalcScreen from "./screens/CalcScreen";
 
 declare global {
   interface Window {
@@ -23,7 +24,7 @@ declare global {
   }
 }
 
-type Screen = "dashboard" | "dynamics" | "stocks" | "advert" | "codes";
+type Screen = "dashboard" | "dynamics" | "stocks" | "advert" | "codes" | "calc";
 
 export default function TwaApp() {
   const [auth, setAuth] = useState<"loading" | "ok" | "error">("loading");
@@ -155,6 +156,7 @@ export default function TwaApp() {
         {screen === "stocks"    && <StocksScreen {...screenProps} />}
         {screen === "advert"    && <AdvertScreen {...screenProps} />}
         {screen === "codes"     && <CodesScreen {...screenProps} />}
+        {screen === "calc"      && <CalcScreen {...screenProps} />}
       </div>
 
       {/* Bottom Nav */}
