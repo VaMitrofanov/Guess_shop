@@ -31,12 +31,17 @@ export default function TwaApp() {
   const [screen, setScreen] = useState<Screen>("dashboard");
 
   useEffect(() => {
-    const tg = window.Telegram?.WebApp;
-    tg?.ready();
-    tg?.expand();
+    let cancelled = false;
 
-    const stored = localStorage.getItem("twa_token");
-    const initData = tg?.initData ?? "";
+    async function waitForTg(maxMs = 4000) {
+      const deadline = Date.now() + maxMs;
+      while (Date.now() < deadline) {
+        const tg = window.Telegram?.WebApp;
+        if (tg?.initData) return tg;
+        await new Promise(r => setTimeout(r, 150));
+      }
+      return window.Telegram?.WebApp;
+    }
 
     async function doAuth(id: string) {
       const res = await fetch("/api/twa/auth", {
@@ -44,29 +49,40 @@ export default function TwaApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ initData: id }),
       });
-      if (!res.ok) { setAuth("error"); return; }
+      if (!res.ok) { if (!cancelled) setAuth("error"); return; }
       const data = await res.json();
       localStorage.setItem("twa_token", data.token);
+      if (cancelled) return;
       setToken(data.token);
       setFirstName(data.firstName ?? "Admin");
       setAuth("ok");
     }
 
-    if (stored) {
-      // Quick verify stored token
-      fetch("/api/twa/dashboard", { headers: { Authorization: `Bearer ${stored}` } })
-        .then(r => {
-          if (r.ok) { setToken(stored); setAuth("ok"); }
-          else if (initData) doAuth(initData);
-          else { localStorage.removeItem("twa_token"); setAuth("error"); }
-        })
-        .catch(() => setAuth("error"));
-    } else if (initData) {
-      doAuth(initData);
-    } else {
-      // Dev: no initData — still allow if token exists
-      setAuth("error");
-    }
+    (async () => {
+      const tg = await waitForTg();
+      if (cancelled) return;
+
+      tg?.ready();
+      tg?.expand();
+
+      const stored = localStorage.getItem("twa_token");
+      const initData = tg?.initData ?? "";
+
+      if (stored) {
+        const r = await fetch("/api/twa/dashboard", { headers: { Authorization: `Bearer ${stored}` } }).catch(() => null);
+        if (cancelled) return;
+        if (r?.ok) { setToken(stored); setAuth("ok"); return; }
+        if (initData) { doAuth(initData); return; }
+        localStorage.removeItem("twa_token");
+      } else if (initData) {
+        doAuth(initData);
+        return;
+      }
+
+      if (!cancelled) setAuth("error");
+    })();
+
+    return () => { cancelled = true; };
   }, []);
 
   if (auth === "loading") {
