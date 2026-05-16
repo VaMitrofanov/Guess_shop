@@ -106,8 +106,14 @@ const RealizRowSchema = z.object({
 // ── In-memory cache (survives across requests, resets on container restart) ─
 
 const TTL = 90_000; // WB statistics API: ~1 req/minute per endpoint
+const ADV_TTL = 120_000; // advert fullstats: generous TTL to avoid 429
 type CacheEntry<T> = { data: T; ts: number };
-const cache: { stats?: CacheEntry<TwaStats30d>; stocks?: CacheEntry<TwaStockItem[]> } = {};
+const cache: {
+  stats?:   CacheEntry<TwaStats30d>;
+  stocks?:  CacheEntry<TwaStockItem[]>;
+  advert?:  CacheEntry<AdvertPeriodData> & { fromDate: string };
+  realiz?:  CacheEntry<TwaRealizData>;
+} = {};
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -245,6 +251,8 @@ export interface AdvertPeriodData {
 
 // Returns ad spend breakdown from fromDate to today across all campaigns.
 export async function getAdvertDataForPeriod(fromDate: string): Promise<AdvertPeriodData | null> {
+  if (cache.advert && cache.advert.fromDate === fromDate && Date.now() - cache.advert.ts < ADV_TTL) return cache.advert.data;
+
   const countData = await fetchWb("https://advert-api.wildberries.ru/adv/v1/promotion/count", AdvertCountSchema);
   if (!countData || countData.adverts.length === 0) return null;
 
@@ -257,7 +265,7 @@ export async function getAdvertDataForPeriod(fromDate: string): Promise<AdvertPe
     `https://advert-api.wildberries.ru/adv/v3/fullstats?ids=${ids.join(",")}&beginDate=${fromDate}&endDate=${endDate}`,
     FullStatsSchema
   );
-  if (!fs) return null;
+  if (!fs) return cache.advert?.data ?? null;
 
   let spend = 0;
   const spendByNmId: Record<number, number> = {};
@@ -276,7 +284,9 @@ export async function getAdvertDataForPeriod(fromDate: string): Promise<AdvertPe
     .filter(([, s]) => s > 0)
     .map(([id]) => Number(id));
 
-  return { spend, spendByNmId, advertisedNmIds };
+  const result: AdvertPeriodData = { spend, spendByNmId, advertisedNmIds };
+  cache.advert = { data: result, ts: Date.now(), fromDate };
+  return result;
 }
 
 // Thin wrapper for ad-attr route (only needs total spend)
@@ -286,6 +296,8 @@ export async function getAdvertSpendSince(fromDate: string): Promise<number | nu
 }
 
 export async function getRealizData(weeks = 4): Promise<TwaRealizData | null> {
+  if (cache.realiz && Date.now() - cache.realiz.ts < TTL) return cache.realiz.data;
+
   const dateTo   = new Date().toISOString().split("T")[0];
   const dateFrom = new Date(Date.now() - weeks * 7 * 864e5).toISOString().split("T")[0];
 
@@ -293,7 +305,8 @@ export async function getRealizData(weeks = 4): Promise<TwaRealizData | null> {
     `https://statistics-api.wildberries.ru/api/v5/supplier/reportDetailByPeriod?dateFrom=${dateFrom}&dateTo=${dateTo}&rrdid=0`,
     z.array(RealizRowSchema)
   );
-  if (!rows || rows.length === 0) return null;
+  if (!rows) return cache.realiz?.data ?? null;
+  if (rows.length === 0) return null;
 
   let salesCount = 0, returnCount = 0;
   let totalRevenue = 0, totalPayout = 0, totalLogistics = 0, totalStorage = 0, totalPenalties = 0;
@@ -332,7 +345,7 @@ export async function getRealizData(weeks = 4): Promise<TwaRealizData | null> {
     byArt.set(key, a);
   }
 
-  return {
+  const realiz: TwaRealizData = {
     period: { from: dateFrom, to: dateTo },
     salesCount, returnCount, totalRevenue, totalPayout, totalLogistics, totalStorage, totalPenalties,
     byArticle: [...byArt.entries()].map(([article, a]) => ({
@@ -343,4 +356,6 @@ export async function getRealizData(weeks = 4): Promise<TwaRealizData | null> {
       storagePerUnit: a.sales > 0 ? Math.round((a.storage / a.sales) * 10) / 10 : 0,
     })).sort((a, b) => b.payout - a.payout),
   };
+  cache.realiz = { data: realiz, ts: Date.now() };
+  return realiz;
 }
