@@ -55,6 +55,11 @@ const AdvertCountSchema = z.object({
 
 const BudgetSchema = z.object({ total: z.number().optional().default(0) });
 
+const FullStatsNmSchema = z.object({
+  nmId: z.number(),
+  sum:  z.number().optional().default(0),
+});
+
 const FullStatsSchema = z.array(z.object({
   advertId: z.number(),
   views:    z.number().optional().default(0),
@@ -62,6 +67,11 @@ const FullStatsSchema = z.array(z.object({
   ctr:      z.number().optional().default(0),
   sum:      z.number().optional().default(0),
   orders:   z.number().optional().default(0),
+  days: z.array(z.object({
+    apps: z.array(z.object({
+      nms: z.array(FullStatsNmSchema).optional().default([]),
+    })).optional().default([]),
+  })).optional().default([]),
 }));
 
 const RealizRowSchema = z.object({
@@ -197,13 +207,19 @@ export interface TwaRealizData {
   byArticle: { article: string; sales: number; payout: number; commPct: number; logPerUnit: number; retPct: number }[];
 }
 
-// Returns total ad spend (₽) from fromDate (YYYY-MM-DD) to today across all campaigns.
-export async function getAdvertSpendSince(fromDate: string): Promise<number | null> {
+export interface AdvertPeriodData {
+  spend:           number;
+  spendByNmId:     Record<number, number>; // nmId → ₽ spent in period
+  advertisedNmIds: number[];               // nmIds with any spend > 0
+}
+
+// Returns ad spend breakdown from fromDate to today across all campaigns.
+export async function getAdvertDataForPeriod(fromDate: string): Promise<AdvertPeriodData | null> {
   const countData = await fetchWb("https://advert-api.wildberries.ru/adv/v1/promotion/count", AdvertCountSchema);
   if (!countData || countData.adverts.length === 0) return null;
 
   const ids = countData.adverts.flatMap(g => g.advert_list.map(a => a.advertId)).slice(0, 50);
-  if (ids.length === 0) return 0;
+  if (ids.length === 0) return { spend: 0, spendByNmId: {}, advertisedNmIds: [] };
 
   const endDate = new Date().toISOString().split("T")[0];
   await new Promise(r => setTimeout(r, 300));
@@ -212,7 +228,31 @@ export async function getAdvertSpendSince(fromDate: string): Promise<number | nu
     FullStatsSchema
   );
   if (!fs) return null;
-  return fs.reduce((sum, s) => sum + s.sum, 0);
+
+  let spend = 0;
+  const spendByNmId: Record<number, number> = {};
+  for (const campaign of fs) {
+    spend += campaign.sum;
+    for (const day of campaign.days) {
+      for (const app of day.apps) {
+        for (const nm of app.nms) {
+          spendByNmId[nm.nmId] = (spendByNmId[nm.nmId] ?? 0) + nm.sum;
+        }
+      }
+    }
+  }
+
+  const advertisedNmIds = Object.entries(spendByNmId)
+    .filter(([, s]) => s > 0)
+    .map(([id]) => Number(id));
+
+  return { spend, spendByNmId, advertisedNmIds };
+}
+
+// Thin wrapper for ad-attr route (only needs total spend)
+export async function getAdvertSpendSince(fromDate: string): Promise<number | null> {
+  const data = await getAdvertDataForPeriod(fromDate);
+  return data ? data.spend : null;
 }
 
 export async function getRealizData(weeks = 4): Promise<TwaRealizData | null> {

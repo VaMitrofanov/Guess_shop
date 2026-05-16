@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
-import { getAdvertSpendSince, getRealizData } from "@/lib/wb-api";
+import { getAdvertDataForPeriod, getRealizData } from "@/lib/wb-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
     : new Date(Date.now() - 30 * 864e5).toISOString().split("T")[0];
 
   const [advertResult, realizResult, pricesResult] = await Promise.allSettled([
-    getAdvertSpendSince(fromDate),
+    getAdvertDataForPeriod(fromDate),
     getRealizData(4),
     token
       ? fetch("https://discounts-prices-api.wildberries.ru/api/v2/list/goods/filter?limit=100&offset=0", {
@@ -50,7 +50,10 @@ export async function GET(req: NextRequest) {
       : Promise.resolve(null),
   ]);
 
-  const cpo = advertResult.status === "fulfilled" ? (advertResult.value ?? 0) : 0;
+  const advertData = advertResult.status === "fulfilled" ? advertResult.value : null;
+  const cpo              = advertData?.spend ?? 0;
+  const advertisedNmIds  = advertData?.advertisedNmIds ?? [];
+  const spendByNmId      = advertData?.spendByNmId ?? {};
   const lastAdAttributedAt = settings?.lastAdAttributedAt ?? null;
   const realiz = realizResult.status === "fulfilled" ? realizResult.value : null;
   const storagePerUnit = realiz && realiz.salesCount > 0 && realiz.totalStorage > 0
@@ -92,6 +95,8 @@ export async function GET(req: NextRequest) {
     kursUsd,
     fixedCost,
     cpo,
+    advertisedNmIds,
+    spendByNmId,
     storagePerUnit,
     products,
     costByArticle: Object.fromEntries(costByArticle),

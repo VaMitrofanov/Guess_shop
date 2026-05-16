@@ -6,6 +6,8 @@ interface UeData {
   kursUsd:           number;
   fixedCost:         number;
   cpo:               number;
+  advertisedNmIds:   number[];
+  spendByNmId:       Record<number, number>;
   storagePerUnit:    number;
   products:          { nmID: number; article: string; price: number; discountedPrice: number; discount: number }[];
   costByArticle:     Record<string, { commission: number; taxRate: number; denomination: number | null }>;
@@ -30,13 +32,15 @@ export default function CalcScreen({ token }: { token: string }) {
   const [loading,     setLoading]     = useState(true);
   const [attributing, setAttributing] = useState(false);
   const [attributed,  setAttributed]  = useState<{ amount: number; at: string } | null>(null);
-  const [withAds,     setWithAds]     = useState(true);
+  // null = auto (follow WB data), true/false = manual override
+  const [withAdsOverride, setWithAdsOverride] = useState<boolean | null>(null);
 
   // The one thing the user inputs: purchase rate
   // kursMode: "rate" = kursRb directly | "rub" = total ₽ for denom | "usd" = total $ for denom
   const [kursMode, setKursMode] = useState<"rate" | "rub" | "usd">(() => ls(LS_KURS_MODE, "rate") as any);
   const [kursVal,  setKursVal]  = useState(() => ls(LS_KURS_RB, ""));
   const [denom,    setDenom]    = useState(500);
+  const setDenomAndReset = (d: number) => { setDenom(d); setWithAdsOverride(null); };
 
   useEffect(() => {
     fetch("/api/twa/ue", { headers: { Authorization: `Bearer ${token}` } })
@@ -84,9 +88,17 @@ export default function CalcScreen({ token }: { token: string }) {
   const commission = costEntry?.commission ?? 0.245;
   const taxRate    = costEntry?.taxRate    ?? 0.07;
   const fixedCost  = ud?.fixedCost ?? 87.5;
-  const rawCpo     = ud?.cpo ?? 0;
-  const cpo        = withAds ? rawCpo : 0;
-  const storage    = ud?.storagePerUnit ?? 0;
+  const rawCpo = ud?.cpo ?? 0;
+
+  // Auto: product is advertised if its nmID has spend > 0 in this period
+  const isAdvertisedAuto = product
+    ? (ud?.advertisedNmIds ?? []).includes(product.nmID)
+    : rawCpo > 0; // if no product found, assume yes when there's any spend
+
+  // Manual override wins; otherwise use auto detection
+  const withAds = withAdsOverride !== null ? withAdsOverride : isAdvertisedAuto;
+  const cpo     = withAds ? rawCpo : 0;
+  const storage = ud?.storagePerUnit ?? 0;
 
   // Profit chain
   const afterComm = sellPrice * (1 - commission);
@@ -155,7 +167,7 @@ export default function CalcScreen({ token }: { token: string }) {
             const prod  = ud?.products.find(p => p.article === String(d));
             const active = denom === d;
             return (
-              <button key={d} onClick={() => setDenom(d)} style={{
+              <button key={d} onClick={() => setDenomAndReset(d)} style={{
                 padding: "7px 12px", borderRadius: 8, border: "none", cursor: "pointer",
                 background: active ? "#bf5af2" : "#2c2c2e",
                 color: active ? "#fff" : prod ? "#e5e5ea" : "#48484a",
@@ -233,7 +245,7 @@ export default function CalcScreen({ token }: { token: string }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "#8e8e93", textTransform: "uppercase", letterSpacing: 0.5 }}>Юнит-экономика</div>
           {rawCpo > 0 && (
-            <button onClick={() => setWithAds(v => !v)} style={{
+            <button onClick={() => setWithAdsOverride(withAds ? false : true)} style={{
               display: "flex", alignItems: "center", gap: 5, background: "none", border: "none",
               cursor: "pointer", padding: "2px 0",
             }}>
@@ -248,6 +260,7 @@ export default function CalcScreen({ token }: { token: string }) {
               </div>
               <span style={{ fontSize: 11, color: withAds ? "#bf5af2" : "#636366" }}>
                 {withAds ? `реклама ${Math.round(rawCpo)}₽` : "без рекламы"}
+                {withAdsOverride === null && <span style={{ color: "#48484a" }}> авто</span>}
               </span>
             </button>
           )}
