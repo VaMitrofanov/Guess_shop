@@ -30,7 +30,7 @@ export async function buildAdminKeyboard() {
   return Markup.keyboard([
     [`📦 Заказы (${pendingCount})`, "📈 Статистика"],
     [`🟣 Wildberries ${stockIndicator}`, "🛠 Состояние"],
-    ["💱 Курс", { text: "📊 Дашборд", web_app: { url: `${process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru"}/twa` } }],
+    ["💱 Курс", "📊 Дашборд"],
   ]).resize();
 }
 

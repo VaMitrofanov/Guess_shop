@@ -81,6 +81,16 @@ export function registerAdminHubs(bot: Telegraf): void {
   bot.hears(/^🟣 Wildberries/, (ctx) => handleAdminMenu(ctx, showWildberriesHub));
   bot.hears("🛠 Состояние", (ctx) => handleAdminMenu(ctx, showSystemHub));
   bot.hears("💱 Курс", (ctx) => handleAdminMenu(ctx, showRatesHub));
+  bot.hears("📊 Дашборд", async (ctx) => {
+    if (!ADMIN_IDS.includes(String(ctx.from?.id))) return;
+    if (ctx.message?.message_id) {
+      try { await ctx.deleteMessage(ctx.message.message_id); } catch { /* ignore */ }
+    }
+    const url = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru"}/twa`;
+    await ctx.reply("WB Dashboard", Markup.inlineKeyboard([
+      [Markup.button.webApp("📊 Открыть дашборд", url)],
+    ]));
+  });
 
   // ── Text input interceptors for admin modes ──────────────────────────────
   // These run BEFORE the main text handler in handlers.ts.
