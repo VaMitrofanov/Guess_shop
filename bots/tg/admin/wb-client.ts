@@ -253,15 +253,19 @@ export interface WbAdvertSummary {
   totalSpend:   number;
   totalOrders:  number;
   avgCpo:       number;
+  totalBudget:  number;
   campaigns:    {
     id: number;
     name: string;
+    status: number;
     spend: number;
     orders: number;
     cpo: number;
     views: number;
     clicks: number;
     ctr: number;
+    budget: number;
+    dailyBudget: number;
   }[];
 }
 
@@ -473,14 +477,17 @@ export async function getCampaignsStatus(): Promise<string | null> {
   try {
     const res = await fetchWb(`https://advert-api.wildberries.ru/adv/v1/promotion/count`, z.any());
     if (!res) return null;
-    
+
     let result = "Подключено ✅";
     if (res.adverts && Array.isArray(res.adverts)) {
-        const active = res.adverts.filter((a: any) => a.status === 9 || a.status === 11).length;
-        result = `Активно: ${active} / Всего: ${res.adverts.length}`;
+      // status 7 = активна, 9 = на паузе (advertiser), 11 = на паузе (budget)
+      const active = res.adverts.filter((a: any) => a.status === 7 || a.status === 9 || a.status === 11);
+      const totalActive = active.reduce((s: number, a: any) => s + (a.count ?? 0), 0);
+      const totalAll    = res.adverts.reduce((s: number, a: any) => s + (a.count ?? 0), 0);
+      result = totalActive > 0 ? `Активно/пауза: ${totalActive} / Всего: ${totalAll}` : `Всего кампаний: ${totalAll}`;
     }
-    
-    setToCache(cacheKey, result, 10 * 60 * 1000); // 10 min cache
+
+    setToCache(cacheKey, result, 10 * 60 * 1000);
     return result;
   } catch {
     return "Ошибка загрузки ❌";
@@ -904,22 +911,20 @@ export async function getAdvertStats(): Promise<WbAdvertSummary | null> {
 
   if (!wbCodeEnv) return null;
 
-  // 1. Get active campaign list — try v2 first, fall back to v1
+  // 1. Get campaign list via v1 only — v2 is a POST endpoint, not GET.
+  // WB status codes: 7 = активна, 9 = пауза (advertiser), 11 = пауза (budget).
   let campaigns: z.infer<typeof AdvertCampaignSchema>[] = [];
-  for (const status of [9, 11]) {
+  for (const status of [7, 9, 11]) {
     const res = await fetchWb(
-      `https://advert-api.wildberries.ru/adv/v2/promotion/adverts?status=${status}&limit=50&offset=0`,
-      z.array(AdvertCampaignSchema)
-    ) ?? await fetchWb(
       `https://advert-api.wildberries.ru/adv/v1/promotion/adverts?status=${status}&limit=50&offset=0`,
       z.array(AdvertCampaignSchema)
     );
     if (res && res.length > 0) campaigns.push(...res);
   }
 
-  // Cache null on failure so we don't spam 404s on every open
+  // Short cache on empty — might be a transient API outage, retry in 5 min
   if (campaigns.length === 0) {
-    setToCache(cacheKey, null as any, 30 * 60 * 1000);
+    setToCache(cacheKey, null as any, 5 * 60 * 1000);
     return null;
   }
 
@@ -937,7 +942,7 @@ export async function getAdvertStats(): Promise<WbAdvertSummary | null> {
     { method: "POST", body: JSON.stringify(body) }
   );
 
-  let totalSpend = 0, totalOrders = 0, totalViews = 0, totalClicks = 0;
+  let totalSpend = 0, totalOrders = 0, totalViews = 0, totalClicks = 0, totalBudget = 0;
   const campaignStats: WbAdvertSummary["campaigns"] = [];
 
   for (const camp of campaigns) {
@@ -957,15 +962,19 @@ export async function getAdvertStats(): Promise<WbAdvertSummary | null> {
     totalOrders += orders;
     totalViews  += views;
     totalClicks += clicks;
+    totalBudget += camp.budget ?? 0;
     campaignStats.push({
-      id: camp.advertId,
-      name: camp.name || String(camp.advertId),
+      id:          camp.advertId,
+      name:        camp.name || String(camp.advertId),
+      status:      camp.status ?? 0,
       spend,
       orders,
-      cpo:    orders > 0 ? Math.round(spend / orders) : 0,
+      cpo:         orders > 0 ? Math.round(spend / orders) : 0,
       views,
       clicks,
-      ctr:    views > 0 ? Math.round((clicks / views) * 1000) / 10 : 0,
+      ctr:         views > 0 ? Math.round((clicks / views) * 1000) / 10 : 0,
+      budget:      camp.budget ?? 0,
+      dailyBudget: camp.dailyBudget ?? 0,
     });
   }
 
@@ -974,6 +983,7 @@ export async function getAdvertStats(): Promise<WbAdvertSummary | null> {
     totalSpend,
     totalOrders,
     avgCpo:       totalOrders > 0 ? Math.round(totalSpend / totalOrders) : 0,
+    totalBudget,
     campaigns:    campaignStats.sort((a, b) => b.spend - a.spend),
   };
 

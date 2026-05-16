@@ -464,7 +464,10 @@ export async function showRealizationPeriod(ctx: Context, period: string): Promi
   await ctx.answerCbQuery("Загружаю отчёт…");
 
   const weeks = period === "2w" ? 2 : 4;
-  const data  = await getRealizationReport(weeks);
+  const [data, advertData] = await Promise.all([
+    getRealizationReport(weeks),
+    getAdvertStats(),
+  ]);
 
   const backKbd = Markup.inlineKeyboard([
     [Markup.button.callback("◀️ Назад", CB.wbRealization)],
@@ -503,6 +506,8 @@ export async function showRealizationPeriod(ctx: Context, period: string): Promi
     lines.push(`${pad("Хранение:",  16)} −${rub(Math.round(data.totalStorage))}`);
   if (data.totalPenalties > 0)
     lines.push(`${pad("Штрафы:",    16)} −${rub(Math.round(data.totalPenalties))}`);
+  if (advertData && advertData.totalSpend > 0)
+    lines.push(`${pad("Реклама:",   16)} −${rub(Math.round(advertData.totalSpend))}  (7д)`);
   lines.push(`──────────────────────────`);
   lines.push(`${pad("Возвраты:",    16)} ${data.returnCount} шт  (${retPct}%)`);
   lines.push(`</code>`);
@@ -553,15 +558,20 @@ export async function showAdvertHub(ctx: Context): Promise<void> {
     return;
   }
 
+  const statusLabel = (s: number) =>
+    s === 7 ? "▶ активна" : s === 9 ? "⏸ пауза" : s === 11 ? "💸 пауза(бюджет)" : `#${s}`;
+
   let lines: string[] = [];
   lines.push(`📣 <b>РЕКЛАМА — последние 7 дней</b>`);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
   lines.push(``);
   lines.push(`<code>`);
-  lines.push(`${pad("Активных кампаний:", 22)} ${data.totalActive}`);
-  lines.push(`${pad("Расход:",            22)} ${rub(Math.round(data.totalSpend))}`);
+  lines.push(`${pad("Кампаний:",          22)} ${data.totalActive}`);
+  lines.push(`${pad("Расход (7д):",       22)} ${rub(Math.round(data.totalSpend))}`);
   lines.push(`${pad("Заказов с рекламы:", 22)} ${data.totalOrders} шт`);
   lines.push(`${pad("Средний CPO:",       22)} ${data.avgCpo > 0 ? rub(data.avgCpo) : "—"}`);
+  if (data.totalBudget > 0)
+    lines.push(`${pad("Остаток бюджета:",   22)} ${rub(Math.round(data.totalBudget))}`);
   lines.push(`</code>`);
   lines.push(``);
 
@@ -569,16 +579,17 @@ export async function showAdvertHub(ctx: Context): Promise<void> {
     lines.push(`<b>Кампании:</b>`);
     lines.push(`<code>`);
     for (const c of data.campaigns.slice(0, 10)) {
-      const cpoStr  = c.orders > 0 ? `CPO ${rub(c.cpo)}` : "нет заказов";
-      const ctrStr  = c.ctr > 0 ? ` CTR ${c.ctr}%` : "";
-      lines.push(`▸ ${c.name.slice(0, 20)}`);
-      lines.push(`  ${rub(Math.round(c.spend))}  ${c.orders}шт  ${cpoStr}${ctrStr}`);
+      const cpoStr = c.orders > 0 ? `CPO ${rub(c.cpo)}` : "нет заказов";
+      const ctrStr = c.ctr  > 0 ? ` CTR ${c.ctr}%` : "";
+      const budStr = c.budget > 0 ? `  бюджет: ${rub(Math.round(c.budget))}` : "";
+      lines.push(`▸ ${c.name.slice(0, 22)}  [${statusLabel(c.status)}]`);
+      lines.push(`  расход: ${rub(Math.round(c.spend))}  ${c.orders}шт  ${cpoStr}${ctrStr}${budStr}`);
     }
     lines.push(`</code>`);
 
     if (data.avgCpo > 0) {
       lines.push(``);
-      lines.push(`<i>💡 Средний CPO ${rub(data.avgCpo)} — используй как «реклама на единицу» в юнит-экономике.</i>`);
+      lines.push(`<i>💡 CPO ${rub(data.avgCpo)} подставляется в юнит-экономику как затраты на рекламу/ед (если не указаны вручную).</i>`);
     }
   }
 
@@ -591,10 +602,11 @@ const LOGISTICS_STALE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 export async function showUnitEconHub(ctx: Context): Promise<void> {
   await ctx.answerCbQuery();
-  const [products, settings, realizData] = await Promise.all([
+  const [products, settings, realizData, advertData] = await Promise.all([
     getProducts(),
     getWbSettings(),
     getRealizationReport(4),
+    getAdvertStats(),
   ]);
 
   let lines: string[] = [];
@@ -660,12 +672,29 @@ export async function showUnitEconHub(ctx: Context): Promise<void> {
       const afterComm    = price * (1 - commission);
       const afterTax     = afterComm * (1 - tax);
       const profitBefore = afterTax - fixedCost - robuxCost;
-      const adCost       = cost.adCostPerUnit ?? 0;
-      const profitAfter  = profitBefore - adCost;
+
+      // Ad cost: manual setting wins, otherwise fall back to global CPO from live campaigns
+      const manualAdCost = cost.adCostPerUnit ?? 0;
+      const autoCpo      = (advertData && advertData.avgCpo > 0) ? advertData.avgCpo : 0;
+      const adCost       = manualAdCost > 0 ? manualAdCost : autoCpo;
+      const adCostSource = manualAdCost > 0 ? "ручн." : (autoCpo > 0 ? "CPO" : null);
+
+      // Storage per unit: from realization data (total storage / sales count)
+      const storagePerUnit = (realizData && realizData.salesCount > 0 && realizData.totalStorage > 0)
+        ? realizData.totalStorage / realizData.salesCount : 0;
+
+      const profitAfter  = profitBefore - adCost - storagePerUnit;
       const marginPct    = afterTax - fixedCost > 0
         ? Math.round((profitBefore / (afterTax - fixedCost)) * 100) : 0;
       const profitUsd    = settings.kursUsd > 0
         ? Math.round((profitAfter / settings.kursUsd) * 100) / 100 : 0;
+
+      const adLine = adCost > 0
+        ? `  −Реклама/ед (${adCostSource}): ${pad(rub(Math.round(adCost)), 8)}\n`
+        : `  −Реклама/ед:        не указана\n`;
+      const storeLine = storagePerUnit > 0
+        ? `  −Хранение/ед:       ${pad(rub(Math.round(storagePerUnit)), 10)}\n`
+        : "";
 
       lines.push(
         `<code>` +
@@ -675,7 +704,8 @@ export async function showUnitEconHub(ctx: Context): Promise<void> {
         `  −Фикс. затраты:     ${pad(rub(fixedCost), 10)}\n` +
         `  −Себест. Robux:     ${pad(rub(Math.round(robuxCost)), 10)}` +
         `  (${settings.kursRb}×${settings.kursUsd}×${cost.denomination}/700)\n` +
-        (adCost > 0 ? `  −Реклама/ед:        ${pad(rub(Math.round(adCost)), 10)}\n` : `  −Реклама/ед:        не указана\n`) +
+        adLine +
+        storeLine +
         `  ${"─".repeat(34)}\n` +
         `  Чистая прибыль:     ${pad(rub(Math.round(profitAfter)), 10)}  (${marginPct}%)\n` +
         `  В долларах:         $${profitUsd}` +
@@ -692,15 +722,18 @@ export async function showUnitEconHub(ctx: Context): Promise<void> {
           : 0;
         const realLog       = Math.round(realArt.avgLogisticsPerUnit);
         const retPct        = Math.round(realArt.returnRate * 100);
+        const realStoragePerUnit = realArt.salesCount > 0 && realizData?.totalStorage
+          ? realizData.totalStorage / realizData.salesCount : 0;
         const realAfterComm = price * (1 - realCommPct / 100);
         const realAfterTax  = realAfterComm * (1 - tax);
-        const realProfit    = realAfterTax - fixedCost - robuxCost - realLog - adCost;
+        const realProfit    = realAfterTax - fixedCost - robuxCost - realLog - adCost - realStoragePerUnit;
         const realProfitUsd = settings.kursUsd > 0
           ? Math.round((realProfit / settings.kursUsd) * 100) / 100 : 0;
         lines.push(
           `<code>` +
           `  📊 По реализации (факт, ${realArt.salesCount} шт):\n` +
           `  Факт. комса: ${realCommPct}%  Лог: ${realLog}₽  Возвр: ${retPct}%\n` +
+          (realStoragePerUnit > 0 ? `  Хранение/ед: ${rub(Math.round(realStoragePerUnit))}\n` : "") +
           `  Уточн. прибыль: ${rub(Math.round(realProfit))}  ($${realProfitUsd})` +
           `</code>`
         );
