@@ -1,38 +1,51 @@
 import { NextRequest, NextResponse } from "next/server";
-import { extractTwaUser } from "@/lib/twa-auth";
+import { getStats30d } from "@/lib/wb-api";
 
 function getWbToken() {
   return (process.env.WB_API_TOKEN ?? "").trim().replace(/^["'`]|["'`]$/g, "").trim();
 }
 
 export async function GET(req: NextRequest) {
-  if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Protected by ADMIN_SECRET, not TWA auth — lets us diagnose from curl
+  const secret = req.nextUrl.searchParams.get("secret");
+  if (secret !== process.env.ADMIN_SECRET) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const raw   = process.env.WB_API_TOKEN ?? "";
   const clean = getWbToken();
 
-  // Test one statistics API call
-  let apiStatus = "not_tested";
-  let httpCode: number | null = null;
+  // Test raw HTTP first
+  let httpStatus: number | null = null;
+  let httpError: string | null  = null;
   try {
     const dateFrom = new Date(Date.now() - 7 * 864e5).toISOString().split(".")[0] + "Z";
     const res = await fetch(
       `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${encodeURIComponent(dateFrom)}&flag=0`,
       { cache: "no-store", headers: { Authorization: clean } }
     );
-    httpCode   = res.status;
-    apiStatus  = res.ok ? "ok" : `http_${res.status}`;
+    httpStatus = res.status;
   } catch (e: any) {
-    apiStatus = `error: ${e?.message ?? "unknown"}`;
+    httpError = e?.message ?? "unknown";
+  }
+
+  // Test full getStats30d (includes Zod parsing)
+  let statsResult: "ok" | "null" | string = "not_run";
+  try {
+    const stats = await getStats30d();
+    statsResult = stats ? `ok (orders=${stats.orders.length} sales=${stats.sales.length})` : "null";
+  } catch (e: any) {
+    statsResult = `throw: ${e?.message ?? "unknown"}`;
   }
 
   return NextResponse.json({
     rawTokenLength:   raw.length,
     cleanTokenLength: clean.length,
-    tokenFirstChars:  clean.slice(0, 10) || "(empty)",
+    tokenFirstChars:  clean.slice(0, 12) || "(empty)",
     tokensMatch:      raw === clean,
-    apiStatus,
-    httpCode,
+    httpStatus,
+    httpError,
+    statsResult,
     nodeEnv: process.env.NODE_ENV,
   });
 }
