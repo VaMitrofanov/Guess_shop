@@ -14,6 +14,7 @@ declare global {
         ready: () => void;
         expand: () => void;
         initData: string;
+        initDataUnsafe: { user?: { id: number; first_name?: string; username?: string } };
         colorScheme: "dark" | "light";
         themeParams: Record<string, string>;
         close: () => void;
