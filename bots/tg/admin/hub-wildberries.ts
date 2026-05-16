@@ -243,8 +243,9 @@ async function buildWbText(): Promise<{
   const fbsCount       = fbs?.length ?? 0;
   const reviewCount    = reviews.length;
 
-  const totalStock   = (stocks ?? []).reduce((a, s) => a + s.quantity, 0);
-  const inTransit    = fbs?.filter((o: any) => o.wbStatus === "sorted_for_client" || o.wbStatus === "sold_not_uploaded").length ?? 0;
+  const totalStock     = (stocks ?? []).reduce((a, s) => a + s.quantity, 0);
+  const totalInTransit = (stocks ?? []).reduce((a, s) => a + (s.inWayToClient ?? 0), 0);
+  const totalReturning = (stocks ?? []).reduce((a, s) => a + (s.inWayFromClient ?? 0), 0);
   const lowStock     = (stocks ?? []).filter(s => s.runwayDays < 7 && s.runwayDays > 0);
   const lowStockArticles = lowStock.map(s => s.article);
 
@@ -315,7 +316,11 @@ async function buildWbText(): Promise<{
     // Stocks summary
     lines.push(`📦 <b>Склады</b>`);
     if (stocks && stocks.length > 0) {
-      lines.push(`<code>FBO: ${totalStock} шт  │  🚚 FBS в работе: ${fbsCount}</code>`);
+      let stockLine = `FBO: ${totalStock} шт`;
+      if (totalInTransit > 0) stockLine += `  │  ✈️ клиент: ${totalInTransit}`;
+      if (totalReturning > 0) stockLine += `  │  🔄 возврат: ${totalReturning}`;
+      stockLine += `  │  🚚 FBS: ${fbsCount}`;
+      lines.push(`<code>${stockLine}</code>`);
       if (lowStock.length > 0) {
         lines.push(`⚠️ Заканчивается: ${lowStock.length} арт. (<7 дней)`);
         lowStock.slice(0, 2).forEach(s =>
@@ -378,17 +383,18 @@ export async function showStocksHub(ctx: Context): Promise<void> {
   } else {
     // Bloomberg-style pipe table — all groups in one block for fast scanning
     lines.push(`<code>`);
-    lines.push(`Артикул       | В наличии | Резерв |  Ср/д | Дней`);
-    lines.push(`──────────────|───────────|────────|───────|──────`);
+    lines.push(`Артикул       |Склад| →Кл| ←Кл| Ср/д |Дней`);
+    lines.push(`──────────────|-----|----|----|------|─────`);
     for (const s of stocks) {
-      const icon        = runwayIcon(s.runwayDays);
-      const runway      = s.runwayDays > 998 ? "  ∞" : pad(String(s.runwayDays), 3);
-      const alert       = s.runwayDays < 7 ? " ⚠️" : "";
-      const art         = pad(s.article.slice(0, 12), 12);
-      const qty         = pad(String(s.quantity), 9);
-      const reservedQty = pad(String(s.quantityFull - s.quantity), 6);
-      const avg         = pad(String(s.avgDailySales), 5);
-      lines.push(`${art} | ${qty} | ${reservedQty} | ${avg} | ${runway} ${icon}${alert}`);
+      const icon       = runwayIcon(s.runwayDays);
+      const runway     = s.runwayDays > 998 ? " ∞" : pad(String(s.runwayDays), 3);
+      const alert      = s.runwayDays < 7 ? " ⚠️" : "";
+      const art        = pad(s.article.slice(0, 12), 12);
+      const qty        = pad(String(s.quantity), 5);
+      const toClient   = pad(String(s.inWayToClient ?? 0), 4);
+      const fromClient = pad(String(s.inWayFromClient ?? 0), 4);
+      const avg        = pad(String(s.avgDailySales), 5);
+      lines.push(`${art} |${qty}|${toClient}|${fromClient}| ${avg} |${runway} ${icon}${alert}`);
     }
     lines.push(`</code>`);
     lines.push("");
@@ -563,26 +569,41 @@ export async function showAdvertHub(ctx: Context): Promise<void> {
 
   const activeCount = data.campaigns.filter(c => c.status === 11).length;
   const pausedCount = data.campaigns.filter(c => c.status === 9).length;
+  const hasStats    = data.totalSpend > 0 || data.totalViews > 0;
 
   let lines: string[] = [];
   lines.push(`📣 <b>РЕКЛАМА</b>`);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
   lines.push(``);
   lines.push(`<code>`);
-  lines.push(`${pad("Активных:",        18)} ${activeCount}`);
-  lines.push(`${pad("На паузе:",        18)} ${pausedCount}`);
+  lines.push(`${pad("Активных:",         18)} ${activeCount}`);
+  lines.push(`${pad("На паузе:",         18)} ${pausedCount}`);
   lines.push(`${pad("Бюджет (остаток):", 18)} ${rub(Math.round(data.totalBudget))}`);
-  lines.push(`</code>`);
-  lines.push(``);
-  lines.push(`<b>Кампании:</b>`);
-  lines.push(`<code>`);
-  for (const c of data.campaigns) {
-    const balStr = c.budgetBalance > 0 ? `  остаток: ${rub(Math.round(c.budgetBalance))}` : "  бюджет 0";
-    lines.push(`▸ ID ${c.id}  [${statusLabel(c.status)}]${balStr}`);
+  if (hasStats) {
+    lines.push(`──────────────────────────`);
+    lines.push(`${pad("Расходы (7д):",    18)} ${rub(Math.round(data.totalSpend))}`);
+    lines.push(`${pad("Показы (7д):",     18)} ${data.totalViews.toLocaleString("ru-RU")}`);
+    lines.push(`${pad("Клики (7д):",      18)} ${data.totalClicks.toLocaleString("ru-RU")}`);
+    lines.push(`${pad("CTR:",             18)} ${data.avgCtr}%`);
+    lines.push(`${pad("CPC:",             18)} ${rub(data.avgCpc)}/клик`);
+    if (data.totalOrders > 0)
+      lines.push(`${pad("CPO:",           18)} ${rub(data.avgCpo)}/заказ  (${data.totalOrders} шт)`);
   }
   lines.push(`</code>`);
   lines.push(``);
-  lines.push(`<i>⚠️ WB отключил API статистики расходов. Расходы/CPO недоступны через API.\nЗатраты на рекламу вводи вручную в юнит-экономике.</i>`);
+  lines.push(`<b>Кампании (7д):</b>`);
+  lines.push(`<code>`);
+  for (const c of data.campaigns) {
+    const balStr   = c.budgetBalance > 0 ? `ост: ${rub(Math.round(c.budgetBalance))}` : "бюджет 0";
+    const spendStr = c.spend7d > 0 ? `  потр: ${rub(Math.round(c.spend7d))}` : "";
+    const ordStr   = c.orders7d > 0 ? `  зак: ${c.orders7d}` : "";
+    const viewStr  = c.views7d > 0 ? `  пок: ${c.views7d}` : "";
+    lines.push(`▸ ID ${c.id}  [${statusLabel(c.status)}]  ${balStr}${spendStr}${ordStr}${viewStr}`);
+  }
+  lines.push(`</code>`);
+  if (!hasStats) {
+    lines.push(`\n<i>ℹ️ Расходы за 7д не получены — кампании могут быть новыми или WB вернул нули.\nЗатраты можно ввести вручную в 🧩 Юнит-экономике.</i>`);
+  }
 
   await editWidget(ctx, lines.join("\n"), backKbd);
 }
@@ -593,10 +614,11 @@ const LOGISTICS_STALE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 export async function showUnitEconHub(ctx: Context): Promise<void> {
   await ctx.answerCbQuery();
-  const [products, settings, realizData] = await Promise.all([
+  const [products, settings, realizData, advertData] = await Promise.all([
     getProducts(),
     getWbSettings(),
     getRealizationReport(4),
+    getAdvertStats(),
   ]);
 
   let lines: string[] = [];
@@ -663,9 +685,11 @@ export async function showUnitEconHub(ctx: Context): Promise<void> {
       const afterTax     = afterComm * (1 - tax);
       const profitBefore = afterTax - fixedCost - robuxCost;
 
-      // Ad cost: manual only (WB spend API unavailable — set via 📣 Реклама button)
-      const adCost       = cost.adCostPerUnit ?? 0;
-      const adCostSource = adCost > 0 ? "ручн." : null;
+      // Ad cost: manual override wins; fallback to WB API global CPO (avg across all campaigns)
+      const manualAdCost = cost.adCostPerUnit ?? 0;
+      const apiCpo       = advertData?.avgCpo ?? 0;
+      const adCost       = manualAdCost > 0 ? manualAdCost : apiCpo;
+      const adCostSource = manualAdCost > 0 ? "вручную" : apiCpo > 0 ? "WB CPO" : null;
 
       // Storage per unit: from realization data (total storage / sales count)
       const storagePerUnit = (realizData && realizData.salesCount > 0 && realizData.totalStorage > 0)
@@ -678,7 +702,7 @@ export async function showUnitEconHub(ctx: Context): Promise<void> {
         ? Math.round((profitAfter / settings.kursUsd) * 100) / 100 : 0;
 
       const adLine = adCost > 0
-        ? `  −Реклама/ед:        ${pad(rub(Math.round(adCost)), 10)}\n`
+        ? `  −Реклама/ед:        ${pad(rub(Math.round(adCost)), 10)}  (${adCostSource})\n`
         : `  −Реклама/ед:        не указана\n`;
       const storeLine = storagePerUnit > 0
         ? `  −Хранение/ед:       ${pad(rub(Math.round(storagePerUnit)), 10)}\n`
@@ -1126,8 +1150,9 @@ export async function showWbProducts(ctx: Context): Promise<void> {
     lines.push(`У вас пока нет активных карточек.`);
   } else {
     for (const p of products) {
+      const discStr  = p.discount ? ` −${p.discount}%` : "";
       const priceStr = p.price
-        ? `💰 <b>${p.discountedPrice} ₽</b>` + (p.price !== p.discountedPrice ? ` (<s>${p.price}</s>)` : "")
+        ? `💰 <b>${p.discountedPrice} ₽</b>${discStr}` + (p.price !== p.discountedPrice ? ` (<s>${p.price}</s>)` : "")
         : `💰 <i>не указана</i>`;
       lines.push(`🔸 <b>${p.title || p.vendorCode}</b>\n   <code>${p.vendorCode}</code>  ${priceStr}`);
       lines.push("");

@@ -27,12 +27,14 @@ const SaleSchema = z.object({
 });
 
 const StockSchema = z.object({
-  lastChangeDate: z.string(),
+  lastChangeDate:  z.string(),
   supplierArticle: z.string(),
-  barcode: z.string(),
-  quantity: z.number(),
-  quantityFull: z.number(),
-  Price: z.number(),
+  barcode:         z.string(),
+  quantity:        z.number(),
+  quantityFull:    z.number(),
+  inWayToClient:   z.number().optional().default(0),
+  inWayFromClient: z.number().optional().default(0),
+  Price:    z.number(),
   Discount: z.number(),
 });
 
@@ -91,8 +93,9 @@ const PriceSchema = z.object({
       nmID: z.number(),
       vendorCode: z.string(),
       sizes: z.array(z.object({
-        price: z.number(),
+        price:           z.number(),
         discountedPrice: z.number(),
+        discount:        z.number().optional().default(0),
       })),
     })).optional().default([]),
   }),
@@ -133,22 +136,19 @@ const AdvertCampaignSchema = z.object({
   createTime: z.string().optional().default(""),
 });
 
-// Advert fullstats response
+// Advert fullstats v3 response — GET /adv/v3/fullstats (replaced POST v2 on 2025-09-30)
+// Parameters: ids (comma-separated), beginDate, endDate (YYYY-MM-DD)
 const AdvertFullStatsSchema = z.array(z.object({
-  advertId: z.number(),
-  days: z.array(z.object({
-    date: z.string(),
-    apps: z.array(z.object({
-      views:     z.number().optional().default(0),
-      clicks:    z.number().optional().default(0),
-      ctr:       z.number().optional().default(0),
-      cpc:       z.number().optional().default(0),
-      sum:       z.number().optional().default(0),
-      orders:    z.number().optional().default(0),
-      cr:        z.number().optional().default(0),
-      sum_price: z.number().optional().default(0),
-    })).optional().default([]),
-  })).optional().default([]),
+  advertId:  z.number(),
+  views:     z.number().optional().default(0),
+  clicks:    z.number().optional().default(0),
+  ctr:       z.number().optional().default(0),
+  cpc:       z.number().optional().default(0),
+  sum:       z.number().optional().default(0),    // total spend ₽
+  orders:    z.number().optional().default(0),
+  cr:        z.number().optional().default(0),
+  sum_price: z.number().optional().default(0),    // revenue from ad orders
+  canceled:  z.number().optional().default(0),
 }));
 
 // ── Cache mechanism ─────────────────────────────────────────────────────────
@@ -187,6 +187,8 @@ export interface WbStock {
   article: string;
   quantity: number;
   quantityFull: number;
+  inWayToClient: number;
+  inWayFromClient: number;
   price: number;
 }
 
@@ -196,6 +198,7 @@ export interface WbProduct {
   title: string;
   price?: number;
   discountedPrice?: number;
+  discount?: number;
 }
 
 export interface WbReview {
@@ -261,14 +264,21 @@ export interface WbAdvertSummary {
   totalActive:   number;
   totalPaused:   number;
   totalBudget:   number;
-  // spend stats unavailable — WB removed fullstats API
-  totalSpend:    number;
+  totalSpend:    number;   // 7-day spend from /adv/v3/fullstats
+  totalViews:    number;
+  totalClicks:   number;
   totalOrders:   number;
-  avgCpo:        number;
-  campaigns:     {
-    id: number;
-    status: number;
+  avgCpo:        number;   // spend / orders
+  avgCtr:        number;   // clicks / views * 100
+  avgCpc:        number;   // spend / clicks
+  campaigns: {
+    id:            number;
+    status:        number;
     budgetBalance: number;
+    spend7d:       number;
+    views7d:       number;
+    clicks7d:      number;
+    orders7d:      number;
   }[];
 }
 
@@ -445,12 +455,14 @@ export async function getStocks(): Promise<WbStock[] | null> {
   if (!stocks) return null;
 
   const res: WbStock[] = [];
-  const grouped = new Map<string, { q: number, qf: number, p: number }>();
+  const grouped = new Map<string, { q: number, qf: number, p: number, toClient: number, fromClient: number }>();
 
   for (const s of stocks) {
-    const existing = grouped.get(s.supplierArticle) || { q: 0, qf: 0, p: s.Price };
+    const existing = grouped.get(s.supplierArticle) || { q: 0, qf: 0, p: s.Price, toClient: 0, fromClient: 0 };
     existing.q += s.quantity;
     existing.qf += s.quantityFull;
+    existing.toClient   += s.inWayToClient;
+    existing.fromClient += s.inWayFromClient;
     grouped.set(s.supplierArticle, existing);
   }
 
@@ -459,6 +471,8 @@ export async function getStocks(): Promise<WbStock[] | null> {
       article,
       quantity: data.q,
       quantityFull: data.qf,
+      inWayToClient:   data.toClient,
+      inWayFromClient: data.fromClient,
       price: data.p,
     });
   }
@@ -519,13 +533,14 @@ export async function getProducts(): Promise<WbProduct[] | null> {
   // 2. Get prices from Price API
   const pricesRaw = await fetchWb("https://discounts-prices-api.wildberries.ru/api/v2/list/goods/filter?limit=100&offset=0", PriceSchema);
   
-  const priceMap = new Map<number, { p: number, dp: number }>();
+  const priceMap = new Map<number, { p: number, dp: number, disc: number }>();
   if (pricesRaw?.data?.listGoods) {
     for (const g of pricesRaw.data.listGoods) {
       if (g.sizes && g.sizes[0]) {
         priceMap.set(g.nmID, {
-          p: g.sizes[0].price,
-          dp: g.sizes[0].discountedPrice
+          p:    g.sizes[0].price,
+          dp:   g.sizes[0].discountedPrice,
+          disc: g.sizes[0].discount ?? 0,
         });
       }
     }
@@ -539,6 +554,7 @@ export async function getProducts(): Promise<WbProduct[] | null> {
       title: c.title,
       price: priceData?.p,
       discountedPrice: priceData?.dp,
+      discount: priceData?.disc,
     };
   });
 
@@ -975,16 +991,54 @@ export async function getAdvertStats(): Promise<WbAdvertSummary | null> {
     );
     const balance = budget?.total ?? 0;
     totalBudget += balance;
-    campaignStats.push({ id: camp.id, status: camp.status, budgetBalance: balance });
+    campaignStats.push({ id: camp.id, status: camp.status, budgetBalance: balance, spend7d: 0, views7d: 0, clicks7d: 0, orders7d: 0 });
   }
+
+  // 3. Get 7-day spend/clicks/views via GET /adv/v3/fullstats (single call for all campaigns)
+  let totalSpend = 0, totalViews = 0, totalClicks = 0, totalOrders = 0;
+
+  if (allCampaigns.length > 0) {
+    const endDate   = new Date().toISOString().split("T")[0];
+    const beginDate = new Date(Date.now() - 7 * 864e5).toISOString().split("T")[0];
+    const idsParam  = allCampaigns.slice(0, 50).map(c => c.id).join(",");
+
+    await new Promise(r => setTimeout(r, 300));
+    const fullStats = await fetchWb(
+      `https://advert-api.wildberries.ru/adv/v3/fullstats?ids=${idsParam}&beginDate=${beginDate}&endDate=${endDate}`,
+      AdvertFullStatsSchema
+    );
+
+    if (fullStats) {
+      const spendMap = new Map<number, { spend: number; views: number; clicks: number; orders: number }>();
+      for (const s of fullStats) {
+        spendMap.set(s.advertId, { spend: s.sum, views: s.views, clicks: s.clicks, orders: s.orders });
+        totalSpend  += s.sum;
+        totalViews  += s.views;
+        totalClicks += s.clicks;
+        totalOrders += s.orders;
+      }
+      for (const camp of campaignStats) {
+        const st = spendMap.get(camp.id);
+        if (st) { camp.spend7d = st.spend; camp.views7d = st.views; camp.clicks7d = st.clicks; camp.orders7d = st.orders; }
+      }
+    }
+  }
+
+  const avgCpo = totalOrders > 0 ? Math.round(totalSpend / totalOrders) : 0;
+  const avgCtr = totalViews  > 0 ? Math.round((totalClicks / totalViews) * 1000) / 10 : 0;
+  const avgCpc = totalClicks > 0 ? Math.round(totalSpend / totalClicks) : 0;
 
   const result: WbAdvertSummary = {
     totalActive,
     totalPaused,
     totalBudget,
-    totalSpend:  0,
-    totalOrders: 0,
-    avgCpo:      0,
+    totalSpend,
+    totalViews,
+    totalClicks,
+    totalOrders,
+    avgCpo,
+    avgCtr,
+    avgCpc,
     campaigns:   campaignStats,
   };
 
