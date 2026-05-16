@@ -204,7 +204,7 @@ export interface TwaRealizData {
   totalLogistics: number;
   totalStorage:   number;
   totalPenalties: number;
-  byArticle: { article: string; sales: number; payout: number; commPct: number; logPerUnit: number; retPct: number }[];
+  byArticle: { article: string; sales: number; payout: number; commPct: number; logPerUnit: number; retPct: number; storagePerUnit: number }[];
 }
 
 export interface AdvertPeriodData {
@@ -267,7 +267,7 @@ export async function getRealizData(weeks = 4): Promise<TwaRealizData | null> {
 
   let salesCount = 0, returnCount = 0;
   let totalRevenue = 0, totalPayout = 0, totalLogistics = 0, totalStorage = 0, totalPenalties = 0;
-  const byArt = new Map<string, { sales: number; returns: number; revenue: number; payout: number; logistics: number; commSum: number }>();
+  const byArt = new Map<string, { sales: number; returns: number; revenue: number; payout: number; logistics: number; commSum: number; storage: number }>();
 
   for (const row of rows) {
     const doc  = row.doc_type_name.toLowerCase();
@@ -280,7 +280,7 @@ export async function getRealizData(weeks = 4): Promise<TwaRealizData | null> {
       continue;
     }
 
-    const a = byArt.get(key) ?? { sales: 0, returns: 0, revenue: 0, payout: 0, logistics: 0, commSum: 0 };
+    const a = byArt.get(key) ?? { sales: 0, returns: 0, revenue: 0, payout: 0, logistics: 0, commSum: 0, storage: 0 };
 
     if (doc.includes("продажа")) {
       const qty = Math.abs(row.quantity) || 1;
@@ -294,6 +294,7 @@ export async function getRealizData(weeks = 4): Promise<TwaRealizData | null> {
       a.returns += qty; returnCount += qty;
       totalPayout += row.ppvz_for_pay;
     } else if (oper.includes("хранение") || row.storage_fee > 0) {
+      a.storage    += row.storage_fee;
       totalStorage += row.storage_fee;
     } else if (doc.includes("штраф") || oper.includes("штраф")) {
       totalPenalties += Math.abs(row.penalty) + Math.abs(row.deduction);
@@ -306,9 +307,10 @@ export async function getRealizData(weeks = 4): Promise<TwaRealizData | null> {
     salesCount, returnCount, totalRevenue, totalPayout, totalLogistics, totalStorage, totalPenalties,
     byArticle: [...byArt.entries()].map(([article, a]) => ({
       article, sales: a.sales, payout: Math.round(a.payout),
-      commPct:    a.revenue > 0 ? Math.round(((a.revenue - a.payout) / a.revenue) * 1000) / 10 : 0,
-      logPerUnit: a.sales > 0 ? Math.round(a.logistics / a.sales) : 0,
-      retPct:     a.sales > 0 ? Math.round((a.returns / a.sales) * 100) : 0,
+      commPct:       a.revenue > 0 ? Math.round(((a.revenue - a.payout) / a.revenue) * 1000) / 10 : 0,
+      logPerUnit:    a.sales > 0 ? Math.round(a.logistics / a.sales) : 0,
+      retPct:        a.sales > 0 ? Math.round((a.returns / a.sales) * 100) : 0,
+      storagePerUnit: a.sales > 0 ? Math.round((a.storage / a.sales) * 10) / 10 : 0,
     })).sort((a, b) => b.payout - a.payout),
   };
 }

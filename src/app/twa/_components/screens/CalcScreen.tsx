@@ -9,6 +9,7 @@ interface UeData {
   advertisedNmIds:   number[];
   spendByNmId:       Record<number, number>;
   storagePerUnit:    number;
+  storageByArticle:  Record<string, number>;
   products:          { nmID: number; article: string; price: number; discountedPrice: number; discount: number }[];
   costByArticle:     Record<string, { commission: number; taxRate: number; denomination: number | null }>;
   lastAdAttributedAt: string | null;
@@ -98,7 +99,12 @@ export default function CalcScreen({ token }: { token: string }) {
   // Manual override wins; otherwise use auto detection
   const withAds = withAdsOverride !== null ? withAdsOverride : isAdvertisedAuto;
   const cpo     = withAds ? rawCpo : 0;
-  const storage = ud?.storagePerUnit ?? 0;
+
+  // Storage: per-article from realization report, fallback to global average
+  const article = product?.article ?? String(denom);
+  const storage = ud
+    ? (ud.storageByArticle[article] ?? ud.storagePerUnit)
+    : 0;
 
   // Profit chain
   const afterComm = sellPrice * (1 - commission);
@@ -274,7 +280,9 @@ export default function CalcScreen({ token }: { token: string }) {
           hasKurs ? `${kursRb}×${kursUsd}×${denom}/700` : undefined
         )}
         {withAds && cpo > 0 && row("−Реклама/ед", "−" + fmt(Math.round(cpo)), true, "WB CPO")}
-        {storage > 0 && row("−Хранение/ед", "−" + fmt(Math.round(storage)), true, "из реализации")}
+        {storage > 0 && row("−Хранение/ед", "−" + fmt(Math.round(storage)), true,
+          ud?.storageByArticle[article] ? `арт. ${article}` : "среднее по всем"
+        )}
 
         <div style={{ borderTop: "1px solid #3a3a3c", margin: "8px 0 6px" }} />
 

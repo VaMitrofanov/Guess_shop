@@ -56,9 +56,17 @@ export async function GET(req: NextRequest) {
   const spendByNmId      = advertData?.spendByNmId ?? {};
   const lastAdAttributedAt = settings?.lastAdAttributedAt ?? null;
   const realiz = realizResult.status === "fulfilled" ? realizResult.value : null;
-  const storagePerUnit = realiz && realiz.salesCount > 0 && realiz.totalStorage > 0
+  // Global fallback: total storage / total sales (used when per-article data is missing)
+  const storagePerUnitGlobal = realiz && realiz.salesCount > 0 && realiz.totalStorage > 0
     ? Math.round((realiz.totalStorage / realiz.salesCount) * 10) / 10
     : 0;
+  // Per-article storage map: article → storagePerUnit
+  const storageByArticle: Record<string, number> = {};
+  if (realiz) {
+    for (const a of realiz.byArticle) {
+      if (a.storagePerUnit > 0) storageByArticle[a.article] = a.storagePerUnit;
+    }
+  }
 
   // Parse prices
   const products: { nmID: number; article: string; price: number; discountedPrice: number; discount: number }[] = [];
@@ -97,7 +105,8 @@ export async function GET(req: NextRequest) {
     cpo,
     advertisedNmIds,
     spendByNmId,
-    storagePerUnit,
+    storagePerUnit: storagePerUnitGlobal,
+    storageByArticle,
     products,
     costByArticle: Object.fromEntries(costByArticle),
     lastAdAttributedAt,
