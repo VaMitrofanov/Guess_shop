@@ -29,6 +29,7 @@ export default function TwaApp() {
   const [token, setToken] = useState<string | null>(null);
   const [firstName, setFirstName] = useState("Admin");
   const [screen, setScreen] = useState<Screen>("dashboard");
+  const [debugMsg, setDebugMsg] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -49,7 +50,14 @@ export default function TwaApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ initData: id }),
       });
-      if (!res.ok) { if (!cancelled) setAuth("error"); return; }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        if (!cancelled) {
+          setDebugMsg(`HTTP ${res.status}: ${body.error ?? "unknown"}`);
+          setAuth("error");
+        }
+        return;
+      }
       const data = await res.json();
       localStorage.setItem("twa_token", data.token);
       if (cancelled) return;
@@ -79,7 +87,10 @@ export default function TwaApp() {
         return;
       }
 
-      if (!cancelled) setAuth("error");
+      if (!cancelled) {
+        setDebugMsg(initData ? "token+initData failed" : "no initData");
+        setAuth("error");
+      }
     })();
 
     return () => { cancelled = true; };
@@ -103,6 +114,7 @@ export default function TwaApp() {
           <div style={{ fontSize: 32, marginBottom: 12 }}>🔒</div>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Доступ запрещён</div>
           <div style={{ color: "#8e8e93", fontSize: 13 }}>Открывайте из Telegram-бота</div>
+          {debugMsg && <div style={{ color: "#ff9f0a", fontSize: 11, marginTop: 12, fontFamily: "monospace" }}>{debugMsg}</div>}
         </div>
       </div>
     );
