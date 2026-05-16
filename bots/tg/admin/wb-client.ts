@@ -115,10 +115,11 @@ const RealizationRowSchema = z.object({
   return_amount:              z.number().optional().default(0),
   penalty:                    z.number().optional().default(0),
   additional_payment:         z.number().optional().default(0),
-  storage_fee:                z.number().optional().default(0),
-  deduction:                  z.number().optional().default(0),
-  sale_dt:                    z.string().optional().default(""),
-  order_dt:                   z.string().optional().default(""),
+  storage_fee:           z.number().optional().default(0),
+  deduction:             z.number().optional().default(0),
+  supplier_oper_name:    z.string().optional().default(""),
+  sale_dt:               z.string().optional().default(""),
+  order_dt:              z.string().optional().default(""),
 });
 
 // Advert campaign list item
@@ -825,9 +826,20 @@ export async function getRealizationReport(weeks = 4): Promise<WbRealizationSumm
   let salesCount = 0, returnCount = 0;
 
   for (const row of rows) {
-    const docType = row.doc_type_name.toLowerCase();
-    const key     = row.sa_name || String(row.nm_id);
-    if (!key || key === "0") continue;
+    // WB uses doc_type_name for sales/returns but supplier_oper_name for services
+    const docType  = row.doc_type_name.toLowerCase();
+    const operName = row.supplier_oper_name.toLowerCase();
+    const key      = row.sa_name || String(row.nm_id);
+
+    // Service rows (хранение, etc.) have empty doc_type — handle before key check
+    if (!key || key === "0") {
+      if (operName.includes("хранение") || row.storage_fee > 0) {
+        totalStorage += row.storage_fee;
+      } else if (operName.includes("штраф") || operName.includes("penalty")) {
+        totalPenalties += Math.abs(row.penalty) + Math.abs(row.deduction);
+      }
+      continue;
+    }
 
     let art = byArticle.get(key);
     if (!art) {
@@ -871,9 +883,9 @@ export async function getRealizationReport(weeks = 4): Promise<WbRealizationSumm
       art.totalPayout  += row.ppvz_for_pay; // negative on returns
       returnCount      += qty;
       totalPayout      += row.ppvz_for_pay;
-    } else if (docType.includes("хранение")) {
-      totalStorage += Math.abs(row.delivery_rub) + Math.abs(row.ppvz_for_pay);
-    } else if (docType.includes("штраф")) {
+    } else if (operName.includes("хранение") || row.storage_fee > 0) {
+      totalStorage += row.storage_fee;
+    } else if (docType.includes("штраф") || operName.includes("штраф")) {
       totalPenalties += Math.abs(row.penalty) + Math.abs(row.deduction);
     }
   }
