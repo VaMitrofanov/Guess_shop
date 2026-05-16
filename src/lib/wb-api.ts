@@ -1,7 +1,12 @@
 import { z } from "zod";
 
+function getWbToken(): string {
+  // Strip surrounding quotes/whitespace that Coolify's UI can silently inject
+  return (process.env.WB_API_TOKEN ?? "").trim().replace(/^["'`]|["'`]$/g, "").trim();
+}
+
 async function fetchWb<T>(url: string, schema: z.ZodType<T>, options: RequestInit = {}): Promise<T | null> {
-  const token = process.env.WB_API_TOKEN ?? "";
+  const token = getWbToken();
   if (!token) return null;
   try {
     const res = await fetch(url, {

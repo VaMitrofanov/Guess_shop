@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   const fixedCost = settings?.fixedCost ?? 87.5;
 
   // 2. WB API data — fetch in parallel, each falls back to 0 if unavailable
-  const token = process.env.WB_API_TOKEN ?? "";
+  const token = (process.env.WB_API_TOKEN ?? "").trim().replace(/^["'`]|["'`]$/g, "").trim();
 
   // CPO = incremental spend since last attributed order (not a rolling average)
   const fromDate = settings?.lastAdAttributedAt
