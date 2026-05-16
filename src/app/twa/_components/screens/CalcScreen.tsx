@@ -2,13 +2,15 @@
 import { useEffect, useState } from "react";
 
 interface UeData {
-  kursRb:         number;
-  kursUsd:        number;
-  fixedCost:      number;
-  cpo:            number;
-  storagePerUnit: number;
-  products:       { nmID: number; article: string; price: number; discountedPrice: number; discount: number }[];
-  costByArticle:  Record<string, { commission: number; taxRate: number; denomination: number | null }>;
+  kursRb:            number;
+  kursUsd:           number;
+  fixedCost:         number;
+  cpo:               number;
+  storagePerUnit:    number;
+  products:          { nmID: number; article: string; price: number; discountedPrice: number; discount: number }[];
+  costByArticle:     Record<string, { commission: number; taxRate: number; denomination: number | null }>;
+  lastAdAttributedAt: string | null;
+  adFromDate:        string;
 }
 
 const LS_KURS_MODE = "calc_kursMode";
@@ -24,8 +26,10 @@ function ls(key: string, def: string) {
 }
 
 export default function CalcScreen({ token }: { token: string }) {
-  const [ueData,   setUeData]   = useState<UeData | null>(null);
-  const [loading,  setLoading]  = useState(true);
+  const [ueData,      setUeData]      = useState<UeData | null>(null);
+  const [loading,     setLoading]     = useState(true);
+  const [attributing, setAttributing] = useState(false);
+  const [attributed,  setAttributed]  = useState<{ amount: number; at: string } | null>(null);
 
   // The one thing the user inputs: purchase rate
   // kursMode: "rate" = kursRb directly | "rub" = total ₽ for denom | "usd" = total $ for denom
@@ -253,12 +257,60 @@ export default function CalcScreen({ token }: { token: string }) {
         </div>
       </div>
 
-      {/* Settings hint */}
-      {ud && (
-        <div style={{ fontSize: 11, color: "#3a3a3c", textAlign: "center" }}>
-          Настройки (комиссия, налог, курс USD, CPO) меняются в боте → ⚙️ Юнит-экономика
+      {/* Mark order complete */}
+      <div style={{ background: "#1c1c1e", borderRadius: 14, border: "1px solid #2c2c2e", padding: 14 }}>
+        <div style={{ fontSize: 12, color: "#8e8e93", marginBottom: 4 }}>
+          Реклама считается с{" "}
+          <span style={{ color: "#e5e5ea" }}>
+            {ud?.lastAdAttributedAt
+              ? new Date(ud.lastAdAttributedAt).toLocaleDateString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+              : ud?.adFromDate ?? "…"}
+          </span>
         </div>
-      )}
+        <div style={{ fontSize: 12, color: "#636366", marginBottom: 10 }}>
+          Весь расход за этот период = CPO следующего заказа.
+          После выполнения — нажми кнопку, счётчик сбросится.
+        </div>
+
+        {attributed && (
+          <div style={{ background: "#0d2a0d", borderRadius: 8, padding: "8px 12px", marginBottom: 10, fontSize: 13, color: "#30d158" }}>
+            ✓ Зафиксировано: {attributed.amount.toLocaleString("ru-RU")} ₽ на рекламу
+          </div>
+        )}
+
+        <button
+          disabled={attributing}
+          onClick={async () => {
+            setAttributing(true);
+            try {
+              const res = await fetch("/api/twa/ad-attr", {
+                method: "POST",
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (res.ok) {
+                const data = await res.json();
+                setAttributed({ amount: data.attributed ?? 0, at: data.lastAttributedAt });
+                const ueRes = await fetch("/api/twa/ue", { headers: { Authorization: `Bearer ${token}` } });
+                if (ueRes.ok) setUeData(await ueRes.json());
+              }
+            } finally {
+              setAttributing(false);
+            }
+          }}
+          style={{
+            width: "100%", padding: "12px 0", borderRadius: 10, border: "none",
+            cursor: attributing ? "default" : "pointer",
+            background: attributing ? "#2c2c2e" : "#bf5af2",
+            color: "#fff", fontSize: 15, fontWeight: 600,
+          }}
+        >
+          {attributing ? "Фиксируем…" : "✓ Заказ выполнен — зафиксировать рекламу"}
+        </button>
+      </div>
+
+      <div style={{ fontSize: 11, color: "#3a3a3c", textAlign: "center" }}>
+        Настройки (комиссия, налог, курс USD) меняются в боте → ⚙️ Юнит-экономика
+      </div>
     </div>
   );
 }

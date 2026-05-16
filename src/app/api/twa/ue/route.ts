@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
-import { getAdvertData, getRealizData } from "@/lib/wb-api";
+import { getAdvertSpendSince, getRealizData } from "@/lib/wb-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -34,8 +34,13 @@ export async function GET(req: NextRequest) {
   // 2. WB API data — fetch in parallel, each falls back to 0 if unavailable
   const token = process.env.WB_API_TOKEN ?? "";
 
+  // CPO = incremental spend since last attributed order (not a rolling average)
+  const fromDate = settings?.lastAdAttributedAt
+    ? (settings.lastAdAttributedAt as Date).toISOString().split("T")[0]
+    : new Date(Date.now() - 30 * 864e5).toISOString().split("T")[0];
+
   const [advertResult, realizResult, pricesResult] = await Promise.allSettled([
-    getAdvertData(),
+    getAdvertSpendSince(fromDate),
     getRealizData(4),
     token
       ? fetch("https://discounts-prices-api.wildberries.ru/api/v2/list/goods/filter?limit=100&offset=0", {
@@ -45,7 +50,8 @@ export async function GET(req: NextRequest) {
       : Promise.resolve(null),
   ]);
 
-  const cpo = advertResult.status === "fulfilled" ? (advertResult.value?.avgCpo ?? 0) : 0;
+  const cpo = advertResult.status === "fulfilled" ? (advertResult.value ?? 0) : 0;
+  const lastAdAttributedAt = settings?.lastAdAttributedAt ?? null;
   const realiz = realizResult.status === "fulfilled" ? realizResult.value : null;
   const storagePerUnit = realiz && realiz.salesCount > 0 && realiz.totalStorage > 0
     ? Math.round((realiz.totalStorage / realiz.salesCount) * 10) / 10
@@ -89,5 +95,7 @@ export async function GET(req: NextRequest) {
     storagePerUnit,
     products,
     costByArticle: Object.fromEntries(costByArticle),
+    lastAdAttributedAt,
+    adFromDate: fromDate,
   });
 }

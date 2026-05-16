@@ -192,6 +192,24 @@ export interface TwaRealizData {
   byArticle: { article: string; sales: number; payout: number; commPct: number; logPerUnit: number; retPct: number }[];
 }
 
+// Returns total ad spend (₽) from fromDate (YYYY-MM-DD) to today across all campaigns.
+export async function getAdvertSpendSince(fromDate: string): Promise<number | null> {
+  const countData = await fetchWb("https://advert-api.wildberries.ru/adv/v1/promotion/count", AdvertCountSchema);
+  if (!countData || countData.adverts.length === 0) return null;
+
+  const ids = countData.adverts.flatMap(g => g.advert_list.map(a => a.advertId)).slice(0, 50);
+  if (ids.length === 0) return 0;
+
+  const endDate = new Date().toISOString().split("T")[0];
+  await new Promise(r => setTimeout(r, 300));
+  const fs = await fetchWb(
+    `https://advert-api.wildberries.ru/adv/v3/fullstats?ids=${ids.join(",")}&beginDate=${fromDate}&endDate=${endDate}`,
+    FullStatsSchema
+  );
+  if (!fs) return null;
+  return fs.reduce((sum, s) => sum + s.sum, 0);
+}
+
 export async function getRealizData(weeks = 4): Promise<TwaRealizData | null> {
   const dateTo   = new Date().toISOString().split("T")[0];
   const dateFrom = new Date(Date.now() - weeks * 7 * 864e5).toISOString().split("T")[0];

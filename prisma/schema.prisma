@@ -200,10 +200,11 @@ model WbProductCost {
 
 /// Global Wildberries unit economics settings (singleton, id=1).
 model WbSettings {
-  id        Int   @id @default(1)
-  kursRb    Float @default(4)    // закупочный курс (руб. за единицу)
-  kursUsd   Float @default(75)   // курс USD/RUB
-  fixedCost Float @default(87.5) // фиксированные затраты на единицу (₽)
+  id                 Int       @id @default(1)
+  kursRb             Float     @default(4)    // закупочный курс (руб. за единицу)
+  kursUsd            Float     @default(75)   // курс USD/RUB
+  fixedCost          Float     @default(87.5) // фиксированные затраты на единицу (₽)
+  lastAdAttributedAt DateTime?               // дата последнего атрибутирования рекламы к заказу
 }
 
 /// Activation codes printed on Wildberries card inserts.
