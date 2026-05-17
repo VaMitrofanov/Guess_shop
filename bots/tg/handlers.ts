@@ -96,8 +96,14 @@ export function registerStart(bot: Telegraf): void {
     const rawPayload = ctx.startPayload?.trim() ?? "";
     let code = rawPayload.toUpperCase();
     let sessionId: string | null = null;
+    let isGuideMode = false;
 
-    if (rawPayload.toLowerCase().startsWith("wb_")) {
+    if (rawPayload.toLowerCase().startsWith("wbg_")) {
+      const parts = rawPayload.split("_");
+      code = (parts[1] || "").toUpperCase();
+      sessionId = parts[2] || null;
+      isGuideMode = true;
+    } else if (rawPayload.toLowerCase().startsWith("wb_")) {
       const parts = rawPayload.split("_");
       code = (parts[1] || "").toUpperCase();
       sessionId = parts[2] || null;
@@ -135,16 +141,34 @@ export function registerStart(bot: Telegraf): void {
         const idleMsg = getIdleGreeting(custStatus, firstName);
         await ctx.reply(
           `${idleMsg}\n\n📦 Статус заказа: /status`,
-          { parse_mode: "HTML" }
+          {
+            parse_mode: "HTML",
+            link_preview_options: { is_disabled: true },
+            ...Markup.inlineKeyboard([[supportBtn("💬 Написать менеджеру")]]),
+          }
         );
-      } else {
+      } else if (isAdmin) {
         const greeting = getGreeting(custStatus, firstName);
-        const kb = isAdmin ? await getAdminKeyboard() : {};
+        const adminKb = await getAdminKeyboard();
         await ctx.reply(
           `${greeting}Твой личный проводник в мир робуксов.\n\n` +
           `Для активации кода с карточки Wildberries перейди по ссылке на вкладыше.\n\n` +
           `📦 Статус заказа: /status`,
-          kb
+          adminKb
+        );
+      } else {
+        const greeting = getGreeting(custStatus, firstName);
+        await ctx.reply(
+          `${greeting}Твой личный проводник в мир робуксов.\n\n` +
+          `Для активации кода с карточки Wildberries перейди по ссылке на вкладыше или на нашем сайте.\n\n` +
+          `📦 Статус заказа: /status`,
+          {
+            parse_mode: "HTML",
+            link_preview_options: { is_disabled: true },
+            ...Markup.inlineKeyboard([[
+              Markup.button.url("📖 Инструкция по активации", "https://robloxbank.ru/guide?source=wb"),
+            ]]),
+          }
         );
       }
       return;
@@ -159,7 +183,8 @@ export function registerStart(bot: Telegraf): void {
       return;
     }
 
-    if (wbCode.status === "CLAIMED" || (wbCode.isUsed && wbCode.userId != null)) {
+    // Block only when the gamepass was already submitted (isUsed=true = order created)
+    if (wbCode.isUsed) {
       await ctx.reply("⚠️ Этот код уже был активирован ранее.");
       return;
     }
@@ -183,6 +208,12 @@ export function registerStart(bot: Telegraf): void {
       });
     }
 
+    // If code is CLAIMED by a different user, block
+    if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
+      await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.");
+      return;
+    }
+
     const totalAmount = wbCode.denomination + (user.balance || 0);
 
     // ── Set pendingLink BEFORE the sub-gate ───────────────────────────────
@@ -197,17 +228,24 @@ export function registerStart(bot: Telegraf): void {
     // Subscription gate (optional — skip if TG_CHANNEL_ID not set)
     const subscribed = await checkSubscription(bot, ctx.from.id);
     if (!subscribed) {
-      await ctx.reply(
-        `✨ Почти готово! Чтобы мы могли моментально уведомлять тебя о выкупе и присылать секретные бонусы, загляни в наш канал: https://t.me/Roblox_Bank_Tg\n\n` +
-        `Подпишись и просто пришли Asset ID или ссылку на геймпасс с ценой ровно <b>${passPrice} R$</b> — мы сразу возьмем его в работу! 💛`,
-        {
-          parse_mode: "HTML",
-          link_preview_options: { is_disabled: true },
-          ...Markup.inlineKeyboard([[
-            Markup.button.url("📢 Подписаться", "https://t.me/Roblox_Bank_Tg")
-          ]]),
-        }
-      );
+      const subText = isGuideMode
+        ? `🎉 Код <b>${code}</b> принят!\n\n` +
+          `Ты в одном шаге — у наших клиентов есть закрытый канал: там первыми узнают о статусе заказа, ` +
+          `получают бонусы на следующий заказ и эксклюзивные акции.\n\n` +
+          `👇 Загляни — это бесплатно:\n` +
+          `https://t.me/Roblox_Bank_Tg\n\n` +
+          `После этого возвращайся за инструкцией 👉 https://www.robloxbank.ru/guide?source=wb`
+        : `🎉 Код <b>${code}</b> принят!\n\n` +
+          `Ты в одном шаге — у наших клиентов есть закрытый канал: там первыми узнают о выкупе, ` +
+          `получают бонусы на следующий заказ и эксклюзивные акции.\n\n` +
+          `👇 Загляни — это бесплатно, а потом присылай ссылку на геймпасс с ценой ровно <b>${passPrice} R$</b>:`;
+      await ctx.reply(subText, {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        ...Markup.inlineKeyboard([[
+          Markup.button.url("⭐ Стать участником", "https://t.me/Roblox_Bank_Tg")
+        ]]),
+      });
       return; // pendingLink preserved — user sends gamepass after subscribing
     }
     const isAdmin = ADMIN_IDS.includes(tgId);
@@ -227,17 +265,81 @@ export function registerStart(bot: Telegraf): void {
 
     await ctx.reply(
       `${greetLine}\n` +
-      `✅ Код <b>${code}</b> активирован!\n` +
-      bonusText +
-      `Осталось совсем чуть-чуть — пришли <b>Asset ID</b> или <b>ссылку</b> на геймпасс.\n` +
-      `📌 Убедись, что цена геймпасса ровно <b>${passPrice} R$</b>\n\n` +
-      `Жду ссылку 👇`,
+      (isGuideMode
+        ? `✅ Код <b>${code}</b> зафиксирован!\n\n` +
+          `Если геймпасс уже создан — кидай ссылку 👇\n\n` +
+          `Если нужна инструкция — возвращайся на сайт:\n` +
+          `👉 https://www.robloxbank.ru/guide?source=wb\n` +
+          `Там подробная пошаговая инструкция!`
+        : `✅ Код <b>${code}</b> активирован!\n` +
+          bonusText +
+          `Осталось совсем чуть-чуть — пришли <b>Asset ID</b> или <b>ссылку</b> на геймпасс.\n` +
+          `📌 Убедись, что цена геймпасса ровно <b>${passPrice} R$</b>\n\n` +
+          `Жду ссылку 👇`
+      ),
       {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
         ...(isAdmin ? adminKb : {})
       }
     );
+
+    // ── Provisional order: claim code + create AWAITING_GAMEPASS order ─────────
+    // Done after welcoming the user so any DB error doesn't block them.
+    // Admins see the user's info immediately, without waiting for the gamepass link.
+    let provisionalOrder: any = null;
+    try {
+      provisionalOrder = await (db as any).$transaction(async (tx: any) => {
+        const existingOrder = await tx.wbOrder.findUnique({ where: { wbCode: code } });
+        if (existingOrder) return existingOrder; // re-activation — order already exists
+        await tx.wbCode.update({
+          where: { code },
+          data: { userId: user.id, status: "CLAIMED", isUsed: false },
+        });
+        return tx.wbOrder.create({
+          data: {
+            amount: totalAmount,
+            gamepassUrl: null,
+            status: "AWAITING_GAMEPASS",
+            platform: "TG",
+            userId: user.id,
+            wbCode: code,
+          },
+        });
+      });
+    } catch (err) {
+      console.error("[TG] Provisional order creation failed:", err);
+    }
+
+    // Admin early notification — includes user identity, no action buttons yet
+    if (provisionalOrder && provisionalOrder.status === "AWAITING_GAMEPASS") {
+      try {
+        const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "Пользователь");
+        const dateStr = new Date().toLocaleString("ru-RU", {
+          timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
+          year: "numeric", hour: "2-digit", minute: "2-digit",
+        }) + " МСК";
+        const notifyText =
+          `📥 <b>НОВЫЙ КЛИЕНТ</b>\n` +
+          `━━━━━━━━━━━━━━━━\n` +
+          (isGuideMode ? `📖 Режим: <b>Инструкция</b>\n` : ``) +
+          `📅 Время: <b>${dateStr}</b>\n` +
+          `👤 Юзер: <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a> (ID: ${ctx.from.id})\n` +
+          `💎 Сумма: <b>${totalAmount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
+          `🔑 Код ВБ: <code>${code}</code>\n` +
+          `📊 Статус: ⌛ Ожидаем ссылку на геймпасс`;
+        for (const adminId of ADMIN_IDS) {
+          try {
+            await bot.telegram.sendMessage(adminId, notifyText, {
+              parse_mode: "HTML",
+              link_preview_options: { is_disabled: true },
+            });
+          } catch { /* non-fatal */ }
+        }
+      } catch (err) {
+        console.error("[TG] Admin provisional notify error:", err);
+      }
+    }
   });
 }
 
@@ -297,6 +399,7 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   }
 
   const label: Record<string, string> = {
+    AWAITING_GAMEPASS: "⌛ Ожидаем геймпасс",
     PENDING:     "⏳ В обработке",
     IN_PROGRESS: "🔧 В работе",
     COMPLETED:   "✅ Выполнен",
@@ -307,9 +410,11 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   const pendingOver60  = order.status === "PENDING" && pendingAgeMs > 60  * 60 * 1000;
   const pendingOver120 = order.status === "PENDING" && pendingAgeMs > 120 * 60 * 1000;
 
-  // Progressive note: calm up to 60 min, nudge to check at 60+, support at 120+
+  // Progressive note per status
   let note = "";
-  if (order.status === "PENDING") {
+  if (order.status === "AWAITING_GAMEPASS") {
+    note = "\n\n💡 <i>Пришли ссылку на геймпасс прямо сюда — и мы сразу возьмём в работу!</i>";
+  } else if (order.status === "PENDING") {
     if (pendingOver120) {
       note = "\n\n⏰ <i>Заявка обрабатывается дольше обычного. Если нужна помощь — напишите нам.</i>";
     } else if (pendingOver60) {
@@ -318,20 +423,41 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
       note = "\n\n💬 <i>Менеджеры работают в порядке очереди — среднее время 15–30 минут. " +
              "Мы сами пришлём уведомление при изменении статуса.</i>";
     }
+  } else if (order.status === "REJECTED") {
+    note = order.rejectionReason
+      ? `\n\n💬 Причина: <i>${order.rejectionReason}</i>\n\nНажми кнопку ниже, чтобы исправить ссылку.`
+      : `\n\nНажми кнопку ниже, чтобы исправить ссылку на геймпасс.`;
+  } else if (order.status === "COMPLETED") {
+    note = "\n\n🚀 <i>Хочешь заказать ещё? Постоянным клиентам — прямое обслуживание без Wildberries по лучшему курсу!</i>";
   }
+
+  const gamepassLine = order.gamepassUrl
+    ? `🔗 <a href="${order.gamepassUrl}">Геймпасс</a>\n`
+    : ``;
 
   const text =
     `📦 <b>Заявка #${order.id.slice(-6).toUpperCase()}</b>\n` +
     `📅 ${new Date(order.createdAt).toLocaleDateString("ru-RU")}\n` +
     `💎 Номинал: <b>${order.amount} R$</b>\n` +
-    `🔗 <a href="${order.gamepassUrl}">Геймпасс</a>\n` +
+    gamepassLine +
     `📊 Статус: <b>${label[order.status] ?? order.status}</b>` +
     note;
 
-  // Support button appears only when the wait is genuinely long (> 60 min PENDING)
-  const keyboard = pendingOver60
-    ? Markup.inlineKeyboard([refreshRow, [supportBtn("Нужна помощь?")]])
-    : Markup.inlineKeyboard([refreshRow]);
+  // Keyboard varies by status
+  let keyboard: ReturnType<typeof Markup.inlineKeyboard>;
+  if (order.status === "REJECTED") {
+    keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback("🔄 Исправить ссылку", `user_resubmit:${order.wbCode}:${order.amount}`)],
+      refreshRow,
+      [supportBtn("Нужна помощь?")],
+    ]);
+  } else if (order.status === "COMPLETED") {
+    keyboard = Markup.inlineKeyboard([refreshRow, [supportBtn("💬 Заказать ещё")]]);
+  } else if (pendingOver60) {
+    keyboard = Markup.inlineKeyboard([refreshRow, [supportBtn("Нужна помощь?")]]);
+  } else {
+    keyboard = Markup.inlineKeyboard([refreshRow]);
+  }
 
   return { text, keyboard };
 }
@@ -360,7 +486,7 @@ export function registerText(bot: Telegraf): void {
       return;
     }
 
-    const state = pendingLink.get(ctx.from.id);
+    let state = pendingLink.get(ctx.from.id);
 
     // 2. ADMIN SEARCH
     // Run for admins whenever the text is NOT a recognisable gamepass URL/ID.
@@ -385,29 +511,29 @@ export function registerText(bot: Telegraf): void {
           const subbed = await checkSubscription(bot, ctx.from.id);
           if (!subbed) {
             await ctx.reply(
-              `✨ Мы очень ждем твою заявку! Но чтобы система могла закрепить её за тобой и выдать робуксы, нужно сначала заглянуть в наш канал: https://t.me/Roblox_Bank_Tg\n\n` +
-              `Как только подпишешься — присылай код или ссылку, и мы всё сделаем! 💛`,
+              `⭐ У наших клиентов есть закрытый канал — там уведомления о статусе заказа, ` +
+              `бонусы и акции.\n\nЗагляни, это бесплатно:\n` +
+              `https://t.me/Roblox_Bank_Tg`,
               {
                 parse_mode: "HTML",
                 link_preview_options: { is_disabled: true },
                 ...Markup.inlineKeyboard([[
-                  Markup.button.url("📢 Подписаться", "https://t.me/Roblox_Bank_Tg")
+                  Markup.button.url("⭐ Стать участником", "https://t.me/Roblox_Bank_Tg")
                 ]]),
               }
             );
             return;
           }
         }
-        
-        // Fallback for subscribed users with no active session.
-        // If this looks like a gamepass URL, check whether the user has a
-        // rejected order — in that case they probably skipped the button.
+
+        // If user sent a gamepass URL/ID, try to recover their session first
         if (extractPassId(text) !== null) {
           const tgUser = await (db as any).user.findUnique({
             where: { tgId },
-            select: { id: true },
+            select: { id: true, balance: true },
           });
           if (tgUser) {
+            // 1. Check for rejected order — guide them to use the button in that message
             const rejected = await (db as any).wbOrder.findFirst({
               where: { userId: tgUser.id, status: "REJECTED" },
               orderBy: { updatedAt: "desc" },
@@ -421,20 +547,35 @@ export function registerText(bot: Telegraf): void {
               );
               return;
             }
+
+            // 2. Recover AWAITING_GAMEPASS state after bot restart
+            const awaitingOrder = await (db as any).wbOrder.findFirst({
+              where: { userId: tgUser.id, status: "AWAITING_GAMEPASS" },
+              orderBy: { createdAt: "desc" },
+            });
+            if (awaitingOrder) {
+              state = { wbCode: awaitingOrder.wbCode, denomination: awaitingOrder.amount };
+              pendingLink.set(ctx.from.id, state);
+              // Fall through to gamepass processing below
+            }
           }
         }
 
-        await ctx.reply(
-          "У тебя сейчас нет активных заявок.\n\n" +
-          "📦 Проверить статус: /status\n" +
-          "🔑 Активировать код: перейди по ссылке на вкладыше",
-          {
-            parse_mode: "HTML",
-            ...Markup.inlineKeyboard([[supportBtn("Нужна помощь?")]]),
-          }
-        );
+        if (!state) {
+          await ctx.reply(
+            "У тебя сейчас нет активных заявок.\n\n" +
+            "📦 Проверить статус: /status\n" +
+            "🔑 Активировать код: перейди по ссылке на вкладыше",
+            {
+              parse_mode: "HTML",
+              ...Markup.inlineKeyboard([[supportBtn("Нужна помощь?")]]),
+            }
+          );
+          return;
+        }
+      } else {
+        return;
       }
-      return;
     }
 
     const passId = extractPassId(text);
@@ -463,13 +604,15 @@ export function registerText(bot: Telegraf): void {
       const subscribed = await checkSubscription(bot, ctx.from.id);
       if (!subscribed) {
         await ctx.reply(
-          `✨ Почти готово! Чтобы мы могли моментально уведомлять тебя о выкупе и присылать секретные бонусы, загляни в наш канал: https://t.me/Roblox_Bank_Tg\n\n` +
-          `Подпишись и просто отправь ссылку на геймпасс за <b>${expectedPrice} R$</b> еще раз — мы сразу возьмем его в работу! 💛`,
+          `⭐ Почти готово! У наших клиентов есть закрытый канал — там первыми узнают о выкупе, ` +
+          `получают бонусы и эксклюзивные акции.\n\n` +
+          `Загляни — бесплатно, а потом просто пришли ссылку ещё раз:\n` +
+          `https://t.me/Roblox_Bank_Tg`,
           {
             parse_mode: "HTML",
             link_preview_options: { is_disabled: true },
             ...Markup.inlineKeyboard([[
-              Markup.button.url("📢 Подписаться", "https://t.me/Roblox_Bank_Tg")
+              Markup.button.url("⭐ Стать участником", "https://t.me/Roblox_Bank_Tg")
             ]]),
           }
         );
@@ -497,6 +640,19 @@ export function registerText(bot: Telegraf): void {
 
     if (!gamepassInfo.validationSkipped) {
       // Normal validation — only runs when Roblox API was reachable
+      if (gamepassInfo.isGamePrivate) {
+        await ctx.reply(
+          `❌ Геймпасс находится в <b>закрытой или недоступной игре</b>.\n\n` +
+          `Создай новый геймпасс в публичной игре:\n` +
+          `• Creator Dashboard → Creations → Passes → Create\n` +
+          `• Выбери публичную игру\n` +
+          `• Установи цену <b>${expectedPrice} R$</b>\n\n` +
+          `Затем пришли ссылку на новый геймпасс.`,
+          { parse_mode: "HTML" }
+        );
+        return;
+      }
+
       if (!gamepassInfo.isActive) {
         const fc = getFailCounts(ctx.from.id);
         fc.notActive++;
@@ -568,7 +724,8 @@ export function registerText(bot: Telegraf): void {
             code: { equals: state.wbCode, mode: "insensitive" },
             OR: [
               { status: "RESERVED" },
-              { userId: null }
+              { userId: null },
+              { status: "CLAIMED", isUsed: false, userId: user.id }, // provisional state
             ]
           },
           data: { userId: user.id, isUsed: true, status: "CLAIMED", usedAt: new Date() },
@@ -584,7 +741,11 @@ export function registerText(bot: Telegraf): void {
           if (!existingCode || existingCode.userId !== user.id) {
             throw Object.assign(new Error("Code already claimed"), { isClaimed: true });
           }
-          // Code already assigned to this user — allow retry, skip re-update
+          // Code already assigned to this user — mark as used now
+          await tx.wbCode.update({
+            where: { id: existingCode.id },
+            data: { isUsed: true, usedAt: new Date() },
+          });
         }
 
         // Check if an order already exists for this WB code.
@@ -595,15 +756,15 @@ export function registerText(bot: Telegraf): void {
 
         let newOrder;
         if (existingOrder) {
-          if (existingOrder.status === "REJECTED") {
-            // Allow resubmission: update the rejected order back to PENDING with the new link
+          if (existingOrder.status === "AWAITING_GAMEPASS" || existingOrder.status === "REJECTED") {
+            // Promote to PENDING with the gamepass link
             newOrder = await tx.wbOrder.update({
               where: { id: existingOrder.id },
               data: {
                 gamepassUrl: cleanLink,
                 status: "PENDING",
                 rejectionReason: null,
-                adminId: null, // Reset admin assignment
+                adminId: null,
               },
             });
           } else {
@@ -611,7 +772,7 @@ export function registerText(bot: Telegraf): void {
             throw Object.assign(new Error("Order already exists"), { code: "P2002" });
           }
         } else {
-          // Fresh order
+          // No provisional order (shouldn't happen with new flow, defensive fallback)
           newOrder = await tx.wbOrder.create({
             data: {
               amount: state.denomination,
@@ -693,7 +854,13 @@ export function registerText(bot: Telegraf): void {
 async function renderOrderCard(order: any) {
   const shortId = order.id.slice(-6).toUpperCase();
   const passPrice = Math.ceil(order.amount / 0.7);
-  const statusLabels: any = { PENDING: "⏳ В обработке", IN_PROGRESS: "🔧 В работе", COMPLETED: "✅ Выполнен", REJECTED: "❌ Отклонён" };
+  const statusLabels: any = {
+    AWAITING_GAMEPASS: "⌛ Ожидаем геймпасс",
+    PENDING: "⏳ В обработке",
+    IN_PROGRESS: "🔧 В работе",
+    COMPLETED: "✅ Выполнен",
+    REJECTED: "❌ Отклонён",
+  };
 
   const dateStr = order.createdAt
     ? new Date(order.createdAt).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " МСК"
@@ -721,7 +888,7 @@ async function renderOrderCard(order: any) {
   const wbCode = await (db as any).wbCode.findUnique({ where: { code: order.wbCode } });
   const bonus = wbCode && order.amount > wbCode.denomination ? order.amount - wbCode.denomination : 0;
   const bonusLine = bonus > 0 ? `🎁 Использован бонус: <b>${bonus} R$</b>\n` : "";
-  const reviewLine = wbCode?.reviewBonusClaimed ? `🌟 Отзыв: <b>Оставлен (+50 R$)</b>\n` : `🌟 Отзыв: <b>Нет</b>\n`;
+  const reviewLine = wbCode?.reviewBonusClaimed ? `🌟 Отзыв: <b>Оставлен (+100 R$)</b>\n` : `🌟 Отзыв: <b>Нет</b>\n`;
 
   // Loyalty tag — subtract 1 to get count of orders BEFORE the current one
   const totalOrders = await (db as any).wbOrder.count({ where: { userId: order.userId } }).catch(() => 1);
@@ -742,10 +909,10 @@ async function renderOrderCard(order: any) {
     reviewLine +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
     `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
-    `📊 Статус: <b>${statusLabels[order.status] || order.status}</b>${reasonLine}\n\n` +
-    `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>`;
+    `📊 Статус: <b>${statusLabels[order.status] || order.status}</b>${reasonLine}` +
+    (order.gamepassUrl ? `\n\n🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>` : ``);
 
-  // Inline buttons only for PENDING orders
+  // Action buttons for PENDING orders only
   const reply_markup = order.status === "PENDING" ? {
     inline_keyboard: [[
       { text: "✅ ВЫКУПЛЕНО", callback_data: CB.adminOk(order.id) },
@@ -821,7 +988,14 @@ export function registerPhoto(bot: Telegraf): void {
         })
         : null;
 
-      if (!order || !linked) return; // user has nothing to review
+      if (!order || !linked) {
+        await ctx.reply(
+          "У тебя пока нет выполненных заказов, за которые можно получить бонус.\n\n" +
+          "Когда заказ будет выполнен, пришли скриншот отзыва с Wildberries — начислим +100 R$!",
+          withSupportKb()
+        );
+        return;
+      }
       orderId = order.id as string;
     }
 
@@ -1034,7 +1208,7 @@ export function registerCallbacks(bot: Telegraf): void {
       // Award +50 R$ and mark bonus as claimed
       await (db as any).user.update({
         where: { id: userId },
-        data: { balance: { increment: 50 } },
+        data: { balance: { increment: 100 } },
       });
       await (db as any).wbCode.updateMany({
         where: { userId, reviewBonusClaimed: false },
@@ -1043,7 +1217,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
       const user = await (db as any).user.findUnique({ where: { id: userId } });
       const bonusMsg =
-        `🎁 <b>+50 R$ зачислено на счёт!</b>\n` +
+        `🎁 <b>+100 R$ зачислено на счёт!</b>\n` +
         `Спасибо за отзыв — бонус доступен при следующей покупке 💛`;
 
       if (user?.tgId) {
@@ -1054,7 +1228,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
       const caption = `🎁 Бонус начислен — ${adminTag}\nЗаказ #${orderId.slice(-6).toUpperCase()}`;
       try { await ctx.editMessageCaption(caption, { parse_mode: "HTML" }); } catch { }
-      await ctx.answerCbQuery("+50 R$ начислено");
+      await ctx.answerCbQuery("+100 R$ начислено");
       return;
     }
 
@@ -1187,12 +1361,12 @@ async function notifyUserCompleted(
     // TIER 1: First-Time Buyer — Review & Social Proof
     tgMsg =
       `✅ Заказ выкуплен! Робуксы придут через 5-7 дней.\n\n` +
-      `🎁 <b>Оставь отзыв и получи 50 R$ в подарок!</b>\n` +
+      `🎁 <b>Оставь отзыв и получи 100 R$ в подарок!</b>\n` +
       `Напиши отзыв на Wildberries, сделай скриншот и отправь его сюда (фотографией, не файлом). После проверки администратором бонус начислим сразу!\n\n` +
       `Ты уже в нашем канале, так что не пропустишь секретные раздачи! 🎰`;
     vkMsg =
       `✅ Заказ выкуплен! Робуксы придут через 5-7 дней.\n\n` +
-      `Оставь отзыв и получи 50 R$ в подарок!\n` +
+      `Оставь отзыв и получи 100 R$ в подарок!\n` +
       `Напиши отзыв на Wildberries, сделай скриншот и отправь его в этот чат. После проверки бонус начислим сразу!\n\n` +
       `Ты уже в нашем сообществе, так что не пропустишь секретные раздачи! 🎰`;
   } else {
@@ -1205,7 +1379,7 @@ async function notifyUserCompleted(
       `Всё ли было удобно в этот раз? Если есть идеи по улучшению — напиши в поддержку, мы читаем каждое сообщение!`;
     vkMsg =
       `✅ Заказ выкуплен! Это уже твой ${completedCount}-й заказ в RobloxBank. Спасибо за доверие! 💛\n\n` +
-      `Кстати, для постоянных клиентов у нас есть закрытый формат. Чтобы не ждать поставок на Wildberries и оформлять заказы по самому выгодному курсу (без лишних комиссий), пиши нам в поддержку напрямую: t.me/RobloxBank_PA\n\n` +
+      `Кстати, для постоянных клиентов у нас есть закрытый формат. Чтобы не ждать поставок на Wildberries и оформлять заказы по самому выгодному курсу (без лишних комиссий), пиши нам в поддержку напрямую: https://t.me/RobloxBank_PA\n\n` +
       `Это быстрее, проще и всегда выгоднее. Мы закрепим за тобой персональное обслуживание.\n\n` +
       `Всё ли было удобно в этот раз? Если есть идеи по улучшению — напиши в поддержку, мы читаем каждое сообщение!`;
   }
@@ -1268,12 +1442,12 @@ async function notifyReviewRejected(
   const tgMsg =
     `❌ Ой, возникла проблемка с твоим отзывом!\n` +
     `Админ указал причину: <b>${reason}</b>.\n\n` +
-    `Исправь это, пожалуйста, и пришли скриншот снова — бонус 50 R$ всё еще ждет тебя! 🎁`;
+    `Исправь это, пожалуйста, и пришли скриншот снова — бонус 100 R$ всё еще ждет тебя! 🎁`;
 
   const vkMsg =
     `❌ Ой, возникла проблемка с твоим отзывом!\n` +
     `Админ указал причину: ${reason}.\n\n` +
-    `Исправь это, пожалуйста, и пришли скриншот снова — бонус 50 R$ всё еще ждет тебя! 🎁`;
+    `Исправь это, пожалуйста, и пришли скриншот снова — бонус 100 R$ всё еще ждет тебя! 🎁`;
 
   if (user.tgId) {
     try {

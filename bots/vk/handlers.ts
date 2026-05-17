@@ -49,11 +49,11 @@ async function tryRestoreState(vkUserId: number): Promise<boolean> {
     });
     if (!lastCode) return false;
 
-    // Skip if a gamepass order was already submitted for this code and is still active
+    // Skip if an active or provisional order already exists for this code
     const existingOrder = await (db as any).wbOrder.findFirst({
-      where: { 
+      where: {
         wbCode: lastCode.code,
-        status: { in: ["PENDING", "COMPLETED"] }
+        status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED"] }
       },
     });
     if (existingOrder) return false;
@@ -120,13 +120,15 @@ async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null): Pro
   const groupUrl = groupId ? `https://vk.com/club${groupId}` : "https://vk.com";
   await ctx.reply({
     message:
-      `✨ Мы очень ждем твою заявку! Но чтобы система могла закрепить её за тобой и выдать робуксы, нужно сначала заглянуть в наше сообщество: ${groupUrl}\n\n` +
-      `Как только подпишешься — нажми кнопку «✅ Я подписался» ниже, и мы всё сделаем! 💛`,
+      `⭐ Ты в одном шаге! У наших клиентов есть закрытое сообщество — там первыми узнают о статусе заказа, ` +
+      `получают бонусы на следующую покупку и эксклюзивные акции.\n\n` +
+      `Загляни — это бесплатно:\n${groupUrl}\n\n` +
+      `Потом нажми «✅ Я вступил» — и продолжим!`,
     keyboard: Keyboard.builder()
       .urlButton({ label: "🔔 Подписаться", url: groupUrl })
       .row()
       .textButton({
-        label:   "✅ Я подписался",
+        label:   "✅ Я вступил",
         payload: refCode ? { command: "check_sub", ref: refCode } : { command: "check_sub" },
         color:   "positive",
       })
@@ -161,7 +163,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // (old VK desktop clients that don't send inline-keyboard payloads). Without
   // the context guard any user sending that phrase would trigger a spurious sub-check.
   const isSubConfirmText =
-    text === "✅ Я подписался" && getState(vkUserId)?.type === "AWAITING_LINK";
+    (text === "✅ Я вступил" || text === "✅ Я подписался") && getState(vkUserId)?.type === "AWAITING_LINK";
   if (msgPayload?.command === "check_sub" || isSubConfirmText) {
     try {
       if (!(await isVkSubscribed(ctx, vkUserId))) {
@@ -236,16 +238,15 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     console.log(`[VK] Начать command: vkUserId=${vkUserId}, isReturning=${custStatus.isReturning}`);
     if (custStatus.isReturning) {
       const firstName = await vkGetName(vkUserId);
-      await ctx.reply(
-        `${getGreeting(custStatus, firstName)}\n\n` +
-        `Чтобы начать новый обмен — отправь код с карточки Wildberries или ссылку на геймпасс, и мы всё сделаем!`
-      );
+      await ctx.reply(getIdleGreeting(custStatus, firstName));
       return;
     }
 
     await ctx.reply(
-      "❌ Код активации не найден.\n\n" +
-      "Пожалуйста, перейдите по ссылке из инструкции ещё раз — ссылка должна содержать ваш уникальный код."
+      "👋 Привет! Здесь ты можешь обменять Wildberries-карту на робуксы.\n\n" +
+      "Чтобы начать — открой инструкцию на нашем сайте:\n" +
+      "🔗 https://robloxbank.ru/guide?source=wb\n\n" +
+      "Там подробная пошаговая инструкция. После активации кода возвращайся сюда и присылай ссылку на геймпасс!"
     );
     return;
   }
@@ -271,10 +272,13 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
 async function handleRefActivation(
   ctx: MessageContext,
   vkUserId: number,
-  code: string
+  rawCode: string
 ): Promise<void> {
+  const isGuideMode = rawCode.startsWith("GD") && rawCode.length === 9;
+  const code = isGuideMode ? rawCode.substring(2) : rawCode;
+
   if (!(await isVkSubscribed(ctx, vkUserId))) {
-    await sendVkSubPrompt(ctx, code);
+    await sendVkSubPrompt(ctx, rawCode);
     return;
   }
 
@@ -286,10 +290,9 @@ async function handleRefActivation(
     await ctx.reply("❌ Код не найден. Проверь правильность ввода на карточке.");
     return;
   }
-  // Only hard-block when code is definitively claimed (isUsed + userId set).
-  // isUsed=true with userId=null means the site pre-activated it — the bot
-  // will link the user atomically at the gamepass-submission step.
-  if (wbCode.isUsed && wbCode.userId != null) {
+  // Block when the code is claimed by any user (gamepass submitted or TG provisional order).
+  // isUsed=true → gamepass was submitted; status=CLAIMED+userId → TG provisional order exists.
+  if (wbCode.isUsed || (wbCode.status === "CLAIMED" && wbCode.userId != null)) {
     await ctx.reply("⚠️ Этот код уже был активирован.");
     return;
   }
@@ -343,14 +346,25 @@ async function handleRefActivation(
   // Greeting from shared helper — no double-up, single source of truth
   const greetLine = getGreeting(custStatus, firstName);
 
-  await ctx.reply(
-    greetLine + `\n` +
-    `✅ Код ${code} активирован!\n` +
-    bonusText +
-    `Осталось совсем чуть-чуть — пришли Asset ID или ссылку на геймпасс.\n` +
-    `📌 Убедись, что цена геймпасса ровно ${passPrice} R$\n\n` +
-    `Жду ссылку 👇`
-  );
+  if (isGuideMode) {
+    await ctx.reply(
+      greetLine + `\n` +
+      `✅ Код ${code} зафиксирован!\n\n` +
+      `Если геймпасс уже создан — кидай ссылку 👇\n\n` +
+      `Если нужна инструкция — возвращайся на сайт:\n` +
+      `👉 https://www.robloxbank.ru/guide?source=wb\n` +
+      `Там подробная пошаговая инструкция!`
+    );
+  } else {
+    await ctx.reply(
+      greetLine + `\n` +
+      `✅ Код ${code} активирован!\n` +
+      bonusText +
+      `Осталось совсем чуть-чуть — пришли Asset ID или ссылку на геймпасс.\n` +
+      `📌 Убедись, что цена геймпасса ровно ${passPrice} R$\n\n` +
+      `Жду ссылку 👇`
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -402,6 +416,18 @@ async function handleGamepassLink(
 
   if (!gamepassInfo.validationSkipped) {
     // Normal validation — only runs when Roblox API was reachable
+    if (gamepassInfo.isGamePrivate) {
+      await ctx.reply(
+        `❌ Геймпасс находится в закрытой или недоступной игре.\n\n` +
+        `Создай новый геймпасс в публичной игре:\n` +
+        `• Creator Dashboard → Creations → Passes → Create\n` +
+        `• Выбери публичную игру\n` +
+        `• Установи цену ${expectedPrice} R$\n\n` +
+        `Затем пришли ссылку на новый геймпасс.`
+      );
+      return;
+    }
+
     if (!gamepassInfo.isActive) {
       await ctx.reply(
         `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
@@ -590,7 +616,7 @@ async function handleReviewScreenshot(
       // User is in AWAITING_REVIEW state but sent no photo — guide them
       await ctx.reply(
         "📸 Пришли скриншот отзыва в виде фотографии (не файлом).\n" +
-        "После проверки администратором ты получишь +50 R$."
+        "После проверки администратором ты получишь +100 R$."
       );
     }
     return;
@@ -701,28 +727,34 @@ async function handleIdleMessage(
     }
 
     const label: Record<string, string> = {
-      PENDING:   "⏳ В обработке",
-      COMPLETED: "✅ Выполнен",
-      REJECTED:  "❌ Отклонён",
+      AWAITING_GAMEPASS: "⌛ Ожидаем геймпасс",
+      PENDING:           "⏳ В обработке",
+      IN_PROGRESS:       "🔧 В работе",
+      COMPLETED:         "✅ Выполнен",
+      REJECTED:          "❌ Отклонён",
     };
 
     const passPrice = Math.ceil((order.amount as number) / 0.7);
     const shortId   = (order.id as string).slice(-6).toUpperCase();
     const statusStr = label[order.status] ?? order.status;
 
-    const calm =
-      order.status === "PENDING"
+    const hint =
+      order.status === "AWAITING_GAMEPASS"
+        ? `\n\nПришли ссылку на геймпасс с ценой ${passPrice} R$ — и мы возьмём в работу!`
+        : order.status === "PENDING"
         ? "\n\nНе переживай — менеджер работает в порядке очереди, среднее время 15–30 мин. Напишем сами."
         : "";
+
+    const gamepassLine = order.gamepassUrl ? `🔗 ${order.gamepassUrl}\n` : "";
 
     await ctx.reply(
       `📦 Заявка #${shortId}\n` +
       `━━━━━━━━━━━━━━━━\n` +
       `💎 Сумма: ${order.amount} R$ (Геймпасс: ${passPrice} R$)\n` +
       `🔑 Код ВБ: ${order.wbCode}\n` +
-      `🔗 ${order.gamepassUrl}\n` +
+      gamepassLine +
       `📊 Статус: ${statusStr}` +
-      calm
+      hint
     );
     return;
   }

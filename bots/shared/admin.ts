@@ -199,7 +199,7 @@ export async function sendAdminReviewCard(payload: ReviewCardPayload): Promise<v
 
   const reply_markup = {
     inline_keyboard: [[
-      { text: "🎁 Начислить +50 R$", callback_data: CB.reviewOk(payload.orderId, payload.userId) },
+      { text: "🎁 Начислить +100 R$", callback_data: CB.reviewOk(payload.orderId, payload.userId) },
       { text: "❌ Отклонить",         callback_data: CB.reviewNo(payload.orderId, payload.userId) },
     ]],
   };

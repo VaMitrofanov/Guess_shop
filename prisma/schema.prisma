@@ -88,6 +88,7 @@ enum Platform {
 }
 
 enum WbOrderStatus {
+  AWAITING_GAMEPASS
   PENDING
   IN_PROGRESS
   COMPLETED
@@ -104,7 +105,7 @@ enum WbCodeStatus {
 model WbOrder {
   id              String        @id @default(cuid())
   amount          Int
-  gamepassUrl     String
+  gamepassUrl     String?
   status          WbOrderStatus @default(PENDING)
   platform        Platform
   userId          String

@@ -4,7 +4,44 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Shield, Wifi } from "lucide-react";
 
-type State = "detecting" | "vpn-on" | "vpn-off";
+type State = "detecting" | "vpn-on" | "vpn-off" | "hidden";
+
+// All IANA timezone identifiers that correspond to Russian territory.
+const RU_TIMEZONES = new Set([
+  "Europe/Moscow",
+  "Europe/Kaliningrad",
+  "Europe/Samara",
+  "Europe/Ulyanovsk",
+  "Europe/Volgograd",
+  "Europe/Kirov",
+  "Europe/Astrakhan",
+  "Asia/Yekaterinburg",
+  "Asia/Omsk",
+  "Asia/Novosibirsk",
+  "Asia/Barnaul",
+  "Asia/Tomsk",
+  "Asia/Novokuznetsk",
+  "Asia/Krasnoyarsk",
+  "Asia/Irkutsk",
+  "Asia/Chita",
+  "Asia/Yakutsk",
+  "Asia/Khandyga",
+  "Asia/Vladivostok",
+  "Asia/Ust-Nera",
+  "Asia/Magadan",
+  "Asia/Sakhalin",
+  "Asia/Srednekolymsk",
+  "Asia/Kamchatka",
+  "Asia/Anadyr",
+]);
+
+function isRuTimezone(): boolean {
+  try {
+    return RU_TIMEZONES.has(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  } catch {
+    return false;
+  }
+}
 
 const TG_ICON = (
   <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 flex-shrink-0">
@@ -29,15 +66,11 @@ function Card({
   label: string;
   hint: string;
   highlighted: boolean;
-  color: string; // hex accent
+  color: string;
 }) {
-  const ring = highlighted
-    ? `border-[${color}]/60 bg-[${color}]/15 shadow-[0_0_12px_${color}22]`
-    : `border-[${color}]/20 bg-[${color}]/5`;
-
   return (
     <div
-      className={`flex items-center gap-2.5 px-3 py-2.5 border flex-1 transition-all ${ring}`}
+      className="flex items-center gap-2.5 px-3 py-2.5 border flex-1 transition-all"
       style={
         highlighted
           ? {
@@ -74,25 +107,48 @@ export function ConnectivityAssistant() {
   const [state, setState] = useState<State>("detecting");
 
   useEffect(() => {
+    const ruTz = isRuTimezone();
     const controller = new AbortController();
+    // Abort after 5 s so we don't hang forever on a blocked API.
+    const timer = setTimeout(() => controller.abort(), 5000);
+
     fetch("https://ipapi.co/json/", {
       signal: controller.signal,
       cache: "no-store",
     })
       .then((r) => r.json())
       .then((data: { country_code?: string }) => {
-        setState(data.country_code !== "RU" ? "vpn-on" : "vpn-off");
+        const ipRu = data.country_code === "RU";
+        if (ipRu) {
+          // IP is Russia — definitely no VPN (or Russian VPN server, treat same).
+          setState("vpn-off");
+        } else if (data.country_code) {
+          // Got a valid non-RU IP. If timezone says Russia → VPN is on.
+          // If timezone is also non-Russian → user is outside Russia → hide.
+          setState(ruTz ? "vpn-on" : "hidden");
+        } else {
+          // Unexpected response shape — fall back to timezone.
+          setState(ruTz ? "vpn-off" : "hidden");
+        }
       })
       .catch(() => {
-        // Treat fetch failure as "outside RU / VPN on"
-        setState("vpn-on");
-      });
-    return () => controller.abort();
+        // API unreachable (blocked / timed out).
+        // Russian timezone = almost certainly in Russia, API just failed → vpn-off.
+        // Non-Russian timezone = outside Russia → hide.
+        setState(ruTz ? "vpn-off" : "hidden");
+      })
+      .finally(() => clearTimeout(timer));
+
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
   }, []);
 
-  if (state === "detecting") return null;
+  if (state === "detecting" || state === "hidden") return null;
 
   const isVpnOn = state === "vpn-on";
+  const accentColor = isVpnOn ? "#229ED9" : "#0077FF";
 
   const tgCard = (
     <Card
@@ -116,8 +172,6 @@ export function ConnectivityAssistant() {
     />
   );
 
-  const accentColor = isVpnOn ? "#229ED9" : "#0077FF";
-
   return (
     <motion.div
       initial={{ opacity: 0, y: -6 }}
@@ -132,18 +186,11 @@ export function ConnectivityAssistant() {
           background: `${accentColor}08`,
         }}
       >
-        {/* Header row */}
         <div className="flex items-center gap-2 mb-2">
           {isVpnOn ? (
-            <Shield
-              className="w-3.5 h-3.5 flex-shrink-0"
-              style={{ color: accentColor }}
-            />
+            <Shield className="w-3.5 h-3.5 flex-shrink-0" style={{ color: accentColor }} />
           ) : (
-            <Wifi
-              className="w-3.5 h-3.5 flex-shrink-0"
-              style={{ color: accentColor }}
-            />
+            <Wifi className="w-3.5 h-3.5 flex-shrink-0" style={{ color: accentColor }} />
           )}
           <span
             className="font-black text-[9px] uppercase tracking-[0.22em]"
@@ -156,14 +203,12 @@ export function ConnectivityAssistant() {
           </span>
         </div>
 
-        {/* Body */}
         <p className="text-xs md:text-sm text-zinc-400 font-medium leading-relaxed mb-3">
           {isVpnOn
             ? "Мы позаботились о каждой детали. VPN помогает Telegram стабильнее работать в РФ — вы в выигрыше. ВКонтакте, напротив, иногда блокирует авторизацию через VPN, поэтому для VK лучше его отключить."
             : "Всё отлично — прямое соединение идеально для ВКонтакте. Если бот Telegram не открывается сразу, попробуйте включить VPN или прокси: Telegram в некоторых регионах РФ работает только через него."}
         </p>
 
-        {/* Status cards */}
         <div className="flex gap-2">
           {isVpnOn ? [tgCard, vkCard] : [vkCard, tgCard]}
         </div>

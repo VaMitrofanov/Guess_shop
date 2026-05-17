@@ -133,11 +133,44 @@ export interface GamepassDetails {
    * admin review.
    */
   validationSkipped?: boolean;
+  /** true when the gamepass's parent game is private / not playable. */
+  isGamePrivate?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Direct Roblox calls
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns true if the game hosting this gamepass is private / not playable.
+ * Fail-open: returns false on any network error so we never block the user due
+ * to an API outage.
+ */
+async function checkGamePrivate(gamepassId: string): Promise<boolean> {
+  try {
+    // Step 1: resolve the universe ID for this asset
+    const uRes = await rFetch(
+      `https://apis.roblox.com/universes/v1/assets/${gamepassId}/universe`
+    );
+    if (!uRes.ok) return false;
+    const uData: any = await uRes.json().catch(() => null);
+    const universeId = uData?.universeId;
+    if (!universeId) return false;
+
+    // Step 2: check if the universe is playable
+    const gRes = await rFetch(
+      `https://games.roblox.com/v1/games?universeIds=${universeId}`
+    );
+    if (!gRes.ok) return false;
+    const gData: any = await gRes.json().catch(() => null);
+    const game = (gData?.data ?? [])[0];
+    if (!game) return false;
+
+    return game.isPlayable === false;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Hits Roblox APIs directly — no bridge routing.
@@ -212,7 +245,10 @@ export async function getGamepassDetailsDirect(
       const items: any[] = Array.isArray(json) ? json : (json?.data ?? []);
       const item = items.find((x: any) => String(x?.id) === gamepassId || String(x?.assetId) === gamepassId) ?? items[0];
       const parsed = parseItem(item, "marketplace-items");
-      if (parsed) return parsed;
+      if (parsed) {
+        if (await checkGamePrivate(gamepassId)) parsed.isGamePrivate = true;
+        return parsed;
+      }
     } else {
       const body = await res.text().catch(() => "");
       console.warn(`[Roblox/bots] endpoint 1 (marketplace-items) failed: HTTP ${res.status} for id=${gamepassId} — ${body.slice(0, 300)}`);
@@ -235,7 +271,10 @@ export async function getGamepassDetailsDirect(
       const items: any[] = Array.isArray(json) ? json : (json?.data ?? []);
       const item = items[0];
       const parsed = parseItem(item, "catalog/items/details");
-      if (parsed) return parsed;
+      if (parsed) {
+        if (await checkGamePrivate(gamepassId)) parsed.isGamePrivate = true;
+        return parsed;
+      }
     } else {
       const body = await res.text().catch(() => "");
       console.warn(`[Roblox/bots] endpoint 2 (catalog/items/details) failed: HTTP ${res.status} for id=${gamepassId} — ${body.slice(0, 300)}`);
@@ -251,7 +290,10 @@ export async function getGamepassDetailsDirect(
     if (res.ok) {
       const d = await res.json();
       const parsed = parseItem(d, "economy/game-passes");
-      if (parsed) return parsed;
+      if (parsed) {
+        if (await checkGamePrivate(gamepassId)) parsed.isGamePrivate = true;
+        return parsed;
+      }
     } else {
       const body = await res.text().catch(() => "");
       console.warn(`[Roblox/bots] endpoint 3 (economy/game-passes) failed: HTTP ${res.status} for id=${gamepassId} — ${body.slice(0, 300)}`);
@@ -266,7 +308,10 @@ export async function getGamepassDetailsDirect(
     httpResponses++;
     if (res.ok) {
       const parsed = parseItem(await res.json(), "roproxy/product-info");
-      if (parsed) return parsed;
+      if (parsed) {
+        if (await checkGamePrivate(gamepassId)) parsed.isGamePrivate = true;
+        return parsed;
+      }
     } else {
       const body = await res.text().catch(() => "");
       console.warn(`[Roblox/bots] endpoint 4 (roproxy/product-info) failed: HTTP ${res.status} for id=${gamepassId} — ${body.slice(0, 300)}`);

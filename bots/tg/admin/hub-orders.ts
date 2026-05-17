@@ -28,6 +28,7 @@ function waitTime(createdAt: Date): string {
 }
 
 const STATUS_LABELS: Record<string, string> = {
+  AWAITING_GAMEPASS: "⌛ Ожидаем",
   PENDING: "⏳ Ожидает",
   IN_PROGRESS: "🔧 В работе",
   COMPLETED: "✅ Выполнен",
@@ -40,17 +41,19 @@ export async function showOrdersHub(ctx: Context): Promise<void> {
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-  const [pendingCount, inProgressCount, todayDone] = await Promise.all([
+  const [awaitingCount, pendingCount, inProgressCount, todayDone] = await Promise.all([
+    (db as any).wbOrder.count({ where: { status: "AWAITING_GAMEPASS" } }),
     (db as any).wbOrder.count({ where: { status: "PENDING" } }),
     (db as any).wbOrder.count({ where: { status: "IN_PROGRESS" } }),
     (db as any).wbOrder.count({ where: { status: "COMPLETED", updatedAt: { gte: startOfDay } } }),
   ]);
 
-  const activeTotal = pendingCount + inProgressCount;
+  const activeTotal = awaitingCount + pendingCount + inProgressCount;
 
   const text =
     `📦 <b>ЗАКАЗЫ</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
+    (awaitingCount > 0 ? `⌛ Ожидают ссылку: <b>${awaitingCount}</b>\n` : ``) +
     `⏳ Ожидают: <b>${pendingCount}</b>\n` +
     `🔧 В работе: <b>${inProgressCount}</b>\n` +
     `📊 Сегодня выполнено: <b>${todayDone}</b>\n` +
@@ -74,7 +77,7 @@ export async function showOrdersHub(ctx: Context): Promise<void> {
 
 export async function showActiveOrders(ctx: Context): Promise<void> {
   const orders = await (db as any).wbOrder.findMany({
-    where: { status: { in: ["PENDING", "IN_PROGRESS"] } },
+    where: { status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] } },
     include: { user: true },
     orderBy: { createdAt: "asc" },
     take: 15,
@@ -170,7 +173,7 @@ export async function renderExtendedCard(order: any) {
     where: { code: { equals: order.wbCode, mode: "insensitive" } },
   });
   const reviewLine = wbCode?.reviewBonusClaimed
-    ? `🌟 Отзыв: <b>Оставлен (+50 R$)</b>\n`
+    ? `🌟 Отзыв: <b>Оставлен (+100 R$)</b>\n`
     : `🌟 Отзыв: <b>Нет</b>\n`;
 
   const reasonLine = order.status === "REJECTED" && order.rejectionReason
@@ -194,9 +197,9 @@ export async function renderExtendedCard(order: any) {
     `📊 Статус: <b>${STATUS_LABELS[order.status] || order.status}</b>${reasonLine}`;
 
   // ── Inline keyboard ────────────────────────────────────────────────────
-  // Row 1: 🔗 Открыть Gamepass (wide URL button)
-  // Row N: 💬 Написать | ⬅️ Назад
-  const gamepassRow = [Markup.button.url("🔗 Открыть Gamepass", order.gamepassUrl)];
+  const gamepassRow: any[] | null = order.gamepassUrl
+    ? [Markup.button.url("🔗 Открыть Gamepass", order.gamepassUrl)]
+    : null;
 
   const bottomRow: any[] = [];
   if (contactUrl) {
@@ -207,9 +210,14 @@ export async function renderExtendedCard(order: any) {
 
   let keyboard: any[][];
 
-  if (order.status === "PENDING") {
+  if (order.status === "AWAITING_GAMEPASS") {
     keyboard = [
-      gamepassRow,
+      ...(gamepassRow ? [gamepassRow] : []),
+      bottomRow,
+    ];
+  } else if (order.status === "PENDING") {
+    keyboard = [
+      ...(gamepassRow ? [gamepassRow] : []),
       [Markup.button.callback("🔧 В работу", CB.orderTakeWork(order.id))],
       [
         Markup.button.callback("✅ Выполнил", CB.adminOk(order.id)),
@@ -219,7 +227,7 @@ export async function renderExtendedCard(order: any) {
     ];
   } else if (order.status === "IN_PROGRESS") {
     keyboard = [
-      gamepassRow,
+      ...(gamepassRow ? [gamepassRow] : []),
       [
         Markup.button.callback("✅ Выполнил", CB.adminOk(order.id)),
         Markup.button.callback("❌ Отклонить", CB.adminErr(order.id)),
@@ -227,7 +235,7 @@ export async function renderExtendedCard(order: any) {
       bottomRow,
     ];
   } else {
-    keyboard = [gamepassRow, bottomRow];
+    keyboard = [...(gamepassRow ? [gamepassRow] : []), bottomRow];
   }
 
   return { text, keyboard };
@@ -395,7 +403,9 @@ export async function showBatchView(ctx: Context): Promise<void> {
 
   for (const o of pending) {
     const shortId = o.id.slice(-6).toUpperCase();
-    text += `• <a href="${o.gamepassUrl}">#${shortId}</a> — ${o.amount} R$\n`;
+    text += o.gamepassUrl
+      ? `• <a href="${o.gamepassUrl}">#${shortId}</a> — ${o.amount} R$\n`
+      : `• #${shortId} — ${o.amount} R$ (ожидаем ссылку)\n`;
   }
 
   text += `\n<i>Откройте все ссылки, выкупите геймпассы, затем нажмите «Подтвердить».</i>`;

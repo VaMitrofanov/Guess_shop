@@ -1738,6 +1738,7 @@ function WBGate({ onSuccess }: WBGateProps) {
   const [mode, setMode] = useState<"guide" | "ready">("guide");
   const [quickTarget, setQuickTarget] = useState<"tg" | "vk" | null>(null);
   const [showVkAuth, setShowVkAuth] = useState(false);
+  const [vkAuthCode, setVkAuthCode] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1784,8 +1785,8 @@ function WBGate({ onSuccess }: WBGateProps) {
     }
   };
 
-  // Quick TG redirect — TG bot picks up the code via /start deep-link payload.
-  const handleQuickRedirect = async (target: "tg" | "vk") => {
+  // Quick TG/VK redirect — guide=true sends wbg_ prefix so bot sends instruction welcome.
+  const handleQuickRedirect = async (target: "tg" | "vk", guide = false) => {
     if (code.length < 7) {
       setError("Сначала введите 7-значный код с карточки");
       inputRef.current?.focus();
@@ -1797,15 +1798,12 @@ function WBGate({ onSuccess }: WBGateProps) {
     try {
       await validateAndPersist();
       if (target === "tg") {
-        window.location.href = `https://t.me/RobloxBankBot?start=wb_${code}_${getOrInitSessionId()}`;
+        const prefix = guide ? "wbg" : "wb";
+        window.location.href = `https://t.me/RobloxBankBot?start=${prefix}_${code}_${getOrInitSessionId()}`;
         return;
       }
-      // VK path: don't redirect blindly to vk.me/club?ref=… — VK does NOT
-      // forward `ref` reliably through messenger deep-links, and the bot
-      // can't recover state without a vk_id↔wbCode link in DB.
-      // Instead, surface the VKAuthButton inline; VK ID auth attaches the
-      // user's vkId to the code (see auth.ts → vk-id authorize) and then
-      // VKAuthButton itself redirects to the community.
+      // VK path: guide mode passes GD-prefixed code so bot sends instruction welcome.
+      setVkAuthCode(guide ? `GD${code}` : code);
       setShowVkAuth(true);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Неизвестная ошибка";
@@ -1924,23 +1922,57 @@ function WBGate({ onSuccess }: WBGateProps) {
               )}
 
               {isGuideMode ? (
-                <button
-                  type="submit"
-                  disabled={loading || !codeReady}
-                  className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-[12px] md:text-sm uppercase tracking-widest text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{
-                    background: loading || !codeReady
-                      ? "linear-gradient(135deg, #4a3a10, #2a2008)"
-                      : "linear-gradient(135deg, #c9a84c 0%, #f0c040 50%, #c9a84c 100%)",
-                    color: loading || !codeReady ? "#888" : "#0a0c14",
-                  }}
-                >
-                  {loading ? (
-                    <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Проверяем...</>
+                <div className="space-y-3">
+                  <p className="text-[11px] text-zinc-500 font-medium leading-relaxed text-center">
+                    Переходите в мессенджер — получите инструкцию или сразу отправьте ссылку на геймпасс.
+                  </p>
+                  <ConnectivityAssistant />
+                  <button
+                    type="button"
+                    onClick={() => handleQuickRedirect("tg", true)}
+                    disabled={loading || !codeReady}
+                    className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-[12px] md:text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#229ED9]/50 bg-[#229ED9]/15 hover:bg-[#229ED9]/25 hover:border-[#229ED9]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {loading && quickTarget === "tg" ? (
+                      <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем Telegram...</>
+                    ) : (
+                      <>
+                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0 text-[#229ED9]">
+                          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z"/>
+                        </svg>
+                        Получить в Telegram
+                      </>
+                    )}
+                  </button>
+                  {!showVkAuth ? (
+                    <button
+                      type="button"
+                      onClick={() => handleQuickRedirect("vk", true)}
+                      disabled={loading || !codeReady}
+                      className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-[12px] md:text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 hover:bg-[#0077FF]/25 hover:border-[#0077FF]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {loading && quickTarget === "vk" ? (
+                        <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем VK...</>
+                      ) : (
+                        <>
+                          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0 text-[#0077FF]">
+                            <path d="M12.785 16.241s.288-.032.435-.194c.135-.149.13-.43.13-.43s-.019-1.306.572-1.497c.582-.188 1.331 1.252 2.124 1.806.6.42 1.056.328 1.056.328l2.122-.03s1.111-.07.585-.957c-.043-.073-.306-.658-1.578-1.853-1.331-1.252-1.153-1.049.451-3.224.977-1.323 1.367-2.13 1.245-2.474-.116-.328-.834-.241-.834-.241l-2.387.015s-.177-.024-.308.056c-.128.078-.21.262-.21.262s-.378 1.022-.882 1.892c-1.062 1.834-1.487 1.931-1.661 1.816-.405-.267-.304-1.069-.304-1.638 0-1.778.267-2.519-.51-2.711-.258-.064-.448-.106-1.108-.113-.847-.009-1.564.003-1.97.207-.27.136-.479.439-.351.456.157.022.514.099.703.363.244.341.236 1.108.236 1.108s.14 2.083-.328 2.342c-.32.178-.76-.185-1.706-1.85-.484-.853-.85-1.795-.85-1.795s-.07-.176-.196-.27c-.152-.114-.365-.15-.365-.15l-2.268.015s-.34.01-.466.16c-.111.135-.009.412-.009.412s1.776 4.221 3.787 6.349c1.844 1.95 3.938 1.822 3.938 1.822h.949z"/>
+                          </svg>
+                          Получить в ВКонтакте
+                        </>
+                      )}
+                    </button>
                   ) : (
-                    <><Send className="w-4 h-4" />Получить инструкцию</>
+                    <div className="space-y-2">
+                      <p className="text-[10px] text-[#0077FF]/80 font-black uppercase tracking-widest text-center">
+                        Авторизуйтесь через VK ID — после этого откроется чат с менеджером
+                      </p>
+                      <div className="border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 px-4 py-3 flex items-center justify-center min-h-[64px]">
+                        <VKAuthButton mode="order" wbCode={vkAuthCode} />
+                      </div>
+                    </div>
                   )}
-                </button>
+                </div>
               ) : (
                 <div className="space-y-3">
                   <p className="text-[11px] text-zinc-500 font-medium leading-relaxed text-center">
@@ -1988,7 +2020,7 @@ function WBGate({ onSuccess }: WBGateProps) {
                         Авторизуйтесь через VK ID — после этого откроется чат с менеджером
                       </p>
                       <div className="border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 px-4 py-3 flex items-center justify-center min-h-[64px]">
-                        <VKAuthButton mode="order" wbCode={code} />
+                        <VKAuthButton mode="order" wbCode={vkAuthCode} />
                       </div>
                     </div>
                   )}
