@@ -183,8 +183,10 @@ export function registerStart(bot: Telegraf): void {
       return;
     }
 
-    // Block only when the gamepass was already submitted (isUsed=true = order created)
-    if (wbCode.isUsed) {
+    // Block only when the code was actually completed in the bot (isUsed + userId set).
+    // isUsed=true with userId=null means the website reserved it but the bot flow
+    // never finished — allow those through so users aren't silently stuck.
+    if (wbCode.isUsed && wbCode.userId) {
       await ctx.reply("⚠️ Этот код уже был активирован ранее.");
       return;
     }
@@ -561,11 +563,17 @@ export function registerText(bot: Telegraf): void {
           }
         }
 
+        // If user typed a WB code directly (7 alphanumeric chars with at least one letter)
+        if (!state && /^[A-Za-z0-9]{7}$/.test(text) && /[A-Za-z]/.test(text)) {
+          await handleWbCodeTextEntry(bot, ctx, tgId, text);
+          return;
+        }
+
         if (!state) {
           await ctx.reply(
             "У тебя сейчас нет активных заявок.\n\n" +
             "📦 Проверить статус: /status\n" +
-            "🔑 Активировать код: перейди по ссылке на вкладыше",
+            "🔑 Активировать код: перейди по ссылке на вкладыше или напиши его прямо здесь",
             {
               parse_mode: "HTML",
               ...Markup.inlineKeyboard([[supportBtn("Нужна помощь?")]]),
@@ -961,6 +969,83 @@ async function handleAdminSearch(ctx: any, query: string) {
   }
 
   return ctx.reply("🔎 Ничего не найдено. Введи ID заказа (последние 6-8 символов) или код WB.");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WB code direct text entry — user typed the code manually (e.g. after getting
+// stuck due to a prior error or losing the deep link)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text: string): Promise<void> {
+  const codeInput = text.toUpperCase();
+
+  const wbCode = await (db as any).wbCode.findFirst({
+    where: { code: { equals: codeInput, mode: "insensitive" } },
+  });
+
+  if (!wbCode) {
+    await ctx.reply(
+      `❌ Код <b>${codeInput}</b> не найден.\n\n` +
+      `Проверь правильность ввода или обратись в поддержку:`,
+      { parse_mode: "HTML", ...withSupportKb() }
+    );
+    return;
+  }
+
+  if ((wbCode.isUsed && wbCode.userId) || wbCode.status === "CLAIMED") {
+    await ctx.reply("⚠️ Этот код уже был активирован ранее.");
+    return;
+  }
+
+  // Valid code — find or create user and set session
+  let user = await (db as any).user.findUnique({ where: { tgId } });
+  if (!user) {
+    user = await (db as any).user.create({
+      data: {
+        tgId,
+        name: [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || null,
+      },
+    });
+  }
+
+  const totalAmount = wbCode.denomination + (user.balance || 0);
+  const passPrice = Math.ceil(totalAmount / 0.7);
+
+  pendingLink.set(ctx.from.id, { wbCode: wbCode.code, denomination: totalAmount });
+  clearFailCounts(ctx.from.id);
+
+  // Subscription gate
+  const subscribed = await checkSubscription(bot, ctx.from.id);
+  if (!subscribed) {
+    await ctx.reply(
+      `🎉 Код <b>${codeInput}</b> принят!\n\n` +
+      `Ты в одном шаге — у наших клиентов есть закрытый канал: там первыми узнают о выкупе, ` +
+      `получают бонусы на следующий заказ и эксклюзивные акции.\n\n` +
+      `👇 Загляни — это бесплатно, а потом присылай ссылку на геймпасс с ценой ровно <b>${passPrice} R$</b>:`,
+      {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        ...Markup.inlineKeyboard([[Markup.button.url("⭐ Стать участником", "https://t.me/Roblox_Bank_Tg")]]),
+      }
+    );
+    return;
+  }
+
+  let bonusText = "";
+  if (user.balance && user.balance > 0) {
+    bonusText = `🎁 Использован бонус: <b>${user.balance} R$</b>\n💎 Итого к выдаче: <b>${totalAmount} R$</b>\n\n`;
+  } else {
+    bonusText = `💎 Номинал: <b>${wbCode.denomination} R$</b>\n\n`;
+  }
+
+  await ctx.reply(
+    `✅ Код <b>${codeInput}</b> активирован!\n` +
+    bonusText +
+    `Осталось совсем чуть-чуть — пришли <b>Asset ID</b> или <b>ссылку</b> на геймпасс.\n` +
+    `📌 Убедись, что цена геймпасса ровно <b>${passPrice} R$</b>\n\n` +
+    `Жду ссылку 👇`,
+    { parse_mode: "HTML", link_preview_options: { is_disabled: true } }
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
