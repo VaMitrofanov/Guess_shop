@@ -77,15 +77,14 @@ if (disablePolling) {
     "This instance serves as a validation bridge only."
   );
 } else {
-  bot.launch().then(() => {
-    console.log("[TG] Bot started ✅");
-    console.log(
-      `[TG] Admin IDs: ${process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "(none)"}`
-    );
-  }).catch((err: Error) => {
+  bot.launch().catch((err: Error) => {
     console.error("[TG] Failed to start:", err);
     process.exit(1);
   });
+  console.log("[TG] Bot started ✅ (polling)");
+  console.log(
+    `[TG] Admin IDs: ${process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "(none)"}`
+  );
 }
 
 process.once("SIGINT",  () => { console.log("[TG] Stopping…"); bot.stop("SIGINT");  });
