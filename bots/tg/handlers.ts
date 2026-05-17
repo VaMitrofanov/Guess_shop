@@ -25,12 +25,9 @@ function supportBtn(label = "💬 Написать в поддержку") {
   return Markup.button.url(label, SUPPORT_URL);
 }
 
-/**
- * Returns inlineKeyboard rows. Pass extra rows (e.g. refresh button) as the
- * first argument; support button is always appended as the last row.
- */
-function withSupportKb(extraRows: any[][] = []): ReturnType<typeof Markup.inlineKeyboard> {
-  return Markup.inlineKeyboard([...extraRows, [supportBtn()]]);
+/** Returns an inlineKeyboard with a single support button row. */
+function withSupportKb(label?: string): ReturnType<typeof Markup.inlineKeyboard> {
+  return Markup.inlineKeyboard([[supportBtn(label)]]);
 }
 
 /** Get or init the fail-counter object for a user's current session. */
@@ -780,7 +777,7 @@ export function registerText(bot: Telegraf): void {
             throw Object.assign(new Error("Order already exists"), { code: "P2002" });
           }
         } else {
-          // No provisional order (shouldn't happen with new flow, defensive fallback)
+          // No provisional order — legitimate path for text-entry activations
           newOrder = await tx.wbOrder.create({
             data: {
               amount: state.denomination,
@@ -992,7 +989,10 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
     return;
   }
 
-  if ((wbCode.isUsed && wbCode.userId) || wbCode.status === "CLAIMED") {
+  // Same guard as registerStart — only block when the code was truly completed
+  // (isUsed=true + userId set). CLAIMED+isUsed=false is a provisional state
+  // (bot claimed it but gamepass not sent yet), which should still be allowed through.
+  if (wbCode.isUsed && wbCode.userId) {
     await ctx.reply("⚠️ Этот код уже был активирован ранее.");
     return;
   }
@@ -1006,6 +1006,12 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
         name: [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || null,
       },
     });
+  }
+
+  // If code is CLAIMED by a different user, block
+  if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
+    await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.");
+    return;
   }
 
   const totalAmount = wbCode.denomination + (user.balance || 0);
@@ -1046,6 +1052,31 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
     `Жду ссылку 👇`,
     { parse_mode: "HTML", link_preview_options: { is_disabled: true } }
   );
+
+  // Create provisional AWAITING_GAMEPASS order so the session can be restored
+  // from DB if the bot restarts before the user sends the gamepass link.
+  try {
+    await (db as any).$transaction(async (tx: any) => {
+      const existingOrder = await tx.wbOrder.findUnique({ where: { wbCode: wbCode.code } });
+      if (existingOrder) return; // already exists (e.g. user re-entered the code)
+      await tx.wbCode.update({
+        where: { code: wbCode.code },
+        data: { userId: user.id, status: "CLAIMED", isUsed: false },
+      });
+      await tx.wbOrder.create({
+        data: {
+          amount: totalAmount,
+          gamepassUrl: null,
+          status: "AWAITING_GAMEPASS",
+          platform: "TG",
+          userId: user.id,
+          wbCode: wbCode.code,
+        },
+      });
+    });
+  } catch (err) {
+    console.error("[TG] Text-entry provisional order creation failed:", err);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
