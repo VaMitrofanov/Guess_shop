@@ -56,15 +56,27 @@ export async function GET(req: NextRequest) {
   const spendByNmId      = advertData?.spendByNmId ?? {};
   const lastAdAttributedAt = settings?.lastAdAttributedAt ?? null;
   const realiz = realizResult.status === "fulfilled" ? realizResult.value : null;
-  // Global fallback: total storage / total sales (used when per-article data is missing)
   const storagePerUnitGlobal = realiz && realiz.salesCount > 0 && realiz.totalStorage > 0
     ? Math.round((realiz.totalStorage / realiz.salesCount) * 10) / 10
     : 0;
-  // Per-article storage map: article → storagePerUnit
+  const logPerUnitGlobal = realiz && realiz.salesCount > 0 && realiz.totalLogistics > 0
+    ? Math.round(realiz.totalLogistics / realiz.salesCount)
+    : 0;
+  const retPctGlobal = realiz && realiz.salesCount > 0
+    ? Math.round((realiz.returnCount / realiz.salesCount) * 100)
+    : 0;
+  const penaltyPerUnit = realiz && realiz.salesCount > 0 && realiz.totalPenalties > 0
+    ? Math.round((realiz.totalPenalties / realiz.salesCount) * 10) / 10
+    : 0;
+
   const storageByArticle: Record<string, number> = {};
+  const logByArticle:     Record<string, number> = {};
+  const retByArticle:     Record<string, number> = {};
   if (realiz) {
     for (const a of realiz.byArticle) {
       if (a.storagePerUnit > 0) storageByArticle[a.article] = a.storagePerUnit;
+      if (a.logPerUnit > 0)     logByArticle[a.article]     = a.logPerUnit;
+      if (a.retPct > 0)         retByArticle[a.article]     = a.retPct;
     }
   }
 
@@ -107,6 +119,11 @@ export async function GET(req: NextRequest) {
     spendByNmId,
     storagePerUnit: storagePerUnitGlobal,
     storageByArticle,
+    logPerUnit: logPerUnitGlobal,
+    logByArticle,
+    retPct: retPctGlobal,
+    retByArticle,
+    penaltyPerUnit,
     products,
     costByArticle: Object.fromEntries(costByArticle),
     lastAdAttributedAt,

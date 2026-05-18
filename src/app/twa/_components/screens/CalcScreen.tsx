@@ -10,6 +10,11 @@ interface UeData {
   spendByNmId:       Record<number, number>;
   storagePerUnit:    number;
   storageByArticle:  Record<string, number>;
+  logPerUnit:        number;
+  logByArticle:      Record<string, number>;
+  retPct:            number;
+  retByArticle:      Record<string, number>;
+  penaltyPerUnit:    number;
   products:          { nmID: number; article: string; price: number; discountedPrice: number; discount: number }[];
   costByArticle:     Record<string, { commission: number; taxRate: number; denomination: number | null }>;
   lastAdAttributedAt: string | null;
@@ -98,17 +103,18 @@ export default function CalcScreen({ token }: { token: string }) {
   const withAds = withAdsOverride !== null ? withAdsOverride : isAdvertisedAuto;
   const cpo     = withAds ? rawCpo : 0;
 
-  // Storage: per-article from realization report, fallback to global average
-  const article = product?.article ?? String(denom);
-  const storage = ud
-    ? (ud.storageByArticle[article] ?? ud.storagePerUnit)
-    : 0;
+  // Per-article costs from realization report, fallback to global averages
+  const article      = product?.article ?? String(denom);
+  const storage      = ud ? (ud.storageByArticle[article] ?? ud.storagePerUnit)  : 0;
+  const logistics    = ud ? (ud.logByArticle[article]     ?? ud.logPerUnit)       : 0;
+  const retPct       = ud ? (ud.retByArticle[article]     ?? ud.retPct)           : 0;
+  const penaltyPerUnit = ud?.penaltyPerUnit ?? 0;
 
   // Profit chain
   const afterComm = sellPrice * (1 - commission);
   const afterTax  = afterComm * (1 - taxRate);
   const profit    = sellPrice > 0 && kursRb > 0
-    ? afterTax - fixedCost - robuxCost - cpo - storage
+    ? afterTax - fixedCost - robuxCost - cpo - storage - logistics - penaltyPerUnit
     : NaN;
   const profitUsd = !isNaN(profit) && kursUsd > 0 ? profit / kursUsd : NaN;
   const marginPct = !isNaN(profit) && sellPrice > 0 ? (profit / sellPrice) * 100 : NaN;
@@ -278,9 +284,13 @@ export default function CalcScreen({ token }: { token: string }) {
           hasKurs ? `${kursRb}×${kursUsd}×${denom}/700` : undefined
         )}
         {withAds && cpo > 0 && row("−Реклама/ед", "−" + fmt(Math.round(cpo)), true, "атрибут.")}
+        {logistics > 0 && row("−Логистика/ед", "−" + fmt(Math.round(logistics)), true,
+          ud?.logByArticle[article] ? `арт. ${article}` : "среднее по всем"
+        )}
         {storage > 0 && row("−Хранение/ед", "−" + fmt(Math.round(storage)), true,
           ud?.storageByArticle[article] ? `арт. ${article}` : "среднее по всем"
         )}
+        {penaltyPerUnit > 0 && row("−Штрафы/ед", "−" + fmt(Math.round(penaltyPerUnit)), true, "среднее")}
 
         <div style={{ borderTop: "1px solid #3a3a3c", margin: "8px 0 6px" }} />
 
@@ -293,6 +303,7 @@ export default function CalcScreen({ token }: { token: string }) {
             {canCalc && !isNaN(profitUsd) && (
               <div style={{ fontSize: 12, color: "#8e8e93", marginTop: 2 }}>
                 ${profitUsd.toFixed(2)} · маржа {Math.round(marginPct)}%
+                {retPct > 0 && <span style={{ color: retPct >= 20 ? "#ff9f0a" : "#636366" }}> · возвраты {retPct}%</span>}
               </div>
             )}
           </div>
