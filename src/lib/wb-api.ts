@@ -350,7 +350,7 @@ export async function getRealizData(weeks = 4): Promise<TwaRealizData | null> {
     salesCount, returnCount, totalRevenue, totalPayout, totalLogistics, totalStorage, totalPenalties,
     byArticle: [...byArt.entries()].map(([article, a]) => ({
       article, sales: a.sales, payout: Math.round(a.payout),
-      commPct:       a.revenue > 0 ? Math.round(((a.revenue - a.payout) / a.revenue) * 1000) / 10 : 0,
+      commPct:       a.revenue > 0 ? Math.round((a.commSum / a.revenue) * 1000) / 10 : 0,
       logPerUnit:    a.sales > 0 ? Math.round(a.logistics / a.sales) : 0,
       retPct:        a.sales > 0 ? Math.round((a.returns / a.sales) * 100) : 0,
       storagePerUnit: a.sales > 0 ? Math.round((a.storage / a.sales) * 10) / 10 : 0,

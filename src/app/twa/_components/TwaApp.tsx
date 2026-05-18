@@ -2,9 +2,8 @@
 import { useState, useEffect } from "react";
 import BottomNav from "./BottomNav";
 import Dashboard from "./screens/Dashboard";
-import DynamicsScreen from "./screens/DynamicsScreen";
+import AnalyticsScreen from "./screens/AnalyticsScreen";
 import StocksScreen from "./screens/StocksScreen";
-import AdvertScreen from "./screens/AdvertScreen";
 import CodesScreen from "./screens/CodesScreen";
 import CalcScreen from "./screens/CalcScreen";
 
@@ -24,20 +23,25 @@ declare global {
   }
 }
 
-type Screen = "dashboard" | "dynamics" | "stocks" | "advert" | "codes" | "calc";
+type Screen = "dashboard" | "analytics" | "stocks" | "codes" | "calc";
+
+const SCREEN_TITLES: Record<Screen, string> = {
+  dashboard: "Главная",
+  analytics: "Аналитика",
+  stocks:    "Склад",
+  codes:     "Коды",
+  calc:      "Калькулятор",
+};
 
 export default function TwaApp() {
-  const [auth, setAuth] = useState<"loading" | "ok" | "error">("loading");
-  const [token, setToken] = useState<string | null>(null);
-  const [firstName, setFirstName] = useState("Admin");
-  const [screen, setScreen] = useState<Screen>("dashboard");
+  const [auth,     setAuth]     = useState<"loading" | "ok" | "error">("loading");
+  const [token,    setToken]    = useState<string | null>(null);
+  const [screen,   setScreen]   = useState<Screen>("dashboard");
   const [debugMsg, setDebugMsg] = useState("");
 
   useEffect(() => {
     let cancelled = false;
 
-    // SDK is loaded via beforeInteractive in root layout — it should be ready.
-    // Poll briefly as a safety net for any edge-case ordering.
     async function waitForInitData(maxMs = 3000): Promise<string> {
       const deadline = Date.now() + maxMs;
       while (Date.now() < deadline) {
@@ -66,7 +70,6 @@ export default function TwaApp() {
       localStorage.setItem("twa_token", data.token);
       if (cancelled) return;
       setToken(data.token);
-      setFirstName(data.firstName ?? "Admin");
       setAuth("ok");
       window.Telegram?.WebApp?.ready();
       window.Telegram?.WebApp?.expand();
@@ -96,7 +99,6 @@ export default function TwaApp() {
         return;
       }
 
-      // Fallback: initData absent on some Telegram iOS builds — use initDataUnsafe
       const unsafeUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
       if (unsafeUser?.id) {
         doAuth({ userId: unsafeUser.id, firstName: unsafeUser.first_name });
@@ -115,10 +117,10 @@ export default function TwaApp() {
 
   if (auth === "loading") {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "#1c1c1e", color: "#8e8e93", fontSize: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "#1c1c1e", color: "#8e8e93" }}>
         <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>🟣</div>
-          <div>Загрузка дашборда…</div>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>🟣</div>
+          <div style={{ fontSize: 14 }}>Загрузка…</div>
         </div>
       </div>
     );
@@ -126,9 +128,9 @@ export default function TwaApp() {
 
   if (auth === "error") {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "#1c1c1e", color: "#ff453a", fontSize: 14, padding: 24 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "#1c1c1e", color: "#ff453a", padding: 24 }}>
         <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>🔒</div>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>🔒</div>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Доступ запрещён</div>
           <div style={{ color: "#8e8e93", fontSize: 13 }}>Открывайте из Telegram-бота</div>
           {debugMsg && <div style={{ color: "#ff9f0a", fontSize: 11, marginTop: 12, fontFamily: "monospace" }}>{debugMsg}</div>}
@@ -137,29 +139,32 @@ export default function TwaApp() {
     );
   }
 
-  const screenProps = { token: token! };
+  const sp = { token: token! };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", background: "#1c1c1e", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#fff" }}>
-      {/* Header */}
-      <div style={{ padding: "12px 16px 8px", borderBottom: "1px solid #2c2c2e", flexShrink: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 16, color: "#bf5af2" }}>WB Dashboard</div>
-        <div style={{ fontSize: 12, color: "#8e8e93", marginTop: 2 }}>
-          {firstName} · {new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}
+    <div style={{
+      display: "flex", flexDirection: "column", height: "100dvh",
+      background: "#1c1c1e",
+      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      color: "#fff",
+    }}>
+      {/* Title bar */}
+      <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid #2c2c2e", flexShrink: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 18, letterSpacing: -0.3 }}>{SCREEN_TITLES[screen]}</div>
+        <div style={{ fontSize: 12, color: "#636366", marginTop: 1 }}>
+          {new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}
         </div>
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
-        {screen === "dashboard" && <Dashboard {...screenProps} />}
-        {screen === "dynamics"  && <DynamicsScreen {...screenProps} />}
-        {screen === "stocks"    && <StocksScreen {...screenProps} />}
-        {screen === "advert"    && <AdvertScreen {...screenProps} />}
-        {screen === "codes"     && <CodesScreen {...screenProps} />}
-        {screen === "calc"      && <CalcScreen {...screenProps} />}
+      <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
+        {screen === "dashboard" && <Dashboard       {...sp} />}
+        {screen === "analytics" && <AnalyticsScreen  {...sp} />}
+        {screen === "stocks"    && <StocksScreen     {...sp} />}
+        {screen === "codes"     && <CodesScreen      {...sp} />}
+        {screen === "calc"      && <CalcScreen       {...sp} />}
       </div>
 
-      {/* Bottom Nav */}
       <BottomNav active={screen} onChange={setScreen} />
     </div>
   );

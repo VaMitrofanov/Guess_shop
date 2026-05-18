@@ -72,11 +72,13 @@ export async function GET(req: NextRequest) {
   const storageByArticle: Record<string, number> = {};
   const logByArticle:     Record<string, number> = {};
   const retByArticle:     Record<string, number> = {};
+  const commByArticle:    Record<string, number> = {};
   if (realiz) {
     for (const a of realiz.byArticle) {
       if (a.storagePerUnit > 0) storageByArticle[a.article] = a.storagePerUnit;
       if (a.logPerUnit > 0)     logByArticle[a.article]     = a.logPerUnit;
       if (a.retPct > 0)         retByArticle[a.article]     = a.retPct;
+      if (a.commPct > 0)        commByArticle[a.article]    = a.commPct;
     }
   }
 
@@ -124,6 +126,7 @@ export async function GET(req: NextRequest) {
     retPct: retPctGlobal,
     retByArticle,
     penaltyPerUnit,
+    commByArticle,
     products,
     costByArticle: Object.fromEntries(costByArticle),
     lastAdAttributedAt,
