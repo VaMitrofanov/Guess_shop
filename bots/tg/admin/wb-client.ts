@@ -798,13 +798,13 @@ export async function updatePrice(nmID: number, price: number): Promise<boolean>
 
 // ── WB Settings (unit economics global config) ───────────────────────────────
 
-export async function getWbSettings(): Promise<{ kursRb: number; kursUsd: number; fixedCost: number }> {
+export async function getWbSettings(): Promise<{ kursRb: number; kursUsd: number; fixedCost: number; lastAdAttributedAt: Date | null }> {
   const s: any = await (db as any).wbSettings.upsert({
     where:  { id: 1 },
     update: {},
     create: { id: 1, kursRb: 4, kursUsd: 75, fixedCost: 87.5 },
   });
-  return { kursRb: s.kursRb, kursUsd: s.kursUsd, fixedCost: s.fixedCost };
+  return { kursRb: s.kursRb, kursUsd: s.kursUsd, fixedCost: s.fixedCost, lastAdAttributedAt: s.lastAdAttributedAt ?? null };
 }
 
 export async function updateWbSetting(field: "kursRb" | "kursUsd" | "fixedCost", value: number): Promise<void> {
@@ -1044,5 +1044,33 @@ export async function getAdvertStats(): Promise<WbAdvertSummary | null> {
 
   setToCache(cacheKey, result, 15 * 60 * 1000);
   return result;
+}
+
+// Total ad spend from fromDate to today — for attributive UE (delta since last attributed order).
+// Skips budget fetching; only needs fullstats totals.
+export async function getAdvertSpendForPeriod(fromDate: string): Promise<number | null> {
+  if (!wbCodeEnv) return null;
+
+  const countData = await fetchWb(
+    `https://advert-api.wildberries.ru/adv/v1/promotion/count`,
+    AdvertCountSchema
+  );
+  if (!countData || countData.adverts.length === 0) return 0;
+
+  const ids = countData.adverts
+    .flatMap((g: any) => g.advert_list.map((a: any) => a.advertId))
+    .slice(0, 50);
+  if (ids.length === 0) return 0;
+
+  const endDate = new Date().toISOString().split("T")[0];
+  await new Promise(r => setTimeout(r, 300));
+
+  const fullStats = await fetchWb(
+    `https://advert-api.wildberries.ru/adv/v3/fullstats?ids=${ids.join(",")}&beginDate=${fromDate}&endDate=${endDate}`,
+    AdvertFullStatsSchema
+  );
+  if (!fullStats) return null;
+
+  return fullStats.reduce((sum: number, s: any) => sum + (s.sum ?? 0), 0);
 }
 

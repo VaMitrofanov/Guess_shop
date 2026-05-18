@@ -81,16 +81,6 @@ export function registerAdminHubs(bot: Telegraf): void {
   bot.hears(/^🟣 Wildberries/, (ctx) => handleAdminMenu(ctx, showWildberriesHub));
   bot.hears("🛠 Состояние", (ctx) => handleAdminMenu(ctx, showSystemHub));
   bot.hears("💱 Курс", (ctx) => handleAdminMenu(ctx, showRatesHub));
-  bot.hears("📊 Дашборд", async (ctx) => {
-    if (!ADMIN_IDS.includes(String(ctx.from?.id))) return;
-    if (ctx.message?.message_id) {
-      try { await ctx.deleteMessage(ctx.message.message_id); } catch { /* ignore */ }
-    }
-    const url = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru"}/twa`;
-    await ctx.reply("WB Dashboard", Markup.inlineKeyboard([
-      [Markup.button.webApp("📊 Открыть дашборд", url)],
-    ]));
-  });
 
   // ── Text input interceptors for admin modes ──────────────────────────────
   // These run BEFORE the main text handler in handlers.ts.
@@ -416,4 +406,20 @@ export async function routeAdminCallback(
   }
 
   return false;
+}
+
+/**
+ * Set the Menu Button (left of the input field) to open the TWA dashboard.
+ * Called once at bot startup for every admin chat.
+ */
+export async function setupMenuButton(bot: import("telegraf").Telegraf): Promise<void> {
+  const url = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru"}/twa`;
+  await Promise.allSettled(
+    ADMIN_IDS.map(id =>
+      bot.telegram.setChatMenuButton({
+        chatId: Number(id),
+        menuButton: { type: "web_app", text: "Dashboard", web_app: { url } },
+      })
+    )
+  );
 }

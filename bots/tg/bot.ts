@@ -36,7 +36,7 @@ import {
   registerCallbacks,
   registerAdmin,
 } from "./handlers";
-import { registerAdminHubs } from "./admin";
+import { registerAdminHubs, setupMenuButton } from "./admin";
 
 const token = process.env.TG_TOKEN;
 if (!token) throw new Error("[TG] TG_TOKEN is not set");
@@ -81,6 +81,8 @@ if (disablePolling) {
     console.error("[TG] Failed to start:", err);
     process.exit(1);
   });
+  // Set Menu Button (left of input) for each admin — opens TWA dashboard directly
+  setupMenuButton(bot).catch((err: Error) => console.error("[TG] setChatMenuButton failed:", err));
   console.log("[TG] Bot started ✅ (polling)");
   console.log(
     `[TG] Admin IDs: ${process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "(none)"}`

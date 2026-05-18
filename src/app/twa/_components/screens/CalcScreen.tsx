@@ -91,10 +91,8 @@ export default function CalcScreen({ token }: { token: string }) {
   const fixedCost  = ud?.fixedCost ?? 87.5;
   const rawCpo = ud?.cpo ?? 0;
 
-  // Auto: product is advertised if its nmID has spend > 0 in this period
-  const isAdvertisedAuto = product
-    ? (ud?.advertisedNmIds ?? []).includes(product.nmID)
-    : rawCpo > 0; // if no product found, assume yes when there's any spend
+  // All orders share the attributive CPO — applies regardless of denomination/campaign
+  const isAdvertisedAuto = rawCpo > 0;
 
   // Manual override wins; otherwise use auto detection
   const withAds = withAdsOverride !== null ? withAdsOverride : isAdvertisedAuto;
@@ -279,7 +277,7 @@ export default function CalcScreen({ token }: { token: string }) {
         {row(`−Себест. Robux`, hasKurs ? "−" + fmt(Math.round(robuxCost)) : "—", true,
           hasKurs ? `${kursRb}×${kursUsd}×${denom}/700` : undefined
         )}
-        {withAds && cpo > 0 && row("−Реклама/ед", "−" + fmt(Math.round(cpo)), true, "WB CPO")}
+        {withAds && cpo > 0 && row("−Реклама/ед", "−" + fmt(Math.round(cpo)), true, "атрибут.")}
         {storage > 0 && row("−Хранение/ед", "−" + fmt(Math.round(storage)), true,
           ud?.storageByArticle[article] ? `арт. ${article}` : "среднее по всем"
         )}

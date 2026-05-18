@@ -23,7 +23,7 @@ import {
   getProducts, getWeeklyStats, getPrevWeekStats, getDailyBreakdown,
   getUnansweredReviews, answerReview, captureNotifyState, flushFbsDigest,
   getFbsOrders, updatePrice, getWbSettings, updateWbSetting,
-  getRealizationReport, getAdvertStats,
+  getRealizationReport, getAdvertStats, getAdvertSpendForPeriod,
   type WbStockWithRunway, type WbRealizationSummary, type WbRealizationArticle,
   type WbAdvertSummary,
 } from "./wb-client";
@@ -614,17 +614,28 @@ const LOGISTICS_STALE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 export async function showUnitEconHub(ctx: Context): Promise<void> {
   await ctx.answerCbQuery();
-  const [products, settings, realizData, advertData] = await Promise.all([
+  const [products, settings, realizData] = await Promise.all([
     getProducts(),
     getWbSettings(),
     getRealizationReport(4),
-    getAdvertStats(),
   ]);
+
+  // Attributive ad spend: delta since last attributed order, applies to ALL denominations
+  const fromDate = settings.lastAdAttributedAt
+    ? settings.lastAdAttributedAt.toISOString().split("T")[0]
+    : new Date(Date.now() - 30 * 864e5).toISOString().split("T")[0];
+  const unattributedSpend = await getAdvertSpendForPeriod(fromDate) ?? 0;
+
+  const attrSinceStr = settings.lastAdAttributedAt
+    ? settings.lastAdAttributedAt.toLocaleDateString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+    : "30 дней";
 
   let lines: string[] = [];
   lines.push(`🧩 <b>ЮНИТ-ЭКОНОМИКА</b>`);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
   lines.push(`<code>Курс: ${settings.kursRb} руб/ед · $1=${settings.kursUsd}₽ · Фикс: ${settings.fixedCost}₽</code>`);
+  if (unattributedSpend > 0)
+    lines.push(`<code>📣 Реклама накоп.: ${rub(Math.round(unattributedSpend))}  (с ${attrSinceStr})</code>`);
   lines.push("");
 
   if (!products || products.length === 0) {
@@ -685,11 +696,11 @@ export async function showUnitEconHub(ctx: Context): Promise<void> {
       const afterTax     = afterComm * (1 - tax);
       const profitBefore = afterTax - fixedCost - robuxCost;
 
-      // Ad cost: manual override wins; fallback to WB API global CPO (avg across all campaigns)
+      // Ad cost: manual override wins; otherwise use attributive spend (delta since last order).
+      // Applies to ALL products regardless of denomination — not campaign-average, but actual delta.
       const manualAdCost = cost.adCostPerUnit ?? 0;
-      const apiCpo       = advertData?.avgCpo ?? 0;
-      const adCost       = manualAdCost > 0 ? manualAdCost : apiCpo;
-      const adCostSource = manualAdCost > 0 ? "вручную" : apiCpo > 0 ? "WB CPO" : null;
+      const adCost       = manualAdCost > 0 ? manualAdCost : unattributedSpend;
+      const adCostSource = manualAdCost > 0 ? "вручную" : unattributedSpend > 0 ? `атрибут. с ${attrSinceStr}` : null;
 
       // Storage per unit: from realization data (total storage / sales count)
       const storagePerUnit = (realizData && realizData.salesCount > 0 && realizData.totalStorage > 0)
