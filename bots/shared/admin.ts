@@ -103,6 +103,12 @@ export const CB = {
   ratesRefresh:    "rates_refresh",
   ratesAnalytics:  "rates_analytics",
 
+  // ── AutoBuy hub ────────────────────────────────────────────────────────────
+  hubAutoBuy:      "hub_autobuy",
+  autoBuyToggle:   "ab_toggle",
+  autoBuySetRate:  "ab_set_rate",
+  autoBuyRefresh:  "ab_refresh",
+
   // ── Legacy (kept for backwards compatibility) ──────────────────────────────
   adminStats: "admin_stats",
   adminQueue: "admin_queue",

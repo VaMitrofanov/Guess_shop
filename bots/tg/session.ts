@@ -77,3 +77,6 @@ export const pendingDenomInput = new Map<number, { nmID: number; vendorCode: str
 
 /** Admin is updating a global WB unit econ setting. */
 export const pendingUeSettingInput = new Map<number, { field: "kursRb" | "kursUsd" | "fixedCost" }>();
+
+/** Admin is entering the auto-buy target rate. */
+export const pendingAutoBuyRateInput = new Map<number, true>();

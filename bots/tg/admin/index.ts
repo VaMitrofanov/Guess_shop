@@ -18,6 +18,10 @@ import {
 import { showStatsHub, refreshStats, enterRateInput, handleRateInput } from "./hub-stats";
 import { showRatesHub, refreshRates, showRatesAnalytics } from "./hub-rates";
 import {
+  showAutoBuyHub, toggleAutoBuy, enterAutoBuyRateInput,
+  handleAutoBuyRateInput, refreshAutoBuy,
+} from "./hub-autobuy";
+import {
   showWildberriesHub, refreshWb, showAddCodesDenom, enterCodesInput,
   showAnalytics, showAnalyticsForPeriod, downloadUnusedCodes, handleCodesInput, showWbProducts,
   enterPriceInput, handlePriceInput, showRecentOrders,
@@ -38,6 +42,7 @@ import {
   pendingAdminSearch, pendingCodesInput, pendingRateInput, pendingPriceInput,
   pendingReviewAnswer, pendingCostInput, pendingLogisticsInput,
   pendingAdInput, pendingDenomInput, pendingUeSettingInput,
+  pendingAutoBuyRateInput,
 } from "../session";
 
 // Re-export for external use
@@ -81,6 +86,7 @@ export function registerAdminHubs(bot: Telegraf): void {
   bot.hears(/^🟣 Wildberries/, (ctx) => handleAdminMenu(ctx, showWildberriesHub));
   bot.hears("🛠 Состояние", (ctx) => handleAdminMenu(ctx, showSystemHub));
   bot.hears("💱 Курс", (ctx) => handleAdminMenu(ctx, showRatesHub));
+  bot.hears("🤖 Автобай", (ctx) => handleAdminMenu(ctx, showAutoBuyHub));
 
   // ── Text input interceptors for admin modes ──────────────────────────────
   // These run BEFORE the main text handler in handlers.ts.
@@ -148,6 +154,12 @@ export function registerAdminHubs(bot: Telegraf): void {
     // 10. UE settings input
     if (pendingUeSettingInput.has(ctx.from.id)) {
       const handled = await handleUeSettingInput(ctx, text);
+      if (handled) return;
+    }
+
+    // 11. AutoBuy rate input
+    if (pendingAutoBuyRateInput.has(ctx.from.id)) {
+      const handled = await handleAutoBuyRateInput(ctx, text);
       if (handled) return;
     }
 
@@ -240,6 +252,25 @@ export async function routeAdminCallback(
   if (data === CB.ratesAnalytics) {
     await showRatesAnalytics(ctx);
     await ctx.answerCbQuery();
+    return true;
+  }
+
+  // ── AutoBuy hub ────────────────────────────────────────────────────────────
+  if (data === CB.hubAutoBuy) {
+    await showAutoBuyHub(ctx);
+    await ctx.answerCbQuery();
+    return true;
+  }
+  if (data === CB.autoBuyToggle) {
+    await toggleAutoBuy(ctx);
+    return true;
+  }
+  if (data === CB.autoBuySetRate) {
+    await enterAutoBuyRateInput(ctx);
+    return true;
+  }
+  if (data === CB.autoBuyRefresh) {
+    await refreshAutoBuy(ctx);
     return true;
   }
 

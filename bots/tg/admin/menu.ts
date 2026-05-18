@@ -30,7 +30,7 @@ export async function buildAdminKeyboard() {
   return Markup.keyboard([
     [`📦 Заказы (${pendingCount})`, "📈 Статистика"],
     [`🟣 Wildberries ${stockIndicator}`, "🛠 Состояние"],
-    ["💱 Курс"],
+    ["💱 Курс", "🤖 Автобай"],
   ]).resize();
 }
 

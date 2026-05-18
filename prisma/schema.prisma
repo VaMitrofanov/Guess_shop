@@ -181,6 +181,8 @@ model GlobalSettings {
   /// Manual purchase rate in ₽ per R$ — set by admin via bot.
   purchaseRate Float?
   lastUpdated  DateTime @updatedAt
+  autoBuyEnabled Boolean  @default(false)
+  autoBuyRate    Float    @default(4.0)
 }
 
 /// Cost basis for WB products — used for unit economics calculation.
