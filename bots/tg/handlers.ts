@@ -149,7 +149,7 @@ export function registerStart(bot: Telegraf): void {
         const adminKb = await getAdminKeyboard();
         await ctx.reply(
           `${greeting}Твой личный проводник в мир робуксов.\n\n` +
-          `Для активации кода с карточки Wildberries перейди по ссылке на вкладыше.\n\n` +
+          `Есть код с WB-карты? Напиши его прямо сюда — я всё оформлю.\n\n` +
           `📦 Статус заказа: /status`,
           adminKb
         );
@@ -157,7 +157,7 @@ export function registerStart(bot: Telegraf): void {
         const greeting = getGreeting(custStatus, firstName);
         await ctx.reply(
           `${greeting}Твой личный проводник в мир робуксов.\n\n` +
-          `Для активации кода с карточки Wildberries перейди по ссылке на вкладыше или на нашем сайте.\n\n` +
+          `Есть код с WB-карты? Напиши его прямо сюда — сайт не нужен.\n\n` +
           `📦 Статус заказа: /status`,
           {
             parse_mode: "HTML",
@@ -176,7 +176,10 @@ export function registerStart(bot: Telegraf): void {
       where: { code: { equals: code, mode: "insensitive" } },
     });
     if (!wbCode) {
-      await ctx.reply("❌ Код не найден. Проверь правильность ввода или обратись в поддержку.");
+      await ctx.reply(
+        "❌ Код не найден. Проверь правильность ввода.\n\nЕсли уверен, что код верный — напиши нам: @RobloxBank_PA",
+        { parse_mode: "HTML", ...withSupportKb() }
+      );
       return;
     }
 
@@ -274,6 +277,7 @@ export function registerStart(bot: Telegraf): void {
           bonusText +
           `Осталось совсем чуть-чуть — пришли <b>Asset ID</b> или <b>ссылку</b> на геймпасс.\n` +
           `📌 Убедись, что цена геймпасса ровно <b>${passPrice} R$</b>\n\n` +
+          `Нужна инструкция? 👉 https://www.robloxbank.ru/guide?source=wb&skip=1\n\n` +
           `Жду ссылку 👇`
       ),
       {
@@ -570,7 +574,7 @@ export function registerText(bot: Telegraf): void {
           await ctx.reply(
             "У тебя сейчас нет активных заявок.\n\n" +
             "📦 Проверить статус: /status\n" +
-            "🔑 Активировать код: перейди по ссылке на вкладыше или напиши его прямо здесь",
+            "🔑 Есть код с WB-карты? Напиши его прямо сюда",
             {
               parse_mode: "HTML",
               ...Markup.inlineKeyboard([[supportBtn("Нужна помощь?")]]),

@@ -2576,9 +2576,10 @@ function WBIntro({ onDone }: { onDone: () => void }) {
 
 // ─── Main export ───────────────────────────────────────────────────────────────
 
-export default function GuideClient({ isWB }: { isWB: boolean }) {
+export default function GuideClient({ isWB, skipGate = false }: { isWB: boolean; skipGate?: boolean }) {
   const [phase, setPhase] = useState<"intro" | "gate" | "instruction">(
-    isWB ? "intro" : "instruction"
+    // skipGate=true when arriving from TG/VK bot after code activation — skip intro+gate
+    skipGate ? "instruction" : isWB ? "intro" : "instruction"
   );
   const [denomination, setDenomination] = useState<number>(0);
   const [activeCode, setActiveCode] = useState<string>("");

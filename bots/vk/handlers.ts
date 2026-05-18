@@ -244,9 +244,9 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
 
     await ctx.reply(
       "👋 Привет! Здесь ты можешь обменять Wildberries-карту на робуксы.\n\n" +
-      "Чтобы начать — открой инструкцию на нашем сайте:\n" +
-      "🔗 https://robloxbank.ru/guide?source=wb\n\n" +
-      "Там подробная пошаговая инструкция. После активации кода возвращайся сюда и присылай ссылку на геймпасс!"
+      "Есть код с WB-карты? Напиши его прямо сюда — сайт не нужен.\n\n" +
+      "Или открой инструкцию: https://robloxbank.ru/guide?source=wb\n\n" +
+      "Нужна помощь? Пиши: https://t.me/RobloxBank_PA"
     );
     return;
   }
@@ -702,8 +702,10 @@ async function handleIdleMessage(
       return;
     }
     await ctx.reply(
-      "⚠️ Сначала активируй код с карточки Wildberries — перейди по ссылке на вкладыше.\n\n" +
-      "После активации кода пришли ссылку на геймпасс сюда."
+      "⚠️ Сначала активируй код с WB-карты — напиши его прямо сюда или на сайте:\n" +
+      "🔗 https://robloxbank.ru/guide?source=wb\n\n" +
+      "После активации пришли ссылку на геймпасс.\n" +
+      "Нужна помощь? https://t.me/RobloxBank_PA"
     );
     return;
   }
@@ -712,7 +714,11 @@ async function handleIdleMessage(
   if (lower.includes("статус") || lower.includes("заказ")) {
     const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
     if (!user) {
-      await ctx.reply("У тебя пока нет заказов. Активируй код с карточки Wildberries по ссылке на вкладыше.");
+      await ctx.reply(
+        "У тебя пока нет заказов.\n\n" +
+        "Есть код с WB-карты? Напиши его прямо сюда — и мы всё оформим.\n" +
+        "Нужна помощь? https://t.me/RobloxBank_PA"
+      );
       return;
     }
 
@@ -786,10 +792,10 @@ async function handleIdleMessage(
     const greeting = getGreeting(status, firstName);
     await ctx.reply(
       `${greeting}Твой личный проводник в мир робуксов.\n\n` +
-      `Чтобы начать, перейди на сайт и активируй код с карточки Wildberries:\n` +
-      `🔗 https://robloxbank.ru/guide?source=wb\n\n` +
+      `Есть код с WB-карты? Напиши его прямо сюда — сайт не нужен.\n\n` +
+      `Или открой инструкцию: https://robloxbank.ru/guide?source=wb\n\n` +
       `Напиши "статус" — узнать статус последнего заказа.\n` +
-      `Нужна помощь? Пиши менеджеру: https://t.me/RobloxBank_PA`
+      `Нужна помощь? Пиши: https://t.me/RobloxBank_PA`
     );
   }
 }

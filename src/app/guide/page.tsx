@@ -8,12 +8,14 @@ export const metadata: Metadata = {
 };
 
 interface GuidPageProps {
-  searchParams: Promise<{ source?: string }>;
+  searchParams: Promise<{ source?: string; skip?: string }>;
 }
 
 export default async function GuidePage({ searchParams }: GuidPageProps) {
-  const { source } = await searchParams;
+  const { source, skip } = await searchParams;
   const isWB = source === "wb";
+  // skip=1 is set by the TG/VK bot after code activation — bypass gate, show guide directly
+  const skipGate = isWB && !!skip;
 
   return (
     <>
@@ -24,7 +26,7 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
         style={{ display: "none" }}
         aria-hidden="true"
       />
-      <GuideClient isWB={isWB} />
+      <GuideClient isWB={isWB} skipGate={skipGate} />
     </>
   );
 }
