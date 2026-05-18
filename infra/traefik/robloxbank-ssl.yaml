@@ -1,0 +1,91 @@
+http:
+  routers:
+    rb-redirect:
+      entryPoints:
+        - http
+      rule: "Host(`robloxbank.ru`) || Host(`www.robloxbank.ru`)"
+      middlewares:
+        - redirect-to-https
+      service: noop@internal
+      priority: 50
+
+    rb-main-https:
+      entryPoints:
+        - https
+      rule: "Host(`robloxbank.ru`) || Host(`www.robloxbank.ru`)"
+      tls:
+        certResolver: letsencrypt
+      service: main-svc@docker
+      middlewares:
+        - rate-limit-general
+      priority: 1
+
+    rb-guide-page-https:
+      entryPoints:
+        - https
+      rule: "Host(`robloxbank.ru`) && Path(`/guide`) && Query(`source`, `wb`)"
+      tls:
+        certResolver: letsencrypt
+      service: guide-svc@docker
+      middlewares:
+        - rate-limit-general
+      priority: 100
+
+    rb-guide-assets-https:
+      entryPoints:
+        - https
+      rule: "Host(`robloxbank.ru`) && PathPrefix(`/_next-guide`)"
+      tls:
+        certResolver: letsencrypt
+      middlewares:
+        - guide-strip-prefix@docker
+        - rate-limit-static
+      service: guide-svc@docker
+      priority: 101
+
+    rb-guide-api-https:
+      entryPoints:
+        - https
+      rule: "Host(`robloxbank.ru`) && (PathPrefix(`/api/wb-code`) || PathPrefix(`/api/wb-link`))"
+      tls:
+        certResolver: letsencrypt
+      service: guide-svc@docker
+      middlewares:
+        - rate-limit-api
+      priority: 102
+
+  middlewares:
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+
+    # 60 req/min per IP — regular pages
+    rate-limit-general:
+      rateLimit:
+        average: 60
+        burst: 100
+        period: 1m
+        sourceCriterion:
+          ipStrategy:
+            depth: 1
+
+    # 20 req/min per IP — API endpoints (brute force protection)
+    rate-limit-api:
+      rateLimit:
+        average: 20
+        burst: 30
+        period: 1m
+        sourceCriterion:
+          ipStrategy:
+            depth: 1
+
+    # 200 req/min per IP — static assets (JS/CSS loaded in batches)
+    rate-limit-static:
+      rateLimit:
+        average: 200
+        burst: 300
+        period: 1m
+        sourceCriterion:
+          ipStrategy:
+            depth: 1
