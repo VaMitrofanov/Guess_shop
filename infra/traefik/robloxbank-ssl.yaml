@@ -66,9 +66,6 @@ http:
         average: 60
         burst: 100
         period: 1m
-        sourceCriterion:
-          ipStrategy:
-            depth: 1
 
     # 20 req/min per IP — API endpoints (brute force protection)
     rate-limit-api:
@@ -76,9 +73,6 @@ http:
         average: 20
         burst: 30
         period: 1m
-        sourceCriterion:
-          ipStrategy:
-            depth: 1
 
     # 200 req/min per IP — static assets (JS/CSS loaded in batches)
     rate-limit-static:
@@ -86,6 +80,3 @@ http:
         average: 200
         burst: 300
         period: 1m
-        sourceCriterion:
-          ipStrategy:
-            depth: 1
