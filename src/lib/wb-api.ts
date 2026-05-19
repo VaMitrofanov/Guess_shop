@@ -105,7 +105,7 @@ const RealizRowSchema = z.object({
 
 // ── In-memory cache (survives across requests, resets on container restart) ─
 
-const TTL = 90_000; // WB statistics API: ~1 req/minute per endpoint
+const TTL = 300_000; // WB statistics API: rate-limited per seller, 5-min cache reduces 429s
 const ADV_TTL = 120_000; // advert fullstats: generous TTL to avoid 429
 type CacheEntry<T> = { data: T; ts: number };
 const cache: {
@@ -126,10 +126,15 @@ export async function getStats30d(): Promise<TwaStats30d | null> {
   if (cache.stats && Date.now() - cache.stats.ts < TTL) return cache.stats.data;
 
   const dateFrom = new Date(Date.now() - 30 * 864e5).toISOString().split(".")[0] + "Z";
-  const [orders, sales] = await Promise.all([
-    fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${encodeURIComponent(dateFrom)}&flag=0`, z.array(OrderSchema)),
-    (async () => { await new Promise(r => setTimeout(r, 1500)); return fetchWb(`https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${encodeURIComponent(dateFrom)}`, z.array(SaleSchema)); })(),
-  ]);
+  const orders = await fetchWb(
+    `https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${encodeURIComponent(dateFrom)}&flag=0`,
+    z.array(OrderSchema),
+  );
+  await new Promise(r => setTimeout(r, 2000));
+  const sales = await fetchWb(
+    `https://statistics-api.wildberries.ru/api/v1/supplier/sales?dateFrom=${encodeURIComponent(dateFrom)}`,
+    z.array(SaleSchema),
+  );
 
   if (orders && sales) {
     cache.stats = { data: { orders, sales }, ts: Date.now() };
