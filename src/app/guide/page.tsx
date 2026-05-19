@@ -24,7 +24,7 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
       {/* Visible in "View Source" — confirms this response came from RobloxBank-Guide container */}
       <span
         id="__svc"
-        data-served-by="RobloxBank-Guide"
+        data-served-by="RobloxBank-Guide-v2"
         style={{ display: "none" }}
         aria-hidden="true"
       />
