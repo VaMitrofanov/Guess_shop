@@ -34,7 +34,10 @@ export async function GET(request: NextRequest) {
     try {
       await db.wbCode.update({
         where: { code: wbCode },
-        data: { userId, status: "CLAIMED" },
+        // isUsed: false puts the code into provisional CLAIMED state —
+        // the bot's isUsed+userId guard will not block the user, and the
+        // final transaction (gamepass submission) sets isUsed: true.
+        data: { userId, status: "CLAIMED", isUsed: false },
       });
     } catch (err) {
       // Non-fatal: code may already be linked or not exist
