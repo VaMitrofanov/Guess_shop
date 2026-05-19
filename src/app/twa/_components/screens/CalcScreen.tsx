@@ -1,5 +1,17 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+interface RealizSummary {
+  period:         { from: string; to: string };
+  salesCount:     number;
+  returnCount:    number;
+  totalRevenue:   number;
+  totalPayout:    number;
+  totalLogistics: number;
+  totalStorage:   number;
+  totalPenalties: number;
+  byArticle:      { article: string; sales: number }[];
+}
 
 interface UeData {
   kursRb:            number;
@@ -84,6 +96,10 @@ export default function CalcScreen({ token }: { token: string }) {
   const [attributed,  setAttributed]  = useState<{ amount: number; at: string } | null>(null);
   const [withAdsOverride, setWithAdsOverride] = useState<boolean | null>(null);
 
+  const [realizData,    setRealizData]    = useState<RealizSummary | null>(null);
+  const [realizLoading, setRealizLoading] = useState(false);
+  const [realizWeeks,   setRealizWeeks]   = useState<2 | 4>(4);
+
   const [kursMode, setKursMode] = useState<"rate" | "rub" | "usd">(() => ls(LS_KURS_MODE, "rate") as "rate" | "rub" | "usd");
   const [kursVal,  setKursVal]  = useState(() => ls(LS_KURS_RB, ""));
   const [denom,    setDenom]    = useState(500);
@@ -98,6 +114,15 @@ export default function CalcScreen({ token }: { token: string }) {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [token]);
+
+  useEffect(() => {
+    setRealizLoading(true);
+    fetch(`/api/twa/realiz?weeks=${realizWeeks}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(setRealizData)
+      .catch(() => {})
+      .finally(() => setRealizLoading(false));
+  }, [token, realizWeeks]);
 
   const setDenomAndReset = (d: number) => { setDenom(d); setWithAdsOverride(null); };
 
@@ -163,6 +188,27 @@ export default function CalcScreen({ token }: { token: string }) {
     : NaN;
   const profitUsd = !isNaN(profit) && kursUsd > 0 ? profit / kursUsd : NaN;
   const marginPct = !isNaN(profit) && sellPrice > 0 ? (profit / sellPrice) * 100 : NaN;
+
+  const totalProfit = useMemo(() => {
+    if (!realizData) return null;
+    const { salesCount, totalPayout, totalLogistics, totalStorage, totalPenalties, byArticle } = realizData;
+
+    const totalTax        = totalPayout * taxRate;
+    const totalFixedCosts = salesCount  * fixedCost;
+
+    let totalRobuxCost = 0;
+    if (kursRb > 0) {
+      for (const { article, sales } of byArticle) {
+        const denomination = parseFloat(article);
+        if (denomination > 0 && sales > 0) {
+          totalRobuxCost += sales * denomination * kursRb * kursUsd / 700;
+        }
+      }
+    }
+
+    const net = totalPayout - totalTax - totalFixedCosts - totalRobuxCost - totalLogistics - totalStorage - totalPenalties;
+    return { totalTax, totalFixedCosts, totalRobuxCost, totalLogistics, totalStorage, totalPenalties, totalPayout, net, hasKurs: kursRb > 0 };
+  }, [realizData, taxRate, fixedCost, kursRb, kursUsd]);
 
   const equivLabel = (() => {
     if (!hasKurs) return null;
@@ -447,6 +493,83 @@ export default function CalcScreen({ token }: { token: string }) {
           )}
         </div>
       )}
+
+      {/* Total profit summary */}
+      <div style={{ background: C.card, borderRadius: 14, padding: 16 }}>
+        {/* Header + period toggle */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: C.sec, textTransform: "uppercase" as const, letterSpacing: 0.6 }}>
+            Итого за период
+          </span>
+          <div style={{ display: "flex", background: C.elevated, borderRadius: 8, padding: 2, gap: 1 }}>
+            {([2, 4] as const).map(w => (
+              <button key={w} onClick={() => setRealizWeeks(w)} style={{
+                padding: "3px 10px", borderRadius: 6, border: "none", cursor: "pointer",
+                fontSize: 12, fontWeight: 600,
+                background: realizWeeks === w ? C.accent : "none",
+                color:      realizWeeks === w ? "#fff"   : C.sec,
+              }}>
+                {w} нед
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {realizLoading ? (
+          <div style={{ textAlign: "center" as const, color: C.muted, fontSize: 13, padding: "12px 0" }}>Загрузка…</div>
+        ) : !realizData ? (
+          <div style={{ textAlign: "center" as const, color: C.muted, fontSize: 13, padding: "12px 0" }}>WB API недоступен</div>
+        ) : totalProfit ? (
+          <>
+            {/* Period + sales */}
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
+              {new Date(realizData.period.from).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
+              {" — "}
+              {new Date(realizData.period.to).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
+              <span style={{ marginLeft: 8 }}>
+                {realizData.salesCount} продаж
+                {realizData.returnCount > 0 && <span style={{ color: C.yellow }}> · {realizData.returnCount} возврат{realizData.returnCount === 1 ? "" : "ов"}</span>}
+              </span>
+            </div>
+
+            <div style={{ borderBottom: `1px solid ${C.border}`, paddingBottom: 10, marginBottom: 10 }}>
+              <Row label="Выплата WB"          value={fmt(Math.round(totalProfit.totalPayout))} />
+              <Row label={`−Налог УСН (${Math.round(taxRate * 100)}%)`} value={"−" + fmt(Math.round(totalProfit.totalTax))} />
+              <Row label="−Логистика"           value={"−" + fmt(Math.round(totalProfit.totalLogistics))} />
+              {totalProfit.totalStorage   > 0 && <Row label="−Хранение"       value={"−" + fmt(Math.round(totalProfit.totalStorage))} />}
+              {totalProfit.totalPenalties > 0 && <Row label="−Штрафы"         value={"−" + fmt(Math.round(totalProfit.totalPenalties))} />}
+              <Row label="−Фикс. затраты"       value={"−" + fmt(Math.round(totalProfit.totalFixedCosts))} />
+              <Row
+                label="−Себестоимость"
+                value={totalProfit.hasKurs ? "−" + fmt(Math.round(totalProfit.totalRobuxCost)) : "—"}
+                note={totalProfit.hasKurs ? "при текущем курсе" : "введи курс выше"}
+                dim={!totalProfit.hasKurs}
+              />
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+              <span style={{ fontWeight: 700, fontSize: 15 }}>Чистая прибыль</span>
+              <div style={{ textAlign: "right" as const }}>
+                <div style={{
+                  fontSize: 26, fontWeight: 800, letterSpacing: -0.5,
+                  color: totalProfit.hasKurs
+                    ? (totalProfit.net >= 0 ? C.green : C.red)
+                    : C.muted,
+                }}>
+                  {totalProfit.hasKurs
+                    ? (totalProfit.net >= 0 ? "+" : "") + fmt(Math.round(totalProfit.net))
+                    : "—"}
+                </div>
+                {totalProfit.hasKurs && kursUsd > 0 && (
+                  <div style={{ fontSize: 12, color: C.sec, marginTop: 2 }}>
+                    ${Math.round(totalProfit.net / kursUsd).toLocaleString("ru-RU")}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        ) : null}
+      </div>
 
       <div style={{ fontSize: 11, color: C.muted, textAlign: "center" as const }}>
         Значки <span style={{ color: "#5ac8fa" }}>отч</span> — данные из отчёта реализации WB за 4 нед.
