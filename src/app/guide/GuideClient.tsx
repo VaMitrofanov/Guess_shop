@@ -220,6 +220,8 @@ const TABLE = [
 ];
 
 const FAQ = [
+  { q: "У меня нет аккаунта в Roblox — что делать?", a: "Зарегистрируйся бесплатно на roblox.com. Это займёт 2 минуты. Аккаунт нужен для создания геймпасса — без него получить Robux не получится." },
+  { q: "Зачем вообще нужен геймпасс? Почему нельзя просто перевести деньги?", a: "Roblox не позволяет переводить Robux напрямую между пользователями. Геймпасс — это внутриигровой товар: мы его покупаем, ты получаешь Robux на счёт. Это единственный легальный способ." },
   { q: "Сколько времени занимает создание?",       a: "Около 5 минут. Создать игру (1 мин) → создать пасс (2 мин) → установить цену (1 мин) → оформить заказ (1 мин)." },
   { q: "Когда придут Robux после оплаты?",          a: "Заказ обрабатывается до 24 часов. После покупки пасса Roblox зачисляет средства через 5–7 дней — это стандартная политика платформы." },
   { q: "Можно удалить геймпасс после оплаты?",      a: "Нет! Не удаляй и не меняй цену до получения подтверждения о завершении. Иначе заказ не выполнится и придётся делать возврат." },
@@ -1651,7 +1653,7 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
       <div className="relative z-10 flex items-center justify-center gap-2 mt-8 opacity-60">
         <AlertTriangle className="w-4 h-4 text-[#c9a84c]" />
         <p className="text-[#c9a84c] text-[10px] font-black uppercase tracking-widest text-center">
-          Среднее время ответа — 10 минут • Работаем круглосуточно
+          Среднее время обработки — до суток • Работаем круглосуточно
         </p>
       </div>
     </div>
@@ -1893,7 +1895,7 @@ function WBGate({ onSuccess }: WBGateProps) {
                 />
                 <div className="flex justify-between items-center">
                   <p className="text-[11px] text-zinc-600 font-medium">
-                    Код напечатан на карточке в заказе
+                    7-значный код с карточки WB, например: ABC1234
                   </p>
                   <span className={`text-[11px] font-black tabular-nums ${codeReady ? "text-[#c9a84c]" : "text-zinc-600"}`}>
                     {code.length}/7
@@ -1928,6 +1930,9 @@ function WBGate({ onSuccess }: WBGateProps) {
                   Уже есть геймпасс
                 </button>
               </div>
+              <p className="text-[10px] text-zinc-600 text-center leading-relaxed">
+                Геймпасс — это способ получить Robux через Roblox. Если не знаешь что это — выбери «Нужна инструкция»
+              </p>
 
               {error && (
                 <div className="flex items-center gap-2 border border-red-500/30 bg-red-500/5 px-3 py-2">
@@ -2475,7 +2480,7 @@ function Instruction({ isWB, denomination, code, onReset, freshFromGate = false 
                   <h2 className="text-4xl font-black uppercase tracking-tight">Частые вопросы</h2>
                 </div>
                 <p className="text-zinc-400 text-base font-medium leading-relaxed">
-                  Не нашёл ответа? Напиши нам в Telegram — ответим в течение 10 минут.
+                  Не нашёл ответа? Напиши нам в Telegram — ответим быстро.
                 </p>
                 <div className="space-y-2">
                   <a

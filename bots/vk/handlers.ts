@@ -123,7 +123,8 @@ async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null): Pro
       `⭐ Ты в одном шаге! У наших клиентов есть закрытое сообщество — там первыми узнают о статусе заказа, ` +
       `получают бонусы на следующую покупку и эксклюзивные акции.\n\n` +
       `Загляни — это бесплатно:\n${groupUrl}\n\n` +
-      `Потом нажми «✅ Я вступил» — и продолжим!`,
+      `После подписки нажми кнопку «✅ Я вступил» ниже.\n` +
+      `Если кнопка не отображается — напиши «Я вступил» в этот чат.`,
     keyboard: Keyboard.builder()
       .urlButton({ label: "🔔 Подписаться", url: groupUrl })
       .row()
@@ -413,10 +414,12 @@ async function handleRefActivation(
       greetLine + `\n` +
       `✅ Код ${code} активирован!\n` +
       bonusText +
-      `Осталось совсем чуть-чуть — пришли Asset ID или ссылку на геймпасс.\n` +
-      `📌 Убедись, что цена геймпасса ровно ${passPrice} R$\n\n` +
-      `Нужна инструкция? 👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n\n` +
-      `Жду ссылку 👇`
+      `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда.\n` +
+      `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n` +
+      `(это номинал ÷ 0.7 — Roblox удерживает 30% комиссии)\n\n` +
+      `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
+      `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n\n` +
+      `Жди ссылку на геймпасс 👇`
     );
   }
 }
@@ -468,6 +471,8 @@ async function handleGamepassLink(
     return;
   }
 
+  let validatedCreator: string | null = null;
+  let validatedPrice: number | null = null;
   if (!gamepassInfo.validationSkipped) {
     // Normal validation — only runs when Roblox API was reachable
     if (gamepassInfo.isGamePrivate) {
@@ -500,21 +505,31 @@ async function handleGamepassLink(
       return;
     }
 
-    // Notify user that the gamepass was found and validated
-    const creatorLine = gamepassInfo.creatorName
-      ? `\n👤 Создатель: ${gamepassInfo.creatorName}`
-      : "";
-    await ctx.reply(
-      `✅ Геймпасс найден!` +
-      creatorLine +
-      `\n💰 Цена: ${gamepassInfo.price} R$`
-    );
+    // Store validated info for the merged confirmation message below
+    validatedCreator = gamepassInfo.creatorName ?? null;
+    validatedPrice = gamepassInfo.price;
   } else {
-    // Network-down fallback — log for audit, proceed to order creation
+    // Network-down fallback — Roblox API unreachable
     console.warn(
       `[VK] Roblox API unreachable — accepting passId=${passId} without validation. ` +
       `Admin must verify price manually.`
     );
+    await ctx.reply(
+      `⚠️ Не удалось автоматически проверить геймпасс — серверы Roblox временно недоступны.\n\n` +
+      `Убедись, что цена геймпасса установлена ровно ${Math.ceil(denomination / 0.7)} R$ — ` +
+      `менеджер проверит вручную. Если цена неверная, заявка будет отклонена.`
+    );
+    // Alert admins
+    const alertText =
+      `⚠️ РУЧНАЯ ПРОВЕРКА (VK)\n` +
+      `Roblox API недоступен — геймпасс принят без проверки цены.\n` +
+      `Pass ID: ${passId} · Ожидаемая цена: ${Math.ceil(denomination / 0.7)} R$`;
+    const { tgSend } = await import("../shared/notify");
+    const chatIds = [
+      ...ADMIN_IDS,
+      ...((process.env.TG_CHAT_ID ?? "").split(",").map((s: string) => s.trim()).filter((s: string) => s && !ADMIN_IDS.includes(s))),
+    ];
+    await Promise.allSettled(chatIds.map((id: string) => tgSend(id, alertText)));
   }
   // ── End Roblox validation ─────────────────────────────────────────────
 
@@ -619,10 +634,15 @@ async function handleGamepassLink(
 
   clearState(vkUserId);
 
+  const creatorLine = validatedCreator ? `\n👤 Создатель: ${validatedCreator}` : "";
+  const priceLine = validatedPrice != null ? `\n💰 Цена: ${validatedPrice} R$` : "";
   await ctx.reply(
-    `✅ Принял геймпасс №${passId}! Ожидайте выкупа.\n\n` +
-    `🆔 Номер заявки: ${order.id.slice(-6).toUpperCase()}\n` +
-    `Напиши "статус" чтобы узнать статус обработки.`
+    `✅ Принял геймпасс №${passId}!` +
+    creatorLine +
+    priceLine +
+    `\n\n🆔 Номер заявки: ${order.id.slice(-6).toUpperCase()}\n\n` +
+    `⏳ Менеджер выкупит геймпасс в течение суток — обычно намного быстрее.\n` +
+    `Напиши «статус» — узнать статус обработки.`
   );
 
   // Fetch real name for admin card (non-blocking — fallback is "VK #id")
@@ -848,11 +868,13 @@ async function handleIdleMessage(
   } else {
     const greeting = getGreeting(status, firstName);
     await ctx.reply(
-      `${greeting}Твой личный проводник в мир робуксов.\n\n` +
-      `Есть код с WB-карты? Напиши его прямо сюда — сайт не нужен.\n\n` +
-      `Или открой инструкцию: https://robloxbank.ru/guide?source=wb\n\n` +
-      `Напиши "статус" — узнать статус последнего заказа.\n` +
-      `Нужна помощь? Пиши: https://t.me/RobloxBank_PA`
+      `${greeting}Я помогаю обменять карты Wildberries на робуксы в Roblox.\n\n` +
+      `Вот что я умею:\n` +
+      `• Напиши 7-значный код с карты WB — оформлю заказ\n` +
+      `• Напиши «статус» — покажу статус твоего заказа\n` +
+      `• Пришли ссылку на геймпасс — приму в работу\n\n` +
+      `Инструкция по активации: https://robloxbank.ru/guide?source=wb\n` +
+      `Нужна живая помощь? https://t.me/RobloxBank_PA`
     );
   }
 }

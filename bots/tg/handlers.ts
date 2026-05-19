@@ -130,8 +130,8 @@ export function registerStart(bot: Telegraf): void {
       console.warn(`[TG] Rate limit exceeded for start command by ${rateKey}`);
       if (rateData.attempts === 6) {
         await ctx.reply(
-          "⏳ Ты уже активировал этот код. Подожди — бот обрабатывает заявку.\n\n" +
-          "Если ждёшь больше 2 минут — напиши в поддержку: @RobloxBank_PA"
+          "⏳ Слишком много попыток — подожди минуту и попробуй снова.\n\n" +
+          "Если что-то пошло не так — напиши в поддержку: @RobloxBank_PA"
         );
       }
       return;
@@ -319,7 +319,10 @@ export function registerStart(bot: Telegraf): void {
         : `🎉 Код <b>${code}</b> принят!\n\n` +
           `Ты в одном шаге — у наших клиентов есть закрытый канал: там первыми узнают о выкупе, ` +
           `получают бонусы на следующий заказ и эксклюзивные акции.\n\n` +
-          `👇 Загляни — это бесплатно, а потом присылай ссылку на геймпасс с ценой ровно <b>${passPrice} R$</b>:`;
+          `👇 Загляни — это бесплатно:\n` +
+          `https://t.me/Roblox_Bank_Tg\n\n` +
+          `После подписки бот напишет тебе автоматически — ничего дополнительно делать не нужно.\n` +
+          `Если сообщение не пришло — просто напиши сюда любое слово 👋`;
       await ctx.reply(subText, {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
@@ -357,10 +360,12 @@ export function registerStart(bot: Telegraf): void {
           `Там подробная пошаговая инструкция!`
         : `✅ Код <b>${code}</b> активирован!\n` +
           bonusText +
-          `Осталось совсем чуть-чуть — пришли <b>Asset ID</b> или <b>ссылку</b> на геймпасс.\n` +
-          `📌 Убедись, что цена геймпасса ровно <b>${passPrice} R$</b>\n\n` +
-          `Нужна инструкция? 👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n\n` +
-          `Жду ссылку 👇`
+          `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда.\n` +
+          `📌 Цена геймпасса должна быть ровно <b>${passPrice} R$</b>\n` +
+          `<i>(это номинал ÷ 0.7 — Roblox удерживает 30% комиссии)</i>\n\n` +
+          `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
+          `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n\n` +
+          `Жди ссылку на геймпасс 👇`
       ),
       {
         parse_mode: "HTML",
@@ -448,8 +453,8 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     } else if (pendingOver60) {
       note = "\n\n💬 <i>Обработка занимает чуть дольше обычного — скоро возьмём в работу.</i>";
     } else {
-      note = "\n\n💬 <i>Менеджеры работают в порядке очереди — среднее время 15–30 минут. " +
-             "Мы сами пришлём уведомление при изменении статуса.</i>";
+      note = "\n\n💬 <i>Менеджеры работают в порядке очереди — обычно выкупаем в течение нескольких часов, максимум сутки. " +
+             "Мы сами пришлём уведомление когда всё будет готово.</i>";
     }
   } else if (order.status === "REJECTED") {
     note = order.rejectionReason
@@ -723,11 +728,25 @@ export function registerText(bot: Telegraf): void {
       validatedCreator = gamepassInfo.creatorName ?? null;
       validatedPrice = gamepassInfo.price;
     } else {
-      // Network-down fallback — log for audit, proceed to order creation
+      // Network-down fallback — Roblox API unreachable, proceed without validation
       console.warn(
         `[TG] Roblox API unreachable — accepting passId=${passId} without validation. ` +
         `Admin must verify price manually.`
       );
+      await ctx.reply(
+        `⚠️ Не удалось автоматически проверить геймпасс — серверы Roblox временно недоступны.\n\n` +
+        `Убедись, что цена геймпасса установлена ровно <b>${Math.ceil(state.denomination / 0.7)} R$</b> — ` +
+        `менеджер проверит вручную. Если цена неверная, заявка будет отклонена.`,
+        { parse_mode: "HTML" }
+      );
+      // Alert admins so they know manual price check is required
+      const alertText =
+        `⚠️ <b>РУЧНАЯ ПРОВЕРКА</b>\n` +
+        `Roblox API недоступен — геймпасс принят без автоматической проверки цены.\n` +
+        `Pass ID: <code>${passId}</code> · Ожидаемая цена: ${Math.ceil(state.denomination / 0.7)} R$`;
+      for (const adminId of ADMIN_IDS) {
+        try { await bot.telegram.sendMessage(adminId, alertText, { parse_mode: "HTML" }); } catch {}
+      }
     }
     // ── End Roblox validation ─────────────────────────────────────────────
 
@@ -854,12 +873,16 @@ export function registerText(bot: Telegraf): void {
     const creatorLine = validatedCreator ? `👤 Создатель: ${validatedCreator}\n` : "";
     const priceLine = validatedPrice != null ? `💰 Цена: ${validatedPrice} R$\n` : "";
     await ctx.reply(
-      `✅ Принял геймпасс №${passId}! Ожидайте выкупа.\n` +
+      `✅ Принял геймпасс №${passId}!\n` +
       creatorLine +
       priceLine +
-      `\n🆔 Номер заявки: <code>${order.id.slice(-6).toUpperCase()}</code>\n` +
-      `📊 Проверить статус в любой момент: /status`,
-      { parse_mode: "HTML" }
+      `\n🆔 Номер заявки: <code>${order.id.slice(-6).toUpperCase()}</code>\n\n` +
+      `⏳ Менеджер выкупит геймпасс в течение суток — обычно намного быстрее.\n` +
+      `Когда всё будет готово — пришлём уведомление.`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[Markup.button.callback("📊 Проверить статус", CB.refreshStatus)]]),
+      }
     );
 
     // Notify all Telegram admins (non-fatal — errors don't affect user)
@@ -1110,7 +1133,10 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
       `🎉 Код <b>${codeInput}</b> принят!\n\n` +
       `Ты в одном шаге — у наших клиентов есть закрытый канал: там первыми узнают о выкупе, ` +
       `получают бонусы на следующий заказ и эксклюзивные акции.\n\n` +
-      `👇 Загляни — это бесплатно, а потом присылай ссылку на геймпасс с ценой ровно <b>${passPrice} R$</b>:`,
+      `👇 Загляни — это бесплатно:\n` +
+      `https://t.me/Roblox_Bank_Tg\n\n` +
+      `После подписки бот напишет тебе автоматически — ничего дополнительно делать не нужно.\n` +
+      `Если сообщение не пришло — просто напиши сюда любое слово 👋`,
       {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
@@ -1130,10 +1156,12 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   await ctx.reply(
     `✅ Код <b>${codeInput}</b> активирован!\n` +
     bonusText +
-    `Осталось совсем чуть-чуть — пришли <b>Asset ID</b> или <b>ссылку</b> на геймпасс.\n` +
-    `📌 Убедись, что цена геймпасса ровно <b>${passPrice} R$</b>\n\n` +
-    `Нужна инструкция? 👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${codeInput}\n\n` +
-    `Жду ссылку 👇`,
+    `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда.\n` +
+    `📌 Цена геймпасса должна быть ровно <b>${passPrice} R$</b>\n` +
+    `<i>(это номинал ÷ 0.7 — Roblox удерживает 30% комиссии)</i>\n\n` +
+    `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
+    `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${codeInput}\n\n` +
+    `Жди ссылку на геймпасс 👇`,
     { parse_mode: "HTML", link_preview_options: { is_disabled: true } }
   );
 }
@@ -1583,9 +1611,12 @@ async function notifyUserRejected(
     : "";
 
   const msg =
-    `❌ <b>Ошибка в вашем заказе #${shortId}</b>\n\n` +
+    `❌ <b>Заявка #${shortId} отклонена</b>\n\n` +
     reasonLine +
-    `Нажми на кнопку ниже, чтобы отправить исправленную ссылку:`;
+    `Чаще всего причина в одном из двух:\n` +
+    `• Цена геймпасса неверная — нужно ${Math.ceil(amount / 0.7)} R$\n` +
+    `• Геймпасс не выставлен на продажу\n\n` +
+    `Исправь и нажми кнопку ниже, чтобы отправить ссылку заново:`;
 
   if (user.tgId) {
     try {
