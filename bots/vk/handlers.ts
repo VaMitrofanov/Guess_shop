@@ -277,11 +277,6 @@ async function handleRefActivation(
   const isGuideMode = rawCode.startsWith("GD") && rawCode.length === 9;
   const code = isGuideMode ? rawCode.substring(2) : rawCode;
 
-  if (!(await isVkSubscribed(ctx, vkUserId))) {
-    await sendVkSubPrompt(ctx, rawCode);
-    return;
-  }
-
   // Case-insensitive code lookup
   const wbCode = await (db as any).wbCode.findFirst({
     where: { code: { equals: code, mode: "insensitive" } },
@@ -290,15 +285,14 @@ async function handleRefActivation(
     await ctx.reply("❌ Код не найден. Проверь правильность ввода на карточке.");
     return;
   }
-  // Block only when code was fully claimed (userId set by a bot).
-  // isUsed=true with userId=null means the website reserved it but no bot flow
-  // completed — allow through so users aren't silently stuck.
-  if (wbCode.userId != null) {
+  // Block only when code was truly completed (isUsed=true + userId set).
+  // isUsed=false + userId set = TG provisional claim — don't block VK activation.
+  if (wbCode.isUsed && wbCode.userId) {
     await ctx.reply("⚠️ Этот код уже был активирован.");
     return;
   }
 
-  // Fetch real name from VK API (ctx.vk is the VK instance attached to the context)
+  // Fetch real name from VK API
   let fullName = "VK User";
   try {
     const [userData] = await (ctx as any).vk.api.users.get({ user_ids: [vkUserId] });
@@ -316,22 +310,25 @@ async function handleRefActivation(
       data: { vkId: String(vkUserId), name: fullName },
     });
   } else if (!user.name || user.name.startsWith("VK #")) {
-    // Update only if name is missing or was a fallback placeholder
     user = await (db as any).user.update({
       where: { vkId: String(vkUserId) },
       data:  { name: fullName },
     });
   }
 
-  const totalAmount = wbCode.denomination + (user.balance || 0);
+  // If code is CLAIMED by a different user, block
+  if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
+    await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.");
+    return;
+  }
 
-  // ── Check returning status for personalized greeting ──────────────────
+  const totalAmount = wbCode.denomination + (user.balance || 0);
+  const passPrice = Math.ceil(totalAmount / 0.7);
   const custStatus = await getCustomerStatus(String(vkUserId), "VK");
   const firstName = fullName.split(" ")[0] || "друг";
+  const greetLine = getGreeting(custStatus, firstName);
 
   setState(vkUserId, { type: "AWAITING_LINK", wbCode: wbCode.code, denomination: totalAmount });
-
-  const passPrice = Math.ceil(totalAmount / 0.7);
 
   let bonusText = "";
   if (user.balance && user.balance > 0) {
@@ -341,10 +338,8 @@ async function handleRefActivation(
     bonusText = `💎 Номинал: ${wbCode.denomination} R$\n\n`;
   }
 
-  const greetLine = getGreeting(custStatus, firstName);
-
-  // ── Provisional order: claim code + create AWAITING_GAMEPASS order ────────
-  // Mirrors the TG bot flow — done after greeting so DB errors don't block user.
+  // ── Provisional order: claim code + notify admins BEFORE subscription gate ──
+  // Mirrors TG flow — user identity is captured even if they skip the sub check.
   let provisionalCreated = false;
   try {
     await (db as any).$transaction(async (tx: any) => {
@@ -370,7 +365,6 @@ async function handleRefActivation(
     console.error("[VK] Provisional order creation failed:", err);
   }
 
-  // Admin early notification with VK user identity
   if (provisionalCreated) {
     try {
       const dateStr = new Date().toLocaleString("ru-RU", {
@@ -395,6 +389,12 @@ async function handleRefActivation(
     } catch (err) {
       console.error("[VK] Admin provisional notify error:", err);
     }
+  }
+
+  // ── Subscription gate (after order is created so admin always gets the lead) ──
+  if (!(await isVkSubscribed(ctx, vkUserId))) {
+    await sendVkSubPrompt(ctx, rawCode);
+    return;
   }
 
   if (isGuideMode) {
