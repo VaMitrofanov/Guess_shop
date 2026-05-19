@@ -150,11 +150,14 @@ export function registerStart(bot: Telegraf): void {
         // IDLE state: upsell to direct sales, no gamepass instructions
         const idleMsg = getIdleGreeting(custStatus, firstName);
         await ctx.reply(
-          `${idleMsg}\n\n📦 Статус заказа: /status`,
+          idleMsg,
           {
             parse_mode: "HTML",
             link_preview_options: { is_disabled: true },
-            ...Markup.inlineKeyboard([[supportBtn("💬 Написать менеджеру")]]),
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
+              [supportBtn("💬 Написать менеджеру")],
+            ]),
           }
         );
       } else if (isAdmin) {
@@ -162,22 +165,21 @@ export function registerStart(bot: Telegraf): void {
         const adminKb = await getAdminKeyboard();
         await ctx.reply(
           `${greeting}Твой личный проводник в мир робуксов.\n\n` +
-          `Есть код с WB-карты? Напиши его прямо сюда — я всё оформлю.\n\n` +
-          `📦 Статус заказа: /status`,
+          `Есть код с WB-карты? Напиши его прямо сюда — я всё оформлю.`,
           adminKb
         );
       } else {
         const greeting = getGreeting(custStatus, firstName);
         await ctx.reply(
           `${greeting}Твой личный проводник в мир робуксов.\n\n` +
-          `Есть код с WB-карты? Напиши его прямо сюда — сайт не нужен.\n\n` +
-          `📦 Статус заказа: /status`,
+          `Есть код с WB-карты? Напиши его прямо сюда — сайт не нужен.`,
           {
             parse_mode: "HTML",
             link_preview_options: { is_disabled: true },
-            ...Markup.inlineKeyboard([[
-              Markup.button.url("📖 Инструкция по активации", "https://robloxbank.ru/guide?source=wb"),
-            ]]),
+            ...Markup.inlineKeyboard([
+              [Markup.button.url("📖 Инструкция по активации", "https://robloxbank.ru/guide?source=wb")],
+              [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
+            ]),
           }
         );
       }
@@ -484,6 +486,11 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
       refreshRow,
       [supportBtn("Нужна помощь?")],
     ]);
+  } else if (order.status === "AWAITING_GAMEPASS") {
+    keyboard = Markup.inlineKeyboard([
+      [Markup.button.url("📖 Инструкция по созданию геймпасса", `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}`)],
+      refreshRow,
+    ]);
   } else if (order.status === "COMPLETED") {
     keyboard = Markup.inlineKeyboard([refreshRow, [supportBtn("💬 Заказать ещё")]]);
   } else if (pendingOver60) {
@@ -603,11 +610,13 @@ export function registerText(bot: Telegraf): void {
         if (!state) {
           await ctx.reply(
             "У тебя сейчас нет активных заявок.\n\n" +
-            "📦 Проверить статус: /status\n" +
-            "🔑 Есть код с WB-карты? Напиши его прямо сюда",
+            "🔑 Есть код с WB-карты? Напиши его прямо сюда.",
             {
               parse_mode: "HTML",
-              ...Markup.inlineKeyboard([[supportBtn("Нужна помощь?")]]),
+              ...Markup.inlineKeyboard([
+                [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
+                [supportBtn("Нужна помощь?")],
+              ]),
             }
           );
           return;
@@ -854,7 +863,8 @@ export function registerText(bot: Telegraf): void {
         pendingLink.delete(ctx.from.id);
         clearFailCounts(ctx.from.id);
         await ctx.reply(
-          "⚠️ Заказ по этому коду уже создан и сейчас обрабатывается.\n\nПроверь статус: /status"
+          "⚠️ Заказ по этому коду уже создан и сейчас обрабатывается.",
+          Markup.inlineKeyboard([[Markup.button.callback("📊 Проверить статус", CB.refreshStatus)]])
         );
         return;
       }

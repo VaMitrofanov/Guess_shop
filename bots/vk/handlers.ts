@@ -825,7 +825,7 @@ async function handleIdleMessage(
       order.status === "AWAITING_GAMEPASS"
         ? `\n\nПришли ссылку на геймпасс с ценой ${passPrice} R$ — и мы возьмём в работу!`
         : order.status === "PENDING"
-        ? "\n\nНе переживай — менеджер работает в порядке очереди, среднее время 15–30 мин. Напишем сами."
+        ? "\n\nНе переживай — менеджер работает в порядке очереди, обычно выкупаем в течение нескольких часов, максимум сутки. Напишем сами."
         : "";
 
     const gamepassLine = order.gamepassUrl ? `🔗 ${order.gamepassUrl}\n` : "";
