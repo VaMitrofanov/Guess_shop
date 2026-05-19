@@ -348,7 +348,9 @@ export function registerStart(bot: Telegraf): void {
     await ctx.reply(
       `${greetLine}\n` +
       (isGuideMode
-        ? `✅ Код <b>${code}</b> зафиксирован!\n\n` +
+        ? `✅ Код <b>${code}</b> зафиксирован!\n` +
+          bonusText +
+          `📌 Цена геймпасса должна быть ровно <b>${passPrice} R$</b>\n\n` +
           `Если геймпасс уже создан — кидай ссылку 👇\n\n` +
           `Если нужна инструкция — возвращайся на сайт:\n` +
           `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n` +
@@ -1379,7 +1381,7 @@ export function registerCallbacks(bot: Telegraf): void {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const [, orderId, userId] = data.split(":");
 
-      // Award +50 R$ and mark bonus as claimed
+      // Award +100 R$ and mark bonus as claimed
       await (db as any).user.update({
         where: { id: userId },
         data: { balance: { increment: 100 } },
