@@ -302,7 +302,7 @@ export function registerStart(bot: Telegraf): void {
           `получают бонусы на следующий заказ и эксклюзивные акции.\n\n` +
           `👇 Загляни — это бесплатно:\n` +
           `https://t.me/Roblox_Bank_Tg\n\n` +
-          `После этого возвращайся за инструкцией 👉 https://www.robloxbank.ru/guide?source=wb&skip=1`
+          `После этого возвращайся за инструкцией 👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}`
         : `🎉 Код <b>${code}</b> принят!\n\n` +
           `Ты в одном шаге — у наших клиентов есть закрытый канал: там первыми узнают о выкупе, ` +
           `получают бонусы на следующий заказ и эксклюзивные акции.\n\n` +
@@ -338,13 +338,13 @@ export function registerStart(bot: Telegraf): void {
         ? `✅ Код <b>${code}</b> зафиксирован!\n\n` +
           `Если геймпасс уже создан — кидай ссылку 👇\n\n` +
           `Если нужна инструкция — возвращайся на сайт:\n` +
-          `👉 https://www.robloxbank.ru/guide?source=wb&skip=1\n` +
+          `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n` +
           `Там подробная пошаговая инструкция!`
         : `✅ Код <b>${code}</b> активирован!\n` +
           bonusText +
           `Осталось совсем чуть-чуть — пришли <b>Asset ID</b> или <b>ссылку</b> на геймпасс.\n` +
           `📌 Убедись, что цена геймпасса ровно <b>${passPrice} R$</b>\n\n` +
-          `Нужна инструкция? 👉 https://www.robloxbank.ru/guide?source=wb&skip=1\n\n` +
+          `Нужна инструкция? 👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n\n` +
           `Жду ссылку 👇`
       ),
       {

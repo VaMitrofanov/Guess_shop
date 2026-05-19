@@ -8,14 +8,16 @@ export const metadata: Metadata = {
 };
 
 interface GuidPageProps {
-  searchParams: Promise<{ source?: string; skip?: string }>;
+  searchParams: Promise<{ source?: string; skip?: string; code?: string }>;
 }
 
 export default async function GuidePage({ searchParams }: GuidPageProps) {
-  const { source, skip } = await searchParams;
+  const { source, skip, code } = await searchParams;
   const isWB = source === "wb";
-  // skip=1 is set by the TG/VK bot after code activation — bypass gate, show guide directly
   const skipGate = isWB && !!skip;
+  // code passed by TG/VK bot so the instruction page opens even in Telegram's WebView
+  // (which has a separate localStorage from the regular browser)
+  const wbCodeFromUrl = skipGate && code ? code.trim().toUpperCase() : undefined;
 
   return (
     <>
@@ -26,7 +28,7 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
         style={{ display: "none" }}
         aria-hidden="true"
       />
-      <GuideClient isWB={isWB} skipGate={skipGate} />
+      <GuideClient isWB={isWB} skipGate={skipGate} wbCodeFromUrl={wbCodeFromUrl} />
     </>
   );
 }

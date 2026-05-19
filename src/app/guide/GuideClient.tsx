@@ -2591,9 +2591,8 @@ function WBIntro({ onDone }: { onDone: () => void }) {
 
 // ─── Main export ───────────────────────────────────────────────────────────────
 
-export default function GuideClient({ isWB, skipGate = false }: { isWB: boolean; skipGate?: boolean }) {
+export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl }: { isWB: boolean; skipGate?: boolean; wbCodeFromUrl?: string }) {
   const [phase, setPhase] = useState<"intro" | "gate" | "instruction">(
-    // skipGate=true when arriving from TG/VK bot — go to gate so restoreSession can check CLAIMED status
     !isWB ? "instruction" : skipGate ? "gate" : "intro"
   );
   const [denomination, setDenomination] = useState<number>(0);
@@ -2608,20 +2607,22 @@ export default function GuideClient({ isWB, skipGate = false }: { isWB: boolean;
     }
     const restoreSession = async () => {
       const saved = loadWBSession();
-      if (!saved) {
+      // wbCodeFromUrl is passed by the bot link (?code=...) — works even in Telegram WebView
+      // where localStorage is isolated from the regular browser session.
+      const codeToCheck = saved?.code || wbCodeFromUrl;
+      if (!codeToCheck) {
         setIsRestoring(false);
         return;
       }
       try {
-        // Check if code is already activated (CLAIMED) — enables instruction access
-        const statusRes = await fetch(`/api/wb-code?code=${encodeURIComponent(saved.code)}`);
+        const statusRes = await fetch(`/api/wb-code?code=${encodeURIComponent(codeToCheck)}`);
         const statusData = await statusRes.json().catch(() => ({}));
         if (statusRes.ok && statusData.claimed) {
-          setDenomination(statusData.denomination ?? saved.denomination);
-          setActiveCode(saved.code);
+          setDenomination(statusData.denomination ?? saved?.denomination ?? 0);
+          setActiveCode(codeToCheck);
           setPhase("instruction");
         }
-        // If not claimed: stay in gate — user must activate via TG/VK
+        // If not claimed: stay in gate
       } catch {
         // Network error — stay in gate
       } finally {
@@ -2629,7 +2630,7 @@ export default function GuideClient({ isWB, skipGate = false }: { isWB: boolean;
       }
     };
     restoreSession();
-  }, [isWB]);
+  }, [isWB, wbCodeFromUrl]);
 
   const handleWBReset = () => {
     clearWBSession();

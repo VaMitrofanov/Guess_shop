@@ -403,7 +403,7 @@ async function handleRefActivation(
       `✅ Код ${code} зафиксирован!\n\n` +
       `Если геймпасс уже создан — кидай ссылку 👇\n\n` +
       `Если нужна инструкция — возвращайся на сайт:\n` +
-      `👉 https://www.robloxbank.ru/guide?source=wb&skip=1\n` +
+      `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n` +
       `Там подробная пошаговая инструкция!`
     );
   } else {
