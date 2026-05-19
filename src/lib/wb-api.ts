@@ -103,16 +103,103 @@ const RealizRowSchema = z.object({
   sale_dt:                   z.string().optional().default(""),
 });
 
+const NmReportCardSchema = z.object({
+  nmID:        z.number(),
+  vendorCode:  z.string().optional().default(""),
+  statistics: z.array(z.object({
+    selectedPeriod: z.object({
+      openCardCount:   z.number().optional().default(0),
+      addToCartCount:  z.number().optional().default(0),
+      ordersCount:     z.number().optional().default(0),
+      ordersSumRub:    z.number().optional().default(0),
+      buyoutsCount:    z.number().optional().default(0),
+      conversions: z.object({
+        addToCartPercent:     z.number().optional().default(0),
+        cartToOrderPercent:   z.number().optional().default(0),
+        orderToBuyoutPercent: z.number().optional().default(0),
+      }).optional(),
+    }).optional(),
+  })).optional().default([]),
+});
+
+const NmReportSchema = z.object({
+  data: z.object({
+    cards: z.array(NmReportCardSchema).optional().default([]),
+  }).optional(),
+});
+
+const GoodItemSchema = z.object({
+  nmID:             z.number(),
+  vendorCode:       z.string().optional().default(""),
+  price:            z.number().optional().default(0),
+  discount:         z.number().optional().default(0),
+  discountedPrice:  z.number().optional().default(0),
+});
+
+const GoodsListSchema = z.object({
+  data: z.object({
+    listGoods: z.array(GoodItemSchema).optional().default([]),
+  }).optional(),
+});
+
+const FeedbackItemSchema = z.object({
+  id:               z.string(),
+  text:             z.string().optional().default(""),
+  productValuation: z.number().optional().default(0),
+  createdDate:      z.string().optional().default(""),
+  productDetails:   z.array(z.object({ supplierArticle: z.string().optional().default("") })).optional().default([]),
+  answer:           z.object({ text: z.string() }).nullable().optional(),
+});
+
+const FeedbacksResponseSchema = z.object({
+  data: z.object({
+    countUnanswered: z.number().optional().default(0),
+    feedbacks:       z.array(FeedbackItemSchema).optional().default([]),
+  }).optional(),
+});
+
+const QuestionItemSchema = z.object({
+  id:          z.string(),
+  text:        z.string().optional().default(""),
+  createdDate: z.string().optional().default(""),
+  productDetails: z.array(z.object({ supplierArticle: z.string().optional().default("") })).optional().default([]),
+  answer:      z.object({ text: z.string() }).nullable().optional(),
+});
+
+const QuestionsResponseSchema = z.object({
+  data: z.object({
+    countUnanswered: z.number().optional().default(0),
+    questions:       z.array(QuestionItemSchema).optional().default([]),
+  }).optional(),
+});
+
+const SupplySchema = z.object({
+  id:        z.string(),
+  done:      z.boolean().optional().default(false),
+  createdAt: z.string().optional().default(""),
+  closedAt:  z.string().nullable().optional(),
+  name:      z.string().optional().default(""),
+  cargoType: z.number().optional().default(0),
+});
+
+const SuppliesResponseSchema = z.object({
+  supplies: z.array(SupplySchema).optional().default([]),
+});
+
 // ── In-memory cache (survives across requests, resets on container restart) ─
 
 const TTL = 300_000; // WB statistics API: rate-limited per seller, 5-min cache reduces 429s
 const ADV_TTL = 120_000; // advert fullstats: generous TTL to avoid 429
 type CacheEntry<T> = { data: T; ts: number };
 const cache: {
-  stats?:   CacheEntry<TwaStats30d>;
-  stocks?:  CacheEntry<TwaStockItem[]>;
-  advert?:  CacheEntry<AdvertPeriodData> & { fromDate: string };
-  realiz?:  CacheEntry<TwaRealizData>;
+  stats?:    CacheEntry<TwaStats30d>;
+  stocks?:   CacheEntry<TwaStockItem[]>;
+  advert?:   CacheEntry<AdvertPeriodData> & { fromDate: string };
+  realiz?:   CacheEntry<TwaRealizData>;
+  funnel?:   CacheEntry<NmFunnelItem[]>;
+  feedback?: CacheEntry<FeedbackSummary>;
+  supplies?: CacheEntry<TwaSupply[]>;
+  goods?:    CacheEntry<TwaGoodItem[]>;
 } = {};
 
 // ── Public API ─────────────────────────────────────────────────────────────
@@ -363,4 +450,186 @@ export async function getRealizData(weeks = 4): Promise<TwaRealizData | null> {
   };
   cache.realiz = { data: realiz, ts: Date.now() };
   return realiz;
+}
+
+export interface NmFunnelItem {
+  nmID:      number;
+  article:   string;
+  views:     number;
+  cart:      number;
+  orders:    number;
+  buyouts:   number;
+  revenue:   number;
+  pctCart:   number;
+  pctOrder:  number;
+  pctBuyout: number;
+}
+
+export interface TwaGoodItem {
+  nmID:            number;
+  article:         string;
+  price:           number;
+  discount:        number;
+  discountedPrice: number;
+}
+
+export interface FeedbackSummary {
+  unansweredFeedbacks: number;
+  unansweredQuestions: number;
+  items: {
+    id: string; type: "feedback" | "question";
+    text: string; rating?: number;
+    date: string; article: string; answered: boolean;
+  }[];
+}
+
+export interface TwaSupply {
+  id: string; done: boolean;
+  createdAt: string; closedAt: string | null;
+  name: string; cargoType: number;
+}
+
+const FUNNEL_TTL   = 20 * 60_000;
+const FEEDBACK_TTL =  5 * 60_000;
+const SUPPLY_TTL   = 10 * 60_000;
+const GOODS_TTL    = 10 * 60_000;
+
+export async function getGoods(): Promise<TwaGoodItem[] | null> {
+  if (cache.goods && Date.now() - cache.goods.ts < GOODS_TTL) return cache.goods.data;
+  const token = getWbToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(
+      "https://discounts-prices-api.wildberries.ru/api/v2/list/goods/filter?limit=100&offset=0",
+      { cache: "no-store", headers: { Authorization: token } },
+    );
+    if (!res.ok) { console.error(`[wb-api] goods ${res.status}`); return cache.goods?.data ?? null; }
+    const parsed = GoodsListSchema.safeParse(await res.json());
+    if (!parsed.success) return cache.goods?.data ?? null;
+    const result: TwaGoodItem[] = (parsed.data.data?.listGoods ?? []).map(g => ({
+      nmID: g.nmID, article: g.vendorCode,
+      price: g.price, discount: g.discount, discountedPrice: g.discountedPrice,
+    }));
+    cache.goods = { data: result, ts: Date.now() };
+    return result;
+  } catch (e: any) {
+    console.error("[wb-api] goods error:", e?.message);
+    return cache.goods?.data ?? null;
+  }
+}
+
+export async function getNmFunnel(): Promise<NmFunnelItem[] | null> {
+  if (cache.funnel && Date.now() - cache.funnel.ts < FUNNEL_TTL) return cache.funnel.data;
+  const token = getWbToken();
+  if (!token) return null;
+  const goods = await getGoods();
+  if (!goods || goods.length === 0) return cache.funnel?.data ?? [];
+  const nmIds = goods.map(g => g.nmID);
+
+  const now  = new Date();
+  const from = new Date(now.getTime() - 30 * 864e5);
+  const fmt  = (d: Date) => d.toISOString().replace("T", " ").split(".")[0];
+  try {
+    const res = await fetch("https://seller-analytics.wildberries.ru/api/v1/nm-report/detail", {
+      method: "POST", cache: "no-store",
+      headers: { Authorization: token, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        nmIDs: nmIds,
+        period: { begin: fmt(from), end: fmt(now) },
+        timezone: "Europe/Moscow",
+        aggregationLevel: "month",
+      }),
+    });
+    if (!res.ok) { console.error(`[wb-api] nm-report ${res.status}`); return cache.funnel?.data ?? null; }
+    const parsed = NmReportSchema.safeParse(await res.json());
+    if (!parsed.success || !parsed.data.data) return cache.funnel?.data ?? null;
+    const result: NmFunnelItem[] = parsed.data.data.cards.map(card => {
+      const sp  = card.statistics[0]?.selectedPeriod;
+      const cv  = sp?.conversions;
+      const v   = sp?.openCardCount  ?? 0;
+      const c   = sp?.addToCartCount ?? 0;
+      const o   = sp?.ordersCount    ?? 0;
+      const b   = sp?.buyoutsCount   ?? 0;
+      return {
+        nmID: card.nmID, article: card.vendorCode,
+        views: v, cart: c, orders: o, buyouts: b,
+        revenue:   sp?.ordersSumRub ?? 0,
+        pctCart:   cv?.addToCartPercent     ?? (v > 0 ? Math.round(c / v * 100) : 0),
+        pctOrder:  cv?.cartToOrderPercent   ?? (c > 0 ? Math.round(o / c * 100) : 0),
+        pctBuyout: cv?.orderToBuyoutPercent ?? (o > 0 ? Math.round(b / o * 100) : 0),
+      };
+    }).sort((a, b) => b.views - a.views);
+    cache.funnel = { data: result, ts: Date.now() };
+    return result;
+  } catch (e: any) {
+    console.error("[wb-api] nm-report error:", e?.message);
+    return cache.funnel?.data ?? null;
+  }
+}
+
+export async function getFeedbackSummary(): Promise<FeedbackSummary | null> {
+  if (cache.feedback && Date.now() - cache.feedback.ts < FEEDBACK_TTL) return cache.feedback.data;
+  const token = getWbToken();
+  if (!token) return null;
+  try {
+    const [fbRes, qRes] = await Promise.all([
+      fetch("https://feedbacks-and-questions.wildberries.ru/api/v1/feedbacks?isAnswered=false&take=5&skip=0",
+        { cache: "no-store", headers: { Authorization: token } }).catch(() => null),
+      fetch("https://feedbacks-and-questions.wildberries.ru/api/v1/questions?isAnswered=false&take=5&skip=0",
+        { cache: "no-store", headers: { Authorization: token } }).catch(() => null),
+    ]);
+    const fbJson = fbRes?.ok ? FeedbacksResponseSchema.safeParse(await fbRes.json()) : null;
+    const qJson  =  qRes?.ok ?  QuestionsResponseSchema.safeParse(await  qRes.json()) : null;
+    const fbData = fbJson?.success ? fbJson.data.data : null;
+    const qData  =  qJson?.success ?  qJson.data.data : null;
+    const items = [
+      ...(fbData?.feedbacks ?? []).map(f => ({
+        id: f.id, type: "feedback" as const,
+        text: f.text, rating: f.productValuation,
+        date: f.createdDate,
+        article: f.productDetails[0]?.supplierArticle ?? "",
+        answered: !!f.answer?.text,
+      })),
+      ...(qData?.questions ?? []).map(q => ({
+        id: q.id, type: "question" as const,
+        text: q.text, rating: undefined,
+        date: q.createdDate,
+        article: q.productDetails[0]?.supplierArticle ?? "",
+        answered: !!q.answer?.text,
+      })),
+    ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const result: FeedbackSummary = {
+      unansweredFeedbacks: fbData?.countUnanswered ?? 0,
+      unansweredQuestions:  qData?.countUnanswered ?? 0,
+      items,
+    };
+    cache.feedback = { data: result, ts: Date.now() };
+    return result;
+  } catch (e: any) {
+    console.error("[wb-api] feedback error:", e?.message);
+    return cache.feedback?.data ?? null;
+  }
+}
+
+export async function getSupplies(): Promise<TwaSupply[] | null> {
+  if (cache.supplies && Date.now() - cache.supplies.ts < SUPPLY_TTL) return cache.supplies.data;
+  const token = getWbToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(
+      "https://marketplace-api.wildberries.ru/api/v3/supplies?limit=10&next=0",
+      { cache: "no-store", headers: { Authorization: token } },
+    );
+    if (!res.ok) { console.error(`[wb-api] supplies ${res.status}`); return cache.supplies?.data ?? null; }
+    const parsed = SuppliesResponseSchema.safeParse(await res.json());
+    if (!parsed.success) return cache.supplies?.data ?? null;
+    const result: TwaSupply[] = parsed.data.supplies.map(s => ({
+      ...s, closedAt: s.closedAt ?? null,
+    }));
+    cache.supplies = { data: result, ts: Date.now() };
+    return result;
+  } catch (e: any) {
+    console.error("[wb-api] supplies error:", e?.message);
+    return cache.supplies?.data ?? null;
+  }
 }

@@ -7,6 +7,17 @@ interface StockItem {
   avgDailySales: number; runwayDays: number; price: number;
 }
 
+interface SupplyItem {
+  id: string; done: boolean;
+  createdAt: string; closedAt: string | null;
+  name: string; cargoType: number;
+}
+
+interface GoodItem {
+  nmID: number; article: string;
+  price: number; discount: number; discountedPrice: number;
+}
+
 const C = {
   card: "#2c2c2e", elevated: "#3a3a3c", border: "#3a3a3c",
   accent: "#bf5af2", green: "#30d158", red: "#ff453a", yellow: "#ffd60a",
@@ -21,30 +32,20 @@ function runwayInfo(d: number): { color: string; label: string } {
   return        { color: "#636366",      label: "0д" };
 }
 
-export default function StocksScreen({ token }: { token: string }) {
-  const [data,    setData]    = useState<StockItem[] | null>(null);
-  const [loading, setLoading] = useState(true);
+function cargoLabel(n: number): string {
+  if (n === 1) return "FBO";
+  if (n === 2) return "FBS";
+  if (n === 3) return "Кросс";
+  return `Тип ${n}`;
+}
 
-  useEffect(() => {
-    fetch("/api/twa/stocks", { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json()).then(setData).finally(() => setLoading(false));
-  }, [token]);
-
-  if (loading) return <Skeleton />;
-  if (!data)   return (
-    <div style={{ padding: 40, textAlign: "center" as const, color: C.red }}>
-      <div style={{ fontSize: 32, marginBottom: 8 }}>⚠️</div>
-      <div style={{ fontSize: 14 }}>Ошибка загрузки</div>
-    </div>
-  );
-
+function StocksContent({ data }: { data: StockItem[] }) {
   const total      = data.reduce((a, s) => a + s.quantity,        0);
   const toClient   = data.reduce((a, s) => a + s.inWayToClient,   0);
   const fromClient = data.reduce((a, s) => a + s.inWayFromClient, 0);
 
   return (
     <div style={{ padding: 16, paddingBottom: 24, display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* Summary row */}
       <div style={{ background: C.card, borderRadius: 14, padding: "14px 16px" }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, textAlign: "center" as const }}>
           {[
@@ -97,6 +98,130 @@ export default function StocksScreen({ token }: { token: string }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function SuppliesContent({ token }: { token: string }) {
+  const [data, setData] = useState<SupplyItem[] | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/twa/supplies", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null).then(setData)
+      .catch(() => {}).finally(() => setLoading(false));
+  }, [token]);
+
+  if (loading) return <Skeleton />;
+  if (!data || data.length === 0) return (
+    <div style={{ padding: 40, textAlign: "center" as const, color: C.sec, fontSize: 14 }}>
+      Нет поставок
+    </div>
+  );
+
+  return (
+    <div style={{ padding: 16, paddingBottom: 24, display: "flex", flexDirection: "column", gap: 10 }}>
+      {data.map(s => (
+        <div key={s.id} style={{ background: C.card, borderRadius: 14, padding: "14px 16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 15 }}>{s.name || s.id}</div>
+              {s.name && <div style={{ fontSize: 12, color: C.sec, marginTop: 2 }}>ID: {s.id}</div>}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: s.done ? C.green : C.yellow }}>
+                {s.done ? "Принята" : "В работе"}
+              </span>
+              <span style={{ fontSize: 11, color: C.muted }}>{cargoLabel(s.cargoType)}</span>
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: C.sec }}>
+            Создана: {new Date(s.createdAt).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
+            {s.closedAt && (
+              <span>
+                {" "}· Закрыта: {new Date(s.closedAt).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
+              </span>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PricesContent({ token }: { token: string }) {
+  const [data, setData] = useState<GoodItem[] | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/twa/goods", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null).then(setData)
+      .catch(() => {}).finally(() => setLoading(false));
+  }, [token]);
+
+  if (loading) return <Skeleton />;
+  if (!data || data.length === 0) return (
+    <div style={{ padding: 40, textAlign: "center" as const, color: C.sec, fontSize: 14 }}>
+      Нет данных
+    </div>
+  );
+
+  return (
+    <div style={{ padding: 16, paddingBottom: 24, display: "flex", flexDirection: "column", gap: 10 }}>
+      {data.map(g => (
+        <div key={g.nmID} style={{ background: C.card, borderRadius: 14, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ color: C.accent, fontWeight: 600, fontSize: 16 }}>{g.article} R$</span>
+          <div style={{ textAlign: "right" as const }}>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>{g.discountedPrice.toLocaleString("ru-RU")} ₽</div>
+            {g.discount > 0 && (
+              <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+                {g.price.toLocaleString("ru-RU")} ₽ −{g.discount}%
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function StocksScreen({ token }: { token: string }) {
+  const [tab, setTab]   = useState<"stocks" | "supplies" | "prices">("stocks");
+  const [data, setData] = useState<StockItem[] | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/twa/stocks", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json()).then(setData).finally(() => setLoading(false));
+  }, [token]);
+
+  return (
+    <div style={{ paddingBottom: 24 }}>
+      <div style={{ padding: "10px 16px", borderBottom: "1px solid #2c2c2e" }}>
+        <div style={{ display: "flex", background: "#2c2c2e", borderRadius: 10, padding: 3, gap: 2 }}>
+          {(["stocks", "supplies", "prices"] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)} style={{
+              flex: 1, padding: "8px 0", borderRadius: 8, border: "none", cursor: "pointer",
+              fontSize: 13, fontWeight: tab === t ? 600 : 400,
+              background: tab === t ? C.elevated : "none",
+              color: tab === t ? "#fff" : C.sec,
+            }}>
+              {t === "stocks" ? "Склад" : t === "supplies" ? "Поставки" : "Цены"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {tab === "stocks" && (
+        loading ? <Skeleton /> : !data ? (
+          <div style={{ padding: 40, textAlign: "center" as const, color: C.red }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>⚠️</div>
+            <div style={{ fontSize: 14 }}>Ошибка загрузки</div>
+          </div>
+        ) : <StocksContent data={data} />
+      )}
+      {tab === "supplies" && <SuppliesContent token={token} />}
+      {tab === "prices"   && <PricesContent token={token} />}
     </div>
   );
 }

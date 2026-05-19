@@ -192,17 +192,121 @@ function AdvertTab({ token }: { token: string }) {
   );
 }
 
+interface FunnelItem {
+  nmID: number; article: string;
+  views: number; cart: number; orders: number; buyouts: number;
+  revenue: number; pctCart: number; pctOrder: number; pctBuyout: number;
+}
+interface GoodItem {
+  nmID: number; article: string;
+  price: number; discount: number; discountedPrice: number;
+}
+interface FunnelData { funnel: FunnelItem[]; goods: GoodItem[] }
+
+function FunnelTab({ token }: { token: string }) {
+  const [data, setData] = useState<FunnelData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/twa/funnel", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null).then(setData)
+      .catch(() => {}).finally(() => setLoading(false));
+  }, [token]);
+
+  if (loading) return <Skeleton />;
+  if (!data || data.funnel.length === 0) return (
+    <div style={{ padding: 24, textAlign: "center" as const, color: C.sec, fontSize: 13 }}>
+      <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
+      Нет данных воронки.<br />Проверь права токена WB (аналитика).
+    </div>
+  );
+
+  const totalViews = data.funnel.reduce((s, f) => s + f.views, 0);
+  const totalRev   = data.funnel.reduce((s, f) => s + f.revenue, 0);
+
+  function pctColor(val: number, type: "cart" | "order" | "buyout") {
+    if (type === "cart")   return val >= 10 ? C.green : val >= 5 ? C.yellow : C.red;
+    if (type === "order")  return val >= 7  ? C.green : val >= 3 ? C.yellow : C.red;
+    return val >= 85 ? C.green : val >= 70 ? C.yellow : C.red;
+  }
+
+  return (
+    <div style={{ padding: "12px 16px 0", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div style={{ background: C.card, borderRadius: 12, padding: "10px 14px" }}>
+          <div style={{ fontSize: 11, color: C.sec }}>Просмотров (30д)</div>
+          <div style={{ fontSize: 20, fontWeight: 700, marginTop: 3 }}>{totalViews.toLocaleString("ru-RU")}</div>
+        </div>
+        <div style={{ background: C.card, borderRadius: 12, padding: "10px 14px" }}>
+          <div style={{ fontSize: 11, color: C.sec }}>Заказов на сумму</div>
+          <div style={{ fontSize: 20, fontWeight: 700, marginTop: 3 }}>{rub(Math.round(totalRev))}</div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 1fr 1fr 1fr", gap: 4, padding: "0 4px" }}>
+        {["Артикул", "Просм", "→Корзина", "→Заказ", "→Выкуп"].map(h => (
+          <div key={h} style={{ fontSize: 10, color: C.muted, textAlign: "center" as const }}>{h}</div>
+        ))}
+      </div>
+
+      {data.funnel.map(item => (
+        <div key={item.nmID} style={{ background: C.card, borderRadius: 12, padding: "10px 12px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 1fr 1fr 1fr", gap: 4, alignItems: "center" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.accent }}>{item.article} R$</div>
+            <div style={{ textAlign: "center" as const }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{item.views.toLocaleString("ru-RU")}</div>
+            </div>
+            <div style={{ textAlign: "center" as const }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: pctColor(item.pctCart, "cart") }}>{item.pctCart}%</div>
+              <div style={{ fontSize: 10, color: C.muted }}>{item.cart.toLocaleString("ru-RU")}</div>
+            </div>
+            <div style={{ textAlign: "center" as const }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: pctColor(item.pctOrder, "order") }}>{item.pctOrder}%</div>
+              <div style={{ fontSize: 10, color: C.muted }}>{item.orders.toLocaleString("ru-RU")}</div>
+            </div>
+            <div style={{ textAlign: "center" as const }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: pctColor(item.pctBuyout, "buyout") }}>{item.pctBuyout}%</div>
+              <div style={{ fontSize: 10, color: C.muted }}>{item.buyouts.toLocaleString("ru-RU")}</div>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {data.goods.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, fontWeight: 700, color: C.sec, textTransform: "uppercase" as const, letterSpacing: 0.6, marginTop: 4 }}>
+            Текущие цены WB
+          </div>
+          {data.goods.map(g => (
+            <div key={g.nmID} style={{ background: C.card, borderRadius: 12, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ color: C.accent, fontWeight: 600, fontSize: 15 }}>{g.article} R$</span>
+              <div style={{ textAlign: "right" as const }}>
+                <span style={{ fontSize: 16, fontWeight: 700 }}>{g.discountedPrice.toLocaleString("ru-RU")} ₽</span>
+                {g.discount > 0 && (
+                  <span style={{ fontSize: 12, color: C.muted, marginLeft: 6 }}>
+                    {g.price.toLocaleString("ru-RU")} ₽ −{g.discount}%
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function AnalyticsScreen({ token }: { token: string }) {
-  const [tab, setTab] = useState<"dynamics" | "advert">("dynamics");
+  const [tab, setTab] = useState<"dynamics" | "advert" | "funnel">("dynamics");
 
   return (
     <div style={{ paddingBottom: 24 }}>
-      {/* Inner tab bar */}
       <div style={{ padding: "12px 16px", borderBottom: "1px solid #2c2c2e" }}>
         <div style={{ display: "flex", background: "#2c2c2e", borderRadius: 10, padding: 3, gap: 2 }}>
           {([
             { id: "dynamics", label: "Динамика" },
             { id: "advert",   label: "Реклама"  },
+            { id: "funnel",   label: "Воронка"  },
           ] as const).map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
               flex: 1, padding: "8px 0", borderRadius: 8, border: "none", cursor: "pointer",
@@ -214,7 +318,9 @@ export default function AnalyticsScreen({ token }: { token: string }) {
         </div>
       </div>
 
-      {tab === "dynamics" ? <DynamicsTab token={token} /> : <AdvertTab token={token} />}
+      {tab === "dynamics" && <DynamicsTab token={token} />}
+      {tab === "advert"   && <AdvertTab token={token} />}
+      {tab === "funnel"   && <FunnelTab token={token} />}
     </div>
   );
 }

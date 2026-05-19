@@ -41,12 +41,19 @@ function MetricCard({ label, value, sub, subColor, accent }: {
 }
 
 export default function Dashboard({ token }: { token: string }) {
-  const [data,    setData]    = useState<DashData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data,     setData]     = useState<DashData | null>(null);
+  const [loading,  setLoading]  = useState(true);
+  const [feedback, setFeedback] = useState<{ unansweredFeedbacks: number; unansweredQuestions: number; items: any[] } | null>(null);
 
   useEffect(() => {
     fetch("/api/twa/dashboard", { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json()).then(setData).finally(() => setLoading(false));
+  }, [token]);
+
+  useEffect(() => {
+    fetch("/api/twa/feedback", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null).then(d => { if (d) setFeedback(d); })
+      .catch(() => {});
   }, [token]);
 
   if (loading) return <Skeleton />;
@@ -121,6 +128,44 @@ export default function Dashboard({ token }: { token: string }) {
           </div>
         )}
       </section>
+
+      {(feedback && (feedback.unansweredFeedbacks > 0 || feedback.unansweredQuestions > 0 || feedback.items.length > 0)) && (
+        <section>
+          <div style={{ fontSize: 11, fontWeight: 700, color: C.sec, textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 10 }}>
+            Отзывы и вопросы
+          </div>
+          <div style={{ background: C.card, borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+            {feedback.unansweredFeedbacks > 0 && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 14 }}>⭐ Отзывов без ответа</span>
+                <span style={{ fontSize: 16, fontWeight: 700, color: C.red }}>{feedback.unansweredFeedbacks}</span>
+              </div>
+            )}
+            {feedback.unansweredQuestions > 0 && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 14 }}>❓ Вопросов без ответа</span>
+                <span style={{ fontSize: 16, fontWeight: 700, color: C.yellow }}>{feedback.unansweredQuestions}</span>
+              </div>
+            )}
+            {feedback.items.slice(0, 3).map((item: any) => (
+              <div key={item.id} style={{ borderTop: `1px solid ${C.border}`, paddingTop: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                  <span style={{ fontSize: 11, color: item.type === "feedback" ? C.yellow : C.accent }}>
+                    {item.type === "feedback" ? `⭐ ${item.rating}/5` : "❓ вопрос"}
+                    {item.article ? ` · ${item.article} R$` : ""}
+                  </span>
+                  <span style={{ fontSize: 11, color: C.muted }}>
+                    {item.date ? new Date(item.date).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }) : ""}
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, color: "#e5e5ea", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const }}>
+                  {item.text || "(без текста)"}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
