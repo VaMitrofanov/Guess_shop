@@ -86,6 +86,9 @@ async function checkSubscription(bot: Telegraf, userId: number): Promise<boolean
 // ─────────────────────────────────────────────────────────────────────────────
 
 const startRateLimiter = new Map<string, { attempts: number, resetAt: number }>();
+// Tracks users who recently sent /start with a code — suppresses the duplicate
+// plain /start that iOS Telegram sends right after opening a deep link.
+const recentCodeStarts = new Map<number, number>(); // userId → timestamp
 
 export function registerStart(bot: Telegraf): void {
   bot.start(async (ctx) => {
@@ -104,6 +107,13 @@ export function registerStart(bot: Telegraf): void {
       const parts = rawPayload.split("_");
       code = (parts[1] || "").toUpperCase();
       sessionId = parts[2] || null;
+    }
+
+    // If this /start carries a code, mark the user immediately so a concurrent
+    // plain /start (iOS deep-link duplicate) is suppressed below.
+    if (code) {
+      recentCodeStarts.set(ctx.from.id, Date.now());
+      setTimeout(() => recentCodeStarts.delete(ctx.from.id), 30_000);
     }
 
     // Rate Limiting
@@ -129,6 +139,9 @@ export function registerStart(bot: Telegraf): void {
 
     // No code payload — IDLE greeting
     if (!code) {
+      // Suppress the duplicate plain /start that iOS Telegram sends after a deep link
+      const recentTs = recentCodeStarts.get(ctx.from.id);
+      if (recentTs && Date.now() - recentTs < 15_000) return;
       const isAdmin = ADMIN_IDS.includes(tgId);
       const custStatus = await getCustomerStatus(tgId, "TG");
       const firstName = ctx.from.first_name || undefined;
