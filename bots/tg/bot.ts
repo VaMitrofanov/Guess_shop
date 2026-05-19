@@ -35,6 +35,7 @@ import {
   registerPhoto,
   registerCallbacks,
   registerAdmin,
+  registerChatMember,
 } from "./handlers";
 import { registerAdminHubs, setupMenuButton } from "./admin";
 
@@ -53,6 +54,7 @@ registerAdmin(bot);
 registerCallbacks(bot);
 registerText(bot);
 registerPhoto(bot);
+registerChatMember(bot); // must be after other handlers; fires when user joins TG_CHANNEL_ID
 
 // ── Bridge server ────────────────────────────────────────────────────────────
 // Always start when VALIDATOR_KEY is set — works as provider (Singapore) or as
@@ -77,7 +79,9 @@ if (disablePolling) {
     "This instance serves as a validation bridge only."
   );
 } else {
-  bot.launch().catch((err: Error) => {
+  bot.launch({
+    allowedUpdates: ["message", "callback_query", "my_chat_member", "chat_member"],
+  }).catch((err: Error) => {
     console.error("[TG] Failed to start:", err);
     process.exit(1);
   });

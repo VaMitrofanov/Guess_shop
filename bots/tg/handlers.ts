@@ -655,6 +655,8 @@ export function registerText(bot: Telegraf): void {
     }
 
     // ── Roblox API validation ─────────────────────────────────────────────
+    let validatedCreator: string | null = null;
+    let validatedPrice: number | null = null;
     const gamepassInfo = await getGamepassDetails(passId);
 
     if (!gamepassInfo) {
@@ -717,16 +719,9 @@ export function registerText(bot: Telegraf): void {
         return;
       }
 
-      // Notify user that the gamepass was found and validated
-      const creatorLine = gamepassInfo.creatorName
-        ? `\n👤 Создатель: ${gamepassInfo.creatorName}`
-        : "";
-      await ctx.reply(
-        `✅ Геймпасс найден!` +
-        creatorLine +
-        `\n💰 Цена: ${gamepassInfo.price} R$`,
-        { parse_mode: "HTML" }
-      );
+      // Store creator/price for the merged confirmation message below
+      validatedCreator = gamepassInfo.creatorName ?? null;
+      validatedPrice = gamepassInfo.price;
     } else {
       // Network-down fallback — log for audit, proceed to order creation
       console.warn(
@@ -856,9 +851,13 @@ export function registerText(bot: Telegraf): void {
     pendingLink.delete(ctx.from.id);
     clearFailCounts(ctx.from.id); // success — reset progressive disclosure counters
 
+    const creatorLine = validatedCreator ? `👤 Создатель: ${validatedCreator}\n` : "";
+    const priceLine = validatedPrice != null ? `💰 Цена: ${validatedPrice} R$\n` : "";
     await ctx.reply(
-      `✅ Принял геймпасс №${passId}! Ожидайте выкупа.\n\n` +
-      `🆔 Номер заявки: <code>${order.id.slice(-6).toUpperCase()}</code>\n` +
+      `✅ Принял геймпасс №${passId}! Ожидайте выкупа.\n` +
+      creatorLine +
+      priceLine +
+      `\n🆔 Номер заявки: <code>${order.id.slice(-6).toUpperCase()}</code>\n` +
       `📊 Проверить статус в любой момент: /status`,
       { parse_mode: "HTML" }
     );
@@ -1639,4 +1638,61 @@ async function notifyReviewRejected(
       setState(parseInt(user.vkId), { type: "AWAITING_REVIEW", orderId });
     } catch { }
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// chat_member — fires when a user joins TG_CHANNEL_ID
+// Requires the bot to be admin in the channel and "chat_member" in allowedUpdates.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function registerChatMember(bot: Telegraf): void {
+  const channelId = process.env.TG_CHANNEL_ID;
+  if (!channelId) return;
+
+  bot.on("chat_member", async (ctx) => {
+    const update = ctx.chatMember;
+    // Only events from our subscription channel
+    if (String(update.chat.id) !== channelId) return;
+
+    const newStatus = update.new_chat_member.status;
+    const oldStatus = update.old_chat_member.status;
+    // Only when transitioning TO member/admin (joining)
+    const isNowMember = ["member", "administrator", "creator"].includes(newStatus);
+    const wasAlreadyMember = ["member", "administrator", "creator"].includes(oldStatus);
+    if (!isNowMember || wasAlreadyMember) return;
+
+    const userId = update.new_chat_member.user.id;
+    const tgId = String(userId);
+
+    try {
+      const user = await (db as any).user.findUnique({ where: { tgId } });
+      if (!user) return;
+
+      const pendingOrder = await (db as any).wbOrder.findFirst({
+        where: { userId: user.id, status: "AWAITING_GAMEPASS" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!pendingOrder) return;
+
+      const state = pendingLink.get(userId);
+      const denomination = state?.denomination ?? pendingOrder.amount;
+      const code = state?.wbCode ?? pendingOrder.wbCode;
+      const passPrice = Math.ceil(denomination / 0.7);
+
+      await bot.telegram.sendMessage(
+        userId,
+        `✅ <b>Добро пожаловать в канал!</b>\n\n` +
+        `Твой код <code>${code}</code> зафиксирован — осталось создать геймпасс.\n\n` +
+        `📌 Установи цену ровно <b>${passPrice} R$</b>\n\n` +
+        `Создай геймпасс и пришли ссылку прямо сюда 👇\n\n` +
+        `Нужна инструкция? 👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}`,
+        {
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+        }
+      );
+    } catch (err) {
+      console.error("[TG] chat_member handler error:", err);
+    }
+  });
 }

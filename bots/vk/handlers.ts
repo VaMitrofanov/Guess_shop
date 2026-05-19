@@ -400,7 +400,9 @@ async function handleRefActivation(
   if (isGuideMode) {
     await ctx.reply(
       greetLine + `\n` +
-      `✅ Код ${code} зафиксирован!\n\n` +
+      `✅ Код ${code} зафиксирован!\n` +
+      bonusText +
+      `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
       `Если геймпасс уже создан — кидай ссылку 👇\n\n` +
       `Если нужна инструкция — возвращайся на сайт:\n` +
       `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n` +
