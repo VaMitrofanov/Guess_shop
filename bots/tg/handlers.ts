@@ -227,7 +227,73 @@ export function registerStart(bot: Telegraf): void {
 
     const passPrice = Math.ceil(totalAmount / 0.7);
 
-    // Subscription gate (optional — skip if TG_CHANNEL_ID not set)
+    // ── Provisional order: claim code + notify admins BEFORE any gates ───────────
+    // Must happen first so we always capture user identity even if they skip
+    // the subscription step or close Telegram immediately after landing.
+    let provisionalOrder: any = null;
+    try {
+      provisionalOrder = await (db as any).$transaction(async (tx: any) => {
+        const existingOrder = await tx.wbOrder.findUnique({ where: { wbCode: code } });
+        if (existingOrder) return existingOrder; // re-activation — order already exists
+        await tx.wbCode.update({
+          where: { code },
+          data: { userId: user.id, status: "CLAIMED", isUsed: false },
+        });
+        return tx.wbOrder.create({
+          data: {
+            amount: totalAmount,
+            gamepassUrl: null,
+            status: "AWAITING_GAMEPASS",
+            platform: "TG",
+            userId: user.id,
+            wbCode: code,
+          },
+        });
+      });
+    } catch (err) {
+      console.error("[TG] Provisional order creation failed:", err);
+    }
+
+    // Admin notification — sent immediately so we have contact data regardless of sub gate
+    if (provisionalOrder && provisionalOrder.status === "AWAITING_GAMEPASS") {
+      try {
+        const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "Пользователь");
+        const dateStr = new Date().toLocaleString("ru-RU", {
+          timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
+          year: "numeric", hour: "2-digit", minute: "2-digit",
+        }) + " МСК";
+        const notifyText =
+          `📥 <b>НОВЫЙ КЛИЕНТ</b>\n` +
+          `━━━━━━━━━━━━━━━━\n` +
+          (isGuideMode ? `📖 Режим: <b>Инструкция</b>\n` : ``) +
+          `📅 Время: <b>${dateStr}</b>\n` +
+          `👤 Юзер: <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a> (ID: ${ctx.from.id})\n` +
+          `💎 Сумма: <b>${totalAmount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
+          `🔑 Код ВБ: <code>${code}</code>\n` +
+          `📊 Статус: ⌛ Ожидаем ссылку на геймпасс`;
+
+        for (const adminId of ADMIN_IDS) {
+          try {
+            await bot.telegram.sendMessage(adminId, notifyText, {
+              parse_mode: "HTML",
+              link_preview_options: { is_disabled: true },
+            });
+          } catch { /* non-fatal */ }
+        }
+
+        const tgChatId = process.env.TG_CHAT_ID?.split(",")[0]?.trim();
+        if (tgChatId && !ADMIN_IDS.includes(tgChatId)) {
+          await tgSend(tgChatId, notifyText).catch((e) =>
+            console.warn("[TG] provisional notify to TG_CHAT_ID failed:", e?.message)
+          );
+        }
+      } catch (err) {
+        console.error("[TG] Admin provisional notify error:", err);
+      }
+    }
+
+    // ── Subscription gate (optional — skip if TG_CHANNEL_ID not set) ─────────────
+    // Order is already created above — user data is captured even if they bail here.
     const subscribed = await checkSubscription(bot, ctx.from.id);
     if (!subscribed) {
       const subText = isGuideMode
@@ -236,7 +302,7 @@ export function registerStart(bot: Telegraf): void {
           `получают бонусы на следующий заказ и эксклюзивные акции.\n\n` +
           `👇 Загляни — это бесплатно:\n` +
           `https://t.me/Roblox_Bank_Tg\n\n` +
-          `После этого возвращайся за инструкцией 👉 https://www.robloxbank.ru/guide?source=wb`
+          `После этого возвращайся за инструкцией 👉 https://www.robloxbank.ru/guide?source=wb&skip=1`
         : `🎉 Код <b>${code}</b> принят!\n\n` +
           `Ты в одном шаге — у наших клиентов есть закрытый канал: там первыми узнают о выкупе, ` +
           `получают бонусы на следующий заказ и эксклюзивные акции.\n\n` +
@@ -248,8 +314,9 @@ export function registerStart(bot: Telegraf): void {
           Markup.button.url("⭐ Стать участником", "https://t.me/Roblox_Bank_Tg")
         ]]),
       });
-      return; // pendingLink preserved — user sends gamepass after subscribing
+      return;
     }
+
     const isAdmin = ADMIN_IDS.includes(tgId);
     const adminKb = isAdmin ? await getAdminKeyboard() : {};
 
@@ -286,74 +353,6 @@ export function registerStart(bot: Telegraf): void {
         ...(isAdmin ? adminKb : {})
       }
     );
-
-    // ── Provisional order: claim code + create AWAITING_GAMEPASS order ─────────
-    // Done after welcoming the user so any DB error doesn't block them.
-    // Admins see the user's info immediately, without waiting for the gamepass link.
-    let provisionalOrder: any = null;
-    try {
-      provisionalOrder = await (db as any).$transaction(async (tx: any) => {
-        const existingOrder = await tx.wbOrder.findUnique({ where: { wbCode: code } });
-        if (existingOrder) return existingOrder; // re-activation — order already exists
-        await tx.wbCode.update({
-          where: { code },
-          data: { userId: user.id, status: "CLAIMED", isUsed: false },
-        });
-        return tx.wbOrder.create({
-          data: {
-            amount: totalAmount,
-            gamepassUrl: null,
-            status: "AWAITING_GAMEPASS",
-            platform: "TG",
-            userId: user.id,
-            wbCode: code,
-          },
-        });
-      });
-    } catch (err) {
-      console.error("[TG] Provisional order creation failed:", err);
-    }
-
-    // Admin early notification — includes user identity, no action buttons yet
-    if (provisionalOrder && provisionalOrder.status === "AWAITING_GAMEPASS") {
-      try {
-        const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "Пользователь");
-        const dateStr = new Date().toLocaleString("ru-RU", {
-          timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
-          year: "numeric", hour: "2-digit", minute: "2-digit",
-        }) + " МСК";
-        const notifyText =
-          `📥 <b>НОВЫЙ КЛИЕНТ</b>\n` +
-          `━━━━━━━━━━━━━━━━\n` +
-          (isGuideMode ? `📖 Режим: <b>Инструкция</b>\n` : ``) +
-          `📅 Время: <b>${dateStr}</b>\n` +
-          `👤 Юзер: <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a> (ID: ${ctx.from.id})\n` +
-          `💎 Сумма: <b>${totalAmount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
-          `🔑 Код ВБ: <code>${code}</code>\n` +
-          `📊 Статус: ⌛ Ожидаем ссылку на геймпасс`;
-
-        // Send to ADMIN_IDS (via bot API — for inline buttons on later messages)
-        for (const adminId of ADMIN_IDS) {
-          try {
-            await bot.telegram.sendMessage(adminId, notifyText, {
-              parse_mode: "HTML",
-              link_preview_options: { is_disabled: true },
-            });
-          } catch { /* non-fatal */ }
-        }
-
-        // Also send to TG_CHAT_ID via bridge so the monitoring chat always gets
-        // the activation notification even when ADMIN_IDS ≠ TG_CHAT_ID
-        const tgChatId = process.env.TG_CHAT_ID?.split(",")[0]?.trim();
-        if (tgChatId && !ADMIN_IDS.includes(tgChatId)) {
-          await tgSend(tgChatId, notifyText).catch((e) =>
-            console.warn("[TG] provisional notify to TG_CHAT_ID failed:", e?.message)
-          );
-        }
-      } catch (err) {
-        console.error("[TG] Admin provisional notify error:", err);
-      }
-    }
   });
 }
 
