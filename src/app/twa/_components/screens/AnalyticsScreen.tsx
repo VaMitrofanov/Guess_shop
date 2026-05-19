@@ -193,9 +193,9 @@ function AdvertTab({ token }: { token: string }) {
 }
 
 interface FunnelItem {
-  nmID: number; article: string;
-  views: number; cart: number; orders: number; buyouts: number;
-  revenue: number; pctCart: number; pctOrder: number; pctBuyout: number;
+  article: string;
+  orders: number; buyouts: number;
+  revenue: number; pctBuyout: number; retPct: number;
 }
 interface GoodItem {
   nmID: number; article: string;
@@ -217,56 +217,54 @@ function FunnelTab({ token }: { token: string }) {
   if (!data || data.funnel.length === 0) return (
     <div style={{ padding: 24, textAlign: "center" as const, color: C.sec, fontSize: 13 }}>
       <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
-      Нет данных воронки.<br />Проверь права токена WB (аналитика).
+      Нет данных воронки.<br />Данные появятся после первых заказов за 30 дней.
     </div>
   );
 
-  const totalViews = data.funnel.reduce((s, f) => s + f.views, 0);
-  const totalRev   = data.funnel.reduce((s, f) => s + f.revenue, 0);
+  const totalOrders = data.funnel.reduce((s, f) => s + f.orders, 0);
+  const totalRev    = data.funnel.reduce((s, f) => s + f.revenue, 0);
 
-  function pctColor(val: number, type: "cart" | "order" | "buyout") {
-    if (type === "cart")   return val >= 10 ? C.green : val >= 5 ? C.yellow : C.red;
-    if (type === "order")  return val >= 7  ? C.green : val >= 3 ? C.yellow : C.red;
+  function buyoutColor(val: number) {
     return val >= 85 ? C.green : val >= 70 ? C.yellow : C.red;
+  }
+  function retColor(val: number) {
+    return val <= 5 ? C.green : val <= 15 ? C.yellow : C.red;
   }
 
   return (
     <div style={{ padding: "12px 16px 0", display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <div style={{ background: C.card, borderRadius: 12, padding: "10px 14px" }}>
-          <div style={{ fontSize: 11, color: C.sec }}>Просмотров (30д)</div>
-          <div style={{ fontSize: 20, fontWeight: 700, marginTop: 3 }}>{totalViews.toLocaleString("ru-RU")}</div>
+          <div style={{ fontSize: 11, color: C.sec }}>Заказов (30д)</div>
+          <div style={{ fontSize: 20, fontWeight: 700, marginTop: 3 }}>{totalOrders.toLocaleString("ru-RU")}</div>
         </div>
         <div style={{ background: C.card, borderRadius: 12, padding: "10px 14px" }}>
-          <div style={{ fontSize: 11, color: C.sec }}>Заказов на сумму</div>
+          <div style={{ fontSize: 11, color: C.sec }}>Выручка (30д)</div>
           <div style={{ fontSize: 20, fontWeight: 700, marginTop: 3 }}>{rub(Math.round(totalRev))}</div>
         </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 1fr 1fr 1fr", gap: 4, padding: "0 4px" }}>
-        {["Артикул", "Просм", "→Корзина", "→Заказ", "→Выкуп"].map(h => (
+        {["Артикул", "Заказы", "Выкупы", "Выкуп%", "Возврат%"].map(h => (
           <div key={h} style={{ fontSize: 10, color: C.muted, textAlign: "center" as const }}>{h}</div>
         ))}
       </div>
 
       {data.funnel.map(item => (
-        <div key={item.nmID} style={{ background: C.card, borderRadius: 12, padding: "10px 12px" }}>
+        <div key={item.article} style={{ background: C.card, borderRadius: 12, padding: "10px 12px" }}>
           <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 1fr 1fr 1fr", gap: 4, alignItems: "center" }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: C.accent }}>{item.article} R$</div>
             <div style={{ textAlign: "center" as const }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>{item.views.toLocaleString("ru-RU")}</div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{item.orders.toLocaleString("ru-RU")}</div>
             </div>
             <div style={{ textAlign: "center" as const }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: pctColor(item.pctCart, "cart") }}>{item.pctCart}%</div>
-              <div style={{ fontSize: 10, color: C.muted }}>{item.cart.toLocaleString("ru-RU")}</div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{item.buyouts.toLocaleString("ru-RU")}</div>
             </div>
             <div style={{ textAlign: "center" as const }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: pctColor(item.pctOrder, "order") }}>{item.pctOrder}%</div>
-              <div style={{ fontSize: 10, color: C.muted }}>{item.orders.toLocaleString("ru-RU")}</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: buyoutColor(item.pctBuyout) }}>{item.pctBuyout}%</div>
             </div>
             <div style={{ textAlign: "center" as const }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: pctColor(item.pctBuyout, "buyout") }}>{item.pctBuyout}%</div>
-              <div style={{ fontSize: 10, color: C.muted }}>{item.buyouts.toLocaleString("ru-RU")}</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: retColor(item.retPct) }}>{item.retPct}%</div>
             </div>
           </div>
         </div>

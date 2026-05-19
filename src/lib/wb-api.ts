@@ -453,16 +453,12 @@ export async function getRealizData(weeks = 4): Promise<TwaRealizData | null> {
 }
 
 export interface NmFunnelItem {
-  nmID:      number;
   article:   string;
-  views:     number;
-  cart:      number;
   orders:    number;
   buyouts:   number;
   revenue:   number;
-  pctCart:   number;
-  pctOrder:  number;
   pctBuyout: number;
+  retPct:    number;
 }
 
 export interface TwaGoodItem {
@@ -520,51 +516,43 @@ export async function getGoods(): Promise<TwaGoodItem[] | null> {
 
 export async function getNmFunnel(): Promise<NmFunnelItem[] | null> {
   if (cache.funnel && Date.now() - cache.funnel.ts < FUNNEL_TTL) return cache.funnel.data;
-  const token = getWbToken();
-  if (!token) return null;
-  const goods = await getGoods();
-  if (!goods || goods.length === 0) return cache.funnel?.data ?? [];
-  const nmIds = goods.map(g => g.nmID);
 
-  const now  = new Date();
-  const from = new Date(now.getTime() - 30 * 864e5);
-  const fmt  = (d: Date) => d.toISOString().replace("T", " ").split(".")[0];
-  try {
-    const res = await fetch("https://seller-analytics.wildberries.ru/api/v1/nm-report/detail", {
-      method: "POST", cache: "no-store",
-      headers: { Authorization: token, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        nmIDs: nmIds,
-        period: { begin: fmt(from), end: fmt(now) },
-        timezone: "Europe/Moscow",
-        aggregationLevel: "month",
-      }),
-    });
-    if (!res.ok) { console.error(`[wb-api] nm-report ${res.status}`); return cache.funnel?.data ?? null; }
-    const parsed = NmReportSchema.safeParse(await res.json());
-    if (!parsed.success || !parsed.data.data) return cache.funnel?.data ?? null;
-    const result: NmFunnelItem[] = parsed.data.data.cards.map(card => {
-      const sp  = card.statistics[0]?.selectedPeriod;
-      const cv  = sp?.conversions;
-      const v   = sp?.openCardCount  ?? 0;
-      const c   = sp?.addToCartCount ?? 0;
-      const o   = sp?.ordersCount    ?? 0;
-      const b   = sp?.buyoutsCount   ?? 0;
-      return {
-        nmID: card.nmID, article: card.vendorCode,
-        views: v, cart: c, orders: o, buyouts: b,
-        revenue:   sp?.ordersSumRub ?? 0,
-        pctCart:   cv?.addToCartPercent     ?? (v > 0 ? Math.round(c / v * 100) : 0),
-        pctOrder:  cv?.cartToOrderPercent   ?? (c > 0 ? Math.round(o / c * 100) : 0),
-        pctBuyout: cv?.orderToBuyoutPercent ?? (o > 0 ? Math.round(b / o * 100) : 0),
-      };
-    }).sort((a, b) => b.views - a.views);
-    cache.funnel = { data: result, ts: Date.now() };
-    return result;
-  } catch (e: any) {
-    console.error("[wb-api] nm-report error:", e?.message);
-    return cache.funnel?.data ?? null;
+  const [stats, realiz] = await Promise.all([getStats30d(), getRealizData()]);
+  if (!stats) return cache.funnel?.data ?? null;
+
+  const byArticle = new Map<string, { orders: number; buyouts: number; revenue: number }>();
+
+  for (const o of stats.orders) {
+    if (o.isCancel) continue;
+    const a = byArticle.get(o.supplierArticle) ?? { orders: 0, buyouts: 0, revenue: 0 };
+    a.orders++;
+    byArticle.set(o.supplierArticle, a);
   }
+  for (const s of stats.sales) {
+    const a = byArticle.get(s.supplierArticle) ?? { orders: 0, buyouts: 0, revenue: 0 };
+    a.buyouts++;
+    a.revenue += s.priceWithDisc;
+    byArticle.set(s.supplierArticle, a);
+  }
+
+  const retByArticle = new Map<string, number>(
+    (realiz?.byArticle ?? []).map(a => [a.article, a.retPct])
+  );
+
+  const result: NmFunnelItem[] = [...byArticle.entries()]
+    .filter(([, v]) => v.orders > 0 || v.buyouts > 0)
+    .map(([article, v]) => ({
+      article,
+      orders:    v.orders,
+      buyouts:   v.buyouts,
+      revenue:   v.revenue,
+      pctBuyout: v.orders > 0 ? Math.round(v.buyouts / v.orders * 100) : 0,
+      retPct:    retByArticle.get(article) ?? 0,
+    }))
+    .sort((a, b) => b.orders - a.orders);
+
+  cache.funnel = { data: result, ts: Date.now() };
+  return result;
 }
 
 export async function getFeedbackSummary(): Promise<FeedbackSummary | null> {
