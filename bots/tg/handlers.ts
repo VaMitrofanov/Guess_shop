@@ -1048,7 +1048,62 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   pendingLink.set(ctx.from.id, { wbCode: wbCode.code, denomination: totalAmount });
   clearFailCounts(ctx.from.id);
 
-  // Subscription gate
+  // ── Provisional order: claim code + notify admins BEFORE subscription gate ──
+  // Mirrors registerStart — user identity is captured even if they bail at the sub step.
+  let provisionalCreated = false;
+  try {
+    await (db as any).$transaction(async (tx: any) => {
+      const existingOrder = await tx.wbOrder.findUnique({ where: { wbCode: wbCode.code } });
+      if (existingOrder) return;
+      await tx.wbCode.update({
+        where: { code: wbCode.code },
+        data: { userId: user.id, status: "CLAIMED", isUsed: false },
+      });
+      await tx.wbOrder.create({
+        data: {
+          amount: totalAmount,
+          gamepassUrl: null,
+          status: "AWAITING_GAMEPASS",
+          platform: "TG",
+          userId: user.id,
+          wbCode: wbCode.code,
+        },
+      });
+      provisionalCreated = true;
+    });
+  } catch (err) {
+    console.error("[TG] Text-entry provisional order creation failed:", err);
+  }
+
+  if (provisionalCreated) {
+    try {
+      const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "Пользователь");
+      const dateStr = new Date().toLocaleString("ru-RU", {
+        timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
+        year: "numeric", hour: "2-digit", minute: "2-digit",
+      }) + " МСК";
+      const notifyText =
+        `📥 <b>НОВЫЙ КЛИЕНТ</b>\n` +
+        `━━━━━━━━━━━━━━━━\n` +
+        `📅 Время: <b>${dateStr}</b>\n` +
+        `👤 Юзер: <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a> (ID: ${ctx.from.id})\n` +
+        `💎 Сумма: <b>${totalAmount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
+        `🔑 Код ВБ: <code>${codeInput}</code>\n` +
+        `📊 Статус: ⌛ Ожидаем ссылку на геймпасс`;
+
+      const chatIds = [
+        ...ADMIN_IDS,
+        ...((process.env.TG_CHAT_ID ?? "").split(",").map((s) => s.trim()).filter((s) => s && !ADMIN_IDS.includes(s))),
+      ];
+      await Promise.allSettled(
+        chatIds.map((id) => tgSend(id, notifyText))
+      );
+    } catch (err) {
+      console.error("[TG] Text-entry admin notify error:", err);
+    }
+  }
+
+  // ── Subscription gate (order already created above) ───────────────────────
   const subscribed = await checkSubscription(bot, ctx.from.id);
   if (!subscribed) {
     await ctx.reply(
@@ -1077,65 +1132,10 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
     bonusText +
     `Осталось совсем чуть-чуть — пришли <b>Asset ID</b> или <b>ссылку</b> на геймпасс.\n` +
     `📌 Убедись, что цена геймпасса ровно <b>${passPrice} R$</b>\n\n` +
+    `Нужна инструкция? 👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${codeInput}\n\n` +
     `Жду ссылку 👇`,
     { parse_mode: "HTML", link_preview_options: { is_disabled: true } }
   );
-
-  // Create provisional AWAITING_GAMEPASS order so the session can be restored
-  // from DB if the bot restarts before the user sends the gamepass link.
-  let provisionalCreated = false;
-  try {
-    await (db as any).$transaction(async (tx: any) => {
-      const existingOrder = await tx.wbOrder.findUnique({ where: { wbCode: wbCode.code } });
-      if (existingOrder) return; // already exists (e.g. user re-entered the code)
-      await tx.wbCode.update({
-        where: { code: wbCode.code },
-        data: { userId: user.id, status: "CLAIMED", isUsed: false },
-      });
-      await tx.wbOrder.create({
-        data: {
-          amount: totalAmount,
-          gamepassUrl: null,
-          status: "AWAITING_GAMEPASS",
-          platform: "TG",
-          userId: user.id,
-          wbCode: wbCode.code,
-        },
-      });
-      provisionalCreated = true;
-    });
-  } catch (err) {
-    console.error("[TG] Text-entry provisional order creation failed:", err);
-  }
-
-  // Admin notification with user identity (text-entry path)
-  if (provisionalCreated) {
-    try {
-      const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "Пользователь");
-      const dateStr = new Date().toLocaleString("ru-RU", {
-        timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
-        year: "numeric", hour: "2-digit", minute: "2-digit",
-      }) + " МСК";
-      const notifyText =
-        `📥 <b>НОВЫЙ КЛИЕНТ</b>\n` +
-        `━━━━━━━━━━━━━━━━\n` +
-        `📅 Время: <b>${dateStr}</b>\n` +
-        `👤 Юзер: <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a> (ID: ${ctx.from.id})\n` +
-        `💎 Сумма: <b>${totalAmount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
-        `🔑 Код ВБ: <code>${codeInput}</code>\n` +
-        `📊 Статус: ⌛ Ожидаем ссылку на геймпасс`;
-
-      const chatIds = [
-        ...ADMIN_IDS,
-        ...((process.env.TG_CHAT_ID ?? "").split(",").map((s) => s.trim()).filter((s) => s && !ADMIN_IDS.includes(s))),
-      ];
-      await Promise.allSettled(
-        chatIds.map((id) => tgSend(id, notifyText))
-      );
-    } catch (err) {
-      console.error("[TG] Text-entry admin notify error:", err);
-    }
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1538,7 +1538,7 @@ async function notifyUserCompleted(
       `✅ Заказ выкуплен! Робуксы придут через 5-7 дней.\n\n` +
       `🎁 <b>Оставь отзыв и получи 100 R$ в подарок!</b>\n` +
       `Напиши отзыв на Wildberries, сделай скриншот и отправь его сюда (фотографией, не файлом). После проверки администратором бонус начислим сразу!\n\n` +
-      `Ты уже в нашем канале, так что не пропустишь секретные раздачи! 🎰`;
+      (process.env.TG_CHANNEL_ID ? `Ты уже в нашем канале, так что не пропустишь секретные раздачи! 🎰` : `Ждём тебя снова! 🎰`);
     vkMsg =
       `✅ Заказ выкуплен! Робуксы придут через 5-7 дней.\n\n` +
       `Оставь отзыв и получи 100 R$ в подарок!\n` +

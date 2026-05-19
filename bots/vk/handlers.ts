@@ -415,6 +415,7 @@ async function handleRefActivation(
       bonusText +
       `Осталось совсем чуть-чуть — пришли Asset ID или ссылку на геймпасс.\n` +
       `📌 Убедись, что цена геймпасса ровно ${passPrice} R$\n\n` +
+      `Нужна инструкция? 👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n\n` +
       `Жду ссылку 👇`
     );
   }
@@ -540,10 +541,13 @@ async function handleGamepassLink(
     order = await (db as any).$transaction(async (tx: any) => {
       const claimed = await tx.wbCode.updateMany({
         where: {
-          code:   { equals: wbCode, mode: "insensitive" },
-          userId: null, // matches fresh (isUsed=false) AND web-activated (isUsed=true,userId=null)
+          code: { equals: wbCode, mode: "insensitive" },
+          OR: [
+            { userId: null },
+            { status: "CLAIMED", isUsed: false, userId: user.id }, // provisional from handleRefActivation
+          ],
         },
-        data: { userId: user.id, isUsed: true, usedAt: new Date() },
+        data: { userId: user.id, isUsed: true, status: "CLAIMED", usedAt: new Date() },
       });
       console.log(
         `[VK] $transaction: wbCode.updateMany count=${claimed.count} for code=${wbCode}`
@@ -567,15 +571,15 @@ async function handleGamepassLink(
 
       let newOrder;
       if (existingOrder) {
-        if (existingOrder.status === "REJECTED") {
-          // Allow resubmission: update the rejected order back to PENDING with the new link
+        if (existingOrder.status === "AWAITING_GAMEPASS" || existingOrder.status === "REJECTED") {
+          // Promote provisional/rejected order to PENDING with the gamepass link
           newOrder = await tx.wbOrder.update({
             where: { id: existingOrder.id },
             data: {
               gamepassUrl: cleanLink,
               status: "PENDING",
               rejectionReason: null,
-              adminId: null, // Reset admin assignment
+              adminId: null,
             },
           });
         } else {
