@@ -1807,6 +1807,21 @@ function WBGate({ onSuccess }: WBGateProps) {
       setShowVkAuth(true);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Неизвестная ошибка";
+      // If code already claimed, check if user can access instructions directly
+      if (msg.includes("уже был активирован")) {
+        try {
+          const statusRes = await fetch(`/api/wb-code?code=${encodeURIComponent(code)}`);
+          if (statusRes.ok) {
+            const statusData = await statusRes.json().catch(() => ({}));
+            if (statusData.claimed) {
+              saveWBSession(statusData.denomination ?? 0, code);
+              document.cookie = `wb_code=${code}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+              onSuccess(statusData.denomination ?? 0, code);
+              return;
+            }
+          }
+        } catch { /* ignore, fall through to error */ }
+      }
       setError(msg);
       setShowVkAuth(false);
     } finally {
@@ -1859,7 +1874,7 @@ function WBGate({ onSuccess }: WBGateProps) {
 
             <div className="h-px bg-gradient-to-r from-transparent via-[#c9a84c]/30 to-transparent" />
 
-            <form onSubmit={handleSubmit} className="space-y-5 animate-in fade-in zoom-in animate-delay-200">
+            <form onSubmit={(e) => e.preventDefault()} className="space-y-5 animate-in fade-in zoom-in animate-delay-200">
               <div className="space-y-2">
                 <label className="font-pixel text-[9px] text-[#c9a84c]/60 tracking-widest flex items-center gap-2">
                   <Lock className="w-3 h-3" />КОД С КАРТОЧКИ
@@ -2578,8 +2593,8 @@ function WBIntro({ onDone }: { onDone: () => void }) {
 
 export default function GuideClient({ isWB, skipGate = false }: { isWB: boolean; skipGate?: boolean }) {
   const [phase, setPhase] = useState<"intro" | "gate" | "instruction">(
-    // skipGate=true when arriving from TG/VK bot after code activation — skip intro+gate
-    skipGate ? "instruction" : isWB ? "intro" : "instruction"
+    // skipGate=true when arriving from TG/VK bot — go to gate so restoreSession can check CLAIMED status
+    !isWB ? "instruction" : skipGate ? "gate" : "intro"
   );
   const [denomination, setDenomination] = useState<number>(0);
   const [activeCode, setActiveCode] = useState<string>("");
@@ -2598,22 +2613,17 @@ export default function GuideClient({ isWB, skipGate = false }: { isWB: boolean;
         return;
       }
       try {
-        const sessionId = getOrInitSessionId();
-        const res = await fetch("/api/wb-code", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code: saved.code, sessionId }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok && data.denomination) {
-          setDenomination(data.denomination);
+        // Check if code is already activated (CLAIMED) — enables instruction access
+        const statusRes = await fetch(`/api/wb-code?code=${encodeURIComponent(saved.code)}`);
+        const statusData = await statusRes.json().catch(() => ({}));
+        if (statusRes.ok && statusData.claimed) {
+          setDenomination(statusData.denomination ?? saved.denomination);
           setActiveCode(saved.code);
           setPhase("instruction");
-        } else {
-          clearWBSession();
         }
+        // If not claimed: stay in gate — user must activate via TG/VK
       } catch {
-        // Network error - keep saved session and fallback to gate
+        // Network error — stay in gate
       } finally {
         setIsRestoring(false);
       }

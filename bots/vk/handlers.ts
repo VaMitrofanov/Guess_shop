@@ -11,8 +11,8 @@
 
 import type { MessageContext } from "vk-io";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
-import { sendAdminOrderCard, sendAdminReviewCard } from "../shared/admin";
-import { vkGetName } from "../shared/notify";
+import { sendAdminOrderCard, sendAdminReviewCard, ADMIN_IDS } from "../shared/admin";
+import { vkGetName, tgSend } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
 import { getGamepassDetails } from "../shared/roblox";
@@ -290,9 +290,10 @@ async function handleRefActivation(
     await ctx.reply("❌ Код не найден. Проверь правильность ввода на карточке.");
     return;
   }
-  // Block when the code is claimed by any user (gamepass submitted or TG provisional order).
-  // isUsed=true → gamepass was submitted; status=CLAIMED+userId → TG provisional order exists.
-  if (wbCode.isUsed || (wbCode.status === "CLAIMED" && wbCode.userId != null)) {
+  // Block only when code was fully claimed (userId set by a bot).
+  // isUsed=true with userId=null means the website reserved it but no bot flow
+  // completed — allow through so users aren't silently stuck.
+  if (wbCode.userId != null) {
     await ctx.reply("⚠️ Этот код уже был активирован.");
     return;
   }
@@ -328,9 +329,6 @@ async function handleRefActivation(
   const custStatus = await getCustomerStatus(String(vkUserId), "VK");
   const firstName = fullName.split(" ")[0] || "друг";
 
-  // ── Defer isUsed write to the gamepass step ────────────────────────────
-  // The code is claimed atomically (userId:null → user.id) only after Roblox
-  // validates the gamepass — see the $transaction in handleGamepassLink.
   setState(vkUserId, { type: "AWAITING_LINK", wbCode: wbCode.code, denomination: totalAmount });
 
   const passPrice = Math.ceil(totalAmount / 0.7);
@@ -343,8 +341,61 @@ async function handleRefActivation(
     bonusText = `💎 Номинал: ${wbCode.denomination} R$\n\n`;
   }
 
-  // Greeting from shared helper — no double-up, single source of truth
   const greetLine = getGreeting(custStatus, firstName);
+
+  // ── Provisional order: claim code + create AWAITING_GAMEPASS order ────────
+  // Mirrors the TG bot flow — done after greeting so DB errors don't block user.
+  let provisionalCreated = false;
+  try {
+    await (db as any).$transaction(async (tx: any) => {
+      const existingOrder = await tx.wbOrder.findUnique({ where: { wbCode: wbCode.code } });
+      if (existingOrder) return;
+      await tx.wbCode.update({
+        where: { code: wbCode.code },
+        data: { userId: user.id, status: "CLAIMED", isUsed: false },
+      });
+      await tx.wbOrder.create({
+        data: {
+          amount: totalAmount,
+          gamepassUrl: null,
+          status: "AWAITING_GAMEPASS",
+          platform: "VK",
+          userId: user.id,
+          wbCode: wbCode.code,
+        },
+      });
+      provisionalCreated = true;
+    });
+  } catch (err) {
+    console.error("[VK] Provisional order creation failed:", err);
+  }
+
+  // Admin early notification with VK user identity
+  if (provisionalCreated) {
+    try {
+      const dateStr = new Date().toLocaleString("ru-RU", {
+        timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
+        year: "numeric", hour: "2-digit", minute: "2-digit",
+      }) + " МСК";
+      const notifyText =
+        `📥 <b>НОВЫЙ КЛИЕНТ</b>\n` +
+        `━━━━━━━━━━━━━━━━\n` +
+        (isGuideMode ? `📖 Режим: <b>Инструкция</b>\n` : ``) +
+        `📅 Время: <b>${dateStr}</b>\n` +
+        `👤 Юзер: <a href="https://vk.com/id${vkUserId}">${fullName}</a> (VK ID: ${vkUserId})\n` +
+        `💎 Сумма: <b>${totalAmount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
+        `🔑 Код ВБ: <code>${code}</code>\n` +
+        `📊 Статус: ⌛ Ожидаем ссылку на геймпасс`;
+
+      const chatIds = [
+        ...ADMIN_IDS,
+        ...((process.env.TG_CHAT_ID ?? "").split(",").map((s) => s.trim()).filter((s) => s && !ADMIN_IDS.includes(s))),
+      ];
+      await Promise.allSettled(chatIds.map((id) => tgSend(id, notifyText)));
+    } catch (err) {
+      console.error("[VK] Admin provisional notify error:", err);
+    }
+  }
 
   if (isGuideMode) {
     await ctx.reply(
@@ -352,7 +403,7 @@ async function handleRefActivation(
       `✅ Код ${code} зафиксирован!\n\n` +
       `Если геймпасс уже создан — кидай ссылку 👇\n\n` +
       `Если нужна инструкция — возвращайся на сайт:\n` +
-      `👉 https://www.robloxbank.ru/guide?source=wb\n` +
+      `👉 https://www.robloxbank.ru/guide?source=wb&skip=1\n` +
       `Там подробная пошаговая инструкция!`
     );
   } else {

@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     try {
       await db.wbCode.update({
         where: { code: wbCode },
-        data: { userId },
+        data: { userId, status: "CLAIMED" },
       });
     } catch (err) {
       // Non-fatal: code may already be linked or not exist

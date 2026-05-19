@@ -9,7 +9,7 @@ import { Telegraf, Markup } from "telegraf";
 // telegraf/types re-exports the full typegram surface (official subpath export)
 import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
-import { vkSend, stripHtml } from "../shared/notify";
+import { vkSend, stripHtml, tgSend } from "../shared/notify";
 import { sendAdminOrderCard, sendAdminReviewCard, CB, ADMIN_IDS } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, type LinkFailState } from "./session";
 import { getGamepassDetails } from "../shared/roblox";
@@ -271,7 +271,7 @@ export function registerStart(bot: Telegraf): void {
         ? `✅ Код <b>${code}</b> зафиксирован!\n\n` +
           `Если геймпасс уже создан — кидай ссылку 👇\n\n` +
           `Если нужна инструкция — возвращайся на сайт:\n` +
-          `👉 https://www.robloxbank.ru/guide?source=wb\n` +
+          `👉 https://www.robloxbank.ru/guide?source=wb&skip=1\n` +
           `Там подробная пошаговая инструкция!`
         : `✅ Код <b>${code}</b> активирован!\n` +
           bonusText +
@@ -331,6 +331,8 @@ export function registerStart(bot: Telegraf): void {
           `💎 Сумма: <b>${totalAmount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
           `🔑 Код ВБ: <code>${code}</code>\n` +
           `📊 Статус: ⌛ Ожидаем ссылку на геймпасс`;
+
+        // Send to ADMIN_IDS (via bot API — for inline buttons on later messages)
         for (const adminId of ADMIN_IDS) {
           try {
             await bot.telegram.sendMessage(adminId, notifyText, {
@@ -338,6 +340,15 @@ export function registerStart(bot: Telegraf): void {
               link_preview_options: { is_disabled: true },
             });
           } catch { /* non-fatal */ }
+        }
+
+        // Also send to TG_CHAT_ID via bridge so the monitoring chat always gets
+        // the activation notification even when ADMIN_IDS ≠ TG_CHAT_ID
+        const tgChatId = process.env.TG_CHAT_ID?.split(",")[0]?.trim();
+        if (tgChatId && !ADMIN_IDS.includes(tgChatId)) {
+          await tgSend(tgChatId, notifyText).catch((e) =>
+            console.warn("[TG] provisional notify to TG_CHAT_ID failed:", e?.message)
+          );
         }
       } catch (err) {
         console.error("[TG] Admin provisional notify error:", err);
@@ -1059,6 +1070,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
 
   // Create provisional AWAITING_GAMEPASS order so the session can be restored
   // from DB if the bot restarts before the user sends the gamepass link.
+  let provisionalCreated = false;
   try {
     await (db as any).$transaction(async (tx: any) => {
       const existingOrder = await tx.wbOrder.findUnique({ where: { wbCode: wbCode.code } });
@@ -1077,9 +1089,39 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
           wbCode: wbCode.code,
         },
       });
+      provisionalCreated = true;
     });
   } catch (err) {
     console.error("[TG] Text-entry provisional order creation failed:", err);
+  }
+
+  // Admin notification with user identity (text-entry path)
+  if (provisionalCreated) {
+    try {
+      const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "Пользователь");
+      const dateStr = new Date().toLocaleString("ru-RU", {
+        timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
+        year: "numeric", hour: "2-digit", minute: "2-digit",
+      }) + " МСК";
+      const notifyText =
+        `📥 <b>НОВЫЙ КЛИЕНТ</b>\n` +
+        `━━━━━━━━━━━━━━━━\n` +
+        `📅 Время: <b>${dateStr}</b>\n` +
+        `👤 Юзер: <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a> (ID: ${ctx.from.id})\n` +
+        `💎 Сумма: <b>${totalAmount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
+        `🔑 Код ВБ: <code>${codeInput}</code>\n` +
+        `📊 Статус: ⌛ Ожидаем ссылку на геймпасс`;
+
+      const chatIds = [
+        ...ADMIN_IDS,
+        ...((process.env.TG_CHAT_ID ?? "").split(",").map((s) => s.trim()).filter((s) => s && !ADMIN_IDS.includes(s))),
+      ];
+      await Promise.allSettled(
+        chatIds.map((id) => tgSend(id, notifyText))
+      );
+    } catch (err) {
+      console.error("[TG] Text-entry admin notify error:", err);
+    }
   }
 }
 

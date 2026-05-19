@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { PrismaClientWithWb } from "@/types/prisma-wb";
-import { sendTelegramMessage } from "@/lib/telegram";
 
 const db = prisma as unknown as PrismaClientWithWb;
 
@@ -26,7 +25,6 @@ export async function POST(request: Request) {
     }
 
     const now = new Date();
-    let isFirstActivation = false;
 
     // ── 1. Atomic lookup + reservation in a single transaction ────────
     const txResult = await (db as any).$transaction(async (tx: any) => {
@@ -51,7 +49,7 @@ export async function POST(request: Request) {
             where: { id: wbCode.id },
             data: { reservedUntil: reserveTime },
           });
-          return { wbCode: updated, isFirstActivation: false };
+          return { wbCode: updated };
         } else {
           // Different session.
           if (wbCode.reservedUntil && wbCode.reservedUntil > now) {
@@ -60,15 +58,14 @@ export async function POST(request: Request) {
               where: { id: wbCode.id },
               data: { sessionId: sessionId, reservedUntil: reserveTime },
             });
-            // We treat this as a session transfer, not necessarily a 'first' activation for TG notify
-            return { wbCode: updated, isFirstActivation: false };
+            return { wbCode: updated };
           } else {
             // Reservation expired, claim it
             const updated = await tx.wbCode.update({
               where: { id: wbCode.id },
               data: { sessionId: sessionId, reservedUntil: reserveTime },
             });
-            return { wbCode: updated, isFirstActivation: true };
+            return { wbCode: updated };
           }
         }
       }
@@ -83,29 +80,10 @@ export async function POST(request: Request) {
           isUsed: true, // Legacy flag for backwards compat
         },
       });
-      return { wbCode: updated, isFirstActivation: true };
+      return { wbCode: updated };
     });
 
     const wbCode = txResult.wbCode;
-    isFirstActivation = txResult.isFirstActivation;
-
-    // ── 2. Telegram notification (first activation only) ──────────────────
-    const token = process.env.TG_TOKEN;
-    const chatIds = (process.env.TG_CHAT_ID ?? "")
-      .split(",")
-      .map((id) => id.trim())
-      .filter(Boolean);
-
-    if (isFirstActivation) {
-      if (token && chatIds.length > 0) {
-        const text = `✅ Код ${wbCode.code} (Номинал ${wbCode.denomination} R$) забронирован, пользователь читает инструкцию`;
-        const results = await Promise.all(
-          chatIds.map((chatId) => sendTelegramMessage(token, chatId, text))
-        );
-        const sent = results.filter(Boolean).length;
-        console.log(`[wb-code] TG notify: ${sent}/${chatIds.length} delivered for code ${wbCode.code}`);
-      }
-    }
 
     return NextResponse.json({
       ok: true,
@@ -120,6 +98,29 @@ export async function POST(request: Request) {
       { error: "Внутренняя ошибка сервера" },
       { status: 500 }
     );
+  }
+}
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code")?.trim().toUpperCase();
+  if (!code || code.length !== 7) {
+    return NextResponse.json({ error: "Invalid code" }, { status: 400 });
+  }
+  try {
+    const wbCode = await (db as any).wbCode.findFirst({
+      where: { code: { equals: code, mode: "insensitive" } },
+      select: { status: true, userId: true, denomination: true },
+    });
+    if (!wbCode) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    // Code is "activated" if userId is set (by TG or VK) OR status is CLAIMED
+    const claimed = !!(wbCode.userId || wbCode.status === "CLAIMED");
+    return NextResponse.json({ claimed, denomination: wbCode.denomination });
+  } catch (err) {
+    console.error("[wb-code GET] error:", err);
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
 

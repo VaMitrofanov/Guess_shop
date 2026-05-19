@@ -133,7 +133,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               // Пытаемся привязать код к пользователю
               await (prisma as any).wbCode.update({
                 where: { code: wbCode },
-                data: { userId: user.id },
+                data: { userId: user.id, status: "CLAIMED" },
               });
               console.log(`[auth] Linked user ${user.id} to WbCode ${wbCode} via credentials`);
             } catch (linkErr) {
