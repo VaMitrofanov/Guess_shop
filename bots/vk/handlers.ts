@@ -156,7 +156,24 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // (old VK desktop clients that don't send inline-keyboard payloads). Without
   // the context guard any user sending that phrase would trigger a spurious sub-check.
   const isSubConfirmText =
-    (text === "✅ Я вступил" || text === "✅ Я подписался") && getState(vkUserId)?.type === "AWAITING_LINK";
+    (lower.includes("вступил") || lower.includes("подписал")) && getState(vkUserId)?.type === "AWAITING_LINK";
+  // "resubmit" button from /status REJECTED keyboard
+  if (msgPayload?.command === "resubmit" && msgPayload?.code) {
+    const resubCode = String(msgPayload.code).toUpperCase();
+    const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+    if (user) {
+      const order = await (db as any).wbOrder.findFirst({ where: { wbCode: resubCode, userId: user.id } });
+      if (order && (order.status === "REJECTED" || order.status === "AWAITING_GAMEPASS")) {
+        setState(vkUserId, { type: "AWAITING_LINK", wbCode: resubCode, denomination: order.amount });
+        const passPrice = Math.ceil(order.amount / 0.7);
+        await ctx.reply(`🔄 Исправление ссылки\n\n💎 Номинал: ${order.amount} R$\nПришли новую ссылку на геймпасс с ценой ${passPrice} R$.`);
+        return;
+      }
+    }
+    await ctx.reply("Заказ не найден или уже не требует исправления.");
+    return;
+  }
+
   if (msgPayload?.command === "check_sub" || isSubConfirmText) {
     try {
       if (!(await isVkSubscribed(ctx, vkUserId))) {
@@ -183,6 +200,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       return;
     } catch (err) {
       console.error("[VK] check_sub handler failed:", err);
+      await ctx.reply("Не удалось проверить подписку — попробуй ещё раз через минуту.");
     }
   }
 
@@ -619,6 +637,11 @@ async function handleGamepassLink(
       await ctx.reply("⚠️ Этот код уже был активирован другим пользователем. Обратитесь в поддержку.");
       return;
     }
+    if (err.code === "P2002") {
+      clearState(vkUserId);
+      await ctx.reply("⚠️ Заказ по этому коду уже создан и сейчас обрабатывается. Напиши «статус» чтобы проверить.");
+      return;
+    }
     console.error("[VK] Order/transaction error:", err);
     await ctx.reply("❌ Ошибка при создании заявки. Попробуй позже или напишите в поддержку.");
     return;
@@ -756,7 +779,13 @@ async function handleIdleMessage(
     }
   }
 
-  // ── PRIORITY 1: Loyalty check FIRST for every idle message ─────────────
+  // ── PRIORITY 1: Direct WB code entry (7 alphanumeric chars, at least one letter) ──
+  if (/^[A-Za-z0-9]{7}$/.test(text.trim()) && /[A-Za-z]/.test(text.trim())) {
+    await handleRefActivation(ctx, vkUserId, text.trim().toUpperCase());
+    return;
+  }
+
+  // ── PRIORITY 2: Loyalty check FIRST for every idle message ─────────────
   const status = await getCustomerStatus(String(vkUserId), "VK");
   console.log(`[VK] User ${vkUserId} isReturning: ${status.isReturning}, orderCount: ${status.orderCount}`);
 
@@ -819,20 +848,28 @@ async function handleIdleMessage(
         : order.status === "PENDING"
         ? "\n\nНе переживай — менеджер работает в порядке очереди, обычно выкупаем в течение нескольких часов, максимум сутки. Напишем сами."
         : order.status === "REJECTED"
-        ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Исправь геймпасс и пришли новую ссылку прямо в этот чат.`
+        ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Исправь геймпасс и нажми кнопку ниже — отправим на проверку заново.`
         : "";
 
     const gamepassLine = order.gamepassUrl ? `🔗 ${order.gamepassUrl}\n` : "";
 
-    await ctx.reply(
-      `📦 Заявка #${shortId}\n` +
-      `━━━━━━━━━━━━━━━━\n` +
-      `💎 Сумма: ${order.amount} R$ (Геймпасс: ${passPrice} R$)\n` +
-      `🔑 Код ВБ: ${order.wbCode}\n` +
-      gamepassLine +
-      `📊 Статус: ${statusStr}` +
-      hint
-    );
+    const keyboard = order.status === "REJECTED"
+      ? Keyboard.builder()
+          .textButton({ label: "🔄 Исправить ссылку", payload: { command: "resubmit", code: order.wbCode }, color: "primary" })
+          .inline()
+      : undefined;
+
+    await ctx.reply({
+      message:
+        `📦 Заявка #${shortId}\n` +
+        `━━━━━━━━━━━━━━━━\n` +
+        `💎 Сумма: ${order.amount} R$ (Геймпасс: ${passPrice} R$)\n` +
+        `🔑 Код ВБ: ${order.wbCode}\n` +
+        gamepassLine +
+        `📊 Статус: ${statusStr}` +
+        hint,
+      ...(keyboard ? { keyboard } : {}),
+    });
     return;
   }
 

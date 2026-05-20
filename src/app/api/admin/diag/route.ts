@@ -20,6 +20,7 @@
  * }
  */
 
+import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -56,7 +57,9 @@ export async function GET(request: Request) {
   }
   const auth = request.headers.get("authorization") ?? "";
   const expected = `Bearer ${adminSecret}`;
-  if (auth !== expected) {
+  const bufA = Buffer.from(crypto.createHash("sha256").update(auth).digest("hex"), "hex");
+  const bufB = Buffer.from(crypto.createHash("sha256").update(expected).digest("hex"), "hex");
+  if (!crypto.timingSafeEqual(bufA, bufB)) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 

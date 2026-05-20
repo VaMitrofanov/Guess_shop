@@ -16,6 +16,7 @@
  * }
  */
 
+import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { PrismaClientWithWb } from "@/types/prisma-wb";
@@ -36,8 +37,15 @@ export async function POST(request: Request) {
   const authHeader = request.headers.get("authorization") ?? "";
   const secret     = process.env.ADMIN_SECRET;
 
-  if (!secret || authHeader !== `Bearer ${secret}`) {
+  if (!secret) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  {
+    const a = Buffer.from(crypto.createHash("sha256").update(authHeader).digest("hex"), "hex");
+    const b = Buffer.from(crypto.createHash("sha256").update(`Bearer ${secret}`).digest("hex"), "hex");
+    if (!crypto.timingSafeEqual(a, b)) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
   }
 
   // ── Parse body ─────────────────────────────────────────────────────────────
@@ -115,8 +123,15 @@ export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization") ?? "";
   const secret     = process.env.ADMIN_SECRET;
 
-  if (!secret || authHeader !== `Bearer ${secret}`) {
+  if (!secret) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  {
+    const a = Buffer.from(crypto.createHash("sha256").update(authHeader).digest("hex"), "hex");
+    const b = Buffer.from(crypto.createHash("sha256").update(`Bearer ${secret}`).digest("hex"), "hex");
+    if (!crypto.timingSafeEqual(a, b)) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
   }
 
   const stats = await db.wbCode.groupBy({

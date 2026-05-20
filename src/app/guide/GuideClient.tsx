@@ -1485,7 +1485,7 @@ function StepsGrid({
                   </div>
                 )}
 
-                {dynamicWarn && !isStep04 && (
+                {dynamicWarn && !(isStep04 && passPrice) && (
                   <div className="flex gap-2 items-start border-l-2 border-amber-500/50 pl-3 py-1 mt-2">
                     <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                     <p className="text-sm md:text-base text-amber-300/80 font-bold leading-relaxed">{dynamicWarn}</p>
@@ -2372,7 +2372,7 @@ function Instruction({ isWB, denomination, code, onReset, freshFromGate = false 
               passPrice={passPrice}
               onCopyPassPrice={handleCopyPassPrice}
               priceCopied={priceCopied}
-              onPassPriceChange={setPassPrice}
+              onPassPriceChange={(p) => { setPassPrice(p); setPriceCopied(false); }}
               platform={platform}
             />
           </InstructionRevealCurtain>
@@ -2626,8 +2626,14 @@ export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl }: {
           setDenomination(statusData.denomination ?? saved?.denomination ?? 0);
           setActiveCode(codeToCheck);
           setPhase("instruction");
+        } else if (statusRes.ok && !statusData.claimed && wbCodeFromUrl && statusData.denomination) {
+          // Code exists but not yet claimed — timing race (user opened link before bot finished)
+          // Show instruction anyway; the denomination is on the physical card so it's not secret
+          setDenomination(statusData.denomination);
+          setActiveCode(codeToCheck);
+          setPhase("instruction");
         }
-        // If not claimed: stay in gate
+        // If not claimed and no wbCodeFromUrl: stay in gate
       } catch {
         // Network error — stay in gate
       } finally {

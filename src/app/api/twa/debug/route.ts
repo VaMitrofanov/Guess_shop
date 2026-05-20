@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getStats30d } from "@/lib/wb-api";
 import { prisma } from "@/lib/prisma";
@@ -7,9 +8,17 @@ function getWbToken() {
 }
 
 export async function GET(req: NextRequest) {
-  const secret = req.nextUrl.searchParams.get("secret");
-  if (secret !== process.env.ADMIN_SECRET) {
+  const secret = req.nextUrl.searchParams.get("secret") ?? "";
+  const adminSecret = process.env.ADMIN_SECRET ?? "";
+  if (!adminSecret) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  {
+    const a = Buffer.from(crypto.createHash("sha256").update(secret).digest("hex"), "hex");
+    const b = Buffer.from(crypto.createHash("sha256").update(adminSecret).digest("hex"), "hex");
+    if (!crypto.timingSafeEqual(a, b)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
   }
 
   const raw   = process.env.WB_API_TOKEN ?? "";

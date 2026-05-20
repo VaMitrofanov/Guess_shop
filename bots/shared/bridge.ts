@@ -89,7 +89,8 @@ export function startBridgeServer(): http.Server {
         return;
       }
 
-      const { token, method: tgMethod, chat_id, ...rest } = body as any;
+      const { method: tgMethod, chat_id, ...rest } = body as any;
+      const token = process.env.TG_TOKEN;
       if (!token || !chat_id) {
         respond(400, { ok: false, error: "missing_fields" });
         return;

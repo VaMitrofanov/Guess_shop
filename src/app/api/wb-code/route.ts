@@ -77,7 +77,6 @@ export async function POST(request: Request) {
           status: "RESERVED",
           sessionId: sessionId,
           reservedUntil: reserveTime,
-          isUsed: true, // Legacy flag for backwards compat
         },
       });
       return { wbCode: updated };

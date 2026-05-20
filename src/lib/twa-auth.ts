@@ -48,7 +48,11 @@ export function isAdmin(userId?: number): boolean {
   return ADMIN_SET.has(String(userId));
 }
 
-const getSecret = () => new TextEncoder().encode(process.env.AUTH_SECRET ?? "fallback");
+const getSecret = () => {
+  const s = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
+  if (!s) throw new Error("[twa-auth] AUTH_SECRET or NEXTAUTH_SECRET must be set");
+  return new TextEncoder().encode(s);
+};
 
 export async function signTwaToken(userId: number, firstName: string): Promise<string> {
   return new jose.SignJWT({ sub: String(userId), firstName, role: "twa-admin" })

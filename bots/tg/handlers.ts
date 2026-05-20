@@ -239,6 +239,7 @@ export function registerStart(bot: Telegraf): void {
     // this state and processes it immediately — no silent dead-end.
     pendingLink.set(ctx.from.id, { wbCode: wbCode.code, denomination: totalAmount });
     clearFailCounts(ctx.from.id); // fresh session — reset progressive disclosure counters
+    pendingRejectionReason.delete(ctx.from.id); // discard any in-flight admin rejection reason
 
     const passPrice = Math.ceil(totalAmount / 0.7);
 
@@ -461,6 +462,8 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
       note = "\n\n💬 <i>Менеджеры работают в порядке очереди — обычно выкупаем в течение нескольких часов, максимум сутки. " +
              "Мы сами пришлём уведомление когда всё будет готово.</i>";
     }
+  } else if (order.status === "IN_PROGRESS") {
+    note = "\n\n🔧 <i>Менеджер уже занимается твоим геймпассом — скоро пришлём уведомление.</i>";
   } else if (order.status === "REJECTED") {
     note = order.rejectionReason
       ? `\n\n💬 Причина: <i>${order.rejectionReason}</i>\n\nНажми кнопку ниже, чтобы исправить ссылку.`
@@ -609,7 +612,13 @@ export function registerText(bot: Telegraf): void {
             // Text is a gamepass URL — fall through to processing below
           }
 
-          // 2. REJECTED order — guide user to resubmit
+          // 2. WB code direct entry — check BEFORE rejected order so a new code is never blocked
+          if (!state && /^[A-Za-z0-9]{7}$/.test(text) && /[A-Za-z]/.test(text)) {
+            await handleWbCodeTextEntry(bot, ctx, tgId, text);
+            return;
+          }
+
+          // 3. REJECTED order — guide user to resubmit
           if (!state) {
             const rejectedOrder = await (db as any).wbOrder.findFirst({
               where: { userId: tgUser.id, status: "REJECTED" },
@@ -1044,8 +1053,8 @@ async function renderOrderCard(order: any) {
     `📊 Статус: <b>${statusLabels[order.status] || order.status}</b>${reasonLine}` +
     (order.gamepassUrl ? `\n\n🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>` : ``);
 
-  // Action buttons for PENDING orders only
-  const reply_markup = order.status === "PENDING" ? {
+  // Action buttons for PENDING and IN_PROGRESS orders
+  const reply_markup = (order.status === "PENDING" || order.status === "IN_PROGRESS") ? {
     inline_keyboard: [[
       { text: "✅ ВЫКУПЛЕНО", callback_data: CB.adminOk(order.id) },
       { text: "❌ ОШИБКА", callback_data: `admin_reject_init:${order.id}` }
@@ -1059,6 +1068,10 @@ async function renderOrderCard(order: any) {
 async function handleAdminSearch(ctx: any, query: string) {
   const q = query.trim().toUpperCase();
   const lowerQ = query.trim().toLowerCase();
+
+  if (lowerQ.length < 4) {
+    return ctx.reply("🔎 Введи не менее 4 символов для поиска.");
+  }
 
   // Try search by order ID (full or short suffix)
   let order = await (db as any).wbOrder.findFirst({
@@ -1494,7 +1507,30 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("user_resubmit:")) {
       const parts = data.split(":");
       const code = parts[1];
-      const denomination = parseInt(parts[2]);
+
+      const existingOrder = await (db as any).wbOrder.findFirst({
+        where: { wbCode: code },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!existingOrder) {
+        await ctx.answerCbQuery("Заказ не найден");
+        return;
+      }
+
+      // Verify the order belongs to the calling user
+      const callerUser = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
+      if (!callerUser || existingOrder.userId !== callerUser.id) {
+        await ctx.answerCbQuery("⛔ Нет доступа");
+        return;
+      }
+
+      // Don't allow resubmit on already-processing or completed orders
+      if (existingOrder.status === "IN_PROGRESS" || existingOrder.status === "COMPLETED" || existingOrder.status === "PENDING") {
+        await ctx.answerCbQuery("Заказ уже в работе — исправлять ссылку не нужно.");
+        return;
+      }
+
+      const denomination = existingOrder.amount;
 
       pendingLink.set(ctx.from.id, { wbCode: code, denomination });
       const passPrice = Math.ceil(denomination / 0.7);
