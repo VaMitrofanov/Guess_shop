@@ -730,7 +730,23 @@ export function registerText(bot: Telegraf): void {
 
     if (!gamepassInfo.validationSkipped) {
       // Normal validation — only runs when Roblox API was reachable
+
+      /** Notify admins about a validation rejection so they're aware. Non-fatal. */
+      const notifyAdminValidationFail = async (reason: string) => {
+        const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "Пользователь");
+        const alertText =
+          `⚠️ <b>НЕВЕРНЫЙ ГЕЙМПАСС</b>\n` +
+          `👤 Юзер: <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a> (ID: ${ctx.from.id})\n` +
+          `🔑 Код ВБ: <code>${state.wbCode}</code>\n` +
+          `🔗 Pass ID: <code>${passId}</code>\n` +
+          `❌ Причина: ${reason}`;
+        for (const adminId of ADMIN_IDS) {
+          try { await bot.telegram.sendMessage(adminId, alertText, { parse_mode: "HTML", link_preview_options: { is_disabled: true } }); } catch {}
+        }
+      };
+
       if (gamepassInfo.isGamePrivate) {
+        await notifyAdminValidationFail("Игра закрыта (private)");
         await ctx.reply(
           `❌ Геймпасс находится в <b>закрытой или недоступной игре</b>.\n\n` +
           `Создай новый геймпасс в публичной игре:\n` +
@@ -738,7 +754,7 @@ export function registerText(bot: Telegraf): void {
           `• Выбери публичную игру\n` +
           `• Установи цену <b>${expectedPrice} R$</b>\n\n` +
           `Затем пришли ссылку на новый геймпасс.`,
-          { parse_mode: "HTML" }
+          { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?") }
         );
         return;
       }
@@ -746,30 +762,37 @@ export function registerText(bot: Telegraf): void {
       if (!gamepassInfo.isActive) {
         const fc = getFailCounts(ctx.from.id);
         fc.notActive++;
+        if (fc.notActive === 1) await notifyAdminValidationFail("Геймпасс не выставлен на продажу");
         const notActiveText =
-          `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
-          `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.`;
-        if (fc.notActive >= 2) {
-          await ctx.reply(notActiveText, { parse_mode: "HTML", ...withSupportKb("Нужна помощь?") });
-        } else {
-          await ctx.reply(notActiveText, { parse_mode: "HTML" });
-        }
+          `⚠️ Геймпасс не выставлен на продажу.\n\n` +
+          `Зайди в Creator Dashboard → Creations → Passes, найди геймпасс <b>${passId}</b>, ` +
+          `нажми «Edit» и поставь галочку «On Sale». После этого пришли ссылку снова.`;
+        await ctx.reply(notActiveText, {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[
+            Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`),
+            ...(fc.notActive >= 2 ? [supportBtn("Нужна помощь?")] : []),
+          ]]),
+        });
         return;
       }
 
       if (Math.abs(gamepassInfo.price - expectedPrice) > 2) {
         const fc = getFailCounts(ctx.from.id);
         fc.priceMismatch++;
+        if (fc.priceMismatch === 1) await notifyAdminValidationFail(`Неверная цена: ${gamepassInfo.price} R$ (ожидалось ${expectedPrice} R$)`);
         const priceMismatchText =
           `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
           `Установлено: <b>${gamepassInfo.price} R$</b>\n` +
           `Ожидается:   <b>${expectedPrice} R$</b>\n\n` +
-          `Измени цену в настройках Roblox (Creator Dashboard → Passes → Edit) и пришли ссылку снова.`;
-        if (fc.priceMismatch >= 2) {
-          await ctx.reply(priceMismatchText, { parse_mode: "HTML", ...withSupportKb("Нужна помощь с ценой?") });
-        } else {
-          await ctx.reply(priceMismatchText, { parse_mode: "HTML" });
-        }
+          `Зайди в Creator Dashboard → Passes → Edit, измени цену и пришли ссылку снова.`;
+        await ctx.reply(priceMismatchText, {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[
+            Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`),
+            ...(fc.priceMismatch >= 2 ? [supportBtn("Нужна помощь с ценой?")] : []),
+          ]]),
+        });
         return;
       }
 
