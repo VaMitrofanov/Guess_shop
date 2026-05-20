@@ -68,7 +68,7 @@ export async function showOrdersHub(ctx: Context): Promise<void> {
     ],
     [
       Markup.button.callback("📜 История 24ч", CB.ordersHistory),
-      Markup.button.callback(`❌ Отклонённые (${todayRejected})`, CB.ordersRejected),
+      Markup.button.callback(`❌ Отклонённые`, CB.ordersRejected),
     ],
     [
       Markup.button.callback("📋 Пакетный выкуп", CB.ordersBatch),
@@ -460,7 +460,7 @@ export async function confirmBatchFulfill(
   ctx: Context
 ): Promise<void> {
   const adminId = String(ctx.from!.id);
-
+  try {
   const orders = await (db as any).wbOrder.findMany({
     where: { status: { in: ["PENDING", "IN_PROGRESS"] } },
     include: { user: true },
@@ -500,4 +500,8 @@ export async function confirmBatchFulfill(
 
   await updateMainMenu(bot);
   await ctx.answerCbQuery(`✅ ${orders.length} заказов выполнено`);
+  } catch (err) {
+    console.error("[confirmBatchFulfill] error:", err);
+    await ctx.answerCbQuery("❌ Ошибка при выполнении пакета").catch(() => {});
+  }
 }

@@ -10,7 +10,7 @@ export async function POST(request: Request) {
     const rawCode: string = (body?.code ?? "").toString().trim().toUpperCase();
     const sessionId: string = body?.sessionId ?? "";
 
-    if (!rawCode || rawCode.length < 7) {
+    if (!rawCode || rawCode.length !== 7 || !/^[A-Z0-9]{7}$/.test(rawCode)) {
       return NextResponse.json(
         { error: "Введите полный 7-значный код с карточки" },
         { status: 400 }

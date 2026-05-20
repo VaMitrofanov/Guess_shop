@@ -1456,35 +1456,45 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("admin_ok:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const orderId = data.split(":")[1];
+      try {
+        // Snapshot purchase rate at fulfillment time
+        const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
+        const currentRate = settings?.purchaseRate ?? null;
 
-      // Snapshot purchase rate at fulfillment time
-      const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
-      const currentRate = settings?.purchaseRate ?? null;
+        // Atomic guard: only update if the order is still in an actionable state.
+        // Prevents double-notification when two admins click simultaneously.
+        const updatedCount = await (db as any).wbOrder.updateMany({
+          where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
+          data: { status: "COMPLETED", adminId, purchaseRate: currentRate },
+        });
 
-      // Atomic guard: only update if the order is still in an actionable state.
-      // Prevents double-notification when two admins click simultaneously.
-      const updatedCount = await (db as any).wbOrder.updateMany({
-        where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
-        data: { status: "COMPLETED", adminId, purchaseRate: currentRate },
-      });
+        if (updatedCount.count === 0) {
+          await ctx.answerCbQuery("⚠️ Уже обработан другим админом");
+          try {
+            await ctx.editMessageText("✅ Выполнено (другим админом)", { parse_mode: "HTML" });
+          } catch {}
+          return;
+        }
 
-      if (updatedCount.count === 0) {
-        await ctx.answerCbQuery("⚠️ Уже обработан другим админом");
-        try {
-          await ctx.editMessageText("✅ Выполнено (другим админом)", { parse_mode: "HTML" });
-        } catch {}
-        return;
+        const order = await (db as any).wbOrder.findUnique({ where: { id: orderId } });
+        if (!order) {
+          await ctx.answerCbQuery("⚠️ Заказ не найден");
+          return;
+        }
+        const user = order.userId
+          ? await (db as any).user.findUnique({ where: { id: order.userId } })
+          : null;
+
+        const editedText = `✅ <b>Выполнено админом ${adminTag}</b>\nЗаказ #${orderId.slice(-6).toUpperCase()} · ${order.amount} R$`;
+        try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch { }
+
+        if (user) await notifyUserCompleted(bot, user, orderId, order.amount);
+        await updateMainMenu(bot);
+        await ctx.answerCbQuery("✅ Выполнено");
+      } catch (err) {
+        console.error("[admin_ok] error:", err);
+        await ctx.answerCbQuery("❌ Ошибка, попробуйте ещё раз").catch(() => {});
       }
-
-      const order = await (db as any).wbOrder.findUnique({ where: { id: orderId } });
-      const user = await (db as any).user.findUnique({ where: { id: order.userId } });
-
-      const editedText = `✅ <b>Выполнено админом ${adminTag}</b>\nЗаказ #${orderId.slice(-6).toUpperCase()} · ${order.amount} R$`;
-      try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch { }
-
-      if (user) await notifyUserCompleted(bot, user, orderId, order.amount);
-      await updateMainMenu(bot);
-      await ctx.answerCbQuery("✅ Выполнено");
       return;
     }
 

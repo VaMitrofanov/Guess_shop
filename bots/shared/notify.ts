@@ -22,21 +22,26 @@ export async function tgSend(
 
   if (bridgeUrl) {
     // Route through the Singapore bridge (Russia cannot reach api.telegram.org)
-    const res = await fetch(`${bridgeUrl}/tg-proxy`, {
-      method:  "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(validatorKey ? { "x-validator-key": validatorKey } : {}),
-      },
-      body: JSON.stringify({
-        token:                    process.env.TG_TOKEN,
-        chat_id:                  chatId,
-        text,
-        disable_web_page_preview: true,
-        ...extra,
-      }),
-    });
-    return (res.json() as Promise<Record<string, unknown>>).catch(() => ({}));
+    try {
+      const res = await fetch(`${bridgeUrl}/tg-proxy`, {
+        method:  "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(validatorKey ? { "x-validator-key": validatorKey } : {}),
+        },
+        body: JSON.stringify({
+          token:                    process.env.TG_TOKEN,
+          chat_id:                  chatId,
+          text,
+          disable_web_page_preview: true,
+          ...extra,
+        }),
+      });
+      return (res.json() as Promise<Record<string, unknown>>).catch(() => ({}));
+    } catch (err: any) {
+      console.warn("[notify] tgSend bridge error:", err?.message ?? err);
+      return {};
+    }
   }
 
   const res = await fetch(tgUrl("sendMessage"), {
@@ -177,11 +182,15 @@ export async function vkSend(
     access_token: process.env.VK_TOKEN ?? "",
     v:          "5.131",
   });
-  await fetch(vkApiUrl("messages.send"), {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: params.toString(),
-  });
+  try {
+    await fetch(vkApiUrl("messages.send"), {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+    });
+  } catch (err: any) {
+    console.warn("[notify] vkSend error:", err?.message ?? err);
+  }
 }
 
 // ── Util ──────────────────────────────────────────────────────────────────────
