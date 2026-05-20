@@ -513,21 +513,71 @@ npm run dev:reset-test
 ## Последние коммиты (от новых к старым)
 
 ```
+bc1c7df fix(critical): P0/P1 crash fixes from ultra-review audit
+8cf1f83 feat(tg/admin): add REJECTED orders view to TG admin hub
 429acf5 fix(bots): correct Roblox game privacy path in all instruction texts
-6f5744e fix(bots): correct Roblox game privacy path (промежуточный)
-8e533c9 fix(bots): full audit fixes + private-game UX overhaul
 6ad4b3e fix(auth,guide): VK guide-mode bugs + remove dead onSuccess gate prop
 ffdda78 fix(bots): patch runtime crash, complete hand-holding funnel  
 752bd5d polish(ux): Apple-level ecosystem UX — consistent tone, terminology
 c33aa06 fix(bots): pass_private ctxKey for TG, add DB fallback for VK support handler
 93d1785 feat(bots): support button sends admin alert with scenario context
-062c944 fix(bots/guide): close all UX dead-ends, remove WBGate bypass
-c5beaba feat(tg/admin): preset order rejection reasons — one-tap instead of typing
 ```
 
 ---
 
 *Обновляй этот файл после каждой значимой сессии.*
+
+---
+
+## Текущий деплой (2026-05-21 после ultra-review)
+
+| Сервис | Сервер | Commit | Статус |
+|--------|--------|--------|--------|
+| Next.js сайт | RF 89.110.94.117 | `bc1c7df` | ✅ |
+| Guide (отдельный сервис) | RF 89.110.94.117 | `bc1c7df` | ✅ |
+| VK бот | RF 89.110.94.117 | `bc1c7df` | ✅ |
+| TG бот | SG 5.223.95.11 | `bc1c7df` | ✅ |
+
+**Auto-deploy сломан:** RF-сервер не может достучаться до `api.github.com` (Russian IP block). Coolify ставит `is_auto_deploy_enabled = true`, но вебхук не срабатывает (timeout на GitHub API). Деплой только вручную через Coolify UI или API.
+
+**DB состояние (на момент аудита):** 3 COMPLETED / 2 REJECTED заказа, 995 AVAILABLE кодов, 9 TG-пользователей.  
+**4 зависших RESERVED кода** (`1FS0SNA`, `66PXO05`, `UITRVG1`, `QP7HC6J`) — нет фонового cleanup job, истёкли TTL. Нужно либо cron-задача, либо авто-релиз в `/api/wb-code` при истёкшем `reservedUntil`.
+
+---
+
+## Ultra-review 2026-05-21 — полные находки
+
+### Что исправлено в этой сессии (коммит bc1c7df)
+
+| Файл | Серьёзность | Проблема | Исправление |
+|------|------------|---------|------------|
+| `notify.ts` tgSend | **P1** | `fetch` к bridge без try/catch — сетевая ошибка = unhandled rejection | Обёрнуто в try/catch, warn в лог, возвращает `{}` |
+| `notify.ts` vkSend | **P1** | Нет try/catch — ошибка VK API падала наружу | try/catch + warn в лог |
+| `handlers.ts` admin_ok | **P1** | `order` после `findUnique` может быть `null` — `order.userId` краш | Null guard + try/catch вокруг всего блока |
+| `hub-orders.ts` confirmBatchFulfill | **P1** | Нет try/catch — DB ошибка = нет answerCbQuery, бесконечный спиннер | try/catch + fallback answerCbQuery |
+| `wb-code/route.ts` | **P0** | Проверка `length < 7` — коды длиннее 7 символов проходили валидацию | `length !== 7` + alphanumeric regex |
+| `hub-orders.ts` кнопка | **P2** | Лейбл "Отклонённые (N)" показывал сегодняшний счётчик, а вью показывал все заказы за всё время | Убрали счётчик из лейбла |
+
+### Открытые находки (backlog)
+
+**P1 — Next.js сайт**
+- `VKAuthButton.tsx:137-143`: `wb_code` из `?code=` URL-параметра — атакующий может подменить чужой код, подставив его в ссылку. Fix: доверять только `wbCodeProp` (prop) или cookie, не query param.
+- `auth.ts:141-145` + `wb-link/route.ts:37-41`: нет проверки `status` перед `update` CLAIMED кода — второй логин может перезаписать `userId` активированного кода. Fix: `where: { status: { not: "CLAIMED" } }`.
+- `GuideClient.tsx:1760`: cookie `wb_code` без флага `Secure` — на HTTP-соединении уходит открытым текстом. Fix: добавить `; Secure`.
+
+**P1 — TG бот**
+- `handlers.ts:2624-2626`: `answerCbQuery` может не вызваться при throw в `ord_rr` ветке (performAdminReject вызывается до answerCbQuery). Fix: вызывать answerCbQuery перед performAdminReject или в finally.
+
+**P2 — Next.js сайт**
+- `wb-code/route.ts:60-65`: живая резервация переносится на любую сессию, знающую код (намеренный UX-выбор, но риск угона). Рассмотреть grace period / rate limiting.
+- `GuideClient.tsx / wb-code/route.ts`: BOT_CLAIMED возвращает 409, но сайт не переключает фазу на "instruction" — пользователь застревает на форме. Fix: вернуть `ok: true` с флагом `botClaimed: true`, перейти в фазу instruction.
+- `WBGate` не передаёт `onSuccess` callback в `GuideClient` — после успешного ввода кода родитель не узнаёт denomination/code. Fix: `onSuccess(denomination, code)` callback prop.
+- `roblox.ts:258`: `strictOnUnavailable: false` на первичных эндпоинтах — таймаут/503 принимается как "validation skipped", а не как ошибка недоступности.
+
+**P3**
+- `admin/index.ts:341-343`: `nmID` в `wb_ue:{id}` парсится но не передаётся в `showUnitEconHub` — мёртвый код.
+- `vk/handlers.ts:529`: spinner-сообщение никогда не удаляется при ошибке.
+- `wb-code/route.ts:11`: `sessionId` не валидируется — можно перебирать коды с однобайтными sId.
 
 ---
 
