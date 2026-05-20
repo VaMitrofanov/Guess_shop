@@ -566,37 +566,65 @@ export function registerText(bot: Telegraf): void {
           }
         }
 
-        // If user sent a gamepass URL/ID, try to recover their session first
-        if (extractPassId(text) !== null) {
-          const tgUser = await (db as any).user.findUnique({
-            where: { tgId },
-            select: { id: true, balance: true },
+        // DB-based session recovery — runs for ANY text, not just gamepass URLs.
+        // This ensures users who type "привет" or "что делать" after bot restart
+        // still get a meaningful response instead of "no active orders".
+        const tgUser = await (db as any).user.findUnique({
+          where: { tgId },
+          select: { id: true, balance: true },
+        });
+
+        if (tgUser) {
+          // 1. AWAITING_GAMEPASS — restore session
+          const awaitingOrder = await (db as any).wbOrder.findFirst({
+            where: { userId: tgUser.id, status: "AWAITING_GAMEPASS" },
+            orderBy: { createdAt: "desc" },
           });
-          if (tgUser) {
-            // 1. Check for rejected order — guide them to use the button in that message
-            const rejected = await (db as any).wbOrder.findFirst({
-              where: { userId: tgUser.id, status: "REJECTED" },
-              orderBy: { updatedAt: "desc" },
-              select: { id: true },
-            });
-            if (rejected) {
+          if (awaitingOrder) {
+            state = { wbCode: awaitingOrder.wbCode, denomination: awaitingOrder.amount };
+            pendingLink.set(ctx.from.id, state);
+
+            // If text is not a gamepass URL, remind user what to do next
+            if (extractPassId(text) === null) {
+              const passPrice = Math.ceil(state.denomination / 0.7);
               await ctx.reply(
-                `👆 <b>Сначала нажми кнопку «🔄 Исправить ссылку»</b> в сообщении об отклонении заказа.\n\n` +
-                `Без этого бот не знает, к какому заказу прикрепить твою ссылку — просто найди то сообщение и нажми кнопку, а потом снова пришли ссылку.`,
-                { parse_mode: "HTML" }
+                `✅ Код <b>${state.wbCode}</b> уже активирован!\n\n` +
+                `Осталось создать геймпасс и прислать сюда ссылку.\n` +
+                `📌 Цена геймпасса: <b>${passPrice} R$</b>\n` +
+                `<i>(это номинал ÷ 0.7 — Roblox удерживает 30%)</i>\n\n` +
+                `Нужна инструкция? 👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`,
+                {
+                  parse_mode: "HTML",
+                  link_preview_options: { is_disabled: true },
+                  ...Markup.inlineKeyboard([[
+                    Markup.button.url("📖 Открыть инструкцию", `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`),
+                  ]]),
+                }
               );
               return;
             }
+            // Text is a gamepass URL — fall through to processing below
+          }
 
-            // 2. Recover AWAITING_GAMEPASS state after bot restart
-            const awaitingOrder = await (db as any).wbOrder.findFirst({
-              where: { userId: tgUser.id, status: "AWAITING_GAMEPASS" },
-              orderBy: { createdAt: "desc" },
+          // 2. REJECTED order — guide user to resubmit
+          if (!state) {
+            const rejectedOrder = await (db as any).wbOrder.findFirst({
+              where: { userId: tgUser.id, status: "REJECTED" },
+              orderBy: { updatedAt: "desc" },
             });
-            if (awaitingOrder) {
-              state = { wbCode: awaitingOrder.wbCode, denomination: awaitingOrder.amount };
-              pendingLink.set(ctx.from.id, state);
-              // Fall through to gamepass processing below
+            if (rejectedOrder) {
+              await ctx.reply(
+                `❌ Твоя последняя заявка была отклонена.\n\n` +
+                `Исправь ссылку на геймпасс и нажми кнопку ниже — отправим на проверку заново:`,
+                {
+                  parse_mode: "HTML",
+                  ...Markup.inlineKeyboard([
+                    [Markup.button.callback("🔄 Исправить ссылку", `user_resubmit:${rejectedOrder.wbCode}:${rejectedOrder.amount}`)],
+                    [supportBtn("💬 Нужна помощь?")],
+                  ]),
+                }
+              );
+              return;
             }
           }
         }
