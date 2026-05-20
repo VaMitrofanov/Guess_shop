@@ -608,6 +608,15 @@ export function registerText(bot: Telegraf): void {
         }
 
         if (!state) {
+          // User may have clicked "📸 Оставить отзыв" and typed instead of sending a photo
+          if (pendingReview.has(ctx.from.id)) {
+            await ctx.reply(
+              "📸 Жду скриншот отзыва — отправь его фотографией (не файлом, не документом).\n\n" +
+              "Просто прикрепи изображение как обычное фото в Telegram.",
+              { parse_mode: "HTML" }
+            );
+            return;
+          }
           await ctx.reply(
             "У тебя сейчас нет активных заявок.\n\n" +
             "🔑 Есть код с WB-карты? Напиши его прямо сюда.",
@@ -1546,6 +1555,20 @@ export function registerCallbacks(bot: Telegraf): void {
 
     // ── 📸 review_hint: prompt user to send review screenshot ────────────
     if (data === CB.reviewHint) {
+      // Restore pendingReview so the text handler can remind them if they type instead of sending a photo
+      const tgUser = await (db as any).user.findUnique({ where: { tgId: adminId } });
+      if (tgUser) {
+        const reviewOrder = await (db as any).wbOrder.findFirst({
+          where: { userId: tgUser.id, status: "COMPLETED" },
+          orderBy: { updatedAt: "desc" },
+        });
+        const linked = reviewOrder
+          ? await (db as any).wbCode.findFirst({ where: { userId: tgUser.id, reviewBonusClaimed: false } })
+          : null;
+        if (reviewOrder && linked) {
+          pendingReview.set(ctx.from.id, reviewOrder.id as string);
+        }
+      }
       await ctx.reply(
         "📸 Сделай скриншот своего отзыва на Wildberries и отправь его сюда фотографией (не файлом, не документом).\n\n" +
         "После проверки бонус <b>+100 R$</b> придёт автоматически.",
