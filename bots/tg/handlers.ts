@@ -1543,7 +1543,7 @@ export function registerCallbacks(bot: Telegraf): void {
       const reason = reasonMap[key] ?? key;
       pendingRejectionReason.delete(ctx.from.id);
       await performAdminReject(bot, ctx, orderId, reason);
-      await ctx.answerCbQuery(`Отклонено: ${reason}`);
+      await ctx.answerCbQuery("✅ Заказ отклонён");
       return;
     }
 
@@ -1753,7 +1753,7 @@ export function registerCallbacks(bot: Telegraf): void {
       // Notify user and restore review state
       await notifyReviewRejected(bot, userId, orderId, reason);
 
-      await ctx.answerCbQuery(`Отклонено: ${reason}`);
+      await ctx.answerCbQuery("✅ Отзыв отклонён");
       return;
     }
 
