@@ -184,7 +184,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       wbCode,
       denomination: denom,
     });
-    await ctx.reply("Соединяем с менеджером — напишите нам: https://t.me/RobloxBank_PA\n\nМы уже знаем о вашей ситуации 👍");
+    await ctx.reply("Соединяем с менеджером — напиши нам: https://t.me/RobloxBank_PA\n\nМы уже знаем о твоей ситуации 👍");
     return;
   }
 
@@ -252,14 +252,16 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       const passPrice = Math.ceil(state.denomination / 0.7);
       const custStatus = await getCustomerStatus(String(vkUserId), "VK");
       const firstName = await vkGetName(vkUserId);
-      await ctx.reply(
-        `${getGreeting(custStatus, firstName)}\n` +
-        `✅ У тебя есть активный код!\n` +
-        `💎 Номинал: ${state.denomination} R$\n\n` +
-        `Осталось совсем чуть-чуть — пришли ссылку на геймпасс.\n` +
-        `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
-        `Жду ссылку 👇`
-      );
+      await ctx.reply({
+        message:
+          `${getGreeting(custStatus, firstName)}\n` +
+          `✅ У тебя есть активный код!\n` +
+          `💎 Номинал: ${state.denomination} R$\n\n` +
+          `Осталось совсем чуть-чуть — пришли ссылку на геймпасс.\n` +
+          `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
+          `Жду ссылку 👇`,
+        keyboard: vkSupportKb("general"),
+      });
       return;
     }
 
@@ -270,14 +272,16 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       const passPrice = Math.ceil(restoredState.denomination / 0.7);
       const custStatus = await getCustomerStatus(String(vkUserId), "VK");
       const firstName = await vkGetName(vkUserId);
-      await ctx.reply(
-        `${getGreeting(custStatus, firstName)}\n` +
-        `✅ У тебя есть активный код!\n` +
-        `💎 Номинал: ${restoredState.denomination} R$\n\n` +
-        `Осталось совсем чуть-чуть — пришли ссылку на геймпасс.\n` +
-        `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
-        `Жду ссылку 👇`
-      );
+      await ctx.reply({
+        message:
+          `${getGreeting(custStatus, firstName)}\n` +
+          `✅ У тебя есть активный код!\n` +
+          `💎 Номинал: ${restoredState.denomination} R$\n\n` +
+          `Осталось совсем чуть-чуть — пришли ссылку на геймпасс.\n` +
+          `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
+          `Жду ссылку 👇`,
+        keyboard: vkSupportKb("general"),
+      });
       return;
     }
 
@@ -467,16 +471,19 @@ async function handleRefActivation(
     );
   } else {
     await ctx.reply(
-      greetLine + `\n` +
-      `✅ Код ${code} активирован!\n` +
-      bonusText +
-      `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда.\n` +
-      `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n` +
-      `(это номинал ÷ 0.7 — Roblox удерживает 30% комиссии)\n\n` +
-      `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
-      `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n\n` +
-      `Пришли ссылку на геймпасс 👇`
-    );
+    {
+      message:
+        greetLine + `\n` +
+        `✅ Код ${code} активирован!\n` +
+        bonusText +
+        `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда.\n` +
+        `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n` +
+        `(это номинал ÷ 0.7 — Roblox удерживает 30% комиссии)\n\n` +
+        `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
+        `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n\n` +
+        `Пришли ссылку на геймпасс 👇`,
+      keyboard: vkSupportKb("general"),
+    });
   }
 }
 
@@ -899,6 +906,15 @@ async function handleIdleMessage(
     const shortId   = (order.id as string).slice(-6).toUpperCase();
     const statusStr = label[order.status] ?? order.status;
 
+    // For COMPLETED: check if review bonus was already claimed
+    let reviewClaimed = true;
+    if (order.status === "COMPLETED") {
+      try {
+        const wbCodeRec = await (db as any).wbCode.findFirst({ where: { code: order.wbCode } });
+        reviewClaimed = wbCodeRec?.reviewBonusClaimed ?? true;
+      } catch {}
+    }
+
     const hint =
       order.status === "AWAITING_GAMEPASS"
         ? `\n\nПришли ссылку на геймпасс с ценой ${passPrice} R$ — и мы возьмём в работу!`
@@ -907,18 +923,25 @@ async function handleIdleMessage(
         : order.status === "IN_PROGRESS"
         ? "\n\n🔧 Менеджер уже работает над твоей заявкой. Скоро всё будет готово!"
         : order.status === "COMPLETED"
-        ? "\n\n✅ Заявка выполнена! Если есть вопросы — https://t.me/RobloxBank_PA"
+        ? (reviewClaimed
+            ? "\n\n🚀 Хочешь заказать ещё? Постоянным клиентам — прямое обслуживание без очереди по лучшему курсу! Пиши: https://t.me/RobloxBank_PA"
+            : "\n\n🎁 Оставь отзыв на Wildberries и получи +100 R$ бонусом!\nСделай скриншот отзыва и пришли его сюда фотографией.")
         : order.status === "REJECTED"
         ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Исправь геймпасс и нажми кнопку ниже — отправим на проверку заново.`
         : "";
 
     const gamepassLine = order.gamepassUrl ? `🔗 ${order.gamepassUrl}\n` : "";
 
-    const keyboard = order.status === "REJECTED"
-      ? Keyboard.builder()
-          .textButton({ label: "🔄 Исправить ссылку", payload: { command: "resubmit", code: order.wbCode }, color: "primary" })
-          .inline()
-      : undefined;
+    const keyboard =
+      order.status === "REJECTED"
+        ? Keyboard.builder()
+            .textButton({ label: "🔄 Исправить ссылку", payload: { command: "resubmit", code: order.wbCode }, color: "primary" })
+            .inline()
+        : order.status === "COMPLETED" && reviewClaimed
+        ? Keyboard.builder()
+            .textButton({ label: "💬 Заказать ещё", payload: { command: "support", context: "general" }, color: "positive" })
+            .inline()
+        : undefined;
 
     await ctx.reply({
       message:
@@ -940,14 +963,16 @@ async function handleIdleMessage(
     const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
     const passPrice = Math.ceil(restoredState.denomination / 0.7);
     const firstName = await vkGetName(vkUserId);
-    await ctx.reply(
-      `${getGreeting(status, firstName)}\n` +
-      `✅ У тебя есть активный код ${restoredState.wbCode}!\n` +
-      `💎 Номинал: ${restoredState.denomination} R$\n\n` +
-      `Осталось совсем чуть-чуть — пришли ссылку на геймпасс.\n` +
-      `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
-      `Жду ссылку 👇`
-    );
+    await ctx.reply({
+      message:
+        `${getGreeting(status, firstName)}\n` +
+        `✅ У тебя есть активный код ${restoredState.wbCode}!\n` +
+        `💎 Номинал: ${restoredState.denomination} R$\n\n` +
+        `Осталось совсем чуть-чуть — пришли ссылку на геймпасс.\n` +
+        `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
+        `Жду ссылку 👇`,
+      keyboard: vkSupportKb("general"),
+    });
     return;
   }
 

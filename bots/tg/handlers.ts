@@ -16,6 +16,10 @@ import { getGamepassDetails } from "../shared/roblox";
 import { buildAdminKeyboard, updateMainMenu, routeAdminCallback } from "./admin";
 import { renderExtendedCard } from "./admin/hub-orders";
 
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const SUPPORT_URL = "https://t.me/RobloxBank_PA";
+
 // ── Support contact (Progressive Disclosure) ────────────────────────────────
 
 /** Inline callback button that triggers support notification + shows contact URL. */
@@ -352,13 +356,13 @@ export function registerStart(bot: Telegraf): void {
     await ctx.reply(
       `${greetLine}\n` +
       (isGuideMode
-        ? `✅ Код <b>${code}</b> зафиксирован!\n` +
+        ? `✅ Код <b>${code}</b> активирован!\n` +
           bonusText +
+          `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда.\n` +
           `📌 Цена геймпасса должна быть ровно <b>${passPrice} R$</b>\n\n` +
-          `Если геймпасс уже создан — кидай ссылку 👇\n\n` +
-          `Если нужна инструкция — возвращайся на сайт:\n` +
-          `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n` +
-          `Там подробная пошаговая инструкция!`
+          `Если геймпасс уже создан — пришли ссылку прямо сюда 👇\n\n` +
+          `Нужна инструкция?\n` +
+          `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}`
         : `✅ Код <b>${code}</b> активирован!\n` +
           bonusText +
           `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда.\n` +
@@ -497,7 +501,10 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
       [supportBtn("💬 Нужна помощь?", "general")],
     ]);
   } else if (order.status === "COMPLETED") {
-    keyboard = Markup.inlineKeyboard([refreshRow, [supportBtn("💬 Заказать ещё", "general")]]);
+    keyboard = Markup.inlineKeyboard([
+      refreshRow,
+      [Markup.button.url("💬 Заказать ещё напрямую", SUPPORT_URL)],
+    ]);
   } else if (pendingOver60) {
     keyboard = Markup.inlineKeyboard([refreshRow, [supportBtn("Нужна помощь?", "pending_long")]]);
   } else {
@@ -1964,7 +1971,7 @@ export function registerChatMember(bot: Telegraf): void {
       await bot.telegram.sendMessage(
         userId,
         `✅ <b>Добро пожаловать в канал!</b>\n\n` +
-        `Твой код <code>${code}</code> зафиксирован — осталось создать геймпасс.\n\n` +
+        `Твой код <code>${code}</code> активирован — осталось создать геймпасс.\n\n` +
         `📌 Установи цену ровно <b>${passPrice} R$</b>\n\n` +
         `Создай геймпасс и пришли ссылку прямо сюда 👇`,
         {
