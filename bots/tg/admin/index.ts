@@ -12,7 +12,7 @@ import { ADMIN_IDS, CB } from "../../shared/admin";
 import { buildAdminKeyboard, updateMainMenu } from "./menu";
 import {
   showOrdersHub, showActiveOrders, showOrderCard, enterSearchMode,
-  showHistory24h, showBatchView, confirmBatchFulfill, takeOrderInWork,
+  showHistory24h, showRejectedOrders, showBatchView, confirmBatchFulfill, takeOrderInWork,
   handleSearchQuery,
 } from "./hub-orders";
 import { showStatsHub, refreshStats, enterRateInput, handleRateInput } from "./hub-stats";
@@ -192,6 +192,11 @@ export async function routeAdminCallback(
   }
   if (data === CB.ordersHistory) {
     await showHistory24h(ctx);
+    await ctx.answerCbQuery();
+    return true;
+  }
+  if (data === CB.ordersRejected) {
+    await showRejectedOrders(ctx);
     await ctx.answerCbQuery();
     return true;
   }

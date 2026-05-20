@@ -107,6 +107,7 @@ export const CB = {
   ordersActive:    "ord_active",
   ordersSearch:    "ord_search",
   ordersHistory:   "ord_hist",
+  ordersRejected:  "ord_rej",
   ordersBatch:     "ord_batch",
   ordersBatchConfirm: "ord_batch_ok",
   orderTakeWork:   (id: string) => `ord_work:${id}`,

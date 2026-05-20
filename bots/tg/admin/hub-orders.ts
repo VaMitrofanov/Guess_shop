@@ -41,11 +41,12 @@ export async function showOrdersHub(ctx: Context): Promise<void> {
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-  const [awaitingCount, pendingCount, inProgressCount, todayDone] = await Promise.all([
+  const [awaitingCount, pendingCount, inProgressCount, todayDone, todayRejected] = await Promise.all([
     (db as any).wbOrder.count({ where: { status: "AWAITING_GAMEPASS" } }),
     (db as any).wbOrder.count({ where: { status: "PENDING" } }),
     (db as any).wbOrder.count({ where: { status: "IN_PROGRESS" } }),
     (db as any).wbOrder.count({ where: { status: "COMPLETED", updatedAt: { gte: startOfDay } } }),
+    (db as any).wbOrder.count({ where: { status: "REJECTED",  updatedAt: { gte: startOfDay } } }),
   ]);
 
   const activeTotal = awaitingCount + pendingCount + inProgressCount;
@@ -57,6 +58,7 @@ export async function showOrdersHub(ctx: Context): Promise<void> {
     `⏳ Ожидают: <b>${pendingCount}</b>\n` +
     `🔧 В работе: <b>${inProgressCount}</b>\n` +
     `📊 Сегодня выполнено: <b>${todayDone}</b>\n` +
+    (todayRejected > 0 ? `❌ Сегодня отклонено: <b>${todayRejected}</b>\n` : ``) +
     (activeTotal === 0 ? `\n✅ Все заказы обработаны!` : "");
 
   const keyboard = Markup.inlineKeyboard([
@@ -66,6 +68,9 @@ export async function showOrdersHub(ctx: Context): Promise<void> {
     ],
     [
       Markup.button.callback("📜 История 24ч", CB.ordersHistory),
+      Markup.button.callback(`❌ Отклонённые (${todayRejected})`, CB.ordersRejected),
+    ],
+    [
       Markup.button.callback("📋 Пакетный выкуп", CB.ordersBatch),
     ],
   ]);
@@ -375,6 +380,40 @@ export async function showHistory24h(ctx: Context): Promise<void> {
       timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit",
     });
     text += `✅ <code>${shortId}</code> — <b>${o.amount} R$</b> · ${time}\n`;
+    buttons.push([Markup.button.callback(`🔍 ${shortId}`, CB.orderView(o.id))]);
+  }
+
+  buttons.push([Markup.button.callback("⬅️ Назад", CB.ordersBack)]);
+  await editWidget(ctx, text, Markup.inlineKeyboard(buttons));
+}
+
+// ── Rejected orders list ─────────────────────────────────────────────────────
+
+export async function showRejectedOrders(ctx: Context): Promise<void> {
+  const orders = await (db as any).wbOrder.findMany({
+    where: { status: "REJECTED" },
+    include: { user: true },
+    orderBy: { updatedAt: "desc" },
+    take: 30,
+  });
+
+  if (orders.length === 0) {
+    await editWidget(ctx, "❌ Отклонённых заказов нет.", Markup.inlineKeyboard([
+      [Markup.button.callback("⬅️ Назад", CB.ordersBack)],
+    ]));
+    return;
+  }
+
+  let text = `❌ <b>ОТКЛОНЁННЫЕ (${orders.length})</b>\n━━━━━━━━━━━━━━━━\n\n`;
+  const buttons: any[][] = [];
+
+  for (const o of orders) {
+    const shortId = o.id.slice(-6).toUpperCase();
+    const time = new Date(o.updatedAt).toLocaleString("ru-RU", {
+      timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+    });
+    const reason = o.rejectionReason ? ` — ${o.rejectionReason.slice(0, 30)}…` : "";
+    text += `❌ <code>${shortId}</code> · ${o.amount} R$ · ${time}${reason}\n`;
     buttons.push([Markup.button.callback(`🔍 ${shortId}`, CB.orderView(o.id))]);
   }
 
