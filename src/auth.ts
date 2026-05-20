@@ -93,7 +93,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const vkId = credentials.vk_id as string;
         const name = credentials.name as string;
         const image = credentials.image as string;
-        const wbCode = (credentials.wb_code as string)?.trim().toUpperCase();
+        const rawWbCode = (credentials.wb_code as string)?.trim().toUpperCase() ?? "";
+        // Strip guide-mode prefix ("GD" + 7-char code = 9 chars total)
+        const wbCode = rawWbCode.startsWith("GD") && rawWbCode.length === 9
+          ? rawWbCode.slice(2)
+          : rawWbCode;
+        const isGuideMode = rawWbCode.startsWith("GD") && rawWbCode.length === 9;
 
         try {
           // Upsert user in DB
@@ -127,47 +132,45 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             }
           }
 
-          // Link WB code if passed in credentials
+          // Link WB code if passed in credentials (works for both regular and guide mode
+          // after the GD prefix has been stripped above)
+          let wbCodeRecord: any = null;
           if (wbCode && wbCode.length === 7) {
             try {
-              // Пытаемся привязать код к пользователю
-              await (prisma as any).wbCode.update({
-                where: { code: wbCode },
-                data: { userId: user.id, status: "CLAIMED", isUsed: false },
-              });
-              console.log(`[auth] Linked user ${user.id} to WbCode ${wbCode} via credentials`);
+              wbCodeRecord = await (prisma as any).wbCode.findUnique({ where: { code: wbCode } });
+              if (wbCodeRecord) {
+                await (prisma as any).wbCode.update({
+                  where: { code: wbCode },
+                  data: { userId: user.id, status: "CLAIMED", isUsed: false },
+                });
+                console.log(`[auth] Linked user ${user.id} to WbCode ${wbCode} via credentials (guideMode=${isGuideMode})`);
+              }
             } catch (linkErr) {
               console.error("[auth] Failed to link WbCode during authorize:", linkErr);
-              // Не прерываем вход, если привязка кода не удалась (например, код уже использован)
             }
           }
 
-          // Telegram notification — format depends on mode:
-          //  • login mode (no wb_code): brief "🔑 Вход" card
-          //  • order mode (wb_code present): full order card so admins know
-          //    a code was linked via the site (bot may still send its own card
-          //    when the gamepass URL arrives)
+          // Telegram notification
+          //  • order mode (wb_code present): brief "переходит в VK" card.
+          //    The VK bot sends the full order card once it processes the ref.
+          //  • login mode (no wb_code): brief sign-in card
           try {
             const tgToken   = process.env.TG_TOKEN;
             const tgChatIds = process.env.TG_CHAT_ID?.split(",").map((id) => id.trim()) ?? [];
             if (tgToken && tgChatIds.length > 0) {
               let msg: string;
               if (wbCode && wbCode.length === 7) {
-                // Order mode — full card
-                const passPrice = Math.ceil(
-                  // Look up denomination from DB; fall back to a rough estimate
-                  (() => { try { return (user as any).wbCodes?.[0]?.denomination ?? 0; } catch { return 0; } })() / 0.7
-                );
+                const denomination = wbCodeRecord?.denomination ?? 0;
+                const passPrice    = denomination > 0 ? Math.ceil(denomination / 0.7) : null;
                 msg =
-                  `📦 <b>КОД АКТИВИРОВАН (сайт)</b>\n` +
+                  `📥 <b>КОД АКТИВИРОВАН (сайт → VK)</b>\n` +
                   `━━━━━━━━━━━━━━━━\n` +
-                  `📱 Платформа: [WEB→VK]\n` +
-                  `👤 Юзер: ${name}\n` +
-                  `🆔 VK ID: <code>${vkId}</code>\n` +
+                  (isGuideMode ? `📖 Режим: <b>Инструкция</b>\n` : ``) +
+                  `👤 Юзер: ${name} (<a href="https://vk.com/id${vkId}">VK</a>)\n` +
                   `🔑 Код ВБ: <code>${wbCode}</code>\n` +
-                  `📊 Статус: ⏳ Ожидает ссылку на геймпасс`;
+                  (denomination > 0 ? `💎 Номинал: <b>${denomination} R$</b>${passPrice ? ` (Геймпасс: ${passPrice} R$)` : ""}\n` : ``) +
+                  `📊 Статус: ⌛ Переходит в VK бот...`;
               } else {
-                // Login mode — brief card
                 const isNew = user.createdAt.getTime() === user.updatedAt.getTime();
                 msg =
                   `${isNew ? "🆕 <b>Новый пользователь</b>" : "🔑 <b>Вход</b>"}\n` +

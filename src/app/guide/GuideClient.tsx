@@ -17,7 +17,6 @@ import VKAuthButton from "@/components/auth/VKAuthButton";
 // (three.js was dropped in favour of CSS gradients), so dynamic chunk
 // splitting just adds round-trips and deploy fragility for zero kB win.
 import AnimatedShaderBackground from "@/components/ui/animated-shader-background";
-import InstructionRevealCurtain from "@/components/ui/instruction-reveal-curtain";
 import ScrollFeatureTeaser from "@/components/ui/scroll-feature-teaser";
 import { ConnectivityAssistant } from "@/components/connectivity-assistant";
 import { getOrInitSessionId, loadWBSession, saveWBSession, clearWBSession } from "@/lib/wb-session";
@@ -1728,11 +1727,7 @@ function WBStaticHeader({ denomination, onReset }: { denomination?: number; onRe
 
 // ─── WB Gate Screen ────────────────────────────────────────────────────────────
 
-interface WBGateProps {
-  onSuccess: (denomination: number, code: string) => void;
-}
-
-function WBGate({ onSuccess }: WBGateProps) {
+function WBGate() {
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2209,7 +2204,7 @@ function FormulaCalculator({
 
 // ─── Instruction page ──────────────────────────────────────────────────────────
 
-function Instruction({ isWB, denomination, code, onReset, freshFromGate = false }: { isWB: boolean; denomination?: number; code?: string; onReset?: () => void; freshFromGate?: boolean }) {
+function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; denomination?: number; code?: string; onReset?: () => void }) {
   const [passPrice, setPassPrice] = useState<number | null>(
     denomination && denomination > 0 ? Math.ceil(denomination / 0.7) : null
   );
@@ -2336,29 +2331,15 @@ function Instruction({ isWB, denomination, code, onReset, freshFromGate = false 
           <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">ПОШАГОВАЯ ИНСТРУКЦИЯ</div>
           <PlatformSwitcher platform={platform} onChange={setPlatform} />
         </div>
-        {isWB && freshFromGate ? (
-          <InstructionRevealCurtain active giantText="ИНСТРУКЦИЯ">
-            <StepsGrid
-              denomination={denomination}
-              isWB={isWB}
-              passPrice={passPrice}
-              onCopyPassPrice={handleCopyPassPrice}
-              priceCopied={priceCopied}
-              onPassPriceChange={(p) => { setPassPrice(p); setPriceCopied(false); }}
-              platform={platform}
-            />
-          </InstructionRevealCurtain>
-        ) : (
-          <StepsGrid
-            denomination={denomination}
-            isWB={isWB}
-            passPrice={passPrice}
-            onCopyPassPrice={handleCopyPassPrice}
-            priceCopied={priceCopied}
-            onPassPriceChange={setPassPrice}
-            platform={platform}
-          />
-        )}
+        <StepsGrid
+          denomination={denomination}
+          isWB={isWB}
+          passPrice={passPrice}
+          onCopyPassPrice={handleCopyPassPrice}
+          priceCopied={priceCopied}
+          onPassPriceChange={setPassPrice}
+          platform={platform}
+        />
         {isWB ? <WBManagerBlock denomination={denomination} code={code} /> : <StandardDoneBlock />}
 
         {/* Support at the bottom for WB users */}
@@ -2574,7 +2555,6 @@ export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl }: {
   );
   const [denomination, setDenomination] = useState<number>(0);
   const [activeCode, setActiveCode] = useState<string>("");
-  const [freshFromGate, setFreshFromGate] = useState(false);
   const [isRestoring, setIsRestoring] = useState(true);
 
   useEffect(() => {
@@ -2642,17 +2622,7 @@ export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl }: {
 
   if (phase === "gate") {
     return (
-      <WBGate
-        onSuccess={(d, c) => {
-          saveWBSession(d, c);
-          // Устанавливаем куку сразу, чтобы она была доступна при любой авторизации
-          document.cookie = `wb_code=${c}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
-          setDenomination(d);
-          setActiveCode(c);
-          setFreshFromGate(true);
-          setPhase("instruction");
-        }}
-      />
+      <WBGate />
     );
   }
 
@@ -2662,7 +2632,6 @@ export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl }: {
       denomination={denomination}
       code={activeCode}
       onReset={isWB ? handleWBReset : undefined}
-      freshFromGate={freshFromGate}
     />
   );
 }
