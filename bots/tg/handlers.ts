@@ -1431,10 +1431,19 @@ export function registerCallbacks(bot: Telegraf): void {
       const user = await (db as any).user.findUnique({ where: { id: userId } });
       const bonusMsg =
         `🎁 <b>+100 R$ зачислено на счёт!</b>\n` +
-        `Спасибо за отзыв — бонус доступен при следующей покупке 💛`;
+        `Спасибо за отзыв — бонус применится автоматически при следующей активации кода 💛\n\n` +
+        `Есть ещё карточка WB? Активируй прямо в боте.\n` +
+        `Хочешь заказать без карты — пиши нам напрямую.`;
 
       if (user?.tgId) {
-        try { await bot.telegram.sendMessage(user.tgId, bonusMsg, { parse_mode: "HTML" }); } catch { }
+        try {
+          await bot.telegram.sendMessage(user.tgId, bonusMsg, {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([
+              [Markup.button.url("💬 Заказать напрямую", SUPPORT_URL)],
+            ]),
+          });
+        } catch { }
       } else if (user?.vkId) {
         await vkSend(user.vkId, stripHtml(bonusMsg));
       }
@@ -1535,6 +1544,17 @@ export function registerCallbacks(bot: Telegraf): void {
     // handled by routeAdminCallback() above (hub system).
 
 
+    // ── 📸 review_hint: prompt user to send review screenshot ────────────
+    if (data === CB.reviewHint) {
+      await ctx.reply(
+        "📸 Сделай скриншот своего отзыва на Wildberries и отправь его сюда фотографией (не файлом, не документом).\n\n" +
+        "После проверки бонус <b>+100 R$</b> придёт автоматически.",
+        { parse_mode: "HTML" }
+      );
+      await ctx.answerCbQuery();
+      return;
+    }
+
     // ── 🔄 refresh_status: user refresh ──────────────────────────────────
     if (data === CB.refreshStatus) {
       const { text, keyboard } = await buildStatusMessage(adminId);
@@ -1599,7 +1619,15 @@ async function notifyUserCompleted(
 
   if (user.tgId) {
     try {
-      await bot.telegram.sendMessage(user.tgId, tgMsg, { parse_mode: "HTML" });
+      const keyboard = completedCount === 1
+        ? Markup.inlineKeyboard([
+            [Markup.button.callback("📸 Оставить отзыв за +100 R$", CB.reviewHint)],
+            [Markup.button.url("💬 Написать менеджеру", SUPPORT_URL)],
+          ])
+        : Markup.inlineKeyboard([
+            [Markup.button.url("💬 Заказать напрямую", SUPPORT_URL)],
+          ]);
+      await bot.telegram.sendMessage(user.tgId, tgMsg, { parse_mode: "HTML", ...keyboard });
       if (completedCount === 1) pendingReview.set(parseInt(user.tgId), orderId);
     } catch { }
   } else if (user.vkId) {

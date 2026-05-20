@@ -116,6 +116,7 @@ export const CB = {
 
   // User actions
   refreshStatus: "refresh_status",
+  reviewHint:    "review_hint",
 } as const;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
