@@ -9,6 +9,61 @@
 
 import { tgSend, tgSendPhoto } from "./notify";
 
+// ── Support alert ─────────────────────────────────────────────────────────────
+
+const SUPPORT_CONTEXT_LABELS: Record<string, string> = {
+  code_not_found: "Код не найден",
+  code_mine:      "Код уже активирован (повторный вход)",
+  code_claimed:   "Код активирован другим пользователем",
+  pass_format:    "Не распознан формат геймпасса",
+  pass_not_found: "Геймпасс не найден на Roblox",
+  pass_private:   "Геймпасс в закрытой игре",
+  pass_inactive:  "Геймпасс не выставлен на продажу",
+  pass_price:     "Неверная цена геймпасса",
+  roblox_down:    "Серверы Roblox недоступны",
+  order_dupe:     "Дублирующийся заказ",
+  order_lost:     "Заказ не найден",
+  rejected:       "Заказ отклонён",
+  resubmit:       "Исправление ссылки",
+  review_rej:     "Отзыв отклонён",
+  pending_long:   "Заказ долго в обработке",
+  general:        "Общий вопрос",
+};
+
+export interface SupportAlertPayload {
+  platform:     "TG" | "VK";
+  userDisplay:  string;
+  tgId?:        string;
+  contextKey:   string;
+  wbCode?:      string;
+  denomination?: number;
+}
+
+export async function sendAdminSupportAlert(p: SupportAlertPayload): Promise<void> {
+  const label   = SUPPORT_CONTEXT_LABELS[p.contextKey] ?? p.contextKey;
+  const codeLine = p.wbCode
+    ? `🔑 Код: <code>${p.wbCode}</code>${p.denomination ? ` · ${p.denomination} R$` : ""}\n`
+    : "";
+  const linkLine = p.platform === "TG" && p.tgId
+    ? `\n<a href="tg://user?id=${p.tgId}">💬 Написать пользователю</a>`
+    : "";
+  const now = new Date().toLocaleString("ru-RU", {
+    timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit",
+  });
+
+  const text =
+    `🆘 <b>ОБРАЩЕНИЕ В ПОДДЕРЖКУ</b>\n` +
+    `━━━━━━━━━━━━━━━━\n` +
+    `${p.platform === "TG" ? "📱" : "📘"} Платформа: <b>${p.platform}</b>\n` +
+    `👤 Юзер: ${p.userDisplay}\n` +
+    codeLine +
+    `📍 Причина: <b>${label}</b>\n` +
+    `⏰ ${now} МСК` +
+    linkLine;
+
+  await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text)));
+}
+
 /** Comma-separated list of Telegram admin chat IDs from env. */
 export const ADMIN_IDS: string[] = (
   process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? ""

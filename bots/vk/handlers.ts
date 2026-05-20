@@ -11,7 +11,7 @@
 
 import type { MessageContext } from "vk-io";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
-import { sendAdminOrderCard, sendAdminReviewCard, ADMIN_IDS } from "../shared/admin";
+import { sendAdminOrderCard, sendAdminReviewCard, sendAdminSupportAlert, ADMIN_IDS } from "../shared/admin";
 import { vkGetName, tgSend } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
@@ -106,6 +106,13 @@ async function isVkSubscribed(ctx: MessageContext, vkUserId: number): Promise<bo
   }
 }
 
+/** Inline keyboard with a single "Нужна помощь?" button that sends a support alert. */
+function vkSupportKb(ctxKey: string) {
+  return Keyboard.builder()
+    .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: ctxKey }, color: "secondary" })
+    .inline();
+}
+
 /** Sends the subscription prompt and inline buttons. */
 async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null): Promise<void> {
   const groupId  = process.env.VK_GROUP_ID;
@@ -149,6 +156,24 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
 
   if (ref) {
     await handleRefActivation(ctx, vkUserId, ref.trim().toUpperCase());
+    return;
+  }
+
+  // ── 🆘 Support button payload ────────────────────────────────────────────
+  if (msgPayload?.command === "support") {
+    const ctxKey    = String(msgPayload.context ?? "general");
+    const firstName = await vkGetName(vkUserId);
+    const state     = getState(vkUserId);
+    const wbCode    = state?.type === "AWAITING_LINK" ? state.wbCode        : undefined;
+    const denom     = state?.type === "AWAITING_LINK" ? state.denomination  : undefined;
+    await sendAdminSupportAlert({
+      platform:    "VK",
+      userDisplay: `vk.com/id${vkUserId} (${firstName})`,
+      contextKey:  ctxKey,
+      wbCode,
+      denomination: denom,
+    });
+    await ctx.reply("Соединяем с менеджером — напишите нам: https://t.me/RobloxBank_PA\n\nМы уже знаем о вашей ситуации 👍");
     return;
   }
 
@@ -455,14 +480,15 @@ async function handleGamepassLink(
   const passId = extractPassId(input);
 
   if (!passId) {
-    await ctx.reply(
-      "⚠️ Не удалось распознать геймпасс.\n\n" +
-      "Пришли одно из:\n" +
-      "• Ссылку: https://www.roblox.com/game-pass/1234567/...\n" +
-      "• Ссылку из конструктора: https://create.roblox.com/...\n" +
-      "• Просто ID (только цифры): 1234567\n\n" +
-      "Если не получается — напишите нам: https://t.me/RobloxBank_PA"
-    );
+    await ctx.reply({
+      message:
+        "⚠️ Не удалось распознать геймпасс.\n\n" +
+        "Пришли одно из:\n" +
+        "• Ссылку: https://www.roblox.com/game-pass/1234567/...\n" +
+        "• Ссылку из конструктора: https://create.roblox.com/...\n" +
+        "• Просто ID (только цифры): 1234567",
+      keyboard: vkSupportKb("pass_format"),
+    });
     return;
   }
 
@@ -488,35 +514,38 @@ async function handleGamepassLink(
   if (!gamepassInfo.validationSkipped) {
     // Normal validation — only runs when Roblox API was reachable
     if (gamepassInfo.isGamePrivate) {
-      await ctx.reply(
-        `❌ Геймпасс находится в закрытой или недоступной игре.\n\n` +
-        `Создай новый геймпасс в публичной игре:\n` +
-        `• Creator Dashboard → Creations → Passes → Create\n` +
-        `• Выбери публичную игру\n` +
-        `• Установи цену ${expectedPrice} R$\n\n` +
-        `Затем пришли ссылку на новый геймпасс.\n\n` +
-        `Если нужна помощь — https://t.me/RobloxBank_PA`
-      );
+      await ctx.reply({
+        message:
+          `❌ Геймпасс находится в закрытой или недоступной игре.\n\n` +
+          `Создай новый геймпасс в публичной игре:\n` +
+          `• Creator Dashboard → Creations → Passes → Create\n` +
+          `• Выбери публичную игру\n` +
+          `• Установи цену ${expectedPrice} R$\n\n` +
+          `Затем пришли ссылку на новый геймпасс.`,
+        keyboard: vkSupportKb("pass_private"),
+      });
       return;
     }
 
     if (!gamepassInfo.isActive) {
-      await ctx.reply(
-        `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
-        `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.\n\n` +
-        `Если нужна помощь — https://t.me/RobloxBank_PA`
-      );
+      await ctx.reply({
+        message:
+          `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
+          `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.`,
+        keyboard: vkSupportKb("pass_inactive"),
+      });
       return;
     }
 
     if (Math.abs(gamepassInfo.price - expectedPrice) > 2) {
-      await ctx.reply(
-        `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
-        `Установлено: ${gamepassInfo.price} R$\n` +
-        `Ожидается:   ${expectedPrice} R$\n\n` +
-        `Измени цену геймпасса в настройках Roblox и пришли ссылку снова.\n\n` +
-        `Если нужна помощь — https://t.me/RobloxBank_PA`
-      );
+      await ctx.reply({
+        message:
+          `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
+          `Установлено: ${gamepassInfo.price} R$\n` +
+          `Ожидается:   ${expectedPrice} R$\n\n` +
+          `Измени цену геймпасса в настройках Roblox и пришли ссылку снова.`,
+        keyboard: vkSupportKb("pass_price"),
+      });
       return;
     }
 

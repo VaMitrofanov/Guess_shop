@@ -10,7 +10,7 @@ import { Telegraf, Markup } from "telegraf";
 import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, stripHtml, tgSend } from "../shared/notify";
-import { sendAdminOrderCard, sendAdminReviewCard, CB, ADMIN_IDS } from "../shared/admin";
+import { sendAdminOrderCard, sendAdminReviewCard, sendAdminSupportAlert, CB, ADMIN_IDS } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, type LinkFailState } from "./session";
 import { getGamepassDetails } from "../shared/roblox";
 import { buildAdminKeyboard, updateMainMenu, routeAdminCallback } from "./admin";
@@ -18,16 +18,14 @@ import { renderExtendedCard } from "./admin/hub-orders";
 
 // ── Support contact (Progressive Disclosure) ────────────────────────────────
 
-const SUPPORT_URL = "https://t.me/RobloxBank_PA";
-
-/** Inline URL button linking to support. Label is kept neutral to avoid spam. */
-function supportBtn(label = "💬 Написать в поддержку") {
-  return Markup.button.url(label, SUPPORT_URL);
+/** Inline callback button that triggers support notification + shows contact URL. */
+function supportBtn(label = "💬 Написать в поддержку", ctxKey = "general") {
+  return Markup.button.callback(label, `sup:${ctxKey}`);
 }
 
 /** Returns an inlineKeyboard with a single support button row. */
-function withSupportKb(label?: string): ReturnType<typeof Markup.inlineKeyboard> {
-  return Markup.inlineKeyboard([[supportBtn(label)]]);
+function withSupportKb(label?: string, ctxKey = "general"): ReturnType<typeof Markup.inlineKeyboard> {
+  return Markup.inlineKeyboard([[supportBtn(label, ctxKey)]]);
 }
 
 /** Get or init the fail-counter object for a user's current session. */
@@ -193,7 +191,7 @@ export function registerStart(bot: Telegraf): void {
     if (!wbCode) {
       await ctx.reply(
         "❌ Код не найден. Проверь правильность ввода.\n\nЕсли уверен, что код верный — напиши нам: @RobloxBank_PA",
-        { parse_mode: "HTML", ...withSupportKb() }
+        { parse_mode: "HTML", ...withSupportKb(undefined, "code_not_found") }
       );
       return;
     }
@@ -202,7 +200,7 @@ export function registerStart(bot: Telegraf): void {
     // isUsed=true with userId=null means the website reserved it but the bot flow
     // never finished — allow those through so users aren't silently stuck.
     if (wbCode.isUsed && wbCode.userId) {
-      await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?") });
+      await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?", "code_mine") });
       return;
     }
 
@@ -227,7 +225,7 @@ export function registerStart(bot: Telegraf): void {
 
     // If code is CLAIMED by a different user, block
     if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
-      await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.", { parse_mode: "HTML", ...withSupportKb("💬 Оспорить — написать нам") });
+      await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.", { parse_mode: "HTML", ...withSupportKb("💬 Оспорить — написать нам", "code_claimed") });
       return;
     }
 
@@ -490,18 +488,18 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     keyboard = Markup.inlineKeyboard([
       [Markup.button.callback("🔄 Исправить ссылку", `user_resubmit:${order.wbCode}:${order.amount}`)],
       refreshRow,
-      [supportBtn("Нужна помощь?")],
+      [supportBtn("Нужна помощь?", "rejected")],
     ]);
   } else if (order.status === "AWAITING_GAMEPASS") {
     keyboard = Markup.inlineKeyboard([
       [Markup.button.url("📖 Инструкция по созданию геймпасса", `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}`)],
       refreshRow,
-      [supportBtn("💬 Нужна помощь?")],
+      [supportBtn("💬 Нужна помощь?", "general")],
     ]);
   } else if (order.status === "COMPLETED") {
-    keyboard = Markup.inlineKeyboard([refreshRow, [supportBtn("💬 Заказать ещё")]]);
+    keyboard = Markup.inlineKeyboard([refreshRow, [supportBtn("💬 Заказать ещё", "general")]]);
   } else if (pendingOver60) {
-    keyboard = Markup.inlineKeyboard([refreshRow, [supportBtn("Нужна помощь?")]]);
+    keyboard = Markup.inlineKeyboard([refreshRow, [supportBtn("Нужна помощь?", "pending_long")]]);
   } else {
     keyboard = Markup.inlineKeyboard([refreshRow]);
   }
@@ -689,7 +687,7 @@ export function registerText(bot: Telegraf): void {
         "• Ссылку из конструктора: <code>https://create.roblox.com/...</code>\n" +
         "• Просто ID (только цифры): <code>1234567</code>";
       if (fc.formatError >= 2) {
-        await ctx.reply(formatHint, { parse_mode: "HTML", ...withSupportKb() });
+        await ctx.reply(formatHint, { parse_mode: "HTML", ...withSupportKb(undefined, "pass_format") });
       } else {
         await ctx.reply(formatHint, { parse_mode: "HTML" });
       }
@@ -734,7 +732,7 @@ export function registerText(bot: Telegraf): void {
         "• Ссылка ведёт именно на Game Pass, а не на саму игру\n" +
         "• Ты скопировал ссылку прямо из браузера Roblox\n\n" +
         "Если геймпасс точно существует — мы поможем разобраться:",
-        { parse_mode: "HTML", ...withSupportKb("💬 Написать нам") }
+        { parse_mode: "HTML", ...withSupportKb("💬 Написать нам", "pass_not_found") }
       );
       return;
     }
@@ -782,7 +780,7 @@ export function registerText(bot: Telegraf): void {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([[
             Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`),
-            ...(fc.notActive >= 2 ? [supportBtn("Нужна помощь?")] : []),
+            ...(fc.notActive >= 2 ? [supportBtn("Нужна помощь?", "pass_inactive")] : []),
           ]]),
         });
         return;
@@ -801,7 +799,7 @@ export function registerText(bot: Telegraf): void {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([[
             Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`),
-            ...(fc.priceMismatch >= 2 ? [supportBtn("Нужна помощь с ценой?")] : []),
+            ...(fc.priceMismatch >= 2 ? [supportBtn("Нужна помощь с ценой?", "pass_price")] : []),
           ]]),
         });
         return;
@@ -824,7 +822,7 @@ export function registerText(bot: Telegraf): void {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
             [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
-            [supportBtn("💬 Вопросы по заявке?")],
+            [supportBtn("💬 Вопросы по заявке?", "roblox_down")],
           ]),
         }
       );
@@ -955,7 +953,7 @@ export function registerText(bot: Telegraf): void {
           "⚠️ Заказ по этому коду уже создан и сейчас обрабатывается.",
           Markup.inlineKeyboard([
             [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
-            [supportBtn("💬 Если что-то не так")],
+            [supportBtn("💬 Если что-то не так", "order_dupe")],
           ])
         );
         return;
@@ -1150,7 +1148,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   // (isUsed=true + userId set). CLAIMED+isUsed=false is a provisional state
   // (bot claimed it but gamepass not sent yet), which should still be allowed through.
   if (wbCode.isUsed && wbCode.userId) {
-    await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?") });
+    await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?", "code_mine") });
     return;
   }
 
@@ -1167,7 +1165,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
 
   // If code is CLAIMED by a different user, block
   if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
-    await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.", { parse_mode: "HTML", ...withSupportKb("💬 Оспорить — написать нам") });
+    await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.", { parse_mode: "HTML", ...withSupportKb("💬 Оспорить — написать нам", "code_claimed") });
     return;
   }
 
@@ -1399,6 +1397,44 @@ export function registerCallbacks(bot: Telegraf): void {
     const adminId = String(ctx.from.id);
     const adminTag = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "Админ";
 
+    // ── 🆘 sup: — user tapped a support button ────────────────────────────
+    if (data.startsWith("sup:")) {
+      const ctxKey     = data.slice(4);
+      const tgId       = String(ctx.from.id);
+      const userDisplay = ctx.from.username
+        ? `@${ctx.from.username}`
+        : ctx.from.first_name ?? `tg:${tgId}`;
+
+      const pendingState = pendingLink.get(ctx.from.id);
+      let wbCode    = pendingState?.wbCode;
+      let denom     = pendingState?.denomination;
+
+      if (!wbCode) {
+        try {
+          const u = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+          if (u) {
+            const o = await (db as any).wbOrder.findFirst({
+              where: { userId: u.id },
+              orderBy: { updatedAt: "desc" },
+              select: { wbCode: true, amount: true },
+            });
+            if (o) { wbCode = o.wbCode; denom = o.amount; }
+          }
+        } catch {}
+      }
+
+      await sendAdminSupportAlert({
+        platform: "TG", userDisplay, tgId, contextKey: ctxKey,
+        wbCode, denomination: denom,
+      });
+      await ctx.answerCbQuery("Менеджер уже в курсе 👍");
+      await ctx.reply(
+        "Соединяем с менеджером — напишите @RobloxBank_PA\n\nМы уже знаем о вашей ситуации 👍",
+        { parse_mode: "HTML" }
+      );
+      return;
+    }
+
     // ── Route to admin hub handlers first ─────────────────────────────────
     const hubHandled = await routeAdminCallback(bot, ctx, data, adminId);
     if (hubHandled) return;
@@ -1573,7 +1609,7 @@ export function registerCallbacks(bot: Telegraf): void {
         `<code>https://www.roblox.com/game-pass/1234567/...</code>\n\n` +
         `💡 <i>Пример Asset ID:</i>\n` +
         `<code>1234567</code>`,
-        { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?") }
+        { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "resubmit") }
       );
       await ctx.answerCbQuery();
       return;
@@ -1842,7 +1878,7 @@ async function notifyUserRejected(
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
           [Markup.button.callback("🔄 Исправить ссылку", `user_resubmit:${wbCode}:${amount}`)],
-          [supportBtn("💬 Нужна помощь?")],
+          [supportBtn("💬 Нужна помощь?", "rejected")],
         ])
       });
     } catch { }
@@ -1878,7 +1914,7 @@ async function notifyReviewRejected(
     try {
       await bot.telegram.sendMessage(user.tgId, tgMsg, {
         parse_mode: "HTML",
-        ...Markup.inlineKeyboard([[supportBtn("💬 Нужна помощь?")]]),
+        ...Markup.inlineKeyboard([[supportBtn("💬 Нужна помощь?", "review_rej")]]),
       });
       // Restore review state so the next photo from this user is processed
       pendingReview.set(parseInt(user.tgId), orderId);
