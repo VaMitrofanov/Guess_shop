@@ -191,6 +191,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             image: user.image,
             role: user.role,
             wb_code: wbCode && wbCode.length === 7 ? wbCode : null,
+            is_guide_mode: isGuideMode,
           };
         } catch (dbErr) {
           console.error("[auth][vk-id] FATAL — authorize() threw:", {
@@ -213,6 +214,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.vkId = (user as any).vkId;
         token.balance = (user as any).balance;
         token.wb_code = (user as any).wb_code ?? null;
+        token.is_guide_mode = (user as any).is_guide_mode ?? false;
       }
       return token;
     },
@@ -223,6 +225,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         (session.user as any).vkId = token.vkId;
         (session.user as any).balance = token.balance;
         (session.user as any).wb_code = token.wb_code ?? null;
+        (session.user as any).is_guide_mode = token.is_guide_mode ?? false;
       }
       return session;
     },

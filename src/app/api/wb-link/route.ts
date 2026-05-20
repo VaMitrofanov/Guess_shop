@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
 
   // wb_code comes from the JWT session (saved during authorize in auth.ts)
   const wbCode = ((session.user as any).wb_code as string | null)?.trim().toUpperCase();
+  const isGuideMode = (session.user as any).is_guide_mode === true;
 
   if (wbCode && wbCode.length === 7) {
     try {
@@ -45,8 +46,10 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const targetUrl = wbCode
-    ? `https://vk.me/bankroblox?ref=${wbCode}`
+  // In guide mode, pass the GD prefix so the VK bot sends the guide welcome message.
+  const refCode = wbCode ? (isGuideMode ? `GD${wbCode}` : wbCode) : null;
+  const targetUrl = refCode
+    ? `https://vk.me/bankroblox?ref=${refCode}`
     : "https://vk.me/bankroblox";
 
   return NextResponse.redirect(new URL(targetUrl));

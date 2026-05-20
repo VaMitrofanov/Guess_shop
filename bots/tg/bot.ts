@@ -88,9 +88,16 @@ if (disablePolling) {
   // Set Menu Button (left of input) for each admin — opens TWA dashboard directly
   setupMenuButton(bot).catch((err: Error) => console.error("[TG] setChatMenuButton failed:", err));
   console.log("[TG] Bot started ✅ (polling)");
-  console.log(
-    `[TG] Admin IDs: ${process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "(none)"}`
-  );
+  const adminIds = process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "";
+  if (!adminIds.trim()) {
+    console.error(
+      "[TG] *** SECURITY: ADMIN_IDS (and TG_CHAT_ID) are not set. " +
+      "Any Telegram user can trigger admin callbacks on order cards. " +
+      "Set ADMIN_IDS in Coolify env vars immediately. ***"
+    );
+  } else {
+    console.log(`[TG] Admin IDs: ${adminIds}`);
+  }
 }
 
 process.once("SIGINT",  () => { console.log("[TG] Stopping…"); bot.stop("SIGINT");  });

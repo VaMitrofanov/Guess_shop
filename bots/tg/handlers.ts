@@ -726,9 +726,14 @@ export function registerText(bot: Telegraf): void {
     }
 
     // ── Roblox API validation ─────────────────────────────────────────────
+    // Show a "checking" message — validation can take 10–30 s via bridge/retries.
+    await ctx.sendChatAction("typing");
+    const checkingMsg = await ctx.reply("⏳ Проверяем геймпасс…");
     let validatedCreator: string | null = null;
     let validatedPrice: number | null = null;
     const gamepassInfo = await getGamepassDetails(passId);
+    // Delete the placeholder before sending the actual result.
+    try { await bot.telegram.deleteMessage(ctx.chat!.id, checkingMsg.message_id); } catch {}
 
     if (!gamepassInfo) {
       // Roblox returned HTTP responses but no usable data → gamepass doesn't exist.
@@ -765,12 +770,13 @@ export function registerText(bot: Telegraf): void {
       if (gamepassInfo.isGamePrivate) {
         await notifyAdminValidationFail("Игра закрыта (private)");
         await ctx.reply(
-          `❌ Геймпасс находится в <b>закрытой или недоступной игре</b>.\n\n` +
-          `Создай новый геймпасс в публичной игре:\n` +
-          `• Creator Dashboard → Creations → Passes → Create\n` +
-          `• Выбери публичную игру\n` +
-          `• Установи цену <b>${expectedPrice} R$</b>\n\n` +
-          `Затем пришли ссылку на новый геймпасс.`,
+          `❌ Геймпасс в <b>закрытой или удалённой игре</b> — выкупить невозможно.\n\n` +
+          `<b>Вариант 1</b> — открой игру:\n` +
+          `• Creator Hub → выбери игру → Settings → Playability → <b>Public</b>\n\n` +
+          `<b>Вариант 2</b> — создай геймпасс в другой публичной игре:\n` +
+          `• Creator Hub → Creations → Passes → Create\n` +
+          `• Установи цену <b>${expectedPrice} R$</b>, включи «On Sale»\n\n` +
+          `После этого пришли новую ссылку.`,
           { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "pass_private") }
         );
         return;
@@ -1510,6 +1516,7 @@ export function registerCallbacks(bot: Telegraf): void {
             [Markup.button.callback("🔕 Не на продаже",    CB.orderRejectReason(orderId, "notsale"))],
             [Markup.button.callback("💰 Неверная цена",    CB.orderRejectReason(orderId, "price"))],
             [Markup.button.callback("🔗 Ссылка не та",     CB.orderRejectReason(orderId, "badlink"))],
+            [Markup.button.callback("🔒 Закрытая игра",    CB.orderRejectReason(orderId, "privgame"))],
             [Markup.button.callback("✏️ Написать причину", CB.orderRejectCustom(orderId))],
             [Markup.button.callback("🚫 Без причины",      `admin_reject_none:${orderId}`)],
           ])
@@ -1526,9 +1533,10 @@ export function registerCallbacks(bot: Telegraf): void {
       const orderId = parts[1];
       const key     = parts[2];
       const reasonMap: Record<string, string> = {
-        notsale: "Геймпасс не выставлен на продажу",
-        price:   "Неверная цена геймпасса",
-        badlink: "Неверная ссылка на геймпасс",
+        notsale:  "Геймпасс не выставлен на продажу",
+        price:    "Неверная цена геймпасса",
+        badlink:  "Неверная ссылка на геймпасс",
+        privgame: "Игра закрытая (private) — открой её в Creator Hub → игра → Settings → Playability → Public, или создай геймпасс в другой публичной игре",
       };
       const reason = reasonMap[key] ?? key;
       pendingRejectionReason.delete(ctx.from.id);
@@ -1622,15 +1630,33 @@ export function registerCallbacks(bot: Telegraf): void {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const [, orderId, userId] = data.split(":");
 
-      // Award +100 R$ and mark bonus as claimed
-      await (db as any).user.update({
-        where: { id: userId },
-        data: { balance: { increment: 100 } },
+      // Resolve which specific WB code to mark — prevents marking ALL codes for this user.
+      const reviewOrder = await (db as any).wbOrder.findUnique({ where: { id: orderId } });
+      if (!reviewOrder) {
+        await ctx.answerCbQuery("Заказ не найден");
+        return;
+      }
+
+      // Atomic idempotency guard: mark this specific code + increment balance in one transaction.
+      // If reviewBonusClaimed is already true (double-click or concurrent admin), count=0 → skip.
+      let paid = false;
+      await (db as any).$transaction(async (tx: any) => {
+        const result = await tx.wbCode.updateMany({
+          where: { code: reviewOrder.wbCode, reviewBonusClaimed: false },
+          data: { reviewBonusClaimed: true },
+        });
+        if (result.count === 0) return;
+        await tx.user.update({
+          where: { id: userId },
+          data: { balance: { increment: 100 } },
+        });
+        paid = true;
       });
-      await (db as any).wbCode.updateMany({
-        where: { userId, reviewBonusClaimed: false },
-        data: { reviewBonusClaimed: true },
-      });
+
+      if (!paid) {
+        await ctx.answerCbQuery("✅ Бонус уже начислен ранее");
+        return;
+      }
 
       const user = await (db as any).user.findUnique({ where: { id: userId } });
       const bonusMsg =
@@ -1866,13 +1892,22 @@ async function notifyUserRejected(
     ? `💬 Причина: <i>${reason}</i>\n\n`
     : "";
 
+  const isPrivateGame = reason.toLowerCase().includes("закрыт");
+  const fixInstructions = isPrivateGame
+    ? `Как исправить:\n` +
+      `1. Открой игру в Roblox: Creator Hub → выбери игру → Settings → Playability → <b>Public</b>\n` +
+      `   — ИЛИ создай геймпасс в другой публичной игре\n` +
+      `2. Установи цену геймпасса: <b>${Math.ceil(amount / 0.7)} R$</b>\n` +
+      `3. Нажми кнопку ниже и пришли новую ссылку:`
+    : `Чаще всего причина в одном из двух:\n` +
+      `• Цена геймпасса неверная — нужно ${Math.ceil(amount / 0.7)} R$\n` +
+      `• Геймпасс не выставлен на продажу\n\n` +
+      `Исправь и нажми кнопку ниже, чтобы отправить ссылку заново:`;
+
   const msg =
     `❌ <b>Заявка #${shortId} отклонена</b>\n\n` +
     reasonLine +
-    `Чаще всего причина в одном из двух:\n` +
-    `• Цена геймпасса неверная — нужно ${Math.ceil(amount / 0.7)} R$\n` +
-    `• Геймпасс не выставлен на продажу\n\n` +
-    `Исправь и нажми кнопку ниже, чтобы отправить ссылку заново:`;
+    fixInstructions;
 
   if (user.tgId) {
     try {

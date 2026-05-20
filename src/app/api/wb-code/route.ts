@@ -36,8 +36,13 @@ export async function POST(request: Request) {
         throw { status: 404, message: "Код не найден. Проверьте правильность ввода." };
       }
 
-      if (wbCode.status === "CLAIMED" || (wbCode.isUsed && wbCode.userId)) {
+      if (wbCode.isUsed && wbCode.userId) {
         throw { status: 409, message: "Этот код уже был активирован ранее." };
+      }
+      // Provisional state: bot claimed the code but user hasn't submitted the gamepass yet.
+      // Direct them to the bot instead of showing a generic error.
+      if (wbCode.status === "CLAIMED" && !wbCode.isUsed) {
+        throw { status: 409, message: "Код уже активирован — продолжай в боте (Telegram или ВКонтакте). Если потерял сессию — напиши код напрямую в бот.", code: "BOT_CLAIMED" };
       }
 
       const reserveTime = new Date(now.getTime() + 60 * 60 * 1000); // +60 mins

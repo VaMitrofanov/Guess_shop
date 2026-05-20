@@ -45,10 +45,15 @@ async function tryRestoreState(vkUserId: number): Promise<boolean> {
     if (!user) return false;
 
     // Look for AWAITING_GAMEPASS or REJECTED orders — mirrors TG DB recovery.
-    // (The old isUsed:true + no-order query was dead code: isUsed is only set true
-    //  atomically alongside order creation, so that combination never exists.)
+    // Limit to 30 days to avoid restoring stale orders from months ago where
+    // the gamepass no longer exists.
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const recoverable = await (db as any).wbOrder.findFirst({
-      where:   { userId: user.id, status: { in: ["AWAITING_GAMEPASS", "REJECTED"] } },
+      where:   {
+        userId: user.id,
+        status: { in: ["AWAITING_GAMEPASS", "REJECTED"] },
+        updatedAt: { gte: thirtyDaysAgo },
+      },
       orderBy: { updatedAt: "desc" },
     });
     if (!recoverable) return false;
@@ -520,6 +525,8 @@ async function handleGamepassLink(
   }
 
   // ── Roblox API validation ─────────────────────────────────────────────
+  // Warn the user — validation can take 10–30 s via bridge/retries.
+  await ctx.reply("⏳ Проверяем геймпасс…");
   const expectedPrice = Math.ceil(denomination / 0.7);
   const gamepassInfo  = await getGamepassDetails(passId);
 
@@ -543,12 +550,14 @@ async function handleGamepassLink(
     if (gamepassInfo.isGamePrivate) {
       await ctx.reply({
         message:
-          `❌ Геймпасс находится в закрытой или недоступной игре.\n\n` +
-          `Создай новый геймпасс в публичной игре:\n` +
-          `• Creator Dashboard → Creations → Passes → Create\n` +
-          `• Выбери публичную игру\n` +
-          `• Установи цену ${expectedPrice} R$\n\n` +
-          `Затем пришли ссылку на новый геймпасс.`,
+          `❌ Геймпасс в закрытой или удалённой игре — выкупить невозможно.\n\n` +
+          `Как исправить:\n` +
+          `Вариант 1 — открой игру:\n` +
+          `Creator Hub → выбери игру → Settings → Playability → Public\n\n` +
+          `Вариант 2 — создай геймпасс в другой публичной игре:\n` +
+          `Creator Hub → Creations → Passes → Create\n` +
+          `Установи цену ${expectedPrice} R$, включи «On Sale»\n\n` +
+          `После этого пришли ссылку на геймпасс сюда.`,
         keyboard: vkSupportKb("pass_private"),
       });
       return;

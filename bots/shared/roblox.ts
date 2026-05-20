@@ -143,19 +143,22 @@ export interface GamepassDetails {
 
 /**
  * Returns true if the game hosting this gamepass is private / not playable.
- * Fail-open: returns false on any network error so we never block the user due
- * to an API outage.
+ *
+ * @param strictOnUnavailable - When true, a 404 from the universe endpoint
+ *   is treated as "game is private" rather than "API unavailable". Use only
+ *   when there is already strong evidence the game is inaccessible (e.g. all
+ *   primary Roblox endpoints also failed to find the gamepass).
  */
-async function checkGamePrivate(gamepassId: string): Promise<boolean> {
+async function checkGamePrivate(gamepassId: string, strictOnUnavailable = false): Promise<boolean> {
   try {
     // Step 1: resolve the universe ID for this asset
     const uRes = await rFetch(
       `https://apis.roblox.com/universes/v1/assets/${gamepassId}/universe`
     );
-    if (!uRes.ok) return false;
+    if (!uRes.ok) return strictOnUnavailable;
     const uData: any = await uRes.json().catch(() => null);
     const universeId = uData?.universeId;
-    if (!universeId) return false;
+    if (!universeId) return strictOnUnavailable;
 
     // Step 2: check if the universe is playable
     const gRes = await rFetch(
@@ -182,6 +185,9 @@ export async function getGamepassDetailsDirect(
   gamepassId: string
 ): Promise<GamepassDetails | null> {
   let httpResponses = 0;
+  // True when at least one primary Roblox endpoint (1-3) returned the gamepass data.
+  // Used to decide whether to apply strict private-game detection at the roproxy fallback.
+  let foundInPrimary = false;
   const numId = parseInt(gamepassId, 10);
 
   // ── Shared parser: handles both POST response shapes ─────────────────────
@@ -248,6 +254,7 @@ export async function getGamepassDetailsDirect(
       const item = items.find((x: any) => String(x?.id) === gamepassId || String(x?.assetId) === gamepassId) ?? items[0];
       const parsed = parseItem(item, "marketplace-items");
       if (parsed) {
+        foundInPrimary = true;
         if (await checkGamePrivate(gamepassId)) parsed.isGamePrivate = true;
         return parsed;
       }
@@ -274,6 +281,7 @@ export async function getGamepassDetailsDirect(
       const item = items[0];
       const parsed = parseItem(item, "catalog/items/details");
       if (parsed) {
+        foundInPrimary = true;
         if (await checkGamePrivate(gamepassId)) parsed.isGamePrivate = true;
         return parsed;
       }
@@ -293,6 +301,7 @@ export async function getGamepassDetailsDirect(
       const d = await res.json();
       const parsed = parseItem(d, "economy/game-passes");
       if (parsed) {
+        foundInPrimary = true;
         if (await checkGamePrivate(gamepassId)) parsed.isGamePrivate = true;
         return parsed;
       }
@@ -311,7 +320,11 @@ export async function getGamepassDetailsDirect(
     if (res.ok) {
       const parsed = parseItem(await res.json(), "roproxy/product-info");
       if (parsed) {
-        if (await checkGamePrivate(gamepassId)) parsed.isGamePrivate = true;
+        // If no primary endpoint found this gamepass (marketplace, economy all failed)
+        // treat a universe 404 as "game is private" rather than "API temporarily down".
+        // This catches the common case where the game was deleted or never made public.
+        const strictPrivate = !foundInPrimary && httpResponses >= 2;
+        if (await checkGamePrivate(gamepassId, strictPrivate)) parsed.isGamePrivate = true;
         return parsed;
       }
     } else {

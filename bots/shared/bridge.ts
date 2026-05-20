@@ -185,9 +185,13 @@ export function startBridgeServer(): http.Server {
   server.listen(BRIDGE_PORT, "0.0.0.0", () => {
     console.log(`[Bridge] Validation server listening on 0.0.0.0:${BRIDGE_PORT}`);
     if (!expectedKey) {
-      console.warn(
-        "[Bridge] ⚠️  VALIDATOR_KEY is not set — endpoint is UNPROTECTED. " +
-        "Set VALIDATOR_KEY in Coolify env vars immediately."
+      // Log as error so it's impossible to miss in Coolify/PM2 logs.
+      // The server still starts so the bot doesn't crash, but any operator
+      // reading the logs will see this immediately.
+      console.error(
+        "[Bridge] *** SECURITY: VALIDATOR_KEY is not set — /check-pass and /tg-proxy " +
+        "are COMPLETELY UNPROTECTED. Anyone who knows this IP can send Telegram messages " +
+        "or query gamepasses. Set VALIDATOR_KEY in Coolify env vars immediately. ***"
       );
     }
   });
