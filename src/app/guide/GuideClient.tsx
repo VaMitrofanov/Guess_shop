@@ -1767,26 +1767,6 @@ function WBGate({ onSuccess }: WBGateProps) {
     return denomination;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (code.length < 7) {
-      setError("Введите полный 7-значный код с карточки");
-      inputRef.current?.focus();
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const denomination = await validateAndPersist();
-      onSuccess(denomination, code);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Неизвестная ошибка";
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // Quick TG/VK redirect — guide=true sends wbg_ prefix so bot sends instruction welcome.
   const handleQuickRedirect = async (target: "tg" | "vk", guide = false) => {
     if (code.length < 7) {
