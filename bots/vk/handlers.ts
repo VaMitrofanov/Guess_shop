@@ -119,11 +119,9 @@ async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null): Pro
   const groupUrl = groupId ? `https://vk.com/club${groupId}` : "https://vk.com";
   await ctx.reply({
     message:
-      `⭐ Ты в одном шаге! У наших клиентов есть закрытое сообщество — там первыми узнают о статусе заказа, ` +
-      `получают бонусы на следующую покупку и эксклюзивные акции.\n\n` +
+      `⭐ Ты в одном шаге! У наших клиентов есть закрытое сообщество — там анонсы акций, розыгрыши и бонусы для постоянных клиентов.\n\n` +
       `Загляни — это бесплатно:\n${groupUrl}\n\n` +
-      `После подписки нажми кнопку «✅ Я вступил» ниже.\n` +
-      `Если кнопка не отображается — напиши «Я вступил» в этот чат.`,
+      `После подписки нажми кнопку «✅ Я вступил» ниже.`,
     keyboard: Keyboard.builder()
       .urlButton({ label: "🔔 Подписаться", url: groupUrl })
       .row()
@@ -209,14 +207,14 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         return;
       }
     }
-    await ctx.reply("Заказ не найден или уже не требует исправления.\n\nЕсть вопросы? https://t.me/RobloxBank_PA");
+    await ctx.reply("Заявка не найдена или уже не требует исправления.\n\nЕсть вопросы? https://t.me/RobloxBank_PA");
     return;
   }
 
   if (msgPayload?.command === "check_sub" || isSubConfirmText) {
     try {
       if (!(await isVkSubscribed(ctx, vkUserId))) {
-        await ctx.reply("Ты всё ещё не подписан! 😢 Подпишись и нажми кнопку снова.");
+        await ctx.reply("Похоже, подписка ещё не прошла 🙈 Подпишись на сообщество и нажми кнопку снова.");
         return;
       }
       const refToActivate = msgPayload?.ref;
@@ -239,7 +237,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       return;
     } catch (err) {
       console.error("[VK] check_sub handler failed:", err);
-      await ctx.reply("Не удалось проверить подписку — попробуй ещё раз через минуту.\n\nЕсли проблема повторяется — напишите нам: https://t.me/RobloxBank_PA");
+      await ctx.reply("Не удалось проверить подписку — попробуй ещё раз через минуту.\n\nЕсли проблема повторяется — напиши нам: https://t.me/RobloxBank_PA");
     }
   }
 
@@ -258,7 +256,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         `${getGreeting(custStatus, firstName)}\n` +
         `✅ У тебя есть активный код!\n` +
         `💎 Номинал: ${state.denomination} R$\n\n` +
-        `Осталось совсем чуть-чуть — пришли Asset ID или ссылку на геймпасс.\n` +
+        `Осталось совсем чуть-чуть — пришли ссылку на геймпасс.\n` +
         `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
         `Жду ссылку 👇`
       );
@@ -276,7 +274,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         `${getGreeting(custStatus, firstName)}\n` +
         `✅ У тебя есть активный код!\n` +
         `💎 Номинал: ${restoredState.denomination} R$\n\n` +
-        `Осталось совсем чуть-чуть — пришли Asset ID или ссылку на геймпасс.\n` +
+        `Осталось совсем чуть-чуть — пришли ссылку на геймпасс.\n` +
         `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
         `Жду ссылку 👇`
       );
@@ -288,7 +286,14 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     console.log(`[VK] Начать command: vkUserId=${vkUserId}, isReturning=${custStatus.isReturning}`);
     if (custStatus.isReturning) {
       const firstName = await vkGetName(vkUserId);
-      await ctx.reply(getIdleGreeting(custStatus, firstName) + "\n\nНужна помощь? https://t.me/RobloxBank_PA");
+      await ctx.reply({
+        message: getIdleGreeting(custStatus, firstName) + "\n\nНужна помощь? https://t.me/RobloxBank_PA",
+        keyboard: Keyboard.builder()
+          .textButton({ label: "📊 Статус заявки", payload: { command: "status" }, color: "primary" })
+          .row()
+          .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+          .inline(),
+      });
       return;
     }
 
@@ -312,7 +317,9 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   }
 
   // ── (C) No active state — DB-derived status / help message ───────────────
-  await handleIdleMessage(ctx, vkUserId, text);
+  // "status" button payload routes to the same handler as the "статус" keyword.
+  const effectiveText = msgPayload?.command === "status" ? "статус" : text;
+  await handleIdleMessage(ctx, vkUserId, effectiveText);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -338,7 +345,7 @@ async function handleRefActivation(
   // Block only when code was truly completed (isUsed=true + userId set).
   // isUsed=false + userId set = TG provisional claim — don't block VK activation.
   if (wbCode.isUsed && wbCode.userId) {
-    await ctx.reply("⚠️ Этот код уже был активирован.\n\nЕсли карточка ваша — напишите нам: https://t.me/RobloxBank_PA");
+    await ctx.reply("⚠️ Этот код уже был активирован.\n\nЕсли карточка твоя — напиши нам: https://t.me/RobloxBank_PA");
     return;
   }
 
@@ -368,7 +375,7 @@ async function handleRefActivation(
 
   // If code is CLAIMED by a different user, block
   if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
-    await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.\nНапишите нам: https://t.me/RobloxBank_PA");
+    await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.\nНапиши нам: https://t.me/RobloxBank_PA");
     return;
   }
 
@@ -450,13 +457,13 @@ async function handleRefActivation(
   if (isGuideMode) {
     await ctx.reply(
       greetLine + `\n` +
-      `✅ Код ${code} зафиксирован!\n` +
-      bonusText +
-      `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
-      `Если геймпасс уже создан — кидай ссылку 👇\n\n` +
-      `Если нужна инструкция — возвращайся на сайт:\n` +
-      `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n` +
-      `Там подробная пошаговая инструкция!`
+      `✅ Код ${code} активирован! Номинал: ${totalAmount} R$\n\n` +
+      `Теперь создай геймпасс в Roblox:\n` +
+      `1️⃣ Creator Hub → твоя игра → Monetization → Passes → Create a Pass\n` +
+      `2️⃣ Установи цену ровно ${passPrice} R$\n` +
+      `3️⃣ Включи «On Sale» и сохрани\n` +
+      `4️⃣ Пришли ссылку на геймпасс сюда 👇\n\n` +
+      `Подробная инструкция: https://robloxbank.ru/guide?source=wb&skip=1&code=${code}`
     );
   } else {
     await ctx.reply(
@@ -468,7 +475,7 @@ async function handleRefActivation(
       `(это номинал ÷ 0.7 — Roblox удерживает 30% комиссии)\n\n` +
       `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
       `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n\n` +
-      `Жди ссылку на геймпасс 👇`
+      `Пришли ссылку на геймпасс 👇`
     );
   }
 }
@@ -573,8 +580,8 @@ async function handleGamepassLink(
     );
     await ctx.reply(
       `⚠️ Не удалось автоматически проверить геймпасс — серверы Roblox временно недоступны.\n\n` +
-      `Убедись, что цена геймпасса установлена ровно ${Math.ceil(denomination / 0.7)} R$ — ` +
-      `менеджер проверит вручную. Если цена неверная, заявка будет отклонена.`
+      `Убедись, что цена геймпасса установлена ровно ${Math.ceil(denomination / 0.7)} R$. ` +
+      `Мы проверим вручную — просто жди уведомления.`
     );
     // Alert admins
     const alertText =
@@ -594,7 +601,7 @@ async function handleGamepassLink(
 
   const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
   if (!user) {
-    await ctx.reply("Ошибка сессии. Напишите нам: https://t.me/RobloxBank_PA — разберёмся вместе.");
+    await ctx.reply("Ошибка сессии. Напиши нам: https://t.me/RobloxBank_PA — разберёмся вместе.");
     clearState(vkUserId);
     return;
   }
@@ -681,12 +688,12 @@ async function handleGamepassLink(
   } catch (err: any) {
     if (err.isClaimed) {
       clearState(vkUserId);
-      await ctx.reply("⚠️ Этот код уже был активирован другим пользователем. Обратитесь в поддержку.\nhttps://t.me/RobloxBank_PA");
+      await ctx.reply("⚠️ Этот код уже был активирован другим пользователем. Обратись в поддержку.\nhttps://t.me/RobloxBank_PA");
       return;
     }
     if (err.code === "P2002") {
       clearState(vkUserId);
-      await ctx.reply("⚠️ Заказ по этому коду уже создан и сейчас обрабатывается. Напиши «статус» чтобы проверить.\n\nНужна помощь? https://t.me/RobloxBank_PA");
+      await ctx.reply("⚠️ Заявка по этому коду уже создана и сейчас обрабатывается. Напиши «статус» чтобы проверить.\n\nНужна помощь? https://t.me/RobloxBank_PA");
       return;
     }
     console.error("[VK] Order/transaction error:", err);
@@ -698,14 +705,17 @@ async function handleGamepassLink(
 
   const creatorLine = validatedCreator ? `\n👤 Создатель: ${validatedCreator}` : "";
   const priceLine = validatedPrice != null ? `\n💰 Цена: ${validatedPrice} R$` : "";
-  await ctx.reply(
-    `✅ Принял геймпасс №${passId}!` +
-    creatorLine +
-    priceLine +
-    `\n\n🆔 Номер заявки: ${order.id.slice(-6).toUpperCase()}\n\n` +
-    `⏳ Менеджер выкупит геймпасс в течение суток — обычно намного быстрее.\n` +
-    `Напиши «статус» — узнать статус обработки.`
-  );
+  await ctx.reply({
+    message:
+      `🎉 Отлично, заявка принята!` +
+      creatorLine +
+      priceLine +
+      `\n\n🆔 Номер заявки: ${order.id.slice(-6).toUpperCase()}\n\n` +
+      `⏳ Выкупим в течение нескольких часов — обычно быстрее. Напишем как будет готово.`,
+    keyboard: Keyboard.builder()
+      .textButton({ label: "📊 Статус заявки", payload: { command: "status" }, color: "positive" })
+      .inline(),
+  });
 
   // Fetch real name for admin card (non-blocking — fallback is "VK #id")
   const vkName = user.name ?? await vkGetName(vkUserId);
@@ -778,7 +788,7 @@ async function handleReviewScreenshot(
       : null;
     if (!order || !linked) {
       await ctx.reply(
-        "📸 У тебя сейчас нет выполненных заказов, ожидающих отзыва.\n\n" +
+        "📸 У тебя сейчас нет выполненных заявок, ожидающих отзыва.\n\n" +
         "Если у тебя возникла проблема или вопрос — напиши в поддержку: https://t.me/RobloxBank_PA"
       );
       return;
@@ -855,12 +865,12 @@ async function handleIdleMessage(
     return;
   }
 
-  // "статус" keyword → show last order in rich format
-  if (lower.includes("статус") || lower.includes("заказ")) {
+  // "статус" keyword (also triggered via payload routing in handleMessage) → show last order in rich format
+  if (lower.includes("статус") || lower.includes("заявк")) {
     const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
     if (!user) {
       await ctx.reply(
-        "У тебя пока нет заказов.\n\n" +
+        "У тебя пока нет заявок.\n\n" +
         "Есть код с WB-карты? Напиши его прямо сюда — и мы всё оформим.\n" +
         "Нужна помощь? https://t.me/RobloxBank_PA"
       );
@@ -895,9 +905,9 @@ async function handleIdleMessage(
         : order.status === "PENDING"
         ? "\n\nНе переживай — менеджер работает в порядке очереди, обычно выкупаем в течение нескольких часов, максимум сутки. Напишем сами."
         : order.status === "IN_PROGRESS"
-        ? "\n\n🔧 Менеджер уже работает над твоим заказом. Скоро всё будет готово!"
+        ? "\n\n🔧 Менеджер уже работает над твоей заявкой. Скоро всё будет готово!"
         : order.status === "COMPLETED"
-        ? "\n\n✅ Заказ выполнен! Если есть вопросы — https://t.me/RobloxBank_PA"
+        ? "\n\n✅ Заявка выполнена! Если есть вопросы — https://t.me/RobloxBank_PA"
         : order.status === "REJECTED"
         ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Исправь геймпасс и нажми кнопку ниже — отправим на проверку заново.`
         : "";
@@ -934,7 +944,7 @@ async function handleIdleMessage(
       `${getGreeting(status, firstName)}\n` +
       `✅ У тебя есть активный код ${restoredState.wbCode}!\n` +
       `💎 Номинал: ${restoredState.denomination} R$\n\n` +
-      `Осталось совсем чуть-чуть — пришли Asset ID или ссылку на геймпасс.\n` +
+      `Осталось совсем чуть-чуть — пришли ссылку на геймпасс.\n` +
       `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
       `Жду ссылку 👇`
     );
@@ -946,14 +956,21 @@ async function handleIdleMessage(
 
   if (status.isReturning) {
     // IDLE state: upsell to direct sales, no gamepass instructions
-    await ctx.reply(getIdleGreeting(status, firstName) + "\n\nНужна помощь? https://t.me/RobloxBank_PA");
+    await ctx.reply({
+      message: getIdleGreeting(status, firstName) + "\n\nНужна помощь? https://t.me/RobloxBank_PA",
+      keyboard: Keyboard.builder()
+        .textButton({ label: "📊 Статус заявки", payload: { command: "status" }, color: "primary" })
+        .row()
+        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+        .inline(),
+    });
   } else {
     const greeting = getGreeting(status, firstName);
     await ctx.reply(
       `${greeting}Я помогаю обменять карты Wildberries на робуксы в Roblox.\n\n` +
       `Вот что я умею:\n` +
-      `• Напиши 7-значный код с карты WB — оформлю заказ\n` +
-      `• Напиши «статус» — покажу статус твоего заказа\n` +
+      `• Напиши 7-значный код с карты WB — оформлю заявку\n` +
+      `• Напиши «статус» — покажу статус твоей заявки\n` +
       `• Пришли ссылку на геймпасс — приму в работу\n\n` +
       `Инструкция по активации: https://robloxbank.ru/guide?source=wb\n` +
       `Нужна живая помощь? https://t.me/RobloxBank_PA`

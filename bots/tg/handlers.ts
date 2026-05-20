@@ -128,8 +128,8 @@ export function registerStart(bot: Telegraf): void {
       console.warn(`[TG] Rate limit exceeded for start command by ${rateKey}`);
       if (rateData.attempts === 6) {
         await ctx.reply(
-          "⏳ Слишком много попыток — подожди минуту и попробуй снова.\n\n" +
-          "Если что-то пошло не так — напиши в поддержку: @RobloxBank_PA"
+          "⏳ Слишком много попыток — подожди минуту и попробуй снова.",
+          { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?") }
         );
       }
       return;
@@ -366,7 +366,7 @@ export function registerStart(bot: Telegraf): void {
           `<i>(это номинал ÷ 0.7 — Roblox удерживает 30% комиссии)</i>\n\n` +
           `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
           `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n\n` +
-          `Жди ссылку на геймпасс 👇`
+          `Пришли ссылку на геймпасс прямо сюда 👇`
       ),
       {
         parse_mode: "HTML",
@@ -430,7 +430,7 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
 
   if (!order) {
     return {
-      text: "У тебя пока нет заявок. Отправь ссылку на геймпасс, чтобы создать заявку.",
+      text: "Есть код с WB-карты? Напиши его прямо сюда — и начнём!",
       keyboard: Markup.inlineKeyboard([refreshRow, [supportBtn("💬 Нужна помощь?")]]),
     };
   }
@@ -453,7 +453,7 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     note = "\n\n💡 <i>Пришли ссылку на геймпасс прямо сюда — и мы сразу возьмём в работу!</i>";
   } else if (order.status === "PENDING") {
     if (pendingOver120) {
-      note = "\n\n⏰ <i>Заявка обрабатывается дольше обычного. Если нужна помощь — напишите нам.</i>";
+      note = "\n\n⏰ <i>Заявка обрабатывается дольше обычного. Если нужна помощь — напиши нам.</i>";
     } else if (pendingOver60) {
       note = "\n\n💬 <i>Обработка занимает чуть дольше обычного — скоро возьмём в работу.</i>";
     } else {
@@ -593,10 +593,9 @@ export function registerText(bot: Telegraf): void {
             if (extractPassId(text) === null) {
               const passPrice = Math.ceil(state.denomination / 0.7);
               await ctx.reply(
-                `✅ Код <b>${state.wbCode}</b> уже активирован!\n\n` +
+                `Продолжаем! Твой код уже активирован.\n\n` +
                 `Осталось создать геймпасс и прислать сюда ссылку.\n` +
-                `📌 Цена геймпасса: <b>${passPrice} R$</b>\n` +
-                `<i>(это номинал ÷ 0.7 — Roblox удерживает 30%)</i>\n\n` +
+                `📌 Цена геймпасса: <b>${passPrice} R$</b>\n\n` +
                 `Нужна инструкция? 👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`,
                 {
                   parse_mode: "HTML",
@@ -625,9 +624,11 @@ export function registerText(bot: Telegraf): void {
               orderBy: { updatedAt: "desc" },
             });
             if (rejectedOrder) {
+              const reasonLine = rejectedOrder.rejectionReason
+                ? `\n💬 Причина: <i>${rejectedOrder.rejectionReason}</i>\n`
+                : "";
               await ctx.reply(
-                `❌ Твоя последняя заявка была отклонена.\n\n` +
-                `Исправь ссылку на геймпасс и нажми кнопку ниже — отправим на проверку заново:`,
+                `❌ Заявка была отклонена.` + reasonLine + `\nИсправь геймпасс и нажми кнопку:`,
                 {
                   parse_mode: "HTML",
                   ...Markup.inlineKeyboard([
@@ -701,7 +702,7 @@ export function registerText(bot: Telegraf): void {
       const subscribed = await checkSubscription(bot, ctx.from.id);
       if (!subscribed) {
         await ctx.reply(
-          `⭐ Почти готово! У наших клиентов есть закрытый канал — там первыми узнают о выкупе, ` +
+          `Получил! Осталось один шаг — у наших клиентов есть закрытый канал: там первыми узнают о выкупе, ` +
           `получают бонусы и эксклюзивные акции.\n\n` +
           `Загляни — бесплатно, а потом просто пришли ссылку ещё раз:\n` +
           `https://t.me/Roblox_Bank_Tg`,
@@ -816,8 +817,8 @@ export function registerText(bot: Telegraf): void {
       );
       await ctx.reply(
         `⚠️ Не удалось автоматически проверить геймпасс — серверы Roblox временно недоступны.\n\n` +
-        `Убедись, что цена геймпасса установлена ровно <b>${Math.ceil(state.denomination / 0.7)} R$</b> — ` +
-        `менеджер проверит вручную. Если цена неверная, заявка будет отклонена.`,
+        `Убедись, что цена геймпасса установлена ровно <b>${Math.ceil(state.denomination / 0.7)} R$</b>. ` +
+        `Мы проверим вручную — просто жди уведомления.`,
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
@@ -842,13 +843,10 @@ export function registerText(bot: Telegraf): void {
     const user = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
     if (!user) {
       await ctx.reply(
-        "Ошибка сессии — попробуй активировать код заново.",
+        "Что-то пошло не так — напиши нам, разберёмся вместе:",
         {
           parse_mode: "HTML",
-          ...Markup.inlineKeyboard([
-            [Markup.button.url("📖 Начать заново", "https://robloxbank.ru/guide?source=wb")],
-            [supportBtn("💬 Нужна помощь?")],
-          ]),
+          ...withSupportKb("💬 Написать нам", "session_err"),
         }
       );
       return;
@@ -941,7 +939,7 @@ export function registerText(bot: Telegraf): void {
         clearFailCounts(ctx.from.id);
         // "Тупик" — user cannot resolve this themselves
         await ctx.reply(
-          "⚠️ Этот код уже был активирован другим пользователем.\n\nЕсли вы уверены, что код ваш — напишите нам:",
+          "⚠️ Этот код уже был активирован другим пользователем.\n\nЕсли уверен, что код твой — напиши нам:",
           { parse_mode: "HTML", ...withSupportKb() }
         );
         return;
@@ -973,12 +971,12 @@ export function registerText(bot: Telegraf): void {
     const creatorLine = validatedCreator ? `👤 Создатель: ${validatedCreator}\n` : "";
     const priceLine = validatedPrice != null ? `💰 Цена: ${validatedPrice} R$\n` : "";
     await ctx.reply(
-      `✅ Принял геймпасс №${passId}!\n` +
+      `🎉 Отлично, геймпасс принят!\n` +
       creatorLine +
       priceLine +
       `\n🆔 Номер заявки: <code>${order.id.slice(-6).toUpperCase()}</code>\n\n` +
-      `⏳ Менеджер выкупит геймпасс в течение суток — обычно намного быстрее.\n` +
-      `Когда всё будет готово — пришлём уведомление.`,
+      `⏳ Выкупим в течение нескольких часов — обычно быстрее. Как только будет готово — напишем.\n` +
+      `💡 <i>Робуксы начислит Roblox — обычно в течение 5–7 дней после выкупа.</i>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([[Markup.button.callback("📊 Проверить статус", CB.refreshStatus)]]),
@@ -1265,7 +1263,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
     `<i>(это номинал ÷ 0.7 — Roblox удерживает 30% комиссии)</i>\n\n` +
     `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
     `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${codeInput}\n\n` +
-    `Жди ссылку на геймпасс 👇`,
+    `Пришли ссылку на геймпасс прямо сюда 👇`,
     {
       parse_mode: "HTML",
       link_preview_options: { is_disabled: true },
@@ -1429,7 +1427,7 @@ export function registerCallbacks(bot: Telegraf): void {
       });
       await ctx.answerCbQuery("Менеджер уже в курсе 👍");
       await ctx.reply(
-        "Соединяем с менеджером — напишите @RobloxBank_PA\n\nМы уже знаем о вашей ситуации 👍",
+        "Соединяем с менеджером — напиши @RobloxBank_PA\n\nМы уже знаем о твоей ситуации 👍",
         { parse_mode: "HTML" }
       );
       return;
@@ -1581,7 +1579,7 @@ export function registerCallbacks(bot: Telegraf): void {
       // Verify the order belongs to the calling user
       const callerUser = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
       if (!callerUser || existingOrder.userId !== callerUser.id) {
-        await ctx.reply("⛔ Этот заказ не принадлежит вашему аккаунту.\n\nЕсли вы уверены, что это ваш заказ:", { parse_mode: "HTML", ...withSupportKb() });
+        await ctx.reply("⛔ Этот заказ не принадлежит твоему аккаунту.\n\nЕсли уверен, что это твой заказ:", { parse_mode: "HTML", ...withSupportKb() });
         await ctx.answerCbQuery("⛔ Нет доступа");
         return;
       }
@@ -1604,11 +1602,8 @@ export function registerCallbacks(bot: Telegraf): void {
       await ctx.reply(
         `🔄 <b>Исправление ссылки</b>\n\n` +
         `💎 Номинал: <b>${denomination} R$</b>\n` +
-        `Пришли нам <b>Asset ID</b>, либо <b>ссылку</b> на твой геймпасс. Перед отправкой, пожалуйста, убедись, что цена в геймпассе установлена ровно на <b>${passPrice} R$</b> 🪙\n\n` +
-        `💡 <i>Пример ссылки:</i>\n` +
-        `<code>https://www.roblox.com/game-pass/1234567/...</code>\n\n` +
-        `💡 <i>Пример Asset ID:</i>\n` +
-        `<code>1234567</code>`,
+        `Пришли ссылку на геймпасс с ценой ${passPrice} R$ 👇\n\n` +
+        `💡 <i>Пример: https://www.roblox.com/game-pass/1234567/...</i>`,
         { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "resubmit") }
       );
       await ctx.answerCbQuery();
@@ -1809,12 +1804,12 @@ async function notifyUserCompleted(
   if (completedCount === 1) {
     // TIER 1: First-Time Buyer — Review & Social Proof
     tgMsg =
-      `✅ Заказ выкуплен! Робуксы придут через 5-7 дней.\n\n` +
+      `✅ Заказ выкуплен! Робуксы начислит Roblox — обычно в течение 5–7 дней после выкупа.\n\n` +
       `🎁 <b>Оставь отзыв и получи 100 R$ в подарок!</b>\n` +
       `Напиши отзыв на Wildberries, сделай скриншот и отправь его сюда (фотографией, не файлом). После проверки администратором бонус начислим сразу!\n\n` +
       (process.env.TG_CHANNEL_ID ? `Ты уже в нашем канале, так что не пропустишь секретные раздачи! 🎰` : `Ждём тебя снова! 🎰`);
     vkMsg =
-      `✅ Заказ выкуплен! Робуксы придут через 5-7 дней.\n\n` +
+      `✅ Заказ выкуплен! Робуксы начислит Roblox — обычно в течение 5–7 дней после выкупа.\n\n` +
       `Оставь отзыв и получи 100 R$ в подарок!\n` +
       `Напиши отзыв на Wildberries, сделай скриншот и отправь его в этот чат. После проверки бонус начислим сразу!\n\n` +
       `Ты уже в нашем сообществе, так что не пропустишь секретные раздачи! 🎰`;
@@ -1883,7 +1878,7 @@ async function notifyUserRejected(
       });
     } catch { }
   } else if (user.vkId) {
-    await vkSend(user.vkId, stripHtml(msg) + "\n\nЧтобы исправить, просто отправьте новую ссылку на геймпасс в этот чат.\nЕсли нужна помощь — https://t.me/RobloxBank_PA");
+    await vkSend(user.vkId, stripHtml(msg) + "\n\nЧтобы исправить, просто пришли новую ссылку на геймпасс в этот чат.\nЕсли нужна помощь — https://t.me/RobloxBank_PA");
   }
 }
 
@@ -1901,14 +1896,12 @@ async function notifyReviewRejected(
   if (!user) return;
 
   const tgMsg =
-    `❌ Ой, возникла проблемка с твоим отзывом!\n` +
-    `Админ указал причину: <b>${reason}</b>.\n\n` +
-    `Исправь это, пожалуйста, и пришли скриншот снова — бонус 100 R$ всё еще ждет тебя! 🎁`;
+    `📸 Скриншот не подошёл: <b>${reason}</b>.\n\n` +
+    `Пришли новый — бонус 100 R$ всё ещё ждёт тебя! 🎁`;
 
   const vkMsg =
-    `❌ Ой, возникла проблемка с твоим отзывом!\n` +
-    `Админ указал причину: ${reason}.\n\n` +
-    `Исправь это, пожалуйста, и пришли скриншот снова — бонус 100 R$ всё еще ждет тебя! 🎁`;
+    `📸 Скриншот не подошёл: ${reason}.\n\n` +
+    `Пришли новый — бонус 100 R$ всё ещё ждёт тебя! 🎁`;
 
   if (user.tgId) {
     try {

@@ -177,39 +177,38 @@ const STEPS_STANDARD: StepDef[] = [
 const STEPS_WB: StepDef[] = [
   {
     num: "05", icon: Hash,
-    title: "Скопируй ID геймпасса",
-    desc: "В списке пассов нажми ⋮ рядом с названием пасса → выбери «Copy Asset ID».",
-    detail: "Asset ID — числовой идентификатор пасса (например: 1234567). Это самый быстрый способ передать пасс менеджеру без ошибок в ссылке.",
+    title: "Скопируй ссылку на геймпасс",
+    desc: "Открой страницу геймпасса → скопируй ссылку из адресной строки. Или нажми ⋮ рядом с пассом → «Copy Asset ID».",
+    detail: "Ссылка выглядит так: roblox.com/game-pass/1234567/VIP. Можно скопировать и ссылку, и числовой Asset ID из URL — менеджер принимает оба формата.",
     tip: "Нажми три точки (⋮) справа от названия пасса в списке — откроется контекстное меню.",
     warn: null,
-    pcTip: "В Creator Hub: Monetization → Passes → ⋮ (три точки) → «Copy Asset ID».",
-    mobileDesc: "Снова открой боковое меню, нажав на ≡ в левой верхей части экрана → нажми три точки (⋮) рядом с названием пасса.",
-    mobileDetail: "В выпавшем меню выбери «Copy Asset ID».",
-    mobileTip: "На телефоне ищи кнопку ⋮ (три точки) в левом верхнем углу.",
+    pcTip: "Самый быстрый способ: Monetization → Passes → ⋮ → «Copy Asset ID» (или скопируй ссылку из адресной строки браузера).",
+    mobileDesc: "Открой страницу геймпасса → скопируй ссылку из адресной строки. Или нажми ⋮ рядом с пассом → «Copy Asset ID».",
+    mobileDetail: "Менеджер принимает и ссылку, и числовой ID из адресной строки.",
+    mobileTip: "На телефоне ищи кнопку ⋮ (три точки) в списке пассов.",
     bullets: [
-
-      { icon: MoreHorizontal, text: "Нажми ⋮ рядом с названием пасса" },
-      { icon: Copy, text: "Выбери «Copy Asset ID»" },
-      { icon: Check, text: "ID скопирован — отправь его менеджеру" },
+      { icon: Link2, text: "Открой страницу геймпасса — скопируй ссылку из адресной строки" },
+      { icon: MoreHorizontal, text: "Или нажми ⋮ рядом с пассом → «Copy Asset ID»" },
+      { icon: Check, text: "Ссылка (или Asset ID) скопирована — отправь менеджеру" },
     ],
     mobileBullets: [
       { icon: Ticket, text: "Открой список пассов игры" },
-      { icon: MoreHorizontal, text: "Нажми ≡ или долго удержи строку пасса" },
-      { icon: Copy, text: "Выбери «Copy Asset ID»" },
-      { icon: Send, text: "Отправь скопированный ID менеджеру" },
+      { icon: Link2, text: "Скопируй ссылку из адресной строки браузера" },
+      { icon: MoreHorizontal, text: "Или нажми ⋮ → «Copy Asset ID» (или числовой ID из адресной строки)" },
+      { icon: Send, text: "Отправь скопированную ссылку менеджеру" },
     ],
   },
   {
     num: "06", icon: Send,
-    title: "Отправь ID менеджеру",
-    desc: "Перешли скопированный Asset ID нам — в Telegram или ВКонтакте.",
-    detail: "Менеджер выкупит пасс вручную и пришлёт подтверждение. Robux поступят на баланс через 5–7 дней — стандартное время зачисления по правилам Roblox.",
+    title: "Отправь ссылку менеджеру",
+    desc: "Перешли скопированную ссылку на геймпасс нам — в Telegram или ВКонтакте.",
+    detail: "Живой менеджер выкупит пасс вручную и пришлёт подтверждение. Robux поступят на баланс через 5–7 дней — стандартное время зачисления по правилам Roblox.",
     tip: null,
     warn: "Не удаляй геймпасс и не меняй цену до получения уведомления о завершении заказа.",
-    pcTip: "Скопируй ID → нажми кнопку Telegram или VK ниже → вставь ID в сообщение.",
-    mobileDesc: "Отправь ID нам в Telegram или VK — кнопки внизу страницы.",
-    mobileDetail: "Просто вставь скопированный ID в сообщение менеджеру.",
-    mobileTip: "Нажми на кнопку Telegram или VK ниже — откроется чат с менеджером.",
+    pcTip: "Скопируй ссылку на геймпасс → нажми кнопку Telegram или VK ниже → вставь в сообщение.",
+    mobileDesc: "Отправь ссылку на геймпасс нам в Telegram или VK — кнопки внизу страницы.",
+    mobileDetail: "Просто вставь скопированную ссылку (или числовой ID из адресной строки) в сообщение менеджеру.",
+    mobileTip: "Нажми на кнопку Telegram или VK ниже — откроется чат с живым менеджером.",
   },
 ];
 
@@ -223,7 +222,7 @@ const FAQ = [
   { q: "У меня нет аккаунта в Roblox — что делать?", a: "Зарегистрируйся бесплатно на roblox.com. Это займёт 2 минуты. Аккаунт нужен для создания геймпасса — без него получить Robux не получится." },
   { q: "Зачем вообще нужен геймпасс? Почему нельзя просто перевести деньги?", a: "Roblox не позволяет переводить Robux напрямую между пользователями. Геймпасс — это внутриигровой товар: мы его покупаем, ты получаешь Robux на счёт. Это единственный легальный способ." },
   { q: "Сколько времени занимает создание?",       a: "Около 5 минут. Создать игру (1 мин) → создать пасс (2 мин) → установить цену (1 мин) → оформить заказ (1 мин)." },
-  { q: "Когда придут Robux после оплаты?",          a: "Заказ обрабатывается до 24 часов. После покупки пасса Roblox зачисляет средства через 5–7 дней — это стандартная политика платформы." },
+  { q: "Когда придут Robux после оплаты?",          a: "Заказ обрабатывается обычно за несколько часов. После покупки пасса Roblox зачисляет средства через 5–7 дней — это стандартная политика платформы." },
   { q: "Можно удалить геймпасс после оплаты?",      a: "Нет! Не удаляй и не меняй цену до получения подтверждения о завершении. Иначе заказ не выполнится и придётся делать возврат." },
   { q: "Нет игры в Roblox — что делать?",           a: "Создай пустую через Creator Hub за 1 минуту. Публиковать и наполнять контентом не нужно — игра нужна только как контейнер для пасса." },
   { q: "Почему цена пасса выше нужной суммы?",      a: "Roblox удерживает 30% с каждой продажи. Чтобы получить 1000 R$ — пасс должен стоить 1430 R$. Калькулятор учитывает это автоматически." },
@@ -1093,7 +1092,7 @@ function Anim06WB() {
         {/* Manager first message */}
         <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 6 }}>
           <div style={{ background: "#182533", borderRadius: "2px 10px 10px 10px", padding: "5px 9px", maxWidth: "78%" }}>
-            <div style={{ fontSize: 9, color: "#ddd", lineHeight: 1.4 }}>Привет! Пришлите ссылку на геймпасс 👋</div>
+            <div style={{ fontSize: 9, color: "#ddd", lineHeight: 1.4 }}>Привет! Пришли ссылку на геймпасс 👋</div>
             <div style={{ fontSize: 7, color: "#445566", marginTop: 2, textAlign: "right" }}>10:30</div>
           </div>
         </div>
@@ -1116,8 +1115,8 @@ function Anim06WB() {
         {f >= 3 && (
           <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 5 }}>
             <div style={{ background: "#182533", border: "1px solid #22c55e22", borderRadius: "2px 10px 10px 10px", padding: "5px 9px", maxWidth: "84%" }}>
-              <div style={{ fontSize: 9, color: "#22c55e", fontWeight: 700, marginBottom: 2 }}>✅ Спасибо за покупку!</div>
-              <div style={{ fontSize: 8, color: "#aaa", lineHeight: 1.4 }}>Геймпасс получен, выкупаем прямо сейчас.</div>
+              <div style={{ fontSize: 9, color: "#22c55e", fontWeight: 700, marginBottom: 2 }}>✅ Геймпасс принят!</div>
+              <div style={{ fontSize: 8, color: "#aaa", lineHeight: 1.4 }}>Выкупим в ближайшие часы 🚀</div>
               <div style={{ fontSize: 7, color: "#445566", marginTop: 2 }}>10:31</div>
             </div>
           </div>
@@ -1594,7 +1593,7 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
         {denomination && passPrice ? (
           <div className="flex flex-col sm:flex-row items-center justify-center gap-6 mb-10">
             <div className="flex flex-col items-center gap-1 border-2 border-[#c9a84c]/20 bg-[#c9a84c]/5 px-8 py-4 min-w-[180px]">
-              <span className="font-pixel text-[8px] text-[#c9a84c]/40">ВЫ ПОЛУЧИТЕ</span>
+              <span className="font-pixel text-[8px] text-[#c9a84c]/40">ТЫ ПОЛУЧИШЬ</span>
               <span className="text-4xl font-black text-white">{denomination} R$</span>
             </div>
             <div className="bg-[#c9a84c]/20 w-8 h-[2px] hidden sm:block" />
@@ -1609,7 +1608,7 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
           Почти готово!
         </h3>
         <p className="text-zinc-400 font-medium text-base max-w-lg mx-auto leading-relaxed">
-          Чтобы мы могли выкупить ваш геймпасс, отправьте ссылку на него боту в Telegram или нашему сообществу ВКонтакте.
+          Чтобы мы могли выкупить твой геймпасс, отправь ссылку на него боту в Telegram или нашему сообществу ВКонтакте.
         </p>
       </div>
 
@@ -1653,7 +1652,7 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
       <div className="relative z-10 flex items-center justify-center gap-2 mt-8 opacity-60">
         <AlertTriangle className="w-4 h-4 text-[#c9a84c]" />
         <p className="text-[#c9a84c] text-[10px] font-black uppercase tracking-widest text-center">
-          Среднее время обработки — до суток • Работаем круглосуточно
+          Среднее время обработки — несколько часов • Работаем круглосуточно
         </p>
       </div>
     </div>
@@ -1830,12 +1829,12 @@ function WBGate({ onSuccess }: WBGateProps) {
                   WILDBERRIES × ROBLOXBANK
                 </div>
                 <h1 className="text-xl sm:text-2xl font-black uppercase tracking-tight leading-tight text-white">
-                  Благодарим за покупку<br />
+                  Спасибо за покупку<br />
                   <span style={{ color: "#f0c040" }}>в RobloxBank!</span>
                 </h1>
               </div>
               <p className="text-zinc-400 font-medium text-base leading-relaxed">
-                Для активации номинала введите уникальный&nbsp;код с&nbsp;карточки.
+                Для активации номинала введи уникальный&nbsp;код с&nbsp;карточки.
               </p>
             </div>
 
@@ -1851,7 +1850,7 @@ function WBGate({ onSuccess }: WBGateProps) {
                   type="text"
                   value={code}
                   onChange={handleInput}
-                  placeholder="XXXXXXX"
+                  placeholder="ABC1234"
                   autoFocus
                   autoComplete="off"
                   spellCheck={false}
@@ -1880,7 +1879,7 @@ function WBGate({ onSuccess }: WBGateProps) {
                   }`}
                   aria-pressed={isGuideMode}
                 >
-                  Нужна инструкция
+                  Нужна инструкция 📖
                 </button>
                 <button
                   type="button"
@@ -1892,11 +1891,11 @@ function WBGate({ onSuccess }: WBGateProps) {
                   }`}
                   aria-pressed={!isGuideMode}
                 >
-                  Уже есть геймпасс
+                  Геймпасс готов ✅
                 </button>
               </div>
               <p className="text-[10px] text-zinc-600 text-center leading-relaxed">
-                Геймпасс — это способ получить Robux через Roblox. Если не знаешь что это — выбери «Нужна инструкция»
+                Геймпасс — это способ получить Robux через Roblox. Если не знаешь что это — выбери «Нужна инструкция 📖»
               </p>
 
               {error && (
@@ -1909,7 +1908,7 @@ function WBGate({ onSuccess }: WBGateProps) {
                 <p className="text-xs text-zinc-500 mt-1">
                   Нужна помощь?{" "}
                   <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer" className="text-[#00b06f] underline">
-                    Написать менеджеру →
+                    Написать живому менеджеру →
                   </a>
                 </p>
               )}
@@ -1917,7 +1916,7 @@ function WBGate({ onSuccess }: WBGateProps) {
               {isGuideMode ? (
                 <div className="space-y-3">
                   <p className="text-[11px] text-zinc-500 font-medium leading-relaxed text-center">
-                    Переходите в мессенджер — получите инструкцию или сразу отправьте ссылку на геймпасс.
+                    Переходи в мессенджер — получи инструкцию или сразу отправь ссылку на геймпасс.
                   </p>
                   <ConnectivityAssistant />
                   <button
@@ -1958,7 +1957,7 @@ function WBGate({ onSuccess }: WBGateProps) {
                   ) : (
                     <div className="space-y-2">
                       <p className="text-[10px] text-[#0077FF]/80 font-black uppercase tracking-widest text-center">
-                        Авторизуйтесь через VK ID — после этого откроется чат с менеджером
+                        Авторизуйся через VK ID — после этого откроется чат с менеджером
                       </p>
                       <div className="border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 px-4 py-3 flex items-center justify-center min-h-[64px]">
                         <VKAuthButton mode="order" wbCode={vkAuthCode} />
@@ -1969,7 +1968,7 @@ function WBGate({ onSuccess }: WBGateProps) {
               ) : (
                 <div className="space-y-3">
                   <p className="text-[11px] text-zinc-500 font-medium leading-relaxed text-center">
-                    Геймпасс уже создан? Отправьте ссылку или ID пасса напрямую — менеджер выкупит вручную.
+                    Геймпасс уже создан? Отправь ссылку или ID пасса напрямую — менеджер выкупит вручную.
                   </p>
                   <ConnectivityAssistant />
                   <button
@@ -2010,7 +2009,7 @@ function WBGate({ onSuccess }: WBGateProps) {
                   ) : (
                     <div className="space-y-2">
                       <p className="text-[10px] text-[#0077FF]/80 font-black uppercase tracking-widest text-center">
-                        Авторизуйтесь через VK ID — после этого откроется чат с менеджером
+                        Авторизуйся через VK ID — после этого откроется чат с менеджером
                       </p>
                       <div className="border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 px-4 py-3 flex items-center justify-center min-h-[64px]">
                         <VKAuthButton mode="order" wbCode={vkAuthCode} />
@@ -2052,7 +2051,7 @@ function WBGate({ onSuccess }: WBGateProps) {
                 Возникли трудности?
               </span>
               <span className="text-[12px] font-black text-white group-hover:text-[#f0c040] transition-colors">
-                Связаться с менеджером — @RobloxBank_PA
+                Написать живому менеджеру → @RobloxBank_PA
               </span>
             </div>
             <ExternalLink className="w-4 h-4 text-zinc-600 group-hover:text-[#c9a84c] transition-colors flex-shrink-0 ml-auto" />
@@ -2372,7 +2371,7 @@ function Instruction({ isWB, denomination, code, onReset, freshFromGate = false 
               target="_blank" rel="noopener noreferrer"
               className="inline-flex items-center gap-3 px-8 py-4 border-2 border-[#c9a84c]/20 hover:border-[#c9a84c]/50 text-[#c9a84c] transition-all font-black text-[11px] uppercase tracking-[0.2em] group"
             >
-              Связаться с менеджером
+              Написать живому менеджеру (не боту)
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </a>
           </div>
