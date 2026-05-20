@@ -15,6 +15,28 @@
 
 ---
 
+## Доступ к инфраструктуре
+
+Claude (в рамках сессии) имеет доступ ко всему:
+
+| Ресурс | Что это |
+|--------|---------|
+| **SSH RF** | Основной сервер (Москва, 89.110.94.117) — Next.js сайт + TG/VK боты |
+| **SSH SG** | Singapore VPS — bridge сервер (Roblox API + TG Bot API прокси) |
+| **Coolify token** | Панель управления деплоем, env vars, логи контейнеров |
+
+Команды для CLI-работы в сессии:
+```bash
+# Подключение к серверам
+! ssh root@89.110.94.117      # RF
+! ssh root@<SG_IP>            # SG
+
+# Coolify API
+! curl -H "Authorization: Bearer $COOLIFY_TOKEN" https://coolify.robloxbank.ru/api/v1/...
+```
+
+---
+
 ## Стек
 
 | Слой | Технология |
@@ -491,7 +513,9 @@ npm run dev:reset-test
 ## Последние коммиты (от новых к старым)
 
 ```
-(pending) fix(audit): P0 review_ok race+scope, guide mode JWT, tryRestoreState TTL, debug logs
+429acf5 fix(bots): correct Roblox game privacy path in all instruction texts
+6f5744e fix(bots): correct Roblox game privacy path (промежуточный)
+8e533c9 fix(bots): full audit fixes + private-game UX overhaul
 6ad4b3e fix(auth,guide): VK guide-mode bugs + remove dead onSuccess gate prop
 ffdda78 fix(bots): patch runtime crash, complete hand-holding funnel  
 752bd5d polish(ux): Apple-level ecosystem UX — consistent tone, terminology
@@ -499,9 +523,6 @@ c33aa06 fix(bots): pass_private ctxKey for TG, add DB fallback for VK support ha
 93d1785 feat(bots): support button sends admin alert with scenario context
 062c944 fix(bots/guide): close all UX dead-ends, remove WBGate bypass
 c5beaba feat(tg/admin): preset order rejection reasons — one-tap instead of typing
-d8848b9 feat(tg): notify admins on gamepass validation fail, improve error UX
-db86a59 fix(bots): audit fixes — private gamepass, /start command text, VK state recovery
-ca48a02 fix(tg): recover session for any text, not just gamepass URLs
 ```
 
 ---
