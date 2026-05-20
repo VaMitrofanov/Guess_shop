@@ -1940,6 +1940,14 @@ function WBGate({ onSuccess }: WBGateProps) {
                   <p className="text-sm text-red-400 font-medium">{error}</p>
                 </div>
               )}
+              {error && (
+                <p className="text-xs text-zinc-500 mt-1">
+                  Нужна помощь?{" "}
+                  <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer" className="text-[#00b06f] underline">
+                    Написать менеджеру →
+                  </a>
+                </p>
+              )}
 
               {isGuideMode ? (
                 <div className="space-y-3">
@@ -2640,7 +2648,8 @@ export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl }: {
         setIsRestoring(false);
       }
     };
-    restoreSession();
+    const timeout = setTimeout(() => setIsRestoring(false), 10_000);
+    restoreSession().finally(() => clearTimeout(timeout));
   }, [isWB, wbCodeFromUrl]);
 
   const handleWBReset = () => {

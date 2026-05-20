@@ -202,7 +202,7 @@ export function registerStart(bot: Telegraf): void {
     // isUsed=true with userId=null means the website reserved it but the bot flow
     // never finished — allow those through so users aren't silently stuck.
     if (wbCode.isUsed && wbCode.userId) {
-      await ctx.reply("⚠️ Этот код уже был активирован ранее.");
+      await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?") });
       return;
     }
 
@@ -227,7 +227,7 @@ export function registerStart(bot: Telegraf): void {
 
     // If code is CLAIMED by a different user, block
     if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
-      await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.");
+      await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.", { parse_mode: "HTML", ...withSupportKb("💬 Оспорить — написать нам") });
       return;
     }
 
@@ -433,7 +433,7 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   if (!order) {
     return {
       text: "У тебя пока нет заявок. Отправь ссылку на геймпасс, чтобы создать заявку.",
-      keyboard: Markup.inlineKeyboard([refreshRow]),
+      keyboard: Markup.inlineKeyboard([refreshRow, [supportBtn("💬 Нужна помощь?")]]),
     };
   }
 
@@ -496,6 +496,7 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     keyboard = Markup.inlineKeyboard([
       [Markup.button.url("📖 Инструкция по созданию геймпасса", `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}`)],
       refreshRow,
+      [supportBtn("💬 Нужна помощь?")],
     ]);
   } else if (order.status === "COMPLETED") {
     keyboard = Markup.inlineKeyboard([refreshRow, [supportBtn("💬 Заказать ещё")]]);
@@ -818,7 +819,13 @@ export function registerText(bot: Telegraf): void {
         `⚠️ Не удалось автоматически проверить геймпасс — серверы Roblox временно недоступны.\n\n` +
         `Убедись, что цена геймпасса установлена ровно <b>${Math.ceil(state.denomination / 0.7)} R$</b> — ` +
         `менеджер проверит вручную. Если цена неверная, заявка будет отклонена.`,
-        { parse_mode: "HTML" }
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
+            [supportBtn("💬 Вопросы по заявке?")],
+          ]),
+        }
       );
       // Alert admins so they know manual price check is required
       const alertText =
@@ -837,7 +844,13 @@ export function registerText(bot: Telegraf): void {
     if (!user) {
       await ctx.reply(
         "Ошибка сессии — попробуй активировать код заново.",
-        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.url("📖 Начать заново", "https://robloxbank.ru/guide?source=wb")]]) }
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.url("📖 Начать заново", "https://robloxbank.ru/guide?source=wb")],
+            [supportBtn("💬 Нужна помощь?")],
+          ]),
+        }
       );
       return;
     }
@@ -1133,7 +1146,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   // (isUsed=true + userId set). CLAIMED+isUsed=false is a provisional state
   // (bot claimed it but gamepass not sent yet), which should still be allowed through.
   if (wbCode.isUsed && wbCode.userId) {
-    await ctx.reply("⚠️ Этот код уже был активирован ранее.");
+    await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?") });
     return;
   }
 
@@ -1150,7 +1163,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
 
   // If code is CLAIMED by a different user, block
   if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
-    await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.");
+    await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.", { parse_mode: "HTML", ...withSupportKb("💬 Оспорить — написать нам") });
     return;
   }
 
@@ -1251,7 +1264,14 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
     `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
     `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${codeInput}\n\n` +
     `Жди ссылку на геймпасс 👇`,
-    { parse_mode: "HTML", link_preview_options: { is_disabled: true } }
+    {
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+      ...Markup.inlineKeyboard([
+        [Markup.button.url("📖 Открыть инструкцию", `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${codeInput}`)],
+        [supportBtn("💬 Нужна помощь?")],
+      ]),
+    }
   );
 }
 
@@ -1513,6 +1533,7 @@ export function registerCallbacks(bot: Telegraf): void {
         orderBy: { createdAt: "desc" },
       });
       if (!existingOrder) {
+        await ctx.reply("Заказ не найден — возможно, он уже завершён.", { parse_mode: "HTML", ...withSupportKb("💬 Разобраться с заявкой") });
         await ctx.answerCbQuery("Заказ не найден");
         return;
       }
@@ -1520,12 +1541,17 @@ export function registerCallbacks(bot: Telegraf): void {
       // Verify the order belongs to the calling user
       const callerUser = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
       if (!callerUser || existingOrder.userId !== callerUser.id) {
+        await ctx.reply("⛔ Этот заказ не принадлежит вашему аккаунту.\n\nЕсли вы уверены, что это ваш заказ:", { parse_mode: "HTML", ...withSupportKb() });
         await ctx.answerCbQuery("⛔ Нет доступа");
         return;
       }
 
       // Don't allow resubmit on already-processing or completed orders
       if (existingOrder.status === "IN_PROGRESS" || existingOrder.status === "COMPLETED" || existingOrder.status === "PENDING") {
+        await ctx.reply("✅ Твой заказ уже принят в работу — исправлять ссылку не нужно.\n\nОжидай уведомления.", {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[Markup.button.callback("📊 Проверить статус", CB.refreshStatus)]]),
+        });
         await ctx.answerCbQuery("Заказ уже в работе — исправлять ссылку не нужно.");
         return;
       }

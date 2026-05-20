@@ -155,6 +155,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // Accept "✅ Я подписался" as text only when the user is in AWAITING_LINK state
   // (old VK desktop clients that don't send inline-keyboard payloads). Without
   // the context guard any user sending that phrase would trigger a spurious sub-check.
+  const lower = text.toLowerCase();
   const isSubConfirmText =
     (lower.includes("вступил") || lower.includes("подписал")) && getState(vkUserId)?.type === "AWAITING_LINK";
   // "resubmit" button from /status REJECTED keyboard
@@ -170,7 +171,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         return;
       }
     }
-    await ctx.reply("Заказ не найден или уже не требует исправления.");
+    await ctx.reply("Заказ не найден или уже не требует исправления.\n\nЕсть вопросы? https://t.me/RobloxBank_PA");
     return;
   }
 
@@ -200,7 +201,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       return;
     } catch (err) {
       console.error("[VK] check_sub handler failed:", err);
-      await ctx.reply("Не удалось проверить подписку — попробуй ещё раз через минуту.");
+      await ctx.reply("Не удалось проверить подписку — попробуй ещё раз через минуту.\n\nЕсли проблема повторяется — напишите нам: https://t.me/RobloxBank_PA");
     }
   }
 
@@ -249,7 +250,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     console.log(`[VK] Начать command: vkUserId=${vkUserId}, isReturning=${custStatus.isReturning}`);
     if (custStatus.isReturning) {
       const firstName = await vkGetName(vkUserId);
-      await ctx.reply(getIdleGreeting(custStatus, firstName));
+      await ctx.reply(getIdleGreeting(custStatus, firstName) + "\n\nНужна помощь? https://t.me/RobloxBank_PA");
       return;
     }
 
@@ -293,13 +294,13 @@ async function handleRefActivation(
     where: { code: { equals: code, mode: "insensitive" } },
   });
   if (!wbCode) {
-    await ctx.reply("❌ Код не найден. Проверь правильность ввода на карточке.");
+    await ctx.reply("❌ Код не найден. Проверь правильность ввода на карточке.\n\nНужна помощь? https://t.me/RobloxBank_PA");
     return;
   }
   // Block only when code was truly completed (isUsed=true + userId set).
   // isUsed=false + userId set = TG provisional claim — don't block VK activation.
   if (wbCode.isUsed && wbCode.userId) {
-    await ctx.reply("⚠️ Этот код уже был активирован.");
+    await ctx.reply("⚠️ Этот код уже был активирован.\n\nЕсли карточка ваша — напишите нам: https://t.me/RobloxBank_PA");
     return;
   }
 
@@ -329,7 +330,7 @@ async function handleRefActivation(
 
   // If code is CLAIMED by a different user, block
   if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
-    await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.");
+    await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.\nНапишите нам: https://t.me/RobloxBank_PA");
     return;
   }
 
@@ -547,7 +548,7 @@ async function handleGamepassLink(
 
   const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
   if (!user) {
-    await ctx.reply("Ошибка сессии. Напиши нам снова — начнём с начала.");
+    await ctx.reply("Ошибка сессии. Напишите нам: https://t.me/RobloxBank_PA — разберёмся вместе.");
     clearState(vkUserId);
     return;
   }
@@ -634,16 +635,16 @@ async function handleGamepassLink(
   } catch (err: any) {
     if (err.isClaimed) {
       clearState(vkUserId);
-      await ctx.reply("⚠️ Этот код уже был активирован другим пользователем. Обратитесь в поддержку.");
+      await ctx.reply("⚠️ Этот код уже был активирован другим пользователем. Обратитесь в поддержку.\nhttps://t.me/RobloxBank_PA");
       return;
     }
     if (err.code === "P2002") {
       clearState(vkUserId);
-      await ctx.reply("⚠️ Заказ по этому коду уже создан и сейчас обрабатывается. Напиши «статус» чтобы проверить.");
+      await ctx.reply("⚠️ Заказ по этому коду уже создан и сейчас обрабатывается. Напиши «статус» чтобы проверить.\n\nНужна помощь? https://t.me/RobloxBank_PA");
       return;
     }
     console.error("[VK] Order/transaction error:", err);
-    await ctx.reply("❌ Ошибка при создании заявки. Попробуй позже или напишите в поддержку.");
+    await ctx.reply("❌ Ошибка при создании заявки. Попробуй позже или напиши нам: https://t.me/RobloxBank_PA");
     return;
   }
 
@@ -826,7 +827,7 @@ async function handleIdleMessage(
     });
 
     if (!order) {
-      await ctx.reply("У тебя пока нет заявок.");
+      await ctx.reply("У тебя пока нет заявок.\n\nЕсть код с WB-карты? Напиши его прямо сюда.\nНужна помощь? https://t.me/RobloxBank_PA");
       return;
     }
 
@@ -895,7 +896,7 @@ async function handleIdleMessage(
 
   if (status.isReturning) {
     // IDLE state: upsell to direct sales, no gamepass instructions
-    await ctx.reply(getIdleGreeting(status, firstName));
+    await ctx.reply(getIdleGreeting(status, firstName) + "\n\nНужна помощь? https://t.me/RobloxBank_PA");
   } else {
     const greeting = getGreeting(status, firstName);
     await ctx.reply(
