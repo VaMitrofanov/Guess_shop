@@ -1420,19 +1420,53 @@ export function registerCallbacks(bot: Telegraf): void {
       return;
     }
 
-    // ── ✅ confirm_reject: confirmed → ask for reason ────────────────────────
+    // ── ✅ confirm_reject: confirmed → show preset reason buttons ───────────
     if (data.startsWith("confirm_reject:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      const orderId = data.split(":")[1];
+      try { await ctx.editMessageText(
+        `📋 Выбери причину отклонения заказа <code>${orderId.slice(-6).toUpperCase()}</code>:`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("🔕 Не на продаже",    CB.orderRejectReason(orderId, "notsale"))],
+            [Markup.button.callback("💰 Неверная цена",    CB.orderRejectReason(orderId, "price"))],
+            [Markup.button.callback("🔗 Ссылка не та",     CB.orderRejectReason(orderId, "badlink"))],
+            [Markup.button.callback("✏️ Написать причину", CB.orderRejectCustom(orderId))],
+            [Markup.button.callback("🚫 Без причины",      `admin_reject_none:${orderId}`)],
+          ])
+        }
+      ); } catch { }
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    // ── 📋 ord_rr: preset order rejection reason ─────────────────────────────
+    if (data.startsWith("ord_rr:") && !data.startsWith("ord_rr_txt:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      const parts = data.split(":");
+      const orderId = parts[1];
+      const key     = parts[2];
+      const reasonMap: Record<string, string> = {
+        notsale: "Геймпасс не выставлен на продажу",
+        price:   "Неверная цена геймпасса",
+        badlink: "Неверная ссылка на геймпасс",
+      };
+      const reason = reasonMap[key] ?? key;
+      pendingRejectionReason.delete(ctx.from.id);
+      await performAdminReject(bot, ctx, orderId, reason);
+      await ctx.answerCbQuery(`Отклонено: ${reason}`);
+      return;
+    }
+
+    // ── ✏️ ord_rr_txt: admin wants to type a custom reason ──────────────────
+    if (data.startsWith("ord_rr_txt:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const orderId = data.split(":")[1];
       pendingRejectionReason.set(ctx.from.id, orderId);
       try { await ctx.editMessageText(
-        `⚠️ Введи причину отклонения для заказа <code>${orderId.slice(-6).toUpperCase()}</code>:`,
-        {
-          parse_mode: "HTML",
-          ...Markup.inlineKeyboard([[
-            Markup.button.callback("❌ Без причины", `admin_reject_none:${orderId}`)
-          ]])
-        }
+        `✏️ Напиши причину отклонения заказа <code>${orderId.slice(-6).toUpperCase()}</code>:`,
+        { parse_mode: "HTML" }
       ); } catch { }
       await ctx.answerCbQuery();
       return;
@@ -1450,7 +1484,7 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("admin_reject_none:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const orderId = data.split(":")[1];
-      pendingRejectionReason.delete(ctx.from.id); // cleanup if any
+      pendingRejectionReason.delete(ctx.from.id);
       await performAdminReject(bot, ctx, orderId, "");
       await ctx.answerCbQuery("Отклонено без причины");
       return;

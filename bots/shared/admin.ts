@@ -37,6 +37,11 @@ export const CB = {
   reviewRejectReason: (orderId: string, userId: string, key: string) =>
     `rr:${orderId}:${userId}:${key}`,
 
+  // Preset order rejection reasons — ord_rr:{orderId}:{key} (≤ 43 b with CUID + 8-char key)
+  orderRejectReason:  (orderId: string, key: string) => `ord_rr:${orderId}:${key}`,
+  // "type custom reason" → enter free-text mode
+  orderRejectCustom:  (orderId: string) => `ord_rr_txt:${orderId}`,
+
   // ── Hub navigation ─────────────────────────────────────────────────────────
   hubOrders:       "hub_orders",
   hubStats:        "hub_stats",
