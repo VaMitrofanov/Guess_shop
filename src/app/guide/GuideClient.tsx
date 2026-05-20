@@ -1789,21 +1789,6 @@ function WBGate({ onSuccess }: WBGateProps) {
       setShowVkAuth(true);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Неизвестная ошибка";
-      // If code already claimed, check if user can access instructions directly
-      if (msg.includes("уже был активирован")) {
-        try {
-          const statusRes = await fetch(`/api/wb-code?code=${encodeURIComponent(code)}`);
-          if (statusRes.ok) {
-            const statusData = await statusRes.json().catch(() => ({}));
-            if (statusData.claimed) {
-              saveWBSession(statusData.denomination ?? 0, code);
-              document.cookie = `wb_code=${code}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
-              onSuccess(statusData.denomination ?? 0, code);
-              return;
-            }
-          }
-        } catch { /* ignore, fall through to error */ }
-      }
       setError(msg);
       setShowVkAuth(false);
     } finally {

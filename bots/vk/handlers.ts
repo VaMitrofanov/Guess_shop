@@ -167,7 +167,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       if (order && (order.status === "REJECTED" || order.status === "AWAITING_GAMEPASS")) {
         setState(vkUserId, { type: "AWAITING_LINK", wbCode: resubCode, denomination: order.amount });
         const passPrice = Math.ceil(order.amount / 0.7);
-        await ctx.reply(`🔄 Исправление ссылки\n\n💎 Номинал: ${order.amount} R$\nПришли новую ссылку на геймпасс с ценой ${passPrice} R$.`);
+        await ctx.reply(`🔄 Исправление ссылки\n\n💎 Номинал: ${order.amount} R$\nПришли новую ссылку на геймпасс с ценой ${passPrice} R$.\n\nЕсли нужна помощь — https://t.me/RobloxBank_PA`);
         return;
       }
     }
@@ -460,7 +460,8 @@ async function handleGamepassLink(
       "Пришли одно из:\n" +
       "• Ссылку: https://www.roblox.com/game-pass/1234567/...\n" +
       "• Ссылку из конструктора: https://create.roblox.com/...\n" +
-      "• Просто ID (только цифры): 1234567"
+      "• Просто ID (только цифры): 1234567\n\n" +
+      "Если не получается — напишите нам: https://t.me/RobloxBank_PA"
     );
     return;
   }
@@ -493,7 +494,8 @@ async function handleGamepassLink(
         `• Creator Dashboard → Creations → Passes → Create\n` +
         `• Выбери публичную игру\n` +
         `• Установи цену ${expectedPrice} R$\n\n` +
-        `Затем пришли ссылку на новый геймпасс.`
+        `Затем пришли ссылку на новый геймпасс.\n\n` +
+        `Если нужна помощь — https://t.me/RobloxBank_PA`
       );
       return;
     }
@@ -501,7 +503,8 @@ async function handleGamepassLink(
     if (!gamepassInfo.isActive) {
       await ctx.reply(
         `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
-        `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.`
+        `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.\n\n` +
+        `Если нужна помощь — https://t.me/RobloxBank_PA`
       );
       return;
     }
@@ -511,7 +514,8 @@ async function handleGamepassLink(
         `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
         `Установлено: ${gamepassInfo.price} R$\n` +
         `Ожидается:   ${expectedPrice} R$\n\n` +
-        `Измени цену геймпасса в настройках Roblox и пришли ссылку снова.`
+        `Измени цену геймпасса в настройках Roblox и пришли ссылку снова.\n\n` +
+        `Если нужна помощь — https://t.me/RobloxBank_PA`
       );
       return;
     }
@@ -848,6 +852,10 @@ async function handleIdleMessage(
         ? `\n\nПришли ссылку на геймпасс с ценой ${passPrice} R$ — и мы возьмём в работу!`
         : order.status === "PENDING"
         ? "\n\nНе переживай — менеджер работает в порядке очереди, обычно выкупаем в течение нескольких часов, максимум сутки. Напишем сами."
+        : order.status === "IN_PROGRESS"
+        ? "\n\n🔧 Менеджер уже работает над твоим заказом. Скоро всё будет готово!"
+        : order.status === "COMPLETED"
+        ? "\n\n✅ Заказ выполнен! Если есть вопросы — https://t.me/RobloxBank_PA"
         : order.status === "REJECTED"
         ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Исправь геймпасс и нажми кнопку ниже — отправим на проверку заново.`
         : "";

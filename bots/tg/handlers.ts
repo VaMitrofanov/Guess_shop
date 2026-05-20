@@ -603,9 +603,10 @@ export function registerText(bot: Telegraf): void {
                 {
                   parse_mode: "HTML",
                   link_preview_options: { is_disabled: true },
-                  ...Markup.inlineKeyboard([[
-                    Markup.button.url("📖 Открыть инструкцию", `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`),
-                  ]]),
+                  ...Markup.inlineKeyboard([
+                    [Markup.button.url("📖 Открыть инструкцию", `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
+                    [supportBtn("💬 Нужна помощь?")],
+                  ]),
                 }
               );
               return;
@@ -654,7 +655,7 @@ export function registerText(bot: Telegraf): void {
             await ctx.reply(
               "📸 Жду скриншот отзыва — отправь его фотографией (не файлом, не документом).\n\n" +
               "Просто прикрепи изображение как обычное фото в Telegram.",
-              { parse_mode: "HTML" }
+              { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?") }
             );
             return;
           }
@@ -952,7 +953,10 @@ export function registerText(bot: Telegraf): void {
         clearFailCounts(ctx.from.id);
         await ctx.reply(
           "⚠️ Заказ по этому коду уже создан и сейчас обрабатывается.",
-          Markup.inlineKeyboard([[Markup.button.callback("📊 Проверить статус", CB.refreshStatus)]])
+          Markup.inlineKeyboard([
+            [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
+            [supportBtn("💬 Если что-то не так")],
+          ])
         );
         return;
       }
@@ -1569,7 +1573,7 @@ export function registerCallbacks(bot: Telegraf): void {
         `<code>https://www.roblox.com/game-pass/1234567/...</code>\n\n` +
         `💡 <i>Пример Asset ID:</i>\n` +
         `<code>1234567</code>`,
-        { parse_mode: "HTML" }
+        { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?") }
       );
       await ctx.answerCbQuery();
       return;
@@ -1836,13 +1840,14 @@ async function notifyUserRejected(
     try {
       await bot.telegram.sendMessage(user.tgId, msg, {
         parse_mode: "HTML",
-        ...Markup.inlineKeyboard([[
-          Markup.button.callback("🔄 Исправить ссылку", `user_resubmit:${wbCode}:${amount}`)
-        ]])
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🔄 Исправить ссылку", `user_resubmit:${wbCode}:${amount}`)],
+          [supportBtn("💬 Нужна помощь?")],
+        ])
       });
     } catch { }
   } else if (user.vkId) {
-    await vkSend(user.vkId, stripHtml(msg) + "\n\n(Чтобы исправить, просто отправьте новую ссылку на геймпасс в этот чат)");
+    await vkSend(user.vkId, stripHtml(msg) + "\n\nЧтобы исправить, просто отправьте новую ссылку на геймпасс в этот чат.\nЕсли нужна помощь — https://t.me/RobloxBank_PA");
   }
 }
 
@@ -1871,12 +1876,15 @@ async function notifyReviewRejected(
 
   if (user.tgId) {
     try {
-      await bot.telegram.sendMessage(user.tgId, tgMsg, { parse_mode: "HTML" });
+      await bot.telegram.sendMessage(user.tgId, tgMsg, {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([[supportBtn("💬 Нужна помощь?")]]),
+      });
       // Restore review state so the next photo from this user is processed
       pendingReview.set(parseInt(user.tgId), orderId);
     } catch { }
   } else if (user.vkId) {
-    await vkSend(user.vkId, vkMsg);
+    await vkSend(user.vkId, vkMsg + "\n\nЕсли нужна помощь — https://t.me/RobloxBank_PA");
     // Restore VK review state — lazy import to avoid circular deps
     try {
       const { setState } = await import("../vk/session");
@@ -1929,11 +1937,14 @@ export function registerChatMember(bot: Telegraf): void {
         `✅ <b>Добро пожаловать в канал!</b>\n\n` +
         `Твой код <code>${code}</code> зафиксирован — осталось создать геймпасс.\n\n` +
         `📌 Установи цену ровно <b>${passPrice} R$</b>\n\n` +
-        `Создай геймпасс и пришли ссылку прямо сюда 👇\n\n` +
-        `Нужна инструкция? 👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}`,
+        `Создай геймпасс и пришли ссылку прямо сюда 👇`,
         {
           parse_mode: "HTML",
           link_preview_options: { is_disabled: true },
+          ...Markup.inlineKeyboard([
+            [Markup.button.url("📖 Открыть инструкцию", `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}`)],
+            [supportBtn("💬 Нужна помощь?")],
+          ]),
         }
       );
     } catch (err) {
