@@ -164,8 +164,21 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     const ctxKey    = String(msgPayload.context ?? "general");
     const firstName = await vkGetName(vkUserId);
     const state     = getState(vkUserId);
-    const wbCode    = state?.type === "AWAITING_LINK" ? state.wbCode        : undefined;
-    const denom     = state?.type === "AWAITING_LINK" ? state.denomination  : undefined;
+    let wbCode  = state?.type === "AWAITING_LINK" ? state.wbCode       : undefined;
+    let denom   = state?.type === "AWAITING_LINK" ? state.denomination : undefined;
+    if (!wbCode) {
+      try {
+        const u = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+        if (u) {
+          const o = await (db as any).wbOrder.findFirst({
+            where: { userId: u.id },
+            orderBy: { updatedAt: "desc" },
+            select: { wbCode: true, amount: true },
+          });
+          if (o) { wbCode = o.wbCode; denom = o.amount; }
+        }
+      } catch {}
+    }
     await sendAdminSupportAlert({
       platform:    "VK",
       userDisplay: `vk.com/id${vkUserId} (${firstName})`,

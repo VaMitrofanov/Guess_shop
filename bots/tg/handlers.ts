@@ -763,7 +763,7 @@ export function registerText(bot: Telegraf): void {
           `• Выбери публичную игру\n` +
           `• Установи цену <b>${expectedPrice} R$</b>\n\n` +
           `Затем пришли ссылку на новый геймпасс.`,
-          { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?") }
+          { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "pass_private") }
         );
         return;
       }
