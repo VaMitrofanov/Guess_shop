@@ -166,7 +166,9 @@ async function checkGamePrivate(gamepassId: string): Promise<boolean> {
     const game = (gData?.data ?? [])[0];
     if (!game) return false;
 
-    return game.isPlayable === false;
+    // isPlayable===false covers standard private games; playabilityStatus covers
+    // cases where Roblox omits isPlayable but still signals the game is inaccessible.
+    return game.isPlayable === false || game.playabilityStatus === "PrivateGame";
   } catch {
     return false;
   }

@@ -41,30 +41,22 @@ function extractPassId(input: string): string | null {
  */
 async function tryRestoreState(vkUserId: number): Promise<boolean> {
   try {
-    // Query wbCode directly via relation filter — avoids loading the full User
-    // object with a deep include, which was causing ETIMEDOUT on Neon.
-    const lastCode = await (db as any).wbCode.findFirst({
-      where:   { user: { vkId: String(vkUserId) }, isUsed: true },
-      orderBy: { usedAt: "desc" },
-    });
-    if (!lastCode) return false;
-
-    // Skip if an active or provisional order already exists for this code
-    const existingOrder = await (db as any).wbOrder.findFirst({
-      where: {
-        wbCode: lastCode.code,
-        status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED"] }
-      },
-    });
-    if (existingOrder) return false;
-
     const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
-    const totalAmount = lastCode.denomination + (user?.balance || 0);
+    if (!user) return false;
+
+    // Look for AWAITING_GAMEPASS or REJECTED orders — mirrors TG DB recovery.
+    // (The old isUsed:true + no-order query was dead code: isUsed is only set true
+    //  atomically alongside order creation, so that combination never exists.)
+    const recoverable = await (db as any).wbOrder.findFirst({
+      where:   { userId: user.id, status: { in: ["AWAITING_GAMEPASS", "REJECTED"] } },
+      orderBy: { updatedAt: "desc" },
+    });
+    if (!recoverable) return false;
 
     setState(vkUserId, {
       type:         "AWAITING_LINK",
-      wbCode:       lastCode.code,
-      denomination: totalAmount,
+      wbCode:       recoverable.wbCode,
+      denomination: recoverable.amount,
     });
     return true;
   } catch (err) {
@@ -826,6 +818,8 @@ async function handleIdleMessage(
         ? `\n\nПришли ссылку на геймпасс с ценой ${passPrice} R$ — и мы возьмём в работу!`
         : order.status === "PENDING"
         ? "\n\nНе переживай — менеджер работает в порядке очереди, обычно выкупаем в течение нескольких часов, максимум сутки. Напишем сами."
+        : order.status === "REJECTED"
+        ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Исправь геймпасс и пришли новую ссылку прямо в этот чат.`
         : "";
 
     const gamepassLine = order.gamepassUrl ? `🔗 ${order.gamepassUrl}\n` : "";

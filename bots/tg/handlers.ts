@@ -416,8 +416,11 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   const user = await (db as any).user.findUnique({ where: { tgId } });
   if (!user) {
     return {
-      text: "У тебя пока нет заказов. Активируй код с карточки Wildberries через /start.",
-      keyboard: Markup.inlineKeyboard([refreshRow]),
+      text: "У тебя пока нет заказов. Есть код с WB-карты? Напиши его прямо сюда или открой инструкцию.",
+      keyboard: Markup.inlineKeyboard([
+        [Markup.button.url("📖 Инструкция", "https://robloxbank.ru/guide?source=wb")],
+        refreshRow,
+      ]),
     };
   }
 
@@ -800,7 +803,10 @@ export function registerText(bot: Telegraf): void {
 
     const user = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
     if (!user) {
-      await ctx.reply("Ошибка сессии. Пожалуйста, пройди активацию кода повторно через /start.");
+      await ctx.reply(
+        "Ошибка сессии — попробуй активировать код заново.",
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.url("📖 Начать заново", "https://robloxbank.ru/guide?source=wb")]]) }
+      );
       return;
     }
 
