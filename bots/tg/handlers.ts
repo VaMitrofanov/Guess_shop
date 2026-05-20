@@ -772,7 +772,9 @@ export function registerText(bot: Telegraf): void {
         await ctx.reply(
           `❌ Геймпасс в <b>закрытой или удалённой игре</b> — выкупить невозможно.\n\n` +
           `<b>Вариант 1</b> — открой игру:\n` +
-          `• create.roblox.com → найди игру → нажми <b>⋯</b> → <b>Make Public</b>\n\n` +
+          `• Зайди на <b>create.roblox.com/dashboard/creations</b> — у игры должен быть значок <b>Public</b>.\n` +
+          `• Если нет: кликни на плейс → Settings → Configure → выбери <b>Public</b>.\n` +
+          `• Если не получается — напиши менеджеру.\n\n` +
           `<b>Вариант 2</b> — создай геймпасс в другой публичной игре:\n` +
           `• Creator Hub → Creations → Passes → Create\n` +
           `• Установи цену <b>${expectedPrice} R$</b>, включи «On Sale»\n\n` +
@@ -1536,7 +1538,7 @@ export function registerCallbacks(bot: Telegraf): void {
         notsale:  "Геймпасс не выставлен на продажу",
         price:    "Неверная цена геймпасса",
         badlink:  "Неверная ссылка на геймпасс",
-        privgame: "Игра закрытая (private) — на create.roblox.com найди игру, нажми ⋯ → Make Public, или создай геймпасс в другой публичной игре",
+        privgame: "Игра закрытая (private) — create.roblox.com/dashboard/creations: у игры должен быть значок Public. Если нет: кликни на плейс → Settings → Configure → выбери Public. Или создай геймпасс в другой публичной игре.",
       };
       const reason = reasonMap[key] ?? key;
       pendingRejectionReason.delete(ctx.from.id);
@@ -1895,8 +1897,9 @@ async function notifyUserRejected(
   const isPrivateGame = reason.toLowerCase().includes("закрыт");
   const fixInstructions = isPrivateGame
     ? `Как исправить:\n` +
-      `1. Открой игру: create.roblox.com → найди игру → нажми <b>⋯</b> → <b>Make Public</b>\n` +
-      `   — ИЛИ создай геймпасс в другой публичной игре\n` +
+      `1. Зайди на <b>create.roblox.com/dashboard/creations</b> — у игры должен быть значок <b>Public</b>.\n` +
+      `   Если нет: кликни на плейс → Settings → Configure → выбери <b>Public</b>.\n` +
+      `   Если не получается — напиши менеджеру. Или создай геймпасс в другой публичной игре.\n` +
       `2. Установи цену геймпасса: <b>${Math.ceil(amount / 0.7)} R$</b>\n` +
       `3. Нажми кнопку ниже и пришли новую ссылку:`
     : `Чаще всего причина в одном из двух:\n` +

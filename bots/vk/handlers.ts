@@ -553,7 +553,9 @@ async function handleGamepassLink(
           `❌ Геймпасс в закрытой или удалённой игре — выкупить невозможно.\n\n` +
           `Как исправить:\n` +
           `Вариант 1 — открой игру:\n` +
-          `create.roblox.com → найди игру → нажми ⋯ → Make Public\n\n` +
+          `Зайди на create.roblox.com/dashboard/creations — у игры должен быть значок Public.\n` +
+          `Если нет: кликни на плейс → Settings → Configure → выбери Public.\n` +
+          `Если не получается — напиши менеджеру.\n\n` +
           `Вариант 2 — создай геймпасс в другой публичной игре:\n` +
           `Creator Hub → Creations → Passes → Create\n` +
           `Установи цену ${expectedPrice} R$, включи «On Sale»\n\n` +
