@@ -239,58 +239,97 @@ function hetznerStatusEmoji(status: string): string {
 }
 
 // ── VDSina API ────────────────────────────────────────────────────────────────
-// Auth: email + password (no API key — VDSina uses session tokens).
+// Auth: email + password via CSRF session (api2.vdsina.ru — the real API host).
+// Flow: GET /login (JSON) → POST /login with CSRF → session cookie → GET /account/view
 // Env vars: VDSINA_EMAIL, VDSINA_PASSWORD, VDSINA_LOW_BALANCE (default 500)
 
 interface VdsinaBalance { balance: number; currency: string }
 
-// Cached session token with expiry
-let _vdsinaToken: string | null = null;
-let _vdsinaTokenExpiresAt = 0;
+// Cached session + CSRF
+let _vdsinaSession: string | null = null;
+let _vdsinaSessionAt = 0;
 
-async function getVdsinaToken(): Promise<string | null> {
+const VDSINA_BASE = "https://api2.vdsina.ru";
+const VDSINA_HDRS = {
+  "Accept":            "application/json",
+  "X-Requested-With":  "XMLHttpRequest",
+  "Origin":            "https://cp.vdsina.ru",
+  "Referer":           "https://cp.vdsina.ru/",
+  "User-Agent":        "Mozilla/5.0",
+};
+
+async function vdsinaLogin(): Promise<string | null> {
   const email    = process.env.VDSINA_EMAIL;
   const password = process.env.VDSINA_PASSWORD;
   if (!email || !password) return null;
 
-  // Reuse cached token if still valid (with 5-min buffer)
-  if (_vdsinaToken && Date.now() < _vdsinaTokenExpiresAt - 5 * 60_000) {
-    return _vdsinaToken;
+  // Reuse session for 12h
+  if (_vdsinaSession && Date.now() - _vdsinaSessionAt < 12 * 3_600_000) {
+    return _vdsinaSession;
   }
 
   try {
-    const res = await fetch("https://api.vdsina.com/v1/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+    // Step 1: GET /login → CSRF token + session cookie
+    const r1 = await fetch(`${VDSINA_BASE}/login`, {
+      headers: VDSINA_HDRS,
       signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) return null;
-    const data = (await res.json()) as any;
-    const obj  = data.data ?? data;
-    _vdsinaToken = obj.token ?? obj.access_token ?? null;
-    // VDSina tokens typically last 24h; default to 23h if not specified
-    const expiresIn = parseInt(obj.expires_in ?? "82800", 10);
-    _vdsinaTokenExpiresAt = Date.now() + expiresIn * 1000;
-    return _vdsinaToken;
+    if (!r1.ok) return null;
+
+    const d1  = (await r1.json()) as any;
+    const csrf = d1._csrf as string | undefined;
+    if (!csrf) return null;
+
+    // Capture Set-Cookie (need raw value to avoid truncation by URL-decode)
+    const rawCookies: Record<string, string> = {};
+    r1.headers.forEach((v, k) => {
+      if (k.toLowerCase() === "set-cookie") {
+        const name = v.split("=")[0].trim();
+        const val  = v.split("=").slice(1).join("=").split(";")[0].trim();
+        rawCookies[name] = val;
+      }
+    });
+    const cookieStr = Object.entries(rawCookies).map(([k, v]) => `${k}=${v}`).join("; ");
+
+    // Step 2: POST /login with CSRF in body + header
+    const r2 = await fetch(`${VDSINA_BASE}/login`, {
+      method:  "POST",
+      headers: {
+        ...VDSINA_HDRS,
+        "Content-Type": "application/json",
+        "Cookie":        cookieStr,
+        "X-CSRF-Token":  csrf,
+      },
+      body:   JSON.stringify({ email, password, _csrf: csrf, remember_me: 1 }),
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!r2.ok) return null;
+    const d2 = (await r2.json()) as any;
+    if (d2.status !== "ok" && d2.status !== "success") return null;
+
+    _vdsinaSession    = d2._session ?? null;
+    _vdsinaSessionAt  = Date.now();
+    return _vdsinaSession;
   } catch {
     return null;
   }
 }
 
 async function fetchVdsinaBalance(): Promise<VdsinaBalance | null> {
-  const token = await getVdsinaToken();
-  if (!token) return null;
+  const session = await vdsinaLogin();
+  if (!session) return null;
   try {
-    const res = await fetch("https://api.vdsina.com/v1/account", {
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    const res = await fetch(`${VDSINA_BASE}/account/view`, {
+      headers: { ...VDSINA_HDRS, "Cookie": `_session=${session}` },
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as any;
+    // Response shape: { status: "ok", data: { balance: "123.45", ... } }
     const obj  = data.data ?? data.result ?? data;
     const balance = parseFloat(obj.balance ?? obj.credit ?? obj.amount ?? "0");
-    return { balance, currency: obj.currency ?? "₽" };
+    return { balance, currency: "₽" };
   } catch {
     return null;
   }
@@ -305,21 +344,29 @@ async function buildServersSection(): Promise<string> {
 
   let out = `\n🖥 <b>СЕРВЕРЫ</b>\n`;
 
+  // Hetzner: bills on the 1st of every month (postpay)
   if (hasHetzner) {
     const servers = await fetchHetznerServers();
     if (servers.length === 0) {
       out += `🇩🇪 Hetzner: <i>нет серверов / ошибка API</i>\n`;
     } else {
+      let totalEur = 0;
       for (const srv of servers) {
         const emoji  = hetznerStatusEmoji(srv.status);
         const city   = srv.datacenter?.location?.city ?? srv.datacenter?.name ?? "?";
         const dcLoc  = srv.datacenter?.location?.name;
         const price  = srv.server_type?.prices?.find(p => p.location === dcLoc) ?? srv.server_type?.prices?.[0];
         const eur    = price ? parseFloat(price.price_monthly.gross) : 0;
-        const cost   = eur > 0 ? ` · €${eur.toFixed(2)}/мес` : "";
         const spec   = srv.server_type ? ` ${srv.server_type.cores}vCPU ${srv.server_type.memory}GB` : "";
-        out += `🇩🇪 <b>${srv.name}</b> [${city}]: ${emoji} ${srv.status}${cost}${spec}\n`;
+        totalEur += eur;
+        out += `🇩🇪 <b>${srv.name}</b> [${city}]: ${emoji} ${srv.status}${spec}\n`;
       }
+      // Days until Hetzner billing (1st of next month)
+      const now  = new Date();
+      const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const days = Math.ceil((next.getTime() - now.getTime()) / 86_400_000);
+      const daysStr = days <= 5 ? ` ⚠️ через <b>${days}д</b>` : ` через ${days}д`;
+      out += `   💶 Оплата: ~€${totalEur.toFixed(2)}/мес · 1-е числа${daysStr}\n`;
     }
   }
 
@@ -328,9 +375,17 @@ async function buildServersSection(): Promise<string> {
     if (!result) {
       out += `🇷🇺 VDSina: <i>ошибка API</i>\n`;
     } else {
-      const low  = parseFloat(process.env.VDSINA_LOW_BALANCE ?? "500");
-      const warn = result.balance < low ? ` ⚠️ <b>ПОПОЛНИТЕ!</b>` : "";
-      out += `🇷🇺 VDSina: 💰 <b>${result.balance.toFixed(2)} ${result.currency}</b>${warn}\n`;
+      const low    = parseFloat(process.env.VDSINA_LOW_BALANCE ?? "500");
+      // Estimate days left: daily burn ≈ monthly cost / 30
+      // VDSINA_MONTHLY_COST env var lets user set the monthly cost for ETA
+      const monthly = parseFloat(process.env.VDSINA_MONTHLY_COST ?? "0");
+      const dailyBurn = monthly > 0 ? monthly / 30 : 0;
+      const daysLeft  = dailyBurn > 0 ? Math.floor(result.balance / dailyBurn) : null;
+      const etaStr    = daysLeft !== null
+        ? (daysLeft <= 7 ? ` ⚠️ <b>~${daysLeft}д осталось!</b>` : ` · ~${daysLeft}д`)
+        : "";
+      const warn = result.balance < low && etaStr === "" ? ` ⚠️ <b>ПОПОЛНИТЕ!</b>` : "";
+      out += `🇷🇺 VDSina: 💰 <b>${result.balance.toFixed(2)} ₽</b>${etaStr}${warn}\n`;
     }
   }
 
