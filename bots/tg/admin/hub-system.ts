@@ -337,52 +337,32 @@ async function fetchVdsinaBalance(): Promise<VdsinaBalance | null> {
   }
 }
 
-// ── Neon Postgres API ─────────────────────────────────────────────────────────
-// API key: console.neon.tech → Account Settings → API Keys
-// Env vars: NEON_API_KEY
+// ── Neon DB stats via direct query ────────────────────────────────────────────
+// No API key needed — queries the connected DB directly.
+// Env vars: NEON_BILLING_DAY (default 1), NEON_DB_SIZE_ALERT_MB (default 450)
 
-interface NeonUsage {
-  storageGb:    number;
-  computeHours: number;
-  dataTransferGb: number;
-  periodStart:  string; // ISO date
+interface NeonDbStats {
+  sizeBytes:         bigint;
+  orderCount:        bigint;
+  unusedCodes:       bigint;
+  activeConnections: bigint;
 }
 
-async function fetchNeonUsage(): Promise<NeonUsage | null> {
-  const key = process.env.NEON_API_KEY;
-  if (!key) return null;
-
+async function fetchNeonDbStats(): Promise<NeonDbStats | null> {
   try {
-    // Get current month boundaries
-    const now   = new Date();
-    const from  = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-    const to    = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
-
-    const res = await fetch(
-      `https://console.neon.tech/api/v2/consumption_history/account?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&granularity=monthly`,
-      {
-        headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
-        signal: AbortSignal.timeout(8000),
-      }
-    );
-    if (!res.ok) return null;
-    const data = (await res.json()) as any;
-
-    // Response: { periods: [{ period_id, consumption: [{ timeframe_start, ..., active_time_seconds, compute_time_seconds, written_data_bytes, data_storage_bytes_hour, data_transfer_bytes }] }] }
-    const periods  = data.periods ?? [];
-    const period   = periods[0];
-    if (!period) return null;
-    const c = period.consumption?.[0] ?? {};
-
-    const computeHours    = ((c.compute_time_seconds ?? 0) / 3600);
-    const storageGb       = (c.data_storage_bytes_hour ?? 0) / (1024 ** 3 * 720); // avg GB
-    const dataTransferGb  = (c.data_transfer_bytes ?? 0) / 1024 ** 3;
-
+    const result = await (db as any).$queryRaw`
+      SELECT
+        pg_database_size(current_database())                                    AS size_bytes,
+        (SELECT count(*) FROM "WbOrder")                                        AS order_count,
+        (SELECT count(*) FROM "WbCode" WHERE "isUsed" = false)                  AS unused_codes,
+        (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()) AS active_connections
+    `;
+    const row = (result as any[])[0];
     return {
-      storageGb,
-      computeHours,
-      dataTransferGb,
-      periodStart: (period.period_id ?? from).slice(0, 10),
+      sizeBytes:         BigInt(row.size_bytes         ?? 0),
+      orderCount:        BigInt(row.order_count        ?? 0),
+      unusedCodes:       BigInt(row.unused_codes       ?? 0),
+      activeConnections: BigInt(row.active_connections ?? 0),
     };
   } catch {
     return null;
@@ -390,27 +370,30 @@ async function fetchNeonUsage(): Promise<NeonUsage | null> {
 }
 
 async function buildNeonSection(): Promise<string> {
-  if (!process.env.NEON_API_KEY) return "";
+  const stats = await fetchNeonDbStats();
+  if (!stats) return `\n🐘 <b>Neon DB</b>: <i>ошибка запроса</i>\n`;
 
-  const usage = await fetchNeonUsage();
-  if (!usage) return `\n🐘 <b>Neon DB</b>: <i>ошибка API</i>\n`;
+  const sizeMB = Number(stats.sizeBytes) / (1024 ** 2);
+  const sizeStr = sizeMB >= 100
+    ? `${(sizeMB / 1024).toFixed(2)} GB`
+    : `${sizeMB.toFixed(0)} MB`;
 
-  // Days in current billing period
-  const now        = new Date();
-  const daysIn     = now.getDate();
-  const daysTotal  = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const daysLeft   = daysTotal - daysIn;
-  const nextBill   = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-    .toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+  // Billing countdown from NEON_BILLING_DAY (default: 1st of month)
+  const billingDay = parseInt(process.env.NEON_BILLING_DAY ?? "1");
+  const now = new Date();
+  let nextBillDate = new Date(now.getFullYear(), now.getMonth(), billingDay);
+  if (nextBillDate.getTime() <= now.getTime()) {
+    nextBillDate = new Date(now.getFullYear(), now.getMonth() + 1, billingDay);
+  }
+  const daysLeft   = Math.ceil((nextBillDate.getTime() - now.getTime()) / 86_400_000);
+  const billWarn   = daysLeft <= 5 ? " ⚠️" : "";
+  const nextBillStr = nextBillDate.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
 
-  const storageLine  = `💾 ${usage.storageGb.toFixed(2)} GB`;
-  const computeLine  = `⚡ ${usage.computeHours.toFixed(1)}ч compute`;
-  const transferLine = usage.dataTransferGb > 0.01 ? ` · 🔁 ${usage.dataTransferGb.toFixed(2)} GB` : "";
-
-  const billWarn = daysLeft <= 5 ? ` ⚠️` : "";
-  const billLine = `📅 оплата ${nextBill} (через ${daysLeft}д${billWarn})`;
-
-  return `\n🐘 <b>Neon DB</b>\n${storageLine} · ${computeLine}${transferLine}\n${billLine}\n`;
+  return (
+    `\n🐘 <b>Neon DB</b>\n` +
+    `💾 ${sizeStr} · 📦 ${stats.orderCount} заказов · 🎫 ${stats.unusedCodes} кодов\n` +
+    `📅 оплата ${nextBillStr} (через ${daysLeft}д${billWarn})\n`
+  );
 }
 
 // ── Combined servers section ──────────────────────────────────────────────────
@@ -501,13 +484,14 @@ async function runServerCheck(): Promise<void> {
     }
   }
 
-  // Neon: alert if compute > NEON_COMPUTE_ALERT_HOURS threshold (default 100h)
-  if (process.env.NEON_API_KEY) {
-    const usage = await fetchNeonUsage();
-    if (usage) {
-      const limit = parseFloat(process.env.NEON_COMPUTE_ALERT_HOURS ?? "100");
-      if (usage.computeHours > limit) {
-        alerts.push(`🐘 Neon DB: ⚡ compute <b>${usage.computeHours.toFixed(1)}ч</b> — превышен порог ${limit}ч`);
+  // Neon: alert if DB size exceeds threshold (default 450 MB — warns before 500 MB free-tier limit)
+  {
+    const stats = await fetchNeonDbStats();
+    if (stats) {
+      const sizeMB  = Number(stats.sizeBytes) / (1024 ** 2);
+      const limitMB = parseFloat(process.env.NEON_DB_SIZE_ALERT_MB ?? "450");
+      if (sizeMB > limitMB) {
+        alerts.push(`🐘 Neon DB: 💾 размер <b>${(sizeMB / 1024).toFixed(2)} GB</b> — превышен порог ${limitMB} MB`);
       }
     }
   }
@@ -521,8 +505,7 @@ async function runServerCheck(): Promise<void> {
 /** Start background server monitor. Call once at bot startup. */
 export function startServerMonitor(): void {
   const hasAny = process.env.HETZNER_API_TOKEN
-    || (process.env.VDSINA_EMAIL && process.env.VDSINA_PASSWORD)
-    || process.env.NEON_API_KEY;
+    || (process.env.VDSINA_EMAIL && process.env.VDSINA_PASSWORD);
   if (!hasAny) return;
 
   // First check after 1 min (populate _prevHetznerStatus baseline without alerting),
