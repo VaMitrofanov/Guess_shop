@@ -36,7 +36,7 @@ import {
 } from "./hub-wildberries";
 import {
   showSystemHub, showLogs, showRestartConfirm, handleRestartConfirm,
-  initLogCapture,
+  initLogCapture, startServerMonitor,
 } from "./hub-system";
 import {
   pendingAdminSearch, pendingCodesInput, pendingRateInput, pendingPriceInput,
@@ -58,6 +58,9 @@ export function registerAdminHubs(bot: Telegraf): void {
 
   // Start WB background monitor — pushes alerts every 15 min
   startWbMonitor(bot);
+
+  // Start server monitor — checks Hetzner/VDSina every 30 min
+  startServerMonitor();
 
   /**
    * Wrapper for admin menu commands (Zero-Spam UI).
