@@ -26,7 +26,7 @@
 
 import "dotenv/config";
 import { VK } from "vk-io";
-import { handleMessage } from "./handlers";
+import { handleMessage, initVkHandlers } from "./handlers";
 import { startBridgeServer } from "../shared/bridge";
 
 console.log("🚀 DEPLOY_VERSION: 4.0 - LOYALTY_HARD_SYNC");
@@ -38,6 +38,7 @@ if (!token)   throw new Error("[VK] VK_TOKEN is not set");
 if (!groupId) throw new Error("[VK] VK_GROUP_ID is not set");
 
 export const vk = new VK({ token, apiVersion: "5.131" });
+initVkHandlers(vk);
 
 // Register message_new handler
 vk.updates.on("message_new", async (ctx) => {

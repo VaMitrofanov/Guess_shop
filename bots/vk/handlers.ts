@@ -17,6 +17,12 @@ import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
 import { getGamepassDetails } from "../shared/roblox";
 
+// VK API instance injected from bot.ts to avoid circular import.
+let _vkApi: any = null;
+export function initVkHandlers(vkInstance: any): void {
+  _vkApi = vkInstance.api;
+}
+
 /**
  * Extract a Roblox game-pass ID from user input.
  * Accepts:
@@ -98,11 +104,12 @@ function vkUserDisplay(name: string, vkUserId: number): string {
 }
 
 /** Returns false only when the group ID is configured AND the API confirms non-membership. Fail-open. */
-async function isVkSubscribed(ctx: MessageContext, vkUserId: number): Promise<boolean> {
+async function isVkSubscribed(_ctx: MessageContext, vkUserId: number): Promise<boolean> {
   const groupId = process.env.VK_GROUP_ID;
   if (!groupId) return true;
+  if (!_vkApi) { console.error("[Gate] _vkApi not initialised — call initVkHandlers() in bot.ts"); return true; }
   try {
-    const isMember = !!(await (ctx as any).vk.api.groups.isMember({ group_id: groupId, user_id: vkUserId }));
+    const isMember = !!(await _vkApi.groups.isMember({ group_id: groupId, user_id: vkUserId }));
     console.log(isMember ? `[Gate] User ${vkUserId} passed sub check` : `[Gate] User ${vkUserId} failed sub check`);
     return isMember;
   } catch (err) {
