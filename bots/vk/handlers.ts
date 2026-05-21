@@ -555,12 +555,29 @@ async function handleGamepassLink(
   if (!gamepassInfo.validationSkipped) {
     // Normal validation — only runs when Roblox API was reachable
     if (!gamepassInfo.isActive) {
-      await ctx.reply({
-        message:
-          `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
-          `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.`,
-        keyboard: vkSupportKb("pass_inactive"),
-      });
+      if (gamepassInfo.isGamePrivate) {
+        await ctx.reply({
+          message:
+            `❌ Геймпасс в закрытой или удалённой игре — выкупить невозможно.\n\n` +
+            `Как исправить:\n` +
+            `Вариант 1 — открой игру:\n` +
+            `Зайди на create.roblox.com/dashboard/creations — у игры должен быть значок Public.\n` +
+            `Если нет: кликни на плейс → Settings → Configure → выбери Public.\n` +
+            `Если не получается — напиши менеджеру.\n\n` +
+            `Вариант 2 — создай геймпасс в другой публичной игре:\n` +
+            `Creator Hub → Creations → Passes → Create\n` +
+            `Установи цену ${expectedPrice} R$, включи «On Sale»\n\n` +
+            `После этого пришли ссылку на геймпасс сюда.`,
+          keyboard: vkSupportKb("pass_private"),
+        });
+      } else {
+        await ctx.reply({
+          message:
+            `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
+            `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.`,
+          keyboard: vkSupportKb("pass_inactive"),
+        });
+      }
       return;
     }
 

@@ -770,18 +770,34 @@ export function registerText(bot: Telegraf): void {
       if (!gamepassInfo.isActive) {
         const fc = getFailCounts(ctx.from.id);
         fc.notActive++;
-        if (fc.notActive === 1) await notifyAdminValidationFail("Геймпасс не выставлен на продажу");
-        const notActiveText =
-          `⚠️ Геймпасс не выставлен на продажу.\n\n` +
-          `Зайди в Creator Dashboard → Creations → Passes, найди геймпасс <b>${passId}</b>, ` +
-          `нажми «Edit» и поставь галочку «On Sale». После этого пришли ссылку снова.`;
-        await ctx.reply(notActiveText, {
-          parse_mode: "HTML",
-          ...Markup.inlineKeyboard([[
-            Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`),
-            ...(fc.notActive >= 2 ? [supportBtn("Нужна помощь?", "pass_inactive")] : []),
-          ]]),
-        });
+        if (gamepassInfo.isGamePrivate) {
+          if (fc.notActive === 1) await notifyAdminValidationFail("Игра закрыта (private) — геймпасс не продаётся");
+          await ctx.reply(
+            `❌ Геймпасс в <b>закрытой или удалённой игре</b> — выкупить невозможно.\n\n` +
+            `<b>Вариант 1</b> — открой игру:\n` +
+            `• Зайди на <b>create.roblox.com/dashboard/creations</b> — у игры должен быть значок <b>Public</b>.\n` +
+            `• Если нет: кликни на плейс → Settings → Configure → выбери <b>Public</b>.\n` +
+            `• Если не получается — напиши менеджеру.\n\n` +
+            `<b>Вариант 2</b> — создай геймпасс в другой публичной игре:\n` +
+            `• Creator Hub → Creations → Passes → Create\n` +
+            `• Установи цену <b>${expectedPrice} R$</b>, включи «On Sale»\n\n` +
+            `После этого пришли новую ссылку.`,
+            { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "pass_private") }
+          );
+        } else {
+          if (fc.notActive === 1) await notifyAdminValidationFail("Геймпасс не выставлен на продажу");
+          const notActiveText =
+            `⚠️ Геймпасс не выставлен на продажу.\n\n` +
+            `Зайди в Creator Dashboard → Creations → Passes, найди геймпасс <b>${passId}</b>, ` +
+            `нажми «Edit» и поставь галочку «On Sale». После этого пришли ссылку снова.`;
+          await ctx.reply(notActiveText, {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[
+              Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`),
+              ...(fc.notActive >= 2 ? [supportBtn("Нужна помощь?", "pass_inactive")] : []),
+            ]]),
+          });
+        }
         return;
       }
 
