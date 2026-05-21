@@ -104,10 +104,11 @@ export async function showSystemHub(ctx: Context): Promise<void> {
 async function buildSystemText(): Promise<string> {
   const services = getServices();
 
-  // Parallel: health checks + servers section
-  const [checks, serversSection] = await Promise.all([
+  // Parallel: health checks + servers + Neon
+  const [checks, serversSection, neonSection] = await Promise.all([
     Promise.all(services.map(async (s) => ({ ...s, ...await checkHealth(s.url) }))),
     buildServersSection(),
+    buildNeonSection(),
   ]);
 
   // DB check
@@ -151,7 +152,8 @@ async function buildSystemText(): Promise<string> {
     `📊 База данных: ${dbOk ? "🟢 Connected" : "🔴 Disconnected"}\n` +
     `⏰ Последний заказ: <b>${lastOrderAgo}</b>\n` +
     `💾 Память: <b>${heapMB} MB</b> heap / <b>${rssMB} MB</b> RSS` +
-    serversSection
+    serversSection +
+    neonSection
   );
 }
 
@@ -335,6 +337,82 @@ async function fetchVdsinaBalance(): Promise<VdsinaBalance | null> {
   }
 }
 
+// ── Neon Postgres API ─────────────────────────────────────────────────────────
+// API key: console.neon.tech → Account Settings → API Keys
+// Env vars: NEON_API_KEY
+
+interface NeonUsage {
+  storageGb:    number;
+  computeHours: number;
+  dataTransferGb: number;
+  periodStart:  string; // ISO date
+}
+
+async function fetchNeonUsage(): Promise<NeonUsage | null> {
+  const key = process.env.NEON_API_KEY;
+  if (!key) return null;
+
+  try {
+    // Get current month boundaries
+    const now   = new Date();
+    const from  = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const to    = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+
+    const res = await fetch(
+      `https://console.neon.tech/api/v2/consumption_history/account?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&granularity=monthly`,
+      {
+        headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as any;
+
+    // Response: { periods: [{ period_id, consumption: [{ timeframe_start, ..., active_time_seconds, compute_time_seconds, written_data_bytes, data_storage_bytes_hour, data_transfer_bytes }] }] }
+    const periods  = data.periods ?? [];
+    const period   = periods[0];
+    if (!period) return null;
+    const c = period.consumption?.[0] ?? {};
+
+    const computeHours    = ((c.compute_time_seconds ?? 0) / 3600);
+    const storageGb       = (c.data_storage_bytes_hour ?? 0) / (1024 ** 3 * 720); // avg GB
+    const dataTransferGb  = (c.data_transfer_bytes ?? 0) / 1024 ** 3;
+
+    return {
+      storageGb,
+      computeHours,
+      dataTransferGb,
+      periodStart: (period.period_id ?? from).slice(0, 10),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function buildNeonSection(): Promise<string> {
+  if (!process.env.NEON_API_KEY) return "";
+
+  const usage = await fetchNeonUsage();
+  if (!usage) return `\n🐘 <b>Neon DB</b>: <i>ошибка API</i>\n`;
+
+  // Days in current billing period
+  const now        = new Date();
+  const daysIn     = now.getDate();
+  const daysTotal  = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const daysLeft   = daysTotal - daysIn;
+  const nextBill   = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+    .toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+
+  const storageLine  = `💾 ${usage.storageGb.toFixed(2)} GB`;
+  const computeLine  = `⚡ ${usage.computeHours.toFixed(1)}ч compute`;
+  const transferLine = usage.dataTransferGb > 0.01 ? ` · 🔁 ${usage.dataTransferGb.toFixed(2)} GB` : "";
+
+  const billWarn = daysLeft <= 5 ? ` ⚠️` : "";
+  const billLine = `📅 оплата ${nextBill} (через ${daysLeft}д${billWarn})`;
+
+  return `\n🐘 <b>Neon DB</b>\n${storageLine} · ${computeLine}${transferLine}\n${billLine}\n`;
+}
+
 // ── Combined servers section ──────────────────────────────────────────────────
 
 async function buildServersSection(): Promise<string> {
@@ -423,6 +501,17 @@ async function runServerCheck(): Promise<void> {
     }
   }
 
+  // Neon: alert if compute > NEON_COMPUTE_ALERT_HOURS threshold (default 100h)
+  if (process.env.NEON_API_KEY) {
+    const usage = await fetchNeonUsage();
+    if (usage) {
+      const limit = parseFloat(process.env.NEON_COMPUTE_ALERT_HOURS ?? "100");
+      if (usage.computeHours > limit) {
+        alerts.push(`🐘 Neon DB: ⚡ compute <b>${usage.computeHours.toFixed(1)}ч</b> — превышен порог ${limit}ч`);
+      }
+    }
+  }
+
   if (alerts.length > 0) {
     const text = `🚨 <b>СЕРВЕРНЫЙ АЛЕРТ</b>\n━━━━━━━━━━━━━━━━\n` + alerts.join("\n");
     await Promise.allSettled(ADMIN_IDS.map(id => tgSend(id, text)));
@@ -431,7 +520,10 @@ async function runServerCheck(): Promise<void> {
 
 /** Start background server monitor. Call once at bot startup. */
 export function startServerMonitor(): void {
-  if (!process.env.HETZNER_API_TOKEN && !(process.env.VDSINA_EMAIL && process.env.VDSINA_PASSWORD)) return;
+  const hasAny = process.env.HETZNER_API_TOKEN
+    || (process.env.VDSINA_EMAIL && process.env.VDSINA_PASSWORD)
+    || process.env.NEON_API_KEY;
+  if (!hasAny) return;
 
   // First check after 1 min (populate _prevHetznerStatus baseline without alerting),
   // then every 30 min for ongoing monitoring.
