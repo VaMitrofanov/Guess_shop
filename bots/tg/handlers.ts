@@ -767,23 +767,6 @@ export function registerText(bot: Telegraf): void {
         }
       };
 
-      if (gamepassInfo.isGamePrivate) {
-        await notifyAdminValidationFail("Игра закрыта (private)");
-        await ctx.reply(
-          `❌ Геймпасс в <b>закрытой или удалённой игре</b> — выкупить невозможно.\n\n` +
-          `<b>Вариант 1</b> — открой игру:\n` +
-          `• Зайди на <b>create.roblox.com/dashboard/creations</b> — у игры должен быть значок <b>Public</b>.\n` +
-          `• Если нет: кликни на плейс → Settings → Configure → выбери <b>Public</b>.\n` +
-          `• Если не получается — напиши менеджеру.\n\n` +
-          `<b>Вариант 2</b> — создай геймпасс в другой публичной игре:\n` +
-          `• Creator Hub → Creations → Passes → Create\n` +
-          `• Установи цену <b>${expectedPrice} R$</b>, включи «On Sale»\n\n` +
-          `После этого пришли новую ссылку.`,
-          { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "pass_private") }
-        );
-        return;
-      }
-
       if (!gamepassInfo.isActive) {
         const fc = getFailCounts(ctx.from.id);
         fc.notActive++;
