@@ -630,8 +630,11 @@ async function handleGamepassLink(
     return;
   }
 
-  // Count BEFORE the transaction so the badge reflects orders prior to this one
-  const previousOrderCount = await (db as any).wbOrder.count({ where: { userId: user.id } }).catch(() => 0);
+  // Count completed/pending/rejected orders only — exclude the current provisional
+  // AWAITING_GAMEPASS order so a first-time user doesn't get the "returning" badge.
+  const previousOrderCount = await (db as any).wbOrder.count({
+    where: { userId: user.id, status: { notIn: ["AWAITING_GAMEPASS"] } },
+  }).catch(() => 0);
 
   // ── Atomic claim + order creation ──────────────────────────────────────
   // Roblox validation passed above — now commit in a single transaction:
