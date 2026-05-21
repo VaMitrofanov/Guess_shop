@@ -196,6 +196,14 @@ export async function getGamepassDetailsDirect(
   const parseItem = (d: any, source: string): GamepassDetails | null => {
     if (!d || typeof d !== "object") return null; // caller already logged HTTP status
 
+    // Reject catalog assets (clothing, accessories…) that share a numeric ID with a
+    // gamepass. The catalog endpoint can return a non-gamepass item when itemType is
+    // "Asset"; we guard here so all four attempts stay self-consistent.
+    if (d.itemType && d.itemType !== "GamePass") {
+      console.warn(`[Roblox/bots] ${source}: itemType=${d.itemType} for id=${gamepassId} — not a GamePass, skipping`);
+      return null;
+    }
+
     const price: number =
       d.price          ?? // marketplace-items shape
       d.priceInRobux   ?? // catalog shape (camelCase)
@@ -271,7 +279,7 @@ export async function getGamepassDetailsDirect(
       {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ items: [{ itemType: "Asset", id: numId }] }),
+        body:    JSON.stringify({ items: [{ itemType: "GamePass", id: numId }] }),
       }
     );
     httpResponses++;
