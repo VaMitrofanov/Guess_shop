@@ -309,6 +309,10 @@ TG_CHANNEL_ID             # Канал подписки (опционально)
 ADMIN_IDS                 # TG user IDs через запятую
 VALIDATOR_SOURCE_URL      # Singapore bridge URL
 VALIDATOR_KEY             # Shared secret для bridge
+HETZNER_API_TOKEN         # Hetzner Cloud API token (read-only) — для мониторинга сервера
+VDSINA_EMAIL              # Email от cp.vdsina.ru — для проверки баланса
+VDSINA_PASSWORD           # Пароль от cp.vdsina.ru
+VDSINA_LOW_BALANCE        # Порог алерта в ₽ (default: 500)
 ```
 
 ### VK бот (отдельный Coolify сервис)
@@ -420,6 +424,7 @@ const denomination = wbCodeRecord?.denomination ?? 0;
 - ✅ Уведомления о поддержке: любой тупик → кнопка → alert в ADMIN_IDS
 - ✅ validationSkipped: если Roblox недоступен — принять с предупреждением
 - ✅ Denomination и passPrice в уведомлениях (auth.ts, TG provisional, VK provisional)
+- ✅ Мониторинг серверов в System Hub: Hetzner (статус, €/мес) + VDSina (баланс ₽, алерт при < 500₽)
 
 ### Что не тестировалось в последнее время
 - ⚠️ Tinkoff эквайринг (в коде есть, но WB флоу не использует)
@@ -529,16 +534,18 @@ c33aa06 fix(bots): pass_private ctxKey for TG, add DB fallback for VK support ha
 
 ---
 
-## Текущий деплой (2026-05-21 после ultra-review)
+## Текущий деплой (2026-05-21)
 
 | Сервис | Сервер | Commit | Статус |
 |--------|--------|--------|--------|
 | Next.js сайт | RF 89.110.94.117 | `bc1c7df` | ✅ |
 | Guide (отдельный сервис) | RF 89.110.94.117 | `bc1c7df` | ✅ |
 | VK бот | RF 89.110.94.117 | `bc1c7df` | ✅ |
-| TG бот | SG 5.223.95.11 | `bc1c7df` | ✅ |
+| TG бот | SG 5.223.95.11 | `db56f8e` | ✅ |
 
 **Auto-deploy сломан:** RF-сервер не может достучаться до `api.github.com` (Russian IP block). Coolify ставит `is_auto_deploy_enabled = true`, но вебхук не срабатывает (timeout на GitHub API). Деплой только вручную через Coolify UI или API.
+
+**Coolify API доступ:** токен ID=16 создан через DB (SHA-256 хэш). Формат: `16|<raw_token>`. Вызов только с RF-сервера через `http://localhost:8000/api/v1/`. UUID TG-бота: `lyz78enntugna9em1biopinr`. Deploy endpoint: `POST /api/v1/deploy?uuid=lyz78enntugna9em1biopinr`.
 
 **DB состояние (на момент аудита):** 3 COMPLETED / 2 REJECTED заказа, 995 AVAILABLE кодов, 9 TG-пользователей.  
 **4 зависших RESERVED кода** (`1FS0SNA`, `66PXO05`, `UITRVG1`, `QP7HC6J`) — нет фонового cleanup job, истёкли TTL. Нужно либо cron-задача, либо авто-релиз в `/api/wb-code` при истёкшем `reservedUntil`.
