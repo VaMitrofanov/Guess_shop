@@ -546,12 +546,43 @@ c33aa06 fix(bots): pass_private ctxKey for TG, add DB fallback for VK support ha
 
 ---
 
-## Текущий деплой (2026-05-21)
+## Сессия 2026-05-22/23 — PublicGameBlock + аудит анимаций
+
+### Что сделано
+
+**Сайт (GuideClient.tsx):**
+- Добавлен `PublicGameBlock` — коллапсируемый блок "Игра должна быть Public" под шагом 02. Включает:
+  - Новая code-анимация `AnimPublicBadge`: сетка Creations, курсор движется к карточке, значок Public подсвечивается и увеличивается, затем курсор отходит чтобы открыть badge
+  - Скриншот `public-configure.jpg` с зелёным highlight-прямоугольником вокруг кнопки Public
+  - Вложенный коллапс "Всё ещё не Public?" → slideshow из 3 скриншотов через Questionnaire
+- Добавлены скриншоты в `public/guide/`: `public-badge.jpg`, `public-configure.jpg`, `public-settings.jpg`, `public-questionnaire.png`, `public-questionnaire-success.png`
+- Исправлен TypeScript build: `scratch/` добавлен в `tsconfig.json` exclude
+
+**Боты (pass_private ветка):**
+- `bots/tg/handlers.ts`: в ветке `pass_private` добавлена пошаговая инструкция (Configure → Settings → Audience → Public), шаг через Questionnaire, кнопка "📖 Полная инструкция" со ссылкой на `/guide?source=wb&skip=1&code=...`
+- `bots/vk/handlers.ts`: аналогично + ссылка на гайд текстом
+
+**Аудит и фикс анимаций (коммит `aa00ed4`):**
+- `Anim01`: курсор теперь виден на всех 4 кадрах (был скрыт во время загрузки); правильные позиции
+- `Anim02`: курсор движется к карточке игры на f=1 (был freeze 3.4с); модалка появляется через AnimatePresence fade вместо резкого pop-in
+- `AnimPublicBadge`: 5 кадров → 4 (убран дублирующий f=4 = 2.6с freeze); курсор уходит на f=3 чтобы открыть badge
+- `Anim04Price`: цена набирается посимвольно (f=3: первые 2 цифры, f=4: полностью); toggle-контент скрывается через AnimatePresence вместо flash
+- `Anim05WB`: URL всегда `roblox.com/game-pass/...` (был mismatch с `create.roblox.com`); 4 позиции курсора; курсор виден на f=3
+- `Anim06WB`: сообщения менеджера (f=3, f=4) появляются через `motion.div` с slide+fade
+- `Anim05ID`: контекстное меню scale+fade через AnimatePresence
+
+**Инфраструктура:**
+- Обнаружен реальный IP сервера RF: `89.110.94.117` (не `77.222.43.19`)
+- Создан новый Coolify API токен ID=18 (предыдущий ID=16 был нечитаем из DB)
+- Coolify deploy требует `force=true` из-за Russian IP block на api.github.com
+
+---
+
+## Текущий деплой (2026-05-23)
 
 | Сервис | Сервер | Commit | Статус |
 |--------|--------|--------|--------|
-| Next.js сайт | RF 89.110.94.117 | `bc1c7df` | ✅ |
-| Guide (отдельный сервис) | RF 89.110.94.117 | `bc1c7df` | ✅ |
+| Next.js сайт | RF 89.110.94.117 | `aa00ed4` | ✅ |
 | VK бот | RF 89.110.94.117 | `7165440` (handlers.ts вручную) | ✅ |
 | TG бот | SG 5.223.95.11 | `b2d4e98` (handlers.ts + roblox.ts вручную) | ✅ |
 
