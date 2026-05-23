@@ -1548,7 +1548,7 @@ export function registerCallbacks(bot: Telegraf): void {
         notsale:  "Геймпасс не выставлен на продажу",
         price:    "Неверная цена геймпасса",
         badlink:  "Неверная ссылка на геймпасс",
-        privgame: "Игра закрытая (private) — create.roblox.com/dashboard/creations: у игры должен быть значок Public. Если нет: кликни на плейс → Settings → Configure → выбери Public. Или создай геймпасс в другой публичной игре.",
+        privgame: "Игра закрытая (private) — нужно сделать публичной. Подробная инструкция ниже.",
       };
       const reason = reasonMap[key] ?? key;
       pendingRejectionReason.delete(ctx.from.id);

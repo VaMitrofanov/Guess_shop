@@ -944,7 +944,7 @@ function PublicGameBlock() {
                                 <span style={{ fontSize: 9, color: "#ccc" }}>{QUEST_SLIDES[questSlide].caption}</span>
                                 <div style={{ display: "flex", gap: 4, flexShrink: 0, marginLeft: 8 }}>
                                   {QUEST_SLIDES.map((_, qi) => (
-                                    <button key={qi} onClick={() => setQuestSlide(qi)} style={{ width: 6, height: 6, borderRadius: "50%", background: questSlide === qi ? "#00b06f" : "#555", border: "none", cursor: "pointer", padding: 0 }} />
+                                    <button key={qi} onClick={() => setQuestSlide(qi)} aria-label={`Перейти к слайду ${qi + 1} из ${QUEST_SLIDES.length}`} aria-current={questSlide === qi ? "true" : undefined} style={{ width: 6, height: 6, borderRadius: "50%", background: questSlide === qi ? "#00b06f" : "#555", border: "none", cursor: "pointer", padding: 0 }} />
                                   ))}
                                 </div>
                               </div>

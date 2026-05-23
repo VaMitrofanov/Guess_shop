@@ -596,7 +596,7 @@ git push origin main
 # 2. Потом тригернуть деплой правильного UUID (z10ws7m1q45h281zwedmhei4 = RobloxBankWeb, домен robloxbank.ru)
 # Вызывать с ЛОКАЛЬНОЙ машины (не через SSH на сервер):
 curl -s -X POST "http://89.110.94.117:8000/api/v1/deploy?uuid=z10ws7m1q45h281zwedmhei4&force=true" \
-  -H "Authorization: Bearer 18|891afdc3c9732b6bb8cff1ae86a73a064dbcdb6b1bb4dcc8d8d71cb6301296bf"
+  -H "Authorization: Bearer $COOLIFY_TOKEN"
 
 # ⚠️ НЕ использовать uuid=ebac6llpah5n2x58rb64yn8j — это RobloxBank-Guide, у него нет домена (fqdn: null)
 ```
@@ -604,7 +604,7 @@ curl -s -X POST "http://89.110.94.117:8000/api/v1/deploy?uuid=z10ws7m1q45h281zwe
 **Проверить статус деплоя:**
 ```bash
 curl -s "http://89.110.94.117:8000/api/v1/deployments/<deployment_uuid>" \
-  -H "Authorization: Bearer 18|891afdc3c9732b6bb8cff1ae86a73a064dbcdb6b1bb4dcc8d8d71cb6301296bf" | jq '{status, commit_message}'
+  -H "Authorization: Bearer $COOLIFY_TOKEN" | jq '{status, commit_message}'
 # status: "finished" + правильный commit_message = успех
 ```
 
@@ -689,7 +689,7 @@ curl -s "http://89.110.94.117:8000/api/v1/deployments/<deployment_uuid>" \
 ### Деплой
 ```bash
 curl -s -X POST "http://89.110.94.117:8000/api/v1/deploy?uuid=z10ws7m1q45h281zwedmhei4&force=true" \
-  -H "Authorization: Bearer 18|891afdc3c9732b6bb8cff1ae86a73a064dbcdb6b1bb4dcc8d8d71cb6301296bf"
+  -H "Authorization: Bearer $COOLIFY_TOKEN"
 # deployment_uuid: pabfk98x3sdsgxmjmxft3zpi — status: finished ✅
 ```
 
