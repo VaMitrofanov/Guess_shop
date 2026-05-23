@@ -582,7 +582,7 @@ c33aa06 fix(bots): pass_private ctxKey for TG, add DB fallback for VK support ha
 
 | Сервис | Сервер | Commit | Статус |
 |--------|--------|--------|--------|
-| Next.js сайт | RF 89.110.94.117 | `aa00ed4` | ✅ |
+| Next.js сайт | RF 89.110.94.117 | `d5712de` | 🟡 деплоится |
 | VK бот | RF 89.110.94.117 | `7165440` (handlers.ts вручную) | ✅ |
 | TG бот | SG 5.223.95.11 | `b2d4e98` (handlers.ts + roblox.ts вручную) | ✅ |
 
@@ -597,6 +597,64 @@ ssh root@77.222.43.19 'curl -s -X POST -H "Authorization: Bearer 18|891afdc3c973
 
 **DB состояние (на момент аудита):** 3 COMPLETED / 2 REJECTED заказа, 995 AVAILABLE кодов, 9 TG-пользователей.  
 **4 зависших RESERVED кода** (`1FS0SNA`, `66PXO05`, `UITRVG1`, `QP7HC6J`) — нет фонового cleanup job, истёкли TTL. Нужно либо cron-задача, либо авто-релиз в `/api/wb-code` при истёкшем `reservedUntil`.
+
+---
+
+## Сессия 2026-05-23 (продолжение) — полный аудит читаемости текста
+
+### Что сделано
+
+**GuideClient.tsx — два коммита:**
+
+**`d979bec` — WBManagerBlock text fixes (начало сессии):**
+- Оформление заказа: `text-[10px]/60` → `text-xs/70`
+- ТЫ ПОЛУЧИШЬ / ЦЕНА ПАССА: `text-[8px]` → `text-[11px]`, opacity +20%
+- Telegram кнопка: `text-[11px]` → `text-xs`
+- Подписи кнопок: `text-[10px] zinc-600` → `text-xs zinc-400`
+- Время обработки: `text-[10px]` → `text-xs`
+
+**`d5712de` — полный проход по всему файлу (34 правки):**
+
+Удалены все `text-[8px]` и `text-[9px]` из className (было 20+ вхождений), все `text-[10px]` без исключений по смысловым элементам. Полный список замен:
+
+| Место | Было | Стало |
+|-------|------|-------|
+| PlatformSwitcher лейбл | `text-[9px] zinc-500` | `text-[11px] zinc-400` |
+| StepsGrid номера шагов | `text-[9px] /40` | `text-[11px] /50` |
+| StepsGrid mobile-бейдж | `text-[9px] zinc-600` | `text-xs zinc-400` |
+| "Открыть Creator Hub" кнопка | `text-[10px]` | `text-xs` |
+| StandardDoneBlock "ГОТОВО!" | `text-[10px]` | `text-xs` |
+| StandardDoneBlock CTA | `text-[10px]` | `text-xs` |
+| WBStaticHeader "НОМИНАЛ" | `text-[8px] /60` | `text-[11px] /70` |
+| WBStaticHeader "Новый код" | `text-[10px]` | `text-xs` |
+| WBGate trust-badges | `zinc-600` | `zinc-400` |
+| WBGate "Возникли трудности?" | `text-[10px] zinc-500` | `text-xs zinc-400` |
+| WBGate "@RobloxBank_PA" | `text-[12px]` | `text-sm` |
+| FormulaCalculator заголовки | `text-[10px] /60` | `text-xs /70` |
+| FormulaCalculator field labels | `text-[10px] zinc-500` | `text-xs zinc-400` |
+| FormulaCalculator "нажми…" | `text-[10px] zinc-600` | `text-xs zinc-500` |
+| FormulaCalculator "скопировано" | `text-[10px]` | `text-xs` |
+| Hero WILDBERRIES чип | `text-[9px] /80` | `text-[11px] /90` |
+| Все section-лейблы (TUTORIAL, FAQ, PRICE TABLE, ЧАСТЫЕ ОШИБКИ, ПОШАГОВАЯ ИНСТРУКЦИЯ) | `text-[10px] /60` | `text-xs /70` |
+| "ЧТО ПОНАДОБИТСЯ" + чекбокс-числа | `text-[9px]` / `text-[8px]` | `text-[11px]` / `text-[10px]` |
+| ФОРМУЛА бейдж в таблице цен | `text-[9px]` | `text-[11px]` |
+| OFFICIAL / READY? лейблы FAQ | `text-[9px]` | `text-[11px]` |
+| WBIntro "Пропустить →" | `text-[9px] zinc-600` | `text-[11px] zinc-400` |
+| WBIntro "Восстановление…" | `text-[10px] /50` | `text-xs /60` |
+| TIP badges | `text-[9px]` | `text-[10px]` |
+| PublicGameBlock подпись | `text-xs zinc-600` | `text-xs zinc-500` |
+
+**Оставлено намеренно:**
+- `text-zinc-600` только на иконках (ChevronRight, ExternalLink) и формульных операторах `÷ 0.7 =` (большой размер компенсирует контраст)
+- TIP badges и числа в иконках-чекбоксах на `text-[10px]` — минимальный читаемый для декоративных элементов
+- Все размеры внутри `style={{ ... }}` (inline-стили анимационных компонентов) — там 7–9px намеренно, это имитация Roblox UI
+
+### Деплой
+```bash
+curl -s -X POST "http://89.110.94.117:8000/api/v1/deploy?uuid=ebac6llpah5n2x58rb64yn8j&force=true" \
+  -H "Authorization: Bearer 18|891afdc3c9732b6bb8cff1ae86a73a064dbcdb6b1bb4dcc8d8d71cb6301296bf"
+# deployment_uuid: k5ee3ol17i5xr9h7t349p3gk
+```
 
 ---
 
