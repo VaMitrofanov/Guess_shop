@@ -258,7 +258,7 @@ function RCHBrowser({ children, url = "create.roblox.com" }: { children: React.R
           <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#ffbd2e" }} />
           <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#28ca41" }} />
         </div>
-        <div style={{ flex: 1, background: "#1c1c1c", border: "1px solid #444", borderRadius: 3, padding: "2px 8px", display: "flex", alignItems: "center", gap: 4, maxWidth: 220, margin: "0 auto" }}>
+        <div style={{ flex: 1, background: "#1c1c1c", border: "1px solid #444", borderRadius: 3, padding: "2px 8px", display: "flex", alignItems: "center", gap: 4, margin: "0 auto" }}>
           <svg width="8" height="8" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="4.5" stroke="#5f6368" strokeWidth="1.2" /><path d="M8.5 8.5L11 11" stroke="#5f6368" strokeWidth="1.2" strokeLinecap="round" /></svg>
           <span style={{ fontSize: 9, color: "#9aa0a6", letterSpacing: "0.01em" }}>{url}</span>
         </div>
@@ -969,7 +969,7 @@ function PublicGameBlock() {
 function Anim04Price({ passPrice }: { passPrice: number | null }) {
   const [f, setF] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setF(v => (v + 1) % 7), 1400);
+    const id = setInterval(() => setF(v => (v + 1) % 7), 2400);
     return () => clearInterval(id);
   }, []);
 
@@ -1367,7 +1367,7 @@ function Anim05WB() {
 function Anim06WB() {
   const [f, setF] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setF(v => (v + 1) % 5), 1800);
+    const id = setInterval(() => setF(v => (v + 1) % 5), 1600);
     return () => clearInterval(id);
   }, []);
   // f=0: chat open (manager first msg), f=1: user typing link,
@@ -1664,7 +1664,7 @@ function PlatformSwitcher({
           className="absolute inset-y-1 bg-[#00b06f]/15 border border-[#00b06f]/40"
           style={{ width: "calc(50% - 4px)" }}
           animate={{ left: platform === "pc" ? 4 : "calc(50%)" }}
-          transition={{ type: "spring", stiffness: 380, damping: 36 }}
+          transition={{ type: "spring", stiffness: 300, damping: 28 }}
         />
         {([
           { id: "pc" as const, label: "Компьютер", icon: Monitor },
@@ -1766,7 +1766,7 @@ function StepsGrid({
               >
                 <h2 className="text-xl md:text-2xl font-black uppercase tracking-tight leading-tight">{step.title}</h2>
                 <p className="text-sm md:text-base text-white/90 font-semibold leading-relaxed">{displayDesc}</p>
-                <p className="text-sm md:text-base text-zinc-400 font-medium leading-relaxed">{displayDetail}</p>
+                <p className="text-sm md:text-base text-zinc-300 font-medium leading-relaxed">{displayDetail}</p>
 
                 {/* Bullet points with icons */}
                 {displayBullets && displayBullets.length > 0 && (
@@ -1776,7 +1776,7 @@ function StepsGrid({
                       return (
                         <div key={bi} className="flex items-start gap-2.5">
                           <div className="w-5 h-5 border border-[#1e2a45] bg-[#0a0e1a] flex items-center justify-center flex-shrink-0 mt-0.5">
-                            <BIcon className="w-2.5 h-2.5 text-[#00b06f]/60" />
+                            <BIcon className="w-3 h-3 text-[#00b06f]/70" />
                           </div>
                           <span className="text-sm md:text-base text-zinc-300 font-medium leading-snug">{bullet.text}</span>
                         </div>
@@ -2205,20 +2205,29 @@ function WBGate() {
                 Геймпасс — это способ получить Robux через Roblox. Если не знаешь что это — выбери «Нужна инструкция 📖»
               </p>
 
-              {error && (
-                <div className="flex items-center gap-2 border border-red-500/30 bg-red-500/5 px-3 py-2">
-                  <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
-                  <p className="text-sm text-red-400 font-medium">{error}</p>
-                </div>
-              )}
-              {error && (
-                <p className="text-xs text-zinc-500 mt-1">
-                  Нужна помощь?{" "}
-                  <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer" className="text-[#00b06f] underline">
-                    Написать живому менеджеру →
-                  </a>
-                </p>
-              )}
+              <AnimatePresence>
+                {error && (
+                  <motion.div
+                    key="error-block"
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.2 }}
+                    className="space-y-1"
+                  >
+                    <div className="flex items-center gap-2 border border-red-500/30 bg-red-500/5 px-3 py-2">
+                      <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+                      <p className="text-sm text-red-400 font-medium">{error}</p>
+                    </div>
+                    <p className="text-xs text-zinc-500">
+                      Нужна помощь?{" "}
+                      <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer" className="text-[#00b06f] underline">
+                        Написать живому менеджеру →
+                      </a>
+                    </p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {isGuideMode ? (
                 <div className="space-y-3">
@@ -2476,7 +2485,7 @@ function FormulaCalculator({
             className={`h-12 md:h-14 w-full bg-[#080c18] border-2 px-3 flex items-center justify-between transition-all group ${
               calcPrice
                 ? "border-[#00b06f]/30 hover:border-[#00b06f]/60 hover:bg-[#00b06f]/5 cursor-pointer"
-                : "border-[#1e2a45] cursor-default"
+                : "border-[#1e2a45] cursor-default opacity-50"
             }`}
           >
             <span className="text-xl md:text-2xl font-black text-[#00b06f]">{calcPrice ?? "—"}</span>
@@ -2581,7 +2590,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
 
             {/* Right: stats + warning + calculator */}
             <div className="space-y-4">
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
                 {[
                   { label: "Время",     value: "5 мин" },
                   { label: "Сложность", value: "Легко" },
@@ -2707,7 +2716,8 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
                 <h2 className="text-4xl font-black uppercase tracking-tight mb-2">Таблица цен</h2>
                 <p className="text-base text-zinc-500 font-medium mb-5">Цена пасса с учётом 30% комиссии Roblox.</p>
                 <div className="pixel-card border-2 border-[#1e2a45] overflow-hidden">
-                  <table className="w-full">
+                  <div className="overflow-x-auto">
+                  <table className="w-full min-w-[320px]">
                     <thead>
                       <tr className="border-b-2 border-[#1e2a45] bg-[#080c18]">
                         <th className="text-left px-5 py-4 text-xs font-black text-zinc-400 uppercase tracking-wider">Получишь</th>
@@ -2725,6 +2735,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
                       ))}
                     </tbody>
                   </table>
+                  </div>
                   <div className="px-5 py-3.5 bg-[#080c18] border-t border-[#1e2a45] flex items-center gap-3">
                     <span className="font-pixel text-[11px] text-[#00b06f] border border-[#00b06f]/20 bg-[#00b06f]/10 px-2 py-1">ФОРМУЛА</span>
                     <span className="text-sm font-bold text-zinc-300">цена пасса = нужная сумма ÷ 0.7</span>
@@ -2776,7 +2787,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
                 {FAQ.map((item) => (
                   <details
                     key={item.q}
-                    className="pixel-card border-2 border-[#1e2a45] hover:border-[#00b06f]/20 transition-colors group"
+                    className="pixel-card border-2 border-[#1e2a45] hover:border-[#00b06f]/20 transition-colors group focus-visible:outline-2 focus-visible:outline-[#00b06f] focus-visible:outline-offset-2"
                   >
                     <summary className="px-6 py-5 cursor-pointer flex items-center justify-between gap-3 list-none">
                       <h3 className="font-black uppercase tracking-tight text-base">{item.q}</h3>
