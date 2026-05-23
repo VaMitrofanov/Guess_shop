@@ -661,18 +661,93 @@ function Anim03() {
   );
 }
 
+// ── AnimPublicBadge: Creations grid — highlights the "Public" badge ────────────
+function AnimPublicBadge() {
+  const [f, setF] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setF(v => (v + 1) % 5), 1300);
+    return () => clearInterval(id);
+  }, []);
+  // 0: grid, cursor idle  1: cursor → target card  2: card glows
+  // 3: badge zooms + label  4: checkmark + "вот так должно быть"
+
+  const cards = [
+    { name: "Obby World",  color: "#7c3aed", pub: false },
+    { name: "My Place",    color: "#0e6fff", pub: true  },
+    { name: "Test Game",   color: "#0891b2", pub: false },
+  ];
+  const hi = f >= 2;
+  const badge = f >= 3;
+
+  return (
+    <div style={{ background: "#111", position: "relative", padding: "10px 10px 4px", fontFamily: "ui-sans-serif,system-ui,sans-serif", userSelect: "none" }}>
+      {/* Tab row */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+        {["My Experiences", "Shared With Me"].map((t, i) => (
+          <div key={t} style={{ padding: "3px 10px", borderRadius: 12, background: i === 0 ? "#fff" : "transparent", color: i === 0 ? "#111" : "#555", fontSize: 8, fontWeight: i === 0 ? 700 : 400, border: i === 0 ? "none" : "1px solid #333" }}>{t}</div>
+        ))}
+      </div>
+
+      {/* Cards grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+        {cards.map((card, i) => {
+          const isTarget = i === 1;
+          const glow = isTarget && hi;
+          const badgeHi = isTarget && badge;
+          return (
+            <div key={i} style={{ border: glow ? "1.5px solid #00b06f" : "1px solid #252525", boxShadow: glow ? "0 0 10px #00b06f40" : "none", overflow: "hidden", transition: "all 0.35s" }}>
+              <div style={{ height: 46, background: card.color, opacity: glow ? 1 : 0.3, transition: "opacity 0.35s" }} />
+              <div style={{ padding: "4px 5px", background: "#181818" }}>
+                <div style={{ fontSize: 7, color: "#888", fontWeight: 600, marginBottom: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{card.name}</div>
+                {/* Badge */}
+                <div style={{
+                  display: "inline-flex", alignItems: "center", gap: 3,
+                  padding: badgeHi ? "2px 7px 2px 4px" : "1.5px 5px 1.5px 3px",
+                  borderRadius: 8,
+                  background: badgeHi ? "#00b06f1a" : "#1a1a1a",
+                  border: `1px solid ${badgeHi ? "#00b06f" : (card.pub ? "#2d4a35" : "#2d2d2d")}`,
+                  transition: "all 0.35s",
+                  transform: badgeHi ? "scale(1.12)" : "scale(1)",
+                }}>
+                  <div style={{ width: 5, height: 5, borderRadius: "50%", background: card.pub ? (badgeHi ? "#00b06f" : "#3d7a52") : "#454545", flexShrink: 0, transition: "background 0.35s" }} />
+                  <span style={{ fontSize: badgeHi ? 8 : 7, fontWeight: 700, color: card.pub ? (badgeHi ? "#00e07a" : "#4d8a5f") : "#454545", transition: "all 0.35s" }}>
+                    {card.pub ? "Public" : "Private"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Label annotation */}
+      <motion.div
+        animate={{ opacity: badge ? 1 : 0, y: badge ? 0 : 4 }}
+        transition={{ duration: 0.3 }}
+        style={{ textAlign: "center", marginTop: 6, fontSize: 8.5, fontWeight: 800, color: "#00b06f", letterSpacing: "0.02em", paddingBottom: 4 }}
+      >
+        ↑ у твоего плейса должен быть значок Public
+      </motion.div>
+
+      {/* Cursor */}
+      <div style={{
+        position: "absolute",
+        top:  f === 0 ? 14 : f === 1 ? 62 : 74,
+        left: f === 0 ? 8  : f === 1 ? 76 : 82,
+        pointerEvents: "none", zIndex: 20,
+        transition: "top 0.5s cubic-bezier(0.4,0,0.2,1), left 0.5s cubic-bezier(0.4,0,0.2,1)",
+      }}>
+        <RCursor />
+      </div>
+    </div>
+  );
+}
+
 // ── PublicGameBlock: collapsible "игра должна быть Public" ────────────────────
 function PublicGameBlock() {
   const [open, setOpen]           = useState(false);
   const [questOpen, setQuestOpen] = useState(false);
-  const [slide, setSlide]         = useState(0);
   const [questSlide, setQuestSlide] = useState(0);
-
-  useEffect(() => {
-    if (!open) return;
-    const id = setInterval(() => setSlide(v => (v + 1) % 2), 3500);
-    return () => clearInterval(id);
-  }, [open]);
 
   useEffect(() => {
     if (!questOpen) return;
@@ -680,34 +755,47 @@ function PublicGameBlock() {
     return () => clearInterval(id);
   }, [questOpen]);
 
-  const SLIDES = [
-    { src: "/guide/public-configure.jpg", pos: "top",    caption: "Configure → Settings → Audience → Public" },
-    { src: "/guide/public-badge.jpg",     pos: "center", caption: "Значок Public появится на плейсе ✓" },
-  ] as const;
-
   const QUEST_SLIDES = [
-    { src: "/guide/public-settings.jpg",              pos: "top",    caption: "Configure → Questionnaire → нажми Restart" },
-    { src: "/guide/public-questionnaire.png",         pos: "top",    caption: "Ответь «No» на все 10 вопросов → Continue" },
-    { src: "/guide/public-questionnaire-success.png", pos: "center", caption: "Готово — плейс стал Public ✓" },
+    { src: "/guide/public-settings.jpg",              pos: "50% 90%", caption: "Configure → Questionnaire → нажми Restart" },
+    { src: "/guide/public-questionnaire.png",         pos: "top",     caption: "Ответь «No» на все 10 вопросов → Continue" },
+    { src: "/guide/public-questionnaire-success.png", pos: "center",  caption: "Готово — плейс стал Public ✓" },
   ] as const;
 
   return (
-    <div className="mt-3">
-      {/* Toggle */}
+    <div className="mt-4">
+      {/* ── Toggle button ── */}
       <button
         onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center gap-2 px-3 py-2.5 border border-amber-500/25 bg-amber-500/5 hover:bg-amber-500/10 transition-colors text-left"
+        className="w-full text-left group transition-all"
+        style={{
+          background: open ? "rgba(245,158,11,0.12)" : "rgba(245,158,11,0.06)",
+          border: "1px solid rgba(245,158,11,0.3)",
+          borderBottom: open ? "none" : "1px solid rgba(245,158,11,0.3)",
+          padding: "10px 14px",
+        }}
       >
-        <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
-        <span className="text-xs font-black uppercase tracking-widest text-amber-300/90">
-          Игра должна быть Public
-        </span>
-        <ChevronRight
-          className="w-3.5 h-3.5 text-amber-500/50 ml-auto transition-transform duration-200"
-          style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
-        />
+        <div className="flex items-center gap-3">
+          {/* Icon */}
+          <div style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.35)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <AlertTriangle className="w-4 h-4 text-amber-400" />
+          </div>
+          {/* Text */}
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-black uppercase tracking-wide text-amber-300">
+              Игра должна быть Public
+            </div>
+            <div className="text-xs text-amber-600/70 font-medium mt-0.5">
+              {open ? "нажми, чтобы свернуть" : "нажми, чтобы узнать как это сделать →"}
+            </div>
+          </div>
+          {/* Chevron */}
+          <motion.div animate={{ rotate: open ? 90 : 0 }} transition={{ duration: 0.2 }}>
+            <ChevronRight className="w-5 h-5 text-amber-500/50 flex-shrink-0" />
+          </motion.div>
+        </div>
       </button>
 
+      {/* ── Expandable body ── */}
       <AnimatePresence initial={false}>
         {open && (
           <motion.div
@@ -715,82 +803,89 @@ function PublicGameBlock() {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.28, ease: "easeInOut" }}
+            transition={{ duration: 0.3, ease: "easeInOut" }}
             style={{ overflow: "hidden" }}
           >
-            <div className="border border-amber-500/20 border-t-0 bg-[#0a0e1a] p-4 space-y-4">
-              <p className="text-sm text-zinc-300 font-semibold leading-relaxed">
-                Геймпасс должен быть создан в <span className="text-amber-300 font-black">публичной</span> игре — иначе менеджер не сможет его выкупить.
-              </p>
+            <div style={{ border: "1px solid rgba(245,158,11,0.25)", borderTop: "none", background: "#090d1a" }}>
 
-              {/* Steps */}
-              <div className="space-y-1.5">
-                {([
-                  "Нажми на свой плейс в списке Creations",
-                  (<span key="s2">В боковом меню: <b>Configure → Settings</b></span>),
-                  (<span key="s3">Найди раздел <b>Audience</b> → выбери <b>Public</b> → сохрани</span>),
-                ] as React.ReactNode[]).map((step, i) => (
-                  <div key={i} className="flex items-start gap-2.5">
-                    <div className="w-5 h-5 border border-[#1e2a45] bg-[#080c18] flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <span className="font-pixel text-[8px] text-[#00b06f]/70">{i + 1}</span>
-                    </div>
-                    <span className="text-sm text-zinc-300 font-medium leading-snug">{step}</span>
-                  </div>
-                ))}
-              </div>
+              {/* ── Section 1: что должно быть ── */}
+              <div className="p-4 space-y-3">
+                <p className="text-sm text-zinc-300 font-semibold leading-relaxed">
+                  У твоей игры в списке должен быть значок{" "}
+                  <span style={{ background: "#00b06f18", border: "1px solid #00b06f", borderRadius: 6, padding: "1px 7px", color: "#00e07a", fontWeight: 800, fontSize: "0.8rem" }}>● Public</span>
+                  {" "}— без него менеджер не может выкупить геймпасс.
+                </p>
 
-              {/* Screenshot slideshow — PC only */}
-              <div className="hidden md:block">
-                <div className="border border-[#1e2a45] overflow-hidden" style={{ fontFamily: "ui-sans-serif,system-ui,sans-serif" }}>
-                  {/* Mini browser chrome */}
-                  <div style={{ background: "#2d2d2d", padding: "5px 8px", display: "flex", alignItems: "center", gap: 6 }}>
-                    <div style={{ display: "flex", gap: 4 }}>
-                      {(["#ff5f57","#ffbd2e","#28ca41"] as string[]).map((c, i) => (
-                        <div key={i} style={{ width: 8, height: 8, borderRadius: "50%", background: c }} />
-                      ))}
-                    </div>
-                    <div style={{ flex: 1, background: "#1c1c1c", border: "1px solid #444", borderRadius: 3, padding: "2px 8px", maxWidth: 220, margin: "0 auto" }}>
-                      <span style={{ fontSize: 9, color: "#9aa0a6" }}>create.roblox.com</span>
-                    </div>
-                  </div>
-                  {/* Slides */}
-                  <div style={{ position: "relative", background: "#111", overflow: "hidden" }}>
-                    <AnimatePresence mode="wait">
-                      <motion.img
-                        key={slide}
-                        src={SLIDES[slide].src}
-                        alt={SLIDES[slide].caption}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.45 }}
-                        style={{ width: "100%", display: "block", maxHeight: 230, objectFit: "cover", objectPosition: SLIDES[slide].pos }}
-                      />
-                    </AnimatePresence>
-                    {/* Caption + dots */}
-                    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "linear-gradient(transparent,rgba(0,0,0,0.82))", padding: "20px 10px 8px", display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
-                      <span style={{ fontSize: 9, color: "#ccc" }}>{SLIDES[slide].caption}</span>
-                      <div style={{ display: "flex", gap: 4, flexShrink: 0, marginLeft: 8 }}>
-                        {SLIDES.map((_, i) => (
-                          <button key={i} onClick={() => setSlide(i)} style={{ width: 6, height: 6, borderRadius: "50%", background: slide === i ? "#00b06f" : "#555", border: "none", cursor: "pointer", padding: 0 }} />
-                        ))}
-                      </div>
-                    </div>
-                  </div>
+                {/* Code animation — PC only */}
+                <div className="hidden md:block">
+                  <RCHBrowser url="create.roblox.com/dashboard/creations">
+                    <AnimPublicBadge />
+                  </RCHBrowser>
                 </div>
               </div>
 
-              {/* Nested: Questionnaire fix */}
-              <div>
+              {/* Divider */}
+              <div style={{ borderTop: "1px solid #1a2235", margin: "0 16px" }} />
+
+              {/* ── Section 2: как сделать Public ── */}
+              <div className="p-4 space-y-3">
+                <p className="text-xs font-black uppercase tracking-widest text-zinc-500">Как сделать Public</p>
+
+                <div className="space-y-2">
+                  {([
+                    "Нажми на свой плейс в списке Creations",
+                    (<span key="s2">В боковом меню выбери <b className="text-white">Configure → Settings</b></span>),
+                    (<span key="s3">Найди раздел <b className="text-white">Audience</b> → нажми <b className="text-white">Public</b> → сохрани</span>),
+                  ] as React.ReactNode[]).map((step, i) => (
+                    <div key={i} className="flex items-start gap-3">
+                      <div style={{ width: 22, height: 22, borderRadius: "50%", background: "#0e1a2e", border: "1.5px solid #1e3a5f", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
+                        <span style={{ fontSize: 9, fontWeight: 900, color: "#4a8fd4" }}>{i + 1}</span>
+                      </div>
+                      <span className="text-sm text-zinc-300 font-medium leading-snug pt-1">{step}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Screenshot: Configure → Settings → Public — PC only */}
+                <div className="hidden md:block">
+                  <RCHBrowser url="create.roblox.com/…/configure/settings">
+                    <div style={{ position: "relative", overflow: "hidden" }}>
+                      <img
+                        src="/guide/public-configure.jpg"
+                        alt="Configure → Settings → выбери Public"
+                        style={{ width: "100%", display: "block", maxHeight: 240, objectFit: "cover", objectPosition: "50% 42%" }}
+                      />
+                      {/* Highlight overlay — pulse ring around Public button area */}
+                      <div style={{
+                        position: "absolute",
+                        top: "52%", left: "40%",
+                        width: 68, height: 26,
+                        border: "2px solid #00b06f",
+                        borderRadius: 4,
+                        boxShadow: "0 0 12px #00b06f80",
+                        pointerEvents: "none",
+                      }} />
+                    </div>
+                  </RCHBrowser>
+                </div>
+              </div>
+
+              {/* ── Nested: Questionnaire fix ── */}
+              <div style={{ borderTop: "1px solid #1a2235" }}>
                 <button
                   onClick={() => setQuestOpen(v => !v)}
-                  className="w-full flex items-center gap-2 px-3 py-2 border border-[#1e2a45] hover:border-zinc-600 bg-[#080c18] hover:bg-[#0c1020] transition-colors text-left"
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors text-left"
                 >
-                  <span className="font-pixel text-[9px] text-zinc-500 uppercase tracking-widest">Всё ещё не Public?</span>
-                  <ChevronRight
-                    className="w-3 h-3 text-zinc-600 ml-auto transition-transform duration-200"
-                    style={{ transform: questOpen ? "rotate(90deg)" : "rotate(0deg)" }}
-                  />
+                  <div style={{ width: 22, height: 22, borderRadius: "50%", background: "#111827", border: "1px solid #2d3748", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <span style={{ fontSize: 11, color: "#4a5568" }}>?</span>
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-sm font-black text-zinc-400">Всё ещё не Public?</div>
+                    <div className="text-xs text-zinc-600">Есть способ через Questionnaire</div>
+                  </div>
+                  <motion.div animate={{ rotate: questOpen ? 90 : 0 }} transition={{ duration: 0.18 }}>
+                    <ChevronRight className="w-4 h-4 text-zinc-600" />
+                  </motion.div>
                 </button>
 
                 <AnimatePresence initial={false}>
@@ -803,44 +898,55 @@ function PublicGameBlock() {
                       transition={{ duration: 0.22, ease: "easeInOut" }}
                       style={{ overflow: "hidden" }}
                     >
-                      <div className="border border-[#1e2a45] border-t-0 bg-[#080c18] p-3 space-y-3">
-                        <div className="space-y-1.5">
+                      <div className="px-4 pb-4 space-y-3" style={{ background: "#070b15" }}>
+                        <div className="space-y-2">
                           {([
-                            (<span key="q1">В том же меню: <b>Configure → Questionnaire</b></span>),
-                            "Нажми Restart внизу страницы",
-                            "Появятся 10 вопросов — на все ответь «No»",
-                            "Нажми Continue → плейс станет Public ✓",
+                            (<span key="q1">В том же меню выбери <b className="text-white">Configure → Questionnaire</b></span>),
+                            (<span key="q2">Внизу страницы нажми синюю кнопку <b className="text-white">Restart</b></span>),
+                            "Появятся 10 вопросов — на все отвечай «No»",
+                            (<span key="q4">Нажми <b className="text-white">Continue</b> — плейс станет Public ✓</span>),
                           ] as React.ReactNode[]).map((step, i) => (
-                            <div key={i} className="flex items-start gap-2.5">
-                              <div className="w-5 h-5 border border-[#1e2a45] bg-[#0a0e1a] flex items-center justify-center flex-shrink-0 mt-0.5">
-                                <span className="font-pixel text-[8px] text-zinc-600">{i + 1}</span>
+                            <div key={i} className="flex items-start gap-3">
+                              <div style={{ width: 22, height: 22, borderRadius: "50%", background: "#0a0f1a", border: "1.5px solid #1e2a45", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
+                                <span style={{ fontSize: 9, fontWeight: 900, color: "#555" }}>{i + 1}</span>
                               </div>
-                              <span className="text-sm text-zinc-400 font-medium leading-snug">{step}</span>
+                              <span className="text-sm text-zinc-400 font-medium leading-snug pt-1">{step}</span>
                             </div>
                           ))}
                         </div>
 
-                        {/* Questionnaire slideshow — PC only */}
+                        {/* Questionnaire screenshots slideshow — PC only */}
                         <div className="hidden md:block">
-                          <div style={{ border: "1px solid #1e2a45", overflow: "hidden", position: "relative", background: "#111" }}>
-                            <AnimatePresence mode="wait">
-                              <motion.img
-                                key={questSlide}
-                                src={QUEST_SLIDES[questSlide].src}
-                                alt={QUEST_SLIDES[questSlide].caption}
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                transition={{ duration: 0.4 }}
-                                style={{ width: "100%", display: "block", maxHeight: 200, objectFit: "cover", objectPosition: QUEST_SLIDES[questSlide].pos }}
-                              />
-                            </AnimatePresence>
-                            <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "linear-gradient(transparent,rgba(0,0,0,0.82))", padding: "16px 10px 8px", display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
-                              <span style={{ fontSize: 9, color: "#ccc" }}>{QUEST_SLIDES[questSlide].caption}</span>
-                              <div style={{ display: "flex", gap: 4, flexShrink: 0, marginLeft: 8 }}>
-                                {QUEST_SLIDES.map((_, i) => (
-                                  <button key={i} onClick={() => setQuestSlide(i)} style={{ width: 6, height: 6, borderRadius: "50%", background: questSlide === i ? "#00b06f" : "#555", border: "none", cursor: "pointer", padding: 0 }} />
+                          <div style={{ border: "1px solid #1e2a45", overflow: "hidden", position: "relative", background: "#111", fontFamily: "ui-sans-serif,system-ui,sans-serif" }}>
+                            {/* mini chrome */}
+                            <div style={{ background: "#2d2d2d", padding: "5px 8px", display: "flex", alignItems: "center", gap: 6 }}>
+                              <div style={{ display: "flex", gap: 4 }}>
+                                {(["#ff5f57","#ffbd2e","#28ca41"] as string[]).map((c, ci) => (
+                                  <div key={ci} style={{ width: 8, height: 8, borderRadius: "50%", background: c }} />
                                 ))}
+                              </div>
+                              <span style={{ fontSize: 9, color: "#9aa0a6", marginLeft: 6 }}>create.roblox.com</span>
+                            </div>
+                            <div style={{ position: "relative" }}>
+                              <AnimatePresence mode="wait">
+                                <motion.img
+                                  key={questSlide}
+                                  src={QUEST_SLIDES[questSlide].src}
+                                  alt={QUEST_SLIDES[questSlide].caption}
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  exit={{ opacity: 0 }}
+                                  transition={{ duration: 0.4 }}
+                                  style={{ width: "100%", display: "block", maxHeight: 210, objectFit: "cover", objectPosition: QUEST_SLIDES[questSlide].pos }}
+                                />
+                              </AnimatePresence>
+                              <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "linear-gradient(transparent,rgba(0,0,0,0.85))", padding: "20px 10px 8px", display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
+                                <span style={{ fontSize: 9, color: "#ccc" }}>{QUEST_SLIDES[questSlide].caption}</span>
+                                <div style={{ display: "flex", gap: 4, flexShrink: 0, marginLeft: 8 }}>
+                                  {QUEST_SLIDES.map((_, qi) => (
+                                    <button key={qi} onClick={() => setQuestSlide(qi)} style={{ width: 6, height: 6, borderRadius: "50%", background: questSlide === qi ? "#00b06f" : "#555", border: "none", cursor: "pointer", padding: 0 }} />
+                                  ))}
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -850,6 +956,7 @@ function PublicGameBlock() {
                   )}
                 </AnimatePresence>
               </div>
+
             </div>
           </motion.div>
         )}
