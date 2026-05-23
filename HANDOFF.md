@@ -582,7 +582,7 @@ c33aa06 fix(bots): pass_private ctxKey for TG, add DB fallback for VK support ha
 
 | Сервис | Сервер | Commit | Статус |
 |--------|--------|--------|--------|
-| Next.js сайт | RF 89.110.94.117 | `cdb135b` | ✅ |
+| Next.js сайт | RF 89.110.94.117 | `055cc89` | ✅ |
 | VK бот | RF 89.110.94.117 | `7165440` (handlers.ts вручную) | ✅ |
 | TG бот | SG 5.223.95.11 | `b2d4e98` (handlers.ts + roblox.ts вручную) | ✅ |
 
@@ -664,11 +664,33 @@ curl -s "http://89.110.94.117:8000/api/v1/deployments/<deployment_uuid>" \
 - TIP badges и числа в иконках-чекбоксах на `text-[10px]` — минимальный читаемый для декоративных элементов
 - Все размеры внутри `style={{ ... }}` (inline-стили анимационных компонентов) — там 7–9px намеренно, это имитация Roblox UI
 
+**`055cc89` — WBGate targeted text pass (продолжение сессии 2026-05-23):**
+
+Второй прицельный проход по экрану ввода кода — самые мелкие элементы:
+
+| Место | Было | Стало |
+|-------|------|-------|
+| WBStaticHeader WILDBERRIES / ROBLOXBANK | `text-[11px]` | `text-xs` |
+| "WILDBERRIES × ROBLOXBANK" eyebrow | `font-pixel text-[11px] /60` | `font-pixel text-sm /80` |
+| H1 заголовок WBGate | `text-xl sm:text-2xl` | `text-2xl sm:text-3xl` |
+| Main subtext | `text-zinc-400` | `text-zinc-300` |
+| "КОД С КАРТОЧКИ" label | `font-pixel text-[11px] /70` | `font-pixel text-sm /85` |
+| Helper text под инпутом | `text-xs` | `text-sm` |
+| Счётчик "0/7" | `text-xs` | `text-sm` |
+| Mode toggle buttons (×2) | `text-xs md:text-sm` | `text-sm` |
+| Explainer text | `text-xs` | `text-sm` |
+| TG-кнопки (все варианты) | `text-[12px] md:text-sm` | `text-sm` |
+| VK-кнопки (все варианты) | `text-[12px] md:text-sm` | `text-sm` |
+| "Переходи в мессенджер…" (guide mode) | `text-xs md:text-sm` | `text-sm` |
+| "Геймпасс уже создан?" (ready mode) | `text-xs md:text-sm` | `text-sm` |
+| VK auth text (×2) | `text-xs text-[#5599ff]` | `text-sm text-[#5599ff]` |
+| "Код одноразовый · Хранить не нужно" | `text-xs` | `text-sm` |
+
 ### Деплой
 ```bash
-curl -s -X POST "http://89.110.94.117:8000/api/v1/deploy?uuid=ebac6llpah5n2x58rb64yn8j&force=true" \
+curl -s -X POST "http://89.110.94.117:8000/api/v1/deploy?uuid=z10ws7m1q45h281zwedmhei4&force=true" \
   -H "Authorization: Bearer 18|891afdc3c9732b6bb8cff1ae86a73a064dbcdb6b1bb4dcc8d8d71cb6301296bf"
-# deployment_uuid: k5ee3ol17i5xr9h7t349p3gk
+# deployment_uuid: pabfk98x3sdsgxmjmxft3zpi — status: finished ✅
 ```
 
 ---
