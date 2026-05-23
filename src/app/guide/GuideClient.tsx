@@ -661,6 +661,203 @@ function Anim03() {
   );
 }
 
+// ── PublicGameBlock: collapsible "игра должна быть Public" ────────────────────
+function PublicGameBlock() {
+  const [open, setOpen]           = useState(false);
+  const [questOpen, setQuestOpen] = useState(false);
+  const [slide, setSlide]         = useState(0);
+  const [questSlide, setQuestSlide] = useState(0);
+
+  useEffect(() => {
+    if (!open) return;
+    const id = setInterval(() => setSlide(v => (v + 1) % 2), 3500);
+    return () => clearInterval(id);
+  }, [open]);
+
+  useEffect(() => {
+    if (!questOpen) return;
+    const id = setInterval(() => setQuestSlide(v => (v + 1) % 3), 3000);
+    return () => clearInterval(id);
+  }, [questOpen]);
+
+  const SLIDES = [
+    { src: "/guide/public-configure.jpg", pos: "top",    caption: "Configure → Settings → Audience → Public" },
+    { src: "/guide/public-badge.jpg",     pos: "center", caption: "Значок Public появится на плейсе ✓" },
+  ] as const;
+
+  const QUEST_SLIDES = [
+    { src: "/guide/public-settings.jpg",              pos: "top",    caption: "Configure → Questionnaire → нажми Restart" },
+    { src: "/guide/public-questionnaire.png",         pos: "top",    caption: "Ответь «No» на все 10 вопросов → Continue" },
+    { src: "/guide/public-questionnaire-success.png", pos: "center", caption: "Готово — плейс стал Public ✓" },
+  ] as const;
+
+  return (
+    <div className="mt-3">
+      {/* Toggle */}
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2.5 border border-amber-500/25 bg-amber-500/5 hover:bg-amber-500/10 transition-colors text-left"
+      >
+        <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+        <span className="text-xs font-black uppercase tracking-widest text-amber-300/90">
+          Игра должна быть Public
+        </span>
+        <ChevronRight
+          className="w-3.5 h-3.5 text-amber-500/50 ml-auto transition-transform duration-200"
+          style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
+        />
+      </button>
+
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="pub-body"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.28, ease: "easeInOut" }}
+            style={{ overflow: "hidden" }}
+          >
+            <div className="border border-amber-500/20 border-t-0 bg-[#0a0e1a] p-4 space-y-4">
+              <p className="text-sm text-zinc-300 font-semibold leading-relaxed">
+                Геймпасс должен быть создан в <span className="text-amber-300 font-black">публичной</span> игре — иначе менеджер не сможет его выкупить.
+              </p>
+
+              {/* Steps */}
+              <div className="space-y-1.5">
+                {([
+                  "Нажми на свой плейс в списке Creations",
+                  (<span key="s2">В боковом меню: <b>Configure → Settings</b></span>),
+                  (<span key="s3">Найди раздел <b>Audience</b> → выбери <b>Public</b> → сохрани</span>),
+                ] as React.ReactNode[]).map((step, i) => (
+                  <div key={i} className="flex items-start gap-2.5">
+                    <div className="w-5 h-5 border border-[#1e2a45] bg-[#080c18] flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <span className="font-pixel text-[8px] text-[#00b06f]/70">{i + 1}</span>
+                    </div>
+                    <span className="text-sm text-zinc-300 font-medium leading-snug">{step}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Screenshot slideshow — PC only */}
+              <div className="hidden md:block">
+                <div className="border border-[#1e2a45] overflow-hidden" style={{ fontFamily: "ui-sans-serif,system-ui,sans-serif" }}>
+                  {/* Mini browser chrome */}
+                  <div style={{ background: "#2d2d2d", padding: "5px 8px", display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      {(["#ff5f57","#ffbd2e","#28ca41"] as string[]).map((c, i) => (
+                        <div key={i} style={{ width: 8, height: 8, borderRadius: "50%", background: c }} />
+                      ))}
+                    </div>
+                    <div style={{ flex: 1, background: "#1c1c1c", border: "1px solid #444", borderRadius: 3, padding: "2px 8px", maxWidth: 220, margin: "0 auto" }}>
+                      <span style={{ fontSize: 9, color: "#9aa0a6" }}>create.roblox.com</span>
+                    </div>
+                  </div>
+                  {/* Slides */}
+                  <div style={{ position: "relative", background: "#111", overflow: "hidden" }}>
+                    <AnimatePresence mode="wait">
+                      <motion.img
+                        key={slide}
+                        src={SLIDES[slide].src}
+                        alt={SLIDES[slide].caption}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.45 }}
+                        style={{ width: "100%", display: "block", maxHeight: 230, objectFit: "cover", objectPosition: SLIDES[slide].pos }}
+                      />
+                    </AnimatePresence>
+                    {/* Caption + dots */}
+                    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "linear-gradient(transparent,rgba(0,0,0,0.82))", padding: "20px 10px 8px", display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: 9, color: "#ccc" }}>{SLIDES[slide].caption}</span>
+                      <div style={{ display: "flex", gap: 4, flexShrink: 0, marginLeft: 8 }}>
+                        {SLIDES.map((_, i) => (
+                          <button key={i} onClick={() => setSlide(i)} style={{ width: 6, height: 6, borderRadius: "50%", background: slide === i ? "#00b06f" : "#555", border: "none", cursor: "pointer", padding: 0 }} />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Nested: Questionnaire fix */}
+              <div>
+                <button
+                  onClick={() => setQuestOpen(v => !v)}
+                  className="w-full flex items-center gap-2 px-3 py-2 border border-[#1e2a45] hover:border-zinc-600 bg-[#080c18] hover:bg-[#0c1020] transition-colors text-left"
+                >
+                  <span className="font-pixel text-[9px] text-zinc-500 uppercase tracking-widest">Всё ещё не Public?</span>
+                  <ChevronRight
+                    className="w-3 h-3 text-zinc-600 ml-auto transition-transform duration-200"
+                    style={{ transform: questOpen ? "rotate(90deg)" : "rotate(0deg)" }}
+                  />
+                </button>
+
+                <AnimatePresence initial={false}>
+                  {questOpen && (
+                    <motion.div
+                      key="quest-body"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.22, ease: "easeInOut" }}
+                      style={{ overflow: "hidden" }}
+                    >
+                      <div className="border border-[#1e2a45] border-t-0 bg-[#080c18] p-3 space-y-3">
+                        <div className="space-y-1.5">
+                          {([
+                            (<span key="q1">В том же меню: <b>Configure → Questionnaire</b></span>),
+                            "Нажми Restart внизу страницы",
+                            "Появятся 10 вопросов — на все ответь «No»",
+                            "Нажми Continue → плейс станет Public ✓",
+                          ] as React.ReactNode[]).map((step, i) => (
+                            <div key={i} className="flex items-start gap-2.5">
+                              <div className="w-5 h-5 border border-[#1e2a45] bg-[#0a0e1a] flex items-center justify-center flex-shrink-0 mt-0.5">
+                                <span className="font-pixel text-[8px] text-zinc-600">{i + 1}</span>
+                              </div>
+                              <span className="text-sm text-zinc-400 font-medium leading-snug">{step}</span>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Questionnaire slideshow — PC only */}
+                        <div className="hidden md:block">
+                          <div style={{ border: "1px solid #1e2a45", overflow: "hidden", position: "relative", background: "#111" }}>
+                            <AnimatePresence mode="wait">
+                              <motion.img
+                                key={questSlide}
+                                src={QUEST_SLIDES[questSlide].src}
+                                alt={QUEST_SLIDES[questSlide].caption}
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                transition={{ duration: 0.4 }}
+                                style={{ width: "100%", display: "block", maxHeight: 200, objectFit: "cover", objectPosition: QUEST_SLIDES[questSlide].pos }}
+                              />
+                            </AnimatePresence>
+                            <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "linear-gradient(transparent,rgba(0,0,0,0.82))", padding: "16px 10px 8px", display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
+                              <span style={{ fontSize: 9, color: "#ccc" }}>{QUEST_SLIDES[questSlide].caption}</span>
+                              <div style={{ display: "flex", gap: 4, flexShrink: 0, marginLeft: 8 }}>
+                                {QUEST_SLIDES.map((_, i) => (
+                                  <button key={i} onClick={() => setQuestSlide(i)} style={{ width: 6, height: 6, borderRadius: "50%", background: questSlide === i ? "#00b06f" : "#555", border: "none", cursor: "pointer", padding: 0 }} />
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 // ── Anim 04: Set price — accurate Roblox Creator Hub dark UI ──────────────────
 function Anim04Price({ passPrice }: { passPrice: number | null }) {
   const [f, setF] = useState(0);
@@ -1518,6 +1715,9 @@ function StepsGrid({
                 {!isMobile && isStep06Std && <div style={{ minHeight: 180 }}><Anim06Standard /></div>}
                 {!isMobile && isStep05WB  && <div style={{ minHeight: 220 }}><Anim05ID /></div>}
                 {!isMobile && isStep06WB  && <div style={{ minHeight: 320 }}><Anim06WB /></div>}
+
+                {/* Step 02: public game warning */}
+                {step.num === "02" && <PublicGameBlock />}
 
                 {/* Step 01 PC: direct link button */}
                 {step.num === "01" && !isMobile && (

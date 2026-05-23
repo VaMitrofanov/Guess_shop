@@ -773,16 +773,17 @@ export function registerText(bot: Telegraf): void {
         if (gamepassInfo.isGamePrivate) {
           if (fc.notActive === 1) await notifyAdminValidationFail("Игра закрыта (private) — геймпасс не продаётся");
           await ctx.reply(
-            `❌ Геймпасс в <b>закрытой или удалённой игре</b> — выкупить невозможно.\n\n` +
-            `<b>Вариант 1</b> — открой игру:\n` +
-            `• Зайди на <b>create.roblox.com/dashboard/creations</b> — у игры должен быть значок <b>Public</b>.\n` +
-            `• Если нет: кликни на плейс → Settings → Configure → выбери <b>Public</b>.\n` +
-            `• Если не получается — напиши менеджеру.\n\n` +
-            `<b>Вариант 2</b> — создай геймпасс в другой публичной игре:\n` +
-            `• Creator Hub → Creations → Passes → Create\n` +
-            `• Установи цену <b>${expectedPrice} R$</b>, включи «On Sale»\n\n` +
-            `После этого пришли новую ссылку.`,
-            { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "pass_private") }
+            `❌ <b>Геймпасс в закрытой игре</b> — выкупить невозможно.\n\n` +
+            `Как открыть игру:\n` +
+            `1. Нажми на плейс → <b>Configure → Settings</b>\n` +
+            `2. Найди раздел Audience → выбери <b>Public</b> → сохрани\n\n` +
+            `Не помогло? <b>Configure → Questionnaire → Restart</b>\n` +
+            `Ответь «No» на все 10 вопросов → Continue\n\n` +
+            `Или создай геймпасс в другой публичной игре (цена: <b>${expectedPrice} R$</b>)`,
+            { parse_mode: "HTML", ...Markup.inlineKeyboard([
+              [Markup.button.url("📖 Полная инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
+              [supportBtn("💬 Нужна помощь?", "pass_private")],
+            ]) }
           );
         } else {
           if (fc.notActive === 1) await notifyAdminValidationFail("Геймпасс не выставлен на продажу");
@@ -1906,9 +1907,8 @@ async function notifyUserRejected(
   const isPrivateGame = reason.toLowerCase().includes("закрыт");
   const fixInstructions = isPrivateGame
     ? `Как исправить:\n` +
-      `1. Зайди на <b>create.roblox.com/dashboard/creations</b> — у игры должен быть значок <b>Public</b>.\n` +
-      `   Если нет: кликни на плейс → Settings → Configure → выбери <b>Public</b>.\n` +
-      `   Если не получается — напиши менеджеру. Или создай геймпасс в другой публичной игре.\n` +
+      `1. Нажми на плейс → <b>Configure → Settings</b> → Audience → выбери <b>Public</b>\n` +
+      `   Не помогло? <b>Configure → Questionnaire → Restart</b> → ответь «No» на 10 вопросов\n` +
       `2. Установи цену геймпасса: <b>${Math.ceil(amount / 0.7)} R$</b>\n` +
       `3. Нажми кнопку ниже и пришли новую ссылку:`
     : `Чаще всего причина в одном из двух:\n` +

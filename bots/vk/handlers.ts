@@ -558,17 +558,17 @@ async function handleGamepassLink(
       if (gamepassInfo.isGamePrivate) {
         await ctx.reply({
           message:
-            `❌ Геймпасс в закрытой или удалённой игре — выкупить невозможно.\n\n` +
-            `Как исправить:\n` +
-            `Вариант 1 — открой игру:\n` +
-            `Зайди на create.roblox.com/dashboard/creations — у игры должен быть значок Public.\n` +
-            `Если нет: кликни на плейс → Settings → Configure → выбери Public.\n` +
-            `Если не получается — напиши менеджеру.\n\n` +
-            `Вариант 2 — создай геймпасс в другой публичной игре:\n` +
-            `Creator Hub → Creations → Passes → Create\n` +
-            `Установи цену ${expectedPrice} R$, включи «On Sale»\n\n` +
-            `После этого пришли ссылку на геймпасс сюда.`,
-          keyboard: vkSupportKb("pass_private"),
+            `❌ Геймпасс в закрытой игре — выкупить невозможно.\n\n` +
+            `Как открыть игру:\n` +
+            `1. Нажми на плейс → Configure → Settings\n` +
+            `2. Найди Audience → выбери Public → сохрани\n\n` +
+            `Не помогло? Configure → Questionnaire → Restart\n` +
+            `Ответь «No» на все 10 вопросов → Continue\n\n` +
+            `Или создай геймпасс в другой публичной игре (цена: ${expectedPrice} R$)\n\n` +
+            `📖 Полная инструкция со скринами:\nhttps://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}`,
+          keyboard: Keyboard.builder()
+            .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "pass_private" }, color: "secondary" })
+            .inline(),
         });
       } else {
         await ctx.reply({
