@@ -881,7 +881,7 @@ function PublicGameBlock() {
                   </div>
                   <div className="flex-1">
                     <div className="text-sm font-black text-zinc-400">Всё ещё не Public?</div>
-                    <div className="text-xs text-zinc-600">Есть способ через Questionnaire</div>
+                    <div className="text-xs text-zinc-500">Есть способ через Questionnaire</div>
                   </div>
                   <motion.div animate={{ rotate: questOpen ? 90 : 0 }} transition={{ duration: 0.18 }}>
                     <ChevronRight className="w-4 h-4 text-zinc-600" />
@@ -1657,7 +1657,7 @@ function PlatformSwitcher({
 }) {
   return (
     <div className="flex items-center gap-4 mb-8">
-      <span className="font-pixel text-[9px] text-zinc-500 uppercase tracking-widest hidden sm:block">Платформа создания геймпасса:</span>
+      <span className="font-pixel text-[11px] text-zinc-400 uppercase tracking-widest hidden sm:block">Платформа создания геймпасса:</span>
       <div className="relative inline-flex bg-[#0a0e1a] border-2 border-[#1e2a45] p-1">
         {/* Sliding highlight */}
         <motion.div
@@ -1747,9 +1747,9 @@ function StepsGrid({
               <div className="w-9 h-9 border-2 border-[#00b06f]/30 bg-[#00b06f]/10 flex items-center justify-center group-hover:border-[#00b06f]/60 group-hover:bg-[#00b06f]/15 transition-colors flex-shrink-0">
                 <StepIcon className="w-4 h-4 text-[#00b06f]" />
               </div>
-              <span className="font-pixel text-[9px] text-[#00b06f]/40">{step.num}</span>
+              <span className="font-pixel text-[11px] text-[#00b06f]/50">{step.num}</span>
               {isMobile && (
-                <span className="ml-auto flex items-center gap-1 text-[9px] font-black text-zinc-600 uppercase tracking-wider">
+                <span className="ml-auto flex items-center gap-1 text-xs font-black text-zinc-400 uppercase tracking-wider">
                   <Smartphone className="w-3 h-3" /> mobile
                 </span>
               )}
@@ -1787,7 +1787,7 @@ function StepsGrid({
 
                 {displayTip && (
                   <div className="flex gap-2 items-start bg-[#00b06f]/5 border border-[#00b06f]/15 px-3 py-2 mt-2">
-                    <span className="font-pixel text-[9px] text-[#00b06f] mt-0.5 flex-shrink-0">TIP</span>
+                    <span className="font-pixel text-[10px] text-[#00b06f] mt-0.5 flex-shrink-0">TIP</span>
                     <p className="text-sm md:text-base text-[#00b06f]/80 font-bold leading-relaxed">{displayTip}</p>
                   </div>
                 )}
@@ -1838,7 +1838,7 @@ function StepsGrid({
                       href="https://create.roblox.com/dashboard/creations"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 h-10 px-5 border-2 border-[#1e2a45] hover:border-[#00b06f]/50 hover:text-[#00b06f] font-black text-[10px] uppercase tracking-widest transition-all text-zinc-300"
+                      className="inline-flex items-center gap-2 h-10 px-5 border-2 border-[#1e2a45] hover:border-[#00b06f]/50 hover:text-[#00b06f] font-black text-xs uppercase tracking-widest transition-all text-zinc-300"
                     >
                       Открыть Creator Hub <ExternalLink className="w-3.5 h-3.5" />
                     </a>
@@ -1978,13 +1978,13 @@ function StandardDoneBlock() {
         <CheckCircle2 className="w-7 h-7 text-[#00b06f]" />
       </div>
       <div className="text-center sm:text-left space-y-1">
-        <p className="font-pixel text-[10px] text-[#00b06f]">ГОТОВО!</p>
+        <p className="font-pixel text-xs text-[#00b06f]">ГОТОВО!</p>
         <p className="font-black uppercase tracking-tight text-lg">Геймпасс создан — оформляй заказ</p>
         <p className="text-sm text-zinc-400 font-medium">Найди пасс по нику, ссылке или ID — и оплати</p>
       </div>
       <Link
         href="/checkout"
-        className="ml-auto h-12 px-8 gold-gradient font-black text-[10px] uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none flex items-center gap-2 flex-shrink-0"
+        className="ml-auto h-12 px-8 gold-gradient font-black text-xs uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none flex items-center gap-2 flex-shrink-0"
       >
         Купить R$ <ArrowRight className="w-3.5 h-3.5" />
       </Link>
@@ -2016,7 +2016,7 @@ function WBStaticHeader({ denomination, onReset }: { denomination?: number; onRe
         {/* Denomination badge */}
         {denomination && denomination > 0 && (
           <div className="flex items-center gap-2 px-3 py-1.5 border border-[#c9a84c]/30 bg-[#c9a84c]/10">
-            <span className="font-pixel text-[8px] text-[#c9a84c]/60 tracking-widest hidden sm:block">НОМИНАЛ</span>
+            <span className="font-pixel text-[11px] text-[#c9a84c]/70 tracking-widest hidden sm:block">НОМИНАЛ</span>
             <span className="font-black text-lg leading-none" style={{ color: "#f0c040" }}>{denomination} R$</span>
           </div>
         )}
@@ -2025,7 +2025,7 @@ function WBStaticHeader({ denomination, onReset }: { denomination?: number; onRe
         {onReset && (
           <button
             onClick={onReset}
-            className="flex items-center gap-1.5 h-8 px-3 border border-[#c9a84c]/20 hover:border-[#c9a84c]/50 text-[#c9a84c]/50 hover:text-[#c9a84c] transition-all font-black text-[10px] uppercase tracking-widest"
+            className="flex items-center gap-1.5 h-8 px-3 border border-[#c9a84c]/20 hover:border-[#c9a84c]/50 text-[#c9a84c]/50 hover:text-[#c9a84c] transition-all font-black text-xs uppercase tracking-widest"
           >
             <ArrowRight className="w-3 h-3 rotate-180" />
             <span className="hidden sm:inline">Новый код</span>
@@ -2338,7 +2338,7 @@ function WBGate() {
               { label: "Ручная выдача",  icon: CheckCircle2 },
               { label: "Поддержка 24/7", icon: ShoppingBag },
             ].map(({ label, icon: Icon }) => (
-              <div key={label} className="flex items-center gap-1.5 text-zinc-600">
+              <div key={label} className="flex items-center gap-1.5 text-zinc-400">
                 <Icon className="w-3.5 h-3.5" />
                 <span className="text-xs font-black uppercase tracking-wide">{label}</span>
               </div>
@@ -2354,10 +2354,10 @@ function WBGate() {
           >
             <AlertTriangle className="w-4 h-4 text-zinc-500 group-hover:text-[#c9a84c] transition-colors flex-shrink-0" />
             <div className="flex flex-col text-left leading-tight">
-              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 group-hover:text-zinc-300 transition-colors">
+              <span className="text-xs font-black uppercase tracking-widest text-zinc-400 group-hover:text-zinc-300 transition-colors">
                 Возникли трудности?
               </span>
-              <span className="text-[12px] font-black text-white group-hover:text-[#f0c040] transition-colors">
+              <span className="text-sm font-black text-white group-hover:text-[#f0c040] transition-colors">
                 Написать живому менеджеру → @RobloxBank_PA
               </span>
             </div>
@@ -2401,7 +2401,7 @@ function FormulaCalculator({
     const fixedPrice = Math.ceil(denomination / 0.7);
     return (
       <div className="pixel-card border-2 border-[#00b06f]/30 bg-[#00b06f]/5 p-5">
-        <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-3">ГЛАВНАЯ ФОРМУЛА</div>
+        <div className="font-pixel text-xs text-[#00b06f]/70 tracking-wider mb-3">ГЛАВНАЯ ФОРМУЛА</div>
         <div className="flex items-center gap-4 mb-3">
           <div className="text-center">
             <div className="text-3xl font-black" style={{ color: "#f0c040" }}>{denomination}</div>
@@ -2426,7 +2426,7 @@ function FormulaCalculator({
           </button>
         </div>
         <div className="flex gap-2 items-start bg-[#00b06f]/5 border border-[#00b06f]/15 px-3 py-2 mt-2">
-          <span className="font-pixel text-[9px] text-[#00b06f] mt-0.5 flex-shrink-0">TIP</span>
+          <span className="font-pixel text-[10px] text-[#00b06f] mt-0.5 flex-shrink-0">TIP</span>
           <p className="text-sm text-[#00b06f]/80 font-bold leading-relaxed">Нажми на цену пасса, чтобы скопировать</p>
         </div>
         {/* Regional pricing warning */}
@@ -2443,12 +2443,12 @@ function FormulaCalculator({
   // Standard — interactive calculator
   return (
     <div className="pixel-card border-2 border-[#00b06f]/30 bg-[#00b06f]/5 p-5 min-h-[220px]">
-      <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-4">КАЛЬКУЛЯТОР ЦЕНЫ ПАССА</div>
+      <div className="font-pixel text-xs text-[#00b06f]/70 tracking-wider mb-4">КАЛЬКУЛЯТОР ЦЕНЫ ПАССА</div>
 
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
         {/* Input */}
         <div className="flex-1 space-y-1">
-          <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Хочу получить (R$)</div>
+          <div className="text-xs font-black text-zinc-400 uppercase tracking-widest">Хочу получить (R$)</div>
           <div className="relative">
             <input
               type="number"
@@ -2469,7 +2469,7 @@ function FormulaCalculator({
 
         {/* Result — click to copy */}
         <div className="flex-1 space-y-1">
-          <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Цена пасса (R$)</div>
+          <div className="text-xs font-black text-zinc-400 uppercase tracking-widest">Цена пасса (R$)</div>
           <button
             onClick={calcPrice ? onCopyPassPrice : undefined}
             disabled={!calcPrice}
@@ -2482,12 +2482,12 @@ function FormulaCalculator({
             <span className="text-xl md:text-2xl font-black text-[#00b06f]">{calcPrice ?? "—"}</span>
             <div className="flex items-center gap-2">
               {calcPrice && !priceCopied && (
-                <span className="text-[10px] font-medium text-zinc-600 group-hover:text-zinc-500 transition-colors">
+                <span className="text-xs font-medium text-zinc-500 group-hover:text-zinc-400 transition-colors">
                   нажми, чтобы скопировать
                 </span>
               )}
               {priceCopied && (
-                <span className="text-[10px] font-medium text-[#00b06f]/70">
+                <span className="text-xs font-medium text-[#00b06f]/70">
                   ✓ скопировано
                 </span>
               )}
@@ -2555,10 +2555,10 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
               {isWB && (
                 <div className="inline-flex items-center gap-2 px-3 py-1.5 border border-amber-500/30 bg-amber-500/5">
                   <ShoppingBag className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="font-pixel text-[9px] text-amber-400/80 tracking-widest">WILDBERRIES</span>
+                  <span className="font-pixel text-[11px] text-amber-400/90 tracking-widest">WILDBERRIES</span>
                 </div>
               )}
-              <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">TUTORIAL</div>
+              <div className="font-pixel text-xs text-[#00b06f]/70 tracking-wider">TUTORIAL</div>
               <h1 className="text-6xl md:text-7xl font-black uppercase tracking-[-0.04em] leading-[0.85]">
                 Как создать<br />
                 <span className="gold-text">геймпасс</span>
@@ -2608,7 +2608,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
 
               {/* Quick checklist */}
               <div className="border-2 border-[#1e2a45] bg-[#080c18] p-5 space-y-2">
-                <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider mb-3">ЧТО ПОНАДОБИТСЯ</div>
+                <div className="font-pixel text-[11px] text-[#00b06f]/70 tracking-wider mb-3">ЧТО ПОНАДОБИТСЯ</div>
                 {[
                   "Аккаунт Roblox (любой уровень)",
                   "Браузер — создаём прямо на сайте",
@@ -2617,7 +2617,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
                 ].map((item, i) => (
                   <div key={i} className="flex items-start gap-3">
                     <div className="w-4 h-4 border border-[#00b06f]/40 bg-[#00b06f]/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <span className="text-[#00b06f] text-[8px] font-black">{i + 1}</span>
+                      <span className="text-[#00b06f] text-[10px] font-black">{i + 1}</span>
                     </div>
                     <span className="text-sm font-medium text-zinc-300 leading-snug">{item}</span>
                   </div>
@@ -2640,7 +2640,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
       {/* ── STEPS ── (curtain reveal только при свежем переходе из gate) */}
       <section className="container mx-auto px-6 py-16 max-w-7xl">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-          <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">ПОШАГОВАЯ ИНСТРУКЦИЯ</div>
+          <div className="font-pixel text-xs text-[#00b06f]/70 tracking-wider">ПОШАГОВАЯ ИНСТРУКЦИЯ</div>
           <PlatformSwitcher platform={platform} onChange={setPlatform} />
         </div>
         <StepsGrid
@@ -2680,7 +2680,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
           <section className="container mx-auto px-6 py-16 max-w-7xl">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
               <div>
-                <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-2">ЧАСТЫЕ ОШИБКИ</div>
+                <div className="font-pixel text-xs text-[#00b06f]/70 tracking-wider mb-2">ЧАСТЫЕ ОШИБКИ</div>
                 <h2 className="text-4xl font-black uppercase tracking-tight mb-6">Чего не делать</h2>
                 <div className="space-y-2">
                   {MISTAKES.map(({ wrong, right }) => (
@@ -2703,7 +2703,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
               </div>
 
               <div>
-                <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-2">PRICE TABLE</div>
+                <div className="font-pixel text-xs text-[#00b06f]/70 tracking-wider mb-2">PRICE TABLE</div>
                 <h2 className="text-4xl font-black uppercase tracking-tight mb-2">Таблица цен</h2>
                 <p className="text-base text-zinc-500 font-medium mb-5">Цена пасса с учётом 30% комиссии Roblox.</p>
                 <div className="pixel-card border-2 border-[#1e2a45] overflow-hidden">
@@ -2726,7 +2726,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
                     </tbody>
                   </table>
                   <div className="px-5 py-3.5 bg-[#080c18] border-t border-[#1e2a45] flex items-center gap-3">
-                    <span className="font-pixel text-[9px] text-[#00b06f] border border-[#00b06f]/20 bg-[#00b06f]/10 px-2 py-1">ФОРМУЛА</span>
+                    <span className="font-pixel text-[11px] text-[#00b06f] border border-[#00b06f]/20 bg-[#00b06f]/10 px-2 py-1">ФОРМУЛА</span>
                     <span className="text-sm font-bold text-zinc-300">цена пасса = нужная сумма ÷ 0.7</span>
                   </div>
                 </div>
@@ -2741,7 +2741,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
               <div className="space-y-6">
                 <div>
-                  <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-2">FAQ</div>
+                  <div className="font-pixel text-xs text-[#00b06f]/70 tracking-wider mb-2">FAQ</div>
                   <h2 className="text-4xl font-black uppercase tracking-tight">Частые вопросы</h2>
                 </div>
                 <p className="text-zinc-400 text-base font-medium leading-relaxed">
@@ -2754,7 +2754,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
                     className="flex items-center justify-between p-5 pixel-card border-2 border-[#1e2a45] hover:border-[#00b06f]/30 transition-colors group"
                   >
                     <div>
-                      <p className="font-pixel text-[9px] text-zinc-500 tracking-wider">OFFICIAL</p>
+                      <p className="font-pixel text-[11px] text-zinc-400 tracking-wider">OFFICIAL</p>
                       <p className="font-black uppercase text-base">Creator Hub</p>
                     </div>
                     <ExternalLink className="w-4 h-4 text-zinc-500 group-hover:text-[#00b06f] transition-colors" />
@@ -2764,7 +2764,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
                     className="flex items-center justify-between p-5 pixel-card border-2 border-[#00b06f]/20 bg-[#00b06f]/5 hover:border-[#00b06f]/40 transition-colors group"
                   >
                     <div>
-                      <p className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">READY?</p>
+                      <p className="font-pixel text-[11px] text-[#00b06f]/70 tracking-wider">READY?</p>
                       <p className="font-black uppercase text-base">Купить Robux</p>
                     </div>
                     <ArrowRight className="w-4 h-4 text-[#00b06f]" />
@@ -2844,13 +2844,13 @@ function WBIntro({ onDone }: { onDone: () => void }) {
       <div className="flex items-center justify-between px-8 py-5 border-t border-white/5">
         <div className="flex items-center gap-3">
           <div className="w-1.5 h-1.5 rounded-full bg-[#c9a84c] animate-pulse" />
-          <span className="font-pixel text-[9px] text-[#c9a84c]/60 tracking-widest">
+          <span className="font-pixel text-[11px] text-[#c9a84c]/70 tracking-widest">
             WILDBERRIES × ROBLOXBANK
           </span>
         </div>
         <button
           onClick={handleDone}
-          className="font-pixel text-[9px] text-zinc-600 hover:text-[#c9a84c] tracking-widest uppercase transition-colors"
+          className="font-pixel text-[11px] text-zinc-400 hover:text-[#c9a84c] tracking-widest uppercase transition-colors"
         >
           Пропустить →
         </button>
@@ -2921,7 +2921,7 @@ export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl }: {
         <div className="w-16 h-16 rounded-full bg-[#1c1c1e] animate-pulse mb-6 border border-[#c9a84c]/20" />
         <div className="w-48 h-4 bg-[#1c1c1e] rounded animate-pulse mb-3" />
         <div className="w-32 h-3 bg-[#1c1c1e] rounded animate-pulse" />
-        <div className="mt-8 text-[10px] uppercase tracking-widest text-[#c9a84c]/50 font-pixel animate-pulse">
+        <div className="mt-8 text-xs uppercase tracking-widest text-[#c9a84c]/60 font-pixel animate-pulse">
           Восстановление сессии...
         </div>
       </div>
