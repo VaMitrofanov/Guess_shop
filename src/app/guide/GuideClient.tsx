@@ -1897,19 +1897,19 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
           <div className="absolute inset-0 border border-[#c9a84c]/20 scale-125 opacity-20" />
         </div>
         
-        <div className="font-pixel text-[10px] text-[#c9a84c]/60 tracking-[0.3em] mb-4 uppercase">
+        <div className="font-pixel text-xs text-[#c9a84c]/70 tracking-[0.3em] mb-4 uppercase">
           Оформление заказа
         </div>
 
         {denomination && passPrice ? (
           <div className="flex flex-col sm:flex-row items-center justify-center gap-6 mb-10">
             <div className="flex flex-col items-center gap-1 border-2 border-[#c9a84c]/20 bg-[#c9a84c]/5 px-8 py-4 min-w-[180px]">
-              <span className="font-pixel text-[8px] text-[#c9a84c]/40">ТЫ ПОЛУЧИШЬ</span>
+              <span className="font-pixel text-[11px] text-[#c9a84c]/60">ТЫ ПОЛУЧИШЬ</span>
               <span className="text-4xl font-black text-white">{denomination} R$</span>
             </div>
             <div className="bg-[#c9a84c]/20 w-8 h-[2px] hidden sm:block" />
             <div className="flex flex-col items-center gap-1 border-2 border-[#c9a84c]/40 bg-[#c9a84c]/10 px-8 py-4 min-w-[180px]">
-              <span className="font-pixel text-[8px] text-[#c9a84c]/60">ЦЕНА ПАССА</span>
+              <span className="font-pixel text-[11px] text-[#c9a84c]/80">ЦЕНА ПАССА</span>
               <span className="text-4xl font-black text-[#f0c040]">{passPrice} R$</span>
             </div>
           </div>
@@ -1931,7 +1931,7 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
           <a
             href={code ? `https://t.me/RobloxBankBot?start=wb_${code}_${getOrInitSessionId()}` : "https://t.me/RobloxBankBot"}
             target="_blank" rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2.5 md:gap-4 w-full h-full font-black text-[11px] md:text-sm uppercase tracking-widest text-white"
+            className="flex items-center justify-center gap-2.5 md:gap-4 w-full h-full font-black text-xs md:text-sm uppercase tracking-widest text-white"
           >
             <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 md:w-6 md:h-6 flex-shrink-0 text-[#229ED9] group-hover/tg:scale-110 transition-transform">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z"/>
@@ -1952,17 +1952,17 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
 
       {/* Subtitle under buttons */}
       <div className="relative z-10 flex flex-col sm:flex-row items-center justify-center gap-6 mt-4 max-w-2xl mx-auto w-full">
-        <p className="text-[10px] md:text-xs text-zinc-600 font-black uppercase tracking-widest text-center flex-1">
+        <p className="text-xs text-zinc-400 font-black uppercase tracking-widest text-center flex-1">
           Бот открывается автоматически
         </p>
-        <p className="text-[10px] md:text-xs text-zinc-600 font-black uppercase tracking-widest text-center flex-1">
+        <p className="text-xs text-zinc-400 font-black uppercase tracking-widest text-center flex-1">
           Быстрая авторизация VK ID
         </p>
       </div>
 
       <div className="relative z-10 flex items-center justify-center gap-2 mt-8 opacity-60">
         <AlertTriangle className="w-4 h-4 text-[#c9a84c]" />
-        <p className="text-[#c9a84c] text-[10px] font-black uppercase tracking-widest text-center">
+        <p className="text-[#c9a84c] text-xs font-black uppercase tracking-widest text-center">
           Среднее время обработки — несколько часов • Работаем круглосуточно
         </p>
       </div>
