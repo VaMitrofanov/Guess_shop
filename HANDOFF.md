@@ -17,23 +17,60 @@
 
 ## Доступ к инфраструктуре
 
-Claude (в рамках сессии) имеет доступ ко всему:
+### Серверы
 
-| Ресурс | Что это |
-|--------|---------|
-| **SSH RF** | Основной сервер (Москва, 89.110.94.117) — Next.js сайт + TG/VK боты |
-| **SSH SG** | Singapore VPS — bridge сервер (Roblox API + TG Bot API прокси) |
-| **Coolify token** | Панель управления деплоем, env vars, логи контейнеров |
+| Сервер | IP | Что на нём |
+|--------|----|-----------|
+| **RF (Москва)** | `89.110.94.117` | Coolify panel (`port 8000`), Next.js сайт, VK бот, Guide |
+| **SG (Singapore)** | `5.223.95.11` | TG бот, Bridge сервер (`port 3000`) |
 
-Команды для CLI-работы в сессии:
 ```bash
-# Подключение к серверам
-! ssh root@89.110.94.117      # RF
-! ssh root@<SG_IP>            # SG
-
-# Coolify API
-! curl -H "Authorization: Bearer $COOLIFY_TOKEN" https://coolify.robloxbank.ru/api/v1/...
+ssh root@89.110.94.117   # RF — Coolify, Web, VK bot
+ssh root@5.223.95.11     # SG — TG bot, bridge
 ```
+
+### Coolify
+
+- Панель: `http://89.110.94.117:8000` (или `panel.robloxbank.ru`)
+- API токен: создаётся в Coolify → Profile → API Tokens. Хранить в `$COOLIFY_TOKEN` (не в файлах!).
+- Токен нужен с правами **Read + Write + Deploy**.
+
+```bash
+# Деплой любого сервиса (с локальной машины):
+curl -s -X POST "http://89.110.94.117:8000/api/v1/deploy?uuid=<UUID>&force=true" \
+  -H "Authorization: Bearer $COOLIFY_TOKEN"
+
+# Статус деплоя:
+curl -s "http://89.110.94.117:8000/api/v1/deployments/<deployment_uuid>" \
+  -H "Authorization: Bearer $COOLIFY_TOKEN" | jq '{status, commit_message}'
+```
+
+### UUID сервисов в Coolify
+
+| Сервис | UUID | Сервер |
+|--------|------|--------|
+| RobloxBankWeb (сайт) | `z10ws7m1q45h281zwedmhei4` | RF |
+| RobloxBank-Guide | `ebac6llpah5n2x58rb64yn8j` | RF |
+| TG_bot | `lyz78enntugna9em1biopinr` | SG |
+| VK_bot | `gmtpfqosgoz23vjyxyczuic9` | RF |
+
+### Env vars (секреты)
+
+Все секреты живут **только в Coolify** (env vars на каждом сервисе). В коде — никаких raw токенов.
+
+| Переменная | Где | Что это |
+|-----------|-----|---------|
+| `TG_TOKEN` | TG_bot + VK_bot + RobloxBankWeb | Telegram bot token (`@RobloxBankBot`) |
+| `VK_TOKEN` | VK_bot | VK community token |
+| `DATABASE_URL` | Все сервисы | Neon Postgres (pooler) |
+| `VALIDATOR_KEY` | TG_bot, VK_bot | Shared secret для bridge-сервера |
+| `VALIDATOR_SOURCE_URL` | VK_bot | `http://5.223.95.11:3000` — bridge на SG |
+| `ADMIN_IDS` | TG_bot | Telegram IDs через запятую |
+| `WB_API_TOKEN` | TG_bot | Wildberries API токен |
+
+**Ротация токенов:**
+- TG токен: @BotFather → /mybots → выбрать бота → API Token → Revoke. После замены — обновить `TG_TOKEN` в Coolify на TG_bot **и** VK_bot (VK бот шлёт TG-уведомления).
+- Coolify API токен: Coolify → Profile → API Tokens → удалить старый, создать новый. Только `$COOLIFY_TOKEN` в env, не в файлах.
 
 ---
 
@@ -578,40 +615,51 @@ c33aa06 fix(bots): pass_private ctxKey for TG, add DB fallback for VK support ha
 
 ---
 
-## Текущий деплой (2026-05-23)
+## Текущий деплой (2026-05-24)
 
 | Сервис | Сервер | Commit | Статус |
 |--------|--------|--------|--------|
-| Next.js сайт | RF 89.110.94.117 | `055cc89` | ✅ |
-| VK бот | RF 89.110.94.117 | `7165440` (handlers.ts вручную) | ✅ |
-| TG бот | SG 5.223.95.11 | `b2d4e98` (handlers.ts + roblox.ts вручную) | ✅ |
+| Next.js сайт | RF `89.110.94.117` | `7ee10e9` | ✅ running:healthy |
+| Guide микросервис | RF `89.110.94.117` | `4c3bd4c` | ✅ running:healthy |
+| VK бот | RF `89.110.94.117` | `3e485a3` | ✅ running |
+| TG бот | SG `5.223.95.11` | `3e485a3` | ✅ running |
 
-**Auto-deploy сломан:** RF-сервер не может достучаться до `api.github.com` (Russian IP block). Coolify ставит `is_auto_deploy_enabled = true`, но вебхук не срабатывает (timeout на GitHub API). Деплой только вручную через Coolify API с `force=true`.
-
-**⚠️ Обязательный порядок деплоя Next.js сайта:**
+**⚠️ Обязательный порядок деплоя:**
 ```bash
-# 1. Сначала запушить коммиты на GitHub (иначе Coolify возьмёт старый код)
+# 1. Запушить коммиты
 git push origin main
 
-# 2. Потом тригернуть деплой правильного UUID (z10ws7m1q45h281zwedmhei4 = RobloxBankWeb, домен robloxbank.ru)
-# Вызывать с ЛОКАЛЬНОЙ машины (не через SSH на сервер):
-curl -s -X POST "http://89.110.94.117:8000/api/v1/deploy?uuid=z10ws7m1q45h281zwedmhei4&force=true" \
+# 2. Тригернуть деплой с ЛОКАЛЬНОЙ машины (force=true — SG/RF не достают до api.github.com)
+curl -s -X POST "http://89.110.94.117:8000/api/v1/deploy?uuid=<UUID>&force=true" \
   -H "Authorization: Bearer $COOLIFY_TOKEN"
 
-# ⚠️ НЕ использовать uuid=ebac6llpah5n2x58rb64yn8j — это RobloxBank-Guide, у него нет домена (fqdn: null)
+# ⚠️ Для сайта — uuid=z10ws7m1q45h281zwedmhei4 (НЕ ebac6llp — это Guide без домена)
 ```
 
-**Проверить статус деплоя:**
+**Проверка статуса:**
 ```bash
 curl -s "http://89.110.94.117:8000/api/v1/deployments/<deployment_uuid>" \
   -H "Authorization: Bearer $COOLIFY_TOKEN" | jq '{status, commit_message}'
 # status: "finished" + правильный commit_message = успех
 ```
 
-**Coolify API доступ:** токен ID=18 вставлен напрямую в DB (`personal_access_tokens`, team_id=0). Raw token: `891afdc3c9732b6bb8cff1ae86a73a064dbcdb6b1bb4dcc8d8d71cb6301296bf`. Формат заголовка: `18|<raw_token>`. Вызов только с RF-сервера через `http://localhost:8000/api/v1/`. UUID сайта: `z10ws7m1q45h281zwedmhei4`. UUID TG-бота: `lyz78enntugna9em1biopinr`.
+**Диагностика TG бота (деплоится на SG, не на RF!):**
+```bash
+# Контейнер ищи на SG, не на RF:
+ssh root@5.223.95.11 "docker ps --format '{{.Names}}\t{{.Status}}' | grep lyz78"
+ssh root@5.223.95.11 "docker logs <container_name> 2>&1 | tail -20"
+```
 
-**DB состояние (на момент аудита):** 3 COMPLETED / 2 REJECTED заказа, 995 AVAILABLE кодов, 9 TG-пользователей.  
-**4 зависших RESERVED кода** (`1FS0SNA`, `66PXO05`, `UITRVG1`, `QP7HC6J`) — нет фонового cleanup job, истёкли TTL. Нужно либо cron-задача, либо авто-релиз в `/api/wb-code` при истёкшем `reservedUntil`.
+**Известная проблема с env в Coolify:** при добавлении env var через Dashboard возможно создание plaintext-дубля (без шифрования) — тогда деплои начнут падать с `DecryptException`. Лечение:
+```bash
+ssh root@89.110.94.117
+docker exec coolify-db psql -U coolify -d coolify -c \
+  "SELECT id, key, CASE WHEN value LIKE 'eyJp%' THEN 'encrypted' ELSE 'PLAINTEXT' END FROM environment_variables WHERE resourceable_id=<app_id>;"
+# Удалить строку с PLAINTEXT: DELETE FROM environment_variables WHERE id=<id>;
+```
+
+**DB состояние (на момент аудита, 2026-05-21):** 3 COMPLETED / 2 REJECTED заказа, 995 AVAILABLE кодов, 9 TG-пользователей.  
+**4 зависших RESERVED кода** (`1FS0SNA`, `66PXO05`, `UITRVG1`, `QP7HC6J`) — нет фонового cleanup job, истёкли TTL.
 
 ---
 
@@ -787,3 +835,72 @@ curl -s -X POST "http://89.110.94.117:8000/api/v1/deploy?uuid=z10ws7m1q45h281zwe
 **Файл:** `prisma/schema.prisma`  
 **Проблема:** нет audit trail для переходов AVAILABLE → RESERVED → CLAIMED. Поиск по `updatedAt` в `tryRestoreState` был невозможен.  
 **Исправление:** добавлено `updatedAt DateTime @updatedAt` + миграция `20260521_add_wbcode_updated_at`.
+
+---
+
+## Сессия 2026-05-23–24 — UX-аудит + ротация токенов
+
+### UX-аудит (GuideClient.tsx, коммиты `2d0b8ea`, `169de13`, `7ee10e9`)
+
+**Полный проход по UX (11 фиксов, `2d0b8ea`):**
+- `Anim04Price`: интервал 1400→2400ms (убрана быстрая мелькалка)
+- `Anim06WB`: интервал 1800→1600ms
+- `PlatformSwitcher`: spring stiffness 400→300, damping 30→28 (меньше overshoot)
+- Step detail text: `text-zinc-400` → `text-zinc-300` (WCAG AA контраст)
+- Bullet icons: `w-2 h-2` → `w-3 h-3`
+- `FormulaCalculator` disabled state: добавлена `opacity-50`
+- WBGate error: анимированное появление через `AnimatePresence` + иконка AlertTriangle + ссылка на поддержку
+- Price table: `overflow-x-auto` + `min-w-[320px]` для горизонтального скролла на mobile
+- Hero stats grid: `grid-cols-4` → `grid-cols-2 md:grid-cols-4`
+- FAQ: `focus-visible:outline` для keyboard navigation
+- WBManagerBlock description: `text-zinc-400` → `text-zinc-300`
+
+**Mobile-аудит (6 фиксов, `169de13`):**
+- Убран `autoFocus` на WBGate input (угонял клавиатуру при открытии)
+- WBGate outer padding: `py-16` → `py-8 sm:py-16` (short screens)
+- WBGate card: `p-10 lg:p-14` → `p-6 sm:p-10 lg:p-14`
+- Trust badges: `flex-wrap` + `gap-y-2`
+- Hero H1: `text-6xl md:text-7xl` → `text-5xl sm:text-6xl md:text-7xl`
+- FormulaCalculator static row: `flex-wrap`
+
+**Ultrareview fixes (`7ee10e9`):**
+- `HANDOFF.md`: raw Coolify токен заменён на `$COOLIFY_TOKEN`
+- `bots/tg/handlers.ts`: `privgame` reasonMap — убрана inline-инструкция (противоречила fixInstructions)
+- `GuideClient.tsx`: `aria-label` + `aria-current` на slideshow nav dots
+
+### Безопасность — ротация токенов (2026-05-24)
+
+**Обнаружены и исправлены утечки:**
+
+| Что | Где было | Статус |
+|-----|---------|--------|
+| Coolify API token `18\|891afd...` | `HANDOFF.md` (в git-истории) | Токен отозван. В истории остался — угрозы нет. |
+| TG bot token `AAENlm8...` | `test_tg.js` (в git-истории) | Токен отозван, файл удалён (`3e485a3`). |
+| `NEON_API_KEY` plaintext | Coolify DB, env var ID=135 | Удалён (был дублём encrypted ID=136). Вызывал `DecryptException` при деплое. |
+
+**Новые токены** (хранятся только в Coolify env vars):
+- TG токен: `@RobloxBankBot` → обновлён в TG_bot и VK_bot
+- Coolify API токен: создать новый в Profile → API Tokens (нужны права Read+Write+Deploy)
+
+**Важно:** VK бот тоже использует `TG_TOKEN` для отправки admin-уведомлений. При ротации TG токена — обновлять **оба** сервиса: `TG_bot` и `VK_bot`.
+
+### Архитектурное открытие: TG бот на отдельном сервере
+
+TG бот (`lyz78enntugna9em1biopinr`) деплоится на **SG сервер** (`5.223.95.11`), а не на RF. Это было неочевидно — в Coolify Dashboard сервис выглядит как обычное приложение. При отладке контейнеры искать на SG:
+
+```bash
+ssh root@5.223.95.11 "docker ps | grep lyz78"
+ssh root@5.223.95.11 "docker logs <container> 2>&1 | tail -20"
+```
+
+### Текущее состояние workflow (2026-05-24)
+
+| Компонент | Статус | Проверено |
+|-----------|--------|-----------|
+| `robloxbank.ru` | 200 OK | ✅ |
+| `robloxbank.ru/guide?source=wb` | 200 OK | ✅ |
+| `@RobloxBankBot` (Telegram API) | ok, токен валиден | ✅ |
+| TG бот (`[TG] Bot started ✅`) | running, polling | ✅ SG |
+| VK бот (`[VK] Bot started ✅`) | running | ✅ RF |
+| Bridge (`0.0.0.0:3000`) | listening | ✅ SG |
+| Neon DB (TCP `5432`) | reachable | ✅ |
