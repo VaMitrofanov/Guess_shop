@@ -582,15 +582,30 @@ c33aa06 fix(bots): pass_private ctxKey for TG, add DB fallback for VK support ha
 
 | Сервис | Сервер | Commit | Статус |
 |--------|--------|--------|--------|
-| Next.js сайт | RF 89.110.94.117 | `d5712de` | 🟡 деплоится |
+| Next.js сайт | RF 89.110.94.117 | `cdb135b` | ✅ |
 | VK бот | RF 89.110.94.117 | `7165440` (handlers.ts вручную) | ✅ |
 | TG бот | SG 5.223.95.11 | `b2d4e98` (handlers.ts + roblox.ts вручную) | ✅ |
 
-**Auto-deploy сломан:** RF-сервер не может достучаться до `api.github.com` (Russian IP block). Coolify ставит `is_auto_deploy_enabled = true`, но вебхук не срабатывает (timeout на GitHub API). Деплой только вручную через Coolify UI или API с `force=true`:
+**Auto-deploy сломан:** RF-сервер не может достучаться до `api.github.com` (Russian IP block). Coolify ставит `is_auto_deploy_enabled = true`, но вебхук не срабатывает (timeout на GitHub API). Деплой только вручную через Coolify API с `force=true`.
 
+**⚠️ Обязательный порядок деплоя Next.js сайта:**
 ```bash
-# Next.js сайт (uuid z10ws7m1q45h281zwedmhei4)
-ssh root@77.222.43.19 'curl -s -X POST -H "Authorization: Bearer 18|891afdc3c9732b6bb8cff1ae86a73a064dbcdb6b1bb4dcc8d8d71cb6301296bf" "http://localhost:8000/api/v1/deploy?uuid=z10ws7m1q45h281zwedmhei4&force=true"'
+# 1. Сначала запушить коммиты на GitHub (иначе Coolify возьмёт старый код)
+git push origin main
+
+# 2. Потом тригернуть деплой правильного UUID (z10ws7m1q45h281zwedmhei4 = RobloxBankWeb, домен robloxbank.ru)
+# Вызывать с ЛОКАЛЬНОЙ машины (не через SSH на сервер):
+curl -s -X POST "http://89.110.94.117:8000/api/v1/deploy?uuid=z10ws7m1q45h281zwedmhei4&force=true" \
+  -H "Authorization: Bearer 18|891afdc3c9732b6bb8cff1ae86a73a064dbcdb6b1bb4dcc8d8d71cb6301296bf"
+
+# ⚠️ НЕ использовать uuid=ebac6llpah5n2x58rb64yn8j — это RobloxBank-Guide, у него нет домена (fqdn: null)
+```
+
+**Проверить статус деплоя:**
+```bash
+curl -s "http://89.110.94.117:8000/api/v1/deployments/<deployment_uuid>" \
+  -H "Authorization: Bearer 18|891afdc3c9732b6bb8cff1ae86a73a064dbcdb6b1bb4dcc8d8d71cb6301296bf" | jq '{status, commit_message}'
+# status: "finished" + правильный commit_message = успех
 ```
 
 **Coolify API доступ:** токен ID=18 вставлен напрямую в DB (`personal_access_tokens`, team_id=0). Raw token: `891afdc3c9732b6bb8cff1ae86a73a064dbcdb6b1bb4dcc8d8d71cb6301296bf`. Формат заголовка: `18|<raw_token>`. Вызов только с RF-сервера через `http://localhost:8000/api/v1/`. UUID сайта: `z10ws7m1q45h281zwedmhei4`. UUID TG-бота: `lyz78enntugna9em1biopinr`.
