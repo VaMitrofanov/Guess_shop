@@ -2008,8 +2008,8 @@ function WBStaticHeader({ denomination, onReset }: { denomination?: number; onRe
             </div>
           </div>
           <div className="hidden sm:flex flex-col leading-none">
-            <span className="text-[11px] font-black uppercase tracking-[0.2em] text-white">Wildberries</span>
-            <span className="text-[11px] font-black uppercase tracking-[0.2em] text-[#c9a84c]">× RobloxBank</span>
+            <span className="text-xs font-black uppercase tracking-[0.2em] text-white">Wildberries</span>
+            <span className="text-xs font-black uppercase tracking-[0.2em] text-[#c9a84c]">× RobloxBank</span>
           </div>
         </div>
 
@@ -2132,15 +2132,15 @@ function WBGate() {
                 <Ticket className="w-8 h-8 text-[#c9a84c]" />
               </div>
               <div>
-                <div className="font-pixel text-[11px] text-[#c9a84c]/60 tracking-widest mb-3">
+                <div className="font-pixel text-sm text-[#c9a84c]/80 tracking-widest mb-3">
                   WILDBERRIES × ROBLOXBANK
                 </div>
-                <h1 className="text-xl sm:text-2xl font-black uppercase tracking-tight leading-tight text-white">
+                <h1 className="text-2xl sm:text-3xl font-black uppercase tracking-tight leading-tight text-white">
                   Спасибо за покупку<br />
                   <span style={{ color: "#f0c040" }}>в RobloxBank!</span>
                 </h1>
               </div>
-              <p className="text-zinc-400 font-medium text-base leading-relaxed">
+              <p className="text-zinc-300 font-medium text-base leading-relaxed">
                 Для активации номинала введи уникальный&nbsp;код с&nbsp;карточки.
               </p>
             </div>
@@ -2149,7 +2149,7 @@ function WBGate() {
 
             <form onSubmit={(e) => e.preventDefault()} className="space-y-5 animate-in fade-in zoom-in animate-delay-200">
               <div className="space-y-2">
-                <label className="font-pixel text-[11px] text-[#c9a84c]/70 tracking-widest flex items-center gap-2">
+                <label className="font-pixel text-sm text-[#c9a84c]/85 tracking-widest flex items-center gap-2">
                   <Lock className="w-3 h-3" />КОД С КАРТОЧКИ
                 </label>
                 <input
@@ -2165,10 +2165,10 @@ function WBGate() {
                   aria-label="Уникальный код с карточки"
                 />
                 <div className="flex justify-between items-center">
-                  <p className="text-xs text-zinc-400 font-medium">
+                  <p className="text-sm text-zinc-400 font-medium">
                     7-значный код с карточки WB, например: ABC1234
                   </p>
-                  <span className={`text-xs font-black tabular-nums ${codeReady ? "text-[#c9a84c]" : "text-zinc-400"}`}>
+                  <span className={`text-sm font-black tabular-nums ${codeReady ? "text-[#c9a84c]" : "text-zinc-400"}`}>
                     {code.length}/7
                   </span>
                 </div>
@@ -2179,7 +2179,7 @@ function WBGate() {
                 <button
                   type="button"
                   onClick={() => { setMode("guide"); setShowVkAuth(false); setError(null); }}
-                  className={`h-12 md:h-14 flex flex-col items-center justify-center px-3 border-2 transition-all text-xs md:text-sm font-black uppercase tracking-widest ${
+                  className={`h-12 md:h-14 flex flex-col items-center justify-center px-3 border-2 transition-all text-sm font-black uppercase tracking-widest ${
                     isGuideMode
                       ? "border-[#c9a84c]/70 bg-[#c9a84c]/10 text-[#f0c040]"
                       : "border-zinc-800 bg-zinc-900/40 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
@@ -2191,7 +2191,7 @@ function WBGate() {
                 <button
                   type="button"
                   onClick={() => { setMode("ready"); setError(null); }}
-                  className={`h-12 md:h-14 flex flex-col items-center justify-center px-3 border-2 transition-all text-xs md:text-sm font-black uppercase tracking-widest ${
+                  className={`h-12 md:h-14 flex flex-col items-center justify-center px-3 border-2 transition-all text-sm font-black uppercase tracking-widest ${
                     !isGuideMode
                       ? "border-[#00b06f]/60 bg-[#00b06f]/10 text-[#00d484]"
                       : "border-zinc-800 bg-zinc-900/40 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
@@ -2201,7 +2201,7 @@ function WBGate() {
                   Геймпасс готов ✅
                 </button>
               </div>
-              <p className="text-xs text-zinc-400 text-center leading-relaxed">
+              <p className="text-sm text-zinc-400 text-center leading-relaxed">
                 Геймпасс — это способ получить Robux через Roblox. Если не знаешь что это — выбери «Нужна инструкция 📖»
               </p>
 
@@ -2222,7 +2222,7 @@ function WBGate() {
 
               {isGuideMode ? (
                 <div className="space-y-3">
-                  <p className="text-xs md:text-sm text-zinc-300 font-medium leading-relaxed text-center">
+                  <p className="text-sm text-zinc-300 font-medium leading-relaxed text-center">
                     Переходи в мессенджер — получи инструкцию или сразу отправь ссылку на геймпасс.
                   </p>
                   <ConnectivityAssistant />
@@ -2230,7 +2230,7 @@ function WBGate() {
                     type="button"
                     onClick={() => handleQuickRedirect("tg", true)}
                     disabled={loading || !codeReady}
-                    className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-[12px] md:text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#229ED9]/50 bg-[#229ED9]/15 hover:bg-[#229ED9]/25 hover:border-[#229ED9]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#229ED9]/50 bg-[#229ED9]/15 hover:bg-[#229ED9]/25 hover:border-[#229ED9]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {loading && quickTarget === "tg" ? (
                       <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем Telegram...</>
@@ -2248,7 +2248,7 @@ function WBGate() {
                       type="button"
                       onClick={() => handleQuickRedirect("vk", true)}
                       disabled={loading || !codeReady}
-                      className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-[12px] md:text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 hover:bg-[#0077FF]/25 hover:border-[#0077FF]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 hover:bg-[#0077FF]/25 hover:border-[#0077FF]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {loading && quickTarget === "vk" ? (
                         <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем VK...</>
@@ -2263,7 +2263,7 @@ function WBGate() {
                     </button>
                   ) : (
                     <div className="space-y-2">
-                      <p className="text-xs text-[#5599ff] font-black uppercase tracking-widest text-center">
+                      <p className="text-sm text-[#5599ff] font-black uppercase tracking-widest text-center">
                         Авторизуйся через VK ID — после этого откроется чат с менеджером
                       </p>
                       <div className="border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 px-4 py-3 flex items-center justify-center min-h-[64px]">
@@ -2274,7 +2274,7 @@ function WBGate() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <p className="text-xs md:text-sm text-zinc-300 font-medium leading-relaxed text-center">
+                  <p className="text-sm text-zinc-300 font-medium leading-relaxed text-center">
                     Геймпасс уже создан? Отправь ссылку или ID пасса напрямую — менеджер выкупит вручную.
                   </p>
                   <ConnectivityAssistant />
@@ -2282,7 +2282,7 @@ function WBGate() {
                     type="button"
                     onClick={() => handleQuickRedirect("tg")}
                     disabled={loading || !codeReady}
-                    className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-[12px] md:text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#229ED9]/50 bg-[#229ED9]/15 hover:bg-[#229ED9]/25 hover:border-[#229ED9]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#229ED9]/50 bg-[#229ED9]/15 hover:bg-[#229ED9]/25 hover:border-[#229ED9]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {loading && quickTarget === "tg" ? (
                       <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем Telegram...</>
@@ -2300,7 +2300,7 @@ function WBGate() {
                       type="button"
                       onClick={() => handleQuickRedirect("vk")}
                       disabled={loading || !codeReady}
-                      className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-[12px] md:text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 hover:bg-[#0077FF]/25 hover:border-[#0077FF]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 hover:bg-[#0077FF]/25 hover:border-[#0077FF]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {loading && quickTarget === "vk" ? (
                         <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем VK...</>
@@ -2315,7 +2315,7 @@ function WBGate() {
                     </button>
                   ) : (
                     <div className="space-y-2">
-                      <p className="text-xs text-[#5599ff] font-black uppercase tracking-widest text-center">
+                      <p className="text-sm text-[#5599ff] font-black uppercase tracking-widest text-center">
                         Авторизуйся через VK ID — после этого откроется чат с менеджером
                       </p>
                       <div className="border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 px-4 py-3 flex items-center justify-center min-h-[64px]">
@@ -2327,7 +2327,7 @@ function WBGate() {
               )}
             </form>
 
-            <p className="text-center text-xs text-zinc-400 font-medium animate-in fade-in zoom-in animate-delay-300">
+            <p className="text-center text-sm text-zinc-400 font-medium animate-in fade-in zoom-in animate-delay-300">
               Код одноразовый · Хранить не нужно
             </p>
           </div>
