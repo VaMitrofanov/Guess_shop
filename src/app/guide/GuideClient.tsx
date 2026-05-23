@@ -1918,7 +1918,7 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
         <h3 className="text-3xl md:text-4xl font-black uppercase tracking-tight text-white mb-4">
           Почти готово!
         </h3>
-        <p className="text-zinc-400 font-medium text-base max-w-lg mx-auto leading-relaxed">
+        <p className="text-zinc-300 font-medium text-base max-w-lg mx-auto leading-relaxed">
           Чтобы мы могли выкупить твой геймпасс, отправь ссылку на него боту в Telegram или нашему сообществу ВКонтакте.
         </p>
       </div>
@@ -2114,7 +2114,7 @@ function WBGate() {
           on mobile it self-degrades to a static CSS gradient. */}
       <AnimatedShaderBackground className="-z-10" />
 
-      <div className="flex-1 flex items-center justify-center px-4 py-16 bg-[#080c18]/70 relative">
+      <div className="flex-1 flex items-center justify-center px-4 py-8 sm:py-16 bg-[#080c18]/70 relative">
         <div className="fixed inset-0 opacity-[0.02] pointer-events-none"
           style={{
             backgroundImage: `linear-gradient(rgba(201,168,76,0.8) 1px, transparent 1px),
@@ -2123,7 +2123,7 @@ function WBGate() {
           }}
         />
         <div className="w-full max-w-xl animate-in fade-in zoom-in">
-          <div className="pixel-card border-2 border-[#c9a84c]/40 bg-[#0a0c14] p-8 sm:p-12 lg:p-14 space-y-8 relative">
+          <div className="pixel-card border-2 border-[#c9a84c]/40 bg-[#0a0c14] p-6 sm:p-10 lg:p-14 space-y-6 sm:space-y-8 relative">
             <div className="absolute top-0 left-0 w-12 h-12 border-t-2 border-l-2 border-[#c9a84c]/60" />
             <div className="absolute bottom-0 right-0 w-12 h-12 border-b-2 border-r-2 border-[#c9a84c]/60" />
 
@@ -2158,7 +2158,6 @@ function WBGate() {
                   value={code}
                   onChange={handleInput}
                   placeholder="ABC1234"
-                  autoFocus
                   autoComplete="off"
                   spellCheck={false}
                   className="wb-input"
@@ -2341,7 +2340,7 @@ function WBGate() {
             </p>
           </div>
 
-          <div className="flex items-center justify-center gap-6 mt-6 animate-in fade-in zoom-in animate-delay-300">
+          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 mt-6 animate-in fade-in zoom-in animate-delay-300">
             {[
               { label: "Защита данных",  icon: Lock },
               { label: "Ручная выдача",  icon: CheckCircle2 },
@@ -2411,7 +2410,7 @@ function FormulaCalculator({
     return (
       <div className="pixel-card border-2 border-[#00b06f]/30 bg-[#00b06f]/5 p-5">
         <div className="font-pixel text-xs text-[#00b06f]/70 tracking-wider mb-3">ГЛАВНАЯ ФОРМУЛА</div>
-        <div className="flex items-center gap-4 mb-3">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4 mb-3">
           <div className="text-center">
             <div className="text-3xl font-black" style={{ color: "#f0c040" }}>{denomination}</div>
             <div className="text-xs text-zinc-500 uppercase tracking-widest font-black">Твой номинал</div>
@@ -2568,7 +2567,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
                 </div>
               )}
               <div className="font-pixel text-xs text-[#00b06f]/70 tracking-wider">TUTORIAL</div>
-              <h1 className="text-6xl md:text-7xl font-black uppercase tracking-[-0.04em] leading-[0.85]">
+              <h1 className="text-5xl sm:text-6xl md:text-7xl font-black uppercase tracking-[-0.04em] leading-[0.85]">
                 Как создать<br />
                 <span className="gold-text">геймпасс</span>
               </h1>
