@@ -312,7 +312,6 @@ function Anim01() {
   const showPage = f >= 2;
 
   return (
-    <>
     <div style={{
       marginTop: 12, overflow: "hidden", border: "1px solid #2a2a2a",
       background: "#111", fontSize: 10, userSelect: "none", position: "relative",
@@ -386,20 +385,19 @@ function Anim01() {
             </div>
           </div>
 
-          {/* Cursor — absolute over entire body */}
-          <div style={{
-            position:"absolute",
-            top:  f===2 ? 69 : 63,
-            left: f===2 ? 152 : 47,
-            pointerEvents:"none", zIndex:20,
-            transition:"top 0.45s cubic-bezier(0.4,0,0.2,1), left 0.45s cubic-bezier(0.4,0,0.2,1)",
-          }}>
-            <RCursor />
-          </div>
         </div>
       )}
+      {/* Cursor — always visible, absolute within entire animation */}
+      <div style={{
+        position:"absolute",
+        top:  [8, 80, 69, 63][f],
+        left: [110, 100, 152, 47][f],
+        pointerEvents:"none", zIndex:20,
+        transition:"top 0.45s cubic-bezier(0.4,0,0.2,1), left 0.45s cubic-bezier(0.4,0,0.2,1)",
+      }}>
+        <RCursor />
+      </div>
     </div>
-    </>
   );
 }
 
@@ -496,8 +494,9 @@ function Anim02() {
           </div>
 
           {/* Create modal */}
+          <AnimatePresence>
           {f===3 && (
-            <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:10 }}>
+            <motion.div key="create-modal" initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} transition={{ duration:0.25 }} style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:10 }}>
               <div style={{ background:"#1c1c1c", border:"1px solid #333", borderRadius:6, padding:"10px 12px", width:"80%", boxShadow:"0 8px 32px rgba(0,0,0,0.5)" }}>
                 <div style={{ fontSize:10, fontWeight:700, color:"#eee", marginBottom:6 }}>Create New Experience</div>
                 <div style={{ fontSize:7, color:"#666", marginBottom:3 }}>Experience Name</div>
@@ -509,18 +508,19 @@ function Anim02() {
                   <div style={{ fontSize:8, fontWeight:700, color:"white", background:"#0e6fff", borderRadius:3, padding:"3px 8px" }}>Create</div>
                 </div>
               </div>
-            </div>
+            </motion.div>
           )}
+          </AnimatePresence>
 
           {/* Cursor */}
           <div style={{
             position:"absolute",
-            top:  f===0 ? 52 : f===1 ? 52 : f===2 ? 8 : 52,
-            left: f===0 ? 10 : f===1 ? 10 : f===2 ? 118 : 10,
+            top:  [8, 44, 8, 55][f],
+            left: [80, 53, 118, 100][f],
             pointerEvents:"none", zIndex:20,
             transition:"top 0.4s cubic-bezier(0.4,0,0.2,1), left 0.4s cubic-bezier(0.4,0,0.2,1)",
           }}>
-            {f <= 2 && <RCursor />}
+            <RCursor />
           </div>
         </div>
       </div>
@@ -665,11 +665,11 @@ function Anim03() {
 function AnimPublicBadge() {
   const [f, setF] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setF(v => (v + 1) % 5), 1300);
+    const id = setInterval(() => setF(v => (v + 1) % 4), 1400);
     return () => clearInterval(id);
   }, []);
-  // 0: grid, cursor idle  1: cursor → target card  2: card glows
-  // 3: badge zooms + label  4: checkmark + "вот так должно быть"
+  // 0: grid idle  1: cursor → target card  2: card glows + cursor settles
+  // 3: badge zooms + label + cursor moves away to reveal badge
 
   const cards = [
     { name: "Obby World",  color: "#7c3aed", pub: false },
@@ -732,8 +732,8 @@ function AnimPublicBadge() {
       {/* Cursor */}
       <div style={{
         position: "absolute",
-        top:  f === 0 ? 14 : f === 1 ? 62 : 74,
-        left: f === 0 ? 8  : f === 1 ? 76 : 82,
+        top:  [14, 62, 74, 56][f],
+        left: [8,  76, 82, 96][f],
         pointerEvents: "none", zIndex: 20,
         transition: "top 0.5s cubic-bezier(0.4,0,0.2,1), left 0.5s cubic-bezier(0.4,0,0.2,1)",
       }}>
@@ -981,8 +981,9 @@ function Anim04Price({ passPrice }: { passPrice: number | null }) {
   // f=5: cursor moves to checkbox with RED warning (don't check!)
   // f=6: cursor moves to Save Changes → saved state
   const toggleOn  = f >= 2;
-  const priceFocus = f >= 3;
-  const priceVal  = f >= 4 ? String(passPrice ?? 1430) : "";
+  const priceFocus = f === 3 || f === 4;
+  const priceStr   = String(passPrice ?? 1430);
+  const priceVal   = f === 3 ? priceStr.slice(0, 2) : f >= 4 ? priceStr : "";
   const checkWarn = f === 5;
   const saveHL    = f === 6;
 
@@ -1099,87 +1100,86 @@ function Anim04Price({ passPrice }: { passPrice: number | null }) {
             }
           `}</style>
 
-          {/* Default Price field */}
+          <AnimatePresence>
           {toggleOn && (
-            <div style={{ marginBottom: 8, position:"relative" }}>
-              <div style={{ fontSize: 7, color: "#555", marginBottom: 3 }}>Default Price</div>
-              {/* Pulse ring when focusing the price field */}
-              {f === 3 && (
-                <div style={{
-                  position:"absolute", inset:-3, borderRadius:5,
-                  border:"2px solid #4a9eff",
-                  pointerEvents:"none", zIndex:5,
-                  animation:"pulseGlow 0.9s ease-in-out infinite",
-                }} />
-              )}
-              <div style={{
-                border: priceFocus ? "2px solid #4a9eff" : "1px solid #2a2a2a",
-                borderRadius: 3, background: "#1a1a1a",
-                padding: "5px 10px", display: "flex", alignItems: "center", gap: 6,
-                transition: "border-color 0.3s",
-                boxShadow: priceFocus ? "0 0 0 3px #4a9eff22" : "none",
-              }}>
-                <div style={{ width: 9, height: 9, borderRadius: "50%", border: "2px solid #4a9eff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <div style={{ width: 3, height: 3, borderRadius: "50%", background: "#4a9eff" }} />
-                </div>
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#eee", fontFamily: "monospace" }}>
-                  {priceVal || <span style={{ color: "#444" }}>0</span>}
-                  {priceFocus && f <= 4 ? <span style={{ borderLeft: "1.5px solid #eee", marginLeft: 1 }}>&nbsp;</span> : null}
-                </span>
-                {priceVal && !priceFocus && (
-                  <span style={{ marginLeft:"auto", fontSize:7, color:"#22c55e", fontWeight:700 }}>✓</span>
+            <motion.div key="price-content" initial={{ opacity:0, height:0 }} animate={{ opacity:1, height:"auto" }} exit={{ opacity:0, height:0 }} transition={{ duration:0.3 }} style={{ overflow:"hidden" }}>
+              {/* Default Price field */}
+              <div style={{ marginBottom: 8, position:"relative" }}>
+                <div style={{ fontSize: 7, color: "#555", marginBottom: 3 }}>Default Price</div>
+                {f === 3 && (
+                  <div style={{
+                    position:"absolute", inset:-3, borderRadius:5,
+                    border:"2px solid #4a9eff",
+                    pointerEvents:"none", zIndex:5,
+                    animation:"pulseGlow 0.9s ease-in-out infinite",
+                  }} />
                 )}
-              </div>
-            </div>
-          )}
-
-          {/* Enable regional pricing checkbox */}
-          {toggleOn && (
-            <div style={{ marginBottom: 8 }}>
-              <div style={{
-                display: "flex", alignItems: "center", gap: 7, padding: "4px 6px",
-                border: checkWarn ? "1.5px solid #ef4444" : "1px solid transparent",
-                background: checkWarn ? "#250a0a" : "transparent",
-                borderRadius: 3, transition: "all 0.3s",
-                boxShadow: checkWarn ? "0 0 0 3px #ef444420" : "none",
-              }}>
                 <div style={{
-                  width: 12, height: 12,
-                  border: checkWarn ? "2px solid #ef4444" : "1.5px solid #3a3a3a",
-                  background: "transparent", borderRadius: 2, flexShrink: 0, transition: "border-color 0.3s",
-                }} />
-                <span style={{ fontSize: 8.5, color: checkWarn ? "#ff8888" : "#888", fontWeight: checkWarn ? 700 : 400 }}>
-                  Enable regional pricing
-                </span>
-                {checkWarn && (
-                  <span style={{ marginLeft: "auto", fontSize: 7, color: "#ef4444", fontWeight: 700, background: "#ef444420", padding: "1px 5px", borderRadius: 2 }}>
-                    ← НЕ ТРОГАТЬ
+                  border: priceFocus ? "2px solid #4a9eff" : "1px solid #2a2a2a",
+                  borderRadius: 3, background: "#1a1a1a",
+                  padding: "5px 10px", display: "flex", alignItems: "center", gap: 6,
+                  transition: "border-color 0.3s",
+                  boxShadow: priceFocus ? "0 0 0 3px #4a9eff22" : "none",
+                }}>
+                  <div style={{ width: 9, height: 9, borderRadius: "50%", border: "2px solid #4a9eff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <div style={{ width: 3, height: 3, borderRadius: "50%", background: "#4a9eff" }} />
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#eee", fontFamily: "monospace" }}>
+                    {priceVal || <span style={{ color: "#444" }}>0</span>}
+                    {priceFocus ? <span style={{ borderLeft: "1.5px solid #eee", marginLeft: 1 }}>&nbsp;</span> : null}
                   </span>
+                  {priceVal && !priceFocus && (
+                    <span style={{ marginLeft:"auto", fontSize:7, color:"#22c55e", fontWeight:700 }}>✓</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Enable regional pricing checkbox */}
+              <div style={{ marginBottom: 8 }}>
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 7, padding: "4px 6px",
+                  border: checkWarn ? "1.5px solid #ef4444" : "1px solid transparent",
+                  background: checkWarn ? "#250a0a" : "transparent",
+                  borderRadius: 3, transition: "all 0.3s",
+                  boxShadow: checkWarn ? "0 0 0 3px #ef444420" : "none",
+                }}>
+                  <div style={{
+                    width: 12, height: 12,
+                    border: checkWarn ? "2px solid #ef4444" : "1.5px solid #3a3a3a",
+                    background: "transparent", borderRadius: 2, flexShrink: 0, transition: "border-color 0.3s",
+                  }} />
+                  <span style={{ fontSize: 8.5, color: checkWarn ? "#ff8888" : "#888", fontWeight: checkWarn ? 700 : 400 }}>
+                    Enable regional pricing
+                  </span>
+                  {checkWarn && (
+                    <span style={{ marginLeft: "auto", fontSize: 7, color: "#ef4444", fontWeight: 700, background: "#ef444420", padding: "1px 5px", borderRadius: 2 }}>
+                      ← НЕ ТРОГАТЬ
+                    </span>
+                  )}
+                </div>
+                {checkWarn && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, padding: "3px 6px", background: "#1e1400", border: "1px solid #c9a84c33", borderRadius: 2 }}>
+                    <span style={{ color: "#c9a84c", fontSize: 8 }}>⚠</span>
+                    <span style={{ fontSize: 7, color: "#c9a84c88" }}>Roblox изменит цену для разных стран — оставь выключенным</span>
+                  </div>
                 )}
               </div>
-              {checkWarn && (
-                <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, padding: "3px 6px", background: "#1e1400", border: "1px solid #c9a84c33", borderRadius: 2 }}>
-                  <span style={{ color: "#c9a84c", fontSize: 8 }}>⚠</span>
-                  <span style={{ fontSize: 7, color: "#c9a84c88" }}>Roblox изменит цену для разных стран — оставь выключенным</span>
-                </div>
-              )}
-            </div>
-          )}
 
-          {/* Buttons */}
-          {toggleOn && (
-            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-              <div style={{ padding: "5px 14px", border: "1px solid #2a2a2a", borderRadius: 4, fontSize: 8.5, color: "#666" }}>Cancel</div>
-              <div style={{
-                padding: "5px 18px", borderRadius: 4, fontSize: 8.5, fontWeight: 700, color: "white",
-                background: saveHL ? "#1d4ed8" : "#4a9eff",
-                boxShadow: saveHL ? "0 0 0 3px #4a9eff33" : "none",
-                transition: "all 0.3s",
-              }}>
-                {saveHL ? "✓ Saved!" : "Save Changes"}
+              {/* Buttons */}
+              <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                <div style={{ padding: "5px 14px", border: "1px solid #2a2a2a", borderRadius: 4, fontSize: 8.5, color: "#666" }}>Cancel</div>
+                <div style={{
+                  padding: "5px 18px", borderRadius: 4, fontSize: 8.5, fontWeight: 700, color: "white",
+                  background: saveHL ? "#1d4ed8" : "#4a9eff",
+                  boxShadow: saveHL ? "0 0 0 3px #4a9eff33" : "none",
+                  transition: "all 0.3s",
+                }}>
+                  {saveHL ? "✓ Saved!" : "Save Changes"}
+                </div>
               </div>
-            </div>
+            </motion.div>
           )}
+          </AnimatePresence>
 
           {/* Cursor */}
           <div style={{
@@ -1315,7 +1315,7 @@ function Anim05WB() {
   // 0=pass page, 1=click share/address bar, 2=URL selected, 3=copied!
 
   return (
-    <RCHBrowser url={f >= 1 ? "roblox.com/game-pass/1234567/VIP" : "create.roblox.com"}>
+    <RCHBrowser url="roblox.com/game-pass/1234567/VIP">
       <RCHTopNav />
       <div style={{ display: "flex", background: "#fff", position: "relative" }}>
         <div style={{ width: 108, background: "#f5f5f5", borderRight: "1px solid #e0e0e0", padding: "4px 4px", flexShrink: 0 }}>
@@ -1356,8 +1356,8 @@ function Anim05WB() {
           </div>
         </div>
         {/* Cursor */}
-        <div style={{ position: "absolute", top: f === 0 ? 55 : 88, left: f === 0 ? 150 : 210, pointerEvents: "none", zIndex: 20, transition: "all 0.45s" }}>
-          {f <= 2 && <RCursor />}
+        <div style={{ position: "absolute", top: [40, 72, 72, 72][f], left: [140, 155, 180, 215][f], pointerEvents: "none", zIndex: 20, transition: "top 0.45s cubic-bezier(0.4,0,0.2,1), left 0.45s cubic-bezier(0.4,0,0.2,1)" }}>
+          <RCursor />
         </div>
       </div>
     </RCHBrowser>
@@ -1414,26 +1414,30 @@ function Anim06WB() {
           </div>
         )}
 
-        {/* Manager: "Спасибо за покупку!" (f=3+) */}
+        {/* Manager: "Геймпасс принят!" (f=3+) */}
+        <AnimatePresence>
         {f >= 3 && (
-          <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 5 }}>
+          <motion.div key="mgr-1" initial={{ opacity:0, y:5 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }} transition={{ duration:0.3 }} style={{ display:"flex", justifyContent:"flex-start", marginBottom:5 }}>
             <div style={{ background: "#182533", border: "1px solid #22c55e22", borderRadius: "2px 10px 10px 10px", padding: "5px 9px", maxWidth: "84%" }}>
               <div style={{ fontSize: 9, color: "#22c55e", fontWeight: 700, marginBottom: 2 }}>✅ Геймпасс принят!</div>
               <div style={{ fontSize: 8, color: "#aaa", lineHeight: 1.4 }}>Выкупим в ближайшие часы 🚀</div>
               <div style={{ fontSize: 7, color: "#445566", marginTop: 2 }}>10:31</div>
             </div>
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
 
         {/* Manager: время зачисления (f=4) */}
+        <AnimatePresence>
         {f >= 4 && (
-          <div style={{ display: "flex", justifyContent: "flex-start" }}>
+          <motion.div key="mgr-2" initial={{ opacity:0, y:5 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }} transition={{ duration:0.3 }} style={{ display:"flex", justifyContent:"flex-start" }}>
             <div style={{ background: "#182533", borderRadius: "2px 10px 10px 10px", padding: "5px 9px", maxWidth: "84%" }}>
               <div style={{ fontSize: 8, color: "#ddd", lineHeight: 1.4 }}>⏳ Robux поступят на баланс через <span style={{ color: "#4a9eff", fontWeight: 700 }}>5–7 дней</span> по правилам Roblox.</div>
               <div style={{ fontSize: 7, color: "#445566", marginTop: 2 }}>10:31</div>
             </div>
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
 
         {/* Input bar */}
         <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "#232e3c", borderTop: "1px solid #1e2a45", padding: "5px 8px", display: "flex", gap: 6, alignItems: "center" }}>
@@ -1566,8 +1570,9 @@ function Anim05ID() {
                 )}
 
                 {/* Context menu */}
+                <AnimatePresence>
                 {i === 0 && showMenu && (
-                  <div style={{
+                  <motion.div key="ctx-menu" initial={{ opacity:0, scale:0.95, y:-4 }} animate={{ opacity:1, scale:1, y:0 }} exit={{ opacity:0, scale:0.95, y:-4 }} transition={{ duration:0.15 }} style={{
                     position:"absolute", right:8, top:28, zIndex:30,
                     background:"#1e1e1e", border:"1px solid #333",
                     borderRadius:4, overflow:"hidden", minWidth:130,
@@ -1582,7 +1587,6 @@ function Anim05ID() {
                         display:"flex", alignItems:"center", gap:6,
                         cursor:"pointer",
                         transition:"all 0.2s",
-                        outline: item === "Copy Asset ID" && hoverCopy ? "none" : "none",
                         boxShadow: item === "Copy Asset ID" && hoverCopy ? "inset 0 0 0 2px #4a9eff55" : "none",
                       }}>
                         {item === "Copy Asset ID" && (
@@ -1594,8 +1598,9 @@ function Anim05ID() {
                         )}
                       </div>
                     ))}
-                  </div>
+                  </motion.div>
                 )}
+                </AnimatePresence>
               </div>
             ))}
           </div>
