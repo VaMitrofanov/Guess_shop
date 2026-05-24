@@ -129,6 +129,9 @@ export function registerStart(bot: Telegraf): void {
     // Rate Limiting
     const rateKey = sessionId || tgId;
     const now = Date.now();
+    if (startRateLimiter.size > 500) {
+      for (const [k, v] of startRateLimiter) { if (v.resetAt < now) startRateLimiter.delete(k); }
+    }
     const rateData = startRateLimiter.get(rateKey) || { attempts: 0, resetAt: now + 60000 };
     if (rateData.resetAt < now) {
       rateData.attempts = 0;
@@ -183,7 +186,7 @@ export function registerStart(bot: Telegraf): void {
         const greeting = getGreeting(custStatus, firstName);
         await ctx.reply(
           `${greeting}Твой личный проводник в мир робуксов.\n\n` +
-          `Есть код с WB-карты? Напиши его прямо сюда — сайт не нужен.`,
+          `Есть код с WB-карты? Напиши его прямо сюда — больше ничего не нужно.`,
           {
             parse_mode: "HTML",
             link_preview_options: { is_disabled: true },
@@ -470,7 +473,10 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   // Progressive note per status
   let note = "";
   if (order.status === "AWAITING_PAYMENT") {
-    note = "\n\n💡 <i>Менеджер скоро пришлёт реквизиты для оплаты.</i>";
+    const waitMins = Math.floor((Date.now() - new Date(order.createdAt).getTime()) / 60_000);
+    note = waitMins >= 15
+      ? "\n\n⏰ <i>Реквизиты ещё не пришли. Если прошло больше 15 минут — напиши нам.</i>"
+      : "\n\n💡 <i>Менеджер скоро пришлёт реквизиты для оплаты.</i>";
   } else if (order.status === "PAYMENT_PENDING") {
     note = "\n\n💳 <i>Пришли скриншот оплаты сюда (фотографией, не файлом).</i>";
   } else if (order.status === "AWAITING_GAMEPASS") {
@@ -515,7 +521,11 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   // Keyboard varies by status
   let keyboard: ReturnType<typeof Markup.inlineKeyboard>;
   if (order.status === "AWAITING_PAYMENT" || order.status === "PAYMENT_PENDING") {
-    keyboard = Markup.inlineKeyboard([refreshRow, [supportBtn("💬 Нужна помощь?")]]);
+    const waitMins = Math.floor((Date.now() - new Date(order.createdAt).getTime()) / 60_000);
+    const supportRow = waitMins >= 15
+      ? [supportBtn("⏰ Написать менеджеру", "direct_wait")]
+      : [supportBtn("💬 Нужна помощь?", "direct_wait")];
+    keyboard = Markup.inlineKeyboard([refreshRow, supportRow]);
   } else if (order.status === "REJECTED") {
     if (order.isDirectOrder) {
       keyboard = Markup.inlineKeyboard([
@@ -597,7 +607,7 @@ export function registerText(bot: Telegraf): void {
           await bot.telegram.sendMessage(
             payUser.tgId,
             `💳 <b>Реквизиты для оплаты заказа #${shortId}:</b>\n\n` +
-            `${text}\n\n` +
+            `<code>${text}</code>\n\n` +
             `Переведи деньги и пришли скриншот подтверждения сюда (фотографией, не файлом) 👇`,
             {
               parse_mode: "HTML",
@@ -1728,7 +1738,7 @@ export function registerCallbacks(bot: Telegraf): void {
       pendingRejectionReason.set(ctx.from.id, orderId);
       try { await ctx.editMessageText(
         `✏️ Напиши причину отклонения заказа <code>${orderId.slice(-6).toUpperCase()}</code>:`,
-        { parse_mode: "HTML" }
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", `cancel_reject:${orderId}`)]]) }
       ); } catch { }
       await ctx.answerCbQuery();
       return;
@@ -1769,7 +1779,13 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data === CB.confirmDirect) {
       const dirState = pendingDirectOrder.get(ctx.from.id);
       if (!dirState) {
-        await ctx.answerCbQuery("Сессия истекла — начни заново");
+        await ctx.answerCbQuery("Начни заново");
+        try {
+          await ctx.editMessageText(
+            "⏳ <b>Время подтверждения вышло.</b>\n\nНажми кнопку — начнём заново, сумма не сохраняется.",
+            { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("💎 Заказать напрямую", CB.startDirect)]]) }
+          );
+        } catch { }
         return;
       }
       pendingDirectOrder.delete(ctx.from.id);
@@ -1909,8 +1925,11 @@ export function registerCallbacks(bot: Telegraf): void {
         try {
           await bot.telegram.sendMessage(
             cdoUser.tgId,
-            `❌ <b>Заказ #${cdoOrderId.slice(-6).toUpperCase()} отменён</b>\n\nМенеджер отменил заказ. Если это ошибка — напиши нам.`,
-            { parse_mode: "HTML", ...withSupportKb() }
+            `❌ <b>Заказ #${cdoOrderId.slice(-6).toUpperCase()} отменён.</b>\n\nЕсли хочешь — создай новый заказ.`,
+            { parse_mode: "HTML", ...Markup.inlineKeyboard([
+              [Markup.button.callback("💎 Новый заказ", CB.startDirect)],
+              [supportBtn("💬 Это ошибка?", "order_cancelled")],
+            ]) }
           );
         } catch { }
       }
@@ -1952,7 +1971,7 @@ export function registerCallbacks(bot: Telegraf): void {
               parse_mode: "HTML",
               link_preview_options: { is_disabled: true },
               ...Markup.inlineKeyboard([
-                [Markup.button.url("📖 Инструкция", "https://robloxbank.ru/guide?source=wb")],
+                [Markup.button.url("📖 Инструкция", "https://robloxbank.ru/guide?source=direct")],
                 [supportBtn("💬 Нужна помощь?")],
               ]),
             }
@@ -1969,14 +1988,19 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("pay_no:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const [, payNoOrderId, payNoUserId] = data.split(":");
+      const payNoOrder = await (db as any).wbOrder.findUnique({ where: { id: payNoOrderId }, select: { paymentDetails: true } });
       const payNoUser = await (db as any).user.findUnique({ where: { id: payNoUserId } });
       if (payNoUser?.tgId) {
         pendingPaymentScreenshot.set(parseInt(payNoUser.tgId), payNoOrderId);
+        const detailsLine = payNoOrder?.paymentDetails
+          ? `\n\n💳 Реквизиты:\n<code>${payNoOrder.paymentDetails}</code>\n`
+          : "";
         try {
           await bot.telegram.sendMessage(
             payNoUser.tgId,
-            `❌ <b>Не смогли подтвердить оплату.</b>\n\n` +
-            `Реквизиты те же — пришли скриншот ещё раз (фотографией, не файлом) 👇`,
+            `❌ <b>Не смогли подтвердить оплату.</b>` +
+            detailsLine +
+            `\nПришли скриншот ещё раз (фотографией, не файлом) 👇`,
             { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "payment") }
           );
         } catch { }
