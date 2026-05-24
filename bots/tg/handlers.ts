@@ -594,7 +594,12 @@ export function registerText(bot: Telegraf): void {
             `💳 <b>Реквизиты для оплаты заказа #${shortId}:</b>\n\n` +
             `${text}\n\n` +
             `Переведи деньги и пришли скриншот подтверждения сюда (фотографией, не файлом) 👇`,
-            { parse_mode: "HTML" }
+            {
+              parse_mode: "HTML",
+              reply_markup: {
+                inline_keyboard: [[{ text: "📊 Проверить статус", callback_data: CB.refreshStatus }]],
+              },
+            }
           );
           pendingPaymentScreenshot.set(parseInt(payUser.tgId), dirOrder.id);
         } catch { }
@@ -1816,14 +1821,18 @@ export function registerCallbacks(bot: Telegraf): void {
       }
       const shortId = newDirectOrder.id.slice(-6).toUpperCase();
       const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "Пользователь");
+      const prevOrdersCount = await (db as any).wbOrder.count({
+        where: { userId: dirUser.id, status: "COMPLETED" },
+      });
       await sendAdminDirectOrderCard({
-        orderId:      newDirectOrder.id,
-        userId:       dirUser.id,
-        amount:       dirState.totalAmount,
-        bonusApplied: bonus,
-        userDisplay:  `${tgDisplay} (ID: ${ctx.from.id})`,
+        orderId:             newDirectOrder.id,
+        userId:              dirUser.id,
+        amount:              dirState.totalAmount,
+        bonusApplied:        bonus,
+        userDisplay:         `${tgDisplay} (ID: ${ctx.from.id})`,
         tgId,
-        createdAt:    newDirectOrder.createdAt,
+        createdAt:           newDirectOrder.createdAt,
+        previousOrdersCount: prevOrdersCount,
       });
       const confirmKb = Markup.inlineKeyboard([
         [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],

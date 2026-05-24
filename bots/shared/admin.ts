@@ -212,13 +212,14 @@ export interface ReviewCardPayload {
 }
 
 export interface DirectOrderCardPayload {
-  orderId:     string;
-  userId:      string;   // DB User.id
-  amount:      number;   // total Robux (incl. bonus)
-  bonusApplied: number;
-  userDisplay: string;
-  tgId:        string;
-  createdAt:   Date;
+  orderId:            string;
+  userId:             string;   // DB User.id
+  amount:             number;   // total Robux (incl. bonus)
+  bonusApplied:       number;
+  userDisplay:        string;
+  tgId:               string;
+  createdAt:          Date;
+  previousOrdersCount?: number;
 }
 
 export interface PaymentScreenshotCardPayload {
@@ -295,9 +296,16 @@ export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload):
     ? `🎁 Бонус учтён: <b>+${payload.bonusApplied} R$</b>\n`
     : "";
 
+  const prev = payload.previousOrdersCount ?? 0;
+  const loyaltyLine =
+    prev >= 5 ? `👑 <b>VIP КЛИЕНТ (${prev} заказов)</b>\n` :
+    prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ (${prev} заказ${prev === 1 ? "" : prev < 5 ? "а" : "ов"})</b>\n` :
+    `🆕 <b>НОВЫЙ КЛИЕНТ</b>\n`;
+
   const text =
     `🔷 <b>ПРЯМОЙ ЗАКАЗ #${shortId}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
+    loyaltyLine +
     `📅 Время: <b>${dateStr}</b>\n` +
     `👤 Юзер: ${payload.userDisplay}\n` +
     bonusLine +
