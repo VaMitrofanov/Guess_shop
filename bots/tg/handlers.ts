@@ -192,6 +192,7 @@ export function registerStart(bot: Telegraf): void {
             link_preview_options: { is_disabled: true },
             ...Markup.inlineKeyboard([
               [Markup.button.url("📖 Инструкция по активации", "https://robloxbank.ru/guide?source=wb")],
+              [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
               [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
             ]),
           }
