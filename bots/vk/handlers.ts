@@ -328,6 +328,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   }
 
   if (state?.type === "AWAITING_REVIEW" || ctx.hasAttachments("photo")) {
+    console.log(`[VK] photo routing: vkUserId=${vkUserId} hasPhoto=${ctx.hasAttachments("photo")} state=${state?.type ?? "none"}`);
     await handleReviewScreenshot(ctx, vkUserId, state?.type === "AWAITING_REVIEW" ? state.orderId : undefined);
     return;
   }
@@ -770,6 +771,8 @@ async function handleReviewScreenshot(
   vkUserId: number,
   knownOrderId?: string
 ): Promise<void> {
+  console.log(`[VK] handleReviewScreenshot: vkUserId=${vkUserId} knownOrderId=${knownOrderId ?? "none"}`);
+
   // Try vk-io parsed attachments first, then walk raw message attachments
   // as a fallback (some VK clients deliver photos in a different structure).
   let url: string | undefined;
@@ -786,20 +789,44 @@ async function handleReviewScreenshot(
     if (rawPhoto) url = photoUrl(rawPhoto);
   }
 
-  // If we still don't have a URL — stay silent (do not feedback user)
   if (!url) {
     if (knownOrderId) {
-      // User is in AWAITING_REVIEW state but sent no photo — guide them
       await ctx.reply(
         "📸 Пришли скриншот отзыва в виде фотографии (не файлом).\n" +
         "После проверки администратором ты получишь +100 R$."
+      );
+    } else {
+      // Photo was detected at routing level but URL extraction failed — guide user
+      await ctx.reply(
+        "📸 Не удалось получить фото. Попробуй отправить скриншот ещё раз — именно как фотографию (не файлом).\n\n" +
+        "Если не получается — напиши нам: https://t.me/RobloxBank_PA"
       );
     }
     return;
   }
 
   const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
-  if (!user) return;
+  if (!user) {
+    console.log(`[VK] handleReviewScreenshot: user not found for vkId=${vkUserId} — notifying admins`);
+    await ctx.reply(
+      "📸 Получили твой скриншот, но не смогли найти твою заявку в базе.\n\n" +
+      "Свяжись с нами напрямую: https://t.me/RobloxBank_PA — " +
+      "укажи свой VK ID, и мы разберёмся вручную."
+    );
+    try {
+      for (const adminId of ADMIN_IDS) {
+        await tgSend(
+          adminId,
+          `⚠️ <b>Скриншот ВБ отзыва — пользователь не найден в БД</b>\n` +
+          `VK ID: <code>${vkUserId}</code> (<a href="https://vk.com/id${vkUserId}">vk.com/id${vkUserId}</a>)\n\n` +
+          `Пользователь отправил скрин, но записи в базе нет. Нужна ручная проверка.`
+        );
+      }
+    } catch (err) {
+      console.error("[VK] admin notify for unknown reviewer failed:", err);
+    }
+    return;
+  }
 
   // Resolve the order to attach this review to
   let orderId = knownOrderId;
@@ -814,6 +841,7 @@ async function handleReviewScreenshot(
         })
       : null;
     if (!order || !linked) {
+      console.log(`[VK] handleReviewScreenshot: no eligible order/code for userId=${user.id} vkId=${vkUserId} hasOrder=${!!order} hasLinked=${!!linked}`);
       await ctx.reply(
         "📸 У тебя сейчас нет выполненных заявок, ожидающих отзыва.\n\n" +
         "Если у тебя возникла проблема или вопрос — напиши в поддержку: https://t.me/RobloxBank_PA"
