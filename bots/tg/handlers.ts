@@ -1582,13 +1582,13 @@ export function registerCallbacks(bot: Telegraf): void {
     if (!("data" in cbq)) return ctx.answerCbQuery();
 
     const data = cbq.data;
-    const adminId = String(ctx.from.id);
+    const tgId = String(ctx.from.id);
+    const adminId = tgId;
     const adminTag = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "Админ";
 
     // ── 🆘 sup: — user tapped a support button ────────────────────────────
     if (data.startsWith("sup:")) {
-      const ctxKey     = data.slice(4);
-      const tgId       = String(ctx.from.id);
+      const ctxKey = data.slice(4);
       const userDisplay = ctx.from.username
         ? `@${ctx.from.username}`
         : ctx.from.first_name ?? `tg:${tgId}`;
