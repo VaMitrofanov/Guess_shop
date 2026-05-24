@@ -28,11 +28,13 @@ function waitTime(createdAt: Date): string {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  AWAITING_GAMEPASS: "⌛ Ожидаем",
-  PENDING: "⏳ Ожидает",
-  IN_PROGRESS: "🔧 В работе",
-  COMPLETED: "✅ Выполнен",
-  REJECTED: "❌ Отклонён",
+  AWAITING_PAYMENT:  "⏳ Ожидаем реквизиты",
+  PAYMENT_PENDING:   "💳 Ожидаем оплату",
+  AWAITING_GAMEPASS: "⌛ Ожидаем ссылку",
+  PENDING:           "⏳ Ожидает",
+  IN_PROGRESS:       "🔧 В работе",
+  COMPLETED:         "✅ Выполнен",
+  REJECTED:          "❌ Отклонён",
 };
 
 // ── Main widget ──────────────────────────────────────────────────────────────
@@ -41,7 +43,9 @@ export async function showOrdersHub(ctx: Context): Promise<void> {
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-  const [awaitingCount, pendingCount, inProgressCount, todayDone, todayRejected] = await Promise.all([
+  const [awaitingPaymentCount, paymentPendingCount, awaitingCount, pendingCount, inProgressCount, todayDone, todayRejected] = await Promise.all([
+    (db as any).wbOrder.count({ where: { status: "AWAITING_PAYMENT" } }),
+    (db as any).wbOrder.count({ where: { status: "PAYMENT_PENDING" } }),
     (db as any).wbOrder.count({ where: { status: "AWAITING_GAMEPASS" } }),
     (db as any).wbOrder.count({ where: { status: "PENDING" } }),
     (db as any).wbOrder.count({ where: { status: "IN_PROGRESS" } }),
@@ -49,12 +53,14 @@ export async function showOrdersHub(ctx: Context): Promise<void> {
     (db as any).wbOrder.count({ where: { status: "REJECTED",  updatedAt: { gte: startOfDay } } }),
   ]);
 
-  const activeTotal = awaitingCount + pendingCount + inProgressCount;
+  const activeTotal = awaitingPaymentCount + paymentPendingCount + awaitingCount + pendingCount + inProgressCount;
 
   const text =
     `📦 <b>ЗАКАЗЫ</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
-    (awaitingCount > 0 ? `⌛ Ожидают ссылку: <b>${awaitingCount}</b>\n` : ``) +
+    (awaitingPaymentCount > 0 ? `🔷 Ждут реквизиты: <b>${awaitingPaymentCount}</b>\n` : ``) +
+    (paymentPendingCount > 0  ? `💳 Ждут оплату: <b>${paymentPendingCount}</b>\n`       : ``) +
+    (awaitingCount > 0        ? `⌛ Ожидают ссылку: <b>${awaitingCount}</b>\n`          : ``) +
     `⏳ Ожидают: <b>${pendingCount}</b>\n` +
     `🔧 В работе: <b>${inProgressCount}</b>\n` +
     `📊 Сегодня выполнено: <b>${todayDone}</b>\n` +
@@ -82,7 +88,7 @@ export async function showOrdersHub(ctx: Context): Promise<void> {
 
 export async function showActiveOrders(ctx: Context): Promise<void> {
   const orders = await (db as any).wbOrder.findMany({
-    where: { status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] } },
+    where: { status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] } },
     include: { user: true },
     orderBy: { createdAt: "asc" },
     take: 15,
@@ -100,9 +106,13 @@ export async function showActiveOrders(ctx: Context): Promise<void> {
 
   for (const o of orders) {
     const shortId = o.id.slice(-6).toUpperCase();
-    const statusIcon = o.status === "IN_PROGRESS" ? "🔧" : "⏳";
+    const statusIcon =
+      o.status === "IN_PROGRESS"      ? "🔧" :
+      o.status === "AWAITING_PAYMENT" ? "🔷" :
+      o.status === "PAYMENT_PENDING"  ? "💳" : "⏳";
+    const directTag = o.isDirectOrder ? " 🔷" : "";
     const wait = waitTime(o.createdAt);
-    text += `${statusIcon} <code>${shortId}</code> — <b>${o.amount} R$</b> · ⏱${wait}\n`;
+    text += `${statusIcon} <code>${shortId}</code> — <b>${o.amount} R$</b>${directTag} · ⏱${wait}\n`;
     buttons.push([Markup.button.callback(`🔍 ${shortId} (${o.amount}R$)`, CB.orderView(o.id))]);
   }
 
@@ -187,10 +197,15 @@ export async function renderExtendedCard(order: any) {
   const platformEmojis: Record<string, string> = { TG: "📱", VK: "📘" };
   const pe = platformEmojis[order.platform] || "📦";
 
+  const directLine    = order.isDirectOrder ? `🔷 <b>ПРЯМОЙ ЗАКАЗ</b>\n` : "";
+  const payDetailsLine = order.paymentDetails
+    ? `💳 Реквизиты: <code>${order.paymentDetails}</code>\n` : "";
+
   // ── Card text ──────────────────────────────────────────────────────────
   const text =
     `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
+    directLine +
     loyaltyLine +
     `${pe} Источник: <b>${order.platform}</b>\n` +
     `📅 Время: <b>${dateStr}</b>\n` +
@@ -198,7 +213,8 @@ export async function renderExtendedCard(order: any) {
     `👤 Юзер: ${userLabel}\n` +
     reviewLine +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
-    `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
+    (order.isDirectOrder ? `` : `🔑 Код ВБ: <code>${order.wbCode}</code>\n`) +
+    payDetailsLine +
     `📊 Статус: <b>${STATUS_LABELS[order.status] || order.status}</b>${reasonLine}`;
 
   // ── Inline keyboard ────────────────────────────────────────────────────
@@ -215,7 +231,18 @@ export async function renderExtendedCard(order: any) {
 
   let keyboard: any[][];
 
-  if (order.status === "AWAITING_GAMEPASS") {
+  if (order.status === "AWAITING_PAYMENT") {
+    keyboard = [
+      [Markup.button.callback("💳 Отправить реквизиты", CB.sendPaymentDetails(order.id))],
+      [Markup.button.callback("❌ Отменить заказ",      CB.cancelDirectOrder(order.id))],
+      bottomRow,
+    ];
+  } else if (order.status === "PAYMENT_PENDING") {
+    keyboard = [
+      [Markup.button.callback("❌ Отменить заказ", CB.cancelDirectOrder(order.id))],
+      bottomRow,
+    ];
+  } else if (order.status === "AWAITING_GAMEPASS") {
     keyboard = [
       ...(gamepassRow ? [gamepassRow] : []),
       bottomRow,

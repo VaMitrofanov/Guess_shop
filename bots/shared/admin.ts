@@ -175,6 +175,15 @@ export const CB = {
   adminQueue: "admin_queue",
   adminCodes: "admin_codes",
 
+  // ── Direct order ──────────────────────────────────────────────────────────
+  startDirect:         "start_direct",
+  confirmDirect:       "confirm_direct",
+  cancelDirect:        "cancel_direct",
+  sendPaymentDetails:  (orderId: string) => `spd:${orderId}`,                             // 29 b
+  cancelDirectOrder:   (orderId: string) => `cdo:${orderId}`,                             // 29 b
+  paymentOk:           (orderId: string, userId: string) => `pay_ok:${orderId}:${userId}`, // 59 b
+  paymentNo:           (orderId: string, userId: string) => `pay_no:${orderId}:${userId}`, // 59 b
+
   // User actions
   refreshStatus: "refresh_status",
   reviewHint:    "review_hint",
@@ -199,6 +208,23 @@ export interface ReviewCardPayload {
   orderId:     string;
   userId:      string;   // DB User.id
   photoSource: string;   // Telegram file_id OR public HTTPS URL (VK photo)
+  userDisplay: string;
+}
+
+export interface DirectOrderCardPayload {
+  orderId:     string;
+  userId:      string;   // DB User.id
+  amount:      number;   // total Robux (incl. bonus)
+  bonusApplied: number;
+  userDisplay: string;
+  tgId:        string;
+  createdAt:   Date;
+}
+
+export interface PaymentScreenshotCardPayload {
+  orderId:     string;
+  userId:      string;
+  photoFileId: string;
   userDisplay: string;
 }
 
@@ -255,8 +281,67 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
 }
 
 /**
+ * Notify all admins about a new direct order (no WB card).
+ * Admin can send payment details or cancel the order.
+ */
+export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload): Promise<void> {
+  const shortId = payload.orderId.slice(-6).toUpperCase();
+  const dateStr = new Date(payload.createdAt).toLocaleString("ru-RU", {
+    timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
+    year: "numeric", hour: "2-digit", minute: "2-digit",
+  }) + " МСК";
+  const bonusLine = payload.bonusApplied > 0
+    ? `🎁 Бонус учтён: <b>+${payload.bonusApplied} R$</b>\n`
+    : "";
+
+  const text =
+    `🔷 <b>ПРЯМОЙ ЗАКАЗ #${shortId}</b>\n` +
+    `━━━━━━━━━━━━━━━━\n` +
+    `📅 Время: <b>${dateStr}</b>\n` +
+    `👤 Юзер: ${payload.userDisplay}\n` +
+    bonusLine +
+    `💎 Сумма: <b>${payload.amount} R$</b> (Геймпасс: ${Math.ceil(payload.amount / 0.7)} R$)\n` +
+    `📊 Статус: ⏳ Ожидаем реквизиты`;
+
+  const reply_markup = {
+    inline_keyboard: [[
+      { text: "💳 Отправить реквизиты", callback_data: CB.sendPaymentDetails(payload.orderId) },
+      { text: "❌ Отменить заказ",      callback_data: CB.cancelDirectOrder(payload.orderId) },
+    ]],
+  };
+
+  await Promise.allSettled(
+    ADMIN_IDS.map((id) => tgSend(id, text, { reply_markup }))
+  );
+}
+
+/**
+ * Send a payment screenshot card to all admins for confirmation.
+ */
+export async function sendAdminPaymentCard(payload: PaymentScreenshotCardPayload): Promise<void> {
+  const shortId = payload.orderId.slice(-6).toUpperCase();
+  const caption =
+    `💳 <b>Скриншот оплаты</b>\n` +
+    `Заказ #${shortId}\n` +
+    `Юзер: ${payload.userDisplay}`;
+
+  const reply_markup = {
+    inline_keyboard: [[
+      { text: "✅ Оплата принята", callback_data: CB.paymentOk(payload.orderId, payload.userId) },
+      { text: "❌ Отклонить",      callback_data: CB.paymentNo(payload.orderId, payload.userId) },
+    ]],
+  };
+
+  await Promise.allSettled(
+    ADMIN_IDS.map((id) =>
+      tgSendPhoto(id, payload.photoFileId, caption, { reply_markup })
+    )
+  );
+}
+
+/**
  * Broadcast a review-screenshot card to all Telegram admins.
- * Admin chooses [🎁 Начислить +50 R$] or [❌ Отклонить].
+ * Admin chooses [🎁 Начислить +100 R$] or [❌ Отклонить].
  */
 export async function sendAdminReviewCard(payload: ReviewCardPayload): Promise<void> {
   const shortId = payload.orderId.slice(-6).toUpperCase();

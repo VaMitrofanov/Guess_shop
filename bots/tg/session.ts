@@ -22,6 +22,31 @@ export const pendingLink = new Map<number, LinkState>();
  * Key: Telegram numeric user ID → WbOrder.id they should review.
  */
 export const pendingReview = new Map<number, string>();
+
+// ── Direct order session states ───────────────────────────────────────────────
+
+/** User clicked "Купить напрямую" and is expected to type a Robux amount. */
+export const pendingDirectAmount = new Map<number, true>();
+
+/** User typed an amount and is viewing the confirmation screen. */
+export interface DirectOrderState {
+  amount: number;
+  passPrice: number;
+  totalAmount: number;
+}
+export const pendingDirectOrder = new Map<number, DirectOrderState>();
+
+/**
+ * Admin is typing payment details for a direct order.
+ * Key: admin tgId (number) → WbOrder.id
+ */
+export const pendingPaymentDetails = new Map<number, string>();
+
+/**
+ * User is expected to send a payment screenshot.
+ * Key: user tgId (number) → WbOrder.id
+ */
+export const pendingPaymentScreenshot = new Map<number, string>();
 /**
  * Admins currently writing a rejection reason for an order.
  * Key: Admin Telegram ID → WbOrder.id

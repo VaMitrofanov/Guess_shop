@@ -624,6 +624,271 @@ c33aa06 fix(bots): pass_private ctxKey for TG, add DB fallback for VK support ha
 | VK бот | RF `89.110.94.117` | `3e485a3` | ✅ running |
 | TG бот | SG `5.223.95.11` | `3e485a3` | ✅ running |
 
+---
+
+## Сессия 2026-05-24 — Прямые заказы + Review Reminders
+
+### Контекст задачи
+
+⚠️ **ГЛАВНОЕ ПРАВИЛО: существующий WB-флоу не трогаем и не ломаем.**
+Весь код пути WB-карточка → геймпасс → выкуп → уведомление остаётся в точности как есть.
+Прямые заказы — **чисто аддитивное расширение**: новые команды, новые поля, новая ветка в text handler. Ни одна строка существующей логики не переписывается.
+
+Вводится два изменения:
+1. **Прямой заказ** — пользователь может купить Robux в боте **без WB-карточки**. Полезно для повторных клиентов, которые уже знают процесс. Воронка: review_ok бонус → 30-дневный дедлайн → CTA "купить напрямую".
+2. **Review bonus reminders** — бонус 100 R$ сгорает через 30 дней. Бот шлёт напоминания раз в неделю (дни 7, 14, 21) и финальное за 3 дня до конца (день 27).
+
+---
+
+### Схема БД — изменения
+
+#### WbOrder — новое поле
+```prisma
+isDirectOrder Boolean @default(false)
+```
+Синтетический WB-код вида `DIR-XXXXXXXX` (8 заглавных alphanum) генерируется при создании прямого заказа и сохраняется в существующем поле `wbCode`. Это позволяет не делать `wbCode` nullable и не трогать ни одну существующую логику поиска заказов.
+
+**Почему синтетический код, а не nullable wbCode:**
+- `wbCode @unique` используется в ~15 местах (gamepass handler, user_resubmit callback, order cards)
+- `findFirst({ where: { wbCode: "DIR-..." } })` работает так же
+- Реальные WB коды — ровно 7 алфанум. `DIR-` + 8 символов = 12 символов → не пересечётся никогда
+
+#### User — новые поля
+```prisma
+reviewBonusGrantedAt  DateTime?
+reviewReminderLevel   Int       @default(0)
+```
+- `reviewBonusGrantedAt` — когда был начислен бонус (устанавливается при `review_ok`)
+- `reviewReminderLevel` — какие напоминания уже отправлены (0=нет, 1=день7, 2=день14, 3=день21, 4=день27)
+
+Миграция: `20260524_direct_orders_review_reminders`
+
+---
+
+### Прямой заказ — полный диалог
+
+Точки входа — кнопка "💎 Купить напрямую" в четырёх местах:
+- бонусное сообщение (review_ok)
+- welcome для повторных клиентов (idle path)
+- "нет активных заявок" fallback
+- уведомление COMPLETED для 2+ заказа
+
+```
+ШАГ 1: клик кнопки "💎 Купить напрямую"
+Бот: 💎 Прямой заказ Robux
+     Введи количество Robux (от 100 до 10 000):
+
+ШАГ 2: пользователь пишет число (например 500)
+
+  Если есть бонус 100 R$:
+  Бот: ✅ Подтверди заказ
+       💎 Запрос:          500 R$
+       🎁 Твой бонус:     +100 R$
+       ━━━━━━━━━━━━━━━━
+       📦 Итого получишь:  600 R$
+       📌 Цена геймпасса:  858 R$
+       [✅ Подтвердить]  [❌ Отмена]
+
+  Без бонуса:
+  Бот: ✅ Подтверди заказ
+       📦 Получишь:       500 R$
+       📌 Цена геймпасса: 715 R$
+       [✅ Подтвердить]  [❌ Отмена]
+
+ШАГ 3: нажимает "✅ Подтвердить"
+  → WbOrder создан: status=AWAITING_PAYMENT, isDirectOrder=true
+  → wbCode = "DIR-XXXXXXXX" (синтетический, не связан с WbCode таблицей)
+  → Бот шлёт уведомление администратору
+  Бот: 📋 Заказ #A1B2C3 оформлен!
+       Менеджер пришлёт реквизиты в течение нескольких минут.
+       Ожидай сообщения 👇
+
+─────────────────────── СТОРОНА АДМИНИСТРАТОРА ──────────────────────
+
+Бот → администратор:
+  🔷 ПРЯМОЙ ЗАКАЗ #A1B2C3
+  ━━━━━━━━━━━━━━━━━━
+  👤 @username (ID: 12345678)
+  💎 Сумма: 600 R$  (+100 R$ бонус учтён)
+  📅 24.05.26 15:32 МСК
+  [💳 Отправить реквизиты]  [❌ Отменить заказ]
+
+Клик "💳 Отправить реквизиты":
+  Бот → администратор: Введи реквизиты для пользователя:
+  Администратор пишет, например:
+    Сбербанк: 4276 1234 5678 9012 / Сумма: 2100 руб. / Иван И.
+  → WbOrder.status = PAYMENT_PENDING
+  → WbOrder.paymentDetails = текст реквизитов
+  → pendingPaymentScreenshot.set(userId, orderId)
+
+─────────────────────── ОБРАТНО К ПОЛЬЗОВАТЕЛЮ ──────────────────────
+
+ШАГ 4: реквизиты приходят пользователю:
+  Бот: 💳 Реквизиты для оплаты заказа #A1B2C3:
+       [текст который написал менеджер]
+       Переведи деньги и пришли скриншот сюда (фото, не файл) 👇
+
+ШАГ 5: пользователь отправляет фото скриншота оплаты
+  Бот → пользователь: ✅ Скриншот получен! Менеджер проверит — обычно до 15 минут.
+  Бот → администратор: [фото] + "💳 Скриншот оплаты / Заказ #A1B2C3"
+    [✅ Оплата принята]  [❌ Отклонить]
+
+ШАГ 6А: администратор "✅ Оплата принята"
+  → WbOrder.status = AWAITING_GAMEPASS
+  → pendingLink.set(userId, { wbCode: "DIR-...", denomination: 600 })
+  Бот → пользователь:
+    ✅ Оплата подтверждена!
+    Теперь создай геймпасс:
+    📌 Цена геймпасса: 858 R$
+    Пришли ссылку сюда 👇
+    [📖 Инструкция]  [💬 Нужна помощь?]
+  → СТАНДАРТНЫЙ FLOW без изменений
+
+ШАГ 6Б: администратор "❌ Отклонить"
+  → WbOrder.status = PAYMENT_PENDING (остаётся)
+  → pendingPaymentScreenshot.set(userId, orderId) восстанавливается
+  Бот → пользователь:
+    ❌ Не смогли подтвердить оплату.
+    Реквизиты те же — пришли скриншот ещё раз.
+```
+
+---
+
+### Схема БД — финальные изменения
+
+```prisma
+enum WbOrderStatus {
+  AWAITING_PAYMENT    // NEW: прямой заказ, ждём реквизитов
+  PAYMENT_PENDING     // NEW: реквизиты отправлены, ждём скриншот
+  AWAITING_GAMEPASS
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  REJECTED
+}
+
+model WbOrder {
+  // ... все существующие поля без изменений ...
+  isDirectOrder   Boolean  @default(false)  // NEW
+  paymentDetails  String?                   // NEW
+}
+
+model User {
+  // ... все существующие поля без изменений ...
+  reviewBonusGrantedAt  DateTime?           // NEW
+  reviewReminderLevel   Int  @default(0)    // NEW: 0-4
+}
+```
+
+Миграция: `20260524_direct_orders_review_reminders`
+
+---
+
+### CB-константы (64-байтный лимит)
+
+| Константа | Значение | Байт |
+|-----------|---------|------|
+| `startDirect` | `"start_direct"` | 12 |
+| `confirmDirect` | `"confirm_direct"` | 14 |
+| `cancelDirect` | `"cancel_direct"` | 13 |
+| `sendPaymentDetails(orderId)` | `spd:{orderId}` | 29 |
+| `paymentOk(orderId, userId)` | `pay_ok:{orderId}:{userId}` | 59 ✅ |
+| `paymentNo(orderId, userId)` | `pay_no:{orderId}:{userId}` | 59 ✅ |
+
+---
+
+### Новые session Maps (session.ts)
+
+```typescript
+pendingDirectAmount      Map<number, true>
+  // пользователь в режиме ввода суммы
+
+pendingDirectOrder       Map<number, { amount: number; passPrice: number; totalAmount: number }>
+  // пользователь видит confirmation, ещё не нажал подтвердить
+
+pendingPaymentDetails    Map<number, string>
+  // admin вводит реквизиты; значение = orderId
+
+pendingPaymentScreenshot Map<number, string>
+  // tgId (number) → orderId; пользователь должен прислать фото оплаты
+```
+
+---
+
+### Review Bonus Reminders — тексты (Вариант А, утверждён)
+
+**При начислении (review_ok):**
+```
+🎁 +100 R$ зачислено на счёт
+
+Действуют до [дата +30 дней].
+
+Используй на прямой заказ — без карточки WB.
+Бонус добавится к покупке автоматически.
+
+[💰 Купить напрямую]  → callback start_direct
+```
+
+**Еженедельно (дни 7, 14, 21):**
+```
+🔔 Напоминание о бонусе
+
+У тебя 100 R$ — действуют до [дата].
+Потрать на прямой заказ Robux.
+
+[💰 Купить со скидкой]  → callback start_direct
+```
+
+**Финальное (день 27, за 3 дня):**
+```
+⏳ Бонус сгорает через 3 дня ([дата])
+
+100 R$ на счёте. Используй сейчас.
+
+[💰 Использовать сейчас]  → callback start_direct
+```
+
+Cron: `setInterval(1 час)` в bot.ts → query User(reviewBonusGrantedAt≠null, balance>0, level<4) → по дням отправляем уровень → после 30 дней: balance=0, grant=null.
+
+---
+
+### Guard в gamepass $transaction
+
+В `registerText` → gamepass handler, перед блоком `tx.wbCode.updateMany`:
+```typescript
+if (!state.wbCode.startsWith("DIR-")) {
+  // existing wbCode claim logic — не меняется, только оборачивается
+}
+```
+
+---
+
+### Файлы к изменению
+
+| Файл | Изменение |
+|------|-----------|
+| `prisma/schema.prisma` | enum + 4 поля |
+| `prisma/migrations/...` | SQL миграция |
+| `bots/tg/session.ts` | 4 новых Map |
+| `bots/shared/admin.ts` | 6 CB-констант + `sendAdminDirectOrderCard` + `sendAdminPaymentCard` |
+| `bots/tg/handlers.ts` | entry кнопки ×4, start_direct, amount input, confirm/cancel, admin payment details, registerPhoto, pay_ok/pay_no, guard, review_ok текст |
+| `bots/tg/bot.ts` | hourly cron |
+| `bots/tg/admin/hub-orders.ts` | метка "🔷 ПРЯМОЙ" |
+
+### Что НЕ меняется — ПОЛНЫЙ СПИСОК (freeze)
+
+**WB-флоу заморожен. Ни одна из этих вещей не редактируется:**
+- `/start wbg_CODE_SESSION` → provisional transaction → subscription gate → gamepass prompt
+- `handleWbCodeTextEntry` — прямой ввод кода в чат
+- Gamepass validation (`getGamepassDetails`, `checkGamePrivate`, все 4 Roblox endpoints)
+- `$transaction` claim + order create (кроме нового `if (!isDirect)` guard'а — добавляется, не переписывается)
+- `admin_ok` / `admin_reject` callbacks и весь rejection flow
+- `user_resubmit` callback
+- `notifyUserCompleted` / `notifyUserRejected`
+- VK бот — без изменений
+- Сайт — без изменений
+- Все существующие WbOrder и WbCode записи в БД — без изменений
+
 **⚠️ Обязательный порядок деплоя:**
 ```bash
 # 1. Запушить коммиты
