@@ -428,9 +428,10 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   const user = await (db as any).user.findUnique({ where: { tgId } });
   if (!user) {
     return {
-      text: "У тебя пока нет заказов. Есть код с WB-карты? Напиши его прямо сюда или открой инструкцию.",
+      text: "Привет! Есть WB-карта — напиши код прямо сюда или открой инструкцию.\n\nХочешь купить Robux напрямую без карты — нажми кнопку ниже.",
       keyboard: Markup.inlineKeyboard([
         [Markup.button.url("📖 Инструкция", "https://robloxbank.ru/guide?source=wb")],
+        [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
         refreshRow,
       ]),
     };
@@ -443,8 +444,12 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
 
   if (!order) {
     return {
-      text: "Есть код с WB-карты? Напиши его прямо сюда — и начнём!",
-      keyboard: Markup.inlineKeyboard([refreshRow, [supportBtn("💬 Нужна помощь?")]]),
+      text: "Есть код с WB-карты? Напиши его прямо сюда — и начнём!\n\nИли купи Robux напрямую без карты 👇",
+      keyboard: Markup.inlineKeyboard([
+        [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
+        refreshRow,
+        [supportBtn("💬 Нужна помощь?")],
+      ]),
     };
   }
 
