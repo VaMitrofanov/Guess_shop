@@ -615,14 +615,14 @@ c33aa06 fix(bots): pass_private ctxKey for TG, add DB fallback for VK support ha
 
 ---
 
-## Текущий деплой (2026-05-24)
+## Текущий деплой (2026-05-24, вечер)
 
 | Сервис | Сервер | Commit | Статус |
 |--------|--------|--------|--------|
 | Next.js сайт | RF `89.110.94.117` | `7ee10e9` | ✅ running:healthy |
 | Guide микросервис | RF `89.110.94.117` | `4c3bd4c` | ✅ running:healthy |
 | VK бот | RF `89.110.94.117` | `3e485a3` | ✅ running |
-| TG бот | SG `5.223.95.11` | `3e485a3` | ✅ running |
+| TG бот | SG `5.223.95.11` | `c6e5b90` | ✅ running |
 
 ---
 
@@ -1169,3 +1169,75 @@ ssh root@5.223.95.11 "docker logs <container> 2>&1 | tail -20"
 | VK бот (`[VK] Bot started ✅`) | running | ✅ RF |
 | Bridge (`0.0.0.0:3000`) | listening | ✅ SG |
 | Neon DB (TCP `5432`) | reachable | ✅ |
+
+---
+
+## Сессия 2026-05-24 (вечер) — Прямые заказы: деплой + bugfix-волна
+
+### Что задеплоено
+
+Три коммита в рамках прямых заказов и review reminders:
+
+| Коммит | Содержимое |
+|--------|-----------|
+| `dccedeb` | Прямые заказы v1: новые поля схемы, handlers.ts, crons.ts, admin/hub-orders.ts |
+| `70b27d6` | 5 багов из ревью регистрации фото и колбэков |
+| `c6e5b90` | 2 UX-улучшения: бейдж лояльности + кнопка статуса с реквизитами |
+
+TG бот перезапускался на `c6e5b90` и вышел чисто:
+```
+🚀 DEPLOY_VERSION: 4.0 - LOYALTY_HARD_SYNC
+[ReviewReminder] Cron started ✅
+[TG] Bot started ✅ (polling)
+[Bridge] Validation server listening on 0.0.0.0:3000
+```
+
+---
+
+### Что добавлено в прямые заказы
+
+Полная схема потока — в разделе "Сессия 2026-05-24" выше.
+
+**Новые файлы:**
+- `bots/tg/crons.ts` — hourly review reminder cron (дни 7/14/21/27, expire day 30)
+
+**Изменённые файлы:**
+- `bots/tg/handlers.ts` — прямой заказ end-to-end (startDirect → amount → confirm → adminCard → payDetails → screenshot → ok/no → gamepass)
+- `bots/tg/session.ts` — 4 новых Map: `pendingDirectAmount`, `pendingDirectOrder`, `pendingPaymentDetails`, `pendingPaymentScreenshot`
+- `bots/shared/admin.ts` — 6 новых CB + `sendAdminDirectOrderCard` + `sendAdminPaymentCard`
+- `bots/tg/admin/hub-orders.ts` — статусы AWAITING_PAYMENT и PAYMENT_PENDING в dashboard
+- `bots/tg/bot.ts` — `startReviewReminderCron(bot)` после launch
+- `bots/tg/Dockerfile` — COPY `bots/tg/crons.ts`
+
+---
+
+### Баги закрыты (70b27d6 + c6e5b90)
+
+| # | Серьёзность | Проблема | Файл |
+|---|------------|---------|------|
+| A | **HIGH** | `registerPhoto`: нет DB recovery при перезапуске бота когда пользователь в `PAYMENT_PENDING`. Фото летело в review fallback → "нет выполненных заказов" → тупик | handlers.ts |
+| B | **MEDIUM** | `registerPhoto` review DB fallback не фильтровал `isDirectOrder: false` — мог совпасть с direct-заказом и испортить review_ok | handlers.ts |
+| C | **LOW-MEDIUM** | `user_resubmit` callback: старые кнопки в чате несут `DIR-XXXXXXXX` в callback_data → попадало в pendingLink/gamepass flow | handlers.ts |
+| D | **LOW** | `review_hint` не фильтровал `isDirectOrder: false` → мог поставить `pendingReview` на direct-заказ | handlers.ts |
+| UX | — | `sendAdminPaymentCard` не показывал сумму заказа. Менеджер не знал, сколько должны перевести | admin.ts |
+| UX | — | Сообщение с реквизитами пользователю шло без единой кнопки. После оплаты некуда нажать | handlers.ts |
+| UX | — | `sendAdminDirectOrderCard` не показывал информацию о лояльности (кол-во завершённых заказов) | admin.ts |
+
+---
+
+### Текущее состояние прямых заказов
+
+- ✅ WB-флоу без изменений (regressions нет)
+- ✅ Прямой заказ: полный цикл AWAITING_PAYMENT → PAYMENT_PENDING → AWAITING_GAMEPASS → PENDING → COMPLETED
+- ✅ DB recovery после перезапуска бота для всех in-memory Maps
+- ✅ Review bonus reminders cron (hourly)
+- ✅ Loyalty badge в admin-карточке прямого заказа
+- ✅ Кнопка "📊 Проверить статус" в сообщении с реквизитами
+
+### Открытые задачи (backlog, некритично)
+
+- [ ] **P1-B** (site): `WBManagerBlock` всегда посылает `wb_` prefix вместо `wbg_` 
+- [ ] **P2-C** (site): `wb_code` cookie без `HttpOnly`
+- [ ] **P1-E** (site): GET `/api/wb-code` без auth
+- [ ] **P1-TG**: `answerCbQuery` может не вызваться при throw в `ord_rr` ветке
+- [ ] **P2** (site): `VKAuthButton` доверяет `?code=` URL-параметру (spoofing)
