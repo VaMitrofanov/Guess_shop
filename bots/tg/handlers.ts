@@ -1790,8 +1790,15 @@ export function registerCallbacks(bot: Telegraf): void {
         return;
       }
       pendingDirectOrder.delete(ctx.from.id);
-      const dirUser = await (db as any).user.findUnique({ where: { tgId } });
-      if (!dirUser) { await ctx.answerCbQuery("Пользователь не найден"); return; }
+      let dirUser = await (db as any).user.findUnique({ where: { tgId } });
+      if (!dirUser) {
+        dirUser = await (db as any).user.create({
+          data: {
+            tgId,
+            name: [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || null,
+          },
+        });
+      }
 
       // Guard: one active direct order at a time
       const existingDirect = await (db as any).wbOrder.findFirst({
