@@ -812,6 +812,28 @@ export function registerText(bot: Telegraf): void {
       }
     }
 
+    // ── Subscription gate — BEFORE parsing the link ──────────────────────
+    // Check first so the user never sees "Получил!" before subscribing.
+    // pendingLink is preserved; after joining the channel registerChatMember
+    // will prompt the user to re-send the link.
+    if (!isAdmin && process.env.TG_CHANNEL_ID) {
+      const subscribed = await checkSubscription(bot, ctx.from.id);
+      if (!subscribed) {
+        await ctx.reply(
+          `Чтобы оформить заказ, сначала подпишись на наш канал — там бонусы и акции для клиентов.\n\n` +
+          `После подписки бот напишет тебе сам. Или пришли ссылку ещё раз.`,
+          {
+            parse_mode: "HTML",
+            link_preview_options: { is_disabled: true },
+            ...Markup.inlineKeyboard([[
+              Markup.button.url("⭐ Подписаться", "https://t.me/Roblox_Bank_Tg")
+            ]]),
+          }
+        );
+        return;
+      }
+    }
+
     const passId = extractPassId(text);
 
     if (!passId) {
@@ -832,27 +854,6 @@ export function registerText(bot: Telegraf): void {
     }
 
     const expectedPrice = Math.ceil(state.denomination / 0.7);
-
-    // Re-check subscription — pendingLink state may have been set before subscribing.
-    if (!isAdmin) {
-      const subscribed = await checkSubscription(bot, ctx.from.id);
-      if (!subscribed) {
-        await ctx.reply(
-          `Получил! Осталось один шаг — у наших клиентов есть закрытый канал: там первыми узнают о выкупе, ` +
-          `получают бонусы и эксклюзивные акции.\n\n` +
-          `Загляни — бесплатно, а потом просто пришли ссылку ещё раз:\n` +
-          `https://t.me/Roblox_Bank_Tg`,
-          {
-            parse_mode: "HTML",
-            link_preview_options: { is_disabled: true },
-            ...Markup.inlineKeyboard([[
-              Markup.button.url("⭐ Стать участником", "https://t.me/Roblox_Bank_Tg")
-            ]]),
-          }
-        );
-        return; // pendingLink preserved — user re-sends the link after subscribing
-      }
-    }
 
     // ── Roblox API validation ─────────────────────────────────────────────
     // Show a "checking" message — validation can take 10–30 s via bridge/retries.
