@@ -226,6 +226,7 @@ export interface PaymentScreenshotCardPayload {
   userId:      string;
   photoFileId: string;
   userDisplay: string;
+  amount?:     number;
 }
 
 // ── Senders ───────────────────────────────────────────────────────────────────
@@ -320,9 +321,11 @@ export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload):
  */
 export async function sendAdminPaymentCard(payload: PaymentScreenshotCardPayload): Promise<void> {
   const shortId = payload.orderId.slice(-6).toUpperCase();
+  const amountLine = payload.amount ? `💎 Сумма: <b>${payload.amount} R$</b>\n` : "";
   const caption =
     `💳 <b>Скриншот оплаты</b>\n` +
     `Заказ #${shortId}\n` +
+    amountLine +
     `Юзер: ${payload.userDisplay}`;
 
   const reply_markup = {

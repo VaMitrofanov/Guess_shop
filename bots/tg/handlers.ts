@@ -1417,28 +1417,50 @@ export function registerPhoto(bot: Telegraf): void {
     const user = await (db as any).user.findUnique({ where: { tgId } });
     if (!user) return;
 
-    // 0. Payment screenshot for direct orders (takes priority over review)
+    // 0a. Payment screenshot for direct orders — in-memory path (takes priority)
     const paymentOrderId = pendingPaymentScreenshot.get(ctx.from.id);
     if (paymentOrderId) {
       pendingPaymentScreenshot.delete(ctx.from.id);
       const fileId = ctx.message.photo.at(-1)!.file_id;
+      const payOrder = await (db as any).wbOrder.findUnique({ where: { id: paymentOrderId }, select: { amount: true } });
       await ctx.reply("✅ Скриншот получен! Менеджер проверит — обычно до 15 минут.");
       await sendAdminPaymentCard({
         orderId: paymentOrderId,
         userId: user.id as string,
         photoFileId: fileId,
         userDisplay: userDisplay(ctx.from),
+        amount: payOrder?.amount,
       });
       return;
+    }
+
+    // 0b. DB recovery: bot restarted while user was in PAYMENT_PENDING state
+    {
+      const pendingPayOrder = await (db as any).wbOrder.findFirst({
+        where: { userId: user.id, status: "PAYMENT_PENDING" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (pendingPayOrder) {
+        const fileId = ctx.message.photo.at(-1)!.file_id;
+        await ctx.reply("✅ Скриншот получен! Менеджер проверит — обычно до 15 минут.");
+        await sendAdminPaymentCard({
+          orderId: pendingPayOrder.id,
+          userId: user.id as string,
+          photoFileId: fileId,
+          userDisplay: userDisplay(ctx.from),
+          amount: pendingPayOrder.amount,
+        });
+        return;
+      }
     }
 
     // 1. Check in-memory state first (fastest path)
     let orderId = pendingReview.get(ctx.from.id);
 
-    // 2. DB fallback: latest COMPLETED order whose review bonus is not yet claimed
+    // 2. DB fallback: latest COMPLETED WB order whose review bonus is not yet claimed
     if (!orderId) {
       const order = await (db as any).wbOrder.findFirst({
-        where: { userId: user.id, status: "COMPLETED" },
+        where: { userId: user.id, status: "COMPLETED", isDirectOrder: false },
         orderBy: { updatedAt: "desc" },
       });
       const linked = order
@@ -1965,6 +1987,16 @@ export function registerCallbacks(bot: Telegraf): void {
       const parts = data.split(":");
       const code = parts[1];
 
+      // DIR- codes are synthetic — they can't have a gamepass link resubmitted
+      if (code?.startsWith("DIR-")) {
+        await ctx.answerCbQuery("Прямой заказ нельзя переоформить так");
+        await ctx.reply(
+          "Для нового прямого заказа используй кнопку ниже.",
+          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("💎 Заказать напрямую", CB.startDirect)]]) }
+        );
+        return;
+      }
+
       const existingOrder = await (db as any).wbOrder.findFirst({
         where: { wbCode: code },
         orderBy: { createdAt: "desc" },
@@ -2169,7 +2201,7 @@ export function registerCallbacks(bot: Telegraf): void {
       const tgUser = await (db as any).user.findUnique({ where: { tgId: adminId } });
       if (tgUser) {
         const reviewOrder = await (db as any).wbOrder.findFirst({
-          where: { userId: tgUser.id, status: "COMPLETED" },
+          where: { userId: tgUser.id, status: "COMPLETED", isDirectOrder: false },
           orderBy: { updatedAt: "desc" },
         });
         const linked = reviewOrder
