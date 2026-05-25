@@ -1377,3 +1377,114 @@ TG бот перезапускался на `c6e5b90` и вышел чисто:
 - [ ] **P1-E** (site): GET `/api/wb-code` без auth
 - [ ] **P1-TG**: `answerCbQuery` может не вызваться при throw в `ord_rr` ветке
 - [ ] **P2** (site): `VKAuthButton` доверяет `?code=` URL-параметру (spoofing)
+
+---
+
+## Сессия 2026-05-25 — Валидация геймпассов: каскадные проверки + UX уведомлений
+
+### Контекст
+
+Заказ #MITCJ2 прошёл валидацию дважды с нерабочими геймпассами. Был выявлен и устранён ряд пробелов в логике `getGamepassDetails`.
+
+---
+
+### Коммиты сессии
+
+| Коммит | Содержимое |
+|--------|-----------|
+| `d0d811b` | `isModifiedAfterCreation` — блокировка геймпасса с `Updated > Created+1h` (изменён после создания) |
+| `01cb867` | Economy cross-check: проверка pokупаемости через economy API |
+| `3d90bce` | `isNotInCatalog` — сигнал "catalog 200+empty" при отсутствии геймпасса в маркетплейсе |
+| `14a8780` | `creatorName` в admin-карточке — ник создателя геймпасса (`🎮 Создатель ГП`) |
+| `f246ac3` | Уточнён текст сообщения при `isNotInCatalog` (упоминание private game как вероятной причины) |
+| `12b208c` | `isGamePrivate` — блокировка геймпасса, если игра приватна и нет в каталоге |
+| `cc3ceea` | `sendAdminReviewCard` fallback — admin всегда получает алерт + фото при ошибке доставки карточки |
+| `aab662b` | `checkGameAccess` — детектирование 18+ игр; первая версия блокировала их |
+| `ccb582c` | 18+ геймпасс разрешён; admin-карточка показывает `🔞 Игра 18+ — выкуп вручную` |
+| `c1fa6e2` | В сообщение о выкупе добавлена ссылка на `roblox.com/transactions → Pending` |
+| `2981ed5` | Восстановлен оригинальный текст воронки TIER 2 (был случайно укорочен в c1fa6e2) |
+
+---
+
+### Архитектурные изменения — `bots/shared/roblox.ts`
+
+#### Три слоя блокировки для "свежих" геймпассов (≤30 дней)
+
+```
+1. isModifiedAfterCreation  → Updated > Created + 1h  →  кнопка «Купить» временно недоступна
+2. isNotInCatalog           → catalog 200+empty + !foundInPrimary  →  не продаётся
+3. isGamePrivate            → игра приватна + !foundInPrimary  →  купить невозможно
+```
+
+#### `checkGameAccess(gamepassId, creatorId, strict)` — новая функция
+
+Заменяет `checkGamePrivate`. Различает два состояния игры:
+
+| Результат | Причина | Поведение |
+|-----------|---------|-----------|
+| `"private"` | `playabilityStatus === "PrivateGame"` | `isActive=false`, блокировка |
+| `"age_restricted"` | `games/v1/games` вернул `data:[]` | `isActive=true`, предупреждение в карточке |
+| `"ok"` | Всё штатно | без изменений |
+
+**Проблема `roproxy`**: `apis.roproxy.com` возвращает `IsForSale=true` даже для удалённых геймпассов (stale cache). `catalog.roblox.com` тоже нестабилен — возвращает 429 для несуществующих геймпассов. Именно поэтому нужны три независимых слоя.
+
+#### Поле `isNotInCatalog`
+
+```typescript
+// В рoproxy-блоке: catalog вернул HTTP 200, но тело пустое
+catalogReturned200Empty = true;
+// Финальное условие:
+if (!foundInPrimary && catalogReturned200Empty && isRecent) → isActive = false
+```
+
+---
+
+### Изменения `bots/shared/admin.ts`
+
+- `OrderCardPayload` — новые поля: `creatorName?: string`, `isAgeRestricted?: boolean`
+- В текст карточки добавлены строки:
+  ```
+  🎮 Создатель ГП: <b>{creatorName}</b>
+  🔞 Игра 18+ — выкуп вручную          (только при isAgeRestricted)
+  ```
+
+---
+
+### Изменения `bots/tg/handlers.ts` + `bots/vk/handlers.ts`
+
+- `renderOrderCard(order, creatorName?, isAgeRestricted?)` — два новых опциональных параметра
+- `sendAdminReviewCard` обёрнут в `try/catch`:
+  - TG: fallback — `bot.telegram.sendMessage` + `sendPhoto` каждому admin
+  - VK: fallback — `tgSend` алерт + URL фото каждому admin
+- Completion message TIER 1 (первый WB): "Робуксы уже в пути 🚀" + `pendingLine` + запрос отзыва
+- Completion message TIER 2 (повторный): `pendingLine` + **оригинальный текст воронки** сохранён:
+  > "...закрытый формат... персональное обслуживание... @RobloxBank_PA"
+
+---
+
+### Ситуативные действия
+
+**Заказ #MITCJ2** — отклонён дважды скриптом `reject_gamepass.ts`:
+- 1-й геймпасс `1853334259` — `isModifiedAfterCreation` (кнопка «Купить» недоступна)
+- 2-й геймпасс `1856096440` — 18+ игра ("Sdafer60's Place", Maturity: Restricted) + не в каталоге
+
+**Мила Платонова (vkId 656629794, заказ WKDQAE1)** — фото отзыва ВБ не доставилось в admin из-за silent fail в `sendAdminReviewCard`. Попросили прислать повторно (VK message отправлен вручную). Баг закрыт в `cc3ceea`.
+
+---
+
+### Текущее состояние (после деплоя `2981ed5`)
+
+- ✅ Каскадная проверка геймпасса: 3 независимых слоя (modified / not-in-catalog / private game)
+- ✅ 18+ игры: не блокируются, admin видит предупреждение
+- ✅ Creator username в admin-карточке
+- ✅ Fallback при ошибке review card — admin всегда получает уведомление
+- ✅ Transactions pendingLine во всех completion-сообщениях
+- ✅ Воронка TIER 2 сохранена без изменений
+
+### Открытые задачи (backlog, некритично)
+
+- [ ] **P1-B** (site): `WBManagerBlock` всегда посылает `wb_` prefix вместо `wbg_` 
+- [ ] **P2-C** (site): `wb_code` cookie без `HttpOnly`
+- [ ] **P1-E** (site): GET `/api/wb-code` без auth
+- [ ] **P1-TG**: `answerCbQuery` может не вызваться при throw в `ord_rr` ветке
+- [ ] **P2** (site): `VKAuthButton` доверяет `?code=` URL-параметру (spoofing)
