@@ -244,6 +244,48 @@ export async function getGamepassDetailsDirect(
     };
   };
 
+  // ── Economy cross-check helper ────────────────────────────────────────────
+  // marketplace-items `isPurchasable` and catalog `isPurchasable` can return
+  // true even when the economy system cannot process the purchase (e.g. the
+  // economy endpoint returns an errors array for the same gamepass).
+  // This helper verifies that the economy endpoint agrees before we accept the
+  // result from endpoints 1 or 2.
+  //
+  // Returns:
+  //   true  — economy confirms gamepass is purchasable
+  //   false — economy explicitly returned an errors body (not purchasable)
+  //   null  — economy was unreachable (network/5xx) → trust caller's data
+  const checkEconomyPurchasable = async (): Promise<boolean | null> => {
+    try {
+      const econRes = await rFetch(
+        `https://economy.roblox.com/v1/game-passes/${gamepassId}/details`
+      );
+      if (!econRes.ok) return null; // 4xx/5xx — API temporarily unavailable
+      const econData: any = await econRes.json().catch(() => null);
+      if (!econData) return null;
+      // Economy returns {"errors":[...]} when the purchase path is broken
+      if (econData.errors && Array.isArray(econData.errors) && econData.errors.length > 0) {
+        console.warn(
+          `[Roblox/bots] economy/details returned errors for id=${gamepassId} ` +
+          `— gamepass not purchasable despite marketplace/catalog claiming isPurchasable=true`
+        );
+        return false;
+      }
+      // Economy returned a real object — additionally parse it for extra signal
+      const econParsed = parseItem(econData, "economy-cross-check");
+      if (econParsed && !econParsed.isActive) {
+        console.warn(
+          `[Roblox/bots] economy/details says isForSale=false for id=${gamepassId} ` +
+          `— downgrading marketplace-items result`
+        );
+        return false;
+      }
+      return true;
+    } catch {
+      return null; // network error → trust marketplace/catalog result
+    }
+  };
+
   // ── Attempt 1 — marketplace-items (Roblox mobile app endpoint) ───────────
   try {
     const res = await rFetch(
@@ -262,6 +304,12 @@ export async function getGamepassDetailsDirect(
       const item = items.find((x: any) => String(x?.id) === gamepassId || String(x?.assetId) === gamepassId) ?? items[0];
       const parsed = parseItem(item, "marketplace-items");
       if (parsed) {
+        // Cross-check with economy endpoint when marketplace-items says purchasable.
+        // Economy is the authoritative purchase path — if it returns errors, reject.
+        if (parsed.isActive) {
+          const econOk = await checkEconomyPurchasable();
+          if (econOk === false) parsed.isActive = false;
+        }
         foundInPrimary = true;
         if (await checkGamePrivate(gamepassId)) parsed.isGamePrivate = true;
         return parsed;
@@ -289,6 +337,10 @@ export async function getGamepassDetailsDirect(
       const item = items[0];
       const parsed = parseItem(item, "catalog/items/details");
       if (parsed) {
+        if (parsed.isActive) {
+          const econOk = await checkEconomyPurchasable();
+          if (econOk === false) parsed.isActive = false;
+        }
         foundInPrimary = true;
         if (await checkGamePrivate(gamepassId)) parsed.isGamePrivate = true;
         return parsed;

@@ -727,6 +727,41 @@ npx tsx scripts/grant-review-bonus.ts <vkId>
 
 ---
 
+### Фикс валидации геймпассов — economy cross-check (`bots/shared/roblox.ts`)
+
+**Проблема (геймпасс `1853334259`, заказ #MITCJ2):**
+`marketplace-items` (endpoint 1) вернул `isPurchasable: true, price: 500` → бот принял геймпасс.
+Но при попытке выкупить вручную оказалось, что геймпасс нельзя купить.
+`curl economy.roblox.com/v1/game-passes/1853334259/game-pass-product-info` → `{"errors":[{"code":0,"message":""}]}`.
+
+**Корень проблемы:**
+`getGamepassDetailsDirect` возвращает результат при первом же успешном endpoint (1 или 2), никогда не доходя до economy endpoint (3). `marketplace-items.isPurchasable = true` ≠ "экономическая система Roblox способна провести покупку".
+
+**Фикс — `checkEconomyPurchasable()` helper внутри `getGamepassDetailsDirect`:**
+```typescript
+// После получения parsed.isActive = true из endpoint 1 или 2:
+if (parsed.isActive) {
+  const econOk = await checkEconomyPurchasable();
+  // econOk = false → economy вернул {"errors":[...]}  → parsed.isActive = false
+  // econOk = null  → economy недоступен (network/5xx)  → доверяем marketplace-items
+  // econOk = true  → economy подтвердил                → принимаем
+  if (econOk === false) parsed.isActive = false;
+}
+```
+
+`checkEconomyPurchasable()` вызывает `economy.roblox.com/v1/game-passes/{id}/details`:
+- HTTP 200 + `errors[]` → `false` (геймпасс не продаётся через экономическую систему)
+- HTTP 200 + `isForSale: false` → `false`
+- HTTP 200 + норм → `true`
+- HTTP 4xx/5xx / сетевая ошибка → `null` (доверяем marketplace-items)
+
+**Деплой:** затронут `bots/shared/roblox.ts` → нужен деплой обоих ботов **и bridge-сервера** (SG):
+- VK бот (RF) — использует bridge → косвенно
+- TG бот (SG) — bridge server вызывает `getGamepassDetailsDirect` из того же файла
+- Bridge server (SG) — деплоится вместе с TG ботом
+
+---
+
 ## Сессия 2026-05-24 — Прямые заказы + Review Reminders
 
 ### Контекст задачи
