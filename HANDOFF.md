@@ -1488,3 +1488,93 @@ if (!foundInPrimary && catalogReturned200Empty && isRecent) → isActive = false
 - [ ] **P1-E** (site): GET `/api/wb-code` без auth
 - [ ] **P1-TG**: `answerCbQuery` может не вызваться при throw в `ord_rr` ветке
 - [ ] **P2** (site): `VKAuthButton` доверяет `?code=` URL-параметру (spoofing)
+
+---
+
+## Сессия 2026-05-25 (ночь) — TWA: раздел Заказы + фикс авторизации
+
+### Баг: TWA недоступна — "Invalid initData"
+
+**Симптом:** при открытии TWA из Telegram-бота — экран "Доступ запрещён / HTTP 401: Invalid initData".
+
+**Причина:** при ротации TG токена 24 мая обновили `TG_TOKEN` только в `TG_bot` и `VK_bot`. В сервисе `RobloxBankWeb` остался старый **отозванный** токен. HMAC-валидация `initData` проваливалась — сервер проверял подпись отозванным ключом.
+
+**Фикс:**
+1. Прочитан актуальный `TG_TOKEN` из работающего TG_bot контейнера на SG:
+   ```bash
+   ssh root@5.223.95.11 "docker exec lyz78enntugna9em1biopinr-151654829442 printenv TG_TOKEN"
+   ```
+2. Обновлён через Coolify API (PATCH на приложение, не на env var UUID):
+   ```bash
+   PATCH http://89.110.94.117:8000/api/v1/applications/z10ws7m1q45h281zwedmhei4/envs
+   {"key": "TG_TOKEN", "value": "<актуальный_токен>"}
+   ```
+3. Передеплой завершён.
+
+**⚠️ Правило ротации токенов (обновлено):** при смене `TG_TOKEN` обновлять в **трёх** сервисах: `TG_bot` + `VK_bot` + **`RobloxBankWeb`**.
+
+---
+
+### Новая фича: раздел "Заказы" в TWA дашборде
+
+**Проблема:** найти и проверить статус конкретного заказа через TG Admin Hub неудобно.
+
+**Решение:** новый экран "Заказы" в TWA — все WbOrder в одном месте.
+
+**Новые файлы:**
+
+| Файл | Описание |
+|------|---------|
+| `src/app/api/twa/orders/route.ts` | GET `/api/twa/orders?status=<STATUS>&page=N&limit=20` — список заказов с include user, per-status counts, пагинация |
+| `src/app/twa/_components/screens/OrdersScreen.tsx` | Экран с фильтр-чипами, expandable-карточками, load more |
+
+**Изменённые файлы:**
+
+| Файл | Что изменено |
+|------|-------------|
+| `BottomNav.tsx` | 6-й таб "Заказы" с иконкой clipboard + красный бейдж (PENDING + IN_PROGRESS count) |
+| `TwaApp.tsx` | Тип Screen + маршрут + фоновый fetch badge count после авторизации |
+
+**UX экрана заказов:**
+- Горизонтальные фильтр-чипы: Все / Новые / В работе / Ждут ссылку / Готово / Отклонено — с счётчиками
+- Срочные фильтры (PENDING, IN_PROGRESS) подсвечены красным бейджем
+- Карточка: цветная левая полоска по статусу, статус-бейдж, сумма R$, время ("5 мин назад"), юзер (TG/VK ID + имя)
+- Tap → разворачивается: ссылка на геймпасс (кнопка Копировать), код WB, реквизиты, причина отклонения, ID заказа
+- Кнопка "Ещё (N)" — инкрементальная подгрузка
+- Строка "⚡ N требуют обработки" при наличии срочных заказов
+- Бейдж на таб-баре: кол-во PENDING + IN_PROGRESS
+
+**Коммит:** `6387aa5`
+
+---
+
+### Coolify API — рабочий паттерн обновления env var
+
+```bash
+# Прочитать список (значения зашифрованы, UUID виден):
+curl http://89.110.94.117:8000/api/v1/applications/<APP_UUID>/envs \
+  -H "Authorization: Bearer $COOLIFY_TOKEN"
+
+# Обновить существующую переменную:
+curl -X PATCH http://89.110.94.117:8000/api/v1/applications/<APP_UUID>/envs \
+  -H "Authorization: Bearer $COOLIFY_TOKEN" -H "Content-Type: application/json" \
+  -d '{"key": "VAR_NAME", "value": "new_value"}'
+
+# Добавить новую:
+curl -X POST http://89.110.94.117:8000/api/v1/applications/<APP_UUID>/envs \
+  -H "Authorization: Bearer $COOLIFY_TOKEN" -H "Content-Type: application/json" \
+  -d '{"key": "VAR_NAME", "value": "value"}'
+
+# PATCH /api/v1/envs/<ENV_UUID> — НЕ РАБОТАЕТ (404). Всегда через приложение.
+```
+
+---
+
+### Текущее состояние (2026-05-25 ночь)
+
+| Сервис | Сервер | Commit | Статус |
+|--------|--------|--------|--------|
+| Next.js сайт | RF `89.110.94.117` | `6387aa5` | ✅ running:healthy |
+| Guide микросервис | RF `89.110.94.117` | `4c3bd4c` | ✅ running:healthy |
+| VK бот | RF `89.110.94.117` | `7011dcb` | ✅ running |
+| TG бот | SG `5.223.95.11` | `7011dcb` | ✅ running |
