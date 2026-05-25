@@ -356,6 +356,22 @@ export async function getGamepassDetailsDirect(
         const strictPrivate = !foundInPrimary && httpResponses >= 2;
         if (await checkGamePrivate(gamepassId, strictPrivate)) parsed.isGamePrivate = true;
 
+        // A gamepass in a private game cannot be purchased — block it even if roproxy
+        // says IsForSale=true. Only apply to recent gamepasses (≤30 days) where no
+        // primary endpoint confirmed it: old gamepasses may show isGamePrivate=true
+        // due to Roblox API quirks, but their completed orders prove they work.
+        if (parsed.isActive && parsed.isGamePrivate && !foundInPrimary && d.Created) {
+          const createdMs = new Date(d.Created).getTime();
+          if (!isNaN(createdMs) && (Date.now() - createdMs) < 30 * 24 * 3_600_000) {
+            console.warn(
+              `[Roblox/bots] roproxy: gamepass ${gamepassId} is in a private/unavailable ` +
+              `game and no primary endpoint confirmed it — isActive→false`
+            );
+            parsed.isActive = false;
+            // isGamePrivate is already set — handler shows the "open your game" message
+          }
+        }
+
         // Detect modified gamepasses: if a RECENTLY created gamepass (≤30 days old)
         // has an Updated timestamp that is >1 h later than Created, the creator
         // changed the gamepass after it was set up. Modified gamepasses frequently
