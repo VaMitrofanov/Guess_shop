@@ -1140,9 +1140,9 @@ async function handleReviewScreenshot(
 
   await ctx.reply("✅ Отзыв получен! Менеджер проверит его в ближайшее время и начислит бонус.");
 
-  // Forward to Telegram admins — silent fail so user never sees a broken state
+  // Forward to Telegram admins
+  const reviewerName = user.name ?? await vkGetName(vkUserId);
   try {
-    const reviewerName = user.name ?? await vkGetName(vkUserId);
     await sendAdminReviewCard({
       orderId,
       userId:      user.id as string,
@@ -1150,7 +1150,18 @@ async function handleReviewScreenshot(
       userDisplay: vkUserDisplay(reviewerName, vkUserId),
     });
   } catch (err) {
-    console.error("[VK] sendAdminReviewCard failed (silent):", err);
+    console.error("[VK] sendAdminReviewCard failed:", err);
+    // Fallback: plain alert so admins can approve manually
+    for (const adminId of ADMIN_IDS) {
+      try {
+        await tgSend(adminId,
+          `⚠️ <b>Ошибка доставки карточки отзыва — требуется ручная проверка</b>\n\n` +
+          `👤 Юзер: ${vkUserDisplay(reviewerName, vkUserId)}\n` +
+          `📦 Заказ: <code>${orderId}</code>\n` +
+          `🖼 Фото: ${url}`
+        );
+      } catch {}
+    }
   }
 }
 

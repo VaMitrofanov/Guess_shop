@@ -1546,12 +1546,28 @@ export function registerPhoto(bot: Telegraf): void {
       "✅ Скриншот получен! Ожидай решения администратора — обычно это занимает до 30 минут."
     );
 
-    await sendAdminReviewCard({
-      orderId,
-      userId: user.id as string,
-      photoSource: fileId,
-      userDisplay: userDisplay(ctx.from),
-    });
+    try {
+      await sendAdminReviewCard({
+        orderId,
+        userId:      user.id as string,
+        photoSource: fileId,
+        userDisplay: userDisplay(ctx.from),
+      });
+    } catch (err) {
+      console.error("[TG] sendAdminReviewCard failed:", err);
+      // Fallback: send plain alert + photo directly to each admin
+      for (const adminId of ADMIN_IDS) {
+        try {
+          await bot.telegram.sendMessage(adminId,
+            `⚠️ <b>Ошибка доставки карточки отзыва — требуется ручная проверка</b>\n\n` +
+            `👤 Юзер: ${userDisplay(ctx.from)}\n` +
+            `📦 Заказ: <code>${orderId}</code>`,
+            { parse_mode: "HTML" }
+          );
+          await bot.telegram.sendPhoto(adminId, fileId);
+        } catch {}
+      }
+    }
   });
 
   bot.on("document", async (ctx) => {
