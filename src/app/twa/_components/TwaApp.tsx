@@ -6,6 +6,7 @@ import AnalyticsScreen from "./screens/AnalyticsScreen";
 import StocksScreen from "./screens/StocksScreen";
 import CodesScreen from "./screens/CodesScreen";
 import CalcScreen from "./screens/CalcScreen";
+import OrdersScreen from "./screens/OrdersScreen";
 
 declare global {
   interface Window {
@@ -23,7 +24,7 @@ declare global {
   }
 }
 
-type Screen = "dashboard" | "analytics" | "stocks" | "codes" | "calc";
+type Screen = "dashboard" | "analytics" | "stocks" | "codes" | "calc" | "orders";
 
 const SCREEN_TITLES: Record<Screen, string> = {
   dashboard: "Главная",
@@ -31,13 +32,15 @@ const SCREEN_TITLES: Record<Screen, string> = {
   stocks:    "Склад",
   codes:     "Коды",
   calc:      "Калькулятор",
+  orders:    "Заказы",
 };
 
 export default function TwaApp() {
-  const [auth,     setAuth]     = useState<"loading" | "ok" | "error">("loading");
-  const [token,    setToken]    = useState<string | null>(null);
-  const [screen,   setScreen]   = useState<Screen>("dashboard");
-  const [debugMsg, setDebugMsg] = useState("");
+  const [auth,         setAuth]         = useState<"loading" | "ok" | "error">("loading");
+  const [token,        setToken]        = useState<string | null>(null);
+  const [screen,       setScreen]       = useState<Screen>("dashboard");
+  const [debugMsg,     setDebugMsg]     = useState("");
+  const [ordersBadge,  setOrdersBadge]  = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -115,6 +118,19 @@ export default function TwaApp() {
     return () => { cancelled = true; };
   }, []);
 
+  // Fetch urgent orders count for badge after auth
+  useEffect(() => {
+    if (auth !== "ok" || !token) return;
+    fetch("/api/twa/orders?status=PENDING&limit=1", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!d) return;
+        const urgent = (d.counts?.PENDING ?? 0) + (d.counts?.IN_PROGRESS ?? 0);
+        setOrdersBadge(urgent);
+      })
+      .catch(() => {});
+  }, [auth, token]);
+
   if (auth === "loading") {
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "#1c1c1e", color: "#8e8e93" }}>
@@ -163,9 +179,10 @@ export default function TwaApp() {
         {screen === "stocks"    && <StocksScreen     {...sp} />}
         {screen === "codes"     && <CodesScreen      {...sp} />}
         {screen === "calc"      && <CalcScreen       {...sp} />}
+        {screen === "orders"    && <OrdersScreen     {...sp} />}
       </div>
 
-      <BottomNav active={screen} onChange={setScreen} />
+      <BottomNav active={screen} onChange={setScreen} ordersBadge={ordersBadge} />
     </div>
   );
 }

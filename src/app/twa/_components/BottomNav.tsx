@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 
-type Screen = "dashboard" | "analytics" | "stocks" | "codes" | "calc";
+type Screen = "dashboard" | "analytics" | "stocks" | "codes" | "calc" | "orders";
 
 const HomeIcon = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -47,15 +47,31 @@ const CalcIcon = () => (
   </svg>
 );
 
+const OrdersIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+    <rect x="9" y="3" width="6" height="4" rx="1"/>
+    <line x1="9"  y1="12" x2="15" y2="12"/>
+    <line x1="9"  y1="16" x2="13" y2="16"/>
+  </svg>
+);
+
 const TABS: { id: Screen; label: string; Icon: () => React.ReactElement }[] = [
-  { id: "dashboard", label: "Главная",    Icon: HomeIcon      },
-  { id: "analytics", label: "Аналитика",  Icon: AnalyticsIcon },
-  { id: "stocks",    label: "Склад",      Icon: StocksIcon    },
-  { id: "codes",     label: "Коды",       Icon: CodesIcon     },
-  { id: "calc",      label: "Калькулятор",Icon: CalcIcon      },
+  { id: "dashboard", label: "Главная",   Icon: HomeIcon      },
+  { id: "analytics", label: "Аналитика", Icon: AnalyticsIcon },
+  { id: "stocks",    label: "Склад",     Icon: StocksIcon    },
+  { id: "codes",     label: "Коды",      Icon: CodesIcon     },
+  { id: "calc",      label: "Калькул.",  Icon: CalcIcon      },
+  { id: "orders",    label: "Заказы",    Icon: OrdersIcon    },
 ];
 
-export default function BottomNav({ active, onChange }: { active: Screen; onChange: (s: Screen) => void }) {
+export default function BottomNav({
+  active, onChange, ordersBadge = 0,
+}: {
+  active: Screen;
+  onChange: (s: Screen) => void;
+  ordersBadge?: number;
+}) {
   return (
     <nav style={{
       display: "flex",
@@ -66,12 +82,13 @@ export default function BottomNav({ active, onChange }: { active: Screen; onChan
     }}>
       {TABS.map(({ id, label, Icon }) => {
         const isActive = active === id;
+        const badge = id === "orders" && ordersBadge > 0 ? ordersBadge : 0;
         return (
           <button
             key={id}
             onClick={() => onChange(id)}
             style={{
-              flex: 1, padding: "9px 2px 7px", border: "none", background: "none",
+              flex: 1, padding: "9px 1px 7px", border: "none", background: "none",
               cursor: "pointer", display: "flex", flexDirection: "column",
               alignItems: "center", gap: 3,
               color: isActive ? "#bf5af2" : "#636366",
@@ -82,11 +99,24 @@ export default function BottomNav({ active, onChange }: { active: Screen; onChan
             {isActive && (
               <div style={{
                 position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)",
-                width: 32, height: 2, background: "#bf5af2", borderRadius: "0 0 2px 2px",
+                width: 28, height: 2, background: "#bf5af2", borderRadius: "0 0 2px 2px",
               }} />
             )}
-            <Icon />
-            <span style={{ fontSize: 10, fontWeight: isActive ? 600 : 400, letterSpacing: 0.1 }}>
+            <div style={{ position: "relative" as const }}>
+              <Icon />
+              {badge > 0 && (
+                <div style={{
+                  position: "absolute", top: -4, right: -6,
+                  background: "#ff453a", color: "#fff",
+                  fontSize: 9, fontWeight: 700, lineHeight: 1,
+                  padding: "2px 4px", borderRadius: 8, minWidth: 14,
+                  textAlign: "center" as const,
+                }}>
+                  {badge > 99 ? "99+" : badge}
+                </div>
+              )}
+            </div>
+            <span style={{ fontSize: 9, fontWeight: isActive ? 600 : 400, letterSpacing: 0.1 }}>
               {label}
             </span>
           </button>
