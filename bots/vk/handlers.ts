@@ -616,7 +616,15 @@ async function handleGamepassLink(
   if (!gamepassInfo.validationSkipped) {
     // Normal validation — only runs when Roblox API was reachable
     if (!gamepassInfo.isActive) {
-      if (gamepassInfo.isGamePrivate) {
+      if (gamepassInfo.isModifiedAfterCreation) {
+        await ctx.reply({
+          message:
+            `❌ Геймпасс был изменён после создания — кнопка «Купить» временно недоступна.\n\n` +
+            `Создай новый геймпасс с нуля (цена: ${expectedPrice} R$) и пришли ссылку на него.\n\n` +
+            `Старый геймпасс можно удалить.`,
+          keyboard: vkSupportKb("pass_modified"),
+        });
+      } else if (gamepassInfo.isGamePrivate) {
         await ctx.reply({
           message:
             `❌ Геймпасс в закрытой игре — выкупить невозможно.\n\n` +

@@ -755,7 +755,7 @@ if (parsed.isActive) {
 - HTTP 200 + норм → `true`
 - HTTP 4xx/5xx / сетевая ошибка → `null` (доверяем marketplace-items)
 
-**Деплой:** затронут `bots/shared/roblox.ts` → нужен деплой обоих ботов **и bridge-сервера** (SG):
+**Деплой:** затронуты `bots/shared/roblox.ts`, `bots/tg/handlers.ts`, `bots/vk/handlers.ts` → нужен деплой обоих ботов **и bridge-сервера** (SG):
 - VK бот (RF) — использует bridge → косвенно
 - TG бот (SG) — bridge server вызывает `getGamepassDetailsDirect` из того же файла
 - Bridge server (SG) — деплоится вместе с TG ботом
