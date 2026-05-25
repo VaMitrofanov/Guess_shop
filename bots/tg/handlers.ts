@@ -908,7 +908,17 @@ export function registerText(bot: Telegraf): void {
       if (!gamepassInfo.isActive) {
         const fc = getFailCounts(ctx.from.id);
         fc.notActive++;
-        if (gamepassInfo.isNotInCatalog) {
+        if (gamepassInfo.isAgeRestricted) {
+          if (fc.notActive === 1) await notifyAdminValidationFail("Геймпасс в игре 18+ — не принимаем");
+          await ctx.reply(
+            `❌ <b>Геймпасс в игре с возрастным ограничением 18+</b> — мы не можем его выкупить.\n\n` +
+            `Создай геймпасс в обычной публичной игре (цена: <b>${expectedPrice} R$</b>) и пришли ссылку на него.`,
+            { parse_mode: "HTML", ...Markup.inlineKeyboard([
+              [Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
+              [supportBtn("💬 Нужна помощь?", "pass_age")],
+            ]) }
+          );
+        } else if (gamepassInfo.isNotInCatalog) {
           if (fc.notActive === 1) await notifyAdminValidationFail("Геймпасс не найден в каталоге — скорее всего закрытая игра");
           await ctx.reply(
             `❌ <b>Геймпасс недоступен</b> — скорее всего, игра, в которой он создан, закрыта (Private).\n\n` +

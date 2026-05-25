@@ -149,6 +149,12 @@ export interface GamepassDetails {
    * gamepasses (≤30 days). Callers should reject with a "gamepass not found" message.
    */
   isNotInCatalog?: boolean;
+  /**
+   * true when the gamepass's parent game has an 18+ age restriction.
+   * The games API returns empty data for restricted games from unauthenticated
+   * servers. Callers should reject with a "create gamepass in a regular game" message.
+   */
+  isAgeRestricted?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -188,6 +194,62 @@ async function checkGamePrivate(gamepassId: string, strictOnUnavailable = false)
     return game.isPlayable === false || game.playabilityStatus === "PrivateGame";
   } catch {
     return false;
+  }
+}
+
+type GameAccessResult = "ok" | "private" | "age_restricted";
+
+/**
+ * Detailed game access check used in the roproxy fallback block where
+ * the creator ID is known. Distinguishes private games from 18+ restricted
+ * ones: the games API returns empty data[] for restricted games when called
+ * from an unauthenticated server.
+ *
+ * Falls back to looking up the creator's games when the direct asset→universe
+ * lookup fails (age-restricted games return an error on that endpoint).
+ */
+async function checkGameAccess(
+  gamepassId: string,
+  creatorId:  number,
+  strict = false
+): Promise<GameAccessResult> {
+  try {
+    // Try to resolve universe ID via gamepass asset
+    let universeId: number | null = null;
+    const uRes = await rFetch(
+      `https://apis.roblox.com/universes/v1/assets/${gamepassId}/universe`
+    ).catch(() => null);
+    if (uRes?.ok) {
+      const uData: any = await uRes.json().catch(() => null);
+      universeId = uData?.universeId ?? null;
+    }
+
+    // Fallback: look up via creator's games (works for 18+ games where the
+    // asset endpoint returns an error for unauthenticated callers)
+    if (!universeId && creatorId) {
+      const cRes = await rFetch(
+        `https://games.roblox.com/v2/users/${creatorId}/games?accessFilter=Public&limit=1`
+      ).catch(() => null);
+      if (cRes?.ok) {
+        const cData: any = await cRes.json().catch(() => null);
+        universeId = cData?.data?.[0]?.id ?? null;
+      }
+    }
+
+    if (!universeId) return strict ? "age_restricted" : "ok";
+
+    const gRes = await rFetch(
+      `https://games.roblox.com/v1/games?universeIds=${universeId}`
+    ).catch(() => null);
+    if (!gRes?.ok) return "ok";
+    const gData: any = await gRes.json().catch(() => null);
+    const game = (gData?.data ?? [])[0];
+
+    if (!game) return "age_restricted"; // API hides 18+ games from unauthenticated requests
+    if (game.isPlayable === false || game.playabilityStatus === "PrivateGame") return "private";
+    return "ok";
+  } catch {
+    return "ok";
   }
 }
 
@@ -353,22 +415,22 @@ export async function getGamepassDetailsDirect(
         // If no primary endpoint found this gamepass (marketplace, economy all failed)
         // treat a universe 404 as "game is private" rather than "API temporarily down".
         // This catches the common case where the game was deleted or never made public.
-        const strictPrivate = !foundInPrimary && httpResponses >= 2;
-        if (await checkGamePrivate(gamepassId, strictPrivate)) parsed.isGamePrivate = true;
+        const strict = !foundInPrimary && httpResponses >= 2;
+        const gameAccess = await checkGameAccess(gamepassId, parsed.creatorId, strict);
+        if (gameAccess === "private")       parsed.isGamePrivate   = true;
+        if (gameAccess === "age_restricted") parsed.isAgeRestricted = true;
 
-        // A gamepass in a private game cannot be purchased — block it even if roproxy
-        // says IsForSale=true. Only apply to recent gamepasses (≤30 days) where no
-        // primary endpoint confirmed it: old gamepasses may show isGamePrivate=true
-        // due to Roblox API quirks, but their completed orders prove they work.
-        if (parsed.isActive && parsed.isGamePrivate && !foundInPrimary && d.Created) {
+        // Block recent gamepasses (≤30 days) in inaccessible games when no primary
+        // endpoint confirmed them. Old gamepasses are excluded — Roblox API quirks
+        // can flip these flags on completed orders that are known to work.
+        if (parsed.isActive && (parsed.isGamePrivate || parsed.isAgeRestricted) && !foundInPrimary && d.Created) {
           const createdMs = new Date(d.Created).getTime();
           if (!isNaN(createdMs) && (Date.now() - createdMs) < 30 * 24 * 3_600_000) {
             console.warn(
-              `[Roblox/bots] roproxy: gamepass ${gamepassId} is in a private/unavailable ` +
-              `game and no primary endpoint confirmed it — isActive→false`
+              `[Roblox/bots] roproxy: gamepass ${gamepassId} game access=${gameAccess} ` +
+              `and no primary endpoint confirmed it — isActive→false`
             );
             parsed.isActive = false;
-            // isGamePrivate is already set — handler shows the "open your game" message
           }
         }
 
