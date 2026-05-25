@@ -82,21 +82,92 @@ async function tryRestoreState(vkUserId: number): Promise<boolean> {
 /** Best available URL from a VK photo attachment. */
 function photoUrl(attachment: unknown): string | undefined {
   const ph = attachment as any;
-  // vk-io v4: computed largeSizeUrl getter
+  // vk-io v4: computed getter works when $filled=true
   if (typeof ph?.largeSizeUrl === "string") return ph.largeSizeUrl;
-  // Walk sizes array — present on vk-io objects and raw VK API payloads.
-  // ph.photo.sizes covers raw attachment objects where photo is nested.
+  // Walk sizes — check all possible locations in vk-io objects and raw VK API payloads.
+  // ph.sizes        → vk-io getter (this.payload.sizes)
+  // ph.payload.sizes → direct payload access when getter is unreliable
+  // ph.photo.sizes  → raw attachment { type:"photo", photo:{ sizes:[...] } }
   const sizes: Array<{ width?: number; height?: number; url?: string }> =
-    ph?.sizes ?? ph?.photo?.sizes ?? [];
+    ph?.sizes ?? ph?.payload?.sizes ?? ph?.photo?.sizes ?? [];
   if (sizes.length > 0) {
-    return sizes
-      .filter((s) => s.url)
-      .sort((a, b) =>
+    const withUrl = sizes.filter((s: any) => typeof s.url === "string");
+    if (withUrl.length > 0) {
+      return withUrl.sort((a: any, b: any) =>
         (b.width ?? 0) * (b.height ?? 0) - (a.width ?? 0) * (a.height ?? 0)
-      )[0]?.url;
+      )[0].url;
+    }
   }
-  // Last resort: bare url property
   return typeof ph?.url === "string" ? ph.url : undefined;
+}
+
+/**
+ * Attempts every known path to extract a VK photo URL:
+ * 1. Direct vk-io attachment (parsed by library)
+ * 2. Raw message.attachments array
+ * 3. Forwarded messages (fwd_messages) — user may forward a screenshot
+ * 4. VK API photos.getById — last-resort when payload has no sizes
+ */
+async function extractPhotoUrl(ctx: MessageContext): Promise<string | undefined> {
+  // 1. vk-io parsed attachment
+  if (ctx.hasAttachments("photo")) {
+    const url = photoUrl(ctx.getAttachments("photo")[0]);
+    if (url) return url;
+  }
+
+  // 2. Raw message.attachments
+  const rawAttachments: any[] = (ctx as any).message?.attachments ?? (ctx as any).attachments ?? [];
+  const rawPhoto = rawAttachments.find((a: any) => a.type === "photo")?.photo;
+  if (rawPhoto) {
+    const url = photoUrl(rawPhoto);
+    if (url) return url;
+  }
+
+  // 3. Photos inside forwarded/replied messages
+  const fwdMsgs: any[] = (ctx as any).message?.fwd_messages ?? [];
+  const replyMsg: any = (ctx as any).message?.reply_message;
+  const allFwd = replyMsg ? [replyMsg, ...fwdMsgs] : fwdMsgs;
+  for (const fwd of allFwd) {
+    const fwdPhoto = (fwd?.attachments ?? []).find((a: any) => a.type === "photo")?.photo;
+    if (fwdPhoto) {
+      const url = photoUrl(fwdPhoto);
+      if (url) return url;
+    }
+  }
+
+  // 4. VK API photos.getById — fetch full payload with sizes
+  if (_vkApi) {
+    // Collect all candidate photo refs (id + owner_id pairs)
+    const candidates: Array<{ id: number; ownerId: number; accessKey?: string }> = [];
+
+    if (ctx.hasAttachments("photo")) {
+      const att = ctx.getAttachments("photo")[0] as any;
+      if (att?.id && att?.ownerId) candidates.push({ id: att.id, ownerId: att.ownerId, accessKey: att.accessKey });
+    }
+    const allRawAtts = [
+      ...rawAttachments,
+      ...allFwd.flatMap((m: any) => m?.attachments ?? []),
+    ];
+    for (const a of allRawAtts) {
+      const p = a?.photo;
+      if (p?.id && p?.owner_id) candidates.push({ id: p.id, ownerId: p.owner_id, accessKey: p.access_key });
+    }
+
+    for (const c of candidates) {
+      try {
+        const key = `${c.ownerId}_${c.id}${c.accessKey ? "_" + c.accessKey : ""}`;
+        const result: any[] = await _vkApi.photos.getById({ photos: key });
+        if (Array.isArray(result) && result[0]) {
+          const url = photoUrl(result[0]);
+          if (url) return url;
+        }
+      } catch (err) {
+        console.warn("[VK] photos.getById fallback failed:", (err as any)?.message ?? err);
+      }
+    }
+  }
+
+  return undefined;
 }
 
 function vkUserDisplay(name: string, vkUserId: number): string {
@@ -1015,16 +1086,7 @@ async function handleDirectPaymentScreenshot(
   user: any,
   orderId: string
 ): Promise<void> {
-  let url: string | undefined;
-
-  if (ctx.hasAttachments("photo")) {
-    url = photoUrl(ctx.getAttachments("photo")[0]);
-  }
-  if (!url) {
-    const rawAttachments: any[] = (ctx as any).message?.attachments ?? (ctx as any).attachments ?? [];
-    const rawPhoto = rawAttachments.find((a: any) => a.type === "photo")?.photo;
-    if (rawPhoto) url = photoUrl(rawPhoto);
-  }
+  const url = await extractPhotoUrl(ctx);
 
   if (!url) {
     await ctx.reply("📸 Не удалось получить фото. Отправь скриншот оплаты как фотографию (не файлом) 👇");
@@ -1059,21 +1121,8 @@ async function handleReviewScreenshot(
 ): Promise<void> {
   console.log(`[VK] handleReviewScreenshot: vkUserId=${vkUserId} knownOrderId=${knownOrderId ?? "none"}`);
 
-  // Try vk-io parsed attachments first, then walk raw message attachments
-  // as a fallback (some VK clients deliver photos in a different structure).
-  let url: string | undefined;
-
-  if (ctx.hasAttachments("photo")) {
-    url = photoUrl(ctx.getAttachments("photo")[0]);
-  }
-  if (!url) {
-    const rawAttachments: any[] =
-      (ctx as any).message?.attachments ??
-      (ctx as any).attachments ??
-      [];
-    const rawPhoto = rawAttachments.find((a: any) => a.type === "photo")?.photo;
-    if (rawPhoto) url = photoUrl(rawPhoto);
-  }
+  const url = await extractPhotoUrl(ctx);
+  console.log(`[VK] handleReviewScreenshot: url=${url ? "found" : "NOT_FOUND"}`);
 
   if (!url) {
     if (knownOrderId) {
