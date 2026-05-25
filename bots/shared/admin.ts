@@ -217,7 +217,7 @@ export interface DirectOrderCardPayload {
   amount:             number;   // total Robux (incl. bonus)
   bonusApplied:       number;
   userDisplay:        string;
-  tgId:               string;
+  tgId?:              string;   // optional — not set for VK users
   createdAt:          Date;
   previousOrdersCount?: number;
 }

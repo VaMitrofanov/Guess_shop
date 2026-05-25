@@ -11,8 +11,8 @@
 
 import type { MessageContext } from "vk-io";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
-import { sendAdminOrderCard, sendAdminReviewCard, sendAdminSupportAlert, ADMIN_IDS } from "../shared/admin";
-import { vkGetName, tgSend } from "../shared/notify";
+import { sendAdminOrderCard, sendAdminReviewCard, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminSupportAlert, ADMIN_IDS } from "../shared/admin";
+import { vkGetName, tgSend, vkSend } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
 import { getGamepassDetails } from "../shared/roblox";
@@ -101,6 +101,14 @@ function photoUrl(attachment: unknown): string | undefined {
 
 function vkUserDisplay(name: string, vkUserId: number): string {
   return `<a href="https://vk.com/id${vkUserId}">${name}</a>`;
+}
+
+/** Generate a unique synthetic WB code for direct orders (never matches a real 7-char code). */
+function generateDirectCode(): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let code = "DIR-";
+  for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
 }
 
 /** Returns false only when the group ID is configured AND the API confirms non-membership. Fail-open. */
@@ -305,9 +313,11 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       await ctx.reply({
         message: getIdleGreeting(custStatus, firstName) + "\n\nНужна помощь? https://t.me/RobloxBank_PA",
         keyboard: Keyboard.builder()
-          .textButton({ label: "📊 Статус заявки", payload: { command: "status" }, color: "primary" })
+          .textButton({ label: "📊 Статус заявки",   payload: { command: "status" },       color: "primary"   })
           .row()
-          .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+          .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" },  color: "positive"  })
+          .row()
+          .textButton({ label: "💬 Нужна помощь?",   payload: { command: "support", context: "general" }, color: "secondary" })
           .inline(),
       });
       return;
@@ -322,9 +332,59 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     return;
   }
 
+  // ── Direct order payload commands ─────────────────────────────────────────
+  if (msgPayload?.command === "start_direct") {
+    await handleStartDirect(ctx, vkUserId);
+    return;
+  }
+  if (msgPayload?.command === "direct_confirm") {
+    await handleDirectConfirm(ctx, vkUserId);
+    return;
+  }
+  if (msgPayload?.command === "direct_cancel") {
+    clearState(vkUserId);
+    await ctx.reply("Отменено.");
+    return;
+  }
+
   if (state?.type === "AWAITING_LINK") {
     await handleGamepassLink(ctx, vkUserId, text, state.wbCode, state.denomination);
     return;
+  }
+
+  // ── Direct order amount input ──────────────────────────────────────────────
+  if (state?.type === "AWAITING_DIRECT_AMOUNT") {
+    await handleDirectAmountInput(ctx, vkUserId, text);
+    return;
+  }
+  // AWAITING_DIRECT_CONFIRM: user should use buttons; if they type text, do nothing
+  if (state?.type === "AWAITING_DIRECT_CONFIRM") {
+    await ctx.reply({
+      message: "Используй кнопки выше для подтверждения или отмены.",
+      keyboard: Keyboard.builder()
+        .textButton({ label: "✅ Подтвердить", payload: { command: "direct_confirm" }, color: "positive" })
+        .textButton({ label: "❌ Отмена",      payload: { command: "direct_cancel"  }, color: "negative" })
+        .inline(),
+    });
+    return;
+  }
+
+  // ── Direct order payment screenshot (BEFORE review routing) ───────────────
+  if (ctx.hasAttachments("photo") || state?.type === "AWAITING_DIRECT_PAYMENT") {
+    const photoUser = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+    if (photoUser) {
+      const payOrder = state?.type === "AWAITING_DIRECT_PAYMENT"
+        ? await (db as any).wbOrder.findUnique({ where: { id: state.orderId } })
+        : await (db as any).wbOrder.findFirst({
+            where: { userId: photoUser.id, status: "PAYMENT_PENDING", isDirectOrder: true },
+            orderBy: { createdAt: "desc" },
+          });
+      if (payOrder?.status === "PAYMENT_PENDING") {
+        console.log(`[VK] payment screenshot routing: vkUserId=${vkUserId} orderId=${payOrder.id}`);
+        await handleDirectPaymentScreenshot(ctx, vkUserId, photoUser, payOrder.id);
+        return;
+      }
+    }
   }
 
   if (state?.type === "AWAITING_REVIEW" || ctx.hasAttachments("photo")) {
@@ -763,6 +823,212 @@ async function handleGamepassLink(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// B3 — Direct order flow (no WB card needed)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function handleStartDirect(ctx: MessageContext, vkUserId: number): Promise<void> {
+  // Subscription gate — same as TG bot
+  if (process.env.VK_GROUP_ID) {
+    const subbed = await isVkSubscribed(ctx, vkUserId);
+    if (!subbed) {
+      await sendVkSubPrompt(ctx, null);
+      return;
+    }
+  }
+
+  const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { balance: true } });
+  const bonus = user?.balance ?? 0;
+  const bonusNote = bonus > 0
+    ? `\n\n🎁 У тебя есть бонус ${bonus} R$ — он автоматически добавится к заказу.`
+    : "";
+
+  setState(vkUserId, { type: "AWAITING_DIRECT_AMOUNT" });
+
+  await ctx.reply({
+    message:
+      `💎 Прямой заказ Robux\n\n` +
+      `Введи количество Robux, которое хочешь купить (от 100 до 10 000):` +
+      bonusNote,
+    keyboard: Keyboard.builder()
+      .textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" })
+      .inline(),
+  });
+}
+
+async function handleDirectAmountInput(ctx: MessageContext, vkUserId: number, text: string): Promise<void> {
+  const num = parseInt(text.replace(/[\s,]/g, ""), 10);
+  if (isNaN(num) || num < 100 || num > 10000) {
+    await ctx.reply({
+      message: "⚠️ Введи число от 100 до 10 000.\n\nНапример: 500",
+      keyboard: Keyboard.builder()
+        .textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" })
+        .inline(),
+    });
+    return;
+  }
+
+  const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { balance: true } });
+  const bonus = user?.balance ?? 0;
+  const totalAmount = num + bonus;
+  const passPrice = Math.ceil(totalAmount / 0.7);
+
+  setState(vkUserId, { type: "AWAITING_DIRECT_CONFIRM", amount: num, totalAmount, bonus });
+
+  const bonusSection = bonus > 0
+    ? `💎 Запрос:          ${num} R$\n` +
+      `🎁 Твой бонус:     +${bonus} R$\n` +
+      `─────────────────\n` +
+      `📦 Итого получишь:  ${totalAmount} R$\n`
+    : `📦 Получишь:       ${totalAmount} R$\n`;
+
+  await ctx.reply({
+    message:
+      `✅ Подтверди заказ\n\n` +
+      bonusSection +
+      `📌 Цена геймпасса:  ${passPrice} R$`,
+    keyboard: Keyboard.builder()
+      .textButton({ label: "✅ Подтвердить", payload: { command: "direct_confirm" }, color: "positive" })
+      .textButton({ label: "❌ Отмена",      payload: { command: "direct_cancel"  }, color: "negative" })
+      .inline(),
+  });
+}
+
+async function handleDirectConfirm(ctx: MessageContext, vkUserId: number): Promise<void> {
+  const state = getState(vkUserId);
+  if (state?.type !== "AWAITING_DIRECT_CONFIRM") {
+    await ctx.reply({
+      message: "⏳ Время подтверждения вышло. Начни заново:",
+      keyboard: Keyboard.builder()
+        .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "primary" })
+        .inline(),
+    });
+    return;
+  }
+
+  const { amount, totalAmount, bonus } = state;
+  clearState(vkUserId);
+
+  // Lazy upsert user
+  let user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+  if (!user) {
+    const name = await vkGetName(vkUserId);
+    user = await (db as any).user.create({ data: { vkId: String(vkUserId), name } });
+  }
+
+  // Guard: one active direct order at a time
+  const existing = await (db as any).wbOrder.findFirst({
+    where: { userId: user.id, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING"] } },
+  });
+  if (existing) {
+    await ctx.reply({
+      message:
+        `⏳ У тебя уже есть активный заказ #${existing.id.slice(-6).toUpperCase()}.\n\n` +
+        `Дождись реквизитов от менеджера, а затем оформи новый.`,
+      keyboard: vkSupportKb("direct_wait"),
+    });
+    return;
+  }
+
+  const dirCode = generateDirectCode();
+  let newOrder: any;
+  try {
+    newOrder = await (db as any).$transaction(async (tx: any) => {
+      const ord = await tx.wbOrder.create({
+        data: {
+          amount:        totalAmount,
+          gamepassUrl:   null,
+          status:        "AWAITING_PAYMENT",
+          platform:      "VK",
+          userId:        user.id,
+          wbCode:        dirCode,
+          isDirectOrder: true,
+        },
+      });
+      if (bonus > 0) {
+        await tx.user.update({
+          where: { id: user.id },
+          data:  { balance: 0, reviewBonusGrantedAt: null, reviewReminderLevel: 0 },
+        });
+      }
+      return ord;
+    });
+  } catch (err) {
+    console.error("[VK] Direct order create error:", err);
+    await ctx.reply({ message: "❌ Не удалось создать заказ. Попробуй снова.", keyboard: vkSupportKb("general") });
+    return;
+  }
+
+  const shortId = newOrder.id.slice(-6).toUpperCase();
+  const vkName = user.name ?? await vkGetName(vkUserId);
+  const prevOrdersCount = await (db as any).wbOrder.count({
+    where: { userId: user.id, status: "COMPLETED" },
+  });
+
+  try {
+    await sendAdminDirectOrderCard({
+      orderId:             newOrder.id,
+      userId:              user.id,
+      amount:              totalAmount,
+      bonusApplied:        bonus,
+      userDisplay:         `${vkUserDisplay(vkName, vkUserId)} (VK ID: ${vkUserId})`,
+      createdAt:           newOrder.createdAt,
+      previousOrdersCount: prevOrdersCount,
+    });
+  } catch (err) {
+    console.error("[VK] sendAdminDirectOrderCard failed:", err);
+  }
+
+  await ctx.reply({
+    message:
+      `📋 Заказ #${shortId} оформлен!\n\n` +
+      `Менеджер пришлёт реквизиты для оплаты в течение нескольких минут.\n\n` +
+      `Ожидай сообщения 👇`,
+    keyboard: vkSupportKb("direct_wait"),
+  });
+
+  console.log(`[VK] Direct order created: ${newOrder.id} vkUserId=${vkUserId} amount=${totalAmount}`);
+}
+
+async function handleDirectPaymentScreenshot(
+  ctx: MessageContext,
+  vkUserId: number,
+  user: any,
+  orderId: string
+): Promise<void> {
+  let url: string | undefined;
+
+  if (ctx.hasAttachments("photo")) {
+    url = photoUrl(ctx.getAttachments("photo")[0]);
+  }
+  if (!url) {
+    const rawAttachments: any[] = (ctx as any).message?.attachments ?? (ctx as any).attachments ?? [];
+    const rawPhoto = rawAttachments.find((a: any) => a.type === "photo")?.photo;
+    if (rawPhoto) url = photoUrl(rawPhoto);
+  }
+
+  if (!url) {
+    await ctx.reply("📸 Не удалось получить фото. Отправь скриншот оплаты как фотографию (не файлом) 👇");
+    return;
+  }
+
+  clearState(vkUserId);
+
+  await ctx.reply("✅ Скриншот получен! Менеджер проверит — обычно до 15 минут.");
+
+  try {
+    await sendAdminPaymentCard({
+      orderId,
+      userId:      user.id,
+      photoFileId: url,
+      userDisplay: vkUserDisplay(user.name ?? `VK #${vkUserId}`, vkUserId),
+      amount:      undefined,
+    });
+  } catch (err) {
+    console.error("[VK] sendAdminPaymentCard failed:", err);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // B2 — Collect review screenshot
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -987,7 +1253,7 @@ async function handleIdleMessage(
             .inline()
         : order.status === "COMPLETED" && reviewClaimed
         ? Keyboard.builder()
-            .textButton({ label: "💬 Заказать ещё", payload: { command: "support", context: "general" }, color: "positive" })
+            .textButton({ label: "💎 Заказать напрямую", payload: { command: "start_direct" }, color: "positive" })
             .inline()
         : undefined;
 
@@ -1028,13 +1294,14 @@ async function handleIdleMessage(
   const firstName = await vkGetName(vkUserId);
 
   if (status.isReturning) {
-    // IDLE state: upsell to direct sales, no gamepass instructions
     await ctx.reply({
       message: getIdleGreeting(status, firstName) + "\n\nНужна помощь? https://t.me/RobloxBank_PA",
       keyboard: Keyboard.builder()
-        .textButton({ label: "📊 Статус заявки", payload: { command: "status" }, color: "primary" })
+        .textButton({ label: "📊 Статус заявки",   payload: { command: "status" },       color: "primary"   })
         .row()
-        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+        .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" },  color: "positive"  })
+        .row()
+        .textButton({ label: "💬 Нужна помощь?",   payload: { command: "support", context: "general" }, color: "secondary" })
         .inline(),
     });
   } else {

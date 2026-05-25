@@ -619,6 +619,14 @@ export function registerText(bot: Telegraf): void {
           );
           pendingPaymentScreenshot.set(parseInt(payUser.tgId), dirOrder.id);
         } catch { }
+      } else if (payUser?.vkId) {
+        try {
+          await vkSend(payUser.vkId,
+            `💳 Реквизиты для оплаты заказа #${shortId}:\n\n` +
+            `${text}\n\n` +
+            `Переведи деньги и пришли скриншот подтверждения сюда (фотографией, не файлом) 👇`
+          );
+        } catch { }
       }
       await ctx.reply(`✅ Реквизиты отправлены пользователю (Заказ #${shortId})`, { parse_mode: "HTML" });
       return;
@@ -1941,6 +1949,12 @@ export function registerCallbacks(bot: Telegraf): void {
             ]) }
           );
         } catch { }
+      } else if (cdoUser?.vkId) {
+        try {
+          await vkSend(cdoUser.vkId,
+            `❌ Заказ #${cdoOrderId.slice(-6).toUpperCase()} отменён.\n\nЕсли хочешь — создай новый заказ напрямую (нажми кнопку "💎 Купить напрямую").\n\nЕсли считаешь, что это ошибка — https://t.me/RobloxBank_PA`
+          );
+        } catch { }
       }
       try { await ctx.editMessageText(
         (ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : "") +
@@ -1986,6 +2000,17 @@ export function registerCallbacks(bot: Telegraf): void {
             }
           );
         } catch { }
+      } else if (payOkUser?.vkId) {
+        const passPrice = Math.ceil(payOkOrder.amount / 0.7);
+        try {
+          await vkSend(payOkUser.vkId,
+            `✅ Оплата подтверждена!\n\n` +
+            `Теперь создай геймпасс по инструкции:\n` +
+            `📌 Цена геймпасса: ${passPrice} R$\n\n` +
+            `Когда создашь — пришли ссылку или ID прямо сюда 👇\n\n` +
+            `Инструкция: https://robloxbank.ru/guide?source=direct`
+          );
+        } catch { }
       }
       const payOkCaption = `✅ Оплата принята — ${adminTag}\nЗаказ #${payOkOrderId.slice(-6).toUpperCase()}`;
       try { await ctx.editMessageCaption(payOkCaption, { parse_mode: "HTML" }); } catch { }
@@ -2011,6 +2036,17 @@ export function registerCallbacks(bot: Telegraf): void {
             detailsLine +
             `\nПришли скриншот ещё раз (фотографией, не файлом) 👇`,
             { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "payment") }
+          );
+        } catch { }
+      } else if (payNoUser?.vkId) {
+        const detailsLine = payNoOrder?.paymentDetails
+          ? `\n\n💳 Реквизиты:\n${payNoOrder.paymentDetails}\n`
+          : "";
+        try {
+          await vkSend(payNoUser.vkId,
+            `❌ Не смогли подтвердить оплату.` +
+            detailsLine +
+            `\nПришли скриншот ещё раз (фотографией, не файлом) 👇\n\nНужна помощь? https://t.me/RobloxBank_PA`
           );
         } catch { }
       }

@@ -2,16 +2,22 @@
  * State machine for VK users.
  *
  * States:
- *  AWAITING_LINK      — user activated a WB code and must send a gamepass URL
- *  AWAITING_REVIEW    — user's order was COMPLETED; waiting for review screenshot
+ *  AWAITING_LINK            — user activated a WB code and must send a gamepass URL
+ *  AWAITING_REVIEW          — user's order was COMPLETED; waiting for review screenshot
+ *  AWAITING_DIRECT_AMOUNT   — user opened direct order flow; waiting for robux amount
+ *  AWAITING_DIRECT_CONFIRM  — amount entered; waiting for confirm/cancel button
+ *  AWAITING_DIRECT_PAYMENT  — payment details sent; waiting for payment screenshot
  *
  * Storage: in-memory Map (VK numeric user ID → state).
  * On process restart the bot re-derives state from the DB (see handlers.ts).
  */
 
 export type VKState =
-  | { type: "AWAITING_LINK";   wbCode: string; denomination: number }
-  | { type: "AWAITING_REVIEW"; orderId: string };
+  | { type: "AWAITING_LINK";           wbCode: string; denomination: number }
+  | { type: "AWAITING_REVIEW";         orderId: string }
+  | { type: "AWAITING_DIRECT_AMOUNT" }
+  | { type: "AWAITING_DIRECT_CONFIRM"; amount: number; totalAmount: number; bonus: number }
+  | { type: "AWAITING_DIRECT_PAYMENT"; orderId: string };
 
 const store = new Map<number, VKState>();
 
