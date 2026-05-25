@@ -616,14 +616,7 @@ async function handleGamepassLink(
   if (!gamepassInfo.validationSkipped) {
     // Normal validation — only runs when Roblox API was reachable
     if (!gamepassInfo.isActive) {
-      if (gamepassInfo.isAgeRestricted) {
-        await ctx.reply({
-          message:
-            `❌ Геймпасс в игре с возрастным ограничением 18+ — мы не можем его выкупить.\n\n` +
-            `Создай геймпасс в обычной публичной игре (цена: ${expectedPrice} R$) и пришли ссылку на него.`,
-          keyboard: vkSupportKb("pass_age"),
-        });
-      } else if (gamepassInfo.isNotInCatalog) {
+      if (gamepassInfo.isNotInCatalog) {
         await ctx.reply({
           message:
             `❌ Геймпасс недоступен — скорее всего, игра, в которой он создан, закрыта (Private).\n\n` +
@@ -845,6 +838,7 @@ async function handleGamepassLink(
     bonusApplied:        user.balance || 0,
     previousOrderCount,
     creatorName:         validatedCreator ?? undefined,
+    isAgeRestricted:     gamepassInfo.isAgeRestricted ?? false,
   });
 }
 

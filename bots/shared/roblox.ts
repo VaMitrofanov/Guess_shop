@@ -420,14 +420,14 @@ export async function getGamepassDetailsDirect(
         if (gameAccess === "private")       parsed.isGamePrivate   = true;
         if (gameAccess === "age_restricted") parsed.isAgeRestricted = true;
 
-        // Block recent gamepasses (≤30 days) in inaccessible games when no primary
-        // endpoint confirmed them. Old gamepasses are excluded — Roblox API quirks
-        // can flip these flags on completed orders that are known to work.
-        if (parsed.isActive && (parsed.isGamePrivate || parsed.isAgeRestricted) && !foundInPrimary && d.Created) {
+        // Block recent gamepasses (≤30 days) in PRIVATE games when no primary
+        // endpoint confirmed them. Age-restricted (18+) games are allowed through —
+        // we can still purchase those gamepasses with a verified account.
+        if (parsed.isActive && parsed.isGamePrivate && !foundInPrimary && d.Created) {
           const createdMs = new Date(d.Created).getTime();
           if (!isNaN(createdMs) && (Date.now() - createdMs) < 30 * 24 * 3_600_000) {
             console.warn(
-              `[Roblox/bots] roproxy: gamepass ${gamepassId} game access=${gameAccess} ` +
+              `[Roblox/bots] roproxy: gamepass ${gamepassId} is in a private game ` +
               `and no primary endpoint confirmed it — isActive→false`
             );
             parsed.isActive = false;

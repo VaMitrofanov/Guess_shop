@@ -204,6 +204,8 @@ export interface OrderCardPayload {
   previousOrderCount?: number;
   /** Roblox username of the gamepass creator, as returned by the validation API. */
   creatorName?:        string;
+  /** true when the gamepass is in an 18+ age-restricted game. */
+  isAgeRestricted?:    boolean;
 }
 
 export interface ReviewCardPayload {
@@ -259,7 +261,8 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
     prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>\n`              :
     "";
 
-  const creatorLine = order.creatorName ? `🎮 Создатель ГП: <b>${order.creatorName}</b>\n` : "";
+  const creatorLine    = order.creatorName    ? `🎮 Создатель ГП: <b>${order.creatorName}</b>\n`  : "";
+  const ageRestrictLine = order.isAgeRestricted ? `🔞 <b>Игра 18+ — выкуп вручную</b>\n`           : "";
 
   const text =
     `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
@@ -270,6 +273,7 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
     `👤 Юзер: ${order.userDisplay}\n` +
     bonusLine +
     creatorLine +
+    ageRestrictLine +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
     `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
     `📊 Статус: ⏳ В обработке\n\n` +

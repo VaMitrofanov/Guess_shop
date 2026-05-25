@@ -908,17 +908,7 @@ export function registerText(bot: Telegraf): void {
       if (!gamepassInfo.isActive) {
         const fc = getFailCounts(ctx.from.id);
         fc.notActive++;
-        if (gamepassInfo.isAgeRestricted) {
-          if (fc.notActive === 1) await notifyAdminValidationFail("Геймпасс в игре 18+ — не принимаем");
-          await ctx.reply(
-            `❌ <b>Геймпасс в игре с возрастным ограничением 18+</b> — мы не можем его выкупить.\n\n` +
-            `Создай геймпасс в обычной публичной игре (цена: <b>${expectedPrice} R$</b>) и пришли ссылку на него.`,
-            { parse_mode: "HTML", ...Markup.inlineKeyboard([
-              [Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
-              [supportBtn("💬 Нужна помощь?", "pass_age")],
-            ]) }
-          );
-        } else if (gamepassInfo.isNotInCatalog) {
+        if (gamepassInfo.isNotInCatalog) {
           if (fc.notActive === 1) await notifyAdminValidationFail("Геймпасс не найден в каталоге — скорее всего закрытая игра");
           await ctx.reply(
             `❌ <b>Геймпасс недоступен</b> — скорее всего, игра, в которой он создан, закрыта (Private).\n\n` +
@@ -1183,7 +1173,7 @@ export function registerText(bot: Telegraf): void {
         include: { user: true }
       });
       if (fullOrder) {
-        const { text: cardText, reply_markup } = await renderOrderCard(fullOrder, validatedCreator ?? undefined);
+        const { text: cardText, reply_markup } = await renderOrderCard(fullOrder, validatedCreator ?? undefined, gamepassInfo.isAgeRestricted);
         for (const adminId of ADMIN_IDS) {
           try { await bot.telegram.sendMessage(adminId, cardText, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } }); } catch { }
         }
@@ -1198,7 +1188,7 @@ export function registerText(bot: Telegraf): void {
  * Universal renderer for the admin order card.
  * Returns text and reply_markup ready for ctx.reply or edit.
  */
-async function renderOrderCard(order: any, creatorName?: string) {
+async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted?: boolean) {
   const shortId = order.id.slice(-6).toUpperCase();
   const passPrice = Math.ceil(order.amount / 0.7);
   const statusLabels: any = {
@@ -1247,7 +1237,8 @@ async function renderOrderCard(order: any, creatorName?: string) {
 
   const directTag = order.isDirectOrder ? `🔷 <b>ПРЯМОЙ ЗАКАЗ</b>\n` : ``;
 
-  const gpCreatorLine = creatorName ? `🎮 Создатель ГП: <b>${creatorName}</b>\n` : "";
+  const gpCreatorLine    = creatorName      ? `🎮 Создатель ГП: <b>${creatorName}</b>\n`  : "";
+  const ageRestrictLine  = isAgeRestricted  ? `🔞 <b>Игра 18+ — выкуп вручную</b>\n`      : "";
 
   const text =
     `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
@@ -1259,6 +1250,7 @@ async function renderOrderCard(order: any, creatorName?: string) {
     `👤 Юзер: ${userLabel}\n` +
     bonusLine +
     gpCreatorLine +
+    ageRestrictLine +
     (order.isDirectOrder ? `` : reviewLine) +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
     (order.isDirectOrder ? `` : `🔑 Код ВБ: <code>${order.wbCode}</code>\n`) +
