@@ -615,14 +615,115 @@ c33aa06 fix(bots): pass_private ctxKey for TG, add DB fallback for VK support ha
 
 ---
 
-## Текущий деплой (2026-05-24, вечер)
+## Текущий деплой (2026-05-25)
 
 | Сервис | Сервер | Commit | Статус |
 |--------|--------|--------|--------|
 | Next.js сайт | RF `89.110.94.117` | `7ee10e9` | ✅ running:healthy |
 | Guide микросервис | RF `89.110.94.117` | `4c3bd4c` | ✅ running:healthy |
-| VK бот | RF `89.110.94.117` | `3e485a3` | ✅ running |
-| TG бот | SG `5.223.95.11` | `c6e5b90` | ✅ running |
+| VK бот | RF `89.110.94.117` | `7011dcb` | 🔄 deploying |
+| TG бот | SG `5.223.95.11` | `7011dcb` | 🔄 deploying |
+
+---
+
+## Сессия 2026-05-25 — VK review screenshot fix + VK прямые заказы
+
+### Баги VK review screenshot (коммит `45dadd8`)
+
+**Проблема:** Мила Платонова отправила скрин отзыва ВБ в VK бот — бот не ответил, admin-уведомления не пришли.
+
+Три причины молчания в `handleReviewScreenshot`:
+
+| # | Причина | Где | Фикс |
+|---|---------|-----|------|
+| 1 | `if (!user) return` — если `vkId` нет в БД, тихий return без ответа и без алерта | `handlers.ts:802` | Теперь отвечает пользователю + пингует всех ADMIN_IDS с VK ID |
+| 2 | `if (!url && !knownOrderId) return` — фото пришло, URL не извлёкся, тихий return | `handlers.ts:798` | Теперь говорит "отправь как фото, не файл" |
+| 3 | Нулевое логирование — ни routing, ни entry функции, ни `!order/!linked` path | везде | Добавлено 3 `console.log` на ключевых точках |
+
+**Как начислить бонус Миле вручную:**
+```bash
+# Найти VK ID в URL профиля: vk.com/id<NUMBER>
+npx tsx scripts/grant-review-bonus.ts <VK_ID>
+# Скрипт: find user → find COMPLETED order + wbCode → $transaction → vkSend "+100 R$"
+```
+
+---
+
+### VK прямые заказы — полный паритет с TG (коммит `7011dcb`)
+
+**Новые состояния в `bots/vk/session.ts`:**
+```typescript
+| { type: "AWAITING_DIRECT_AMOUNT" }
+| { type: "AWAITING_DIRECT_CONFIRM"; amount: number; totalAmount: number; bonus: number }
+| { type: "AWAITING_DIRECT_PAYMENT"; orderId: string }
+```
+
+**Новые функции в `bots/vk/handlers.ts`:**
+- `handleStartDirect` — subscription gate → сохраняем бонус → AWAITING_DIRECT_AMOUNT
+- `handleDirectAmountInput` — валидация 100–10000 → расчёт с бонусом → AWAITING_DIRECT_CONFIRM
+- `handleDirectConfirm` — guard (один активный заказ) → `$transaction` (WbOrder + обнуление бонуса) → `sendAdminDirectOrderCard`
+- `handleDirectPaymentScreenshot` — извлечь URL фото → `sendAdminPaymentCard` (TG принимает URL так же как file_id)
+
+**VK кнопки "💎 Купить напрямую" добавлены в 3 места:**
+- `Начать` welcome для возвращающихся клиентов
+- `handleIdleMessage` IDLE greeting для returning users
+- Status COMPLETED + reviewClaimed кнопка (было "Заказать ещё" → теперь "💎 Заказать напрямую")
+
+**Payload commands в `handleMessage`:**
+```
+msgPayload.command === "start_direct"    → handleStartDirect
+msgPayload.command === "direct_confirm"  → handleDirectConfirm
+msgPayload.command === "direct_cancel"   → clearState + "Отменено"
+state.type === "AWAITING_DIRECT_AMOUNT"  → handleDirectAmountInput
+state.type === "AWAITING_DIRECT_CONFIRM" → показывает кнопки (если юзер набрал текст)
+```
+
+**Routing фото (до review routing):**
+```typescript
+// PAYMENT_PENDING direct order → payment screenshot handler
+if (ctx.hasAttachments("photo") || state?.type === "AWAITING_DIRECT_PAYMENT") {
+  const payOrder = state?.type === "AWAITING_DIRECT_PAYMENT"
+    ? wbOrder.findUnique(state.orderId)
+    : wbOrder.findFirst({ status: "PAYMENT_PENDING", isDirectOrder: true }); // DB fallback
+  if (payOrder?.status === "PAYMENT_PENDING") → handleDirectPaymentScreenshot
+}
+```
+
+**TG admin callbacks теперь уведомляют VK пользователей:**
+
+| Callback | VK уведомление |
+|---------|---------------|
+| `spd:` (text handler) | `💳 Реквизиты для оплаты #XXXX:\n{text}\nПришли скриншот...` |
+| `cdo:` | `❌ Заказ #XXXX отменён. Если хочешь — кнопка "💎 Купить напрямую"` |
+| `pay_ok:` | `✅ Оплата подтверждена! Создай геймпасс... Инструкция: /guide?source=direct` |
+| `pay_no:` | `❌ Не смогли подтвердить оплату. {details}\nПришли скриншот ещё раз` |
+
+`DirectOrderCardPayload.tgId` сделано опциональным (`tgId?:`) — у VK-пользователей его нет, а в теле `sendAdminDirectOrderCard` оно не использовалось.
+
+---
+
+### Ключевые архитектурные решения
+
+**VK `pendingPaymentScreenshot` не нужен:** TG-бот не может писать в VK-bot's in-memory Map (разные процессы). VK бот при получении фото делает DB lookup `{ status: "PAYMENT_PENDING", isDirectOrder: true }` — это надёжнее in-memory state, который теряется при рестарте.
+
+**`tgSendPhoto` принимает URL:** Telegram Bot API принимает в поле `photo` как file_id, так и HTTPS URL. VK фото имеют URL → `sendAdminPaymentCard` работает без изменений.
+
+**Генерация DIR-кода:** дублирована из TG handlers (4 строки). Перенести в `bots/shared/` при следующем рефакторинге.
+
+---
+
+### Новый скрипт: `scripts/grant-review-bonus.ts`
+
+```bash
+npx tsx scripts/grant-review-bonus.ts <vkId>
+```
+
+Делает всё что делает `review_ok` кнопка в TG, но напрямую через DB:
+1. Find user by vkId
+2. Find COMPLETED WbOrder
+3. Find WbCode with reviewBonusClaimed=false
+4. `$transaction`: mark code + balance += 100 + reviewBonusGrantedAt = now
+5. vkSend стандартное бонусное сообщение
 
 ---
 
