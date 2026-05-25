@@ -1171,7 +1171,7 @@ export function registerText(bot: Telegraf): void {
         include: { user: true }
       });
       if (fullOrder) {
-        const { text: cardText, reply_markup } = await renderOrderCard(fullOrder);
+        const { text: cardText, reply_markup } = await renderOrderCard(fullOrder, validatedCreator ?? undefined);
         for (const adminId of ADMIN_IDS) {
           try { await bot.telegram.sendMessage(adminId, cardText, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } }); } catch { }
         }
@@ -1186,7 +1186,7 @@ export function registerText(bot: Telegraf): void {
  * Universal renderer for the admin order card.
  * Returns text and reply_markup ready for ctx.reply or edit.
  */
-async function renderOrderCard(order: any) {
+async function renderOrderCard(order: any, creatorName?: string) {
   const shortId = order.id.slice(-6).toUpperCase();
   const passPrice = Math.ceil(order.amount / 0.7);
   const statusLabels: any = {
@@ -1235,6 +1235,8 @@ async function renderOrderCard(order: any) {
 
   const directTag = order.isDirectOrder ? `🔷 <b>ПРЯМОЙ ЗАКАЗ</b>\n` : ``;
 
+  const gpCreatorLine = creatorName ? `🎮 Создатель ГП: <b>${creatorName}</b>\n` : "";
+
   const text =
     `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
@@ -1244,6 +1246,7 @@ async function renderOrderCard(order: any) {
     (dateStr ? `📅 Время: <b>${dateStr}</b>\n` : "") +
     `👤 Юзер: ${userLabel}\n` +
     bonusLine +
+    gpCreatorLine +
     (order.isDirectOrder ? `` : reviewLine) +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
     (order.isDirectOrder ? `` : `🔑 Код ВБ: <code>${order.wbCode}</code>\n`) +

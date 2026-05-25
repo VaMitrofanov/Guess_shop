@@ -835,6 +835,7 @@ async function handleGamepassLink(
     createdAt:           order.createdAt,
     bonusApplied:        user.balance || 0,
     previousOrderCount,
+    creatorName:         validatedCreator ?? undefined,
   });
 }
 

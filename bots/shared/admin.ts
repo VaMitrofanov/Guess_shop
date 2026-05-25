@@ -202,6 +202,8 @@ export interface OrderCardPayload {
   bonusApplied?:       number;
   /** Number of WbOrders placed BEFORE this one. Used to render loyalty badge. */
   previousOrderCount?: number;
+  /** Roblox username of the gamepass creator, as returned by the validation API. */
+  creatorName?:        string;
 }
 
 export interface ReviewCardPayload {
@@ -257,6 +259,8 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
     prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>\n`              :
     "";
 
+  const creatorLine = order.creatorName ? `🎮 Создатель ГП: <b>${order.creatorName}</b>\n` : "";
+
   const text =
     `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
@@ -265,6 +269,7 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
     `📅 Время: <b>${dateStr}</b>\n` +
     `👤 Юзер: ${order.userDisplay}\n` +
     bonusLine +
+    creatorLine +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
     `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
     `📊 Статус: ⏳ В обработке\n\n` +
