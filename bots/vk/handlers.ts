@@ -616,7 +616,15 @@ async function handleGamepassLink(
   if (!gamepassInfo.validationSkipped) {
     // Normal validation — only runs when Roblox API was reachable
     if (!gamepassInfo.isActive) {
-      if (gamepassInfo.isModifiedAfterCreation) {
+      if (gamepassInfo.isNotInCatalog) {
+        await ctx.reply({
+          message:
+            `❌ Геймпасс не найден в каталоге Roblox — возможно, он был удалён сразу после создания.\n\n` +
+            `Создай новый геймпасс с нуля (цена: ${expectedPrice} R$) и пришли ссылку на него.\n\n` +
+            `Важно: не удаляй геймпасс до получения оплаты.`,
+          keyboard: vkSupportKb("pass_deleted"),
+        });
+      } else if (gamepassInfo.isModifiedAfterCreation) {
         await ctx.reply({
           message:
             `❌ Геймпасс был изменён после создания — кнопка «Купить» временно недоступна.\n\n` +

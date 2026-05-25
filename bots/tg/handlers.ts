@@ -908,7 +908,18 @@ export function registerText(bot: Telegraf): void {
       if (!gamepassInfo.isActive) {
         const fc = getFailCounts(ctx.from.id);
         fc.notActive++;
-        if (gamepassInfo.isModifiedAfterCreation) {
+        if (gamepassInfo.isNotInCatalog) {
+          if (fc.notActive === 1) await notifyAdminValidationFail("Геймпасс не найден в каталоге — возможно удалён");
+          await ctx.reply(
+            `❌ <b>Геймпасс не найден в каталоге Roblox</b> — возможно, он был удалён сразу после создания.\n\n` +
+            `Создай <b>новый</b> геймпасс с нуля (цена: <b>${expectedPrice} R$</b>) и пришли ссылку на него.\n\n` +
+            `Важно: не удаляй геймпасс до получения оплаты.`,
+            { parse_mode: "HTML", ...Markup.inlineKeyboard([
+              [Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
+              [supportBtn("💬 Нужна помощь?", "pass_deleted")],
+            ]) }
+          );
+        } else if (gamepassInfo.isModifiedAfterCreation) {
           if (fc.notActive === 1) await notifyAdminValidationFail("Геймпасс изменён после создания — Buy button недоступен");
           await ctx.reply(
             `❌ <b>Геймпасс был изменён после создания</b> — кнопка «Купить» временно недоступна.\n\n` +

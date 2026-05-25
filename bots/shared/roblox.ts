@@ -142,6 +142,13 @@ export interface GamepassDetails {
    * a "create a fresh gamepass" message.
    */
   isModifiedAfterCreation?: boolean;
+  /**
+   * true when roproxy returned IsForSale=true but the catalog endpoint returned
+   * HTTP 200 with an empty items array — meaning the gamepass is not in the Roblox
+   * marketplace (likely deleted after creation). Only set for recently-created
+   * gamepasses (≤30 days). Callers should reject with a "gamepass not found" message.
+   */
+  isNotInCatalog?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -195,6 +202,9 @@ export async function getGamepassDetailsDirect(
   // True when at least one primary Roblox endpoint (1-3) returned the gamepass data.
   // Used to decide whether to apply strict private-game detection at the roproxy fallback.
   let foundInPrimary = false;
+  // True when catalog returned HTTP 200 but an empty items array — the gamepass is not
+  // in the Roblox marketplace. Used in the roproxy block to detect deleted gamepasses.
+  let catalogReturned200Empty = false;
   const numId = parseInt(gamepassId, 10);
 
   // ── Shared parser: handles both POST response shapes ─────────────────────
@@ -293,6 +303,10 @@ export async function getGamepassDetailsDirect(
     if (res.ok) {
       const json: any = await res.json();
       const items: any[] = Array.isArray(json) ? json : (json?.data ?? []);
+      if (items.length === 0) {
+        catalogReturned200Empty = true;
+        console.log(`[Roblox/bots] endpoint 2 (catalog/items/details): HTTP 200 empty for id=${gamepassId} — not in marketplace`);
+      }
       const item = items[0];
       const parsed = parseItem(item, "catalog/items/details");
       if (parsed) {
@@ -362,6 +376,24 @@ export async function getGamepassDetailsDirect(
             );
             parsed.isActive = false;
             parsed.isModifiedAfterCreation = true;
+          }
+        }
+
+        // Detect gamepasses deleted after creation:
+        // roproxy can return stale cached data (IsForSale=true) for gamepasses that
+        // no longer exist on roblox.com. If the catalog explicitly returned HTTP 200
+        // with an empty array (not a rate-limit 429) AND no primary endpoint found it,
+        // the gamepass is not in the marketplace → reject as non-existent.
+        if (parsed.isActive && !foundInPrimary && catalogReturned200Empty) {
+          const createdMs = d.Created ? new Date(d.Created).getTime() : NaN;
+          const isRecent  = !isNaN(createdMs) && (Date.now() - createdMs) < 30 * 24 * 3_600_000;
+          if (isRecent) {
+            console.warn(
+              `[Roblox/bots] roproxy: gamepass ${gamepassId} not found in catalog ` +
+              `(catalog returned 200+empty, no primary endpoint confirmed) — isActive→false isNotInCatalog→true`
+            );
+            parsed.isActive = false;
+            parsed.isNotInCatalog = true;
           }
         }
 
