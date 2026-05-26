@@ -619,10 +619,12 @@ c33aa06 fix(bots): pass_private ctxKey for TG, add DB fallback for VK support ha
 
 | Сервис | Сервер | Контейнер | Статус |
 |--------|--------|-----------|--------|
-| Next.js сайт | RF `89.110.94.117` | `bd3390a55967` | ✅ running:healthy (commit `1bcecec`) |
+| Next.js сайт | RF `89.110.94.117` | `fd8fb090b442` | ✅ running:healthy (commit `1bcecec`) |
 | Guide микросервис | RF `89.110.94.117` | `4781007f1526` | ✅ running:healthy |
 | VK бот | RF `89.110.94.117` | `d3d6aa622322` | ✅ running |
-| TG бот + Bridge | SG `5.223.95.11` | `0b4a028427a0` | ✅ running |
+| TG бот + Bridge | SG `5.223.95.11` | `233c47374802` | ✅ running |
+
+**BOSSROBUX_TOKEN:** добавлен в Coolify DB (app_id 1 и 3), в `.env` файлы обоих серверов, и в `/app/bots/tg/.env` внутри TG-бот контейнера (dotenv). Сайт — через force-recreate, TG бот — через docker restart (файлы не слетели).
 
 ---
 
