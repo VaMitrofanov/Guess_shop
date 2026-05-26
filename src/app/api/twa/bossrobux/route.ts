@@ -18,16 +18,36 @@ async function brPost(endpoint: string, body: object = {}) {
   return res.json() as Promise<Record<string, unknown>>;
 }
 
+// VND/USD rate cache (1 hour TTL, module-level — survives across requests in the same process)
+let vndRateCache: { usdPerVnd: number; ts: number } | null = null;
+
+async function getVndToUsd(): Promise<number> {
+  const now = Date.now();
+  if (vndRateCache && now - vndRateCache.ts < 3_600_000) return vndRateCache.usdPerVnd;
+  try {
+    const r = await fetch("https://open.er-api.com/v6/latest/VND", { signal: AbortSignal.timeout(5_000) });
+    const d = await r.json() as Record<string, any>;
+    const usdPerVnd = Number(d?.rates?.USD ?? 0);
+    if (usdPerVnd > 0) {
+      vndRateCache = { usdPerVnd, ts: now };
+      return usdPerVnd;
+    }
+  } catch { /* fall through */ }
+  // fallback ≈ 25,300 VND = $1
+  return 1 / 25_300;
+}
+
 export async function GET(req: NextRequest) {
   if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!brToken()) return NextResponse.json({ error: "Token not configured" }, { status: 503 });
   try {
-    const data = await brPost("get-rb");
+    const [data, usdPerVnd] = await Promise.all([brPost("get-rb"), getVndToUsd()]);
     if (data.robux_total === undefined) return NextResponse.json({ error: "Bad response" }, { status: 502 });
     return NextResponse.json({
       rate:        Number(data.rate),
       robux_total: Number(data.robux_total),
       robux_max:   Number(data.robux_max),
+      usd_per_vnd: usdPerVnd,
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 502 });
