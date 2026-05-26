@@ -615,14 +615,81 @@ c33aa06 fix(bots): pass_private ctxKey for TG, add DB fallback for VK support ha
 
 ---
 
-## Текущий деплой (2026-05-25)
+## Текущий деплой (2026-05-26)
 
-| Сервис | Сервер | Commit | Статус |
-|--------|--------|--------|--------|
-| Next.js сайт | RF `89.110.94.117` | `7ee10e9` | ✅ running:healthy |
-| Guide микросервис | RF `89.110.94.117` | `4c3bd4c` | ✅ running:healthy |
-| VK бот | RF `89.110.94.117` | `7011dcb` | 🔄 deploying |
-| TG бот | SG `5.223.95.11` | `7011dcb` | 🔄 deploying |
+| Сервис | Сервер | Контейнер | Статус |
+|--------|--------|-----------|--------|
+| Next.js сайт | RF `89.110.94.117` | `997210a91646` | ⚠️ RF unreachable (сессия 2026-05-26 ночь) |
+| Guide микросервис | RF `89.110.94.117` | `4781007f1526` | ⚠️ RF unreachable |
+| VK бот | RF `89.110.94.117` | `ae6c6e9f9e83` | ⚠️ RF unreachable |
+| TG бот + Bridge | SG `5.223.95.11` | `0b4a028427a0` | ✅ running |
+
+**Pending deploy — Next.js сайт (commit `264d0d2`):**
+```bash
+# После восстановления RF — зайти на сервер, перейти в директорию приложения,
+# git pull, npm run build, перезапустить контейнер.
+# Изменения: TWA экран Boss Robux (новая вкладка "Выкуп" в дашборде).
+ssh rf
+cd /data/coolify/applications/z10ws7m1q45h281zwedmhei4
+git pull && npm ci && npm run build
+docker restart $(docker ps -qf "name=z10ws7m1q45h281z")
+```
+
+---
+
+## Сессия 2026-05-26 ночь — Boss Robux в TWA дашборде
+
+### Что сделано
+
+**Boss Robux LK → TWA дашборд** (commit `264d0d2`):
+
+1. **`src/app/api/twa/bossrobux/route.ts`** — новый API-роут:
+   - `GET` — возвращает баланс ЛК (rate, robux_total, robux_max)
+   - `POST { action: "search", username }` — поиск геймпассов по Roblox-нику
+   - `POST { action: "purchase", gp }` — покупка геймпасса
+   - Проксирует запросы на bossrobux.com с `Token:` header, требует TWA JWT-авторизацию
+
+2. **`src/app/twa/_components/screens/BossrobuxScreen.tsx`** — новый экран:
+   - Карточка баланса: курс / доступно R$ / макс. на ордер (данные обновляются при открытии)
+   - Поиск по Roblox-нику → список геймпассов с ценой
+   - Экран подтверждения: полные данные (GP ID, Place ID, Product ID, robux, seller)
+   - Результат выкупа (успех/ошибка) с кнопкой "Новый выкуп"
+
+3. **`BottomNav.tsx` + `TwaApp.tsx`** — новая вкладка "Выкуп" (7-я, корзина-иконка)
+
+**Также закоммичены:** hint-тексты по Regional Pricing в `bots/tg/handlers.ts` и `bots/vk/handlers.ts` (ранее задеплоены через docker cp, теперь в source).
+
+### Деплой (ожидает RF сервер)
+
+RF сервер (`89.110.94.117`) недоступен — SSH timeout. Деплой Next.js сайта отложен. Команды выше (секция "Текущий деплой").
+
+---
+
+## Сессия 2026-05-26 — Региональный прайс геймпасса + TWA Orders
+
+### Региональный прайс (regional pricing) — новая проверка
+
+**Проблема:** При включённом региональном прайсе покупатели из разных стран платят разные суммы в локальной валюте. Бот не мог это детектировать — мог принять геймпасс с некорректной ценой.
+
+**Что добавлено в `bots/shared/roblox.ts`:**
+- Новое поле `hasRegionalPricing?: boolean` в интерфейсе `GamepassDetails`
+- В `parseItem()`: проверяет `d.priceConfiguration?.localePricingEnabled === true` (из ответа marketplace-items) и `d.isPriceRange === true` (из catalog)
+- Логирует `[Roblox/bots] regional pricing detected` когда нашёл
+
+**Что добавлено в `bots/tg/handlers.ts` и `bots/vk/handlers.ts`:**
+- Проверка `gamepassInfo.hasRegionalPricing` вставлена ПОСЛЕ `!isActive` проверок, ДО проверки цены
+- При обнаружении: уведомляет администратора + даёт пользователю пошаговую инструкцию как отключить (Creator Dashboard → Passes → Edit → Pricing → выключить Enable Regional Pricing)
+- Context для admin: `"pass_regional"`
+
+**Деплой:** оба бота задеплоены через SCP + docker cp + docker restart. Контейнеры подняты и живые.
+
+**Ограничение:** региональный прайс обнаруживается только если сработал endpoint 1 (marketplace-items) или endpoint 2 (catalog). Если работает только endpoint 4 (roproxy/product-info) — поле будет `undefined` и бот не заблокирует. В таком случае помогает price-check (неправильная цена всё равно поймается).
+
+### TWA Orders экран + TWA auth fix (предыдущая сессия, итоги)
+
+- Добавлен `/api/twa/orders` endpoint (GET, фильтры по статусу, пагинация)
+- Добавлен `OrdersScreen.tsx` — карточки с фильтрами, копирование, бейдж на таб
+- TG_TOKEN обновлён в RobloxBankWeb после ротации (правило: обновлять в 3 сервисах — TG_bot, VK_bot, RobloxBankWeb)
 
 ---
 
