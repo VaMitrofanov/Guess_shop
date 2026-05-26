@@ -2183,14 +2183,21 @@ export function registerCallbacks(bot: Telegraf): void {
       }
 
       // Atomic idempotency guard: mark this specific code + increment balance in one transaction.
-      // If reviewBonusClaimed is already true (double-click or concurrent admin), count=0 → skip.
+      // Direct orders (DIR- prefix) have no WbCode row — use user.reviewBonusGrantedAt as guard instead.
+      const isDirectOrder = (reviewOrder.wbCode as string).startsWith("DIR-");
       let paid = false;
       await (db as any).$transaction(async (tx: any) => {
-        const result = await tx.wbCode.updateMany({
-          where: { code: reviewOrder.wbCode, reviewBonusClaimed: false },
-          data: { reviewBonusClaimed: true },
-        });
-        if (result.count === 0) return;
+        if (isDirectOrder) {
+          // Idempotency for direct orders: check reviewBonusGrantedAt hasn't been set yet.
+          const u = await tx.user.findUnique({ where: { id: userId }, select: { reviewBonusGrantedAt: true } });
+          if (u?.reviewBonusGrantedAt) return; // already paid
+        } else {
+          const result = await tx.wbCode.updateMany({
+            where: { code: reviewOrder.wbCode, reviewBonusClaimed: false },
+            data: { reviewBonusClaimed: true },
+          });
+          if (result.count === 0) return; // already paid
+        }
         await tx.user.update({
           where: { id: userId },
           data: { balance: { increment: 100 }, reviewBonusGrantedAt: new Date(), reviewReminderLevel: 0 },
