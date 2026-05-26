@@ -1720,16 +1720,33 @@ Standalone TG/VK notification helpers для использования в Next.
 
 ---
 
-### Что нужно задеплоить
+### Текущее состояние (2026-05-27)
 
-1. **Next.js сайт (RF)** — коммит `fd37425` включает изменения TWA + bossrobux fix
-2. **VK бот (RF)** — коммит `fd37425` включает fix handleReviewScreenshot для DIR- заказов
-   - Задеплоить через: `scp bots/vk/handlers.ts root@89.110.94.117:/tmp/ && ssh root@89.110.94.117 "docker cp /tmp/handlers.ts d3d6aa622322:/app/bots/vk/handlers.ts && docker restart d3d6aa622322"`
+| Сервис | Сервер | Контейнер | Статус |
+|--------|--------|-----------|--------|
+| Next.js сайт | RF `89.110.94.117` | `robloxbank-web` | ✅ задеплоен (Coolify, `fd37425`) |
+| VK бот | RF `89.110.94.117` | `e428b9fe41a4` | ✅ задеплоен (fix DIR- review + fix `review_ok` бонус) |
+| TG бот | SG `5.223.95.11` | `233c47374802` | ✅ задеплоен (`201ce46`, fix `review_ok` для DIR-) |
 
-### Текущее состояние (2026-05-26)
+---
 
-| Сервис | Сервер | Commit | Статус |
-|--------|--------|--------|--------|
-| Next.js сайт | RF `89.110.94.117` | ожидает деплоя `fd37425` | ✅ running (старая версия) |
-| VK бот | RF `89.110.94.117` | ожидает деплоя `fd37425` | ✅ running (без fix DIR-) |
+## Сессия 2026-05-27 — Ручное начисление бонуса Миле Платоновой
+
+### Что сделано
+
+**Мила Платонова (vkId `656629794`, заказ `WKDQAE1`)** — вместо просьбы переслать фото отзыва ещё раз, бонус начислен вручную через скрипт.
+
+**Порядок действий:**
+```bash
+scp scripts/grant-review-bonus.ts root@89.110.94.117:/tmp/
+ssh root@89.110.94.117 "docker cp /tmp/grant-review-bonus.ts e428b9fe41a4:/app/grant-review-bonus.ts"
+ssh root@89.110.94.117 "docker exec e428b9fe41a4 sh -c 'cd /app && npx tsx grant-review-bonus.ts 656629794'"
+```
+
+**Результат:**
+- `WbCode.reviewBonusClaimed = true` для кода `WKDQAE1`
+- `user.balance: 0 → 100 R$`, `reviewBonusGrantedAt = now()`, `reviewReminderLevel = 0`
+- VK-сообщение отправлено (message_id=471): "+100 R$ зачислено, действуют 30 дней"
+
+**Примечание:** скрипт `scripts/grant-review-bonus.ts` работает только для обычных WB-кодов. Для прямых заказов (DIR-) нужна отдельная версия (аналогичная логика, но без `wbCode.findFirst` — идемпотентность через `reviewBonusGrantedAt`).
 | TG бот | SG `5.223.95.11` | `7011dcb` | ✅ running |
