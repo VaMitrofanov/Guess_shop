@@ -24,7 +24,6 @@ interface Rate {
   rate:        number;
   robux_total: number;
   robux_max:   number;
-  usd_per_vnd: number;
 }
 
 interface Gamepass {
@@ -112,30 +111,7 @@ function BalanceCard({
             <StatBox label="Макс/орд." value={rate.robux_max.toLocaleString("ru-RU")} sub="R$" />
           </div>
 
-          {/* Monetary balance */}
-          {(() => {
-            const vnd = rate.robux_total * rate.rate;
-            const usdPerVnd = rate.usd_per_vnd || 1 / 25_300;
-            const usd = vnd * usdPerVnd;
-            return (
-              <div style={{
-                marginTop: 10, padding: "9px 12px", background: C.elevated,
-                borderRadius: 10, display: "flex", justifyContent: "space-between", alignItems: "center",
-              }}>
-                <span style={{ fontSize: 11, color: C.sec }}>Баланс ЛК</span>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                  <span style={{ fontSize: 15, fontWeight: 700, color: "#fff", letterSpacing: -0.3 }}>
-                    {Math.round(vnd).toLocaleString("ru-RU")} ₫
-                  </span>
-                  <span style={{ fontSize: 12, color: C.sec }}>
-                    ≈ ${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                </div>
-              </div>
-            );
-          })()}
-
-          <div style={{ fontSize: 10, color: C.muted, marginTop: 6, textAlign: "right" as const }}>
+          <div style={{ fontSize: 10, color: C.muted, marginTop: 8, textAlign: "right" as const }}>
             {ageSeconds < 5 ? "только что" : `${ageSeconds}с назад`}
             {fetching && " · обновляю…"}
           </div>
