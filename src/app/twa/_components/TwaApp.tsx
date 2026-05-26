@@ -181,7 +181,7 @@ export default function TwaApp() {
         {screen === "stocks"    && <StocksScreen     {...sp} />}
         {screen === "codes"     && <CodesScreen      {...sp} />}
         {screen === "calc"      && <CalcScreen       {...sp} />}
-        {screen === "orders"    && <OrdersScreen      {...sp} />}
+        {screen === "orders"    && <OrdersScreen      {...sp} onGoToBossrobux={() => setScreen("bossrobux")} />}
         {screen === "bossrobux" && <BossrobuxScreen   {...sp} />}
       </div>
 

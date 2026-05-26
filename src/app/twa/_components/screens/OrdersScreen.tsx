@@ -80,7 +80,7 @@ function CopyBtn({ text }: { text: string }) {
   );
 }
 
-function OrderCard({ order }: { order: Order }) {
+function OrderCard({ order, onGoToBossrobux }: { order: Order; onGoToBossrobux?: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const meta = STATUS_META[order.status];
   const userHandle = order.user.tgId
@@ -158,6 +158,21 @@ function OrderCard({ order }: { order: Order }) {
             </DetailRow>
           )}
 
+          {/* Boss Robux quick buy */}
+          {onGoToBossrobux && order.gamepassUrl && (order.status === "PENDING" || order.status === "IN_PROGRESS") && (
+            <button
+              onClick={e => { e.stopPropagation(); onGoToBossrobux(); }}
+              style={{
+                width: "100%", padding: "10px", border: "none", borderRadius: 10,
+                background: "rgba(191,90,242,0.15)", color: "#bf5af2",
+                fontSize: 13, fontWeight: 600, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              }}
+            >
+              🛒 Выкупить через Boss Robux
+            </button>
+          )}
+
           {/* WB Code */}
           <DetailRow label="Код WB">
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -221,7 +236,7 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
-export default function OrdersScreen({ token }: { token: string }) {
+export default function OrdersScreen({ token, onGoToBossrobux }: { token: string; onGoToBossrobux?: () => void }) {
   const [filter,   setFilter]   = useState<FilterStatus>("ALL");
   const [data,     setData]     = useState<OrdersData | null>(null);
   const [loading,  setLoading]  = useState(true);
@@ -328,7 +343,7 @@ export default function OrdersScreen({ token }: { token: string }) {
               )}
             </div>
 
-            {allOrders.map(order => <OrderCard key={order.id} order={order} />)}
+            {allOrders.map(order => <OrderCard key={order.id} order={order} onGoToBossrobux={onGoToBossrobux} />)}
 
             {data && page < data.pages && (
               <button
