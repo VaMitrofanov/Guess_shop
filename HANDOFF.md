@@ -1636,3 +1636,100 @@ curl -X POST http://89.110.94.117:8000/api/v1/applications/<APP_UUID>/envs \
 | Guide микросервис | RF `89.110.94.117` | `4c3bd4c` | ✅ running:healthy |
 | VK бот | RF `89.110.94.117` | `7011dcb` | ✅ running |
 | TG бот | SG `5.223.95.11` | `7011dcb` | ✅ running |
+
+---
+
+## Сессия 2026-05-26 — TWA admin overhaul + VK direct order review fix
+
+### Проблемы этой сессии
+
+#### 1. BOSSROBUX_TOKEN пропадает при редеплое (решено)
+**Симптом:** TWA дашборд показывал "⚠️ Token not configured" после Coolify редеплоя.  
+**Причина:** токен записан в `environment_variables` через неправильные колонки (`application_id` не существует, нужны `resourceable_type`/`resourceable_id`). Coolify хранит все env vars зашифрованными через Laravel `encrypt()`.  
+**Решение:** вручную в Coolify Postgres создана запись с правильными колонками и зашифрованным значением через `php artisan tinker` → `encrypt("token")`. Деплой подтвердил — токен в контейнере.  
+**Важно:** правильные колонки в `environment_variables`: `resourceable_type`, `resourceable_id`, `is_runtime`, `is_buildtime` (НЕ `application_id`, НЕ `is_build_time`).
+
+#### 2. "Баланс ЛК" показывал неправильную сумму (решено)
+**Симптом:** TWA дашборд показывал 174,225 ₫ ≈ $6.62, bossrobux.com показывал 597,222 VND | 22.62 USD.  
+**Причина:** API `/get-rb` возвращает только `rate`, `robux_total`, `robux_max`. `rate` — это BUY rate (что они платят поставщикам), НЕ sell rate. Поле `usd_per_vnd` не существует в API — было вычислено через отдельный fetch курса обмена, который брал неправильный источник.  
+**Решение:** убрана строка "Баланс ЛК" полностью из `BossrobuxScreen.tsx`. API не возвращает sell-rate баланс в рублях/долларах.  
+**Файлы:** `src/app/api/twa/bossrobux/route.ts`, `src/app/twa/_components/screens/BossrobuxScreen.tsx`
+
+#### 3. VK review photo не принималась для прямых заказов (решено)
+**Симптом:** пользователь с прямым заказом (код `DIR-XXXXXXXX`) отправлял фото отзыва — бот молчал, в TG ничего не приходило.  
+**Причина:** `handleReviewScreenshot` проверял `wbCode.findFirst({ where: { userId, reviewBonusClaimed: false } })`. Для прямых заказов записи в таблице `WbCode` нет (код `DIR-` синтетический) → `linked = null` → бот отвечал "нет выполненных заявок".  
+**Решение:** добавлена проверка `isDirectOrder = order?.wbCode.startsWith("DIR-")`. Если `isDirectOrder`, то пропускаем проверку `linked` — достаточно что есть `order`.  
+**Файл:** `bots/vk/handlers.ts:1175-1186`  
+**Коммит:** `fd37425`
+
+---
+
+### TWA admin dashboard overhaul (коммит `fd37425`)
+
+Полный рефакторинг TWA дашборда: из просмотрщика аналитики — в полноценный инструмент управления заказами.
+
+#### Архитектурные изменения
+
+**BottomNav:** 7 вкладок → 5  
+| Было | Стало |
+|------|-------|
+| Главная, Аналит., Склад, Коды, Калькул., Заказы, Выкуп | Главная, Заказы, WB, Выкуп, Настройки |
+
+**Screen type:** `"dashboard" | "analytics" | "stocks" | "codes" | "calc" | "orders" | "bossrobux"` → `"dashboard" | "orders" | "wb" | "bossrobux" | "settings"`
+
+WB-вкладки (Аналитика/Склад/Коды) объединены в `WbScreen.tsx` с segment-control переключением.  
+Калькулятор перенесён в `SettingsScreen.tsx` (планируется, сейчас в Настройках только курсы и автобай).
+
+#### Новые файлы
+
+**`src/lib/twa-notify.ts`**  
+Standalone TG/VK notification helpers для использования в Next.js API routes (bots/ исключён из tsconfig → нельзя импортировать напрямую). Реплицирует логику `bots/shared/notify.ts`:
+- `notifyOrderCompleted(user, orderId, amount, isDirectOrder)` — полная tier-логика (tier 1: отзыв+100R$, tier 2: pitch на прямые заказы, direct: "выкуплено")
+- `notifyOrderRejected(user, orderId, reason, amount)` — письмо с причиной + инструкцией по исправлению
+- Bridge-aware: если `VALIDATOR_SOURCE_URL` задан → через `/tg-proxy`, иначе прямо в TG API
+
+**`src/app/api/twa/settings/route.ts`** — GET/POST для `GlobalSettings`:
+- GET: возвращает `{ purchaseRate, usdToRub, autoBuyEnabled, autoBuyRate }`
+- POST: частичный update любого поля с валидацией диапазонов
+
+**`src/app/twa/_components/screens/WbScreen.tsx`** — Segment control (Аналитика | Склад | Коды), монтирует существующие экраны.
+
+**`src/app/twa/_components/screens/SettingsScreen.tsx`** — Apple-style settings:
+- Секция "Курсы": поля purchaseRate (₽/R$) и usdToRub с кнопкой Сохранить
+- Секция "Автобай": toggle вкл/выкл + целевой курс ($/1K R$) с кнопкой Сохранить
+- Валидация и error state
+
+#### Изменённые файлы
+
+**`src/app/api/twa/orders/route.ts`** — добавлен POST handler:
+- `action: "take-work"` → PENDING → IN_PROGRESS
+- `action: "complete"` → PENDING/IN_PROGRESS → COMPLETED + `notifyOrderCompleted()`
+- `action: "reject"` → PENDING/IN_PROGRESS/AWAITING_GAMEPASS → REJECTED + `notifyOrderRejected()`
+- Notification вызывается через `catch(() => {})` — ошибка уведомления не блокирует ответ
+
+**`src/app/twa/_components/screens/OrdersScreen.tsx`** — добавлен `ActionBar` компонент:
+- Для PENDING: кнопки "🟠 В работу" и "❌ Отклонить"
+- Для IN_PROGRESS: кнопки "✅ Готово" и "❌ Отклонить"
+- Для AWAITING_GAMEPASS: только "❌ Отклонить"
+- При "Отклонить": inline режим с textarea для причины
+- После действия: карточка сворачивается и список обновляется
+
+**`src/app/twa/_components/TwaApp.tsx`**:
+- Новый Screen type и routing
+- Badge-счётчик обновляется автоматически каждые 30 секунд (был только при mount)
+
+---
+
+### Что нужно задеплоить
+
+1. **Next.js сайт (RF)** — коммит `fd37425` включает изменения TWA + bossrobux fix
+2. **VK бот (RF)** — коммит `fd37425` включает fix handleReviewScreenshot для DIR- заказов
+   - Задеплоить через: `scp bots/vk/handlers.ts root@89.110.94.117:/tmp/ && ssh root@89.110.94.117 "docker cp /tmp/handlers.ts d3d6aa622322:/app/bots/vk/handlers.ts && docker restart d3d6aa622322"`
+
+### Текущее состояние (2026-05-26)
+
+| Сервис | Сервер | Commit | Статус |
+|--------|--------|--------|--------|
+| Next.js сайт | RF `89.110.94.117` | ожидает деплоя `fd37425` | ✅ running (старая версия) |
+| VK бот | RF `89.110.94.117` | ожидает деплоя `fd37425` | ✅ running (без fix DIR-) |
+| TG бот | SG `5.223.95.11` | `7011dcb` | ✅ running |
