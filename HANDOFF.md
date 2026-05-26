@@ -619,21 +619,10 @@ c33aa06 fix(bots): pass_private ctxKey for TG, add DB fallback for VK support ha
 
 | Сервис | Сервер | Контейнер | Статус |
 |--------|--------|-----------|--------|
-| Next.js сайт | RF `89.110.94.117` | `997210a91646` | ⚠️ RF unreachable (сессия 2026-05-26 ночь) |
-| Guide микросервис | RF `89.110.94.117` | `4781007f1526` | ⚠️ RF unreachable |
-| VK бот | RF `89.110.94.117` | `ae6c6e9f9e83` | ⚠️ RF unreachable |
+| Next.js сайт | RF `89.110.94.117` | `bd3390a55967` | ✅ running:healthy (commit `1bcecec`) |
+| Guide микросервис | RF `89.110.94.117` | `4781007f1526` | ✅ running:healthy |
+| VK бот | RF `89.110.94.117` | `d3d6aa622322` | ✅ running |
 | TG бот + Bridge | SG `5.223.95.11` | `0b4a028427a0` | ✅ running |
-
-**Pending deploy — Next.js сайт (commit `264d0d2`):**
-```bash
-# После восстановления RF — зайти на сервер, перейти в директорию приложения,
-# git pull, npm run build, перезапустить контейнер.
-# Изменения: TWA экран Boss Robux (новая вкладка "Выкуп" в дашборде).
-ssh rf
-cd /data/coolify/applications/z10ws7m1q45h281zwedmhei4
-git pull && npm ci && npm run build
-docker restart $(docker ps -qf "name=z10ws7m1q45h281z")
-```
 
 ---
 
@@ -659,9 +648,9 @@ docker restart $(docker ps -qf "name=z10ws7m1q45h281z")
 
 **Также закоммичены:** hint-тексты по Regional Pricing в `bots/tg/handlers.ts` и `bots/vk/handlers.ts` (ранее задеплоены через docker cp, теперь в source).
 
-### Деплой (ожидает RF сервер)
+### Деплой
 
-RF сервер (`89.110.94.117`) недоступен — SSH timeout. Деплой Next.js сайта отложен. Команды выше (секция "Текущий деплой").
+Coolify автоматически задеплоил commit `1bcecec` (все изменения включены) когда RF сервер вернулся онлайн после оплаты. Сайт работает, новая вкладка "Выкуп" доступна в TWA дашборде.
 
 ---
 
