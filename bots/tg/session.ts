@@ -105,3 +105,9 @@ export const pendingUeSettingInput = new Map<number, { field: "kursRb" | "kursUs
 
 /** Admin is entering the auto-buy target rate. */
 export const pendingAutoBuyRateInput = new Map<number, true>();
+
+/** Admin is typing a gamepass name to search on bossrobux. */
+export const pendingBossrobuxSearch = new Map<number, true>();
+
+/** Cached search results per admin (cleared after successful purchase). */
+export const bossrobuxSearchCache = new Map<number, import("../shared/bossrobux").BossrobuxGamepass[]>();

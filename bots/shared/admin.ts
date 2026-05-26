@@ -170,6 +170,11 @@ export const CB = {
   autoBuySetRate:  "ab_set_rate",
   autoBuyRefresh:  "ab_refresh",
 
+  // ── Boss Robux (inside AutoBuy hub) ────────────────────────────────────────
+  bossrobuxSearch:  "br_search",
+  bossrobuxBuy:     (i: number) => `br_buy:${i}`,    // ≤ 10 b
+  bossrobuxConfirm: (i: number) => `br_ok:${i}`,     // ≤ 9 b
+
   // ── Legacy (kept for backwards compatibility) ──────────────────────────────
   adminStats: "admin_stats",
   adminQueue: "admin_queue",

@@ -20,6 +20,8 @@ import { showRatesHub, refreshRates, showRatesAnalytics } from "./hub-rates";
 import {
   showAutoBuyHub, toggleAutoBuy, enterAutoBuyRateInput,
   handleAutoBuyRateInput, refreshAutoBuy,
+  enterBossrobuxSearch, handleBossrobuxSearchInput,
+  handleBossrobuxBuy, handleBossrobuxConfirm,
 } from "./hub-autobuy";
 import {
   showWildberriesHub, refreshWb, showAddCodesDenom, enterCodesInput,
@@ -42,7 +44,7 @@ import {
   pendingAdminSearch, pendingCodesInput, pendingRateInput, pendingPriceInput,
   pendingReviewAnswer, pendingCostInput, pendingLogisticsInput,
   pendingAdInput, pendingDenomInput, pendingUeSettingInput,
-  pendingAutoBuyRateInput,
+  pendingAutoBuyRateInput, pendingBossrobuxSearch,
 } from "../session";
 
 // Re-export for external use
@@ -166,6 +168,12 @@ export function registerAdminHubs(bot: Telegraf): void {
       if (handled) return;
     }
 
+    // 12. Boss Robux gamepass search input
+    if (pendingBossrobuxSearch.has(ctx.from.id)) {
+      const handled = await handleBossrobuxSearchInput(ctx, text);
+      if (handled) return;
+    }
+
     return next();
   });
 }
@@ -279,6 +287,22 @@ export async function routeAdminCallback(
   }
   if (data === CB.autoBuyRefresh) {
     await refreshAutoBuy(ctx);
+    return true;
+  }
+
+  // ── Boss Robux (inside AutoBuy hub) ───────────────────────────────────────
+  if (data === CB.bossrobuxSearch) {
+    await enterBossrobuxSearch(ctx);
+    return true;
+  }
+  if (data.startsWith("br_buy:")) {
+    const index = parseInt(data.split(":")[1]);
+    await handleBossrobuxBuy(ctx, index);
+    return true;
+  }
+  if (data.startsWith("br_ok:")) {
+    const index = parseInt(data.split(":")[1]);
+    await handleBossrobuxConfirm(ctx, index);
     return true;
   }
 
