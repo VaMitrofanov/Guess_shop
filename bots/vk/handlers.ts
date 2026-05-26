@@ -11,7 +11,7 @@
 
 import type { MessageContext } from "vk-io";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
-import { sendAdminOrderCard, sendAdminReviewCard, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminSupportAlert, ADMIN_IDS } from "../shared/admin";
+import { sendAdminOrderCard, sendAdminReviewCard, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminSupportAlert, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS } from "../shared/admin";
 import { vkGetName, tgSend, vkSend } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
@@ -19,6 +19,35 @@ import { getGamepassDetails } from "../shared/roblox";
 
 // VK API instance injected from bot.ts to avoid circular import.
 let _vkApi: any = null;
+
+/** Format roubles with thousands separator, e.g. 3500 → "3 500 ₽". */
+function fmtRub(n: number): string {
+  if (n >= 1000) return `${Math.floor(n / 1000)} ${String(n % 1000).padStart(3, "0")} ₽`;
+  return `${n} ₽`;
+}
+
+/** Build VK inline keyboard with predefined Robux packs and their ruble prices. */
+function buildVkPackKb() {
+  const kb = Keyboard.builder();
+  const rows: (readonly number[])[] = [
+    DIRECT_PACKS.slice(0, 3) as unknown as readonly number[],  // 100, 200, 300
+    DIRECT_PACKS.slice(3, 6) as unknown as readonly number[],  // 500, 800, 1000
+    DIRECT_PACKS.slice(6, 8) as unknown as readonly number[],  // 2000, 5000
+    DIRECT_PACKS.slice(8)    as unknown as readonly number[],  // 10000
+  ];
+  for (const row of rows) {
+    for (const amt of row) {
+      kb.textButton({
+        label: `${amt} R$ — ${fmtRub(Math.round(amt * DIRECT_RATE))}`,
+        payload: { command: "direct_pack", amount: amt },
+        color: "primary",
+      });
+    }
+    kb.row();
+  }
+  kb.textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" });
+  return kb.inline();
+}
 export function initVkHandlers(vkInstance: any): void {
   _vkApi = vkInstance.api;
 }
@@ -406,6 +435,13 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // ── Direct order payload commands ─────────────────────────────────────────
   if (msgPayload?.command === "start_direct") {
     await handleStartDirect(ctx, vkUserId);
+    return;
+  }
+  if (msgPayload?.command === "direct_pack") {
+    const packAmt = typeof msgPayload.amount === "number" ? msgPayload.amount : NaN;
+    if (!isNaN(packAmt) && (DIRECT_PACKS as readonly number[]).includes(packAmt)) {
+      await handleDirectPackSelect(ctx, vkUserId, packAmt);
+    }
     return;
   }
   if (msgPayload?.command === "direct_confirm") {
@@ -938,12 +974,9 @@ async function handleStartDirect(ctx: MessageContext, vkUserId: number): Promise
 
   await ctx.reply({
     message:
-      `💎 Прямой заказ Robux\n\n` +
-      `Введи количество Robux, которое хочешь купить (от 100 до 10 000):` +
+      `💎 Прямой заказ Robux\n\nВыбери количество (курс 0.7 ₽/R$):` +
       bonusNote,
-    keyboard: Keyboard.builder()
-      .textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" })
-      .inline(),
+    keyboard: buildVkPackKb(),
   });
 }
 
@@ -958,16 +991,20 @@ async function handleDirectAmountInput(ctx: MessageContext, vkUserId: number, te
     });
     return;
   }
+  await handleDirectPackSelect(ctx, vkUserId, num);
+}
 
+async function handleDirectPackSelect(ctx: MessageContext, vkUserId: number, amount: number): Promise<void> {
   const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { balance: true } });
   const bonus = user?.balance ?? 0;
-  const totalAmount = num + bonus;
+  const totalAmount = amount + bonus;
   const passPrice = Math.ceil(totalAmount / 0.7);
+  const rublePrice = Math.round(amount * DIRECT_RATE);
 
-  setState(vkUserId, { type: "AWAITING_DIRECT_CONFIRM", amount: num, totalAmount, bonus });
+  setState(vkUserId, { type: "AWAITING_DIRECT_CONFIRM", amount, totalAmount, bonus });
 
   const bonusSection = bonus > 0
-    ? `💎 Запрос:          ${num} R$\n` +
+    ? `💎 Запрос:          ${amount} R$\n` +
       `🎁 Твой бонус:     +${bonus} R$\n` +
       `─────────────────\n` +
       `📦 Итого получишь:  ${totalAmount} R$\n`
@@ -977,6 +1014,7 @@ async function handleDirectAmountInput(ctx: MessageContext, vkUserId: number, te
     message:
       `✅ Подтверди заказ\n\n` +
       bonusSection +
+      `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
       `📌 Цена геймпасса:  ${passPrice} R$`,
     keyboard: Keyboard.builder()
       .textButton({ label: "✅ Подтвердить", payload: { command: "direct_confirm" }, color: "positive" })

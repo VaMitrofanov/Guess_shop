@@ -133,14 +133,16 @@ export default function VKAuthButton({
 
                 const isLoginMode = mode === "login";
 
-                const urlParams    = new URLSearchParams(window.location.search);
-                const queryWbCode  = urlParams.get("code") || urlParams.get("wb_code") || "";
                 const cookieMatch  = document.cookie.match(/wb_code=([^;]+)/);
                 const cookieWbCode = cookieMatch ? cookieMatch[1].trim() : "";
 
+                // Trust only the React prop (passed from parent) or the cookie
+                // (written server-side when user reserved the code).
+                // Ignoring ?code= URL param prevents an attacker from linking
+                // a victim's account to an arbitrary code via a crafted URL.
                 const finalWbCode = isLoginMode
                   ? null
-                  : (wbCodeProp || queryWbCode || cookieWbCode || null);
+                  : (wbCodeProp || cookieWbCode || null);
                 const resolvedWbCode = finalWbCode ? finalWbCode.toUpperCase() : "";
 
                 const { signIn } = await import("next-auth/react");

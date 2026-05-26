@@ -2069,7 +2069,7 @@ function WBGate() {
     const denomination: number = data.denomination ?? 0;
     saveWBSession(denomination, code);
     // Cookie is needed by VKAuthButton (order mode) for ref code resolution.
-    document.cookie = `wb_code=${code}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+    document.cookie = `wb_code=${code}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax; Secure`;
     return denomination;
   };
 

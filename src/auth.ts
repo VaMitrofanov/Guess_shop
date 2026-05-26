@@ -140,7 +140,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               wbCodeRecord = await (prisma as any).wbCode.findUnique({ where: { code: wbCode } });
               if (wbCodeRecord) {
                 await (prisma as any).wbCode.update({
-                  where: { code: wbCode },
+                  where: { code: wbCode, status: { not: "CLAIMED" } },
                   data: { userId: user.id, status: "CLAIMED", isUsed: false },
                 });
                 console.log(`[auth] Linked user ${user.id} to WbCode ${wbCode} via credentials (guideMode=${isGuideMode})`);

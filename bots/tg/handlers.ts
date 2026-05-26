@@ -10,7 +10,7 @@ import { Telegraf, Markup } from "telegraf";
 import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, stripHtml, tgSend } from "../shared/notify";
-import { sendAdminOrderCard, sendAdminReviewCard, sendAdminSupportAlert, sendAdminDirectOrderCard, sendAdminPaymentCard, CB, ADMIN_IDS } from "../shared/admin";
+import { sendAdminOrderCard, sendAdminReviewCard, sendAdminSupportAlert, sendAdminDirectOrderCard, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectAmount, pendingDirectOrder, pendingPaymentDetails, pendingPaymentScreenshot, type LinkFailState, type DirectOrderState } from "./session";
 import { getGamepassDetails } from "../shared/roblox";
 import { buildAdminKeyboard, updateMainMenu, routeAdminCallback } from "./admin";
@@ -19,6 +19,32 @@ import { renderExtendedCard } from "./admin/hub-orders";
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const SUPPORT_URL = "https://t.me/RobloxBank_PA";
+
+/** Format a ruble amount with thousands separator, e.g. 3500 → "3 500 ₽". */
+function fmtRub(n: number): string {
+  if (n >= 1000) return `${Math.floor(n / 1000)} ${String(n % 1000).padStart(3, "0")} ₽`;
+  return `${n} ₽`;
+}
+
+/** Build an inline keyboard with predefined Robux packs and their ruble prices. */
+function buildPackKb() {
+  const rows = [
+    DIRECT_PACKS.slice(0, 3),  // 100, 200, 300
+    DIRECT_PACKS.slice(3, 6),  // 500, 800, 1000
+    DIRECT_PACKS.slice(6, 8),  // 2000, 5000
+    DIRECT_PACKS.slice(8),     // 10000
+  ] as number[][];
+  const buttons = rows.map(row =>
+    row.map(amt =>
+      Markup.button.callback(
+        `${amt} R$ — ${fmtRub(Math.round(amt * DIRECT_RATE))}`,
+        CB.directPack(amt)
+      )
+    )
+  );
+  buttons.push([Markup.button.callback("❌ Отмена", CB.cancelDirect)]);
+  return Markup.inlineKeyboard(buttons);
+}
 
 /** Generate a unique synthetic WB code for direct orders (never matches a real 7-char code). */
 function generateDirectCode(): string {
@@ -651,6 +677,7 @@ export function registerText(bot: Telegraf): void {
       const bonus = dirUser?.balance ?? 0;
       const totalAmount = num + bonus;
       const passPrice = Math.ceil(totalAmount / 0.7);
+      const rublePrice = Math.round(num * DIRECT_RATE);
       pendingDirectOrder.set(ctx.from.id, { amount: num, passPrice, totalAmount });
       const bonusSection = bonus > 0
         ? `💎 Запрос:          ${num} R$\n` +
@@ -661,6 +688,7 @@ export function registerText(bot: Telegraf): void {
       await ctx.reply(
         `✅ <b>Подтверди заказ</b>\n\n` +
         bonusSection +
+        `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
         `📌 Цена геймпасса:  ${passPrice} R$`,
         {
           parse_mode: "HTML",
@@ -1782,8 +1810,11 @@ export function registerCallbacks(bot: Telegraf): void {
       };
       const reason = reasonMap[key] ?? key;
       pendingRejectionReason.delete(ctx.from.id);
-      await performAdminReject(bot, ctx, orderId, reason);
-      await ctx.answerCbQuery("✅ Заказ отклонён");
+      try {
+        await performAdminReject(bot, ctx, orderId, reason);
+      } finally {
+        await ctx.answerCbQuery("✅ Заказ отклонён");
+      }
       return;
     }
 
@@ -1810,7 +1841,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
     // ── 💎 DIRECT ORDER callbacks ─────────────────────────────────────────────
 
-    // start_direct: user opens direct order flow
+    // start_direct: user opens direct order flow — show predefined packs
     if (data === CB.startDirect) {
       const dirUser = await (db as any).user.findUnique({
         where: { tgId },
@@ -1818,15 +1849,69 @@ export function registerCallbacks(bot: Telegraf): void {
       });
       const bonus = dirUser?.balance ?? 0;
       const bonusNote = bonus > 0
-        ? `\n\n🎁 У тебя есть бонус <b>${bonus} R$</b> — он автоматически добавится к заказу.`
+        ? `\n\n🎁 У тебя есть бонус <b>${bonus} R$</b> — автоматически добавится к заказу.`
         : "";
       pendingDirectAmount.set(ctx.from.id, true);
       await ctx.reply(
-        `💎 <b>Прямой заказ Robux</b>\n\n` +
-        `Введи количество Robux, которое хочешь купить (от 100 до 10 000):` +
-        bonusNote,
-        { parse_mode: "HTML" }
+        `💎 <b>Прямой заказ Robux</b>\n\nВыбери количество (курс <b>0.7 ₽/R$</b>):` + bonusNote,
+        { parse_mode: "HTML", ...buildPackKb() }
       );
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    // dp: user selects a predefined pack
+    if (data.startsWith("dp:")) {
+      const amt = parseInt(data.slice(3), 10);
+      if (isNaN(amt) || !(DIRECT_PACKS as readonly number[]).includes(amt)) {
+        await ctx.answerCbQuery("Неверный пак");
+        return;
+      }
+      pendingDirectAmount.delete(ctx.from.id);
+      const dirUser = await (db as any).user.findUnique({
+        where: { tgId },
+        select: { balance: true },
+      });
+      const bonus = dirUser?.balance ?? 0;
+      const totalAmount = amt + bonus;
+      const passPrice = Math.ceil(totalAmount / 0.7);
+      const rublePrice = Math.round(amt * DIRECT_RATE);
+      pendingDirectOrder.set(ctx.from.id, { amount: amt, passPrice, totalAmount });
+      const bonusSection = bonus > 0
+        ? `💎 Запрос:          ${amt} R$\n` +
+          `🎁 Твой бонус:     +${bonus} R$\n` +
+          `━━━━━━━━━━━━━━━━\n` +
+          `📦 Итого получишь:  ${totalAmount} R$\n`
+        : `📦 Получишь:       ${totalAmount} R$\n`;
+      try {
+        await ctx.editMessageText(
+          `✅ <b>Подтверди заказ</b>\n\n` +
+          bonusSection +
+          `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
+          `📌 Цена геймпасса:  ${passPrice} R$`,
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[
+              Markup.button.callback("✅ Подтвердить", CB.confirmDirect),
+              Markup.button.callback("❌ Отмена", CB.cancelDirect),
+            ]]),
+          }
+        );
+      } catch {
+        await ctx.reply(
+          `✅ <b>Подтверди заказ</b>\n\n` +
+          bonusSection +
+          `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
+          `📌 Цена геймпасса:  ${passPrice} R$`,
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[
+              Markup.button.callback("✅ Подтвердить", CB.confirmDirect),
+              Markup.button.callback("❌ Отмена", CB.cancelDirect),
+            ]]),
+          }
+        );
+      }
       await ctx.answerCbQuery();
       return;
     }

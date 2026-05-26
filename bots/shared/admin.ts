@@ -9,6 +9,14 @@
 
 import { tgSend, tgSendPhoto } from "./notify";
 
+// ── Direct order pricing ───────────────────────────────────────────────────────
+
+/** Sell rate: how many roubles the customer pays per 1 R$ they receive. */
+export const DIRECT_RATE = 0.7;
+
+/** Predefined Robux pack sizes available for direct orders. */
+export const DIRECT_PACKS = [100, 200, 300, 500, 800, 1000, 2000, 5000, 10000] as const;
+
 // ── Support alert ─────────────────────────────────────────────────────────────
 
 const SUPPORT_CONTEXT_LABELS: Record<string, string> = {
@@ -184,6 +192,7 @@ export const CB = {
   startDirect:         "start_direct",
   confirmDirect:       "confirm_direct",
   cancelDirect:        "cancel_direct",
+  directPack:          (amount: number) => `dp:${amount}`,                                // 8 b max
   sendPaymentDetails:  (orderId: string) => `spd:${orderId}`,                             // 29 b
   cancelDirectOrder:   (orderId: string) => `cdo:${orderId}`,                             // 29 b
   paymentOk:           (orderId: string, userId: string) => `pay_ok:${orderId}:${userId}`, // 59 b
@@ -316,6 +325,9 @@ export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload):
     prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ (${prev} заказ${prev === 1 ? "" : prev < 5 ? "а" : "ов"})</b>\n` :
     `🆕 <b>НОВЫЙ КЛИЕНТ</b>\n`;
 
+  const paidRobux = payload.amount - payload.bonusApplied;
+  const rublePrice = Math.round(paidRobux * DIRECT_RATE);
+
   const text =
     `🔷 <b>ПРЯМОЙ ЗАКАЗ #${shortId}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
@@ -323,7 +335,8 @@ export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload):
     `📅 Время: <b>${dateStr}</b>\n` +
     `👤 Юзер: ${payload.userDisplay}\n` +
     bonusLine +
-    `💎 Сумма: <b>${payload.amount} R$</b> (Геймпасс: ${Math.ceil(payload.amount / 0.7)} R$)\n` +
+    `💰 К оплате: <b>${rublePrice} ₽</b>\n` +
+    `💎 Выдать: <b>${payload.amount} R$</b> (Геймпасс: ${Math.ceil(payload.amount / 0.7)} R$)\n` +
     `📊 Статус: ⏳ Ожидаем реквизиты`;
 
   const reply_markup = {
