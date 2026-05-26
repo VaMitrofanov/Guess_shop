@@ -1171,13 +1171,18 @@ async function handleReviewScreenshot(
       where:   { userId: user.id, status: "COMPLETED" },
       orderBy: { updatedAt: "desc" },
     });
-    const linked = order
+
+    // Direct orders (wbCode starts with "DIR-") have no WbCode record in DB,
+    // so skip the reviewBonusClaimed check for them.
+    const isDirectOrder = (order?.wbCode as string | undefined)?.startsWith("DIR-");
+    const linked = (order && !isDirectOrder)
       ? await (db as any).wbCode.findFirst({
           where: { userId: user.id, reviewBonusClaimed: false },
         })
-      : null;
+      : order ?? null; // direct orders: truthy if order exists
+
     if (!order || !linked) {
-      console.log(`[VK] handleReviewScreenshot: no eligible order/code for userId=${user.id} vkId=${vkUserId} hasOrder=${!!order} hasLinked=${!!linked}`);
+      console.log(`[VK] handleReviewScreenshot: no eligible order/code for userId=${user.id} vkId=${vkUserId} hasOrder=${!!order} isDirectOrder=${!!isDirectOrder} hasLinked=${!!linked}`);
       await ctx.reply(
         "📸 У тебя сейчас нет выполненных заявок, ожидающих отзыва.\n\n" +
         "Если у тебя возникла проблема или вопрос — напиши в поддержку: https://t.me/RobloxBank_PA"

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
+import { notifyOrderCompleted, notifyOrderRejected } from "@/lib/twa-notify";
 
 const VALID_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
@@ -39,4 +40,55 @@ export async function GET(req: NextRequest) {
   ]);
 
   return NextResponse.json({ orders, total, counts, page, pages: Math.ceil(total / limit) });
+}
+
+export async function POST(req: NextRequest) {
+  if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const body = await req.json().catch(() => null);
+  if (!body?.action || !body?.orderId)
+    return NextResponse.json({ error: "action and orderId required" }, { status: 400 });
+
+  const { action, orderId, reason } = body;
+
+  const order = await (prisma as any).wbOrder.findUnique({
+    where: { id: orderId },
+    include: { user: { select: { id: true, tgId: true, vkId: true } } },
+  });
+  if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
+
+  if (action === "take-work") {
+    if (order.status !== "PENDING")
+      return NextResponse.json({ error: "Order must be PENDING" }, { status: 400 });
+    await (prisma as any).wbOrder.update({
+      where: { id: orderId },
+      data:  { status: "IN_PROGRESS" },
+    });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === "complete") {
+    if (!["PENDING", "IN_PROGRESS"].includes(order.status))
+      return NextResponse.json({ error: "Order must be PENDING or IN_PROGRESS" }, { status: 400 });
+    await (prisma as any).wbOrder.update({
+      where: { id: orderId },
+      data:  { status: "COMPLETED" },
+    });
+    notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder).catch(() => {});
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === "reject") {
+    if (!["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS"].includes(order.status))
+      return NextResponse.json({ error: "Cannot reject this order" }, { status: 400 });
+    const rejectionReason = String(reason ?? "не указана");
+    await (prisma as any).wbOrder.update({
+      where: { id: orderId },
+      data:  { status: "REJECTED", rejectionReason },
+    });
+    notifyOrderRejected(order.user, orderId, rejectionReason, order.amount).catch(() => {});
+    return NextResponse.json({ ok: true });
+  }
+
+  return NextResponse.json({ error: "Invalid action" }, { status: 400 });
 }

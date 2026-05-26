@@ -80,7 +80,98 @@ function CopyBtn({ text }: { text: string }) {
   );
 }
 
-function OrderCard({ order, onGoToBossrobux }: { order: Order; onGoToBossrobux?: () => void }) {
+function ActionBar({ order, token, onDone }: { order: Order; token: string; onDone: () => void }) {
+  const [loading, setLoading] = useState(false);
+  const [rejectMode, setRejectMode] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [err, setErr] = useState("");
+
+  async function doAction(action: string, extra?: Record<string, unknown>) {
+    setLoading(true); setErr("");
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ action, orderId: order.id, ...extra }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setErr(d.error ?? "Ошибка"); return; }
+      onDone();
+    } catch { setErr("Ошибка сети"); }
+    finally  { setLoading(false); }
+  }
+
+  if (rejectMode) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 4 }}>
+        <textarea
+          placeholder="Причина отклонения…"
+          value={rejectReason}
+          onChange={e => setRejectReason(e.target.value)}
+          rows={2}
+          style={{
+            background: C.elevated, border: "none", borderRadius: 10, color: "#fff",
+            fontSize: 14, padding: "8px 12px", resize: "none", outline: "none", width: "100%",
+            boxSizing: "border-box",
+          }}
+        />
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={() => setRejectMode(false)}
+            style={{ flex: 1, padding: "10px", borderRadius: 10, border: "none", background: C.elevated, color: C.sec, fontSize: 13, cursor: "pointer" }}
+          >
+            Отмена
+          </button>
+          <button
+            onClick={() => doAction("reject", { reason: rejectReason || "не указана" })}
+            disabled={loading}
+            style={{ flex: 2, padding: "10px", borderRadius: 10, border: "none", background: C.red, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.7 : 1 }}
+          >
+            {loading ? "…" : "❌ Отклонить"}
+          </button>
+        </div>
+        {err && <div style={{ color: C.red, fontSize: 12 }}>{err}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 4 }}>
+      <div style={{ display: "flex", gap: 8 }}>
+        {order.status === "PENDING" && (
+          <button
+            onClick={() => doAction("take-work")}
+            disabled={loading}
+            style={{ flex: 1, padding: "10px", borderRadius: 10, border: "none", background: C.orange, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.7 : 1 }}
+          >
+            {loading ? "…" : "🟠 В работу"}
+          </button>
+        )}
+        {(order.status === "PENDING" || order.status === "IN_PROGRESS") && (
+          <button
+            onClick={() => doAction("complete")}
+            disabled={loading}
+            style={{ flex: 1, padding: "10px", borderRadius: 10, border: "none", background: C.green, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.7 : 1 }}
+          >
+            {loading ? "…" : "✅ Готово"}
+          </button>
+        )}
+        {["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS"].includes(order.status) && (
+          <button
+            onClick={() => setRejectMode(true)}
+            disabled={loading}
+            style={{ flex: 1, padding: "10px", borderRadius: 10, border: "none", background: C.red + "22", color: C.red, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+          >
+            ❌ Отклонить
+          </button>
+        )}
+      </div>
+      {err && <div style={{ color: C.red, fontSize: 12 }}>{err}</div>}
+    </div>
+  );
+}
+
+function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order; token: string; onGoToBossrobux?: () => void; onRefresh: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const meta = STATUS_META[order.status];
   const userHandle = order.user.tgId
@@ -216,6 +307,9 @@ function OrderCard({ order, onGoToBossrobux }: { order: Order; onGoToBossrobux?:
             <span>Создан: {new Date(order.createdAt).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
             <span>Обновлён: {new Date(order.updatedAt).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
           </div>
+
+          {/* Action buttons */}
+          <ActionBar order={order} token={token} onDone={() => { setExpanded(false); onRefresh(); }} />
         </div>
       )}
 
@@ -236,7 +330,7 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
-export default function OrdersScreen({ token, onGoToBossrobux }: { token: string; onGoToBossrobux?: () => void }) {
+export default function OrdersScreen({ token, onGoToBossrobux }: { token: string; onGoToBossrobux?: () => void; }) {
   const [filter,   setFilter]   = useState<FilterStatus>("ALL");
   const [data,     setData]     = useState<OrdersData | null>(null);
   const [loading,  setLoading]  = useState(true);
@@ -343,7 +437,15 @@ export default function OrdersScreen({ token, onGoToBossrobux }: { token: string
               )}
             </div>
 
-            {allOrders.map(order => <OrderCard key={order.id} order={order} onGoToBossrobux={onGoToBossrobux} />)}
+            {allOrders.map(order => (
+              <OrderCard
+                key={order.id}
+                order={order}
+                token={token}
+                onGoToBossrobux={onGoToBossrobux}
+                onRefresh={() => fetchOrders(filter, 1, false)}
+              />
+            ))}
 
             {data && page < data.pages && (
               <button

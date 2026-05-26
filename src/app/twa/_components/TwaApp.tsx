@@ -2,12 +2,10 @@
 import { useState, useEffect } from "react";
 import BottomNav from "./BottomNav";
 import Dashboard from "./screens/Dashboard";
-import AnalyticsScreen from "./screens/AnalyticsScreen";
-import StocksScreen from "./screens/StocksScreen";
-import CodesScreen from "./screens/CodesScreen";
-import CalcScreen from "./screens/CalcScreen";
+import WbScreen from "./screens/WbScreen";
 import OrdersScreen from "./screens/OrdersScreen";
 import BossrobuxScreen from "./screens/BossrobuxScreen";
+import SettingsScreen from "./screens/SettingsScreen";
 
 declare global {
   interface Window {
@@ -25,16 +23,14 @@ declare global {
   }
 }
 
-type Screen = "dashboard" | "analytics" | "stocks" | "codes" | "calc" | "orders" | "bossrobux";
+type Screen = "dashboard" | "orders" | "wb" | "bossrobux" | "settings";
 
 const SCREEN_TITLES: Record<Screen, string> = {
   dashboard:  "Главная",
-  analytics:  "Аналитика",
-  stocks:     "Склад",
-  codes:      "Коды",
-  calc:       "Калькулятор",
   orders:     "Заказы",
+  wb:         "Wildberries",
   bossrobux:  "Boss Robux",
+  settings:   "Настройки",
 };
 
 export default function TwaApp() {
@@ -123,14 +119,19 @@ export default function TwaApp() {
   // Fetch urgent orders count for badge after auth
   useEffect(() => {
     if (auth !== "ok" || !token) return;
-    fetch("/api/twa/orders?status=PENDING&limit=1", { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (!d) return;
-        const urgent = (d.counts?.PENDING ?? 0) + (d.counts?.IN_PROGRESS ?? 0);
-        setOrdersBadge(urgent);
-      })
-      .catch(() => {});
+    const refresh = () => {
+      fetch("/api/twa/orders?status=PENDING&limit=1", { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          if (!d) return;
+          const urgent = (d.counts?.PENDING ?? 0) + (d.counts?.IN_PROGRESS ?? 0);
+          setOrdersBadge(urgent);
+        })
+        .catch(() => {});
+    };
+    refresh();
+    const iv = setInterval(refresh, 30_000);
+    return () => clearInterval(iv);
   }, [auth, token]);
 
   if (auth === "loading") {
@@ -176,13 +177,11 @@ export default function TwaApp() {
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
-        {screen === "dashboard" && <Dashboard       {...sp} />}
-        {screen === "analytics" && <AnalyticsScreen  {...sp} />}
-        {screen === "stocks"    && <StocksScreen     {...sp} />}
-        {screen === "codes"     && <CodesScreen      {...sp} />}
-        {screen === "calc"      && <CalcScreen       {...sp} />}
-        {screen === "orders"    && <OrdersScreen      {...sp} onGoToBossrobux={() => setScreen("bossrobux")} />}
-        {screen === "bossrobux" && <BossrobuxScreen   {...sp} />}
+        {screen === "dashboard"  && <Dashboard      {...sp} />}
+        {screen === "orders"     && <OrdersScreen   {...sp} onGoToBossrobux={() => setScreen("bossrobux")} />}
+        {screen === "wb"         && <WbScreen       {...sp} />}
+        {screen === "bossrobux"  && <BossrobuxScreen {...sp} />}
+        {screen === "settings"   && <SettingsScreen  {...sp} />}
       </div>
 
       <BottomNav active={screen} onChange={setScreen} ordersBadge={ordersBadge} />
