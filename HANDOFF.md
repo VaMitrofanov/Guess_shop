@@ -619,7 +619,7 @@ c33aa06 fix(bots): pass_private ctxKey for TG, add DB fallback for VK support ha
 
 | Сервис | Сервер | Контейнер | Статус |
 |--------|--------|-----------|--------|
-| Next.js сайт | RF `89.110.94.117` | `fd8fb090b442` | ✅ running:healthy (commit `1bcecec`) |
+| Next.js сайт | RF `89.110.94.117` | `6f7087244565` | ✅ running:healthy (commit `75bc6d4`) |
 | Guide микросервис | RF `89.110.94.117` | `4781007f1526` | ✅ running:healthy |
 | VK бот | RF `89.110.94.117` | `d3d6aa622322` | ✅ running |
 | TG бот + Bridge | SG `5.223.95.11` | `233c47374802` | ✅ running |
