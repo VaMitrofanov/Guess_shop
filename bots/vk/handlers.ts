@@ -737,7 +737,8 @@ async function handleGamepassLink(
           `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
           `Установлено: ${gamepassInfo.price} R$\n` +
           `Ожидается:   ${expectedPrice} R$\n\n` +
-          `Измени цену геймпасса в настройках Roblox и пришли ссылку снова.`,
+          `Измени цену геймпасса в настройках Roblox и пришли ссылку снова.\n\n` +
+          `💡 Если у тебя включён Regional Pricing — обязательно выключи его (Passes → Edit → Pricing → убрать галочку Enable Regional Pricing), иначе цена будет неверной.`,
         keyboard: vkSupportKb("pass_price"),
       });
       return;

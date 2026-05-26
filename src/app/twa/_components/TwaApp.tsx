@@ -7,6 +7,7 @@ import StocksScreen from "./screens/StocksScreen";
 import CodesScreen from "./screens/CodesScreen";
 import CalcScreen from "./screens/CalcScreen";
 import OrdersScreen from "./screens/OrdersScreen";
+import BossrobuxScreen from "./screens/BossrobuxScreen";
 
 declare global {
   interface Window {
@@ -24,15 +25,16 @@ declare global {
   }
 }
 
-type Screen = "dashboard" | "analytics" | "stocks" | "codes" | "calc" | "orders";
+type Screen = "dashboard" | "analytics" | "stocks" | "codes" | "calc" | "orders" | "bossrobux";
 
 const SCREEN_TITLES: Record<Screen, string> = {
-  dashboard: "Главная",
-  analytics: "Аналитика",
-  stocks:    "Склад",
-  codes:     "Коды",
-  calc:      "Калькулятор",
-  orders:    "Заказы",
+  dashboard:  "Главная",
+  analytics:  "Аналитика",
+  stocks:     "Склад",
+  codes:      "Коды",
+  calc:       "Калькулятор",
+  orders:     "Заказы",
+  bossrobux:  "Boss Robux",
 };
 
 export default function TwaApp() {
@@ -179,7 +181,8 @@ export default function TwaApp() {
         {screen === "stocks"    && <StocksScreen     {...sp} />}
         {screen === "codes"     && <CodesScreen      {...sp} />}
         {screen === "calc"      && <CalcScreen       {...sp} />}
-        {screen === "orders"    && <OrdersScreen     {...sp} />}
+        {screen === "orders"    && <OrdersScreen      {...sp} />}
+        {screen === "bossrobux" && <BossrobuxScreen   {...sp} />}
       </div>
 
       <BottomNav active={screen} onChange={setScreen} ordersBadge={ordersBadge} />

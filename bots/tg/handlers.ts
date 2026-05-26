@@ -972,7 +972,8 @@ export function registerText(bot: Telegraf): void {
           `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
           `Установлено: <b>${gamepassInfo.price} R$</b>\n` +
           `Ожидается:   <b>${expectedPrice} R$</b>\n\n` +
-          `Зайди в Creator Dashboard → Passes → Edit, измени цену и пришли ссылку снова.`;
+          `Зайди в Creator Dashboard → Passes → Edit, измени цену и пришли ссылку снова.\n\n` +
+          `💡 Если у тебя включён <b>Regional Pricing</b> — обязательно выключи его (Passes → Edit → Pricing → убрать галочку Enable Regional Pricing), иначе цена будет неверной.`;
         await ctx.reply(priceMismatchText, {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([[

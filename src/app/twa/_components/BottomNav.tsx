@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 
-type Screen = "dashboard" | "analytics" | "stocks" | "codes" | "calc" | "orders";
+type Screen = "dashboard" | "analytics" | "stocks" | "codes" | "calc" | "orders" | "bossrobux";
 
 const HomeIcon = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -56,13 +56,22 @@ const OrdersIcon = () => (
   </svg>
 );
 
+const BossrobuxIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="9" cy="21" r="1"/>
+    <circle cx="20" cy="21" r="1"/>
+    <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
+  </svg>
+);
+
 const TABS: { id: Screen; label: string; Icon: () => React.ReactElement }[] = [
-  { id: "dashboard", label: "Главная",   Icon: HomeIcon      },
-  { id: "analytics", label: "Аналитика", Icon: AnalyticsIcon },
-  { id: "stocks",    label: "Склад",     Icon: StocksIcon    },
-  { id: "codes",     label: "Коды",      Icon: CodesIcon     },
-  { id: "calc",      label: "Калькул.",  Icon: CalcIcon      },
-  { id: "orders",    label: "Заказы",    Icon: OrdersIcon    },
+  { id: "dashboard",  label: "Главная",  Icon: HomeIcon        },
+  { id: "analytics",  label: "Аналит.",  Icon: AnalyticsIcon   },
+  { id: "stocks",     label: "Склад",    Icon: StocksIcon      },
+  { id: "codes",      label: "Коды",     Icon: CodesIcon       },
+  { id: "calc",       label: "Калькул.", Icon: CalcIcon        },
+  { id: "orders",     label: "Заказы",   Icon: OrdersIcon      },
+  { id: "bossrobux",  label: "Выкуп",    Icon: BossrobuxIcon   },
 ];
 
 export default function BottomNav({
