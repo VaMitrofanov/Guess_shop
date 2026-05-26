@@ -1749,4 +1749,60 @@ ssh root@89.110.94.117 "docker exec e428b9fe41a4 sh -c 'cd /app && npx tsx grant
 - VK-сообщение отправлено (message_id=471): "+100 R$ зачислено, действуют 30 дней"
 
 **Примечание:** скрипт `scripts/grant-review-bonus.ts` работает только для обычных WB-кодов. Для прямых заказов (DIR-) нужна отдельная версия (аналогичная логика, но без `wbCode.findFirst` — идемпотентность через `reviewBonusGrantedAt`).
-| TG бот | SG `5.223.95.11` | `7011dcb` | ✅ running |
+
+---
+
+## Сессия 2026-05-27 — Pack pricing + P1 security fixes (коммит `dd7febe`)
+
+### Прямые заказы — выбор пака с ₽ ценой
+
+**Проблема:** пользователь не понимал, сколько рублей ему переводить — приходилось договариваться вручную.
+
+**Что добавлено:**
+
+`bots/shared/admin.ts`:
+- `export const DIRECT_RATE = 0.7` — курс продажи: 0.7 ₽ за 1 R$
+- `export const DIRECT_PACKS = [100, 200, 300, 500, 800, 1000, 2000, 5000, 10000]`
+- `CB.directPack(amount)` → `dp:{amount}` (8 байт макс, в лимите TG)
+
+**TG бот (`bots/tg/handlers.ts`):**
+- `start_direct` теперь показывает 9 кнопок-паков вместо "введи число":
+  ```
+  100 R$ — 70 ₽  | 200 R$ — 140 ₽  | 300 R$ — 210 ₽
+  500 R$ — 350 ₽ | 800 R$ — 560 ₽  | 1 000 R$ — 700 ₽
+  2 000 R$ — 1 400 ₽ | 5 000 R$ — 3 500 ₽
+  10 000 R$ — 7 000 ₽
+  ```
+- Новый `dp:` callback: проверяет что amount ∈ DIRECT_PACKS, вычисляет totalAmount + rublePrice, показывает confirmation
+- Confirmation теперь содержит строку `💰 К оплате: X ₽` (считается от base amount без бонуса)
+- Текстовый ввод произвольной суммы оставлен как fallback (pendingDirectAmount сохранён)
+
+**VK бот (`bots/vk/handlers.ts`):**
+- Аналогичный `buildVkPackKb()` — inline VK keyboard с паками по 3 в строке
+- `direct_pack` payload routing: `{ command: "direct_pack", amount: N }`
+- `handleDirectPackSelect()` — общая логика для пака и для ввода числа вручную
+- `handleDirectAmountInput` теперь вызывает `handleDirectPackSelect` (нет дублирования)
+- Confirmation: `💰 К оплате: X ₽`
+
+**Admin-карточка прямого заказа:**
+- Новая строка `💰 К оплате: <b>X ₽</b>` — рублёвая цена для менеджера (amount − bonusApplied × DIRECT_RATE)
+- Строка `💎 Выдать:` заменила `💎 Сумма:` для ясности
+
+---
+
+### Security P1 — закрытые уязвимости
+
+| # | Файл | Проблема | Фикс |
+|---|------|---------|------|
+| P1-TG | `bots/tg/handlers.ts` | `answerCbQuery` не вызывался при throw в `ord_rr` → кнопка зависала | `try/finally` вокруг `performAdminReject` |
+| P1-auth | `src/auth.ts` | `wbCode.update` без `status` guard → повторный VK-логин перезаписывал `userId` уже активированного кода | `where: { status: { not: "CLAIMED" } }` |
+| P1-link | `src/app/api/wb-link/route.ts` | Аналогично: второй redirect угонял активированный код | `where: { status: { not: "CLAIMED" } }` |
+| P1-vk | `src/components/auth/VKAuthButton.tsx` | Доверял `?code=` URL-параметру → атакующий мог подставить чужой код в ссылку | Убран `queryWbCode` из цепочки resolution; остались только prop и cookie |
+| P2-cookie | `src/app/guide/GuideClient.tsx` | `wb_code` cookie без флага `Secure` | Добавлен `; Secure` |
+
+**Оставшийся backlog (P1/P2 некритично):**
+- [ ] **P1-B** (site): `WBManagerBlock` посылает `wb_` вместо `wbg_` prefix
+- [ ] **P1-E** (site): GET `/api/wb-code` без auth / rate limiting
+- [ ] **P2-C** (site): `wb_code` cookie без `HttpOnly` (теперь Secure есть, HttpOnly сложнее — нужен server-side endpoint)
+- [ ] **P3**: `extractPassId` продублирован TG/VK
+- [ ] **P3**: `grant-review-bonus.ts` не работает для DIR- заказов
