@@ -48,6 +48,7 @@ export async function GET(req: NextRequest) {
       robux_total: Number(data.robux_total),
       robux_max:   Number(data.robux_max),
       usd_per_vnd: usdPerVnd,
+      _raw:        data,
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 502 });
