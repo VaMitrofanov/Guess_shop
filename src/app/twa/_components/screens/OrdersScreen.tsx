@@ -180,6 +180,8 @@ function extractGamepassId(url: string | null): string | null {
 
 function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order; token: string; onGoToBossrobux?: (gamepassId?: string) => void; onRefresh: () => void }) {
   const [expanded, setExpanded] = useState(false);
+  const [fetchedCreator, setFetchedCreator] = useState<string | null>(null);
+  const [fetchingCreator, setFetchingCreator] = useState(false);
   const meta = STATUS_META[order.status];
   const userHandle = order.user.tgId
     ? `TG: ${order.user.tgId}${order.user.name ? ` · ${order.user.name}` : ""}`
@@ -188,6 +190,19 @@ function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order;
     : "Неизвестный";
 
   const shortId = order.id.slice(-6).toUpperCase();
+  const displayCreator = order.robloxUsername ?? fetchedCreator;
+
+  useEffect(() => {
+    if (!expanded || order.robloxUsername || !order.gamepassUrl || fetchedCreator || fetchingCreator) return;
+    const gpId = extractGamepassId(order.gamepassUrl);
+    if (!gpId) return;
+    setFetchingCreator(true);
+    fetch(`/api/roblox/gamepasses?query=${gpId}`)
+      .then(r => r.json())
+      .then(d => { setFetchedCreator(d?.gamepasses?.[0]?.creatorName ?? null); })
+      .catch(() => {})
+      .finally(() => setFetchingCreator(false));
+  }, [expanded, order.robloxUsername, order.gamepassUrl, fetchedCreator, fetchingCreator]);
 
   return (
     <div
@@ -257,12 +272,16 @@ function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order;
           )}
 
           {/* Roblox username */}
-          {order.robloxUsername && (
+          {(displayCreator || (order.gamepassUrl && fetchingCreator)) && (
             <DetailRow label="Ник в Roblox">
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontFamily: "monospace", fontSize: 14, color: "#fff" }}>{order.robloxUsername}</span>
-                <CopyBtn text={order.robloxUsername} />
-              </div>
+              {fetchingCreator && !displayCreator
+                ? <span style={{ fontSize: 12, color: C.muted }}>…</span>
+                : displayCreator
+                ? <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontFamily: "monospace", fontSize: 14, color: "#fff" }}>{displayCreator}</span>
+                    <CopyBtn text={displayCreator} />
+                  </div>
+                : null}
             </DetailRow>
           )}
 

@@ -171,7 +171,6 @@ export interface GamepassDetails {
  */
 async function checkGamePrivate(gamepassId: string, strictOnUnavailable = false): Promise<boolean> {
   try {
-    // Step 1: resolve the universe ID for this asset
     const uRes = await rFetch(
       `https://apis.roblox.com/universes/v1/assets/${gamepassId}/universe`
     );
@@ -180,18 +179,18 @@ async function checkGamePrivate(gamepassId: string, strictOnUnavailable = false)
     const universeId = uData?.universeId;
     if (!universeId) return strictOnUnavailable;
 
-    // Step 2: check if the universe is playable
-    const gRes = await rFetch(
-      `https://games.roblox.com/v1/games?universeIds=${universeId}`
+    const pRes = await rFetch(
+      `https://games.roblox.com/v1/games/multiget-playability-status?universeIds=${universeId}`
     );
-    if (!gRes.ok) return false;
-    const gData: any = await gRes.json().catch(() => null);
-    const game = (gData?.data ?? [])[0];
-    if (!game) return false;
+    if (!pRes.ok) return false;
+    const pData: any = await pRes.json().catch(() => null);
+    const status = (Array.isArray(pData) ? pData : [])[0];
+    if (!status) return false;
 
-    // isPlayable===false covers standard private games; playabilityStatus covers
-    // cases where Roblox omits isPlayable but still signals the game is inaccessible.
-    return game.isPlayable === false || game.playabilityStatus === "PrivateGame";
+    const ps = status.playabilityStatus as string | undefined;
+    if (ps === "Playable" || ps === "GuestProhibited") return false;
+    if (ps === "PrivateGame" || ps === "ContextualPlayabilityUnrated" || ps === "GameUnapproved") return true;
+    return status.isPlayable === false;
   } catch {
     return false;
   }
@@ -228,7 +227,7 @@ async function checkGameAccess(
     // asset endpoint returns an error for unauthenticated callers)
     if (!universeId && creatorId) {
       const cRes = await rFetch(
-        `https://games.roblox.com/v2/users/${creatorId}/games?accessFilter=Public&limit=1`
+        `https://games.roblox.com/v2/users/${creatorId}/games?accessFilter=Public&limit=10`
       ).catch(() => null);
       if (cRes?.ok) {
         const cData: any = await cRes.json().catch(() => null);
@@ -238,15 +237,23 @@ async function checkGameAccess(
 
     if (!universeId) return strict ? "age_restricted" : "ok";
 
-    const gRes = await rFetch(
-      `https://games.roblox.com/v1/games?universeIds=${universeId}`
+    // games/v1 omits isPlayable/playabilityStatus — use the dedicated status endpoint
+    const pRes = await rFetch(
+      `https://games.roblox.com/v1/games/multiget-playability-status?universeIds=${universeId}`
     ).catch(() => null);
-    if (!gRes?.ok) return "ok";
-    const gData: any = await gRes.json().catch(() => null);
-    const game = (gData?.data ?? [])[0];
+    if (!pRes?.ok) return "ok";
+    const pData: any = await pRes.json().catch(() => null);
+    const status = (Array.isArray(pData) ? pData : [])[0];
+    if (!status) return "age_restricted"; // no data → API hides 18+ or restricted games
 
-    if (!game) return "age_restricted"; // API hides 18+ games from unauthenticated requests
-    if (game.isPlayable === false || game.playabilityStatus === "PrivateGame") return "private";
+    const ps = status.playabilityStatus as string | undefined;
+    // GuestProhibited = requires login but purchasable with authenticated account
+    if (ps === "Playable" || ps === "GuestProhibited") return "ok";
+    // Unrated / unapproved games: gamepasses can't be purchased
+    if (ps === "ContextualPlayabilityUnrated" || ps === "GameUnapproved") return "private";
+    if (ps === "PrivateGame") return "private";
+    // Unknown status — fall back to isPlayable flag
+    if (status.isPlayable === false) return "private";
     return "ok";
   } catch {
     return "ok";

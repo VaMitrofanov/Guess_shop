@@ -556,6 +556,121 @@ VALIDATOR_KEY        = <тот же что в TG боте>
 
 ---
 
+### Сессия 2026-05-28 — TWA BossRobux: прямой выкуп из заказа + дебаггинг API
+
+#### Что было сделано
+
+**1. TWA Orders → BossRobux прямой переход**
+
+- Кнопка "Выкупить через Boss Robux" в расширенной карточке заказа открывает BossrobuxScreen уже с нужным геймпассом (не пустой поиск).
+- Реализация: `extractGamepassId(order.gamepassUrl)` → `onGoToBossrobux(gpId)` → `TwaApp.bossrobuxPreloadId` → `BossrobuxScreen.preloadGamepassId`.
+- При открытии экрана срабатывает useEffect: `POST /api/twa/bossrobux {action:"lookup", gamepassId}` → bridge `/gamepass-by-id` → `getGamepassForPurchase` → открывает PurchaseSheet автоматически.
+- **Файлы:** `TwaApp.tsx`, `OrdersScreen.tsx`, `BossrobuxScreen.tsx`, `src/app/api/twa/bossrobux/route.ts`, `bots/shared/bridge.ts`, `bots/shared/roblox.ts`.
+
+**2. Ник Roblox в карточке заказа**
+
+- В интерфейсе `Order` добавлено поле `robloxUsername`.
+- В карточке заказа показывается строка "Ник в Roblox" с кнопкой копировать (аналогично ссылке геймпасса).
+- Ник сохраняется при создании заказа (TG и VK боты) — записывается из `validatedCreator` при переходе в PENDING.
+- Схема БД: `ALTER TABLE "WbOrder" ADD COLUMN IF NOT EXISTS "robloxUsername" TEXT;` (применено вручную, Prisma migrate dev опасен из-за drift).
+- **Файлы:** `prisma/schema.prisma`, `bots/tg/handlers.ts`, `bots/vk/handlers.ts`, `OrdersScreen.tsx`.
+
+**3. BossRobux `api/get-orders` — БАГИ на их стороне**
+
+- Эндпоинт `POST /api/get-orders` **всегда возвращает HTTP 500** независимо от параметров.
+- Аутентификация работает (неверный токен = 401, верный = 500 после auth).
+- Тестировались: пустое тело, точные параметры из доки, form-encoded. Всё 500.
+- **Это баг на сервере BossRobux.** Не наш код.
+- Исследование buyer panel: `POST https://bossrobux.com/gamepass` с `{type: GetItem/PayGpass}` — это их UI для собственного каталога (Blox Fruit permanents и т.д.), **не для покупки произвольных геймпассов**. Не применимо.
+- Отправлено обращение в поддержку (2026-05-28). Ждём ответа.
+
+**4. Исправление `getGamepassForPurchase` (коммит `996a137`)**
+
+- Старый код: `universes/v1/assets/{id}/universe` → список geмпассов universeId → find. Падал для многих ID (возвращал null).
+- Новый код (2 стратегии):
+  - Стратегия 1: то же, но pageSize=100 + один cursor page.
+  - Стратегия 2 (fallback): `economy.roblox.com/v1/game-passes/{id}/details` → получаем `Creator.Name` → `getUserGamepasses(creatorName)` → find по ID. Reuses proven path.
+- **Файл:** `bots/shared/roblox.ts`.
+
+**5. Визуальный баг PurchaseSheet (коммит `996a137`)**
+
+- Симптом: нижний таббар (BottomNav) наслаивался поверх шторки выкупа на iOS.
+- Причина: iOS Safari не поддерживает `position: fixed` внутри `overflow: auto` контейнера (шторка была внутри скроллируемого div).
+- Фикс: `createPortal(content, document.body)` в PurchaseSheet + zIndex 1000/1001 (вместо 200/201).
+- **Файл:** `src/app/twa/_components/screens/BossrobuxScreen.tsx`.
+
+**6. Баг `include` → `select` в orders API**
+
+- При добавлении `robloxUsername` был изменён `include` на `select` → сломались все заказы (пустой экран).
+- Причина: Prisma возвращает все скалярные поля автоматически при `include`, `select` заменяет это.
+- **Правило: никогда не менять `include` на `select` только ради добавления поля.**
+- Исправлено: откат на `include`.
+
+#### API `get-rb` — что возвращает и чего не хватает
+
+`POST /api/get-rb` возвращает: `rate` (курс в VND/донгах), `robux_total` (глобальный запас Robux на складе BossRobux), `robux_max` (макс. R$ на один ордер).
+
+**Важно:** `robux_total` — это НЕ личный баланс пользователя. Реальный баланс аккаунта (например, 597,222 VND | 22.62 USD) на сайте bossrobux.com — в API не возвращается вообще.
+
+- Поле `rate` = 109 — курс в донгах (VND), не USD.
+- В ответе нет `rate_usdt` или `rate_usd` (мы пробрасываем их если BossRobux добавит).
+- Конвертация из кода страницы: 1 USD ≈ 26,400 VND → 1 R$ ≈ 109/26400 ≈ $0.0041. Но это захардкожено на их стороне.
+- Вывод в UI: пока показывается "₫ / R$". Когда BossRobux добавит USD-поле в API — TWA автоматически переключится на "$" (логика уже в route.ts + BossrobuxScreen.tsx).
+- "Запас" в TWA (бывший "Доступно") — это склад BossRobux, не личный баланс.
+
+**Попросили у поддержки (2026-05-28):**
+1. Починить `api/get-orders` HTTP 500
+2. Добавить в `api/get-rb` ответ: личный баланс аккаунта в USD/VND
+3. Добавить в `api/get-rb` ответ: `rate_usd` или `rate_usdt`
+
+#### Текущее состояние BossRobux
+- ✅ Поиск геймпассов по нику работает (через bridge SG)
+- ✅ Прямой lookup из карточки заказа — реализован, с fallback стратегией
+- ✅ PurchaseSheet открывается корректно, показывает данные геймпасса
+- ✅ UI: курс автоматически переключится на USD когда API вернёт `rate_usdt`
+- ✅ UI: "Запас" (глобальный склад), а не "Доступно" (не личный баланс)
+- ❌ Покупка (`api/get-orders`) — HTTP 500 на сервере BossRobux, наш код верен
+- ❌ Личный баланс (USD) — API не возвращает, видно только на сайте
+- ❌ Курс в USD — API возвращает только VND
+- ⏳ Ждём ответа от поддержки BossRobux
+
+### Сессия 2026-05-28 (ночь) — фиксы валидации геймпасса
+
+#### Проблема: games API v1 не возвращает isPlayable/playabilityStatus
+
+`games.roblox.com/v1/games?universeIds=X` **не включает** поля `isPlayable` и `playabilityStatus` в ответ. Старый код проверял эти поля → никогда не мог определить что игра приватная/unrated.
+
+**Правильный endpoint:** `games.roblox.com/v1/games/multiget-playability-status?universeIds=X`
+- Возвращает `{ playabilityStatus, isPlayable, universeId }` для каждого universeId.
+- Статусы: `"Playable"` / `"GuestProhibited"` = OK; `"PrivateGame"` / `"ContextualPlayabilityUnrated"` / `"GameUnapproved"` = БЛОК.
+- `"GuestProhibited"` = требует логина, но авторизованный аккаунт купит → пропускаем.
+- `"ContextualPlayabilityUnrated"` = unrated-игра, Store-вкладка пуста, купить нельзя → блокируем.
+
+**Файл:** `bots/shared/roblox.ts` — обновлены `checkGamePrivate()` и `checkGameAccess()`.
+
+#### Проблема: limit=1 всегда возвращал 400
+
+В `checkGameAccess()` fallback-путь делал `games.roblox.com/v2/users/{id}/games?limit=1`.
+Roblox API принимает только `limit=10|25|50` → всегда 400 → `universeId` не находился → в strict-режиме возвращал `"age_restricted"` для любого геймпасса.
+
+**Фикс:** `limit=10`.
+
+#### Проблема: ник Roblox не показывался для старых заказов
+
+Поле `robloxUsername` в БД null для заказов, созданных до сохранения ника.
+**Фикс:** в `OrdersScreen.tsx` — при раскрытии карточки автоматически запрашивает `/api/roblox/gamepasses?query={gamepassId}` и показывает `creatorName` с кнопкой копировать.
+
+**Файл:** `src/app/twa/_components/screens/OrdersScreen.tsx`
+
+#### Итог проверки двух конкретных геймпассов (тест 2026-05-28)
+
+| ID | Ник | Статус | Результат после фикса |
+|----|-----|--------|----------------------|
+| `1860607091` | `lokomotiv_2018` | `GuestProhibited` | ✅ Пропускается |
+| `1855988517` | `xxgkl_4` | `ContextualPlayabilityUnrated` | ❌ Блокируется (unrated игра) |
+
+---
+
 ## Важные соглашения кодовой базы
 
 ### Provisional order pattern
