@@ -180,8 +180,8 @@ function extractGamepassId(url: string | null): string | null {
 
 function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order; token: string; onGoToBossrobux?: (gamepassId?: string) => void; onRefresh: () => void }) {
   const [expanded, setExpanded] = useState(false);
-  const [fetchedCreator, setFetchedCreator] = useState<string | null>(null);
-  const [fetchingCreator, setFetchingCreator] = useState(false);
+  // null = not started, false = loading, string = done (empty string = not found)
+  const [fetchedCreator, setFetchedCreator] = useState<string | false | null>(null);
   const meta = STATUS_META[order.status];
   const userHandle = order.user.tgId
     ? `TG: ${order.user.tgId}${order.user.name ? ` · ${order.user.name}` : ""}`
@@ -190,19 +190,22 @@ function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order;
     : "Неизвестный";
 
   const shortId = order.id.slice(-6).toUpperCase();
-  const displayCreator = order.robloxUsername ?? fetchedCreator;
+  const displayCreator = order.robloxUsername ?? (typeof fetchedCreator === "string" ? fetchedCreator || null : null);
 
   useEffect(() => {
-    if (!expanded || order.robloxUsername || !order.gamepassUrl || fetchedCreator || fetchingCreator) return;
+    if (!expanded || order.robloxUsername || !order.gamepassUrl || fetchedCreator !== null) return;
     const gpId = extractGamepassId(order.gamepassUrl);
     if (!gpId) return;
-    setFetchingCreator(true);
-    fetch(`/api/roblox/gamepasses?query=${gpId}`)
+    setFetchedCreator(false); // loading
+    fetch("/api/twa/bossrobux", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ action: "lookup", gamepassId: gpId }),
+    })
       .then(r => r.json())
-      .then(d => { setFetchedCreator(d?.gamepasses?.[0]?.creatorName ?? null); })
-      .catch(() => {})
-      .finally(() => setFetchingCreator(false));
-  }, [expanded, order.robloxUsername, order.gamepassUrl, fetchedCreator, fetchingCreator]);
+      .then(d => setFetchedCreator(d?.gamepass?.sellerName ?? ""))
+      .catch(() => setFetchedCreator(""));
+  }, [expanded, order.robloxUsername, order.gamepassUrl, fetchedCreator, token]);
 
   return (
     <div
@@ -272,16 +275,16 @@ function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order;
           )}
 
           {/* Roblox username */}
-          {(displayCreator || (order.gamepassUrl && fetchingCreator)) && (
+          {(order.gamepassUrl || displayCreator) && (
             <DetailRow label="Ник в Roblox">
-              {fetchingCreator && !displayCreator
-                ? <span style={{ fontSize: 12, color: C.muted }}>…</span>
+              {fetchedCreator === false
+                ? <span style={{ fontSize: 13, color: C.sec }}>загружаю…</span>
                 : displayCreator
                 ? <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontFamily: "monospace", fontSize: 14, color: "#fff" }}>{displayCreator}</span>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: "#fff" }}>{displayCreator}</span>
                     <CopyBtn text={displayCreator} />
                   </div>
-                : null}
+                : <span style={{ fontSize: 13, color: C.muted }}>—</span>}
             </DetailRow>
           )}
 
@@ -360,7 +363,7 @@ function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order;
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase" as const, letterSpacing: 0.5, marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 11, color: C.sec, marginBottom: 4 }}>{label}</div>
       <div style={{ color: "#e5e5ea" }}>{children}</div>
     </div>
   );
