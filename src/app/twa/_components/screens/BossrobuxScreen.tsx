@@ -25,6 +25,8 @@ interface Rate {
   rate:        number;
   robux_total: number;
   robux_max:   number;
+  rate_usdt?:  number;
+  rate_usd?:   number;
 }
 
 interface Gamepass {
@@ -104,7 +106,21 @@ function BalanceCard({
       ) : (
         <>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-            <StatBox label="Курс" value={`${rate.rate}`} sub="₫ / R$" />
+            <StatBox
+              label="Курс"
+              value={
+                rate.rate_usd != null
+                  ? `$${rate.rate_usd.toFixed(4)}`
+                  : rate.rate_usdt != null
+                  ? `$${(rate.rate / rate.rate_usdt).toFixed(4)}`
+                  : `${rate.rate}`
+              }
+              sub={
+                rate.rate_usd != null || rate.rate_usdt != null
+                  ? "$ / R$"
+                  : "₫ / R$"
+              }
+            />
             <StatBox
               label="Доступно" value={rate.robux_total.toLocaleString("ru-RU")} sub="R$"
               valueColor={rate.robux_total > 0 ? C.green : C.red}

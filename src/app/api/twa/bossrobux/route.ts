@@ -31,6 +31,9 @@ export async function GET(req: NextRequest) {
       rate:        Number(data.rate),
       robux_total: Number(data.robux_total),
       robux_max:   Number(data.robux_max),
+      // Forward optional USD/USDT rate if BossRobux API returns it
+      rate_usdt:   data.rate_usdt !== undefined ? Number(data.rate_usdt) : undefined,
+      rate_usd:    data.rate_usd  !== undefined ? Number(data.rate_usd)  : undefined,
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 502 });
