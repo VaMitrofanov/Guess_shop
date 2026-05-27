@@ -122,7 +122,7 @@ function BalanceCard({
               }
             />
             <StatBox
-              label="Доступно" value={rate.robux_total.toLocaleString("ru-RU")} sub="R$"
+              label="Запас" value={rate.robux_total.toLocaleString("ru-RU")} sub="R$ (склад)"
               valueColor={rate.robux_total > 0 ? C.green : C.red}
             />
             <StatBox label="Макс/орд." value={rate.robux_max.toLocaleString("ru-RU")} sub="R$" />
