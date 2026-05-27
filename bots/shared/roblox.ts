@@ -593,7 +593,7 @@ export async function getUserGamepasses(username: string): Promise<GamepassSearc
     }
 
     const passBatches = await Promise.all(universes.map(async (game: any) => {
-      const placeId: number = game.rootPlaceId ?? 0;
+      const placeId: number = game.rootPlaceId ?? game.rootPlace?.id ?? 0;
       const pRes = await rFetch(
         `https://apis.roblox.com/game-passes/v1/universes/${game.id}/game-passes?passView=Full&pageSize=30`
       ).catch(() => null);
