@@ -865,6 +865,7 @@ async function handleGamepassLink(
               status: "PENDING",
               rejectionReason: null,
               adminId: null,
+              ...(validatedCreator ? { robloxUsername: validatedCreator } : {}),
             },
           });
         } else {
@@ -881,6 +882,7 @@ async function handleGamepassLink(
             platform:    "VK",
             userId:      user.id,
             wbCode,
+            ...(validatedCreator ? { robloxUsername: validatedCreator } : {}),
           },
         });
       }

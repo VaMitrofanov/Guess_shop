@@ -23,7 +23,7 @@ interface Order {
   paymentDetails: string | null;
   createdAt: string;
   updatedAt: string;
-  customerRobloxUser: string | null;
+  robloxUsername: string | null;
   user: { tgId: string | null; vkId: string | null; name: string | null };
 }
 
@@ -257,11 +257,11 @@ function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order;
           )}
 
           {/* Roblox username */}
-          {order.customerRobloxUser && (
+          {order.robloxUsername && (
             <DetailRow label="Ник в Roblox">
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontFamily: "monospace", fontSize: 14, color: "#fff" }}>{order.customerRobloxUser}</span>
-                <CopyBtn text={order.customerRobloxUser} />
+                <span style={{ fontFamily: "monospace", fontSize: 14, color: "#fff" }}>{order.robloxUsername}</span>
+                <CopyBtn text={order.robloxUsername} />
               </div>
             </DetailRow>
           )}

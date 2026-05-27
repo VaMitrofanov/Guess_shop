@@ -122,6 +122,7 @@ model WbOrder {
   purchaseRate    Float?
   isDirectOrder   Boolean       @default(false)
   paymentDetails  String?
+  robloxUsername  String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 

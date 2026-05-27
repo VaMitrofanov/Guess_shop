@@ -1105,6 +1105,7 @@ export function registerText(bot: Telegraf): void {
                 status: "PENDING",
                 rejectionReason: null,
                 adminId: null,
+                ...(validatedCreator ? { robloxUsername: validatedCreator } : {}),
               },
             });
           } else {
@@ -1121,6 +1122,7 @@ export function registerText(bot: Telegraf): void {
               platform: "TG",
               userId: user.id,
               wbCode: state.wbCode,
+              ...(validatedCreator ? { robloxUsername: validatedCreator } : {}),
             },
           });
         }
