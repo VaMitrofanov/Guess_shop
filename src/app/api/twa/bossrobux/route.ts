@@ -46,11 +46,25 @@ export async function POST(req: NextRequest) {
     if (!username) return NextResponse.json({ error: "username required" }, { status: 400 });
     try {
       const data = await brPost("get-gamepass", { name: username });
+      console.log("[BossRobux/search] raw response:", JSON.stringify(data).slice(0, 500));
+      // { status: "success", data: [...] }
       if (data.status === "success") {
-        return NextResponse.json({ gamepasses: Array.isArray(data.data) ? data.data : [] });
+        const arr = Array.isArray(data.data) ? data.data
+          : Array.isArray((data as any).gamepasses) ? (data as any).gamepasses
+          : Array.isArray((data as any).items) ? (data as any).items
+          : [];
+        return NextResponse.json({ gamepasses: arr });
       }
+      // bare array
       if (Array.isArray(data)) return NextResponse.json({ gamepasses: data });
-      return NextResponse.json({ error: String(data.msg ?? "Search failed") }, { status: 400 });
+      // { success: true, data: [...] }
+      if ((data as any).success === true) {
+        const arr = Array.isArray(data.data) ? data.data
+          : Array.isArray((data as any).gamepasses) ? (data as any).gamepasses
+          : [];
+        return NextResponse.json({ gamepasses: arr });
+      }
+      return NextResponse.json({ error: String(data.msg ?? (data as any).message ?? "Search failed") }, { status: 400 });
     } catch (e: any) {
       return NextResponse.json({ error: e.message }, { status: 502 });
     }

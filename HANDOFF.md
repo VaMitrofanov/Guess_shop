@@ -1814,3 +1814,47 @@ ssh root@89.110.94.117 "docker exec e428b9fe41a4 sh -c 'cd /app && npx tsx grant
 - [ ] **P2-C** (site): `wb_code` cookie без `HttpOnly` (теперь Secure есть, HttpOnly сложнее — нужен server-side endpoint)
 - [ ] **P3**: `extractPassId` продублирован TG/VK
 - [ ] **P3**: `grant-review-bonus.ts` не работает для DIR- заказов
+
+---
+
+## Сессия 2026-05-27 (вечер) — Диагностика BossRobux поиска геймпассов
+
+### Симптом
+
+В TWA экране "Выкуп" поиск по нику "Sdafer60" возвращал "⚠️ Геймпассы не найдены", хотя геймпасс у пользователя должен быть.
+
+### Анализ
+
+`src/app/api/twa/bossrobux/route.ts` → `POST get-gamepass { name: username }`.  
+Вывод "Геймпассы не найдены" означает, что backend вернул `{ gamepasses: [] }` (не ошибку).  
+Это значит BossRobux ответил либо `{ status: "success", data: [] }`, либо что-то непарсируемое (не `status: "success"`, но и не ошибка).
+
+### Что изменено (`src/app/api/twa/bossrobux/route.ts`)
+
+1. **Добавлен `console.log` сырого ответа BossRobux** — после деплоя смотреть в логах сайта:
+   ```bash
+   ssh root@89.110.94.117 "docker logs robloxbank-web 2>&1 | grep BossRobux"
+   ```
+
+2. **Расширен парсинг ответа** — обрабатываем больше возможных форматов:
+   - `{ status: "success", gamepasses: [...] }` (ключ `gamepasses` вместо `data`)
+   - `{ status: "success", items: [...] }` (ключ `items`)
+   - `{ success: true, data: [...] }` (ключ `success` вместо `status`)
+   - `{ success: true, gamepasses: [...] }`
+   - Сообщение об ошибке теперь также пробует `data.message` если нет `data.msg`
+
+### Следующие шаги после деплоя
+
+1. Задеплоить сайт (только `src/app/api/twa/bossrobux/route.ts` изменился)
+2. Попробовать поиск снова в TWA
+3. Посмотреть логи контейнера — увидеть сырой ответ BossRobux
+4. Если ответ `{ status: "success", data: [] }` — BossRobux реально не находит геймпасс для этого ника:
+   - Проверить что ник введён точно (регистр, пробелы)
+   - Возможно, BossRobux API ищет **только по геймпассам из своего пула**, а не по всем Roblox геймпассам
+   - В этом случае нужно использовать `src/app/api/roblox/gamepasses/route.ts` (прямой поиск через Roblox API) — там `getUserGamepasses(username)` через публичный Roblox API
+5. Если ответ другой структуры — обновить парсинг
+
+### Деплой
+
+UUID сайта: `z10ws7m1q45h281zwedmhei4` (RF сервер).  
+Только сайт — боты не затронуты.
