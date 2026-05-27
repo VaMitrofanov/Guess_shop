@@ -498,10 +498,28 @@ VALIDATOR_KEY        = <тот же что в TG боте>
 ```
 Без этих переменных поиск вернёт "Поиск недоступен — VALIDATOR_SOURCE_URL не задан".
 
+**Дополнительный баг найден при live-проверке API (коммит `bfb44e9`):**
+- `game.rootPlaceId ?? 0` → всегда `0`. Roblox API возвращает `rootPlace: { id, type }`, не `rootPlaceId`.
+- Фикс: `game.rootPlaceId ?? game.rootPlace?.id ?? 0`.
+- Без этого BossRobux `get-orders` получал `placeId: 0` и отклонял покупку.
+
+**Live-верификация на `lokomotiv_2018`:**
+- userId `7690713189`, universeId `6909351863`, placeId `119202015547630`
+- Проходят фильтр: "Lokomotiv 2018" (715 R$, productId `3599688666`) + "############" (143 R$, productId `2683601613`)
+- Правильно отфильтрованы: "G" и "500 robaks" — `isForSale: false`, `price: null`
+- Совпадает 1-в-1 с тем что показывает BossRobux на своём сайте ✅
+
+**Что нужно добавить в Coolify (RF сервер — RobloxBankWeb):**
+```
+VALIDATOR_SOURCE_URL = http://5.223.95.11:3000
+VALIDATOR_KEY        = <тот же что в TG боте>
+```
+Без этих переменных поиск вернёт "Поиск недоступен — VALIDATOR_SOURCE_URL не задан".
+
 **Файлы изменены:**
-- `bots/shared/roblox.ts` — новый `getUserGamepasses()` + `GamepassSearchResult` тип
+- `bots/shared/roblox.ts` — новый `getUserGamepasses()` + `GamepassSearchResult` тип + баг rootPlace.id
 - `bots/shared/bridge.ts` — новый endpoint `POST /search-gamepasses`
-- `src/app/api/twa/bossrobux/route.ts` — поиск через bridge
+- `src/app/api/twa/bossrobux/route.ts` — поиск через bridge, токен-чек перенесён только к purchase
 - `bots/tg/admin/hub-autobuy.ts` — поиск через `getUserGamepasses` (Roblox напрямую)
 
 ### Сессия 2026-05-21 (вечер) — боевые баги по реальному кейсу
