@@ -572,40 +572,89 @@ export interface GamepassSearchResult {
  */
 export async function getGamepassForPurchase(gamepassId: string): Promise<GamepassSearchResult | null> {
   try {
-    const uRes = await rFetch(`https://apis.roblox.com/universes/v1/assets/${gamepassId}/universe`);
-    if (!uRes.ok) return null;
-    const uData = await uRes.json().catch(() => null);
-    const universeId: number | undefined = uData?.universeId;
-    if (!universeId) return null;
+    // Strategy 1: universe asset → game-passes list (pageSize=100, one cursor page)
+    const uRes = await rFetch(`https://apis.roblox.com/universes/v1/assets/${gamepassId}/universe`).catch(() => null);
+    if (uRes?.ok) {
+      const uData = await uRes.json().catch(() => null);
+      const universeId: number | undefined = uData?.universeId;
+      if (universeId) {
+        const [gRes, pRes] = await Promise.all([
+          rFetch(`https://games.roblox.com/v1/games?universeIds=${universeId}`),
+          rFetch(`https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes?passView=Full&pageSize=100`),
+        ]);
+        const gData  = gRes.ok  ? await gRes.json().catch(() => null)  : null;
+        const pData  = pRes.ok  ? await pRes.json().catch(() => null)  : null;
+        const placeId: number = gData?.data?.[0]?.rootPlaceId ?? 0;
 
-    const [gRes, pRes] = await Promise.all([
-      rFetch(`https://games.roblox.com/v1/games?universeIds=${universeId}`),
-      rFetch(`https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes?passView=Full&pageSize=50`),
-    ]);
+        let gp = (pData?.gamePasses ?? []).find((p: any) => String(p.id) === String(gamepassId));
 
-    const gData  = gRes.ok  ? await gRes.json().catch(() => null)  : null;
-    const pData  = pRes.ok  ? await pRes.json().catch(() => null)  : null;
-    const placeId: number = gData?.data?.[0]?.rootPlaceId ?? 0;
-    const gp = (pData?.gamePasses ?? []).find((p: any) => String(p.id) === String(gamepassId));
-    if (!gp) return null;
+        // Try one more cursor page if not found in first 100
+        if (!gp && pData?.nextPageCursor) {
+          const p2Res = await rFetch(
+            `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes?passView=Full&pageSize=100&cursor=${encodeURIComponent(pData.nextPageCursor)}`
+          ).catch(() => null);
+          const p2Data = p2Res?.ok ? await p2Res.json().catch(() => null) : null;
+          gp = (p2Data?.gamePasses ?? []).find((p: any) => String(p.id) === String(gamepassId));
+        }
 
-    const tRes = await rFetch(
-      `https://thumbnails.roblox.com/v1/game-passes?gamePassIds=${gamepassId}&size=150x150&format=Png&isCircular=false`
-    ).catch(() => null);
-    const tData = tRes?.ok ? await tRes.json().catch(() => null) : null;
-    const image = tData?.data?.[0]?.imageUrl
-      ?? `https://www.roblox.com/asset-thumbnail/image?assetId=${gamepassId}&width=150&height=150&format=png`;
+        if (gp) {
+          const tRes = await rFetch(
+            `https://thumbnails.roblox.com/v1/game-passes?gamePassIds=${gamepassId}&size=150x150&format=Png&isCircular=false`
+          ).catch(() => null);
+          const tData = tRes?.ok ? await tRes.json().catch(() => null) : null;
+          const image = tData?.data?.[0]?.imageUrl
+            ?? `https://www.roblox.com/asset-thumbnail/image?assetId=${gamepassId}&width=150&height=150&format=png`;
 
-    console.log(`[Roblox/bots] getGamepassForPurchase: id=${gamepassId} → "${gp.name}" ${gp.price}R$ productId=${gp.productId}`);
-    return {
-      gamepassId: gp.id,
-      productId:  gp.productId ?? 0,
-      placeId,
-      name:       gp.name ?? gp.displayName ?? "Gamepass",
-      robux:      gp.price ?? 0,
-      sellerName: gp.creator?.name ?? "Unknown",
-      image,
-    };
+          console.log(`[Roblox/bots] getGamepassForPurchase: id=${gamepassId} → "${gp.name}" ${gp.price}R$ productId=${gp.productId}`);
+          return {
+            gamepassId: gp.id,
+            productId:  gp.productId ?? 0,
+            placeId,
+            name:       gp.name ?? gp.displayName ?? "Gamepass",
+            robux:      gp.price ?? 0,
+            sellerName: gp.creator?.name ?? "Unknown",
+            image,
+          };
+        }
+        console.log(`[Roblox/bots] getGamepassForPurchase: id=${gamepassId} not in universe ${universeId} passes — trying fallback`);
+      } else {
+        console.log(`[Roblox/bots] getGamepassForPurchase: id=${gamepassId} → no universeId — trying fallback`);
+      }
+    } else {
+      console.log(`[Roblox/bots] getGamepassForPurchase: id=${gamepassId} → universe endpoint failed — trying fallback`);
+    }
+
+    // Strategy 2: resolve creator via economy/roproxy → getUserGamepasses → find by ID
+    let creatorName: string | null = null;
+
+    const eRes = await rFetch(`https://economy.roblox.com/v1/game-passes/${gamepassId}/details`).catch(() => null);
+    if (eRes?.ok) {
+      const eData = await eRes.json().catch(() => null);
+      creatorName = eData?.Creator?.Name ?? eData?.creatorName ?? null;
+    }
+
+    if (!creatorName) {
+      const rRes = await rFetch(`https://apis.roproxy.com/game-passes/v1/game-passes/${gamepassId}/product-info`).catch(() => null);
+      if (rRes?.ok) {
+        const rData = await rRes.json().catch(() => null);
+        creatorName = rData?.Creator?.Name ?? null;
+      }
+    }
+
+    if (creatorName) {
+      console.log(`[Roblox/bots] getGamepassForPurchase fallback: searching via creator "${creatorName}"`);
+      const results = await getUserGamepasses(creatorName);
+      const found = results.find(r => String(r.gamepassId) === String(gamepassId));
+      if (found) {
+        console.log(`[Roblox/bots] getGamepassForPurchase fallback success: id=${gamepassId} found via "${creatorName}"`);
+        return found;
+      }
+      console.warn(`[Roblox/bots] getGamepassForPurchase fallback: id=${gamepassId} not in ${results.length} passes for "${creatorName}"`);
+    } else {
+      console.warn(`[Roblox/bots] getGamepassForPurchase: could not determine creator for id=${gamepassId}`);
+    }
+
+    return null;
   } catch (err: any) {
     console.error("[Roblox/bots] getGamepassForPurchase:", err?.message ?? err);
     return null;

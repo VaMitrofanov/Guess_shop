@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 
 const C = {
   card: "#2c2c2e", elevated: "#3a3a3c", border: "#3a3a3c",
@@ -200,9 +201,11 @@ function PurchaseSheet({
   gp: Gamepass | null; open: boolean; onClose: () => void;
   token: string; onPurchased: (robux: number) => void;
 }) {
-  const [phase, setPhase] = useState<SheetPhase>("idle");
-  const [errMsg, setErrMsg] = useState("");
-  const [okMsg,  setOkMsg]  = useState("");
+  const [phase,   setPhase]   = useState<SheetPhase>("idle");
+  const [errMsg,  setErrMsg]  = useState("");
+  const [okMsg,   setOkMsg]   = useState("");
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     if (open) { setPhase("idle"); setErrMsg(""); setOkMsg(""); }
@@ -232,13 +235,15 @@ function PurchaseSheet({
     }
   }
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <>
       {/* Backdrop */}
       <div
         onClick={phase === "buying" ? undefined : onClose}
         style={{
-          position: "fixed", inset: 0, zIndex: 200,
+          position: "fixed", inset: 0, zIndex: 1000,
           background: "rgba(0,0,0,0.55)",
           backdropFilter: "blur(4px)",
           WebkitBackdropFilter: "blur(4px)",
@@ -250,7 +255,7 @@ function PurchaseSheet({
 
       {/* Sheet */}
       <div style={{
-        position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 201,
+        position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 1001,
         background: "#2c2c2e",
         borderRadius: "22px 22px 0 0",
         transform: open ? "translateY(0)" : "translateY(110%)",
@@ -347,7 +352,8 @@ function PurchaseSheet({
           </div>
         )}
       </div>
-    </>
+    </>,
+    document.body
   );
 }
 
