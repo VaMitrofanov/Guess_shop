@@ -8,14 +8,17 @@ function brToken() {
 }
 
 async function brPost(endpoint: string, body: object = {}) {
+  console.log(`[BossRobux] POST /${endpoint}`, JSON.stringify(body));
   const res = await fetch(`${BASE}/${endpoint}`, {
     method: "POST",
     headers: { Token: brToken(), "Content-Type": "application/json" },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(15_000),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json() as Promise<Record<string, unknown>>;
+  const text = await res.text();
+  console.log(`[BossRobux] /${endpoint} → HTTP ${res.status}: ${text}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
+  return JSON.parse(text) as Record<string, unknown>;
 }
 
 export async function GET(req: NextRequest) {
