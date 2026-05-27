@@ -45,6 +45,8 @@ curl -s "http://89.110.94.117:8000/api/v1/deployments/<deployment_uuid>" \
   -H "Authorization: Bearer $COOLIFY_TOKEN" | jq '{status, commit_message}'
 ```
 
+> **ВАЖНО:** Coolify настроен на **автодеплой по push в main**. Достаточно `git push origin main` — Coolify сам подхватывает изменения через GitHub webhook. **Не нужно** вручную вызывать API деплоя, вставлять записи в БД или что-либо ещё.
+
 ### UUID сервисов в Coolify
 
 | Сервис | UUID | Сервер |
@@ -2054,12 +2056,36 @@ npx tsx scripts/accept_gamepass.ts <полный_orderId> <gamepassUrl>
 6. Экран успеха показывает `msg` от BossRobux (например: "Order #XXXX placed")
 7. Баланс BossRobux обновляется автоматически
 
-### Деплой
+### Деплой (выполнен 2026-05-27)
 
-**Требуется:**
-1. Деплой `bots/shared/bridge.ts` (TG бот/SG) — новый `/gamepass-by-id` endpoint
-2. Деплой Next.js (RF сайт) — новый `lookup` action + frontend изменения
-3. Убедиться что в Coolify (RF, RobloxBankWeb) заданы:
-   - `VALIDATOR_SOURCE_URL=http://5.223.95.11:3000`
-   - `VALIDATOR_KEY=<то же значение что на SG>`
-   - `BOSSROBUX_TOKEN=<токен>`
+- SG bridge + roblox.ts → `docker cp` + `docker restart` (бот запускается через tsx)
+- Next.js + TG/VK handlers → автодеплой через git push main
+- `VALIDATOR_SOURCE_URL`, `VALIDATOR_KEY`, `BOSSROBUX_TOKEN` — заданы в Coolify на RF ✅
+- `VALIDATOR_KEY` на SG совпадает с RF ✅
+
+---
+
+## Сессия 2026-05-28 (продолжение) — robloxUsername в WbOrder
+
+### Проблема
+
+`WbOrder` не имел поля с Roblox-ником клиента. `customerRobloxUser` существовал только в модели `Order` (Tinkoff-оплаты) — не там.
+
+### Что сделано
+
+- `prisma/schema.prisma` — добавлено `robloxUsername String?` в `WbOrder`
+- SQL применён напрямую: `ALTER TABLE "WbOrder" ADD COLUMN IF NOT EXISTS "robloxUsername" TEXT`
+  (migrate dev нельзя — drift между schema и migration history)
+- `bots/tg/handlers.ts` — при апдейте/создании заказа со статусом PENDING сохраняется `validatedCreator` → `robloxUsername`
+- `bots/vk/handlers.ts` — аналогично
+- `OrdersScreen.tsx` — поле `robloxUsername` в интерфейсе Order, рендерится в карточке с кнопкой «Копировать»
+
+### Баг в сессии — select вместо include (коммит `50d6e18`)
+
+Я заменил `include` на `select` в orders API — все заказы пропали (заказов пока нет). Причина: с `select` нужно явно перечислять все поля, иначе запрос падает без ошибки. Откатил обратно на `include` — все скалярные поля (включая `robloxUsername`) Prisma возвращает автоматически.
+
+**Вывод: никогда не менять `include` → `select` только ради добавления нового поля в WbOrder. Оно придёт само.**
+
+### Ник заполняется только у новых заказов
+
+Существующие заказы (до этой сессии) `robloxUsername = NULL`. Ник появится только у заказов, созданных после деплоя этой сессии.
