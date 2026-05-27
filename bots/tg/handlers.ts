@@ -949,17 +949,6 @@ export function registerText(bot: Telegraf): void {
               [supportBtn("💬 Нужна помощь?", "pass_deleted")],
             ]) }
           );
-        } else if (gamepassInfo.isModifiedAfterCreation) {
-          if (fc.notActive === 1) await notifyAdminValidationFail("Геймпасс изменён после создания — Buy button недоступен");
-          await ctx.reply(
-            `❌ <b>Геймпасс был изменён после создания</b> — кнопка «Купить» временно недоступна.\n\n` +
-            `Создай <b>новый</b> геймпасс с нуля (цена: <b>${expectedPrice} R$</b>) и пришли ссылку на него.\n\n` +
-            `Старый геймпасс можно удалить.`,
-            { parse_mode: "HTML", ...Markup.inlineKeyboard([
-              [Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
-              [supportBtn("💬 Нужна помощь?", "pass_modified")],
-            ]) }
-          );
         } else if (gamepassInfo.isGamePrivate) {
           if (fc.notActive === 1) await notifyAdminValidationFail("Игра закрыта (private) — геймпасс не продаётся");
           await ctx.reply(

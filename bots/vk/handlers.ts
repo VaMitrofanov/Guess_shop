@@ -733,14 +733,6 @@ async function handleGamepassLink(
             `Не удаляй геймпасс до получения оплаты.`,
           keyboard: vkSupportKb("pass_deleted"),
         });
-      } else if (gamepassInfo.isModifiedAfterCreation) {
-        await ctx.reply({
-          message:
-            `❌ Геймпасс был изменён после создания — кнопка «Купить» временно недоступна.\n\n` +
-            `Создай новый геймпасс с нуля (цена: ${expectedPrice} R$) и пришли ссылку на него.\n\n` +
-            `Старый геймпасс можно удалить.`,
-          keyboard: vkSupportKb("pass_modified"),
-        });
       } else if (gamepassInfo.isGamePrivate) {
         await ctx.reply({
           message:

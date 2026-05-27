@@ -434,28 +434,6 @@ export async function getGamepassDetailsDirect(
           }
         }
 
-        // Detect modified gamepasses: if a RECENTLY created gamepass (≤30 days old)
-        // has an Updated timestamp that is >1 h later than Created, the creator
-        // changed the gamepass after it was set up. Modified gamepasses frequently
-        // lose their Buy button while Roblox re-processes the change.
-        // The 30-day limit excludes old gamepasses that Roblox auto-migrates
-        // (their Updated field changes without any user action).
-        if (parsed.isActive && d.Created && d.Updated) {
-          const createdMs = new Date(d.Created).getTime();
-          const updatedMs = new Date(d.Updated).getTime();
-          const nowMs     = Date.now();
-          const ageMs     = nowMs - createdMs;
-          const isRecent  = !isNaN(createdMs) && ageMs < 30 * 24 * 3_600_000;
-          if (isRecent && !isNaN(updatedMs) && updatedMs - createdMs > 3_600_000) {
-            const diffHours = Math.round((updatedMs - createdMs) / 3_600_000);
-            console.warn(
-              `[Roblox/bots] roproxy: gamepass ${gamepassId} was modified ${diffHours}h ` +
-              `after creation (created=${d.Created} updated=${d.Updated}) — isActive→false`
-            );
-            parsed.isActive = false;
-            parsed.isModifiedAfterCreation = true;
-          }
-        }
 
         // Detect gamepasses deleted after creation:
         // roproxy can return stale cached data (IsForSale=true) for gamepasses that
