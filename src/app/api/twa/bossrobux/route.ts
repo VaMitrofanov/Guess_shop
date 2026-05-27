@@ -36,7 +36,6 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!brToken()) return NextResponse.json({ error: "Token not configured" }, { status: 503 });
 
   const body = await req.json().catch(() => null);
   if (!body?.action) return NextResponse.json({ error: "action required" }, { status: 400 });
@@ -44,27 +43,34 @@ export async function POST(req: NextRequest) {
   if (body.action === "search") {
     const username = String(body.username ?? "").trim();
     if (!username) return NextResponse.json({ error: "username required" }, { status: 400 });
+
+    const bridgeUrl = process.env.VALIDATOR_SOURCE_URL?.trim();
+    if (!bridgeUrl) {
+      return NextResponse.json({ error: "Поиск недоступен — VALIDATOR_SOURCE_URL не задан" });
+    }
+
     try {
-      const { getUserGamepasses } = await import("@/lib/roblox");
-      const robloxPasses = await getUserGamepasses(username);
-      const gamepasses = robloxPasses
-        .filter((gp: any) => gp.isForSale && gp.price > 0)
-        .map((gp: any) => ({
-          gamepassId: gp.id,
-          productId:  gp.productId,
-          placeId:    gp.placeId,
-          name:       gp.name,
-          robux:      gp.price,
-          sellerName: gp.sellerName,
-          image:      gp.image,
-        }));
-      return NextResponse.json({ gamepasses });
+      const res = await fetch(`${bridgeUrl.replace(/\/+$/, "")}/search-gamepasses`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(process.env.VALIDATOR_KEY ? { "x-validator-key": process.env.VALIDATOR_KEY } : {}),
+        },
+        body: JSON.stringify({ username }),
+        signal: AbortSignal.timeout(25_000),
+      });
+      const data = await res.json().catch(() => null);
+      if (!data?.ok) {
+        return NextResponse.json({ error: data?.error ?? "Ошибка поиска" });
+      }
+      return NextResponse.json({ gamepasses: data.gamepasses ?? [] });
     } catch (e: any) {
       return NextResponse.json({ error: e.message }, { status: 502 });
     }
   }
 
   if (body.action === "purchase") {
+    if (!brToken()) return NextResponse.json({ success: false, msg: "BOSSROBUX_TOKEN не задан" });
     const gp = body.gp;
     if (!gp?.gamepassId) return NextResponse.json({ error: "gp required" }, { status: 400 });
     try {

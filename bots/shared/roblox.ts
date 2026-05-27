@@ -543,6 +543,100 @@ async function fetchViaBridge(
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Gamepass search by Roblox username
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface GamepassSearchResult {
+  gamepassId: number;
+  productId:  number;
+  placeId:    number;
+  name:       string;
+  robux:      number;
+  sellerName: string;
+  image:      string;
+}
+
+/**
+ * Returns all for-sale gamepasses owned by a Roblox user.
+ * Used by:
+ *   • TG admin bot hub (direct call — already on SG)
+ *   • Singapore bridge /search-gamepasses (called by TWA on RF)
+ *
+ * Filter: isForSale !== false (keep if true OR if field absent — assume for sale).
+ * This avoids the ?? false bug where missing field drops all results.
+ */
+export async function getUserGamepasses(username: string): Promise<GamepassSearchResult[]> {
+  try {
+    const uRes = await rFetch("https://users.roblox.com/v1/usernames/users", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ usernames: [username], excludeBannedUsers: true }),
+    });
+    if (!uRes.ok) return [];
+    const uData = await uRes.json().catch(() => null);
+    const userId: number | undefined = uData?.data?.[0]?.id;
+    if (!userId) {
+      console.log(`[Roblox/bots] getUserGamepasses: user "${username}" not found`);
+      return [];
+    }
+
+    const gRes = await rFetch(
+      `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=10`
+    );
+    if (!gRes.ok) return [];
+    const gData = await gRes.json().catch(() => null);
+    const universes: any[] = gData?.data ?? [];
+    if (universes.length === 0) {
+      console.log(`[Roblox/bots] getUserGamepasses: no public games for userId=${userId}`);
+      return [];
+    }
+
+    const passBatches = await Promise.all(universes.map(async (game: any) => {
+      const placeId: number = game.rootPlaceId ?? 0;
+      const pRes = await rFetch(
+        `https://apis.roblox.com/game-passes/v1/universes/${game.id}/game-passes?passView=Full&pageSize=30`
+      ).catch(() => null);
+      if (!pRes?.ok) return [];
+      const pData = await pRes.json().catch(() => null);
+      return (pData?.gamePasses ?? []).map((gp: any) => ({ ...gp, _placeId: placeId }));
+    }));
+
+    const all: any[] = passBatches.flat();
+    if (all.length === 0) return [];
+
+    const ids = all.map((gp: any) => gp.id).join(",");
+    const tRes = await rFetch(
+      `https://thumbnails.roblox.com/v1/game-passes?gamePassIds=${ids}&size=150x150&format=Png&isCircular=false`
+    ).catch(() => null);
+    const tData = tRes?.ok ? await tRes.json().catch(() => null) : null;
+    const thumbMap: Record<number, string> = Object.fromEntries(
+      (tData?.data ?? []).map((t: any) => [t.targetId, t.imageUrl])
+    );
+
+    const results = all
+      .filter((gp: any) => gp.isForSale !== false && (gp.price ?? 0) > 0)
+      .map((gp: any): GamepassSearchResult => ({
+        gamepassId: gp.id,
+        productId:  gp.productId ?? 0,
+        placeId:    gp._placeId ?? 0,
+        name:       gp.name ?? gp.displayName ?? "Gamepass",
+        robux:      gp.price ?? 0,
+        sellerName: gp.creator?.name ?? username,
+        image:      thumbMap[gp.id]
+          ?? `https://www.roblox.com/asset-thumbnail/image?assetId=${gp.id}&width=150&height=150&format=png`,
+      }));
+
+    console.log(`[Roblox/bots] getUserGamepasses: "${username}" → ${results.length} for-sale pass(es)`);
+    return results;
+  } catch (err: any) {
+    console.error("[Roblox/bots] getUserGamepasses:", err?.message ?? err);
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * Fetches gamepass metadata.
  *

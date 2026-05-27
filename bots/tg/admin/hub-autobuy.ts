@@ -12,7 +12,8 @@ import { db } from "../../shared/db";
 import { CB } from "../../shared/admin";
 import { sendOrEditWidget, editWidget } from "./widgets";
 import { pendingAutoBuyRateInput, pendingBossrobuxSearch, bossrobuxSearchCache } from "../session";
-import { getRate, searchGamepass, purchaseGamepass, type BossrobuxGamepass } from "../../shared/bossrobux";
+import { getRate, purchaseGamepass, type BossrobuxGamepass } from "../../shared/bossrobux";
+import { getUserGamepasses } from "../../shared/roblox";
 
 // ── AutoBuy main widget ───────────────────────────────────────────────────────
 
@@ -136,19 +137,24 @@ export async function handleBossrobuxSearchInput(ctx: Context, name: string): Pr
   if (!pendingBossrobuxSearch.has(ctx.from!.id)) return false;
   pendingBossrobuxSearch.delete(ctx.from!.id);
 
-  const results = await searchGamepass(name.trim());
+  const username = name.trim();
+  await ctx.reply(`🔍 Ищу геймпассы <b>${esc(username)}</b>…`, { parse_mode: "HTML" });
 
-  if ("error" in results) {
-    await ctx.reply(
-      `❌ <b>Ошибка поиска:</b> ${esc(results.error)}`,
-      { parse_mode: "HTML" }
-    );
-    return true;
-  }
+  const found = await getUserGamepasses(username);
+  const results: BossrobuxGamepass[] = found.map(gp => ({
+    placeId:    gp.placeId,
+    productId:  gp.productId,
+    gamepassId: gp.gamepassId,
+    name:       gp.name,
+    robux:      gp.robux,
+    sellerName: gp.sellerName,
+    image:      gp.image,
+  }));
 
   if (results.length === 0) {
     await ctx.reply(
-      `🔍 Ничего не найдено по запросу: <b>${esc(name)}</b>`,
+      `🔍 Геймпассы не найдены для: <b>${esc(username)}</b>\n\n` +
+      `<i>Возможные причины: нет публичных игр, нет геймпассов в продаже, или ник указан неверно.</i>`,
       { parse_mode: "HTML" }
     );
     return true;

@@ -468,6 +468,42 @@ const denomination = wbCodeRecord?.denomination ?? 0;
 - ⚠️ Telegram WebApp (TWA) для WB-продавца — это отдельная фича для хозяина бизнеса
 - ⚠️ AutoBuy hub — backend есть, бизнес-логика авто-выкупа не ясна
 
+### Сессия 2026-05-27 — BossRobux поиск геймпассов (TWA + TG бот)
+
+**Симптом:** TWA → вкладка "Выкуп" → ввод ника → "Геймпассы не найдены" для всех пользователей, включая реально работающий `lokomotiv_2018`.
+
+**Путь к фиксу (3 попытки):**
+
+**Попытка 1 — BossRobux `get-gamepass` API** (коммит `83e9807`):
+- `POST /api/get-gamepass` с `{ name: username }` → **всегда возвращает пустой массив**.
+- Добавлено логирование, проверены все форматы ответа (bare array, `{status,data}`, `{success,data}`).
+- Вывод: BossRobux `/api/get-gamepass` не работает для поиска по нику. Скорее всего их сайт делает поиск через Roblox API на клиенте, а BossRobux API получает уже готовые данные при покупке.
+
+**Попытка 2 — Roblox API из Next.js (RF сервер)** (коммит `2bc996b`):
+- Переключились на `getUserGamepasses(username)` из `src/lib/roblox.ts`.
+- **Провал:** RF сервер (89.110.94.117, Москва) — все Roblox API домены заблокированы в РФ с DC IP. Запросы к `apis.roblox.com`, `games.roblox.com`, `users.roblox.com` падают с сетевой ошибкой.
+- Дополнительный баг: `isForSale: gp.isForSale ?? false` — если Roblox не возвращает поле (а `passView=Full` может не включать его), дефолт `false` убивал все результаты фильтром `isForSale && price > 0`.
+
+**Попытка 3 — Рабочая архитектура** (текущий фикс):
+- **Bridge на SG (5.223.95.11) уже делает Roblox API вызовы** — именно через него идут все проверки геймпассов. Нужно добавить туда поиск.
+- Добавлен `POST /search-gamepasses` в `bots/shared/bridge.ts` — принимает `{ username }`, вызывает `getUserGamepasses(username)` из `bots/shared/roblox.ts`.
+- TWA `route.ts` для action=`search` теперь обращается к bridge через `VALIDATOR_SOURCE_URL/search-gamepasses`.
+- TG бот (`hub-autobuy.ts`) — вызывает `getUserGamepasses` напрямую (уже на SG, нет блокировки).
+- Ключевой фикс в `getUserGamepasses`: `gp.isForSale !== false` вместо `gp.isForSale ?? false`. Разница: `undefined !== false` → `true` (пропускаем), `undefined ?? false` → `false` (блокируем).
+
+**Что нужно добавить в Coolify (RF сервер — RobloxBankWeb):**
+```
+VALIDATOR_SOURCE_URL = http://5.223.95.11:3000
+VALIDATOR_KEY        = <тот же что в TG боте>
+```
+Без этих переменных поиск вернёт "Поиск недоступен — VALIDATOR_SOURCE_URL не задан".
+
+**Файлы изменены:**
+- `bots/shared/roblox.ts` — новый `getUserGamepasses()` + `GamepassSearchResult` тип
+- `bots/shared/bridge.ts` — новый endpoint `POST /search-gamepasses`
+- `src/app/api/twa/bossrobux/route.ts` — поиск через bridge
+- `bots/tg/admin/hub-autobuy.ts` — поиск через `getUserGamepasses` (Roblox напрямую)
+
 ### Сессия 2026-05-21 (вечер) — боевые баги по реальному кейсу
 
 Реальный кейс: Мила Платонова (VK), код WKDQAE1, геймпасс ID `1850867407` ("Ква", 429 R$, игра "Obby 1").
@@ -1466,12 +1502,13 @@ TG бот перезапускался на `c6e5b90` и вышел чисто:
 
 ### Архитектурные изменения — `bots/shared/roblox.ts`
 
-#### Три слоя блокировки для "свежих" геймпассов (≤30 дней)
+#### Слои блокировки для "свежих" геймпассов (≤30 дней)
+
+> ~~1. isModifiedAfterCreation~~ — **удалено** в сессии 2026-05-27 (слишком строго, давало false rejections)
 
 ```
-1. isModifiedAfterCreation  → Updated > Created + 1h  →  кнопка «Купить» временно недоступна
-2. isNotInCatalog           → catalog 200+empty + !foundInPrimary  →  не продаётся
-3. isGamePrivate            → игра приватна + !foundInPrimary  →  купить невозможно
+1. isNotInCatalog  → catalog 200+empty + !foundInPrimary  →  не продаётся
+2. isGamePrivate   → игра приватна + !foundInPrimary  →  купить невозможно
 ```
 
 #### `checkGameAccess(gamepassId, creatorId, strict)` — новая функция
@@ -1886,3 +1923,63 @@ curl -s -X POST "http://89.110.94.117:8000/api/v1/deploy?uuid=z10ws7m1q45h281zwe
 - `72 robux` — gamepassId=685980175, productId=1728755312, robux=715
 
 Структура полностью совместима с BossRobux `get-orders`.
+
+---
+
+## Сессия 2026-05-27 (вечер) — Удаление isModifiedAfterCreation + ручное принятие заказа
+
+### Убран `isModifiedAfterCreation` (коммит `a95bb75`)
+
+**Проблема:** пользователь прислал геймпасс `https://www.roblox.com/game-pass/1860607091/Lokomotiv-2018` — цена 715 R$ ✅, `IsForSale: true` ✅, но бот отклонял с ошибкой "изменён после создания" (Updated = Created + 89 мин > 1 ч).
+
+**Решение:** проверка `isModifiedAfterCreation` убрана полностью. Критерии приёма — `IsForSale: true` и цена совпадает. Факт редактирования геймпасса после создания не влияет на возможность выкупа.
+
+**Файлы изменены:**
+- `bots/shared/roblox.ts` — удалён блок `if (isRecent && updatedMs - createdMs > 3_600_000)`
+- `bots/tg/handlers.ts` — удалена ветка `} else if (gamepassInfo.isModifiedAfterCreation)`
+- `bots/vk/handlers.ts` — аналогично
+
+**Деплой:** сайт через Coolify (`npgfjr8klzbhgvkdx165v08v`), боты через SCP + docker restart.
+
+| Сервис | Сервер | Контейнер | Коммит |
+|--------|--------|-----------|--------|
+| Next.js сайт | RF | `robloxbank-web` | `a95bb75` ✅ |
+| VK бот | RF | `gmtpfqosgoz23vjyxyczuic9-153248944590` | `a95bb75` ✅ |
+| TG бот | SG | `lyz78enntugna9em1biopinr-221030771061` | `a95bb75` ✅ |
+
+---
+
+### Ручное принятие геймпасса — заказ #4N16TD
+
+Заказ был в статусе `AWAITING_GAMEPASS`. Геймпасс принят вручную через новый скрипт:
+
+```bash
+npx tsx scripts/accept_gamepass.ts <orderId> <gamepassUrl>
+# Пример:
+npx tsx scripts/accept_gamepass.ts "cmpo2evvr00000iph2u4n16td" "https://www.roblox.com/game-pass/1860607091/Lokomotiv-2018"
+```
+
+Скрипт: `AWAITING_GAMEPASS → PENDING`, сохраняет `gamepassUrl`, помечает `WbCode.isUsed = true`.
+
+Пользователю (VK ID `1104565250`) отправлено уведомление вручную через VK-бот контейнер:
+```bash
+docker exec gmtpfqosgoz23vjyxyczuic9-153248944590 node -e "
+const { VK } = require('/app/node_modules/vk-io');
+const vk = new VK({ token: process.env.VK_TOKEN });
+vk.api.messages.send({ user_id: <VK_ID>, random_id: Date.now(), message: '...' })
+"
+```
+
+**Текущее состояние заказа #4N16TD:** `PENDING`, ждёт выкупа менеджером.
+
+---
+
+### Новый скрипт `scripts/accept_gamepass.ts`
+
+Используется когда нужно принять геймпасс в обход бота (например, `isForSale=true` + цена совпадает, но бот по какой-то причине не принял).
+
+```bash
+npx tsx scripts/accept_gamepass.ts <полный_orderId> <gamepassUrl>
+```
+
+Аналог для ручного отклонения: `scripts/reject_gamepass.ts <orderId> "<reason>"`.
