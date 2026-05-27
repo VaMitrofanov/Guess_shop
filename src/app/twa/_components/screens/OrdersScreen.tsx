@@ -23,6 +23,7 @@ interface Order {
   paymentDetails: string | null;
   createdAt: string;
   updatedAt: string;
+  customerRobloxUser: string | null;
   user: { tgId: string | null; vkId: string | null; name: string | null };
 }
 
@@ -171,7 +172,13 @@ function ActionBar({ order, token, onDone }: { order: Order; token: string; onDo
   );
 }
 
-function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order; token: string; onGoToBossrobux?: () => void; onRefresh: () => void }) {
+function extractGamepassId(url: string | null): string | null {
+  if (!url) return null;
+  const m = url.match(/game-pass\/(\d+)/i);
+  return m ? m[1] : null;
+}
+
+function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order; token: string; onGoToBossrobux?: (gamepassId?: string) => void; onRefresh: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const meta = STATUS_META[order.status];
   const userHandle = order.user.tgId
@@ -249,10 +256,20 @@ function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order;
             </DetailRow>
           )}
 
+          {/* Roblox username */}
+          {order.customerRobloxUser && (
+            <DetailRow label="Ник в Roblox">
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontFamily: "monospace", fontSize: 14, color: "#fff" }}>{order.customerRobloxUser}</span>
+                <CopyBtn text={order.customerRobloxUser} />
+              </div>
+            </DetailRow>
+          )}
+
           {/* Boss Robux quick buy */}
           {onGoToBossrobux && order.gamepassUrl && (order.status === "PENDING" || order.status === "IN_PROGRESS") && (
             <button
-              onClick={e => { e.stopPropagation(); onGoToBossrobux(); }}
+              onClick={e => { e.stopPropagation(); onGoToBossrobux(extractGamepassId(order.gamepassUrl) ?? undefined); }}
               style={{
                 width: "100%", padding: "10px", border: "none", borderRadius: 10,
                 background: "rgba(191,90,242,0.15)", color: "#bf5af2",
@@ -330,7 +347,7 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
-export default function OrdersScreen({ token, onGoToBossrobux }: { token: string; onGoToBossrobux?: () => void; }) {
+export default function OrdersScreen({ token, onGoToBossrobux }: { token: string; onGoToBossrobux?: (gamepassId?: string) => void; }) {
   const [filter,   setFilter]   = useState<FilterStatus>("ALL");
   const [data,     setData]     = useState<OrdersData | null>(null);
   const [loading,  setLoading]  = useState(true);

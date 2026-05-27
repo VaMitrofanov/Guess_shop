@@ -20,7 +20,7 @@
  */
 
 import * as http from "http";
-import { getGamepassDetailsDirect, getUserGamepasses } from "./roblox";
+import { getGamepassDetailsDirect, getUserGamepasses, getGamepassForPurchase } from "./roblox";
 
 // Allow overriding port via env for cases where 3000 is already in use
 const BRIDGE_PORT = parseInt(process.env.VALIDATOR_PORT ?? "3000", 10);
@@ -51,8 +51,9 @@ export function startBridgeServer(): http.Server {
     const isCheckPass        = req.method === "GET"  && url.pathname === "/check-pass";
     const isTgProxy          = req.method === "POST" && url.pathname === "/tg-proxy";
     const isSearchGamepasses = req.method === "POST" && url.pathname === "/search-gamepasses";
+    const isGamepassById     = req.method === "GET"  && url.pathname === "/gamepass-by-id";
 
-    if (!isCheckPass && !isTgProxy && !isSearchGamepasses) {
+    if (!isCheckPass && !isTgProxy && !isSearchGamepasses && !isGamepassById) {
       respond(404, { ok: false, error: "not_found" });
       return;
     }
@@ -174,6 +175,25 @@ export function startBridgeServer(): http.Server {
         respond(200, { ok: true, gamepasses });
       } catch (err: any) {
         console.error(`[Bridge] search-gamepasses error for "${username}":`, err?.message ?? err);
+        respond(500, { ok: false, error: "server_error" });
+      }
+      return;
+    }
+
+    // ── GET /gamepass-by-id ─────────────────────────────────────────────────
+    if (isGamepassById) {
+      const gpId = url.searchParams.get("id") ?? "";
+      if (!gpId || !/^\d{1,20}$/.test(gpId)) {
+        respond(400, { ok: false, error: "invalid_id" });
+        return;
+      }
+      console.log(`[Bridge] → Lookup gamepass-by-id id=${gpId}`);
+      try {
+        const gp = await getGamepassForPurchase(gpId);
+        console.log(`[Bridge] ← id=${gpId}: ${gp ? `"${gp.name}" ${gp.robux}R$` : "not found"}`);
+        respond(200, { ok: true, gamepass: gp });
+      } catch (err: any) {
+        console.error(`[Bridge] gamepass-by-id error for id=${gpId}:`, err?.message ?? err);
         respond(500, { ok: false, error: "server_error" });
       }
       return;

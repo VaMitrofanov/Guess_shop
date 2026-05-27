@@ -2001,3 +2001,65 @@ npx tsx scripts/accept_gamepass.ts <полный_orderId> <gamepassUrl>
 ```
 
 Аналог для ручного отклонения: `scripts/reject_gamepass.ts <orderId> "<reason>"`.
+
+---
+
+## Сессия 2026-05-28 — BossRobux прямой выкуп из карточки заказа
+
+### Контекст
+
+Два экрана в TWA:
+1. **Orders (Заказы)** — список заказов, кнопка «🛒 Выкупить через Boss Robux» в развёрнутой карточке
+2. **BossRobux (Выкуп)** — поиск по нику + покупка
+
+До этой сессии кнопка «Выкупить» в Orders просто переходила на экран Выкуп с пустым полем поиска — пользователь должен был сам вводить ник и искать нужный геймпасс вручную.
+
+### Что сделано
+
+**Новый endpoint `GET /gamepass-by-id?id=X` в bridge (`bots/shared/bridge.ts`):**
+- Добавлен в route dispatcher рядом с `/check-pass` и `/search-gamepasses`
+- Вызывает `getGamepassForPurchase(id)` из `bots/shared/roblox.ts` (уже реализовано ранее)
+- Возвращает `{ ok: true, gamepass: GamepassSearchResult | null }`
+- Auth через `x-validator-key` как у остальных endpoints
+
+**Новый action `lookup` в `src/app/api/twa/bossrobux/route.ts`:**
+- `POST { action: "lookup", gamepassId: "1234567890" }`
+- Звонит на bridge `GET /gamepass-by-id?id=X` через `VALIDATOR_SOURCE_URL`
+- Возвращает `{ gamepass: { placeId, productId, gamepassId, name, robux, sellerName, image } }`
+
+**`OrdersScreen.tsx`:**
+- Новая функция `extractGamepassId(url)` — парсит числовой ID из URL типа `roblox.com/game-pass/1860607091/...`
+- `onGoToBossrobux` callback изменён с `() => void` → `(gamepassId?: string) => void`
+- Кнопка «Выкупить» передаёт `extractGamepassId(order.gamepassUrl)` при клике
+
+**`TwaApp.tsx`:**
+- Добавлен state `bossrobuxPreloadId: string | undefined`
+- `onGoToBossrobux` теперь: `(gpId) => { setBossrobuxPreloadId(gpId); setScreen("bossrobux"); }`
+- `BossrobuxScreen` получает `preloadGamepassId` и `onPreloadConsumed` props
+
+**`BossrobuxScreen.tsx`:**
+- Принимает `preloadGamepassId?: string` и `onPreloadConsumed?: () => void`
+- `useEffect` на изменение `preloadGamepassId`: вызывает `lookup` action, открывает PurchaseSheet сразу с найденным геймпассом (минуя поиск по нику)
+- `preloadHandled` ref предотвращает двойной вызов
+- `onPurchased` callback теперь вызывает `fetchRate()` после покупки — баланс обновляется в реальном времени
+- В success-экране PurchaseSheet показывается полный `msg` от BossRobux в зелёном блоке (monospace)
+
+### Флоу после изменений
+
+1. Менеджер открывает Orders → находит заказ со статусом PENDING/IN_PROGRESS
+2. Раскрывает карточку → нажимает «🛒 Выкупить через Boss Robux»
+3. TWA переходит на экран Выкуп + **автоматически** ищет геймпасс по ID из ссылки
+4. Открывается PurchaseSheet с полными данными (название, цена, sellerName, IDs)
+5. Нажимает «✅ Выкупить NNNNN R$» → покупка через BossRobux API
+6. Экран успеха показывает `msg` от BossRobux (например: "Order #XXXX placed")
+7. Баланс BossRobux обновляется автоматически
+
+### Деплой
+
+**Требуется:**
+1. Деплой `bots/shared/bridge.ts` (TG бот/SG) — новый `/gamepass-by-id` endpoint
+2. Деплой Next.js (RF сайт) — новый `lookup` action + frontend изменения
+3. Убедиться что в Coolify (RF, RobloxBankWeb) заданы:
+   - `VALIDATOR_SOURCE_URL=http://5.223.95.11:3000`
+   - `VALIDATOR_KEY=<то же значение что на SG>`
+   - `BOSSROBUX_TOKEN=<токен>`

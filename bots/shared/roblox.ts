@@ -566,6 +566,52 @@ export interface GamepassSearchResult {
  * Filter: isForSale !== false (keep if true OR if field absent — assume for sale).
  * This avoids the ?? false bug where missing field drops all results.
  */
+/**
+ * Returns purchase-ready data for a single gamepass by its ID.
+ * Used when admin clicks "Выкупить через Boss Robux" on a specific order.
+ */
+export async function getGamepassForPurchase(gamepassId: string): Promise<GamepassSearchResult | null> {
+  try {
+    const uRes = await rFetch(`https://apis.roblox.com/universes/v1/assets/${gamepassId}/universe`);
+    if (!uRes.ok) return null;
+    const uData = await uRes.json().catch(() => null);
+    const universeId: number | undefined = uData?.universeId;
+    if (!universeId) return null;
+
+    const [gRes, pRes] = await Promise.all([
+      rFetch(`https://games.roblox.com/v1/games?universeIds=${universeId}`),
+      rFetch(`https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes?passView=Full&pageSize=50`),
+    ]);
+
+    const gData  = gRes.ok  ? await gRes.json().catch(() => null)  : null;
+    const pData  = pRes.ok  ? await pRes.json().catch(() => null)  : null;
+    const placeId: number = gData?.data?.[0]?.rootPlaceId ?? 0;
+    const gp = (pData?.gamePasses ?? []).find((p: any) => String(p.id) === String(gamepassId));
+    if (!gp) return null;
+
+    const tRes = await rFetch(
+      `https://thumbnails.roblox.com/v1/game-passes?gamePassIds=${gamepassId}&size=150x150&format=Png&isCircular=false`
+    ).catch(() => null);
+    const tData = tRes?.ok ? await tRes.json().catch(() => null) : null;
+    const image = tData?.data?.[0]?.imageUrl
+      ?? `https://www.roblox.com/asset-thumbnail/image?assetId=${gamepassId}&width=150&height=150&format=png`;
+
+    console.log(`[Roblox/bots] getGamepassForPurchase: id=${gamepassId} → "${gp.name}" ${gp.price}R$ productId=${gp.productId}`);
+    return {
+      gamepassId: gp.id,
+      productId:  gp.productId ?? 0,
+      placeId,
+      name:       gp.name ?? gp.displayName ?? "Gamepass",
+      robux:      gp.price ?? 0,
+      sellerName: gp.creator?.name ?? "Unknown",
+      image,
+    };
+  } catch (err: any) {
+    console.error("[Roblox/bots] getGamepassForPurchase:", err?.message ?? err);
+    return null;
+  }
+}
+
 export async function getUserGamepasses(username: string): Promise<GamepassSearchResult[]> {
   try {
     const uRes = await rFetch("https://users.roblox.com/v1/usernames/users", {

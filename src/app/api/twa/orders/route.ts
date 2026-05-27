@@ -25,7 +25,12 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "desc" },
       skip,
       take: limit,
-      include: {
+      select: {
+        id: true, amount: true, gamepassUrl: true, status: true,
+        platform: true, wbCode: true, rejectionReason: true,
+        isDirectOrder: true, paymentDetails: true,
+        createdAt: true, updatedAt: true,
+        customerRobloxUser: true,
         user: { select: { tgId: true, vkId: true, name: true } },
       },
     }),

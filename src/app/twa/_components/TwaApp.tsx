@@ -34,11 +34,12 @@ const SCREEN_TITLES: Record<Screen, string> = {
 };
 
 export default function TwaApp() {
-  const [auth,         setAuth]         = useState<"loading" | "ok" | "error">("loading");
-  const [token,        setToken]        = useState<string | null>(null);
-  const [screen,       setScreen]       = useState<Screen>("dashboard");
-  const [debugMsg,     setDebugMsg]     = useState("");
-  const [ordersBadge,  setOrdersBadge]  = useState(0);
+  const [auth,               setAuth]               = useState<"loading" | "ok" | "error">("loading");
+  const [token,              setToken]              = useState<string | null>(null);
+  const [screen,             setScreen]             = useState<Screen>("dashboard");
+  const [debugMsg,           setDebugMsg]           = useState("");
+  const [ordersBadge,        setOrdersBadge]        = useState(0);
+  const [bossrobuxPreloadId, setBossrobuxPreloadId] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -178,9 +179,9 @@ export default function TwaApp() {
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
         {screen === "dashboard"  && <Dashboard      {...sp} />}
-        {screen === "orders"     && <OrdersScreen   {...sp} onGoToBossrobux={() => setScreen("bossrobux")} />}
+        {screen === "orders"     && <OrdersScreen   {...sp} onGoToBossrobux={(gpId) => { setBossrobuxPreloadId(gpId); setScreen("bossrobux"); }} />}
         {screen === "wb"         && <WbScreen       {...sp} />}
-        {screen === "bossrobux"  && <BossrobuxScreen {...sp} />}
+        {screen === "bossrobux"  && <BossrobuxScreen {...sp} preloadGamepassId={bossrobuxPreloadId} onPreloadConsumed={() => setBossrobuxPreloadId(undefined)} />}
         {screen === "settings"   && <SettingsScreen  {...sp} />}
       </div>
 

@@ -202,9 +202,10 @@ function PurchaseSheet({
 }) {
   const [phase, setPhase] = useState<SheetPhase>("idle");
   const [errMsg, setErrMsg] = useState("");
+  const [okMsg,  setOkMsg]  = useState("");
 
   useEffect(() => {
-    if (open) { setPhase("idle"); setErrMsg(""); }
+    if (open) { setPhase("idle"); setErrMsg(""); setOkMsg(""); }
   }, [open, gp?.gamepassId]);
 
   async function buy() {
@@ -218,6 +219,7 @@ function PurchaseSheet({
       });
       const d = await res.json();
       if (d.success) {
+        setOkMsg(d.msg ?? "");
         setPhase("ok");
         onPurchased(gp.robux);
       } else {
@@ -269,9 +271,19 @@ function PurchaseSheet({
               <div style={{ textAlign: "center" as const, padding: "28px 0 8px" }}>
                 <div style={{ fontSize: 60, marginBottom: 14, lineHeight: 1 }}>✅</div>
                 <div style={{ fontSize: 22, fontWeight: 700, color: C.green, marginBottom: 8 }}>Выкуплено!</div>
-                <div style={{ fontSize: 15, color: C.sec, marginBottom: 28 }}>
+                <div style={{ fontSize: 15, color: C.sec, marginBottom: 8 }}>
                   {gp.name} · {gp.robux.toLocaleString("ru-RU")} R$
                 </div>
+                {okMsg ? (
+                  <div style={{
+                    background: "rgba(48,209,88,0.1)", border: "1px solid rgba(48,209,88,0.25)",
+                    borderRadius: 10, padding: "8px 12px", marginBottom: 24,
+                    color: C.green, fontSize: 12, fontFamily: "monospace", textAlign: "left" as const,
+                    wordBreak: "break-word" as const,
+                  }}>
+                    {okMsg}
+                  </div>
+                ) : <div style={{ marginBottom: 24 }} />}
                 <button
                   onClick={onClose}
                   style={{
@@ -354,7 +366,15 @@ function IdRow({ label, value, last }: { label: string; value: string; last?: bo
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 
-export default function BossrobuxScreen({ token }: { token: string }) {
+export default function BossrobuxScreen({
+  token,
+  preloadGamepassId,
+  onPreloadConsumed,
+}: {
+  token: string;
+  preloadGamepassId?: string;
+  onPreloadConsumed?: () => void;
+}) {
   const [rate,     setRate]     = useState<Rate | null>(null);
   const [rateErr,  setRateErr]  = useState("");
   const [fetching, setFetching] = useState(false);
@@ -370,6 +390,7 @@ export default function BossrobuxScreen({ token }: { token: string }) {
 
   const rateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const ageIntervalRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const preloadHandled  = useRef<string | undefined>(undefined);
 
   const fetchRate = useCallback(async () => {
     setFetching(true);
@@ -390,6 +411,34 @@ export default function BossrobuxScreen({ token }: { token: string }) {
       if (ageIntervalRef.current)  clearInterval(ageIntervalRef.current);
     };
   }, [fetchRate]);
+
+  // Auto-lookup gamepass from order card and open purchase sheet directly
+  useEffect(() => {
+    if (!preloadGamepassId || preloadHandled.current === preloadGamepassId) return;
+    preloadHandled.current = preloadGamepassId;
+    onPreloadConsumed?.();
+
+    setSearching(true);
+    setSearchErr("");
+    setResults(null);
+
+    fetch("/api/twa/bossrobux", {
+      method: "POST",
+      headers: authH(token),
+      body: JSON.stringify({ action: "lookup", gamepassId: preloadGamepassId }),
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (d.error || !d.gamepass) {
+          setSearchErr(d.error ?? "Геймпасс не найден");
+        } else {
+          setSelected(d.gamepass);
+          setSheetOpen(true);
+        }
+      })
+      .catch(() => { setSearchErr("Ошибка сети при загрузке геймпасса"); })
+      .finally(() => { setSearching(false); });
+  }, [preloadGamepassId, token, onPreloadConsumed]);
 
   async function handleSearch() {
     if (!username.trim() || searching) return;
@@ -417,6 +466,11 @@ export default function BossrobuxScreen({ token }: { token: string }) {
   function closeSheet() {
     setSheetOpen(false);
     setTimeout(() => setSelected(null), 380);
+  }
+
+  function closeSheetAndRefreshBalance() {
+    closeSheet();
+    fetchRate();
   }
 
   function clearSearch() {
@@ -496,6 +550,7 @@ export default function BossrobuxScreen({ token }: { token: string }) {
         onClose={closeSheet} token={token}
         onPurchased={robux => {
           if (rate) setRate({ ...rate, robux_total: Math.max(0, rate.robux_total - robux) });
+          fetchRate();
         }}
       />
     </div>

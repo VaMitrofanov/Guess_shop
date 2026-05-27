@@ -40,6 +40,37 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   if (!body?.action) return NextResponse.json({ error: "action required" }, { status: 400 });
 
+  if (body.action === "lookup") {
+    const gamepassId = String(body.gamepassId ?? "").trim();
+    if (!gamepassId || !/^\d{1,20}$/.test(gamepassId)) {
+      return NextResponse.json({ error: "gamepassId required" }, { status: 400 });
+    }
+
+    const bridgeUrl = process.env.VALIDATOR_SOURCE_URL?.trim();
+    if (!bridgeUrl) {
+      return NextResponse.json({ error: "Поиск недоступен — VALIDATOR_SOURCE_URL не задан" });
+    }
+
+    try {
+      const res = await fetch(
+        `${bridgeUrl.replace(/\/+$/, "")}/gamepass-by-id?id=${gamepassId}`,
+        {
+          headers: process.env.VALIDATOR_KEY
+            ? { "x-validator-key": process.env.VALIDATOR_KEY }
+            : {},
+          signal: AbortSignal.timeout(25_000),
+        }
+      );
+      const data = await res.json().catch(() => null);
+      if (!data?.ok) {
+        return NextResponse.json({ error: data?.error ?? "Ошибка поиска" });
+      }
+      return NextResponse.json({ gamepass: data.gamepass ?? null });
+    } catch (e: any) {
+      return NextResponse.json({ error: e.message }, { status: 502 });
+    }
+  }
+
   if (body.action === "search") {
     const username = String(body.username ?? "").trim();
     if (!username) return NextResponse.json({ error: "username required" }, { status: 400 });
