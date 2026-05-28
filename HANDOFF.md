@@ -671,28 +671,40 @@ Roblox API принимает только `limit=10|25|50` → всегда 400
 
 ---
 
-### Сессия 2026-05-28 (финал) — TWA Orders: статус отзыва (коммит `be2a8d3`)
+### Сессия 2026-05-28 (финал) — TWA Orders: статус отзыва + чистка карточки (коммиты `be2a8d3`, `d05b8be`, `114c292`)
 
-#### Что добавлено
+#### Что добавлено / изменено
 
-**TWA дашборд → вкладка "Заказы"** теперь показывает статус отзыва WB для каждого завершённого заказа.
+**1. Статус отзыва WB в expanded карточке заказа**
 
 Логика:
 - Отзыв запрашивается только у **первого** COMPLETED WB-заказа пользователя (tier 1 в `notifyUserCompleted`)
 - Прямые заказы (`isDirectOrder=true`) и все повторные WB-заказы — без отзыва (`reviewStatus=null`, строка не показывается)
 - Статусы: `"PENDING"` (ожидается) / `"SUBMITTED"` (бонус начислен, `reviewBonusClaimed=true`)
 
-**Файлы:**
-- `src/app/api/twa/orders/route.ts` — post-processing после основного запроса:
-  1. Батч-запрос `WbCode.findMany` → получает `reviewBonusClaimed` для всех кодов на странице
-  2. `WbOrder.findFirst` per unique userId → определяет самый ранний COMPLETED WB заказ (= первый)
-  3. Проставляет `reviewStatus` на каждый ордер
+`src/app/api/twa/orders/route.ts` — post-processing после основного запроса:
+1. Батч-запрос `WbCode.findMany` → получает `reviewBonusClaimed` для всех кодов на странице
+2. `WbOrder.findFirst` per unique userId → определяет самый ранний COMPLETED WB заказ (= первый)
+3. Проставляет `reviewStatus` на каждый ордер
 
-- `src/app/twa/_components/screens/OrdersScreen.tsx`:
-  - Collapsed карточка: маленький бейдж `📸 отзыв` (жёлтый) или `⭐ отзыв` (зелёный) рядом со статусом
-  - Expanded карточка: строка "Отзыв WB" с текстом `⭐ Получен · +100 R$ начислено` или `📸 Ожидается от пользователя`
+`src/app/twa/_components/screens/OrdersScreen.tsx`:
+- Collapsed карточка: бейдж `📸 отзыв` (жёлтый) или `⭐ отзыв` (зелёный) рядом со статусом
+- Expanded карточка: строка "Отзыв WB" → `⭐ Получен · +100 R$ начислено` или `📸 Ожидается от пользователя`
 
-**Деплой:** коммит `be2a8d3` запушен в main → Coolify автодеплой сайта на RF (uuid `z10ws7m1q45h281zwedmhei4`). TG/VK боты не затронуты.
+**2. Чистка expanded-карточки**
+
+- **Убрано:** строка "ID заказа" с копированием — не нужна
+- **Добавлено:** строка "Пользователь" — VK-ссылка `vk.com/id{id}` + копирование ID, или TG ID + копирование
+- **Добавлено:** строка "Цена покупки" — `amount × purchaseRate` ₽, отображается только когда `purchaseRate` задан (TG бот ставит при завершении)
+  - В будущем: TWA тоже будет ставить при выкупе через BossRobux API
+
+**Деплой:** все коммиты запушены в main. RF не тянет GitHub автоматически — нужен ручной тригер:
+```bash
+COOLIFY_TOKEN=<токен> curl -s -X POST \
+  "http://89.110.94.117:8000/api/v1/deploy?uuid=z10ws7m1q45h281zwedmhei4&force=true" \
+  -H "Authorization: Bearer $COOLIFY_TOKEN"
+```
+TG/VK боты не затронуты.
 
 ---
 
