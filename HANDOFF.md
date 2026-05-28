@@ -458,7 +458,7 @@ const denomination = wbCodeRecord?.denomination ?? 0;
 - ✅ Loyalty badges: повторный клиент / VIP (5+ заказов)
 - ✅ Subscription gate (TG_CHANNEL_ID, опционально)
 - ✅ Bridge для Roblox API + TG API через Singapore
-- ✅ Admin hub: Orders, Stats, WB, System, Rates, AutoBuy
+- ✅ Admin hub: Orders (со статусом отзыва WB), Stats, WB, System, Rates, AutoBuy
 - ✅ TWA дашборд для WB-продавца (Wildberries API интеграция)
 - ✅ Уведомления о поддержке: любой тупик → кнопка → alert в ADMIN_IDS
 - ✅ validationSkipped: если Roblox недоступен — принять с предупреждением
@@ -668,6 +668,31 @@ Roblox API принимает только `limit=10|25|50` → всегда 400
 |----|-----|--------|----------------------|
 | `1860607091` | `lokomotiv_2018` | `GuestProhibited` | ✅ Пропускается |
 | `1855988517` | `xxgkl_4` | `ContextualPlayabilityUnrated` | ❌ Блокируется (unrated игра) |
+
+---
+
+### Сессия 2026-05-28 (финал) — TWA Orders: статус отзыва (коммит `be2a8d3`)
+
+#### Что добавлено
+
+**TWA дашборд → вкладка "Заказы"** теперь показывает статус отзыва WB для каждого завершённого заказа.
+
+Логика:
+- Отзыв запрашивается только у **первого** COMPLETED WB-заказа пользователя (tier 1 в `notifyUserCompleted`)
+- Прямые заказы (`isDirectOrder=true`) и все повторные WB-заказы — без отзыва (`reviewStatus=null`, строка не показывается)
+- Статусы: `"PENDING"` (ожидается) / `"SUBMITTED"` (бонус начислен, `reviewBonusClaimed=true`)
+
+**Файлы:**
+- `src/app/api/twa/orders/route.ts` — post-processing после основного запроса:
+  1. Батч-запрос `WbCode.findMany` → получает `reviewBonusClaimed` для всех кодов на странице
+  2. `WbOrder.findFirst` per unique userId → определяет самый ранний COMPLETED WB заказ (= первый)
+  3. Проставляет `reviewStatus` на каждый ордер
+
+- `src/app/twa/_components/screens/OrdersScreen.tsx`:
+  - Collapsed карточка: маленький бейдж `📸 отзыв` (жёлтый) или `⭐ отзыв` (зелёный) рядом со статусом
+  - Expanded карточка: строка "Отзыв WB" с текстом `⭐ Получен · +100 R$ начислено` или `📸 Ожидается от пользователя`
+
+**Деплой:** коммит `be2a8d3` запушен в main → Coolify автодеплой сайта на RF (uuid `z10ws7m1q45h281zwedmhei4`). TG/VK боты не затронуты.
 
 ---
 
