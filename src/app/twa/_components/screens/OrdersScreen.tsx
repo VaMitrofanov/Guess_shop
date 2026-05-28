@@ -155,6 +155,8 @@ function ActionBar({
   const showComplete = order.status === "PENDING" || order.status === "IN_PROGRESS";
   const showReject   = ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS"].includes(order.status);
 
+  const hasMainAction = showTakeWork || showComplete;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ display: "flex", gap: 8 }}>
@@ -171,21 +173,38 @@ function ActionBar({
           <button
             onClick={() => doAction("complete")}
             disabled={loading}
-            style={{ flex: 1, padding: "11px", borderRadius: 12, border: "none", background: C.green, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.7 : 1 }}
+            style={{ flex: 2, padding: "11px", borderRadius: 12, border: "none", background: C.green, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.7 : 1 }}
           >
             {loading ? "…" : "✅ Готово"}
           </button>
         )}
-        {showReject && (
+        {showReject && hasMainAction && (
           <button
             onClick={() => setRejectMode(true)}
             disabled={loading}
-            style={{ flex: showTakeWork || showComplete ? 1 : 2, padding: "11px", borderRadius: 12, border: "none", background: C.red + "20", color: C.red, fontSize: 14, fontWeight: 600, cursor: "pointer" }}
+            style={{
+              flexShrink: 0, width: 44, padding: "11px 0", borderRadius: 12,
+              border: `1px solid ${C.red}55`, background: "transparent",
+              color: C.red, fontSize: 18, lineHeight: 1, cursor: "pointer",
+            }}
           >
-            ❌ Отклонить
+            ✕
           </button>
         )}
       </div>
+      {showReject && !hasMainAction && (
+        <button
+          onClick={() => setRejectMode(true)}
+          disabled={loading}
+          style={{
+            width: "100%", padding: "10px", borderRadius: 12,
+            border: `1px solid ${C.red}55`, background: "transparent",
+            color: C.red, fontSize: 14, fontWeight: 500, cursor: "pointer",
+          }}
+        >
+          ❌ Отклонить
+        </button>
+      )}
       {err && <div style={{ color: C.red, fontSize: 12 }}>{err}</div>}
     </div>
   );
@@ -207,10 +226,11 @@ function OrderCard({
   const isActive  = ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS"].includes(order.status);
   const isHistory = ["COMPLETED", "REJECTED"].includes(order.status);
 
+  const realName = order.user.name && order.user.name !== "VK User" ? order.user.name : null;
   const userHandle = order.user.vkId
-    ? `VK · ${order.user.vkId}${order.user.name ? ` · ${order.user.name}` : ""}`
+    ? (realName ?? `VK · ${order.user.vkId}`)
     : order.user.tgId
-    ? `TG · ${order.user.tgId}${order.user.name ? ` · ${order.user.name}` : ""}`
+    ? (realName ?? `TG · ${order.user.tgId}`)
     : "—";
 
   const displayCreator = order.robloxUsername
@@ -339,30 +359,34 @@ function OrderCard({
             </InfoRow>
           )}
 
-          {/* User contact (in expanded history) */}
-          {detailsOpen && (
-            <InfoRow icon="👥">
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {order.user.vkId ? (
-                  <>
-                    <a
-                      href={`https://vk.com/id${order.user.vkId}`}
-                      target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
-                      style={{ color: C.blue, fontSize: 13 }}
-                    >
-                      VK {order.user.vkId}{order.user.name ? ` · ${order.user.name}` : ""}
-                    </a>
-                    <CopyBtn text={order.user.vkId} />
-                  </>
-                ) : order.user.tgId ? (
-                  <>
-                    <span style={{ fontSize: 13, color: "#e5e5ea" }}>TG {order.user.tgId}{order.user.name ? ` · ${order.user.name}` : ""}</span>
-                    <CopyBtn text={order.user.tgId} />
-                  </>
-                ) : <span style={{ fontSize: 13, color: C.muted }}>—</span>}
-              </div>
-            </InfoRow>
-          )}
+          {/* User contact — always visible in body */}
+          <InfoRow icon="👥">
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const }}>
+              {order.user.vkId ? (
+                <>
+                  <a
+                    href={`https://vk.com/id${order.user.vkId}`}
+                    target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+                    style={{ color: C.blue, fontSize: 13, fontWeight: 500 }}
+                  >
+                    {order.user.name && order.user.name !== "VK User" ? order.user.name : `VK · ${order.user.vkId}`}
+                  </a>
+                  <CopyBtn text={order.user.vkId} />
+                </>
+              ) : order.user.tgId ? (
+                <>
+                  <a
+                    href={`https://t.me/${order.user.tgId}`}
+                    target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+                    style={{ color: C.blue, fontSize: 13, fontWeight: 500 }}
+                  >
+                    {order.user.name ? order.user.name : `TG · ${order.user.tgId}`}
+                  </a>
+                  <CopyBtn text={order.user.tgId} />
+                </>
+              ) : <span style={{ fontSize: 13, color: C.muted }}>—</span>}
+            </div>
+          </InfoRow>
 
           {/* Purchase cost */}
           {order.purchaseRate != null && (

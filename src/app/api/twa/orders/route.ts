@@ -39,6 +39,36 @@ export async function GET(req: NextRequest) {
     ).then(entries => Object.fromEntries(entries)),
   ]);
 
+  // Enrich VK users whose stored name is generic/missing with real first+last name from VK API
+  const vkEnrichOrders = orders.filter((o: any) => o.user?.vkId && (!o.user.name || o.user.name === "VK User"));
+  if (vkEnrichOrders.length > 0 && process.env.VK_TOKEN) {
+    const vkIds = [...new Set<string>(vkEnrichOrders.map((o: any) => String(o.user.vkId)))];
+    try {
+      const params = new URLSearchParams({
+        user_ids:     vkIds.join(","),
+        fields:       "first_name,last_name",
+        access_token: process.env.VK_TOKEN,
+        v:            "5.131",
+      });
+      const vkRes  = await fetch("https://api.vk.com/method/users.get", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body:   params.toString(),
+      });
+      const vkJson = (await vkRes.json()) as any;
+      const nameMap = new Map<string, string>(
+        (vkJson?.response ?? [])
+          .filter((u: any) => u?.id && u?.first_name)
+          .map((u: any) => [String(u.id), [u.first_name, u.last_name].filter(Boolean).join(" ")] as [string, string])
+      );
+      for (const order of orders) {
+        if (order.user?.vkId && nameMap.has(String(order.user.vkId))) {
+          order.user = { ...order.user, name: nameMap.get(String(order.user.vkId))! };
+        }
+      }
+    } catch { /* non-fatal — keep stored names */ }
+  }
+
   // Attach reviewStatus for COMPLETED WB orders (non-direct only, first order per user gets review)
   const completedWbOrders = orders.filter((o: any) => o.status === "COMPLETED" && !o.isDirectOrder);
   if (completedWbOrders.length > 0) {
