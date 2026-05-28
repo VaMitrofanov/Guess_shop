@@ -39,6 +39,44 @@ export async function GET(req: NextRequest) {
     ).then(entries => Object.fromEntries(entries)),
   ]);
 
+  // Attach reviewStatus for COMPLETED WB orders (non-direct only, first order per user gets review)
+  const completedWbOrders = orders.filter((o: any) => o.status === "COMPLETED" && !o.isDirectOrder);
+  if (completedWbOrders.length > 0) {
+    const wbCodeValues = completedWbOrders.map((o: any) => o.wbCode as string);
+    const codeRecords = await (prisma as any).wbCode.findMany({
+      where: { code: { in: wbCodeValues } },
+      select: { code: true, reviewBonusClaimed: true },
+    });
+    const reviewClaimedMap = new Map<string, boolean>(
+      codeRecords.map((c: any) => [c.code as string, c.reviewBonusClaimed as boolean])
+    );
+
+    const uniqueUserIds = [...new Set<string>(completedWbOrders.map((o: any) => o.userId as string))];
+    const firstOrderResults = await Promise.all(
+      uniqueUserIds.map((uid: string) =>
+        (prisma as any).wbOrder.findFirst({
+          where: { userId: uid, status: "COMPLETED", isDirectOrder: false },
+          orderBy: { createdAt: "asc" },
+          select: { id: true, userId: true },
+        })
+      )
+    );
+    const firstOrderByUser = new Map<string, string>(
+      firstOrderResults.filter(Boolean).map((o: any) => [o.userId as string, o.id as string])
+    );
+
+    for (const order of orders) {
+      if (order.status === "COMPLETED" && !order.isDirectOrder) {
+        const isFirstOrder = firstOrderByUser.get(order.userId) === order.id;
+        order.reviewStatus = isFirstOrder
+          ? (reviewClaimedMap.get(order.wbCode) === true ? "SUBMITTED" : "PENDING")
+          : null;
+      } else {
+        order.reviewStatus = null;
+      }
+    }
+  }
+
   return NextResponse.json({ orders, total, counts, page, pages: Math.ceil(total / limit) });
 }
 

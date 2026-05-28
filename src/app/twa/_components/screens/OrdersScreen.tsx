@@ -24,6 +24,7 @@ interface Order {
   createdAt: string;
   updatedAt: string;
   robloxUsername: string | null;
+  reviewStatus: "PENDING" | "SUBMITTED" | null;
   user: { tgId: string | null; vkId: string | null; name: string | null };
 }
 
@@ -219,7 +220,7 @@ function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order;
       {/* Main row */}
       <div style={{ padding: "12px 14px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" as const }}>
             <span style={{
               background: meta.color + "22", color: meta.color, fontSize: 11,
               fontWeight: 600, padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap" as const,
@@ -229,6 +230,16 @@ function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order;
             {order.isDirectOrder && (
               <span style={{ fontSize: 10, color: C.blue, background: C.blue + "22", padding: "2px 6px", borderRadius: 20 }}>
                 прямой
+              </span>
+            )}
+            {order.reviewStatus === "PENDING" && (
+              <span style={{ fontSize: 10, color: C.yellow, background: C.yellow + "22", padding: "2px 6px", borderRadius: 20, whiteSpace: "nowrap" as const }}>
+                📸 отзыв
+              </span>
+            )}
+            {order.reviewStatus === "SUBMITTED" && (
+              <span style={{ fontSize: 10, color: C.green, background: C.green + "22", padding: "2px 6px", borderRadius: 20, whiteSpace: "nowrap" as const }}>
+                ⭐ отзыв
               </span>
             )}
           </div>
@@ -340,6 +351,15 @@ function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order;
               <CopyBtn text={order.id} />
             </div>
           </DetailRow>
+
+          {/* Review status — only for first WB order */}
+          {order.reviewStatus != null && (
+            <DetailRow label="Отзыв WB">
+              {order.reviewStatus === "SUBMITTED"
+                ? <span style={{ color: C.green, fontSize: 13, fontWeight: 600 }}>⭐ Получен · +100 R$ начислено</span>
+                : <span style={{ color: C.yellow, fontSize: 13 }}>📸 Ожидается от пользователя</span>}
+            </DetailRow>
+          )}
 
           {/* Timestamps */}
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, paddingTop: 4 }}>
