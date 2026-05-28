@@ -71,7 +71,7 @@ export default function BottomNav({
             key={id}
             onClick={() => onChange(id)}
             style={{
-              flex: 1, padding: "9px 1px 7px", border: "none", background: "none",
+              flex: 1, padding: "8px 1px 7px", border: "none", background: "none",
               cursor: "pointer", display: "flex", flexDirection: "column",
               alignItems: "center", gap: 3,
               color: isActive ? "#bf5af2" : "#636366",
@@ -79,29 +79,32 @@ export default function BottomNav({
               position: "relative",
             }}
           >
-            {isActive && (
-              <div style={{
-                position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)",
-                width: 28, height: 2, background: "#bf5af2", borderRadius: "0 0 2px 2px",
-              }} />
-            )}
-            <div style={{ position: "relative" as const }}>
-              <Icon />
-              {badge > 0 && (
-                <div style={{
-                  position: "absolute", top: -4, right: -6,
-                  background: "#ff453a", color: "#fff",
-                  fontSize: 9, fontWeight: 700, lineHeight: 1,
-                  padding: "2px 4px", borderRadius: 8, minWidth: 14,
-                  textAlign: "center" as const,
-                }}>
-                  {badge > 99 ? "99+" : badge}
-                </div>
-              )}
+            <div style={{
+              position: "relative",
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+              background: isActive ? "rgba(191,90,242,0.15)" : "transparent",
+              borderRadius: 14,
+              padding: isActive ? "5px 14px" : "5px 14px",
+              transition: "background 0.15s",
+            }}>
+              <div style={{ position: "relative" as const }}>
+                <Icon />
+                {badge > 0 && (
+                  <div style={{
+                    position: "absolute", top: -4, right: -6,
+                    background: "#ff453a", color: "#fff",
+                    fontSize: 9, fontWeight: 700, lineHeight: 1,
+                    padding: "2px 4px", borderRadius: 8, minWidth: 14,
+                    textAlign: "center" as const,
+                  }}>
+                    {badge > 99 ? "99+" : badge}
+                  </div>
+                )}
+              </div>
+              <span style={{ fontSize: 10, fontWeight: isActive ? 600 : 400, letterSpacing: 0.1 }}>
+                {label}
+              </span>
             </div>
-            <span style={{ fontSize: 9, fontWeight: isActive ? 600 : 400, letterSpacing: 0.1 }}>
-              {label}
-            </span>
           </button>
         );
       })}
