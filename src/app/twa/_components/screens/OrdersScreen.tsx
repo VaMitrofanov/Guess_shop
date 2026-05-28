@@ -21,6 +21,7 @@ interface Order {
   rejectionReason: string | null;
   isDirectOrder: boolean;
   paymentDetails: string | null;
+  purchaseRate: number | null;
   createdAt: string;
   updatedAt: string;
   robloxUsername: string | null;
@@ -314,6 +315,33 @@ function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order;
             </button>
           )}
 
+          {/* User contact */}
+          <DetailRow label="Пользователь">
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {order.user.vkId ? (
+                <>
+                  <a
+                    href={`https://vk.com/id${order.user.vkId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={e => e.stopPropagation()}
+                    style={{ color: C.blue, fontSize: 13 }}
+                  >
+                    VK {order.user.vkId}{order.user.name ? ` · ${order.user.name}` : ""}
+                  </a>
+                  <CopyBtn text={order.user.vkId} />
+                </>
+              ) : order.user.tgId ? (
+                <>
+                  <span style={{ fontSize: 13, color: "#e5e5ea" }}>TG {order.user.tgId}{order.user.name ? ` · ${order.user.name}` : ""}</span>
+                  <CopyBtn text={order.user.tgId} />
+                </>
+              ) : (
+                <span style={{ fontSize: 13, color: C.muted }}>—</span>
+              )}
+            </div>
+          </DetailRow>
+
           {/* WB Code */}
           <DetailRow label="Код WB">
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -322,10 +350,17 @@ function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order;
             </div>
           </DetailRow>
 
-          {/* Platform */}
-          <DetailRow label="Платформа">
-            <span style={{ fontSize: 13 }}>{order.platform === "TELEGRAM" ? "Telegram" : order.platform === "VK" ? "VK" : order.platform}</span>
-          </DetailRow>
+          {/* Purchase cost — set by TG bot on complete, future: TWA+BossRobux */}
+          {order.purchaseRate != null && (
+            <DetailRow label="Цена покупки">
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#fff" }}>
+                {Math.round(order.amount * order.purchaseRate)} ₽
+                <span style={{ fontSize: 11, color: C.sec, fontWeight: 400, marginLeft: 6 }}>
+                  по {order.purchaseRate} ₽/R$
+                </span>
+              </span>
+            </DetailRow>
+          )}
 
           {/* Payment details */}
           {order.paymentDetails && (
@@ -343,14 +378,6 @@ function OrderCard({ order, token, onGoToBossrobux, onRefresh }: { order: Order;
               <span style={{ fontSize: 12, color: C.red }}>{order.rejectionReason}</span>
             </DetailRow>
           )}
-
-          {/* Order ID */}
-          <DetailRow label="ID заказа">
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontFamily: "monospace", fontSize: 11, color: C.muted }}>{order.id}</span>
-              <CopyBtn text={order.id} />
-            </div>
-          </DetailRow>
 
           {/* Review status — only for first WB order */}
           {order.reviewStatus != null && (
