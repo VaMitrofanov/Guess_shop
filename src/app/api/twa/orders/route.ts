@@ -79,14 +79,17 @@ export async function GET(req: NextRequest) {
     ).then(entries => Object.fromEntries(entries)),
   ]);
 
-  // Enrich VK users whose stored name is generic/missing with real first+last name from VK API
-  const vkEnrichOrders = orders.filter((o: any) => o.user?.vkId && (!o.user.name || o.user.name === "VK User"));
+  // Enrich VK users whose stored name/username is generic or missing.
+  // Now persists results back to the User row so subsequent requests skip the API call.
+  const vkEnrichOrders = orders.filter((o: any) =>
+    o.user?.vkId && (!o.user.name || o.user.name === "VK User" || !o.user.username)
+  );
   if (vkEnrichOrders.length > 0 && process.env.VK_TOKEN) {
     const vkIds = [...new Set<string>(vkEnrichOrders.map((o: any) => String(o.user.vkId)))];
     try {
       const params = new URLSearchParams({
         user_ids:     vkIds.join(","),
-        fields:       "first_name,last_name",
+        fields:       "first_name,last_name,screen_name",
         access_token: process.env.VK_TOKEN,
         v:            "5.131",
       });
@@ -96,18 +99,65 @@ export async function GET(req: NextRequest) {
         body:   params.toString(),
       });
       const vkJson = (await vkRes.json()) as any;
-      const nameMap = new Map<string, string>(
-        (vkJson?.response ?? [])
-          .filter((u: any) => u?.id && u?.first_name)
-          .map((u: any) => [String(u.id), [u.first_name, u.last_name].filter(Boolean).join(" ")] as [string, string])
-      );
+      const map = new Map<string, { name: string; username?: string }>();
+      for (const u of (vkJson?.response ?? [])) {
+        if (!u?.id || !u?.first_name) continue;
+        const fullName = [u.first_name, u.last_name].filter(Boolean).join(" ");
+        const username = u.screen_name && u.screen_name !== `id${u.id}` ? String(u.screen_name) : undefined;
+        map.set(String(u.id), { name: fullName, username });
+      }
+      // Update the in-memory orders and persist to DB (best-effort).
+      const userIdsToPersist = new Set<string>();
       for (const order of orders) {
-        if (order.user?.vkId && nameMap.has(String(order.user.vkId))) {
-          order.user = { ...order.user, name: nameMap.get(String(order.user.vkId))! };
-        }
+        const v = order.user?.vkId ? map.get(String(order.user.vkId)) : null;
+        if (!v) continue;
+        order.user = { ...order.user, name: v.name, username: v.username ?? order.user.username ?? null };
+        userIdsToPersist.add(order.userId);
+      }
+      if (userIdsToPersist.size > 0) {
+        await Promise.all([...userIdsToPersist].map(async (uid: string) => {
+          const order = orders.find((o: any) => o.userId === uid);
+          if (!order?.user?.vkId) return;
+          const v = map.get(String(order.user.vkId));
+          if (!v) return;
+          try {
+            await (prisma as any).user.update({
+              where: { id: uid },
+              data: {
+                name: v.name,
+                ...(v.username ? { username: v.username } : {}),
+              },
+            });
+          } catch { /* race / drift — ignore */ }
+        }));
       }
     } catch { /* non-fatal — keep stored names */ }
   }
+
+  // ── Sequential order number within an identity cluster ───────────────────
+  // Identity cluster = union of {tgId, vkId, robloxUsername}. We count how many
+  // orders in the same cluster were created up to and including this one. The
+  // same human ordering through TG and VK with the same Roblox nickname is
+  // collapsed into one ledger — that's the manager's mental model.
+  await Promise.all(orders.map(async (order: any) => {
+    const orClauses: any[] = [];
+    if (order.user?.tgId)   orClauses.push({ user: { tgId: order.user.tgId } });
+    if (order.user?.vkId)   orClauses.push({ user: { vkId: order.user.vkId } });
+    if (order.robloxUsername) orClauses.push({ robloxUsername: order.robloxUsername });
+    if (orClauses.length === 0) {
+      order.userOrderNumber = 1;
+      order.userOrderTotal  = 1;
+      return;
+    }
+    const [earlier, total] = await Promise.all([
+      (prisma as any).wbOrder.count({
+        where: { AND: [{ OR: orClauses }, { createdAt: { lt: order.createdAt } }] },
+      }),
+      (prisma as any).wbOrder.count({ where: { OR: orClauses } }),
+    ]);
+    order.userOrderNumber = earlier + 1;
+    order.userOrderTotal  = total;
+  }));
 
   // Attach reviewStatus for COMPLETED WB orders (non-direct only, first order per user gets review)
   const completedWbOrders = orders.filter((o: any) => o.status === "COMPLETED" && !o.isDirectOrder);

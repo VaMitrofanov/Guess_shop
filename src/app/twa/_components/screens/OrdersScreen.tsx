@@ -44,6 +44,8 @@ interface Order {
   updatedAt: string;
   robloxUsername: string | null;
   reviewStatus: "PENDING" | "SUBMITTED" | null;
+  userOrderNumber: number | null;
+  userOrderTotal:  number | null;
   user: {
     tgId:                 string | null;
     vkId:                 string | null;
@@ -198,6 +200,22 @@ function Chip({ children, color }: { children: React.ReactNode; color: string })
       {children}
     </span>
   );
+}
+
+/* OrderNumberChip — shows "N/Total" where N is the cluster-relative position.
+   Cluster = same person across TG/VK/Roblox identity union. Pale-blue for 1st,
+   neutral for 2-4, gold for 5+ (VIP). */
+function OrderNumberChip({ n, total }: { n: number | null; total: number | null }) {
+  if (!n || !total) return null;
+  const isFirst = n === 1 && total === 1;
+  const isVip   = total >= 5;
+  const color = isVip ? "#ffd60a" : isFirst ? C.green : C.blue;
+  const label = isFirst
+    ? "НОВЫЙ"
+    : isVip
+    ? `${n}/${total} · VIP`
+    : `${n}/${total}`;
+  return <Chip color={color}>{isVip && "👑 "}{label}</Chip>;
 }
 
 /* ───────────── Info row with readable label/value (Apple Wallet style) ───────────── */
@@ -364,41 +382,74 @@ function extractGamepassId(url: string | null): string | null {
 }
 
 /* ───────────── Contact button — direct chat link ─────────────
-   • @username present → t.me/<username> opens the chat directly.
-   • TG numeric only   → tg://user?id=<id> (profile, "Send Message" one tap away).
-   • VK                → vk.com/im?sel=<id> opens VK conversation.
+   Plain <a href="tg://..."> is silently swallowed inside the Telegram WebApp;
+   the click does nothing. The only reliable path is the WebApp JS API:
+   Telegram.WebApp.openTelegramLink(url) closes the WebApp and opens the chat.
 */
-function ContactButton({ user }: { user: Order["user"] }) {
-  let href: string | null = null;
-  let label = "Написать клиенту";
+function openContact(user: Order["user"]) {
+  const tg = (typeof window !== "undefined" ? window.Telegram?.WebApp : undefined) as any;
   if (user.username) {
-    href = `https://t.me/${user.username}`;
-    label = `Написать @${user.username}`;
-  } else if (user.tgId) {
-    href = `tg://user?id=${user.tgId}`;
-    label = "Открыть профиль в Telegram";
-  } else if (user.vkId) {
-    href = `https://vk.com/im?sel=${user.vkId}`;
-    label = "Написать в ВКонтакте";
+    const url = `https://t.me/${user.username}`;
+    if (tg?.openTelegramLink) tg.openTelegramLink(url);
+    else window.open(url, "_blank");
+    return;
   }
-  if (!href) return null;
+  if (user.tgId) {
+    const url = `tg://user?id=${user.tgId}`;
+    if (tg?.openTelegramLink) tg.openTelegramLink(url);
+    else window.location.href = url;
+    return;
+  }
+  if (user.vkId) {
+    const url = `https://vk.com/im?sel=${user.vkId}`;
+    if (tg?.openLink) tg.openLink(url);
+    else window.open(url, "_blank");
+  }
+}
+function contactLabel(user: Order["user"]): string | null {
+  if (user.username) return `Написать @${user.username}`;
+  if (user.tgId)     return "Открыть профиль в Telegram";
+  if (user.vkId)     return "Написать в ВКонтакте";
+  return null;
+}
+function ContactButton({ user }: { user: Order["user"] }) {
+  const label = contactLabel(user);
+  if (!label) return null;
   return (
-    <a
-      href={href}
-      target={href.startsWith("http") ? "_blank" : undefined}
-      rel="noreferrer"
-      onClick={e => e.stopPropagation()}
+    <button
+      onClick={e => { e.stopPropagation(); openContact(user); }}
       style={{
         marginTop: 14, display: "block", textAlign: "center" as const,
-        padding: "13px", borderRadius: 13, textDecoration: "none",
+        width: "100%", padding: "13px", borderRadius: 13, border: "none",
         background: "linear-gradient(180deg, rgba(10,132,255,0.20), rgba(10,132,255,0.10))",
-        border: `1px solid rgba(10,132,255,0.35)`,
+        boxShadow: `inset 0 0 0 1px rgba(10,132,255,0.35)`,
         color: "#7ec5ff", fontSize: 15, fontWeight: 600, letterSpacing: 0.2,
+        cursor: "pointer", fontFamily: "inherit",
       }}
     >
       💬 {label}
-    </a>
+    </button>
   );
+}
+
+/* ───────────── User identity helpers — @username everywhere ─────────────
+   Display priority for TG users: @username (canonical) → name → "TG · <id>".
+   For VK: name (enriched from VK API) → "VK · <id>".
+*/
+function userDisplayName(u: Order["user"]): string {
+  if (u.username) return `@${u.username}`;
+  const realName = u.name && u.name !== "VK User" ? u.name : null;
+  if (realName) return realName;
+  if (u.tgId)    return `TG · ${u.tgId}`;
+  if (u.vkId)    return `VK · ${u.vkId}`;
+  return "—";
+}
+function userSubHandle(u: Order["user"]): string {
+  // Show the secondary identifier under the main name when both exist.
+  if (u.username && u.name && u.name !== "VK User") return u.name;
+  if (u.tgId)    return `TG · ${u.tgId}`;
+  if (u.vkId)    return `VK · ${u.vkId}`;
+  return "";
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -413,18 +464,15 @@ function OrderCard({
   const isActive  = ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS"].includes(order.status);
   const isHistory = ["COMPLETED", "REJECTED"].includes(order.status);
 
-  // User identity for the card header
-  const realName = order.user.name && order.user.name !== "VK User" ? order.user.name : null;
+  // User identity for the card header — @username canonical, with secondary line
   const platform: "tg" | "vk" | "—" = order.user.tgId ? "tg" : order.user.vkId ? "vk" : "—";
-  const fallbackHandle = order.user.vkId
-    ? `VK · ${order.user.vkId}`
-    : order.user.tgId
-    ? `TG · ${order.user.tgId}`
-    : "—";
-  const displayName = realName ?? fallbackHandle;
-  const subHandle   = realName
-    ? (order.user.vkId ? `VK · ${order.user.vkId}` : order.user.tgId ? `TG · ${order.user.tgId}` : "")
-    : "";
+  const displayName = userDisplayName(order.user);
+  const subHandle   = userSubHandle(order.user);
+  // Avatar uses the real name when available (better visual identity than "@handle"),
+  // otherwise falls back to the display name.
+  const avatarSeed  = (order.user.name && order.user.name !== "VK User")
+    ? order.user.name
+    : displayName;
 
   const displayCreator = order.robloxUsername
     ?? (typeof fetchedCreator === "string" ? fetchedCreator || null : null);
@@ -469,6 +517,7 @@ function OrderCard({
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5, minWidth: 0 }}>
             <StatusPill status={order.status} />
+            <OrderNumberChip n={order.userOrderNumber} total={order.userOrderTotal} />
             {order.isDirectOrder && <Chip color={C.blue}>ПРЯМОЙ</Chip>}
             {order.reviewStatus === "PENDING"   && <Chip color={C.yellow}>📸 ОТЗЫВ</Chip>}
             {order.reviewStatus === "SUBMITTED" && <Chip color={C.green}>⭐ ОТЗЫВ</Chip>}
@@ -485,7 +534,7 @@ function OrderCard({
 
         {/* Bottom row: avatar + user identity */}
         <div style={{ display: "flex", alignItems: "center", gap: 11, minWidth: 0 }}>
-          <Avatar name={displayName} platform={platform} />
+          <Avatar name={avatarSeed} platform={platform} />
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{
               fontSize: 15, fontWeight: 600, color: C.textPrimary,
@@ -600,38 +649,59 @@ function OrderCard({
             </>
           )}
 
-          {/* User identity — @username (copyable) + platform ID below */}
+          {/* User identity — @username (copyable) + name & platform ID below */}
           <Divider />
           <Row label="Пользователь">
-            {order.user.username ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 17, fontWeight: 600, color: C.textPrimary, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
-                    @{order.user.username}
-                  </span>
-                  <CopyBtn text={`@${order.user.username}`} />
-                </div>
-                {order.user.tgId && (
-                  <span style={{ fontSize: 12.5, color: C.textTertiary, ...tabular }}>
-                    TG · {order.user.tgId}
-                  </span>
-                )}
-              </div>
-            ) : order.user.vkId ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ fontSize: 17, fontWeight: 600, color: C.textPrimary, ...tabular }}>
-                  vk.com/id{order.user.vkId}
-                </span>
-                <CopyBtn text={order.user.vkId} />
-              </div>
-            ) : order.user.tgId ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ fontSize: 17, fontWeight: 600, color: C.textPrimary, ...tabular }}>
-                  TG · {order.user.tgId}
-                </span>
-                <CopyBtn text={order.user.tgId} />
-              </div>
-            ) : <span style={{ fontSize: 14.5, color: C.textTertiary }}>—</span>}
+            {(() => {
+              const realName = order.user.name && order.user.name !== "VK User" ? order.user.name : null;
+              if (order.user.username) {
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 17, fontWeight: 600, color: C.textPrimary, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+                        @{order.user.username}
+                      </span>
+                      <CopyBtn text={`@${order.user.username}`} />
+                    </div>
+                    <span style={{ fontSize: 12.5, color: C.textTertiary, ...tabular }}>
+                      {realName ? `${realName} · ` : ""}
+                      {order.user.tgId ? `TG · ${order.user.tgId}` : order.user.vkId ? `VK · ${order.user.vkId}` : ""}
+                    </span>
+                  </div>
+                );
+              }
+              // No @handle — show name primary, ID secondary
+              if (realName) {
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 17, fontWeight: 600, color: C.textPrimary }}>{realName}</span>
+                      <CopyBtn text={realName} />
+                    </div>
+                    <span style={{ fontSize: 12.5, color: C.textTertiary, ...tabular }}>
+                      {order.user.tgId ? `TG · ${order.user.tgId}` : order.user.vkId ? `VK · ${order.user.vkId}` : ""}
+                    </span>
+                  </div>
+                );
+              }
+              if (order.user.tgId) {
+                return (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 17, fontWeight: 600, color: C.textPrimary, ...tabular }}>TG · {order.user.tgId}</span>
+                    <CopyBtn text={order.user.tgId} />
+                  </div>
+                );
+              }
+              if (order.user.vkId) {
+                return (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 17, fontWeight: 600, color: C.textPrimary, ...tabular }}>vk.com/id{order.user.vkId}</span>
+                    <CopyBtn text={order.user.vkId} />
+                  </div>
+                );
+              }
+              return <span style={{ fontSize: 14.5, color: C.textTertiary }}>—</span>;
+            })()}
           </Row>
 
           {/* Purchase cost */}
