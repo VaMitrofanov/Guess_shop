@@ -776,10 +776,102 @@ curl -s -X POST "$URL?uuid=gmtpfqosgoz23vjyxyczuic9&force=true" -H "Authorizatio
 
 #### Что осталось на следующую итерацию
 
-- **VK enrich screen_name** — расширить блок `vkEnrichOrders` в `route.ts:43` так, чтобы тянуть `screen_name` через `users.get` и сохранять в `User.username` (или `User.vkScreenName`). Сейчас VK-юзеры в TWA без копируемого `@handle`.
 - **Кнопка «📊 Открыть в дашборде»** в `sendAdminPaymentCard` и `sendAdminReviewCard` (фото-карточки) — пока не добавлена.
 - **Sticky большой заголовок** в Orders (iOS Large Title) — переход «крупный → компактный» при скролле.
 - **Live-баджи нечитанных заказов** — сейчас в `TwaApp.tsx` уже есть polling `?status=PENDING&limit=1` каждые 30 с, рисует красный кружок над иконкой Заказы; можно расширить на новые статусы (например, если REJECTED с user_resubmit).
+
+---
+
+### Сессия 2026-05-30 (поздно) — TWA v3: @username везде, рабочая кнопка «Написать», N/Total chip, VK/TG enrich с записью в БД
+
+**Контекст и реальный кейс.** После v2-деплоя по обратной связи с iPhone всплыло:
+1. В карточке заказа отображалось «Amydamary» — это устаревший first_name из БД. Реальный её TG `@Atars1s` (display name `Atarsis`). Юзер сменил имя/handle, бот этого не догнал.
+2. Кнопка «Написать клиенту» в TWA не реагировала на тап. Внутри Telegram WebApp обычный `<a href="tg://user?id=…">` Telegram **силento глотает** — клик не делает ничего.
+3. Хотелось видеть в карточке «1/2 заказ» — позицию заказа в истории клиента, чтобы менеджер не лез в админ-хаб TG-бота за бейджами «ПОВТОРНЫЙ/VIP».
+4. Имя Мили Платоновой (VK) приходило как «VK User» — enrich в `route.ts` каждый раз тянул VK API, но **не записывал** результат в БД.
+
+#### Что сделано
+
+**1. `@username` как канонический идентификатор TG**
+
+- `userDisplayName(u)` / `userSubHandle(u)` — две хелпер-функции в `OrdersScreen.tsx`. Приоритет TG: `@username → name → "TG · <id>"`. Приоритет VK: `name → "VK · <id>"`. Сабхэндл (мелким серым под главным) показывает второй идентификатор для контекста (имя + ID).
+- Везде, где раньше использовался `name` напрямую, теперь — эти хелперы. В Header card отображается `@username` главным шрифтом, реальное имя + numeric ID под ним. В детализации «Пользователь» — тот же приоритет, плюс копируемый CopyBtn рядом.
+- Аватарка генерируется из реального имени (детерминированный HSL по хешу), а не из `@handle` — чтобы цвет был стабильным даже если юзер сменит handle.
+
+**2. Кнопка «Написать клиенту» через `Telegram.WebApp.openTelegramLink()`**
+
+- Старая реализация — обычный `<a href>`. Внутри Telegram WebApp такие ссылки **не работают** (Telegram блокирует переход, чтобы избежать XSS и phishing-вектора).
+- Новая `openContact(user)` (`OrdersScreen.tsx:368`):
+  - Если есть `@username` → `Telegram.WebApp.openTelegramLink('https://t.me/' + username)` — закрывает TWA и открывает диалог напрямую.
+  - Только TG ID → `tg://user?id=<id>` через тот же `openTelegramLink` (открывает карточку профиля).
+  - VK → `Telegram.WebApp.openLink('https://vk.com/im?sel=<id>')` (открывается во внешнем браузере).
+- Fallback на `window.open` если SDK почему-то недоступен.
+- Кнопка сменена с `<a>` на `<button onClick>` чтобы клик гарантированно перехватывался JS-обработчиком.
+
+**3. Chip «N/Total» — позиция заказа в кластере «одного человека»**
+
+- В API `route.ts` после основного запроса для каждого заказа считается:
+  - `userOrderNumber` = `count(WbOrder WHERE (tgId == self.tgId OR vkId == self.vkId OR robloxUsername == self.robloxUsername) AND createdAt < self.createdAt) + 1`
+  - `userOrderTotal` = `count` без условия `createdAt`.
+- Union по трём идентификаторам — то самое «один человек с разных устройств и аккаунтов», как просил оператор. Юлия Миронова получила `1/2`: помимо `B2VAPVE` у неё есть ещё один заказ в кластере (через тот же tgId).
+- Запросы: 2×N COUNT'ов на странице, выполняются `Promise.all`. На 20 заказах — ~40 индексных count'ов, миллисекунды.
+- UI: `OrderNumberChip` (`OrdersScreen.tsx:222`) — `1/1` зелёный «НОВЫЙ», `2-4/N` синий, `5+/N` золотой с короной «VIP». Стоит рядом со StatusPill в Header.
+
+**4. VK enrich теперь пишет в БД**
+
+- `route.ts:83` расширен: для VK-юзеров с пустым/«VK User» именем — тянет `first_name, last_name, screen_name` через `users.get` и **сохраняет в `User.name` + `User.username`** (если `screen_name` непустой и не `idX`). При следующем запросе API не дёргает.
+- Мила Платонова (vkId 656629794) теперь в БД с `name="Мила Платонова"`. До этого в БД было `"VK User"`. Скрин-нейм у неё не нашёлся (или совпал с `id656629794`), поэтому `username` остался null — это нормально, в карточке будет имя + «VK · 656629794».
+
+**5. TG enrich для существующих юзеров (одноразовый скрипт)**
+
+- `scripts/enrich-tg-usernames.ts` — обходит всех `User` где `tgId IS NOT NULL` и (`username IS NULL` OR `name IS NULL`), вызывает `getChat(tgId)` у TG API, дописывает `username`/`name`. Soft rate-limit 40 ms между запросами.
+- Запущен **разово на SG** в TG-bot контейнере (`docker exec` → `npx tsx /app/enrich.ts`). Результат: 15 TG юзеров → 11 получили `@username` (включая `@Niyad_LV` для RianaKeene и `@Atars1s` для бывшей "Amydamary" → теперь "Atarsis"), 4 не изменились, 0 заблокированных бота.
+- Скрипт идемпотентный — можно гонять заново когда юзер сменит handle. Флаг `--force` перепроверит и тех, у кого `username` уже стоит.
+
+**Важный нюанс с dotenv:** в standalone Docker-образе TG-бота нет `dotenv` модуля (env вары идут через Docker). В скрипте `dotenv/config` обёрнут в `try { require(...) } catch {}` — локально работает, в контейнере молча пропускается.
+
+**Запуск скрипта на SG (для будущего):**
+```bash
+scp scripts/enrich-tg-usernames.ts root@5.223.95.11:/tmp/enrich.ts
+ssh root@5.223.95.11 'CID=$(docker ps --format "{{.Names}}" --filter "name=lyz78enntugna9em1biopinr" | head -1); \
+  docker cp /tmp/enrich.ts "$CID":/app/enrich.ts && \
+  docker exec "$CID" sh -c "cd /app && npx tsx enrich.ts"'
+```
+
+#### Проверка на проде после деплоя
+
+| Запрос | Результат | Что проверено |
+|---|---|---|
+| `?q=4YNF7HH` | RianaKeene, **username=Niyad_LV**, 1/1 | TG enrich + N/Total |
+| `?q=SJR03EX` | Atarsis, **username=Atars1s**, 1/1 | TG enrich (бывш. "Amydamary") |
+| `?q=WKDQAE1` | **Мила Платонова** (было "VK User"), balance=100, granted=26.05, 1/1, reviewStatus=SUBMITTED | VK enrich-with-persist + бонус-таймер |
+| `?q=B2VAPVE` | Юлия Миронова, balance=100, **1/2** | N/Total ловит её второй заказ в кластере |
+
+#### Файлы
+
+- `src/app/api/twa/orders/route.ts` — VK enrich пишет в БД + считает `userOrderNumber/userOrderTotal` для каждого заказа.
+- `src/app/twa/_components/screens/OrdersScreen.tsx` — `userDisplayName`/`userSubHandle`/`openContact` хелперы, новый `OrderNumberChip`, кнопка `<button>` вместо `<a>`, обновлённая строка «Пользователь» в детализации.
+- `scripts/enrich-tg-usernames.ts` — backfill TG handles через `getChat`.
+
+#### Коммит и деплой
+
+- `ac13810` — задеплоен на RobloxBankWeb (RF) через Coolify (deploy id `vf3p8u9gotm4o903jean891k`, длительность ~3 мин).
+- TG-bot и VK-bot **не трогались** — изменения только фронт + API.
+- Скрипт `enrich-tg-usernames.ts` выполнен разово на SG, результат записан в Neon DB.
+
+#### Что у тебя теперь будет видно
+
+- В TWA карточке заказа Мили (4YNF7HH) сверху — `@Niyad_LV` крупно, под ним «❇️RianaKeene❇️ · TG · 7690762078» мелким; chip «1/1 НОВЫЙ»; кнопка «💬 Написать @Niyad_LV» открывает диалог прямо из TWA.
+- У Юлии Мироновой chip «1/2» — намекает что у неё есть ещё один заказ в кластере (поищи `6688959761` чтобы увидеть оба).
+- У Мили Платоновой (WKDQAE1) в детализации Отзыва WB — плашка «Сгорает через ~26 дней, до 25 июня · на счету 100 R$» жёлтым.
+- У Юлии (B2VAPVE) — такая же плашка с «~29 дней до 28 июня».
+- Кнопка «💬 Написать» теперь реально работает: тап → закрывается TWA → открывается диалог.
+
+#### Что осталось
+
+- **Cron-обновление username** при каждом сообщении уже есть в TG handlers (backfill из v2), но первичный скан старых юзеров делался скриптом разово. Если набегут новые активные юзеры — их подберёт `tryRestoreState`/handlers при следующем сообщении. Скрипт стоит запускать раз в месяц для гигиены.
+- **VK screen_name** часто пустой — VK API возвращает `id<num>` если юзер не задал короткое имя. Это нормально, fallback на name+ID работает.
+- **2 исторические аномалии** (`SJR03EX`, `0LNHH6H` — `reviewBonusClaimed=true` + `reviewBonusGrantedAt=null`) — это самовыкупы для теста системы, оператор просил не трогать. Учтено.
 
 ---
 
