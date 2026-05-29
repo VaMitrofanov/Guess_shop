@@ -2313,3 +2313,73 @@ curl -X POST "http://89.110.94.117:8000/api/v1/deploy?uuid=z10ws7m1q45h281zwedmh
   -H "Authorization: Bearer $COOLIFY_TOKEN"
 ```
 TG/VK боты не затронуты.
+
+---
+
+## Сессия 2026-05-29 — Фикс ложных отклонений валидации геймпасса (`bots/shared/roblox.ts`)
+
+### Реальный кейс
+Заказ: `@Niyad_LV` (id 7690762078), код ВБ `4YNF7HH`, pass `1861189578` («VIP 500», создатель `Dark_Varia8954`, 715 R$ = верная цена для карты 500₽). Бот отклонил: *«⚠️ НЕВЕРНЫЙ ГЕЙМПАСС — Игра закрыта (private), геймпасс не продаётся»*. Геймпасс на самом деле **валиден и выставлен на продажу** — это ложное срабатывание.
+
+### Диагностика (запускал валидацию прямо на живом контейнере TG-бота на SG)
+Контейнер `lyz78enntugna9em1biopinr-...` собран из коммита `abe4108` — т.е. деплой актуальный, стейл-кода нет. Проблема чисто в логике валидации.
+
+Прогон `getGamepassDetailsDirect` на боевом IP показал: **3 из 4 первичных эндпоинта Roblox лежат для ЛЮБЫХ геймпассов** (проверено и на ранее-рабочем `lokomotiv_2018`):
+
+| Эндпоинт (attempt) | Поведение с IP бота |
+|---|---|
+| `marketplace-items` (1) | пусто `[]` |
+| `catalog/items/details` (2) | HTTP 200 + **пустой массив** — но **мигает**! то пусто, то с данными |
+| `economy/.../details` (3) | **404** (для всех пассов, включая валидные) |
+| `universes/v1/assets/{id}/universe` | **404** (для всех пассов — ломает `checkGamePrivate`/`checkGameAccess`) |
+| `roproxy product-info` (4) | ✅ единственный, кто стабильно отдаёт данные |
+
+Когда пасс подтверждает только roproxy, а каталог вернул «200+пусто», срабатывала эвристика «удалён» → `isNotInCatalog=true` (*«не найден в каталоге»*). А когда `checkGameAccess` через fallback цеплял не ту игру создателя → `isGamePrivate=true` (*«Игра закрыта (private)»* — именно это и видел юзер).
+
+**Доказательство недетерминированности** — та же функция, два прогона подряд на контейнере:
+```
+прогон 1:  1861189578 → isActive:false, isNotInCatalog:true   (ОТКЛОНИТЬ)
+прогон 2:  1861189578 → isActive:true                          (ПРИНЯТЬ)
+           1860607091 (lokomotiv, ранее рабочий) → isNotInCatalog:true (ОТКЛОНИТЬ)
+```
+Один и тот же пасс то отклоняется, то принимается — зависит только от того, отдал ли `catalog` пустой массив на конкретном запросе (мигает из-за CSRF/rate-limit).
+
+### Почему поиск в дашборде («Выкуп») работает почти всегда
+`getUserGamepasses(username)` (поиск по нику в TWA) использует **другой, надёжный путь**:
+`users.roblox.com/...usernames/users` → `games.roblox.com/v2/users/{id}/games?accessFilter=Public` → `apis.roblox.com/game-passes/v1/universes/{universeId}/game-passes?passView=Full` (листинг геймпассов в играх) + thumbnails.
+
+Он НЕ трогает сломанные `assets/{id}/universe` / `economy` / `catalog`. Поэтому находит пассы почти всегда. Также он возвращает `placeId`, а `apis.roblox.com/universes/v1/places/{placeId}/universe` (в отличие от `assets/{id}/universe`) **резолвится надёжно** → можно достать реальный universe пасса и проверить playability.
+
+### Фикс (взял логику из поиска, как и предложил владелец)
+В `getGamepassDetailsDirect`, ветка roproxy (attempt 4), **до** старых эвристик добавлена авторитетная кросс-проверка:
+1. `getUserGamepasses(parsed.creatorName)` → ищем пасс по id в листинге публичных игр создателя.
+2. Если найден → пасс реально существует и выставлен на продажу.
+3. Реальная playability через новый хелпер `placeIsPlayable(match.placeId)` (`places/{placeId}/universe` → `multiget-playability-status`):
+   - `Playable` / `GuestProhibited` → **принять** (`return parsed`, isActive=true).
+   - `PrivateGame` / `ContextualPlayabilityUnrated` / `GameUnapproved` → **заблокировать** (isActive=false, isGamePrivate=true) — политика блокировки unrated из сессии 2026-05-28 (ночь) сохранена.
+4. Если пасс НЕ в листинге (игра реально приватная — `accessFilter=Public` её не вернёт) → проваливается в старые консервативные эвристики (как было).
+
+Только в ветке `!foundInPrimary` (т.е. ровно там, где сейчас всё и оказывается, раз первичные эндпоинты лежат). Когда `catalog` всё-таки отдаёт данные — `foundInPrimary=true`, доверяем как раньше.
+
+### Верификация (на контейнере, патч через temp-файл, детерминированно)
+| Pass | Ник | Playability | Результат |
+|------|-----|-------------|-----------|
+| `1861189578` | Dark_Varia8954 | GuestProhibited | ✅ accept (active, 715 R$) |
+| `1860607091` | lokomotiv_2018 | GuestProhibited | ✅ accept (active, 715 R$) |
+| `1855988517` | xxgkl_4 | ContextualPlayabilityUnrated | ❌ block (isGamePrivate) |
+
+Оба прогона идентичны — мигание устранено.
+
+### Файлы
+- `bots/shared/roblox.ts`:
+  - новый хелпер `placeIsPlayable(placeId)` — playability через `places/{placeId}/universe` (рядом с `checkGameAccess`).
+  - в attempt-4 (roproxy) добавлен блок кросс-проверки через `getUserGamepasses` + `placeIsPlayable`.
+
+### НЕ задеплоено (нужно сделать)
+Фикс пока только локально + проверен на контейнере через temp-файл. Для прода:
+1. `git add bots/shared/roblox.ts && git commit && git push origin main`.
+2. **Деплой на SG вручную** (бот на SG, автодеплоя нет): `scp bots/shared/roblox.ts root@5.223.95.11:/tmp/ && docker cp /tmp/roblox.ts <container>:/app/bots/shared/roblox.ts && docker restart <container>`. Контейнер: `lyz78enntugna9em1biopinr-...`.
+3. VK бот на RF тоже использует `getGamepassDetails` (через bridge) — после деплоя бот SG обновится и VK получит фикс автоматически (он ходит на тот же bridge/код через `VALIDATOR_SOURCE_URL`).
+
+### На заметку (деградация Roblox API)
+`economy.roblox.com/v1/game-passes/{id}/details` и `apis.roblox.com/universes/v1/assets/{id}/universe` сейчас отдают **404 для всех пассов** с IP бота. Возможно временно (geo/rate-limit), возможно эндпоинты задеприкейчены. Стоит периодически проверять — если оживут, основной путь снова заработает. Надёжный путь (`places/{id}/universe` + `universes/{id}/game-passes` листинг) на их фоне работает стабильно.
