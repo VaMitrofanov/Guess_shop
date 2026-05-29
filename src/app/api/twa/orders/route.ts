@@ -60,7 +60,10 @@ export async function GET(req: NextRequest) {
       skip,
       take: limit,
       include: {
-        user: { select: { tgId: true, vkId: true, name: true } },
+        user: { select: {
+          tgId: true, vkId: true, name: true, username: true,
+          balance: true, reviewBonusGrantedAt: true,
+        } },
       },
     }),
     (prisma as any).wbOrder.count({ where }),

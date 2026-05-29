@@ -14,7 +14,10 @@ declare global {
         ready: () => void;
         expand: () => void;
         initData: string;
-        initDataUnsafe: { user?: { id: number; first_name?: string; username?: string } };
+        initDataUnsafe: {
+          user?: { id: number; first_name?: string; username?: string };
+          start_param?: string;
+        };
         colorScheme: "dark" | "light";
         themeParams: Record<string, string>;
         close: () => void;
@@ -40,6 +43,15 @@ export default function TwaApp() {
   const [debugMsg,           setDebugMsg]           = useState("");
   const [ordersBadge,        setOrdersBadge]        = useState(0);
   const [bossrobuxPreloadId, setBossrobuxPreloadId] = useState<string | undefined>(undefined);
+  // Pre-focus the Orders search when launched via admin notification deep-link.
+  // Accepts either ?q=... in the URL (works with InlineKeyboardButton.web_app
+  // URLs) or Telegram's start_param (works with Direct Link Apps via startapp).
+  const [orderQueryPreload,  setOrderQueryPreload]  = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    const fromUrl = new URLSearchParams(window.location.search).get("q") ?? "";
+    const fromStartParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param ?? "";
+    return (fromUrl || fromStartParam || "").trim();
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -179,7 +191,7 @@ export default function TwaApp() {
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
         {screen === "dashboard"  && <Dashboard      {...sp} />}
-        {screen === "orders"     && <OrdersScreen   {...sp} onGoToBossrobux={(gpId) => { setBossrobuxPreloadId(gpId); setScreen("bossrobux"); }} />}
+        {screen === "orders"     && <OrdersScreen   {...sp} onGoToBossrobux={(gpId) => { setBossrobuxPreloadId(gpId); setScreen("bossrobux"); }} initialQuery={orderQueryPreload} onInitialQueryConsumed={() => setOrderQueryPreload("")} />}
         {screen === "wb"         && <WbScreen       {...sp} />}
         {screen === "bossrobux"  && <BossrobuxScreen {...sp} preloadGamepassId={bossrobuxPreloadId} onPreloadConsumed={() => setBossrobuxPreloadId(undefined)} />}
         {screen === "settings"   && <SettingsScreen  {...sp} />}
