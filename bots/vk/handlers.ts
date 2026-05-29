@@ -20,6 +20,86 @@ import { getGamepassDetails } from "../shared/roblox";
 // VK API instance injected from bot.ts to avoid circular import.
 let _vkApi: any = null;
 
+// ── Live-support pause ──────────────────────────────────────────────────────
+// When a user taps support, the manager joins THIS VK dialog and chats directly.
+// While that conversation is active the bot must stay silent on free text — else
+// the user's replies to the manager get parsed as gamepass links and the bot
+// spams "не принял ссылку" on top of the human chat. Keyed by VK user id → expiry.
+const SUPPORT_PAUSE_MS = 30 * 60 * 1000;
+const RESUME_KEYWORDS  = ["+бот", "+bot", "бот+"];
+const supportPause = new Map<number, number>();
+
+function pauseSupport(vkUserId: number): void {
+  supportPause.set(vkUserId, Date.now() + SUPPORT_PAUSE_MS);
+}
+function isSupportPaused(vkUserId: number): boolean {
+  const exp = supportPause.get(vkUserId);
+  if (!exp) return false;
+  if (Date.now() < exp) return true;
+  supportPause.delete(vkUserId); // expired
+  return false;
+}
+function refreshSupportPause(vkUserId: number): void {
+  if (supportPause.has(vkUserId)) supportPause.set(vkUserId, Date.now() + SUPPORT_PAUSE_MS);
+}
+function resumeSupport(vkUserId: number): void {
+  supportPause.delete(vkUserId);
+}
+
+/** After the manager hands control back, nudge the user to continue the bot flow. */
+async function rePromptAfterSupport(vkUserId: number): Promise<void> {
+  try {
+    if (!_vkApi) return;
+    let state = getState(vkUserId);
+    if (state?.type !== "AWAITING_LINK") {
+      await tryRestoreState(vkUserId);
+      state = getState(vkUserId);
+    }
+    let msg = "🤖 Бот снова на связи!";
+    if (state?.type === "AWAITING_LINK") {
+      const passPrice = Math.ceil(state.denomination / 0.7);
+      msg = `🤖 Бот снова на связи! Пришли ссылку на геймпасс с ценой ровно ${passPrice} R$ — приму её 👇`;
+    }
+    await _vkApi.messages.send({ peer_id: vkUserId, message: msg, random_id: Date.now() + Math.floor(Math.random() * 1000) });
+  } catch (e) {
+    console.error("[VK] rePromptAfterSupport failed:", e);
+  }
+}
+
+// Natural-language ways a user might ask for a human — so support is reachable by
+// simply writing, not only via the button. Substring match (stems cover endings).
+const SUPPORT_WORDS = ["оператор", "поддержк", "менеджер", "помощь", "помоги", "саппорт", "support", "живой человек", "живого человека", "жалоб"];
+
+/** Single entry point for "user wants a manager": alert admins, pause the bot,
+ *  and reply with a clear explanation of what happens next. */
+async function triggerSupport(ctx: any, vkUserId: number, ctxKey: string): Promise<void> {
+  const firstName = await vkGetName(vkUserId);
+  const state     = getState(vkUserId);
+  let wbCode = state?.type === "AWAITING_LINK" ? state.wbCode       : undefined;
+  let denom  = state?.type === "AWAITING_LINK" ? state.denomination : undefined;
+  if (!wbCode) {
+    try {
+      const u = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+      if (u) {
+        const o = await (db as any).wbOrder.findFirst({
+          where: { userId: u.id }, orderBy: { updatedAt: "desc" }, select: { wbCode: true, amount: true },
+        });
+        if (o) { wbCode = o.wbCode; denom = o.amount; }
+      }
+    } catch {}
+  }
+  await sendAdminSupportAlert({
+    platform: "VK", userDisplay: `vk.com/id${vkUserId} (${firstName})`, contextKey: ctxKey, wbCode, denomination: denom,
+  });
+  pauseSupport(vkUserId); // bot goes quiet so it won't interrupt the live chat
+  await ctx.reply(
+    "✅ Готово! Передал твоё обращение менеджеру — он скоро ответит прямо здесь, в этом чате.\n\n" +
+    "Опиши, пожалуйста, что случилось, одним сообщением 👇\n" +
+    "Пока идёт диалог с менеджером, бот не вмешивается.\n\n" +
+    "Если удобнее в Telegram — поддержка там: https://t.me/RobloxBank_PA"
+  );
+}
+
 /** Format roubles with thousands separator, e.g. 3500 → "3 500 ₽". */
 function fmtRub(n: number): string {
   if (n >= 1000) return `${Math.floor(n / 1000)} ${String(n % 1000).padStart(3, "0")} ₽`;
@@ -91,14 +171,43 @@ async function tryRestoreState(vkUserId: number): Promise<boolean> {
       },
       orderBy: { updatedAt: "desc" },
     });
-    if (!recoverable) return false;
+    if (recoverable) {
+      setState(vkUserId, {
+        type:         "AWAITING_LINK",
+        wbCode:       recoverable.wbCode,
+        denomination: recoverable.amount,
+      });
+      return true;
+    }
 
-    setState(vkUserId, {
-      type:         "AWAITING_LINK",
-      wbCode:       recoverable.wbCode,
-      denomination: recoverable.amount,
+    // Orphan-code fallback: the site (auth.ts) can link a code (CLAIMED + userId)
+    // before the user reaches the bot, but the provisional WbOrder is only created
+    // inside handleRefActivation. If VK never delivered the `ref`, that handler
+    // never ran → the code is CLAIMED to this user with NO order, and the order
+    // lookup above finds nothing. Recover by picking up the orphan code directly
+    // so the user isn't stranded after activating on the site.
+    const orphanCandidates = await (db as any).wbCode.findMany({
+      where: {
+        userId:    user.id,
+        status:    "CLAIMED",
+        isUsed:    false,
+        updatedAt: { gte: thirtyDaysAgo },
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 5,
     });
-    return true;
+    for (const code of orphanCandidates) {
+      const order = await (db as any).wbOrder.findUnique({ where: { wbCode: code.code } });
+      if (!order) {
+        setState(vkUserId, {
+          type:         "AWAITING_LINK",
+          wbCode:       code.code,
+          denomination: code.denomination,
+        });
+        return true;
+      }
+    }
+    return false;
   } catch (err) {
     // Non-fatal: DB timeout or connectivity issue — bot continues without auto-restore
     console.error("[VK] tryRestoreState failed:", err);
@@ -257,7 +366,21 @@ async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null): Pro
 // ── Entry point: called for every message_new event ───────────────────────────
 
 export async function handleMessage(ctx: MessageContext): Promise<void> {
-  if (ctx.isOutbox) return; // skip messages sent by the community itself
+  if (ctx.isOutbox) {
+    // Manager replied from the community. Keep the bot paused while the live
+    // conversation is active; let the manager hand control back with a keyword.
+    const peer = typeof (ctx as any).peerId === "number" ? (ctx as any).peerId : undefined;
+    if (peer !== undefined) {
+      const t = (ctx.text ?? "").trim().toLowerCase();
+      if (RESUME_KEYWORDS.includes(t)) {
+        resumeSupport(peer);
+        void rePromptAfterSupport(peer);
+      } else {
+        refreshSupportPause(peer);
+      }
+    }
+    return; // never process community's own messages as user input
+  }
 
   const vkUserId = ctx.senderId;
   const text     = ctx.text?.trim() ?? "";
@@ -279,32 +402,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
 
   // ── 🆘 Support button payload ────────────────────────────────────────────
   if (msgPayload?.command === "support") {
-    const ctxKey    = String(msgPayload.context ?? "general");
-    const firstName = await vkGetName(vkUserId);
-    const state     = getState(vkUserId);
-    let wbCode  = state?.type === "AWAITING_LINK" ? state.wbCode       : undefined;
-    let denom   = state?.type === "AWAITING_LINK" ? state.denomination : undefined;
-    if (!wbCode) {
-      try {
-        const u = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
-        if (u) {
-          const o = await (db as any).wbOrder.findFirst({
-            where: { userId: u.id },
-            orderBy: { updatedAt: "desc" },
-            select: { wbCode: true, amount: true },
-          });
-          if (o) { wbCode = o.wbCode; denom = o.amount; }
-        }
-      } catch {}
-    }
-    await sendAdminSupportAlert({
-      platform:    "VK",
-      userDisplay: `vk.com/id${vkUserId} (${firstName})`,
-      contextKey:  ctxKey,
-      wbCode,
-      denomination: denom,
-    });
-    await ctx.reply("Соединяем с менеджером — напиши нам: https://t.me/RobloxBank_PA\n\nМы уже знаем о твоей ситуации 👍");
+    await triggerSupport(ctx, vkUserId, String(msgPayload.context ?? "general"));
     return;
   }
 
@@ -361,6 +459,22 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     }
   }
 
+  // ── Natural-language support request — user can reach a manager by simply
+  // writing ("оператор", "поддержка", "помощь"…), not only via the button. ──
+  if (text.length > 0 && SUPPORT_WORDS.some((w) => lower.includes(w))) {
+    if (isSupportPaused(vkUserId)) {
+      await ctx.reply("Менеджер уже подключается и ответит прямо здесь 👇 Опиши, пожалуйста, свой вопрос одним сообщением.");
+    } else {
+      await triggerSupport(ctx, vkUserId, "general");
+    }
+    return;
+  }
+
+  // ── Live-support pause: stay silent on free text while a manager is handling
+  // this chat, so the user's replies to the manager aren't parsed as links.
+  // (Button payloads above — support/resubmit/check_sub — still work.)
+  if (isSupportPaused(vkUserId)) return;
+
   // ── (B) State machine dispatch ────────────────────────────────────────────
   const state = getState(vkUserId);
 
@@ -411,7 +525,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     if (custStatus.isReturning) {
       const firstName = await vkGetName(vkUserId);
       await ctx.reply({
-        message: getIdleGreeting(custStatus, firstName) + "\n\nНужна помощь? https://t.me/RobloxBank_PA",
+        message: getIdleGreeting(custStatus, firstName) + "\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA",
         keyboard: Keyboard.builder()
           .textButton({ label: "📊 Статус заявки",   payload: { command: "status" },       color: "primary"   })
           .row()
@@ -523,7 +637,7 @@ async function handleRefActivation(
     where: { code: { equals: code, mode: "insensitive" } },
   });
   if (!wbCode) {
-    await ctx.reply("❌ Код не найден. Проверь правильность ввода на карточке.\n\nНужна помощь? https://t.me/RobloxBank_PA");
+    await ctx.reply("❌ Код не найден. Проверь правильность ввода на карточке.\n💡 Часто путают букву «О» и цифру «0» — проверь эти символы в коде.\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
     return;
   }
   // Block only when code was truly completed (isUsed=true + userId set).
@@ -713,7 +827,7 @@ async function handleGamepassLink(
       "• Геймпасс опубликован (не в черновиках)\n" +
       "• Ссылка ведёт именно на Game Pass, а не на саму игру\n" +
       "• Ты скопировал ссылку прямо из браузера Roblox\n\n" +
-      "Если геймпасс точно существует — напиши в поддержку: https://t.me/RobloxBank_PA"
+      "Если геймпасс точно существует — напиши сюда, ответим здесь. Или в Telegram: https://t.me/RobloxBank_PA"
     );
     return;
   }
@@ -901,7 +1015,7 @@ async function handleGamepassLink(
     }
     if (err.code === "P2002") {
       clearState(vkUserId);
-      await ctx.reply("⚠️ Заявка по этому коду уже создана и сейчас обрабатывается. Напиши «статус» чтобы проверить.\n\nНужна помощь? https://t.me/RobloxBank_PA");
+      await ctx.reply("⚠️ Заявка по этому коду уже создана и сейчас обрабатывается. Напиши «статус» чтобы проверить.\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
       return;
     }
     console.error("[VK] Order/transaction error:", err);
@@ -1217,7 +1331,7 @@ async function handleReviewScreenshot(
       console.log(`[VK] handleReviewScreenshot: no eligible order/code for userId=${user.id} vkId=${vkUserId} hasOrder=${!!order} isDirectOrder=${!!isDirectOrder} hasLinked=${!!linked}`);
       await ctx.reply(
         "📸 У тебя сейчас нет выполненных заявок, ожидающих отзыва.\n\n" +
-        "Если у тебя возникла проблема или вопрос — напиши в поддержку: https://t.me/RobloxBank_PA"
+        "Если у тебя возникла проблема или вопрос — напиши сюда, ответим здесь. Или в Telegram: https://t.me/RobloxBank_PA"
       );
       return;
     }
@@ -1299,7 +1413,7 @@ async function handleIdleMessage(
       "⚠️ Сначала активируй код с WB-карты — напиши его прямо сюда или на сайте:\n" +
       "🔗 https://robloxbank.ru/guide?source=wb\n\n" +
       "После активации пришли ссылку на геймпасс.\n" +
-      "Нужна помощь? https://t.me/RobloxBank_PA"
+      "Нужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA"
     );
     return;
   }
@@ -1311,7 +1425,7 @@ async function handleIdleMessage(
       await ctx.reply(
         "У тебя пока нет заявок.\n\n" +
         "Есть код с WB-карты? Напиши его прямо сюда — и мы всё оформим.\n" +
-        "Нужна помощь? https://t.me/RobloxBank_PA"
+        "Нужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA"
       );
       return;
     }
@@ -1322,7 +1436,7 @@ async function handleIdleMessage(
     });
 
     if (!order) {
-      await ctx.reply("У тебя пока нет заявок.\n\nЕсть код с WB-карты? Напиши его прямо сюда.\nНужна помощь? https://t.me/RobloxBank_PA");
+      await ctx.reply("У тебя пока нет заявок.\n\nЕсть код с WB-карты? Напиши его прямо сюда.\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
       return;
     }
 
@@ -1413,7 +1527,7 @@ async function handleIdleMessage(
 
   if (status.isReturning) {
     await ctx.reply({
-      message: getIdleGreeting(status, firstName) + "\n\nНужна помощь? https://t.me/RobloxBank_PA",
+      message: getIdleGreeting(status, firstName) + "\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA",
       keyboard: Keyboard.builder()
         .textButton({ label: "📊 Статус заявки",   payload: { command: "status" },       color: "primary"   })
         .row()

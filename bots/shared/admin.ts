@@ -72,6 +72,30 @@ export async function sendAdminSupportAlert(p: SupportAlertPayload): Promise<voi
   await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text)));
 }
 
+/** Public support contact. Used as a direct URL button so a single tap opens the dialog. */
+export const SUPPORT_URL = "https://t.me/RobloxBank_PA";
+
+// In-memory dedup: the support button is now a direct URL (one tap → support
+// chat), so we can no longer hook a callback on press. Instead we alert admins
+// when the button is *shown* in a problem context — deduped per
+// (platform, user, context) within a window so a re-rendered dead-end or a user
+// hitting the same error twice doesn't spam the admin chat.
+const SUPPORT_ALERT_TTL_MS = 30 * 60 * 1000;
+const supportAlertSeen = new Map<string, number>();
+
+/** Deduplicated wrapper around {@link sendAdminSupportAlert} for show-time alerts. */
+export async function notifySupportShown(p: SupportAlertPayload): Promise<void> {
+  const key = `${p.platform}:${p.tgId ?? p.userDisplay}:${p.contextKey}`;
+  const now = Date.now();
+  const last = supportAlertSeen.get(key);
+  if (last && now - last < SUPPORT_ALERT_TTL_MS) return; // within window — skip
+  supportAlertSeen.set(key, now);
+  if (supportAlertSeen.size > 500) {
+    for (const [k, t] of supportAlertSeen) if (now - t > SUPPORT_ALERT_TTL_MS) supportAlertSeen.delete(k);
+  }
+  await sendAdminSupportAlert(p);
+}
+
 /** Comma-separated list of Telegram admin chat IDs from env. */
 export const ADMIN_IDS: string[] = (
   process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? ""
@@ -294,11 +318,20 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
     `📊 Статус: ⏳ В обработке\n\n` +
     `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>`;
 
+  // One-tap deep-link into the TWA Orders screen, prefocused on this order.
+  // web_app inline buttons launch the Web App in personal chats with the given
+  // URL — no Direct Link app name needed.
+  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(shortId)}`;
   const reply_markup = {
-    inline_keyboard: [[
-      { text: "✅ ВЫКУПЛЕНО", callback_data: CB.adminOk(order.id)  },
-      { text: "❌ ОШИБКА",    callback_data: CB.adminErr(order.id) },
-    ]],
+    inline_keyboard: [
+      [
+        { text: "✅ ВЫКУПЛЕНО", callback_data: CB.adminOk(order.id)  },
+        { text: "❌ ОШИБКА",    callback_data: CB.adminErr(order.id) },
+      ],
+      [
+        { text: "📊 Открыть в дашборде", web_app: { url: twaUrl } },
+      ],
+    ],
   };
 
   await Promise.allSettled(
@@ -340,11 +373,17 @@ export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload):
     `💎 Выдать: <b>${payload.amount} R$</b> (Геймпасс: ${Math.ceil(payload.amount / 0.7)} R$)\n` +
     `📊 Статус: ⏳ Ожидаем реквизиты`;
 
+  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(shortId)}`;
   const reply_markup = {
-    inline_keyboard: [[
-      { text: "💳 Отправить реквизиты", callback_data: CB.sendPaymentDetails(payload.orderId) },
-      { text: "❌ Отменить заказ",      callback_data: CB.cancelDirectOrder(payload.orderId) },
-    ]],
+    inline_keyboard: [
+      [
+        { text: "💳 Отправить реквизиты", callback_data: CB.sendPaymentDetails(payload.orderId) },
+        { text: "❌ Отменить заказ",      callback_data: CB.cancelDirectOrder(payload.orderId) },
+      ],
+      [
+        { text: "📊 Открыть в дашборде", web_app: { url: twaUrl } },
+      ],
+    ],
   };
 
   await Promise.allSettled(

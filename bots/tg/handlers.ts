@@ -10,7 +10,7 @@ import { Telegraf, Markup } from "telegraf";
 import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, stripHtml, tgSend } from "../shared/notify";
-import { sendAdminOrderCard, sendAdminReviewCard, sendAdminSupportAlert, sendAdminDirectOrderCard, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS } from "../shared/admin";
+import { sendAdminOrderCard, sendAdminReviewCard, sendAdminSupportAlert, notifySupportShown, sendAdminDirectOrderCard, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectAmount, pendingDirectOrder, pendingPaymentDetails, pendingPaymentScreenshot, type LinkFailState, type DirectOrderState } from "./session";
 import { getGamepassDetails } from "../shared/roblox";
 import { buildAdminKeyboard, updateMainMenu, routeAdminCallback } from "./admin";
@@ -56,14 +56,39 @@ function generateDirectCode(): string {
 
 // ── Support contact (Progressive Disclosure) ────────────────────────────────
 
-/** Inline callback button that triggers support notification + shows contact URL. */
-function supportBtn(label = "💬 Написать в поддержку", ctxKey = "general") {
-  return Markup.button.callback(label, `sup:${ctxKey}`);
+/** Direct URL button — one tap opens the support dialog. When `ctx` is passed,
+ *  also fires a deduped admin alert (the button no longer round-trips a callback
+ *  we could hook, so we notify admins at show-time instead). */
+function supportBtn(label = "💬 Написать в поддержку", ctxKey = "general", ctx?: any) {
+  if (ctx?.from) void fireSupportAlert(ctx, ctxKey);
+  return Markup.button.url(label, SUPPORT_URL);
+}
+
+/** Fire-and-forget deduped admin alert when a support button is shown to a user. */
+async function fireSupportAlert(ctx: any, ctxKey: string): Promise<void> {
+  try {
+    const tgId        = String(ctx.from.id);
+    const userDisplay = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? `tg:${tgId}`;
+    let wbCode = pendingLink.get(ctx.from.id)?.wbCode;
+    let denom  = pendingLink.get(ctx.from.id)?.denomination;
+    if (!wbCode) {
+      const u = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+      if (u) {
+        const o = await (db as any).wbOrder.findFirst({
+          where: { userId: u.id }, orderBy: { updatedAt: "desc" }, select: { wbCode: true, amount: true },
+        });
+        if (o) { wbCode = o.wbCode; denom = o.amount; }
+      }
+    }
+    await notifySupportShown({ platform: "TG", userDisplay, tgId, contextKey: ctxKey, wbCode, denomination: denom });
+  } catch (e) {
+    console.error("[TG] fireSupportAlert failed:", e);
+  }
 }
 
 /** Returns an inlineKeyboard with a single support button row. */
-function withSupportKb(label?: string, ctxKey = "general"): ReturnType<typeof Markup.inlineKeyboard> {
-  return Markup.inlineKeyboard([[supportBtn(label, ctxKey)]]);
+function withSupportKb(label?: string, ctxKey = "general", ctx?: any): ReturnType<typeof Markup.inlineKeyboard> {
+  return Markup.inlineKeyboard([[supportBtn(label, ctxKey, ctx)]]);
 }
 
 /** Get or init the fail-counter object for a user's current session. */
@@ -233,8 +258,8 @@ export function registerStart(bot: Telegraf): void {
     });
     if (!wbCode) {
       await ctx.reply(
-        "❌ Код не найден. Проверь правильность ввода.\n\nЕсли уверен, что код верный — напиши нам: @RobloxBank_PA",
-        { parse_mode: "HTML", ...withSupportKb(undefined, "code_not_found") }
+        "❌ Код не найден. Проверь правильность ввода.\n💡 Часто путают букву «О» и цифру «0» — проверь эти символы в коде.\n\nЕсли уверен, что код верный — напиши нам: @RobloxBank_PA",
+        { parse_mode: "HTML", ...withSupportKb(undefined, "code_not_found", ctx) }
       );
       return;
     }
@@ -243,7 +268,7 @@ export function registerStart(bot: Telegraf): void {
     // isUsed=true with userId=null means the website reserved it but the bot flow
     // never finished — allow those through so users aren't silently stuck.
     if (wbCode.isUsed && wbCode.userId) {
-      await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?", "code_mine") });
+      await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?", "code_mine", ctx) });
       return;
     }
 
@@ -262,13 +287,17 @@ export function registerStart(bot: Telegraf): void {
         data: {
           tgId,
           name: [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || null,
+          username: ctx.from.username ?? null,
         },
       });
+    } else if (ctx.from.username && user.username !== ctx.from.username) {
+      // Backfill @handle for existing users so TWA "Написать" button works
+      user = await (db as any).user.update({ where: { id: user.id }, data: { username: ctx.from.username } });
     }
 
     // If code is CLAIMED by a different user, block
     if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
-      await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.", { parse_mode: "HTML", ...withSupportKb("💬 Оспорить — написать нам", "code_claimed") });
+      await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.", { parse_mode: "HTML", ...withSupportKb("💬 Оспорить — написать нам", "code_claimed", ctx) });
       return;
     }
 
@@ -882,7 +911,7 @@ export function registerText(bot: Telegraf): void {
         "• Ссылку из конструктора: <code>https://create.roblox.com/...</code>\n" +
         "• Просто ID (только цифры): <code>1234567</code>";
       if (fc.formatError >= 2) {
-        await ctx.reply(formatHint, { parse_mode: "HTML", ...withSupportKb(undefined, "pass_format") });
+        await ctx.reply(formatHint, { parse_mode: "HTML", ...withSupportKb(undefined, "pass_format", ctx) });
       } else {
         await ctx.reply(formatHint, { parse_mode: "HTML" });
       }
@@ -911,7 +940,7 @@ export function registerText(bot: Telegraf): void {
         "• Ссылка ведёт именно на Game Pass, а не на саму игру\n" +
         "• Ты скопировал ссылку прямо из браузера Roblox\n\n" +
         "Если геймпасс точно существует — мы поможем разобраться:",
-        { parse_mode: "HTML", ...withSupportKb("💬 Написать нам", "pass_not_found") }
+        { parse_mode: "HTML", ...withSupportKb("💬 Написать нам", "pass_not_found", ctx) }
       );
       return;
     }
@@ -946,7 +975,7 @@ export function registerText(bot: Telegraf): void {
             `Не удаляй геймпасс до получения оплаты.`,
             { parse_mode: "HTML", ...Markup.inlineKeyboard([
               [Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
-              [supportBtn("💬 Нужна помощь?", "pass_deleted")],
+              [supportBtn("💬 Нужна помощь?", "pass_deleted", ctx)],
             ]) }
           );
         } else if (gamepassInfo.isGamePrivate) {
@@ -961,7 +990,7 @@ export function registerText(bot: Telegraf): void {
             `Или создай геймпасс в другой публичной игре (цена: <b>${expectedPrice} R$</b>)`,
             { parse_mode: "HTML", ...Markup.inlineKeyboard([
               [Markup.button.url("📖 Полная инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
-              [supportBtn("💬 Нужна помощь?", "pass_private")],
+              [supportBtn("💬 Нужна помощь?", "pass_private", ctx)],
             ]) }
           );
         } else {
@@ -974,7 +1003,7 @@ export function registerText(bot: Telegraf): void {
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([[
               Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`),
-              ...(fc.notActive >= 2 ? [supportBtn("Нужна помощь?", "pass_inactive")] : []),
+              ...(fc.notActive >= 2 ? [supportBtn("Нужна помощь?", "pass_inactive", ctx)] : []),
             ]]),
           });
         }
@@ -995,7 +1024,7 @@ export function registerText(bot: Telegraf): void {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([[
             Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`),
-            ...(fc.priceMismatch >= 2 ? [supportBtn("Нужна помощь с ценой?", "pass_price")] : []),
+            ...(fc.priceMismatch >= 2 ? [supportBtn("Нужна помощь с ценой?", "pass_price", ctx)] : []),
           ]]),
         });
         return;
@@ -1018,7 +1047,7 @@ export function registerText(bot: Telegraf): void {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
             [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
-            [supportBtn("💬 Вопросы по заявке?", "roblox_down")],
+            [supportBtn("💬 Вопросы по заявке?", "roblox_down", ctx)],
           ]),
         }
       );
@@ -1041,7 +1070,7 @@ export function registerText(bot: Telegraf): void {
         "Что-то пошло не так — напиши нам, разберёмся вместе:",
         {
           parse_mode: "HTML",
-          ...withSupportKb("💬 Написать нам", "session_err"),
+          ...withSupportKb("💬 Написать нам", "session_err", ctx),
         }
       );
       return;
@@ -1154,7 +1183,7 @@ export function registerText(bot: Telegraf): void {
           "⚠️ Заказ по этому коду уже создан и сейчас обрабатывается.",
           Markup.inlineKeyboard([
             [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
-            [supportBtn("💬 Если что-то не так", "order_dupe")],
+            [supportBtn("💬 Если что-то не так", "order_dupe", ctx)],
           ])
         );
         return;
@@ -1357,7 +1386,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   // (isUsed=true + userId set). CLAIMED+isUsed=false is a provisional state
   // (bot claimed it but gamepass not sent yet), which should still be allowed through.
   if (wbCode.isUsed && wbCode.userId) {
-    await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?", "code_mine") });
+    await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?", "code_mine", ctx) });
     return;
   }
 
@@ -1368,13 +1397,16 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
       data: {
         tgId,
         name: [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || null,
+        username: ctx.from.username ?? null,
       },
     });
+  } else if (ctx.from.username && user.username !== ctx.from.username) {
+    user = await (db as any).user.update({ where: { id: user.id }, data: { username: ctx.from.username } });
   }
 
   // If code is CLAIMED by a different user, block
   if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
-    await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.", { parse_mode: "HTML", ...withSupportKb("💬 Оспорить — написать нам", "code_claimed") });
+    await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.", { parse_mode: "HTML", ...withSupportKb("💬 Оспорить — написать нам", "code_claimed", ctx) });
     return;
   }
 
@@ -1927,6 +1959,7 @@ export function registerCallbacks(bot: Telegraf): void {
           data: {
             tgId,
             name: [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || null,
+            username: ctx.from.username ?? null,
           },
         });
       }
@@ -2067,7 +2100,7 @@ export function registerCallbacks(bot: Telegraf): void {
             `❌ <b>Заказ #${cdoOrderId.slice(-6).toUpperCase()} отменён.</b>\n\nЕсли хочешь — создай новый заказ.`,
             { parse_mode: "HTML", ...Markup.inlineKeyboard([
               [Markup.button.callback("💎 Новый заказ", CB.startDirect)],
-              [supportBtn("💬 Это ошибка?", "order_cancelled")],
+              [supportBtn("💬 Это ошибка?", "order_cancelled", ctx)],
             ]) }
           );
         } catch { }
@@ -2157,7 +2190,7 @@ export function registerCallbacks(bot: Telegraf): void {
             `❌ <b>Не смогли подтвердить оплату.</b>` +
             detailsLine +
             `\nПришли скриншот ещё раз (фотографией, не файлом) 👇`,
-            { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "payment") }
+            { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "payment", ctx) }
           );
         } catch { }
       } else if (payNoUser?.vkId) {
@@ -2240,7 +2273,7 @@ export function registerCallbacks(bot: Telegraf): void {
         `💎 Номинал: <b>${denomination} R$</b>\n` +
         `Пришли ссылку на геймпасс с ценой ${passPrice} R$ 👇\n\n` +
         `💡 <i>Пример: https://www.roblox.com/game-pass/1234567/...</i>`,
-        { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "resubmit") }
+        { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "resubmit", ctx) }
       );
       await ctx.answerCbQuery();
       return;
