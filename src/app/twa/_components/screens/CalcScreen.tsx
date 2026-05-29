@@ -28,6 +28,8 @@ interface UeData {
   retByArticle:      Record<string, number>;
   penaltyPerUnit:    number;
   commByArticle:     Record<string, number>;
+  defaultCommissionPct: number | null; // live WB category commission (fallback for unsold)
+  defaultLogistics:     number | null; // live WB digital-warehouse logistics ₽ (fallback)
   products:          { nmID: number; article: string; price: number; discountedPrice: number; discount: number }[];
   costByArticle:     Record<string, { commission: number; taxRate: number; denomination: number | null }>;
   lastAdAttributedAt: string | null;
@@ -87,6 +89,46 @@ function Row({
       }}>{value}</span>
     </div>
   );
+}
+
+// Compact money for the overview table (no trailing space before ₽).
+function money(n: number) {
+  return Math.round(n).toLocaleString("ru-RU") + "₽";
+}
+
+// Per-product profit/margin/break-even — same formula as the detailed breakdown below,
+// run for every priced denomination to power the overview table.
+function computeRow(
+  article: string, sellPrice: number, denomNum: number,
+  ud: UeData, kursRb: number, kursUsd: number, withAds: boolean,
+) {
+  const costEntry = ud.costByArticle[article] ?? null;
+  const commFromRealiz = ud.commByArticle?.[article];
+  const commission = commFromRealiz != null
+    ? commFromRealiz / 100
+    : (ud.defaultCommissionPct ?? costEntry?.commission ?? 0.245);
+  const taxRate   = costEntry?.taxRate ?? 0.07;
+  const fixedCost = ud.fixedCost ?? 87.5;
+  const robuxCost = kursRb * kursUsd * denomNum / 700;
+  const cpo       = withAds ? (ud.cpo ?? 0) : 0;
+  const storage   = ud.storageByArticle[article] ?? ud.storagePerUnit;
+  const logistics = ud.logByArticle[article] ?? ud.defaultLogistics ?? ud.logPerUnit;
+  const retPct    = ud.retByArticle[article] ?? ud.retPct;
+  const penalty   = ud.penaltyPerUnit ?? 0;
+
+  const afterComm  = sellPrice * (1 - commission);
+  const afterTax   = afterComm * (1 - taxRate);
+  const returnLoss = retPct > 0 && sellPrice > 0 ? (retPct / 100) * (afterTax + logistics) : 0;
+  const hasKurs    = kursRb > 0;
+  const profit     = sellPrice > 0 && hasKurs
+    ? afterTax - fixedCost - robuxCost - cpo - storage - logistics - penalty - returnLoss
+    : NaN;
+  const marginPct  = !isNaN(profit) && sellPrice > 0 ? (profit / sellPrice) * 100 : NaN;
+  const beK        = fixedCost + robuxCost + cpo + storage + logistics + penalty + (retPct / 100) * logistics;
+  const beDenom    = (1 - commission) * (1 - taxRate) * (1 - retPct / 100);
+  const breakEven  = hasKurs && beDenom > 0 ? beK / beDenom : NaN;
+
+  return { sellPrice, profit, marginPct, breakEven, isRealComm: commFromRealiz != null };
 }
 
 export default function CalcScreen({ token }: { token: string }) {
@@ -154,9 +196,11 @@ export default function CalcScreen({ token }: { token: string }) {
   const article    = product?.article ?? String(denom);
   const costEntry  = product ? (ud?.costByArticle[product.article] ?? null) : null;
 
-  // Real WB commission from realization report (commSum/revenue), fallback to DB/default
+  // Commission priority: realization report (fact) → live WB category tariff → DB → 0.245
   const commFromRealiz = ud?.commByArticle?.[article];
-  const commission     = commFromRealiz != null ? commFromRealiz / 100 : (costEntry?.commission ?? 0.245);
+  const commission     = commFromRealiz != null
+    ? commFromRealiz / 100
+    : (ud?.defaultCommissionPct ?? costEntry?.commission ?? 0.245);
   const isRealComm     = commFromRealiz != null;
 
   const taxRate    = costEntry?.taxRate    ?? 0.07;
@@ -167,7 +211,8 @@ export default function CalcScreen({ token }: { token: string }) {
   const cpo     = withAds ? rawCpo : 0;
 
   const storage   = ud ? (ud.storageByArticle[article] ?? ud.storagePerUnit) : 0;
-  const logistics = ud ? (ud.logByArticle[article]     ?? ud.logPerUnit)      : 0;
+  // Logistics priority: realization (fact) → live WB digital-warehouse tariff → global avg
+  const logistics = ud ? (ud.logByArticle[article] ?? ud.defaultLogistics ?? ud.logPerUnit) : 0;
   const retPct    = ud ? (ud.retByArticle[article]     ?? ud.retPct)          : 0;
   const penalty   = ud?.penaltyPerUnit ?? 0;
 
@@ -188,6 +233,21 @@ export default function CalcScreen({ token }: { token: string }) {
     : NaN;
   const profitUsd = !isNaN(profit) && kursUsd > 0 ? profit / kursUsd : NaN;
   const marginPct = !isNaN(profit) && sellPrice > 0 ? (profit / sellPrice) * 100 : NaN;
+
+  // Break-even price: P·(1−comm)(1−tax)(1−r) = fixedCosts + r·logistics  (r = return rate)
+  const beK       = fixedCost + robuxCost + cpo + storage + logistics + penalty + (retPct / 100) * logistics;
+  const beDenom   = (1 - commission) * (1 - taxRate) * (1 - retPct / 100);
+  const breakEven = hasKurs && beDenom > 0 ? Math.round(beK / beDenom) : NaN;
+
+  // Overview table: every priced denomination at the current kurs (the chosen "compact table" design).
+  const tableRows = useMemo(() => {
+    if (!ud) return [] as { article: string; denomNum: number; calc: ReturnType<typeof computeRow> }[];
+    return ud.products
+      .map(p => ({ article: p.article, denomNum: parseFloat(p.article) || 0, price: p.discountedPrice ?? 0 }))
+      .filter(p => p.price > 0 && p.denomNum > 0)
+      .sort((a, b) => a.denomNum - b.denomNum)
+      .map(p => ({ article: p.article, denomNum: p.denomNum, calc: computeRow(p.article, p.price, p.denomNum, ud, kursRb, kursUsd, withAds) }));
+  }, [ud, kursRb, kursUsd, withAds]);
 
   const totalProfit = useMemo(() => {
     if (!realizData) return null;
@@ -218,6 +278,40 @@ export default function CalcScreen({ token }: { token: string }) {
 
   return (
     <div style={{ padding: 16, paddingBottom: 32, display: "flex", flexDirection: "column", gap: 16 }}>
+
+      {/* Overview table — all priced denominations at a glance */}
+      {tableRows.length > 0 && (
+        <div style={{ background: C.card, borderRadius: 14, padding: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: C.sec, textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 10 }}>
+            Все номиналы{hasKurs ? "" : " · введите курс ниже"}
+          </div>
+          <div style={{ display: "flex", fontSize: 10, color: C.muted, paddingBottom: 6, borderBottom: `1px solid ${C.border}` }}>
+            <span style={{ flex: "0 0 44px" }}>Ном</span>
+            <span style={{ flex: 1, textAlign: "right" as const }}>Цена</span>
+            <span style={{ flex: 1, textAlign: "right" as const }}>Приб</span>
+            <span style={{ flex: "0 0 44px", textAlign: "right" as const }}>Марж</span>
+            <span style={{ flex: 1, textAlign: "right" as const }}>Безуб</span>
+          </div>
+          {tableRows.map(({ article, denomNum, calc }) => {
+            const active = denom === denomNum;
+            const mColor = isNaN(calc.marginPct) ? C.muted : calc.marginPct >= 15 ? C.green : calc.marginPct >= 8 ? C.yellow : C.red;
+            return (
+              <button key={article} onClick={() => setDenomAndReset(denomNum)} style={{
+                display: "flex", width: "100%", alignItems: "center", padding: "9px 6px", boxSizing: "border-box" as const,
+                background: active ? C.elevated : "none", border: "none", borderBottom: `1px solid ${C.border}`,
+                cursor: "pointer", borderRadius: active ? 8 : 0,
+              }}>
+                <span style={{ flex: "0 0 44px", textAlign: "left" as const, fontSize: 13, fontWeight: active ? 700 : 600, color: active ? C.accent : "#e5e5ea" }}>{article}</span>
+                <span style={{ flex: 1, textAlign: "right" as const, fontSize: 12, color: C.sec }}>{money(calc.sellPrice)}</span>
+                <span style={{ flex: 1, textAlign: "right" as const, fontSize: 12, fontWeight: 600, color: isNaN(calc.profit) ? C.muted : calc.profit >= 0 ? "#e5e5ea" : C.red }}>{isNaN(calc.profit) ? "—" : money(calc.profit)}</span>
+                <span style={{ flex: "0 0 44px", textAlign: "right" as const, fontSize: 12, fontWeight: 700, color: mColor }}>{isNaN(calc.marginPct) ? "—" : Math.round(calc.marginPct) + "%"}</span>
+                <span style={{ flex: 1, textAlign: "right" as const, fontSize: 12, color: C.sec }}>{isNaN(calc.breakEven) ? "—" : money(calc.breakEven)}</span>
+              </button>
+            );
+          })}
+          <div style={{ fontSize: 10, color: C.muted, marginTop: 8 }}>Тап по строке → подробный расклад ниже</div>
+        </div>
+      )}
 
       {/* Denomination selector */}
       <div>
@@ -435,6 +529,11 @@ export default function CalcScreen({ token }: { token: string }) {
                 {retPct > 0 && (
                   <span style={{ color: retPct >= 20 ? C.yellow : C.muted }}> · возвраты {retPct}%</span>
                 )}
+              </div>
+            )}
+            {canCalc && !isNaN(breakEven) && (
+              <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>
+                ⚖️ безубыточность: {money(breakEven)}
               </div>
             )}
           </div>
