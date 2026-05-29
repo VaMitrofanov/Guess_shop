@@ -2375,11 +2375,27 @@ TG/VK боты не затронуты.
   - новый хелпер `placeIsPlayable(placeId)` — playability через `places/{placeId}/universe` (рядом с `checkGameAccess`).
   - в attempt-4 (roproxy) добавлен блок кросс-проверки через `getUserGamepasses` + `placeIsPlayable`.
 
-### НЕ задеплоено (нужно сделать)
-Фикс пока только локально + проверен на контейнере через temp-файл. Для прода:
-1. `git add bots/shared/roblox.ts && git commit && git push origin main`.
-2. **Деплой на SG вручную** (бот на SG, автодеплоя нет): `scp bots/shared/roblox.ts root@5.223.95.11:/tmp/ && docker cp /tmp/roblox.ts <container>:/app/bots/shared/roblox.ts && docker restart <container>`. Контейнер: `lyz78enntugna9em1biopinr-...`.
-3. VK бот на RF тоже использует `getGamepassDetails` (через bridge) — после деплоя бот SG обновится и VK получит фикс автоматически (он ходит на тот же bridge/код через `VALIDATOR_SOURCE_URL`).
+### Деплой — ВЫПОЛНЕНО ✅
+Коммиты: `c30bc45` (fix), `a1b7712` (handoff). Запушены в `main`.
+
+**ВАЖНОЕ ОТКРЫТИЕ: SG автодеплоится из GitHub.** Вопреки прежнему допущению (что боты надо разливать вручную через `docker cp`), после `git push origin main` Coolify на SG **сам пересобрал** TG-бот контейнер из коммита `a1b7712` (новый контейнер `lyz78enntugna9em1biopinr-035137668064`, образ `lyz78enntugna9em1biopinr:a1b7712...`). Блок IP касается только RF (Москва), Сингапур не заблокирован. То есть `docker cp` для SG больше не обязателен — достаточно push (но docker cp + restart остаётся как быстрый ручной путь, если автодеплой не сработал).
+
+Бридж живёт **в том же контейнере**, что и TG-бот (`tsx bot.ts` + порт 3000). Один деплой обновляет и прямую валидацию TG-бота, и бридж (которым пользуются VK-бот на RF и TWA/web через `VALIDATOR_SOURCE_URL`).
+
+Проверка на боевом бридже после деплоя:
+```
+GET /check-pass?id=1861189578 → isActive:true                       (VIP 500 — принят ✅)
+GET /check-pass?id=1855988517 → isActive:false, isGamePrivate:true  (unrated — заблокирован ✅)
+```
+
+### Ручное принятие заказа #PYTANJ (код 4YNF7HH, @Niyad_LV)
+Заказ из реального кейса завис в `AWAITING_GAMEPASS` (отклонён ложно до фикса). После деплоя принят вручную — повторён точный флоу бота (как при принятой ссылке):
+- `WbOrder cmpppjui200010hnu2kpytanj` → `PENDING`, `gamepassUrl=https://www.roblox.com/game-pass/1861189578`, `robloxUsername=Dark_Varia8954`.
+- `WbCode 4YNF7HH` → `isUsed=true`, `usedAt=now`.
+- Юзеру (tgId 7690762078) отправлено стандартное «🎉 геймпасс принят» (создатель + цена 715 R$ + №PYTANJ + кнопка «📊 Проверить статус») → `{"ok":true}`.
+- Админам разосланы карточки заказа через `sendAdminOrderCard` (НОВЫЙ КЛИЕНТ, кнопки ✅ ВЫКУПЛЕНО / ❌ ОШИБКА).
+
+Делалось одноразовым скриптом внутри контейнера SG (импорт `bots/shared/{db,notify,admin}`, env + Telegram-доступность на месте), скрипт после прогона удалён. Скрипт-шаблон для подобных случаев — `scripts/accept_gamepass.ts` (только БД, без уведомлений).
 
 ### На заметку (деградация Roblox API)
 `economy.roblox.com/v1/game-passes/{id}/details` и `apis.roblox.com/universes/v1/assets/{id}/universe` сейчас отдают **404 для всех пассов** с IP бота. Возможно временно (geo/rate-limit), возможно эндпоинты задеприкейчены. Стоит периодически проверять — если оживут, основной путь снова заработает. Надёжный путь (`places/{id}/universe` + `universes/{id}/game-passes` листинг) на их фоне работает стабильно.
