@@ -3,10 +3,12 @@ import { useState } from "react";
 import AnalyticsScreen from "./AnalyticsScreen";
 import StocksScreen from "./StocksScreen";
 import CodesScreen from "./CodesScreen";
+import CalcScreen from "./CalcScreen";
 
 const TABS = [
   { id: "analytics", label: "Аналитика" },
   { id: "stocks",    label: "Склад"     },
+  { id: "calc",      label: "Расчёт"    },
   { id: "codes",     label: "Коды"      },
 ] as const;
 type WbTab = typeof TABS[number]["id"];
@@ -46,9 +48,10 @@ export default function WbScreen({ token }: { token: string }) {
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, overflow: "hidden", marginTop: 10 }}>
+      <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any, marginTop: 10 }}>
         {tab === "analytics" && <AnalyticsScreen token={token} />}
         {tab === "stocks"    && <StocksScreen    token={token} />}
+        {tab === "calc"      && <CalcScreen      token={token} />}
         {tab === "codes"     && <CodesScreen     token={token} />}
       </div>
     </div>
