@@ -32,6 +32,7 @@ import {
   enterDenomInput, handleDenomInput,
   enterAdInput, handleAdInput,
   showUeSettings, enterUeSettingInput, handleUeSettingInput,
+  enterWhatIfInput, handleWhatIfInput,
   showReviewsHub, enterReviewAnswer, handleReviewAnswer,
   showFbsHub, startWbMonitor,
   showRealizationHub, showRealizationPeriod, showAdvertHub,
@@ -44,6 +45,7 @@ import {
   pendingAdminSearch, pendingCodesInput, pendingRateInput, pendingPriceInput,
   pendingReviewAnswer, pendingCostInput, pendingLogisticsInput,
   pendingAdInput, pendingDenomInput, pendingUeSettingInput,
+  pendingWhatIfInput,
   pendingAutoBuyRateInput, pendingBossrobuxSearch,
 } from "../session";
 
@@ -159,6 +161,12 @@ export function registerAdminHubs(bot: Telegraf): void {
     // 10. UE settings input
     if (pendingUeSettingInput.has(ctx.from.id)) {
       const handled = await handleUeSettingInput(ctx, text);
+      if (handled) return;
+    }
+
+    // 10b. What-if unit-econ calculator input
+    if (pendingWhatIfInput.has(ctx.from.id)) {
+      const handled = await handleWhatIfInput(ctx, text);
       if (handled) return;
     }
 
@@ -421,6 +429,10 @@ export async function routeAdminCallback(
   }
   if (data === CB.wbUeFixedCost) {
     await enterUeSettingInput(ctx, "fixedCost");
+    return true;
+  }
+  if (data === CB.wbCalcWhatIf) {
+    await enterWhatIfInput(ctx);
     return true;
   }
   if (data === CB.wbRealization) {

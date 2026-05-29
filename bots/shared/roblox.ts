@@ -217,7 +217,8 @@ async function placeIsPlayable(placeId: number): Promise<GameAccessResult> {
       `https://apis.roblox.com/universes/v1/places/${placeId}/universe`
     ).catch(() => null);
     if (!uRes?.ok) return "ok";
-    const universeId = (await uRes.json().catch(() => null))?.universeId;
+    const uData: any = await uRes.json().catch(() => null);
+    const universeId = uData?.universeId;
     if (!universeId) return "ok";
 
     const pRes = await rFetch(

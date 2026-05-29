@@ -152,6 +152,7 @@ export const CB = {
   wbEditAd:        (nmID: number) => `wb_ad:${nmID}`,
   wbEditDenom:     (nmID: number) => `wb_denom_ue:${nmID}`,
   wbUeSettings:    "wb_ue_settings",
+  wbCalcWhatIf:    "wb_calc_whatif",
   wbUeKursRb:      "wb_ue_kurs_rb",
   wbUeKursUsd:     "wb_ue_kurs_usd",
   wbUeFixedCost:   "wb_ue_fixed",
