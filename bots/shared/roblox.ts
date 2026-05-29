@@ -199,6 +199,42 @@ async function checkGamePrivate(gamepassId: string, strictOnUnavailable = false)
 type GameAccessResult = "ok" | "private" | "age_restricted";
 
 /**
+ * Playability check keyed by placeId (not gamepassId).
+ *
+ * `apis.roblox.com/universes/v1/assets/{gamepassId}/universe` currently 404s from
+ * our server IP, which cripples checkGamePrivate/checkGameAccess. The places-based
+ * endpoint `universes/v1/places/{placeId}/universe` resolves reliably, and
+ * getUserGamepasses() already hands us the placeId — so we can run the real
+ * playability check on the gamepass's actual game.
+ *
+ * Returns "private" for unrated / private / unapproved games (gamepass not buyable),
+ * "ok" otherwise. Playable + GuestProhibited both count as OK.
+ */
+async function placeIsPlayable(placeId: number): Promise<GameAccessResult> {
+  try {
+    if (!placeId) return "ok";
+    const uRes = await rFetch(
+      `https://apis.roblox.com/universes/v1/places/${placeId}/universe`
+    ).catch(() => null);
+    if (!uRes?.ok) return "ok";
+    const universeId = (await uRes.json().catch(() => null))?.universeId;
+    if (!universeId) return "ok";
+
+    const pRes = await rFetch(
+      `https://games.roblox.com/v1/games/multiget-playability-status?universeIds=${universeId}`
+    ).catch(() => null);
+    if (!pRes?.ok) return "ok";
+    const status = (((await pRes.json().catch(() => null)) as any[]) ?? [])[0];
+    const ps = status?.playabilityStatus as string | undefined;
+    if (ps === "Playable" || ps === "GuestProhibited") return "ok";
+    if (ps === "PrivateGame" || ps === "ContextualPlayabilityUnrated" || ps === "GameUnapproved") return "private";
+    return status?.isPlayable === false ? "private" : "ok";
+  } catch {
+    return "ok";
+  }
+}
+
+/**
  * Detailed game access check used in the roproxy fallback block where
  * the creator ID is known. Distinguishes private games from 18+ restricted
  * ones: the games API returns empty data[] for restricted games when called
@@ -419,6 +455,41 @@ export async function getGamepassDetailsDirect(
       const d: any = await res.json();
       const parsed = parseItem(d, "roproxy/product-info");
       if (parsed) {
+        // Authoritative cross-check — reuses the dashboard search path.
+        // The catalog / economy / universe-asset endpoints are unreliable from our IP
+        // (they 404 or return HTTP 200 + empty array even for valid, for-sale passes),
+        // which makes the heuristics below false-reject. getUserGamepasses() takes the
+        // reliable route (user → public games → universes/{id}/game-passes listing) and
+        // hands back the pass's placeId, so we can also run the real playability check
+        // via places/{placeId}/universe (which resolves where the asset endpoint 404s).
+        // Found + playable → trust it; found but unrated/private → block with the proper
+        // message. A pass in a truly private game won't be listed at all (accessFilter=
+        // Public) and falls through to the conservative heuristics below.
+        if (parsed.isActive && !foundInPrimary && parsed.creatorName) {
+          try {
+            const listed = await getUserGamepasses(parsed.creatorName);
+            const match  = listed.find((g) => String(g.gamepassId) === gamepassId);
+            if (match) {
+              if (match.robux > 0) parsed.price = match.robux;
+              const access = await placeIsPlayable(match.placeId);
+              if (access === "private") {
+                console.warn(
+                  `[Roblox/bots] roproxy: gamepass ${gamepassId} listed for sale but its game ` +
+                  `(place ${match.placeId}) is unrated/private — isActive→false isGamePrivate→true`
+                );
+                parsed.isActive = false;
+                parsed.isGamePrivate = true;
+                return parsed;
+              }
+              console.log(
+                `[Roblox/bots] roproxy: gamepass ${gamepassId} confirmed for-sale & playable via ` +
+                `creator listing "${parsed.creatorName}" — accepting (primary endpoints degraded)`
+              );
+              return parsed; // isActive stays true — no heuristic downgrade
+            }
+          } catch { /* listing unavailable — fall through to conservative heuristics */ }
+        }
+
         // If no primary endpoint found this gamepass (marketplace, economy all failed)
         // treat a universe 404 as "game is private" rather than "API temporarily down".
         // This catches the common case where the game was deleted or never made public.
