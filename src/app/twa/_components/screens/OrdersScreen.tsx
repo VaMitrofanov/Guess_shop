@@ -1,12 +1,30 @@
 "use client";
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Palette — refined Apple-style dark, vibrant accents at limited contrast,
+   hairlines instead of thick borders. Tokens are referenced everywhere so the
+   look stays consistent across the screen.
+   ───────────────────────────────────────────────────────────────────────── */
 const C = {
-  card: "#2c2c2e", elevated: "#3a3a3c", border: "#3a3a3c",
-  accent: "#bf5af2", green: "#30d158", red: "#ff453a", yellow: "#ffd60a",
-  orange: "#ff9f0a", blue: "#0a84ff",
-  sec: "#8e8e93", muted: "#48484a", bg: "#1c1c1e",
+  bg:          "#1c1c1e",
+  card:        "#2c2c2e",
+  cardTop:     "rgba(255,255,255,0.04)",      // inner top-edge highlight
+  cardShadow:  "0 1px 0 rgba(255,255,255,0.04) inset, 0 6px 20px rgba(0,0,0,0.18)",
+  elevated:    "#3a3a3c",
+  hairline:    "rgba(255,255,255,0.07)",
+  textPrimary: "#f2f2f7",
+  textSecondary:"#98989d",
+  textTertiary:"#636366",
+  accent:      "#bf5af2",
+  green:       "#30d158",
+  red:         "#ff453a",
+  yellow:      "#ffd60a",
+  orange:      "#ff9f0a",
+  blue:        "#0a84ff",
 };
+
+const tabular = { fontVariantNumeric: "tabular-nums" as const };
 
 type OrderStatus = "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED";
 type FilterStatus = OrderStatus | "ALL";
@@ -37,12 +55,12 @@ interface OrdersData {
   pages: number;
 }
 
-const STATUS_META: Record<OrderStatus, { label: string; color: string; dot: string }> = {
-  AWAITING_GAMEPASS: { label: "Ждёт ссылку", color: C.yellow,  dot: "🟡" },
-  PENDING:           { label: "Новый",        color: C.accent,  dot: "🟣" },
-  IN_PROGRESS:       { label: "В работе",     color: C.orange,  dot: "🟠" },
-  COMPLETED:         { label: "Завершён",     color: C.green,   dot: "🟢" },
-  REJECTED:          { label: "Отклонён",     color: C.red,     dot: "🔴" },
+const STATUS_META: Record<OrderStatus, { label: string; color: string }> = {
+  AWAITING_GAMEPASS: { label: "Ждёт ссылку", color: C.yellow },
+  PENDING:           { label: "Новый",        color: C.accent },
+  IN_PROGRESS:       { label: "В работе",     color: C.orange },
+  COMPLETED:         { label: "Завершён",     color: C.green  },
+  REJECTED:          { label: "Отклонён",     color: C.red    },
 };
 
 const FILTERS: { id: FilterStatus; label: string }[] = [
@@ -54,46 +72,141 @@ const FILTERS: { id: FilterStatus; label: string }[] = [
   { id: "REJECTED",          label: "Отклонено"   },
 ];
 
-function fmtDate(iso: string) {
-  const d = new Date(iso);
-  const now = new Date();
-  const diffMin = (now.getTime() - d.getTime()) / 60000;
+/* ───────────── Time formatting — short & contextual ───────────── */
+function fmtRelative(iso: string) {
+  const d       = new Date(iso);
+  const diffMin = (Date.now() - d.getTime()) / 60000;
+  if (diffMin < 1)    return "только что";
   if (diffMin < 60)   return `${Math.round(diffMin)} мин`;
   if (diffMin < 1440) return `${Math.round(diffMin / 60)} ч`;
+  if (diffMin < 1440 * 7) return `${Math.floor(diffMin / 1440)} дн`;
   return d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+}
+function fmtFull(iso: string) {
+  return new Date(iso).toLocaleString("ru-RU", {
+    day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+  });
 }
 
 function copyText(text: string) {
   navigator.clipboard?.writeText(text).catch(() => {});
 }
 
-function CopyBtn({ text }: { text: string }) {
+function CopyBtn({ text, variant = "ghost" }: { text: string; variant?: "ghost" | "tinted" }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
-      onClick={e => { e.stopPropagation(); copyText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-      style={{
-        background: copied ? C.green + "33" : C.elevated,
-        border: "none", borderRadius: 6,
-        color: copied ? C.green : C.sec,
-        fontSize: 11, padding: "3px 8px", cursor: "pointer",
-        flexShrink: 0, transition: "all 0.2s",
+      onClick={e => {
+        e.stopPropagation();
+        copyText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1400);
       }}
+      style={{
+        background:
+          copied ? `${C.green}26` :
+          variant === "tinted" ? "rgba(255,255,255,0.06)" : "transparent",
+        border:    "none",
+        borderRadius: 7,
+        color:     copied ? C.green : C.textSecondary,
+        fontSize:  11,
+        fontWeight: 500,
+        padding:   "4px 9px",
+        cursor:    "pointer",
+        flexShrink:0,
+        transition:"background 0.18s, color 0.18s",
+      }}
+      title={copied ? "Скопировано" : "Скопировать"}
     >
-      {copied ? "✓" : "Копировать"}
+      {copied ? "✓ Скопировано" : "Скопировать"}
     </button>
   );
 }
 
-function InfoRow({ icon, children }: { icon: string; children: React.ReactNode }) {
+/* ───────────── Avatar — initial circle with deterministic hue ───────────── */
+function colorForName(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  const hue = hash % 360;
+  return `hsl(${hue} 55% 42%)`;
+}
+function Avatar({ name, platform }: { name: string; platform: "tg" | "vk" | "—" }) {
+  const initial = (name.trim()[0] ?? "?").toUpperCase();
+  const bg = name === "—" ? C.elevated : colorForName(name);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 9, minHeight: 22 }}>
-      <span style={{ fontSize: 13, width: 18, textAlign: "center" as const, flexShrink: 0, opacity: 0.7 }}>{icon}</span>
-      <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
+    <div style={{
+      width: 36, height: 36, borderRadius: 18,
+      background: bg,
+      color: "#fff",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontWeight: 700, fontSize: 15, letterSpacing: -0.2,
+      flexShrink: 0,
+      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18)",
+      position: "relative",
+    }}>
+      {initial}
+      {platform !== "—" && (
+        <div style={{
+          position: "absolute", right: -2, bottom: -2,
+          width: 14, height: 14, borderRadius: 7,
+          background: platform === "tg" ? "#229ED9" : "#0077FF",
+          border: `2px solid ${C.card}`,
+          fontSize: 7, fontWeight: 800, color: "#fff",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          {platform === "tg" ? "T" : "V"}
+        </div>
+      )}
     </div>
   );
 }
 
+/* ───────────── Status pill — refined dot+label ───────────── */
+function StatusPill({ status }: { status: OrderStatus }) {
+  const meta = STATUS_META[status];
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+      background: `${meta.color}1c`,
+      color:      meta.color,
+      fontSize:   10.5,
+      fontWeight: 700,
+      padding:    "3px 9px 3px 7px",
+      borderRadius: 999,
+      letterSpacing: 0.4,
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: 3, background: meta.color, boxShadow: `0 0 0 2px ${meta.color}33` }} />
+      {meta.label.toUpperCase()}
+    </span>
+  );
+}
+
+function Chip({ children, color }: { children: React.ReactNode; color: string }) {
+  return (
+    <span style={{
+      fontSize: 10, fontWeight: 600, letterSpacing: 0.3,
+      color, background: `${color}1c`,
+      padding: "2.5px 8px", borderRadius: 999, whiteSpace: "nowrap",
+    }}>
+      {children}
+    </span>
+  );
+}
+
+/* ───────────── Info row with small label/value ───────────── */
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "92px 1fr", alignItems: "center", gap: 8, minHeight: 26 }}>
+      <span style={{ fontSize: 11, color: C.textTertiary, letterSpacing: 0.2 }}>{label}</span>
+      <div style={{ minWidth: 0, fontSize: 13.5, color: C.textPrimary }}>{children}</div>
+    </div>
+  );
+}
+function Divider() {
+  return <div style={{ height: 1, background: C.hairline, margin: "8px 0" }} />;
+}
+
+/* ───────────── ActionBar (preserved logic, polished visuals) ───────────── */
 function ActionBar({
   order, token, onDone,
 }: { order: Order; token: string; onDone: () => void }) {
@@ -119,31 +232,34 @@ function ActionBar({
 
   if (rejectMode) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <textarea
           placeholder="Причина отклонения…"
           value={rejectReason}
           onChange={e => setRejectReason(e.target.value)}
           rows={2}
           style={{
-            background: C.elevated, border: "none", borderRadius: 10, color: "#fff",
-            fontSize: 14, padding: "8px 12px", resize: "none", outline: "none", width: "100%",
-            boxSizing: "border-box",
+            background: "rgba(255,255,255,0.06)",
+            border: "none", borderRadius: 12,
+            color: C.textPrimary, fontSize: 14, lineHeight: 1.35,
+            padding: "10px 12px",
+            resize: "none", outline: "none", width: "100%", boxSizing: "border-box",
+            fontFamily: "inherit",
           }}
         />
         <div style={{ display: "flex", gap: 8 }}>
           <button
             onClick={() => setRejectMode(false)}
-            style={{ flex: 1, padding: "11px", borderRadius: 12, border: "none", background: C.elevated, color: C.sec, fontSize: 14, cursor: "pointer" }}
+            style={btn(C.elevated, C.textSecondary, 1)}
           >
             Отмена
           </button>
           <button
             onClick={() => doAction("reject", { reason: rejectReason || "не указана" })}
             disabled={loading}
-            style={{ flex: 2, padding: "11px", borderRadius: 12, border: "none", background: C.red, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.7 : 1 }}
+            style={{ ...btn(C.red, "#fff", 2), opacity: loading ? 0.7 : 1 }}
           >
-            {loading ? "…" : "❌ Отклонить"}
+            {loading ? "…" : "Отклонить"}
           </button>
         </div>
         {err && <div style={{ color: C.red, fontSize: 12 }}>{err}</div>}
@@ -154,60 +270,55 @@ function ActionBar({
   const showTakeWork = order.status === "PENDING";
   const showComplete = order.status === "PENDING" || order.status === "IN_PROGRESS";
   const showReject   = ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS"].includes(order.status);
-
-  const hasMainAction = showTakeWork || showComplete;
+  const hasMain      = showTakeWork || showComplete;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ display: "flex", gap: 8 }}>
         {showTakeWork && (
-          <button
-            onClick={() => doAction("take-work")}
-            disabled={loading}
-            style={{ flex: 1, padding: "11px", borderRadius: 12, border: "none", background: C.orange, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.7 : 1 }}
-          >
-            {loading ? "…" : "🟠 В работу"}
+          <button onClick={() => doAction("take-work")} disabled={loading}
+            style={{ ...btn(C.orange, "#fff", 1), opacity: loading ? 0.7 : 1 }}>
+            {loading ? "…" : "В работу"}
           </button>
         )}
         {showComplete && (
-          <button
-            onClick={() => doAction("complete")}
-            disabled={loading}
-            style={{ flex: 2, padding: "11px", borderRadius: 12, border: "none", background: C.green, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.7 : 1 }}
-          >
-            {loading ? "…" : "✅ Готово"}
+          <button onClick={() => doAction("complete")} disabled={loading}
+            style={{ ...btn(C.green, "#fff", 2), opacity: loading ? 0.7 : 1, fontWeight: 700 }}>
+            {loading ? "…" : "✓ Выкуплено"}
           </button>
         )}
-        {showReject && hasMainAction && (
-          <button
-            onClick={() => setRejectMode(true)}
-            disabled={loading}
+        {showReject && hasMain && (
+          <button onClick={() => setRejectMode(true)} disabled={loading}
             style={{
-              flexShrink: 0, width: 44, padding: "11px 0", borderRadius: 12,
-              border: `1px solid ${C.red}55`, background: "transparent",
-              color: C.red, fontSize: 18, lineHeight: 1, cursor: "pointer",
-            }}
-          >
+              flexShrink: 0, width: 46,
+              padding: "12px 0", borderRadius: 12,
+              border: `1px solid ${C.red}66`, background: "transparent",
+              color: C.red, fontSize: 20, lineHeight: 1, cursor: "pointer",
+            }}>
             ✕
           </button>
         )}
       </div>
-      {showReject && !hasMainAction && (
-        <button
-          onClick={() => setRejectMode(true)}
-          disabled={loading}
+      {showReject && !hasMain && (
+        <button onClick={() => setRejectMode(true)} disabled={loading}
           style={{
-            width: "100%", padding: "10px", borderRadius: 12,
+            width: "100%", padding: "11px", borderRadius: 12,
             border: `1px solid ${C.red}55`, background: "transparent",
             color: C.red, fontSize: 14, fontWeight: 500, cursor: "pointer",
-          }}
-        >
-          ❌ Отклонить
+          }}>
+          Отклонить заказ
         </button>
       )}
       {err && <div style={{ color: C.red, fontSize: 12 }}>{err}</div>}
     </div>
   );
+}
+function btn(bg: string, color: string, flex: number): React.CSSProperties {
+  return {
+    flex, padding: "12px", borderRadius: 12, border: "none",
+    background: bg, color, fontSize: 14, fontWeight: 600, cursor: "pointer",
+    letterSpacing: 0.1,
+  };
 }
 
 function extractGamepassId(url: string | null): string | null {
@@ -216,27 +327,36 @@ function extractGamepassId(url: string | null): string | null {
   return m ? m[1] : null;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   OrderCard — premium hierarchy
+   ───────────────────────────────────────────────────────────────────────── */
 function OrderCard({
   order, token, onGoToBossrobux, onRefresh,
 }: { order: Order; token: string; onGoToBossrobux?: (gamepassId?: string) => void; onRefresh: () => void }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [fetchedCreator, setFetchedCreator] = useState<string | false | null>(null);
 
-  const meta      = STATUS_META[order.status];
   const isActive  = ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS"].includes(order.status);
   const isHistory = ["COMPLETED", "REJECTED"].includes(order.status);
 
+  // User identity for the card header
   const realName = order.user.name && order.user.name !== "VK User" ? order.user.name : null;
-  const userHandle = order.user.vkId
-    ? (realName ?? `VK · ${order.user.vkId}`)
+  const platform: "tg" | "vk" | "—" = order.user.tgId ? "tg" : order.user.vkId ? "vk" : "—";
+  const fallbackHandle = order.user.vkId
+    ? `VK · ${order.user.vkId}`
     : order.user.tgId
-    ? (realName ?? `TG · ${order.user.tgId}`)
+    ? `TG · ${order.user.tgId}`
     : "—";
+  const displayName = realName ?? fallbackHandle;
+  const subHandle   = realName
+    ? (order.user.vkId ? `VK · ${order.user.vkId}` : order.user.tgId ? `TG · ${order.user.tgId}` : "")
+    : "";
 
   const displayCreator = order.robloxUsername
     ?? (typeof fetchedCreator === "string" ? fetchedCreator || null : null);
+  const shortId = order.id.slice(-6).toUpperCase();
 
-  // Fetch creator when historical card is opened and robloxUsername not in DB
+  // Late-fetch Roblox username for older orders missing it from DB
   useEffect(() => {
     if (!detailsOpen || order.robloxUsername || !order.gamepassUrl || fetchedCreator !== null) return;
     const gpId = extractGamepassId(order.gamepassUrl);
@@ -253,205 +373,251 @@ function OrderCard({
   }, [detailsOpen, order.robloxUsername, order.gamepassUrl, fetchedCreator, token]);
 
   return (
-    <div style={{ background: C.card, borderRadius: 16, overflow: "hidden" }}>
+    <article style={{
+      background: C.card,
+      borderRadius: 18,
+      overflow: "hidden",
+      boxShadow: C.cardShadow,
+      position: "relative",
+    }}>
+      {/* Inner top-edge highlight */}
+      <div style={{
+        position: "absolute", inset: 0, borderRadius: 18, pointerEvents: "none",
+        background: `linear-gradient(180deg, ${C.cardTop} 0%, rgba(255,255,255,0) 28%)`,
+      }} />
 
-      {/* ── Header: status + amount + user ── */}
+      {/* ─── Header ─── */}
       <div
-        style={{ padding: "12px 14px 10px", cursor: isHistory ? "pointer" : "default" }}
         onClick={() => isHistory && setDetailsOpen(d => !d)}
+        style={{ padding: "14px 16px 12px", cursor: isHistory ? "pointer" : "default", position: "relative" }}
       >
-        {/* Row 1: status badge + amount */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" as const }}>
-            <span style={{
-              background: meta.color + "22", color: meta.color, fontSize: 11,
-              fontWeight: 700, padding: "3px 9px", borderRadius: 20, letterSpacing: 0.3,
+        {/* Top row: status + chips + amount */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, minWidth: 0 }}>
+            <StatusPill status={order.status} />
+            {order.isDirectOrder && <Chip color={C.blue}>ПРЯМОЙ</Chip>}
+            {order.reviewStatus === "PENDING"   && <Chip color={C.yellow}>📸 ОТЗЫВ</Chip>}
+            {order.reviewStatus === "SUBMITTED" && <Chip color={C.green}>⭐ ОТЗЫВ</Chip>}
+          </div>
+          <div style={{ textAlign: "right" as const, flexShrink: 0 }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, letterSpacing: -0.6, ...tabular, lineHeight: 1.05 }}>
+              {order.amount.toLocaleString("ru-RU")} <span style={{ fontSize: 14, color: C.textSecondary, fontWeight: 600, letterSpacing: 0 }}>R$</span>
+            </div>
+            <div style={{ fontSize: 11, color: C.textTertiary, marginTop: 2, ...tabular }}>
+              #{shortId} · {fmtRelative(order.createdAt)}
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom row: avatar + user identity */}
+        <div style={{ display: "flex", alignItems: "center", gap: 11, minWidth: 0 }}>
+          <Avatar name={displayName} platform={platform} />
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{
+              fontSize: 15, fontWeight: 600, color: C.textPrimary,
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
             }}>
-              {meta.dot} {meta.label.toUpperCase()}
+              {displayName}
+            </div>
+            {subHandle && (
+              <div style={{ fontSize: 11.5, color: C.textTertiary, marginTop: 1, ...tabular }}>
+                {subHandle}
+              </div>
+            )}
+          </div>
+          {isHistory && (
+            <span style={{
+              fontSize: 11, color: C.textTertiary, fontWeight: 500,
+              padding: "4px 10px", borderRadius: 999,
+              background: "rgba(255,255,255,0.06)",
+              flexShrink: 0,
+            }}>
+              {detailsOpen ? "Скрыть" : "Детали"}
             </span>
-            {order.isDirectOrder && (
-              <span style={{ fontSize: 10, color: C.blue, background: C.blue + "22", padding: "2px 7px", borderRadius: 20 }}>прямой</span>
-            )}
-            {order.reviewStatus === "PENDING" && (
-              <span style={{ fontSize: 10, color: C.yellow, background: C.yellow + "22", padding: "2px 7px", borderRadius: 20, whiteSpace: "nowrap" as const }}>📸 отзыв</span>
-            )}
-            {order.reviewStatus === "SUBMITTED" && (
-              <span style={{ fontSize: 10, color: C.green, background: C.green + "22", padding: "2px 7px", borderRadius: 20, whiteSpace: "nowrap" as const }}>⭐ отзыв</span>
-            )}
-          </div>
-          <span style={{ fontSize: 20, fontWeight: 700, color: "#fff", letterSpacing: -0.5 }}>{order.amount} R$</span>
+          )}
         </div>
 
-        {/* Row 2: user + time */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: C.sec }}>{userHandle}</span>
-          <span style={{ fontSize: 11, color: C.muted }}>{fmtDate(order.createdAt)}</span>
-        </div>
-
-        {/* Rejection reason preview */}
-        {order.status === "REJECTED" && order.rejectionReason && (
-          <div style={{ marginTop: 5, fontSize: 12, color: C.red, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-            💬 {order.rejectionReason}
-          </div>
-        )}
-
-        {/* Historical expand hint */}
-        {isHistory && (
-          <div style={{ marginTop: 4, fontSize: 11, color: C.muted, textAlign: "right" as const }}>
-            {detailsOpen ? "▲ скрыть" : "▼ подробнее"}
+        {/* Rejection reason preview (collapsed cards) */}
+        {!detailsOpen && order.status === "REJECTED" && order.rejectionReason && (
+          <div style={{
+            marginTop: 10, padding: "8px 11px",
+            background: `${C.red}14`, borderRadius: 10,
+            fontSize: 12, color: C.red,
+            display: "flex", gap: 7,
+            overflow: "hidden",
+          }}>
+            <span style={{ flexShrink: 0 }}>💬</span>
+            <span style={{
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {order.rejectionReason}
+            </span>
           </div>
         )}
       </div>
 
-      {/* ── Body: always for active; toggled for history ── */}
+      {/* ─── Body ─── */}
       {(isActive || detailsOpen) && (
-        <div
-          onClick={e => e.stopPropagation()}
-          style={{ borderTop: `1px solid ${C.border}`, padding: "10px 14px", display: "flex", flexDirection: "column", gap: 9 }}
-        >
+        <div onClick={e => e.stopPropagation()} style={{ padding: "0 16px 14px" }}>
+          <div style={{ height: 1, background: C.hairline, marginBottom: 12 }} />
+
           {/* Gamepass URL */}
           {order.gamepassUrl ? (
-            <InfoRow icon="🔗">
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+            <Row label="Геймпасс">
+              <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                 <a
-                  href={order.gamepassUrl}
-                  target="_blank"
-                  rel="noreferrer"
+                  href={order.gamepassUrl} target="_blank" rel="noreferrer"
                   onClick={e => e.stopPropagation()}
-                  style={{ color: C.blue, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, flex: 1 }}
-                >
-                  {order.gamepassUrl}
+                  style={{
+                    color: C.blue, fontSize: 13.5, fontWeight: 500,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    minWidth: 0, flex: 1, textDecoration: "none",
+                  }}>
+                  {order.gamepassUrl.replace(/^https?:\/\//, "")}
                 </a>
                 <CopyBtn text={order.gamepassUrl} />
               </div>
-            </InfoRow>
+            </Row>
           ) : order.status === "AWAITING_GAMEPASS" ? (
-            <div style={{ fontSize: 12, color: C.muted, fontStyle: "italic" as const, paddingLeft: 27 }}>
-              ⏳ Пользователь ещё не отправил ссылку
-            </div>
+            <Row label="Геймпасс">
+              <span style={{ fontSize: 13, color: C.textTertiary, fontStyle: "italic" }}>
+                Ждём ссылку от пользователя
+              </span>
+            </Row>
           ) : null}
 
           {/* Roblox username */}
           {(order.robloxUsername || (detailsOpen && (displayCreator || fetchedCreator === false))) && (
-            <InfoRow icon="👤">
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {fetchedCreator === false && !order.robloxUsername
-                  ? <span style={{ fontSize: 13, color: C.sec }}>загружаю…</span>
-                  : (order.robloxUsername ?? displayCreator)
-                  ? <>
-                      <span style={{ fontSize: 14, fontWeight: 600, color: "#fff" }}>
-                        {order.robloxUsername ?? displayCreator}
-                      </span>
-                      <CopyBtn text={order.robloxUsername ?? displayCreator ?? ""} />
-                    </>
-                  : <span style={{ fontSize: 13, color: C.muted }}>—</span>}
-              </div>
-            </InfoRow>
+            <Row label="Ник в Roblox">
+              {fetchedCreator === false && !order.robloxUsername ? (
+                <span style={{ fontSize: 13, color: C.textTertiary }}>загружаю…</span>
+              ) : (order.robloxUsername ?? displayCreator) ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary }}>
+                    {order.robloxUsername ?? displayCreator}
+                  </span>
+                  <CopyBtn text={order.robloxUsername ?? displayCreator ?? ""} />
+                </div>
+              ) : (
+                <span style={{ fontSize: 13, color: C.textTertiary }}>—</span>
+              )}
+            </Row>
           )}
 
-          {/* WB Code */}
+          {/* WB code */}
           {!order.isDirectOrder && (
-            <InfoRow icon="🔑">
+            <Row label="Код WB">
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontFamily: "monospace", fontSize: 14, color: C.accent, fontWeight: 700 }}>{order.wbCode}</span>
+                <span style={{
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                  fontSize: 13.5, fontWeight: 700, color: C.accent,
+                  letterSpacing: 1.2,
+                }}>
+                  {order.wbCode}
+                </span>
                 <CopyBtn text={order.wbCode} />
               </div>
-            </InfoRow>
+            </Row>
           )}
 
-          {/* User contact — always visible in body */}
-          <InfoRow icon="👥">
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" as const }}>
-              {order.user.vkId ? (
-                <>
-                  <a
-                    href={`https://vk.com/id${order.user.vkId}`}
-                    target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
-                    style={{ color: C.blue, fontSize: 13, fontWeight: 500 }}
-                  >
-                    {order.user.name && order.user.name !== "VK User" ? order.user.name : `VK · ${order.user.vkId}`}
-                  </a>
-                  <CopyBtn text={order.user.vkId} />
-                </>
-              ) : order.user.tgId ? (
-                <>
-                  <a
-                    href={`https://t.me/${order.user.tgId}`}
-                    target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
-                    style={{ color: C.blue, fontSize: 13, fontWeight: 500 }}
-                  >
-                    {order.user.name ? order.user.name : `TG · ${order.user.tgId}`}
-                  </a>
-                  <CopyBtn text={order.user.tgId} />
-                </>
-              ) : <span style={{ fontSize: 13, color: C.muted }}>—</span>}
-            </div>
-          </InfoRow>
+          {/* User identity (link out) */}
+          <Row label="Пользователь">
+            {order.user.vkId ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <a href={`https://vk.com/id${order.user.vkId}`} target="_blank" rel="noreferrer"
+                   onClick={e => e.stopPropagation()}
+                   style={{ color: C.blue, fontSize: 13.5, fontWeight: 500, textDecoration: "none" }}>
+                  vk.com/id{order.user.vkId}
+                </a>
+                <CopyBtn text={order.user.vkId} />
+              </div>
+            ) : order.user.tgId ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <a href={`tg://user?id=${order.user.tgId}`}
+                   onClick={e => e.stopPropagation()}
+                   style={{ color: C.blue, fontSize: 13.5, fontWeight: 500, textDecoration: "none" }}>
+                  tg://{order.user.tgId}
+                </a>
+                <CopyBtn text={order.user.tgId} />
+              </div>
+            ) : <span style={{ fontSize: 13, color: C.textTertiary }}>—</span>}
+          </Row>
 
           {/* Purchase cost */}
           {order.purchaseRate != null && (
-            <InfoRow icon="💰">
-              <span style={{ fontSize: 14, fontWeight: 600, color: "#fff" }}>
-                {Math.round(order.amount * order.purchaseRate)} ₽
-                <span style={{ fontSize: 11, color: C.sec, fontWeight: 400, marginLeft: 6 }}>
+            <Row label="Себестоимость">
+              <span style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary, ...tabular }}>
+                {Math.round(order.amount * order.purchaseRate).toLocaleString("ru-RU")} ₽
+                <span style={{ fontSize: 11.5, color: C.textSecondary, fontWeight: 400, marginLeft: 6 }}>
                   по {order.purchaseRate} ₽/R$
                 </span>
               </span>
-            </InfoRow>
+            </Row>
           )}
 
-          {/* Payment details (direct orders) */}
+          {/* Payment details (direct) */}
           {order.paymentDetails && (
-            <InfoRow icon="💳">
+            <Row label="Реквизиты">
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 12, color: "#e5e5ea" }}>{order.paymentDetails}</span>
+                <span style={{
+                  fontSize: 12.5, color: "#e5e5ea",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {order.paymentDetails}
+                </span>
                 <CopyBtn text={order.paymentDetails} />
               </div>
-            </InfoRow>
+            </Row>
           )}
 
-          {/* Rejection reason (full, in expanded) */}
+          {/* Rejection reason (full) */}
           {detailsOpen && order.rejectionReason && order.status === "REJECTED" && (
-            <InfoRow icon="💬">
-              <span style={{ fontSize: 12, color: C.red }}>{order.rejectionReason}</span>
-            </InfoRow>
+            <Row label="Причина">
+              <span style={{ fontSize: 13, color: C.red, lineHeight: 1.4 }}>{order.rejectionReason}</span>
+            </Row>
           )}
 
-          {/* Review status (in expanded history) */}
+          {/* Review status */}
           {detailsOpen && order.reviewStatus != null && (
-            <InfoRow icon="📋">
+            <Row label="Отзыв WB">
               {order.reviewStatus === "SUBMITTED"
                 ? <span style={{ color: C.green, fontSize: 13, fontWeight: 600 }}>⭐ Получен · +100 R$ начислено</span>
                 : <span style={{ color: C.yellow, fontSize: 13 }}>📸 Ожидается от пользователя</span>}
-            </InfoRow>
+            </Row>
           )}
 
-          {/* Timestamps (in expanded history) */}
+          {/* Timestamps */}
           {detailsOpen && (
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, paddingTop: 2 }}>
-              <span>{new Date(order.createdAt).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
-              <span>обн. {new Date(order.updatedAt).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
-            </div>
+            <>
+              <Divider />
+              <div style={{
+                display: "flex", justifyContent: "space-between",
+                fontSize: 11, color: C.textTertiary, ...tabular,
+              }}>
+                <span>Создан · {fmtFull(order.createdAt)}</span>
+                <span>Обновлён · {fmtFull(order.updatedAt)}</span>
+              </div>
+            </>
           )}
         </div>
       )}
 
-      {/* ── Actions: always visible for active orders ── */}
+      {/* ─── Actions ─── */}
       {isActive && (
-        <div
-          onClick={e => e.stopPropagation()}
-          style={{ borderTop: `1px solid ${C.border}`, padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}
-        >
+        <div onClick={e => e.stopPropagation()} style={{
+          borderTop: `1px solid ${C.hairline}`,
+          padding: "12px 16px 14px",
+          display: "flex", flexDirection: "column", gap: 10,
+          background: "rgba(0,0,0,0.12)",
+        }}>
           <ActionBar order={order} token={token} onDone={onRefresh} />
-
-          {/* Boss Robux quick buy */}
           {onGoToBossrobux && order.gamepassUrl && (order.status === "PENDING" || order.status === "IN_PROGRESS") && (
             <button
               onClick={e => { e.stopPropagation(); onGoToBossrobux(extractGamepassId(order.gamepassUrl) ?? undefined); }}
               style={{
-                width: "100%", padding: "9px", border: "none", borderRadius: 10,
-                background: "rgba(191,90,242,0.12)", color: "#bf5af2",
-                fontSize: 13, fontWeight: 600, cursor: "pointer",
+                width: "100%", padding: "11px", border: "none", borderRadius: 12,
+                background: "rgba(191,90,242,0.14)", color: C.accent,
+                fontSize: 13.5, fontWeight: 600, cursor: "pointer", letterSpacing: 0.1,
               }}
             >
               🛒 Выкупить через Boss Robux
@@ -459,88 +625,171 @@ function OrderCard({
           )}
         </div>
       )}
+    </article>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Search input — debounced, with clear button
+   ───────────────────────────────────────────────────────────────────────── */
+function SearchBar({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [local, setLocal] = useState(value);
+  useEffect(() => { setLocal(value); }, [value]);
+  useEffect(() => {
+    const t = setTimeout(() => { if (local !== value) onChange(local); }, 250);
+    return () => clearTimeout(t);
+  }, [local]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 8,
+      background: "rgba(118,118,128,0.24)",
+      borderRadius: 11, padding: "8px 11px",
+    }}>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+           stroke={C.textSecondary} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
+           style={{ flexShrink: 0 }}>
+        <circle cx="11" cy="11" r="7" />
+        <path d="m21 21-4.3-4.3" />
+      </svg>
+      <input
+        value={local}
+        onChange={e => setLocal(e.target.value)}
+        placeholder="Ник Roblox, ID, ссылка, WB-код, TG/VK"
+        style={{
+          background: "transparent", border: "none", outline: "none",
+          color: C.textPrimary, fontSize: 14.5, flex: 1, minWidth: 0,
+          padding: 0, fontFamily: "inherit",
+        }}
+      />
+      {local && (
+        <button
+          onClick={() => { setLocal(""); onChange(""); }}
+          style={{
+            background: "rgba(255,255,255,0.18)", border: "none",
+            width: 18, height: 18, borderRadius: 9,
+            color: C.bg, fontSize: 11, fontWeight: 700,
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0, lineHeight: 1,
+          }}
+          title="Очистить"
+        >
+          ✕
+        </button>
+      )}
     </div>
   );
 }
 
-export default function OrdersScreen({ token, onGoToBossrobux }: { token: string; onGoToBossrobux?: (gamepassId?: string) => void }) {
+/* ─────────────────────────────────────────────────────────────────────────────
+   Main screen
+   ───────────────────────────────────────────────────────────────────────── */
+export default function OrdersScreen({
+  token, onGoToBossrobux,
+}: { token: string; onGoToBossrobux?: (gamepassId?: string) => void }) {
   const [filter,    setFilter]    = useState<FilterStatus>("ALL");
+  const [query,     setQuery]     = useState("");
   const [data,      setData]      = useState<OrdersData | null>(null);
   const [loading,   setLoading]   = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [page,      setPage]      = useState(1);
   const [allOrders, setAllOrders] = useState<Order[]>([]);
+  const reqIdRef = useRef(0);
 
-  const fetchOrders = useCallback(async (f: FilterStatus, p: number, append = false) => {
-    if (!append) setLoading(true);
-    else setLoadingMore(true);
+  const fetchOrders = useCallback(async (f: FilterStatus, q: string, p: number, append = false) => {
+    if (!append) setLoading(true); else setLoadingMore(true);
+    const reqId = ++reqIdRef.current;
     try {
       const params = new URLSearchParams({ page: String(p), limit: "20" });
       if (f !== "ALL") params.set("status", f);
+      if (q)           params.set("q", q);
       const res = await fetch(`/api/twa/orders?${params}`, { headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) return;
+      if (!res.ok || reqId !== reqIdRef.current) return;
       const d: OrdersData = await res.json();
+      if (reqId !== reqIdRef.current) return;     // stale response — drop it
       setData(d);
       setAllOrders(prev => append ? [...prev, ...d.orders] : d.orders);
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (reqId === reqIdRef.current) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
   }, [token]);
 
   useEffect(() => {
     setPage(1);
     setAllOrders([]);
-    fetchOrders(filter, 1, false);
-  }, [filter, fetchOrders]);
+    fetchOrders(filter, query, 1, false);
+  }, [filter, query, fetchOrders]);
 
   const loadMore = () => {
     const next = page + 1;
     setPage(next);
-    fetchOrders(filter, next, true);
+    fetchOrders(filter, query, next, true);
   };
 
   const urgentCount = data ? ((data.counts["PENDING"] ?? 0) + (data.counts["IN_PROGRESS"] ?? 0)) : 0;
 
+  const summaryText = useMemo(() => {
+    if (!data) return "";
+    if (query) return `По запросу «${query}» · ${data.total}`;
+    return filter === "ALL" ? `Всего · ${data.total}` : `Найдено · ${data.total}`;
+  }, [data, query, filter]);
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-      {/* Filter chips */}
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: C.bg }}>
+
+      {/* Sticky top: search + chips */}
       <div style={{
-        display: "flex", gap: 7, padding: "10px 16px",
-        overflowX: "auto", flexShrink: 0, scrollbarWidth: "none",
-        borderBottom: `1px solid ${C.border}`,
+        padding: "10px 16px 8px",
+        background: C.bg,
+        borderBottom: `1px solid ${C.hairline}`,
+        flexShrink: 0,
+        display: "flex", flexDirection: "column", gap: 9,
       }}>
-        <style>{`.orders-chips::-webkit-scrollbar{display:none}`}</style>
-        {FILTERS.map(f => {
-          const count    = data?.counts[f.id] ?? 0;
-          const isActive = filter === f.id;
-          const isUrgent = (f.id === "PENDING" || f.id === "IN_PROGRESS") && count > 0;
-          return (
-            <button
-              key={f.id}
-              onClick={() => setFilter(f.id)}
-              style={{
-                flexShrink: 0, padding: "6px 13px", borderRadius: 20, border: "none",
-                background: isActive ? C.accent : C.elevated,
-                color: isActive ? "#fff" : C.sec,
-                fontSize: 13, fontWeight: isActive ? 600 : 400,
-                cursor: "pointer", display: "flex", alignItems: "center", gap: 5,
-                transition: "background 0.15s, color 0.15s",
-              }}
-            >
-              {f.label}
-              {count > 0 && (
-                <span style={{
-                  background: isActive ? "rgba(255,255,255,0.25)" : isUrgent ? C.red : C.muted,
-                  color: "#fff", fontSize: 10, fontWeight: 700,
-                  padding: "1px 5px", borderRadius: 10, minWidth: 18, textAlign: "center" as const,
-                }}>
-                  {count}
-                </span>
-              )}
-            </button>
-          );
-        })}
+        <SearchBar value={query} onChange={setQuery} />
+
+        <div className="orders-chips" style={{
+          display: "flex", gap: 7,
+          overflowX: "auto", scrollbarWidth: "none",
+          marginRight: -16, paddingRight: 16,           // edge-fade bleed
+        }}>
+          <style>{`.orders-chips::-webkit-scrollbar{display:none}`}</style>
+          {FILTERS.map(f => {
+            const count    = data?.counts[f.id] ?? 0;
+            const isActive = filter === f.id;
+            const isUrgent = (f.id === "PENDING" || f.id === "IN_PROGRESS") && count > 0;
+            return (
+              <button
+                key={f.id}
+                onClick={() => setFilter(f.id)}
+                style={{
+                  flexShrink: 0, padding: "6.5px 13px", borderRadius: 999,
+                  border: "none",
+                  background: isActive ? C.accent : "rgba(118,118,128,0.22)",
+                  color:      isActive ? "#fff"  : C.textPrimary,
+                  fontSize: 13, fontWeight: isActive ? 600 : 500,
+                  cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+                  transition: "background 0.15s, color 0.15s",
+                  letterSpacing: 0.1,
+                }}
+              >
+                {f.label}
+                {count > 0 && (
+                  <span style={{
+                    background: isActive ? "rgba(255,255,255,0.28)" : isUrgent ? C.red : "rgba(255,255,255,0.18)",
+                    color: "#fff", fontSize: 10.5, fontWeight: 700,
+                    padding: "1px 6px", borderRadius: 999, minWidth: 18, textAlign: "center",
+                    ...tabular,
+                  }}>
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Content */}
@@ -548,15 +797,12 @@ export default function OrdersScreen({ token, onGoToBossrobux }: { token: string
         {loading ? (
           <Skeleton />
         ) : allOrders.length === 0 ? (
-          <EmptyState filter={filter} />
+          <EmptyState filter={filter} query={query} />
         ) : (
-          <div style={{ padding: "12px 16px 32px", display: "flex", flexDirection: "column", gap: 10 }}>
-            {/* Summary */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 12, color: C.sec }}>
-                {filter === "ALL" ? `Всего: ${data?.total ?? 0}` : `Найдено: ${data?.total ?? 0}`}
-              </span>
-              {urgentCount > 0 && filter === "ALL" && (
+          <div style={{ padding: "12px 16px 32px", display: "flex", flexDirection: "column", gap: 11 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 2px" }}>
+              <span style={{ fontSize: 12, color: C.textSecondary, letterSpacing: 0.1 }}>{summaryText}</span>
+              {urgentCount > 0 && filter === "ALL" && !query && (
                 <span style={{ fontSize: 12, color: C.red, fontWeight: 600 }}>
                   ⚡ {urgentCount} требуют обработки
                 </span>
@@ -569,7 +815,7 @@ export default function OrdersScreen({ token, onGoToBossrobux }: { token: string
                 order={order}
                 token={token}
                 onGoToBossrobux={onGoToBossrobux}
-                onRefresh={() => fetchOrders(filter, 1, false)}
+                onRefresh={() => fetchOrders(filter, query, 1, false)}
               />
             ))}
 
@@ -578,12 +824,15 @@ export default function OrdersScreen({ token, onGoToBossrobux }: { token: string
                 onClick={loadMore}
                 disabled={loadingMore}
                 style={{
-                  background: C.elevated, border: "none", borderRadius: 12,
-                  color: loadingMore ? C.muted : "#fff", fontSize: 14, padding: "12px",
-                  cursor: loadingMore ? "default" : "pointer", marginTop: 4, opacity: loadingMore ? 0.6 : 1,
+                  background: "rgba(118,118,128,0.18)", border: "none", borderRadius: 12,
+                  color: loadingMore ? C.textTertiary : C.textPrimary,
+                  fontSize: 14, fontWeight: 500, padding: "13px",
+                  cursor: loadingMore ? "default" : "pointer",
+                  marginTop: 4, opacity: loadingMore ? 0.6 : 1,
+                  letterSpacing: 0.1,
                 }}
               >
-                {loadingMore ? "Загрузка…" : `Ещё (${data.total - allOrders.length})`}
+                {loadingMore ? "Загрузка…" : `Показать ещё (${data.total - allOrders.length})`}
               </button>
             )}
           </div>
@@ -593,7 +842,18 @@ export default function OrdersScreen({ token, onGoToBossrobux }: { token: string
   );
 }
 
-function EmptyState({ filter }: { filter: FilterStatus }) {
+function EmptyState({ filter, query }: { filter: FilterStatus; query: string }) {
+  if (query) {
+    return (
+      <div style={{ padding: 48, textAlign: "center", color: C.textSecondary }}>
+        <div style={{ fontSize: 36, marginBottom: 10 }}>🔎</div>
+        <div style={{ fontSize: 14, marginBottom: 4 }}>Ничего не нашлось</div>
+        <div style={{ fontSize: 12, color: C.textTertiary }}>
+          Попробуй ник Roblox, ID геймпасса, WB-код или TG/VK ID
+        </div>
+      </div>
+    );
+  }
   const labels: Record<FilterStatus, string> = {
     ALL:               "Заказов пока нет",
     PENDING:           "Нет новых заказов",
@@ -603,7 +863,7 @@ function EmptyState({ filter }: { filter: FilterStatus }) {
     REJECTED:          "Нет отклонённых заказов",
   };
   return (
-    <div style={{ padding: 48, textAlign: "center" as const, color: C.sec }}>
+    <div style={{ padding: 48, textAlign: "center", color: C.textSecondary }}>
       <div style={{ fontSize: 36, marginBottom: 10 }}>📋</div>
       <div style={{ fontSize: 14 }}>{labels[filter]}</div>
     </div>
@@ -612,11 +872,15 @@ function EmptyState({ filter }: { filter: FilterStatus }) {
 
 function Skeleton() {
   return (
-    <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-      {[110, 90, 110, 90].map((h, i) => (
-        <div key={i} style={{ background: C.card, borderRadius: 16, height: h, animation: "pulse 1.5s ease-in-out infinite" }} />
+    <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 11 }}>
+      {[120, 100, 120, 100].map((h, i) => (
+        <div key={i} style={{
+          background: C.card, borderRadius: 18, height: h,
+          animation: "pulse 1.5s ease-in-out infinite",
+          boxShadow: C.cardShadow,
+        }} />
       ))}
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}`}</style>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.45}}`}</style>
     </div>
   );
 }

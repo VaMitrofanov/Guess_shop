@@ -14,10 +14,39 @@ export async function GET(req: NextRequest) {
   const page    = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
   const limit   = Math.min(50, Math.max(5, parseInt(searchParams.get("limit") ?? "20", 10)));
   const skip    = (page - 1) * limit;
+  const qRaw    = (searchParams.get("q") ?? "").trim();
+  // Treat very short queries as no-op so we don't return half-the-table by accident
+  const q       = qRaw.length >= 2 ? qRaw : "";
 
-  const where = (status && status !== "ALL" && VALID_STATUSES.includes(status as OrderStatus))
+  const statusWhere = (status && status !== "ALL" && VALID_STATUSES.includes(status as OrderStatus))
     ? { status: status as OrderStatus }
     : {};
+
+  // Build a multi-field search that mirrors how managers describe orders verbally:
+  // Roblox nickname, gamepass URL/ID, WB code, TG/VK display name or numeric ID, or
+  // the short order-ID suffix shown in admin cards. Case-insensitive contains.
+  let searchWhere: any = {};
+  if (q) {
+    const qDigits = q.replace(/\D/g, "");
+    const orClauses: any[] = [
+      { gamepassUrl:    { contains: q,           mode: "insensitive" } },
+      { robloxUsername: { contains: q,           mode: "insensitive" } },
+      { wbCode:         { contains: q.toUpperCase() } },
+      { id:             { endsWith: q.toLowerCase() } },
+      { user: { name:   { contains: q,           mode: "insensitive" } } },
+    ];
+    if (qDigits.length >= 2) {
+      orClauses.push({ user: { tgId: { contains: qDigits } } });
+      orClauses.push({ user: { vkId: { contains: qDigits } } });
+      // Asset ID inside gamepassUrl (digits only is a common ask)
+      orClauses.push({ gamepassUrl: { contains: qDigits } });
+    }
+    searchWhere = { OR: orClauses };
+  }
+
+  const where = q
+    ? { AND: [statusWhere, searchWhere] }
+    : statusWhere;
 
   const [orders, total, counts] = await Promise.all([
     (prisma as any).wbOrder.findMany({
@@ -32,7 +61,10 @@ export async function GET(req: NextRequest) {
     (prisma as any).wbOrder.count({ where }),
     Promise.all(
       [...VALID_STATUSES, "ALL"].map(async s => {
-        const w = s === "ALL" ? {} : { status: s };
+        const statusPart = s === "ALL" ? {} : { status: s };
+        // When user is searching, chip counts reflect the search so they show
+        // how many of *her* orders are PENDING / COMPLETED / etc.
+        const w = q ? { AND: [statusPart, searchWhere] } : statusPart;
         const count = await (prisma as any).wbOrder.count({ where: w });
         return [s, count] as [string, number];
       })

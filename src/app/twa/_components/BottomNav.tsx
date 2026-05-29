@@ -41,10 +41,10 @@ const SettingsIcon = () => (
 );
 
 const TABS: { id: Screen; label: string; Icon: () => React.ReactElement }[] = [
-  { id: "dashboard",  label: "Главная",  Icon: HomeIcon        },
   { id: "orders",     label: "Заказы",   Icon: OrdersIcon      },
   { id: "wb",         label: "WB",       Icon: WbIcon          },
   { id: "bossrobux",  label: "Выкуп",    Icon: BossrobuxIcon   },
+  { id: "dashboard",  label: "Главная",  Icon: HomeIcon        },
   { id: "settings",   label: "Настройки",Icon: SettingsIcon    },
 ];
 
