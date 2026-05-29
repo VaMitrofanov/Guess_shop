@@ -28,6 +28,11 @@ export async function GET(req: NextRequest) {
   let searchWhere: any = {};
   if (q) {
     const qDigits = q.replace(/\D/g, "");
+    // Treat the query as "numeric ID" only when it's actually a numeric string
+    // (≥4 digits AND ≥80 % digits). Otherwise a WB code like "4YNF7HH" leaks
+    // its two stray digits "47" into tgId/vkId/URL `contains` and matches
+    // arbitrary unrelated orders.
+    const isNumericId = qDigits.length >= 4 && qDigits.length / q.length >= 0.8;
     const orClauses: any[] = [
       { gamepassUrl:    { contains: q,           mode: "insensitive" } },
       { robloxUsername: { contains: q,           mode: "insensitive" } },
@@ -35,7 +40,7 @@ export async function GET(req: NextRequest) {
       { id:             { endsWith: q.toLowerCase() } },
       { user: { name:   { contains: q,           mode: "insensitive" } } },
     ];
-    if (qDigits.length >= 2) {
+    if (isNumericId) {
       orClauses.push({ user: { tgId: { contains: qDigits } } });
       orClauses.push({ user: { vkId: { contains: qDigits } } });
       // Asset ID inside gamepassUrl (digits only is a common ask)
