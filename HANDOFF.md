@@ -671,6 +671,118 @@ Roblox API принимает только `limit=10|25|50` → всегда 400
 
 ---
 
+### Сессия 2026-05-30 (вечер) — TWA Orders v2: бонус-таймер, кнопка «Написать», крупные шрифты, deep-link, фикс numeric-ID поиска
+
+**Контекст.** Утренняя итерация (см. ниже) задеплоилась на прод (`9a577fd`), пользователь зашёл с iPhone и дал содержательную обратную связь по скриншоту: шрифты в детализации мелкие и нечитаемые, нужен срок до сгорания бонуса в строке отзыва, прямая кнопка/ссылка «написать клиенту», `@username` копируемый, а в целом «как-то это надо оформить более креативно, продумано». Параллельно при прод-смоук-тесте всплыл баг поиска: `4YNF7HH` возвращал 4 заказа вместо 1.
+
+#### 1. Фикс numeric-ID search (коммит `809bc0c` — задеплоен)
+
+Запрос `4YNF7HH` через `q.replace(/\D/g, "")` сжимался до `47`. Моя проверка `qDigits.length >= 2` пропускала это в OR-клаузы `user.tgId / user.vkId / gamepassUrl: contains "47"`. «47» как подстрока попадается почти везде — отсюда ложноположительные.
+
+Правило ужесточено: цифровая ветка активируется только когда запрос **сам по себе** цифровой — `qDigits.length >= 4 && qDigits.length / q.length >= 0.8`. WB-код `4YNF7HH` (ratio 0.29) ветку не активирует, ник `Dark_Varia8954` (ratio 0.29) — тоже не активирует (всё равно найдётся через `robloxUsername` contains). Чисто цифровые ID `1859361109`, `7690762078`, `1861189578` — активируют. Файл: `src/app/api/twa/orders/route.ts:34`.
+
+Прод-проверка после деплоя: `4YNF7HH→1, 1859361109→0, 7690762078→1, Dark_Varia8954→1, B2VAPVE→1`. ✓
+
+#### 2. БД миграция: `User.username` (TG @handle)
+
+Раньше TG @handle нигде не сохранялся — `User.name` хранил только `first_name + last_name`. Без хэндла невозможно построить прямую ссылку `t.me/<username>` на чат.
+
+- `prisma/schema.prisma:25` — добавлено поле `username String?` (после `name`).
+- **Миграция применена в прод-БД руками** через `prisma db execute --file=/tmp/migrate_username.sql` с `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "username" TEXT;`. Никакого `prisma migrate dev` — HANDOFF (общие соглашения) предупреждает про drift.
+- TG-бот в трёх местах создания `User` (`bots/tg/handlers.ts:286, 1396, 1958`) теперь пишет `username: ctx.from.username ?? null`. Дополнительно в основных entry points (`registerStart`, `handleWbCodeTextEntry`) добавлен backfill: если у existing user `username !== ctx.from.username` — апдейтим. Это заполнит хэндлы для уже зарегистрированных юзеров при их следующем сообщении (бот в принципе видит всех активных пользователей часто).
+- VK — пока не сохраняем `screen_name` (это требует отдельного `users.get` к VK API; есть уже похожая enrich-логика для имён в `route.ts:43`, можно расширить позже).
+
+#### 3. TWA Orders — переработка детализации
+
+Сводка визуальных изменений `OrdersScreen.tsx`:
+
+- **Row helper** переписан с двухколоночного грида на **label-over-value** компоновку: лейблы (UPPERCASE 11.5 px, тёмный, трекинг 0.4), значения 16 px. Между rows — hairline-разделители вместо плотного грида. Padding каждой строки 10×0.
+- **Код WB** теперь моноспейс 19 px / weight 700 / letter-spacing 2.2 — читается с дистанции, кнопка копирования рядом.
+- **Ник в Roblox** — 17 px / weight 600.
+- **Геймпасс-ссылка** — 15.5 px (стало читаемо).
+- **CopyBtn** увеличена: 12.5 px, padding 6×11, border-radius 8.
+- **Header** карточки не трогал — он и так читаемый (статус-пилл, сумма 22 px, аватарка 36 px).
+
+#### 4. Строка «Отзыв WB» с таймером сгорания бонуса
+
+Логика `notifyUserCompleted` в TG-боте начисляет +100 R$ и ставит `User.reviewBonusGrantedAt = now()`. Через **30 дней** (константа `EXPIRY_DAYS` в `bots/tg/crons.ts`) бонус сгорает, а cron-напоминания шлются по графику 7/14/21/27 дней.
+
+Теперь это видно в TWA:
+- `bonusExpiryInfo(grantedAtIso, balance)` — чистая функция, возвращает `{ daysLeft, expiryStr, color, balance }` либо `null` если бонус не начислен / уже потрачен (`balance === 0`). Файл: `OrdersScreen.tsx:165`.
+- Цвет-индикация: `>14 дн → зелёный`, `7–14 → жёлтый`, `4–7 → оранжевый`, `≤3 → красный`. Точно те же тиры, в которых cron-напоминания идут пользователю — менеджер визуально соотносит «когда уже долбить вручную через @-mention».
+- Карточка-плашка под основной строкой статуса отзыва: «⏳ Сгорает через X дней до DD MMM · на счету N R$». Локализованное склонение `день / дня / дней`.
+- Показывается только когда `reviewStatus === "SUBMITTED"` и `user.reviewBonusGrantedAt != null` и `balance > 0`. Если бонус потрачен — не блокирует визуально.
+- API `route.ts` теперь возвращает `user.balance` и `user.reviewBonusGrantedAt` в `include` (помимо `username`).
+
+#### 5. `ContactButton` — кнопка «Написать клиенту»
+
+Новый компонент `OrdersScreen.tsx:333`. Логика выбора `href`:
+1. `username` есть → `https://t.me/<username>` (открывает диалог напрямую, не профиль). Label: «Написать @<username>».
+2. Только `tgId` → `tg://user?id=<id>` (открывает карточку профиля; оттуда один тап до «Написать»). Label: «Открыть профиль в Telegram».
+3. Только `vkId` → `https://vk.com/im?sel=<id>` (VK чат напрямую). Label: «Написать в ВКонтакте».
+
+Кнопка отрисовывается **внутри body** карточки (не в подвале) — её видно и для активных, и для исторических заказов. Стиль — синий gradient (`rgba(10,132,255,0.20→0.10)`), border `rgba(10,132,255,0.35)`. По кнопке `e.stopPropagation()`, чтобы клик не сворачивал детализацию.
+
+В строке «Пользователь»: если `username` есть — отображается `@<username>` моноспейсом 17 px с CopyBtn (копируется `@username`, не голый ID). Под ним мелким серым — `TG · <numericId>` для справки. Если `username` нет — fallback: `TG · <id>` / `vk.com/id<id>` с копированием.
+
+#### 6. Deep-link открытия TWA из admin-уведомлений
+
+Идея пользователя: «как-то интегрировать открытие аппки сильнее, чем просто кнопка дашборд слева от ввода». Решение — **`InlineKeyboardButton.web_app`**. В personal chats Telegram позволяет инлайн-кнопке открывать Web App из произвольного URL без BotFather Direct Link app. Я этим и воспользовался.
+
+- `bots/shared/admin.ts:sendAdminOrderCard` — к рядку `[✅ ВЫКУПЛЕНО | ❌ ОШИБКА]` добавлен второй ряд `[📊 Открыть в дашборде]` с `web_app: { url: "https://robloxbank.ru/twa?q=<shortId>" }`.
+- То же — для `sendAdminDirectOrderCard` (прямые заказы).
+- В `payment` и `review` карточках пока без deep-link (там фото-карточки, можно добавить позже).
+- Один тап на кнопку → у админа открывается TWA. Telegram автоматически минтит свежий `initData` от админ-юзера; backend проверяет HMAC и подписывает JWT. Существующий `localStorage twa_token` reuse как раньше, если валиден.
+- **TwaApp.tsx**: на mount читает `?q=...` из `window.location.search`, а также `window.Telegram?.WebApp?.initDataUnsafe?.start_param` (если в будущем будем юзать Direct Link App с `startapp=...`). Сохраняет в state, передаёт в `OrdersScreen` как `initialQuery`, и сразу же `onInitialQueryConsumed` зачищает state — чтобы при переключении табов и обратно поиск не воскрешался.
+- `OrdersScreen` принимает `initialQuery` через prop, инициализирует `useState(initialQuery ?? "")`, дальше живёт обычной жизнью.
+- Тип `Window.Telegram.WebApp.initDataUnsafe` расширен `start_param?: string`.
+
+#### Файлы — статус коммитов и деплоя ✅
+
+Всё запушено в `main` и **задеплоено на прод**:
+
+| Коммит | Что | Куда |
+|---|---|---|
+| `809bc0c` | Фикс numeric-ID поиска (только `route.ts`) | RobloxBankWeb (RF) |
+| `3290b36` | Крупные шрифты, бонус-таймер, ContactButton, deep-link preload, миграция `User.username` (`schema.prisma`, `route.ts`, `TwaApp.tsx`, `OrdersScreen.tsx`) | RobloxBankWeb (RF) |
+| `28c8eeb` | Pre-existing WIP + мои патчи в один коммит: `admin.ts` (SUPPORT_URL + `notifySupportShown` дедуп + кнопки `📊 Открыть в дашборде`), `vk/handlers.ts` (live-support pause + `+бот` resume), `tg/handlers.ts` (username sync во всех `user.create` + backfill) | TG_bot (SG) + VK_bot (RF) |
+
+**Проверено end-to-end после деплоя:**
+- TWA `?q=4YNF7HH` через JWT → `total=1`. Поля `user.username / balance / reviewBonusGrantedAt` присутствуют в payload.
+- TWA chunk `0z3wp36wgx5f0.js` содержит `Сгорает через`, `Написать @`, `orderQueryPreload` — новый код реально вышел в бандл.
+- SG TG-bot контейнер на образе `lyz78enntugna9em1biopinr:28c8eebb...`, лог `[TG] Bot started ✅ (polling)` + 4 admin IDs пингуются.
+- RF VK-bot контейнер на образе `gmtpfqosgoz23vjyxyczuic9:28c8eebb...`, лог `[VK] Bot started ✅ (group 237309399)`.
+
+#### Что станет видно при тестировании прямо сейчас
+
+- **Новые заказы** в админ-карточках TG получат второй ряд кнопок `[📊 Открыть в дашборде]` — один тап откроет TWA с предзаполненным поиском.
+- **Старые юзеры** в TWA — пока без `@username` (он заполнится при следующем их сообщении боту). Кнопка «Написать» у них покажется как «Открыть профиль в Telegram» (через `tg://user?id=`).
+- **Новые юзеры** (после деплоя) — сразу с `@username` в БД, кнопка «Написать @<handle>» откроет диалог напрямую через `t.me/<handle>`.
+- **Бонусы за отзыв** — таймер появится в детализации только у заказов, где `User.reviewBonusGrantedAt != null` И `User.balance > 0` (т.е. бонус реально начислен и не сгорел/не потрачен). Цвет: ≤3 дн красный, ≤7 оранжевый, ≤14 жёлтый, иначе зелёный.
+
+#### Команды Coolify-деплоя (на будущее)
+
+```bash
+COOLIFY_TOKEN="27|0d4c2d90ecd6f09378c803ea183416822f51820d"
+URL="http://89.110.94.117:8000/api/v1/deploy"
+# TWA (RF)
+curl -s -X POST "$URL?uuid=z10ws7m1q45h281zwedmhei4&force=true" -H "Authorization: Bearer $COOLIFY_TOKEN"
+# TG bot (SG)
+curl -s -X POST "$URL?uuid=lyz78enntugna9em1biopinr&force=true" -H "Authorization: Bearer $COOLIFY_TOKEN"
+# VK bot (RF)
+curl -s -X POST "$URL?uuid=gmtpfqosgoz23vjyxyczuic9&force=true" -H "Authorization: Bearer $COOLIFY_TOKEN"
+```
+Все три UUID живые, автодеплой через GitHub-webhook не критичен (ручной триггер работает и быстрее).
+
+#### Что осталось на следующую итерацию
+
+- **VK enrich screen_name** — расширить блок `vkEnrichOrders` в `route.ts:43` так, чтобы тянуть `screen_name` через `users.get` и сохранять в `User.username` (или `User.vkScreenName`). Сейчас VK-юзеры в TWA без копируемого `@handle`.
+- **Кнопка «📊 Открыть в дашборде»** в `sendAdminPaymentCard` и `sendAdminReviewCard` (фото-карточки) — пока не добавлена.
+- **Sticky большой заголовок** в Orders (iOS Large Title) — переход «крупный → компактный» при скролле.
+- **Live-баджи нечитанных заказов** — сейчас в `TwaApp.tsx` уже есть polling `?status=PENDING&limit=1` каждые 30 с, рисует красный кружок над иконкой Заказы; можно расширить на новые статусы (например, если REJECTED с user_resubmit).
+
+---
+
 ### Сессия 2026-05-30 — TWA: Заказы как главный экран + поиск + Apple-редизайн карточек
 
 **Контекст.** TWA — основной рабочий инструмент менеджера. До этой сессии дефолтным экраном была «Главная» (Dashboard), а «Заказы» — вторая вкладка. На практике менеджер открывает TWA ради заказов в 95 % случаев. Карточки заказов работали, но визуально были далеки от Apple-уровня и в них не было поиска (приходилось искать через TG-бот командой).
