@@ -131,9 +131,15 @@ const NmReportSchema = z.object({
 const GoodItemSchema = z.object({
   nmID:             z.number(),
   vendorCode:       z.string().optional().default(""),
+  // WB v2 nests price/discountedPrice inside sizes[]; discount stays top-level.
   price:            z.number().optional().default(0),
   discount:         z.number().optional().default(0),
   discountedPrice:  z.number().optional().default(0),
+  sizes:            z.array(z.object({
+    price:           z.number().optional().default(0),
+    discountedPrice: z.number().optional().default(0),
+    discount:        z.number().optional().default(0),
+  })).optional().default([]),
 });
 
 const GoodsListSchema = z.object({
@@ -502,10 +508,15 @@ export async function getGoods(): Promise<TwaGoodItem[] | null> {
     if (!res.ok) { console.error(`[wb-api] goods ${res.status}`); return cache.goods?.data ?? null; }
     const parsed = GoodsListSchema.safeParse(await res.json());
     if (!parsed.success) return cache.goods?.data ?? null;
-    const result: TwaGoodItem[] = (parsed.data.data?.listGoods ?? []).map(g => ({
-      nmID: g.nmID, article: g.vendorCode,
-      price: g.price, discount: g.discount, discountedPrice: g.discountedPrice,
-    }));
+    const result: TwaGoodItem[] = (parsed.data.data?.listGoods ?? []).map(g => {
+      const sz = g.sizes?.[0];
+      return {
+        nmID: g.nmID, article: g.vendorCode,
+        price:           sz?.price           || g.price,
+        discount:        g.discount          || sz?.discount || 0,
+        discountedPrice: sz?.discountedPrice || g.discountedPrice,
+      };
+    });
     cache.goods = { data: result, ts: Date.now() };
     return result;
   } catch (e: any) {

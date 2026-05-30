@@ -11,14 +11,125 @@
 
 import type { MessageContext } from "vk-io";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
-import { sendAdminOrderCard, sendAdminReviewCard, sendAdminSupportAlert, ADMIN_IDS } from "../shared/admin";
-import { vkGetName, tgSend } from "../shared/notify";
+import { sendAdminOrderCard, sendAdminReviewCard, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminSupportAlert, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS } from "../shared/admin";
+import { vkGetName, tgSend, vkSend } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
 import { getGamepassDetails } from "../shared/roblox";
+import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 
 // VK API instance injected from bot.ts to avoid circular import.
 let _vkApi: any = null;
+
+// ── Live-support pause ──────────────────────────────────────────────────────
+// When a user taps support, the manager joins THIS VK dialog and chats directly.
+// While that conversation is active the bot must stay silent on free text — else
+// the user's replies to the manager get parsed as gamepass links and the bot
+// spams "не принял ссылку" on top of the human chat. Keyed by VK user id → expiry.
+const SUPPORT_PAUSE_MS = 30 * 60 * 1000;
+const RESUME_KEYWORDS  = ["+бот", "+bot", "бот+"];
+const supportPause = new Map<number, number>();
+
+function pauseSupport(vkUserId: number): void {
+  supportPause.set(vkUserId, Date.now() + SUPPORT_PAUSE_MS);
+}
+function isSupportPaused(vkUserId: number): boolean {
+  const exp = supportPause.get(vkUserId);
+  if (!exp) return false;
+  if (Date.now() < exp) return true;
+  supportPause.delete(vkUserId); // expired
+  return false;
+}
+function refreshSupportPause(vkUserId: number): void {
+  if (supportPause.has(vkUserId)) supportPause.set(vkUserId, Date.now() + SUPPORT_PAUSE_MS);
+}
+function resumeSupport(vkUserId: number): void {
+  supportPause.delete(vkUserId);
+}
+
+/** After the manager hands control back, nudge the user to continue the bot flow. */
+async function rePromptAfterSupport(vkUserId: number): Promise<void> {
+  try {
+    if (!_vkApi) return;
+    let state = getState(vkUserId);
+    if (state?.type !== "AWAITING_LINK") {
+      // No ctx here — orphan recovery falls back to setState (no full activation flow).
+      await tryRestoreState(vkUserId);
+      state = getState(vkUserId);
+    }
+    let msg = "🤖 Бот снова на связи!";
+    if (state?.type === "AWAITING_LINK") {
+      const passPrice = Math.ceil(state.denomination / 0.7);
+      msg = `🤖 Бот снова на связи! Пришли ссылку на геймпасс с ценой ровно ${passPrice} R$ — приму её 👇`;
+    }
+    await _vkApi.messages.send({ peer_id: vkUserId, message: msg, random_id: Date.now() + Math.floor(Math.random() * 1000) });
+  } catch (e) {
+    console.error("[VK] rePromptAfterSupport failed:", e);
+  }
+}
+
+// Natural-language ways a user might ask for a human — so support is reachable by
+// simply writing, not only via the button. Substring match (stems cover endings).
+const SUPPORT_WORDS = ["оператор", "поддержк", "менеджер", "помощь", "помоги", "саппорт", "support", "живой человек", "живого человека", "жалоб"];
+
+/** Single entry point for "user wants a manager": alert admins, pause the bot,
+ *  and reply with a clear explanation of what happens next. */
+async function triggerSupport(ctx: any, vkUserId: number, ctxKey: string): Promise<void> {
+  const firstName = await vkGetName(vkUserId);
+  const state     = getState(vkUserId);
+  let wbCode = state?.type === "AWAITING_LINK" ? state.wbCode       : undefined;
+  let denom  = state?.type === "AWAITING_LINK" ? state.denomination : undefined;
+  if (!wbCode) {
+    try {
+      const u = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+      if (u) {
+        const o = await (db as any).wbOrder.findFirst({
+          where: { userId: u.id }, orderBy: { updatedAt: "desc" }, select: { wbCode: true, amount: true },
+        });
+        if (o) { wbCode = o.wbCode; denom = o.amount; }
+      }
+    } catch {}
+  }
+  await sendAdminSupportAlert({
+    platform: "VK", userDisplay: `vk.com/id${vkUserId} (${firstName})`, contextKey: ctxKey, wbCode, denomination: denom,
+  });
+  pauseSupport(vkUserId); // bot goes quiet so it won't interrupt the live chat
+  await ctx.reply(
+    "✅ Готово! Передал твоё обращение менеджеру — он скоро ответит прямо здесь, в этом чате.\n\n" +
+    "Опиши, пожалуйста, что случилось, одним сообщением 👇\n" +
+    "Пока идёт диалог с менеджером, бот не вмешивается.\n\n" +
+    "Если удобнее в Telegram — поддержка там: https://t.me/RobloxBank_PA"
+  );
+}
+
+/** Format roubles with thousands separator, e.g. 3500 → "3 500 ₽". */
+function fmtRub(n: number): string {
+  if (n >= 1000) return `${Math.floor(n / 1000)} ${String(n % 1000).padStart(3, "0")} ₽`;
+  return `${n} ₽`;
+}
+
+/** Build VK inline keyboard with predefined Robux packs and their ruble prices. */
+function buildVkPackKb() {
+  const kb = Keyboard.builder();
+  const rows: (readonly number[])[] = [
+    DIRECT_PACKS.slice(0, 3) as unknown as readonly number[],  // 100, 200, 300
+    DIRECT_PACKS.slice(3, 6) as unknown as readonly number[],  // 500, 800, 1000
+    DIRECT_PACKS.slice(6, 8) as unknown as readonly number[],  // 2000, 5000
+    DIRECT_PACKS.slice(8)    as unknown as readonly number[],  // 10000
+  ];
+  for (const row of rows) {
+    for (const amt of row) {
+      kb.textButton({
+        label: `${amt} R$ — ${fmtRub(Math.round(amt * DIRECT_RATE))}`,
+        payload: { command: "direct_pack", amount: amt },
+        color: "primary",
+      });
+    }
+    kb.row();
+  }
+  kb.textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" });
+  return kb.inline();
+}
 export function initVkHandlers(vkInstance: any): void {
   _vkApi = vkInstance.api;
 }
@@ -42,13 +153,24 @@ function extractPassId(input: string): string | null {
 
 /**
  * When VK fails to deliver a ref, look up the user's most recently activated
- * WB code that doesn't yet have a WbOrder. If found, restore AWAITING_LINK.
- * Returns true if state was restored.
+ * WB code that doesn't yet have a WbOrder. Three possible outcomes:
+ *  - "none":      no recoverable state — caller shows the idle greeting
+ *  - "restored":  existing AWAITING_GAMEPASS/REJECTED order found, in-memory
+ *                 state set to AWAITING_LINK — caller shows the "active code" recap
+ *  - "handled":   orphan WB code (linked by auth.ts but ref never reached the bot)
+ *                 was promoted via handleRefActivation — it has already sent the
+ *                 full welcome with the instruction link and created the provisional
+ *                 WbOrder + admin notification, so the caller must return immediately
+ *
+ * `ctx` is optional: when omitted (e.g. rePromptAfterSupport, which has no message
+ * context), orphan recovery degrades to the legacy setState behaviour.
  */
-async function tryRestoreState(vkUserId: number): Promise<boolean> {
+type RestoreOutcome = "none" | "restored" | "handled";
+
+async function tryRestoreState(vkUserId: number, ctx?: MessageContext): Promise<RestoreOutcome> {
   try {
     const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
-    if (!user) return false;
+    if (!user) return "none";
 
     // Look for AWAITING_GAMEPASS or REJECTED orders — mirrors TG DB recovery.
     // Limit to 30 days to avoid restoring stale orders from months ago where
@@ -62,18 +184,52 @@ async function tryRestoreState(vkUserId: number): Promise<boolean> {
       },
       orderBy: { updatedAt: "desc" },
     });
-    if (!recoverable) return false;
+    if (recoverable) {
+      setState(vkUserId, {
+        type:         "AWAITING_LINK",
+        wbCode:       recoverable.wbCode,
+        denomination: recoverable.amount,
+      });
+      return "restored";
+    }
 
-    setState(vkUserId, {
-      type:         "AWAITING_LINK",
-      wbCode:       recoverable.wbCode,
-      denomination: recoverable.amount,
+    // Orphan-code fallback: the site (auth.ts) can link a code (CLAIMED + userId)
+    // before the user reaches the bot, but the provisional WbOrder is only created
+    // inside handleRefActivation. If VK never delivered the `ref`, that handler
+    // never ran → the code is CLAIMED to this user with NO order, and the order
+    // lookup above finds nothing. Run handleRefActivation now to catch the user up:
+    // they get the full welcome with the gamepass-instruction link, and the manager
+    // gets the provisional-order admin card they would have missed.
+    const orphanCandidates = await (db as any).wbCode.findMany({
+      where: {
+        userId:    user.id,
+        status:    "CLAIMED",
+        isUsed:    false,
+        updatedAt: { gte: thirtyDaysAgo },
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 5,
     });
-    return true;
+    for (const code of orphanCandidates) {
+      const order = await (db as any).wbOrder.findUnique({ where: { wbCode: code.code } });
+      if (!order) {
+        if (ctx) {
+          await handleRefActivation(ctx, vkUserId, code.code);
+          return "handled";
+        }
+        setState(vkUserId, {
+          type:         "AWAITING_LINK",
+          wbCode:       code.code,
+          denomination: code.denomination,
+        });
+        return "restored";
+      }
+    }
+    return "none";
   } catch (err) {
     // Non-fatal: DB timeout or connectivity issue — bot continues without auto-restore
     console.error("[VK] tryRestoreState failed:", err);
-    return false;
+    return "none";
   }
 }
 
@@ -82,25 +238,104 @@ async function tryRestoreState(vkUserId: number): Promise<boolean> {
 /** Best available URL from a VK photo attachment. */
 function photoUrl(attachment: unknown): string | undefined {
   const ph = attachment as any;
-  // vk-io v4: computed largeSizeUrl getter
+  // vk-io v4: computed getter works when $filled=true
   if (typeof ph?.largeSizeUrl === "string") return ph.largeSizeUrl;
-  // Walk sizes array — present on vk-io objects and raw VK API payloads.
-  // ph.photo.sizes covers raw attachment objects where photo is nested.
+  // Walk sizes — check all possible locations in vk-io objects and raw VK API payloads.
+  // ph.sizes        → vk-io getter (this.payload.sizes)
+  // ph.payload.sizes → direct payload access when getter is unreliable
+  // ph.photo.sizes  → raw attachment { type:"photo", photo:{ sizes:[...] } }
   const sizes: Array<{ width?: number; height?: number; url?: string }> =
-    ph?.sizes ?? ph?.photo?.sizes ?? [];
+    ph?.sizes ?? ph?.payload?.sizes ?? ph?.photo?.sizes ?? [];
   if (sizes.length > 0) {
-    return sizes
-      .filter((s) => s.url)
-      .sort((a, b) =>
+    const withUrl = sizes.filter((s: any) => typeof s.url === "string");
+    if (withUrl.length > 0) {
+      return withUrl.sort((a: any, b: any) =>
         (b.width ?? 0) * (b.height ?? 0) - (a.width ?? 0) * (a.height ?? 0)
-      )[0]?.url;
+      )[0].url;
+    }
   }
-  // Last resort: bare url property
   return typeof ph?.url === "string" ? ph.url : undefined;
+}
+
+/**
+ * Attempts every known path to extract a VK photo URL:
+ * 1. Direct vk-io attachment (parsed by library)
+ * 2. Raw message.attachments array
+ * 3. Forwarded messages (fwd_messages) — user may forward a screenshot
+ * 4. VK API photos.getById — last-resort when payload has no sizes
+ */
+async function extractPhotoUrl(ctx: MessageContext): Promise<string | undefined> {
+  // 1. vk-io parsed attachment
+  if (ctx.hasAttachments("photo")) {
+    const url = photoUrl(ctx.getAttachments("photo")[0]);
+    if (url) return url;
+  }
+
+  // 2. Raw message.attachments
+  const rawAttachments: any[] = (ctx as any).message?.attachments ?? (ctx as any).attachments ?? [];
+  const rawPhoto = rawAttachments.find((a: any) => a.type === "photo")?.photo;
+  if (rawPhoto) {
+    const url = photoUrl(rawPhoto);
+    if (url) return url;
+  }
+
+  // 3. Photos inside forwarded/replied messages
+  const fwdMsgs: any[] = (ctx as any).message?.fwd_messages ?? [];
+  const replyMsg: any = (ctx as any).message?.reply_message;
+  const allFwd = replyMsg ? [replyMsg, ...fwdMsgs] : fwdMsgs;
+  for (const fwd of allFwd) {
+    const fwdPhoto = (fwd?.attachments ?? []).find((a: any) => a.type === "photo")?.photo;
+    if (fwdPhoto) {
+      const url = photoUrl(fwdPhoto);
+      if (url) return url;
+    }
+  }
+
+  // 4. VK API photos.getById — fetch full payload with sizes
+  if (_vkApi) {
+    // Collect all candidate photo refs (id + owner_id pairs)
+    const candidates: Array<{ id: number; ownerId: number; accessKey?: string }> = [];
+
+    if (ctx.hasAttachments("photo")) {
+      const att = ctx.getAttachments("photo")[0] as any;
+      if (att?.id && att?.ownerId) candidates.push({ id: att.id, ownerId: att.ownerId, accessKey: att.accessKey });
+    }
+    const allRawAtts = [
+      ...rawAttachments,
+      ...allFwd.flatMap((m: any) => m?.attachments ?? []),
+    ];
+    for (const a of allRawAtts) {
+      const p = a?.photo;
+      if (p?.id && p?.owner_id) candidates.push({ id: p.id, ownerId: p.owner_id, accessKey: p.access_key });
+    }
+
+    for (const c of candidates) {
+      try {
+        const key = `${c.ownerId}_${c.id}${c.accessKey ? "_" + c.accessKey : ""}`;
+        const result: any[] = await _vkApi.photos.getById({ photos: key });
+        if (Array.isArray(result) && result[0]) {
+          const url = photoUrl(result[0]);
+          if (url) return url;
+        }
+      } catch (err) {
+        console.warn("[VK] photos.getById fallback failed:", (err as any)?.message ?? err);
+      }
+    }
+  }
+
+  return undefined;
 }
 
 function vkUserDisplay(name: string, vkUserId: number): string {
   return `<a href="https://vk.com/id${vkUserId}">${name}</a>`;
+}
+
+/** Generate a unique synthetic WB code for direct orders (never matches a real 7-char code). */
+function generateDirectCode(): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let code = "DIR-";
+  for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
 }
 
 /** Returns false only when the group ID is configured AND the API confirms non-membership. Fail-open. */
@@ -149,7 +384,21 @@ async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null): Pro
 // ── Entry point: called for every message_new event ───────────────────────────
 
 export async function handleMessage(ctx: MessageContext): Promise<void> {
-  if (ctx.isOutbox) return; // skip messages sent by the community itself
+  if (ctx.isOutbox) {
+    // Manager replied from the community. Keep the bot paused while the live
+    // conversation is active; let the manager hand control back with a keyword.
+    const peer = typeof (ctx as any).peerId === "number" ? (ctx as any).peerId : undefined;
+    if (peer !== undefined) {
+      const t = (ctx.text ?? "").trim().toLowerCase();
+      if (RESUME_KEYWORDS.includes(t)) {
+        resumeSupport(peer);
+        void rePromptAfterSupport(peer);
+      } else {
+        refreshSupportPause(peer);
+      }
+    }
+    return; // never process community's own messages as user input
+  }
 
   const vkUserId = ctx.senderId;
   const text     = ctx.text?.trim() ?? "";
@@ -171,32 +420,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
 
   // ── 🆘 Support button payload ────────────────────────────────────────────
   if (msgPayload?.command === "support") {
-    const ctxKey    = String(msgPayload.context ?? "general");
-    const firstName = await vkGetName(vkUserId);
-    const state     = getState(vkUserId);
-    let wbCode  = state?.type === "AWAITING_LINK" ? state.wbCode       : undefined;
-    let denom   = state?.type === "AWAITING_LINK" ? state.denomination : undefined;
-    if (!wbCode) {
-      try {
-        const u = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
-        if (u) {
-          const o = await (db as any).wbOrder.findFirst({
-            where: { userId: u.id },
-            orderBy: { updatedAt: "desc" },
-            select: { wbCode: true, amount: true },
-          });
-          if (o) { wbCode = o.wbCode; denom = o.amount; }
-        }
-      } catch {}
-    }
-    await sendAdminSupportAlert({
-      platform:    "VK",
-      userDisplay: `vk.com/id${vkUserId} (${firstName})`,
-      contextKey:  ctxKey,
-      wbCode,
-      denomination: denom,
-    });
-    await ctx.reply("Соединяем с менеджером — напиши нам: https://t.me/RobloxBank_PA\n\nМы уже знаем о твоей ситуации 👍");
+    await triggerSupport(ctx, vkUserId, String(msgPayload.context ?? "general"));
     return;
   }
 
@@ -253,6 +477,22 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     }
   }
 
+  // ── Natural-language support request — user can reach a manager by simply
+  // writing ("оператор", "поддержка", "помощь"…), not only via the button. ──
+  if (text.length > 0 && SUPPORT_WORDS.some((w) => lower.includes(w))) {
+    if (isSupportPaused(vkUserId)) {
+      await ctx.reply("Менеджер уже подключается и ответит прямо здесь 👇 Опиши, пожалуйста, свой вопрос одним сообщением.");
+    } else {
+      await triggerSupport(ctx, vkUserId, "general");
+    }
+    return;
+  }
+
+  // ── Live-support pause: stay silent on free text while a manager is handling
+  // this chat, so the user's replies to the manager aren't parsed as links.
+  // (Button payloads above — support/resubmit/check_sub — still work.)
+  if (isSupportPaused(vkUserId)) return;
+
   // ── (B) State machine dispatch ────────────────────────────────────────────
   const state = getState(vkUserId);
 
@@ -271,15 +511,21 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
           `💎 Номинал: ${state.denomination} R$\n\n` +
           `Осталось совсем чуть-чуть — пришли ссылку на геймпасс.\n` +
           `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
+          `❓ Не помнишь как создать геймпасс? Инструкция со скриншотами:\n` +
+          `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}\n\n` +
           `Жду ссылку 👇`,
         keyboard: vkSupportKb("general"),
       });
       return;
     }
 
-    // 2. Try to recover a pending WB code from DB
-    const restored = await tryRestoreState(vkUserId);
-    if (restored) {
+    // 2. Try to recover a pending WB code from DB. Orphan codes (CLAIMED by
+    // site auth.ts but no order yet) are caught up via handleRefActivation —
+    // it sends the full welcome with the instruction link and creates the
+    // provisional order, so we return immediately on "handled".
+    const outcome = await tryRestoreState(vkUserId, ctx);
+    if (outcome === "handled") return;
+    if (outcome === "restored") {
       const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
       const passPrice = Math.ceil(restoredState.denomination / 0.7);
       const custStatus = await getCustomerStatus(String(vkUserId), "VK");
@@ -291,6 +537,8 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
           `💎 Номинал: ${restoredState.denomination} R$\n\n` +
           `Осталось совсем чуть-чуть — пришли ссылку на геймпасс.\n` +
           `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
+          `❓ Не помнишь как создать геймпасс? Инструкция со скриншотами:\n` +
+          `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${restoredState.wbCode}\n\n` +
           `Жду ссылку 👇`,
         keyboard: vkSupportKb("general"),
       });
@@ -303,11 +551,13 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     if (custStatus.isReturning) {
       const firstName = await vkGetName(vkUserId);
       await ctx.reply({
-        message: getIdleGreeting(custStatus, firstName) + "\n\nНужна помощь? https://t.me/RobloxBank_PA",
+        message: getIdleGreeting(custStatus, firstName) + "\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA",
         keyboard: Keyboard.builder()
-          .textButton({ label: "📊 Статус заявки", payload: { command: "status" }, color: "primary" })
+          .textButton({ label: "📊 Статус заявки",   payload: { command: "status" },       color: "primary"   })
           .row()
-          .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+          .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" },  color: "positive"  })
+          .row()
+          .textButton({ label: "💬 Нужна помощь?",   payload: { command: "support", context: "general" }, color: "secondary" })
           .inline(),
       });
       return;
@@ -322,12 +572,84 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     return;
   }
 
+  // ── Direct order payload commands ─────────────────────────────────────────
+  if (msgPayload?.command === "start_direct") {
+    await handleStartDirect(ctx, vkUserId);
+    return;
+  }
+  if (msgPayload?.command === "direct_pack") {
+    const packAmt = typeof msgPayload.amount === "number" ? msgPayload.amount : NaN;
+    if (!isNaN(packAmt) && (DIRECT_PACKS as readonly number[]).includes(packAmt)) {
+      await handleDirectPackSelect(ctx, vkUserId, packAmt);
+    }
+    return;
+  }
+  if (msgPayload?.command === "direct_confirm") {
+    await handleDirectConfirm(ctx, vkUserId);
+    return;
+  }
+  if (msgPayload?.command === "direct_cancel") {
+    clearState(vkUserId);
+    await ctx.reply("Отменено.");
+    return;
+  }
+
+  // ── 🔎 Find gamepass by Roblox nick (item 7) ───────────────────────────────
+  if (msgPayload?.command === "find_gp_start") {
+    await handleFindGpStart(ctx, vkUserId);
+    return;
+  }
+  if (msgPayload?.command === "gp_pick" && typeof msgPayload.passId === "string") {
+    await handleGpPick(ctx, vkUserId, msgPayload.passId);
+    return;
+  }
+  if (state?.type === "AWAITING_ROBLOX_NICK") {
+    await handleRobloxNickInput(ctx, vkUserId, text, state.wbCode, state.denomination);
+    return;
+  }
+
   if (state?.type === "AWAITING_LINK") {
     await handleGamepassLink(ctx, vkUserId, text, state.wbCode, state.denomination);
     return;
   }
 
+  // ── Direct order amount input ──────────────────────────────────────────────
+  if (state?.type === "AWAITING_DIRECT_AMOUNT") {
+    await handleDirectAmountInput(ctx, vkUserId, text);
+    return;
+  }
+  // AWAITING_DIRECT_CONFIRM: user should use buttons; if they type text, do nothing
+  if (state?.type === "AWAITING_DIRECT_CONFIRM") {
+    await ctx.reply({
+      message: "Используй кнопки выше для подтверждения или отмены.",
+      keyboard: Keyboard.builder()
+        .textButton({ label: "✅ Подтвердить", payload: { command: "direct_confirm" }, color: "positive" })
+        .textButton({ label: "❌ Отмена",      payload: { command: "direct_cancel"  }, color: "negative" })
+        .inline(),
+    });
+    return;
+  }
+
+  // ── Direct order payment screenshot (BEFORE review routing) ───────────────
+  if (ctx.hasAttachments("photo") || state?.type === "AWAITING_DIRECT_PAYMENT") {
+    const photoUser = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+    if (photoUser) {
+      const payOrder = state?.type === "AWAITING_DIRECT_PAYMENT"
+        ? await (db as any).wbOrder.findUnique({ where: { id: state.orderId } })
+        : await (db as any).wbOrder.findFirst({
+            where: { userId: photoUser.id, status: "PAYMENT_PENDING", isDirectOrder: true },
+            orderBy: { createdAt: "desc" },
+          });
+      if (payOrder?.status === "PAYMENT_PENDING") {
+        console.log(`[VK] payment screenshot routing: vkUserId=${vkUserId} orderId=${payOrder.id}`);
+        await handleDirectPaymentScreenshot(ctx, vkUserId, photoUser, payOrder.id);
+        return;
+      }
+    }
+  }
+
   if (state?.type === "AWAITING_REVIEW" || ctx.hasAttachments("photo")) {
+    console.log(`[VK] photo routing: vkUserId=${vkUserId} hasPhoto=${ctx.hasAttachments("photo")} state=${state?.type ?? "none"}`);
     await handleReviewScreenshot(ctx, vkUserId, state?.type === "AWAITING_REVIEW" ? state.orderId : undefined);
     return;
   }
@@ -355,7 +677,7 @@ async function handleRefActivation(
     where: { code: { equals: code, mode: "insensitive" } },
   });
   if (!wbCode) {
-    await ctx.reply("❌ Код не найден. Проверь правильность ввода на карточке.\n\nНужна помощь? https://t.me/RobloxBank_PA");
+    await ctx.reply("❌ Код не найден. Проверь правильность ввода на карточке.\n💡 Часто путают букву «О» и цифру «0» — проверь эти символы в коде.\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
     return;
   }
   // Block only when code was truly completed (isUsed=true + userId set).
@@ -488,13 +810,16 @@ async function handleRefActivation(
         greetLine + `\n` +
         `✅ Код ${code} активирован!\n` +
         bonusText +
-        `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда.\n` +
-        `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n` +
-        `(это номинал ÷ 0.7 — Roblox удерживает 30% комиссии)\n\n` +
-        `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
-        `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n\n` +
-        `Пришли ссылку на геймпасс 👇`,
-      keyboard: vkSupportKb("general"),
+        `Создай геймпасс в Roblox за ${passPrice} R$ — затем нажми кнопку «🔎 Найти по моему нику Roblox» 👇 (быстрый путь, без ссылок).\n` +
+        `(${passPrice} R$ — это номинал ÷ 0.7, Roblox удерживает 30%)\n\n` +
+        `Если удобнее — пришли ссылку на геймпасс сюда вручную.\n\n` +
+        `❓ Что такое геймпасс и как его создать:\n` +
+        `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}`,
+      keyboard: Keyboard.builder()
+        .textButton({ label: "🔎 Найти по моему нику Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+        .row()
+        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+        .inline(),
     });
   }
 }
@@ -545,7 +870,7 @@ async function handleGamepassLink(
       "• Геймпасс опубликован (не в черновиках)\n" +
       "• Ссылка ведёт именно на Game Pass, а не на саму игру\n" +
       "• Ты скопировал ссылку прямо из браузера Roblox\n\n" +
-      "Если геймпасс точно существует — напиши в поддержку: https://t.me/RobloxBank_PA"
+      "Если геймпасс точно существует — напиши сюда, ответим здесь. Или в Telegram: https://t.me/RobloxBank_PA"
     );
     return;
   }
@@ -555,20 +880,30 @@ async function handleGamepassLink(
   if (!gamepassInfo.validationSkipped) {
     // Normal validation — only runs when Roblox API was reachable
     if (!gamepassInfo.isActive) {
-      if (gamepassInfo.isGamePrivate) {
+      if (gamepassInfo.isNotInCatalog) {
         await ctx.reply({
           message:
-            `❌ Геймпасс в закрытой или удалённой игре — выкупить невозможно.\n\n` +
-            `Как исправить:\n` +
-            `Вариант 1 — открой игру:\n` +
-            `Зайди на create.roblox.com/dashboard/creations — у игры должен быть значок Public.\n` +
-            `Если нет: кликни на плейс → Settings → Configure → выбери Public.\n` +
-            `Если не получается — напиши менеджеру.\n\n` +
-            `Вариант 2 — создай геймпасс в другой публичной игре:\n` +
-            `Creator Hub → Creations → Passes → Create\n` +
-            `Установи цену ${expectedPrice} R$, включи «On Sale»\n\n` +
-            `После этого пришли ссылку на геймпасс сюда.`,
-          keyboard: vkSupportKb("pass_private"),
+            `❌ Геймпасс недоступен — скорее всего, игра, в которой он создан, закрыта (Private).\n\n` +
+            `Два варианта:\n` +
+            `1. Открой игру: Creator Hub → Experience → Settings → Permissions → Public → сохрани. Затем пришли ссылку снова.\n` +
+            `2. Создай геймпасс в любой публичной игре (цена: ${expectedPrice} R$) и пришли новую ссылку.\n\n` +
+            `Не удаляй геймпасс до получения оплаты.`,
+          keyboard: vkSupportKb("pass_deleted"),
+        });
+      } else if (gamepassInfo.isGamePrivate) {
+        await ctx.reply({
+          message:
+            `❌ Геймпасс в закрытой игре — выкупить невозможно.\n\n` +
+            `Как открыть игру:\n` +
+            `1. Нажми на плейс → Configure → Settings\n` +
+            `2. Найди Audience → выбери Public → сохрани\n\n` +
+            `Не помогло? Configure → Questionnaire → Restart\n` +
+            `Ответь «No» на все 10 вопросов → Continue\n\n` +
+            `Или создай геймпасс в другой публичной игре (цена: ${expectedPrice} R$)\n\n` +
+            `📖 Полная инструкция со скринами:\nhttps://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}`,
+          keyboard: Keyboard.builder()
+            .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "pass_private" }, color: "secondary" })
+            .inline(),
         });
       } else {
         await ctx.reply({
@@ -587,7 +922,8 @@ async function handleGamepassLink(
           `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
           `Установлено: ${gamepassInfo.price} R$\n` +
           `Ожидается:   ${expectedPrice} R$\n\n` +
-          `Измени цену геймпасса в настройках Roblox и пришли ссылку снова.`,
+          `Измени цену геймпасса в настройках Roblox и пришли ссылку снова.\n\n` +
+          `💡 Если у тебя включён Regional Pricing — обязательно выключи его (Passes → Edit → Pricing → убрать галочку Enable Regional Pricing), иначе цена будет неверной.`,
         keyboard: vkSupportKb("pass_price"),
       });
       return;
@@ -686,6 +1022,7 @@ async function handleGamepassLink(
               status: "PENDING",
               rejectionReason: null,
               adminId: null,
+              ...(validatedCreator ? { robloxUsername: validatedCreator } : {}),
             },
           });
         } else {
@@ -702,6 +1039,7 @@ async function handleGamepassLink(
             platform:    "VK",
             userId:      user.id,
             wbCode,
+            ...(validatedCreator ? { robloxUsername: validatedCreator } : {}),
           },
         });
       }
@@ -720,7 +1058,7 @@ async function handleGamepassLink(
     }
     if (err.code === "P2002") {
       clearState(vkUserId);
-      await ctx.reply("⚠️ Заявка по этому коду уже создана и сейчас обрабатывается. Напиши «статус» чтобы проверить.\n\nНужна помощь? https://t.me/RobloxBank_PA");
+      await ctx.reply("⚠️ Заявка по этому коду уже создана и сейчас обрабатывается. Напиши «статус» чтобы проверить.\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
       return;
     }
     console.error("[VK] Order/transaction error:", err);
@@ -758,7 +1096,413 @@ async function handleGamepassLink(
     createdAt:           order.createdAt,
     bonusApplied:        user.balance || 0,
     previousOrderCount,
+    creatorName:         validatedCreator ?? undefined,
+    isAgeRestricted:     gamepassInfo.isAgeRestricted ?? false,
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B2 — Gamepass search by Roblox nick (item 7)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Allowed Roblox username regex. */
+const ROBLOX_NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
+/** Max gamepass matches we show as inline buttons. */
+const MAX_PICK_BUTTONS = 5;
+
+/** "🔎 Найти по моему нику" tap — set state and ask for the nick. */
+async function handleFindGpStart(ctx: MessageContext, vkUserId: number): Promise<void> {
+  const user = await (db as any).user.findUnique({
+    where: { vkId: String(vkUserId) },
+    select: { id: true },
+  });
+  if (!user) {
+    await ctx.reply("Сессия истекла — напиши «Начать», чтобы продолжить.");
+    return;
+  }
+  const order = await (db as any).wbOrder.findFirst({
+    where: { userId: user.id, status: "AWAITING_GAMEPASS" },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!order) {
+    await ctx.reply("У тебя сейчас нет активной заявки. Введи код WB чтобы начать.");
+    return;
+  }
+  setState(vkUserId, {
+    type: "AWAITING_ROBLOX_NICK",
+    wbCode: order.wbCode,
+    denomination: order.amount,
+  });
+  const passPrice = Math.ceil(order.amount / 0.7);
+  await ctx.reply(
+    `🔎 Введи свой ник в Roblox (то, как ты заходишь в игру).\n\n` +
+    `Я найду все твои геймпассы за ${passPrice} R$ — и предложу выбрать нужный.\n` +
+    `Если передумал — пришли ссылку на геймпасс как обычно.`
+  );
+}
+
+/**
+ * User typed a Roblox nick — same 5-branch tree as the TG version, text-only
+ * (VK keyboards are text buttons; no photo card variant).
+ */
+async function handleRobloxNickInput(
+  ctx: MessageContext,
+  vkUserId: number,
+  raw: string,
+  wbCode: string,
+  denomination: number,
+): Promise<void> {
+  const nick = raw.trim().replace(/^@/, "");
+  if (!ROBLOX_NICK_RE.test(nick)) {
+    await ctx.reply(
+      "⚠️ Ник не похож на ник Roblox.\n\n" +
+      "Должно быть 3–20 символов: буквы, цифры или подчёркивание. " +
+      "Например: lokomotiv_2018"
+    );
+    return;
+  }
+
+  await ctx.reply(`🔎 Ищу геймпассы у ${nick}…`);
+  const expectedPrice = Math.ceil(denomination / 0.7);
+
+  let outcome: GamepassSearchOutcome;
+  try {
+    outcome = await searchGamepassesByNick(nick, expectedPrice);
+  } catch (err: any) {
+    console.error("[VK/find-gp] searchGamepassesByNick failed:", err?.message ?? err);
+    outcome = { status: "user_not_found", nick, expectedPrice };
+  }
+
+  // Always return to LINK state — picker handles next move via VK payload button.
+  setState(vkUserId, { type: "AWAITING_LINK", wbCode, denomination });
+
+  const guideUrl = `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}`;
+
+  // Branch 1: nickname doesn't exist on Roblox
+  if (outcome.status === "user_not_found") {
+    await ctx.reply({
+      message:
+        `🤷 Пользователя ${nick} нет на Roblox.\n\n` +
+        `Скорее всего опечатка. Скопируй ник прямо со страницы профиля и пришли заново.`,
+      keyboard: Keyboard.builder()
+        .textButton({ label: "🔎 Попробовать ещё раз", payload: { command: "find_gp_start" }, color: "primary" })
+        .row()
+        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "nick_not_found" }, color: "secondary" })
+        .inline(),
+    });
+    return;
+  }
+
+  // Branch 2: nick exists but no public for-sale gamepasses → place probably private
+  if (outcome.status === "no_gamepasses") {
+    await ctx.reply({
+      message:
+        `🙈 У ${nick} не нашли публичных геймпассов.\n\n` +
+        `Самая частая причина — плейс закрыт. Открой его в настройках, тогда геймпассы станут видны:\n\n` +
+        `1. Roblox → раздел Creations\n` +
+        `2. Выбери свой плейс → ⚙️ Configure → Privacy\n` +
+        `3. Поставь Public\n\n` +
+        `Если плейс уже публичный — проверь, что геймпасс создан и выставлен на продажу за ${expectedPrice} R$.\n\n` +
+        `Инструкция: ${guideUrl}`,
+      keyboard: Keyboard.builder()
+        .textButton({ label: "🔎 Попробовать другой ник", payload: { command: "find_gp_start" }, color: "primary" })
+        .row()
+        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "place_closed" }, color: "secondary" })
+        .inline(),
+    });
+    return;
+  }
+
+  // outcome.status === "ok"
+  const { matches, nonMatches } = outcome;
+
+  // Branch 5: gamepasses exist but none at expected price → show actual prices
+  if (matches.length === 0) {
+    const top = nonMatches.slice(0, MAX_PICK_BUTTONS);
+    const listLines = top.map(g => `• ${g.name} · ${g.robux} R$`).join("\n");
+    await ctx.reply({
+      message:
+        `У ${nick} нашли геймпассы, но ни один не за ${expectedPrice} R$:\n\n` +
+        `${listLines}\n\n` +
+        `Создай геймпасс ровно на ${expectedPrice} R$ или измени цену существующего — и нажми «🔎 Уже исправил».\n\n` +
+        `Инструкция: ${guideUrl}`,
+      keyboard: Keyboard.builder()
+        .textButton({ label: "🔎 Уже исправил — проверить", payload: { command: "find_gp_start" }, color: "primary" })
+        .row()
+        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "wrong_price" }, color: "secondary" })
+        .inline(),
+    });
+    return;
+  }
+
+  // Branch 3: exactly 1 price-match (VK = text confirmation, no photo)
+  if (matches.length === 1) {
+    const m = matches[0];
+    await ctx.reply({
+      message:
+        `🎯 Нашёл у ${nick} подходящий геймпасс:\n\n` +
+        `💎 ${m.name} · ${m.robux} R$\n\n` +
+        `Это он? Нажми «✅ Да» — отправлю на проверку.`,
+      keyboard: Keyboard.builder()
+        .textButton({ label: `✅ Да, выкупаем (${m.robux} R$)`, payload: { command: "gp_pick", passId: String(m.gamepassId) }, color: "positive" })
+        .row()
+        .textButton({ label: "🔎 Другой ник", payload: { command: "find_gp_start" }, color: "secondary" })
+        .inline(),
+    });
+    return;
+  }
+
+  // Branch 4: 2–5 price-matches → text-button list
+  const shown = matches.slice(0, MAX_PICK_BUTTONS);
+  const kb = Keyboard.builder();
+  for (const m of shown) {
+    kb.textButton({
+      label: `💎 ${m.name.slice(0, 32)} · ${m.robux} R$`,
+      payload: { command: "gp_pick", passId: String(m.gamepassId) },
+      color: "positive",
+    }).row();
+  }
+  kb.textButton({ label: "🔎 Другой ник", payload: { command: "find_gp_start" }, color: "secondary" });
+  await ctx.reply({
+    message:
+      `У ${nick} нашёл несколько подходящих геймпассов.\n` +
+      `Выбери тот, который хочешь продать:`,
+    keyboard: kb.inline(),
+  });
+}
+
+/** User tapped a "💎 ${name} · ${price} R$" button → run the canonical flow. */
+async function handleGpPick(
+  ctx: MessageContext,
+  vkUserId: number,
+  passId: string,
+): Promise<void> {
+  if (!/^\d{3,15}$/.test(passId)) {
+    await ctx.reply("⚠️ Не удалось распознать геймпасс.");
+    return;
+  }
+  const user = await (db as any).user.findUnique({
+    where: { vkId: String(vkUserId) },
+    select: { id: true },
+  });
+  if (!user) {
+    await ctx.reply("Сессия истекла — напиши «Начать».");
+    return;
+  }
+  const order = await (db as any).wbOrder.findFirst({
+    where: { userId: user.id, status: "AWAITING_GAMEPASS" },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!order) {
+    await ctx.reply("У тебя сейчас нет активной заявки.");
+    return;
+  }
+  setState(vkUserId, {
+    type: "AWAITING_LINK",
+    wbCode: order.wbCode,
+    denomination: order.amount,
+  });
+  const url = `https://www.roblox.com/game-pass/${passId}`;
+  await handleGamepassLink(ctx, vkUserId, url, order.wbCode, order.amount);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B3 — Direct order flow (no WB card needed)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function handleStartDirect(ctx: MessageContext, vkUserId: number): Promise<void> {
+  // Subscription gate — same as TG bot
+  if (process.env.VK_GROUP_ID) {
+    const subbed = await isVkSubscribed(ctx, vkUserId);
+    if (!subbed) {
+      await sendVkSubPrompt(ctx, null);
+      return;
+    }
+  }
+
+  const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { balance: true } });
+  const bonus = user?.balance ?? 0;
+  const bonusNote = bonus > 0
+    ? `\n\n🎁 У тебя есть бонус ${bonus} R$ — он автоматически добавится к заказу.`
+    : "";
+
+  setState(vkUserId, { type: "AWAITING_DIRECT_AMOUNT" });
+
+  await ctx.reply({
+    message:
+      `💎 Прямой заказ Robux\n\nВыбери количество (курс 0.7 ₽/R$):` +
+      bonusNote,
+    keyboard: buildVkPackKb(),
+  });
+}
+
+async function handleDirectAmountInput(ctx: MessageContext, vkUserId: number, text: string): Promise<void> {
+  const num = parseInt(text.replace(/[\s,]/g, ""), 10);
+  if (isNaN(num) || num < 100 || num > 10000) {
+    await ctx.reply({
+      message: "⚠️ Введи число от 100 до 10 000.\n\nНапример: 500",
+      keyboard: Keyboard.builder()
+        .textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" })
+        .inline(),
+    });
+    return;
+  }
+  await handleDirectPackSelect(ctx, vkUserId, num);
+}
+
+async function handleDirectPackSelect(ctx: MessageContext, vkUserId: number, amount: number): Promise<void> {
+  const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { balance: true } });
+  const bonus = user?.balance ?? 0;
+  const totalAmount = amount + bonus;
+  const passPrice = Math.ceil(totalAmount / 0.7);
+  const rublePrice = Math.round(amount * DIRECT_RATE);
+
+  setState(vkUserId, { type: "AWAITING_DIRECT_CONFIRM", amount, totalAmount, bonus });
+
+  const bonusSection = bonus > 0
+    ? `💎 Запрос:          ${amount} R$\n` +
+      `🎁 Твой бонус:     +${bonus} R$\n` +
+      `─────────────────\n` +
+      `📦 Итого получишь:  ${totalAmount} R$\n`
+    : `📦 Получишь:       ${totalAmount} R$\n`;
+
+  await ctx.reply({
+    message:
+      `✅ Подтверди заказ\n\n` +
+      bonusSection +
+      `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
+      `📌 Цена геймпасса:  ${passPrice} R$`,
+    keyboard: Keyboard.builder()
+      .textButton({ label: "✅ Подтвердить", payload: { command: "direct_confirm" }, color: "positive" })
+      .textButton({ label: "❌ Отмена",      payload: { command: "direct_cancel"  }, color: "negative" })
+      .inline(),
+  });
+}
+
+async function handleDirectConfirm(ctx: MessageContext, vkUserId: number): Promise<void> {
+  const state = getState(vkUserId);
+  if (state?.type !== "AWAITING_DIRECT_CONFIRM") {
+    await ctx.reply({
+      message: "⏳ Время подтверждения вышло. Начни заново:",
+      keyboard: Keyboard.builder()
+        .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "primary" })
+        .inline(),
+    });
+    return;
+  }
+
+  const { amount, totalAmount, bonus } = state;
+  clearState(vkUserId);
+
+  // Lazy upsert user
+  let user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+  if (!user) {
+    const name = await vkGetName(vkUserId);
+    user = await (db as any).user.create({ data: { vkId: String(vkUserId), name } });
+  }
+
+  // Guard: one active direct order at a time
+  const existing = await (db as any).wbOrder.findFirst({
+    where: { userId: user.id, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING"] } },
+  });
+  if (existing) {
+    await ctx.reply({
+      message:
+        `⏳ У тебя уже есть активный заказ #${existing.id.slice(-6).toUpperCase()}.\n\n` +
+        `Дождись реквизитов от менеджера, а затем оформи новый.`,
+      keyboard: vkSupportKb("direct_wait"),
+    });
+    return;
+  }
+
+  const dirCode = generateDirectCode();
+  let newOrder: any;
+  try {
+    newOrder = await (db as any).$transaction(async (tx: any) => {
+      const ord = await tx.wbOrder.create({
+        data: {
+          amount:        totalAmount,
+          gamepassUrl:   null,
+          status:        "AWAITING_PAYMENT",
+          platform:      "VK",
+          userId:        user.id,
+          wbCode:        dirCode,
+          isDirectOrder: true,
+        },
+      });
+      if (bonus > 0) {
+        await tx.user.update({
+          where: { id: user.id },
+          data:  { balance: 0, reviewBonusGrantedAt: null, reviewReminderLevel: 0 },
+        });
+      }
+      return ord;
+    });
+  } catch (err) {
+    console.error("[VK] Direct order create error:", err);
+    await ctx.reply({ message: "❌ Не удалось создать заказ. Попробуй снова.", keyboard: vkSupportKb("general") });
+    return;
+  }
+
+  const shortId = newOrder.id.slice(-6).toUpperCase();
+  const vkName = user.name ?? await vkGetName(vkUserId);
+  const prevOrdersCount = await (db as any).wbOrder.count({
+    where: { userId: user.id, status: "COMPLETED" },
+  });
+
+  try {
+    await sendAdminDirectOrderCard({
+      orderId:             newOrder.id,
+      userId:              user.id,
+      amount:              totalAmount,
+      bonusApplied:        bonus,
+      userDisplay:         `${vkUserDisplay(vkName, vkUserId)} (VK ID: ${vkUserId})`,
+      createdAt:           newOrder.createdAt,
+      previousOrdersCount: prevOrdersCount,
+    });
+  } catch (err) {
+    console.error("[VK] sendAdminDirectOrderCard failed:", err);
+  }
+
+  await ctx.reply({
+    message:
+      `📋 Заказ #${shortId} оформлен!\n\n` +
+      `Менеджер пришлёт реквизиты для оплаты в течение нескольких минут.\n\n` +
+      `Ожидай сообщения 👇`,
+    keyboard: vkSupportKb("direct_wait"),
+  });
+
+  console.log(`[VK] Direct order created: ${newOrder.id} vkUserId=${vkUserId} amount=${totalAmount}`);
+}
+
+async function handleDirectPaymentScreenshot(
+  ctx: MessageContext,
+  vkUserId: number,
+  user: any,
+  orderId: string
+): Promise<void> {
+  const url = await extractPhotoUrl(ctx);
+
+  if (!url) {
+    await ctx.reply("📸 Не удалось получить фото. Отправь скриншот оплаты как фотографию (не файлом) 👇");
+    return;
+  }
+
+  clearState(vkUserId);
+
+  await ctx.reply("✅ Скриншот получен! Менеджер проверит — обычно до 15 минут.");
+
+  try {
+    await sendAdminPaymentCard({
+      orderId,
+      userId:      user.id,
+      photoFileId: url,
+      userDisplay: vkUserDisplay(user.name ?? `VK #${vkUserId}`, vkUserId),
+      amount:      undefined,
+    });
+  } catch (err) {
+    console.error("[VK] sendAdminPaymentCard failed:", err);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -770,36 +1514,49 @@ async function handleReviewScreenshot(
   vkUserId: number,
   knownOrderId?: string
 ): Promise<void> {
-  // Try vk-io parsed attachments first, then walk raw message attachments
-  // as a fallback (some VK clients deliver photos in a different structure).
-  let url: string | undefined;
+  console.log(`[VK] handleReviewScreenshot: vkUserId=${vkUserId} knownOrderId=${knownOrderId ?? "none"}`);
 
-  if (ctx.hasAttachments("photo")) {
-    url = photoUrl(ctx.getAttachments("photo")[0]);
-  }
-  if (!url) {
-    const rawAttachments: any[] =
-      (ctx as any).message?.attachments ??
-      (ctx as any).attachments ??
-      [];
-    const rawPhoto = rawAttachments.find((a: any) => a.type === "photo")?.photo;
-    if (rawPhoto) url = photoUrl(rawPhoto);
-  }
+  const url = await extractPhotoUrl(ctx);
+  console.log(`[VK] handleReviewScreenshot: url=${url ? "found" : "NOT_FOUND"}`);
 
-  // If we still don't have a URL — stay silent (do not feedback user)
   if (!url) {
     if (knownOrderId) {
-      // User is in AWAITING_REVIEW state but sent no photo — guide them
       await ctx.reply(
         "📸 Пришли скриншот отзыва в виде фотографии (не файлом).\n" +
         "После проверки администратором ты получишь +100 R$."
+      );
+    } else {
+      // Photo was detected at routing level but URL extraction failed — guide user
+      await ctx.reply(
+        "📸 Не удалось получить фото. Попробуй отправить скриншот ещё раз — именно как фотографию (не файлом).\n\n" +
+        "Если не получается — напиши нам: https://t.me/RobloxBank_PA"
       );
     }
     return;
   }
 
   const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
-  if (!user) return;
+  if (!user) {
+    console.log(`[VK] handleReviewScreenshot: user not found for vkId=${vkUserId} — notifying admins`);
+    await ctx.reply(
+      "📸 Получили твой скриншот, но не смогли найти твою заявку в базе.\n\n" +
+      "Свяжись с нами напрямую: https://t.me/RobloxBank_PA — " +
+      "укажи свой VK ID, и мы разберёмся вручную."
+    );
+    try {
+      for (const adminId of ADMIN_IDS) {
+        await tgSend(
+          adminId,
+          `⚠️ <b>Скриншот ВБ отзыва — пользователь не найден в БД</b>\n` +
+          `VK ID: <code>${vkUserId}</code> (<a href="https://vk.com/id${vkUserId}">vk.com/id${vkUserId}</a>)\n\n` +
+          `Пользователь отправил скрин, но записи в базе нет. Нужна ручная проверка.`
+        );
+      }
+    } catch (err) {
+      console.error("[VK] admin notify for unknown reviewer failed:", err);
+    }
+    return;
+  }
 
   // Resolve the order to attach this review to
   let orderId = knownOrderId;
@@ -808,15 +1565,21 @@ async function handleReviewScreenshot(
       where:   { userId: user.id, status: "COMPLETED" },
       orderBy: { updatedAt: "desc" },
     });
-    const linked = order
+
+    // Direct orders (wbCode starts with "DIR-") have no WbCode record in DB,
+    // so skip the reviewBonusClaimed check for them.
+    const isDirectOrder = (order?.wbCode as string | undefined)?.startsWith("DIR-");
+    const linked = (order && !isDirectOrder)
       ? await (db as any).wbCode.findFirst({
           where: { userId: user.id, reviewBonusClaimed: false },
         })
-      : null;
+      : order ?? null; // direct orders: truthy if order exists
+
     if (!order || !linked) {
+      console.log(`[VK] handleReviewScreenshot: no eligible order/code for userId=${user.id} vkId=${vkUserId} hasOrder=${!!order} isDirectOrder=${!!isDirectOrder} hasLinked=${!!linked}`);
       await ctx.reply(
         "📸 У тебя сейчас нет выполненных заявок, ожидающих отзыва.\n\n" +
-        "Если у тебя возникла проблема или вопрос — напиши в поддержку: https://t.me/RobloxBank_PA"
+        "Если у тебя возникла проблема или вопрос — напиши сюда, ответим здесь. Или в Telegram: https://t.me/RobloxBank_PA"
       );
       return;
     }
@@ -827,9 +1590,9 @@ async function handleReviewScreenshot(
 
   await ctx.reply("✅ Отзыв получен! Менеджер проверит его в ближайшее время и начислит бонус.");
 
-  // Forward to Telegram admins — silent fail so user never sees a broken state
+  // Forward to Telegram admins
+  const reviewerName = user.name ?? await vkGetName(vkUserId);
   try {
-    const reviewerName = user.name ?? await vkGetName(vkUserId);
     await sendAdminReviewCard({
       orderId,
       userId:      user.id as string,
@@ -837,7 +1600,18 @@ async function handleReviewScreenshot(
       userDisplay: vkUserDisplay(reviewerName, vkUserId),
     });
   } catch (err) {
-    console.error("[VK] sendAdminReviewCard failed (silent):", err);
+    console.error("[VK] sendAdminReviewCard failed:", err);
+    // Fallback: plain alert so admins can approve manually
+    for (const adminId of ADMIN_IDS) {
+      try {
+        await tgSend(adminId,
+          `⚠️ <b>Ошибка доставки карточки отзыва — требуется ручная проверка</b>\n\n` +
+          `👤 Юзер: ${vkUserDisplay(reviewerName, vkUserId)}\n` +
+          `📦 Заказ: <code>${orderId}</code>\n` +
+          `🖼 Фото: ${url}`
+        );
+      } catch {}
+    }
   }
 }
 
@@ -875,9 +1649,13 @@ async function handleIdleMessage(
 
   // Guard: user sent a gamepass URL/ID but state machine has no active code.
   // Try DB auto-pickup first — they may have activated the code on the site.
+  // Pass no ctx: we want orphan recovery to fall back to plain setState here
+  // (legacy path), so we can immediately dispatch to handleGamepassLink with
+  // the link the user just sent — rather than ping-ponging through the
+  // handleRefActivation welcome flow.
   if (extractPassId(text) !== null) {
-    const restored = await tryRestoreState(vkUserId);
-    if (restored) {
+    const outcome = await tryRestoreState(vkUserId);
+    if (outcome === "restored") {
       // State is now AWAITING_LINK — re-dispatch to gamepass handler
       const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
       await handleGamepassLink(ctx, vkUserId, text, restoredState.wbCode, restoredState.denomination);
@@ -887,7 +1665,7 @@ async function handleIdleMessage(
       "⚠️ Сначала активируй код с WB-карты — напиши его прямо сюда или на сайте:\n" +
       "🔗 https://robloxbank.ru/guide?source=wb\n\n" +
       "После активации пришли ссылку на геймпасс.\n" +
-      "Нужна помощь? https://t.me/RobloxBank_PA"
+      "Нужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA"
     );
     return;
   }
@@ -899,7 +1677,7 @@ async function handleIdleMessage(
       await ctx.reply(
         "У тебя пока нет заявок.\n\n" +
         "Есть код с WB-карты? Напиши его прямо сюда — и мы всё оформим.\n" +
-        "Нужна помощь? https://t.me/RobloxBank_PA"
+        "Нужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA"
       );
       return;
     }
@@ -910,7 +1688,7 @@ async function handleIdleMessage(
     });
 
     if (!order) {
-      await ctx.reply("У тебя пока нет заявок.\n\nЕсть код с WB-карты? Напиши его прямо сюда.\nНужна помощь? https://t.me/RobloxBank_PA");
+      await ctx.reply("У тебя пока нет заявок.\n\nЕсть код с WB-карты? Напиши его прямо сюда.\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
       return;
     }
 
@@ -959,7 +1737,7 @@ async function handleIdleMessage(
             .inline()
         : order.status === "COMPLETED" && reviewClaimed
         ? Keyboard.builder()
-            .textButton({ label: "💬 Заказать ещё", payload: { command: "support", context: "general" }, color: "positive" })
+            .textButton({ label: "💎 Заказать напрямую", payload: { command: "start_direct" }, color: "positive" })
             .inline()
         : undefined;
 
@@ -978,8 +1756,11 @@ async function handleIdleMessage(
   }
 
   // Try to restore a pending WB code before falling back to the greeting.
-  const restored = await tryRestoreState(vkUserId);
-  if (restored) {
+  // "handled" = orphan code → handleRefActivation already sent the full welcome
+  // with the gamepass-instruction link and created the provisional order.
+  const outcome = await tryRestoreState(vkUserId, ctx);
+  if (outcome === "handled") return;
+  if (outcome === "restored") {
     const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
     const passPrice = Math.ceil(restoredState.denomination / 0.7);
     const firstName = await vkGetName(vkUserId);
@@ -990,6 +1771,8 @@ async function handleIdleMessage(
         `💎 Номинал: ${restoredState.denomination} R$\n\n` +
         `Осталось совсем чуть-чуть — пришли ссылку на геймпасс.\n` +
         `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
+        `❓ Не помнишь как создать геймпасс? Инструкция со скриншотами:\n` +
+        `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${restoredState.wbCode}\n\n` +
         `Жду ссылку 👇`,
       keyboard: vkSupportKb("general"),
     });
@@ -1000,13 +1783,14 @@ async function handleIdleMessage(
   const firstName = await vkGetName(vkUserId);
 
   if (status.isReturning) {
-    // IDLE state: upsell to direct sales, no gamepass instructions
     await ctx.reply({
-      message: getIdleGreeting(status, firstName) + "\n\nНужна помощь? https://t.me/RobloxBank_PA",
+      message: getIdleGreeting(status, firstName) + "\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA",
       keyboard: Keyboard.builder()
-        .textButton({ label: "📊 Статус заявки", payload: { command: "status" }, color: "primary" })
+        .textButton({ label: "📊 Статус заявки",   payload: { command: "status" },       color: "primary"   })
         .row()
-        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+        .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" },  color: "positive"  })
+        .row()
+        .textButton({ label: "💬 Нужна помощь?",   payload: { command: "support", context: "general" }, color: "secondary" })
         .inline(),
     });
   } else {

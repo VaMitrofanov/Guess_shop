@@ -237,15 +237,16 @@ export async function getUserGamepasses(username: string) {
     const universes: any[] = gamesData.data ?? [];
     if (universes.length === 0) return [];
 
-    // 2. Fetch gamepasses for each universe in parallel
+    // 2. Fetch gamepasses for each universe in parallel, carrying placeId along
     const passPromises = universes.map(async (game: any) => {
+      const placeId: number = game.rootPlaceId ?? game.rootPlace?.id ?? 0;
       try {
         const res = await rFetch(
           `https://apis.roblox.com/game-passes/v1/universes/${game.id}/game-passes?passView=Full&pageSize=30`
         );
         if (!res.ok) return [];
         const data = await res.json();
-        return data.gamePasses ?? [];
+        return (data.gamePasses ?? []).map((gp: any) => ({ ...gp, _placeId: placeId }));
       } catch {
         return [];
       }
@@ -265,11 +266,14 @@ export async function getUserGamepasses(username: string) {
     );
 
     return allGamepasses.map((gp: any) => ({
-      id:        gp.id,
-      name:      gp.name ?? gp.displayName,
-      price:     gp.price ?? 0,
-      productId: gp.productId,
-      image:     thumbMap[gp.id]
+      id:         gp.id,
+      name:       gp.name ?? gp.displayName,
+      price:      gp.price ?? 0,
+      productId:  gp.productId ?? 0,
+      placeId:    gp._placeId ?? 0,
+      sellerName: gp.creator?.name ?? username,
+      isForSale:  gp.isForSale ?? false,
+      image:      thumbMap[gp.id]
         ?? `https://www.roblox.com/asset-thumbnail/image?assetId=${gp.id}&width=150&height=150&format=png`,
     }));
   } catch (error) {

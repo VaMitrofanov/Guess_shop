@@ -38,6 +38,7 @@ import {
   registerChatMember,
 } from "./handlers";
 import { registerAdminHubs, setupMenuButton } from "./admin";
+import { startReviewReminderCron } from "./crons";
 
 const token = process.env.TG_TOKEN;
 if (!token) throw new Error("[TG] TG_TOKEN is not set");
@@ -87,6 +88,7 @@ if (disablePolling) {
   });
   // Set Menu Button (left of input) for each admin — opens TWA dashboard directly
   setupMenuButton(bot).catch((err: Error) => console.error("[TG] setChatMenuButton failed:", err));
+  startReviewReminderCron(bot);
   console.log("[TG] Bot started ✅ (polling)");
   const adminIds = process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "";
   if (!adminIds.trim()) {

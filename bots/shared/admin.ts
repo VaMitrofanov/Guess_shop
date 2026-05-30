@@ -9,6 +9,14 @@
 
 import { tgSend, tgSendPhoto } from "./notify";
 
+// ── Direct order pricing ───────────────────────────────────────────────────────
+
+/** Sell rate: how many roubles the customer pays per 1 R$ they receive. */
+export const DIRECT_RATE = 0.7;
+
+/** Predefined Robux pack sizes available for direct orders. */
+export const DIRECT_PACKS = [100, 200, 300, 500, 800, 1000, 2000, 5000, 10000] as const;
+
 // ── Support alert ─────────────────────────────────────────────────────────────
 
 const SUPPORT_CONTEXT_LABELS: Record<string, string> = {
@@ -64,6 +72,30 @@ export async function sendAdminSupportAlert(p: SupportAlertPayload): Promise<voi
   await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text)));
 }
 
+/** Public support contact. Used as a direct URL button so a single tap opens the dialog. */
+export const SUPPORT_URL = "https://t.me/RobloxBank_PA";
+
+// In-memory dedup: the support button is now a direct URL (one tap → support
+// chat), so we can no longer hook a callback on press. Instead we alert admins
+// when the button is *shown* in a problem context — deduped per
+// (platform, user, context) within a window so a re-rendered dead-end or a user
+// hitting the same error twice doesn't spam the admin chat.
+const SUPPORT_ALERT_TTL_MS = 30 * 60 * 1000;
+const supportAlertSeen = new Map<string, number>();
+
+/** Deduplicated wrapper around {@link sendAdminSupportAlert} for show-time alerts. */
+export async function notifySupportShown(p: SupportAlertPayload): Promise<void> {
+  const key = `${p.platform}:${p.tgId ?? p.userDisplay}:${p.contextKey}`;
+  const now = Date.now();
+  const last = supportAlertSeen.get(key);
+  if (last && now - last < SUPPORT_ALERT_TTL_MS) return; // within window — skip
+  supportAlertSeen.set(key, now);
+  if (supportAlertSeen.size > 500) {
+    for (const [k, t] of supportAlertSeen) if (now - t > SUPPORT_ALERT_TTL_MS) supportAlertSeen.delete(k);
+  }
+  await sendAdminSupportAlert(p);
+}
+
 /** Comma-separated list of Telegram admin chat IDs from env. */
 export const ADMIN_IDS: string[] = (
   process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? ""
@@ -71,6 +103,54 @@ export const ADMIN_IDS: string[] = (
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
+
+// ── Unified user-handle formatting ─────────────────────────────────────────────
+
+/** Minimal shape needed by {@link formatUserHandle}. */
+export interface UserHandleSource {
+  tgId?:     string | null;
+  vkId?:     string | null;
+  username?: string | null;
+  name?:     string | null;
+}
+
+/**
+ * Build the canonical user label for admin cards.
+ *
+ * TG priority:  `@username` (clickable) → display name → `tg:<id>`
+ * VK priority:  display name → `vk:<id>`
+ *
+ * Returns plain text — caller wraps in HTML link as needed.
+ */
+export function formatUserHandle(u: UserHandleSource): string {
+  if (u.tgId) {
+    if (u.username) return `@${u.username}`;
+    return u.name ?? `tg:${u.tgId}`;
+  }
+  if (u.vkId) {
+    return u.name ?? `vk:${u.vkId}`;
+  }
+  return u.name ?? "Неизвестен";
+}
+
+/**
+ * Same as {@link formatUserHandle} but wrapped in an HTML link to the user's profile.
+ * Suitable for HTML-formatted admin messages.
+ */
+export function formatUserHandleHtml(u: UserHandleSource): string {
+  const label = formatUserHandle(u);
+  if (u.tgId) {
+    // @username links work natively in Telegram even without an explicit <a>,
+    // but wrapping in tg://user?id=... gives a deterministic profile link
+    // that works even if the handle is unavailable.
+    if (u.username) return `<a href="https://t.me/${u.username}">${label}</a>`;
+    return `<a href="tg://user?id=${u.tgId}">${label}</a>`;
+  }
+  if (u.vkId) {
+    return `<a href="https://vk.com/id${u.vkId}">${label}</a>`;
+  }
+  return label;
+}
 
 // ── callback_data constants (≤ 64 bytes guaranteed with CUID ~25 chars) ────────
 export const CB = {
@@ -144,6 +224,7 @@ export const CB = {
   wbEditAd:        (nmID: number) => `wb_ad:${nmID}`,
   wbEditDenom:     (nmID: number) => `wb_denom_ue:${nmID}`,
   wbUeSettings:    "wb_ue_settings",
+  wbCalcWhatIf:    "wb_calc_whatif",
   wbUeKursRb:      "wb_ue_kurs_rb",
   wbUeKursUsd:     "wb_ue_kurs_usd",
   wbUeFixedCost:   "wb_ue_fixed",
@@ -170,14 +251,37 @@ export const CB = {
   autoBuySetRate:  "ab_set_rate",
   autoBuyRefresh:  "ab_refresh",
 
+  // ── Boss Robux (inside AutoBuy hub) ────────────────────────────────────────
+  bossrobuxSearch:  "br_search",
+  bossrobuxBuy:     (i: number) => `br_buy:${i}`,    // ≤ 10 b
+  bossrobuxConfirm: (i: number) => `br_ok:${i}`,     // ≤ 9 b
+
   // ── Legacy (kept for backwards compatibility) ──────────────────────────────
   adminStats: "admin_stats",
   adminQueue: "admin_queue",
   adminCodes: "admin_codes",
 
+  // ── Direct order ──────────────────────────────────────────────────────────
+  startDirect:         "start_direct",
+  confirmDirect:       "confirm_direct",
+  cancelDirect:        "cancel_direct",
+  directPack:          (amount: number) => `dp:${amount}`,                                // 8 b max
+  sendPaymentDetails:  (orderId: string) => `spd:${orderId}`,                             // 29 b
+  cancelDirectOrder:   (orderId: string) => `cdo:${orderId}`,                             // 29 b
+  paymentOk:           (orderId: string, userId: string) => `pay_ok:${orderId}:${userId}`, // 59 b
+  paymentNo:           (orderId: string, userId: string) => `pay_no:${orderId}:${userId}`, // 59 b
+
   // User actions
   refreshStatus: "refresh_status",
   reviewHint:    "review_hint",
+
+  // ── Gamepass search by Roblox nick (item 7) ──────────────────────────────
+  // Client flow: user clicks "find by nick" → bot asks for nick → user types
+  // it → bot lists matches as inline buttons. Pass IDs are numeric strings
+  // up to ~12 digits, well under the 64-byte callback limit.
+  findGpStart:   "find_gp",                                  // 7 b
+  findGpRetry:   "find_gp_retry",                            // 13 b
+  gpPick:        (passId: string) => `gp_pick:${passId}`,    // ≤ 22 b
 } as const;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -193,6 +297,10 @@ export interface OrderCardPayload {
   bonusApplied?:       number;
   /** Number of WbOrders placed BEFORE this one. Used to render loyalty badge. */
   previousOrderCount?: number;
+  /** Roblox username of the gamepass creator, as returned by the validation API. */
+  creatorName?:        string;
+  /** true when the gamepass is in an 18+ age-restricted game. */
+  isAgeRestricted?:    boolean;
 }
 
 export interface ReviewCardPayload {
@@ -200,6 +308,25 @@ export interface ReviewCardPayload {
   userId:      string;   // DB User.id
   photoSource: string;   // Telegram file_id OR public HTTPS URL (VK photo)
   userDisplay: string;
+}
+
+export interface DirectOrderCardPayload {
+  orderId:            string;
+  userId:             string;   // DB User.id
+  amount:             number;   // total Robux (incl. bonus)
+  bonusApplied:       number;
+  userDisplay:        string;
+  tgId?:              string;   // optional — not set for VK users
+  createdAt:          Date;
+  previousOrdersCount?: number;
+}
+
+export interface PaymentScreenshotCardPayload {
+  orderId:     string;
+  userId:      string;
+  photoFileId: string;
+  userDisplay: string;
+  amount?:     number;
 }
 
 // ── Senders ───────────────────────────────────────────────────────────────────
@@ -229,6 +356,9 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
     prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>\n`              :
     "";
 
+  const creatorLine    = order.creatorName    ? `🎮 Создатель ГП: <b>${order.creatorName}</b>\n`  : "";
+  const ageRestrictLine = order.isAgeRestricted ? `🔞 <b>Игра 18+ — выкуп вручную</b>\n`           : "";
+
   const text =
     `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
@@ -237,16 +367,27 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
     `📅 Время: <b>${dateStr}</b>\n` +
     `👤 Юзер: ${order.userDisplay}\n` +
     bonusLine +
+    creatorLine +
+    ageRestrictLine +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
     `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
     `📊 Статус: ⏳ В обработке\n\n` +
     `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>`;
 
+  // One-tap deep-link into the TWA Orders screen, prefocused on this order.
+  // web_app inline buttons launch the Web App in personal chats with the given
+  // URL — no Direct Link app name needed.
+  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(shortId)}`;
   const reply_markup = {
-    inline_keyboard: [[
-      { text: "✅ ВЫКУПЛЕНО", callback_data: CB.adminOk(order.id)  },
-      { text: "❌ ОШИБКА",    callback_data: CB.adminErr(order.id) },
-    ]],
+    inline_keyboard: [
+      [
+        { text: "✅ ВЫКУПЛЕНО", callback_data: CB.adminOk(order.id)  },
+        { text: "❌ ОШИБКА",    callback_data: CB.adminErr(order.id) },
+      ],
+      [
+        { text: "📊 Открыть в дашборде", web_app: { url: twaUrl } },
+      ],
+    ],
   };
 
   await Promise.allSettled(
@@ -255,8 +396,86 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
 }
 
 /**
+ * Notify all admins about a new direct order (no WB card).
+ * Admin can send payment details or cancel the order.
+ */
+export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload): Promise<void> {
+  const shortId = payload.orderId.slice(-6).toUpperCase();
+  const dateStr = new Date(payload.createdAt).toLocaleString("ru-RU", {
+    timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
+    year: "numeric", hour: "2-digit", minute: "2-digit",
+  }) + " МСК";
+  const bonusLine = payload.bonusApplied > 0
+    ? `🎁 Бонус учтён: <b>+${payload.bonusApplied} R$</b>\n`
+    : "";
+
+  const prev = payload.previousOrdersCount ?? 0;
+  const loyaltyLine =
+    prev >= 5 ? `👑 <b>VIP КЛИЕНТ (${prev} заказов)</b>\n` :
+    prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ (${prev} заказ${prev === 1 ? "" : prev < 5 ? "а" : "ов"})</b>\n` :
+    `🆕 <b>НОВЫЙ КЛИЕНТ</b>\n`;
+
+  const paidRobux = payload.amount - payload.bonusApplied;
+  const rublePrice = Math.round(paidRobux * DIRECT_RATE);
+
+  const text =
+    `🔷 <b>ПРЯМОЙ ЗАКАЗ #${shortId}</b>\n` +
+    `━━━━━━━━━━━━━━━━\n` +
+    loyaltyLine +
+    `📅 Время: <b>${dateStr}</b>\n` +
+    `👤 Юзер: ${payload.userDisplay}\n` +
+    bonusLine +
+    `💰 К оплате: <b>${rublePrice} ₽</b>\n` +
+    `💎 Выдать: <b>${payload.amount} R$</b> (Геймпасс: ${Math.ceil(payload.amount / 0.7)} R$)\n` +
+    `📊 Статус: ⏳ Ожидаем реквизиты`;
+
+  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(shortId)}`;
+  const reply_markup = {
+    inline_keyboard: [
+      [
+        { text: "💳 Отправить реквизиты", callback_data: CB.sendPaymentDetails(payload.orderId) },
+        { text: "❌ Отменить заказ",      callback_data: CB.cancelDirectOrder(payload.orderId) },
+      ],
+      [
+        { text: "📊 Открыть в дашборде", web_app: { url: twaUrl } },
+      ],
+    ],
+  };
+
+  await Promise.allSettled(
+    ADMIN_IDS.map((id) => tgSend(id, text, { reply_markup }))
+  );
+}
+
+/**
+ * Send a payment screenshot card to all admins for confirmation.
+ */
+export async function sendAdminPaymentCard(payload: PaymentScreenshotCardPayload): Promise<void> {
+  const shortId = payload.orderId.slice(-6).toUpperCase();
+  const amountLine = payload.amount ? `💎 Сумма: <b>${payload.amount} R$</b>\n` : "";
+  const caption =
+    `💳 <b>Скриншот оплаты</b>\n` +
+    `Заказ #${shortId}\n` +
+    amountLine +
+    `Юзер: ${payload.userDisplay}`;
+
+  const reply_markup = {
+    inline_keyboard: [[
+      { text: "✅ Оплата принята", callback_data: CB.paymentOk(payload.orderId, payload.userId) },
+      { text: "❌ Отклонить",      callback_data: CB.paymentNo(payload.orderId, payload.userId) },
+    ]],
+  };
+
+  await Promise.allSettled(
+    ADMIN_IDS.map((id) =>
+      tgSendPhoto(id, payload.photoFileId, caption, { reply_markup })
+    )
+  );
+}
+
+/**
  * Broadcast a review-screenshot card to all Telegram admins.
- * Admin chooses [🎁 Начислить +50 R$] or [❌ Отклонить].
+ * Admin chooses [🎁 Начислить +100 R$] or [❌ Отклонить].
  */
 export async function sendAdminReviewCard(payload: ReviewCardPayload): Promise<void> {
   const shortId = payload.orderId.slice(-6).toUpperCase();

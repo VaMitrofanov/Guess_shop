@@ -22,11 +22,14 @@ model User {
   email              String?   @unique
   password           String?
   name               String?
+  username           String?
   image              String?
-  balance            Int       @default(0)
-  role               String    @default("USER")
-  reviewBonusClaimed Boolean   @default(false)
-  orders             Order[]
+  balance               Int       @default(0)
+  role                  String    @default("USER")
+  reviewBonusClaimed    Boolean   @default(false)
+  reviewBonusGrantedAt  DateTime?
+  reviewReminderLevel   Int       @default(0)
+  orders                Order[]
   wbCodes            WbCode[]
   wbOrders           WbOrder[]
   createdAt          DateTime  @default(now())
@@ -88,6 +91,8 @@ enum Platform {
 }
 
 enum WbOrderStatus {
+  AWAITING_PAYMENT
+  PAYMENT_PENDING
   AWAITING_GAMEPASS
   PENDING
   IN_PROGRESS
@@ -116,11 +121,20 @@ model WbOrder {
   /// Snapshot of the purchase rate (R$/₽) at the time of fulfillment.
   /// Allows accurate historical profit calculations.
   purchaseRate    Float?
+  isDirectOrder   Boolean       @default(false)
+  paymentDetails  String?
+  robloxUsername  String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
   @@index([userId])
   @@index([status])
+  // Main TWA Orders listing — sort by createdAt desc within a status chip.
+  @@index([status, createdAt(sort: Desc)])
+  // Identity-cluster numbering in /api/twa/orders + GP-by-nick search.
+  @@index([robloxUsername])
+  // Per-user history (BossRobux + analytics).
+  @@index([userId, createdAt(sort: Desc)])
 }
 
 model FAQ {

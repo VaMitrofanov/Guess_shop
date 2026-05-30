@@ -1,11 +1,25 @@
 "use client";
 import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import BottomNav from "./BottomNav";
-import Dashboard from "./screens/Dashboard";
-import AnalyticsScreen from "./screens/AnalyticsScreen";
-import StocksScreen from "./screens/StocksScreen";
-import CodesScreen from "./screens/CodesScreen";
-import CalcScreen from "./screens/CalcScreen";
+import OrdersScreen from "./screens/OrdersScreen";
+
+// Dynamically load non-default screens so the initial JS bundle is just
+// the OrdersScreen (default tab) + TwaApp shell. BossrobuxScreen alone is
+// ~580 LoC + framer-motion dependency; deferring it cuts cold-start time
+// for the 95 % of sessions that open Orders.
+const Dashboard       = dynamic(() => import("./screens/Dashboard"),      { ssr: false, loading: () => <ScreenSkeleton /> });
+const WbScreen        = dynamic(() => import("./screens/WbScreen"),       { ssr: false, loading: () => <ScreenSkeleton /> });
+const BossrobuxScreen = dynamic(() => import("./screens/BossrobuxScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
+const SettingsScreen  = dynamic(() => import("./screens/SettingsScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
+
+function ScreenSkeleton() {
+  return (
+    <div style={{ padding: "32px 16px", color: "#636366", fontSize: 13, textAlign: "center" }}>
+      Загружаем экран…
+    </div>
+  );
+}
 
 declare global {
   interface Window {
@@ -14,7 +28,10 @@ declare global {
         ready: () => void;
         expand: () => void;
         initData: string;
-        initDataUnsafe: { user?: { id: number; first_name?: string; username?: string } };
+        initDataUnsafe: {
+          user?: { id: number; first_name?: string; username?: string };
+          start_param?: string;
+        };
         colorScheme: "dark" | "light";
         themeParams: Record<string, string>;
         close: () => void;
@@ -23,31 +40,46 @@ declare global {
   }
 }
 
-type Screen = "dashboard" | "analytics" | "stocks" | "codes" | "calc";
+type Screen = "dashboard" | "orders" | "wb" | "bossrobux" | "settings";
 
 const SCREEN_TITLES: Record<Screen, string> = {
-  dashboard: "Главная",
-  analytics: "Аналитика",
-  stocks:    "Склад",
-  codes:     "Коды",
-  calc:      "Калькулятор",
+  dashboard:  "Главная",
+  orders:     "Заказы",
+  wb:         "Wildberries",
+  bossrobux:  "Boss Robux",
+  settings:   "Настройки",
 };
 
 export default function TwaApp() {
-  const [auth,     setAuth]     = useState<"loading" | "ok" | "error">("loading");
-  const [token,    setToken]    = useState<string | null>(null);
-  const [screen,   setScreen]   = useState<Screen>("dashboard");
-  const [debugMsg, setDebugMsg] = useState("");
+  const [auth,               setAuth]               = useState<"loading" | "ok" | "error">("loading");
+  const [token,              setToken]              = useState<string | null>(null);
+  const [screen,             setScreen]             = useState<Screen>("orders");
+  const [debugMsg,           setDebugMsg]           = useState("");
+  const [ordersBadge,        setOrdersBadge]        = useState(0);
+  const [bossrobuxPreloadId, setBossrobuxPreloadId] = useState<string | undefined>(undefined);
+  // Pre-focus the Orders search when launched via admin notification deep-link.
+  // Accepts either ?q=... in the URL (works with InlineKeyboardButton.web_app
+  // URLs) or Telegram's start_param (works with Direct Link Apps via startapp).
+  const [orderQueryPreload,  setOrderQueryPreload]  = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    const fromUrl = new URLSearchParams(window.location.search).get("q") ?? "";
+    const fromStartParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param ?? "";
+    return (fromUrl || fromStartParam || "").trim();
+  });
 
   useEffect(() => {
     let cancelled = false;
 
-    async function waitForInitData(maxMs = 3000): Promise<string> {
+    // Tightened from 3000 ms / 100 ms poll to 1200 ms / 50 ms poll.
+    // On all current Telegram clients initData lands within ~200-400 ms of
+    // ready(); a 3 s budget was wasting time on the cold-start path when
+    // initDataUnsafe.user.id is already available (we fall back to that below).
+    async function waitForInitData(maxMs = 1200): Promise<string> {
       const deadline = Date.now() + maxMs;
       while (Date.now() < deadline) {
         const id = window.Telegram?.WebApp?.initData;
         if (id) return id;
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 50));
       }
       return "";
     }
@@ -79,7 +111,8 @@ export default function TwaApp() {
       const stored = localStorage.getItem("twa_token");
 
       if (stored) {
-        const r = await fetch("/api/twa/dashboard", { headers: { Authorization: `Bearer ${stored}` } }).catch(() => null);
+        // Lightweight verify — no DB/WB API roundtrip (item 2 fix).
+        const r = await fetch("/api/twa/ping", { headers: { Authorization: `Bearer ${stored}` } }).catch(() => null);
         if (cancelled) return;
         if (r?.ok) {
           setToken(stored);
@@ -91,6 +124,21 @@ export default function TwaApp() {
         localStorage.removeItem("twa_token");
       }
 
+      // Fast path: if initDataUnsafe.user.id is already present, skip the
+      // initData poll entirely — auth endpoint accepts unsafe userId for
+      // admins (HMAC isn't possible without the raw initData anyway).
+      const unsafeUserEarly = window.Telegram?.WebApp?.initDataUnsafe?.user;
+      const initDataEarly   = window.Telegram?.WebApp?.initData;
+      if (initDataEarly) {
+        doAuth({ initData: initDataEarly });
+        return;
+      }
+      if (unsafeUserEarly?.id) {
+        doAuth({ userId: unsafeUserEarly.id, firstName: unsafeUserEarly.first_name });
+        return;
+      }
+
+      // Last resort: SDK still hydrating — short poll, then bail.
       const initData = await waitForInitData();
       if (cancelled) return;
 
@@ -115,12 +163,48 @@ export default function TwaApp() {
     return () => { cancelled = true; };
   }, []);
 
+  // Fetch urgent orders count for badge after auth.
+  // Uses the lightweight /urgent-count endpoint (single COUNT on indexed
+  // status column) instead of the full Orders pipeline.
+  useEffect(() => {
+    if (auth !== "ok" || !token) return;
+    const refresh = () => {
+      fetch("/api/twa/orders/urgent-count", { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          if (!d) return;
+          setOrdersBadge(d.count ?? 0);
+        })
+        .catch(() => {});
+    };
+    refresh();
+    const iv = setInterval(refresh, 30_000);
+    return () => clearInterval(iv);
+  }, [auth, token]);
+
   if (auth === "loading") {
+    // Skeleton matches the post-auth chrome (title bar + content + bottom nav)
+    // so the visual transition to the real Orders screen is a fade-in,
+    // not a layout pop. Cuts perceived load time even when the JWT verify
+    // takes its usual ~150 ms.
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "#1c1c1e", color: "#8e8e93" }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 36, marginBottom: 12 }}>🟣</div>
-          <div style={{ fontSize: 14 }}>Загрузка…</div>
+      <div style={{
+        display: "flex", flexDirection: "column", height: "100dvh",
+        background: "#1c1c1e", color: "#fff",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      }}>
+        <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid #2c2c2e" }}>
+          <div style={{ width: 90, height: 18, borderRadius: 5, background: "#2c2c2e" }} />
+          <div style={{ width: 60, height: 11, borderRadius: 4, background: "#2c2c2e", marginTop: 4 }} />
+        </div>
+        <div style={{ flex: 1, padding: "16px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+          {[0, 1, 2, 3].map(i => (
+            <div key={i} style={{
+              height: 96, borderRadius: 18, background: "#2c2c2e",
+              boxShadow: "0 1px 0 rgba(255,255,255,0.04) inset",
+              opacity: 0.7 - i * 0.12,
+            }} />
+          ))}
         </div>
       </div>
     );
@@ -158,14 +242,14 @@ export default function TwaApp() {
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
-        {screen === "dashboard" && <Dashboard       {...sp} />}
-        {screen === "analytics" && <AnalyticsScreen  {...sp} />}
-        {screen === "stocks"    && <StocksScreen     {...sp} />}
-        {screen === "codes"     && <CodesScreen      {...sp} />}
-        {screen === "calc"      && <CalcScreen       {...sp} />}
+        {screen === "dashboard"  && <Dashboard      {...sp} />}
+        {screen === "orders"     && <OrdersScreen   {...sp} onGoToBossrobux={(gpId) => { setBossrobuxPreloadId(gpId); setScreen("bossrobux"); }} initialQuery={orderQueryPreload} onInitialQueryConsumed={() => setOrderQueryPreload("")} />}
+        {screen === "wb"         && <WbScreen       {...sp} />}
+        {screen === "bossrobux"  && <BossrobuxScreen {...sp} preloadGamepassId={bossrobuxPreloadId} onPreloadConsumed={() => setBossrobuxPreloadId(undefined)} />}
+        {screen === "settings"   && <SettingsScreen  {...sp} />}
       </div>
 
-      <BottomNav active={screen} onChange={setScreen} />
+      <BottomNav active={screen} onChange={setScreen} ordersBadge={ordersBadge} />
     </div>
   );
 }

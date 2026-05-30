@@ -20,7 +20,7 @@
  */
 
 import * as http from "http";
-import { getGamepassDetailsDirect } from "./roblox";
+import { getGamepassDetailsDirect, getUserGamepasses, getGamepassForPurchase } from "./roblox";
 
 // Allow overriding port via env for cases where 3000 is already in use
 const BRIDGE_PORT = parseInt(process.env.VALIDATOR_PORT ?? "3000", 10);
@@ -48,10 +48,12 @@ export function startBridgeServer(): http.Server {
     }
 
     // ── Route dispatcher ────────────────────────────────────────────────────
-    const isCheckPass = req.method === "GET"  && url.pathname === "/check-pass";
-    const isTgProxy   = req.method === "POST" && url.pathname === "/tg-proxy";
+    const isCheckPass        = req.method === "GET"  && url.pathname === "/check-pass";
+    const isTgProxy          = req.method === "POST" && url.pathname === "/tg-proxy";
+    const isSearchGamepasses = req.method === "POST" && url.pathname === "/search-gamepasses";
+    const isGamepassById     = req.method === "GET"  && url.pathname === "/gamepass-by-id";
 
-    if (!isCheckPass && !isTgProxy) {
+    if (!isCheckPass && !isTgProxy && !isSearchGamepasses && !isGamepassById) {
       respond(404, { ok: false, error: "not_found" });
       return;
     }
@@ -140,6 +142,59 @@ export function startBridgeServer(): http.Server {
       } catch (err: any) {
         console.error("[Bridge/tg-proxy] fetch failed:", err?.message ?? err);
         respond(502, { ok: false, error: "tg_unreachable" });
+      }
+      return;
+    }
+
+    // ── POST /search-gamepasses ─────────────────────────────────────────────
+    if (isSearchGamepasses) {
+      let body: Record<string, unknown>;
+      try {
+        const raw = await new Promise<string>((resolve, reject) => {
+          let data = "";
+          req.on("data", (chunk) => { data += chunk; });
+          req.on("end",  () => resolve(data));
+          req.on("error", reject);
+        });
+        body = JSON.parse(raw);
+      } catch {
+        respond(400, { ok: false, error: "bad_request" });
+        return;
+      }
+
+      const username = typeof body.username === "string" ? body.username.trim() : "";
+      if (!username) {
+        respond(400, { ok: false, error: "missing_username" });
+        return;
+      }
+
+      console.log(`[Bridge] → Searching gamepasses for username="${username}"`);
+      try {
+        const gamepasses = await getUserGamepasses(username);
+        console.log(`[Bridge] ← "${username}": ${gamepasses.length} gamepass(es)`);
+        respond(200, { ok: true, gamepasses });
+      } catch (err: any) {
+        console.error(`[Bridge] search-gamepasses error for "${username}":`, err?.message ?? err);
+        respond(500, { ok: false, error: "server_error" });
+      }
+      return;
+    }
+
+    // ── GET /gamepass-by-id ─────────────────────────────────────────────────
+    if (isGamepassById) {
+      const gpId = url.searchParams.get("id") ?? "";
+      if (!gpId || !/^\d{1,20}$/.test(gpId)) {
+        respond(400, { ok: false, error: "invalid_id" });
+        return;
+      }
+      console.log(`[Bridge] → Lookup gamepass-by-id id=${gpId}`);
+      try {
+        const gp = await getGamepassForPurchase(gpId);
+        console.log(`[Bridge] ← id=${gpId}: ${gp ? `"${gp.name}" ${gp.robux}R$` : "not found"}`);
+        respond(200, { ok: true, gamepass: gp });
+      } catch (err: any) {
+        console.error(`[Bridge] gamepass-by-id error for id=${gpId}:`, err?.message ?? err);
+        respond(500, { ok: false, error: "server_error" });
       }
       return;
     }

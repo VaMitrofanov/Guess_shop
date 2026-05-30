@@ -10,9 +10,10 @@ import { Telegraf, Markup } from "telegraf";
 import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, stripHtml, tgSend } from "../shared/notify";
-import { sendAdminOrderCard, sendAdminReviewCard, sendAdminSupportAlert, CB, ADMIN_IDS } from "../shared/admin";
-import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, type LinkFailState } from "./session";
+import { sendAdminOrderCard, sendAdminReviewCard, sendAdminSupportAlert, notifySupportShown, sendAdminDirectOrderCard, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS, formatUserHandle, formatUserHandleHtml } from "../shared/admin";
+import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectAmount, pendingDirectOrder, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, robloxGpCache, type LinkFailState, type DirectOrderState, type LinkState } from "./session";
 import { getGamepassDetails } from "../shared/roblox";
+import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { buildAdminKeyboard, updateMainMenu, routeAdminCallback } from "./admin";
 import { renderExtendedCard } from "./admin/hub-orders";
 
@@ -20,16 +21,75 @@ import { renderExtendedCard } from "./admin/hub-orders";
 
 const SUPPORT_URL = "https://t.me/RobloxBank_PA";
 
+/** Format a ruble amount with thousands separator, e.g. 3500 → "3 500 ₽". */
+function fmtRub(n: number): string {
+  if (n >= 1000) return `${Math.floor(n / 1000)} ${String(n % 1000).padStart(3, "0")} ₽`;
+  return `${n} ₽`;
+}
+
+/** Build an inline keyboard with predefined Robux packs and their ruble prices. */
+function buildPackKb() {
+  const rows = [
+    DIRECT_PACKS.slice(0, 3),  // 100, 200, 300
+    DIRECT_PACKS.slice(3, 6),  // 500, 800, 1000
+    DIRECT_PACKS.slice(6, 8),  // 2000, 5000
+    DIRECT_PACKS.slice(8),     // 10000
+  ] as number[][];
+  const buttons = rows.map(row =>
+    row.map(amt =>
+      Markup.button.callback(
+        `${amt} R$ — ${fmtRub(Math.round(amt * DIRECT_RATE))}`,
+        CB.directPack(amt)
+      )
+    )
+  );
+  buttons.push([Markup.button.callback("❌ Отмена", CB.cancelDirect)]);
+  return Markup.inlineKeyboard(buttons);
+}
+
+/** Generate a unique synthetic WB code for direct orders (never matches a real 7-char code). */
+function generateDirectCode(): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let code = "DIR-";
+  for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
 // ── Support contact (Progressive Disclosure) ────────────────────────────────
 
-/** Inline callback button that triggers support notification + shows contact URL. */
-function supportBtn(label = "💬 Написать в поддержку", ctxKey = "general") {
-  return Markup.button.callback(label, `sup:${ctxKey}`);
+/** Direct URL button — one tap opens the support dialog. When `ctx` is passed,
+ *  also fires a deduped admin alert (the button no longer round-trips a callback
+ *  we could hook, so we notify admins at show-time instead). */
+function supportBtn(label = "💬 Написать в поддержку", ctxKey = "general", ctx?: any) {
+  if (ctx?.from) void fireSupportAlert(ctx, ctxKey);
+  return Markup.button.url(label, SUPPORT_URL);
+}
+
+/** Fire-and-forget deduped admin alert when a support button is shown to a user. */
+async function fireSupportAlert(ctx: any, ctxKey: string): Promise<void> {
+  try {
+    const tgId        = String(ctx.from.id);
+    const userDisplay = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? `tg:${tgId}`;
+    let wbCode = pendingLink.get(ctx.from.id)?.wbCode;
+    let denom  = pendingLink.get(ctx.from.id)?.denomination;
+    if (!wbCode) {
+      const u = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+      if (u) {
+        const o = await (db as any).wbOrder.findFirst({
+          where: { userId: u.id }, orderBy: { updatedAt: "desc" }, select: { wbCode: true, amount: true },
+        });
+        if (o) { wbCode = o.wbCode; denom = o.amount; }
+      }
+    }
+    await notifySupportShown({ platform: "TG", userDisplay, tgId, contextKey: ctxKey, wbCode, denomination: denom });
+  } catch (e) {
+    console.error("[TG] fireSupportAlert failed:", e);
+  }
 }
 
 /** Returns an inlineKeyboard with a single support button row. */
-function withSupportKb(label?: string, ctxKey = "general"): ReturnType<typeof Markup.inlineKeyboard> {
-  return Markup.inlineKeyboard([[supportBtn(label, ctxKey)]]);
+function withSupportKb(label?: string, ctxKey = "general", ctx?: any): ReturnType<typeof Markup.inlineKeyboard> {
+  return Markup.inlineKeyboard([[supportBtn(label, ctxKey, ctx)]]);
 }
 
 /** Get or init the fail-counter object for a user's current session. */
@@ -121,6 +181,9 @@ export function registerStart(bot: Telegraf): void {
     // Rate Limiting
     const rateKey = sessionId || tgId;
     const now = Date.now();
+    if (startRateLimiter.size > 500) {
+      for (const [k, v] of startRateLimiter) { if (v.resetAt < now) startRateLimiter.delete(k); }
+    }
     const rateData = startRateLimiter.get(rateKey) || { attempts: 0, resetAt: now + 60000 };
     if (rateData.resetAt < now) {
       rateData.attempts = 0;
@@ -157,6 +220,7 @@ export function registerStart(bot: Telegraf): void {
             parse_mode: "HTML",
             link_preview_options: { is_disabled: true },
             ...Markup.inlineKeyboard([
+              [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
               [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
               [supportBtn("💬 Написать менеджеру")],
             ]),
@@ -174,12 +238,13 @@ export function registerStart(bot: Telegraf): void {
         const greeting = getGreeting(custStatus, firstName);
         await ctx.reply(
           `${greeting}Твой личный проводник в мир робуксов.\n\n` +
-          `Есть код с WB-карты? Напиши его прямо сюда — сайт не нужен.`,
+          `Есть код с WB-карты? Напиши его прямо сюда — больше ничего не нужно.`,
           {
             parse_mode: "HTML",
             link_preview_options: { is_disabled: true },
             ...Markup.inlineKeyboard([
               [Markup.button.url("📖 Инструкция по активации", "https://robloxbank.ru/guide?source=wb")],
+              [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
               [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
             ]),
           }
@@ -194,8 +259,8 @@ export function registerStart(bot: Telegraf): void {
     });
     if (!wbCode) {
       await ctx.reply(
-        "❌ Код не найден. Проверь правильность ввода.\n\nЕсли уверен, что код верный — напиши нам: @RobloxBank_PA",
-        { parse_mode: "HTML", ...withSupportKb(undefined, "code_not_found") }
+        "❌ Код не найден. Проверь правильность ввода.\n💡 Часто путают букву «О» и цифру «0» — проверь эти символы в коде.\n\nЕсли уверен, что код верный — напиши нам: @RobloxBank_PA",
+        { parse_mode: "HTML", ...withSupportKb(undefined, "code_not_found", ctx) }
       );
       return;
     }
@@ -204,7 +269,7 @@ export function registerStart(bot: Telegraf): void {
     // isUsed=true with userId=null means the website reserved it but the bot flow
     // never finished — allow those through so users aren't silently stuck.
     if (wbCode.isUsed && wbCode.userId) {
-      await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?", "code_mine") });
+      await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?", "code_mine", ctx) });
       return;
     }
 
@@ -223,13 +288,17 @@ export function registerStart(bot: Telegraf): void {
         data: {
           tgId,
           name: [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || null,
+          username: ctx.from.username ?? null,
         },
       });
+    } else if (ctx.from.username && user.username !== ctx.from.username) {
+      // Backfill @handle for existing users so TWA "Написать" button works
+      user = await (db as any).user.update({ where: { id: user.id }, data: { username: ctx.from.username } });
     }
 
     // If code is CLAIMED by a different user, block
     if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
-      await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.", { parse_mode: "HTML", ...withSupportKb("💬 Оспорить — написать нам", "code_claimed") });
+      await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.", { parse_mode: "HTML", ...withSupportKb("💬 Оспорить — написать нам", "code_claimed", ctx) });
       return;
     }
 
@@ -353,29 +422,36 @@ export function registerStart(bot: Telegraf): void {
       bonusText = `💎 Номинал: <b>${wbCode.denomination} R$</b>\n\n`;
     }
 
+    // Non-admins also get an inline "find by nick" shortcut — saves them
+    // from copy-pasting URLs. Admins get only the Launch keyboard at the
+    // bottom (their flow is to operate the dashboard, not place orders).
+    const clientInline = !isAdmin
+      ? Markup.inlineKeyboard([
+          [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
+          [Markup.button.url("📖 Открыть инструкцию", `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}`)],
+        ])
+      : {};
     await ctx.reply(
       `${greetLine}\n` +
       (isGuideMode
         ? `✅ Код <b>${code}</b> активирован!\n` +
           bonusText +
-          `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда.\n` +
-          `📌 Цена геймпасса должна быть ровно <b>${passPrice} R$</b>\n\n` +
-          `Если геймпасс уже создан — пришли ссылку прямо сюда 👇\n\n` +
+          `Создай геймпасс в Roblox за <b>${passPrice} R$</b> — затем нажми кнопку «🔎 Найти по моему нику Roblox» 👇 (быстрый путь, без ссылок).\n` +
+          `Если удобнее — пришли ссылку на геймпасс сюда вручную.\n\n` +
           `Нужна инструкция?\n` +
           `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}`
         : `✅ Код <b>${code}</b> активирован!\n` +
           bonusText +
-          `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда.\n` +
-          `📌 Цена геймпасса должна быть ровно <b>${passPrice} R$</b>\n` +
-          `<i>(это номинал ÷ 0.7 — Roblox удерживает 30% комиссии)</i>\n\n` +
-          `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
-          `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n\n` +
-          `Пришли ссылку на геймпасс прямо сюда 👇`
+          `Создай геймпасс в Roblox за <b>${passPrice} R$</b> — затем нажми кнопку «🔎 Найти по моему нику Roblox» 👇 (быстрый путь, без ссылок).\n` +
+          `<i>(${passPrice} R$ — это номинал ÷ 0.7, Roblox удерживает 30%)</i>\n\n` +
+          `Если удобнее — пришли ссылку на геймпасс сюда вручную.\n\n` +
+          `❓ Что такое геймпасс и как его создать:\n` +
+          `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}`
       ),
       {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
-        ...(isAdmin ? adminKb : {})
+        ...(isAdmin ? adminKb : clientInline),
       }
     );
   });
@@ -419,9 +495,10 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   const user = await (db as any).user.findUnique({ where: { tgId } });
   if (!user) {
     return {
-      text: "У тебя пока нет заказов. Есть код с WB-карты? Напиши его прямо сюда или открой инструкцию.",
+      text: "Привет! Есть WB-карта — напиши код прямо сюда или открой инструкцию.\n\nХочешь купить Robux напрямую без карты — нажми кнопку ниже.",
       keyboard: Markup.inlineKeyboard([
         [Markup.button.url("📖 Инструкция", "https://robloxbank.ru/guide?source=wb")],
+        [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
         refreshRow,
       ]),
     };
@@ -434,12 +511,18 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
 
   if (!order) {
     return {
-      text: "Есть код с WB-карты? Напиши его прямо сюда — и начнём!",
-      keyboard: Markup.inlineKeyboard([refreshRow, [supportBtn("💬 Нужна помощь?")]]),
+      text: "Есть код с WB-карты? Напиши его прямо сюда — и начнём!\n\nИли купи Robux напрямую без карты 👇",
+      keyboard: Markup.inlineKeyboard([
+        [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
+        refreshRow,
+        [supportBtn("💬 Нужна помощь?")],
+      ]),
     };
   }
 
   const label: Record<string, string> = {
+    AWAITING_PAYMENT:  "⏳ Ожидаем реквизиты",
+    PAYMENT_PENDING:   "💳 Ожидаем оплату",
     AWAITING_GAMEPASS: "⌛ Ожидаем геймпасс",
     PENDING:     "⏳ В обработке",
     IN_PROGRESS: "🔧 В работе",
@@ -453,7 +536,14 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
 
   // Progressive note per status
   let note = "";
-  if (order.status === "AWAITING_GAMEPASS") {
+  if (order.status === "AWAITING_PAYMENT") {
+    const waitMins = Math.floor((Date.now() - new Date(order.createdAt).getTime()) / 60_000);
+    note = waitMins >= 15
+      ? "\n\n⏰ <i>Реквизиты ещё не пришли. Если прошло больше 15 минут — напиши нам.</i>"
+      : "\n\n💡 <i>Менеджер скоро пришлёт реквизиты для оплаты.</i>";
+  } else if (order.status === "PAYMENT_PENDING") {
+    note = "\n\n💳 <i>Пришли скриншот оплаты сюда (фотографией, не файлом).</i>";
+  } else if (order.status === "AWAITING_GAMEPASS") {
     note = "\n\n💡 <i>Пришли ссылку на геймпасс прямо сюда — и мы сразу возьмём в работу!</i>";
   } else if (order.status === "PENDING") {
     if (pendingOver120) {
@@ -467,9 +557,15 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   } else if (order.status === "IN_PROGRESS") {
     note = "\n\n🔧 <i>Менеджер уже занимается твоим геймпассом — скоро пришлём уведомление.</i>";
   } else if (order.status === "REJECTED") {
-    note = order.rejectionReason
-      ? `\n\n💬 Причина: <i>${order.rejectionReason}</i>\n\nНажми кнопку ниже, чтобы исправить ссылку.`
-      : `\n\nНажми кнопку ниже, чтобы исправить ссылку на геймпасс.`;
+    if (order.isDirectOrder) {
+      note = order.rejectionReason
+        ? `\n\n💬 Причина: <i>${order.rejectionReason}</i>\n\nЕсли хочешь — оформи новый заказ.`
+        : `\n\nЕсли хочешь — оформи новый заказ ниже.`;
+    } else {
+      note = order.rejectionReason
+        ? `\n\n💬 Причина: <i>${order.rejectionReason}</i>\n\nНажми кнопку ниже, чтобы исправить ссылку.`
+        : `\n\nНажми кнопку ниже, чтобы исправить ссылку на геймпасс.`;
+    }
   } else if (order.status === "COMPLETED") {
     note = "\n\n🚀 <i>Хочешь заказать ещё? Постоянным клиентам — прямое обслуживание без Wildberries по лучшему курсу!</i>";
   }
@@ -488,22 +584,39 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
 
   // Keyboard varies by status
   let keyboard: ReturnType<typeof Markup.inlineKeyboard>;
-  if (order.status === "REJECTED") {
-    keyboard = Markup.inlineKeyboard([
-      [Markup.button.callback("🔄 Исправить ссылку", `user_resubmit:${order.wbCode}:${order.amount}`)],
-      refreshRow,
-      [supportBtn("Нужна помощь?", "rejected")],
-    ]);
+  if (order.status === "AWAITING_PAYMENT" || order.status === "PAYMENT_PENDING") {
+    const waitMins = Math.floor((Date.now() - new Date(order.createdAt).getTime()) / 60_000);
+    const supportRow = waitMins >= 15
+      ? [supportBtn("⏰ Написать менеджеру", "direct_wait")]
+      : [supportBtn("💬 Нужна помощь?", "direct_wait")];
+    keyboard = Markup.inlineKeyboard([refreshRow, supportRow]);
+  } else if (order.status === "REJECTED") {
+    if (order.isDirectOrder) {
+      keyboard = Markup.inlineKeyboard([
+        [Markup.button.callback("💎 Заказать напрямую", CB.startDirect)],
+        refreshRow,
+        [supportBtn("💬 Нужна помощь?", "rejected")],
+      ]);
+    } else {
+      keyboard = Markup.inlineKeyboard([
+        [Markup.button.callback("🔄 Исправить ссылку", `user_resubmit:${order.wbCode}:${order.amount}`)],
+        refreshRow,
+        [supportBtn("Нужна помощь?", "rejected")],
+      ]);
+    }
   } else if (order.status === "AWAITING_GAMEPASS") {
+    const guideUrl = order.isDirectOrder
+      ? `https://www.robloxbank.ru/guide?source=direct`
+      : `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}`;
     keyboard = Markup.inlineKeyboard([
-      [Markup.button.url("📖 Инструкция по созданию геймпасса", `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}`)],
+      [Markup.button.url("📖 Инструкция по созданию геймпасса", guideUrl)],
       refreshRow,
       [supportBtn("💬 Нужна помощь?", "general")],
     ]);
   } else if (order.status === "COMPLETED") {
     keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback("💎 Заказать напрямую", CB.startDirect)],
       refreshRow,
-      [Markup.button.url("💬 Заказать ещё напрямую", SUPPORT_URL)],
     ]);
   } else if (pendingOver60) {
     keyboard = Markup.inlineKeyboard([refreshRow, [supportBtn("Нужна помощь?", "pending_long")]]);
@@ -535,6 +648,99 @@ export function registerText(bot: Telegraf): void {
     if (isAdmin && rejectOrderId) {
       pendingRejectionReason.delete(ctx.from.id);
       await performAdminReject(bot, ctx, rejectOrderId, text);
+      return;
+    }
+
+    // 1z. USER ROBLOX-NICK input (item 7 — "find gamepass by nick")
+    if (!isAdmin && pendingRobloxNick.has(ctx.from.id)) {
+      await handleRobloxNickInput(bot, ctx, text);
+      return;
+    }
+
+    // 1a. ADMIN PAYMENT DETAILS flow
+    const paymentDetailsOrderId = pendingPaymentDetails.get(ctx.from.id);
+    if (isAdmin && paymentDetailsOrderId) {
+      pendingPaymentDetails.delete(ctx.from.id);
+      const dirOrder = await (db as any).wbOrder.findUnique({ where: { id: paymentDetailsOrderId } });
+      if (!dirOrder) {
+        await ctx.reply("❌ Заказ не найден.", { parse_mode: "HTML" });
+        return;
+      }
+      await (db as any).wbOrder.update({
+        where: { id: paymentDetailsOrderId },
+        data: { paymentDetails: text, status: "PAYMENT_PENDING" },
+      });
+      const shortId = dirOrder.id.slice(-6).toUpperCase();
+      const payUser = await (db as any).user.findUnique({ where: { id: dirOrder.userId } });
+      if (payUser?.tgId) {
+        try {
+          await bot.telegram.sendMessage(
+            payUser.tgId,
+            `💳 <b>Реквизиты для оплаты заказа #${shortId}:</b>\n\n` +
+            `<code>${text}</code>\n\n` +
+            `Переведи деньги и пришли скриншот подтверждения сюда (фотографией, не файлом) 👇`,
+            {
+              parse_mode: "HTML",
+              reply_markup: {
+                inline_keyboard: [[{ text: "📊 Проверить статус", callback_data: CB.refreshStatus }]],
+              },
+            }
+          );
+          pendingPaymentScreenshot.set(parseInt(payUser.tgId), dirOrder.id);
+        } catch { }
+      } else if (payUser?.vkId) {
+        try {
+          await vkSend(payUser.vkId,
+            `💳 Реквизиты для оплаты заказа #${shortId}:\n\n` +
+            `${text}\n\n` +
+            `Переведи деньги и пришли скриншот подтверждения сюда (фотографией, не файлом) 👇`
+          );
+        } catch { }
+      }
+      await ctx.reply(`✅ Реквизиты отправлены пользователю (Заказ #${shortId})`, { parse_mode: "HTML" });
+      return;
+    }
+
+    // 1b. USER DIRECT ORDER AMOUNT input
+    if (!isAdmin && pendingDirectAmount.has(ctx.from.id)) {
+      const num = parseInt(text.replace(/[\s,]/g, ""), 10);
+      if (isNaN(num) || num < 100 || num > 10000) {
+        pendingDirectAmount.set(ctx.from.id, true);
+        await ctx.reply(
+          "⚠️ Введи число от 100 до 10 000.\n\nНапример: <code>500</code>",
+          { parse_mode: "HTML" }
+        );
+        return;
+      }
+      pendingDirectAmount.delete(ctx.from.id);
+      const dirUser = await (db as any).user.findUnique({
+        where: { tgId },
+        select: { balance: true },
+      });
+      const bonus = dirUser?.balance ?? 0;
+      const totalAmount = num + bonus;
+      const passPrice = Math.ceil(totalAmount / 0.7);
+      const rublePrice = Math.round(num * DIRECT_RATE);
+      pendingDirectOrder.set(ctx.from.id, { amount: num, passPrice, totalAmount });
+      const bonusSection = bonus > 0
+        ? `💎 Запрос:          ${num} R$\n` +
+          `🎁 Твой бонус:     +${bonus} R$\n` +
+          `━━━━━━━━━━━━━━━━\n` +
+          `📦 Итого получишь:  ${totalAmount} R$\n`
+        : `📦 Получишь:       ${totalAmount} R$\n`;
+      await ctx.reply(
+        `✅ <b>Подтверди заказ</b>\n\n` +
+        bonusSection +
+        `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
+        `📌 Цена геймпасса:  ${passPrice} R$`,
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[
+            Markup.button.callback("✅ Подтвердить", CB.confirmDirect),
+            Markup.button.callback("❌ Отмена", CB.cancelDirect),
+          ]]),
+        }
+      );
       return;
     }
 
@@ -667,10 +873,12 @@ export function registerText(bot: Telegraf): void {
           }
           await ctx.reply(
             "У тебя сейчас нет активных заявок.\n\n" +
-            "🔑 Есть код с WB-карты? Напиши его прямо сюда.",
+            "🔑 Есть код с WB-карты? Напиши его прямо сюда.\n" +
+            "💎 Хочешь заказать без карты — нажми кнопку ниже.",
             {
               parse_mode: "HTML",
               ...Markup.inlineKeyboard([
+                [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
                 [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
                 [supportBtn("Нужна помощь?")],
               ]),
@@ -679,6 +887,28 @@ export function registerText(bot: Telegraf): void {
           return;
         }
       } else {
+        return;
+      }
+    }
+
+    // ── Subscription gate — BEFORE parsing the link ──────────────────────
+    // Check first so the user never sees "Получил!" before subscribing.
+    // pendingLink is preserved; after joining the channel registerChatMember
+    // will prompt the user to re-send the link.
+    if (!isAdmin && process.env.TG_CHANNEL_ID) {
+      const subscribed = await checkSubscription(bot, ctx.from.id);
+      if (!subscribed) {
+        await ctx.reply(
+          `Чтобы оформить заказ, сначала подпишись на наш канал — там бонусы и акции для клиентов.\n\n` +
+          `После подписки бот напишет тебе сам. Или пришли ссылку ещё раз.`,
+          {
+            parse_mode: "HTML",
+            link_preview_options: { is_disabled: true },
+            ...Markup.inlineKeyboard([[
+              Markup.button.url("⭐ Подписаться", "https://t.me/Roblox_Bank_Tg")
+            ]]),
+          }
+        );
         return;
       }
     }
@@ -695,35 +925,209 @@ export function registerText(bot: Telegraf): void {
         "• Ссылку из конструктора: <code>https://create.roblox.com/...</code>\n" +
         "• Просто ID (только цифры): <code>1234567</code>";
       if (fc.formatError >= 2) {
-        await ctx.reply(formatHint, { parse_mode: "HTML", ...withSupportKb(undefined, "pass_format") });
+        await ctx.reply(formatHint, { parse_mode: "HTML", ...withSupportKb(undefined, "pass_format", ctx) });
       } else {
         await ctx.reply(formatHint, { parse_mode: "HTML" });
       }
       return;
     }
 
-    const expectedPrice = Math.ceil(state.denomination / 0.7);
+    await processGamepassSubmission(bot, ctx, state, passId);
+  });
+}
 
-    // Re-check subscription — pendingLink state may have been set before subscribing.
-    if (!isAdmin) {
-      const subscribed = await checkSubscription(bot, ctx.from.id);
-      if (!subscribed) {
-        await ctx.reply(
-          `Получил! Осталось один шаг — у наших клиентов есть закрытый канал: там первыми узнают о выкупе, ` +
-          `получают бонусы и эксклюзивные акции.\n\n` +
-          `Загляни — бесплатно, а потом просто пришли ссылку ещё раз:\n` +
-          `https://t.me/Roblox_Bank_Tg`,
-          {
-            parse_mode: "HTML",
-            link_preview_options: { is_disabled: true },
-            ...Markup.inlineKeyboard([[
-              Markup.button.url("⭐ Стать участником", "https://t.me/Roblox_Bank_Tg")
-            ]]),
-          }
-        );
-        return; // pendingLink preserved — user re-sends the link after subscribing
+/* ─────────────────────── Find-by-nick search (item 7) ────────────────────── */
+
+/** Cache TTL for getUserGamepasses lookups per user. */
+const NICK_CACHE_MS = 60_000;
+/** Max gamepass matches we show as inline buttons. */
+const MAX_PICK_BUTTONS = 5;
+/** Allowed Roblox username regex. */
+const ROBLOX_NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
+
+/**
+ * Handle a user's Roblox-nick reply after they tapped "🔎 Найти по моему нику".
+ *
+ * Calls `searchGamepassesByNick` (the unified shared engine) and renders one
+ * of five branches depending on the structured outcome:
+ *
+ *   1. `user_not_found`  → "no such user on Roblox" + retry
+ *   2. `no_gamepasses`   → "place probably closed" + guide instruction
+ *   3. `ok` 1 match      → photo card with thumbnail + confirm button
+ *   4. `ok` N≥2 matches  → text-button list (same as Phase A)
+ *   5. `ok` 0 match but gamepasses exist → list of actual prices + "fix" hint
+ *
+ * Tapping the confirm button fires CB.gpPick → callback handler funnels into
+ * {@link processGamepassSubmission} (the canonical link → order pipeline).
+ */
+async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Promise<void> {
+  const tgIdNum = ctx.from.id;
+  const state = pendingRobloxNick.get(tgIdNum);
+  if (!state) return;
+
+  const nick = raw.trim().replace(/^@/, "");
+  if (!ROBLOX_NICK_RE.test(nick)) {
+    await ctx.reply(
+      "⚠️ Ник не похож на ник Roblox.\n\n" +
+      "Должно быть 3–20 символов: буквы, цифры или подчёркивание. " +
+      "Например: <code>lokomotiv_2018</code>",
+      { parse_mode: "HTML" }
+    );
+    return;
+  }
+
+  const expectedPrice = Math.ceil(state.denomination / 0.7);
+
+  await ctx.sendChatAction("typing");
+  const checkingMsg = await ctx.reply(`🔎 Ищу геймпассы у <b>${nick}</b>…`, { parse_mode: "HTML" });
+
+  let outcome: GamepassSearchOutcome;
+  try {
+    outcome = await searchGamepassesByNick(nick, expectedPrice);
+  } catch (err: any) {
+    console.error("[TG/find-gp] searchGamepassesByNick failed:", err?.message ?? err);
+    // Treat infra failure as "couldn't resolve" — user-facing retry is the best UX.
+    outcome = { status: "user_not_found", nick, expectedPrice };
+  }
+  try { await bot.telegram.deleteMessage(ctx.chat.id, checkingMsg.message_id); } catch {}
+
+  // User has moved past the input stage in every branch below.
+  pendingRobloxNick.delete(tgIdNum);
+
+  const guideUrl = `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`;
+
+  // ── Branch 1: nickname doesn't exist on Roblox ───────────────────────────
+  if (outcome.status === "user_not_found") {
+    await ctx.reply(
+      `🤷 Пользователя <b>${nick}</b> нет на Roblox.\n\n` +
+      `Скорее всего опечатка. Скопируй ник прямо со страницы профиля и пришли заново.`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🔎 Попробовать ещё раз", CB.findGpRetry)],
+          [supportBtn("💬 Нужна помощь?", "nick_not_found", ctx)],
+        ]),
       }
+    );
+    return;
+  }
+
+  // ── Branch 2: nickname exists but no public for-sale gamepasses ──────────
+  // Most common reason: the user's place is private. Guide them to opening it
+  // before sending them to the generic support button.
+  if (outcome.status === "no_gamepasses") {
+    await ctx.reply(
+      `🙈 У <b>${nick}</b> не нашли публичных геймпассов.\n\n` +
+      `Самая частая причина — <b>плейс закрыт</b>. Открой его в настройках, тогда геймпассы станут видны:\n\n` +
+      `1. Roblox → раздел <b>Creations</b>\n` +
+      `2. Выбери свой плейс → ⚙️ <b>Configure</b> → <b>Privacy</b>\n` +
+      `3. Поставь <b>Public</b>\n\n` +
+      `Если плейс уже публичный — проверь, что геймпасс <b>создан и выставлен на продажу</b> за <b>${expectedPrice} R$</b>.`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.url("📖 Подробная инструкция", guideUrl)],
+          [Markup.button.callback("🔎 Попробовать другой ник", CB.findGpRetry)],
+          [supportBtn("💬 Нужна помощь?", "place_closed", ctx)],
+        ]),
+      }
+    );
+    return;
+  }
+
+  // outcome.status === "ok"
+  const { matches, nonMatches, all } = outcome;
+
+  // Populate the picker cache (used by callback for "это не он" → fall back
+  // to next candidate without re-hitting Roblox). Top-5 already sorted by
+  // closeness to expectedPrice inside `searchGamepassesByNick`.
+  robloxGpCache.set(tgIdNum, {
+    hits: all.slice(0, MAX_PICK_BUTTONS).map(g => ({
+      passId: String(g.gamepassId),
+      name:   g.name,
+      price:  g.robux,
+      image:  g.image,
+    })),
+    ts:     Date.now(),
+    wbCode: state.wbCode,
+  });
+
+  // ── Branch 5: gamepasses exist but none at the expected price ────────────
+  // Show their actual prices so they SEE the mismatch and know to fix one.
+  if (matches.length === 0) {
+    const top = nonMatches.slice(0, MAX_PICK_BUTTONS);
+    const listLines = top.map(g => `• <b>${g.name}</b> · ${g.robux} R$`).join("\n");
+    await ctx.reply(
+      `У <b>${nick}</b> нашли геймпассы, но ни один не за <b>${expectedPrice} R$</b>:\n\n` +
+      `${listLines}\n\n` +
+      `Создай геймпасс ровно на <b>${expectedPrice} R$</b> или измени цену существующего — и нажми «🔎 Уже исправил».`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.url("📖 Как создать геймпасс", guideUrl)],
+          [Markup.button.callback("🔎 Уже исправил — проверить", CB.findGpRetry)],
+          [supportBtn("💬 Нужна помощь?", "wrong_price", ctx)],
+        ]),
+      }
+    );
+    return;
+  }
+
+  // ── Branch 3: exactly 1 price-matching gamepass → photo card ─────────────
+  if (matches.length === 1) {
+    const m = matches[0];
+    const caption =
+      `🎯 Нашёл у <b>${nick}</b> подходящий геймпасс:\n\n` +
+      `💎 <b>${m.name}</b> · ${m.robux} R$\n\n` +
+      `Это он? Жми «✅ Да» — отправлю на проверку.`;
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback(`✅ Да, выкупаем (${m.robux} R$)`, CB.gpPick(String(m.gamepassId)))],
+      [Markup.button.callback("🔎 Другой ник", CB.findGpRetry)],
+    ]);
+    try {
+      await ctx.replyWithPhoto(m.image, { caption, parse_mode: "HTML", ...keyboard });
+    } catch (err: any) {
+      // Telegram occasionally rejects external thumbnail URLs (CDN expiry,
+      // rate limit). Fall back to text so the user is never blocked.
+      console.warn("[TG/find-gp] replyWithPhoto failed, falling back to text:", err?.message ?? err);
+      await ctx.reply(caption, { parse_mode: "HTML", ...keyboard });
     }
+    return;
+  }
+
+  // ── Branch 4: 2–5 price-matching gamepasses → text-button list ───────────
+  const shown = matches.slice(0, MAX_PICK_BUTTONS);
+  await ctx.reply(
+    `У <b>${nick}</b> нашёл несколько подходящих геймпассов.\n` +
+    `Выбери тот, который хочешь продать:`,
+    {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([
+        ...shown.map(m => [
+          Markup.button.callback(`💎 ${m.name.slice(0, 32)} · ${m.robux} R$`, CB.gpPick(String(m.gamepassId))),
+        ]),
+        [Markup.button.callback("🔎 Другой ник", CB.findGpRetry)],
+      ]),
+    }
+  );
+}
+
+/**
+ * Run the full Roblox validation + atomic WbOrder transaction for a given
+ * `passId` and `state` (wb-code/denomination). Extracted from the text-handler
+ * (item 7) so it can also be invoked from the gp_pick callback after the
+ * "search by Roblox nick" picker.
+ *
+ * Side effects: replies to ctx, mutates pendingLink/linkFailCounts, broadcasts
+ * the rendered order card to ADMIN_IDS. Returns normally on every branch.
+ */
+async function processGamepassSubmission(
+  bot: Telegraf,
+  ctx: any,
+  state: LinkState,
+  passId: string,
+): Promise<void> {
+    const expectedPrice = Math.ceil(state.denomination / 0.7);
 
     // ── Roblox API validation ─────────────────────────────────────────────
     // Show a "checking" message — validation can take 10–30 s via bridge/retries.
@@ -745,7 +1149,7 @@ export function registerText(bot: Telegraf): void {
         "• Ссылка ведёт именно на Game Pass, а не на саму игру\n" +
         "• Ты скопировал ссылку прямо из браузера Roblox\n\n" +
         "Если геймпасс точно существует — мы поможем разобраться:",
-        { parse_mode: "HTML", ...withSupportKb("💬 Написать нам", "pass_not_found") }
+        { parse_mode: "HTML", ...withSupportKb("💬 Написать нам", "pass_not_found", ctx) }
       );
       return;
     }
@@ -770,19 +1174,33 @@ export function registerText(bot: Telegraf): void {
       if (!gamepassInfo.isActive) {
         const fc = getFailCounts(ctx.from.id);
         fc.notActive++;
-        if (gamepassInfo.isGamePrivate) {
+        if (gamepassInfo.isNotInCatalog) {
+          if (fc.notActive === 1) await notifyAdminValidationFail("Геймпасс не найден в каталоге — скорее всего закрытая игра");
+          await ctx.reply(
+            `❌ <b>Геймпасс недоступен</b> — скорее всего, игра, в которой он создан, закрыта (Private).\n\n` +
+            `Два варианта:\n` +
+            `1. Открой игру: Creator Hub → Experience → Settings → Permissions → <b>Public</b> → сохрани. Затем пришли ссылку снова.\n` +
+            `2. Создай геймпасс в любой <b>публичной</b> игре (цена: <b>${expectedPrice} R$</b>) и пришли новую ссылку.\n\n` +
+            `Не удаляй геймпасс до получения оплаты.`,
+            { parse_mode: "HTML", ...Markup.inlineKeyboard([
+              [Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
+              [supportBtn("💬 Нужна помощь?", "pass_deleted", ctx)],
+            ]) }
+          );
+        } else if (gamepassInfo.isGamePrivate) {
           if (fc.notActive === 1) await notifyAdminValidationFail("Игра закрыта (private) — геймпасс не продаётся");
           await ctx.reply(
-            `❌ Геймпасс в <b>закрытой или удалённой игре</b> — выкупить невозможно.\n\n` +
-            `<b>Вариант 1</b> — открой игру:\n` +
-            `• Зайди на <b>create.roblox.com/dashboard/creations</b> — у игры должен быть значок <b>Public</b>.\n` +
-            `• Если нет: кликни на плейс → Settings → Configure → выбери <b>Public</b>.\n` +
-            `• Если не получается — напиши менеджеру.\n\n` +
-            `<b>Вариант 2</b> — создай геймпасс в другой публичной игре:\n` +
-            `• Creator Hub → Creations → Passes → Create\n` +
-            `• Установи цену <b>${expectedPrice} R$</b>, включи «On Sale»\n\n` +
-            `После этого пришли новую ссылку.`,
-            { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "pass_private") }
+            `❌ <b>Геймпасс в закрытой игре</b> — выкупить невозможно.\n\n` +
+            `Как открыть игру:\n` +
+            `1. Нажми на плейс → <b>Configure → Settings</b>\n` +
+            `2. Найди раздел Audience → выбери <b>Public</b> → сохрани\n\n` +
+            `Не помогло? <b>Configure → Questionnaire → Restart</b>\n` +
+            `Ответь «No» на все 10 вопросов → Continue\n\n` +
+            `Или создай геймпасс в другой публичной игре (цена: <b>${expectedPrice} R$</b>)`,
+            { parse_mode: "HTML", ...Markup.inlineKeyboard([
+              [Markup.button.url("📖 Полная инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
+              [supportBtn("💬 Нужна помощь?", "pass_private", ctx)],
+            ]) }
           );
         } else {
           if (fc.notActive === 1) await notifyAdminValidationFail("Геймпасс не выставлен на продажу");
@@ -794,7 +1212,7 @@ export function registerText(bot: Telegraf): void {
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([[
               Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`),
-              ...(fc.notActive >= 2 ? [supportBtn("Нужна помощь?", "pass_inactive")] : []),
+              ...(fc.notActive >= 2 ? [supportBtn("Нужна помощь?", "pass_inactive", ctx)] : []),
             ]]),
           });
         }
@@ -809,12 +1227,13 @@ export function registerText(bot: Telegraf): void {
           `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
           `Установлено: <b>${gamepassInfo.price} R$</b>\n` +
           `Ожидается:   <b>${expectedPrice} R$</b>\n\n` +
-          `Зайди в Creator Dashboard → Passes → Edit, измени цену и пришли ссылку снова.`;
+          `Зайди в Creator Dashboard → Passes → Edit, измени цену и пришли ссылку снова.\n\n` +
+          `💡 Если у тебя включён <b>Regional Pricing</b> — обязательно выключи его (Passes → Edit → Pricing → убрать галочку Enable Regional Pricing), иначе цена будет неверной.`;
         await ctx.reply(priceMismatchText, {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([[
             Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`),
-            ...(fc.priceMismatch >= 2 ? [supportBtn("Нужна помощь с ценой?", "pass_price")] : []),
+            ...(fc.priceMismatch >= 2 ? [supportBtn("Нужна помощь с ценой?", "pass_price", ctx)] : []),
           ]]),
         });
         return;
@@ -837,7 +1256,7 @@ export function registerText(bot: Telegraf): void {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
             [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
-            [supportBtn("💬 Вопросы по заявке?", "roblox_down")],
+            [supportBtn("💬 Вопросы по заявке?", "roblox_down", ctx)],
           ]),
         }
       );
@@ -860,7 +1279,7 @@ export function registerText(bot: Telegraf): void {
         "Что-то пошло не так — напиши нам, разберёмся вместе:",
         {
           parse_mode: "HTML",
-          ...withSupportKb("💬 Написать нам", "session_err"),
+          ...withSupportKb("💬 Написать нам", "session_err", ctx),
         }
       );
       return;
@@ -875,6 +1294,8 @@ export function registerText(bot: Telegraf): void {
     let order: any;
     try {
       order = await (db as any).$transaction(async (tx: any) => {
+        // Direct orders have a synthetic DIR- code — no WbCode record exists, skip claim step.
+        if (!state.wbCode.startsWith("DIR-")) {
         const claimed = await tx.wbCode.updateMany({
           where: {
             code: { equals: state.wbCode, mode: "insensitive" },
@@ -903,6 +1324,7 @@ export function registerText(bot: Telegraf): void {
             data: { isUsed: true, usedAt: new Date() },
           });
         }
+        } // end: if (!state.wbCode.startsWith("DIR-"))
 
         // Check if an order already exists for this WB code.
         // Since wbCode is @unique, we can only have one record per code.
@@ -921,6 +1343,7 @@ export function registerText(bot: Telegraf): void {
                 status: "PENDING",
                 rejectionReason: null,
                 adminId: null,
+                ...(validatedCreator ? { robloxUsername: validatedCreator } : {}),
               },
             });
           } else {
@@ -937,12 +1360,16 @@ export function registerText(bot: Telegraf): void {
               platform: "TG",
               userId: user.id,
               wbCode: state.wbCode,
+              ...(validatedCreator ? { robloxUsername: validatedCreator } : {}),
             },
           });
         }
 
         if (user.balance && user.balance > 0) {
-          await tx.user.update({ where: { id: user.id }, data: { balance: 0 } });
+          await tx.user.update({
+            where: { id: user.id },
+            data: { balance: 0, reviewBonusGrantedAt: null, reviewReminderLevel: 0 },
+          });
         }
 
         return newOrder;
@@ -965,7 +1392,7 @@ export function registerText(bot: Telegraf): void {
           "⚠️ Заказ по этому коду уже создан и сейчас обрабатывается.",
           Markup.inlineKeyboard([
             [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
-            [supportBtn("💬 Если что-то не так", "order_dupe")],
+            [supportBtn("💬 Если что-то не так", "order_dupe", ctx)],
           ])
         );
         return;
@@ -1004,7 +1431,7 @@ export function registerText(bot: Telegraf): void {
         include: { user: true }
       });
       if (fullOrder) {
-        const { text: cardText, reply_markup } = await renderOrderCard(fullOrder);
+        const { text: cardText, reply_markup } = await renderOrderCard(fullOrder, validatedCreator ?? undefined, gamepassInfo.isAgeRestricted);
         for (const adminId of ADMIN_IDS) {
           try { await bot.telegram.sendMessage(adminId, cardText, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } }); } catch { }
         }
@@ -1012,14 +1439,13 @@ export function registerText(bot: Telegraf): void {
     } catch (err) {
       console.error("[TG] Admin notify error:", err);
     }
-  });
 }
 
-/** 
+/**
  * Universal renderer for the admin order card.
  * Returns text and reply_markup ready for ctx.reply or edit.
  */
-async function renderOrderCard(order: any) {
+async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted?: boolean) {
   const shortId = order.id.slice(-6).toUpperCase();
   const passPrice = Math.ceil(order.amount / 0.7);
   const statusLabels: any = {
@@ -1034,15 +1460,13 @@ async function renderOrderCard(order: any) {
     ? new Date(order.createdAt).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " МСК"
     : "";
 
-  // User profile link
+  // User profile link — prefer @username (clickable) over display name.
+  // See HANDOFF item 4: @SunriseSword/@username should win over ":D misak¡ti".
   let userLabel = "Неизвестен";
   if (order.user) {
-    if (order.user.vkId) {
-      const vkName = order.user.name || "VK Пользователь";
-      userLabel = `<a href="https://vk.com/id${order.user.vkId}">${vkName}</a>`;
-    } else if (order.user.tgId) {
-      const name = order.user.name || "Пользователь";
-      userLabel = `<a href="tg://user?id=${order.user.tgId}">${name}</a> (ID: ${order.user.tgId})`;
+    userLabel = formatUserHandleHtml(order.user);
+    if (order.user.tgId) {
+      userLabel += ` (ID: ${order.user.tgId})`;
     }
   }
 
@@ -1066,17 +1490,25 @@ async function renderOrderCard(order: any) {
       prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>\n` :
         "";
 
+  const directTag = order.isDirectOrder ? `🔷 <b>ПРЯМОЙ ЗАКАЗ</b>\n` : ``;
+
+  const gpCreatorLine    = creatorName      ? `🎮 Создатель ГП: <b>${creatorName}</b>\n`  : "";
+  const ageRestrictLine  = isAgeRestricted  ? `🔞 <b>Игра 18+ — выкуп вручную</b>\n`      : "";
+
   const text =
     `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
+    directTag +
     loyaltyLine +
     `${platformEmoji} Источник: <b>${order.platform}</b>\n` +
     (dateStr ? `📅 Время: <b>${dateStr}</b>\n` : "") +
     `👤 Юзер: ${userLabel}\n` +
     bonusLine +
-    reviewLine +
+    gpCreatorLine +
+    ageRestrictLine +
+    (order.isDirectOrder ? `` : reviewLine) +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
-    `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
+    (order.isDirectOrder ? `` : `🔑 Код ВБ: <code>${order.wbCode}</code>\n`) +
     `📊 Статус: <b>${statusLabels[order.status] || order.status}</b>${reasonLine}` +
     (order.gamepassUrl ? `\n\n🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>` : ``);
 
@@ -1160,7 +1592,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   // (isUsed=true + userId set). CLAIMED+isUsed=false is a provisional state
   // (bot claimed it but gamepass not sent yet), which should still be allowed through.
   if (wbCode.isUsed && wbCode.userId) {
-    await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?", "code_mine") });
+    await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?", "code_mine", ctx) });
     return;
   }
 
@@ -1171,13 +1603,16 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
       data: {
         tgId,
         name: [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || null,
+        username: ctx.from.username ?? null,
       },
     });
+  } else if (ctx.from.username && user.username !== ctx.from.username) {
+    user = await (db as any).user.update({ where: { id: user.id }, data: { username: ctx.from.username } });
   }
 
   // If code is CLAIMED by a different user, block
   if (wbCode.status === "CLAIMED" && wbCode.userId && wbCode.userId !== user.id) {
-    await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.", { parse_mode: "HTML", ...withSupportKb("💬 Оспорить — написать нам", "code_claimed") });
+    await ctx.reply("⚠️ Этот код уже был активирован другим пользователем.", { parse_mode: "HTML", ...withSupportKb("💬 Оспорить — написать нам", "code_claimed", ctx) });
     return;
   }
 
@@ -1272,16 +1707,16 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   await ctx.reply(
     `✅ Код <b>${codeInput}</b> активирован!\n` +
     bonusText +
-    `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда.\n` +
-    `📌 Цена геймпасса должна быть ровно <b>${passPrice} R$</b>\n` +
-    `<i>(это номинал ÷ 0.7 — Roblox удерживает 30% комиссии)</i>\n\n` +
-    `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
-    `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${codeInput}\n\n` +
-    `Пришли ссылку на геймпасс прямо сюда 👇`,
+    `Создай геймпасс в Roblox за <b>${passPrice} R$</b> — затем нажми кнопку «🔎 Найти по моему нику Roblox» 👇 (быстрый путь, без ссылок).\n` +
+    `<i>(${passPrice} R$ — это номинал ÷ 0.7, Roblox удерживает 30%)</i>\n\n` +
+    `Если удобнее — пришли ссылку на геймпасс сюда вручную.\n\n` +
+    `❓ Что такое геймпасс и как его создать:\n` +
+    `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${codeInput}`,
     {
       parse_mode: "HTML",
       link_preview_options: { is_disabled: true },
       ...Markup.inlineKeyboard([
+        [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
         [Markup.button.url("📖 Открыть инструкцию", `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${codeInput}`)],
         [supportBtn("💬 Нужна помощь?")],
       ]),
@@ -1299,13 +1734,50 @@ export function registerPhoto(bot: Telegraf): void {
     const user = await (db as any).user.findUnique({ where: { tgId } });
     if (!user) return;
 
+    // 0a. Payment screenshot for direct orders — in-memory path (takes priority)
+    const paymentOrderId = pendingPaymentScreenshot.get(ctx.from.id);
+    if (paymentOrderId) {
+      pendingPaymentScreenshot.delete(ctx.from.id);
+      const fileId = ctx.message.photo.at(-1)!.file_id;
+      const payOrder = await (db as any).wbOrder.findUnique({ where: { id: paymentOrderId }, select: { amount: true } });
+      await ctx.reply("✅ Скриншот получен! Менеджер проверит — обычно до 15 минут.");
+      await sendAdminPaymentCard({
+        orderId: paymentOrderId,
+        userId: user.id as string,
+        photoFileId: fileId,
+        userDisplay: userDisplay(ctx.from),
+        amount: payOrder?.amount,
+      });
+      return;
+    }
+
+    // 0b. DB recovery: bot restarted while user was in PAYMENT_PENDING state
+    {
+      const pendingPayOrder = await (db as any).wbOrder.findFirst({
+        where: { userId: user.id, status: "PAYMENT_PENDING" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (pendingPayOrder) {
+        const fileId = ctx.message.photo.at(-1)!.file_id;
+        await ctx.reply("✅ Скриншот получен! Менеджер проверит — обычно до 15 минут.");
+        await sendAdminPaymentCard({
+          orderId: pendingPayOrder.id,
+          userId: user.id as string,
+          photoFileId: fileId,
+          userDisplay: userDisplay(ctx.from),
+          amount: pendingPayOrder.amount,
+        });
+        return;
+      }
+    }
+
     // 1. Check in-memory state first (fastest path)
     let orderId = pendingReview.get(ctx.from.id);
 
-    // 2. DB fallback: latest COMPLETED order whose review bonus is not yet claimed
+    // 2. DB fallback: latest COMPLETED WB order whose review bonus is not yet claimed
     if (!orderId) {
       const order = await (db as any).wbOrder.findFirst({
-        where: { userId: user.id, status: "COMPLETED" },
+        where: { userId: user.id, status: "COMPLETED", isDirectOrder: false },
         orderBy: { updatedAt: "desc" },
       });
       const linked = order
@@ -1334,12 +1806,28 @@ export function registerPhoto(bot: Telegraf): void {
       "✅ Скриншот получен! Ожидай решения администратора — обычно это занимает до 30 минут."
     );
 
-    await sendAdminReviewCard({
-      orderId,
-      userId: user.id as string,
-      photoSource: fileId,
-      userDisplay: userDisplay(ctx.from),
-    });
+    try {
+      await sendAdminReviewCard({
+        orderId,
+        userId:      user.id as string,
+        photoSource: fileId,
+        userDisplay: userDisplay(ctx.from),
+      });
+    } catch (err) {
+      console.error("[TG] sendAdminReviewCard failed:", err);
+      // Fallback: send plain alert + photo directly to each admin
+      for (const adminId of ADMIN_IDS) {
+        try {
+          await bot.telegram.sendMessage(adminId,
+            `⚠️ <b>Ошибка доставки карточки отзыва — требуется ручная проверка</b>\n\n` +
+            `👤 Юзер: ${userDisplay(ctx.from)}\n` +
+            `📦 Заказ: <code>${orderId}</code>`,
+            { parse_mode: "HTML" }
+          );
+          await bot.telegram.sendPhoto(adminId, fileId);
+        } catch {}
+      }
+    }
   });
 
   bot.on("document", async (ctx) => {
@@ -1358,9 +1846,9 @@ export function registerAdmin(bot: Telegraf): void {
 
     await ctx.reply(
       "🛠️ <b>Панель управления</b>\n\n" +
-      "Меню команд теперь всегда доступно внизу экрана.\n" +
-      "Также ты можешь отправить боту ID заказа или код ВБ для быстрого поиска.",
-      await getAdminKeyboard()
+      "🚀 Жми «Launch Dashboard» внизу — там заказы, поиск, статистика, коды, выкуп и всё остальное.\n" +
+      "Этот чат теперь работает как канал оповещений: новые заказы, оплаты, отзывы и алерты приходят сюда.",
+      { parse_mode: "HTML", ...(await getAdminKeyboard()) }
     );
   });
 }
@@ -1406,13 +1894,85 @@ export function registerCallbacks(bot: Telegraf): void {
     if (!("data" in cbq)) return ctx.answerCbQuery();
 
     const data = cbq.data;
-    const adminId = String(ctx.from.id);
+    const tgId = String(ctx.from.id);
+    const adminId = tgId;
     const adminTag = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "Админ";
+
+    // ── 🔎 find_gp: user wants to search by Roblox nick (item 7) ──────────
+    if (data === CB.findGpStart || data === CB.findGpRetry) {
+      const tgIdNum = ctx.from.id;
+      const user = await (db as any).user.findUnique({
+        where: { tgId: String(tgIdNum) },
+        select: { id: true, balance: true },
+      });
+      if (!user) {
+        await ctx.answerCbQuery("Сессия истекла — напиши /start");
+        return;
+      }
+      const order = await (db as any).wbOrder.findFirst({
+        where: { userId: user.id, status: "AWAITING_GAMEPASS" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!order) {
+        await ctx.answerCbQuery("Активной заявки нет");
+        await ctx.reply(
+          "У тебя сейчас нет активной заявки. Введи код WB чтобы начать.",
+          { parse_mode: "HTML" }
+        );
+        return;
+      }
+      const state: LinkState = { wbCode: order.wbCode, denomination: order.amount };
+      pendingRobloxNick.set(tgIdNum, state);
+      const passPrice = Math.ceil(order.amount / 0.7);
+      await ctx.answerCbQuery();
+      await ctx.reply(
+        `🔎 Введи свой <b>ник в Roblox</b> (то, как ты заходишь в игру).\n\n` +
+        `Я найду все твои геймпассы за <b>${passPrice} R$</b> — и предложу выбрать нужный.\n` +
+        `<i>Если передумал — пришли ссылку на геймпасс как обычно.</i>`,
+        { parse_mode: "HTML" }
+      );
+      return;
+    }
+
+    // ── 🎮 gp_pick: user picked a gamepass from the nick-search list ──────
+    if (data.startsWith("gp_pick:")) {
+      const passId = data.slice("gp_pick:".length);
+      if (!/^\d{3,15}$/.test(passId)) {
+        await ctx.answerCbQuery("Некорректный ID");
+        return;
+      }
+      const tgIdNum = ctx.from.id;
+      const user = await (db as any).user.findUnique({
+        where: { tgId: String(tgIdNum) },
+        select: { id: true, balance: true },
+      });
+      if (!user) {
+        await ctx.answerCbQuery("Сессия истекла — напиши /start");
+        return;
+      }
+      // Re-derive state from active AWAITING_GAMEPASS order — pendingRobloxNick
+      // may have expired if the user took >n minutes to pick.
+      const order = await (db as any).wbOrder.findFirst({
+        where: { userId: user.id, status: "AWAITING_GAMEPASS" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!order) {
+        await ctx.answerCbQuery("Активной заявки нет");
+        return;
+      }
+      const state: LinkState = { wbCode: order.wbCode, denomination: order.amount };
+      pendingLink.set(tgIdNum, state);
+      pendingRobloxNick.delete(tgIdNum);
+      await ctx.answerCbQuery("Проверяю…");
+      // Reuse the canonical gamepass-submission pipeline so all the existing
+      // validation/transaction/admin-notify logic runs untouched.
+      await processGamepassSubmission(bot, ctx, state, passId);
+      return;
+    }
 
     // ── 🆘 sup: — user tapped a support button ────────────────────────────
     if (data.startsWith("sup:")) {
-      const ctxKey     = data.slice(4);
-      const tgId       = String(ctx.from.id);
+      const ctxKey = data.slice(4);
       const userDisplay = ctx.from.username
         ? `@${ctx.from.username}`
         : ctx.from.first_name ?? `tg:${tgId}`;
@@ -1487,7 +2047,7 @@ export function registerCallbacks(bot: Telegraf): void {
         const editedText = `✅ <b>Выполнено админом ${adminTag}</b>\nЗаказ #${orderId.slice(-6).toUpperCase()} · ${order.amount} R$`;
         try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch { }
 
-        if (user) await notifyUserCompleted(bot, user, orderId, order.amount);
+        if (user) await notifyUserCompleted(bot, user, orderId, order.amount, order.isDirectOrder ?? false);
         await updateMainMenu(bot);
         await ctx.answerCbQuery("✅ Выполнено");
       } catch (err) {
@@ -1547,12 +2107,15 @@ export function registerCallbacks(bot: Telegraf): void {
         notsale:  "Геймпасс не выставлен на продажу",
         price:    "Неверная цена геймпасса",
         badlink:  "Неверная ссылка на геймпасс",
-        privgame: "Игра закрытая (private) — create.roblox.com/dashboard/creations: у игры должен быть значок Public. Если нет: кликни на плейс → Settings → Configure → выбери Public. Или создай геймпасс в другой публичной игре.",
+        privgame: "Игра закрытая (private) — нужно сделать публичной. Подробная инструкция ниже.",
       };
       const reason = reasonMap[key] ?? key;
       pendingRejectionReason.delete(ctx.from.id);
-      await performAdminReject(bot, ctx, orderId, reason);
-      await ctx.answerCbQuery("✅ Заказ отклонён");
+      try {
+        await performAdminReject(bot, ctx, orderId, reason);
+      } finally {
+        await ctx.answerCbQuery("✅ Заказ отклонён");
+      }
       return;
     }
 
@@ -1563,7 +2126,7 @@ export function registerCallbacks(bot: Telegraf): void {
       pendingRejectionReason.set(ctx.from.id, orderId);
       try { await ctx.editMessageText(
         `✏️ Напиши причину отклонения заказа <code>${orderId.slice(-6).toUpperCase()}</code>:`,
-        { parse_mode: "HTML" }
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", `cancel_reject:${orderId}`)]]) }
       ); } catch { }
       await ctx.answerCbQuery();
       return;
@@ -1574,6 +2137,354 @@ export function registerCallbacks(bot: Telegraf): void {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       try { await ctx.editMessageText("✅ Отклонение отменено."); } catch { }
       await ctx.answerCbQuery("Отменено");
+      return;
+    }
+
+    // ── 💎 DIRECT ORDER callbacks ─────────────────────────────────────────────
+
+    // start_direct: user opens direct order flow — show predefined packs
+    if (data === CB.startDirect) {
+      const dirUser = await (db as any).user.findUnique({
+        where: { tgId },
+        select: { balance: true },
+      });
+      const bonus = dirUser?.balance ?? 0;
+      const bonusNote = bonus > 0
+        ? `\n\n🎁 У тебя есть бонус <b>${bonus} R$</b> — автоматически добавится к заказу.`
+        : "";
+      pendingDirectAmount.set(ctx.from.id, true);
+      await ctx.reply(
+        `💎 <b>Прямой заказ Robux</b>\n\nВыбери количество (курс <b>0.7 ₽/R$</b>):` + bonusNote,
+        { parse_mode: "HTML", ...buildPackKb() }
+      );
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    // dp: user selects a predefined pack
+    if (data.startsWith("dp:")) {
+      const amt = parseInt(data.slice(3), 10);
+      if (isNaN(amt) || !(DIRECT_PACKS as readonly number[]).includes(amt)) {
+        await ctx.answerCbQuery("Неверный пак");
+        return;
+      }
+      pendingDirectAmount.delete(ctx.from.id);
+      const dirUser = await (db as any).user.findUnique({
+        where: { tgId },
+        select: { balance: true },
+      });
+      const bonus = dirUser?.balance ?? 0;
+      const totalAmount = amt + bonus;
+      const passPrice = Math.ceil(totalAmount / 0.7);
+      const rublePrice = Math.round(amt * DIRECT_RATE);
+      pendingDirectOrder.set(ctx.from.id, { amount: amt, passPrice, totalAmount });
+      const bonusSection = bonus > 0
+        ? `💎 Запрос:          ${amt} R$\n` +
+          `🎁 Твой бонус:     +${bonus} R$\n` +
+          `━━━━━━━━━━━━━━━━\n` +
+          `📦 Итого получишь:  ${totalAmount} R$\n`
+        : `📦 Получишь:       ${totalAmount} R$\n`;
+      try {
+        await ctx.editMessageText(
+          `✅ <b>Подтверди заказ</b>\n\n` +
+          bonusSection +
+          `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
+          `📌 Цена геймпасса:  ${passPrice} R$`,
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[
+              Markup.button.callback("✅ Подтвердить", CB.confirmDirect),
+              Markup.button.callback("❌ Отмена", CB.cancelDirect),
+            ]]),
+          }
+        );
+      } catch {
+        await ctx.reply(
+          `✅ <b>Подтверди заказ</b>\n\n` +
+          bonusSection +
+          `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
+          `📌 Цена геймпасса:  ${passPrice} R$`,
+          {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[
+              Markup.button.callback("✅ Подтвердить", CB.confirmDirect),
+              Markup.button.callback("❌ Отмена", CB.cancelDirect),
+            ]]),
+          }
+        );
+      }
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    // confirm_direct: user confirms amount on confirmation screen
+    if (data === CB.confirmDirect) {
+      const dirState = pendingDirectOrder.get(ctx.from.id);
+      if (!dirState) {
+        await ctx.answerCbQuery("Начни заново");
+        try {
+          await ctx.editMessageText(
+            "⏳ <b>Время подтверждения вышло.</b>\n\nНажми кнопку — начнём заново, сумма не сохраняется.",
+            { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("💎 Заказать напрямую", CB.startDirect)]]) }
+          );
+        } catch { }
+        return;
+      }
+      pendingDirectOrder.delete(ctx.from.id);
+      let dirUser = await (db as any).user.findUnique({ where: { tgId } });
+      if (!dirUser) {
+        dirUser = await (db as any).user.create({
+          data: {
+            tgId,
+            name: [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || null,
+            username: ctx.from.username ?? null,
+          },
+        });
+      }
+
+      // Guard: one active direct order at a time
+      const existingDirect = await (db as any).wbOrder.findFirst({
+        where: { userId: dirUser.id, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING"] } },
+      });
+      if (existingDirect) {
+        pendingDirectOrder.delete(ctx.from.id);
+        await ctx.answerCbQuery("У тебя уже есть активный заказ");
+        try {
+          await ctx.editMessageText(
+            `⏳ У тебя уже есть активный заказ <b>#${existingDirect.id.slice(-6).toUpperCase()}</b>.\n\n` +
+            `Дождись реквизитов от менеджера, а затем оформи новый.`,
+            { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("📊 Статус заказа", CB.refreshStatus)]]) }
+          );
+        } catch { }
+        return;
+      }
+
+      const dirCode = generateDirectCode();
+      let newDirectOrder: any;
+      const bonus = dirState.totalAmount - dirState.amount;
+      try {
+        // Create order and atomically spend the bonus balance
+        newDirectOrder = await (db as any).$transaction(async (tx: any) => {
+          const ord = await tx.wbOrder.create({
+            data: {
+              amount:       dirState.totalAmount,
+              gamepassUrl:  null,
+              status:       "AWAITING_PAYMENT",
+              platform:     "TG",
+              userId:       dirUser.id,
+              wbCode:       dirCode,
+              isDirectOrder: true,
+            },
+          });
+          if (bonus > 0) {
+            await tx.user.update({
+              where: { id: dirUser.id },
+              data:  { balance: 0, reviewBonusGrantedAt: null, reviewReminderLevel: 0 },
+            });
+          }
+          return ord;
+        });
+      } catch (err) {
+        console.error("[TG] Direct order create error:", err);
+        await ctx.answerCbQuery("Ошибка — попробуй снова");
+        await ctx.reply("❌ Не удалось создать заказ. Попробуй снова.", { parse_mode: "HTML", ...withSupportKb() });
+        return;
+      }
+      const shortId = newDirectOrder.id.slice(-6).toUpperCase();
+      const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "Пользователь");
+      const prevOrdersCount = await (db as any).wbOrder.count({
+        where: { userId: dirUser.id, status: "COMPLETED" },
+      });
+      await sendAdminDirectOrderCard({
+        orderId:             newDirectOrder.id,
+        userId:              dirUser.id,
+        amount:              dirState.totalAmount,
+        bonusApplied:        bonus,
+        userDisplay:         `${tgDisplay} (ID: ${ctx.from.id})`,
+        tgId,
+        createdAt:           newDirectOrder.createdAt,
+        previousOrdersCount: prevOrdersCount,
+      });
+      const confirmKb = Markup.inlineKeyboard([
+        [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
+        [supportBtn("💬 Нужна помощь?", "direct_wait")],
+      ]);
+      try {
+        await ctx.editMessageText(
+          `📋 <b>Заказ #${shortId} оформлен!</b>\n\n` +
+          `Менеджер пришлёт реквизиты для оплаты в течение нескольких минут.\n\n` +
+          `Ожидай сообщения 👇`,
+          { parse_mode: "HTML", ...confirmKb }
+        );
+      } catch {
+        await ctx.reply(
+          `📋 <b>Заказ #${shortId} оформлен!</b>\n\nМенеджер пришлёт реквизиты — ожидай.`,
+          { parse_mode: "HTML", ...confirmKb }
+        );
+      }
+      await ctx.answerCbQuery("✅ Заказ создан!");
+      return;
+    }
+
+    // cancel_direct: user cancelled order confirmation
+    if (data === CB.cancelDirect) {
+      pendingDirectOrder.delete(ctx.from.id);
+      pendingDirectAmount.delete(ctx.from.id);
+      try { await ctx.editMessageText("Отменено.", { parse_mode: "HTML" }); } catch { }
+      await ctx.answerCbQuery("Отменено");
+      return;
+    }
+
+    // spd: admin sends payment details to user
+    if (data.startsWith("spd:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      const spdOrderId = data.slice(4);
+      const spdOrder = await (db as any).wbOrder.findUnique({ where: { id: spdOrderId } });
+      if (!spdOrder) { await ctx.answerCbQuery("Заказ не найден"); return; }
+      if (spdOrder.status !== "AWAITING_PAYMENT") {
+        await ctx.answerCbQuery("Реквизиты уже отправлены");
+        return;
+      }
+      pendingPaymentDetails.set(ctx.from.id, spdOrderId);
+      await ctx.reply(
+        `💳 <b>Введи реквизиты для пользователя</b>\n` +
+        `Заказ #${spdOrderId.slice(-6).toUpperCase()}\n\n` +
+        `Просто напиши — я отправлю напрямую покупателю:`,
+        { parse_mode: "HTML" }
+      );
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    // cdo: admin cancels direct order
+    if (data.startsWith("cdo:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      const cdoOrderId = data.slice(4);
+      const cdoOrder = await (db as any).wbOrder.findUnique({ where: { id: cdoOrderId } });
+      if (!cdoOrder) { await ctx.answerCbQuery("Заказ не найден"); return; }
+      if (!["AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(cdoOrder.status)) {
+        await ctx.answerCbQuery("Заказ уже обрабатывается или завершён");
+        return;
+      }
+      await (db as any).wbOrder.update({
+        where: { id: cdoOrderId },
+        data: { status: "REJECTED", rejectionReason: "Отменён менеджером" },
+      });
+      const cdoUser = await (db as any).user.findUnique({ where: { id: cdoOrder.userId } });
+      if (cdoUser?.tgId) {
+        try {
+          await bot.telegram.sendMessage(
+            cdoUser.tgId,
+            `❌ <b>Заказ #${cdoOrderId.slice(-6).toUpperCase()} отменён.</b>\n\nЕсли хочешь — создай новый заказ.`,
+            { parse_mode: "HTML", ...Markup.inlineKeyboard([
+              [Markup.button.callback("💎 Новый заказ", CB.startDirect)],
+              [supportBtn("💬 Это ошибка?", "order_cancelled", ctx)],
+            ]) }
+          );
+        } catch { }
+      } else if (cdoUser?.vkId) {
+        try {
+          await vkSend(cdoUser.vkId,
+            `❌ Заказ #${cdoOrderId.slice(-6).toUpperCase()} отменён.\n\nЕсли хочешь — создай новый заказ напрямую (нажми кнопку "💎 Купить напрямую").\n\nЕсли считаешь, что это ошибка — https://t.me/RobloxBank_PA`
+          );
+        } catch { }
+      }
+      try { await ctx.editMessageText(
+        (ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : "") +
+        `\n\n❌ Отменён — ${adminTag}`,
+        { parse_mode: "HTML" }
+      ); } catch { }
+      await ctx.answerCbQuery("Заказ отменён");
+      return;
+    }
+
+    // pay_ok: admin confirms payment screenshot
+    if (data.startsWith("pay_ok:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      const [, payOkOrderId, payOkUserId] = data.split(":");
+      const payOkOrder = await (db as any).wbOrder.findUnique({ where: { id: payOkOrderId } });
+      if (!payOkOrder) { await ctx.answerCbQuery("Заказ не найден"); return; }
+      if (payOkOrder.status !== "PAYMENT_PENDING") {
+        await ctx.answerCbQuery("Оплата уже обработана");
+        return;
+      }
+      await (db as any).wbOrder.update({
+        where: { id: payOkOrderId },
+        data: { status: "AWAITING_GAMEPASS" },
+      });
+      const payOkUser = await (db as any).user.findUnique({ where: { id: payOkUserId } });
+      if (payOkUser?.tgId) {
+        const passPrice = Math.ceil(payOkOrder.amount / 0.7);
+        pendingLink.set(parseInt(payOkUser.tgId), { wbCode: payOkOrder.wbCode, denomination: payOkOrder.amount });
+        try {
+          await bot.telegram.sendMessage(
+            payOkUser.tgId,
+            `✅ <b>Оплата подтверждена!</b>\n\n` +
+            `Теперь создай геймпасс по инструкции:\n` +
+            `📌 Цена геймпасса: <b>${passPrice} R$</b>\n\n` +
+            `Когда создашь — пришли ссылку или ID сюда 👇`,
+            {
+              parse_mode: "HTML",
+              link_preview_options: { is_disabled: true },
+              ...Markup.inlineKeyboard([
+                [Markup.button.url("📖 Инструкция", "https://robloxbank.ru/guide?source=direct")],
+                [supportBtn("💬 Нужна помощь?")],
+              ]),
+            }
+          );
+        } catch { }
+      } else if (payOkUser?.vkId) {
+        const passPrice = Math.ceil(payOkOrder.amount / 0.7);
+        try {
+          await vkSend(payOkUser.vkId,
+            `✅ Оплата подтверждена!\n\n` +
+            `Теперь создай геймпасс по инструкции:\n` +
+            `📌 Цена геймпасса: ${passPrice} R$\n\n` +
+            `Когда создашь — пришли ссылку или ID прямо сюда 👇\n\n` +
+            `Инструкция: https://robloxbank.ru/guide?source=direct`
+          );
+        } catch { }
+      }
+      const payOkCaption = `✅ Оплата принята — ${adminTag}\nЗаказ #${payOkOrderId.slice(-6).toUpperCase()}`;
+      try { await ctx.editMessageCaption(payOkCaption, { parse_mode: "HTML" }); } catch { }
+      await ctx.answerCbQuery("✅ Оплата подтверждена");
+      return;
+    }
+
+    // pay_no: admin rejects payment screenshot
+    if (data.startsWith("pay_no:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      const [, payNoOrderId, payNoUserId] = data.split(":");
+      const payNoOrder = await (db as any).wbOrder.findUnique({ where: { id: payNoOrderId }, select: { paymentDetails: true } });
+      const payNoUser = await (db as any).user.findUnique({ where: { id: payNoUserId } });
+      if (payNoUser?.tgId) {
+        pendingPaymentScreenshot.set(parseInt(payNoUser.tgId), payNoOrderId);
+        const detailsLine = payNoOrder?.paymentDetails
+          ? `\n\n💳 Реквизиты:\n<code>${payNoOrder.paymentDetails}</code>\n`
+          : "";
+        try {
+          await bot.telegram.sendMessage(
+            payNoUser.tgId,
+            `❌ <b>Не смогли подтвердить оплату.</b>` +
+            detailsLine +
+            `\nПришли скриншот ещё раз (фотографией, не файлом) 👇`,
+            { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "payment", ctx) }
+          );
+        } catch { }
+      } else if (payNoUser?.vkId) {
+        const detailsLine = payNoOrder?.paymentDetails
+          ? `\n\n💳 Реквизиты:\n${payNoOrder.paymentDetails}\n`
+          : "";
+        try {
+          await vkSend(payNoUser.vkId,
+            `❌ Не смогли подтвердить оплату.` +
+            detailsLine +
+            `\nПришли скриншот ещё раз (фотографией, не файлом) 👇\n\nНужна помощь? https://t.me/RobloxBank_PA`
+          );
+        } catch { }
+      }
+      try { await ctx.editMessageCaption(`❌ Оплата отклонена — ${adminTag}`, { parse_mode: "HTML" }); } catch { }
+      await ctx.answerCbQuery("Отклонено");
       return;
     }
 
@@ -1591,6 +2502,16 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("user_resubmit:")) {
       const parts = data.split(":");
       const code = parts[1];
+
+      // DIR- codes are synthetic — they can't have a gamepass link resubmitted
+      if (code?.startsWith("DIR-")) {
+        await ctx.answerCbQuery("Прямой заказ нельзя переоформить так");
+        await ctx.reply(
+          "Для нового прямого заказа используй кнопку ниже.",
+          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("💎 Заказать напрямую", CB.startDirect)]]) }
+        );
+        return;
+      }
 
       const existingOrder = await (db as any).wbOrder.findFirst({
         where: { wbCode: code },
@@ -1630,7 +2551,7 @@ export function registerCallbacks(bot: Telegraf): void {
         `💎 Номинал: <b>${denomination} R$</b>\n` +
         `Пришли ссылку на геймпасс с ценой ${passPrice} R$ 👇\n\n` +
         `💡 <i>Пример: https://www.roblox.com/game-pass/1234567/...</i>`,
-        { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "resubmit") }
+        { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "resubmit", ctx) }
       );
       await ctx.answerCbQuery();
       return;
@@ -1649,17 +2570,24 @@ export function registerCallbacks(bot: Telegraf): void {
       }
 
       // Atomic idempotency guard: mark this specific code + increment balance in one transaction.
-      // If reviewBonusClaimed is already true (double-click or concurrent admin), count=0 → skip.
+      // Direct orders (DIR- prefix) have no WbCode row — use user.reviewBonusGrantedAt as guard instead.
+      const isDirectOrder = (reviewOrder.wbCode as string).startsWith("DIR-");
       let paid = false;
       await (db as any).$transaction(async (tx: any) => {
-        const result = await tx.wbCode.updateMany({
-          where: { code: reviewOrder.wbCode, reviewBonusClaimed: false },
-          data: { reviewBonusClaimed: true },
-        });
-        if (result.count === 0) return;
+        if (isDirectOrder) {
+          // Idempotency for direct orders: check reviewBonusGrantedAt hasn't been set yet.
+          const u = await tx.user.findUnique({ where: { id: userId }, select: { reviewBonusGrantedAt: true } });
+          if (u?.reviewBonusGrantedAt) return; // already paid
+        } else {
+          const result = await tx.wbCode.updateMany({
+            where: { code: reviewOrder.wbCode, reviewBonusClaimed: false },
+            data: { reviewBonusClaimed: true },
+          });
+          if (result.count === 0) return; // already paid
+        }
         await tx.user.update({
           where: { id: userId },
-          data: { balance: { increment: 100 } },
+          data: { balance: { increment: 100 }, reviewBonusGrantedAt: new Date(), reviewReminderLevel: 0 },
         });
         paid = true;
       });
@@ -1670,18 +2598,23 @@ export function registerCallbacks(bot: Telegraf): void {
       }
 
       const user = await (db as any).user.findUnique({ where: { id: userId } });
+      const expiryDate = new Date();
+      expiryDate.setDate(expiryDate.getDate() + 30);
+      const expiryStr = expiryDate.toLocaleDateString("ru-RU", {
+        day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Moscow",
+      });
       const bonusMsg =
-        `🎁 <b>+100 R$ зачислено на счёт!</b>\n` +
-        `Спасибо за отзыв — бонус применится автоматически при следующей активации кода 💛\n\n` +
-        `Есть ещё карточка WB? Активируй прямо в боте.\n` +
-        `Хочешь заказать без карты — пиши нам напрямую.`;
+        `🎁 <b>+100 R$ зачислено на счёт!</b>\n\n` +
+        `Действуют до ${expiryStr}.\n\n` +
+        `Используй на прямой заказ — без карточки WB.\n` +
+        `Бонус добавится к покупке автоматически.`;
 
       if (user?.tgId) {
         try {
           await bot.telegram.sendMessage(user.tgId, bonusMsg, {
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([
-              [Markup.button.url("💬 Заказать напрямую", SUPPORT_URL)],
+              [Markup.button.callback("💰 Купить напрямую", CB.startDirect)],
             ]),
           });
         } catch { }
@@ -1791,7 +2724,7 @@ export function registerCallbacks(bot: Telegraf): void {
       const tgUser = await (db as any).user.findUnique({ where: { tgId: adminId } });
       if (tgUser) {
         const reviewOrder = await (db as any).wbOrder.findFirst({
-          where: { userId: tgUser.id, status: "COMPLETED" },
+          where: { userId: tgUser.id, status: "COMPLETED", isDirectOrder: false },
           orderBy: { updatedAt: "desc" },
         });
         const linked = reviewOrder
@@ -1835,38 +2768,69 @@ async function notifyUserCompleted(
   bot: Telegraf,
   user: { tgId?: string | null; vkId?: string | null; id: string },
   orderId: string,
-  amount: number
+  amount: number,
+  isDirectOrder: boolean
 ): Promise<void> {
-  // Count includes the order just marked COMPLETED — satisfies "current order counts"
   const completedCount = await (db as any).wbOrder.count({
-    where: { userId: user.id, status: "COMPLETED" }
+    where: { userId: user.id, status: "COMPLETED" },
   });
+
+  // Count WB-only completed orders (review prompt is only relevant for WB purchases)
+  const wbCompletedCount = isDirectOrder ? await (db as any).wbOrder.count({
+    where: { userId: user.id, status: "COMPLETED", isDirectOrder: false },
+  }) : completedCount;
 
   let tgMsg: string;
   let vkMsg: string;
 
-  if (completedCount === 1) {
-    // TIER 1: First-Time Buyer — Review & Social Proof
+  const pendingLine =
+    `\n\n📊 Проверить зачисление: <a href="https://www.roblox.com/transactions">roblox.com/transactions</a> → строка <b>Pending</b>`;
+  const pendingLineVk =
+    `\n\n📊 Проверить зачисление: https://www.roblox.com/transactions → строка Pending`;
+
+  if (isDirectOrder) {
+    if (completedCount <= 1) {
+      tgMsg =
+        `✅ <b>Заказ выкуплен!</b> Робуксы уже в пути 🚀\n\n` +
+        `Roblox зачислит их в течение 5–7 дней — это их стандартный процесс.` +
+        pendingLine + `\n\n` +
+        `Спасибо, что выбрал RobloxBank! Заказывай ещё — мы всегда здесь 💛`;
+    } else {
+      tgMsg =
+        `✅ Заказ выкуплен! Это уже твой <b>${completedCount}-й</b> заказ — спасибо за доверие! 💛\n\n` +
+        `Робуксы появятся в течение 5–7 дней.` +
+        pendingLine + `\n\n` +
+        `Всё ли было удобно? Напиши нам — мы читаем каждое сообщение.`;
+    }
+    vkMsg = tgMsg.replace(/<\/?b>/g, "").replace(pendingLine, pendingLineVk).replace(/<a href="[^"]+">([^<]+)<\/a>/g, "$1");
+  } else if (wbCompletedCount === 1) {
+    // TIER 1: First WB order — review prompt
     tgMsg =
-      `✅ Заказ выкуплен! Робуксы начислит Roblox — обычно в течение 5–7 дней после выкупа.\n\n` +
-      `🎁 <b>Оставь отзыв и получи 100 R$ в подарок!</b>\n` +
-      `Напиши отзыв на Wildberries, сделай скриншот и отправь его сюда (фотографией, не файлом). После проверки администратором бонус начислим сразу!\n\n` +
-      (process.env.TG_CHANNEL_ID ? `Ты уже в нашем канале, так что не пропустишь секретные раздачи! 🎰` : `Ждём тебя снова! 🎰`);
+      `✅ <b>Заказ выкуплен!</b> Робуксы уже в пути 🚀\n\n` +
+      `Roblox зачислит их в течение 5–7 дней — это их стандартный процесс.` +
+      pendingLine + `\n\n` +
+      `🎁 <b>Оставь отзыв и получи +100 R$ в подарок!</b>\n` +
+      `Напиши отзыв на Wildberries, сделай скриншот и отправь его сюда (фотографией, не файлом). После проверки бонус начислим сразу!`;
     vkMsg =
-      `✅ Заказ выкуплен! Робуксы начислит Roblox — обычно в течение 5–7 дней после выкупа.\n\n` +
-      `Оставь отзыв и получи 100 R$ в подарок!\n` +
-      `Напиши отзыв на Wildberries, сделай скриншот и отправь его в этот чат. После проверки бонус начислим сразу!\n\n` +
-      `Ты уже в нашем сообществе, так что не пропустишь секретные раздачи! 🎰`;
+      `✅ Заказ выкуплен! Робуксы уже в пути 🚀\n\n` +
+      `Roblox зачислит их в течение 5–7 дней — это их стандартный процесс.` +
+      pendingLineVk + `\n\n` +
+      `Оставь отзыв и получи +100 R$ в подарок!\n` +
+      `Напиши отзыв на Wildberries, сделай скриншот и отправь его в этот чат. После проверки бонус начислим сразу!`;
   } else {
-    // TIER 2: Returning & VIP — Direct pitch to @RobloxBank_PA
+    // TIER 2: Returning / VIP — direct order pitch
     console.log(`[CRM] Direct pitch sent for order #${completedCount}`);
     tgMsg =
       `✅ Заказ выкуплен! Это уже твой <b>${completedCount}-й</b> заказ в RobloxBank. Спасибо за доверие! 💛\n\n` +
+      `Робуксы появятся в течение 5–7 дней.` +
+      pendingLine + `\n\n` +
       `Кстати, для постоянных клиентов у нас есть закрытый формат. Чтобы не ждать поставок на Wildberries и оформлять заказы по самому выгодному курсу (без лишних комиссий), пиши нам в поддержку напрямую: @RobloxBank_PA\n\n` +
       `Это <b>быстрее, проще и всегда выгоднее</b>. Мы закрепим за тобой персональное обслуживание.\n\n` +
       `Всё ли было удобно в этот раз? Если есть идеи по улучшению — напиши в поддержку, мы читаем каждое сообщение!`;
     vkMsg =
       `✅ Заказ выкуплен! Это уже твой ${completedCount}-й заказ в RobloxBank. Спасибо за доверие! 💛\n\n` +
+      `Робуксы появятся в течение 5–7 дней.` +
+      pendingLineVk + `\n\n` +
       `Кстати, для постоянных клиентов у нас есть закрытый формат. Чтобы не ждать поставок на Wildberries и оформлять заказы по самому выгодному курсу (без лишних комиссий), пиши нам в поддержку напрямую: https://t.me/RobloxBank_PA\n\n` +
       `Это быстрее, проще и всегда выгоднее. Мы закрепим за тобой персональное обслуживание.\n\n` +
       `Всё ли было удобно в этот раз? Если есть идеи по улучшению — напиши в поддержку, мы читаем каждое сообщение!`;
@@ -1874,16 +2838,19 @@ async function notifyUserCompleted(
 
   if (user.tgId) {
     try {
-      const keyboard = completedCount === 1
-        ? Markup.inlineKeyboard([
-            [Markup.button.callback("📸 Оставить отзыв за +100 R$", CB.reviewHint)],
-            [Markup.button.url("💬 Написать менеджеру", SUPPORT_URL)],
-          ])
-        : Markup.inlineKeyboard([
-            [Markup.button.url("💬 Заказать напрямую", SUPPORT_URL)],
-          ]);
+      let keyboard: ReturnType<typeof Markup.inlineKeyboard>;
+      if (!isDirectOrder && wbCompletedCount === 1) {
+        keyboard = Markup.inlineKeyboard([
+          [Markup.button.callback("📸 Оставить отзыв за +100 R$", CB.reviewHint)],
+          [Markup.button.url("💬 Написать менеджеру", SUPPORT_URL)],
+        ]);
+        pendingReview.set(parseInt(user.tgId), orderId);
+      } else {
+        keyboard = Markup.inlineKeyboard([
+          [Markup.button.callback("💎 Заказать напрямую", CB.startDirect)],
+        ]);
+      }
       await bot.telegram.sendMessage(user.tgId, tgMsg, { parse_mode: "HTML", ...keyboard });
-      if (completedCount === 1) pendingReview.set(parseInt(user.tgId), orderId);
     } catch { }
   } else if (user.vkId) {
     await vkSend(user.vkId, vkMsg);
@@ -1906,9 +2873,8 @@ async function notifyUserRejected(
   const isPrivateGame = reason.toLowerCase().includes("закрыт");
   const fixInstructions = isPrivateGame
     ? `Как исправить:\n` +
-      `1. Зайди на <b>create.roblox.com/dashboard/creations</b> — у игры должен быть значок <b>Public</b>.\n` +
-      `   Если нет: кликни на плейс → Settings → Configure → выбери <b>Public</b>.\n` +
-      `   Если не получается — напиши менеджеру. Или создай геймпасс в другой публичной игре.\n` +
+      `1. Нажми на плейс → <b>Configure → Settings</b> → Audience → выбери <b>Public</b>\n` +
+      `   Не помогло? <b>Configure → Questionnaire → Restart</b> → ответь «No» на 10 вопросов\n` +
       `2. Установи цену геймпасса: <b>${Math.ceil(amount / 0.7)} R$</b>\n` +
       `3. Нажми кнопку ниже и пришли новую ссылку:`
     : `Чаще всего причина в одном из двух:\n` +

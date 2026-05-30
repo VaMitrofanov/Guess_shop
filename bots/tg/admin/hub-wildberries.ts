@@ -24,6 +24,7 @@ import {
   getUnansweredReviews, answerReview, captureNotifyState, flushFbsDigest,
   getFbsOrders, updatePrice, getWbSettings, updateWbSetting,
   getRealizationReport, getAdvertStats, getAdvertSpendForPeriod,
+  getCommissionRates, getBoxTariffs, computeUnitEcon, priceForTargetMargin,
   type WbStockWithRunway, type WbRealizationSummary, type WbRealizationArticle,
   type WbAdvertSummary,
 } from "./wb-client";
@@ -31,6 +32,7 @@ import {
   pendingCodesInput, pendingPriceInput,
   pendingReviewAnswer, pendingCostInput, pendingLogisticsInput,
   pendingAdInput, pendingDenomInput, pendingUeSettingInput,
+  pendingWhatIfInput,
 } from "../session";
 
 // ── Formatting helpers ───────────────────────────────────────────────────────
@@ -614,11 +616,16 @@ const LOGISTICS_STALE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 export async function showUnitEconHub(ctx: Context): Promise<void> {
   await ctx.answerCbQuery();
-  const [products, settings, realizData] = await Promise.all([
+  const [products, settings, realizData, commissionRates, boxTariffs] = await Promise.all([
     getProducts(),
     getWbSettings(),
     getRealizationReport(4),
+    getCommissionRates(),
+    getBoxTariffs(),
   ]);
+
+  // Live logistics from the digital warehouse (our case); fallback to per-product stored value.
+  const liveLogistics = boxTariffs?.digitalDeliveryBase ?? null;
 
   // Attributive ad spend: delta since last attributed order, applies to ALL denominations
   const fromDate = settings.lastAdAttributedAt
@@ -633,7 +640,11 @@ export async function showUnitEconHub(ctx: Context): Promise<void> {
   let lines: string[] = [];
   lines.push(`🧩 <b>ЮНИТ-ЭКОНОМИКА</b>`);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
-  lines.push(`<code>Курс: ${settings.kursRb} руб/ед · $1=${settings.kursUsd}₽ · Фикс: ${settings.fixedCost}₽</code>`);
+  lines.push(`<code>Курс: ${settings.kursRb} руб/ед · $1=${settings.kursUsd}₽</code>`);
+  lines.push(
+    `<code>Тарифы WB: ${commissionRates ? "комса по категории ✅" : "комса —"} · ` +
+    `${liveLogistics != null ? `логистика ${liveLogistics}₽ (Цифр.склад)` : "логистика —"}</code>`
+  );
   if (unattributedSpend > 0)
     lines.push(`<code>📣 Реклама накоп.: ${rub(Math.round(unattributedSpend))}  (с ${attrSinceStr})</code>`);
   lines.push("");
@@ -688,16 +699,18 @@ export async function showUnitEconHub(ctx: Context): Promise<void> {
       lines.push(`  <i>⚙️ Не указан номинал Robux</i>`);
       buttons.push([Markup.button.callback(`🔢 Номинал (${p.vendorCode})`, CB.wbEditDenom(p.nmID))]);
     } else {
-      const commission   = cost.wbCommission;  // e.g. 0.245
-      const tax          = cost.taxRate;        // e.g. 0.07
-      const fixedCost    = cost.logisticsCost;  // e.g. 87.5
-      const robuxCost    = settings.kursRb * settings.kursUsd * cost.denomination / 700;
-      const afterComm    = price * (1 - commission);
-      const afterTax     = afterComm * (1 - tax);
-      const profitBefore = afterTax - fixedCost - robuxCost;
+      const tax = cost.taxRate;        // e.g. 0.07
+
+      // Commission: live category rate (marketplace/FBS model) wins; fallback to stored value.
+      const liveComm  = p.subjectID ? commissionRates?.get(p.subjectID)?.marketplace : undefined;
+      const commission = liveComm != null ? liveComm / 100 : cost.wbCommission;
+      const commSrc   = liveComm != null ? "WB" : "руч.";
+
+      // Logistics: live digital-warehouse base wins; fallback to stored value.
+      const fixedCost = liveLogistics != null ? liveLogistics : cost.logisticsCost;
+      const logSrc    = liveLogistics != null ? "Цифр.склад" : "руч.";
 
       // Ad cost: manual override wins; otherwise use attributive spend (delta since last order).
-      // Applies to ALL products regardless of denomination — not campaign-average, but actual delta.
       const manualAdCost = cost.adCostPerUnit ?? 0;
       const adCost       = manualAdCost > 0 ? manualAdCost : unattributedSpend;
       const adCostSource = manualAdCost > 0 ? "вручную" : unattributedSpend > 0 ? `атрибут. с ${attrSinceStr}` : null;
@@ -706,11 +719,12 @@ export async function showUnitEconHub(ctx: Context): Promise<void> {
       const storagePerUnit = (realizData && realizData.salesCount > 0 && realizData.totalStorage > 0)
         ? realizData.totalStorage / realizData.salesCount : 0;
 
-      const profitAfter  = profitBefore - adCost - storagePerUnit;
-      const marginPct    = afterTax - fixedCost > 0
-        ? Math.round((profitBefore / (afterTax - fixedCost)) * 100) : 0;
-      const profitUsd    = settings.kursUsd > 0
-        ? Math.round((profitAfter / settings.kursUsd) * 100) / 100 : 0;
+      const econ = computeUnitEcon({
+        price, denomination: cost.denomination, commissionPct: commission, taxRate: tax,
+        logisticsCost: fixedCost, storagePerUnit, adCostPerUnit: adCost,
+        kursRb: settings.kursRb, kursUsd: settings.kursUsd,
+      });
+      const robuxCost = econ.robuxCost; // for the realization overlay below
 
       const adLine = adCost > 0
         ? `  −Реклама/ед:        ${pad(rub(Math.round(adCost)), 10)}  (${adCostSource})\n`
@@ -722,16 +736,17 @@ export async function showUnitEconHub(ctx: Context): Promise<void> {
       lines.push(
         `<code>` +
         `  Цена продажи:       ${pad(rub(price), 10)}\n` +
-        `  −Комса WB ${pad(`(${Math.round(commission*100)}%):`, 7)} ${pad(rub(Math.round(price - afterComm)), 10)}\n` +
-        `  −Налог УСН ${pad(`(${Math.round(tax*100)}%):`, 6)} ${pad(rub(Math.round(afterComm - afterTax)), 10)}\n` +
-        `  −Фикс. затраты:     ${pad(rub(fixedCost), 10)}\n` +
-        `  −Себест. Robux:     ${pad(rub(Math.round(robuxCost)), 10)}` +
+        `  −Комса WB ${pad(`(${Math.round(commission*100)}%${commSrc==="WB"?"✓":""}):`, 8)} ${pad(rub(econ.commissionRub), 10)}\n` +
+        `  −Налог УСН ${pad(`(${Math.round(tax*100)}%):`, 6)} ${pad(rub(econ.taxRub), 10)}\n` +
+        `  −Логистика:         ${pad(rub(Math.round(fixedCost)), 10)}  (${logSrc})\n` +
+        `  −Себест. Robux:     ${pad(rub(econ.robuxCost), 10)}` +
         `  (${settings.kursRb}×${settings.kursUsd}×${cost.denomination}/700)\n` +
         adLine +
         storeLine +
         `  ${"─".repeat(34)}\n` +
-        `  Чистая прибыль:     ${pad(rub(Math.round(profitAfter)), 10)}  (${marginPct}%)\n` +
-        `  В долларах:         $${profitUsd}` +
+        `  Чистая прибыль:     ${pad(rub(econ.profit), 10)}  (${econ.marginPct}%)\n` +
+        `  В долларах:         $${econ.profitUsd}\n` +
+        `  Безубыточность:     ${pad(rub(econ.breakEvenPrice), 10)}` +
         `</code>`
       );
 
@@ -770,9 +785,85 @@ export async function showUnitEconHub(ctx: Context): Promise<void> {
     lines.push("");
   }
 
+  buttons.push([Markup.button.callback("🧮 Калькулятор (что-если)", CB.wbCalcWhatIf)]);
   buttons.push([Markup.button.callback("⚙️ Курсы и ставки", CB.wbUeSettings)]);
   buttons.push([Markup.button.callback("◀️ Назад", CB.hubWildberries)]);
   await editWidget(ctx, lines.join("\n"), Markup.inlineKeyboard(buttons));
+}
+
+// ── What-if calculator (wbcon-style forecast for any price/denomination) ────────
+
+export async function enterWhatIfInput(ctx: Context): Promise<void> {
+  await ctx.answerCbQuery();
+  pendingWhatIfInput.add(ctx.from!.id);
+  await editWidget(
+    ctx,
+    `🧮 <b>КАЛЬКУЛЯТОР (ЧТО-ЕСЛИ)</b>\n━━━━━━━━━━━━━━━━\n\n` +
+    `Прикинь маржу для любой цены/номинала по живым тарифам WB (категория «Диски с играми», Цифр.склад).\n\n` +
+    `Пришли строкой: <b>номинал цена [целевая_маржа%]</b>\n` +
+    `<i>Примеры:\n• <code>500 539</code> — прибыль и безубыточность\n• <code>500 539 30</code> — ещё и цена под 30% маржи</i>`,
+    Markup.inlineKeyboard([[Markup.button.callback("⬅️ Отмена", CB.wbUnitEcon)]])
+  );
+}
+
+export async function handleWhatIfInput(ctx: Context, text: string): Promise<boolean> {
+  if (!pendingWhatIfInput.has(ctx.from!.id)) return false;
+
+  const parts = text.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+  const denom  = parseInt(parts[0] ?? "", 10);
+  const price  = parseFloat((parts[1] ?? "").replace(",", "."));
+  const target = parts[2] != null ? parseFloat(parts[2].replace(",", ".")) : null;
+
+  if (!Number.isFinite(denom) || denom <= 0 || !Number.isFinite(price) || price <= 0) {
+    await ctx.reply("⚠️ Формат: <b>номинал цена [маржа%]</b>. Пример: <code>500 539 30</code>", { parse_mode: "HTML" });
+    return true;
+  }
+
+  pendingWhatIfInput.delete(ctx.from!.id);
+
+  const [settings, rates, box] = await Promise.all([getWbSettings(), getCommissionRates(), getBoxTariffs()]);
+  // Our products live in subjectID 532 ("Диски с играми"); use it for the forecast.
+  const commPct  = (rates?.get(532)?.marketplace ?? 28) / 100;
+  const logistics = box?.digitalDeliveryBase ?? settings.fixedCost;
+
+  const econ = computeUnitEcon({
+    price, denomination: denom, commissionPct: commPct, taxRate: 0.07,
+    logisticsCost: logistics, storagePerUnit: 0, adCostPerUnit: 0,
+    kursRb: settings.kursRb, kursUsd: settings.kursUsd,
+  });
+
+  let body =
+    `🧮 <b>РАСЧЁТ — ${denom} R$ @ ${price}₽</b>\n` +
+    `<code>` +
+    `  −Комса WB (${Math.round(commPct*100)}%):  ${rub(econ.commissionRub)}\n` +
+    `  −Налог УСН (7%):    ${rub(econ.taxRub)}\n` +
+    `  −Логистика:         ${rub(Math.round(logistics))}\n` +
+    `  −Себест. Robux:     ${rub(econ.robuxCost)}\n` +
+    `  ${"─".repeat(30)}\n` +
+    `  Чистая прибыль:     ${rub(econ.profit)}  (${econ.marginPct}%)\n` +
+    `  В долларах:         $${econ.profitUsd}\n` +
+    `  Безубыточность:     ${rub(econ.breakEvenPrice)}` +
+    `</code>`;
+
+  if (target != null && Number.isFinite(target) && target > 0 && target < 100) {
+    const reqPrice = priceForTargetMargin(
+      { denomination: denom, commissionPct: commPct, taxRate: 0.07, logisticsCost: logistics,
+        storagePerUnit: 0, adCostPerUnit: 0, kursRb: settings.kursRb, kursUsd: settings.kursUsd },
+      target / 100
+    );
+    body += reqPrice > 0
+      ? `\n\n🎯 Для маржи <b>${target}%</b> нужна цена: <b>${rub(reqPrice)}</b>`
+      : `\n\n🎯 Маржа ${target}% недостижима при этих издержках.`;
+  }
+
+  await ctx.reply(body, {
+    parse_mode: "HTML",
+    ...Markup.inlineKeyboard([
+      [Markup.button.callback("🧮 Ещё расчёт", CB.wbCalcWhatIf)],
+      [Markup.button.callback("◀️ К юнит-экономике", CB.wbUnitEcon)],
+    ]),
+  });
+  return true;
 }
 
 export async function enterDenomInput(ctx: Context, nmID: number): Promise<void> {

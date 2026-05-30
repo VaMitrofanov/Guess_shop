@@ -22,6 +22,31 @@ export const pendingLink = new Map<number, LinkState>();
  * Key: Telegram numeric user ID → WbOrder.id they should review.
  */
 export const pendingReview = new Map<number, string>();
+
+// ── Direct order session states ───────────────────────────────────────────────
+
+/** User clicked "Купить напрямую" and is expected to type a Robux amount. */
+export const pendingDirectAmount = new Map<number, true>();
+
+/** User typed an amount and is viewing the confirmation screen. */
+export interface DirectOrderState {
+  amount: number;
+  passPrice: number;
+  totalAmount: number;
+}
+export const pendingDirectOrder = new Map<number, DirectOrderState>();
+
+/**
+ * Admin is typing payment details for a direct order.
+ * Key: admin tgId (number) → WbOrder.id
+ */
+export const pendingPaymentDetails = new Map<number, string>();
+
+/**
+ * User is expected to send a payment screenshot.
+ * Key: user tgId (number) → WbOrder.id
+ */
+export const pendingPaymentScreenshot = new Map<number, string>();
 /**
  * Admins currently writing a rejection reason for an order.
  * Key: Admin Telegram ID → WbOrder.id
@@ -78,5 +103,37 @@ export const pendingDenomInput = new Map<number, { nmID: number; vendorCode: str
 /** Admin is updating a global WB unit econ setting. */
 export const pendingUeSettingInput = new Map<number, { field: "kursRb" | "kursUsd" | "fixedCost" }>();
 
+/** Admin is using the what-if unit-econ calculator (typing "номинал цена [маржа%]"). */
+export const pendingWhatIfInput = new Set<number>();
+
 /** Admin is entering the auto-buy target rate. */
 export const pendingAutoBuyRateInput = new Map<number, true>();
+
+/** Admin is typing a gamepass name to search on bossrobux. */
+export const pendingBossrobuxSearch = new Map<number, true>();
+
+/** Cached search results per admin (cleared after successful purchase). */
+export const bossrobuxSearchCache = new Map<number, import("../shared/bossrobux").BossrobuxGamepass[]>();
+
+// ── Client-side: gamepass search by Roblox nick (item 7) ─────────────────────
+
+/**
+ * User clicked "🔎 Найти по моему нику Roblox" on the provisional welcome and
+ * is now expected to type their Roblox username. Carries the order context
+ * so we know which `wbCode` / `denomination` to validate the price against.
+ */
+export const pendingRobloxNick = new Map<number, LinkState>();
+
+/**
+ * Per-user cache of gamepass-search results so a tap on "❌ Это не он" can
+ * fall back to the next candidate without re-hitting the bridge. Cleared
+ * on successful pick or when the user starts a new search.
+ */
+export interface GpSearchHit {
+  passId:   string;
+  name:     string;
+  price:    number;
+  /** Thumbnail URL — populated when result comes through gamepass-search.ts. */
+  image?:   string;
+}
+export const robloxGpCache = new Map<number, { hits: GpSearchHit[]; ts: number; wbCode: string }>();

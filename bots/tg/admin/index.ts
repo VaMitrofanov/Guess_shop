@@ -20,6 +20,8 @@ import { showRatesHub, refreshRates, showRatesAnalytics } from "./hub-rates";
 import {
   showAutoBuyHub, toggleAutoBuy, enterAutoBuyRateInput,
   handleAutoBuyRateInput, refreshAutoBuy,
+  enterBossrobuxSearch, handleBossrobuxSearchInput,
+  handleBossrobuxBuy, handleBossrobuxConfirm,
 } from "./hub-autobuy";
 import {
   showWildberriesHub, refreshWb, showAddCodesDenom, enterCodesInput,
@@ -30,6 +32,7 @@ import {
   enterDenomInput, handleDenomInput,
   enterAdInput, handleAdInput,
   showUeSettings, enterUeSettingInput, handleUeSettingInput,
+  enterWhatIfInput, handleWhatIfInput,
   showReviewsHub, enterReviewAnswer, handleReviewAnswer,
   showFbsHub, startWbMonitor,
   showRealizationHub, showRealizationPeriod, showAdvertHub,
@@ -42,7 +45,8 @@ import {
   pendingAdminSearch, pendingCodesInput, pendingRateInput, pendingPriceInput,
   pendingReviewAnswer, pendingCostInput, pendingLogisticsInput,
   pendingAdInput, pendingDenomInput, pendingUeSettingInput,
-  pendingAutoBuyRateInput,
+  pendingWhatIfInput,
+  pendingAutoBuyRateInput, pendingBossrobuxSearch,
 } from "../session";
 
 // Re-export for external use
@@ -160,9 +164,21 @@ export function registerAdminHubs(bot: Telegraf): void {
       if (handled) return;
     }
 
+    // 10b. What-if unit-econ calculator input
+    if (pendingWhatIfInput.has(ctx.from.id)) {
+      const handled = await handleWhatIfInput(ctx, text);
+      if (handled) return;
+    }
+
     // 11. AutoBuy rate input
     if (pendingAutoBuyRateInput.has(ctx.from.id)) {
       const handled = await handleAutoBuyRateInput(ctx, text);
+      if (handled) return;
+    }
+
+    // 12. Boss Robux gamepass search input
+    if (pendingBossrobuxSearch.has(ctx.from.id)) {
+      const handled = await handleBossrobuxSearchInput(ctx, text);
       if (handled) return;
     }
 
@@ -282,6 +298,22 @@ export async function routeAdminCallback(
     return true;
   }
 
+  // ── Boss Robux (inside AutoBuy hub) ───────────────────────────────────────
+  if (data === CB.bossrobuxSearch) {
+    await enterBossrobuxSearch(ctx);
+    return true;
+  }
+  if (data.startsWith("br_buy:")) {
+    const index = parseInt(data.split(":")[1]);
+    await handleBossrobuxBuy(ctx, index);
+    return true;
+  }
+  if (data.startsWith("br_ok:")) {
+    const index = parseInt(data.split(":")[1]);
+    await handleBossrobuxConfirm(ctx, index);
+    return true;
+  }
+
   // ── WB hub ─────────────────────────────────────────────────────────────
   if (data === CB.hubWildberries) {
     await showWildberriesHub(ctx);
@@ -397,6 +429,10 @@ export async function routeAdminCallback(
   }
   if (data === CB.wbUeFixedCost) {
     await enterUeSettingInput(ctx, "fixedCost");
+    return true;
+  }
+  if (data === CB.wbCalcWhatIf) {
+    await enterWhatIfInput(ctx);
     return true;
   }
   if (data === CB.wbRealization) {
