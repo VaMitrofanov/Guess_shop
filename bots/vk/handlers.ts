@@ -15,7 +15,8 @@ import { sendAdminOrderCard, sendAdminReviewCard, sendAdminDirectOrderCard, send
 import { vkGetName, tgSend, vkSend } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
-import { getGamepassDetails, getUserGamepasses } from "../shared/roblox";
+import { getGamepassDetails } from "../shared/roblox";
+import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 
 // VK API instance injected from bot.ts to avoid circular import.
 let _vkApi: any = null;
@@ -809,13 +810,11 @@ async function handleRefActivation(
         greetLine + `\n` +
         `✅ Код ${code} активирован!\n` +
         bonusText +
-        `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда —\n` +
-        `или нажми «🔎 Найти по моему нику Roblox», и я сам его подберу.\n` +
-        `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n` +
-        `(это номинал ÷ 0.7 — Roblox удерживает 30% комиссии)\n\n` +
-        `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
-        `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n\n` +
-        `Пришли ссылку на геймпасс 👇`,
+        `Создай геймпасс в Roblox за ${passPrice} R$ — затем нажми кнопку «🔎 Найти по моему нику Roblox» 👇 (быстрый путь, без ссылок).\n` +
+        `(${passPrice} R$ — это номинал ÷ 0.7, Roblox удерживает 30%)\n\n` +
+        `Если удобнее — пришли ссылку на геймпасс сюда вручную.\n\n` +
+        `❓ Что такое геймпасс и как его создать:\n` +
+        `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}`,
       keyboard: Keyboard.builder()
         .textButton({ label: "🔎 Найти по моему нику Roblox", payload: { command: "find_gp_start" }, color: "primary" })
         .row()
@@ -1142,7 +1141,10 @@ async function handleFindGpStart(ctx: MessageContext, vkUserId: number): Promise
   );
 }
 
-/** User typed a Roblox nick — look up matching gamepasses. */
+/**
+ * User typed a Roblox nick — same 5-branch tree as the TG version, text-only
+ * (VK keyboards are text buttons; no photo card variant).
+ */
 async function handleRobloxNickInput(
   ctx: MessageContext,
   vkUserId: number,
@@ -1163,47 +1165,86 @@ async function handleRobloxNickInput(
   await ctx.reply(`🔎 Ищу геймпассы у ${nick}…`);
   const expectedPrice = Math.ceil(denomination / 0.7);
 
-  let hits: { passId: string; name: string; price: number }[] = [];
+  let outcome: GamepassSearchOutcome;
   try {
-    const raw = await getUserGamepasses(nick);
-    hits = raw
-      .filter(g => g.robux > 0 && Math.abs(g.robux - expectedPrice) <= 2)
-      .map(g => ({ passId: String(g.gamepassId), name: g.name, price: g.robux }));
+    outcome = await searchGamepassesByNick(nick, expectedPrice);
   } catch (err: any) {
-    console.error("[VK/find-gp] getUserGamepasses failed:", err?.message ?? err);
+    console.error("[VK/find-gp] searchGamepassesByNick failed:", err?.message ?? err);
+    outcome = { status: "user_not_found", nick, expectedPrice };
   }
 
-  // Clear nick state regardless of outcome — pick is via inline button now.
-  // Re-enter via "🔎 Другой ник" if needed.
+  // Always return to LINK state — picker handles next move via VK payload button.
   setState(vkUserId, { type: "AWAITING_LINK", wbCode, denomination });
 
-  if (hits.length === 0) {
+  const guideUrl = `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}`;
+
+  // Branch 1: nickname doesn't exist on Roblox
+  if (outcome.status === "user_not_found") {
     await ctx.reply({
       message:
-        `🤷 У ${nick} не нашли геймпасса за ${expectedPrice} R$.\n\n` +
-        `Проверь что:\n` +
-        `• Ник Roblox правильный (можно скопировать прямо со страницы профиля)\n` +
-        `• Геймпасс создан и опубликован\n` +
-        `• Цена ровно ${expectedPrice} R$\n\n` +
-        `Если уверен — попробуй ещё раз, или пришли ссылку как раньше.`,
+        `🤷 Пользователя ${nick} нет на Roblox.\n\n` +
+        `Скорее всего опечатка. Скопируй ник прямо со страницы профиля и пришли заново.`,
       keyboard: Keyboard.builder()
-        .textButton({ label: "🔎 Попробовать другой ник", payload: { command: "find_gp_start" }, color: "primary" })
+        .textButton({ label: "🔎 Попробовать ещё раз", payload: { command: "find_gp_start" }, color: "primary" })
         .row()
-        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "pass_not_found" }, color: "secondary" })
+        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "nick_not_found" }, color: "secondary" })
         .inline(),
     });
     return;
   }
 
-  if (hits.length === 1) {
-    const h = hits[0];
+  // Branch 2: nick exists but no public for-sale gamepasses → place probably private
+  if (outcome.status === "no_gamepasses") {
     await ctx.reply({
       message:
-        `Нашёл геймпасс у ${nick}:\n\n` +
-        `💎 ${h.name} · ${h.price} R$\n\n` +
-        `Подтверди — и я отправлю на проверку.`,
+        `🙈 У ${nick} не нашли публичных геймпассов.\n\n` +
+        `Самая частая причина — плейс закрыт. Открой его в настройках, тогда геймпассы станут видны:\n\n` +
+        `1. Roblox → раздел Creations\n` +
+        `2. Выбери свой плейс → ⚙️ Configure → Privacy\n` +
+        `3. Поставь Public\n\n` +
+        `Если плейс уже публичный — проверь, что геймпасс создан и выставлен на продажу за ${expectedPrice} R$.\n\n` +
+        `Инструкция: ${guideUrl}`,
       keyboard: Keyboard.builder()
-        .textButton({ label: `✅ Это он — выкупить (${h.price} R$)`, payload: { command: "gp_pick", passId: h.passId }, color: "positive" })
+        .textButton({ label: "🔎 Попробовать другой ник", payload: { command: "find_gp_start" }, color: "primary" })
+        .row()
+        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "place_closed" }, color: "secondary" })
+        .inline(),
+    });
+    return;
+  }
+
+  // outcome.status === "ok"
+  const { matches, nonMatches } = outcome;
+
+  // Branch 5: gamepasses exist but none at expected price → show actual prices
+  if (matches.length === 0) {
+    const top = nonMatches.slice(0, MAX_PICK_BUTTONS);
+    const listLines = top.map(g => `• ${g.name} · ${g.robux} R$`).join("\n");
+    await ctx.reply({
+      message:
+        `У ${nick} нашли геймпассы, но ни один не за ${expectedPrice} R$:\n\n` +
+        `${listLines}\n\n` +
+        `Создай геймпасс ровно на ${expectedPrice} R$ или измени цену существующего — и нажми «🔎 Уже исправил».\n\n` +
+        `Инструкция: ${guideUrl}`,
+      keyboard: Keyboard.builder()
+        .textButton({ label: "🔎 Уже исправил — проверить", payload: { command: "find_gp_start" }, color: "primary" })
+        .row()
+        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "wrong_price" }, color: "secondary" })
+        .inline(),
+    });
+    return;
+  }
+
+  // Branch 3: exactly 1 price-match (VK = text confirmation, no photo)
+  if (matches.length === 1) {
+    const m = matches[0];
+    await ctx.reply({
+      message:
+        `🎯 Нашёл у ${nick} подходящий геймпасс:\n\n` +
+        `💎 ${m.name} · ${m.robux} R$\n\n` +
+        `Это он? Нажми «✅ Да» — отправлю на проверку.`,
+      keyboard: Keyboard.builder()
+        .textButton({ label: `✅ Да, выкупаем (${m.robux} R$)`, payload: { command: "gp_pick", passId: String(m.gamepassId) }, color: "positive" })
         .row()
         .textButton({ label: "🔎 Другой ник", payload: { command: "find_gp_start" }, color: "secondary" })
         .inline(),
@@ -1211,12 +1252,13 @@ async function handleRobloxNickInput(
     return;
   }
 
-  const shown = hits.slice(0, MAX_PICK_BUTTONS);
+  // Branch 4: 2–5 price-matches → text-button list
+  const shown = matches.slice(0, MAX_PICK_BUTTONS);
   const kb = Keyboard.builder();
-  for (const h of shown) {
+  for (const m of shown) {
     kb.textButton({
-      label: `💎 ${h.name.slice(0, 32)} · ${h.price} R$`,
-      payload: { command: "gp_pick", passId: h.passId },
+      label: `💎 ${m.name.slice(0, 32)} · ${m.robux} R$`,
+      payload: { command: "gp_pick", passId: String(m.gamepassId) },
       color: "positive",
     }).row();
   }

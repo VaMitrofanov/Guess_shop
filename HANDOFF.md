@@ -43,6 +43,32 @@
     - Приватный профиль — `getUserGamepasses` возвращает `[]`, не падает.
     - `robloxGpCache` TTL=60s — повторный «другой ник» не бьёт Roblox API дважды.
     - TWA → выбор gp → заказ `AWAITING_GAMEPASS → PENDING` → клиент в TG получает уведомление (проверить, что вынос в shared не потерял notify-вызов).
+  - ✅ **Phase E (сделана, ждёт деплоя):** превратить user-side поиск по нику из «дополнительной кнопки» в полноценный альтернативный путь к URL'у — единая экосистема ввода. Сейчас:
+    - Фильтр `±2` от `expectedPrice` **скрывает** существующие геймпассы с неправильной ценой — пользователь не понимает, что у него геймпасс есть, просто цена неверна.
+    - При 0 hits бот говорит «не нашли за X R$» — не отличает «закрытый плейс» от «есть, но не за столько».
+    - Single-match подтверждение — голая текстовая кнопка, не видно миниатюру → сомнения «точно ли тот?».
+    - VK и TG дублируют логику ветвления 0/1/N (`handleRobloxNickInput` × 2). Бизнес-логика разрослась, расходится по мелочам.
+
+    **Backend (новое):**
+    - `bots/shared/gamepass-search.ts` (новый модуль) — `searchGamepassesByNick(nick, expectedPrice)` возвращает `{ status: 'ok' | 'user_not_found' | 'no_gamepasses', hits: GpSearchResult[], expectedPrice }`. `GpSearchResult` = базовое + `isPriceMatch: boolean`. **Никакого фильтра** — все for-sale геймпассы.
+    - Отличить «user_not_found» от «no_gamepasses» через первый шаг `getUserGamepasses` (resolve usernames endpoint). Сейчас оба сливаются в пустой массив — поправить, добавить новый возврат.
+    - TG `handleRobloxNickInput` + VK `handleRobloxNickInput` — оба переписать на вызов `searchGamepassesByNick` и общую ветвящуюся функцию `renderGamepassPickerTG(ctx, result)` / `renderGamepassPickerVK(peer, result)`. Сами рендеры могут быть в `bots/tg/` и `bots/vk/` отдельно (разные API мессенджеров), но логика ветвления — одна.
+
+    **UX отображения (TG, согласовано):**
+    - **1 матч по цене** → `sendPhoto` с миниатюрой геймпасса, caption «Нашёл у тебя такой геймпасс: 💎 *<Name>* · *<price> R$*. Это он?» + кнопки `[✅ Да, выкупаем]` / `[🔎 Другой ник]`. Миниатюра уже приходит из `getUserGamepasses` в поле `image`.
+    - **2–5 матчей по цене** → текстовый список кнопок (как сейчас), `💎 <Name> · <price>` + `🔎 Другой ник` внизу.
+    - **0 матчей по цене, но геймпассы есть** → список всех геймпассов с их РЕАЛЬНЫМИ ценами и строка «Ни один не за *<expectedPrice> R$*. Создай геймпасс ровно на эту сумму или измени цену существующего» + кнопки `[🔎 Другой ник]` / `[📖 Как создать геймпасс]`.
+    - **0 геймпассов вообще** → «У тебя в Roblox нет публичных геймпассов. Скорее всего плейс закрыт» + кнопка `[📖 Как открыть плейс]` (ссылка на guide-секцию «Открой плейс») + `[🔎 Другой ник]`.
+    - **User не найден** → «Юзер `<nick>` не существует на Roblox. Проверь написание (скопируй прямо со страницы профиля)» + `[🔎 Другой ник]`.
+
+    **UX отображения (VK):** идентичная ветвящаяся структура, но без photo-карточки (VK Messages API в боте проще держать на текстовых сообщениях; ничего критичного не теряем — VK-аудитория сейчас минорная).
+
+    **Изменение в welcome:** в обоих welcome-сообщениях (`handlers.ts:430`, `handlers.ts:1658`) подсветить кнопку как **первичный** путь — текст изменить с «Создай геймпасс… или нажми кнопку» на «Создай геймпасс — затем пришли ссылку **или нажми «🔎 Найти по моему нику»** ↓». Цель — снизить долю URL-вводов с ошибками.
+
+    **Не делается в Phase E** (отдельно):
+    - Photo-cards для VK — отложено.
+    - Кэширование «public gamepass list per nick» дольше 60 c — текущий `robloxGpCache` оставляем как есть.
+    - Reorganize welcome — только сдвиг акцента, не редизайн.
 
 - [ ] **(8) Оптимизация скорости Orders (TWA)** — диагностирована, в работе. Cold-start уже ускорен в Спринт 1 item 2, но *внутри* экрана Orders запросы тормозят. План:
   - **Серверная часть** (`src/app/api/twa/orders/route.ts`):
@@ -3317,5 +3343,72 @@ curl -s -X POST \
 - **Item 1 Phase B** — перенос System/Stats/Rates/AutoBuy в TWA-экраны. Подзадачи B1-B5 по одному коммиту каждая, начинать со Stats (read-only, наименьший риск).
 - **Item 7 Phase C** — поиск GP по нику внутри TWA, объединение бизнес-логики связки в `bots/shared/gamepass-link.ts` (единая экосистема: TG/VK/TWA → одна функция).
 - **Item 7 Phase D** — smoke-tests на `lokomotiv_2018` / `Dark_Varia8954` / 0 hits / приватный профиль / TWA-вариант.
+
+---
+
+### Сессия 2026-05-31 (поздно) — Item 7 Phase E: unified nick-search с разветвлённой диагностикой
+
+Превратили «дополнительную кнопку поиска по нику» в полноценный альтернативный путь к URL'у. Юзеру теперь не нужно копировать ID/ссылки — он шлёт ник, получает фотокарточку с миниатюрой геймпасса и одной кнопкой подтверждает.
+
+#### Новый shared-модуль `bots/shared/gamepass-search.ts`
+
+`searchGamepassesByNick(nick, expectedPrice) → GamepassSearchOutcome` (discriminated union):
+- `user_not_found` — ник не существует на Roblox (раньше сливалось с no_gamepasses).
+- `no_gamepasses` — юзер есть, но публичных геймпассов 0 (обычно закрытый плейс).
+- `ok` — есть геймпассы, возвращаются ВСЕ с флагом `isPriceMatch`. Доп. поля `matches`/`nonMatches` для готовой ветвящейся логики на стороне ботов.
+
+Сортировка результата — по `|robux − expectedPrice|` asc, чтобы `slice(0, 5)` всегда давал самые релевантные.
+
+#### Refactor `bots/shared/roblox.ts`
+
+Вынес два примитива из `getUserGamepasses`:
+- `resolveRobloxUserId(username): Promise<number | null>` — POST `/v1/usernames/users`.
+- `listForSaleGamepasses(userId, fallbackUsername): Promise<GamepassSearchResult[]>` — `/v2/users/:id/games` → per-universe `/game-passes` → thumbnails → filter `isForSale && price > 0`.
+`getUserGamepasses` теперь — тонкий wrapper над этими двумя (бэк-компат для bridge `/search-gamepasses` и TWA BossRobux `lookup` — они не различают «нет юзера» и «нет пассов»).
+
+#### TG `handleRobloxNickInput` (`bots/tg/handlers.ts:957-1130`)
+
+5 веток вместо прежних 3:
+1. **user_not_found**: «Пользователя X нет на Roblox. Скорее всего опечатка» + retry + support.
+2. **no_gamepasses**: «У X не нашли публичных геймпассов. Самая частая причина — плейс закрыт» + 3-шаговая инструкция (Creations → Configure → Privacy → Public) + ссылка на guide + retry + support.
+3. **ok, 1 price-match**: `replyWithPhoto(image, caption + 2 buttons)` — миниатюра геймпасса прямо в чате. `try/catch` fallback на text, если Telegram отверг URL.
+4. **ok, 2–5 price-matches**: inline-кнопки `💎 <name> · <price>` (как раньше).
+5. **ok, 0 price-match но пассы есть**: список реальных цен `• <name> · <price>` + хинт «Ни один не за X R$. Создай или измени цену — и нажми «🔎 Уже исправил».
+
+#### VK `handleRobloxNickInput` (`bots/vk/handlers.ts:1146-1290`)
+
+Та же 5-ветвистая структура, но текстовая (без photo-карточек — VK Keyboard API проще держать текстом). Single price-match — текстовое подтверждение с кнопкой `✅ Да, выкупаем`. Поведение остального тождественно TG.
+
+#### Welcome-копи — лидируем кнопкой, не URL'ом
+
+В трёх местах (TG start path `handlers.ts:434`, TG text-entry `:1645`, VK `:807`) перефраз:
+- Было: «создай геймпасс и пришли ссылку — или нажми кнопку».
+- Стало: «создай геймпасс за X R$ — затем нажми кнопку «🔎 Найти по моему нику» 👇 (быстрый путь, без ссылок). Если удобнее — пришли ссылку вручную».
+
+Цель — снизить долю ошибочных URL-вводов (юзеры часто шлют ссылку на плейс/профиль вместо геймпасса).
+
+#### Session.ts — image в кэше
+
+`GpSearchHit` получил опциональное поле `image` — для re-render картинки при «❌ это не он» без повторного запроса к Roblox.
+
+#### Файлы (стейджед, не закоммичено)
+
+- ✏️ `bots/shared/roblox.ts` — refactor `getUserGamepasses` (split на `resolveRobloxUserId` + `listForSaleGamepasses`).
+- ➕ `bots/shared/gamepass-search.ts` — новый модуль.
+- ✏️ `bots/tg/handlers.ts` — `handleRobloxNickInput` переписан, 2 welcome'а перефразированы, импорт `getUserGamepasses` снят (он больше не используется в TG-фронте напрямую).
+- ✏️ `bots/vk/handlers.ts` — `handleRobloxNickInput` переписан, welcome перефразирован, импорт `getUserGamepasses` снят.
+- ✏️ `bots/tg/session.ts` — `GpSearchHit.image?` поле.
+- ✏️ `HANDOFF.md` — Phase E переведена из плана в «сделано», добавлена эта секция.
+
+#### Что проверить на проде после деплоя
+
+1. **Single match + thumbnail** — ник с одним подходящим пассом (`lokomotiv_2018` если у него один за 285 R$). Должна прийти фотокарточка с миниатюрой и капшеном.
+2. **Multi-match** — ник с 2-5 пассами в нужной цене (`Dark_Varia8954` обычно). Список кнопок без фото.
+3. **Wrong-price branch** — ник, у которого есть геймпассы, но ни одного за нужную цену. Должен прийти **список реальных цен** + кнопка «🔎 Уже исправил».
+4. **No gamepasses (closed place)** — ник реального юзера БЕЗ публичных геймпассов. Должна быть инструкция про Creations → Configure → Privacy → Public.
+5. **User not found** — несуществующий ник `xyz_typo_123`. «Пользователя нет на Roblox. Скорее всего опечатка».
+6. **Welcome копи** — после ввода кода первая инструкция должна лидировать кнопкой «🔎 Найти по моему нику».
+7. **VK паритет** — все 5 веток повторяются текстом без фоток.
+8. **gp_pick callback всё ещё работает** — выбранный pass проходит через `processGamepassSubmission` и попадает в `AWAITING_GAMEPASS → PENDING`.
 
 

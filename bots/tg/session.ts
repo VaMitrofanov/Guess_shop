@@ -133,5 +133,7 @@ export interface GpSearchHit {
   passId:   string;
   name:     string;
   price:    number;
+  /** Thumbnail URL — populated when result comes through gamepass-search.ts. */
+  image?:   string;
 }
 export const robloxGpCache = new Map<number, { hits: GpSearchHit[]; ts: number; wbCode: string }>();

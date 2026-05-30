@@ -11,8 +11,9 @@ import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, stripHtml, tgSend } from "../shared/notify";
 import { sendAdminOrderCard, sendAdminReviewCard, sendAdminSupportAlert, notifySupportShown, sendAdminDirectOrderCard, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS, formatUserHandle, formatUserHandleHtml } from "../shared/admin";
-import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectAmount, pendingDirectOrder, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, robloxGpCache, type LinkFailState, type DirectOrderState, type LinkState, type GpSearchHit } from "./session";
-import { getGamepassDetails, getUserGamepasses } from "../shared/roblox";
+import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectAmount, pendingDirectOrder, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, robloxGpCache, type LinkFailState, type DirectOrderState, type LinkState } from "./session";
+import { getGamepassDetails } from "../shared/roblox";
+import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { buildAdminKeyboard, updateMainMenu, routeAdminCallback } from "./admin";
 import { renderExtendedCard } from "./admin/hub-orders";
 
@@ -435,18 +436,17 @@ export function registerStart(bot: Telegraf): void {
       (isGuideMode
         ? `✅ Код <b>${code}</b> активирован!\n` +
           bonusText +
-          `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда — или нажми «🔎 Найти по моему нику Roblox» внизу, и я подберу его сам.\n` +
-          `📌 Цена геймпасса должна быть ровно <b>${passPrice} R$</b>\n\n` +
+          `Создай геймпасс в Roblox за <b>${passPrice} R$</b> — затем нажми кнопку «🔎 Найти по моему нику Roblox» 👇 (быстрый путь, без ссылок).\n` +
+          `Если удобнее — пришли ссылку на геймпасс сюда вручную.\n\n` +
           `Нужна инструкция?\n` +
           `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}`
         : `✅ Код <b>${code}</b> активирован!\n` +
           bonusText +
-          `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда — или нажми «🔎 Найти по моему нику Roblox» внизу, и я подберу его сам.\n` +
-          `📌 Цена геймпасса должна быть ровно <b>${passPrice} R$</b>\n` +
-          `<i>(это номинал ÷ 0.7 — Roblox удерживает 30% комиссии)</i>\n\n` +
-          `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
-          `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n\n` +
-          `Пришли ссылку на геймпасс прямо сюда 👇`
+          `Создай геймпасс в Roblox за <b>${passPrice} R$</b> — затем нажми кнопку «🔎 Найти по моему нику Roblox» 👇 (быстрый путь, без ссылок).\n` +
+          `<i>(${passPrice} R$ — это номинал ÷ 0.7, Roblox удерживает 30%)</i>\n\n` +
+          `Если удобнее — пришли ссылку на геймпасс сюда вручную.\n\n` +
+          `❓ Что такое геймпасс и как его создать:\n` +
+          `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}`
       ),
       {
         parse_mode: "HTML",
@@ -948,11 +948,17 @@ const ROBLOX_NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
 /**
  * Handle a user's Roblox-nick reply after they tapped "🔎 Найти по моему нику".
  *
- * Picks all for-sale gamepasses owned by the user, filters them down to those
- * whose price matches `state.denomination / 0.7` ±2 (the price the manager
- * expects for the WB-code's denomination), and presents them as inline
- * buttons. Tapping a button feeds the chosen `passId` straight into
- * {@link processGamepassSubmission}.
+ * Calls `searchGamepassesByNick` (the unified shared engine) and renders one
+ * of five branches depending on the structured outcome:
+ *
+ *   1. `user_not_found`  → "no such user on Roblox" + retry
+ *   2. `no_gamepasses`   → "place probably closed" + guide instruction
+ *   3. `ok` 1 match      → photo card with thumbnail + confirm button
+ *   4. `ok` N≥2 matches  → text-button list (same as Phase A)
+ *   5. `ok` 0 match but gamepasses exist → list of actual prices + "fix" hint
+ *
+ * Tapping the confirm button fires CB.gpPick → callback handler funnels into
+ * {@link processGamepassSubmission} (the canonical link → order pipeline).
  */
 async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Promise<void> {
   const tgIdNum = ctx.from.id;
@@ -970,79 +976,135 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
     return;
   }
 
+  const expectedPrice = Math.ceil(state.denomination / 0.7);
+
   await ctx.sendChatAction("typing");
   const checkingMsg = await ctx.reply(`🔎 Ищу геймпассы у <b>${nick}</b>…`, { parse_mode: "HTML" });
 
-  let hits: GpSearchHit[] = [];
+  let outcome: GamepassSearchOutcome;
   try {
-    const raw = await getUserGamepasses(nick);
-    const expectedPrice = Math.ceil(state.denomination / 0.7);
-    hits = raw
-      .filter(g => g.robux > 0 && Math.abs(g.robux - expectedPrice) <= 2)
-      .map(g => ({ passId: String(g.gamepassId), name: g.name, price: g.robux }));
+    outcome = await searchGamepassesByNick(nick, expectedPrice);
   } catch (err: any) {
-    console.error("[TG/find-gp] getUserGamepasses failed:", err?.message ?? err);
+    console.error("[TG/find-gp] searchGamepassesByNick failed:", err?.message ?? err);
+    // Treat infra failure as "couldn't resolve" — user-facing retry is the best UX.
+    outcome = { status: "user_not_found", nick, expectedPrice };
   }
   try { await bot.telegram.deleteMessage(ctx.chat.id, checkingMsg.message_id); } catch {}
 
-  // Cache for next "не он" / retry actions
-  robloxGpCache.set(tgIdNum, { hits, ts: Date.now(), wbCode: state.wbCode });
-
-  const expectedPrice = Math.ceil(state.denomination / 0.7);
-
-  if (hits.length === 0) {
-    pendingRobloxNick.delete(tgIdNum);
-    await ctx.reply(
-      `🤷 У <b>${nick}</b> не нашли геймпасса за <b>${expectedPrice} R$</b>.\n\n` +
-      `Проверь что:\n` +
-      `• Ник Roblox правильный (можно скопировать прямо со страницы профиля)\n` +
-      `• Геймпасс <b>создан и опубликован</b>\n` +
-      `• Цена ровно <b>${expectedPrice} R$</b>\n\n` +
-      `Если уверен — попробуй ещё раз, или пришли ссылку как раньше.`,
-      {
-        parse_mode: "HTML",
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback("🔎 Попробовать другой ник", CB.findGpRetry)],
-          [Markup.button.url("📖 Инструкция", `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
-          [supportBtn("💬 Нужна помощь?", "pass_not_found", ctx)],
-        ]),
-      }
-    );
-    return;
-  }
-
-  if (hits.length === 1) {
-    // Single match → still show as a single button so the user has an
-    // explicit confirm step (Roblox API can occasionally surface a stale
-    // pass that's not actually the one the user wants).
-    const h = hits[0];
-    pendingRobloxNick.delete(tgIdNum);
-    await ctx.reply(
-      `Нашёл геймпасс у <b>${nick}</b>:\n\n` +
-      `💎 <b>${h.name}</b> · ${h.price} R$\n\n` +
-      `Подтверди — и я отправлю на проверку.`,
-      {
-        parse_mode: "HTML",
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback(`✅ Это он — выкупить (${h.price} R$)`, CB.gpPick(h.passId))],
-          [Markup.button.callback("🔎 Другой ник", CB.findGpRetry)],
-        ]),
-      }
-    );
-    return;
-  }
-
-  // Multiple matches → list the top N by closeness to expectedPrice.
-  const shown = hits.slice(0, MAX_PICK_BUTTONS);
+  // User has moved past the input stage in every branch below.
   pendingRobloxNick.delete(tgIdNum);
+
+  const guideUrl = `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`;
+
+  // ── Branch 1: nickname doesn't exist on Roblox ───────────────────────────
+  if (outcome.status === "user_not_found") {
+    await ctx.reply(
+      `🤷 Пользователя <b>${nick}</b> нет на Roblox.\n\n` +
+      `Скорее всего опечатка. Скопируй ник прямо со страницы профиля и пришли заново.`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🔎 Попробовать ещё раз", CB.findGpRetry)],
+          [supportBtn("💬 Нужна помощь?", "nick_not_found", ctx)],
+        ]),
+      }
+    );
+    return;
+  }
+
+  // ── Branch 2: nickname exists but no public for-sale gamepasses ──────────
+  // Most common reason: the user's place is private. Guide them to opening it
+  // before sending them to the generic support button.
+  if (outcome.status === "no_gamepasses") {
+    await ctx.reply(
+      `🙈 У <b>${nick}</b> не нашли публичных геймпассов.\n\n` +
+      `Самая частая причина — <b>плейс закрыт</b>. Открой его в настройках, тогда геймпассы станут видны:\n\n` +
+      `1. Roblox → раздел <b>Creations</b>\n` +
+      `2. Выбери свой плейс → ⚙️ <b>Configure</b> → <b>Privacy</b>\n` +
+      `3. Поставь <b>Public</b>\n\n` +
+      `Если плейс уже публичный — проверь, что геймпасс <b>создан и выставлен на продажу</b> за <b>${expectedPrice} R$</b>.`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.url("📖 Подробная инструкция", guideUrl)],
+          [Markup.button.callback("🔎 Попробовать другой ник", CB.findGpRetry)],
+          [supportBtn("💬 Нужна помощь?", "place_closed", ctx)],
+        ]),
+      }
+    );
+    return;
+  }
+
+  // outcome.status === "ok"
+  const { matches, nonMatches, all } = outcome;
+
+  // Populate the picker cache (used by callback for "это не он" → fall back
+  // to next candidate without re-hitting Roblox). Top-5 already sorted by
+  // closeness to expectedPrice inside `searchGamepassesByNick`.
+  robloxGpCache.set(tgIdNum, {
+    hits: all.slice(0, MAX_PICK_BUTTONS).map(g => ({
+      passId: String(g.gamepassId),
+      name:   g.name,
+      price:  g.robux,
+      image:  g.image,
+    })),
+    ts:     Date.now(),
+    wbCode: state.wbCode,
+  });
+
+  // ── Branch 5: gamepasses exist but none at the expected price ────────────
+  // Show their actual prices so they SEE the mismatch and know to fix one.
+  if (matches.length === 0) {
+    const top = nonMatches.slice(0, MAX_PICK_BUTTONS);
+    const listLines = top.map(g => `• <b>${g.name}</b> · ${g.robux} R$`).join("\n");
+    await ctx.reply(
+      `У <b>${nick}</b> нашли геймпассы, но ни один не за <b>${expectedPrice} R$</b>:\n\n` +
+      `${listLines}\n\n` +
+      `Создай геймпасс ровно на <b>${expectedPrice} R$</b> или измени цену существующего — и нажми «🔎 Уже исправил».`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.url("📖 Как создать геймпасс", guideUrl)],
+          [Markup.button.callback("🔎 Уже исправил — проверить", CB.findGpRetry)],
+          [supportBtn("💬 Нужна помощь?", "wrong_price", ctx)],
+        ]),
+      }
+    );
+    return;
+  }
+
+  // ── Branch 3: exactly 1 price-matching gamepass → photo card ─────────────
+  if (matches.length === 1) {
+    const m = matches[0];
+    const caption =
+      `🎯 Нашёл у <b>${nick}</b> подходящий геймпасс:\n\n` +
+      `💎 <b>${m.name}</b> · ${m.robux} R$\n\n` +
+      `Это он? Жми «✅ Да» — отправлю на проверку.`;
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback(`✅ Да, выкупаем (${m.robux} R$)`, CB.gpPick(String(m.gamepassId)))],
+      [Markup.button.callback("🔎 Другой ник", CB.findGpRetry)],
+    ]);
+    try {
+      await ctx.replyWithPhoto(m.image, { caption, parse_mode: "HTML", ...keyboard });
+    } catch (err: any) {
+      // Telegram occasionally rejects external thumbnail URLs (CDN expiry,
+      // rate limit). Fall back to text so the user is never blocked.
+      console.warn("[TG/find-gp] replyWithPhoto failed, falling back to text:", err?.message ?? err);
+      await ctx.reply(caption, { parse_mode: "HTML", ...keyboard });
+    }
+    return;
+  }
+
+  // ── Branch 4: 2–5 price-matching gamepasses → text-button list ───────────
+  const shown = matches.slice(0, MAX_PICK_BUTTONS);
   await ctx.reply(
     `У <b>${nick}</b> нашёл несколько подходящих геймпассов.\n` +
     `Выбери тот, который хочешь продать:`,
     {
       parse_mode: "HTML",
       ...Markup.inlineKeyboard([
-        ...shown.map(h => [
-          Markup.button.callback(`💎 ${h.name.slice(0, 32)} · ${h.price} R$`, CB.gpPick(h.passId)),
+        ...shown.map(m => [
+          Markup.button.callback(`💎 ${m.name.slice(0, 32)} · ${m.robux} R$`, CB.gpPick(String(m.gamepassId))),
         ]),
         [Markup.button.callback("🔎 Другой ник", CB.findGpRetry)],
       ]),
@@ -1645,12 +1707,11 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   await ctx.reply(
     `✅ Код <b>${codeInput}</b> активирован!\n` +
     bonusText +
-    `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда — или нажми «🔎 Найти по моему нику Roblox» внизу, и я подберу его сам.\n` +
-    `📌 Цена геймпасса должна быть ровно <b>${passPrice} R$</b>\n` +
-    `<i>(это номинал ÷ 0.7 — Roblox удерживает 30% комиссии)</i>\n\n` +
-    `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
-    `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${codeInput}\n\n` +
-    `Пришли ссылку на геймпасс прямо сюда 👇`,
+    `Создай геймпасс в Roblox за <b>${passPrice} R$</b> — затем нажми кнопку «🔎 Найти по моему нику Roblox» 👇 (быстрый путь, без ссылок).\n` +
+    `<i>(${passPrice} R$ — это номинал ÷ 0.7, Roblox удерживает 30%)</i>\n\n` +
+    `Если удобнее — пришли ссылку на геймпасс сюда вручную.\n\n` +
+    `❓ Что такое геймпасс и как его создать:\n` +
+    `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${codeInput}`,
     {
       parse_mode: "HTML",
       link_preview_options: { is_disabled: true },
