@@ -12,7 +12,8 @@
  * Safe to re-run; updates are no-op if nothing changed.
  */
 
-import "dotenv/config";
+// dotenv only needed locally — in the container env is already populated by docker
+try { require("dotenv/config"); } catch {}
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import pkg from "pg";

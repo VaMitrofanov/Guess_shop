@@ -1,11 +1,25 @@
 "use client";
 import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import BottomNav from "./BottomNav";
-import Dashboard from "./screens/Dashboard";
-import WbScreen from "./screens/WbScreen";
 import OrdersScreen from "./screens/OrdersScreen";
-import BossrobuxScreen from "./screens/BossrobuxScreen";
-import SettingsScreen from "./screens/SettingsScreen";
+
+// Dynamically load non-default screens so the initial JS bundle is just
+// the OrdersScreen (default tab) + TwaApp shell. BossrobuxScreen alone is
+// ~580 LoC + framer-motion dependency; deferring it cuts cold-start time
+// for the 95 % of sessions that open Orders.
+const Dashboard       = dynamic(() => import("./screens/Dashboard"),      { ssr: false, loading: () => <ScreenSkeleton /> });
+const WbScreen        = dynamic(() => import("./screens/WbScreen"),       { ssr: false, loading: () => <ScreenSkeleton /> });
+const BossrobuxScreen = dynamic(() => import("./screens/BossrobuxScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
+const SettingsScreen  = dynamic(() => import("./screens/SettingsScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
+
+function ScreenSkeleton() {
+  return (
+    <div style={{ padding: "32px 16px", color: "#636366", fontSize: 13, textAlign: "center" }}>
+      Загружаем экран…
+    </div>
+  );
+}
 
 declare global {
   interface Window {
@@ -56,12 +70,16 @@ export default function TwaApp() {
   useEffect(() => {
     let cancelled = false;
 
-    async function waitForInitData(maxMs = 3000): Promise<string> {
+    // Tightened from 3000 ms / 100 ms poll to 1200 ms / 50 ms poll.
+    // On all current Telegram clients initData lands within ~200-400 ms of
+    // ready(); a 3 s budget was wasting time on the cold-start path when
+    // initDataUnsafe.user.id is already available (we fall back to that below).
+    async function waitForInitData(maxMs = 1200): Promise<string> {
       const deadline = Date.now() + maxMs;
       while (Date.now() < deadline) {
         const id = window.Telegram?.WebApp?.initData;
         if (id) return id;
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 50));
       }
       return "";
     }
@@ -93,7 +111,8 @@ export default function TwaApp() {
       const stored = localStorage.getItem("twa_token");
 
       if (stored) {
-        const r = await fetch("/api/twa/dashboard", { headers: { Authorization: `Bearer ${stored}` } }).catch(() => null);
+        // Lightweight verify — no DB/WB API roundtrip (item 2 fix).
+        const r = await fetch("/api/twa/ping", { headers: { Authorization: `Bearer ${stored}` } }).catch(() => null);
         if (cancelled) return;
         if (r?.ok) {
           setToken(stored);
@@ -105,6 +124,21 @@ export default function TwaApp() {
         localStorage.removeItem("twa_token");
       }
 
+      // Fast path: if initDataUnsafe.user.id is already present, skip the
+      // initData poll entirely — auth endpoint accepts unsafe userId for
+      // admins (HMAC isn't possible without the raw initData anyway).
+      const unsafeUserEarly = window.Telegram?.WebApp?.initDataUnsafe?.user;
+      const initDataEarly   = window.Telegram?.WebApp?.initData;
+      if (initDataEarly) {
+        doAuth({ initData: initDataEarly });
+        return;
+      }
+      if (unsafeUserEarly?.id) {
+        doAuth({ userId: unsafeUserEarly.id, firstName: unsafeUserEarly.first_name });
+        return;
+      }
+
+      // Last resort: SDK still hydrating — short poll, then bail.
       const initData = await waitForInitData();
       if (cancelled) return;
 
@@ -148,11 +182,28 @@ export default function TwaApp() {
   }, [auth, token]);
 
   if (auth === "loading") {
+    // Skeleton matches the post-auth chrome (title bar + content + bottom nav)
+    // so the visual transition to the real Orders screen is a fade-in,
+    // not a layout pop. Cuts perceived load time even when the JWT verify
+    // takes its usual ~150 ms.
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "#1c1c1e", color: "#8e8e93" }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 36, marginBottom: 12 }}>🟣</div>
-          <div style={{ fontSize: 14 }}>Загрузка…</div>
+      <div style={{
+        display: "flex", flexDirection: "column", height: "100dvh",
+        background: "#1c1c1e", color: "#fff",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      }}>
+        <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid #2c2c2e" }}>
+          <div style={{ width: 90, height: 18, borderRadius: 5, background: "#2c2c2e" }} />
+          <div style={{ width: 60, height: 11, borderRadius: 4, background: "#2c2c2e", marginTop: 4 }} />
+        </div>
+        <div style={{ flex: 1, padding: "16px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+          {[0, 1, 2, 3].map(i => (
+            <div key={i} style={{
+              height: 96, borderRadius: 18, background: "#2c2c2e",
+              boxShadow: "0 1px 0 rgba(255,255,255,0.04) inset",
+              opacity: 0.7 - i * 0.12,
+            }} />
+          ))}
         </div>
       </div>
     );

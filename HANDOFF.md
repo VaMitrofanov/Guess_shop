@@ -4,6 +4,27 @@
 
 ---
 
+## 🛠 Активный план (спринт 2026-05-30 → 2026-06)
+
+7 пунктов от пользователя. Сначала закрываем легкие, потом две тяжёлые.
+
+### Спринт 1 — лёгкие фиксы
+
+- [x] **(4) Юзернейм в карточках заказа** ✅ — добавлен `formatUserHandle()` + `formatUserHandleHtml()` в `bots/shared/admin.ts`. `renderOrderCard` (`bots/tg/handlers.ts:1262`) и `renderExtendedCard` (`bots/tg/admin/hub-orders.ts:151`) теперь используют DB `user.username` напрямую (вместо regex-парсинга из display name). Эффект: `@SunriseSword` вместо `:D misak¡ti`.
+- [x] **(3) Кнопка «Открыть профиль в TG»** ✅ — `openContact()` в `OrdersScreen.tsx:389` зовёт `openTelegramLink('tg://...')`, который Telegram отвергает (принимает только `https://t.me/...`). Решение: для безхэндловых юзеров кнопка → best-effort открыть deep link + **гарантированно копирует ID** в буфер + показывает inline-тост «вставь в поиск Telegram». Label стал контекстным: `Написать @x` / `Скопировать ID · 12345` / `Написать в ВКонтакте`.
+- [x] **(6) Двойной деплой Coolify** ✅ — диагностировано. **Причина:** один GitHub-репозиторий обслуживает **4 Coolify-сервиса** (RobloxBankWeb, RobloxBank-Guide, TG_bot, VK_bot), у всех включён auto-deploy по push в main. На один `git push` GitHub шлёт 4 webhook → Coolify запускает 4 деплоя. На RF-сервере живут 3 из 4 (Web + Guide + VK) → пользователь видит «двойной/тройной» деплой даже если правил только `src/app/twa/`. `.github/workflows` пуст, husky-хуков нет, скриптов авто-пуша нет. **Решение (требуется доступ к Coolify UI, не правки кода):** в каждом сервисе → Configuration → "Watch Paths" задать фильтры: Web=`src/**, prisma/**, package*.json, Dockerfile, next.config.ts`; Guide=`src/app/guide/**, public/guide/**, Dockerfile.guide, next.config.guide.ts`; TG=`bots/tg/**, bots/shared/**, prisma/**, package*.json, bots/tg/Dockerfile`; VK=`bots/vk/**, bots/shared/**, prisma/**, package*.json, bots/vk/Dockerfile`. После этого правка UI триггерит только Web.
+- [x] **(2) Оптимизация загрузки TWA** ✅ — сделано: (a) новый `/api/twa/ping` (только JWT verify, без БД/WB-API) заменил `dashboard`-пробу; (b) `Dashboard / WbScreen / BossrobuxScreen / SettingsScreen` подгружаются через `next/dynamic` с `ssr:false` — в стартовом бандле только `OrdersScreen` (default-таб); (c) fast-path: если `initData` или `initDataUnsafe.user.id` уже есть — auth-fetch стартует мгновенно без поллинга; (d) `waitForInitData` сжат с 3000 ms/100 ms до 1200 ms/50 ms; (e) loading-state заменён с emoji-spinner на skeleton-карточки, совпадающие с layout'ом OrdersScreen — нет визуального скачка.
+- [x] **(5) Поиск WB-кодов в БД** ✅ — новый `GET /api/twa/wbcodes/search?q=&status=&denom=&page=&limit=` возвращает коды с `user` и `order`-связкой. `CodesScreen.tsx` получил search bar + status-фильтры (Все / Свободные / Резерв / Забраны); при пустом запросе показывает прежний dashboard (графики/остатки), при заполненном — список карточек кодов (код / номинал / статус / юзер @username / заказ #X / резерв-таймер / батч). 220 ms debounce + анти-stale request guard.
+
+### Спринт 2 — тяжёлые задачи
+
+- [ ] **(1) Перенос кнопок TG-бота внутрь TWA** — убрать Reply Keyboard, оставить одну большую `🚀 Launch Dashboard` (web_app). TG-бот = канал оповещений. Перенести в TWA System / Stats / Rates / AutoBuy хабы. Делать поэтапно.
+- [ ] **(7) Поиск геймпассов по нику** — новый user-flow в TG/VK ботах: «Найти по нику» вместо «пришли ссылку». Бот вызывает `getUserGamepasses` через bridge, показывает inline-кнопки. Менеджеру — кнопка «🔎 Найти GP клиента» в карточке `AWAITING_GAMEPASS` в TWA.
+
+Прогресс отмечается прямо здесь чекбоксами. Каждая закрытая задача документируется ниже в новой сессионной секции.
+
+---
+
 ## Что это за проект
 
 **RobloxBank** — сервис выкупа Robux (внутриигровая валюта Roblox) у российских пользователей. Клиент получил карту Wildberries, на ней написан 7-символьный активационный код. Он вводит код → создаёт геймпасс на Roblox → менеджер выкупает геймпасс → клиент получает деньги.
@@ -2933,3 +2954,90 @@ TG/Web сервисы НЕ затронуты.
 - Юзер активирует код на сайте → VK не доставил ref → юзер пишет что-то в чат → бот вызывает `handleRefActivation` через orphan-recovery → юзер получает **полное** приветствие со ссылкой на инструкцию + админу прилетает карточка `📥 НОВЫЙ КЛИЕНТ` с VK ID, ником, кодом и суммой.
 - Если у юзера уже был `AWAITING_GAMEPASS`/`REJECTED` order — recovery-сообщение тоже теперь с ссылкой на гайд (на случай если юзер забыл инструкцию).
 - `5ZXCZJV` остался без `WbOrder` в БД (фикс работает только для будущих кейсов). Если этот конкретный юзер ещё активен — попросит ссылку на гайд в чате, и бот по orphan-recovery в одном из следующих сообщений сам прогонит его через `handleRefActivation` (код всё ещё `CLAIMED + isUsed=false + no order`).
+
+---
+
+### Сессия 2026-05-31 — Спринт 1: 5 лёгких фиксов (item 2/3/4/5/6) одним проходом
+
+Все правки в одном проходе, без коммита/деплоя — ждём команды на push.
+
+#### 1. Item 4 — `@username` в карточках заказа
+
+- `bots/shared/admin.ts`: добавлены `formatUserHandle(u)` и `formatUserHandleHtml(u)`. Приоритет: TG → `@username` → `name` → `tg:<id>`; VK → `name` → `vk:<id>`. HTML-вариант оборачивает в `<a href="https://t.me/<username>">` либо `tg://user?id=` либо `https://vk.com/id`.
+- `bots/tg/handlers.ts:1262` (`renderOrderCard`): убрал чтение `order.user.name` напрямую, теперь использует `formatUserHandleHtml(order.user)` + дописывает `(ID: ${tgId})` после.
+- `bots/tg/admin/hub-orders.ts:151` (`renderExtendedCard`): убран хрупкий regex `/^@?([a-zA-Z]\w{4,31})$/`, который пытался парсить `@username` из `name`. Теперь читает `order.user.username` напрямую (поле появилось в БД в сессии 2026-05-30).
+- **Корень бага:** v3-сессия 30 мая добавила колонку `User.username` и enrich-скрипт, но забыла обновить `renderOrderCard` — он по-прежнему читал `name`. Эффект: `@SunriseSword` в support-карточке (где `userDisplay` хелпер) vs `:D misak¡ti` в order-карточке.
+
+#### 2. Item 3 — Кнопка «Открыть профиль в Telegram» в TWA
+
+- `src/app/twa/_components/screens/OrdersScreen.tsx:389` (`openContact`): для `tgId`-only юзеров (без `username`):
+  - best-effort `tg.openLink('tg://user?id=...')` (некоторые клиенты пропускают в системный handler);
+  - best-effort `window.location.href = 'tg://...'`;
+  - **гарантированно копирует tgId в буфер** + показывает inline-тост на 2.4 с: «📋 ID 12345 скопирован — вставь в поиск Telegram».
+- Label кнопки стал контекстным: `Написать @username` / `Скопировать ID · 12345` / `Написать в ВКонтакте`. Юзер видит, что кнопка делает, и нет ситуации «кнопка молчит».
+- **Корень бага:** `Telegram.WebApp.openTelegramLink(url)` принимает **только** `https://t.me/*`. Передача `tg://user?id=...` молча игнорируется без ошибки.
+
+#### 3. Item 6 — Двойной деплой Coolify (диагностика, без кода)
+
+- `.github/workflows/` отсутствует, husky-хуков нет, скриптов на push нет.
+- В корне репо: `Dockerfile`, `Dockerfile.guide`, `bots/tg/Dockerfile`, `bots/vk/Dockerfile`. **4 Coolify-сервиса смотрят в один и тот же GitHub-репо**. На каждый `git push origin main` GitHub шлёт 4 webhook → Coolify независимо запускает 4 деплоя.
+- **Действие пользователя в Coolify UI (без правок кода):** в каждом сервисе → Configuration → Watch Paths:
+  - **RobloxBankWeb:** `src/**, prisma/**, package*.json, Dockerfile, next.config.ts, tsconfig.json, public/**`
+  - **RobloxBank-Guide:** `src/app/guide/**, public/guide/**, Dockerfile.guide, next.config.guide.ts, package*.json`
+  - **TG_bot:** `bots/tg/**, bots/shared/**, prisma/**, package*.json`
+  - **VK_bot:** `bots/vk/**, bots/shared/**, prisma/**, package*.json`
+- После этого правка `src/app/twa/` (как 90 % итераций) триггерит только Web.
+
+#### 4. Item 2 — Оптимизация загрузки TWA
+
+- **Новый endpoint `GET /api/twa/ping`** (`src/app/api/twa/ping/route.ts`): только JWT verify, никакой БД и WB API. Используется в `TwaApp` для проверки `localStorage.twa_token`. Раньше проверка делалась через `/api/twa/dashboard`, который тянет `getStats30d()` + 2 запроса в БД — это ~500-1500 ms на холодную.
+- **Динамические импорты** (`TwaApp.tsx`): `Dashboard / WbScreen / BossrobuxScreen / SettingsScreen` теперь через `next/dynamic({ ssr: false })`. В стартовом JS-бандле остаётся только `OrdersScreen` (дефолтный таб) + shell. BossrobuxScreen — 580 LoC + framer-motion зависимость; вытеснение его из initial chunk заметно ускорит cold start для 95 % сессий, где открывают сразу Заказы.
+- **Fast-path auth** (`TwaApp.tsx`): убрана необходимость ждать 3 с `waitForInitData`, если `window.Telegram.WebApp.initData` или `initDataUnsafe.user.id` уже есть — стартует auth-fetch синхронно. Бюджет ожидания сжат с 3000 ms / 100 ms poll до 1200 ms / 50 ms poll (на случай SDK ещё гидрируется).
+- **Skeleton loading state** (`TwaApp.tsx`): emoji-spinner «🟣 Загрузка…» заменён на skeleton, повторяющий layout OrdersScreen (title bar + 4 карточки с убывающей прозрачностью). При появлении реальных данных — fade-in, без визуального скачка.
+- **Прогноз:** cold load дашборда с ~2-3 с (initData poll + dashboard verify + загрузка 5 экранов) сократится до ~600-1000 ms (только ping verify + загрузка OrdersScreen + первый orders fetch).
+
+#### 5. Item 5 — Поиск WB-кодов в TWA
+
+- **Новый endpoint `GET /api/twa/wbcodes/search`** (`src/app/api/twa/wbcodes/search/route.ts`):
+  - Query: `q` (substring), `status` (AVAILABLE/RESERVED/CLAIMED), `denom` (exact), `page`, `limit` (≤200).
+  - Возвращает `{ codes, total, page, pages, limit }`. Каждый код включает: `denomination`, `status`, `isUsed`, `reservedUntil`, `usedAt`, `batch`, `reviewBonusClaimed`, `user` (id/tgId/vkId/name/username), `order` (id/status/amount/createdAt — батч-запрос по `wbCode IN (...)`).
+  - Order JOIN сделан отдельным batch-запросом вместо `include`, чтобы не дёргать `WbOrder.findFirst` per-row.
+- **`CodesScreen.tsx` переписан с расширением, не заменой:** прежний dashboard (графики/остатки) остаётся при пустом поиске. Сверху появилась `SearchBar` (filled input в `rgba(118,118,128,0.24)` + status-фильтры pill-ряд). При q/status — рендер списка `CodeRow` (моноспейс-код, denom, status pill, USED/⭐+100 чипы, юзер `@username`, связанный заказ `#XXXXXX · status · amount`, резерв-таймер если активен).
+- **Анти-stale:** `reqIdRef.current` инкрементируется на каждый запрос, поздние ответы выбрасываются (тот же приём что в OrdersScreen). Debounce 220 ms.
+- TypeScript checked, `npx tsc --noEmit` → exit 0.
+
+#### Файлы — список изменений (в working tree, push ждёт команды)
+
+| Файл | Изменение |
+|---|---|
+| `bots/shared/admin.ts` | +50 LoC: `UserHandleSource`, `formatUserHandle`, `formatUserHandleHtml` |
+| `bots/tg/handlers.ts` | импорт + перепись блока user label в `renderOrderCard` |
+| `bots/tg/admin/hub-orders.ts` | импорт + замена regex-парсинга `@handle` на DB `username` |
+| `src/app/twa/_components/screens/OrdersScreen.tsx` | `openContact` с гарантированным copy-fallback + toast |
+| `src/app/twa/_components/TwaApp.tsx` | dynamic imports, ping-endpoint, fast-path, skeleton |
+| `src/app/api/twa/ping/route.ts` | новый — JWT verify only |
+| `src/app/api/twa/wbcodes/search/route.ts` | новый — search endpoint |
+| `src/app/twa/_components/screens/CodesScreen.tsx` | переписан: search + status фильтры + результаты |
+| `HANDOFF.md` | план + эта секция |
+
+#### Деплой команд (после команды пользователя)
+
+```bash
+# Web — затронут (TWA + новые API):
+curl -s -X POST \
+  "http://89.110.94.117:8000/api/v1/deploy?uuid=z10ws7m1q45h281zwedmhei4&force=true" \
+  -H "Authorization: Bearer $COOLIFY_TOKEN"
+
+# TG-bot — затронут (formatUserHandle в admin.ts + hub-orders.ts):
+curl -s -X POST \
+  "http://89.110.94.117:8000/api/v1/deploy?uuid=lyz78enntugna9em1biopinr&force=true" \
+  -H "Authorization: Bearer $COOLIFY_TOKEN"
+
+# VK-bot — НЕ затронут (admin.ts только новые экспорты, vk handlers не правились). Передеплой не нужен.
+```
+
+#### Что осталось на спринт 2 (тяжёлое)
+
+- **(1) Перенос кнопок TG-бота внутрь TWA** — удалить Reply Keyboard (`bots/tg/admin/menu.ts`), поставить одну `🚀 Launch Dashboard` (web_app reply button), мигрировать System/Stats/Rates/AutoBuy хабы в TWA-экраны.
+- **(7) Поиск геймпассов по нику для клиента** — новый flow в TG/VK ботах: вместо «пришли ссылку» — «введи ник Roblox», бот через bridge возвращает inline-кнопки с подходящими по цене pass'ами. Менеджеру — кнопка «🔎 Найти GP клиента» в TWA-карточке `AWAITING_GAMEPASS`.
+

@@ -382,11 +382,19 @@ function extractGamepassId(url: string | null): string | null {
 }
 
 /* ───────────── Contact button — direct chat link ─────────────
-   Plain <a href="tg://..."> is silently swallowed inside the Telegram WebApp;
-   the click does nothing. The only reliable path is the WebApp JS API:
-   Telegram.WebApp.openTelegramLink(url) closes the WebApp and opens the chat.
+   Inside Telegram WebApp:
+   - Telegram.WebApp.openTelegramLink ONLY accepts https://t.me/* URLs.
+     Passing tg://user?id=... is silently ignored — that was the "ничего не происходит"
+     bug for users without a public @username (item 3).
+   - For tgId-only users there is no reliable in-WebApp way to open the profile,
+     so we always copy the ID to clipboard as a guaranteed fallback, then attempt
+     the deep link via openLink and window.location as best-effort.
+   Result: тап на кнопку всегда что-то делает (минимум — ID в буфере + тост).
 */
-function openContact(user: Order["user"]) {
+function openContact(
+  user: Order["user"],
+  notify: (msg: string) => void,
+) {
   const tg = (typeof window !== "undefined" ? window.Telegram?.WebApp : undefined) as any;
   if (user.username) {
     const url = `https://t.me/${user.username}`;
@@ -395,9 +403,16 @@ function openContact(user: Order["user"]) {
     return;
   }
   if (user.tgId) {
-    const url = `tg://user?id=${user.tgId}`;
-    if (tg?.openTelegramLink) tg.openTelegramLink(url);
-    else window.location.href = url;
+    // Best-effort: try opening the deep link via the generic openLink
+    // (some clients pass tg:// through to the system handler), then via
+    // window.location as a second attempt. Both may silently no-op.
+    const deepLink = `tg://user?id=${user.tgId}`;
+    try { tg?.openLink?.(deepLink); } catch {}
+    try { window.location.href = deepLink; } catch {}
+    // Guaranteed fallback — copy the ID so the manager can paste it
+    // into Telegram's global search and open the profile in one tap.
+    copyText(String(user.tgId));
+    notify(`📋 ID ${user.tgId} скопирован — вставь в поиск Telegram`);
     return;
   }
   if (user.vkId) {
@@ -408,27 +423,45 @@ function openContact(user: Order["user"]) {
 }
 function contactLabel(user: Order["user"]): string | null {
   if (user.username) return `Написать @${user.username}`;
-  if (user.tgId)     return "Открыть профиль в Telegram";
+  if (user.tgId)     return `Скопировать ID · ${user.tgId}`;
   if (user.vkId)     return "Написать в ВКонтакте";
   return null;
 }
 function ContactButton({ user }: { user: Order["user"] }) {
+  const [toast, setToast] = useState<string | null>(null);
   const label = contactLabel(user);
   if (!label) return null;
   return (
-    <button
-      onClick={e => { e.stopPropagation(); openContact(user); }}
-      style={{
-        marginTop: 14, display: "block", textAlign: "center" as const,
-        width: "100%", padding: "13px", borderRadius: 13, border: "none",
-        background: "linear-gradient(180deg, rgba(10,132,255,0.20), rgba(10,132,255,0.10))",
-        boxShadow: `inset 0 0 0 1px rgba(10,132,255,0.35)`,
-        color: "#7ec5ff", fontSize: 15, fontWeight: 600, letterSpacing: 0.2,
-        cursor: "pointer", fontFamily: "inherit",
-      }}
-    >
-      💬 {label}
-    </button>
+    <div style={{ marginTop: 14 }}>
+      <button
+        onClick={e => {
+          e.stopPropagation();
+          openContact(user, msg => {
+            setToast(msg);
+            setTimeout(() => setToast(null), 2400);
+          });
+        }}
+        style={{
+          display: "block", textAlign: "center" as const,
+          width: "100%", padding: "13px", borderRadius: 13, border: "none",
+          background: "linear-gradient(180deg, rgba(10,132,255,0.20), rgba(10,132,255,0.10))",
+          boxShadow: `inset 0 0 0 1px rgba(10,132,255,0.35)`,
+          color: "#7ec5ff", fontSize: 15, fontWeight: 600, letterSpacing: 0.2,
+          cursor: "pointer", fontFamily: "inherit",
+        }}
+      >
+        💬 {label}
+      </button>
+      {toast && (
+        <div style={{
+          marginTop: 8, padding: "8px 12px", borderRadius: 10,
+          background: `${C.green}26`, color: C.green,
+          fontSize: 12.5, fontWeight: 500, textAlign: "center" as const,
+        }}>
+          {toast}
+        </div>
+      )}
+    </div>
   );
 }
 

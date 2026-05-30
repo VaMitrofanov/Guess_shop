@@ -104,6 +104,54 @@ export const ADMIN_IDS: string[] = (
   .map((s) => s.trim())
   .filter(Boolean);
 
+// ── Unified user-handle formatting ─────────────────────────────────────────────
+
+/** Minimal shape needed by {@link formatUserHandle}. */
+export interface UserHandleSource {
+  tgId?:     string | null;
+  vkId?:     string | null;
+  username?: string | null;
+  name?:     string | null;
+}
+
+/**
+ * Build the canonical user label for admin cards.
+ *
+ * TG priority:  `@username` (clickable) → display name → `tg:<id>`
+ * VK priority:  display name → `vk:<id>`
+ *
+ * Returns plain text — caller wraps in HTML link as needed.
+ */
+export function formatUserHandle(u: UserHandleSource): string {
+  if (u.tgId) {
+    if (u.username) return `@${u.username}`;
+    return u.name ?? `tg:${u.tgId}`;
+  }
+  if (u.vkId) {
+    return u.name ?? `vk:${u.vkId}`;
+  }
+  return u.name ?? "Неизвестен";
+}
+
+/**
+ * Same as {@link formatUserHandle} but wrapped in an HTML link to the user's profile.
+ * Suitable for HTML-formatted admin messages.
+ */
+export function formatUserHandleHtml(u: UserHandleSource): string {
+  const label = formatUserHandle(u);
+  if (u.tgId) {
+    // @username links work natively in Telegram even without an explicit <a>,
+    // but wrapping in tg://user?id=... gives a deterministic profile link
+    // that works even if the handle is unavailable.
+    if (u.username) return `<a href="https://t.me/${u.username}">${label}</a>`;
+    return `<a href="tg://user?id=${u.tgId}">${label}</a>`;
+  }
+  if (u.vkId) {
+    return `<a href="https://vk.com/id${u.vkId}">${label}</a>`;
+  }
+  return label;
+}
+
 // ── callback_data constants (≤ 64 bytes guaranteed with CUID ~25 chars) ────────
 export const CB = {
   adminOk:    (orderId: string) => `admin_ok:${orderId}`,   // 34 b

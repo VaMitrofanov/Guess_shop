@@ -10,7 +10,7 @@ import { Telegraf, Markup } from "telegraf";
 import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, stripHtml, tgSend } from "../shared/notify";
-import { sendAdminOrderCard, sendAdminReviewCard, sendAdminSupportAlert, notifySupportShown, sendAdminDirectOrderCard, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS } from "../shared/admin";
+import { sendAdminOrderCard, sendAdminReviewCard, sendAdminSupportAlert, notifySupportShown, sendAdminDirectOrderCard, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS, formatUserHandle, formatUserHandleHtml } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectAmount, pendingDirectOrder, pendingPaymentDetails, pendingPaymentScreenshot, type LinkFailState, type DirectOrderState } from "./session";
 import { getGamepassDetails } from "../shared/roblox";
 import { buildAdminKeyboard, updateMainMenu, routeAdminCallback } from "./admin";
@@ -1252,15 +1252,13 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
     ? new Date(order.createdAt).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " МСК"
     : "";
 
-  // User profile link
+  // User profile link — prefer @username (clickable) over display name.
+  // See HANDOFF item 4: @SunriseSword/@username should win over ":D misak¡ti".
   let userLabel = "Неизвестен";
   if (order.user) {
-    if (order.user.vkId) {
-      const vkName = order.user.name || "VK Пользователь";
-      userLabel = `<a href="https://vk.com/id${order.user.vkId}">${vkName}</a>`;
-    } else if (order.user.tgId) {
-      const name = order.user.name || "Пользователь";
-      userLabel = `<a href="tg://user?id=${order.user.tgId}">${name}</a> (ID: ${order.user.tgId})`;
+    userLabel = formatUserHandleHtml(order.user);
+    if (order.user.tgId) {
+      userLabel += ` (ID: ${order.user.tgId})`;
     }
   }
 

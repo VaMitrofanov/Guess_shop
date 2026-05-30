@@ -8,7 +8,7 @@
 
 import { Markup, type Telegraf, type Context } from "telegraf";
 import { db } from "../../shared/db";
-import { CB, ADMIN_IDS } from "../../shared/admin";
+import { CB, ADMIN_IDS, formatUserHandle } from "../../shared/admin";
 import { sendOrEditWidget, editWidget } from "./widgets";
 import { pendingAdminSearch, pendingBatchFulfill } from "../session";
 import { updateMainMenu } from "./menu";
@@ -149,27 +149,22 @@ export async function renderExtendedCard(order: any) {
   }) + " МСК";
 
   // ── Clickable user label ───────────────────────────────────────────────
-  // Priority: @username (auto-linked by TG) → tg://user?id= deep link → VK
+  // Priority: real DB @username (clickable) → display name → tg:// deeplink → VK
   let userLabel = "Неизвестен";
   let contactUrl = "";
 
   if (order.user) {
+    const handle = formatUserHandle(order.user);
     if (order.platform === "TG" && order.user.tgId) {
-      const storedName = order.user.name || "";
-      // Username: alphanumeric + underscores, 5-32 chars
-      const usernameMatch = storedName.match(/^@?([a-zA-Z]\w{4,31})$/);
-
-      if (usernameMatch) {
-        userLabel = `@${usernameMatch[1]}`;
-        contactUrl = `https://t.me/${usernameMatch[1]}`;
+      if (order.user.username) {
+        userLabel = `@${order.user.username}`;
+        contactUrl = `https://t.me/${order.user.username}`;
       } else {
-        const displayName = storedName || "Пользователь";
-        userLabel = `<a href="tg://user?id=${order.user.tgId}">${displayName}</a>`;
+        userLabel = `<a href="tg://user?id=${order.user.tgId}">${handle}</a>`;
         contactUrl = `tg://user?id=${order.user.tgId}`;
       }
     } else if (order.platform === "VK" && order.user.vkId) {
-      const vkName = order.user.name || "VK Пользователь";
-      userLabel = `<a href="https://vk.com/id${order.user.vkId}">${vkName}</a>`;
+      userLabel = `<a href="https://vk.com/id${order.user.vkId}">${handle}</a>`;
       contactUrl = VK_GROUP_ID
         ? `https://vk.com/gim${VK_GROUP_ID}?sel=${order.user.vkId}`
         : `https://vk.com/id${order.user.vkId}`;
