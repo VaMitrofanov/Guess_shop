@@ -3038,6 +3038,130 @@ curl -s -X POST \
 
 #### Что осталось на спринт 2 (тяжёлое)
 
-- **(1) Перенос кнопок TG-бота внутрь TWA** — удалить Reply Keyboard (`bots/tg/admin/menu.ts`), поставить одну `🚀 Launch Dashboard` (web_app reply button), мигрировать System/Stats/Rates/AutoBuy хабы в TWA-экраны.
-- **(7) Поиск геймпассов по нику для клиента** — новый flow в TG/VK ботах: вместо «пришли ссылку» — «введи ник Roblox», бот через bridge возвращает inline-кнопки с подходящими по цене pass'ами. Менеджеру — кнопка «🔎 Найти GP клиента» в TWA-карточке `AWAITING_GAMEPASS`.
+См. секцию ниже «План спринта 2».
+
+---
+
+### План спринта 2 — детальный (черновик до апрува пользователя)
+
+#### Item 1 — TG-бот = канал оповещений, всё остальное в TWA
+
+**Цель.** Убрать у админов в обычном TG всю «рабочую» клавиатуру под полем ввода. На её месте — одна большая `🚀 Launch Dashboard` (web_app reply button) на всю ширину. Бот остаётся каналом уведомлений (карточки заказов / отзывов / оплат / поддержки — с inline-кнопками-действиями ✅/❌, которые завязаны на контекст конкретного уведомления и не имеют смысла вне его). Всё «исследование» (поиск, статистика, система, курс, остатки, авто-выкуп) живёт в TWA.
+
+Реализуется фазами — после каждой можно остановиться и проверить.
+
+**Фаза A — Launch-кнопка вместо Reply Keyboard (минимальный изменный набор).**
+
+- `bots/tg/admin/menu.ts`: `buildAdminKeyboard()` переписать на single-button web_app keyboard: `Markup.keyboard([[ Markup.button.webApp("🚀 Launch Dashboard", TWA_URL) ]]).resize()`. Telegram при `web_app` в reply-button сам делает кнопку фирменно-синей на всю ширину.
+- `updateMainMenu()` остаётся, но теперь шлёт one-shot push для смены клавиатуры (без живых счётчиков — счётчики переезжают в TWA badge через polling, который уже есть в `TwaApp.tsx`).
+- `bots/tg/admin/index.ts`: удалить все `bot.hears(/^📦 Заказы/, ...)` и проч. — текстовая клава больше не реагирует. Колбэки и text-interceptors из admin hub'ов **временно оставить** — старые workflow ввода (поиск, ввод курса, codes input) перестанут вызываться через клаву, но если до их рефакторинга кто-то отправит соответствующий текст — продолжат работать. После Phase B будут удалены.
+- `bots/tg/bot.ts`: `setupMenuButton(bot)` остаётся (Menu-button слева = вторая точка входа в TWA, как пользователь просил «оба варианта»).
+- **Side-effects:** prepared hub-функции `showOrdersHub`/`showStatsHub` и т.д. через клавиатуру вызываться перестанут. Через `routeAdminCallback` (с inline-кнопок на старых сообщениях) пока сработают — без поломки.
+- **Файлы:** `bots/tg/admin/menu.ts`, `bots/tg/admin/index.ts`, `bots/tg/bot.ts`.
+
+**Фаза B — Перенос недостающих хабов в TWA.**
+
+Сейчас в TWA нет: System / Stats / Rates / AutoBuy. Это четыре экрана + соответствующие API.
+
+- **`SystemScreen`** (`src/app/twa/_components/screens/SystemScreen.tsx`):
+  - Содержание hub-system: контейнеры (TG-bot, VK-bot, Web, Guide) — статус, аптайм, кнопка рестарт; последние N строк логов; Hetzner-мониторинг (статус сервера, €/мес); VDSina-баланс ₽ с алертом.
+  - API: `GET /api/twa/system` → суммарный snapshot; `POST /api/twa/system/restart` body `{ name }` → выдернуть из `hub-system.ts:handleRestartConfirm` логику. Hetzner/VDSina-monitor функции уже есть, их можно вытащить в `src/lib/system-monitor.ts`.
+- **`StatsScreen`** (`src/app/twa/_components/screens/StatsScreen.tsx`):
+  - Содержание hub-stats: ежедневная статистика (заказы/выручка по дням), управление курсом RUB→R$.
+  - API: `GET /api/twa/stats?period=...` + `POST /api/twa/stats/rate` body `{ rate }`. Часть логики уже есть в `/api/twa/dashboard` — переиспользовать без дублирования.
+- **`RatesScreen`** (`src/app/twa/_components/screens/RatesScreen.tsx`):
+  - Содержание hub-rates: текущий курс RUB/R$ и аналитика курсов.
+  - API: `GET /api/twa/rates` + `GET /api/twa/rates/analytics`.
+- **`AutoBuyScreen`** (`src/app/twa/_components/screens/AutoBuyScreen.tsx`):
+  - Содержание hub-autobuy: toggle on/off, лимиты, курс для авто-выкупа, Boss Robux настройки (часть уже в `BossrobuxScreen`, но логика покупки/настроек разнесена — нужно посмотреть как объединить без дублирования).
+  - API: `GET /api/twa/autobuy`, `POST /api/twa/autobuy/toggle`, `POST /api/twa/autobuy/rate`.
+
+**BottomNav после переноса (5 табов, 4 видимых + drawer):**
+
+Вариант 1 (рекомендуемый): добавить **«Бизнес»** hub-таб вместо «Главная». Внутри Бизнес — segment-control (как в WbScreen) с табами `Статистика · Курс · Авто-выкуп · Система`. Так нижняя навигация остаётся компактной (5 видимых), без обрезаний.
+
+Старая «Главная» (Dashboard) становится первой подвкладкой Бизнеса. Если пользователь захочет — можно вернуть Dashboard в Settings или удалить.
+
+- **Файлы (Фаза B):** 4 новых API роута + 4 новых screen-файла + правка `TwaApp.tsx` (новый screen-id `business`) + правка `BottomNav.tsx`.
+
+**Фаза C — Уборка мёртвого кода в TG-боте (после стабилизации Фаз A/B).**
+
+- Удалить `bot.on("text")` интерсепторы для `pendingRateInput / pendingCodesInput / pendingPriceInput / pendingReviewAnswer / pendingCostInput / pendingLogisticsInput / pendingAdInput / pendingDenomInput / pendingUeSettingInput / pendingWhatIfInput / pendingAutoBuyRateInput / pendingBossrobuxSearch` из `bots/tg/admin/index.ts`. Те же поля в `bots/tg/session.ts` — оставить только активно используемые (`pendingAdminSearch` останется, если поиск из карточки уведомления потребуется).
+- Удалить функции showXHub из `bots/tg/admin/index.ts:routeAdminCallback` для миграционных кейсов (System / Stats / Rates / AutoBuy). Файлы `hub-system.ts / hub-stats.ts / hub-rates.ts / hub-autobuy.ts` физически удалить можно только когда нет старых inline-кнопок в чатах. Безопаснее: оставить файлы как есть на 1-2 недели, потом удалить.
+- Карточки уведомлений (`sendAdminOrderCard / sendAdminDirectOrderCard / sendAdminPaymentCard / sendAdminReviewCard / sendAdminSupportAlert`) и их inline-кнопки (✅ ВЫКУПЛЕНО / ❌ ОШИБКА / 💳 / 📊 Открыть в дашборде / etc.) **не трогаются** — это и есть «канал оповещений» с быстрыми действиями.
+
+**Риски и проверки.**
+
+- Reply Keyboard `Markup.button.webApp(...)` действительно открывает TWA в personal chats — проверено на других сервисах. Если на iOS старые версии TG не поддерживают — будет fallback на текст-нажатие (юзер увидит просто кнопку без web_app действия). Современные iOS Telegram-клиенты поддерживают.
+- При деплое TG-bot контейнер придётся передеплоить (изменения в `bots/tg/`).
+- Менеджеры увидят новую клавиатуру **сразу после следующего сообщения боту** (Telegram не «толкает» обновлённую клавиатуру без message; либо `updateMainMenu` шлёт минимальное сообщение, либо ждём первого `/admin` или ответа на любую карточку).
+
+**Прогноз LoC изменений.** Фаза A ~50 строк правок. Фаза B ~600-800 строк нового кода (4 API + 4 screen, по средним метрикам существующих). Фаза C ~100-200 удалений.
+
+---
+
+#### Item 7 — Поиск геймпассов по нику для клиента + помощь менеджеру
+
+**Цель.** Заменить «пришли ссылку на геймпасс» на «введи ник Roblox → выбери из подсвеченных вариантов». Это убирает у клиентов часть боли (особенно тех, кто впервые создаёт геймпасс и не понимает откуда брать ссылку), плюс уменьшает количество reject'ов из-за неправильных URL.
+
+Параллельно — менеджер в TWA может за клиента найти его геймпасс из карточки `AWAITING_GAMEPASS` (через тот же endpoint).
+
+**Что уже есть и переиспользуется.**
+
+- `bots/shared/roblox.ts:getUserGamepasses(username)` — рабочий, через bridge на SG, валидирует, возвращает массив `{ id, name, price, isForSale, productId, sellerId }`.
+- `bots/shared/bridge.ts:POST /search-gamepasses` — рабочий, доступен с обоих серверов.
+- `src/app/api/twa/bossrobux/route.ts action=search` — TWA уже умеет поиск, переиспользуем endpoint или клонируем под отдельный.
+
+**Фаза A — TG-бот клиентский flow.**
+
+- В welcome-сообщении после provisional order (`bots/tg/handlers.ts:204-247`, ветки PROVISIONAL для текстового ввода и для start-link): сейчас отдаётся «Инструкция» + «Купить напрямую». Добавить третью inline-кнопку **`🔎 Найти по моему нику Roblox`** (callback `find_gp_start`).
+- Новое состояние сессии `pendingRobloxNick` (`bots/tg/session.ts`): `Map<tgId, { wbCode, denomination }>`.
+- Новый callback `find_gp_start`:
+  - Reply: «Введи свой ник в Roblox (как при входе в игру):»
+  - `pendingRobloxNick.set(ctx.from.id, { wbCode: ..., denomination: ... })` — берём из existing `WbOrder(AWAITING_GAMEPASS)` юзера.
+- Новый handler `handleRobloxNickInput(ctx, nick)` (вставляется в `registerText` после text-entry проверок):
+  - Валидация ника: regex `/^[a-zA-Z0-9_]{3,20}$/` (Roblox правила).
+  - `getUserGamepasses(nick)` через bridge.
+  - Фильтр на стороне бота: `gp.isForSale !== false && Math.abs(gp.price - passPrice) <= 2` (passPrice = `Math.ceil(denomination / 0.7)`).
+  - **0 результатов** → reply «У @ника не нашли геймпасса за `${passPrice} R$`. Проверь что создал, и попробуй ещё раз. Или пришли ссылку как раньше.» + retry-кнопка + ссылка на инструкцию.
+  - **1 результат** → reply «Нашёл `${name}` за `${price} R$`. Принять? [✅ Да, выкупить] [❌ Это не он]». Callback `gp_pick:{passId}` → синтезирует URL `https://www.roblox.com/game-pass/{passId}` → диспатчит в уже существующий `handleGamepassLink` flow (с той же валидацией / транзакцией). Не дублируем код выкупа.
+  - **N результатов (≤5)** → reply со списком inline-кнопок: `[💎 ${name1} · ${price1} R$]`, `[💎 ${name2} · ${price2} R$]` и т.д. Callback `gp_pick:{passId}`.
+  - **>5 результатов** → показываем 5 лучших (отсортированных по близости к passPrice) + reply «Если нет нужного — пришли ссылку текстом».
+- Edge case: приватный профиль Roblox / 0 gamepasses → подсказка как открыть профиль или подсказка «убедись что pass публичный, скрин-инструкция → /guide…».
+- Лёгкий cache на 60 с per-tgId, чтобы повторный тап «Это не он» → «Найти ещё» не дёргал bridge заново.
+- **Файлы:** `bots/tg/handlers.ts`, `bots/tg/session.ts`, `bots/shared/roblox.ts` (если потребуется адаптация фильтра).
+
+**Фаза B — VK-бот клиентский flow (симметрично).**
+
+- Те же шаги в `bots/vk/handlers.ts`. VK keyboard buttons (payload `{ command: "find_gp_start" }`, `{ command: "gp_pick", passId }`), `pendingRobloxNick` в `bots/vk/session.ts`.
+- Технически проще, потому что VK поддерживает payload без 64-байтного лимита Telegram callback_data.
+- **Файлы:** `bots/vk/handlers.ts`, `bots/vk/session.ts`.
+
+**Фаза C — Менеджер в TWA.**
+
+- В детализации карточки заказа со статусом `AWAITING_GAMEPASS` (`OrdersScreen.tsx`) — кнопка **`🔎 Найти GP клиента`**. Видна только если есть `order.robloxUsername` (был сохранён, например через TWA enrich) или предлагает ввести ник.
+- Открывает компактный inline-модал (или переходит в BossrobuxScreen с `preloadUsername`): показывает список найденных gamepasses, у каждой строки «📋 Скопировать URL» + «💬 Отправить клиенту» (последнее — будущая фича, через TG API bot.sendMessage; в этот спринт делаем только Скопировать).
+- Сценарий менеджера: клиент не разобрался / прислал не то / ник Roblox известен → менеджер за 10 сек находит нужный pass и шлёт URL в TG диалог вручную.
+- **Файлы:** `OrdersScreen.tsx` + возможно расширение `BossrobuxScreen.tsx` либо новый mini-модал.
+
+**Фаза D — Smoke tests на реальных кейсах.**
+
+- `lokomotiv_2018` (известный рабочий, из сессии 2026-05-27).
+- 0-results — например выдуманный ник `qwertyzzz9999`.
+- N-results — `Dark_Varia8954` (Мила Платонова, у неё несколько pass'ов).
+- Edge: приватный профиль, бот-аккаунт без gamepasses.
+
+**Прогноз LoC.** Фаза A ~150 строк. Фаза B ~120 строк (с переиспользованием). Фаза C ~80 строк. Документация в HANDOFF.
+
+---
+
+#### Порядок выполнения спринта 2 (после команды пользователя)
+
+1. **Item 1 Фаза A** (Launch-кнопка) — минимальный риск, мгновенный визуальный эффект. ~50 строк.
+2. **Item 7 Фаза A** (TG-бот клиентский flow) — самостоятельная ценность для клиентов и менеджеров.
+3. **Item 7 Фаза B** (VK-бот симметрично) — закрывает второй канал.
+4. **Item 1 Фаза B** (TWA-экраны System/Stats/Rates/AutoBuy) — самая объёмная работа, делается отдельным сабсессией если устанем.
+5. **Item 1 Фаза C** (cleanup) и **Item 7 Фаза C** (TWA helper для менеджера) и Фаза D (smoke tests) — финальная полировка.
+
+Между фазами — commit + (опционально) deploy + (опционально) демонстрация. Можно остановиться на любой фазе если приоритеты сменятся.
 
