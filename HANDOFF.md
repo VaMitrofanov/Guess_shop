@@ -16,10 +16,18 @@
 - [x] **(2) Оптимизация загрузки TWA** ✅ — сделано: (a) новый `/api/twa/ping` (только JWT verify, без БД/WB-API) заменил `dashboard`-пробу; (b) `Dashboard / WbScreen / BossrobuxScreen / SettingsScreen` подгружаются через `next/dynamic` с `ssr:false` — в стартовом бандле только `OrdersScreen` (default-таб); (c) fast-path: если `initData` или `initDataUnsafe.user.id` уже есть — auth-fetch стартует мгновенно без поллинга; (d) `waitForInitData` сжат с 3000 ms/100 ms до 1200 ms/50 ms; (e) loading-state заменён с emoji-spinner на skeleton-карточки, совпадающие с layout'ом OrdersScreen — нет визуального скачка.
 - [x] **(5) Поиск WB-кодов в БД** ✅ — новый `GET /api/twa/wbcodes/search?q=&status=&denom=&page=&limit=` возвращает коды с `user` и `order`-связкой. `CodesScreen.tsx` получил search bar + status-фильтры (Все / Свободные / Резерв / Забраны); при пустом запросе показывает прежний dashboard (графики/остатки), при заполненном — список карточек кодов (код / номинал / статус / юзер @username / заказ #X / резерв-таймер / батч). 220 ms debounce + анти-stale request guard.
 
-### Спринт 2 — тяжёлые задачи
+### Спринт 2 — тяжёлые задачи (в работе)
 
-- [ ] **(1) Перенос кнопок TG-бота внутрь TWA** — убрать Reply Keyboard, оставить одну большую `🚀 Launch Dashboard` (web_app). TG-бот = канал оповещений. Перенести в TWA System / Stats / Rates / AutoBuy хабы. Делать поэтапно.
-- [ ] **(7) Поиск геймпассов по нику** — новый user-flow в TG/VK ботах: «Найти по нику» вместо «пришли ссылку». Бот вызывает `getUserGamepasses` через bridge, показывает inline-кнопки. Менеджеру — кнопка «🔎 Найти GP клиента» в карточке `AWAITING_GAMEPASS` в TWA.
+- [~] **(1) Перенос кнопок TG-бота внутрь TWA** — **Phase A сделана** (коммит `6613568`). Phase B/C не начаты.
+  - ✅ **Phase A:** `bots/tg/admin/menu.ts` переписан — Reply Keyboard теперь одна большая `🚀 Launch Dashboard` (web_app). `updateMainMenu` оставлен как no-op чтобы старые call-сайты компилировались. `/admin` сообщение обновлено.
+  - ⏳ **Phase B (не начата):** перенос System / Stats / Rates / AutoBuy хабов в TWA-экраны. Это ~600-800 строк (4 React-экрана + 4 API endpoint + reshuffle BottomNav). **Заброшена до ревью пользователем — слишком объёмный кусок для одной сессии.**
+  - ⏳ **Phase C (не начата):** удаление мёртвых text-interceptors из `bots/tg/admin/index.ts` после стабилизации Phase B.
+
+- [~] **(7) Поиск геймпассов по нику** — **Phase A+B сделаны** (коммит `6613568`). Phase C/D не начаты.
+  - ✅ **Phase A (TG client):** новая inline-кнопка «🔎 Найти по моему нику Roblox» в welcome после provisional order. Состояние `pendingRobloxNick`, callback `CB.findGpStart`/`CB.gpPick`. Большой кусок validation+transaction (~330 строк) вынесен в `processGamepassSubmission` — переиспользуется text-handler'ом и callback'ом без дублирования. UX: 0/1/N результатов с разной клавиатурой.
+  - ✅ **Phase B (VK client):** аналогичный flow в `bots/vk/handlers.ts`. Новое состояние `AWAITING_ROBLOX_NICK` в `VKState`. `handleFindGpStart` / `handleRobloxNickInput` / `handleGpPick`. Picker вызывает существующий `handleGamepassLink(url)` напрямую — никакой дубликат логики.
+  - ⏳ **Phase C (не начата):** кнопка «🔎 Найти GP клиента» в TWA `OrdersScreen` для `AWAITING_GAMEPASS` карточки.
+  - ⏳ **Phase D (не начата):** smoke-tests на `lokomotiv_2018` / `Dark_Varia8954` / 0-results / приватный профиль.
 
 Прогресс отмечается прямо здесь чекбоксами. Каждая закрытая задача документируется ниже в новой сессионной секции.
 
@@ -3164,4 +3172,76 @@ curl -s -X POST \
 5. **Item 1 Фаза C** (cleanup) и **Item 7 Фаза C** (TWA helper для менеджера) и Фаза D (smoke tests) — финальная полировка.
 
 Между фазами — commit + (опционально) deploy + (опционально) демонстрация. Можно остановиться на любой фазе если приоритеты сменятся.
+
+---
+
+### Сессия 2026-05-31 — Спринт 2 Phase A: Launch-кнопка + GP-search-by-nick (коммит `6613568`)
+
+Спринт 1 (5 лёгких фиксов) перед этим автодеплоился по push: коммит `7169e86` подхватил RobloxBankWeb + TG_bot + VK_bot. Это сразу проявило item 6 на практике — двойной/тройной деплой на один push. Решение задокументировано выше (Watch Paths в Coolify UI). После этого `git push` ушёл коммит `6613568` — он тоже сам поднимет 3 сервиса.
+
+#### Что попало в коммит `6613568`
+
+**Item 1 Phase A — TG-бот = канал оповещений** (`bots/tg/`):
+- `admin/menu.ts` переписан: 6-кнопочная Reply Keyboard заменена на single web_app кнопку `🚀 Launch Dashboard`. `Markup.button.webApp(...)` рендерится Telegram'ом в фирменном синем градиенте на всю ширину. `.persistent()` чтобы оставалась после первого `/start`.
+- `updateMainMenu(bot)` оставлен как no-op. Старые call-сайты (`handlers.ts:1771` после `admin_ok`, `hub-orders.ts:523` после `ord_work`) продолжают компилироваться. Раньше функция шла «📋 В очереди: N» — это пуш-обновлял счётчики на текстовых кнопках; теперь счётчики в TWA-badge (`TwaApp.tsx` polling уже есть), пушить нечего.
+- `/admin` команда (`handlers.ts:1639`): текст обновлён — «Жми Launch Dashboard внизу — там всё. Этот чат теперь канал оповещений.»
+- **Что не тронуто (намеренно):** карточки `sendAdminOrderCard / sendAdminDirectOrderCard / sendAdminPaymentCard / sendAdminReviewCard / sendAdminSupportAlert` и их inline-действия (✅ ВЫКУПЛЕНО / ❌ ОШИБКА / 💳 / 📊 Открыть в дашборде). Это и есть «канал оповещений» — каждая карточка несёт контекст и быстрые действия.
+
+**Item 7 Phase A — TG client gamepass search by nick** (`bots/tg/`, `bots/shared/`):
+- Новый `LinkState` и `GpSearchHit` типы в `session.ts`, плюс мапы `pendingRobloxNick` и `robloxGpCache`.
+- В `shared/admin.ts CB`: новые константы `findGpStart`, `findGpRetry`, `gpPick(passId)` (≤22 байт каждая).
+- В `handlers.ts`:
+  - **Большой кусок (validation Roblox + atomic WbOrder transaction + admin notify, ~330 строк)** вынесен из text-handler'а в module-level `async function processGamepassSubmission(bot, ctx, state, passId)`. Текст-handler теперь вызывает её одной строкой.
+  - Welcome после provisional order (обе ветки: `registerStart` start-link и `handleWbCodeTextEntry` plain text) получили inline-кнопку `🔎 Найти по моему нику Roblox` для не-админов. Админам — старая Reply Keyboard (теперь это Launch button).
+  - В `registerCallbacks`: handlers для `findGpStart` (ask for nick → set state), `findGpRetry` (re-ask), `gpPick:<passId>` (re-derive state from DB, push to processGamepassSubmission).
+  - В text-handler перед всеми остальными ветками: intercept `pendingRobloxNick.has(tgId)` → `handleRobloxNickInput`.
+  - `handleRobloxNickInput`: валидирует ник regex `/^[A-Za-z0-9_]{3,20}$/`, зовёт `getUserGamepasses` через bridge, фильтрует по `|price - expectedPrice| <= 2`, кеширует hit'ы в `robloxGpCache` на 60 с. UX по числу результатов:
+    - **0** → подсказка с retry-кнопкой + ссылка на инструкцию + support;
+    - **1** → одна confirm-кнопка `✅ Это он — выкупить (X R$)` + alt-кнопка `🔎 Другой ник`;
+    - **N** → до 5 кнопок `💎 ${name} · ${price} R$` (топ-5 по близости к expectedPrice).
+
+**Item 7 Phase B — VK client симметрично** (`bots/vk/`):
+- В `session.ts` добавлено `AWAITING_ROBLOX_NICK` в `VKState`.
+- В `handlers.ts`:
+  - payload-команды `find_gp_start` и `gp_pick` в `handleMessage`-роутере.
+  - `handleFindGpStart` — set state, ask for nick.
+  - `handleRobloxNickInput` — то же что в TG, но рисует VK Keyboard вместо Telegraf inline.
+  - `handleGpPick` — синтезирует `https://www.roblox.com/game-pass/<passId>` и зовёт уже существующий `handleGamepassLink(ctx, vkUserId, url, wbCode, denomination)` без дублирования логики.
+  - В welcome после provisional order (без guide mode): добавлена кнопка `🔎 Найти по моему нику Roblox` payload `{command:"find_gp_start"}`.
+
+**Что вне коммита `6613568`** (потеряно ради контроля объёма):
+- Item 1 Phase B — 4 новых TWA-экрана (System / Stats / Rates / AutoBuy) + 4 API endpoint + reshuffle `BottomNav`. Начато было: написал стартовый `src/app/api/twa/stats/route.ts` и `src/app/api/twa/rates/route.ts`, но удалил **(working tree чистый)** — без UI-стороны API — мёртвый код. Перепишу одним связным проходом в следующей сессии после ревью текущих изменений.
+- Item 7 Phase C/D.
+- Cleanup мёртвых hub text-interceptors в `bots/tg/admin/index.ts`.
+
+#### Чек-лист пользователя для верификации текущего коммита
+
+После того как Coolify закончит автодеплой `6613568` (по 3 сервисам — это и есть тройной деплой из item 6):
+
+**TG-бот (`@RobloxBankBot` в обычном Telegram):**
+1. `/start` от админа — внизу должна появиться **одна большая синяя кнопка `🚀 Launch Dashboard`** на всю ширину. Тап → открывается TWA.
+2. `/admin` — текст ответа должен указывать на Launch-кнопку.
+3. Старая клавиатура `📦 Заказы (N) · 📈 Статистика · ...` должна исчезнуть. **Если у тебя в Telegram-клиенте всё ещё видна старая 6-кнопочная клавиатура** — это кэш TG-клиента; нажми любую кнопку или напиши боту что угодно — обновится.
+4. **Активация WB-кода** (как клиент, не как админ): введи код → бот ответит «✅ Код XXX активирован!» с inline-кнопкой `🔎 Найти по моему нику Roblox`. Тап → бот спросит ник → введи `lokomotiv_2018` → бот должен показать список pass'ов (или конкретный pass). Тап на pass → бот проверит через Roblox API → создаст заказ или ответит с ошибкой валидации.
+
+**VK-бот (`vk.me/club237309399`):**
+1. Активируй WB-код (через site→VK ref или текстом в VK чат).
+2. После приветствия `✅ Код активирован` — должна быть кнопка `🔎 Найти по моему нику Roblox`.
+3. Тап → бот спросит ник → введи известный ник → список pass'ов inline-кнопками → тап → стандартная валидация и создание заказа.
+
+**TWA (запускается из Launch кнопки):**
+- Должно открыться как обычно (item 2 + 5 уже в проде после спринта 1). Ничего нового — Phase B ещё не делалась.
+
+#### Откат если что-то сломалось
+
+Все изменения в `6613568` — additive, ничего из старой логики не удаляется. Если найдёшь регрессию:
+- Item 1 Phase A: откатить весь файл `bots/tg/admin/menu.ts` к предыдущей версии (там сейчас single-button keyboard вместо 6-кнопочной).
+- Item 7: можно отключить кнопку «🔎 Найти по нику» точечно — убрать `[Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)]` из welcome-сообщений (`handlers.ts:430-433` для start path, `:1511-1513` для text-entry). Сами handlers `findGpStart/gpPick/handleRobloxNickInput` останутся как dead-code, ничего не сломают.
+- `processGamepassSubmission` — это extracted-as-is из text-handler'а, behavior эквивалентен. Если найдёшь split-разницу — readme: оригинальная логика лежала на `handlers.ts:921-1232` в коммите до `6613568`, можно сравнить.
+
+#### Что я НЕ делал и НЕ буду пока не дадите команду
+
+- Item 7 Phase C (manager helper в TWA OrdersScreen).
+- Item 1 Phase B (4 экрана System/Stats/Rates/AutoBuy в TWA). Хочу делать связным проходом после ревью, чтобы не вытаскивать сырые куски.
+- Cleanup hub-* в `bots/tg/admin/`.
 
