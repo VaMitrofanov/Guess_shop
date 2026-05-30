@@ -10,7 +10,7 @@ import { Telegraf, Markup } from "telegraf";
 import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, stripHtml, tgSend } from "../shared/notify";
-import { sendAdminOrderCard, sendAdminReviewCard, sendAdminSupportAlert, notifySupportShown, sendAdminDirectOrderCard, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS, formatUserHandle, formatUserHandleHtml } from "../shared/admin";
+import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUserHurdle, sendAdminDirectOrderCard, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS, formatUserHandle, formatUserHandleHtml } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectAmount, pendingDirectOrder, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, robloxGpCache, type LinkFailState, type DirectOrderState, type LinkState } from "./session";
 import { getGamepassDetails } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
@@ -57,16 +57,26 @@ function generateDirectCode(): string {
 
 // ── Support contact (Progressive Disclosure) ────────────────────────────────
 
-/** Direct URL button — one tap opens the support dialog. When `ctx` is passed,
- *  also fires a deduped admin alert (the button no longer round-trips a callback
- *  we could hook, so we notify admins at show-time instead). */
+/** In-bot support button.
+ *
+ *  Wired as a `callback_data` button (not URL) so a real tap lands the
+ *  `sup:<ctxKey>` callback in the bot; only THEN we send the full SOS alert
+ *  to admins. At show-time, if `ctx` is provided, we fire a much smaller
+ *  "user hurdle" heads-up (one line, no 🆘) so admins can react proactively
+ *  to a stuck user without being misled by a false-positive SOS.
+ *
+ *  The previous URL-button design fired SOS at show-time because URL buttons
+ *  give the bot no callback to hook — that's been replaced with the explicit
+ *  callback flow handled in the `sup:` branch of the cbq handler. */
 function supportBtn(label = "💬 Написать в поддержку", ctxKey = "general", ctx?: any) {
-  if (ctx?.from) void fireSupportAlert(ctx, ctxKey);
-  return Markup.button.url(label, SUPPORT_URL);
+  if (ctx?.from) void fireHurdleAlert(ctx, ctxKey);
+  return Markup.button.callback(label, CB.supTap(ctxKey));
 }
 
-/** Fire-and-forget deduped admin alert when a support button is shown to a user. */
-async function fireSupportAlert(ctx: any, ctxKey: string): Promise<void> {
+/** Fire-and-forget deduped "user is stuck" heads-up — sent when the bot puts
+ *  a support button in front of the user after a dead-end branch. Distinct
+ *  from the full SOS alert, which only fires when the user actually taps. */
+async function fireHurdleAlert(ctx: any, ctxKey: string): Promise<void> {
   try {
     const tgId        = String(ctx.from.id);
     const userDisplay = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? `tg:${tgId}`;
@@ -81,9 +91,9 @@ async function fireSupportAlert(ctx: any, ctxKey: string): Promise<void> {
         if (o) { wbCode = o.wbCode; denom = o.amount; }
       }
     }
-    await notifySupportShown({ platform: "TG", userDisplay, tgId, contextKey: ctxKey, wbCode, denomination: denom });
+    await notifyUserHurdle({ platform: "TG", userDisplay, tgId, contextKey: ctxKey, wbCode, denomination: denom });
   } catch (e) {
-    console.error("[TG] fireSupportAlert failed:", e);
+    console.error("[TG] fireHurdleAlert failed:", e);
   }
 }
 
@@ -1995,14 +2005,22 @@ export function registerCallbacks(bot: Telegraf): void {
         } catch {}
       }
 
-      await sendAdminSupportAlert({
+      // Deduped — a double-tap inside the 30-min window won't spam the admin
+      // chat with two SOS messages.
+      await notifySupportShown({
         platform: "TG", userDisplay, tgId, contextKey: ctxKey,
         wbCode, denomination: denom,
       });
       await ctx.answerCbQuery("Менеджер уже в курсе 👍");
+      // Final hand-off — single-tap URL button lands the user in the support
+      // chat. Keeping it as an inline_keyboard (not a hyperlink in text) gives
+      // a bigger touch target on mobile.
       await ctx.reply(
-        "Соединяем с менеджером — напиши @RobloxBank_PA\n\nМы уже знаем о твоей ситуации 👍",
-        { parse_mode: "HTML" }
+        "🤝 Менеджер уже в курсе. Открой чат с поддержкой 👇\n\nТебе ответят в ближайшее время.",
+        {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[Markup.button.url("📩 Открыть @RobloxBank_PA", SUPPORT_URL)]]),
+        }
       );
       return;
     }

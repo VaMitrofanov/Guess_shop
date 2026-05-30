@@ -28,6 +28,7 @@ const SUPPORT_CONTEXT_LABELS: Record<string, string> = {
   pass_private:   "Геймпасс в закрытой игре",
   pass_inactive:  "Геймпасс не выставлен на продажу",
   pass_price:     "Неверная цена геймпасса",
+  pass_deleted:   "Геймпасс удалён",
   roblox_down:    "Серверы Roblox недоступны",
   order_dupe:     "Дублирующийся заказ",
   order_lost:     "Заказ не найден",
@@ -35,7 +36,12 @@ const SUPPORT_CONTEXT_LABELS: Record<string, string> = {
   resubmit:       "Исправление ссылки",
   review_rej:     "Отзыв отклонён",
   pending_long:   "Заказ долго в обработке",
+  direct_wait:    "Долгое ожидание прямого заказа",
   general:        "Общий вопрос",
+  // Item 7 Phase E — nick-search dead-ends
+  nick_not_found: "Ник Roblox не найден",
+  place_closed:   "Закрытый плейс / нет публичных геймпассов",
+  wrong_price:    "Геймпасс есть, но цена неверна",
 };
 
 export interface SupportAlertPayload {
@@ -72,28 +78,57 @@ export async function sendAdminSupportAlert(p: SupportAlertPayload): Promise<voi
   await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text)));
 }
 
-/** Public support contact. Used as a direct URL button so a single tap opens the dialog. */
+/** Public support contact. Used as the final URL the bot hands the user after
+ *  they tap the in-bot support button — see TG `sup:<ctxKey>` callback. */
 export const SUPPORT_URL = "https://t.me/RobloxBank_PA";
 
-// In-memory dedup: the support button is now a direct URL (one tap → support
-// chat), so we can no longer hook a callback on press. Instead we alert admins
-// when the button is *shown* in a problem context — deduped per
-// (platform, user, context) within a window so a re-rendered dead-end or a user
-// hitting the same error twice doesn't spam the admin chat.
+// In-memory dedup shared by the full SOS alert (real tap) and the lightweight
+// "user hurdle" heads-up (show-time on a dead-end). Different namespaces so
+// the two streams don't poison each other's TTL window.
 const SUPPORT_ALERT_TTL_MS = 30 * 60 * 1000;
 const supportAlertSeen = new Map<string, number>();
 
-/** Deduplicated wrapper around {@link sendAdminSupportAlert} for show-time alerts. */
+function cleanupSupportAlertSeen(now: number): void {
+  if (supportAlertSeen.size <= 500) return;
+  for (const [k, t] of supportAlertSeen) if (now - t > SUPPORT_ALERT_TTL_MS) supportAlertSeen.delete(k);
+}
+
+/** Deduplicated wrapper around {@link sendAdminSupportAlert} for real button-tap
+ *  events (currently fired from the TG `sup:<ctxKey>` callback and from VK's
+ *  payload-driven support button). */
 export async function notifySupportShown(p: SupportAlertPayload): Promise<void> {
-  const key = `${p.platform}:${p.tgId ?? p.userDisplay}:${p.contextKey}`;
+  const key = `SOS:${p.platform}:${p.tgId ?? p.userDisplay}:${p.contextKey}`;
   const now = Date.now();
   const last = supportAlertSeen.get(key);
-  if (last && now - last < SUPPORT_ALERT_TTL_MS) return; // within window — skip
+  if (last && now - last < SUPPORT_ALERT_TTL_MS) return;
   supportAlertSeen.set(key, now);
-  if (supportAlertSeen.size > 500) {
-    for (const [k, t] of supportAlertSeen) if (now - t > SUPPORT_ALERT_TTL_MS) supportAlertSeen.delete(k);
-  }
+  cleanupSupportAlertSeen(now);
   await sendAdminSupportAlert(p);
+}
+
+/** "User got stuck" heads-up — fires at show-time when the bot puts a support
+ *  button in front of the user after a UX dead-end (wrong nick, closed place,
+ *  wrong price, etc.). Distinct from the full SOS alert: one-liner, no 🆘
+ *  scream emoji, just a 👀 + stage + code so the admin can decide whether to
+ *  jump in proactively. Real SOS still fires *only* when the user actually
+ *  taps the support button (see {@link notifySupportShown}). */
+export async function notifyUserHurdle(p: SupportAlertPayload): Promise<void> {
+  const key = `HURDLE:${p.platform}:${p.tgId ?? p.userDisplay}:${p.contextKey}`;
+  const now = Date.now();
+  const last = supportAlertSeen.get(key);
+  if (last && now - last < SUPPORT_ALERT_TTL_MS) return;
+  supportAlertSeen.set(key, now);
+  cleanupSupportAlertSeen(now);
+
+  const label = SUPPORT_CONTEXT_LABELS[p.contextKey] ?? p.contextKey;
+  const codePart = p.wbCode
+    ? ` · 🔑 <code>${p.wbCode}</code>${p.denomination ? ` (${p.denomination} R$)` : ""}`
+    : "";
+  const time = new Date().toLocaleString("ru-RU", {
+    timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit",
+  });
+  const text = `👀 ${p.userDisplay} застрял: <i>${label}</i>${codePart} · ${time}`;
+  await Promise.allSettled(ADMIN_IDS.map(id => tgSend(id, text)));
 }
 
 /** Comma-separated list of Telegram admin chat IDs from env. */
@@ -282,6 +317,12 @@ export const CB = {
   findGpStart:   "find_gp",                                  // 7 b
   findGpRetry:   "find_gp_retry",                            // 13 b
   gpPick:        (passId: string) => `gp_pick:${passId}`,    // ≤ 22 b
+
+  // ── Support button tap (replaces the prior URL button so we can detect
+  // *real* taps and fire the full SOS only then; show-time fires a much
+  // smaller "user hurdle" heads-up instead). Suffix is the context key —
+  // ctxKey alphabet is `[a-z_]+`, never close to the 64-byte limit. ──
+  supTap:        (ctxKey: string) => `sup:${ctxKey}`,        // ≤ 30 b
 } as const;
 
 // ── Types ─────────────────────────────────────────────────────────────────────

@@ -11,7 +11,7 @@
 
 import type { MessageContext } from "vk-io";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
-import { sendAdminOrderCard, sendAdminReviewCard, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminSupportAlert, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS } from "../shared/admin";
+import { sendAdminOrderCard, sendAdminReviewCard, sendAdminDirectOrderCard, sendAdminPaymentCard, notifySupportShown, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS } from "../shared/admin";
 import { vkGetName, tgSend, vkSend } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
@@ -90,8 +90,11 @@ async function triggerSupport(ctx: any, vkUserId: number, ctxKey: string): Promi
       }
     } catch {}
   }
-  await sendAdminSupportAlert({
-    platform: "VK", userDisplay: `vk.com/id${vkUserId} (${firstName})`, contextKey: ctxKey, wbCode, denomination: denom,
+  // Deduped — double-tap inside 30 min won't spam admins. VK button already
+  // fires on real tap (via payload callback), so this is a true SOS.
+  await notifySupportShown({
+    platform: "VK", userDisplay: `vk.com/id${vkUserId} (${firstName})`,
+    contextKey: ctxKey, wbCode, denomination: denom,
   });
   pauseSupport(vkUserId); // bot goes quiet so it won't interrupt the live chat
   await ctx.reply(

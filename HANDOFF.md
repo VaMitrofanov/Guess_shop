@@ -3411,4 +3411,42 @@ curl -s -X POST \
 7. **VK паритет** — все 5 веток повторяются текстом без фоток.
 8. **gp_pick callback всё ещё работает** — выбранный pass проходит через `processGamepassSubmission` и попадает в `AWAITING_GAMEPASS → PENDING`.
 
+---
+
+### Сессия 2026-05-31 (поздно-2) — Bugfix: ложные SOS-алерты на показ кнопки поддержки
+
+**Симптом:** при тесте Phase E в админский чат прилетели `🆘 ОБРАЩЕНИЕ В ПОДДЕРЖКУ · place_closed` и `🆘 nick_not_found`, хотя пользователь физически не нажимал кнопку поддержки — он просто увидел диагностические сообщения «плейс закрыт» и «ник не найден», в которых я (Phase E) разместил `supportBtn(... ctx)`.
+
+**Причина:** старый TG `supportBtn` отдавал `Markup.button.url(SUPPORT_URL)` (URL-кнопка, без callback) и поэтому слал админам SOS **на show-time** через `notifySupportShown`. Любое отображение кнопки = SOS. Это было задумано как workaround «у URL-кнопки нельзя поймать тап», но Phase E увеличила число dead-end веток с кнопкой → SOS стал ложно срабатывать.
+
+**Архитектурное решение:** разделить два события.
+- 🆘 **Полный SOS** — только когда пользователь реально нажал.
+- 👀 **Мини-алерт «застрял»** — на show-time после dead-end (одна строка, без 🆘-крика).
+
+**Изменения:**
+
+1. `bots/shared/admin.ts`:
+   - Добавлен `notifyUserHurdle(p)` — одна строка `👀 @user застрял: <стадия> · 🔑 CODE (R$) · HH:MM`. Тот же 30-min дедуп, namespace `HURDLE:` (раздельный от `SOS:`).
+   - `notifySupportShown` теперь использует namespace `SOS:` и зовётся только из callback-handler'ов (TG `sup:*` + VK payload command `support`) — после **реального** тапа.
+   - Добавлены лейблы `nick_not_found / place_closed / wrong_price / pass_deleted / direct_wait` в `SUPPORT_CONTEXT_LABELS`.
+   - Новая CB-константа `CB.supTap(ctxKey)` → `sup:<ctxKey>` (≤ 30 b).
+
+2. `bots/tg/handlers.ts`:
+   - `supportBtn(...)` теперь возвращает **callback-кнопку** `Markup.button.callback(label, CB.supTap(ctxKey))` вместо URL.
+   - Show-time alert переключён с `notifySupportShown` → `notifyUserHurdle` (через переименованный `fireHurdleAlert`).
+   - Существующий `sup:` callback-handler (был dead-code от прошлой архитектуры) теперь активен: на тап → `notifySupportShown` (deduped full SOS) → отвечает пользователю URL-кнопкой `📩 Открыть @RobloxBank_PA` (один тап до чата).
+   - Убран неиспользуемый импорт `sendAdminSupportAlert`.
+
+3. `bots/vk/handlers.ts`:
+   - VK уже работал правильно (callback по payload `command: "support"`). Заменил raw `sendAdminSupportAlert` → `notifySupportShown` чтобы double-tap не слал 2 SOS.
+
+**UX-цена:** в TG юзеру теперь нужно **2 тапа** до чата поддержки вместо 1 (кнопка → reply с URL-кнопкой → тап). Принято за accurate-tap detection.
+
+**Что проверить:**
+1. Тыкнуть код WB → попасть на диагностическую ветку Phase E (например, ввести опечатку в нике). В админку должен прилететь **👀 мини-алерт «застрял»**, а не 🆘 SOS.
+2. На той же диагностике нажать кнопку «💬 Нужна помощь?». Только тогда в админку летит **🆘 ОБРАЩЕНИЕ В ПОДДЕРЖКУ**, а пользователю в чате — кнопка `📩 Открыть @RobloxBank_PA`.
+3. Двойной тап на «💬 Нужна помощь?» в течение 30 минут — второй SOS не приходит (дедуп).
+4. VK: тап на «💬 Нужна помощь?» → SOS прилетает один раз, повторный тап в 30 минут — пусто (раньше прилетал каждый раз).
+5. Старые supportBtn-места (после rejected, pending long и т.д.) — тоже теперь работают по-новому (callback вместо URL).
+
 
