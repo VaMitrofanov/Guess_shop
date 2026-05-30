@@ -274,6 +274,14 @@ export const CB = {
   // User actions
   refreshStatus: "refresh_status",
   reviewHint:    "review_hint",
+
+  // ── Gamepass search by Roblox nick (item 7) ──────────────────────────────
+  // Client flow: user clicks "find by nick" → bot asks for nick → user types
+  // it → bot lists matches as inline buttons. Pass IDs are numeric strings
+  // up to ~12 digits, well under the 64-byte callback limit.
+  findGpStart:   "find_gp",                                  // 7 b
+  findGpRetry:   "find_gp_retry",                            // 13 b
+  gpPick:        (passId: string) => `gp_pick:${passId}`,    // ≤ 22 b
 } as const;
 
 // ── Types ─────────────────────────────────────────────────────────────────────

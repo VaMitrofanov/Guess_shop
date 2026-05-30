@@ -11,8 +11,8 @@ import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, stripHtml, tgSend } from "../shared/notify";
 import { sendAdminOrderCard, sendAdminReviewCard, sendAdminSupportAlert, notifySupportShown, sendAdminDirectOrderCard, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS, formatUserHandle, formatUserHandleHtml } from "../shared/admin";
-import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectAmount, pendingDirectOrder, pendingPaymentDetails, pendingPaymentScreenshot, type LinkFailState, type DirectOrderState } from "./session";
-import { getGamepassDetails } from "../shared/roblox";
+import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectAmount, pendingDirectOrder, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, robloxGpCache, type LinkFailState, type DirectOrderState, type LinkState, type GpSearchHit } from "./session";
+import { getGamepassDetails, getUserGamepasses } from "../shared/roblox";
 import { buildAdminKeyboard, updateMainMenu, routeAdminCallback } from "./admin";
 import { renderExtendedCard } from "./admin/hub-orders";
 
@@ -421,19 +421,27 @@ export function registerStart(bot: Telegraf): void {
       bonusText = `💎 Номинал: <b>${wbCode.denomination} R$</b>\n\n`;
     }
 
+    // Non-admins also get an inline "find by nick" shortcut — saves them
+    // from copy-pasting URLs. Admins get only the Launch keyboard at the
+    // bottom (their flow is to operate the dashboard, not place orders).
+    const clientInline = !isAdmin
+      ? Markup.inlineKeyboard([
+          [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
+          [Markup.button.url("📖 Открыть инструкцию", `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}`)],
+        ])
+      : {};
     await ctx.reply(
       `${greetLine}\n` +
       (isGuideMode
         ? `✅ Код <b>${code}</b> активирован!\n` +
           bonusText +
-          `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда.\n` +
+          `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда — или нажми «🔎 Найти по моему нику Roblox» внизу, и я подберу его сам.\n` +
           `📌 Цена геймпасса должна быть ровно <b>${passPrice} R$</b>\n\n` +
-          `Если геймпасс уже создан — пришли ссылку прямо сюда 👇\n\n` +
           `Нужна инструкция?\n` +
           `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}`
         : `✅ Код <b>${code}</b> активирован!\n` +
           bonusText +
-          `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда.\n` +
+          `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда — или нажми «🔎 Найти по моему нику Roblox» внизу, и я подберу его сам.\n` +
           `📌 Цена геймпасса должна быть ровно <b>${passPrice} R$</b>\n` +
           `<i>(это номинал ÷ 0.7 — Roblox удерживает 30% комиссии)</i>\n\n` +
           `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
@@ -443,7 +451,7 @@ export function registerStart(bot: Telegraf): void {
       {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
-        ...(isAdmin ? adminKb : {})
+        ...(isAdmin ? adminKb : clientInline),
       }
     );
   });
@@ -640,6 +648,12 @@ export function registerText(bot: Telegraf): void {
     if (isAdmin && rejectOrderId) {
       pendingRejectionReason.delete(ctx.from.id);
       await performAdminReject(bot, ctx, rejectOrderId, text);
+      return;
+    }
+
+    // 1z. USER ROBLOX-NICK input (item 7 — "find gamepass by nick")
+    if (!isAdmin && pendingRobloxNick.has(ctx.from.id)) {
+      await handleRobloxNickInput(bot, ctx, text);
       return;
     }
 
@@ -918,6 +932,139 @@ export function registerText(bot: Telegraf): void {
       return;
     }
 
+    await processGamepassSubmission(bot, ctx, state, passId);
+  });
+}
+
+/* ─────────────────────── Find-by-nick search (item 7) ────────────────────── */
+
+/** Cache TTL for getUserGamepasses lookups per user. */
+const NICK_CACHE_MS = 60_000;
+/** Max gamepass matches we show as inline buttons. */
+const MAX_PICK_BUTTONS = 5;
+/** Allowed Roblox username regex. */
+const ROBLOX_NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
+
+/**
+ * Handle a user's Roblox-nick reply after they tapped "🔎 Найти по моему нику".
+ *
+ * Picks all for-sale gamepasses owned by the user, filters them down to those
+ * whose price matches `state.denomination / 0.7` ±2 (the price the manager
+ * expects for the WB-code's denomination), and presents them as inline
+ * buttons. Tapping a button feeds the chosen `passId` straight into
+ * {@link processGamepassSubmission}.
+ */
+async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Promise<void> {
+  const tgIdNum = ctx.from.id;
+  const state = pendingRobloxNick.get(tgIdNum);
+  if (!state) return;
+
+  const nick = raw.trim().replace(/^@/, "");
+  if (!ROBLOX_NICK_RE.test(nick)) {
+    await ctx.reply(
+      "⚠️ Ник не похож на ник Roblox.\n\n" +
+      "Должно быть 3–20 символов: буквы, цифры или подчёркивание. " +
+      "Например: <code>lokomotiv_2018</code>",
+      { parse_mode: "HTML" }
+    );
+    return;
+  }
+
+  await ctx.sendChatAction("typing");
+  const checkingMsg = await ctx.reply(`🔎 Ищу геймпассы у <b>${nick}</b>…`, { parse_mode: "HTML" });
+
+  let hits: GpSearchHit[] = [];
+  try {
+    const raw = await getUserGamepasses(nick);
+    const expectedPrice = Math.ceil(state.denomination / 0.7);
+    hits = raw
+      .filter(g => g.robux > 0 && Math.abs(g.robux - expectedPrice) <= 2)
+      .map(g => ({ passId: String(g.gamepassId), name: g.name, price: g.robux }));
+  } catch (err: any) {
+    console.error("[TG/find-gp] getUserGamepasses failed:", err?.message ?? err);
+  }
+  try { await bot.telegram.deleteMessage(ctx.chat.id, checkingMsg.message_id); } catch {}
+
+  // Cache for next "не он" / retry actions
+  robloxGpCache.set(tgIdNum, { hits, ts: Date.now(), wbCode: state.wbCode });
+
+  const expectedPrice = Math.ceil(state.denomination / 0.7);
+
+  if (hits.length === 0) {
+    pendingRobloxNick.delete(tgIdNum);
+    await ctx.reply(
+      `🤷 У <b>${nick}</b> не нашли геймпасса за <b>${expectedPrice} R$</b>.\n\n` +
+      `Проверь что:\n` +
+      `• Ник Roblox правильный (можно скопировать прямо со страницы профиля)\n` +
+      `• Геймпасс <b>создан и опубликован</b>\n` +
+      `• Цена ровно <b>${expectedPrice} R$</b>\n\n` +
+      `Если уверен — попробуй ещё раз, или пришли ссылку как раньше.`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🔎 Попробовать другой ник", CB.findGpRetry)],
+          [Markup.button.url("📖 Инструкция", `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
+          [supportBtn("💬 Нужна помощь?", "pass_not_found", ctx)],
+        ]),
+      }
+    );
+    return;
+  }
+
+  if (hits.length === 1) {
+    // Single match → still show as a single button so the user has an
+    // explicit confirm step (Roblox API can occasionally surface a stale
+    // pass that's not actually the one the user wants).
+    const h = hits[0];
+    pendingRobloxNick.delete(tgIdNum);
+    await ctx.reply(
+      `Нашёл геймпасс у <b>${nick}</b>:\n\n` +
+      `💎 <b>${h.name}</b> · ${h.price} R$\n\n` +
+      `Подтверди — и я отправлю на проверку.`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback(`✅ Это он — выкупить (${h.price} R$)`, CB.gpPick(h.passId))],
+          [Markup.button.callback("🔎 Другой ник", CB.findGpRetry)],
+        ]),
+      }
+    );
+    return;
+  }
+
+  // Multiple matches → list the top N by closeness to expectedPrice.
+  const shown = hits.slice(0, MAX_PICK_BUTTONS);
+  pendingRobloxNick.delete(tgIdNum);
+  await ctx.reply(
+    `У <b>${nick}</b> нашёл несколько подходящих геймпассов.\n` +
+    `Выбери тот, который хочешь продать:`,
+    {
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([
+        ...shown.map(h => [
+          Markup.button.callback(`💎 ${h.name.slice(0, 32)} · ${h.price} R$`, CB.gpPick(h.passId)),
+        ]),
+        [Markup.button.callback("🔎 Другой ник", CB.findGpRetry)],
+      ]),
+    }
+  );
+}
+
+/**
+ * Run the full Roblox validation + atomic WbOrder transaction for a given
+ * `passId` and `state` (wb-code/denomination). Extracted from the text-handler
+ * (item 7) so it can also be invoked from the gp_pick callback after the
+ * "search by Roblox nick" picker.
+ *
+ * Side effects: replies to ctx, mutates pendingLink/linkFailCounts, broadcasts
+ * the rendered order card to ADMIN_IDS. Returns normally on every branch.
+ */
+async function processGamepassSubmission(
+  bot: Telegraf,
+  ctx: any,
+  state: LinkState,
+  passId: string,
+): Promise<void> {
     const expectedPrice = Math.ceil(state.denomination / 0.7);
 
     // ── Roblox API validation ─────────────────────────────────────────────
@@ -1230,10 +1377,9 @@ export function registerText(bot: Telegraf): void {
     } catch (err) {
       console.error("[TG] Admin notify error:", err);
     }
-  });
 }
 
-/** 
+/**
  * Universal renderer for the admin order card.
  * Returns text and reply_markup ready for ctx.reply or edit.
  */
@@ -1499,7 +1645,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   await ctx.reply(
     `✅ Код <b>${codeInput}</b> активирован!\n` +
     bonusText +
-    `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда.\n` +
+    `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда — или нажми «🔎 Найти по моему нику Roblox» внизу, и я подберу его сам.\n` +
     `📌 Цена геймпасса должна быть ровно <b>${passPrice} R$</b>\n` +
     `<i>(это номинал ÷ 0.7 — Roblox удерживает 30% комиссии)</i>\n\n` +
     `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
@@ -1509,6 +1655,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
       parse_mode: "HTML",
       link_preview_options: { is_disabled: true },
       ...Markup.inlineKeyboard([
+        [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
         [Markup.button.url("📖 Открыть инструкцию", `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${codeInput}`)],
         [supportBtn("💬 Нужна помощь?")],
       ]),
@@ -1638,9 +1785,9 @@ export function registerAdmin(bot: Telegraf): void {
 
     await ctx.reply(
       "🛠️ <b>Панель управления</b>\n\n" +
-      "Меню команд теперь всегда доступно внизу экрана.\n" +
-      "Также ты можешь отправить боту ID заказа или код ВБ для быстрого поиска.",
-      await getAdminKeyboard()
+      "🚀 Жми «Launch Dashboard» внизу — там заказы, поиск, статистика, коды, выкуп и всё остальное.\n" +
+      "Этот чат теперь работает как канал оповещений: новые заказы, оплаты, отзывы и алерты приходят сюда.",
+      { parse_mode: "HTML", ...(await getAdminKeyboard()) }
     );
   });
 }
@@ -1689,6 +1836,78 @@ export function registerCallbacks(bot: Telegraf): void {
     const tgId = String(ctx.from.id);
     const adminId = tgId;
     const adminTag = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "Админ";
+
+    // ── 🔎 find_gp: user wants to search by Roblox nick (item 7) ──────────
+    if (data === CB.findGpStart || data === CB.findGpRetry) {
+      const tgIdNum = ctx.from.id;
+      const user = await (db as any).user.findUnique({
+        where: { tgId: String(tgIdNum) },
+        select: { id: true, balance: true },
+      });
+      if (!user) {
+        await ctx.answerCbQuery("Сессия истекла — напиши /start");
+        return;
+      }
+      const order = await (db as any).wbOrder.findFirst({
+        where: { userId: user.id, status: "AWAITING_GAMEPASS" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!order) {
+        await ctx.answerCbQuery("Активной заявки нет");
+        await ctx.reply(
+          "У тебя сейчас нет активной заявки. Введи код WB чтобы начать.",
+          { parse_mode: "HTML" }
+        );
+        return;
+      }
+      const state: LinkState = { wbCode: order.wbCode, denomination: order.amount };
+      pendingRobloxNick.set(tgIdNum, state);
+      const passPrice = Math.ceil(order.amount / 0.7);
+      await ctx.answerCbQuery();
+      await ctx.reply(
+        `🔎 Введи свой <b>ник в Roblox</b> (то, как ты заходишь в игру).\n\n` +
+        `Я найду все твои геймпассы за <b>${passPrice} R$</b> — и предложу выбрать нужный.\n` +
+        `<i>Если передумал — пришли ссылку на геймпасс как обычно.</i>`,
+        { parse_mode: "HTML" }
+      );
+      return;
+    }
+
+    // ── 🎮 gp_pick: user picked a gamepass from the nick-search list ──────
+    if (data.startsWith("gp_pick:")) {
+      const passId = data.slice("gp_pick:".length);
+      if (!/^\d{3,15}$/.test(passId)) {
+        await ctx.answerCbQuery("Некорректный ID");
+        return;
+      }
+      const tgIdNum = ctx.from.id;
+      const user = await (db as any).user.findUnique({
+        where: { tgId: String(tgIdNum) },
+        select: { id: true, balance: true },
+      });
+      if (!user) {
+        await ctx.answerCbQuery("Сессия истекла — напиши /start");
+        return;
+      }
+      // Re-derive state from active AWAITING_GAMEPASS order — pendingRobloxNick
+      // may have expired if the user took >n minutes to pick.
+      const order = await (db as any).wbOrder.findFirst({
+        where: { userId: user.id, status: "AWAITING_GAMEPASS" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!order) {
+        await ctx.answerCbQuery("Активной заявки нет");
+        return;
+      }
+      const state: LinkState = { wbCode: order.wbCode, denomination: order.amount };
+      pendingLink.set(tgIdNum, state);
+      pendingRobloxNick.delete(tgIdNum);
+      await ctx.answerCbQuery("Проверяю…");
+      // Reuse the canonical gamepass-submission pipeline so all the existing
+      // validation/transaction/admin-notify logic runs untouched.
+      await processGamepassSubmission(bot, ctx, state, passId);
+      return;
+    }
 
     // ── 🆘 sup: — user tapped a support button ────────────────────────────
     if (data.startsWith("sup:")) {

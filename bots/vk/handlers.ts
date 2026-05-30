@@ -15,7 +15,7 @@ import { sendAdminOrderCard, sendAdminReviewCard, sendAdminDirectOrderCard, send
 import { vkGetName, tgSend, vkSend } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
-import { getGamepassDetails } from "../shared/roblox";
+import { getGamepassDetails, getUserGamepasses } from "../shared/roblox";
 
 // VK API instance injected from bot.ts to avoid circular import.
 let _vkApi: any = null;
@@ -593,6 +593,20 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     return;
   }
 
+  // ── 🔎 Find gamepass by Roblox nick (item 7) ───────────────────────────────
+  if (msgPayload?.command === "find_gp_start") {
+    await handleFindGpStart(ctx, vkUserId);
+    return;
+  }
+  if (msgPayload?.command === "gp_pick" && typeof msgPayload.passId === "string") {
+    await handleGpPick(ctx, vkUserId, msgPayload.passId);
+    return;
+  }
+  if (state?.type === "AWAITING_ROBLOX_NICK") {
+    await handleRobloxNickInput(ctx, vkUserId, text, state.wbCode, state.denomination);
+    return;
+  }
+
   if (state?.type === "AWAITING_LINK") {
     await handleGamepassLink(ctx, vkUserId, text, state.wbCode, state.denomination);
     return;
@@ -795,13 +809,18 @@ async function handleRefActivation(
         greetLine + `\n` +
         `✅ Код ${code} активирован!\n` +
         bonusText +
-        `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда.\n` +
+        `Теперь создай геймпасс в Roblox и пришли на него ссылку сюда —\n` +
+        `или нажми «🔎 Найти по моему нику Roblox», и я сам его подберу.\n` +
         `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n` +
         `(это номинал ÷ 0.7 — Roblox удерживает 30% комиссии)\n\n` +
         `❓ Что такое геймпасс и как его создать — в инструкции:\n` +
         `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}\n\n` +
         `Пришли ссылку на геймпасс 👇`,
-      keyboard: vkSupportKb("general"),
+      keyboard: Keyboard.builder()
+        .textButton({ label: "🔎 Найти по моему нику Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+        .row()
+        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+        .inline(),
     });
   }
 }
@@ -1081,6 +1100,168 @@ async function handleGamepassLink(
     creatorName:         validatedCreator ?? undefined,
     isAgeRestricted:     gamepassInfo.isAgeRestricted ?? false,
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B2 — Gamepass search by Roblox nick (item 7)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Allowed Roblox username regex. */
+const ROBLOX_NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
+/** Max gamepass matches we show as inline buttons. */
+const MAX_PICK_BUTTONS = 5;
+
+/** "🔎 Найти по моему нику" tap — set state and ask for the nick. */
+async function handleFindGpStart(ctx: MessageContext, vkUserId: number): Promise<void> {
+  const user = await (db as any).user.findUnique({
+    where: { vkId: String(vkUserId) },
+    select: { id: true },
+  });
+  if (!user) {
+    await ctx.reply("Сессия истекла — напиши «Начать», чтобы продолжить.");
+    return;
+  }
+  const order = await (db as any).wbOrder.findFirst({
+    where: { userId: user.id, status: "AWAITING_GAMEPASS" },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!order) {
+    await ctx.reply("У тебя сейчас нет активной заявки. Введи код WB чтобы начать.");
+    return;
+  }
+  setState(vkUserId, {
+    type: "AWAITING_ROBLOX_NICK",
+    wbCode: order.wbCode,
+    denomination: order.amount,
+  });
+  const passPrice = Math.ceil(order.amount / 0.7);
+  await ctx.reply(
+    `🔎 Введи свой ник в Roblox (то, как ты заходишь в игру).\n\n` +
+    `Я найду все твои геймпассы за ${passPrice} R$ — и предложу выбрать нужный.\n` +
+    `Если передумал — пришли ссылку на геймпасс как обычно.`
+  );
+}
+
+/** User typed a Roblox nick — look up matching gamepasses. */
+async function handleRobloxNickInput(
+  ctx: MessageContext,
+  vkUserId: number,
+  raw: string,
+  wbCode: string,
+  denomination: number,
+): Promise<void> {
+  const nick = raw.trim().replace(/^@/, "");
+  if (!ROBLOX_NICK_RE.test(nick)) {
+    await ctx.reply(
+      "⚠️ Ник не похож на ник Roblox.\n\n" +
+      "Должно быть 3–20 символов: буквы, цифры или подчёркивание. " +
+      "Например: lokomotiv_2018"
+    );
+    return;
+  }
+
+  await ctx.reply(`🔎 Ищу геймпассы у ${nick}…`);
+  const expectedPrice = Math.ceil(denomination / 0.7);
+
+  let hits: { passId: string; name: string; price: number }[] = [];
+  try {
+    const raw = await getUserGamepasses(nick);
+    hits = raw
+      .filter(g => g.robux > 0 && Math.abs(g.robux - expectedPrice) <= 2)
+      .map(g => ({ passId: String(g.gamepassId), name: g.name, price: g.robux }));
+  } catch (err: any) {
+    console.error("[VK/find-gp] getUserGamepasses failed:", err?.message ?? err);
+  }
+
+  // Clear nick state regardless of outcome — pick is via inline button now.
+  // Re-enter via "🔎 Другой ник" if needed.
+  setState(vkUserId, { type: "AWAITING_LINK", wbCode, denomination });
+
+  if (hits.length === 0) {
+    await ctx.reply({
+      message:
+        `🤷 У ${nick} не нашли геймпасса за ${expectedPrice} R$.\n\n` +
+        `Проверь что:\n` +
+        `• Ник Roblox правильный (можно скопировать прямо со страницы профиля)\n` +
+        `• Геймпасс создан и опубликован\n` +
+        `• Цена ровно ${expectedPrice} R$\n\n` +
+        `Если уверен — попробуй ещё раз, или пришли ссылку как раньше.`,
+      keyboard: Keyboard.builder()
+        .textButton({ label: "🔎 Попробовать другой ник", payload: { command: "find_gp_start" }, color: "primary" })
+        .row()
+        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "pass_not_found" }, color: "secondary" })
+        .inline(),
+    });
+    return;
+  }
+
+  if (hits.length === 1) {
+    const h = hits[0];
+    await ctx.reply({
+      message:
+        `Нашёл геймпасс у ${nick}:\n\n` +
+        `💎 ${h.name} · ${h.price} R$\n\n` +
+        `Подтверди — и я отправлю на проверку.`,
+      keyboard: Keyboard.builder()
+        .textButton({ label: `✅ Это он — выкупить (${h.price} R$)`, payload: { command: "gp_pick", passId: h.passId }, color: "positive" })
+        .row()
+        .textButton({ label: "🔎 Другой ник", payload: { command: "find_gp_start" }, color: "secondary" })
+        .inline(),
+    });
+    return;
+  }
+
+  const shown = hits.slice(0, MAX_PICK_BUTTONS);
+  const kb = Keyboard.builder();
+  for (const h of shown) {
+    kb.textButton({
+      label: `💎 ${h.name.slice(0, 32)} · ${h.price} R$`,
+      payload: { command: "gp_pick", passId: h.passId },
+      color: "positive",
+    }).row();
+  }
+  kb.textButton({ label: "🔎 Другой ник", payload: { command: "find_gp_start" }, color: "secondary" });
+  await ctx.reply({
+    message:
+      `У ${nick} нашёл несколько подходящих геймпассов.\n` +
+      `Выбери тот, который хочешь продать:`,
+    keyboard: kb.inline(),
+  });
+}
+
+/** User tapped a "💎 ${name} · ${price} R$" button → run the canonical flow. */
+async function handleGpPick(
+  ctx: MessageContext,
+  vkUserId: number,
+  passId: string,
+): Promise<void> {
+  if (!/^\d{3,15}$/.test(passId)) {
+    await ctx.reply("⚠️ Не удалось распознать геймпасс.");
+    return;
+  }
+  const user = await (db as any).user.findUnique({
+    where: { vkId: String(vkUserId) },
+    select: { id: true },
+  });
+  if (!user) {
+    await ctx.reply("Сессия истекла — напиши «Начать».");
+    return;
+  }
+  const order = await (db as any).wbOrder.findFirst({
+    where: { userId: user.id, status: "AWAITING_GAMEPASS" },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!order) {
+    await ctx.reply("У тебя сейчас нет активной заявки.");
+    return;
+  }
+  setState(vkUserId, {
+    type: "AWAITING_LINK",
+    wbCode: order.wbCode,
+    denomination: order.amount,
+  });
+  const url = `https://www.roblox.com/game-pass/${passId}`;
+  await handleGamepassLink(ctx, vkUserId, url, order.wbCode, order.amount);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

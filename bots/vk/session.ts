@@ -17,7 +17,8 @@ export type VKState =
   | { type: "AWAITING_REVIEW";         orderId: string }
   | { type: "AWAITING_DIRECT_AMOUNT" }
   | { type: "AWAITING_DIRECT_CONFIRM"; amount: number; totalAmount: number; bonus: number }
-  | { type: "AWAITING_DIRECT_PAYMENT"; orderId: string };
+  | { type: "AWAITING_DIRECT_PAYMENT"; orderId: string }
+  | { type: "AWAITING_ROBLOX_NICK";    wbCode: string; denomination: number };
 
 const store = new Map<number, VKState>();
 
