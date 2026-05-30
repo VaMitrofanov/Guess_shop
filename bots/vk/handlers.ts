@@ -52,6 +52,7 @@ async function rePromptAfterSupport(vkUserId: number): Promise<void> {
     if (!_vkApi) return;
     let state = getState(vkUserId);
     if (state?.type !== "AWAITING_LINK") {
+      // No ctx here — orphan recovery falls back to setState (no full activation flow).
       await tryRestoreState(vkUserId);
       state = getState(vkUserId);
     }
@@ -151,13 +152,24 @@ function extractPassId(input: string): string | null {
 
 /**
  * When VK fails to deliver a ref, look up the user's most recently activated
- * WB code that doesn't yet have a WbOrder. If found, restore AWAITING_LINK.
- * Returns true if state was restored.
+ * WB code that doesn't yet have a WbOrder. Three possible outcomes:
+ *  - "none":      no recoverable state — caller shows the idle greeting
+ *  - "restored":  existing AWAITING_GAMEPASS/REJECTED order found, in-memory
+ *                 state set to AWAITING_LINK — caller shows the "active code" recap
+ *  - "handled":   orphan WB code (linked by auth.ts but ref never reached the bot)
+ *                 was promoted via handleRefActivation — it has already sent the
+ *                 full welcome with the instruction link and created the provisional
+ *                 WbOrder + admin notification, so the caller must return immediately
+ *
+ * `ctx` is optional: when omitted (e.g. rePromptAfterSupport, which has no message
+ * context), orphan recovery degrades to the legacy setState behaviour.
  */
-async function tryRestoreState(vkUserId: number): Promise<boolean> {
+type RestoreOutcome = "none" | "restored" | "handled";
+
+async function tryRestoreState(vkUserId: number, ctx?: MessageContext): Promise<RestoreOutcome> {
   try {
     const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
-    if (!user) return false;
+    if (!user) return "none";
 
     // Look for AWAITING_GAMEPASS or REJECTED orders — mirrors TG DB recovery.
     // Limit to 30 days to avoid restoring stale orders from months ago where
@@ -177,15 +189,16 @@ async function tryRestoreState(vkUserId: number): Promise<boolean> {
         wbCode:       recoverable.wbCode,
         denomination: recoverable.amount,
       });
-      return true;
+      return "restored";
     }
 
     // Orphan-code fallback: the site (auth.ts) can link a code (CLAIMED + userId)
     // before the user reaches the bot, but the provisional WbOrder is only created
     // inside handleRefActivation. If VK never delivered the `ref`, that handler
     // never ran → the code is CLAIMED to this user with NO order, and the order
-    // lookup above finds nothing. Recover by picking up the orphan code directly
-    // so the user isn't stranded after activating on the site.
+    // lookup above finds nothing. Run handleRefActivation now to catch the user up:
+    // they get the full welcome with the gamepass-instruction link, and the manager
+    // gets the provisional-order admin card they would have missed.
     const orphanCandidates = await (db as any).wbCode.findMany({
       where: {
         userId:    user.id,
@@ -199,19 +212,23 @@ async function tryRestoreState(vkUserId: number): Promise<boolean> {
     for (const code of orphanCandidates) {
       const order = await (db as any).wbOrder.findUnique({ where: { wbCode: code.code } });
       if (!order) {
+        if (ctx) {
+          await handleRefActivation(ctx, vkUserId, code.code);
+          return "handled";
+        }
         setState(vkUserId, {
           type:         "AWAITING_LINK",
           wbCode:       code.code,
           denomination: code.denomination,
         });
-        return true;
+        return "restored";
       }
     }
-    return false;
+    return "none";
   } catch (err) {
     // Non-fatal: DB timeout or connectivity issue — bot continues without auto-restore
     console.error("[VK] tryRestoreState failed:", err);
-    return false;
+    return "none";
   }
 }
 
@@ -493,15 +510,21 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
           `💎 Номинал: ${state.denomination} R$\n\n` +
           `Осталось совсем чуть-чуть — пришли ссылку на геймпасс.\n` +
           `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
+          `❓ Не помнишь как создать геймпасс? Инструкция со скриншотами:\n` +
+          `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}\n\n` +
           `Жду ссылку 👇`,
         keyboard: vkSupportKb("general"),
       });
       return;
     }
 
-    // 2. Try to recover a pending WB code from DB
-    const restored = await tryRestoreState(vkUserId);
-    if (restored) {
+    // 2. Try to recover a pending WB code from DB. Orphan codes (CLAIMED by
+    // site auth.ts but no order yet) are caught up via handleRefActivation —
+    // it sends the full welcome with the instruction link and creates the
+    // provisional order, so we return immediately on "handled".
+    const outcome = await tryRestoreState(vkUserId, ctx);
+    if (outcome === "handled") return;
+    if (outcome === "restored") {
       const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
       const passPrice = Math.ceil(restoredState.denomination / 0.7);
       const custStatus = await getCustomerStatus(String(vkUserId), "VK");
@@ -513,6 +536,8 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
           `💎 Номинал: ${restoredState.denomination} R$\n\n` +
           `Осталось совсем чуть-чуть — пришли ссылку на геймпасс.\n` +
           `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
+          `❓ Не помнишь как создать геймпасс? Инструкция со скриншотами:\n` +
+          `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${restoredState.wbCode}\n\n` +
           `Жду ссылку 👇`,
         keyboard: vkSupportKb("general"),
       });
@@ -1401,9 +1426,13 @@ async function handleIdleMessage(
 
   // Guard: user sent a gamepass URL/ID but state machine has no active code.
   // Try DB auto-pickup first — they may have activated the code on the site.
+  // Pass no ctx: we want orphan recovery to fall back to plain setState here
+  // (legacy path), so we can immediately dispatch to handleGamepassLink with
+  // the link the user just sent — rather than ping-ponging through the
+  // handleRefActivation welcome flow.
   if (extractPassId(text) !== null) {
-    const restored = await tryRestoreState(vkUserId);
-    if (restored) {
+    const outcome = await tryRestoreState(vkUserId);
+    if (outcome === "restored") {
       // State is now AWAITING_LINK — re-dispatch to gamepass handler
       const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
       await handleGamepassLink(ctx, vkUserId, text, restoredState.wbCode, restoredState.denomination);
@@ -1504,8 +1533,11 @@ async function handleIdleMessage(
   }
 
   // Try to restore a pending WB code before falling back to the greeting.
-  const restored = await tryRestoreState(vkUserId);
-  if (restored) {
+  // "handled" = orphan code → handleRefActivation already sent the full welcome
+  // with the gamepass-instruction link and created the provisional order.
+  const outcome = await tryRestoreState(vkUserId, ctx);
+  if (outcome === "handled") return;
+  if (outcome === "restored") {
     const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
     const passPrice = Math.ceil(restoredState.denomination / 0.7);
     const firstName = await vkGetName(vkUserId);
@@ -1516,6 +1548,8 @@ async function handleIdleMessage(
         `💎 Номинал: ${restoredState.denomination} R$\n\n` +
         `Осталось совсем чуть-чуть — пришли ссылку на геймпасс.\n` +
         `📌 Цена геймпасса должна быть ровно ${passPrice} R$\n\n` +
+        `❓ Не помнишь как создать геймпасс? Инструкция со скриншотами:\n` +
+        `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${restoredState.wbCode}\n\n` +
         `Жду ссылку 👇`,
       keyboard: vkSupportKb("general"),
     });

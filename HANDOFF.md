@@ -2871,3 +2871,65 @@ VK_TOKEN="$(ssh root@89.110.94.117 'docker exec gmtpfqosgoz23vjyxyczuic9-0427134
 - **Текстовые триггеры** `SUPPORT_WORDS` (`оператор/поддержк/менеджер/помощь/помоги/саппорт/support/живой человек/жалоб`, substring) — проверяются перед стейт-машиной и перед паузой. Если пауза активна — реассюр «менеджер уже подключается», без нового алёрта.
 - Ответ при вызове: «✅ Передал менеджеру — ответит прямо здесь. Опиши вопрос 👇 Бот не вмешивается. Если удобнее в TG — ссылка».
 - **Резюме раскладки управления:** юзер зовёт поддержку = кнопка ИЛИ слово; менеджер возвращает бота = слово `+бот` в диалоге (кнопки для менеджера нет) ИЛИ авто через 30 мин.
+
+---
+
+### Сессия 2026-05-30 (ночь) — VK: orphan-код после web-активации → нет инструкции (фикс)
+
+**Реальный кейс.** Заказ `5ZXCZJV` (vkId `721003053`, name «Just Matt»). Юзер активировал код на сайте через VK-OAuth, попал в чат бота, **сразу получил**:
+```
+✅ У тебя есть активный код!
+💎 Номинал: 500 R$
+Осталось совсем чуть-чуть — пришли ссылку на геймпасс.
+📌 Цена геймпасса должна быть ровно 715 R$
+Жду ссылку 👇
+```
+БЕЗ ссылки на инструкцию и без объяснения «как создать геймпасс». Юзер не понял что делать дальше.
+
+**Что нашёл в БД на момент диагностики:**
+- `WbCode 5ZXCZJV`: `CLAIMED`, `isUsed=false`, `userId=cmps9l78r000001jt1njlg8fd` (vkId 721003053).
+- `WbOrder` по этому коду — **ОТСУТСТВУЕТ**. Provisional не создан.
+- `User.name = "VK User"` — fallback (auth.ts взял с VK ID-токена, либо не пришло).
+
+**Что произошло:**
+1. Сайт: ввёл код → VK OAuth → `src/auth.ts` залинковал `WbCode.userId`, создал `User`, послал TG-уведомление `📥 КОД АКТИВИРОВАН`, редиректнул на `vk.me/club237309399?ref=5ZXCZJV`.
+2. **VK не доставил `ref` в чат бота** — ни в `ctx.ref`, ни в `messagePayload.ref`, ни в `startPayload`. `handleRefActivation` НЕ вызвалась → provisional `WbOrder` не создался → админ не получил карточку `📥 НОВЫЙ КЛИЕНТ` от VK-бота (только сигнал auth.ts).
+3. Юзер написал в чат (или «Начать») → `tryRestoreState()` (orphan branch, `bots/vk/handlers.ts:189-209`) нашёл `CLAIMED + isUsed=false + no order` → выставил `AWAITING_LINK` в памяти → caller (`handleIdleMessage` / «Начать»-branch) показал короткое recovery-сообщение.
+4. **Три recovery-ветки** (`bots/vk/handlers.ts:489-498`, `:509-518`, `:1512-1521`) НЕ печатают ссылку на инструкцию — в отличие от обеих веток `handleRefActivation` (строки 755-781).
+
+**Фикс (коммит `b8d5fbb`):**
+
+Расширил контракт `tryRestoreState(vkUserId, ctx?)` на enum `"none" | "restored" | "handled"`:
+- **`"restored"`** — нашли existing `WbOrder` (AWAITING_GAMEPASS/REJECTED) → set state, caller сам шлёт recovery-сообщение (теперь со ссылкой на гайд, см. ниже).
+- **`"handled"`** — нашли orphan `WbCode` (CLAIMED + isUsed=false + no order) И передан `ctx` → вызывается **`handleRefActivation(ctx, vkUserId, code.code)`** напрямую. Она:
+  - создаёт provisional `WbOrder(AWAITING_GAMEPASS)` (с guard `if (existingOrder) return` — без дублей);
+  - шлёт `📥 НОВЫЙ КЛИЕНТ` всем `ADMIN_IDS` (карточку, которую админ изначально потерял);
+  - печатает юзеру полное приветствие со ссылкой `https://www.robloxbank.ru/guide?source=wb&skip=1&code=КОД`.
+- **`"none"`** — старый дефолт.
+
+Дополнительно в три recovery-сообщения добавил строку с гайдом — на случай если юзер всё-таки попал в ветку `"restored"` (т.е. существующий `WbOrder` уже есть от старого VK-ref-кейса):
+```
+❓ Не помнишь как создать геймпасс? Инструкция со скриншотами:
+👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}
+```
+
+**Все вызовы `tryRestoreState`:**
+- `rePromptAfterSupport(vkUserId)` — без ctx. orphan recovery → legacy setState. Юзер увидит дефолтное recovery-сообщение (со ссылкой на гайд после фикса).
+- «Начать» / `handleIdleMessage` — с ctx. orphan → `"handled"` → полный welcome-флоу + provisional order + admin card.
+- `handleIdleMessage` extractPassId branch (1430) — без ctx **намеренно**: юзер уже прислал ссылку на геймпасс, нам нужно сразу диспатчить в `handleGamepassLink`, а не уводить в приветствие. orphan там работает по-старому (setState).
+
+**Файлы:** `bots/vk/handlers.ts` (только этот файл, всё локализовано в VK-боте).
+
+**Type-check baseline:** ошибки в `bots/shared/roblox.ts` и про `vk-io` — pre-existing (handoff: «bots/ excluded from tsconfig»), новых ошибок нет.
+
+**Деплой:** VK_bot (RF) — UUID `gmtpfqosgoz23vjyxyczuic9`. Coolify auto-deploy на RF не подхватывает GitHub-webhook (Russian IP block), нужно вручную:
+```bash
+curl -s -X POST "http://89.110.94.117:8000/api/v1/deploy?uuid=gmtpfqosgoz23vjyxyczuic9&force=true" \
+  -H "Authorization: Bearer $COOLIFY_TOKEN"
+```
+TG/Web сервисы НЕ затронуты.
+
+**Что у тебя теперь будет видно при реал-кейсе «web→VK без ref»:**
+- Юзер активирует код на сайте → VK не доставил ref → юзер пишет что-то в чат → бот вызывает `handleRefActivation` через orphan-recovery → юзер получает **полное** приветствие со ссылкой на инструкцию + админу прилетает карточка `📥 НОВЫЙ КЛИЕНТ` с VK ID, ником, кодом и суммой.
+- Если у юзера уже был `AWAITING_GAMEPASS`/`REJECTED` order — recovery-сообщение тоже теперь с ссылкой на гайд (на случай если юзер забыл инструкцию).
+- `5ZXCZJV` остался без `WbOrder` в БД (фикс работает только для будущих кейсов). Если этот конкретный юзер ещё активен — попросит ссылку на гайд в чате, и бот по orphan-recovery в одном из следующих сообщений сам прогонит его через `handleRefActivation` (код всё ещё `CLAIMED + isUsed=false + no order`).
