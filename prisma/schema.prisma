@@ -129,6 +129,12 @@ model WbOrder {
 
   @@index([userId])
   @@index([status])
+  // Main TWA Orders listing — sort by createdAt desc within a status chip.
+  @@index([status, createdAt(sort: Desc)])
+  // Identity-cluster numbering in /api/twa/orders + GP-by-nick search.
+  @@index([robloxUsername])
+  // Per-user history (BossRobux + analytics).
+  @@index([userId, createdAt(sort: Desc)])
 }
 
 model FAQ {

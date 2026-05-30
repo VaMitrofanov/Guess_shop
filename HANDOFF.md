@@ -20,14 +20,45 @@
 
 - [~] **(1) Перенос кнопок TG-бота внутрь TWA** — **Phase A сделана** (коммит `6613568`). Phase B/C не начаты.
   - ✅ **Phase A:** `bots/tg/admin/menu.ts` переписан — Reply Keyboard теперь одна большая `🚀 Launch Dashboard` (web_app). `updateMainMenu` оставлен как no-op чтобы старые call-сайты компилировались. `/admin` сообщение обновлено.
-  - ⏳ **Phase B (не начата):** перенос System / Stats / Rates / AutoBuy хабов в TWA-экраны. Это ~600-800 строк (4 React-экрана + 4 API endpoint + reshuffle BottomNav). **Заброшена до ревью пользователем — слишком объёмный кусок для одной сессии.**
-  - ⏳ **Phase C (не начата):** удаление мёртвых text-interceptors из `bots/tg/admin/index.ts` после стабилизации Phase B.
+  - ⏳ **Phase B (не начата):** перенос System / Stats / Rates / AutoBuy хабов в TWA-экраны. Делать **по одному хабу за коммит/деплой**, иначе сломается админский поток на проде. Порядок (от наименее рискованного):
+    - **B1 Stats** (read-only): `GET /api/twa/stats` — те же агрегаты, что считает `bots/tg/admin/hub-stats.ts` (выручка день/неделя/месяц, кол-во заказов по статусам, конверсия). Экран `StatsScreen.tsx`, путь в Settings → «Статистика» (BottomNav уже на 5 пунктах).
+    - **B2 Rates** (read + write): `GET/POST /api/twa/rates` — текущие курсы R$/₽ + история. POST защищён `extractTwaUser` + `role === ADMIN`. Экран — две большие input-карточки.
+    - **B3 System** (диагностика): перенос `bots/tg/admin/hub-system.ts` — health, env-флаги (только наличие), сессии, git SHA. `GET /api/twa/system`.
+    - **B4 AutoBuy** (самое сложное — переносить последним): `GET/PUT /api/twa/autobuy` — конфиг BossRobux автозакупки + лог последних попыток.
+    - **B5 Уборка:** удалить старые reply-кнопки из `bots/tg/admin/menu.ts` и `updateMainMenu` (сейчас no-op).
+  - ⏳ **Phase C (не начата):** удаление мёртвых text-interceptors из `bots/tg/admin/index.ts` после стабилизации Phase B. Параллельно вычистить неиспользуемые CB-константы из `bots/shared/admin.ts`. Проверка — `grep -rn "CB\." bots/ src/` должен сжаться.
 
 - [~] **(7) Поиск геймпассов по нику** — **Phase A+B сделаны** (коммит `6613568`). Phase C/D не начаты.
   - ✅ **Phase A (TG client):** новая inline-кнопка «🔎 Найти по моему нику Roblox» в welcome после provisional order. Состояние `pendingRobloxNick`, callback `CB.findGpStart`/`CB.gpPick`. Большой кусок validation+transaction (~330 строк) вынесен в `processGamepassSubmission` — переиспользуется text-handler'ом и callback'ом без дублирования. UX: 0/1/N результатов с разной клавиатурой.
   - ✅ **Phase B (VK client):** аналогичный flow в `bots/vk/handlers.ts`. Новое состояние `AWAITING_ROBLOX_NICK` в `VKState`. `handleFindGpStart` / `handleRobloxNickInput` / `handleGpPick`. Picker вызывает существующий `handleGamepassLink(url)` напрямую — никакой дубликат логики.
-  - ⏳ **Phase C (не начата):** кнопка «🔎 Найти GP клиента» в TWA `OrdersScreen` для `AWAITING_GAMEPASS` карточки.
-  - ⏳ **Phase D (не начата):** smoke-tests на `lokomotiv_2018` / `Dark_Varia8954` / 0-results / приватный профиль.
+  - ⏳ **Phase C (не начата):** «🔎 Найти GP клиента» в TWA `OrdersScreen` для `AWAITING_GAMEPASS` карточки. **Принцип единой экосистемы:** бизнес-логика связки геймпасса с заказом живёт в одном месте, три фронта (TG, VK, TWA) вызывают её через свои транспорты. План:
+    - **C1** `POST /api/twa/orders/find-gamepass` `{orderId, nick}` → импортирует `getUserGamepasses` из `bots/shared/roblox.ts:743`, фильтрует по `expectedPrice = ceil(denomination / 0.7) ±2` (из связанного `WbCode`), возвращает `{hits, expectedPrice}`.
+    - **C2** Вынести transactional-кусок из `processGamepassSubmission` (`bots/tg/handlers.ts:1062`) в новый `bots/shared/gamepass-link.ts` → `linkGamepassToOrder({orderId, passId, denomination}) → {ok, error?}`. Переключить TG, VK, TWA на эту функцию. Это и есть «единая экосистема».
+    - **C3** `POST /api/twa/orders/link-gamepass` `{orderId, gamepassId}` → вызывает `linkGamepassToOrder`.
+    - **C4** UI: в блоке `order.status === "AWAITING_GAMEPASS"` (`OrdersScreen.tsx:637`) добавить кнопку «🔎 Найти геймпасс по нику клиента». Pre-fill ника = `order.robloxUsername`. Sheet/модалка с инпутом. 0 hits → «не нашли, попробовать другой». 1 hit → карточка + «✅ Привязать». N (≤5) → список карточек.
+  - ⏳ **Phase D (не начата):** smoke-tests:
+    - `lokomotiv_2018` — single-hit (TG, VK, TWA).
+    - `Dark_Varia8954` — multi-hit.
+    - 0 results — несуществующий ник.
+    - Приватный профиль — `getUserGamepasses` возвращает `[]`, не падает.
+    - `robloxGpCache` TTL=60s — повторный «другой ник» не бьёт Roblox API дважды.
+    - TWA → выбор gp → заказ `AWAITING_GAMEPASS → PENDING` → клиент в TG получает уведомление (проверить, что вынос в shared не потерял notify-вызов).
+
+- [ ] **(8) Оптимизация скорости Orders (TWA)** — диагностирована, в работе. Cold-start уже ускорен в Спринт 1 item 2, но *внутри* экрана Orders запросы тормозят. План:
+  - **Серверная часть** (`src/app/api/twa/orders/route.ts`):
+    - **Order numbering** (`route.ts:142-160`) — сейчас на каждый из 20 заказов запускается 2 `count()` через relation `OR` на `tgId/vkId/robloxUsername` → **40 round-trip'ов в Neon на 1 fetch**. Заменить на один `groupBy` или сырой SQL с агрегацией по identity-кластеру за 1 запрос.
+    - **reviewStatus** (`route.ts:163-198`) — `Promise.all(uniqueUserIds.map(findFirst))` заменить на один `groupBy(userId, _min: createdAt)`.
+    - **VK enrich** (`route.ts:84-135`) — блокирует ответ; вынести в fire-and-forget после `NextResponse.json` (либо в `waitUntil`). UI и так показывает fallback `TG · 12345` / `VK · 12345`, так что лишний raund-trip к VK API клиента не блокирует.
+    - **Counts** (`route.ts:70-79`) — 6 count'ов на каждый запрос. Не зависят от `skip/take`. Добавить `?skipCounts=1` (для пагинации «Показать ещё»), на клиенте не дёргать counts при load-more.
+  - **Лёгкий бэйдж** — новый `GET /api/twa/orders/urgent-count` (один `count({where:{status:{in:['PENDING','IN_PROGRESS']}}})` использует существующий `@@index([status])`). `TwaApp.tsx:167-182` переключить 30-сек полл на него вместо `/api/twa/orders?status=PENDING&limit=1`, который сейчас тянет полный pipeline ради одного числа.
+  - **Индексы БД** (`prisma/schema.prisma:110-132`):
+    - `@@index([status, createdAt(sort: Desc)])` — для основного listing'а с фильтром по статусу.
+    - `@@index([robloxUsername])` — для search и identity-cluster numbering'а.
+    - `@@index([userId, createdAt(sort: Desc)])` — для per-user истории.
+  - **Клиент** (`OrdersScreen.tsx`):
+    - Не передёргивать counts при `loadMore` (использовать кэш предыдущего ответа).
+    - SWR-паттерн: класть последний ответ `/api/twa/orders` в `sessionStorage`, при возврате на вкладку показывать его моментально + фоновый refresh. Сейчас при каждом возврате — голый skeleton.
+  - **Ожидаемый эффект:** первый ответ списка 1.5-3 с → 200-400 мс на тёплой Neon-сессии.
 
 Прогресс отмечается прямо здесь чекбоксами. Каждая закрытая задача документируется ниже в новой сессионной секции.
 
@@ -3244,4 +3275,47 @@ curl -s -X POST \
 - Item 7 Phase C (manager helper в TWA OrdersScreen).
 - Item 1 Phase B (4 экрана System/Stats/Rates/AutoBuy в TWA). Хочу делать связным проходом после ревью, чтобы не вытаскивать сырые куски.
 - Cleanup hub-* в `bots/tg/admin/`.
+
+---
+
+### Сессия 2026-05-31 (вечер) — диагностика TWA Orders perf + план Спринта 2
+
+После выкатки Спринта 1 пользователь жалуется, что **внутри** TWA раздел Заказы всё ещё медленный. Cold-start уже ускорен (item 2 в Спринт 1), но сам fetch списка тормозит.
+
+#### Диагностика — где тормозит `/api/twa/orders` (`src/app/api/twa/orders/route.ts`)
+
+| Место | Что происходит | Цена на 1 fetch (page=20) |
+|-------|----------------|----------------------------|
+| `route.ts:142-160` numbering | На каждый из 20 заказов — 2 отдельных `count()` с `OR` по relation `tgId/vkId/robloxUsername` | **40 round-trip'ов** в Neon |
+| `route.ts:70-79` counts чипов | 6 count'ов параллельно (5 статусов + ALL). Повторяются на каждой пагинации «Показать ещё» | 6 round-trip'ов × N страниц |
+| `route.ts:84-135` VK enrich | Если есть VK-юзеры с `name === "VK User"` — синхронный fetch на `api.vk.com` + N апдейтов перед `NextResponse.json` | +300-800 мс к ответу |
+| `route.ts:163-198` reviewStatus | `Promise.all(uniqueUserIds.map(findFirst))` — N запросов | N round-trip'ов |
+| `TwaApp.tsx:167-182` badge polling | Каждые 30 с дёргает `/api/twa/orders?status=PENDING&limit=1` — а это весь pipeline выше ради одного числа | 50+ SQL/30 с фоном |
+| `prisma/schema.prisma:110-132` индексы | Только `@@index([userId])` + `@@index([status])`. Нет composite `(status, createdAt desc)`, нет index на `robloxUsername` | seq-scan при сортировке/numbering'е |
+
+#### План (Спринт 2 item 8)
+
+**Сервер:**
+1. **Numbering** в один запрос — заменить `Promise.all(orders.map(o => count×2))` на агрегат через `groupBy` или `$queryRaw` с CTE по identity-кластеру. Эффект: 40 → 1 query.
+2. **reviewStatus** — `Promise.all(findFirst)` → один `groupBy(userId, _min: createdAt)`.
+3. **VK enrich** — отвязать от ответа: возвращать заказы немедленно, enrich пускать в `void Promise.allSettled(...)` после `NextResponse.json`. UI и так fallback'ит на `TG · 12345` / `VK · 12345`.
+4. **Counts** — добавить query-param `?skipCounts=1`. На клиенте при `loadMore` не дёргать counts.
+5. **Лёгкий endpoint бэйджа** — `GET /api/twa/orders/urgent-count` — один `count({where:{status:{in:['PENDING','IN_PROGRESS']}}})`. `TwaApp.tsx` 30s-полл переключить на него.
+6. **Индексы** в `WbOrder` (migration):
+   - `@@index([status, createdAt(sort: Desc)])` — основной listing.
+   - `@@index([robloxUsername])` — search + identity-cluster numbering.
+   - `@@index([userId, createdAt(sort: Desc)])` — per-user.
+
+**Клиент** (`OrdersScreen.tsx`):
+7. Не передёргивать counts при `loadMore` — сохранять прошлые из `data.counts`, дёргать новый запрос только при изменении `(filter, query)`.
+8. (Опционально) SWR-кэш в `sessionStorage` — при возврате на вкладку моментально показывать последний ответ + фоновый refresh.
+
+**Ожидаемый эффект:** первый ответ списка 1.5-3 с → 200-400 мс на тёплой Neon-сессии.
+
+#### План задач, которые остались НЕ начатыми (детально записано в чекбоксах Спринта 2 выше)
+
+- **Item 1 Phase B** — перенос System/Stats/Rates/AutoBuy в TWA-экраны. Подзадачи B1-B5 по одному коммиту каждая, начинать со Stats (read-only, наименьший риск).
+- **Item 7 Phase C** — поиск GP по нику внутри TWA, объединение бизнес-логики связки в `bots/shared/gamepass-link.ts` (единая экосистема: TG/VK/TWA → одна функция).
+- **Item 7 Phase D** — smoke-tests на `lokomotiv_2018` / `Dark_Varia8954` / 0 hits / приватный профиль / TWA-вариант.
+
 

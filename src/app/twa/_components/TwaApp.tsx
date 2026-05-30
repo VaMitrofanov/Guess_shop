@@ -163,16 +163,17 @@ export default function TwaApp() {
     return () => { cancelled = true; };
   }, []);
 
-  // Fetch urgent orders count for badge after auth
+  // Fetch urgent orders count for badge after auth.
+  // Uses the lightweight /urgent-count endpoint (single COUNT on indexed
+  // status column) instead of the full Orders pipeline.
   useEffect(() => {
     if (auth !== "ok" || !token) return;
     const refresh = () => {
-      fetch("/api/twa/orders?status=PENDING&limit=1", { headers: { Authorization: `Bearer ${token}` } })
+      fetch("/api/twa/orders/urgent-count", { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.ok ? r.json() : null)
         .then(d => {
           if (!d) return;
-          const urgent = (d.counts?.PENDING ?? 0) + (d.counts?.IN_PROGRESS ?? 0);
-          setOrdersBadge(urgent);
+          setOrdersBadge(d.count ?? 0);
         })
         .catch(() => {});
     };

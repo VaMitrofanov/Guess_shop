@@ -951,11 +951,17 @@ export default function OrdersScreen({
       const params = new URLSearchParams({ page: String(p), limit: "20" });
       if (f !== "ALL") params.set("status", f);
       if (q)           params.set("q", q);
+      // Chip counts don't depend on the page slice — skip them on "load more"
+      // so we don't re-run 6 COUNT queries every time the manager paginates.
+      if (append)      params.set("skipCounts", "1");
       const res = await fetch(`/api/twa/orders?${params}`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok || reqId !== reqIdRef.current) return;
       const d: OrdersData = await res.json();
       if (reqId !== reqIdRef.current) return;     // stale response — drop it
-      setData(d);
+      setData(prev => append && prev
+        // Keep prior counts when paginating — server returned `counts: null`.
+        ? { ...d, counts: prev.counts }
+        : d);
       setAllOrders(prev => append ? [...prev, ...d.orders] : d.orders);
     } finally {
       if (reqId === reqIdRef.current) {
