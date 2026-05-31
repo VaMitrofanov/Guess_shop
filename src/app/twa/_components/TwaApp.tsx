@@ -23,6 +23,7 @@ function ScreenSkeleton() {
 
 declare global {
   interface Window {
+    __tgHash?: string;
     Telegram?: {
       WebApp?: {
         ready: () => void;
@@ -70,11 +71,13 @@ export default function TwaApp() {
   useEffect(() => {
     let cancelled = false;
 
-    // Tightened from 3000 ms / 100 ms poll to 1200 ms / 50 ms poll.
-    // On all current Telegram clients initData lands within ~200-400 ms of
-    // ready(); a 3 s budget was wasting time on the cold-start path when
-    // initDataUnsafe.user.id is already available (we fall back to that below).
-    async function waitForInitData(maxMs = 1200): Promise<string> {
+    function extractInitDataFromHash(hash: string): string {
+      if (!hash || !hash.includes("tgWebAppData")) return "";
+      const params = new URLSearchParams(hash.replace(/^#/, ""));
+      return params.get("tgWebAppData") ?? "";
+    }
+
+    async function waitForInitData(maxMs = 3000): Promise<string> {
       const deadline = Date.now() + maxMs;
       while (Date.now() < deadline) {
         const id = window.Telegram?.WebApp?.initData;
@@ -108,25 +111,25 @@ export default function TwaApp() {
     }
 
     (async () => {
+      // Signal Telegram that the app is ready — on some iOS versions this
+      // triggers the native side to populate initData/initDataUnsafe.
+      window.Telegram?.WebApp?.ready();
+      window.Telegram?.WebApp?.expand();
+
       const stored = localStorage.getItem("twa_token");
 
       if (stored) {
-        // Lightweight verify — no DB/WB API roundtrip (item 2 fix).
         const r = await fetch("/api/twa/ping", { headers: { Authorization: `Bearer ${stored}` } }).catch(() => null);
         if (cancelled) return;
         if (r?.ok) {
           setToken(stored);
           setAuth("ok");
-          window.Telegram?.WebApp?.ready();
-          window.Telegram?.WebApp?.expand();
           return;
         }
         localStorage.removeItem("twa_token");
       }
 
-      // Fast path: if initDataUnsafe.user.id is already present, skip the
-      // initData poll entirely — auth endpoint accepts unsafe userId for
-      // admins (HMAC isn't possible without the raw initData anyway).
+      // Fast path: initData or initDataUnsafe already populated.
       const unsafeUserEarly = window.Telegram?.WebApp?.initDataUnsafe?.user;
       const initDataEarly   = window.Telegram?.WebApp?.initData;
       if (initDataEarly) {
@@ -138,7 +141,7 @@ export default function TwaApp() {
         return;
       }
 
-      // Last resort: SDK still hydrating — short poll, then bail.
+      // Poll — SDK may still be hydrating after async beforeInteractive load.
       const initData = await waitForInitData();
       if (cancelled) return;
 
@@ -153,9 +156,22 @@ export default function TwaApp() {
         return;
       }
 
+      // Fallback: parse the hash captured by the inline script in layout.tsx
+      // before Next.js async script loading had a chance to run.
+      const earlyHash = window.__tgHash ?? "";
+      const hashInitData = extractInitDataFromHash(earlyHash) || extractInitDataFromHash(location.hash);
+      if (hashInitData) {
+        doAuth({ initData: hashInitData });
+        return;
+      }
+
       if (!cancelled) {
         const sdk = window.Telegram?.WebApp;
-        setDebugMsg(`SDK:${sdk ? "ok" : "no"} initData:"${sdk?.initData ?? ""}" unsafe:${JSON.stringify(sdk?.initDataUnsafe?.user ?? null)}`);
+        setDebugMsg(
+          `SDK:${sdk ? "ok" : "no"} initData:"${sdk?.initData ?? ""}" ` +
+          `unsafe:${JSON.stringify(sdk?.initDataUnsafe?.user ?? null)} ` +
+          `hash:${earlyHash ? earlyHash.slice(0, 40) + "…" : "(empty)"}`
+        );
         setAuth("error");
       }
     })();

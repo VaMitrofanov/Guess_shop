@@ -13,7 +13,7 @@
 - [x] **(4) Юзернейм в карточках заказа** ✅ — добавлен `formatUserHandle()` + `formatUserHandleHtml()` в `bots/shared/admin.ts`. `renderOrderCard` (`bots/tg/handlers.ts:1262`) и `renderExtendedCard` (`bots/tg/admin/hub-orders.ts:151`) теперь используют DB `user.username` напрямую (вместо regex-парсинга из display name). Эффект: `@SunriseSword` вместо `:D misak¡ti`.
 - [x] **(3) Кнопка «Открыть профиль в TG»** ✅ — `openContact()` в `OrdersScreen.tsx:389` зовёт `openTelegramLink('tg://...')`, который Telegram отвергает (принимает только `https://t.me/...`). Решение: для безхэндловых юзеров кнопка → best-effort открыть deep link + **гарантированно копирует ID** в буфер + показывает inline-тост «вставь в поиск Telegram». Label стал контекстным: `Написать @x` / `Скопировать ID · 12345` / `Написать в ВКонтакте`.
 - [x] **(6) Двойной деплой Coolify** ✅ — диагностировано. **Причина:** один GitHub-репозиторий обслуживает **4 Coolify-сервиса** (RobloxBankWeb, RobloxBank-Guide, TG_bot, VK_bot), у всех включён auto-deploy по push в main. На один `git push` GitHub шлёт 4 webhook → Coolify запускает 4 деплоя. На RF-сервере живут 3 из 4 (Web + Guide + VK) → пользователь видит «двойной/тройной» деплой даже если правил только `src/app/twa/`. `.github/workflows` пуст, husky-хуков нет, скриптов авто-пуша нет. **Решение (требуется доступ к Coolify UI, не правки кода):** в каждом сервисе → Configuration → "Watch Paths" задать фильтры: Web=`src/**, prisma/**, package*.json, Dockerfile, next.config.ts`; Guide=`src/app/guide/**, public/guide/**, Dockerfile.guide, next.config.guide.ts`; TG=`bots/tg/**, bots/shared/**, prisma/**, package*.json, bots/tg/Dockerfile`; VK=`bots/vk/**, bots/shared/**, prisma/**, package*.json, bots/vk/Dockerfile`. После этого правка UI триггерит только Web.
-- [x] **(2) Оптимизация загрузки TWA** ✅ — сделано: (a) новый `/api/twa/ping` (только JWT verify, без БД/WB-API) заменил `dashboard`-пробу; (b) `Dashboard / WbScreen / BossrobuxScreen / SettingsScreen` подгружаются через `next/dynamic` с `ssr:false` — в стартовом бандле только `OrdersScreen` (default-таб); (c) fast-path: если `initData` или `initDataUnsafe.user.id` уже есть — auth-fetch стартует мгновенно без поллинга; (d) `waitForInitData` сжат с 3000 ms/100 ms до 1200 ms/50 ms; (e) loading-state заменён с emoji-spinner на skeleton-карточки, совпадающие с layout'ом OrdersScreen — нет визуального скачка.
+- [x] **(2) Оптимизация загрузки TWA** ✅ — сделано: (a) новый `/api/twa/ping` (только JWT verify, без БД/WB-API) заменил `dashboard`-пробу; (b) `Dashboard / WbScreen / BossrobuxScreen / SettingsScreen` подгружаются через `next/dynamic` с `ssr:false` — в стартовом бандле только `OrdersScreen` (default-таб); (c) fast-path: если `initData` или `initDataUnsafe.user.id` уже есть — auth-fetch стартует мгновенно без поллинга; (d) `waitForInitData` — 3000 ms/50 ms (возвращён с 1200 ms из-за iOS timing issue, см. сессию 2026-05-31); (e) loading-state заменён с emoji-spinner на skeleton-карточки, совпадающие с layout'ом OrdersScreen — нет визуального скачка.
 - [x] **(5) Поиск WB-кодов в БД** ✅ — новый `GET /api/twa/wbcodes/search?q=&status=&denom=&page=&limit=` возвращает коды с `user` и `order`-связкой. `CodesScreen.tsx` получил search bar + status-фильтры (Все / Свободные / Резерв / Забраны); при пустом запросе показывает прежний dashboard (графики/остатки), при заполненном — список карточек кодов (код / номинал / статус / юзер @username / заказ #X / резерв-таймер / батч). 220 ms debounce + анти-stale request guard.
 
 ### Спринт 2 — тяжёлые задачи (в работе)
@@ -3449,4 +3449,32 @@ curl -s -X POST \
 4. VK: тап на «💬 Нужна помощь?» → SOS прилетает один раз, повторный тап в 30 минут — пусто (раньше прилетал каждый раз).
 5. Старые supportBtn-места (после rejected, pending long и т.д.) — тоже теперь работают по-новому (callback вместо URL).
 
+### Сессия 2026-05-31 — fix: TWA «Доступ запрещён» (initData пустой на iOS)
+
+**Проблема:** TWA показывает «Доступ запрещён» с debug `SDK:ok initData:"" unsafe:null`. Telegram WebApp SDK загружается, но `initData` и `initDataUnsafe.user` пусты — аутентификация невозможна.
+
+**Корневая причина:** Next.js 16 загружает `strategy="beforeInteractive"` скрипты через асинхронный `self.__next_s.push()` → `loadScriptsInSequence()` (`node_modules/next/dist/client/app-bootstrap.js`), а не как блокирующий `<script>` в `<head>`. Telegram SDK (`telegram-web-app.js`) читает `location.hash` **один раз** при выполнении скрипта (подтверждено из исходника SDK). На iOS WKWebView хеш-фрагмент с `tgWebAppData=...` может быть утерян к моменту, когда Next.js bootstrap скачается, выполнится и подгрузит SDK.
+
+Продакшн-HTML подтверждает: SDK появляется как `<link rel="preload">` (скачивание) + `self.__next_s.push()` (отложенное выполнение), а НЕ как синхронный `<script src="...">` в `<head>`.
+
+**Фикс (2 файла):**
+
+1. **`src/app/layout.tsx`** — добавлен inline `<script>` через `dangerouslySetInnerHTML` в начале `<body>`:
+   ```html
+   <script>window.__tgHash=location.hash;</script>
+   ```
+   Это блокирующий inline-скрипт, рендерится SSR — выполняется ДО любых async-скриптов Next.js. Сохраняет хеш в глобальную переменную на случай, если он будет утерян к моменту загрузки SDK.
+
+2. **`src/app/twa/_components/TwaApp.tsx`** — 4 изменения в auth-flow:
+   - **`ready()` + `expand()` вызываются сразу** при обнаружении SDK, ДО попытки чтения initData. Раньше вызывались только после успешной авторизации (chicken-and-egg). На некоторых версиях iOS это сигнализирует Telegram передать данные.
+   - **Таймаут поллинга увеличен** с 1200ms до 3000ms. 1200ms была преждевременная оптимизация из item 2 sprint 1 — на медленных iOS-соединениях SDK может загрузиться позже.
+   - **Hash fallback:** если SDK `initData` пуст после поллинга, парсится `window.__tgHash` (сохранённый inline-скриптом) и текущий `location.hash` на наличие `tgWebAppData=...`. Если найдено — используется как initData для auth.
+   - **Улучшенный debug:** ошибка теперь показывает `hash:` (первые 40 символов сохранённого хеша) — при следующем сбое сразу видно, был ли хеш вообще.
+   - Добавлен тип `__tgHash?: string` в `Window` interface.
+
+**Что проверить:**
+1. `npm run build` — чистый (проверено: `tsc --noEmit` ок)
+2. Открыть TWA из iOS Telegram через кнопку «🚀 Launch Dashboard» или Menu Button
+3. Должен авторизоваться и показать экран Заказы (не «Доступ запрещён»)
+4. Если всё ещё ошибка — в debug-строке будет `hash:...` с хешем или `hash:(empty)`, что покажет, передаёт ли Telegram данные вообще (и тогда проблема в настройках BotFather / домена)
 
