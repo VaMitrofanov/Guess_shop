@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
+import { prisma } from "@/lib/prisma";
 
 const BASE = "https://bossrobux.com/api";
 
@@ -28,13 +29,15 @@ export async function GET(req: NextRequest) {
     const data = await brPost("get-rb");
     if (data.robux_total === undefined) return NextResponse.json({ error: "Bad response" }, { status: 502 });
     const rate = Number(data.rate);
-    // BossRobux API returns rate in VND per R$; compute USD if not provided
-    const VND_PER_USD = 25_800;
-    const rate_usd = data.rate_usd !== undefined
-      ? Number(data.rate_usd)
-      : data.rate_usdt !== undefined
-        ? rate / Number(data.rate_usdt)
-        : rate / VND_PER_USD;
+    let rate_usd: number;
+    if (data.rate_usd !== undefined) {
+      rate_usd = Number(data.rate_usd);
+    } else if (data.rate_usdt !== undefined) {
+      rate_usd = rate / Number(data.rate_usdt);
+    } else {
+      const mr = await prisma.marketRate.findUnique({ where: { provider: "bossrobux" } });
+      rate_usd = mr ? mr.rateUSD / 1000 : rate / 26_000;
+    }
     return NextResponse.json({
       rate,
       robux_total: Number(data.robux_total),
