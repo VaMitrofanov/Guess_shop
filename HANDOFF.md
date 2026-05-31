@@ -98,6 +98,8 @@
 - **Сайт** (`robloxbank.ru/guide?source=wb`) — точка входа / инструкция
 - **TG бот** (`@RobloxBankBot`) — основной рабочий канал
 - **VK бот** (`vk.me/club237309399`) — альтернативный канал для VK-аудитории
+- **TG канал** (`@Roblox_Bank_Tg`, ID: `-1003910127162`) — анонсы, акции, обновления
+- **VK сообщество** (`vk.com/bankroblox`, ID: `237309399`) — стена для анонсов VK-аудитории
 
 ---
 
@@ -3449,32 +3451,34 @@ curl -s -X POST \
 4. VK: тап на «💬 Нужна помощь?» → SOS прилетает один раз, повторный тап в 30 минут — пусто (раньше прилетал каждый раз).
 5. Старые supportBtn-места (после rejected, pending long и т.д.) — тоже теперь работают по-новому (callback вместо URL).
 
-### Сессия 2026-05-31 — fix: TWA «Доступ запрещён» (initData пустой на iOS)
+### Сессия 2026-05-31 — fix: TWA «Доступ запрещён» (initData пустой на iOS) ✅
 
-**Проблема:** TWA показывает «Доступ запрещён» с debug `SDK:ok initData:"" unsafe:null`. Telegram WebApp SDK загружается, но `initData` и `initDataUnsafe.user` пусты — аутентификация невозможна.
+**Проблема:** TWA показывала «Доступ запрещён» с debug `SDK:ok initData:"" unsafe:null`. Telegram WebApp SDK загружался, но `initData` и `initDataUnsafe.user` были пусты — аутентификация невозможна.
 
-**Корневая причина:** Next.js 16 загружает `strategy="beforeInteractive"` скрипты через асинхронный `self.__next_s.push()` → `loadScriptsInSequence()` (`node_modules/next/dist/client/app-bootstrap.js`), а не как блокирующий `<script>` в `<head>`. Telegram SDK (`telegram-web-app.js`) читает `location.hash` **один раз** при выполнении скрипта (подтверждено из исходника SDK). На iOS WKWebView хеш-фрагмент с `tgWebAppData=...` может быть утерян к моменту, когда Next.js bootstrap скачается, выполнится и подгрузит SDK.
+**Диагностика (2 итерации):**
 
-Продакшн-HTML подтверждает: SDK появляется как `<link rel="preload">` (скачивание) + `self.__next_s.push()` (отложенное выполнение), а НЕ как синхронный `<script src="...">` в `<head>`.
+1. **Первая гипотеза (частично верна):** Next.js 16 загружает `strategy="beforeInteractive"` скрипты через асинхронный `self.__next_s.push()` → `loadScriptsInSequence()` (`node_modules/next/dist/client/app-bootstrap.js`), а не как блокирующий `<script>` в `<head>`. SDK читает `location.hash` **один раз** при выполнении. Добавлен inline `<script>` для раннего захвата хеша + увеличен таймаут поллинга + вызов `ready()` до auth.
 
-**Фикс (2 файла):**
+2. **Реальная причина (обнаружена из debug):** после деплоя первого фикса debug показал `hash:#tgWebAppVersion=9.6&tgWebAppPlatform=ios…` — хеш **есть**, но `tgWebAppData` в нём **полностью отсутствует**. iOS Telegram v9.6+ **не передаёт initData в хеше** для Mini Apps, открытых через `setChatMenuButton` и Reply Keyboard `web_app`. В исходнике SDK (`telegram-web-app.js`) подтверждено: `initData` заполняется **только** из `initParams.tgWebAppData` (парсинг хеша), никакого `postMessage`/`receiveEvent` fallback для initData нет.
 
-1. **`src/app/layout.tsx`** — добавлен inline `<script>` через `dangerouslySetInnerHTML` в начале `<body>`:
-   ```html
-   <script>window.__tgHash=location.hash;</script>
-   ```
-   Это блокирующий inline-скрипт, рендерится SSR — выполняется ДО любых async-скриптов Next.js. Сохраняет хеш в глобальную переменную на случай, если он будет утерян к моменту загрузки SDK.
+**Итоговый фикс (4 файла, 2 коммита):**
 
-2. **`src/app/twa/_components/TwaApp.tsx`** — 4 изменения в auth-flow:
-   - **`ready()` + `expand()` вызываются сразу** при обнаружении SDK, ДО попытки чтения initData. Раньше вызывались только после успешной авторизации (chicken-and-egg). На некоторых версиях iOS это сигнализирует Telegram передать данные.
-   - **Таймаут поллинга увеличен** с 1200ms до 3000ms. 1200ms была преждевременная оптимизация из item 2 sprint 1 — на медленных iOS-соединениях SDK может загрузиться позже.
-   - **Hash fallback:** если SDK `initData` пуст после поллинга, парсится `window.__tgHash` (сохранённый inline-скриптом) и текущий `location.hash` на наличие `tgWebAppData=...`. Если найдено — используется как initData для auth.
-   - **Улучшенный debug:** ошибка теперь показывает `hash:` (первые 40 символов сохранённого хеша) — при следующем сбое сразу видно, был ли хеш вообще.
-   - Добавлен тип `__tgHash?: string` в `Window` interface.
+**Коммит 1** — `b784229` — подготовительные меры + диагностика:
+1. **`src/app/layout.tsx`** — inline `<script>window.__tgHash=location.hash;</script>` в начале `<body>` (SSR, блокирующий). Сохраняет хеш до загрузки SDK.
+2. **`src/app/twa/_components/TwaApp.tsx`**:
+   - `ready()` + `expand()` вызываются сразу при обнаружении SDK (раньше — только после auth)
+   - Таймаут поллинга 3000ms вместо 1200ms
+   - Fallback-парсинг `window.__tgHash` и `location.hash` на `tgWebAppData=...`
+   - Улучшенный debug с отображением `hash:...` (первые 80 символов)
+   - Тип `__tgHash?: string` в Window interface
 
-**Что проверить:**
-1. `npm run build` — чистый (проверено: `tsc --noEmit` ок)
-2. Открыть TWA из iOS Telegram через кнопку «🚀 Launch Dashboard» или Menu Button
-3. Должен авторизоваться и показать экран Заказы (не «Доступ запрещён»)
-4. Если всё ещё ошибка — в debug-строке будет `hash:...` с хешем или `hash:(empty)`, что покажет, передаёт ли Telegram данные вообще (и тогда проблема в настройках BotFather / домена)
+**Коммит 2** — `60cf135` — решающий фикс (uid в URL):
+3. **`bots/tg/admin/menu.ts`** — `buildAdminKeyboard(uid?)` теперь принимает TG ID админа. `twaUrl(uid)` добавляет `?uid=<id>` в URL web_app кнопки.
+4. **`bots/tg/admin/index.ts`** — `setupMenuButton()` добавляет `?uid=<adminId>` в URL каждого per-admin MenuButton.
+5. **`bots/tg/handlers.ts`** — `getAdminKeyboard(uid)` стала per-admin (кэш по uid). Все 3 call-site обновлены: передают `ctx.from.id` / `tgId`.
+6. **`src/app/twa/_components/TwaApp.tsx`** — новый fallback: если все методы (initData, initDataUnsafe, hash-парсинг) провалились, читает `?uid=` из URL и шлёт на `/api/twa/auth` как `{ userId }`. Auth endpoint (Path 2) проверяет `isAdmin(userId)` — безопасно, т.к. нужно знать TG ID админа.
+
+**Почему это безопасно:** auth endpoint (`src/app/api/twa/auth/route.ts`) Path 2 принимает raw userId, но **только если он есть в `ADMIN_IDS`** (env var `TG_CHAT_ID`). Посторонний не сможет авторизоваться, даже зная URL с `?uid=`.
+
+**Архитектурная заметка:** если Telegram в будущем начнёт передавать `tgWebAppData` в хеше (или iOS обновится), auth пойдёт через Path 1 (HMAC) — более безопасный. `?uid=` fallback сработает только когда все остальные методы провалились. Цепочка приоритетов: stored JWT → initData (HMAC) → initDataUnsafe.user → hash-парсинг → `?uid=` URL param.
 

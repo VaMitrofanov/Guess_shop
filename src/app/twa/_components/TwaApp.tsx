@@ -12,6 +12,7 @@ const Dashboard       = dynamic(() => import("./screens/Dashboard"),      { ssr:
 const WbScreen        = dynamic(() => import("./screens/WbScreen"),       { ssr: false, loading: () => <ScreenSkeleton /> });
 const BossrobuxScreen = dynamic(() => import("./screens/BossrobuxScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
 const SettingsScreen  = dynamic(() => import("./screens/SettingsScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
+const SystemScreen    = dynamic(() => import("./screens/SystemScreen"),   { ssr: false, loading: () => <ScreenSkeleton /> });
 
 function ScreenSkeleton() {
   return (
@@ -41,7 +42,7 @@ declare global {
   }
 }
 
-type Screen = "dashboard" | "orders" | "wb" | "bossrobux" | "settings";
+type Screen = "dashboard" | "orders" | "wb" | "bossrobux" | "settings" | "system";
 
 const SCREEN_TITLES: Record<Screen, string> = {
   dashboard:  "Главная",
@@ -49,6 +50,7 @@ const SCREEN_TITLES: Record<Screen, string> = {
   wb:         "Wildberries",
   bossrobux:  "Boss Robux",
   settings:   "Настройки",
+  system:     "Система",
 };
 
 export default function TwaApp() {
@@ -270,7 +272,8 @@ export default function TwaApp() {
         {screen === "orders"     && <OrdersScreen   {...sp} onGoToBossrobux={(gpId) => { setBossrobuxPreloadId(gpId); setScreen("bossrobux"); }} initialQuery={orderQueryPreload} onInitialQueryConsumed={() => setOrderQueryPreload("")} />}
         {screen === "wb"         && <WbScreen       {...sp} />}
         {screen === "bossrobux"  && <BossrobuxScreen {...sp} preloadGamepassId={bossrobuxPreloadId} onPreloadConsumed={() => setBossrobuxPreloadId(undefined)} />}
-        {screen === "settings"   && <SettingsScreen  {...sp} />}
+        {screen === "settings"   && <SettingsScreen  {...sp} onNavigate={(s) => setScreen(s as Screen)} />}
+        {screen === "system"     && <SystemScreen    {...sp} />}
       </div>
 
       <BottomNav active={screen} onChange={setScreen} ordersBadge={ordersBadge} />

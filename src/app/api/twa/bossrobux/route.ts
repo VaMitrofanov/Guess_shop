@@ -27,13 +27,19 @@ export async function GET(req: NextRequest) {
   try {
     const data = await brPost("get-rb");
     if (data.robux_total === undefined) return NextResponse.json({ error: "Bad response" }, { status: 502 });
+    const rate = Number(data.rate);
+    // BossRobux API returns rate in VND per R$; compute USD if not provided
+    const VND_PER_USD = 25_800;
+    const rate_usd = data.rate_usd !== undefined
+      ? Number(data.rate_usd)
+      : data.rate_usdt !== undefined
+        ? rate / Number(data.rate_usdt)
+        : rate / VND_PER_USD;
     return NextResponse.json({
-      rate:        Number(data.rate),
+      rate,
       robux_total: Number(data.robux_total),
       robux_max:   Number(data.robux_max),
-      // Forward optional USD/USDT rate if BossRobux API returns it
-      rate_usdt:   data.rate_usdt !== undefined ? Number(data.rate_usdt) : undefined,
-      rate_usd:    data.rate_usd  !== undefined ? Number(data.rate_usd)  : undefined,
+      rate_usd,
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 502 });

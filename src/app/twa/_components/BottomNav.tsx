@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 
-type Screen = "dashboard" | "orders" | "wb" | "bossrobux" | "settings";
+type Screen = "dashboard" | "orders" | "wb" | "bossrobux" | "settings" | "system";
 
 const HomeIcon = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -64,7 +64,7 @@ export default function BottomNav({
       paddingBottom: "env(safe-area-inset-bottom)",
     }}>
       {TABS.map(({ id, label, Icon }) => {
-        const isActive = active === id;
+        const isActive = active === id || (id === "settings" && active === "system");
         const badge = id === "orders" && ordersBadge > 0 ? ordersBadge : 0;
         return (
           <button

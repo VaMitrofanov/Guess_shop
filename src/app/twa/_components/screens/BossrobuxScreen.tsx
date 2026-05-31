@@ -110,14 +110,12 @@ function BalanceCard({
               label="Курс"
               value={
                 rate.rate_usd != null
-                  ? `$${rate.rate_usd.toFixed(4)}`
-                  : rate.rate_usdt != null
-                  ? `$${(rate.rate / rate.rate_usdt).toFixed(4)}`
+                  ? `$${(rate.rate_usd * 1000).toFixed(2)}`
                   : `${rate.rate}`
               }
               sub={
-                rate.rate_usd != null || rate.rate_usdt != null
-                  ? "$ / R$"
+                rate.rate_usd != null
+                  ? "$ / 1K R$"
                   : "₫ / R$"
               }
             />

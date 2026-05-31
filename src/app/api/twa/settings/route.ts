@@ -5,12 +5,19 @@ import { prisma } from "@/lib/prisma";
 export async function GET(req: NextRequest) {
   if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const s = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+  const [s, bestRate, pendingCount] = await Promise.all([
+    (prisma as any).globalSettings.findUnique({ where: { id: "global" } }),
+    (prisma as any).marketRate.findFirst({ orderBy: { rateUSD: "asc" }, where: { inventory: { gt: 0 } } }),
+    (prisma as any).wbOrder.count({ where: { status: "PENDING" } }),
+  ]);
+
   return NextResponse.json({
     purchaseRate:    s?.purchaseRate    ?? null,
     usdToRub:        s?.usdToRub        ?? 90,
     autoBuyEnabled:  s?.autoBuyEnabled  ?? false,
     autoBuyRate:     s?.autoBuyRate     ?? 4.0,
+    bestRate:        bestRate ? { rateUSD: bestRate.rateUSD, provider: bestRate.provider, inventory: bestRate.inventory } : null,
+    pendingOrders:   pendingCount,
   });
 }
 

@@ -12,6 +12,8 @@ interface Settings {
   usdToRub:       number;
   autoBuyEnabled: boolean;
   autoBuyRate:    number;
+  bestRate:       { rateUSD: number; provider: string; inventory: number } | null;
+  pendingOrders:  number;
 }
 
 function SectionHeader({ title }: { title: string }) {
@@ -23,11 +25,7 @@ function SectionHeader({ title }: { title: string }) {
 }
 
 function Card({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ background: C.card, borderRadius: 14, overflow: "hidden" }}>
-      {children}
-    </div>
-  );
+  return <div style={{ background: C.card, borderRadius: 14, overflow: "hidden" }}>{children}</div>;
 }
 
 function RowSep() {
@@ -46,22 +44,15 @@ function SettingRow({ label, children, last = false }: { label: string; children
   );
 }
 
-function NumInput({
-  value, onChange, placeholder, step = 0.1,
-}: { value: string; onChange: (v: string) => void; placeholder?: string; step?: number }) {
+function NumInput({ value, onChange, placeholder, step = 0.1 }: { value: string; onChange: (v: string) => void; placeholder?: string; step?: number }) {
   return (
     <input
-      type="number"
-      inputMode="decimal"
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      placeholder={placeholder}
-      step={step}
+      type="number" inputMode="decimal" value={value} onChange={e => onChange(e.target.value)}
+      placeholder={placeholder} step={step}
       style={{
         background: C.elevated, border: "none", borderRadius: 8,
         color: "#fff", fontSize: 15, padding: "6px 10px",
-        width: 90, textAlign: "right", outline: "none",
-        WebkitAppearance: "none",
+        width: 90, textAlign: "right", outline: "none", WebkitAppearance: "none",
       }}
     />
   );
@@ -90,8 +81,7 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
 function SaveBtn({ onSave, saving, saved }: { onSave: () => void; saving: boolean; saved: boolean }) {
   return (
     <button
-      onClick={onSave}
-      disabled={saving}
+      onClick={onSave} disabled={saving}
       style={{
         background: saved ? C.green : C.accent, border: "none", borderRadius: 12,
         color: "#fff", fontSize: 15, fontWeight: 600, padding: "13px",
@@ -104,22 +94,54 @@ function SaveBtn({ onSave, saving, saved }: { onSave: () => void; saving: boolea
   );
 }
 
-export default function SettingsScreen({ token }: { token: string }) {
+function StatusPill({ enabled, bestRate, targetRate, pending }: {
+  enabled: boolean; bestRate: Settings["bestRate"]; targetRate: number; pending: number;
+}) {
+  const conditionMet = bestRate && bestRate.rateUSD <= targetRate;
+  return (
+    <div style={{
+      background: enabled
+        ? conditionMet ? "rgba(48,209,88,0.08)" : "rgba(191,90,242,0.08)"
+        : "rgba(142,142,147,0.08)",
+      border: `1px solid ${enabled
+        ? conditionMet ? "rgba(48,209,88,0.2)" : "rgba(191,90,242,0.15)"
+        : "rgba(142,142,147,0.15)"}`,
+      borderRadius: 12, padding: "10px 14px",
+      display: "flex", alignItems: "center", gap: 10,
+    }}>
+      <div style={{
+        width: 8, height: 8, borderRadius: "50%",
+        background: enabled ? (conditionMet ? C.green : C.accent) : C.muted,
+        boxShadow: enabled ? `0 0 6px ${conditionMet ? C.green : C.accent}` : "none",
+      }} />
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, color: "#e5e5ea", fontWeight: 500 }}>
+          {!enabled ? "Автобай выключен" : conditionMet ? "Условие выполнено — выкупает" : "Ожидание подходящего курса"}
+        </div>
+        <div style={{ fontSize: 11, color: C.sec, marginTop: 2 }}>
+          {bestRate
+            ? `Лучший: $${bestRate.rateUSD}/1K · ${bestRate.provider} · ${bestRate.inventory.toLocaleString("ru-RU")} R$`
+            : "Нет данных о рыночном курсе"}
+          {pending > 0 && ` · ${pending} в очереди`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function SettingsScreen({ token, onNavigate }: { token: string; onNavigate?: (screen: string) => void }) {
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [loading,  setLoading]  = useState(true);
-  const [error,    setError]    = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  // Local edit state
-  const [purchaseRateStr,  setPurchaseRateStr]  = useState("");
-  const [usdToRubStr,      setUsdToRubStr]      = useState("");
-  const [autoBuyEnabled,   setAutoBuyEnabled]   = useState(false);
-  const [autoBuyRateStr,   setAutoBuyRateStr]   = useState("");
+  const [purchaseRateStr, setPurchaseRateStr] = useState("");
+  const [usdToRubStr, setUsdToRubStr] = useState("");
+  const [autoBuyEnabled, setAutoBuyEnabled] = useState(false);
+  const [autoBuyRateStr, setAutoBuyRateStr] = useState("");
 
-  const [savingRates,   setSavingRates]   = useState(false);
-  const [savedRates,    setSavedRates]    = useState(false);
-  const [savingAuto,    setSavingAuto]    = useState(false);
-  const [savedAuto,     setSavedAuto]     = useState(false);
-  const [saveErr,       setSaveErr]       = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveErr, setSaveErr] = useState("");
 
   const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
@@ -135,49 +157,59 @@ export default function SettingsScreen({ token }: { token: string }) {
       setAutoBuyEnabled(d.autoBuyEnabled);
       setAutoBuyRateStr(String(d.autoBuyRate));
     } catch { setError("Ошибка сети"); }
-    finally  { setLoading(false); }
+    finally { setLoading(false); }
   }, [token]);
 
   useEffect(() => { load(); }, [load]);
 
-  async function saveRates() {
-    setSavingRates(true); setSaveErr("");
+  async function save() {
+    setSaving(true); setSaveErr(""); setSaved(false);
     try {
       const purchaseRate = purchaseRateStr.trim() === "" ? null : parseFloat(purchaseRateStr);
       const usdToRub = parseFloat(usdToRubStr);
-      const r = await fetch("/api/twa/settings", {
-        method: "POST", headers,
-        body: JSON.stringify({ purchaseRate, usdToRub }),
-      });
-      const d = await r.json();
-      if (!r.ok) { setSaveErr(d.error ?? "Ошибка"); return; }
-      setSettings(s => s ? { ...s, purchaseRate: d.purchaseRate, usdToRub: d.usdToRub } : s);
-      setSavedRates(true); setTimeout(() => setSavedRates(false), 2000);
-    } catch { setSaveErr("Ошибка сети"); }
-    finally { setSavingRates(false); }
-  }
-
-  async function saveAutoBuy() {
-    setSavingAuto(true); setSaveErr("");
-    try {
       const autoBuyRate = parseFloat(autoBuyRateStr);
       const r = await fetch("/api/twa/settings", {
         method: "POST", headers,
-        body: JSON.stringify({ autoBuyEnabled, autoBuyRate }),
+        body: JSON.stringify({ purchaseRate, usdToRub, autoBuyEnabled, autoBuyRate }),
       });
       const d = await r.json();
       if (!r.ok) { setSaveErr(d.error ?? "Ошибка"); return; }
-      setSettings(s => s ? { ...s, autoBuyEnabled: d.autoBuyEnabled, autoBuyRate: d.autoBuyRate } : s);
-      setSavedAuto(true); setTimeout(() => setSavedAuto(false), 2000);
+      setSettings(s => s ? { ...s, ...d } : s);
+      setSaved(true); setTimeout(() => setSaved(false), 2000);
     } catch { setSaveErr("Ошибка сети"); }
-    finally { setSavingAuto(false); }
+    finally { setSaving(false); }
   }
 
   if (loading) return <Skeleton />;
-  if (error)   return <ErrorState msg={error} onRetry={load} />;
+  if (error) return <ErrorState msg={error} onRetry={load} />;
+  if (!settings) return null;
 
   return (
-    <div style={{ padding: "16px 16px 32px", display: "flex", flexDirection: "column", gap: 24, overflowY: "auto", height: "100%" }}>
+    <div style={{ padding: "16px 16px 32px", display: "flex", flexDirection: "column", gap: 22, overflowY: "auto", height: "100%" }}>
+
+      {/* AutoBuy status */}
+      <section>
+        <SectionHeader title="Автобай" />
+        <StatusPill
+          enabled={autoBuyEnabled}
+          bestRate={settings.bestRate}
+          targetRate={parseFloat(autoBuyRateStr) || settings.autoBuyRate}
+          pending={settings.pendingOrders}
+        />
+        <div style={{ marginTop: 10 }}>
+          <Card>
+            <SettingRow label="Включён">
+              <Toggle on={autoBuyEnabled} onChange={setAutoBuyEnabled} />
+            </SettingRow>
+            <SettingRow label="Целевой курс ($/1K R$)" last>
+              <NumInput value={autoBuyRateStr} onChange={setAutoBuyRateStr} placeholder="4.0" step={0.1} />
+            </SettingRow>
+          </Card>
+        </div>
+        <div style={{ fontSize: 11, color: C.sec, paddingLeft: 4, marginTop: 6 }}>
+          buyer.py проверяет рынок каждые 60 сек. Выкупает когда курс ≤ целевого.
+        </div>
+      </section>
 
       {/* Rates */}
       <section>
@@ -190,34 +222,15 @@ export default function SettingsScreen({ token }: { token: string }) {
             <NumInput value={usdToRubStr} onChange={setUsdToRubStr} placeholder="90" step={1} />
           </SettingRow>
         </Card>
-        <div style={{ marginTop: 10 }}>
-          <SaveBtn onSave={saveRates} saving={savingRates} saved={savedRates} />
-        </div>
-        {settings?.purchaseRate === null && (
-          <div style={{ fontSize: 12, color: C.sec, paddingLeft: 4, marginTop: 6 }}>
+        {settings.purchaseRate === null && (
+          <div style={{ fontSize: 11, color: C.sec, paddingLeft: 4, marginTop: 6 }}>
             Курс закупа не задан — используется рыночный
           </div>
         )}
       </section>
 
-      {/* AutoBuy */}
-      <section>
-        <SectionHeader title="Автобай" />
-        <Card>
-          <SettingRow label="Включён">
-            <Toggle on={autoBuyEnabled} onChange={setAutoBuyEnabled} />
-          </SettingRow>
-          <SettingRow label="Целевой курс ($/1K R$)" last>
-            <NumInput value={autoBuyRateStr} onChange={setAutoBuyRateStr} placeholder="4.0" step={0.1} />
-          </SettingRow>
-        </Card>
-        <div style={{ marginTop: 10 }}>
-          <SaveBtn onSave={saveAutoBuy} saving={savingAuto} saved={savedAuto} />
-        </div>
-        <div style={{ fontSize: 12, color: C.sec, paddingLeft: 4, marginTop: 6 }}>
-          buyer.py на X280 проверяет каждые 60 сек
-        </div>
-      </section>
+      {/* Save */}
+      <SaveBtn onSave={save} saving={saving} saved={saved} />
 
       {saveErr && (
         <div style={{ background: C.red + "22", color: C.red, borderRadius: 10, padding: "10px 14px", fontSize: 13 }}>
@@ -225,6 +238,28 @@ export default function SettingsScreen({ token }: { token: string }) {
         </div>
       )}
 
+      {/* System link */}
+      {onNavigate && (
+        <section>
+          <SectionHeader title="Мониторинг" />
+          <button
+            onClick={() => onNavigate("system")}
+            style={{
+              width: "100%", background: C.card, border: "none", borderRadius: 14,
+              padding: "15px 16px", cursor: "pointer",
+              display: "flex", alignItems: "center", gap: 12,
+              WebkitTapHighlightColor: "transparent",
+            }}
+          >
+            <span style={{ fontSize: 22 }}>🖥</span>
+            <div style={{ flex: 1, textAlign: "left" }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "#e5e5ea" }}>Состояние системы</div>
+              <div style={{ fontSize: 12, color: C.sec, marginTop: 2 }}>Серверы, БД, сервисы</div>
+            </div>
+            <span style={{ color: C.muted, fontSize: 18 }}>›</span>
+          </button>
+        </section>
+      )}
     </div>
   );
 }
@@ -232,7 +267,7 @@ export default function SettingsScreen({ token }: { token: string }) {
 function Skeleton() {
   return (
     <div style={{ padding: "16px 16px", display: "flex", flexDirection: "column", gap: 20 }}>
-      {[100, 140, 100].map((h, i) => (
+      {[72, 100, 80, 48].map((h, i) => (
         <div key={i} style={{ background: C.card, borderRadius: 14, height: h, animation: "pulse 1.5s ease-in-out infinite" }} />
       ))}
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}`}</style>
@@ -247,10 +282,8 @@ function ErrorState({ msg, onRetry }: { msg: string; onRetry: () => void }) {
       <div style={{ fontSize: 14, marginBottom: 16 }}>{msg}</div>
       <button
         onClick={onRetry}
-        style={{ background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 14, padding: "10px 20px", cursor: "pointer" }}
-      >
-        Повторить
-      </button>
+        style={{ background: C.accent, border: "none", borderRadius: 10, color: "#fff", fontSize: 14, fontWeight: 600, padding: "10px 20px", cursor: "pointer" }}
+      >Повторить</button>
     </div>
   );
 }
