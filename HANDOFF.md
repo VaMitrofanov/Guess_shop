@@ -20,12 +20,12 @@
 
 - [~] **(1) Перенос кнопок TG-бота внутрь TWA** — **Phase A сделана** (коммит `6613568`). Phase B/C не начаты.
   - ✅ **Phase A:** `bots/tg/admin/menu.ts` переписан — Reply Keyboard теперь одна большая `🚀 Launch Dashboard` (web_app). `updateMainMenu` оставлен как no-op чтобы старые call-сайты компилировались. `/admin` сообщение обновлено.
-  - ⏳ **Phase B (не начата):** перенос System / Stats / Rates / AutoBuy хабов в TWA-экраны. Делать **по одному хабу за коммит/деплой**, иначе сломается админский поток на проде. Порядок (от наименее рискованного):
-    - **B1 Stats** (read-only): `GET /api/twa/stats` — те же агрегаты, что считает `bots/tg/admin/hub-stats.ts` (выручка день/неделя/месяц, кол-во заказов по статусам, конверсия). Экран `StatsScreen.tsx`, путь в Settings → «Статистика» (BottomNav уже на 5 пунктах).
-    - **B2 Rates** (read + write): `GET/POST /api/twa/rates` — текущие курсы R$/₽ + история. POST защищён `extractTwaUser` + `role === ADMIN`. Экран — две большие input-карточки.
-    - **B3 System** (диагностика): перенос `bots/tg/admin/hub-system.ts` — health, env-флаги (только наличие), сессии, git SHA. `GET /api/twa/system`.
-    - **B4 AutoBuy** (самое сложное — переносить последним): `GET/PUT /api/twa/autobuy` — конфиг BossRobux автозакупки + лог последних попыток.
-    - **B5 Уборка:** удалить старые reply-кнопки из `bots/tg/admin/menu.ts` и `updateMainMenu` (сейчас no-op).
+  - [~] **Phase B (частично):** перенос System / Stats / Rates / AutoBuy хабов в TWA-экраны.
+    - ✅ **B2+B4 Rates + AutoBuy** — объединены в переработанный `SettingsScreen.tsx`. Live-статус автобая (лучший рыночный курс, провайдер, pending-очередь), курсы + автобай в одном экране с единой кнопкой «Сохранить». API `/api/twa/settings` расширен: возвращает `bestRate` + `pendingOrders`.
+    - ✅ **B3 System** — `GET /api/twa/system` + `SystemScreen.tsx`. Health checks сервисов с пульсом + ms, Hetzner серверы (статус, спеки, €/мес, countdown до оплаты), VDSina баланс + дней осталось, Neon DB (размер, коннекты, дата оплаты). Доступ из Settings → «Состояние системы».
+    - ✅ **BossRobux курс** — `rate` из VND конвертируется в USD серверно (`/api/twa/bossrobux`), UI показывает `$/1K R$`.
+    - ⏳ **B1 Stats** (read-only): `GET /api/twa/stats` — выручка день/неделя/месяц, кол-во заказов по статусам, конверсия. Экран `StatsScreen.tsx`. (Частично покрыт Dashboard, может не понадобиться отдельно.)
+    - ⏳ **B5 Уборка:** удалить старые reply-кнопки из `bots/tg/admin/menu.ts` и `updateMainMenu` (сейчас no-op).
   - ⏳ **Phase C (не начата):** удаление мёртвых text-interceptors из `bots/tg/admin/index.ts` после стабилизации Phase B. Параллельно вычистить неиспользуемые CB-константы из `bots/shared/admin.ts`. Проверка — `grep -rn "CB\." bots/ src/` должен сжаться.
 
 - [~] **(7) Поиск геймпассов по нику** — **Phase A+B сделаны** (коммит `6613568`). Phase C/D не начаты.
