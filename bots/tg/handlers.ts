@@ -238,7 +238,7 @@ export function registerStart(bot: Telegraf): void {
         );
       } else if (isAdmin) {
         const greeting = getGreeting(custStatus, firstName);
-        const adminKb = await getAdminKeyboard();
+        const adminKb = await getAdminKeyboard(ctx.from.id);
         await ctx.reply(
           `${greeting}Твой личный проводник в мир робуксов.\n\n` +
           `Есть код с WB-карты? Напиши его прямо сюда — я всё оформлю.`,
@@ -418,7 +418,7 @@ export function registerStart(bot: Telegraf): void {
     }
 
     const isAdmin = ADMIN_IDS.includes(tgId);
-    const adminKb = isAdmin ? await getAdminKeyboard() : {};
+    const adminKb = isAdmin ? await getAdminKeyboard(tgId) : {};
 
     // Loyalty-aware greeting for code activation
     const custStatus = await getCustomerStatus(tgId, "TG");
@@ -467,15 +467,14 @@ export function registerStart(bot: Telegraf): void {
   });
 }
 
-// Admin keyboard is now dynamic — see admin/menu.ts
-let _cachedKeyboard: any = null;
-async function getAdminKeyboard() {
-  // Cache for 30s to avoid DB hits on every /start
-  if (!_cachedKeyboard) {
-    _cachedKeyboard = await buildAdminKeyboard();
-    setTimeout(() => { _cachedKeyboard = null; }, 30_000);
-  }
-  return _cachedKeyboard;
+const _kbCache = new Map<string, { kb: any; timer: ReturnType<typeof setTimeout> }>();
+async function getAdminKeyboard(uid?: string | number) {
+  const key = String(uid ?? "");
+  const cached = _kbCache.get(key);
+  if (cached) return cached.kb;
+  const kb = await buildAdminKeyboard(uid);
+  _kbCache.set(key, { kb, timer: setTimeout(() => _kbCache.delete(key), 30_000) });
+  return kb;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1858,7 +1857,7 @@ export function registerAdmin(bot: Telegraf): void {
       "🛠️ <b>Панель управления</b>\n\n" +
       "🚀 Жми «Launch Dashboard» внизу — там заказы, поиск, статистика, коды, выкуп и всё остальное.\n" +
       "Этот чат теперь работает как канал оповещений: новые заказы, оплаты, отзывы и алерты приходят сюда.",
-      { parse_mode: "HTML", ...(await getAdminKeyboard()) }
+      { parse_mode: "HTML", ...(await getAdminKeyboard(ctx.from?.id)) }
     );
   });
 }

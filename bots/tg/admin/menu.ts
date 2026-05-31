@@ -20,8 +20,9 @@
 import { Markup, type Telegraf } from "telegraf";
 
 /** TWA URL used by the Launch button. Coolify sets NEXT_PUBLIC_APP_URL. */
-function twaUrl(): string {
-  return `${process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru"}/twa`;
+function twaUrl(uid?: string | number): string {
+  const base = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru"}/twa`;
+  return uid ? `${base}?uid=${uid}` : base;
 }
 
 /**
@@ -31,10 +32,13 @@ function twaUrl(): string {
  * platform-native blue gradient — no styling tricks needed on our side.
  * The button closes the chat and opens the TWA in the standard Mini App
  * frame; admin authenticates via initData (HMAC over TG_TOKEN).
+ *
+ * `uid` is appended as `?uid=<tgId>` — iOS Telegram v9.6+ omits
+ * tgWebAppData from the hash, so the TWA needs the admin ID in the URL.
  */
-export async function buildAdminKeyboard() {
+export async function buildAdminKeyboard(uid?: string | number) {
   return Markup.keyboard([
-    [Markup.button.webApp("🚀 Launch Dashboard", twaUrl())],
+    [Markup.button.webApp("🚀 Launch Dashboard", twaUrl(uid))],
   ]).resize().persistent();
 }
 

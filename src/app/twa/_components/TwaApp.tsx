@@ -165,12 +165,20 @@ export default function TwaApp() {
         return;
       }
 
+      // Fallback: iOS Telegram v9.6+ omits tgWebAppData from the hash
+      // entirely. The bot embeds ?uid=<adminId> in the web_app URL.
+      const urlUid = new URLSearchParams(window.location.search).get("uid");
+      if (urlUid) {
+        doAuth({ userId: Number(urlUid) });
+        return;
+      }
+
       if (!cancelled) {
         const sdk = window.Telegram?.WebApp;
         setDebugMsg(
           `SDK:${sdk ? "ok" : "no"} initData:"${sdk?.initData ?? ""}" ` +
           `unsafe:${JSON.stringify(sdk?.initDataUnsafe?.user ?? null)} ` +
-          `hash:${earlyHash ? earlyHash.slice(0, 40) + "…" : "(empty)"}`
+          `hash:${earlyHash ? earlyHash.slice(0, 80) + "…" : "(empty)"}`
         );
         setAuth("error");
       }

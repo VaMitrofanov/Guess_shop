@@ -488,12 +488,12 @@ export async function routeAdminCallback(
  * Called once at bot startup for every admin chat.
  */
 export async function setupMenuButton(bot: import("telegraf").Telegraf): Promise<void> {
-  const url = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru"}/twa`;
+  const base = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru"}/twa`;
   await Promise.allSettled(
     ADMIN_IDS.map(id =>
       bot.telegram.setChatMenuButton({
         chatId: Number(id),
-        menuButton: { type: "web_app", text: "Dashboard", web_app: { url } },
+        menuButton: { type: "web_app", text: "Dashboard", web_app: { url: `${base}?uid=${id}` } },
       })
     )
   );
