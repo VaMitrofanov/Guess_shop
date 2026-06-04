@@ -3484,3 +3484,35 @@ curl -s -X POST \
 
 **Архитектурная заметка:** если Telegram в будущем начнёт передавать `tgWebAppData` в хеше (или iOS обновится), auth пойдёт через Path 1 (HMAC) — более безопасный. `?uid=` fallback сработает только когда все остальные методы провалились. Цепочка приоритетов: stored JWT → initData (HMAC) → initDataUnsafe.user → hash-парсинг → `?uid=` URL param.
 
+### Сессия 2026-06-04 — Три фикса: VK-карточка, бонусы, юзернеймы
+
+**1. VK auth → полноценная карточка заказа**
+
+**Проблема:** `📥 КОД АКТИВИРОВАН (сайт → VK)` в `auth.ts` отправлялся как info-сообщение без кнопок и без order ID. Заказ создавался только позже в VK боте.
+
+**Решение:** `auth.ts` теперь создаёт provisional order (AWAITING_GAMEPASS) при VK-авторизации с кодом — до того как пользователь дойдёт до VK бота. VK бот проверяет `findUnique(wbCode)` и пропускает создание если заказ уже есть. Уведомление отправляется как полноценная карточка `📦 ЗАКАЗ #XXXX` с inline-кнопкой «Открыть в дашборде».
+
+**Файлы:**
+- `src/auth.ts` — provisional order creation + card-style notification
+- `src/lib/telegram.ts` — `sendTelegramMessage` расширен: `extra?: { reply_markup }` для inline-кнопок через bridge
+
+**2. Бонус: строго для прямых заказов, без WB**
+
+**Проблема:** `totalAmount = denomination + user.balance` применялся и к WB-заказам — бонус ошибочно добавлялся к сумме. Заказ `QXZCTNV` (Юлия Енина, denomination=300) получил amount=400 (+100 бонус от review).
+
+**Решение:**
+- DB fix: `UPDATE WbOrder SET amount=300 WHERE id='cmpyl7xfh00070imj1kx626mq'`
+- TG бот (`handlers.ts`): `totalAmount = wbCode.denomination` (без `+ balance`) в обоих path'ах (registerStart line 315, text-entry line 1628)
+- VK бот (`handlers.ts`): аналогично (line 723)
+- Баланс больше НЕ обнуляется при WB-заказе (убраны `balance: 0` транзакции) — бонус сохраняется для прямых заказов
+- Greeting text: вместо «🎁 Использован бонус» → «💡 Бонус X R$ — применится к прямому заказу»
+- Direct order flow: добавлена пометка «бонус действует только для прямых заказов»
+
+**Правило:** бонусный баланс (review +100 R$) плюсуется ТОЛЬКО к `isDirectOrder=true` заказам. WB-code заказы всегда `amount = denomination`.
+
+**3. TWA: кликабельные юзернеймы**
+
+**Проблема:** в TWA-карточках имя пользователя было plain text, не кликабельное. В TG-боте оно кликабельное через `<a href="tg://user?id=...">`.
+
+**Решение:** `OrdersScreen.tsx` — имя/username/ID в expanded-карточке стали tappable (цвет `#7ec5ff`, `cursor: pointer`). Тап вызывает `openContact()` — для `@username` открывает `t.me/`, для TG ID копирует + deep link, для VK открывает `vk.com/im`.
+

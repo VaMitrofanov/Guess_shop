@@ -312,7 +312,8 @@ export function registerStart(bot: Telegraf): void {
       return;
     }
 
-    const totalAmount = wbCode.denomination + (user.balance || 0);
+    // Bonus balance is NOT applied to WB-code orders — strictly for direct bot orders only.
+    const totalAmount = wbCode.denomination;
 
     // ── Set pendingLink BEFORE the sub-gate ───────────────────────────────
     // The session must survive the "please subscribe" detour. If the gate fires
@@ -424,12 +425,9 @@ export function registerStart(bot: Telegraf): void {
     const custStatus = await getCustomerStatus(tgId, "TG");
     const greetLine = getGreeting(custStatus, ctx.from.first_name || undefined);
 
-    let bonusText = "";
+    let bonusText = `💎 Номинал: <b>${wbCode.denomination} R$</b>\n\n`;
     if (user.balance && user.balance > 0) {
-      bonusText = `🎁 Использован бонус: <b>${user.balance} R$</b>\n` +
-        `💎 Итого к выдаче: <b>${totalAmount} R$</b>\n\n`;
-    } else {
-      bonusText = `💎 Номинал: <b>${wbCode.denomination} R$</b>\n\n`;
+      bonusText += `💡 <i>У тебя есть бонус ${user.balance} R$ — он применится к прямому заказу через бота (без карточки WB).</i>\n\n`;
     }
 
     // Non-admins also get an inline "find by nick" shortcut — saves them
@@ -1374,12 +1372,7 @@ async function processGamepassSubmission(
           });
         }
 
-        if (user.balance && user.balance > 0) {
-          await tx.user.update({
-            where: { id: user.id },
-            data: { balance: 0, reviewBonusGrantedAt: null, reviewReminderLevel: 0 },
-          });
-        }
+        // Bonus balance is preserved — it's only spent on direct bot orders, not WB-code orders.
 
         return newOrder;
       });
@@ -1625,7 +1618,8 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
     return;
   }
 
-  const totalAmount = wbCode.denomination + (user.balance || 0);
+  // Bonus balance is NOT applied to WB-code orders — strictly for direct bot orders only.
+  const totalAmount = wbCode.denomination;
   const passPrice = Math.ceil(totalAmount / 0.7);
 
   pendingLink.set(ctx.from.id, { wbCode: wbCode.code, denomination: totalAmount });
@@ -1706,11 +1700,9 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
     return;
   }
 
-  let bonusText = "";
+  let bonusText = `💎 Номинал: <b>${wbCode.denomination} R$</b>\n\n`;
   if (user.balance && user.balance > 0) {
-    bonusText = `🎁 Использован бонус: <b>${user.balance} R$</b>\n💎 Итого к выдаче: <b>${totalAmount} R$</b>\n\n`;
-  } else {
-    bonusText = `💎 Номинал: <b>${wbCode.denomination} R$</b>\n\n`;
+    bonusText += `💡 <i>У тебя есть бонус ${user.balance} R$ — он применится к прямому заказу через бота (без карточки WB).</i>\n\n`;
   }
 
   await ctx.reply(
@@ -2167,7 +2159,7 @@ export function registerCallbacks(bot: Telegraf): void {
       });
       const bonus = dirUser?.balance ?? 0;
       const bonusNote = bonus > 0
-        ? `\n\n🎁 У тебя есть бонус <b>${bonus} R$</b> — автоматически добавится к заказу.`
+        ? `\n\n🎁 У тебя есть бонус <b>${bonus} R$</b> — автоматически добавится к этому заказу (бонус действует только для прямых заказов).`
         : "";
       pendingDirectAmount.set(ctx.from.id, true);
       await ctx.reply(

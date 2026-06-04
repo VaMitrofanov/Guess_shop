@@ -682,16 +682,21 @@ function OrderCard({
             </>
           )}
 
-          {/* User identity — @username (copyable) + name & platform ID below */}
+          {/* User identity — tappable name opens profile/chat, @username copyable */}
           <Divider />
           <Row label="Пользователь">
             {(() => {
               const realName = order.user.name && order.user.name !== "VK User" ? order.user.name : null;
+              const linkStyle = { color: "#7ec5ff", textDecoration: "none" as const, cursor: "pointer" as const };
+              const handleTap = (e: React.MouseEvent) => {
+                e.stopPropagation();
+                openContact(order.user, () => {});
+              };
               if (order.user.username) {
                 return (
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontSize: 17, fontWeight: 600, color: C.textPrimary, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+                      <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
                         @{order.user.username}
                       </span>
                       <CopyBtn text={`@${order.user.username}`} />
@@ -703,12 +708,11 @@ function OrderCard({
                   </div>
                 );
               }
-              // No @handle — show name primary, ID secondary
               if (realName) {
                 return (
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontSize: 17, fontWeight: 600, color: C.textPrimary }}>{realName}</span>
+                      <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle }}>{realName}</span>
                       <CopyBtn text={realName} />
                     </div>
                     <span style={{ fontSize: 12.5, color: C.textTertiary, ...tabular }}>
@@ -720,7 +724,7 @@ function OrderCard({
               if (order.user.tgId) {
                 return (
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ fontSize: 17, fontWeight: 600, color: C.textPrimary, ...tabular }}>TG · {order.user.tgId}</span>
+                    <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle, ...tabular }}>TG · {order.user.tgId}</span>
                     <CopyBtn text={order.user.tgId} />
                   </div>
                 );
@@ -728,7 +732,7 @@ function OrderCard({
               if (order.user.vkId) {
                 return (
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ fontSize: 17, fontWeight: 600, color: C.textPrimary, ...tabular }}>vk.com/id{order.user.vkId}</span>
+                    <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle, ...tabular }}>vk.com/id{order.user.vkId}</span>
                     <CopyBtn text={order.user.vkId} />
                   </div>
                 );

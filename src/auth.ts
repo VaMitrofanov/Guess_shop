@@ -150,26 +150,67 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             }
           }
 
-          // Telegram notification
-          //  • order mode (wb_code present): brief "переходит в VK" card.
-          //    The VK bot sends the full order card once it processes the ref.
-          //  • login mode (no wb_code): brief sign-in card
+          // ── Provisional order + admin card (VK code activation) ─────────
+          // Create the provisional order here so admin sees a full card
+          // immediately. The VK bot's handleRefActivation checks for existing
+          // orders and skips creation if one already exists.
+          let provisionalOrder: any = null;
+          if (wbCode && wbCode.length === 7 && wbCodeRecord) {
+            try {
+              const existing = await prisma.wbOrder.findUnique({ where: { wbCode } });
+              if (!existing) {
+                provisionalOrder = await prisma.wbOrder.create({
+                  data: {
+                    amount: wbCodeRecord.denomination,
+                    gamepassUrl: null,
+                    status: "AWAITING_GAMEPASS",
+                    platform: "VK",
+                    userId: user.id,
+                    wbCode,
+                  } as any,
+                });
+              } else {
+                provisionalOrder = existing;
+              }
+            } catch (orderErr) {
+              console.error("[auth] Provisional order creation failed:", orderErr);
+            }
+          }
+
+          // Telegram notification — proper order card for code activation,
+          // brief sign-in card for login without code.
           try {
             const tgToken   = process.env.TG_TOKEN;
             const tgChatIds = process.env.TG_CHAT_ID?.split(",").map((id) => id.trim()) ?? [];
             if (tgToken && tgChatIds.length > 0) {
               let msg: string;
+              let reply_markup: unknown = undefined;
               if (wbCode && wbCode.length === 7) {
                 const denomination = wbCodeRecord?.denomination ?? 0;
                 const passPrice    = denomination > 0 ? Math.ceil(denomination / 0.7) : null;
+                const shortId      = provisionalOrder ? provisionalOrder.id.slice(-6).toUpperCase() : "—";
+                const dateStr = new Date().toLocaleString("ru-RU", {
+                  timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
+                  year: "numeric", hour: "2-digit", minute: "2-digit",
+                }) + " МСК";
                 msg =
-                  `📥 <b>КОД АКТИВИРОВАН (сайт → VK)</b>\n` +
+                  `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
                   `━━━━━━━━━━━━━━━━\n` +
                   (isGuideMode ? `📖 Режим: <b>Инструкция</b>\n` : ``) +
-                  `👤 Юзер: ${name} (<a href="https://vk.com/id${vkId}">VK</a>)\n` +
+                  `📘 Источник: <b>VK (сайт)</b>\n` +
+                  `📅 Время: <b>${dateStr}</b>\n` +
+                  `👤 Юзер: <a href="https://vk.com/id${vkId}">${name}</a>\n` +
                   `🔑 Код ВБ: <code>${wbCode}</code>\n` +
-                  (denomination > 0 ? `💎 Номинал: <b>${denomination} R$</b>${passPrice ? ` (Геймпасс: ${passPrice} R$)` : ""}\n` : ``) +
-                  `📊 Статус: ⌛ Переходит в VK бот...`;
+                  (denomination > 0 ? `💎 Сумма: <b>${denomination} R$</b>${passPrice ? ` (Геймпасс: ${passPrice} R$)` : ""}\n` : ``) +
+                  `📊 Статус: ⌛ Ожидаем ссылку на геймпасс`;
+                if (provisionalOrder) {
+                  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(shortId)}`;
+                  reply_markup = {
+                    inline_keyboard: [
+                      [{ text: "📊 Открыть в дашборде", web_app: { url: twaUrl } }],
+                    ],
+                  };
+                }
               } else {
                 const isNew = user.createdAt.getTime() === user.updatedAt.getTime();
                 msg =
@@ -178,7 +219,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                   `🆔 VK ID: <code>${vkId}</code>`;
               }
               await Promise.all(
-                tgChatIds.map((chatId) => sendTelegramMessage(tgToken, chatId, msg))
+                tgChatIds.map((chatId) => sendTelegramMessage(tgToken, chatId, msg, reply_markup ? { reply_markup } : undefined))
               );
             }
           } catch (tgErr) {

@@ -720,7 +720,8 @@ async function handleRefActivation(
     return;
   }
 
-  const totalAmount = wbCode.denomination + (user.balance || 0);
+  // Bonus balance is NOT applied to WB-code orders — strictly for direct bot orders only.
+  const totalAmount = wbCode.denomination;
   const passPrice = Math.ceil(totalAmount / 0.7);
   const custStatus = await getCustomerStatus(String(vkUserId), "VK");
   const firstName = fullName.split(" ")[0] || "друг";
@@ -728,12 +729,9 @@ async function handleRefActivation(
 
   setState(vkUserId, { type: "AWAITING_LINK", wbCode: wbCode.code, denomination: totalAmount });
 
-  let bonusText = "";
+  let bonusText = `💎 Номинал: ${wbCode.denomination} R$\n\n`;
   if (user.balance && user.balance > 0) {
-    bonusText = `🎁 Использован бонус: ${user.balance} R$!\n` +
-                `💎 Итого к выдаче: ${totalAmount} R$\n\n`;
-  } else {
-    bonusText = `💎 Номинал: ${wbCode.denomination} R$\n\n`;
+    bonusText += `💡 У тебя есть бонус ${user.balance} R$ — он применится к прямому заказу через бота (без карточки WB).\n\n`;
   }
 
   // ── Provisional order: claim code + notify admins BEFORE subscription gate ──
@@ -979,7 +977,7 @@ async function handleGamepassLink(
   // Roblox validation passed above — now commit in a single transaction:
   //  1. Claim the code (userId:null covers both fresh and web-pre-activated codes)
   //  2. Create the order
-  //  3. Clear bonus balance
+  // Bonus balance is preserved — only spent on direct bot orders.
   // If any step fails the whole transaction rolls back — code stays unclaimed.
   let order: any;
   try {
@@ -1047,9 +1045,7 @@ async function handleGamepassLink(
         });
       }
 
-      if (user.balance && user.balance > 0) {
-        await tx.user.update({ where: { id: user.id }, data: { balance: 0 } });
-      }
+      // Bonus balance is preserved — only spent on direct bot orders, not WB-code orders.
 
       return newOrder;
     });
@@ -1326,7 +1322,7 @@ async function handleStartDirect(ctx: MessageContext, vkUserId: number): Promise
   const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { balance: true } });
   const bonus = user?.balance ?? 0;
   const bonusNote = bonus > 0
-    ? `\n\n🎁 У тебя есть бонус ${bonus} R$ — он автоматически добавится к заказу.`
+    ? `\n\n🎁 У тебя есть бонус ${bonus} R$ — он автоматически добавится к этому заказу (бонус действует только для прямых заказов).`
     : "";
 
   setState(vkUserId, { type: "AWAITING_DIRECT_AMOUNT" });
