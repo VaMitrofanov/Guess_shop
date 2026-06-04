@@ -51,6 +51,16 @@ export const db: PrismaClient =
 
 g.__botPrisma = db;
 
+// Neon scale-to-zero keepalive: lightweight SELECT 1 every 4 min prevents the
+// compute from sleeping (5 min inactivity threshold). Costs ~0.25 CU continuous
+// instead of $80/mo for always-on, while avoiding cold-start penalties.
+if (!(g.__neonKeepalive as boolean)) {
+  g.__neonKeepalive = true;
+  setInterval(() => {
+    (db as any).$queryRawUnsafe("SELECT 1").catch(() => {});
+  }, 4 * 60 * 1000);
+}
+
 export default db;
 
 // ─────────────────────────────────────────────────────────────────────────────

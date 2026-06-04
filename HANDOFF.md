@@ -3516,3 +3516,30 @@ curl -s -X POST \
 
 **Решение:** `OrdersScreen.tsx` — имя/username/ID в expanded-карточке стали tappable (цвет `#7ec5ff`, `cursor: pointer`). Тап вызывает `openContact()` — для `@username` открывает `t.me/`, для TG ID копирует + deep link, для VK открывает `vk.com/im`.
 
+### Сессия 2026-06-05 — Диагностика: TWA "This page couldn't load" + 404
+
+**Симптом:** TWA в Telegram показывал «This page couldn't load» (native WebView error) и «404 | This page could not be found.» (Next.js 404) с разных устройств.
+
+**Диагностика (SSH на RF сервер 89.110.94.117):**
+
+1. **Контейнер `robloxbank-web`** — `Up 11 hours (healthy)`. Обе страницы (`index.html` 97KB, `twa.html` 12KB) присутствуют в билде. Изнутри контейнера `/` и `/twa` возвращают HTTP 200.
+
+2. **Traefik роутинг** — работает корректно. Access log подтверждает: HTTPS-запросы к `robloxbank.ru` идут через `rb-main-https@file` → `http://10.0.1.3:3000` и возвращают 200. Конфликтов роутеров нет: Docker labels определяют `main-web` на `http` entrypoint (priority 1), а YAML `robloxbank-ssl.yaml` определяет `rb-main-https` на `https` entrypoint (priority 1) → каждый обслуживает свой entrypoint.
+
+3. **CrowdSec** — чисто. Единственный бан: `48.214.144.31` (Microsoft CVE probing). IP пользователя не забанен.
+
+4. **SSL** — Let's Encrypt, валиден May 18 — Aug 16 2026.
+
+5. **Neon DB: 0.25 CU + Scale to zero** — **ключевая проблема производительности**. Access log показывает:
+   - `/api/twa/orders/urgent-count` → **1562ms, 3042ms**
+   - `/api/twa/orders?page=1&limit=20` → **4196ms, 4054ms**
+   - Причина: 0.25 CU = 1/4 ядра + scale-to-zero добавляет cold start 500ms-3s после 5 мин простоя.
+   - **Рекомендация:** вернуть minimum 0.5-1 CU, выключить Scale to zero (боты и TWA шлют запросы регулярно).
+
+**Вывод:** сервер, билд, роутинг, SSL, CrowdSec — всё в порядке. 404/«This page couldn't load» скриншоты — предположительно транзиентные (во время рестарта контейнера при деплое, или при тайм-ауте из-за замёрзшего Neon). Главная текущая проблема — **экстремальная задержка API из-за Neon 0.25 CU + scale-to-zero**.
+
+**Фикс: Neon keepalive** (`bots/shared/db.ts`):
+- Добавлен `SELECT 1` каждые 4 мин через `setInterval` — не даёт Neon compute уснуть (порог 5 мин).
+- Подхватывается и TG ботом (SG), и VK ботом (RF) автоматически. Один из них достаточен.
+- **Рекомендация пользователю:** в Neon Dashboard поднять «Scale up to» с 0.25 до 0.5–1 CU. Min оставить 0.25, Scale to zero оставить включённым — keepalive не даст уснуть, а при нагрузке compute масштабируется.
+
