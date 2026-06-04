@@ -24,3 +24,9 @@ export const prisma =
   });
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+
+// Pre-warm all 3 pool connections on startup so the first real request
+// doesn't pay the TLS handshake + Neon auth cost (~1.5s per connection).
+if (!globalForPrisma.prisma) {
+  Promise.all([pool.query("SELECT 1"), pool.query("SELECT 1"), pool.query("SELECT 1")]).catch(() => {});
+}
