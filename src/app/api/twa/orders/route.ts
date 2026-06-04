@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
   const q           = qRaw.length >= 2 ? qRaw : "";
   // Page 2+ (load-more) re-uses the prior page's counts so we save 6 COUNTs per request.
   const skipCounts  = searchParams.get("skipCounts") === "1";
+  const lite        = searchParams.get("lite") === "1";
 
   const statusWhere = (status && status !== "ALL" && VALID_STATUSES.includes(status as OrderStatus))
     ? { status: status as OrderStatus }
@@ -115,100 +116,99 @@ export async function GET(req: NextRequest) {
     ? await (prisma as any).wbOrder.count({ where })
     : total;
 
-  // ── Cluster numbering + review status — all DB queries in one parallel batch ─
-  const pageTgIds       = new Set<string>();
-  const pageVkIds       = new Set<string>();
-  const pageRobloxNicks = new Set<string>();
-  for (const o of orders) {
-    if (o.user?.tgId)       pageTgIds.add(String(o.user.tgId));
-    if (o.user?.vkId)       pageVkIds.add(String(o.user.vkId));
-    if (o.robloxUsername)   pageRobloxNicks.add(String(o.robloxUsername));
-  }
-  const clusterOrClauses: any[] = [];
-  if (pageTgIds.size      > 0) clusterOrClauses.push({ user: { tgId: { in: [...pageTgIds] } } });
-  if (pageVkIds.size      > 0) clusterOrClauses.push({ user: { vkId: { in: [...pageVkIds] } } });
-  if (pageRobloxNicks.size > 0) clusterOrClauses.push({ robloxUsername: { in: [...pageRobloxNicks] } });
-
-  const completedWbOrders = orders.filter((o: any) => o.status === "COMPLETED" && !o.isDirectOrder);
-  const wbCodeValues     = completedWbOrders.map((o: any) => o.wbCode as string);
-  const uniqueUserIds    = [...new Set<string>(completedWbOrders.map((o: any) => o.userId as string))];
-
-  const [clusterOrders, codeRecords, firstOrderRows] = await Promise.all([
-    clusterOrClauses.length > 0
-      ? (prisma as any).wbOrder.findMany({
-          where: { OR: clusterOrClauses },
-          select: { createdAt: true, robloxUsername: true, user: { select: { tgId: true, vkId: true } } },
-        })
-      : [],
-    completedWbOrders.length > 0
-      ? (prisma as any).wbCode.findMany({
-          where: { code: { in: wbCodeValues } },
-          select: { code: true, reviewBonusClaimed: true },
-        })
-      : [],
-    completedWbOrders.length > 0
-      ? (prisma as any).wbOrder.groupBy({
-          by: ["userId"],
-          where: { userId: { in: uniqueUserIds }, status: "COMPLETED", isDirectOrder: false },
-          _min: { createdAt: true },
-        })
-      : [],
-  ]);
-
-  for (const order of orders) {
-    const myTg     = order.user?.tgId     ?? null;
-    const myVk     = order.user?.vkId     ?? null;
-    const myRoblox = order.robloxUsername ?? null;
-    if (!myTg && !myVk && !myRoblox) {
-      order.userOrderNumber = 1;
-      order.userOrderTotal  = 1;
-      continue;
+  // ── Enrichment: cluster numbering + review status (skipped in lite mode) ────
+  if (!lite) {
+    const pageTgIds       = new Set<string>();
+    const pageVkIds       = new Set<string>();
+    const pageRobloxNicks = new Set<string>();
+    for (const o of orders) {
+      if (o.user?.tgId)       pageTgIds.add(String(o.user.tgId));
+      if (o.user?.vkId)       pageVkIds.add(String(o.user.vkId));
+      if (o.robloxUsername)   pageRobloxNicks.add(String(o.robloxUsername));
     }
-    const myCreated = new Date(order.createdAt).getTime();
-    let cnt = 0, earlier = 0;
-    for (const c of clusterOrders) {
-      const match =
-        (myTg     && c.user?.tgId === myTg) ||
-        (myVk     && c.user?.vkId === myVk) ||
-        (myRoblox && c.robloxUsername === myRoblox);
-      if (!match) continue;
-      cnt++;
-      if (new Date(c.createdAt).getTime() < myCreated) earlier++;
-    }
-    order.userOrderNumber = earlier + 1;
-    order.userOrderTotal  = cnt;
-  }
+    const clusterOrClauses: any[] = [];
+    if (pageTgIds.size      > 0) clusterOrClauses.push({ user: { tgId: { in: [...pageTgIds] } } });
+    if (pageVkIds.size      > 0) clusterOrClauses.push({ user: { vkId: { in: [...pageVkIds] } } });
+    if (pageRobloxNicks.size > 0) clusterOrClauses.push({ robloxUsername: { in: [...pageRobloxNicks] } });
 
-  if (completedWbOrders.length > 0) {
-    const reviewClaimedMap = new Map<string, boolean>(
-      codeRecords.map((c: any) => [c.code as string, c.reviewBonusClaimed as boolean])
-    );
-    const firstCreatedByUser = new Map<string, number>(
-      firstOrderRows
-        .filter((r: any) => r._min?.createdAt)
-        .map((r: any) => [r.userId as string, new Date(r._min.createdAt).getTime()])
-    );
+    const completedWbOrders = orders.filter((o: any) => o.status === "COMPLETED" && !o.isDirectOrder);
+    const wbCodeValues     = completedWbOrders.map((o: any) => o.wbCode as string);
+    const uniqueUserIds    = [...new Set<string>(completedWbOrders.map((o: any) => o.userId as string))];
+
+    const [clusterOrders, codeRecords, firstOrderRows] = await Promise.all([
+      clusterOrClauses.length > 0
+        ? (prisma as any).wbOrder.findMany({
+            where: { OR: clusterOrClauses },
+            select: { createdAt: true, robloxUsername: true, user: { select: { tgId: true, vkId: true } } },
+          })
+        : [],
+      completedWbOrders.length > 0
+        ? (prisma as any).wbCode.findMany({
+            where: { code: { in: wbCodeValues } },
+            select: { code: true, reviewBonusClaimed: true },
+          })
+        : [],
+      completedWbOrders.length > 0
+        ? (prisma as any).wbOrder.groupBy({
+            by: ["userId"],
+            where: { userId: { in: uniqueUserIds }, status: "COMPLETED", isDirectOrder: false },
+            _min: { createdAt: true },
+          })
+        : [],
+    ]);
+
     for (const order of orders) {
-      if (order.status === "COMPLETED" && !order.isDirectOrder) {
-        const firstAt = firstCreatedByUser.get(order.userId);
-        const isFirstOrder = firstAt !== undefined && new Date(order.createdAt).getTime() === firstAt;
-        order.reviewStatus = isFirstOrder
-          ? (reviewClaimedMap.get(order.wbCode) === true ? "SUBMITTED" : "PENDING")
-          : null;
-      } else {
-        order.reviewStatus = null;
+      const myTg     = order.user?.tgId     ?? null;
+      const myVk     = order.user?.vkId     ?? null;
+      const myRoblox = order.robloxUsername ?? null;
+      if (!myTg && !myVk && !myRoblox) {
+        order.userOrderNumber = 1;
+        order.userOrderTotal  = 1;
+        continue;
+      }
+      const myCreated = new Date(order.createdAt).getTime();
+      let cnt = 0, earlier = 0;
+      for (const c of clusterOrders) {
+        const match =
+          (myTg     && c.user?.tgId === myTg) ||
+          (myVk     && c.user?.vkId === myVk) ||
+          (myRoblox && c.robloxUsername === myRoblox);
+        if (!match) continue;
+        cnt++;
+        if (new Date(c.createdAt).getTime() < myCreated) earlier++;
+      }
+      order.userOrderNumber = earlier + 1;
+      order.userOrderTotal  = cnt;
+    }
+
+    if (completedWbOrders.length > 0) {
+      const reviewClaimedMap = new Map<string, boolean>(
+        codeRecords.map((c: any) => [c.code as string, c.reviewBonusClaimed as boolean])
+      );
+      const firstCreatedByUser = new Map<string, number>(
+        firstOrderRows
+          .filter((r: any) => r._min?.createdAt)
+          .map((r: any) => [r.userId as string, new Date(r._min.createdAt).getTime()])
+      );
+      for (const order of orders) {
+        if (order.status === "COMPLETED" && !order.isDirectOrder) {
+          const firstAt = firstCreatedByUser.get(order.userId);
+          const isFirstOrder = firstAt !== undefined && new Date(order.createdAt).getTime() === firstAt;
+          order.reviewStatus = isFirstOrder
+            ? (reviewClaimedMap.get(order.wbCode) === true ? "SUBMITTED" : "PENDING")
+            : null;
+        } else {
+          order.reviewStatus = null;
+        }
       }
     }
-  }
 
-  // VK enrich — fire-and-forget. The first request returns un-enriched names
-  // (UI falls back to "TG · <id>" / "VK · <id>"); subsequent requests pick up
-  // the persisted enrichment from the DB. Used to block the response by 300-800 ms.
-  const vkEnrichOrders = orders.filter((o: any) =>
-    o.user?.vkId && (!o.user.name || o.user.name === "VK User" || !o.user.username)
-  );
-  if (vkEnrichOrders.length > 0 && process.env.VK_TOKEN) {
-    void enrichVkUsers(vkEnrichOrders);
+    const vkEnrichOrders = orders.filter((o: any) =>
+      o.user?.vkId && (!o.user.name || o.user.name === "VK User" || !o.user.username)
+    );
+    if (vkEnrichOrders.length > 0 && process.env.VK_TOKEN) {
+      void enrichVkUsers(vkEnrichOrders);
+    }
   }
 
   return NextResponse.json({ orders, total: finalTotal, counts, page, pages: Math.ceil(finalTotal / limit) });
