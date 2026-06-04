@@ -948,6 +948,9 @@ export default function OrdersScreen({
   const [allOrders, setAllOrders] = useState<Order[]>([]);
   const reqIdRef = useRef(0);
 
+  const cacheKey = useCallback((f: FilterStatus, q: string) =>
+    `twa_orders_${f}_${q}`, []);
+
   const fetchOrders = useCallback(async (f: FilterStatus, q: string, p: number, append = false) => {
     if (!append) setLoading(true); else setLoadingMore(true);
     const reqId = ++reqIdRef.current;
@@ -955,31 +958,45 @@ export default function OrdersScreen({
       const params = new URLSearchParams({ page: String(p), limit: "20" });
       if (f !== "ALL") params.set("status", f);
       if (q)           params.set("q", q);
-      // Chip counts don't depend on the page slice — skip them on "load more"
-      // so we don't re-run 6 COUNT queries every time the manager paginates.
       if (append)      params.set("skipCounts", "1");
       const res = await fetch(`/api/twa/orders?${params}`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok || reqId !== reqIdRef.current) return;
       const d: OrdersData = await res.json();
-      if (reqId !== reqIdRef.current) return;     // stale response — drop it
+      if (reqId !== reqIdRef.current) return;
       setData(prev => append && prev
-        // Keep prior counts when paginating — server returned `counts: null`.
         ? { ...d, counts: prev.counts }
         : d);
       setAllOrders(prev => append ? [...prev, ...d.orders] : d.orders);
+      if (p === 1 && !append) {
+        try { sessionStorage.setItem(cacheKey(f, q), JSON.stringify({ t: Date.now(), d })); } catch {}
+      }
     } finally {
       if (reqId === reqIdRef.current) {
         setLoading(false);
         setLoadingMore(false);
       }
     }
-  }, [token]);
+  }, [token, cacheKey]);
 
   useEffect(() => {
     setPage(1);
     setAllOrders([]);
+    const key = cacheKey(filter, query);
+    try {
+      const raw = sessionStorage.getItem(key);
+      if (raw) {
+        const { t, d } = JSON.parse(raw) as { t: number; d: OrdersData };
+        if (Date.now() - t < 60_000) {
+          setData(d);
+          setAllOrders(d.orders);
+          setLoading(false);
+          fetchOrders(filter, query, 1, false);
+          return;
+        }
+      }
+    } catch {}
     fetchOrders(filter, query, 1, false);
-  }, [filter, query, fetchOrders]);
+  }, [filter, query, fetchOrders, cacheKey]);
 
   const loadMore = () => {
     const next = page + 1;
