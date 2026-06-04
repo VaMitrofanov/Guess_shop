@@ -948,24 +948,14 @@ export default function OrdersScreen({
   const [allOrders, setAllOrders] = useState<Order[]>([]);
   const reqIdRef = useRef(0);
 
-  const cacheKey = useCallback((f: FilterStatus, q: string) =>
-    `twa_orders_${f}_${q}`, []);
-
-  const fetchOrders = useCallback(async (
-    f: FilterStatus, q: string, p: number,
-    opts: { append?: boolean; lite?: boolean; silent?: boolean } = {},
-  ) => {
-    const { append = false, lite = false, silent = false } = opts;
-    if (!silent) {
-      if (!append) setLoading(true); else setLoadingMore(true);
-    }
-    const reqId = append || silent ? reqIdRef.current : ++reqIdRef.current;
+  const fetchOrders = useCallback(async (f: FilterStatus, q: string, p: number, append = false) => {
+    if (!append) setLoading(true); else setLoadingMore(true);
+    const reqId = ++reqIdRef.current;
     try {
       const params = new URLSearchParams({ page: String(p), limit: "20" });
       if (f !== "ALL") params.set("status", f);
       if (q)           params.set("q", q);
       if (append)      params.set("skipCounts", "1");
-      if (lite)        params.set("lite", "1");
       const res = await fetch(`/api/twa/orders?${params}`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok || reqId !== reqIdRef.current) return;
       const d: OrdersData = await res.json();
@@ -974,43 +964,24 @@ export default function OrdersScreen({
         ? { ...d, counts: prev.counts }
         : d);
       setAllOrders(prev => append ? [...prev, ...d.orders] : d.orders);
-      if (p === 1 && !append) {
-        try { sessionStorage.setItem(cacheKey(f, q), JSON.stringify({ t: Date.now(), d })); } catch {}
-      }
     } finally {
       if (reqId === reqIdRef.current) {
         setLoading(false);
         setLoadingMore(false);
       }
     }
-  }, [token, cacheKey]);
+  }, [token]);
 
   useEffect(() => {
     setPage(1);
     setAllOrders([]);
-    const key = cacheKey(filter, query);
-    try {
-      const raw = sessionStorage.getItem(key);
-      if (raw) {
-        const { t, d } = JSON.parse(raw) as { t: number; d: OrdersData };
-        if (Date.now() - t < 60_000) {
-          setData(d);
-          setAllOrders(d.orders);
-          setLoading(false);
-          fetchOrders(filter, query, 1, { silent: true });
-          return;
-        }
-      }
-    } catch {}
-    fetchOrders(filter, query, 1, { lite: true }).then(() => {
-      fetchOrders(filter, query, 1, { silent: true });
-    });
-  }, [filter, query, fetchOrders, cacheKey]);
+    fetchOrders(filter, query, 1, false);
+  }, [filter, query, fetchOrders]);
 
   const loadMore = () => {
     const next = page + 1;
     setPage(next);
-    fetchOrders(filter, query, next, { append: true });
+    fetchOrders(filter, query, next, true);
   };
 
   const urgentCount = data ? ((data.counts["PENDING"] ?? 0) + (data.counts["IN_PROGRESS"] ?? 0)) : 0;
@@ -1099,7 +1070,7 @@ export default function OrdersScreen({
                 order={order}
                 token={token}
                 onGoToBossrobux={onGoToBossrobux}
-                onRefresh={() => fetchOrders(filter, query, 1)}
+                onRefresh={() => fetchOrders(filter, query, 1, false)}
               />
             ))}
 
