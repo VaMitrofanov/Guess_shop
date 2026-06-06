@@ -52,8 +52,8 @@ async function processReviewReminders(bot: Telegraf): Promise<void> {
           await bot.telegram.sendMessage(
             user.tgId,
             `⏰ <b>Срок бонуса истёк.</b>\n\n` +
-            `Ваш бонус <b>100 R$</b> за отзыв сгорел — он действовал 30 дней.\n\n` +
-            `Купить робуксы напрямую (от 1000 R$) можно в любое время:`,
+            `Ваш бонус <b>100 R$</b> за отзыв сгорел (действовал 30 дней, для прямых заказов от 1000 R$).\n\n` +
+            `Купить робуксы напрямую можно в любое время:`,
             {
               parse_mode: "HTML",
               ...Markup.inlineKeyboard([[Markup.button.callback("💎 Купить напрямую", CB.startDirect)]]),
