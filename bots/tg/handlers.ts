@@ -28,7 +28,7 @@ function fmtRub(n: number): string {
 }
 
 /** Build an inline keyboard with predefined Robux packs and their ruble prices. */
-function buildPackKb() {
+function buildPackKb(userBonus = 0) {
   const rows = [
     DIRECT_PACKS.slice(0, 3),  // 100, 200, 300
     DIRECT_PACKS.slice(3, 6),  // 500, 800, 1000
@@ -36,12 +36,13 @@ function buildPackKb() {
     DIRECT_PACKS.slice(8),     // 10000
   ] as number[][];
   const buttons = rows.map(row =>
-    row.map(amt =>
-      Markup.button.callback(
-        `${amt} R$ — ${fmtRub(Math.round(amt * DIRECT_RATE))}`,
+    row.map(amt => {
+      const tag = userBonus > 0 && amt >= 1000 ? ` +${userBonus}🎁` : "";
+      return Markup.button.callback(
+        `${amt}${tag} R$ — ${fmtRub(Math.round(amt * DIRECT_RATE))}`,
         CB.directPack(amt)
-      )
-    )
+      );
+    })
   );
   buttons.push([Markup.button.callback("❌ Отмена", CB.cancelDirect)]);
   return Markup.inlineKeyboard(buttons);
@@ -427,7 +428,7 @@ export function registerStart(bot: Telegraf): void {
 
     let bonusText = `💎 Номинал: <b>${wbCode.denomination} R$</b>\n\n`;
     if (user.balance && user.balance > 0) {
-      bonusText += `💡 <i>У тебя есть бонус ${user.balance} R$ — он применится к прямому заказу через бота (без карточки WB).</i>\n\n`;
+      bonusText += `💡 <i>У тебя есть бонус ${user.balance} R$ — он применится к прямому заказу от 1000 R$ через бота (без карточки WB).</i>\n\n`;
     }
 
     // Non-admins also get an inline "find by nick" shortcut — saves them
@@ -724,7 +725,8 @@ export function registerText(bot: Telegraf): void {
         where: { tgId },
         select: { balance: true },
       });
-      const bonus = dirUser?.balance ?? 0;
+      const rawBonus = dirUser?.balance ?? 0;
+      const bonus = num >= 1000 ? rawBonus : 0;
       const totalAmount = num + bonus;
       const passPrice = Math.ceil(totalAmount / 0.7);
       const rublePrice = Math.round(num * DIRECT_RATE);
@@ -734,6 +736,9 @@ export function registerText(bot: Telegraf): void {
           `🎁 Твой бонус:     +${bonus} R$\n` +
           `━━━━━━━━━━━━━━━━\n` +
           `📦 Итого получишь:  ${totalAmount} R$\n`
+        : rawBonus > 0 && num < 1000
+        ? `📦 Получишь:       ${totalAmount} R$\n` +
+          `💡 <i>Бонус ${rawBonus} R$ применяется к заказам от 1000 R$</i>\n`
         : `📦 Получишь:       ${totalAmount} R$\n`;
       await ctx.reply(
         `✅ <b>Подтверди заказ</b>\n\n` +
@@ -1790,7 +1795,7 @@ export function registerPhoto(bot: Telegraf): void {
       if (!order || !linked) {
         await ctx.reply(
           "У тебя пока нет выполненных заказов, за которые можно получить бонус.\n\n" +
-          "Когда заказ будет выполнен, пришли скриншот отзыва с Wildberries — начислим +100 R$!",
+          "Когда заказ будет выполнен, пришли скриншот отзыва с Wildberries — начислим +100 R$ (бонус для прямых заказов от 1000 R$)!",
           withSupportKb()
         );
         return;
@@ -2159,12 +2164,12 @@ export function registerCallbacks(bot: Telegraf): void {
       });
       const bonus = dirUser?.balance ?? 0;
       const bonusNote = bonus > 0
-        ? `\n\n🎁 У тебя есть бонус <b>${bonus} R$</b> — автоматически добавится к этому заказу (бонус действует только для прямых заказов).`
+        ? `\n\n🎁 У тебя есть бонус <b>${bonus} R$</b> — применится автоматически к заказу от 1000 R$ (только прямые заказы).`
         : "";
       pendingDirectAmount.set(ctx.from.id, true);
       await ctx.reply(
         `💎 <b>Прямой заказ Robux</b>\n\nВыбери количество (курс <b>0.7 ₽/R$</b>):` + bonusNote,
-        { parse_mode: "HTML", ...buildPackKb() }
+        { parse_mode: "HTML", ...buildPackKb(bonus) }
       );
       await ctx.answerCbQuery();
       return;
@@ -2182,7 +2187,8 @@ export function registerCallbacks(bot: Telegraf): void {
         where: { tgId },
         select: { balance: true },
       });
-      const bonus = dirUser?.balance ?? 0;
+      const rawBonus = dirUser?.balance ?? 0;
+      const bonus = amt >= 1000 ? rawBonus : 0;
       const totalAmount = amt + bonus;
       const passPrice = Math.ceil(totalAmount / 0.7);
       const rublePrice = Math.round(amt * DIRECT_RATE);
@@ -2192,6 +2198,9 @@ export function registerCallbacks(bot: Telegraf): void {
           `🎁 Твой бонус:     +${bonus} R$\n` +
           `━━━━━━━━━━━━━━━━\n` +
           `📦 Итого получишь:  ${totalAmount} R$\n`
+        : rawBonus > 0 && amt < 1000
+        ? `📦 Получишь:       ${totalAmount} R$\n` +
+          `💡 <i>Бонус ${rawBonus} R$ применяется к заказам от 1000 R$</i>\n`
         : `📦 Получишь:       ${totalAmount} R$\n`;
       try {
         await ctx.editMessageText(
@@ -2615,8 +2624,7 @@ export function registerCallbacks(bot: Telegraf): void {
       const bonusMsg =
         `🎁 <b>+100 R$ зачислено на счёт!</b>\n\n` +
         `Действуют до ${expiryStr}.\n\n` +
-        `Используй на прямой заказ — без карточки WB.\n` +
-        `Бонус добавится к покупке автоматически.`;
+        `Используй на прямой заказ от 1000 R$ — бонус добавится автоматически.`;
 
       if (user?.tgId) {
         try {
@@ -2745,7 +2753,7 @@ export function registerCallbacks(bot: Telegraf): void {
       }
       await ctx.reply(
         "📸 Сделай скриншот своего отзыва на Wildberries и отправь его сюда фотографией (не файлом, не документом).\n\n" +
-        "После проверки бонус <b>+100 R$</b> придёт автоматически.",
+        "После проверки бонус <b>+100 R$</b> придёт автоматически (для прямых заказов от 1000 R$).",
         { parse_mode: "HTML" }
       );
       await ctx.answerCbQuery();
@@ -2819,12 +2827,14 @@ async function notifyUserCompleted(
       `Roblox зачислит их в течение 5–7 дней — это их стандартный процесс.` +
       pendingLine + `\n\n` +
       `🎁 <b>Оставь отзыв и получи +100 R$ в подарок!</b>\n` +
+      `Бонус применяется к прямому заказу от 1000 R$.\n` +
       `Напиши отзыв на Wildberries, сделай скриншот и отправь его сюда (фотографией, не файлом). После проверки бонус начислим сразу!`;
     vkMsg =
       `✅ Заказ выкуплен! Робуксы уже в пути 🚀\n\n` +
       `Roblox зачислит их в течение 5–7 дней — это их стандартный процесс.` +
       pendingLineVk + `\n\n` +
       `Оставь отзыв и получи +100 R$ в подарок!\n` +
+      `Бонус применяется к прямому заказу от 1000 R$.\n` +
       `Напиши отзыв на Wildberries, сделай скриншот и отправь его в этот чат. После проверки бонус начислим сразу!`;
   } else {
     // TIER 2: Returning / VIP — direct order pitch
@@ -2850,7 +2860,7 @@ async function notifyUserCompleted(
       let keyboard: ReturnType<typeof Markup.inlineKeyboard>;
       if (!isDirectOrder && wbCompletedCount === 1) {
         keyboard = Markup.inlineKeyboard([
-          [Markup.button.callback("📸 Оставить отзыв за +100 R$", CB.reviewHint)],
+          [Markup.button.callback("📸 Отзыв = +100 R$ (от 1000 R$)", CB.reviewHint)],
           [Markup.button.url("💬 Написать менеджеру", SUPPORT_URL)],
         ]);
         pendingReview.set(parseInt(user.tgId), orderId);
@@ -2926,11 +2936,11 @@ async function notifyReviewRejected(
 
   const tgMsg =
     `📸 Скриншот не подошёл: <b>${reason}</b>.\n\n` +
-    `Пришли новый — бонус 100 R$ всё ещё ждёт тебя! 🎁`;
+    `Пришли новый — бонус 100 R$ всё ещё ждёт тебя (для прямых заказов от 1000 R$)! 🎁`;
 
   const vkMsg =
     `📸 Скриншот не подошёл: ${reason}.\n\n` +
-    `Пришли новый — бонус 100 R$ всё ещё ждёт тебя! 🎁`;
+    `Пришли новый — бонус 100 R$ всё ещё ждёт тебя (для прямых заказов от 1000 R$)! 🎁`;
 
   if (user.tgId) {
     try {

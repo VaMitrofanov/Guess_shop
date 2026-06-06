@@ -112,7 +112,7 @@ function fmtRub(n: number): string {
 }
 
 /** Build VK inline keyboard with predefined Robux packs and their ruble prices. */
-function buildVkPackKb() {
+function buildVkPackKb(userBonus = 0) {
   const kb = Keyboard.builder();
   const rows: (readonly number[])[] = [
     DIRECT_PACKS.slice(0, 3) as unknown as readonly number[],  // 100, 200, 300
@@ -122,10 +122,11 @@ function buildVkPackKb() {
   ];
   for (const row of rows) {
     for (const amt of row) {
+      const tag = userBonus > 0 && amt >= 1000 ? ` +${userBonus}🎁` : "";
       kb.textButton({
-        label: `${amt} R$ — ${fmtRub(Math.round(amt * DIRECT_RATE))}`,
+        label: `${amt}${tag} R$ — ${fmtRub(Math.round(amt * DIRECT_RATE))}`,
         payload: { command: "direct_pack", amount: amt },
-        color: "primary",
+        color: amt >= 1000 && userBonus > 0 ? "positive" : "primary",
       });
     }
     kb.row();
@@ -731,7 +732,7 @@ async function handleRefActivation(
 
   let bonusText = `💎 Номинал: ${wbCode.denomination} R$\n\n`;
   if (user.balance && user.balance > 0) {
-    bonusText += `💡 У тебя есть бонус ${user.balance} R$ — он применится к прямому заказу через бота (без карточки WB).\n\n`;
+    bonusText += `💡 У тебя есть бонус ${user.balance} R$ — он применится к прямому заказу от 1000 R$ через бота (без карточки WB).\n\n`;
   }
 
   // ── Provisional order: claim code + notify admins BEFORE subscription gate ──
@@ -1322,7 +1323,7 @@ async function handleStartDirect(ctx: MessageContext, vkUserId: number): Promise
   const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { balance: true } });
   const bonus = user?.balance ?? 0;
   const bonusNote = bonus > 0
-    ? `\n\n🎁 У тебя есть бонус ${bonus} R$ — он автоматически добавится к этому заказу (бонус действует только для прямых заказов).`
+    ? `\n\n🎁 У тебя есть бонус ${bonus} R$ — он автоматически добавится к заказу от 1000 R$ (бонус действует только для прямых заказов от 1000 R$).`
     : "";
 
   setState(vkUserId, { type: "AWAITING_DIRECT_AMOUNT" });
@@ -1331,7 +1332,7 @@ async function handleStartDirect(ctx: MessageContext, vkUserId: number): Promise
     message:
       `💎 Прямой заказ Robux\n\nВыбери количество (курс 0.7 ₽/R$):` +
       bonusNote,
-    keyboard: buildVkPackKb(),
+    keyboard: buildVkPackKb(bonus),
   });
 }
 
@@ -1351,7 +1352,8 @@ async function handleDirectAmountInput(ctx: MessageContext, vkUserId: number, te
 
 async function handleDirectPackSelect(ctx: MessageContext, vkUserId: number, amount: number): Promise<void> {
   const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { balance: true } });
-  const bonus = user?.balance ?? 0;
+  const rawBonus = user?.balance ?? 0;
+  const bonus = amount >= 1000 ? rawBonus : 0;
   const totalAmount = amount + bonus;
   const passPrice = Math.ceil(totalAmount / 0.7);
   const rublePrice = Math.round(amount * DIRECT_RATE);
@@ -1363,6 +1365,9 @@ async function handleDirectPackSelect(ctx: MessageContext, vkUserId: number, amo
       `🎁 Твой бонус:     +${bonus} R$\n` +
       `─────────────────\n` +
       `📦 Итого получишь:  ${totalAmount} R$\n`
+    : rawBonus > 0 && amount < 1000
+    ? `📦 Получишь:       ${amount} R$\n` +
+      `💡 Бонус ${rawBonus} R$ применяется к заказам от 1000 R$.\n`
     : `📦 Получишь:       ${totalAmount} R$\n`;
 
   await ctx.reply({
@@ -1522,7 +1527,7 @@ async function handleReviewScreenshot(
     if (knownOrderId) {
       await ctx.reply(
         "📸 Пришли скриншот отзыва в виде фотографии (не файлом).\n" +
-        "После проверки администратором ты получишь +100 R$."
+        "После проверки администратором ты получишь +100 R$ (для прямых заказов от 1000 R$)."
       );
     } else {
       // Photo was detected at routing level but URL extraction failed — guide user
@@ -1587,7 +1592,7 @@ async function handleReviewScreenshot(
 
   clearState(vkUserId);
 
-  await ctx.reply("✅ Отзыв получен! Менеджер проверит его в ближайшее время и начислит бонус.");
+  await ctx.reply("✅ Отзыв получен! Менеджер проверит его в ближайшее время и начислит бонус 100 R$ (для прямых заказов от 1000 R$).");
 
   // Forward to Telegram admins
   const reviewerName = user.name ?? await vkGetName(vkUserId);
@@ -1722,7 +1727,7 @@ async function handleIdleMessage(
         : order.status === "COMPLETED"
         ? (reviewClaimed
             ? "\n\n🚀 Хочешь заказать ещё? Постоянным клиентам — прямое обслуживание без очереди по лучшему курсу! Пиши: https://t.me/RobloxBank_PA"
-            : "\n\n🎁 Оставь отзыв на Wildberries и получи +100 R$ бонусом!\nСделай скриншот отзыва и пришли его сюда фотографией.")
+            : "\n\n🎁 Оставь отзыв на Wildberries и получи +100 R$ бонусом (для прямых заказов от 1000 R$)!\nСделай скриншот отзыва и пришли его сюда фотографией.")
         : order.status === "REJECTED"
         ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Исправь геймпасс и нажми кнопку ниже — отправим на проверку заново.`
         : "";

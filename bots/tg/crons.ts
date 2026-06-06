@@ -53,7 +53,7 @@ async function processReviewReminders(bot: Telegraf): Promise<void> {
             user.tgId,
             `⏰ <b>Срок бонуса истёк.</b>\n\n` +
             `Ваш бонус <b>100 R$</b> за отзыв сгорел — он действовал 30 дней.\n\n` +
-            `Купить робуксы напрямую можно в любое время:`,
+            `Купить робуксы напрямую (от 1000 R$) можно в любое время:`,
             {
               parse_mode: "HTML",
               ...Markup.inlineKeyboard([[Markup.button.callback("💎 Купить напрямую", CB.startDirect)]]),
@@ -79,12 +79,12 @@ async function processReviewReminders(bot: Telegraf): Promise<void> {
       msg =
         `🚨 <b>Бонус сгорает через 3 дня!</b>\n\n` +
         `У вас есть <b>100 R$</b> на счёту — они действуют до <b>${expiryStr}</b>.\n\n` +
-        `Оформите прямой заказ прямо сейчас — бонус спишется автоматически.`;
+        `Оформите прямой заказ от 1000 R$ — бонус спишется автоматически.`;
     } else {
       msg =
         `💰 <b>Напоминание: у вас есть бонус 100 R$!</b>\n\n` +
         `Бонус за отзыв действует ещё <b>${daysLeft} ${daysWord(daysLeft)}</b> — до ${expiryStr}.\n\n` +
-        `Используйте на покупку робуксов напрямую, без карточки WB.`;
+        `Используйте на прямой заказ от 1000 R$ (без карточки WB).`;
     }
 
     await (db as any).user.update({
