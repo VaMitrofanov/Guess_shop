@@ -3606,6 +3606,12 @@ curl -s -X POST \
 | 11 sequential queries, pool max:1 | 2-5 parallel, pool max:3 | 1-2 queries (lite + cached counts) |
 | ~4000ms | ~2000ms | ~500ms (ожидание) |
 
+**Критический баг (commit a3b2781):**
+- Pooler (PgBouncer) НЕ поддерживает `statement_timeout` как startup-параметр в `options`.
+- `prisma.ts` содержал `options: "--statement_timeout=8000"` → ВСЕ запросы к БД падали с ошибкой P2010 → 500 Internal Server Error.
+- Это была **реальная причина «не работает»** — API возвращал 500 на любой запрос с БД.
+- **Фикс:** удалён `options` из конфигурации Pool. Statement timeout не критичен — Neon сам ограничивает запросы.
+
 **Нерешённые проблемы:**
 - Enrichment data (номера заказов пользователя, статус отзыва) не отображается в lite mode. Если нужно вернуть — сделать фоновый дозапрос после первого рендера, но осторожно: предыдущая попытка с `.then()` в useEffect ломала Telegram WebView.
 - Если Neon compute надолго уснул (keepalive бота не сработал), первый запрос может быть 1-2с даже через pooler.
