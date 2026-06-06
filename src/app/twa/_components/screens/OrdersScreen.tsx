@@ -26,7 +26,7 @@ const C = {
 
 const tabular = { fontVariantNumeric: "tabular-nums" as const };
 
-type OrderStatus = "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED";
+type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED";
 type FilterStatus = OrderStatus | "ALL";
 
 interface Order {
@@ -65,17 +65,21 @@ interface OrdersData {
 }
 
 const STATUS_META: Record<OrderStatus, { label: string; color: string }> = {
-  AWAITING_GAMEPASS: { label: "Ждёт ссылку", color: C.yellow },
-  PENDING:           { label: "Новый",        color: C.accent },
-  IN_PROGRESS:       { label: "В работе",     color: C.orange },
-  COMPLETED:         { label: "Завершён",     color: C.green  },
-  REJECTED:          { label: "Отклонён",     color: C.red    },
+  AWAITING_PAYMENT:  { label: "Ждёт реквизиты", color: "#ac8e68" },
+  PAYMENT_PENDING:   { label: "Ждёт оплату",    color: "#ac8e68" },
+  AWAITING_GAMEPASS: { label: "Ждёт ссылку",    color: C.yellow },
+  PENDING:           { label: "Новый",           color: C.accent },
+  IN_PROGRESS:       { label: "В работе",        color: C.orange },
+  COMPLETED:         { label: "Завершён",        color: C.green  },
+  REJECTED:          { label: "Отклонён",        color: C.red    },
 };
 
 const FILTERS: { id: FilterStatus; label: string }[] = [
   { id: "ALL",               label: "Все"         },
   { id: "PENDING",           label: "Новые"       },
   { id: "IN_PROGRESS",       label: "В работе"    },
+  { id: "AWAITING_PAYMENT",  label: "Реквизиты"   },
+  { id: "PAYMENT_PENDING",   label: "Оплата"      },
   { id: "AWAITING_GAMEPASS", label: "Ждут ссылку" },
   { id: "COMPLETED",         label: "Готово"      },
   { id: "REJECTED",          label: "Отклонено"   },
@@ -323,7 +327,7 @@ function ActionBar({
 
   const showTakeWork = order.status === "PENDING";
   const showComplete = order.status === "PENDING" || order.status === "IN_PROGRESS";
-  const showReject   = ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS"].includes(order.status);
+  const showReject   = ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status);
   const hasMain      = showTakeWork || showComplete;
 
   return (
@@ -494,7 +498,7 @@ function OrderCard({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [fetchedCreator, setFetchedCreator] = useState<string | false | null>(null);
 
-  const isActive  = ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS"].includes(order.status);
+  const isActive  = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS"].includes(order.status);
   const isHistory = ["COMPLETED", "REJECTED"].includes(order.status);
 
   // User identity for the card header — @username canonical, with secondary line
@@ -985,7 +989,10 @@ export default function OrdersScreen({
     fetchOrders(filter, query, next, true);
   };
 
-  const urgentCount = data ? ((data.counts["PENDING"] ?? 0) + (data.counts["IN_PROGRESS"] ?? 0)) : 0;
+  const urgentCount = data ? (
+    (data.counts["PENDING"] ?? 0) + (data.counts["IN_PROGRESS"] ?? 0) +
+    (data.counts["AWAITING_PAYMENT"] ?? 0) + (data.counts["PAYMENT_PENDING"] ?? 0)
+  ) : 0;
 
   const summaryText = useMemo(() => {
     if (!data) return "";
@@ -1015,7 +1022,7 @@ export default function OrdersScreen({
           {FILTERS.map(f => {
             const count    = data?.counts[f.id] ?? 0;
             const isActive = filter === f.id;
-            const isUrgent = (f.id === "PENDING" || f.id === "IN_PROGRESS") && count > 0;
+            const isUrgent = (f.id === "PENDING" || f.id === "IN_PROGRESS" || f.id === "AWAITING_PAYMENT" || f.id === "PAYMENT_PENDING") && count > 0;
             return (
               <button
                 key={f.id}
@@ -1112,6 +1119,8 @@ function EmptyState({ filter, query }: { filter: FilterStatus; query: string }) 
   }
   const labels: Record<FilterStatus, string> = {
     ALL:               "Заказов пока нет",
+    AWAITING_PAYMENT:  "Нет ожидающих реквизиты",
+    PAYMENT_PENDING:   "Нет ожидающих оплату",
     PENDING:           "Нет новых заказов",
     IN_PROGRESS:       "Нет заказов в работе",
     AWAITING_GAMEPASS: "Нет ожидающих ссылку",

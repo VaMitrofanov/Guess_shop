@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Press_Start_2P } from "next/font/google";
 import "./globals.css";
 import Script from "next/script";
 import SessionProvider from "@/components/session-provider";
@@ -13,6 +13,12 @@ const geistSans = Geist({
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+});
+
+const pressStart = Press_Start_2P({
+  variable: "--font-pixel",
+  weight: "400",
+  subsets: ["latin", "cyrillic"],
 });
 
 export const metadata: Metadata = {
@@ -37,12 +43,12 @@ export default function RootLayout({
   return (
     <html
       lang="ru"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${pressStart.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         <script
           dangerouslySetInnerHTML={{
-            __html: `window.__tgHash=location.hash;`,
+            __html: `window.__tgHash=location.hash;window.onerror=function(m,s,l,c,e){var d=document.getElementById('__twa_err');if(d)d.textContent='JS Error: '+m+' at '+s+':'+l;};window.onunhandledrejection=function(e){var d=document.getElementById('__twa_err');if(d)d.textContent='Promise: '+(e.reason||e);};`,
           }}
         />
         <SessionProvider>

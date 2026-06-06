@@ -3,7 +3,7 @@ import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
 import { notifyOrderCompleted, notifyOrderRejected } from "@/lib/twa-notify";
 
-const VALID_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED"] as const;
+const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
 
 let cachedCounts: { data: Record<string, number>; ts: number } | null = null;
@@ -88,6 +88,8 @@ export async function GET(req: NextRequest) {
           const rows: any[] = await (prisma as any).$queryRawUnsafe(`
             SELECT
               COUNT(*)::int AS "ALL",
+              COUNT(*) FILTER (WHERE status = 'AWAITING_PAYMENT')::int AS "AWAITING_PAYMENT",
+              COUNT(*) FILTER (WHERE status = 'PAYMENT_PENDING')::int AS "PAYMENT_PENDING",
               COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS')::int AS "AWAITING_GAMEPASS",
               COUNT(*) FILTER (WHERE status = 'PENDING')::int AS "PENDING",
               COUNT(*) FILTER (WHERE status = 'IN_PROGRESS')::int AS "IN_PROGRESS",
@@ -312,7 +314,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "reject") {
-    if (!["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS"].includes(order.status))
+    if (!["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status))
       return NextResponse.json({ error: "Cannot reject this order" }, { status: 400 });
     const rejectionReason = String(reason ?? "не указана");
     await (prisma as any).wbOrder.update({
