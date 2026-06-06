@@ -3641,3 +3641,5 @@ curl -s -X POST \
 4. **НЕ изменено (admin-only):**
    - `bots/shared/admin.ts` — кнопка «🎁 Начислить +100 R$» — видна только админам, не пользователям.
 
+**Коммит:** `b8a1edb`. Задеплоено: TG бот (SG `lyz78enntugna9em1biopinr`), VK бот (RF `gmtpfqosgoz23vjyxyczuic9`), Web (Coolify auto-deploy).
+
