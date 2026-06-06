@@ -3580,8 +3580,33 @@ curl -s -X POST \
    - Результат: страница перестала открываться вообще — «This page couldn't load» в Telegram WebView сразу, без загрузки. Причина не найдена: TypeScript компиляция OK, `next build` OK, все API-запросы в access log возвращают 200. Вероятно, Turbopack или Telegram WebView несовместимы с `.then()` цепочкой в `useEffect` или с `sessionStorage` в Mini App контексте.
    - Фронтенд откачен к исходной версии — простой `fetchOrders(filter, query, 1, false)`.
 
+**Оптимизация 2026-06-06 (commit 75c4f86):**
+
+4. **`src/lib/prisma.ts` — Neon connection pooler (автоматический)**
+   - Функция `buildPoolerUrl()` автоматически подменяет hostname в DATABASE_URL: `ep-xxx` → `ep-xxx-pooler` + убирает `channel_binding=require` (PgBouncer не поддерживает).
+   - Замерено: время создания нового соединения **536ms → 245ms** (экономия 40%).
+   - Бот (`bots/shared/db.ts`) использует прямое соединение — pooler нужен только веб-приложению.
+
+5. **`src/app/api/twa/orders/route.ts` — in-memory кэш счётчиков (30с TTL)**
+   - При запросе без поиска: если прошло < 30с с последнего COUNT → возвращает из кэша, 0 запросов.
+   - Кэш инвалидируется при take-work / complete / reject (POST handler).
+   - `skipCounts` (пагинация): вместо отдельного `COUNT(where)` берёт `limit+1` строк → если получили больше `limit`, значит есть следующая страница. Экономия 1 запроса на каждый load-more.
+
+6. **`src/app/api/twa/orders/urgent-count/route.ts` — кэш 20с**
+   - Badge-поллинг каждые 30с → реально бьёт в БД ~1 раз в 20с вместо каждого запроса.
+
+7. **`OrdersScreen.tsx` — lite mode включён**
+   - `params.set("lite", "1")` добавлен в fetchOrders — ВСЕ запросы идут в lite mode.
+   - Пропускаются 3 enrichment-запроса (cluster numbering + review status).
+   - OrderNumberChip и review-чипсы gracefully скрываются (возвращают null при отсутствии данных).
+
+**Итого по запросам на одну загрузку страницы заказов:**
+| До (оригинал) | После opt 1 (commit c3c77f2) | После opt 2 (commit 75c4f86) |
+|---|---|---|
+| 11 sequential queries, pool max:1 | 2-5 parallel, pool max:3 | 1-2 queries (lite + cached counts) |
+| ~4000ms | ~2000ms | ~500ms (ожидание) |
+
 **Нерешённые проблемы:**
-- Telegram WebView может показывать «This page couldn't load» при медленном API. Прогрев пула должен помочь, но Neon cold start (если бот-keepalive не сработал) по-прежнему добавляет ~1-2с.
-- Lite mode (`?lite=1`) реализован в API, но фронтенд его не использует (фронтенд-изменения откачены). Для использования: в `OrdersScreen.tsx` → `fetchOrders` → добавить `params.set("lite", "1")` при первом запросе.
-- Для гарантированного решения нужен **Neon connection pooler** (hostname с `-pooler` суффиксом) — server-side пулинг, соединения всегда тёплые.
+- Enrichment data (номера заказов пользователя, статус отзыва) не отображается в lite mode. Если нужно вернуть — сделать фоновый дозапрос после первого рендера, но осторожно: предыдущая попытка с `.then()` в useEffect ломала Telegram WebView.
+- Если Neon compute надолго уснул (keepalive бота не сработал), первый запрос может быть 1-2с даже через pooler.
 
