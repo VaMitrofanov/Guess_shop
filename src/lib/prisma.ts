@@ -6,8 +6,18 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
+function buildPoolerUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    if (u.hostname.includes("-pooler.")) return raw;
+    u.hostname = u.hostname.replace(/^(ep-[^.]+)(\.)/,  "$1-pooler$2");
+    u.searchParams.delete("channel_binding");
+    return u.toString();
+  } catch { return raw; }
+}
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: buildPoolerUrl(process.env.DATABASE_URL ?? ""),
   max: 3,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 15_000,

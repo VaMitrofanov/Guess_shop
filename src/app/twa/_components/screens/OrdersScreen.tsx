@@ -956,6 +956,7 @@ export default function OrdersScreen({
       if (f !== "ALL") params.set("status", f);
       if (q)           params.set("q", q);
       if (append)      params.set("skipCounts", "1");
+      params.set("lite", "1");
       const res = await fetch(`/api/twa/orders?${params}`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok || reqId !== reqIdRef.current) return;
       const d: OrdersData = await res.json();

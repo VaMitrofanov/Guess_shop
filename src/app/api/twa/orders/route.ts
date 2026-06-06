@@ -6,6 +6,9 @@ import { notifyOrderCompleted, notifyOrderRejected } from "@/lib/twa-notify";
 const VALID_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
 
+let cachedCounts: { data: Record<string, number>; ts: number } | null = null;
+const COUNT_CACHE_TTL = 30_000;
+
 export async function GET(req: NextRequest) {
   if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -59,11 +62,12 @@ export async function GET(req: NextRequest) {
   // ── Phase 1: orders + combined counts in ONE parallel batch ──────────────
   // Previous: 1 findMany + 1 COUNT(total) + 6 COUNT(per status) = 8 queries
   // through a max:1 pool → all sequential. Now: 2 queries in true parallel.
+  const take = skipCounts ? limit + 1 : limit;
   const ordersPromise = (prisma as any).wbOrder.findMany({
     where,
     orderBy: { createdAt: "desc" },
     skip,
-    take: limit,
+    take,
     include: {
       user: { select: {
         tgId: true, vkId: true, name: true, username: true,
@@ -76,7 +80,11 @@ export async function GET(req: NextRequest) {
     ? Promise.resolve({ total: 0, counts: null as Record<string, number> | null })
     : (async () => {
         if (!q) {
-          // No search — single raw SQL replaces 7 round-trips.
+          if (cachedCounts && Date.now() - cachedCounts.ts < COUNT_CACHE_TTL) {
+            const counts = cachedCounts.data;
+            const total = (status && status !== "ALL") ? (counts[status] ?? 0) : counts["ALL"];
+            return { total, counts };
+          }
           const rows: any[] = await (prisma as any).$queryRawUnsafe(`
             SELECT
               COUNT(*)::int AS "ALL",
@@ -90,10 +98,10 @@ export async function GET(req: NextRequest) {
           const r = rows[0] ?? {};
           const counts: Record<string, number> = {};
           for (const s of [...VALID_STATUSES, "ALL"]) counts[s] = Number(r[s] ?? 0);
+          cachedCounts = { data: counts, ts: Date.now() };
           const total = (status && status !== "ALL") ? (counts[status] ?? 0) : counts["ALL"];
           return { total, counts };
         }
-        // Search active — Prisma groupBy handles relation filters natively.
         const groups: any[] = await (prisma as any).wbOrder.groupBy({
           by: ["status"],
           where: searchWhere,
@@ -110,10 +118,11 @@ export async function GET(req: NextRequest) {
         return { total, counts };
       })();
 
-  const [orders, { total, counts }] = await Promise.all([ordersPromise, countsPromise]);
-  // If skipCounts, we still need total for pagination
+  const [rawOrders, { total, counts }] = await Promise.all([ordersPromise, countsPromise]);
+  const hasMore = skipCounts && rawOrders.length > limit;
+  const orders = hasMore ? rawOrders.slice(0, limit) : rawOrders;
   const finalTotal = skipCounts
-    ? await (prisma as any).wbOrder.count({ where })
+    ? skip + orders.length + (hasMore ? limit : 0)
     : total;
 
   // ── Enrichment: cluster numbering + review status (skipped in lite mode) ────
@@ -286,6 +295,7 @@ export async function POST(req: NextRequest) {
       where: { id: orderId },
       data:  { status: "IN_PROGRESS" },
     });
+    cachedCounts = null;
     return NextResponse.json({ ok: true });
   }
 
@@ -296,6 +306,7 @@ export async function POST(req: NextRequest) {
       where: { id: orderId },
       data:  { status: "COMPLETED" },
     });
+    cachedCounts = null;
     notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder).catch(() => {});
     return NextResponse.json({ ok: true });
   }
@@ -308,6 +319,7 @@ export async function POST(req: NextRequest) {
       where: { id: orderId },
       data:  { status: "REJECTED", rejectionReason },
     });
+    cachedCounts = null;
     notifyOrderRejected(order.user, orderId, rejectionReason, order.amount).catch(() => {});
     return NextResponse.json({ ok: true });
   }
