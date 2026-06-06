@@ -623,7 +623,11 @@ VALIDATOR_KEY        = <тот же что в TG боте>
 - 🟠 **`isGamePrivate` ложные срабатывания** — геймпасс в "dummy" приватной игре (Obby 1) всё равно продаётся в маркетплейсе (`isActive: true`). Бот блокировал его с ошибкой "закрытая игра". Новая логика: `isGamePrivate` блокирует только когда `!isActive`. Если `isActive: true` — принять независимо от статуса игры. **Коммит: `b2d4e98`**
 - 🟡 **"ПОВТОРНЫЙ КЛИЕНТ" для первого заказа** — provisional order (`AWAITING_GAMEPASS`) создаётся до ввода геймпасса. `previousOrderCount` считал его → первый клиент получал бейдж "ПОВТОРНЫЙ". Фикс: исключить `AWAITING_GAMEPASS` из счётчика. **Коммит: `7165440`**
 
-**⚠️ Coolify auto-deploy сломан для GitHub на RF** (Russian IP block). TG/VK боты обновляются вручную: `scp file root@server:/tmp/ && docker cp /tmp/file container:/app/path && docker restart container`. Последний задеплоенный код — коммит `7165440` (handlers.ts скопирован в оба контейнера напрямую).
+**⚠️ Coolify auto-deploy работает для Web (RF), но боты обновляются вручную:** `scp file root@server:/tmp/ && docker cp /tmp/file container:/app/path && docker restart container`.
+- **Последний задеплоенный код** — коммит `3b8dd36` (2026-06-06).
+- **TG бот** (SG `5.223.95.11`): контейнер `lyz78enntugna9em1biopinr-*` (ID меняется при рестарте Coolify).
+- **VK бот** (RF `89.110.94.117`): контейнер `gmtpfqosgoz23vjyxyczuic9-*`.
+- **Web** (RF): `robloxbank-web` — auto-deploy по push в main.
 
 ### Аудит 2026-05-21 — что исправлено
 Проведён полный code audit. Найдено и закрыто:
@@ -3613,7 +3617,7 @@ curl -s -X POST \
 - **Фикс:** удалён `options` из конфигурации Pool. Statement timeout не критичен — Neon сам ограничивает запросы.
 
 **Нерешённые проблемы (2026-06-06):**
-- **Страница заказов в TG WebView по-прежнему не работает.** API возвращает 200 за 650ms (тёплый пул), но пользователь видит проблему. Возможные направления: JS-ошибка на клиенте (не видна в access log), кэш старого JS в Telegram WebView, таймаут Telegram на первый холодный запрос (~2.3с). Нужна отладка с DevTools в TG Desktop или chrome://inspect.
+- ~~**Страница заказов в TG WebView по-прежнему не работает.**~~ **РЕШЕНО** — см. сессию 2026-06-07.
 - Enrichment data (номера заказов пользователя, статус отзыва) не отображается в lite mode.
 - Если Neon compute надолго уснул (keepalive бота не сработал), первый запрос может быть 1-2с даже через pooler.
 
@@ -3642,4 +3646,61 @@ curl -s -X POST \
    - `bots/shared/admin.ts` — кнопка «🎁 Начислить +100 R$» — видна только админам, не пользователям.
 
 **Коммит:** `b8a1edb`. Задеплоено: TG бот (SG `lyz78enntugna9em1biopinr`), VK бот (RF `gmtpfqosgoz23vjyxyczuic9`), Web (Coolify auto-deploy).
+
+---
+
+### Сессия 2026-06-07 — TWA «This page couldn't load»: финальный фикс
+
+**Симптом:** TWA в Telegram на iOS показывал «This page couldn't load» (нативная ошибка WebView). API сервер полностью рабочий (200, ~650ms), все JS-чанки отдаются, SSL валиден, контейнер healthy.
+
+**Диагностика (SSH на RF `89.110.94.117`):**
+1. Контейнер `robloxbank-web` — Up, healthy. Изнутри `/twa` → 200, все 11 JS-чанков → 200, `/api/twa/auth` → 200 с токеном, `/api/twa/orders` → 200 с данными.
+2. HTTPS снаружи — 200, 1.7с с Японии, ~0.3с из России. SSL Let's Encrypt валиден до Aug 16 2026.
+3. Traefik — роутинг корректный, rate-limit-general 60 req/min burst 100.
+4. CrowdSec — чисто, IP пользователя не забанен.
+
+**Три корневые причины:**
+
+1. **CSS `@import` Google Fonts — render-blocking (ГЛАВНАЯ ПРИЧИНА)**
+   - `globals.css` начинался с `@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap')`
+   - CSS `@import` — render-blocking: браузер **полностью останавливает рендеринг** пока Google Fonts не ответит
+   - На мобильном интернете в России Google Fonts может отвечать 2-5+ секунд → Telegram WebView таймаутит → «This page couldn't load»
+   - Шрифт `Press Start 2P` используется только на главной/guide, НЕ в TWA — но CSS общий для всех страниц
+   - **Фикс:** удалён `@import` из CSS, шрифт загружается через `next/font/google` (`Press_Start_2P`) — скачивается при билде, встраивается как .woff2, ноль сетевых запросов в рантайме
+   - CSS variable `--font-pixel` добавлена в `layout.tsx`, `.font-pixel` и `.pixel-tag` используют `var(--font-pixel)` с фоллбеком
+
+2. **Поздний вызов `Telegram.WebApp.ready()`**
+   - `ready()` вызывался только из React `useEffect` в `TwaApp.tsx` — то есть после загрузки ВСЕХ 11 JS-чанков (60-200KB суммарно) + React гидрации
+   - На медленном соединении это 3-5 секунд до первого `ready()` — Telegram может решить, что приложение мёртвое
+   - **Фикс:** добавлен inline `<script>` в `src/app/twa/layout.tsx`, который вызывает `Telegram.WebApp.ready()` + `expand()` сразу в HTML, ДО загрузки любого JS-чанка. Telegram мгновенно получает сигнал «приложение живое».
+
+3. **Отсутствие статусов `AWAITING_PAYMENT` / `PAYMENT_PENDING` в TWA**
+   - Prisma-схема имеет 7 статусов заказов, TWA знала только о 5
+   - Прямые заказы создаются со статусом `AWAITING_PAYMENT`, потом переходят в `PAYMENT_PENDING`
+   - `StatusPill` обращался к `STATUS_META["AWAITING_PAYMENT"]` → `undefined` → `undefined.color` → `TypeError` → React краш → белый экран
+   - **Фикс:** добавлены оба статуса в `OrdersScreen.tsx` (тип, метаданные, фильтры, isActive, showReject, urgentCount, EmptyState), `route.ts` (VALID_STATUSES, SQL COUNT FILTER, reject action), `urgent-count/route.ts`
+
+**Дополнительно:**
+- Добавлен `src/app/twa/error.tsx` — Error Boundary. Если React падает, показывает ошибку вместо белого экрана.
+- Добавлен `window.onerror` + `window.onunhandledrejection` handler в layout — JS-ошибки показываются в debug overlay внизу экрана.
+- Если в будущем опять будет «This page couldn't load» — будет видна конкретная ошибка.
+
+**Файлы:**
+| Файл | Что изменено |
+|------|-------------|
+| `src/app/globals.css` | Убран `@import url(google fonts)`, `.font-pixel`/`.pixel-tag` → `var(--font-pixel)` |
+| `src/app/layout.tsx` | `Press_Start_2P` через `next/font/google`, `--font-pixel` CSS variable, `window.onerror` handler |
+| `src/app/twa/layout.tsx` | Ранний inline `Telegram.WebApp.ready()` + `expand()` |
+| `src/app/twa/page.tsx` | Debug overlay `#__twa_err`, ранний `ready()` |
+| `src/app/twa/error.tsx` | **Новый** — React Error Boundary для TWA |
+| `src/app/twa/_components/screens/OrdersScreen.tsx` | `AWAITING_PAYMENT` + `PAYMENT_PENDING` во всех местах |
+| `src/app/api/twa/orders/route.ts` | Те же статусы в VALID_STATUSES, SQL, reject |
+| `src/app/api/twa/orders/urgent-count/route.ts` | Те же статусы в count query |
+
+**Коммит:** `42cd7c9`. Задеплоено: Web (Coolify auto-deploy, контейнер пересоздан 2026-06-06 21:47 MSK).
+
+**Урок на будущее:**
+- **Никогда** не использовать CSS `@import url()` для внешних ресурсов — это render-blocking. Всегда `next/font/google` или `<link rel="preload">`.
+- **Всегда** вызывать `Telegram.WebApp.ready()` в inline script, не ждать React.
+- При добавлении новых статусов в Prisma-схему — **сразу** обновлять все фронтенды, иначе React крашится без ошибки.
 
