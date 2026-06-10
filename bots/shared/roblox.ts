@@ -227,8 +227,8 @@ async function placeIsPlayable(placeId: number): Promise<GameAccessResult> {
     if (!pRes?.ok) return "ok";
     const status = (((await pRes.json().catch(() => null)) as any[]) ?? [])[0];
     const ps = status?.playabilityStatus as string | undefined;
-    if (ps === "Playable" || ps === "GuestProhibited") return "ok";
-    if (ps === "PrivateGame" || ps === "ContextualPlayabilityUnrated" || ps === "GameUnapproved") return "private";
+    if (ps === "Playable" || ps === "GuestProhibited" || ps === "ContextualPlayabilityUnrated") return "ok";
+    if (ps === "PrivateGame" || ps === "GameUnapproved") return "private";
     return status?.isPlayable === false ? "private" : "ok";
   } catch {
     return "ok";
@@ -285,9 +285,8 @@ async function checkGameAccess(
 
     const ps = status.playabilityStatus as string | undefined;
     // GuestProhibited = requires login but purchasable with authenticated account
-    if (ps === "Playable" || ps === "GuestProhibited") return "ok";
-    // Unrated / unapproved games: gamepasses can't be purchased
-    if (ps === "ContextualPlayabilityUnrated" || ps === "GameUnapproved") return "private";
+    if (ps === "Playable" || ps === "GuestProhibited" || ps === "ContextualPlayabilityUnrated") return "ok";
+    if (ps === "GameUnapproved") return "private";
     if (ps === "PrivateGame") return "private";
     // Unknown status — fall back to isPlayable flag
     if (status.isPlayable === false) return "private";
