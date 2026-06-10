@@ -826,6 +826,7 @@ export function registerText(bot: Telegraf): void {
                   parse_mode: "HTML",
                   link_preview_options: { is_disabled: true },
                   ...Markup.inlineKeyboard([
+                    [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
                     [Markup.button.url("📖 Открыть инструкцию", `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
                     [supportBtn("💬 Нужна помощь?")],
                   ]),
@@ -935,12 +936,17 @@ export function registerText(bot: Telegraf): void {
         "Пришли одно из:\n" +
         "• Ссылку: <code>https://www.roblox.com/game-pass/1234567/...</code>\n" +
         "• Ссылку из конструктора: <code>https://create.roblox.com/...</code>\n" +
-        "• Просто ID (только цифры): <code>1234567</code>";
-      if (fc.formatError >= 2) {
-        await ctx.reply(formatHint, { parse_mode: "HTML", ...withSupportKb(undefined, "pass_format", ctx) });
-      } else {
-        await ctx.reply(formatHint, { parse_mode: "HTML" });
-      }
+        "• Просто ID (только цифры): <code>1234567</code>\n\n" +
+        "Или нажми кнопку ниже — я найду геймпасс по твоему нику:";
+      const formatKb = fc.formatError >= 2
+        ? [
+            [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
+            [supportBtn(undefined, "pass_format", ctx)],
+          ]
+        : [
+            [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
+          ];
+      await ctx.reply(formatHint, { parse_mode: "HTML", ...Markup.inlineKeyboard(formatKb) });
       return;
     }
 
