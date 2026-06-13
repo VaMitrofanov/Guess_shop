@@ -333,3 +333,50 @@ body {
 .vk-auth-widget * {
   border-radius: 0 !important;
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   TWA — Telegram admin app: tactile + motion layer.
+   Scoped via .twa-* class names so the marketing site is untouched. Inline
+   styles (used throughout the TWA) cannot express :active / pseudo-states,
+   so the press feedback that makes it feel like an app lives here.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.twa-root, .twa-root * { -webkit-tap-highlight-color: transparent; }
+.twa-root ::-webkit-scrollbar { width: 0; height: 0; }
+.twa-root ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); }
+
+.twa-press {
+  touch-action: manipulation;
+  -webkit-user-select: none; user-select: none;
+  transition: transform .14s cubic-bezier(.2,.8,.2,1), opacity .14s ease, filter .14s ease;
+}
+.twa-press:active      { transform: scale(.96);  filter: brightness(1.08); }
+.twa-press-sm:active   { transform: scale(.97); }
+.twa-card-press:active { transform: scale(.985); filter: brightness(1.05); }
+.twa-press:disabled,
+.twa-press[aria-disabled="true"] { filter: none; transform: none; }
+
+@keyframes twa-pop       { 0%{transform:scale(.5);opacity:0} 60%{transform:scale(1.18)} 100%{transform:scale(1);opacity:1} }
+@keyframes twa-fade-in   { from{opacity:0} to{opacity:1} }
+@keyframes twa-fade-up   { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+@keyframes twa-chip-in   { from{opacity:0;transform:translateY(-2px) scale(.85)} to{opacity:1;transform:none} }
+@keyframes twa-toast-in  { from{opacity:0;transform:translateY(14px) scale(.96)} to{opacity:1;transform:none} }
+@keyframes twa-card-exit { to{opacity:0;transform:translateX(40px) scale(.97)} }
+
+.twa-pop      { animation: twa-pop .4s cubic-bezier(.22,1,.36,1) both; }
+.twa-fade-in  { animation: twa-fade-in .3s ease both; }
+.twa-fade-up  { animation: twa-fade-up .35s cubic-bezier(.22,1,.36,1) both; }
+.twa-chip-in  { animation: twa-chip-in .28s cubic-bezier(.22,1,.36,1) both; }
+.twa-toast-in { animation: twa-toast-in .3s cubic-bezier(.22,1,.36,1) both; }
+.twa-card-exit{ animation: twa-card-exit .26s cubic-bezier(.4,0,1,1) forwards; pointer-events: none; }
+
+/* Horizontal chip rail — hide scrollbar cross-browser */
+.twa-no-scrollbar { scrollbar-width: none; }
+.twa-no-scrollbar::-webkit-scrollbar { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .twa-press, .twa-pop, .twa-fade-in, .twa-fade-up,
+  .twa-chip-in, .twa-toast-in, .twa-card-exit {
+    animation: none !important;
+    transition: none !important;
+  }
+}

@@ -6,7 +6,71 @@
 
 ---
 
-## 🛠 Активный план (спринт 2026-05-30 → 2026-06)
+## 🛠 Активный план: фиксы по ультра-ревью (2026-06-13)
+
+Полное ревью связки WB → гейт → боты нашло 24 проблемы. Чиним по очереди, после каждого блока — `npx tsc -p bots --noEmit` (baseline: 17 строк ошибок, все pre-existing: untyped `res.json()` в roblox.ts + отсутствие типов vk-io). Новых ошибок быть не должно.
+
+### Блок A — Админ-reject (критично)
+- [x] **A1.** ✅ `cancel_reject:` теперь чистит `pendingRejectionReason` — следующий текст админа больше не отклоняет заказ.
+- [x] **A2.** ✅ `performAdminReject` переведён на `updateMany({ id, status in [PENDING, IN_PROGRESS] })`; при count=0 — «уже в статусе X, отклонение не выполнено».
+
+### Блок B — Валидация (критично)
+- [x] **B1.** ✅ `ContextualPlayabilityUnrated` убран из private-списка `checkGamePrivate` — все три плейабилити-чекера в roblox.ts теперь консистентны.
+
+### Блок C — «Пришли ник — найду сам» (критично)
+- [x] **C1 (TG).** ✅ В AWAITING_LINK ник-текст (не passId, матчит `ROBLOX_NICK_RE`, не админ) роутится в `handleRobloxNickInput` через `pendingRobloxNick.set`.
+- [x] **C2 (VK).** ✅ `handleGamepassLink`: ник → `handleRobloxNickInput(...)` вместо ошибки формата.
+
+### Блок D — Захват лида в TG (критично)
+- [x] **D1.** ✅ Проверка WB-кода поднята выше sub-гейта в `registerText`, но только если код существует в БД (7-символьный ник падает дальше в recovery → nick-роутер). Поздние дубли проверки кода оставлены сознательно: теперь они дают «Код не найден» для несуществующих кодов.
+
+### Блок E — VK-флоу
+- [x] **E1.** ✅ `bonusApplied` убран из admin-карточки WB-заказа.
+- [x] **E2.** ✅ idle PRIORITY 1: lookup кода → если нет, restore + роутинг текста (ник идёт в nick-поиск); recap'ы (×3: «Начать»-remind, «Начать»-restored, idle-restored) различают DIR-заказы (текст «активный прямой заказ», guide-ссылка `?source=direct`); restored-ветка с ник-текстом диспатчит сразу в `handleGamepassLink`.
+- [x] **E3.** ✅ labels+hints для AWAITING_PAYMENT/PAYMENT_PENDING; «Код ВБ» скрыт для DIR-.
+- [x] **E4.** ✅ `return` в catch `check_sub`.
+- [x] **E5.** ✅ `{ status: "RESERVED" }` добавлен в OR claim-транзакции.
+
+### Блок F — Ложные hurdle-алерты (TG)
+- [x] **F1.** ✅ `ctx` убран из supportBtn/withSupportKb в `cdo:` и `pay_no:` (клавиатуры для юзера, ctx был админский).
+
+### Блок G — auth.ts (сайт → VK)
+- [x] **G1.** ✅ Order-карточка шлётся только при `isActiveActivation` (код существует + заказ AWAITING_GAMEPASS); stale cookie / опечатка → обычная карточка входа.
+
+### Блок H — Поиск по нику при падении bridge
+- [x] **H1.** ✅ TG+VK: ошибка поиска → «поиск временно недоступен, пришли ссылку вручную» + кнопка retry (вместо ложного «юзера нет на Roblox»).
+
+### Блок I — WB-гейт (сайт)
+- [x] **I1.** ✅ Кнопка «Геймпасс готов ✅» сбрасывает `showVkAuth`.
+- [x] **I2.** ✅ Идентичные ветки hijack/expired схлопнуты.
+
+### Блок J — VK support-пауза
+- [x] **J1.** ✅ SUPPORT_WORDS не триггерится, если в тексте распознаётся геймпасс (`extractPassId !== null`); юзер может сам вернуть бота «+бот» (раньше — только менеджер из outbox); текст triggerSupport упоминает «+бот».
+
+### Блок K — HTML-эскейп
+- [x] **K1.** ✅ `escapeHtml()` добавлен в shared/notify.ts. Применён: `formatUserHandle` (покрывает Html-вариант и hub-orders), `userDisplay()`, 4× `tgDisplay`, hurdle/sup userDisplay, creatorName (renderOrderCard + sendAdminOrderCard + user-confirm), названия геймпассов в TG nick-пикере (HTML-тела; plain-кнопки не эскейпятся), VK `vkUserDisplay` + fullName в provisional-карточке + firstName в triggerSupport, auth.ts (локальный helper, 2 места).
+
+### Блок L — Cron бонусов
+- [x] **L1.** ✅ crons.ts: expiry + reminder шлются и VK-юзерам через `vkSend(stripHtml(...))` с подсказкой «напиши Начать».
+
+### Блок M — Чистка
+- [x] **M1.** ✅ `robloxGpCache`/`GpSearchHit`/`NICK_CACHE_MS` удалены.
+- [x] **M2.** ✅ `tgEdit`/`tgEditCaption` удалены из notify.ts.
+- [x] **M3.** ✅ `registerStart`: транзакция использует `wbCode.code`.
+- [x] **M4.** ✅ `isModifiedAfterCreation` удалён.
+- [x] **M5.** ✅ `wb-link` → `vk.me/club237309399`.
+
+**Верификация (2026-06-13):**
+- `npx tsc -p bots --noEmit` после ВСЕХ правок — те же 17 pre-existing ошибок (untyped `res.json()` в roblox.ts + отсутствие типов vk-io), новых нет ✅
+- `npx tsc --noEmit` (основной проект: auth.ts, GuideClient, wb-code, wb-link) — 0 ошибок ✅
+- ⚠️ `eslint` и `jest` НЕ прогнаны — Bash-классификатор Claude был недоступен в конце сессии. Перед деплоем: `npx jest` + `npx eslint src/auth.ts src/app/api/wb-code/route.ts src/app/api/wb-link/route.ts src/app/guide/GuideClient.tsx`.
+- Изменения НЕ закоммичены (push в main триггерит автодеплой 4 сервисов — коммитить только после прогона тестов).
+
+Прогресс отмечаем чекбоксами здесь. Найденное, но НЕ чинимое сейчас: гонка в `wb-code` POST (двойная бронь, низкий риск); агрессивность SUPPORT_WORDS целиком; устаревшие описания callback'ов в HANDOFF ниже (`user_resubmit:{orderId}:{userId}` → фактически `user_resubmit:{wbCode}:{amount}`).
+
+---
+
+## 🛠 Прошлый план (спринт 2026-05-30 → 2026-06)
 
 7 пунктов от пользователя. Сначала закрываем легкие, потом две тяжёлые.
 
@@ -30,9 +94,10 @@
     - ⏳ **B5 Уборка:** удалить старые reply-кнопки из `bots/tg/admin/menu.ts` и `updateMainMenu` (сейчас no-op).
   - ⏳ **Phase C (не начата):** удаление мёртвых text-interceptors из `bots/tg/admin/index.ts` после стабилизации Phase B. Параллельно вычистить неиспользуемые CB-константы из `bots/shared/admin.ts`. Проверка — `grep -rn "CB\." bots/ src/` должен сжаться.
 
-- [~] **(7) Поиск геймпассов по нику** — **Phase A+B сделаны** (коммит `6613568`). Phase C/D не начаты.
+- [~] **(7) Поиск геймпассов по нику** — **Phase A+B+E сделаны** (коммиты `6613568`, `9512c47`, `cf287cc`). Phase C/D не начаты.
   - ✅ **Phase A (TG client):** новая inline-кнопка «🔎 Найти по моему нику Roblox» в welcome после provisional order. Состояние `pendingRobloxNick`, callback `CB.findGpStart`/`CB.gpPick`. Большой кусок validation+transaction (~330 строк) вынесен в `processGamepassSubmission` — переиспользуется text-handler'ом и callback'ом без дублирования. UX: 0/1/N результатов с разной клавиатурой.
   - ✅ **Phase B (VK client):** аналогичный flow в `bots/vk/handlers.ts`. Новое состояние `AWAITING_ROBLOX_NICK` в `VKState`. `handleFindGpStart` / `handleRobloxNickInput` / `handleGpPick`. Picker вызывает существующий `handleGamepassLink(url)` напрямую — никакой дубликат логики.
+  - ✅ **Phase E-fix (2026-06-10):** кнопка «🔎 Найти по нику» теперь показывается в **двух** местах, где раньше отсутствовала: (1) ошибка формата геймпасса (`handlers.ts:940`) — «Или нажми кнопку ниже»; (2) восстановление сессии (`handlers.ts:829`) — первой строкой клавиатуры. Раньше пользователь, набравший ник текстом, получал «Не распознан формат геймпасса» без альтернативы.
   - ⏳ **Phase C (не начата):** «🔎 Найти GP клиента» в TWA `OrdersScreen` для `AWAITING_GAMEPASS` карточки. **Принцип единой экосистемы:** бизнес-логика связки геймпасса с заказом живёт в одном месте, три фронта (TG, VK, TWA) вызывают её через свои транспорты. План:
     - **C1** `POST /api/twa/orders/find-gamepass` `{orderId, nick}` → импортирует `getUserGamepasses` из `bots/shared/roblox.ts:743`, фильтрует по `expectedPrice = ceil(denomination / 0.7) ±2` (из связанного `WbCode`), возвращает `{hits, expectedPrice}`.
     - **C2** Вынести transactional-кусок из `processGamepassSubmission` (`bots/tg/handlers.ts:1062`) в новый `bots/shared/gamepass-link.ts` → `linkGamepassToOrder({orderId, passId, denomination}) → {ok, error?}`. Переключить TG, VK, TWA на эту функцию. Это и есть «единая экосистема».
@@ -624,7 +689,7 @@ VALIDATOR_KEY        = <тот же что в TG боте>
 - 🟡 **"ПОВТОРНЫЙ КЛИЕНТ" для первого заказа** — provisional order (`AWAITING_GAMEPASS`) создаётся до ввода геймпасса. `previousOrderCount` считал его → первый клиент получал бейдж "ПОВТОРНЫЙ". Фикс: исключить `AWAITING_GAMEPASS` из счётчика. **Коммит: `7165440`**
 
 **⚠️ Coolify auto-deploy работает для Web (RF), но боты обновляются вручную:** `scp file root@server:/tmp/ && docker cp /tmp/file container:/app/path && docker restart container`.
-- **Последний задеплоенный код** — коммит `3b8dd36` (2026-06-06).
+- **Последний задеплоенный код** — коммит `1105bb3` (2026-06-11).
 - **TG бот** (SG `5.223.95.11`): контейнер `lyz78enntugna9em1biopinr-*` (ID меняется при рестарте Coolify).
 - **VK бот** (RF `89.110.94.117`): контейнер `gmtpfqosgoz23vjyxyczuic9-*`.
 - **Web** (RF): `robloxbank-web` — auto-deploy по push в main.
@@ -3703,4 +3768,97 @@ curl -s -X POST \
 - **Никогда** не использовать CSS `@import url()` для внешних ресурсов — это render-blocking. Всегда `next/font/google` или `<link rel="preload">`.
 - **Всегда** вызывать `Telegram.WebApp.ready()` в inline script, не ждать React.
 - При добавлении новых статусов в Prisma-схему — **сразу** обновлять все фронтенды, иначе React крашится без ошибки.
+
+---
+
+### Сессия 2026-06-10 — Фикс «Не распознан формат геймпасса» + unrated-игры
+
+**Кейс:** `@Helen200655` (TG ID `5103111621`), заказ `IUJYBIG` (300 R$), ник Roblox `Nelleavb`.
+
+**Проблема 1 — UX «🔎 Найти по нику» не видна:**
+Пользователь набрал свой ник `Nelleavb` текстом вместо нажатия кнопки «🔎 Найти по моему нику Roblox». Бот пытался распарсить ник как URL/ID геймпасса → `extractPassId("Nelleavb")` → `null` → ошибка «Не распознан формат геймпасса». Кнопка поиска по нику **не показывалась** ни в ошибке формата, ни при восстановлении сессии.
+
+**Фикс (коммит `9512c47`):** кнопка `CB.findGpStart` добавлена в оба сообщения:
+- `handlers.ts:829` — восстановление сессии: «Продолжаем! Осталось создать геймпасс…» + кнопка «🔎 Найти по нику» первой строкой
+- `handlers.ts:940` — ошибка формата: «Или нажми кнопку ниже — я найду геймпасс по твоему нику:» + кнопка «🔎 Найти по нику» (кнопка поддержки по-прежнему с 2-й ошибки)
+
+**Проблема 2 — `ContextualPlayabilityUnrated` блокирует геймпассы:**
+Плейс `Nelleavb's Place` (universe 7361527321, place 100064769663073) имеет `playabilityStatus: "ContextualPlayabilityUnrated"` — игра не прошла Experience Guidelines. Бот расценивал это как «закрытая игра» → `isActive=false, isGamePrivate=true` → «❌ Геймпасс в закрытой игре — выкупить невозможно». Но на самом деле геймпассы из unrated-игр покупаются по прямой ссылке + BossRobux их видит.
+
+**Фикс (коммит `cf287cc`):** `ContextualPlayabilityUnrated` перенесён из «private» в «ok» в обеих функциях:
+- `roblox.ts:230` (`placeIsPlayable`) — `if (ps === "Playable" || ps === "GuestProhibited" || ps === "ContextualPlayabilityUnrated") return "ok"`
+- `roblox.ts:288` (`checkGameAccess`) — аналогично
+
+**Правило:** если BossRobux видит геймпасс → он покупаемый → он должен проходить валидацию бота.
+
+**Ручное действие:** заказ `IUJYBIG` обновлён в БД напрямую (`AWAITING_GAMEPASS → PENDING`, gamepassUrl=`https://www.roblox.com/game-pass/1872524601`, robloxUsername=`Nelleavb`). Уведомления отправлены: пользователю «🎉 Геймпасс принят!», админам — карточка с кнопками выкупа.
+
+| Файл | Изменения |
+|------|-----------|
+| `bots/tg/handlers.ts` | Кнопка «🔎 Найти по нику» в session recovery (`:829`) и format error (`:940-949`) |
+| `bots/shared/roblox.ts` | `ContextualPlayabilityUnrated` → "ok" в `placeIsPlayable` (`:230`) и `checkGameAccess` (`:288`) |
+
+**Коммиты:** `9512c47`, `cf287cc`. Задеплоено: TG_bot (Coolify auto-deploy, SG сервер, контейнер `lyz78enntugna9em1biopinr-155059963532`).
+
+---
+
+## Сессия 2026-06-13 — TWA admin UI/UX «Apple-grade»: тактильность, живые действия, прогрессивный enrichment
+
+**Запрос владельца:** довести админ-аппку (TWA), **особенно раздел «Заказы»**, до ощущения Apple — лёгко, красиво, стильно, эргономично, продуманно.
+
+### Диагноз (что нашёл при ревизии)
+
+1. **🔴 Половина богатого UI карточек мертва в проде.** `OrdersScreen.tsx` шлёт `lite=1` во всех запросах (`:963`), а `route.ts:131` под `if (!lite)` пропускает весь enrichment. Поэтому **никогда** не показываются: `OrderNumberChip` (N/Total, 👑 VIP 5+, «НОВЫЙ»), чипы отзыва (📸/⭐). Это самый ценный сигнал «новичок vs постоянник», и он невидим. Сделано ради скорости (см. сессии 2026-06-05/07, страница падала с «This page couldn't load»).
+2. **Нет единой дизайн-системы.** 10 экранов дублируют `const C = {…}`, 14 файлов хардкодят `#bf5af2`. `OrdersScreen` (радиус 18, тени, `textSecondary #98989d`) и `Dashboard` (радиус 14, без теней, `sec #8e8e93`) — визуально разные приложения.
+3. **Ноль тактильности.** `HapticFeedback` не используется нигде; ни одного `:active`/`scale` press-состояния; инлайн-стили в принципе не умеют `:active`. Кнопки «проваливаются» без отклика.
+4. **Действия = жёсткий рефетч страницы 1** (`:1081`). На 3-й странице после «Показать ещё» завершение заказа теряет скролл и подгруженные заказы. Нет оптимистики, нет момента подтверждения.
+5. Два сложенных хедера съедают ~100px; reject без пресетов (пустая textarea); 8 чипов без edge-fade; «Показать ещё» вместо infinite-scroll; тосты локальные.
+
+### План фиксов (транши, impact÷риск)
+
+**Транш 0 — Фундамент:** `twa/_components/theme.ts` (единые токены — суперсет всех палитр), `haptics.ts` (обёртка `Telegram.WebApp.HapticFeedback`, feature-detect + try/catch), `Pressable.tsx` (press-primitive), tactile-слой в `globals.css` (`.twa-press` scale .96, `-webkit-tap-highlight-color: transparent`, keyframes pop/fade/chip-in/toast).
+
+**Транш 1 — Заказы (ядро):**
+- `src/lib/order-enrich.ts` — извлечённый helper cluster-numbering + reviewStatus.
+- `GET /api/twa/orders/enrich?ids=…` — батч enrichment по видимым id. Список рисуется мгновенно (lite), чипы VIP/N-Total/отзыв «появляются» через ~300мс (прогрессивное обогащение — НЕ тот sessionStorage-SWR, что ломал WebView).
+- Оптимистичные действия: haptic + локальное обновление статуса/счётчиков, анимация ухода карточки, без сброса скролла/страниц; ошибка → откат + haptic error.
+- Haptics на всё (действия, копирование, фильтр=selection, таб=selection). Press-состояния везде.
+- Reject-пресеты (one-tap частые причины) + свободный ввод.
+
+**Транш 2 — Полировка Orders:** infinite-scroll (IntersectionObserver + fallback-кнопка), edge-fade ленты чипов, единый компактный хедер, глобальный тост-слой, fade скелетон→контент. **PTR (pull-to-refresh) осознанно отложен** — конфликт с нативным pull-to-close в Telegram iOS + документированная хрупкость WebView. Оптимистика + 30s-поллинг бейджа закрывают потребность.
+
+**Транш 3 (каркас):** TwaApp title bar + BottomNav + StatCard на `theme.ts` + haptics на табы → единый каркас вокруг всех экранов. **Полная миграция палитр остальных 9 экранов — документированный follow-up** (трогать рабочие экраны = регресс-риск при WebView-хрупкости; вынес отдельно).
+
+**Деплой:** только TWA (RF, ручной триггер Coolify). Боты не затронуты.
+
+### Реализовано (2026-06-13) — build зелёный, НЕ задеплоено
+
+**Новые файлы:**
+- `src/app/twa/_components/theme.ts` — единые токены (`C`, `RADIUS`, `SHADOW`, `EASING`, `tabular`, `MONO`, `tint()`).
+- `src/app/twa/_components/haptics.ts` — `haptic.impact/notify/select`, feature-detect + try/catch (no-op вне Telegram).
+- `src/app/twa/_components/Pressable.tsx` — press-primitive (вариант press/press-sm/card + haptic).
+- `src/app/twa/_components/Toast.tsx` — глобальный `toast()` + `<ToastHost/>` (pub/sub, без провайдера).
+- `src/lib/order-enrich.ts` — `computeEnrichment()` (cluster numbering + reviewStatus), извлечён из orders/route.
+- `src/app/api/twa/orders/enrich/route.ts` — `GET ?ids=` (cap 60), батч-обогащение видимых заказов.
+
+**Изменено:**
+- `src/app/globals.css` — `.twa-*` tactile-слой: press-состояния (`scale .96`), tap-highlight reset, keyframes (pop/fade/chip-in/toast/card-exit), `prefers-reduced-motion`, hide-scrollbar.
+- `OrdersScreen.tsx` — переписан: оптимистичные действия (`runAction` — локальный мьютейт статуса+счётчиков, анимация ухода карточки, откат при ошибке, **без сброса скролла/страниц**), haptics на всё, reject-пресеты, прогрессивный enrichment (кэш `enrichCache`/`requestedRef`, чипы появляются после первого пейнта), infinite-scroll (IntersectionObserver + fallback-кнопка), edge-fade чипов, fade-in списка, тосты.
+- `TwaApp.tsx` — `<ToastHost/>`, `.twa-root` (scope tap-highlight), `refreshBadge` → проп `onActionDone` (бейдж падает сразу после действия), title bar на токенах.
+- `BottomNav.tsx` — haptic на смену таба, press, токены.
+- `StatCard.tsx` — токены.
+
+**Верификация:** `npx tsc --noEmit` → exit 0; `npm run build` (next 16.2.2) → exit 0, роут `/api/twa/orders/enrich` зарегистрирован. ESLint НЕ гейтит билд (существующий `orders/route.ts` уже даёт 27 `no-explicit-any`; мой код следует тому же идиому).
+
+**Осознанно отложено (документированный follow-up):**
+- Pull-to-refresh — конфликт с нативным pull-to-close в Telegram iOS + хрупкость WebView. Оптимистика + 30s-поллинг бейджа закрывают потребность.
+- Collapsible-search — для админ-воркфлоу всегда-видимый поиск лучше; не делаю.
+- Полная миграция палитр остальных 9 экранов (Dashboard/WB/Bossrobux/Settings/System/Stocks/Codes/Dynamics/Advert/Calc/Analytics) на `theme.ts` — трогать рабочие экраны = регресс-риск; вынесено отдельно.
+
+**Деплой — НЕ выполнен (ждёт go-ahead владельца).** Причины паузы: (1) в рабочем дереве лежит чужой/прежний незакоммиченный WIP (`bots/*`, `wb-code`, `wb-link`, `auth.ts`, `GuideClient`) — не мой; (2) известный фейл-мод WebView («This page couldn't load») не ловится HTTP-смоук-тестом (см. 2026-06-05), нужна проверка в живом Telegram. Команда деплоя (web/TWA, RF):
+```bash
+curl -X POST "http://89.110.94.117:8000/api/v1/deploy?uuid=z10ws7m1q45h281zwedmhei4&force=true" \
+  -H "Authorization: Bearer $COOLIFY_TOKEN"
+```
+Перед деплоем нужно закоммитить **только мои 11 файлов** (не трогая чужой WIP) и запушить — Coolify force-deploy тянет из GitHub `main`.
 

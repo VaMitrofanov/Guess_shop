@@ -1,5 +1,7 @@
 "use client";
 import React from "react";
+import { haptic } from "./haptics";
+import { C, tint } from "./theme";
 
 type Screen = "dashboard" | "orders" | "wb" | "bossrobux" | "settings" | "system";
 
@@ -58,8 +60,8 @@ export default function BottomNav({
   return (
     <nav style={{
       display: "flex",
-      borderTop: "1px solid #2c2c2e",
-      background: "#1c1c1e",
+      borderTop: `1px solid ${C.hairline}`,
+      background: C.bg,
       flexShrink: 0,
       paddingBottom: "env(safe-area-inset-bottom)",
     }}>
@@ -69,12 +71,13 @@ export default function BottomNav({
         return (
           <button
             key={id}
-            onClick={() => onChange(id)}
+            className="twa-press"
+            onClick={() => { if (!isActive) haptic.select(); onChange(id); }}
             style={{
               flex: 1, padding: "8px 1px 7px", border: "none", background: "none",
               cursor: "pointer", display: "flex", flexDirection: "column",
               alignItems: "center", gap: 3,
-              color: isActive ? "#bf5af2" : "#636366",
+              color: isActive ? C.accent : C.textTertiary,
               transition: "color 0.15s",
               position: "relative",
             }}
@@ -82,9 +85,9 @@ export default function BottomNav({
             <div style={{
               position: "relative",
               display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
-              background: isActive ? "rgba(191,90,242,0.15)" : "transparent",
+              background: isActive ? tint(C.accent, 0.15) : "transparent",
               borderRadius: 14,
-              padding: isActive ? "5px 14px" : "5px 14px",
+              padding: "5px 14px",
               transition: "background 0.15s",
             }}>
               <div style={{ position: "relative" as const }}>
@@ -92,7 +95,7 @@ export default function BottomNav({
                 {badge > 0 && (
                   <div style={{
                     position: "absolute", top: -4, right: -6,
-                    background: "#ff453a", color: "#fff",
+                    background: C.red, color: "#fff",
                     fontSize: 9, fontWeight: 700, lineHeight: 1,
                     padding: "2px 4px", borderRadius: 8, minWidth: 14,
                     textAlign: "center" as const,

@@ -1,8 +1,10 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
 import BottomNav from "./BottomNav";
 import OrdersScreen from "./screens/OrdersScreen";
+import { ToastHost } from "./Toast";
+import { C } from "./theme";
 
 // Dynamically load non-default screens so the initial JS bundle is just
 // the OrdersScreen (default tab) + TwaApp shell. BossrobuxScreen alone is
@@ -192,21 +194,20 @@ export default function TwaApp() {
   // Fetch urgent orders count for badge after auth.
   // Uses the lightweight /urgent-count endpoint (single COUNT on indexed
   // status column) instead of the full Orders pipeline.
+  const refreshBadge = useCallback(() => {
+    if (!token) return;
+    fetch("/api/twa/orders/urgent-count", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setOrdersBadge(d.count ?? 0); })
+      .catch(() => {});
+  }, [token]);
+
   useEffect(() => {
     if (auth !== "ok" || !token) return;
-    const refresh = () => {
-      fetch("/api/twa/orders/urgent-count", { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.ok ? r.json() : null)
-        .then(d => {
-          if (!d) return;
-          setOrdersBadge(d.count ?? 0);
-        })
-        .catch(() => {});
-    };
-    refresh();
-    const iv = setInterval(refresh, 30_000);
+    refreshBadge();
+    const iv = setInterval(refreshBadge, 30_000);
     return () => clearInterval(iv);
-  }, [auth, token]);
+  }, [auth, token, refreshBadge]);
 
   if (auth === "loading") {
     // Skeleton matches the post-auth chrome (title bar + content + bottom nav)
@@ -214,7 +215,7 @@ export default function TwaApp() {
     // not a layout pop. Cuts perceived load time even when the JWT verify
     // takes its usual ~150 ms.
     return (
-      <div style={{
+      <div className="twa-root" style={{
         display: "flex", flexDirection: "column", height: "100dvh",
         background: "#1c1c1e", color: "#fff",
         fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
@@ -238,7 +239,7 @@ export default function TwaApp() {
 
   if (auth === "error") {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "#1c1c1e", color: "#ff453a", padding: 24 }}>
+      <div className="twa-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "#1c1c1e", color: "#ff453a", padding: 24 }}>
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 36, marginBottom: 12 }}>🔒</div>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Доступ запрещён</div>
@@ -252,16 +253,16 @@ export default function TwaApp() {
   const sp = { token: token! };
 
   return (
-    <div style={{
+    <div className="twa-root" style={{
       display: "flex", flexDirection: "column", height: "100dvh",
-      background: "#1c1c1e",
+      background: C.bg,
       fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      color: "#fff",
+      color: C.textPrimary,
     }}>
       {/* Title bar */}
-      <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid #2c2c2e", flexShrink: 0 }}>
+      <div style={{ padding: "14px 16px 10px", borderBottom: `1px solid ${C.hairline}`, flexShrink: 0 }}>
         <div style={{ fontWeight: 700, fontSize: 18, letterSpacing: -0.3 }}>{SCREEN_TITLES[screen]}</div>
-        <div style={{ fontSize: 12, color: "#636366", marginTop: 1 }}>
+        <div style={{ fontSize: 12, color: C.textTertiary, marginTop: 1 }}>
           {new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}
         </div>
       </div>
@@ -269,7 +270,7 @@ export default function TwaApp() {
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
         {screen === "dashboard"  && <Dashboard      {...sp} />}
-        {screen === "orders"     && <OrdersScreen   {...sp} onGoToBossrobux={(gpId) => { setBossrobuxPreloadId(gpId); setScreen("bossrobux"); }} initialQuery={orderQueryPreload} onInitialQueryConsumed={() => setOrderQueryPreload("")} />}
+        {screen === "orders"     && <OrdersScreen   {...sp} onGoToBossrobux={(gpId) => { setBossrobuxPreloadId(gpId); setScreen("bossrobux"); }} onActionDone={refreshBadge} initialQuery={orderQueryPreload} onInitialQueryConsumed={() => setOrderQueryPreload("")} />}
         {screen === "wb"         && <WbScreen       {...sp} />}
         {screen === "bossrobux"  && <BossrobuxScreen {...sp} preloadGamepassId={bossrobuxPreloadId} onPreloadConsumed={() => setBossrobuxPreloadId(undefined)} />}
         {screen === "settings"   && <SettingsScreen  {...sp} onNavigate={(s) => setScreen(s as Screen)} />}
@@ -277,6 +278,7 @@ export default function TwaApp() {
       </div>
 
       <BottomNav active={screen} onChange={setScreen} ordersBadge={ordersBadge} />
+      <ToastHost />
     </div>
   );
 }

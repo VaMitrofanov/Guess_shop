@@ -1,30 +1,16 @@
 "use client";
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { C, SHADOW, tabular, MONO } from "../theme";
+import { haptic } from "../haptics";
+import { toast } from "../Toast";
+import Pressable from "../Pressable";
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   Palette — refined Apple-style dark, vibrant accents at limited contrast,
-   hairlines instead of thick borders. Tokens are referenced everywhere so the
-   look stays consistent across the screen.
+   OrdersScreen — Apple-grade admin order list.
+   Palette/radii/shadows come from the shared theme. Interactions are tactile
+   (haptics + press states), actions are optimistic (no full-list refetch), and
+   the "Nth order / VIP / review" signals stream in via deferred enrichment.
    ───────────────────────────────────────────────────────────────────────── */
-const C = {
-  bg:          "#1c1c1e",
-  card:        "#2c2c2e",
-  cardTop:     "rgba(255,255,255,0.04)",      // inner top-edge highlight
-  cardShadow:  "0 1px 0 rgba(255,255,255,0.04) inset, 0 6px 20px rgba(0,0,0,0.18)",
-  elevated:    "#3a3a3c",
-  hairline:    "rgba(255,255,255,0.07)",
-  textPrimary: "#f2f2f7",
-  textSecondary:"#98989d",
-  textTertiary:"#636366",
-  accent:      "#bf5af2",
-  green:       "#30d158",
-  red:         "#ff453a",
-  yellow:      "#ffd60a",
-  orange:      "#ff9f0a",
-  blue:        "#0a84ff",
-};
-
-const tabular = { fontVariantNumeric: "tabular-nums" as const };
 
 type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED";
 type FilterStatus = OrderStatus | "ALL";
@@ -64,6 +50,13 @@ interface OrdersData {
   pages: number;
 }
 
+/* Per-order signals merged in after the list paints (deferred enrichment). */
+interface EnrichValue {
+  userOrderNumber: number | null;
+  userOrderTotal:  number | null;
+  reviewStatus:    "PENDING" | "SUBMITTED" | null;
+}
+
 const STATUS_META: Record<OrderStatus, { label: string; color: string }> = {
   AWAITING_PAYMENT:  { label: "Ждёт реквизиты", color: "#ac8e68" },
   PAYMENT_PENDING:   { label: "Ждёт оплату",    color: "#ac8e68" },
@@ -83,6 +76,18 @@ const FILTERS: { id: FilterStatus; label: string }[] = [
   { id: "AWAITING_GAMEPASS", label: "Ждут ссылку" },
   { id: "COMPLETED",         label: "Готово"      },
   { id: "REJECTED",          label: "Отклонено"   },
+];
+
+const URGENT_STATUSES: OrderStatus[] = ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING"];
+
+/* Common rejection reasons — one tap to fill, still freely editable. */
+const REJECT_PRESETS = [
+  "Приватный профиль",
+  "Неверная ссылка",
+  "Геймпасс не найден",
+  "Цена не совпала",
+  "Дубликат заказа",
+  "Нет оплаты",
 ];
 
 /* ───────────── Time formatting — short & contextual ───────────── */
@@ -105,20 +110,21 @@ function copyText(text: string) {
   navigator.clipboard?.writeText(text).catch(() => {});
 }
 
-function CopyBtn({ text, variant = "ghost" }: { text: string; variant?: "ghost" | "tinted" }) {
+function CopyBtn({ text, label }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
+      className="twa-press-sm"
       onClick={e => {
         e.stopPropagation();
         copyText(text);
+        haptic.impact("light");
         setCopied(true);
         setTimeout(() => setCopied(false), 1400);
+        if (label) toast(`${label} скопирован`, "success");
       }}
       style={{
-        background:
-          copied ? `${C.green}26` :
-          variant === "tinted" ? "rgba(255,255,255,0.06)" : "transparent",
+        background:   copied ? `${C.green}26` : "transparent",
         border:    "none",
         borderRadius: 8,
         color:     copied ? C.green : C.textSecondary,
@@ -127,7 +133,6 @@ function CopyBtn({ text, variant = "ghost" }: { text: string; variant?: "ghost" 
         padding:   "6px 11px",
         cursor:    "pointer",
         flexShrink:0,
-        transition:"background 0.18s, color 0.18s",
       }}
       title={copied ? "Скопировано" : "Скопировать"}
     >
@@ -194,9 +199,9 @@ function StatusPill({ status }: { status: OrderStatus }) {
   );
 }
 
-function Chip({ children, color }: { children: React.ReactNode; color: string }) {
+function Chip({ children, color, animate }: { children: React.ReactNode; color: string; animate?: boolean }) {
   return (
-    <span style={{
+    <span className={animate ? "twa-chip-in" : undefined} style={{
       fontSize: 10, fontWeight: 600, letterSpacing: 0.3,
       color, background: `${color}1c`,
       padding: "2.5px 8px", borderRadius: 999, whiteSpace: "nowrap",
@@ -206,9 +211,8 @@ function Chip({ children, color }: { children: React.ReactNode; color: string })
   );
 }
 
-/* OrderNumberChip — shows "N/Total" where N is the cluster-relative position.
-   Cluster = same person across TG/VK/Roblox identity union. Pale-blue for 1st,
-   neutral for 2-4, gold for 5+ (VIP). */
+/* OrderNumberChip — "N/Total" cluster-relative position (TG/VK/Roblox identity
+   union). Green "НОВЫЙ" for a lone first order, blue for repeat, gold VIP at 5+. */
 function OrderNumberChip({ n, total }: { n: number | null; total: number | null }) {
   if (!n || !total) return null;
   const isFirst = n === 1 && total === 1;
@@ -219,7 +223,7 @@ function OrderNumberChip({ n, total }: { n: number | null; total: number | null 
     : isVip
     ? `${n}/${total} · VIP`
     : `${n}/${total}`;
-  return <Chip color={color}>{isVip && "👑 "}{label}</Chip>;
+  return <Chip color={color} animate>{isVip && "👑 "}{label}</Chip>;
 }
 
 /* ───────────── Info row with readable label/value (Apple Wallet style) ───────────── */
@@ -264,33 +268,44 @@ function daysWord(n: number): string {
   return "дней";
 }
 
-/* ───────────── ActionBar (preserved logic, polished visuals) ───────────── */
+type ActionResult = { ok: boolean; error?: string };
+
+/* ───────────── ActionBar — controlled; the screen owns the optimistic mutation ───────────── */
 function ActionBar({
-  order, token, onDone,
-}: { order: Order; token: string; onDone: () => void }) {
+  order, onRunAction,
+}: { order: Order; onRunAction: (action: string, reason?: string) => Promise<ActionResult> }) {
   const [loading,      setLoading]      = useState(false);
   const [rejectMode,   setRejectMode]   = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [err,          setErr]          = useState("");
 
-  async function doAction(action: string, extra?: Record<string, unknown>) {
+  async function doAction(action: string, reason?: string) {
     setLoading(true); setErr("");
-    try {
-      const r = await fetch("/api/twa/orders", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ action, orderId: order.id, ...extra }),
-      });
-      const d = await r.json();
-      if (!r.ok) { setErr(d.error ?? "Ошибка"); return; }
-      onDone();
-    } catch { setErr("Ошибка сети"); }
-    finally  { setLoading(false); }
+    const res = await onRunAction(action, reason);
+    setLoading(false);
+    if (!res.ok) setErr(res.error ?? "Ошибка");
   }
 
   if (rejectMode) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {REJECT_PRESETS.map(p => (
+            <Pressable
+              key={p}
+              variant="press-sm"
+              onClick={() => setRejectReason(p)}
+              style={{
+                background: rejectReason === p ? `${C.red}26` : "rgba(255,255,255,0.06)",
+                border: "none", borderRadius: 999,
+                color: rejectReason === p ? C.red : C.textSecondary,
+                fontSize: 12, fontWeight: 500, padding: "6px 11px", cursor: "pointer",
+              }}
+            >
+              {p}
+            </Pressable>
+          ))}
+        </div>
         <textarea
           placeholder="Причина отклонения…"
           value={rejectReason}
@@ -307,13 +322,15 @@ function ActionBar({
         />
         <div style={{ display: "flex", gap: 8 }}>
           <button
-            onClick={() => setRejectMode(false)}
+            className="twa-press"
+            onClick={() => { haptic.impact("light"); setRejectMode(false); }}
             style={btn(C.elevated, C.textSecondary, 1)}
           >
             Отмена
           </button>
           <button
-            onClick={() => doAction("reject", { reason: rejectReason || "не указана" })}
+            className="twa-press"
+            onClick={() => doAction("reject", rejectReason || "не указана")}
             disabled={loading}
             style={{ ...btn(C.red, "#fff", 2), opacity: loading ? 0.7 : 1 }}
           >
@@ -334,19 +351,19 @@ function ActionBar({
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ display: "flex", gap: 8 }}>
         {showTakeWork && (
-          <button onClick={() => doAction("take-work")} disabled={loading}
+          <button className="twa-press" onClick={() => doAction("take-work")} disabled={loading}
             style={{ ...btn(C.orange, "#fff", 1), opacity: loading ? 0.7 : 1 }}>
             {loading ? "…" : "В работу"}
           </button>
         )}
         {showComplete && (
-          <button onClick={() => doAction("complete")} disabled={loading}
+          <button className="twa-press" onClick={() => doAction("complete")} disabled={loading}
             style={{ ...btn(C.green, "#fff", 2), opacity: loading ? 0.7 : 1, fontWeight: 700 }}>
             {loading ? "…" : "✓ Выкуплено"}
           </button>
         )}
         {showReject && hasMain && (
-          <button onClick={() => setRejectMode(true)} disabled={loading}
+          <button className="twa-press" onClick={() => { haptic.impact("light"); setRejectMode(true); }} disabled={loading}
             style={{
               flexShrink: 0, width: 46,
               padding: "12px 0", borderRadius: 12,
@@ -358,7 +375,7 @@ function ActionBar({
         )}
       </div>
       {showReject && !hasMain && (
-        <button onClick={() => setRejectMode(true)} disabled={loading}
+        <button className="twa-press" onClick={() => { haptic.impact("light"); setRejectMode(true); }} disabled={loading}
           style={{
             width: "100%", padding: "11px", borderRadius: 12,
             border: `1px solid ${C.red}55`, background: "transparent",
@@ -386,19 +403,11 @@ function extractGamepassId(url: string | null): string | null {
 }
 
 /* ───────────── Contact button — direct chat link ─────────────
-   Inside Telegram WebApp:
-   - Telegram.WebApp.openTelegramLink ONLY accepts https://t.me/* URLs.
-     Passing tg://user?id=... is silently ignored — that was the "ничего не происходит"
-     bug for users without a public @username (item 3).
-   - For tgId-only users there is no reliable in-WebApp way to open the profile,
-     so we always copy the ID to clipboard as a guaranteed fallback, then attempt
-     the deep link via openLink and window.location as best-effort.
-   Result: тап на кнопку всегда что-то делает (минимум — ID в буфере + тост).
-*/
-function openContact(
-  user: Order["user"],
-  notify: (msg: string) => void,
-) {
+   Inside Telegram WebApp openTelegramLink only accepts https://t.me/* URLs;
+   tg://user?id=... is silently ignored. For tgId-only users there is no
+   reliable in-WebApp way to open the profile, so we always copy the ID as a
+   guaranteed fallback, then best-effort the deep link. */
+function openContact(user: Order["user"]) {
   const tg = (typeof window !== "undefined" ? window.Telegram?.WebApp : undefined) as any;
   if (user.username) {
     const url = `https://t.me/${user.username}`;
@@ -407,16 +416,11 @@ function openContact(
     return;
   }
   if (user.tgId) {
-    // Best-effort: try opening the deep link via the generic openLink
-    // (some clients pass tg:// through to the system handler), then via
-    // window.location as a second attempt. Both may silently no-op.
     const deepLink = `tg://user?id=${user.tgId}`;
     try { tg?.openLink?.(deepLink); } catch {}
     try { window.location.href = deepLink; } catch {}
-    // Guaranteed fallback — copy the ID so the manager can paste it
-    // into Telegram's global search and open the profile in one tap.
     copyText(String(user.tgId));
-    notify(`📋 ID ${user.tgId} скопирован — вставь в поиск Telegram`);
+    toast(`📋 ID ${user.tgId} скопирован — вставь в поиск Telegram`, "success");
     return;
   }
   if (user.vkId) {
@@ -432,19 +436,13 @@ function contactLabel(user: Order["user"]): string | null {
   return null;
 }
 function ContactButton({ user }: { user: Order["user"] }) {
-  const [toast, setToast] = useState<string | null>(null);
   const label = contactLabel(user);
   if (!label) return null;
   return (
     <div style={{ marginTop: 14 }}>
       <button
-        onClick={e => {
-          e.stopPropagation();
-          openContact(user, msg => {
-            setToast(msg);
-            setTimeout(() => setToast(null), 2400);
-          });
-        }}
+        className="twa-press"
+        onClick={e => { e.stopPropagation(); haptic.impact("light"); openContact(user); }}
         style={{
           display: "block", textAlign: "center" as const,
           width: "100%", padding: "13px", borderRadius: 13, border: "none",
@@ -456,23 +454,11 @@ function ContactButton({ user }: { user: Order["user"] }) {
       >
         💬 {label}
       </button>
-      {toast && (
-        <div style={{
-          marginTop: 8, padding: "8px 12px", borderRadius: 10,
-          background: `${C.green}26`, color: C.green,
-          fontSize: 12.5, fontWeight: 500, textAlign: "center" as const,
-        }}>
-          {toast}
-        </div>
-      )}
     </div>
   );
 }
 
-/* ───────────── User identity helpers — @username everywhere ─────────────
-   Display priority for TG users: @username (canonical) → name → "TG · <id>".
-   For VK: name (enriched from VK API) → "VK · <id>".
-*/
+/* ───────────── User identity helpers — @username everywhere ───────────── */
 function userDisplayName(u: Order["user"]): string {
   if (u.username) return `@${u.username}`;
   const realName = u.name && u.name !== "VK User" ? u.name : null;
@@ -482,7 +468,6 @@ function userDisplayName(u: Order["user"]): string {
   return "—";
 }
 function userSubHandle(u: Order["user"]): string {
-  // Show the secondary identifier under the main name when both exist.
   if (u.username && u.name && u.name !== "VK User") return u.name;
   if (u.tgId)    return `TG · ${u.tgId}`;
   if (u.vkId)    return `VK · ${u.vkId}`;
@@ -493,20 +478,23 @@ function userSubHandle(u: Order["user"]): string {
    OrderCard — premium hierarchy
    ───────────────────────────────────────────────────────────────────────── */
 function OrderCard({
-  order, token, onGoToBossrobux, onRefresh,
-}: { order: Order; token: string; onGoToBossrobux?: (gamepassId?: string) => void; onRefresh: () => void }) {
+  order, token, exiting, onGoToBossrobux, onRunAction,
+}: {
+  order: Order;
+  token: string;
+  exiting: boolean;
+  onGoToBossrobux?: (gamepassId?: string) => void;
+  onRunAction: (action: string, reason?: string) => Promise<ActionResult>;
+}) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [fetchedCreator, setFetchedCreator] = useState<string | false | null>(null);
 
   const isActive  = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS"].includes(order.status);
   const isHistory = ["COMPLETED", "REJECTED"].includes(order.status);
 
-  // User identity for the card header — @username canonical, with secondary line
   const platform: "tg" | "vk" | "—" = order.user.tgId ? "tg" : order.user.vkId ? "vk" : "—";
   const displayName = userDisplayName(order.user);
   const subHandle   = userSubHandle(order.user);
-  // Avatar uses the real name when available (better visual identity than "@handle"),
-  // otherwise falls back to the display name.
   const avatarSeed  = (order.user.name && order.user.name !== "VK User")
     ? order.user.name
     : displayName;
@@ -515,7 +503,6 @@ function OrderCard({
     ?? (typeof fetchedCreator === "string" ? fetchedCreator || null : null);
   const shortId = order.id.slice(-6).toUpperCase();
 
-  // Late-fetch Roblox username for older orders missing it from DB
   useEffect(() => {
     if (!detailsOpen || order.robloxUsername || !order.gamepassUrl || fetchedCreator !== null) return;
     const gpId = extractGamepassId(order.gamepassUrl);
@@ -532,14 +519,13 @@ function OrderCard({
   }, [detailsOpen, order.robloxUsername, order.gamepassUrl, fetchedCreator, token]);
 
   return (
-    <article style={{
+    <article className={exiting ? "twa-card-exit" : undefined} style={{
       background: C.card,
       borderRadius: 18,
       overflow: "hidden",
-      boxShadow: C.cardShadow,
+      boxShadow: SHADOW.card,
       position: "relative",
     }}>
-      {/* Inner top-edge highlight */}
       <div style={{
         position: "absolute", inset: 0, borderRadius: 18, pointerEvents: "none",
         background: `linear-gradient(180deg, ${C.cardTop} 0%, rgba(255,255,255,0) 28%)`,
@@ -547,17 +533,17 @@ function OrderCard({
 
       {/* ─── Header ─── */}
       <div
-        onClick={() => isHistory && setDetailsOpen(d => !d)}
+        className={isHistory ? "twa-card-press" : undefined}
+        onClick={() => { if (isHistory) { haptic.impact("light"); setDetailsOpen(d => !d); } }}
         style={{ padding: "14px 16px 12px", cursor: isHistory ? "pointer" : "default", position: "relative" }}
       >
-        {/* Top row: status + chips + amount */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5, minWidth: 0 }}>
             <StatusPill status={order.status} />
             <OrderNumberChip n={order.userOrderNumber} total={order.userOrderTotal} />
             {order.isDirectOrder && <Chip color={C.blue}>ПРЯМОЙ</Chip>}
-            {order.reviewStatus === "PENDING"   && <Chip color={C.yellow}>📸 ОТЗЫВ</Chip>}
-            {order.reviewStatus === "SUBMITTED" && <Chip color={C.green}>⭐ ОТЗЫВ</Chip>}
+            {order.reviewStatus === "PENDING"   && <Chip color={C.yellow} animate>📸 ОТЗЫВ</Chip>}
+            {order.reviewStatus === "SUBMITTED" && <Chip color={C.green}  animate>⭐ ОТЗЫВ</Chip>}
           </div>
           <div style={{ textAlign: "right" as const, flexShrink: 0 }}>
             <div style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, letterSpacing: -0.6, ...tabular, lineHeight: 1.05 }}>
@@ -569,7 +555,6 @@ function OrderCard({
           </div>
         </div>
 
-        {/* Bottom row: avatar + user identity */}
         <div style={{ display: "flex", alignItems: "center", gap: 11, minWidth: 0 }}>
           <Avatar name={avatarSeed} platform={platform} />
           <div style={{ minWidth: 0, flex: 1 }}>
@@ -597,7 +582,6 @@ function OrderCard({
           )}
         </div>
 
-        {/* Rejection reason preview (collapsed cards) */}
         {!detailsOpen && order.status === "REJECTED" && order.rejectionReason && (
           <div style={{
             marginTop: 10, padding: "8px 11px",
@@ -607,9 +591,7 @@ function OrderCard({
             overflow: "hidden",
           }}>
             <span style={{ flexShrink: 0 }}>💬</span>
-            <span style={{
-              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-            }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {order.rejectionReason}
             </span>
           </div>
@@ -621,7 +603,6 @@ function OrderCard({
         <div onClick={e => e.stopPropagation()} style={{ padding: "0 18px 16px" }}>
           <div style={{ height: 1, background: C.hairline, marginBottom: 4 }} />
 
-          {/* Gamepass URL */}
           {order.gamepassUrl ? (
             <Row label="Геймпасс">
               <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
@@ -635,7 +616,7 @@ function OrderCard({
                   }}>
                   {order.gamepassUrl.replace(/^https?:\/\//, "")}
                 </a>
-                <CopyBtn text={order.gamepassUrl} />
+                <CopyBtn text={order.gamepassUrl} label="Ссылка" />
               </div>
             </Row>
           ) : order.status === "AWAITING_GAMEPASS" ? (
@@ -646,7 +627,6 @@ function OrderCard({
             </Row>
           ) : null}
 
-          {/* Roblox username */}
           {(order.robloxUsername || (detailsOpen && (displayCreator || fetchedCreator === false))) && (
             <>
               <Divider />
@@ -658,7 +638,7 @@ function OrderCard({
                     <span style={{ fontSize: 17, fontWeight: 600, color: C.textPrimary }}>
                       {order.robloxUsername ?? displayCreator}
                     </span>
-                    <CopyBtn text={order.robloxUsername ?? displayCreator ?? ""} />
+                    <CopyBtn text={order.robloxUsername ?? displayCreator ?? ""} label="Ник" />
                   </div>
                 ) : (
                   <span style={{ fontSize: 14.5, color: C.textTertiary }}>—</span>
@@ -667,26 +647,24 @@ function OrderCard({
             </>
           )}
 
-          {/* WB code */}
           {!order.isDirectOrder && (
             <>
               <Divider />
               <Row label="Код WB">
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span style={{
-                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                    fontFamily: MONO,
                     fontSize: 19, fontWeight: 700, color: C.accent,
                     letterSpacing: 2.2,
                   }}>
                     {order.wbCode}
                   </span>
-                  <CopyBtn text={order.wbCode} />
+                  <CopyBtn text={order.wbCode} label="Код" />
                 </div>
               </Row>
             </>
           )}
 
-          {/* User identity — tappable name opens profile/chat, @username copyable */}
           <Divider />
           <Row label="Пользователь">
             {(() => {
@@ -694,13 +672,14 @@ function OrderCard({
               const linkStyle = { color: "#7ec5ff", textDecoration: "none" as const, cursor: "pointer" as const };
               const handleTap = (e: React.MouseEvent) => {
                 e.stopPropagation();
-                openContact(order.user, () => {});
+                haptic.impact("light");
+                openContact(order.user);
               };
               if (order.user.username) {
                 return (
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+                      <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle, fontFamily: MONO }}>
                         @{order.user.username}
                       </span>
                       <CopyBtn text={`@${order.user.username}`} />
@@ -745,7 +724,6 @@ function OrderCard({
             })()}
           </Row>
 
-          {/* Purchase cost */}
           {order.purchaseRate != null && (
             <>
               <Divider />
@@ -762,7 +740,6 @@ function OrderCard({
             </>
           )}
 
-          {/* Payment details (direct) */}
           {order.paymentDetails && (
             <>
               <Divider />
@@ -774,13 +751,12 @@ function OrderCard({
                   }}>
                     {order.paymentDetails}
                   </span>
-                  <CopyBtn text={order.paymentDetails} />
+                  <CopyBtn text={order.paymentDetails} label="Реквизиты" />
                 </div>
               </Row>
             </>
           )}
 
-          {/* Rejection reason (full) */}
           {detailsOpen && order.rejectionReason && order.status === "REJECTED" && (
             <>
               <Divider />
@@ -790,7 +766,6 @@ function OrderCard({
             </>
           )}
 
-          {/* Review status + bonus expiry timer */}
           {detailsOpen && order.reviewStatus != null && (() => {
             const bonus = order.reviewStatus === "SUBMITTED"
               ? bonusExpiryInfo(order.user.reviewBonusGrantedAt, order.user.balance)
@@ -830,7 +805,6 @@ function OrderCard({
             );
           })()}
 
-          {/* Timestamps */}
           {detailsOpen && (
             <>
               <Divider />
@@ -844,7 +818,6 @@ function OrderCard({
             </>
           )}
 
-          {/* Write-to-user button — surfaces in both active and historical contexts */}
           <ContactButton user={order.user} />
         </div>
       )}
@@ -857,10 +830,11 @@ function OrderCard({
           display: "flex", flexDirection: "column", gap: 10,
           background: "rgba(0,0,0,0.12)",
         }}>
-          <ActionBar order={order} token={token} onDone={onRefresh} />
+          <ActionBar order={order} onRunAction={onRunAction} />
           {onGoToBossrobux && order.gamepassUrl && (order.status === "PENDING" || order.status === "IN_PROGRESS") && (
             <button
-              onClick={e => { e.stopPropagation(); onGoToBossrobux(extractGamepassId(order.gamepassUrl) ?? undefined); }}
+              className="twa-press"
+              onClick={e => { e.stopPropagation(); haptic.impact("light"); onGoToBossrobux(extractGamepassId(order.gamepassUrl) ?? undefined); }}
               style={{
                 width: "100%", padding: "11px", border: "none", borderRadius: 12,
                 background: "rgba(191,90,242,0.14)", color: C.accent,
@@ -911,7 +885,8 @@ function SearchBar({ value, onChange }: { value: string; onChange: (v: string) =
       />
       {local && (
         <button
-          onClick={() => { setLocal(""); onChange(""); }}
+          className="twa-press-sm"
+          onClick={() => { haptic.impact("light"); setLocal(""); onChange(""); }}
           style={{
             background: "rgba(255,255,255,0.18)", border: "none",
             width: 18, height: 18, borderRadius: 9,
@@ -928,14 +903,24 @@ function SearchBar({ value, onChange }: { value: string; onChange: (v: string) =
   );
 }
 
+/* shiftCounts — move one order between status buckets in the chip counts.
+   ALL stays constant (an order changing status doesn't change the grand total). */
+function shiftCounts(counts: Record<string, number>, from: string, to: string): Record<string, number> {
+  const next = { ...counts };
+  if (from in next) next[from] = Math.max(0, (next[from] ?? 0) - 1);
+  if (to in next)   next[to]   = (next[to]   ?? 0) + 1;
+  return next;
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
    Main screen
    ───────────────────────────────────────────────────────────────────────── */
 export default function OrdersScreen({
-  token, onGoToBossrobux, initialQuery, onInitialQueryConsumed,
+  token, onGoToBossrobux, onActionDone, initialQuery, onInitialQueryConsumed,
 }: {
   token: string;
   onGoToBossrobux?: (gamepassId?: string) => void;
+  onActionDone?: () => void;
   initialQuery?: string;
   onInitialQueryConsumed?: () => void;
 }) {
@@ -945,12 +930,24 @@ export default function OrdersScreen({
     if (initialQuery) onInitialQueryConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [data,      setData]      = useState<OrdersData | null>(null);
-  const [loading,   setLoading]   = useState(true);
+  const [data,        setData]        = useState<OrdersData | null>(null);
+  const [loading,     setLoading]     = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [page,      setPage]      = useState(1);
-  const [allOrders, setAllOrders] = useState<Order[]>([]);
+  const [page,        setPage]        = useState(1);
+  const [allOrders,   setAllOrders]   = useState<Order[]>([]);
+  const [exiting,     setExiting]     = useState<Set<string>>(new Set());
   const reqIdRef = useRef(0);
+
+  // Deferred-enrichment cache: id → signals. Applied to every fetched page so
+  // the chips survive filter switches without re-requesting.
+  const enrichCache  = useRef<Map<string, EnrichValue>>(new Map());
+  const requestedRef = useRef<Set<string>>(new Set());
+
+  const applyCache = useCallback((list: Order[]): Order[] =>
+    list.map(o => {
+      const e = enrichCache.current.get(o.id);
+      return e ? { ...o, ...e } : o;
+    }), []);
 
   const fetchOrders = useCallback(async (f: FilterStatus, q: string, p: number, append = false) => {
     if (!append) setLoading(true); else setLoadingMore(true);
@@ -965,17 +962,15 @@ export default function OrdersScreen({
       if (!res.ok || reqId !== reqIdRef.current) return;
       const d: OrdersData = await res.json();
       if (reqId !== reqIdRef.current) return;
-      setData(prev => append && prev
-        ? { ...d, counts: prev.counts }
-        : d);
-      setAllOrders(prev => append ? [...prev, ...d.orders] : d.orders);
+      setData(prev => append && prev ? { ...d, counts: prev.counts } : d);
+      setAllOrders(prev => append ? [...prev, ...applyCache(d.orders)] : applyCache(d.orders));
     } finally {
       if (reqId === reqIdRef.current) {
         setLoading(false);
         setLoadingMore(false);
       }
     }
-  }, [token]);
+  }, [token, applyCache]);
 
   useEffect(() => {
     setPage(1);
@@ -983,16 +978,110 @@ export default function OrdersScreen({
     fetchOrders(filter, query, 1, false);
   }, [filter, query, fetchOrders]);
 
-  const loadMore = () => {
+  // Deferred enrichment — runs after the list paints; fills VIP / N-Total / review.
+  useEffect(() => {
+    const need = allOrders
+      .filter(o => !enrichCache.current.has(o.id) && !requestedRef.current.has(o.id))
+      .map(o => o.id)
+      .slice(0, 60);
+    if (need.length === 0) return;
+    need.forEach(id => requestedRef.current.add(id));
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/twa/orders/enrich?ids=${need.join(",")}`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!r.ok) return;
+        const d = await r.json();
+        if (cancelled || !d?.enrich) return;
+        const map = d.enrich as Record<string, EnrichValue>;
+        for (const [id, v] of Object.entries(map)) enrichCache.current.set(id, v);
+        setAllOrders(prev => prev.map(o => (map[o.id] ? { ...o, ...map[o.id] } : o)));
+      } catch { /* enrichment is best-effort */ }
+    })();
+    return () => { cancelled = true; };
+  }, [allOrders, token]);
+
+  const loadMore = useCallback(() => {
+    if (!data || page >= data.pages || loadingMore || loading) return;
     const next = page + 1;
     setPage(next);
     fetchOrders(filter, query, next, true);
-  };
+  }, [data, page, loadingMore, loading, filter, query, fetchOrders]);
 
-  const urgentCount = data ? (
-    (data.counts["PENDING"] ?? 0) + (data.counts["IN_PROGRESS"] ?? 0) +
-    (data.counts["AWAITING_PAYMENT"] ?? 0) + (data.counts["PAYMENT_PENDING"] ?? 0)
-  ) : 0;
+  // Infinite scroll — observe a sentinel near the list bottom.
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && data && page < data.pages && !loadingMore && !loading) {
+        loadMore();
+      }
+    }, { rootMargin: "320px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [data, page, loadingMore, loading, loadMore]);
+
+  /* Optimistic action: mutate locally first (status + counts + maybe exit),
+     POST in the background, roll back on failure. Never refetches the whole
+     list, so scroll position and loaded pages are preserved. */
+  const runAction = useCallback(async (order: Order, action: string, reason?: string): Promise<ActionResult> => {
+    const prevStatus = order.status;
+    const newStatus: OrderStatus | null =
+      action === "take-work" ? "IN_PROGRESS" :
+      action === "complete"  ? "COMPLETED"   :
+      action === "reject"    ? "REJECTED"    : null;
+    if (!newStatus) return { ok: false, error: "Invalid action" };
+
+    haptic.impact(action === "complete" ? "medium" : "light");
+
+    // The card leaves the visible set when a status filter no longer matches.
+    const leaves = filter !== "ALL" && filter !== newStatus;
+
+    setAllOrders(prev => prev.map(o => o.id === order.id
+      ? { ...o, status: newStatus, rejectionReason: action === "reject" ? (reason || "не указана") : o.rejectionReason }
+      : o));
+    setData(prev => prev ? { ...prev, counts: shiftCounts(prev.counts, prevStatus, newStatus) } : prev);
+    if (leaves) setExiting(prev => new Set(prev).add(order.id));
+
+    const rollback = () => {
+      setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: prevStatus } : o));
+      setData(prev => prev ? { ...prev, counts: shiftCounts(prev.counts, newStatus, prevStatus) } : prev);
+      setExiting(prev => { const n = new Set(prev); n.delete(order.id); return n; });
+    };
+
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ action, orderId: order.id, ...(reason ? { reason } : {}) }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { rollback(); haptic.notify("error"); return { ok: false, error: d.error ?? "Ошибка" }; }
+
+      haptic.notify("success");
+      onActionDone?.();
+      if (leaves) {
+        window.setTimeout(() => {
+          setAllOrders(prev => prev.filter(o => o.id !== order.id));
+          setExiting(prev => { const n = new Set(prev); n.delete(order.id); return n; });
+          setData(prev => prev ? { ...prev, total: Math.max(0, prev.total - 1) } : prev);
+        }, 260);
+      }
+      toast(
+        action === "complete"  ? "Заказ выкуплен ✓" :
+        action === "take-work" ? "Взято в работу"   :
+                                 "Заказ отклонён",
+        action === "reject" ? "default" : "success",
+      );
+      return { ok: true };
+    } catch {
+      rollback(); haptic.notify("error");
+      return { ok: false, error: "Ошибка сети" };
+    }
+  }, [token, filter, onActionDone]);
+
+  const urgentCount = data ? URGENT_STATUSES.reduce((sum, s) => sum + (data.counts[s] ?? 0), 0) : 0;
 
   const summaryText = useMemo(() => {
     if (!data) return "";
@@ -1013,20 +1102,22 @@ export default function OrdersScreen({
       }}>
         <SearchBar value={query} onChange={setQuery} />
 
-        <div className="orders-chips" style={{
+        <div className="twa-no-scrollbar" style={{
           display: "flex", gap: 7,
-          overflowX: "auto", scrollbarWidth: "none",
-          marginRight: -16, paddingRight: 16,           // edge-fade bleed
+          overflowX: "auto",
+          marginRight: -16, paddingRight: 16,
+          WebkitMaskImage: "linear-gradient(90deg, #000 90%, transparent)",
+          maskImage: "linear-gradient(90deg, #000 90%, transparent)",
         }}>
-          <style>{`.orders-chips::-webkit-scrollbar{display:none}`}</style>
           {FILTERS.map(f => {
             const count    = data?.counts[f.id] ?? 0;
             const isActive = filter === f.id;
-            const isUrgent = (f.id === "PENDING" || f.id === "IN_PROGRESS" || f.id === "AWAITING_PAYMENT" || f.id === "PAYMENT_PENDING") && count > 0;
+            const isUrgent = URGENT_STATUSES.includes(f.id as OrderStatus) && count > 0;
             return (
               <button
                 key={f.id}
-                onClick={() => setFilter(f.id)}
+                className="twa-press-sm"
+                onClick={() => { if (f.id !== filter) haptic.select(); setFilter(f.id); }}
                 style={{
                   flexShrink: 0, padding: "6.5px 13px", borderRadius: 999,
                   border: "none",
@@ -1034,7 +1125,6 @@ export default function OrdersScreen({
                   color:      isActive ? "#fff"  : C.textPrimary,
                   fontSize: 13, fontWeight: isActive ? 600 : 500,
                   cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
-                  transition: "background 0.15s, color 0.15s",
                   letterSpacing: 0.1,
                 }}
               >
@@ -1062,7 +1152,7 @@ export default function OrdersScreen({
         ) : allOrders.length === 0 ? (
           <EmptyState filter={filter} query={query} />
         ) : (
-          <div style={{ padding: "12px 16px 32px", display: "flex", flexDirection: "column", gap: 11 }}>
+          <div className="twa-fade-in" style={{ padding: "12px 16px 32px", display: "flex", flexDirection: "column", gap: 11 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 2px" }}>
               <span style={{ fontSize: 12, color: C.textSecondary, letterSpacing: 0.1 }}>{summaryText}</span>
               {urgentCount > 0 && filter === "ALL" && !query && (
@@ -1077,26 +1167,32 @@ export default function OrdersScreen({
                 key={order.id}
                 order={order}
                 token={token}
+                exiting={exiting.has(order.id)}
                 onGoToBossrobux={onGoToBossrobux}
-                onRefresh={() => fetchOrders(filter, query, 1, false)}
+                onRunAction={(action, reason) => runAction(order, action, reason)}
               />
             ))}
 
+            {/* Infinite-scroll sentinel + status footer */}
             {data && page < data.pages && (
-              <button
-                onClick={loadMore}
-                disabled={loadingMore}
-                style={{
-                  background: "rgba(118,118,128,0.18)", border: "none", borderRadius: 12,
-                  color: loadingMore ? C.textTertiary : C.textPrimary,
-                  fontSize: 14, fontWeight: 500, padding: "13px",
-                  cursor: loadingMore ? "default" : "pointer",
-                  marginTop: 4, opacity: loadingMore ? 0.6 : 1,
-                  letterSpacing: 0.1,
-                }}
-              >
-                {loadingMore ? "Загрузка…" : `Показать ещё (${data.total - allOrders.length})`}
-              </button>
+              <div ref={sentinelRef} style={{ minHeight: 1 }}>
+                <button
+                  className="twa-press"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  style={{
+                    width: "100%",
+                    background: "rgba(118,118,128,0.18)", border: "none", borderRadius: 12,
+                    color: loadingMore ? C.textTertiary : C.textPrimary,
+                    fontSize: 14, fontWeight: 500, padding: "13px",
+                    cursor: loadingMore ? "default" : "pointer",
+                    marginTop: 4, opacity: loadingMore ? 0.6 : 1,
+                    letterSpacing: 0.1,
+                  }}
+                >
+                  {loadingMore ? "Загрузка…" : `Показать ещё (${Math.max(0, data.total - allOrders.length)})`}
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -1142,7 +1238,7 @@ function Skeleton() {
         <div key={i} style={{
           background: C.card, borderRadius: 18, height: h,
           animation: "pulse 1.5s ease-in-out infinite",
-          boxShadow: C.cardShadow,
+          boxShadow: SHADOW.card,
         }} />
       ))}
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.45}}`}</style>
