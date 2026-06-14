@@ -58,47 +58,6 @@ export async function tgSend(
   return res.json() as Promise<Record<string, unknown>>;
 }
 
-/** Edit an existing Telegram message text. */
-export async function tgEdit(
-  chatId: string | number,
-  messageId: number,
-  text: string,
-  extra: Record<string, unknown> = {}
-): Promise<void> {
-  await fetch(tgUrl("editMessageText"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      message_id: messageId,
-      text,
-      parse_mode: "HTML",
-      disable_web_page_preview: true,
-      ...extra,
-    }),
-  });
-}
-
-/** Edit an existing Telegram message caption (for photo messages). */
-export async function tgEditCaption(
-  chatId: string | number,
-  messageId: number,
-  caption: string,
-  extra: Record<string, unknown> = {}
-): Promise<void> {
-  await fetch(tgUrl("editMessageCaption"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      message_id: messageId,
-      caption,
-      parse_mode: "HTML",
-      ...extra,
-    }),
-  });
-}
-
 /** Send a photo to a Telegram chat (accepts file_id or HTTPS URL). */
 export async function tgSendPhoto(
   chatId: string | number,
@@ -198,4 +157,14 @@ export async function vkSend(
 /** Strip HTML tags for platforms that don't support HTML formatting. */
 export function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, "");
+}
+
+/**
+ * Escape &, <, > for Telegram HTML parse_mode. User-controlled strings
+ * (display names, gamepass titles) MUST pass through this before being
+ * embedded in an HTML message — otherwise Telegram rejects the whole
+ * message ("can't parse entities") and the notification is silently lost.
+ */
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

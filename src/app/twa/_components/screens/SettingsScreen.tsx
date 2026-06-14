@@ -215,7 +215,7 @@ export default function SettingsScreen({ token, onNavigate }: { token: string; o
       <section>
         <SectionHeader title="Курсы" />
         <Card>
-          <SettingRow label="Курс закупа (₽/R$)">
+          <SettingRow label="Курс закупа ($/1K R$)">
             <NumInput value={purchaseRateStr} onChange={setPurchaseRateStr} placeholder="авто" step={0.1} />
           </SettingRow>
           <SettingRow label="USD → RUB" last>

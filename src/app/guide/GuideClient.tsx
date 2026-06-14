@@ -2189,7 +2189,9 @@ function WBGate() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setMode("ready"); setError(null); }}
+                  // Reset the VK widget too — otherwise a widget opened in guide
+                  // mode keeps the GD-prefixed code and sends the wrong welcome.
+                  onClick={() => { setMode("ready"); setShowVkAuth(false); setError(null); }}
                   className={`h-12 md:h-14 flex flex-col items-center justify-center px-3 border-2 transition-all text-sm font-black uppercase tracking-widest ${
                     !isGuideMode
                       ? "border-[#00b06f]/60 bg-[#00b06f]/10 text-[#00d484]"

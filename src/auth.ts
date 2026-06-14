@@ -5,6 +5,11 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { sendTelegramMessage } from "@/lib/telegram";
 
+// VK display names are user-controlled and embedded into Telegram HTML
+// notifications — unescaped "<" breaks the whole message (silently lost).
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
 // ── Startup-time env validation ────────────────────────────────────────────
 // NextAuth produces a generic "Server error - Configuration" page when
 // required env vars are missing. Logging at module init makes the root
@@ -185,10 +190,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             if (tgToken && tgChatIds.length > 0) {
               let msg: string;
               let reply_markup: unknown = undefined;
-              if (wbCode && wbCode.length === 7) {
+              // Send the order card ONLY for a genuinely active activation:
+              // the code exists and the order is still awaiting a gamepass.
+              // Re-logins with a stale wb_code cookie (order already PENDING/
+              // COMPLETED) and typo'd codes fall through to the plain
+              // sign-in card — previously they produced a misleading
+              // «ЗАКАЗ … Ожидаем ссылку» (or «ЗАКАЗ #—») card.
+              const isActiveActivation =
+                wbCode && wbCode.length === 7 && !!wbCodeRecord &&
+                !!provisionalOrder && provisionalOrder.status === "AWAITING_GAMEPASS";
+              if (isActiveActivation) {
                 const denomination = wbCodeRecord?.denomination ?? 0;
                 const passPrice    = denomination > 0 ? Math.ceil(denomination / 0.7) : null;
-                const shortId      = provisionalOrder ? provisionalOrder.id.slice(-6).toUpperCase() : "—";
+                const shortId      = provisionalOrder.id.slice(-6).toUpperCase();
                 const dateStr = new Date().toLocaleString("ru-RU", {
                   timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
                   year: "numeric", hour: "2-digit", minute: "2-digit",
@@ -199,23 +213,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                   (isGuideMode ? `📖 Режим: <b>Инструкция</b>\n` : ``) +
                   `📘 Источник: <b>VK (сайт)</b>\n` +
                   `📅 Время: <b>${dateStr}</b>\n` +
-                  `👤 Юзер: <a href="https://vk.com/id${vkId}">${name}</a>\n` +
+                  `👤 Юзер: <a href="https://vk.com/id${vkId}">${escapeHtml(name)}</a>\n` +
                   `🔑 Код ВБ: <code>${wbCode}</code>\n` +
                   (denomination > 0 ? `💎 Сумма: <b>${denomination} R$</b>${passPrice ? ` (Геймпасс: ${passPrice} R$)` : ""}\n` : ``) +
                   `📊 Статус: ⌛ Ожидаем ссылку на геймпасс`;
-                if (provisionalOrder) {
-                  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(shortId)}`;
-                  reply_markup = {
-                    inline_keyboard: [
-                      [{ text: "📊 Открыть в дашборде", web_app: { url: twaUrl } }],
-                    ],
-                  };
-                }
+                const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(shortId)}`;
+                reply_markup = {
+                  inline_keyboard: [
+                    [{ text: "📊 Открыть в дашборде", web_app: { url: twaUrl } }],
+                  ],
+                };
               } else {
                 const isNew = user.createdAt.getTime() === user.updatedAt.getTime();
                 msg =
                   `${isNew ? "🆕 <b>Новый пользователь</b>" : "🔑 <b>Вход</b>"}\n` +
-                  `👤 ${name}\n` +
+                  `👤 ${escapeHtml(name)}\n` +
                   `🆔 VK ID: <code>${vkId}</code>`;
               }
               await Promise.all(

@@ -9,9 +9,9 @@ import { Telegraf, Markup } from "telegraf";
 // telegraf/types re-exports the full typegram surface (official subpath export)
 import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
-import { vkSend, stripHtml, tgSend } from "../shared/notify";
+import { vkSend, stripHtml, tgSend, escapeHtml } from "../shared/notify";
 import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUserHurdle, sendAdminDirectOrderCard, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS, formatUserHandle, formatUserHandleHtml } from "../shared/admin";
-import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectAmount, pendingDirectOrder, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, robloxGpCache, type LinkFailState, type DirectOrderState, type LinkState } from "./session";
+import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectAmount, pendingDirectOrder, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectOrderState, type LinkState } from "./session";
 import { getGamepassDetails } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { buildAdminKeyboard, updateMainMenu, routeAdminCallback } from "./admin";
@@ -80,7 +80,7 @@ function supportBtn(label = "💬 Написать в поддержку", ctxKe
 async function fireHurdleAlert(ctx: any, ctxKey: string): Promise<void> {
   try {
     const tgId        = String(ctx.from.id);
-    const userDisplay = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? `tg:${tgId}`;
+    const userDisplay = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name ?? `tg:${tgId}`);
     let wbCode = pendingLink.get(ctx.from.id)?.wbCode;
     let denom  = pendingLink.get(ctx.from.id)?.denomination;
     if (!wbCode) {
@@ -136,7 +136,8 @@ function extractPassId(input: string): string | null {
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
 function userDisplay(from: TGUser): string {
-  const name = from.username ? `@${from.username}` : from.first_name;
+  // first_name is user-controlled and ends up in HTML admin cards — escape it.
+  const name = from.username ? `@${from.username}` : escapeHtml(from.first_name);
   return `${name} (ID: ${from.id})`;
 }
 
@@ -331,11 +332,13 @@ export function registerStart(bot: Telegraf): void {
     // the subscription step or close Telegram immediately after landing.
     let provisionalOrder: any = null;
     try {
+      // Use the DB-cased wbCode.code (not the payload-cased `code`) so the
+      // unique-where update can't silently miss a code stored in another case.
       provisionalOrder = await (db as any).$transaction(async (tx: any) => {
-        const existingOrder = await tx.wbOrder.findUnique({ where: { wbCode: code } });
+        const existingOrder = await tx.wbOrder.findUnique({ where: { wbCode: wbCode.code } });
         if (existingOrder) return existingOrder; // re-activation — order already exists
         await tx.wbCode.update({
-          where: { code },
+          where: { code: wbCode.code },
           data: { userId: user.id, status: "CLAIMED", isUsed: false },
         });
         return tx.wbOrder.create({
@@ -345,7 +348,7 @@ export function registerStart(bot: Telegraf): void {
             status: "AWAITING_GAMEPASS",
             platform: "TG",
             userId: user.id,
-            wbCode: code,
+            wbCode: wbCode.code,
           },
         });
       });
@@ -356,7 +359,7 @@ export function registerStart(bot: Telegraf): void {
     // Admin notification — sent immediately so we have contact data regardless of sub gate
     if (provisionalOrder && provisionalOrder.status === "AWAITING_GAMEPASS") {
       try {
-        const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "Пользователь");
+        const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name || "Пользователь");
         const dateStr = new Date().toLocaleString("ru-RU", {
           timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
           year: "numeric", hour: "2-digit", minute: "2-digit",
@@ -617,7 +620,8 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
       ? `https://www.robloxbank.ru/guide?source=direct`
       : `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}`;
     keyboard = Markup.inlineKeyboard([
-      [Markup.button.url("📖 Инструкция по созданию геймпасса", guideUrl)],
+      [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
+      [Markup.button.url("📖 Инструкция", guideUrl)],
       refreshRow,
       [supportBtn("💬 Нужна помощь?", "general")],
     ]);
@@ -776,6 +780,22 @@ export function registerText(bot: Telegraf): void {
     // 3. USER GAMEPASS LINK flow
     if (!state) {
       if (!isAdmin) {
+        // 0. WB-code direct entry — BEFORE the subscription gate, so the lead
+        // (provisional order + admin card) is captured even for unsubscribed
+        // users. handleWbCodeTextEntry runs its own sub-gate AFTER capture —
+        // mirrors the /start wb_… flow. Only when the code actually exists:
+        // a 7-char Roblox nick must fall through to session recovery below.
+        if (/^[A-Za-z0-9]{7}$/.test(text) && /[A-Za-z]/.test(text)) {
+          const codeExists = await (db as any).wbCode.findFirst({
+            where: { code: { equals: text.toUpperCase(), mode: "insensitive" } },
+            select: { id: true },
+          });
+          if (codeExists) {
+            await handleWbCodeTextEntry(bot, ctx, tgId, text);
+            return;
+          }
+        }
+
         // Gentle gate — unsubscribed user with no active code session
         if (process.env.TG_CHANNEL_ID) {
           const subbed = await checkSubscription(bot, ctx.from.id);
@@ -813,6 +833,14 @@ export function registerText(bot: Telegraf): void {
           if (awaitingOrder) {
             state = { wbCode: awaitingOrder.wbCode, denomination: awaitingOrder.amount };
             pendingLink.set(ctx.from.id, state);
+
+            // If the message itself is a Roblox nick — route it straight into
+            // the nick search instead of swallowing it with a reminder.
+            if (extractPassId(text) === null && ROBLOX_NICK_RE.test(text.replace(/^@/, ""))) {
+              pendingRobloxNick.set(ctx.from.id, state);
+              await handleRobloxNickInput(bot, ctx, text);
+              return;
+            }
 
             // If text is not a gamepass URL, remind user what to do next
             if (extractPassId(text) === null) {
@@ -930,15 +958,23 @@ export function registerText(bot: Telegraf): void {
     const passId = extractPassId(text);
 
     if (!passId) {
+      // The bot's own prompts promise «пришли свой ник — найду геймпасс сам».
+      // Honor that: nick-looking text routes into the nick search instead of
+      // a format error. (state is guaranteed non-null at this point.)
+      if (!isAdmin && ROBLOX_NICK_RE.test(text.replace(/^@/, ""))) {
+        pendingRobloxNick.set(ctx.from.id, state);
+        await handleRobloxNickInput(bot, ctx, text);
+        return;
+      }
       const fc = getFailCounts(ctx.from.id);
       fc.formatError++;
       const formatHint =
-        "⚠️ Не удалось распознать геймпасс.\n\n" +
+        "⚠️ Не удалось распознать.\n\n" +
         "Пришли одно из:\n" +
+        "• Ник в Roblox (латиница, 3–20 символов)\n" +
         "• Ссылку: <code>https://www.roblox.com/game-pass/1234567/...</code>\n" +
-        "• Ссылку из конструктора: <code>https://create.roblox.com/...</code>\n" +
         "• Просто ID (только цифры): <code>1234567</code>\n\n" +
-        "Или нажми кнопку ниже — я найду геймпасс по твоему нику:";
+        "Или нажми кнопку ниже — найду по нику:";
       const formatKb = fc.formatError >= 2
         ? [
             [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
@@ -957,8 +993,6 @@ export function registerText(bot: Telegraf): void {
 
 /* ─────────────────────── Find-by-nick search (item 7) ────────────────────── */
 
-/** Cache TTL for getUserGamepasses lookups per user. */
-const NICK_CACHE_MS = 60_000;
 /** Max gamepass matches we show as inline buttons. */
 const MAX_PICK_BUTTONS = 5;
 /** Allowed Roblox username regex. */
@@ -1004,9 +1038,23 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
   try {
     outcome = await searchGamepassesByNick(nick, expectedPrice);
   } catch (err: any) {
+    // Infra failure (bridge/Roblox down) is NOT «ника нет на Roblox» — saying
+    // so sends users with a valid nick into a retyping spiral. Be honest.
     console.error("[TG/find-gp] searchGamepassesByNick failed:", err?.message ?? err);
-    // Treat infra failure as "couldn't resolve" — user-facing retry is the best UX.
-    outcome = { status: "user_not_found", nick, expectedPrice };
+    try { await bot.telegram.deleteMessage(ctx.chat.id, checkingMsg.message_id); } catch {}
+    pendingRobloxNick.delete(tgIdNum);
+    await ctx.reply(
+      "⚠️ Поиск по нику временно недоступен — не получилось связаться с Roblox.\n\n" +
+      "Попробуй ещё раз через минуту или пришли ссылку на геймпасс вручную.",
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("🔎 Попробовать ещё раз", CB.findGpRetry)],
+          [supportBtn("💬 Нужна помощь?", "roblox_down", ctx)],
+        ]),
+      }
+    );
+    return;
   }
   try { await bot.telegram.deleteMessage(ctx.chat.id, checkingMsg.message_id); } catch {}
 
@@ -1055,27 +1103,13 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
   }
 
   // outcome.status === "ok"
-  const { matches, nonMatches, all } = outcome;
-
-  // Populate the picker cache (used by callback for "это не он" → fall back
-  // to next candidate without re-hitting Roblox). Top-5 already sorted by
-  // closeness to expectedPrice inside `searchGamepassesByNick`.
-  robloxGpCache.set(tgIdNum, {
-    hits: all.slice(0, MAX_PICK_BUTTONS).map(g => ({
-      passId: String(g.gamepassId),
-      name:   g.name,
-      price:  g.robux,
-      image:  g.image,
-    })),
-    ts:     Date.now(),
-    wbCode: state.wbCode,
-  });
+  const { matches, nonMatches } = outcome;
 
   // ── Branch 5: gamepasses exist but none at the expected price ────────────
   // Show their actual prices so they SEE the mismatch and know to fix one.
   if (matches.length === 0) {
     const top = nonMatches.slice(0, MAX_PICK_BUTTONS);
-    const listLines = top.map(g => `• <b>${g.name}</b> · ${g.robux} R$`).join("\n");
+    const listLines = top.map(g => `• <b>${escapeHtml(g.name)}</b> · ${g.robux} R$`).join("\n");
     await ctx.reply(
       `У <b>${nick}</b> нашли геймпассы, но ни один не за <b>${expectedPrice} R$</b>:\n\n` +
       `${listLines}\n\n` +
@@ -1097,7 +1131,7 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
     const m = matches[0];
     const caption =
       `🎯 Нашёл у <b>${nick}</b> подходящий геймпасс:\n\n` +
-      `💎 <b>${m.name}</b> · ${m.robux} R$\n\n` +
+      `💎 <b>${escapeHtml(m.name)}</b> · ${m.robux} R$\n\n` +
       `Это он? Жми «✅ Да» — отправлю на проверку.`;
     const keyboard = Markup.inlineKeyboard([
       [Markup.button.callback(`✅ Да, выкупаем (${m.robux} R$)`, CB.gpPick(String(m.gamepassId)))],
@@ -1178,7 +1212,7 @@ async function processGamepassSubmission(
 
       /** Notify admins about a validation rejection so they're aware. Non-fatal. */
       const notifyAdminValidationFail = async (reason: string) => {
-        const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "Пользователь");
+        const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name || "Пользователь");
         const alertText =
           `⚠️ <b>НЕВЕРНЫЙ ГЕЙМПАСС</b>\n` +
           `👤 Юзер: <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a> (ID: ${ctx.from.id})\n` +
@@ -1423,7 +1457,7 @@ async function processGamepassSubmission(
     pendingLink.delete(ctx.from.id);
     clearFailCounts(ctx.from.id); // success — reset progressive disclosure counters
 
-    const creatorLine = validatedCreator ? `👤 Создатель: ${validatedCreator}\n` : "";
+    const creatorLine = validatedCreator ? `👤 Создатель: ${escapeHtml(validatedCreator)}\n` : "";
     const priceLine = validatedPrice != null ? `💰 Цена: ${validatedPrice} R$\n` : "";
     await ctx.reply(
       `🎉 Отлично, геймпасс принят!\n` +
@@ -1506,7 +1540,7 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
 
   const directTag = order.isDirectOrder ? `🔷 <b>ПРЯМОЙ ЗАКАЗ</b>\n` : ``;
 
-  const gpCreatorLine    = creatorName      ? `🎮 Создатель ГП: <b>${creatorName}</b>\n`  : "";
+  const gpCreatorLine    = creatorName      ? `🎮 Создатель ГП: <b>${escapeHtml(creatorName)}</b>\n`  : "";
   const ageRestrictLine  = isAgeRestricted  ? `🔞 <b>Игра 18+ — выкуп вручную</b>\n`      : "";
 
   const text =
@@ -1666,7 +1700,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
 
   if (provisionalCreated) {
     try {
-      const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "Пользователь");
+      const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name || "Пользователь");
       const dateStr = new Date().toLocaleString("ru-RU", {
         timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
         year: "numeric", hour: "2-digit", minute: "2-digit",
@@ -1875,15 +1909,40 @@ async function performAdminReject(bot: Telegraf, ctx: any, orderId: string, reas
   const displayReason = reason.trim() || "не указана";
 
   try {
-    const order = await (db as any).wbOrder.update({
-      where: { id: orderId },
+    // Atomic guard: only reject orders still in an actionable state. Mirrors
+    // admin_ok — prevents rejecting a COMPLETED order from a stale card or a
+    // second admin's race.
+    const updated = await (db as any).wbOrder.updateMany({
+      where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
       data: {
         status: "REJECTED",
         rejectionReason: reason.trim() || null,
         adminId: tgId
       },
-      include: { user: true }
     });
+
+    if (updated.count === 0) {
+      const current = await (db as any).wbOrder.findUnique({
+        where: { id: orderId },
+        select: { status: true },
+      });
+      await ctx.reply(
+        current
+          ? `⚠️ Заказ #${orderId.slice(-6).toUpperCase()} уже в статусе <b>${current.status}</b> — отклонение не выполнено.`
+          : "❌ Заказ не найден.",
+        { parse_mode: "HTML" }
+      );
+      return;
+    }
+
+    const order = await (db as any).wbOrder.findUnique({
+      where: { id: orderId },
+      include: { user: true },
+    });
+    if (!order) {
+      await ctx.reply("❌ Заказ не найден.");
+      return;
+    }
 
     const shortId = order.id.slice(-6).toUpperCase();
     await ctx.reply(`❌ <b>Заказ #${shortId} отклонён.</b>\nПричина: <i>${displayReason}</i>`, { parse_mode: "HTML" });
@@ -1988,7 +2047,7 @@ export function registerCallbacks(bot: Telegraf): void {
       const ctxKey = data.slice(4);
       const userDisplay = ctx.from.username
         ? `@${ctx.from.username}`
-        : ctx.from.first_name ?? `tg:${tgId}`;
+        : escapeHtml(ctx.from.first_name ?? `tg:${tgId}`);
 
       const pendingState = pendingLink.get(ctx.from.id);
       let wbCode    = pendingState?.wbCode;
@@ -2156,6 +2215,9 @@ export function registerCallbacks(bot: Telegraf): void {
     // ── ❌ cancel_reject: admin cancelled rejection ──────────────────────────
     if (data.startsWith("cancel_reject:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      // Also exit free-text reason mode — otherwise the admin's next message
+      // would be consumed as a rejection reason and reject the order.
+      pendingRejectionReason.delete(ctx.from.id);
       try { await ctx.editMessageText("✅ Отклонение отменено."); } catch { }
       await ctx.answerCbQuery("Отменено");
       return;
@@ -2316,7 +2378,7 @@ export function registerCallbacks(bot: Telegraf): void {
         return;
       }
       const shortId = newDirectOrder.id.slice(-6).toUpperCase();
-      const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "Пользователь");
+      const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name || "Пользователь");
       const prevOrdersCount = await (db as any).wbOrder.count({
         where: { userId: dirUser.id, status: "COMPLETED" },
       });
@@ -2401,9 +2463,11 @@ export function registerCallbacks(bot: Telegraf): void {
           await bot.telegram.sendMessage(
             cdoUser.tgId,
             `❌ <b>Заказ #${cdoOrderId.slice(-6).toUpperCase()} отменён.</b>\n\nЕсли хочешь — создай новый заказ.`,
+            // No ctx here: this keyboard goes to the USER, but ctx belongs to the
+            // admin callback — passing it fired a false «admin застрял» hurdle alert.
             { parse_mode: "HTML", ...Markup.inlineKeyboard([
               [Markup.button.callback("💎 Новый заказ", CB.startDirect)],
-              [supportBtn("💬 Это ошибка?", "order_cancelled", ctx)],
+              [supportBtn("💬 Это ошибка?", "order_cancelled")],
             ]) }
           );
         } catch { }
@@ -2495,7 +2559,8 @@ export function registerCallbacks(bot: Telegraf): void {
             `❌ <b>Не смогли подтвердить оплату.</b>` +
             detailsLine +
             `\nПришли скриншот ещё раз (фотографией, не файлом) 👇`,
-            { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "payment", ctx) }
+            // No ctx: message goes to the user, ctx is the admin's callback.
+            { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "payment") }
           );
         } catch { }
       } else if (payNoUser?.vkId) {

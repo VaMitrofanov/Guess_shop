@@ -56,22 +56,14 @@ export async function POST(request: Request) {
           });
           return { wbCode: updated };
         } else {
-          // Different session.
-          if (wbCode.reservedUntil && wbCode.reservedUntil > now) {
-            // Hijack the session: since the user knows the physical code, we transfer the reservation.
-            const updated = await tx.wbCode.update({
-              where: { id: wbCode.id },
-              data: { sessionId: sessionId, reservedUntil: reserveTime },
-            });
-            return { wbCode: updated };
-          } else {
-            // Reservation expired, claim it
-            const updated = await tx.wbCode.update({
-              where: { id: wbCode.id },
-              data: { sessionId: sessionId, reservedUntil: reserveTime },
-            });
-            return { wbCode: updated };
-          }
+          // Different session — transfer the reservation regardless of expiry:
+          // the user holds the physical card, so they win (active reservation
+          // gets hijacked; expired one is simply re-claimed).
+          const updated = await tx.wbCode.update({
+            where: { id: wbCode.id },
+            data: { sessionId: sessionId, reservedUntil: reserveTime },
+          });
+          return { wbCode: updated };
         }
       }
 

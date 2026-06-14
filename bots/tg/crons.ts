@@ -6,6 +6,7 @@
 import { Markup, type Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { CB } from "../shared/admin";
+import { vkSend, stripHtml } from "../shared/notify";
 
 const BONUS_AMOUNT = 100;
 const EXPIRY_DAYS = 30;
@@ -25,6 +26,7 @@ async function processReviewReminders(bot: Telegraf): Promise<void> {
     select: {
       id:                  true,
       tgId:                true,
+      vkId:                true,
       balance:             true,
       reviewBonusGrantedAt: true,
       reviewReminderLevel: true,
@@ -47,19 +49,20 @@ async function processReviewReminders(bot: Telegraf): Promise<void> {
         },
       });
 
+      const expiredMsg =
+        `⏰ <b>Срок бонуса истёк.</b>\n\n` +
+        `Ваш бонус <b>100 R$</b> за отзыв сгорел (действовал 30 дней, для прямых заказов от 1000 R$).\n\n` +
+        `Купить робуксы напрямую можно в любое время:`;
       if (user.tgId) {
         try {
-          await bot.telegram.sendMessage(
-            user.tgId,
-            `⏰ <b>Срок бонуса истёк.</b>\n\n` +
-            `Ваш бонус <b>100 R$</b> за отзыв сгорел (действовал 30 дней, для прямых заказов от 1000 R$).\n\n` +
-            `Купить робуксы напрямую можно в любое время:`,
-            {
-              parse_mode: "HTML",
-              ...Markup.inlineKeyboard([[Markup.button.callback("💎 Купить напрямую", CB.startDirect)]]),
-            }
-          );
+          await bot.telegram.sendMessage(user.tgId, expiredMsg, {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[Markup.button.callback("💎 Купить напрямую", CB.startDirect)]]),
+          });
         } catch { /* user may have blocked the bot */ }
+      } else if (user.vkId) {
+        // VK users used to lose the bonus silently — at least tell them.
+        await vkSend(user.vkId, stripHtml(expiredMsg) + "\nНапиши «Начать» — покажу меню с кнопкой «💎 Купить напрямую».");
       }
       continue;
     }
@@ -99,6 +102,8 @@ async function processReviewReminders(bot: Telegraf): Promise<void> {
           ...Markup.inlineKeyboard([[Markup.button.callback("💎 Купить напрямую", CB.startDirect)]]),
         });
       } catch { }
+    } else if (user.vkId) {
+      await vkSend(user.vkId, stripHtml(msg) + "\nНапиши «Начать» — покажу меню с кнопкой «💎 Купить напрямую».");
     }
   }
 }

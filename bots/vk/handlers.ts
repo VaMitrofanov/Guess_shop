@@ -12,7 +12,7 @@
 import type { MessageContext } from "vk-io";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { sendAdminOrderCard, sendAdminReviewCard, sendAdminDirectOrderCard, sendAdminPaymentCard, notifySupportShown, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS } from "../shared/admin";
-import { vkGetName, tgSend, vkSend } from "../shared/notify";
+import { vkGetName, tgSend, vkSend, escapeHtml } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
 import { getGamepassDetails } from "../shared/roblox";
@@ -93,14 +93,14 @@ async function triggerSupport(ctx: any, vkUserId: number, ctxKey: string): Promi
   // Deduped — double-tap inside 30 min won't spam admins. VK button already
   // fires on real tap (via payload callback), so this is a true SOS.
   await notifySupportShown({
-    platform: "VK", userDisplay: `vk.com/id${vkUserId} (${firstName})`,
+    platform: "VK", userDisplay: `vk.com/id${vkUserId} (${escapeHtml(firstName)})`,
     contextKey: ctxKey, wbCode, denomination: denom,
   });
   pauseSupport(vkUserId); // bot goes quiet so it won't interrupt the live chat
   await ctx.reply(
     "✅ Готово! Передал твоё обращение менеджеру — он скоро ответит прямо здесь, в этом чате.\n\n" +
     "Опиши, пожалуйста, что случилось, одним сообщением 👇\n" +
-    "Пока идёт диалог с менеджером, бот не вмешивается.\n\n" +
+    "Пока идёт диалог с менеджером, бот не вмешивается. Вернуть бота можно командой «+бот».\n\n" +
     "Если удобнее в Telegram — поддержка там: https://t.me/RobloxBank_PA"
   );
 }
@@ -331,7 +331,8 @@ async function extractPhotoUrl(ctx: MessageContext): Promise<string | undefined>
 }
 
 function vkUserDisplay(name: string, vkUserId: number): string {
-  return `<a href="https://vk.com/id${vkUserId}">${name}</a>`;
+  // Names go into HTML admin cards — escape so "<Имя>" can't break the message.
+  return `<a href="https://vk.com/id${vkUserId}">${escapeHtml(name)}</a>`;
 }
 
 /** Generate a unique synthetic WB code for direct orders (never matches a real 7-char code). */
@@ -491,12 +492,15 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     } catch (err) {
       console.error("[VK] check_sub handler failed:", err);
       await ctx.reply("Не удалось проверить подписку — попробуй ещё раз через минуту.\n\nЕсли проблема повторяется — напиши нам: https://t.me/RobloxBank_PA");
+      return; // don't fall through to the idle pipeline — avoids a second reply
     }
   }
 
   // ── Natural-language support request — user can reach a manager by simply
-  // writing ("оператор", "поддержка", "помощь"…), not only via the button. ──
-  if (text.length > 0 && SUPPORT_WORDS.some((w) => lower.includes(w))) {
+  // writing ("оператор", "поддержка", "помощь"…), not only via the button.
+  // Skip when the message carries a recognisable gamepass link/ID — «помоги,
+  // вот ссылка …» must reach the flow, not freeze the bot for 30 minutes. ──
+  if (text.length > 0 && extractPassId(text) === null && SUPPORT_WORDS.some((w) => lower.includes(w))) {
     if (isSupportPaused(vkUserId)) {
       await ctx.reply("Менеджер уже подключается и ответит прямо здесь 👇 Опиши, пожалуйста, свой вопрос одним сообщением.");
     } else {
@@ -508,7 +512,14 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // ── Live-support pause: stay silent on free text while a manager is handling
   // this chat, so the user's replies to the manager aren't parsed as links.
   // (Button payloads above — support/resubmit/check_sub — still work.)
-  if (isSupportPaused(vkUserId)) return;
+  // The user can hand control back to the bot themselves with «+бот».
+  if (isSupportPaused(vkUserId)) {
+    if (RESUME_KEYWORDS.includes(lower)) {
+      resumeSupport(vkUserId);
+      void rePromptAfterSupport(vkUserId);
+    }
+    return;
+  }
 
   // ── (B) State machine dispatch ────────────────────────────────────────────
   const state = getState(vkUserId);
@@ -521,16 +532,21 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       const passPrice = Math.ceil(state.denomination / 0.7);
       const custStatus = await getCustomerStatus(String(vkUserId), "VK");
       const firstName = await vkGetName(vkUserId);
+      const isDirect = state.wbCode.startsWith("DIR-");
       await ctx.reply({
         message:
           `${getGreeting(custStatus, firstName)}\n` +
-          `✅ У тебя есть активный код!\n` +
-          `💎 Номинал: ${state.denomination} R$\n\n` +
+          (isDirect
+            ? `✅ У тебя есть активный прямой заказ на ${state.denomination} R$!\n\n`
+            : `✅ У тебя есть активный код!\n` +
+              `💎 Номинал: ${state.denomination} R$\n\n`) +
           `Осталось совсем чуть-чуть — пришли свой ник в Roblox, и я найду геймпасс сам 🔎\n` +
           `📌 Цена геймпасса: ${passPrice} R$\n\n` +
           `Также можно прислать ссылку или Asset ID.\n\n` +
           `❓ Не помнишь как создать геймпасс? Инструкция со скриншотами:\n` +
-          `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`,
+          (isDirect
+            ? `👉 https://robloxbank.ru/guide?source=direct`
+            : `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`),
         keyboard: Keyboard.builder()
           .textButton({ label: "🔎 Найти по моему нику Roblox", payload: { command: "find_gp_start" }, color: "primary" })
           .row()
@@ -551,16 +567,21 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       const passPrice = Math.ceil(restoredState.denomination / 0.7);
       const custStatus = await getCustomerStatus(String(vkUserId), "VK");
       const firstName = await vkGetName(vkUserId);
+      const isDirect = restoredState.wbCode.startsWith("DIR-");
       await ctx.reply({
         message:
           `${getGreeting(custStatus, firstName)}\n` +
-          `✅ У тебя есть активный код!\n` +
-          `💎 Номинал: ${restoredState.denomination} R$\n\n` +
+          (isDirect
+            ? `✅ У тебя есть активный прямой заказ на ${restoredState.denomination} R$!\n\n`
+            : `✅ У тебя есть активный код!\n` +
+              `💎 Номинал: ${restoredState.denomination} R$\n\n`) +
           `Осталось совсем чуть-чуть — пришли свой ник в Roblox, и я найду геймпасс сам 🔎\n` +
           `📌 Цена геймпасса: ${passPrice} R$\n\n` +
           `Также можно прислать ссылку или Asset ID.\n\n` +
           `❓ Не помнишь как создать геймпасс? Инструкция со скриншотами:\n` +
-          `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${restoredState.wbCode}`,
+          (isDirect
+            ? `👉 https://robloxbank.ru/guide?source=direct`
+            : `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${restoredState.wbCode}`),
         keyboard: Keyboard.builder()
           .textButton({ label: "🔎 Найти по моему нику Roblox", payload: { command: "find_gp_start" }, color: "primary" })
           .row()
@@ -794,7 +815,7 @@ async function handleRefActivation(
         `━━━━━━━━━━━━━━━━\n` +
         (isGuideMode ? `📖 Режим: <b>Инструкция</b>\n` : ``) +
         `📅 Время: <b>${dateStr}</b>\n` +
-        `👤 Юзер: <a href="https://vk.com/id${vkUserId}">${fullName}</a> (VK ID: ${vkUserId})\n` +
+        `👤 Юзер: <a href="https://vk.com/id${vkUserId}">${escapeHtml(fullName)}</a> (VK ID: ${vkUserId})\n` +
         `💎 Сумма: <b>${totalAmount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
         `🔑 Код ВБ: <code>${code}</code>\n` +
         `📊 Статус: ⌛ Ожидаем ссылку на геймпасс`;
@@ -868,14 +889,25 @@ async function handleGamepassLink(
   const passId = extractPassId(input);
 
   if (!passId) {
+    // The bot's own prompts promise «пришли свой ник — найду геймпасс сам».
+    // Honor that: nick-looking text routes into the nick search instead of
+    // a format error.
+    if (ROBLOX_NICK_RE.test(input.trim().replace(/^@/, ""))) {
+      await handleRobloxNickInput(ctx, vkUserId, input, wbCode, denomination);
+      return;
+    }
     await ctx.reply({
       message:
-        "⚠️ Не удалось распознать геймпасс.\n\n" +
+        "⚠️ Не удалось распознать.\n\n" +
         "Пришли одно из:\n" +
+        "• Ник в Roblox (латиница, 3–20 символов)\n" +
         "• Ссылку: https://www.roblox.com/game-pass/1234567/...\n" +
-        "• Ссылку из конструктора: https://create.roblox.com/...\n" +
         "• Просто ID (только цифры): 1234567",
-      keyboard: vkSupportKb("pass_format"),
+      keyboard: Keyboard.builder()
+        .textButton({ label: "🔎 Найти по моему нику Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+        .row()
+        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "pass_format" }, color: "secondary" })
+        .inline(),
     });
     return;
   }
@@ -1009,6 +1041,7 @@ async function handleGamepassLink(
         where: {
           code: { equals: wbCode, mode: "insensitive" },
           OR: [
+            { status: "RESERVED" }, // site reservation — parity with the TG claim
             { userId: null },
             { status: "CLAIMED", isUsed: false, userId: user.id }, // provisional from handleRefActivation
           ],
@@ -1116,7 +1149,8 @@ async function handleGamepassLink(
     wbCode,
     userDisplay:         vkUserDisplay(vkName, vkUserId),
     createdAt:           order.createdAt,
-    bonusApplied:        user.balance || 0,
+    // Bonus balance is never spent on WB-code orders — passing user.balance
+    // here used to falsely render «🎁 Использован бонус» on the admin card.
     previousOrderCount,
     creatorName:         validatedCreator ?? undefined,
     isAgeRestricted:     gamepassInfo.isAgeRestricted ?? false,
@@ -1191,8 +1225,20 @@ async function handleRobloxNickInput(
   try {
     outcome = await searchGamepassesByNick(nick, expectedPrice);
   } catch (err: any) {
+    // Infra failure (bridge/Roblox down) is NOT «ника нет на Roblox» — be honest.
     console.error("[VK/find-gp] searchGamepassesByNick failed:", err?.message ?? err);
-    outcome = { status: "user_not_found", nick, expectedPrice };
+    setState(vkUserId, { type: "AWAITING_LINK", wbCode, denomination });
+    await ctx.reply({
+      message:
+        "⚠️ Поиск по нику временно недоступен — не получилось связаться с Roblox.\n\n" +
+        "Попробуй ещё раз через минуту или пришли ссылку на геймпасс вручную.",
+      keyboard: Keyboard.builder()
+        .textButton({ label: "🔎 Попробовать ещё раз", payload: { command: "find_gp_start" }, color: "primary" })
+        .row()
+        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "roblox_down" }, color: "secondary" })
+        .inline(),
+    });
+    return;
   }
 
   // Always return to LINK state — picker handles next move via VK payload button.
@@ -1665,7 +1711,29 @@ async function handleIdleMessage(
 
   // ── PRIORITY 1: Direct WB code entry (7 alphanumeric chars, at least one letter) ──
   if (/^[A-Za-z0-9]{7}$/.test(text.trim()) && /[A-Za-z]/.test(text.trim())) {
-    await handleRefActivation(ctx, vkUserId, text.trim().toUpperCase());
+    const codeExists = await (db as any).wbCode.findFirst({
+      where: { code: { equals: text.trim().toUpperCase(), mode: "insensitive" } },
+      select: { id: true },
+    });
+    if (codeExists) {
+      await handleRefActivation(ctx, vkUserId, text.trim().toUpperCase());
+      return;
+    }
+    // Not a known code — could be a 7-char Roblox nick for an active order
+    // (e.g. a direct order right after payment confirmation, when the VK bot
+    // has no in-memory state). Restore from DB and route into the link flow,
+    // which understands nicks.
+    const nickOutcome = await tryRestoreState(vkUserId);
+    if (nickOutcome === "restored") {
+      const st = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
+      await handleGamepassLink(ctx, vkUserId, text.trim(), st.wbCode, st.denomination);
+      return;
+    }
+    await ctx.reply(
+      "❌ Код не найден. Проверь правильность ввода на карточке.\n" +
+      "💡 Часто путают букву «О» и цифру «0» — проверь эти символы в коде.\n\n" +
+      "Нужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA"
+    );
     return;
   }
 
@@ -1719,6 +1787,8 @@ async function handleIdleMessage(
     }
 
     const label: Record<string, string> = {
+      AWAITING_PAYMENT:  "⏳ Ожидаем реквизиты",
+      PAYMENT_PENDING:   "💳 Ожидаем оплату",
       AWAITING_GAMEPASS: "⌛ Ожидаем геймпасс",
       PENDING:           "⏳ В обработке",
       IN_PROGRESS:       "🔧 В работе",
@@ -1740,7 +1810,11 @@ async function handleIdleMessage(
     }
 
     const hint =
-      order.status === "AWAITING_GAMEPASS"
+      order.status === "AWAITING_PAYMENT"
+        ? "\n\n💡 Менеджер скоро пришлёт реквизиты для оплаты. Если прошло больше 15 минут — напиши нам."
+        : order.status === "PAYMENT_PENDING"
+        ? "\n\n💳 Пришли скриншот оплаты сюда (фотографией, не файлом)."
+        : order.status === "AWAITING_GAMEPASS"
         ? `\n\nПришли свой ник в Roblox — найду геймпасс сам 🔎\nИли отправь ссылку / Asset ID. Цена: ${passPrice} R$`
         : order.status === "PENDING"
         ? "\n\nНе переживай — менеджер работает в порядке очереди, обычно выкупаем в течение нескольких часов, максимум сутки. Напишем сами."
@@ -1761,6 +1835,12 @@ async function handleIdleMessage(
         ? Keyboard.builder()
             .textButton({ label: "🔄 Исправить ссылку", payload: { command: "resubmit", code: order.wbCode }, color: "primary" })
             .inline()
+        : order.status === "AWAITING_GAMEPASS"
+        ? Keyboard.builder()
+            .textButton({ label: "🔎 Найти по моему нику Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+            .row()
+            .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+            .inline()
         : order.status === "COMPLETED" && reviewClaimed
         ? Keyboard.builder()
             .textButton({ label: "💎 Заказать напрямую", payload: { command: "start_direct" }, color: "positive" })
@@ -1772,7 +1852,8 @@ async function handleIdleMessage(
         `📦 Заявка #${shortId}\n` +
         `━━━━━━━━━━━━━━━━\n` +
         `💎 Сумма: ${order.amount} R$ (Геймпасс: ${passPrice} R$)\n` +
-        `🔑 Код ВБ: ${order.wbCode}\n` +
+        // DIR- codes are internal synthetic IDs for direct orders — don't expose them
+        ((order.wbCode as string).startsWith("DIR-") ? "" : `🔑 Код ВБ: ${order.wbCode}\n`) +
         gamepassLine +
         `📊 Статус: ${statusStr}` +
         hint,
@@ -1788,18 +1869,29 @@ async function handleIdleMessage(
   if (outcome === "handled") return;
   if (outcome === "restored") {
     const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
+    // If the message itself is a Roblox nick — route it straight into the
+    // link flow (which understands nicks) instead of swallowing it with a recap.
+    if (ROBLOX_NICK_RE.test(text.trim().replace(/^@/, ""))) {
+      await handleGamepassLink(ctx, vkUserId, text.trim(), restoredState.wbCode, restoredState.denomination);
+      return;
+    }
     const passPrice = Math.ceil(restoredState.denomination / 0.7);
     const firstName = await vkGetName(vkUserId);
+    const isDirect = restoredState.wbCode.startsWith("DIR-");
     await ctx.reply({
       message:
         `${getGreeting(status, firstName)}\n` +
-        `✅ У тебя есть активный код ${restoredState.wbCode}!\n` +
-        `💎 Номинал: ${restoredState.denomination} R$\n\n` +
+        (isDirect
+          ? `✅ У тебя есть активный прямой заказ на ${restoredState.denomination} R$!\n\n`
+          : `✅ У тебя есть активный код ${restoredState.wbCode}!\n` +
+            `💎 Номинал: ${restoredState.denomination} R$\n\n`) +
         `Осталось совсем чуть-чуть — пришли свой ник в Roblox, и я найду геймпасс сам 🔎\n` +
         `📌 Цена геймпасса: ${passPrice} R$\n\n` +
         `Также можно прислать ссылку или Asset ID.\n\n` +
         `❓ Не помнишь как создать геймпасс? Инструкция со скриншотами:\n` +
-        `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${restoredState.wbCode}`,
+        (isDirect
+          ? `👉 https://robloxbank.ru/guide?source=direct`
+          : `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${restoredState.wbCode}`),
       keyboard: Keyboard.builder()
         .textButton({ label: "🔎 Найти по моему нику Roblox", payload: { command: "find_gp_start" }, color: "primary" })
         .row()

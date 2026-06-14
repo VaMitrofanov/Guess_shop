@@ -136,13 +136,6 @@ export interface GamepassDetails {
   /** true when the gamepass's parent game is private / not playable. */
   isGamePrivate?: boolean;
   /**
-   * true when the gamepass was modified significantly after creation (Updated
-   * timestamp is >1 h later than Created). Modified gamepasses often lose their
-   * Buy button while Roblox re-processes the change. Callers should reject with
-   * a "create a fresh gamepass" message.
-   */
-  isModifiedAfterCreation?: boolean;
-  /**
    * true when roproxy returned IsForSale=true but the catalog endpoint returned
    * HTTP 200 with an empty items array — meaning the gamepass is not in the Roblox
    * marketplace (likely deleted after creation). Only set for recently-created
@@ -188,8 +181,10 @@ async function checkGamePrivate(gamepassId: string, strictOnUnavailable = false)
     if (!status) return false;
 
     const ps = status.playabilityStatus as string | undefined;
-    if (ps === "Playable" || ps === "GuestProhibited") return false;
-    if (ps === "PrivateGame" || ps === "ContextualPlayabilityUnrated" || ps === "GameUnapproved") return true;
+    // ContextualPlayabilityUnrated games are purchasable (commit cf287cc) —
+    // keep all three playability checkers in this file consistent.
+    if (ps === "Playable" || ps === "GuestProhibited" || ps === "ContextualPlayabilityUnrated") return false;
+    if (ps === "PrivateGame" || ps === "GameUnapproved") return true;
     return status.isPlayable === false;
   } catch {
     return false;

@@ -123,17 +123,3 @@ export const bossrobuxSearchCache = new Map<number, import("../shared/bossrobux"
  * so we know which `wbCode` / `denomination` to validate the price against.
  */
 export const pendingRobloxNick = new Map<number, LinkState>();
-
-/**
- * Per-user cache of gamepass-search results so a tap on "❌ Это не он" can
- * fall back to the next candidate without re-hitting the bridge. Cleared
- * on successful pick or when the user starts a new search.
- */
-export interface GpSearchHit {
-  passId:   string;
-  name:     string;
-  price:    number;
-  /** Thumbnail URL — populated when result comes through gamepass-search.ts. */
-  image?:   string;
-}
-export const robloxGpCache = new Map<number, { hits: GpSearchHit[]; ts: number; wbCode: string }>();

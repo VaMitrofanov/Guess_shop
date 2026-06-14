@@ -304,9 +304,11 @@ export async function POST(req: NextRequest) {
   if (action === "complete") {
     if (!["PENDING", "IN_PROGRESS"].includes(order.status))
       return NextResponse.json({ error: "Order must be PENDING or IN_PROGRESS" }, { status: 400 });
+    const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+    const currentRate = settings?.purchaseRate ?? null;
     await (prisma as any).wbOrder.update({
       where: { id: orderId },
-      data:  { status: "COMPLETED" },
+      data:  { status: "COMPLETED", purchaseRate: currentRate },
     });
     cachedCounts = null;
     notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder).catch(() => {});

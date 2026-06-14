@@ -7,7 +7,7 @@
  * by the TG bot).
  */
 
-import { tgSend, tgSendPhoto } from "./notify";
+import { tgSend, tgSendPhoto, escapeHtml } from "./notify";
 
 // ── Direct order pricing ───────────────────────────────────────────────────────
 
@@ -158,14 +158,17 @@ export interface UserHandleSource {
  * Returns plain text — caller wraps in HTML link as needed.
  */
 export function formatUserHandle(u: UserHandleSource): string {
+  // Display names are user-controlled and every current call site embeds the
+  // result into an HTML message — escape here so a name like "<Вадим>" can't
+  // break the Telegram card. @usernames are [A-Za-z0-9_] and need no escaping.
   if (u.tgId) {
     if (u.username) return `@${u.username}`;
-    return u.name ?? `tg:${u.tgId}`;
+    return u.name ? escapeHtml(u.name) : `tg:${u.tgId}`;
   }
   if (u.vkId) {
-    return u.name ?? `vk:${u.vkId}`;
+    return u.name ? escapeHtml(u.name) : `vk:${u.vkId}`;
   }
-  return u.name ?? "Неизвестен";
+  return u.name ? escapeHtml(u.name) : "Неизвестен";
 }
 
 /**
@@ -397,7 +400,7 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
     prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>\n`              :
     "";
 
-  const creatorLine    = order.creatorName    ? `🎮 Создатель ГП: <b>${order.creatorName}</b>\n`  : "";
+  const creatorLine    = order.creatorName    ? `🎮 Создатель ГП: <b>${escapeHtml(order.creatorName)}</b>\n`  : "";
   const ageRestrictLine = order.isAgeRestricted ? `🔞 <b>Игра 18+ — выкуп вручную</b>\n`           : "";
 
   const text =

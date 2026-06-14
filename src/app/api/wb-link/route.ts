@@ -49,8 +49,8 @@ export async function GET(request: NextRequest) {
   // In guide mode, pass the GD prefix so the VK bot sends the guide welcome message.
   const refCode = wbCode ? (isGuideMode ? `GD${wbCode}` : wbCode) : null;
   const targetUrl = refCode
-    ? `https://vk.me/bankroblox?ref=${refCode}`
-    : "https://vk.me/bankroblox";
+    ? `https://vk.me/club237309399?ref=${refCode}`
+    : "https://vk.me/club237309399";
 
   return NextResponse.redirect(new URL(targetUrl));
 }

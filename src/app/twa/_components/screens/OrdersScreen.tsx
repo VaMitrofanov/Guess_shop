@@ -730,10 +730,10 @@ function OrderCard({
               <Row label="Себестоимость">
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
                   <span style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary, ...tabular }}>
-                    {Math.round(order.amount * order.purchaseRate).toLocaleString("ru-RU")} ₽
+                    ${(order.amount / 1000 * order.purchaseRate).toFixed(2)}
                   </span>
                   <span style={{ fontSize: 12.5, color: C.textSecondary, ...tabular }}>
-                    по {order.purchaseRate} ₽/R$
+                    по ${order.purchaseRate}/1K R$
                   </span>
                 </div>
               </Row>
