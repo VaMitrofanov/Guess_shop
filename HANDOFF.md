@@ -6,6 +6,38 @@
 
 ---
 
+## 🎨 UI-унификация TWA → единая экосистема Apple (2026-06-15)
+
+Аудит UI/UX TWA-админки и ботов. **Диагноз:** дизайн-система (`src/app/twa/_components/theme.ts` `C`, `Pressable`, `haptics`, `Toast`, `StatCard`) была построена, но использовалась **только** `OrdersScreen`. Остальные 11 экранов переопределяли локальные палитры и не имели тактильности → ощущение «Orders это приложение, остальное веб-страница». Цель — достроить проводку эталона Orders до всех экранов **без утяжеления бандла**.
+
+### P0 — Фундамент дизайн-системы ✅ (коммит `df29811`, задеплоен, прод HTTP 200)
+- Все 9 экранов переведены с локальных `const C` на общий `theme.ts`. Убран дрейф вторичного текста `#8e8e93` → канонический `#98989d` (как в Orders).
+- `StatCard` (был orphan, не использовался нигде) расширен `subColor` + left-accent-bar и стал каноном — заменил приватный `MetricCard` в Dashboard.
+- Удалены мёртвые экраны `AdvertScreen.tsx` + `DynamicsScreen.tsx` (нигде не импортились).
+- Чисто рефактор: −228 LoC, 0 новых зависимостей. `tsc` 0 ошибок, jest 12/12, lint-нейтрально.
+
+### P1 — Тактильность по всей аппке ✅ (коммит `37289fa`, задеплоен, прод HTTP 200)
+- `haptic` + `.twa-press` press-state добавлены контролам, которые были «мертвы на ощупь»:
+  - Settings: Toggle (rigid), Save (medium), строка «Состояние системы» (select).
+  - WbScreen segment-control (select при смене вкладки).
+  - CodesScreen: чипы фильтра статуса (select), копирование кода + очистка поиска (light).
+  - SystemScreen refresh (light).
+  - BossrobuxScreen: кнопка выкупа (medium + notify success/error), карточки геймпассов.
+- 0 новых зависимостей, **0 байт** в бандле — `haptics` и `.twa-press` уже едут в базовом чанке через Orders/BottomNav, ленивые экраны просто переиспользуют.
+
+### Замеры тяжести (прод, gzip transfer)
+- **Initial JS для `/twa` = 200 KB** (205 437 B) на 13 чанках. P0 и P1 — **байт в байт идентичны** (тактильность бесплатна). Ленивые экраны (Dashboard/WB/Boss/Settings/System) грузятся только при переключении вкладки, в стартовый бандл не входят.
+- Честно: удаление 2 мёртвых экранов — это чистка репозитория (они и так tree-shake'ились), не уменьшение рантайм-бандла. Дедуп палитр даёт маргинальную экономию в ленивых чанках. **Главное — приложение НЕ потяжелело.**
+
+### Деплой-нюанс (на будущее)
+P1-автодеплой с первого раза **упал** не из-за кода (образ собрался полностью, все роуты скомпилировались), а из-за Coolify-квирка RF: `Custom internal name is set, rolling update is not supported` → конфликт имени контейнера `robloxbank-web` (старый контейнер не удалился перед созданием нового). **Лечится повторным деплоем** через API (`POST /api/v1/deploy?uuid=z10ws7m1q45h281zwedmhei4&force=true`) — со второго раза прошло. Если повторится и retry не помогает — нужен `docker rm -f robloxbank-web` на RF (требует SSH-аппрува) или кнопка Redeploy в Coolify UI.
+
+### Осталось (не начато)
+- **P2 (навигация/IA):** порядок bottom-nav (сейчас «Главная» 4-я), убрать хак подсветки `system→settings`, title-bar как контекст-зона.
+- **P3 (связь бот↔аппка):** кнопка `web_app` «Открыть в приложении» в админ-карточке TG (`bots/tg/handlers.ts:1564`, инфра приёма `?q=` готова в `TwaApp.tsx:68`); единый словарь статусов бот/аппка; закрыть Phase C долг (`updateMainMenu` no-op в `bots/tg/admin/menu.ts:57`).
+
+---
+
 ## 🛠 Активный план: фиксы по ультра-ревью (2026-06-13)
 
 Полное ревью связки WB → гейт → боты нашло 24 проблемы. Чиним по очереди, после каждого блока — `npx tsc -p bots --noEmit` (baseline: 17 строк ошибок, все pre-existing: untyped `res.json()` в roblox.ts + отсутствие типов vk-io). Новых ошибок быть не должно.
@@ -155,6 +187,19 @@
   - Пороги: ≤10 шт → 🟡 предупреждение, ≤3 шт → 🔴 критично, 0 шт → 🔴 закончились.
   - Отправляет одноразовый алерт всем ADMIN_IDS в TG. Сбрасывается при пополнении выше порога.
   - Текущий сток: 300R$=19, 500R$=72, 800R$=297, 1000R$=260, 1200R$=267, 2000R$=20. Алерт сработает на 300 R$ (19 шт > 10, пока ок) и 2000 R$ (20 шт > 10, пока ок).
+
+- [x] **(13) Тестовые коды isTest** ✅ — коммит `763139f`, 2026-06-14:
+  - Добавлен `isTest Boolean @default(false)` в модели `WbCode` и `WbOrder` (Prisma schema). Миграция через raw SQL (ALTER TABLE), shadow-db миграция сломана из-за pre-existing robloxUsername issue.
+  - Помечены 4 тестовых кода (TEST300/TEST500/TEST700/TESTDEV) и 4 связанных заказа как `isTest = true`.
+  - Исключены из **всей** статистики (8+ файлов):
+    - `api/twa/orders/route.ts` — raw SQL counts/sums + Prisma where
+    - `api/twa/dashboard/route.ts` — wbCode groupBy + wbOrder count
+    - `api/twa/codes/route.ts` — groupBy + count×3 (today/week/chart)
+    - `api/twa/system/route.ts` — raw SQL counts (order_count, unused_codes)
+    - `api/twa/orders/urgent-count/route.ts` — wbOrder count
+    - `api/admin/wb-codes/route.ts` — groupBy stats
+    - `api/twa/wbcodes/search/route.ts` — isTest field включён в ответ (тестовые коды видны при поиске, но не в статистике)
+    - `bots/tg/crons.ts` — checkWbCodeStock() фильтрует `isTest: false`
 
 - [ ] **(8) Оптимизация скорости Orders (TWA)** — диагностирована, в работе. Cold-start уже ускорен в Спринт 1 item 2, но *внутри* экрана Orders запросы тормозят. План:
   - **Серверная часть** (`src/app/api/twa/orders/route.ts`):
