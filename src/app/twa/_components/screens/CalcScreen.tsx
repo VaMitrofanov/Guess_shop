@@ -1,4 +1,5 @@
 "use client";
+import { C } from "../theme";
 import { useEffect, useMemo, useState } from "react";
 
 interface RealizSummary {
@@ -40,18 +41,6 @@ const LS_KURS_MODE = "calc_kursMode";
 const LS_KURS_RB   = "calc_kursRb";
 const DENOMS       = [100, 200, 300, 500, 800, 1000, 1200, 1500, 2000];
 
-const C = {
-  bg:       "#1c1c1e",
-  card:     "#2c2c2e",
-  elevated: "#3a3a3c",
-  border:   "#3a3a3c",
-  accent:   "#bf5af2",
-  green:    "#30d158",
-  red:      "#ff453a",
-  yellow:   "#ffd60a",
-  sec:      "#8e8e93",
-  muted:    "#48484a",
-};
 
 function fmt(n: number) {
   return n.toLocaleString("ru-RU", { maximumFractionDigits: 0 }) + " ₽";
@@ -79,7 +68,7 @@ function Row({
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 5, flex: 1, minWidth: 0 }}>
-        <span style={{ fontSize: 13, color: dim ? C.muted : C.sec, whiteSpace: "nowrap" }}>{label}</span>
+        <span style={{ fontSize: 13, color: dim ? C.muted : C.textSecondary, whiteSpace: "nowrap" }}>{label}</span>
         {badge}
         {note && <span style={{ fontSize: 11, color: C.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{note}</span>}
       </div>
@@ -282,7 +271,7 @@ export default function CalcScreen({ token }: { token: string }) {
       {/* Overview table — all priced denominations at a glance */}
       {tableRows.length > 0 && (
         <div style={{ background: C.card, borderRadius: 14, padding: 14 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: C.sec, textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: C.textSecondary, textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 10 }}>
             Все номиналы{hasKurs ? "" : " · введите курс ниже"}
           </div>
           <div style={{ display: "flex", fontSize: 10, color: C.muted, paddingBottom: 6, borderBottom: `1px solid ${C.border}` }}>
@@ -302,10 +291,10 @@ export default function CalcScreen({ token }: { token: string }) {
                 cursor: "pointer", borderRadius: active ? 8 : 0,
               }}>
                 <span style={{ flex: "0 0 44px", textAlign: "left" as const, fontSize: 13, fontWeight: active ? 700 : 600, color: active ? C.accent : "#e5e5ea" }}>{article}</span>
-                <span style={{ flex: 1, textAlign: "right" as const, fontSize: 12, color: C.sec }}>{money(calc.sellPrice)}</span>
+                <span style={{ flex: 1, textAlign: "right" as const, fontSize: 12, color: C.textSecondary }}>{money(calc.sellPrice)}</span>
                 <span style={{ flex: 1, textAlign: "right" as const, fontSize: 12, fontWeight: 600, color: isNaN(calc.profit) ? C.muted : calc.profit >= 0 ? "#e5e5ea" : C.red }}>{isNaN(calc.profit) ? "—" : money(calc.profit)}</span>
                 <span style={{ flex: "0 0 44px", textAlign: "right" as const, fontSize: 12, fontWeight: 700, color: mColor }}>{isNaN(calc.marginPct) ? "—" : Math.round(calc.marginPct) + "%"}</span>
-                <span style={{ flex: 1, textAlign: "right" as const, fontSize: 12, color: C.sec }}>{isNaN(calc.breakEven) ? "—" : money(calc.breakEven)}</span>
+                <span style={{ flex: 1, textAlign: "right" as const, fontSize: 12, color: C.textSecondary }}>{isNaN(calc.breakEven) ? "—" : money(calc.breakEven)}</span>
               </button>
             );
           })}
@@ -315,7 +304,7 @@ export default function CalcScreen({ token }: { token: string }) {
 
       {/* Denomination selector */}
       <div>
-        <div style={{ fontSize: 11, color: C.sec, textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 10 }}>
+        <div style={{ fontSize: 11, color: C.textSecondary, textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 10 }}>
           Номинал
         </div>
         <div style={{ display: "flex", gap: 6, overflowX: "auto" as const, paddingBottom: 4, marginBottom: 8 }}>
@@ -361,7 +350,7 @@ export default function CalcScreen({ token }: { token: string }) {
       {/* Manual price when no WB product */}
       {!product && !loading && (
         <div>
-          <div style={{ fontSize: 11, color: C.sec, textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 6 }}>
+          <div style={{ fontSize: 11, color: C.textSecondary, textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 6 }}>
             Цена на WB
           </div>
           <input
@@ -385,7 +374,7 @@ export default function CalcScreen({ token }: { token: string }) {
                 padding: "3px 10px", borderRadius: 6, border: "none", cursor: "pointer",
                 fontSize: 12, fontWeight: 600,
                 background: kursMode === m ? C.accent : "none",
-                color: kursMode === m ? "#fff" : C.sec,
+                color: kursMode === m ? "#fff" : C.textSecondary,
               }}>
                 {m === "rate" ? "курс" : m === "rub" ? "₽" : "$"}
               </button>
@@ -406,7 +395,7 @@ export default function CalcScreen({ token }: { token: string }) {
               WebkitAppearance: "none" as const, minWidth: 0,
             }}
           />
-          <span style={{ color: C.sec, fontSize: 14, flexShrink: 0 }}>
+          <span style={{ color: C.textSecondary, fontSize: 14, flexShrink: 0 }}>
             {kursMode === "rate" ? "руб/ед" : kursMode === "rub" ? "₽" : "$"}
           </span>
         </div>
@@ -425,7 +414,7 @@ export default function CalcScreen({ token }: { token: string }) {
       <div style={{ background: C.card, borderRadius: 14, padding: 16, opacity: canCalc ? 1 : 0.55 }}>
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: C.sec, textTransform: "uppercase" as const, letterSpacing: 0.6 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: C.textSecondary, textTransform: "uppercase" as const, letterSpacing: 0.6 }}>
             Юнит-экономика
           </span>
           {rawCpo > 0 && (
@@ -442,7 +431,7 @@ export default function CalcScreen({ token }: { token: string }) {
                   borderRadius: "50%", background: "#fff", transition: "left 0.15s",
                 }} />
               </div>
-              <span style={{ fontSize: 11, color: withAds ? C.accent : C.sec }}>
+              <span style={{ fontSize: 11, color: withAds ? C.accent : C.textSecondary }}>
                 реклама{withAds ? ` ${Math.round(rawCpo)}₽` : ""}
                 {withAdsOverride === null && <span style={{ color: C.muted }}> авто</span>}
               </span>
@@ -524,7 +513,7 @@ export default function CalcScreen({ token }: { token: string }) {
               {canCalc ? (profit >= 0 ? "+" : "") + fmt(Math.round(profit)) : "—"}
             </div>
             {canCalc && !isNaN(profitUsd) && (
-              <div style={{ fontSize: 12, color: C.sec, marginTop: 2 }}>
+              <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 2 }}>
                 ${profitUsd.toFixed(2)} · {Math.round(marginPct)}% маржа
                 {retPct > 0 && (
                   <span style={{ color: retPct >= 20 ? C.yellow : C.muted }}> · возвраты {retPct}%</span>
@@ -543,7 +532,7 @@ export default function CalcScreen({ token }: { token: string }) {
       {/* Ad attribution */}
       {withAds && (
         <div style={{ background: C.card, borderRadius: 14, border: `1px solid ${C.border}`, padding: 16 }}>
-          <div style={{ fontSize: 12, color: C.sec, marginBottom: 4 }}>
+          <div style={{ fontSize: 12, color: C.textSecondary, marginBottom: 4 }}>
             Реклама с{" "}
             <span style={{ color: "#e5e5ea" }}>
               {ud?.lastAdAttributedAt
@@ -597,7 +586,7 @@ export default function CalcScreen({ token }: { token: string }) {
       <div style={{ background: C.card, borderRadius: 14, padding: 16 }}>
         {/* Header + period toggle */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: C.sec, textTransform: "uppercase" as const, letterSpacing: 0.6 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: C.textSecondary, textTransform: "uppercase" as const, letterSpacing: 0.6 }}>
             Итого за период
           </span>
           <div style={{ display: "flex", background: C.elevated, borderRadius: 8, padding: 2, gap: 1 }}>
@@ -606,7 +595,7 @@ export default function CalcScreen({ token }: { token: string }) {
                 padding: "3px 10px", borderRadius: 6, border: "none", cursor: "pointer",
                 fontSize: 12, fontWeight: 600,
                 background: realizWeeks === w ? C.accent : "none",
-                color:      realizWeeks === w ? "#fff"   : C.sec,
+                color:      realizWeeks === w ? "#fff"   : C.textSecondary,
               }}>
                 {w} нед
               </button>
@@ -660,7 +649,7 @@ export default function CalcScreen({ token }: { token: string }) {
                     : "—"}
                 </div>
                 {totalProfit.hasKurs && kursUsd > 0 && (
-                  <div style={{ fontSize: 12, color: C.sec, marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 2 }}>
                     ${Math.round(totalProfit.net / kursUsd).toLocaleString("ru-RU")}
                   </div>
                 )}

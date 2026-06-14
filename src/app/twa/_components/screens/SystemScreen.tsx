@@ -1,12 +1,7 @@
 "use client";
+import { C } from "../theme";
 import { useEffect, useState, useCallback } from "react";
 
-const C = {
-  card: "#2c2c2e", elevated: "#3a3a3c", border: "#3a3a3c",
-  accent: "#bf5af2", green: "#30d158", red: "#ff453a",
-  yellow: "#ffd60a", orange: "#ff9f0a",
-  sec: "#8e8e93", muted: "#48484a", bg: "#1c1c1e",
-};
 
 interface ServiceCheck { name: string; icon: string; ok: boolean; ms: number }
 
@@ -36,7 +31,7 @@ interface SystemData {
 
 function SectionHeader({ title }: { title: string }) {
   return (
-    <div style={{ fontSize: 12, fontWeight: 600, color: C.sec, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 10, paddingLeft: 4 }}>
+    <div style={{ fontSize: 12, fontWeight: 600, color: C.textSecondary, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 10, paddingLeft: 4 }}>
       {title}
     </div>
   );
@@ -83,7 +78,7 @@ function HetznerCard({ provider }: { provider: ServerProvider }) {
           <div style={{ fontSize: 14, fontWeight: 600, color: warn ? C.orange : "#e5e5ea" }}>
             €{provider.monthlyEur?.toFixed(2)}/мес
           </div>
-          <div style={{ fontSize: 11, color: warn ? C.orange : C.sec }}>
+          <div style={{ fontSize: 11, color: warn ? C.orange : C.textSecondary }}>
             оплата через {provider.daysUntilBill}д{warn ? " ⚠️" : ""}
           </div>
         </div>
@@ -96,9 +91,9 @@ function HetznerCard({ provider }: { provider: ServerProvider }) {
           <Pulse ok={srv.status === "running"} />
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 14, color: "#e5e5ea", fontWeight: 500 }}>{srv.name}</div>
-            <div style={{ fontSize: 11, color: C.sec }}>{srv.city} · {srv.cores}vCPU · {srv.memory}GB</div>
+            <div style={{ fontSize: 11, color: C.textSecondary }}>{srv.city} · {srv.cores}vCPU · {srv.memory}GB</div>
           </div>
-          <span style={{ fontSize: 12, color: C.sec }}>€{srv.monthlyEur.toFixed(2)}</span>
+          <span style={{ fontSize: 12, color: C.textSecondary }}>€{srv.monthlyEur.toFixed(2)}</span>
         </div>
       ))}
     </div>
@@ -119,7 +114,7 @@ function VdsinaCard({ provider }: { provider: ServerProvider }) {
             {provider.balance?.toFixed(0)}{provider.currency}
           </div>
           {provider.daysLeft != null && (
-            <div style={{ fontSize: 11, color: warn ? C.orange : C.sec }}>
+            <div style={{ fontSize: 11, color: warn ? C.orange : C.textSecondary }}>
               ~{provider.daysLeft}д до конца{warn ? " ⚠️" : ""}
             </div>
           )}
@@ -139,7 +134,7 @@ function NeonCard({ neon }: { neon: NeonStats }) {
           <span style={{ fontSize: 15 }}>🐘</span>
           <span style={{ fontSize: 15, fontWeight: 600, color: "#e5e5ea" }}>Neon Postgres</span>
         </div>
-        <div style={{ fontSize: 12, color: warn ? C.orange : C.sec }}>
+        <div style={{ fontSize: 12, color: warn ? C.orange : C.textSecondary }}>
           оплата {neon.nextBillDate}{warn ? " ⚠️" : ""}
         </div>
       </div>
@@ -152,7 +147,7 @@ function NeonCard({ neon }: { neon: NeonStats }) {
         ].map((m, i) => (
           <div key={i} style={{ padding: "12px 8px", textAlign: "center", borderRight: i < 3 ? `1px solid ${C.border}` : "none" }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: "#e5e5ea" }}>{m.value}</div>
-            <div style={{ fontSize: 10, color: C.sec, marginTop: 3 }}>{m.label}</div>
+            <div style={{ fontSize: 10, color: C.textSecondary, marginTop: 3 }}>{m.label}</div>
           </div>
         ))}
       </div>
@@ -207,7 +202,7 @@ export default function SystemScreen({ token }: { token: string }) {
               {allOk ? "Все системы работают" : "Есть проблемы"}
             </div>
             {data.lastOrderMinAgo != null && (
-              <div style={{ fontSize: 12, color: C.sec, marginTop: 2 }}>
+              <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 2 }}>
                 Последний заказ: {data.lastOrderMinAgo < 60 ? `${data.lastOrderMinAgo} мин назад` : `${Math.floor(data.lastOrderMinAgo / 60)}ч назад`}
               </div>
             )}
@@ -274,7 +269,7 @@ function Skeleton() {
 
 function ErrorState({ msg, onRetry }: { msg: string; onRetry: () => void }) {
   return (
-    <div style={{ padding: 48, textAlign: "center", color: C.sec }}>
+    <div style={{ padding: 48, textAlign: "center", color: C.textSecondary }}>
       <div style={{ fontSize: 28, marginBottom: 10 }}>⚠️</div>
       <div style={{ fontSize: 14, marginBottom: 16 }}>{msg}</div>
       <button

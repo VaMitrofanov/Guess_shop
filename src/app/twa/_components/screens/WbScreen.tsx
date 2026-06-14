@@ -1,4 +1,5 @@
 "use client";
+import { C } from "../theme";
 import { useState } from "react";
 import AnalyticsScreen from "./AnalyticsScreen";
 import StocksScreen from "./StocksScreen";
@@ -13,7 +14,6 @@ const TABS = [
 ] as const;
 type WbTab = typeof TABS[number]["id"];
 
-const C = { accent: "#bf5af2", card: "#2c2c2e", elevated: "#3a3a3c", sec: "#8e8e93" };
 
 export default function WbScreen({ token }: { token: string }) {
   const [tab, setTab] = useState<WbTab>("analytics");
@@ -37,7 +37,7 @@ export default function WbScreen({ token }: { token: string }) {
                 flex: 1, padding: "7px 4px", border: "none", cursor: "pointer",
                 borderRadius: 8, fontSize: 13, fontWeight: tab === t.id ? 600 : 400,
                 background: tab === t.id ? C.accent : "transparent",
-                color: tab === t.id ? "#fff" : C.sec,
+                color: tab === t.id ? "#fff" : C.textSecondary,
                 transition: "all 0.15s",
               }}
             >

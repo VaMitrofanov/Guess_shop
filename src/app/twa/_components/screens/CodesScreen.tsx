@@ -1,4 +1,5 @@
 "use client";
+import { C } from "../theme";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
@@ -46,14 +47,6 @@ interface SearchData {
   limit: number;
 }
 
-const C = {
-  card: "#2c2c2e", elevated: "#3a3a3c", border: "#3a3a3c",
-  accent: "#bf5af2", green: "#30d158", red: "#ff453a", yellow: "#ffd60a",
-  blue: "#0a84ff", orange: "#ff9f0a",
-  sec: "#8e8e93", muted: "#48484a",
-  textPrimary: "#f2f2f7", textSecondary: "#98989d", textTertiary: "#636366",
-  hairline: "rgba(255,255,255,0.07)",
-};
 
 const STATUS_META: Record<WbCodeStatus, { label: string; color: string }> = {
   AVAILABLE: { label: "Свободен",      color: C.green  },
@@ -147,7 +140,7 @@ export default function CodesScreen({ token }: { token: string }) {
                   { label: "За 7 дней",         val: data.usedWeek,  accent: false },
                 ].map(c => (
                   <div key={c.label} style={{ background: C.card, borderRadius: 14, padding: "14px 16px" }}>
-                    <div style={{ fontSize: 12, color: C.sec, marginBottom: 5 }}>{c.label}</div>
+                    <div style={{ fontSize: 12, color: C.textSecondary, marginBottom: 5 }}>{c.label}</div>
                     <div style={{ fontSize: 24, fontWeight: 700, color: c.accent ? C.accent : "#fff" }}>{c.val}</div>
                   </div>
                 ))}
@@ -159,8 +152,8 @@ export default function CodesScreen({ token }: { token: string }) {
                 <ResponsiveContainer width="100%" height={150}>
                   <BarChart data={data.chart} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
-                    <XAxis dataKey="date" tick={{ fill: C.sec, fontSize: 10 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fill: C.sec, fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <XAxis dataKey="date" tick={{ fill: C.textSecondary, fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: C.textSecondary, fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
                     <Tooltip
                       contentStyle={{ background: C.elevated, border: "none", borderRadius: 8, fontSize: 12 }}
                       labelStyle={{ color: "#fff" }}
@@ -174,7 +167,7 @@ export default function CodesScreen({ token }: { token: string }) {
               <div style={{ background: C.card, borderRadius: 14, padding: "14px 16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
                   <span style={{ fontWeight: 600, fontSize: 14 }}>Остатки кодов</span>
-                  <span style={{ color: C.sec, fontSize: 13 }}>Всего: {total} шт</span>
+                  <span style={{ color: C.textSecondary, fontSize: 13 }}>Всего: {total} шт</span>
                 </div>
 
                 {data.inventory.length === 0 ? (

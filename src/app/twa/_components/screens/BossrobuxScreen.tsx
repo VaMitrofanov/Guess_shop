@@ -1,13 +1,8 @@
 "use client";
+import { C } from "../theme";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 
-const C = {
-  card: "#2c2c2e", elevated: "#3a3a3c", border: "#3a3a3c",
-  accent: "#bf5af2", green: "#30d158", red: "#ff453a",
-  yellow: "#ffd60a", orange: "#ff9f0a",
-  sec: "#8e8e93", muted: "#48484a", bg: "#1c1c1e",
-};
 
 const ANIM = `
   @keyframes shimmer {
@@ -81,7 +76,7 @@ function BalanceCard({
   return (
     <div style={{ background: C.card, borderRadius: 16, padding: "14px 16px", marginBottom: 12 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <span style={{ fontSize: 11, color: C.sec, fontWeight: 600, letterSpacing: 0.6, textTransform: "uppercase" as const }}>
+        <span style={{ fontSize: 11, color: C.textSecondary, fontWeight: 600, letterSpacing: 0.6, textTransform: "uppercase" as const }}>
           Boss Robux — ЛК
         </span>
         <button
@@ -142,8 +137,8 @@ function StatBox({ label, value, sub, valueColor }: { label: string; value: stri
       <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.1, color: valueColor ?? "#fff", letterSpacing: -0.4 }}>
         {value}
       </div>
-      {sub && <div style={{ fontSize: 10, color: C.sec, marginTop: 2 }}>{sub}</div>}
-      <div style={{ fontSize: 10, color: C.sec, marginTop: 5 }}>{label}</div>
+      {sub && <div style={{ fontSize: 10, color: C.textSecondary, marginTop: 2 }}>{sub}</div>}
+      <div style={{ fontSize: 10, color: C.textSecondary, marginTop: 5 }}>{label}</div>
     </div>
   );
 }
@@ -170,13 +165,13 @@ function GamepassCard({ gp, onSelect }: { gp: Gamepass; onSelect: (gp: Gamepass)
         }}>
           {gp.name}
         </div>
-        <div style={{ fontSize: 12, color: C.sec }}>@{gp.sellerName}</div>
+        <div style={{ fontSize: 12, color: C.textSecondary }}>@{gp.sellerName}</div>
       </div>
       <div style={{ flexShrink: 0, textAlign: "right" as const }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: C.yellow, letterSpacing: -0.3 }}>
           {gp.robux.toLocaleString("ru-RU")}
         </div>
-        <div style={{ fontSize: 10, color: C.sec }}>R$</div>
+        <div style={{ fontSize: 10, color: C.textSecondary }}>R$</div>
       </div>
       <div style={{ color: C.muted, fontSize: 18, flexShrink: 0, marginLeft: 2 }}>›</div>
     </button>
@@ -290,7 +285,7 @@ function PurchaseSheet({
               <div style={{ textAlign: "center" as const, padding: "28px 0 8px" }}>
                 <div style={{ fontSize: 60, marginBottom: 14, lineHeight: 1 }}>✅</div>
                 <div style={{ fontSize: 22, fontWeight: 700, color: C.green, marginBottom: 8 }}>Выкуплено!</div>
-                <div style={{ fontSize: 15, color: C.sec, marginBottom: 8 }}>
+                <div style={{ fontSize: 15, color: C.textSecondary, marginBottom: 8 }}>
                   {gp.name} · {gp.robux.toLocaleString("ru-RU")} R$
                 </div>
                 {okMsg ? (
@@ -320,7 +315,7 @@ function PurchaseSheet({
                     <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.25, marginBottom: 5, wordBreak: "break-word" as const }}>
                       {gp.name}
                     </div>
-                    <div style={{ fontSize: 13, color: C.sec, marginBottom: 8 }}>@{gp.sellerName}</div>
+                    <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 8 }}>@{gp.sellerName}</div>
                     <div style={{ fontSize: 28, fontWeight: 800, color: C.yellow, letterSpacing: -1, lineHeight: 1 }}>
                       {gp.robux.toLocaleString("ru-RU")} <span style={{ fontSize: 16, fontWeight: 600, letterSpacing: 0 }}>R$</span>
                     </div>
@@ -378,7 +373,7 @@ function IdRow({ label, value, last }: { label: string; value: string; last?: bo
       padding: "10px 0",
       borderBottom: last ? "none" : `1px solid ${C.border}`,
     }}>
-      <span style={{ fontSize: 13, color: C.sec }}>{label}</span>
+      <span style={{ fontSize: 13, color: C.textSecondary }}>{label}</span>
       <span style={{ fontFamily: "monospace", fontSize: 13, color: "#fff", letterSpacing: 0.2 }}>{value}</span>
     </div>
   );
@@ -511,7 +506,7 @@ export default function BossrobuxScreen({
       {/* Search */}
       <div style={{ background: C.card, borderRadius: 16, padding: "10px 14px", marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ color: C.sec, fontSize: 15, flexShrink: 0 }}>🔍</span>
+          <span style={{ color: C.textSecondary, fontSize: 15, flexShrink: 0 }}>🔍</span>
           <input
             value={username}
             onChange={e => { setUsername(e.target.value); }}
@@ -559,7 +554,7 @@ export default function BossrobuxScreen({
         <GamepassCard key={gp.gamepassId} gp={gp} onSelect={openSheet} />
       ))}
       {results && results.length > 10 && (
-        <div style={{ fontSize: 12, color: C.sec, textAlign: "center" as const, padding: "4px 0 12px" }}>
+        <div style={{ fontSize: 12, color: C.textSecondary, textAlign: "center" as const, padding: "4px 0 12px" }}>
           Показаны первые 10 из {results.length}
         </div>
       )}

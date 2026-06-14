@@ -1,11 +1,7 @@
 "use client";
+import { C } from "../theme";
 import { useEffect, useState, useCallback } from "react";
 
-const C = {
-  card: "#2c2c2e", elevated: "#3a3a3c", border: "#3a3a3c",
-  accent: "#bf5af2", green: "#30d158", red: "#ff453a", yellow: "#ffd60a", orange: "#ff9f0a",
-  sec: "#8e8e93", muted: "#48484a", bg: "#1c1c1e",
-};
 
 interface Settings {
   purchaseRate:   number | null;
@@ -18,7 +14,7 @@ interface Settings {
 
 function SectionHeader({ title }: { title: string }) {
   return (
-    <div style={{ fontSize: 12, fontWeight: 600, color: C.sec, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8, paddingLeft: 4 }}>
+    <div style={{ fontSize: 12, fontWeight: 600, color: C.textSecondary, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8, paddingLeft: 4 }}>
       {title}
     </div>
   );
@@ -118,7 +114,7 @@ function StatusPill({ enabled, bestRate, targetRate, pending }: {
         <div style={{ fontSize: 13, color: "#e5e5ea", fontWeight: 500 }}>
           {!enabled ? "Автобай выключен" : conditionMet ? "Условие выполнено — выкупает" : "Ожидание подходящего курса"}
         </div>
-        <div style={{ fontSize: 11, color: C.sec, marginTop: 2 }}>
+        <div style={{ fontSize: 11, color: C.textSecondary, marginTop: 2 }}>
           {bestRate
             ? `Лучший: $${bestRate.rateUSD}/1K · ${bestRate.provider} · ${bestRate.inventory.toLocaleString("ru-RU")} R$`
             : "Нет данных о рыночном курсе"}
@@ -206,7 +202,7 @@ export default function SettingsScreen({ token, onNavigate }: { token: string; o
             </SettingRow>
           </Card>
         </div>
-        <div style={{ fontSize: 11, color: C.sec, paddingLeft: 4, marginTop: 6 }}>
+        <div style={{ fontSize: 11, color: C.textSecondary, paddingLeft: 4, marginTop: 6 }}>
           buyer.py проверяет рынок каждые 60 сек. Выкупает когда курс ≤ целевого.
         </div>
       </section>
@@ -223,7 +219,7 @@ export default function SettingsScreen({ token, onNavigate }: { token: string; o
           </SettingRow>
         </Card>
         {settings.purchaseRate === null && (
-          <div style={{ fontSize: 11, color: C.sec, paddingLeft: 4, marginTop: 6 }}>
+          <div style={{ fontSize: 11, color: C.textSecondary, paddingLeft: 4, marginTop: 6 }}>
             Курс закупа не задан — используется рыночный
           </div>
         )}
@@ -254,7 +250,7 @@ export default function SettingsScreen({ token, onNavigate }: { token: string; o
             <span style={{ fontSize: 22 }}>🖥</span>
             <div style={{ flex: 1, textAlign: "left" }}>
               <div style={{ fontSize: 15, fontWeight: 600, color: "#e5e5ea" }}>Состояние системы</div>
-              <div style={{ fontSize: 12, color: C.sec, marginTop: 2 }}>Серверы, БД, сервисы</div>
+              <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 2 }}>Серверы, БД, сервисы</div>
             </div>
             <span style={{ color: C.muted, fontSize: 18 }}>›</span>
           </button>
@@ -277,7 +273,7 @@ function Skeleton() {
 
 function ErrorState({ msg, onRetry }: { msg: string; onRetry: () => void }) {
   return (
-    <div style={{ padding: 48, textAlign: "center", color: C.sec }}>
+    <div style={{ padding: 48, textAlign: "center", color: C.textSecondary }}>
       <div style={{ fontSize: 28, marginBottom: 10 }}>⚠️</div>
       <div style={{ fontSize: 14, marginBottom: 16 }}>{msg}</div>
       <button
