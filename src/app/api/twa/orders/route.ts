@@ -33,6 +33,7 @@ export async function GET(req: NextRequest) {
   // the short order-ID suffix shown in admin cards. Case-insensitive contains.
   let searchWhere: any = {};
   if (q) {
+    const qClean = q.replace(/^@/, "");
     const qDigits = q.replace(/\D/g, "");
     // Treat the query as "numeric ID" only when it's actually a numeric string
     // (≥4 digits AND ≥80 % digits). Otherwise a WB code like "4YNF7HH" leaks
@@ -41,15 +42,15 @@ export async function GET(req: NextRequest) {
     const isNumericId = qDigits.length >= 4 && qDigits.length / q.length >= 0.8;
     const orClauses: any[] = [
       { gamepassUrl:    { contains: q,           mode: "insensitive" } },
-      { robloxUsername: { contains: q,           mode: "insensitive" } },
+      { robloxUsername: { contains: qClean,      mode: "insensitive" } },
       { wbCode:         { contains: q.toUpperCase() } },
       { id:             { endsWith: q.toLowerCase() } },
-      { user: { name:   { contains: q,           mode: "insensitive" } } },
+      { user: { name:     { contains: q,         mode: "insensitive" } } },
+      { user: { username: { contains: qClean,    mode: "insensitive" } } },
     ];
     if (isNumericId) {
       orClauses.push({ user: { tgId: { contains: qDigits } } });
       orClauses.push({ user: { vkId: { contains: qDigits } } });
-      // Asset ID inside gamepassUrl (digits only is a common ask)
       orClauses.push({ gamepassUrl: { contains: qDigits } });
     }
     searchWhere = { OR: orClauses };
@@ -227,12 +228,13 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const vkEnrichOrders = orders.filter((o: any) =>
-      o.user?.vkId && (!o.user.name || o.user.name === "VK User" || !o.user.username)
-    );
-    if (vkEnrichOrders.length > 0 && process.env.VK_TOKEN) {
-      void enrichVkUsers(vkEnrichOrders);
-    }
+  }
+
+  const vkEnrichOrders = orders.filter((o: any) =>
+    o.user?.vkId && (!o.user.name || o.user.name === "VK User" || !o.user.username)
+  );
+  if (vkEnrichOrders.length > 0 && process.env.VK_TOKEN) {
+    void enrichVkUsers(vkEnrichOrders);
   }
 
   return NextResponse.json({ orders, total: finalTotal, counts, sums, page, pages: Math.ceil(finalTotal / limit) });

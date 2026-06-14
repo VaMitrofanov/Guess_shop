@@ -877,7 +877,7 @@ function SearchBar({ value, onChange }: { value: string; onChange: (v: string) =
       <input
         value={local}
         onChange={e => setLocal(e.target.value)}
-        placeholder="Ник Roblox, ID, ссылка, WB-код, TG/VK"
+        placeholder="Ник, @username, WB-код, ссылка, ID"
         style={{
           background: "transparent", border: "none", outline: "none",
           color: C.textPrimary, fontSize: 14.5, flex: 1, minWidth: 0,
@@ -1299,7 +1299,7 @@ function EmptyState({ filter, query }: { filter: FilterStatus; query: string }) 
         <div style={{ fontSize: 36, marginBottom: 10 }}>🔎</div>
         <div style={{ fontSize: 14, marginBottom: 4 }}>Ничего не нашлось</div>
         <div style={{ fontSize: 12, color: C.textTertiary }}>
-          Попробуй ник Roblox, ID геймпасса, WB-код или TG/VK ID
+          Попробуй ник Roblox, @username, WB-код или TG/VK ID
         </div>
       </div>
     );
