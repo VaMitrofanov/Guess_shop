@@ -1,6 +1,7 @@
 "use client";
 import { C } from "../theme";
 import { useState } from "react";
+import { haptic } from "../haptics";
 import AnalyticsScreen from "./AnalyticsScreen";
 import StocksScreen from "./StocksScreen";
 import CodesScreen from "./CodesScreen";
@@ -32,7 +33,8 @@ export default function WbScreen({ token }: { token: string }) {
           {TABS.map(t => (
             <button
               key={t.id}
-              onClick={() => setTab(t.id)}
+              className="twa-press-sm"
+              onClick={() => { if (t.id !== tab) haptic.select(); setTab(t.id); }}
               style={{
                 flex: 1, padding: "7px 4px", border: "none", cursor: "pointer",
                 borderRadius: 8, fontSize: 13, fontWeight: tab === t.id ? 600 : 400,

@@ -1,7 +1,7 @@
 "use client";
 import { C } from "../theme";
 import { useEffect, useState, useCallback } from "react";
-
+import { haptic } from "../haptics";
 
 interface Settings {
   purchaseRate:   number | null;
@@ -57,7 +57,8 @@ function NumInput({ value, onChange, placeholder, step = 0.1 }: { value: string;
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
     <div
-      onClick={() => onChange(!on)}
+      className="twa-press-sm"
+      onClick={() => { haptic.impact("rigid"); onChange(!on); }}
       style={{
         width: 51, height: 31, borderRadius: 16, flexShrink: 0,
         background: on ? C.green : C.elevated,
@@ -77,7 +78,8 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
 function SaveBtn({ onSave, saving, saved }: { onSave: () => void; saving: boolean; saved: boolean }) {
   return (
     <button
-      onClick={onSave} disabled={saving}
+      className="twa-press"
+      onClick={() => { if (!saving) { haptic.impact("medium"); onSave(); } }} disabled={saving}
       style={{
         background: saved ? C.green : C.accent, border: "none", borderRadius: 12,
         color: "#fff", fontSize: 15, fontWeight: 600, padding: "13px",
@@ -239,7 +241,8 @@ export default function SettingsScreen({ token, onNavigate }: { token: string; o
         <section>
           <SectionHeader title="Мониторинг" />
           <button
-            onClick={() => onNavigate("system")}
+            className="twa-press"
+            onClick={() => { haptic.select(); onNavigate("system"); }}
             style={{
               width: "100%", background: C.card, border: "none", borderRadius: 14,
               padding: "15px 16px", cursor: "pointer",

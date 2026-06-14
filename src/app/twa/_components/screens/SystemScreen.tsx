@@ -1,7 +1,7 @@
 "use client";
 import { C } from "../theme";
 import { useEffect, useState, useCallback } from "react";
-
+import { haptic } from "../haptics";
 
 interface ServiceCheck { name: string; icon: string; ok: boolean; ms: number }
 
@@ -209,7 +209,8 @@ export default function SystemScreen({ token }: { token: string }) {
           </div>
         </div>
         <button
-          onClick={() => load(true)} disabled={refreshing}
+          className="twa-press-sm"
+          onClick={() => { if (!refreshing) { haptic.impact("light"); load(true); } }} disabled={refreshing}
           style={{
             background: "none", border: "none", fontSize: 20, cursor: "pointer",
             color: refreshing ? C.muted : C.accent,

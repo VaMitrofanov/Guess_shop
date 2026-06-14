@@ -1,6 +1,7 @@
 "use client";
 import { C } from "../theme";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { haptic } from "../haptics";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 interface CodesData {
@@ -228,7 +229,8 @@ function SearchBar({
         />
         {q && (
           <button
-            onClick={() => onChange("")}
+            className="twa-press-sm"
+            onClick={() => { haptic.impact("light"); onChange(""); }}
             style={{
               border: "none", background: "transparent", color: C.textSecondary,
               fontSize: 15, cursor: "pointer", padding: 4,
@@ -249,7 +251,8 @@ function SearchBar({
           return (
             <button
               key={f.id}
-              onClick={() => onStatusChange(f.id)}
+              className="twa-press-sm"
+              onClick={() => { if (f.id !== status) haptic.select(); onStatusChange(f.id); }}
               style={{
                 padding: "6px 12px", borderRadius: 999, border: "none", cursor: "pointer",
                 background:  active ? C.accent          : C.card,
@@ -331,7 +334,8 @@ function CodeRow({ c }: { c: WbCodeRow }) {
     }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <button
-          onClick={() => copy(c.code)}
+          className="twa-press-sm"
+          onClick={() => { haptic.impact("light"); copy(c.code); }}
           style={{
             background: "transparent", border: "none", padding: 0, cursor: "pointer",
             fontFamily: "ui-monospace, SFMono-Regular, monospace",

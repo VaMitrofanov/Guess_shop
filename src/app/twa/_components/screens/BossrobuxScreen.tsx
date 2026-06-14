@@ -2,6 +2,7 @@
 import { C } from "../theme";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { haptic } from "../haptics";
 
 
 const ANIM = `
@@ -148,7 +149,8 @@ function StatBox({ label, value, sub, valueColor }: { label: string; value: stri
 function GamepassCard({ gp, onSelect }: { gp: Gamepass; onSelect: (gp: Gamepass) => void }) {
   return (
     <button
-      onClick={() => onSelect(gp)}
+      className="twa-card-press"
+      onClick={() => { haptic.impact("light"); onSelect(gp); }}
       style={{
         width: "100%", background: C.card, border: "none", borderRadius: 14,
         padding: "12px 14px", marginBottom: 8,
@@ -222,6 +224,7 @@ function PurchaseSheet({
 
   async function buy() {
     if (!gp || phase === "buying") return;
+    haptic.impact("medium");
     setPhase("buying");
     try {
       const res = await fetch("/api/twa/bossrobux", {
@@ -231,14 +234,17 @@ function PurchaseSheet({
       });
       const d = await res.json();
       if (d.success) {
+        haptic.notify("success");
         setOkMsg(d.msg ?? "");
         setPhase("ok");
         onPurchased(gp.robux);
       } else {
+        haptic.notify("error");
         setErrMsg(d.msg ?? "Ошибка выкупа");
         setPhase("err");
       }
     } catch {
+      haptic.notify("error");
       setErrMsg("Ошибка сети");
       setPhase("err");
     }
@@ -342,6 +348,7 @@ function PurchaseSheet({
 
                 {/* Buy button */}
                 <button
+                  className="twa-press"
                   onClick={buy} disabled={phase === "buying"}
                   style={{
                     width: "100%", padding: "17px", border: "none", borderRadius: 14,
