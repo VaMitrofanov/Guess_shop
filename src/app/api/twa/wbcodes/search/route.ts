@@ -69,6 +69,7 @@ export async function GET(req: NextRequest) {
     reservedUntil:      c.reservedUntil,
     usedAt:             c.usedAt,
     batch:              c.batch,
+    isTest:             c.isTest,
     reviewBonusClaimed: c.reviewBonusClaimed,
     createdAt:          c.createdAt,
     updatedAt:          c.updatedAt,

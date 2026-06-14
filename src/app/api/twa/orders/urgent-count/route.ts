@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ count: cached.count });
   }
   const count = await (prisma as any).wbOrder.count({
-    where: { status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING", "PENDING", "IN_PROGRESS"] } },
+    where: { status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING", "PENDING", "IN_PROGRESS"] }, isTest: false },
   });
   cached = { count, ts: Date.now() };
   return NextResponse.json({ count });

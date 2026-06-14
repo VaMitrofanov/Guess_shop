@@ -145,8 +145,8 @@ async function fetchNeonStats(): Promise<NeonStats | null> {
     const result: any[] = await (prisma as any).$queryRaw`
       SELECT
         pg_database_size(current_database()) AS size_bytes,
-        (SELECT count(*) FROM "WbOrder") AS order_count,
-        (SELECT count(*) FROM "WbCode" WHERE "isUsed" = false) AS unused_codes,
+        (SELECT count(*) FROM "WbOrder" WHERE "isTest" = false) AS order_count,
+        (SELECT count(*) FROM "WbCode" WHERE "isUsed" = false AND "isTest" = false) AS unused_codes,
         (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()) AS active_connections
     `;
     const row = result[0];

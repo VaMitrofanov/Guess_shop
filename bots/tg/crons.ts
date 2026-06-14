@@ -131,7 +131,7 @@ async function checkWbCodeStock(): Promise<void> {
   const groups: { denomination: number; _count: { _all: number } }[] =
     await (db as any).wbCode.groupBy({
       by: ["denomination"],
-      where: { status: "AVAILABLE" },
+      where: { status: "AVAILABLE", isTest: false },
       _count: { _all: true },
     });
 
@@ -143,6 +143,7 @@ async function checkWbCodeStock(): Promise<void> {
   // Also check denominations that have 0 available (not in groupBy result)
   const allDenoms: { denomination: number }[] = await (db as any).wbCode.findMany({
     distinct: ["denomination"],
+    where: { isTest: false },
     select: { denomination: true },
   });
   for (const d of allDenoms) {

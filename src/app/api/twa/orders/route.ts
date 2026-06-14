@@ -61,9 +61,10 @@ export async function GET(req: NextRequest) {
     searchWhere = { OR: orClauses };
   }
 
+  const notTest = { isTest: false };
   const where = q
-    ? { AND: [statusWhere, searchWhere] }
-    : statusWhere;
+    ? { AND: [notTest, statusWhere, searchWhere] }
+    : { ...notTest, ...statusWhere };
 
   // ── Phase 1: orders + combined counts in ONE parallel batch ──────────────
   // Previous: 1 findMany + 1 COUNT(total) + 6 COUNT(per status) = 8 queries
@@ -109,6 +110,7 @@ export async function GET(req: NextRequest) {
               COALESCE(SUM(amount) FILTER (WHERE status = 'COMPLETED'),         0)::int AS "SUM_COMPLETED",
               COALESCE(SUM(amount) FILTER (WHERE status = 'REJECTED'),          0)::int AS "SUM_REJECTED"
             FROM "WbOrder"
+            WHERE "isTest" = false
           `);
           const r = rows[0] ?? {};
           const counts: Record<string, number> = {};
@@ -121,7 +123,7 @@ export async function GET(req: NextRequest) {
         }
         const groups: any[] = await (prisma as any).wbOrder.groupBy({
           by: ["status"],
-          where: searchWhere,
+          where: { ...searchWhere, isTest: false },
           _count: { _all: true },
           _sum: { amount: true },
         });

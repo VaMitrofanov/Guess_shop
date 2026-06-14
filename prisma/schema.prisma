@@ -122,6 +122,7 @@ model WbOrder {
   /// Allows accurate historical profit calculations.
   purchaseRate    Float?
   isDirectOrder   Boolean       @default(false)
+  isTest          Boolean       @default(false)
   paymentDetails  String?
   robloxUsername  String?
   createdAt       DateTime      @default(now())
@@ -235,6 +236,7 @@ model WbCode {
   isUsed             Boolean      @default(false)
   usedAt             DateTime?
   batch              String?
+  isTest             Boolean      @default(false)
   reviewBonusClaimed Boolean      @default(false)
   userId             String?
   user               User?        @relation(fields: [userId], references: [id])
