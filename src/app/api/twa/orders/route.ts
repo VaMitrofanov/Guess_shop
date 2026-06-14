@@ -24,8 +24,13 @@ export async function GET(req: NextRequest) {
   const skipCounts  = searchParams.get("skipCounts") === "1";
   const lite        = searchParams.get("lite") === "1";
 
-  const statusWhere = (status && status !== "ALL" && VALID_STATUSES.includes(status as OrderStatus))
-    ? { status: status as OrderStatus }
+  const statusList = status && status !== "ALL"
+    ? status.split(",").filter(s => VALID_STATUSES.includes(s as OrderStatus)) as OrderStatus[]
+    : [];
+  const statusWhere = statusList.length === 1
+    ? { status: statusList[0] }
+    : statusList.length > 1
+    ? { status: { in: statusList } }
     : {};
 
   // Build a multi-field search that mirrors how managers describe orders verbally:
@@ -83,7 +88,7 @@ export async function GET(req: NextRequest) {
         if (!q) {
           if (cachedCounts && Date.now() - cachedCounts.ts < COUNT_CACHE_TTL) {
             const { data: counts, sums } = cachedCounts;
-            const total = (status && status !== "ALL") ? (counts[status] ?? 0) : counts["ALL"];
+            const total = statusList.length > 0 ? statusList.reduce((s, st) => s + (counts[st] ?? 0), 0) : counts["ALL"];
             return { total, counts, sums };
           }
           const rows: any[] = await (prisma as any).$queryRawUnsafe(`
@@ -111,7 +116,7 @@ export async function GET(req: NextRequest) {
           for (const s of [...VALID_STATUSES, "ALL"]) counts[s] = Number(r[s] ?? 0);
           for (const s of VALID_STATUSES) sums[s] = Number(r[`SUM_${s}`] ?? 0);
           cachedCounts = { data: counts, sums, ts: Date.now() };
-          const total = (status && status !== "ALL") ? (counts[status] ?? 0) : counts["ALL"];
+          const total = statusList.length > 0 ? statusList.reduce((s, st) => s + (counts[st] ?? 0), 0) : counts["ALL"];
           return { total, counts, sums };
         }
         const groups: any[] = await (prisma as any).wbOrder.groupBy({
@@ -130,7 +135,7 @@ export async function GET(req: NextRequest) {
           counts["ALL"] += cnt;
           sums[g.status] = Number(g._sum?.amount ?? 0);
         }
-        const total = (status && status !== "ALL") ? (counts[status] ?? 0) : counts["ALL"];
+        const total = statusList.length > 0 ? statusList.reduce((s, st) => s + (counts[st] ?? 0), 0) : counts["ALL"];
         return { total, counts, sums };
       })();
 

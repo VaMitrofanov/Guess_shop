@@ -5,8 +5,8 @@
 
 import { Markup, type Telegraf } from "telegraf";
 import { db } from "../shared/db";
-import { CB } from "../shared/admin";
-import { vkSend, stripHtml } from "../shared/notify";
+import { CB, ADMIN_IDS } from "../shared/admin";
+import { tgSend, vkSend, stripHtml } from "../shared/notify";
 
 const BONUS_AMOUNT = 100;
 const EXPIRY_DAYS = 30;
@@ -116,6 +116,73 @@ function daysWord(n: number): string {
   return "дней";
 }
 
+/* ── WB code stock alerts ─────────────────────────────────────────────────────
+   Checks available WB codes per denomination every 30 min. When a denomination
+   drops to LOW_THRESHOLD or CRITICAL_THRESHOLD, sends a one-time alert to
+   admins. Resets when stock goes back above the threshold.
+   ───────────────────────────────────────────────────────────────────────── */
+
+const LOW_THRESHOLD      = 10;
+const CRITICAL_THRESHOLD = 3;
+
+const lastAlertLevel = new Map<number, "low" | "critical" | null>();
+
+async function checkWbCodeStock(): Promise<void> {
+  const groups: { denomination: number; _count: { _all: number } }[] =
+    await (db as any).wbCode.groupBy({
+      by: ["denomination"],
+      where: { status: "AVAILABLE" },
+      _count: { _all: true },
+    });
+
+  const stockMap = new Map<number, number>();
+  for (const g of groups) {
+    stockMap.set(g.denomination, typeof g._count === "number" ? g._count : g._count._all);
+  }
+
+  // Also check denominations that have 0 available (not in groupBy result)
+  const allDenoms: { denomination: number }[] = await (db as any).wbCode.findMany({
+    distinct: ["denomination"],
+    select: { denomination: true },
+  });
+  for (const d of allDenoms) {
+    if (!stockMap.has(d.denomination)) stockMap.set(d.denomination, 0);
+  }
+
+  const alerts: string[] = [];
+
+  for (const [denom, available] of stockMap) {
+    const prev = lastAlertLevel.get(denom) ?? null;
+
+    if (available <= CRITICAL_THRESHOLD) {
+      if (prev !== "critical") {
+        alerts.push(
+          available === 0
+            ? `🔴 <b>${denom} R$</b> — закончились!`
+            : `🔴 <b>${denom} R$</b> — осталось <b>${available}</b> шт (критично)`
+        );
+        lastAlertLevel.set(denom, "critical");
+      }
+    } else if (available <= LOW_THRESHOLD) {
+      if (prev !== "low" && prev !== "critical") {
+        alerts.push(`🟡 <b>${denom} R$</b> — осталось <b>${available}</b> шт`);
+        lastAlertLevel.set(denom, "low");
+      }
+    } else {
+      if (prev != null) lastAlertLevel.set(denom, null);
+    }
+  }
+
+  if (alerts.length === 0) return;
+
+  const msg =
+    `📦 <b>Остаток карточек WB</b>\n\n` +
+    alerts.join("\n") +
+    `\n\n<i>Пополни запас в админке (Коды → загрузить CSV).</i>`;
+
+  await Promise.allSettled(ADMIN_IDS.map(id => tgSend(id, msg)));
+}
+
 export function startReviewReminderCron(bot: Telegraf): void {
   // Run once shortly after startup, then every hour
   setTimeout(() => {
@@ -130,5 +197,19 @@ export function startReviewReminderCron(bot: Telegraf): void {
     );
   }, 60 * 60 * 1000); // every 1 hour
 
+  // WB stock alert — check every 30 minutes
+  setTimeout(() => {
+    checkWbCodeStock().catch(err =>
+      console.error("[StockAlert] error:", err)
+    );
+  }, 60_000); // 1 min after boot
+
+  setInterval(() => {
+    checkWbCodeStock().catch(err =>
+      console.error("[StockAlert] error:", err)
+    );
+  }, 30 * 60 * 1000); // every 30 min
+
   console.log("[ReviewReminder] Cron started ✅");
+  console.log("[StockAlert] Cron started ✅");
 }

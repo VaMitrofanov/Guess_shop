@@ -13,7 +13,7 @@ import Pressable from "../Pressable";
    ───────────────────────────────────────────────────────────────────────── */
 
 type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED";
-type FilterStatus = OrderStatus | "ALL";
+type FilterStatus = OrderStatus | "ALL" | "BUYOUT";
 
 interface Order {
   id: string;
@@ -70,6 +70,7 @@ const STATUS_META: Record<OrderStatus, { label: string; color: string }> = {
 
 const FILTERS: { id: FilterStatus; label: string }[] = [
   { id: "ALL",               label: "Все"         },
+  { id: "BUYOUT",            label: "К выкупу"    },
   { id: "PENDING",           label: "Новые"       },
   { id: "IN_PROGRESS",       label: "В работе"    },
   { id: "AWAITING_PAYMENT",  label: "Реквизиты"   },
@@ -962,8 +963,9 @@ export default function OrdersScreen({
     const reqId = ++reqIdRef.current;
     try {
       const params = new URLSearchParams({ page: String(p), limit: "20" });
-      if (f !== "ALL") params.set("status", f);
-      if (q)           params.set("q", q);
+      if (f === "BUYOUT")   params.set("status", "PENDING,IN_PROGRESS");
+      else if (f !== "ALL") params.set("status", f);
+      if (q)                params.set("q", q);
       if (append)      params.set("skipCounts", "1");
       params.set("lite", "1");
       const res = await fetch(`/api/twa/orders?${params}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -1043,8 +1045,10 @@ export default function OrdersScreen({
 
     haptic.impact(action === "complete" ? "medium" : "light");
 
-    // The card leaves the visible set when a status filter no longer matches.
-    const leaves = filter !== "ALL" && filter !== newStatus;
+    const BUYOUT_STATUSES: OrderStatus[] = ["PENDING", "IN_PROGRESS"];
+    const leaves = filter !== "ALL" && (
+      filter === "BUYOUT" ? !BUYOUT_STATUSES.includes(newStatus) : filter !== newStatus
+    );
 
     setAllOrders(prev => prev.map(o => o.id === order.id
       ? { ...o, status: newStatus, rejectionReason: action === "reject" ? (reason || "не указана") : o.rejectionReason }
@@ -1102,7 +1106,9 @@ export default function OrdersScreen({
   const summaryText = useMemo(() => {
     if (!data) return "";
     if (query) return `По запросу «${query}» · ${data.total}`;
-    return filter === "ALL" ? `Всего · ${data.total}` : `Найдено · ${data.total}`;
+    if (filter === "ALL") return `Всего · ${data.total}`;
+    if (filter === "BUYOUT") return `К выкупу · ${data.total}`;
+    return `Найдено · ${data.total}`;
   }, [data, query, filter]);
 
   return (
@@ -1126,9 +1132,11 @@ export default function OrdersScreen({
           maskImage: "linear-gradient(90deg, #000 90%, transparent)",
         }}>
           {FILTERS.map(f => {
-            const count    = data?.counts[f.id] ?? 0;
+            const count    = f.id === "BUYOUT"
+              ? (data?.counts["PENDING"] ?? 0) + (data?.counts["IN_PROGRESS"] ?? 0)
+              : data?.counts[f.id] ?? 0;
             const isActive = filter === f.id;
-            const isUrgent = URGENT_STATUSES.includes(f.id as OrderStatus) && count > 0;
+            const isUrgent = (f.id === "BUYOUT" || URGENT_STATUSES.includes(f.id as OrderStatus)) && count > 0;
             return (
               <button
                 key={f.id}
@@ -1166,7 +1174,7 @@ export default function OrdersScreen({
         {/* Mini dashboard */}
         {data?.sums && !query && filter === "ALL" && (
           <div style={{ paddingTop: 10 }}>
-            <MiniDashboard counts={data.counts} sums={data.sums} />
+            <MiniDashboard counts={data.counts} sums={data.sums} onTap={setFilter} />
           </div>
         )}
 
@@ -1232,13 +1240,17 @@ function fmtRobux(n: number): string {
   return n.toLocaleString("ru-RU");
 }
 
-const DASHBOARD_GROUPS: { key: string; label: string; statuses: string[]; color: string; icon: string }[] = [
-  { key: "buyout",  label: "К выкупу",    statuses: ["PENDING", "IN_PROGRESS"],               color: C.green,  icon: "R$" },
-  { key: "link",    label: "Ждут ссылку", statuses: ["AWAITING_GAMEPASS"],                    color: C.yellow, icon: "🔗" },
-  { key: "payment", label: "Ждут оплату", statuses: ["AWAITING_PAYMENT", "PAYMENT_PENDING"],  color: C.orange, icon: "💳" },
+const DASHBOARD_GROUPS: { key: string; label: string; statuses: string[]; filter: FilterStatus; color: string; icon: string }[] = [
+  { key: "buyout",  label: "К выкупу",    statuses: ["PENDING", "IN_PROGRESS"],               filter: "BUYOUT",           color: C.green,  icon: "R$" },
+  { key: "link",    label: "Ждут ссылку", statuses: ["AWAITING_GAMEPASS"],                    filter: "AWAITING_GAMEPASS", color: C.yellow, icon: "🔗" },
+  { key: "payment", label: "Ждут оплату", statuses: ["AWAITING_PAYMENT", "PAYMENT_PENDING"],  filter: "AWAITING_PAYMENT",  color: C.orange, icon: "💳" },
 ];
 
-function MiniDashboard({ counts, sums }: { counts: Record<string, number>; sums: Record<string, number> }) {
+function MiniDashboard({ counts, sums, onTap }: {
+  counts: Record<string, number>;
+  sums: Record<string, number>;
+  onTap: (filter: FilterStatus) => void;
+}) {
   return (
     <div style={{
       display: "flex", gap: 8,
@@ -1249,16 +1261,23 @@ function MiniDashboard({ counts, sums }: { counts: Record<string, number>; sums:
         const robux = g.statuses.reduce((s, st) => s + (sums[st] ?? 0), 0);
         if (count === 0) return null;
         return (
-          <div key={g.key} style={{
-            flex: 1, minWidth: 0,
-            background: C.card,
-            borderRadius: 14,
-            padding: "10px 12px",
-            display: "flex", flexDirection: "column", gap: 3,
-            boxShadow: SHADOW.card,
-            position: "relative",
-            overflow: "hidden",
-          }}>
+          <Pressable
+            key={g.key}
+            variant="press-sm"
+            onClick={() => { haptic.impact("light"); onTap(g.filter); }}
+            style={{
+              flex: 1, minWidth: 0,
+              background: C.card,
+              borderRadius: 14,
+              padding: "10px 12px",
+              display: "flex", flexDirection: "column", gap: 3,
+              boxShadow: SHADOW.card,
+              position: "relative",
+              overflow: "hidden",
+              border: "none", cursor: "pointer",
+              textAlign: "left",
+            }}
+          >
             <div style={{
               position: "absolute", inset: 0, borderRadius: 14, pointerEvents: "none",
               background: `linear-gradient(180deg, ${g.color}0d 0%, transparent 60%)`,
@@ -1285,7 +1304,7 @@ function MiniDashboard({ counts, sums }: { counts: Record<string, number>; sums:
             }}>
               {count} {count === 1 ? "заказ" : count < 5 ? "заказа" : "заказов"}
             </div>
-          </div>
+          </Pressable>
         );
       })}
     </div>
@@ -1306,6 +1325,7 @@ function EmptyState({ filter, query }: { filter: FilterStatus; query: string }) 
   }
   const labels: Record<FilterStatus, string> = {
     ALL:               "Заказов пока нет",
+    BUYOUT:            "Нет заказов к выкупу",
     AWAITING_PAYMENT:  "Нет ожидающих реквизиты",
     PAYMENT_PENDING:   "Нет ожидающих оплату",
     PENDING:           "Нет новых заказов",
