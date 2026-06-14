@@ -137,6 +137,8 @@
     - Кэширование «public gamepass list per nick» дольше 60 c — текущий `robloxGpCache` оставляем как есть.
     - Reorganize welcome — только сдвиг акцента, не редизайн.
 
+- [x] **(9) Мини-дашборд в Orders (TWA)** ✅ — компактные карточки сверху списка заказов: «К выкупу» (PENDING+IN_PROGRESS), «Ждут ссылку» (AWAITING_GAMEPASS), «Ждут оплату» (AWAITING_PAYMENT+PAYMENT_PENDING) — кол-во заказов + сумма в R$. API `GET /api/twa/orders` расширен: `SUM(amount)` per status возвращается в новом поле `sums` (пигбэк на существующий counts-запрос, 0 доп. запросов, тот же 30s кэш). UI: `MiniDashboard` в `OrdersScreen.tsx` — показывается только на фильтре «Все» без поиска; пустые группы скрываются; суммы обновляются оптимистично при действиях (выкуп/отклонение/в работу).
+
 - [ ] **(8) Оптимизация скорости Orders (TWA)** — диагностирована, в работе. Cold-start уже ускорен в Спринт 1 item 2, но *внутри* экрана Orders запросы тормозят. План:
   - **Серверная часть** (`src/app/api/twa/orders/route.ts`):
     - **Order numbering** (`route.ts:142-160`) — сейчас на каждый из 20 заказов запускается 2 `count()` через relation `OR` на `tgId/vkId/robloxUsername` → **40 round-trip'ов в Neon на 1 fetch**. Заменить на один `groupBy` или сырой SQL с агрегацией по identity-кластеру за 1 запрос.
@@ -3855,10 +3857,15 @@ curl -s -X POST \
 - Collapsible-search — для админ-воркфлоу всегда-видимый поиск лучше; не делаю.
 - Полная миграция палитр остальных 9 экранов (Dashboard/WB/Bossrobux/Settings/System/Stocks/Codes/Dynamics/Advert/Calc/Analytics) на `theme.ts` — трогать рабочие экраны = регресс-риск; вынесено отдельно.
 
-**Деплой — НЕ выполнен (ждёт go-ahead владельца).** Причины паузы: (1) в рабочем дереве лежит чужой/прежний незакоммиченный WIP (`bots/*`, `wb-code`, `wb-link`, `auth.ts`, `GuideClient`) — не мой; (2) известный фейл-мод WebView («This page couldn't load») не ловится HTTP-смоук-тестом (см. 2026-06-05), нужна проверка в живом Telegram. Команда деплоя (web/TWA, RF):
+**Деплой — ✅ ВЫПОЛНЕНО (2026-06-13).**
+- Коммит `c9dcfb3` — закоммичены **только мои 12 файлов** (theme/haptics/Pressable/Toast/order-enrich/enrich-route + OrdersScreen/TwaApp/BottomNav/StatCard/globals.css/HANDOFF). Прежний WIP владельца (`bots/*`, `wb-code`, `wb-link`, `auth.ts`, `GuideClient`) НЕ тронут — остался незакоммиченным в рабочем дереве.
+- Запушено в `main`; Coolify web/TWA (`z10ws7m1q45h281zwedmhei4`) force-deploy `we3adesgftdyj4ckcb8n8c02` → собрался и докатился.
+- **Верификация прода:** `/twa` → 200 (рендерит TWA-шелл: скелетон `#1c1c1e`, telegram-web-app.js, корректный title, не «Доступ запрещён»). Новый `/api/twa/orders/enrich` прошёл `404 → 503 → 401` (старый билд → swap → новый код с auth-гейтом). Регресс-свип всех TWA-API: `orders/enrich/urgent-count/dashboard/ping/bossrobux/wbcodes-search` → все 401 (живы, гейтятся). Coolify-запись подтверждает деплой коммита `c9dcfb3`.
+- **Остаточный риск (на владельце):** реальный рендер в Telegram WebView + интерактив (haptics, оптимистика, появление VIP/N-Total/review-чипов) отсюда не проверить — нужен живой Telegram. Откат при проблеме: передеплой предыдущего билда через Coolify UI/API.
+
+Команда деплоя (web/TWA, RF) для справки:
 ```bash
-curl -X POST "http://89.110.94.117:8000/api/v1/deploy?uuid=z10ws7m1q45h281zwedmhei4&force=true" \
+curl -s -X POST "http://89.110.94.117:8000/api/v1/deploy?uuid=z10ws7m1q45h281zwedmhei4&force=true" \
   -H "Authorization: Bearer $COOLIFY_TOKEN"
 ```
-Перед деплоем нужно закоммитить **только мои 11 файлов** (не трогая чужой WIP) и запушить — Coolify force-deploy тянет из GitHub `main`.
 

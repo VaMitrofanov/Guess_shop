@@ -6,7 +6,7 @@ import { notifyOrderCompleted, notifyOrderRejected } from "@/lib/twa-notify";
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
 
-let cachedCounts: { data: Record<string, number>; ts: number } | null = null;
+let cachedCounts: { data: Record<string, number>; sums: Record<string, number>; ts: number } | null = null;
 const COUNT_CACHE_TTL = 30_000;
 
 export async function GET(req: NextRequest) {
@@ -77,13 +77,13 @@ export async function GET(req: NextRequest) {
   });
 
   const countsPromise = skipCounts
-    ? Promise.resolve({ total: 0, counts: null as Record<string, number> | null })
+    ? Promise.resolve({ total: 0, counts: null as Record<string, number> | null, sums: null as Record<string, number> | null })
     : (async () => {
         if (!q) {
           if (cachedCounts && Date.now() - cachedCounts.ts < COUNT_CACHE_TTL) {
-            const counts = cachedCounts.data;
+            const { data: counts, sums } = cachedCounts;
             const total = (status && status !== "ALL") ? (counts[status] ?? 0) : counts["ALL"];
-            return { total, counts };
+            return { total, counts, sums };
           }
           const rows: any[] = await (prisma as any).$queryRawUnsafe(`
             SELECT
@@ -94,33 +94,46 @@ export async function GET(req: NextRequest) {
               COUNT(*) FILTER (WHERE status = 'PENDING')::int AS "PENDING",
               COUNT(*) FILTER (WHERE status = 'IN_PROGRESS')::int AS "IN_PROGRESS",
               COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS "COMPLETED",
-              COUNT(*) FILTER (WHERE status = 'REJECTED')::int AS "REJECTED"
+              COUNT(*) FILTER (WHERE status = 'REJECTED')::int AS "REJECTED",
+              COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_PAYMENT'),  0)::int AS "SUM_AWAITING_PAYMENT",
+              COALESCE(SUM(amount) FILTER (WHERE status = 'PAYMENT_PENDING'),   0)::int AS "SUM_PAYMENT_PENDING",
+              COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS'), 0)::int AS "SUM_AWAITING_GAMEPASS",
+              COALESCE(SUM(amount) FILTER (WHERE status = 'PENDING'),           0)::int AS "SUM_PENDING",
+              COALESCE(SUM(amount) FILTER (WHERE status = 'IN_PROGRESS'),       0)::int AS "SUM_IN_PROGRESS",
+              COALESCE(SUM(amount) FILTER (WHERE status = 'COMPLETED'),         0)::int AS "SUM_COMPLETED",
+              COALESCE(SUM(amount) FILTER (WHERE status = 'REJECTED'),          0)::int AS "SUM_REJECTED"
             FROM "WbOrder"
           `);
           const r = rows[0] ?? {};
           const counts: Record<string, number> = {};
+          const sums: Record<string, number> = {};
           for (const s of [...VALID_STATUSES, "ALL"]) counts[s] = Number(r[s] ?? 0);
-          cachedCounts = { data: counts, ts: Date.now() };
+          for (const s of VALID_STATUSES) sums[s] = Number(r[`SUM_${s}`] ?? 0);
+          cachedCounts = { data: counts, sums, ts: Date.now() };
           const total = (status && status !== "ALL") ? (counts[status] ?? 0) : counts["ALL"];
-          return { total, counts };
+          return { total, counts, sums };
         }
         const groups: any[] = await (prisma as any).wbOrder.groupBy({
           by: ["status"],
           where: searchWhere,
           _count: { _all: true },
+          _sum: { amount: true },
         });
         const counts: Record<string, number> = {};
+        const sums: Record<string, number> = {};
         for (const s of [...VALID_STATUSES, "ALL"]) counts[s] = 0;
+        for (const s of VALID_STATUSES) sums[s] = 0;
         for (const g of groups) {
           const cnt = typeof g._count === "number" ? g._count : g._count?._all ?? 0;
           counts[g.status] = cnt;
           counts["ALL"] += cnt;
+          sums[g.status] = Number(g._sum?.amount ?? 0);
         }
         const total = (status && status !== "ALL") ? (counts[status] ?? 0) : counts["ALL"];
-        return { total, counts };
+        return { total, counts, sums };
       })();
 
-  const [rawOrders, { total, counts }] = await Promise.all([ordersPromise, countsPromise]);
+  const [rawOrders, { total, counts, sums }] = await Promise.all([ordersPromise, countsPromise]);
   const hasMore = skipCounts && rawOrders.length > limit;
   const orders = hasMore ? rawOrders.slice(0, limit) : rawOrders;
   const finalTotal = skipCounts
@@ -222,7 +235,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ orders, total: finalTotal, counts, page, pages: Math.ceil(finalTotal / limit) });
+  return NextResponse.json({ orders, total: finalTotal, counts, sums, page, pages: Math.ceil(finalTotal / limit) });
 }
 
 /**

@@ -46,6 +46,7 @@ interface OrdersData {
   orders: Order[];
   total: number;
   counts: Record<FilterStatus, number>;
+  sums?: Record<string, number> | null;
   page: number;
   pages: number;
 }
@@ -912,6 +913,13 @@ function shiftCounts(counts: Record<string, number>, from: string, to: string): 
   return next;
 }
 
+function shiftSums(sums: Record<string, number>, from: string, to: string, amount: number): Record<string, number> {
+  const next = { ...sums };
+  if (from in next) next[from] = Math.max(0, (next[from] ?? 0) - amount);
+  if (to in next)   next[to]   = (next[to]   ?? 0) + amount;
+  return next;
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
    Main screen
    ───────────────────────────────────────────────────────────────────────── */
@@ -1041,12 +1049,20 @@ export default function OrdersScreen({
     setAllOrders(prev => prev.map(o => o.id === order.id
       ? { ...o, status: newStatus, rejectionReason: action === "reject" ? (reason || "не указана") : o.rejectionReason }
       : o));
-    setData(prev => prev ? { ...prev, counts: shiftCounts(prev.counts, prevStatus, newStatus) } : prev);
+    setData(prev => prev ? {
+      ...prev,
+      counts: shiftCounts(prev.counts, prevStatus, newStatus),
+      sums: prev.sums ? shiftSums(prev.sums, prevStatus, newStatus, order.amount) : prev.sums,
+    } : prev);
     if (leaves) setExiting(prev => new Set(prev).add(order.id));
 
     const rollback = () => {
       setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: prevStatus } : o));
-      setData(prev => prev ? { ...prev, counts: shiftCounts(prev.counts, newStatus, prevStatus) } : prev);
+      setData(prev => prev ? {
+        ...prev,
+        counts: shiftCounts(prev.counts, newStatus, prevStatus),
+        sums: prev.sums ? shiftSums(prev.sums, newStatus, prevStatus, order.amount) : prev.sums,
+      } : prev);
       setExiting(prev => { const n = new Set(prev); n.delete(order.id); return n; });
     };
 
@@ -1147,6 +1163,13 @@ export default function OrdersScreen({
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
+        {/* Mini dashboard */}
+        {data?.sums && !query && filter === "ALL" && (
+          <div style={{ paddingTop: 10 }}>
+            <MiniDashboard counts={data.counts} sums={data.sums} />
+          </div>
+        )}
+
         {loading ? (
           <Skeleton />
         ) : allOrders.length === 0 ? (
@@ -1197,6 +1220,74 @@ export default function OrdersScreen({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ───────────── MiniDashboard — compact robux stats above the list ───────────── */
+function fmtRobux(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 10_000)    return `${(n / 1_000).toFixed(0)}K`;
+  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString("ru-RU");
+}
+
+const DASHBOARD_GROUPS: { key: string; label: string; statuses: string[]; color: string; icon: string }[] = [
+  { key: "buyout",  label: "К выкупу",    statuses: ["PENDING", "IN_PROGRESS"],               color: C.green,  icon: "R$" },
+  { key: "link",    label: "Ждут ссылку", statuses: ["AWAITING_GAMEPASS"],                    color: C.yellow, icon: "🔗" },
+  { key: "payment", label: "Ждут оплату", statuses: ["AWAITING_PAYMENT", "PAYMENT_PENDING"],  color: C.orange, icon: "💳" },
+];
+
+function MiniDashboard({ counts, sums }: { counts: Record<string, number>; sums: Record<string, number> }) {
+  return (
+    <div style={{
+      display: "flex", gap: 8,
+      padding: "0 16px 6px",
+    }}>
+      {DASHBOARD_GROUPS.map(g => {
+        const count = g.statuses.reduce((s, st) => s + (counts[st] ?? 0), 0);
+        const robux = g.statuses.reduce((s, st) => s + (sums[st] ?? 0), 0);
+        if (count === 0) return null;
+        return (
+          <div key={g.key} style={{
+            flex: 1, minWidth: 0,
+            background: C.card,
+            borderRadius: 14,
+            padding: "10px 12px",
+            display: "flex", flexDirection: "column", gap: 3,
+            boxShadow: SHADOW.card,
+            position: "relative",
+            overflow: "hidden",
+          }}>
+            <div style={{
+              position: "absolute", inset: 0, borderRadius: 14, pointerEvents: "none",
+              background: `linear-gradient(180deg, ${g.color}0d 0%, transparent 60%)`,
+            }} />
+            <div style={{
+              fontSize: 10.5, fontWeight: 600, color: g.color,
+              letterSpacing: 0.3, textTransform: "uppercase",
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              position: "relative",
+            }}>
+              {g.icon} {g.label}
+            </div>
+            <div style={{
+              fontSize: 18, fontWeight: 700, color: C.textPrimary,
+              letterSpacing: -0.5, ...tabular, lineHeight: 1.1,
+              position: "relative",
+            }}>
+              {fmtRobux(robux)}
+              <span style={{ fontSize: 11, fontWeight: 500, color: C.textSecondary, marginLeft: 2 }}>R$</span>
+            </div>
+            <div style={{
+              fontSize: 11, color: C.textTertiary, ...tabular,
+              position: "relative",
+            }}>
+              {count} {count === 1 ? "заказ" : count < 5 ? "заказа" : "заказов"}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
