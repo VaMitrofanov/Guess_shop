@@ -6,6 +6,46 @@
 
 ---
 
+## Сессия 2026-06-16 — WB-инструкция: редизайн перенесён в код + testdev (готово к push)
+
+**Статус:** макет утверждён владельцем (итерации шага 5/6 + замена ①② на текстовые подписи). Перенесён в прод-код отдельным компонентом, `tsc --noEmit` = **0 ошибок**. **НЕ задеплоено** — текущая среда без сети к GitHub/Coolify/Neon (push/деплой/DB недоступны). Коммит готов, нужен `git push` с машины владельца (Mac/X280).
+
+### Что сделано (код)
+- **Новый компонент `src/app/guide/WBInstructionV2.tsx`** — точный порт утверждённого макета: 8 шагов, реальные скрины/видео из `public/guide/`, hero + блок «⚠️ 2 пункта», интерактивная «ВАША ЦЕНА ПАСА» (номинал → ceil(/0.7), копирование), CTA Telegram + VKAuthButton. CSS scoped — все классы префикс `wbi-`, чтобы не задеть глобальные стили/Tailwind. Видео ленивые (IntersectionObserver: грузятся/играют только на экране, пауза при уходе и сворачивании вкладки) + постер-кадры (нет чёрного мигания), `prefers-reduced-motion` глушит анимации, `<img loading=lazy decoding=async>`.
+- **Шаг 5/6 разведены** (2 действия в одном месте Sales): шаг 5 = снять `Enable regional pricing` (свой скрин с зелёной рамкой Item for sale + плашка «ВКЛЮЧИ» и оранжевой «ГАЛОЧКА СНЯТА»); шаг 6 = вставить цену (свой скрин: «3572» стёрт, наложена **живая цена**, синхронизированная с калькулятором — `.wbi-liveprice` через container-query). ①② убраны — заменены текстовыми подписями прямо на скринах.
+- **Новые ассеты** в `public/guide/`: `wb-step5-regional.jpg`, `wb-step6-price.jpg` (аннотации перерисованы поверх чистого фона), `wb-step3-poster.jpg`, `wb-step4-poster.jpg` (постеры видео). Старый `wb-step5-price.jpg` оставлен (исходник).
+- **Роутинг:** `GuideClient.tsx` — при `isWB` фаза `instruction` рендерит `WBInstructionV2` (вместо старого `Instruction`-пути с анимациями Anim0x). **Стандартный (не-WB) путь не тронут** — изоляция риска. `Instruction`/`StepsGrid`/`PublicGameBlock`/`WBManagerBlock` остались для не-WB; старые `public/guide/public-*.jpg` всё ещё нужны там — НЕ удалять.
+- Утверждённый макет синхронизирован: `docs/wb-instruction-mockup.html`.
+
+### testdev / режим инструкции для проверок (без оповещений)
+- **`page.tsx`**: тихий QA-проход в инструкцию без резерва кода, без бота, без админ-карточки:
+  - `https://www.robloxbank.ru/guide?source=wb&test=1` (опц. `&nom=1000`) — открывает редизайн напрямую, номинал из `nom` (по умолчанию 1000), API/бот не дёргаются.
+  - `https://www.robloxbank.ru/guide?source=wb&code=TESTDEV` — то же (codeUp===TESTDEV → testMode).
+  - В testMode TG-кнопка несёт `start=wb_TESTDEV_<sid>` (если владелец захочет прогнать реальный бот-путь тестовым кодом), кнопка «Новый код» скрыта.
+- **Тест-коды (уже в БД, `isTest=true`, исключены из статистики):** `TESTDEV` (500 R$, рециклится `npm run dev:reset-test`), `TEST300`, `TEST500`, `TEST700`. Это валидные 7-симв. коды — вводятся как обычные на `/guide?source=wb`.
+
+### Проверки
+- `npx tsc --noEmit` = **0 ошибок** (весь проект, включая guide).
+- `eslint` новых файлов: только warnings (img без next/image — как в существующем коде; live-региона нет). Один error `react-hooks/set-state-in-effect` на строке `setIsRestoring(false)` — **pre-existing на HEAD** (не из этой правки), Guide билдится с `ignoreBuildErrors:true` (`next.config.guide.ts`).
+- `jest` прогнать не удалось в этой среде (нет сети для `napi-postinstall` биндинга) — прогнать локально перед push (baseline 12/12).
+- Визуал React-рендера в этой среде проверить нельзя (нет браузера) — финальная сверка после деплоя на `test=1`.
+
+### Деплой (нужно сделать владельцу — push)
+Ветка `wb-instruction-redesign`. Коммит готов. Coolify автодеплоит **по push в `main`** (Guide-сервис watch-paths = `src/app/guide/**`, `public/guide/**`).
+```bash
+git checkout main && git merge wb-instruction-redesign
+npm run dev:reset-test          # вернуть TESTDEV в AVAILABLE (опц.)
+npx tsc --noEmit && npx jest    # финальный гейт
+git push origin main            # Coolify соберёт RobloxBank-Guide (UUID ebac6llpah5n2x58rb64yn8j)
+```
+После деплоя проверить: `https://www.robloxbank.ru/guide?source=wb&test=1` (HTTP 200, 8 шагов, живая цена меняется при вводе номинала, видео играют при скролле).
+
+### Остаётся (опц., не блокирует)
+- Подавление админ-уведомлений для `isTest`-кодов в **ботах** (TG/VK handlers + auth.ts) — сейчас `isTest` влияет только на статистику; при реальном прогоне TESTDEV через бот админ всё ещё получит карточку. Site-проход (`test=1`) уже без оповещений. Трогает рисковую непокрытую тестами бот-поверхность — отдельной сессией.
+- Пережать старые `public/guide/public-*.jpg` (~1.1 МБ) — они теперь только на не-WB пути.
+
+---
+
 ## ⏳ Ожидает залива: новая партия кодов 500 R$ (2026-06-15)
 
 **300 кодов номинала 500 R$ проверены и готовы к заливу в БД — НЕ залиты (по просьбе пользователя «позже зальём»).**

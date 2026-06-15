@@ -13,6 +13,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { ParticleTextEffect } from "@/components/ui/particle-text-effect";
 import VKAuthButton from "@/components/auth/VKAuthButton";
+import WBInstructionV2 from "./WBInstructionV2";
 // Visual components imported directly. None of them tug in heavy deps now
 // (three.js was dropped in favour of CSS gradients), so dynamic chunk
 // splitting just adds round-trips and deploy fragility for zero kB win.
@@ -2873,16 +2874,16 @@ function WBIntro({ onDone }: { onDone: () => void }) {
 
 // ─── Main export ───────────────────────────────────────────────────────────────
 
-export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl }: { isWB: boolean; skipGate?: boolean; wbCodeFromUrl?: string }) {
+export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl, testMode = false, testNom }: { isWB: boolean; skipGate?: boolean; wbCodeFromUrl?: string; testMode?: boolean; testNom?: number }) {
   const [phase, setPhase] = useState<"intro" | "gate" | "instruction">(
-    !isWB ? "instruction" : skipGate ? "gate" : "intro"
+    !isWB ? "instruction" : testMode ? "instruction" : skipGate ? "gate" : "intro"
   );
-  const [denomination, setDenomination] = useState<number>(0);
-  const [activeCode, setActiveCode] = useState<string>("");
+  const [denomination, setDenomination] = useState<number>(testMode ? (testNom && testNom > 0 ? testNom : 1000) : 0);
+  const [activeCode, setActiveCode] = useState<string>(testMode ? "TESTDEV" : "");
   const [isRestoring, setIsRestoring] = useState(true);
 
   useEffect(() => {
-    if (!isWB) {
+    if (!isWB || testMode) {
       setIsRestoring(false);
       return;
     }
@@ -2950,12 +2951,21 @@ export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl }: {
     );
   }
 
+  if (isWB) {
+    return (
+      <WBInstructionV2
+        denomination={denomination}
+        code={activeCode}
+        onReset={testMode ? undefined : handleWBReset}
+      />
+    );
+  }
+
   return (
     <Instruction
-      isWB={isWB}
+      isWB={false}
       denomination={denomination}
       code={activeCode}
-      onReset={isWB ? handleWBReset : undefined}
     />
   );
 }
