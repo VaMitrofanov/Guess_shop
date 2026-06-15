@@ -16,13 +16,11 @@
 
 ---
 
-## 🔴 ACTION-ITEM: VK_TOKEN на TG_bot (для admin→VK в прямом заказе) (2026-06-16)
+## ✅ ПРОВЕРЕНО: VK_TOKEN на TG_bot есть (admin→VK работает) (2026-06-16)
 
-**Весь admin→VK обмен в прямом заказе идёт из TG-бота** (`vkSend`/`vkSendPhoto` в `bots/tg/handlers.ts`: `spd:`, `sqr:`, `pay_ok`, `pay_no`, `cdo`). Эти вызовы используют `process.env.VK_TOKEN`. По таблице env в этом HANDOFF `VK_TOKEN` стоит **только на VK_bot** → если у TG_bot его нет, VK-покупатель прямого заказа **не получит ни реквизиты, ни QR, ни подтверждение оплаты** (ошибка глотается `catch`).
+**Весь admin→VK обмен в прямом заказе идёт из TG-бота** (`vkSend`/`vkSendPhoto` в `bots/tg/handlers.ts`: `spd:`, `sqr:`, `pay_ok`, `pay_no`, `cdo`) — использует `process.env.VK_TOKEN`. Был риск, что у TG_bot нет токена → проверено в проде: у **TG_bot `VK_TOKEN` И `VK_GROUP_ID` присутствуют** (Coolify envs). Таблица env ниже была неполной — `VK_TOKEN` стоит и на TG_bot тоже. Admin→VK путь рабочий, доп. действий не нужно.
 
-- **Проверить/добавить:** Coolify → TG_bot (`lyz78enntugna9em1biopinr`) → Env → `VK_TOKEN` = (то же значение, что на VK_bot `gmtpfqosgoz23vjyxyczuic9`). Затем redeploy TG_bot.
-- Я не смог проверить env сам — Coolify API prod-read заблокирован авто-классификатором в той сессии.
-- Кейс, на котором всплыло: прямой заказ **Рита Миклина** (VK, `vkId 868087873`), заказ `cmqfl3ziz…d5`, 100 R$ → 70 ₽, статус `AWAITING_PAYMENT`. Похоже, первый VK-прямой заказ, дошедший до шага оплаты — потому путь раньше не палился.
+**Поправка к таблице env:** `VK_TOKEN` есть на **VK_bot И TG_bot** (TG-бот шлёт VK-юзерам реквизиты/QR/подтверждения в прямом заказе).
 
 ---
 
@@ -43,9 +41,9 @@
 
 **Аудит прямого заказа (тупики):** флоу в целом рабочий (создание VK/TG, восстановление `PAYMENT_PENDING` из БД, VK-скрин→админ, `pay_ok` для VK — всё ок). Главные дыры — отправка QR (закрыто) и **VK_TOKEN на TG_bot** (см. ACTION-ITEM выше — без него Рита ничего не получит).
 
-**Проверки:** bots `tsc` = 17 (baseline, 0 новых), 0 ассетов в гите. **Не оттестировано вживую:** нажатие кнопки доступно только TG-админу; VK-доставка зависит от `VK_TOKEN` на TG_bot. Локально VK_TOKEN недоступен (в `.env` только TG_TOKEN), прогнать upload-пайплайн не смог.
+**Проверки:** bots `tsc` = 17 (baseline, 0 новых), 0 ассетов в гите. **VK upload-пайплайн `vkSendPhoto` проверен на реальном VK API в проде** (getMessagesUploadServer → upload → saveMessagesPhoto прошли, валидный attachment; `messages.send` не звал, чтобы не слать Рите). `VK_TOKEN` у TG_bot подтверждён. QR в БД читается (35259 байт). **Остаётся ручной шаг:** нажать `📷 Отправить QR` на карточке заказа (доступно только TG-админу) — это уже боевая отправка.
 
-**Деплой:** push в main `22ddeaf` → автодеплой TG_bot + VK_bot (менялся `bots/shared`). Web не пересобирался.
+**Деплой:** коммиты `22ddeaf` (код) + `16fc364` (docs) → push в main; затем явный force-redeploy обоих ботов через Coolify API, **оба `finished`, контейнеры `running`**. Web не пересобирался.
 
 ---
 
