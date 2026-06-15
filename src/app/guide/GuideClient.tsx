@@ -2957,6 +2957,7 @@ export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl, tes
         denomination={denomination}
         code={activeCode}
         onReset={testMode ? undefined : handleWBReset}
+        testMode={testMode}
       />
     );
   }

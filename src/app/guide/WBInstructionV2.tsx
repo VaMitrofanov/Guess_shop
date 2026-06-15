@@ -68,7 +68,8 @@ export default function WBInstructionV2({
   denomination,
   code,
   onReset,
-}: { denomination?: number; code?: string; onReset?: () => void }) {
+  testMode = false,
+}: { denomination?: number; code?: string; onReset?: () => void; testMode?: boolean }) {
   const nomDefault = denomination && denomination > 0 ? denomination : 1000;
   const [nom, setNom] = useState<number>(nomDefault);
   const [copied, setCopied] = useState(false);
@@ -237,13 +238,28 @@ export default function WBInstructionV2({
         <div className="wbi-cta wbi-reveal">
           <h3>Геймпасс готов? Открой бота и введи ник</h3>
           <div className="wbi-s">Номинал {nomDefault} R$ · цена пасса {calcPrice(nomDefault)} R$ · бот выкупит и пришлёт бонус за отзыв</div>
-          <div className="wbi-row">
-            <a className="wbi-tg" href={tgHref} target="_blank" rel="noopener noreferrer">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z" /></svg>
-              Получить в Telegram
-            </a>
-            <div className="wbi-vkwrap"><VKAuthButton mode="order" wbCode={code} /></div>
-          </div>
+          {testMode ? (
+            <div className="wbi-row">
+              <button className="wbi-tg" disabled aria-disabled="true" style={{ opacity: 0.5, cursor: "not-allowed" }}>
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z" /></svg>
+                Получить в Telegram
+              </button>
+              <button className="wbi-tg" disabled aria-disabled="true" style={{ opacity: 0.5, cursor: "not-allowed", background: "#0077ff" }}>
+                Войти через VK
+              </button>
+            </div>
+          ) : (
+            <div className="wbi-row">
+              <a className="wbi-tg" href={tgHref} target="_blank" rel="noopener noreferrer">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z" /></svg>
+                Получить в Telegram
+              </a>
+              <div className="wbi-vkwrap"><VKAuthButton mode="order" wbCode={code} /></div>
+            </div>
+          )}
+          {testMode && (
+            <div className="wbi-s" style={{ marginTop: 8, color: "#f0a020" }}>testdev: кнопки Telegram/VK отключены — бот и админ-оповещения не дёргаются</div>
+          )}
           <a className="wbi-support" href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer">Остались вопросы? Написать живому менеджеру (не боту) →</a>
         </div>
 
