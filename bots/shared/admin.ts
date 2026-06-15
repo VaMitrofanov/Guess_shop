@@ -290,6 +290,7 @@ export const CB = {
   cancelDirect:        "cancel_direct",
   directPack:          (amount: number) => `dp:${amount}`,                                // 8 b max
   sendPaymentDetails:  (orderId: string) => `spd:${orderId}`,                             // 29 b
+  sendQr:              (orderId: string) => `sqr:${orderId}`,                             // 29 b
   cancelDirectOrder:   (orderId: string) => `cdo:${orderId}`,                             // 29 b
   paymentOk:           (orderId: string, userId: string) => `pay_ok:${orderId}:${userId}`, // 59 b
   paymentNo:           (orderId: string, userId: string) => `pay_no:${orderId}:${userId}`, // 59 b
@@ -462,8 +463,11 @@ export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload):
   const reply_markup = {
     inline_keyboard: [
       [
-        { text: "💳 Отправить реквизиты", callback_data: CB.sendPaymentDetails(payload.orderId) },
-        { text: "❌ Отменить заказ",      callback_data: CB.cancelDirectOrder(payload.orderId) },
+        { text: "📷 Отправить QR (СБП)", callback_data: CB.sendQr(payload.orderId) },
+      ],
+      [
+        { text: "💳 Реквизиты текстом", callback_data: CB.sendPaymentDetails(payload.orderId) },
+        { text: "❌ Отменить заказ",     callback_data: CB.cancelDirectOrder(payload.orderId) },
       ],
       [
         { text: "📊 Открыть в дашборде", web_app: { url: twaUrl } },

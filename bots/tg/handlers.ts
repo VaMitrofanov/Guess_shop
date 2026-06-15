@@ -9,7 +9,8 @@ import { Telegraf, Markup } from "telegraf";
 // telegraf/types re-exports the full typegram surface (official subpath export)
 import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
-import { vkSend, stripHtml, tgSend, escapeHtml } from "../shared/notify";
+import { vkSend, vkSendPhoto, stripHtml, tgSend, escapeHtml } from "../shared/notify";
+import { getSbpQrBuffer } from "../shared/sbp";
 import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUserHurdle, sendAdminDirectOrderCard, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS, formatUserHandle, formatUserHandleHtml } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectAmount, pendingDirectOrder, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectOrderState, type LinkState } from "./session";
 import { getGamepassDetails } from "../shared/roblox";
@@ -1786,6 +1787,20 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
 export function registerPhoto(bot: Telegraf): void {
   bot.on("photo", async (ctx) => {
     const tgId = String(ctx.from.id);
+
+    // 0z. ADMIN is mid «ввод реквизитов» but sent a photo instead of text.
+    // Without this guard the photo falls through to the review branch and the
+    // admin gets a confusing «у тебя нет выполненных заказов». Steer them to
+    // the dedicated QR button (static СБП QR) or text entry.
+    if (pendingPaymentDetails.has(ctx.from.id)) {
+      await ctx.reply(
+        "📷 Чтобы отправить покупателю QR — нажми кнопку «Отправить QR (СБП)» на карточке заказа.\n" +
+        "А реквизиты текстом просто напиши сообщением.",
+        { parse_mode: "HTML" }
+      );
+      return;
+    }
+
     const user = await (db as any).user.findUnique({ where: { tgId } });
     if (!user) return;
 
@@ -2443,6 +2458,88 @@ export function registerCallbacks(bot: Telegraf): void {
         { parse_mode: "HTML" }
       );
       await ctx.answerCbQuery();
+      return;
+    }
+
+    // sqr: admin sends the static СБП QR photo to the buyer (one tap).
+    // Works for both TG (multipart from buffer) and VK (vkSendPhoto upload).
+    // Allowed in AWAITING_PAYMENT *and* PAYMENT_PENDING so the QR can be re-sent.
+    if (data.startsWith("sqr:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      const sqrOrderId = data.slice(4);
+      const sqrOrder = await (db as any).wbOrder.findUnique({ where: { id: sqrOrderId } });
+      if (!sqrOrder) { await ctx.answerCbQuery("Заказ не найден"); return; }
+      if (!["AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(sqrOrder.status)) {
+        await ctx.answerCbQuery("Заказ уже обрабатывается или завершён");
+        return;
+      }
+
+      const qr = await getSbpQrBuffer();
+      if (!qr) {
+        await ctx.answerCbQuery("QR не настроен");
+        await ctx.reply(
+          "⚠️ QR не настроен в БД (GlobalSettings.sbpQrBase64). " +
+          "Загрузи изображение или отправь реквизиты текстом.",
+          { parse_mode: "HTML" }
+        );
+        return;
+      }
+
+      const sqrShortId  = sqrOrderId.slice(-6).toUpperCase();
+      const rublePrice  = Math.round(sqrOrder.amount * DIRECT_RATE);
+      await (db as any).wbOrder.update({
+        where: { id: sqrOrderId },
+        data:  { status: "PAYMENT_PENDING", paymentDetails: "СБП QR" },
+      });
+
+      const sqrUser = await (db as any).user.findUnique({ where: { id: sqrOrder.userId } });
+      let delivered = false;
+
+      if (sqrUser?.tgId) {
+        try {
+          await bot.telegram.sendPhoto(
+            sqrUser.tgId,
+            { source: qr },
+            {
+              caption:
+                `💳 <b>Оплата заказа #${sqrShortId}</b>\n\n` +
+                `Сумма к оплате: <b>${rublePrice} ₽</b>\n` +
+                `Отсканируй QR в приложении банка (по СБП) и переведи <b>точную сумму</b>.\n\n` +
+                `После перевода пришли сюда <b>скриншот или чек об оплате</b> (фотографией, не файлом) 👇`,
+              parse_mode: "HTML",
+              reply_markup: {
+                inline_keyboard: [[{ text: "📊 Проверить статус", callback_data: CB.refreshStatus }]],
+              },
+            }
+          );
+          pendingPaymentScreenshot.set(parseInt(sqrUser.tgId), sqrOrderId);
+          delivered = true;
+        } catch (err) {
+          console.error("[TG] sqr sendPhoto failed:", err);
+        }
+      } else if (sqrUser?.vkId) {
+        // VK screenshot routing is DB-driven (PAYMENT_PENDING + isDirectOrder).
+        delivered = await vkSendPhoto(
+          sqrUser.vkId,
+          qr,
+          `💳 Оплата заказа #${sqrShortId}\n\n` +
+          `Сумма к оплате: ${rublePrice} ₽\n` +
+          `Отсканируй QR в приложении банка (по СБП) и переведи точную сумму.\n\n` +
+          `После перевода пришли сюда скриншот или чек об оплате (фотографией, не файлом) 👇`
+        );
+      }
+
+      if (delivered) {
+        await ctx.reply(`✅ QR отправлен покупателю (Заказ #${sqrShortId}).`, { parse_mode: "HTML" });
+        await ctx.answerCbQuery("✅ QR отправлен");
+      } else {
+        await ctx.reply(
+          `⚠️ Не удалось доставить QR покупателю (Заказ #${sqrShortId}). ` +
+          `Проверь, что у пользователя есть активный диалог с ботом.`,
+          { parse_mode: "HTML" }
+        );
+        await ctx.answerCbQuery("Не доставлено");
+      }
       return;
     }
 
