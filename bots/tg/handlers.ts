@@ -14,8 +14,7 @@ import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUser
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectAmount, pendingDirectOrder, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectOrderState, type LinkState } from "./session";
 import { getGamepassDetails } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
-import { buildAdminKeyboard, routeAdminCallback } from "./admin";
-import { renderExtendedCard } from "./admin/hub-orders";
+import { buildAdminKeyboard } from "./admin";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -2096,10 +2095,6 @@ export function registerCallbacks(bot: Telegraf): void {
       return;
     }
 
-    // ── Route to admin hub handlers first ─────────────────────────────────
-    const hubHandled = await routeAdminCallback(bot, ctx, data, adminId);
-    if (hubHandled) return;
-
     // ── ✅ admin_ok: order completed ──────────────────────────────────────
     if (data.startsWith("admin_ok:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
@@ -2819,10 +2814,6 @@ export function registerCallbacks(bot: Telegraf): void {
       await ctx.reply(text, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } });
       return ctx.answerCbQuery();
     }
-
-    // Legacy admin_stats / admin_queue / admin_codes callbacks are now
-    // handled by routeAdminCallback() above (hub system).
-
 
     // ── 📸 review_hint: prompt user to send review screenshot ────────────
     if (data === CB.reviewHint) {
