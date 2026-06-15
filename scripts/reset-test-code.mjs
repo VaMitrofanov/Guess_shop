@@ -17,32 +17,40 @@ const { Pool } = pkg;
 dotenv.config({ path: ".env.local" });
 dotenv.config(); // fallback to .env
 
-const TEST_CODE        = "TESTDEV";
-const TEST_DENOMINATION = 500;
+// Permanent test codes. All carry isTest=true so they never leak into stats.
+const TEST_CODES = [
+  { code: "TESTDEV", denomination: 500 },
+  { code: "TEST300", denomination: 300 },
+  { code: "TEST500", denomination: 500 },
+  { code: "TEST700", denomination: 700 },
+];
 
 const pool    = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma  = new PrismaClient({ adapter });
 
 async function main() {
-  const result = await prisma.wbCode.upsert({
-    where:  { code: TEST_CODE },
-    update: {
-      status:        "AVAILABLE",
-      isUsed:        false,
-      userId:        null,
-      sessionId:     null,
-      reservedUntil: null,
-      usedAt:        null,
-    },
-    create: {
-      code:         TEST_CODE,
-      denomination: TEST_DENOMINATION,
-      status:       "AVAILABLE",
-    },
-  });
-
-  console.log(`✅ Test code ready: ${result.code}  (${result.denomination} R$, status=${result.status})`);
+  for (const { code, denomination } of TEST_CODES) {
+    const result = await prisma.wbCode.upsert({
+      where:  { code },
+      update: {
+        status:        "AVAILABLE",
+        isUsed:        false,
+        isTest:        true,
+        userId:        null,
+        sessionId:     null,
+        reservedUntil: null,
+        usedAt:        null,
+      },
+      create: {
+        code,
+        denomination,
+        status: "AVAILABLE",
+        isTest: true,
+      },
+    });
+    console.log(`✅ Test code ready: ${result.code}  (${result.denomination} R$, status=${result.status})`);
+  }
 }
 
 main()
