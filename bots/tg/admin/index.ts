@@ -9,7 +9,7 @@
 import type { Telegraf, Context } from "telegraf";
 import { Markup } from "telegraf";
 import { ADMIN_IDS, CB } from "../../shared/admin";
-import { buildAdminKeyboard, updateMainMenu } from "./menu";
+import { buildAdminKeyboard } from "./menu";
 import {
   showOrdersHub, showActiveOrders, showOrderCard, enterSearchMode,
   showHistory24h, showRejectedOrders, showBatchView, confirmBatchFulfill, takeOrderInWork,
@@ -50,7 +50,7 @@ import {
 } from "../session";
 
 // Re-export for external use
-export { updateMainMenu, buildAdminKeyboard };
+export { buildAdminKeyboard };
 
 /**
  * Register all admin dashboard handlers on the bot.

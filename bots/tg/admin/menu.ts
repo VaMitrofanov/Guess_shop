@@ -10,14 +10,9 @@
  * on the full width (Telegram renders web_app reply buttons in the brand
  * blue). The Menu Button left of the input (`setupMenuButton` in `index.ts`)
  * stays as a second entry point.
- *
- * `updateMainMenu()` is kept as a no-op surface for callers that previously
- * refreshed counters — there is nothing to refresh in a static one-button
- * keyboard, but we leave the function so existing callers (`handlers.ts:1771`,
- * `hub-orders.ts:523`) compile without changes.
  */
 
-import { Markup, type Telegraf } from "telegraf";
+import { Markup } from "telegraf";
 
 /** TWA URL used by the Launch button. Coolify sets NEXT_PUBLIC_APP_URL. */
 function twaUrl(uid?: string | number): string {
@@ -40,20 +35,4 @@ export async function buildAdminKeyboard(uid?: string | number) {
   return Markup.keyboard([
     [Markup.button.webApp("🚀 Launch Dashboard", twaUrl(uid))],
   ]).resize().persistent();
-}
-
-/**
- * Refresh the Reply Keyboard for all admins. No-op in the new design.
- *
- * Previously this pushed a "📋 В очереди: N" status message to update
- * the live-counter labels on the 6-button keyboard. The single Launch
- * button has no counter, so a forced push would just spam admin chats
- * after every order. Counters now live in the TWA bottom-nav badge
- * (`TwaApp.tsx` polls /api/twa/orders?status=PENDING&limit=1 every 30 s).
- *
- * Kept as an exported no-op so existing call sites (post-fulfilment,
- * post-rejection) keep compiling. Remove after sprint 2 phase C cleanup.
- */
-export async function updateMainMenu(_bot: Telegraf): Promise<void> {
-  return;
 }

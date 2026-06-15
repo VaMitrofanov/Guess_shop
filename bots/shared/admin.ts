@@ -198,8 +198,6 @@ export const CB = {
   reviewNo:   (orderId: string, userId: string) => `review_no:${orderId}:${userId}`, // 61 b
 
   // Safety confirmation steps
-  confirmRejectOrder:  (orderId: string) => `confirm_reject:${orderId}`,
-  cancelRejectOrder:   (orderId: string) => `cancel_reject:${orderId}`,
   // Shortened to fit Telegram's 64-byte callback_data limit (CUID×2 = 50 bytes used).
   // confirm_rev_no: was 66 b, cancel_rev_no: was 65 b — both exceeded the limit.
   confirmReviewReject: (orderId: string, userId: string) => `crn:${orderId}:${userId}`,
@@ -216,7 +214,6 @@ export const CB = {
   orderRejectCustom:  (orderId: string) => `ord_rr_txt:${orderId}`,
 
   // ── Hub navigation ─────────────────────────────────────────────────────────
-  hubOrders:       "hub_orders",
   hubStats:        "hub_stats",
   hubWildberries:  "hub_wb",
   hubSystem:       "hub_sys",
@@ -229,9 +226,7 @@ export const CB = {
   ordersBatch:     "ord_batch",
   ordersBatchConfirm: "ord_batch_ok",
   orderTakeWork:   (id: string) => `ord_work:${id}`,
-  orderComplete:   (id: string) => `ord_done:${id}`,
   orderView:       (id: string) => `admin_view:${id}`,
-  orderContact:    (id: string, p: string) => `ord_ct:${id}:${p}`,
   ordersBack:      "ord_back",
 
   // ── Stats hub ──────────────────────────────────────────────────────────────
@@ -246,19 +241,15 @@ export const CB = {
   wbProducts:      "wb_prods",
   wbRecentOrders:  "wb_recent",
   wbEditPrice:     (nmID: number) => `wb_edit_p:${nmID}`,
-  wbUpdatePrice:   (nmID: number, price: number) => `wb_upd_p:${nmID}:${price}`,
   wbDownload:      "wb_download",
   wbRefresh:       "wb_refresh",
   wbStocks:        "wb_stocks",
   wbDynamics:      "wb_dynamics",
   wbUnitEcon:      "wb_unit_econ",
-  wbUnitEconItem:  (nmID: number) => `wb_ue:${nmID}`,
   wbReviews:       "wb_reviews",
   wbAnswerReview:  (id: string) => `wb_ans_r:${id}`,
   wbAnswerQuestion: (id: string) => `wb_ans_q:${id}`,
   wbFbs:           "wb_fbs",
-  wbEditCost:      (nmID: number) => `wb_cost:${nmID}`,
-  wbEditLogistics: (nmID: number) => `wb_log:${nmID}`,
   wbEditAd:        (nmID: number) => `wb_ad:${nmID}`,
   wbEditDenom:     (nmID: number) => `wb_denom_ue:${nmID}`,
   wbUeSettings:    "wb_ue_settings",
@@ -275,7 +266,6 @@ export const CB = {
   sysLogs:            (name: string) => `sys_log:${name}`,
   sysRestart:         (name: string) => `sys_rst:${name}`,
   sysConfirmRestart:  (name: string) => `sys_crst:${name}`,
-  sysCancelRestart:   (name: string) => `sys_xrst:${name}`,
   sysRefresh:         "sys_refresh",
 
   // ── Rates hub ──────────────────────────────────────────────────────────────
@@ -293,11 +283,6 @@ export const CB = {
   bossrobuxSearch:  "br_search",
   bossrobuxBuy:     (i: number) => `br_buy:${i}`,    // ≤ 10 b
   bossrobuxConfirm: (i: number) => `br_ok:${i}`,     // ≤ 9 b
-
-  // ── Legacy (kept for backwards compatibility) ──────────────────────────────
-  adminStats: "admin_stats",
-  adminQueue: "admin_queue",
-  adminCodes: "admin_codes",
 
   // ── Direct order ──────────────────────────────────────────────────────────
   startDirect:         "start_direct",

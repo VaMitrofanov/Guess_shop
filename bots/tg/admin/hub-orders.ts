@@ -11,7 +11,6 @@ import { db } from "../../shared/db";
 import { CB, ADMIN_IDS, formatUserHandle } from "../../shared/admin";
 import { sendOrEditWidget, editWidget } from "./widgets";
 import { pendingAdminSearch, pendingBatchFulfill } from "../session";
-import { updateMainMenu } from "./menu";
 
 // ── VK community ID for direct-message links ────────────────────────────────
 const VK_GROUP_ID = process.env.VK_GROUP_ID ?? "";
@@ -520,7 +519,6 @@ export async function confirmBatchFulfill(
     Markup.inlineKeyboard([[Markup.button.callback("⬅️ К заказам", CB.ordersBack)]])
   );
 
-  await updateMainMenu(bot);
   await ctx.answerCbQuery(`✅ ${orders.length} заказов выполнено`);
   } catch (err) {
     console.error("[confirmBatchFulfill] error:", err);

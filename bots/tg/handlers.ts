@@ -14,7 +14,7 @@ import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUser
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectAmount, pendingDirectOrder, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectOrderState, type LinkState } from "./session";
 import { getGamepassDetails } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
-import { buildAdminKeyboard, updateMainMenu, routeAdminCallback } from "./admin";
+import { buildAdminKeyboard, routeAdminCallback } from "./admin";
 import { renderExtendedCard } from "./admin/hub-orders";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -2137,7 +2137,6 @@ export function registerCallbacks(bot: Telegraf): void {
         try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch { }
 
         if (user) await notifyUserCompleted(bot, user, orderId, order.amount, order.isDirectOrder ?? false);
-        await updateMainMenu(bot);
         await ctx.answerCbQuery("✅ Выполнено");
       } catch (err) {
         console.error("[admin_ok] error:", err);
