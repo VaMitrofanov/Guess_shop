@@ -8,11 +8,11 @@ export const metadata: Metadata = {
 };
 
 interface GuidPageProps {
-  searchParams: Promise<{ source?: string; skip?: string; code?: string; test?: string; nom?: string }>;
+  searchParams: Promise<{ source?: string; skip?: string; code?: string; test?: string; nom?: string; preview?: string }>;
 }
 
 export default async function GuidePage({ searchParams }: GuidPageProps) {
-  const { source, skip, code, test, nom } = await searchParams;
+  const { source, skip, code, test, nom, preview } = await searchParams;
   const isWB = source === "wb";
   const skipGate = isWB && !!skip;
   // code passed by TG/VK bot so the instruction page opens even in Telegram's WebView
@@ -22,6 +22,13 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
   //   /guide?source=wb&test=1[&nom=1000]   or   /guide?source=wb&code=TESTDEV
   const codeUp = code?.trim().toUpperCase();
   const testMode = isWB && (test === "1" || codeUp === "TESTDEV");
+  // Permanent "just show me the instruction" link (Traefik only forwards
+  // Path(/guide)&Query(source=wb) to the guide service, so this must live on the
+  // /guide route — a nested /guide/preview path never reaches the container).
+  // Opens the real instruction directly (no gate/intro/bot/DB) with WORKING
+  // Telegram/VK buttons (unlike test=1, where they are inert):
+  //   /guide?source=wb&preview=1[&nom=1000]
+  const previewMode = isWB && preview === "1";
   const testNom = nom ? Math.max(0, parseInt(nom, 10) || 0) : undefined;
 
   return (
@@ -33,7 +40,7 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
         style={{ display: "none" }}
         aria-hidden="true"
       />
-      <GuideClient isWB={isWB} skipGate={skipGate} wbCodeFromUrl={wbCodeFromUrl} testMode={testMode} testNom={testNom} />
+      <GuideClient isWB={isWB} skipGate={skipGate} wbCodeFromUrl={wbCodeFromUrl} testMode={testMode} previewMode={previewMode} testNom={testNom} />
     </>
   );
 }

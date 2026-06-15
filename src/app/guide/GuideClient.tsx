@@ -2874,16 +2874,20 @@ function WBIntro({ onDone }: { onDone: () => void }) {
 
 // ─── Main export ───────────────────────────────────────────────────────────────
 
-export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl, testMode = false, testNom }: { isWB: boolean; skipGate?: boolean; wbCodeFromUrl?: string; testMode?: boolean; testNom?: number }) {
+export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl, testMode = false, previewMode = false, testNom }: { isWB: boolean; skipGate?: boolean; wbCodeFromUrl?: string; testMode?: boolean; previewMode?: boolean; testNom?: number }) {
+  // Both modes open the instruction directly (no gate/intro/bot/DB/session).
+  // Difference: testMode renders the Telegram/VK buttons inert (silent QA),
+  // previewMode keeps them working — "as if a code was already activated".
+  const directInstruction = testMode || previewMode;
   const [phase, setPhase] = useState<"intro" | "gate" | "instruction">(
-    !isWB ? "instruction" : testMode ? "instruction" : skipGate ? "gate" : "intro"
+    !isWB ? "instruction" : directInstruction ? "instruction" : skipGate ? "gate" : "intro"
   );
-  const [denomination, setDenomination] = useState<number>(testMode ? (testNom && testNom > 0 ? testNom : 1000) : 0);
+  const [denomination, setDenomination] = useState<number>(directInstruction ? (testNom && testNom > 0 ? testNom : 1000) : 0);
   const [activeCode, setActiveCode] = useState<string>(testMode ? "TESTDEV" : "");
   const [isRestoring, setIsRestoring] = useState(true);
 
   useEffect(() => {
-    if (!isWB || testMode) {
+    if (!isWB || directInstruction) {
       setIsRestoring(false);
       return;
     }
@@ -2956,7 +2960,7 @@ export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl, tes
       <WBInstructionV2
         denomination={denomination}
         code={activeCode}
-        onReset={testMode ? undefined : handleWBReset}
+        onReset={directInstruction ? undefined : handleWBReset}
         testMode={testMode}
       />
     );
