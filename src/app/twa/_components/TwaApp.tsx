@@ -5,6 +5,7 @@ import BottomNav from "./BottomNav";
 import OrdersScreen from "./screens/OrdersScreen";
 import { ToastHost } from "./Toast";
 import { C } from "./theme";
+import { haptic } from "./haptics";
 
 // Dynamically load non-default screens so the initial JS bundle is just
 // the OrdersScreen (default tab) + TwaApp shell. BossrobuxScreen alone is
@@ -53,6 +54,12 @@ const SCREEN_TITLES: Record<Screen, string> = {
   bossrobux:  "Boss Robux",
   settings:   "Настройки",
   system:     "Система",
+};
+
+// Drill-down screens reachable from a parent tab (not in the bottom nav).
+// The title bar shows a back chevron to the parent instead of the date.
+const SCREEN_PARENT: Partial<Record<Screen, Screen>> = {
+  system: "settings",
 };
 
 export default function TwaApp() {
@@ -259,12 +266,40 @@ export default function TwaApp() {
       fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       color: C.textPrimary,
     }}>
-      {/* Title bar */}
+      {/* Title bar — doubles as a context zone: back chevron on drill-down
+          screens, date otherwise. */}
       <div style={{ padding: "14px 16px 10px", borderBottom: `1px solid ${C.hairline}`, flexShrink: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 18, letterSpacing: -0.3 }}>{SCREEN_TITLES[screen]}</div>
-        <div style={{ fontSize: 12, color: C.textTertiary, marginTop: 1 }}>
-          {new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}
-        </div>
+        {(() => {
+          const parent = SCREEN_PARENT[screen];
+          if (parent) {
+            return (
+              <>
+                <button
+                  className="twa-press-sm"
+                  onClick={() => { haptic.select(); setScreen(parent); }}
+                  style={{
+                    background: "none", border: "none", padding: 0, cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 3,
+                    color: C.accent, fontSize: 14, fontWeight: 500, marginBottom: 2,
+                    fontFamily: "inherit",
+                  }}
+                >
+                  <span style={{ fontSize: 19, lineHeight: 1, marginTop: -1 }}>‹</span>
+                  {SCREEN_TITLES[parent]}
+                </button>
+                <div style={{ fontWeight: 700, fontSize: 18, letterSpacing: -0.3 }}>{SCREEN_TITLES[screen]}</div>
+              </>
+            );
+          }
+          return (
+            <>
+              <div style={{ fontWeight: 700, fontSize: 18, letterSpacing: -0.3 }}>{SCREEN_TITLES[screen]}</div>
+              <div style={{ fontSize: 12, color: C.textTertiary, marginTop: 1 }}>
+                {new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}
+              </div>
+            </>
+          );
+        })()}
       </div>
 
       {/* Content */}

@@ -1560,12 +1560,21 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
     `📊 Статус: <b>${statusLabels[order.status] || order.status}</b>${reasonLine}` +
     (order.gamepassUrl ? `\n\n🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>` : ``);
 
-  // Action buttons for PENDING and IN_PROGRESS orders
+  // Action buttons for PENDING and IN_PROGRESS orders, plus a one-tap deep-link
+  // into the TWA Orders screen prefocused on this order (?q=<shortId> matches
+  // the order id suffix). Mirrors sendAdminOrderCard so every admin card —
+  // new-order notify, search result, status refresh — leads back into the app.
+  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(shortId)}`;
   const reply_markup = (order.status === "PENDING" || order.status === "IN_PROGRESS") ? {
-    inline_keyboard: [[
-      { text: "✅ ВЫКУПЛЕНО", callback_data: CB.adminOk(order.id) },
-      { text: "❌ ОШИБКА", callback_data: `admin_reject_init:${order.id}` }
-    ]]
+    inline_keyboard: [
+      [
+        { text: "✅ ВЫКУПЛЕНО", callback_data: CB.adminOk(order.id) },
+        { text: "❌ ОШИБКА", callback_data: `admin_reject_init:${order.id}` }
+      ],
+      [
+        { text: "📊 Открыть в дашборде", web_app: { url: twaUrl } }
+      ]
+    ]
   } : undefined;
 
   return { text, reply_markup };
