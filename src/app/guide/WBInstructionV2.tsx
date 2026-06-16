@@ -132,8 +132,8 @@ export default function WBInstructionV2({
           <Step n="1">
             <div className="wbi-cols wbi-media">
               <div><div className="wbi-ttl">Открой Creator Hub</div>
-                <p className="wbi-t">Это официальный сайт Roblox — там же, где ты играешь и покупаешь робуксы. Кнопка ниже — быстрый путь в нужный раздел.</p>
-                <p className="wbi-s" style={{ marginTop: 6 }}>Войди в свой аккаунт Roblox в этом браузере — иначе ссылка откроется не туда.</p></div>
+                <p className="wbi-t">Это официальный сайт Roblox — где ты играешь и покупаешь робуксы. Кнопка ведёт прямо в нужный раздел.</p>
+                <p className="wbi-s" style={{ marginTop: 6 }}>Открой её в браузере, где вошёл в свой аккаунт Roblox.</p></div>
               <div className="wbi-mcol">
                 <a className="wbi-btnL" href="https://create.roblox.com/dashboard/creations" target="_blank" rel="noopener noreferrer">🔗 Открыть Creator Hub</a>
                 <div className="wbi-url">create.roblox.com/dashboard/creations</div>
@@ -199,15 +199,14 @@ export default function WBInstructionV2({
             <div className="wbi-ttl">Скопируй и вставь цену</div>
             <p className="wbi-t">Вот цена для твоего паса. Нажми на неё, чтобы скопировать, и вставь её в поле <b>Default Price</b> (зелёная рамка) на вкладке <b>Sales</b>, затем нажми <b>Save Changes</b>.</p>
             <div className="wbi-calc">
-              <div className="wbi-lbl">ВАША ЦЕНА ПАСА</div>
-              <div className="wbi-nomrow">Твой номинал: <input className="wbi-input" type="number" min={1} inputMode="numeric" value={nom}
+              <div className="wbi-lbl">ЦЕНА ПАСА — ВСТАВЬ ЕЁ В ROBLOX</div>
+              <div className="wbi-nomrow">Номинал твоей карты: <input className="wbi-input" type="number" min={1} inputMode="numeric" value={nom}
                 onChange={(e) => setNom(Math.max(0, parseInt(e.target.value || "0", 10)))} /> R$</div>
               <div className="wbi-v wbi-copy" onClick={copy} role="button" tabIndex={0}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") copy(); }}>
                 <span>{price}</span><span className="wbi-ci">{copied ? "✓" : "📋"}</span>
               </div>
-              <div className="wbi-sub">= номинал ÷ 0.7 · Roblox берёт 30%</div>
-              <div className="wbi-copyhint">{copied ? `✓ Скопировано: ${price}` : "✅ Нажми на цену, чтобы скопировать"}</div>
+              <div className="wbi-copyhint">{copied ? `✓ Скопировано: ${price}` : `Нажми → скопируется. Выстави эту цену, чтобы на руки пришло ${nom} R$`}</div>
             </div>
             <figure className="wbi-figure wbi-shot wbi-spot">
               <span className="wbi-priceshot"><img src="/guide/wb-step6-price.jpg" alt="Default Price — вставь цену"  loading="lazy" decoding="async" /><span className="wbi-liveprice">{price}</span></span>
