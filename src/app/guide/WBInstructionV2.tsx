@@ -242,17 +242,18 @@ export default function WBInstructionV2({
             <div className="wbi-row">
               <button className="wbi-tg" disabled aria-disabled="true" style={{ opacity: 0.5, cursor: "not-allowed" }}>
                 <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z" /></svg>
-                Получить в Telegram
+                <span>Telegram</span>
               </button>
-              <button className="wbi-tg" disabled aria-disabled="true" style={{ opacity: 0.5, cursor: "not-allowed", background: "#0077ff" }}>
-                Войти через VK
+              <button className="wbi-tg" disabled aria-disabled="true" style={{ opacity: 0.5, cursor: "not-allowed", background: "linear-gradient(180deg,#3d8bff,#0a66e0)" }}>
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.785 16.241s.288-.032.435-.194c.135-.149.13-.43.13-.43s-.019-1.306.572-1.497c.582-.188 1.331 1.252 2.124 1.806.6.42 1.056.328 1.056.328l2.122-.03s1.111-.07.585-.957c-.043-.073-.306-.658-1.578-1.853-1.331-1.252-1.153-1.049.451-3.224.977-1.323 1.367-2.13 1.245-2.474-.116-.328-.834-.241-.834-.241l-2.387.015s-.177-.024-.308.056c-.128.078-.21.262-.21.262s-.378 1.022-.882 1.892c-1.062 1.834-1.487 1.931-1.661 1.816-.405-.267-.304-1.069-.304-1.638 0-1.778.267-2.519-.51-2.711-.258-.064-.448-.106-1.108-.113-.847-.009-1.564.003-1.97.207-.27.136-.479.439-.351.456.157.022.514.099.703.363.244.341.236 1.108.236 1.108s.14 2.083-.328 2.342c-.32.178-.76-.185-1.706-1.85-.484-.853-.85-1.795-.85-1.795s-.07-.176-.196-.27c-.152-.114-.365-.15-.365-.15l-2.268.015s-.34.01-.466.16c-.111.135-.009.412-.009.412s1.776 4.221 3.787 6.349c1.844 1.95 3.938 1.822 3.938 1.822h.949z" /></svg>
+                <span>ВКонтакте</span>
               </button>
             </div>
           ) : (
             <div className="wbi-row">
               <a className="wbi-tg" href={tgHref} target="_blank" rel="noopener noreferrer">
                 <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z" /></svg>
-                Получить в Telegram
+                <span>Telegram</span>
               </a>
               <div className="wbi-vkwrap"><VKAuthButton mode="order" wbCode={code} /></div>
             </div>
@@ -362,10 +363,14 @@ const CSS = `
 .wbi-cta{border:1px solid rgba(201,168,76,.45);background:radial-gradient(circle at 50% 0,rgba(201,168,76,.12),transparent 70%),#0a0d18;border-radius:18px;padding:26px;margin-top:30px;text-align:center}
 .wbi-cta h3{font-size:19px;color:#fff}.wbi-cta .wbi-s{font-size:13px;color:var(--mut);margin-top:5px}
 .wbi-row{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:20px;align-items:stretch}
-.wbi-tg{display:inline-flex;align-items:center;justify-content:center;gap:12px;padding:20px 34px;border-radius:14px;font-size:19px;font-weight:800;color:#fff;text-decoration:none;transition:transform .15s,box-shadow .15s;flex:1 1 240px;max-width:300px;background:linear-gradient(180deg,#2aa8e0,#1f8fc6);border:1px solid rgba(34,158,217,.8);box-shadow:0 5px 0 #14638c,0 10px 22px rgba(34,158,217,.32)}
-.wbi-tg svg{width:26px;height:26px}
+.wbi-tg{display:inline-flex;align-items:center;justify-content:center;gap:12px;padding:20px 30px;border-radius:14px;font-size:21px;font-weight:800;letter-spacing:.3px;white-space:nowrap;color:#fff;text-decoration:none;transition:transform .15s,box-shadow .15s;flex:1 1 240px;max-width:300px;background:linear-gradient(180deg,#2aa8e0,#1f8fc6);border:1px solid rgba(34,158,217,.8);box-shadow:0 5px 0 #14638c,0 10px 22px rgba(34,158,217,.32)}
+.wbi-tg svg{width:28px;height:28px;flex-shrink:0}
 .wbi-tg:hover{transform:translateY(-3px)}.wbi-tg:active{transform:translateY(1px)}
-.wbi-vkwrap{flex:1 1 240px;max-width:300px;display:flex;align-items:center;justify-content:center;border-radius:14px;background:linear-gradient(180deg,#3d8bff,#0a66e0);border:1px solid rgba(0,119,255,.8);box-shadow:0 5px 0 #0a4aa0,0 10px 22px rgba(0,119,255,.32);padding:8px 12px;min-height:64px}
+.wbi-vkwrap{flex:1 1 240px;max-width:300px;display:flex;align-items:center;justify-content:center;border-radius:14px;background:linear-gradient(180deg,#3d8bff,#0a66e0);border:1px solid rgba(0,119,255,.8);box-shadow:0 5px 0 #0a4aa0,0 10px 22px rgba(0,119,255,.32);padding:8px 12px;min-height:66px}
+/* Scoped: enlarge the VK button label to match Telegram (does not touch VKAuthButton's global style elsewhere) */
+.wbi-vkwrap button{gap:12px!important}
+.wbi-vkwrap button span{font-size:21px!important;font-weight:800!important;text-transform:none!important;letter-spacing:.3px!important}
+.wbi-vkwrap button svg{width:28px!important;height:28px!important;color:#fff!important;flex-shrink:0}
 .wbi-support{display:inline-block;margin-top:22px;font-size:13px;color:var(--gold);text-decoration:none;border-bottom:1px solid rgba(201,168,76,.3)}
 .wbi-note{font-size:12px;color:#5e6678;text-align:center;margin-top:26px;font-style:italic}
 .wbi-reveal{opacity:0;transform:translateY(26px);transition:opacity .65s cubic-bezier(.2,.7,.2,1),transform .65s cubic-bezier(.2,.7,.2,1)}
