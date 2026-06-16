@@ -60,7 +60,7 @@ async function rePromptAfterSupport(vkUserId: number): Promise<void> {
     let msg = "🤖 Бот снова на связи!";
     if (state?.type === "AWAITING_LINK") {
       const passPrice = Math.ceil(state.denomination / 0.7);
-      msg = `🤖 Бот снова на связи! Пришли свой ник в Roblox — найду геймпасс сам 🔎\n📌 Цена геймпасса: ${passPrice} R$\n\nТакже можно прислать ссылку или Asset ID.`;
+      msg = `🤖 Бот снова на связи! Цена геймпасса: ${passPrice} R$\n\nНапиши свой ник в Roblox — найду геймпасс 🔎`;
     }
     await _vkApi.messages.send({ peer_id: vkUserId, message: msg, random_id: Date.now() + Math.floor(Math.random() * 1000) });
   } catch (e) {
@@ -533,22 +533,20 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       const custStatus = await getCustomerStatus(String(vkUserId), "VK");
       const firstName = await vkGetName(vkUserId);
       const isDirect = state.wbCode.startsWith("DIR-");
+      const startGuideUrl = isDirect
+        ? `https://robloxbank.ru/guide?source=direct`
+        : `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`;
       await ctx.reply({
         message:
           `${getGreeting(custStatus, firstName)}\n` +
-          (isDirect
-            ? `✅ У тебя есть активный прямой заказ на ${state.denomination} R$!\n\n`
-            : `✅ У тебя есть активный код!\n` +
-              `💎 Номинал: ${state.denomination} R$\n\n`) +
-          `Осталось совсем чуть-чуть — пришли свой ник в Roblox, и я найду геймпасс сам 🔎\n` +
-          `📌 Цена геймпасса: ${passPrice} R$\n\n` +
-          `Также можно прислать ссылку или Asset ID.\n\n` +
-          `❓ Не помнишь как создать геймпасс? Инструкция со скриншотами:\n` +
-          (isDirect
-            ? `👉 https://robloxbank.ru/guide?source=direct`
-            : `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`),
+          `✅ Код активирован! 📌 Цена геймпасса: ${passPrice} R$\n\n` +
+          `⚠️ Если геймпасс ещё не создан — пройди инструкцию:\n` +
+          `👉 ${startGuideUrl}\n\n` +
+          `Когда будет готов — напиши свой ник в Roblox 🔎`,
         keyboard: Keyboard.builder()
-          .textButton({ label: "🔎 Найти по моему нику Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+          .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: startGuideUrl })
+          .row()
+          .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
           .row()
           .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
           .inline(),
@@ -568,22 +566,20 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       const custStatus = await getCustomerStatus(String(vkUserId), "VK");
       const firstName = await vkGetName(vkUserId);
       const isDirect = restoredState.wbCode.startsWith("DIR-");
+      const restoredGuideUrl = isDirect
+        ? `https://robloxbank.ru/guide?source=direct`
+        : `https://robloxbank.ru/guide?source=wb&skip=1&code=${restoredState.wbCode}`;
       await ctx.reply({
         message:
           `${getGreeting(custStatus, firstName)}\n` +
-          (isDirect
-            ? `✅ У тебя есть активный прямой заказ на ${restoredState.denomination} R$!\n\n`
-            : `✅ У тебя есть активный код!\n` +
-              `💎 Номинал: ${restoredState.denomination} R$\n\n`) +
-          `Осталось совсем чуть-чуть — пришли свой ник в Roblox, и я найду геймпасс сам 🔎\n` +
-          `📌 Цена геймпасса: ${passPrice} R$\n\n` +
-          `Также можно прислать ссылку или Asset ID.\n\n` +
-          `❓ Не помнишь как создать геймпасс? Инструкция со скриншотами:\n` +
-          (isDirect
-            ? `👉 https://robloxbank.ru/guide?source=direct`
-            : `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${restoredState.wbCode}`),
+          `✅ Код активирован! 📌 Цена геймпасса: ${passPrice} R$\n\n` +
+          `⚠️ Если геймпасс ещё не создан — пройди инструкцию:\n` +
+          `👉 ${restoredGuideUrl}\n\n` +
+          `Когда будет готов — напиши свой ник в Roblox 🔎`,
         keyboard: Keyboard.builder()
-          .textButton({ label: "🔎 Найти по моему нику Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+          .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: restoredGuideUrl })
+          .row()
+          .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
           .row()
           .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
           .inline(),
@@ -609,12 +605,19 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       return;
     }
 
-    await ctx.reply(
-      "👋 Привет! Здесь ты можешь обменять Wildberries-карту на робуксы.\n\n" +
-      "Есть код с WB-карты? Напиши его прямо сюда — сайт не нужен.\n\n" +
-      "Или открой инструкцию: https://robloxbank.ru/guide?source=wb\n\n" +
-      "Нужна помощь? Пиши: https://t.me/RobloxBank_PA"
-    );
+    await ctx.reply({
+      message:
+        "👋 Привет! Я помогу обменять Wildberries-карту на робуксы.\n\n" +
+        "📖 Вся информация — создание геймпасса, разблокировка, настройка — в инструкции:\n" +
+        "👉 https://robloxbank.ru/guide?source=wb\n\n" +
+        "🔑 Есть код с WB-карты? Напиши его прямо сюда.\n" +
+        "🔎 Геймпасс уже готов? Напиши свой ник в Roblox.",
+      keyboard: Keyboard.builder()
+        .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: "https://robloxbank.ru/guide?source=wb" })
+        .row()
+        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+        .inline(),
+    });
     return;
   }
 
@@ -772,11 +775,6 @@ async function handleRefActivation(
 
   setState(vkUserId, { type: "AWAITING_LINK", wbCode: wbCode.code, denomination: totalAmount });
 
-  let bonusText = `💎 Номинал: ${wbCode.denomination} R$\n\n`;
-  if (user.balance && user.balance > 0) {
-    bonusText += `💡 У тебя есть бонус ${user.balance} R$ — он применится к прямому заказу от 1000 R$ через бота (без карточки WB).\n\n`;
-  }
-
   // ── Provisional order: claim code + notify admins BEFORE subscription gate ──
   // Mirrors TG flow — user identity is captured even if they skip the sub check.
   let provisionalCreated = false;
@@ -836,37 +834,23 @@ async function handleRefActivation(
     return;
   }
 
-  if (isGuideMode) {
-    await ctx.reply(
+  const vkGuideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${code}`;
+  await ctx.reply({
+    message:
       greetLine + `\n` +
-      `✅ Код ${code} активирован! Номинал: ${totalAmount} R$\n\n` +
-      `Теперь создай геймпасс в Roblox:\n` +
-      `1️⃣ Creator Hub → твоя игра → Monetization → Passes → Create a Pass\n` +
-      `2️⃣ Установи цену ровно ${passPrice} R$\n` +
-      `3️⃣ Включи «On Sale» и сохрани\n` +
-      `4️⃣ Пришли свой ник в Roblox — я найду геймпасс сам 🔎\n\n` +
-      `Также можно прислать ссылку или Asset ID.\n\n` +
-      `Подробная инструкция: https://robloxbank.ru/guide?source=wb&skip=1&code=${code}`
-    );
-  } else {
-    await ctx.reply(
-    {
-      message:
-        greetLine + `\n` +
-        `✅ Код ${code} активирован!\n` +
-        bonusText +
-        `Создай геймпасс в Roblox за ${passPrice} R$ — затем нажми кнопку «🔎 Найти по моему нику Roblox» 👇 (быстрый путь, без ссылок).\n` +
-        `(${passPrice} R$ — это номинал ÷ 0.7, Roblox удерживает 30%)\n\n` +
-        `Если удобнее — пришли ссылку на геймпасс сюда вручную.\n\n` +
-        `❓ Что такое геймпасс и как его создать:\n` +
-        `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}`,
-      keyboard: Keyboard.builder()
-        .textButton({ label: "🔎 Найти по моему нику Roblox", payload: { command: "find_gp_start" }, color: "primary" })
-        .row()
-        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
-        .inline(),
-    });
-  }
+      `✅ Код ${code} активирован!\n` +
+      `💎 Номинал: ${totalAmount} R$ → Цена геймпасса: ${passPrice} R$\n\n` +
+      `⚠️ Без выполнения инструкции робуксы выкупить невозможно — она покажет, как создать и разблокировать геймпасс:\n` +
+      `👉 ${vkGuideUrl}\n\n` +
+      `Когда геймпасс будет готов — напиши свой ник в Roblox, и я найду его сам 🔎`,
+    keyboard: Keyboard.builder()
+      .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: vkGuideUrl })
+      .row()
+      .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+      .row()
+      .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+      .inline(),
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -899,12 +883,10 @@ async function handleGamepassLink(
     await ctx.reply({
       message:
         "⚠️ Не удалось распознать.\n\n" +
-        "Пришли одно из:\n" +
-        "• Ник в Roblox (латиница, 3–20 символов)\n" +
-        "• Ссылку: https://www.roblox.com/game-pass/1234567/...\n" +
-        "• Просто ID (только цифры): 1234567",
+        "Напиши свой ник в Roblox (латиница, 3–20 символов) — найду геймпасс сам.\n\n" +
+        "Или пришли ссылку / ID геймпасса вручную.",
       keyboard: Keyboard.builder()
-        .textButton({ label: "🔎 Найти по моему нику Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+        .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
         .row()
         .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "pass_format" }, color: "secondary" })
         .inline(),
@@ -1261,19 +1243,18 @@ async function handleRobloxNickInput(
     return;
   }
 
-  // Branch 2: nick exists but no public for-sale gamepasses → place probably private
+  // Branch 2: nick exists but no public for-sale gamepasses
   if (outcome.status === "no_gamepasses") {
     await ctx.reply({
       message:
         `🙈 У ${nick} не нашли публичных геймпассов.\n\n` +
-        `Самая частая причина — плейс закрыт. Открой его в настройках, тогда геймпассы станут видны:\n\n` +
-        `1. Roblox → раздел Creations\n` +
-        `2. Выбери свой плейс → ⚙️ Configure → Privacy\n` +
-        `3. Поставь Public\n\n` +
-        `Если плейс уже публичный — проверь, что геймпасс создан и выставлен на продажу за ${expectedPrice} R$.\n\n` +
-        `Инструкция: ${guideUrl}`,
+        `Скорее всего геймпасс ещё не создан, не выставлен на продажу или плейс закрыт.\n\n` +
+        `⚠️ Пройди инструкцию — там по шагам: создание, разблокировка, правильная цена ${expectedPrice} R$:\n` +
+        `👉 ${guideUrl}`,
       keyboard: Keyboard.builder()
-        .textButton({ label: "🔎 Попробовать другой ник", payload: { command: "find_gp_start" }, color: "primary" })
+        .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: guideUrl })
+        .row()
+        .textButton({ label: "🔎 Уже сделал — проверить", payload: { command: "find_gp_start" }, color: "primary" })
         .row()
         .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "place_closed" }, color: "secondary" })
         .inline(),
@@ -1292,9 +1273,11 @@ async function handleRobloxNickInput(
       message:
         `У ${nick} нашли геймпассы, но ни один не за ${expectedPrice} R$:\n\n` +
         `${listLines}\n\n` +
-        `Создай геймпасс ровно на ${expectedPrice} R$ или измени цену существующего — и нажми «🔎 Уже исправил».\n\n` +
-        `Инструкция: ${guideUrl}`,
+        `Нужен геймпасс ровно на ${expectedPrice} R$. Как исправить — в инструкции:\n` +
+        `👉 ${guideUrl}`,
       keyboard: Keyboard.builder()
+        .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: guideUrl })
+        .row()
         .textButton({ label: "🔎 Уже исправил — проверить", payload: { command: "find_gp_start" }, color: "primary" })
         .row()
         .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "wrong_price" }, color: "secondary" })
@@ -1815,7 +1798,7 @@ async function handleIdleMessage(
         : order.status === "PAYMENT_PENDING"
         ? "\n\n💳 Пришли скриншот оплаты сюда (фотографией, не файлом)."
         : order.status === "AWAITING_GAMEPASS"
-        ? `\n\nПришли свой ник в Roblox — найду геймпасс сам 🔎\nИли отправь ссылку / Asset ID. Цена: ${passPrice} R$`
+        ? `\n\nПройди инструкцию, создай геймпасс — затем напиши свой ник в Roblox 🔎\nЦена геймпасса: ${passPrice} R$`
         : order.status === "PENDING"
         ? "\n\nНе переживай — менеджер работает в порядке очереди, обычно выкупаем в течение нескольких часов, максимум сутки. Напишем сами."
         : order.status === "IN_PROGRESS"
@@ -1837,7 +1820,9 @@ async function handleIdleMessage(
             .inline()
         : order.status === "AWAITING_GAMEPASS"
         ? Keyboard.builder()
-            .textButton({ label: "🔎 Найти по моему нику Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+            .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}` })
+            .row()
+            .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
             .row()
             .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
             .inline()
@@ -1869,8 +1854,6 @@ async function handleIdleMessage(
   if (outcome === "handled") return;
   if (outcome === "restored") {
     const restoredState = getState(vkUserId) as { type: "AWAITING_LINK"; wbCode: string; denomination: number };
-    // If the message itself is a Roblox nick — route it straight into the
-    // link flow (which understands nicks) instead of swallowing it with a recap.
     if (ROBLOX_NICK_RE.test(text.trim().replace(/^@/, ""))) {
       await handleGamepassLink(ctx, vkUserId, text.trim(), restoredState.wbCode, restoredState.denomination);
       return;
@@ -1878,22 +1861,20 @@ async function handleIdleMessage(
     const passPrice = Math.ceil(restoredState.denomination / 0.7);
     const firstName = await vkGetName(vkUserId);
     const isDirect = restoredState.wbCode.startsWith("DIR-");
+    const idleGuideUrl = isDirect
+      ? `https://robloxbank.ru/guide?source=direct`
+      : `https://robloxbank.ru/guide?source=wb&skip=1&code=${restoredState.wbCode}`;
     await ctx.reply({
       message:
         `${getGreeting(status, firstName)}\n` +
-        (isDirect
-          ? `✅ У тебя есть активный прямой заказ на ${restoredState.denomination} R$!\n\n`
-          : `✅ У тебя есть активный код ${restoredState.wbCode}!\n` +
-            `💎 Номинал: ${restoredState.denomination} R$\n\n`) +
-        `Осталось совсем чуть-чуть — пришли свой ник в Roblox, и я найду геймпасс сам 🔎\n` +
-        `📌 Цена геймпасса: ${passPrice} R$\n\n` +
-        `Также можно прислать ссылку или Asset ID.\n\n` +
-        `❓ Не помнишь как создать геймпасс? Инструкция со скриншотами:\n` +
-        (isDirect
-          ? `👉 https://robloxbank.ru/guide?source=direct`
-          : `👉 https://www.robloxbank.ru/guide?source=wb&skip=1&code=${restoredState.wbCode}`),
+        `✅ Код активирован! 📌 Цена геймпасса: ${passPrice} R$\n\n` +
+        `⚠️ Если геймпасс ещё не создан — пройди инструкцию:\n` +
+        `👉 ${idleGuideUrl}\n\n` +
+        `Когда будет готов — напиши свой ник в Roblox 🔎`,
       keyboard: Keyboard.builder()
-        .textButton({ label: "🔎 Найти по моему нику Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+        .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: idleGuideUrl })
+        .row()
+        .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
         .row()
         .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
         .inline(),
@@ -1917,14 +1898,18 @@ async function handleIdleMessage(
     });
   } else {
     const greeting = getGreeting(status, firstName);
-    await ctx.reply(
-      `${greeting}Я помогаю обменять карты Wildberries на робуксы в Roblox.\n\n` +
-      `Вот что я умею:\n` +
-      `• Напиши 7-значный код с карты WB — оформлю заявку\n` +
-      `• Напиши «статус» — покажу статус твоей заявки\n` +
-      `• Пришли ник в Roblox или ссылку на геймпасс — приму в работу\n\n` +
-      `Инструкция по активации: https://robloxbank.ru/guide?source=wb\n` +
-      `Нужна живая помощь? https://t.me/RobloxBank_PA`
-    );
+    await ctx.reply({
+      message:
+        `${greeting}Я помогу обменять Wildberries-карту на робуксы.\n\n` +
+        `📖 Вся информация — создание геймпасса, разблокировка, настройка — в инструкции:\n` +
+        `👉 https://robloxbank.ru/guide?source=wb\n\n` +
+        `🔑 Есть код с WB-карты? Напиши его прямо сюда.\n` +
+        `🔎 Геймпасс уже готов? Напиши свой ник в Roblox.`,
+      keyboard: Keyboard.builder()
+        .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: "https://robloxbank.ru/guide?source=wb" })
+        .row()
+        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+        .inline(),
+    });
   }
 }

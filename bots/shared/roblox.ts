@@ -493,18 +493,15 @@ export async function getGamepassDetailsDirect(
         if (gameAccess === "private")       parsed.isGamePrivate   = true;
         if (gameAccess === "age_restricted") parsed.isAgeRestricted = true;
 
-        // Block recent gamepasses (≤30 days) in PRIVATE games when no primary
-        // endpoint confirmed them. Age-restricted (18+) games are allowed through —
-        // we can still purchase those gamepasses with a verified account.
-        if (parsed.isActive && parsed.isGamePrivate && !foundInPrimary && d.Created) {
-          const createdMs = new Date(d.Created).getTime();
-          if (!isNaN(createdMs) && (Date.now() - createdMs) < 30 * 24 * 3_600_000) {
-            console.warn(
-              `[Roblox/bots] roproxy: gamepass ${gamepassId} is in a private game ` +
-              `and no primary endpoint confirmed it — isActive→false`
-            );
-            parsed.isActive = false;
-          }
+        // Block gamepasses in PRIVATE games when no primary endpoint confirmed them.
+        // Age-restricted (18+) games are allowed through — we can still purchase
+        // those gamepasses with a verified account.
+        if (parsed.isActive && parsed.isGamePrivate && !foundInPrimary) {
+          console.warn(
+            `[Roblox/bots] roproxy: gamepass ${gamepassId} is in a private game ` +
+            `and no primary endpoint confirmed it — isActive→false`
+          );
+          parsed.isActive = false;
         }
 
 
@@ -636,8 +633,8 @@ export interface GamepassSearchResult {
  *   • TG admin bot hub (direct call — already on SG)
  *   • Singapore bridge /search-gamepasses (called by TWA on RF)
  *
- * Filter: isForSale !== false (keep if true OR if field absent — assume for sale).
- * This avoids the ?? false bug where missing field drops all results.
+ * Filter: isForSale === true (strict — only explicitly for-sale passes).
+ * Gamepasses without the isForSale field are excluded to prevent closed passes leaking through.
  */
 /**
  * Returns purchase-ready data for a single gamepass by its ID.
@@ -808,7 +805,7 @@ export async function listForSaleGamepasses(
   );
 
   return all
-    .filter((gp: any) => gp.isForSale !== false && (gp.price ?? 0) > 0)
+    .filter((gp: any) => gp.isForSale === true && (gp.price ?? 0) > 0)
     .map((gp: any): GamepassSearchResult => ({
       gamepassId: gp.id,
       productId:  gp.productId ?? 0,
