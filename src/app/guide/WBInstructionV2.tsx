@@ -132,7 +132,8 @@ export default function WBInstructionV2({
           <Step n="1">
             <div className="wbi-cols wbi-media">
               <div><div className="wbi-ttl">Открой Creator Hub</div>
-                <p className="wbi-t">Это сайт, где в Roblox делают игры. Открой его и войди в свой аккаунт Roblox — тот же, где играешь.</p></div>
+                <p className="wbi-t">Это официальный сайт Roblox — там же, где ты играешь и покупаешь робуксы. Кнопка ниже — быстрый путь в нужный раздел.</p>
+                <p className="wbi-s" style={{ marginTop: 6 }}>Войди в свой аккаунт Roblox в этом браузере — иначе ссылка откроется не туда.</p></div>
               <div className="wbi-mcol">
                 <a className="wbi-btnL" href="https://create.roblox.com/dashboard/creations" target="_blank" rel="noopener noreferrer">🔗 Открыть Creator Hub</a>
                 <div className="wbi-url">create.roblox.com/dashboard/creations</div>
