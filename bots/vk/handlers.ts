@@ -1226,7 +1226,7 @@ async function handleRobloxNickInput(
   // Always return to LINK state — picker handles next move via VK payload button.
   setState(vkUserId, { type: "AWAITING_LINK", wbCode, denomination });
 
-  const guideUrl = `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}`;
+  const guideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}`;
 
   // Branch 1: nickname doesn't exist on Roblox
   if (outcome.status === "user_not_found") {

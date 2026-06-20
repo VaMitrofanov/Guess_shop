@@ -223,6 +223,41 @@ export function registerStart(bot: Telegraf): void {
       const custStatus = await getCustomerStatus(tgId, "TG");
       const firstName = ctx.from.first_name || undefined;
 
+      // Check for active AWAITING_GAMEPASS order — show personalized instruction
+      if (!isAdmin) {
+        const startUser = await (db as any).user.findUnique({ where: { tgId } });
+        if (startUser) {
+          const awaitingOrder = await (db as any).wbOrder.findFirst({
+            where: { userId: startUser.id, status: "AWAITING_GAMEPASS" },
+            orderBy: { createdAt: "desc" },
+          });
+          if (awaitingOrder) {
+            const passPrice = Math.ceil(awaitingOrder.amount / 0.7);
+            const isDirect = (awaitingOrder.wbCode as string).startsWith("DIR-");
+            const startGuideUrl = isDirect
+              ? `https://robloxbank.ru/guide?source=direct`
+              : `https://robloxbank.ru/guide?source=wb&skip=1&code=${awaitingOrder.wbCode}`;
+            pendingLink.set(ctx.from.id, { wbCode: awaitingOrder.wbCode, denomination: awaitingOrder.amount });
+            await ctx.reply(
+              `Твой код уже активирован! 📌 Цена геймпасса: <b>${passPrice} R$</b>\n\n` +
+              `⚠️ <b>Если геймпасс ещё не создан</b> — пройди инструкцию:\n` +
+              `👉 ${startGuideUrl}\n\n` +
+              `Когда будет готов — напиши свой <b>ник в Roblox</b> 🔎`,
+              {
+                parse_mode: "HTML",
+                link_preview_options: { is_disabled: true },
+                ...Markup.inlineKeyboard([
+                  [Markup.button.url("📖 ИНСТРУКЦИЯ — как создать геймпасс", startGuideUrl)],
+                  [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
+                  [supportBtn("💬 Нужна помощь?")],
+                ]),
+              }
+            );
+            return;
+          }
+        }
+      }
+
       if (custStatus.isReturning && !isAdmin) {
         // IDLE state: upsell to direct sales, no gamepass instructions
         const idleMsg = getIdleGreeting(custStatus, firstName);
@@ -1038,7 +1073,7 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
   // User has moved past the input stage in every branch below.
   pendingRobloxNick.delete(tgIdNum);
 
-  const guideUrl = `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`;
+  const guideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`;
 
   // ── Branch 1: nickname doesn't exist on Roblox ───────────────────────────
   if (outcome.status === "user_not_found") {
@@ -3158,7 +3193,7 @@ export function registerChatMember(bot: Telegraf): void {
           link_preview_options: { is_disabled: true },
           ...Markup.inlineKeyboard([
             [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
-            [Markup.button.url("📖 Открыть инструкцию", `https://www.robloxbank.ru/guide?source=wb&skip=1&code=${code}`)],
+            [Markup.button.url("📖 Открыть инструкцию", `https://robloxbank.ru/guide?source=wb&skip=1&code=${code}`)],
             [supportBtn("💬 Нужна помощь?")],
           ]),
         }
