@@ -121,7 +121,7 @@ export default function WBInstructionV2({
           <div className="wbi-must">
             <div className="wbi-must-h">⚠️ ВАЖНО ВЫПОЛНИТЬ 2 ПУНКТА</div>
             <div className="wbi-must-it"><span className="wbi-n">1</span><span><b>Игра (Place) должна быть Public</b> — открытая. Делается в шаге 3.</span></div>
-            <div className="wbi-must-it"><span className="wbi-n">2</span><span>Галочка <b>«Enable regional pricing»</b> (региональные цены) должна быть <b>снята</b>. Это в шаге 5.</span></div>
+            <div className="wbi-must-it"><span className="wbi-n">2</span><span>Переключатель <b>«Managed pricing»</b> (региональные цены) должен быть <b>выключен</b>. Это в шаге 5.</span></div>
             <div className="wbi-must-ft">Без этих двух условий геймпасс физически нельзя выкупить.</div>
           </div>
         </div>
@@ -179,25 +179,42 @@ export default function WBInstructionV2({
               <div><div className="wbi-ttl">Создай геймпасс</div>
                 <p className="wbi-t">Геймпасс — это товар внутри игры, который мы у тебя купим. Путь короткий:</p>
                 <ol className="wbi-ol">
-                  <li>Открой <b>☰</b> → пролистай до <b>Monetization</b>.</li>
-                  <li>Нажми <b>Passes</b> → синяя кнопка <b>Create Pass</b>.</li>
-                  <li>Придумай любое название (например «VIP») → создать. Картинка не нужна.</li>
+                  <li>Нажми <b>☰</b> → пролистай вниз до <b>Monetization</b>.</li>
+                  <li>Нажми <span className="wbi-pill">Passes</span> (обведено на скрине).</li>
+                  <li>Синяя кнопка <b>Create Pass</b> → придумай любое название (например «VIP») → создать. Картинка не нужна.</li>
                 </ol></div>
-              <div className="wbi-mcol"><figure className="wbi-figure wbi-spot"><LazyVideo src="/guide/wb-step4-createpass.mp4" poster="/guide/wb-step4-poster.jpg" alt="Create Pass" /><figcaption><b>☰ → Monetization → Passes → Create Pass</b> → название.</figcaption></figure></div>
+              <div className="wbi-mcol"><figure className="wbi-figure">
+                <span className="wbi-anno">
+                  <img src="/guide/wb-step4-menu.png" alt="Меню: Monetization → Passes" loading="lazy" decoding="async" />
+                  <span className="wbi-box y" style={{ left: "27%", top: "44%", width: "71.5%", height: "7.5%" }} />
+                  <span className="wbi-box g" style={{ left: "27.5%", top: "78.8%", width: "71%", height: "7.4%" }} />
+                </span>
+                <figcaption>Открой <b>☰</b> → <b>Monetization</b> (жёлтая рамка) → нажми <b>Passes</b> (зелёная).</figcaption>
+              </figure></div>
             </div>
           </Step>
 
           <Step n="5" pulse cls="wbi-key">
             <div className="wbi-kbadge">★ ВАЖНО — НЕ ПРОПУСТИ</div>
-            <div className="wbi-ttl">Сними галочку «регионалок»</div>
+            <div className="wbi-ttl">Выключи «Managed pricing»</div>
             <p className="wbi-t">Открой свой геймпасс → нажми три полоски <b>☰</b> в левом верхнем углу → вкладка <b>Sales</b>. Включи переключатель <b>Item for sale</b> (зелёная рамка на скрине).</p>
-            <div className="wbi-warn">Галочку <b>Enable regional pricing</b> (оранжевая рамка) нужно <b>снять</b> — она должна быть пустой. Если она стоит, Roblox занизит цену в других странах, и тебе придёт меньше R$.</div>
-            <figure className="wbi-figure wbi-shot wbi-spot"><img src="/guide/wb-step5-regional.jpg" alt="Item for sale включён, Enable regional pricing снято"  loading="lazy" decoding="async" /><figcaption><b>Item for sale</b> — включи. <b>Enable regional pricing</b> — галочка должна быть <b>пустой</b>.</figcaption></figure>
+            <div className="wbi-warn">Переключатель <b>Managed pricing</b> (жёлтая рамка) должен быть <b>выключен</b>. Если он включён, Roblox занизит цену в других странах, и тебе придёт меньше R$.</div>
+            <figure className="wbi-figure wbi-shot">
+              <span className="wbi-anno">
+                <img src="/guide/wb-step5-regional.png" alt="Item for sale включён, Managed pricing выключен" loading="lazy" decoding="async" />
+                <span className="wbi-box g pill" style={{ left: "63.5%", top: "27.5%", width: "12%", height: "12.5%" }} />
+                <span className="wbi-tip g" style={{ left: "69.5%", top: "42%" }}>ВКЛЮЧИ</span>
+                <span className="wbi-box y pill" style={{ left: "70.5%", top: "76.5%", width: "12%", height: "12.5%" }} />
+                <span className="wbi-tip y" style={{ left: "76.5%", top: "91%" }}>ВЫКЛЮЧИ</span>
+                <span className="wbi-price6" style={{ top: "57.1%" }}>{price}</span>
+              </span>
+              <figcaption><b>Item for sale</b> — включи (зелёная). <b>Managed pricing</b> — выключи (жёлтая).</figcaption>
+            </figure>
           </Step>
 
           <Step n="6" cls="wbi-key">
             <div className="wbi-ttl">Скопируй и вставь цену</div>
-            <p className="wbi-t">Вот цена для твоего паса. Нажми на неё, чтобы скопировать, и вставь её в поле <b>Default Price</b> (зелёная рамка) на вкладке <b>Sales</b>, затем нажми <b>Save Changes</b>.</p>
+            <p className="wbi-t">Вот цена для твоего паса. Нажми на неё, чтобы скопировать, и вставь её в поле <b>Price</b> (зелёная рамка) на вкладке <b>Sales</b>, затем нажми <b>Save Changes</b>.</p>
             <div className="wbi-calc">
               <div className="wbi-lbl">ЦЕНА ПАСА — ВСТАВЬ ЕЁ В ROBLOX</div>
               <div className="wbi-nomrow">Номинал твоей карты: <input className="wbi-input" type="number" min={1} inputMode="numeric" value={nom}
@@ -208,9 +225,14 @@ export default function WBInstructionV2({
               </div>
               <div className="wbi-copyhint">{copied ? `✓ Скопировано: ${price}` : `Нажми → скопируется. Выстави эту цену, чтобы на руки пришло ${nom} R$`}</div>
             </div>
-            <figure className="wbi-figure wbi-shot wbi-spot">
-              <span className="wbi-priceshot"><img src="/guide/wb-step6-price.jpg" alt="Default Price — вставь цену"  loading="lazy" decoding="async" /><span className="wbi-liveprice">{price}</span></span>
-              <figcaption>В поле <b>Default Price</b> (зелёная рамка) — на скрине уже показана <b>твоя</b> цена.</figcaption>
+            <figure className="wbi-figure wbi-shot">
+              <span className="wbi-anno">
+                <img src="/guide/wb-step6-price.png" alt="Price — вставь цену" loading="lazy" decoding="async" />
+                <span className="wbi-box g" style={{ left: "3.8%", top: "37.5%", width: "92.4%", height: "56.5%" }} />
+                <span className="wbi-tip g caret" style={{ left: "50%", top: "20%" }}>СЮДА ВСТАВЬ ЦЕНУ</span>
+                <span className="wbi-price6">{price}</span>
+              </span>
+              <figcaption>В поле <b>Price</b> (зелёная рамка) — на скрине уже показана <b>твоя</b> цена.</figcaption>
             </figure>
           </Step>
 
@@ -356,9 +378,20 @@ const CSS = `
 .wbi-input:focus{outline:none;border-color:var(--gold2)}
 .wbi-input::-webkit-outer-spin-button,.wbi-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .wbi-copyhint{font-size:13.5px;color:#8ff0bf;margin-top:10px}
-.wbi-priceshot{position:relative;display:block;line-height:0;container-type:inline-size}
-.wbi-priceshot img{display:block}
-.wbi-liveprice{position:absolute;left:13.3%;top:52.5%;transform:translateY(-50%);font-size:4.6cqw;font-weight:700;color:#f0f0f2;letter-spacing:.5px;line-height:1;white-space:nowrap;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+/* ── Annotation overlay layer (highlights/labels live in CSS, screenshots stay clean) ── */
+.wbi-anno{position:relative;display:block;line-height:0;container-type:inline-size}
+.wbi-anno img{display:block}
+.wbi-figure:hover .wbi-anno img{transform:none}
+.wbi-box{position:absolute;border:3px solid transparent;border-radius:11px;pointer-events:none;z-index:2}
+.wbi-box.pill{border-radius:999px}
+.wbi-box.g{border-color:#00e08a;box-shadow:0 0 0 1px rgba(0,0,0,.4),0 0 16px rgba(0,224,138,.5)}
+.wbi-box.y{border-color:#f2c14e;box-shadow:0 0 0 1px rgba(0,0,0,.4),0 0 16px rgba(242,193,78,.45)}
+.wbi-tip{position:absolute;transform:translate(-50%,-50%);z-index:3;pointer-events:none;line-height:1;font-weight:800;letter-spacing:.4px;white-space:nowrap;font-size:clamp(10px,2.7cqw,15px);padding:.42em .62em;border-radius:7px;box-shadow:0 3px 10px rgba(0,0,0,.35)}
+.wbi-tip.g{background:#00c277;color:#06210f}
+.wbi-tip.y{background:#f2c14e;color:#241a02}
+.wbi-tip.caret{font-size:clamp(9px,2.4cqw,14px)}
+.wbi-tip.caret::after{content:"";position:absolute;left:50%;bottom:-7px;transform:translateX(-50%);border:5px solid transparent;border-top-color:#00c277;border-bottom:0}
+.wbi-price6{position:absolute;left:13%;top:65.7%;transform:translateY(-50%);z-index:2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-weight:500;font-size:4.7cqw;line-height:1;color:#f1f1f3;white-space:nowrap;letter-spacing:.3px}
 .wbi-icoTile{width:100%;max-width:300px;aspect-ratio:16/10;border-radius:14px;border:1px solid var(--line);background:radial-gradient(circle at 50% 40%,rgba(201,168,76,.1),transparent 70%),#070b15;display:flex;align-items:center;justify-content:center;font-size:64px}
 .wbi-cta{border:1px solid rgba(201,168,76,.45);background:radial-gradient(circle at 50% 0,rgba(201,168,76,.12),transparent 70%),#0a0d18;border-radius:18px;padding:26px;margin-top:30px;text-align:center}
 .wbi-cta h3{font-size:19px;color:#fff}.wbi-cta .wbi-s{font-size:13px;color:var(--mut);margin-top:5px}
