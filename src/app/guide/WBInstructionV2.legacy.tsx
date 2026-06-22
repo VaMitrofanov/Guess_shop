@@ -122,8 +122,15 @@ export default function WBInstructionV2({
   const [searchErr, setSearchErr] = useState<string | null>(null);
   const [view, setView] = useState<SearchView>({ kind: "idle" });
   const [picked, setPicked] = useState<{ id: string; name: string; price: number } | null>(null);
+  // Verification gate — the nick search unlocks only after the user confirms the
+  // one hard requirement that makes a gamepass purchasable (a Public place).
+  // Managed pricing is now off by default on new gamepasses, so it's only a
+  // reminder, not a gate.
+  const [chkPublic, setChkPublic] = useState(false);
+  const verified = chkPublic;
 
   const runSearch = useCallback(async () => {
+    if (!verified) return;
     const n = nick.trim().replace(/^@/, "");
     if (!NICK_RE.test(n)) {
       setSearchErr("Ник Roblox: 3–20 символов — латинские буквы, цифры или _");
@@ -154,7 +161,7 @@ export default function WBInstructionV2({
     } finally {
       setSearching(false);
     }
-  }, [nick, expectedPrice]);
+  }, [nick, expectedPrice, verified]);
 
   // Which channel did the user pick earlier (TG/VK)? Drives the single CTA button
   // at the bottom. orderPlaced = the order is already materialised (site one-tap
@@ -239,16 +246,16 @@ export default function WBInstructionV2({
         <div className="wbi-hero wbi-reveal">
           <div className="wbi-kick">ПОЛУЧИ СВОИ ROBUX</div>
           <h1 className="wbi-h1">Это <span className="wbi-g">проще</span><br />чем кажется</h1>
-          <p className="wbi-lead">Всего 9 шагов. Всё в браузере, ничего скачивать не нужно.</p>
+          <p className="wbi-lead">Всего 10 шагов. Всё в браузере, ничего скачивать не нужно.</p>
           <div className="wbi-chips">
             <div className="wbi-chip"><b>5–7 мин</b><span>ВРЕМЯ</span></div>
             <div className="wbi-chip"><b>Легко</b><span>СЛОЖНОСТЬ</span></div>
             <div className="wbi-chip"><b>0 ₽</b><span>КОМИССИЯ</span></div>
           </div>
           <div className="wbi-must">
-            <div className="wbi-must-h">✅ ВСЁ ПРОЩЕ, ЧЕМ РАНЬШЕ</div>
-            <div className="wbi-must-it"><span className="wbi-n">1</span><span>Главное — создать геймпасс и поставить <b>точную цену</b> (посчитаем её ниже). Остального делать не нужно.</span></div>
-            <div className="wbi-must-ft">Просто проверь, что переключатель <b>«Managed pricing»</b> (региональные цены) <b>выключен</b> — у новых геймпассов он выключен по умолчанию (шаг 7).</div>
+            <div className="wbi-must-h">⚠️ 1 ОБЯЗАТЕЛЬНЫЙ ПУНКТ</div>
+            <div className="wbi-must-it"><span className="wbi-n">1</span><span><b>Игра (Place) должна быть Public</b> — открытая. Делается в шаге 3. Без этого геймпасс физически нельзя выкупить.</span></div>
+            <div className="wbi-must-ft">И просто проверь, что переключатель <b>«Managed pricing»</b> (региональные цены) <b>выключен</b> — у новых геймпассов он выключен по умолчанию (шаг 8).</div>
           </div>
         </div>
 
@@ -269,37 +276,57 @@ export default function WBInstructionV2({
 
           <Step n="2">
             <div className="wbi-cols wbi-media wbi-rev">
-              <div><div className="wbi-ttl">Найди свою игру и открой её</div>
+              <div><div className="wbi-ttl">Найди свою игру</div>
                 <p className="wbi-t">Открой раздел <b>Creations</b> — там твоя игра, названа по твоему нику. Даже если ты ничего не создавал, одна игра уже есть.</p>
-                <ol className="wbi-ol">
-                  <li>Найди карточку своей игры.</li>
-                  <li><b>Нажми на неё</b>, чтобы открыть.</li>
-                </ol></div>
-              <div className="wbi-mcol"><figure className="wbi-figure">
-                <span className="wbi-anno">
-                  <img src="/guide/wb-step2-place.png" alt="Creations: нажми на свою игру" loading="lazy" decoding="async" />
-                  <span className="wbi-box g" style={{ left: "9.5%", top: "20%", width: "76%", height: "50.5%" }} />
-                  <span className="wbi-tip g" style={{ left: "48%", top: "44%" }}>НАЖМИ</span>
-                </span>
-                <figcaption>Нажми на карточку своей игры (обведено).</figcaption>
-              </figure></div>
+                <div className="wbi-ok">Под игрой горит зелёное <b>Public</b> (= «открыта»)? Супер, переходи к шагу 4.</div>
+                <div className="wbi-warn">Не Public? Не страшно — откроем её в шаге 3.</div></div>
+              <div className="wbi-mcol"><figure className="wbi-figure wbi-spot"><img src="/guide/wb-step2-public.jpg" alt="Public"  loading="lazy" decoding="async" /></figure></div>
             </div>
           </Step>
 
-          <Step n="3">
+          <Step n="3" pulse cls="wbi-key">
+            <div className="wbi-kbadge">★ САМЫЙ ВАЖНЫЙ ШАГ</div>
+            <div className="wbi-ttl">Сделай игру открытой (Public)</div>
+            <p className="wbi-t">Чтобы мы смогли купить твой геймпасс, игра должна быть открытой. Для этого ответь на простые вопросы Roblox — это минута.</p>
             <div className="wbi-cols wbi-media">
-              <div><div className="wbi-ttl">Открой раздел Passes</div>
-                <p className="wbi-t">Геймпасс — это товар внутри игры, который мы у тебя купим. Открой раздел, где он создаётся (просто повтори за видео):</p>
-                <ol className="wbi-ol">
-                  <li>Нажми <b>☰</b> — три полоски слева вверху.</li>
-                  <li>В меню пролистай до <span className="wbi-pill">Monetization</span>.</li>
-                  <li>Нажми <span className="wbi-pill">Passes</span>.</li>
-                </ol></div>
-              <div className="wbi-mcol"><figure className="wbi-figure wbi-spot"><LazyVideo src="/guide/wb-step3-passesnav.mp4" poster="/guide/wb-step3-passesnav-poster.jpg" alt="☰ → Monetization → Passes" /><figcaption>☰ → <b>Monetization</b> → <b>Passes</b> — как на видео.</figcaption></figure></div>
+              <div><ol className="wbi-ol">
+                <li>Нажми на свою игру, чтобы открыть её.</li>
+                <li>Нажми три полоски <b>☰</b> в левом верхнем углу.</li>
+                <li>В меню: <b>Configure</b> → <b>Questionnaire</b>.</li>
+              </ol></div>
+              <div className="wbi-mcol"><figure className="wbi-figure"><img src="/guide/wb-step3-menu.jpg" alt="Меню: Questionnaire"  loading="lazy" decoding="async" /><figcaption>Открой <b>☰</b> → <b>Configure</b> → внизу нажми <b>Questionnaire</b> (обведено).</figcaption></figure></div>
+            </div>
+            <div className="wbi-cols wbi-media wbi-rev" style={{ marginTop: 14 }}>
+              <div><ol className="wbi-ol" style={{ counterReset: "s 3" }}>
+                <li>Пролистай вниз до вопросов.</li>
+                <li>У каждого вопроса выбирай <span className="wbi-pill">No</span> — загорится зелёная галочка.</li>
+                <li>В самом низу нажми синюю кнопку <span className="wbi-pill">Continue</span> — и сразу ещё раз. Нажать нужно <b>два раза</b>.</li>
+              </ol>
+              <div className="wbi-ok">Готово! Вернись к игре — теперь под ней горит зелёное <b>Public</b>.</div></div>
+              <div className="wbi-mcol"><figure className="wbi-figure wbi-spot"><LazyVideo src="/guide/wb-step3-answers.mp4" poster="/guide/wb-step3-poster.jpg" alt="Ответы No" /><figcaption>На каждый вопрос — <b>No</b>. Появляется зелёная галочка ✅, и так до конца.</figcaption></figure></div>
             </div>
           </Step>
 
           <Step n="4">
+            <div className="wbi-cols wbi-media">
+              <div><div className="wbi-ttl">Открой раздел Passes</div>
+                <p className="wbi-t">Геймпасс — это товар внутри игры, который мы у тебя купим. Открой раздел, где он создаётся:</p>
+                <ol className="wbi-ol">
+                  <li>Нажми <b>☰</b> → пролистай вниз до <b>Monetization</b>.</li>
+                  <li>Нажми <span className="wbi-pill">Passes</span> (обведено на скрине).</li>
+                </ol></div>
+              <div className="wbi-mcol"><figure className="wbi-figure">
+                <span className="wbi-anno">
+                  <img src="/guide/wb-step4-menu.png" alt="Меню: Monetization → Passes" loading="lazy" decoding="async" />
+                  <span className="wbi-box y" style={{ left: "27%", top: "44%", width: "71.5%", height: "7.5%" }} />
+                  <span className="wbi-box g" style={{ left: "27.5%", top: "78.8%", width: "71%", height: "7.4%" }} />
+                </span>
+                <figcaption>Открой <b>☰</b> → <b>Monetization</b> (жёлтая рамка) → нажми <b>Passes</b> (зелёная).</figcaption>
+              </figure></div>
+            </div>
+          </Step>
+
+          <Step n="5">
             <div className="wbi-ttl">Нажми «Create Pass»</div>
             <p className="wbi-t">На странице <b>Passes</b> нажми синюю кнопку <b>Create Pass</b> (вверху слева) — откроется форма создания.</p>
             <figure className="wbi-figure wbi-shot">
@@ -312,7 +339,7 @@ export default function WBInstructionV2({
             </figure>
           </Step>
 
-          <Step n="5">
+          <Step n="6">
             <div className="wbi-ttl">Заполни форму пасса</div>
             <p className="wbi-t">Откроется форма создания. Заполни её:</p>
             <ol className="wbi-ol">
@@ -332,7 +359,7 @@ export default function WBInstructionV2({
             </figure>
           </Step>
 
-          <Step n="6">
+          <Step n="7">
             <div className="wbi-ttl">Открой пасс → ☰ → Sales</div>
             <p className="wbi-t">После создания ты вернёшься в список <b>Passes</b>. Чтобы задать цену:</p>
             <ol className="wbi-ol">
@@ -350,7 +377,7 @@ export default function WBInstructionV2({
             </figure>
           </Step>
 
-          <Step n="7" cls="wbi-key">
+          <Step n="8" cls="wbi-key">
             <div className="wbi-ttl">Впиши цену и сохрани</div>
             <p className="wbi-t">Ты на вкладке <b>Sales</b>. Дальше:</p>
             <ol className="wbi-ol">
@@ -386,24 +413,34 @@ export default function WBInstructionV2({
             </figure>
           </Step>
 
-          <Step n="8" pulse cls="wbi-key wbi-finish">
-            <div className="wbi-kbadge">🏁 ФИНИШ — ОФОРМЛЯЕМ ЗАКАЗ</div>
-            <div className="wbi-ttl">Геймпасс готов — оформи заказ</div>
-            <p className="wbi-t">🎉 Самое сложное позади! Впиши свой <b>ник в Roblox</b> — мы сами найдём твой геймпасс и <b>оформим заказ</b>. Дальше всё в <b>боте</b> (Telegram или ВКонтакте — туда ты перейдёшь ниже): он сам выкупит пасс, там же статус заказа, уведомления и бонусы за отзыв.</p>
+          <Step n="9" cls="wbi-key">
+            <div className="wbi-ttl">Найди свой геймпасс по нику</div>
+            <p className="wbi-t">Чтобы робуксы пришли <b>автоматически</b>, сначала подтверди главное условие из инструкции. Без него геймпасс физически невозможно выкупить — поиск откроется только после галочки.</p>
 
-            <div className="wbi-search">
+            <div className="wbi-checks">
+              <label className={`wbi-check${chkPublic ? " on" : ""}`}>
+                <input type="checkbox" checked={chkPublic} onChange={(e) => setChkPublic(e.target.checked)} />
+                <span className="wbi-cbox" aria-hidden="true">✓</span>
+                <span className="wbi-ctext">Мой плейс <b>публичный (Public)</b> — сделал по шагу <b>3</b></span>
+              </label>
+              <div className="wbi-checknote">ℹ️ <b>«Managed pricing»</b> (региональные цены) у нового геймпасса по умолчанию <b>выключена</b> — это на вкладке Sales (шаг <b>8</b>), трогать не нужно.</div>
+            </div>
+
+            <div className={`wbi-search${verified ? "" : " locked"}`}>
+              {!verified && <div className="wbi-locknote">🔒 Отметь пункт выше — тогда откроется поиск по нику.</div>}
               <div className="wbi-srow">
                 <input
                   className="wbi-sinput"
                   type="text"
-                  placeholder="Твой ник в Roblox"
+                  placeholder={verified ? "Твой ник в Roblox" : "Сначала отметь пункт ↑"}
                   value={nick}
                   onChange={(e) => setNick(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }}
                   autoCapitalize="off" autoCorrect="off" spellCheck={false}
                   aria-label="Ник Roblox"
+                  disabled={!verified}
                 />
-                <button className="wbi-sbtn" onClick={runSearch} disabled={searching}>
+                <button className="wbi-sbtn" onClick={runSearch} disabled={!verified || searching}>
                   {searching ? "Ищем…" : "🔎 Найти"}
                 </button>
               </div>
@@ -419,7 +456,7 @@ export default function WBInstructionV2({
 
               {view.kind === "no_gamepasses" && (
                 <div className="wbi-warn" style={{ marginTop: 12 }}>
-                  🙈 У <b>{view.nick}</b> не нашли геймпассов на продажу. Скорее всего пасс ещё не создан или не выставлен на продажу — вернись к шагам <b>3–7</b>, затем нажми «Найти» снова.
+                  🙈 У <b>{view.nick}</b> не нашли публичных геймпассов. Скорее всего пасс ещё не создан, не выставлен на продажу или плейс закрыт — вернись к шагам <b>3</b> и <b>5–8</b>, затем нажми «Найти» снова.
                 </div>
               )}
 
@@ -434,7 +471,7 @@ export default function WBInstructionV2({
                       </div>
                     ))}
                   </div>
-                  <div className="wbi-shint">Нужен геймпасс ровно на <b>{expectedPrice} R$</b> — поправь цену (шаг <b>7</b>) и нажми «Найти» снова.</div>
+                  <div className="wbi-shint">Нужен геймпасс ровно на <b>{expectedPrice} R$</b> — поправь цену (шаг <b>8</b>) и нажми «Найти» снова.</div>
                 </div>
               )}
 
@@ -468,7 +505,7 @@ export default function WBInstructionV2({
             </div>
           </Step>
 
-          <Step n="9">
+          <Step n="10">
             <div className="wbi-cols wbi-media wbi-rev">
               <div><div className="wbi-ttl">Зачем нужен бот</div>
                 <p className="wbi-t">Бот — это твой личный кабинет заказа. Тебе только нажимать кнопки:</p>
@@ -593,12 +630,6 @@ const CSS = `
 .wbi-card.wbi-key{border:1px solid rgba(201,168,76,.5);animation:wbi-glow 3.4s ease-in-out infinite}
 @keyframes wbi-glow{0%,100%{box-shadow:0 0 0 1px rgba(201,168,76,.25),0 0 22px rgba(201,168,76,.08)}50%{box-shadow:0 0 0 1px rgba(201,168,76,.6),0 0 44px rgba(201,168,76,.2)}}
 .wbi-kbadge{display:inline-block;background:linear-gradient(90deg,#c9a84c,#f7d574);color:#1a1405;font-size:11px;font-weight:800;letter-spacing:1px;padding:5px 12px;border-radius:20px;margin-bottom:14px}
-/* Finish step — green "finish line" accent so it can't be missed when scrolling fast */
-.wbi-card.wbi-finish{border:1px solid rgba(0,224,138,.6);animation:wbi-glow-fin 3s ease-in-out infinite}
-@keyframes wbi-glow-fin{0%,100%{box-shadow:0 0 0 1px rgba(0,224,138,.3),0 0 26px rgba(0,224,138,.12)}50%{box-shadow:0 0 0 1px rgba(0,224,138,.72),0 0 54px rgba(0,224,138,.28)}}
-.wbi-finish .wbi-kbadge{background:linear-gradient(90deg,#00e08a,#5ef0b0);color:#06210f}
-.wbi-step:has(.wbi-finish) .wbi-dot.wbi-pulse{background:#00e08a;color:#06210f;animation:wbi-pulse-fin 2.6s infinite}
-@keyframes wbi-pulse-fin{0%{box-shadow:0 0 0 0 rgba(0,224,138,.5)}70%{box-shadow:0 0 0 14px rgba(0,224,138,0)}100%{box-shadow:0 0 0 0 rgba(0,224,138,0)}}
 .wbi-ttl{font-size:24px;font-weight:800;color:#fff;margin-bottom:6px}
 .wbi-t{color:#c3c9d4;font-size:16.5px;margin:8px 0;line-height:1.65}
 .wbi-card b,.wbi-card strong{color:#fff;font-weight:700}

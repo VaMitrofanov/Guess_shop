@@ -242,17 +242,14 @@ export function registerStart(bot: Telegraf): void {
             if (await offerPreselectedGamepass(ctx, awaitingOrder.wbCode, passPrice, startGuideUrl)) return;
             await ctx.reply(
               `С возвращением! 👋 Твой код активирован · цена геймпасса <b>${passPrice} R$</b>\n\n` +
-              `Напомню, что я умею:\n` +
-              `📖 Инструкция — как создать геймпасс\n` +
-              `📊 Статус заказа — приняли → выкупаем → готово\n` +
-              `💎 Прямой заказ — Robux без карты WB, быстрее и выгоднее\n\n` +
-              `👉 Геймпасс ещё не создан? Пройди инструкцию. Уже готов? Пришли свой <b>ник Roblox</b> 🔎`,
+              `📖 Вот твоя <b>персональная инструкция</b> — заказ оформляется <b>там же</b>: создай геймпасс и найди его по нику Roblox 🔎\n\n` +
+              `🔔 Здесь, в боте, ты получишь <b>уведомления о заказе</b> — приняли → выкупаем → готово.`,
               {
                 parse_mode: "HTML",
                 link_preview_options: { is_disabled: true },
                 ...Markup.inlineKeyboard([
-                  [Markup.button.url("📖 ИНСТРУКЦИЯ — как создать геймпасс", startGuideUrl)],
-                  [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
+                  [Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", startGuideUrl)],
+                  [Markup.button.callback("🔎 Уже создал — найти по нику", CB.findGpStart)],
                   [Markup.button.callback("📊 Мой заказ", CB.refreshStatus), Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
                   [supportBtn("💬 Нужна помощь?")],
                 ]),
@@ -504,19 +501,18 @@ export function registerStart(bot: Telegraf): void {
 
     const clientInline = !isAdmin
       ? Markup.inlineKeyboard([
-          [Markup.button.url("📖 ИНСТРУКЦИЯ — как создать геймпасс", guideUrl)],
-          [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
+          [Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", guideUrl)],
+          [Markup.button.callback("🔎 Уже создал — найти по нику", CB.findGpStart)],
           [Markup.button.callback("📊 Мой заказ", CB.refreshStatus), Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
         ])
       : {};
     await ctx.reply(
       `${greetLine}\n` +
       `✅ Код <b>${code}</b> активирован · номинал <b>${wbCode.denomination} R$</b> → геймпасс <b>${passPrice} R$</b>\n\n` +
-      `Я бот RobloxBank — помогу превратить твой код в робуксы 💎 Вот что я умею:\n` +
-      `📖 Покажу инструкцию — как создать геймпасс (это один раз, дальше проще)\n` +
-      `📊 Прослежу за заказом — приняли → выкупаем → готово ✨\n` +
-      `💎 Оформлю прямой заказ — Robux без карты WB, быстрее и выгоднее\n\n` +
-      `👉 Сейчас главное — создай геймпасс по инструкции. Готово? Пришли свой <b>ник Roblox</b> (или подтверди выбор с сайта) — остальное беру на себя 🙌`,
+      `📖 Вот твоя <b>персональная инструкция</b> — открой её по кнопке ниже.\n` +
+      `Заказ оформляется <b>прямо там</b>: создашь геймпасс и найдёшь его по своему нику Roblox 🔎\n\n` +
+      `🔔 А здесь, в боте, ты будешь получать <b>уведомления о заказе</b> — приняли → выкупаем → готово ✨\n` +
+      `💎 Ещё тут можно купить Robux <b>напрямую</b> — без карты WB, быстрее и выгоднее.`,
       {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
@@ -577,21 +573,39 @@ export function registerStatus(bot: Telegraf): void {
     }
   });
 
-  // /help — instruction link + how to reach a human.
+  // /help — personal instruction link (tied to the user's active code/order) +
+  // how to reach a human. No raw command names in the text — buttons only.
   bot.command("help", async (ctx) => {
+    // Resolve the user's latest order so the instruction link carries their code
+    // (→ opens straight into the instruction, not the code-entry gate).
+    let guideUrl = "https://robloxbank.ru/guide?source=wb";
+    try {
+      const helpUser = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
+      if (helpUser) {
+        const helpOrder = await (db as any).wbOrder.findFirst({
+          where: { userId: helpUser.id },
+          orderBy: { createdAt: "desc" },
+          select: { wbCode: true, isDirectOrder: true },
+        });
+        if (helpOrder?.wbCode && !(helpOrder.wbCode as string).startsWith("DIR-") && !helpOrder.isDirectOrder) {
+          guideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${helpOrder.wbCode}`;
+        } else if (helpOrder?.isDirectOrder) {
+          guideUrl = "https://robloxbank.ru/guide?source=direct";
+        }
+      }
+    } catch (err) {
+      console.error("[TG] /help order lookup failed:", err);
+    }
     await ctx.reply(
       `🆘 <b>Помощь</b>\n\n` +
-      `📖 Инструкция — как создать геймпасс и получить робуксы:\n` +
-      `👉 https://robloxbank.ru/guide?source=wb\n\n` +
-      `📊 Статус заказа — команда /status\n` +
-      `💎 Прямой заказ Robux — команда /direct\n\n` +
-      `🔑 Есть код с WB-карты? Просто напиши его сюда.\n` +
-      `🔎 Геймпасс готов? Напиши свой ник Roblox.`,
+      `📖 Твоя инструкция — как создать геймпасс и получить робуксы. Заказ оформляется прямо там, по нику Roblox.\n\n` +
+      `🔔 Статус заказа и уведомления — здесь, в боте.\n` +
+      `💎 А ещё можно купить Robux напрямую — без карты WB, быстрее и выгоднее.`,
       {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
         ...Markup.inlineKeyboard([
-          [Markup.button.url("📖 ИНСТРУКЦИЯ", "https://robloxbank.ru/guide?source=wb")],
+          [Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", guideUrl)],
           [Markup.button.callback("📊 Мой заказ", CB.refreshStatus), Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
           [supportBtn("💬 Написать менеджеру")],
         ]),
@@ -729,10 +743,16 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     ? `🔗 <a href="${order.gamepassUrl}">Геймпасс</a>\n`
     : ``;
 
+  // Show the Roblox nick so the user sees exactly where the Robux will land.
+  const nickLine = order.robloxUsername
+    ? `🎮 Roblox: <b>${escapeHtml(order.robloxUsername)}</b>\n`
+    : ``;
+
   const text =
     `📦 <b>Заявка #${order.id.slice(-6).toUpperCase()}</b>\n` +
     `📅 ${new Date(order.createdAt).toLocaleDateString("ru-RU")}\n` +
     `💎 Номинал: <b>${order.amount} R$</b>\n` +
+    nickLine +
     gamepassLine +
     `📊 Статус: <b>${label[order.status] ?? order.status}</b>` +
     note;
@@ -994,15 +1014,15 @@ export function registerText(bot: Telegraf): void {
               if (await offerPreselectedGamepass(ctx, state.wbCode, passPrice, recoverGuideUrl)) return;
               await ctx.reply(
                 `Твой код уже активирован! 📌 Цена геймпасса: <b>${passPrice} R$</b>\n\n` +
-                `⚠️ <b>Если геймпасс ещё не создан</b> — пройди инструкцию:\n` +
+                `📖 Открой свою <b>персональную инструкцию</b> — заказ оформляется <b>там же</b>: создай геймпасс и найди его по нику Roblox 🔎\n` +
                 `👉 ${recoverGuideUrl}\n\n` +
-                `Когда будет готов — напиши свой <b>ник в Roblox</b> 🔎`,
+                `🔔 Здесь, в боте, придут <b>уведомления о заказе</b>.`,
                 {
                   parse_mode: "HTML",
                   link_preview_options: { is_disabled: true },
                   ...Markup.inlineKeyboard([
-                    [Markup.button.url("📖 ИНСТРУКЦИЯ", recoverGuideUrl)],
-                    [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
+                    [Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", recoverGuideUrl)],
+                    [Markup.button.callback("🔎 Уже создал — найти по нику", CB.findGpStart)],
                     [Markup.button.callback("📊 Мой заказ", CB.refreshStatus), Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
                     [supportBtn("💬 Нужна помощь?")],
                   ]),
@@ -1984,15 +2004,15 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   await ctx.reply(
     `✅ Код <b>${codeInput}</b> активирован!\n` +
     `💎 Номинал: <b>${wbCode.denomination} R$</b> → Цена геймпасса: <b>${passPrice} R$</b>\n\n` +
-    `⚠️ <b>Без выполнения инструкции робуксы выкупить невозможно</b> — она покажет, как создать и разблокировать геймпасс:\n` +
+    `📖 Вот твоя <b>персональная инструкция</b> — заказ оформляется <b>прямо там</b>: создашь геймпасс и найдёшь его по нику Roblox 🔎\n` +
     `👉 ${textGuideUrl}\n\n` +
-    `Когда геймпасс будет готов — напиши свой <b>ник в Roblox</b>, и я найду его сам 🔎`,
+    `🔔 А здесь, в боте, придут <b>уведомления о заказе</b> — приняли → выкупаем → готово.`,
     {
       parse_mode: "HTML",
       link_preview_options: { is_disabled: true },
       ...Markup.inlineKeyboard([
-        [Markup.button.url("📖 ИНСТРУКЦИЯ — как создать геймпасс", textGuideUrl)],
-        [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
+        [Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", textGuideUrl)],
+        [Markup.button.callback("🔎 Уже создал — найти по нику", CB.findGpStart)],
         [supportBtn("💬 Нужна помощь?")],
       ]),
     }
@@ -3387,16 +3407,15 @@ export function registerChatMember(bot: Telegraf): void {
       await bot.telegram.sendMessage(
         userId,
         `✅ <b>Добро пожаловать в канал!</b>\n\n` +
-        `Твой код <code>${code}</code> активирован — осталось создать геймпасс.\n\n` +
-        `📌 Установи цену ровно <b>${passPrice} R$</b>\n\n` +
-        `Пришли свой ник в Roblox — найду геймпасс сам 🔎\n` +
-        `<i>Также можно прислать ссылку или Asset ID.</i>`,
+        `Твой код <code>${code}</code> активирован 🎉\n\n` +
+        `📖 Вот твоя <b>персональная инструкция</b> — заказ оформляется <b>прямо там</b>: создашь геймпасс (цена ровно <b>${passPrice} R$</b>) и найдёшь его по нику Roblox 🔎\n\n` +
+        `🔔 А здесь, в боте, ты будешь получать <b>уведомления о заказе</b> — приняли → выкупаем → готово.`,
         {
           parse_mode: "HTML",
           link_preview_options: { is_disabled: true },
           ...Markup.inlineKeyboard([
-            [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
-            [Markup.button.url("📖 Открыть инструкцию", `https://robloxbank.ru/guide?source=wb&skip=1&code=${code}`)],
+            [Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", `https://robloxbank.ru/guide?source=wb&skip=1&code=${code}`)],
+            [Markup.button.callback("🔎 Уже создал — найти по нику", CB.findGpStart)],
             [supportBtn("💬 Нужна помощь?")],
           ]),
         }

@@ -608,13 +608,13 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         message:
           `${getGreeting(custStatus, firstName)}\n` +
           `✅ Код активирован! 📌 Цена геймпасса: ${passPrice} R$\n\n` +
-          `⚠️ Если геймпасс ещё не создан — пройди инструкцию:\n` +
+          `📖 Открой свою персональную инструкцию — заказ оформляется там же: создай геймпасс и найди его по нику Roblox 🔎\n` +
           `👉 ${startGuideUrl}\n\n` +
-          `Когда будет готов — напиши свой ник в Roblox 🔎`,
+          `🔔 Здесь, в боте, придут уведомления о заказе.`,
         keyboard: Keyboard.builder()
-          .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: startGuideUrl })
+          .urlButton({ label: "📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", url: startGuideUrl })
           .row()
-          .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+          .textButton({ label: "🔎 Уже создал — найти по нику", payload: { command: "find_gp_start" }, color: "primary" })
           .row()
           .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
           .inline(),
@@ -643,15 +643,12 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         message:
           `${getGreeting(custStatus, firstName)}\n` +
           `✅ Код активирован · цена геймпасса ${passPrice} R$\n\n` +
-          `Напомню, что я умею:\n` +
-          `📖 Инструкция — как создать геймпасс\n` +
-          `📊 Статус заказа — приняли → выкупаем → готово\n` +
-          `💎 Прямой заказ — Robux без карты WB, быстрее и выгоднее\n\n` +
-          `👉 Геймпасс ещё не создан? Пройди инструкцию. Уже готов? Напиши свой ник Roblox 🔎`,
+          `📖 Вот твоя персональная инструкция — заказ оформляется там же: создай геймпасс и найди его по нику Roblox 🔎\n\n` +
+          `🔔 Здесь, в боте, ты получишь уведомления о заказе — приняли → выкупаем → готово.`,
         keyboard: Keyboard.builder()
-          .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: restoredGuideUrl })
+          .urlButton({ label: "📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", url: restoredGuideUrl })
           .row()
-          .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+          .textButton({ label: "🔎 Уже создал — найти по нику", payload: { command: "find_gp_start" }, color: "primary" })
           .row()
           .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "secondary" })
           .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "secondary" })
@@ -1015,15 +1012,14 @@ async function handleRefActivation(
     message:
       greetLine + `\n` +
       `✅ Код ${code} активирован · номинал ${totalAmount} R$ → геймпасс ${passPrice} R$\n\n` +
-      `Я бот RobloxBank — помогу превратить твой код в робуксы 💎 Вот что я умею:\n` +
-      `📖 Покажу инструкцию — как создать геймпасс (это один раз, дальше проще)\n` +
-      `📊 Прослежу за заказом — приняли → выкупаем → готово ✨\n` +
-      `💎 Оформлю прямой заказ — Robux без карты WB, быстрее и выгоднее\n\n` +
-      `👉 Сейчас главное — создай геймпасс по инструкции. Готово? Напиши свой ник Roblox (или подтверди выбор с сайта) — остальное беру на себя 🙌`,
+      `📖 Вот твоя персональная инструкция — открой её по кнопке ниже.\n` +
+      `Заказ оформляется прямо там: создашь геймпасс и найдёшь его по своему нику Roblox 🔎\n\n` +
+      `🔔 А здесь, в боте, ты будешь получать уведомления о заказе — приняли → выкупаем → готово ✨\n` +
+      `💎 Ещё тут можно купить Robux напрямую — без карты WB, быстрее и выгоднее.`,
     keyboard: Keyboard.builder()
-      .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: vkGuideUrl })
+      .urlButton({ label: "📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", url: vkGuideUrl })
       .row()
-      .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+      .textButton({ label: "🔎 Уже создал — найти по нику", payload: { command: "find_gp_start" }, color: "primary" })
       .row()
       .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "secondary" })
       .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "secondary" })
@@ -2025,6 +2021,8 @@ async function handleIdleMessage(
         : "";
 
     const gamepassLine = order.gamepassUrl ? `🔗 ${order.gamepassUrl}\n` : "";
+    // Show the Roblox nick so the user sees exactly where the Robux will land.
+    const nickLine = order.robloxUsername ? `🎮 Roblox: ${order.robloxUsername}\n` : "";
 
     const keyboard =
       order.status === "REJECTED"
@@ -2052,6 +2050,7 @@ async function handleIdleMessage(
         `💎 Сумма: ${order.amount} R$ (Геймпасс: ${passPrice} R$)\n` +
         // DIR- codes are internal synthetic IDs for direct orders — don't expose them
         ((order.wbCode as string).startsWith("DIR-") ? "" : `🔑 Код ВБ: ${order.wbCode}\n`) +
+        nickLine +
         gamepassLine +
         `📊 Статус: ${statusStr}` +
         hint,
@@ -2081,13 +2080,13 @@ async function handleIdleMessage(
       message:
         `${getGreeting(status, firstName)}\n` +
         `✅ Код активирован! 📌 Цена геймпасса: ${passPrice} R$\n\n` +
-        `⚠️ Если геймпасс ещё не создан — пройди инструкцию:\n` +
+        `📖 Открой свою персональную инструкцию — заказ оформляется там же: создай геймпасс и найди его по нику Roblox 🔎\n` +
         `👉 ${idleGuideUrl}\n\n` +
-        `Когда будет готов — напиши свой ник в Roblox 🔎`,
+        `🔔 Здесь, в боте, придут уведомления о заказе.`,
       keyboard: Keyboard.builder()
-        .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: idleGuideUrl })
+        .urlButton({ label: "📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", url: idleGuideUrl })
         .row()
-        .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+        .textButton({ label: "🔎 Уже создал — найти по нику", payload: { command: "find_gp_start" }, color: "primary" })
         .row()
         .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
         .inline(),
