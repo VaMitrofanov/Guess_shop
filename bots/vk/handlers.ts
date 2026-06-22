@@ -679,12 +679,9 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
 
     await ctx.reply({
       message:
-        "👋 Привет! Я бот RobloxBank — помогу получить робуксы 💎 Вот что я умею:\n" +
-        "📖 Покажу инструкцию — как создать геймпасс\n" +
-        "📊 Прослежу за заказом — приняли → выкупаем → готово\n" +
-        "💎 Оформлю прямой заказ — Robux без карты WB, быстрее и выгоднее\n\n" +
-        "🔑 Есть код с WB-карты? Напиши его прямо сюда.\n" +
-        "🔎 Геймпасс уже готов? Напиши свой ник Roblox.",
+        "👋 Привет! Я бот RobloxBank — помогу получить робуксы за код с карты Wildberries 💎\n\n" +
+        "🔑 Есть код с WB-карты? Напиши его прямо сюда — дам твою персональную инструкцию, заказ оформишь по ней, а тут будешь получать уведомления о заказе.\n\n" +
+        "💎 Нет кода? Можно купить Robux напрямую — без карты WB, быстрее и выгоднее.",
       keyboard: Keyboard.builder()
         .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: "https://robloxbank.ru/guide?source=wb" })
         .row()
@@ -2112,11 +2109,9 @@ async function handleIdleMessage(
     const greeting = getGreeting(status, firstName);
     await ctx.reply({
       message:
-        `${greeting}Я помогу обменять Wildberries-карту на робуксы.\n\n` +
-        `📖 Вся информация — создание геймпасса, разблокировка, настройка — в инструкции:\n` +
-        `👉 https://robloxbank.ru/guide?source=wb\n\n` +
-        `🔑 Есть код с WB-карты? Напиши его прямо сюда.\n` +
-        `🔎 Геймпасс уже готов? Напиши свой ник в Roblox.`,
+        `${greeting}Я помогу получить робуксы за код с карты Wildberries 💎\n\n` +
+        `🔑 Есть код с WB-карты? Напиши его прямо сюда — дам твою персональную инструкцию, заказ оформишь по ней, а тут будешь получать уведомления о заказе.\n\n` +
+        `💎 Нет кода? Можно купить Robux напрямую — без карты WB, быстрее и выгоднее.`,
       keyboard: Keyboard.builder()
         .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: "https://robloxbank.ru/guide?source=wb" })
         .row()
