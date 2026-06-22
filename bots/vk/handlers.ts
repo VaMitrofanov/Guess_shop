@@ -98,10 +98,10 @@ async function triggerSupport(ctx: any, vkUserId: number, ctxKey: string): Promi
   });
   pauseSupport(vkUserId); // bot goes quiet so it won't interrupt the live chat
   await ctx.reply(
-    "✅ Готово! Передал твоё обращение менеджеру — он скоро ответит прямо здесь, в этом чате.\n\n" +
+    "✅ Готово! Дальше с тобой общается живой человек (не бот) — менеджер ответит прямо здесь, в этом чате.\n\n" +
     "Опиши, пожалуйста, что случилось, одним сообщением 👇\n" +
     "Пока идёт диалог с менеджером, бот не вмешивается. Вернуть бота можно командой «+бот».\n\n" +
-    "Если удобнее в Telegram — поддержка там: https://t.me/RobloxBank_PA"
+    "Если удобнее в Telegram — там тоже живой человек: https://t.me/RobloxBank_PA"
   );
 }
 
@@ -561,7 +561,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     !(messageHasPhoto(ctx) && await hasPendingProofPhoto(vkUserId))
   ) {
     if (isSupportPaused(vkUserId)) {
-      await ctx.reply("Менеджер уже подключается и ответит прямо здесь 👇 Опиши, пожалуйста, свой вопрос одним сообщением.");
+      await ctx.reply("С тобой на связи живой человек (не бот) — менеджер ответит прямо здесь 👇 Опиши, пожалуйста, свой вопрос одним сообщением.");
     } else {
       await triggerSupport(ctx, vkUserId, "general");
     }
