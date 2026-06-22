@@ -331,6 +331,8 @@ export interface OrderCardPayload {
   creatorName?:        string;
   /** true when the gamepass is in an 18+ age-restricted game. */
   isAgeRestricted?:    boolean;
+  /** true when the customer picked this gamepass via the website nick-search (one-tap). */
+  viaWebOneTap?:       boolean;
 }
 
 export interface ReviewCardPayload {
@@ -389,9 +391,12 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   const creatorLine    = order.creatorName    ? `🎮 Создатель ГП: <b>${escapeHtml(order.creatorName)}</b>\n`  : "";
   const ageRestrictLine = order.isAgeRestricted ? `🔞 <b>Игра 18+ — выкуп вручную</b>\n`           : "";
 
+  const webOneTapLine = order.viaWebOneTap ? `🌐 <b>ONE-TAP С САЙТА</b>\n` : "";
+
   const text =
     `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
+    webOneTapLine +
     loyaltyLine +
     `${platformEmoji} Источник: <b>${order.platform}</b>\n` +
     `📅 Время: <b>${dateStr}</b>\n` +

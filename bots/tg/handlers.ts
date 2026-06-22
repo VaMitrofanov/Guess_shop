@@ -238,17 +238,22 @@ export function registerStart(bot: Telegraf): void {
               ? `https://robloxbank.ru/guide?source=direct`
               : `https://robloxbank.ru/guide?source=wb&skip=1&code=${awaitingOrder.wbCode}`;
             pendingLink.set(ctx.from.id, { wbCode: awaitingOrder.wbCode, denomination: awaitingOrder.amount });
+            // One-tap: gamepass already picked on the website → offer confirm.
+            if (await offerPreselectedGamepass(ctx, awaitingOrder.wbCode, passPrice, startGuideUrl)) return;
             await ctx.reply(
-              `Твой код уже активирован! 📌 Цена геймпасса: <b>${passPrice} R$</b>\n\n` +
-              `⚠️ <b>Если геймпасс ещё не создан</b> — пройди инструкцию:\n` +
-              `👉 ${startGuideUrl}\n\n` +
-              `Когда будет готов — напиши свой <b>ник в Roblox</b> 🔎`,
+              `С возвращением! 👋 Твой код активирован · цена геймпасса <b>${passPrice} R$</b>\n\n` +
+              `Напомню, что я умею:\n` +
+              `📖 Инструкция — как создать геймпасс\n` +
+              `📊 Статус заказа — приняли → выкупаем → готово\n` +
+              `💎 Прямой заказ — Robux без карты WB, быстрее и выгоднее\n\n` +
+              `👉 Геймпасс ещё не создан? Пройди инструкцию. Уже готов? Пришли свой <b>ник Roblox</b> 🔎`,
               {
                 parse_mode: "HTML",
                 link_preview_options: { is_disabled: true },
                 ...Markup.inlineKeyboard([
                   [Markup.button.url("📖 ИНСТРУКЦИЯ — как создать геймпасс", startGuideUrl)],
                   [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
+                  [Markup.button.callback("📊 Мой заказ", CB.refreshStatus), Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
                   [supportBtn("💬 Нужна помощь?")],
                 ]),
               }
@@ -284,18 +289,18 @@ export function registerStart(bot: Telegraf): void {
       } else {
         const greeting = getGreeting(custStatus, firstName);
         await ctx.reply(
-          `${greeting}Я помогу обменять Wildberries-карту на робуксы.\n\n` +
-          `📖 <b>Вся информация — создание геймпасса, разблокировка, настройка — в инструкции:</b>\n` +
-          `👉 https://robloxbank.ru/guide?source=wb\n\n` +
+          `${greeting}Я бот RobloxBank — помогу получить робуксы 💎 Вот что я умею:\n` +
+          `📖 Покажу инструкцию — как создать геймпасс\n` +
+          `📊 Прослежу за заказом — приняли → выкупаем → готово\n` +
+          `💎 Оформлю прямой заказ — Robux без карты WB, быстрее и выгоднее\n\n` +
           `🔑 Есть код с WB-карты? Напиши его прямо сюда.\n` +
-          `🔎 Геймпасс уже готов? Напиши свой ник в Roblox.`,
+          `🔎 Геймпасс уже готов? Напиши свой ник Roblox.`,
           {
             parse_mode: "HTML",
             link_preview_options: { is_disabled: true },
             ...Markup.inlineKeyboard([
               [Markup.button.url("📖 ИНСТРУКЦИЯ", "https://robloxbank.ru/guide?source=wb")],
-              [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
-              [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
+              [Markup.button.callback("📊 Мой заказ", CB.refreshStatus), Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
             ]),
           }
         );
@@ -319,6 +324,38 @@ export function registerStart(bot: Telegraf): void {
     // isUsed=true with userId=null means the website reserved it but the bot flow
     // never finished — allow those through so users aren't silently stuck.
     if (wbCode.isUsed && wbCode.userId) {
+      // If THIS user owns the code and already has a placed order (e.g. they
+      // materialised it from the website one-tap), greet with the order status
+      // instead of the "уже активирован" dead-end.
+      const owner = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+      if (owner && owner.id === wbCode.userId) {
+        const placedOrder = await (db as any).wbOrder.findFirst({
+          where: { userId: owner.id, wbCode: { equals: code, mode: "insensitive" } },
+          orderBy: { createdAt: "desc" },
+          select: { id: true, status: true },
+        });
+        if (placedOrder && ["PENDING", "IN_PROGRESS", "COMPLETED"].includes(placedOrder.status)) {
+          const shortId = String(placedOrder.id).slice(-6).toUpperCase();
+          const done = placedOrder.status === "COMPLETED";
+          await ctx.reply(
+            (done
+              ? `✅ <b>Заказ #${shortId} выполнен</b> — спасибо! 🎉\n\nХочешь ещё робуксов? 💎`
+              : `✅ <b>Заказ оформлен</b> — геймпасс с сайта принят! 🙌\n\n` +
+                `🆔 Заявка <code>${shortId}</code>\n` +
+                `📊 Слежу за статусом: приняли → выкупаем → готово ✨\n\n` +
+                `Как только выкупим — сразу напишу сюда. 💎 А ещё можно купить Robux напрямую — без карты WB.`),
+            {
+              parse_mode: "HTML",
+              link_preview_options: { is_disabled: true },
+              ...Markup.inlineKeyboard([
+                [Markup.button.callback("📊 Мой заказ", CB.refreshStatus)],
+                [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
+              ]),
+            }
+          );
+          return;
+        }
+      }
       await ctx.reply("⚠️ Этот код уже был активирован ранее.", { parse_mode: "HTML", ...withSupportKb("💬 Это не мой заказ?", "code_mine", ctx) });
       return;
     }
@@ -460,19 +497,26 @@ export function registerStart(bot: Telegraf): void {
     const greetLine = getGreeting(custStatus, ctx.from.first_name || undefined);
 
     const guideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${code}`;
+
+    // One-tap: if the user already picked a gamepass on the website, offer the
+    // confirm instead of the standard "напиши ник" welcome.
+    if (!isAdmin && await offerPreselectedGamepass(ctx, code, passPrice, guideUrl)) return;
+
     const clientInline = !isAdmin
       ? Markup.inlineKeyboard([
           [Markup.button.url("📖 ИНСТРУКЦИЯ — как создать геймпасс", guideUrl)],
           [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
+          [Markup.button.callback("📊 Мой заказ", CB.refreshStatus), Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
         ])
       : {};
     await ctx.reply(
       `${greetLine}\n` +
-      `✅ Код <b>${code}</b> активирован!\n` +
-      `💎 Номинал: <b>${wbCode.denomination} R$</b> → Цена геймпасса: <b>${passPrice} R$</b>\n\n` +
-      `⚠️ <b>Без выполнения инструкции робуксы выкупить невозможно</b> — она покажет, как создать и разблокировать геймпасс:\n` +
-      `👉 ${guideUrl}\n\n` +
-      `Когда геймпасс будет готов — напиши свой <b>ник в Roblox</b>, и я найду его сам 🔎`,
+      `✅ Код <b>${code}</b> активирован · номинал <b>${wbCode.denomination} R$</b> → геймпасс <b>${passPrice} R$</b>\n\n` +
+      `Я бот RobloxBank — помогу превратить твой код в робуксы 💎 Вот что я умею:\n` +
+      `📖 Покажу инструкцию — как создать геймпасс (это один раз, дальше проще)\n` +
+      `📊 Прослежу за заказом — приняли → выкупаем → готово ✨\n` +
+      `💎 Оформлю прямой заказ — Robux без карты WB, быстрее и выгоднее\n\n` +
+      `👉 Сейчас главное — создай геймпасс по инструкции. Готово? Пришли свой <b>ник Roblox</b> (или подтверди выбор с сайта) — остальное беру на себя 🙌`,
       {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
@@ -496,6 +540,24 @@ async function getAdminKeyboard(uid?: string | number) {
 // /status — last order info with comforting text for PENDING
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Open the direct-order flow (predefined Robux packs). Shared by the
+ * `💎 Купить напрямую` callback and the `/direct` command.
+ */
+async function startDirectFlow(ctx: any): Promise<void> {
+  const tgId = String(ctx.from.id);
+  const dirUser = await (db as any).user.findUnique({ where: { tgId }, select: { balance: true } });
+  const bonus = dirUser?.balance ?? 0;
+  const bonusNote = bonus > 0
+    ? `\n\n🎁 У тебя есть бонус <b>${bonus} R$</b> — применится автоматически к заказу от 1000 R$ (только прямые заказы).`
+    : "";
+  pendingDirectAmount.set(ctx.from.id, true);
+  await ctx.reply(
+    `💎 <b>Прямой заказ Robux</b>\n\nВыбери количество (курс <b>0.7 ₽/R$</b>):` + bonusNote,
+    { parse_mode: "HTML", ...buildPackKb(bonus) }
+  );
+}
+
 export function registerStatus(bot: Telegraf): void {
   bot.command("status", async (ctx) => {
     const { text, keyboard } = await buildStatusMessage(String(ctx.from.id));
@@ -505,6 +567,74 @@ export function registerStatus(bot: Telegraf): void {
       ...keyboard,
     });
   });
+
+  // /direct — jump straight into the direct-order pack menu.
+  bot.command("direct", async (ctx) => {
+    try {
+      await startDirectFlow(ctx);
+    } catch (err) {
+      console.error("[TG] /direct failed:", err);
+    }
+  });
+
+  // /help — instruction link + how to reach a human.
+  bot.command("help", async (ctx) => {
+    await ctx.reply(
+      `🆘 <b>Помощь</b>\n\n` +
+      `📖 Инструкция — как создать геймпасс и получить робуксы:\n` +
+      `👉 https://robloxbank.ru/guide?source=wb\n\n` +
+      `📊 Статус заказа — команда /status\n` +
+      `💎 Прямой заказ Robux — команда /direct\n\n` +
+      `🔑 Есть код с WB-карты? Просто напиши его сюда.\n` +
+      `🔎 Геймпасс готов? Напиши свой ник Roblox.`,
+      {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        ...Markup.inlineKeyboard([
+          [Markup.button.url("📖 ИНСТРУКЦИЯ", "https://robloxbank.ru/guide?source=wb")],
+          [Markup.button.callback("📊 Мой заказ", CB.refreshStatus), Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
+          [supportBtn("💬 Написать менеджеру")],
+        ]),
+      }
+    );
+  });
+}
+
+/**
+ * Set the bot's public profile programmatically at startup, so it lives in git
+ * and survives redeploys (no manual BotFather steps):
+ *   - short description — shown on the bot's profile page / when shared
+ *   - description       — shown in an empty chat before «Запустить»
+ *   - command menu      — /status, /direct, /help for everyone
+ * Call only from the polling instance. Non-fatal: failures are logged.
+ */
+export async function setupBotProfile(bot: Telegraf): Promise<void> {
+  const shortDescription =
+    "Выкуп Robux: инструкция, статус заказа и покупка напрямую — без карты WB 💎";
+  const description =
+    "Привет! 👋 Это RobloxBank — получай робуксы за код с карты Wildberries.\n\n" +
+    "Я умею:\n" +
+    "📖 Показать инструкцию — как создать геймпасс\n" +
+    "📊 Следить за заказом — приняли → выкупаем → готово\n" +
+    "💎 Оформить заказ напрямую — Robux без карты WB, быстрее и выгоднее\n\n" +
+    "Жми «Запустить» и начнём 🚀";
+  const commands = [
+    { command: "status", description: "📊 Статус моего заказа" },
+    { command: "direct", description: "💎 Купить Robux напрямую" },
+    { command: "help", description: "📖 Инструкция и помощь" },
+  ];
+  const results = await Promise.allSettled([
+    bot.telegram.setMyShortDescription(shortDescription),
+    bot.telegram.setMyDescription(description),
+    bot.telegram.setMyCommands(commands),
+  ]);
+  results.forEach((r, i) => {
+    if (r.status === "rejected") {
+      const what = ["setMyShortDescription", "setMyDescription", "setMyCommands"][i];
+      console.error(`[TG] ${what} failed:`, r.reason);
+    }
+  });
+  console.log("[TG] Bot profile (description + commands) applied ✅");
 }
 
 interface StatusMessage {
@@ -860,6 +990,8 @@ export function registerText(bot: Telegraf): void {
             if (extractPassId(text) === null) {
               const passPrice = Math.ceil(state.denomination / 0.7);
               const recoverGuideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`;
+              // One-tap: gamepass already picked on the website → offer confirm.
+              if (await offerPreselectedGamepass(ctx, state.wbCode, passPrice, recoverGuideUrl)) return;
               await ctx.reply(
                 `Твой код уже активирован! 📌 Цена геймпасса: <b>${passPrice} R$</b>\n\n` +
                 `⚠️ <b>Если геймпасс ещё не создан</b> — пройди инструкцию:\n` +
@@ -871,6 +1003,7 @@ export function registerText(bot: Telegraf): void {
                   ...Markup.inlineKeyboard([
                     [Markup.button.url("📖 ИНСТРУКЦИЯ", recoverGuideUrl)],
                     [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
+                    [Markup.button.callback("📊 Мой заказ", CB.refreshStatus), Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
                     [supportBtn("💬 Нужна помощь?")],
                   ]),
                 }
@@ -1009,6 +1142,79 @@ export function registerText(bot: Telegraf): void {
 const MAX_PICK_BUTTONS = 5;
 /** Allowed Roblox username regex. */
 const ROBLOX_NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
+
+/**
+ * Website Step-9 handoff. Two cases when the user picked a gamepass on the site:
+ *
+ *  1. The site already materialised the order (status PENDING/processing) — show
+ *     "заказ оформлен, слежу за статусом", NOT another buy prompt.
+ *  2. The order is still AWAITING_GAMEPASS/REJECTED (site promotion didn't fire,
+ *     e.g. Roblox was down) — offer the one-tap "выкупаем?" as a clean fallback.
+ *     The confirm routes into gp_pick → processGamepassSubmission (full Roblox
+ *     validation still runs).
+ *
+ * Returns true when something was shown — callers then skip their "напиши ник"
+ * prompt.
+ */
+async function offerPreselectedGamepass(
+  ctx: any,
+  code: string,
+  passPrice: number,
+  guideUrl: string,
+): Promise<boolean> {
+  try {
+    if (!code) return false;
+    const wbCode = await (db as any).wbCode.findFirst({
+      where: { code: { equals: code, mode: "insensitive" } },
+      select: { selectedGamepassId: true },
+    });
+    const gpId = wbCode?.selectedGamepassId ? String(wbCode.selectedGamepassId) : "";
+    if (!/^\d{3,15}$/.test(gpId)) return false;
+
+    // Case 1 — order already placed from the site.
+    const order = await (db as any).wbOrder.findFirst({
+      where: { wbCode: { equals: code, mode: "insensitive" } },
+      select: { id: true, status: true },
+    });
+    if (order && order.status !== "AWAITING_GAMEPASS" && order.status !== "REJECTED") {
+      const shortId = String(order.id).slice(-6).toUpperCase();
+      await ctx.reply(
+        `✅ <b>Заказ уже оформлен</b> — геймпасс с сайта принят! 🙌\n\n` +
+        `🆔 Заявка <code>${shortId}</code>\n` +
+        `📊 Слежу за статусом: приняли → выкупаем → готово ✨\n\n` +
+        `Как только выкупим — сразу напишу сюда. Можешь спокойно закрыть чат.`,
+        {
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("📊 Мой заказ", CB.refreshStatus)],
+            [Markup.button.callback("💎 Купить ещё напрямую", CB.startDirect)],
+          ]),
+        }
+      );
+      return true;
+    }
+
+    // Case 2 — fallback one-tap offer.
+    await ctx.reply(
+      `🎯 Ты уже выбрал геймпасс на сайте!\n\n` +
+      `Выкупаем его за <b>${passPrice} R$</b>? Жми «✅ Да» — проверю и оформлю заказ.`,
+      {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback(`✅ Да, выкупаем (${passPrice} R$)`, CB.gpPick(gpId))],
+          [Markup.button.callback("🔎 Выбрать другой геймпасс", CB.findGpStart)],
+          [Markup.button.url("📖 Инструкция", guideUrl)],
+        ]),
+      }
+    );
+    return true;
+  } catch (err: any) {
+    console.error("[TG] offerPreselectedGamepass:", err?.message ?? err);
+    return false;
+  }
+}
 
 /**
  * Handle a user's Roblox-nick reply after they tapped "🔎 Найти по моему нику".
@@ -1556,9 +1762,18 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
   const gpCreatorLine    = creatorName      ? `🎮 Создатель ГП: <b>${escapeHtml(creatorName)}</b>\n`  : "";
   const ageRestrictLine  = isAgeRestricted  ? `🔞 <b>Игра 18+ — выкуп вручную</b>\n`      : "";
 
+  // Marker: the customer picked this gamepass in the website nick-search.
+  // selectedGamepassId is only ever written by /api/wb-code/select-gamepass, so
+  // its presence (matching the finalized pass) means "came from site one-tap".
+  const pickedOnSite =
+    !!wbCode?.selectedGamepassId &&
+    (order.gamepassUrl ?? "").includes(String(wbCode.selectedGamepassId));
+  const webOneTapLine = pickedOnSite ? `🌐 <b>ONE-TAP С САЙТА</b>\n` : "";
+
   const text =
     `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
+    webOneTapLine +
     directTag +
     loyaltyLine +
     `${platformEmoji} Источник: <b>${order.platform}</b>\n` +
@@ -2249,19 +2464,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
     // start_direct: user opens direct order flow — show predefined packs
     if (data === CB.startDirect) {
-      const dirUser = await (db as any).user.findUnique({
-        where: { tgId },
-        select: { balance: true },
-      });
-      const bonus = dirUser?.balance ?? 0;
-      const bonusNote = bonus > 0
-        ? `\n\n🎁 У тебя есть бонус <b>${bonus} R$</b> — применится автоматически к заказу от 1000 R$ (только прямые заказы).`
-        : "";
-      pendingDirectAmount.set(ctx.from.id, true);
-      await ctx.reply(
-        `💎 <b>Прямой заказ Robux</b>\n\nВыбери количество (курс <b>0.7 ₽/R$</b>):` + bonusNote,
-        { parse_mode: "HTML", ...buildPackKb(bonus) }
-      );
+      await startDirectFlow(ctx);
       await ctx.answerCbQuery();
       return;
     }

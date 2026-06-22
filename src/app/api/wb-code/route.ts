@@ -113,7 +113,26 @@ export async function GET(request: Request) {
     }
     // Code is "activated" if userId is set (by TG or VK) OR status is CLAIMED
     const claimed = !!(wbCode.userId || wbCode.status === "CLAIMED");
-    return NextResponse.json({ claimed, denomination: wbCode.denomination });
+
+    // The provisional order tells us which channel the user picked (TG/VK) and
+    // how far the order has progressed — the instruction page uses this to show
+    // a single channel CTA and to reflect "order already placed".
+    let platform: string | null = null;
+    let orderStatus: string | null = null;
+    try {
+      const order = await (db as any).wbOrder.findFirst({
+        where: { wbCode: { equals: code, mode: "insensitive" } },
+        select: { platform: true, status: true },
+      });
+      if (order) {
+        platform = order.platform ?? null;
+        orderStatus = order.status ?? null;
+      }
+    } catch {
+      /* non-fatal — CTA falls back to showing both channels */
+    }
+
+    return NextResponse.json({ claimed, denomination: wbCode.denomination, platform, orderStatus });
   } catch (err) {
     console.error("[wb-code GET] error:", err);
     return NextResponse.json({ error: "Server error" }, { status: 500 });

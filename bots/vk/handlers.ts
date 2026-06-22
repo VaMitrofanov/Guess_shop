@@ -262,6 +262,22 @@ function photoUrl(attachment: unknown): string | undefined {
 }
 
 /**
+ * True if the message carries a photo via vk-io OR the raw payload. vk-io
+ * occasionally fails to flag `hasAttachments("photo")` depending on the
+ * client/SDK version (and for forwarded/replied screenshots), which would
+ * otherwise misroute the photo to the idle/help branch. Checks every path.
+ */
+function messageHasPhoto(ctx: MessageContext): boolean {
+  if (ctx.hasAttachments("photo")) return true;
+  const raw: any[] = (ctx as any).message?.attachments ?? (ctx as any).attachments ?? [];
+  if (raw.some((a) => a?.type === "photo")) return true;
+  const fwd: any[] = (ctx as any).message?.fwd_messages ?? [];
+  const reply: any = (ctx as any).message?.reply_message;
+  const all = reply ? [reply, ...fwd] : fwd;
+  return all.some((m) => (m?.attachments ?? []).some((a: any) => a?.type === "photo"));
+}
+
+/**
  * Attempts every known path to extract a VK photo URL:
  * 1. Direct vk-io attachment (parsed by library)
  * 2. Raw message.attachments array
@@ -328,6 +344,42 @@ async function extractPhotoUrl(ctx: MessageContext): Promise<string | undefined>
   }
 
   return undefined;
+}
+
+/**
+ * True when a photo from this user is *terminal proof* we should accept even
+ * during a live-support pause: a pending direct-order payment, or a completed
+ * order whose review bonus hasn't been claimed yet. Used to stop the support
+ * pause from silently swallowing review/payment screenshots ("фото зависло"),
+ * while still ignoring random screenshots meant for the live manager.
+ * Fail-safe: returns false on error so the pause behaviour is preserved.
+ */
+async function hasPendingProofPhoto(vkUserId: number): Promise<boolean> {
+  try {
+    const user = await (db as any).user.findUnique({
+      where: { vkId: String(vkUserId) }, select: { id: true, reviewBonusGrantedAt: true },
+    });
+    if (!user) return false;
+    const pendingPay = await (db as any).wbOrder.findFirst({
+      where: { userId: user.id, status: "PAYMENT_PENDING", isDirectOrder: true }, select: { id: true },
+    });
+    if (pendingPay) return true;
+    const completed = await (db as any).wbOrder.findFirst({
+      where: { userId: user.id, status: "COMPLETED" }, select: { wbCode: true },
+    });
+    if (!completed) return false;
+    // Direct orders have no WbCode row — gate on reviewBonusGrantedAt instead.
+    if ((completed.wbCode as string | undefined)?.startsWith("DIR-")) {
+      return !user.reviewBonusGrantedAt;
+    }
+    const unclaimed = await (db as any).wbCode.findFirst({
+      where: { userId: user.id, reviewBonusClaimed: false }, select: { code: true },
+    });
+    return !!unclaimed;
+  } catch (e) {
+    console.error("[VK] hasPendingProofPhoto check failed:", e);
+    return false;
+  }
 }
 
 function vkUserDisplay(name: string, vkUserId: number): string {
@@ -499,8 +551,15 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // ── Natural-language support request — user can reach a manager by simply
   // writing ("оператор", "поддержка", "помощь"…), not only via the button.
   // Skip when the message carries a recognisable gamepass link/ID — «помоги,
-  // вот ссылка …» must reach the flow, not freeze the bot for 30 minutes. ──
-  if (text.length > 0 && extractPassId(text) === null && SUPPORT_WORDS.some((w) => lower.includes(w))) {
+  // вот ссылка …» must reach the flow, not freeze the bot for 30 minutes.
+  // Also skip when it carries an *eligible proof photo* — «помогите, вот мой
+  // отзыв 📷» must route to the review/payment flow, not trigger support. ──
+  if (
+    text.length > 0 &&
+    extractPassId(text) === null &&
+    SUPPORT_WORDS.some((w) => lower.includes(w)) &&
+    !(messageHasPhoto(ctx) && await hasPendingProofPhoto(vkUserId))
+  ) {
     if (isSupportPaused(vkUserId)) {
       await ctx.reply("Менеджер уже подключается и ответит прямо здесь 👇 Опиши, пожалуйста, свой вопрос одним сообщением.");
     } else {
@@ -517,8 +576,17 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     if (RESUME_KEYWORDS.includes(lower)) {
       resumeSupport(vkUserId);
       void rePromptAfterSupport(vkUserId);
+      return;
     }
-    return;
+    // A photo is almost always *terminal proof* (review screenshot or direct
+    // payment). Silently dropping it here was the "фото зависло" bug — the user
+    // got no acknowledgement at all. Let an *eligible* proof photo fall through
+    // to the photo-routing below; non-eligible photos (e.g. a screenshot meant
+    // for the live manager) still stay silent so the bot doesn't hijack the chat.
+    if (!(messageHasPhoto(ctx) && await hasPendingProofPhoto(vkUserId))) {
+      return;
+    }
+    console.log(`[VK] support-pause bypass: eligible proof photo from vkUserId=${vkUserId}`);
   }
 
   // ── (B) State machine dispatch ────────────────────────────────────────────
@@ -569,17 +637,24 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       const restoredGuideUrl = isDirect
         ? `https://robloxbank.ru/guide?source=direct`
         : `https://robloxbank.ru/guide?source=wb&skip=1&code=${restoredState.wbCode}`;
+      // One-tap: gamepass already picked on the website → offer confirm.
+      if (await vkOfferPreselectedGamepass(ctx, restoredState.wbCode, passPrice, restoredGuideUrl)) return;
       await ctx.reply({
         message:
           `${getGreeting(custStatus, firstName)}\n` +
-          `✅ Код активирован! 📌 Цена геймпасса: ${passPrice} R$\n\n` +
-          `⚠️ Если геймпасс ещё не создан — пройди инструкцию:\n` +
-          `👉 ${restoredGuideUrl}\n\n` +
-          `Когда будет готов — напиши свой ник в Roblox 🔎`,
+          `✅ Код активирован · цена геймпасса ${passPrice} R$\n\n` +
+          `Напомню, что я умею:\n` +
+          `📖 Инструкция — как создать геймпасс\n` +
+          `📊 Статус заказа — приняли → выкупаем → готово\n` +
+          `💎 Прямой заказ — Robux без карты WB, быстрее и выгоднее\n\n` +
+          `👉 Геймпасс ещё не создан? Пройди инструкцию. Уже готов? Напиши свой ник Roblox 🔎`,
         keyboard: Keyboard.builder()
           .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: restoredGuideUrl })
           .row()
           .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+          .row()
+          .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "secondary" })
+          .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "secondary" })
           .row()
           .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
           .inline(),
@@ -607,13 +682,17 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
 
     await ctx.reply({
       message:
-        "👋 Привет! Я помогу обменять Wildberries-карту на робуксы.\n\n" +
-        "📖 Вся информация — создание геймпасса, разблокировка, настройка — в инструкции:\n" +
-        "👉 https://robloxbank.ru/guide?source=wb\n\n" +
+        "👋 Привет! Я бот RobloxBank — помогу получить робуксы 💎 Вот что я умею:\n" +
+        "📖 Покажу инструкцию — как создать геймпасс\n" +
+        "📊 Прослежу за заказом — приняли → выкупаем → готово\n" +
+        "💎 Оформлю прямой заказ — Robux без карты WB, быстрее и выгоднее\n\n" +
         "🔑 Есть код с WB-карты? Напиши его прямо сюда.\n" +
-        "🔎 Геймпасс уже готов? Напиши свой ник в Roblox.",
+        "🔎 Геймпасс уже готов? Напиши свой ник Roblox.",
       keyboard: Keyboard.builder()
         .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: "https://robloxbank.ru/guide?source=wb" })
+        .row()
+        .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "primary" })
+        .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "positive" })
         .row()
         .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
         .inline(),
@@ -680,7 +759,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   }
 
   // ── Direct order payment screenshot (BEFORE review routing) ───────────────
-  if (ctx.hasAttachments("photo") || state?.type === "AWAITING_DIRECT_PAYMENT") {
+  if (messageHasPhoto(ctx) || state?.type === "AWAITING_DIRECT_PAYMENT") {
     const photoUser = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
     if (photoUser) {
       const payOrder = state?.type === "AWAITING_DIRECT_PAYMENT"
@@ -697,8 +776,8 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     }
   }
 
-  if (state?.type === "AWAITING_REVIEW" || ctx.hasAttachments("photo")) {
-    console.log(`[VK] photo routing: vkUserId=${vkUserId} hasPhoto=${ctx.hasAttachments("photo")} state=${state?.type ?? "none"}`);
+  if (state?.type === "AWAITING_REVIEW" || messageHasPhoto(ctx)) {
+    console.log(`[VK] photo routing: vkUserId=${vkUserId} hasPhoto=${messageHasPhoto(ctx)} state=${state?.type ?? "none"}`);
     await handleReviewScreenshot(ctx, vkUserId, state?.type === "AWAITING_REVIEW" ? state.orderId : undefined);
     return;
   }
@@ -707,6 +786,72 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // "status" button payload routes to the same handler as the "статус" keyword.
   const effectiveText = msgPayload?.command === "status" ? "статус" : text;
   await handleIdleMessage(ctx, vkUserId, effectiveText);
+}
+
+/**
+ * Website Step-9 handoff (VK). Two cases when the user picked a gamepass on the
+ * site:
+ *   1. The site already materialised the order (PENDING/processing) → show
+ *      "заказ оформлен, слежу за статусом", not another buy prompt.
+ *   2. Still AWAITING_GAMEPASS/REJECTED → offer the one-tap "выкупаем?" as a
+ *      fallback (routes into gp_pick → handleGpPick, full validation runs).
+ * Returns true when something was shown.
+ */
+async function vkOfferPreselectedGamepass(
+  ctx: MessageContext,
+  code: string,
+  passPrice: number,
+  guideUrl: string,
+): Promise<boolean> {
+  try {
+    if (!code) return false;
+    const wbCode = await (db as any).wbCode.findFirst({
+      where: { code: { equals: code, mode: "insensitive" } },
+      select: { selectedGamepassId: true },
+    });
+    const gpId = wbCode?.selectedGamepassId ? String(wbCode.selectedGamepassId) : "";
+    if (!/^\d{3,15}$/.test(gpId)) return false;
+
+    // Case 1 — order already placed from the site.
+    const order = await (db as any).wbOrder.findFirst({
+      where: { wbCode: { equals: code, mode: "insensitive" } },
+      select: { id: true, status: true },
+    });
+    if (order && order.status !== "AWAITING_GAMEPASS" && order.status !== "REJECTED") {
+      const shortId = String(order.id).slice(-6).toUpperCase();
+      await ctx.reply({
+        message:
+          `✅ Заказ уже оформлен — геймпасс с сайта принят! 🙌\n\n` +
+          `🆔 Заявка ${shortId}\n` +
+          `📊 Слежу за статусом: приняли → выкупаем → готово ✨\n\n` +
+          `Как только выкупим — сразу напишу сюда. Можешь спокойно закрыть чат.`,
+        keyboard: Keyboard.builder()
+          .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "positive" })
+          .row()
+          .textButton({ label: "💎 Купить ещё напрямую", payload: { command: "start_direct" }, color: "primary" })
+          .inline(),
+      });
+      return true;
+    }
+
+    // Case 2 — fallback one-tap offer.
+    await ctx.reply({
+      message:
+        `🎯 Ты уже выбрал геймпасс на сайте!\n\n` +
+        `Выкупаем его за ${passPrice} R$? Жми «✅ Да» — проверю и оформлю заказ.`,
+      keyboard: Keyboard.builder()
+        .textButton({ label: `✅ Да, выкупаем (${passPrice} R$)`, payload: { command: "gp_pick", passId: gpId }, color: "positive" })
+        .row()
+        .textButton({ label: "🔎 Выбрать другой", payload: { command: "find_gp_start" }, color: "primary" })
+        .row()
+        .urlButton({ label: "📖 Инструкция", url: guideUrl })
+        .inline(),
+    });
+    return true;
+  } catch (err: any) {
+    console.error("[VK] vkOfferPreselectedGamepass:", err?.message ?? err);
+    return false;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -732,6 +877,35 @@ async function handleRefActivation(
   // Block only when code was truly completed (isUsed=true + userId set).
   // isUsed=false + userId set = TG provisional claim — don't block VK activation.
   if (wbCode.isUsed && wbCode.userId) {
+    // If THIS user owns the code and already has a placed order (e.g. they
+    // materialised it from the website one-tap), greet with the order status
+    // instead of the "уже активирован" dead-end.
+    const owner = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+    if (owner && owner.id === wbCode.userId) {
+      const placedOrder = await (db as any).wbOrder.findFirst({
+        where: { userId: owner.id, wbCode: { equals: code, mode: "insensitive" } },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, status: true },
+      });
+      if (placedOrder && ["PENDING", "IN_PROGRESS", "COMPLETED"].includes(placedOrder.status)) {
+        const shortId = String(placedOrder.id).slice(-6).toUpperCase();
+        const done = placedOrder.status === "COMPLETED";
+        await ctx.reply({
+          message: done
+            ? `✅ Заказ #${shortId} выполнен — спасибо! 🎉\n\nХочешь ещё робуксов? 💎`
+            : `✅ Заказ оформлен — геймпасс с сайта принят! 🙌\n\n` +
+              `🆔 Заявка ${shortId}\n` +
+              `📊 Слежу за статусом: приняли → выкупаем → готово ✨\n\n` +
+              `Как только выкупим — сразу напишу сюда. 💎 А ещё можно купить Robux напрямую — без карты WB.`,
+          keyboard: Keyboard.builder()
+            .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "positive" })
+            .row()
+            .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "primary" })
+            .inline(),
+        });
+        return;
+      }
+    }
     await ctx.reply("⚠️ Этот код уже был активирован.\n\nЕсли карточка твоя — напиши нам: https://t.me/RobloxBank_PA");
     return;
   }
@@ -835,18 +1009,24 @@ async function handleRefActivation(
   }
 
   const vkGuideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${code}`;
+  // One-tap: gamepass already picked on the website → offer confirm.
+  if (await vkOfferPreselectedGamepass(ctx, code, passPrice, vkGuideUrl)) return;
   await ctx.reply({
     message:
       greetLine + `\n` +
-      `✅ Код ${code} активирован!\n` +
-      `💎 Номинал: ${totalAmount} R$ → Цена геймпасса: ${passPrice} R$\n\n` +
-      `⚠️ Без выполнения инструкции робуксы выкупить невозможно — она покажет, как создать и разблокировать геймпасс:\n` +
-      `👉 ${vkGuideUrl}\n\n` +
-      `Когда геймпасс будет готов — напиши свой ник в Roblox, и я найду его сам 🔎`,
+      `✅ Код ${code} активирован · номинал ${totalAmount} R$ → геймпасс ${passPrice} R$\n\n` +
+      `Я бот RobloxBank — помогу превратить твой код в робуксы 💎 Вот что я умею:\n` +
+      `📖 Покажу инструкцию — как создать геймпасс (это один раз, дальше проще)\n` +
+      `📊 Прослежу за заказом — приняли → выкупаем → готово ✨\n` +
+      `💎 Оформлю прямой заказ — Robux без карты WB, быстрее и выгоднее\n\n` +
+      `👉 Сейчас главное — создай геймпасс по инструкции. Готово? Напиши свой ник Roblox (или подтверди выбор с сайта) — остальное беру на себя 🙌`,
     keyboard: Keyboard.builder()
       .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: vkGuideUrl })
       .row()
       .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+      .row()
+      .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "secondary" })
+      .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "secondary" })
       .row()
       .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
       .inline(),
@@ -1122,6 +1302,17 @@ async function handleGamepassLink(
   // Fetch real name for admin card (non-blocking — fallback is "VK #id")
   const vkName = user.name ?? await vkGetName(vkUserId);
 
+  // Marker: did the customer pick this pass on the website? selectedGamepassId
+  // is only ever written by /api/wb-code/select-gamepass. Non-fatal extra read.
+  let viaWebOneTap = false;
+  try {
+    const codeRow = await (db as any).wbCode.findFirst({
+      where: { code: { equals: wbCode, mode: "insensitive" } },
+      select: { selectedGamepassId: true },
+    });
+    viaWebOneTap = !!codeRow?.selectedGamepassId && cleanLink.includes(String(codeRow.selectedGamepassId));
+  } catch { /* non-fatal — marker just won't show */ }
+
   // Notify Telegram admins
   await sendAdminOrderCard({
     id:                  order.id,
@@ -1136,6 +1327,7 @@ async function handleGamepassLink(
     previousOrderCount,
     creatorName:         validatedCreator ?? undefined,
     isAgeRestricted:     gamepassInfo.isAgeRestricted ?? false,
+    viaWebOneTap,
   });
 }
 
@@ -1575,6 +1767,27 @@ async function handleReviewScreenshot(
   console.log(`[VK] handleReviewScreenshot: url=${url ? "found" : "NOT_FOUND"}`);
 
   if (!url) {
+    // Extraction failed. If the user genuinely has a review pending, don't trap
+    // them in a "resend" loop — alert admins for manual handling and reassure.
+    if (await hasPendingProofPhoto(vkUserId)) {
+      await ctx.reply(
+        "📸 Скриншот получили, но не смогли обработать его автоматически.\n" +
+        "Менеджер проверит вручную — это займёт немного времени. 🙌"
+      );
+      try {
+        for (const adminId of ADMIN_IDS) {
+          await tgSend(
+            adminId,
+            `⚠️ <b>VK отзыв: не удалось извлечь фото — нужна ручная проверка</b>\n` +
+            `VK ID: <code>${vkUserId}</code> (<a href="https://vk.com/id${vkUserId}">vk.com/id${vkUserId}</a>)\n\n` +
+            `Пользователь прислал скрин отзыва, авто-извлечение URL не сработало. Проверь диалог и начисли бонус вручную.`
+          );
+        }
+      } catch (err) {
+        console.error("[VK] admin notify for unextractable review photo failed:", err);
+      }
+      return;
+    }
     if (knownOrderId) {
       await ctx.reply(
         "📸 Пришли скриншот отзыва в виде фотографии (не файлом).\n" +
