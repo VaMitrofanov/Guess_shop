@@ -3409,15 +3409,13 @@ export function registerChatMember(bot: Telegraf): void {
         `✅ <b>Добро пожаловать в канал!</b>\n\n` +
         `Твой код <code>${code}</code> активирован 🎉\n\n` +
         `📖 Вот твоя <b>персональная инструкция</b> — заказ оформляется <b>прямо там</b>: создашь геймпасс (цена ровно <b>${passPrice} R$</b>) и найдёшь его по нику Roblox 🔎\n\n` +
-        `🔔 А здесь, в боте, ты будешь получать <b>уведомления о заказе</b> — приняли → выкупаем → готово.\n\n` +
-        `💬 Есть вопрос? Напиши живому человеку в поддержку — это отдельный чат <b>@RobloxBank_PA</b> (не бот).`,
+        `🔔 А здесь, в боте, ты будешь получать <b>уведомления о заказе</b> — приняли → выкупаем → готово.`,
         {
           parse_mode: "HTML",
           link_preview_options: { is_disabled: true },
           ...Markup.inlineKeyboard([
             [Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", `https://robloxbank.ru/guide?source=wb&skip=1&code=${code}`)],
             [Markup.button.callback("🔎 Уже создал — найти по нику", CB.findGpStart)],
-            [Markup.button.url("💬 Поддержка — живой человек", SUPPORT_URL)],
           ]),
         }
       );
