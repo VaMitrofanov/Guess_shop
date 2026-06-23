@@ -620,9 +620,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         keyboard: Keyboard.builder()
           .urlButton({ label: "📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", url: startGuideUrl })
           .row()
-          .textButton({ label: "🔎 Уже создал — найти по нику", payload: { command: "find_gp_start" }, color: "primary" })
-          .row()
-          .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+          .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
           .inline(),
       });
       return;
@@ -654,12 +652,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         keyboard: Keyboard.builder()
           .urlButton({ label: "📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", url: restoredGuideUrl })
           .row()
-          .textButton({ label: "🔎 Уже создал — найти по нику", payload: { command: "find_gp_start" }, color: "primary" })
-          .row()
-          .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "secondary" })
-          .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "secondary" })
-          .row()
-          .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+          .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
           .inline(),
       });
       return;
@@ -1026,6 +1019,8 @@ async function handleRefActivation(
       `📖 Открой инструкцию по кнопке ниже — она проведёт тебя по шагам. Заказ оформляется прямо там 👇`,
     keyboard: Keyboard.builder()
       .urlButton({ label: "📖 ОТКРЫТЬ ИНСТРУКЦИЮ", url: vkGuideUrl })
+      .row()
+      .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
       .inline(),
   });
 }
@@ -1057,15 +1052,16 @@ async function handleGamepassLink(
       await handleRobloxNickInput(ctx, vkUserId, input, wbCode, denomination);
       return;
     }
+    const fmtGuideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}`;
     await ctx.reply({
       message:
         "⚠️ Не удалось распознать.\n\n" +
         "Напиши свой ник в Roblox (латиница, 3–20 символов) — найду геймпасс сам.\n\n" +
-        "Или пришли ссылку / ID геймпасса вручную.",
+        "📖 Как создать геймпасс и найти ник — в инструкции:",
       keyboard: Keyboard.builder()
-        .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+        .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: fmtGuideUrl })
         .row()
-        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "pass_format" }, color: "secondary" })
+        .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
         .inline(),
     });
     return;
@@ -1102,8 +1098,11 @@ async function handleGamepassLink(
             `Два варианта:\n` +
             `1. Открой игру: Creator Hub → Experience → Settings → Permissions → Public → сохрани. Затем пришли ссылку снова.\n` +
             `2. Создай геймпасс в любой публичной игре (цена: ${expectedPrice} R$) и пришли новую ссылку.\n\n` +
-            `Не удаляй геймпасс до получения оплаты.`,
-          keyboard: vkSupportKb("pass_deleted"),
+            `Не удаляй геймпасс до получения оплаты.\n\n` +
+            `📖 Подробная инструкция по кнопке ниже:`,
+          keyboard: Keyboard.builder()
+            .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}` })
+            .inline(),
         });
       } else if (gamepassInfo.isGamePrivate) {
         await ctx.reply({
@@ -1115,17 +1114,20 @@ async function handleGamepassLink(
             `Не помогло? Configure → Questionnaire → Restart\n` +
             `Ответь «No» на все 10 вопросов → Continue\n\n` +
             `Или создай геймпасс в другой публичной игре (цена: ${expectedPrice} R$)\n\n` +
-            `📖 Полная инструкция со скринами:\nhttps://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}`,
+            `📖 Полная инструкция со скринами:`,
           keyboard: Keyboard.builder()
-            .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "pass_private" }, color: "secondary" })
+            .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}` })
             .inline(),
         });
       } else {
         await ctx.reply({
           message:
             `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
-            `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.`,
-          keyboard: vkSupportKb("pass_inactive"),
+            `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.\n\n` +
+            `📖 Как правильно создать и активировать — в инструкции:`,
+          keyboard: Keyboard.builder()
+            .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}` })
+            .inline(),
         });
       }
       return;
@@ -1138,8 +1140,11 @@ async function handleGamepassLink(
           `Установлено: ${gamepassInfo.price} R$\n` +
           `Ожидается:   ${expectedPrice} R$\n\n` +
           `Измени цену геймпасса в настройках Roblox и пришли ссылку снова.\n\n` +
-          `💡 Если у тебя включён Regional Pricing — обязательно выключи его (Passes → Edit → Pricing → убрать галочку Enable Regional Pricing), иначе цена будет неверной.`,
-        keyboard: vkSupportKb("pass_price"),
+          `💡 Если у тебя включён Regional Pricing — обязательно выключи его (Passes → Edit → Pricing → убрать галочку Enable Regional Pricing), иначе цена будет неверной.\n\n` +
+          `📖 Подробнее — в инструкции:`,
+        keyboard: Keyboard.builder()
+          .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}` })
+          .inline(),
       });
       return;
     }
@@ -1441,14 +1446,16 @@ async function handleRobloxNickInput(
     // Infra failure (bridge/Roblox down) is NOT «ника нет на Roblox» — be honest.
     console.error("[VK/find-gp] searchGamepassesByNick failed:", err?.message ?? err);
     setState(vkUserId, { type: "AWAITING_LINK", wbCode, denomination });
+    const downGuideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}`;
     await ctx.reply({
       message:
         "⚠️ Поиск по нику временно недоступен — не получилось связаться с Roblox.\n\n" +
-        "Попробуй ещё раз через минуту или пришли ссылку на геймпасс вручную.",
+        "Попробуй ещё раз через минуту или пришли ссылку на геймпасс вручную.\n\n" +
+        "📖 Вся инструкция по созданию и оформлению — по кнопке ниже.",
       keyboard: Keyboard.builder()
-        .textButton({ label: "🔎 Попробовать ещё раз", payload: { command: "find_gp_start" }, color: "primary" })
+        .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: downGuideUrl })
         .row()
-        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "roblox_down" }, color: "secondary" })
+        .textButton({ label: "🔎 Попробовать ещё раз", payload: { command: "find_gp_start" }, color: "primary" })
         .inline(),
     });
     return;
@@ -1464,11 +1471,12 @@ async function handleRobloxNickInput(
     await ctx.reply({
       message:
         `🤷 Пользователя ${nick} нет на Roblox.\n\n` +
-        `Скорее всего опечатка. Скопируй ник прямо со страницы профиля и пришли заново.`,
+        `Скорее всего опечатка. Скопируй ник прямо со страницы профиля и пришли заново.\n\n` +
+        `📖 Как найти ник и создать геймпасс — в инструкции:`,
       keyboard: Keyboard.builder()
-        .textButton({ label: "🔎 Попробовать ещё раз", payload: { command: "find_gp_start" }, color: "primary" })
+        .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: guideUrl })
         .row()
-        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "nick_not_found" }, color: "secondary" })
+        .textButton({ label: "🔎 Попробовать ещё раз", payload: { command: "find_gp_start" }, color: "primary" })
         .inline(),
     });
     return;
@@ -1486,8 +1494,6 @@ async function handleRobloxNickInput(
         .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: guideUrl })
         .row()
         .textButton({ label: "🔎 Уже сделал — проверить", payload: { command: "find_gp_start" }, color: "primary" })
-        .row()
-        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "place_closed" }, color: "secondary" })
         .inline(),
     });
     return;
@@ -1504,14 +1510,11 @@ async function handleRobloxNickInput(
       message:
         `У ${nick} нашли геймпассы, но ни один не за ${expectedPrice} R$:\n\n` +
         `${listLines}\n\n` +
-        `Нужен геймпасс ровно на ${expectedPrice} R$. Как исправить — в инструкции:\n` +
-        `👉 ${guideUrl}`,
+        `Нужен геймпасс ровно на ${expectedPrice} R$. Как исправить — в инструкции:`,
       keyboard: Keyboard.builder()
         .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: guideUrl })
         .row()
         .textButton({ label: "🔎 Уже исправил — проверить", payload: { command: "find_gp_start" }, color: "primary" })
-        .row()
-        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "wrong_price" }, color: "secondary" })
         .inline(),
     });
     return;
@@ -2210,8 +2213,7 @@ async function handleIdleMessage(
       kb.textButton({ label: "🔄 Исправить ссылку", payload: { command: "resubmit", code: order.wbCode }, color: "primary" }).row();
     } else if (order.status === "AWAITING_GAMEPASS") {
       kb.urlButton({ label: "📖 ИНСТРУКЦИЯ", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}` }).row()
-        .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" }).row()
-        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" }).row();
+        .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" }).row();
     } else if (order.status === "COMPLETED" && reviewClaimed) {
       kb.textButton({ label: "💎 Заказать напрямую", payload: { command: "start_direct" }, color: "positive" }).row();
     } else if ((order.status === "PENDING" || order.status === "IN_PROGRESS") && !order.isDirectOrder) {
@@ -2263,9 +2265,7 @@ async function handleIdleMessage(
       keyboard: Keyboard.builder()
         .urlButton({ label: "📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", url: idleGuideUrl })
         .row()
-        .textButton({ label: "🔎 Уже создал — найти по нику", payload: { command: "find_gp_start" }, color: "primary" })
-        .row()
-        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+        .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
         .inline(),
     });
     return;

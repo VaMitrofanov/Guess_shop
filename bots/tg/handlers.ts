@@ -249,9 +249,7 @@ export function registerStart(bot: Telegraf): void {
                 link_preview_options: { is_disabled: true },
                 ...Markup.inlineKeyboard([
                   [Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", startGuideUrl)],
-                  [Markup.button.callback("🔎 Уже создал — найти по нику", CB.findGpStart)],
-                  [Markup.button.callback("📊 Мой заказ", CB.refreshStatus), Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
-                  [supportBtn("💬 Нужна помощь?")],
+                  [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
                 ]),
               }
             );
@@ -522,6 +520,7 @@ export function registerStart(bot: Telegraf): void {
     const clientInline = !isAdmin
       ? Markup.inlineKeyboard([
           [Markup.button.url("📖 ОТКРЫТЬ ИНСТРУКЦИЮ", guideUrl)],
+          [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
         ])
       : {};
     await ctx.reply(
@@ -874,7 +873,6 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
       [Markup.button.url("📖 ИНСТРУКЦИЯ — как создать геймпасс", guideUrl)],
       [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
       refreshRow,
-      [supportBtn("💬 Нужна помощь?", "general")],
       menuRow,
     ]);
   } else if (order.status === "COMPLETED") {
@@ -1190,9 +1188,7 @@ export function registerText(bot: Telegraf): void {
                   link_preview_options: { is_disabled: true },
                   ...Markup.inlineKeyboard([
                     [Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", recoverGuideUrl)],
-                    [Markup.button.callback("🔎 Уже создал — найти по нику", CB.findGpStart)],
-                    [Markup.button.callback("📊 Мой заказ", CB.refreshStatus), Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
-                    [supportBtn("💬 Нужна помощь?")],
+                    [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
                   ]),
                 }
               );
@@ -1304,19 +1300,18 @@ export function registerText(bot: Telegraf): void {
       }
       const fc = getFailCounts(ctx.from.id);
       fc.formatError++;
+      const fmtGuideUrl = state.wbCode.startsWith("DIR-")
+        ? `https://robloxbank.ru/guide?source=direct`
+        : `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`;
       const formatHint =
         "⚠️ Не удалось распознать.\n\n" +
         "Напиши свой <b>ник в Roblox</b> (латиница, 3–20 символов) — найду геймпасс сам.\n\n" +
-        "Или пришли ссылку / ID геймпасса вручную.";
-      const formatKb = fc.formatError >= 2
-        ? [
-            [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
-            [supportBtn(undefined, "pass_format", ctx)],
-          ]
-        : [
-            [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
-          ];
-      await ctx.reply(formatHint, { parse_mode: "HTML", ...Markup.inlineKeyboard(formatKb) });
+        "📖 Как создать геймпасс и найти ник — в инструкции:";
+      const formatKb = [
+        [Markup.button.url("📖 ИНСТРУКЦИЯ", fmtGuideUrl)],
+        [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
+      ];
+      await ctx.reply(formatHint, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...Markup.inlineKeyboard(formatKb) });
       return;
     }
 
@@ -1449,14 +1444,17 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
     console.error("[TG/find-gp] searchGamepassesByNick failed:", err?.message ?? err);
     try { await bot.telegram.deleteMessage(ctx.chat.id, checkingMsg.message_id); } catch {}
     pendingRobloxNick.delete(tgIdNum);
+    const downGuideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`;
     await ctx.reply(
       "⚠️ Поиск по нику временно недоступен — не получилось связаться с Roblox.\n\n" +
-      "Попробуй ещё раз через минуту или пришли ссылку на геймпасс вручную.",
+      "Попробуй ещё раз через минуту или пришли ссылку на геймпасс вручную.\n\n" +
+      "📖 Вся инструкция по созданию и оформлению — по кнопке ниже.",
       {
         parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
         ...Markup.inlineKeyboard([
+          [Markup.button.url("📖 ИНСТРУКЦИЯ", downGuideUrl)],
           [Markup.button.callback("🔎 Попробовать ещё раз", CB.findGpRetry)],
-          [supportBtn("💬 Нужна помощь?", "roblox_down", ctx)],
         ]),
       }
     );
@@ -1473,12 +1471,14 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
   if (outcome.status === "user_not_found") {
     await ctx.reply(
       `🤷 Пользователя <b>${nick}</b> нет на Roblox.\n\n` +
-      `Скорее всего опечатка. Скопируй ник прямо со страницы профиля и пришли заново.`,
+      `Скорее всего опечатка. Скопируй ник прямо со страницы профиля и пришли заново.\n\n` +
+      `📖 Как найти ник и создать геймпасс — в инструкции:`,
       {
         parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
         ...Markup.inlineKeyboard([
+          [Markup.button.url("📖 ИНСТРУКЦИЯ", guideUrl)],
           [Markup.button.callback("🔎 Попробовать ещё раз", CB.findGpRetry)],
-          [supportBtn("💬 Нужна помощь?", "nick_not_found", ctx)],
         ]),
       }
     );
@@ -1500,7 +1500,6 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
         ...Markup.inlineKeyboard([
           [Markup.button.url("📖 ИНСТРУКЦИЯ", guideUrl)],
           [Markup.button.callback("🔎 Уже сделал — проверить", CB.findGpRetry)],
-          [supportBtn("💬 Нужна помощь?", "place_closed", ctx)],
         ]),
       }
     );
@@ -1526,7 +1525,6 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
         ...Markup.inlineKeyboard([
           [Markup.button.url("📖 ИНСТРУКЦИЯ", guideUrl)],
           [Markup.button.callback("🔎 Уже исправил — проверить", CB.findGpRetry)],
-          [supportBtn("💬 Нужна помощь?", "wrong_price", ctx)],
         ]),
       }
     );
@@ -1643,8 +1641,7 @@ async function processGamepassSubmission(
             `2. Создай геймпасс в любой <b>публичной</b> игре (цена: <b>${expectedPrice} R$</b>) и пришли новую ссылку.\n\n` +
             `Не удаляй геймпасс до получения оплаты.`,
             { parse_mode: "HTML", ...Markup.inlineKeyboard([
-              [Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
-              [supportBtn("💬 Нужна помощь?", "pass_deleted", ctx)],
+              [Markup.button.url("📖 ИНСТРУКЦИЯ", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
             ]) }
           );
         } else if (gamepassInfo.isGamePrivate) {
@@ -1656,10 +1653,10 @@ async function processGamepassSubmission(
             `2. Найди раздел Audience → выбери <b>Public</b> → сохрани\n\n` +
             `Не помогло? <b>Configure → Questionnaire → Restart</b>\n` +
             `Ответь «No» на все 10 вопросов → Continue\n\n` +
-            `Или создай геймпасс в другой публичной игре (цена: <b>${expectedPrice} R$</b>)`,
+            `Или создай геймпасс в другой публичной игре (цена: <b>${expectedPrice} R$</b>)\n\n` +
+            `📖 Полная инструкция со скринами:`,
             { parse_mode: "HTML", ...Markup.inlineKeyboard([
-              [Markup.button.url("📖 Полная инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
-              [supportBtn("💬 Нужна помощь?", "pass_private", ctx)],
+              [Markup.button.url("📖 ИНСТРУКЦИЯ", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
             ]) }
           );
         } else {
@@ -1667,13 +1664,13 @@ async function processGamepassSubmission(
           const notActiveText =
             `⚠️ Геймпасс не выставлен на продажу.\n\n` +
             `Зайди в Creator Dashboard → Creations → Passes, найди геймпасс <b>${passId}</b>, ` +
-            `нажми «Edit» и поставь галочку «On Sale». После этого пришли ссылку снова.`;
+            `нажми «Edit» и поставь галочку «On Sale». После этого пришли ссылку снова.\n\n` +
+            `📖 Как правильно создать и активировать — в инструкции:`;
           await ctx.reply(notActiveText, {
             parse_mode: "HTML",
-            ...Markup.inlineKeyboard([[
-              Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`),
-              ...(fc.notActive >= 2 ? [supportBtn("Нужна помощь?", "pass_inactive", ctx)] : []),
-            ]]),
+            ...Markup.inlineKeyboard([
+              [Markup.button.url("📖 ИНСТРУКЦИЯ", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
+            ]),
           });
         }
         return;
@@ -1688,13 +1685,13 @@ async function processGamepassSubmission(
           `Установлено: <b>${gamepassInfo.price} R$</b>\n` +
           `Ожидается:   <b>${expectedPrice} R$</b>\n\n` +
           `Зайди в Creator Dashboard → Passes → Edit, измени цену и пришли ссылку снова.\n\n` +
-          `💡 Если у тебя включён <b>Regional Pricing</b> — обязательно выключи его (Passes → Edit → Pricing → убрать галочку Enable Regional Pricing), иначе цена будет неверной.`;
+          `💡 Если у тебя включён <b>Regional Pricing</b> — обязательно выключи его (Passes → Edit → Pricing → убрать галочку Enable Regional Pricing), иначе цена будет неверной.\n\n` +
+          `📖 Подробнее — в инструкции:`;
         await ctx.reply(priceMismatchText, {
           parse_mode: "HTML",
-          ...Markup.inlineKeyboard([[
-            Markup.button.url("📖 Инструкция", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`),
-            ...(fc.priceMismatch >= 2 ? [supportBtn("Нужна помощь с ценой?", "pass_price", ctx)] : []),
-          ]]),
+          ...Markup.inlineKeyboard([
+            [Markup.button.url("📖 ИНСТРУКЦИЯ", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
+          ]),
         });
         return;
       }
@@ -2187,8 +2184,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
       link_preview_options: { is_disabled: true },
       ...Markup.inlineKeyboard([
         [Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", textGuideUrl)],
-        [Markup.button.callback("🔎 Уже создал — найти по нику", CB.findGpStart)],
-        [supportBtn("💬 Нужна помощь?")],
+        [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
       ]),
     }
   );
@@ -3642,7 +3638,7 @@ export function registerChatMember(bot: Telegraf): void {
           link_preview_options: { is_disabled: true },
           ...Markup.inlineKeyboard([
             [Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", `https://robloxbank.ru/guide?source=wb&skip=1&code=${code}`)],
-            [Markup.button.callback("🔎 Уже создал — найти по нику", CB.findGpStart)],
+            [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
           ]),
         }
       );
