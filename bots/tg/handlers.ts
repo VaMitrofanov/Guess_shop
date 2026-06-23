@@ -496,20 +496,18 @@ export function registerStart(bot: Telegraf): void {
     // confirm instead of the standard "напиши ник" welcome.
     if (!isAdmin && await offerPreselectedGamepass(ctx, code, passPrice, guideUrl)) return;
 
+    // Just-activated code: the user understands nothing yet — send them
+    // straight into the instruction and NOTHING else. One button. (No nick
+    // search / status / direct-buy clutter — that all lives in /menu later.)
     const clientInline = !isAdmin
       ? Markup.inlineKeyboard([
-          [Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", guideUrl)],
-          [Markup.button.callback("🔎 Уже создал — найти по нику", CB.findGpStart)],
-          [Markup.button.callback("📊 Мой заказ", CB.refreshStatus), Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
+          [Markup.button.url("📖 ОТКРЫТЬ ИНСТРУКЦИЮ", guideUrl)],
         ])
       : {};
     await ctx.reply(
       `${greetLine}\n` +
       `✅ Код <b>${code}</b> активирован · номинал <b>${wbCode.denomination} R$</b> → геймпасс <b>${passPrice} R$</b>\n\n` +
-      `📖 Вот твоя <b>персональная инструкция</b> — открой её по кнопке ниже.\n` +
-      `Заказ оформляется <b>прямо там</b>: создашь геймпасс и найдёшь его по своему нику Roblox 🔎\n\n` +
-      `🔔 А здесь, в боте, ты будешь получать <b>уведомления о заказе</b> — приняли → выкупаем → готово ✨\n` +
-      `💎 Ещё тут можно купить Robux <b>напрямую</b> — без карты WB, быстрее и выгоднее.`,
+      `📖 Открой <b>инструкцию</b> по кнопке ниже — она проведёт тебя по шагам. Заказ оформляется прямо там 👇`,
       {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
@@ -552,6 +550,16 @@ async function startDirectFlow(ctx: any): Promise<void> {
 }
 
 export function registerStatus(bot: Telegraf): void {
+  // /menu — buyer mini-profile hub (the bot's "home base" for repeat customers).
+  bot.command("menu", async (ctx) => {
+    const { text, keyboard } = await buildBuyerMenu(String(ctx.from.id), ctx.from.first_name || undefined);
+    await ctx.reply(text, {
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+      ...keyboard,
+    });
+  });
+
   bot.command("status", async (ctx) => {
     const { text, keyboard } = await buildStatusMessage(String(ctx.from.id));
     await ctx.reply(text, {
@@ -630,6 +638,7 @@ export async function setupBotProfile(bot: Telegraf): Promise<void> {
     "💎 Оформить заказ напрямую — Robux без карты WB, быстрее и выгоднее\n\n" +
     "Жми «Запустить» и начнём 🚀";
   const commands = [
+    { command: "menu", description: "👤 Моё меню — профиль и заказы" },
     { command: "status", description: "📊 Статус моего заказа" },
     { command: "direct", description: "💎 Купить Robux напрямую" },
     { command: "help", description: "📖 Инструкция и помощь" },
@@ -656,6 +665,8 @@ interface StatusMessage {
 /** Builds /status text + keyboard. Shows support button when PENDING > 60 min. */
 async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   const refreshRow = [Markup.button.callback("🔄 Обновить", CB.refreshStatus)];
+  // Back to the buyer's home hub — always offered so the user never dead-ends.
+  const menuRow = [Markup.button.callback("👤 В моё меню", CB.buyerMenu)];
 
   const user = await (db as any).user.findUnique({ where: { tgId } });
   if (!user) {
@@ -761,19 +772,21 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     const supportRow = waitMins >= 15
       ? [supportBtn("⏰ Написать менеджеру", "direct_wait")]
       : [supportBtn("💬 Нужна помощь?", "direct_wait")];
-    keyboard = Markup.inlineKeyboard([refreshRow, supportRow]);
+    keyboard = Markup.inlineKeyboard([refreshRow, supportRow, menuRow]);
   } else if (order.status === "REJECTED") {
     if (order.isDirectOrder) {
       keyboard = Markup.inlineKeyboard([
         [Markup.button.callback("💎 Заказать напрямую", CB.startDirect)],
         refreshRow,
         [supportBtn("💬 Нужна помощь?", "rejected")],
+        menuRow,
       ]);
     } else {
       keyboard = Markup.inlineKeyboard([
         [Markup.button.callback("🔄 Исправить ссылку", `user_resubmit:${order.wbCode}:${order.amount}`)],
         refreshRow,
         [supportBtn("Нужна помощь?", "rejected")],
+        menuRow,
       ]);
     }
   } else if (order.status === "AWAITING_GAMEPASS") {
@@ -785,19 +798,95 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
       [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
       refreshRow,
       [supportBtn("💬 Нужна помощь?", "general")],
+      menuRow,
     ]);
   } else if (order.status === "COMPLETED") {
     keyboard = Markup.inlineKeyboard([
       [Markup.button.callback("💎 Заказать напрямую", CB.startDirect)],
       refreshRow,
+      menuRow,
     ]);
   } else if (pendingOver60) {
-    keyboard = Markup.inlineKeyboard([refreshRow, [supportBtn("Нужна помощь?", "pending_long")]]);
+    keyboard = Markup.inlineKeyboard([refreshRow, [supportBtn("Нужна помощь?", "pending_long")], menuRow]);
   } else {
-    keyboard = Markup.inlineKeyboard([refreshRow]);
+    keyboard = Markup.inlineKeyboard([refreshRow, menuRow]);
   }
 
   return { text, keyboard };
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  AWAITING_PAYMENT:  "⏳ Ожидаем реквизиты",
+  PAYMENT_PENDING:   "💳 Ожидаем оплату",
+  AWAITING_GAMEPASS: "⌛ Ожидаем геймпасс",
+  PENDING:     "⏳ В обработке",
+  IN_PROGRESS: "🔧 В работе",
+  COMPLETED:   "✅ Выполнен",
+  REJECTED:    "❌ Отклонён",
+};
+
+/**
+ * Buyer "mini profile" / home hub — the place a customer lands once the WB flow
+ * is done, so the bot becomes the habit for the next (direct) purchase.
+ * Loyalty-aware: shows tier, bonus balance, order count and the latest order at
+ * a glance, plus the everyday actions (my order / buy directly / guide / help).
+ * Fail-open: any DB hiccup still returns a usable menu.
+ */
+async function buildBuyerMenu(tgId: string, name?: string): Promise<StatusMessage> {
+  let user: any = null;
+  let order: any = null;
+  let status = { isReturning: false, orderCount: 0 };
+  try {
+    user = await (db as any).user.findUnique({ where: { tgId } });
+    status = await getCustomerStatus(tgId, "TG");
+    if (user) {
+      order = await (db as any).wbOrder.findFirst({
+        where: { userId: user.id },
+        orderBy: { createdAt: "desc" },
+      });
+    }
+  } catch (err) {
+    console.error("[TG] buildBuyerMenu lookup failed:", err);
+  }
+
+  const balance = user?.balance ?? 0;
+  const tier = status.orderCount >= 5 ? "👑 VIP-клиент"
+             : status.isReturning   ? "💛 Постоянный клиент"
+             : "🌱 Новый клиент";
+  const hello = name ? ` <b>${escapeHtml(name)}</b>` : "";
+
+  const lines: string[] = [];
+  lines.push(`👤 <b>Твоё меню</b>${hello} · RobloxBank`);
+  lines.push("");
+  lines.push(tier);
+  if (status.orderCount > 0) lines.push(`🛍 Заказов: <b>${status.orderCount}</b>`);
+  if (balance > 0) lines.push(`🎁 Бонусный баланс: <b>${balance} R$</b> <i>(к прямым заказам от 1000 R$)</i>`);
+  if (order) {
+    lines.push(
+      `📦 Последний заказ <b>#${order.id.slice(-6).toUpperCase()}</b> — ` +
+      `${STATUS_LABEL[order.status] ?? order.status}`
+    );
+  }
+  lines.push("");
+  lines.push(
+    `💎 В следующий раз можно заказать Robux <b>напрямую</b> — без карты WB, ` +
+    `быстрее и выгоднее. Всё здесь, в боте 👇`
+  );
+
+  const isWbOrder = order && order.wbCode && !String(order.wbCode).startsWith("DIR-") && !order.isDirectOrder;
+  const guideUrl = isWbOrder
+    ? `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}`
+    : "https://robloxbank.ru/guide?source=wb";
+
+  const rows: any[] = [];
+  if (order) rows.push([Markup.button.callback("📦 Мой заказ", CB.refreshStatus)]);
+  rows.push([Markup.button.callback("💎 Купить Robux напрямую", CB.startDirect)]);
+  rows.push([
+    Markup.button.url("📖 Инструкция", guideUrl),
+    supportBtn("💬 Поддержка", "menu"),
+  ]);
+
+  return { text: lines.join("\n"), keyboard: Markup.inlineKeyboard(rows) };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1701,10 +1790,14 @@ async function processGamepassSubmission(
       priceLine +
       `\n🆔 Номер заявки: <code>${order.id.slice(-6).toUpperCase()}</code>\n\n` +
       `⏳ Выкупим в течение нескольких часов — обычно быстрее. Как только будет готово — напишем.\n` +
-      `💡 <i>Робуксы начислит Roblox — обычно в течение 5–7 дней после выкупа.</i>`,
+      `💡 <i>Робуксы начислит Roblox — обычно в течение 5–7 дней после выкупа.</i>\n\n` +
+      `👤 Дальше всё здесь, в боте: статус заказа, бонусы и быстрый заказ напрямую — в меню 👇`,
       {
         parse_mode: "HTML",
-        ...Markup.inlineKeyboard([[Markup.button.callback("📊 Проверить статус", CB.refreshStatus)]]),
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
+          [Markup.button.callback("👤 Открыть моё меню", CB.buyerMenu)],
+        ]),
       }
     );
 
@@ -3172,6 +3265,25 @@ export function registerCallbacks(bot: Telegraf): void {
         });
       } catch { }
       return ctx.answerCbQuery("Обновлено");
+    }
+
+    // ── 👤 menu: buyer mini-profile hub ──────────────────────────────────
+    if (data === CB.buyerMenu) {
+      const { text, keyboard } = await buildBuyerMenu(adminId, ctx.from.first_name || undefined);
+      try {
+        await ctx.editMessageText(text, {
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+          ...keyboard,
+        });
+      } catch {
+        await ctx.reply(text, {
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+          ...keyboard,
+        });
+      }
+      return ctx.answerCbQuery();
     }
 
     await ctx.answerCbQuery();

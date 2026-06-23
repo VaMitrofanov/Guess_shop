@@ -298,6 +298,7 @@ export const CB = {
   // User actions
   refreshStatus: "refresh_status",
   reviewHint:    "review_hint",
+  buyerMenu:     "menu",                                     // buyer mini-profile hub
 
   // ── Gamepass search by Roblox nick (item 7) ──────────────────────────────
   // Client flow: user clicks "find by nick" → bot asks for nick → user types
