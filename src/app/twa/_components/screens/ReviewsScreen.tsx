@@ -43,7 +43,7 @@ export default function ReviewsScreen({ token }: { token: string }) {
     setError(false);
     try {
       const res = await fetch("/api/twa/feedback", {
-        headers: { Authorization: `twa ${token}` },
+        headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error(String(res.status));
       setData(await res.json());
