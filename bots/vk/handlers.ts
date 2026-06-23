@@ -1945,7 +1945,7 @@ const VK_STATUS_LABEL: Record<string, string> = {
 };
 
 // Statuses where the user may still re-pick their nick / gamepass (not yet bought).
-const VK_CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"];
+const VK_CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "REJECTED"];
 
 /**
  * Plain-text VK mirror of the TG `pendingStage` — gives a PENDING order a sense

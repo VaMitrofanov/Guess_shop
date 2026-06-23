@@ -709,7 +709,7 @@ interface StatusMessage {
 // Statuses where the user may still re-pick their Roblox nick / gamepass — i.e.
 // the order hasn't been bought yet. COMPLETED/REJECTED are deliberately excluded
 // (paid is final; rejected has its own "fix link" resubmit flow).
-const CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"];
+const CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "REJECTED"];
 
 /**
  * Gives a PENDING order a sense of forward motion even while it just sits in the
