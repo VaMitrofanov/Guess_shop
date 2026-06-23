@@ -2040,11 +2040,65 @@ function WBStaticHeader({ denomination, onReset }: { denomination?: number; onRe
 
 // ─── WB Gate Screen ────────────────────────────────────────────────────────────
 
+// Scoped styles for the gate — mirrors the WB instruction's design language
+// (soft -apple-system type, rounded gradient cards, circular gold step badges,
+// chunky 3D channel buttons) so the entry screen feels like one product with it.
+const WBG_CSS = `
+.wbg-root{--gold:#c9a84c;--gold2:#f0c040;--grn:#00d484;--line:#1c2740;--mut:#aab1c0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+.wbg-root *{box-sizing:border-box}
+.wbg-card{position:relative;border:1px solid var(--line);background:linear-gradient(180deg,rgba(18,22,36,.88),rgba(10,13,24,.94));border-radius:22px;padding:26px 22px;box-shadow:0 24px 60px rgba(0,0,0,.45)}
+@media(min-width:640px){.wbg-card{padding:34px 30px}}
+.wbg-icon{width:62px;height:62px;border-radius:18px;border:1px solid rgba(201,168,76,.45);background:rgba(201,168,76,.08);display:flex;align-items:center;justify-content:center;margin:0 auto 16px}
+.wbg-eye{font-size:11px;letter-spacing:2.5px;color:var(--gold);font-weight:700;text-transform:uppercase}
+.wbg-h1{font-size:clamp(27px,6vw,34px);font-weight:900;color:#fff;line-height:1.05;letter-spacing:-.01em;margin:8px 0 0}
+.wbg-lead{color:var(--mut);font-size:15.5px;line-height:1.6;margin:10px auto 0;max-width:330px}
+.wbg-hr{height:1px;background:linear-gradient(90deg,transparent,rgba(201,168,76,.32),transparent)}
+.wbg-step-h{display:flex;align-items:center;gap:11px;margin-bottom:12px}
+.wbg-dot{flex-shrink:0;width:32px;height:32px;border-radius:50%;background:#0d1120;border:2px solid rgba(201,168,76,.55);display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--gold2);font-size:15px;transition:all .25s}
+.wbg-dot.done{background:rgba(0,212,132,.12);border-color:rgba(0,212,132,.6);color:var(--grn)}
+.wbg-ttl{font-size:17.5px;font-weight:800;color:#fff;line-height:1.2}
+.wbg-t{color:#c3c9d4;font-size:14.5px;line-height:1.55;margin:0 0 14px}
+.wbg-input{width:100%;background:#0d1424;border:1px solid rgba(201,168,76,.5);color:#fff;border-radius:13px;padding:16px;font-size:25px;font-weight:800;text-align:center;letter-spacing:.3em;text-indent:.3em;outline:none;transition:border-color .2s,box-shadow .2s}
+.wbg-input::placeholder{color:#46506b;font-weight:700}
+.wbg-input:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(201,168,76,.16)}
+.wbg-input.ready{border-color:rgba(0,212,132,.6);box-shadow:0 0 0 3px rgba(0,212,132,.14)}
+.wbg-meta{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:9px;font-size:12.5px;color:var(--mut)}
+.wbg-count{font-weight:800;font-variant-numeric:tabular-nums;color:var(--mut)}
+.wbg-count.ready{color:var(--grn)}
+.wbg-step2{transition:opacity .3s}
+.wbg-step2.locked{opacity:.45}
+.wbg-btns{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+.wbg-btn{width:100%;display:flex;align-items:center;justify-content:center;gap:10px;border-radius:14px;padding:15px;font-size:16px;font-weight:800;color:#fff;border:none;cursor:pointer;transition:transform .12s,box-shadow .12s,filter .2s}
+.wbg-btn:disabled{opacity:.4;cursor:not-allowed;box-shadow:none!important;transform:none!important;filter:grayscale(.35)}
+.wbg-btn:not(:disabled):hover{filter:brightness(1.06)}
+.wbg-btn:not(:disabled):active{transform:translateY(3px)}
+.wbg-btn.tg{background:linear-gradient(180deg,#2aa8e0,#1f8fc6);box-shadow:0 5px 0 #14638c,0 12px 24px rgba(34,158,217,.3)}
+.wbg-btn.tg:not(:disabled):active{box-shadow:0 2px 0 #14638c}
+.wbg-btn.vk{background:linear-gradient(180deg,#4a90ff,#0a66e0);box-shadow:0 5px 0 #0a4aa0,0 12px 24px rgba(10,102,224,.3)}
+.wbg-btn.vk:not(:disabled):active{box-shadow:0 2px 0 #0a4aa0}
+.wbg-spin{width:16px;height:16px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:wbg-spin .7s linear infinite}
+@keyframes wbg-spin{to{transform:rotate(360deg)}}
+.wbg-err{border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.07);border-radius:12px;padding:11px 13px;display:flex;align-items:center;gap:9px}
+.wbg-err p{color:#fca5a5;font-size:14px;font-weight:600;margin:0}
+.wbg-errhelp{font-size:12px;color:#8a91a3;margin:6px 0 0}
+.wbg-errhelp a{color:var(--grn);text-decoration:underline}
+.wbg-foot{text-align:center;font-size:12.5px;color:#71798c;margin-top:16px}
+.wbg-vkauth{display:flex;flex-direction:column;gap:8px}
+.wbg-vkauth p{font-size:13px;color:#7fb0ff;font-weight:700;text-align:center;margin:0}
+.wbg-vkwrap{border:1px solid rgba(10,102,224,.5);background:rgba(10,102,224,.1);border-radius:14px;padding:12px;display:flex;align-items:center;justify-content:center;min-height:62px}
+.wbg-trust{display:flex;flex-wrap:wrap;justify-content:center;gap:7px 18px;margin-top:18px}
+.wbg-trust span{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--mut);font-weight:600}
+.wbg-help{margin-top:14px;display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:14px;background:rgba(10,13,24,.55);padding:13px 15px;text-decoration:none;transition:border-color .2s,background .2s}
+.wbg-help:hover{border-color:rgba(201,168,76,.4);background:rgba(201,168,76,.05)}
+.wbg-help-t{display:flex;flex-direction:column;line-height:1.25}
+.wbg-help-t b{font-size:13.5px;color:#fff;font-weight:800}
+.wbg-help-t span{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;font-weight:700}
+`;
+
 function WBGate() {
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<"guide" | "ready">("guide");
   const [quickTarget, setQuickTarget] = useState<"tg" | "vk" | null>(null);
   const [showVkAuth, setShowVkAuth] = useState(false);
   const [vkAuthCode, setVkAuthCode] = useState("");
@@ -2105,7 +2159,6 @@ function WBGate() {
   };
 
   const codeReady = code.length === 7;
-  const isGuideMode = mode === "guide";
 
   return (
     <main className="min-h-screen flex flex-col relative">
@@ -2115,97 +2168,45 @@ function WBGate() {
           on mobile it self-degrades to a static CSS gradient. */}
       <AnimatedShaderBackground className="-z-10" />
 
-      <div className="flex-1 flex items-center justify-center px-4 py-8 sm:py-16 bg-[#080c18]/70 relative">
-        <div className="fixed inset-0 opacity-[0.02] pointer-events-none"
-          style={{
-            backgroundImage: `linear-gradient(rgba(201,168,76,0.8) 1px, transparent 1px),
-                              linear-gradient(90deg, rgba(201,168,76,0.8) 1px, transparent 1px)`,
-            backgroundSize: "40px 40px",
-          }}
-        />
-        <div className="w-full max-w-xl animate-in fade-in zoom-in">
-          <div className="pixel-card border-2 border-[#c9a84c]/40 bg-[#0a0c14] p-6 sm:p-10 lg:p-14 space-y-6 sm:space-y-8 relative">
-            <div className="absolute top-0 left-0 w-12 h-12 border-t-2 border-l-2 border-[#c9a84c]/60" />
-            <div className="absolute bottom-0 right-0 w-12 h-12 border-b-2 border-r-2 border-[#c9a84c]/60" />
+      <div className="flex-1 flex items-center justify-center px-4 py-8 sm:py-14 bg-[#05070f]/80 relative">
+        <div className="wbg-root w-full max-w-md animate-in fade-in zoom-in">
+          <style>{WBG_CSS}</style>
 
-            <div className="text-center space-y-4 animate-in fade-in zoom-in animate-delay-100">
-              <div className="w-16 h-16 border-2 border-[#c9a84c]/50 bg-[#c9a84c]/10 flex items-center justify-center mx-auto">
-                <Ticket className="w-8 h-8 text-[#c9a84c]" />
+          <div className="wbg-card animate-in fade-in zoom-in animate-delay-100">
+            {/* Header */}
+            <div style={{ textAlign: "center" }}>
+              <div className="wbg-icon">
+                <Ticket className="w-7 h-7" style={{ color: "#f0c040" }} />
               </div>
-              <div>
-                <div className="font-pixel text-sm text-[#c9a84c]/80 tracking-widest mb-3">
-                  WILDBERRIES × ROBLOXBANK
-                </div>
-                <h1 className="text-2xl sm:text-3xl font-black uppercase tracking-tight leading-tight text-white">
-                  Спасибо за покупку<br />
-                  <span style={{ color: "#f0c040" }}>в RobloxBank!</span>
-                </h1>
-              </div>
-              <p className="text-zinc-300 font-medium text-base leading-relaxed">
-                Для активации номинала введи уникальный&nbsp;код с&nbsp;карточки.
-              </p>
+              <div className="wbg-eye">Wildberries × RobloxBank</div>
+              <h1 className="wbg-h1">Спасибо за&nbsp;покупку!</h1>
+              <p className="wbg-lead">Два шага — и робуксы у тебя. Это займёт пару минут.</p>
             </div>
 
-            <div className="h-px bg-gradient-to-r from-transparent via-[#c9a84c]/30 to-transparent" />
+            <div className="wbg-hr" style={{ margin: "22px 0" }} />
 
-            <form onSubmit={(e) => e.preventDefault()} className="space-y-5 animate-in fade-in zoom-in animate-delay-200">
-              <div className="space-y-2">
-                <label className="font-pixel text-sm text-[#c9a84c]/85 tracking-widest flex items-center gap-2">
-                  <Lock className="w-3 h-3" />КОД С КАРТОЧКИ
-                </label>
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={code}
-                  onChange={handleInput}
-                  placeholder="ABC1234"
-                  autoComplete="off"
-                  spellCheck={false}
-                  className="wb-input"
-                  aria-label="Уникальный код с карточки"
-                />
-                <div className="flex justify-between items-center">
-                  <p className="text-sm text-zinc-400 font-medium">
-                    7-значный код с карточки WB, например: ABC1234
-                  </p>
-                  <span className={`text-sm font-black tabular-nums ${codeReady ? "text-[#c9a84c]" : "text-zinc-400"}`}>
-                    {code.length}/7
-                  </span>
-                </div>
+            <form onSubmit={(e) => e.preventDefault()}>
+              {/* ── Step 1 — code ─────────────────────────────────── */}
+              <div className="wbg-step-h">
+                <span className={`wbg-dot${codeReady ? " done" : ""}`} aria-hidden>{codeReady ? "✓" : "1"}</span>
+                <span className="wbg-ttl">Код с карточки</span>
               </div>
-
-              {/* Mode toggle: guide vs. ready */}
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => { setMode("guide"); setShowVkAuth(false); setError(null); }}
-                  className={`h-12 md:h-14 flex flex-col items-center justify-center px-3 border-2 transition-all text-sm font-black uppercase tracking-widest ${
-                    isGuideMode
-                      ? "border-[#c9a84c]/70 bg-[#c9a84c]/10 text-[#f0c040]"
-                      : "border-zinc-800 bg-zinc-900/40 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
-                  }`}
-                  aria-pressed={isGuideMode}
-                >
-                  Нужна инструкция 📖
-                </button>
-                <button
-                  type="button"
-                  // Reset the VK widget too — otherwise a widget opened in guide
-                  // mode keeps the GD-prefixed code and sends the wrong welcome.
-                  onClick={() => { setMode("ready"); setShowVkAuth(false); setError(null); }}
-                  className={`h-12 md:h-14 flex flex-col items-center justify-center px-3 border-2 transition-all text-sm font-black uppercase tracking-widest ${
-                    !isGuideMode
-                      ? "border-[#00b06f]/60 bg-[#00b06f]/10 text-[#00d484]"
-                      : "border-zinc-800 bg-zinc-900/40 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
-                  }`}
-                  aria-pressed={!isGuideMode}
-                >
-                  Геймпасс готов ✅
-                </button>
+              <input
+                ref={inputRef}
+                type="text"
+                inputMode="text"
+                value={code}
+                onChange={handleInput}
+                placeholder="ABC1234"
+                autoComplete="off"
+                spellCheck={false}
+                className={`wbg-input${codeReady ? " ready" : ""}`}
+                aria-label="Уникальный код с карточки"
+              />
+              <div className="wbg-meta">
+                <span>7 символов с обратной стороны карточки</span>
+                <span className={`wbg-count${codeReady ? " ready" : ""}`}>{code.length}/7</span>
               </div>
-              <p className="text-sm text-zinc-400 text-center leading-relaxed">
-                Геймпасс — это способ получить Robux через Roblox. Если не знаешь что это — выбери «Нужна инструкция 📖»
-              </p>
 
               <AnimatePresence>
                 {error && (
@@ -2215,15 +2216,15 @@ function WBGate() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -6 }}
                     transition={{ duration: 0.2 }}
-                    className="space-y-1"
+                    style={{ marginTop: 14 }}
                   >
-                    <div className="flex items-center gap-2 border border-red-500/30 bg-red-500/5 px-3 py-2">
-                      <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
-                      <p className="text-sm text-red-400 font-medium">{error}</p>
+                    <div className="wbg-err">
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: "#f87171" }} />
+                      <p>{error}</p>
                     </div>
-                    <p className="text-xs text-zinc-500">
+                    <p className="wbg-errhelp">
                       Нужна помощь?{" "}
-                      <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer" className="text-[#00b06f] underline">
+                      <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer">
                         Написать живому менеджеру →
                       </a>
                     </p>
@@ -2231,41 +2232,48 @@ function WBGate() {
                 )}
               </AnimatePresence>
 
-              {isGuideMode ? (
-                <div className="space-y-3">
-                  <p className="text-sm text-zinc-300 font-medium leading-relaxed text-center">
-                    Переходи в мессенджер — получи инструкцию или сразу отправь ссылку на геймпасс.
-                  </p>
-                  <ConnectivityAssistant />
+              {/* ── Step 2 — channel ──────────────────────────────── */}
+              <div className={`wbg-step2${codeReady ? "" : " locked"}`} style={{ marginTop: 26 }}>
+                <div className="wbg-step-h">
+                  <span className="wbg-dot" aria-hidden>2</span>
+                  <span className="wbg-ttl">Где удобнее отслеживать заказ</span>
+                </div>
+                <p className="wbg-t">
+                  Выбери мессенджер — туда придёт инструкция, статус заказа и уведомления.
+                </p>
+                <ConnectivityAssistant />
+
+                <div className="wbg-btns">
                   <button
                     type="button"
                     onClick={() => handleQuickRedirect("tg", true)}
                     disabled={loading || !codeReady}
-                    className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#229ED9]/50 bg-[#229ED9]/15 hover:bg-[#229ED9]/25 hover:border-[#229ED9]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="wbg-btn tg"
                   >
                     {loading && quickTarget === "tg" ? (
-                      <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем Telegram...</>
+                      <><span className="wbg-spin" />Открываем Telegram…</>
                     ) : (
                       <>
-                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0 text-[#229ED9]">
+                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0">
                           <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z"/>
                         </svg>
                         Получить в Telegram
                       </>
                     )}
                   </button>
+
                   {!showVkAuth ? (
                     <button
                       type="button"
                       onClick={() => handleQuickRedirect("vk", true)}
                       disabled={loading || !codeReady}
-                      className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 hover:bg-[#0077FF]/25 hover:border-[#0077FF]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="wbg-btn vk"
                     >
                       {loading && quickTarget === "vk" ? (
-                        <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем VK...</>
+                        <><span className="wbg-spin" />Открываем VK…</>
                       ) : (
                         <>
-                          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0 text-[#0077FF]">
+                          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0">
                             <path d="M12.785 16.241s.288-.032.435-.194c.135-.149.13-.43.13-.43s-.019-1.306.572-1.497c.582-.188 1.331 1.252 2.124 1.806.6.42 1.056.328 1.056.328l2.122-.03s1.111-.07.585-.957c-.043-.073-.306-.658-1.578-1.853-1.331-1.252-1.153-1.049.451-3.224.977-1.323 1.367-2.13 1.245-2.474-.116-.328-.834-.241-.834-.241l-2.387.015s-.177-.024-.308.056c-.128.078-.21.262-.21.262s-.378 1.022-.882 1.892c-1.062 1.834-1.487 1.931-1.661 1.816-.405-.267-.304-1.069-.304-1.638 0-1.778.267-2.519-.51-2.711-.258-.064-.448-.106-1.108-.113-.847-.009-1.564.003-1.97.207-.27.136-.479.439-.351.456.157.022.514.099.703.363.244.341.236 1.108.236 1.108s.14 2.083-.328 2.342c-.32.178-.76-.185-1.706-1.85-.484-.853-.85-1.795-.85-1.795s-.07-.176-.196-.27c-.152-.114-.365-.15-.365-.15l-2.268.015s-.34.01-.466.16c-.111.135-.009.412-.009.412s1.776 4.221 3.787 6.349c1.844 1.95 3.938 1.822 3.938 1.822h.949z"/>
                           </svg>
                           Получить в ВКонтакте
@@ -2273,106 +2281,40 @@ function WBGate() {
                       )}
                     </button>
                   ) : (
-                    <div className="space-y-2">
-                      <p className="text-sm text-[#5599ff] font-black uppercase tracking-widest text-center">
-                        Авторизуйся через VK ID — после этого откроется чат с менеджером
-                      </p>
-                      <div className="border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 px-4 py-3 flex items-center justify-center min-h-[64px]">
+                    <div className="wbg-vkauth">
+                      <p>Авторизуйся через VK ID — и мы откроем твой заказ</p>
+                      <div className="wbg-vkwrap">
                         <VKAuthButton mode="order" wbCode={vkAuthCode} />
                       </div>
                     </div>
                   )}
                 </div>
-              ) : (
-                <div className="space-y-3">
-                  <p className="text-sm text-zinc-300 font-medium leading-relaxed text-center">
-                    Геймпасс уже создан? Отправь ссылку или ID пасса напрямую — менеджер выкупит вручную.
-                  </p>
-                  <ConnectivityAssistant />
-                  <button
-                    type="button"
-                    onClick={() => handleQuickRedirect("tg")}
-                    disabled={loading || !codeReady}
-                    className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#229ED9]/50 bg-[#229ED9]/15 hover:bg-[#229ED9]/25 hover:border-[#229ED9]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {loading && quickTarget === "tg" ? (
-                      <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем Telegram...</>
-                    ) : (
-                      <>
-                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0 text-[#229ED9]">
-                          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z"/>
-                        </svg>
-                        Перейти в Telegram-бот
-                      </>
-                    )}
-                  </button>
-                  {!showVkAuth ? (
-                    <button
-                      type="button"
-                      onClick={() => handleQuickRedirect("vk")}
-                      disabled={loading || !codeReady}
-                      className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 hover:bg-[#0077FF]/25 hover:border-[#0077FF]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {loading && quickTarget === "vk" ? (
-                        <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем VK...</>
-                      ) : (
-                        <>
-                          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0 text-[#0077FF]">
-                            <path d="M12.785 16.241s.288-.032.435-.194c.135-.149.13-.43.13-.43s-.019-1.306.572-1.497c.582-.188 1.331 1.252 2.124 1.806.6.42 1.056.328 1.056.328l2.122-.03s1.111-.07.585-.957c-.043-.073-.306-.658-1.578-1.853-1.331-1.252-1.153-1.049.451-3.224.977-1.323 1.367-2.13 1.245-2.474-.116-.328-.834-.241-.834-.241l-2.387.015s-.177-.024-.308.056c-.128.078-.21.262-.21.262s-.378 1.022-.882 1.892c-1.062 1.834-1.487 1.931-1.661 1.816-.405-.267-.304-1.069-.304-1.638 0-1.778.267-2.519-.51-2.711-.258-.064-.448-.106-1.108-.113-.847-.009-1.564.003-1.97.207-.27.136-.479.439-.351.456.157.022.514.099.703.363.244.341.236 1.108.236 1.108s.14 2.083-.328 2.342c-.32.178-.76-.185-1.706-1.85-.484-.853-.85-1.795-.85-1.795s-.07-.176-.196-.27c-.152-.114-.365-.15-.365-.15l-2.268.015s-.34.01-.466.16c-.111.135-.009.412-.009.412s1.776 4.221 3.787 6.349c1.844 1.95 3.938 1.822 3.938 1.822h.949z"/>
-                          </svg>
-                          Перейти в VK
-                        </>
-                      )}
-                    </button>
-                  ) : (
-                    <div className="space-y-2">
-                      <p className="text-sm text-[#5599ff] font-black uppercase tracking-widest text-center">
-                        Авторизуйся через VK ID — после этого откроется чат с менеджером
-                      </p>
-                      <div className="border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 px-4 py-3 flex items-center justify-center min-h-[64px]">
-                        <VKAuthButton mode="order" wbCode={vkAuthCode} />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+              </div>
             </form>
 
-            <p className="text-center text-sm text-zinc-400 font-medium animate-in fade-in zoom-in animate-delay-300">
-              Код одноразовый · Хранить не нужно
-            </p>
+            <div className="wbg-hr" style={{ margin: "22px 0 0" }} />
+            <p className="wbg-foot">Код одноразовый · хранить не нужно</p>
           </div>
 
-          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 mt-6 animate-in fade-in zoom-in animate-delay-300">
+          {/* Trust badges */}
+          <div className="wbg-trust animate-in fade-in animate-delay-300">
             {[
               { label: "Защита данных",  icon: Lock },
               { label: "Ручная выдача",  icon: CheckCircle2 },
               { label: "Поддержка 24/7", icon: ShoppingBag },
             ].map(({ label, icon: Icon }) => (
-              <div key={label} className="flex items-center gap-1.5 text-zinc-400">
-                <Icon className="w-3.5 h-3.5" />
-                <span className="text-xs font-black uppercase tracking-wide">{label}</span>
-              </div>
+              <span key={label}><Icon className="w-3.5 h-3.5" />{label}</span>
             ))}
           </div>
 
           {/* Direct manager contact — fallback if anything goes wrong */}
-          <a
-            href="https://t.me/RobloxBank_PA"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-6 group flex items-center justify-center gap-3 px-5 py-4 border-2 border-zinc-800 hover:border-[#c9a84c]/40 bg-zinc-950/60 hover:bg-[#c9a84c]/5 transition-all animate-in fade-in zoom-in animate-delay-300"
-          >
-            <AlertTriangle className="w-4 h-4 text-zinc-500 group-hover:text-[#c9a84c] transition-colors flex-shrink-0" />
-            <div className="flex flex-col text-left leading-tight">
-              <span className="text-xs font-black uppercase tracking-widest text-zinc-400 group-hover:text-zinc-300 transition-colors">
-                Возникли трудности?
-              </span>
-              <span className="text-sm font-black text-white group-hover:text-[#f0c040] transition-colors">
-                Написать живому менеджеру → @RobloxBank_PA
-              </span>
-            </div>
-            <ExternalLink className="w-4 h-4 text-zinc-600 group-hover:text-[#c9a84c] transition-colors flex-shrink-0 ml-auto" />
+          <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer" className="wbg-help">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: "#aab1c0" }} />
+            <span className="wbg-help-t">
+              <span>Возникли трудности?</span>
+              <b>Написать живому менеджеру → @RobloxBank_PA</b>
+            </span>
+            <ExternalLink className="w-4 h-4 flex-shrink-0" style={{ marginLeft: "auto", color: "#71798c" }} />
           </a>
         </div>
       </div>

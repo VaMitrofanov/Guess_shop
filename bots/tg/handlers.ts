@@ -260,6 +260,26 @@ export function registerStart(bot: Telegraf): void {
         }
       }
 
+      // A customer with a LIVE order (placed / in payment / being processed) must
+      // not get the idle/upsell greeting — show their real order status instead.
+      // Mirrors the VK fix for order 5Q8V6LJ: only AWAITING_GAMEPASS was surfaced
+      // above, so a website one-tap order (PENDING) fell through to the «рады снова,
+      // покупай напрямую» upsell — stale info for someone mid-order.
+      if (!isAdmin) {
+        const liveUser = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+        if (liveUser) {
+          const liveOrder = await (db as any).wbOrder.findFirst({
+            where: { userId: liveUser.id, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING", "PENDING", "IN_PROGRESS"] } },
+            select: { id: true },
+          });
+          if (liveOrder) {
+            const { text, keyboard } = await buildStatusMessage(tgId);
+            await ctx.reply(text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...keyboard });
+            return;
+          }
+        }
+      }
+
       if (custStatus.isReturning && !isAdmin) {
         // IDLE state: upsell to direct sales, no gamepass instructions
         const idleMsg = getIdleGreeting(custStatus, firstName);
@@ -687,11 +707,36 @@ interface StatusMessage {
   keyboard: ReturnType<typeof Markup.inlineKeyboard>;
 }
 
+// Statuses where the user may still re-pick their Roblox nick / gamepass — i.e.
+// the order hasn't been bought yet. COMPLETED/REJECTED are deliberately excluded
+// (paid is final; rejected has its own "fix link" resubmit flow).
+const CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"];
+
+/**
+ * Gives a PENDING order a sense of forward motion even while it just sits in the
+ * manager queue. Derives a plausible "stage" from elapsed time so the status line
+ * visibly advances over time ("как будто кипит работа") without ever claiming a
+ * manager has actually started — that's the real IN_PROGRESS, set by hand. Stages
+ * stay within "queued / checking / preparing" semantics so we never over-promise.
+ */
+function pendingStage(createdAt: Date | string): { label: string; note: string } {
+  const mins = (Date.now() - new Date(createdAt).getTime()) / 60_000;
+  if (mins < 3)   return { label: "🆕 Заявка создана",          note: "Только что приняли заявку — ставим в очередь на выкуп." };
+  if (mins < 12)  return { label: "🔍 Проверяем геймпасс",      note: "Сверяем геймпасс и цену перед выкупом." };
+  if (mins < 30)  return { label: "📋 Поставлен в очередь",     note: "Заявка в очереди к менеджеру — скоро возьмём в работу." };
+  if (mins < 90)  return { label: "💼 Готовим к выкупу",        note: "Менеджер вот-вот возьмёт твой геймпасс в работу." };
+  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Выкупаем заявки по очереди — обычно в течение нескольких часов, максимум сутки." };
+  return            { label: "⏳ Уже скоро выкупим",        note: "Заявка дольше обычного в очереди, но уже близко — мы сами пришлём уведомление, как только всё будет готово." };
+}
+
 /** Builds /status text + keyboard. Shows support button when PENDING > 60 min. */
 async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   const refreshRow = [Markup.button.callback("🔄 Обновить", CB.refreshStatus)];
   // Back to the buyer's home hub — always offered so the user never dead-ends.
   const menuRow = [Markup.button.callback("👤 В моё меню", CB.buyerMenu)];
+  // "Передумал" — let the user re-pick their Roblox nick / gamepass on an
+  // order that hasn't been bought yet (offered only on the live WB statuses).
+  const changeNickRow = [Markup.button.callback("✏️ Сменить ник Roblox", CB.changeNick)];
 
   const user = await (db as any).user.findUnique({ where: { tgId } });
   if (!user) {
@@ -736,6 +781,9 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   const pendingOver60  = order.status === "PENDING" && pendingAgeMs > 60  * 60 * 1000;
   const pendingOver120 = order.status === "PENDING" && pendingAgeMs > 120 * 60 * 1000;
 
+  // Time-based pseudo-stage so PENDING visibly "moves" even with no real change.
+  const stage = order.status === "PENDING" ? pendingStage(order.createdAt) : null;
+
   // Progressive note per status
   let note = "";
   if (order.status === "AWAITING_PAYMENT") {
@@ -748,13 +796,9 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   } else if (order.status === "AWAITING_GAMEPASS") {
     note = "\n\n⚠️ <i>Пройди инструкцию, создай геймпасс — затем напиши свой ник в Roblox 🔎</i>";
   } else if (order.status === "PENDING") {
+    note = `\n\n💬 <i>${stage!.note}</i>`;
     if (pendingOver120) {
-      note = "\n\n⏰ <i>Заявка обрабатывается дольше обычного. Если нужна помощь — напиши нам.</i>";
-    } else if (pendingOver60) {
-      note = "\n\n💬 <i>Обработка занимает чуть дольше обычного — скоро возьмём в работу.</i>";
-    } else {
-      note = "\n\n💬 <i>Менеджеры работают в порядке очереди — обычно выкупаем в течение нескольких часов, максимум сутки. " +
-             "Мы сами пришлём уведомление когда всё будет готово.</i>";
+      note += "\n⏰ <i>Если нужна помощь — напиши нам.</i>";
     }
   } else if (order.status === "IN_PROGRESS") {
     note = "\n\n🔧 <i>Менеджер уже занимается твоим геймпассом — скоро пришлём уведомление.</i>";
@@ -780,10 +824,14 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     ? `🔗 <a href="${order.gamepassUrl}">Геймпасс</a>\n`
     : ``;
 
-  // Show the Roblox nick so the user sees exactly where the Robux will land.
+  // Spell out that this nick is the recipient — so the user reads it as "robux
+  // land HERE", not just some technical field.
   const nickLine = order.robloxUsername
-    ? `🎮 Roblox: <b>${escapeHtml(order.robloxUsername)}</b>\n`
+    ? `🎮 Робуксы придут на ник: <b>${escapeHtml(order.robloxUsername)}</b>\n`
     : ``;
+
+  // PENDING shows the time-based pseudo-stage; everything else uses its label.
+  const statusLabel = stage ? stage.label : (label[order.status] ?? order.status);
 
   const text =
     `📦 <b>Заявка #${order.id.slice(-6).toUpperCase()}</b>\n` +
@@ -791,7 +839,7 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     `💎 Номинал: <b>${order.amount} R$</b>\n` +
     nickLine +
     gamepassLine +
-    `📊 Статус: <b>${label[order.status] ?? order.status}</b>` +
+    `📊 Статус: <b>${statusLabel}</b>` +
     note;
 
   // Keyboard varies by status
@@ -836,9 +884,14 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
       menuRow,
     ]);
   } else if (pendingOver60) {
-    keyboard = Markup.inlineKeyboard([refreshRow, [supportBtn("Нужна помощь?", "pending_long")], menuRow]);
+    // PENDING — still re-pickable until it's bought (skip on direct/paid orders).
+    keyboard = Markup.inlineKeyboard(order.isDirectOrder
+      ? [refreshRow, [supportBtn("Нужна помощь?", "pending_long")], menuRow]
+      : [refreshRow, changeNickRow, [supportBtn("Нужна помощь?", "pending_long")], menuRow]);
   } else {
-    keyboard = Markup.inlineKeyboard([refreshRow, menuRow]);
+    // PENDING (<60 min) and IN_PROGRESS — still re-pickable until it's bought.
+    const canChangeNick = !order.isDirectOrder && (order.status === "PENDING" || order.status === "IN_PROGRESS");
+    keyboard = Markup.inlineKeyboard(canChangeNick ? [refreshRow, changeNickRow, menuRow] : [refreshRow, menuRow]);
   }
 
   return { text, keyboard };
@@ -1741,22 +1794,24 @@ async function processGamepassSubmission(
 
         let newOrder;
         if (existingOrder) {
-          if (existingOrder.status === "AWAITING_GAMEPASS" || existingOrder.status === "REJECTED") {
-            // Promote to PENDING with the gamepass link
-            newOrder = await tx.wbOrder.update({
-              where: { id: existingOrder.id },
-              data: {
-                gamepassUrl: cleanLink,
-                status: "PENDING",
-                rejectionReason: null,
-                adminId: null,
-                ...(validatedCreator ? { robloxUsername: validatedCreator } : {}),
-              },
-            });
-          } else {
-            // Already processing or completed
+          // AWAITING_GAMEPASS / REJECTED → first gamepass; PENDING / IN_PROGRESS →
+          // the user re-picked their nick ("передумал") before it was bought.
+          // Both (re)bind the gamepass and (re)set the order to PENDING so the
+          // manager re-checks. COMPLETED is the only terminal block here.
+          if (existingOrder.status === "COMPLETED") {
             throw Object.assign(new Error("Order already exists"), { code: "P2002" });
           }
+          // Promote / re-point to PENDING with the (new) gamepass link
+          newOrder = await tx.wbOrder.update({
+            where: { id: existingOrder.id },
+            data: {
+              gamepassUrl: cleanLink,
+              status: "PENDING",
+              rejectionReason: null,
+              adminId: null,
+              ...(validatedCreator ? { robloxUsername: validatedCreator } : {}),
+            },
+          });
         } else {
           // No provisional order — legitimate path for text-entry activations
           newOrder = await tx.wbOrder.create({
@@ -2353,6 +2408,38 @@ export function registerCallbacks(bot: Telegraf): void {
     const adminTag = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "Админ";
 
     // ── 🔎 find_gp: user wants to search by Roblox nick (item 7) ──────────
+    // ── ✏️ change_nick: re-pick nick/gamepass on an order that isn't bought yet ─
+    if (data === CB.changeNick) {
+      const tgIdNum = ctx.from.id;
+      const user = await (db as any).user.findUnique({
+        where: { tgId: String(tgIdNum) },
+        select: { id: true },
+      });
+      if (!user) {
+        await ctx.answerCbQuery("Сессия истекла — напиши /start");
+        return;
+      }
+      const order = await (db as any).wbOrder.findFirst({
+        where: { userId: user.id, status: { in: CHANGEABLE_ORDER_STATUSES }, isDirectOrder: false },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!order) {
+        await ctx.answerCbQuery("Нет заказа, который можно изменить");
+        return;
+      }
+      const state: LinkState = { wbCode: order.wbCode, denomination: order.amount };
+      pendingRobloxNick.set(tgIdNum, state);
+      const passPrice = Math.ceil(order.amount / 0.7);
+      await ctx.answerCbQuery();
+      await ctx.reply(
+        `✏️ <b>Меняем ник Roblox.</b>\n\n` +
+        `Пришли <b>новый ник</b> — найду твои геймпассы за <b>${passPrice} R$</b> и переоформлю заказ на него.\n` +
+        `<i>Выкупим только тот геймпасс, который ты выберешь сейчас. Старый трогать не будем.</i>`,
+        { parse_mode: "HTML" }
+      );
+      return;
+    }
+
     if (data === CB.findGpStart || data === CB.findGpRetry) {
       const tgIdNum = ctx.from.id;
       const user = await (db as any).user.findUnique({
@@ -2364,7 +2451,7 @@ export function registerCallbacks(bot: Telegraf): void {
         return;
       }
       const order = await (db as any).wbOrder.findFirst({
-        where: { userId: user.id, status: "AWAITING_GAMEPASS" },
+        where: { userId: user.id, status: { in: CHANGEABLE_ORDER_STATUSES } },
         orderBy: { createdAt: "desc" },
       });
       if (!order) {
@@ -2404,10 +2491,11 @@ export function registerCallbacks(bot: Telegraf): void {
         await ctx.answerCbQuery("Сессия истекла — напиши /start");
         return;
       }
-      // Re-derive state from active AWAITING_GAMEPASS order — pendingRobloxNick
-      // may have expired if the user took >n minutes to pick.
+      // Re-derive state from the active order — pendingRobloxNick may have expired
+      // if the user took >n minutes to pick. Includes PENDING/IN_PROGRESS so a
+      // "change nick" re-pick on an already-placed order also resolves here.
       const order = await (db as any).wbOrder.findFirst({
-        where: { userId: user.id, status: "AWAITING_GAMEPASS" },
+        where: { userId: user.id, status: { in: CHANGEABLE_ORDER_STATUSES } },
         orderBy: { createdAt: "desc" },
       });
       if (!order) {
@@ -3547,7 +3635,7 @@ export function registerChatMember(bot: Telegraf): void {
         userId,
         `✅ <b>Добро пожаловать в канал!</b>\n\n` +
         `Твой код <code>${code}</code> активирован 🎉\n\n` +
-        `📖 Вот твоя <b>персональная инструкция</b> — заказ оформляется <b>прямо там</b>: создашь геймпасс (цена ровно <b>${passPrice} R$</b>) и найдёшь его по нику Roblox 🔎\n\n` +
+        `📖 Вот твоя <b>персональная инструкция</b> — заказ оформляется <b>прямо там</b>: создашь геймпасс (цена ровно <b>${passPrice} R$</b>) и найдёшь его по <b>своему нику Roblox</b> 🔎 — на этот аккаунт и придут робуксы.\n\n` +
         `🔔 А здесь, в боте, ты будешь получать <b>уведомления о заказе</b> — приняли → выкупаем → готово.`,
         {
           parse_mode: "HTML",

@@ -307,6 +307,8 @@ export const CB = {
   findGpStart:   "find_gp",                                  // 7 b
   findGpRetry:   "find_gp_retry",                            // 13 b
   gpPick:        (passId: string) => `gp_pick:${passId}`,    // ≤ 22 b
+  // "change my Roblox nick / gamepass" on an already-placed order (передумал)
+  changeNick:    "change_nick",                              // 11 b
 
   // ── Support button tap (replaces the prior URL button so we can detect
   // *real* taps and fire the full SOS only then; show-time fires a much

@@ -258,8 +258,9 @@ export default function WBInstructionV2({
           <Step n="1">
             <div className="wbi-cols wbi-media">
               <div><div className="wbi-ttl">Открой Creator Hub</div>
-                <p className="wbi-t">Это официальный сайт Roblox — где ты играешь и покупаешь робуксы. Кнопка ведёт прямо в нужный раздел.</p>
-                <p className="wbi-s" style={{ marginTop: 6 }}>Открой её в браузере, где вошёл в свой аккаунт Roblox.</p></div>
+                <p className="wbi-t">Это официальный сайт Roblox — где создаётся геймпасс. Кнопка ведёт прямо в нужный раздел.</p>
+                <p className="wbi-s" style={{ marginTop: 6 }}>💡 Лучше открыть в обычном браузере (Safari / Chrome), где ты уже вошёл в свой аккаунт Roblox. Если открылось внутри Telegram/ВК и просит вход — нажми «⋯» вверху → «Открыть в браузере».</p>
+                <p className="wbi-s" style={{ marginTop: 6 }}>📱 Можно создать геймпасс и прямо в приложении Roblox — скоро добавим пошаговую инструкцию.</p></div>
               <div className="wbi-mcol">
                 <a className="wbi-btnL" href="https://create.roblox.com/dashboard/creations" target="_blank" rel="noopener noreferrer">🔗 Открыть Creator Hub</a>
                 <div className="wbi-url">create.roblox.com/dashboard/creations</div>
@@ -389,19 +390,20 @@ export default function WBInstructionV2({
           <Step n="8" pulse cls="wbi-key wbi-finish">
             <div className="wbi-kbadge">🏁 ФИНИШ — ОФОРМЛЯЕМ ЗАКАЗ</div>
             <div className="wbi-ttl">Геймпасс готов — оформи заказ</div>
-            <p className="wbi-t">🎉 Самое сложное позади! Впиши свой <b>ник в Roblox</b> — мы сами найдём твой геймпасс и <b>оформим заказ</b>. Дальше всё в <b>боте</b> (Telegram или ВКонтакте — туда ты перейдёшь ниже): он сам выкупит пасс, там же статус заказа, уведомления и бонусы за отзыв.</p>
+            <p className="wbi-t">🎉 Самое сложное позади! Впиши <b>ник аккаунта Roblox, на который придут робуксы</b> — мы сами найдём твой геймпасс и <b>оформим заказ</b>. Дальше всё в <b>боте</b> (Telegram или ВКонтакте — туда ты перейдёшь ниже): он сам выкупит пасс, там же статус заказа, уведомления и бонусы за отзыв.</p>
+            <div className="wbi-shint" style={{ margin: "2px 0 10px" }}>💡 Это <b>твой</b> ник Roblox — именно на этот аккаунт зачислятся робуксы.</div>
 
             <div className="wbi-search">
               <div className="wbi-srow">
                 <input
                   className="wbi-sinput"
                   type="text"
-                  placeholder="Твой ник в Roblox"
+                  placeholder="Ник Roblox — сюда придут робуксы"
                   value={nick}
                   onChange={(e) => setNick(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }}
                   autoCapitalize="off" autoCorrect="off" spellCheck={false}
-                  aria-label="Ник Roblox"
+                  aria-label="Ник Roblox — аккаунт получателя робуксов"
                 />
                 <button className="wbi-sbtn" onClick={runSearch} disabled={searching}>
                   {searching ? "Ищем…" : "🔎 Найти"}
@@ -455,12 +457,12 @@ export default function WBInstructionV2({
 
               {picked && (
                 <div className="wbi-picked">
-                  <div className="wbi-picked-h">{orderPlaced ? "✅ ЗАКАЗ ОФОРМЛЕН" : "✅ ГЕЙМПАСС ВЫБРАН"}</div>
+                  <div className="wbi-picked-h">{orderPlaced ? "✅ ЗАКАЗ ОФОРМЛЕН" : "⏳ ОФОРМЛЯЕМ ЗАКАЗ…"}</div>
                   <div className="wbi-picked-b"><b>{picked.name}</b> · {picked.price} R$</div>
                   <div className="wbi-shint" style={{ marginTop: 8 }}>
                     {orderPlaced
-                      ? "Менеджер уже видит твой заказ и выкупит геймпасс. Открой бота ниже — там статус заказа и уведомления."
-                      : "Готово! Открой бота ниже — он подтвердит выкуп этого геймпасса в один тап."}
+                      ? "Готово! Сейчас вернём тебя в бота — там статус заказа и уведомления. Если не открылось автоматически — нажми кнопку ниже 👇"
+                      : "Оформляем твой заказ, подожди немного — затем сами вернём тебя в бота 👌"}
                   </div>
                   <button className="wbi-relink" onClick={() => { setPicked(null); setOrderPlaced(false); }}>Выбрать другой</button>
                 </div>
@@ -488,12 +490,12 @@ export default function WBInstructionV2({
         {/* CTA */}
         <div className="wbi-cta wbi-reveal">
           <h3>{orderPlaced
-            ? "Заказ оформлен — открой бота"
+            ? "Заказ оформлен — возвращаем в бота"
             : picked
               ? "Почти готово — открой бота и подтверди"
               : "Геймпасс готов? Открой бота"}</h3>
           <div className="wbi-s">{orderPlaced
-            ? <>✅ <b>{picked?.name ?? "Геймпасс"}</b> · {picked?.price ?? calcPrice(nomDefault)} R$ — менеджер уже видит заказ. В боте — статус и уведомления.</>
+            ? <>✅ <b>{picked?.name ?? "Геймпасс"}</b> · {picked?.price ?? calcPrice(nomDefault)} R$ — заказ уже у менеджера. Сейчас вернём тебя в бота — там статус и уведомления.</>
             : picked
               ? <>✅ <b>{picked.name}</b> · {picked.price} R$ — бот подтвердит выкуп в один тап</>
               : <>Номинал {nomDefault} R$ · цена пасса {calcPrice(nomDefault)} R$ · бот выкупит и пришлёт бонус за отзыв</>}</div>

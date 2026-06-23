@@ -727,6 +727,11 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     await handleFindGpStart(ctx, vkUserId);
     return;
   }
+  // ── ✏️ Change nick / gamepass on an order that isn't bought yet ────────────
+  if (msgPayload?.command === "change_nick") {
+    await handleChangeNick(ctx, vkUserId);
+    return;
+  }
   if (msgPayload?.command === "gp_pick" && typeof msgPayload.passId === "string") {
     await handleGpPick(ctx, vkUserId, msgPayload.passId);
     return;
@@ -1224,22 +1229,24 @@ async function handleGamepassLink(
 
       let newOrder;
       if (existingOrder) {
-        if (existingOrder.status === "AWAITING_GAMEPASS" || existingOrder.status === "REJECTED") {
-          // Promote provisional/rejected order to PENDING with the gamepass link
-          newOrder = await tx.wbOrder.update({
-            where: { id: existingOrder.id },
-            data: {
-              gamepassUrl: cleanLink,
-              status: "PENDING",
-              rejectionReason: null,
-              adminId: null,
-              ...(validatedCreator ? { robloxUsername: validatedCreator } : {}),
-            },
-          });
-        } else {
-          // Already processing or completed
+        // AWAITING_GAMEPASS / REJECTED → first gamepass; PENDING / IN_PROGRESS →
+        // the user re-picked their nick ("передумал") before it was bought. Both
+        // (re)bind the gamepass and (re)set PENDING so the manager re-checks.
+        // COMPLETED is the only terminal block here.
+        if (existingOrder.status === "COMPLETED") {
           throw Object.assign(new Error("Order already exists"), { code: "P2002" });
         }
+        // Promote / re-point to PENDING with the (new) gamepass link
+        newOrder = await tx.wbOrder.update({
+          where: { id: existingOrder.id },
+          data: {
+            gamepassUrl: cleanLink,
+            status: "PENDING",
+            rejectionReason: null,
+            adminId: null,
+            ...(validatedCreator ? { robloxUsername: validatedCreator } : {}),
+          },
+        });
       } else {
         // Fresh order
         newOrder = await tx.wbOrder.create({
@@ -1347,7 +1354,7 @@ async function handleFindGpStart(ctx: MessageContext, vkUserId: number): Promise
     return;
   }
   const order = await (db as any).wbOrder.findFirst({
-    where: { userId: user.id, status: "AWAITING_GAMEPASS" },
+    where: { userId: user.id, status: { in: VK_CHANGEABLE_ORDER_STATUSES } },
     orderBy: { createdAt: "desc" },
   });
   if (!order) {
@@ -1364,6 +1371,42 @@ async function handleFindGpStart(ctx: MessageContext, vkUserId: number): Promise
     `🔎 Введи свой ник в Roblox (то, как ты заходишь в игру).\n\n` +
     `Я найду все твои геймпассы за ${passPrice} R$ — и предложу выбрать нужный.\n` +
     `Если передумал — пришли ссылку на геймпасс как обычно.`
+  );
+}
+
+/**
+ * "Передумал" — re-pick nick / gamepass on an order that hasn't been bought yet.
+ * Same machinery as {@link handleFindGpStart} but with copy that makes the intent
+ * explicit (we re-bind the order to the newly chosen gamepass). Direct/paid
+ * orders are excluded — only WB orders re-route through the nick search.
+ */
+async function handleChangeNick(ctx: MessageContext, vkUserId: number): Promise<void> {
+  const user = await (db as any).user.findUnique({
+    where: { vkId: String(vkUserId) },
+    select: { id: true },
+  });
+  if (!user) {
+    await ctx.reply("Сессия истекла — напиши «Начать», чтобы продолжить.");
+    return;
+  }
+  const order = await (db as any).wbOrder.findFirst({
+    where: { userId: user.id, status: { in: VK_CHANGEABLE_ORDER_STATUSES }, isDirectOrder: false },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!order) {
+    await ctx.reply("Нет заказа, который можно изменить.");
+    return;
+  }
+  setState(vkUserId, {
+    type: "AWAITING_ROBLOX_NICK",
+    wbCode: order.wbCode,
+    denomination: order.amount,
+  });
+  const passPrice = Math.ceil(order.amount / 0.7);
+  await ctx.reply(
+    `✏️ Меняем ник Roblox.\n\n` +
+    `Пришли новый ник — найду твои геймпассы за ${passPrice} R$ и переоформлю заказ на него.\n` +
+    `Выкупим только тот геймпасс, который ты выберешь сейчас. Старый трогать не будем.`
   );
 }
 
@@ -1529,7 +1572,7 @@ async function handleGpPick(
     return;
   }
   const order = await (db as any).wbOrder.findFirst({
-    where: { userId: user.id, status: "AWAITING_GAMEPASS" },
+    where: { userId: user.id, status: { in: VK_CHANGEABLE_ORDER_STATUSES } },
     orderBy: { createdAt: "desc" },
   });
   if (!order) {
@@ -1893,6 +1936,25 @@ const VK_STATUS_LABEL: Record<string, string> = {
   REJECTED:          "❌ Отклонён",
 };
 
+// Statuses where the user may still re-pick their nick / gamepass (not yet bought).
+const VK_CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"];
+
+/**
+ * Plain-text VK mirror of the TG `pendingStage` — gives a PENDING order a sense
+ * of forward motion from elapsed time so the status visibly "moves" even with no
+ * real change. Stays within queued/checking/preparing semantics — never claims a
+ * manager has actually started (that's the real IN_PROGRESS).
+ */
+function vkPendingStage(createdAt: Date | string): { label: string; note: string } {
+  const mins = (Date.now() - new Date(createdAt).getTime()) / 60_000;
+  if (mins < 3)   return { label: "🆕 Заявка создана",          note: "Только что приняли заявку — ставим в очередь на выкуп." };
+  if (mins < 12)  return { label: "🔍 Проверяем геймпасс",      note: "Сверяем геймпасс и цену перед выкупом." };
+  if (mins < 30)  return { label: "📋 Поставлен в очередь",     note: "Заявка в очереди к менеджеру — скоро возьмём в работу." };
+  if (mins < 90)  return { label: "💼 Готовим к выкупу",        note: "Менеджер вот-вот возьмёт твой геймпасс в работу." };
+  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Выкупаем заявки по очереди — обычно в течение нескольких часов, максимум сутки." };
+  return            { label: "⏳ Уже скоро выкупим",        note: "Заявка дольше обычного в очереди, но уже близко — напишем сами, как только всё будет готово." };
+}
+
 /** Russian day pluralization: 1 день · 2 дня · 5 дней. */
 function vkPluralDays(n: number): string {
   const a = Math.abs(n) % 100;
@@ -2050,8 +2112,26 @@ async function handleIdleMessage(
     return;
   }
 
+  // A customer with a LIVE order (placed / in payment / being processed) must
+  // never get the generic idle/upsell greeting — that reads as "the bot forgot my
+  // order" and shows stale info. Surface their real order status for ANY message.
+  // Bug fix (order 5Q8V6LJ): only AWAITING_GAMEPASS/REJECTED were treated as
+  // active here (via tryRestoreState), so a website one-tap order (PENDING) left
+  // the client with a «рады видеть снова, покупай напрямую» upsell instead.
+  let hasLiveOrder = false;
+  try {
+    const liveU = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+    if (liveU) {
+      const liveOrder = await (db as any).wbOrder.findFirst({
+        where: { userId: liveU.id, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING", "PENDING", "IN_PROGRESS"] } },
+        select: { id: true },
+      });
+      hasLiveOrder = !!liveOrder;
+    }
+  } catch { /* fail-open: fall through to the normal greeting */ }
+
   // "статус" keyword (also triggered via payload routing in handleMessage) → show last order in rich format
-  if (lower.includes("статус") || lower.includes("заявк")) {
+  if (lower.includes("статус") || lower.includes("заявк") || hasLiveOrder) {
     const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
     if (!user) {
       await ctx.reply(
@@ -2084,7 +2164,9 @@ async function handleIdleMessage(
 
     const passPrice = Math.ceil((order.amount as number) / 0.7);
     const shortId   = (order.id as string).slice(-6).toUpperCase();
-    const statusStr = label[order.status] ?? order.status;
+    // PENDING shows a time-based pseudo-stage so it visibly "moves" over time.
+    const stage     = order.status === "PENDING" ? vkPendingStage(order.createdAt) : null;
+    const statusStr = stage ? stage.label : (label[order.status] ?? order.status);
 
     // For COMPLETED: check if review bonus was already claimed
     let reviewClaimed = true;
@@ -2103,7 +2185,7 @@ async function handleIdleMessage(
         : order.status === "AWAITING_GAMEPASS"
         ? `\n\nПройди инструкцию, создай геймпасс — затем напиши свой ник в Roblox 🔎\nЦена геймпасса: ${passPrice} R$`
         : order.status === "PENDING"
-        ? "\n\nНе переживай — менеджер работает в порядке очереди, обычно выкупаем в течение нескольких часов, максимум сутки. Напишем сами."
+        ? `\n\n💬 ${stage!.note}`
         : order.status === "IN_PROGRESS"
         ? "\n\n🔧 Менеджер уже работает над твоей заявкой. Скоро всё будет готово!"
         : order.status === "COMPLETED"
@@ -2117,8 +2199,9 @@ async function handleIdleMessage(
         : "";
 
     const gamepassLine = order.gamepassUrl ? `🔗 ${order.gamepassUrl}\n` : "";
-    // Show the Roblox nick so the user sees exactly where the Robux will land.
-    const nickLine = order.robloxUsername ? `🎮 Roblox: ${order.robloxUsername}\n` : "";
+    // Spell out that this nick is the recipient — so the user reads it as "robux
+    // land HERE", not just some technical field.
+    const nickLine = order.robloxUsername ? `🎮 Робуксы придут на ник: ${order.robloxUsername}\n` : "";
 
     // Status-specific rows first, then always a "👤 В моё меню" row so the user
     // never dead-ends on the status screen (mirror of the TG menuRow).
@@ -2131,6 +2214,9 @@ async function handleIdleMessage(
         .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" }).row();
     } else if (order.status === "COMPLETED" && reviewClaimed) {
       kb.textButton({ label: "💎 Заказать напрямую", payload: { command: "start_direct" }, color: "positive" }).row();
+    } else if ((order.status === "PENDING" || order.status === "IN_PROGRESS") && !order.isDirectOrder) {
+      // "Передумал" — re-pick nick/gamepass while the order isn't bought yet.
+      kb.textButton({ label: "✏️ Сменить ник Roblox", payload: { command: "change_nick" }, color: "primary" }).row();
     }
     kb.textButton({ label: "👤 В моё меню", payload: { command: "menu" }, color: "secondary" });
 
