@@ -311,34 +311,39 @@ async function extractPhotoUrl(ctx: MessageContext): Promise<string | undefined>
     }
   }
 
-  // 4. VK API photos.getById — fetch full payload with sizes
+  // 4. VK API messages.getByConversationMessageId — re-fetch message with full
+  // photo sizes. Community tokens can't use photos.getById (error 27), but CAN
+  // use messages.getByConversationMessageId which returns complete attachments.
   if (_vkApi) {
-    // Collect all candidate photo refs (id + owner_id pairs)
-    const candidates: Array<{ id: number; ownerId: number; accessKey?: string }> = [];
-
-    if (ctx.hasAttachments("photo")) {
-      const att = ctx.getAttachments("photo")[0] as any;
-      if (att?.id && att?.ownerId) candidates.push({ id: att.id, ownerId: att.ownerId, accessKey: att.accessKey });
-    }
-    const allRawAtts = [
-      ...rawAttachments,
-      ...allFwd.flatMap((m: any) => m?.attachments ?? []),
-    ];
-    for (const a of allRawAtts) {
-      const p = a?.photo;
-      if (p?.id && p?.owner_id) candidates.push({ id: p.id, ownerId: p.owner_id, accessKey: p.access_key });
-    }
-
-    for (const c of candidates) {
+    const peerId = (ctx as any).peerId ?? (ctx as any).message?.peer_id;
+    const cmid   = (ctx as any).conversationMessageId ?? (ctx as any).message?.conversation_message_id;
+    const groupId = process.env.VK_GROUP_ID;
+    if (peerId && cmid && groupId) {
       try {
-        const key = `${c.ownerId}_${c.id}${c.accessKey ? "_" + c.accessKey : ""}`;
-        const result: any[] = await _vkApi.photos.getById({ photos: key });
-        if (Array.isArray(result) && result[0]) {
-          const url = photoUrl(result[0]);
-          if (url) return url;
+        const resp = await _vkApi.messages.getByConversationMessageId({
+          peer_id: peerId,
+          conversation_message_ids: cmid,
+          group_id: Number(groupId),
+        });
+        const items: any[] = resp?.items ?? [];
+        for (const msg of items) {
+          for (const att of (msg?.attachments ?? [])) {
+            if (att?.type === "photo") {
+              const url = photoUrl(att.photo);
+              if (url) return url;
+            }
+          }
+          for (const fwd of (msg?.fwd_messages ?? [])) {
+            for (const att of (fwd?.attachments ?? [])) {
+              if (att?.type === "photo") {
+                const url = photoUrl(att.photo);
+                if (url) return url;
+              }
+            }
+          }
         }
       } catch (err) {
-        console.warn("[VK] photos.getById fallback failed:", (err as any)?.message ?? err);
+        console.warn("[VK] messages.getByConversationMessageId fallback failed:", (err as any)?.message ?? err);
       }
     }
   }
