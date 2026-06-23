@@ -125,6 +125,9 @@ model WbOrder {
   isTest          Boolean       @default(false)
   paymentDetails  String?
   robloxUsername  String?
+  /// Free-text admin note (current status / problem) — admin-only, shown in the
+  /// TWA order card. Never surfaced to the customer.
+  adminNote       String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 

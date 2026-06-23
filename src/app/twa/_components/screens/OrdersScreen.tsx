@@ -23,6 +23,7 @@ interface Order {
   platform: string;
   wbCode: string;
   rejectionReason: string | null;
+  adminNote: string | null;
   isDirectOrder: boolean;
   paymentDetails: string | null;
   purchaseRate: number | null;
@@ -345,6 +346,7 @@ function ActionBar({
   }
 
   const showTakeWork = order.status === "PENDING";
+  const showUntake   = order.status === "IN_PROGRESS";
   const showComplete = order.status === "PENDING" || order.status === "IN_PROGRESS";
   const showReject   = ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status);
   const hasMain      = showTakeWork || showComplete;
@@ -386,6 +388,16 @@ function ActionBar({
           Отклонить заказ
         </button>
       )}
+      {showUntake && (
+        <button className="twa-press" onClick={() => doAction("untake")} disabled={loading}
+          style={{
+            width: "100%", padding: "11px", borderRadius: 12,
+            border: `1px solid ${C.orange}55`, background: "transparent",
+            color: C.orange, fontSize: 13.5, fontWeight: 600, cursor: "pointer",
+          }}>
+          ↩︎ Вернуть в «Новые»
+        </button>
+      )}
       {err && <div style={{ color: C.red, fontSize: 12 }}>{err}</div>}
     </div>
   );
@@ -396,6 +408,116 @@ function btn(bg: string, color: string, flex: number): React.CSSProperties {
     background: bg, color, fontSize: 14, fontWeight: 600, cursor: "pointer",
     letterSpacing: 0.1,
   };
+}
+
+/* ───────────── NotesEditor — admin-only free-text note, autosave on blur ─────────────
+   Where the manager jots the current status / problem for an order. Highlighted
+   when set so a noted order stands out at a glance. Never shown to the customer. */
+function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) => Promise<ActionResult> }) {
+  const [note, setNote]   = useState(order.adminNote ?? "");
+  const [saving, setSaving] = useState(false);
+  const [flash, setFlash] = useState(false);
+  // Re-sync local draft when the persisted note changes elsewhere (optimistic patch).
+  const lastSaved = useRef(order.adminNote ?? "");
+  useEffect(() => {
+    if ((order.adminNote ?? "") !== lastSaved.current) {
+      lastSaved.current = order.adminNote ?? "";
+      setNote(order.adminNote ?? "");
+    }
+  }, [order.adminNote]);
+
+  const dirty = note.trim() !== lastSaved.current.trim();
+
+  async function commit() {
+    if (!dirty || saving) return;
+    setSaving(true);
+    const res = await onSave(note.trim());
+    setSaving(false);
+    if (res.ok) {
+      lastSaved.current = note.trim();
+      haptic.notify("success");
+      setFlash(true); setTimeout(() => setFlash(false), 1600);
+    }
+  }
+
+  const hasNote = !!(order.adminNote && order.adminNote.trim());
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontSize: 12.5, fontWeight: 600, color: C.textSecondary }}>
+          📝 Заметка <span style={{ color: C.textTertiary, fontWeight: 400 }}>· видят только админы</span>
+        </span>
+        {flash && <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>Сохранено ✓</span>}
+      </div>
+      <textarea
+        value={note}
+        onChange={e => setNote(e.target.value)}
+        onBlur={commit}
+        onClick={e => e.stopPropagation()}
+        placeholder="Текущий статус или проблема по заказу…"
+        rows={2}
+        style={{
+          background: hasNote ? `${C.yellow}14` : "rgba(255,255,255,0.06)",
+          border: hasNote ? `1px solid ${C.yellow}40` : "1px solid transparent",
+          borderRadius: 12, color: C.textPrimary, fontSize: 14, lineHeight: 1.4,
+          padding: "10px 12px", resize: "vertical", outline: "none",
+          width: "100%", boxSizing: "border-box", fontFamily: "inherit",
+        }}
+      />
+      {dirty && (
+        <button
+          className="twa-press"
+          onClick={e => { e.stopPropagation(); commit(); }}
+          disabled={saving}
+          style={{
+            alignSelf: "flex-start", padding: "8px 16px", borderRadius: 10, border: "none",
+            background: C.accent, color: "#fff", fontSize: 13, fontWeight: 600,
+            cursor: "pointer", opacity: saving ? 0.7 : 1,
+          }}
+        >
+          {saving ? "…" : "Сохранить заметку"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ───────────── QuickTools — open / copy gamepass & nick, grouped with actions ───────────── */
+function QuickTools({ order }: { order: Order }) {
+  const gp   = order.gamepassUrl;
+  const nick = order.robloxUsername;
+  if (!gp && !nick) return null;
+  const toolStyle: React.CSSProperties = {
+    flex: 1, minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+    padding: "10px 8px", borderRadius: 11, border: "none",
+    background: "rgba(255,255,255,0.06)", color: C.textSecondary,
+    fontSize: 12.5, fontWeight: 600, cursor: "pointer", textDecoration: "none",
+    whiteSpace: "nowrap",
+  };
+  const copy = (text: string, label: string) => {
+    copyText(text); haptic.impact("light"); toast(`${label} скопирован`, "success");
+  };
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      {gp && (
+        <a href={gp} target="_blank" rel="noreferrer"
+           onClick={e => { e.stopPropagation(); haptic.impact("light"); }} style={toolStyle}>
+          🔗 Открыть
+        </a>
+      )}
+      {gp && (
+        <button className="twa-press-sm" onClick={e => { e.stopPropagation(); copy(gp, "Ссылка"); }} style={toolStyle}>
+          📋 Ссылка
+        </button>
+      )}
+      {nick && (
+        <button className="twa-press-sm" onClick={e => { e.stopPropagation(); copy(nick, "Ник"); }} style={toolStyle}>
+          📋 Ник
+        </button>
+      )}
+    </div>
+  );
 }
 
 function extractGamepassId(url: string | null): string | null {
@@ -480,13 +602,14 @@ function userSubHandle(u: Order["user"]): string {
    OrderCard — premium hierarchy
    ───────────────────────────────────────────────────────────────────────── */
 function OrderCard({
-  order, token, exiting, onGoToBossrobux, onRunAction,
+  order, token, exiting, onGoToBossrobux, onRunAction, onSaveNote,
 }: {
   order: Order;
   token: string;
   exiting: boolean;
   onGoToBossrobux?: (gamepassId?: string) => void;
   onRunAction: (action: string, reason?: string) => Promise<ActionResult>;
+  onSaveNote: (note: string) => Promise<ActionResult>;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [fetchedCreator, setFetchedCreator] = useState<string | false | null>(null);
@@ -820,6 +943,11 @@ function OrderCard({
             </>
           )}
 
+          <Divider />
+          <div style={{ paddingTop: 12 }}>
+            <NotesEditor order={order} onSave={onSaveNote} />
+          </div>
+
           <ContactButton user={order.user} />
         </div>
       )}
@@ -833,6 +961,7 @@ function OrderCard({
           background: "rgba(0,0,0,0.12)",
         }}>
           <ActionBar order={order} onRunAction={onRunAction} />
+          <QuickTools order={order} />
           {onGoToBossrobux && order.gamepassUrl && (order.status === "PENDING" || order.status === "IN_PROGRESS") && (
             <button
               className="twa-press"
@@ -1039,6 +1168,7 @@ export default function OrdersScreen({
     const prevStatus = order.status;
     const newStatus: OrderStatus | null =
       action === "take-work" ? "IN_PROGRESS" :
+      action === "untake"    ? "PENDING"     :
       action === "complete"  ? "COMPLETED"   :
       action === "reject"    ? "REJECTED"    : null;
     if (!newStatus) return { ok: false, error: "Invalid action" };
@@ -1091,6 +1221,7 @@ export default function OrdersScreen({
       toast(
         action === "complete"  ? "Заказ выкуплен ✓" :
         action === "take-work" ? "Взято в работу"   :
+        action === "untake"    ? "Возвращён в «Новые»" :
                                  "Заказ отклонён",
         action === "reject" ? "default" : "success",
       );
@@ -1100,6 +1231,35 @@ export default function OrdersScreen({
       return { ok: false, error: "Ошибка сети" };
     }
   }, [token, filter, onActionDone]);
+
+  /* Admin note save — optimistic patch + POST, rollback on failure. Status/counts
+     are untouched, so this never reorders or drops the card. */
+  const saveNote = useCallback(async (orderId: string, note: string): Promise<ActionResult> => {
+    let prevNote: string | null = null;
+    setAllOrders(prev => prev.map(o => {
+      if (o.id !== orderId) return o;
+      prevNote = o.adminNote;
+      return { ...o, adminNote: note || null };
+    }));
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set-note", orderId, note }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setAllOrders(prev => prev.map(o => o.id === orderId ? { ...o, adminNote: prevNote } : o));
+        haptic.notify("error");
+        return { ok: false, error: d.error ?? "Ошибка" };
+      }
+      return { ok: true };
+    } catch {
+      setAllOrders(prev => prev.map(o => o.id === orderId ? { ...o, adminNote: prevNote } : o));
+      haptic.notify("error");
+      return { ok: false, error: "Ошибка сети" };
+    }
+  }, [token]);
 
   const urgentCount = data ? URGENT_STATUSES.reduce((sum, s) => sum + (data.counts[s] ?? 0), 0) : 0;
 
@@ -1201,6 +1361,7 @@ export default function OrdersScreen({
                 exiting={exiting.has(order.id)}
                 onGoToBossrobux={onGoToBossrobux}
                 onRunAction={(action, reason) => runAction(order, action, reason)}
+                onSaveNote={(note) => saveNote(order.id, note)}
               />
             ))}
 

@@ -323,6 +323,30 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  // Undo "take-work" — move an order back to the new/PENDING queue (e.g. taken
+  // by mistake, or handing it off to another manager).
+  if (action === "untake") {
+    if (order.status !== "IN_PROGRESS")
+      return NextResponse.json({ error: "Order must be IN_PROGRESS" }, { status: 400 });
+    await (prisma as any).wbOrder.update({
+      where: { id: orderId },
+      data:  { status: "PENDING" },
+    });
+    cachedCounts = null;
+    return NextResponse.json({ ok: true });
+  }
+
+  // Admin-only free-text note (current status / problem). Empty string clears it.
+  // Does not touch status, so counts stay valid (no cache bust).
+  if (action === "set-note") {
+    const note = typeof body.note === "string" ? body.note.trim().slice(0, 2000) : "";
+    await (prisma as any).wbOrder.update({
+      where: { id: orderId },
+      data:  { adminNote: note || null },
+    });
+    return NextResponse.json({ ok: true });
+  }
+
   if (action === "complete") {
     if (!["PENDING", "IN_PROGRESS"].includes(order.status))
       return NextResponse.json({ error: "Order must be PENDING or IN_PROGRESS" }, { status: 400 });
