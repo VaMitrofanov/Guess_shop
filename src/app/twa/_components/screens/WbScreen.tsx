@@ -6,10 +6,12 @@ import AnalyticsScreen from "./AnalyticsScreen";
 import StocksScreen from "./StocksScreen";
 import CodesScreen from "./CodesScreen";
 import CalcScreen from "./CalcScreen";
+import ReviewsScreen from "./ReviewsScreen";
 
 const TABS = [
   { id: "analytics", label: "Аналитика" },
   { id: "stocks",    label: "Склад"     },
+  { id: "reviews",   label: "Отзывы"    },
   { id: "calc",      label: "Расчёт"    },
   { id: "codes",     label: "Коды"      },
 ] as const;
@@ -53,6 +55,7 @@ export default function WbScreen({ token }: { token: string }) {
       <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any, marginTop: 10 }}>
         {tab === "analytics" && <AnalyticsScreen token={token} />}
         {tab === "stocks"    && <StocksScreen    token={token} />}
+        {tab === "reviews"   && <ReviewsScreen   token={token} />}
         {tab === "calc"      && <CalcScreen      token={token} />}
         {tab === "codes"     && <CodesScreen     token={token} />}
       </div>
