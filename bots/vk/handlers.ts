@@ -1298,13 +1298,15 @@ async function handleGamepassLink(
   const priceLine = validatedPrice != null ? `\n💰 Цена: ${validatedPrice} R$` : "";
   await ctx.reply({
     message:
-      `🎉 Отлично, заявка принята!` +
+      `🎉 Геймпасс принят!` +
       creatorLine +
       priceLine +
-      `\n\n🆔 Номер заявки: ${order.id.slice(-6).toUpperCase()}\n\n` +
-      `⏳ Выкупим в течение нескольких часов — обычно быстрее.\n` +
-      `🔔 Как только выкупим — пришлём уведомление прямо сюда, в этот бот. Никуда заходить не нужно — просто жди сообщение 👌\n\n` +
-      `👤 Статус заявки, бонусы и быстрый заказ напрямую — в меню 👇`,
+      `\n\n📋 Что будет дальше:\n` +
+      `1. Выкупим геймпасс — обычно за пару часов\n` +
+      `2. Пришлём уведомление сюда ✅\n` +
+      `3. Roblox начислит робуксы — это 5–7 дней после выкупа\n\n` +
+      `Ничего делать не нужно — просто жди сообщение 👌\n\n` +
+      `Заявка ${order.id.slice(-6).toUpperCase()} · Статус и бонусы — в меню 👇`,
     keyboard: Keyboard.builder()
       .textButton({ label: "📊 Статус заявки", payload: { command: "status" }, color: "positive" })
       .row()

@@ -2067,8 +2067,8 @@ const WBG_CSS = `
 .wbg-count.ready{color:var(--grn)}
 .wbg-step2{transition:opacity .3s}
 .wbg-step2.locked{opacity:.45}
-.wbg-btns{display:flex;flex-direction:column;gap:10px;margin-top:14px}
-.wbg-btn{width:100%;display:flex;align-items:center;justify-content:center;gap:10px;border-radius:14px;padding:15px;font-size:16px;font-weight:800;color:#fff;border:none;cursor:pointer;transition:transform .12s,box-shadow .12s,filter .2s}
+.wbg-btns{display:flex;flex-direction:column;gap:16px;margin-top:18px}
+.wbg-btn{width:100%;display:flex;align-items:center;justify-content:center;gap:10px;border-radius:14px;padding:18px 15px;font-size:16px;font-weight:800;color:#fff;border:none;cursor:pointer;transition:transform .12s,box-shadow .12s,filter .2s}
 .wbg-btn:disabled{opacity:.4;cursor:not-allowed;box-shadow:none!important;transform:none!important;filter:grayscale(.35)}
 .wbg-btn:not(:disabled):hover{filter:brightness(1.06)}
 .wbg-btn:not(:disabled):active{transform:translateY(3px)}
@@ -2236,10 +2236,10 @@ function WBGate() {
               <div className={`wbg-step2${codeReady ? "" : " locked"}`} style={{ marginTop: 26 }}>
                 <div className="wbg-step-h">
                   <span className="wbg-dot" aria-hidden>2</span>
-                  <span className="wbg-ttl">Где удобнее отслеживать заказ</span>
+                  <span className="wbg-ttl">Твой бот для заказов и робуксов</span>
                 </div>
                 <p className="wbg-t">
-                  Выбери мессенджер — туда придёт инструкция, статус заказа и уведомления.
+                  Выбери мессенджер — бот проведёт по шагам, примет геймпасс и будет присылать статус. В следующий раз можно заказать прямо в нём — быстрее и без карты WB.
                 </p>
                 <ConnectivityAssistant />
 

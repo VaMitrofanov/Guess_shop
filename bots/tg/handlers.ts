@@ -1866,14 +1866,15 @@ async function processGamepassSubmission(
     const creatorLine = validatedCreator ? `👤 Создатель: ${escapeHtml(validatedCreator)}\n` : "";
     const priceLine = validatedPrice != null ? `💰 Цена: ${validatedPrice} R$\n` : "";
     await ctx.reply(
-      `🎉 Отлично, геймпасс принят!\n` +
+      `🎉 Геймпасс принят!\n` +
       creatorLine +
       priceLine +
-      `\n🆔 Номер заявки: <code>${order.id.slice(-6).toUpperCase()}</code>\n\n` +
-      `⏳ Выкупим в течение нескольких часов — обычно быстрее.\n` +
-      `🔔 Как только выкупим — пришлём уведомление <b>прямо сюда, в этот бот</b>. Никуда заходить не нужно — просто жди сообщение 👌\n` +
-      `💡 <i>Робуксы начислит Roblox — обычно в течение 5–7 дней после выкупа.</i>\n\n` +
-      `👤 Статус заказа, бонусы и быстрый заказ напрямую — в меню 👇`,
+      `\n📋 <b>Что будет дальше:</b>\n` +
+      `1. Выкупим геймпасс — обычно за пару часов\n` +
+      `2. Пришлём уведомление сюда ✅\n` +
+      `3. Roblox начислит робуксы — это <b>5–7 дней</b> после выкупа\n\n` +
+      `Ничего делать не нужно — просто жди сообщение 👌\n\n` +
+      `Заявка <code>${order.id.slice(-6).toUpperCase()}</code> · Статус и бонусы — в меню 👇`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
