@@ -127,6 +127,131 @@ function StatusPill({ enabled, bestRate, targetRate, pending }: {
   );
 }
 
+/* ───────────── Test codes — list + one-tap reset, for QA runs ───────────── */
+interface TestCode {
+  code: string;
+  denomination: number;
+  passPrice: number;
+  exists: boolean;
+  status: "AVAILABLE" | "RESERVED" | "CLAIMED" | null;
+  isUsed: boolean;
+}
+
+const TC_STATUS: Record<string, { label: string; color: string }> = {
+  AVAILABLE: { label: "Свободен", color: C.green  },
+  RESERVED:  { label: "Резерв",   color: C.yellow },
+  CLAIMED:   { label: "Занят",    color: C.orange },
+};
+
+function TestCodesSection({ token }: { token: string }) {
+  const [codes, setCodes]   = useState<TestCode[] | null>(null);
+  const [busy, setBusy]     = useState<string | null>(null); // a code, or "__ALL__"
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch("/api/twa/test-codes", { headers: { Authorization: `Bearer ${token}` } });
+      if (r.ok) { const d = await r.json(); setCodes(d.codes ?? []); }
+    } catch { /* keep prior state */ }
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
+
+  async function reset(code?: string) {
+    if (busy) return;
+    setBusy(code ?? "__ALL__");
+    haptic.impact("medium");
+    try {
+      const r = await fetch("/api/twa/test-codes", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset", ...(code ? { code } : {}) }),
+      });
+      if (r.ok) { haptic.notify("success"); await load(); }
+      else haptic.notify("error");
+    } catch { haptic.notify("error"); }
+    finally { setBusy(null); }
+  }
+
+  function copy(code: string) {
+    navigator.clipboard?.writeText(code).catch(() => {});
+    haptic.impact("light");
+    setCopied(code);
+    setTimeout(() => setCopied(c => (c === code ? null : c)), 1400);
+  }
+
+  return (
+    <section>
+      <SectionHeader title="Тестовые коды" />
+      <Card>
+        {codes === null && (
+          <div style={{ padding: "14px 16px", fontSize: 13, color: C.textSecondary }}>Загрузка…</div>
+        )}
+        {codes?.map((c, i) => {
+          const meta = c.status ? TC_STATUS[c.status] : null;
+          return (
+            <div key={c.code}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px" }}>
+                <button
+                  className="twa-press-sm"
+                  onClick={() => copy(c.code)}
+                  style={{
+                    background: "transparent", border: "none", padding: 0, cursor: "pointer",
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                    fontSize: 15, fontWeight: 700, letterSpacing: 1.4,
+                    color: copied === c.code ? C.green : C.accent, whiteSpace: "nowrap",
+                  }}
+                >
+                  {copied === c.code ? `✓ ${c.code}` : c.code}
+                </button>
+                <span style={{ flex: 1, fontSize: 12, color: C.textSecondary, whiteSpace: "nowrap" }}>
+                  {c.denomination} → {c.passPrice} R$
+                </span>
+                <span style={{
+                  fontSize: 11, fontWeight: 600,
+                  color: meta?.color ?? C.muted,
+                  background: `${meta?.color ?? C.muted}1f`,
+                  borderRadius: 7, padding: "3px 8px", whiteSpace: "nowrap",
+                }}>
+                  {meta?.label ?? "Нет"}
+                </span>
+                <button
+                  className="twa-press-sm"
+                  onClick={() => reset(c.code)}
+                  disabled={!!busy}
+                  title="Сбросить этот код"
+                  style={{
+                    background: "transparent", border: "none", cursor: busy ? "default" : "pointer",
+                    fontSize: 17, lineHeight: 1, color: C.textSecondary, padding: "2px 4px",
+                    opacity: busy === c.code ? 0.4 : 1,
+                  }}
+                >
+                  {busy === c.code ? "…" : "↻"}
+                </button>
+              </div>
+              {i < codes.length - 1 && <RowSep />}
+            </div>
+          );
+        })}
+      </Card>
+      <button
+        className="twa-press"
+        onClick={() => reset()}
+        disabled={!!busy}
+        style={{
+          marginTop: 10, width: "100%", padding: "13px", borderRadius: 12, border: "none",
+          background: C.accent, color: "#fff", fontSize: 15, fontWeight: 600,
+          cursor: busy ? "default" : "pointer", opacity: busy === "__ALL__" ? 0.7 : 1,
+        }}
+      >
+        {busy === "__ALL__" ? "Сбрасываю…" : "↻ Сбросить все тестовые коды"}
+      </button>
+      <div style={{ fontSize: 11, color: C.textSecondary, paddingLeft: 4, marginTop: 6 }}>
+        Сброс → код снова свободен (AVAILABLE), его заявка удаляется. Тестовые коды (isTest) в статистику и остатки не попадают. Тапни код, чтобы скопировать.
+      </div>
+    </section>
+  );
+}
+
 export default function SettingsScreen({ token, onNavigate }: { token: string; onNavigate?: (screen: string) => void }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -259,6 +384,9 @@ export default function SettingsScreen({ token, onNavigate }: { token: string; o
           </button>
         </section>
       )}
+
+      {/* Test codes — QA reset surface */}
+      <TestCodesSection token={token} />
     </div>
   );
 }
