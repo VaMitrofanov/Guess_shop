@@ -631,12 +631,13 @@ export async function setupBotProfile(bot: Telegraf): Promise<void> {
   const shortDescription =
     "Выкуп Robux: инструкция, статус заказа и покупка напрямую — без карты WB 💎";
   const description =
-    "Привет! 👋 Это RobloxBank — получай робуксы за код с карты Wildberries.\n\n" +
-    "Я умею:\n" +
-    "📖 Показать инструкцию — как создать геймпасс\n" +
-    "📊 Следить за заказом — приняли → выкупаем → готово\n" +
-    "💎 Оформить заказ напрямую — Robux без карты WB, быстрее и выгоднее\n\n" +
-    "Жми «Запустить» и начнём 🚀";
+    "Привет! 👋 Это RobloxBank — здесь ты получишь робуксы за код с карты Wildberries.\n\n" +
+    "Дальше всё происходит в этом боте:\n" +
+    "📖 покажу инструкцию — как создать геймпасс\n" +
+    "💸 выкуплю его, обычно за пару часов\n" +
+    "🔔 пришлю сюда уведомление, как только всё готово\n" +
+    "💎 или закажи Robux напрямую — без карты WB, выгоднее\n\n" +
+    "Жми «Запустить» 🚀";
   const commands = [
     { command: "menu", description: "👤 Моё меню — профиль и заказы" },
     { command: "status", description: "📊 Статус моего заказа" },
@@ -655,6 +656,30 @@ export async function setupBotProfile(bot: Telegraf): Promise<void> {
     }
   });
   console.log("[TG] Bot profile (description + commands) applied ✅");
+}
+
+/** Russian day pluralization: 1 день · 2 дня · 5 дней. */
+function pluralDays(n: number): string {
+  const a = Math.abs(n) % 100;
+  const b = a % 10;
+  if (a > 10 && a < 20) return "дней";
+  if (b > 1 && b < 5) return "дня";
+  if (b === 1) return "день";
+  return "дней";
+}
+
+/**
+ * Countdown for Roblox's pending-funds hold once we've bought the gamepass.
+ * `completedAt` ≈ WbOrder.updatedAt for a COMPLETED order (terminal state — the
+ * order isn't updated again in the normal flow). Roblox releases pending Robux
+ * in ~5 days (occasionally up to 7). Answers the recurring "а сколько ждать?".
+ */
+function robuxCountdown(completedAt: Date | string): string {
+  const since = Math.floor((Date.now() - new Date(completedAt).getTime()) / 86_400_000);
+  const left = 5 - since;
+  if (left >= 2) return `⏳ <b>Примерно через ${left} ${pluralDays(left)}</b> робуксы станут доступны.`;
+  if (left === 1) return `⏳ <b>Уже завтра</b> робуксы должны стать доступны.`;
+  return `⏳ Робуксы вот-вот появятся. Roblox иногда держит пендинг до 7 дней — если их пока нет, подожди ещё чуть-чуть.`;
 }
 
 interface StatusMessage {
@@ -744,7 +769,11 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
         : `\n\nНажми кнопку ниже, чтобы исправить ссылку на геймпасс.`;
     }
   } else if (order.status === "COMPLETED") {
-    note = "\n\n🚀 <i>Хочешь заказать ещё? Постоянным клиентам — прямое обслуживание без Wildberries по лучшему курсу!</i>";
+    note =
+      `\n\n${robuxCountdown(order.updatedAt)}\n` +
+      `💡 <i>Они уже у тебя в Roblox — лежат в пендинге (заморожены самим Roblox). ` +
+      `Проверить: <a href="https://www.roblox.com/transactions">roblox.com/transactions</a> → строка Pending.</i>\n\n` +
+      `🚀 <i>Хочешь заказать ещё? Постоянным клиентам — прямое обслуживание без Wildberries по лучшему курсу!</i>`;
   }
 
   const gamepassLine = order.gamepassUrl
@@ -1789,9 +1818,10 @@ async function processGamepassSubmission(
       creatorLine +
       priceLine +
       `\n🆔 Номер заявки: <code>${order.id.slice(-6).toUpperCase()}</code>\n\n` +
-      `⏳ Выкупим в течение нескольких часов — обычно быстрее. Как только будет готово — напишем.\n` +
+      `⏳ Выкупим в течение нескольких часов — обычно быстрее.\n` +
+      `🔔 Как только выкупим — пришлём уведомление <b>прямо сюда, в этот бот</b>. Никуда заходить не нужно — просто жди сообщение 👌\n` +
       `💡 <i>Робуксы начислит Roblox — обычно в течение 5–7 дней после выкупа.</i>\n\n` +
-      `👤 Дальше всё здесь, в боте: статус заказа, бонусы и быстрый заказ напрямую — в меню 👇`,
+      `👤 Статус заказа, бонусы и быстрый заказ напрямую — в меню 👇`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([

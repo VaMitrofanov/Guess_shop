@@ -1285,8 +1285,9 @@ async function handleGamepassLink(
       creatorLine +
       priceLine +
       `\n\n🆔 Номер заявки: ${order.id.slice(-6).toUpperCase()}\n\n` +
-      `⏳ Выкупим в течение нескольких часов — обычно быстрее. Напишем как будет готово.\n\n` +
-      `👤 Дальше всё здесь, в боте: статус заказа, бонусы и быстрый заказ напрямую — в меню 👇`,
+      `⏳ Выкупим в течение нескольких часов — обычно быстрее.\n` +
+      `🔔 Как только выкупим — пришлём уведомление прямо сюда, в этот бот. Никуда заходить не нужно — просто жди сообщение 👌\n\n` +
+      `👤 Статус заявки, бонусы и быстрый заказ напрямую — в меню 👇`,
     keyboard: Keyboard.builder()
       .textButton({ label: "📊 Статус заявки", payload: { command: "status" }, color: "positive" })
       .row()
@@ -1892,6 +1893,30 @@ const VK_STATUS_LABEL: Record<string, string> = {
   REJECTED:          "❌ Отклонён",
 };
 
+/** Russian day pluralization: 1 день · 2 дня · 5 дней. */
+function vkPluralDays(n: number): string {
+  const a = Math.abs(n) % 100;
+  const b = a % 10;
+  if (a > 10 && a < 20) return "дней";
+  if (b > 1 && b < 5) return "дня";
+  if (b === 1) return "день";
+  return "дней";
+}
+
+/**
+ * Countdown for Roblox's pending-funds hold once we've bought the gamepass
+ * (plain-text VK mirror of the TG `robuxCountdown`). `completedAt` ≈
+ * WbOrder.updatedAt for a COMPLETED order — Roblox releases pending Robux in
+ * ~5 days (up to 7). Answers the recurring "а сколько ждать?".
+ */
+function vkRobuxCountdown(completedAt: Date | string): string {
+  const since = Math.floor((Date.now() - new Date(completedAt).getTime()) / 86_400_000);
+  const left = 5 - since;
+  if (left >= 2) return `⏳ Примерно через ${left} ${vkPluralDays(left)} робуксы станут доступны.`;
+  if (left === 1) return `⏳ Уже завтра робуксы должны стать доступны.`;
+  return `⏳ Робуксы вот-вот появятся. Roblox иногда держит пендинг до 7 дней — если их пока нет, подожди ещё чуть-чуть.`;
+}
+
 /**
  * Buyer "mini profile" / home hub (VK mirror of TG `buildBuyerMenu`). The place
  * a customer lands once the WB flow is done, so the bot becomes the habit for
@@ -2082,7 +2107,9 @@ async function handleIdleMessage(
         : order.status === "IN_PROGRESS"
         ? "\n\n🔧 Менеджер уже работает над твоей заявкой. Скоро всё будет готово!"
         : order.status === "COMPLETED"
-        ? (reviewClaimed
+        ? "\n\n" + vkRobuxCountdown(order.updatedAt) +
+          "\n💡 Они уже у тебя в Roblox — лежат в пендинге (заморожены самим Roblox). Проверить: roblox.com/transactions → строка Pending." +
+          (reviewClaimed
             ? "\n\n🚀 Хочешь заказать ещё? Постоянным клиентам — прямое обслуживание без очереди по лучшему курсу! Пиши: https://t.me/RobloxBank_PA"
             : "\n\n🎁 Оставь отзыв на Wildberries и получи +100 R$ бонусом (для прямых заказов от 1000 R$)!\nСделай скриншот отзыва и пришли его сюда фотографией.")
         : order.status === "REJECTED"
