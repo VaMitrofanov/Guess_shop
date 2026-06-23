@@ -481,6 +481,12 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     return;
   }
 
+  // ── 👤 Buyer mini-profile hub ─────────────────────────────────────────────
+  if (msgPayload?.command === "menu") {
+    await sendVkBuyerMenu(ctx, vkUserId);
+    return;
+  }
+
   // Accept "✅ Я подписался" as text only when the user is in AWAITING_LINK state
   // (old VK desktop clients that don't send inline-keyboard payloads). Without
   // the context guard any user sending that phrase would trigger a spurious sub-check.
@@ -1005,23 +1011,16 @@ async function handleRefActivation(
   const vkGuideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${code}`;
   // One-tap: gamepass already picked on the website → offer confirm.
   if (await vkOfferPreselectedGamepass(ctx, code, passPrice, vkGuideUrl)) return;
+  // Just-activated code: the user understands nothing yet — send them straight
+  // into the instruction and NOTHING else. One button. (Status / direct-buy /
+  // nick-search clutter lives in the buyer menu later.)
   await ctx.reply({
     message:
       greetLine + `\n` +
       `✅ Код ${code} активирован · номинал ${totalAmount} R$ → геймпасс ${passPrice} R$\n\n` +
-      `📖 Вот твоя персональная инструкция — открой её по кнопке ниже.\n` +
-      `Заказ оформляется прямо там: создашь геймпасс и найдёшь его по своему нику Roblox 🔎\n\n` +
-      `🔔 А здесь, в боте, ты будешь получать уведомления о заказе — приняли → выкупаем → готово ✨\n` +
-      `💎 Ещё тут можно купить Robux напрямую — без карты WB, быстрее и выгоднее.`,
+      `📖 Открой инструкцию по кнопке ниже — она проведёт тебя по шагам. Заказ оформляется прямо там 👇`,
     keyboard: Keyboard.builder()
-      .urlButton({ label: "📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", url: vkGuideUrl })
-      .row()
-      .textButton({ label: "🔎 Уже создал — найти по нику", payload: { command: "find_gp_start" }, color: "primary" })
-      .row()
-      .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "secondary" })
-      .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "secondary" })
-      .row()
-      .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+      .urlButton({ label: "📖 ОТКРЫТЬ ИНСТРУКЦИЮ", url: vkGuideUrl })
       .inline(),
   });
 }
@@ -1286,9 +1285,12 @@ async function handleGamepassLink(
       creatorLine +
       priceLine +
       `\n\n🆔 Номер заявки: ${order.id.slice(-6).toUpperCase()}\n\n` +
-      `⏳ Выкупим в течение нескольких часов — обычно быстрее. Напишем как будет готово.`,
+      `⏳ Выкупим в течение нескольких часов — обычно быстрее. Напишем как будет готово.\n\n` +
+      `👤 Дальше всё здесь, в боте: статус заказа, бонусы и быстрый заказ напрямую — в меню 👇`,
     keyboard: Keyboard.builder()
       .textButton({ label: "📊 Статус заявки", payload: { command: "status" }, color: "positive" })
+      .row()
+      .textButton({ label: "👤 Открыть моё меню", payload: { command: "menu" }, color: "secondary" })
       .inline(),
   });
 
@@ -1880,6 +1882,76 @@ async function handleReviewScreenshot(
 // C — Idle: status check or help
 // ─────────────────────────────────────────────────────────────────────────────
 
+const VK_STATUS_LABEL: Record<string, string> = {
+  AWAITING_PAYMENT:  "⏳ Ожидаем реквизиты",
+  PAYMENT_PENDING:   "💳 Ожидаем оплату",
+  AWAITING_GAMEPASS: "⌛ Ожидаем геймпасс",
+  PENDING:           "⏳ В обработке",
+  IN_PROGRESS:       "🔧 В работе",
+  COMPLETED:         "✅ Выполнен",
+  REJECTED:          "❌ Отклонён",
+};
+
+/**
+ * Buyer "mini profile" / home hub (VK mirror of TG `buildBuyerMenu`). The place
+ * a customer lands once the WB flow is done, so the bot becomes the habit for
+ * the next (direct) purchase. Loyalty-aware; fail-open.
+ */
+async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<void> {
+  let user: any = null;
+  let order: any = null;
+  let status = { isReturning: false, orderCount: 0 };
+  try {
+    user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
+    status = await getCustomerStatus(String(vkUserId), "VK");
+    if (user) {
+      order = await (db as any).wbOrder.findFirst({
+        where: { userId: user.id },
+        orderBy: { createdAt: "desc" },
+      });
+    }
+  } catch (err) {
+    console.error("[VK] sendVkBuyerMenu lookup failed:", err);
+  }
+
+  const firstName = await vkGetName(vkUserId);
+  const balance = user?.balance ?? 0;
+  const tier = status.orderCount >= 5 ? "👑 VIP-клиент"
+             : status.isReturning   ? "💛 Постоянный клиент"
+             : "🌱 Новый клиент";
+
+  const lines: string[] = [];
+  lines.push(`👤 Твоё меню${firstName ? `, ${firstName}` : ""} · RobloxBank`);
+  lines.push("");
+  lines.push(tier);
+  if (status.orderCount > 0) lines.push(`🛍 Заказов: ${status.orderCount}`);
+  if (balance > 0) lines.push(`🎁 Бонусный баланс: ${balance} R$ (к прямым заказам от 1000 R$)`);
+  if (order) {
+    lines.push(
+      `📦 Последний заказ #${String(order.id).slice(-6).toUpperCase()} — ` +
+      `${VK_STATUS_LABEL[order.status] ?? order.status}`
+    );
+  }
+  lines.push("");
+  lines.push(
+    `💎 В следующий раз можно заказать Robux напрямую — без карты WB, ` +
+    `быстрее и выгоднее. Всё здесь, в боте 👇`
+  );
+
+  const isWbOrder = order && order.wbCode && !String(order.wbCode).startsWith("DIR-") && !order.isDirectOrder;
+  const guideUrl = isWbOrder
+    ? `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}`
+    : "https://robloxbank.ru/guide?source=wb";
+
+  const kb = Keyboard.builder();
+  if (order) kb.textButton({ label: "📦 Мой заказ", payload: { command: "status" }, color: "primary" }).row();
+  kb.textButton({ label: "💎 Купить Robux напрямую", payload: { command: "start_direct" }, color: "positive" }).row();
+  kb.urlButton({ label: "📖 Инструкция", url: guideUrl }).row();
+  kb.textButton({ label: "💬 Поддержка", payload: { command: "support", context: "menu" }, color: "secondary" });
+
+  await ctx.reply({ message: lines.join("\n"), keyboard: kb.inline() });
+}
+
 async function handleIdleMessage(
   ctx: MessageContext,
   vkUserId: number,
@@ -2021,24 +2093,19 @@ async function handleIdleMessage(
     // Show the Roblox nick so the user sees exactly where the Robux will land.
     const nickLine = order.robloxUsername ? `🎮 Roblox: ${order.robloxUsername}\n` : "";
 
-    const keyboard =
-      order.status === "REJECTED"
-        ? Keyboard.builder()
-            .textButton({ label: "🔄 Исправить ссылку", payload: { command: "resubmit", code: order.wbCode }, color: "primary" })
-            .inline()
-        : order.status === "AWAITING_GAMEPASS"
-        ? Keyboard.builder()
-            .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}` })
-            .row()
-            .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
-            .row()
-            .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
-            .inline()
-        : order.status === "COMPLETED" && reviewClaimed
-        ? Keyboard.builder()
-            .textButton({ label: "💎 Заказать напрямую", payload: { command: "start_direct" }, color: "positive" })
-            .inline()
-        : undefined;
+    // Status-specific rows first, then always a "👤 В моё меню" row so the user
+    // never dead-ends on the status screen (mirror of the TG menuRow).
+    const kb = Keyboard.builder();
+    if (order.status === "REJECTED") {
+      kb.textButton({ label: "🔄 Исправить ссылку", payload: { command: "resubmit", code: order.wbCode }, color: "primary" }).row();
+    } else if (order.status === "AWAITING_GAMEPASS") {
+      kb.urlButton({ label: "📖 ИНСТРУКЦИЯ", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}` }).row()
+        .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" }).row()
+        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" }).row();
+    } else if (order.status === "COMPLETED" && reviewClaimed) {
+      kb.textButton({ label: "💎 Заказать напрямую", payload: { command: "start_direct" }, color: "positive" }).row();
+    }
+    kb.textButton({ label: "👤 В моё меню", payload: { command: "menu" }, color: "secondary" });
 
     await ctx.reply({
       message:
@@ -2051,7 +2118,7 @@ async function handleIdleMessage(
         gamepassLine +
         `📊 Статус: ${statusStr}` +
         hint,
-      ...(keyboard ? { keyboard } : {}),
+      keyboard: kb.inline(),
     });
     return;
   }
@@ -2098,8 +2165,9 @@ async function handleIdleMessage(
     await ctx.reply({
       message: getIdleGreeting(status, firstName) + "\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA",
       keyboard: Keyboard.builder()
-        .textButton({ label: "📊 Статус заявки",   payload: { command: "status" },       color: "primary"   })
+        .textButton({ label: "👤 Моё меню",        payload: { command: "menu" },         color: "primary"   })
         .row()
+        .textButton({ label: "📊 Статус заявки",   payload: { command: "status" },       color: "secondary" })
         .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" },  color: "positive"  })
         .row()
         .textButton({ label: "💬 Нужна помощь?",   payload: { command: "support", context: "general" }, color: "secondary" })
