@@ -2300,7 +2300,7 @@ function WBGate() {
           <div className="wbg-trust animate-in fade-in animate-delay-300">
             {[
               { label: "Защита данных",  icon: Lock },
-              { label: "Ручная выдача",  icon: CheckCircle2 },
+              { label: "Авто-выдача",    icon: CheckCircle2 },
               { label: "Поддержка 24/7", icon: ShoppingBag },
             ].map(({ label, icon: Icon }) => (
               <span key={label}><Icon className="w-3.5 h-3.5" />{label}</span>
