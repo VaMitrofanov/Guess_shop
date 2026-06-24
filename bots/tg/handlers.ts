@@ -777,8 +777,8 @@ function pendingStage(createdAt: Date | string): { label: string; note: string }
   if (mins < 12)  return { label: "🔍 Проверяем геймпасс",      note: "Сверяем геймпасс и цену перед выкупом." };
   if (mins < 30)  return { label: "📋 Поставлен в очередь",     note: "Заказ в очереди — скоро возьмём в работу." };
   if (mins < 90)  return { label: "💼 Готовим к выкупу",        note: "Менеджер вот-вот возьмёт твой геймпасс в работу." };
-  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Выкупаем по очереди — обычно в течение нескольких часов, максимум сутки." };
-  return            { label: "⏳ Уже скоро выкупим",        note: "Заказ дольше обычного в очереди, но уже близко — мы сами пришлём уведомление, как только всё будет готово." };
+  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Из-за технических работ внутри Roblox время выкупа увеличилось — просим отнестись с пониманием 🙏 Мы стараемся подстроиться под новые правила как можно быстрее." };
+  return            { label: "⏳ В очереди на выкуп",        note: "Из-за технических работ Roblox выкуп занимает больше времени, чем обычно. Мы работаем и пришлём уведомление, как только всё будет готово 🙏" };
 }
 
 /** Builds /status text + keyboard. Shows support button when PENDING > 60 min. */
@@ -886,6 +886,8 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     ? `🔑 Код ВБ: <b>${order.wbCode}</b>\n`
     : `📦 Заказ #${order.id.slice(-6).toUpperCase()}\n`;
 
+  const showDelayBanner = order.status === "PENDING" || order.status === "IN_PROGRESS";
+
   const text =
     codeLine +
     `📅 ${new Date(order.createdAt).toLocaleDateString("ru-RU")}\n` +
@@ -893,7 +895,8 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     nickLine +
     gamepassLine +
     `📊 Статус: <b>${statusLabel}</b>` +
-    note;
+    note +
+    (showDelayBanner ? ROBLOX_DELAY_BANNER : "");
 
   // Keyboard varies by status
   let keyboard: ReturnType<typeof Markup.inlineKeyboard>;

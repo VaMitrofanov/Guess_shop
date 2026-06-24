@@ -2032,8 +2032,8 @@ function vkPendingStage(createdAt: Date | string): { label: string; note: string
   if (mins < 12)  return { label: "🔍 Проверяем геймпасс",      note: "Сверяем геймпасс и цену перед выкупом." };
   if (mins < 30)  return { label: "📋 Поставлен в очередь",     note: "Заказ в очереди — скоро возьмём в работу." };
   if (mins < 90)  return { label: "💼 Готовим к выкупу",        note: "Менеджер вот-вот возьмёт твой геймпасс в работу." };
-  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Выкупаем по очереди — обычно в течение нескольких часов, максимум сутки." };
-  return            { label: "⏳ Уже скоро выкупим",        note: "Заказ дольше обычного в очереди, но уже близко — напишем сами, как только всё будет готово." };
+  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Из-за технических работ внутри Roblox время выкупа увеличилось — просим отнестись с пониманием 🙏 Мы стараемся подстроиться под новые правила как можно быстрее." };
+  return            { label: "⏳ В очереди на выкуп",        note: "Из-за технических работ Roblox выкуп занимает больше времени, чем обычно. Мы работаем и пришлём уведомление, как только всё будет готово 🙏" };
 }
 
 /** Russian day pluralization: 1 день · 2 дня · 5 дней. */
@@ -2327,6 +2327,8 @@ async function handleIdleMessage(
     }
     kb.row().textButton({ label: "👤 В моё меню", payload: { command: "menu" }, color: "secondary" });
 
+    const vkShowDelayBanner = order.status === "PENDING" || order.status === "IN_PROGRESS";
+
     await ctx.reply({
       message:
         (String(order.wbCode).startsWith("DIR-")
@@ -2337,7 +2339,8 @@ async function handleIdleMessage(
         nickLine +
         gamepassLine +
         `📊 Статус: ${statusStr}` +
-        hint,
+        hint +
+        (vkShowDelayBanner ? ROBLOX_DELAY_BANNER : ""),
       keyboard: kb.inline(),
     });
     return;
