@@ -388,11 +388,11 @@ export function registerStart(bot: Telegraf): void {
           const done = placedOrder.status === "COMPLETED";
           await ctx.reply(
             (done
-              ? `✅ <b>Заказ #${shortId} выполнен</b> — спасибо! 🎉\n\nХочешь ещё робуксов? 💎`
-              : `✅ <b>Заказ оформлен</b> — геймпасс с сайта принят! 🙌\n\n` +
-                `🆔 Заявка <code>${shortId}</code>\n` +
+              ? `✅ <b>Заказ выполнен</b> — спасибо! 🎉\n\nХочешь ещё робуксов? 💎`
+              : `✅ <b>Заказ оформлен</b> — твой геймпасс с сайта принят! 🙌\n\n` +
+                `🔑 Код ВБ: <code>${placedOrder.wbCode ?? shortId}</code>\n` +
                 `📊 Слежу за статусом: приняли → выкупаем → готово ✨\n\n` +
-                `Как только выкупим — сразу напишу сюда. 💎 А ещё можно купить Robux напрямую — без карты WB.`),
+                `Как только выкупим — сразу напишу сюда.`),
             {
               parse_mode: "HTML",
               link_preview_options: { is_disabled: true },
@@ -762,6 +762,8 @@ async function findRelevantOrder(userId: string): Promise<any | null> {
 // (paid is final; rejected has its own "fix link" resubmit flow).
 const CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "REJECTED"];
 
+const ROBLOX_DELAY_BANNER = `\n\n⚠️ <i>Roblox сейчас обновляет систему геймпассов — выкуп может занять от суток до нескольких дней. Надеемся на понимание 🙏\nКак только всё стабилизируется — оповестим о возврате к обычным срокам.</i>`;
+
 /**
  * Gives a PENDING order a sense of forward motion even while it just sits in the
  * manager queue. Derives a plausible "stage" from elapsed time so the status line
@@ -771,12 +773,12 @@ const CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"
  */
 function pendingStage(createdAt: Date | string): { label: string; note: string } {
   const mins = (Date.now() - new Date(createdAt).getTime()) / 60_000;
-  if (mins < 3)   return { label: "🆕 Заявка создана",          note: "Только что приняли заявку — ставим в очередь на выкуп." };
+  if (mins < 3)   return { label: "🆕 Заказ создан",             note: "Только что приняли — ставим в очередь на выкуп." };
   if (mins < 12)  return { label: "🔍 Проверяем геймпасс",      note: "Сверяем геймпасс и цену перед выкупом." };
-  if (mins < 30)  return { label: "📋 Поставлен в очередь",     note: "Заявка в очереди к менеджеру — скоро возьмём в работу." };
+  if (mins < 30)  return { label: "📋 Поставлен в очередь",     note: "Заказ в очереди — скоро возьмём в работу." };
   if (mins < 90)  return { label: "💼 Готовим к выкупу",        note: "Менеджер вот-вот возьмёт твой геймпасс в работу." };
-  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Выкупаем заявки по очереди — обычно в течение нескольких часов, максимум сутки." };
-  return            { label: "⏳ Уже скоро выкупим",        note: "Заявка дольше обычного в очереди, но уже близко — мы сами пришлём уведомление, как только всё будет готово." };
+  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Выкупаем по очереди — обычно в течение нескольких часов, максимум сутки." };
+  return            { label: "⏳ Уже скоро выкупим",        note: "Заказ дольше обычного в очереди, но уже близко — мы сами пришлём уведомление, как только всё будет готово." };
 }
 
 /** Builds /status text + keyboard. Shows support button when PENDING > 60 min. */
@@ -786,7 +788,7 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   const menuRow = [Markup.button.callback("👤 В моё меню", CB.buyerMenu)];
   // "Передумал" — let the user re-pick their Roblox nick / gamepass on an
   // order that hasn't been bought yet (offered only on the live WB statuses).
-  const changeNickRow = [Markup.button.callback("✏️ Сменить ник Roblox", CB.changeNick)];
+  const changeNickRow = [Markup.button.callback("⚠️ Ошибся с ником? Изменить заказ", CB.changeNick)];
 
   const user = await (db as any).user.findUnique({ where: { tgId } });
   if (!user) {
@@ -845,7 +847,7 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   } else if (order.status === "PENDING") {
     note = `\n\n💬 <i>${stage!.note}</i>`;
     if (pendingOver120) {
-      note += "\n⏰ <i>Если нужна помощь — напиши нам.</i>";
+      note += "\n💡 <i>Ответы на частые вопросы — в кнопке ниже 👇</i>";
     }
   } else if (order.status === "IN_PROGRESS") {
     note = "\n\n🔧 <i>Менеджер уже занимается твоим геймпассом — скоро пришлём уведомление.</i>";
@@ -880,8 +882,12 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   // PENDING shows the time-based pseudo-stage; everything else uses its label.
   const statusLabel = stage ? stage.label : (label[order.status] ?? order.status);
 
+  const codeLine = order.wbCode && !String(order.wbCode).startsWith("DIR-")
+    ? `🔑 Код ВБ: <b>${order.wbCode}</b>\n`
+    : `📦 Заказ #${order.id.slice(-6).toUpperCase()}\n`;
+
   const text =
-    `📦 <b>Заявка #${order.id.slice(-6).toUpperCase()}</b>\n` +
+    codeLine +
     `📅 ${new Date(order.createdAt).toLocaleDateString("ru-RU")}\n` +
     `💎 Номинал: <b>${order.amount} R$</b>\n` +
     nickLine +
@@ -1317,7 +1323,7 @@ export function registerText(bot: Telegraf): void {
                 ? `\n💬 Причина: <i>${rejectedOrder.rejectionReason}</i>\n`
                 : "";
               await ctx.reply(
-                `❌ Заявка была отклонена.` + reasonLine + `\nИсправь геймпасс и нажми кнопку:`,
+                `❌ Заказ отклонён.` + reasonLine + `\nИсправь геймпасс и нажми кнопку:`,
                 {
                   parse_mode: "HTML",
                   ...Markup.inlineKeyboard([
@@ -1458,12 +1464,11 @@ async function offerPreselectedGamepass(
       select: { id: true, status: true },
     });
     if (order && order.status !== "AWAITING_GAMEPASS" && order.status !== "REJECTED") {
-      const shortId = String(order.id).slice(-6).toUpperCase();
       await ctx.reply(
-        `✅ <b>Заказ уже оформлен</b> — геймпасс с сайта принят! 🙌\n\n` +
-        `🆔 Заявка <code>${shortId}</code>\n` +
+        `✅ <b>Заказ уже оформлен</b> — твой геймпасс принят! 🙌\n\n` +
+        `🔑 Код ВБ: <code>${code}</code>\n` +
         `📊 Слежу за статусом: приняли → выкупаем → готово ✨\n\n` +
-        `Как только выкупим — сразу напишу сюда. Можешь спокойно закрыть чат.`,
+        `Как только выкупим — сразу напишу сюда.`,
         {
           parse_mode: "HTML",
           link_preview_options: { is_disabled: true },
@@ -1811,7 +1816,7 @@ async function processGamepassSubmission(
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
             [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
-            [supportBtn("💬 Вопросы по заявке?", "roblox_down", ctx)],
+            [supportBtn("💬 Вопросы по заказу?", "roblox_down", ctx)],
           ]),
         }
       );
@@ -1952,7 +1957,7 @@ async function processGamepassSubmission(
       console.error("[TG] Order create error:", err);
       // "Тупик" — DB/infrastructure error, user helpless
       await ctx.reply(
-        "❌ Ошибка при создании заявки. Попробуй ещё раз через минуту.\n\nЕсли ошибка повторяется:",
+        "❌ Ошибка при создании заказа. Попробуй ещё раз через минуту.\n\nЕсли ошибка повторяется:",
         { parse_mode: "HTML", ...withSupportKb() }
       );
       return;
@@ -1968,15 +1973,16 @@ async function processGamepassSubmission(
     const creatorLine = validatedCreator ? `👤 Создатель: ${escapeHtml(validatedCreator)}\n` : "";
     const priceLine = validatedPrice != null ? `💰 Цена: ${validatedPrice} R$\n` : "";
     await ctx.reply(
-      `🎉 Геймпасс принят!\n` +
+      `🎉 Твой геймпасс принят!\n` +
       creatorLine +
       priceLine +
       `\n📋 <b>Что будет дальше:</b>\n` +
-      `1. Выкупим геймпасс — обычно за пару часов\n` +
+      `1. Выкупим твой геймпасс\n` +
       `2. Пришлём уведомление сюда ✅\n` +
       `3. Roblox начислит робуксы — это <b>5–7 дней</b> после выкупа\n\n` +
-      `Ничего делать не нужно — просто жди сообщение 👌\n\n` +
-      `Заявка <code>${order.id.slice(-6).toUpperCase()}</code> · Статус и бонусы — в меню 👇`,
+      `Ничего делать не нужно — просто жди сообщение 👌` +
+      ROBLOX_DELAY_BANNER +
+      `\n\nКод ВБ: <code>${state.wbCode}</code> · Статус и бонусы — в меню 👇`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
@@ -2531,9 +2537,10 @@ export function registerCallbacks(bot: Telegraf): void {
       const passPrice = Math.ceil(order.amount / 0.7);
       await ctx.answerCbQuery();
       await ctx.reply(
-        `✏️ <b>Меняем ник Roblox.</b>\n\n` +
-        `Пришли <b>новый ник</b> — найду твои геймпассы за <b>${passPrice} R$</b> и переоформлю заказ на него.\n` +
-        `<i>Выкупим только тот геймпасс, который ты выберешь сейчас. Старый трогать не будем.</i>`,
+        `⚠️ <b>Внимание: меняем ник и геймпасс в заказе!</b>\n\n` +
+        `Текущий геймпасс будет заменён на новый.\n` +
+        `Пришли <b>новый ник Roblox</b> — найду геймпассы за <b>${passPrice} R$</b> и переоформлю заказ.\n\n` +
+        `<i>Используй это только если ошибся с ником при оформлении.</i>`,
         { parse_mode: "HTML" }
       );
       return;
@@ -2554,9 +2561,9 @@ export function registerCallbacks(bot: Telegraf): void {
         orderBy: { createdAt: "desc" },
       });
       if (!order) {
-        await ctx.answerCbQuery("Активной заявки нет");
+        await ctx.answerCbQuery("Активного заказа нет");
         await ctx.reply(
-          "У тебя сейчас нет активной заявки. Введи код WB чтобы начать.",
+          "У тебя сейчас нет активного заказа. Введи код WB чтобы начать.",
           { parse_mode: "HTML" }
         );
         return;
@@ -2598,7 +2605,7 @@ export function registerCallbacks(bot: Telegraf): void {
         orderBy: { createdAt: "desc" },
       });
       if (!order) {
-        await ctx.answerCbQuery("Активной заявки нет");
+        await ctx.answerCbQuery("Активного заказа нет");
         return;
       }
       const state: LinkState = { wbCode: order.wbCode, denomination: order.amount };
@@ -3276,7 +3283,7 @@ export function registerCallbacks(bot: Telegraf): void {
         orderBy: { createdAt: "desc" },
       });
       if (!existingOrder) {
-        await ctx.reply("Заказ не найден — возможно, он уже завершён.", { parse_mode: "HTML", ...withSupportKb("💬 Разобраться с заявкой") });
+        await ctx.reply("Заказ не найден — возможно, он уже завершён.", { parse_mode: "HTML", ...withSupportKb("💬 Разобраться с заказом") });
         await ctx.answerCbQuery("Заказ не найден");
         return;
       }
@@ -3655,8 +3662,11 @@ async function notifyUserRejected(
       `• Геймпасс не выставлен на продажу\n\n` +
       `Исправь и нажми кнопку ниже, чтобы отправить ссылку заново:`;
 
+  const codeLabel = wbCode && !wbCode.startsWith("DIR-")
+    ? `Код ВБ: ${wbCode}`
+    : `Заказ #${shortId}`;
   const msg =
-    `❌ <b>Заявка #${shortId} отклонена</b>\n\n` +
+    `❌ <b>${codeLabel} — отклонён</b>\n\n` +
     reasonLine +
     fixInstructions;
 

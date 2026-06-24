@@ -569,7 +569,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         return;
       }
     }
-    await ctx.reply("Заявка не найдена или уже не требует исправления.\n\nЕсть вопросы? https://t.me/RobloxBank_PA");
+    await ctx.reply("Заказ не найден или уже не требует исправления.\n\nЕсть вопросы? https://t.me/RobloxBank_PA");
     return;
   }
 
@@ -718,7 +718,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       await ctx.reply({
         message: getIdleGreeting(custStatus, firstName) + "\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA",
         keyboard: Keyboard.builder()
-          .textButton({ label: "📊 Статус заявки",   payload: { command: "status" },       color: "primary"   })
+          .textButton({ label: "📊 Мой заказ",         payload: { command: "status" },       color: "primary"   })
           .row()
           .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" },  color: "positive"  })
           .row()
@@ -871,10 +871,10 @@ async function vkOfferPreselectedGamepass(
       const shortId = String(order.id).slice(-6).toUpperCase();
       await ctx.reply({
         message:
-          `✅ Заказ уже оформлен — геймпасс с сайта принят! 🙌\n\n` +
-          `🆔 Заявка ${shortId}\n` +
+          `✅ Заказ уже оформлен — твой геймпасс принят! 🙌\n\n` +
+          `🔑 Код ВБ: ${code}\n` +
           `📊 Слежу за статусом: приняли → выкупаем → готово ✨\n\n` +
-          `Как только выкупим — сразу напишу сюда. Можешь спокойно закрыть чат.`,
+          `Как только выкупим — сразу напишу сюда.`,
         keyboard: Keyboard.builder()
           .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "positive" })
           .row()
@@ -942,11 +942,11 @@ async function handleRefActivation(
         const done = placedOrder.status === "COMPLETED";
         await ctx.reply({
           message: done
-            ? `✅ Заказ #${shortId} выполнен — спасибо! 🎉\n\nХочешь ещё робуксов? 💎`
-            : `✅ Заказ оформлен — геймпасс с сайта принят! 🙌\n\n` +
-              `🆔 Заявка ${shortId}\n` +
+            ? `✅ Заказ выполнен — спасибо! 🎉\n\nХочешь ещё робуксов? 💎`
+            : `✅ Заказ оформлен — твой геймпасс принят! 🙌\n\n` +
+              `🔑 Код ВБ: ${code}\n` +
               `📊 Слежу за статусом: приняли → выкупаем → готово ✨\n\n` +
-              `Как только выкупим — сразу напишу сюда. 💎 А ещё можно купить Robux напрямую — без карты WB.`,
+              `Как только выкупим — сразу напишу сюда.`,
           keyboard: Keyboard.builder()
             .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "positive" })
             .row()
@@ -1331,11 +1331,11 @@ async function handleGamepassLink(
     }
     if (err.code === "P2002") {
       clearState(vkUserId);
-      await ctx.reply("⚠️ Заявка по этому коду уже создана и сейчас обрабатывается. Напиши «статус» чтобы проверить.\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
+      await ctx.reply("⚠️ Заказ по этому коду уже создан и сейчас обрабатывается. Напиши «статус» чтобы проверить.\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
       return;
     }
     console.error("[VK] Order/transaction error:", err);
-    await ctx.reply("❌ Ошибка при создании заявки. Попробуй позже или напиши нам: https://t.me/RobloxBank_PA");
+    await ctx.reply("❌ Ошибка при создании заказа. Попробуй позже или напиши нам: https://t.me/RobloxBank_PA");
     return;
   }
 
@@ -1349,17 +1349,18 @@ async function handleGamepassLink(
   const priceLine = validatedPrice != null ? `\n💰 Цена: ${validatedPrice} R$` : "";
   await ctx.reply({
     message:
-      `🎉 Геймпасс принят!` +
+      `🎉 Твой геймпасс принят!` +
       creatorLine +
       priceLine +
       `\n\n📋 Что будет дальше:\n` +
-      `1. Выкупим геймпасс — обычно за пару часов\n` +
+      `1. Выкупим твой геймпасс\n` +
       `2. Пришлём уведомление сюда ✅\n` +
       `3. Roblox начислит робуксы — это 5–7 дней после выкупа\n\n` +
-      `Ничего делать не нужно — просто жди сообщение 👌\n\n` +
-      `Заявка ${order.id.slice(-6).toUpperCase()} · Статус и бонусы — в меню 👇`,
+      `Ничего делать не нужно — просто жди сообщение 👌` +
+      ROBLOX_DELAY_BANNER +
+      `\n\nКод ВБ: ${wbCode} · Статус и бонусы — в меню 👇`,
     keyboard: Keyboard.builder()
-      .textButton({ label: "📊 Статус заявки", payload: { command: "status" }, color: "positive" })
+      .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "positive" })
       .row()
       .textButton({ label: "👤 Открыть моё меню", payload: { command: "menu" }, color: "secondary" })
       .inline(),
@@ -1421,7 +1422,7 @@ async function handleFindGpStart(ctx: MessageContext, vkUserId: number): Promise
     orderBy: { createdAt: "desc" },
   });
   if (!order) {
-    await ctx.reply("У тебя сейчас нет активной заявки. Введи код WB чтобы начать.");
+    await ctx.reply("У тебя сейчас нет активного заказа. Введи код WB чтобы начать.");
     return;
   }
   setState(vkUserId, {
@@ -1467,9 +1468,10 @@ async function handleChangeNick(ctx: MessageContext, vkUserId: number): Promise<
   });
   const passPrice = Math.ceil(order.amount / 0.7);
   await ctx.reply(
-    `✏️ Меняем ник Roblox.\n\n` +
-    `Пришли новый ник — найду твои геймпассы за ${passPrice} R$ и переоформлю заказ на него.\n` +
-    `Выкупим только тот геймпасс, который ты выберешь сейчас. Старый трогать не будем.`
+    `⚠️ Внимание: меняем ник и геймпасс в заказе!\n\n` +
+    `Текущий геймпасс будет заменён на новый.\n` +
+    `Пришли новый ник Roblox — найду геймпассы за ${passPrice} R$ и переоформлю заказ.\n\n` +
+    `Используй это только если ошибся с ником при оформлении.`
   );
 }
 
@@ -1637,7 +1639,7 @@ async function handleGpPick(
     orderBy: { createdAt: "desc" },
   });
   if (!order) {
-    await ctx.reply("У тебя сейчас нет активной заявки.");
+    await ctx.reply("У тебя сейчас нет активного заказа.");
     return;
   }
   setState(vkUserId, {
@@ -1909,7 +1911,7 @@ async function handleReviewScreenshot(
   if (!user) {
     console.log(`[VK] handleReviewScreenshot: user not found for vkId=${vkUserId} — notifying admins`);
     await ctx.reply(
-      "📸 Получили твой скриншот, но не смогли найти твою заявку в базе.\n\n" +
+      "📸 Получили твой скриншот, но не смогли найти твой заказ в базе.\n\n" +
       "Свяжись с нами напрямую: https://t.me/RobloxBank_PA — " +
       "укажи свой VK ID, и мы разберёмся вручную."
     );
@@ -2016,6 +2018,8 @@ const VK_STATUS_LABEL: Record<string, string> = {
 // Statuses where the user may still re-pick their nick / gamepass (not yet bought).
 const VK_CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "REJECTED"];
 
+const ROBLOX_DELAY_BANNER = `\n\n⚠️ Roblox сейчас обновляет систему геймпассов — выкуп может занять от суток до нескольких дней. Надеемся на понимание 🙏\nКак только всё стабилизируется — оповестим о возврате к обычным срокам.`;
+
 /**
  * Plain-text VK mirror of the TG `pendingStage` — gives a PENDING order a sense
  * of forward motion from elapsed time so the status visibly "moves" even with no
@@ -2024,12 +2028,12 @@ const VK_CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRE
  */
 function vkPendingStage(createdAt: Date | string): { label: string; note: string } {
   const mins = (Date.now() - new Date(createdAt).getTime()) / 60_000;
-  if (mins < 3)   return { label: "🆕 Заявка создана",          note: "Только что приняли заявку — ставим в очередь на выкуп." };
+  if (mins < 3)   return { label: "🆕 Заказ создан",             note: "Только что приняли — ставим в очередь на выкуп." };
   if (mins < 12)  return { label: "🔍 Проверяем геймпасс",      note: "Сверяем геймпасс и цену перед выкупом." };
-  if (mins < 30)  return { label: "📋 Поставлен в очередь",     note: "Заявка в очереди к менеджеру — скоро возьмём в работу." };
+  if (mins < 30)  return { label: "📋 Поставлен в очередь",     note: "Заказ в очереди — скоро возьмём в работу." };
   if (mins < 90)  return { label: "💼 Готовим к выкупу",        note: "Менеджер вот-вот возьмёт твой геймпасс в работу." };
-  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Выкупаем заявки по очереди — обычно в течение нескольких часов, максимум сутки." };
-  return            { label: "⏳ Уже скоро выкупим",        note: "Заявка дольше обычного в очереди, но уже близко — напишем сами, как только всё будет готово." };
+  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Выкупаем по очереди — обычно в течение нескольких часов, максимум сутки." };
+  return            { label: "⏳ Уже скоро выкупим",        note: "Заказ дольше обычного в очереди, но уже близко — напишем сами, как только всё будет готово." };
 }
 
 /** Russian day pluralization: 1 день · 2 дня · 5 дней. */
@@ -2233,7 +2237,7 @@ async function handleIdleMessage(
   } catch { /* fail-open: fall through to the normal greeting */ }
 
   // "статус" keyword (also triggered via payload routing in handleMessage) → show last order in rich format
-  if (lower.includes("статус") || lower.includes("заявк") || hasLiveOrder) {
+  if (lower.includes("статус") || lower.includes("заявк") || lower.includes("заказ") || hasLiveOrder) {
     const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
     if (!user) {
       await ctx.reply(
@@ -2247,7 +2251,7 @@ async function handleIdleMessage(
     const order = await findRelevantOrder(user.id);
 
     if (!order) {
-      await ctx.reply("У тебя пока нет заявок.\n\nЕсть код с WB-карты? Напиши его прямо сюда.\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
+      await ctx.reply("У тебя пока нет заказов.\n\nЕсть код с WB-карты? Напиши его прямо сюда.\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
       return;
     }
 
@@ -2286,7 +2290,7 @@ async function handleIdleMessage(
         : order.status === "PENDING"
         ? `\n\n💬 ${stage!.note}`
         : order.status === "IN_PROGRESS"
-        ? "\n\n🔧 Менеджер уже работает над твоей заявкой. Скоро всё будет готово!"
+        ? "\n\n🔧 Менеджер уже работает над твоим заказом. Скоро всё будет готово!"
         : order.status === "COMPLETED"
         ? "\n\n" + vkRobuxCountdown(order.updatedAt) +
           "\n💡 Они уже у тебя в Roblox — лежат в пендинге (заморожены самим Roblox). Проверить: roblox.com/transactions → строка Pending." +
@@ -2314,7 +2318,7 @@ async function handleIdleMessage(
       kb.textButton({ label: "💎 Заказать напрямую", payload: { command: "start_direct" }, color: "positive" }).row();
     } else if ((order.status === "PENDING" || order.status === "IN_PROGRESS") && !order.isDirectOrder) {
       // "Передумал" — re-pick nick/gamepass while the order isn't bought yet.
-      kb.textButton({ label: "✏️ Сменить ник Roblox", payload: { command: "change_nick" }, color: "primary" }).row();
+      kb.textButton({ label: "⚠️ Ошибся с ником? Изменить заказ", payload: { command: "change_nick" }, color: "negative" }).row();
     }
     if (orderAgeMsFromOrder(order) < SUPPORT_COOLDOWN_MS) {
       kb.row().textButton({ label: "❓ Частые вопросы", payload: { command: "faq" }, color: "secondary" });
@@ -2325,10 +2329,11 @@ async function handleIdleMessage(
 
     await ctx.reply({
       message:
-        `📦 Заявка #${shortId}\n` +
+        (String(order.wbCode).startsWith("DIR-")
+          ? `📦 Заказ #${shortId}\n`
+          : `🔑 Код ВБ: ${order.wbCode}\n`) +
         `━━━━━━━━━━━━━━━━\n` +
         `💎 Сумма: ${order.amount} R$ (Геймпасс: ${passPrice} R$)\n` +
-        ((order.wbCode as string).startsWith("DIR-") ? "" : `🔑 Код ВБ: ${order.wbCode}\n`) +
         nickLine +
         gamepassLine +
         `📊 Статус: ${statusStr}` +
@@ -2380,7 +2385,7 @@ async function handleIdleMessage(
       keyboard: Keyboard.builder()
         .textButton({ label: "👤 Моё меню",        payload: { command: "menu" },         color: "primary"   })
         .row()
-        .textButton({ label: "📊 Статус заявки",   payload: { command: "status" },       color: "secondary" })
+        .textButton({ label: "📊 Мой заказ",        payload: { command: "status" },       color: "secondary" })
         .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" },  color: "positive"  })
         .row()
         .textButton({ label: "❓ Частые вопросы",   payload: { command: "faq" }, color: "secondary" })

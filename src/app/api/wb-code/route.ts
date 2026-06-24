@@ -119,20 +119,22 @@ export async function GET(request: Request) {
     // a single channel CTA and to reflect "order already placed".
     let platform: string | null = null;
     let orderStatus: string | null = null;
+    let robloxUsername: string | null = null;
     try {
       const order = await (db as any).wbOrder.findFirst({
         where: { wbCode: { equals: code, mode: "insensitive" } },
-        select: { platform: true, status: true },
+        select: { platform: true, status: true, robloxUsername: true },
       });
       if (order) {
         platform = order.platform ?? null;
         orderStatus = order.status ?? null;
+        robloxUsername = order.robloxUsername ?? null;
       }
     } catch {
       /* non-fatal — CTA falls back to showing both channels */
     }
 
-    return NextResponse.json({ claimed, denomination: wbCode.denomination, platform, orderStatus });
+    return NextResponse.json({ claimed, denomination: wbCode.denomination, platform, orderStatus, robloxUsername });
   } catch (err) {
     console.error("[wb-code GET] error:", err);
     return NextResponse.json({ error: "Server error" }, { status: 500 });

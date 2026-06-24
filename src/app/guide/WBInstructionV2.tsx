@@ -161,10 +161,10 @@ export default function WBInstructionV2({
   // or further) → reframe the CTA as "следи за статусом" instead of "оформи".
   const [channel, setChannel] = useState<"TG" | "VK" | null>(null);
   const [orderPlaced, setOrderPlaced] = useState(false);
+  const [robloxUsername, setRobloxUsername] = useState<string | null>(null);
+  // True when orderPlaced was detected on mount (re-entry), not from a fresh pick.
+  const [isReEntry, setIsReEntry] = useState(false);
 
-  // Once the order is placed, bounce the user straight back into their bot — the
-  // site has nothing more for them to do. The manual "Вернуться в …" button stays
-  // as a fallback in case the auto-redirect is blocked.
   const [redirecting, setRedirecting] = useState(false);
 
   useEffect(() => {
@@ -177,24 +177,27 @@ export default function WBInstructionV2({
         const d = await res.json();
         if (!alive) return;
         if (d.platform === "TG" || d.platform === "VK") setChannel(d.platform);
-        if (["PENDING", "IN_PROGRESS", "COMPLETED"].includes(d.orderStatus)) setOrderPlaced(true);
+        if (d.robloxUsername) setRobloxUsername(d.robloxUsername);
+        if (["PENDING", "IN_PROGRESS", "COMPLETED"].includes(d.orderStatus)) {
+          setOrderPlaced(true);
+          setIsReEntry(true);
+        }
       } catch { /* non-fatal — CTA falls back to showing both channels */ }
     })();
     return () => { alive = false; };
   }, [code, testMode]);
 
-  // The order is already bound to the user's channel, so a direct deep-link back
-  // to the bot is enough (no VK re-auth needed once orderPlaced).
   const returnHref = channel === "VK"
     ? (code ? `${VK_RETURN_HREF}?ref=${code}` : VK_RETURN_HREF)
     : tgHref;
 
+  // Auto-redirect only on fresh picks (not re-entries — let the user see their nick).
   useEffect(() => {
-    if (!orderPlaced || testMode || !channel) return;
+    if (!orderPlaced || isReEntry || testMode || !channel) return;
     setRedirecting(true);
     const t = setTimeout(() => { window.location.href = returnHref; }, 1800);
     return () => clearTimeout(t);
-  }, [orderPlaced, channel, testMode, returnHref]);
+  }, [orderPlaced, isReEntry, channel, testMode, returnHref]);
 
   const pick = useCallback(async (p: Pass, searchedNick: string) => {
     setPicked({ id: String(p.id), name: p.name, price: p.price });
@@ -388,12 +391,31 @@ export default function WBInstructionV2({
           </Step>
 
           <Step n="8" pulse cls="wbi-key wbi-finish">
+            {isReEntry && robloxUsername ? (
+              <>
+                <div className="wbi-kbadge" style={{ background: "linear-gradient(135deg,#1a7a3a,#2ecc71)" }}>✅ ЗАКАЗ ОФОРМЛЕН</div>
+                <div className="wbi-ttl">Твой заказ в работе</div>
+                <div className="wbi-picked" style={{ marginTop: 12 }}>
+                  <div className="wbi-picked-h">🎮 Робуксы придут на ник:</div>
+                  <div className="wbi-picked-b" style={{ fontSize: "1.3em" }}><b>{robloxUsername}</b></div>
+                  <div className="wbi-shint" style={{ marginTop: 8 }}>
+                    Статус и уведомления — в боте. Не меняй цену и не удаляй геймпасс до сообщения «всё готово».
+                  </div>
+                  <button className="wbi-relink" style={{ color: "#e74c3c", borderColor: "#e74c3c", marginTop: 12 }} onClick={() => { setIsReEntry(false); setOrderPlaced(false); setPicked(null); setRobloxUsername(null); }}>
+                    ⚠️ Ошибся с ником? Изменить заказ
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
             <div className="wbi-kbadge">🏁 ФИНИШ — ОФОРМЛЯЕМ ЗАКАЗ</div>
             <div className="wbi-ttl">Геймпасс готов — оформи заказ</div>
             <p className="wbi-t">🎉 Самое сложное позади! Впиши <b>ник аккаунта Roblox, на который придут робуксы</b> — мы сами найдём твой геймпасс и <b>оформим заказ</b>. Дальше всё в <b>боте</b> (Telegram или ВКонтакте — туда ты перейдёшь ниже): он сам выкупит пасс, там же статус заказа, уведомления и бонусы за отзыв.</p>
             <div className="wbi-shint" style={{ margin: "2px 0 10px" }}>💡 Это <b>твой</b> ник Roblox — именно на этот аккаунт зачислятся робуксы.</div>
+              </>
+            )}
 
-            <div className="wbi-search">
+            {!(isReEntry && robloxUsername) && <div className="wbi-search">
               <div className="wbi-srow">
                 <input
                   className="wbi-sinput"
@@ -467,7 +489,7 @@ export default function WBInstructionV2({
                   <button className="wbi-relink" onClick={() => { setPicked(null); setOrderPlaced(false); }}>Выбрать другой</button>
                 </div>
               )}
-            </div>
+            </div>}
           </Step>
 
           <Step n="9">
@@ -489,16 +511,20 @@ export default function WBInstructionV2({
 
         {/* CTA */}
         <div className="wbi-cta wbi-reveal">
-          <h3>{orderPlaced
-            ? "Заказ оформлен — возвращаем в бота"
-            : picked
-              ? "Почти готово — открой бота и подтверди"
-              : "Геймпасс готов? Открой бота"}</h3>
-          <div className="wbi-s">{orderPlaced
-            ? <>✅ <b>{picked?.name ?? "Геймпасс"}</b> · {picked?.price ?? calcPrice(nomDefault)} R$ — заказ уже у менеджера. Сейчас вернём тебя в бота — там статус и уведомления.</>
-            : picked
-              ? <>✅ <b>{picked.name}</b> · {picked.price} R$ — бот подтвердит выкуп в один тап</>
-              : <>Номинал {nomDefault} R$ · цена пасса {calcPrice(nomDefault)} R$ · бот выкупит и пришлёт бонус за отзыв</>}</div>
+          <h3>{isReEntry && orderPlaced
+            ? "Заказ оформлен — статус в боте"
+            : orderPlaced
+              ? "Заказ оформлен — возвращаем в бота"
+              : picked
+                ? "Почти готово — открой бота и подтверди"
+                : "Геймпасс готов? Открой бота"}</h3>
+          <div className="wbi-s">{isReEntry && orderPlaced
+            ? <>✅ Заказ уже у менеджера. Статус и уведомления — в боте.</>
+            : orderPlaced
+              ? <>✅ <b>{picked?.name ?? "Геймпасс"}</b> · {picked?.price ?? calcPrice(nomDefault)} R$ — заказ уже у менеджера. Сейчас вернём тебя в бота — там статус и уведомления.</>
+              : picked
+                ? <>✅ <b>{picked.name}</b> · {picked.price} R$ — бот подтвердит выкуп в один тап</>
+                : <>Номинал {nomDefault} R$ · цена пасса {calcPrice(nomDefault)} R$ · бот выкупит и пришлёт бонус за отзыв</>}</div>
 
           {(() => {
             const tgBtn = (disabled: boolean) => disabled ? (
