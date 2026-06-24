@@ -80,6 +80,7 @@ const FAQ_ITEMS: { key: string; label: string; answer: string }[] = [
   { key: "wrong_gp",  label: "✏️ Не тот геймпасс/ник",     answer: "Нажми кнопку <b>«✏️ Сменить ник Roblox»</b> в карточке заказа — можно перевыбрать ник и геймпасс в любой момент до выкупа." },
   { key: "how_gp",    label: "📖 Как создать геймпасс?",    answer: "Полная пошаговая инструкция — по кнопке 📖 ИНСТРУКЦИЯ в меню.\n\nВкратце: зайди на create.roblox.com → выбери свою игру → Monetization → Passes → Create Pass → поставь нужную цену → сохрани." },
   { key: "price",     label: "💰 Какую цену ставить?",      answer: "Цена геймпасса = <b>номинал ÷ 0.7</b> (округлённо вверх).\n\nНапример: 500 R$ → <b>715 R$</b>, 1000 R$ → <b>1429 R$</b>.\n\nТочная цена написана в карточке заказа и в инструкции." },
+  { key: "managed",   label: "⚠️ Managed pricing?",         answer: "<b>Managed pricing</b> (региональные цены) должен быть <b>ВЫКЛЮЧЕН</b>.\n\nЕсли он включён — Roblox автоматически меняет цену геймпасса для разных стран, и выдача робуксов задержится.\n\nПроверь: Passes → твой пасс → ☰ → Sales → переключатель <b>Managed pricing = OFF</b>.\n\nПо умолчанию он выключен, но если случайно включил — выключи и нажми <b>Save Changes</b>." },
 ];
 
 function faqBtn() {
@@ -1791,7 +1792,7 @@ async function processGamepassSubmission(
           `Установлено: <b>${gamepassInfo.price} R$</b>\n` +
           `Ожидается:   <b>${expectedPrice} R$</b>\n\n` +
           `Зайди в Creator Dashboard → Passes → Edit, измени цену и пришли ссылку снова.\n\n` +
-          `💡 Если у тебя включён <b>Regional Pricing</b> — обязательно выключи его (Passes → Edit → Pricing → убрать галочку Enable Regional Pricing), иначе цена будет неверной.\n\n` +
+          `💡 Если у тебя включён <b>Managed pricing</b> — обязательно выключи его (Passes → твой пасс → ☰ → Sales → переключатель Managed pricing = OFF), иначе цена будет неверной и выдача робуксов задержится.\n\n` +
           `📖 Подробнее — в инструкции:`;
         await ctx.reply(priceMismatchText, {
           parse_mode: "HTML",
@@ -1983,6 +1984,7 @@ async function processGamepassSubmission(
       `1. Выкупим твой геймпасс\n` +
       `2. Пришлём уведомление сюда ✅\n` +
       `3. Roblox начислит робуксы — это <b>5–7 дней</b> после выкупа\n\n` +
+      `⚠️ Убедись, что <b>Managed pricing</b> выключен (Sales → переключатель OFF), иначе выдача задержится.\n\n` +
       `Ничего делать не нужно — просто жди сообщение 👌` +
       ROBLOX_DELAY_BANNER +
       `\n\nКод ВБ: <code>${state.wbCode}</code> · Статус и бонусы — в меню 👇`,

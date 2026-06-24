@@ -251,7 +251,7 @@ export default function WBInstructionV2({
           <div className="wbi-must">
             <div className="wbi-must-h">✅ ВСЁ ПРОЩЕ, ЧЕМ РАНЬШЕ</div>
             <div className="wbi-must-it"><span className="wbi-n">1</span><span>Главное — создать геймпасс и поставить <b>точную цену</b> (посчитаем её ниже). Остального делать не нужно.</span></div>
-            <div className="wbi-must-ft">Просто проверь, что переключатель <b>«Managed pricing»</b> (региональные цены) <b>выключен</b> — у новых геймпассов он выключен по умолчанию (шаг 7).</div>
+            <div className="wbi-must-ft">⚠️ Проверь, что <b>«Managed pricing»</b> (региональные цены) <b>выключен</b> — иначе выдача робуксов задержится! По умолчанию он выключен, но обязательно проверь (шаг 7).</div>
           </div>
         </div>
 
@@ -362,7 +362,7 @@ export default function WBInstructionV2({
               <li>Скопируй цену ниже → вставь в поле <b>Price</b>.</li>
               <li>Нажми синюю <b>Save Changes</b>.</li>
             </ol>
-            <div className="wbi-checknote">ℹ️ <b>«Managed pricing»</b> (региональные цены) на этой же вкладке оставь <b>выключенным</b> — по умолчанию так и есть.</div>
+            <div className="wbi-checknote" style={{ background: "rgba(255,60,60,0.12)", borderColor: "#ff4444" }}>⚠️ <b>ВАЖНО: «Managed pricing»</b> (региональные цены) должен быть <b>ВЫКЛЮЧЕН</b> (переключатель ниже на этой же вкладке). Если включён — Roblox изменит цену геймпасса и выдача робуксов задержится! По умолчанию он выключен, но обязательно проверь.</div>
             <div className="wbi-calc">
               <div className="wbi-lbl">ЦЕНА ПАСА — ВСТАВЬ ЕЁ В ROBLOX</div>
               <div className="wbi-nomrow">Номинал твоей карты: <input className="wbi-input" type="number" min={1} inputMode="numeric" value={nom}
@@ -375,18 +375,21 @@ export default function WBInstructionV2({
             </div>
             <figure className="wbi-figure wbi-shot">
               <span className="wbi-anno">
-                <img src="/guide/wb-step6-sales.png" alt="Вкладка Sales: Price, Item for sale включён, Save Changes" loading="lazy" decoding="async" />
+                <img src="/guide/wb-step7-sales.png" alt="Вкладка Sales: Price, Item for sale, Managed pricing выключен, Save Changes" loading="lazy" decoding="async" />
                 {/* Item for sale already on */}
-                <span className="wbi-tip g caret" style={{ left: "70%", top: "10.5%", fontSize: "clamp(8px,2.1cqw,12px)" }}>ВКЛ ✓</span>
-                {/* Price field + live price over the example "1715" */}
-                <span className="wbi-box g" style={{ left: "3.5%", top: "22.5%", width: "93%", height: "15.5%" }} />
-                <span className="wbi-price6" style={{ left: "7.8%", top: "30.5%", fontSize: "3.7cqw", background: "#131215", padding: "0.1em 1.1em 0.1em 0.3em" }}>{price}</span>
-                <span className="wbi-tip g caret" style={{ left: "26%", top: "14.5%", fontSize: "clamp(8px,2.1cqw,12px)" }}>ТВОЯ ЦЕНА ↓</span>
+                <span className="wbi-tip g caret" style={{ left: "70%", top: "5.5%", fontSize: "clamp(8px,2.1cqw,12px)" }}>ВКЛ ✓</span>
+                {/* Price field + live price */}
+                <span className="wbi-box g" style={{ left: "3.5%", top: "15%", width: "93%", height: "14%" }} />
+                <span className="wbi-price6" style={{ left: "7.8%", top: "22%", fontSize: "3.7cqw", background: "#131215", padding: "0.1em 1.1em 0.1em 0.3em" }}>{price}</span>
+                <span className="wbi-tip g caret" style={{ left: "26%", top: "9%", fontSize: "clamp(8px,2.1cqw,12px)" }}>ТВОЯ ЦЕНА ↓</span>
+                {/* Managed pricing — highlight it must be OFF */}
+                <span className="wbi-box" style={{ left: "3.5%", top: "30%", width: "93%", height: "10%", borderColor: "#ff4444" }} />
+                <span className="wbi-tip caret" style={{ left: "72%", top: "34%", fontSize: "clamp(8px,2.1cqw,12px)", color: "#ff4444", fontWeight: 700 }}>⚠️ ВЫКЛЮЧЕН ✓</span>
                 {/* Save Changes */}
-                <span className="wbi-box g" style={{ left: "3.5%", top: "83.5%", width: "93%", height: "15%" }} />
-                <span className="wbi-tip g caret" style={{ left: "50%", top: "79%" }}>НАЖМИ — СОХРАНИТЬ</span>
+                <span className="wbi-box g" style={{ left: "3.5%", top: "82%", width: "93%", height: "14%" }} />
+                <span className="wbi-tip g caret" style={{ left: "50%", top: "78%" }}>НАЖМИ — СОХРАНИТЬ</span>
               </span>
-              <figcaption>В поле <b>Price</b> — твоя цена. <b>Item for sale</b> уже включён. Внизу нажми <b>Save Changes</b>.</figcaption>
+              <figcaption>В поле <b>Price</b> — твоя цена. <b>Item for sale</b> уже включён. <b>Managed pricing — ВЫКЛЮЧЕН</b>. Внизу нажми <b>Save Changes</b>.</figcaption>
             </figure>
           </Step>
 
