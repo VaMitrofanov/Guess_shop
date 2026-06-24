@@ -56,6 +56,35 @@ function generateDirectCode(): string {
   return code;
 }
 
+// ── FAQ / Self-service (replaces support in the first 24h) ────────────────
+
+const FAQ_ITEMS: { key: string; label: string; answer: string }[] = [
+  { key: "when_buy",  label: "⏳ Когда выкупят?",           answer: "Обычно выкупаем за пару часов, максимум — в течение суток.\nКак только выкупим — бот пришлёт уведомление прямо сюда. Ничего делать не нужно, просто жди 👌" },
+  { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа <b>Roblox замораживает робуксы на 5–7 дней</b> (это их стандартная процедура — «Pending Robux»).\n\nПроверить: <a href=\"https://www.roblox.com/transactions\">roblox.com/transactions</a> → строка <b>Pending</b>.\n\nМы на это повлиять не можем — дальше всё на стороне Roblox." },
+  { key: "what_now",  label: "🤔 Что мне делать сейчас?",   answer: "Если заказ <b>оформлен</b> — просто жди. Бот сам пришлёт уведомление, когда геймпасс будет выкуплен.\n\nЕсли ещё <b>не создал геймпасс</b> — открой 📖 Инструкцию и пройди все шаги." },
+  { key: "wrong_gp",  label: "✏️ Не тот геймпасс/ник",     answer: "Нажми кнопку <b>«✏️ Сменить ник Roblox»</b> в карточке заказа — можно перевыбрать ник и геймпасс в любой момент до выкупа." },
+  { key: "how_gp",    label: "📖 Как создать геймпасс?",    answer: "Полная пошаговая инструкция — по кнопке 📖 ИНСТРУКЦИЯ в меню.\n\nВкратце: зайди на create.roblox.com → выбери свою игру → Monetization → Passes → Create Pass → поставь нужную цену → сохрани." },
+  { key: "price",     label: "💰 Какую цену ставить?",      answer: "Цена геймпасса = <b>номинал ÷ 0.7</b> (округлённо вверх).\n\nНапример: 500 R$ → <b>715 R$</b>, 1000 R$ → <b>1429 R$</b>.\n\nТочная цена написана в карточке заказа и в инструкции." },
+];
+
+function faqBtn() {
+  return Markup.button.callback("❓ Частые вопросы", CB.faq);
+}
+
+function orderAgeMsFromOrder(order: any): number {
+  if (!order?.createdAt) return Infinity;
+  return Date.now() - new Date(order.createdAt).getTime();
+}
+
+const SUPPORT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+function faqOrSupportBtn(order: any, label?: string, ctxKey = "general", ctx?: any) {
+  if (order && orderAgeMsFromOrder(order) < SUPPORT_COOLDOWN_MS) {
+    return faqBtn();
+  }
+  return supportBtn(label, ctxKey, ctx);
+}
+
 // ── Support contact (Progressive Disclosure) ────────────────────────────────
 
 /** In-bot support button.
@@ -289,7 +318,7 @@ export function registerStart(bot: Telegraf): void {
             ...Markup.inlineKeyboard([
               [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
               [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
-              [supportBtn("💬 Написать менеджеру")],
+              [faqBtn()],
             ]),
           }
         );
@@ -556,14 +585,18 @@ async function getAdminKeyboard(uid?: string | number) {
  */
 async function startDirectFlow(ctx: any): Promise<void> {
   const tgId = String(ctx.from.id);
-  const dirUser = await (db as any).user.findUnique({ where: { tgId }, select: { balance: true } });
+  const dirUser = await (db as any).user.findUnique({ where: { tgId }, select: { balance: true, robloxUsername: true } });
   const bonus = dirUser?.balance ?? 0;
+  const robloxNick = dirUser?.robloxUsername;
   const bonusNote = bonus > 0
     ? `\n\n🎁 У тебя есть бонус <b>${bonus} R$</b> — применится автоматически к заказу от 1000 R$ (только прямые заказы).`
     : "";
+  const nickNote = robloxNick
+    ? `\n\n🎮 Робуксы придут на ник: <b>${escapeHtml(robloxNick)}</b>`
+    : "";
   pendingDirectAmount.set(ctx.from.id, true);
   await ctx.reply(
-    `💎 <b>Прямой заказ Robux</b>\n\nВыбери количество (курс <b>0.7 ₽/R$</b>):` + bonusNote,
+    `💎 <b>Прямой заказ Robux</b>${nickNote}\n\nВыбери количество (курс <b>0.7 ₽/R$</b>):` + bonusNote,
     { parse_mode: "HTML", ...buildPackKb(bonus) }
   );
 }
@@ -606,11 +639,7 @@ export function registerStatus(bot: Telegraf): void {
     try {
       const helpUser = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
       if (helpUser) {
-        const helpOrder = await (db as any).wbOrder.findFirst({
-          where: { userId: helpUser.id },
-          orderBy: { createdAt: "desc" },
-          select: { wbCode: true, isDirectOrder: true },
-        });
+        const helpOrder = await findRelevantOrder(helpUser.id);
         if (helpOrder?.wbCode && !(helpOrder.wbCode as string).startsWith("DIR-") && !helpOrder.isDirectOrder) {
           guideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${helpOrder.wbCode}`;
         } else if (helpOrder?.isDirectOrder) {
@@ -631,7 +660,7 @@ export function registerStatus(bot: Telegraf): void {
         ...Markup.inlineKeyboard([
           [Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", guideUrl)],
           [Markup.button.callback("📊 Мой заказ", CB.refreshStatus), Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
-          [supportBtn("💬 Написать менеджеру")],
+          [faqBtn()],
         ]),
       }
     );
@@ -706,6 +735,20 @@ interface StatusMessage {
   keyboard: ReturnType<typeof Markup.inlineKeyboard>;
 }
 
+const ACTIVE_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"];
+
+async function findRelevantOrder(userId: string): Promise<any | null> {
+  const active = await (db as any).wbOrder.findFirst({
+    where: { userId, status: { in: ACTIVE_STATUSES } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (active) return active;
+  return (db as any).wbOrder.findFirst({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 // Statuses where the user may still re-pick their Roblox nick / gamepass — i.e.
 // the order hasn't been bought yet. COMPLETED/REJECTED are deliberately excluded
 // (paid is final; rejected has its own "fix link" resubmit flow).
@@ -749,10 +792,7 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     };
   }
 
-  const order = await (db as any).wbOrder.findFirst({
-    where: { userId: user.id },
-    orderBy: { createdAt: "desc" },
-  });
+  const order = await findRelevantOrder(user.id);
 
   if (!order) {
     return {
@@ -761,7 +801,7 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
         [Markup.button.url("📖 ИНСТРУКЦИЯ", "https://robloxbank.ru/guide?source=wb")],
         [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
         refreshRow,
-        [supportBtn("💬 Нужна помощь?")],
+        [faqBtn()],
       ]),
     };
   }
@@ -845,23 +885,23 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   let keyboard: ReturnType<typeof Markup.inlineKeyboard>;
   if (order.status === "AWAITING_PAYMENT" || order.status === "PAYMENT_PENDING") {
     const waitMins = Math.floor((Date.now() - new Date(order.createdAt).getTime()) / 60_000);
-    const supportRow = waitMins >= 15
+    const helpRow = waitMins >= 15
       ? [supportBtn("⏰ Написать менеджеру", "direct_wait")]
-      : [supportBtn("💬 Нужна помощь?", "direct_wait")];
-    keyboard = Markup.inlineKeyboard([refreshRow, supportRow, menuRow]);
+      : [faqOrSupportBtn(order, "💬 Нужна помощь?", "direct_wait")];
+    keyboard = Markup.inlineKeyboard([refreshRow, helpRow, menuRow]);
   } else if (order.status === "REJECTED") {
     if (order.isDirectOrder) {
       keyboard = Markup.inlineKeyboard([
         [Markup.button.callback("💎 Заказать напрямую", CB.startDirect)],
         refreshRow,
-        [supportBtn("💬 Нужна помощь?", "rejected")],
+        [faqOrSupportBtn(order, "💬 Нужна помощь?", "rejected")],
         menuRow,
       ]);
     } else {
       keyboard = Markup.inlineKeyboard([
         [Markup.button.callback("🔄 Исправить ссылку", `user_resubmit:${order.wbCode}:${order.amount}`)],
         refreshRow,
-        [supportBtn("Нужна помощь?", "rejected")],
+        [faqOrSupportBtn(order, undefined, "rejected")],
         menuRow,
       ]);
     }
@@ -879,17 +919,18 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     keyboard = Markup.inlineKeyboard([
       [Markup.button.callback("💎 Заказать напрямую", CB.startDirect)],
       refreshRow,
+      [faqBtn()],
       menuRow,
     ]);
   } else if (pendingOver60) {
-    // PENDING — still re-pickable until it's bought (skip on direct/paid orders).
     keyboard = Markup.inlineKeyboard(order.isDirectOrder
-      ? [refreshRow, [supportBtn("Нужна помощь?", "pending_long")], menuRow]
-      : [refreshRow, changeNickRow, [supportBtn("Нужна помощь?", "pending_long")], menuRow]);
+      ? [refreshRow, [faqOrSupportBtn(order, undefined, "pending_long")], menuRow]
+      : [refreshRow, changeNickRow, [faqOrSupportBtn(order, undefined, "pending_long")], menuRow]);
   } else {
-    // PENDING (<60 min) and IN_PROGRESS — still re-pickable until it's bought.
     const canChangeNick = !order.isDirectOrder && (order.status === "PENDING" || order.status === "IN_PROGRESS");
-    keyboard = Markup.inlineKeyboard(canChangeNick ? [refreshRow, changeNickRow, menuRow] : [refreshRow, menuRow]);
+    keyboard = Markup.inlineKeyboard(canChangeNick
+      ? [refreshRow, changeNickRow, [faqBtn()], menuRow]
+      : [refreshRow, [faqBtn()], menuRow]);
   }
 
   return { text, keyboard };
@@ -914,14 +955,20 @@ const STATUS_LABEL: Record<string, string> = {
  */
 async function buildBuyerMenu(tgId: string, name?: string): Promise<StatusMessage> {
   let user: any = null;
-  let order: any = null;
+  let activeOrders: any[] = [];
+  let lastCompleted: any = null;
   let status = { isReturning: false, orderCount: 0 };
   try {
     user = await (db as any).user.findUnique({ where: { tgId } });
     status = await getCustomerStatus(tgId, "TG");
     if (user) {
-      order = await (db as any).wbOrder.findFirst({
-        where: { userId: user.id },
+      activeOrders = await (db as any).wbOrder.findMany({
+        where: { userId: user.id, status: { in: ACTIVE_STATUSES } },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+      });
+      lastCompleted = await (db as any).wbOrder.findFirst({
+        where: { userId: user.id, status: "COMPLETED" },
         orderBy: { createdAt: "desc" },
       });
     }
@@ -930,41 +977,52 @@ async function buildBuyerMenu(tgId: string, name?: string): Promise<StatusMessag
   }
 
   const balance = user?.balance ?? 0;
+  const robloxNick = user?.robloxUsername;
   const tier = status.orderCount >= 5 ? "👑 VIP-клиент"
              : status.isReturning   ? "💛 Постоянный клиент"
              : "🌱 Новый клиент";
-  const hello = name ? ` <b>${escapeHtml(name)}</b>` : "";
 
-  const lines: string[] = [];
-  lines.push(`👤 <b>Твоё меню</b>${hello} · RobloxBank`);
-  lines.push("");
-  lines.push(tier);
-  if (status.orderCount > 0) lines.push(`🛍 Заказов: <b>${status.orderCount}</b>`);
-  if (balance > 0) lines.push(`🎁 Бонусный баланс: <b>${balance} R$</b> <i>(к прямым заказам от 1000 R$)</i>`);
-  if (order) {
-    lines.push(
-      `📦 Последний заказ <b>#${order.id.slice(-6).toUpperCase()}</b> — ` +
-      `${STATUS_LABEL[order.status] ?? order.status}`
-    );
+  const heading = robloxNick
+    ? `🎮 <b>RobloxBank</b> · ${escapeHtml(robloxNick)}`
+    : `👤 <b>Твоё меню</b>${name ? ` ${escapeHtml(name)}` : ""} · RobloxBank`;
+
+  const lines: string[] = [heading, ""];
+  lines.push(`${tier} · ${status.orderCount > 0 ? `${status.orderCount} ${status.orderCount === 1 ? "заказ" : status.orderCount < 5 ? "заказа" : "заказов"}` : "0 заказов"}${balance > 0 ? ` · 🎁 ${balance} R$` : ""}`);
+
+  if (activeOrders.length > 0) {
+    lines.push("");
+    lines.push("── <b>Активные заказы</b> ──");
+    for (const o of activeOrders) {
+      const shortId = o.id.slice(-6).toUpperCase();
+      const statusLbl = STATUS_LABEL[o.status] ?? o.status;
+      lines.push(`📦 #${shortId} · ${o.amount} R$ · ${statusLbl}`);
+    }
   }
-  lines.push("");
-  lines.push(
-    `💎 В следующий раз можно заказать Robux <b>напрямую</b> — без карты WB, ` +
-    `быстрее и выгоднее. Всё здесь, в боте 👇`
-  );
 
-  const isWbOrder = order && order.wbCode && !String(order.wbCode).startsWith("DIR-") && !order.isDirectOrder;
-  const guideUrl = isWbOrder
-    ? `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}`
+  if (lastCompleted) {
+    lines.push("");
+    const dt = new Date(lastCompleted.createdAt).toLocaleDateString("ru-RU");
+    lines.push(`✅ Последний выполненный: #${lastCompleted.id.slice(-6).toUpperCase()} · ${lastCompleted.amount} R$ · ${dt}`);
+  }
+
+  lines.push("");
+  lines.push(`💎 Заказать Robux <b>напрямую</b> — без карты WB, быстрее и выгоднее 👇`);
+
+  const firstActiveWb = activeOrders.find(o => o.wbCode && !String(o.wbCode).startsWith("DIR-") && !o.isDirectOrder);
+  const guideUrl = firstActiveWb
+    ? `https://robloxbank.ru/guide?source=wb&skip=1&code=${firstActiveWb.wbCode}`
     : "https://robloxbank.ru/guide?source=wb";
 
   const rows: any[] = [];
-  if (order) rows.push([Markup.button.callback("📦 Мой заказ", CB.refreshStatus)]);
-  rows.push([Markup.button.callback("💎 Купить Robux напрямую", CB.startDirect)]);
-  rows.push([
-    Markup.button.url("📖 Инструкция", guideUrl),
-    supportBtn("💬 Поддержка", "menu"),
-  ]);
+  if (robloxNick) {
+    rows.push([Markup.button.callback(`💎 Заказать ещё на ${robloxNick}`, CB.startDirect)]);
+  } else {
+    rows.push([Markup.button.callback("💎 Купить Robux напрямую", CB.startDirect)]);
+  }
+  if (activeOrders.length > 0) rows.push([Markup.button.callback("📦 Мой заказ", CB.refreshStatus)]);
+  rows.push([Markup.button.url("📖 Инструкция", guideUrl)]);
+  const relevantOrder = activeOrders[0] ?? lastCompleted;
+  rows.push([faqOrSupportBtn(relevantOrder, "💬 Поддержка", "menu")]);
 
   return { text: lines.join("\n"), keyboard: Markup.inlineKeyboard(rows) };
 }
@@ -1219,7 +1277,7 @@ export function registerText(bot: Telegraf): void {
                   parse_mode: "HTML",
                   ...Markup.inlineKeyboard([
                     [Markup.button.callback("🔄 Исправить ссылку", `user_resubmit:${rejectedOrder.wbCode}:${rejectedOrder.amount}`)],
-                    [supportBtn("💬 Нужна помощь?")],
+                    [faqBtn()],
                   ]),
                 }
               );
@@ -1240,7 +1298,7 @@ export function registerText(bot: Telegraf): void {
             await ctx.reply(
               "📸 Жду скриншот отзыва — отправь его фотографией (не файлом, не документом).\n\n" +
               "Просто прикрепи изображение как обычное фото в Telegram.",
-              { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?") }
+              { parse_mode: "HTML", ...Markup.inlineKeyboard([[faqBtn()]]) }
             );
             return;
           }
@@ -1254,7 +1312,7 @@ export function registerText(bot: Telegraf): void {
               ...Markup.inlineKeyboard([
                 [Markup.button.url("📖 ИНСТРУКЦИЯ", "https://robloxbank.ru/guide?source=wb")],
                 [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
-                [supportBtn("Нужна помощь?")],
+                [faqBtn()],
               ]),
             }
           );
@@ -1861,7 +1919,11 @@ async function processGamepassSubmission(
     }
 
     pendingLink.delete(ctx.from.id);
-    clearFailCounts(ctx.from.id); // success — reset progressive disclosure counters
+    clearFailCounts(ctx.from.id);
+
+    if (validatedCreator) {
+      try { await (db as any).user.update({ where: { tgId: String(ctx.from.id) }, data: { robloxUsername: validatedCreator } }); } catch {}
+    }
 
     const creatorLine = validatedCreator ? `👤 Создатель: ${escapeHtml(validatedCreator)}\n` : "";
     const priceLine = validatedPrice != null ? `💰 Цена: ${validatedPrice} R$\n` : "";
@@ -2509,6 +2571,38 @@ export function registerCallbacks(bot: Telegraf): void {
       return;
     }
 
+    // ── ❓ FAQ — self-service answers (hides support for first 24h) ──────
+    if (data === CB.faq) {
+      await ctx.answerCbQuery("Частые вопросы 👇");
+      const rows = FAQ_ITEMS.map(item => [Markup.button.callback(item.label, CB.faqItem(item.key))]);
+      rows.push([supportBtn("💬 Не нашёл ответ — написать менеджеру")]);
+      rows.push([Markup.button.callback("👤 В моё меню", CB.buyerMenu)]);
+      await ctx.reply(
+        "❓ <b>Частые вопросы</b>\n\nВыбери тему — отвечу сразу 👇",
+        { parse_mode: "HTML", ...Markup.inlineKeyboard(rows) }
+      );
+      return;
+    }
+
+    if (data.startsWith("fq:")) {
+      const key = data.slice(3);
+      const item = FAQ_ITEMS.find(i => i.key === key);
+      if (!item) { await ctx.answerCbQuery("❌"); return; }
+      await ctx.answerCbQuery(item.label);
+      await ctx.reply(
+        `<b>${item.label}</b>\n\n${item.answer}`,
+        {
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback("⬅️ Все вопросы", CB.faq)],
+            [supportBtn("💬 Не помогло — написать менеджеру")],
+          ]),
+        }
+      );
+      return;
+    }
+
     // ── 🆘 sup: — user tapped a support button ────────────────────────────
     if (data.startsWith("sup:")) {
       const ctxKey = data.slice(4);
@@ -2844,7 +2938,7 @@ export function registerCallbacks(bot: Telegraf): void {
       });
       const confirmKb = Markup.inlineKeyboard([
         [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
-        [supportBtn("💬 Нужна помощь?", "direct_wait")],
+        [faqBtn()],
       ]);
       try {
         await ctx.editMessageText(
@@ -2999,7 +3093,7 @@ export function registerCallbacks(bot: Telegraf): void {
             // admin callback — passing it fired a false «admin застрял» hurdle alert.
             { parse_mode: "HTML", ...Markup.inlineKeyboard([
               [Markup.button.callback("💎 Новый заказ", CB.startDirect)],
-              [supportBtn("💬 Это ошибка?", "order_cancelled")],
+              [faqBtn()],
             ]) }
           );
         } catch { }
@@ -3051,7 +3145,7 @@ export function registerCallbacks(bot: Telegraf): void {
               ...Markup.inlineKeyboard([
                 [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
                 [Markup.button.url("📖 Инструкция", "https://robloxbank.ru/guide?source=direct")],
-                [supportBtn("💬 Нужна помощь?")],
+                [faqBtn()],
               ]),
             }
           );
@@ -3092,7 +3186,7 @@ export function registerCallbacks(bot: Telegraf): void {
             detailsLine +
             `\nПришли скриншот ещё раз (фотографией, не файлом) 👇`,
             // No ctx: message goes to the user, ctx is the admin's callback.
-            { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?", "payment") }
+            { parse_mode: "HTML", ...Markup.inlineKeyboard([[faqBtn()]]) }
           );
         } catch { }
       } else if (payNoUser?.vkId) {

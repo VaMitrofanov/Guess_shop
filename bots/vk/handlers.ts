@@ -422,6 +422,35 @@ function vkSupportKb(ctxKey: string) {
     .inline();
 }
 
+const VK_FAQ_ITEMS: { key: string; label: string; answer: string }[] = [
+  { key: "when_buy",  label: "⏳ Когда выкупят?",           answer: "Обычно выкупаем за пару часов, максимум — в течение суток.\nКак только выкупим — бот пришлёт уведомление прямо сюда. Ничего делать не нужно, просто жди 👌" },
+  { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа Roblox замораживает робуксы на 5–7 дней (это их стандартная процедура — «Pending Robux»).\n\nПроверить: roblox.com/transactions → строка Pending.\n\nМы на это повлиять не можем — дальше всё на стороне Roblox." },
+  { key: "what_now",  label: "🤔 Что мне делать сейчас?",   answer: "Если заказ оформлен — просто жди. Бот сам пришлёт уведомление, когда геймпасс будет выкуплен.\n\nЕсли ещё не создал геймпасс — открой 📖 Инструкцию и пройди все шаги." },
+  { key: "wrong_gp",  label: "✏️ Не тот геймпасс/ник",     answer: "Напиши «сменить ник» — можно перевыбрать ник и геймпасс в любой момент до выкупа." },
+  { key: "how_gp",    label: "📖 Как создать геймпасс?",    answer: "Полная пошаговая инструкция — по кнопке 📖 ИНСТРУКЦИЯ.\n\nВкратце: зайди на create.roblox.com → выбери свою игру → Monetization → Passes → Create Pass → поставь нужную цену → сохрани." },
+  { key: "price",     label: "💰 Какую цену ставить?",      answer: "Цена геймпасса = номинал ÷ 0.7 (округлённо вверх).\n\nНапример: 500 R$ → 715 R$, 1000 R$ → 1429 R$.\n\nТочная цена написана в карточке заказа и в инструкции." },
+];
+
+function vkFaqKb() {
+  return Keyboard.builder()
+    .textButton({ label: "❓ Частые вопросы", payload: { command: "faq" }, color: "secondary" })
+    .inline();
+}
+
+function vkFaqOrSupportKb(order: any, ctxKey = "general") {
+  if (order && orderAgeMsFromOrder(order) < SUPPORT_COOLDOWN_MS) {
+    return vkFaqKb();
+  }
+  return vkSupportKb(ctxKey);
+}
+
+function orderAgeMsFromOrder(order: any): number {
+  if (!order?.createdAt) return Infinity;
+  return Date.now() - new Date(order.createdAt).getTime();
+}
+
+const SUPPORT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
 /** Sends the subscription prompt and inline buttons. */
 async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null): Promise<void> {
   const groupId  = process.env.VK_GROUP_ID;
@@ -486,6 +515,24 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     return;
   }
 
+  // ── ❓ FAQ — self-service answers ─────────────────────────────────────────
+  if (msgPayload?.command === "faq") {
+    const lines = ["❓ Частые вопросы\n"];
+    for (const item of VK_FAQ_ITEMS) {
+      lines.push(`${item.label}\n${item.answer}\n`);
+    }
+    lines.push("💬 Не нашёл ответ? Напиши прямо сюда — ответим здесь, или в Telegram: https://t.me/RobloxBank_PA");
+    await ctx.reply({
+      message: lines.join("\n"),
+      keyboard: Keyboard.builder()
+        .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "primary" })
+        .row()
+        .textButton({ label: "👤 В моё меню", payload: { command: "menu" }, color: "secondary" })
+        .inline(),
+    });
+    return;
+  }
+
   // ── 👤 Buyer mini-profile hub ─────────────────────────────────────────────
   if (msgPayload?.command === "menu") {
     await sendVkBuyerMenu(ctx, vkUserId);
@@ -516,7 +563,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
           keyboard: Keyboard.builder()
             .textButton({ label: "🔎 Найти по моему нику Roblox", payload: { command: "find_gp_start" }, color: "primary" })
             .row()
-            .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+            .textButton({ label: "❓ Частые вопросы", payload: { command: "faq" }, color: "secondary" })
             .inline(),
         });
         return;
@@ -675,7 +722,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
           .row()
           .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" },  color: "positive"  })
           .row()
-          .textButton({ label: "💬 Нужна помощь?",   payload: { command: "support", context: "general" }, color: "secondary" })
+          .textButton({ label: "❓ Частые вопросы",   payload: { command: "faq" }, color: "secondary" })
           .inline(),
       });
       return;
@@ -692,7 +739,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "primary" })
         .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "positive" })
         .row()
-        .textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "general" }, color: "secondary" })
+        .textButton({ label: "❓ Частые вопросы", payload: { command: "faq" }, color: "secondary" })
         .inline(),
     });
     return;
@@ -1294,6 +1341,10 @@ async function handleGamepassLink(
 
   clearState(vkUserId);
 
+  if (validatedCreator) {
+    try { await (db as any).user.update({ where: { vkId: String(vkUserId) }, data: { robloxUsername: validatedCreator } }); } catch {}
+  }
+
   const creatorLine = validatedCreator ? `\n👤 Создатель: ${validatedCreator}` : "";
   const priceLine = validatedPrice != null ? `\n💰 Цена: ${validatedPrice} R$` : "";
   await ctx.reply({
@@ -1612,17 +1663,19 @@ async function handleStartDirect(ctx: MessageContext, vkUserId: number): Promise
     }
   }
 
-  const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { balance: true } });
+  const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { balance: true, robloxUsername: true } });
   const bonus = user?.balance ?? 0;
+  const robloxNick = user?.robloxUsername;
   const bonusNote = bonus > 0
     ? `\n\n🎁 У тебя есть бонус ${bonus} R$ — он автоматически добавится к заказу от 1000 R$ (бонус действует только для прямых заказов от 1000 R$).`
     : "";
+  const nickNote = robloxNick ? `\n\n🎮 Робуксы придут на ник: ${robloxNick}` : "";
 
   setState(vkUserId, { type: "AWAITING_DIRECT_AMOUNT" });
 
   await ctx.reply({
     message:
-      `💎 Прямой заказ Robux\n\nВыбери количество (курс 0.7 ₽/R$):` +
+      `💎 Прямой заказ Robux${nickNote}\n\nВыбери количество (курс 0.7 ₽/R$):` +
       bonusNote,
     keyboard: buildVkPackKb(bonus),
   });
@@ -1706,7 +1759,7 @@ async function handleDirectConfirm(ctx: MessageContext, vkUserId: number): Promi
       message:
         `⏳ У тебя уже есть активный заказ #${existing.id.slice(-6).toUpperCase()}.\n\n` +
         `Дождись реквизитов от менеджера, а затем оформи новый.`,
-      keyboard: vkSupportKb("direct_wait"),
+      keyboard: vkFaqKb(),
     });
     return;
   }
@@ -1736,7 +1789,7 @@ async function handleDirectConfirm(ctx: MessageContext, vkUserId: number): Promi
     });
   } catch (err) {
     console.error("[VK] Direct order create error:", err);
-    await ctx.reply({ message: "❌ Не удалось создать заказ. Попробуй снова.", keyboard: vkSupportKb("general") });
+    await ctx.reply({ message: "❌ Не удалось создать заказ. Попробуй снова.", keyboard: vkFaqKb() });
     return;
   }
 
@@ -1765,7 +1818,7 @@ async function handleDirectConfirm(ctx: MessageContext, vkUserId: number): Promi
       `📋 Заказ #${shortId} оформлен!\n\n` +
       `Менеджер пришлёт реквизиты для оплаты в течение нескольких минут.\n\n` +
       `Ожидай сообщения 👇`,
-    keyboard: vkSupportKb("direct_wait"),
+    keyboard: vkFaqKb(),
   });
 
   console.log(`[VK] Direct order created: ${newOrder.id} vkUserId=${vkUserId} amount=${totalAmount}`);
@@ -1936,6 +1989,20 @@ async function handleReviewScreenshot(
 // C — Idle: status check or help
 // ─────────────────────────────────────────────────────────────────────────────
 
+const VK_ACTIVE_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"];
+
+async function findRelevantOrder(userId: string): Promise<any | null> {
+  const active = await (db as any).wbOrder.findFirst({
+    where: { userId, status: { in: VK_ACTIVE_STATUSES } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (active) return active;
+  return (db as any).wbOrder.findFirst({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 const VK_STATUS_LABEL: Record<string, string> = {
   AWAITING_PAYMENT:  "⏳ Ожидаем реквизиты",
   PAYMENT_PENDING:   "💳 Ожидаем оплату",
@@ -1996,14 +2063,20 @@ function vkRobuxCountdown(completedAt: Date | string): string {
  */
 async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<void> {
   let user: any = null;
-  let order: any = null;
+  let activeOrders: any[] = [];
+  let lastCompleted: any = null;
   let status = { isReturning: false, orderCount: 0 };
   try {
     user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
     status = await getCustomerStatus(String(vkUserId), "VK");
     if (user) {
-      order = await (db as any).wbOrder.findFirst({
-        where: { userId: user.id },
+      activeOrders = await (db as any).wbOrder.findMany({
+        where: { userId: user.id, status: { in: VK_ACTIVE_STATUSES } },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+      });
+      lastCompleted = await (db as any).wbOrder.findFirst({
+        where: { userId: user.id, status: "COMPLETED" },
         orderBy: { createdAt: "desc" },
       });
     }
@@ -2013,38 +2086,57 @@ async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<v
 
   const firstName = await vkGetName(vkUserId);
   const balance = user?.balance ?? 0;
+  const robloxNick = user?.robloxUsername;
   const tier = status.orderCount >= 5 ? "👑 VIP-клиент"
              : status.isReturning   ? "💛 Постоянный клиент"
              : "🌱 Новый клиент";
 
-  const lines: string[] = [];
-  lines.push(`👤 Твоё меню${firstName ? `, ${firstName}` : ""} · RobloxBank`);
-  lines.push("");
-  lines.push(tier);
-  if (status.orderCount > 0) lines.push(`🛍 Заказов: ${status.orderCount}`);
-  if (balance > 0) lines.push(`🎁 Бонусный баланс: ${balance} R$ (к прямым заказам от 1000 R$)`);
-  if (order) {
-    lines.push(
-      `📦 Последний заказ #${String(order.id).slice(-6).toUpperCase()} — ` +
-      `${VK_STATUS_LABEL[order.status] ?? order.status}`
-    );
-  }
-  lines.push("");
-  lines.push(
-    `💎 В следующий раз можно заказать Robux напрямую — без карты WB, ` +
-    `быстрее и выгоднее. Всё здесь, в боте 👇`
-  );
+  const heading = robloxNick
+    ? `🎮 RobloxBank · ${robloxNick}`
+    : `👤 Твоё меню${firstName ? `, ${firstName}` : ""} · RobloxBank`;
 
-  const isWbOrder = order && order.wbCode && !String(order.wbCode).startsWith("DIR-") && !order.isDirectOrder;
-  const guideUrl = isWbOrder
-    ? `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}`
+  const lines: string[] = [heading, ""];
+  const oc = status.orderCount;
+  lines.push(`${tier} · ${oc > 0 ? `${oc} ${oc === 1 ? "заказ" : oc < 5 ? "заказа" : "заказов"}` : "0 заказов"}${balance > 0 ? ` · 🎁 ${balance} R$` : ""}`);
+
+  if (activeOrders.length > 0) {
+    lines.push("");
+    lines.push("── Активные заказы ──");
+    for (const o of activeOrders) {
+      const shortId = String(o.id).slice(-6).toUpperCase();
+      const statusLbl = VK_STATUS_LABEL[o.status] ?? o.status;
+      lines.push(`📦 #${shortId} · ${o.amount} R$ · ${statusLbl}`);
+    }
+  }
+
+  if (lastCompleted) {
+    lines.push("");
+    const dt = new Date(lastCompleted.createdAt).toLocaleDateString("ru-RU");
+    lines.push(`✅ Последний: #${String(lastCompleted.id).slice(-6).toUpperCase()} · ${lastCompleted.amount} R$ · ${dt}`);
+  }
+
+  lines.push("");
+  lines.push(`💎 Заказать Robux напрямую — без карты WB, быстрее и выгоднее 👇`);
+
+  const firstActiveWb = activeOrders.find(o => o.wbCode && !String(o.wbCode).startsWith("DIR-") && !o.isDirectOrder);
+  const guideUrl = firstActiveWb
+    ? `https://robloxbank.ru/guide?source=wb&skip=1&code=${firstActiveWb.wbCode}`
     : "https://robloxbank.ru/guide?source=wb";
 
   const kb = Keyboard.builder();
-  if (order) kb.textButton({ label: "📦 Мой заказ", payload: { command: "status" }, color: "primary" }).row();
-  kb.textButton({ label: "💎 Купить Robux напрямую", payload: { command: "start_direct" }, color: "positive" }).row();
+  if (robloxNick) {
+    kb.textButton({ label: `💎 Ещё на ${robloxNick}`, payload: { command: "start_direct" }, color: "positive" }).row();
+  } else {
+    kb.textButton({ label: "💎 Купить Robux напрямую", payload: { command: "start_direct" }, color: "positive" }).row();
+  }
+  if (activeOrders.length > 0) kb.textButton({ label: "📦 Мой заказ", payload: { command: "status" }, color: "primary" }).row();
   kb.urlButton({ label: "📖 Инструкция", url: guideUrl }).row();
-  kb.textButton({ label: "💬 Поддержка", payload: { command: "support", context: "menu" }, color: "secondary" });
+  const relevantOrder = activeOrders[0] ?? lastCompleted;
+  if (relevantOrder && orderAgeMsFromOrder(relevantOrder) < SUPPORT_COOLDOWN_MS) {
+    kb.textButton({ label: "❓ Частые вопросы", payload: { command: "faq" }, color: "secondary" });
+  } else {
+    kb.textButton({ label: "💬 Поддержка", payload: { command: "support", context: "menu" }, color: "secondary" });
+  }
 
   await ctx.reply({ message: lines.join("\n"), keyboard: kb.inline() });
 }
@@ -2152,10 +2244,7 @@ async function handleIdleMessage(
       return;
     }
 
-    const order = await (db as any).wbOrder.findFirst({
-      where:   { userId: user.id },
-      orderBy: { createdAt: "desc" },
-    });
+    const order = await findRelevantOrder(user.id);
 
     if (!order) {
       await ctx.reply("У тебя пока нет заявок.\n\nЕсть код с WB-карты? Напиши его прямо сюда.\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
@@ -2227,14 +2316,18 @@ async function handleIdleMessage(
       // "Передумал" — re-pick nick/gamepass while the order isn't bought yet.
       kb.textButton({ label: "✏️ Сменить ник Roblox", payload: { command: "change_nick" }, color: "primary" }).row();
     }
-    kb.textButton({ label: "👤 В моё меню", payload: { command: "menu" }, color: "secondary" });
+    if (orderAgeMsFromOrder(order) < SUPPORT_COOLDOWN_MS) {
+      kb.row().textButton({ label: "❓ Частые вопросы", payload: { command: "faq" }, color: "secondary" });
+    } else {
+      kb.row().textButton({ label: "💬 Нужна помощь?", payload: { command: "support", context: "status" }, color: "secondary" });
+    }
+    kb.row().textButton({ label: "👤 В моё меню", payload: { command: "menu" }, color: "secondary" });
 
     await ctx.reply({
       message:
         `📦 Заявка #${shortId}\n` +
         `━━━━━━━━━━━━━━━━\n` +
         `💎 Сумма: ${order.amount} R$ (Геймпасс: ${passPrice} R$)\n` +
-        // DIR- codes are internal synthetic IDs for direct orders — don't expose them
         ((order.wbCode as string).startsWith("DIR-") ? "" : `🔑 Код ВБ: ${order.wbCode}\n`) +
         nickLine +
         gamepassLine +
@@ -2290,7 +2383,7 @@ async function handleIdleMessage(
         .textButton({ label: "📊 Статус заявки",   payload: { command: "status" },       color: "secondary" })
         .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" },  color: "positive"  })
         .row()
-        .textButton({ label: "💬 Нужна помощь?",   payload: { command: "support", context: "general" }, color: "secondary" })
+        .textButton({ label: "❓ Частые вопросы",   payload: { command: "faq" }, color: "secondary" })
         .inline(),
     });
   } else {

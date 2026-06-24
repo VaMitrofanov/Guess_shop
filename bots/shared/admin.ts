@@ -315,6 +315,10 @@ export const CB = {
   // smaller "user hurdle" heads-up instead). Suffix is the context key —
   // ctxKey alphabet is `[a-z_]+`, never close to the 64-byte limit. ──
   supTap:        (ctxKey: string) => `sup:${ctxKey}`,        // ≤ 30 b
+
+  // ── FAQ / self-service (replaces support in the first 24h) ──
+  faq:           "faq",                                       // 3 b
+  faqItem:       (key: string) => `fq:${key}`,               // ≤ 20 b
 } as const;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
