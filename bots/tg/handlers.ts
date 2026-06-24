@@ -762,7 +762,7 @@ async function findRelevantOrder(userId: string): Promise<any | null> {
 // (paid is final; rejected has its own "fix link" resubmit flow).
 const CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "REJECTED"];
 
-const ROBLOX_DELAY_BANNER = `\n\n⚠️ <i>Roblox сейчас обновляет систему геймпассов — выкуп может занять от суток до нескольких дней. Надеемся на понимание 🙏\nКак только всё стабилизируется — оповестим о возврате к обычным срокам.</i>`;
+const ROBLOX_DELAY_BANNER = `\n\n⚠️ <i>Roblox ввёл ограничения на выкуп геймпассов — сроки выросли до 1–3 дней. Это не зависит от нас — выкупаем при первой возможности.</i>`;
 
 /**
  * Gives a PENDING order a sense of forward motion even while it just sits in the
@@ -777,8 +777,8 @@ function pendingStage(createdAt: Date | string): { label: string; note: string }
   if (mins < 12)  return { label: "🔍 Проверяем геймпасс",      note: "Сверяем геймпасс и цену перед выкупом." };
   if (mins < 30)  return { label: "📋 Поставлен в очередь",     note: "Заказ в очереди — скоро возьмём в работу." };
   if (mins < 90)  return { label: "💼 Готовим к выкупу",        note: "Менеджер вот-вот возьмёт твой геймпасс в работу." };
-  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Из-за технических работ внутри Roblox время выкупа увеличилось — просим отнестись с пониманием 🙏 Мы стараемся подстроиться под новые правила как можно быстрее." };
-  return            { label: "⏳ В очереди на выкуп",        note: "Из-за технических работ Roblox выкуп занимает больше времени, чем обычно. Мы работаем и пришлём уведомление, как только всё будет готово 🙏" };
+  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Сейчас задержки на стороне Roblox — мы всё сделаем, как только они разрешат. Уведомим сразу 🙏" };
+  return            { label: "⏳ В очереди на выкуп",        note: "Roblox ограничил выкуп геймпассов на своей стороне — ждём окна. Уведомим сразу, как выкупим 🙏" };
 }
 
 /** Builds /status text + keyboard. Shows support button when PENDING > 60 min. */

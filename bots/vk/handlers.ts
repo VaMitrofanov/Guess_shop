@@ -2018,7 +2018,7 @@ const VK_STATUS_LABEL: Record<string, string> = {
 // Statuses where the user may still re-pick their nick / gamepass (not yet bought).
 const VK_CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "REJECTED"];
 
-const ROBLOX_DELAY_BANNER = `\n\n⚠️ Roblox сейчас обновляет систему геймпассов — выкуп может занять от суток до нескольких дней. Надеемся на понимание 🙏\nКак только всё стабилизируется — оповестим о возврате к обычным срокам.`;
+const ROBLOX_DELAY_BANNER = `\n\n⚠️ Roblox ввёл ограничения на выкуп геймпассов — сроки выросли до 1–3 дней. Это не зависит от нас — выкупаем при первой возможности.`;
 
 /**
  * Plain-text VK mirror of the TG `pendingStage` — gives a PENDING order a sense
@@ -2032,8 +2032,8 @@ function vkPendingStage(createdAt: Date | string): { label: string; note: string
   if (mins < 12)  return { label: "🔍 Проверяем геймпасс",      note: "Сверяем геймпасс и цену перед выкупом." };
   if (mins < 30)  return { label: "📋 Поставлен в очередь",     note: "Заказ в очереди — скоро возьмём в работу." };
   if (mins < 90)  return { label: "💼 Готовим к выкупу",        note: "Менеджер вот-вот возьмёт твой геймпасс в работу." };
-  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Из-за технических работ внутри Roblox время выкупа увеличилось — просим отнестись с пониманием 🙏 Мы стараемся подстроиться под новые правила как можно быстрее." };
-  return            { label: "⏳ В очереди на выкуп",        note: "Из-за технических работ Roblox выкуп занимает больше времени, чем обычно. Мы работаем и пришлём уведомление, как только всё будет готово 🙏" };
+  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Сейчас задержки на стороне Roblox — мы всё сделаем, как только они разрешат. Уведомим сразу 🙏" };
+  return            { label: "⏳ В очереди на выкуп",        note: "Roblox ограничил выкуп геймпассов на своей стороне — ждём окна. Уведомим сразу, как выкупим 🙏" };
 }
 
 /** Russian day pluralization: 1 день · 2 дня · 5 дней. */
@@ -2267,6 +2267,8 @@ async function handleIdleMessage(
 
     const passPrice = Math.ceil((order.amount as number) / 0.7);
     const shortId   = (order.id as string).slice(-6).toUpperCase();
+    const pendingAgeMs   = Date.now() - new Date(order.createdAt).getTime();
+    const pendingOver120 = order.status === "PENDING" && pendingAgeMs > 120 * 60 * 1000;
     // PENDING shows a time-based pseudo-stage so it visibly "moves" over time.
     const stage     = order.status === "PENDING" ? vkPendingStage(order.createdAt) : null;
     const statusStr = stage ? stage.label : (label[order.status] ?? order.status);
@@ -2288,7 +2290,7 @@ async function handleIdleMessage(
         : order.status === "AWAITING_GAMEPASS"
         ? `\n\nПройди инструкцию, создай геймпасс — затем напиши свой ник в Roblox 🔎\nЦена геймпасса: ${passPrice} R$`
         : order.status === "PENDING"
-        ? `\n\n💬 ${stage!.note}`
+        ? `\n\n💬 ${stage!.note}` + (pendingOver120 ? "\n💡 Ответы на частые вопросы — в кнопке ниже 👇" : "")
         : order.status === "IN_PROGRESS"
         ? "\n\n🔧 Менеджер уже работает над твоим заказом. Скоро всё будет готово!"
         : order.status === "COMPLETED"
@@ -2301,7 +2303,7 @@ async function handleIdleMessage(
         ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Исправь геймпасс и нажми кнопку ниже — отправим на проверку заново.`
         : "";
 
-    const gamepassLine = order.gamepassUrl ? `🔗 ${order.gamepassUrl}\n` : "";
+    const gamepassLine = order.gamepassUrl ? `🔗 Геймпасс: ${order.gamepassUrl}\n` : "";
     // Spell out that this nick is the recipient — so the user reads it as "robux
     // land HERE", not just some technical field.
     const nickLine = order.robloxUsername ? `🎮 Робуксы придут на ник: ${order.robloxUsername}\n` : "";
@@ -2334,8 +2336,8 @@ async function handleIdleMessage(
         (String(order.wbCode).startsWith("DIR-")
           ? `📦 Заказ #${shortId}\n`
           : `🔑 Код ВБ: ${order.wbCode}\n`) +
-        `━━━━━━━━━━━━━━━━\n` +
-        `💎 Сумма: ${order.amount} R$ (Геймпасс: ${passPrice} R$)\n` +
+        `📅 ${new Date(order.createdAt).toLocaleDateString("ru-RU")}\n` +
+        `💎 Номинал: ${order.amount} R$\n` +
         nickLine +
         gamepassLine +
         `📊 Статус: ${statusStr}` +
