@@ -350,10 +350,7 @@ export function registerStart(bot: Telegraf): void {
           {
             parse_mode: "HTML",
             link_preview_options: { is_disabled: true },
-            ...Markup.inlineKeyboard([
-              [Markup.button.url("📖 ИНСТРУКЦИЯ", "https://robloxbank.ru/guide?source=wb")],
-              [Markup.button.callback("📊 Мой заказ", CB.refreshStatus), Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
-            ]),
+            ...menuReplyKb(),
           }
         );
       }
@@ -1043,22 +1040,29 @@ export function registerText(bot: Telegraf): void {
     const isAdmin = ADMIN_IDS.includes(tgId);
     const text = ctx.message.text.trim();
 
-    // 0. PERSISTENT REPLY KEYBOARD buttons — always handled, even mid-flow
-    if (!isAdmin && text === MENU_BTN.direct) {
+    // 0. PERSISTENT REPLY KEYBOARD buttons — always handled, even mid-flow.
+    //    clearUserSession ensures the user escapes ANY pending input state.
+    const clearUserSession = () => {
+      pendingLink.delete(ctx.from.id);
       pendingRobloxNick.delete(ctx.from.id);
       pendingDirectAmount.delete(ctx.from.id);
       pendingDirectOrder.delete(ctx.from.id);
+      pendingPaymentScreenshot.delete(ctx.from.id);
+      pendingReview.delete(ctx.from.id);
+    };
+    if (!isAdmin && text === MENU_BTN.direct) {
+      clearUserSession();
       try { await startDirectFlow(ctx); } catch (err) { console.error("[TG] menu→direct failed:", err); }
       return;
     }
     if (!isAdmin && text === MENU_BTN.order) {
-      pendingRobloxNick.delete(ctx.from.id);
+      clearUserSession();
       const { text: statusText, keyboard } = await buildStatusMessage(tgId);
       await ctx.reply(statusText, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...keyboard });
       return;
     }
     if (!isAdmin && text === MENU_BTN.guide) {
-      pendingRobloxNick.delete(ctx.from.id);
+      clearUserSession();
       let guideUrl = "https://robloxbank.ru/guide?source=wb";
       try {
         const gu = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
@@ -1077,7 +1081,7 @@ export function registerText(bot: Telegraf): void {
       return;
     }
     if (!isAdmin && text === MENU_BTN.faq) {
-      pendingRobloxNick.delete(ctx.from.id);
+      clearUserSession();
       const faqText = "❓ <b>Частые вопросы</b>\n\nВыбери тему:";
       const faqRows = FAQ_ITEMS.map(f => [Markup.button.callback(f.label, CB.faqItem(f.key))]);
       await ctx.reply(faqText, { parse_mode: "HTML", ...Markup.inlineKeyboard(faqRows) });
@@ -1345,16 +1349,11 @@ export function registerText(bot: Telegraf): void {
           }
           await ctx.reply(
             "У тебя сейчас нет активных заявок.\n\n" +
-            "🔑 Есть код с WB-карты? Напиши его прямо сюда.\n" +
-            "📖 Инструкция: https://robloxbank.ru/guide?source=wb",
+            "🔑 Есть код с WB-карты? Напиши его прямо сюда.",
             {
               parse_mode: "HTML",
               link_preview_options: { is_disabled: true },
-              ...Markup.inlineKeyboard([
-                [Markup.button.url("📖 ИНСТРУКЦИЯ", "https://robloxbank.ru/guide?source=wb")],
-                [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
-                [faqBtn()],
-              ]),
+              ...menuReplyKb(),
             }
           );
           return;
