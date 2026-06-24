@@ -21,6 +21,21 @@ import { buildAdminKeyboard } from "./admin";
 
 const SUPPORT_URL = "https://t.me/RobloxBank_PA";
 
+// Persistent reply keyboard labels (shown below TG input field)
+const MENU_BTN = {
+  direct: "💎 Купить напрямую",
+  order:  "📦 Мой заказ",
+  guide:  "📖 Инструкция",
+  faq:    "❓ Частые вопросы",
+} as const;
+
+function menuReplyKb() {
+  return Markup.keyboard([
+    [MENU_BTN.direct, MENU_BTN.order],
+    [MENU_BTN.guide,  MENU_BTN.faq],
+  ]).resize();
+}
+
 /** Format a ruble amount with thousands separator, e.g. 3500 → "3 500 ₽". */
 function fmtRub(n: number): string {
   if (n >= 1000) return `${Math.floor(n / 1000)} ${String(n % 1000).padStart(3, "0")} ₽`;
@@ -315,11 +330,7 @@ export function registerStart(bot: Telegraf): void {
           {
             parse_mode: "HTML",
             link_preview_options: { is_disabled: true },
-            ...Markup.inlineKeyboard([
-              [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
-              [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
-              [faqBtn()],
-            ]),
+            ...menuReplyKb(),
           }
         );
       } else if (isAdmin) {
@@ -1005,26 +1016,15 @@ async function buildBuyerMenu(tgId: string, name?: string): Promise<StatusMessag
     lines.push(`✅ Последний выполненный: #${lastCompleted.id.slice(-6).toUpperCase()} · ${lastCompleted.amount} R$ · ${dt}`);
   }
 
-  lines.push("");
-  lines.push(`💎 Заказать Robux <b>напрямую</b> — без карты WB, быстрее и выгоднее 👇`);
-
-  const firstActiveWb = activeOrders.find(o => o.wbCode && !String(o.wbCode).startsWith("DIR-") && !o.isDirectOrder);
-  const guideUrl = firstActiveWb
-    ? `https://robloxbank.ru/guide?source=wb&skip=1&code=${firstActiveWb.wbCode}`
-    : "https://robloxbank.ru/guide?source=wb";
-
-  const rows: any[] = [];
   if (robloxNick) {
-    rows.push([Markup.button.callback(`💎 Заказать ещё на ${robloxNick}`, CB.startDirect)]);
+    lines.push("");
+    lines.push(`💎 Заказать Robux <b>напрямую</b> на <b>${escapeHtml(robloxNick)}</b> — без карты WB, быстрее и выгоднее 👇`);
   } else {
-    rows.push([Markup.button.callback("💎 Купить Robux напрямую", CB.startDirect)]);
+    lines.push("");
+    lines.push(`💎 Заказать Robux <b>напрямую</b> — без карты WB, быстрее и выгоднее 👇`);
   }
-  if (activeOrders.length > 0) rows.push([Markup.button.callback("📦 Мой заказ", CB.refreshStatus)]);
-  rows.push([Markup.button.url("📖 Инструкция", guideUrl)]);
-  const relevantOrder = activeOrders[0] ?? lastCompleted;
-  rows.push([faqOrSupportBtn(relevantOrder, "💬 Поддержка", "menu")]);
 
-  return { text: lines.join("\n"), keyboard: Markup.inlineKeyboard(rows) };
+  return { text: lines.join("\n"), keyboard: menuReplyKb() as any };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1042,6 +1042,47 @@ export function registerText(bot: Telegraf): void {
     const tgId = String(ctx.from.id);
     const isAdmin = ADMIN_IDS.includes(tgId);
     const text = ctx.message.text.trim();
+
+    // 0. PERSISTENT REPLY KEYBOARD buttons — always handled, even mid-flow
+    if (!isAdmin && text === MENU_BTN.direct) {
+      pendingRobloxNick.delete(ctx.from.id);
+      pendingDirectAmount.delete(ctx.from.id);
+      pendingDirectOrder.delete(ctx.from.id);
+      try { await startDirectFlow(ctx); } catch (err) { console.error("[TG] menu→direct failed:", err); }
+      return;
+    }
+    if (!isAdmin && text === MENU_BTN.order) {
+      pendingRobloxNick.delete(ctx.from.id);
+      const { text: statusText, keyboard } = await buildStatusMessage(tgId);
+      await ctx.reply(statusText, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...keyboard });
+      return;
+    }
+    if (!isAdmin && text === MENU_BTN.guide) {
+      pendingRobloxNick.delete(ctx.from.id);
+      let guideUrl = "https://robloxbank.ru/guide?source=wb";
+      try {
+        const gu = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
+        if (gu) {
+          const go = await findRelevantOrder(gu.id);
+          if (go?.wbCode && !String(go.wbCode).startsWith("DIR-") && !go.isDirectOrder) {
+            guideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${go.wbCode}`;
+          }
+        }
+      } catch {}
+      await ctx.reply(
+        `📖 Твоя персональная инструкция 👇\n${guideUrl}`,
+        { parse_mode: "HTML", link_preview_options: { is_disabled: true },
+          ...Markup.inlineKeyboard([[Markup.button.url("📖 ОТКРЫТЬ ИНСТРУКЦИЮ", guideUrl)]]) }
+      );
+      return;
+    }
+    if (!isAdmin && text === MENU_BTN.faq) {
+      pendingRobloxNick.delete(ctx.from.id);
+      const faqText = "❓ <b>Частые вопросы</b>\n\nВыбери тему:";
+      const faqRows = FAQ_ITEMS.map(f => [Markup.button.callback(f.label, CB.faqItem(f.key))]);
+      await ctx.reply(faqText, { parse_mode: "HTML", ...Markup.inlineKeyboard(faqRows) });
+      return;
+    }
 
     // 1. ADMIN REJECTION REASON flow
     const rejectOrderId = pendingRejectionReason.get(ctx.from.id);
@@ -3479,19 +3520,11 @@ export function registerCallbacks(bot: Telegraf): void {
     // ── 👤 menu: buyer mini-profile hub ──────────────────────────────────
     if (data === CB.buyerMenu) {
       const { text, keyboard } = await buildBuyerMenu(adminId, ctx.from.first_name || undefined);
-      try {
-        await ctx.editMessageText(text, {
-          parse_mode: "HTML",
-          link_preview_options: { is_disabled: true },
-          ...keyboard,
-        });
-      } catch {
-        await ctx.reply(text, {
-          parse_mode: "HTML",
-          link_preview_options: { is_disabled: true },
-          ...keyboard,
-        });
-      }
+      await ctx.reply(text, {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        ...keyboard,
+      });
       return ctx.answerCbQuery();
     }
 
