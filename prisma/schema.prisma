@@ -26,6 +26,10 @@ model User {
   image              String?
   robloxUsername     String?
   balance               Int       @default(0)
+  bonusExpiresAt        DateTime?
+  rubleDiscount         Int       @default(0)
+  promoExpiresAt        DateTime?
+  promoSentAt           DateTime?
   role                  String    @default("USER")
   reviewBonusClaimed    Boolean   @default(false)
   reviewBonusGrantedAt  DateTime?

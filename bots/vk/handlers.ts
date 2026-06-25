@@ -11,7 +11,7 @@
 
 import type { MessageContext } from "vk-io";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
-import { sendAdminOrderCard, sendAdminReviewCard, sendAdminDirectOrderCard, sendAdminPaymentCard, notifySupportShown, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS } from "../shared/admin";
+import { sendAdminOrderCard, sendAdminReviewCard, sendAdminDirectOrderCard, sendAdminPaymentCard, notifySupportShown, ADMIN_IDS, DIRECT_PACKS, directPrice, BONUS_MIN_PACK } from "../shared/admin";
 import { vkGetName, tgSend, vkSend, escapeHtml } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
@@ -112,21 +112,23 @@ function fmtRub(n: number): string {
 }
 
 /** Build VK inline keyboard with predefined Robux packs and their ruble prices. */
-function buildVkPackKb(userBonus = 0) {
+function buildVkPackKb(userBonus = 0, rubleDiscount = 0) {
   const kb = Keyboard.builder();
-  const rows: (readonly number[])[] = [
-    DIRECT_PACKS.slice(0, 3) as unknown as readonly number[],  // 100, 200, 300
-    DIRECT_PACKS.slice(3, 6) as unknown as readonly number[],  // 500, 800, 1000
-    DIRECT_PACKS.slice(6, 8) as unknown as readonly number[],  // 2000, 5000
-    DIRECT_PACKS.slice(8)    as unknown as readonly number[],  // 10000
+  const rows: number[][] = [
+    DIRECT_PACKS.slice(0, 3),   // 100, 200, 300
+    DIRECT_PACKS.slice(3, 6),   // 400, 500, 800
+    DIRECT_PACKS.slice(6, 9),   // 1000, 1200, 1500
+    DIRECT_PACKS.slice(9),      // 2000
   ];
   for (const row of rows) {
     for (const amt of row) {
-      const tag = userBonus > 0 && amt >= 1000 ? ` +${userBonus}🎁` : "";
+      const tag = userBonus > 0 && amt >= BONUS_MIN_PACK ? ` +${userBonus}🎁` : "";
+      const basePrice = directPrice(amt);
+      const price = rubleDiscount > 0 ? Math.max(0, basePrice - rubleDiscount) : basePrice;
       kb.textButton({
-        label: `${amt}${tag} R$ — ${fmtRub(Math.round(amt * DIRECT_RATE))}`,
+        label: `${amt}${tag} R$ — ${fmtRub(price)}`,
         payload: { command: "direct_pack", amount: amt },
-        color: amt >= 1000 && userBonus > 0 ? "positive" : "primary",
+        color: userBonus > 0 && amt >= BONUS_MIN_PACK ? "positive" : "primary",
       });
     }
     kb.row();
@@ -753,7 +755,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   }
   if (msgPayload?.command === "direct_pack") {
     const packAmt = typeof msgPayload.amount === "number" ? msgPayload.amount : NaN;
-    if (!isNaN(packAmt) && (DIRECT_PACKS as readonly number[]).includes(packAmt)) {
+    if (!isNaN(packAmt) && DIRECT_PACKS.includes(packAmt)) {
       await handleDirectPackSelect(ctx, vkUserId, packAmt);
     }
     return;
@@ -1667,21 +1669,27 @@ async function handleStartDirect(ctx: MessageContext, vkUserId: number): Promise
     }
   }
 
-  const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { balance: true, robloxUsername: true } });
-  const bonus = user?.balance ?? 0;
+  const user = await (db as any).user.findUnique({
+    where: { vkId: String(vkUserId) },
+    select: { balance: true, bonusExpiresAt: true, rubleDiscount: true, robloxUsername: true },
+  });
+  const now = new Date();
+  const rawBonus = user?.balance ?? 0;
+  const bonusExpired = user?.bonusExpiresAt ? user.bonusExpiresAt <= now : false;
+  const bonus = rawBonus > 0 && !bonusExpired ? rawBonus : 0;
+  const rubleDiscount = user?.rubleDiscount ?? 0;
   const robloxNick = user?.robloxUsername;
-  const bonusNote = bonus > 0
-    ? `\n\n🎁 У тебя есть бонус ${bonus} R$ — он автоматически добавится к заказу от 1000 R$ (бонус действует только для прямых заказов от 1000 R$).`
-    : "";
+  const notes: string[] = [];
+  if (bonus > 0) notes.push(`🎁 Бонус ${bonus} R$ — добавится автоматически.`);
+  if (rubleDiscount > 0) notes.push(`💰 Скидка ${rubleDiscount} ₽ на этот заказ.`);
   const nickNote = robloxNick ? `\n\n🎮 Робуксы придут на ник: ${robloxNick}` : "";
+  const notesBlock = notes.length > 0 ? "\n\n" + notes.join("\n") : "";
 
   setState(vkUserId, { type: "AWAITING_DIRECT_AMOUNT" });
 
   await ctx.reply({
-    message:
-      `💎 Прямой заказ Robux${nickNote}\n\nВыбери количество (курс 0.7 ₽/R$):` +
-      bonusNote,
-    keyboard: buildVkPackKb(bonus),
+    message: `💎 Прямой заказ Robux${nickNote}\n\nВыбери количество:` + notesBlock,
+    keyboard: buildVkPackKb(bonus, rubleDiscount),
   });
 }
 
@@ -1700,12 +1708,18 @@ async function handleDirectAmountInput(ctx: MessageContext, vkUserId: number, te
 }
 
 async function handleDirectPackSelect(ctx: MessageContext, vkUserId: number, amount: number): Promise<void> {
-  const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { balance: true } });
+  const user = await (db as any).user.findUnique({
+    where: { vkId: String(vkUserId) },
+    select: { balance: true, bonusExpiresAt: true, rubleDiscount: true },
+  });
   const rawBonus = user?.balance ?? 0;
-  const bonus = amount >= 1000 ? rawBonus : 0;
+  const bonusExpired = user?.bonusExpiresAt ? user.bonusExpiresAt <= new Date() : false;
+  const bonus = rawBonus > 0 && !bonusExpired && amount >= BONUS_MIN_PACK ? rawBonus : 0;
   const totalAmount = amount + bonus;
   const passPrice = Math.ceil(totalAmount / 0.7);
-  const rublePrice = Math.round(amount * DIRECT_RATE);
+  const baseRublePrice = directPrice(amount);
+  const discount = user?.rubleDiscount ?? 0;
+  const rublePrice = discount > 0 ? Math.max(0, baseRublePrice - discount) : baseRublePrice;
 
   setState(vkUserId, { type: "AWAITING_DIRECT_CONFIRM", amount, totalAmount, bonus });
 
@@ -1714,15 +1728,14 @@ async function handleDirectPackSelect(ctx: MessageContext, vkUserId: number, amo
       `🎁 Твой бонус:     +${bonus} R$\n` +
       `─────────────────\n` +
       `📦 Итого получишь:  ${totalAmount} R$\n`
-    : rawBonus > 0 && amount < 1000
-    ? `📦 Получишь:       ${amount} R$\n` +
-      `💡 Бонус ${rawBonus} R$ применяется к заказам от 1000 R$.\n`
     : `📦 Получишь:       ${totalAmount} R$\n`;
+  const discountLine = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
 
   await ctx.reply({
     message:
       `✅ Подтверди заказ\n\n` +
       bonusSection +
+      discountLine +
       `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
       `📌 Цена геймпасса:  ${passPrice} R$`,
     keyboard: Keyboard.builder()
@@ -1783,11 +1796,16 @@ async function handleDirectConfirm(ctx: MessageContext, vkUserId: number): Promi
           isDirectOrder: true,
         },
       });
+      const updateData: any = {};
       if (bonus > 0) {
-        await tx.user.update({
-          where: { id: user.id },
-          data:  { balance: 0, reviewBonusGrantedAt: null, reviewReminderLevel: 0 },
-        });
+        updateData.balance = 0;
+        updateData.reviewBonusGrantedAt = null;
+        updateData.bonusExpiresAt = null;
+        updateData.reviewReminderLevel = 0;
+      }
+      if (user.rubleDiscount > 0) updateData.rubleDiscount = 0;
+      if (Object.keys(updateData).length > 0) {
+        await tx.user.update({ where: { id: user.id }, data: updateData });
       }
       return ord;
     });
@@ -1897,7 +1915,7 @@ async function handleReviewScreenshot(
     if (knownOrderId) {
       await ctx.reply(
         "📸 Пришли скриншот отзыва в виде фотографии (не файлом).\n" +
-        "После проверки администратором ты получишь +100 R$ (для прямых заказов от 1000 R$)."
+        "После проверки администратором ты получишь +100 R$ (действует на любой номинал)."
       );
     } else {
       // Photo was detected at routing level but URL extraction failed — guide user
@@ -1962,7 +1980,7 @@ async function handleReviewScreenshot(
 
   clearState(vkUserId);
 
-  await ctx.reply("✅ Отзыв получен! Менеджер проверит его в ближайшее время и начислит бонус 100 R$ (для прямых заказов от 1000 R$).");
+  await ctx.reply("✅ Отзыв получен! Менеджер проверит его в ближайшее время и начислит бонус 100 R$ (действует на любой номинал).");
 
   // Forward to Telegram admins
   const reviewerName = user.name ?? await vkGetName(vkUserId);
@@ -2092,6 +2110,10 @@ async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<v
 
   const firstName = await vkGetName(vkUserId);
   const balance = user?.balance ?? 0;
+  const bonusExpiresAt = user?.bonusExpiresAt ? new Date(user.bonusExpiresAt) : null;
+  const bonusExpired = bonusExpiresAt ? bonusExpiresAt <= new Date() : false;
+  const effectiveBonus = balance > 0 && !bonusExpired ? balance : 0;
+  const rubleDiscount = user?.rubleDiscount ?? 0;
   const robloxNick = user?.robloxUsername;
   const tier = status.orderCount >= 5 ? "👑 VIP-клиент"
              : status.isReturning   ? "💛 Постоянный клиент"
@@ -2101,9 +2123,17 @@ async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<v
     ? `🎮 RobloxBank · ${robloxNick}`
     : `👤 Твоё меню${firstName ? `, ${firstName}` : ""} · RobloxBank`;
 
+  const perks: string[] = [];
+  if (effectiveBonus > 0) {
+    const expStr = bonusExpiresAt!.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+    perks.push(`🎁 ${effectiveBonus} R$ (до ${expStr})`);
+  }
+  if (rubleDiscount > 0) perks.push(`💰 Скидка ${rubleDiscount} ₽`);
+  const perksStr = perks.length > 0 ? ` · ${perks.join(" · ")}` : "";
+
   const lines: string[] = [heading, ""];
   const oc = status.orderCount;
-  lines.push(`${tier} · ${oc > 0 ? `${oc} ${oc === 1 ? "заказ" : oc < 5 ? "заказа" : "заказов"}` : "0 заказов"}${balance > 0 ? ` · 🎁 ${balance} R$` : ""}`);
+  lines.push(`${tier} · ${oc > 0 ? `${oc} ${oc === 1 ? "заказ" : oc < 5 ? "заказа" : "заказов"}` : "0 заказов"}${perksStr}`);
 
   if (activeOrders.length > 0) {
     lines.push("");
@@ -2300,7 +2330,7 @@ async function handleIdleMessage(
           "\n💡 Они уже у тебя в Roblox — лежат в пендинге (заморожены самим Roblox). Проверить: roblox.com/transactions → строка Pending." +
           (reviewClaimed
             ? "\n\n🚀 Хочешь заказать ещё? Постоянным клиентам — прямое обслуживание без очереди по лучшему курсу! Пиши: https://t.me/RobloxBank_PA"
-            : "\n\n🎁 Оставь отзыв на Wildberries и получи +100 R$ бонусом (для прямых заказов от 1000 R$)!\nСделай скриншот отзыва и пришли его сюда фотографией.")
+            : "\n\n🎁 Оставь отзыв на Wildberries и получи +100 R$ бонусом (действует на любой номинал)!\nСделай скриншот отзыва и пришли его сюда фотографией.")
         : order.status === "REJECTED"
         ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Исправь геймпасс и нажми кнопку ниже — отправим на проверку заново.`
         : "";

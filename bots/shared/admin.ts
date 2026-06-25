@@ -11,11 +11,41 @@ import { tgSend, tgSendPhoto, escapeHtml } from "./notify";
 
 // ── Direct order pricing ───────────────────────────────────────────────────────
 
-/** Sell rate: how many roubles the customer pays per 1 R$ they receive. */
-export const DIRECT_RATE = 0.7;
+/** Fixed price table: pack size → ruble price. */
+export const DIRECT_PRICES: Record<number, number> = {
+  100:  160,
+  200:  260,
+  300:  360,
+  400:  440,
+  500:  460,
+  800:  720,
+  1000: 800,
+  1200: 890,
+  1500: 1050,
+  2000: 1400,
+};
 
-/** Predefined Robux pack sizes available for direct orders. */
-export const DIRECT_PACKS = [100, 200, 300, 500, 800, 1000, 2000, 5000, 10000] as const;
+/** Ordered list of available pack sizes (derived from DIRECT_PRICES). */
+export const DIRECT_PACKS = Object.keys(DIRECT_PRICES).map(Number) as number[];
+
+/** Returns the ruble price for a given pack. Falls back to 0.7 ₽/R$ for custom amounts. */
+export function directPrice(amount: number): number {
+  return DIRECT_PRICES[amount] ?? Math.round(amount * 0.7);
+}
+
+/** Minimum pack size that qualifies for the R$ bonus. Set to 0 for all packs. */
+export const BONUS_MIN_PACK = 0;
+
+/** Special promo prices for non-bonus users (Friday push). */
+export const PROMO_PRICES: Record<number, number> = {
+  100:  100,
+  200:  200,
+  500:  450,
+  1000: 800,
+};
+
+/** @deprecated Kept for admin card backwards compat — use directPrice() instead. */
+export const DIRECT_RATE = 0.7;
 
 // ── Support alert ─────────────────────────────────────────────────────────────
 
@@ -458,7 +488,7 @@ export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload):
     `🆕 <b>НОВЫЙ КЛИЕНТ</b>\n`;
 
   const paidRobux = payload.amount - payload.bonusApplied;
-  const rublePrice = Math.round(paidRobux * DIRECT_RATE);
+  const rublePrice = directPrice(paidRobux);
 
   const text =
     `🔷 <b>ПРЯМОЙ ЗАКАЗ #${shortId}</b>\n` +

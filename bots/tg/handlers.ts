@@ -11,7 +11,7 @@ import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, vkSendPhoto, stripHtml, tgSend, escapeHtml } from "../shared/notify";
 import { getSbpQrBuffer } from "../shared/sbp";
-import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUserHurdle, sendAdminDirectOrderCard, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_RATE, DIRECT_PACKS, formatUserHandle, formatUserHandleHtml } from "../shared/admin";
+import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUserHurdle, sendAdminDirectOrderCard, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, BONUS_MIN_PACK, formatUserHandle, formatUserHandleHtml } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectAmount, pendingDirectOrder, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectOrderState, type LinkState } from "./session";
 import { getGamepassDetails } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
@@ -43,18 +43,20 @@ function fmtRub(n: number): string {
 }
 
 /** Build an inline keyboard with predefined Robux packs and their ruble prices. */
-function buildPackKb(userBonus = 0) {
+function buildPackKb(userBonus = 0, rubleDiscount = 0, promoActive = false) {
   const rows = [
-    DIRECT_PACKS.slice(0, 3),  // 100, 200, 300
-    DIRECT_PACKS.slice(3, 6),  // 500, 800, 1000
-    DIRECT_PACKS.slice(6, 8),  // 2000, 5000
-    DIRECT_PACKS.slice(8),     // 10000
+    DIRECT_PACKS.slice(0, 3),   // 100, 200, 300
+    DIRECT_PACKS.slice(3, 6),   // 400, 500, 800
+    DIRECT_PACKS.slice(6, 9),   // 1000, 1200, 1500
+    DIRECT_PACKS.slice(9),      // 2000
   ] as number[][];
   const buttons = rows.map(row =>
     row.map(amt => {
-      const tag = userBonus > 0 && amt >= 1000 ? ` +${userBonus}🎁` : "";
+      const tag = userBonus > 0 && amt >= BONUS_MIN_PACK ? ` +${userBonus}🎁` : "";
+      const basePrice = directPrice(amt);
+      const price = rubleDiscount > 0 ? Math.max(0, basePrice - rubleDiscount) : basePrice;
       return Markup.button.callback(
-        `${amt}${tag} R$ — ${fmtRub(Math.round(amt * DIRECT_RATE))}`,
+        `${amt}${tag} R$ — ${fmtRub(price)}`,
         CB.directPack(amt)
       );
     })
@@ -594,19 +596,25 @@ async function getAdminKeyboard(uid?: string | number) {
  */
 async function startDirectFlow(ctx: any): Promise<void> {
   const tgId = String(ctx.from.id);
-  const dirUser = await (db as any).user.findUnique({ where: { tgId }, select: { balance: true, robloxUsername: true } });
-  const bonus = dirUser?.balance ?? 0;
+  const dirUser = await (db as any).user.findUnique({
+    where: { tgId },
+    select: { balance: true, bonusExpiresAt: true, rubleDiscount: true, promoExpiresAt: true, robloxUsername: true },
+  });
+  const now = new Date();
+  const rawBonus = dirUser?.balance ?? 0;
+  const bonusExpired = dirUser?.bonusExpiresAt ? dirUser.bonusExpiresAt <= now : false;
+  const bonus = rawBonus > 0 && !bonusExpired ? rawBonus : 0;
+  const rubleDiscount = dirUser?.rubleDiscount ?? 0;
   const robloxNick = dirUser?.robloxUsername;
-  const bonusNote = bonus > 0
-    ? `\n\n🎁 У тебя есть бонус <b>${bonus} R$</b> — применится автоматически к заказу от 1000 R$ (только прямые заказы).`
-    : "";
-  const nickNote = robloxNick
-    ? `\n\n🎮 Робуксы придут на ник: <b>${escapeHtml(robloxNick)}</b>`
-    : "";
+  const notes: string[] = [];
+  if (bonus > 0) notes.push(`🎁 Бонус <b>${bonus} R$</b> — добавится автоматически.`);
+  if (rubleDiscount > 0) notes.push(`💰 Скидка <b>${rubleDiscount} ₽</b> на этот заказ.`);
+  const nickNote = robloxNick ? `\n\n🎮 Робуксы придут на ник: <b>${escapeHtml(robloxNick)}</b>` : "";
+  const notesBlock = notes.length > 0 ? "\n\n" + notes.join("\n") : "";
   pendingDirectAmount.set(ctx.from.id, true);
   await ctx.reply(
-    `💎 <b>Прямой заказ Robux</b>${nickNote}\n\nВыбери количество (курс <b>0.7 ₽/R$</b>):` + bonusNote,
-    { parse_mode: "HTML", ...buildPackKb(bonus) }
+    `💎 <b>Прямой заказ Robux</b>${nickNote}\n\nВыбери количество:` + notesBlock,
+    { parse_mode: "HTML", ...buildPackKb(bonus, rubleDiscount) }
   );
 }
 
@@ -995,6 +1003,10 @@ async function buildBuyerMenu(tgId: string, name?: string): Promise<StatusMessag
   }
 
   const balance = user?.balance ?? 0;
+  const bonusExpiresAt = user?.bonusExpiresAt ? new Date(user.bonusExpiresAt) : null;
+  const bonusExpired = bonusExpiresAt ? bonusExpiresAt <= new Date() : false;
+  const effectiveBonus = balance > 0 && !bonusExpired ? balance : 0;
+  const rubleDiscount = user?.rubleDiscount ?? 0;
   const robloxNick = user?.robloxUsername;
   const tier = status.orderCount >= 5 ? "👑 VIP-клиент"
              : status.isReturning   ? "💛 Постоянный клиент"
@@ -1004,8 +1016,16 @@ async function buildBuyerMenu(tgId: string, name?: string): Promise<StatusMessag
     ? `🎮 <b>RobloxBank</b> · ${escapeHtml(robloxNick)}`
     : `👤 <b>Твоё меню</b>${name ? ` ${escapeHtml(name)}` : ""} · RobloxBank`;
 
+  const perks: string[] = [];
+  if (effectiveBonus > 0) {
+    const expStr = bonusExpiresAt!.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+    perks.push(`🎁 ${effectiveBonus} R$ (до ${expStr})`);
+  }
+  if (rubleDiscount > 0) perks.push(`💰 Скидка ${rubleDiscount} ₽`);
+  const perksStr = perks.length > 0 ? ` · ${perks.join(" · ")}` : "";
+
   const lines: string[] = [heading, ""];
-  lines.push(`${tier} · ${status.orderCount > 0 ? `${status.orderCount} ${status.orderCount === 1 ? "заказ" : status.orderCount < 5 ? "заказа" : "заказов"}` : "0 заказов"}${balance > 0 ? ` · 🎁 ${balance} R$` : ""}`);
+  lines.push(`${tier} · ${status.orderCount > 0 ? `${status.orderCount} ${status.orderCount === 1 ? "заказ" : status.orderCount < 5 ? "заказа" : "заказов"}` : "0 заказов"}${perksStr}`);
 
   if (activeOrders.length > 0) {
     lines.push("");
@@ -1170,26 +1190,28 @@ export function registerText(bot: Telegraf): void {
       pendingDirectAmount.delete(ctx.from.id);
       const dirUser = await (db as any).user.findUnique({
         where: { tgId },
-        select: { balance: true },
+        select: { balance: true, bonusExpiresAt: true, rubleDiscount: true },
       });
       const rawBonus = dirUser?.balance ?? 0;
-      const bonus = num >= 1000 ? rawBonus : 0;
+      const bonusExpired = dirUser?.bonusExpiresAt ? dirUser.bonusExpiresAt <= new Date() : false;
+      const bonus = rawBonus > 0 && !bonusExpired && num >= BONUS_MIN_PACK ? rawBonus : 0;
       const totalAmount = num + bonus;
       const passPrice = Math.ceil(totalAmount / 0.7);
-      const rublePrice = Math.round(num * DIRECT_RATE);
+      const baseRublePrice = directPrice(num);
+      const discount = dirUser?.rubleDiscount ?? 0;
+      const rublePrice = discount > 0 ? Math.max(0, baseRublePrice - discount) : baseRublePrice;
       pendingDirectOrder.set(ctx.from.id, { amount: num, passPrice, totalAmount });
       const bonusSection = bonus > 0
         ? `💎 Запрос:          ${num} R$\n` +
           `🎁 Твой бонус:     +${bonus} R$\n` +
           `━━━━━━━━━━━━━━━━\n` +
           `📦 Итого получишь:  ${totalAmount} R$\n`
-        : rawBonus > 0 && num < 1000
-        ? `📦 Получишь:       ${totalAmount} R$\n` +
-          `💡 <i>Бонус ${rawBonus} R$ применяется к заказам от 1000 R$</i>\n`
         : `📦 Получишь:       ${totalAmount} R$\n`;
+      const discountLine = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
       await ctx.reply(
         `✅ <b>Подтверди заказ</b>\n\n` +
         bonusSection +
+        discountLine +
         `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
         `📌 Цена геймпасса:  ${passPrice} R$`,
         {
@@ -2383,7 +2405,7 @@ export function registerPhoto(bot: Telegraf): void {
       if (!order || !linked) {
         await ctx.reply(
           "У тебя пока нет выполненных заказов, за которые можно получить бонус.\n\n" +
-          "Когда заказ будет выполнен, пришли скриншот отзыва с Wildberries — начислим +100 R$ (бонус для прямых заказов от 1000 R$)!",
+          "Когда заказ будет выполнен, пришли скриншот отзыва с Wildberries — начислим +100 R$ (действует на любой номинал)!",
           withSupportKb()
         );
         return;
@@ -2843,58 +2865,45 @@ export function registerCallbacks(bot: Telegraf): void {
     // dp: user selects a predefined pack
     if (data.startsWith("dp:")) {
       const amt = parseInt(data.slice(3), 10);
-      if (isNaN(amt) || !(DIRECT_PACKS as readonly number[]).includes(amt)) {
+      if (isNaN(amt) || !DIRECT_PACKS.includes(amt)) {
         await ctx.answerCbQuery("Неверный пак");
         return;
       }
       pendingDirectAmount.delete(ctx.from.id);
       const dirUser = await (db as any).user.findUnique({
         where: { tgId },
-        select: { balance: true },
+        select: { balance: true, bonusExpiresAt: true, rubleDiscount: true },
       });
       const rawBonus = dirUser?.balance ?? 0;
-      const bonus = amt >= 1000 ? rawBonus : 0;
+      const bonusExpired = dirUser?.bonusExpiresAt ? dirUser.bonusExpiresAt <= new Date() : false;
+      const bonus = rawBonus > 0 && !bonusExpired && amt >= BONUS_MIN_PACK ? rawBonus : 0;
       const totalAmount = amt + bonus;
       const passPrice = Math.ceil(totalAmount / 0.7);
-      const rublePrice = Math.round(amt * DIRECT_RATE);
+      const baseRublePrice = directPrice(amt);
+      const discount = dirUser?.rubleDiscount ?? 0;
+      const rublePrice = discount > 0 ? Math.max(0, baseRublePrice - discount) : baseRublePrice;
       pendingDirectOrder.set(ctx.from.id, { amount: amt, passPrice, totalAmount });
       const bonusSection = bonus > 0
         ? `💎 Запрос:          ${amt} R$\n` +
           `🎁 Твой бонус:     +${bonus} R$\n` +
           `━━━━━━━━━━━━━━━━\n` +
           `📦 Итого получишь:  ${totalAmount} R$\n`
-        : rawBonus > 0 && amt < 1000
-        ? `📦 Получишь:       ${totalAmount} R$\n` +
-          `💡 <i>Бонус ${rawBonus} R$ применяется к заказам от 1000 R$</i>\n`
         : `📦 Получишь:       ${totalAmount} R$\n`;
+      const discountLine = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
+      const confirmText =
+        `✅ <b>Подтверди заказ</b>\n\n` +
+        bonusSection +
+        discountLine +
+        `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
+        `📌 Цена геймпасса:  ${passPrice} R$`;
+      const confirmKb = Markup.inlineKeyboard([[
+        Markup.button.callback("✅ Подтвердить", CB.confirmDirect),
+        Markup.button.callback("❌ Отмена", CB.cancelDirect),
+      ]]);
       try {
-        await ctx.editMessageText(
-          `✅ <b>Подтверди заказ</b>\n\n` +
-          bonusSection +
-          `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
-          `📌 Цена геймпасса:  ${passPrice} R$`,
-          {
-            parse_mode: "HTML",
-            ...Markup.inlineKeyboard([[
-              Markup.button.callback("✅ Подтвердить", CB.confirmDirect),
-              Markup.button.callback("❌ Отмена", CB.cancelDirect),
-            ]]),
-          }
-        );
+        await ctx.editMessageText(confirmText, { parse_mode: "HTML", ...confirmKb });
       } catch {
-        await ctx.reply(
-          `✅ <b>Подтверди заказ</b>\n\n` +
-          bonusSection +
-          `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
-          `📌 Цена геймпасса:  ${passPrice} R$`,
-          {
-            parse_mode: "HTML",
-            ...Markup.inlineKeyboard([[
-              Markup.button.callback("✅ Подтвердить", CB.confirmDirect),
-              Markup.button.callback("❌ Отмена", CB.cancelDirect),
-            ]]),
-          }
-        );
+        await ctx.reply(confirmText, { parse_mode: "HTML", ...confirmKb });
       }
       await ctx.answerCbQuery();
       return;
@@ -2946,7 +2955,6 @@ export function registerCallbacks(bot: Telegraf): void {
       let newDirectOrder: any;
       const bonus = dirState.totalAmount - dirState.amount;
       try {
-        // Create order and atomically spend the bonus balance
         newDirectOrder = await (db as any).$transaction(async (tx: any) => {
           const ord = await tx.wbOrder.create({
             data: {
@@ -2959,11 +2967,16 @@ export function registerCallbacks(bot: Telegraf): void {
               isDirectOrder: true,
             },
           });
+          const updateData: any = {};
           if (bonus > 0) {
-            await tx.user.update({
-              where: { id: dirUser.id },
-              data:  { balance: 0, reviewBonusGrantedAt: null, reviewReminderLevel: 0 },
-            });
+            updateData.balance = 0;
+            updateData.reviewBonusGrantedAt = null;
+            updateData.bonusExpiresAt = null;
+            updateData.reviewReminderLevel = 0;
+          }
+          if (dirUser.rubleDiscount > 0) updateData.rubleDiscount = 0;
+          if (Object.keys(updateData).length > 0) {
+            await tx.user.update({ where: { id: dirUser.id }, data: updateData });
           }
           return ord;
         });
@@ -3064,7 +3077,7 @@ export function registerCallbacks(bot: Telegraf): void {
       }
 
       const sqrShortId  = sqrOrderId.slice(-6).toUpperCase();
-      const rublePrice  = Math.round(sqrOrder.amount * DIRECT_RATE);
+      const rublePrice  = directPrice(sqrOrder.amount);
       await (db as any).wbOrder.update({
         where: { id: sqrOrderId },
         data:  { status: "PAYMENT_PENDING", paymentDetails: "СБП QR" },
@@ -3377,13 +3390,18 @@ export function registerCallbacks(bot: Telegraf): void {
       const user = await (db as any).user.findUnique({ where: { id: userId } });
       const expiryDate = new Date();
       expiryDate.setDate(expiryDate.getDate() + 30);
+      // Set bonusExpiresAt on the user
+      await (db as any).user.update({
+        where: { id: userId },
+        data: { bonusExpiresAt: expiryDate },
+      });
       const expiryStr = expiryDate.toLocaleDateString("ru-RU", {
         day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Moscow",
       });
       const bonusMsg =
         `🎁 <b>+100 R$ зачислено на счёт!</b>\n\n` +
-        `Действуют до ${expiryStr}.\n\n` +
-        `Используй на прямой заказ от 1000 R$ — бонус добавится автоматически.`;
+        `Спасибо за отзыв! Действуют до ${expiryStr}.\n\n` +
+        `Используй на прямой заказ — бонус добавится автоматически.`;
 
       if (user?.tgId) {
         try {
@@ -3508,7 +3526,7 @@ export function registerCallbacks(bot: Telegraf): void {
       }
       await ctx.reply(
         "📸 Сделай скриншот своего отзыва на Wildberries и отправь его сюда фотографией (не файлом, не документом).\n\n" +
-        "После проверки бонус <b>+100 R$</b> придёт автоматически (для прямых заказов от 1000 R$).",
+        "После проверки бонус <b>+100 R$</b> придёт автоматически (действует на любой номинал).",
         { parse_mode: "HTML" }
       );
       await ctx.answerCbQuery();
@@ -3571,36 +3589,51 @@ async function notifyUserCompleted(
   const pendingLineVk =
     `\n\n📊 Проверить зачисление: https://www.roblox.com/transactions → строка Pending`;
 
+  // Post-purchase discount: direct orders < 500 R$ get 60₽ off next order
+  if (isDirectOrder && amount < 500) {
+    try {
+      await (db as any).user.update({
+        where: { id: user.id },
+        data: { rubleDiscount: 60 },
+      });
+    } catch (err) {
+      console.error("[TG] Failed to set rubleDiscount:", err);
+    }
+  }
+
+  const discountNote = isDirectOrder && amount < 500
+    ? `\n\n💰 Дарю тебе скидку <b>60 рублей</b> к следующему заказу.`
+    : "";
+
   if (isDirectOrder) {
     if (completedCount <= 1) {
       tgMsg =
-        `✅ <b>Заказ выкуплен!</b> Робуксы уже в пути 🚀\n\n` +
+        `✅ <b>Спасибо за покупку!</b> Робуксы будут выкуплены в течение нескольких часов.\n\n` +
         `Roblox зачислит их в течение 5–7 дней — это их стандартный процесс.` +
-        pendingLine + `\n\n` +
+        pendingLine + discountNote + `\n\n` +
         `Спасибо, что выбрал RobloxBank! Заказывай ещё — мы всегда здесь 💛`;
     } else {
       tgMsg =
         `✅ Заказ выкуплен! Это уже твой <b>${completedCount}-й</b> заказ — спасибо за доверие! 💛\n\n` +
         `Робуксы появятся в течение 5–7 дней.` +
-        pendingLine + `\n\n` +
+        pendingLine + discountNote + `\n\n` +
         `Всё ли было удобно? Напиши нам — мы читаем каждое сообщение.`;
     }
     vkMsg = tgMsg.replace(/<\/?b>/g, "").replace(pendingLine, pendingLineVk).replace(/<a href="[^"]+">([^<]+)<\/a>/g, "$1");
   } else if (wbCompletedCount === 1) {
-    // TIER 1: First WB order — review prompt
     tgMsg =
       `✅ <b>Заказ выкуплен!</b> Робуксы уже в пути 🚀\n\n` +
       `Roblox зачислит их в течение 5–7 дней — это их стандартный процесс.` +
       pendingLine + `\n\n` +
       `🎁 <b>Оставь отзыв и получи +100 R$ в подарок!</b>\n` +
-      `Бонус применяется к прямому заказу от 1000 R$.\n` +
+      `Бонус действует на любой номинал.\n` +
       `Напиши отзыв на Wildberries, сделай скриншот и отправь его сюда (фотографией, не файлом). После проверки бонус начислим сразу!`;
     vkMsg =
       `✅ Заказ выкуплен! Робуксы уже в пути 🚀\n\n` +
       `Roblox зачислит их в течение 5–7 дней — это их стандартный процесс.` +
       pendingLineVk + `\n\n` +
       `Оставь отзыв и получи +100 R$ в подарок!\n` +
-      `Бонус применяется к прямому заказу от 1000 R$.\n` +
+      `Бонус действует на любой номинал.\n` +
       `Напиши отзыв на Wildberries, сделай скриншот и отправь его в этот чат. После проверки бонус начислим сразу!`;
   } else {
     // TIER 2: Returning / VIP — direct order pitch
@@ -3626,7 +3659,7 @@ async function notifyUserCompleted(
       let keyboard: ReturnType<typeof Markup.inlineKeyboard>;
       if (!isDirectOrder && wbCompletedCount === 1) {
         keyboard = Markup.inlineKeyboard([
-          [Markup.button.callback("📸 Отзыв = +100 R$ (от 1000 R$)", CB.reviewHint)],
+          [Markup.button.callback("📸 Отзыв = +100 R$ бонус", CB.reviewHint)],
           [Markup.button.url("💬 Написать менеджеру", SUPPORT_URL)],
         ]);
         pendingReview.set(parseInt(user.tgId), orderId);
@@ -3705,11 +3738,11 @@ async function notifyReviewRejected(
 
   const tgMsg =
     `📸 Скриншот не подошёл: <b>${reason}</b>.\n\n` +
-    `Пришли новый — бонус 100 R$ всё ещё ждёт тебя (для прямых заказов от 1000 R$)! 🎁`;
+    `Пришли новый — бонус 100 R$ всё ещё ждёт тебя (действует на любой номинал)! 🎁`;
 
   const vkMsg =
     `📸 Скриншот не подошёл: ${reason}.\n\n` +
-    `Пришли новый — бонус 100 R$ всё ещё ждёт тебя (для прямых заказов от 1000 R$)! 🎁`;
+    `Пришли новый — бонус 100 R$ всё ещё ждёт тебя (действует на любой номинал)! 🎁`;
 
   if (user.tgId) {
     try {
