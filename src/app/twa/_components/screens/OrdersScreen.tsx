@@ -483,51 +483,29 @@ function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) =
   );
 }
 
-/* ───────────── QuickTools — open / copy gamepass & nick, grouped with actions ───────────── */
-function QuickTools({ order }: { order: Order }) {
-  const gp   = order.gamepassUrl;
-  const nick = order.robloxUsername;
-  if (!gp && !nick) return null;
-  const toolStyle: React.CSSProperties = {
-    flex: 1, minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-    padding: "10px 8px", borderRadius: 11, border: "none",
-    background: "rgba(255,255,255,0.06)", color: C.textSecondary,
-    fontSize: 12.5, fontWeight: 600, cursor: "pointer", textDecoration: "none",
-    whiteSpace: "nowrap",
-  };
-  const copy = (text: string, label: string) => {
-    copyText(text); haptic.impact("light"); toast(`${label} скопирован`, "success");
-  };
+/* ───────────── PassIdCopy — single copy-button for the gamepass ID ───────────── */
+function PassIdCopy({ order }: { order: Order }) {
+  const passId = extractGamepassId(order.gamepassUrl);
+  if (!passId) return null;
   return (
-    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-      {gp && (
-        <a href={gp} target="_blank" rel="noreferrer"
-           onClick={e => { e.stopPropagation(); haptic.impact("light"); }} style={toolStyle}>
-          🔗 Открыть
-        </a>
-      )}
-      {gp && (
-        <button className="twa-press-sm" onClick={e => { e.stopPropagation(); copy(gp, "Ссылка"); }} style={toolStyle}>
-          📋 Ссылка
-        </button>
-      )}
-      {gp && extractGamepassId(gp) && (
-        <button className="twa-press-sm" onClick={e => { e.stopPropagation(); copy(extractGamepassId(gp)!, "Pass ID"); }} style={toolStyle}>
-          🎫 Pass ID
-        </button>
-      )}
-      {nick && (
-        <button className="twa-press-sm" onClick={e => { e.stopPropagation(); copy(nick, "Ник"); }} style={toolStyle}>
-          📋 Ник
-        </button>
-      )}
-    </div>
+    <button
+      className="twa-press-sm"
+      onClick={e => { e.stopPropagation(); copyText(passId); haptic.impact("light"); toast("Pass ID скопирован", "success"); }}
+      style={{
+        width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+        padding: "10px 8px", borderRadius: 11, border: "none",
+        background: "rgba(255,255,255,0.06)", color: C.textSecondary,
+        fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+      }}
+    >
+      🎫 Pass ID: <span style={{ color: C.textPrimary, fontFamily: "monospace" }}>{passId}</span>
+    </button>
   );
 }
 
 function extractGamepassId(url: string | null): string | null {
   if (!url) return null;
-  const m = url.match(/game-pass\/(\d+)/i);
+  const m = url.match(/game-pass(?:es)?\/(\d+)/i);
   return m ? m[1] : null;
 }
 
@@ -965,8 +943,8 @@ function OrderCard({
           display: "flex", flexDirection: "column", gap: 10,
           background: "rgba(0,0,0,0.12)",
         }}>
+          <PassIdCopy order={order} />
           <ActionBar order={order} onRunAction={onRunAction} />
-          <QuickTools order={order} />
           {onGoToBossrobux && order.gamepassUrl && (order.status === "PENDING" || order.status === "IN_PROGRESS") && (
             <button
               className="twa-press"
