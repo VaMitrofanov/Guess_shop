@@ -511,6 +511,11 @@ function QuickTools({ order }: { order: Order }) {
           📋 Ссылка
         </button>
       )}
+      {gp && extractGamepassId(gp) && (
+        <button className="twa-press-sm" onClick={e => { e.stopPropagation(); copy(extractGamepassId(gp)!, "Pass ID"); }} style={toolStyle}>
+          🎫 Pass ID
+        </button>
+      )}
       {nick && (
         <button className="twa-press-sm" onClick={e => { e.stopPropagation(); copy(nick, "Ник"); }} style={toolStyle}>
           📋 Ник

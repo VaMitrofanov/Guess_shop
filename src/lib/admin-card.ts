@@ -75,7 +75,11 @@ export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
     `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
     `📊 Статус: ⏳ В обработке\n\n` +
-    `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>`;
+    `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>` +
+    (() => {
+      const m = order.gamepassUrl.match(/game-pass(?:es)?\/(\d+)/);
+      return m ? `\n🎫 Pass ID: <code>${m[1]}</code>` : "";
+    })();
 
   const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(shortId)}`;
   const reply_markup = {

@@ -444,7 +444,11 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
     `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
     `📊 Статус: ⏳ В обработке\n\n` +
-    `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>`;
+    `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>` +
+    (() => {
+      const m = order.gamepassUrl.match(/game-pass(?:es)?\/(\d+)/);
+      return m ? `\n🎫 Pass ID: <code>${m[1]}</code>` : "";
+    })();
 
   // One-tap deep-link into the TWA Orders screen, prefocused on this order.
   // web_app inline buttons launch the Web App in personal chats with the given
