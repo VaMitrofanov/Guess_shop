@@ -178,7 +178,8 @@ async function tryRestoreState(vkUserId: number, ctx?: MessageContext): Promise<
     const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
     if (!user) return "none";
 
-    // Look for AWAITING_GAMEPASS or REJECTED orders — mirrors TG DB recovery.
+    // Look for AWAITING_GAMEPASS or REJECTED WB orders — mirrors TG DB recovery.
+    // REJECTED direct orders are dead (cancelled by manager) — never restore.
     // Limit to 30 days to avoid restoring stale orders from months ago where
     // the gamepass no longer exists.
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -186,6 +187,7 @@ async function tryRestoreState(vkUserId: number, ctx?: MessageContext): Promise<
       where:   {
         userId: user.id,
         status: { in: ["AWAITING_GAMEPASS", "REJECTED"] },
+        isDirectOrder: false,
         updatedAt: { gte: thirtyDaysAgo },
       },
       orderBy: { updatedAt: "desc" },
@@ -2019,6 +2021,11 @@ async function findRelevantOrder(userId: string): Promise<any | null> {
     orderBy: { createdAt: "desc" },
   });
   if (active) return active;
+  const completed = await (db as any).wbOrder.findFirst({
+    where: { userId, status: "COMPLETED" },
+    orderBy: { createdAt: "desc" },
+  });
+  if (completed) return completed;
   return (db as any).wbOrder.findFirst({
     where: { userId },
     orderBy: { createdAt: "desc" },
@@ -2331,6 +2338,8 @@ async function handleIdleMessage(
           (reviewClaimed
             ? "\n\n🚀 Хочешь заказать ещё? Постоянным клиентам — прямое обслуживание без очереди по лучшему курсу! Пиши: https://t.me/RobloxBank_PA"
             : "\n\n🎁 Оставь отзыв на Wildberries и получи +100 R$ бонусом (действует на любой номинал)!\nСделай скриншот отзыва и пришли его сюда фотографией.")
+        : order.status === "REJECTED" && order.isDirectOrder
+        ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Если хочешь — оформи новый заказ.`
         : order.status === "REJECTED"
         ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Исправь геймпасс и нажми кнопку ниже — отправим на проверку заново.`
         : "";
@@ -2343,7 +2352,9 @@ async function handleIdleMessage(
     // Status-specific rows first, then always a "👤 В моё меню" row so the user
     // never dead-ends on the status screen (mirror of the TG menuRow).
     const kb = Keyboard.builder();
-    if (order.status === "REJECTED") {
+    if (order.status === "REJECTED" && order.isDirectOrder) {
+      kb.textButton({ label: "💎 Заказать напрямую", payload: { command: "start_direct" }, color: "positive" }).row();
+    } else if (order.status === "REJECTED") {
       kb.textButton({ label: "🔄 Исправить ссылку", payload: { command: "resubmit", code: order.wbCode }, color: "primary" }).row();
     } else if (order.status === "AWAITING_GAMEPASS") {
       kb.urlButton({ label: "📖 ИНСТРУКЦИЯ", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}` }).row()

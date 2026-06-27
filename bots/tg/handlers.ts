@@ -760,6 +760,11 @@ async function findRelevantOrder(userId: string): Promise<any | null> {
     orderBy: { createdAt: "desc" },
   });
   if (active) return active;
+  const completed = await (db as any).wbOrder.findFirst({
+    where: { userId, status: "COMPLETED" },
+    orderBy: { createdAt: "desc" },
+  });
+  if (completed) return completed;
   return (db as any).wbOrder.findFirst({
     where: { userId },
     orderBy: { createdAt: "desc" },
@@ -1338,10 +1343,11 @@ export function registerText(bot: Telegraf): void {
             return;
           }
 
-          // 3. REJECTED order — guide user to resubmit
+          // 3. REJECTED WB order — guide user to resubmit.
+          // Skip REJECTED direct orders — they're dead (cancelled by manager).
           if (!state) {
             const rejectedOrder = await (db as any).wbOrder.findFirst({
-              where: { userId: tgUser.id, status: "REJECTED" },
+              where: { userId: tgUser.id, status: "REJECTED", isDirectOrder: false },
               orderBy: { updatedAt: "desc" },
             });
             if (rejectedOrder) {
