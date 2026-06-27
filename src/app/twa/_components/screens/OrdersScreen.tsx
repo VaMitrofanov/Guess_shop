@@ -1463,6 +1463,9 @@ function MiniDashboard({ counts, sums, onTap }: {
             }}>
               {fmtRobux(robux)}
               <span style={{ fontSize: 11, fontWeight: 500, color: C.textSecondary, marginLeft: 2 }}>R$</span>
+              <span style={{ fontSize: 11, fontWeight: 500, color: C.textTertiary, marginLeft: 4 }}>
+                ({fmtRobux(Math.ceil(robux / 0.7))})
+              </span>
             </div>
             <div style={{
               fontSize: 11, color: C.textTertiary, ...tabular,
