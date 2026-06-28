@@ -224,6 +224,7 @@ export function formatUserHandleHtml(u: UserHandleSource): string {
 export const CB = {
   adminOk:    (orderId: string) => `admin_ok:${orderId}`,   // 34 b
   adminErr:   (orderId: string) => `admin_reject_init:${orderId}`,  // 43 b
+  purchaseScript: (orderId: string) => `ps:${orderId}`,            // 28 b
   reviewOk:   (orderId: string, userId: string) => `review_ok:${orderId}:${userId}`, // 61 b
   reviewNo:   (orderId: string, userId: string) => `review_no:${orderId}:${userId}`, // 61 b
 
@@ -461,7 +462,8 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
         { text: "❌ ОШИБКА",    callback_data: CB.adminErr(order.id) },
       ],
       [
-        { text: "📊 Открыть в дашборде", web_app: { url: twaUrl } },
+        { text: "📋 Скрипт выкупа", callback_data: CB.purchaseScript(order.id) },
+        { text: "📊 Дашборд",       web_app: { url: twaUrl } },
       ],
     ],
   };

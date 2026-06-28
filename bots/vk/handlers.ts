@@ -1918,8 +1918,8 @@ async function handleReviewScreenshot(
     }
     if (knownOrderId) {
       await ctx.reply(
-        "📸 Пришли скриншот отзыва в виде фотографии (не файлом).\n" +
-        "После проверки администратором ты получишь +100 R$ (действует на любой номинал)."
+        "📸 Оставь отзыв на Wildberries с текстом и фото, пришли скриншот в виде фотографии (не файлом).\n" +
+        "После проверки получишь +100 R$ (действует на любой номинал)."
       );
     } else {
       // Photo was detected at routing level but URL extraction failed — guide user
@@ -2339,7 +2339,7 @@ async function handleIdleMessage(
           "\n💡 Они уже у тебя в Roblox — лежат в пендинге (заморожены самим Roblox). Проверить: roblox.com/transactions → строка Pending." +
           (reviewClaimed
             ? "\n\n🚀 Хочешь заказать ещё? Постоянным клиентам — прямое обслуживание без очереди по лучшему курсу! Пиши: https://t.me/RobloxBank_PA"
-            : "\n\n🎁 Оставь отзыв на Wildberries и получи +100 R$ бонусом (действует на любой номинал)!\nСделай скриншот отзыва и пришли его сюда фотографией.")
+            : "\n\n🎁 Оставь отзыв на Wildberries с текстом и фото — получи +100 R$ бонусом (действует на любой номинал)!\nПришли скриншот отзыва сюда фотографией.")
         : order.status === "REJECTED" && order.isDirectOrder
         ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Если хочешь — оформи новый заказ.`
         : order.status === "REJECTED"

@@ -868,3 +868,82 @@ export async function getGamepassDetails(
 
   return getGamepassDetailsDirect(gamepassId);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Purchase helpers (admin auto-buy)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface GamepassProductInfo {
+  productId:           number;
+  priceInRobux:        number;
+  userBasePriceInRobux: number;
+  creatorId:           number;
+  creatorName:         string;
+  name:                string;
+  isForSale:           boolean;
+  isManagedPricing:    boolean;
+}
+
+/**
+ * Fetches product-info for a gamepass — returns everything needed
+ * for a purchase script and managed pricing detection.
+ */
+export async function getGamepassProductInfo(
+  gamepassId: string,
+): Promise<GamepassProductInfo | null> {
+  try {
+    const res = await rFetch(
+      `https://apis.roblox.com/game-passes/v1/game-passes/${gamepassId}/product-info`,
+    );
+    if (!res.ok) {
+      // Fallback to roproxy
+      const rr = await rFetch(
+        `https://apis.roproxy.com/game-passes/v1/game-passes/${gamepassId}/product-info`,
+      );
+      if (!rr.ok) return null;
+      const d: any = await rr.json();
+      return parseProductInfo(d);
+    }
+    const d: any = await res.json();
+    return parseProductInfo(d);
+  } catch (err: any) {
+    console.error("[Roblox/bots] getGamepassProductInfo:", err?.message ?? err);
+    return null;
+  }
+}
+
+function parseProductInfo(d: any): GamepassProductInfo | null {
+  if (!d || !d.ProductId) return null;
+  const price = d.PriceInRobux ?? 0;
+  const base  = d.UserBasePriceInRobux ?? price;
+  return {
+    productId:            d.ProductId,
+    priceInRobux:         price,
+    userBasePriceInRobux: base,
+    creatorId:            d.Creator?.Id ?? d.Creator?.CreatorTargetId ?? 0,
+    creatorName:          d.Creator?.Name ?? "Unknown",
+    name:                 d.Name ?? "Gamepass",
+    isForSale:            d.IsForSale ?? false,
+    isManagedPricing:     price !== base,
+  };
+}
+
+/**
+ * Generates a browser-console JS script for purchasing a gamepass.
+ * Values are pre-filled from product-info — manager just pastes into Antik console.
+ */
+export function buildPurchaseScript(info: GamepassProductInfo): string {
+  return [
+    `(async()=>{`,
+    `const r=await fetch("https://auth.roblox.com/v2/logout",{method:"POST",credentials:"include"});`,
+    `const t=r.headers.get("x-csrf-token");`,
+    `if(!t){console.log("❌ Не залогинен");return}`,
+    `const b=await fetch("https://economy.roblox.com/v1/purchases/products/${info.productId}",{`,
+    `method:"POST",credentials:"include",`,
+    `headers:{"Content-Type":"application/json","X-CSRF-TOKEN":t},`,
+    `body:JSON.stringify({expectedCurrency:1,expectedPrice:${info.priceInRobux},expectedSellerId:${info.creatorId}})`,
+    `});const j=await b.json();`,
+    `console.log(j.purchased?"✅ Куплено: "+j.price+" R$":"❌ Ошибка: "+j.reason)`,
+    `})()`,
+  ].join("");
+}

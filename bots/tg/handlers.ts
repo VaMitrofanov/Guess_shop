@@ -13,7 +13,7 @@ import { vkSend, vkSendPhoto, stripHtml, tgSend, escapeHtml } from "../shared/no
 import { getSbpQrBuffer } from "../shared/sbp";
 import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUserHurdle, sendAdminDirectOrderCard, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, BONUS_MIN_PACK, formatUserHandle, formatUserHandleHtml } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectAmount, pendingDirectOrder, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectOrderState, type LinkState } from "./session";
-import { getGamepassDetails } from "../shared/roblox";
+import { getGamepassDetails, getGamepassProductInfo, buildPurchaseScript } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { buildAdminKeyboard } from "./admin";
 
@@ -1380,7 +1380,7 @@ export function registerText(bot: Telegraf): void {
           if (pendingReview.has(ctx.from.id)) {
             await ctx.reply(
               "📸 Жду скриншот отзыва — отправь его фотографией (не файлом, не документом).\n\n" +
-              "Просто прикрепи изображение как обычное фото в Telegram.",
+              "Отзыв должен быть <b>с текстом и фото</b>, не только оценка.",
               { parse_mode: "HTML", ...Markup.inlineKeyboard([[faqBtn()]]) }
             );
             return;
@@ -1814,14 +1814,29 @@ async function processGamepassSubmission(
       if (Math.abs(gamepassInfo.price - expectedPrice) > 2) {
         const fc = getFailCounts(ctx.from.id);
         fc.priceMismatch++;
-        if (fc.priceMismatch === 1) await notifyAdminValidationFail(`Неверная цена: ${gamepassInfo.price} R$ (ожидалось ${expectedPrice} R$)`);
-        const priceMismatchText =
-          `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
-          `Установлено: <b>${gamepassInfo.price} R$</b>\n` +
-          `Ожидается:   <b>${expectedPrice} R$</b>\n\n` +
-          `❗️ Чаще всего причина — включённый <b>Managed pricing</b>. Он автоматически меняет цену, и выкупить геймпасс <b>невозможно</b>, пока цена не совпадёт.\n\n` +
-          `Исправь: Passes → твой пасс → ☰ → Sales → отключи <b>Managed pricing</b> → поставь правильную цену → <b>Save Changes</b>. Потом пришли ссылку снова.\n\n` +
-          `📖 Подробная инструкция:`;
+
+        // Check if the mismatch is caused by Managed pricing
+        const prodInfo = await getGamepassProductInfo(passId).catch(() => null);
+        const isManaged = prodInfo?.isManagedPricing ?? false;
+        const reasonTag = isManaged
+          ? `Managed pricing: ${prodInfo!.priceInRobux} R$ (база ${prodInfo!.userBasePriceInRobux} R$), ожидалось ${expectedPrice} R$`
+          : `Неверная цена: ${gamepassInfo.price} R$ (ожидалось ${expectedPrice} R$)`;
+        if (fc.priceMismatch === 1) await notifyAdminValidationFail(reasonTag);
+
+        const priceMismatchText = isManaged
+          ? `⚠️ <b>Managed pricing включён</b> — Roblox изменил цену геймпасса.\n\n` +
+            `Цена Roblox: <b>${gamepassInfo.price} R$</b>\n` +
+            `Твоя цена:   <b>${prodInfo!.userBasePriceInRobux} R$</b>\n` +
+            `Нужна:       <b>${expectedPrice} R$</b>\n\n` +
+            `Пока Managed pricing включён — выкупить геймпасс <b>невозможно</b>.\n\n` +
+            `Исправь: Passes → твой пасс → ☰ → Sales → <b>отключи Managed pricing</b> → проверь цену <b>${expectedPrice} R$</b> → <b>Save Changes</b>.\n\n` +
+            `📖 Подробная инструкция:`
+          : `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
+            `Установлено: <b>${gamepassInfo.price} R$</b>\n` +
+            `Ожидается:   <b>${expectedPrice} R$</b>\n\n` +
+            `❗️ Чаще всего причина — включённый <b>Managed pricing</b>. Он автоматически меняет цену, и выкупить геймпасс <b>невозможно</b>, пока цена не совпадёт.\n\n` +
+            `Исправь: Passes → твой пасс → ☰ → Sales → отключи <b>Managed pricing</b> → поставь правильную цену → <b>Save Changes</b>. Потом пришли ссылку снова.\n\n` +
+            `📖 Подробная инструкция:`;
         await ctx.reply(priceMismatchText, {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
@@ -2413,7 +2428,7 @@ export function registerPhoto(bot: Telegraf): void {
       if (!order || !linked) {
         await ctx.reply(
           "У тебя пока нет выполненных заказов, за которые можно получить бонус.\n\n" +
-          "Когда заказ будет выполнен, пришли скриншот отзыва с Wildberries — начислим +100 R$ (действует на любой номинал)!",
+          "Когда заказ будет выполнен, оставь отзыв на Wildberries <b>с текстом и фото</b> — пришли скриншот сюда и получишь +100 R$ (действует на любой номинал)!",
           withSupportKb()
         );
         return;
@@ -2727,6 +2742,53 @@ export function registerCallbacks(bot: Telegraf): void {
           ...Markup.inlineKeyboard([[Markup.button.url("📩 Написать в @RobloxBank_PA", SUPPORT_URL)]]),
         }
       );
+      return;
+    }
+
+    // ── 📋 ps: purchase script for manual buy in Antik console ───────────
+    if (data.startsWith("ps:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      const orderId = data.slice(3);
+      try {
+        const order = await (db as any).wbOrder.findUnique({ where: { id: orderId } });
+        if (!order) { await ctx.answerCbQuery("⚠️ Заказ не найден"); return; }
+
+        const gpMatch = order.gamepassUrl?.match(/game-pass(?:es)?\/(\d+)/);
+        if (!gpMatch) { await ctx.answerCbQuery("⚠️ Нет ссылки на геймпасс"); return; }
+        const gpId = gpMatch[1];
+
+        await ctx.answerCbQuery("⏳ Загружаю данные…");
+        const info = await getGamepassProductInfo(gpId);
+        if (!info) {
+          await ctx.reply(`❌ Не удалось получить product-info для геймпасса <code>${gpId}</code>`, { parse_mode: "HTML" });
+          return;
+        }
+
+        const lines: string[] = [];
+        lines.push(`📋 <b>Скрипт выкупа</b> · Заказ #${orderId.slice(-6).toUpperCase()}`);
+        lines.push(`🎮 ${escapeHtml(info.name)} · ${info.priceInRobux} R$ · ${escapeHtml(info.creatorName)}`);
+
+        if (!info.isForSale) {
+          lines.push(`\n❌ <b>Геймпасс НЕ на продаже!</b> Выкуп невозможен.`);
+          await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
+          return;
+        }
+
+        if (info.isManagedPricing) {
+          lines.push(`\n⚠️ <b>MANAGED PRICING ВКЛЮЧЁН!</b>`);
+          lines.push(`Цена Roblox: <b>${info.priceInRobux} R$</b> · Цена продавца: <b>${info.userBasePriceInRobux} R$</b>`);
+          lines.push(`Выкуп пройдёт по цене Roblox (${info.priceInRobux} R$).`);
+        }
+
+        const script = buildPurchaseScript(info);
+        lines.push(`\nВставь в консоль (F12 → Console) на roblox.com:`);
+        lines.push(`<code>${escapeHtml(script)}</code>`);
+
+        await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
+      } catch (err) {
+        console.error("[ps] error:", err);
+        await ctx.reply("❌ Ошибка генерации скрипта");
+      }
       return;
     }
 
@@ -3533,7 +3595,7 @@ export function registerCallbacks(bot: Telegraf): void {
         }
       }
       await ctx.reply(
-        "📸 Сделай скриншот своего отзыва на Wildberries и отправь его сюда фотографией (не файлом, не документом).\n\n" +
+        "📸 Оставь отзыв на Wildberries <b>с текстом и фото</b>, сделай скриншот и отправь сюда фотографией (не файлом).\n\n" +
         "После проверки бонус <b>+100 R$</b> придёт автоматически (действует на любой номинал).",
         { parse_mode: "HTML" }
       );
@@ -3634,15 +3696,15 @@ async function notifyUserCompleted(
       `Roblox зачислит их в течение 5–7 дней — это их стандартный процесс.` +
       pendingLine + `\n\n` +
       `🎁 <b>Оставь отзыв и получи +100 R$ в подарок!</b>\n` +
-      `Бонус действует на любой номинал.\n` +
-      `Напиши отзыв на Wildberries, сделай скриншот и отправь его сюда (фотографией, не файлом). После проверки бонус начислим сразу!`;
+      `Отзыв должен быть <b>с текстом и фото</b> — только оценка не подойдёт.\n` +
+      `Пришли скриншот сюда (фотографией, не файлом) — после проверки бонус начислим сразу!`;
     vkMsg =
       `✅ Заказ выкуплен! Робуксы уже в пути 🚀\n\n` +
       `Roblox зачислит их в течение 5–7 дней — это их стандартный процесс.` +
       pendingLineVk + `\n\n` +
       `Оставь отзыв и получи +100 R$ в подарок!\n` +
-      `Бонус действует на любой номинал.\n` +
-      `Напиши отзыв на Wildberries, сделай скриншот и отправь его в этот чат. После проверки бонус начислим сразу!`;
+      `Отзыв должен быть с текстом и фото — только оценка не подойдёт.\n` +
+      `Пришли скриншот в этот чат (фотографией, не файлом) — после проверки бонус начислим сразу!`;
   } else {
     // TIER 2: Returning / VIP — direct order pitch
     console.log(`[CRM] Direct pitch sent for order #${completedCount}`);
