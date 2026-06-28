@@ -462,8 +462,9 @@ async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null): Pro
   const groupUrl = groupId ? `https://vk.com/club${groupId}` : "https://vk.com";
   await ctx.reply({
     message:
-      `⭐ Ты в одном шаге! У наших клиентов есть закрытое сообщество — там анонсы акций, розыгрыши и бонусы для постоянных клиентов.\n\n` +
-      `Загляни — это бесплатно:\n${groupUrl}\n\n` +
+      `⭐ Чтобы продолжить, подпишись на наше сообщество 👇\n` +
+      `После подписки бот выдаст тебе персональную инструкцию и ты сможешь оформить заказ по нику в Roblox.\n\n` +
+      `${groupUrl}\n\n` +
       `После подписки нажми кнопку «✅ Я вступил» ниже.`,
     keyboard: Keyboard.builder()
       .urlButton({ label: "🔔 Подписаться", url: groupUrl })
@@ -601,7 +602,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
           `Также можно прислать ссылку или Asset ID.`
         );
       } else {
-        await ctx.reply("✅ Спасибо за подписку! Теперь ты можешь активировать свой код с карточки Wildberries.");
+        await ctx.reply("✅ Подписка подтверждена! Теперь отправь свой код с карточки Wildberries — бот выдаст инструкцию.");
       }
       return;
     } catch (err) {

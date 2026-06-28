@@ -527,9 +527,9 @@ export function registerStart(bot: Telegraf): void {
     if (!subscribed) {
       await ctx.reply(
         `🎉 Код <b>${code}</b> принят!\n\n` +
-        `Подпишись на наш канал — там статус заказов, бонусы и акции:\n` +
-        `👇 https://t.me/Roblox_Bank_Tg\n\n` +
-        `После подписки бот напишет сам. Если нет — напиши любое слово 👋`,
+        `Чтобы продолжить, подпишись на наш канал 👇\n` +
+        `После подписки бот выдаст тебе <b>персональную инструкцию</b> и ты сможешь оформить заказ по нику в Roblox.\n\n` +
+        `Если бот не написал — напиши любое слово 👋`,
         {
           parse_mode: "HTML",
           link_preview_options: { is_disabled: true },
@@ -1271,14 +1271,13 @@ export function registerText(bot: Telegraf): void {
           const subbed = await checkSubscription(bot, ctx.from.id);
           if (!subbed) {
             await ctx.reply(
-              `⭐ У наших клиентов есть закрытый канал — там уведомления о статусе заказа, ` +
-              `бонусы и акции.\n\nЗагляни, это бесплатно:\n` +
-              `https://t.me/Roblox_Bank_Tg`,
+              `⭐ Подпишись на наш канал, чтобы продолжить 👇\n` +
+              `После подписки бот выдаст тебе инструкцию и ты сможешь оформить заказ.`,
               {
                 parse_mode: "HTML",
                 link_preview_options: { is_disabled: true },
                 ...Markup.inlineKeyboard([[
-                  Markup.button.url("⭐ Стать участником", "https://t.me/Roblox_Bank_Tg")
+                  Markup.button.url("⭐ Подписаться", "https://t.me/Roblox_Bank_Tg")
                 ]]),
               }
             );
@@ -2317,9 +2316,9 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   if (!subscribed) {
     await ctx.reply(
       `🎉 Код <b>${codeInput}</b> принят!\n\n` +
-      `Подпишись на наш канал — там статус заказов, бонусы и акции:\n` +
-      `👇 https://t.me/Roblox_Bank_Tg\n\n` +
-      `После подписки бот напишет сам. Если нет — напиши любое слово 👋`,
+      `Чтобы продолжить, подпишись на наш канал 👇\n` +
+      `После подписки бот выдаст тебе <b>персональную инструкцию</b> и ты сможешь оформить заказ по нику в Roblox.\n\n` +
+      `Если бот не написал — напиши любое слово 👋`,
       {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
