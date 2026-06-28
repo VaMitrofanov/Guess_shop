@@ -6,6 +6,57 @@
 
 ---
 
+## Сессия 2026-06-29 — Подписка не прерывает заказ + скрипт выкупа в TWA + ник в карточках (✅ ЗАДЕПЛОЕНО, коммит `73f2563`)
+
+### Контекст: баг @id783839703 (VK)
+
+Пользователь пришёл с сайта, ввёл ник, выбрал геймпасс, подтвердил — а **после подтверждения** вылез гейт подписки на сообщество. Пользователь решил «заказ готов» и ушёл. Геймпасс не сохранился — подписка в `handleGamepassLink` заблокировала `processGamepassSubmission`.
+
+**Root cause:** подписка проверялась **дважды** — на входе (активация кода) + при отправке геймпасса. Вторая проверка убивала уже готовый заказ.
+
+### 1. Подписка не прерывает оформление заказа (TG + VK)
+
+**Убраны повторные sub-проверки:**
+- VK `handleGamepassLink` (строка ~1097): убрана `isVkSubscribed` → ссылка/ник всегда проходят в `processGamepassSubmission`
+- TG `registerText` (строка ~1405): убрана `checkSubscription` → та же логика
+
+**Ранние гейты подписки оставлены без изменений:**
+- VK `handleRefActivation` (строка ~1060) — при активации кода
+- TG `registerStart` (строка ~526) — при /start с кодом
+- TG idle-ветка (строка ~1269) — для свободных сообщений
+- VK `handleIdleMessage` (строка ~2196) — для idle
+- VK/TG `handleStartDirect` — для прямых заказов
+
+**Добавлен мягкий промпт подписки ПОСЛЕ оформления заказа (не блокирует):**
+- VK: после `processGamepassSubmission` — URL-кнопка «🔔 Подписаться», `try/catch`, non-fatal
+- TG: зеркально — inline-кнопка «🔔 Подписаться», `try/catch`, non-fatal
+
+**Принцип:** подписка первая (гейт на входе), но заказ **никогда не теряется** — если юзер дошёл до выбора геймпасса, он проходит.
+
+### 2. Кнопка «📋 Скрипт выкупа» в TG admin-карточках
+
+`renderOrderCard` (TG `handlers.ts`) — добавлена кнопка «📋 Скрипт выкупа» (`CB.purchaseScript`) рядом с «📊 Дашборд». Раньше была только в `sendAdminOrderCard` (VK/web заказы), TG-карточки её не имели.
+
+### 3. Кнопка «📋 Скрипт» в TWA
+
+- **API:** новый action `purchase-script` в `POST /api/twa/orders` — фетчит `product-info` с Roblox (fallback roproxy), генерирует JS-скрипт для консоли Антика
+- **UI:** компонент `PurchaseScriptBtn` в `OrdersScreen.tsx` — по нажатию копирует скрипт в буфер + toast с инфой (имя, цена, managed pricing предупреждение)
+- Стоит рядом с «🛒 Boss Robux» для PENDING/IN_PROGRESS заказов
+
+### 4. Ник Roblox в карточках TWA
+
+Для COMPLETED и REJECTED карточек — `🎮 username` отображается справа в бейдже «общее время», заполняя пустое место. Используется `order.robloxUsername`.
+
+### ✅ Деплой (прод-проверка 2026-06-29)
+
+- [x] Коммит `73f2563` → `git push origin main`
+- [x] Web (`z10ws7m1q45h281zwedmhei4`) — image tag `73f2563`, Up 6 min (healthy), 200 OK
+- [x] VK bot (`gmtpfqosgoz23vjyxyczuic9`) — image tag `73f2563`, `Bot started ✅ (group 237309399)`
+- [x] TG bot (`lyz78enntugna9em1biopinr`, SG) — image tag `73f2563`, `Bot started ✅`, все 3 cron started ✅, `Bot profile applied ✅`
+- [x] Ошибок в логах нет
+
+---
+
 ## Сессия 2026-06-28 (день-3) — Скрипт выкупа + managed pricing детект + отзывы с текстом (✅ ЗАДЕПЛОЕНО, коммит `43fd8bf`)
 
 ### 1. Кнопка «📋 Скрипт выкупа» в admin-карточке
