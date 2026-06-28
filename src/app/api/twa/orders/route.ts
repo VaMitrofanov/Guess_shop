@@ -108,7 +108,8 @@ export async function GET(req: NextRequest) {
               COALESCE(SUM(amount) FILTER (WHERE status = 'PENDING'),           0)::int AS "SUM_PENDING",
               COALESCE(SUM(amount) FILTER (WHERE status = 'IN_PROGRESS'),       0)::int AS "SUM_IN_PROGRESS",
               COALESCE(SUM(amount) FILTER (WHERE status = 'COMPLETED'),         0)::int AS "SUM_COMPLETED",
-              COALESCE(SUM(amount) FILTER (WHERE status = 'REJECTED'),          0)::int AS "SUM_REJECTED"
+              COALESCE(SUM(amount) FILTER (WHERE status = 'REJECTED'),          0)::int AS "SUM_REJECTED",
+              COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" < NOW() - INTERVAL '3 hours')::int AS "STALE_AWAITING"
             FROM "WbOrder"
             WHERE "isTest" = false
           `);
@@ -117,6 +118,7 @@ export async function GET(req: NextRequest) {
           const sums: Record<string, number> = {};
           for (const s of [...VALID_STATUSES, "ALL"]) counts[s] = Number(r[s] ?? 0);
           for (const s of VALID_STATUSES) sums[s] = Number(r[`SUM_${s}`] ?? 0);
+          sums["STALE_AWAITING"] = Number(r["STALE_AWAITING"] ?? 0);
           cachedCounts = { data: counts, sums, ts: Date.now() };
           const total = statusList.length > 0 ? statusList.reduce((s, st) => s + (counts[st] ?? 0), 0) : counts["ALL"];
           return { total, counts, sums };
@@ -317,7 +319,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Order must be PENDING" }, { status: 400 });
     await (prisma as any).wbOrder.update({
       where: { id: orderId },
-      data:  { status: "IN_PROGRESS" },
+      data:  { status: "IN_PROGRESS", takenAt: new Date() },
     });
     cachedCounts = null;
     return NextResponse.json({ ok: true });
@@ -330,7 +332,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Order must be IN_PROGRESS" }, { status: 400 });
     await (prisma as any).wbOrder.update({
       where: { id: orderId },
-      data:  { status: "PENDING" },
+      data:  { status: "PENDING", takenAt: null },
     });
     cachedCounts = null;
     return NextResponse.json({ ok: true });

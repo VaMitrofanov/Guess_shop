@@ -279,7 +279,7 @@ export async function takeOrderInWork(
   try {
     const order = await (db as any).wbOrder.update({
       where: { id: orderId },
-      data: { status: "IN_PROGRESS", adminId },
+      data: { status: "IN_PROGRESS", adminId, takenAt: new Date() },
       include: { user: true },
     });
 

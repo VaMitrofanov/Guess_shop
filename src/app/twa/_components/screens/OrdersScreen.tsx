@@ -29,6 +29,8 @@ interface Order {
   purchaseRate: number | null;
   createdAt: string;
   updatedAt: string;
+  pendingAt: string | null;
+  takenAt: string | null;
   robloxUsername: string | null;
   reviewStatus: "PENDING" | "SUBMITTED" | null;
   userOrderNumber: number | null;
@@ -107,6 +109,23 @@ function fmtFull(iso: string) {
   return new Date(iso).toLocaleString("ru-RU", {
     day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
   });
+}
+function fmtAge(iso: string): string {
+  const mins = (Date.now() - new Date(iso).getTime()) / 60000;
+  if (mins < 1) return "< 1 мин";
+  if (mins < 60) return `${Math.round(mins)} мин`;
+  const h = Math.floor(mins / 60);
+  const d = Math.floor(h / 24);
+  if (d === 0) return `${h}ч`;
+  const rem = h % 24;
+  return rem > 0 ? `${d}д ${rem}ч` : `${d}д`;
+}
+function ageColor(iso: string): string {
+  const mins = (Date.now() - new Date(iso).getTime()) / 60000;
+  if (mins < 120)  return C.green;
+  if (mins < 720)  return C.yellow;
+  if (mins < 1440) return C.orange;
+  return C.red;
 }
 
 function copyText(text: string) {
@@ -581,8 +600,92 @@ function userSubHandle(u: Order["user"]): string {
   return "";
 }
 
+/* ───────────── TimeBadge — colored age indicator ───────────── */
+function TimeBadge({ icon, value, label, color }: { icon: string; value: string; label: string; color: string }) {
+  return (
+    <div style={{
+      flex: 1, minWidth: 0,
+      background: `${color}18`,
+      borderRadius: 12,
+      padding: "8px 10px",
+      display: "flex", flexDirection: "column", gap: 2,
+    }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color, ...tabular, lineHeight: 1.1 }}>
+        {icon} {value}
+      </div>
+      <div style={{ fontSize: 10, color: C.textTertiary, fontWeight: 500, letterSpacing: 0.2 }}>
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function OrderTimeline({ order }: { order: Order }) {
+  const badges: React.ReactNode[] = [];
+
+  if (order.status === "AWAITING_GAMEPASS") {
+    badges.push(<TimeBadge key="cr" icon="⏱" value={fmtAge(order.createdAt)} label="ждёт ссылку" color={ageColor(order.createdAt)} />);
+  } else if (order.status === "PENDING") {
+    badges.push(<TimeBadge key="cr" icon="⏱" value={fmtAge(order.createdAt)} label="создан" color={C.textTertiary} />);
+    const ref = order.pendingAt ?? order.createdAt;
+    badges.push(<TimeBadge key="pn" icon="📋" value={fmtAge(ref)} label="в очереди" color={ageColor(ref)} />);
+  } else if (order.status === "IN_PROGRESS") {
+    const pendRef = order.pendingAt ?? order.createdAt;
+    const takenRef = order.takenAt ?? order.updatedAt;
+    badges.push(<TimeBadge key="pn" icon="📋" value={fmtAge(pendRef)} label="был в очереди" color={C.textTertiary} />);
+    badges.push(<TimeBadge key="tk" icon="🔨" value={fmtAge(takenRef)} label="в работе" color={ageColor(takenRef)} />);
+  } else if (order.status === "COMPLETED") {
+    badges.push(<TimeBadge key="done" icon="✅" value={fmtAge(order.createdAt)} label="общее время" color={C.green} />);
+  } else if (order.status === "REJECTED") {
+    badges.push(<TimeBadge key="rej" icon="❌" value={fmtAge(order.createdAt)} label="общее время" color={C.red} />);
+  } else {
+    badges.push(<TimeBadge key="cr" icon="⏱" value={fmtAge(order.createdAt)} label="создан" color={ageColor(order.createdAt)} />);
+  }
+
+  badges.push(
+    <div key="amt" style={{
+      minWidth: 72, flexShrink: 0,
+      background: `${C.accent}18`,
+      borderRadius: 12,
+      padding: "8px 10px",
+      display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+    }}>
+      <div style={{ fontSize: 17, fontWeight: 700, color: C.textPrimary, ...tabular, lineHeight: 1.1 }}>
+        {order.amount.toLocaleString("ru-RU")}
+      </div>
+      <div style={{ fontSize: 10, color: C.accent, fontWeight: 600 }}>R$</div>
+    </div>,
+  );
+
+  return <div style={{ display: "flex", gap: 6 }}>{badges}</div>;
+}
+
+/* ───────────── DataRow — compact icon + value + copy ───────────── */
+function DataRow({ icon, children, copyText: ct, onOpen }: {
+  icon: string; children: React.ReactNode; copyText?: string; onOpen?: () => void;
+}) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 8,
+      padding: "6px 0", minWidth: 0,
+    }}>
+      <span style={{ fontSize: 14, flexShrink: 0 }}>{icon}</span>
+      <div style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 500, color: C.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {children}
+      </div>
+      {onOpen && (
+        <button className="twa-press-sm" onClick={e => { e.stopPropagation(); onOpen(); }}
+          style={{ background: "transparent", border: "none", color: C.blue, fontSize: 12, fontWeight: 500, padding: "4px 8px", cursor: "pointer", flexShrink: 0 }}>
+          Открыть
+        </button>
+      )}
+      {ct && <CopyBtn text={ct} />}
+    </div>
+  );
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
-   OrderCard — premium hierarchy
+   OrderCard — Zoned layout: header / body / actions
    ───────────────────────────────────────────────────────────────────────── */
 function OrderCard({
   order, token, exiting, onGoToBossrobux, onRunAction, onSaveNote,
@@ -602,17 +705,25 @@ function OrderCard({
 
   const platform: "tg" | "vk" | "—" = order.user.tgId ? "tg" : order.user.vkId ? "vk" : "—";
   const displayName = userDisplayName(order.user);
-  const subHandle   = userSubHandle(order.user);
-  const avatarSeed  = (order.user.name && order.user.name !== "VK User")
-    ? order.user.name
-    : displayName;
+  const shortName = (() => {
+    if (order.user.username) return `@${order.user.username}`;
+    const realName = order.user.name && order.user.name !== "VK User" ? order.user.name : null;
+    if (realName) {
+      const parts = realName.split(" ");
+      return parts.length > 1 ? `${parts[0]} ${parts[1][0]}.` : parts[0];
+    }
+    if (order.user.tgId) return `TG ${order.user.tgId}`;
+    if (order.user.vkId) return `VK ${order.user.vkId}`;
+    return "—";
+  })();
 
   const displayCreator = order.robloxUsername
     ?? (typeof fetchedCreator === "string" ? fetchedCreator || null : null);
   const shortId = order.id.slice(-6).toUpperCase();
+  const passId = extractGamepassId(order.gamepassUrl);
 
   useEffect(() => {
-    if (!detailsOpen || order.robloxUsername || !order.gamepassUrl || fetchedCreator !== null) return;
+    if (!(isActive || detailsOpen) || order.robloxUsername || !order.gamepassUrl || fetchedCreator !== null) return;
     const gpId = extractGamepassId(order.gamepassUrl);
     if (!gpId) return;
     setFetchedCreator(false);
@@ -624,7 +735,7 @@ function OrderCard({
       .then(r => r.json())
       .then(d => setFetchedCreator(d?.gamepass?.sellerName ?? ""))
       .catch(() => setFetchedCreator(""));
-  }, [detailsOpen, order.robloxUsername, order.gamepassUrl, fetchedCreator, token]);
+  }, [isActive, detailsOpen, order.robloxUsername, order.gamepassUrl, fetchedCreator, token]);
 
   return (
     <article className={exiting ? "twa-card-exit" : undefined} style={{
@@ -639,303 +750,252 @@ function OrderCard({
         background: `linear-gradient(180deg, ${C.cardTop} 0%, rgba(255,255,255,0) 28%)`,
       }} />
 
-      {/* ─── Header ─── */}
+      {/* ─── Zone 1: Header ─── */}
       <div
         className={isHistory ? "twa-card-press" : undefined}
         onClick={() => { if (isHistory) { haptic.impact("light"); setDetailsOpen(d => !d); } }}
         style={{ padding: "14px 16px 12px", cursor: isHistory ? "pointer" : "default", position: "relative" }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, minWidth: 0 }}>
+        {/* Row 1: status pills + chips + user */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, minWidth: 0, alignItems: "center" }}>
             <StatusPill status={order.status} />
             <OrderNumberChip n={order.userOrderNumber} total={order.userOrderTotal} />
             {order.isDirectOrder && <Chip color={C.blue}>ПРЯМОЙ</Chip>}
             {order.reviewStatus === "PENDING"   && <Chip color={C.yellow} animate>📸 ОТЗЫВ</Chip>}
             {order.reviewStatus === "SUBMITTED" && <Chip color={C.green}  animate>⭐ ОТЗЫВ</Chip>}
           </div>
-          <div style={{ textAlign: "right" as const, flexShrink: 0 }}>
-            <div style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, letterSpacing: -0.6, ...tabular, lineHeight: 1.05 }}>
-              {order.amount.toLocaleString("ru-RU")} <span style={{ fontSize: 14, color: C.textSecondary, fontWeight: 600, letterSpacing: 0 }}>R$</span>
-            </div>
-            <div style={{ fontSize: 11, color: C.textTertiary, marginTop: 2, ...tabular }}>
-              #{shortId} · {fmtRelative(order.createdAt)}
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 11, minWidth: 0 }}>
-          <Avatar name={avatarSeed} platform={platform} />
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{
-              fontSize: 15, fontWeight: 600, color: C.textPrimary,
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-            }}>
-              {displayName}
-            </div>
-            {subHandle && (
-              <div style={{ fontSize: 11.5, color: C.textTertiary, marginTop: 1, ...tabular }}>
-                {subHandle}
-              </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+            <span
+              onClick={e => { e.stopPropagation(); haptic.impact("light"); openContact(order.user); }}
+              style={{
+                fontSize: 13, fontWeight: 600, color: "#7ec5ff", cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {platform === "vk" ? "V" : platform === "tg" ? "T" : ""} {shortName}
+            </span>
+            {isHistory && (
+              <span style={{
+                fontSize: 10, color: C.textTertiary, fontWeight: 500,
+                padding: "3px 8px", borderRadius: 999,
+                background: "rgba(255,255,255,0.06)",
+              }}>
+                {detailsOpen ? "▲" : "▼"}
+              </span>
             )}
           </div>
-          {isHistory && (
-            <span style={{
-              fontSize: 11, color: C.textTertiary, fontWeight: 500,
-              padding: "4px 10px", borderRadius: 999,
-              background: "rgba(255,255,255,0.06)",
-              flexShrink: 0,
-            }}>
-              {detailsOpen ? "Скрыть" : "Детали"}
-            </span>
-          )}
         </div>
 
+        {/* Row 2: time badges + amount */}
+        <OrderTimeline order={order} />
+
+        {/* Rejection reason inline preview */}
         {!detailsOpen && order.status === "REJECTED" && order.rejectionReason && (
           <div style={{
-            marginTop: 10, padding: "8px 11px",
+            marginTop: 8, padding: "6px 10px",
             background: `${C.red}14`, borderRadius: 10,
             fontSize: 12, color: C.red,
-            display: "flex", gap: 7,
-            overflow: "hidden",
+            display: "flex", gap: 6, overflow: "hidden",
           }}>
             <span style={{ flexShrink: 0 }}>💬</span>
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {order.rejectionReason}
-            </span>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{order.rejectionReason}</span>
           </div>
         )}
       </div>
 
-      {/* ─── Body ─── */}
+      {/* ─── Zone 2: Body ─── */}
       {(isActive || detailsOpen) && (
-        <div onClick={e => e.stopPropagation()} style={{ padding: "0 18px 16px" }}>
-          <div style={{ height: 1, background: C.hairline, marginBottom: 4 }} />
+        <div onClick={e => e.stopPropagation()} style={{ padding: "0 16px 14px" }}>
+          <div style={{ height: 1, background: C.hairline, marginBottom: 6 }} />
+
+          {/* Key data for purchase — compact rows */}
+          {(order.robloxUsername || displayCreator) && (
+            <DataRow icon="🎮" copyText={order.robloxUsername ?? displayCreator ?? undefined}>
+              <span style={{ fontWeight: 600, fontSize: 16 }}>{order.robloxUsername ?? displayCreator}</span>
+            </DataRow>
+          )}
+
+          {passId && (
+            <DataRow icon="🎫" copyText={passId}>
+              <span style={{ fontFamily: MONO, fontWeight: 600, fontSize: 15, letterSpacing: 0.5 }}>{passId}</span>
+            </DataRow>
+          )}
 
           {order.gamepassUrl ? (
-            <Row label="Геймпасс">
-              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                <a
-                  href={order.gamepassUrl} target="_blank" rel="noreferrer"
-                  onClick={e => e.stopPropagation()}
-                  style={{
-                    color: C.blue, fontSize: 15.5, fontWeight: 500,
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    minWidth: 0, flex: 1, textDecoration: "none",
-                  }}>
-                  {order.gamepassUrl.replace(/^https?:\/\//, "")}
-                </a>
-                <CopyBtn text={order.gamepassUrl} label="Ссылка" />
-              </div>
-            </Row>
+            <DataRow
+              icon="🔗"
+              copyText={order.gamepassUrl}
+              onOpen={() => window.open(order.gamepassUrl!, "_blank")}
+            >
+              <span style={{ color: C.blue, fontSize: 14 }}>{order.gamepassUrl.replace(/^https?:\/\/(www\.)?/, "").slice(0, 35)}</span>
+            </DataRow>
           ) : order.status === "AWAITING_GAMEPASS" ? (
-            <Row label="Геймпасс">
-              <span style={{ fontSize: 14.5, color: C.textTertiary, fontStyle: "italic" }}>
-                Ждём ссылку от пользователя
-              </span>
-            </Row>
+            <DataRow icon="🔗">
+              <span style={{ color: C.textTertiary, fontStyle: "italic", fontSize: 13.5 }}>Ждём ссылку от пользователя</span>
+            </DataRow>
           ) : null}
 
-          {(order.robloxUsername || (detailsOpen && (displayCreator || fetchedCreator === false))) && (
-            <>
-              <Divider />
-              <Row label="Ник в Roblox">
-                {fetchedCreator === false && !order.robloxUsername ? (
-                  <span style={{ fontSize: 14.5, color: C.textTertiary }}>загружаю…</span>
-                ) : (order.robloxUsername ?? displayCreator) ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ fontSize: 17, fontWeight: 600, color: C.textPrimary }}>
-                      {order.robloxUsername ?? displayCreator}
-                    </span>
-                    <CopyBtn text={order.robloxUsername ?? displayCreator ?? ""} label="Ник" />
-                  </div>
-                ) : (
-                  <span style={{ fontSize: 14.5, color: C.textTertiary }}>—</span>
-                )}
-              </Row>
-            </>
-          )}
-
           {!order.isDirectOrder && (
-            <>
-              <Divider />
-              <Row label="Код WB">
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{
-                    fontFamily: MONO,
-                    fontSize: 19, fontWeight: 700, color: C.accent,
-                    letterSpacing: 2.2,
-                  }}>
-                    {order.wbCode}
-                  </span>
-                  <CopyBtn text={order.wbCode} label="Код" />
-                </div>
-              </Row>
-            </>
-          )}
-
-          <Divider />
-          <Row label="Пользователь">
-            {(() => {
-              const realName = order.user.name && order.user.name !== "VK User" ? order.user.name : null;
-              const linkStyle = { color: "#7ec5ff", textDecoration: "none" as const, cursor: "pointer" as const };
-              const handleTap = (e: React.MouseEvent) => {
-                e.stopPropagation();
-                haptic.impact("light");
-                openContact(order.user);
-              };
-              if (order.user.username) {
-                return (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle, fontFamily: MONO }}>
-                        @{order.user.username}
-                      </span>
-                      <CopyBtn text={`@${order.user.username}`} />
-                    </div>
-                    <span style={{ fontSize: 12.5, color: C.textTertiary, ...tabular }}>
-                      {realName ? `${realName} · ` : ""}
-                      {order.user.tgId ? `TG · ${order.user.tgId}` : order.user.vkId ? `VK · ${order.user.vkId}` : ""}
-                    </span>
-                  </div>
-                );
-              }
-              if (realName) {
-                return (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle }}>{realName}</span>
-                      <CopyBtn text={realName} />
-                    </div>
-                    <span style={{ fontSize: 12.5, color: C.textTertiary, ...tabular }}>
-                      {order.user.tgId ? `TG · ${order.user.tgId}` : order.user.vkId ? `VK · ${order.user.vkId}` : ""}
-                    </span>
-                  </div>
-                );
-              }
-              if (order.user.tgId) {
-                return (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle, ...tabular }}>TG · {order.user.tgId}</span>
-                    <CopyBtn text={order.user.tgId} />
-                  </div>
-                );
-              }
-              if (order.user.vkId) {
-                return (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle, ...tabular }}>vk.com/id{order.user.vkId}</span>
-                    <CopyBtn text={order.user.vkId} />
-                  </div>
-                );
-              }
-              return <span style={{ fontSize: 14.5, color: C.textTertiary }}>—</span>;
-            })()}
-          </Row>
-
-          {order.purchaseRate != null && (
-            <>
-              <Divider />
-              <Row label="Себестоимость">
-                <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                  <span style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary, ...tabular }}>
-                    ${(order.amount / 1000 * order.purchaseRate).toFixed(2)}
-                  </span>
-                  <span style={{ fontSize: 12.5, color: C.textSecondary, ...tabular }}>
-                    по ${order.purchaseRate}/1K R$
-                  </span>
-                </div>
-              </Row>
-            </>
+            <DataRow icon="📦" copyText={order.wbCode}>
+              <span style={{ fontFamily: MONO, fontWeight: 700, color: C.accent, letterSpacing: 2, fontSize: 16 }}>
+                {order.wbCode}
+              </span>
+            </DataRow>
           )}
 
           {order.paymentDetails && (
-            <>
-              <Divider />
-              <Row label="Реквизиты">
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{
-                    fontSize: 14.5, color: "#e5e5ea",
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  }}>
-                    {order.paymentDetails}
-                  </span>
-                  <CopyBtn text={order.paymentDetails} label="Реквизиты" />
-                </div>
-              </Row>
-            </>
+            <DataRow icon="💳" copyText={order.paymentDetails}>
+              <span style={{ fontSize: 14, color: "#e5e5ea" }}>{order.paymentDetails}</span>
+            </DataRow>
           )}
 
-          {detailsOpen && order.rejectionReason && order.status === "REJECTED" && (
+          {/* Expandable details */}
+          {(isActive || detailsOpen) && (
             <>
-              <Divider />
-              <Row label="Причина">
-                <span style={{ fontSize: 15, color: C.red, lineHeight: 1.45 }}>{order.rejectionReason}</span>
-              </Row>
-            </>
-          )}
-
-          {detailsOpen && order.reviewStatus != null && (() => {
-            const bonus = order.reviewStatus === "SUBMITTED"
-              ? bonusExpiryInfo(order.user.reviewBonusGrantedAt, order.user.balance)
-              : null;
-            return (
-              <>
-                <Divider />
-                <Row label="Отзыв WB">
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {order.reviewStatus === "SUBMITTED" ? (
-                      <span style={{ color: C.green, fontSize: 15, fontWeight: 600 }}>
-                        ⭐ Получен · +100&nbsp;R$ начислено
-                      </span>
-                    ) : (
-                      <span style={{ color: C.yellow, fontSize: 15 }}>
-                        📸 Ожидается от пользователя
-                      </span>
-                    )}
-                    {bonus && (
-                      <div style={{
-                        display: "flex", flexDirection: "column", gap: 2,
-                        padding: "10px 12px", borderRadius: 12,
-                        background: `${bonus.color}14`,
-                        border: `1px solid ${bonus.color}33`,
-                      }}>
-                        <span style={{ fontSize: 14, color: bonus.color, fontWeight: 600 }}>
-                          ⏳ Сгорает через {bonus.daysLeft}&nbsp;{daysWord(bonus.daysLeft)}
-                        </span>
-                        <span style={{ fontSize: 12, color: C.textSecondary, ...tabular }}>
-                          до&nbsp;{bonus.expiryStr} · на счету {bonus.balance}&nbsp;R$
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </Row>
-              </>
-            );
-          })()}
-
-          {detailsOpen && (
-            <>
-              <Divider />
-              <div style={{
-                display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8,
-                fontSize: 12, color: C.textTertiary, ...tabular, paddingTop: 10,
-              }}>
-                <span>Создан · {fmtFull(order.createdAt)}</span>
-                <span>Обновлён · {fmtFull(order.updatedAt)}</span>
+              {/* Notes editor — always visible for active */}
+              <div style={{ marginTop: 8 }}>
+                <NotesEditor order={order} onSave={onSaveNote} />
               </div>
+
+              {/* Toggle for secondary info */}
+              <button
+                className="twa-press-sm"
+                onClick={e => { e.stopPropagation(); haptic.impact("light"); setDetailsOpen(d => !d); }}
+                style={{
+                  marginTop: 8, width: "100%", padding: "8px",
+                  background: "rgba(255,255,255,0.04)", border: "none", borderRadius: 10,
+                  color: C.textTertiary, fontSize: 12, fontWeight: 500, cursor: "pointer",
+                }}
+              >
+                {detailsOpen ? "▲ Скрыть подробности" : "▾ Подробнее"}
+              </button>
+
+              {detailsOpen && (
+                <div style={{ marginTop: 8 }}>
+                  {/* Full user info */}
+                  <Divider />
+                  <Row label="Пользователь">
+                    {(() => {
+                      const realName = order.user.name && order.user.name !== "VK User" ? order.user.name : null;
+                      const linkStyle = { color: "#7ec5ff", textDecoration: "none" as const, cursor: "pointer" as const };
+                      const handleTap = (e: React.MouseEvent) => { e.stopPropagation(); haptic.impact("light"); openContact(order.user); };
+                      if (order.user.username) {
+                        return (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle, fontFamily: MONO }}>@{order.user.username}</span>
+                              <CopyBtn text={`@${order.user.username}`} />
+                            </div>
+                            <span style={{ fontSize: 12.5, color: C.textTertiary, ...tabular }}>
+                              {realName ? `${realName} · ` : ""}{order.user.tgId ? `TG · ${order.user.tgId}` : order.user.vkId ? `VK · ${order.user.vkId}` : ""}
+                            </span>
+                          </div>
+                        );
+                      }
+                      if (realName) {
+                        return (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle }}>{realName}</span>
+                              <CopyBtn text={realName} />
+                            </div>
+                            <span style={{ fontSize: 12.5, color: C.textTertiary, ...tabular }}>
+                              {order.user.tgId ? `TG · ${order.user.tgId}` : order.user.vkId ? `VK · ${order.user.vkId}` : ""}
+                            </span>
+                          </div>
+                        );
+                      }
+                      if (order.user.tgId) {
+                        return (
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle, ...tabular }}>TG · {order.user.tgId}</span>
+                            <CopyBtn text={order.user.tgId} />
+                          </div>
+                        );
+                      }
+                      if (order.user.vkId) {
+                        return (
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle, ...tabular }}>vk.com/id{order.user.vkId}</span>
+                            <CopyBtn text={order.user.vkId} />
+                          </div>
+                        );
+                      }
+                      return <span style={{ fontSize: 14.5, color: C.textTertiary }}>—</span>;
+                    })()}
+                  </Row>
+
+                  {order.purchaseRate != null && (
+                    <>
+                      <Divider />
+                      <Row label="Себестоимость">
+                        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                          <span style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary, ...tabular }}>
+                            ${(order.amount / 1000 * order.purchaseRate).toFixed(2)}
+                          </span>
+                          <span style={{ fontSize: 12.5, color: C.textSecondary, ...tabular }}>по ${order.purchaseRate}/1K R$</span>
+                        </div>
+                      </Row>
+                    </>
+                  )}
+
+                  {order.rejectionReason && order.status === "REJECTED" && (
+                    <>
+                      <Divider />
+                      <Row label="Причина">
+                        <span style={{ fontSize: 15, color: C.red, lineHeight: 1.45 }}>{order.rejectionReason}</span>
+                      </Row>
+                    </>
+                  )}
+
+                  {order.reviewStatus != null && (() => {
+                    const bonus = order.reviewStatus === "SUBMITTED"
+                      ? bonusExpiryInfo(order.user.reviewBonusGrantedAt, order.user.balance) : null;
+                    return (
+                      <>
+                        <Divider />
+                        <Row label="Отзыв WB">
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            {order.reviewStatus === "SUBMITTED" ? (
+                              <span style={{ color: C.green, fontSize: 15, fontWeight: 600 }}>⭐ Получен · +100&nbsp;R$ начислено</span>
+                            ) : (
+                              <span style={{ color: C.yellow, fontSize: 15 }}>📸 Ожидается от пользователя</span>
+                            )}
+                            {bonus && (
+                              <div style={{
+                                display: "flex", flexDirection: "column", gap: 2,
+                                padding: "10px 12px", borderRadius: 12,
+                                background: `${bonus.color}14`, border: `1px solid ${bonus.color}33`,
+                              }}>
+                                <span style={{ fontSize: 14, color: bonus.color, fontWeight: 600 }}>⏳ Сгорает через {bonus.daysLeft}&nbsp;{daysWord(bonus.daysLeft)}</span>
+                                <span style={{ fontSize: 12, color: C.textSecondary, ...tabular }}>до&nbsp;{bonus.expiryStr} · на счету {bonus.balance}&nbsp;R$</span>
+                              </div>
+                            )}
+                          </div>
+                        </Row>
+                      </>
+                    );
+                  })()}
+
+                  <Divider />
+                  <div style={{
+                    display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8,
+                    fontSize: 12, color: C.textTertiary, ...tabular, paddingTop: 10,
+                  }}>
+                    <span>#{shortId} · {fmtFull(order.createdAt)}</span>
+                    <span>Обновлён · {fmtFull(order.updatedAt)}</span>
+                  </div>
+
+                  <ContactButton user={order.user} />
+                </div>
+              )}
             </>
           )}
-
-          <Divider />
-          <div style={{ paddingTop: 12 }}>
-            <NotesEditor order={order} onSave={onSaveNote} />
-          </div>
-
-          <ContactButton user={order.user} />
         </div>
       )}
 
-      {/* ─── Actions ─── */}
+      {/* ─── Zone 3: Actions ─── */}
       {isActive && (
         <div onClick={e => e.stopPropagation()} style={{
           borderTop: `1px solid ${C.hairline}`,
@@ -943,7 +1003,6 @@ function OrderCard({
           display: "flex", flexDirection: "column", gap: 10,
           background: "rgba(0,0,0,0.12)",
         }}>
-          <PassIdCopy order={order} />
           <ActionBar order={order} onRunAction={onRunAction} />
           {onGoToBossrobux && order.gamepassUrl && (order.status === "PENDING" || order.status === "IN_PROGRESS") && (
             <button
@@ -1448,8 +1507,14 @@ function MiniDashboard({ counts, sums, onTap }: {
             <div style={{
               fontSize: 11, color: C.textTertiary, ...tabular,
               position: "relative",
+              display: "flex", alignItems: "center", gap: 6,
             }}>
-              {count} {count === 1 ? "заказ" : count < 5 ? "заказа" : "заказов"}
+              <span>{count} {count === 1 ? "заказ" : count < 5 ? "заказа" : "заказов"}</span>
+              {g.key === "link" && (sums["STALE_AWAITING"] ?? 0) > 0 && (
+                <span style={{ color: C.orange, fontWeight: 600, fontSize: 10 }}>
+                  ⚠️ {sums["STALE_AWAITING"]} давно
+                </span>
+              )}
             </div>
           </Pressable>
         );

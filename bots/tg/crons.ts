@@ -184,6 +184,128 @@ async function checkWbCodeStock(): Promise<void> {
   await Promise.allSettled(ADMIN_IDS.map(id => tgSend(id, msg)));
 }
 
+/* ── AWAITING_GAMEPASS reminders ──────────────────────────────────────────────
+   Users who activated a code but haven't created a gamepass yet. Progressive
+   nudges at 3h, 24h, 72h. No order deletion — just reminders.
+   ───────────────────────────────────────────────────────────────────────── */
+
+const AWAITING_SCHEDULE: Array<{ sent: number; hoursThreshold: number }> = [
+  { sent: 0, hoursThreshold: 3 },
+  { sent: 1, hoursThreshold: 24 },
+  { sent: 2, hoursThreshold: 72 },
+];
+
+function buildReminderMsg(level: number, guideUrl: string): string {
+  if (level === 1) {
+    return (
+      `👋 Привет! Чтобы получить робуксы, осталось совсем немного:\n\n` +
+      `1. Создай геймпасс на Roblox (по инструкции — 5 минут)\n` +
+      `2. Найди его по нику на сайте\n` +
+      `3. Подтверди — и мы выкупим!\n\n` +
+      `📖 <a href="${guideUrl}">Открыть инструкцию</a>`
+    );
+  }
+  if (level === 2) {
+    return (
+      `Напоминаю — геймпасс ещё не создан. Пока заказ не оформлен, робуксы не придут.\n\n` +
+      `Всё просто: создай геймпасс → найди по нику → готово 🙌\n\n` +
+      `📖 <a href="${guideUrl}">Открыть инструкцию</a>`
+    );
+  }
+  return (
+    `Последнее напоминание: геймпасс всё ещё ждёт создания.\n` +
+    `Если нужна помощь — напиши, поможем разобраться 💬\n\n` +
+    `📖 <a href="${guideUrl}">Открыть инструкцию</a>`
+  );
+}
+
+function buildReminderMsgPlain(level: number, guideUrl: string): string {
+  if (level === 1) {
+    return (
+      `👋 Привет! Чтобы получить робуксы, осталось совсем немного:\n\n` +
+      `1. Создай геймпасс на Roblox (по инструкции — 5 минут)\n` +
+      `2. Найди его по нику на сайте\n` +
+      `3. Подтверди — и мы выкупим!\n\n` +
+      `📖 Инструкция: ${guideUrl}`
+    );
+  }
+  if (level === 2) {
+    return (
+      `Напоминаю — геймпасс ещё не создан. Пока заказ не оформлен, робуксы не придут.\n\n` +
+      `Всё просто: создай геймпасс → найди по нику → готово 🙌\n\n` +
+      `📖 Инструкция: ${guideUrl}`
+    );
+  }
+  return (
+    `Последнее напоминание: геймпасс всё ещё ждёт создания.\n` +
+    `Если нужна помощь — напиши, поможем разобраться 💬\n\n` +
+    `📖 Инструкция: ${guideUrl}`
+  );
+}
+
+async function processAwaitingReminders(bot: Telegraf): Promise<void> {
+  const now = Date.now();
+
+  const orders = await (db as any).wbOrder.findMany({
+    where: {
+      status: "AWAITING_GAMEPASS",
+      remindersSent: { lt: 3 },
+      isTest: false,
+    },
+    include: {
+      user: { select: { tgId: true, vkId: true } },
+    },
+  });
+
+  for (const order of orders) {
+    const ageHours = (now - new Date(order.createdAt).getTime()) / 3_600_000;
+    const scheduled = AWAITING_SCHEDULE.find(
+      s => s.sent === order.remindersSent && ageHours >= s.hoursThreshold
+    );
+    if (!scheduled) continue;
+
+    const newLevel = order.remindersSent + 1;
+    const guideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}`;
+
+    await (db as any).wbOrder.update({
+      where: { id: order.id },
+      data: { remindersSent: newLevel },
+    });
+
+    if (order.user.tgId) {
+      try {
+        const extra: Record<string, unknown> = {
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
+        };
+        if (newLevel === 3) {
+          extra.reply_markup = {
+            inline_keyboard: [
+              [{ text: "📖 ОТКРЫТЬ ИНСТРУКЦИЮ", url: guideUrl }],
+              [{ text: "🔎 Ввести ник Roblox", callback_data: "find_nick" }],
+            ],
+          };
+        } else {
+          extra.reply_markup = {
+            inline_keyboard: [
+              [{ text: "📖 ОТКРЫТЬ ИНСТРУКЦИЮ", url: guideUrl }],
+            ],
+          };
+        }
+        await bot.telegram.sendMessage(
+          order.user.tgId,
+          buildReminderMsg(newLevel, guideUrl),
+          extra,
+        );
+      } catch { }
+    } else if (order.user.vkId) {
+      try {
+        await vkSend(order.user.vkId, buildReminderMsgPlain(newLevel, guideUrl));
+      } catch { }
+    }
+  }
+}
+
 export function startReviewReminderCron(bot: Telegraf): void {
   // Run once shortly after startup, then every hour
   setTimeout(() => {
@@ -211,6 +333,20 @@ export function startReviewReminderCron(bot: Telegraf): void {
     );
   }, 30 * 60 * 1000); // every 30 min
 
+  // AWAITING_GAMEPASS reminders — check every 2 hours
+  setTimeout(() => {
+    processAwaitingReminders(bot).catch(err =>
+      console.error("[AwaitingReminder] error:", err)
+    );
+  }, 45_000); // 45 s after boot
+
+  setInterval(() => {
+    processAwaitingReminders(bot).catch(err =>
+      console.error("[AwaitingReminder] error:", err)
+    );
+  }, 2 * 60 * 60 * 1000); // every 2 hours
+
   console.log("[ReviewReminder] Cron started ✅");
   console.log("[StockAlert] Cron started ✅");
+  console.log("[AwaitingReminder] Cron started ✅");
 }

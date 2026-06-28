@@ -113,6 +113,7 @@ export async function POST(request: Request) {
         data: {
           gamepassUrl,
           status: "PENDING",
+          pendingAt: new Date(),
           rejectionReason: null,
           adminId: null,
           robloxUsername: nick,

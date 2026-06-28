@@ -1304,6 +1304,7 @@ async function handleGamepassLink(
           data: {
             gamepassUrl: cleanLink,
             status: "PENDING",
+            pendingAt: new Date(),
             rejectionReason: null,
             adminId: null,
             ...(validatedCreator ? { robloxUsername: validatedCreator } : {}),
@@ -1316,6 +1317,7 @@ async function handleGamepassLink(
             amount:      denomination,
             gamepassUrl: cleanLink,
             status:      "PENDING",
+            pendingAt:   new Date(),
             platform:    "VK",
             userId:      user.id,
             wbCode,

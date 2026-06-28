@@ -133,6 +133,9 @@ model WbOrder {
   /// Free-text admin note (current status / problem) — admin-only, shown in the
   /// TWA order card. Never surfaced to the customer.
   adminNote       String?
+  pendingAt       DateTime?
+  takenAt         DateTime?
+  remindersSent   Int           @default(0)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 

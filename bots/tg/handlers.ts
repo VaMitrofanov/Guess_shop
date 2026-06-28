@@ -1939,6 +1939,7 @@ async function processGamepassSubmission(
             data: {
               gamepassUrl: cleanLink,
               status: "PENDING",
+              pendingAt: new Date(),
               rejectionReason: null,
               adminId: null,
               ...(validatedCreator ? { robloxUsername: validatedCreator } : {}),
@@ -1951,6 +1952,7 @@ async function processGamepassSubmission(
               amount: state.denomination,
               gamepassUrl: cleanLink,
               status: "PENDING",
+              pendingAt: new Date(),
               platform: "TG",
               userId: user.id,
               wbCode: state.wbCode,

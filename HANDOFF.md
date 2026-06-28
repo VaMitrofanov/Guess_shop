@@ -6,6 +6,302 @@
 
 ---
 
+## Сессия 2026-06-28 (день-2) — Редизайн карточек TWA + напоминания «Ждут ссылку» (🟡 ЛОКАЛЬНО)
+
+### 1. Миграция: `pendingAt`, `takenAt`, `remindersSent`
+
+Новые поля в `WbOrder`:
+- `pendingAt DateTime?` — момент перехода в PENDING (геймпасс принят)
+- `takenAt DateTime?` — момент перехода в IN_PROGRESS (менеджер взял)
+- `remindersSent Int @default(0)` — счётчик отправленных напоминаний (макс 3)
+
+Миграция: `prisma/migrations/20260628_add_order_timestamps_reminders/migration.sql` (с backfill существующих заказов).
+
+Timestamps проставляются во всех точках смены статуса:
+- → PENDING: `bots/tg/handlers.ts`, `bots/vk/handlers.ts`, `src/app/api/wb-code/select-gamepass/route.ts`
+- → IN_PROGRESS: `src/app/api/twa/orders/route.ts`, `bots/tg/admin/hub-orders.ts`
+- untake (IN_PROGRESS → PENDING): `takenAt` обнуляется
+
+### 2. Редизайн карточек TWA — Zoned Card
+
+Карточка заказа полностью переработана — 3 визуальные зоны:
+
+**Зона 1 (шапка):** статус-пилл + чипы + юзер/платформа в одну строку. Под ними — **цветные бейджи времени** (TimeBadge) + сумма R$:
+- Цветовая шкала по возрасту: зелёный < 2ч, жёлтый 2-12ч, оранжевый 12-24ч, красный > 24ч
+- Бейджи масштабируются по статусу: AWAITING_GAMEPASS → 1 бейдж, PENDING → 2, IN_PROGRESS → 2, COMPLETED → 1
+
+**Зона 2 (тело):** ключевые данные для выкупа компактными DataRow (иконка + значение + copy):
+- 🎮 ник Roblox, 🎫 Pass ID, 🔗 URL геймпасса, 📦 код WB
+- NotesEditor + toggle «▾ Подробнее» (полные данные юзера, себестоимость, отзыв WB, timestamps)
+
+**Зона 3 (подвал):** ActionBar + Boss Robux кнопка (без изменений по логике)
+
+Аватар-кружок убран → юзер в шапке одной строкой (экономия места).
+
+### 3. MiniDashboard — бейдж «давно»
+
+В карточке «Ждут ссылку» показывается `⚠️ N давно` — количество AWAITING_GAMEPASS заказов старше 3ч. API считает через `STALE_AWAITING` в raw SQL.
+
+### 4. Авто-напоминания AWAITING_GAMEPASS
+
+Cron в TG-боте (`bots/tg/crons.ts`), запускается каждые 2ч. 3 ступени:
+- **3ч:** «Осталось создать геймпасс по инструкции + найти по нику»
+- **24ч:** «Геймпасс ещё не создан. Пока заказ не оформлен — робуксы не придут»
+- **72ч:** «Последнее напоминание. Нужна помощь — напиши»
+
+Каждое напоминание содержит личную ссылку на инструкцию (`?skip=1&code=CODE`). VK-пользователям шлёт тот же TG-бот процесс через `vkSend`.
+
+### ⚠️ ЖДЁТ ДЕПЛОЯ
+
+- [ ] `prisma migrate deploy` (применить миграцию к Neon)
+- [ ] `prisma generate`
+- [ ] Push → Web авто, Guide вручную, оба бота передеплоить
+
+---
+
+## 🔬 ПЛАН: Автоматизация покупки геймпассов (auto-purchase)
+
+> **Перенесено из сессии 2026-06-25. Проблема:** менеджер выкупает геймпассы вручную. Хотим автоматизировать через `economy.roblox.com/v1/purchases/products/{ProductId}`.
+
+**API покупки:** GET product-info → POST /v2/logout (CSRF) → POST /purchases/products/{ProductId}
+
+**Нужно для работы:** `.ROBLOSECURITY` cookie аккаунта-покупателя (env var), баланс Robux, выключенная 2FA.
+
+**Порядок:** 1) cookie → 2) тест покупки с серверного IP → 3) `purchaseGamepass()` в `roblox.ts` → 4) managed pricing детект → 5) кнопка «🛒 Выкупить» в админ-карточке → 6) `/balance` health-check → 7) автовыкуп при PENDING.
+
+**⚠️ ЖДЁМ ОТ ПОЛЬЗОВАТЕЛЯ:** cookie `.ROBLOSECURITY`, 2FA выключена?, с какого сервера (RF/SG)?, тестовый gamepass ID.
+
+Подробный plan — см. сессию 2026-06-25 ниже.
+
+---
+
+## Сессия 2026-06-28 — Pass ID + грязные R$ в дашборде (✅ ЗАДЕПЛОЕНО, коммиты `ea27f61`, `1ff5127`)
+
+### 1. Копируемый Pass ID (`ea27f61`)
+
+Во всех admin-карточках (TG-бот `bots/shared/admin.ts`, web `src/lib/admin-card.ts`) под ссылкой на геймпасс появилась строка:
+```
+🎫 Pass ID: <code>1883087422</code>
+```
+Tap-to-copy — менеджер может сразу вставить ID при выкупе.
+
+В TWA дашборде (`OrdersScreen.tsx → QuickTools`) добавлена кнопка **«🎫 Pass ID»** — копирует ID геймпасса из URL. Использует существующую `extractGamepassId()`.
+
+### 2. Грязные R$ в MiniDashboard (`1ff5127`)
+
+Карточки «К выкупу», «Ждут ссылку», «Ждут оплату» теперь показывают в скобках сумму грязных робуксов (amount / 0.7 = цена геймпасса, по которой выкупаем). Например: `2.5K R$ (3.6K)`.
+
+### 3. Привязка заказа QCKTVDM
+
+Ник `werta2511100`, gamepass ID `1883087422`, URL `https://www.roblox.com/game-pass/1883087422`. Заказ промотирован в PENDING. Admin-карточки отправлены в TG всем 3 админам. VK-уведомление не удалось (error 901 — пользователь Полина Волкова пришла с сайта, не писала боту напрямую).
+
+---
+
+## Сессия 2026-06-28 — Фикс «мёртвых заказов»: REJECTED прямой = отменён навсегда (✅ ЗАДЕПЛОЕНО, коммит `26d9a80`)
+
+> Коммит `26d9a80` → `git push origin main`. TG бот, VK бот, Web — все три передеплоены и проверены. TG: `Bot profile applied ✅`; VK: `Bot started ✅ (group 237309399)`; Web: healthy.
+
+### Контекст: заказ Дианы Эрманбетовой (VK 602728781)
+
+Два заказа:
+- **WB заказ** `TIF9ZDB` — 1000 R$, COMPLETED (24.06) — ОК
+- **Прямой заказ** `DIR-ORBZLHAL` — 500 R$, REJECTED «Отменён менеджером» (24.06) — мёртвый
+
+**Проблемы:** бот считал отменённый прямой заказ живым → показывал «✅ Код активирован! Цена геймпасса: 715 R$» вместо COMPLETED-карточки; рассылки включали её в аудиторию; VK статус показывал «Исправь геймпасс» для отменённого прямого заказа.
+
+### Что исправлено (6 багов)
+
+**1. `findRelevantOrder` (TG + VK):**
+Раньше: active → fallback (любой по `createdAt desc`). REJECTED DIR (24.06) бил COMPLETED WB (22.06).
+Теперь: active → COMPLETED → остальные. Пользователь с выполненным заказом видит COMPLETED, а не мёртвый REJECTED.
+
+**2. `tryRestoreState` (VK, `handlers.ts:~187`):**
+Раньше: восстанавливал REJECTED заказы (включая прямые) в AWAITING_LINK → бот писал «Код активирован!» для отменённого заказа.
+Теперь: `isDirectOrder: false` — REJECTED прямые заказы не воскрешаются.
+
+**3. TG DB recovery (text handler, `handlers.ts:~1348`):**
+Раньше: находил любой REJECTED заказ и говорил «Исправь геймпасс».
+Теперь: `isDirectOrder: false` — пропускает REJECTED прямые заказы.
+
+**4. VK статус — текст REJECTED (`handlers.ts:~2341`):**
+Раньше: для всех REJECTED — «Исправь геймпасс и нажми кнопку ниже».
+Теперь: REJECTED direct → «Если хочешь — оформи новый заказ.» REJECTED WB → без изменений.
+
+**5. VK статус — кнопки REJECTED (`handlers.ts:~2355`):**
+Раньше: для всех REJECTED — «🔄 Исправить ссылку».
+Теперь: REJECTED direct → «💎 Заказать напрямую» (positive). REJECTED WB → «🔄 Исправить ссылку» (без изменений).
+
+**6. Broadcast-скрипты (3 файла):**
+- `broadcast-announcement.mjs`: `NOT IN ('COMPLETED')` → `NOT IN ('COMPLETED', 'REJECTED')`
+- `broadcast-gamepass-check.mjs`: убран `REJECTED` из `STATUSES`
+- `broadcast-tg-only.mjs`: `NOT IN ('COMPLETED')` → `NOT IN ('COMPLETED', 'REJECTED')`
+
+### Принцип: «если отменён — он отменён»
+
+| Тип заказа | REJECTED | Что делает бот |
+|------------|----------|----------------|
+| WB | Можно resubmit (исправить ссылку) | Восстанавливает, «Исправь геймпасс» |
+| Прямой (DIR-) | Мёртвый навсегда | НЕ восстанавливает, «Оформи новый заказ» |
+
+### Деплой
+- Web (`z10ws7m1q45h281zwedmhei4`) — авто по push, finished, healthy
+- VK бот (`gmtpfqosgoz23vjyxyczuic9`) — ручной force-deploy, finished
+- TG бот (`lyz78enntugna9em1biopinr`) — ручной force-deploy, finished
+- Guide не затронут (нет изменений в guide/*), не передеплоен
+
+---
+
+## Сессия 2026-06-25 (день-3) — Деплой-фикс + ПЛАН: автоматизация покупки геймпассов
+
+### Деплой-фикс
+
+Коммит `88f997e` не доехал до двух контейнеров (webhook Coolify не сработал для Web; Guide требует ручного деплоя):
+
+| Сервис | Был на | Должен быть | Статус |
+|--------|--------|-------------|--------|
+| Web | `0b99126` | `88f997e` | ⚠️ отстаёт — force-deploy |
+| Guide | `3287acc` | `88f997e` | ⚠️ отстаёт — force-deploy |
+| TG bot | `88f997e` | `88f997e` | ✅ OK |
+| VK bot | `88f997e` | `88f997e` | ✅ OK |
+
+Команды:
+```bash
+ssh root@89.110.94.117 'curl -s -X POST "http://localhost:8000/api/v1/deploy?uuid=z10ws7m1q45h281zwedmhei4&force=true" -H "Authorization: Bearer $COOLIFY_TOKEN"'
+ssh root@89.110.94.117 'curl -s -X POST "http://localhost:8000/api/v1/deploy?uuid=ebac6llpah5n2x58rb64yn8j&force=true" -H "Authorization: Bearer $COOLIFY_TOKEN"'
+```
+
+---
+
+### 🔬 ПЛАН: Автоматизация покупки геймпассов (auto-purchase)
+
+> **Проблема:** сейчас менеджер выкупает геймпассы вручную через страницу Roblox. Хотим автоматизировать — бот/скрипт сам покупает геймпасс от имени аккаунта-покупателя.
+
+#### Как устроена покупка (reverse-engineering)
+
+**Шаг 1 — получить данные геймпасса:**
+```
+GET https://apis.roblox.com/game-passes/v1/game-passes/{gamepassId}/product-info
+```
+Ответ (пример gamepass 1889584347):
+```json
+{
+  "TargetId": 1889584347,         // ← gamepass ID
+  "ProductId": 3606279571,        // ← НУЖЕН ДЛЯ ПОКУПКИ (отличается от TargetId!)
+  "ProductType": "Game Pass",
+  "Name": "12",
+  "PriceInRobux": 10,             // ← текущая цена (может быть изменена Managed pricing)
+  "UserBasePriceInRobux": 10,     // ← оригинальная цена продавца
+  "IsForSale": true,
+  "Creator": {
+    "Id": 11119712305,            // ← expectedSellerId
+    "Name": "dssddf616",
+    "CreatorType": "User",
+    "CreatorTargetId": 11119712305
+  }
+}
+```
+
+**Шаг 2 — получить CSRF-токен:**
+```
+POST https://auth.roblox.com/v2/logout
+Cookie: .ROBLOSECURITY=<cookie аккаунта-покупателя>
+```
+Roblox вернёт **403** и в заголовке `x-csrf-token` — актуальный CSRF-токен. (Уже реализовано в `roblox.ts:rFetch` — автоматически обновляет `lastCsrfToken` при 403.)
+
+**Шаг 3 — покупка:**
+```
+POST https://economy.roblox.com/v1/purchases/products/{ProductId}
+Cookie: .ROBLOSECURITY=<cookie>
+X-CSRF-TOKEN: <из шага 2>
+Content-Type: application/json
+
+{
+  "expectedCurrency": 1,           // 1 = Robux
+  "expectedPrice": <PriceInRobux>, // должна совпадать с текущей ценой
+  "expectedSellerId": <Creator.Id>
+}
+```
+
+#### Что нужно для работы
+
+| Компонент | Описание | Статус |
+|-----------|----------|--------|
+| **`.ROBLOSECURITY` cookie** | Авторизационный cookie аккаунта-покупателя. Берётся из DevTools → Application → Cookies после логина в roblox.com. Длинная строка (~800 символов). | ❓ Нужно получить |
+| **Баланс Robux** | На аккаунте-покупателе должно быть достаточно Robux для покупки. | ❓ Нужно проверить |
+| **CSRF-токен** | Получается автоматически через `POST /v2/logout` (403 → header). В `roblox.ts` уже есть `rFetch` с авто-ротацией CSRF. | ✅ Механика готова |
+| **ProductId** | Отличается от gamepass ID (TargetId). Получается из `product-info` API. | ✅ API известен |
+| **Managed pricing детект** | Если `PriceInRobux ≠ UserBasePriceInRobux` — Managed pricing активен, цена искажена Roblox. | ⚠️ Нужно проверять |
+
+#### Архитектура решения
+
+**Вариант A — серверный скрипт (рекомендуемый):**
+```
+bots/shared/roblox.ts → новая функция purchaseGamepass(gamepassId, cookie)
+  1. GET product-info → ProductId, PriceInRobux, Creator.Id
+  2. POST /v2/logout (с cookie) → x-csrf-token
+  3. POST /purchases/products/{ProductId} (с cookie + CSRF)
+  4. Проверить ответ: purchased=true / reason
+```
+
+Куки `.ROBLOSECURITY` хранить как env var `ROBLOX_PURCHASE_COOKIE` в Coolify (рядом с `TG_TOKEN`). Вызывается из TG-бота при нажатии `admin_ok` (или отдельной кнопкой «🛒 Выкупить»).
+
+**Вариант B — скрипт в браузере (текущий, ручной):**
+Менеджер открывает DevTools → Console → вставляет скрипт. Работает, но не масштабируется.
+
+#### Подводные камни
+
+1. **Cookie `.ROBLOSECURITY` истекает** — при выходе, смене пароля, или по таймауту (~30 дней). Нужна ротация. Можно добавить health-check (GET баланса аккаунта) в TG-бот как команду `/balance`.
+
+2. **Managed pricing** — если у продавца включён, `PriceInRobux` может отличаться от ожидаемой. Покупка с `expectedPrice` = оригинальная цена → **ошибка** (Roblox сверяет). Нужно:
+   - Использовать **актуальную** `PriceInRobux` из `product-info` (не passPrice из нашей БД)
+   - Сравнить `PriceInRobux` с `UserBasePriceInRobux` — если различаются, предупредить менеджера
+   - Опционально: автоотклонение заказа с сообщением «отключи Managed pricing»
+
+3. **Rate limits** — Roblox лимитирует покупки. При массовых выкупах — 429. Нужны паузы между покупками.
+
+4. **2FA / Security challenge** — если на аккаунте включена 2FA, покупка через API может требовать дополнительный challenge (captcha или OTP). Проверить на тестовом аккаунте.
+
+5. **IP-привязка** — Roblox может проверять, что cookie используется с того же IP/региона, где был логин. Покупку делать с того же сервера, где логинились (SG или RF).
+
+6. **Roblox ToS** — автоматизация покупок формально нарушает ToS. Риск бана аккаунта. Использовать отдельный аккаунт-покупатель (не основной).
+
+#### Как определить Managed pricing у конкретного геймпасса
+
+```
+GET https://apis.roblox.com/game-passes/v1/game-passes/{id}/product-info
+```
+Сравнить два поля:
+- `PriceInRobux` — текущая цена (с учётом региональных корректировок)
+- `UserBasePriceInRobux` — цена, которую поставил продавец
+
+Если `PriceInRobux === UserBasePriceInRobux` → Managed pricing **выключен** (OK, можно покупать).
+Если `PriceInRobux !== UserBasePriceInRobux` → Managed pricing **включён** (⚠️ цена искажена).
+
+Дополнительно, поле `PriceDiscountDetails: []` — если не пустое, тоже признак Managed pricing.
+
+#### Порядок реализации
+
+| Шаг | Что | Приоритет |
+|-----|-----|-----------|
+| 1 | Получить `.ROBLOSECURITY` cookie от аккаунта-покупателя | P0 |
+| 2 | Проверить на тестовом геймпассе: покупка через `economy.roblox.com/v1/purchases/products/` работает с серверного IP (RF/SG) | P0 |
+| 3 | Проверить, не блокируется ли покупка 2FA/captcha | P0 |
+| 4 | Добавить `purchaseGamepass()` в `bots/shared/roblox.ts` | P1 |
+| 5 | Добавить Managed pricing детект (product-info → сравнение цен) | P1 |
+| 6 | Интеграция в TG-бот: кнопка «🛒 Выкупить» в админ-карточке | P1 |
+| 7 | Health-check: `/balance` команда для проверки баланса аккаунта | P2 |
+| 8 | Автовыкуп: при PENDING → автоматически покупать (без кнопки менеджера) | P3 |
+
+#### ⚠️ ЖДЁМ ОТ ПОЛЬЗОВАТЕЛЯ
+
+- [ ] Cookie `.ROBLOSECURITY` от аккаунта-покупателя (env var, не в коде)
+- [ ] Подтверждение: на аккаунте выключена 2FA? (или готов разобраться с challenge)
+- [ ] С какого сервера покупать: RF (`89.110.94.117`) или SG (`5.223.95.11`)?
+- [ ] Тестовый геймпасс ID для прогона (не боевой) — чтобы проверить API
+- [ ] Готовность к риску: отдельный аккаунт-покупатель (ToS Roblox)
+
+---
+
 ## Сессия 2026-06-25 (день-2) — Managed pricing: акцент «отключён» + Item for sale «включи» (✅ ЗАДЕПЛОЕНО, коммит `88f997e`)
 
 > Коммит `88f997e` → `git push origin main`. Coolify подхватит Web+Guide+TG+VK по webhook.
