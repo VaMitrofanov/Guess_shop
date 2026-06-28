@@ -600,6 +600,43 @@ function userSubHandle(u: Order["user"]): string {
   return "";
 }
 
+/* ───────────── PurchaseScriptBtn — fetch & copy purchase script ───────────── */
+function PurchaseScriptBtn({ orderId, token }: { orderId: string; token: string }) {
+  const [loading, setLoading] = useState(false);
+  return (
+    <button
+      className="twa-press"
+      onClick={async e => {
+        e.stopPropagation();
+        haptic.impact("light");
+        if (loading) return;
+        setLoading(true);
+        try {
+          const r = await fetch("/api/twa/orders", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ action: "purchase-script", orderId }),
+          });
+          const d = await r.json();
+          if (!r.ok || !d.script) { toast(d.error ?? "Ошибка", "error"); return; }
+          if (!d.isForSale) { toast("❌ Не на продаже!", "error"); return; }
+          copyText(d.script);
+          const warn = d.isManagedPricing ? ` ⚠️ Managed pricing! ${d.price}/${d.base} R$` : "";
+          toast(`📋 Скрипт скопирован · ${d.name} · ${d.price} R$${warn}`, "success");
+        } catch { toast("Ошибка сети", "error"); } finally { setLoading(false); }
+      }}
+      style={{
+        flex: 1, padding: "11px", border: "none", borderRadius: 12,
+        background: "rgba(255,204,0,0.12)", color: "#ffd60a",
+        fontSize: 13.5, fontWeight: 600, cursor: "pointer", letterSpacing: 0.1,
+        opacity: loading ? 0.5 : 1,
+      }}
+    >
+      {loading ? "⏳…" : "📋 Скрипт"}
+    </button>
+  );
+}
+
 /* ───────────── TimeBadge — colored age indicator ───────────── */
 function TimeBadge({ icon, value, label, color }: { icon: string; value: string; label: string; color: string }) {
   return (
@@ -635,9 +672,33 @@ function OrderTimeline({ order }: { order: Order }) {
     badges.push(<TimeBadge key="pn" icon="📋" value={fmtAge(pendRef)} label="был в очереди" color={C.textTertiary} />);
     badges.push(<TimeBadge key="tk" icon="🔨" value={fmtAge(takenRef)} label="в работе" color={ageColor(takenRef)} />);
   } else if (order.status === "COMPLETED") {
-    badges.push(<TimeBadge key="done" icon="✅" value={fmtAge(order.createdAt)} label="общее время" color={C.green} />);
+    badges.push(
+      <div key="done" style={{ flex: 1, minWidth: 0, background: `${C.green}18`, borderRadius: 12, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.green, ...tabular, lineHeight: 1.1 }}>✅ {fmtAge(order.createdAt)}</div>
+          <div style={{ fontSize: 10, color: C.textTertiary, fontWeight: 500, letterSpacing: 0.2 }}>общее время</div>
+        </div>
+        {order.robloxUsername && (
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.textSecondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "50%", lineHeight: 1.2, paddingTop: 1 }}>
+            🎮 {order.robloxUsername}
+          </div>
+        )}
+      </div>,
+    );
   } else if (order.status === "REJECTED") {
-    badges.push(<TimeBadge key="rej" icon="❌" value={fmtAge(order.createdAt)} label="общее время" color={C.red} />);
+    badges.push(
+      <div key="rej" style={{ flex: 1, minWidth: 0, background: `${C.red}18`, borderRadius: 12, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.red, ...tabular, lineHeight: 1.1 }}>❌ {fmtAge(order.createdAt)}</div>
+          <div style={{ fontSize: 10, color: C.textTertiary, fontWeight: 500, letterSpacing: 0.2 }}>общее время</div>
+        </div>
+        {order.robloxUsername && (
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.textSecondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "50%", lineHeight: 1.2, paddingTop: 1 }}>
+            🎮 {order.robloxUsername}
+          </div>
+        )}
+      </div>,
+    );
   } else {
     badges.push(<TimeBadge key="cr" icon="⏱" value={fmtAge(order.createdAt)} label="создан" color={ageColor(order.createdAt)} />);
   }
@@ -1004,18 +1065,23 @@ function OrderCard({
           background: "rgba(0,0,0,0.12)",
         }}>
           <ActionBar order={order} onRunAction={onRunAction} />
-          {onGoToBossrobux && order.gamepassUrl && (order.status === "PENDING" || order.status === "IN_PROGRESS") && (
-            <button
-              className="twa-press"
-              onClick={e => { e.stopPropagation(); haptic.impact("light"); onGoToBossrobux(extractGamepassId(order.gamepassUrl) ?? undefined); }}
-              style={{
-                width: "100%", padding: "11px", border: "none", borderRadius: 12,
-                background: "rgba(191,90,242,0.14)", color: C.accent,
-                fontSize: 13.5, fontWeight: 600, cursor: "pointer", letterSpacing: 0.1,
-              }}
-            >
-              🛒 Выкупить через Boss Robux
-            </button>
+          {order.gamepassUrl && (order.status === "PENDING" || order.status === "IN_PROGRESS") && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <PurchaseScriptBtn orderId={order.id} token={token} />
+              {onGoToBossrobux && (
+                <button
+                  className="twa-press"
+                  onClick={e => { e.stopPropagation(); haptic.impact("light"); onGoToBossrobux(extractGamepassId(order.gamepassUrl) ?? undefined); }}
+                  style={{
+                    flex: 1, padding: "11px", border: "none", borderRadius: 12,
+                    background: "rgba(191,90,242,0.14)", color: C.accent,
+                    fontSize: 13.5, fontWeight: 600, cursor: "pointer", letterSpacing: 0.1,
+                  }}
+                >
+                  🛒 Boss Robux
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}

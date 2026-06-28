@@ -1093,12 +1093,6 @@ async function handleGamepassLink(
   wbCode: string,
   denomination: number
 ): Promise<void> {
-  // Re-check subscription — state could have been set before the user subscribed.
-  if (!(await isVkSubscribed(ctx, vkUserId))) {
-    await sendVkSubPrompt(ctx, null); // no ref; AWAITING_LINK state preserved for retry
-    return;
-  }
-
   const passId = extractPassId(input);
 
   if (!passId) {
@@ -1373,6 +1367,23 @@ async function handleGamepassLink(
       .textButton({ label: "👤 Открыть моё меню", payload: { command: "menu" }, color: "secondary" })
       .inline(),
   });
+
+  // Soft subscription prompt — order is already saved, never blocks
+  const groupId = process.env.VK_GROUP_ID;
+  if (groupId) {
+    try {
+      if (!(await isVkSubscribed(ctx, vkUserId))) {
+        const groupUrl = `https://vk.com/club${groupId}`;
+        await ctx.reply({
+          message:
+            `⭐ Кстати — подпишись на наше сообщество, чтобы не пропустить акции и бонусы:\n${groupUrl}`,
+          keyboard: Keyboard.builder()
+            .urlButton({ label: "🔔 Подписаться", url: groupUrl })
+            .inline(),
+        });
+      }
+    } catch { /* non-fatal */ }
+  }
 
   // Fetch real name for admin card (non-blocking — fallback is "VK #id")
   const vkName = user.name ?? await vkGetName(vkUserId);

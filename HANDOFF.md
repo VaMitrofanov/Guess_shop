@@ -6,6 +6,50 @@
 
 ---
 
+## Сессия 2026-06-28 (день-3) — Скрипт выкупа + managed pricing детект + отзывы с текстом (✅ ЗАДЕПЛОЕНО, коммит `43fd8bf`)
+
+### 1. Кнопка «📋 Скрипт выкупа» в admin-карточке
+
+Новая кнопка во втором ряду рядом с «Дашборд». По нажатию:
+1. Достаёт gamepass ID из URL заказа
+2. Вызывает `getGamepassProductInfo()` (product-info API → fallback roproxy)
+3. Проверяет: IsForSale? Managed pricing?
+4. Генерирует готовый JS-скрипт для консоли Антика → отправляет как `<code>` (tap-to-copy)
+
+Если managed pricing включён — предупреждение с ценами (Roblox vs продавец).
+Если не на продаже — блок с ошибкой.
+
+**Новые функции в `bots/shared/roblox.ts`:**
+- `getGamepassProductInfo(gamepassId)` → `GamepassProductInfo` (productId, priceInRobux, userBasePriceInRobux, creatorId, isManagedPricing)
+- `buildPurchaseScript(info)` → готовый минифицированный JS с проверкой логина и читаемым выводом
+
+**Callback:** `ps:{orderId}` (CB.purchaseScript) в `bots/shared/admin.ts`
+
+### 2. Managed pricing детект при оформлении заказа
+
+В `processGamepassSubmission` (TG): если цена не совпадает — дополнительно вызывается `getGamepassProductInfo()`:
+- Если причина = managed pricing → **отдельное, точное сообщение** пользователю (цена Roblox / цена продавца / ожидаемая)
+- Админу алерт с пометкой «Managed pricing: X R$ (база Y R$)»
+- Если не managed pricing → прежнее общее сообщение о несовпадении цены
+
+### 3. Отзывы — требование «с текстом и фото»
+
+Во всех точках TG+VK, где бот просит оставить отзыв, добавлено: **отзыв должен быть с текстом и фото**, только оценка не подойдёт.
+
+6 точек исправлено:
+- TG: pendingReview напоминание, review_hint callback, notifyUserCompleted tier 1 (tgMsg + vkMsg), fallback «заказ ещё не выполнен»
+- VK: фото-обработка review, статус COMPLETED
+
+### ✅ Деплой (прод-проверка 2026-06-28)
+
+- [x] Коммит `43fd8bf` → `git push origin main`
+- [x] Web (`z10ws7m1q45h281zwedmhei4`) — image tag `43fd8bf`, healthy, 200 OK
+- [x] TG bot (`lyz78enntugna9em1biopinr`, SG) — image tag `43fd8bf`, `Bot started ✅`, все 3 cron started ✅
+- [x] VK bot (`gmtpfqosgoz23vjyxyczuic9`) — image tag `43fd8bf`, `Bot started ✅ (group 237309399)`
+- [x] Ошибок в логах нет
+
+---
+
 ## Сессия 2026-06-28 (день-2) — Редизайн карточек TWA + напоминания «Ждут ссылку» (✅ ЗАДЕПЛОЕНО, коммит `9717ba9`)
 
 ### 1. Миграция: `pendingAt`, `takenAt`, `remindersSent`

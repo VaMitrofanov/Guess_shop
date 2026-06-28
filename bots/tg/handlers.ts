@@ -1401,28 +1401,6 @@ export function registerText(bot: Telegraf): void {
       }
     }
 
-    // ── Subscription gate — BEFORE parsing the link ──────────────────────
-    // Check first so the user never sees "Получил!" before subscribing.
-    // pendingLink is preserved; after joining the channel registerChatMember
-    // will prompt the user to re-send the link.
-    if (!isAdmin && process.env.TG_CHANNEL_ID) {
-      const subscribed = await checkSubscription(bot, ctx.from.id);
-      if (!subscribed) {
-        await ctx.reply(
-          `Чтобы оформить заказ, сначала подпишись на наш канал — там бонусы и акции для клиентов.\n\n` +
-          `После подписки бот напишет тебе сам. Или пришли ссылку ещё раз.`,
-          {
-            parse_mode: "HTML",
-            link_preview_options: { is_disabled: true },
-            ...Markup.inlineKeyboard([[
-              Markup.button.url("⭐ Подписаться", "https://t.me/Roblox_Bank_Tg")
-            ]]),
-          }
-        );
-        return;
-      }
-    }
-
     const passId = extractPassId(text);
 
     if (!passId) {
@@ -2042,6 +2020,25 @@ async function processGamepassSubmission(
       }
     );
 
+    // Soft subscription prompt — order is already saved, never blocks
+    if (process.env.TG_CHANNEL_ID) {
+      try {
+        const subbed = await checkSubscription(bot, ctx.from.id);
+        if (!subbed) {
+          await ctx.reply(
+            `⭐ Кстати — подпишись на наш канал, чтобы не пропустить акции и бонусы 👇`,
+            {
+              parse_mode: "HTML",
+              link_preview_options: { is_disabled: true },
+              ...Markup.inlineKeyboard([[
+                Markup.button.url("🔔 Подписаться", "https://t.me/Roblox_Bank_Tg")
+              ]]),
+            }
+          );
+        }
+      } catch { /* non-fatal */ }
+    }
+
     // Notify all Telegram admins (non-fatal — errors don't affect user)
     try {
       const fullOrder = await (db as any).wbOrder.findUnique({
@@ -2151,7 +2148,8 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
         { text: "❌ ОШИБКА", callback_data: `admin_reject_init:${order.id}` }
       ],
       [
-        { text: "📊 Открыть в дашборде", web_app: { url: twaUrl } }
+        { text: "📋 Скрипт выкупа", callback_data: CB.purchaseScript(order.id) },
+        { text: "📊 Дашборд", web_app: { url: twaUrl } },
       ]
     ]
   } : undefined;

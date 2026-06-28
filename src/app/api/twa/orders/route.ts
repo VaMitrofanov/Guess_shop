@@ -376,5 +376,52 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  if (action === "purchase-script") {
+    const gpMatch = order.gamepassUrl?.match(/game-pass(?:es)?\/(\d+)/);
+    if (!gpMatch) return NextResponse.json({ error: "No gamepass URL" }, { status: 400 });
+    const gpId = gpMatch[1];
+
+    const urls = [
+      `https://apis.roblox.com/game-passes/v1/game-passes/${gpId}/product-info`,
+      `https://apis.roproxy.com/game-passes/v1/game-passes/${gpId}/product-info`,
+    ];
+    let info: any = null;
+    for (const url of urls) {
+      try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        if (r.ok) { info = await r.json(); break; }
+      } catch { /* try next */ }
+    }
+    if (!info?.ProductId)
+      return NextResponse.json({ error: "Failed to fetch product info" }, { status: 502 });
+
+    const price = info.PriceInRobux ?? 0;
+    const base = info.UserBasePriceInRobux ?? price;
+    const isManagedPricing = price !== base;
+    const isForSale = info.IsForSale ?? false;
+    const creatorId = info.Creator?.Id ?? info.Creator?.CreatorTargetId ?? 0;
+    const creatorName = info.Creator?.Name ?? "Unknown";
+    const name = info.Name ?? "Gamepass";
+
+    const script = [
+      `(async()=>{`,
+      `const r=await fetch("https://auth.roblox.com/v2/logout",{method:"POST",credentials:"include"});`,
+      `const t=r.headers.get("x-csrf-token");`,
+      `if(!t){console.log("❌ Не залогинен");return}`,
+      `const b=await fetch("https://economy.roblox.com/v1/purchases/products/${info.ProductId}",{`,
+      `method:"POST",credentials:"include",`,
+      `headers:{"Content-Type":"application/json","X-CSRF-TOKEN":t},`,
+      `body:JSON.stringify({expectedCurrency:1,expectedPrice:${price},expectedSellerId:${creatorId}})`,
+      `});const j=await b.json();`,
+      `console.log(j.purchased?"✅ Куплено: "+j.price+" R$":"❌ Ошибка: "+j.reason)`,
+      `})()`,
+    ].join("");
+
+    return NextResponse.json({
+      ok: true, script, name, price, base, creatorName,
+      isForSale, isManagedPricing, gamepassId: gpId,
+    });
+  }
+
   return NextResponse.json({ error: "Invalid action" }, { status: 400 });
 }
