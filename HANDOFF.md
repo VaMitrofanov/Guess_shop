@@ -6,7 +6,45 @@
 
 ---
 
-## Сессия 2026-06-29 (день-3) — Подписка в велкоме + отмена прямых заказов + WB-код в гейте (⏳ ДЕПЛОЙ)
+## Сессия 2026-06-29 (день-4) — DirectIntent: заказ только при реквизитах (✅ ЗАДЕПЛОЕНО, коммит `ca34e25`)
+
+### Что сделано
+
+Полный рефакторинг прямого заказа: WbOrder создаётся только когда админ отправляет реквизиты (QR/текст), а не при подтверждении покупателем. До оплаты данные живут как `DirectIntent` в БД.
+
+**Новый flow покупателя:** пак → бонус → ник Roblox (сохранённый/новый) → поиск геймпассов → выбор → итого → «Оформить» → DirectIntent(PENDING) → админ получает «🔷 ЗАЯВКА» → QR/Реквизиты → WbOrder(PAYMENT_PENDING) → оплата → PENDING (gamepassUrl уже есть, AWAITING_GAMEPASS пропускается).
+
+Кнопка «❌ Отмена» на каждом шаге. Ник Roblox редактируется из /menu (TG + VK).
+
+### Файлы
+
+| Файл | Что изменено |
+|------|-------------|
+| `prisma/schema.prisma` | +enum `DirectIntentStatus` + model `DirectIntent` |
+| `bots/tg/session.ts` | `DirectFlowState` (step: amount/bonus/nick/nick_input/gamepass/summary) + `pendingNickEdit` |
+| `bots/vk/session.ts` | +5 VK-состояний, `AWAITING_DIRECT_CONFIRM` → DirectFlowData |
+| `bots/shared/admin.ts` | `sendAdminIntentCard()`, 10 CB entries, shared `ROBLOX_NICK_RE` + `generateDirectCode()` |
+| `bots/tg/handlers.ts` | Flow-функции, admin intent handlers (sqi/spi/cai), pay_ok ветвление, ник в /menu |
+| `bots/vk/handlers.ts` | Зеркало TG: flow-функции, payload commands, удалены локальные дубликаты |
+
+### Деплой (прод-проверка 2026-06-29)
+
+- [x] БД: `prisma db push` — DirectIntent таблица создана (+ дроп неиспользуемого `sbpQrBase64`)
+- [x] Коммит `ca34e25` → `git push origin main`
+- [x] TG бот (`lyz78enntugna9em1biopinr`, SG) — image tag `ca34e25`, `Bot started ✅`, `Bot profile applied ✅`, все 3 cron started ✅
+- [x] VK бот (`gmtpfqosgoz23vjyxyczuic9`, RF) — image tag `ca34e25`, `Bot started ✅ (group 237309399)`
+- [x] Web (`z10ws7m1q45h281zwedmhei4`, RF) — image tag `ca34e25`, healthy
+- [x] Ошибок в логах нет
+
+### Ожидает
+
+- [ ] **Тест в проде:** полный flow TG + VK (пак → бонус → ник → ГП → оформить → админ QR → pay_ok)
+- [ ] **Фаза 8 (очистка):** через 1–2 дня удалить `pendingDirectAmount/Order`, `sendAdminDirectOrderCard`, `DirectOrderState`
+- [ ] Формула для кастомных номиналов (сейчас fallback `amount × 0.7`)
+
+---
+
+## Сессия 2026-06-29 (день-3) — Подписка в велкоме + отмена прямых заказов + WB-код в гейте (✅ ЗАДЕПЛОЕНО, коммит `304ed3d`)
 
 ### 1. Подписка в холодном велкоме (TG + VK)
 
