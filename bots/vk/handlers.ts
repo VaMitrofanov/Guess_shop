@@ -781,6 +781,53 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     await ctx.reply("Отменено.");
     return;
   }
+  if (msgPayload?.command === "user_cancel_direct" && msgPayload?.orderId) {
+    const ucdOrderId = String(msgPayload.orderId);
+    const ucdOrder = await (db as any).wbOrder.findUnique({
+      where: { id: ucdOrderId },
+      include: { user: { select: { id: true, vkId: true, balance: true } } },
+    });
+    if (!ucdOrder) { await ctx.reply("Заказ не найден."); return; }
+    if (ucdOrder.status !== "AWAITING_PAYMENT") {
+      await ctx.reply("Этот заказ уже нельзя отменить.");
+      return;
+    }
+    if (ucdOrder.user?.vkId !== String(vkUserId)) {
+      await ctx.reply("⛔ Это не твой заказ.");
+      return;
+    }
+    const updateData: any = {};
+    const baseAmount = ucdOrder.amount;
+    // Restore bonus if any was applied (amount > pack denomination)
+    const dirCodeRec = await (db as any).wbCode.findFirst({ where: { code: ucdOrder.wbCode } });
+    const bonusApplied = dirCodeRec ? baseAmount - dirCodeRec.denomination : 0;
+    if (bonusApplied > 0) updateData.balance = (ucdOrder.user.balance ?? 0) + bonusApplied;
+
+    await (db as any).$transaction(async (tx: any) => {
+      await tx.wbOrder.update({
+        where: { id: ucdOrderId },
+        data: { status: "REJECTED", rejectionReason: "Отменён покупателем" },
+      });
+      if (Object.keys(updateData).length > 0) {
+        await tx.user.update({ where: { id: ucdOrder.user.id }, data: updateData });
+      }
+    });
+    const shortId = ucdOrderId.slice(-6).toUpperCase();
+    await ctx.reply({
+      message: `❌ Заказ #${shortId} отменён.\n\nЕсли хочешь — создай новый заказ.`,
+      keyboard: Keyboard.builder()
+        .textButton({ label: "💎 Заказать напрямую", payload: { command: "start_direct" }, color: "positive" })
+        .inline(),
+    });
+    // Notify admins via TG
+    const fullName = await vkGetName(vkUserId);
+    const adminText =
+      `❌ <b>Заказ #${shortId} отменён покупателем</b>\n` +
+      `👤 <a href="https://vk.com/id${vkUserId}">${escapeHtml(fullName)}</a> (VK)\n` +
+      `💎 ${baseAmount} R$`;
+    await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, adminText)));
+    return;
+  }
 
   // ── 🔎 Find gamepass by Roblox nick (item 7) ───────────────────────────────
   if (msgPayload?.command === "find_gp_start") {
@@ -2375,7 +2422,9 @@ async function handleIdleMessage(
     // Status-specific rows first, then always a "👤 В моё меню" row so the user
     // never dead-ends on the status screen (mirror of the TG menuRow).
     const kb = Keyboard.builder();
-    if (order.status === "REJECTED" && order.isDirectOrder) {
+    if (order.status === "AWAITING_PAYMENT" && order.isDirectOrder) {
+      kb.textButton({ label: "❌ Отменить заказ", payload: { command: "user_cancel_direct", orderId: order.id }, color: "negative" }).row();
+    } else if (order.status === "REJECTED" && order.isDirectOrder) {
       kb.textButton({ label: "💎 Заказать напрямую", payload: { command: "start_direct" }, color: "positive" }).row();
     } else if (order.status === "REJECTED") {
       kb.textButton({ label: "🔄 Исправить ссылку", payload: { command: "resubmit", code: order.wbCode }, color: "primary" }).row();

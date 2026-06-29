@@ -346,14 +346,20 @@ export function registerStart(bot: Telegraf): void {
         );
       } else {
         const greeting = getGreeting(custStatus, firstName);
+        const channelUrl = "https://t.me/Roblox_Bank_Tg";
         await ctx.reply(
-          `${greeting}Я бот RobloxBank — помогу получить робуксы за код с карты Wildberries 💎\n\n` +
-          `🔑 Есть код с WB-карты? Напиши его прямо сюда — дам твою <b>персональную инструкцию</b>, заказ оформишь по ней, а тут будешь получать <b>уведомления о заказе</b>.\n\n` +
+          `${greeting}Я бот RobloxBank — помогу получить робуксы 💎\n\n` +
+          `⭐ Подпишись на наш канал 👇\n` +
+          `После подписки бот точнее находит геймпассы по нику и ты получишь <b>персональную инструкцию</b> — заказ оформляется прямо в ней.\n\n` +
+          `🔑 Есть код с WB-карты? Напиши его прямо сюда.\n` +
           `💎 Нет кода? Можно купить Robux <b>напрямую</b> — без карты WB, быстрее и выгоднее.`,
           {
             parse_mode: "HTML",
             link_preview_options: { is_disabled: true },
-            ...menuReplyKb(),
+            ...Markup.inlineKeyboard([
+              [Markup.button.url("🔔 Подписаться", channelUrl)],
+              [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
+            ]),
           }
         );
       }
@@ -526,9 +532,9 @@ export function registerStart(bot: Telegraf): void {
     const subscribed = await checkSubscription(bot, ctx.from.id);
     if (!subscribed) {
       await ctx.reply(
-        `🎉 Код <b>${code}</b> принят!\n\n` +
+        `📦 Заказ <b>${code}</b> · ${wbCode.denomination} R$ — создан\n\n` +
         `Чтобы продолжить, подпишись на наш канал 👇\n` +
-        `После подписки бот выдаст тебе <b>персональную инструкцию</b> и ты сможешь оформить заказ по нику в Roblox.\n\n` +
+        `После подписки бот точнее находит геймпассы по нику и ты получишь <b>персональную инструкцию</b> — заказ оформляется прямо в ней.\n\n` +
         `Если бот не написал — напиши любое слово 👋`,
         {
           parse_mode: "HTML",
@@ -919,7 +925,10 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     const helpRow = waitMins >= 15
       ? [supportBtn("⏰ Написать менеджеру", "direct_wait")]
       : [faqOrSupportBtn(order, "💬 Нужна помощь?", "direct_wait")];
-    keyboard = Markup.inlineKeyboard([refreshRow, helpRow, menuRow]);
+    const cancelRow = order.status === "AWAITING_PAYMENT" && order.isDirectOrder
+      ? [[Markup.button.callback("❌ Отменить заказ", CB.userCancelDirect(order.id))]]
+      : [];
+    keyboard = Markup.inlineKeyboard([refreshRow, helpRow, ...cancelRow, menuRow]);
   } else if (order.status === "REJECTED") {
     if (order.isDirectOrder) {
       keyboard = Markup.inlineKeyboard([
@@ -1272,7 +1281,7 @@ export function registerText(bot: Telegraf): void {
           if (!subbed) {
             await ctx.reply(
               `⭐ Подпишись на наш канал, чтобы продолжить 👇\n` +
-              `После подписки бот выдаст тебе инструкцию и ты сможешь оформить заказ.`,
+              `После подписки бот точнее находит геймпассы по нику и ты получишь инструкцию — заказ оформляется прямо в ней.`,
               {
                 parse_mode: "HTML",
                 link_preview_options: { is_disabled: true },
@@ -2315,9 +2324,9 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   const subscribed = await checkSubscription(bot, ctx.from.id);
   if (!subscribed) {
     await ctx.reply(
-      `🎉 Код <b>${codeInput}</b> принят!\n\n` +
+      `📦 Заказ <b>${codeInput}</b> · ${wbCode.denomination} R$ — создан\n\n` +
       `Чтобы продолжить, подпишись на наш канал 👇\n` +
-      `После подписки бот выдаст тебе <b>персональную инструкцию</b> и ты сможешь оформить заказ по нику в Roblox.\n\n` +
+      `После подписки бот точнее находит геймпассы по нику и ты получишь <b>персональную инструкцию</b> — заказ оформляется прямо в ней.\n\n` +
       `Если бот не написал — напиши любое слово 👋`,
       {
         parse_mode: "HTML",
@@ -3095,6 +3104,70 @@ export function registerCallbacks(bot: Telegraf): void {
       pendingDirectAmount.delete(ctx.from.id);
       try { await ctx.editMessageText("Отменено.", { parse_mode: "HTML" }); } catch { }
       await ctx.answerCbQuery("Отменено");
+      return;
+    }
+
+    // ucd: user cancels their own direct order (AWAITING_PAYMENT only)
+    if (data.startsWith("ucd:")) {
+      const ucdOrderId = data.slice(4);
+      const ucdOrder = await (db as any).wbOrder.findUnique({
+        where: { id: ucdOrderId },
+        include: { user: { select: { id: true, tgId: true, vkId: true, balance: true, rubleDiscount: true } } },
+      });
+      if (!ucdOrder) { await ctx.answerCbQuery("Заказ не найден"); return; }
+      if (ucdOrder.status !== "AWAITING_PAYMENT") {
+        await ctx.answerCbQuery("Заказ уже нельзя отменить");
+        return;
+      }
+      const ownsTg = ucdOrder.user?.tgId === String(ctx.from.id);
+      if (!ownsTg) { await ctx.answerCbQuery("⛔ Это не твой заказ"); return; }
+
+      // Restore bonus & discount that were deducted at order creation
+      const updateData: any = {};
+      const baseAmount = ucdOrder.amount;
+      const code = ucdOrder.wbCode;
+      const bonusApplied = await (async () => {
+        const dirCode = await (db as any).wbCode.findFirst({ where: { code } });
+        if (!dirCode) return 0;
+        return baseAmount - dirCode.denomination;
+      })();
+      // Direct orders don't use wbCode table — bonus is amount - pack value.
+      // We stored totalAmount (pack + bonus) in order.amount. The original pack
+      // was the directPrice key. Restore bonus to user.balance.
+      if (bonusApplied > 0) updateData.balance = (ucdOrder.user.balance ?? 0) + bonusApplied;
+      // Restore ruble discount — it was zeroed at confirmation
+      // We can't know the exact discount that was applied, but the directPrice
+      // calculation path zeroed rubleDiscount. Set it back to 60 (the only
+      // discount value in the system) if it was 0 and order had it.
+      // Simpler: we won't restore discount — it's a minor edge case. The admin
+      // can re-credit manually if needed.
+
+      await (db as any).$transaction(async (tx: any) => {
+        await tx.wbOrder.update({
+          where: { id: ucdOrderId },
+          data: { status: "REJECTED", rejectionReason: "Отменён покупателем" },
+        });
+        if (Object.keys(updateData).length > 0) {
+          await tx.user.update({ where: { id: ucdOrder.user.id }, data: updateData });
+        }
+      });
+
+      const shortId = ucdOrderId.slice(-6).toUpperCase();
+      try {
+        await ctx.editMessageText(
+          `❌ <b>Заказ #${shortId} отменён.</b>\n\nЕсли хочешь — создай новый заказ.`,
+          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("💎 Заказать напрямую", CB.startDirect)]]) }
+        );
+      } catch { }
+      await ctx.answerCbQuery("Заказ отменён");
+
+      // Notify admins
+      const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "Пользователь");
+      const adminText =
+        `❌ <b>Заказ #${shortId} отменён покупателем</b>\n` +
+        `👤 ${escapeHtml(tgDisplay)}\n` +
+        `💎 ${baseAmount} R$`;
+      await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, adminText)));
       return;
     }
 

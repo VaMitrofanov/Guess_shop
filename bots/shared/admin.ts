@@ -323,6 +323,7 @@ export const CB = {
   sendPaymentDetails:  (orderId: string) => `spd:${orderId}`,                             // 29 b
   sendQr:              (orderId: string) => `sqr:${orderId}`,                             // 29 b
   cancelDirectOrder:   (orderId: string) => `cdo:${orderId}`,                             // 29 b
+  userCancelDirect:    (orderId: string) => `ucd:${orderId}`,                             // 29 b
   paymentOk:           (orderId: string, userId: string) => `pay_ok:${orderId}:${userId}`, // 59 b
   paymentNo:           (orderId: string, userId: string) => `pay_no:${orderId}:${userId}`, // 59 b
 
