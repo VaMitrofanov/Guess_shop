@@ -363,6 +363,7 @@ export const CB = {
   directGpPick:       (passId: string) => `dgp:${passId}`,      // ≤16 b
   directSubmit:       "dir_submit",                              // 10 b
   directCancel:       "dir_cancel",                              // 10 b
+  directBack:         "dir_back",                                // 8 b
   editNick:           "edit_nick",                               // 9 b
 
   // User actions

@@ -42,16 +42,32 @@ function fmtRub(n: number): string {
   return `${n} ₽`;
 }
 
+/** Visual step indicator: ● ● ○ ○ ○  Шаг 2 · Подтверждение */
+function stepBar(current: number, label: string): string {
+  const bar = Array.from({ length: 5 }, (_, i) => i < current ? "●" : "○").join(" ");
+  return `${bar}  <b>Шаг ${current}/5 · ${label}</b>`;
+}
+
 /** Build an inline keyboard with predefined Robux packs and their ruble prices. */
-function buildPackKb(userBonus = 0, rubleDiscount = 0, promoActive = false) {
+function buildPackKb(userBonus = 0, rubleDiscount = 0, lastOrderAmount?: number) {
+  const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+  if (lastOrderAmount && DIRECT_PACKS.includes(lastOrderAmount)) {
+    const tag = userBonus > 0 && lastOrderAmount >= BONUS_MIN_PACK ? ` +${userBonus}🎁` : "";
+    const basePrice = directPrice(lastOrderAmount);
+    const price = rubleDiscount > 0 ? Math.max(0, basePrice - rubleDiscount) : basePrice;
+    buttons.push([Markup.button.callback(
+      `🔄 ${lastOrderAmount}${tag} R$ — ${fmtRub(price)}`,
+      CB.directPack(lastOrderAmount)
+    )]);
+  }
   const rows = [
     DIRECT_PACKS.slice(0, 3),   // 100, 200, 300
     DIRECT_PACKS.slice(3, 6),   // 400, 500, 800
     DIRECT_PACKS.slice(6, 9),   // 1000, 1200, 1500
     DIRECT_PACKS.slice(9),      // 2000
   ] as number[][];
-  const buttons = rows.map(row =>
-    row.map(amt => {
+  for (const row of rows) {
+    buttons.push(row.map(amt => {
       const tag = userBonus > 0 && amt >= BONUS_MIN_PACK ? ` +${userBonus}🎁` : "";
       const basePrice = directPrice(amt);
       const price = rubleDiscount > 0 ? Math.max(0, basePrice - rubleDiscount) : basePrice;
@@ -59,10 +75,10 @@ function buildPackKb(userBonus = 0, rubleDiscount = 0, promoActive = false) {
         `${amt}${tag} R$ — ${fmtRub(price)}`,
         CB.directPack(amt)
       );
-    })
-  );
+    }));
+  }
   buttons.push([Markup.button.callback("✏️ Своё количество", CB.customDirect)]);
-  buttons.push([Markup.button.callback("❌ Отмена", CB.cancelDirect)]);
+  buttons.push([Markup.button.callback("❌ Отменить", CB.cancelDirect)]);
   return Markup.inlineKeyboard(buttons);
 }
 
@@ -622,7 +638,7 @@ async function handleDirectPackChosen(ctx: any, amt: number): Promise<void> {
   const discountLine = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
   const rateLine = amt >= 1000 ? `📊 Курс:            ${customRate(amt)} ₽/R$\n` : "";
   const confirmText =
-    `✅ <b>Подтверди заказ</b>\n\n` +
+    `${stepBar(2, "Подтверждение")}\n\n` +
     bonusSection + rateLine + discountLine +
     `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
     `📌 Цена геймпасса:  ${passPrice} R$`;
@@ -631,11 +647,11 @@ async function handleDirectPackChosen(ctx: any, amt: number): Promise<void> {
     ? [
         [Markup.button.callback(`✅ С бонусом (+${bonus} R$)`, CB.confirmDirect)],
         [Markup.button.callback("✅ Без бонуса", CB.confirmDirectNb)],
-        [Markup.button.callback("❌ Отмена", CB.cancelDirect)],
+        [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
       ]
     : [
-        [Markup.button.callback("✅ Подтвердить", CB.confirmDirect),
-         Markup.button.callback("❌ Отмена", CB.cancelDirect)],
+        [Markup.button.callback("✅ Подтвердить", CB.confirmDirect)],
+        [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
       ];
   const confirmKb = Markup.inlineKeyboard(confirmBtns);
   try {
@@ -655,37 +671,68 @@ async function showNickStep(bot: Telegraf, ctx: any): Promise<void> {
   const savedNick = user?.robloxUsername;
   flow.step = "nick";
 
+  const nickHeader = stepBar(3, "Ник Roblox");
+
   if (savedNick) {
     flow.robloxUsername = savedNick;
     const nickBtns = Markup.inlineKeyboard([
       [Markup.button.callback(`✅ ${savedNick}`, CB.directNickOk)],
       [Markup.button.callback("✏️ Другой ник", CB.directNickNew)],
-      [Markup.button.callback("❌ Отмена", CB.directCancel)],
+      [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
     ]);
+    const nickText = `${nickHeader}\n\nТвой сохранённый ник: <b>${escapeHtml(savedNick)}</b>\n\nПродолжить с ним?`;
     try {
-      await ctx.editMessageText(
-        `🎮 <b>Ник Roblox</b>\n\nТвой сохранённый ник: <b>${escapeHtml(savedNick)}</b>\n\nПродолжить с ним?`,
-        { parse_mode: "HTML", ...nickBtns }
-      );
+      await ctx.editMessageText(nickText, { parse_mode: "HTML", ...nickBtns });
     } catch {
-      await ctx.reply(
-        `🎮 <b>Ник Roblox</b>\n\nТвой сохранённый ник: <b>${escapeHtml(savedNick)}</b>\n\nПродолжить с ним?`,
-        { parse_mode: "HTML", ...nickBtns }
-      );
+      await ctx.reply(nickText, { parse_mode: "HTML", ...nickBtns });
     }
   } else {
     flow.step = "nick_input";
+    const nickInputBtns = Markup.inlineKeyboard([
+      [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
+    ]);
+    const nickInputText = `${nickHeader}\n\nВведи свой ник Roblox — напиши его в чат:`;
     try {
-      await ctx.editMessageText(
-        `🎮 <b>Введи свой ник Roblox</b>\n\nНапиши его в чат:`,
-        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.directCancel)]]) }
+      await ctx.editMessageText(nickInputText, { parse_mode: "HTML", ...nickInputBtns }
       );
     } catch {
       await ctx.reply(
-        `🎮 <b>Введи свой ник Roblox</b>\n\nНапиши его в чат:`,
-        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.directCancel)]]) }
+        nickInputText, { parse_mode: "HTML", ...nickInputBtns }
       );
     }
+  }
+}
+
+async function showSummary(ctx: any, flow: DirectFlowState, gpRobux: number, gpName: string): Promise<void> {
+  const bonusLine = flow.bonus && flow.bonus > 0 ? `\n🎁 Бонус:       +${flow.bonus} R$` : "";
+  const discountLine = flow.rubleDiscount && flow.rubleDiscount > 0 ? `\n💰 Скидка:      −${flow.rubleDiscount} ₽` : "";
+
+  let mpLine = "";
+  try {
+    const info = await getGamepassProductInfo(flow.gamepassId!);
+    if (info && info.priceInRobux !== info.userBasePriceInRobux) {
+      mpLine = `\n⚠️ <b>Managed pricing ВКЛЮЧЁН</b> — выкуп может задержаться`;
+    } else if (info) {
+      mpLine = `\n✅ Managed pricing отключён`;
+    }
+  } catch { /* non-critical */ }
+
+  const summaryText =
+    `${stepBar(5, "Итого")}\n\n` +
+    `📦 Получишь:    <b>${flow.totalAmount} R$</b>${bonusLine}\n` +
+    `🎮 Ник:         <b>${escapeHtml(flow.robloxUsername!)}</b>\n` +
+    `🎫 Геймпасс:    <b>${gpRobux} R$</b> · "${escapeHtml(gpName.slice(0, 30))}"${discountLine}\n` +
+    `💰 К оплате:    <b>${fmtRub(flow.rublePrice!)}</b>` +
+    mpLine;
+
+  const summaryKb = Markup.inlineKeyboard([
+    [Markup.button.callback("✅ Оформить", CB.directSubmit)],
+    [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
+  ]);
+  try {
+    await ctx.editMessageText(summaryText, { parse_mode: "HTML", ...summaryKb });
+  } catch {
+    await ctx.reply(summaryText, { parse_mode: "HTML", ...summaryKb });
   }
 }
 
@@ -705,7 +752,9 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
     flow.step = "nick_input";
     await ctx.reply(
       `❌ Пользователь <b>${escapeHtml(nick)}</b> не найден на Roblox.\n\nПроверь написание и отправь ещё раз:`,
-      { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.directCancel)]]) }
+      { parse_mode: "HTML", ...Markup.inlineKeyboard([
+        [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
+      ]) }
     );
     return;
   }
@@ -719,14 +768,30 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
         ...Markup.inlineKeyboard([
           [Markup.button.url("📖 Инструкция", "https://robloxbank.ru/guide?source=direct")],
           [Markup.button.callback("✏️ Другой ник", CB.directNickNew)],
-          [Markup.button.callback("❌ Отмена", CB.directCancel)],
+          [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
         ]),
       }
     );
     return;
   }
 
+  const gpHeader = stepBar(4, "Геймпасс");
   const { matches, nonMatches } = result;
+
+  // Auto-skip: exactly 1 price-matched gamepass → go straight to summary
+  if (matches.length === 1 && nonMatches.length === 0) {
+    const g = matches[0];
+    const gpDetails = await getGamepassDetails(String(g.id));
+    if (gpDetails) {
+      flow.gamepassId = String(g.id);
+      flow.gamepassUrl = `https://www.roblox.com/game-pass/${g.id}`;
+      flow.gamepassName = gpDetails.name;
+      flow.step = "summary";
+      await showSummary(ctx, flow, gpDetails.robux, gpDetails.name);
+      return;
+    }
+  }
+
   if (matches.length === 0 && nonMatches.length > 0) {
     const topWrong = nonMatches.slice(0, 5);
     const btns = topWrong.map(g => [
@@ -736,9 +801,9 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
       ),
     ]);
     btns.push([Markup.button.callback("✏️ Другой ник", CB.directNickNew)]);
-    btns.push([Markup.button.callback("❌ Отмена", CB.directCancel)]);
+    btns.push([Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)]);
     await ctx.reply(
-      `⚠️ Нет геймпассов с нужной ценой <b>${flow.passPrice} R$</b>.\n\n` +
+      `${gpHeader}\n\n⚠️ Нет геймпассов с нужной ценой <b>${flow.passPrice} R$</b>.\n\n` +
       `Вот что нашлось у <b>${escapeHtml(nick)}</b> — выбери подходящий или создай новый с правильной ценой:`,
       { parse_mode: "HTML", ...Markup.inlineKeyboard(btns) }
     );
@@ -753,9 +818,9 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
     ),
   ]);
   btns.push([Markup.button.callback("✏️ Другой ник", CB.directNickNew)]);
-  btns.push([Markup.button.callback("❌ Отмена", CB.directCancel)]);
+  btns.push([Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)]);
   await ctx.reply(
-    `🎫 Геймпассы <b>${escapeHtml(nick)}</b>\n\nВыбери геймпасс для заказа:`,
+    `${gpHeader}\n\n🎫 Геймпассы <b>${escapeHtml(nick)}</b> — выбери для заказа:`,
     { parse_mode: "HTML", ...Markup.inlineKeyboard(btns) }
   );
 }
@@ -768,7 +833,7 @@ async function startDirectFlow(ctx: any): Promise<void> {
   const tgId = String(ctx.from.id);
   const dirUser = await (db as any).user.findUnique({
     where: { tgId },
-    select: { balance: true, bonusExpiresAt: true, rubleDiscount: true, promoExpiresAt: true, robloxUsername: true },
+    select: { id: true, balance: true, bonusExpiresAt: true, rubleDiscount: true, promoExpiresAt: true, robloxUsername: true },
   });
   const now = new Date();
   const rawBonus = dirUser?.balance ?? 0;
@@ -776,15 +841,26 @@ async function startDirectFlow(ctx: any): Promise<void> {
   const bonus = rawBonus > 0 && !bonusExpired ? rawBonus : 0;
   const rubleDiscount = dirUser?.rubleDiscount ?? 0;
   const robloxNick = dirUser?.robloxUsername;
+
+  let lastOrderAmount: number | undefined;
+  if (dirUser?.id) {
+    const lastOrder = await (db as any).wbOrder.findFirst({
+      where: { userId: dirUser.id, status: "COMPLETED", isDirectOrder: true },
+      orderBy: { createdAt: "desc" },
+      select: { amount: true },
+    });
+    if (lastOrder) lastOrderAmount = lastOrder.amount;
+  }
+
   const notes: string[] = [];
   if (bonus > 0) notes.push(`🎁 Бонус <b>${bonus} R$</b> — добавится автоматически.`);
   if (rubleDiscount > 0) notes.push(`💰 Скидка <b>${rubleDiscount} ₽</b> на этот заказ.`);
-  const nickNote = robloxNick ? `\n\n🎮 Робуксы придут на ник: <b>${escapeHtml(robloxNick)}</b>` : "";
-  const notesBlock = notes.length > 0 ? "\n\n" + notes.join("\n") : "";
+  const nickNote = robloxNick ? `\n🎮 Ник: <b>${escapeHtml(robloxNick)}</b>` : "";
+  const notesBlock = notes.length > 0 ? "\n" + notes.join("\n") : "";
   pendingDirectFlow.set(ctx.from.id, { step: "amount" });
   await ctx.reply(
-    `💎 <b>Прямой заказ Robux</b>${nickNote}\n\nВыбери количество:` + notesBlock,
-    { parse_mode: "HTML", ...buildPackKb(bonus, rubleDiscount) }
+    `${stepBar(1, "Выбери пак")}\n\n💎 <b>Прямой заказ Robux</b>${nickNote}${notesBlock}\n\nВыбери количество:`,
+    { parse_mode: "HTML", ...buildPackKb(bonus, rubleDiscount, lastOrderAmount) }
   );
 }
 
@@ -1386,7 +1462,9 @@ export function registerText(bot: Telegraf): void {
         if (!ROBLOX_NICK_RE.test(nick)) {
           await ctx.reply("⚠️ Ник Roblox: 3–20 символов (буквы, цифры, _). Попробуй ещё раз:", {
             parse_mode: "HTML",
-            ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.directCancel)]]),
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
+            ]),
           });
           return;
         }
@@ -3117,17 +3195,14 @@ export function registerCallbacks(bot: Telegraf): void {
     // dp:custom: user wants to enter a custom amount
     if (data === CB.customDirect) {
       pendingDirectFlow.set(ctx.from.id, { step: "amount" });
-      const customPrompt = `✏️ <b>Своё количество</b>\n\nВведи количество робуксов от ${CUSTOM_MIN} до ${CUSTOM_MAX.toLocaleString("ru-RU")}:`;
+      const customPrompt = `${stepBar(1, "Своё количество")}\n\nВведи количество робуксов от ${CUSTOM_MIN} до ${CUSTOM_MAX.toLocaleString("ru-RU")}:`;
+      const customKb = Markup.inlineKeyboard([
+        [Markup.button.callback("◀️ К пакам", CB.startDirect), Markup.button.callback("❌ Отменить", CB.cancelDirect)],
+      ]);
       try {
-        await ctx.editMessageText(
-          customPrompt,
-          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.cancelDirect)]]) }
-        );
+        await ctx.editMessageText(customPrompt, { parse_mode: "HTML", ...customKb });
       } catch {
-        await ctx.reply(
-          customPrompt,
-          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.cancelDirect)]]) }
-        );
+        await ctx.reply(customPrompt, { parse_mode: "HTML", ...customKb });
       }
       await ctx.answerCbQuery();
       return;
@@ -3190,10 +3265,15 @@ export function registerCallbacks(bot: Telegraf): void {
       return;
     }
 
-    // cancel_direct: user cancelled from pack selection
+    // cancel_direct: user cancelled from pack selection or bonus step
     if (data === CB.cancelDirect) {
       pendingDirectFlow.delete(ctx.from.id);
-      try { await ctx.editMessageText("Отменено.", { parse_mode: "HTML" }); } catch { }
+      try {
+        await ctx.editMessageText(
+          "Заказ отменён.",
+          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("💎 Заказать снова", CB.startDirect)]]) }
+        );
+      } catch { }
       await ctx.answerCbQuery("Отменено");
       return;
     }
@@ -3208,6 +3288,34 @@ export function registerCallbacks(bot: Telegraf): void {
         );
       } catch { }
       await ctx.answerCbQuery("Отменено");
+      return;
+    }
+
+    // dir_back: navigate to the previous step in the direct flow
+    if (data === CB.directBack) {
+      const flow = pendingDirectFlow.get(ctx.from.id);
+      if (!flow) {
+        await ctx.answerCbQuery("Начни заново");
+        return;
+      }
+      const step = flow.step;
+      if (step === "bonus") {
+        await startDirectFlow(ctx);
+      } else if (step === "nick" || step === "nick_input") {
+        await handleDirectPackChosen(ctx, flow.amount!);
+      } else if (step === "gamepass") {
+        await showNickStep(bot, ctx);
+      } else if (step === "summary") {
+        if (flow.robloxUsername) {
+          flow.step = "gamepass";
+          await handleDirectNickResolved(bot, ctx, flow.robloxUsername);
+        } else {
+          await showNickStep(bot, ctx);
+        }
+      } else {
+        await startDirectFlow(ctx);
+      }
+      await ctx.answerCbQuery();
       return;
     }
 
@@ -3229,15 +3337,18 @@ export function registerCallbacks(bot: Telegraf): void {
       const flow = pendingDirectFlow.get(ctx.from.id);
       if (!flow) { await ctx.answerCbQuery("Начни заново"); return; }
       flow.step = "nick_input";
+      const nickNewKb = Markup.inlineKeyboard([
+        [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
+      ]);
       try {
         await ctx.editMessageText(
           `🎮 <b>Введи ник Roblox</b>\n\nНапиши его в чат:`,
-          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.directCancel)]]) }
+          { parse_mode: "HTML", ...nickNewKb }
         );
       } catch {
         await ctx.reply(
           `🎮 <b>Введи ник Roblox</b>\n\nНапиши его в чат:`,
-          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.directCancel)]]) }
+          { parse_mode: "HTML", ...nickNewKb }
         );
       }
       await ctx.answerCbQuery();
@@ -3261,26 +3372,7 @@ export function registerCallbacks(bot: Telegraf): void {
       flow.gamepassUrl = `https://www.roblox.com/game-pass/${passId}`;
       flow.gamepassName = gpDetails.name;
       flow.step = "summary";
-
-      const bonusLine = flow.bonus && flow.bonus > 0 ? `\n🎁 Бонус:       +${flow.bonus} R$` : "";
-      const discountLine = flow.rubleDiscount && flow.rubleDiscount > 0 ? `\n💰 Скидка:      −${flow.rubleDiscount} ₽` : "";
-
-      const summaryText =
-        `📋 <b>Заявка на прямой заказ</b>\n\n` +
-        `📦 Получишь:    <b>${flow.totalAmount} R$</b>${bonusLine}\n` +
-        `🎮 Ник:         <b>${escapeHtml(flow.robloxUsername!)}</b>\n` +
-        `🎫 Геймпасс:    <b>${gpDetails.robux} R$</b> · "${escapeHtml(gpDetails.name.slice(0, 30))}"${discountLine}\n` +
-        `💰 К оплате:    <b>${fmtRub(flow.rublePrice!)}</b>`;
-
-      const summaryKb = Markup.inlineKeyboard([
-        [Markup.button.callback("✅ Оформить", CB.directSubmit)],
-        [Markup.button.callback("❌ Отмена", CB.directCancel)],
-      ]);
-      try {
-        await ctx.editMessageText(summaryText, { parse_mode: "HTML", ...summaryKb });
-      } catch {
-        await ctx.reply(summaryText, { parse_mode: "HTML", ...summaryKb });
-      }
+      await showSummary(ctx, flow, gpDetails.robux, gpDetails.name);
       await ctx.answerCbQuery();
       return;
     }
@@ -3389,18 +3481,15 @@ export function registerCallbacks(bot: Telegraf): void {
         [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
         [faqBtn()],
       ]);
+      const intentMsg =
+        `✅ <b>Заявка #${shortId} отправлена!</b>\n\n` +
+        `📦 ${flow.totalAmount} R$ → <b>${escapeHtml(flow.robloxUsername!)}</b>\n` +
+        `💰 К оплате: <b>${fmtRub(flow.rublePrice!)}</b>\n\n` +
+        `⏱ Менеджер пришлёт реквизиты — обычно в течение 5 минут.\nОжидай сообщения 👇`;
       try {
-        await ctx.editMessageText(
-          `📋 <b>Заявка #${shortId} отправлена!</b>\n\n` +
-          `Менеджер пришлёт реквизиты для оплаты в течение нескольких минут.\n\n` +
-          `Ожидай сообщения 👇`,
-          { parse_mode: "HTML", ...intentKb }
-        );
+        await ctx.editMessageText(intentMsg, { parse_mode: "HTML", ...intentKb });
       } catch {
-        await ctx.reply(
-          `📋 <b>Заявка #${shortId} отправлена!</b>\n\nМенеджер пришлёт реквизиты — ожидай.`,
-          { parse_mode: "HTML", ...intentKb }
-        );
+        await ctx.reply(intentMsg, { parse_mode: "HTML", ...intentKb });
       }
       await ctx.answerCbQuery("✅ Заявка отправлена!");
       return;
