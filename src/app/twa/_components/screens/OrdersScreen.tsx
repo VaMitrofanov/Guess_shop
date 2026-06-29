@@ -128,8 +128,31 @@ function ageColor(iso: string): string {
   return C.red;
 }
 
+function fallbackCopy(text: string) {
+  const el = document.createElement("textarea");
+  el.value = text;
+  el.setAttribute("readonly", "");
+  el.style.position = "fixed";
+  el.style.left = "-9999px";
+  el.style.top = "-9999px";
+  el.style.opacity = "0";
+  document.body.appendChild(el);
+  el.focus();
+  el.select();
+  try { document.execCommand("copy"); } catch {}
+  document.body.removeChild(el);
+}
+
 function copyText(text: string) {
-  navigator.clipboard?.writeText(text).catch(() => {});
+  if (typeof window !== "undefined" && (window as any).Telegram?.WebApp) {
+    fallbackCopy(text);
+    return;
+  }
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+    return;
+  }
+  fallbackCopy(text);
 }
 
 function CopyBtn({ text, label }: { text: string; label?: string }) {
