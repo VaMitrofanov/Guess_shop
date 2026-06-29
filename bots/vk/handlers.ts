@@ -457,13 +457,17 @@ function orderAgeMsFromOrder(order: any): number {
 const SUPPORT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 /** Sends the subscription prompt and inline buttons. */
-async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null): Promise<void> {
+async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null, denomination?: number): Promise<void> {
   const groupId  = process.env.VK_GROUP_ID;
   const groupUrl = groupId ? `https://vk.com/club${groupId}` : "https://vk.com";
+  const orderLine = refCode && denomination
+    ? `📦 Заказ ${refCode} · ${denomination} R$ — создан\n\n`
+    : "";
   await ctx.reply({
     message:
+      orderLine +
       `⭐ Чтобы продолжить, подпишись на наше сообщество 👇\n` +
-      `После подписки бот выдаст тебе персональную инструкцию и ты сможешь оформить заказ по нику в Roblox.\n\n` +
+      `После подписки бот точнее находит геймпассы по нику и ты получишь персональную инструкцию — заказ оформляется прямо в ней.\n\n` +
       `${groupUrl}\n\n` +
       `После подписки нажми кнопку «✅ Я вступил» ниже.`,
     keyboard: Keyboard.builder()
@@ -734,15 +738,20 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       return;
     }
 
+    const coldGroupId  = process.env.VK_GROUP_ID;
+    const coldGroupUrl = coldGroupId ? `https://vk.com/club${coldGroupId}` : "https://vk.com";
     await ctx.reply({
       message:
-        "👋 Привет! Я бот RobloxBank — помогу получить робуксы за код с карты Wildberries 💎\n\n" +
-        "🔑 Есть код с WB-карты? Напиши его прямо сюда — дам твою персональную инструкцию, заказ оформишь по ней, а тут будешь получать уведомления о заказе.\n\n" +
+        "👋 Привет! Я бот RobloxBank — помогу получить робуксы 💎\n\n" +
+        "⭐ Подпишись на наше сообщество 👇\n" +
+        "После подписки бот точнее находит геймпассы по нику и ты получишь персональную инструкцию — заказ оформляется прямо в ней.\n\n" +
+        `${coldGroupUrl}\n\n` +
+        "🔑 Есть код с WB-карты? Напиши его прямо сюда.\n" +
         "💎 Нет кода? Можно купить Robux напрямую — без карты WB, быстрее и выгоднее.",
       keyboard: Keyboard.builder()
-        .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: "https://robloxbank.ru/guide?source=wb" })
+        .urlButton({ label: "🔔 Подписаться", url: coldGroupUrl })
         .row()
-        .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "primary" })
+        .textButton({ label: "✅ Я вступил", payload: { command: "check_sub" }, color: "positive" })
         .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "positive" })
         .row()
         .textButton({ label: "❓ Частые вопросы", payload: { command: "faq" }, color: "secondary" })
@@ -1060,7 +1069,7 @@ async function handleRefActivation(
 
   // ── Subscription gate (after order is created so admin always gets the lead) ──
   if (!(await isVkSubscribed(ctx, vkUserId))) {
-    await sendVkSubPrompt(ctx, rawCode);
+    await sendVkSubPrompt(ctx, rawCode, totalAmount);
     return;
   }
 
