@@ -11,8 +11,8 @@ import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, vkSendPhoto, stripHtml, tgSend, escapeHtml } from "../shared/notify";
 import { getSbpQrBuffer } from "../shared/sbp";
-import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUserHurdle, sendAdminDirectOrderCard, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, BONUS_MIN_PACK, formatUserHandle, formatUserHandleHtml } from "../shared/admin";
-import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectAmount, pendingDirectOrder, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectOrderState, type LinkState } from "./session";
+import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUserHurdle, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminIntentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, BONUS_MIN_PACK, CUSTOM_MIN, ROBLOX_NICK_RE, generateDirectCode, formatUserHandle, formatUserHandleHtml } from "../shared/admin";
+import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
 import { getGamepassDetails, getGamepassProductInfo, buildPurchaseScript } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { buildAdminKeyboard } from "./admin";
@@ -61,17 +61,11 @@ function buildPackKb(userBonus = 0, rubleDiscount = 0, promoActive = false) {
       );
     })
   );
+  buttons.push([Markup.button.callback("✏️ Своё количество", CB.customDirect)]);
   buttons.push([Markup.button.callback("❌ Отмена", CB.cancelDirect)]);
   return Markup.inlineKeyboard(buttons);
 }
 
-/** Generate a unique synthetic WB code for direct orders (never matches a real 7-char code). */
-function generateDirectCode(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let code = "DIR-";
-  for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return code;
-}
 
 // ── FAQ / Self-service (replaces support in the first 24h) ────────────────
 
@@ -596,6 +590,175 @@ async function getAdminKeyboard(uid?: string | number) {
 // /status — last order info with comforting text for PENDING
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Direct intent flow helpers ────────────────────────────────────────────────
+
+async function handleDirectPackChosen(ctx: any, amt: number): Promise<void> {
+  const tgId = String(ctx.from.id);
+  const dirUser = await (db as any).user.findUnique({
+    where: { tgId },
+    select: { balance: true, bonusExpiresAt: true, rubleDiscount: true },
+  });
+  const rawBonus = dirUser?.balance ?? 0;
+  const bonusExpired = dirUser?.bonusExpiresAt ? dirUser.bonusExpiresAt <= new Date() : false;
+  const bonus = rawBonus > 0 && !bonusExpired && amt >= BONUS_MIN_PACK ? rawBonus : 0;
+  const totalAmount = amt + bonus;
+  const passPrice = Math.ceil(totalAmount / 0.7);
+  const baseRublePrice = directPrice(amt);
+  const discount = dirUser?.rubleDiscount ?? 0;
+  const rublePrice = discount > 0 ? Math.max(0, baseRublePrice - discount) : baseRublePrice;
+
+  const flow: DirectFlowState = {
+    step: "bonus", amount: amt, bonus, totalAmount, passPrice,
+    rublePrice, rubleDiscount: discount,
+  };
+  pendingDirectFlow.set(ctx.from.id, flow);
+
+  const bonusSection = bonus > 0
+    ? `💎 Запрос:          ${amt} R$\n` +
+      `🎁 Твой бонус:     +${bonus} R$\n` +
+      `━━━━━━━━━━━━━━━━\n` +
+      `📦 Итого получишь:  ${totalAmount} R$\n`
+    : `📦 Получишь:       ${totalAmount} R$\n`;
+  const discountLine = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
+  const confirmText =
+    `✅ <b>Подтверди заказ</b>\n\n` +
+    bonusSection + discountLine +
+    `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
+    `📌 Цена геймпасса:  ${passPrice} R$`;
+
+  const confirmBtns = bonus > 0
+    ? [
+        [Markup.button.callback(`✅ С бонусом (+${bonus} R$)`, CB.confirmDirect)],
+        [Markup.button.callback("✅ Без бонуса", CB.confirmDirectNb)],
+        [Markup.button.callback("❌ Отмена", CB.cancelDirect)],
+      ]
+    : [
+        [Markup.button.callback("✅ Подтвердить", CB.confirmDirect),
+         Markup.button.callback("❌ Отмена", CB.cancelDirect)],
+      ];
+  const confirmKb = Markup.inlineKeyboard(confirmBtns);
+  try {
+    await ctx.editMessageText(confirmText, { parse_mode: "HTML", ...confirmKb });
+  } catch {
+    await ctx.reply(confirmText, { parse_mode: "HTML", ...confirmKb });
+  }
+}
+
+async function showNickStep(bot: Telegraf, ctx: any): Promise<void> {
+  const tgId = String(ctx.from.id);
+  const flow = pendingDirectFlow.get(ctx.from.id);
+  if (!flow) return;
+  const user = await (db as any).user.findUnique({
+    where: { tgId }, select: { robloxUsername: true },
+  });
+  const savedNick = user?.robloxUsername;
+  flow.step = "nick";
+
+  if (savedNick) {
+    flow.robloxUsername = savedNick;
+    const nickBtns = Markup.inlineKeyboard([
+      [Markup.button.callback(`✅ ${savedNick}`, CB.directNickOk)],
+      [Markup.button.callback("✏️ Другой ник", CB.directNickNew)],
+      [Markup.button.callback("❌ Отмена", CB.directCancel)],
+    ]);
+    try {
+      await ctx.editMessageText(
+        `🎮 <b>Ник Roblox</b>\n\nТвой сохранённый ник: <b>${escapeHtml(savedNick)}</b>\n\nПродолжить с ним?`,
+        { parse_mode: "HTML", ...nickBtns }
+      );
+    } catch {
+      await ctx.reply(
+        `🎮 <b>Ник Roblox</b>\n\nТвой сохранённый ник: <b>${escapeHtml(savedNick)}</b>\n\nПродолжить с ним?`,
+        { parse_mode: "HTML", ...nickBtns }
+      );
+    }
+  } else {
+    flow.step = "nick_input";
+    try {
+      await ctx.editMessageText(
+        `🎮 <b>Введи свой ник Roblox</b>\n\nНапиши его в чат:`,
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.directCancel)]]) }
+      );
+    } catch {
+      await ctx.reply(
+        `🎮 <b>Введи свой ник Roblox</b>\n\nНапиши его в чат:`,
+        { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.directCancel)]]) }
+      );
+    }
+  }
+}
+
+async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): Promise<void> {
+  const flow = pendingDirectFlow.get(ctx.from.id);
+  if (!flow || !flow.passPrice) return;
+  flow.robloxUsername = nick;
+  flow.step = "gamepass";
+
+  const tgId = String(ctx.from.id);
+  await (db as any).user.updateMany({ where: { tgId }, data: { robloxUsername: nick } });
+
+  await ctx.reply(`🔎 Ищу геймпассы у <b>${escapeHtml(nick)}</b>…`, { parse_mode: "HTML" });
+  const result = await searchGamepassesByNick(nick, flow.passPrice);
+
+  if (result.status === "user_not_found") {
+    flow.step = "nick_input";
+    await ctx.reply(
+      `❌ Пользователь <b>${escapeHtml(nick)}</b> не найден на Roblox.\n\nПроверь написание и отправь ещё раз:`,
+      { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.directCancel)]]) }
+    );
+    return;
+  }
+  if (result.status === "no_gamepasses") {
+    flow.step = "nick_input";
+    await ctx.reply(
+      `⚠️ У <b>${escapeHtml(nick)}</b> нет геймпассов на продаже.\n\n` +
+      `Создай геймпасс по инструкции и отправь ник ещё раз:`,
+      {
+        parse_mode: "HTML",
+        ...Markup.inlineKeyboard([
+          [Markup.button.url("📖 Инструкция", "https://robloxbank.ru/guide?source=direct")],
+          [Markup.button.callback("✏️ Другой ник", CB.directNickNew)],
+          [Markup.button.callback("❌ Отмена", CB.directCancel)],
+        ]),
+      }
+    );
+    return;
+  }
+
+  const { matches, nonMatches } = result;
+  if (matches.length === 0 && nonMatches.length > 0) {
+    const topWrong = nonMatches.slice(0, 5);
+    const btns = topWrong.map(g => [
+      Markup.button.callback(
+        `${g.robux} R$ · ${g.name.slice(0, 20)}`,
+        CB.directGpPick(String(g.id))
+      ),
+    ]);
+    btns.push([Markup.button.callback("✏️ Другой ник", CB.directNickNew)]);
+    btns.push([Markup.button.callback("❌ Отмена", CB.directCancel)]);
+    await ctx.reply(
+      `⚠️ Нет геймпассов с нужной ценой <b>${flow.passPrice} R$</b>.\n\n` +
+      `Вот что нашлось у <b>${escapeHtml(nick)}</b> — выбери подходящий или создай новый с правильной ценой:`,
+      { parse_mode: "HTML", ...Markup.inlineKeyboard(btns) }
+    );
+    return;
+  }
+
+  const all = [...matches, ...nonMatches.slice(0, 3)];
+  const btns = all.slice(0, 5).map(g => [
+    Markup.button.callback(
+      `${g.isPriceMatch ? "✅ " : ""}${g.robux} R$ · ${g.name.slice(0, 20)}`,
+      CB.directGpPick(String(g.id))
+    ),
+  ]);
+  btns.push([Markup.button.callback("✏️ Другой ник", CB.directNickNew)]);
+  btns.push([Markup.button.callback("❌ Отмена", CB.directCancel)]);
+  await ctx.reply(
+    `🎫 Геймпассы <b>${escapeHtml(nick)}</b>\n\nВыбери геймпасс для заказа:`,
+    { parse_mode: "HTML", ...Markup.inlineKeyboard(btns) }
+  );
+}
+
 /**
  * Open the direct-order flow (predefined Robux packs). Shared by the
  * `💎 Купить напрямую` callback and the `/direct` command.
@@ -617,7 +780,7 @@ async function startDirectFlow(ctx: any): Promise<void> {
   if (rubleDiscount > 0) notes.push(`💰 Скидка <b>${rubleDiscount} ₽</b> на этот заказ.`);
   const nickNote = robloxNick ? `\n\n🎮 Робуксы придут на ник: <b>${escapeHtml(robloxNick)}</b>` : "";
   const notesBlock = notes.length > 0 ? "\n\n" + notes.join("\n") : "";
-  pendingDirectAmount.set(ctx.from.id, true);
+  pendingDirectFlow.set(ctx.from.id, { step: "amount" });
   await ctx.reply(
     `💎 <b>Прямой заказ Robux</b>${nickNote}\n\nВыбери количество:` + notesBlock,
     { parse_mode: "HTML", ...buildPackKb(bonus, rubleDiscount) }
@@ -627,12 +790,15 @@ async function startDirectFlow(ctx: any): Promise<void> {
 export function registerStatus(bot: Telegraf): void {
   // /menu — buyer mini-profile hub (the bot's "home base" for repeat customers).
   bot.command("menu", async (ctx) => {
-    const { text, keyboard } = await buildBuyerMenu(String(ctx.from.id), ctx.from.first_name || undefined);
+    const { text, keyboard, nickButton } = await buildBuyerMenu(String(ctx.from.id), ctx.from.first_name || undefined);
     await ctx.reply(text, {
       parse_mode: "HTML",
       link_preview_options: { is_disabled: true },
       ...keyboard,
     });
+    if (nickButton) {
+      await ctx.reply("⚙️ Настройки:", { parse_mode: "HTML", ...nickButton });
+    }
   });
 
   bot.command("status", async (ctx) => {
@@ -756,6 +922,7 @@ function robuxCountdown(completedAt: Date | string): string {
 interface StatusMessage {
   text: string;
   keyboard: ReturnType<typeof Markup.inlineKeyboard>;
+  nickButton?: ReturnType<typeof Markup.inlineKeyboard>;
 }
 
 const ACTIVE_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"];
@@ -1057,6 +1224,10 @@ async function buildBuyerMenu(tgId: string, name?: string): Promise<StatusMessag
     lines.push(`✅ Последний выполненный: #${lastCompleted.id.slice(-6).toUpperCase()} · ${lastCompleted.amount} R$ · ${dt}`);
   }
 
+  const nickBtn = robloxNick
+    ? `✏️ Ник: ${robloxNick}`
+    : `🎮 Привязать ник Roblox`;
+
   if (robloxNick) {
     lines.push("");
     lines.push(`💎 Заказать Robux <b>напрямую</b> на <b>${escapeHtml(robloxNick)}</b> — без карты WB, быстрее и выгоднее 👇`);
@@ -1065,7 +1236,11 @@ async function buildBuyerMenu(tgId: string, name?: string): Promise<StatusMessag
     lines.push(`💎 Заказать Robux <b>напрямую</b> — без карты WB, быстрее и выгоднее 👇`);
   }
 
-  return { text: lines.join("\n"), keyboard: menuReplyKb() as any };
+  return {
+    text: lines.join("\n"),
+    keyboard: menuReplyKb() as any,
+    nickButton: Markup.inlineKeyboard([[Markup.button.callback(nickBtn, CB.editNick)]]),
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1089,8 +1264,8 @@ export function registerText(bot: Telegraf): void {
     const clearUserSession = () => {
       pendingLink.delete(ctx.from.id);
       pendingRobloxNick.delete(ctx.from.id);
-      pendingDirectAmount.delete(ctx.from.id);
-      pendingDirectOrder.delete(ctx.from.id);
+      pendingDirectFlow.delete(ctx.from.id);
+      pendingNickEdit.delete(ctx.from.id);
       pendingPaymentScreenshot.delete(ctx.from.id);
       pendingReview.delete(ctx.from.id);
     };
@@ -1190,52 +1365,53 @@ export function registerText(bot: Telegraf): void {
       return;
     }
 
-    // 1b. USER DIRECT ORDER AMOUNT input
-    if (!isAdmin && pendingDirectAmount.has(ctx.from.id)) {
-      const num = parseInt(text.replace(/[\s,]/g, ""), 10);
-      if (isNaN(num) || num < 100 || num > 10000) {
-        pendingDirectAmount.set(ctx.from.id, true);
-        await ctx.reply(
-          "⚠️ Введи число от 100 до 10 000.\n\nНапример: <code>500</code>",
-          { parse_mode: "HTML" }
-        );
+    // 1b. USER DIRECT ORDER — custom amount input OR nick input
+    const dirFlow = pendingDirectFlow.get(ctx.from.id);
+    if (!isAdmin && dirFlow) {
+      if (dirFlow.step === "amount") {
+        const num = parseInt(text.replace(/[\s,]/g, ""), 10);
+        if (isNaN(num) || num < CUSTOM_MIN || num > 10000) {
+          await ctx.reply(
+            `⚠️ Введи число от ${CUSTOM_MIN} до 10 000.\n\nНапример: <code>500</code>`,
+            { parse_mode: "HTML" }
+          );
+          return;
+        }
+        await handleDirectPackChosen(ctx, num);
         return;
       }
-      pendingDirectAmount.delete(ctx.from.id);
-      const dirUser = await (db as any).user.findUnique({
-        where: { tgId },
-        select: { balance: true, bonusExpiresAt: true, rubleDiscount: true },
-      });
-      const rawBonus = dirUser?.balance ?? 0;
-      const bonusExpired = dirUser?.bonusExpiresAt ? dirUser.bonusExpiresAt <= new Date() : false;
-      const bonus = rawBonus > 0 && !bonusExpired && num >= BONUS_MIN_PACK ? rawBonus : 0;
-      const totalAmount = num + bonus;
-      const passPrice = Math.ceil(totalAmount / 0.7);
-      const baseRublePrice = directPrice(num);
-      const discount = dirUser?.rubleDiscount ?? 0;
-      const rublePrice = discount > 0 ? Math.max(0, baseRublePrice - discount) : baseRublePrice;
-      pendingDirectOrder.set(ctx.from.id, { amount: num, passPrice, totalAmount });
-      const bonusSection = bonus > 0
-        ? `💎 Запрос:          ${num} R$\n` +
-          `🎁 Твой бонус:     +${bonus} R$\n` +
-          `━━━━━━━━━━━━━━━━\n` +
-          `📦 Итого получишь:  ${totalAmount} R$\n`
-        : `📦 Получишь:       ${totalAmount} R$\n`;
-      const discountLine = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
-      await ctx.reply(
-        `✅ <b>Подтверди заказ</b>\n\n` +
-        bonusSection +
-        discountLine +
-        `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
-        `📌 Цена геймпасса:  ${passPrice} R$`,
-        {
-          parse_mode: "HTML",
-          ...Markup.inlineKeyboard([[
-            Markup.button.callback("✅ Подтвердить", CB.confirmDirect),
-            Markup.button.callback("❌ Отмена", CB.cancelDirect),
-          ]]),
+      if (dirFlow.step === "nick_input") {
+        const nick = text.replace(/^@/, "").trim();
+        if (!ROBLOX_NICK_RE.test(nick)) {
+          await ctx.reply("⚠️ Ник Roblox: 3–20 символов (буквы, цифры, _). Попробуй ещё раз:", {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.directCancel)]]),
+          });
+          return;
         }
-      );
+        await handleDirectNickResolved(bot, ctx, nick);
+        return;
+      }
+    }
+
+    // 1c. USER NICK EDIT from /menu
+    if (!isAdmin && pendingNickEdit.has(ctx.from.id)) {
+      pendingNickEdit.delete(ctx.from.id);
+      const nick = text.replace(/^@/, "").trim();
+      if (!ROBLOX_NICK_RE.test(nick)) {
+        await ctx.reply("⚠️ Ник Roblox: 3–20 символов (буквы, цифры, _). Попробуй ещё раз.");
+        pendingNickEdit.set(ctx.from.id, true);
+        return;
+      }
+      const { resolveRobloxUserId } = await import("../shared/roblox");
+      const rId = await resolveRobloxUserId(nick);
+      if (!rId) {
+        await ctx.reply(`❌ Пользователь <b>${escapeHtml(nick)}</b> не найден на Roblox. Проверь написание.`, { parse_mode: "HTML" });
+        pendingNickEdit.set(ctx.from.id, true);
+        return;
+      }
+      await (db as any).user.update({ where: { tgId }, data: { robloxUsername: nick } });
+      await ctx.reply(`✅ Ник сохранён: <b>${escapeHtml(nick)}</b>`, { parse_mode: "HTML" });
       return;
     }
 
@@ -1446,7 +1622,6 @@ export function registerText(bot: Telegraf): void {
 /** Max gamepass matches we show as inline buttons. */
 const MAX_PICK_BUTTONS = 5;
 /** Allowed Roblox username regex. */
-const ROBLOX_NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
 
 /**
  * Website Step-9 handoff. Two cases when the user picked a gamepass on the site:
@@ -2938,6 +3113,24 @@ export function registerCallbacks(bot: Telegraf): void {
       return;
     }
 
+    // dp:custom: user wants to enter a custom amount
+    if (data === CB.customDirect) {
+      pendingDirectFlow.set(ctx.from.id, { step: "amount" });
+      try {
+        await ctx.editMessageText(
+          `✏️ <b>Своё количество</b>\n\nВведи количество робуксов от ${CUSTOM_MIN} до 10 000:`,
+          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.cancelDirect)]]) }
+        );
+      } catch {
+        await ctx.reply(
+          `✏️ <b>Своё количество</b>\n\nВведи количество робуксов от ${CUSTOM_MIN} до 10 000:`,
+          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.cancelDirect)]]) }
+        );
+      }
+      await ctx.answerCbQuery();
+      return;
+    }
+
     // dp: user selects a predefined pack
     if (data.startsWith("dp:")) {
       const amt = parseInt(data.slice(3), 10);
@@ -2945,60 +3138,160 @@ export function registerCallbacks(bot: Telegraf): void {
         await ctx.answerCbQuery("Неверный пак");
         return;
       }
-      pendingDirectAmount.delete(ctx.from.id);
-      const dirUser = await (db as any).user.findUnique({
-        where: { tgId },
-        select: { balance: true, bonusExpiresAt: true, rubleDiscount: true },
-      });
-      const rawBonus = dirUser?.balance ?? 0;
-      const bonusExpired = dirUser?.bonusExpiresAt ? dirUser.bonusExpiresAt <= new Date() : false;
-      const bonus = rawBonus > 0 && !bonusExpired && amt >= BONUS_MIN_PACK ? rawBonus : 0;
-      const totalAmount = amt + bonus;
-      const passPrice = Math.ceil(totalAmount / 0.7);
-      const baseRublePrice = directPrice(amt);
-      const discount = dirUser?.rubleDiscount ?? 0;
-      const rublePrice = discount > 0 ? Math.max(0, baseRublePrice - discount) : baseRublePrice;
-      pendingDirectOrder.set(ctx.from.id, { amount: amt, passPrice, totalAmount });
-      const bonusSection = bonus > 0
-        ? `💎 Запрос:          ${amt} R$\n` +
-          `🎁 Твой бонус:     +${bonus} R$\n` +
-          `━━━━━━━━━━━━━━━━\n` +
-          `📦 Итого получишь:  ${totalAmount} R$\n`
-        : `📦 Получишь:       ${totalAmount} R$\n`;
-      const discountLine = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
-      const confirmText =
-        `✅ <b>Подтверди заказ</b>\n\n` +
-        bonusSection +
-        discountLine +
-        `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
-        `📌 Цена геймпасса:  ${passPrice} R$`;
-      const confirmKb = Markup.inlineKeyboard([[
-        Markup.button.callback("✅ Подтвердить", CB.confirmDirect),
-        Markup.button.callback("❌ Отмена", CB.cancelDirect),
-      ]]);
-      try {
-        await ctx.editMessageText(confirmText, { parse_mode: "HTML", ...confirmKb });
-      } catch {
-        await ctx.reply(confirmText, { parse_mode: "HTML", ...confirmKb });
-      }
+      await handleDirectPackChosen(ctx, amt);
       await ctx.answerCbQuery();
       return;
     }
 
-    // confirm_direct: user confirms amount on confirmation screen
+    // confirm_direct: user confirms amount+bonus → proceed to nick step
     if (data === CB.confirmDirect) {
-      const dirState = pendingDirectOrder.get(ctx.from.id);
-      if (!dirState) {
+      const flow = pendingDirectFlow.get(ctx.from.id);
+      if (!flow || flow.step !== "bonus") {
         await ctx.answerCbQuery("Начни заново");
         try {
           await ctx.editMessageText(
-            "⏳ <b>Время подтверждения вышло.</b>\n\nНажми кнопку — начнём заново, сумма не сохраняется.",
+            "⏳ <b>Время подтверждения вышло.</b>\n\nНажми кнопку — начнём заново.",
             { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("💎 Заказать напрямую", CB.startDirect)]]) }
           );
         } catch { }
         return;
       }
-      pendingDirectOrder.delete(ctx.from.id);
+      // bonus stays as-is (already set by handleDirectPackChosen)
+      await showNickStep(bot, ctx);
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    // confirm_direct_nb: user confirms WITHOUT bonus → proceed to nick step
+    if (data === CB.confirmDirectNb) {
+      const flow = pendingDirectFlow.get(ctx.from.id);
+      if (!flow || flow.step !== "bonus") {
+        await ctx.answerCbQuery("Начни заново");
+        try {
+          await ctx.editMessageText(
+            "⏳ <b>Время подтверждения вышло.</b>\n\nНажми кнопку — начнём заново.",
+            { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("💎 Заказать напрямую", CB.startDirect)]]) }
+          );
+        } catch { }
+        return;
+      }
+      // Strip bonus — recalculate
+      flow.bonus = 0;
+      flow.totalAmount = flow.amount!;
+      flow.passPrice = Math.ceil(flow.totalAmount / 0.7);
+      flow.rublePrice = directPrice(flow.amount!);
+      if (flow.rubleDiscount && flow.rubleDiscount > 0) {
+        flow.rublePrice = Math.max(0, flow.rublePrice - flow.rubleDiscount);
+      }
+      await showNickStep(bot, ctx);
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    // cancel_direct: user cancelled from pack selection
+    if (data === CB.cancelDirect) {
+      pendingDirectFlow.delete(ctx.from.id);
+      try { await ctx.editMessageText("Отменено.", { parse_mode: "HTML" }); } catch { }
+      await ctx.answerCbQuery("Отменено");
+      return;
+    }
+
+    // dir_cancel: user cancelled from nick/gamepass/summary steps
+    if (data === CB.directCancel) {
+      pendingDirectFlow.delete(ctx.from.id);
+      try {
+        await ctx.editMessageText(
+          "Заказ отменён.",
+          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("💎 Заказать снова", CB.startDirect)]]) }
+        );
+      } catch { }
+      await ctx.answerCbQuery("Отменено");
+      return;
+    }
+
+    // dir_nick_ok: user confirms their saved nick
+    if (data === CB.directNickOk) {
+      const flow = pendingDirectFlow.get(ctx.from.id);
+      if (!flow || !flow.robloxUsername || flow.step !== "nick") {
+        await ctx.answerCbQuery("Начни заново");
+        return;
+      }
+      flow.step = "gamepass";
+      await handleDirectNickResolved(bot, ctx, flow.robloxUsername);
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    // dir_nick_new: user wants to enter a different nick
+    if (data === CB.directNickNew) {
+      const flow = pendingDirectFlow.get(ctx.from.id);
+      if (!flow) { await ctx.answerCbQuery("Начни заново"); return; }
+      flow.step = "nick_input";
+      try {
+        await ctx.editMessageText(
+          `🎮 <b>Введи ник Roblox</b>\n\nНапиши его в чат:`,
+          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.directCancel)]]) }
+        );
+      } catch {
+        await ctx.reply(
+          `🎮 <b>Введи ник Roblox</b>\n\nНапиши его в чат:`,
+          { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.directCancel)]]) }
+        );
+      }
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    // dgp: user picks a gamepass from the list
+    if (data.startsWith("dgp:")) {
+      const passId = data.slice(4);
+      const flow = pendingDirectFlow.get(ctx.from.id);
+      if (!flow || flow.step !== "gamepass") {
+        await ctx.answerCbQuery("Начни заново");
+        return;
+      }
+      const gpDetails = await getGamepassDetails(passId);
+      if (!gpDetails) {
+        await ctx.answerCbQuery("Геймпасс не найден");
+        return;
+      }
+      flow.gamepassId = passId;
+      flow.gamepassUrl = `https://www.roblox.com/game-pass/${passId}`;
+      flow.gamepassName = gpDetails.name;
+      flow.step = "summary";
+
+      const bonusLine = flow.bonus && flow.bonus > 0 ? `\n🎁 Бонус:       +${flow.bonus} R$` : "";
+      const discountLine = flow.rubleDiscount && flow.rubleDiscount > 0 ? `\n💰 Скидка:      −${flow.rubleDiscount} ₽` : "";
+
+      const summaryText =
+        `📋 <b>Заявка на прямой заказ</b>\n\n` +
+        `📦 Получишь:    <b>${flow.totalAmount} R$</b>${bonusLine}\n` +
+        `🎮 Ник:         <b>${escapeHtml(flow.robloxUsername!)}</b>\n` +
+        `🎫 Геймпасс:    <b>${gpDetails.robux} R$</b> · "${escapeHtml(gpDetails.name.slice(0, 30))}"${discountLine}\n` +
+        `💰 К оплате:    <b>${fmtRub(flow.rublePrice!)}</b>`;
+
+      const summaryKb = Markup.inlineKeyboard([
+        [Markup.button.callback("✅ Оформить", CB.directSubmit)],
+        [Markup.button.callback("❌ Отмена", CB.directCancel)],
+      ]);
+      try {
+        await ctx.editMessageText(summaryText, { parse_mode: "HTML", ...summaryKb });
+      } catch {
+        await ctx.reply(summaryText, { parse_mode: "HTML", ...summaryKb });
+      }
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    // dir_submit: user confirms the full intent → save to DB, notify admins
+    if (data === CB.directSubmit) {
+      const flow = pendingDirectFlow.get(ctx.from.id);
+      if (!flow || flow.step !== "summary" || !flow.gamepassId || !flow.robloxUsername) {
+        await ctx.answerCbQuery("Начни заново");
+        return;
+      }
+      pendingDirectFlow.delete(ctx.from.id);
+
       let dirUser = await (db as any).user.findUnique({ where: { tgId } });
       if (!dirUser) {
         dirUser = await (db as any).user.create({
@@ -3010,16 +3303,32 @@ export function registerCallbacks(bot: Telegraf): void {
         });
       }
 
-      // Guard: one active direct order at a time
-      const existingDirect = await (db as any).wbOrder.findFirst({
+      // Guard: one active intent or order at a time
+      const existingIntent = await (db as any).directIntent.findFirst({
+        where: { userId: dirUser.id, status: "PENDING" },
+      });
+      if (existingIntent) {
+        await ctx.answerCbQuery("У тебя уже есть активная заявка");
+        try {
+          await ctx.editMessageText(
+            `⏳ У тебя уже есть активная заявка <b>#${existingIntent.id.slice(-6).toUpperCase()}</b>.\n\n` +
+            `Дождись реквизитов от менеджера или отмени заявку.`,
+            { parse_mode: "HTML", ...Markup.inlineKeyboard([
+              [Markup.button.callback("❌ Отменить заявку", CB.userCancelIntent(existingIntent.id))],
+              [Markup.button.callback("📊 Статус заказа", CB.refreshStatus)],
+            ]) }
+          );
+        } catch { }
+        return;
+      }
+      const existingOrder = await (db as any).wbOrder.findFirst({
         where: { userId: dirUser.id, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING"] } },
       });
-      if (existingDirect) {
-        pendingDirectOrder.delete(ctx.from.id);
+      if (existingOrder) {
         await ctx.answerCbQuery("У тебя уже есть активный заказ");
         try {
           await ctx.editMessageText(
-            `⏳ У тебя уже есть активный заказ <b>#${existingDirect.id.slice(-6).toUpperCase()}</b>.\n\n` +
+            `⏳ У тебя уже есть активный заказ <b>#${existingOrder.id.slice(-6).toUpperCase()}</b>.\n\n` +
             `Дождись реквизитов от менеджера, а затем оформи новый.`,
             { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("📊 Статус заказа", CB.refreshStatus)]]) }
           );
@@ -3027,83 +3336,108 @@ export function registerCallbacks(bot: Telegraf): void {
         return;
       }
 
-      const dirCode = generateDirectCode();
-      let newDirectOrder: any;
-      const bonus = dirState.totalAmount - dirState.amount;
+      let intent: any;
       try {
-        newDirectOrder = await (db as any).$transaction(async (tx: any) => {
-          const ord = await tx.wbOrder.create({
-            data: {
-              amount:       dirState.totalAmount,
-              gamepassUrl:  null,
-              status:       "AWAITING_PAYMENT",
-              platform:     "TG",
-              userId:       dirUser.id,
-              wbCode:       dirCode,
-              isDirectOrder: true,
-            },
-          });
-          const updateData: any = {};
-          if (bonus > 0) {
-            updateData.balance = 0;
-            updateData.reviewBonusGrantedAt = null;
-            updateData.bonusExpiresAt = null;
-            updateData.reviewReminderLevel = 0;
-          }
-          if (dirUser.rubleDiscount > 0) updateData.rubleDiscount = 0;
-          if (Object.keys(updateData).length > 0) {
-            await tx.user.update({ where: { id: dirUser.id }, data: updateData });
-          }
-          return ord;
+        intent = await (db as any).directIntent.create({
+          data: {
+            userId:        dirUser.id,
+            amount:        flow.amount!,
+            bonus:         flow.bonus ?? 0,
+            totalAmount:   flow.totalAmount!,
+            rubleDiscount: flow.rubleDiscount ?? 0,
+            rublePrice:    flow.rublePrice!,
+            robloxUsername: flow.robloxUsername!,
+            gamepassId:    flow.gamepassId!,
+            gamepassUrl:   flow.gamepassUrl!,
+            platform:      "TG",
+          },
         });
       } catch (err) {
-        console.error("[TG] Direct order create error:", err);
+        console.error("[TG] DirectIntent create error:", err);
         await ctx.answerCbQuery("Ошибка — попробуй снова");
-        await ctx.reply("❌ Не удалось создать заказ. Попробуй снова.", { parse_mode: "HTML", ...withSupportKb() });
+        await ctx.reply("❌ Не удалось оформить заявку. Попробуй снова.", { parse_mode: "HTML" });
         return;
       }
-      const shortId = newDirectOrder.id.slice(-6).toUpperCase();
+
+      const shortId = intent.id.slice(-6).toUpperCase();
       const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name || "Пользователь");
       const prevOrdersCount = await (db as any).wbOrder.count({
         where: { userId: dirUser.id, status: "COMPLETED" },
       });
-      await sendAdminDirectOrderCard({
-        orderId:             newDirectOrder.id,
+
+      await sendAdminIntentCard({
+        intentId:            intent.id,
         userId:              dirUser.id,
-        amount:              dirState.totalAmount,
-        bonusApplied:        bonus,
+        amount:              flow.amount!,
+        bonus:               flow.bonus ?? 0,
+        totalAmount:         flow.totalAmount!,
+        rublePrice:          flow.rublePrice!,
+        robloxUsername:       flow.robloxUsername!,
+        gamepassUrl:         flow.gamepassUrl!,
+        gamepassName:        flow.gamepassName,
         userDisplay:         `${tgDisplay} (ID: ${ctx.from.id})`,
         tgId,
-        createdAt:           newDirectOrder.createdAt,
+        platform:            "TG",
+        createdAt:           intent.createdAt,
         previousOrdersCount: prevOrdersCount,
       });
-      const confirmKb = Markup.inlineKeyboard([
+
+      const intentKb = Markup.inlineKeyboard([
+        [Markup.button.callback("❌ Отменить заявку", CB.userCancelIntent(intent.id))],
         [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
         [faqBtn()],
       ]);
       try {
         await ctx.editMessageText(
-          `📋 <b>Заказ #${shortId} оформлен!</b>\n\n` +
+          `📋 <b>Заявка #${shortId} отправлена!</b>\n\n` +
           `Менеджер пришлёт реквизиты для оплаты в течение нескольких минут.\n\n` +
           `Ожидай сообщения 👇`,
-          { parse_mode: "HTML", ...confirmKb }
+          { parse_mode: "HTML", ...intentKb }
         );
       } catch {
         await ctx.reply(
-          `📋 <b>Заказ #${shortId} оформлен!</b>\n\nМенеджер пришлёт реквизиты — ожидай.`,
-          { parse_mode: "HTML", ...confirmKb }
+          `📋 <b>Заявка #${shortId} отправлена!</b>\n\nМенеджер пришлёт реквизиты — ожидай.`,
+          { parse_mode: "HTML", ...intentKb }
         );
       }
-      await ctx.answerCbQuery("✅ Заказ создан!");
+      await ctx.answerCbQuery("✅ Заявка отправлена!");
       return;
     }
 
-    // cancel_direct: user cancelled order confirmation
-    if (data === CB.cancelDirect) {
-      pendingDirectOrder.delete(ctx.from.id);
-      pendingDirectAmount.delete(ctx.from.id);
-      try { await ctx.editMessageText("Отменено.", { parse_mode: "HTML" }); } catch { }
-      await ctx.answerCbQuery("Отменено");
+    // uci: user cancels their own intent
+    if (data.startsWith("uci:")) {
+      const intentId = data.slice(4);
+      const intent = await (db as any).directIntent.findUnique({ where: { id: intentId } });
+      if (!intent || intent.status !== "PENDING") {
+        await ctx.answerCbQuery("Заявка уже обработана");
+        return;
+      }
+      await (db as any).directIntent.update({ where: { id: intentId }, data: { status: "CANCELLED" } });
+      try {
+        await ctx.editMessageText("❌ Заявка отменена.", {
+          parse_mode: "HTML",
+          ...Markup.inlineKeyboard([[Markup.button.callback("💎 Заказать снова", CB.startDirect)]]),
+        });
+      } catch { }
+      await Promise.allSettled(
+        ADMIN_IDS.map(id => tgSend(id, `❌ Заявка #${intentId.slice(-6).toUpperCase()} отменена покупателем.`))
+      );
+      await ctx.answerCbQuery("Заявка отменена");
+      return;
+    }
+
+    // edit_nick: user wants to change their saved Roblox nick from /menu
+    if (data === CB.editNick) {
+      pendingNickEdit.set(ctx.from.id, true);
+      try {
+        await ctx.editMessageText(
+          `🎮 <b>Введи новый ник Roblox</b>\n\nНапиши его в чат:`,
+          { parse_mode: "HTML" }
+        );
+      } catch {
+        await ctx.reply(`🎮 <b>Введи новый ник Roblox</b>\n\nНапиши его в чат:`, { parse_mode: "HTML" });
+      }
+      await ctx.answerCbQuery();
       return;
     }
 
@@ -3318,6 +3652,173 @@ export function registerCallbacks(bot: Telegraf): void {
       return;
     }
 
+    // sqi: admin sends QR for an intent (creates WbOrder from intent)
+    if (data.startsWith("sqi:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      const intentId = data.slice(4);
+      const intent = await (db as any).directIntent.findUnique({ where: { id: intentId }, include: { user: true } });
+      if (!intent) { await ctx.answerCbQuery("Заявка не найдена"); return; }
+      if (intent.status !== "PENDING") { await ctx.answerCbQuery("Заявка уже обработана"); return; }
+      if (Date.now() - new Date(intent.createdAt).getTime() > 24 * 60 * 60 * 1000) {
+        await (db as any).directIntent.update({ where: { id: intentId }, data: { status: "EXPIRED" } });
+        await ctx.answerCbQuery("Заявка просрочена (>24ч)");
+        return;
+      }
+
+      const qr = await getSbpQrBuffer();
+      if (!qr) { await ctx.answerCbQuery("QR не настроен"); return; }
+
+      const dirCode = generateDirectCode();
+      let newOrder: any;
+      try {
+        newOrder = await (db as any).$transaction(async (tx: any) => {
+          const ord = await tx.wbOrder.create({
+            data: {
+              amount:        intent.totalAmount,
+              gamepassUrl:   intent.gamepassUrl,
+              robloxUsername: intent.robloxUsername,
+              status:        "PAYMENT_PENDING",
+              platform:      intent.platform,
+              userId:        intent.userId,
+              wbCode:        dirCode,
+              isDirectOrder: true,
+              paymentDetails: "СБП QR",
+            },
+          });
+          await tx.directIntent.update({ where: { id: intentId }, data: { status: "CONSUMED" } });
+          const updateData: any = {};
+          if (intent.bonus > 0) {
+            updateData.balance = 0;
+            updateData.reviewBonusGrantedAt = null;
+            updateData.bonusExpiresAt = null;
+            updateData.reviewReminderLevel = 0;
+          }
+          if (intent.user.rubleDiscount > 0) updateData.rubleDiscount = 0;
+          if (Object.keys(updateData).length > 0) {
+            await tx.user.update({ where: { id: intent.userId }, data: updateData });
+          }
+          return ord;
+        });
+      } catch (err) {
+        console.error("[TG] sqi: intent consume error:", err);
+        await ctx.answerCbQuery("Ошибка создания заказа");
+        return;
+      }
+
+      const sqiShortId = newOrder.id.slice(-6).toUpperCase();
+      const sqiRublePrice = intent.rublePrice;
+      if (intent.user.tgId) {
+        try {
+          await bot.telegram.sendPhoto(
+            intent.user.tgId,
+            { source: qr },
+            {
+              caption:
+                `💳 <b>Оплата заказа #${sqiShortId}</b>\n\n` +
+                `Сумма к оплате: <b>${sqiRublePrice} ₽</b>\n` +
+                `Отсканируй QR в приложении банка (по СБП) и переведи <b>точную сумму</b>.\n\n` +
+                `После перевода пришли сюда <b>скриншот или чек об оплате</b> (фотографией, не файлом) 👇`,
+              parse_mode: "HTML",
+              reply_markup: { inline_keyboard: [[{ text: "📊 Проверить статус", callback_data: CB.refreshStatus }]] },
+            }
+          );
+          pendingPaymentScreenshot.set(parseInt(intent.user.tgId), newOrder.id);
+        } catch (err) { console.error("[TG] sqi sendPhoto failed:", err); }
+      } else if (intent.user.vkId) {
+        const delivered = await vkSendPhoto(
+          intent.user.vkId, qr,
+          `💳 Оплата заказа #${sqiShortId}\n\nСумма к оплате: ${sqiRublePrice} ₽\nОтсканируй QR в приложении банка (по СБП) и переведи точную сумму.\n\nПосле перевода пришли скриншот (фотографией, не файлом) 👇`
+        );
+        if (!delivered) console.error("[TG] sqi vkSendPhoto failed");
+      }
+      try { await ctx.editMessageText(`✅ QR отправлен — ${adminTag}\nЗаявка #${intentId.slice(-6).toUpperCase()} → Заказ #${sqiShortId}`, { parse_mode: "HTML" }); } catch { }
+      await ctx.answerCbQuery("✅ QR отправлен");
+      return;
+    }
+
+    // spi: admin sends payment details for an intent (creates WbOrder, then asks admin for text)
+    if (data.startsWith("spi:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      const intentId = data.slice(4);
+      const intent = await (db as any).directIntent.findUnique({ where: { id: intentId }, include: { user: true } });
+      if (!intent) { await ctx.answerCbQuery("Заявка не найдена"); return; }
+      if (intent.status !== "PENDING") { await ctx.answerCbQuery("Заявка уже обработана"); return; }
+      if (Date.now() - new Date(intent.createdAt).getTime() > 24 * 60 * 60 * 1000) {
+        await (db as any).directIntent.update({ where: { id: intentId }, data: { status: "EXPIRED" } });
+        await ctx.answerCbQuery("Заявка просрочена (>24ч)");
+        return;
+      }
+
+      const dirCode = generateDirectCode();
+      let newOrder: any;
+      try {
+        newOrder = await (db as any).$transaction(async (tx: any) => {
+          const ord = await tx.wbOrder.create({
+            data: {
+              amount:        intent.totalAmount,
+              gamepassUrl:   intent.gamepassUrl,
+              robloxUsername: intent.robloxUsername,
+              status:        "AWAITING_PAYMENT",
+              platform:      intent.platform,
+              userId:        intent.userId,
+              wbCode:        dirCode,
+              isDirectOrder: true,
+            },
+          });
+          await tx.directIntent.update({ where: { id: intentId }, data: { status: "CONSUMED" } });
+          const updateData: any = {};
+          if (intent.bonus > 0) {
+            updateData.balance = 0;
+            updateData.reviewBonusGrantedAt = null;
+            updateData.bonusExpiresAt = null;
+            updateData.reviewReminderLevel = 0;
+          }
+          if (intent.user.rubleDiscount > 0) updateData.rubleDiscount = 0;
+          if (Object.keys(updateData).length > 0) {
+            await tx.user.update({ where: { id: intent.userId }, data: updateData });
+          }
+          return ord;
+        });
+      } catch (err) {
+        console.error("[TG] spi: intent consume error:", err);
+        await ctx.answerCbQuery("Ошибка создания заказа");
+        return;
+      }
+
+      pendingPaymentDetails.set(ctx.from.id, newOrder.id);
+      const spiShortId = newOrder.id.slice(-6).toUpperCase();
+      await ctx.reply(
+        `💳 <b>Введи реквизиты для пользователя</b>\nЗаказ #${spiShortId}\n\nПросто напиши — я отправлю напрямую покупателю:`,
+        { parse_mode: "HTML" }
+      );
+      try { await ctx.editMessageText(`💳 Реквизиты → #${spiShortId} — ${adminTag}\nЗаявка #${intentId.slice(-6).toUpperCase()} → Заказ #${spiShortId}`, { parse_mode: "HTML" }); } catch { }
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    // cai: admin cancels/rejects an intent
+    if (data.startsWith("cai:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      const intentId = data.slice(4);
+      const intent = await (db as any).directIntent.findUnique({ where: { id: intentId }, include: { user: true } });
+      if (!intent) { await ctx.answerCbQuery("Заявка не найдена"); return; }
+      if (intent.status !== "PENDING") { await ctx.answerCbQuery("Заявка уже обработана"); return; }
+      await (db as any).directIntent.update({ where: { id: intentId }, data: { status: "CANCELLED" } });
+      if (intent.user.tgId) {
+        try {
+          await bot.telegram.sendMessage(intent.user.tgId,
+            `❌ <b>Заявка отклонена</b>\n\nМенеджер отклонил твою заявку. Попробуй оформить новую.`,
+            { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("💎 Заказать снова", CB.startDirect)]]) }
+          );
+        } catch { }
+      } else if (intent.user.vkId) {
+        try { await vkSend(intent.user.vkId, `❌ Заявка отклонена. Попробуй оформить новую.`); } catch { }
+      }
+      try { await ctx.editMessageText(`❌ Заявка #${intentId.slice(-6).toUpperCase()} отклонена — ${adminTag}`, { parse_mode: "HTML" }); } catch { }
+      await ctx.answerCbQuery("Заявка отклонена");
+      return;
+    }
+
     // pay_ok: admin confirms payment screenshot
     if (data.startsWith("pay_ok:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
@@ -3328,44 +3829,64 @@ export function registerCallbacks(bot: Telegraf): void {
         await ctx.answerCbQuery("Оплата уже обработана");
         return;
       }
-      await (db as any).wbOrder.update({
-        where: { id: payOkOrderId },
-        data: { status: "AWAITING_GAMEPASS" },
-      });
-      const payOkUser = await (db as any).user.findUnique({ where: { id: payOkUserId } });
-      if (payOkUser?.tgId) {
-        const passPrice = Math.ceil(payOkOrder.amount / 0.7);
-        pendingLink.set(parseInt(payOkUser.tgId), { wbCode: payOkOrder.wbCode, denomination: payOkOrder.amount });
-        try {
-          await bot.telegram.sendMessage(
-            payOkUser.tgId,
-            `✅ <b>Оплата подтверждена!</b>\n\n` +
-            `Теперь создай геймпасс по инструкции:\n` +
-            `📌 Цена геймпасса: <b>${passPrice} R$</b>\n\n` +
-            `Когда создашь — пришли свой ник в Roblox, найду геймпасс сам 🔎\n` +
-            `<i>Также можно прислать ссылку или Asset ID.</i>`,
-            {
-              parse_mode: "HTML",
-              link_preview_options: { is_disabled: true },
-              ...Markup.inlineKeyboard([
-                [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
-                [Markup.button.url("📖 Инструкция", "https://robloxbank.ru/guide?source=direct")],
-                [faqBtn()],
-              ]),
-            }
-          );
-        } catch { }
-      } else if (payOkUser?.vkId) {
-        const passPrice = Math.ceil(payOkOrder.amount / 0.7);
-        try {
-          await vkSend(payOkUser.vkId,
-            `✅ Оплата подтверждена!\n\n` +
-            `Теперь создай геймпасс по инструкции:\n` +
-            `📌 Цена геймпасса: ${passPrice} R$\n\n` +
-            `Когда создашь — пришли свой ник в Roblox, найду геймпасс сам 🔎\nТакже можно прислать ссылку или Asset ID.\n\n` +
-            `Инструкция: https://robloxbank.ru/guide?source=direct`
-          );
-        } catch { }
+      // New flow: gamepassUrl already filled from intent → skip AWAITING_GAMEPASS
+      if (payOkOrder.gamepassUrl) {
+        await (db as any).wbOrder.update({
+          where: { id: payOkOrderId },
+          data: { status: "PENDING", pendingAt: new Date() },
+        });
+        const payOkUser = await (db as any).user.findUnique({ where: { id: payOkUserId } });
+        if (payOkUser?.tgId) {
+          try {
+            await bot.telegram.sendMessage(payOkUser.tgId,
+              `✅ <b>Оплата подтверждена!</b>\n\nТвой заказ принят в работу. Робуксы будут выкуплены в ближайшее время — уведомим сразу 🙏`,
+              { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("📊 Проверить статус", CB.refreshStatus)], [faqBtn()]]) }
+            );
+          } catch { }
+        } else if (payOkUser?.vkId) {
+          try { await vkSend(payOkUser.vkId, `✅ Оплата подтверждена!\n\nТвой заказ принят в работу. Робуксы будут выкуплены в ближайшее время — уведомим сразу 🙏`); } catch { }
+        }
+      } else {
+        // Legacy flow: no gamepassUrl → need user to create gamepass
+        await (db as any).wbOrder.update({
+          where: { id: payOkOrderId },
+          data: { status: "AWAITING_GAMEPASS" },
+        });
+        const payOkUser = await (db as any).user.findUnique({ where: { id: payOkUserId } });
+        if (payOkUser?.tgId) {
+          const passPrice = Math.ceil(payOkOrder.amount / 0.7);
+          pendingLink.set(parseInt(payOkUser.tgId), { wbCode: payOkOrder.wbCode, denomination: payOkOrder.amount });
+          try {
+            await bot.telegram.sendMessage(
+              payOkUser.tgId,
+              `✅ <b>Оплата подтверждена!</b>\n\n` +
+              `Теперь создай геймпасс по инструкции:\n` +
+              `📌 Цена геймпасса: <b>${passPrice} R$</b>\n\n` +
+              `Когда создашь — пришли свой ник в Roblox, найду геймпасс сам 🔎\n` +
+              `<i>Также можно прислать ссылку или Asset ID.</i>`,
+              {
+                parse_mode: "HTML",
+                link_preview_options: { is_disabled: true },
+                ...Markup.inlineKeyboard([
+                  [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
+                  [Markup.button.url("📖 Инструкция", "https://robloxbank.ru/guide?source=direct")],
+                  [faqBtn()],
+                ]),
+              }
+            );
+          } catch { }
+        } else if (payOkUser?.vkId) {
+          const passPrice = Math.ceil(payOkOrder.amount / 0.7);
+          try {
+            await vkSend(payOkUser.vkId,
+              `✅ Оплата подтверждена!\n\n` +
+              `Теперь создай геймпасс по инструкции:\n` +
+              `📌 Цена геймпасса: ${passPrice} R$\n\n` +
+              `Когда создашь — пришли свой ник в Roblox, найду геймпасс сам 🔎\nТакже можно прислать ссылку или Asset ID.\n\n` +
+              `Инструкция: https://robloxbank.ru/guide?source=direct`
+            );
+          } catch { }
+        }
       }
       const payOkCaption = `✅ Оплата принята — ${adminTag}\nЗаказ #${payOkOrderId.slice(-6).toUpperCase()}`;
       try { await ctx.editMessageCaption(payOkCaption, { parse_mode: "HTML" }); } catch { }
@@ -3688,12 +4209,15 @@ export function registerCallbacks(bot: Telegraf): void {
 
     // ── 👤 menu: buyer mini-profile hub ──────────────────────────────────
     if (data === CB.buyerMenu) {
-      const { text, keyboard } = await buildBuyerMenu(adminId, ctx.from.first_name || undefined);
+      const { text, keyboard, nickButton } = await buildBuyerMenu(adminId, ctx.from.first_name || undefined);
       await ctx.reply(text, {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
         ...keyboard,
       });
+      if (nickButton) {
+        await ctx.reply("⚙️ Настройки:", { parse_mode: "HTML", ...nickButton });
+      }
       return ctx.answerCbQuery();
     }
 

@@ -36,6 +36,9 @@ export function directPrice(amount: number): number {
 /** Minimum pack size that qualifies for the R$ bonus. Set to 0 for all packs. */
 export const BONUS_MIN_PACK = 0;
 
+/** Minimum custom amount for direct orders. */
+export const CUSTOM_MIN = 200;
+
 /** Special promo prices for non-bonus users (Friday push). */
 export const PROMO_PRICES: Record<number, number> = {
   100:  100,
@@ -46,6 +49,15 @@ export const PROMO_PRICES: Record<number, number> = {
 
 /** @deprecated Kept for admin card backwards compat — use directPrice() instead. */
 export const DIRECT_RATE = 0.7;
+
+export const ROBLOX_NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
+
+export function generateDirectCode(): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let code = "DIR-";
+  for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
 
 // ── Support alert ─────────────────────────────────────────────────────────────
 
@@ -318,7 +330,9 @@ export const CB = {
   // ── Direct order ──────────────────────────────────────────────────────────
   startDirect:         "start_direct",
   confirmDirect:       "confirm_direct",
+  confirmDirectNb:     "confirm_direct_nb",
   cancelDirect:        "cancel_direct",
+  customDirect:        "dp:custom",
   directPack:          (amount: number) => `dp:${amount}`,                                // 8 b max
   sendPaymentDetails:  (orderId: string) => `spd:${orderId}`,                             // 29 b
   sendQr:              (orderId: string) => `sqr:${orderId}`,                             // 29 b
@@ -326,6 +340,18 @@ export const CB = {
   userCancelDirect:    (orderId: string) => `ucd:${orderId}`,                             // 29 b
   paymentOk:           (orderId: string, userId: string) => `pay_ok:${orderId}:${userId}`, // 59 b
   paymentNo:           (orderId: string, userId: string) => `pay_no:${orderId}:${userId}`, // 59 b
+
+  // ── Direct intent (new pre-order flow) ─────────────────────────────────
+  sendIntentQr:       (id: string) => `sqi:${id}`,              // ≤29 b
+  sendIntentDetails:  (id: string) => `spi:${id}`,              // ≤29 b
+  cancelIntent:       (id: string) => `cai:${id}`,              // ≤29 b
+  userCancelIntent:   (id: string) => `uci:${id}`,              // ≤29 b
+  directNickOk:       "dir_nick_ok",                             // 11 b
+  directNickNew:      "dir_nick_new",                            // 12 b
+  directGpPick:       (passId: string) => `dgp:${passId}`,      // ≤16 b
+  directSubmit:       "dir_submit",                              // 10 b
+  directCancel:       "dir_cancel",                              // 10 b
+  editNick:           "edit_nick",                               // 9 b
 
   // User actions
   refreshStatus: "refresh_status",
@@ -389,6 +415,23 @@ export interface DirectOrderCardPayload {
   userDisplay:        string;
   tgId?:              string;   // optional — not set for VK users
   createdAt:          Date;
+  previousOrdersCount?: number;
+}
+
+export interface DirectIntentCardPayload {
+  intentId:             string;
+  userId:               string;
+  amount:               number;
+  bonus:                number;
+  totalAmount:          number;
+  rublePrice:           number;
+  robloxUsername:        string;
+  gamepassUrl:          string;
+  gamepassName?:        string;
+  userDisplay:          string;
+  tgId?:                string;
+  platform:             "TG" | "VK";
+  createdAt:            Date;
   previousOrdersCount?: number;
 }
 
@@ -520,6 +563,60 @@ export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload):
       ],
       [
         { text: "📊 Открыть в дашборде", web_app: { url: twaUrl } },
+      ],
+    ],
+  };
+
+  await Promise.allSettled(
+    ADMIN_IDS.map((id) => tgSend(id, text, { reply_markup }))
+  );
+}
+
+/**
+ * Notify all admins about a new direct intent (pre-order).
+ * Admin can send QR / payment details or reject.
+ */
+export async function sendAdminIntentCard(payload: DirectIntentCardPayload): Promise<void> {
+  const shortId = payload.intentId.slice(-6).toUpperCase();
+  const dateStr = new Date(payload.createdAt).toLocaleString("ru-RU", {
+    timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
+    year: "numeric", hour: "2-digit", minute: "2-digit",
+  }) + " МСК";
+  const bonusLine = payload.bonus > 0
+    ? `🎁 Бонус: <b>+${payload.bonus} R$</b>\n`
+    : "";
+
+  const prev = payload.previousOrdersCount ?? 0;
+  const loyaltyLine =
+    prev >= 5 ? `👑 <b>VIP КЛИЕНТ (${prev} заказов)</b>\n` :
+    prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ (${prev} заказ${prev === 1 ? "" : prev < 5 ? "а" : "ов"})</b>\n` :
+    `🆕 <b>НОВЫЙ КЛИЕНТ</b>\n`;
+
+  const passPrice = Math.ceil(payload.totalAmount / 0.7);
+  const gpName = payload.gamepassName ? ` · "${escapeHtml(payload.gamepassName)}"` : "";
+
+  const text =
+    `🔷 <b>ЗАЯВКА #${shortId}</b>\n` +
+    `━━━━━━━━━━━━━━━━\n` +
+    loyaltyLine +
+    `📅 Время: <b>${dateStr}</b>\n` +
+    `👤 Юзер: ${payload.userDisplay}\n` +
+    bonusLine +
+    `🎮 Ник: <b>${escapeHtml(payload.robloxUsername)}</b>\n` +
+    `🎫 Геймпасс: <b>${passPrice} R$</b>${gpName}\n` +
+    `🔗 <a href="${payload.gamepassUrl}">Открыть Gamepass</a>\n` +
+    `💰 К оплате: <b>${payload.rublePrice} ₽</b>\n` +
+    `💎 Выдать: <b>${payload.totalAmount} R$</b>\n` +
+    `📊 Статус: ⏳ Ожидаем реквизиты`;
+
+  const reply_markup = {
+    inline_keyboard: [
+      [
+        { text: "📷 QR (СБП)", callback_data: CB.sendIntentQr(payload.intentId) },
+      ],
+      [
+        { text: "💳 Реквизиты", callback_data: CB.sendIntentDetails(payload.intentId) },
+        { text: "❌ Отклонить",  callback_data: CB.cancelIntent(payload.intentId) },
       ],
     ],
   };

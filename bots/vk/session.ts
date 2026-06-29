@@ -12,13 +12,26 @@
  * On process restart the bot re-derives state from the DB (see handlers.ts).
  */
 
+interface DirectFlowData {
+  amount: number;
+  totalAmount: number;
+  bonus: number;
+  rubleDiscount: number;
+  rublePrice: number;
+}
+
 export type VKState =
   | { type: "AWAITING_LINK";           wbCode: string; denomination: number }
   | { type: "AWAITING_REVIEW";         orderId: string }
   | { type: "AWAITING_DIRECT_AMOUNT" }
-  | { type: "AWAITING_DIRECT_CONFIRM"; amount: number; totalAmount: number; bonus: number }
+  | { type: "AWAITING_DIRECT_CONFIRM" } & DirectFlowData
+  | { type: "AWAITING_DIRECT_NICK";       } & DirectFlowData
+  | { type: "AWAITING_DIRECT_NICK_INPUT"; } & DirectFlowData
+  | { type: "AWAITING_DIRECT_GAMEPASS";   robloxUsername: string } & DirectFlowData
+  | { type: "AWAITING_DIRECT_SUMMARY";    robloxUsername: string; gamepassId: string; gamepassUrl: string; gamepassName: string } & DirectFlowData
   | { type: "AWAITING_DIRECT_PAYMENT"; orderId: string }
-  | { type: "AWAITING_ROBLOX_NICK";    wbCode: string; denomination: number };
+  | { type: "AWAITING_ROBLOX_NICK";    wbCode: string; denomination: number }
+  | { type: "AWAITING_NICK_EDIT" };
 
 const store = new Map<number, VKState>();
 

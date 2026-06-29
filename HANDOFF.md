@@ -41,24 +41,96 @@
 - Уведомление всем админам в TG
 - PAYMENT_PENDING (реквизиты уже отправлены) — отменить нельзя
 
-### 🔜 ПЛАН: Отложенное создание заказа (вариант Б)
+### ✅ РЕАЛИЗОВАНО (NOT DEPLOYED): Отложенное создание заказа + полный pre-payment flow
 
-**Проблема:** сейчас заказ создаётся в БД сразу при «✅ Подтвердить» (до оплаты). Покупатель, случайно подтвердивший или просто «лазавший по меню», получает заказ + бонус/скидка списываются.
+**Проблема:** заказ `WbOrder` создавался при «✅ Подтвердить» — ДО оплаты. Фантомные `AWAITING_PAYMENT`, преждевременное списание бонуса/скидки, повторный ввод ника/геймпасса после оплаты.
 
-**Решение:** перенести создание заказа на момент после отправки реквизитов менеджером.
+**Решение: DirectIntent + multi-step flow.** Заказ в БД только когда админ отправляет реквизиты.
 
-**Шаги:**
-1. При «✅ Подтвердить» — не создавать `WbOrder`, а сохранять intent в сессии (amount, bonus, discount)
-2. Менеджер видит «заявку» (не заказ) — нажимает «📋 Отправить реквизиты»
-3. Только после отправки реквизитов — создаётся `WbOrder` (PAYMENT_PENDING), бонус/скидка списываются
-4. Если покупатель не оплатил за N часов — intent автоматически протухает, ничего не списано
+#### Новый флоу покупателя
 
-**Сложности:**
-- Сессионные данные (in-memory Map) не переживают рестарт бота → нужна персистенция (Redis / DB table `DirectIntent`)
-- Admin-карточка должна показывать «заявку» до создания заказа → новый тип уведомления
-- VK-бот зеркалит логику → двойная работа
+```
+ШАГИ ДО ОПЛАТЫ (данные в памяти, не в БД):
+1. Выбор пака / кастомной суммы  [❌ Отмена]
+2. Бонус: «С бонусом» / «Без бонуса»  [❌]     (если есть; без бонуса → сразу к нику)
+3. Ник: ✅ {savedNick} / ✏️ Другой ник  [❌]
+4. Поиск ГП по нику → выбор кнопкой  [❌]
+5. Итого → «✅ Оформить»  [❌]
+   ──── DirectIntent(PENDING) → админу «🔷 ЗАЯВКА» ────
 
-**Приоритет:** P2 (после стабилизации текущего флоу с кнопкой отмены)
+ПОСЛЕ ЗАЯВКИ:
+6. Админ: 📷QR / 💳Реквизиты → WbOrder(PAYMENT_PENDING) создаётся в транзакции,
+   бонус/скидка списываются, gamepassUrl + robloxUsername заполнены
+7. Юзер: скрин оплаты → Админ: pay_ok → PENDING (gamepassUrl уже есть → пропуск AWAITING_GAMEPASS)
+```
+
+#### Что реализовано (фазы 1–7)
+
+| Фаза | Файл(ы) | Статус |
+|------|---------|--------|
+| 1. Схема БД | `prisma/schema.prisma` — enum `DirectIntentStatus` + model `DirectIntent` | ✅ (миграция НЕ применена) |
+| 2. TG session | `bots/tg/session.ts` — `DirectFlowState` (step: amount/bonus/nick/nick_input/gamepass/summary) + `pendingNickEdit` | ✅ |
+| 3. VK session | `bots/vk/session.ts` — 5 новых состояний VKState: `AWAITING_DIRECT_NICK/_INPUT/_GAMEPASS/_SUMMARY` + `AWAITING_NICK_EDIT`; `AWAITING_DIRECT_CONFIRM` расширен DirectFlowData | ✅ |
+| 4. Shared admin | `bots/shared/admin.ts` — CB entries (`sqi:/spi:/cai:/uci:`, `dir_*`, `dgp:`), `sendAdminIntentCard()`, вынесены `ROBLOX_NICK_RE` + `generateDirectCode()` в shared | ✅ |
+| 5. TG handlers | `bots/tg/handlers.ts` — полный рефакторинг: `handleDirectPackChosen`, `showNickStep`, `handleDirectNickResolved`, callbacks `dir_submit/dir_cancel/dir_nick_ok/dir_nick_new/dgp:`, admin `sqi:/spi:/cai:`, user `uci:`, `pay_ok:` ветвление, `edit_nick`, `buildBuyerMenu` с nickButton | ✅ |
+| 6. VK handlers | `bots/vk/handlers.ts` — зеркало TG: `showVkNickStep`, `handleVkDirectNickResolved`, `handleVkDirectGpPick`, `handleVkDirectSubmit`, payload commands (`direct_nick_ok/new`, `direct_gp_pick`, `direct_submit`, `direct_cancel_intent`, `edit_nick`), text handlers для `AWAITING_DIRECT_NICK_INPUT` и `AWAITING_NICK_EDIT`; удалены локальные `generateDirectCode` и `ROBLOX_NICK_RE` (используются shared) | ✅ |
+| 7. Ник в /menu | TG: `buildBuyerMenu` → `nickButton` (inline «✏️ Ник: X» / «🎮 Привязать ник»), `edit_nick` callback + `pendingNickEdit`. VK: `sendVkBuyerMenu` → отдельная кнопка «✏️ Ник: X» / «🎮 Привязать ник», `edit_nick` payload + `AWAITING_NICK_EDIT` | ✅ |
+| 8. Очистка legacy | Удалить `pendingDirectAmount/Order`, старый `sendAdminDirectOrderCard`, `DirectOrderState` | 🔜 после деплоя |
+
+**Компиляция:** `npx tsc --noEmit` — чисто на каждой фазе.
+
+#### Ключевые callback data (TG)
+
+| Prefix | Кто | Что |
+|--------|-----|-----|
+| `dp:{amt}` | юзер | выбор пака |
+| `confirm_direct` / `confirm_direct_nb` | юзер | бонус: с/без → переход к нику |
+| `dir_nick_ok` / `dir_nick_new` | юзер | подтвердить/сменить ник |
+| `dgp:{passId}` | юзер | выбрать геймпасс |
+| `dir_submit` | юзер | оформить заявку → DirectIntent(PENDING) |
+| `dir_cancel` | юзер | отмена шагов 2–5 |
+| `uci:{intentId}` | юзер | отменить свою заявку |
+| `sqi:{intentId}` | админ | отправить QR (consume intent → создать WbOrder) |
+| `spi:{intentId}` | админ | отправить реквизиты (consume intent → создать WbOrder) |
+| `cai:{intentId}` | админ | отклонить заявку |
+| `edit_nick` | юзер | сменить ник из /menu |
+
+#### VK payload commands (новые)
+
+`direct_nick_ok` (+ `nick`), `direct_nick_new`, `direct_gp_pick` (+ `passId`), `direct_submit`, `direct_cancel_intent` (+ `intentId`), `edit_nick`
+
+#### Обратная совместимость
+
+- `spd:`/`sqr:`/`cdo:` (orderId) — legacy прямые заказы, работают как раньше
+- `spi:`/`sqi:`/`cai:` (intentId) — новый флоу, разные префиксы, конфликта нет
+- `pay_ok:{orderId}` — ветвление: `order.gamepassUrl` заполнен (new) → PENDING; null (legacy) → AWAITING_GAMEPASS
+- Старые `AWAITING_PAYMENT` заказы и `AWAITING_DIRECT_CONFIRM` (VK) — обрабатываются существующим кодом до очистки
+- `handleDirectConfirm` (VK) обновлён: больше не создаёт WbOrder, а переходит к нику
+
+#### Edge cases
+
+| Ситуация | Решение |
+|----------|---------|
+| Рестарт между шагами 1-5 | `pendingDirectFlow` / VK state потерян → юзер начинает заново. Бонус не списан — безопасно |
+| Рестарт между 5 и 6 | DirectIntent в БД — переживает рестарт |
+| 2 интента от юзера | Guard: `DirectIntent.findFirst(PENDING)` → «уже есть заявка» + кнопка отмены |
+| 2 заказа от юзера | Guard: `WbOrder.findFirst(AWAITING_PAYMENT/PAYMENT_PENDING)` → блок |
+| 2 админа нажимают QR | `$transaction` с проверкой `status=PENDING` → второй получит «уже обработана» |
+
+#### Перед деплоем — чеклист
+
+- [ ] `npx prisma migrate dev --name add_direct_intent` — применить миграцию к Neon
+- [ ] `git add` + коммит + push
+- [ ] Force-deploy: TG бот (SG), VK бот (RF), Web (RF)
+- [ ] **Тест TG:** пак 200 → с бонусом → ник → выбрать ГП → итого → Оформить → Админ: QR → юзер: скрин → pay_ok → статус сразу PENDING
+- [ ] **Тест TG:** отмена на каждом шаге (пак/бонус/ник/ГП/итого/заявка)
+- [ ] **Тест VK:** зеркало TG
+- [ ] **Legacy:** старые `AWAITING_PAYMENT` обрабатываются через `spd:`/`sqr:`
+- [ ] **Ник /menu:** привязать / сменить / проверить
+
+#### Ожидается от пользователя
+
+- [ ] Формула для кастомных номиналов (сейчас fallback `amount × 0.7`)
 
 ---
 

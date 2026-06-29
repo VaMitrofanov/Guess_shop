@@ -11,7 +11,7 @@
 
 import type { MessageContext } from "vk-io";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
-import { sendAdminOrderCard, sendAdminReviewCard, sendAdminDirectOrderCard, sendAdminPaymentCard, notifySupportShown, ADMIN_IDS, DIRECT_PACKS, directPrice, BONUS_MIN_PACK } from "../shared/admin";
+import { sendAdminOrderCard, sendAdminReviewCard, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminIntentCard, notifySupportShown, ADMIN_IDS, DIRECT_PACKS, directPrice, BONUS_MIN_PACK, CUSTOM_MIN, ROBLOX_NICK_RE, generateDirectCode, CB } from "../shared/admin";
 import { vkGetName, tgSend, vkSend, escapeHtml } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
@@ -133,6 +133,8 @@ function buildVkPackKb(userBonus = 0, rubleDiscount = 0) {
     }
     kb.row();
   }
+  kb.textButton({ label: "✏️ Своё количество", payload: { command: "direct_custom" }, color: "secondary" });
+  kb.row();
   kb.textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" });
   return kb.inline();
 }
@@ -396,13 +398,7 @@ function vkUserDisplay(name: string, vkUserId: number): string {
   return `<a href="https://vk.com/id${vkUserId}">${escapeHtml(name)}</a>`;
 }
 
-/** Generate a unique synthetic WB code for direct orders (never matches a real 7-char code). */
-function generateDirectCode(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let code = "DIR-";
-  for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return code;
-}
+// generateDirectCode() now imported from shared/admin
 
 /** Returns false only when the group ID is configured AND the API confirms non-membership. Fail-open. */
 async function isVkSubscribed(_ctx: MessageContext, vkUserId: number): Promise<boolean> {
@@ -773,12 +769,78 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     return;
   }
   if (msgPayload?.command === "direct_confirm") {
-    await handleDirectConfirm(ctx, vkUserId);
+    await handleDirectConfirm(ctx, vkUserId, false);
+    return;
+  }
+  if (msgPayload?.command === "direct_confirm_nb") {
+    await handleDirectConfirm(ctx, vkUserId, true);
+    return;
+  }
+  if (msgPayload?.command === "direct_custom") {
+    setState(vkUserId, { type: "AWAITING_DIRECT_AMOUNT" });
+    await ctx.reply({
+      message: `✏️ Своё количество\n\nВведи количество робуксов от ${CUSTOM_MIN} до 10 000:`,
+      keyboard: Keyboard.builder()
+        .textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" })
+        .inline(),
+    });
     return;
   }
   if (msgPayload?.command === "direct_cancel") {
     clearState(vkUserId);
     await ctx.reply("Отменено.");
+    return;
+  }
+  if (msgPayload?.command === "direct_nick_ok") {
+    const nickState = getState(vkUserId);
+    if (!nickState || nickState.type !== "AWAITING_DIRECT_NICK") {
+      await ctx.reply("⏳ Сессия истекла. Начни заново.");
+      return;
+    }
+    const savedNick = msgPayload.nick as string;
+    if (!savedNick) { await ctx.reply("Ошибка — начни заново."); return; }
+    await handleVkDirectNickResolved(ctx, vkUserId, savedNick);
+    return;
+  }
+  if (msgPayload?.command === "direct_nick_new") {
+    const nickState = getState(vkUserId);
+    if (!nickState || (nickState.type !== "AWAITING_DIRECT_NICK" && nickState.type !== "AWAITING_DIRECT_NICK_INPUT" && nickState.type !== "AWAITING_DIRECT_GAMEPASS")) {
+      await ctx.reply("⏳ Сессия истекла. Начни заново.");
+      return;
+    }
+    setState(vkUserId, { type: "AWAITING_DIRECT_NICK_INPUT", amount: nickState.amount, totalAmount: nickState.totalAmount, bonus: nickState.bonus, rubleDiscount: nickState.rubleDiscount, rublePrice: nickState.rublePrice });
+    const kb = Keyboard.builder();
+    kb.textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" });
+    await ctx.reply({ message: "🎮 Введи ник Roblox\n\nНапиши его в чат:", keyboard: kb.inline() });
+    return;
+  }
+  if (msgPayload?.command === "direct_gp_pick" && typeof msgPayload.passId === "string") {
+    await handleVkDirectGpPick(ctx, vkUserId, msgPayload.passId);
+    return;
+  }
+  if (msgPayload?.command === "direct_submit") {
+    await handleVkDirectSubmit(ctx, vkUserId);
+    return;
+  }
+  if (msgPayload?.command === "direct_cancel_intent" && msgPayload?.intentId) {
+    const intentId = String(msgPayload.intentId);
+    const intent = await (db as any).directIntent.findUnique({ where: { id: intentId } });
+    if (!intent || intent.status !== "PENDING") {
+      await ctx.reply("Заявка уже обработана.");
+      return;
+    }
+    await (db as any).directIntent.update({ where: { id: intentId }, data: { status: "CANCELLED" } });
+    const kb = Keyboard.builder();
+    kb.textButton({ label: "💎 Заказать снова", payload: { command: "start_direct" }, color: "positive" });
+    await ctx.reply({ message: "❌ Заявка отменена.", keyboard: kb.inline() });
+    await Promise.allSettled(
+      ADMIN_IDS.map(id => tgSend(id, `❌ Заявка #${intentId.slice(-6).toUpperCase()} отменена покупателем (VK).`))
+    );
+    return;
+  }
+  if (msgPayload?.command === "edit_nick") {
+    setState(vkUserId, { type: "AWAITING_NICK_EDIT" });
+    await ctx.reply("🎮 Введи новый ник Roblox:");
     return;
   }
   if (msgPayload?.command === "user_cancel_direct" && msgPayload?.orderId) {
@@ -867,6 +929,43 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         .textButton({ label: "❌ Отмена",      payload: { command: "direct_cancel"  }, color: "negative" })
         .inline(),
     });
+    return;
+  }
+  // AWAITING_DIRECT_NICK_INPUT: user is typing a Roblox nick for the new direct flow
+  if (state?.type === "AWAITING_DIRECT_NICK_INPUT") {
+    const nick = text.replace(/^@/, "").trim();
+    if (!ROBLOX_NICK_RE.test(nick)) {
+      const kb = Keyboard.builder();
+      kb.textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" });
+      await ctx.reply({ message: "⚠️ Ник Roblox: 3–20 символов (буквы, цифры, _). Попробуй ещё раз:", keyboard: kb.inline() });
+      return;
+    }
+    await handleVkDirectNickResolved(ctx, vkUserId, nick);
+    return;
+  }
+  // AWAITING_DIRECT_NICK / AWAITING_DIRECT_GAMEPASS / AWAITING_DIRECT_SUMMARY: use buttons
+  if (state?.type === "AWAITING_DIRECT_NICK" || state?.type === "AWAITING_DIRECT_GAMEPASS" || state?.type === "AWAITING_DIRECT_SUMMARY") {
+    await ctx.reply("Используй кнопки выше ☝️");
+    return;
+  }
+  // AWAITING_NICK_EDIT: user editing their nick from /menu
+  if (state?.type === "AWAITING_NICK_EDIT") {
+    clearState(vkUserId);
+    const nick = text.replace(/^@/, "").trim();
+    if (!ROBLOX_NICK_RE.test(nick)) {
+      setState(vkUserId, { type: "AWAITING_NICK_EDIT" });
+      await ctx.reply("⚠️ Ник Roblox: 3–20 символов (буквы, цифры, _). Попробуй ещё раз:");
+      return;
+    }
+    const { resolveRobloxUserId } = await import("../shared/roblox");
+    const rId = await resolveRobloxUserId(nick);
+    if (!rId) {
+      setState(vkUserId, { type: "AWAITING_NICK_EDIT" });
+      await ctx.reply(`❌ Пользователь ${nick} не найден на Roblox. Проверь написание.`);
+      return;
+    }
+    await (db as any).user.updateMany({ where: { vkId: String(vkUserId) }, data: { robloxUsername: nick } });
+    await ctx.reply(`✅ Ник сохранён: ${nick}`);
     return;
   }
 
@@ -1478,8 +1577,7 @@ async function handleGamepassLink(
 // B2 — Gamepass search by Roblox nick (item 7)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Allowed Roblox username regex. */
-const ROBLOX_NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
+// ROBLOX_NICK_RE now imported from shared/admin
 /** Max gamepass matches we show as inline buttons. */
 const MAX_PICK_BUTTONS = 5;
 
@@ -1767,9 +1865,9 @@ async function handleStartDirect(ctx: MessageContext, vkUserId: number): Promise
 
 async function handleDirectAmountInput(ctx: MessageContext, vkUserId: number, text: string): Promise<void> {
   const num = parseInt(text.replace(/[\s,]/g, ""), 10);
-  if (isNaN(num) || num < 100 || num > 10000) {
+  if (isNaN(num) || num < CUSTOM_MIN || num > 10000) {
     await ctx.reply({
-      message: "⚠️ Введи число от 100 до 10 000.\n\nНапример: 500",
+      message: `⚠️ Введи число от ${CUSTOM_MIN} до 10 000.\n\nНапример: 500`,
       keyboard: Keyboard.builder()
         .textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" })
         .inline(),
@@ -1793,31 +1891,41 @@ async function handleDirectPackSelect(ctx: MessageContext, vkUserId: number, amo
   const discount = user?.rubleDiscount ?? 0;
   const rublePrice = discount > 0 ? Math.max(0, baseRublePrice - discount) : baseRublePrice;
 
-  setState(vkUserId, { type: "AWAITING_DIRECT_CONFIRM", amount, totalAmount, bonus });
+  const flowData = { amount, totalAmount, bonus, rubleDiscount: discount, rublePrice };
 
-  const bonusSection = bonus > 0
-    ? `💎 Запрос:          ${amount} R$\n` +
+  if (bonus > 0) {
+    setState(vkUserId, { type: "AWAITING_DIRECT_CONFIRM", ...flowData });
+
+    const bonusSection =
+      `💎 Запрос:          ${amount} R$\n` +
       `🎁 Твой бонус:     +${bonus} R$\n` +
       `─────────────────\n` +
-      `📦 Итого получишь:  ${totalAmount} R$\n`
-    : `📦 Получишь:       ${totalAmount} R$\n`;
-  const discountLine = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
+      `📦 Итого получишь:  ${totalAmount} R$\n`;
+    const discountLine = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
 
-  await ctx.reply({
-    message:
-      `✅ Подтверди заказ\n\n` +
-      bonusSection +
-      discountLine +
-      `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
-      `📌 Цена геймпасса:  ${passPrice} R$`,
-    keyboard: Keyboard.builder()
-      .textButton({ label: "✅ Подтвердить", payload: { command: "direct_confirm" }, color: "positive" })
-      .textButton({ label: "❌ Отмена",      payload: { command: "direct_cancel"  }, color: "negative" })
-      .inline(),
-  });
+    const kb = Keyboard.builder();
+    kb.textButton({ label: `✅ С бонусом (+${bonus} R$)`, payload: { command: "direct_confirm" }, color: "positive" });
+    kb.row();
+    kb.textButton({ label: "✅ Без бонуса", payload: { command: "direct_confirm_nb" }, color: "secondary" });
+    kb.row();
+    kb.textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" });
+
+    await ctx.reply({
+      message:
+        `✅ Подтверди заказ\n\n` +
+        bonusSection + discountLine +
+        `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
+        `📌 Цена геймпасса:  ${passPrice} R$`,
+      keyboard: kb.inline(),
+    });
+  } else {
+    // No bonus — skip confirm, go straight to nick step
+    setState(vkUserId, { type: "AWAITING_DIRECT_NICK", ...flowData });
+    await showVkNickStep(ctx, vkUserId, flowData);
+  }
 }
 
-async function handleDirectConfirm(ctx: MessageContext, vkUserId: number): Promise<void> {
+async function handleDirectConfirm(ctx: MessageContext, vkUserId: number, skipBonus = false): Promise<void> {
   const state = getState(vkUserId);
   if (state?.type !== "AWAITING_DIRECT_CONFIRM") {
     await ctx.reply({
@@ -1829,93 +1937,249 @@ async function handleDirectConfirm(ctx: MessageContext, vkUserId: number): Promi
     return;
   }
 
-  const { amount, totalAmount, bonus } = state;
+  const { amount, bonus: stateBonus, rubleDiscount, rublePrice } = state;
+  const bonus = skipBonus ? 0 : stateBonus;
+  const totalAmount = amount + bonus;
+  const recalcedRublePrice = skipBonus
+    ? Math.max(0, directPrice(amount) - rubleDiscount)
+    : rublePrice;
+
+  const flowData = { amount, totalAmount, bonus, rubleDiscount, rublePrice: recalcedRublePrice };
+  setState(vkUserId, { type: "AWAITING_DIRECT_NICK", ...flowData });
+  await showVkNickStep(ctx, vkUserId, flowData);
+}
+
+async function showVkNickStep(ctx: MessageContext, vkUserId: number, flowData: { amount: number; totalAmount: number; bonus: number; rubleDiscount: number; rublePrice: number }): Promise<void> {
+  const user = await (db as any).user.findUnique({
+    where: { vkId: String(vkUserId) }, select: { robloxUsername: true },
+  });
+  const savedNick = user?.robloxUsername;
+
+  if (savedNick) {
+    setState(vkUserId, { type: "AWAITING_DIRECT_NICK", ...flowData });
+    const kb = Keyboard.builder();
+    kb.textButton({ label: `✅ ${savedNick}`, payload: { command: "direct_nick_ok", nick: savedNick }, color: "positive" });
+    kb.row();
+    kb.textButton({ label: "✏️ Другой ник", payload: { command: "direct_nick_new" }, color: "secondary" });
+    kb.row();
+    kb.textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" });
+    await ctx.reply({
+      message: `🎮 Ник Roblox\n\nТвой сохранённый ник: ${savedNick}\n\nПродолжить с ним?`,
+      keyboard: kb.inline(),
+    });
+  } else {
+    setState(vkUserId, { type: "AWAITING_DIRECT_NICK_INPUT", ...flowData });
+    const kb = Keyboard.builder();
+    kb.textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" });
+    await ctx.reply({
+      message: "🎮 Введи свой ник Roblox\n\nНапиши его в чат:",
+      keyboard: kb.inline(),
+    });
+  }
+}
+
+async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number, nick: string): Promise<void> {
+  const state = getState(vkUserId);
+  if (!state || (state.type !== "AWAITING_DIRECT_NICK" && state.type !== "AWAITING_DIRECT_NICK_INPUT")) return;
+
+  const passPrice = Math.ceil(state.totalAmount / 0.7);
+  await (db as any).user.updateMany({ where: { vkId: String(vkUserId) }, data: { robloxUsername: nick } });
+
+  setState(vkUserId, { type: "AWAITING_DIRECT_GAMEPASS", robloxUsername: nick, amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus, rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice });
+
+  await ctx.reply(`🔎 Ищу геймпассы у ${nick}…`);
+  const result = await searchGamepassesByNick(nick, passPrice);
+
+  if (result.status === "user_not_found") {
+    setState(vkUserId, { type: "AWAITING_DIRECT_NICK_INPUT", amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus, rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice });
+    const kb = Keyboard.builder();
+    kb.textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" });
+    await ctx.reply({ message: `❌ Пользователь ${nick} не найден на Roblox.\n\nПроверь написание и отправь ещё раз:`, keyboard: kb.inline() });
+    return;
+  }
+  if (result.status === "no_gamepasses") {
+    setState(vkUserId, { type: "AWAITING_DIRECT_NICK_INPUT", amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus, rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice });
+    const kb = Keyboard.builder();
+    kb.urlButton({ label: "📖 Инструкция", url: "https://robloxbank.ru/guide?source=direct" });
+    kb.row();
+    kb.textButton({ label: "✏️ Другой ник", payload: { command: "direct_nick_new" }, color: "secondary" });
+    kb.row();
+    kb.textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" });
+    await ctx.reply({ message: `⚠️ У ${nick} нет геймпассов на продаже.\n\nСоздай геймпасс по инструкции и отправь ник ещё раз:`, keyboard: kb.inline() });
+    return;
+  }
+
+  const { matches, nonMatches } = result;
+  const kb = Keyboard.builder();
+
+  if (matches.length === 0 && nonMatches.length > 0) {
+    const topWrong = nonMatches.slice(0, MAX_PICK_BUTTONS);
+    for (const g of topWrong) {
+      kb.textButton({ label: `${g.robux} R$ · ${g.name.slice(0, 18)}`, payload: { command: "direct_gp_pick", passId: String(g.id) }, color: "primary" });
+      kb.row();
+    }
+    kb.textButton({ label: "✏️ Другой ник", payload: { command: "direct_nick_new" }, color: "secondary" });
+    kb.row();
+    kb.textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" });
+    await ctx.reply({
+      message: `⚠️ Нет геймпассов с нужной ценой ${passPrice} R$.\n\nВот что нашлось у ${nick} — выбери подходящий или создай новый с правильной ценой:`,
+      keyboard: kb.inline(),
+    });
+    return;
+  }
+
+  const all = [...matches, ...nonMatches.slice(0, 3)];
+  for (const g of all.slice(0, MAX_PICK_BUTTONS)) {
+    const prefix = g.isPriceMatch ? "✅ " : "";
+    kb.textButton({ label: `${prefix}${g.robux} R$ · ${g.name.slice(0, 16)}`, payload: { command: "direct_gp_pick", passId: String(g.id) }, color: g.isPriceMatch ? "positive" : "primary" });
+    kb.row();
+  }
+  kb.textButton({ label: "✏️ Другой ник", payload: { command: "direct_nick_new" }, color: "secondary" });
+  kb.row();
+  kb.textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" });
+  await ctx.reply({
+    message: `🎫 Геймпассы ${nick}\n\nВыбери геймпасс для заказа:`,
+    keyboard: kb.inline(),
+  });
+}
+
+async function handleVkDirectGpPick(ctx: MessageContext, vkUserId: number, passId: string): Promise<void> {
+  const state = getState(vkUserId);
+  if (!state || state.type !== "AWAITING_DIRECT_GAMEPASS") {
+    await ctx.reply("⏳ Сессия истекла. Начни заново.");
+    return;
+  }
+
+  const gpDetails = await getGamepassDetails(passId);
+  if (!gpDetails) {
+    await ctx.reply("❌ Геймпасс не найден. Попробуй другой.");
+    return;
+  }
+
+  const gamepassUrl = `https://www.roblox.com/game-pass/${passId}`;
+  setState(vkUserId, {
+    type: "AWAITING_DIRECT_SUMMARY",
+    robloxUsername: state.robloxUsername,
+    gamepassId: passId,
+    gamepassUrl,
+    gamepassName: gpDetails.name,
+    amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus,
+    rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice,
+  });
+
+  const bonusLine = state.bonus > 0 ? `\n🎁 Бонус:       +${state.bonus} R$` : "";
+  const discountLine = state.rubleDiscount > 0 ? `\n💰 Скидка:      −${state.rubleDiscount} ₽` : "";
+
+  const summaryText =
+    `📋 Заявка на прямой заказ\n\n` +
+    `📦 Получишь:    ${state.totalAmount} R$${bonusLine}\n` +
+    `🎮 Ник:         ${state.robloxUsername}\n` +
+    `🎫 Геймпасс:    ${gpDetails.robux} R$ · "${gpDetails.name.slice(0, 30)}"${discountLine}\n` +
+    `💰 К оплате:    ${fmtRub(state.rublePrice)}`;
+
+  const kb = Keyboard.builder();
+  kb.textButton({ label: "✅ Оформить", payload: { command: "direct_submit" }, color: "positive" });
+  kb.row();
+  kb.textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" });
+
+  await ctx.reply({ message: summaryText, keyboard: kb.inline() });
+}
+
+async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Promise<void> {
+  const state = getState(vkUserId);
+  if (!state || state.type !== "AWAITING_DIRECT_SUMMARY") {
+    await ctx.reply("⏳ Сессия истекла. Начни заново.");
+    return;
+  }
   clearState(vkUserId);
 
-  // Lazy upsert user
   let user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
   if (!user) {
     const name = await vkGetName(vkUserId);
     user = await (db as any).user.create({ data: { vkId: String(vkUserId), name } });
   }
 
-  // Guard: one active direct order at a time
-  const existing = await (db as any).wbOrder.findFirst({
+  // Guard: one active intent at a time
+  const existingIntent = await (db as any).directIntent.findFirst({
+    where: { userId: user.id, status: "PENDING" },
+  });
+  if (existingIntent) {
+    const shortId = existingIntent.id.slice(-6).toUpperCase();
+    const kb = Keyboard.builder();
+    kb.textButton({ label: "❌ Отменить заявку", payload: { command: "direct_cancel_intent", intentId: existingIntent.id }, color: "negative" });
+    await ctx.reply({ message: `⏳ У тебя уже есть активная заявка #${shortId}.\n\nДождись реквизитов от менеджера или отмени заявку.`, keyboard: kb.inline() });
+    return;
+  }
+  const existingOrder = await (db as any).wbOrder.findFirst({
     where: { userId: user.id, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING"] } },
   });
-  if (existing) {
+  if (existingOrder) {
     await ctx.reply({
-      message:
-        `⏳ У тебя уже есть активный заказ #${existing.id.slice(-6).toUpperCase()}.\n\n` +
-        `Дождись реквизитов от менеджера, а затем оформи новый.`,
+      message: `⏳ У тебя уже есть активный заказ #${existingOrder.id.slice(-6).toUpperCase()}.\n\nДождись реквизитов от менеджера, а затем оформи новый.`,
       keyboard: vkFaqKb(),
     });
     return;
   }
 
-  const dirCode = generateDirectCode();
-  let newOrder: any;
+  let intent: any;
   try {
-    newOrder = await (db as any).$transaction(async (tx: any) => {
-      const ord = await tx.wbOrder.create({
-        data: {
-          amount:        totalAmount,
-          gamepassUrl:   null,
-          status:        "AWAITING_PAYMENT",
-          platform:      "VK",
-          userId:        user.id,
-          wbCode:        dirCode,
-          isDirectOrder: true,
-        },
-      });
-      const updateData: any = {};
-      if (bonus > 0) {
-        updateData.balance = 0;
-        updateData.reviewBonusGrantedAt = null;
-        updateData.bonusExpiresAt = null;
-        updateData.reviewReminderLevel = 0;
-      }
-      if (user.rubleDiscount > 0) updateData.rubleDiscount = 0;
-      if (Object.keys(updateData).length > 0) {
-        await tx.user.update({ where: { id: user.id }, data: updateData });
-      }
-      return ord;
+    intent = await (db as any).directIntent.create({
+      data: {
+        userId:        user.id,
+        amount:        state.amount,
+        bonus:         state.bonus,
+        totalAmount:   state.totalAmount,
+        rubleDiscount: state.rubleDiscount,
+        rublePrice:    state.rublePrice,
+        robloxUsername: state.robloxUsername,
+        gamepassId:    state.gamepassId,
+        gamepassUrl:   state.gamepassUrl,
+        platform:      "VK",
+      },
     });
   } catch (err) {
-    console.error("[VK] Direct order create error:", err);
-    await ctx.reply({ message: "❌ Не удалось создать заказ. Попробуй снова.", keyboard: vkFaqKb() });
+    console.error("[VK] DirectIntent create error:", err);
+    await ctx.reply({ message: "❌ Не удалось оформить заявку. Попробуй снова.", keyboard: vkFaqKb() });
     return;
   }
 
-  const shortId = newOrder.id.slice(-6).toUpperCase();
+  const shortId = intent.id.slice(-6).toUpperCase();
   const vkName = user.name ?? await vkGetName(vkUserId);
   const prevOrdersCount = await (db as any).wbOrder.count({
     where: { userId: user.id, status: "COMPLETED" },
   });
 
   try {
-    await sendAdminDirectOrderCard({
-      orderId:             newOrder.id,
+    await sendAdminIntentCard({
+      intentId:            intent.id,
       userId:              user.id,
-      amount:              totalAmount,
-      bonusApplied:        bonus,
+      amount:              state.amount,
+      bonus:               state.bonus,
+      totalAmount:         state.totalAmount,
+      rublePrice:          state.rublePrice,
+      robloxUsername:       state.robloxUsername,
+      gamepassUrl:         state.gamepassUrl,
+      gamepassName:        state.gamepassName,
       userDisplay:         `${vkUserDisplay(vkName, vkUserId)} (VK ID: ${vkUserId})`,
-      createdAt:           newOrder.createdAt,
+      platform:            "VK",
+      createdAt:           intent.createdAt,
       previousOrdersCount: prevOrdersCount,
     });
   } catch (err) {
-    console.error("[VK] sendAdminDirectOrderCard failed:", err);
+    console.error("[VK] sendAdminIntentCard failed:", err);
   }
 
+  const kb = Keyboard.builder();
+  kb.textButton({ label: "❌ Отменить заявку", payload: { command: "direct_cancel_intent", intentId: intent.id }, color: "negative" });
   await ctx.reply({
     message:
-      `📋 Заказ #${shortId} оформлен!\n\n` +
+      `📋 Заявка #${shortId} отправлена!\n\n` +
       `Менеджер пришлёт реквизиты для оплаты в течение нескольких минут.\n\n` +
       `Ожидай сообщения 👇`,
-    keyboard: vkFaqKb(),
+    keyboard: kb.inline(),
   });
 
-  console.log(`[VK] Direct order created: ${newOrder.id} vkUserId=${vkUserId} amount=${totalAmount}`);
+  console.log(`[VK] DirectIntent created: ${intent.id} vkUserId=${vkUserId} amount=${state.totalAmount}`);
 }
 
 async function handleDirectPaymentScreenshot(
@@ -2252,6 +2516,15 @@ async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<v
   }
 
   await ctx.reply({ message: lines.join("\n"), keyboard: kb.inline() });
+
+  // Separate nick edit button
+  const nickKb = Keyboard.builder();
+  if (robloxNick) {
+    nickKb.textButton({ label: `✏️ Ник: ${robloxNick.slice(0, 18)}`, payload: { command: "edit_nick" }, color: "secondary" });
+  } else {
+    nickKb.textButton({ label: "🎮 Привязать ник Roblox", payload: { command: "edit_nick" }, color: "secondary" });
+  }
+  await ctx.reply({ message: "⚙️ Настройки:", keyboard: nickKb.inline() });
 }
 
 async function handleIdleMessage(

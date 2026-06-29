@@ -37,6 +37,7 @@ model User {
   orders                Order[]
   wbCodes            WbCode[]
   wbOrders           WbOrder[]
+  directIntents      DirectIntent[]
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 }
@@ -103,6 +104,13 @@ enum WbOrderStatus {
   IN_PROGRESS
   COMPLETED
   REJECTED
+}
+
+enum DirectIntentStatus {
+  PENDING
+  CONSUMED
+  CANCELLED
+  EXPIRED
 }
 
 enum WbCodeStatus {
@@ -263,4 +271,26 @@ model WbCode {
   @@index([sessionId])
   @@index([denomination])
   @@index([userId])
+}
+
+/// Pre-order intent for direct purchases. Persisted to DB so it survives bot restarts.
+/// WbOrder is only created when admin sends payment details (consuming the intent).
+model DirectIntent {
+  id             String              @id @default(cuid())
+  userId         String
+  user           User                @relation(fields: [userId], references: [id])
+  amount         Int
+  bonus          Int                 @default(0)
+  totalAmount    Int
+  rubleDiscount  Int                 @default(0)
+  rublePrice     Int
+  robloxUsername  String
+  gamepassId     String
+  gamepassUrl    String
+  platform       Platform
+  status         DirectIntentStatus  @default(PENDING)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([userId, status])
 }

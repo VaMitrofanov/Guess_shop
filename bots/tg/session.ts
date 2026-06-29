@@ -25,16 +25,24 @@ export const pendingReview = new Map<number, string>();
 
 // ── Direct order session states ───────────────────────────────────────────────
 
-/** User clicked "Купить напрямую" and is expected to type a Robux amount. */
-export const pendingDirectAmount = new Map<number, true>();
+export type DirectFlowStep = "amount" | "bonus" | "nick" | "nick_input" | "gamepass" | "summary";
 
-/** User typed an amount and is viewing the confirmation screen. */
-export interface DirectOrderState {
-  amount: number;
-  passPrice: number;
-  totalAmount: number;
+export interface DirectFlowState {
+  step: DirectFlowStep;
+  amount?: number;
+  bonus?: number;
+  totalAmount?: number;
+  passPrice?: number;
+  rublePrice?: number;
+  rubleDiscount?: number;
+  robloxUsername?: string;
+  gamepassId?: string;
+  gamepassUrl?: string;
+  gamepassName?: string;
 }
-export const pendingDirectOrder = new Map<number, DirectOrderState>();
+export const pendingDirectFlow = new Map<number, DirectFlowState>();
+
+export const pendingNickEdit = new Map<number, true>();
 
 /**
  * Admin is typing payment details for a direct order.
