@@ -11,7 +11,7 @@
 
 import type { MessageContext } from "vk-io";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
-import { sendAdminOrderCard, sendAdminReviewCard, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminIntentCard, notifySupportShown, ADMIN_IDS, DIRECT_PACKS, directPrice, BONUS_MIN_PACK, CUSTOM_MIN, ROBLOX_NICK_RE, generateDirectCode, CB } from "../shared/admin";
+import { sendAdminOrderCard, sendAdminReviewCard, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminIntentCard, notifySupportShown, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, CB } from "../shared/admin";
 import { vkGetName, tgSend, vkSend, escapeHtml } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
@@ -779,7 +779,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   if (msgPayload?.command === "direct_custom") {
     setState(vkUserId, { type: "AWAITING_DIRECT_AMOUNT" });
     await ctx.reply({
-      message: `✏️ Своё количество\n\nВведи количество робуксов от ${CUSTOM_MIN} до 10 000:`,
+      message: `✏️ Своё количество\n\nВведи количество робуксов от ${CUSTOM_MIN} до ${CUSTOM_MAX.toLocaleString("ru-RU")}:`,
       keyboard: Keyboard.builder()
         .textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" })
         .inline(),
@@ -1865,9 +1865,9 @@ async function handleStartDirect(ctx: MessageContext, vkUserId: number): Promise
 
 async function handleDirectAmountInput(ctx: MessageContext, vkUserId: number, text: string): Promise<void> {
   const num = parseInt(text.replace(/[\s,]/g, ""), 10);
-  if (isNaN(num) || num < CUSTOM_MIN || num > 10000) {
+  if (isNaN(num) || num < CUSTOM_MIN || num > CUSTOM_MAX) {
     await ctx.reply({
-      message: `⚠️ Введи число от ${CUSTOM_MIN} до 10 000.\n\nНапример: 500`,
+      message: `⚠️ Введи число от ${CUSTOM_MIN} до ${CUSTOM_MAX.toLocaleString("ru-RU")}.\n\nНапример: 500`,
       keyboard: Keyboard.builder()
         .textButton({ label: "❌ Отмена", payload: { command: "direct_cancel" }, color: "negative" })
         .inline(),
@@ -1902,6 +1902,7 @@ async function handleDirectPackSelect(ctx: MessageContext, vkUserId: number, amo
       `─────────────────\n` +
       `📦 Итого получишь:  ${totalAmount} R$\n`;
     const discountLine = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
+    const rateLine = amount >= 1000 ? `📊 Курс:            ${customRate(amount)} ₽/R$\n` : "";
 
     const kb = Keyboard.builder();
     kb.textButton({ label: `✅ С бонусом (+${bonus} R$)`, payload: { command: "direct_confirm" }, color: "positive" });
@@ -1913,7 +1914,7 @@ async function handleDirectPackSelect(ctx: MessageContext, vkUserId: number, amo
     await ctx.reply({
       message:
         `✅ Подтверди заказ\n\n` +
-        bonusSection + discountLine +
+        bonusSection + rateLine + discountLine +
         `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
         `📌 Цена геймпасса:  ${passPrice} R$`,
       keyboard: kb.inline(),

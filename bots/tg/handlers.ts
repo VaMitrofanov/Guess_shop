@@ -11,7 +11,7 @@ import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, vkSendPhoto, stripHtml, tgSend, escapeHtml } from "../shared/notify";
 import { getSbpQrBuffer } from "../shared/sbp";
-import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUserHurdle, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminIntentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, BONUS_MIN_PACK, CUSTOM_MIN, ROBLOX_NICK_RE, generateDirectCode, formatUserHandle, formatUserHandleHtml } from "../shared/admin";
+import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUserHurdle, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminIntentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, formatUserHandle, formatUserHandleHtml } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
 import { getGamepassDetails, getGamepassProductInfo, buildPurchaseScript } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
@@ -620,9 +620,10 @@ async function handleDirectPackChosen(ctx: any, amt: number): Promise<void> {
       `📦 Итого получишь:  ${totalAmount} R$\n`
     : `📦 Получишь:       ${totalAmount} R$\n`;
   const discountLine = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
+  const rateLine = amt >= 1000 ? `📊 Курс:            ${customRate(amt)} ₽/R$\n` : "";
   const confirmText =
     `✅ <b>Подтверди заказ</b>\n\n` +
-    bonusSection + discountLine +
+    bonusSection + rateLine + discountLine +
     `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
     `📌 Цена геймпасса:  ${passPrice} R$`;
 
@@ -1370,9 +1371,9 @@ export function registerText(bot: Telegraf): void {
     if (!isAdmin && dirFlow) {
       if (dirFlow.step === "amount") {
         const num = parseInt(text.replace(/[\s,]/g, ""), 10);
-        if (isNaN(num) || num < CUSTOM_MIN || num > 10000) {
+        if (isNaN(num) || num < CUSTOM_MIN || num > CUSTOM_MAX) {
           await ctx.reply(
-            `⚠️ Введи число от ${CUSTOM_MIN} до 10 000.\n\nНапример: <code>500</code>`,
+            `⚠️ Введи число от ${CUSTOM_MIN} до ${CUSTOM_MAX.toLocaleString("ru-RU")}.\n\nНапример: <code>500</code>`,
             { parse_mode: "HTML" }
           );
           return;
@@ -3116,14 +3117,15 @@ export function registerCallbacks(bot: Telegraf): void {
     // dp:custom: user wants to enter a custom amount
     if (data === CB.customDirect) {
       pendingDirectFlow.set(ctx.from.id, { step: "amount" });
+      const customPrompt = `✏️ <b>Своё количество</b>\n\nВведи количество робуксов от ${CUSTOM_MIN} до ${CUSTOM_MAX.toLocaleString("ru-RU")}:`;
       try {
         await ctx.editMessageText(
-          `✏️ <b>Своё количество</b>\n\nВведи количество робуксов от ${CUSTOM_MIN} до 10 000:`,
+          customPrompt,
           { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.cancelDirect)]]) }
         );
       } catch {
         await ctx.reply(
-          `✏️ <b>Своё количество</b>\n\nВведи количество робуксов от ${CUSTOM_MIN} до 10 000:`,
+          customPrompt,
           { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", CB.cancelDirect)]]) }
         );
       }

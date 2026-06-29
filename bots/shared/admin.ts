@@ -11,16 +11,16 @@ import { tgSend, tgSendPhoto, escapeHtml } from "./notify";
 
 // ── Direct order pricing ───────────────────────────────────────────────────────
 
-/** Fixed price table: pack size → ruble price. */
+/** Available pack sizes for button UI. Prices computed by directPrice(). */
 export const DIRECT_PRICES: Record<number, number> = {
   100:  160,
   200:  260,
   300:  360,
-  400:  440,
-  500:  460,
+  400:  460,
+  500:  450,
   800:  720,
   1000: 800,
-  1200: 890,
+  1200: 960,
   1500: 1050,
   2000: 1400,
 };
@@ -28,16 +28,28 @@ export const DIRECT_PRICES: Record<number, number> = {
 /** Ordered list of available pack sizes (derived from DIRECT_PRICES). */
 export const DIRECT_PACKS = Object.keys(DIRECT_PRICES).map(Number) as number[];
 
-/** Returns the ruble price for a given pack. Falls back to 0.7 ₽/R$ for custom amounts. */
+/** Rate per robux (₽/R$) by tier — used for custom (non-pack) amounts. */
+export function customRate(amount: number): number {
+  if (amount < 500)  return 1.0;
+  if (amount < 1000) return 0.9;
+  if (amount < 1500) return 0.8;
+  return 0.7;
+}
+
+/** Returns the ruble price for any amount. Always uses tiered formula. */
 export function directPrice(amount: number): number {
-  return DIRECT_PRICES[amount] ?? Math.round(amount * 0.7);
+  const surcharge = amount < 500 ? 60 : 0;
+  return Math.round(customRate(amount) * amount + surcharge);
 }
 
 /** Minimum pack size that qualifies for the R$ bonus. Set to 0 for all packs. */
 export const BONUS_MIN_PACK = 0;
 
 /** Minimum custom amount for direct orders. */
-export const CUSTOM_MIN = 200;
+export const CUSTOM_MIN = 100;
+
+/** Maximum custom amount for direct orders. */
+export const CUSTOM_MAX = 100_000;
 
 /** Special promo prices for non-bonus users (Friday push). */
 export const PROMO_PRICES: Record<number, number> = {
