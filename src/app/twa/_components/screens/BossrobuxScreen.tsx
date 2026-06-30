@@ -255,6 +255,7 @@ interface BuyoutOrder {
   gamepassUrl: string | null;
   status: string;
   wbCode: string;
+  isDirectOrder: boolean;
   robloxUsername: string | null;
   createdAt: string;
   pendingAt: string | null;
@@ -287,12 +288,14 @@ function BuyoutSection({ token }: { token: string }) {
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch(`/api/twa/orders?status=BUYOUT&limit=20&lite=1`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!r.ok) return;
-      const d = await r.json();
-      setOrders(d.orders ?? []);
+      const hdrs = { Authorization: `Bearer ${token}` };
+      const [rDirect, rBuyout] = await Promise.all([
+        fetch(`/api/twa/orders?status=DIRECT&limit=20&lite=1`, { headers: hdrs }),
+        fetch(`/api/twa/orders?status=BUYOUT&limit=20&lite=1`, { headers: hdrs }),
+      ]);
+      const direct = rDirect.ok ? ((await rDirect.json()).orders ?? []) : [];
+      const buyout = rBuyout.ok ? ((await rBuyout.json()).orders ?? []) : [];
+      setOrders([...direct, ...buyout]);
     } catch {}
     finally { setLoading(false); }
   }, [token]);
@@ -358,6 +361,13 @@ function BuyoutSection({ token }: { token: string }) {
                     fontSize: 15, fontWeight: 600, color: "#7ec5ff",
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                   }}>{nick}</span>
+                  {order.isDirectOrder && (
+                    <span style={{
+                      fontSize: 11, fontWeight: 600, color: C.blue,
+                      background: `${C.blue}1c`, padding: "2px 7px",
+                      borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
+                    }}>Прямой</span>
+                  )}
                 </div>
                 <span style={{ fontSize: 13, fontWeight: 500, color: ageColor(timeRef), flexShrink: 0, ...tabular }}>
                   ⏱ {fmtAge(timeRef)}
