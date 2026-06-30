@@ -5,7 +5,7 @@ import { notifyOrderCompleted, notifyOrderRejected } from "@/lib/twa-notify";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
-type FilterTab = "ALL" | "BUYOUT" | "DIRECT" | "NEW" | "ERROR" | "AWAITING_LINK" | "FAVORITES";
+type FilterTab = "ALL" | "BUYOUT" | "DIRECT" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "FAVORITES";
 
 const NEW_CUTOFF_HOURS = 40;
 
@@ -27,6 +27,8 @@ function buildTabWhere(tab: FilterTab): any {
       return { status: "ERROR", isFavorite: false };
     case "AWAITING_LINK":
       return { status: "AWAITING_GAMEPASS", createdAt: { lte: cutoff }, isFavorite: false };
+    case "DONE":
+      return { status: "COMPLETED" };
     case "FAVORITES":
       return { isFavorite: true };
     default:
@@ -52,7 +54,7 @@ export async function GET(req: NextRequest) {
   const skipCounts  = searchParams.get("skipCounts") === "1";
   const lite        = searchParams.get("lite") === "1";
 
-  const isVirtualTab = ["ALL", "BUYOUT", "DIRECT", "NEW", "ERROR", "AWAITING_LINK", "FAVORITES"].includes(tab);
+  const isVirtualTab = ["ALL", "BUYOUT", "DIRECT", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES"].includes(tab);
   const tabWhere = isVirtualTab
     ? buildTabWhere(tab as FilterTab)
     : (VALID_STATUSES.includes(tab as any) ? { status: tab } : {});
@@ -113,6 +115,7 @@ export async function GET(req: NextRequest) {
               COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "NEW",
               COUNT(*) FILTER (WHERE status = 'ERROR' AND "isFavorite" = false)::int AS "ERROR",
               COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "AWAITING_LINK",
+              COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS "DONE",
               COUNT(*) FILTER (WHERE "isFavorite" = true)::int AS "FAVORITES",
               COALESCE(SUM(amount) FILTER (WHERE status IN ('PENDING','IN_PROGRESS') AND "isDirectOrder" = false AND "isFavorite" = false), 0)::int AS "SUM_BUYOUT",
               COALESCE(SUM(amount) FILTER (WHERE "isDirectOrder" = true AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_DIRECT",
@@ -123,7 +126,7 @@ export async function GET(req: NextRequest) {
           const r = rows[0] ?? {};
           const counts: Record<string, number> = {};
           const sums: Record<string, number> = {};
-          for (const k of ["ALL", "BUYOUT", "DIRECT", "NEW", "ERROR", "AWAITING_LINK", "FAVORITES"] as const)
+          for (const k of ["ALL", "BUYOUT", "DIRECT", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES"] as const)
             counts[k] = Number(r[k] ?? 0);
           sums["BUYOUT"] = Number(r["SUM_BUYOUT"] ?? 0);
           sums["DIRECT"] = Number(r["SUM_DIRECT"] ?? 0);

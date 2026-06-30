@@ -6,7 +6,7 @@ import { toast } from "../Toast";
 import Pressable from "../Pressable";
 
 type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED" | "ERROR";
-type FilterTab = "ALL" | "BUYOUT" | "DIRECT" | "NEW" | "ERROR" | "AWAITING_LINK" | "FAVORITES";
+type FilterTab = "ALL" | "BUYOUT" | "DIRECT" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "FAVORITES";
 
 interface Order {
   id: string;
@@ -61,6 +61,7 @@ const TAB_META: Record<FilterTab, { label: string; color: string }> = {
   NEW:           { label: "Новые",          color: C.accent },
   ERROR:         { label: "Ошибка",         color: C.red },
   AWAITING_LINK: { label: "Ждут ссылку",    color: C.yellow },
+  DONE:          { label: "Готово",          color: C.green },
   FAVORITES:     { label: "Избранное",      color: "#ffd60a" },
 };
 
@@ -71,6 +72,7 @@ const FILTERS: { id: FilterTab }[] = [
   { id: "NEW" },
   { id: "ERROR" },
   { id: "AWAITING_LINK" },
+  { id: "DONE" },
   { id: "FAVORITES" },
 ];
 
@@ -485,9 +487,8 @@ function OrderCard({
   const shortName = userShortName(order.user);
   const passId = extractGamepassId(order.gamepassUrl);
 
-  const showClean = currentTab === "NEW" || currentTab === "AWAITING_LINK";
-  const displayAmount = showClean ? Math.ceil(order.amount * 0.7) : order.amount;
-  const amountSuffix = showClean ? " чист." : "";
+  const showDirty = currentTab === "BUYOUT" || currentTab === "DIRECT" || currentTab === "ERROR";
+  const displayAmount = showDirty ? Math.ceil(order.amount / 0.7) : order.amount;
 
   const tabBadge = currentTab === "ALL" ? orderTabBadge(order) : null;
   const showMoveBtn = currentTab === "AWAITING_LINK" || currentTab === "FAVORITES";
@@ -557,7 +558,7 @@ function OrderCard({
           <span style={{ fontSize: 17, fontWeight: 700, color: C.textPrimary, ...tabular }}>
             {displayAmount.toLocaleString("ru-RU")}
           </span>
-          <span style={{ fontSize: 11, fontWeight: 600, color: C.accent }}>R${amountSuffix}</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: C.accent }}>R$</span>
         </div>
       </div>
 
@@ -702,6 +703,7 @@ function orderToTab(order: Order): FilterTab {
   const cutoff = Date.now() - 40 * 3600_000;
   const created = new Date(order.createdAt).getTime();
   if (order.isFavorite) return "FAVORITES";
+  if (order.status === "COMPLETED") return "DONE";
   if (order.status === "ERROR") return "ERROR";
   if (order.status === "AWAITING_GAMEPASS") return created > cutoff ? "NEW" : "AWAITING_LINK";
   if (order.isDirectOrder && ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status)) return "DIRECT";
@@ -1128,9 +1130,9 @@ function MiniDashboard({ counts, sums, onTap }: {
         const dirtyRobux = sums[g.sumKey] ?? 0;
         if (count === 0) return null;
 
-        const cleanRobux = Math.ceil(dirtyRobux * 0.7);
-        const primary = g.showClean ? cleanRobux : dirtyRobux;
-        const secondary = g.showClean ? dirtyRobux : cleanRobux;
+        const grossRobux = Math.ceil(dirtyRobux / 0.7);
+        const primary = g.showClean ? dirtyRobux : grossRobux;
+        const secondary = g.showClean ? grossRobux : dirtyRobux;
 
         return (
           <Pressable
@@ -1205,6 +1207,7 @@ function EmptyState({ filter, query }: { filter: FilterTab; query: string }) {
     NEW: "Нет новых заказов",
     ERROR: "Нет ошибок",
     AWAITING_LINK: "Все оформили заказы",
+    DONE: "Нет выкупленных заказов",
     FAVORITES: "Нет избранных",
   };
   return (
