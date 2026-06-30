@@ -376,6 +376,90 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  if (action === "purchase") {
+    if (!["PENDING", "IN_PROGRESS"].includes(order.status))
+      return NextResponse.json({ error: "Order must be PENDING or IN_PROGRESS" }, { status: 400 });
+
+    const gpMatch = order.gamepassUrl?.match(/game-pass(?:es)?\/(\d+)/);
+    if (!gpMatch) return NextResponse.json({ error: "No gamepass URL" }, { status: 400 });
+    const gpId = gpMatch[1];
+
+    const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+    const cookie = settings?.robloxCookie;
+    if (!cookie) return NextResponse.json({ error: "Cookie не задан. /setcookie в боте" }, { status: 400 });
+
+    const infoUrls = [
+      `https://apis.roblox.com/game-passes/v1/game-passes/${gpId}/product-info`,
+      `https://apis.roproxy.com/game-passes/v1/game-passes/${gpId}/product-info`,
+    ];
+    let info: any = null;
+    for (const url of infoUrls) {
+      try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        if (r.ok) { info = await r.json(); break; }
+      } catch { /* try next */ }
+    }
+    if (!info?.ProductId)
+      return NextResponse.json({ error: "Не удалось получить product-info" }, { status: 502 });
+
+    if (!info.IsForSale)
+      return NextResponse.json({ error: "Геймпасс не на продаже" }, { status: 400 });
+
+    const price = info.PriceInRobux ?? 0;
+    const base = info.UserBasePriceInRobux ?? price;
+    const isManagedPricing = price !== base;
+    const creatorId = info.Creator?.Id ?? info.Creator?.CreatorTargetId ?? 0;
+
+    // Get CSRF token
+    const csrfRes = await fetch("https://auth.roblox.com/v2/logout", {
+      method: "POST",
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => null);
+    const csrf = csrfRes?.headers.get("x-csrf-token");
+    if (!csrf)
+      return NextResponse.json({ error: "Не удалось получить CSRF — cookie протух?" }, { status: 502 });
+
+    // Purchase
+    const purchaseRes = await fetch(
+      `https://economy.roblox.com/v1/purchases/products/${info.ProductId}`,
+      {
+        method: "POST",
+        headers: {
+          Cookie: `.ROBLOSECURITY=${cookie}`,
+          "Content-Type": "application/json",
+          "x-csrf-token": csrf,
+        },
+        body: JSON.stringify({
+          expectedCurrency: 1,
+          expectedPrice: price,
+          expectedSellerId: creatorId,
+        }),
+        signal: AbortSignal.timeout(15000),
+      },
+    ).catch(() => null);
+
+    const purchaseData: any = await purchaseRes?.json().catch(() => null);
+
+    if (!purchaseData)
+      return NextResponse.json({ error: "Нет ответа от Roblox" }, { status: 502 });
+
+    if (purchaseData.purchased) {
+      const currentRate = settings?.purchaseRate ?? null;
+      await (prisma as any).wbOrder.updateMany({
+        where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
+        data: { status: "COMPLETED", purchaseRate: currentRate },
+      });
+      cachedCounts = null;
+      notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder ?? false).catch(() => {});
+      const mpWarn = isManagedPricing ? ` (MP: ${price}/${base})` : "";
+      return NextResponse.json({ ok: true, success: true, msg: `Куплено за ${purchaseData.price ?? price} R$${mpWarn}` });
+    }
+
+    const reason = purchaseData.reason ?? purchaseData.errorMsg ?? "Неизвестная ошибка";
+    return NextResponse.json({ ok: true, success: false, msg: reason });
+  }
+
   if (action === "purchase-script") {
     const gpMatch = order.gamepassUrl?.match(/game-pass(?:es)?\/(\d+)/);
     if (!gpMatch) return NextResponse.json({ error: "No gamepass URL" }, { status: 400 });

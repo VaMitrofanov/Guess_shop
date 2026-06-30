@@ -623,6 +623,47 @@ function userSubHandle(u: Order["user"]): string {
   return "";
 }
 
+/* ───────────── PurchaseBtn — server-side auto-purchase ───────────── */
+function PurchaseBtn({ orderId, token, onDone }: { orderId: string; token: string; onDone: () => void }) {
+  const [loading, setLoading] = useState(false);
+  return (
+    <button
+      className="twa-press"
+      onClick={async e => {
+        e.stopPropagation();
+        haptic.impact("medium");
+        if (loading) return;
+        setLoading(true);
+        try {
+          const r = await fetch("/api/twa/orders", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ action: "purchase", orderId }),
+          });
+          const d = await r.json();
+          if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
+          if (d.success) {
+            haptic.notify("success");
+            toast(`✅ ${d.msg}`, "success");
+            onDone();
+          } else {
+            haptic.notify("error");
+            toast(`❌ ${d.msg}`, "error");
+          }
+        } catch { haptic.notify("error"); toast("Ошибка сети", "error"); } finally { setLoading(false); }
+      }}
+      style={{
+        flex: 1, padding: "11px", border: "none", borderRadius: 12,
+        background: "rgba(48,209,88,0.14)", color: "#30d158",
+        fontSize: 13.5, fontWeight: 600, cursor: "pointer", letterSpacing: 0.1,
+        opacity: loading ? 0.5 : 1,
+      }}
+    >
+      {loading ? "⏳ Выкупаю…" : "🛒 Выкупить"}
+    </button>
+  );
+}
+
 /* ───────────── PurchaseScriptBtn — fetch & copy purchase script ───────────── */
 function PurchaseScriptBtn({ orderId, token }: { orderId: string; token: string }) {
   const [loading, setLoading] = useState(false);
@@ -772,7 +813,7 @@ function DataRow({ icon, children, copyText: ct, onOpen }: {
    OrderCard — Zoned layout: header / body / actions
    ───────────────────────────────────────────────────────────────────────── */
 function OrderCard({
-  order, token, exiting, onGoToBossrobux, onRunAction, onSaveNote,
+  order, token, exiting, onGoToBossrobux, onRunAction, onSaveNote, onPurchaseDone,
 }: {
   order: Order;
   token: string;
@@ -780,6 +821,7 @@ function OrderCard({
   onGoToBossrobux?: (gamepassId?: string) => void;
   onRunAction: (action: string, reason?: string) => Promise<ActionResult>;
   onSaveNote: (note: string) => Promise<ActionResult>;
+  onPurchaseDone?: () => void;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [fetchedCreator, setFetchedCreator] = useState<string | false | null>(null);
@@ -1090,6 +1132,7 @@ function OrderCard({
           <ActionBar order={order} onRunAction={onRunAction} />
           {order.gamepassUrl && (order.status === "PENDING" || order.status === "IN_PROGRESS") && (
             <div style={{ display: "flex", gap: 8 }}>
+              <PurchaseBtn orderId={order.id} token={token} onDone={() => onPurchaseDone?.()} />
               <PurchaseScriptBtn orderId={order.id} token={token} />
               {onGoToBossrobux && (
                 <button
@@ -1493,6 +1536,21 @@ export default function OrdersScreen({
                 onGoToBossrobux={onGoToBossrobux}
                 onRunAction={(action, reason) => runAction(order, action, reason)}
                 onSaveNote={(note) => saveNote(order.id, note)}
+                onPurchaseDone={() => {
+                  setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: "COMPLETED" as any } : o));
+                  setData(prev => prev ? {
+                    ...prev,
+                    counts: shiftCounts(prev.counts, order.status, "COMPLETED"),
+                    sums: prev.sums ? shiftSums(prev.sums, order.status, "COMPLETED", order.amount) : prev.sums,
+                  } : prev);
+                  setExiting(prev => new Set(prev).add(order.id));
+                  window.setTimeout(() => {
+                    setAllOrders(prev => prev.filter(o => o.id !== order.id));
+                    setExiting(prev => { const n = new Set(prev); n.delete(order.id); return n; });
+                    setData(prev => prev ? { ...prev, total: Math.max(0, prev.total - 1) } : prev);
+                  }, 260);
+                  onActionDone?.();
+                }}
               />
             ))}
 
