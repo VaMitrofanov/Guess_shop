@@ -6,7 +6,330 @@
 
 ---
 
-## Сессия 2026-06-29 (день-5) — Динамическая цена для кастомных сумм (⏳ НЕ ЗАДЕПЛОЕНО)
+## Сессия 2026-06-30 — Поиск и выкуп сторонних ГП + багфиксы покупки (коммиты `3cd19a3`, NEW)
+
+### Фиксы в `3cd19a3` (BossRobux → Аккаунт)
+
+3 багфикса серверной покупки + реворк таба:
+
+1. **Double-click protection** — `useRef` lock в PurchaseBtn (OrdersScreen). Раньше быстрый двойной тап мог вызвать 2 покупки.
+2. **401 → «Cookie истёк»** — вместо невнятной ошибки Roblox теперь показывается читаемое сообщение.
+3. **CSRF retry** — TWA purchase route (`/api/twa/orders`) получил CSRF retry loop (макс 2 попытки), как в bot-коде.
+4. **BossrobuxScreen → AccountScreen** — таб «Выкуп» переименован в «Аккаунт» (иконка person), убрана кнопка «Boss Robux» из карточек заказов.
+5. **Новый API `/api/twa/roblox-account`** — GET info (cookie, баланс, аккаунт) + POST set-cookie / refresh-balance. Отвязано от бот-кода — самостоятельный Next.js route.
+
+| Файл | Что изменено |
+|------|-------------|
+| `src/app/api/twa/roblox-account/route.ts` | **НОВЫЙ** — GET info + POST set-cookie/refresh |
+| `src/app/twa/_components/screens/BossrobuxScreen.tsx` | Полный реворк: AccountScreen (cookie + баланс + инфо) |
+| `src/app/twa/_components/BottomNav.tsx` | Таб «Выкуп»→«Аккаунт», иконка AccountIcon |
+| `src/app/twa/_components/TwaApp.tsx` | AccountScreen import, убран onGoToBossrobux |
+| `src/app/api/twa/orders/route.ts` | CSRF retry + 401 обработка в action "purchase" |
+| `src/app/twa/_components/screens/OrdersScreen.tsx` | Убрана кнопка BossRobux, double-click lock |
+| `bots/shared/roblox.ts` | +`resetPurchaseCsrf()` export |
+
+### Поиск и выкуп сторонних геймпассов (NEW — не закоммичено)
+
+Новая секция «Поиск и выкуп» в AccountScreen. Админ может купить ЛЮБОЙ геймпасс — не только привязанный к заказу.
+
+#### Два режима поиска
+
+| Режим | Вход | Что делает |
+|-------|------|------------|
+| **По нику** | Ник Roblox | Resolve userId → public games → gamepasses → список с thumbnails |
+| **По ID / URL** | ID или URL геймпасса | product-info → одна карточка с полной инфой |
+
+#### Новый API `/api/twa/roblox-account/purchase`
+
+**Файл:** `src/app/api/twa/roblox-account/purchase/route.ts` (НОВЫЙ)
+
+| Action | Input | Что делает |
+|--------|-------|------------|
+| `search-by-username` | `{ username }` | resolve username → userId → list games → list gamepasses → thumbnails → filter isForSale |
+| `resolve-gamepass` | `{ gamepassId }` | product-info (roblox + roproxy fallback) → name, price, seller, isForSale, managedPricing, thumbnail |
+| `purchase` | `{ productId, price, sellerId }` | cookie из GlobalSettings → CSRF → POST purchase → результат + обновлённый баланс |
+
+Логика search/purchase — inline копия из `bots/shared/roblox.ts` (Next.js route не может импортировать бот-код напрямую).
+
+#### UI (BossrobuxScreen.tsx)
+
+- **SegmentControl** — переключатель «По нику» / «По ID / URL»
+- **GamepassCard** — карточка ГП (thumbnail, имя, цена, продавец, MP-метка, кнопка «🛒»)
+- **ConfirmPurchase** — модалка подтверждения (цена, продавец, managed pricing предупреждение)
+- Результат: toast + ✅ на купленной карточке + обновлённый баланс в шапке
+- Секция показывается **только** если cookie валиден
+
+#### Защиты
+
+| Защита | Как |
+|--------|-----|
+| Double-click | `useRef` lock |
+| Cookie истёк | 401 → сообщение |
+| Managed pricing | Предупреждение в модалке (не блок) |
+| Не на продаже | Кнопка disabled + текст |
+| Resolve перед покупкой | Если из nick-search нет sellerId → auto-resolve через product-info |
+
+### Файлы (NEW)
+
+| Файл | Что изменено |
+|------|-------------|
+| `src/app/api/twa/roblox-account/purchase/route.ts` | **НОВЫЙ** — 3 actions: search-by-username, resolve-gamepass, purchase |
+| `src/app/twa/_components/screens/BossrobuxScreen.tsx` | +секция «Поиск и выкуп» (SegmentControl, GamepassCard, ConfirmPurchase) |
+
+### Ожидает тестирования
+
+- [ ] Поиск по нику → список ГП → купить → ✅ + баланс обновлён
+- [ ] Поиск по ID геймпасса → карточка → купить
+- [ ] Поиск по URL (`roblox.com/game-pass/123456`) → парсит ID → карточка
+- [ ] Managed pricing → предупреждение в модалке
+- [ ] Ник без игр → «Нет публичных игр»
+- [ ] Cookie истёк → ошибка при покупке
+- [ ] Double-click → одна покупка
+
+### Деплой
+
+- [x] `npx tsc --noEmit` — чисто
+- [ ] Коммит + push
+- [ ] Force-deploy Web (RF)
+- [ ] TG/VK боты — не затронуты
+
+---
+
+## Сессия 2026-06-30 — Серверный автовыкуп геймпассов P0+P1 (коммиты `16056e0`, `5929993`)
+
+### Что сделано
+
+Полная серверная автоматизация покупки геймпассов через API Roblox. Вместо ручного «📋 Скрипт → вставить в консоль Антика» — одна кнопка «🛒 Выкупить» в админ-карточке.
+
+**Архитектура:** `.ROBLOSECURITY` cookie хранится в БД (GlobalSettings), бот отправляет HTTP-запрос к economy.roblox.com с этим cookie. Отдельный CSRF-менеджер (`purchaseFetch`) от анонимного `rFetch`.
+
+#### Новые функции в `bots/shared/roblox.ts`
+
+| Функция | Что делает |
+|---------|------------|
+| `purchaseFetch(url, cookie, init)` | HTTP-клиент с cookie + собственный CSRF (403→retry, 429→backoff) |
+| `purchaseGamepassDirect(productId, price, sellerId, cookie)` | POST purchase — зеркало браузерного скрипта |
+| `getRobuxBalance(cookie)` | GET баланс R$ аккаунта |
+| `getAuthenticatedUser(cookie)` | GET имя/ID аккаунта |
+| `resetPurchaseCsrf()` | Сброс CSRF при смене аккаунта |
+
+#### Кнопка «🛒 Выкупить» в админ-карточке
+
+`bots/shared/admin.ts` — `CB.purchaseBuy` (`pb:` prefix). Второй ряд кнопок:
+```
+[🛒 Выкупить] [📋 Скрипт] [📊 Дашборд]
+```
+
+#### Обработчик `pb:` в TG (`bots/tg/handlers.ts`)
+
+1. Проверки: админ, PENDING/IN_PROGRESS, есть gamepassUrl
+2. Читает cookie из GlobalSettings
+3. `getGamepassProductInfo()` → проверки isForSale, managed pricing
+4. `purchaseGamepassDirect()` → покупка
+5. **Успех:** auto-complete (atomic `updateMany`), `notifyUserCompleted()`, edit карточки
+6. **Ошибка:** причина + баланс + предложение скрипта как fallback
+
+#### Команды `/setcookie` и `/balance`
+
+**`/setcookie <value>`:**
+- Валидирует через `getAuthenticatedUser()` — если невалиден, отвергает
+- Сохраняет в `GlobalSettings.robloxCookie` + `robloxCookieUpdatedAt`
+- **Удаляет сообщение** с cookie (безопасность)
+- Показывает аккаунт + баланс
+- Сбрасывает `purchaseCsrfToken`
+
+**`/balance`:** показывает аккаунт + баланс + дату обновления cookie
+
+#### Миграция БД
+
+`GlobalSettings` +2 nullable поля: `robloxCookie String?`, `robloxCookieUpdatedAt DateTime?`. Применено через `prisma db push`.
+
+### Файлы (P0 — коммит `16056e0`)
+
+| Файл | Что изменено |
+|------|-------------|
+| `prisma/schema.prisma` | +2 поля в GlobalSettings |
+| `bots/shared/roblox.ts` | +`purchaseFetch`, +`purchaseGamepassDirect`, +`getRobuxBalance`, +`getAuthenticatedUser`, +`resetPurchaseCsrf` |
+| `bots/shared/admin.ts` | +`CB.purchaseBuy`, +кнопка «🛒 Выкупить» в карточке |
+| `bots/tg/handlers.ts` | +`pb:` handler, +`/setcookie`, +`/balance` |
+
+### Файлы (P1 — коммит `5929993`)
+
+| Файл | Что изменено |
+|------|-------------|
+| `src/app/api/twa/orders/route.ts` | +action `"purchase"` — серверная покупка через cookie из GlobalSettings, CSRF, auto-complete |
+| `src/app/twa/_components/screens/OrdersScreen.tsx` | +`PurchaseBtn` компонент (зелёная кнопка «🛒 Выкупить»), optimistic UI: статус→COMPLETED, анимация выхода, обновление счётчиков |
+
+### Тест покупки с SG сервера (✅ РАБОТАЕТ)
+
+```
+Аккаунт: bendi7038 (ID: 11193107841)
+Баланс: 560 R$ → 460 R$ (−100)
+Геймпасс: "Shsha" (ID 1884228026), 100 R$, продавец KrytishVadim4ick
+Результат: { purchased: true, reason: "Success", price: 100 }
+```
+
+Cookie работает с SG сервера без прокси. IP-привязки нет.
+
+### Деплой
+
+- [x] `npx tsc --noEmit` — чисто
+- [x] `prisma db push` — GlobalSettings обновлена
+- [x] Коммит `16056e0` → `git push origin main` (P0)
+- [x] Коммит `5929993` → `git push origin main` (P1: TWA)
+- [x] TG бот (`lyz78enntugna9em1biopinr`, SG) — `Bot started ✅`, все 3 cron ✅
+- [x] VK бот (`gmtpfqosgoz23vjyxyczuic9`, RF) — `Bot started ✅ (group 237309399)`
+- [x] Web (`z10ws7m1q45h281zwedmhei4`, RF) — finished + redeploy P1 в очереди
+- [x] Ошибок в логах нет
+
+### Workflow для использования
+
+```
+1. Получить cookie от продавца аккаунта (или залогиниться → DevTools → .ROBLOSECURITY)
+2. /setcookie <cookie>  → бот проверит и покажет аккаунт + баланс
+3. /balance             → проверка баланса в любой момент
+4. Заказ в PENDING → нажать «🛒 Выкупить» → автовыкуп + авто-COMPLETED
+5. Баланс кончился → /setcookie с новым cookie
+```
+
+### Ожидает тестирования
+
+- [ ] `/setcookie` с реальным cookie — аккаунт определяется, баланс показывается, сообщение удалено
+- [ ] `/balance` — корректный баланс
+- [ ] Нажать «🛒 Выкупить» на PENDING заказе → покупка → COMPLETED → покупатель уведомлён
+- [ ] Ошибки: без cookie, протухший cookie, не на продаже, managed pricing
+
+### Дальнейший план
+
+| Приоритет | Что | Статус |
+|-----------|-----|--------|
+| P1 | TWA: кнопка «🛒 Выкупить» в OrdersScreen | ✅ `5929993` |
+| P1 | TWA Settings: управление cookie + баланс | 🔜 |
+| P1 | Hub-orders: кнопка в расширенной карточке | 🔜 |
+| P2 | Health-check: cron проверяет cookie валидность, алерт если протух | 🔜 |
+| P2 | Прокси-поддержка: env `ROBLOX_PROXY` для purchaseFetch | 🔜 |
+| P3 | Авто-выкуп: cron при PENDING → покупка без нажатия кнопки | 🔜 |
+
+---
+
+## Сессия 2026-06-29 (день-7) — Фикс clipboard в TWA: скрипт копировался как мусор (коммит `22c032b`)
+
+### Контекст
+
+Один из админов жаловался, что при нажатии «📋 Скрипт» в TWA в буфер копируется рандомный набор символов вместо JS-скрипта. У другого админа всё работало нормально.
+
+### Root cause
+
+`navigator.clipboard.writeText()` ненадёжен в Telegram WebView на некоторых Android-устройствах. API либо молча фейлится, либо пишет мусор в буфер. Ошибка проглатывалась `.catch(() => {})` — пользователь думал что скопировал, но при вставке получал предыдущее содержимое буфера или мусор.
+
+### Что исправлено
+
+Функция `copyText()` в `OrdersScreen.tsx` (строка 131) переписана:
+
+1. **В TWA-контексте** (`window.Telegram.WebApp`) — сразу используется fallback через `textarea` + `document.execCommand('copy')` (надёжно работает во всех WebView)
+2. **В обычном браузере** — сначала `navigator.clipboard.writeText()`, при ошибке → fallback
+3. **Fallback** — создаёт скрытый `<textarea>`, вставляет текст, `select()` + `execCommand('copy')`, удаляет элемент
+
+Затрагивает ВСЁ копирование в TWA: скрипт выкупа, Pass ID, ник Roblox, URL геймпасса, код WB, реквизиты.
+
+### Файлы
+
+| Файл | Что изменено |
+|------|-------------|
+| `src/app/twa/_components/screens/OrdersScreen.tsx` | +`fallbackCopy()`, переписана `copyText()` с TWA-детектом и fallback |
+
+### Деплой
+
+- [x] `npx tsc --noEmit` — чисто
+- [x] Коммит `22c032b` → `git push origin main`
+- [ ] Web (`z10ws7m1q45h281zwedmhei4`, RF) — ожидает force-deploy
+- TG бот и VK бот не затронуты (изменения только в web/TWA)
+
+### Ожидает тестирования
+
+- [ ] Админ с проблемным устройством: нажать «📋 Скрипт» → вставить → проверить что скрипт корректный
+- [ ] Проверить копирование Pass ID, ника, URL геймпасса
+
+---
+
+## Сессия 2026-06-29 (день-6) — UX прямых заказов: 7 улучшений (✅ ЗАДЕПЛОЕНО, коммит `203111b`)
+
+### Что сделано
+
+Полный UX-рефакторинг flow прямых покупок (TG + VK). 7 изменений:
+
+#### 1. Кнопка «◀️ Назад» на каждом шаге
+
+Каждый шаг flow (кроме первого) теперь имеет кнопку «◀️ Назад» рядом с «❌ Отменить». Единый callback `dir_back` (TG) / payload `direct_back` (VK) — читает текущий шаг из flow state и возвращает на предыдущий.
+
+| Шаг | Назад → |
+|-----|---------|
+| Подтверждение бонуса | → Выбор пака |
+| Ник Roblox | → Подтверждение бонуса |
+| Выбор геймпасса | → Ник |
+| Итого | → Поиск геймпассов (повторный) |
+
+#### 2. Прогресс-бар `● ● ● ○ ○  Шаг 3/5 · Ник Roblox`
+
+Визуальный индикатор прогресса на каждом шаге. TG — HTML bold, VK — plain text.
+
+#### 3. Быстрый повтор последнего заказа
+
+Если у пользователя есть завершённый прямой заказ — его пак появляется первой кнопкой с `🔄` префиксом в списке паков. Один тап — и он на шаге 2.
+
+#### 4. Автопропуск единственного геймпасса
+
+Если поиск по нику нашёл ровно 1 геймпасс с нужной ценой и 0 несовпадений — автоматический переход на «Итого» без лишнего клика.
+
+#### 5. Managed pricing чек на «Итого»
+
+Шаг «Итого» вызывает `getGamepassProductInfo()` и показывает:
+- `✅ Managed pricing отключён` — всё ок
+- `⚠️ Managed pricing ВКЛЮЧЁН — цена Roblox: X R$ (база Y R$)` — предупреждение
+
+Non-blocking (try/catch), не ломает flow при ошибке API.
+
+#### 6. Таймер после оформления
+
+После «✅ Оформить» вместо голого «Заявка принята» — полные детали заказа + `⏱ Менеджер пришлёт реквизиты — обычно в течение 5 минут`.
+
+#### 7. VK: шаг подтверждения всегда (даже без бонуса)
+
+Раньше VK при отсутствии бонуса пропускал шаг 2 и шёл прямо к нику. Теперь — всегда показывается подтверждение (пак + цена + «✅ Подтвердить»), как в TG.
+
+### Дополнительно
+
+- Все «❌ Отмена» → «❌ Отменить» (единый стиль)
+- При отмене — кнопка «💎 Заказать снова»
+- `showSummary()` / `showVkSummary()` — вынесены в отдельные функции (reuse для ручного выбора и автопропуска)
+
+### Файлы
+
+| Файл | Что изменено |
+|------|-------------|
+| `bots/shared/admin.ts` | +`directBack` CB constant |
+| `bots/tg/handlers.ts` | +`stepBar()`, +`showSummary()`, обновлены все шаги flow, +`dir_back` handler, автопропуск, last order, MP-чек |
+| `bots/vk/handlers.ts` | Зеркало TG: +`stepBar()`, +`showVkSummary()`, +`direct_back` handler, всегда confirmation step, автопропуск |
+
+### Деплой (✅ прод-проверка 2026-06-29)
+
+- [x] `npx tsc --noEmit` — чисто
+- [x] Коммит `203111b` → `git push origin main`
+- [x] VK бот (`gmtpfqosgoz23vjyxyczuic9`, RF) — finished, `203111b`
+- [x] TG бот (`lyz78enntugna9em1biopinr`, SG) — finished, `203111b` (redeployed — первый deploy был cancelled)
+- [x] Web (`z10ws7m1q45h281zwedmhei4`, RF) — finished, `203111b`
+
+### Ожидает тестирования
+
+- [ ] **TG:** полный flow с кнопкой «Назад» на каждом шаге
+- [ ] **TG:** автопропуск (ник с 1 геймпассом нужной цены)
+- [ ] **TG:** повтор последнего заказа (🔄 кнопка)
+- [ ] **TG:** managed pricing предупреждение на «Итого»
+- [ ] **VK:** зеркало TG + подтверждение без бонуса
+
+---
+
+## Сессия 2026-06-29 (день-5) — Динамическая цена для кастомных сумм (✅ ЗАДЕПЛОЕНО, коммит `c4c255c`)
 
 ### Что сделано
 
@@ -49,14 +372,19 @@
 | 1342 R$ | 1000–1499 | 0.8 | 0.8×1342 | 1 074 ₽ | курс 0.8 + цена |
 | 503 629 R$ | 1500+ | 0.7 | 0.7×503629 | 352 540 ₽ | курс 0.7 + цена |
 
-### Перед деплоем
+### Деплой (✅ прод-проверка 2026-06-29)
 
-- [ ] `npx tsc --noEmit` — ✅ (проверено)
-- [ ] Коммит + push
-- [ ] Force-deploy: TG бот (SG), VK бот (RF)
-- [ ] **Тест TG:** dp:custom → 132 → 192₽; 1342 → курс 0.8, 1134₽
+- [x] `npx tsc --noEmit` — чисто
+- [x] Коммит `c4c255c` → `git push origin main`
+- [x] VK бот (`gmtpfqosgoz23vjyxyczuic9`, RF) — `Bot started ✅ (group 237309399)`
+- [x] TG бот (`lyz78enntugna9em1biopinr`, SG) — `Bot started ✅`, все cron started ✅, `Bot profile applied ✅`
+- [x] Ошибок в логах нет (только штатный stale callback query после рестарта)
+
+### Ожидает тестирования
+
+- [ ] **Тест TG:** dp:custom → 132 → 192₽; 1342 → курс 0.8, 1074₽
 - [ ] **Тест VK:** зеркало TG
-- [ ] **Тест пак:** dp:500 → 460₽ (таблица, не формула)
+- [ ] **Тест пак:** dp:500 → 450₽, dp:1000 → 800₽ (формула)
 
 ---
 

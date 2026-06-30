@@ -1,6 +1,6 @@
 "use client";
 import { C } from "../theme";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { haptic } from "../haptics";
 
 interface AccountInfo {
@@ -10,6 +10,19 @@ interface AccountInfo {
   accountName:    string | null;
   accountId:      number | null;
   balance:        number | null;
+}
+
+interface GamepassItem {
+  gamepassId: number;
+  productId:  number;
+  name:       string;
+  price:      number;
+  sellerName: string;
+  sellerId?:  number;
+  image:      string | null;
+  isForSale?: boolean;
+  isManagedPricing?: boolean;
+  basePriceInRobux?: number;
 }
 
 function SectionHeader({ title }: { title: string }) {
@@ -63,6 +76,178 @@ function formatDate(iso: string | null) {
   return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
 }
 
+// ── Segment Control ─────────────────────────────────────────────────────────
+function SegmentControl({ value, onChange }: { value: "nick" | "id"; onChange: (v: "nick" | "id") => void }) {
+  const opts: { id: "nick" | "id"; label: string }[] = [
+    { id: "nick", label: "По нику" },
+    { id: "id",   label: "По ID / URL" },
+  ];
+  return (
+    <div style={{
+      display: "flex", background: C.elevated, borderRadius: 10, padding: 3, gap: 2,
+    }}>
+      {opts.map(o => (
+        <button
+          key={o.id}
+          className="twa-press-sm"
+          onClick={() => { if (o.id !== value) { haptic.select(); onChange(o.id); } }}
+          style={{
+            flex: 1, padding: "8px 0", border: "none", borderRadius: 8, cursor: "pointer",
+            fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+            background: value === o.id ? C.card : "transparent",
+            color: value === o.id ? "#e5e5ea" : C.textTertiary,
+            boxShadow: value === o.id ? "0 1px 3px rgba(0,0,0,0.3)" : "none",
+            transition: "all 0.2s",
+          }}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Gamepass Card ────────────────────────────────────────────────────────────
+function GamepassCard({
+  gp, buying, bought, onBuy,
+}: {
+  gp: GamepassItem;
+  buying: boolean;
+  bought: boolean;
+  onBuy: () => void;
+}) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 12,
+      padding: "12px 14px",
+      background: bought ? `${C.green}11` : "transparent",
+      transition: "background 0.3s",
+    }}>
+      {gp.image && (
+        <img
+          src={gp.image}
+          alt=""
+          style={{ width: 44, height: 44, borderRadius: 10, objectFit: "cover", flexShrink: 0 }}
+        />
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 14, fontWeight: 600, color: "#e5e5ea",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}>
+          {gp.name}
+        </div>
+        <div style={{ fontSize: 12, color: C.textTertiary, marginTop: 2 }}>
+          {gp.price.toLocaleString()} R$ · {gp.sellerName}
+          {gp.isManagedPricing && <span style={{ color: C.orange }}> · MP</span>}
+        </div>
+      </div>
+      {bought ? (
+        <span style={{ fontSize: 13, fontWeight: 600, color: C.green, flexShrink: 0 }}>✅</span>
+      ) : (
+        <button
+          className="twa-press-sm"
+          onClick={onBuy}
+          disabled={buying || gp.isForSale === false}
+          style={{
+            flexShrink: 0, padding: "7px 14px", border: "none", borderRadius: 10,
+            background: gp.isForSale === false ? C.elevated : C.green,
+            color: "#fff", fontSize: 13, fontWeight: 600, cursor: buying ? "default" : "pointer",
+            opacity: buying ? 0.5 : (gp.isForSale === false ? 0.4 : 1),
+            fontFamily: "inherit", transition: "opacity 0.2s",
+          }}
+        >
+          {buying ? "…" : gp.isForSale === false ? "Не продаётся" : "🛒"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Confirm Modal ───────────────────────────────────────────────────────────
+function ConfirmPurchase({
+  gp, buying, onConfirm, onCancel,
+}: {
+  gp: GamepassItem;
+  buying: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 9999,
+      background: "rgba(0,0,0,0.65)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      padding: 24,
+    }}
+      onClick={e => { if (e.target === e.currentTarget && !buying) onCancel(); }}
+    >
+      <div style={{
+        background: C.card, borderRadius: 18, padding: "24px 20px", width: "100%", maxWidth: 320,
+        boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+      }}>
+        <div style={{ textAlign: "center", marginBottom: 16 }}>
+          {gp.image && (
+            <img src={gp.image} alt="" style={{ width: 56, height: 56, borderRadius: 12, marginBottom: 10 }} />
+          )}
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#e5e5ea" }}>Купить «{gp.name}»?</div>
+        </div>
+
+        <div style={{ background: C.elevated, borderRadius: 12, padding: "12px 14px", marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#e5e5ea", marginBottom: 6 }}>
+            <span>Цена</span>
+            <span style={{ fontWeight: 600 }}>{gp.price.toLocaleString()} R$</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: C.textSecondary }}>
+            <span>Продавец</span>
+            <span>{gp.sellerName}</span>
+          </div>
+        </div>
+
+        {gp.isManagedPricing && (
+          <div style={{
+            background: `${C.orange}18`, borderRadius: 10, padding: "10px 12px", marginBottom: 12,
+            fontSize: 12, color: C.orange, fontWeight: 500,
+          }}>
+            ⚠️ Managed pricing · база {gp.basePriceInRobux?.toLocaleString()} R$, Roblox выставил {gp.price.toLocaleString()} R$
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <button
+            className="twa-press"
+            onClick={onCancel}
+            disabled={buying}
+            style={{
+              flex: 1, padding: "13px 0", border: "none", borderRadius: 12,
+              background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 600,
+              cursor: "pointer", fontFamily: "inherit",
+            }}
+          >
+            Отмена
+          </button>
+          <button
+            className="twa-press"
+            onClick={onConfirm}
+            disabled={buying}
+            style={{
+              flex: 1, padding: "13px 0", border: "none", borderRadius: 12,
+              background: C.green, color: "#fff", fontSize: 15, fontWeight: 600,
+              cursor: buying ? "default" : "pointer", fontFamily: "inherit",
+              opacity: buying ? 0.6 : 1, transition: "opacity 0.2s",
+            }}
+          >
+            {buying ? "Покупаю…" : "✅ Купить"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Main Screen
+// ═════════════════════════════════════════════════════════════════════════════
 export default function BossrobuxScreen({ token }: { token: string }) {
   const [info, setInfo] = useState<AccountInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -73,8 +258,24 @@ export default function BossrobuxScreen({ token }: { token: string }) {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
-  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+  // ── Search & Purchase state ─────────────────────────────────────────────
+  const [searchMode, setSearchMode] = useState<"nick" | "id">("nick");
+  const [searchInput, setSearchInput] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [searchResults, setSearchResults] = useState<GamepassItem[]>([]);
+  const [resolvedUsername, setResolvedUsername] = useState("");
+  const [hasSearched, setHasSearched] = useState(false);
 
+  const [confirmGp, setConfirmGp] = useState<GamepassItem | null>(null);
+  const [buying, setBuying] = useState(false);
+  const [boughtIds, setBoughtIds] = useState<Set<number>>(new Set());
+  const buyLock = useRef(false);
+
+  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+  const purchaseHeaders = { ...headers };
+
+  // ── Account loading ─────────────────────────────────────────────────────
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try {
@@ -133,6 +334,98 @@ export default function BossrobuxScreen({ token }: { token: string }) {
     finally { setSaving(false); }
   }
 
+  // ── Search ──────────────────────────────────────────────────────────────
+  async function doSearch() {
+    const q = searchInput.trim();
+    if (!q) return;
+    setSearching(true); setSearchError(""); setSearchResults([]); setResolvedUsername(""); setHasSearched(true);
+    setBoughtIds(new Set());
+
+    try {
+      if (searchMode === "nick") {
+        const r = await fetch("/api/twa/roblox-account/purchase", {
+          method: "POST", headers: purchaseHeaders,
+          body: JSON.stringify({ action: "search-by-username", username: q }),
+        });
+        const d = await r.json();
+        if (!r.ok) { setSearchError(d.error ?? "Ошибка"); return; }
+        setResolvedUsername(d.username ?? q);
+        setSearchResults(d.gamepasses ?? []);
+        if ((d.gamepasses ?? []).length === 0) setSearchError(d.msg ?? "Геймпассы не найдены");
+      } else {
+        const r = await fetch("/api/twa/roblox-account/purchase", {
+          method: "POST", headers: purchaseHeaders,
+          body: JSON.stringify({ action: "resolve-gamepass", gamepassId: q }),
+        });
+        const d = await r.json();
+        if (!r.ok) { setSearchError(d.error ?? "Ошибка"); return; }
+        setResolvedUsername(d.sellerName ?? "");
+        setSearchResults([d]);
+      }
+      haptic.notify("success");
+    } catch { setSearchError("Ошибка сети"); haptic.notify("error"); }
+    finally { setSearching(false); }
+  }
+
+  // ── Purchase ────────────────────────────────────────────────────────────
+  async function doPurchase() {
+    if (!confirmGp || buyLock.current) return;
+    buyLock.current = true;
+    setBuying(true);
+
+    try {
+      // If we came from nick-search, we need sellerId via resolve
+      let { productId, sellerId } = confirmGp as GamepassItem & { sellerId?: number };
+      const price = confirmGp.price;
+
+      if (!productId || !sellerId) {
+        const r = await fetch("/api/twa/roblox-account/purchase", {
+          method: "POST", headers: purchaseHeaders,
+          body: JSON.stringify({ action: "resolve-gamepass", gamepassId: String(confirmGp.gamepassId) }),
+        });
+        const d = await r.json();
+        if (!r.ok || !d.productId) {
+          haptic.notify("error");
+          setSearchError(d.error ?? "Не удалось получить данные ГП");
+          setConfirmGp(null);
+          return;
+        }
+        productId = d.productId;
+        sellerId = d.sellerId;
+        if (d.isManagedPricing) {
+          setConfirmGp(prev => prev ? { ...prev, isManagedPricing: true, basePriceInRobux: d.basePriceInRobux, sellerId: d.sellerId, productId: d.productId } : prev);
+        }
+      }
+
+      const r = await fetch("/api/twa/roblox-account/purchase", {
+        method: "POST", headers: purchaseHeaders,
+        body: JSON.stringify({ action: "purchase", productId, price, sellerId }),
+      });
+      const d = await r.json();
+
+      if (d.success) {
+        haptic.notify("success");
+        setBoughtIds(prev => new Set(prev).add(confirmGp!.gamepassId));
+        if (d.balance !== null && d.balance !== undefined) {
+          setInfo(prev => prev ? { ...prev, balance: d.balance } : prev);
+        }
+        setConfirmGp(null);
+      } else {
+        haptic.notify("error");
+        setSearchError(d.msg ?? d.error ?? "Ошибка покупки");
+        setConfirmGp(null);
+      }
+    } catch {
+      haptic.notify("error");
+      setSearchError("Ошибка сети");
+      setConfirmGp(null);
+    } finally {
+      setBuying(false);
+      buyLock.current = false;
+    }
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────────
   if (loading) return <Skeleton />;
   if (error) return (
     <div style={{ padding: 24, textAlign: "center" }}>
@@ -143,6 +436,8 @@ export default function BossrobuxScreen({ token }: { token: string }) {
       }}>Повторить</button>
     </div>
   );
+
+  const cookieReady = info?.hasCookie && info?.cookieValid !== false;
 
   return (
     <div style={{ padding: "16px 16px 32px", display: "flex", flexDirection: "column", gap: 22, overflowY: "auto", height: "100%" }}>
@@ -245,6 +540,98 @@ export default function BossrobuxScreen({ token }: { token: string }) {
           Cookie валидируется при сохранении. Обновляй когда меняешь аккаунт.
         </div>
       </section>
+
+      {/* ── Search & Purchase ─────────────────────────────────────────────── */}
+      {cookieReady && (
+        <section>
+          <SectionHeader title="Поиск и выкуп" />
+
+          <div style={{ marginBottom: 10 }}>
+            <SegmentControl value={searchMode} onChange={v => { setSearchMode(v); setSearchResults([]); setSearchError(""); setHasSearched(false); setSearchInput(""); }} />
+          </div>
+
+          <Card>
+            <div style={{ padding: 12 }}>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  value={searchInput}
+                  onChange={e => setSearchInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && searchInput.trim()) doSearch(); }}
+                  placeholder={searchMode === "nick" ? "Ник Roblox…" : "ID или URL геймпасса…"}
+                  style={{
+                    flex: 1, background: C.elevated, border: "none", borderRadius: 10,
+                    color: "#fff", fontSize: 14, padding: "11px 14px",
+                    outline: "none", fontFamily: "inherit", boxSizing: "border-box",
+                    minWidth: 0,
+                  }}
+                />
+                <button
+                  className="twa-press"
+                  onClick={() => { haptic.impact("light"); doSearch(); }}
+                  disabled={searching || !searchInput.trim()}
+                  style={{
+                    flexShrink: 0, padding: "11px 16px", border: "none", borderRadius: 10,
+                    background: searchInput.trim() ? C.accent : C.elevated,
+                    color: "#fff", fontSize: 14, fontWeight: 600, cursor: searching ? "default" : "pointer",
+                    opacity: searching || !searchInput.trim() ? 0.5 : 1,
+                    fontFamily: "inherit", transition: "all 0.2s",
+                  }}
+                >
+                  {searching ? "…" : "🔍"}
+                </button>
+              </div>
+            </div>
+
+            {/* Results */}
+            {searchResults.length > 0 && (
+              <>
+                {resolvedUsername && (
+                  <div style={{
+                    padding: "8px 14px", fontSize: 12, color: C.textTertiary,
+                    borderTop: `1px solid ${C.border}`,
+                  }}>
+                    {searchMode === "nick"
+                      ? `${resolvedUsername} · ${searchResults.length} геймпасс${searchResults.length === 1 ? "" : searchResults.length < 5 ? "а" : "ов"}`
+                      : resolvedUsername
+                    }
+                  </div>
+                )}
+                {searchResults.map((gp, i) => (
+                  <div key={gp.gamepassId}>
+                    {i > 0 && <div style={{ height: 1, background: C.border, marginLeft: 14 }} />}
+                    <GamepassCard
+                      gp={gp}
+                      buying={buying && confirmGp?.gamepassId === gp.gamepassId}
+                      bought={boughtIds.has(gp.gamepassId)}
+                      onBuy={() => setConfirmGp(gp)}
+                    />
+                  </div>
+                ))}
+              </>
+            )}
+
+            {/* Error / empty */}
+            {searchError && (
+              <div style={{
+                padding: "14px 14px", fontSize: 13, color: C.textSecondary, textAlign: "center",
+                borderTop: hasSearched ? `1px solid ${C.border}` : "none",
+              }}>
+                {searchError}
+              </div>
+            )}
+          </Card>
+        </section>
+      )}
+
+      {/* Confirm modal */}
+      {confirmGp && (
+        <ConfirmPurchase
+          gp={confirmGp}
+          buying={buying}
+          onConfirm={doPurchase}
+          onCancel={() => { if (!buying) setConfirmGp(null); }}
+        />
+      )}
     </div>
   );
 }
