@@ -3133,7 +3133,7 @@ export function registerCallbacks(bot: Telegraf): void {
       try {
         const order = await (db as any).wbOrder.findUnique({ where: { id: orderId } });
         if (!order) { await ctx.answerCbQuery("⚠️ Заказ не найден"); return; }
-        if (!["PENDING", "IN_PROGRESS"].includes(order.status)) {
+        if (!["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status)) {
           await ctx.answerCbQuery("⚠️ Заказ уже обработан");
           return;
         }
@@ -3178,7 +3178,7 @@ export function registerCallbacks(bot: Telegraf): void {
         if (result.success) {
           const currentRate = settings?.purchaseRate ?? null;
           const updated = await (db as any).wbOrder.updateMany({
-            where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
+            where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
             data: { status: "COMPLETED", adminId, purchaseRate: currentRate },
           });
 
@@ -3194,8 +3194,12 @@ export function registerCallbacks(bot: Telegraf): void {
             `✅ <b>Автовыкуп</b> · ${adminTag}\n` +
             `Заказ #${shortId} · ${info.priceInRobux} R$` +
             priceWarning;
-          try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch {}
+          try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch {};
         } else {
+          await (db as any).wbOrder.updateMany({
+            where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
+            data: { status: "ERROR" },
+          });
           const balance = await getRobuxBalance(cookie);
           const balanceLine = balance !== null ? `\n💰 Баланс: ${balance.toLocaleString()} R$` : "";
           await ctx.reply(
@@ -3226,7 +3230,7 @@ export function registerCallbacks(bot: Telegraf): void {
         // Atomic guard: only update if the order is still in an actionable state.
         // Prevents double-notification when two admins click simultaneously.
         const updatedCount = await (db as any).wbOrder.updateMany({
-          where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
+          where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
           data: { status: "COMPLETED", adminId, purchaseRate: currentRate },
         });
 

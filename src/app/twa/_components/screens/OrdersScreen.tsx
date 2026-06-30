@@ -5,15 +5,8 @@ import { haptic } from "../haptics";
 import { toast } from "../Toast";
 import Pressable from "../Pressable";
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   OrdersScreen — Apple-grade admin order list.
-   Palette/radii/shadows come from the shared theme. Interactions are tactile
-   (haptics + press states), actions are optimistic (no full-list refetch), and
-   the "Nth order / VIP / review" signals stream in via deferred enrichment.
-   ───────────────────────────────────────────────────────────────────────── */
-
-type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED";
-type FilterStatus = OrderStatus | "ALL" | "BUYOUT";
+type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED" | "ERROR";
+type FilterTab = "ALL" | "BUYOUT" | "DIRECT" | "NEW" | "ERROR" | "AWAITING_LINK" | "FAVORITES";
 
 interface Order {
   id: string;
@@ -25,6 +18,7 @@ interface Order {
   rejectionReason: string | null;
   adminNote: string | null;
   isDirectOrder: boolean;
+  isFavorite: boolean;
   paymentDetails: string | null;
   purchaseRate: number | null;
   createdAt: string;
@@ -34,13 +28,13 @@ interface Order {
   robloxUsername: string | null;
   reviewStatus: "PENDING" | "SUBMITTED" | null;
   userOrderNumber: number | null;
-  userOrderTotal:  number | null;
+  userOrderTotal: number | null;
   user: {
-    tgId:                 string | null;
-    vkId:                 string | null;
-    name:                 string | null;
-    username:             string | null;
-    balance:              number | null;
+    tgId: string | null;
+    vkId: string | null;
+    name: string | null;
+    username: string | null;
+    balance: number | null;
     reviewBonusGrantedAt: string | null;
   };
 }
@@ -48,68 +42,55 @@ interface Order {
 interface OrdersData {
   orders: Order[];
   total: number;
-  counts: Record<FilterStatus, number>;
+  counts: Record<string, number>;
   sums?: Record<string, number> | null;
   page: number;
   pages: number;
 }
 
-/* Per-order signals merged in after the list paints (deferred enrichment). */
 interface EnrichValue {
   userOrderNumber: number | null;
-  userOrderTotal:  number | null;
-  reviewStatus:    "PENDING" | "SUBMITTED" | null;
+  userOrderTotal: number | null;
+  reviewStatus: "PENDING" | "SUBMITTED" | null;
 }
 
-const STATUS_META: Record<OrderStatus, { label: string; color: string }> = {
-  AWAITING_PAYMENT:  { label: "Ждёт реквизиты", color: "#ac8e68" },
-  PAYMENT_PENDING:   { label: "Ждёт оплату",    color: "#ac8e68" },
-  AWAITING_GAMEPASS: { label: "Ждёт ссылку",    color: C.yellow },
-  PENDING:           { label: "Новый",           color: C.accent },
-  IN_PROGRESS:       { label: "В работе",        color: C.orange },
-  COMPLETED:         { label: "Завершён",        color: C.green  },
-  REJECTED:          { label: "Отклонён",        color: C.red    },
+const TAB_META: Record<FilterTab, { label: string; color: string }> = {
+  ALL:           { label: "Все",            color: C.textPrimary },
+  BUYOUT:        { label: "К выкупу",       color: C.green },
+  DIRECT:        { label: "Прямой",         color: C.blue },
+  NEW:           { label: "Новые",          color: C.accent },
+  ERROR:         { label: "Ошибка",         color: C.red },
+  AWAITING_LINK: { label: "Ждут ссылку",    color: C.yellow },
+  FAVORITES:     { label: "Избранное",      color: "#ffd60a" },
 };
 
-const FILTERS: { id: FilterStatus; label: string }[] = [
-  { id: "ALL",               label: "Все"         },
-  { id: "BUYOUT",            label: "К выкупу"    },
-  { id: "PENDING",           label: "Новые"       },
-  { id: "IN_PROGRESS",       label: "В работе"    },
-  { id: "AWAITING_PAYMENT",  label: "Реквизиты"   },
-  { id: "PAYMENT_PENDING",   label: "Оплата"      },
-  { id: "AWAITING_GAMEPASS", label: "Ждут ссылку" },
-  { id: "COMPLETED",         label: "Готово"      },
-  { id: "REJECTED",          label: "Отклонено"   },
+const FILTERS: { id: FilterTab }[] = [
+  { id: "ALL" },
+  { id: "BUYOUT" },
+  { id: "DIRECT" },
+  { id: "NEW" },
+  { id: "ERROR" },
+  { id: "AWAITING_LINK" },
+  { id: "FAVORITES" },
 ];
 
-const URGENT_STATUSES: OrderStatus[] = ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING"];
+function orderTabBadge(order: Order): { label: string; color: string } | null {
+  const cutoff = Date.now() - 40 * 3600_000;
+  const created = new Date(order.createdAt).getTime();
 
-/* Common rejection reasons — one tap to fill, still freely editable. */
-const REJECT_PRESETS = [
-  "Приватный профиль",
-  "Неверная ссылка",
-  "Геймпасс не найден",
-  "Цена не совпала",
-  "Дубликат заказа",
-  "Нет оплаты",
-];
+  if (order.isFavorite) return { label: "Избранное", color: "#ffd60a" };
+  if (order.status === "COMPLETED") return { label: "Готово", color: C.green };
+  if (order.status === "REJECTED") return { label: "Отменено", color: C.red };
+  if (order.status === "ERROR") return { label: "Ошибка", color: C.red };
+  if (order.isDirectOrder && ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status))
+    return { label: "Прямой", color: C.blue };
+  if (order.status === "AWAITING_GAMEPASS" && created > cutoff) return { label: "Новые", color: C.accent };
+  if (order.status === "AWAITING_GAMEPASS" && created <= cutoff) return { label: "Ждут ссылку", color: C.yellow };
+  if (["PENDING", "IN_PROGRESS"].includes(order.status)) return { label: "К выкупу", color: C.green };
+  return null;
+}
 
-/* ───────────── Time formatting — short & contextual ───────────── */
-function fmtRelative(iso: string) {
-  const d       = new Date(iso);
-  const diffMin = (Date.now() - d.getTime()) / 60000;
-  if (diffMin < 1)    return "только что";
-  if (diffMin < 60)   return `${Math.round(diffMin)} мин`;
-  if (diffMin < 1440) return `${Math.round(diffMin / 60)} ч`;
-  if (diffMin < 1440 * 7) return `${Math.floor(diffMin / 1440)} дн`;
-  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
-}
-function fmtFull(iso: string) {
-  return new Date(iso).toLocaleString("ru-RU", {
-    day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
-  });
-}
+/* ───────────── Time formatting ───────────── */
 function fmtAge(iso: string): string {
   const mins = (Date.now() - new Date(iso).getTime()) / 60000;
   if (mins < 1) return "< 1 мин";
@@ -122,8 +103,8 @@ function fmtAge(iso: string): string {
 }
 function ageColor(iso: string): string {
   const mins = (Date.now() - new Date(iso).getTime()) / 60000;
-  if (mins < 120)  return C.green;
-  if (mins < 720)  return C.yellow;
+  if (mins < 120) return C.green;
+  if (mins < 720) return C.yellow;
   if (mins < 1440) return C.orange;
   return C.red;
 }
@@ -169,297 +150,89 @@ function CopyBtn({ text, label }: { text: string; label?: string }) {
         if (label) toast(`${label} скопирован`, "success");
       }}
       style={{
-        background:   copied ? `${C.green}26` : "transparent",
-        border:    "none",
+        background: copied ? `${C.green}26` : "transparent",
+        border: "none",
         borderRadius: 8,
-        color:     copied ? C.green : C.textSecondary,
-        fontSize:  12.5,
+        color: copied ? C.green : C.textSecondary,
+        fontSize: 12.5,
         fontWeight: 500,
-        padding:   "6px 11px",
-        cursor:    "pointer",
-        flexShrink:0,
+        padding: "6px 11px",
+        cursor: "pointer",
+        flexShrink: 0,
       }}
-      title={copied ? "Скопировано" : "Скопировать"}
     >
-      {copied ? "✓ Скопировано" : "Скопировать"}
+      {copied ? "✓" : "Скопировать"}
     </button>
   );
 }
 
-/* ───────────── Avatar — initial circle with deterministic hue ───────────── */
-function colorForName(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
-  const hue = hash % 360;
-  return `hsl(${hue} 55% 42%)`;
-}
-function Avatar({ name, platform }: { name: string; platform: "tg" | "vk" | "—" }) {
-  const initial = (name.trim()[0] ?? "?").toUpperCase();
-  const bg = name === "—" ? C.elevated : colorForName(name);
-  return (
-    <div style={{
-      width: 36, height: 36, borderRadius: 18,
-      background: bg,
-      color: "#fff",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      fontWeight: 700, fontSize: 15, letterSpacing: -0.2,
-      flexShrink: 0,
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18)",
-      position: "relative",
-    }}>
-      {initial}
-      {platform !== "—" && (
-        <div style={{
-          position: "absolute", right: -2, bottom: -2,
-          width: 14, height: 14, borderRadius: 7,
-          background: platform === "tg" ? "#229ED9" : "#0077FF",
-          border: `2px solid ${C.card}`,
-          fontSize: 7, fontWeight: 800, color: "#fff",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          {platform === "tg" ? "T" : "V"}
-        </div>
-      )}
-    </div>
-  );
+/* ───────────── Contact ───────────── */
+function openContact(user: Order["user"]) {
+  const tg = (typeof window !== "undefined" ? window.Telegram?.WebApp : undefined) as any;
+  if (user.username) {
+    const url = `https://t.me/${user.username}`;
+    if (tg?.openTelegramLink) tg.openTelegramLink(url);
+    else window.open(url, "_blank");
+    return;
+  }
+  if (user.tgId) {
+    const deepLink = `tg://user?id=${user.tgId}`;
+    try { tg?.openLink?.(deepLink); } catch {}
+    try { window.location.href = deepLink; } catch {}
+    copyText(String(user.tgId));
+    toast(`ID ${user.tgId} скопирован`, "success");
+    return;
+  }
+  if (user.vkId) {
+    const url = `https://vk.com/im?sel=${user.vkId}`;
+    if (tg?.openLink) tg.openLink(url);
+    else window.open(url, "_blank");
+  }
 }
 
-/* ───────────── Status pill — refined dot+label ───────────── */
-function StatusPill({ status }: { status: OrderStatus }) {
-  const meta = STATUS_META[status];
-  return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: 6,
-      background: `${meta.color}1c`,
-      color:      meta.color,
-      fontSize:   10.5,
-      fontWeight: 700,
-      padding:    "3px 9px 3px 7px",
-      borderRadius: 999,
-      letterSpacing: 0.4,
-    }}>
-      <span style={{ width: 6, height: 6, borderRadius: 3, background: meta.color, boxShadow: `0 0 0 2px ${meta.color}33` }} />
-      {meta.label.toUpperCase()}
-    </span>
-  );
+function userShortName(u: Order["user"]): string {
+  if (u.username) return `@${u.username}`;
+  const realName = u.name && u.name !== "VK User" ? u.name : null;
+  if (realName) {
+    const parts = realName.split(" ");
+    return parts.length > 1 ? `${parts[0]} ${parts[1][0]}.` : parts[0];
+  }
+  if (u.tgId) return `TG ${u.tgId}`;
+  if (u.vkId) return `VK ${u.vkId}`;
+  return "—";
 }
 
-function Chip({ children, color, animate }: { children: React.ReactNode; color: string; animate?: boolean }) {
-  return (
-    <span className={animate ? "twa-chip-in" : undefined} style={{
-      fontSize: 10, fontWeight: 600, letterSpacing: 0.3,
-      color, background: `${color}1c`,
-      padding: "2.5px 8px", borderRadius: 999, whiteSpace: "nowrap",
-    }}>
-      {children}
-    </span>
-  );
-}
-
-/* OrderNumberChip — "N/Total" cluster-relative position (TG/VK/Roblox identity
-   union). Green "НОВЫЙ" for a lone first order, blue for repeat, gold VIP at 5+. */
-function OrderNumberChip({ n, total }: { n: number | null; total: number | null }) {
-  if (!n || !total) return null;
-  const isFirst = n === 1 && total === 1;
-  const isVip   = total >= 5;
-  const color = isVip ? "#ffd60a" : isFirst ? C.green : C.blue;
-  const label = isFirst
-    ? "НОВЫЙ"
-    : isVip
-    ? `${n}/${total} · VIP`
-    : `${n}/${total}`;
-  return <Chip color={color} animate>{isVip && "👑 "}{label}</Chip>;
-}
-
-/* ───────────── Info row with readable label/value (Apple Wallet style) ───────────── */
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "10px 0" }}>
-      <span style={{
-        fontSize: 11.5, color: C.textTertiary,
-        letterSpacing: 0.4, textTransform: "uppercase" as const, fontWeight: 600,
-      }}>
-        {label}
-      </span>
-      <div style={{ fontSize: 16, color: C.textPrimary, lineHeight: 1.35, minWidth: 0 }}>
-        {children}
-      </div>
-    </div>
-  );
-}
-function Divider() {
-  return <div style={{ height: 1, background: C.hairline, margin: "2px 0" }} />;
-}
-
-/* Bonus expiry computation — bonus burns 30 days after reviewBonusGrantedAt */
-const BONUS_EXPIRY_DAYS = 30;
-function bonusExpiryInfo(grantedAtIso: string | null, balance: number | null) {
-  if (!grantedAtIso || !balance || balance <= 0) return null;
-  const grantedMs = new Date(grantedAtIso).getTime();
-  const expiresAt = grantedMs + BONUS_EXPIRY_DAYS * 86_400_000;
-  const daysLeft  = Math.max(0, Math.ceil((expiresAt - Date.now()) / 86_400_000));
-  const expiryStr = new Date(expiresAt).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
-  const color =
-    daysLeft <= 3  ? C.red    :
-    daysLeft <= 7  ? C.orange :
-    daysLeft <= 14 ? C.yellow :
-                     C.green;
-  return { daysLeft, expiryStr, color, balance };
-}
-function daysWord(n: number): string {
-  const m10 = n % 10, m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return "день";
-  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return "дня";
-  return "дней";
+function extractGamepassId(url: string | null): string | null {
+  if (!url) return null;
+  const m = url.match(/game-pass(?:es)?\/(\d+)/i);
+  return m ? m[1] : null;
 }
 
 type ActionResult = { ok: boolean; error?: string };
 
-/* ───────────── ActionBar — controlled; the screen owns the optimistic mutation ───────────── */
-function ActionBar({
-  order, onRunAction,
-}: { order: Order; onRunAction: (action: string, reason?: string) => Promise<ActionResult> }) {
-  const [loading,      setLoading]      = useState(false);
-  const [rejectMode,   setRejectMode]   = useState(false);
-  const [rejectReason, setRejectReason] = useState("");
-  const [err,          setErr]          = useState("");
-
-  async function doAction(action: string, reason?: string) {
-    setLoading(true); setErr("");
-    const res = await onRunAction(action, reason);
-    setLoading(false);
-    if (!res.ok) setErr(res.error ?? "Ошибка");
-  }
-
-  if (rejectMode) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {REJECT_PRESETS.map(p => (
-            <Pressable
-              key={p}
-              variant="press-sm"
-              onClick={() => setRejectReason(p)}
-              style={{
-                background: rejectReason === p ? `${C.red}26` : "rgba(255,255,255,0.06)",
-                border: "none", borderRadius: 999,
-                color: rejectReason === p ? C.red : C.textSecondary,
-                fontSize: 12, fontWeight: 500, padding: "6px 11px", cursor: "pointer",
-              }}
-            >
-              {p}
-            </Pressable>
-          ))}
-        </div>
-        <textarea
-          placeholder="Причина отклонения…"
-          value={rejectReason}
-          onChange={e => setRejectReason(e.target.value)}
-          rows={2}
-          style={{
-            background: "rgba(255,255,255,0.06)",
-            border: "none", borderRadius: 12,
-            color: C.textPrimary, fontSize: 14, lineHeight: 1.35,
-            padding: "10px 12px",
-            resize: "none", outline: "none", width: "100%", boxSizing: "border-box",
-            fontFamily: "inherit",
-          }}
-        />
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            className="twa-press"
-            onClick={() => { haptic.impact("light"); setRejectMode(false); }}
-            style={btn(C.elevated, C.textSecondary, 1)}
-          >
-            Отмена
-          </button>
-          <button
-            className="twa-press"
-            onClick={() => doAction("reject", rejectReason || "не указана")}
-            disabled={loading}
-            style={{ ...btn(C.red, "#fff", 2), opacity: loading ? 0.7 : 1 }}
-          >
-            {loading ? "…" : "Отклонить"}
-          </button>
-        </div>
-        {err && <div style={{ color: C.red, fontSize: 12 }}>{err}</div>}
-      </div>
-    );
-  }
-
-  const showTakeWork = order.status === "PENDING";
-  const showUntake   = order.status === "IN_PROGRESS";
-  const showComplete = order.status === "PENDING" || order.status === "IN_PROGRESS";
-  const showReject   = ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status);
-  const hasMain      = showTakeWork || showComplete;
-
+/* ───────────── DataRow ───────────── */
+function DataRow({ icon, children, copyText: ct }: {
+  icon: string; children: React.ReactNode; copyText?: string;
+}) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ display: "flex", gap: 8 }}>
-        {showTakeWork && (
-          <button className="twa-press" onClick={() => doAction("take-work")} disabled={loading}
-            style={{ ...btn(C.orange, "#fff", 1), opacity: loading ? 0.7 : 1 }}>
-            {loading ? "…" : "В работу"}
-          </button>
-        )}
-        {showComplete && (
-          <button className="twa-press" onClick={() => doAction("complete")} disabled={loading}
-            style={{ ...btn(C.green, "#fff", 2), opacity: loading ? 0.7 : 1, fontWeight: 700 }}>
-            {loading ? "…" : "✓ Выкуплено"}
-          </button>
-        )}
-        {showReject && hasMain && (
-          <button className="twa-press" onClick={() => { haptic.impact("light"); setRejectMode(true); }} disabled={loading}
-            style={{
-              flexShrink: 0, width: 46,
-              padding: "12px 0", borderRadius: 12,
-              border: `1px solid ${C.red}66`, background: "transparent",
-              color: C.red, fontSize: 20, lineHeight: 1, cursor: "pointer",
-            }}>
-            ✕
-          </button>
-        )}
+    <div style={{
+      display: "flex", alignItems: "center", gap: 8,
+      padding: "5px 0", minWidth: 0,
+    }}>
+      <span style={{ fontSize: 13, flexShrink: 0 }}>{icon}</span>
+      <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, color: C.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {children}
       </div>
-      {showReject && !hasMain && (
-        <button className="twa-press" onClick={() => { haptic.impact("light"); setRejectMode(true); }} disabled={loading}
-          style={{
-            width: "100%", padding: "11px", borderRadius: 12,
-            border: `1px solid ${C.red}55`, background: "transparent",
-            color: C.red, fontSize: 14, fontWeight: 500, cursor: "pointer",
-          }}>
-          Отклонить заказ
-        </button>
-      )}
-      {showUntake && (
-        <button className="twa-press" onClick={() => doAction("untake")} disabled={loading}
-          style={{
-            width: "100%", padding: "11px", borderRadius: 12,
-            border: `1px solid ${C.orange}55`, background: "transparent",
-            color: C.orange, fontSize: 13.5, fontWeight: 600, cursor: "pointer",
-          }}>
-          ↩︎ Вернуть в «Новые»
-        </button>
-      )}
-      {err && <div style={{ color: C.red, fontSize: 12 }}>{err}</div>}
+      {ct && <CopyBtn text={ct} />}
     </div>
   );
 }
-function btn(bg: string, color: string, flex: number): React.CSSProperties {
-  return {
-    flex, padding: "12px", borderRadius: 12, border: "none",
-    background: bg, color, fontSize: 14, fontWeight: 600, cursor: "pointer",
-    letterSpacing: 0.1,
-  };
-}
 
-/* ───────────── NotesEditor — admin-only free-text note, autosave on blur ─────────────
-   Where the manager jots the current status / problem for an order. Highlighted
-   when set so a noted order stands out at a glance. Never shown to the customer. */
+/* ───────────── NotesEditor ───────────── */
 function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) => Promise<ActionResult> }) {
-  const [note, setNote]   = useState(order.adminNote ?? "");
+  const [note, setNote] = useState(order.adminNote ?? "");
   const [saving, setSaving] = useState(false);
   const [flash, setFlash] = useState(false);
-  // Re-sync local draft when the persisted note changes elsewhere (optimistic patch).
   const lastSaved = useRef(order.adminNote ?? "");
   useEffect(() => {
     if ((order.adminNote ?? "") !== lastSaved.current) {
@@ -485,25 +258,25 @@ function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) =
   const hasNote = !!(order.adminNote && order.adminNote.trim());
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 12.5, fontWeight: 600, color: C.textSecondary }}>
-          📝 Заметка <span style={{ color: C.textTertiary, fontWeight: 400 }}>· видят только админы</span>
+        <span style={{ fontSize: 11.5, fontWeight: 600, color: C.textSecondary }}>
+          Заметка
         </span>
-        {flash && <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>Сохранено ✓</span>}
+        {flash && <span style={{ fontSize: 11, color: C.green, fontWeight: 600 }}>✓</span>}
       </div>
       <textarea
         value={note}
         onChange={e => setNote(e.target.value)}
         onBlur={commit}
         onClick={e => e.stopPropagation()}
-        placeholder="Текущий статус или проблема по заказу…"
+        placeholder="Заметка…"
         rows={2}
         style={{
           background: hasNote ? `${C.yellow}14` : "rgba(255,255,255,0.06)",
           border: hasNote ? `1px solid ${C.yellow}40` : "1px solid transparent",
-          borderRadius: 12, color: C.textPrimary, fontSize: 14, lineHeight: 1.4,
-          padding: "10px 12px", resize: "vertical", outline: "none",
+          borderRadius: 10, color: C.textPrimary, fontSize: 13, lineHeight: 1.35,
+          padding: "8px 10px", resize: "vertical", outline: "none",
           width: "100%", boxSizing: "border-box", fontFamily: "inherit",
         }}
       />
@@ -513,639 +286,354 @@ function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) =
           onClick={e => { e.stopPropagation(); commit(); }}
           disabled={saving}
           style={{
-            alignSelf: "flex-start", padding: "8px 16px", borderRadius: 10, border: "none",
-            background: C.accent, color: "#fff", fontSize: 13, fontWeight: 600,
+            alignSelf: "flex-start", padding: "6px 14px", borderRadius: 8, border: "none",
+            background: C.accent, color: "#fff", fontSize: 12, fontWeight: 600,
             cursor: "pointer", opacity: saving ? 0.7 : 1,
           }}
         >
-          {saving ? "…" : "Сохранить заметку"}
+          {saving ? "…" : "Сохранить"}
         </button>
       )}
     </div>
   );
 }
 
-/* ───────────── PassIdCopy — single copy-button for the gamepass ID ───────────── */
-function PassIdCopy({ order }: { order: Order }) {
-  const passId = extractGamepassId(order.gamepassUrl);
-  if (!passId) return null;
-  return (
-    <button
-      className="twa-press-sm"
-      onClick={e => { e.stopPropagation(); copyText(passId); haptic.impact("light"); toast("Pass ID скопирован", "success"); }}
-      style={{
-        width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-        padding: "10px 8px", borderRadius: 11, border: "none",
-        background: "rgba(255,255,255,0.06)", color: C.textSecondary,
-        fontSize: 12.5, fontWeight: 600, cursor: "pointer",
-      }}
-    >
-      🎫 Pass ID: <span style={{ color: C.textPrimary, fontFamily: "monospace" }}>{passId}</span>
-    </button>
-  );
-}
+/* ───────────── ActionPanel per tab ───────────── */
+function ActionPanel({
+  order, currentTab, token, onRunAction, onPurchaseDone,
+}: {
+  order: Order;
+  currentTab: FilterTab;
+  token: string;
+  onRunAction: (action: string, reason?: string) => Promise<ActionResult>;
+  onPurchaseDone?: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const busyRef = useRef(false);
 
-function extractGamepassId(url: string | null): string | null {
-  if (!url) return null;
-  const m = url.match(/game-pass(?:es)?\/(\d+)/i);
-  return m ? m[1] : null;
-}
+  const showPanel =
+    currentTab === "BUYOUT" ||
+    currentTab === "DIRECT" ||
+    currentTab === "ERROR";
 
-/* ───────────── Contact button — direct chat link ─────────────
-   Inside Telegram WebApp openTelegramLink only accepts https://t.me/* URLs;
-   tg://user?id=... is silently ignored. For tgId-only users there is no
-   reliable in-WebApp way to open the profile, so we always copy the ID as a
-   guaranteed fallback, then best-effort the deep link. */
-function openContact(user: Order["user"]) {
-  const tg = (typeof window !== "undefined" ? window.Telegram?.WebApp : undefined) as any;
-  if (user.username) {
-    const url = `https://t.me/${user.username}`;
-    if (tg?.openTelegramLink) tg.openTelegramLink(url);
-    else window.open(url, "_blank");
-    return;
+  if (!showPanel) return null;
+
+  async function doAction(action: string) {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setLoading(true);
+    const res = await onRunAction(action);
+    setLoading(false);
+    busyRef.current = false;
   }
-  if (user.tgId) {
-    const deepLink = `tg://user?id=${user.tgId}`;
-    try { tg?.openLink?.(deepLink); } catch {}
-    try { window.location.href = deepLink; } catch {}
-    copyText(String(user.tgId));
-    toast(`📋 ID ${user.tgId} скопирован — вставь в поиск Telegram`, "success");
-    return;
+
+  async function doPurchase() {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setLoading(true);
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "purchase", orderId: order.id }),
+      });
+      const d = await r.json();
+      if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
+      if (d.success) {
+        haptic.notify("success");
+        toast(`✅ ${d.msg}`, "success");
+        onPurchaseDone?.();
+      } else {
+        haptic.notify("error");
+        toast(`❌ ${d.msg}`, "error");
+      }
+    } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
+    finally { busyRef.current = false; setLoading(false); }
   }
-  if (user.vkId) {
-    const url = `https://vk.com/im?sel=${user.vkId}`;
-    if (tg?.openLink) tg.openLink(url);
-    else window.open(url, "_blank");
-  }
-}
-function contactLabel(user: Order["user"]): string | null {
-  if (user.username) return `Написать @${user.username}`;
-  if (user.tgId)     return `Скопировать ID · ${user.tgId}`;
-  if (user.vkId)     return "Написать в ВКонтакте";
-  return null;
-}
-function ContactButton({ user }: { user: Order["user"] }) {
-  const label = contactLabel(user);
-  if (!label) return null;
+
+  const showError = currentTab !== "ERROR";
+  const hasGamepass = !!order.gamepassUrl;
+
   return (
-    <div style={{ marginTop: 14 }}>
-      <button
-        className="twa-press"
-        onClick={e => { e.stopPropagation(); haptic.impact("light"); openContact(user); }}
-        style={{
-          display: "block", textAlign: "center" as const,
-          width: "100%", padding: "13px", borderRadius: 13, border: "none",
-          background: "linear-gradient(180deg, rgba(10,132,255,0.20), rgba(10,132,255,0.10))",
-          boxShadow: `inset 0 0 0 1px rgba(10,132,255,0.35)`,
-          color: "#7ec5ff", fontSize: 15, fontWeight: 600, letterSpacing: 0.2,
-          cursor: "pointer", fontFamily: "inherit",
-        }}
-      >
-        💬 {label}
+    <div style={{ display: "flex", gap: 6, padding: "10px 14px 12px" }}>
+      {hasGamepass && (
+        <button className="twa-press" onClick={doPurchase} disabled={loading}
+          style={{ flex: 2, padding: "10px", border: "none", borderRadius: 10, background: "rgba(48,209,88,0.14)", color: "#30d158", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+          {loading ? "⏳…" : "Выкупить"}
+        </button>
+      )}
+      {showError && (
+        <button className="twa-press" onClick={() => doAction("set-error")} disabled={loading}
+          style={{ flex: 1, padding: "10px", border: "none", borderRadius: 10, background: "rgba(255,149,0,0.12)", color: C.orange, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+          Ошибка
+        </button>
+      )}
+      <button className="twa-press" onClick={() => doAction("complete")} disabled={loading}
+        style={{ flex: 1, padding: "10px", border: "none", borderRadius: 10, background: "rgba(10,132,255,0.12)", color: C.blue, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+        Выкуплено
+      </button>
+      <button className="twa-press" onClick={() => doAction("reject")} disabled={loading}
+        style={{ width: 38, flexShrink: 0, padding: "10px 0", border: `1px solid ${C.red}55`, borderRadius: 10, background: "transparent", color: C.red, fontSize: 16, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+        ✕
       </button>
     </div>
   );
 }
 
-/* ───────────── User identity helpers — @username everywhere ───────────── */
-function userDisplayName(u: Order["user"]): string {
-  if (u.username) return `@${u.username}`;
-  const realName = u.name && u.name !== "VK User" ? u.name : null;
-  if (realName) return realName;
-  if (u.tgId)    return `TG · ${u.tgId}`;
-  if (u.vkId)    return `VK · ${u.vkId}`;
-  return "—";
-}
-function userSubHandle(u: Order["user"]): string {
-  if (u.username && u.name && u.name !== "VK User") return u.name;
-  if (u.tgId)    return `TG · ${u.tgId}`;
-  if (u.vkId)    return `VK · ${u.vkId}`;
-  return "";
-}
+/* ───────────── MoveToModal ───────────── */
+const MOVE_TARGETS: { id: string; label: string; color: string }[] = [
+  { id: "BUYOUT", label: "К выкупу", color: C.green },
+  { id: "DIRECT", label: "Прямой выкуп", color: C.blue },
+  { id: "NEW", label: "Новые", color: C.accent },
+  { id: "ERROR", label: "Ошибка", color: C.red },
+  { id: "AWAITING_LINK", label: "Ждут ссылку", color: C.yellow },
+];
 
-/* ───────────── PurchaseBtn — server-side auto-purchase ───────────── */
-function PurchaseBtn({ orderId, token, onDone }: { orderId: string; token: string; onDone: () => void }) {
+function MoveToModal({ order, token, onDone, onClose }: {
+  order: Order; token: string; onDone: () => void; onClose: () => void;
+}) {
+  const [target, setTarget] = useState("");
+  const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
-  const busyRef = useRef(false);
-  return (
-    <button
-      className="twa-press"
-      onClick={async e => {
-        e.stopPropagation();
-        haptic.impact("medium");
-        if (busyRef.current) return;
-        busyRef.current = true;
-        setLoading(true);
-        try {
-          const r = await fetch("/api/twa/orders", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ action: "purchase", orderId }),
-          });
-          const d = await r.json();
-          if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
-          if (d.success) {
-            haptic.notify("success");
-            toast(`✅ ${d.msg}`, "success");
-            onDone();
-          } else {
-            haptic.notify("error");
-            toast(`❌ ${d.msg}`, "error");
-          }
-        } catch { haptic.notify("error"); toast("Ошибка сети", "error"); } finally { busyRef.current = false; setLoading(false); }
-      }}
-      style={{
-        flex: 1, padding: "11px", border: "none", borderRadius: 12,
-        background: "rgba(48,209,88,0.14)", color: "#30d158",
-        fontSize: 13.5, fontWeight: 600, cursor: "pointer", letterSpacing: 0.1,
-        opacity: loading ? 0.5 : 1,
-      }}
-    >
-      {loading ? "⏳ Выкупаю…" : "🛒 Выкупить"}
-    </button>
-  );
-}
 
-/* ───────────── PurchaseScriptBtn — fetch & copy purchase script ───────────── */
-function PurchaseScriptBtn({ orderId, token }: { orderId: string; token: string }) {
-  const [loading, setLoading] = useState(false);
-  return (
-    <button
-      className="twa-press"
-      onClick={async e => {
-        e.stopPropagation();
-        haptic.impact("light");
-        if (loading) return;
-        setLoading(true);
-        try {
-          const r = await fetch("/api/twa/orders", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ action: "purchase-script", orderId }),
-          });
-          const d = await r.json();
-          if (!r.ok || !d.script) { toast(d.error ?? "Ошибка", "error"); return; }
-          if (!d.isForSale) { toast("❌ Не на продаже!", "error"); return; }
-          copyText(d.script);
-          const warn = d.isManagedPricing ? ` ⚠️ Managed pricing! ${d.price}/${d.base} R$` : "";
-          toast(`📋 Скрипт скопирован · ${d.name} · ${d.price} R$${warn}`, "success");
-        } catch { toast("Ошибка сети", "error"); } finally { setLoading(false); }
-      }}
-      style={{
-        flex: 1, padding: "11px", border: "none", borderRadius: 12,
-        background: "rgba(255,204,0,0.12)", color: "#ffd60a",
-        fontSize: 13.5, fontWeight: 600, cursor: "pointer", letterSpacing: 0.1,
-        opacity: loading ? 0.5 : 1,
-      }}
-    >
-      {loading ? "⏳…" : "📋 Скрипт"}
-    </button>
-  );
-}
-
-/* ───────────── TimeBadge — colored age indicator ───────────── */
-function TimeBadge({ icon, value, label, color }: { icon: string; value: string; label: string; color: string }) {
-  return (
-    <div style={{
-      flex: 1, minWidth: 0,
-      background: `${color}18`,
-      borderRadius: 12,
-      padding: "8px 10px",
-      display: "flex", flexDirection: "column", gap: 2,
-    }}>
-      <div style={{ fontSize: 15, fontWeight: 700, color, ...tabular, lineHeight: 1.1 }}>
-        {icon} {value}
-      </div>
-      <div style={{ fontSize: 10, color: C.textTertiary, fontWeight: 500, letterSpacing: 0.2 }}>
-        {label}
-      </div>
-    </div>
-  );
-}
-
-function OrderTimeline({ order }: { order: Order }) {
-  const badges: React.ReactNode[] = [];
-
-  if (order.status === "AWAITING_GAMEPASS") {
-    badges.push(<TimeBadge key="cr" icon="⏱" value={fmtAge(order.createdAt)} label="ждёт ссылку" color={ageColor(order.createdAt)} />);
-  } else if (order.status === "PENDING") {
-    badges.push(<TimeBadge key="cr" icon="⏱" value={fmtAge(order.createdAt)} label="создан" color={C.textTertiary} />);
-    const ref = order.pendingAt ?? order.createdAt;
-    badges.push(<TimeBadge key="pn" icon="📋" value={fmtAge(ref)} label="в очереди" color={ageColor(ref)} />);
-  } else if (order.status === "IN_PROGRESS") {
-    const pendRef = order.pendingAt ?? order.createdAt;
-    const takenRef = order.takenAt ?? order.updatedAt;
-    badges.push(<TimeBadge key="pn" icon="📋" value={fmtAge(pendRef)} label="был в очереди" color={C.textTertiary} />);
-    badges.push(<TimeBadge key="tk" icon="🔨" value={fmtAge(takenRef)} label="в работе" color={ageColor(takenRef)} />);
-  } else if (order.status === "COMPLETED") {
-    badges.push(
-      <div key="done" style={{ flex: 1, minWidth: 0, background: `${C.green}18`, borderRadius: 12, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: C.green, ...tabular, lineHeight: 1.1 }}>✅ {fmtAge(order.createdAt)}</div>
-          <div style={{ fontSize: 10, color: C.textTertiary, fontWeight: 500, letterSpacing: 0.2 }}>общее время</div>
-        </div>
-        {order.robloxUsername && (
-          <div style={{ fontSize: 13, fontWeight: 600, color: C.textSecondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "50%", lineHeight: 1.2, paddingTop: 1 }}>
-            🎮 {order.robloxUsername}
-          </div>
-        )}
-      </div>,
-    );
-  } else if (order.status === "REJECTED") {
-    badges.push(
-      <div key="rej" style={{ flex: 1, minWidth: 0, background: `${C.red}18`, borderRadius: 12, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: C.red, ...tabular, lineHeight: 1.1 }}>❌ {fmtAge(order.createdAt)}</div>
-          <div style={{ fontSize: 10, color: C.textTertiary, fontWeight: 500, letterSpacing: 0.2 }}>общее время</div>
-        </div>
-        {order.robloxUsername && (
-          <div style={{ fontSize: 13, fontWeight: 600, color: C.textSecondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "50%", lineHeight: 1.2, paddingTop: 1 }}>
-            🎮 {order.robloxUsername}
-          </div>
-        )}
-      </div>,
-    );
-  } else {
-    badges.push(<TimeBadge key="cr" icon="⏱" value={fmtAge(order.createdAt)} label="создан" color={ageColor(order.createdAt)} />);
+  async function submit() {
+    if (!target || !note.trim()) {
+      toast("Выберите раздел и напишите заметку", "error");
+      return;
+    }
+    setLoading(true);
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "move-to", orderId: order.id, target, note: note.trim() }),
+      });
+      const d = await r.json();
+      if (!r.ok) { toast(d.error ?? "Ошибка", "error"); return; }
+      haptic.notify("success");
+      toast("Перенесено", "success");
+      onDone();
+    } catch { toast("Ошибка сети", "error"); }
+    finally { setLoading(false); }
   }
 
-  badges.push(
-    <div key="amt" style={{
-      minWidth: 72, flexShrink: 0,
-      background: `${C.accent}18`,
-      borderRadius: 12,
-      padding: "8px 10px",
-      display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
-    }}>
-      <div style={{ fontSize: 17, fontWeight: 700, color: C.textPrimary, ...tabular, lineHeight: 1.1 }}>
-        {order.amount.toLocaleString("ru-RU")}
-      </div>
-      <div style={{ fontSize: 10, color: C.accent, fontWeight: 600 }}>R$</div>
-    </div>,
-  );
-
-  return <div style={{ display: "flex", gap: 6 }}>{badges}</div>;
-}
-
-/* ───────────── DataRow — compact icon + value + copy ───────────── */
-function DataRow({ icon, children, copyText: ct, onOpen }: {
-  icon: string; children: React.ReactNode; copyText?: string; onOpen?: () => void;
-}) {
   return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 8,
-      padding: "6px 0", minWidth: 0,
+    <div onClick={e => e.stopPropagation()} style={{
+      padding: "12px 14px 14px",
+      borderTop: `1px solid ${C.hairline}`,
+      background: "rgba(0,0,0,0.15)",
+      display: "flex", flexDirection: "column", gap: 10,
     }}>
-      <span style={{ fontSize: 14, flexShrink: 0 }}>{icon}</span>
-      <div style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 500, color: C.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {children}
+      <div style={{ fontSize: 12, fontWeight: 600, color: C.textSecondary }}>Перевести в раздел:</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {MOVE_TARGETS.map(t => (
+          <button key={t.id} className="twa-press-sm"
+            onClick={() => setTarget(t.id)}
+            style={{
+              padding: "6px 12px", borderRadius: 999, border: "none", cursor: "pointer",
+              background: target === t.id ? `${t.color}33` : "rgba(255,255,255,0.08)",
+              color: target === t.id ? t.color : C.textSecondary,
+              fontSize: 12, fontWeight: 600,
+            }}>
+            {t.label}
+          </button>
+        ))}
       </div>
-      {onOpen && (
-        <button className="twa-press-sm" onClick={e => { e.stopPropagation(); onOpen(); }}
-          style={{ background: "transparent", border: "none", color: C.blue, fontSize: 12, fontWeight: 500, padding: "4px 8px", cursor: "pointer", flexShrink: 0 }}>
-          Открыть
+      <textarea
+        placeholder="Заметка (обязательно)…"
+        value={note}
+        onChange={e => setNote(e.target.value)}
+        rows={2}
+        style={{
+          background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10,
+          color: C.textPrimary, fontSize: 13, lineHeight: 1.35,
+          padding: "8px 10px", resize: "none", outline: "none",
+          width: "100%", boxSizing: "border-box", fontFamily: "inherit",
+        }}
+      />
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="twa-press" onClick={onClose}
+          style={{ flex: 1, padding: "10px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 13, fontWeight: 500, cursor: "pointer" }}>
+          Отмена
         </button>
-      )}
-      {ct && <CopyBtn text={ct} />}
+        <button className="twa-press" onClick={submit} disabled={loading || !target || !note.trim()}
+          style={{ flex: 2, padding: "10px", borderRadius: 10, border: "none", background: C.accent, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: loading || !target || !note.trim() ? 0.5 : 1 }}>
+          {loading ? "…" : "Перевести"}
+        </button>
+      </div>
     </div>
   );
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   OrderCard — Zoned layout: header / body / actions
-   ───────────────────────────────────────────────────────────────────────── */
+/* ───────────── OrderCard — compact layout ───────────── */
 function OrderCard({
-  order, token, exiting, onRunAction, onSaveNote, onPurchaseDone,
+  order, token, currentTab, exiting, onRunAction, onSaveNote, onPurchaseDone, onToggleFavorite, onMoved,
 }: {
   order: Order;
   token: string;
+  currentTab: FilterTab;
   exiting: boolean;
   onRunAction: (action: string, reason?: string) => Promise<ActionResult>;
   onSaveNote: (note: string) => Promise<ActionResult>;
   onPurchaseDone?: () => void;
+  onToggleFavorite: () => void;
+  onMoved: () => void;
 }) {
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [fetchedCreator, setFetchedCreator] = useState<string | false | null>(null);
-
-  const isActive  = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS"].includes(order.status);
-  const isHistory = ["COMPLETED", "REJECTED"].includes(order.status);
+  const [moveOpen, setMoveOpen] = useState(false);
 
   const platform: "tg" | "vk" | "—" = order.user.tgId ? "tg" : order.user.vkId ? "vk" : "—";
-  const displayName = userDisplayName(order.user);
-  const shortName = (() => {
-    if (order.user.username) return `@${order.user.username}`;
-    const realName = order.user.name && order.user.name !== "VK User" ? order.user.name : null;
-    if (realName) {
-      const parts = realName.split(" ");
-      return parts.length > 1 ? `${parts[0]} ${parts[1][0]}.` : parts[0];
-    }
-    if (order.user.tgId) return `TG ${order.user.tgId}`;
-    if (order.user.vkId) return `VK ${order.user.vkId}`;
-    return "—";
-  })();
-
-  const displayCreator = order.robloxUsername
-    ?? (typeof fetchedCreator === "string" ? fetchedCreator || null : null);
-  const shortId = order.id.slice(-6).toUpperCase();
+  const shortName = userShortName(order.user);
   const passId = extractGamepassId(order.gamepassUrl);
 
-  useEffect(() => {
-    if (!(isActive || detailsOpen) || order.robloxUsername || !order.gamepassUrl || fetchedCreator !== null) return;
-    const gpId = extractGamepassId(order.gamepassUrl);
-    if (!gpId) return;
-    setFetchedCreator(false);
-    fetch("/api/twa/bossrobux", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ action: "lookup", gamepassId: gpId }),
-    })
-      .then(r => r.json())
-      .then(d => setFetchedCreator(d?.gamepass?.sellerName ?? ""))
-      .catch(() => setFetchedCreator(""));
-  }, [isActive, detailsOpen, order.robloxUsername, order.gamepassUrl, fetchedCreator, token]);
+  const showClean = currentTab === "NEW" || currentTab === "AWAITING_LINK";
+  const displayAmount = showClean ? Math.ceil(order.amount * 0.7) : order.amount;
+  const amountSuffix = showClean ? " чист." : "";
+
+  const tabBadge = currentTab === "ALL" ? orderTabBadge(order) : null;
+  const showMoveBtn = currentTab === "AWAITING_LINK" || currentTab === "FAVORITES";
+
+  const timeRef = (() => {
+    if (currentTab === "BUYOUT" || currentTab === "DIRECT") return order.pendingAt ?? order.createdAt;
+    return order.createdAt;
+  })();
 
   return (
     <article className={exiting ? "twa-card-exit" : undefined} style={{
       background: C.card,
-      borderRadius: 18,
+      borderRadius: 16,
       overflow: "hidden",
       boxShadow: SHADOW.card,
       position: "relative",
     }}>
-      <div style={{
-        position: "absolute", inset: 0, borderRadius: 18, pointerEvents: "none",
-        background: `linear-gradient(180deg, ${C.cardTop} 0%, rgba(255,255,255,0) 28%)`,
-      }} />
-
-      {/* ─── Zone 1: Header ─── */}
-      <div
-        className={isHistory ? "twa-card-press" : undefined}
-        onClick={() => { if (isHistory) { haptic.impact("light"); setDetailsOpen(d => !d); } }}
-        style={{ padding: "14px 16px 12px", cursor: isHistory ? "pointer" : "default", position: "relative" }}
-      >
-        {/* Row 1: status pills + chips + user */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, minWidth: 0, alignItems: "center" }}>
-            <StatusPill status={order.status} />
-            <OrderNumberChip n={order.userOrderNumber} total={order.userOrderTotal} />
-            {order.isDirectOrder && <Chip color={C.blue}>ПРЯМОЙ</Chip>}
-            {order.reviewStatus === "PENDING"   && <Chip color={C.yellow} animate>📸 ОТЗЫВ</Chip>}
-            {order.reviewStatus === "SUBMITTED" && <Chip color={C.green}  animate>⭐ ОТЗЫВ</Chip>}
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+      {/* Header: platform badge + nick + star */}
+      <div style={{ padding: "12px 14px 0", display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
+            <span style={{
+              fontSize: 10, fontWeight: 800, color: "#fff",
+              background: platform === "tg" ? "#229ED9" : platform === "vk" ? "#0077FF" : C.elevated,
+              borderRadius: 4, padding: "2px 5px", flexShrink: 0,
+            }}>
+              {platform === "tg" ? "T" : platform === "vk" ? "V" : "—"}
+            </span>
             <span
               onClick={e => { e.stopPropagation(); haptic.impact("light"); openContact(order.user); }}
               style={{
-                fontSize: 13, fontWeight: 600, color: "#7ec5ff", cursor: "pointer",
-                whiteSpace: "nowrap",
+                fontSize: 14, fontWeight: 600, color: "#7ec5ff", cursor: "pointer",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
               }}
             >
-              {platform === "vk" ? "V" : platform === "tg" ? "T" : ""} {shortName}
+              {shortName}
             </span>
-            {isHistory && (
+            {tabBadge && (
               <span style={{
-                fontSize: 10, color: C.textTertiary, fontWeight: 500,
-                padding: "3px 8px", borderRadius: 999,
-                background: "rgba(255,255,255,0.06)",
+                fontSize: 10, fontWeight: 600, color: tabBadge.color,
+                background: `${tabBadge.color}1c`, padding: "2px 7px",
+                borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
               }}>
-                {detailsOpen ? "▲" : "▼"}
+                {tabBadge.label}
               </span>
             )}
           </div>
+          <button
+            className="twa-press-sm"
+            onClick={e => { e.stopPropagation(); haptic.impact("light"); onToggleFavorite(); }}
+            style={{
+              background: "transparent", border: "none", cursor: "pointer",
+              fontSize: 18, padding: "2px 4px", flexShrink: 0,
+              opacity: order.isFavorite ? 1 : 0.35,
+            }}
+          >
+            {order.isFavorite ? "★" : "☆"}
+          </button>
         </div>
 
-        {/* Row 2: time badges + amount */}
-        <OrderTimeline order={order} />
-
-        {/* Rejection reason inline preview */}
-        {!detailsOpen && order.status === "REJECTED" && order.rejectionReason && (
-          <div style={{
-            marginTop: 8, padding: "6px 10px",
-            background: `${C.red}14`, borderRadius: 10,
-            fontSize: 12, color: C.red,
-            display: "flex", gap: 6, overflow: "hidden",
-          }}>
-            <span style={{ flexShrink: 0 }}>💬</span>
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{order.rejectionReason}</span>
-          </div>
-        )}
+        {/* Time + amount row */}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 500, color: ageColor(timeRef), ...tabular }}>
+            ⏱ {fmtAge(timeRef)}
+          </span>
+          <span style={{ fontSize: 11, color: C.textTertiary }}>—</span>
+          <span style={{ fontSize: 17, fontWeight: 700, color: C.textPrimary, ...tabular }}>
+            {displayAmount.toLocaleString("ru-RU")}
+          </span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: C.accent }}>R${amountSuffix}</span>
+        </div>
       </div>
 
-      {/* ─── Zone 2: Body ─── */}
-      {(isActive || detailsOpen) && (
-        <div onClick={e => e.stopPropagation()} style={{ padding: "0 16px 14px" }}>
-          <div style={{ height: 1, background: C.hairline, marginBottom: 6 }} />
+      {/* Data rows */}
+      <div style={{ padding: "4px 14px 10px" }}>
+        {order.robloxUsername && (
+          <DataRow icon="🎮" copyText={order.robloxUsername}>
+            <span style={{ fontWeight: 600 }}>{order.robloxUsername}</span>
+          </DataRow>
+        )}
+        {order.gamepassUrl && (
+          <DataRow icon="🔗" copyText={order.gamepassUrl}>
+            <span style={{ color: C.blue, fontSize: 13 }}>{order.gamepassUrl.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}</span>
+          </DataRow>
+        )}
+        {!order.isDirectOrder && (
+          <DataRow icon="📦" copyText={order.wbCode}>
+            <span style={{ fontFamily: MONO, fontWeight: 700, color: C.accent, letterSpacing: 1.5, fontSize: 14 }}>
+              {order.wbCode}
+            </span>
+          </DataRow>
+        )}
 
-          {/* Key data for purchase — compact rows */}
-          {(order.robloxUsername || displayCreator) && (
-            <DataRow icon="🎮" copyText={order.robloxUsername ?? displayCreator ?? undefined}>
-              <span style={{ fontWeight: 600, fontSize: 16 }}>{order.robloxUsername ?? displayCreator}</span>
-            </DataRow>
-          )}
-
-          {passId && (
-            <DataRow icon="🎫" copyText={passId}>
-              <span style={{ fontFamily: MONO, fontWeight: 600, fontSize: 15, letterSpacing: 0.5 }}>{passId}</span>
-            </DataRow>
-          )}
-
-          {order.gamepassUrl ? (
-            <DataRow
-              icon="🔗"
-              copyText={order.gamepassUrl}
-              onOpen={() => window.open(order.gamepassUrl!, "_blank")}
-            >
-              <span style={{ color: C.blue, fontSize: 14 }}>{order.gamepassUrl.replace(/^https?:\/\/(www\.)?/, "").slice(0, 35)}</span>
-            </DataRow>
-          ) : order.status === "AWAITING_GAMEPASS" ? (
-            <DataRow icon="🔗">
-              <span style={{ color: C.textTertiary, fontStyle: "italic", fontSize: 13.5 }}>Ждём ссылку от пользователя</span>
-            </DataRow>
-          ) : null}
-
-          {!order.isDirectOrder && (
-            <DataRow icon="📦" copyText={order.wbCode}>
-              <span style={{ fontFamily: MONO, fontWeight: 700, color: C.accent, letterSpacing: 2, fontSize: 16 }}>
-                {order.wbCode}
-              </span>
-            </DataRow>
-          )}
-
-          {order.paymentDetails && (
-            <DataRow icon="💳" copyText={order.paymentDetails}>
-              <span style={{ fontSize: 14, color: "#e5e5ea" }}>{order.paymentDetails}</span>
-            </DataRow>
-          )}
-
-          {/* Expandable details */}
-          {(isActive || detailsOpen) && (
-            <>
-              {/* Notes editor — always visible for active */}
-              <div style={{ marginTop: 8 }}>
-                <NotesEditor order={order} onSave={onSaveNote} />
-              </div>
-
-              {/* Toggle for secondary info */}
-              <button
-                className="twa-press-sm"
-                onClick={e => { e.stopPropagation(); haptic.impact("light"); setDetailsOpen(d => !d); }}
-                style={{
-                  marginTop: 8, width: "100%", padding: "8px",
-                  background: "rgba(255,255,255,0.04)", border: "none", borderRadius: 10,
-                  color: C.textTertiary, fontSize: 12, fontWeight: 500, cursor: "pointer",
-                }}
-              >
-                {detailsOpen ? "▲ Скрыть подробности" : "▾ Подробнее"}
-              </button>
-
-              {detailsOpen && (
-                <div style={{ marginTop: 8 }}>
-                  {/* Full user info */}
-                  <Divider />
-                  <Row label="Пользователь">
-                    {(() => {
-                      const realName = order.user.name && order.user.name !== "VK User" ? order.user.name : null;
-                      const linkStyle = { color: "#7ec5ff", textDecoration: "none" as const, cursor: "pointer" as const };
-                      const handleTap = (e: React.MouseEvent) => { e.stopPropagation(); haptic.impact("light"); openContact(order.user); };
-                      if (order.user.username) {
-                        return (
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                              <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle, fontFamily: MONO }}>@{order.user.username}</span>
-                              <CopyBtn text={`@${order.user.username}`} />
-                            </div>
-                            <span style={{ fontSize: 12.5, color: C.textTertiary, ...tabular }}>
-                              {realName ? `${realName} · ` : ""}{order.user.tgId ? `TG · ${order.user.tgId}` : order.user.vkId ? `VK · ${order.user.vkId}` : ""}
-                            </span>
-                          </div>
-                        );
-                      }
-                      if (realName) {
-                        return (
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                              <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle }}>{realName}</span>
-                              <CopyBtn text={realName} />
-                            </div>
-                            <span style={{ fontSize: 12.5, color: C.textTertiary, ...tabular }}>
-                              {order.user.tgId ? `TG · ${order.user.tgId}` : order.user.vkId ? `VK · ${order.user.vkId}` : ""}
-                            </span>
-                          </div>
-                        );
-                      }
-                      if (order.user.tgId) {
-                        return (
-                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle, ...tabular }}>TG · {order.user.tgId}</span>
-                            <CopyBtn text={order.user.tgId} />
-                          </div>
-                        );
-                      }
-                      if (order.user.vkId) {
-                        return (
-                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <span onClick={handleTap} style={{ fontSize: 17, fontWeight: 600, ...linkStyle, ...tabular }}>vk.com/id{order.user.vkId}</span>
-                            <CopyBtn text={order.user.vkId} />
-                          </div>
-                        );
-                      }
-                      return <span style={{ fontSize: 14.5, color: C.textTertiary }}>—</span>;
-                    })()}
-                  </Row>
-
-                  {order.purchaseRate != null && (
-                    <>
-                      <Divider />
-                      <Row label="Себестоимость">
-                        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                          <span style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary, ...tabular }}>
-                            ${(order.amount / 1000 * order.purchaseRate).toFixed(2)}
-                          </span>
-                          <span style={{ fontSize: 12.5, color: C.textSecondary, ...tabular }}>по ${order.purchaseRate}/1K R$</span>
-                        </div>
-                      </Row>
-                    </>
-                  )}
-
-                  {order.rejectionReason && order.status === "REJECTED" && (
-                    <>
-                      <Divider />
-                      <Row label="Причина">
-                        <span style={{ fontSize: 15, color: C.red, lineHeight: 1.45 }}>{order.rejectionReason}</span>
-                      </Row>
-                    </>
-                  )}
-
-                  {order.reviewStatus != null && (() => {
-                    const bonus = order.reviewStatus === "SUBMITTED"
-                      ? bonusExpiryInfo(order.user.reviewBonusGrantedAt, order.user.balance) : null;
-                    return (
-                      <>
-                        <Divider />
-                        <Row label="Отзыв WB">
-                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                            {order.reviewStatus === "SUBMITTED" ? (
-                              <span style={{ color: C.green, fontSize: 15, fontWeight: 600 }}>⭐ Получен · +100&nbsp;R$ начислено</span>
-                            ) : (
-                              <span style={{ color: C.yellow, fontSize: 15 }}>📸 Ожидается от пользователя</span>
-                            )}
-                            {bonus && (
-                              <div style={{
-                                display: "flex", flexDirection: "column", gap: 2,
-                                padding: "10px 12px", borderRadius: 12,
-                                background: `${bonus.color}14`, border: `1px solid ${bonus.color}33`,
-                              }}>
-                                <span style={{ fontSize: 14, color: bonus.color, fontWeight: 600 }}>⏳ Сгорает через {bonus.daysLeft}&nbsp;{daysWord(bonus.daysLeft)}</span>
-                                <span style={{ fontSize: 12, color: C.textSecondary, ...tabular }}>до&nbsp;{bonus.expiryStr} · на счету {bonus.balance}&nbsp;R$</span>
-                              </div>
-                            )}
-                          </div>
-                        </Row>
-                      </>
-                    );
-                  })()}
-
-                  <Divider />
-                  <div style={{
-                    display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8,
-                    fontSize: 12, color: C.textTertiary, ...tabular, paddingTop: 10,
-                  }}>
-                    <span>#{shortId} · {fmtFull(order.createdAt)}</span>
-                    <span>Обновлён · {fmtFull(order.updatedAt)}</span>
-                  </div>
-
-                  <ContactButton user={order.user} />
-                </div>
-              )}
-            </>
-          )}
+        {/* Notes */}
+        <div style={{ marginTop: 6 }}>
+          <NotesEditor order={order} onSave={onSaveNote} />
         </div>
-      )}
+      </div>
 
-      {/* ─── Zone 3: Actions ─── */}
-      {isActive && (
-        <div onClick={e => e.stopPropagation()} style={{
-          borderTop: `1px solid ${C.hairline}`,
-          padding: "12px 16px 14px",
-          display: "flex", flexDirection: "column", gap: 10,
-          background: "rgba(0,0,0,0.12)",
+      {/* Rejection reason for ALL tab */}
+      {currentTab === "ALL" && order.status === "REJECTED" && order.rejectionReason && (
+        <div style={{
+          margin: "0 14px 10px", padding: "6px 10px",
+          background: `${C.red}14`, borderRadius: 8,
+          fontSize: 12, color: C.red,
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
         }}>
-          <ActionBar order={order} onRunAction={onRunAction} />
-          {order.gamepassUrl && (order.status === "PENDING" || order.status === "IN_PROGRESS") && (
-            <div style={{ display: "flex", gap: 8 }}>
-              <PurchaseBtn orderId={order.id} token={token} onDone={() => onPurchaseDone?.()} />
-              <PurchaseScriptBtn orderId={order.id} token={token} />
-            </div>
-          )}
+          {order.rejectionReason}
         </div>
       )}
+
+      {/* Move button for AWAITING_LINK / FAVORITES */}
+      {showMoveBtn && !moveOpen && (
+        <div style={{ padding: "0 14px 10px" }}>
+          <button className="twa-press-sm" onClick={e => { e.stopPropagation(); setMoveOpen(true); }}
+            style={{
+              width: "100%", padding: "9px", borderRadius: 10, border: `1px solid ${C.accent}44`,
+              background: "transparent", color: C.accent, fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+            }}>
+            Перевести в другой раздел
+          </button>
+        </div>
+      )}
+
+      {moveOpen && (
+        <MoveToModal
+          order={order}
+          token={token}
+          onDone={() => { setMoveOpen(false); onMoved(); }}
+          onClose={() => setMoveOpen(false)}
+        />
+      )}
+
+      {/* Action panel */}
+      <ActionPanel
+        order={order}
+        currentTab={currentTab}
+        token={token}
+        onRunAction={onRunAction}
+        onPurchaseDone={onPurchaseDone}
+      />
     </article>
   );
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   Search input — debounced, with clear button
-   ───────────────────────────────────────────────────────────────────────── */
+/* ───────────── Search ───────────── */
 function SearchBar({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [local, setLocal] = useState(value);
   useEffect(() => { setLocal(value); }, [value]);
@@ -1187,7 +675,6 @@ function SearchBar({ value, onChange }: { value: string; onChange: (v: string) =
             cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
             flexShrink: 0, lineHeight: 1,
           }}
-          title="Очистить"
         >
           ✕
         </button>
@@ -1196,20 +683,30 @@ function SearchBar({ value, onChange }: { value: string; onChange: (v: string) =
   );
 }
 
-/* shiftCounts — move one order between status buckets in the chip counts.
-   ALL stays constant (an order changing status doesn't change the grand total). */
-function shiftCounts(counts: Record<string, number>, from: string, to: string): Record<string, number> {
+/* ───────────── Counts helpers ───────────── */
+function shiftCounts(counts: Record<string, number>, fromTab: string, toTab: string): Record<string, number> {
   const next = { ...counts };
-  if (from in next) next[from] = Math.max(0, (next[from] ?? 0) - 1);
-  if (to in next)   next[to]   = (next[to]   ?? 0) + 1;
+  if (fromTab in next) next[fromTab] = Math.max(0, (next[fromTab] ?? 0) - 1);
+  if (toTab in next) next[toTab] = (next[toTab] ?? 0) + 1;
   return next;
 }
 
-function shiftSums(sums: Record<string, number>, from: string, to: string, amount: number): Record<string, number> {
+function shiftSums(sums: Record<string, number>, fromTab: string, toTab: string, amount: number): Record<string, number> {
   const next = { ...sums };
-  if (from in next) next[from] = Math.max(0, (next[from] ?? 0) - amount);
-  if (to in next)   next[to]   = (next[to]   ?? 0) + amount;
+  if (fromTab in next) next[fromTab] = Math.max(0, (next[fromTab] ?? 0) - amount);
+  if (toTab in next) next[toTab] = (next[toTab] ?? 0) + amount;
   return next;
+}
+
+function orderToTab(order: Order): FilterTab {
+  const cutoff = Date.now() - 40 * 3600_000;
+  const created = new Date(order.createdAt).getTime();
+  if (order.isFavorite) return "FAVORITES";
+  if (order.status === "ERROR") return "ERROR";
+  if (order.status === "AWAITING_GAMEPASS") return created > cutoff ? "NEW" : "AWAITING_LINK";
+  if (order.isDirectOrder && ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status)) return "DIRECT";
+  if (["PENDING", "IN_PROGRESS"].includes(order.status)) return "BUYOUT";
+  return "ALL";
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -1223,23 +720,21 @@ export default function OrdersScreen({
   initialQuery?: string;
   onInitialQueryConsumed?: () => void;
 }) {
-  const [filter,    setFilter]    = useState<FilterStatus>("ALL");
-  const [query,     setQuery]     = useState(initialQuery ?? "");
+  const [filter, setFilter] = useState<FilterTab>("ALL");
+  const [query, setQuery] = useState(initialQuery ?? "");
   useEffect(() => {
     if (initialQuery) onInitialQueryConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [data,        setData]        = useState<OrdersData | null>(null);
-  const [loading,     setLoading]     = useState(true);
+  const [data, setData] = useState<OrdersData | null>(null);
+  const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [page,        setPage]        = useState(1);
-  const [allOrders,   setAllOrders]   = useState<Order[]>([]);
-  const [exiting,     setExiting]     = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(1);
+  const [allOrders, setAllOrders] = useState<Order[]>([]);
+  const [exiting, setExiting] = useState<Set<string>>(new Set());
   const reqIdRef = useRef(0);
 
-  // Deferred-enrichment cache: id → signals. Applied to every fetched page so
-  // the chips survive filter switches without re-requesting.
-  const enrichCache  = useRef<Map<string, EnrichValue>>(new Map());
+  const enrichCache = useRef<Map<string, EnrichValue>>(new Map());
   const requestedRef = useRef<Set<string>>(new Set());
 
   const applyCache = useCallback((list: Order[]): Order[] =>
@@ -1248,15 +743,13 @@ export default function OrdersScreen({
       return e ? { ...o, ...e } : o;
     }), []);
 
-  const fetchOrders = useCallback(async (f: FilterStatus, q: string, p: number, append = false) => {
+  const fetchOrders = useCallback(async (f: FilterTab, q: string, p: number, append = false) => {
     if (!append) setLoading(true); else setLoadingMore(true);
     const reqId = ++reqIdRef.current;
     try {
-      const params = new URLSearchParams({ page: String(p), limit: "20" });
-      if (f === "BUYOUT")   params.set("status", "PENDING,IN_PROGRESS");
-      else if (f !== "ALL") params.set("status", f);
-      if (q)                params.set("q", q);
-      if (append)      params.set("skipCounts", "1");
+      const params = new URLSearchParams({ page: String(p), limit: "20", status: f });
+      if (q) params.set("q", q);
+      if (append) params.set("skipCounts", "1");
       params.set("lite", "1");
       const res = await fetch(`/api/twa/orders?${params}`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok || reqId !== reqIdRef.current) return;
@@ -1278,7 +771,6 @@ export default function OrdersScreen({
     fetchOrders(filter, query, 1, false);
   }, [filter, query, fetchOrders]);
 
-  // Deferred enrichment — runs after the list paints; fills VIP / N-Total / review.
   useEffect(() => {
     const need = allOrders
       .filter(o => !enrichCache.current.has(o.id) && !requestedRef.current.has(o.id))
@@ -1296,7 +788,7 @@ export default function OrdersScreen({
         const map = d.enrich as Record<string, EnrichValue>;
         for (const [id, v] of Object.entries(map)) enrichCache.current.set(id, v);
         setAllOrders(prev => prev.map(o => (map[o.id] ? { ...o, ...map[o.id] } : o)));
-      } catch { /* enrichment is best-effort */ }
+      } catch {}
     })();
     return () => { cancelled = true; };
   }, [allOrders, token]);
@@ -1308,7 +800,6 @@ export default function OrdersScreen({
     fetchOrders(filter, query, next, true);
   }, [data, page, loadingMore, loading, filter, query, fetchOrders]);
 
-  // Infinite scroll — observe a sentinel near the list bottom.
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const el = sentinelRef.current;
@@ -1322,42 +813,41 @@ export default function OrdersScreen({
     return () => io.disconnect();
   }, [data, page, loadingMore, loading, loadMore]);
 
-  /* Optimistic action: mutate locally first (status + counts + maybe exit),
-     POST in the background, roll back on failure. Never refetches the whole
-     list, so scroll position and loaded pages are preserved. */
   const runAction = useCallback(async (order: Order, action: string, reason?: string): Promise<ActionResult> => {
-    const prevStatus = order.status;
-    const newStatus: OrderStatus | null =
-      action === "take-work" ? "IN_PROGRESS" :
-      action === "untake"    ? "PENDING"     :
-      action === "complete"  ? "COMPLETED"   :
-      action === "reject"    ? "REJECTED"    : null;
-    if (!newStatus) return { ok: false, error: "Invalid action" };
+    const fromTab = orderToTab(order);
+    let toTab: FilterTab | null = null;
+    let newStatus: OrderStatus | null = null;
+
+    if (action === "complete") { newStatus = "COMPLETED"; toTab = "ALL"; }
+    else if (action === "reject") { newStatus = "REJECTED"; toTab = "ALL"; }
+    else if (action === "set-error") { newStatus = "ERROR"; toTab = "ERROR"; }
+    else return { ok: false, error: "Invalid action" };
 
     haptic.impact(action === "complete" ? "medium" : "light");
 
-    const BUYOUT_STATUSES: OrderStatus[] = ["PENDING", "IN_PROGRESS"];
-    const leaves = filter !== "ALL" && (
-      filter === "BUYOUT" ? !BUYOUT_STATUSES.includes(newStatus) : filter !== newStatus
-    );
+    const leaves = filter !== "ALL" && (toTab === "ALL" || toTab !== filter);
 
     setAllOrders(prev => prev.map(o => o.id === order.id
-      ? { ...o, status: newStatus, rejectionReason: action === "reject" ? (reason || "не указана") : o.rejectionReason }
+      ? { ...o, status: newStatus!, rejectionReason: action === "reject" ? (reason || "не указана") : o.rejectionReason }
       : o));
-    setData(prev => prev ? {
-      ...prev,
-      counts: shiftCounts(prev.counts, prevStatus, newStatus),
-      sums: prev.sums ? shiftSums(prev.sums, prevStatus, newStatus, order.amount) : prev.sums,
-    } : prev);
+    if (data?.counts && toTab) {
+      setData(prev => prev ? {
+        ...prev,
+        counts: shiftCounts(prev.counts, fromTab, toTab!),
+        sums: prev.sums ? shiftSums(prev.sums, fromTab, toTab!, order.amount) : prev.sums,
+      } : prev);
+    }
     if (leaves) setExiting(prev => new Set(prev).add(order.id));
 
     const rollback = () => {
-      setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: prevStatus } : o));
-      setData(prev => prev ? {
-        ...prev,
-        counts: shiftCounts(prev.counts, newStatus, prevStatus),
-        sums: prev.sums ? shiftSums(prev.sums, newStatus, prevStatus, order.amount) : prev.sums,
-      } : prev);
+      setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: order.status } : o));
+      if (data?.counts && toTab) {
+        setData(prev => prev ? {
+          ...prev,
+          counts: shiftCounts(prev.counts, toTab!, fromTab),
+          sums: prev.sums ? shiftSums(prev.sums, toTab!, fromTab, order.amount) : prev.sums,
+        } : prev);
+      }
       setExiting(prev => { const n = new Set(prev); n.delete(order.id); return n; });
     };
 
@@ -1379,22 +869,15 @@ export default function OrdersScreen({
           setData(prev => prev ? { ...prev, total: Math.max(0, prev.total - 1) } : prev);
         }, 260);
       }
-      toast(
-        action === "complete"  ? "Заказ выкуплен ✓" :
-        action === "take-work" ? "Взято в работу"   :
-        action === "untake"    ? "Возвращён в «Новые»" :
-                                 "Заказ отклонён",
-        action === "reject" ? "default" : "success",
-      );
+      const msg = action === "complete" ? "Выкуплено ✓" : action === "set-error" ? "→ Ошибка" : "Отклонён";
+      toast(msg, action === "reject" ? "default" : "success");
       return { ok: true };
     } catch {
       rollback(); haptic.notify("error");
       return { ok: false, error: "Ошибка сети" };
     }
-  }, [token, filter, onActionDone]);
+  }, [token, filter, data, onActionDone]);
 
-  /* Admin note save — optimistic patch + POST, rollback on failure. Status/counts
-     are untouched, so this never reorders or drops the card. */
   const saveNote = useCallback(async (orderId: string, note: string): Promise<ActionResult> => {
     let prevNote: string | null = null;
     setAllOrders(prev => prev.map(o => {
@@ -1422,20 +905,90 @@ export default function OrdersScreen({
     }
   }, [token]);
 
-  const urgentCount = data ? URGENT_STATUSES.reduce((sum, s) => sum + (data.counts[s] ?? 0), 0) : 0;
+  const toggleFavorite = useCallback(async (order: Order) => {
+    haptic.impact("medium");
+    const wasFav = order.isFavorite;
+    setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, isFavorite: !wasFav } : o));
+    setData(prev => {
+      if (!prev?.counts) return prev;
+      const next = { ...prev.counts };
+      if (wasFav) {
+        next["FAVORITES"] = Math.max(0, (next["FAVORITES"] ?? 0) - 1);
+      } else {
+        next["FAVORITES"] = (next["FAVORITES"] ?? 0) + 1;
+        const fromTab = orderToTab(order);
+        if (fromTab !== "ALL") next[fromTab] = Math.max(0, (next[fromTab] ?? 0) - 1);
+      }
+      return { ...prev, counts: next };
+    });
+
+    if (filter !== "ALL" && !wasFav) {
+      setExiting(prev => new Set(prev).add(order.id));
+      window.setTimeout(() => {
+        setAllOrders(prev => prev.filter(o => o.id !== order.id));
+        setExiting(prev => { const n = new Set(prev); n.delete(order.id); return n; });
+        setData(prev => prev ? { ...prev, total: Math.max(0, prev.total - 1) } : prev);
+      }, 260);
+    }
+
+    try {
+      await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "toggle-favorite", orderId: order.id }),
+      });
+      cachedCountsInvalidate();
+    } catch {
+      setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, isFavorite: wasFav } : o));
+    }
+  }, [token, filter]);
+
+  function cachedCountsInvalidate() {
+    // force refresh on next tab switch
+  }
+
+  const handlePurchaseDone = useCallback((order: Order) => {
+    const fromTab = orderToTab(order);
+    setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: "COMPLETED" as any } : o));
+    setData(prev => prev ? {
+      ...prev,
+      counts: shiftCounts(prev.counts, fromTab, "ALL"),
+      sums: prev.sums ? shiftSums(prev.sums, fromTab, "ALL", order.amount) : prev.sums,
+    } : prev);
+    if (filter !== "ALL") {
+      setExiting(prev => new Set(prev).add(order.id));
+      window.setTimeout(() => {
+        setAllOrders(prev => prev.filter(o => o.id !== order.id));
+        setExiting(prev => { const n = new Set(prev); n.delete(order.id); return n; });
+        setData(prev => prev ? { ...prev, total: Math.max(0, prev.total - 1) } : prev);
+      }, 260);
+    }
+    onActionDone?.();
+  }, [filter, onActionDone]);
+
+  const handleMoved = useCallback((order: Order) => {
+    if (filter !== "ALL") {
+      setExiting(prev => new Set(prev).add(order.id));
+      window.setTimeout(() => {
+        setAllOrders(prev => prev.filter(o => o.id !== order.id));
+        setExiting(prev => { const n = new Set(prev); n.delete(order.id); return n; });
+        setData(prev => prev ? { ...prev, total: Math.max(0, prev.total - 1) } : prev);
+      }, 260);
+    }
+    onActionDone?.();
+  }, [filter, onActionDone]);
 
   const summaryText = useMemo(() => {
     if (!data) return "";
     if (query) return `По запросу «${query}» · ${data.total}`;
-    if (filter === "ALL") return `Всего · ${data.total}`;
-    if (filter === "BUYOUT") return `К выкупу · ${data.total}`;
-    return `Найдено · ${data.total}`;
+    const meta = TAB_META[filter];
+    return `${meta.label} · ${data.total}`;
   }, [data, query, filter]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: C.bg }}>
 
-      {/* Sticky top: search + chips */}
+      {/* Sticky: search + tab chips */}
       <div style={{
         padding: "10px 16px 8px",
         background: C.bg,
@@ -1453,11 +1006,10 @@ export default function OrdersScreen({
           maskImage: "linear-gradient(90deg, #000 90%, transparent)",
         }}>
           {FILTERS.map(f => {
-            const count    = f.id === "BUYOUT"
-              ? (data?.counts["PENDING"] ?? 0) + (data?.counts["IN_PROGRESS"] ?? 0)
-              : data?.counts[f.id] ?? 0;
+            const meta = TAB_META[f.id];
+            const count = data?.counts[f.id] ?? 0;
             const isActive = filter === f.id;
-            const isUrgent = (f.id === "BUYOUT" || URGENT_STATUSES.includes(f.id as OrderStatus)) && count > 0;
+            const isUrgent = ["BUYOUT", "DIRECT", "ERROR"].includes(f.id) && count > 0;
             return (
               <button
                 key={f.id}
@@ -1467,13 +1019,13 @@ export default function OrdersScreen({
                   flexShrink: 0, padding: "6.5px 13px", borderRadius: 999,
                   border: "none",
                   background: isActive ? C.accent : "rgba(118,118,128,0.22)",
-                  color:      isActive ? "#fff"  : C.textPrimary,
+                  color: isActive ? "#fff" : C.textPrimary,
                   fontSize: 13, fontWeight: isActive ? 600 : 500,
                   cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
                   letterSpacing: 0.1,
                 }}
               >
-                {f.label}
+                {meta.label}
                 {count > 0 && (
                   <span style={{
                     background: isActive ? "rgba(255,255,255,0.28)" : isUrgent ? C.red : "rgba(255,255,255,0.18)",
@@ -1492,7 +1044,7 @@ export default function OrdersScreen({
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
-        {/* Mini dashboard */}
+        {/* Mini dashboard for ALL tab */}
         {data?.sums && !query && filter === "ALL" && (
           <div style={{ paddingTop: 10 }}>
             <MiniDashboard counts={data.counts} sums={data.sums} onTap={setFilter} />
@@ -1507,11 +1059,6 @@ export default function OrdersScreen({
           <div className="twa-fade-in" style={{ padding: "12px 16px 32px", display: "flex", flexDirection: "column", gap: 11 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 2px" }}>
               <span style={{ fontSize: 12, color: C.textSecondary, letterSpacing: 0.1 }}>{summaryText}</span>
-              {urgentCount > 0 && filter === "ALL" && !query && (
-                <span style={{ fontSize: 12, color: C.red, fontWeight: 600 }}>
-                  ⚡ {urgentCount} требуют обработки
-                </span>
-              )}
             </div>
 
             {allOrders.map(order => (
@@ -1519,28 +1066,16 @@ export default function OrdersScreen({
                 key={order.id}
                 order={order}
                 token={token}
+                currentTab={filter}
                 exiting={exiting.has(order.id)}
                 onRunAction={(action, reason) => runAction(order, action, reason)}
                 onSaveNote={(note) => saveNote(order.id, note)}
-                onPurchaseDone={() => {
-                  setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: "COMPLETED" as any } : o));
-                  setData(prev => prev ? {
-                    ...prev,
-                    counts: shiftCounts(prev.counts, order.status, "COMPLETED"),
-                    sums: prev.sums ? shiftSums(prev.sums, order.status, "COMPLETED", order.amount) : prev.sums,
-                  } : prev);
-                  setExiting(prev => new Set(prev).add(order.id));
-                  window.setTimeout(() => {
-                    setAllOrders(prev => prev.filter(o => o.id !== order.id));
-                    setExiting(prev => { const n = new Set(prev); n.delete(order.id); return n; });
-                    setData(prev => prev ? { ...prev, total: Math.max(0, prev.total - 1) } : prev);
-                  }, 260);
-                  onActionDone?.();
-                }}
+                onPurchaseDone={() => handlePurchaseDone(order)}
+                onToggleFavorite={() => toggleFavorite(order)}
+                onMoved={() => handleMoved(order)}
               />
             ))}
 
-            {/* Infinite-scroll sentinel + status footer */}
             {data && page < data.pages && (
               <div ref={sentinelRef} style={{ minHeight: 1 }}>
                 <button
@@ -1568,34 +1103,35 @@ export default function OrdersScreen({
   );
 }
 
-/* ───────────── MiniDashboard — compact robux stats above the list ───────────── */
+/* ───────────── MiniDashboard ───────────── */
 function fmtRobux(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 10_000)    return `${(n / 1_000).toFixed(0)}K`;
-  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`;
+  if (n >= 10_000) return `${(n / 1_000).toFixed(0)}K`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toLocaleString("ru-RU");
 }
 
-const DASHBOARD_GROUPS: { key: string; label: string; statuses: string[]; filter: FilterStatus; color: string; icon: string }[] = [
-  { key: "buyout",  label: "К выкупу",    statuses: ["PENDING", "IN_PROGRESS"],               filter: "BUYOUT",           color: C.green,  icon: "R$" },
-  { key: "link",    label: "Ждут ссылку", statuses: ["AWAITING_GAMEPASS"],                    filter: "AWAITING_GAMEPASS", color: C.yellow, icon: "🔗" },
-  { key: "payment", label: "Ждут оплату", statuses: ["AWAITING_PAYMENT", "PAYMENT_PENDING"],  filter: "AWAITING_PAYMENT",  color: C.orange, icon: "💳" },
+const DASHBOARD_GROUPS: { key: string; label: string; sumKey: string; filter: FilterTab; color: string; showClean: boolean }[] = [
+  { key: "buyout", label: "К выкупу", sumKey: "BUYOUT", filter: "BUYOUT", color: C.green, showClean: false },
+  { key: "link", label: "Ждут ссылку", sumKey: "AWAITING_LINK", filter: "AWAITING_LINK", color: C.yellow, showClean: true },
 ];
 
 function MiniDashboard({ counts, sums, onTap }: {
   counts: Record<string, number>;
   sums: Record<string, number>;
-  onTap: (filter: FilterStatus) => void;
+  onTap: (filter: FilterTab) => void;
 }) {
   return (
-    <div style={{
-      display: "flex", gap: 8,
-      padding: "0 16px 6px",
-    }}>
+    <div style={{ display: "flex", gap: 8, padding: "0 16px 6px" }}>
       {DASHBOARD_GROUPS.map(g => {
-        const count = g.statuses.reduce((s, st) => s + (counts[st] ?? 0), 0);
-        const robux = g.statuses.reduce((s, st) => s + (sums[st] ?? 0), 0);
+        const count = counts[g.filter] ?? 0;
+        const dirtyRobux = sums[g.sumKey] ?? 0;
         if (count === 0) return null;
+
+        const cleanRobux = Math.ceil(dirtyRobux * 0.7);
+        const primary = g.showClean ? cleanRobux : dirtyRobux;
+        const secondary = g.showClean ? dirtyRobux : cleanRobux;
+
         return (
           <Pressable
             key={g.key}
@@ -1624,30 +1160,24 @@ function MiniDashboard({ counts, sums, onTap }: {
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
               position: "relative",
             }}>
-              {g.icon} {g.label}
+              {g.label}
             </div>
             <div style={{
               fontSize: 18, fontWeight: 700, color: C.textPrimary,
               letterSpacing: -0.5, ...tabular, lineHeight: 1.1,
               position: "relative",
             }}>
-              {fmtRobux(robux)}
+              {fmtRobux(primary)}
               <span style={{ fontSize: 11, fontWeight: 500, color: C.textSecondary, marginLeft: 2 }}>R$</span>
               <span style={{ fontSize: 11, fontWeight: 500, color: C.textTertiary, marginLeft: 4 }}>
-                ({fmtRobux(Math.ceil(robux / 0.7))})
+                ({fmtRobux(secondary)})
               </span>
             </div>
             <div style={{
               fontSize: 11, color: C.textTertiary, ...tabular,
               position: "relative",
-              display: "flex", alignItems: "center", gap: 6,
             }}>
-              <span>{count} {count === 1 ? "заказ" : count < 5 ? "заказа" : "заказов"}</span>
-              {g.key === "link" && (sums["STALE_AWAITING"] ?? 0) > 0 && (
-                <span style={{ color: C.orange, fontWeight: 600, fontSize: 10 }}>
-                  ⚠️ {sums["STALE_AWAITING"]} давно
-                </span>
-              )}
+              {count} {count === 1 ? "заказ" : count < 5 ? "заказа" : "заказов"}
             </div>
           </Pressable>
         );
@@ -1656,28 +1186,26 @@ function MiniDashboard({ counts, sums, onTap }: {
   );
 }
 
-function EmptyState({ filter, query }: { filter: FilterStatus; query: string }) {
+function EmptyState({ filter, query }: { filter: FilterTab; query: string }) {
   if (query) {
     return (
       <div style={{ padding: 48, textAlign: "center", color: C.textSecondary }}>
         <div style={{ fontSize: 36, marginBottom: 10 }}>🔎</div>
         <div style={{ fontSize: 14, marginBottom: 4 }}>Ничего не нашлось</div>
         <div style={{ fontSize: 12, color: C.textTertiary }}>
-          Попробуй ник Roblox, @username, WB-код или TG/VK ID
+          Попробуй ник Roblox, @username, WB-код или ID
         </div>
       </div>
     );
   }
-  const labels: Record<FilterStatus, string> = {
-    ALL:               "Заказов пока нет",
-    BUYOUT:            "Нет заказов к выкупу",
-    AWAITING_PAYMENT:  "Нет ожидающих реквизиты",
-    PAYMENT_PENDING:   "Нет ожидающих оплату",
-    PENDING:           "Нет новых заказов",
-    IN_PROGRESS:       "Нет заказов в работе",
-    AWAITING_GAMEPASS: "Нет ожидающих ссылку",
-    COMPLETED:         "Нет завершённых заказов",
-    REJECTED:          "Нет отклонённых заказов",
+  const labels: Record<FilterTab, string> = {
+    ALL: "Заказов пока нет",
+    BUYOUT: "Нет заказов к выкупу",
+    DIRECT: "Нет прямых заказов",
+    NEW: "Нет новых заказов",
+    ERROR: "Нет ошибок",
+    AWAITING_LINK: "Все оформили заказы",
+    FAVORITES: "Нет избранных",
   };
   return (
     <div style={{ padding: 48, textAlign: "center", color: C.textSecondary }}>
@@ -1690,9 +1218,9 @@ function EmptyState({ filter, query }: { filter: FilterStatus; query: string }) 
 function Skeleton() {
   return (
     <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 11 }}>
-      {[120, 100, 120, 100].map((h, i) => (
+      {[100, 100, 100, 100].map((h, i) => (
         <div key={i} style={{
-          background: C.card, borderRadius: 18, height: h,
+          background: C.card, borderRadius: 16, height: h,
           animation: "pulse 1.5s ease-in-out infinite",
           boxShadow: SHADOW.card,
         }} />

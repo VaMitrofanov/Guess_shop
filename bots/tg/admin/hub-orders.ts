@@ -87,7 +87,7 @@ export async function showOrdersHub(ctx: Context): Promise<void> {
 
 export async function showActiveOrders(ctx: Context): Promise<void> {
   const orders = await (db as any).wbOrder.findMany({
-    where: { status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] } },
+    where: { status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"] } },
     include: { user: true },
     orderBy: { createdAt: "asc" },
     take: 15,
@@ -446,7 +446,7 @@ export async function showRejectedOrders(ctx: Context): Promise<void> {
 
 export async function showBatchView(ctx: Context): Promise<void> {
   const pending = await (db as any).wbOrder.findMany({
-    where: { status: { in: ["PENDING", "IN_PROGRESS"] } },
+    where: { status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
     orderBy: { createdAt: "asc" },
   });
 
@@ -483,7 +483,7 @@ export async function confirmBatchFulfill(
   const adminId = String(ctx.from!.id);
   try {
   const orders = await (db as any).wbOrder.findMany({
-    where: { status: { in: ["PENDING", "IN_PROGRESS"] } },
+    where: { status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
     include: { user: true },
   });
 

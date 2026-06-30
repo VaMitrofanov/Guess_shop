@@ -385,7 +385,7 @@ export default function WBInstructionV2({
                 <span className="wbi-tip g caret" style={{ left: "26%", top: "17%", fontSize: "clamp(8px,2.1cqw,12px)" }}>ТВОЯ ЦЕНА ↓</span>
                 {/* Managed pricing — highlight it must be OFF */}
                 <span className="wbi-box" style={{ left: "3.5%", top: "42%", width: "93%", height: "9%", borderColor: "#ff4444" }} />
-                <span className="wbi-tip caret" style={{ left: "72%", top: "44%", fontSize: "clamp(8px,2.1cqw,12px)", color: "#ff4444", fontWeight: 700 }}>⚠️ ОТКЛЮЧЁН ✓</span>
+                <span className="wbi-tip r caret" style={{ left: "72%", top: "44%", fontSize: "clamp(8px,2.1cqw,12px)" }}>⚠️ ОТКЛЮЧЁН ✓</span>
                 {/* Save Changes */}
                 <span className="wbi-box g" style={{ left: "3.5%", top: "85%", width: "93%", height: "13%" }} />
                 <span className="wbi-tip g caret" style={{ left: "50%", top: "81%" }}>НАЖМИ — СОХРАНИТЬ</span>
@@ -679,8 +679,10 @@ const CSS = `
 .wbi-tip{position:absolute;transform:translate(-50%,-50%);z-index:3;pointer-events:none;line-height:1;font-weight:800;letter-spacing:.4px;white-space:nowrap;font-size:clamp(10px,2.7cqw,15px);padding:.42em .62em;border-radius:7px;box-shadow:0 3px 10px rgba(0,0,0,.35)}
 .wbi-tip.g{background:#00c277;color:#06210f}
 .wbi-tip.y{background:#f2c14e;color:#241a02}
+.wbi-tip.r{background:#ff4444;color:#fff}
 .wbi-tip.caret{font-size:clamp(9px,2.4cqw,14px)}
 .wbi-tip.caret::after{content:"";position:absolute;left:50%;bottom:-7px;transform:translateX(-50%);border:5px solid transparent;border-top-color:#00c277;border-bottom:0}
+.wbi-tip.r.caret::after{border-top-color:#ff4444}
 .wbi-price6{position:absolute;left:13%;top:65.7%;transform:translateY(-50%);z-index:2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-weight:500;font-size:4.7cqw;line-height:1;color:#f1f1f3;white-space:nowrap;letter-spacing:.3px}
 /* ── Step-7 verification gate + nick search ── */
 .wbi-checks{display:flex;flex-direction:column;gap:10px;margin-top:14px}

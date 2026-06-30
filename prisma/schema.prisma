@@ -104,6 +104,7 @@ enum WbOrderStatus {
   IN_PROGRESS
   COMPLETED
   REJECTED
+  ERROR
 }
 
 enum DirectIntentStatus {
@@ -144,6 +145,7 @@ model WbOrder {
   pendingAt       DateTime?
   takenAt         DateTime?
   remindersSent   Int           @default(0)
+  isFavorite      Boolean       @default(false)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
@@ -155,6 +157,8 @@ model WbOrder {
   @@index([robloxUsername])
   // Per-user history (BossRobux + analytics).
   @@index([userId, createdAt(sort: Desc)])
+  // Favorites filter — fast lookup of starred orders.
+  @@index([isFavorite, createdAt(sort: Desc)])
 }
 
 model FAQ {

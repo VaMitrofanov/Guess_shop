@@ -3,47 +3,65 @@ import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
 import { notifyOrderCompleted, notifyOrderRejected } from "@/lib/twa-notify";
 
-const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED"] as const;
+const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
+type FilterTab = "ALL" | "BUYOUT" | "DIRECT" | "NEW" | "ERROR" | "AWAITING_LINK" | "FAVORITES";
+
+const NEW_CUTOFF_HOURS = 40;
 
 let cachedCounts: { data: Record<string, number>; sums: Record<string, number>; ts: number } | null = null;
 const COUNT_CACHE_TTL = 30_000;
+
+function buildTabWhere(tab: FilterTab): any {
+  const cutoff = new Date(Date.now() - NEW_CUTOFF_HOURS * 3600_000);
+  switch (tab) {
+    case "ALL":
+      return {};
+    case "BUYOUT":
+      return { status: { in: ["PENDING", "IN_PROGRESS"] }, isDirectOrder: false, isFavorite: false };
+    case "DIRECT":
+      return { isDirectOrder: true, status: { in: ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING", "ERROR"] }, isFavorite: false };
+    case "NEW":
+      return { status: "AWAITING_GAMEPASS", createdAt: { gt: cutoff }, isFavorite: false };
+    case "ERROR":
+      return { status: "ERROR", isFavorite: false };
+    case "AWAITING_LINK":
+      return { status: "AWAITING_GAMEPASS", createdAt: { lte: cutoff }, isFavorite: false };
+    case "FAVORITES":
+      return { isFavorite: true };
+    default:
+      return {};
+  }
+}
+
+function sortForTab(tab: FilterTab): "asc" | "desc" {
+  if (tab === "BUYOUT" || tab === "DIRECT" || tab === "ERROR" || tab === "AWAITING_LINK") return "asc";
+  return "desc";
+}
 
 export async function GET(req: NextRequest) {
   if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = req.nextUrl;
-  const status      = searchParams.get("status") as OrderStatus | "ALL" | null;
+  const tab         = (searchParams.get("status") ?? "ALL") as FilterTab | OrderStatus;
   const page        = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
   const limit       = Math.min(50, Math.max(5, parseInt(searchParams.get("limit") ?? "20", 10)));
   const skip        = (page - 1) * limit;
   const qRaw        = (searchParams.get("q") ?? "").trim();
-  // Treat very short queries as no-op so we don't return half-the-table by accident
   const q           = qRaw.length >= 2 ? qRaw : "";
-  // Page 2+ (load-more) re-uses the prior page's counts so we save 6 COUNTs per request.
   const skipCounts  = searchParams.get("skipCounts") === "1";
   const lite        = searchParams.get("lite") === "1";
 
-  const statusList = status && status !== "ALL"
-    ? status.split(",").filter(s => VALID_STATUSES.includes(s as OrderStatus)) as OrderStatus[]
-    : [];
-  const statusWhere = statusList.length === 1
-    ? { status: statusList[0] }
-    : statusList.length > 1
-    ? { status: { in: statusList } }
-    : {};
+  const isVirtualTab = ["ALL", "BUYOUT", "DIRECT", "NEW", "ERROR", "AWAITING_LINK", "FAVORITES"].includes(tab);
+  const tabWhere = isVirtualTab
+    ? buildTabWhere(tab as FilterTab)
+    : (VALID_STATUSES.includes(tab as any) ? { status: tab } : {});
+  const sortDir = isVirtualTab ? sortForTab(tab as FilterTab) : "desc";
 
-  // Build a multi-field search that mirrors how managers describe orders verbally:
-  // Roblox nickname, gamepass URL/ID, WB code, TG/VK display name or numeric ID, or
-  // the short order-ID suffix shown in admin cards. Case-insensitive contains.
   let searchWhere: any = {};
   if (q) {
     const qClean = q.replace(/^@/, "");
     const qDigits = q.replace(/\D/g, "");
-    // Treat the query as "numeric ID" only when it's actually a numeric string
-    // (≥4 digits AND ≥80 % digits). Otherwise a WB code like "4YNF7HH" leaks
-    // its two stray digits "47" into tgId/vkId/URL `contains` and matches
-    // arbitrary unrelated orders.
     const isNumericId = qDigits.length >= 4 && qDigits.length / q.length >= 0.8;
     const orClauses: any[] = [
       { gamepassUrl:    { contains: q,           mode: "insensitive" } },
@@ -63,16 +81,13 @@ export async function GET(req: NextRequest) {
 
   const notTest = { isTest: false };
   const where = q
-    ? { AND: [notTest, statusWhere, searchWhere] }
-    : { ...notTest, ...statusWhere };
+    ? { AND: [notTest, tabWhere, searchWhere] }
+    : { ...notTest, ...tabWhere };
 
-  // ── Phase 1: orders + combined counts in ONE parallel batch ──────────────
-  // Previous: 1 findMany + 1 COUNT(total) + 6 COUNT(per status) = 8 queries
-  // through a max:1 pool → all sequential. Now: 2 queries in true parallel.
   const take = skipCounts ? limit + 1 : limit;
   const ordersPromise = (prisma as any).wbOrder.findMany({
     where,
-    orderBy: { createdAt: "desc" },
+    orderBy: { createdAt: sortDir },
     skip,
     take,
     include: {
@@ -88,59 +103,36 @@ export async function GET(req: NextRequest) {
     : (async () => {
         if (!q) {
           if (cachedCounts && Date.now() - cachedCounts.ts < COUNT_CACHE_TTL) {
-            const { data: counts, sums } = cachedCounts;
-            const total = statusList.length > 0 ? statusList.reduce((s, st) => s + (counts[st] ?? 0), 0) : counts["ALL"];
-            return { total, counts, sums };
+            return { total: tabTotal(tab, cachedCounts.data), counts: cachedCounts.data, sums: cachedCounts.sums };
           }
           const rows: any[] = await (prisma as any).$queryRawUnsafe(`
             SELECT
               COUNT(*)::int AS "ALL",
-              COUNT(*) FILTER (WHERE status = 'AWAITING_PAYMENT')::int AS "AWAITING_PAYMENT",
-              COUNT(*) FILTER (WHERE status = 'PAYMENT_PENDING')::int AS "PAYMENT_PENDING",
-              COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS')::int AS "AWAITING_GAMEPASS",
-              COUNT(*) FILTER (WHERE status = 'PENDING')::int AS "PENDING",
-              COUNT(*) FILTER (WHERE status = 'IN_PROGRESS')::int AS "IN_PROGRESS",
-              COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS "COMPLETED",
-              COUNT(*) FILTER (WHERE status = 'REJECTED')::int AS "REJECTED",
-              COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_PAYMENT'),  0)::int AS "SUM_AWAITING_PAYMENT",
-              COALESCE(SUM(amount) FILTER (WHERE status = 'PAYMENT_PENDING'),   0)::int AS "SUM_PAYMENT_PENDING",
-              COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS'), 0)::int AS "SUM_AWAITING_GAMEPASS",
-              COALESCE(SUM(amount) FILTER (WHERE status = 'PENDING'),           0)::int AS "SUM_PENDING",
-              COALESCE(SUM(amount) FILTER (WHERE status = 'IN_PROGRESS'),       0)::int AS "SUM_IN_PROGRESS",
-              COALESCE(SUM(amount) FILTER (WHERE status = 'COMPLETED'),         0)::int AS "SUM_COMPLETED",
-              COALESCE(SUM(amount) FILTER (WHERE status = 'REJECTED'),          0)::int AS "SUM_REJECTED",
-              COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" < NOW() - INTERVAL '3 hours')::int AS "STALE_AWAITING"
+              COUNT(*) FILTER (WHERE status IN ('PENDING','IN_PROGRESS') AND "isDirectOrder" = false AND "isFavorite" = false)::int AS "BUYOUT",
+              COUNT(*) FILTER (WHERE "isDirectOrder" = true AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false)::int AS "DIRECT",
+              COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "NEW",
+              COUNT(*) FILTER (WHERE status = 'ERROR' AND "isFavorite" = false)::int AS "ERROR",
+              COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "AWAITING_LINK",
+              COUNT(*) FILTER (WHERE "isFavorite" = true)::int AS "FAVORITES",
+              COALESCE(SUM(amount) FILTER (WHERE status IN ('PENDING','IN_PROGRESS') AND "isDirectOrder" = false AND "isFavorite" = false), 0)::int AS "SUM_BUYOUT",
+              COALESCE(SUM(amount) FILTER (WHERE "isDirectOrder" = true AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_DIRECT",
+              COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "isFavorite" = false), 0)::int AS "SUM_AWAITING_LINK"
             FROM "WbOrder"
             WHERE "isTest" = false
           `);
           const r = rows[0] ?? {};
           const counts: Record<string, number> = {};
           const sums: Record<string, number> = {};
-          for (const s of [...VALID_STATUSES, "ALL"]) counts[s] = Number(r[s] ?? 0);
-          for (const s of VALID_STATUSES) sums[s] = Number(r[`SUM_${s}`] ?? 0);
-          sums["STALE_AWAITING"] = Number(r["STALE_AWAITING"] ?? 0);
+          for (const k of ["ALL", "BUYOUT", "DIRECT", "NEW", "ERROR", "AWAITING_LINK", "FAVORITES"] as const)
+            counts[k] = Number(r[k] ?? 0);
+          sums["BUYOUT"] = Number(r["SUM_BUYOUT"] ?? 0);
+          sums["DIRECT"] = Number(r["SUM_DIRECT"] ?? 0);
+          sums["AWAITING_LINK"] = Number(r["SUM_AWAITING_LINK"] ?? 0);
           cachedCounts = { data: counts, sums, ts: Date.now() };
-          const total = statusList.length > 0 ? statusList.reduce((s, st) => s + (counts[st] ?? 0), 0) : counts["ALL"];
-          return { total, counts, sums };
+          return { total: tabTotal(tab, counts), counts, sums };
         }
-        const groups: any[] = await (prisma as any).wbOrder.groupBy({
-          by: ["status"],
-          where: { ...searchWhere, isTest: false },
-          _count: { _all: true },
-          _sum: { amount: true },
-        });
-        const counts: Record<string, number> = {};
-        const sums: Record<string, number> = {};
-        for (const s of [...VALID_STATUSES, "ALL"]) counts[s] = 0;
-        for (const s of VALID_STATUSES) sums[s] = 0;
-        for (const g of groups) {
-          const cnt = typeof g._count === "number" ? g._count : g._count?._all ?? 0;
-          counts[g.status] = cnt;
-          counts["ALL"] += cnt;
-          sums[g.status] = Number(g._sum?.amount ?? 0);
-        }
-        const total = statusList.length > 0 ? statusList.reduce((s, st) => s + (counts[st] ?? 0), 0) : counts["ALL"];
-        return { total, counts, sums };
+        const cnt = await (prisma as any).wbOrder.count({ where });
+        return { total: cnt, counts: null, sums: null };
       })();
 
   const [rawOrders, { total, counts, sums }] = await Promise.all([ordersPromise, countsPromise]);
@@ -150,7 +142,6 @@ export async function GET(req: NextRequest) {
     ? skip + orders.length + (hasMore ? limit : 0)
     : total;
 
-  // ── Enrichment: cluster numbering + review status (skipped in lite mode) ────
   if (!lite) {
     const pageTgIds       = new Set<string>();
     const pageVkIds       = new Set<string>();
@@ -236,7 +227,6 @@ export async function GET(req: NextRequest) {
         }
       }
     }
-
   }
 
   const vkEnrichOrders = orders.filter((o: any) =>
@@ -249,12 +239,10 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ orders, total: finalTotal, counts, sums, page, pages: Math.ceil(finalTotal / limit) });
 }
 
-/**
- * Persist VK first/last name + screen_name into User rows whose entry is generic
- * ("VK User") or missing. Runs in the background after the response is sent.
- * The current request's response is *not* enriched — that's the trade-off for
- * not blocking the client by an external API roundtrip + N user-row UPDATEs.
- */
+function tabTotal(tab: string, counts: Record<string, number>): number {
+  return counts[tab] ?? counts["ALL"] ?? 0;
+}
+
 async function enrichVkUsers(orders: any[]) {
   try {
     const vkIds = [...new Set<string>(orders.map((o: any) => String(o.user.vkId)))];
@@ -296,7 +284,7 @@ async function enrichVkUsers(orders: any[]) {
         },
       });
     }));
-  } catch { /* non-fatal — stays generic, retried on next request */ }
+  } catch { /* non-fatal */ }
 }
 
 export async function POST(req: NextRequest) {
@@ -314,32 +302,6 @@ export async function POST(req: NextRequest) {
   });
   if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
 
-  if (action === "take-work") {
-    if (order.status !== "PENDING")
-      return NextResponse.json({ error: "Order must be PENDING" }, { status: 400 });
-    await (prisma as any).wbOrder.update({
-      where: { id: orderId },
-      data:  { status: "IN_PROGRESS", takenAt: new Date() },
-    });
-    cachedCounts = null;
-    return NextResponse.json({ ok: true });
-  }
-
-  // Undo "take-work" — move an order back to the new/PENDING queue (e.g. taken
-  // by mistake, or handing it off to another manager).
-  if (action === "untake") {
-    if (order.status !== "IN_PROGRESS")
-      return NextResponse.json({ error: "Order must be IN_PROGRESS" }, { status: 400 });
-    await (prisma as any).wbOrder.update({
-      where: { id: orderId },
-      data:  { status: "PENDING", takenAt: null },
-    });
-    cachedCounts = null;
-    return NextResponse.json({ ok: true });
-  }
-
-  // Admin-only free-text note (current status / problem). Empty string clears it.
-  // Does not touch status, so counts stay valid (no cache bust).
   if (action === "set-note") {
     const note = typeof body.note === "string" ? body.note.trim().slice(0, 2000) : "";
     await (prisma as any).wbOrder.update({
@@ -349,9 +311,57 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  if (action === "toggle-favorite") {
+    await (prisma as any).wbOrder.update({
+      where: { id: orderId },
+      data:  { isFavorite: !order.isFavorite },
+    });
+    cachedCounts = null;
+    return NextResponse.json({ ok: true, isFavorite: !order.isFavorite });
+  }
+
+  if (action === "set-error") {
+    if (!["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status))
+      return NextResponse.json({ error: "Cannot set error on this order" }, { status: 400 });
+    await (prisma as any).wbOrder.update({
+      where: { id: orderId },
+      data:  { status: "ERROR" },
+    });
+    cachedCounts = null;
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === "move-to") {
+    const target = body.target as string;
+    const note = typeof body.note === "string" ? body.note.trim() : "";
+    if (!note) return NextResponse.json({ error: "Заметка обязательна при переводе" }, { status: 400 });
+
+    const statusMap: Record<string, string> = {
+      BUYOUT: "PENDING",
+      DIRECT: "PENDING",
+      NEW: "AWAITING_GAMEPASS",
+      ERROR: "ERROR",
+      AWAITING_LINK: "AWAITING_GAMEPASS",
+    };
+    const newStatus = statusMap[target];
+    if (!newStatus) return NextResponse.json({ error: "Invalid target" }, { status: 400 });
+
+    const data: any = {
+      status: newStatus,
+      adminNote: note.slice(0, 2000),
+      isFavorite: false,
+    };
+    if (target === "DIRECT") data.isDirectOrder = true;
+    if (target === "BUYOUT") data.isDirectOrder = false;
+
+    await (prisma as any).wbOrder.update({ where: { id: orderId }, data });
+    cachedCounts = null;
+    return NextResponse.json({ ok: true });
+  }
+
   if (action === "complete") {
-    if (!["PENDING", "IN_PROGRESS"].includes(order.status))
-      return NextResponse.json({ error: "Order must be PENDING or IN_PROGRESS" }, { status: 400 });
+    if (!["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status))
+      return NextResponse.json({ error: "Order must be PENDING, IN_PROGRESS or ERROR" }, { status: 400 });
     const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
     const currentRate = settings?.purchaseRate ?? null;
     await (prisma as any).wbOrder.update({
@@ -364,7 +374,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "reject") {
-    if (!["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status))
+    if (!["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "AWAITING_PAYMENT", "PAYMENT_PENDING", "ERROR"].includes(order.status))
       return NextResponse.json({ error: "Cannot reject this order" }, { status: 400 });
     const rejectionReason = String(reason ?? "не указана");
     await (prisma as any).wbOrder.update({
@@ -377,8 +387,8 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "purchase") {
-    if (!["PENDING", "IN_PROGRESS"].includes(order.status))
-      return NextResponse.json({ error: "Order must be PENDING or IN_PROGRESS" }, { status: 400 });
+    if (!["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status))
+      return NextResponse.json({ error: "Order must be PENDING, IN_PROGRESS or ERROR" }, { status: 400 });
 
     const gpMatch = order.gamepassUrl?.match(/game-pass(?:es)?\/(\d+)/);
     if (!gpMatch) return NextResponse.json({ error: "No gamepass URL" }, { status: 400 });
@@ -410,7 +420,6 @@ export async function POST(req: NextRequest) {
     const isManagedPricing = price !== base;
     const creatorId = info.Creator?.Id ?? info.Creator?.CreatorTargetId ?? 0;
 
-    // Get initial CSRF token
     const csrfRes = await fetch("https://auth.roblox.com/v2/logout", {
       method: "POST",
       headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
@@ -420,7 +429,6 @@ export async function POST(req: NextRequest) {
     if (!csrf)
       return NextResponse.json({ error: "Не удалось получить CSRF — cookie протух?" }, { status: 502 });
 
-    // Purchase with CSRF retry (max 2 attempts)
     let purchaseRes: Response | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       purchaseRes = await fetch(
@@ -459,7 +467,7 @@ export async function POST(req: NextRequest) {
     if (purchaseData.purchased) {
       const currentRate = settings?.purchaseRate ?? null;
       await (prisma as any).wbOrder.updateMany({
-        where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
+        where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
         data: { status: "COMPLETED", purchaseRate: currentRate },
       });
       cachedCounts = null;
@@ -468,8 +476,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, success: true, msg: `Куплено за ${purchaseData.price ?? price} R$${mpWarn}` });
     }
 
-    const reason = purchaseData.reason ?? purchaseData.errorMsg ?? "Неизвестная ошибка";
-    return NextResponse.json({ ok: true, success: false, msg: reason });
+    await (prisma as any).wbOrder.updateMany({
+      where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
+      data: { status: "ERROR" },
+    });
+    cachedCounts = null;
+
+    const failReason = purchaseData.reason ?? purchaseData.errorMsg ?? "Неизвестная ошибка";
+    return NextResponse.json({ ok: true, success: false, msg: failReason });
   }
 
   if (action === "purchase-script") {

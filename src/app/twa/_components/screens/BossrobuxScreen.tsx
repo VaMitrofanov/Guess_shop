@@ -281,7 +281,9 @@ export default function BossrobuxScreen({ token }: { token: string }) {
     try {
       const r = await fetch("/api/twa/roblox-account", { headers: { Authorization: `Bearer ${token}` } });
       if (!r.ok) { setError("Ошибка загрузки"); return; }
-      setInfo(await r.json());
+      const d = await r.json().catch(() => null);
+      if (!d) { setError("Ошибка загрузки"); return; }
+      setInfo(d);
     } catch { setError("Ошибка сети"); }
     finally { setLoading(false); }
   }, [token]);
@@ -315,10 +317,10 @@ export default function BossrobuxScreen({ token }: { token: string }) {
         method: "POST", headers,
         body: JSON.stringify({ action: "set-cookie", cookie: cookieInput.trim() }),
       });
-      const d = await r.json();
-      if (!r.ok) {
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d) {
         haptic.notify("error");
-        setSaveMsg({ text: d.error ?? "Ошибка", ok: false });
+        setSaveMsg({ text: d?.error ?? (r.status >= 500 ? "Сервер недоступен — попробуй позже" : "Ошибка сохранения") , ok: false });
         return;
       }
       haptic.notify("success");
@@ -330,7 +332,7 @@ export default function BossrobuxScreen({ token }: { token: string }) {
         accountName: d.accountName, accountId: d.accountId, balance: d.balance,
       });
       setTimeout(() => setSaveMsg(null), 3000);
-    } catch { haptic.notify("error"); setSaveMsg({ text: "Ошибка сети", ok: false }); }
+    } catch { haptic.notify("error"); setSaveMsg({ text: "Ошибка сети — проверь подключение", ok: false }); }
     finally { setSaving(false); }
   }
 

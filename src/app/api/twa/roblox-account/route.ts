@@ -8,12 +8,16 @@ const ROBLOX_HEADERS = {
 };
 
 async function robloxGet(url: string, cookie: string) {
-  const res = await fetch(url, {
-    headers: { ...ROBLOX_HEADERS, Cookie: `.ROBLOSECURITY=${cookie}` },
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!res.ok) return null;
-  return res.json().catch(() => null);
+  try {
+    const res = await fetch(url, {
+      headers: { ...ROBLOX_HEADERS, Cookie: `.ROBLOSECURITY=${cookie}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return null;
+    return res.json().catch(() => null);
+  } catch {
+    return null;
+  }
 }
 
 export async function GET(req: NextRequest) {
