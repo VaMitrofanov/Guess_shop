@@ -626,13 +626,15 @@ function userSubHandle(u: Order["user"]): string {
 /* ───────────── PurchaseBtn — server-side auto-purchase ───────────── */
 function PurchaseBtn({ orderId, token, onDone }: { orderId: string; token: string; onDone: () => void }) {
   const [loading, setLoading] = useState(false);
+  const busyRef = useRef(false);
   return (
     <button
       className="twa-press"
       onClick={async e => {
         e.stopPropagation();
         haptic.impact("medium");
-        if (loading) return;
+        if (busyRef.current) return;
+        busyRef.current = true;
         setLoading(true);
         try {
           const r = await fetch("/api/twa/orders", {
@@ -650,7 +652,7 @@ function PurchaseBtn({ orderId, token, onDone }: { orderId: string; token: strin
             haptic.notify("error");
             toast(`❌ ${d.msg}`, "error");
           }
-        } catch { haptic.notify("error"); toast("Ошибка сети", "error"); } finally { setLoading(false); }
+        } catch { haptic.notify("error"); toast("Ошибка сети", "error"); } finally { busyRef.current = false; setLoading(false); }
       }}
       style={{
         flex: 1, padding: "11px", border: "none", borderRadius: 12,
@@ -813,12 +815,11 @@ function DataRow({ icon, children, copyText: ct, onOpen }: {
    OrderCard — Zoned layout: header / body / actions
    ───────────────────────────────────────────────────────────────────────── */
 function OrderCard({
-  order, token, exiting, onGoToBossrobux, onRunAction, onSaveNote, onPurchaseDone,
+  order, token, exiting, onRunAction, onSaveNote, onPurchaseDone,
 }: {
   order: Order;
   token: string;
   exiting: boolean;
-  onGoToBossrobux?: (gamepassId?: string) => void;
   onRunAction: (action: string, reason?: string) => Promise<ActionResult>;
   onSaveNote: (note: string) => Promise<ActionResult>;
   onPurchaseDone?: () => void;
@@ -1134,19 +1135,6 @@ function OrderCard({
             <div style={{ display: "flex", gap: 8 }}>
               <PurchaseBtn orderId={order.id} token={token} onDone={() => onPurchaseDone?.()} />
               <PurchaseScriptBtn orderId={order.id} token={token} />
-              {onGoToBossrobux && (
-                <button
-                  className="twa-press"
-                  onClick={e => { e.stopPropagation(); haptic.impact("light"); onGoToBossrobux(extractGamepassId(order.gamepassUrl) ?? undefined); }}
-                  style={{
-                    flex: 1, padding: "11px", border: "none", borderRadius: 12,
-                    background: "rgba(191,90,242,0.14)", color: C.accent,
-                    fontSize: 13.5, fontWeight: 600, cursor: "pointer", letterSpacing: 0.1,
-                  }}
-                >
-                  🛒 Boss Robux
-                </button>
-              )}
             </div>
           )}
         </div>
@@ -1228,10 +1216,9 @@ function shiftSums(sums: Record<string, number>, from: string, to: string, amoun
    Main screen
    ───────────────────────────────────────────────────────────────────────── */
 export default function OrdersScreen({
-  token, onGoToBossrobux, onActionDone, initialQuery, onInitialQueryConsumed,
+  token, onActionDone, initialQuery, onInitialQueryConsumed,
 }: {
   token: string;
-  onGoToBossrobux?: (gamepassId?: string) => void;
   onActionDone?: () => void;
   initialQuery?: string;
   onInitialQueryConsumed?: () => void;
@@ -1533,7 +1520,6 @@ export default function OrdersScreen({
                 order={order}
                 token={token}
                 exiting={exiting.has(order.id)}
-                onGoToBossrobux={onGoToBossrobux}
                 onRunAction={(action, reason) => runAction(order, action, reason)}
                 onSaveNote={(note) => saveNote(order.id, note)}
                 onPurchaseDone={() => {

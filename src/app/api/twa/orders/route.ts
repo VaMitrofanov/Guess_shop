@@ -410,34 +410,46 @@ export async function POST(req: NextRequest) {
     const isManagedPricing = price !== base;
     const creatorId = info.Creator?.Id ?? info.Creator?.CreatorTargetId ?? 0;
 
-    // Get CSRF token
+    // Get initial CSRF token
     const csrfRes = await fetch("https://auth.roblox.com/v2/logout", {
       method: "POST",
       headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
       signal: AbortSignal.timeout(10000),
     }).catch(() => null);
-    const csrf = csrfRes?.headers.get("x-csrf-token");
+    let csrf = csrfRes?.headers.get("x-csrf-token");
     if (!csrf)
       return NextResponse.json({ error: "Не удалось получить CSRF — cookie протух?" }, { status: 502 });
 
-    // Purchase
-    const purchaseRes = await fetch(
-      `https://economy.roblox.com/v1/purchases/products/${info.ProductId}`,
-      {
-        method: "POST",
-        headers: {
-          Cookie: `.ROBLOSECURITY=${cookie}`,
-          "Content-Type": "application/json",
-          "x-csrf-token": csrf,
+    // Purchase with CSRF retry (max 2 attempts)
+    let purchaseRes: Response | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      purchaseRes = await fetch(
+        `https://economy.roblox.com/v1/purchases/products/${info.ProductId}`,
+        {
+          method: "POST",
+          headers: {
+            Cookie: `.ROBLOSECURITY=${cookie}`,
+            "Content-Type": "application/json",
+            "x-csrf-token": csrf,
+          },
+          body: JSON.stringify({
+            expectedCurrency: 1,
+            expectedPrice: price,
+            expectedSellerId: creatorId,
+          }),
+          signal: AbortSignal.timeout(15000),
         },
-        body: JSON.stringify({
-          expectedCurrency: 1,
-          expectedPrice: price,
-          expectedSellerId: creatorId,
-        }),
-        signal: AbortSignal.timeout(15000),
-      },
-    ).catch(() => null);
+      ).catch(() => null);
+
+      if (purchaseRes?.status === 403) {
+        const newCsrf = purchaseRes.headers.get("x-csrf-token");
+        if (newCsrf && attempt === 0) { csrf = newCsrf; continue; }
+      }
+      break;
+    }
+
+    if (purchaseRes?.status === 401)
+      return NextResponse.json({ ok: true, success: false, msg: "Cookie истёк — обнови через /setcookie" });
 
     const purchaseData: any = await purchaseRes?.json().catch(() => null);
 

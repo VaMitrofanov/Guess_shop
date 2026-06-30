@@ -1046,6 +1046,10 @@ export async function purchaseGamepassDirect(
       },
     );
 
+    if (res.status === 401) {
+      return { success: false, msg: "Cookie истёк — обнови через /setcookie", reason: "CookieExpired" };
+    }
+
     const json: any = await res.json().catch(() => null);
 
     if (!json) {

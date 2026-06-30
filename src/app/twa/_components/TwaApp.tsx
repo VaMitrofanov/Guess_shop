@@ -7,13 +7,9 @@ import { ToastHost } from "./Toast";
 import { C } from "./theme";
 import { haptic } from "./haptics";
 
-// Dynamically load non-default screens so the initial JS bundle is just
-// the OrdersScreen (default tab) + TwaApp shell. BossrobuxScreen alone is
-// ~580 LoC + framer-motion dependency; deferring it cuts cold-start time
-// for the 95 % of sessions that open Orders.
 const Dashboard       = dynamic(() => import("./screens/Dashboard"),      { ssr: false, loading: () => <ScreenSkeleton /> });
 const WbScreen        = dynamic(() => import("./screens/WbScreen"),       { ssr: false, loading: () => <ScreenSkeleton /> });
-const BossrobuxScreen = dynamic(() => import("./screens/BossrobuxScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
+const AccountScreen   = dynamic(() => import("./screens/BossrobuxScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
 const SettingsScreen  = dynamic(() => import("./screens/SettingsScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
 const SystemScreen    = dynamic(() => import("./screens/SystemScreen"),   { ssr: false, loading: () => <ScreenSkeleton /> });
 
@@ -45,13 +41,13 @@ declare global {
   }
 }
 
-type Screen = "dashboard" | "orders" | "wb" | "bossrobux" | "settings" | "system";
+type Screen = "dashboard" | "orders" | "wb" | "account" | "settings" | "system";
 
 const SCREEN_TITLES: Record<Screen, string> = {
   dashboard:  "Главная",
   orders:     "Заказы",
   wb:         "Wildberries",
-  bossrobux:  "Boss Robux",
+  account:    "Аккаунт",
   settings:   "Настройки",
   system:     "Система",
 };
@@ -68,7 +64,6 @@ export default function TwaApp() {
   const [screen,             setScreen]             = useState<Screen>("orders");
   const [debugMsg,           setDebugMsg]           = useState("");
   const [ordersBadge,        setOrdersBadge]        = useState(0);
-  const [bossrobuxPreloadId, setBossrobuxPreloadId] = useState<string | undefined>(undefined);
   // Pre-focus the Orders search when launched via admin notification deep-link.
   // Accepts either ?q=... in the URL (works with InlineKeyboardButton.web_app
   // URLs) or Telegram's start_param (works with Direct Link Apps via startapp).
@@ -305,9 +300,9 @@ export default function TwaApp() {
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
         {screen === "dashboard"  && <Dashboard      {...sp} />}
-        {screen === "orders"     && <OrdersScreen   {...sp} onGoToBossrobux={(gpId) => { setBossrobuxPreloadId(gpId); setScreen("bossrobux"); }} onActionDone={refreshBadge} initialQuery={orderQueryPreload} onInitialQueryConsumed={() => setOrderQueryPreload("")} />}
+        {screen === "orders"     && <OrdersScreen   {...sp} onActionDone={refreshBadge} initialQuery={orderQueryPreload} onInitialQueryConsumed={() => setOrderQueryPreload("")} />}
         {screen === "wb"         && <WbScreen       {...sp} />}
-        {screen === "bossrobux"  && <BossrobuxScreen {...sp} preloadGamepassId={bossrobuxPreloadId} onPreloadConsumed={() => setBossrobuxPreloadId(undefined)} />}
+        {screen === "account"    && <AccountScreen  {...sp} />}
         {screen === "settings"   && <SettingsScreen  {...sp} onNavigate={(s) => setScreen(s as Screen)} />}
         {screen === "system"     && <SystemScreen    {...sp} />}
       </div>
