@@ -1,7 +1,8 @@
 "use client";
-import { C } from "../theme";
+import { C, MONO, tabular } from "../theme";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { haptic } from "../haptics";
+import { toast } from "../Toast";
 
 interface AccountInfo {
   hasCookie:      boolean;
@@ -242,6 +243,169 @@ function ConfirmPurchase({
         </div>
       </div>
     </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Buyout Orders Section (embedded in Account)
+// ═════════════════════════════════════════════════════════════════════════════
+interface BuyoutOrder {
+  id: string;
+  amount: number;
+  gamepassUrl: string | null;
+  status: string;
+  wbCode: string;
+  robloxUsername: string | null;
+  createdAt: string;
+  pendingAt: string | null;
+  user: { tgId: string | null; vkId: string | null; name: string | null; username: string | null };
+}
+
+function fmtAge(iso: string): string {
+  const mins = (Date.now() - new Date(iso).getTime()) / 60000;
+  if (mins < 1) return "< 1 мин";
+  if (mins < 60) return `${Math.round(mins)} мин`;
+  const h = Math.floor(mins / 60);
+  const d = Math.floor(h / 24);
+  if (d === 0) return `${h}ч`;
+  const rem = h % 24;
+  return rem > 0 ? `${d}д ${rem}ч` : `${d}д`;
+}
+
+function ageColor(iso: string): string {
+  const mins = (Date.now() - new Date(iso).getTime()) / 60000;
+  if (mins < 120) return C.green;
+  if (mins < 720) return C.yellow;
+  if (mins < 1440) return "#ff9500";
+  return C.red;
+}
+
+function BuyoutSection({ token }: { token: string }) {
+  const [orders, setOrders] = useState<BuyoutOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [buying, setBuying] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/twa/orders?status=BUYOUT&limit=20&lite=1`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!r.ok) return;
+      const d = await r.json();
+      setOrders(d.orders ?? []);
+    } catch {}
+    finally { setLoading(false); }
+  }, [token]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function doPurchase(order: BuyoutOrder) {
+    if (buying) return;
+    setBuying(order.id);
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "purchase", orderId: order.id }),
+      });
+      const d = await r.json();
+      if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
+      if (d.success) {
+        haptic.notify("success");
+        toast(`✅ ${d.msg}`, "success");
+        setOrders(prev => prev.filter(o => o.id !== order.id));
+      } else {
+        haptic.notify("error");
+        toast(`❌ ${d.msg}`, "error");
+      }
+    } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
+    finally { setBuying(null); }
+  }
+
+  if (loading) return (
+    <div style={{ background: C.card, borderRadius: 14, height: 80, animation: "pulse 1.5s ease-in-out infinite" }} />
+  );
+
+  if (orders.length === 0) return (
+    <Card>
+      <div style={{ padding: "20px 16px", textAlign: "center", color: C.textTertiary, fontSize: 14 }}>
+        Нет заказов к выкупу
+      </div>
+    </Card>
+  );
+
+  return (
+    <Card>
+      {orders.map((order, i) => {
+        const dirty = Math.ceil(order.amount / 0.7);
+        const nick = order.user.username ? `@${order.user.username}` : order.user.name ?? "—";
+        const timeRef = order.pendingAt ?? order.createdAt;
+        const isBuying = buying === order.id;
+        return (
+          <div key={order.id}>
+            {i > 0 && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
+            <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
+                  <span style={{
+                    fontSize: 11, fontWeight: 800, color: "#fff",
+                    background: order.user.tgId ? "#229ED9" : order.user.vkId ? "#0077FF" : C.elevated,
+                    borderRadius: 5, padding: "2px 6px", flexShrink: 0,
+                  }}>
+                    {order.user.tgId ? "T" : order.user.vkId ? "V" : "—"}
+                  </span>
+                  <span style={{
+                    fontSize: 15, fontWeight: 600, color: "#7ec5ff",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>{nick}</span>
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 500, color: ageColor(timeRef), flexShrink: 0, ...tabular }}>
+                  ⏱ {fmtAge(timeRef)}
+                </span>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                  <span style={{ fontSize: 18, fontWeight: 700, color: "#e5e5ea", ...tabular }}>
+                    {dirty.toLocaleString("ru-RU")}
+                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: C.accent }}>R$</span>
+                  <span style={{ fontSize: 13, color: C.textTertiary, ...tabular }}>
+                    ({order.amount.toLocaleString("ru-RU")})
+                  </span>
+                </div>
+                {order.gamepassUrl && (
+                  <button
+                    className="twa-press"
+                    onClick={() => doPurchase(order)}
+                    disabled={!!buying}
+                    style={{
+                      padding: "8px 16px", border: "none", borderRadius: 10,
+                      background: "rgba(48,209,88,0.14)", color: "#30d158",
+                      fontSize: 14, fontWeight: 600, cursor: "pointer",
+                      opacity: isBuying ? 0.5 : 1,
+                    }}
+                  >
+                    {isBuying ? "⏳…" : "Выкупить"}
+                  </button>
+                )}
+              </div>
+
+              {order.robloxUsername && (
+                <div style={{ fontSize: 14, color: C.textSecondary }}>
+                  🎮 {order.robloxUsername}
+                </div>
+              )}
+              {order.wbCode && (
+                <div style={{ fontFamily: MONO, fontWeight: 700, color: C.accent, letterSpacing: 1.5, fontSize: 14 }}>
+                  📦 {order.wbCode}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </Card>
   );
 }
 
@@ -622,6 +786,14 @@ export default function BossrobuxScreen({ token }: { token: string }) {
               </div>
             )}
           </Card>
+        </section>
+      )}
+
+      {/* ── Buyout Orders ───────────────────────────────────────────────── */}
+      {cookieReady && (
+        <section>
+          <SectionHeader title="К выкупу" />
+          <BuyoutSection token={token} />
         </section>
       )}
 

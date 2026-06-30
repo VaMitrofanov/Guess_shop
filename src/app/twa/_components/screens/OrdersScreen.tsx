@@ -218,11 +218,11 @@ function DataRow({ icon, children, copyText: ct }: {
 }) {
   return (
     <div style={{
-      display: "flex", alignItems: "center", gap: 8,
-      padding: "5px 0", minWidth: 0,
+      display: "flex", alignItems: "center", gap: 10,
+      padding: "6px 0", minWidth: 0,
     }}>
-      <span style={{ fontSize: 13, flexShrink: 0 }}>{icon}</span>
-      <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, color: C.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <span style={{ fontSize: 15, flexShrink: 0 }}>{icon}</span>
+      <div style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 500, color: C.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {children}
       </div>
       {ct && <CopyBtn text={ct} />}
@@ -262,10 +262,10 @@ function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) =
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 11.5, fontWeight: 600, color: C.textSecondary }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: C.textSecondary }}>
           Заметка
         </span>
-        {flash && <span style={{ fontSize: 11, color: C.green, fontWeight: 600 }}>✓</span>}
+        {flash && <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>✓</span>}
       </div>
       <textarea
         value={note}
@@ -277,8 +277,8 @@ function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) =
         style={{
           background: hasNote ? `${C.yellow}14` : "rgba(255,255,255,0.06)",
           border: hasNote ? `1px solid ${C.yellow}40` : "1px solid transparent",
-          borderRadius: 10, color: C.textPrimary, fontSize: 13, lineHeight: 1.35,
-          padding: "8px 10px", resize: "vertical", outline: "none",
+          borderRadius: 10, color: C.textPrimary, fontSize: 14, lineHeight: 1.4,
+          padding: "10px 12px", resize: "vertical", outline: "none",
           width: "100%", boxSizing: "border-box", fontFamily: "inherit",
         }}
       />
@@ -357,25 +357,25 @@ function ActionPanel({
   const hasGamepass = !!order.gamepassUrl;
 
   return (
-    <div style={{ display: "flex", gap: 6, padding: "10px 14px 12px" }}>
+    <div style={{ display: "flex", gap: 7, padding: "10px 16px 14px" }}>
       {hasGamepass && (
         <button className="twa-press" onClick={doPurchase} disabled={loading}
-          style={{ flex: 2, padding: "10px", border: "none", borderRadius: 10, background: "rgba(48,209,88,0.14)", color: "#30d158", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+          style={{ flex: 2, padding: "12px", border: "none", borderRadius: 12, background: "rgba(48,209,88,0.14)", color: "#30d158", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
           {loading ? "⏳…" : "Выкупить"}
         </button>
       )}
       {showError && (
         <button className="twa-press" onClick={() => doAction("set-error")} disabled={loading}
-          style={{ flex: 1, padding: "10px", border: "none", borderRadius: 10, background: "rgba(255,149,0,0.12)", color: C.orange, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+          style={{ flex: 1, padding: "12px", border: "none", borderRadius: 12, background: "rgba(255,149,0,0.12)", color: C.orange, fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
           Ошибка
         </button>
       )}
       <button className="twa-press" onClick={() => doAction("complete")} disabled={loading}
-        style={{ flex: 1, padding: "10px", border: "none", borderRadius: 10, background: "rgba(10,132,255,0.12)", color: C.blue, fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+        style={{ flex: 1, padding: "12px", border: "none", borderRadius: 12, background: "rgba(10,132,255,0.12)", color: C.blue, fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
         Выкуплено
       </button>
       <button className="twa-press" onClick={() => doAction("reject")} disabled={loading}
-        style={{ width: 38, flexShrink: 0, padding: "10px 0", border: `1px solid ${C.red}55`, borderRadius: 10, background: "transparent", color: C.red, fontSize: 16, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+        style={{ width: 42, flexShrink: 0, padding: "12px 0", border: `1px solid ${C.red}55`, borderRadius: 12, background: "transparent", color: C.red, fontSize: 17, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
         ✕
       </button>
     </div>
@@ -488,7 +488,9 @@ function OrderCard({
   const passId = extractGamepassId(order.gamepassUrl);
 
   const showDirty = currentTab === "BUYOUT" || currentTab === "DIRECT" || currentTab === "ERROR";
-  const displayAmount = showDirty ? Math.ceil(order.amount / 0.7) : order.amount;
+  const dirtyAmount = Math.ceil(order.amount / 0.7);
+  const displayAmount = showDirty ? dirtyAmount : order.amount;
+  const showCleanHint = currentTab === "BUYOUT";
 
   const tabBadge = currentTab === "ALL" ? orderTabBadge(order) : null;
   const showMoveBtn = currentTab === "AWAITING_LINK" || currentTab === "FAVORITES";
@@ -507,20 +509,20 @@ function OrderCard({
       position: "relative",
     }}>
       {/* Header: platform badge + nick + star */}
-      <div style={{ padding: "12px 14px 0", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ padding: "14px 16px 0", display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
             <span style={{
-              fontSize: 10, fontWeight: 800, color: "#fff",
+              fontSize: 11, fontWeight: 800, color: "#fff",
               background: platform === "tg" ? "#229ED9" : platform === "vk" ? "#0077FF" : C.elevated,
-              borderRadius: 4, padding: "2px 5px", flexShrink: 0,
+              borderRadius: 5, padding: "3px 7px", flexShrink: 0,
             }}>
               {platform === "tg" ? "T" : platform === "vk" ? "V" : "—"}
             </span>
             <span
               onClick={e => { e.stopPropagation(); haptic.impact("light"); openContact(order.user); }}
               style={{
-                fontSize: 14, fontWeight: 600, color: "#7ec5ff", cursor: "pointer",
+                fontSize: 16, fontWeight: 600, color: "#7ec5ff", cursor: "pointer",
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
               }}
             >
@@ -528,8 +530,8 @@ function OrderCard({
             </span>
             {tabBadge && (
               <span style={{
-                fontSize: 10, fontWeight: 600, color: tabBadge.color,
-                background: `${tabBadge.color}1c`, padding: "2px 7px",
+                fontSize: 11, fontWeight: 600, color: tabBadge.color,
+                background: `${tabBadge.color}1c`, padding: "3px 8px",
                 borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
               }}>
                 {tabBadge.label}
@@ -541,7 +543,7 @@ function OrderCard({
             onClick={e => { e.stopPropagation(); haptic.impact("light"); onToggleFavorite(); }}
             style={{
               background: "transparent", border: "none", cursor: "pointer",
-              fontSize: 18, padding: "2px 4px", flexShrink: 0,
+              fontSize: 20, padding: "2px 4px", flexShrink: 0,
               opacity: order.isFavorite ? 1 : 0.35,
             }}
           >
@@ -551,19 +553,24 @@ function OrderCard({
 
         {/* Time + amount row */}
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <span style={{ fontSize: 13, fontWeight: 500, color: ageColor(timeRef), ...tabular }}>
+          <span style={{ fontSize: 15, fontWeight: 500, color: ageColor(timeRef), ...tabular }}>
             ⏱ {fmtAge(timeRef)}
           </span>
-          <span style={{ fontSize: 11, color: C.textTertiary }}>—</span>
-          <span style={{ fontSize: 17, fontWeight: 700, color: C.textPrimary, ...tabular }}>
+          <span style={{ fontSize: 13, color: C.textTertiary }}>—</span>
+          <span style={{ fontSize: 20, fontWeight: 700, color: C.textPrimary, ...tabular }}>
             {displayAmount.toLocaleString("ru-RU")}
           </span>
-          <span style={{ fontSize: 11, fontWeight: 600, color: C.accent }}>R$</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: C.accent }}>R$</span>
+          {showCleanHint && (
+            <span style={{ fontSize: 13, color: C.textTertiary, ...tabular }}>
+              ({order.amount.toLocaleString("ru-RU")})
+            </span>
+          )}
         </div>
       </div>
 
       {/* Data rows */}
-      <div style={{ padding: "4px 14px 10px" }}>
+      <div style={{ padding: "6px 16px 12px" }}>
         {order.robloxUsername && (
           <DataRow icon="🎮" copyText={order.robloxUsername}>
             <span style={{ fontWeight: 600 }}>{order.robloxUsername}</span>
@@ -571,19 +578,19 @@ function OrderCard({
         )}
         {order.gamepassUrl && (
           <DataRow icon="🔗" copyText={order.gamepassUrl}>
-            <span style={{ color: C.blue, fontSize: 13 }}>{order.gamepassUrl.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}</span>
+            <span style={{ color: C.blue }}>{order.gamepassUrl.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}</span>
           </DataRow>
         )}
         {!order.isDirectOrder && (
           <DataRow icon="📦" copyText={order.wbCode}>
-            <span style={{ fontFamily: MONO, fontWeight: 700, color: C.accent, letterSpacing: 1.5, fontSize: 14 }}>
+            <span style={{ fontFamily: MONO, fontWeight: 700, color: C.accent, letterSpacing: 1.5, fontSize: 15 }}>
               {order.wbCode}
             </span>
           </DataRow>
         )}
 
         {/* Notes */}
-        <div style={{ marginTop: 6 }}>
+        <div style={{ marginTop: 8 }}>
           <NotesEditor order={order} onSave={onSaveNote} />
         </div>
       </div>
@@ -1018,11 +1025,11 @@ export default function OrdersScreen({
                 className="twa-press-sm"
                 onClick={() => { if (f.id !== filter) haptic.select(); setFilter(f.id); }}
                 style={{
-                  flexShrink: 0, padding: "6.5px 13px", borderRadius: 999,
+                  flexShrink: 0, padding: "7px 14px", borderRadius: 999,
                   border: "none",
                   background: isActive ? C.accent : "rgba(118,118,128,0.22)",
                   color: isActive ? "#fff" : C.textPrimary,
-                  fontSize: 13, fontWeight: isActive ? 600 : 500,
+                  fontSize: 14, fontWeight: isActive ? 600 : 500,
                   cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
                   letterSpacing: 0.1,
                 }}
@@ -1031,8 +1038,8 @@ export default function OrdersScreen({
                 {count > 0 && (
                   <span style={{
                     background: isActive ? "rgba(255,255,255,0.28)" : isUrgent ? C.red : "rgba(255,255,255,0.18)",
-                    color: "#fff", fontSize: 10.5, fontWeight: 700,
-                    padding: "1px 6px", borderRadius: 999, minWidth: 18, textAlign: "center",
+                    color: "#fff", fontSize: 11, fontWeight: 700,
+                    padding: "2px 7px", borderRadius: 999, minWidth: 18, textAlign: "center",
                     ...tabular,
                   }}>
                     {count}
@@ -1058,9 +1065,9 @@ export default function OrdersScreen({
         ) : allOrders.length === 0 ? (
           <EmptyState filter={filter} query={query} />
         ) : (
-          <div className="twa-fade-in" style={{ padding: "12px 16px 32px", display: "flex", flexDirection: "column", gap: 11 }}>
+          <div className="twa-fade-in" style={{ padding: "12px 16px 32px", display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 2px" }}>
-              <span style={{ fontSize: 12, color: C.textSecondary, letterSpacing: 0.1 }}>{summaryText}</span>
+              <span style={{ fontSize: 13, color: C.textSecondary, letterSpacing: 0.1 }}>{summaryText}</span>
             </div>
 
             {allOrders.map(order => (
