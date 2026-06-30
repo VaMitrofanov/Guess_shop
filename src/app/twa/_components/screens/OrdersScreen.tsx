@@ -1009,7 +1009,7 @@ export default function OrdersScreen({
         }}>
           {FILTERS.map(f => {
             const meta = TAB_META[f.id];
-            const count = data?.counts[f.id] ?? 0;
+            const count = data?.counts?.[f.id] ?? 0;
             const isActive = filter === f.id;
             const isUrgent = ["BUYOUT", "DIRECT", "ERROR"].includes(f.id) && count > 0;
             return (
