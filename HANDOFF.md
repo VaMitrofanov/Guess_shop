@@ -6,31 +6,71 @@
 
 ---
 
-## Сессия 2026-07-01 — Полный реворк вкладок Orders TWA (NEW — не закоммичено)
+## Сессия 2026-07-01 — Полный реворк вкладок Orders TWA + UI + «К выкупу» в Аккаунте
+
+### Целевые устройства для вёрстки TWA
+
+TWA используется с **iPhone 14 Pro Max**, **iPhone 15 Pro Max (×2)** и иногда **MacBook Pro 16"** в полноэкранном режиме.
+Шрифты, паддинги и touch-таргеты нужно верстать под эти крупные экраны — мелкий шрифт здесь выглядит как ошибка.
 
 ### Что сделано
 
-Полная переработка системы вкладок в OrdersScreen TWA. Вместо 9 статусных табов — 7 логических разделов с разной сортировкой, панелями управления и оформлением карточек.
+Полная переработка системы вкладок в OrdersScreen TWA. Вместо 9 статусных табов — 8 логических разделов. + UI-рефреш карточек + секция «К выкупу» в экране Аккаунт.
 
-### Новая структура вкладок
+### Коммиты (все на main, запушены)
 
-| Таб | Фильтр | Сортировка | Панель кнопок |
-|-----|--------|------------|---------------|
-| **Все** | все заказы | новые сверху | нет |
-| **К выкупу** | PENDING + IN_PROGRESS, non-direct, non-favorite | старые сверху | Выкупить / Ошибка / Выкуплено / ✕ |
-| **Прямой** | direct orders, active statuses, non-favorite | старые сверху | Выкупить / Ошибка / Выкуплено / ✕ |
-| **Новые** | AWAITING_GAMEPASS, < 40ч, non-favorite | новые сверху | нет |
-| **Ошибка** | ERROR status, non-favorite | старые сверху | Выкупить / Выкуплено / ✕ |
-| **Ждут ссылку** | AWAITING_GAMEPASS, ≥ 40ч, non-favorite | старые сверху | нет, ручной перевод |
-| **Избранное** | isFavorite = true | новые сверху | ручной перевод |
+| Коммит | Описание |
+|--------|----------|
+| `6169014` | Полный реворк вкладок: 7 табов, виртуальные фильтры, избранное, ERROR-автостатус, компактные карточки |
+| `81c3921` | +вкладка «Готово» (DONE), фикс грязных робуксов (amount / 0.7, было * 0.7) |
+| `f67c374` | Fix краш при поиске — `counts` может быть `null`, добавлен `?.` |
+| `575a044` | UI крупнее (шрифты, паддинги), чистые R$ в скобках на «К выкупу», секция «К выкупу» в Аккаунте |
+| `ccafe42` | Прямые заказы первыми в «К выкупу» (Аккаунт), бейдж «Прямой» |
 
-Убранные табы: «В работе», «Реквизиты», «Оплата», «Готово», «Отклонено» — эти заказы видны только в «Все».
+### Новая структура вкладок (8 табов)
+
+| Таб | Фильтр | Сортировка | Панель кнопок | Цена |
+|-----|--------|------------|---------------|------|
+| **Все** | все заказы | новые сверху | нет | чистые |
+| **К выкупу** | PENDING + IN_PROGRESS, non-direct, non-favorite | старые сверху | Выкупить / Ошибка / Выкуплено / ✕ | грязные (чистые) |
+| **Прямой** | direct orders, active statuses, non-favorite | старые сверху | Выкупить / Ошибка / Выкуплено / ✕ | грязные |
+| **Новые** | AWAITING_GAMEPASS, < 40ч, non-favorite | новые сверху | нет | чистые |
+| **Ошибка** | ERROR status, non-favorite | старые сверху | Выкупить / Выкуплено / ✕ | грязные |
+| **Ждут ссылку** | AWAITING_GAMEPASS, ≥ 40ч, non-favorite | старые сверху | нет, ручной перевод | чистые |
+| **Готово** | COMPLETED | новые сверху | нет | чистые |
+| **Избранное** | isFavorite = true | новые сверху | ручной перевод | чистые |
+
+### Робуксы — важно!
+
+- `amount` в БД = **ЧИСТЫЕ** робуксы (что получает продавец)
+- **Грязные** = `Math.ceil(amount / 0.7)` — номинал геймпасса (Roblox забирает 30%)
+- Грязные показываются в: К выкупу, Прямой, Ошибка
+- Чистые показываются во всех остальных
+- На вкладке «К выкупу» дополнительно чистые в скобках: `1 200 R$ (840)`
+
+### UI-рефреш карточек
+
+Увеличены шрифты и отступы для комфортной работы на крупных iPhone:
+- Ник: 14 → **16px**
+- Сумма: 17 → **20px**
+- Data rows: 14 → **15px**
+- Кнопки: 13 → **14px**, padding 10→12, borderRadius 10→12
+- Табы: 13 → **14px**, padding и бейджи увеличены
+- Карточки: padding 12/14 → **14/16**, gap между строками увеличен
+
+### Секция «К выкупу» в экране Аккаунт (BossrobuxScreen)
+
+Новая третья секция после «Поиск и выкуп». Загружает параллельно DIRECT + BUYOUT заказы.
+- **Прямые заказы первыми** (приоритет), с бейджем «Прямой»
+- Компактные карточки: ник, таймер, грязные/чистые R$, WB-код, кнопка «Выкупить»
+- Покупка прямо из экрана Аккаунт без переключения на Заказы
 
 ### Изменения БД (Prisma)
 
 1. **+`ERROR`** в `WbOrderStatus` enum — новый статус для неуспешных покупок
 2. **+`isFavorite Boolean @default(false)`** в `WbOrder` — флаг избранного
 3. **+index** `[isFavorite, createdAt(sort: Desc)]`
+4. Всё применено через `prisma db push`
 
 ### Ключевые концепции
 
@@ -42,78 +82,46 @@
 
 **Автопереход в ERROR:** при неуспешной покупке через бота (pb: хендлер) или TWA (purchase action) → статус автоматически становится ERROR.
 
-**Компактные карточки:** убран аватар, убран expand/details для активных табов. Формат: `[T/V] @ник` → `⏱ время — цена R$` → data rows (ник, ГП, WB-код) → заметка → кнопки.
-
-**Чистые/грязные R$:** в «Новые» и «Ждут ссылку» цена показывается в чистых (×0.7). В остальных — в грязных.
-
 ### API изменения (`/api/twa/orders`)
 
-**GET — новые виртуальные фильтры:**
+**GET — виртуальные фильтры (8 бакетов):**
 - `status=BUYOUT` → PENDING+IN_PROGRESS, non-direct, non-favorite
 - `status=DIRECT` → direct, active statuses, non-favorite
 - `status=NEW` → AWAITING_GAMEPASS < 40ч, non-favorite
 - `status=ERROR` → ERROR, non-favorite
 - `status=AWAITING_LINK` → AWAITING_GAMEPASS ≥ 40ч, non-favorite
+- `status=DONE` → COMPLETED
 - `status=FAVORITES` → isFavorite=true
 
-Сортировка автоматическая по табу: BUYOUT/DIRECT/ERROR/AWAITING_LINK = ASC, остальные = DESC.
+Counts — 1 SQL с FILTER (WHERE ...) для всех 8 бакетов. Сортировка: BUYOUT/DIRECT/ERROR/AWAITING_LINK = ASC, остальные = DESC.
 
-Counts пересчитаны в 1 SQL запрос с FILTER (WHERE ...) для каждого из 7 бакетов.
-
-**POST — новые actions:**
-- `toggle-favorite` → flip isFavorite
-- `set-error` → status = ERROR (из PENDING/IN_PROGRESS/ERROR)
-- `move-to` → перевод в target раздел (обязательна заметка)
-
-**POST — изменения:**
-- `purchase`: при неуспешной покупке → автоматически `status = ERROR`
-- `complete`: принимает ERROR (помимо PENDING/IN_PROGRESS)
-- `reject`: принимает ERROR
-
-### MiniDashboard (шапка «Все»)
-
-Два блока:
-- **К выкупу:** грязные R$ (чистые в скобках) — SUM для PENDING+IN_PROGRESS non-direct
-- **Ждут ссылку:** чистые R$ (грязные в скобках) — SUM для AWAITING_GAMEPASS
+**POST — новые actions:** `toggle-favorite`, `set-error`, `move-to` (+ заметка). `purchase` → auto-ERROR при ошибке.
 
 ### Бот-код изменения
 
-- `bots/tg/handlers.ts` — `pb:` handler: при неуспешной покупке → `status = ERROR`; принимает ERROR для повторной попытки
-- `bots/tg/handlers.ts` — `admin_ok:` handler: принимает ERROR для ручного завершения
-- `bots/tg/admin/hub-orders.ts` — active orders list и batch view включают ERROR
+- `bots/tg/handlers.ts` — `pb:` handler: auto-ERROR при ошибке; принимает ERROR
+- `bots/tg/handlers.ts` — `admin_ok:` handler: принимает ERROR
+- `bots/tg/admin/hub-orders.ts` — active/batch views включают ERROR
 
 ### Файлы
 
 | Файл | Что изменено |
 |------|-------------|
 | `prisma/schema.prisma` | +ERROR в enum, +isFavorite в WbOrder, +index |
-| `src/app/api/twa/orders/route.ts` | Полная переработка: 7 виртуальных фильтров, автосортировка, новые actions (toggle-favorite, set-error, move-to), purchase → auto-ERROR |
-| `src/app/twa/_components/screens/OrdersScreen.tsx` | Полный реворк: 7 табов, компактные карточки, ActionPanel по табу, звёздочка, MoveToModal, обновлённый MiniDashboard |
-| `bots/tg/handlers.ts` | pb: → auto-ERROR при ошибке, admin_ok: принимает ERROR |
+| `src/app/api/twa/orders/route.ts` | 8 виртуальных фильтров, автосортировка, новые actions, purchase → auto-ERROR |
+| `src/app/twa/_components/screens/OrdersScreen.tsx` | 8 табов, UI-рефреш (крупные шрифты), чистые в скобках, ActionPanel, MoveToModal |
+| `src/app/twa/_components/screens/BossrobuxScreen.tsx` | +секция «К выкупу» (DIRECT первыми + BUYOUT), кнопка покупки |
+| `bots/tg/handlers.ts` | pb: → auto-ERROR, admin_ok: принимает ERROR |
 | `bots/tg/admin/hub-orders.ts` | active/batch views включают ERROR |
 
 ### Деплой
 
-- [x] `npx tsc --noEmit` — чисто
-- [x] `npx prisma generate` — OK
-- [ ] `prisma db push` — **НЕ ПРИМЕНЕНО** (ERROR + isFavorite)
-- [ ] Коммит + push
-- [ ] Force-deploy Web (RF)
-- [ ] Force-deploy TG бот (SG)
-- [ ] VK бот — не затронут (нет pb: хендлера)
-
-### Ожидает тестирования
-
-- [ ] Все 7 табов отображаются с правильными counts
-- [ ] Сортировка: DESC для Все/Новые/Избранное, ASC для К выкупу/Прямой/Ошибка/Ждут ссылку
-- [ ] Звёздочка: поставить → заказ в Избранное, снять → обратно
-- [ ] К выкупу: Выкупить → бот покупает → Готово или → Ошибка
-- [ ] К выкупу: ✕ → Отменено
-- [ ] Ошибка: Выкупить → повторная попытка
-- [ ] Ждут ссылку: «Перевести» → модалка → выбор + заметка
-- [ ] Избранное: «Перевести» → модалка
-- [ ] MiniDashboard: грязные/чистые R$ корректны
-- [ ] 40ч cutoff: AWAITING_GAMEPASS < 40ч = Новые, ≥ 40ч = Ждут ссылку
+- [x] TypeScript чисто
+- [x] Prisma db push применено
+- [x] Коммиты запушены на main
+- [ ] Force-deploy Web (RF) — **Coolify токен просрочен**, нужен ручной редеплой из UI
+- [ ] TG бот — не требует редеплоя (бот-код не менялся в этой сессии)
+- [ ] VK бот — не затронут
 
 ---
 
