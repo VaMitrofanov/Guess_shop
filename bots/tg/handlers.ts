@@ -13,7 +13,7 @@ import { vkSend, vkSendPhoto, stripHtml, tgSend, escapeHtml } from "../shared/no
 import { getSbpQrBuffer } from "../shared/sbp";
 import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUserHurdle, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminIntentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, formatUserHandle, formatUserHandleHtml } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
-import { getGamepassDetails, getGamepassProductInfo, buildPurchaseScript } from "../shared/roblox";
+import { getGamepassDetails, getGamepassProductInfo, buildPurchaseScript, purchaseGamepassDirect, getRobuxBalance, getAuthenticatedUser, resetPurchaseCsrf } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { buildAdminKeyboard } from "./admin";
 
@@ -2750,6 +2750,80 @@ export function registerAdmin(bot: Telegraf): void {
       { parse_mode: "HTML", ...(await getAdminKeyboard(ctx.from?.id)) }
     );
   });
+
+  bot.command("setcookie", async (ctx) => {
+    const tgId = String(ctx.from.id);
+    if (!ADMIN_IDS.includes(tgId)) return;
+
+    const text = ctx.message.text.replace(/^\/setcookie\s*/, "").trim();
+    if (!text) {
+      await ctx.reply(
+        "📋 <b>Установка cookie</b>\n\n" +
+        "<code>/setcookie _|WARNING:-DO-NOT-SHARE...|_xxx</code>\n\n" +
+        "Вставь полный .ROBLOSECURITY cookie после команды.",
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
+    try { await ctx.deleteMessage(); } catch {}
+
+    const user = await getAuthenticatedUser(text);
+    if (!user) {
+      await ctx.reply("❌ Cookie недействителен — не удалось авторизоваться.");
+      return;
+    }
+
+    const balance = await getRobuxBalance(text);
+
+    await (db as any).globalSettings.upsert({
+      where: { id: "global" },
+      update: { robloxCookie: text, robloxCookieUpdatedAt: new Date() },
+      create: { id: "global", usdToRub: 90, robloxCookie: text, robloxCookieUpdatedAt: new Date() },
+    });
+
+    resetPurchaseCsrf();
+
+    await ctx.reply(
+      `✅ <b>Cookie установлен!</b>\n` +
+      `👤 Аккаунт: <b>${escapeHtml(user.name)}</b> (ID: ${user.id})\n` +
+      `💰 Баланс: <b>${balance !== null ? `${balance.toLocaleString()} R$` : "не удалось загрузить"}</b>`,
+      { parse_mode: "HTML" },
+    );
+  });
+
+  bot.command("balance", async (ctx) => {
+    const tgId = String(ctx.from.id);
+    if (!ADMIN_IDS.includes(tgId)) return;
+
+    const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
+    const cookie = settings?.robloxCookie;
+    if (!cookie) {
+      await ctx.reply("❌ Cookie не задан. Установи через /setcookie");
+      return;
+    }
+
+    const [user, balance] = await Promise.all([
+      getAuthenticatedUser(cookie),
+      getRobuxBalance(cookie),
+    ]);
+
+    if (!user) {
+      await ctx.reply("❌ Cookie недействителен — сессия истекла. Обнови через /setcookie");
+      return;
+    }
+
+    const cookieAge = settings.robloxCookieUpdatedAt
+      ? ` · Обновлён ${new Date(settings.robloxCookieUpdatedAt).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} МСК`
+      : "";
+
+    await ctx.reply(
+      `💰 <b>Баланс Roblox</b>\n` +
+      `👤 ${escapeHtml(user.name)}${cookieAge}\n` +
+      `💎 <b>${balance !== null ? `${balance.toLocaleString()} R$` : "ошибка загрузки"}</b>`,
+      { parse_mode: "HTML" },
+    );
+  });
 }
 
 // Old admin view functions (showAdminStats, showAdminQueue, showAdminHistory,
@@ -3048,6 +3122,94 @@ export function registerCallbacks(bot: Telegraf): void {
       } catch (err) {
         console.error("[ps] error:", err);
         await ctx.reply("❌ Ошибка генерации скрипта");
+      }
+      return;
+    }
+
+    // ── 🛒 pb: auto-purchase gamepass via stored cookie ────────────────
+    if (data.startsWith("pb:")) {
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      const orderId = data.slice(3);
+      try {
+        const order = await (db as any).wbOrder.findUnique({ where: { id: orderId } });
+        if (!order) { await ctx.answerCbQuery("⚠️ Заказ не найден"); return; }
+        if (!["PENDING", "IN_PROGRESS"].includes(order.status)) {
+          await ctx.answerCbQuery("⚠️ Заказ уже обработан");
+          return;
+        }
+
+        const gpMatch = order.gamepassUrl?.match(/game-pass(?:es)?\/(\d+)/);
+        if (!gpMatch) { await ctx.answerCbQuery("⚠️ Нет ссылки на геймпасс"); return; }
+        const gpId = gpMatch[1];
+
+        const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
+        const cookie = settings?.robloxCookie;
+        if (!cookie) {
+          await ctx.reply("❌ Cookie не задан. Установи через /setcookie");
+          await ctx.answerCbQuery("❌ Нет cookie");
+          return;
+        }
+
+        await ctx.answerCbQuery("⏳ Выкупаю…");
+
+        const info = await getGamepassProductInfo(gpId);
+        if (!info) {
+          await ctx.reply(`❌ Не удалось получить product-info для <code>${gpId}</code>`, { parse_mode: "HTML" });
+          return;
+        }
+
+        if (!info.isForSale) {
+          await ctx.reply(`❌ Геймпасс <b>${escapeHtml(info.name)}</b> не на продаже!`, { parse_mode: "HTML" });
+          return;
+        }
+
+        let priceWarning = "";
+        if (info.isManagedPricing) {
+          priceWarning = `\n⚠️ Managed pricing: ${info.priceInRobux} R$ (продавец: ${info.userBasePriceInRobux} R$)`;
+        }
+
+        const result = await purchaseGamepassDirect(
+          info.productId,
+          info.priceInRobux,
+          info.creatorId,
+          cookie,
+        );
+
+        if (result.success) {
+          const currentRate = settings?.purchaseRate ?? null;
+          const updated = await (db as any).wbOrder.updateMany({
+            where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
+            data: { status: "COMPLETED", adminId, purchaseRate: currentRate },
+          });
+
+          if (updated.count > 0) {
+            const user = order.userId
+              ? await (db as any).user.findUnique({ where: { id: order.userId } })
+              : null;
+            if (user) await notifyUserCompleted(bot, user, orderId, order.amount, order.isDirectOrder ?? false);
+          }
+
+          const shortId = orderId.slice(-6).toUpperCase();
+          const editedText =
+            `✅ <b>Автовыкуп</b> · ${adminTag}\n` +
+            `Заказ #${shortId} · ${info.priceInRobux} R$` +
+            priceWarning;
+          try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch {}
+        } else {
+          const balance = await getRobuxBalance(cookie);
+          const balanceLine = balance !== null ? `\n💰 Баланс: ${balance.toLocaleString()} R$` : "";
+          await ctx.reply(
+            `❌ <b>Ошибка автовыкупа</b>\n` +
+            `Заказ #${orderId.slice(-6).toUpperCase()}\n` +
+            `Геймпасс: ${escapeHtml(info.name)} · ${info.priceInRobux} R$${priceWarning}\n` +
+            `Причина: <code>${escapeHtml(result.msg)}</code>${balanceLine}\n\n` +
+            `<i>Используйте 📋 Скрипт как запасной вариант.</i>`,
+            { parse_mode: "HTML" },
+          );
+        }
+      } catch (err) {
+        console.error("[pb] error:", err);
+        await ctx.reply("❌ Ошибка автовыкупа. Используйте скрипт.");
       }
       return;
     }

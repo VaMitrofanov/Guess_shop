@@ -947,3 +947,152 @@ export function buildPurchaseScript(info: GamepassProductInfo): string {
     `})()`,
   ].join("");
 }
+
+// ── Server-side purchase via .ROBLOSECURITY cookie ──────────────────────────
+
+let purchaseCsrfToken: string | null = null;
+
+export function resetPurchaseCsrf(): void {
+  purchaseCsrfToken = null;
+}
+
+async function purchaseFetch(
+  url: string,
+  cookie: string,
+  init: RequestInit = {},
+  attempt = 1,
+  _csrfRetried = false,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  try {
+    const res = await fetch(url, {
+      ...init,
+      headers: {
+        ...ROBLOX_HEADERS,
+        Cookie: `.ROBLOSECURITY=${cookie}`,
+        ...(purchaseCsrfToken ? { "x-csrf-token": purchaseCsrfToken } : {}),
+        ...(init.headers ?? {}),
+      },
+      signal: controller.signal,
+    });
+
+    if (res.status === 403 && !_csrfRetried) {
+      const csrf = res.headers.get("x-csrf-token");
+      if (csrf) {
+        purchaseCsrfToken = csrf;
+        console.log(`[Roblox/purchase] CSRF 403 — token updated, retrying: ${url}`);
+        clearTimeout(timer);
+        return purchaseFetch(url, cookie, init, attempt, true);
+      }
+    }
+
+    if (res.status === 429 && attempt < MAX_RETRIES) {
+      console.warn(`[Roblox/purchase] 429 rate limited — waiting 2.5s`);
+      await sleep(2_500);
+      return purchaseFetch(url, cookie, init, attempt + 1, _csrfRetried);
+    }
+
+    if (res.status >= 500 && attempt < MAX_RETRIES) {
+      await sleep(RETRY_DELAY);
+      return purchaseFetch(url, cookie, init, attempt + 1, _csrfRetried);
+    }
+
+    return res;
+  } catch (err: any) {
+    const isRetryable =
+      err?.name === "AbortError" ||
+      err?.name === "TimeoutError" ||
+      (err?.name === "TypeError" &&
+        typeof err?.message === "string" &&
+        err.message.toLowerCase().includes("fetch failed"));
+
+    if (isRetryable && attempt < MAX_RETRIES) {
+      await sleep(RETRY_DELAY);
+      return purchaseFetch(url, cookie, init, attempt + 1, _csrfRetried);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export interface PurchaseResult {
+  success: boolean;
+  msg:     string;
+  price?:  number;
+  reason?: string;
+}
+
+export async function purchaseGamepassDirect(
+  productId: number,
+  expectedPrice: number,
+  expectedSellerId: number,
+  cookie: string,
+): Promise<PurchaseResult> {
+  try {
+    const res = await purchaseFetch(
+      `https://economy.roblox.com/v1/purchases/products/${productId}`,
+      cookie,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          expectedCurrency: 1,
+          expectedPrice,
+          expectedSellerId,
+        }),
+      },
+    );
+
+    const json: any = await res.json().catch(() => null);
+
+    if (!json) {
+      return { success: false, msg: `HTTP ${res.status} — не удалось распарсить ответ` };
+    }
+
+    if (json.purchased) {
+      return {
+        success: true,
+        msg: `Куплено за ${json.price ?? expectedPrice} R$`,
+        price: json.price ?? expectedPrice,
+      };
+    }
+
+    const reason = json.reason ?? json.errorMsg ?? "Неизвестная ошибка";
+    return { success: false, msg: reason, reason };
+  } catch (err: any) {
+    return { success: false, msg: `Сетевая ошибка: ${err?.message ?? err}` };
+  }
+}
+
+export async function getRobuxBalance(cookie: string): Promise<number | null> {
+  try {
+    const res = await purchaseFetch(
+      "https://economy.roblox.com/v1/user/currency",
+      cookie,
+    );
+    if (!res.ok) return null;
+    const json: any = await res.json().catch(() => null);
+    return json?.robux ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getAuthenticatedUser(
+  cookie: string,
+): Promise<{ id: number; name: string } | null> {
+  try {
+    const res = await purchaseFetch(
+      "https://users.roblox.com/v1/users/authenticated",
+      cookie,
+    );
+    if (!res.ok) return null;
+    const json: any = await res.json().catch(() => null);
+    return json?.id ? { id: json.id, name: json.name ?? json.displayName ?? "Unknown" } : null;
+  } catch {
+    return null;
+  }
+}
