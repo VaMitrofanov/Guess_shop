@@ -73,7 +73,7 @@ export default function BottomNav({
             className="twa-press"
             onClick={() => { if (!isActive) haptic.select(); onChange(id); }}
             style={{
-              flex: 1, padding: "8px 1px 7px", border: "none", background: "none",
+              flex: 1, padding: "10px 1px 8px", border: "none", background: "none",
               cursor: "pointer", display: "flex", flexDirection: "column",
               alignItems: "center", gap: 3,
               color: isActive ? C.accent : C.textTertiary,
@@ -95,15 +95,15 @@ export default function BottomNav({
                   <div style={{
                     position: "absolute", top: -4, right: -6,
                     background: C.red, color: "#fff",
-                    fontSize: 9, fontWeight: 700, lineHeight: 1,
-                    padding: "2px 4px", borderRadius: 8, minWidth: 14,
+                    fontSize: 10, fontWeight: 700, lineHeight: 1,
+                    padding: "2px 5px", borderRadius: 8, minWidth: 15,
                     textAlign: "center" as const,
                   }}>
                     {badge > 99 ? "99+" : badge}
                   </div>
                 )}
               </div>
-              <span style={{ fontSize: 10, fontWeight: isActive ? 600 : 400, letterSpacing: 0.1 }}>
+              <span style={{ fontSize: 11, fontWeight: isActive ? 600 : 400, letterSpacing: 0.1 }}>
                 {label}
               </span>
             </div>

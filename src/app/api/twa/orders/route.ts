@@ -36,9 +36,10 @@ function buildTabWhere(tab: FilterTab): any {
   }
 }
 
-function sortForTab(tab: FilterTab): "asc" | "desc" {
-  if (tab === "BUYOUT" || tab === "DIRECT" || tab === "ERROR" || tab === "AWAITING_LINK") return "asc";
-  return "desc";
+function orderByForTab(tab: FilterTab): any {
+  if (tab === "BUYOUT" || tab === "DIRECT") return [{ pendingAt: "asc" }, { createdAt: "asc" }];
+  if (tab === "ERROR" || tab === "AWAITING_LINK") return { createdAt: "asc" };
+  return { createdAt: "desc" };
 }
 
 export async function GET(req: NextRequest) {
@@ -58,7 +59,7 @@ export async function GET(req: NextRequest) {
   const tabWhere = isVirtualTab
     ? buildTabWhere(tab as FilterTab)
     : (VALID_STATUSES.includes(tab as any) ? { status: tab } : {});
-  const sortDir = isVirtualTab ? sortForTab(tab as FilterTab) : "desc";
+  const orderBy = isVirtualTab ? orderByForTab(tab as FilterTab) : { createdAt: "desc" as const };
 
   let searchWhere: any = {};
   if (q) {
@@ -89,7 +90,7 @@ export async function GET(req: NextRequest) {
   const take = skipCounts ? limit + 1 : limit;
   const ordersPromise = (prisma as any).wbOrder.findMany({
     where,
-    orderBy: { createdAt: sortDir },
+    orderBy,
     skip,
     take,
     include: {

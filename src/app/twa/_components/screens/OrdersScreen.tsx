@@ -156,9 +156,9 @@ function CopyBtn({ text, label }: { text: string; label?: string }) {
         border: "none",
         borderRadius: 8,
         color: copied ? C.green : C.textSecondary,
-        fontSize: 12.5,
+        fontSize: 14,
         fontWeight: 500,
-        padding: "6px 11px",
+        padding: "8px 14px",
         cursor: "pointer",
         flexShrink: 0,
       }}
@@ -219,10 +219,10 @@ function DataRow({ icon, children, copyText: ct }: {
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: 10,
-      padding: "6px 0", minWidth: 0,
+      padding: "7px 0", minWidth: 0,
     }}>
-      <span style={{ fontSize: 15, flexShrink: 0 }}>{icon}</span>
-      <div style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 500, color: C.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <span style={{ fontSize: 16, flexShrink: 0 }}>{icon}</span>
+      <div style={{ flex: 1, minWidth: 0, fontSize: 16, fontWeight: 500, color: C.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {children}
       </div>
       {ct && <CopyBtn text={ct} />}
@@ -262,10 +262,10 @@ function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) =
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: C.textSecondary }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: C.textSecondary }}>
           Заметка
         </span>
-        {flash && <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>✓</span>}
+        {flash && <span style={{ fontSize: 14, color: C.green, fontWeight: 600 }}>✓</span>}
       </div>
       <textarea
         value={note}
@@ -277,7 +277,7 @@ function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) =
         style={{
           background: hasNote ? `${C.yellow}14` : "rgba(255,255,255,0.06)",
           border: hasNote ? `1px solid ${C.yellow}40` : "1px solid transparent",
-          borderRadius: 10, color: C.textPrimary, fontSize: 14, lineHeight: 1.4,
+          borderRadius: 10, color: C.textPrimary, fontSize: 15, lineHeight: 1.4,
           padding: "10px 12px", resize: "vertical", outline: "none",
           width: "100%", boxSizing: "border-box", fontFamily: "inherit",
         }}
@@ -288,8 +288,8 @@ function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) =
           onClick={e => { e.stopPropagation(); commit(); }}
           disabled={saving}
           style={{
-            alignSelf: "flex-start", padding: "6px 14px", borderRadius: 8, border: "none",
-            background: C.accent, color: "#fff", fontSize: 12, fontWeight: 600,
+            alignSelf: "flex-start", padding: "8px 16px", borderRadius: 8, border: "none",
+            background: C.accent, color: "#fff", fontSize: 14, fontWeight: 600,
             cursor: "pointer", opacity: saving ? 0.7 : 1,
           }}
         >
@@ -357,25 +357,25 @@ function ActionPanel({
   const hasGamepass = !!order.gamepassUrl;
 
   return (
-    <div style={{ display: "flex", gap: 7, padding: "10px 16px 14px" }}>
+    <div style={{ display: "flex", gap: 8, padding: "12px 16px 16px" }}>
       {hasGamepass && (
         <button className="twa-press" onClick={doPurchase} disabled={loading}
-          style={{ flex: 2, padding: "12px", border: "none", borderRadius: 12, background: "rgba(48,209,88,0.14)", color: "#30d158", fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+          style={{ flex: 2, padding: "14px", border: "none", borderRadius: 12, background: "rgba(48,209,88,0.14)", color: "#30d158", fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
           {loading ? "⏳…" : "Выкупить"}
         </button>
       )}
       {showError && (
         <button className="twa-press" onClick={() => doAction("set-error")} disabled={loading}
-          style={{ flex: 1, padding: "12px", border: "none", borderRadius: 12, background: "rgba(255,149,0,0.12)", color: C.orange, fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+          style={{ flex: 1, padding: "14px", border: "none", borderRadius: 12, background: "rgba(255,149,0,0.12)", color: C.orange, fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
           Ошибка
         </button>
       )}
       <button className="twa-press" onClick={() => doAction("complete")} disabled={loading}
-        style={{ flex: 1, padding: "12px", border: "none", borderRadius: 12, background: "rgba(10,132,255,0.12)", color: C.blue, fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+        style={{ flex: 1, padding: "14px", border: "none", borderRadius: 12, background: "rgba(10,132,255,0.12)", color: C.blue, fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
         Выкуплено
       </button>
       <button className="twa-press" onClick={() => doAction("reject")} disabled={loading}
-        style={{ width: 42, flexShrink: 0, padding: "12px 0", border: `1px solid ${C.red}55`, borderRadius: 12, background: "transparent", color: C.red, fontSize: 17, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+        style={{ width: 44, flexShrink: 0, padding: "14px 0", border: `1px solid ${C.red}55`, borderRadius: 12, background: "transparent", color: C.red, fontSize: 18, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
         ✕
       </button>
     </div>
@@ -426,16 +426,16 @@ function MoveToModal({ order, token, onDone, onClose }: {
       background: "rgba(0,0,0,0.15)",
       display: "flex", flexDirection: "column", gap: 10,
     }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: C.textSecondary }}>Перевести в раздел:</div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: C.textSecondary }}>Перевести в раздел:</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
         {MOVE_TARGETS.map(t => (
           <button key={t.id} className="twa-press-sm"
             onClick={() => setTarget(t.id)}
             style={{
-              padding: "6px 12px", borderRadius: 999, border: "none", cursor: "pointer",
+              padding: "8px 14px", borderRadius: 999, border: "none", cursor: "pointer",
               background: target === t.id ? `${t.color}33` : "rgba(255,255,255,0.08)",
               color: target === t.id ? t.color : C.textSecondary,
-              fontSize: 12, fontWeight: 600,
+              fontSize: 14, fontWeight: 600,
             }}>
             {t.label}
           </button>
@@ -448,18 +448,18 @@ function MoveToModal({ order, token, onDone, onClose }: {
         rows={2}
         style={{
           background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10,
-          color: C.textPrimary, fontSize: 13, lineHeight: 1.35,
-          padding: "8px 10px", resize: "none", outline: "none",
+          color: C.textPrimary, fontSize: 15, lineHeight: 1.4,
+          padding: "10px 12px", resize: "none", outline: "none",
           width: "100%", boxSizing: "border-box", fontFamily: "inherit",
         }}
       />
       <div style={{ display: "flex", gap: 8 }}>
         <button className="twa-press" onClick={onClose}
-          style={{ flex: 1, padding: "10px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 13, fontWeight: 500, cursor: "pointer" }}>
+          style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
           Отмена
         </button>
         <button className="twa-press" onClick={submit} disabled={loading || !target || !note.trim()}
-          style={{ flex: 2, padding: "10px", borderRadius: 10, border: "none", background: C.accent, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: loading || !target || !note.trim() ? 0.5 : 1 }}>
+          style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: C.accent, color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading || !target || !note.trim() ? 0.5 : 1 }}>
           {loading ? "…" : "Перевести"}
         </button>
       </div>
@@ -495,10 +495,7 @@ function OrderCard({
   const tabBadge = currentTab === "ALL" ? orderTabBadge(order) : null;
   const showMoveBtn = currentTab === "AWAITING_LINK" || currentTab === "FAVORITES";
 
-  const timeRef = (() => {
-    if (currentTab === "BUYOUT" || currentTab === "DIRECT") return order.pendingAt ?? order.createdAt;
-    return order.createdAt;
-  })();
+  const timeRef = order.createdAt;
 
   return (
     <article className={exiting ? "twa-card-exit" : undefined} style={{
@@ -513,16 +510,16 @@ function OrderCard({
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
             <span style={{
-              fontSize: 11, fontWeight: 800, color: "#fff",
+              fontSize: 12, fontWeight: 800, color: "#fff",
               background: platform === "tg" ? "#229ED9" : platform === "vk" ? "#0077FF" : C.elevated,
-              borderRadius: 5, padding: "3px 7px", flexShrink: 0,
+              borderRadius: 5, padding: "4px 8px", flexShrink: 0,
             }}>
               {platform === "tg" ? "T" : platform === "vk" ? "V" : "—"}
             </span>
             <span
               onClick={e => { e.stopPropagation(); haptic.impact("light"); openContact(order.user); }}
               style={{
-                fontSize: 16, fontWeight: 600, color: "#7ec5ff", cursor: "pointer",
+                fontSize: 17, fontWeight: 600, color: "#7ec5ff", cursor: "pointer",
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
               }}
             >
@@ -530,8 +527,8 @@ function OrderCard({
             </span>
             {tabBadge && (
               <span style={{
-                fontSize: 11, fontWeight: 600, color: tabBadge.color,
-                background: `${tabBadge.color}1c`, padding: "3px 8px",
+                fontSize: 12, fontWeight: 600, color: tabBadge.color,
+                background: `${tabBadge.color}1c`, padding: "4px 9px",
                 borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
               }}>
                 {tabBadge.label}
@@ -543,7 +540,7 @@ function OrderCard({
             onClick={e => { e.stopPropagation(); haptic.impact("light"); onToggleFavorite(); }}
             style={{
               background: "transparent", border: "none", cursor: "pointer",
-              fontSize: 20, padding: "2px 4px", flexShrink: 0,
+              fontSize: 22, padding: "4px 6px", flexShrink: 0,
               opacity: order.isFavorite ? 1 : 0.35,
             }}
           >
@@ -553,16 +550,16 @@ function OrderCard({
 
         {/* Time + amount row */}
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <span style={{ fontSize: 15, fontWeight: 500, color: ageColor(timeRef), ...tabular }}>
+          <span style={{ fontSize: 16, fontWeight: 500, color: ageColor(timeRef), ...tabular }}>
             ⏱ {fmtAge(timeRef)}
           </span>
-          <span style={{ fontSize: 13, color: C.textTertiary }}>—</span>
-          <span style={{ fontSize: 20, fontWeight: 700, color: C.textPrimary, ...tabular }}>
+          <span style={{ fontSize: 14, color: C.textTertiary }}>—</span>
+          <span style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, ...tabular }}>
             {displayAmount.toLocaleString("ru-RU")}
           </span>
-          <span style={{ fontSize: 13, fontWeight: 600, color: C.accent }}>R$</span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: C.accent }}>R$</span>
           {showCleanHint && (
-            <span style={{ fontSize: 13, color: C.textTertiary, ...tabular }}>
+            <span style={{ fontSize: 14, color: C.textTertiary, ...tabular }}>
               ({order.amount.toLocaleString("ru-RU")})
             </span>
           )}
@@ -583,7 +580,7 @@ function OrderCard({
         )}
         {!order.isDirectOrder && (
           <DataRow icon="📦" copyText={order.wbCode}>
-            <span style={{ fontFamily: MONO, fontWeight: 700, color: C.accent, letterSpacing: 1.5, fontSize: 15 }}>
+            <span style={{ fontFamily: MONO, fontWeight: 700, color: C.accent, letterSpacing: 1.5, fontSize: 16 }}>
               {order.wbCode}
             </span>
           </DataRow>
@@ -600,7 +597,7 @@ function OrderCard({
         <div style={{
           margin: "0 14px 10px", padding: "6px 10px",
           background: `${C.red}14`, borderRadius: 8,
-          fontSize: 12, color: C.red,
+          fontSize: 14, color: C.red,
           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
         }}>
           {order.rejectionReason}
@@ -612,8 +609,8 @@ function OrderCard({
         <div style={{ padding: "0 14px 10px" }}>
           <button className="twa-press-sm" onClick={e => { e.stopPropagation(); setMoveOpen(true); }}
             style={{
-              width: "100%", padding: "9px", borderRadius: 10, border: `1px solid ${C.accent}44`,
-              background: "transparent", color: C.accent, fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+              width: "100%", padding: "12px", borderRadius: 10, border: `1px solid ${C.accent}44`,
+              background: "transparent", color: C.accent, fontSize: 14, fontWeight: 600, cursor: "pointer",
             }}>
             Перевести в другой раздел
           </button>
@@ -654,9 +651,9 @@ function SearchBar({ value, onChange }: { value: string; onChange: (v: string) =
     <div style={{
       display: "flex", alignItems: "center", gap: 8,
       background: "rgba(118,118,128,0.24)",
-      borderRadius: 11, padding: "8px 11px",
+      borderRadius: 12, padding: "10px 14px",
     }}>
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none"
            stroke={C.textSecondary} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
            style={{ flexShrink: 0 }}>
         <circle cx="11" cy="11" r="7" />
@@ -668,7 +665,7 @@ function SearchBar({ value, onChange }: { value: string; onChange: (v: string) =
         placeholder="Ник, @username, WB-код, ссылка, ID"
         style={{
           background: "transparent", border: "none", outline: "none",
-          color: C.textPrimary, fontSize: 14.5, flex: 1, minWidth: 0,
+          color: C.textPrimary, fontSize: 16, flex: 1, minWidth: 0,
           padding: 0, fontFamily: "inherit",
         }}
       />
@@ -678,8 +675,8 @@ function SearchBar({ value, onChange }: { value: string; onChange: (v: string) =
           onClick={() => { haptic.impact("light"); setLocal(""); onChange(""); }}
           style={{
             background: "rgba(255,255,255,0.18)", border: "none",
-            width: 18, height: 18, borderRadius: 9,
-            color: C.bg, fontSize: 11, fontWeight: 700,
+            width: 22, height: 22, borderRadius: 11,
+            color: C.bg, fontSize: 12, fontWeight: 700,
             cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
             flexShrink: 0, lineHeight: 1,
           }}
@@ -1025,11 +1022,11 @@ export default function OrdersScreen({
                 className="twa-press-sm"
                 onClick={() => { if (f.id !== filter) haptic.select(); setFilter(f.id); }}
                 style={{
-                  flexShrink: 0, padding: "7px 14px", borderRadius: 999,
+                  flexShrink: 0, padding: "9px 16px", borderRadius: 999,
                   border: "none",
                   background: isActive ? C.accent : "rgba(118,118,128,0.22)",
                   color: isActive ? "#fff" : C.textPrimary,
-                  fontSize: 14, fontWeight: isActive ? 600 : 500,
+                  fontSize: 15, fontWeight: isActive ? 600 : 500,
                   cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
                   letterSpacing: 0.1,
                 }}
@@ -1038,8 +1035,8 @@ export default function OrdersScreen({
                 {count > 0 && (
                   <span style={{
                     background: isActive ? "rgba(255,255,255,0.28)" : isUrgent ? C.red : "rgba(255,255,255,0.18)",
-                    color: "#fff", fontSize: 11, fontWeight: 700,
-                    padding: "2px 7px", borderRadius: 999, minWidth: 18, textAlign: "center",
+                    color: "#fff", fontSize: 12, fontWeight: 700,
+                    padding: "3px 8px", borderRadius: 999, minWidth: 20, textAlign: "center",
                     ...tabular,
                   }}>
                     {count}
@@ -1067,7 +1064,7 @@ export default function OrdersScreen({
         ) : (
           <div className="twa-fade-in" style={{ padding: "12px 16px 32px", display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 2px" }}>
-              <span style={{ fontSize: 13, color: C.textSecondary, letterSpacing: 0.1 }}>{summaryText}</span>
+              <span style={{ fontSize: 14, color: C.textSecondary, letterSpacing: 0.1 }}>{summaryText}</span>
             </div>
 
             {allOrders.map(order => (
@@ -1095,7 +1092,7 @@ export default function OrdersScreen({
                     width: "100%",
                     background: "rgba(118,118,128,0.18)", border: "none", borderRadius: 12,
                     color: loadingMore ? C.textTertiary : C.textPrimary,
-                    fontSize: 14, fontWeight: 500, padding: "13px",
+                    fontSize: 15, fontWeight: 500, padding: "14px",
                     cursor: loadingMore ? "default" : "pointer",
                     marginTop: 4, opacity: loadingMore ? 0.6 : 1,
                     letterSpacing: 0.1,
@@ -1150,7 +1147,7 @@ function MiniDashboard({ counts, sums, onTap }: {
               flex: 1, minWidth: 0,
               background: C.card,
               borderRadius: 14,
-              padding: "10px 12px",
+              padding: "12px 14px",
               display: "flex", flexDirection: "column", gap: 3,
               boxShadow: SHADOW.card,
               position: "relative",
@@ -1164,7 +1161,7 @@ function MiniDashboard({ counts, sums, onTap }: {
               background: `linear-gradient(180deg, ${g.color}0d 0%, transparent 60%)`,
             }} />
             <div style={{
-              fontSize: 10.5, fontWeight: 600, color: g.color,
+              fontSize: 12, fontWeight: 600, color: g.color,
               letterSpacing: 0.3, textTransform: "uppercase",
               whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
               position: "relative",
@@ -1172,18 +1169,18 @@ function MiniDashboard({ counts, sums, onTap }: {
               {g.label}
             </div>
             <div style={{
-              fontSize: 18, fontWeight: 700, color: C.textPrimary,
+              fontSize: 20, fontWeight: 700, color: C.textPrimary,
               letterSpacing: -0.5, ...tabular, lineHeight: 1.1,
               position: "relative",
             }}>
               {fmtRobux(primary)}
-              <span style={{ fontSize: 11, fontWeight: 500, color: C.textSecondary, marginLeft: 2 }}>R$</span>
-              <span style={{ fontSize: 11, fontWeight: 500, color: C.textTertiary, marginLeft: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: C.textSecondary, marginLeft: 2 }}>R$</span>
+              <span style={{ fontSize: 13, fontWeight: 500, color: C.textTertiary, marginLeft: 4 }}>
                 ({fmtRobux(secondary)})
               </span>
             </div>
             <div style={{
-              fontSize: 11, color: C.textTertiary, ...tabular,
+              fontSize: 13, color: C.textTertiary, ...tabular,
               position: "relative",
             }}>
               {count} {count === 1 ? "заказ" : count < 5 ? "заказа" : "заказов"}
@@ -1200,8 +1197,8 @@ function EmptyState({ filter, query }: { filter: FilterTab; query: string }) {
     return (
       <div style={{ padding: 48, textAlign: "center", color: C.textSecondary }}>
         <div style={{ fontSize: 36, marginBottom: 10 }}>🔎</div>
-        <div style={{ fontSize: 14, marginBottom: 4 }}>Ничего не нашлось</div>
-        <div style={{ fontSize: 12, color: C.textTertiary }}>
+        <div style={{ fontSize: 16, marginBottom: 4 }}>Ничего не нашлось</div>
+        <div style={{ fontSize: 14, color: C.textTertiary }}>
           Попробуй ник Roblox, @username, WB-код или ID
         </div>
       </div>
@@ -1220,7 +1217,7 @@ function EmptyState({ filter, query }: { filter: FilterTab; query: string }) {
   return (
     <div style={{ padding: 48, textAlign: "center", color: C.textSecondary }}>
       <div style={{ fontSize: 36, marginBottom: 10 }}>📋</div>
-      <div style={{ fontSize: 14 }}>{labels[filter]}</div>
+      <div style={{ fontSize: 16 }}>{labels[filter]}</div>
     </div>
   );
 }

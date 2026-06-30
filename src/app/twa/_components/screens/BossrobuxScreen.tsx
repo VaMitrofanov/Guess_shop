@@ -28,7 +28,7 @@ interface GamepassItem {
 
 function SectionHeader({ title }: { title: string }) {
   return (
-    <div style={{ fontSize: 12, fontWeight: 600, color: C.textSecondary, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8, paddingLeft: 4 }}>
+    <div style={{ fontSize: 14, fontWeight: 600, color: C.textSecondary, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8, paddingLeft: 4 }}>
       {title}
     </div>
   );
@@ -41,9 +41,9 @@ function Card({ children }: { children: React.ReactNode }) {
 function InfoRow({ label, value, last = false }: { label: string; value: React.ReactNode; last?: boolean }) {
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 16px", gap: 12 }}>
-        <span style={{ fontSize: 15, color: C.textSecondary }}>{label}</span>
-        <span style={{ fontSize: 15, color: "#e5e5ea", fontWeight: 500, fontFamily: "monospace", letterSpacing: 0.2 }}>{value}</span>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", gap: 12 }}>
+        <span style={{ fontSize: 16, color: C.textSecondary }}>{label}</span>
+        <span style={{ fontSize: 16, color: "#e5e5ea", fontWeight: 500, fontFamily: "monospace", letterSpacing: 0.2 }}>{value}</span>
       </div>
       {!last && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
     </>
@@ -93,8 +93,8 @@ function SegmentControl({ value, onChange }: { value: "nick" | "id"; onChange: (
           className="twa-press-sm"
           onClick={() => { if (o.id !== value) { haptic.select(); onChange(o.id); } }}
           style={{
-            flex: 1, padding: "8px 0", border: "none", borderRadius: 8, cursor: "pointer",
-            fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+            flex: 1, padding: "10px 0", border: "none", borderRadius: 8, cursor: "pointer",
+            fontSize: 15, fontWeight: 600, fontFamily: "inherit",
             background: value === o.id ? C.card : "transparent",
             color: value === o.id ? "#e5e5ea" : C.textTertiary,
             boxShadow: value === o.id ? "0 1px 3px rgba(0,0,0,0.3)" : "none",
@@ -133,27 +133,27 @@ function GamepassCard({
       )}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{
-          fontSize: 14, fontWeight: 600, color: "#e5e5ea",
+          fontSize: 16, fontWeight: 600, color: "#e5e5ea",
           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
         }}>
           {gp.name}
         </div>
-        <div style={{ fontSize: 12, color: C.textTertiary, marginTop: 2 }}>
+        <div style={{ fontSize: 14, color: C.textTertiary, marginTop: 2 }}>
           {gp.price.toLocaleString()} R$ · {gp.sellerName}
           {gp.isManagedPricing && <span style={{ color: C.orange }}> · MP</span>}
         </div>
       </div>
       {bought ? (
-        <span style={{ fontSize: 13, fontWeight: 600, color: C.green, flexShrink: 0 }}>✅</span>
+        <span style={{ fontSize: 15, fontWeight: 600, color: C.green, flexShrink: 0 }}>✅</span>
       ) : (
         <button
           className="twa-press-sm"
           onClick={onBuy}
           disabled={buying || gp.isForSale === false}
           style={{
-            flexShrink: 0, padding: "7px 14px", border: "none", borderRadius: 10,
+            flexShrink: 0, padding: "9px 16px", border: "none", borderRadius: 10,
             background: gp.isForSale === false ? C.elevated : C.green,
-            color: "#fff", fontSize: 13, fontWeight: 600, cursor: buying ? "default" : "pointer",
+            color: "#fff", fontSize: 15, fontWeight: 600, cursor: buying ? "default" : "pointer",
             opacity: buying ? 0.5 : (gp.isForSale === false ? 0.4 : 1),
             fontFamily: "inherit", transition: "opacity 0.2s",
           }}
@@ -191,15 +191,15 @@ function ConfirmPurchase({
           {gp.image && (
             <img src={gp.image} alt="" style={{ width: 56, height: 56, borderRadius: 12, marginBottom: 10 }} />
           )}
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#e5e5ea" }}>Купить «{gp.name}»?</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#e5e5ea" }}>Купить «{gp.name}»?</div>
         </div>
 
-        <div style={{ background: C.elevated, borderRadius: 12, padding: "12px 14px", marginBottom: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#e5e5ea", marginBottom: 6 }}>
+        <div style={{ background: C.elevated, borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, color: "#e5e5ea", marginBottom: 6 }}>
             <span>Цена</span>
             <span style={{ fontWeight: 600 }}>{gp.price.toLocaleString()} R$</span>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: C.textSecondary }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, color: C.textSecondary }}>
             <span>Продавец</span>
             <span>{gp.sellerName}</span>
           </div>
@@ -208,7 +208,7 @@ function ConfirmPurchase({
         {gp.isManagedPricing && (
           <div style={{
             background: `${C.orange}18`, borderRadius: 10, padding: "10px 12px", marginBottom: 12,
-            fontSize: 12, color: C.orange, fontWeight: 500,
+            fontSize: 14, color: C.orange, fontWeight: 500,
           }}>
             ⚠️ Managed pricing · база {gp.basePriceInRobux?.toLocaleString()} R$, Roblox выставил {gp.price.toLocaleString()} R$
           </div>
@@ -331,7 +331,7 @@ function BuyoutSection({ token }: { token: string }) {
 
   if (orders.length === 0) return (
     <Card>
-      <div style={{ padding: "20px 16px", textAlign: "center", color: C.textTertiary, fontSize: 14 }}>
+      <div style={{ padding: "20px 16px", textAlign: "center", color: C.textTertiary, fontSize: 16 }}>
         Нет заказов к выкупу
       </div>
     </Card>
@@ -342,45 +342,45 @@ function BuyoutSection({ token }: { token: string }) {
       {orders.map((order, i) => {
         const dirty = Math.ceil(order.amount / 0.7);
         const nick = order.user.username ? `@${order.user.username}` : order.user.name ?? "—";
-        const timeRef = order.pendingAt ?? order.createdAt;
+        const timeRef = order.createdAt;
         const isBuying = buying === order.id;
         return (
           <div key={order.id}>
             {i > 0 && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
-            <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
                   <span style={{
-                    fontSize: 11, fontWeight: 800, color: "#fff",
+                    fontSize: 12, fontWeight: 800, color: "#fff",
                     background: order.user.tgId ? "#229ED9" : order.user.vkId ? "#0077FF" : C.elevated,
-                    borderRadius: 5, padding: "2px 6px", flexShrink: 0,
+                    borderRadius: 5, padding: "4px 8px", flexShrink: 0,
                   }}>
                     {order.user.tgId ? "T" : order.user.vkId ? "V" : "—"}
                   </span>
                   <span style={{
-                    fontSize: 15, fontWeight: 600, color: "#7ec5ff",
+                    fontSize: 17, fontWeight: 600, color: "#7ec5ff",
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                   }}>{nick}</span>
                   {order.isDirectOrder && (
                     <span style={{
-                      fontSize: 11, fontWeight: 600, color: C.blue,
-                      background: `${C.blue}1c`, padding: "2px 7px",
+                      fontSize: 12, fontWeight: 600, color: C.blue,
+                      background: `${C.blue}1c`, padding: "4px 9px",
                       borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
                     }}>Прямой</span>
                   )}
                 </div>
-                <span style={{ fontSize: 13, fontWeight: 500, color: ageColor(timeRef), flexShrink: 0, ...tabular }}>
+                <span style={{ fontSize: 15, fontWeight: 500, color: ageColor(timeRef), flexShrink: 0, ...tabular }}>
                   ⏱ {fmtAge(timeRef)}
                 </span>
               </div>
 
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                  <span style={{ fontSize: 18, fontWeight: 700, color: "#e5e5ea", ...tabular }}>
+                  <span style={{ fontSize: 22, fontWeight: 700, color: "#e5e5ea", ...tabular }}>
                     {dirty.toLocaleString("ru-RU")}
                   </span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: C.accent }}>R$</span>
-                  <span style={{ fontSize: 13, color: C.textTertiary, ...tabular }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: C.accent }}>R$</span>
+                  <span style={{ fontSize: 14, color: C.textTertiary, ...tabular }}>
                     ({order.amount.toLocaleString("ru-RU")})
                   </span>
                 </div>
@@ -390,9 +390,9 @@ function BuyoutSection({ token }: { token: string }) {
                     onClick={() => doPurchase(order)}
                     disabled={!!buying}
                     style={{
-                      padding: "8px 16px", border: "none", borderRadius: 10,
+                      padding: "10px 18px", border: "none", borderRadius: 10,
                       background: "rgba(48,209,88,0.14)", color: "#30d158",
-                      fontSize: 14, fontWeight: 600, cursor: "pointer",
+                      fontSize: 15, fontWeight: 600, cursor: "pointer",
                       opacity: isBuying ? 0.5 : 1,
                     }}
                   >
@@ -402,12 +402,12 @@ function BuyoutSection({ token }: { token: string }) {
               </div>
 
               {order.robloxUsername && (
-                <div style={{ fontSize: 14, color: C.textSecondary }}>
+                <div style={{ fontSize: 15, color: C.textSecondary }}>
                   🎮 {order.robloxUsername}
                 </div>
               )}
               {order.wbCode && (
-                <div style={{ fontFamily: MONO, fontWeight: 700, color: C.accent, letterSpacing: 1.5, fontSize: 14 }}>
+                <div style={{ fontFamily: MONO, fontWeight: 700, color: C.accent, letterSpacing: 1.5, fontSize: 15 }}>
                   📦 {order.wbCode}
                 </div>
               )}
@@ -605,10 +605,10 @@ export default function BossrobuxScreen({ token }: { token: string }) {
   if (loading) return <Skeleton />;
   if (error) return (
     <div style={{ padding: 24, textAlign: "center" }}>
-      <div style={{ color: C.red, fontSize: 14, marginBottom: 12 }}>{error}</div>
+      <div style={{ color: C.red, fontSize: 16, marginBottom: 12 }}>{error}</div>
       <button className="twa-press" onClick={load} style={{
         background: C.card, border: "none", borderRadius: 10,
-        color: C.accent, fontSize: 14, fontWeight: 600, padding: "10px 24px", cursor: "pointer",
+        color: C.accent, fontSize: 15, fontWeight: 600, padding: "12px 28px", cursor: "pointer",
       }}>Повторить</button>
     </div>
   );
@@ -626,11 +626,11 @@ export default function BossrobuxScreen({ token }: { token: string }) {
             <>
               <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
                 <StatusDot valid={info.cookieValid !== false} />
-                <span style={{ fontSize: 17, fontWeight: 600, color: "#e5e5ea" }}>
+                <span style={{ fontSize: 18, fontWeight: 600, color: "#e5e5ea" }}>
                   {info.accountName ?? "Неизвестный"}
                 </span>
                 {info.cookieValid === false && (
-                  <span style={{ fontSize: 12, color: C.red, fontWeight: 500 }}>Cookie истёк</span>
+                  <span style={{ fontSize: 14, color: C.red, fontWeight: 500 }}>Cookie истёк</span>
                 )}
               </div>
               <div style={{ height: 1, background: C.border, marginLeft: 16 }} />
@@ -641,8 +641,8 @@ export default function BossrobuxScreen({ token }: { token: string }) {
           ) : (
             <div style={{ padding: "20px 16px", textAlign: "center" }}>
               <div style={{ fontSize: 28, marginBottom: 8 }}>🔑</div>
-              <div style={{ fontSize: 15, color: C.textSecondary }}>Cookie не задан</div>
-              <div style={{ fontSize: 12, color: C.textTertiary, marginTop: 4 }}>Вставьте .ROBLOSECURITY ниже</div>
+              <div style={{ fontSize: 16, color: C.textSecondary }}>Cookie не задан</div>
+              <div style={{ fontSize: 14, color: C.textTertiary, marginTop: 4 }}>Вставьте .ROBLOSECURITY ниже</div>
             </div>
           )}
         </Card>
@@ -655,8 +655,8 @@ export default function BossrobuxScreen({ token }: { token: string }) {
             style={{
               marginTop: 10, width: "100%",
               background: C.card, border: "none", borderRadius: 12,
-              color: C.accent, fontSize: 14, fontWeight: 600,
-              padding: "12px", cursor: refreshing ? "default" : "pointer",
+              color: C.accent, fontSize: 15, fontWeight: 600,
+              padding: "14px", cursor: refreshing ? "default" : "pointer",
               opacity: refreshing ? 0.6 : 1,
             }}
           >
@@ -677,7 +677,7 @@ export default function BossrobuxScreen({ token }: { token: string }) {
               rows={3}
               style={{
                 width: "100%", background: C.elevated, border: "none", borderRadius: 10,
-                color: "#fff", fontSize: 13, padding: "10px 12px",
+                color: "#fff", fontSize: 15, padding: "12px 14px",
                 resize: "vertical", outline: "none", fontFamily: "monospace",
                 lineHeight: 1.4, boxSizing: "border-box",
               }}
@@ -690,8 +690,8 @@ export default function BossrobuxScreen({ token }: { token: string }) {
                 marginTop: 8, width: "100%",
                 background: cookieInput.trim() ? C.green : C.elevated,
                 border: "none", borderRadius: 10,
-                color: "#fff", fontSize: 14, fontWeight: 600,
-                padding: "12px", cursor: saving ? "default" : "pointer",
+                color: "#fff", fontSize: 15, fontWeight: 600,
+                padding: "14px", cursor: saving ? "default" : "pointer",
                 opacity: saving || !cookieInput.trim() ? 0.5 : 1,
                 transition: "background 0.2s, opacity 0.2s",
               }}
@@ -706,13 +706,13 @@ export default function BossrobuxScreen({ token }: { token: string }) {
             marginTop: 8, padding: "10px 14px", borderRadius: 10,
             background: saveMsg.ok ? `${C.green}22` : `${C.red}22`,
             color: saveMsg.ok ? C.green : C.red,
-            fontSize: 13, fontWeight: 500,
+            fontSize: 15, fontWeight: 500,
           }}>
             {saveMsg.ok ? "✅" : "❌"} {saveMsg.text}
           </div>
         )}
 
-        <div style={{ fontSize: 11, color: C.textTertiary, paddingLeft: 4, marginTop: 6 }}>
+        <div style={{ fontSize: 13, color: C.textTertiary, paddingLeft: 4, marginTop: 6 }}>
           Cookie валидируется при сохранении. Обновляй когда меняешь аккаунт.
         </div>
       </section>
@@ -736,7 +736,7 @@ export default function BossrobuxScreen({ token }: { token: string }) {
                   placeholder={searchMode === "nick" ? "Ник Roblox…" : "ID или URL геймпасса…"}
                   style={{
                     flex: 1, background: C.elevated, border: "none", borderRadius: 10,
-                    color: "#fff", fontSize: 14, padding: "11px 14px",
+                    color: "#fff", fontSize: 16, padding: "12px 14px",
                     outline: "none", fontFamily: "inherit", boxSizing: "border-box",
                     minWidth: 0,
                   }}
@@ -746,9 +746,9 @@ export default function BossrobuxScreen({ token }: { token: string }) {
                   onClick={() => { haptic.impact("light"); doSearch(); }}
                   disabled={searching || !searchInput.trim()}
                   style={{
-                    flexShrink: 0, padding: "11px 16px", border: "none", borderRadius: 10,
+                    flexShrink: 0, padding: "12px 18px", border: "none", borderRadius: 10,
                     background: searchInput.trim() ? C.accent : C.elevated,
-                    color: "#fff", fontSize: 14, fontWeight: 600, cursor: searching ? "default" : "pointer",
+                    color: "#fff", fontSize: 16, fontWeight: 600, cursor: searching ? "default" : "pointer",
                     opacity: searching || !searchInput.trim() ? 0.5 : 1,
                     fontFamily: "inherit", transition: "all 0.2s",
                   }}
@@ -763,7 +763,7 @@ export default function BossrobuxScreen({ token }: { token: string }) {
               <>
                 {resolvedUsername && (
                   <div style={{
-                    padding: "8px 14px", fontSize: 12, color: C.textTertiary,
+                    padding: "10px 14px", fontSize: 14, color: C.textTertiary,
                     borderTop: `1px solid ${C.border}`,
                   }}>
                     {searchMode === "nick"
@@ -789,7 +789,7 @@ export default function BossrobuxScreen({ token }: { token: string }) {
             {/* Error / empty */}
             {searchError && (
               <div style={{
-                padding: "14px 14px", fontSize: 13, color: C.textSecondary, textAlign: "center",
+                padding: "14px 14px", fontSize: 15, color: C.textSecondary, textAlign: "center",
                 borderTop: hasSearched ? `1px solid ${C.border}` : "none",
               }}>
                 {searchError}
