@@ -798,16 +798,35 @@ function BuyoutSection({ token }: { token: string }) {
     </Card>
   );
 
+  const directOrders = orders.filter(o => o.isDirectOrder);
+  const wbOrders = orders.filter(o => !o.isDirectOrder);
+  const hasBothGroups = directOrders.length > 0 && wbOrders.length > 0;
+  const sortedOrders = [...directOrders, ...wbOrders];
+
   return (
     <Card>
-      {orders.map((order, i) => {
+      {sortedOrders.map((order, i) => {
         const dirty = Math.ceil(order.amount / 0.7);
         const nick = order.user.username ? `@${order.user.username}` : order.user.name ?? "—";
         const timeRef = order.createdAt;
         const isBuying = buying === order.id;
+        const isFirstWb = hasBothGroups && !order.isDirectOrder && (i === 0 || sortedOrders[i - 1]?.isDirectOrder);
         return (
           <div key={order.id}>
-            {i > 0 && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
+            {hasBothGroups && i === 0 && (
+              <div style={{ padding: "10px 16px 4px", fontSize: 12, fontWeight: 700, color: C.blue, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                Прямые · {directOrders.length}
+              </div>
+            )}
+            {isFirstWb && (
+              <>
+                <div style={{ height: 2, background: C.border, margin: "6px 0" }} />
+                <div style={{ padding: "10px 16px 4px", fontSize: 12, fontWeight: 700, color: C.green, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                  WB · {wbOrders.length}
+                </div>
+              </>
+            )}
+            {i > 0 && !isFirstWb && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
             <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
@@ -900,7 +919,6 @@ export default function BossrobuxScreen({ token }: { token: string }) {
   const [saveMsg, setSaveMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   // ── Search & Purchase state ─────────────────────────────────────────────
-  const [searchMode, setSearchMode] = useState<"nick" | "id">("nick");
   const [searchInput, setSearchInput] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
@@ -980,15 +998,29 @@ export default function BossrobuxScreen({ token }: { token: string }) {
     finally { setSaving(false); }
   }
 
-  // ── Search ──────────────────────────────────────────────────────────────
+  // ── Search (auto-detect: URL → ID → nick) ──────────────────────────────
   async function doSearch() {
     const q = searchInput.trim();
     if (!q) return;
     setSearching(true); setSearchError(""); setSearchResults([]); setResolvedUsername(""); setHasSearched(true);
     setBoughtIds(new Set());
 
+    const urlMatch = q.match(/game-pass(?:es)?\/(\d+)/i);
+    const isIdLike = !urlMatch && /^\d{6,}$/.test(q);
+    const searchById = !!(urlMatch || isIdLike);
+    const gamepassId = urlMatch ? urlMatch[1] : q;
+
     try {
-      if (searchMode === "nick") {
+      if (searchById) {
+        const r = await fetch("/api/twa/roblox-account/purchase", {
+          method: "POST", headers: purchaseHeaders,
+          body: JSON.stringify({ action: "resolve-gamepass", gamepassId }),
+        });
+        const d = await r.json();
+        if (!r.ok) { setSearchError(d.error ?? "Ошибка"); return; }
+        setResolvedUsername(d.sellerName ?? "");
+        setSearchResults([d]);
+      } else {
         const r = await fetch("/api/twa/roblox-account/purchase", {
           method: "POST", headers: purchaseHeaders,
           body: JSON.stringify({ action: "search-by-username", username: q }),
@@ -998,15 +1030,6 @@ export default function BossrobuxScreen({ token }: { token: string }) {
         setResolvedUsername(d.username ?? q);
         setSearchResults(d.gamepasses ?? []);
         if ((d.gamepasses ?? []).length === 0) setSearchError(d.msg ?? "Геймпассы не найдены");
-      } else {
-        const r = await fetch("/api/twa/roblox-account/purchase", {
-          method: "POST", headers: purchaseHeaders,
-          body: JSON.stringify({ action: "resolve-gamepass", gamepassId: q }),
-        });
-        const d = await r.json();
-        if (!r.ok) { setSearchError(d.error ?? "Ошибка"); return; }
-        setResolvedUsername(d.sellerName ?? "");
-        setSearchResults([d]);
       }
       haptic.notify("success");
     } catch { setSearchError("Ошибка сети"); haptic.notify("error"); }
@@ -1119,10 +1142,6 @@ export default function BossrobuxScreen({ token }: { token: string }) {
         <section>
           <SectionHeader title="Поиск и выкуп" />
 
-          <div style={{ marginBottom: 10 }}>
-            <SegmentControl value={searchMode} onChange={v => { setSearchMode(v); setSearchResults([]); setSearchError(""); setHasSearched(false); setSearchInput(""); }} />
-          </div>
-
           <Card>
             <div style={{ padding: 12 }}>
               <div style={{ display: "flex", gap: 8 }}>
@@ -1130,7 +1149,7 @@ export default function BossrobuxScreen({ token }: { token: string }) {
                   value={searchInput}
                   onChange={e => setSearchInput(e.target.value)}
                   onKeyDown={e => { if (e.key === "Enter" && searchInput.trim()) doSearch(); }}
-                  placeholder={searchMode === "nick" ? "Ник Roblox…" : "ID или URL геймпасса…"}
+                  placeholder="Ник, ID или URL геймпасса…"
                   style={{
                     flex: 1, background: C.elevated, border: "none", borderRadius: 10,
                     color: "#fff", fontSize: 16, padding: "12px 14px",
@@ -1163,8 +1182,8 @@ export default function BossrobuxScreen({ token }: { token: string }) {
                     padding: "10px 14px", fontSize: 14, color: C.textTertiary,
                     borderTop: `1px solid ${C.border}`,
                   }}>
-                    {searchMode === "nick"
-                      ? `${resolvedUsername} · ${searchResults.length} геймпасс${searchResults.length === 1 ? "" : searchResults.length < 5 ? "а" : "ов"}`
+                    {searchResults.length > 1
+                      ? `${resolvedUsername} · ${searchResults.length} геймпасс${searchResults.length < 5 ? "а" : "ов"}`
                       : resolvedUsername
                     }
                   </div>

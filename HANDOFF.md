@@ -6,6 +6,64 @@
 
 ---
 
+## Сессия 2026-07-01 (день-7) — 5 фиксов Аккаунт TWA: куки, поиск, Авито, вкладка, сортировка
+
+### Что сделано
+
+5 доработок после реорганизации экрана Аккаунт и системы заказов:
+
+#### 1. Баг: смена куки не обновляла `robloxAccountName`
+TWA `set-cookie` сохранял только `robloxCookie` + `robloxCookieUpdatedAt`, но не `robloxAccountName`. При смене куки на другой аккаунт, `purchaserUsername` в новых заказах привязывался к старому нику. Исправлено — теперь TWA обновляет `robloxAccountName` как и бот `/setcookie`.
+
+#### 2. Объединённый поиск с автодетектом
+Убран SegmentControl «По нику / По ID / URL». Теперь одно поле ввода с автоматическим определением:
+- Содержит `roblox.com/game-pass/` → парсит ID из URL → `resolve-gamepass`
+- Чисто цифры ≥ 6 символов → `resolve-gamepass` (gamepassId)
+- Всё остальное → `search-by-username` (ник)
+
+#### 3. Управление авито-заказами (отмена + редактирование)
+- **Новый API action `edit-avito`:** редактирование amount, gamepassUrl, robloxUsername, note. Guard: `orderSource === "AVITO"`, статус `PENDING/AWAITING_GAMEPASS/ERROR`. Автоматический переход статусов при добавлении/удалении gamepassUrl.
+- **UI в OrdersScreen:** кнопка «✏️ Редактировать» → inline-форма с предзаполненными данными. Кнопка «✕» (reject) из ActionPanel для отмены.
+
+#### 4. Вкладка «Авито» в Заказах
+- **Новый таб AVITO** в OrdersScreen (оранжевый, после «Прямой»)
+- **API:** новый FilterTab `AVITO` в `buildTabWhere()` (фильтр по `orderSource: "AVITO"`, статусы `PENDING/IN_PROGRESS/AWAITING_GAMEPASS/ERROR`)
+- **Исключение из BUYOUT:** авито-заказы больше не смешиваются с WB в «К выкупу» (`orderSource: { not: "AVITO" }`)
+- **SQL counts/sums:** отдельные COUNT и SUM для AVITO
+- **ActionPanel:** работает на вкладке AVITO (Выкупить/Ошибка/Выкуплено/✕)
+- **orderTabBadge:** авито-заказы получают оранжевый бейдж «Авито» на вкладке «Все»
+- **Цены:** грязные R$ на вкладке Авито (как на BUYOUT)
+
+#### 5. Визуальная группировка в BuyoutSection (Аккаунт)
+Когда в «К выкупу» есть и прямые, и WB заказы — добавлены подзаголовки:
+```
+Прямые · 3
+[карточки прямых]
+────────────
+WB · 12
+[карточки WB]
+```
+Прямые всегда первыми (приоритет — клиент ждёт).
+
+### Файлы
+
+| Файл | Что изменено |
+|------|-------------|
+| `src/app/api/twa/roblox-account/route.ts` | set-cookie → +`robloxAccountName` |
+| `src/app/twa/_components/screens/BossrobuxScreen.tsx` | Объединённый поиск (автодетект), визуальная группировка Direct/WB в BuyoutSection |
+| `src/app/api/twa/orders/route.ts` | +FilterTab `AVITO`, исключение AVITO из BUYOUT, +`edit-avito` action, +SQL counts/sums |
+| `src/app/twa/_components/screens/OrdersScreen.tsx` | +вкладка AVITO, +EditAvitoModal, +бейдж/сортировка/цены для AVITO |
+
+### Деплой
+
+- [x] TypeScript чисто (`npx tsc --noEmit`)
+- [ ] Коммит + push
+- [ ] Web (RF) — автодеплой
+- [ ] TG/VK боты — не затронуты
+- [ ] **Визуальная проверка в TWA** — ожидает
+
+---
+
 ## Сессия 2026-07-01 (день-6) — Реорганизация экрана Аккаунт TWA
 
 ### Что сделано

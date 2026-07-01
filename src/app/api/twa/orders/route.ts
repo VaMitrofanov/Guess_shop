@@ -5,7 +5,7 @@ import { notifyOrderCompleted, notifyOrderRejected } from "@/lib/twa-notify";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
-type FilterTab = "ALL" | "BUYOUT" | "DIRECT" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "FAVORITES";
+type FilterTab = "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "FAVORITES";
 
 const NEW_CUTOFF_HOURS = 40;
 
@@ -18,9 +18,11 @@ function buildTabWhere(tab: FilterTab): any {
     case "ALL":
       return {};
     case "BUYOUT":
-      return { status: { in: ["PENDING", "IN_PROGRESS"] }, isDirectOrder: false, isFavorite: false };
+      return { status: { in: ["PENDING", "IN_PROGRESS"] }, isDirectOrder: false, orderSource: { not: "AVITO" }, isFavorite: false };
     case "DIRECT":
       return { isDirectOrder: true, status: { in: ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING", "ERROR"] }, isFavorite: false };
+    case "AVITO":
+      return { orderSource: "AVITO", status: { in: ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "ERROR"] }, isFavorite: false };
     case "NEW":
       return { status: "AWAITING_GAMEPASS", createdAt: { gt: cutoff }, isFavorite: false };
     case "ERROR":
@@ -37,7 +39,7 @@ function buildTabWhere(tab: FilterTab): any {
 }
 
 function orderByForTab(tab: FilterTab): any {
-  if (tab === "BUYOUT" || tab === "DIRECT") return [{ pendingAt: "asc" }, { createdAt: "asc" }];
+  if (tab === "BUYOUT" || tab === "DIRECT" || tab === "AVITO") return [{ pendingAt: "asc" }, { createdAt: "asc" }];
   if (tab === "ERROR" || tab === "AWAITING_LINK") return { createdAt: "asc" };
   return { createdAt: "desc" };
 }
@@ -56,7 +58,7 @@ export async function GET(req: NextRequest) {
   const lite        = searchParams.get("lite") === "1";
   const sourceFilter = searchParams.get("source") as string | null;
 
-  const isVirtualTab = ["ALL", "BUYOUT", "DIRECT", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES"].includes(tab);
+  const isVirtualTab = ["ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES"].includes(tab);
   const tabWhere = isVirtualTab
     ? buildTabWhere(tab as FilterTab)
     : (VALID_STATUSES.includes(tab as any) ? { status: tab } : {});
@@ -115,15 +117,17 @@ export async function GET(req: NextRequest) {
           const rows: any[] = await (prisma as any).$queryRawUnsafe(`
             SELECT
               COUNT(*)::int AS "ALL",
-              COUNT(*) FILTER (WHERE status IN ('PENDING','IN_PROGRESS') AND "isDirectOrder" = false AND "isFavorite" = false)::int AS "BUYOUT",
+              COUNT(*) FILTER (WHERE status IN ('PENDING','IN_PROGRESS') AND "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "isFavorite" = false)::int AS "BUYOUT",
               COUNT(*) FILTER (WHERE "isDirectOrder" = true AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false)::int AS "DIRECT",
+              COUNT(*) FILTER (WHERE "orderSource" = 'AVITO' AND status IN ('PENDING','IN_PROGRESS','AWAITING_GAMEPASS','ERROR') AND "isFavorite" = false)::int AS "AVITO",
               COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "NEW",
               COUNT(*) FILTER (WHERE status = 'ERROR' AND "isFavorite" = false)::int AS "ERROR",
               COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "AWAITING_LINK",
               COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS "DONE",
               COUNT(*) FILTER (WHERE "isFavorite" = true)::int AS "FAVORITES",
-              COALESCE(SUM(amount) FILTER (WHERE status IN ('PENDING','IN_PROGRESS') AND "isDirectOrder" = false AND "isFavorite" = false), 0)::int AS "SUM_BUYOUT",
+              COALESCE(SUM(amount) FILTER (WHERE status IN ('PENDING','IN_PROGRESS') AND "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "isFavorite" = false), 0)::int AS "SUM_BUYOUT",
               COALESCE(SUM(amount) FILTER (WHERE "isDirectOrder" = true AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_DIRECT",
+              COALESCE(SUM(amount) FILTER (WHERE "orderSource" = 'AVITO' AND status IN ('PENDING','IN_PROGRESS','AWAITING_GAMEPASS','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_AVITO",
               COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "isFavorite" = false), 0)::int AS "SUM_AWAITING_LINK"
             FROM "WbOrder"
             WHERE "isTest" = false
@@ -131,10 +135,11 @@ export async function GET(req: NextRequest) {
           const r = rows[0] ?? {};
           const counts: Record<string, number> = {};
           const sums: Record<string, number> = {};
-          for (const k of ["ALL", "BUYOUT", "DIRECT", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES"] as const)
+          for (const k of ["ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES"] as const)
             counts[k] = Number(r[k] ?? 0);
           sums["BUYOUT"] = Number(r["SUM_BUYOUT"] ?? 0);
           sums["DIRECT"] = Number(r["SUM_DIRECT"] ?? 0);
+          sums["AVITO"] = Number(r["SUM_AVITO"] ?? 0);
           sums["AWAITING_LINK"] = Number(r["SUM_AWAITING_LINK"] ?? 0);
           cachedCounts = { data: counts, sums, ts: Date.now() };
           return { total: tabTotal(tab, counts), counts, sums };
@@ -530,6 +535,39 @@ export async function POST(req: NextRequest) {
 
     const failReason = purchaseData.reason ?? purchaseData.errorMsg ?? "Неизвестная ошибка";
     return NextResponse.json({ ok: true, success: false, msg: failReason });
+  }
+
+  if (action === "edit-avito") {
+    if (order.orderSource !== "AVITO")
+      return NextResponse.json({ error: "Только для Авито-заказов" }, { status: 400 });
+    if (!["PENDING", "AWAITING_GAMEPASS", "ERROR"].includes(order.status))
+      return NextResponse.json({ error: "Нельзя редактировать в этом статусе" }, { status: 400 });
+
+    const data: any = {};
+    if (body.amount !== undefined) {
+      const amt = Number(body.amount);
+      if (!amt || amt < 1) return NextResponse.json({ error: "amount должен быть > 0" }, { status: 400 });
+      data.amount = amt;
+    }
+    if (body.robloxUsername !== undefined) data.robloxUsername = body.robloxUsername || null;
+    if (body.note !== undefined) data.adminNote = typeof body.note === "string" ? body.note.trim().slice(0, 2000) || null : null;
+    if (body.gamepassUrl !== undefined) {
+      const raw = String(body.gamepassUrl ?? "").trim();
+      if (raw) {
+        data.gamepassUrl = raw.includes("roblox.com") ? raw : /^\d+$/.test(raw) ? `https://www.roblox.com/game-pass/${raw}` : raw;
+        if (!order.gamepassUrl) { data.status = "PENDING"; data.pendingAt = new Date(); }
+      } else {
+        data.gamepassUrl = null;
+        data.status = "AWAITING_GAMEPASS";
+        data.pendingAt = null;
+      }
+    }
+    if (Object.keys(data).length === 0)
+      return NextResponse.json({ error: "Нет данных для обновления" }, { status: 400 });
+
+    await (prisma as any).wbOrder.update({ where: { id: orderId }, data });
+    cachedCounts = null;
+    return NextResponse.json({ ok: true });
   }
 
   if (action === "set-source") {

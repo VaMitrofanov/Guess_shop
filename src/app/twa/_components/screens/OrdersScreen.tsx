@@ -6,7 +6,7 @@ import { toast } from "../Toast";
 import Pressable from "../Pressable";
 
 type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED" | "ERROR";
-type FilterTab = "ALL" | "BUYOUT" | "DIRECT" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "FAVORITES";
+type FilterTab = "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "FAVORITES";
 
 interface Order {
   id: string;
@@ -60,6 +60,7 @@ const TAB_META: Record<FilterTab, { label: string; color: string }> = {
   ALL:           { label: "Все",            color: C.textPrimary },
   BUYOUT:        { label: "К выкупу",       color: C.green },
   DIRECT:        { label: "Прямой",         color: C.blue },
+  AVITO:         { label: "Авито",          color: C.orange },
   NEW:           { label: "Новые",          color: C.accent },
   ERROR:         { label: "Ошибка",         color: C.red },
   AWAITING_LINK: { label: "Ждут ссылку",    color: C.yellow },
@@ -71,6 +72,7 @@ const FILTERS: { id: FilterTab }[] = [
   { id: "ALL" },
   { id: "BUYOUT" },
   { id: "DIRECT" },
+  { id: "AVITO" },
   { id: "NEW" },
   { id: "ERROR" },
   { id: "AWAITING_LINK" },
@@ -86,6 +88,8 @@ function orderTabBadge(order: Order): { label: string; color: string } | null {
   if (order.status === "COMPLETED") return { label: "Готово", color: C.green };
   if (order.status === "REJECTED") return { label: "Отменено", color: C.red };
   if (order.status === "ERROR") return { label: "Ошибка", color: C.red };
+  if (order.orderSource === "AVITO" && ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "ERROR"].includes(order.status))
+    return { label: "Авито", color: C.orange };
   if (order.isDirectOrder && ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status))
     return { label: "Прямой", color: C.blue };
   if (order.status === "AWAITING_GAMEPASS" && created > cutoff) return { label: "Новые", color: C.accent };
@@ -318,6 +322,7 @@ function ActionPanel({
   const showPanel =
     currentTab === "BUYOUT" ||
     currentTab === "DIRECT" ||
+    currentTab === "AVITO" ||
     currentTab === "ERROR";
 
   if (!showPanel) return null;
@@ -463,6 +468,71 @@ function MoveToModal({ order, token, onDone, onClose }: {
         <button className="twa-press" onClick={submit} disabled={loading || !target || !note.trim()}
           style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: C.accent, color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading || !target || !note.trim() ? 0.5 : 1 }}>
           {loading ? "…" : "Перевести"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ───────────── Edit Avito Modal ───────────── */
+function EditAvitoModal({ order, token, onDone, onClose }: {
+  order: Order; token: string; onDone: () => void; onClose: () => void;
+}) {
+  const [amount, setAmount] = useState(String(order.amount));
+  const [gpInput, setGpInput] = useState(order.gamepassUrl ?? "");
+  const [nick, setNick] = useState(order.robloxUsername ?? "");
+  const [note, setNote] = useState(order.adminNote ?? "");
+  const [loading, setLoading] = useState(false);
+
+  async function submit() {
+    const amt = parseInt(amount, 10);
+    if (!amt || amt < 1) { toast("Укажи сумму R$", "error"); return; }
+    setLoading(true);
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          action: "edit-avito", orderId: order.id,
+          amount: amt,
+          gamepassUrl: gpInput.trim(),
+          robloxUsername: nick.trim(),
+          note: note.trim(),
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) { toast(d.error ?? "Ошибка", "error"); return; }
+      haptic.notify("success");
+      toast("Сохранено", "success");
+      onDone();
+    } catch { toast("Ошибка сети", "error"); }
+    finally { setLoading(false); }
+  }
+
+  return (
+    <div onClick={e => e.stopPropagation()} style={{
+      padding: "12px 14px 14px",
+      borderTop: `1px solid ${C.hairline}`,
+      background: "rgba(0,0,0,0.15)",
+      display: "flex", flexDirection: "column", gap: 8,
+    }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: C.orange }}>Редактировать Авито</div>
+      <input value={amount} onChange={e => setAmount(e.target.value.replace(/\D/g, ""))} placeholder="Сумма R$" inputMode="numeric"
+        style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "10px 12px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
+      <input value={gpInput} onChange={e => setGpInput(e.target.value)} placeholder="ID или URL геймпасса"
+        style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "10px 12px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
+      <input value={nick} onChange={e => setNick(e.target.value)} placeholder="Ник продавца"
+        style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "10px 12px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
+      <input value={note} onChange={e => setNote(e.target.value)} placeholder="Заметка"
+        style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "10px 12px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="twa-press" onClick={onClose}
+          style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
+          Отмена
+        </button>
+        <button className="twa-press" onClick={submit} disabled={loading || !amount.trim()}
+          style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: C.orange, color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading || !amount.trim() ? 0.5 : 1 }}>
+          {loading ? "…" : "Сохранить"}
         </button>
       </div>
     </div>
@@ -619,18 +689,20 @@ function OrderCard({
   onMoved: () => void;
 }) {
   const [moveOpen, setMoveOpen] = useState(false);
+  const [editAvitoOpen, setEditAvitoOpen] = useState(false);
 
   const platform: "tg" | "vk" | "—" = order.user.tgId ? "tg" : order.user.vkId ? "vk" : "—";
   const shortName = userShortName(order.user);
   const passId = extractGamepassId(order.gamepassUrl);
 
-  const showDirty = currentTab === "BUYOUT" || currentTab === "DIRECT" || currentTab === "ERROR";
+  const showDirty = currentTab === "BUYOUT" || currentTab === "DIRECT" || currentTab === "AVITO" || currentTab === "ERROR";
   const dirtyAmount = Math.ceil(order.amount / 0.7);
   const displayAmount = showDirty ? dirtyAmount : order.amount;
   const showCleanHint = currentTab === "BUYOUT";
 
   const tabBadge = currentTab === "ALL" ? orderTabBadge(order) : null;
   const showMoveBtn = currentTab === "AWAITING_LINK" || currentTab === "FAVORITES";
+  const isEditableAvito = currentTab === "AVITO" && order.orderSource === "AVITO" && ["PENDING", "AWAITING_GAMEPASS", "ERROR"].includes(order.status);
 
   const timeRef = order.createdAt;
 
@@ -773,6 +845,28 @@ function OrderCard({
           token={token}
           onDone={() => { setMoveOpen(false); onMoved(); }}
           onClose={() => setMoveOpen(false)}
+        />
+      )}
+
+      {/* Edit Avito button */}
+      {isEditableAvito && !editAvitoOpen && (
+        <div style={{ padding: "0 14px 6px" }}>
+          <button className="twa-press-sm" onClick={e => { e.stopPropagation(); setEditAvitoOpen(true); }}
+            style={{
+              width: "100%", padding: "10px", borderRadius: 10, border: `1px solid ${C.orange}44`,
+              background: "transparent", color: C.orange, fontSize: 14, fontWeight: 600, cursor: "pointer",
+            }}>
+            ✏️ Редактировать
+          </button>
+        </div>
+      )}
+
+      {editAvitoOpen && (
+        <EditAvitoModal
+          order={order}
+          token={token}
+          onDone={() => { setEditAvitoOpen(false); onMoved(); }}
+          onClose={() => setEditAvitoOpen(false)}
         />
       )}
 
@@ -1166,7 +1260,7 @@ export default function OrdersScreen({
             const meta = TAB_META[f.id];
             const count = data?.counts?.[f.id] ?? 0;
             const isActive = filter === f.id;
-            const isUrgent = ["BUYOUT", "DIRECT", "ERROR"].includes(f.id) && count > 0;
+            const isUrgent = ["BUYOUT", "DIRECT", "AVITO", "ERROR"].includes(f.id) && count > 0;
             return (
               <button
                 key={f.id}
@@ -1419,6 +1513,7 @@ function EmptyState({ filter, query }: { filter: FilterTab; query: string }) {
     ALL: "Заказов пока нет",
     BUYOUT: "Нет заказов к выкупу",
     DIRECT: "Нет прямых заказов",
+    AVITO: "Нет заказов Авито",
     NEW: "Нет новых заказов",
     ERROR: "Нет ошибок",
     AWAITING_LINK: "Все оформили заказы",

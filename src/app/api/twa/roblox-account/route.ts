@@ -72,10 +72,11 @@ export async function POST(req: NextRequest) {
 
     const currency = await robloxGet("https://economy.roblox.com/v1/user/currency", rawCookie);
 
+    const accountName = user.name ?? user.displayName ?? "Unknown";
     await (prisma as any).globalSettings.upsert({
       where: { id: "global" },
-      create: { id: "global", robloxCookie: rawCookie, robloxCookieUpdatedAt: new Date() },
-      update: { robloxCookie: rawCookie, robloxCookieUpdatedAt: new Date() },
+      create: { id: "global", robloxCookie: rawCookie, robloxCookieUpdatedAt: new Date(), robloxAccountName: accountName },
+      update: { robloxCookie: rawCookie, robloxCookieUpdatedAt: new Date(), robloxAccountName: accountName },
     });
 
     return NextResponse.json({
