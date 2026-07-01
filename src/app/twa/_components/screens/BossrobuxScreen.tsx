@@ -742,7 +742,151 @@ function ageColor(iso: string): string {
   return C.red;
 }
 
-function BuyoutSection({ token }: { token: string }) {
+function buildBuyoutPlan(orders: BuyoutOrder[], balance: number) {
+  const sorted = [...orders].sort((a, b) => {
+    const tA = new Date(a.pendingAt ?? a.createdAt).getTime();
+    const tB = new Date(b.pendingAt ?? b.createdAt).getTime();
+    return tA - tB;
+  });
+  let remaining = balance;
+  let totalDirty = 0;
+  const selected: BuyoutOrder[] = [];
+  const waiting: BuyoutOrder[] = [];
+  for (const o of sorted) {
+    const dirty = Math.ceil(o.amount / 0.7);
+    if (dirty <= remaining) {
+      selected.push(o);
+      remaining -= dirty;
+      totalDirty += dirty;
+    } else {
+      waiting.push(o);
+    }
+  }
+  return { selected, waiting, totalDirty, remainingBalance: remaining };
+}
+
+function groupBySource(orders: BuyoutOrder[]) {
+  const direct = orders.filter(o => o.isDirectOrder && o.orderSource !== "AVITO");
+  const avito = orders.filter(o => o.orderSource === "AVITO");
+  const wb = orders.filter(o => !o.isDirectOrder && o.orderSource !== "AVITO");
+  return { direct, avito, wb };
+}
+
+function BuyoutOrderCard({
+  order, buying, onPurchase, dimmed,
+}: { order: BuyoutOrder; buying: string | null; onPurchase: (o: BuyoutOrder) => void; dimmed?: boolean }) {
+  const dirty = Math.ceil(order.amount / 0.7);
+  const nick = order.user.username ? `@${order.user.username}` : order.user.name ?? "—";
+  const isBuying = buying === order.id;
+  return (
+    <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10, opacity: dimmed ? 0.45 : 1 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
+          <span style={{
+            fontSize: 12, fontWeight: 800, color: "#fff",
+            background: order.user.tgId ? "#229ED9" : order.user.vkId ? "#0077FF" : C.elevated,
+            borderRadius: 5, padding: "4px 8px", flexShrink: 0,
+          }}>
+            {order.user.tgId ? "T" : order.user.vkId ? "V" : "—"}
+          </span>
+          <span style={{
+            fontSize: 17, fontWeight: 600, color: "#7ec5ff",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>{nick}</span>
+          {order.orderSource === "AVITO" ? (
+            <span style={{
+              fontSize: 12, fontWeight: 600, color: C.orange,
+              background: `${C.orange}1c`, padding: "4px 9px",
+              borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
+            }}>Авито</span>
+          ) : order.isDirectOrder && (
+            <span style={{
+              fontSize: 12, fontWeight: 600, color: C.blue,
+              background: `${C.blue}1c`, padding: "4px 9px",
+              borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
+            }}>Прямой</span>
+          )}
+        </div>
+        <span style={{ fontSize: 15, fontWeight: 500, color: ageColor(order.createdAt), flexShrink: 0, ...tabular }}>
+          ⏱ {fmtAge(order.createdAt)}
+        </span>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+          <span style={{ fontSize: 22, fontWeight: 700, color: "#e5e5ea", ...tabular }}>
+            {dirty.toLocaleString("ru-RU")}
+          </span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: C.accent }}>R$</span>
+          <span style={{ fontSize: 14, color: C.textTertiary, ...tabular }}>
+            ({order.amount.toLocaleString("ru-RU")})
+          </span>
+        </div>
+        {order.gamepassUrl && !dimmed && (
+          <button
+            className="twa-press"
+            onClick={() => onPurchase(order)}
+            disabled={!!buying}
+            style={{
+              padding: "10px 18px", border: "none", borderRadius: 10,
+              background: "rgba(48,209,88,0.14)", color: "#30d158",
+              fontSize: 15, fontWeight: 600, cursor: "pointer",
+              opacity: isBuying ? 0.5 : 1,
+            }}
+          >
+            {isBuying ? "⏳…" : "Выкупить"}
+          </button>
+        )}
+      </div>
+
+      {order.robloxUsername && (
+        <div style={{ fontSize: 15, color: C.textSecondary }}>
+          🎮 {order.robloxUsername}
+        </div>
+      )}
+      {order.wbCode && (
+        <div style={{ fontFamily: MONO, fontWeight: 700, color: C.accent, letterSpacing: 1.5, fontSize: 15 }}>
+          📦 {order.wbCode}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function renderGroupedOrders(
+  orders: BuyoutOrder[], buying: string | null, onPurchase: (o: BuyoutOrder) => void, dimmed?: boolean,
+) {
+  const { direct, avito, wb } = groupBySource(orders);
+  const groups: { label: string; color: string; items: BuyoutOrder[] }[] = [];
+  if (direct.length) groups.push({ label: "Прямые", color: C.blue, items: direct });
+  if (avito.length) groups.push({ label: "Авито", color: C.orange, items: avito });
+  if (wb.length) groups.push({ label: "WB", color: C.green, items: wb });
+
+  const multiGroup = groups.length > 1;
+  let idx = 0;
+  return groups.map((g, gi) => (
+    <div key={g.label}>
+      {gi > 0 && <div style={{ height: 2, background: C.border, margin: "6px 0" }} />}
+      {multiGroup && (
+        <div style={{ padding: "10px 16px 4px", fontSize: 12, fontWeight: 700, color: g.color, textTransform: "uppercase", letterSpacing: 0.5 }}>
+          {g.label} · {g.items.length}
+        </div>
+      )}
+      {g.items.map((order, oi) => {
+        const showSep = multiGroup ? oi > 0 : idx > 0;
+        idx++;
+        return (
+          <div key={order.id}>
+            {showSep && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
+            <BuyoutOrderCard order={order} buying={buying} onPurchase={onPurchase} dimmed={dimmed} />
+          </div>
+        );
+      })}
+    </div>
+  ));
+}
+
+function BuyoutSection({ token, balance, onBalanceChange }: { token: string; balance: number | null; onBalanceChange: (delta: number) => void }) {
   const [orders, setOrders] = useState<BuyoutOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [buying, setBuying] = useState<string | null>(null);
@@ -750,13 +894,15 @@ function BuyoutSection({ token }: { token: string }) {
   const load = useCallback(async () => {
     try {
       const hdrs = { Authorization: `Bearer ${token}` };
-      const [rDirect, rBuyout] = await Promise.all([
-        fetch(`/api/twa/orders?status=DIRECT&limit=20&lite=1`, { headers: hdrs }),
-        fetch(`/api/twa/orders?status=BUYOUT&limit=20&lite=1`, { headers: hdrs }),
+      const [rDirect, rBuyout, rAvito] = await Promise.all([
+        fetch(`/api/twa/orders?status=DIRECT&limit=50&lite=1`, { headers: hdrs }),
+        fetch(`/api/twa/orders?status=BUYOUT&limit=50&lite=1`, { headers: hdrs }),
+        fetch(`/api/twa/orders?status=AVITO&limit=50&lite=1`, { headers: hdrs }),
       ]);
       const direct = rDirect.ok ? ((await rDirect.json()).orders ?? []) : [];
       const buyout = rBuyout.ok ? ((await rBuyout.json()).orders ?? []) : [];
-      setOrders([...direct, ...buyout]);
+      const avito = rAvito.ok ? ((await rAvito.json()).orders ?? []) : [];
+      setOrders([...direct, ...buyout, ...avito]);
     } catch {}
     finally { setLoading(false); }
   }, [token]);
@@ -777,6 +923,8 @@ function BuyoutSection({ token }: { token: string }) {
       if (d.success) {
         haptic.notify("success");
         toast(`✅ ${d.msg}`, "success");
+        const dirty = Math.ceil(order.amount / 0.7);
+        onBalanceChange(-dirty);
         setOrders(prev => prev.filter(o => o.id !== order.id));
       } else {
         haptic.notify("error");
@@ -798,110 +946,67 @@ function BuyoutSection({ token }: { token: string }) {
     </Card>
   );
 
-  const directOrders = orders.filter(o => o.isDirectOrder);
-  const wbOrders = orders.filter(o => !o.isDirectOrder);
-  const hasBothGroups = directOrders.length > 0 && wbOrders.length > 0;
-  const sortedOrders = [...directOrders, ...wbOrders];
+  if (balance === null) {
+    return <Card>{renderGroupedOrders(orders, buying, doPurchase)}</Card>;
+  }
+
+  const plan = buildBuyoutPlan(orders, balance);
+  const allDirty = orders.reduce((s, o) => s + Math.ceil(o.amount / 0.7), 0);
 
   return (
-    <Card>
-      {sortedOrders.map((order, i) => {
-        const dirty = Math.ceil(order.amount / 0.7);
-        const nick = order.user.username ? `@${order.user.username}` : order.user.name ?? "—";
-        const timeRef = order.createdAt;
-        const isBuying = buying === order.id;
-        const isFirstWb = hasBothGroups && !order.isDirectOrder && (i === 0 || sortedOrders[i - 1]?.isDirectOrder);
-        return (
-          <div key={order.id}>
-            {hasBothGroups && i === 0 && (
-              <div style={{ padding: "10px 16px 4px", fontSize: 12, fontWeight: 700, color: C.blue, textTransform: "uppercase", letterSpacing: 0.5 }}>
-                Прямые · {directOrders.length}
-              </div>
-            )}
-            {isFirstWb && (
-              <>
-                <div style={{ height: 2, background: C.border, margin: "6px 0" }} />
-                <div style={{ padding: "10px 16px 4px", fontSize: 12, fontWeight: 700, color: C.green, textTransform: "uppercase", letterSpacing: 0.5 }}>
-                  WB · {wbOrders.length}
-                </div>
-              </>
-            )}
-            {i > 0 && !isFirstWb && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
-            <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
-                  <span style={{
-                    fontSize: 12, fontWeight: 800, color: "#fff",
-                    background: order.user.tgId ? "#229ED9" : order.user.vkId ? "#0077FF" : C.elevated,
-                    borderRadius: 5, padding: "4px 8px", flexShrink: 0,
-                  }}>
-                    {order.user.tgId ? "T" : order.user.vkId ? "V" : "—"}
-                  </span>
-                  <span style={{
-                    fontSize: 17, fontWeight: 600, color: "#7ec5ff",
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  }}>{nick}</span>
-                  {order.orderSource === "AVITO" ? (
-                    <span style={{
-                      fontSize: 12, fontWeight: 600, color: C.orange,
-                      background: `${C.orange}1c`, padding: "4px 9px",
-                      borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
-                    }}>Авито</span>
-                  ) : order.isDirectOrder && (
-                    <span style={{
-                      fontSize: 12, fontWeight: 600, color: C.blue,
-                      background: `${C.blue}1c`, padding: "4px 9px",
-                      borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
-                    }}>Прямой</span>
-                  )}
-                </div>
-                <span style={{ fontSize: 15, fontWeight: 500, color: ageColor(timeRef), flexShrink: 0, ...tabular }}>
-                  ⏱ {fmtAge(timeRef)}
-                </span>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                  <span style={{ fontSize: 22, fontWeight: 700, color: "#e5e5ea", ...tabular }}>
-                    {dirty.toLocaleString("ru-RU")}
-                  </span>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: C.accent }}>R$</span>
-                  <span style={{ fontSize: 14, color: C.textTertiary, ...tabular }}>
-                    ({order.amount.toLocaleString("ru-RU")})
-                  </span>
-                </div>
-                {order.gamepassUrl && (
-                  <button
-                    className="twa-press"
-                    onClick={() => doPurchase(order)}
-                    disabled={!!buying}
-                    style={{
-                      padding: "10px 18px", border: "none", borderRadius: 10,
-                      background: "rgba(48,209,88,0.14)", color: "#30d158",
-                      fontSize: 15, fontWeight: 600, cursor: "pointer",
-                      opacity: isBuying ? 0.5 : 1,
-                    }}
-                  >
-                    {isBuying ? "⏳…" : "Выкупить"}
-                  </button>
-                )}
-              </div>
-
-              {order.robloxUsername && (
-                <div style={{ fontSize: 15, color: C.textSecondary }}>
-                  🎮 {order.robloxUsername}
-                </div>
-              )}
-              {order.wbCode && (
-                <div style={{ fontFamily: MONO, fontWeight: 700, color: C.accent, letterSpacing: 1.5, fontSize: 15 }}>
-                  📦 {order.wbCode}
-                </div>
-              )}
-            </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Summary bar */}
+      <Card>
+        <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 14, color: C.textSecondary }}>Баланс</span>
+            <span style={{ fontSize: 18, fontWeight: 700, color: "#e5e5ea", ...tabular }}>
+              {balance.toLocaleString("ru-RU")} <span style={{ fontSize: 14, color: C.accent }}>R$</span>
+            </span>
           </div>
-        );
-      })}
-    </Card>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 14, color: C.textSecondary }}>Пачка</span>
+            <span style={{ fontSize: 16, fontWeight: 600, color: C.green, ...tabular }}>
+              {plan.selected.length} из {orders.length} · {plan.totalDirty.toLocaleString("ru-RU")} R$
+            </span>
+          </div>
+          {plan.waiting.length > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 14, color: C.textSecondary }}>Не хватает</span>
+              <span style={{ fontSize: 16, fontWeight: 600, color: C.orange, ...tabular }}>
+                {(allDirty - balance).toLocaleString("ru-RU")} R$
+              </span>
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 14, color: C.textSecondary }}>Остаток</span>
+            <span style={{ fontSize: 16, fontWeight: 600, color: plan.remainingBalance > 0 ? C.textSecondary : C.red, ...tabular }}>
+              {plan.remainingBalance.toLocaleString("ru-RU")} R$
+            </span>
+          </div>
+        </div>
+      </Card>
+
+      {/* Selected — ready to buy */}
+      {plan.selected.length > 0 && (
+        <Card>
+          <div style={{ padding: "10px 16px 4px", fontSize: 12, fontWeight: 700, color: C.green, textTransform: "uppercase", letterSpacing: 0.5 }}>
+            Выкупить · {plan.selected.length}
+          </div>
+          {renderGroupedOrders(plan.selected, buying, doPurchase)}
+        </Card>
+      )}
+
+      {/* Waiting — not enough balance */}
+      {plan.waiting.length > 0 && (
+        <Card>
+          <div style={{ padding: "10px 16px 4px", fontSize: 12, fontWeight: 700, color: C.textTertiary, textTransform: "uppercase", letterSpacing: 0.5 }}>
+            Ожидают баланс · {plan.waiting.length}
+          </div>
+          {renderGroupedOrders(plan.waiting, buying, doPurchase, true)}
+        </Card>
+      )}
+    </div>
   );
 }
 
@@ -1334,7 +1439,11 @@ export default function BossrobuxScreen({ token }: { token: string }) {
       {cookieReady && (
         <section>
           <SectionHeader title="К выкупу" />
-          <BuyoutSection token={token} />
+          <BuyoutSection
+            token={token}
+            balance={info?.balance ?? null}
+            onBalanceChange={(delta) => setInfo(prev => prev && prev.balance !== null ? { ...prev, balance: prev.balance + delta } : prev)}
+          />
         </section>
       )}
 
