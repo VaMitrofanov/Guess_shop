@@ -110,12 +110,14 @@ function SegmentControl({ value, onChange }: { value: "nick" | "id"; onChange: (
 
 // ── Gamepass Card ────────────────────────────────────────────────────────────
 function GamepassCard({
-  gp, buying, bought, onBuy,
+  gp, buying, bought, onBuy, onCreateAvito, creatingAvito,
 }: {
   gp: GamepassItem;
   buying: boolean;
   bought: boolean;
   onBuy: () => void;
+  onCreateAvito?: () => void;
+  creatingAvito?: boolean;
 }) {
   return (
     <div style={{
@@ -146,20 +148,38 @@ function GamepassCard({
       {bought ? (
         <span style={{ fontSize: 15, fontWeight: 600, color: C.green, flexShrink: 0 }}>✅</span>
       ) : (
-        <button
-          className="twa-press-sm"
-          onClick={onBuy}
-          disabled={buying || gp.isForSale === false}
-          style={{
-            flexShrink: 0, padding: "9px 16px", border: "none", borderRadius: 10,
-            background: gp.isForSale === false ? C.elevated : C.green,
-            color: "#fff", fontSize: 15, fontWeight: 600, cursor: buying ? "default" : "pointer",
-            opacity: buying ? 0.5 : (gp.isForSale === false ? 0.4 : 1),
-            fontFamily: "inherit", transition: "opacity 0.2s",
-          }}
-        >
-          {buying ? "…" : gp.isForSale === false ? "Не продаётся" : "🛒"}
-        </button>
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          {onCreateAvito && (
+            <button
+              className="twa-press-sm"
+              onClick={onCreateAvito}
+              disabled={!!creatingAvito}
+              style={{
+                padding: "9px 14px", border: "none", borderRadius: 10,
+                background: C.orange, color: "#fff", fontSize: 14, fontWeight: 600,
+                cursor: creatingAvito ? "default" : "pointer",
+                opacity: creatingAvito ? 0.5 : 1,
+                fontFamily: "inherit", transition: "opacity 0.2s",
+              }}
+            >
+              {creatingAvito ? "…" : "Авито"}
+            </button>
+          )}
+          <button
+            className="twa-press-sm"
+            onClick={onBuy}
+            disabled={buying || gp.isForSale === false}
+            style={{
+              padding: "9px 16px", border: "none", borderRadius: 10,
+              background: gp.isForSale === false ? C.elevated : C.green,
+              color: "#fff", fontSize: 15, fontWeight: 600, cursor: buying ? "default" : "pointer",
+              opacity: buying ? 0.5 : (gp.isForSale === false ? 0.4 : 1),
+              fontFamily: "inherit", transition: "opacity 0.2s",
+            }}
+          >
+            {buying ? "…" : gp.isForSale === false ? "Не продаётся" : "🛒"}
+          </button>
+        </div>
       )}
     </div>
   );
@@ -893,6 +913,8 @@ export default function BossrobuxScreen({ token }: { token: string }) {
   const [boughtIds, setBoughtIds] = useState<Set<number>>(new Set());
   const buyLock = useRef(false);
   const [historyKey, setHistoryKey] = useState(0);
+  const [showCookie, setShowCookie] = useState(false);
+  const [creatingAvito, setCreatingAvito] = useState(false);
 
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
   const purchaseHeaders = { ...headers };
@@ -1049,6 +1071,32 @@ export default function BossrobuxScreen({ token }: { token: string }) {
     }
   }
 
+  // ── Create Avito from search result ─────────────────────────────────────
+  async function createAvitoFromSearch(gp: GamepassItem) {
+    if (creatingAvito) return;
+    setCreatingAvito(true);
+    try {
+      const amount = Math.floor(gp.price * 0.7);
+      const gamepassUrl = `https://www.roblox.com/game-pass/${gp.gamepassId}`;
+      const r = await fetch("/api/twa/orders", {
+        method: "POST", headers,
+        body: JSON.stringify({
+          action: "create-avito",
+          amount,
+          gamepassUrl,
+          robloxUsername: gp.sellerName || null,
+          note: null,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
+      haptic.notify("success");
+      toast(`Авито · ${gp.name} · ${amount} R$`, "success");
+      setHistoryKey(k => k + 1);
+    } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
+    finally { setCreatingAvito(false); }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────
   if (loading) return <Skeleton />;
   if (error) return (
@@ -1066,106 +1114,7 @@ export default function BossrobuxScreen({ token }: { token: string }) {
   return (
     <div style={{ padding: "16px 16px 32px", display: "flex", flexDirection: "column", gap: 22, overflowY: "auto", height: "100%" }}>
 
-      {/* Account info */}
-      <section>
-        <SectionHeader title="Roblox-аккаунт" />
-        <Card>
-          {info?.hasCookie ? (
-            <>
-              <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
-                <StatusDot valid={info.cookieValid !== false} />
-                <span style={{ fontSize: 18, fontWeight: 600, color: "#e5e5ea" }}>
-                  {info.accountName ?? "Неизвестный"}
-                </span>
-                {info.cookieValid === false && (
-                  <span style={{ fontSize: 14, color: C.red, fontWeight: 500 }}>Cookie истёк</span>
-                )}
-              </div>
-              <div style={{ height: 1, background: C.border, marginLeft: 16 }} />
-              <InfoRow label="ID" value={info.accountId?.toLocaleString() ?? "—"} />
-              <InfoRow label="Баланс" value={info.balance !== null ? `${info.balance.toLocaleString()} R$` : "—"} />
-              <InfoRow label="Cookie обновлён" value={formatDate(info.cookieUpdatedAt)} last />
-            </>
-          ) : (
-            <div style={{ padding: "20px 16px", textAlign: "center" }}>
-              <div style={{ fontSize: 28, marginBottom: 8 }}>🔑</div>
-              <div style={{ fontSize: 16, color: C.textSecondary }}>Cookie не задан</div>
-              <div style={{ fontSize: 14, color: C.textTertiary, marginTop: 4 }}>Вставьте .ROBLOSECURITY ниже</div>
-            </div>
-          )}
-        </Card>
-
-        {info?.hasCookie && (
-          <button
-            className="twa-press"
-            onClick={() => { haptic.impact("light"); refreshBalance(); }}
-            disabled={refreshing}
-            style={{
-              marginTop: 10, width: "100%",
-              background: C.card, border: "none", borderRadius: 12,
-              color: C.accent, fontSize: 15, fontWeight: 600,
-              padding: "14px", cursor: refreshing ? "default" : "pointer",
-              opacity: refreshing ? 0.6 : 1,
-            }}
-          >
-            {refreshing ? "Обновляю…" : "🔄 Обновить баланс"}
-          </button>
-        )}
-      </section>
-
-      {/* Set cookie */}
-      <section>
-        <SectionHeader title="Cookie" />
-        <Card>
-          <div style={{ padding: 12 }}>
-            <textarea
-              value={cookieInput}
-              onChange={e => setCookieInput(e.target.value)}
-              placeholder=".ROBLOSECURITY значение…"
-              rows={3}
-              style={{
-                width: "100%", background: C.elevated, border: "none", borderRadius: 10,
-                color: "#fff", fontSize: 15, padding: "12px 14px",
-                resize: "vertical", outline: "none", fontFamily: "monospace",
-                lineHeight: 1.4, boxSizing: "border-box",
-              }}
-            />
-            <button
-              className="twa-press"
-              onClick={() => { haptic.impact("medium"); saveCookie(); }}
-              disabled={saving || !cookieInput.trim()}
-              style={{
-                marginTop: 8, width: "100%",
-                background: cookieInput.trim() ? C.green : C.elevated,
-                border: "none", borderRadius: 10,
-                color: "#fff", fontSize: 15, fontWeight: 600,
-                padding: "14px", cursor: saving ? "default" : "pointer",
-                opacity: saving || !cookieInput.trim() ? 0.5 : 1,
-                transition: "background 0.2s, opacity 0.2s",
-              }}
-            >
-              {saving ? "Проверяю…" : "💾 Сохранить cookie"}
-            </button>
-          </div>
-        </Card>
-
-        {saveMsg && (
-          <div style={{
-            marginTop: 8, padding: "10px 14px", borderRadius: 10,
-            background: saveMsg.ok ? `${C.green}22` : `${C.red}22`,
-            color: saveMsg.ok ? C.green : C.red,
-            fontSize: 15, fontWeight: 500,
-          }}>
-            {saveMsg.ok ? "✅" : "❌"} {saveMsg.text}
-          </div>
-        )}
-
-        <div style={{ fontSize: 13, color: C.textTertiary, paddingLeft: 4, marginTop: 6 }}>
-          Cookie валидируется при сохранении. Обновляй когда меняешь аккаунт.
-        </div>
-      </section>
-
-      {/* ── Search & Purchase ─────────────────────────────────────────────── */}
+      {/* ── Search & Purchase (FIRST — main function) ──────────────────── */}
       {cookieReady && (
         <section>
           <SectionHeader title="Поиск и выкуп" />
@@ -1228,6 +1177,8 @@ export default function BossrobuxScreen({ token }: { token: string }) {
                       buying={buying && confirmGp?.gamepassId === gp.gamepassId}
                       bought={boughtIds.has(gp.gamepassId)}
                       onBuy={() => setConfirmGp(gp)}
+                      onCreateAvito={() => createAvitoFromSearch(gp)}
+                      creatingAvito={creatingAvito}
                     />
                   </div>
                 ))}
@@ -1247,19 +1198,124 @@ export default function BossrobuxScreen({ token }: { token: string }) {
         </section>
       )}
 
+      {/* ── Account info + inline cookie ───────────────────────────────── */}
+      <section>
+        <SectionHeader title="Roblox-аккаунт" />
+        <Card>
+          {info?.hasCookie ? (
+            <>
+              <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+                <StatusDot valid={info.cookieValid !== false} />
+                <span style={{ fontSize: 18, fontWeight: 600, color: "#e5e5ea" }}>
+                  {info.accountName ?? "Неизвестный"}
+                </span>
+                {info.cookieValid === false && (
+                  <span style={{ fontSize: 14, color: C.red, fontWeight: 500 }}>Cookie истёк</span>
+                )}
+              </div>
+              <div style={{ height: 1, background: C.border, marginLeft: 16 }} />
+              <InfoRow label="ID" value={info.accountId?.toLocaleString() ?? "—"} />
+              <InfoRow label="Баланс" value={
+                info.balance !== null
+                  ? <>{info.balance.toLocaleString()} R$ <span style={{ color: C.textTertiary, fontWeight: 400 }}>({Math.floor(info.balance * 0.7).toLocaleString()} чистых)</span></>
+                  : "—"
+              } />
+              <InfoRow label="Cookie обновлён" value={formatDate(info.cookieUpdatedAt)} last />
+            </>
+          ) : (
+            <div style={{ padding: "20px 16px", textAlign: "center" }}>
+              <div style={{ fontSize: 28, marginBottom: 8 }}>🔑</div>
+              <div style={{ fontSize: 16, color: C.textSecondary }}>Cookie не задан</div>
+              <div style={{ fontSize: 14, color: C.textTertiary, marginTop: 4 }}>Вставьте .ROBLOSECURITY ниже</div>
+            </div>
+          )}
+        </Card>
+
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          {info?.hasCookie && (
+            <button
+              className="twa-press"
+              onClick={() => { haptic.impact("light"); refreshBalance(); }}
+              disabled={refreshing}
+              style={{
+                flex: 1,
+                background: C.card, border: "none", borderRadius: 12,
+                color: C.accent, fontSize: 15, fontWeight: 600,
+                padding: "14px", cursor: refreshing ? "default" : "pointer",
+                opacity: refreshing ? 0.6 : 1,
+              }}
+            >
+              {refreshing ? "Обновляю…" : "🔄 Обновить баланс"}
+            </button>
+          )}
+          <button
+            className="twa-press"
+            onClick={() => { haptic.impact("light"); setShowCookie(v => !v); }}
+            style={{
+              flex: info?.hasCookie ? "none" : 1,
+              background: C.card, border: "none", borderRadius: 12,
+              color: showCookie ? C.orange : C.textSecondary, fontSize: 15, fontWeight: 600,
+              padding: "14px 18px", cursor: "pointer",
+            }}
+          >
+            🔑 Cookie
+          </button>
+        </div>
+
+        {showCookie && (
+          <div style={{ marginTop: 10 }}>
+            <Card>
+              <div style={{ padding: 12 }}>
+                <textarea
+                  value={cookieInput}
+                  onChange={e => setCookieInput(e.target.value)}
+                  placeholder=".ROBLOSECURITY значение…"
+                  rows={3}
+                  style={{
+                    width: "100%", background: C.elevated, border: "none", borderRadius: 10,
+                    color: "#fff", fontSize: 15, padding: "12px 14px",
+                    resize: "vertical", outline: "none", fontFamily: "monospace",
+                    lineHeight: 1.4, boxSizing: "border-box",
+                  }}
+                />
+                <button
+                  className="twa-press"
+                  onClick={() => { haptic.impact("medium"); saveCookie(); }}
+                  disabled={saving || !cookieInput.trim()}
+                  style={{
+                    marginTop: 8, width: "100%",
+                    background: cookieInput.trim() ? C.green : C.elevated,
+                    border: "none", borderRadius: 10,
+                    color: "#fff", fontSize: 15, fontWeight: 600,
+                    padding: "14px", cursor: saving ? "default" : "pointer",
+                    opacity: saving || !cookieInput.trim() ? 0.5 : 1,
+                    transition: "background 0.2s, opacity 0.2s",
+                  }}
+                >
+                  {saving ? "Проверяю…" : "💾 Сохранить cookie"}
+                </button>
+              </div>
+            </Card>
+
+            {saveMsg && (
+              <div style={{
+                marginTop: 8, padding: "10px 14px", borderRadius: 10,
+                background: saveMsg.ok ? `${C.green}22` : `${C.red}22`,
+                color: saveMsg.ok ? C.green : C.red,
+                fontSize: 15, fontWeight: 500,
+              }}>
+                {saveMsg.ok ? "✅" : "❌"} {saveMsg.text}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
       {/* ── Buyout Orders ───────────────────────────────────────────────── */}
       {cookieReady && (
         <section>
           <SectionHeader title="К выкупу" />
           <BuyoutSection token={token} />
-        </section>
-      )}
-
-      {/* ── Create Avito Order ──────────────────────────────────── */}
-      {cookieReady && (
-        <section>
-          <SectionHeader title="Авито" />
-          <CreateAvitoSection token={token} onCreated={() => setHistoryKey(k => k + 1)} />
         </section>
       )}
 
