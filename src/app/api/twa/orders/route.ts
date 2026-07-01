@@ -54,6 +54,7 @@ export async function GET(req: NextRequest) {
   const q           = qRaw.length >= 2 ? qRaw : "";
   const skipCounts  = searchParams.get("skipCounts") === "1";
   const lite        = searchParams.get("lite") === "1";
+  const sourceFilter = searchParams.get("source") as string | null;
 
   const isVirtualTab = ["ALL", "BUYOUT", "DIRECT", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES"].includes(tab);
   const tabWhere = isVirtualTab
@@ -83,9 +84,12 @@ export async function GET(req: NextRequest) {
   }
 
   const notTest = { isTest: false };
+  const sourceWhere = sourceFilter && ["WB", "DIRECT", "AVITO", "MANUAL"].includes(sourceFilter)
+    ? { orderSource: sourceFilter }
+    : {};
   const where = q
-    ? { AND: [notTest, tabWhere, searchWhere] }
-    : { ...notTest, ...tabWhere };
+    ? { AND: [notTest, tabWhere, sourceWhere, searchWhere] }
+    : { ...notTest, ...tabWhere, ...sourceWhere };
 
   const take = skipCounts ? limit + 1 : limit;
   const ordersPromise = (prisma as any).wbOrder.findMany({
@@ -295,10 +299,47 @@ export async function POST(req: NextRequest) {
   if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => null);
-  if (!body?.action || !body?.orderId)
-    return NextResponse.json({ error: "action and orderId required" }, { status: 400 });
+  if (!body?.action)
+    return NextResponse.json({ error: "action required" }, { status: 400 });
 
   const { action, orderId, reason } = body;
+
+  if (action === "create-avito") {
+    const { amount, gamepassUrl, robloxUsername, note } = body;
+    if (!amount || typeof amount !== "number" || amount < 1)
+      return NextResponse.json({ error: "amount обязателен (число > 0)" }, { status: 400 });
+
+    const code = `AV-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+
+    const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+
+    const created = await (prisma as any).wbOrder.create({
+      data: {
+        amount,
+        gamepassUrl: gamepassUrl || null,
+        robloxUsername: robloxUsername || null,
+        status: gamepassUrl ? "PENDING" : "AWAITING_GAMEPASS",
+        platform: "TG",
+        wbCode: code,
+        isDirectOrder: false,
+        orderSource: "AVITO",
+        adminNote: note || null,
+        pendingAt: gamepassUrl ? new Date() : null,
+        purchaserUsername: settings?.robloxAccountName ?? null,
+        user: {
+          connectOrCreate: {
+            where: { tgId: "admin" },
+            create: { tgId: "admin", name: "Admin (Avito)" },
+          },
+        },
+      },
+    });
+    cachedCounts = null;
+    return NextResponse.json({ ok: true, order: created });
+  }
+
+  if (!orderId)
+    return NextResponse.json({ error: "orderId required" }, { status: 400 });
 
   const order = await (prisma as any).wbOrder.findUnique({
     where: { id: orderId },
@@ -355,8 +396,8 @@ export async function POST(req: NextRequest) {
       adminNote: note.slice(0, 2000),
       isFavorite: false,
     };
-    if (target === "DIRECT") data.isDirectOrder = true;
-    if (target === "BUYOUT") data.isDirectOrder = false;
+    if (target === "DIRECT") { data.isDirectOrder = true; data.orderSource = "DIRECT"; }
+    if (target === "BUYOUT") { data.isDirectOrder = false; }
 
     await (prisma as any).wbOrder.update({ where: { id: orderId }, data });
     cachedCounts = null;
@@ -489,6 +530,17 @@ export async function POST(req: NextRequest) {
 
     const failReason = purchaseData.reason ?? purchaseData.errorMsg ?? "Неизвестная ошибка";
     return NextResponse.json({ ok: true, success: false, msg: failReason });
+  }
+
+  if (action === "set-source") {
+    const src = body.source as string;
+    if (!["WB", "DIRECT", "AVITO", "MANUAL"].includes(src))
+      return NextResponse.json({ error: "Invalid source" }, { status: 400 });
+    await (prisma as any).wbOrder.update({
+      where: { id: orderId },
+      data: { orderSource: src },
+    });
+    return NextResponse.json({ ok: true });
   }
 
   if (action === "purchase-script") {

@@ -257,10 +257,27 @@ interface TxOrder {
   purchaserUsername: string | null;
   wbCode: string;
   isDirectOrder: boolean;
+  orderSource: "WB" | "DIRECT" | "AVITO" | "MANUAL";
   createdAt: string;
   updatedAt: string;
   user: { tgId: string | null; vkId: string | null; name: string | null; username: string | null };
 }
+
+type TxSourceFilter = "ALL" | "WB" | "DIRECT" | "AVITO" | "MANUAL";
+const TX_SOURCE_CHIPS: { id: TxSourceFilter; label: string; color: string }[] = [
+  { id: "ALL",    label: "Все",     color: C.textPrimary },
+  { id: "WB",     label: "WB",      color: C.green },
+  { id: "DIRECT", label: "Прямой",  color: C.blue },
+  { id: "AVITO",  label: "Авито",   color: C.orange },
+  { id: "MANUAL", label: "Ручные",  color: C.textTertiary },
+];
+
+const TX_SOURCE_BADGE: Record<string, { label: string; color: string }> = {
+  WB:     { label: "WB",     color: C.green },
+  DIRECT: { label: "Прямой", color: C.blue },
+  AVITO:  { label: "Авито",  color: C.orange },
+  MANUAL: { label: "Ручной", color: C.textTertiary },
+};
 
 interface PurchaserGroup {
   purchaser: string;
@@ -287,9 +304,10 @@ function pluralPurchases(n: number): string {
   return `${n} покупок`;
 }
 
-function buildGroups(orders: TxOrder[]): PurchaserGroup[] {
+function buildGroups(orders: TxOrder[], sourceFilter: TxSourceFilter = "ALL"): PurchaserGroup[] {
+  const filtered = sourceFilter === "ALL" ? orders : orders.filter(o => o.orderSource === sourceFilter);
   const map = new Map<string, TxOrder[]>();
-  for (const o of orders) {
+  for (const o of filtered) {
     const key = o.purchaserUsername ?? "Ручные";
     const arr = map.get(key);
     if (arr) arr.push(o); else map.set(key, [o]);
@@ -306,6 +324,12 @@ function buildGroups(orders: TxOrder[]): PurchaserGroup[] {
   }
   groups.sort((a, b) => new Date(b.latestDate).getTime() - new Date(a.latestDate).getTime());
   return groups;
+}
+
+function txCountBySource(orders: TxOrder[]): Record<TxSourceFilter, number> {
+  const c: Record<string, number> = { ALL: orders.length, WB: 0, DIRECT: 0, AVITO: 0, MANUAL: 0 };
+  for (const o of orders) c[o.orderSource] = (c[o.orderSource] ?? 0) + 1;
+  return c as Record<TxSourceFilter, number>;
 }
 
 function PurchaserAccordion({ group }: { group: PurchaserGroup }) {
@@ -363,6 +387,17 @@ function PurchaserAccordion({ group }: { group: PurchaserGroup }) {
                     </span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {tx.orderSource && tx.orderSource !== "WB" && (() => {
+                      const sb = TX_SOURCE_BADGE[tx.orderSource];
+                      if (!sb) return null;
+                      return (
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, color: sb.color,
+                          background: `${sb.color}1c`, padding: "2px 6px",
+                          borderRadius: 999, flexShrink: 0,
+                        }}>{sb.label}</span>
+                      );
+                    })()}
                     {gpId && (
                       <span style={{ fontSize: 14, color: C.textSecondary, ...tabular }}>
                         Pass {gpId}
@@ -401,6 +436,7 @@ function TransactionHistory({ token }: { token: string }) {
   const [loading, setLoading] = useState(true);
   const [doneCount, setDoneCount] = useState(0);
   const [loadedAll, setLoadedAll] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<TxSourceFilter>("ALL");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -446,18 +482,58 @@ function TransactionHistory({ token }: { token: string }) {
     </Card>
   );
 
-  const groups = buildGroups(orders);
+  const sc = txCountBySource(orders);
+  const hasMultipleSources = (Object.keys(sc) as TxSourceFilter[]).filter(k => k !== "ALL" && sc[k] > 0).length > 1;
+  const groups = buildGroups(orders, sourceFilter);
   const totalDirty = groups.reduce((s, g) => s + g.totalDirty, 0);
+  const filteredCount = groups.reduce((s, g) => s + g.orders.length, 0);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Source filter chips */}
+      {hasMultipleSources && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {TX_SOURCE_CHIPS.map(chip => {
+            const cnt = sc[chip.id];
+            if (chip.id !== "ALL" && cnt === 0) return null;
+            const isActive = sourceFilter === chip.id;
+            return (
+              <button
+                key={chip.id}
+                className="twa-press-sm"
+                onClick={() => { haptic.select(); setSourceFilter(chip.id); }}
+                style={{
+                  padding: "6px 12px", border: "none", borderRadius: 999, cursor: "pointer",
+                  fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+                  display: "flex", alignItems: "center", gap: 5,
+                  background: isActive ? chip.color : C.elevated,
+                  color: isActive ? "#fff" : chip.color,
+                  opacity: isActive ? 1 : 0.7,
+                  transition: "all 0.15s",
+                }}
+              >
+                {chip.label}
+                {cnt > 0 && (
+                  <span style={{
+                    fontSize: 11, fontWeight: 700,
+                    background: isActive ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.12)",
+                    color: "#fff", padding: "2px 6px", borderRadius: 999,
+                    ...tabular,
+                  }}>{cnt}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Summary */}
       <div style={{
         display: "flex", justifyContent: "space-between", alignItems: "center",
         padding: "10px 14px", background: tint(C.accent, 0.08), borderRadius: 12,
       }}>
         <span style={{ fontSize: 14, color: C.textSecondary }}>
-          {doneCount > 0 ? pluralPurchases(doneCount) : pluralPurchases(orders.length)} · {groups.length} акк.
+          {pluralPurchases(filteredCount)} · {groups.length} акк.
         </span>
         <span style={{ fontSize: 15, fontWeight: 600, color: C.accent, ...tabular }}>
           − {totalDirty.toLocaleString("ru-RU")} R$
@@ -471,6 +547,146 @@ function TransactionHistory({ token }: { token: string }) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// Create Avito Order
+// ═════════════════════════════════════════════════════════════════════════════
+function CreateAvitoSection({ token, onCreated }: { token: string; onCreated: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [gpInput, setGpInput] = useState("");
+  const [nick, setNick] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    const amt = parseInt(amount, 10);
+    if (!amt || amt < 1) { haptic.notify("error"); toast("Укажи сумму R$", "error"); return; }
+    setSaving(true);
+    try {
+      let gamepassUrl: string | null = null;
+      const raw = gpInput.trim();
+      if (raw) {
+        if (raw.includes("roblox.com")) gamepassUrl = raw;
+        else if (/^\d+$/.test(raw)) gamepassUrl = `https://www.roblox.com/game-pass/${raw}`;
+        else gamepassUrl = raw;
+      }
+
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          action: "create-avito",
+          amount: amt,
+          gamepassUrl,
+          robloxUsername: nick.trim() || null,
+          note: note.trim() || null,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
+      haptic.notify("success");
+      toast(`Заказ Авито создан · ${amt} R$`, "success");
+      setAmount(""); setGpInput(""); setNick(""); setNote("");
+      setOpen(false);
+      onCreated();
+    } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
+    finally { setSaving(false); }
+  }
+
+  if (!open) {
+    return (
+      <button
+        className="twa-press"
+        onClick={() => { haptic.impact("light"); setOpen(true); }}
+        style={{
+          width: "100%", padding: "14px", border: `1px dashed ${C.orange}55`,
+          borderRadius: 14, background: `${C.orange}0a`, cursor: "pointer",
+          fontSize: 15, fontWeight: 600, color: C.orange,
+          fontFamily: "inherit",
+        }}
+      >
+        + Авито заказ
+      </button>
+    );
+  }
+
+  return (
+    <Card>
+      <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 16, fontWeight: 600, color: C.orange }}>Новый заказ Авито</span>
+          <button className="twa-press-sm" onClick={() => { setOpen(false); }}
+            style={{ background: "transparent", border: "none", fontSize: 14, color: C.textTertiary, cursor: "pointer", padding: "4px 8px" }}>
+            ✕
+          </button>
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            value={amount}
+            onChange={e => setAmount(e.target.value.replace(/\D/g, ""))}
+            placeholder="Сумма R$"
+            inputMode="numeric"
+            style={{
+              flex: 1, background: C.elevated, border: "none", borderRadius: 10,
+              color: "#fff", fontSize: 16, padding: "12px 14px",
+              outline: "none", fontFamily: "inherit", boxSizing: "border-box",
+            }}
+          />
+        </div>
+
+        <input
+          value={gpInput}
+          onChange={e => setGpInput(e.target.value)}
+          placeholder="ID или URL геймпасса (опционально)"
+          style={{
+            width: "100%", background: C.elevated, border: "none", borderRadius: 10,
+            color: "#fff", fontSize: 15, padding: "12px 14px",
+            outline: "none", fontFamily: "inherit", boxSizing: "border-box",
+          }}
+        />
+
+        <input
+          value={nick}
+          onChange={e => setNick(e.target.value)}
+          placeholder="Ник Roblox продавца (опционально)"
+          style={{
+            width: "100%", background: C.elevated, border: "none", borderRadius: 10,
+            color: "#fff", fontSize: 15, padding: "12px 14px",
+            outline: "none", fontFamily: "inherit", boxSizing: "border-box",
+          }}
+        />
+
+        <input
+          value={note}
+          onChange={e => setNote(e.target.value)}
+          placeholder="Заметка (опционально)"
+          style={{
+            width: "100%", background: C.elevated, border: "none", borderRadius: 10,
+            color: "#fff", fontSize: 15, padding: "12px 14px",
+            outline: "none", fontFamily: "inherit", boxSizing: "border-box",
+          }}
+        />
+
+        <button
+          className="twa-press"
+          onClick={submit}
+          disabled={saving || !amount.trim()}
+          style={{
+            width: "100%", padding: "14px", border: "none", borderRadius: 12,
+            background: amount.trim() ? C.orange : C.elevated,
+            color: "#fff", fontSize: 16, fontWeight: 600, cursor: saving ? "default" : "pointer",
+            opacity: saving || !amount.trim() ? 0.5 : 1,
+            fontFamily: "inherit", transition: "all 0.2s",
+          }}
+        >
+          {saving ? "Создаю…" : "Создать заказ Авито"}
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 // Buyout Orders Section (embedded in Account)
 // ═════════════════════════════════════════════════════════════════════════════
 interface BuyoutOrder {
@@ -480,6 +696,7 @@ interface BuyoutOrder {
   status: string;
   wbCode: string;
   isDirectOrder: boolean;
+  orderSource: string;
   robloxUsername: string | null;
   createdAt: string;
   pendingAt: string | null;
@@ -585,7 +802,13 @@ function BuyoutSection({ token }: { token: string }) {
                     fontSize: 17, fontWeight: 600, color: "#7ec5ff",
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                   }}>{nick}</span>
-                  {order.isDirectOrder && (
+                  {order.orderSource === "AVITO" ? (
+                    <span style={{
+                      fontSize: 12, fontWeight: 600, color: C.orange,
+                      background: `${C.orange}1c`, padding: "4px 9px",
+                      borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
+                    }}>Авито</span>
+                  ) : order.isDirectOrder && (
                     <span style={{
                       fontSize: 12, fontWeight: 600, color: C.blue,
                       background: `${C.blue}1c`, padding: "4px 9px",
@@ -669,6 +892,7 @@ export default function BossrobuxScreen({ token }: { token: string }) {
   const [buying, setBuying] = useState(false);
   const [boughtIds, setBoughtIds] = useState<Set<number>>(new Set());
   const buyLock = useRef(false);
+  const [historyKey, setHistoryKey] = useState(0);
 
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
   const purchaseHeaders = { ...headers };
@@ -1031,10 +1255,18 @@ export default function BossrobuxScreen({ token }: { token: string }) {
         </section>
       )}
 
+      {/* ── Create Avito Order ──────────────────────────────────── */}
+      {cookieReady && (
+        <section>
+          <SectionHeader title="Авито" />
+          <CreateAvitoSection token={token} onCreated={() => setHistoryKey(k => k + 1)} />
+        </section>
+      )}
+
       {/* ── Transaction History ──────────────────────────────────────── */}
       <section>
         <SectionHeader title="История покупок" />
-        <TransactionHistory token={token} />
+        <TransactionHistory key={historyKey} token={token} />
       </section>
 
       {/* Confirm modal */}

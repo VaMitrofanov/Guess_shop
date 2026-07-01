@@ -6,26 +6,188 @@
 
 ---
 
-## Сессия 2026-07-01 (день-3) — «История покупок» в Аккаунте TWA
+## Сессия 2026-07-01 (день-5) — Классификация заказов по источнику (WB/Прямой/Авито/Ручной)
 
 ### Что сделано
 
-Новая секция **«История покупок»** в экране Аккаунт — аналог Roblox "My Transactions". Остальные секции (cookie, поиск/выкуп, «К выкупу») без изменений.
+Новая система классификации заказов по источнику (`orderSource`). Три типа + ручной:
+- **WB** (default) — заказы через Wildberries-код
+- **DIRECT** — прямые заказы через бота
+- **AVITO** — заказы с Авито, создаются вручную через TWA
+- **MANUAL** — ручные покупки (admin_ok без привязки)
 
-### TransactionHistory — компонент
+Всё полностью **admin-only** — покупатели ни в TG, ни в VK не видят типы заказов и не взаимодействуют с ними.
 
-Показывает все COMPLETED заказы, новые сверху, с пагинацией по 20.
+### Изменения БД (Prisma, `db push` применён)
 
-**Каждая строка (3 ряда):**
-1. Дата+время (`updatedAt`) + грязные R$ оранжевым со знаком − (сколько реально потрачено)
-2. 🎮 ник продавца Roblox + Pass ID (извлечён из `gamepassUrl`)
-3. Платформа покупателя (T/V бейдж) + ник/имя + код заказа + чистые R$ в скобках
+1. **+enum `OrderSource`** — `WB | DIRECT | AVITO | MANUAL`
+2. **+`orderSource OrderSource @default(WB)`** в `WbOrder`
+3. **+index** `[orderSource]`
+4. **Бэкфилл:** все `isDirectOrder = true` → `orderSource = 'DIRECT'` (SQL)
 
-**Summary bar:** кол-во покупок + общая сумма потраченных R$ (грязных), фиолетовый фон.
+### API изменения (`/api/twa/orders`)
 
-**Пагинация:** кнопка «Показать ещё». Первая страница загружает counts, остальные — `skipCounts=1`.
+**GET — фильтр по источнику:**
+- Новый query-параметр `?source=WB|DIRECT|AVITO|MANUAL` — фильтрует заказы по `orderSource`
+- Совместим со всеми существующими фильтрами (tab + search + source)
+
+**POST — новые actions:**
+- `create-avito` — создание заказа Авито. Параметры: `amount` (обязательно), `gamepassUrl`, `robloxUsername`, `note`. Генерирует код `AV-...`, привязывает к admin-юзеру, устанавливает `orderSource: "AVITO"`.
+- `set-source` — изменение `orderSource` существующего заказа
+
+### UI: OrdersScreen (вкладка «Готово»)
+
+**Чипы-фильтры по источнику:**
+```
+[Все 52] [WB 47] [Прямой 3] [Авито 1] [Ручные 1]
+```
+- Появляются только если есть заказы из >1 источника
+- Фильтруют аккордеон-группировку по `purchaserUsername`
+- Счётчики на каждом чипе
+
+**Бейдж источника в карточках:**
+- Для не-WB заказов в шапке карточки появляется бейдж: `Прямой` (синий), `Авито` (оранжевый), `Ручной` (серый)
+- WB-заказы без бейджа (они по умолчанию)
+
+### UI: BossrobuxScreen (Аккаунт)
+
+**Секция «Авито» — кнопка «+ Авито заказ»:**
+- Разворачивается в форму: сумма R$ (обязательно), ID/URL геймпасса, ник продавца, заметка
+- При создании: генерируется заказ с `orderSource: "AVITO"`, `status: PENDING` (если есть GP URL) или `AWAITING_GAMEPASS`
+- История покупок обновляется автоматически
+
+**Чипы-фильтры в «История покупок»:**
+- Те же чипы `[Все] [WB] [Прямой] [Авито] [Ручные]`
+- Фильтруют аккордеон-группировку
+- Summary bar пересчитывается по выбранному фильтру
+
+**Бейдж источника в транзакциях:**
+- Не-WB транзакции получают цветной бейдж рядом с Pass ID
+
+**Бейдж в секции «К выкупу»:**
+- Авито-заказы показывают оранжевый бейдж «Авито» вместо синего «Прямой»
+
+### Бот-код
+
+**TG `bots/tg/handlers.ts`:**
+- Обе точки создания direct-заказов (sqi:/spi:) → `orderSource: "DIRECT"`
+- WB-заказы используют default `WB`
+
+**VK:** WB-заказы используют default `WB`, direct-заказы создаются через TG intent
+
+### Файлы
+
+| Файл | Что изменено |
+|------|-------------|
+| `prisma/schema.prisma` | +enum `OrderSource`, +поле `orderSource` в WbOrder, +index |
+| `src/app/api/twa/orders/route.ts` | +`source` фильтр GET, +`create-avito` / `set-source` actions, `move-to` → sync orderSource |
+| `src/app/twa/_components/screens/OrdersScreen.tsx` | +`orderSource` в Order, +source chips в DONE, +source badges в карточках |
+| `src/app/twa/_components/screens/BossrobuxScreen.tsx` | +`CreateAvitoSection`, +source chips в TransactionHistory, +source badges в транзакциях/buyout |
+| `bots/tg/handlers.ts` | +`orderSource: "DIRECT"` при создании прямых заказов |
+
+### Деплой
+
+- [x] TypeScript чисто (`npx tsc --noEmit`)
+- [x] Prisma `db push` — применено
+- [x] Бэкфилл: `isDirectOrder=true` → `orderSource='DIRECT'`
+- [ ] Коммит + push
+- [ ] Web (RF) — автодеплой
+- [ ] TG бот — требует редеплоя (изменён `handlers.ts`)
+- [ ] VK бот — не затронут
+- [ ] **Визуальная проверка в TWA** — ожидает
+
+---
+
+## Сессия 2026-07-01 (день-4) — Группировка покупок по куки-аккаунту (коммит `db37226`)
+
+### Что сделано
+
+Покупки в «Готово» (OrdersScreen) и «Истории покупок» (BossrobuxScreen) теперь группируются **по куки-аккаунту, с которого выкуплен геймпасс** (`purchaserUsername`), а не по нику продавца (`robloxUsername`).
+
+### Изменения БД (Prisma, `db push` применён)
+
+1. **+`purchaserUsername String?`** в `WbOrder` — ник Roblox-аккаунта куки, с которого куплен ГП
+2. **+index** `[purchaserUsername]`
+3. **+`robloxAccountName String?`** в `GlobalSettings` — кэш ника куки-аккаунта (заполняется при `/setcookie`)
+
+### Точки записи purchaserUsername
+
+| Точка | Файл | Как |
+|-------|------|-----|
+| `/setcookie` (TG) | `bots/tg/handlers.ts` | `getAuthenticatedUser()` → `robloxAccountName` сохраняется в GlobalSettings |
+| `pb:` автовыкуп (TG) | `bots/tg/handlers.ts` | `settings.robloxAccountName` → `purchaserUsername` при `COMPLETED` |
+| TWA purchase | `src/app/api/twa/orders/route.ts` | `settings.robloxAccountName` → `purchaserUsername` при `COMPLETED` |
+| Ручной `admin_ok:` | — | `purchaserUsername` остаётся `null` → группа «Ручные» |
+
+### UI изменения
+
+**OrdersScreen — вкладка «Готово»:**
+- Плоский список → **аккордеон по куки-аккаунту** (`DoneAccordion`)
+- Шапка: 🎮 ник куки-акка + общая сумма грязных R$ + кол-во покупок + стрелка ▶/▼
+- Тап → раскрывает полные `OrderCard` внутри группы
+- Заказы без `purchaserUsername` → группа «Ручные»
+
+**BossrobuxScreen — «История покупок»:**
+- Группировка сменена с `robloxUsername` (продавец) → `purchaserUsername` (куки-аккаунт)
+- Внутри каждой транзакции добавлен `→ {robloxUsername}` — ник продавца, у которого купили
+
+### Файлы
+
+| Файл | Что изменено |
+|------|-------------|
+| `prisma/schema.prisma` | +`purchaserUsername` в WbOrder, +`robloxAccountName` в GlobalSettings, +index |
+| `bots/tg/handlers.ts` | `/setcookie` → сохраняет `robloxAccountName`; `pb:` → пишет `purchaserUsername` |
+| `src/app/api/twa/orders/route.ts` | action `purchase` → пишет `purchaserUsername` |
+| `src/app/twa/_components/screens/BossrobuxScreen.tsx` | `SellerAccordion` → `PurchaserAccordion`, группировка по `purchaserUsername` |
+| `src/app/twa/_components/screens/OrdersScreen.tsx` | +`DoneAccordion`, +`buildDoneGroups`, DONE таб рендерит аккордеон |
+
+### Бэкфилл
+
+Существующие COMPLETED заказы имеют `purchaserUsername = null` → попадают в группу «Ручные». Можно проставить ретроактивно SQL'ом, если известно, с какого аккаунта были сделаны покупки.
+
+### Деплой
+
+- [x] TypeScript чисто (`npx tsc --noEmit`)
+- [x] Prisma `db push` — применено
+- [x] Коммит `db37226` → `git push origin main`
+- [ ] Web (RF) — автодеплой
+- [ ] TG бот — требует редеплоя (изменён `handlers.ts`)
+- [ ] VK бот — не затронут
+- [ ] **Визуальная проверка в TWA** — ожидает
+
+---
+
+## Сессия 2026-07-01 (день-3) — «История покупок» в Аккаунте TWA (коммит `d1f3fa1`)
+
+### Что сделано
+
+Новая секция **«История покупок»** в экране Аккаунт — аналог Roblox "My Transactions" с **аккордеон-группировкой по продавцам** (robloxUsername). Остальные секции (cookie, поиск/выкуп, «К выкупу») без изменений.
+
+### Аккордеон-группировка
+
+COMPLETED заказы загружаются все (авто-пагинация по 50), группируются на клиенте по `robloxUsername`.
+
+**Каждая группа = карточка-аккордеон:**
+- Шапка (всегда видна): 🎮 ник продавца + общая сумма грязных R$ + кол-во покупок + стрелка ▶/▼
+- Тап → раскрывает список транзакций
+- Сортировка групп: по дате последней покупки (свежие сверху)
+- Внутри группы: хронологически (новые сверху)
+
+**Каждая транзакция (внутри раскрытой группы):**
+- Дата+время (`updatedAt`) + грязные R$ оранжевым
+- Pass ID (из gamepassUrl) + платформа (T/V) + ник клиента + код заказа
+
+**Summary bar:** общее кол-во покупок + кол-во аккаунтов + сумма R$.
 
 **Пустое состояние:** 📋 + «Нет завершённых покупок».
+
+### Ключевые компоненты
+
+| Компонент | Роль |
+|-----------|------|
+| `buildGroups(orders)` | Группирует по `robloxUsername`, сортирует группы по дате |
+| `SellerAccordion` | Карточка-аккордеон одного продавца |
+| `TransactionHistory` | Загрузка данных, summary bar, рендер групп |
 
 ### Расположение в экране
 
@@ -42,7 +204,7 @@
 
 | Файл | Что изменено |
 |------|-------------|
-| `src/app/twa/_components/screens/BossrobuxScreen.tsx` | +`TransactionHistory` компонент (~160 строк), +import `tint`, +секция в render |
+| `src/app/twa/_components/screens/BossrobuxScreen.tsx` | +`TransactionHistory`, +`SellerAccordion`, +`buildGroups`, +`pluralPurchases` (~220 строк), +import `tint` |
 
 ### Фаза 2 (потом)
 
@@ -54,9 +216,10 @@
 ### Деплой
 
 - [x] TypeScript чисто (`npx tsc --noEmit`)
-- [ ] Коммит + push
-- [ ] Force-deploy Web (RF)
+- [x] Коммит `d1f3fa1` → `git push origin main`
+- [x] Web (`z10ws7m1q45h281zwedmhei4`, RF) — автодеплой, `d1f3fa1`, healthy
 - [ ] TG/VK боты — не затронуты
+- [ ] **Визуальная проверка в TWA** — ожидает
 
 ---
 

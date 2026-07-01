@@ -114,6 +114,13 @@ enum DirectIntentStatus {
   EXPIRED
 }
 
+enum OrderSource {
+  WB
+  DIRECT
+  AVITO
+  MANUAL
+}
+
 enum WbCodeStatus {
   AVAILABLE
   RESERVED
@@ -136,6 +143,7 @@ model WbOrder {
   /// Allows accurate historical profit calculations.
   purchaseRate    Float?
   isDirectOrder   Boolean       @default(false)
+  orderSource     OrderSource   @default(WB)
   isTest          Boolean       @default(false)
   paymentDetails  String?
   robloxUsername  String?
@@ -163,6 +171,8 @@ model WbOrder {
   @@index([isFavorite, createdAt(sort: Desc)])
   // Grouping completed orders by cookie account.
   @@index([purchaserUsername])
+  // Filter by order source (WB/DIRECT/AVITO/MANUAL).
+  @@index([orderSource])
 }
 
 model FAQ {

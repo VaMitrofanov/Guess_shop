@@ -27,6 +27,7 @@ interface Order {
   takenAt: string | null;
   robloxUsername: string | null;
   purchaserUsername: string | null;
+  orderSource: "WB" | "DIRECT" | "AVITO" | "MANUAL";
   reviewStatus: "PENDING" | "SUBMITTED" | null;
   userOrderNumber: number | null;
   userOrderTotal: number | null;
@@ -469,6 +470,22 @@ function MoveToModal({ order, token, onDone, onClose }: {
 }
 
 /* ───────────── DONE tab: accordion grouped by purchaserUsername ───────────── */
+type SourceFilter = "ALL" | "WB" | "DIRECT" | "AVITO" | "MANUAL";
+const SOURCE_CHIPS: { id: SourceFilter; label: string; color: string }[] = [
+  { id: "ALL",    label: "Все",     color: C.textPrimary },
+  { id: "WB",     label: "WB",      color: C.green },
+  { id: "DIRECT", label: "Прямой",  color: C.blue },
+  { id: "AVITO",  label: "Авито",   color: C.orange },
+  { id: "MANUAL", label: "Ручные",  color: C.textTertiary },
+];
+
+const SOURCE_BADGE_META: Record<string, { label: string; color: string }> = {
+  WB:     { label: "WB",     color: C.green },
+  DIRECT: { label: "Прямой", color: C.blue },
+  AVITO:  { label: "Авито",  color: C.orange },
+  MANUAL: { label: "Ручной", color: C.textTertiary },
+};
+
 interface DoneGroup {
   purchaser: string;
   orders: Order[];
@@ -476,9 +493,10 @@ interface DoneGroup {
   latestDate: string;
 }
 
-function buildDoneGroups(orders: Order[]): DoneGroup[] {
+function buildDoneGroups(orders: Order[], sourceFilter: SourceFilter): DoneGroup[] {
+  const filtered = sourceFilter === "ALL" ? orders : orders.filter(o => o.orderSource === sourceFilter);
   const map = new Map<string, Order[]>();
-  for (const o of orders) {
+  for (const o of filtered) {
     const key = o.purchaserUsername ?? "Ручные";
     const arr = map.get(key);
     if (arr) arr.push(o); else map.set(key, [o]);
@@ -495,6 +513,12 @@ function buildDoneGroups(orders: Order[]): DoneGroup[] {
   }
   groups.sort((a, b) => new Date(b.latestDate).getTime() - new Date(a.latestDate).getTime());
   return groups;
+}
+
+function countBySource(orders: Order[]): Record<SourceFilter, number> {
+  const c: Record<string, number> = { ALL: orders.length, WB: 0, DIRECT: 0, AVITO: 0, MANUAL: 0 };
+  for (const o of orders) c[o.orderSource] = (c[o.orderSource] ?? 0) + 1;
+  return c as Record<SourceFilter, number>;
 }
 
 function pluralPurchases(n: number): string {
@@ -647,6 +671,19 @@ function OrderCard({
                 {tabBadge.label}
               </span>
             )}
+            {order.orderSource && order.orderSource !== "WB" && (() => {
+              const sb = SOURCE_BADGE_META[order.orderSource];
+              if (!sb) return null;
+              return (
+                <span style={{
+                  fontSize: 11, fontWeight: 600, color: sb.color,
+                  background: `${sb.color}1c`, padding: "3px 8px",
+                  borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
+                }}>
+                  {sb.label}
+                </span>
+              );
+            })()}
           </div>
           <button
             className="twa-press-sm"
@@ -851,6 +888,7 @@ export default function OrdersScreen({
   const [page, setPage] = useState(1);
   const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [exiting, setExiting] = useState<Set<string>>(new Set());
+  const [doneSourceFilter, setDoneSourceFilter] = useState<SourceFilter>("ALL");
   const reqIdRef = useRef(0);
 
   const enrichCache = useRef<Map<string, EnrichValue>>(new Map());
@@ -1181,19 +1219,63 @@ export default function OrdersScreen({
             </div>
 
             {filter === "DONE" ? (
-              buildDoneGroups(allOrders).map(g => (
-                <DoneAccordion
-                  key={g.purchaser}
-                  group={g}
-                  token={token}
-                  onRunAction={runAction}
-                  onSaveNote={saveNote}
-                  onPurchaseDone={handlePurchaseDone}
-                  onToggleFavorite={toggleFavorite}
-                  onMoved={handleMoved}
-                  exiting={exiting}
-                />
-              ))
+              <>
+                {/* Source filter chips */}
+                {(() => {
+                  const sc = countBySource(allOrders);
+                  const hasMultiple = (Object.keys(sc) as SourceFilter[]).filter(k => k !== "ALL" && sc[k] > 0).length > 1;
+                  if (!hasMultiple) return null;
+                  return (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
+                      {SOURCE_CHIPS.map(chip => {
+                        const cnt = sc[chip.id];
+                        if (chip.id !== "ALL" && cnt === 0) return null;
+                        const isActive = doneSourceFilter === chip.id;
+                        return (
+                          <button
+                            key={chip.id}
+                            className="twa-press-sm"
+                            onClick={() => { haptic.select(); setDoneSourceFilter(chip.id); }}
+                            style={{
+                              padding: "7px 14px", border: "none", borderRadius: 999, cursor: "pointer",
+                              fontSize: 14, fontWeight: 600, fontFamily: "inherit",
+                              display: "flex", alignItems: "center", gap: 6,
+                              background: isActive ? chip.color : C.elevated,
+                              color: isActive ? "#fff" : chip.color,
+                              opacity: isActive ? 1 : 0.7,
+                              transition: "all 0.15s",
+                            }}
+                          >
+                            {chip.label}
+                            {cnt > 0 && (
+                              <span style={{
+                                fontSize: 12, fontWeight: 700,
+                                background: isActive ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.12)",
+                                color: "#fff", padding: "2px 7px", borderRadius: 999,
+                                ...tabular,
+                              }}>{cnt}</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+                {buildDoneGroups(allOrders, doneSourceFilter).map(g => (
+                  <DoneAccordion
+                    key={g.purchaser}
+                    group={g}
+                    token={token}
+                    onRunAction={runAction}
+                    onSaveNote={saveNote}
+                    onPurchaseDone={handlePurchaseDone}
+                    onToggleFavorite={toggleFavorite}
+                    onMoved={handleMoved}
+                    exiting={exiting}
+                  />
+                ))}
+              </>
+
             ) : (
               allOrders.map(order => (
                 <OrderCard

@@ -3940,6 +3940,7 @@ export function registerCallbacks(bot: Telegraf): void {
               userId:        intent.userId,
               wbCode:        dirCode,
               isDirectOrder: true,
+              orderSource:   "DIRECT",
               paymentDetails: "СБП QR",
             },
           });
@@ -4021,6 +4022,7 @@ export function registerCallbacks(bot: Telegraf): void {
               userId:        intent.userId,
               wbCode:        dirCode,
               isDirectOrder: true,
+              orderSource:   "DIRECT",
             },
           });
           await tx.directIntent.update({ where: { id: intentId }, data: { status: "CONSUMED" } });
