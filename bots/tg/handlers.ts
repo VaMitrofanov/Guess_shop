@@ -2778,8 +2778,8 @@ export function registerAdmin(bot: Telegraf): void {
 
     await (db as any).globalSettings.upsert({
       where: { id: "global" },
-      update: { robloxCookie: text, robloxCookieUpdatedAt: new Date() },
-      create: { id: "global", usdToRub: 90, robloxCookie: text, robloxCookieUpdatedAt: new Date() },
+      update: { robloxCookie: text, robloxCookieUpdatedAt: new Date(), robloxAccountName: user.name },
+      create: { id: "global", usdToRub: 90, robloxCookie: text, robloxCookieUpdatedAt: new Date(), robloxAccountName: user.name },
     });
 
     resetPurchaseCsrf();
@@ -3177,9 +3177,10 @@ export function registerCallbacks(bot: Telegraf): void {
 
         if (result.success) {
           const currentRate = settings?.purchaseRate ?? null;
+          const purchaserUsername = settings?.robloxAccountName ?? null;
           const updated = await (db as any).wbOrder.updateMany({
             where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
-            data: { status: "COMPLETED", adminId, purchaseRate: currentRate },
+            data: { status: "COMPLETED", adminId, purchaseRate: currentRate, purchaserUsername },
           });
 
           if (updated.count > 0) {

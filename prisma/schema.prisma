@@ -146,6 +146,8 @@ model WbOrder {
   takenAt         DateTime?
   remindersSent   Int           @default(0)
   isFavorite      Boolean       @default(false)
+  /// Roblox username of the cookie account that purchased this gamepass.
+  purchaserUsername String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
@@ -159,6 +161,8 @@ model WbOrder {
   @@index([userId, createdAt(sort: Desc)])
   // Favorites filter — fast lookup of starred orders.
   @@index([isFavorite, createdAt(sort: Desc)])
+  // Grouping completed orders by cookie account.
+  @@index([purchaserUsername])
 }
 
 model FAQ {
@@ -223,6 +227,7 @@ model GlobalSettings {
   autoBuyRate    Float    @default(4.0)
   robloxCookie          String?
   robloxCookieUpdatedAt DateTime?
+  robloxAccountName     String?
 }
 
 /// Cost basis for WB products — used for unit economics calculation.

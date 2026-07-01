@@ -247,13 +247,14 @@ function ConfirmPurchase({
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Transaction History — accordion grouped by robloxUsername
+// Transaction History — accordion grouped by purchaserUsername (cookie account)
 // ═════════════════════════════════════════════════════════════════════════════
 interface TxOrder {
   id: string;
   amount: number;
   gamepassUrl: string | null;
   robloxUsername: string | null;
+  purchaserUsername: string | null;
   wbCode: string;
   isDirectOrder: boolean;
   createdAt: string;
@@ -261,8 +262,8 @@ interface TxOrder {
   user: { tgId: string | null; vkId: string | null; name: string | null; username: string | null };
 }
 
-interface SellerGroup {
-  seller: string;
+interface PurchaserGroup {
+  purchaser: string;
   orders: TxOrder[];
   totalDirty: number;
   latestDate: string;
@@ -286,18 +287,18 @@ function pluralPurchases(n: number): string {
   return `${n} покупок`;
 }
 
-function buildGroups(orders: TxOrder[]): SellerGroup[] {
+function buildGroups(orders: TxOrder[]): PurchaserGroup[] {
   const map = new Map<string, TxOrder[]>();
   for (const o of orders) {
-    const key = o.robloxUsername ?? "—";
+    const key = o.purchaserUsername ?? "Ручные";
     const arr = map.get(key);
     if (arr) arr.push(o); else map.set(key, [o]);
   }
-  const groups: SellerGroup[] = [];
-  for (const [seller, ords] of map) {
+  const groups: PurchaserGroup[] = [];
+  for (const [purchaser, ords] of map) {
     ords.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
     groups.push({
-      seller,
+      purchaser,
       orders: ords,
       totalDirty: ords.reduce((s, o) => s + Math.ceil(o.amount / 0.7), 0),
       latestDate: ords[0].updatedAt,
@@ -307,7 +308,7 @@ function buildGroups(orders: TxOrder[]): SellerGroup[] {
   return groups;
 }
 
-function SellerAccordion({ group }: { group: SellerGroup }) {
+function PurchaserAccordion({ group }: { group: PurchaserGroup }) {
   const [open, setOpen] = useState(false);
   return (
     <div style={{ background: C.card, borderRadius: 14, overflow: "hidden" }}>
@@ -324,7 +325,7 @@ function SellerAccordion({ group }: { group: SellerGroup }) {
         <span style={{ fontSize: 17, fontWeight: 600, color: "#e5e5ea", flex: 1, minWidth: 0,
           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
         }}>
-          🎮 {group.seller}
+          🎮 {group.purchaser}
         </span>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
           <span style={{ fontSize: 15, fontWeight: 700, color: C.orange, ...tabular }}>
@@ -367,10 +368,15 @@ function SellerAccordion({ group }: { group: SellerGroup }) {
                         Pass {gpId}
                       </span>
                     )}
+                    {tx.robloxUsername && (
+                      <span style={{ fontSize: 13, color: C.accent, fontWeight: 500 }}>
+                        → {tx.robloxUsername}
+                      </span>
+                    )}
                     <span style={{
                       fontSize: 11, fontWeight: 800, color: "#fff",
                       background: platformColor, borderRadius: 4, padding: "2px 5px",
-                      lineHeight: "15px", marginLeft: gpId ? 2 : 0,
+                      lineHeight: "15px",
                     }}>{platform}</span>
                     <span style={{
                       fontSize: 13, color: C.textTertiary,
@@ -459,7 +465,7 @@ function TransactionHistory({ token }: { token: string }) {
       </div>
 
       {/* Seller groups */}
-      {groups.map(g => <SellerAccordion key={g.seller} group={g} />)}
+      {groups.map(g => <PurchaserAccordion key={g.purchaser} group={g} />)}
     </div>
   );
 }

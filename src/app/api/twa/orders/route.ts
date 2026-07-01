@@ -470,9 +470,10 @@ export async function POST(req: NextRequest) {
 
     if (purchaseData.purchased) {
       const currentRate = settings?.purchaseRate ?? null;
+      const purchaserUsername = settings?.robloxAccountName ?? null;
       await (prisma as any).wbOrder.updateMany({
         where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
-        data: { status: "COMPLETED", purchaseRate: currentRate },
+        data: { status: "COMPLETED", purchaseRate: currentRate, purchaserUsername },
       });
       cachedCounts = null;
       notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder ?? false).catch(() => {});

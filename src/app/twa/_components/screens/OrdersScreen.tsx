@@ -26,6 +26,7 @@ interface Order {
   pendingAt: string | null;
   takenAt: string | null;
   robloxUsername: string | null;
+  purchaserUsername: string | null;
   reviewStatus: "PENDING" | "SUBMITTED" | null;
   userOrderNumber: number | null;
   userOrderTotal: number | null;
@@ -463,6 +464,118 @@ function MoveToModal({ order, token, onDone, onClose }: {
           {loading ? "…" : "Перевести"}
         </button>
       </div>
+    </div>
+  );
+}
+
+/* ───────────── DONE tab: accordion grouped by purchaserUsername ───────────── */
+interface DoneGroup {
+  purchaser: string;
+  orders: Order[];
+  totalDirty: number;
+  latestDate: string;
+}
+
+function buildDoneGroups(orders: Order[]): DoneGroup[] {
+  const map = new Map<string, Order[]>();
+  for (const o of orders) {
+    const key = o.purchaserUsername ?? "Ручные";
+    const arr = map.get(key);
+    if (arr) arr.push(o); else map.set(key, [o]);
+  }
+  const groups: DoneGroup[] = [];
+  for (const [purchaser, ords] of map) {
+    ords.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    groups.push({
+      purchaser,
+      orders: ords,
+      totalDirty: ords.reduce((s, o) => s + Math.ceil(o.amount / 0.7), 0),
+      latestDate: ords[0].updatedAt,
+    });
+  }
+  groups.sort((a, b) => new Date(b.latestDate).getTime() - new Date(a.latestDate).getTime());
+  return groups;
+}
+
+function pluralPurchases(n: number): string {
+  if (n % 10 === 1 && n % 100 !== 11) return `${n} покупка`;
+  if (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) return `${n} покупки`;
+  return `${n} покупок`;
+}
+
+function fmtTxDate(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+    .replace(",", "");
+}
+
+function extractGpId(url: string | null): string | null {
+  if (!url) return null;
+  const m = url.match(/game-pass(?:es)?\/(\d+)/i);
+  return m ? m[1] : null;
+}
+
+function DoneAccordion({ group, token, onRunAction, onSaveNote, onPurchaseDone, onToggleFavorite, onMoved, exiting }: {
+  group: DoneGroup;
+  token: string;
+  onRunAction: (order: Order, action: string, reason?: string) => Promise<ActionResult>;
+  onSaveNote: (orderId: string, note: string) => Promise<ActionResult>;
+  onPurchaseDone: (order: Order) => void;
+  onToggleFavorite: (order: Order) => void;
+  onMoved: (order: Order) => void;
+  exiting: Set<string>;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ background: C.card, borderRadius: 14, overflow: "hidden" }}>
+      <button
+        className="twa-press"
+        onClick={() => { haptic.impact("light"); setOpen(v => !v); }}
+        style={{
+          width: "100%", padding: "14px 16px", border: "none", background: "transparent",
+          display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
+          textAlign: "left", fontFamily: "inherit",
+        }}
+      >
+        <span style={{ fontSize: 17, fontWeight: 600, color: "#e5e5ea", flex: 1, minWidth: 0,
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}>
+          🎮 {group.purchaser}
+        </span>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
+          <span style={{ fontSize: 15, fontWeight: 700, color: C.orange, ...tabular }}>
+            − {group.totalDirty.toLocaleString("ru-RU")} R$
+          </span>
+          <span style={{ fontSize: 13, color: C.textTertiary }}>
+            {pluralPurchases(group.orders.length)}
+          </span>
+        </div>
+        <span style={{
+          fontSize: 13, color: C.textTertiary, flexShrink: 0,
+          transform: open ? "rotate(90deg)" : "none",
+          transition: "transform 0.2s",
+        }}>▶</span>
+      </button>
+
+      {open && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "0 10px 10px" }}>
+          <div style={{ height: 1, background: C.border }} />
+          {group.orders.map(order => (
+            <OrderCard
+              key={order.id}
+              order={order}
+              token={token}
+              currentTab={"DONE" as FilterTab}
+              exiting={exiting.has(order.id)}
+              onRunAction={(action, reason) => onRunAction(order, action, reason)}
+              onSaveNote={(note) => onSaveNote(order.id, note)}
+              onPurchaseDone={() => { onPurchaseDone(order); }}
+              onToggleFavorite={() => { onToggleFavorite(order); }}
+              onMoved={() => { onMoved(order); }}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1067,20 +1180,36 @@ export default function OrdersScreen({
               <span style={{ fontSize: 14, color: C.textSecondary, letterSpacing: 0.1 }}>{summaryText}</span>
             </div>
 
-            {allOrders.map(order => (
-              <OrderCard
-                key={order.id}
-                order={order}
-                token={token}
-                currentTab={filter}
-                exiting={exiting.has(order.id)}
-                onRunAction={(action, reason) => runAction(order, action, reason)}
-                onSaveNote={(note) => saveNote(order.id, note)}
-                onPurchaseDone={() => handlePurchaseDone(order)}
-                onToggleFavorite={() => toggleFavorite(order)}
-                onMoved={() => handleMoved(order)}
-              />
-            ))}
+            {filter === "DONE" ? (
+              buildDoneGroups(allOrders).map(g => (
+                <DoneAccordion
+                  key={g.purchaser}
+                  group={g}
+                  token={token}
+                  onRunAction={runAction}
+                  onSaveNote={saveNote}
+                  onPurchaseDone={handlePurchaseDone}
+                  onToggleFavorite={toggleFavorite}
+                  onMoved={handleMoved}
+                  exiting={exiting}
+                />
+              ))
+            ) : (
+              allOrders.map(order => (
+                <OrderCard
+                  key={order.id}
+                  order={order}
+                  token={token}
+                  currentTab={filter}
+                  exiting={exiting.has(order.id)}
+                  onRunAction={(action, reason) => runAction(order, action, reason)}
+                  onSaveNote={(note) => saveNote(order.id, note)}
+                  onPurchaseDone={() => handlePurchaseDone(order)}
+                  onToggleFavorite={() => toggleFavorite(order)}
+                  onMoved={() => handleMoved(order)}
+                />
+              ))
+            )}
 
             {data && page < data.pages && (
               <div ref={sentinelRef} style={{ minHeight: 1 }}>
