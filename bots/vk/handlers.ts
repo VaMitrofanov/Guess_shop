@@ -651,7 +651,8 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
 
   // ── Live-support pause: stay silent on free text while a manager is handling
   // this chat, so the user's replies to the manager aren't parsed as links.
-  // (Button payloads above — support/resubmit/check_sub — still work.)
+  // Button payload commands (start_direct, status, edit_nick, etc.) still work —
+  // they are intentional user actions from inline keyboards, not free text.
   // The user can hand control back to the bot themselves with «+бот».
   if (isSupportPaused(vkUserId)) {
     if (RESUME_KEYWORDS.includes(lower)) {
@@ -659,15 +660,20 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       void rePromptAfterSupport(vkUserId);
       return;
     }
+    const hasKnownPayload = msgPayload?.command && typeof msgPayload.command === "string";
     // A photo is almost always *terminal proof* (review screenshot or direct
     // payment). Silently dropping it here was the "фото зависло" bug — the user
     // got no acknowledgement at all. Let an *eligible* proof photo fall through
     // to the photo-routing below; non-eligible photos (e.g. a screenshot meant
     // for the live manager) still stay silent so the bot doesn't hijack the chat.
-    if (!(messageHasPhoto(ctx) && await hasPendingProofPhoto(vkUserId))) {
+    if (!hasKnownPayload && !(messageHasPhoto(ctx) && await hasPendingProofPhoto(vkUserId))) {
       return;
     }
-    console.log(`[VK] support-pause bypass: eligible proof photo from vkUserId=${vkUserId}`);
+    if (hasKnownPayload) {
+      console.log(`[VK] support-pause bypass: payload command "${msgPayload.command}" from vkUserId=${vkUserId}`);
+    } else {
+      console.log(`[VK] support-pause bypass: eligible proof photo from vkUserId=${vkUserId}`);
+    }
   }
 
   // ── (B) State machine dispatch ────────────────────────────────────────────

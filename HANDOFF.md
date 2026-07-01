@@ -6,44 +6,95 @@
 
 ---
 
-## Сессия 2026-07-01 (день-8) — Авито в «К выкупу» + умная сортировка пачки по балансу (коммит `cfd5ec1`)
+## Сессия 2026-07-01 (день-9) — Фикс: VK бот молчит на кнопки при активной поддержке (viu1758)
+
+### Инцидент
+
+Покупатель Алексей Асфатулин (viu1758) нажал «💎 Ещё на viu1758» в VK-меню — бот не ответил. Кнопка «В моё меню» работала, а «Ещё на» — нет.
+
+### Root cause
+
+VK бот имеет support-pause механизм (30 мин после нажатия «Поддержка» или ответа менеджера из сообщества). Проверка `isSupportPaused()` на строке 656 `bots/vk/handlers.ts` молча дропала ВСЕ входящие сообщения (кроме фото-пруфов), включая нажатия inline-кнопок с payload.
+
+Часть команд обрабатывалась ДО этой проверки (и работала при поддержке): `menu`, `faq`, `support`, `check_sub`, `resubmit`. Остальные — ПОСЛЕ: `start_direct`, `status`, `edit_nick`, `direct_pack/confirm/cancel/back`, `direct_gp_pick`, `direct_submit`, `user_cancel_direct`. Эти команды молча блокировались.
+
+Сценарий viu1758:
+1. За последние 30 мин сработала поддержка → support-pause активен
+2. 20:06 — нажал «В моё меню» → `menu` → обработан ДО pause → меню показано ✅
+3. 20:07 — нажал «Ещё на viu1758» → `start_direct` → ПОСЛЕ pause → дроп ❌
+
+### Фикс
+
+Support-pause теперь пропускает сообщения с любым payload-command. Кнопки inline-клавиатуры — это осознанное действие пользователя, не свободный текст менеджеру. Добавлен лог `support-pause bypass: payload command "..." from vkUserId=...`.
+
+TG бот проверен — support-pause механизма нет, аналогичной проблемы нет.
+
+### Файлы
+
+| Файл | Что изменено |
+|------|-------------|
+| `bots/vk/handlers.ts` | Support-pause: bypass для сообщений с `msgPayload.command` |
+
+### Деплой
+
+- [x] TypeScript чисто (`npx tsc --noEmit`)
+- [ ] Коммит + push
+- [ ] VK бот — требует редеплоя
+- [ ] TG бот — не затронут
+
+---
+
+## Сессия 2026-07-01 (день-8) — Авито в «К выкупу» + DP-knapsack оптимизация пачки (коммиты `cfd5ec1`, `a6e8d1f`)
 
 ### Что сделано
 
-Две доработки BuyoutSection в экране Аккаунт (BossrobuxScreen):
+Полная переработка BuyoutSection в экране Аккаунт (BossrobuxScreen). Две итерации:
 
-#### 1. Авито-заказы в «К выкупу»
+#### 1. Авито-заказы в «К выкупу» (`cfd5ec1`)
 
-Раньше BuyoutSection загружал только DIRECT + BUYOUT (WB) заказы. Авито-заказы показывались только на отдельной вкладке в OrdersScreen. Теперь BuyoutSection делает 3 параллельных fetch: `?status=DIRECT` + `?status=BUYOUT` + `?status=AVITO`. Группировка трёхсторонняя: **Прямые → Авито → WB** (приоритет по важности).
+BuyoutSection теперь делает 3 параллельных fetch: `?status=DIRECT` + `?status=BUYOUT` + `?status=AVITO`. Раньше авито показывались только на отдельной вкладке в OrdersScreen.
 
-#### 2. Умная сортировка пачки по балансу аккаунта
+#### 2. DP-knapsack вместо жадного алгоритма (`a6e8d1f`)
 
-Новая функция `buildBuyoutPlan(orders, balance)` — жадный алгоритм с приоритетом времени:
-1. Все заказы сортируются по `pendingAt ?? createdAt` (старые первыми)
-2. Для каждого вычисляется `dirty = Math.ceil(amount / 0.7)` — реальная стоимость покупки
-3. Идёт по списку: если dirty ≤ оставшийся баланс → включает в пачку
-4. Если dirty > остаток → пропускает, но продолжает (может следующий дешевле)
+Полностью переписан `buildBuyoutPlan`. Логика:
 
-**UI разделён на две секции:**
-- **«Выкупить · N»** (зелёная) — заказы, которые влезают в баланс, с кнопкой покупки
-- **«Ожидают баланс · N»** (серая) — заказы, на которые не хватает, opacity 0.45, без кнопки
+**Прямые и Авито — обязательные.** Все выкупаются, без оптимизации. Приоритет: Прямые → Авито → WB. Внутри каждой группы — по pendingAt ASC, createdAt ASC.
+
+**WB — оптимизированное подмножество.** После вычета dirty-суммы прямых и авито остаток идёт на WB. Новая функция `optimizeWbSubset()` — классический 0/1 knapsack (subset-sum) через DP с полным backtracking:
+1. WB отсортированы oldest-first, для DP реверсятся (newest=index 0)
+2. DP: `snaps[i][s]` = достижима ли сумма `s` из items 0..i-1
+3. Целевой диапазон: `[wbBudget - 143, wbBudget]` — остаток 0–143 грязных R$ (≈0–100 чистых)
+4. Backtrack от i=n-1 к 0 → предпочитает старые WB-заказы (высокие индексы = oldest в reversed)
+5. Fallback: если целевой диапазон недостижим → максимальная сумма ≤ budget
+
+**Пример:** баланс 9500 dirty, 12 заказов (3П + 3А + 6WB). Прямые+Авито = 4716 dirty. WB-бюджет = 4784. DP находит 5 из 6 WB с суммой 3145 → остаток **66 dirty**. Пропущен В1200 (не влезает в остаток вместе с остальными).
+
+**Память:** N≤50 orders × budget≤300k → 50 × 300k Uint8Array ≈ 15MB, ОК для iPhone 14+.
+
+### UI
 
 **Summary bar** вверху «К выкупу»:
-- Баланс: 20 000 R$
-- Пачка: 15 из 20 · 19 850 R$
-- Не хватает: 10 150 R$ (только если есть ожидающие)
-- Остаток: 150 R$
+```
+Баланс    9 500 R$
+Пачка     11 из 12 · 9 434 R$
+Ожидают   1 шт · 1 715 R$
+Остаток   66 R$  (зелёный если ≤ 143)
+```
 
-**Обновление баланса после покупки:** при успешном выкупе баланс уменьшается на dirty стоимость, пачка пересчитывается без рефетча.
+**Две секции:**
+- **«Выкупить · N»** (зелёная) — Прямые → Авито → WB (оптимизированные), с кнопкой покупки
+- **«Ожидают баланс · N»** (серая) — WB не вошедшие в пачку, opacity 0.45, без кнопки
 
-Если баланс неизвестен (null) — показывает все заказы без разделения (как раньше).
+**Обновление баланса после покупки:** dirty вычитается из баланса, пачка пересчитывается.
 
-### Вспомогательные компоненты
+### Ключевые функции
 
-| Компонент/Функция | Роль |
-|-------------------|------|
-| `buildBuyoutPlan(orders, balance)` | Жадный алгоритм: selected/waiting/totalDirty/remainingBalance |
+| Функция | Роль |
+|---------|------|
+| `buildBuyoutPlan(orders, balance)` | Разделяет на direct/avito/wb, обязательные + knapsack для WB |
+| `optimizeWbSubset(wbOrders, budget)` | 0/1 DP knapsack с backtracking, target [budget-143, budget] |
 | `groupBySource(orders)` | Разбивает на direct/avito/wb массивы |
+| `sortByAge(a, b)` | Сортировка по pendingAt ASC → createdAt ASC |
 | `BuyoutOrderCard` | Карточка заказа (вынесена из inline рендера) |
 | `renderGroupedOrders(orders, ...)` | Рендер с подзаголовками групп (Прямые/Авито/WB) |
 
@@ -51,7 +102,7 @@
 
 | Файл | Что изменено |
 |------|-------------|
-| `src/app/twa/_components/screens/BossrobuxScreen.tsx` | +AVITO fetch, +prop balance/onBalanceChange, +`buildBuyoutPlan`, +`groupBySource`, +`BuyoutOrderCard`, +`renderGroupedOrders`, UI с summary bar и selected/waiting секциями |
+| `src/app/twa/_components/screens/BossrobuxScreen.tsx` | +AVITO fetch, +prop balance/onBalanceChange, +`optimizeWbSubset` (DP), +`buildBuyoutPlan` (обязательные + knapsack), +`groupBySource`, +`BuyoutOrderCard`, +`renderGroupedOrders`, UI summary bar + selected/waiting |
 
 ### API
 
@@ -60,7 +111,7 @@
 ### Деплой
 
 - [x] TypeScript чисто (`npx tsc --noEmit`)
-- [x] Коммит `cfd5ec1` → `git push origin main`
+- [x] Коммит `cfd5ec1` + `a6e8d1f` → `git push origin main`
 - [ ] Web (RF) — автодеплой
 - [ ] TG/VK боты — не затронуты
 - [ ] **Визуальная проверка в TWA** — ожидает
