@@ -1,5 +1,5 @@
 "use client";
-import { C, MONO, tabular } from "../theme";
+import { C, MONO, tabular, tint } from "../theme";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { haptic } from "../haptics";
 import { toast } from "../Toast";
@@ -242,6 +242,224 @@ function ConfirmPurchase({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Transaction History — accordion grouped by robloxUsername
+// ═════════════════════════════════════════════════════════════════════════════
+interface TxOrder {
+  id: string;
+  amount: number;
+  gamepassUrl: string | null;
+  robloxUsername: string | null;
+  wbCode: string;
+  isDirectOrder: boolean;
+  createdAt: string;
+  updatedAt: string;
+  user: { tgId: string | null; vkId: string | null; name: string | null; username: string | null };
+}
+
+interface SellerGroup {
+  seller: string;
+  orders: TxOrder[];
+  totalDirty: number;
+  latestDate: string;
+}
+
+function extractGpId(url: string | null): string | null {
+  if (!url) return null;
+  const m = url.match(/game-pass(?:es)?\/(\d+)/i);
+  return m ? m[1] : null;
+}
+
+function fmtTxDate(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+    .replace(",", "");
+}
+
+function pluralPurchases(n: number): string {
+  if (n % 10 === 1 && n % 100 !== 11) return `${n} покупка`;
+  if (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) return `${n} покупки`;
+  return `${n} покупок`;
+}
+
+function buildGroups(orders: TxOrder[]): SellerGroup[] {
+  const map = new Map<string, TxOrder[]>();
+  for (const o of orders) {
+    const key = o.robloxUsername ?? "—";
+    const arr = map.get(key);
+    if (arr) arr.push(o); else map.set(key, [o]);
+  }
+  const groups: SellerGroup[] = [];
+  for (const [seller, ords] of map) {
+    ords.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    groups.push({
+      seller,
+      orders: ords,
+      totalDirty: ords.reduce((s, o) => s + Math.ceil(o.amount / 0.7), 0),
+      latestDate: ords[0].updatedAt,
+    });
+  }
+  groups.sort((a, b) => new Date(b.latestDate).getTime() - new Date(a.latestDate).getTime());
+  return groups;
+}
+
+function SellerAccordion({ group }: { group: SellerGroup }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ background: C.card, borderRadius: 14, overflow: "hidden" }}>
+      {/* Header — always visible */}
+      <button
+        className="twa-press"
+        onClick={() => { haptic.impact("light"); setOpen(v => !v); }}
+        style={{
+          width: "100%", padding: "14px 16px", border: "none", background: "transparent",
+          display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
+          textAlign: "left", fontFamily: "inherit",
+        }}
+      >
+        <span style={{ fontSize: 17, fontWeight: 600, color: "#e5e5ea", flex: 1, minWidth: 0,
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}>
+          🎮 {group.seller}
+        </span>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
+          <span style={{ fontSize: 15, fontWeight: 700, color: C.orange, ...tabular }}>
+            − {group.totalDirty.toLocaleString("ru-RU")} R$
+          </span>
+          <span style={{ fontSize: 13, color: C.textTertiary }}>
+            {pluralPurchases(group.orders.length)}
+          </span>
+        </div>
+        <span style={{
+          fontSize: 13, color: C.textTertiary, flexShrink: 0,
+          transform: open ? "rotate(90deg)" : "none",
+          transition: "transform 0.2s",
+        }}>▶</span>
+      </button>
+
+      {/* Expanded: transaction rows */}
+      {open && (
+        <div>
+          <div style={{ height: 1, background: C.border }} />
+          {group.orders.map((tx, i) => {
+            const dirty = Math.ceil(tx.amount / 0.7);
+            const gpId = extractGpId(tx.gamepassUrl);
+            const nick = tx.user.username ? `@${tx.user.username}` : tx.user.name ?? "—";
+            const platform = tx.user.tgId ? "T" : tx.user.vkId ? "V" : "—";
+            const platformColor = tx.user.tgId ? "#229ED9" : tx.user.vkId ? "#0077FF" : C.elevated;
+            return (
+              <div key={tx.id}>
+                {i > 0 && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
+                <div style={{ padding: "10px 16px", display: "flex", flexDirection: "column", gap: 3 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 14, color: C.textTertiary, ...tabular }}>{fmtTxDate(tx.updatedAt)}</span>
+                    <span style={{ fontSize: 15, fontWeight: 600, color: C.orange, ...tabular }}>
+                      − {dirty.toLocaleString("ru-RU")} R$
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {gpId && (
+                      <span style={{ fontSize: 14, color: C.textSecondary, ...tabular }}>
+                        Pass {gpId}
+                      </span>
+                    )}
+                    <span style={{
+                      fontSize: 11, fontWeight: 800, color: "#fff",
+                      background: platformColor, borderRadius: 4, padding: "2px 5px",
+                      lineHeight: "15px", marginLeft: gpId ? 2 : 0,
+                    }}>{platform}</span>
+                    <span style={{
+                      fontSize: 13, color: C.textTertiary,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>{nick}</span>
+                    <span style={{ fontSize: 13, color: C.textTertiary, fontFamily: MONO, letterSpacing: 0.3, marginLeft: "auto", flexShrink: 0 }}>
+                      {tx.wbCode}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TransactionHistory({ token }: { token: string }) {
+  const [orders, setOrders] = useState<TxOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [doneCount, setDoneCount] = useState(0);
+  const [loadedAll, setLoadedAll] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      let all: TxOrder[] = [];
+      let page = 1;
+      const limit = 50;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const params = new URLSearchParams({
+          status: "DONE", limit: String(limit), page: String(page), lite: "1",
+          ...(page === 1 ? {} : { skipCounts: "1" }),
+        });
+        const r = await fetch(`/api/twa/orders?${params}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!r.ok) break;
+        const d = await r.json();
+        const batch: TxOrder[] = d.orders ?? [];
+        if (page === 1) setDoneCount(d.counts?.DONE ?? d.total ?? batch.length);
+        all = all.concat(batch);
+        if (batch.length < limit) break;
+        page++;
+      }
+      setOrders(all);
+      setLoadedAll(true);
+    } catch {}
+    finally { setLoading(false); }
+  }, [token]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return (
+    <div style={{ background: C.card, borderRadius: 14, height: 80, animation: "pulse 1.5s ease-in-out infinite" }} />
+  );
+
+  if (orders.length === 0) return (
+    <Card>
+      <div style={{ padding: "24px 16px", textAlign: "center" }}>
+        <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
+        <div style={{ fontSize: 16, color: C.textTertiary }}>Нет завершённых покупок</div>
+      </div>
+    </Card>
+  );
+
+  const groups = buildGroups(orders);
+  const totalDirty = groups.reduce((s, g) => s + g.totalDirty, 0);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Summary */}
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        padding: "10px 14px", background: tint(C.accent, 0.08), borderRadius: 12,
+      }}>
+        <span style={{ fontSize: 14, color: C.textSecondary }}>
+          {doneCount > 0 ? pluralPurchases(doneCount) : pluralPurchases(orders.length)} · {groups.length} акк.
+        </span>
+        <span style={{ fontSize: 15, fontWeight: 600, color: C.accent, ...tabular }}>
+          − {totalDirty.toLocaleString("ru-RU")} R$
+        </span>
+      </div>
+
+      {/* Seller groups */}
+      {groups.map(g => <SellerAccordion key={g.seller} group={g} />)}
     </div>
   );
 }
@@ -806,6 +1024,12 @@ export default function BossrobuxScreen({ token }: { token: string }) {
           <BuyoutSection token={token} />
         </section>
       )}
+
+      {/* ── Transaction History ──────────────────────────────────────── */}
+      <section>
+        <SectionHeader title="История покупок" />
+        <TransactionHistory token={token} />
+      </section>
 
       {/* Confirm modal */}
       {confirmGp && (
