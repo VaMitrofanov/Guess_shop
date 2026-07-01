@@ -117,12 +117,21 @@ function stepBar(current: number, label: string): string {
   return `${bar}  Шаг ${current}/5 · ${label}`;
 }
 
+// VK inline keyboards: max 10 buttons. Drop 400 & 1200 (close neighbours exist).
+const VK_PACKS = [100, 200, 300, 500, 800, 1000, 1500, 2000];
+
 /** Build VK inline keyboard with predefined Robux packs and their ruble prices. */
 function buildVkPackKb(userBonus = 0, rubleDiscount = 0, lastOrderAmount?: number) {
   const kb = Keyboard.builder();
-  if (lastOrderAmount && DIRECT_PACKS.includes(lastOrderAmount)) {
-    const tag = userBonus > 0 && lastOrderAmount >= BONUS_MIN_PACK ? ` +${userBonus}🎁` : "";
-    const basePrice = directPrice(lastOrderAmount);
+  const hasReorder = !!(lastOrderAmount && DIRECT_PACKS.includes(lastOrderAmount));
+
+  // With reorder: 1 reorder + 7 packs + ✏️ + ❌ = 10
+  // Without:      8 packs + ✏️ + ❌ = 10
+  let packs: number[];
+  if (hasReorder) {
+    packs = VK_PACKS.filter(p => p !== lastOrderAmount).slice(0, 7);
+    const tag = userBonus > 0 && lastOrderAmount! >= BONUS_MIN_PACK ? ` +${userBonus}🎁` : "";
+    const basePrice = directPrice(lastOrderAmount!);
     const price = rubleDiscount > 0 ? Math.max(0, basePrice - rubleDiscount) : basePrice;
     kb.textButton({
       label: `🔄 ${lastOrderAmount}${tag} R$ — ${fmtRub(price)}`,
@@ -130,28 +139,23 @@ function buildVkPackKb(userBonus = 0, rubleDiscount = 0, lastOrderAmount?: numbe
       color: "positive",
     });
     kb.row();
+  } else {
+    packs = [...VK_PACKS];
   }
-  const rows: number[][] = [
-    DIRECT_PACKS.slice(0, 3),   // 100, 200, 300
-    DIRECT_PACKS.slice(3, 6),   // 400, 500, 800
-    DIRECT_PACKS.slice(6, 9),   // 1000, 1200, 1500
-    DIRECT_PACKS.slice(9),      // 2000
-  ];
-  for (const row of rows) {
-    for (const amt of row) {
-      const tag = userBonus > 0 && amt >= BONUS_MIN_PACK ? ` +${userBonus}🎁` : "";
-      const basePrice = directPrice(amt);
-      const price = rubleDiscount > 0 ? Math.max(0, basePrice - rubleDiscount) : basePrice;
-      kb.textButton({
-        label: `${amt}${tag} R$ — ${fmtRub(price)}`,
-        payload: { command: "direct_pack", amount: amt },
-        color: userBonus > 0 && amt >= BONUS_MIN_PACK ? "positive" : "primary",
-      });
-    }
-    kb.row();
+
+  for (let i = 0; i < packs.length; i++) {
+    const amt = packs[i];
+    const tag = userBonus > 0 && amt >= BONUS_MIN_PACK ? ` +${userBonus}🎁` : "";
+    const basePrice = directPrice(amt);
+    const price = rubleDiscount > 0 ? Math.max(0, basePrice - rubleDiscount) : basePrice;
+    kb.textButton({
+      label: `${amt}${tag} R$ — ${fmtRub(price)}`,
+      payload: { command: "direct_pack", amount: amt },
+      color: userBonus > 0 && amt >= BONUS_MIN_PACK ? "positive" : "primary",
+    });
+    if ((i + 1) % 4 === 0 || i === packs.length - 1) kb.row();
   }
   kb.textButton({ label: "✏️ Своё количество", payload: { command: "direct_custom" }, color: "secondary" });
-  kb.row();
   kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
   return kb.inline();
 }

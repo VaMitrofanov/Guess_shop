@@ -46,6 +46,11 @@ vk.updates.on("message_new", async (ctx) => {
     await handleMessage(ctx as any);
   } catch (err) {
     console.error("[VK] Unhandled error in message_new:", err);
+    if (!ctx.isOutbox) {
+      try {
+        await ctx.reply("⚠️ Произошла ошибка. Попробуй ещё раз или напиши нам: https://t.me/RobloxBank_PA");
+      } catch {}
+    }
   }
 });
 

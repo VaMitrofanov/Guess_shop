@@ -46,6 +46,13 @@ if (!token) throw new Error("[TG] TG_TOKEN is not set");
 
 export const bot = new Telegraf(token);
 
+bot.catch((err: any, ctx: any) => {
+  console.error("[TG] Unhandled error:", err);
+  try {
+    ctx?.reply?.("⚠️ Произошла ошибка. Попробуй ещё раз или напиши /start");
+  } catch {}
+});
+
 // Register all handlers (order matters: admin hubs → commands → callbacks → text → photo)
 // Admin hubs must be registered FIRST so their text interceptors (search, codes, rate)
 // fire before the generic text handler in handlers.ts.
