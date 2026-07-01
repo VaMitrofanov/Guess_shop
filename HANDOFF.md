@@ -6,6 +6,47 @@
 
 ---
 
+## Сессия 2026-07-01 (день-10) — Фикс: кнопка «Cookie» в TWA всегда падала с «Сервер недоступен»
+
+### Инцидент
+
+Пользователь: «снова не работает кнопка куки в TWA, пишет сервер недоступен — попробуйте позже». До фикса вручную обновил куки аккаунта (новый аккаунт `yqf86867`, баланс 10 960 R$) напрямую в БД (`GlobalSettings`), т.к. кнопка была сломана.
+
+### Root cause
+
+`src/app/api/twa/roblox-account/route.ts`, action `set-cookie` (строка ~76): `prisma.globalSettings.upsert()` вызывался с блоком `create`, в котором отсутствовало обязательное поле `usdToRub` (`Float`, без default в схеме). Prisma валидирует форму `create`-аргумента всегда, даже если по факту сработает ветка `update` — поэтому падало **100% вызовов** с `PrismaClientValidationError: Argument usdToRub is missing`. Роут крашился без JSON `error`, фронт (`BossrobuxScreen.tsx:1162`) показывал заглушку «Сервер недоступен — попробуй позже» (`r.status >= 500` без `d?.error`).
+
+Не связано с блокировкой Roblox API из России — проверено SSH на RF: прямой curl к `users.roblox.com` отвечает 200 за ~0.3с.
+
+TG-бот `/setcookie` (`bots/tg/handlers.ts:2782`) работал, потому что там тот же `upsert`, но в `create` явно передан `usdToRub: 90` — конвенция, которую соблюдают все остальные `globalSettings.upsert()` в коде (`hub-autobuy.ts`, `hub-stats.ts`, `settings/route.ts`), кроме этого одного роута.
+
+### Диагностика
+
+- `ssh root@89.110.94.117 'docker ps | grep z10ws7m1q45h281zwedmhei4'` → контейнер `robloxbank-web` healthy, образ на коммите `a6e8d1f`
+- `ssh root@89.110.94.117 'docker logs robloxbank-web | grep -iE "roblox-account|error|prisma"'` → нашёл повторяющийся `PrismaClientValidationError`
+
+### Фикс
+
+Добавлена `usdToRub: 90` в `create`-блок (1 строка).
+
+### Файлы
+
+| Файл | Что изменено |
+|------|-------------|
+| `src/app/api/twa/roblox-account/route.ts` | `set-cookie` upsert: `create` теперь включает `usdToRub: 90` |
+
+### БД
+
+- Ручной апдейт `GlobalSettings.robloxCookie/robloxCookieUpdatedAt/robloxAccountName` для нового аккаунта `yqf86867` (обходной путь, пока кнопка была сломана)
+
+### Деплой
+
+- [x] TypeScript чисто (`npx tsc --noEmit`)
+- [x] Коммит + push → Coolify автодеплой
+- [ ] **Визуальная проверка в TWA** — сохранить куки через кнопку и убедиться, что ошибка больше не появляется
+
+---
+
 ## Сессия 2026-07-01 (день-9) — Фикс: VK бот молчит на кнопки при активной поддержке (viu1758)
 
 ### Инцидент

@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
     const accountName = user.name ?? user.displayName ?? "Unknown";
     await (prisma as any).globalSettings.upsert({
       where: { id: "global" },
-      create: { id: "global", robloxCookie: rawCookie, robloxCookieUpdatedAt: new Date(), robloxAccountName: accountName },
+      create: { id: "global", usdToRub: 90, robloxCookie: rawCookie, robloxCookieUpdatedAt: new Date(), robloxAccountName: accountName },
       update: { robloxCookie: rawCookie, robloxCookieUpdatedAt: new Date(), robloxAccountName: accountName },
     });
 
