@@ -742,27 +742,99 @@ function ageColor(iso: string): string {
   return C.red;
 }
 
-function buildBuyoutPlan(orders: BuyoutOrder[], balance: number) {
-  const sorted = [...orders].sort((a, b) => {
-    const tA = new Date(a.pendingAt ?? a.createdAt).getTime();
-    const tB = new Date(b.pendingAt ?? b.createdAt).getTime();
-    return tA - tB;
-  });
-  let remaining = balance;
-  let totalDirty = 0;
-  const selected: BuyoutOrder[] = [];
-  const waiting: BuyoutOrder[] = [];
-  for (const o of sorted) {
-    const dirty = Math.ceil(o.amount / 0.7);
-    if (dirty <= remaining) {
-      selected.push(o);
-      remaining -= dirty;
-      totalDirty += dirty;
-    } else {
-      waiting.push(o);
+function sortByAge(a: BuyoutOrder, b: BuyoutOrder) {
+  const pA = new Date(a.pendingAt ?? a.createdAt).getTime();
+  const pB = new Date(b.pendingAt ?? b.createdAt).getTime();
+  if (pA !== pB) return pA - pB;
+  return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+}
+
+const MAX_REMAINDER_DIRTY = 143;
+
+function optimizeWbSubset(wbOrders: BuyoutOrder[], budget: number) {
+  const n = wbOrders.length;
+  const d = wbOrders.map(o => Math.ceil(o.amount / 0.7));
+  const total = d.reduce((a, b) => a + b, 0);
+  if (total <= budget) return { selectedIdx: new Set(d.map((_, i) => i)), targetSum: total };
+
+  const cap = Math.min(budget, 300_000);
+  const reversed = [...d].reverse();
+
+  const snaps: Uint8Array[] = [new Uint8Array(cap + 1)];
+  snaps[0][0] = 1;
+  for (let i = 0; i < n; i++) {
+    const prev = snaps[i];
+    const curr = new Uint8Array(prev);
+    const di = reversed[i];
+    for (let s = cap; s >= di; s--) {
+      if (prev[s - di]) curr[s] = 1;
+    }
+    snaps.push(curr);
+  }
+
+  const final = snaps[n];
+  let bestSum = -1;
+  for (let s = Math.min(cap, budget); s >= Math.max(0, budget - MAX_REMAINDER_DIRTY); s--) {
+    if (final[s]) { bestSum = s; break; }
+  }
+  if (bestSum < 0) {
+    for (let s = Math.min(cap, budget); s >= 0; s--) {
+      if (final[s]) { bestSum = s; break; }
     }
   }
-  return { selected, waiting, totalDirty, remainingBalance: remaining };
+  if (bestSum <= 0) return { selectedIdx: new Set<number>(), targetSum: 0 };
+
+  const revSelected: number[] = [];
+  let s = bestSum;
+  for (let i = n - 1; i >= 0; i--) {
+    if (s >= reversed[i] && snaps[i][s - reversed[i]]) {
+      revSelected.push(i);
+      s -= reversed[i];
+    }
+  }
+
+  const selectedIdx = new Set(revSelected.map(ri => n - 1 - ri));
+  return { selectedIdx, targetSum: bestSum };
+}
+
+function buildBuyoutPlan(orders: BuyoutOrder[], balance: number) {
+  const { direct, avito, wb } = groupBySource(orders);
+  direct.sort(sortByAge);
+  avito.sort(sortByAge);
+  wb.sort(sortByAge);
+
+  const mandatoryDirty = [...direct, ...avito].reduce((s, o) => s + Math.ceil(o.amount / 0.7), 0);
+  const wbBudget = balance - mandatoryDirty;
+
+  let selectedWb: BuyoutOrder[];
+  let waitingWb: BuyoutOrder[];
+  let wbDirtyUsed: number;
+
+  if (wbBudget <= 0) {
+    selectedWb = [];
+    waitingWb = wb;
+    wbDirtyUsed = 0;
+  } else {
+    const totalWbDirty = wb.reduce((s, o) => s + Math.ceil(o.amount / 0.7), 0);
+    if (totalWbDirty <= wbBudget) {
+      selectedWb = wb;
+      waitingWb = [];
+      wbDirtyUsed = totalWbDirty;
+    } else {
+      const { selectedIdx, targetSum } = optimizeWbSubset(wb, wbBudget);
+      selectedWb = wb.filter((_, i) => selectedIdx.has(i));
+      waitingWb = wb.filter((_, i) => !selectedIdx.has(i));
+      wbDirtyUsed = targetSum;
+    }
+  }
+
+  const totalDirty = mandatoryDirty + wbDirtyUsed;
+  return {
+    selected: [...direct, ...avito, ...selectedWb],
+    waiting: waitingWb,
+    totalDirty,
+    remainingBalance: balance - totalDirty,
+  };
 }
 
 function groupBySource(orders: BuyoutOrder[]) {
@@ -951,7 +1023,7 @@ function BuyoutSection({ token, balance, onBalanceChange }: { token: string; bal
   }
 
   const plan = buildBuyoutPlan(orders, balance);
-  const allDirty = orders.reduce((s, o) => s + Math.ceil(o.amount / 0.7), 0);
+  const waitingDirty = plan.waiting.reduce((s, o) => s + Math.ceil(o.amount / 0.7), 0);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -972,15 +1044,15 @@ function BuyoutSection({ token, balance, onBalanceChange }: { token: string; bal
           </div>
           {plan.waiting.length > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 14, color: C.textSecondary }}>Не хватает</span>
+              <span style={{ fontSize: 14, color: C.textSecondary }}>Ожидают</span>
               <span style={{ fontSize: 16, fontWeight: 600, color: C.orange, ...tabular }}>
-                {(allDirty - balance).toLocaleString("ru-RU")} R$
+                {plan.waiting.length} шт · {waitingDirty.toLocaleString("ru-RU")} R$
               </span>
             </div>
           )}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: 14, color: C.textSecondary }}>Остаток</span>
-            <span style={{ fontSize: 16, fontWeight: 600, color: plan.remainingBalance > 0 ? C.textSecondary : C.red, ...tabular }}>
+            <span style={{ fontSize: 16, fontWeight: 600, color: plan.remainingBalance <= MAX_REMAINDER_DIRTY ? C.green : C.textSecondary, ...tabular }}>
               {plan.remainingBalance.toLocaleString("ru-RU")} R$
             </span>
           </div>
