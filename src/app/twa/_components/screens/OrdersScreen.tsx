@@ -573,6 +573,7 @@ function RebindModal({ order, token, onDone, onClose }: {
         });
         const d = await r.json();
         if (r.ok && d.users) setResults(d.users);
+        else toast(d.error ?? "Ошибка поиска", "error");
       } catch {}
       setSearching(false);
     }, 300);
