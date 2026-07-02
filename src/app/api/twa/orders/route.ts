@@ -343,12 +343,39 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, order: created });
   }
 
+  // Не требует orderId — клиент шлёт только { action, query }.
+  if (action === "search-users") {
+    const q = String(body.query ?? "").trim();
+    if (q.length < 2) return NextResponse.json({ error: "Минимум 2 символа" }, { status: 400 });
+
+    const clean = q.replace(/^@/, "");
+    const isNumeric = /^\d+$/.test(clean);
+
+    const orClauses: any[] = [
+      { username: { contains: clean, mode: "insensitive" } },
+      { name: { contains: clean, mode: "insensitive" } },
+      { robloxUsername: { contains: clean, mode: "insensitive" } },
+    ];
+    if (isNumeric) {
+      orClauses.push({ tgId: clean });
+      orClauses.push({ vkId: clean });
+    }
+
+    const users = await (prisma as any).user.findMany({
+      where: { OR: orClauses },
+      select: { id: true, tgId: true, vkId: true, username: true, name: true, robloxUsername: true },
+      take: 10,
+      orderBy: { createdAt: "desc" },
+    });
+    return NextResponse.json({ users });
+  }
+
   if (!orderId)
     return NextResponse.json({ error: "orderId required" }, { status: 400 });
 
   const order = await (prisma as any).wbOrder.findUnique({
     where: { id: orderId },
-    include: { user: { select: { id: true, tgId: true, vkId: true } } },
+    include: { user: { select: { id: true, tgId: true, vkId: true, username: true } } },
   });
   if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
 
@@ -626,32 +653,6 @@ export async function POST(req: NextRequest) {
       ok: true, script, name, price, base, creatorName,
       isForSale, isManagedPricing, gamepassId: gpId,
     });
-  }
-
-  if (action === "search-users") {
-    const q = String(body.query ?? "").trim();
-    if (q.length < 2) return NextResponse.json({ error: "Минимум 2 символа" }, { status: 400 });
-
-    const clean = q.replace(/^@/, "");
-    const isNumeric = /^\d+$/.test(clean);
-
-    const orClauses: any[] = [
-      { username: { contains: clean, mode: "insensitive" } },
-      { name: { contains: clean, mode: "insensitive" } },
-      { robloxUsername: { contains: clean, mode: "insensitive" } },
-    ];
-    if (isNumeric) {
-      orClauses.push({ tgId: clean });
-      orClauses.push({ vkId: clean });
-    }
-
-    const users = await (prisma as any).user.findMany({
-      where: { OR: orClauses },
-      select: { id: true, tgId: true, vkId: true, username: true, name: true, robloxUsername: true },
-      take: 10,
-      orderBy: { createdAt: "desc" },
-    });
-    return NextResponse.json({ users });
   }
 
   if (action === "rebind-order") {
