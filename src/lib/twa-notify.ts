@@ -104,6 +104,34 @@ export async function notifyOrderCompleted(
   else if (user.vkId) await vkPost(user.vkId, vkMsg);
 }
 
+export async function notifyRebind(
+  user: UserRef,
+  amount: number,
+  wbCode: string,
+  hasGamepass: boolean,
+) {
+  const dirty = Math.ceil(amount / 0.7);
+  const instructionUrl = `https://robloxbank.ru/guide?skip=1&code=${wbCode}`;
+
+  if (hasGamepass) {
+    const tgMsg = `🔄 <b>Заказ ${wbCode} привязан к вашему аккаунту</b>\n\nСумма: <b>${dirty} R$</b> (${amount} чистых)\nГеймпасс уже отправлен — мы выкупим его в ближайшее время.`;
+    const vkMsg = `🔄 Заказ ${wbCode} привязан к вашему аккаунту\n\nСумма: ${dirty} R$ (${amount} чистых)\nГеймпасс уже отправлен — мы выкупим его в ближайшее время.`;
+    if (user.tgId) await tgPost(user.tgId, tgMsg);
+    else if (user.vkId) await vkPost(user.vkId, vkMsg);
+  } else {
+    const tgMsg = `🔄 <b>Заказ ${wbCode} привязан к вашему аккаунту</b>\n\nСумма: <b>${dirty} R$</b> (${amount} чистых)\nОтправьте ссылку на геймпасс, чтобы получить робуксы.`;
+    const vkMsg = `🔄 Заказ ${wbCode} привязан к вашему аккаунту\n\nСумма: ${dirty} R$ (${amount} чистых)\nОтправьте ссылку на геймпасс, чтобы получить робуксы.`;
+
+    if (user.tgId) {
+      await tgPost(user.tgId, tgMsg, {
+        reply_markup: { inline_keyboard: [[{ text: "📋 Инструкция", url: instructionUrl }]] },
+      });
+    } else if (user.vkId) {
+      await vkPost(user.vkId, vkMsg + `\n\n📋 Инструкция: ${instructionUrl}`);
+    }
+  }
+}
+
 export async function notifyOrderRejected(
   user: UserRef,
   orderId: string,

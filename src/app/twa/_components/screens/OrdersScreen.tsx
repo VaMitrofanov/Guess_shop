@@ -539,6 +539,184 @@ function EditAvitoModal({ order, token, onDone, onClose }: {
   );
 }
 
+/* ───────────── RebindModal ───────────── */
+interface RebindUser {
+  id: string;
+  tgId: string | null;
+  vkId: string | null;
+  username: string | null;
+  name: string | null;
+  robloxUsername: string | null;
+}
+
+function RebindModal({ order, token, onDone, onClose }: {
+  order: Order; token: string; onDone: () => void; onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<RebindUser[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [selected, setSelected] = useState<RebindUser | null>(null);
+  const [note, setNote] = useState("");
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    if (query.trim().length < 2) { setResults([]); return; }
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const r = await fetch("/api/twa/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action: "search-users", query: query.trim() }),
+        });
+        const d = await r.json();
+        if (r.ok && d.users) setResults(d.users);
+      } catch {}
+      setSearching(false);
+    }, 300);
+    return () => clearTimeout(debounceRef.current);
+  }, [query, token]);
+
+  async function submit() {
+    if (!selected) return;
+    setLoading(true);
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "rebind-order", orderId: order.id, targetUserId: selected.id, note: note.trim() }),
+      });
+      const d = await r.json();
+      if (!r.ok) { toast(d.error ?? "Ошибка", "error"); setLoading(false); return; }
+      haptic.notify("success");
+      toast("Перепривязан", "success");
+      onDone();
+    } catch { toast("Ошибка сети", "error"); }
+    finally { setLoading(false); }
+  }
+
+  const currentOwner = userShortName(order.user);
+  const currentPlatform = order.user.tgId ? "TG" : order.user.vkId ? "VK" : "—";
+
+  function userLabel(u: RebindUser) {
+    const platform = u.tgId ? "TG" : u.vkId ? "VK" : "—";
+    const name = u.username ? `@${u.username}` : u.name || u.tgId || u.vkId || u.id.slice(-6);
+    return { platform, name };
+  }
+
+  if (selected) {
+    const tgt = userLabel(selected);
+    return (
+      <div onClick={e => e.stopPropagation()} style={{
+        padding: "12px 14px 14px", borderTop: `1px solid ${C.hairline}`,
+        background: "rgba(0,0,0,0.15)", display: "flex", flexDirection: "column", gap: 10,
+      }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: C.textSecondary }}>Перепривязать заказ?</div>
+        <div style={{
+          background: "rgba(255,255,255,0.06)", borderRadius: 10, padding: "10px 12px",
+          display: "flex", flexDirection: "column", gap: 6,
+        }}>
+          <div style={{ fontSize: 15, color: C.textPrimary }}>
+            <span style={{ fontWeight: 700, fontFamily: MONO, color: C.accent }}>{order.wbCode}</span>
+            <span style={{ color: C.textTertiary }}> · </span>
+            <span style={{ fontWeight: 600 }}>{Math.ceil(order.amount / 0.7).toLocaleString("ru-RU")} R$</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 15, color: C.textSecondary }}>
+            <span>{currentOwner} ({currentPlatform})</span>
+            <span style={{ color: C.accent }}>→</span>
+            <span style={{ color: C.textPrimary, fontWeight: 600 }}>{tgt.name} ({tgt.platform})</span>
+          </div>
+          {selected.robloxUsername && (
+            <div style={{ fontSize: 14, color: C.textTertiary }}>🎮 {selected.robloxUsername}</div>
+          )}
+        </div>
+        <input
+          value={note} onChange={e => setNote(e.target.value)} placeholder="Заметка (опц.)…"
+          style={{
+            width: "100%", background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10,
+            color: "#fff", fontSize: 15, padding: "10px 12px", outline: "none", fontFamily: "inherit", boxSizing: "border-box",
+          }}
+        />
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="twa-press" onClick={() => setSelected(null)}
+            style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
+            Назад
+          </button>
+          <button className="twa-press" onClick={submit} disabled={loading}
+            style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: C.accent, color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+            {loading ? "…" : "Перепривязать"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div onClick={e => e.stopPropagation()} style={{
+      padding: "12px 14px 14px", borderTop: `1px solid ${C.hairline}`,
+      background: "rgba(0,0,0,0.15)", display: "flex", flexDirection: "column", gap: 10,
+    }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: C.textSecondary }}>
+        🔄 Перепривязать {order.wbCode}
+      </div>
+      <div style={{ fontSize: 13, color: C.textTertiary }}>
+        Сейчас: {currentOwner} ({currentPlatform})
+      </div>
+      <input
+        value={query}
+        onChange={e => setQuery(e.target.value)}
+        placeholder="@username, имя, ID или ник Roblox"
+        autoFocus
+        style={{
+          width: "100%", background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10,
+          color: "#fff", fontSize: 15, padding: "10px 12px", outline: "none", fontFamily: "inherit", boxSizing: "border-box",
+        }}
+      />
+      {searching && <div style={{ fontSize: 13, color: C.textTertiary }}>Поиск…</div>}
+      {results.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 200, overflowY: "auto" }}>
+          {results.map(u => {
+            const lbl = userLabel(u);
+            return (
+              <button key={u.id} className="twa-press-sm" onClick={() => { haptic.impact("light"); setSelected(u); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8, width: "100%",
+                  padding: "10px 12px", borderRadius: 10, border: "none", cursor: "pointer",
+                  background: "rgba(255,255,255,0.06)", textAlign: "left",
+                }}>
+                <span style={{
+                  fontSize: 11, fontWeight: 800, color: "#fff",
+                  background: lbl.platform === "TG" ? "#229ED9" : lbl.platform === "VK" ? "#0077FF" : C.elevated,
+                  borderRadius: 4, padding: "3px 6px", flexShrink: 0,
+                }}>{lbl.platform}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {lbl.name}
+                  </div>
+                  {u.robloxUsername && (
+                    <div style={{ fontSize: 13, color: C.textTertiary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      🎮 {u.robloxUsername}
+                    </div>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {query.trim().length >= 2 && !searching && results.length === 0 && (
+        <div style={{ fontSize: 13, color: C.textTertiary }}>Никого не найдено</div>
+      )}
+      <button className="twa-press" onClick={onClose}
+        style={{ padding: "12px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
+        Отмена
+      </button>
+    </div>
+  );
+}
+
 /* ───────────── DONE tab: accordion grouped by purchaserUsername ───────────── */
 type SourceFilter = "ALL" | "WB" | "DIRECT" | "AVITO" | "MANUAL";
 const SOURCE_CHIPS: { id: SourceFilter; label: string; color: string }[] = [
@@ -690,6 +868,7 @@ function OrderCard({
 }) {
   const [moveOpen, setMoveOpen] = useState(false);
   const [editAvitoOpen, setEditAvitoOpen] = useState(false);
+  const [rebindOpen, setRebindOpen] = useState(false);
 
   const platform: "tg" | "vk" | "—" = order.user.tgId ? "tg" : order.user.vkId ? "vk" : "—";
   const shortName = userShortName(order.user);
@@ -867,6 +1046,28 @@ function OrderCard({
           token={token}
           onDone={() => { setEditAvitoOpen(false); onMoved(); }}
           onClose={() => setEditAvitoOpen(false)}
+        />
+      )}
+
+      {/* Rebind button */}
+      {["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"].includes(order.status) && !rebindOpen && (
+        <div style={{ padding: "0 14px 6px" }}>
+          <button className="twa-press-sm" onClick={e => { e.stopPropagation(); setRebindOpen(true); }}
+            style={{
+              width: "100%", padding: "10px", borderRadius: 10, border: `1px solid ${C.textTertiary}44`,
+              background: "transparent", color: C.textSecondary, fontSize: 14, fontWeight: 600, cursor: "pointer",
+            }}>
+            🔄 Перепривязать
+          </button>
+        </div>
+      )}
+
+      {rebindOpen && (
+        <RebindModal
+          order={order}
+          token={token}
+          onDone={() => { setRebindOpen(false); onMoved(); }}
+          onClose={() => setRebindOpen(false)}
         />
       )}
 

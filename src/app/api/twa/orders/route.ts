@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
-import { notifyOrderCompleted, notifyOrderRejected } from "@/lib/twa-notify";
+import { notifyOrderCompleted, notifyOrderRejected, notifyRebind } from "@/lib/twa-notify";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
@@ -626,6 +626,79 @@ export async function POST(req: NextRequest) {
       ok: true, script, name, price, base, creatorName,
       isForSale, isManagedPricing, gamepassId: gpId,
     });
+  }
+
+  if (action === "search-users") {
+    const q = String(body.query ?? "").trim();
+    if (q.length < 2) return NextResponse.json({ error: "Минимум 2 символа" }, { status: 400 });
+
+    const clean = q.replace(/^@/, "");
+    const isNumeric = /^\d+$/.test(clean);
+
+    const orClauses: any[] = [
+      { username: { contains: clean, mode: "insensitive" } },
+      { name: { contains: clean, mode: "insensitive" } },
+      { robloxUsername: { contains: clean, mode: "insensitive" } },
+    ];
+    if (isNumeric) {
+      orClauses.push({ tgId: clean });
+      orClauses.push({ vkId: clean });
+    }
+
+    const users = await (prisma as any).user.findMany({
+      where: { OR: orClauses },
+      select: { id: true, tgId: true, vkId: true, username: true, name: true, robloxUsername: true },
+      take: 10,
+      orderBy: { createdAt: "desc" },
+    });
+    return NextResponse.json({ users });
+  }
+
+  if (action === "rebind-order") {
+    const { targetUserId, note } = body;
+    if (!targetUserId) return NextResponse.json({ error: "targetUserId обязателен" }, { status: 400 });
+
+    const REBINDABLE = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"];
+    if (!REBINDABLE.includes(order.status))
+      return NextResponse.json({ error: `Нельзя перепривязать заказ в статусе ${order.status}` }, { status: 400 });
+
+    const targetUser = await (prisma as any).user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true, tgId: true, vkId: true, username: true, name: true },
+    });
+    if (!targetUser) return NextResponse.json({ error: "Пользователь не найден" }, { status: 404 });
+
+    if (targetUser.id === order.userId)
+      return NextResponse.json({ error: "Заказ уже привязан к этому пользователю" }, { status: 400 });
+
+    const newPlatform = targetUser.tgId ? "TG" : "VK";
+    const oldLabel = order.user?.username || order.user?.tgId || order.user?.vkId || order.userId;
+    const newLabel = targetUser.username || targetUser.tgId || targetUser.vkId || targetUser.id;
+    const now = new Date().toISOString().slice(0, 10);
+    const auditNote = `[REBIND ${now}] ${order.platform}:${oldLabel} → ${newPlatform}:${newLabel}` + (note ? ` (${note})` : "");
+
+    const existingNote = order.adminNote ? order.adminNote + "\n" : "";
+
+    await (prisma as any).$transaction([
+      (prisma as any).wbOrder.update({
+        where: { id: orderId },
+        data: {
+          userId: targetUser.id,
+          platform: newPlatform,
+          adminNote: (existingNote + auditNote).slice(0, 2000),
+        },
+      }),
+      (prisma as any).wbCode.updateMany({
+        where: { code: order.wbCode },
+        data: { userId: targetUser.id },
+      }),
+    ]);
+
+    cachedCounts = null;
+
+    notifyRebind(targetUser, order.amount, order.wbCode, !!order.gamepassUrl).catch(() => {});
+
+    return NextResponse.json({ ok: true, platform: newPlatform });
   }
 
   return NextResponse.json({ error: "Invalid action" }, { status: 400 });
