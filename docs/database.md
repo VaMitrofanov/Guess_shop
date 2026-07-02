@@ -46,7 +46,10 @@ robloxUsername, userId+createdAt).
 Настройки выкупа: `robloxCookie` (`.ROBLOSECURITY` донора), `robloxCookieUpdatedAt`,
 `robloxAccountName` (ник донора), `purchaseRate` (R$/₽), `usdToRub`.
 Аккаунт-приёмник слива («мой акк»): `drainCookie`, `drainCookieUpdatedAt`, `drainAccountName`,
-`drainGamepassId` (геймпасс, чью цену меняем), `drainProductId` (кэш productId для покупки).
+`drainGamepassId` (геймпасс, чью цену меняем). `drainProductId` (`Int`) — **legacy, больше не
+пишется**: у современных геймпассов ProductId > INT32 (2.1 млрд) → запись падала с
+`ValueOutOfRange` и роняла `set-gamepass` («Ошибка сети» в TWA). Фикс: productId не кэшируем,
+а берём заново из `product-info` в момент слива. Колонка оставлена, чтобы не плодить миграцию.
 
 > ⚠️ `usdToRub` — `Float` без default. Любой `globalSettings.upsert` **обязан** передавать
 > `usdToRub` в блоке `create`, даже если фактически сработает `update` — Prisma валидирует

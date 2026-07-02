@@ -246,7 +246,10 @@ model GlobalSettings {
   drainAccountName      String?
   /// Gamepass ID on the drain account whose price we set to the donor's balance.
   drainGamepassId       String?
-  /// Cached productId of drainGamepassId (needed for the purchase call).
+  /// (unused) Legacy cache of the drain gamepass ProductId. No longer written:
+  /// modern Roblox ProductIds exceed INT32 (this column is INTEGER), and the
+  /// drain flow re-fetches product-info live, so nothing needs to persist here.
+  /// Kept to avoid a drift-only migration against prod.
   drainProductId        Int?
 }
 

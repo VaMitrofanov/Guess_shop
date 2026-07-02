@@ -175,6 +175,7 @@ export async function POST(req: NextRequest) {
   if (!body?.action)
     return NextResponse.json({ error: "action required" }, { status: 400 });
 
+  try {
   // ── Save drain-account cookie ─────────────────────────────────────────────
   if (body.action === "set-cookie") {
     const raw = String(body.cookie ?? "").trim();
@@ -208,8 +209,8 @@ export async function POST(req: NextRequest) {
 
     await (prisma as any).globalSettings.upsert({
       where: { id: "global" },
-      create: { id: "global", usdToRub: 90, drainGamepassId: gpId, drainProductId: info.ProductId },
-      update: { drainGamepassId: gpId, drainProductId: info.ProductId },
+      create: { id: "global", usdToRub: 90, drainGamepassId: gpId },
+      update: { drainGamepassId: gpId },
     });
 
     return NextResponse.json({
@@ -309,4 +310,10 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+  } catch (e: any) {
+    return NextResponse.json(
+      { error: `Ошибка сервера: ${String(e?.message ?? e).slice(0, 200)}` },
+      { status: 500 },
+    );
+  }
 }
