@@ -97,6 +97,11 @@ MacBook 16". Дизайн — iOS-эстетика, минимальный ко�
 
 - Второй cookie — `GlobalSettings.drainCookie` (+ `drainAccountName`), геймпасс приёмника —
   `drainGamepassId`. Оба задаются в блоке «⚙️ Настройка» секции «Слив остатка».
+- **Автосписок геймпассов приёмника.** GET `/api/twa/drain` отдаёт `gamepasses[]` аккаунта
+  приёмника (`GET apis.roblox.com/game-passes/v1/users/{userId}/game-passes?count=50` по
+  `drainCookie`). В «⚙️ Настройка» под ручным вводом ID — тап-список (имя · цена · off если не
+  продаётся, ✓ у выбранного); тап = `set-gamepass` с этим ID. Убирает ручной ввод и защищает
+  от «подставил чужой геймпасс».
 - ⚠️ **Фикс 2026-07-02:** `set-gamepass` писал `drainProductId` в `Int`-колонку, а у новых
   геймпассов ProductId > 2.1 млрд → `ValueOutOfRange` → роут падал немым 500 → в TWA «Ошибка
   сети». Теперь productId не кэшируем (берём из `product-info` при сливе), а POST-роут обёрнут

