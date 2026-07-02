@@ -105,10 +105,18 @@ MacBook 16". Дизайн — iOS-эстетика, минимальный ко�
 - Поток (`action: "drain"`): читаем баланс донора → меняем цену геймпасса приёмника
   (`setGamepassPrice`) → **поллим `product-info`, пока цена не подтвердится** (задержка
   распространения у Roblox) → донор покупает геймпасс той же механикой, что обычный выкуп.
-- ⚠️ **SPIKE не завершён:** точный эндпоинт смены цены не верифицирован вживую (не было
-  `drainCookie`). `setGamepassPrice` пробует `POST apis.roblox.com/game-passes/v1/game-passes/{id}/details`,
-  затем legacy `POST roblox.com/game-pass/update`. После первого реального слива — оставить
-  рабочую ветку, вторую удалить. Роут возвращает `via` (какой эндпоинт сработал).
+- ✅ **SPIKE закрыт (верифицировано вживую 2026-07-03).** Рабочая смена цены геймпасса:
+  1. геймпасс → `placeId` (GET `apis.roblox.com/game-passes/v1/game-passes/{id}/details`) →
+     `universeId` (GET `apis.roblox.com/universes/v1/places/{placeId}/universe`);
+  2. **`PATCH apis.roblox.com/game-passes/v1/universes/{universeId}/game-passes/{gpId}`**,
+     тело — **multipart/form-data** с полями `IsForSale` + `Price` (с заглавной),
+     заголовок `X-CSRF-TOKEN`, успех = **204**.
+  Грабли: запись **universe-scoped** (сначала резолвим universe); тело обязано быть form-data —
+  JSON / merge-patch / json-patch дают **415**; `Content-Type` руками не ставить (fetch сам
+  добавит boundary); старый `POST .../game-passes/{id}/details` мёртв (теперь GET-only → 404
+  на запись), как и legacy `roblox.com/game-pass/update`. `setGamepassPrice` возвращает
+  `via: "universes-patch"`. Комиссия Roblox 30% и pending-заморозка робуксов на приёмнике — как
+  у любой продажи геймпасса.
 
 ## Тестовые коды
 
