@@ -1306,65 +1306,6 @@ function Anim06Standard() {
   );
 }
 
-// ── Anim 05 WB: Copy gamepass link from Creator Hub ────────────────────────────
-function Anim05WB() {
-  const [f, setF] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setF(v => (v + 1) % 4), 1600);
-    return () => clearInterval(id);
-  }, []);
-  // 0=pass page, 1=click share/address bar, 2=URL selected, 3=copied!
-
-  return (
-    <RCHBrowser url="roblox.com/game-pass/1234567/VIP">
-      <RCHTopNav />
-      <div style={{ display: "flex", background: "#fff", position: "relative" }}>
-        <div style={{ width: 108, background: "#f5f5f5", borderRight: "1px solid #e0e0e0", padding: "4px 4px", flexShrink: 0 }}>
-          <SItem label="Overview" />
-          <SItem label="Game Passes" active />
-          <SItem label="Settings" />
-        </div>
-        <div style={{ flex: 1, padding: "8px 10px" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#1a1a1a", marginBottom: 5 }}>VIP Pass</div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 7 }}>
-            <div style={{ width: 32, height: 32, background: "#4f46e5", borderRadius: 3 }} />
-            <div>
-              <div style={{ fontSize: 9, color: "#555" }}>Pass ID: 1234567</div>
-              <div style={{ fontSize: 9, color: "#22c55e", fontWeight: 700 }}>● For Sale · 1430 R$</div>
-            </div>
-          </div>
-          {/* Address bar highlight */}
-          <div style={{
-            background: f === 2 ? "#e8f0fe" : "#f5f5f5",
-            border: f >= 1 ? "2px solid #0e6fff" : "1px solid #e0e0e0",
-            borderRadius: 3, padding: "3px 7px",
-            fontSize: 9, color: f === 2 ? "#0e6fff" : "#555",
-            fontWeight: f === 2 ? 700 : 400,
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            transition: "all 0.3s",
-          }}>
-            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              roblox.com/game-pass/1234567/VIP
-            </span>
-            {f >= 1 && (
-              <span style={{
-                marginLeft: 6, fontSize: 8, fontWeight: 700, flexShrink: 0,
-                color: f === 3 ? "#22c55e" : "#0e6fff",
-              }}>
-                {f === 3 ? "✓ Copied!" : "Copy"}
-              </span>
-            )}
-          </div>
-        </div>
-        {/* Cursor */}
-        <div style={{ position: "absolute", top: [40, 72, 72, 72][f], left: [140, 155, 180, 215][f], pointerEvents: "none", zIndex: 20, transition: "top 0.45s cubic-bezier(0.4,0,0.2,1), left 0.45s cubic-bezier(0.4,0,0.2,1)" }}>
-          <RCursor />
-        </div>
-      </div>
-    </RCHBrowser>
-  );
-}
-
 function Anim06WB() {
   const [f, setF] = useState(0);
   useEffect(() => {
