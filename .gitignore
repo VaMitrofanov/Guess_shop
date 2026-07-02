@@ -44,8 +44,15 @@ next-env.d.ts
 
 # claude code
 .claude/
+.agent/
+
+# operational / internal docs — repo is PUBLIC, these hold infra access
+# (SSH hosts, Coolify UUIDs, deploy topology). Public-safe docs live in /docs.
+/HANDOFF.md
+/PLAN.md
 
 # scratch / temp files
 /scratch/
+/test-results/
 *.tmp
 _write_test_ok
