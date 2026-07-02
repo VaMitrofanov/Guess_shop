@@ -8,10 +8,9 @@
 
 import { Markup, type Telegraf, type Context } from "telegraf";
 import { db } from "../../shared/db";
-import { CB, ADMIN_IDS } from "../../shared/admin";
+import { CB, ADMIN_IDS, formatUserHandle } from "../../shared/admin";
 import { sendOrEditWidget, editWidget } from "./widgets";
 import { pendingAdminSearch, pendingBatchFulfill } from "../session";
-import { updateMainMenu } from "./menu";
 
 // ── VK community ID for direct-message links ────────────────────────────────
 const VK_GROUP_ID = process.env.VK_GROUP_ID ?? "";
@@ -28,11 +27,13 @@ function waitTime(createdAt: Date): string {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  AWAITING_GAMEPASS: "⌛ Ожидаем",
-  PENDING: "⏳ Ожидает",
-  IN_PROGRESS: "🔧 В работе",
-  COMPLETED: "✅ Выполнен",
-  REJECTED: "❌ Отклонён",
+  AWAITING_PAYMENT:  "⏳ Ожидаем реквизиты",
+  PAYMENT_PENDING:   "💳 Ожидаем оплату",
+  AWAITING_GAMEPASS: "⌛ Ожидаем ссылку",
+  PENDING:           "⏳ Ожидает",
+  IN_PROGRESS:       "🔧 В работе",
+  COMPLETED:         "✅ Выполнен",
+  REJECTED:          "❌ Отклонён",
 };
 
 // ── Main widget ──────────────────────────────────────────────────────────────
@@ -41,7 +42,9 @@ export async function showOrdersHub(ctx: Context): Promise<void> {
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-  const [awaitingCount, pendingCount, inProgressCount, todayDone, todayRejected] = await Promise.all([
+  const [awaitingPaymentCount, paymentPendingCount, awaitingCount, pendingCount, inProgressCount, todayDone, todayRejected] = await Promise.all([
+    (db as any).wbOrder.count({ where: { status: "AWAITING_PAYMENT" } }),
+    (db as any).wbOrder.count({ where: { status: "PAYMENT_PENDING" } }),
     (db as any).wbOrder.count({ where: { status: "AWAITING_GAMEPASS" } }),
     (db as any).wbOrder.count({ where: { status: "PENDING" } }),
     (db as any).wbOrder.count({ where: { status: "IN_PROGRESS" } }),
@@ -49,12 +52,14 @@ export async function showOrdersHub(ctx: Context): Promise<void> {
     (db as any).wbOrder.count({ where: { status: "REJECTED",  updatedAt: { gte: startOfDay } } }),
   ]);
 
-  const activeTotal = awaitingCount + pendingCount + inProgressCount;
+  const activeTotal = awaitingPaymentCount + paymentPendingCount + awaitingCount + pendingCount + inProgressCount;
 
   const text =
     `📦 <b>ЗАКАЗЫ</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
-    (awaitingCount > 0 ? `⌛ Ожидают ссылку: <b>${awaitingCount}</b>\n` : ``) +
+    (awaitingPaymentCount > 0 ? `🔷 Ждут реквизиты: <b>${awaitingPaymentCount}</b>\n` : ``) +
+    (paymentPendingCount > 0  ? `💳 Ждут оплату: <b>${paymentPendingCount}</b>\n`       : ``) +
+    (awaitingCount > 0        ? `⌛ Ожидают ссылку: <b>${awaitingCount}</b>\n`          : ``) +
     `⏳ Ожидают: <b>${pendingCount}</b>\n` +
     `🔧 В работе: <b>${inProgressCount}</b>\n` +
     `📊 Сегодня выполнено: <b>${todayDone}</b>\n` +
@@ -82,7 +87,7 @@ export async function showOrdersHub(ctx: Context): Promise<void> {
 
 export async function showActiveOrders(ctx: Context): Promise<void> {
   const orders = await (db as any).wbOrder.findMany({
-    where: { status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] } },
+    where: { status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"] } },
     include: { user: true },
     orderBy: { createdAt: "asc" },
     take: 15,
@@ -100,9 +105,13 @@ export async function showActiveOrders(ctx: Context): Promise<void> {
 
   for (const o of orders) {
     const shortId = o.id.slice(-6).toUpperCase();
-    const statusIcon = o.status === "IN_PROGRESS" ? "🔧" : "⏳";
+    const statusIcon =
+      o.status === "IN_PROGRESS"      ? "🔧" :
+      o.status === "AWAITING_PAYMENT" ? "🔷" :
+      o.status === "PAYMENT_PENDING"  ? "💳" : "⏳";
+    const directTag = o.isDirectOrder ? " 🔷" : "";
     const wait = waitTime(o.createdAt);
-    text += `${statusIcon} <code>${shortId}</code> — <b>${o.amount} R$</b> · ⏱${wait}\n`;
+    text += `${statusIcon} <code>${shortId}</code> — <b>${o.amount} R$</b>${directTag} · ⏱${wait}\n`;
     buttons.push([Markup.button.callback(`🔍 ${shortId} (${o.amount}R$)`, CB.orderView(o.id))]);
   }
 
@@ -139,27 +148,22 @@ export async function renderExtendedCard(order: any) {
   }) + " МСК";
 
   // ── Clickable user label ───────────────────────────────────────────────
-  // Priority: @username (auto-linked by TG) → tg://user?id= deep link → VK
+  // Priority: real DB @username (clickable) → display name → tg:// deeplink → VK
   let userLabel = "Неизвестен";
   let contactUrl = "";
 
   if (order.user) {
+    const handle = formatUserHandle(order.user);
     if (order.platform === "TG" && order.user.tgId) {
-      const storedName = order.user.name || "";
-      // Username: alphanumeric + underscores, 5-32 chars
-      const usernameMatch = storedName.match(/^@?([a-zA-Z]\w{4,31})$/);
-
-      if (usernameMatch) {
-        userLabel = `@${usernameMatch[1]}`;
-        contactUrl = `https://t.me/${usernameMatch[1]}`;
+      if (order.user.username) {
+        userLabel = `@${order.user.username}`;
+        contactUrl = `https://t.me/${order.user.username}`;
       } else {
-        const displayName = storedName || "Пользователь";
-        userLabel = `<a href="tg://user?id=${order.user.tgId}">${displayName}</a>`;
+        userLabel = `<a href="tg://user?id=${order.user.tgId}">${handle}</a>`;
         contactUrl = `tg://user?id=${order.user.tgId}`;
       }
     } else if (order.platform === "VK" && order.user.vkId) {
-      const vkName = order.user.name || "VK Пользователь";
-      userLabel = `<a href="https://vk.com/id${order.user.vkId}">${vkName}</a>`;
+      userLabel = `<a href="https://vk.com/id${order.user.vkId}">${handle}</a>`;
       contactUrl = VK_GROUP_ID
         ? `https://vk.com/gim${VK_GROUP_ID}?sel=${order.user.vkId}`
         : `https://vk.com/id${order.user.vkId}`;
@@ -187,10 +191,15 @@ export async function renderExtendedCard(order: any) {
   const platformEmojis: Record<string, string> = { TG: "📱", VK: "📘" };
   const pe = platformEmojis[order.platform] || "📦";
 
+  const directLine    = order.isDirectOrder ? `🔷 <b>ПРЯМОЙ ЗАКАЗ</b>\n` : "";
+  const payDetailsLine = order.paymentDetails
+    ? `💳 Реквизиты: <code>${order.paymentDetails}</code>\n` : "";
+
   // ── Card text ──────────────────────────────────────────────────────────
   const text =
     `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
+    directLine +
     loyaltyLine +
     `${pe} Источник: <b>${order.platform}</b>\n` +
     `📅 Время: <b>${dateStr}</b>\n` +
@@ -198,7 +207,8 @@ export async function renderExtendedCard(order: any) {
     `👤 Юзер: ${userLabel}\n` +
     reviewLine +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
-    `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
+    (order.isDirectOrder ? `` : `🔑 Код ВБ: <code>${order.wbCode}</code>\n`) +
+    payDetailsLine +
     `📊 Статус: <b>${STATUS_LABELS[order.status] || order.status}</b>${reasonLine}`;
 
   // ── Inline keyboard ────────────────────────────────────────────────────
@@ -215,7 +225,18 @@ export async function renderExtendedCard(order: any) {
 
   let keyboard: any[][];
 
-  if (order.status === "AWAITING_GAMEPASS") {
+  if (order.status === "AWAITING_PAYMENT") {
+    keyboard = [
+      [Markup.button.callback("💳 Отправить реквизиты", CB.sendPaymentDetails(order.id))],
+      [Markup.button.callback("❌ Отменить заказ",      CB.cancelDirectOrder(order.id))],
+      bottomRow,
+    ];
+  } else if (order.status === "PAYMENT_PENDING") {
+    keyboard = [
+      [Markup.button.callback("❌ Отменить заказ", CB.cancelDirectOrder(order.id))],
+      bottomRow,
+    ];
+  } else if (order.status === "AWAITING_GAMEPASS") {
     keyboard = [
       ...(gamepassRow ? [gamepassRow] : []),
       bottomRow,
@@ -258,7 +279,7 @@ export async function takeOrderInWork(
   try {
     const order = await (db as any).wbOrder.update({
       where: { id: orderId },
-      data: { status: "IN_PROGRESS", adminId },
+      data: { status: "IN_PROGRESS", adminId, takenAt: new Date() },
       include: { user: true },
     });
 
@@ -425,7 +446,7 @@ export async function showRejectedOrders(ctx: Context): Promise<void> {
 
 export async function showBatchView(ctx: Context): Promise<void> {
   const pending = await (db as any).wbOrder.findMany({
-    where: { status: { in: ["PENDING", "IN_PROGRESS"] } },
+    where: { status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
     orderBy: { createdAt: "asc" },
   });
 
@@ -462,7 +483,7 @@ export async function confirmBatchFulfill(
   const adminId = String(ctx.from!.id);
   try {
   const orders = await (db as any).wbOrder.findMany({
-    where: { status: { in: ["PENDING", "IN_PROGRESS"] } },
+    where: { status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
     include: { user: true },
   });
 
@@ -498,7 +519,6 @@ export async function confirmBatchFulfill(
     Markup.inlineKeyboard([[Markup.button.callback("⬅️ К заказам", CB.ordersBack)]])
   );
 
-  await updateMainMenu(bot);
   await ctx.answerCbQuery(`✅ ${orders.length} заказов выполнено`);
   } catch (err) {
     console.error("[confirmBatchFulfill] error:", err);

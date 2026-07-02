@@ -131,9 +131,15 @@ const NmReportSchema = z.object({
 const GoodItemSchema = z.object({
   nmID:             z.number(),
   vendorCode:       z.string().optional().default(""),
+  // WB v2 nests price/discountedPrice inside sizes[]; discount stays top-level.
   price:            z.number().optional().default(0),
   discount:         z.number().optional().default(0),
   discountedPrice:  z.number().optional().default(0),
+  sizes:            z.array(z.object({
+    price:           z.number().optional().default(0),
+    discountedPrice: z.number().optional().default(0),
+    discount:        z.number().optional().default(0),
+  })).optional().default([]),
 });
 
 const GoodsListSchema = z.object({
@@ -145,9 +151,14 @@ const GoodsListSchema = z.object({
 const FeedbackItemSchema = z.object({
   id:               z.string(),
   text:             z.string().optional().default(""),
+  pros:             z.string().optional().default(""),
+  cons:             z.string().optional().default(""),
   productValuation: z.number().optional().default(0),
   createdDate:      z.string().optional().default(""),
-  productDetails:   z.array(z.object({ supplierArticle: z.string().optional().default("") })).optional().default([]),
+  productDetails:   z.union([
+    z.object({ supplierArticle: z.string().optional().default("") }),
+    z.array(z.object({ supplierArticle: z.string().optional().default("") })),
+  ]).optional().default({ supplierArticle: "" }),
   answer:           z.object({ text: z.string() }).nullable().optional(),
 });
 
@@ -162,7 +173,10 @@ const QuestionItemSchema = z.object({
   id:          z.string(),
   text:        z.string().optional().default(""),
   createdDate: z.string().optional().default(""),
-  productDetails: z.array(z.object({ supplierArticle: z.string().optional().default("") })).optional().default([]),
+  productDetails: z.union([
+    z.object({ supplierArticle: z.string().optional().default("") }),
+    z.array(z.object({ supplierArticle: z.string().optional().default("") })),
+  ]).optional().default({ supplierArticle: "" }),
   answer:      z.object({ text: z.string() }).nullable().optional(),
 });
 
@@ -502,10 +516,15 @@ export async function getGoods(): Promise<TwaGoodItem[] | null> {
     if (!res.ok) { console.error(`[wb-api] goods ${res.status}`); return cache.goods?.data ?? null; }
     const parsed = GoodsListSchema.safeParse(await res.json());
     if (!parsed.success) return cache.goods?.data ?? null;
-    const result: TwaGoodItem[] = (parsed.data.data?.listGoods ?? []).map(g => ({
-      nmID: g.nmID, article: g.vendorCode,
-      price: g.price, discount: g.discount, discountedPrice: g.discountedPrice,
-    }));
+    const result: TwaGoodItem[] = (parsed.data.data?.listGoods ?? []).map(g => {
+      const sz = g.sizes?.[0];
+      return {
+        nmID: g.nmID, article: g.vendorCode,
+        price:           sz?.price           || g.price,
+        discount:        g.discount          || sz?.discount || 0,
+        discountedPrice: sz?.discountedPrice || g.discountedPrice,
+      };
+    });
     cache.goods = { data: result, ts: Date.now() };
     return result;
   } catch (e: any) {
@@ -555,40 +574,61 @@ export async function getNmFunnel(): Promise<NmFunnelItem[] | null> {
   return result;
 }
 
+function extractArticle(pd: unknown): string {
+  if (Array.isArray(pd)) return (pd[0] as any)?.supplierArticle ?? "";
+  return (pd as any)?.supplierArticle ?? "";
+}
+
+function feedbackText(f: { text: string; pros?: string; cons?: string }): string {
+  if (f.text) return f.text;
+  const parts: string[] = [];
+  if (f.pros) parts.push(f.pros);
+  if (f.cons) parts.push(`Минусы: ${f.cons}`);
+  return parts.join("\n") || "";
+}
+
 export async function getFeedbackSummary(): Promise<FeedbackSummary | null> {
   if (cache.feedback && Date.now() - cache.feedback.ts < FEEDBACK_TTL) return cache.feedback.data;
   const token = getWbToken();
   if (!token) return null;
   try {
-    const [fbRes, qRes] = await Promise.all([
-      fetch("https://feedbacks-and-questions.wildberries.ru/api/v1/feedbacks?isAnswered=false&take=5&skip=0",
-        { cache: "no-store", headers: { Authorization: token } }).catch(() => null),
-      fetch("https://feedbacks-and-questions.wildberries.ru/api/v1/questions?isAnswered=false&take=5&skip=0",
-        { cache: "no-store", headers: { Authorization: token } }).catch(() => null),
+    const hdrs = { cache: "no-store" as const, headers: { Authorization: token } };
+    const [fbUnanswered, fbAnswered, qUnanswered, qAnswered] = await Promise.all([
+      fetch("https://feedbacks-api.wildberries.ru/api/v1/feedbacks?isAnswered=false&take=30&skip=0", hdrs).catch(() => null),
+      fetch("https://feedbacks-api.wildberries.ru/api/v1/feedbacks?isAnswered=true&take=30&skip=0",  hdrs).catch(() => null),
+      fetch("https://feedbacks-api.wildberries.ru/api/v1/questions?isAnswered=false&take=30&skip=0", hdrs).catch(() => null),
+      fetch("https://feedbacks-api.wildberries.ru/api/v1/questions?isAnswered=true&take=30&skip=0",  hdrs).catch(() => null),
     ]);
-    const fbJson = fbRes?.ok ? FeedbacksResponseSchema.safeParse(await fbRes.json()) : null;
-    const qJson  =  qRes?.ok ?  QuestionsResponseSchema.safeParse(await  qRes.json()) : null;
-    const fbData = fbJson?.success ? fbJson.data.data : null;
-    const qData  =  qJson?.success ?  qJson.data.data : null;
+    const fbUJson = fbUnanswered?.ok ? FeedbacksResponseSchema.safeParse(await fbUnanswered.json()) : null;
+    const fbAJson = fbAnswered?.ok   ? FeedbacksResponseSchema.safeParse(await fbAnswered.json())   : null;
+    const qUJson  = qUnanswered?.ok  ? QuestionsResponseSchema.safeParse(await qUnanswered.json())  : null;
+    const qAJson  = qAnswered?.ok    ? QuestionsResponseSchema.safeParse(await qAnswered.json())    : null;
+    const fbUData = fbUJson?.success ? fbUJson.data.data : null;
+    const fbAData = fbAJson?.success ? fbAJson.data.data : null;
+    const qUData  = qUJson?.success  ? qUJson.data.data  : null;
+    const qAData  = qAJson?.success  ? qAJson.data.data  : null;
+    const seen = new Set<string>();
+    const allFb = [...(fbUData?.feedbacks ?? []), ...(fbAData?.feedbacks ?? [])];
+    const allQ  = [...(qUData?.questions  ?? []), ...(qAData?.questions  ?? [])];
     const items = [
-      ...(fbData?.feedbacks ?? []).map(f => ({
+      ...allFb.filter(f => { if (seen.has(f.id)) return false; seen.add(f.id); return true; }).map(f => ({
         id: f.id, type: "feedback" as const,
-        text: f.text, rating: f.productValuation,
+        text: feedbackText(f), rating: f.productValuation,
         date: f.createdDate,
-        article: f.productDetails[0]?.supplierArticle ?? "",
+        article: extractArticle(f.productDetails),
         answered: !!f.answer?.text,
       })),
-      ...(qData?.questions ?? []).map(q => ({
+      ...allQ.filter(q => { if (seen.has(q.id)) return false; seen.add(q.id); return true; }).map(q => ({
         id: q.id, type: "question" as const,
         text: q.text, rating: undefined,
         date: q.createdDate,
-        article: q.productDetails[0]?.supplierArticle ?? "",
+        article: extractArticle(q.productDetails),
         answered: !!q.answer?.text,
       })),
     ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     const result: FeedbackSummary = {
-      unansweredFeedbacks: fbData?.countUnanswered ?? 0,
-      unansweredQuestions:  qData?.countUnanswered ?? 0,
+      unansweredFeedbacks: fbUData?.countUnanswered ?? 0,
+      unansweredQuestions:  qUData?.countUnanswered ?? 0,
       items,
     };
     cache.feedback = { data: result, ts: Date.now() };

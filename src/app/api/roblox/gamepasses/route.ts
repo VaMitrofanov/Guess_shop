@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserGamepasses } from "@/lib/roblox";
+import { getUserGamepasses, getRobloxUser } from "@/lib/roblox";
 
 export const dynamic = "force-dynamic";
 
@@ -61,11 +61,26 @@ export async function GET(req: NextRequest) {
 
     // ── Username lookup ──────────────────────────────────────────────
     const gamepasses = await getUserGamepasses(q);
+    if (gamepasses.length > 0) {
+      return NextResponse.json({
+        success: true,
+        gamepasses,
+        isDirect: false,
+        detectedUsername: q,
+        userExists: true,
+      });
+    }
+    // Empty — distinguish "no such user on Roblox" (likely a typo) from
+    // "user exists but has no public for-sale gamepasses" (place closed / not
+    // created). Mirrors the bot's searchGamepassesByNick branching. We only pay
+    // for this extra resolve when the fast path returned nothing.
+    const user = await getRobloxUser(q);
     return NextResponse.json({
       success: true,
-      gamepasses,
+      gamepasses: [],
       isDirect: false,
-      detectedUsername: gamepasses.length > 0 ? q : null,
+      detectedUsername: null,
+      userExists: !!user,
     });
   } catch (error) {
     console.error("[Gamepasses API] Error:", error);

@@ -8,6 +8,7 @@ export async function sendTelegramMessage(
   token: string,
   chatId: string,
   text: string,
+  extra?: { reply_markup?: unknown },
 ): Promise<boolean> {
   const bridgeUrl = process.env.VALIDATOR_SOURCE_URL?.trim();
   const validatorKey = process.env.VALIDATOR_KEY?.trim();
@@ -22,13 +23,13 @@ export async function sendTelegramMessage(
           "Content-Type":    "application/json",
           ...(validatorKey ? { "x-validator-key": validatorKey } : {}),
         },
-        body: JSON.stringify({ token, chat_id: chatId, text }),
+        body: JSON.stringify({ token, chat_id: chatId, text, ...(extra?.reply_markup ? { reply_markup: extra.reply_markup } : {}) }),
       });
     } else {
       res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
+        body:    JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", ...(extra?.reply_markup ? { reply_markup: extra.reply_markup } : {}) }),
       });
     }
 

@@ -1,78 +1,38 @@
 /**
- * Dynamic Reply Keyboard and updateMainMenu for admin dashboard.
+ * Admin Reply Keyboard — single big web_app launch button.
  *
- * The main menu is a 2×2 Reply Keyboard that shows live counters:
- *   📦 Заказы (N)     📈 Статистика
- *   🟣 Wildberries ●  🛠 Состояние
+ * As of sprint 2 (item 1), the TG bot is the notifications channel only:
+ * order/payment/review/support cards are still posted by the bot (with
+ * inline action buttons like ✅ ВЫКУПЛЕНО / ❌ ОШИБКА). Everything else —
+ * browsing, search, stats, codes, system — lives inside the TWA.
  *
- * updateMainMenu() is called on every state change (new order, fulfillment,
- * code exhaustion) to refresh counters for all admins.
+ * The Reply Keyboard now renders one big "🚀 Launch Dashboard" button
+ * on the full width (Telegram renders web_app reply buttons in the brand
+ * blue). The Menu Button left of the input (`setupMenuButton` in `index.ts`)
+ * stays as a second entry point.
  */
 
-import { Markup, type Telegraf } from "telegraf";
-import { db } from "../../shared/db";
-import { ADMIN_IDS } from "../../shared/admin";
+import { Markup } from "telegraf";
 
-/** Threshold below which a denomination is considered "critically low". */
-const LOW_STOCK_THRESHOLD = 5;
+/** TWA URL used by the Launch button. Coolify sets NEXT_PUBLIC_APP_URL. */
+function twaUrl(uid?: string | number): string {
+  const base = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru"}/twa`;
+  return uid ? `${base}?uid=${uid}` : base;
+}
 
 /**
- * Build the admin Reply Keyboard with live counters.
+ * Build the admin Reply Keyboard with a single full-width Launch button.
+ *
+ * Telegram renders inline `web_app` reply-keyboard buttons with the
+ * platform-native blue gradient — no styling tricks needed on our side.
+ * The button closes the chat and opens the TWA in the standard Mini App
+ * frame; admin authenticates via initData (HMAC over TG_TOKEN).
+ *
+ * `uid` is appended as `?uid=<tgId>` — iOS Telegram v9.6+ omits
+ * tgWebAppData from the hash, so the TWA needs the admin ID in the URL.
  */
-export async function buildAdminKeyboard() {
-  const pendingCount = await (db as any).wbOrder.count({
-    where: { status: { in: ["PENDING", "IN_PROGRESS"] } },
-  });
-
-  const codesLow = await checkCodesLow();
-  const stockIndicator = codesLow ? "🔴" : "🟢";
-
+export async function buildAdminKeyboard(uid?: string | number) {
   return Markup.keyboard([
-    [`📦 Заказы (${pendingCount})`, "📈 Статистика"],
-    [`🟣 Wildberries ${stockIndicator}`, "🛠 Состояние"],
-    ["💱 Курс", "🤖 Автобай"],
-  ]).resize();
-}
-
-/**
- * Check if any denomination has fewer than LOW_STOCK_THRESHOLD unused codes.
- */
-async function checkCodesLow(): Promise<boolean> {
-  const groups = await (db as any).wbCode.groupBy({
-    by: ["denomination"],
-    _count: { _all: true },
-    where: { isUsed: false },
-  });
-
-  if (groups.length === 0) return true; // No codes at all
-
-  return groups.some(
-    (g: { _count: { _all: number } }) => g._count._all < LOW_STOCK_THRESHOLD
-  );
-}
-
-/**
- * Refresh the Reply Keyboard for all admins.
- * Called after state-changing events (order created/fulfilled, codes added, etc.).
- *
- * Sends a minimal status line so the keyboard update isn't jarring.
- */
-export async function updateMainMenu(bot: Telegraf): Promise<void> {
-  const keyboard = await buildAdminKeyboard();
-
-  // Use sendMessage with minimal text to push the updated keyboard.
-  // Telegram requires a message body to update the Reply Keyboard.
-  const pendingCount = await (db as any).wbOrder.count({
-    where: { status: { in: ["PENDING", "IN_PROGRESS"] } },
-  });
-
-  const statusLine = pendingCount > 0
-    ? `📋 В очереди: ${pendingCount}`
-    : "✅ Очередь пуста";
-
-  await Promise.allSettled(
-    ADMIN_IDS.map((id) =>
-      bot.telegram.sendMessage(id, statusLine, keyboard)
-    )
-  );
+    [Markup.button.webApp("🚀 Launch Dashboard", twaUrl(uid))],
+  ]).resize().persistent();
 }

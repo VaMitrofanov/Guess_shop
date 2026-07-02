@@ -22,13 +22,22 @@ model User {
   email              String?   @unique
   password           String?
   name               String?
+  username           String?
   image              String?
-  balance            Int       @default(0)
-  role               String    @default("USER")
-  reviewBonusClaimed Boolean   @default(false)
-  orders             Order[]
+  robloxUsername     String?
+  balance               Int       @default(0)
+  bonusExpiresAt        DateTime?
+  rubleDiscount         Int       @default(0)
+  promoExpiresAt        DateTime?
+  promoSentAt           DateTime?
+  role                  String    @default("USER")
+  reviewBonusClaimed    Boolean   @default(false)
+  reviewBonusGrantedAt  DateTime?
+  reviewReminderLevel   Int       @default(0)
+  orders                Order[]
   wbCodes            WbCode[]
   wbOrders           WbOrder[]
+  directIntents      DirectIntent[]
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 }
@@ -88,11 +97,28 @@ enum Platform {
 }
 
 enum WbOrderStatus {
+  AWAITING_PAYMENT
+  PAYMENT_PENDING
   AWAITING_GAMEPASS
   PENDING
   IN_PROGRESS
   COMPLETED
   REJECTED
+  ERROR
+}
+
+enum DirectIntentStatus {
+  PENDING
+  CONSUMED
+  CANCELLED
+  EXPIRED
+}
+
+enum OrderSource {
+  WB
+  DIRECT
+  AVITO
+  MANUAL
 }
 
 enum WbCodeStatus {
@@ -116,11 +142,37 @@ model WbOrder {
   /// Snapshot of the purchase rate (R$/₽) at the time of fulfillment.
   /// Allows accurate historical profit calculations.
   purchaseRate    Float?
+  isDirectOrder   Boolean       @default(false)
+  orderSource     OrderSource   @default(WB)
+  isTest          Boolean       @default(false)
+  paymentDetails  String?
+  robloxUsername  String?
+  /// Free-text admin note (current status / problem) — admin-only, shown in the
+  /// TWA order card. Never surfaced to the customer.
+  adminNote       String?
+  pendingAt       DateTime?
+  takenAt         DateTime?
+  remindersSent   Int           @default(0)
+  isFavorite      Boolean       @default(false)
+  /// Roblox username of the cookie account that purchased this gamepass.
+  purchaserUsername String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
   @@index([userId])
   @@index([status])
+  // Main TWA Orders listing — sort by createdAt desc within a status chip.
+  @@index([status, createdAt(sort: Desc)])
+  // Identity-cluster numbering in /api/twa/orders + GP-by-nick search.
+  @@index([robloxUsername])
+  // Per-user history (BossRobux + analytics).
+  @@index([userId, createdAt(sort: Desc)])
+  // Favorites filter — fast lookup of starred orders.
+  @@index([isFavorite, createdAt(sort: Desc)])
+  // Grouping completed orders by cookie account.
+  @@index([purchaserUsername])
+  // Filter by order source (WB/DIRECT/AVITO/MANUAL).
+  @@index([orderSource])
 }
 
 model FAQ {
@@ -183,6 +235,9 @@ model GlobalSettings {
   lastUpdated  DateTime @updatedAt
   autoBuyEnabled Boolean  @default(false)
   autoBuyRate    Float    @default(4.0)
+  robloxCookie          String?
+  robloxCookieUpdatedAt DateTime?
+  robloxAccountName     String?
 }
 
 /// Cost basis for WB products — used for unit economics calculation.
@@ -221,9 +276,14 @@ model WbCode {
   isUsed             Boolean      @default(false)
   usedAt             DateTime?
   batch              String?
+  isTest             Boolean      @default(false)
   reviewBonusClaimed Boolean      @default(false)
   userId             String?
   user               User?        @relation(fields: [userId], references: [id])
+  /// Gamepass the user picked on the website Step-7 search (one-tap handoff to bot).
+  selectedGamepassId String?
+  /// Roblox nick the user searched with on the website (also seeds WbOrder.robloxUsername).
+  robloxNick         String?
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 
@@ -232,4 +292,26 @@ model WbCode {
   @@index([sessionId])
   @@index([denomination])
   @@index([userId])
+}
+
+/// Pre-order intent for direct purchases. Persisted to DB so it survives bot restarts.
+/// WbOrder is only created when admin sends payment details (consuming the intent).
+model DirectIntent {
+  id             String              @id @default(cuid())
+  userId         String
+  user           User                @relation(fields: [userId], references: [id])
+  amount         Int
+  bonus          Int                 @default(0)
+  totalAmount    Int
+  rubleDiscount  Int                 @default(0)
+  rublePrice     Int
+  robloxUsername  String
+  gamepassId     String
+  gamepassUrl    String
+  platform       Platform
+  status         DirectIntentStatus  @default(PENDING)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([userId, status])
 }

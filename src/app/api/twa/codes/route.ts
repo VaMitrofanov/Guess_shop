@@ -6,9 +6,9 @@ export async function GET(req: NextRequest) {
   if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const [groups, usedToday, usedWeek] = await Promise.all([
-    (prisma as any).wbCode.groupBy({ by: ["denomination"], _count: { _all: true }, where: { isUsed: false } }),
-    (prisma as any).wbCode.count({ where: { isUsed: true, usedAt: { gte: new Date(new Date().setHours(0,0,0,0)) } } }),
-    (prisma as any).wbCode.count({ where: { isUsed: true, usedAt: { gte: new Date(Date.now() - 7 * 864e5) } } }),
+    (prisma as any).wbCode.groupBy({ by: ["denomination"], _count: { _all: true }, where: { isUsed: false, isTest: false } }),
+    (prisma as any).wbCode.count({ where: { isUsed: true, isTest: false, usedAt: { gte: new Date(new Date().setHours(0,0,0,0)) } } }),
+    (prisma as any).wbCode.count({ where: { isUsed: true, isTest: false, usedAt: { gte: new Date(Date.now() - 7 * 864e5) } } }),
   ]);
 
   // 7-day activation chart
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   for (let i = 6; i >= 0; i--) {
     const start = new Date(); start.setDate(start.getDate() - i); start.setHours(0,0,0,0);
     const end   = new Date(start.getTime() + 864e5);
-    const count = await (prisma as any).wbCode.count({ where: { isUsed: true, usedAt: { gte: start, lt: end } } });
+    const count = await (prisma as any).wbCode.count({ where: { isUsed: true, isTest: false, usedAt: { gte: start, lt: end } } });
     chart.push({ date: start.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }), count });
   }
 

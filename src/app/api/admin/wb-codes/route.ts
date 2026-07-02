@@ -136,6 +136,7 @@ export async function GET(request: Request) {
 
   const stats = await db.wbCode.groupBy({
     by: ["denomination", "isUsed"],
+    where: { isTest: false },
     _count: { id: true },
     orderBy: { denomination: "asc" },
   });

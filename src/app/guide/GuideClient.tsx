@@ -13,6 +13,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { ParticleTextEffect } from "@/components/ui/particle-text-effect";
 import VKAuthButton from "@/components/auth/VKAuthButton";
+import WBInstructionV2 from "./WBInstructionV2";
 // Visual components imported directly. None of them tug in heavy deps now
 // (three.js was dropped in favour of CSS gradients), so dynamic chunk
 // splitting just adds round-trips and deploy fragility for zero kB win.
@@ -258,7 +259,7 @@ function RCHBrowser({ children, url = "create.roblox.com" }: { children: React.R
           <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#ffbd2e" }} />
           <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#28ca41" }} />
         </div>
-        <div style={{ flex: 1, background: "#1c1c1c", border: "1px solid #444", borderRadius: 3, padding: "2px 8px", display: "flex", alignItems: "center", gap: 4, maxWidth: 220, margin: "0 auto" }}>
+        <div style={{ flex: 1, background: "#1c1c1c", border: "1px solid #444", borderRadius: 3, padding: "2px 8px", display: "flex", alignItems: "center", gap: 4, margin: "0 auto" }}>
           <svg width="8" height="8" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="4.5" stroke="#5f6368" strokeWidth="1.2" /><path d="M8.5 8.5L11 11" stroke="#5f6368" strokeWidth="1.2" strokeLinecap="round" /></svg>
           <span style={{ fontSize: 9, color: "#9aa0a6", letterSpacing: "0.01em" }}>{url}</span>
         </div>
@@ -312,7 +313,6 @@ function Anim01() {
   const showPage = f >= 2;
 
   return (
-    <>
     <div style={{
       marginTop: 12, overflow: "hidden", border: "1px solid #2a2a2a",
       background: "#111", fontSize: 10, userSelect: "none", position: "relative",
@@ -386,20 +386,19 @@ function Anim01() {
             </div>
           </div>
 
-          {/* Cursor — absolute over entire body */}
-          <div style={{
-            position:"absolute",
-            top:  f===2 ? 69 : 63,
-            left: f===2 ? 152 : 47,
-            pointerEvents:"none", zIndex:20,
-            transition:"top 0.45s cubic-bezier(0.4,0,0.2,1), left 0.45s cubic-bezier(0.4,0,0.2,1)",
-          }}>
-            <RCursor />
-          </div>
         </div>
       )}
+      {/* Cursor — always visible, absolute within entire animation */}
+      <div style={{
+        position:"absolute",
+        top:  [8, 80, 69, 63][f],
+        left: [110, 100, 152, 47][f],
+        pointerEvents:"none", zIndex:20,
+        transition:"top 0.45s cubic-bezier(0.4,0,0.2,1), left 0.45s cubic-bezier(0.4,0,0.2,1)",
+      }}>
+        <RCursor />
+      </div>
     </div>
-    </>
   );
 }
 
@@ -496,8 +495,9 @@ function Anim02() {
           </div>
 
           {/* Create modal */}
+          <AnimatePresence>
           {f===3 && (
-            <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:10 }}>
+            <motion.div key="create-modal" initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} transition={{ duration:0.25 }} style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:10 }}>
               <div style={{ background:"#1c1c1c", border:"1px solid #333", borderRadius:6, padding:"10px 12px", width:"80%", boxShadow:"0 8px 32px rgba(0,0,0,0.5)" }}>
                 <div style={{ fontSize:10, fontWeight:700, color:"#eee", marginBottom:6 }}>Create New Experience</div>
                 <div style={{ fontSize:7, color:"#666", marginBottom:3 }}>Experience Name</div>
@@ -509,18 +509,19 @@ function Anim02() {
                   <div style={{ fontSize:8, fontWeight:700, color:"white", background:"#0e6fff", borderRadius:3, padding:"3px 8px" }}>Create</div>
                 </div>
               </div>
-            </div>
+            </motion.div>
           )}
+          </AnimatePresence>
 
           {/* Cursor */}
           <div style={{
             position:"absolute",
-            top:  f===0 ? 52 : f===1 ? 52 : f===2 ? 8 : 52,
-            left: f===0 ? 10 : f===1 ? 10 : f===2 ? 118 : 10,
+            top:  [8, 44, 8, 55][f],
+            left: [80, 53, 118, 100][f],
             pointerEvents:"none", zIndex:20,
             transition:"top 0.4s cubic-bezier(0.4,0,0.2,1), left 0.4s cubic-bezier(0.4,0,0.2,1)",
           }}>
-            {f <= 2 && <RCursor />}
+            <RCursor />
           </div>
         </div>
       </div>
@@ -661,11 +662,315 @@ function Anim03() {
   );
 }
 
+// ── AnimPublicBadge: Creations grid — highlights the "Public" badge ────────────
+function AnimPublicBadge() {
+  const [f, setF] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setF(v => (v + 1) % 4), 1400);
+    return () => clearInterval(id);
+  }, []);
+  // 0: grid idle  1: cursor → target card  2: card glows + cursor settles
+  // 3: badge zooms + label + cursor moves away to reveal badge
+
+  const cards = [
+    { name: "Obby World",  color: "#7c3aed", pub: false },
+    { name: "My Place",    color: "#0e6fff", pub: true  },
+    { name: "Test Game",   color: "#0891b2", pub: false },
+  ];
+  const hi = f >= 2;
+  const badge = f >= 3;
+
+  return (
+    <div style={{ background: "#111", position: "relative", padding: "10px 10px 4px", fontFamily: "ui-sans-serif,system-ui,sans-serif", userSelect: "none" }}>
+      {/* Tab row */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+        {["My Experiences", "Shared With Me"].map((t, i) => (
+          <div key={t} style={{ padding: "3px 10px", borderRadius: 12, background: i === 0 ? "#fff" : "transparent", color: i === 0 ? "#111" : "#555", fontSize: 8, fontWeight: i === 0 ? 700 : 400, border: i === 0 ? "none" : "1px solid #333" }}>{t}</div>
+        ))}
+      </div>
+
+      {/* Cards grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+        {cards.map((card, i) => {
+          const isTarget = i === 1;
+          const glow = isTarget && hi;
+          const badgeHi = isTarget && badge;
+          return (
+            <div key={i} style={{ border: glow ? "1.5px solid #00b06f" : "1px solid #252525", boxShadow: glow ? "0 0 10px #00b06f40" : "none", overflow: "hidden", transition: "all 0.35s" }}>
+              <div style={{ height: 46, background: card.color, opacity: glow ? 1 : 0.3, transition: "opacity 0.35s" }} />
+              <div style={{ padding: "4px 5px", background: "#181818" }}>
+                <div style={{ fontSize: 7, color: "#888", fontWeight: 600, marginBottom: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{card.name}</div>
+                {/* Badge */}
+                <div style={{
+                  display: "inline-flex", alignItems: "center", gap: 3,
+                  padding: badgeHi ? "2px 7px 2px 4px" : "1.5px 5px 1.5px 3px",
+                  borderRadius: 8,
+                  background: badgeHi ? "#00b06f1a" : "#1a1a1a",
+                  border: `1px solid ${badgeHi ? "#00b06f" : (card.pub ? "#2d4a35" : "#2d2d2d")}`,
+                  transition: "all 0.35s",
+                  transform: badgeHi ? "scale(1.12)" : "scale(1)",
+                }}>
+                  <div style={{ width: 5, height: 5, borderRadius: "50%", background: card.pub ? (badgeHi ? "#00b06f" : "#3d7a52") : "#454545", flexShrink: 0, transition: "background 0.35s" }} />
+                  <span style={{ fontSize: badgeHi ? 8 : 7, fontWeight: 700, color: card.pub ? (badgeHi ? "#00e07a" : "#4d8a5f") : "#454545", transition: "all 0.35s" }}>
+                    {card.pub ? "Public" : "Private"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Label annotation */}
+      <motion.div
+        animate={{ opacity: badge ? 1 : 0, y: badge ? 0 : 4 }}
+        transition={{ duration: 0.3 }}
+        style={{ textAlign: "center", marginTop: 6, fontSize: 8.5, fontWeight: 800, color: "#00b06f", letterSpacing: "0.02em", paddingBottom: 4 }}
+      >
+        ↑ у твоего плейса должен быть значок Public
+      </motion.div>
+
+      {/* Cursor */}
+      <div style={{
+        position: "absolute",
+        top:  [14, 62, 74, 56][f],
+        left: [8,  76, 82, 96][f],
+        pointerEvents: "none", zIndex: 20,
+        transition: "top 0.5s cubic-bezier(0.4,0,0.2,1), left 0.5s cubic-bezier(0.4,0,0.2,1)",
+      }}>
+        <RCursor />
+      </div>
+    </div>
+  );
+}
+
+// ── PublicGameBlock: collapsible "игра должна быть Public" ────────────────────
+function PublicGameBlock() {
+  const [open, setOpen]           = useState(false);
+  const [questOpen, setQuestOpen] = useState(false);
+  const [questSlide, setQuestSlide] = useState(0);
+
+  useEffect(() => {
+    if (!questOpen) return;
+    const id = setInterval(() => setQuestSlide(v => (v + 1) % 3), 3000);
+    return () => clearInterval(id);
+  }, [questOpen]);
+
+  const QUEST_SLIDES = [
+    { src: "/guide/public-settings.jpg",              pos: "50% 90%", caption: "Configure → Questionnaire → нажми Restart" },
+    { src: "/guide/public-questionnaire.png",         pos: "top",     caption: "Ответь «No» на все 10 вопросов → Continue" },
+    { src: "/guide/public-questionnaire-success.png", pos: "center",  caption: "Готово — плейс стал Public ✓" },
+  ] as const;
+
+  return (
+    <div className="mt-4">
+      {/* ── Toggle button ── */}
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full text-left group transition-all"
+        style={{
+          background: open ? "rgba(245,158,11,0.12)" : "rgba(245,158,11,0.06)",
+          border: "1px solid rgba(245,158,11,0.3)",
+          borderBottom: open ? "none" : "1px solid rgba(245,158,11,0.3)",
+          padding: "10px 14px",
+        }}
+      >
+        <div className="flex items-center gap-3">
+          {/* Icon */}
+          <div style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.35)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <AlertTriangle className="w-4 h-4 text-amber-400" />
+          </div>
+          {/* Text */}
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-black uppercase tracking-wide text-amber-300">
+              Игра должна быть Public
+            </div>
+            <div className="text-xs text-amber-600/70 font-medium mt-0.5">
+              {open ? "нажми, чтобы свернуть" : "нажми, чтобы узнать как это сделать →"}
+            </div>
+          </div>
+          {/* Chevron */}
+          <motion.div animate={{ rotate: open ? 90 : 0 }} transition={{ duration: 0.2 }}>
+            <ChevronRight className="w-5 h-5 text-amber-500/50 flex-shrink-0" />
+          </motion.div>
+        </div>
+      </button>
+
+      {/* ── Expandable body ── */}
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="pub-body"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: "easeInOut" }}
+            style={{ overflow: "hidden" }}
+          >
+            <div style={{ border: "1px solid rgba(245,158,11,0.25)", borderTop: "none", background: "#090d1a" }}>
+
+              {/* ── Section 1: что должно быть ── */}
+              <div className="p-4 space-y-3">
+                <p className="text-sm text-zinc-300 font-semibold leading-relaxed">
+                  У твоей игры в списке должен быть значок{" "}
+                  <span style={{ background: "#00b06f18", border: "1px solid #00b06f", borderRadius: 6, padding: "1px 7px", color: "#00e07a", fontWeight: 800, fontSize: "0.8rem" }}>● Public</span>
+                  {" "}— без него менеджер не может выкупить геймпасс.
+                </p>
+
+                {/* Code animation — PC only */}
+                <div className="hidden md:block">
+                  <RCHBrowser url="create.roblox.com/dashboard/creations">
+                    <AnimPublicBadge />
+                  </RCHBrowser>
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div style={{ borderTop: "1px solid #1a2235", margin: "0 16px" }} />
+
+              {/* ── Section 2: как сделать Public ── */}
+              <div className="p-4 space-y-3">
+                <p className="text-xs font-black uppercase tracking-widest text-zinc-500">Как сделать Public</p>
+
+                <div className="space-y-2">
+                  {([
+                    "Нажми на свой плейс в списке Creations",
+                    (<span key="s2">В боковом меню выбери <b className="text-white">Configure → Settings</b></span>),
+                    (<span key="s3">Найди раздел <b className="text-white">Audience</b> → нажми <b className="text-white">Public</b> → сохрани</span>),
+                  ] as React.ReactNode[]).map((step, i) => (
+                    <div key={i} className="flex items-start gap-3">
+                      <div style={{ width: 22, height: 22, borderRadius: "50%", background: "#0e1a2e", border: "1.5px solid #1e3a5f", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
+                        <span style={{ fontSize: 9, fontWeight: 900, color: "#4a8fd4" }}>{i + 1}</span>
+                      </div>
+                      <span className="text-sm text-zinc-300 font-medium leading-snug pt-1">{step}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Screenshot: Configure → Settings → Public — PC only */}
+                <div className="hidden md:block">
+                  <RCHBrowser url="create.roblox.com/…/configure/settings">
+                    <div style={{ position: "relative", overflow: "hidden" }}>
+                      <img
+                        src="/guide/public-configure.jpg"
+                        alt="Configure → Settings → выбери Public"
+                        style={{ width: "100%", display: "block", maxHeight: 240, objectFit: "cover", objectPosition: "50% 42%" }}
+                      />
+                      {/* Highlight overlay — pulse ring around Public button area */}
+                      <div style={{
+                        position: "absolute",
+                        top: "52%", left: "40%",
+                        width: 68, height: 26,
+                        border: "2px solid #00b06f",
+                        borderRadius: 4,
+                        boxShadow: "0 0 12px #00b06f80",
+                        pointerEvents: "none",
+                      }} />
+                    </div>
+                  </RCHBrowser>
+                </div>
+              </div>
+
+              {/* ── Nested: Questionnaire fix ── */}
+              <div style={{ borderTop: "1px solid #1a2235" }}>
+                <button
+                  onClick={() => setQuestOpen(v => !v)}
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors text-left"
+                >
+                  <div style={{ width: 22, height: 22, borderRadius: "50%", background: "#111827", border: "1px solid #2d3748", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <span style={{ fontSize: 11, color: "#4a5568" }}>?</span>
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-sm font-black text-zinc-400">Всё ещё не Public?</div>
+                    <div className="text-xs text-zinc-500">Есть способ через Questionnaire</div>
+                  </div>
+                  <motion.div animate={{ rotate: questOpen ? 90 : 0 }} transition={{ duration: 0.18 }}>
+                    <ChevronRight className="w-4 h-4 text-zinc-600" />
+                  </motion.div>
+                </button>
+
+                <AnimatePresence initial={false}>
+                  {questOpen && (
+                    <motion.div
+                      key="quest-body"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.22, ease: "easeInOut" }}
+                      style={{ overflow: "hidden" }}
+                    >
+                      <div className="px-4 pb-4 space-y-3" style={{ background: "#070b15" }}>
+                        <div className="space-y-2">
+                          {([
+                            (<span key="q1">В том же меню выбери <b className="text-white">Configure → Questionnaire</b></span>),
+                            (<span key="q2">Внизу страницы нажми синюю кнопку <b className="text-white">Restart</b></span>),
+                            "Появятся 10 вопросов — на все отвечай «No»",
+                            (<span key="q4">Нажми <b className="text-white">Continue</b> — плейс станет Public ✓</span>),
+                          ] as React.ReactNode[]).map((step, i) => (
+                            <div key={i} className="flex items-start gap-3">
+                              <div style={{ width: 22, height: 22, borderRadius: "50%", background: "#0a0f1a", border: "1.5px solid #1e2a45", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
+                                <span style={{ fontSize: 9, fontWeight: 900, color: "#555" }}>{i + 1}</span>
+                              </div>
+                              <span className="text-sm text-zinc-400 font-medium leading-snug pt-1">{step}</span>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Questionnaire screenshots slideshow — PC only */}
+                        <div className="hidden md:block">
+                          <div style={{ border: "1px solid #1e2a45", overflow: "hidden", position: "relative", background: "#111", fontFamily: "ui-sans-serif,system-ui,sans-serif" }}>
+                            {/* mini chrome */}
+                            <div style={{ background: "#2d2d2d", padding: "5px 8px", display: "flex", alignItems: "center", gap: 6 }}>
+                              <div style={{ display: "flex", gap: 4 }}>
+                                {(["#ff5f57","#ffbd2e","#28ca41"] as string[]).map((c, ci) => (
+                                  <div key={ci} style={{ width: 8, height: 8, borderRadius: "50%", background: c }} />
+                                ))}
+                              </div>
+                              <span style={{ fontSize: 9, color: "#9aa0a6", marginLeft: 6 }}>create.roblox.com</span>
+                            </div>
+                            <div style={{ position: "relative" }}>
+                              <AnimatePresence mode="wait">
+                                <motion.img
+                                  key={questSlide}
+                                  src={QUEST_SLIDES[questSlide].src}
+                                  alt={QUEST_SLIDES[questSlide].caption}
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  exit={{ opacity: 0 }}
+                                  transition={{ duration: 0.4 }}
+                                  style={{ width: "100%", display: "block", maxHeight: 210, objectFit: "cover", objectPosition: QUEST_SLIDES[questSlide].pos }}
+                                />
+                              </AnimatePresence>
+                              <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "linear-gradient(transparent,rgba(0,0,0,0.85))", padding: "20px 10px 8px", display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
+                                <span style={{ fontSize: 9, color: "#ccc" }}>{QUEST_SLIDES[questSlide].caption}</span>
+                                <div style={{ display: "flex", gap: 4, flexShrink: 0, marginLeft: 8 }}>
+                                  {QUEST_SLIDES.map((_, qi) => (
+                                    <button key={qi} onClick={() => setQuestSlide(qi)} aria-label={`Перейти к слайду ${qi + 1} из ${QUEST_SLIDES.length}`} aria-current={questSlide === qi ? "true" : undefined} style={{ width: 6, height: 6, borderRadius: "50%", background: questSlide === qi ? "#00b06f" : "#555", border: "none", cursor: "pointer", padding: 0 }} />
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 // ── Anim 04: Set price — accurate Roblox Creator Hub dark UI ──────────────────
 function Anim04Price({ passPrice }: { passPrice: number | null }) {
   const [f, setF] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setF(v => (v + 1) % 7), 1400);
+    const id = setInterval(() => setF(v => (v + 1) % 7), 2400);
     return () => clearInterval(id);
   }, []);
 
@@ -677,8 +982,9 @@ function Anim04Price({ passPrice }: { passPrice: number | null }) {
   // f=5: cursor moves to checkbox with RED warning (don't check!)
   // f=6: cursor moves to Save Changes → saved state
   const toggleOn  = f >= 2;
-  const priceFocus = f >= 3;
-  const priceVal  = f >= 4 ? String(passPrice ?? 1430) : "";
+  const priceFocus = f === 3 || f === 4;
+  const priceStr   = String(passPrice ?? 1430);
+  const priceVal   = f === 3 ? priceStr.slice(0, 2) : f >= 4 ? priceStr : "";
   const checkWarn = f === 5;
   const saveHL    = f === 6;
 
@@ -795,87 +1101,86 @@ function Anim04Price({ passPrice }: { passPrice: number | null }) {
             }
           `}</style>
 
-          {/* Default Price field */}
+          <AnimatePresence>
           {toggleOn && (
-            <div style={{ marginBottom: 8, position:"relative" }}>
-              <div style={{ fontSize: 7, color: "#555", marginBottom: 3 }}>Default Price</div>
-              {/* Pulse ring when focusing the price field */}
-              {f === 3 && (
-                <div style={{
-                  position:"absolute", inset:-3, borderRadius:5,
-                  border:"2px solid #4a9eff",
-                  pointerEvents:"none", zIndex:5,
-                  animation:"pulseGlow 0.9s ease-in-out infinite",
-                }} />
-              )}
-              <div style={{
-                border: priceFocus ? "2px solid #4a9eff" : "1px solid #2a2a2a",
-                borderRadius: 3, background: "#1a1a1a",
-                padding: "5px 10px", display: "flex", alignItems: "center", gap: 6,
-                transition: "border-color 0.3s",
-                boxShadow: priceFocus ? "0 0 0 3px #4a9eff22" : "none",
-              }}>
-                <div style={{ width: 9, height: 9, borderRadius: "50%", border: "2px solid #4a9eff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <div style={{ width: 3, height: 3, borderRadius: "50%", background: "#4a9eff" }} />
-                </div>
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#eee", fontFamily: "monospace" }}>
-                  {priceVal || <span style={{ color: "#444" }}>0</span>}
-                  {priceFocus && f <= 4 ? <span style={{ borderLeft: "1.5px solid #eee", marginLeft: 1 }}>&nbsp;</span> : null}
-                </span>
-                {priceVal && !priceFocus && (
-                  <span style={{ marginLeft:"auto", fontSize:7, color:"#22c55e", fontWeight:700 }}>✓</span>
+            <motion.div key="price-content" initial={{ opacity:0, height:0 }} animate={{ opacity:1, height:"auto" }} exit={{ opacity:0, height:0 }} transition={{ duration:0.3 }} style={{ overflow:"hidden" }}>
+              {/* Default Price field */}
+              <div style={{ marginBottom: 8, position:"relative" }}>
+                <div style={{ fontSize: 7, color: "#555", marginBottom: 3 }}>Default Price</div>
+                {f === 3 && (
+                  <div style={{
+                    position:"absolute", inset:-3, borderRadius:5,
+                    border:"2px solid #4a9eff",
+                    pointerEvents:"none", zIndex:5,
+                    animation:"pulseGlow 0.9s ease-in-out infinite",
+                  }} />
                 )}
-              </div>
-            </div>
-          )}
-
-          {/* Enable regional pricing checkbox */}
-          {toggleOn && (
-            <div style={{ marginBottom: 8 }}>
-              <div style={{
-                display: "flex", alignItems: "center", gap: 7, padding: "4px 6px",
-                border: checkWarn ? "1.5px solid #ef4444" : "1px solid transparent",
-                background: checkWarn ? "#250a0a" : "transparent",
-                borderRadius: 3, transition: "all 0.3s",
-                boxShadow: checkWarn ? "0 0 0 3px #ef444420" : "none",
-              }}>
                 <div style={{
-                  width: 12, height: 12,
-                  border: checkWarn ? "2px solid #ef4444" : "1.5px solid #3a3a3a",
-                  background: "transparent", borderRadius: 2, flexShrink: 0, transition: "border-color 0.3s",
-                }} />
-                <span style={{ fontSize: 8.5, color: checkWarn ? "#ff8888" : "#888", fontWeight: checkWarn ? 700 : 400 }}>
-                  Enable regional pricing
-                </span>
-                {checkWarn && (
-                  <span style={{ marginLeft: "auto", fontSize: 7, color: "#ef4444", fontWeight: 700, background: "#ef444420", padding: "1px 5px", borderRadius: 2 }}>
-                    ← НЕ ТРОГАТЬ
+                  border: priceFocus ? "2px solid #4a9eff" : "1px solid #2a2a2a",
+                  borderRadius: 3, background: "#1a1a1a",
+                  padding: "5px 10px", display: "flex", alignItems: "center", gap: 6,
+                  transition: "border-color 0.3s",
+                  boxShadow: priceFocus ? "0 0 0 3px #4a9eff22" : "none",
+                }}>
+                  <div style={{ width: 9, height: 9, borderRadius: "50%", border: "2px solid #4a9eff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <div style={{ width: 3, height: 3, borderRadius: "50%", background: "#4a9eff" }} />
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#eee", fontFamily: "monospace" }}>
+                    {priceVal || <span style={{ color: "#444" }}>0</span>}
+                    {priceFocus ? <span style={{ borderLeft: "1.5px solid #eee", marginLeft: 1 }}>&nbsp;</span> : null}
                   </span>
+                  {priceVal && !priceFocus && (
+                    <span style={{ marginLeft:"auto", fontSize:7, color:"#22c55e", fontWeight:700 }}>✓</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Enable regional pricing checkbox */}
+              <div style={{ marginBottom: 8 }}>
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 7, padding: "4px 6px",
+                  border: checkWarn ? "1.5px solid #ef4444" : "1px solid transparent",
+                  background: checkWarn ? "#250a0a" : "transparent",
+                  borderRadius: 3, transition: "all 0.3s",
+                  boxShadow: checkWarn ? "0 0 0 3px #ef444420" : "none",
+                }}>
+                  <div style={{
+                    width: 12, height: 12,
+                    border: checkWarn ? "2px solid #ef4444" : "1.5px solid #3a3a3a",
+                    background: "transparent", borderRadius: 2, flexShrink: 0, transition: "border-color 0.3s",
+                  }} />
+                  <span style={{ fontSize: 8.5, color: checkWarn ? "#ff8888" : "#888", fontWeight: checkWarn ? 700 : 400 }}>
+                    Enable regional pricing
+                  </span>
+                  {checkWarn && (
+                    <span style={{ marginLeft: "auto", fontSize: 7, color: "#ef4444", fontWeight: 700, background: "#ef444420", padding: "1px 5px", borderRadius: 2 }}>
+                      ← НЕ ТРОГАТЬ
+                    </span>
+                  )}
+                </div>
+                {checkWarn && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, padding: "3px 6px", background: "#1e1400", border: "1px solid #c9a84c33", borderRadius: 2 }}>
+                    <span style={{ color: "#c9a84c", fontSize: 8 }}>⚠</span>
+                    <span style={{ fontSize: 7, color: "#c9a84c88" }}>Roblox изменит цену для разных стран — оставь выключенным</span>
+                  </div>
                 )}
               </div>
-              {checkWarn && (
-                <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, padding: "3px 6px", background: "#1e1400", border: "1px solid #c9a84c33", borderRadius: 2 }}>
-                  <span style={{ color: "#c9a84c", fontSize: 8 }}>⚠</span>
-                  <span style={{ fontSize: 7, color: "#c9a84c88" }}>Roblox изменит цену для разных стран — оставь выключенным</span>
-                </div>
-              )}
-            </div>
-          )}
 
-          {/* Buttons */}
-          {toggleOn && (
-            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-              <div style={{ padding: "5px 14px", border: "1px solid #2a2a2a", borderRadius: 4, fontSize: 8.5, color: "#666" }}>Cancel</div>
-              <div style={{
-                padding: "5px 18px", borderRadius: 4, fontSize: 8.5, fontWeight: 700, color: "white",
-                background: saveHL ? "#1d4ed8" : "#4a9eff",
-                boxShadow: saveHL ? "0 0 0 3px #4a9eff33" : "none",
-                transition: "all 0.3s",
-              }}>
-                {saveHL ? "✓ Saved!" : "Save Changes"}
+              {/* Buttons */}
+              <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                <div style={{ padding: "5px 14px", border: "1px solid #2a2a2a", borderRadius: 4, fontSize: 8.5, color: "#666" }}>Cancel</div>
+                <div style={{
+                  padding: "5px 18px", borderRadius: 4, fontSize: 8.5, fontWeight: 700, color: "white",
+                  background: saveHL ? "#1d4ed8" : "#4a9eff",
+                  boxShadow: saveHL ? "0 0 0 3px #4a9eff33" : "none",
+                  transition: "all 0.3s",
+                }}>
+                  {saveHL ? "✓ Saved!" : "Save Changes"}
+                </div>
               </div>
-            </div>
+            </motion.div>
           )}
+          </AnimatePresence>
 
           {/* Cursor */}
           <div style={{
@@ -1001,69 +1306,10 @@ function Anim06Standard() {
   );
 }
 
-// ── Anim 05 WB: Copy gamepass link from Creator Hub ────────────────────────────
-function Anim05WB() {
-  const [f, setF] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setF(v => (v + 1) % 4), 1600);
-    return () => clearInterval(id);
-  }, []);
-  // 0=pass page, 1=click share/address bar, 2=URL selected, 3=copied!
-
-  return (
-    <RCHBrowser url={f >= 1 ? "roblox.com/game-pass/1234567/VIP" : "create.roblox.com"}>
-      <RCHTopNav />
-      <div style={{ display: "flex", background: "#fff", position: "relative" }}>
-        <div style={{ width: 108, background: "#f5f5f5", borderRight: "1px solid #e0e0e0", padding: "4px 4px", flexShrink: 0 }}>
-          <SItem label="Overview" />
-          <SItem label="Game Passes" active />
-          <SItem label="Settings" />
-        </div>
-        <div style={{ flex: 1, padding: "8px 10px" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#1a1a1a", marginBottom: 5 }}>VIP Pass</div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 7 }}>
-            <div style={{ width: 32, height: 32, background: "#4f46e5", borderRadius: 3 }} />
-            <div>
-              <div style={{ fontSize: 9, color: "#555" }}>Pass ID: 1234567</div>
-              <div style={{ fontSize: 9, color: "#22c55e", fontWeight: 700 }}>● For Sale · 1430 R$</div>
-            </div>
-          </div>
-          {/* Address bar highlight */}
-          <div style={{
-            background: f === 2 ? "#e8f0fe" : "#f5f5f5",
-            border: f >= 1 ? "2px solid #0e6fff" : "1px solid #e0e0e0",
-            borderRadius: 3, padding: "3px 7px",
-            fontSize: 9, color: f === 2 ? "#0e6fff" : "#555",
-            fontWeight: f === 2 ? 700 : 400,
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            transition: "all 0.3s",
-          }}>
-            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              roblox.com/game-pass/1234567/VIP
-            </span>
-            {f >= 1 && (
-              <span style={{
-                marginLeft: 6, fontSize: 8, fontWeight: 700, flexShrink: 0,
-                color: f === 3 ? "#22c55e" : "#0e6fff",
-              }}>
-                {f === 3 ? "✓ Copied!" : "Copy"}
-              </span>
-            )}
-          </div>
-        </div>
-        {/* Cursor */}
-        <div style={{ position: "absolute", top: f === 0 ? 55 : 88, left: f === 0 ? 150 : 210, pointerEvents: "none", zIndex: 20, transition: "all 0.45s" }}>
-          {f <= 2 && <RCursor />}
-        </div>
-      </div>
-    </RCHBrowser>
-  );
-}
-
 function Anim06WB() {
   const [f, setF] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setF(v => (v + 1) % 5), 1800);
+    const id = setInterval(() => setF(v => (v + 1) % 5), 1600);
     return () => clearInterval(id);
   }, []);
   // f=0: chat open (manager first msg), f=1: user typing link,
@@ -1110,26 +1356,30 @@ function Anim06WB() {
           </div>
         )}
 
-        {/* Manager: "Спасибо за покупку!" (f=3+) */}
+        {/* Manager: "Геймпасс принят!" (f=3+) */}
+        <AnimatePresence>
         {f >= 3 && (
-          <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 5 }}>
+          <motion.div key="mgr-1" initial={{ opacity:0, y:5 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }} transition={{ duration:0.3 }} style={{ display:"flex", justifyContent:"flex-start", marginBottom:5 }}>
             <div style={{ background: "#182533", border: "1px solid #22c55e22", borderRadius: "2px 10px 10px 10px", padding: "5px 9px", maxWidth: "84%" }}>
               <div style={{ fontSize: 9, color: "#22c55e", fontWeight: 700, marginBottom: 2 }}>✅ Геймпасс принят!</div>
               <div style={{ fontSize: 8, color: "#aaa", lineHeight: 1.4 }}>Выкупим в ближайшие часы 🚀</div>
               <div style={{ fontSize: 7, color: "#445566", marginTop: 2 }}>10:31</div>
             </div>
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
 
         {/* Manager: время зачисления (f=4) */}
+        <AnimatePresence>
         {f >= 4 && (
-          <div style={{ display: "flex", justifyContent: "flex-start" }}>
+          <motion.div key="mgr-2" initial={{ opacity:0, y:5 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }} transition={{ duration:0.3 }} style={{ display:"flex", justifyContent:"flex-start" }}>
             <div style={{ background: "#182533", borderRadius: "2px 10px 10px 10px", padding: "5px 9px", maxWidth: "84%" }}>
               <div style={{ fontSize: 8, color: "#ddd", lineHeight: 1.4 }}>⏳ Robux поступят на баланс через <span style={{ color: "#4a9eff", fontWeight: 700 }}>5–7 дней</span> по правилам Roblox.</div>
               <div style={{ fontSize: 7, color: "#445566", marginTop: 2 }}>10:31</div>
             </div>
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
 
         {/* Input bar */}
         <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "#232e3c", borderTop: "1px solid #1e2a45", padding: "5px 8px", display: "flex", gap: 6, alignItems: "center" }}>
@@ -1262,8 +1512,9 @@ function Anim05ID() {
                 )}
 
                 {/* Context menu */}
+                <AnimatePresence>
                 {i === 0 && showMenu && (
-                  <div style={{
+                  <motion.div key="ctx-menu" initial={{ opacity:0, scale:0.95, y:-4 }} animate={{ opacity:1, scale:1, y:0 }} exit={{ opacity:0, scale:0.95, y:-4 }} transition={{ duration:0.15 }} style={{
                     position:"absolute", right:8, top:28, zIndex:30,
                     background:"#1e1e1e", border:"1px solid #333",
                     borderRadius:4, overflow:"hidden", minWidth:130,
@@ -1278,7 +1529,6 @@ function Anim05ID() {
                         display:"flex", alignItems:"center", gap:6,
                         cursor:"pointer",
                         transition:"all 0.2s",
-                        outline: item === "Copy Asset ID" && hoverCopy ? "none" : "none",
                         boxShadow: item === "Copy Asset ID" && hoverCopy ? "inset 0 0 0 2px #4a9eff55" : "none",
                       }}>
                         {item === "Copy Asset ID" && (
@@ -1290,8 +1540,9 @@ function Anim05ID() {
                         )}
                       </div>
                     ))}
-                  </div>
+                  </motion.div>
                 )}
+                </AnimatePresence>
               </div>
             ))}
           </div>
@@ -1348,14 +1599,14 @@ function PlatformSwitcher({
 }) {
   return (
     <div className="flex items-center gap-4 mb-8">
-      <span className="font-pixel text-[9px] text-zinc-500 uppercase tracking-widest hidden sm:block">Платформа создания геймпасса:</span>
+      <span className="font-pixel text-[11px] text-zinc-400 uppercase tracking-widest hidden sm:block">Платформа создания геймпасса:</span>
       <div className="relative inline-flex bg-[#0a0e1a] border-2 border-[#1e2a45] p-1">
         {/* Sliding highlight */}
         <motion.div
           className="absolute inset-y-1 bg-[#00b06f]/15 border border-[#00b06f]/40"
           style={{ width: "calc(50% - 4px)" }}
           animate={{ left: platform === "pc" ? 4 : "calc(50%)" }}
-          transition={{ type: "spring", stiffness: 380, damping: 36 }}
+          transition={{ type: "spring", stiffness: 300, damping: 28 }}
         />
         {([
           { id: "pc" as const, label: "Компьютер", icon: Monitor },
@@ -1438,9 +1689,9 @@ function StepsGrid({
               <div className="w-9 h-9 border-2 border-[#00b06f]/30 bg-[#00b06f]/10 flex items-center justify-center group-hover:border-[#00b06f]/60 group-hover:bg-[#00b06f]/15 transition-colors flex-shrink-0">
                 <StepIcon className="w-4 h-4 text-[#00b06f]" />
               </div>
-              <span className="font-pixel text-[9px] text-[#00b06f]/40">{step.num}</span>
+              <span className="font-pixel text-[11px] text-[#00b06f]/50">{step.num}</span>
               {isMobile && (
-                <span className="ml-auto flex items-center gap-1 text-[9px] font-black text-zinc-600 uppercase tracking-wider">
+                <span className="ml-auto flex items-center gap-1 text-xs font-black text-zinc-400 uppercase tracking-wider">
                   <Smartphone className="w-3 h-3" /> mobile
                 </span>
               )}
@@ -1457,7 +1708,7 @@ function StepsGrid({
               >
                 <h2 className="text-xl md:text-2xl font-black uppercase tracking-tight leading-tight">{step.title}</h2>
                 <p className="text-sm md:text-base text-white/90 font-semibold leading-relaxed">{displayDesc}</p>
-                <p className="text-sm md:text-base text-zinc-400 font-medium leading-relaxed">{displayDetail}</p>
+                <p className="text-sm md:text-base text-zinc-300 font-medium leading-relaxed">{displayDetail}</p>
 
                 {/* Bullet points with icons */}
                 {displayBullets && displayBullets.length > 0 && (
@@ -1467,7 +1718,7 @@ function StepsGrid({
                       return (
                         <div key={bi} className="flex items-start gap-2.5">
                           <div className="w-5 h-5 border border-[#1e2a45] bg-[#0a0e1a] flex items-center justify-center flex-shrink-0 mt-0.5">
-                            <BIcon className="w-2.5 h-2.5 text-[#00b06f]/60" />
+                            <BIcon className="w-3 h-3 text-[#00b06f]/70" />
                           </div>
                           <span className="text-sm md:text-base text-zinc-300 font-medium leading-snug">{bullet.text}</span>
                         </div>
@@ -1478,7 +1729,7 @@ function StepsGrid({
 
                 {displayTip && (
                   <div className="flex gap-2 items-start bg-[#00b06f]/5 border border-[#00b06f]/15 px-3 py-2 mt-2">
-                    <span className="font-pixel text-[9px] text-[#00b06f] mt-0.5 flex-shrink-0">TIP</span>
+                    <span className="font-pixel text-[10px] text-[#00b06f] mt-0.5 flex-shrink-0">TIP</span>
                     <p className="text-sm md:text-base text-[#00b06f]/80 font-bold leading-relaxed">{displayTip}</p>
                   </div>
                 )}
@@ -1519,6 +1770,9 @@ function StepsGrid({
                 {!isMobile && isStep05WB  && <div style={{ minHeight: 220 }}><Anim05ID /></div>}
                 {!isMobile && isStep06WB  && <div style={{ minHeight: 320 }}><Anim06WB /></div>}
 
+                {/* Step 02: public game warning */}
+                {step.num === "02" && <PublicGameBlock />}
+
                 {/* Step 01 PC: direct link button */}
                 {step.num === "01" && !isMobile && (
                   <div className="mt-2">
@@ -1526,7 +1780,7 @@ function StepsGrid({
                       href="https://create.roblox.com/dashboard/creations"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 h-10 px-5 border-2 border-[#1e2a45] hover:border-[#00b06f]/50 hover:text-[#00b06f] font-black text-[10px] uppercase tracking-widest transition-all text-zinc-300"
+                      className="inline-flex items-center gap-2 h-10 px-5 border-2 border-[#1e2a45] hover:border-[#00b06f]/50 hover:text-[#00b06f] font-black text-xs uppercase tracking-widest transition-all text-zinc-300"
                     >
                       Открыть Creator Hub <ExternalLink className="w-3.5 h-3.5" />
                     </a>
@@ -1585,19 +1839,19 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
           <div className="absolute inset-0 border border-[#c9a84c]/20 scale-125 opacity-20" />
         </div>
         
-        <div className="font-pixel text-[10px] text-[#c9a84c]/60 tracking-[0.3em] mb-4 uppercase">
+        <div className="font-pixel text-xs text-[#c9a84c]/70 tracking-[0.3em] mb-4 uppercase">
           Оформление заказа
         </div>
 
         {denomination && passPrice ? (
           <div className="flex flex-col sm:flex-row items-center justify-center gap-6 mb-10">
             <div className="flex flex-col items-center gap-1 border-2 border-[#c9a84c]/20 bg-[#c9a84c]/5 px-8 py-4 min-w-[180px]">
-              <span className="font-pixel text-[8px] text-[#c9a84c]/40">ТЫ ПОЛУЧИШЬ</span>
+              <span className="font-pixel text-[11px] text-[#c9a84c]/60">ТЫ ПОЛУЧИШЬ</span>
               <span className="text-4xl font-black text-white">{denomination} R$</span>
             </div>
             <div className="bg-[#c9a84c]/20 w-8 h-[2px] hidden sm:block" />
             <div className="flex flex-col items-center gap-1 border-2 border-[#c9a84c]/40 bg-[#c9a84c]/10 px-8 py-4 min-w-[180px]">
-              <span className="font-pixel text-[8px] text-[#c9a84c]/60">ЦЕНА ПАССА</span>
+              <span className="font-pixel text-[11px] text-[#c9a84c]/80">ЦЕНА ПАССА</span>
               <span className="text-4xl font-black text-[#f0c040]">{passPrice} R$</span>
             </div>
           </div>
@@ -1606,7 +1860,7 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
         <h3 className="text-3xl md:text-4xl font-black uppercase tracking-tight text-white mb-4">
           Почти готово!
         </h3>
-        <p className="text-zinc-400 font-medium text-base max-w-lg mx-auto leading-relaxed">
+        <p className="text-zinc-300 font-medium text-base max-w-lg mx-auto leading-relaxed">
           Чтобы мы могли выкупить твой геймпасс, отправь ссылку на него боту в Telegram или нашему сообществу ВКонтакте.
         </p>
       </div>
@@ -1619,7 +1873,7 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
           <a
             href={code ? `https://t.me/RobloxBankBot?start=wb_${code}_${getOrInitSessionId()}` : "https://t.me/RobloxBankBot"}
             target="_blank" rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2.5 md:gap-4 w-full h-full font-black text-[11px] md:text-sm uppercase tracking-widest text-white"
+            className="flex items-center justify-center gap-2.5 md:gap-4 w-full h-full font-black text-xs md:text-sm uppercase tracking-widest text-white"
           >
             <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 md:w-6 md:h-6 flex-shrink-0 text-[#229ED9] group-hover/tg:scale-110 transition-transform">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z"/>
@@ -1640,17 +1894,17 @@ function WBManagerBlock({ denomination, code }: { denomination?: number; code?: 
 
       {/* Subtitle under buttons */}
       <div className="relative z-10 flex flex-col sm:flex-row items-center justify-center gap-6 mt-4 max-w-2xl mx-auto w-full">
-        <p className="text-[10px] md:text-xs text-zinc-600 font-black uppercase tracking-widest text-center flex-1">
+        <p className="text-xs text-zinc-400 font-black uppercase tracking-widest text-center flex-1">
           Бот открывается автоматически
         </p>
-        <p className="text-[10px] md:text-xs text-zinc-600 font-black uppercase tracking-widest text-center flex-1">
+        <p className="text-xs text-zinc-400 font-black uppercase tracking-widest text-center flex-1">
           Быстрая авторизация VK ID
         </p>
       </div>
 
       <div className="relative z-10 flex items-center justify-center gap-2 mt-8 opacity-60">
         <AlertTriangle className="w-4 h-4 text-[#c9a84c]" />
-        <p className="text-[#c9a84c] text-[10px] font-black uppercase tracking-widest text-center">
+        <p className="text-[#c9a84c] text-xs font-black uppercase tracking-widest text-center">
           Среднее время обработки — несколько часов • Работаем круглосуточно
         </p>
       </div>
@@ -1666,13 +1920,13 @@ function StandardDoneBlock() {
         <CheckCircle2 className="w-7 h-7 text-[#00b06f]" />
       </div>
       <div className="text-center sm:text-left space-y-1">
-        <p className="font-pixel text-[10px] text-[#00b06f]">ГОТОВО!</p>
+        <p className="font-pixel text-xs text-[#00b06f]">ГОТОВО!</p>
         <p className="font-black uppercase tracking-tight text-lg">Геймпасс создан — оформляй заказ</p>
         <p className="text-sm text-zinc-400 font-medium">Найди пасс по нику, ссылке или ID — и оплати</p>
       </div>
       <Link
         href="/checkout"
-        className="ml-auto h-12 px-8 gold-gradient font-black text-[10px] uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none flex items-center gap-2 flex-shrink-0"
+        className="ml-auto h-12 px-8 gold-gradient font-black text-xs uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none flex items-center gap-2 flex-shrink-0"
       >
         Купить R$ <ArrowRight className="w-3.5 h-3.5" />
       </Link>
@@ -1696,15 +1950,15 @@ function WBStaticHeader({ denomination, onReset }: { denomination?: number; onRe
             </div>
           </div>
           <div className="hidden sm:flex flex-col leading-none">
-            <span className="text-[11px] font-black uppercase tracking-[0.2em] text-white">Wildberries</span>
-            <span className="text-[11px] font-black uppercase tracking-[0.2em] text-[#c9a84c]">× RobloxBank</span>
+            <span className="text-xs font-black uppercase tracking-[0.2em] text-white">Wildberries</span>
+            <span className="text-xs font-black uppercase tracking-[0.2em] text-[#c9a84c]">× RobloxBank</span>
           </div>
         </div>
 
         {/* Denomination badge */}
         {denomination && denomination > 0 && (
           <div className="flex items-center gap-2 px-3 py-1.5 border border-[#c9a84c]/30 bg-[#c9a84c]/10">
-            <span className="font-pixel text-[8px] text-[#c9a84c]/60 tracking-widest hidden sm:block">НОМИНАЛ</span>
+            <span className="font-pixel text-[11px] text-[#c9a84c]/70 tracking-widest hidden sm:block">НОМИНАЛ</span>
             <span className="font-black text-lg leading-none" style={{ color: "#f0c040" }}>{denomination} R$</span>
           </div>
         )}
@@ -1713,7 +1967,7 @@ function WBStaticHeader({ denomination, onReset }: { denomination?: number; onRe
         {onReset && (
           <button
             onClick={onReset}
-            className="flex items-center gap-1.5 h-8 px-3 border border-[#c9a84c]/20 hover:border-[#c9a84c]/50 text-[#c9a84c]/50 hover:text-[#c9a84c] transition-all font-black text-[10px] uppercase tracking-widest"
+            className="flex items-center gap-1.5 h-8 px-3 border border-[#c9a84c]/20 hover:border-[#c9a84c]/50 text-[#c9a84c]/50 hover:text-[#c9a84c] transition-all font-black text-xs uppercase tracking-widest"
           >
             <ArrowRight className="w-3 h-3 rotate-180" />
             <span className="hidden sm:inline">Новый код</span>
@@ -1727,11 +1981,65 @@ function WBStaticHeader({ denomination, onReset }: { denomination?: number; onRe
 
 // ─── WB Gate Screen ────────────────────────────────────────────────────────────
 
+// Scoped styles for the gate — mirrors the WB instruction's design language
+// (soft -apple-system type, rounded gradient cards, circular gold step badges,
+// chunky 3D channel buttons) so the entry screen feels like one product with it.
+const WBG_CSS = `
+.wbg-root{--gold:#c9a84c;--gold2:#f0c040;--grn:#00d484;--line:#1c2740;--mut:#aab1c0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+.wbg-root *{box-sizing:border-box}
+.wbg-card{position:relative;border:1px solid var(--line);background:linear-gradient(180deg,rgba(18,22,36,.88),rgba(10,13,24,.94));border-radius:22px;padding:26px 22px;box-shadow:0 24px 60px rgba(0,0,0,.45)}
+@media(min-width:640px){.wbg-card{padding:34px 30px}}
+.wbg-icon{width:62px;height:62px;border-radius:18px;border:1px solid rgba(201,168,76,.45);background:rgba(201,168,76,.08);display:flex;align-items:center;justify-content:center;margin:0 auto 16px}
+.wbg-eye{font-size:11px;letter-spacing:2.5px;color:var(--gold);font-weight:700;text-transform:uppercase}
+.wbg-h1{font-size:clamp(27px,6vw,34px);font-weight:900;color:#fff;line-height:1.05;letter-spacing:-.01em;margin:8px 0 0}
+.wbg-lead{color:var(--mut);font-size:15.5px;line-height:1.6;margin:10px auto 0;max-width:330px}
+.wbg-hr{height:1px;background:linear-gradient(90deg,transparent,rgba(201,168,76,.32),transparent)}
+.wbg-step-h{display:flex;align-items:center;gap:11px;margin-bottom:12px}
+.wbg-dot{flex-shrink:0;width:32px;height:32px;border-radius:50%;background:#0d1120;border:2px solid rgba(201,168,76,.55);display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--gold2);font-size:15px;transition:all .25s}
+.wbg-dot.done{background:rgba(0,212,132,.12);border-color:rgba(0,212,132,.6);color:var(--grn)}
+.wbg-ttl{font-size:17.5px;font-weight:800;color:#fff;line-height:1.2}
+.wbg-t{color:#c3c9d4;font-size:14.5px;line-height:1.55;margin:0 0 14px}
+.wbg-input{width:100%;background:#0d1424;border:1px solid rgba(201,168,76,.5);color:#fff;border-radius:13px;padding:16px;font-size:25px;font-weight:800;text-align:center;letter-spacing:.3em;text-indent:.3em;outline:none;transition:border-color .2s,box-shadow .2s}
+.wbg-input::placeholder{color:#46506b;font-weight:700}
+.wbg-input:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(201,168,76,.16)}
+.wbg-input.ready{border-color:rgba(0,212,132,.6);box-shadow:0 0 0 3px rgba(0,212,132,.14)}
+.wbg-meta{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:9px;font-size:12.5px;color:var(--mut)}
+.wbg-count{font-weight:800;font-variant-numeric:tabular-nums;color:var(--mut)}
+.wbg-count.ready{color:var(--grn)}
+.wbg-step2{transition:opacity .3s}
+.wbg-step2.locked{opacity:.45}
+.wbg-btns{display:flex;flex-direction:column;gap:16px;margin-top:18px}
+.wbg-btn{width:100%;display:flex;align-items:center;justify-content:center;gap:10px;border-radius:14px;padding:18px 15px;font-size:16px;font-weight:800;color:#fff;border:none;cursor:pointer;transition:transform .12s,box-shadow .12s,filter .2s}
+.wbg-btn:disabled{opacity:.4;cursor:not-allowed;box-shadow:none!important;transform:none!important;filter:grayscale(.35)}
+.wbg-btn:not(:disabled):hover{filter:brightness(1.06)}
+.wbg-btn:not(:disabled):active{transform:translateY(3px)}
+.wbg-btn.tg{background:linear-gradient(180deg,#2aa8e0,#1f8fc6);box-shadow:0 5px 0 #14638c,0 12px 24px rgba(34,158,217,.3)}
+.wbg-btn.tg:not(:disabled):active{box-shadow:0 2px 0 #14638c}
+.wbg-btn.vk{background:linear-gradient(180deg,#4a90ff,#0a66e0);box-shadow:0 5px 0 #0a4aa0,0 12px 24px rgba(10,102,224,.3)}
+.wbg-btn.vk:not(:disabled):active{box-shadow:0 2px 0 #0a4aa0}
+.wbg-spin{width:16px;height:16px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:wbg-spin .7s linear infinite}
+@keyframes wbg-spin{to{transform:rotate(360deg)}}
+.wbg-err{border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.07);border-radius:12px;padding:11px 13px;display:flex;align-items:center;gap:9px}
+.wbg-err p{color:#fca5a5;font-size:14px;font-weight:600;margin:0}
+.wbg-errhelp{font-size:12px;color:#8a91a3;margin:6px 0 0}
+.wbg-errhelp a{color:var(--grn);text-decoration:underline}
+.wbg-foot{text-align:center;font-size:12.5px;color:#71798c;margin-top:16px}
+.wbg-vkauth{display:flex;flex-direction:column;gap:8px}
+.wbg-vkauth p{font-size:13px;color:#7fb0ff;font-weight:700;text-align:center;margin:0}
+.wbg-vkwrap{border:1px solid rgba(10,102,224,.5);background:rgba(10,102,224,.1);border-radius:14px;padding:12px;display:flex;align-items:center;justify-content:center;min-height:62px}
+.wbg-trust{display:flex;flex-wrap:wrap;justify-content:center;gap:7px 18px;margin-top:18px}
+.wbg-trust span{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--mut);font-weight:600}
+.wbg-help{margin-top:14px;display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:14px;background:rgba(10,13,24,.55);padding:13px 15px;text-decoration:none;transition:border-color .2s,background .2s}
+.wbg-help:hover{border-color:rgba(201,168,76,.4);background:rgba(201,168,76,.05)}
+.wbg-help-t{display:flex;flex-direction:column;line-height:1.25}
+.wbg-help-t b{font-size:13.5px;color:#fff;font-weight:800}
+.wbg-help-t span{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;font-weight:700}
+`;
+
 function WBGate() {
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<"guide" | "ready">("guide");
   const [quickTarget, setQuickTarget] = useState<"tg" | "vk" | null>(null);
   const [showVkAuth, setShowVkAuth] = useState(false);
   const [vkAuthCode, setVkAuthCode] = useState("");
@@ -1757,7 +2065,7 @@ function WBGate() {
     const denomination: number = data.denomination ?? 0;
     saveWBSession(denomination, code);
     // Cookie is needed by VKAuthButton (order mode) for ref code resolution.
-    document.cookie = `wb_code=${code}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+    document.cookie = `wb_code=${code}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax; Secure`;
     return denomination;
   };
 
@@ -1792,7 +2100,6 @@ function WBGate() {
   };
 
   const codeReady = code.length === 7;
-  const isGuideMode = mode === "guide";
 
   return (
     <main className="min-h-screen flex flex-col relative">
@@ -1802,147 +2109,112 @@ function WBGate() {
           on mobile it self-degrades to a static CSS gradient. */}
       <AnimatedShaderBackground className="-z-10" />
 
-      <div className="flex-1 flex items-center justify-center px-4 py-16 bg-[#080c18]/70 relative">
-        <div className="fixed inset-0 opacity-[0.02] pointer-events-none"
-          style={{
-            backgroundImage: `linear-gradient(rgba(201,168,76,0.8) 1px, transparent 1px),
-                              linear-gradient(90deg, rgba(201,168,76,0.8) 1px, transparent 1px)`,
-            backgroundSize: "40px 40px",
-          }}
-        />
-        <div className="w-full max-w-xl animate-in fade-in zoom-in">
-          <div className="pixel-card border-2 border-[#c9a84c]/40 bg-[#0a0c14] p-8 sm:p-12 lg:p-14 space-y-8 relative">
-            <div className="absolute top-0 left-0 w-12 h-12 border-t-2 border-l-2 border-[#c9a84c]/60" />
-            <div className="absolute bottom-0 right-0 w-12 h-12 border-b-2 border-r-2 border-[#c9a84c]/60" />
+      <div className="flex-1 flex items-center justify-center px-4 py-8 sm:py-14 bg-[#05070f]/80 relative">
+        <div className="wbg-root w-full max-w-md animate-in fade-in zoom-in">
+          <style>{WBG_CSS}</style>
 
-            <div className="text-center space-y-4 animate-in fade-in zoom-in animate-delay-100">
-              <div className="w-16 h-16 border-2 border-[#c9a84c]/50 bg-[#c9a84c]/10 flex items-center justify-center mx-auto">
-                <Ticket className="w-8 h-8 text-[#c9a84c]" />
+          <div className="wbg-card animate-in fade-in zoom-in animate-delay-100">
+            {/* Header */}
+            <div style={{ textAlign: "center" }}>
+              <div className="wbg-icon">
+                <Ticket className="w-7 h-7" style={{ color: "#f0c040" }} />
               </div>
-              <div>
-                <div className="font-pixel text-[9px] text-[#c9a84c]/50 tracking-widest mb-3">
-                  WILDBERRIES × ROBLOXBANK
-                </div>
-                <h1 className="text-xl sm:text-2xl font-black uppercase tracking-tight leading-tight text-white">
-                  Спасибо за покупку<br />
-                  <span style={{ color: "#f0c040" }}>в RobloxBank!</span>
-                </h1>
-              </div>
-              <p className="text-zinc-400 font-medium text-base leading-relaxed">
-                Для активации номинала введи уникальный&nbsp;код с&nbsp;карточки.
-              </p>
+              <div className="wbg-eye">Wildberries × RobloxBank</div>
+              <h1 className="wbg-h1">Спасибо за&nbsp;покупку!</h1>
+              <p className="wbg-lead">Два шага — и робуксы у тебя. Это займёт пару минут.</p>
             </div>
 
-            <div className="h-px bg-gradient-to-r from-transparent via-[#c9a84c]/30 to-transparent" />
+            <div className="wbg-hr" style={{ margin: "22px 0" }} />
 
-            <form onSubmit={(e) => e.preventDefault()} className="space-y-5 animate-in fade-in zoom-in animate-delay-200">
-              <div className="space-y-2">
-                <label className="font-pixel text-[9px] text-[#c9a84c]/60 tracking-widest flex items-center gap-2">
-                  <Lock className="w-3 h-3" />КОД С КАРТОЧКИ
-                </label>
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={code}
-                  onChange={handleInput}
-                  placeholder="ABC1234"
-                  autoFocus
-                  autoComplete="off"
-                  spellCheck={false}
-                  className="wb-input"
-                  aria-label="Уникальный код с карточки"
-                />
-                <div className="flex justify-between items-center">
-                  <p className="text-[11px] text-zinc-600 font-medium">
-                    7-значный код с карточки WB, например: ABC1234
-                  </p>
-                  <span className={`text-[11px] font-black tabular-nums ${codeReady ? "text-[#c9a84c]" : "text-zinc-600"}`}>
-                    {code.length}/7
-                  </span>
-                </div>
+            <form onSubmit={(e) => e.preventDefault()}>
+              {/* ── Step 1 — code ─────────────────────────────────── */}
+              <div className="wbg-step-h">
+                <span className={`wbg-dot${codeReady ? " done" : ""}`} aria-hidden>{codeReady ? "✓" : "1"}</span>
+                <span className="wbg-ttl">Код с карточки</span>
+              </div>
+              <input
+                ref={inputRef}
+                type="text"
+                inputMode="text"
+                value={code}
+                onChange={handleInput}
+                placeholder="ABC1234"
+                autoComplete="off"
+                spellCheck={false}
+                className={`wbg-input${codeReady ? " ready" : ""}`}
+                aria-label="Уникальный код с карточки"
+              />
+              <div className="wbg-meta">
+                <span>7 символов с обратной стороны карточки</span>
+                <span className={`wbg-count${codeReady ? " ready" : ""}`}>{code.length}/7</span>
               </div>
 
-              {/* Mode toggle: guide vs. ready */}
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => { setMode("guide"); setShowVkAuth(false); setError(null); }}
-                  className={`h-12 md:h-14 flex flex-col items-center justify-center px-3 border-2 transition-all text-[10px] md:text-[11px] font-black uppercase tracking-widest ${
-                    isGuideMode
-                      ? "border-[#c9a84c]/70 bg-[#c9a84c]/10 text-[#f0c040]"
-                      : "border-zinc-800 bg-zinc-900/40 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
-                  }`}
-                  aria-pressed={isGuideMode}
-                >
-                  Нужна инструкция 📖
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setMode("ready"); setError(null); }}
-                  className={`h-12 md:h-14 flex flex-col items-center justify-center px-3 border-2 transition-all text-[10px] md:text-[11px] font-black uppercase tracking-widest ${
-                    !isGuideMode
-                      ? "border-[#00b06f]/60 bg-[#00b06f]/10 text-[#00d484]"
-                      : "border-zinc-800 bg-zinc-900/40 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
-                  }`}
-                  aria-pressed={!isGuideMode}
-                >
-                  Геймпасс готов ✅
-                </button>
-              </div>
-              <p className="text-[10px] text-zinc-600 text-center leading-relaxed">
-                Геймпасс — это способ получить Robux через Roblox. Если не знаешь что это — выбери «Нужна инструкция 📖»
-              </p>
+              <AnimatePresence>
+                {error && (
+                  <motion.div
+                    key="error-block"
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.2 }}
+                    style={{ marginTop: 14 }}
+                  >
+                    <div className="wbg-err">
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: "#f87171" }} />
+                      <p>{error}</p>
+                    </div>
+                    <p className="wbg-errhelp">
+                      Нужна помощь?{" "}
+                      <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer">
+                        Написать живому менеджеру →
+                      </a>
+                    </p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-              {error && (
-                <div className="flex items-center gap-2 border border-red-500/30 bg-red-500/5 px-3 py-2">
-                  <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
-                  <p className="text-sm text-red-400 font-medium">{error}</p>
+              {/* ── Step 2 — channel ──────────────────────────────── */}
+              <div className={`wbg-step2${codeReady ? "" : " locked"}`} style={{ marginTop: 26 }}>
+                <div className="wbg-step-h">
+                  <span className="wbg-dot" aria-hidden>2</span>
+                  <span className="wbg-ttl">Твой бот для заказов и робуксов</span>
                 </div>
-              )}
-              {error && (
-                <p className="text-xs text-zinc-500 mt-1">
-                  Нужна помощь?{" "}
-                  <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer" className="text-[#00b06f] underline">
-                    Написать живому менеджеру →
-                  </a>
+                <p className="wbg-t">
+                  Выбери мессенджер — бот проведёт по шагам, примет геймпасс и будет присылать статус. В следующий раз можно заказать прямо в нём — быстрее и без карты WB.
                 </p>
-              )}
+                <ConnectivityAssistant />
 
-              {isGuideMode ? (
-                <div className="space-y-3">
-                  <p className="text-[11px] text-zinc-500 font-medium leading-relaxed text-center">
-                    Переходи в мессенджер — получи инструкцию или сразу отправь ссылку на геймпасс.
-                  </p>
-                  <ConnectivityAssistant />
+                <div className="wbg-btns">
                   <button
                     type="button"
                     onClick={() => handleQuickRedirect("tg", true)}
                     disabled={loading || !codeReady}
-                    className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-[12px] md:text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#229ED9]/50 bg-[#229ED9]/15 hover:bg-[#229ED9]/25 hover:border-[#229ED9]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="wbg-btn tg"
                   >
                     {loading && quickTarget === "tg" ? (
-                      <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем Telegram...</>
+                      <><span className="wbg-spin" />Открываем Telegram…</>
                     ) : (
                       <>
-                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0 text-[#229ED9]">
+                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0">
                           <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z"/>
                         </svg>
                         Получить в Telegram
                       </>
                     )}
                   </button>
+
                   {!showVkAuth ? (
                     <button
                       type="button"
                       onClick={() => handleQuickRedirect("vk", true)}
                       disabled={loading || !codeReady}
-                      className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-[12px] md:text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 hover:bg-[#0077FF]/25 hover:border-[#0077FF]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="wbg-btn vk"
                     >
                       {loading && quickTarget === "vk" ? (
-                        <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем VK...</>
+                        <><span className="wbg-spin" />Открываем VK…</>
                       ) : (
                         <>
-                          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0 text-[#0077FF]">
+                          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0">
                             <path d="M12.785 16.241s.288-.032.435-.194c.135-.149.13-.43.13-.43s-.019-1.306.572-1.497c.582-.188 1.331 1.252 2.124 1.806.6.42 1.056.328 1.056.328l2.122-.03s1.111-.07.585-.957c-.043-.073-.306-.658-1.578-1.853-1.331-1.252-1.153-1.049.451-3.224.977-1.323 1.367-2.13 1.245-2.474-.116-.328-.834-.241-.834-.241l-2.387.015s-.177-.024-.308.056c-.128.078-.21.262-.21.262s-.378 1.022-.882 1.892c-1.062 1.834-1.487 1.931-1.661 1.816-.405-.267-.304-1.069-.304-1.638 0-1.778.267-2.519-.51-2.711-.258-.064-.448-.106-1.108-.113-.847-.009-1.564.003-1.97.207-.27.136-.479.439-.351.456.157.022.514.099.703.363.244.341.236 1.108.236 1.108s.14 2.083-.328 2.342c-.32.178-.76-.185-1.706-1.85-.484-.853-.85-1.795-.85-1.795s-.07-.176-.196-.27c-.152-.114-.365-.15-.365-.15l-2.268.015s-.34.01-.466.16c-.111.135-.009.412-.009.412s1.776 4.221 3.787 6.349c1.844 1.95 3.938 1.822 3.938 1.822h.949z"/>
                           </svg>
                           Получить в ВКонтакте
@@ -1950,106 +2222,40 @@ function WBGate() {
                       )}
                     </button>
                   ) : (
-                    <div className="space-y-2">
-                      <p className="text-[10px] text-[#0077FF]/80 font-black uppercase tracking-widest text-center">
-                        Авторизуйся через VK ID — после этого откроется чат с менеджером
-                      </p>
-                      <div className="border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 px-4 py-3 flex items-center justify-center min-h-[64px]">
+                    <div className="wbg-vkauth">
+                      <p>Авторизуйся через VK ID — и мы откроем твой заказ</p>
+                      <div className="wbg-vkwrap">
                         <VKAuthButton mode="order" wbCode={vkAuthCode} />
                       </div>
                     </div>
                   )}
                 </div>
-              ) : (
-                <div className="space-y-3">
-                  <p className="text-[11px] text-zinc-500 font-medium leading-relaxed text-center">
-                    Геймпасс уже создан? Отправь ссылку или ID пасса напрямую — менеджер выкупит вручную.
-                  </p>
-                  <ConnectivityAssistant />
-                  <button
-                    type="button"
-                    onClick={() => handleQuickRedirect("tg")}
-                    disabled={loading || !codeReady}
-                    className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-[12px] md:text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#229ED9]/50 bg-[#229ED9]/15 hover:bg-[#229ED9]/25 hover:border-[#229ED9]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {loading && quickTarget === "tg" ? (
-                      <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем Telegram...</>
-                    ) : (
-                      <>
-                        <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0 text-[#229ED9]">
-                          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8-1.7 8.02c-.12.55-.46.68-.94.42l-2.6-1.92-1.25 1.21c-.14.14-.26.26-.53.26l.19-2.67 4.85-4.38c.21-.19-.05-.29-.32-.1L7.12 14.4l-2.55-.8c-.55-.17-.56-.55.12-.82l9.97-3.84c.46-.17.86.11.98.86z"/>
-                        </svg>
-                        Перейти в Telegram-бот
-                      </>
-                    )}
-                  </button>
-                  {!showVkAuth ? (
-                    <button
-                      type="button"
-                      onClick={() => handleQuickRedirect("vk")}
-                      disabled={loading || !codeReady}
-                      className="w-full h-14 md:h-16 flex items-center justify-center gap-3 font-black text-[12px] md:text-sm uppercase tracking-widest border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 hover:bg-[#0077FF]/25 hover:border-[#0077FF]/70 active:translate-y-[2px] active:border-b-[2px] text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {loading && quickTarget === "vk" ? (
-                        <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Открываем VK...</>
-                      ) : (
-                        <>
-                          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 flex-shrink-0 text-[#0077FF]">
-                            <path d="M12.785 16.241s.288-.032.435-.194c.135-.149.13-.43.13-.43s-.019-1.306.572-1.497c.582-.188 1.331 1.252 2.124 1.806.6.42 1.056.328 1.056.328l2.122-.03s1.111-.07.585-.957c-.043-.073-.306-.658-1.578-1.853-1.331-1.252-1.153-1.049.451-3.224.977-1.323 1.367-2.13 1.245-2.474-.116-.328-.834-.241-.834-.241l-2.387.015s-.177-.024-.308.056c-.128.078-.21.262-.21.262s-.378 1.022-.882 1.892c-1.062 1.834-1.487 1.931-1.661 1.816-.405-.267-.304-1.069-.304-1.638 0-1.778.267-2.519-.51-2.711-.258-.064-.448-.106-1.108-.113-.847-.009-1.564.003-1.97.207-.27.136-.479.439-.351.456.157.022.514.099.703.363.244.341.236 1.108.236 1.108s.14 2.083-.328 2.342c-.32.178-.76-.185-1.706-1.85-.484-.853-.85-1.795-.85-1.795s-.07-.176-.196-.27c-.152-.114-.365-.15-.365-.15l-2.268.015s-.34.01-.466.16c-.111.135-.009.412-.009.412s1.776 4.221 3.787 6.349c1.844 1.95 3.938 1.822 3.938 1.822h.949z"/>
-                          </svg>
-                          Перейти в VK
-                        </>
-                      )}
-                    </button>
-                  ) : (
-                    <div className="space-y-2">
-                      <p className="text-[10px] text-[#0077FF]/80 font-black uppercase tracking-widest text-center">
-                        Авторизуйся через VK ID — после этого откроется чат с менеджером
-                      </p>
-                      <div className="border-2 border-b-[6px] border-[#0077FF]/50 bg-[#0077FF]/15 px-4 py-3 flex items-center justify-center min-h-[64px]">
-                        <VKAuthButton mode="order" wbCode={vkAuthCode} />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+              </div>
             </form>
 
-            <p className="text-center text-xs text-zinc-600 font-medium animate-in fade-in zoom-in animate-delay-300">
-              Код одноразовый · Хранить не нужно
-            </p>
+            <div className="wbg-hr" style={{ margin: "22px 0 0" }} />
+            <p className="wbg-foot">Код одноразовый · хранить не нужно</p>
           </div>
 
-          <div className="flex items-center justify-center gap-6 mt-6 animate-in fade-in zoom-in animate-delay-300">
+          {/* Trust badges */}
+          <div className="wbg-trust animate-in fade-in animate-delay-300">
             {[
               { label: "Защита данных",  icon: Lock },
-              { label: "Ручная выдача",  icon: CheckCircle2 },
+              { label: "Авто-выдача",    icon: CheckCircle2 },
               { label: "Поддержка 24/7", icon: ShoppingBag },
             ].map(({ label, icon: Icon }) => (
-              <div key={label} className="flex items-center gap-1.5 text-zinc-600">
-                <Icon className="w-3.5 h-3.5" />
-                <span className="text-xs font-black uppercase tracking-wide">{label}</span>
-              </div>
+              <span key={label}><Icon className="w-3.5 h-3.5" />{label}</span>
             ))}
           </div>
 
           {/* Direct manager contact — fallback if anything goes wrong */}
-          <a
-            href="https://t.me/RobloxBank_PA"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-6 group flex items-center justify-center gap-3 px-5 py-4 border-2 border-zinc-800 hover:border-[#c9a84c]/40 bg-zinc-950/60 hover:bg-[#c9a84c]/5 transition-all animate-in fade-in zoom-in animate-delay-300"
-          >
-            <AlertTriangle className="w-4 h-4 text-zinc-500 group-hover:text-[#c9a84c] transition-colors flex-shrink-0" />
-            <div className="flex flex-col text-left leading-tight">
-              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 group-hover:text-zinc-300 transition-colors">
-                Возникли трудности?
-              </span>
-              <span className="text-[12px] font-black text-white group-hover:text-[#f0c040] transition-colors">
-                Написать живому менеджеру → @RobloxBank_PA
-              </span>
-            </div>
-            <ExternalLink className="w-4 h-4 text-zinc-600 group-hover:text-[#c9a84c] transition-colors flex-shrink-0 ml-auto" />
+          <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer" className="wbg-help">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: "#aab1c0" }} />
+            <span className="wbg-help-t">
+              <span>Возникли трудности?</span>
+              <b>Написать живому менеджеру → @RobloxBank_PA</b>
+            </span>
+            <ExternalLink className="w-4 h-4 flex-shrink-0" style={{ marginLeft: "auto", color: "#71798c" }} />
           </a>
         </div>
       </div>
@@ -2089,8 +2295,8 @@ function FormulaCalculator({
     const fixedPrice = Math.ceil(denomination / 0.7);
     return (
       <div className="pixel-card border-2 border-[#00b06f]/30 bg-[#00b06f]/5 p-5">
-        <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-3">ГЛАВНАЯ ФОРМУЛА</div>
-        <div className="flex items-center gap-4 mb-3">
+        <div className="font-pixel text-xs text-[#00b06f]/70 tracking-wider mb-3">ГЛАВНАЯ ФОРМУЛА</div>
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4 mb-3">
           <div className="text-center">
             <div className="text-3xl font-black" style={{ color: "#f0c040" }}>{denomination}</div>
             <div className="text-xs text-zinc-500 uppercase tracking-widest font-black">Твой номинал</div>
@@ -2114,7 +2320,7 @@ function FormulaCalculator({
           </button>
         </div>
         <div className="flex gap-2 items-start bg-[#00b06f]/5 border border-[#00b06f]/15 px-3 py-2 mt-2">
-          <span className="font-pixel text-[9px] text-[#00b06f] mt-0.5 flex-shrink-0">TIP</span>
+          <span className="font-pixel text-[10px] text-[#00b06f] mt-0.5 flex-shrink-0">TIP</span>
           <p className="text-sm text-[#00b06f]/80 font-bold leading-relaxed">Нажми на цену пасса, чтобы скопировать</p>
         </div>
         {/* Regional pricing warning */}
@@ -2131,12 +2337,12 @@ function FormulaCalculator({
   // Standard — interactive calculator
   return (
     <div className="pixel-card border-2 border-[#00b06f]/30 bg-[#00b06f]/5 p-5 min-h-[220px]">
-      <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-4">КАЛЬКУЛЯТОР ЦЕНЫ ПАССА</div>
+      <div className="font-pixel text-xs text-[#00b06f]/70 tracking-wider mb-4">КАЛЬКУЛЯТОР ЦЕНЫ ПАССА</div>
 
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
         {/* Input */}
         <div className="flex-1 space-y-1">
-          <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Хочу получить (R$)</div>
+          <div className="text-xs font-black text-zinc-400 uppercase tracking-widest">Хочу получить (R$)</div>
           <div className="relative">
             <input
               type="number"
@@ -2157,25 +2363,25 @@ function FormulaCalculator({
 
         {/* Result — click to copy */}
         <div className="flex-1 space-y-1">
-          <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Цена пасса (R$)</div>
+          <div className="text-xs font-black text-zinc-400 uppercase tracking-widest">Цена пасса (R$)</div>
           <button
             onClick={calcPrice ? onCopyPassPrice : undefined}
             disabled={!calcPrice}
             className={`h-12 md:h-14 w-full bg-[#080c18] border-2 px-3 flex items-center justify-between transition-all group ${
               calcPrice
                 ? "border-[#00b06f]/30 hover:border-[#00b06f]/60 hover:bg-[#00b06f]/5 cursor-pointer"
-                : "border-[#1e2a45] cursor-default"
+                : "border-[#1e2a45] cursor-default opacity-50"
             }`}
           >
             <span className="text-xl md:text-2xl font-black text-[#00b06f]">{calcPrice ?? "—"}</span>
             <div className="flex items-center gap-2">
               {calcPrice && !priceCopied && (
-                <span className="text-[10px] font-medium text-zinc-600 group-hover:text-zinc-500 transition-colors">
+                <span className="text-xs font-medium text-zinc-500 group-hover:text-zinc-400 transition-colors">
                   нажми, чтобы скопировать
                 </span>
               )}
               {priceCopied && (
-                <span className="text-[10px] font-medium text-[#00b06f]/70">
+                <span className="text-xs font-medium text-[#00b06f]/70">
                   ✓ скопировано
                 </span>
               )}
@@ -2243,11 +2449,11 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
               {isWB && (
                 <div className="inline-flex items-center gap-2 px-3 py-1.5 border border-amber-500/30 bg-amber-500/5">
                   <ShoppingBag className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="font-pixel text-[9px] text-amber-400/80 tracking-widest">WILDBERRIES</span>
+                  <span className="font-pixel text-[11px] text-amber-400/90 tracking-widest">WILDBERRIES</span>
                 </div>
               )}
-              <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">TUTORIAL</div>
-              <h1 className="text-6xl md:text-7xl font-black uppercase tracking-[-0.04em] leading-[0.85]">
+              <div className="font-pixel text-xs text-[#00b06f]/70 tracking-wider">TUTORIAL</div>
+              <h1 className="text-5xl sm:text-6xl md:text-7xl font-black uppercase tracking-[-0.04em] leading-[0.85]">
                 Как создать<br />
                 <span className="gold-text">геймпасс</span>
               </h1>
@@ -2269,7 +2475,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
 
             {/* Right: stats + warning + calculator */}
             <div className="space-y-4">
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
                 {[
                   { label: "Время",     value: "5 мин" },
                   { label: "Сложность", value: "Легко" },
@@ -2296,7 +2502,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
 
               {/* Quick checklist */}
               <div className="border-2 border-[#1e2a45] bg-[#080c18] p-5 space-y-2">
-                <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider mb-3">ЧТО ПОНАДОБИТСЯ</div>
+                <div className="font-pixel text-[11px] text-[#00b06f]/70 tracking-wider mb-3">ЧТО ПОНАДОБИТСЯ</div>
                 {[
                   "Аккаунт Roblox (любой уровень)",
                   "Браузер — создаём прямо на сайте",
@@ -2305,7 +2511,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
                 ].map((item, i) => (
                   <div key={i} className="flex items-start gap-3">
                     <div className="w-4 h-4 border border-[#00b06f]/40 bg-[#00b06f]/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <span className="text-[#00b06f] text-[8px] font-black">{i + 1}</span>
+                      <span className="text-[#00b06f] text-[10px] font-black">{i + 1}</span>
                     </div>
                     <span className="text-sm font-medium text-zinc-300 leading-snug">{item}</span>
                   </div>
@@ -2328,7 +2534,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
       {/* ── STEPS ── (curtain reveal только при свежем переходе из gate) */}
       <section className="container mx-auto px-6 py-16 max-w-7xl">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-          <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">ПОШАГОВАЯ ИНСТРУКЦИЯ</div>
+          <div className="font-pixel text-xs text-[#00b06f]/70 tracking-wider">ПОШАГОВАЯ ИНСТРУКЦИЯ</div>
           <PlatformSwitcher platform={platform} onChange={setPlatform} />
         </div>
         <StepsGrid
@@ -2368,7 +2574,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
           <section className="container mx-auto px-6 py-16 max-w-7xl">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
               <div>
-                <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-2">ЧАСТЫЕ ОШИБКИ</div>
+                <div className="font-pixel text-xs text-[#00b06f]/70 tracking-wider mb-2">ЧАСТЫЕ ОШИБКИ</div>
                 <h2 className="text-4xl font-black uppercase tracking-tight mb-6">Чего не делать</h2>
                 <div className="space-y-2">
                   {MISTAKES.map(({ wrong, right }) => (
@@ -2391,11 +2597,12 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
               </div>
 
               <div>
-                <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-2">PRICE TABLE</div>
+                <div className="font-pixel text-xs text-[#00b06f]/70 tracking-wider mb-2">PRICE TABLE</div>
                 <h2 className="text-4xl font-black uppercase tracking-tight mb-2">Таблица цен</h2>
                 <p className="text-base text-zinc-500 font-medium mb-5">Цена пасса с учётом 30% комиссии Roblox.</p>
                 <div className="pixel-card border-2 border-[#1e2a45] overflow-hidden">
-                  <table className="w-full">
+                  <div className="overflow-x-auto">
+                  <table className="w-full min-w-[320px]">
                     <thead>
                       <tr className="border-b-2 border-[#1e2a45] bg-[#080c18]">
                         <th className="text-left px-5 py-4 text-xs font-black text-zinc-400 uppercase tracking-wider">Получишь</th>
@@ -2413,8 +2620,9 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
                       ))}
                     </tbody>
                   </table>
+                  </div>
                   <div className="px-5 py-3.5 bg-[#080c18] border-t border-[#1e2a45] flex items-center gap-3">
-                    <span className="font-pixel text-[9px] text-[#00b06f] border border-[#00b06f]/20 bg-[#00b06f]/10 px-2 py-1">ФОРМУЛА</span>
+                    <span className="font-pixel text-[11px] text-[#00b06f] border border-[#00b06f]/20 bg-[#00b06f]/10 px-2 py-1">ФОРМУЛА</span>
                     <span className="text-sm font-bold text-zinc-300">цена пасса = нужная сумма ÷ 0.7</span>
                   </div>
                 </div>
@@ -2429,7 +2637,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
               <div className="space-y-6">
                 <div>
-                  <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider mb-2">FAQ</div>
+                  <div className="font-pixel text-xs text-[#00b06f]/70 tracking-wider mb-2">FAQ</div>
                   <h2 className="text-4xl font-black uppercase tracking-tight">Частые вопросы</h2>
                 </div>
                 <p className="text-zinc-400 text-base font-medium leading-relaxed">
@@ -2442,7 +2650,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
                     className="flex items-center justify-between p-5 pixel-card border-2 border-[#1e2a45] hover:border-[#00b06f]/30 transition-colors group"
                   >
                     <div>
-                      <p className="font-pixel text-[9px] text-zinc-500 tracking-wider">OFFICIAL</p>
+                      <p className="font-pixel text-[11px] text-zinc-400 tracking-wider">OFFICIAL</p>
                       <p className="font-black uppercase text-base">Creator Hub</p>
                     </div>
                     <ExternalLink className="w-4 h-4 text-zinc-500 group-hover:text-[#00b06f] transition-colors" />
@@ -2452,7 +2660,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
                     className="flex items-center justify-between p-5 pixel-card border-2 border-[#00b06f]/20 bg-[#00b06f]/5 hover:border-[#00b06f]/40 transition-colors group"
                   >
                     <div>
-                      <p className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">READY?</p>
+                      <p className="font-pixel text-[11px] text-[#00b06f]/70 tracking-wider">READY?</p>
                       <p className="font-black uppercase text-base">Купить Robux</p>
                     </div>
                     <ArrowRight className="w-4 h-4 text-[#00b06f]" />
@@ -2464,7 +2672,7 @@ function Instruction({ isWB, denomination, code, onReset }: { isWB: boolean; den
                 {FAQ.map((item) => (
                   <details
                     key={item.q}
-                    className="pixel-card border-2 border-[#1e2a45] hover:border-[#00b06f]/20 transition-colors group"
+                    className="pixel-card border-2 border-[#1e2a45] hover:border-[#00b06f]/20 transition-colors group focus-visible:outline-2 focus-visible:outline-[#00b06f] focus-visible:outline-offset-2"
                   >
                     <summary className="px-6 py-5 cursor-pointer flex items-center justify-between gap-3 list-none">
                       <h3 className="font-black uppercase tracking-tight text-base">{item.q}</h3>
@@ -2532,13 +2740,13 @@ function WBIntro({ onDone }: { onDone: () => void }) {
       <div className="flex items-center justify-between px-8 py-5 border-t border-white/5">
         <div className="flex items-center gap-3">
           <div className="w-1.5 h-1.5 rounded-full bg-[#c9a84c] animate-pulse" />
-          <span className="font-pixel text-[9px] text-[#c9a84c]/60 tracking-widest">
+          <span className="font-pixel text-[11px] text-[#c9a84c]/70 tracking-widest">
             WILDBERRIES × ROBLOXBANK
           </span>
         </div>
         <button
           onClick={handleDone}
-          className="font-pixel text-[9px] text-zinc-600 hover:text-[#c9a84c] tracking-widest uppercase transition-colors"
+          className="font-pixel text-[11px] text-zinc-400 hover:text-[#c9a84c] tracking-widest uppercase transition-colors"
         >
           Пропустить →
         </button>
@@ -2549,16 +2757,20 @@ function WBIntro({ onDone }: { onDone: () => void }) {
 
 // ─── Main export ───────────────────────────────────────────────────────────────
 
-export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl }: { isWB: boolean; skipGate?: boolean; wbCodeFromUrl?: string }) {
+export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl, testMode = false, previewMode = false, testNom }: { isWB: boolean; skipGate?: boolean; wbCodeFromUrl?: string; testMode?: boolean; previewMode?: boolean; testNom?: number }) {
+  // Both modes open the instruction directly (no gate/intro/bot/DB/session).
+  // Difference: testMode renders the Telegram/VK buttons inert (silent QA),
+  // previewMode keeps them working — "as if a code was already activated".
+  const directInstruction = testMode || previewMode;
   const [phase, setPhase] = useState<"intro" | "gate" | "instruction">(
-    !isWB ? "instruction" : skipGate ? "gate" : "intro"
+    !isWB ? "instruction" : directInstruction ? "instruction" : skipGate ? "gate" : "intro"
   );
-  const [denomination, setDenomination] = useState<number>(0);
-  const [activeCode, setActiveCode] = useState<string>("");
+  const [denomination, setDenomination] = useState<number>(directInstruction ? (testNom && testNom > 0 ? testNom : 1000) : 0);
+  const [activeCode, setActiveCode] = useState<string>(testMode ? "TESTDEV" : "");
   const [isRestoring, setIsRestoring] = useState(true);
 
   useEffect(() => {
-    if (!isWB) {
+    if (!isWB || directInstruction) {
       setIsRestoring(false);
       return;
     }
@@ -2609,7 +2821,7 @@ export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl }: {
         <div className="w-16 h-16 rounded-full bg-[#1c1c1e] animate-pulse mb-6 border border-[#c9a84c]/20" />
         <div className="w-48 h-4 bg-[#1c1c1e] rounded animate-pulse mb-3" />
         <div className="w-32 h-3 bg-[#1c1c1e] rounded animate-pulse" />
-        <div className="mt-8 text-[10px] uppercase tracking-widest text-[#c9a84c]/50 font-pixel animate-pulse">
+        <div className="mt-8 text-xs uppercase tracking-widest text-[#c9a84c]/60 font-pixel animate-pulse">
           Восстановление сессии...
         </div>
       </div>
@@ -2626,12 +2838,22 @@ export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl }: {
     );
   }
 
+  if (isWB) {
+    return (
+      <WBInstructionV2
+        denomination={denomination}
+        code={activeCode}
+        onReset={directInstruction ? undefined : handleWBReset}
+        testMode={testMode}
+      />
+    );
+  }
+
   return (
     <Instruction
-      isWB={isWB}
+      isWB={false}
       denomination={denomination}
       code={activeCode}
-      onReset={isWB ? handleWBReset : undefined}
     />
   );
 }

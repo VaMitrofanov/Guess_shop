@@ -1,5 +1,7 @@
 "use client";
+import { C } from "../theme";
 import { useEffect, useState } from "react";
+import StatCard from "../StatCard";
 
 interface DashData {
   today:    { orders: number; sum: number; sales: number };
@@ -11,11 +13,6 @@ interface DashData {
   tokenPresent?: boolean;
 }
 
-const C = {
-  card: "#2c2c2e", elevated: "#3a3a3c", border: "#3a3a3c",
-  accent: "#bf5af2", green: "#30d158", red: "#ff453a", yellow: "#ffd60a",
-  sec: "#8e8e93", muted: "#48484a",
-};
 
 function rub(n: number) { return n.toLocaleString("ru-RU") + " ₽"; }
 function delta(a: number, b: number): { text: string; color: string } | null {
@@ -23,21 +20,6 @@ function delta(a: number, b: number): { text: string; color: string } | null {
   const d = Math.round(((a - b) / b) * 100);
   if (d === 0) return null;
   return { text: (d > 0 ? "↑" : "↓") + Math.abs(d) + "%", color: d > 0 ? C.green : C.red };
-}
-
-function MetricCard({ label, value, sub, subColor, accent }: {
-  label: string; value: string | number; sub?: string; subColor?: string; accent?: boolean;
-}) {
-  return (
-    <div style={{
-      background: C.card, borderRadius: 14, padding: "14px 16px",
-      borderLeft: accent ? `3px solid ${C.accent}` : "none",
-    }}>
-      <div style={{ fontSize: 12, color: C.sec, marginBottom: 5 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: accent ? C.accent : "#fff" }}>{value}</div>
-      {sub && <div style={{ fontSize: 12, marginTop: 3, color: subColor ?? C.sec }}>{sub}</div>}
-    </div>
-  );
 }
 
 export default function Dashboard({ token }: { token: string }) {
@@ -75,30 +57,30 @@ export default function Dashboard({ token }: { token: string }) {
       )}
 
       <section>
-        <div style={{ fontSize: 11, fontWeight: 700, color: C.sec, textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 10 }}>Сегодня</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: C.textSecondary, textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 10 }}>Сегодня</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <MetricCard label="Заказы"       value={data.today.orders} accent />
-          <MetricCard label="Выручка"      value={rub(data.today.sum)} />
-          <MetricCard
-            label="FBS в работе"
+          <StatCard title="Заказы"       value={data.today.orders} accent />
+          <StatCard title="Выручка"      value={rub(data.today.sum)} />
+          <StatCard
+            title="FBS в работе"
             value={data.wbOrders}
             sub={data.wbOrders > 0 ? "нужна обработка" : "очередь пуста"}
             subColor={data.wbOrders > 0 ? C.yellow : C.muted}
           />
-          <MetricCard label="Выкупов"      value={data.today.sales} />
+          <StatCard title="Выкупов"      value={data.today.sales} />
         </div>
       </section>
 
       <section>
-        <div style={{ fontSize: 11, fontWeight: 700, color: C.sec, textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 10 }}>Неделя vs прошлая</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: C.textSecondary, textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 10 }}>Неделя vs прошлая</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <MetricCard label="Заказов (7д)" value={data.week.orders} sub={od?.text} subColor={od?.color} />
-          <MetricCard label="Выручка (7д)" value={rub(data.week.sum)} sub={sd?.text} subColor={sd?.color} />
+          <StatCard title="Заказов (7д)" value={data.week.orders} sub={od?.text} subColor={od?.color} />
+          <StatCard title="Выручка (7д)" value={rub(data.week.sum)} sub={sd?.text} subColor={sd?.color} />
         </div>
       </section>
 
       <section>
-        <div style={{ fontSize: 11, fontWeight: 700, color: C.sec, textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 10 }}>Коды WB</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: C.textSecondary, textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 10 }}>Коды WB</div>
         {data.codes.length === 0 ? (
           <div style={{ background: "#2a0808", border: "1px solid #3d1010", borderRadius: 14, padding: "14px 16px", color: C.red, fontSize: 14 }}>
             ⚠️ Коды закончились!
@@ -121,7 +103,7 @@ export default function Dashboard({ token }: { token: string }) {
                 </div>
               );
             })}
-            <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10, display: "flex", justifyContent: "space-between", color: C.sec, fontSize: 13 }}>
+            <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10, display: "flex", justifyContent: "space-between", color: C.textSecondary, fontSize: 13 }}>
               <span>Итого кодов</span>
               <span style={{ fontWeight: 600, color: "#fff" }}>{totalCodes} шт</span>
             </div>
@@ -131,7 +113,7 @@ export default function Dashboard({ token }: { token: string }) {
 
       {(feedback && (feedback.unansweredFeedbacks > 0 || feedback.unansweredQuestions > 0 || feedback.items.length > 0)) && (
         <section>
-          <div style={{ fontSize: 11, fontWeight: 700, color: C.sec, textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: C.textSecondary, textTransform: "uppercase" as const, letterSpacing: 0.6, marginBottom: 10 }}>
             Отзывы и вопросы
           </div>
           <div style={{ background: C.card, borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>

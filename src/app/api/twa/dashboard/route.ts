@@ -8,8 +8,8 @@ export async function GET(req: NextRequest) {
 
   const [stats, codes, wbOrders] = await Promise.all([
     getStats30d(),
-    (prisma as any).wbCode.groupBy({ by: ["denomination"], _count: { _all: true }, where: { isUsed: false } }),
-    (prisma as any).wbOrder.count({ where: { status: { in: ["PENDING", "IN_PROGRESS"] } } }),
+    (prisma as any).wbCode.groupBy({ by: ["denomination"], _count: { _all: true }, where: { isUsed: false, isTest: false } }),
+    (prisma as any).wbOrder.count({ where: { status: { in: ["PENDING", "IN_PROGRESS"] }, isTest: false } }),
   ]);
 
   const todayStr = new Date().toISOString().split("T")[0];

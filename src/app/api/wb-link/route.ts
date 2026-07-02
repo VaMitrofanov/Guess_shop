@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
   if (wbCode && wbCode.length === 7) {
     try {
       await db.wbCode.update({
-        where: { code: wbCode },
+        where: { code: wbCode, status: { not: "CLAIMED" } },
         // isUsed: false puts the code into provisional CLAIMED state —
         // the bot's isUsed+userId guard will not block the user, and the
         // final transaction (gamepass submission) sets isUsed: true.
@@ -49,8 +49,8 @@ export async function GET(request: NextRequest) {
   // In guide mode, pass the GD prefix so the VK bot sends the guide welcome message.
   const refCode = wbCode ? (isGuideMode ? `GD${wbCode}` : wbCode) : null;
   const targetUrl = refCode
-    ? `https://vk.me/bankroblox?ref=${refCode}`
-    : "https://vk.me/bankroblox";
+    ? `https://vk.me/club237309399?ref=${refCode}`
+    : "https://vk.me/club237309399";
 
   return NextResponse.redirect(new URL(targetUrl));
 }

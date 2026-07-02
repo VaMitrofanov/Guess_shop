@@ -53,44 +53,40 @@ async function buildStatsText(): Promise<string> {
   const purchaseRate = settings?.purchaseRate ?? null;
   const usdToRub = settings?.usdToRub ?? 90;
 
-  // Best market rate (lowest $/1K R$) → convert to ₽/R$
-  let bestMarketRateRub: number | null = null;
+  // Best market rate (lowest $/1K R$)
+  let bestRateUSD: number | null = null;
   let bestProvider = "";
-  let bestRateUSD = 0;
   if (marketRates && marketRates.length > 0) {
     let minUsd = Infinity;
     for (const r of marketRates) {
       if (r.rateUSD > 0 && r.rateUSD < minUsd) {
         minUsd = r.rateUSD;
         bestProvider = r.provider;
-        bestRateUSD = r.rateUSD;
       }
     }
-    if (minUsd < Infinity) {
-      bestMarketRateRub = Math.round((minUsd * usdToRub / 1000) * 10000) / 10000;
-    }
+    if (minUsd < Infinity) bestRateUSD = minUsd;
   }
 
   const dayAmount = dayStats._sum.amount || 0;
 
-  // Profit calculation: use manual purchaseRate if set, otherwise use market rate
-  const effectiveRate = purchaseRate ?? bestMarketRateRub;
-  const dayProfit = effectiveRate ? dayAmount * (effectiveRate) : null;
+  // purchaseRate and market rate are both $/1K R$
+  const effectiveRate = purchaseRate ?? bestRateUSD;
+  const dayCostUSD = effectiveRate ? (dayAmount / 1000) * effectiveRate : null;
 
   // Market rate line
   let marketLine: string;
-  if (bestMarketRateRub !== null) {
-    marketLine = `🌐 Рынок (закуп): <b>$${bestRateUSD}/1K R$</b> = <b>${bestMarketRateRub} ₽/R$</b> (${bestProvider})\n`;
+  if (bestRateUSD !== null) {
+    marketLine = `🌐 Рынок (закуп): <b>$${bestRateUSD}/1K R$</b> (${bestProvider})\n`;
   } else {
     marketLine = `🌐 Рынок: <b>нет данных</b> <i>(парсер не запускался)</i>\n`;
   }
 
   const manualRateLine = purchaseRate !== null
-    ? `💵 Ручной курс: <b>${purchaseRate} ₽/R$</b>\n`
-    : `💵 Ручной курс: <b>не задан</b>\n`;
+    ? `💵 Курс закупа: <b>$${purchaseRate}/1K R$</b>\n`
+    : `💵 Курс закупа: <b>не задан</b>\n`;
 
   const marginLine = effectiveRate !== null && effectiveRate > 0
-    ? `📊 Себестоимость (${dayAmount} R$): <b>~${Math.round(dayAmount * effectiveRate)} ₽</b>\n`
+    ? `📊 Себестоимость (${dayAmount} R$): <b>~$${((dayAmount / 1000) * effectiveRate).toFixed(2)}</b>\n`
     : "";
 
   return (
@@ -115,8 +111,8 @@ export async function enterRateInput(ctx: Context): Promise<void> {
   await editWidget(
     ctx,
     `💱 <b>ИЗМЕНЕНИЕ КУРСА ЗАКУПА</b>\n━━━━━━━━━━━━━━━━\n\n` +
-    `Введи новый курс в формате числа (например: <code>2.8</code>).\n` +
-    `Это цена в рублях за 1 R$ при закупке.\n\n` +
+    `Введи новый курс в формате числа (например: <code>4.43</code>).\n` +
+    `Это цена в $ за 1000 R$ при закупке.\n\n` +
     `<i>Ожидаю ввод…</i>`,
     Markup.inlineKeyboard([[Markup.button.callback("⬅️ Отмена", CB.hubStats)]])
   );
@@ -139,6 +135,6 @@ export async function handleRateInput(ctx: Context, text: string): Promise<boole
     create: { id: "global", usdToRub: 0, purchaseRate: rate },
   });
 
-  await ctx.reply(`✅ Курс закупа обновлён: <b>${rate} ₽/R$</b>`, { parse_mode: "HTML" });
+  await ctx.reply(`✅ Курс закупа обновлён: <b>$${rate}/1K R$</b>`, { parse_mode: "HTML" });
   return true;
 }

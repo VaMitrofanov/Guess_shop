@@ -36,13 +36,22 @@ import {
   registerCallbacks,
   registerAdmin,
   registerChatMember,
+  setupBotProfile,
 } from "./handlers";
 import { registerAdminHubs, setupMenuButton } from "./admin";
+import { startReviewReminderCron } from "./crons";
 
 const token = process.env.TG_TOKEN;
 if (!token) throw new Error("[TG] TG_TOKEN is not set");
 
 export const bot = new Telegraf(token);
+
+bot.catch((err: any, ctx: any) => {
+  console.error("[TG] Unhandled error:", err);
+  try {
+    ctx?.reply?.("⚠️ Произошла ошибка. Попробуй ещё раз или напиши /start");
+  } catch {}
+});
 
 // Register all handlers (order matters: admin hubs → commands → callbacks → text → photo)
 // Admin hubs must be registered FIRST so their text interceptors (search, codes, rate)
@@ -87,6 +96,9 @@ if (disablePolling) {
   });
   // Set Menu Button (left of input) for each admin — opens TWA dashboard directly
   setupMenuButton(bot).catch((err: Error) => console.error("[TG] setChatMenuButton failed:", err));
+  // Public profile (description + command menu) — once, on the polling instance.
+  setupBotProfile(bot).catch((err: Error) => console.error("[TG] setupBotProfile failed:", err));
+  startReviewReminderCron(bot);
   console.log("[TG] Bot started ✅ (polling)");
   const adminIds = process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "";
   if (!adminIds.trim()) {

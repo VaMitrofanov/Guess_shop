@@ -1,4 +1,5 @@
 "use client";
+import { C } from "../theme";
 import { useEffect, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
@@ -12,11 +13,6 @@ interface AdvertData {
   empty?: boolean;
 }
 
-const C = {
-  card: "#2c2c2e", elevated: "#3a3a3c", border: "#3a3a3c",
-  accent: "#bf5af2", green: "#30d158", red: "#ff453a", yellow: "#ffd60a",
-  sec: "#8e8e93", muted: "#48484a",
-};
 
 function rub(n: number) { return n.toLocaleString("ru-RU") + " ₽"; }
 function pctDelta(a: number, b: number) {
@@ -49,7 +45,7 @@ function DynamicsTab({ token }: { token: string }) {
           { label: "Выручка (7д)", val: rub(data.week.sum), delta: sd },
         ].map(c => (
           <div key={c.label} style={{ background: C.card, borderRadius: 12, padding: "12px 14px" }}>
-            <div style={{ fontSize: 12, color: C.sec }}>{c.label}</div>
+            <div style={{ fontSize: 12, color: C.textSecondary }}>{c.label}</div>
             <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2 }}>{c.val}</div>
             {c.delta && (
               <div style={{ fontSize: 12, color: c.delta.up ? C.green : C.red, marginTop: 2 }}>
@@ -69,7 +65,7 @@ function DynamicsTab({ token }: { token: string }) {
                 padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer",
                 fontSize: 12, fontWeight: 500,
                 background: view === v ? C.accent : "none",
-                color: view === v ? "#fff" : C.sec,
+                color: view === v ? "#fff" : C.textSecondary,
               }}>{v === "count" ? "Шт" : "₽"}</button>
             ))}
           </div>
@@ -77,8 +73,8 @@ function DynamicsTab({ token }: { token: string }) {
         <ResponsiveContainer width="100%" height={180}>
           <BarChart data={data.daily} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
-            <XAxis dataKey="date" tick={{ fill: C.sec, fontSize: 11 }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: C.sec, fontSize: 11 }} axisLine={false} tickLine={false} />
+            <XAxis dataKey="date" tick={{ fill: C.textSecondary, fontSize: 11 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: C.textSecondary, fontSize: 11 }} axisLine={false} tickLine={false} />
             <Tooltip
               contentStyle={{ background: C.elevated, border: "none", borderRadius: 8, fontSize: 12 }}
               labelStyle={{ color: "#fff" }}
@@ -111,7 +107,7 @@ function AdvertTab({ token }: { token: string }) {
   const statusLabel = (s: number) =>
     s === 11 ? { label: "активна", color: C.green }
   : s === 9  ? { label: "пауза",   color: C.yellow }
-  :            { label: `#${s}`,   color: C.sec };
+  :            { label: `#${s}`,   color: C.textSecondary };
 
   return (
     <div style={{ padding: "12px 16px 0", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -122,7 +118,7 @@ function AdvertTab({ token }: { token: string }) {
           { label: "Бюджет",    val: rub(Math.round(data.totalBudget)),       color: C.accent },
         ].map(c => (
           <div key={c.label} style={{ background: C.card, borderRadius: 12, padding: "10px 12px", textAlign: "center" as const }}>
-            <div style={{ fontSize: 11, color: C.sec }}>{c.label}</div>
+            <div style={{ fontSize: 11, color: C.textSecondary }}>{c.label}</div>
             <div style={{ fontSize: 15, fontWeight: 700, color: c.color, marginTop: 4 }}>{c.val}</div>
           </div>
         ))}
@@ -134,7 +130,7 @@ function AdvertTab({ token }: { token: string }) {
             flex: 1, padding: "7px 0", borderRadius: 8, border: "none", cursor: "pointer",
             fontSize: 13, fontWeight: 500,
             background: sub === t ? C.elevated : "none",
-            color: sub === t ? "#fff" : C.sec,
+            color: sub === t ? "#fff" : C.textSecondary,
           }}>{t === "summary" ? "Итоги 7д" : "Кампании"}</button>
         ))}
       </div>
@@ -142,7 +138,7 @@ function AdvertTab({ token }: { token: string }) {
       {sub === "summary" && (
         <div style={{ background: C.card, borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
           {data.totalSpend7d === 0 ? (
-            <div style={{ color: C.sec, fontSize: 13, textAlign: "center" as const }}>Нет данных о расходах</div>
+            <div style={{ color: C.textSecondary, fontSize: 13, textAlign: "center" as const }}>Нет данных о расходах</div>
           ) : (
             [
               { label: "Расходы (7д)",  val: rub(Math.round(data.totalSpend7d)) },
@@ -155,7 +151,7 @@ function AdvertTab({ token }: { token: string }) {
               ] : []),
             ].map(r => (
               <div key={r.label} style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: C.sec, fontSize: 14 }}>{r.label}</span>
+                <span style={{ color: C.textSecondary, fontSize: 14 }}>{r.label}</span>
                 <span style={{ fontWeight: 600, fontSize: 14 }}>{r.val}</span>
               </div>
             ))
@@ -170,16 +166,16 @@ function AdvertTab({ token }: { token: string }) {
             return (
               <div key={c.id} style={{ background: C.card, borderRadius: 12, padding: "12px 16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ color: C.sec, fontSize: 13 }}>ID {c.id}</span>
+                  <span style={{ color: C.textSecondary, fontSize: 13 }}>ID {c.id}</span>
                   <span style={{ fontSize: 12, color: st.color, fontWeight: 600 }}>{st.label}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 13 }}>
-                  <span style={{ color: C.sec }}>Остаток</span>
+                  <span style={{ color: C.textSecondary }}>Остаток</span>
                   <span style={{ fontWeight: 600, color: c.balance > 0 ? "#fff" : C.red }}>{rub(Math.round(c.balance))}</span>
                 </div>
                 {c.spend7d > 0 && (
                   <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: 13 }}>
-                    <span style={{ color: C.sec }}>Потрачено 7д</span>
+                    <span style={{ color: C.textSecondary }}>Потрачено 7д</span>
                     <span>{rub(Math.round(c.spend7d))}{c.orders7d > 0 ? `  ·  ${c.orders7d} зак.` : ""}</span>
                   </div>
                 )}
@@ -215,7 +211,7 @@ function FunnelTab({ token }: { token: string }) {
 
   if (loading) return <Skeleton />;
   if (!data || data.funnel.length === 0) return (
-    <div style={{ padding: 24, textAlign: "center" as const, color: C.sec, fontSize: 13 }}>
+    <div style={{ padding: 24, textAlign: "center" as const, color: C.textSecondary, fontSize: 13 }}>
       <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
       Нет данных воронки.<br />Данные появятся после первых заказов за 30 дней.
     </div>
@@ -235,11 +231,11 @@ function FunnelTab({ token }: { token: string }) {
     <div style={{ padding: "12px 16px 0", display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <div style={{ background: C.card, borderRadius: 12, padding: "10px 14px" }}>
-          <div style={{ fontSize: 11, color: C.sec }}>Заказов (30д)</div>
+          <div style={{ fontSize: 11, color: C.textSecondary }}>Заказов (30д)</div>
           <div style={{ fontSize: 20, fontWeight: 700, marginTop: 3 }}>{totalOrders.toLocaleString("ru-RU")}</div>
         </div>
         <div style={{ background: C.card, borderRadius: 12, padding: "10px 14px" }}>
-          <div style={{ fontSize: 11, color: C.sec }}>Выручка (30д)</div>
+          <div style={{ fontSize: 11, color: C.textSecondary }}>Выручка (30д)</div>
           <div style={{ fontSize: 20, fontWeight: 700, marginTop: 3 }}>{rub(Math.round(totalRev))}</div>
         </div>
       </div>
@@ -272,7 +268,7 @@ function FunnelTab({ token }: { token: string }) {
 
       {data.goods.length > 0 && (
         <>
-          <div style={{ fontSize: 11, fontWeight: 700, color: C.sec, textTransform: "uppercase" as const, letterSpacing: 0.6, marginTop: 4 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: C.textSecondary, textTransform: "uppercase" as const, letterSpacing: 0.6, marginTop: 4 }}>
             Текущие цены WB
           </div>
           {data.goods.map(g => (
@@ -310,7 +306,7 @@ export default function AnalyticsScreen({ token }: { token: string }) {
               flex: 1, padding: "8px 0", borderRadius: 8, border: "none", cursor: "pointer",
               fontSize: 13, fontWeight: tab === t.id ? 600 : 400,
               background: tab === t.id ? C.elevated : "none",
-              color: tab === t.id ? "#fff" : C.sec,
+              color: tab === t.id ? "#fff" : C.textSecondary,
             }}>{t.label}</button>
           ))}
         </div>

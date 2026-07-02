@@ -82,9 +82,40 @@ const CardsListSchema = z.object({
       nmID: z.number(),
       vendorCode: z.string(),
       title: z.string().optional().default(""),
+      subjectID: z.number().optional().default(0),
+      subjectName: z.string().optional().default(""),
       photos: z.array(z.object({ big: z.string() })).optional().default([]),
     })
   ).optional().default([]),
+});
+
+// Category commission table — GET common-api/api/v1/tariffs/commission
+const CommissionSchema = z.object({
+  report: z.array(z.object({
+    subjectID:       z.number(),
+    subjectName:     z.string().optional().default(""),
+    parentName:      z.string().optional().default(""),
+    kgvpMarketplace: z.number().optional().default(0), // FBS / маркетплейс %
+    kgvpSupplier:    z.number().optional().default(0), // FBW / поставщик %
+    paidStorageKgvp: z.number().optional().default(0), // платное хранение %
+  })).optional().default([]),
+});
+
+// Box tariffs (logistics + storage coefficients) — GET common-api/api/v1/tariffs/box?date=
+// Numeric fields arrive as strings with comma decimals ("0,07", "89,7") or "-" when N/A.
+const BoxTariffSchema = z.object({
+  response: z.object({
+    data: z.object({
+      warehouseList: z.array(z.object({
+        warehouseName:   z.string().optional().default(""),
+        geoName:         z.string().optional().default(""),
+        boxDeliveryBase: z.string().optional().default("0"),
+        boxDeliveryLiter: z.string().optional().default("0"),
+        boxStorageBase:  z.string().optional().default("0"),
+        boxStorageLiter: z.string().optional().default("0"),
+      })).optional().default([]),
+    }).optional().default({ warehouseList: [] } as any),
+  }).optional().default({ data: { warehouseList: [] } } as any),
 });
 
 const PriceSchema = z.object({
@@ -196,9 +227,48 @@ export interface WbProduct {
   nmID: number;
   vendorCode: string;
   title: string;
+  subjectID?: number;
+  subjectName?: string;
   price?: number;
   discountedPrice?: number;
   discount?: number;
+}
+
+export interface WbCommissionRate {
+  subjectName: string;
+  marketplace: number; // FBS commission % (0–100)
+  supplier:    number; // FBW commission % (0–100)
+  storageKgvp: number; // paid-storage commission %
+}
+
+export interface WbBoxTariffs {
+  /** Logistics base ₽ for the "Цифровой склад" (digital warehouse) — our case. */
+  digitalDeliveryBase: number | null;
+  /** Storage ₽ per liter·day for the digital warehouse. */
+  digitalStoragePerLiter: number | null;
+  warehouses: { name: string; geo: string; deliveryBase: number; storageLiter: number }[];
+}
+
+export interface UnitEconInput {
+  price:          number; // продажная цена ₽ (с учётом скидки продавца)
+  denomination:   number; // номинал Robux
+  commissionPct:  number; // 0–1
+  taxRate:        number; // 0–1
+  logisticsCost:  number; // ₽/ед
+  storagePerUnit: number; // ₽/ед
+  adCostPerUnit:  number; // ₽/ед
+  kursRb:         number;
+  kursUsd:        number;
+}
+
+export interface UnitEconResult {
+  robuxCost:      number;
+  commissionRub:  number;
+  taxRub:         number;
+  profit:         number; // чистая прибыль ₽
+  profitUsd:      number;
+  marginPct:      number; // чистая прибыль / цена * 100
+  breakEvenPrice: number; // цена, при которой прибыль = 0
 }
 
 export interface WbReview {
@@ -552,6 +622,8 @@ export async function getProducts(): Promise<WbProduct[] | null> {
       nmID: c.nmID,
       vendorCode: c.vendorCode,
       title: c.title,
+      subjectID: c.subjectID,
+      subjectName: c.subjectName,
       price: priceData?.p,
       discountedPrice: priceData?.dp,
       discount: priceData?.disc,
@@ -1072,5 +1144,114 @@ export async function getAdvertSpendForPeriod(fromDate: string): Promise<number 
   if (!fullStats) return null;
 
   return fullStats.reduce((sum: number, s: any) => sum + (s.sum ?? 0), 0);
+}
+
+// ── Tariffs: category commission + logistics/storage ───────────────────────────
+// These let the unit-economics calculator use REAL WB rates instead of hardcoded
+// defaults, and forecast margin for products without sales history.
+
+/** Parse WB's comma-decimal numeric strings ("0,07", "89,7", "-") → number (0 for "-"). */
+function parseWbNum(s: string): number {
+  if (!s || s === "-") return 0;
+  const n = parseFloat(s.replace(/\s/g, "").replace(",", "."));
+  return isNaN(n) ? 0 : n;
+}
+
+/** Category commission rates keyed by subjectID. Cached 24h (tariffs change rarely). */
+export async function getCommissionRates(): Promise<Map<number, WbCommissionRate> | null> {
+  const cacheKey = "wb_commission_rates";
+  const cached = getFromCache<Map<number, WbCommissionRate>>(cacheKey);
+  if (cached) return cached;
+  if (!wbCodeEnv) return null;
+
+  const data = await fetchWb(
+    "https://common-api.wildberries.ru/api/v1/tariffs/commission?locale=ru",
+    CommissionSchema
+  );
+  if (!data) return null;
+
+  const map = new Map<number, WbCommissionRate>();
+  for (const r of data.report) {
+    map.set(r.subjectID, {
+      subjectName: r.subjectName,
+      marketplace: r.kgvpMarketplace,
+      supplier:    r.kgvpSupplier,
+      storageKgvp: r.paidStorageKgvp,
+    });
+  }
+  setToCache(cacheKey, map, 24 * 60 * 60 * 1000);
+  return map;
+}
+
+/** Box logistics/storage tariffs. Highlights the "Цифровой склад" (our digital case). Cached 24h. */
+export async function getBoxTariffs(): Promise<WbBoxTariffs | null> {
+  const cacheKey = "wb_box_tariffs";
+  const cached = getFromCache<WbBoxTariffs>(cacheKey);
+  if (cached) return cached;
+  if (!wbCodeEnv) return null;
+
+  const today = new Date().toISOString().split("T")[0];
+  const data = await fetchWb(
+    `https://common-api.wildberries.ru/api/v1/tariffs/box?date=${today}`,
+    BoxTariffSchema
+  );
+  if (!data) return null;
+
+  const list = data.response.data.warehouseList;
+  const warehouses = list.map(w => ({
+    name:         w.warehouseName,
+    geo:          w.geoName,
+    deliveryBase: parseWbNum(w.boxDeliveryBase),
+    storageLiter: parseWbNum(w.boxStorageLiter),
+  }));
+  const digital = warehouses.find(w => /цифров/i.test(w.name));
+
+  const result: WbBoxTariffs = {
+    digitalDeliveryBase:    digital ? digital.deliveryBase : null,
+    digitalStoragePerLiter: digital ? digital.storageLiter : null,
+    warehouses,
+  };
+  setToCache(cacheKey, result, 24 * 60 * 60 * 1000);
+  return result;
+}
+
+// ── Pure unit-economics math (shared by the product loop and the what-if calc) ──
+
+/**
+ * Себестоимость Robux = kursRb × kursUsd × номинал / 700.
+ * Прибыль = цена − комиссия − налог − логистика − хранение − реклама − себест.Robux.
+ * Маржа = чистая прибыль / цена × 100.
+ * Точка безубыточности = (логистика+хранение+реклама+себест.Robux) / ((1−комса)(1−налог)).
+ */
+export function computeUnitEcon(i: UnitEconInput): UnitEconResult {
+  const robuxCost     = i.kursRb * i.kursUsd * i.denomination / 700;
+  const commissionRub = i.price * i.commissionPct;
+  const afterComm     = i.price - commissionRub;
+  const taxRub        = afterComm * i.taxRate;
+  const afterTax      = afterComm - taxRub;
+  const fixedCosts    = i.logisticsCost + i.storagePerUnit + i.adCostPerUnit + robuxCost;
+  const profit        = afterTax - i.logisticsCost - i.storagePerUnit - i.adCostPerUnit - robuxCost;
+  const profitUsd     = i.kursUsd > 0 ? Math.round((profit / i.kursUsd) * 100) / 100 : 0;
+  const marginPct     = i.price > 0 ? Math.round((profit / i.price) * 1000) / 10 : 0;
+  const denom         = (1 - i.commissionPct) * (1 - i.taxRate);
+  const breakEvenPrice = denom > 0 ? Math.round(fixedCosts / denom) : 0;
+
+  return {
+    robuxCost:      Math.round(robuxCost),
+    commissionRub:  Math.round(commissionRub),
+    taxRub:         Math.round(taxRub),
+    profit:         Math.round(profit),
+    profitUsd,
+    marginPct,
+    breakEvenPrice,
+  };
+}
+
+/** Required selling price to hit a target net margin (0–1). 0 if unattainable. */
+export function priceForTargetMargin(i: Omit<UnitEconInput, "price">, targetMargin: number): number {
+  const robuxCost  = i.kursRb * i.kursUsd * i.denomination / 700;
+  const fixedCosts = i.logisticsCost + i.storagePerUnit + i.adCostPerUnit + robuxCost;
+  const k          = (1 - i.commissionPct) * (1 - i.taxRate) - targetMargin;
+  return k > 0 ? Math.round(fixedCosts / k) : 0;
 }
 
