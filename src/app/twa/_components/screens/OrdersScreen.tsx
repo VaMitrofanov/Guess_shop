@@ -885,6 +885,9 @@ function OrderCard({
   const isEditableAvito = currentTab === "AVITO" && order.orderSource === "AVITO" && ["PENDING", "AWAITING_GAMEPASS", "ERROR"].includes(order.status);
 
   const timeRef = order.createdAt;
+  // Second timer: how long the order has been sitting in the "К выкупу" queue
+  // (since it entered PENDING). pendingAt is set when the gamepass link arrives.
+  const inBuyoutQueue = !!order.pendingAt && ["PENDING", "IN_PROGRESS"].includes(order.status);
 
   return (
     <article className={exiting ? "twa-card-exit" : undefined} style={{
@@ -955,6 +958,13 @@ function OrderCard({
           <span style={{ fontSize: 16, fontWeight: 500, color: ageColor(timeRef), ...tabular }}>
             ⏱ {fmtAge(timeRef)}
           </span>
+          {inBuyoutQueue && (
+            <span
+              title="В очереди «К выкупу»"
+              style={{ fontSize: 16, fontWeight: 500, color: ageColor(order.pendingAt!), ...tabular }}>
+              🛒 {fmtAge(order.pendingAt!)}
+            </span>
+          )}
           <span style={{ fontSize: 14, color: C.textTertiary }}>—</span>
           <span style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, ...tabular }}>
             {displayAmount.toLocaleString("ru-RU")}

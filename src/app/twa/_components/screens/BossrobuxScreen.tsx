@@ -879,9 +879,17 @@ function BuyoutOrderCard({
             }}>Прямой</span>
           )}
         </div>
-        <span style={{ fontSize: 15, fontWeight: 500, color: ageColor(order.createdAt), flexShrink: 0, ...tabular }}>
-          ⏱ {fmtAge(order.createdAt)}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <span style={{ fontSize: 15, fontWeight: 500, color: ageColor(order.createdAt), ...tabular }}>
+            ⏱ {fmtAge(order.createdAt)}
+          </span>
+          {order.pendingAt && (
+            <span title="В очереди «К выкупу»"
+              style={{ fontSize: 15, fontWeight: 500, color: ageColor(order.pendingAt), ...tabular }}>
+              🛒 {fmtAge(order.pendingAt)}
+            </span>
+          )}
+        </div>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
