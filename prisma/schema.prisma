@@ -238,6 +238,34 @@ model GlobalSettings {
   robloxCookie          String?
   robloxCookieUpdatedAt DateTime?
   robloxAccountName     String?
+  // ── Drain target account ("my account" — leftover donor balance flows here) ──
+  // Bot is always logged into this account; the "Слив" feature reprices a
+  // gamepass on it, then the donor account buys it to consolidate the remainder.
+  drainCookie           String?
+  drainCookieUpdatedAt  DateTime?
+  drainAccountName      String?
+  /// Gamepass ID on the drain account whose price we set to the donor's balance.
+  drainGamepassId       String?
+  /// Cached productId of drainGamepassId (needed for the purchase call).
+  drainProductId        Int?
+}
+
+/// Durable record of a "Выкупить всё" batch — one row per bulk-buyout session.
+/// Lets the manager review what a donor account purchased in a single run.
+model PurchaseBatch {
+  id          String    @id @default(cuid())
+  /// Roblox username of the donor (cookie) account used for this batch.
+  accountName String?
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+  /// Total dirty R$ actually spent (sum of ceil(amount/0.7) for successes).
+  totalGross  Int       @default(0)
+  okCount     Int       @default(0)
+  failCount   Int       @default(0)
+  /// [{ orderId, nick, wbCode, gross, ok, reason }]
+  items       Json
+
+  @@index([startedAt(sort: Desc)])
 }
 
 /// Cost basis for WB products — used for unit economics calculation.

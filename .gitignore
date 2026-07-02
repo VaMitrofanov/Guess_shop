@@ -48,8 +48,10 @@ next-env.d.ts
 
 # operational / internal docs — repo is PUBLIC, these hold infra access
 # (SSH hosts, Coolify UUIDs, deploy topology). Public-safe docs live in /docs.
+# PLAN-*.md hold internal automation plans (account-draining etc.) — keep local.
 /HANDOFF.md
 /PLAN.md
+/PLAN-*.md
 
 # scratch / temp files
 /scratch/

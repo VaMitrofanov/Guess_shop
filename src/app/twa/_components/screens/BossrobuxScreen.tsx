@@ -958,10 +958,24 @@ function renderGroupedOrders(
   ));
 }
 
-function BuyoutSection({ token, balance, onBalanceChange }: { token: string; balance: number | null; onBalanceChange: (delta: number) => void }) {
+interface BatchItem { orderId: string; nick: string; wbCode: string; gross: number; ok: boolean; reason?: string; }
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+// Random jitter between bulk purchases so the account doesn't hammer Roblox.
+const bulkPause = () => 2000 + Math.floor(Math.random() * 6000);
+const STOP_RE = /баланс|insufficient|not enough|истёк|expired|csrf|cookie/i;
+
+function buyoutNick(o: BuyoutOrder): string {
+  return o.user.username ? `@${o.user.username}` : o.user.name ?? "—";
+}
+
+function BuyoutSection({ token, balance, accountName, onBalanceChange }: { token: string; balance: number | null; accountName: string | null; onBalanceChange: (delta: number) => void }) {
   const [orders, setOrders] = useState<BuyoutOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [buying, setBuying] = useState<string | null>(null);
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; ok: number } | null>(null);
+  const [report, setReport] = useState<{ items: BatchItem[]; total: number; ok: number; fail: number } | null>(null);
+  const bulkStop = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -1004,6 +1018,62 @@ function BuyoutSection({ token, balance, onBalanceChange }: { token: string; bal
       }
     } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
     finally { setBuying(null); }
+  }
+
+  // ── Bulk buyout: purchase the whole selected plan one by one, with jitter ──
+  async function doBulk(queue: BuyoutOrder[]) {
+    if (bulkRunning || queue.length === 0) return;
+    setBulkRunning(true);
+    bulkStop.current = false;
+    setBulkProgress({ done: 0, total: queue.length, ok: 0 });
+    const items: BatchItem[] = [];
+    const startedAt = new Date().toISOString();
+    let ok = 0;
+
+    for (let i = 0; i < queue.length; i++) {
+      if (bulkStop.current) break;
+      const order = queue[i];
+      const gross = Math.ceil(order.amount / 0.7);
+      const nick = buyoutNick(order);
+      if (i > 0) await sleep(bulkPause());
+      if (bulkStop.current) break;
+      try {
+        const r = await fetch("/api/twa/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action: "purchase", orderId: order.id }),
+        });
+        const d = await r.json().catch(() => null);
+        if (r.ok && d?.success) {
+          ok++;
+          onBalanceChange(-gross);
+          setOrders(prev => prev.filter(o => o.id !== order.id));
+          items.push({ orderId: order.id, nick, wbCode: order.wbCode, gross, ok: true });
+          haptic.impact("light");
+        } else {
+          const reason = d?.msg ?? d?.error ?? (r.ok ? "не куплено" : `HTTP ${r.status}`);
+          items.push({ orderId: order.id, nick, wbCode: order.wbCode, gross, ok: false, reason });
+          if (STOP_RE.test(String(reason))) { bulkStop.current = true; }
+        }
+      } catch {
+        items.push({ orderId: order.id, nick, wbCode: order.wbCode, gross, ok: false, reason: "ошибка сети" });
+      }
+      setBulkProgress({ done: i + 1, total: queue.length, ok });
+    }
+
+    const fail = items.length - ok;
+    const total = items.filter(x => x.ok).reduce((s, x) => s + x.gross, 0);
+    setBulkRunning(false);
+    setBulkProgress(null);
+    setReport({ items, total, ok, fail });
+    haptic.notify(fail === 0 ? "success" : "warning");
+
+    // Persist the batch + DM the report to the manager who ran it.
+    fetch("/api/twa/purchase-batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ action: "save", accountName, startedAt, items, notify: true }),
+    }).catch(() => {});
   }
 
   if (loading) return (
@@ -1059,6 +1129,33 @@ function BuyoutSection({ token, balance, onBalanceChange }: { token: string; bal
         </div>
       </Card>
 
+      {/* Bulk buyout control */}
+      {plan.selected.length > 0 && (
+        bulkRunning ? (
+          <Card>
+            <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "#e5e5ea" }}>
+                  Выкупаю {bulkProgress?.done ?? 0}/{bulkProgress?.total ?? 0}…
+                </div>
+                <div style={{ fontSize: 13, color: C.green, marginTop: 2, ...tabular }}>
+                  ✅ {bulkProgress?.ok ?? 0} успешно
+                </div>
+              </div>
+              <button className="twa-press" onClick={() => { haptic.impact("medium"); bulkStop.current = true; }}
+                style={{ padding: "10px 18px", border: "none", borderRadius: 10, background: `${C.red}22`, color: C.red, fontSize: 15, fontWeight: 600, cursor: "pointer" }}>
+                ⏹ Стоп
+              </button>
+            </div>
+          </Card>
+        ) : (
+          <button className="twa-press" onClick={() => { haptic.impact("medium"); doBulk(plan.selected); }} disabled={!!buying}
+            style={{ width: "100%", padding: "15px", border: "none", borderRadius: 14, background: C.green, color: "#fff", fontSize: 16, fontWeight: 700, cursor: buying ? "default" : "pointer", opacity: buying ? 0.5 : 1, fontFamily: "inherit" }}>
+            ⚡ Выкупить всё ({plan.selected.length} · {plan.totalDirty.toLocaleString("ru-RU")} R$)
+          </button>
+        )
+      )}
+
       {/* Selected — ready to buy */}
       {plan.selected.length > 0 && (
         <Card>
@@ -1077,6 +1174,271 @@ function BuyoutSection({ token, balance, onBalanceChange }: { token: string; bal
           </div>
           {renderGroupedOrders(plan.waiting, buying, doPurchase, true)}
         </Card>
+      )}
+
+      {report && (
+        <BulkReport report={report} onClose={() => setReport(null)} />
+      )}
+    </div>
+  );
+}
+
+// ── Bulk buyout report modal ──────────────────────────────────────────────────
+function BulkReport({ report, onClose }: {
+  report: { items: BatchItem[]; total: number; ok: number; fail: number };
+  onClose: () => void;
+}) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: C.card, borderRadius: 18, width: "100%", maxWidth: 380, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.5)" }}>
+        <div style={{ padding: "18px 20px 12px" }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#e5e5ea", marginBottom: 8 }}>🧾 Отчёт выкупа</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: C.green, background: `${C.green}1c`, padding: "4px 10px", borderRadius: 999 }}>✅ {report.ok}</span>
+            {report.fail > 0 && <span style={{ fontSize: 13, fontWeight: 600, color: C.red, background: `${C.red}1c`, padding: "4px 10px", borderRadius: 999 }}>❌ {report.fail}</span>}
+            <span style={{ fontSize: 13, fontWeight: 600, color: C.accent, background: `${C.accent}1c`, padding: "4px 10px", borderRadius: 999, ...tabular }}>− {report.total.toLocaleString("ru-RU")} R$</span>
+          </div>
+        </div>
+        <div style={{ height: 1, background: C.border }} />
+        <div style={{ overflowY: "auto", padding: "8px 0" }}>
+          {report.items.map((it, i) => (
+            <div key={it.orderId + i} style={{ padding: "8px 20px", display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 15, flexShrink: 0 }}>{it.ok ? "✅" : "❌"}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, color: "#e5e5ea", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.nick}</div>
+                <div style={{ fontSize: 12, color: C.textTertiary, fontFamily: MONO }}>{it.wbCode}{!it.ok && it.reason ? ` · ${it.reason}` : ""}</div>
+              </div>
+              <span style={{ fontSize: 14, fontWeight: 600, color: it.ok ? C.orange : C.textTertiary, flexShrink: 0, ...tabular }}>
+                {it.ok ? `− ${it.gross.toLocaleString("ru-RU")}` : "—"}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div style={{ height: 1, background: C.border }} />
+        <div style={{ padding: "12px 20px" }}>
+          <button className="twa-press" onClick={onClose}
+            style={{ width: "100%", padding: "13px", border: "none", borderRadius: 12, background: C.accent, color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+            Готово
+          </button>
+          <div style={{ fontSize: 12, color: C.textTertiary, textAlign: "center", marginTop: 8 }}>
+            Отчёт сохранён и отправлен в Telegram
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Drain (слив остатка донора → мой аккаунт)
+// ═════════════════════════════════════════════════════════════════════════════
+interface DrainInfo {
+  drain: {
+    hasCookie: boolean; cookieValid: boolean | null; cookieUpdatedAt: string | null;
+    accountName: string | null; accountId: number | null; balance: number | null;
+  };
+  donor: { hasCookie: boolean; accountName: string | null; balance: number | null };
+  gamepass: {
+    gamepassId: number; productId?: number; name?: string; price?: number;
+    isForSale?: boolean; sellerName?: string | null; error?: string;
+  } | null;
+}
+
+function DrainConfirm({ target, drainName, donorName, draining, onConfirm, onCancel }: {
+  target: number; drainName: string | null; donorName: string | null;
+  draining: boolean; onConfirm: () => void; onCancel: () => void;
+}) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+      onClick={e => { if (e.target === e.currentTarget && !draining) onCancel(); }}>
+      <div style={{ background: C.card, borderRadius: 18, padding: "24px 20px", width: "100%", maxWidth: 320, boxShadow: "0 8px 32px rgba(0,0,0,0.5)" }}>
+        <div style={{ textAlign: "center", marginBottom: 16 }}>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>💧</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#e5e5ea" }}>Слить остаток?</div>
+        </div>
+        <div style={{ background: C.elevated, borderRadius: 12, padding: "14px 16px", marginBottom: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, color: "#e5e5ea" }}>
+            <span>Сумма</span><span style={{ fontWeight: 700 }}>{target.toLocaleString("ru-RU")} R$</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, color: C.textSecondary }}>
+            <span>Донор</span><span>{donorName ?? "—"}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, color: C.textSecondary }}>
+            <span>Приёмник</span><span>{drainName ?? "—"}</span>
+          </div>
+        </div>
+        <div style={{ background: `${C.orange}18`, borderRadius: 10, padding: "10px 12px", marginBottom: 12, fontSize: 13, color: C.orange }}>
+          Цена геймпасса приёмника станет {target.toLocaleString("ru-RU")} R$, донор его купит на весь баланс. Займёт ~15–30 c.
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="twa-press" onClick={onCancel} disabled={draining}
+            style={{ flex: 1, padding: "13px 0", border: "none", borderRadius: 12, background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+            Отмена
+          </button>
+          <button className="twa-press" onClick={onConfirm} disabled={draining}
+            style={{ flex: 1, padding: "13px 0", border: "none", borderRadius: 12, background: C.accent, color: "#fff", fontSize: 15, fontWeight: 600, cursor: draining ? "default" : "pointer", fontFamily: "inherit", opacity: draining ? 0.6 : 1 }}>
+            {draining ? "Сливаю…" : "💧 Слить"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DrainSection({ token, onDonorBalance }: { token: string; onDonorBalance?: (b: number | null) => void }) {
+  const [d, setD] = useState<DrainInfo | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [draining, setDraining] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
+  const [cookieInput, setCookieInput] = useState("");
+  const [gpInput, setGpInput] = useState("");
+  const [savingCookie, setSavingCookie] = useState(false);
+  const [savingGp, setSavingGp] = useState(false);
+
+  const hdrs = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch("/api/twa/drain", { headers: { Authorization: `Bearer ${token}` } });
+      if (r.ok) setD(await r.json());
+    } catch {}
+    finally { setLoading(false); }
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
+
+  async function saveCookie() {
+    if (!cookieInput.trim()) return;
+    setSavingCookie(true);
+    try {
+      const r = await fetch("/api/twa/drain", { method: "POST", headers: hdrs, body: JSON.stringify({ action: "set-cookie", cookie: cookieInput.trim() }) });
+      const j = await r.json();
+      if (!r.ok) { haptic.notify("error"); toast(j.error ?? "Ошибка", "error"); return; }
+      haptic.notify("success"); toast(`Приёмник · ${j.accountName}`, "success");
+      setCookieInput(""); await load();
+    } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
+    finally { setSavingCookie(false); }
+  }
+
+  async function saveGp() {
+    if (!gpInput.trim()) return;
+    setSavingGp(true);
+    try {
+      const r = await fetch("/api/twa/drain", { method: "POST", headers: hdrs, body: JSON.stringify({ action: "set-gamepass", gamepassId: gpInput.trim() }) });
+      const j = await r.json();
+      if (!r.ok) { haptic.notify("error"); toast(j.error ?? "Ошибка", "error"); return; }
+      haptic.notify("success"); toast(`Геймпасс · ${j.name}`, "success");
+      setGpInput(""); await load();
+    } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
+    finally { setSavingGp(false); }
+  }
+
+  async function doDrain() {
+    setDraining(true);
+    try {
+      const r = await fetch("/api/twa/drain", { method: "POST", headers: hdrs, body: JSON.stringify({ action: "drain" }) });
+      const j = await r.json();
+      if (!r.ok) { haptic.notify("error"); toast(j.error ?? "Ошибка", "error"); return; }
+      if (j.success) { haptic.notify("success"); toast(`💧 ${j.msg}`, "success"); }
+      else { haptic.notify("error"); toast(`❌ ${j.msg}`, "error"); }
+      setConfirm(false);
+      if (j.donorBalanceAfter !== undefined) onDonorBalance?.(j.donorBalanceAfter);
+      await load();
+    } catch { haptic.notify("error"); toast("Ошибка сети — слив мог не завершиться", "error"); }
+    finally { setDraining(false); }
+  }
+
+  if (loading) return (
+    <div style={{ background: C.card, borderRadius: 14, height: 80, animation: "pulse 1.5s ease-in-out infinite" }} />
+  );
+
+  const target = d?.donor.balance ?? 0;
+  const gp = d?.gamepass;
+  const gpReady = !!gp?.productId;
+  const canDrain = !!d?.drain.hasCookie && d.drain.cookieValid !== false && gpReady && target > 0 && !!d?.donor.hasCookie;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <Card>
+        {d?.drain.hasCookie ? (
+          <>
+            <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+              <StatusDot valid={d.drain.cookieValid !== false} />
+              <span style={{ fontSize: 17, fontWeight: 600, color: "#e5e5ea" }}>{d.drain.accountName ?? "Приёмник"}</span>
+              {d.drain.cookieValid === false && <span style={{ fontSize: 13, color: C.red }}>Cookie истёк</span>}
+            </div>
+            <div style={{ height: 1, background: C.border, marginLeft: 16 }} />
+            <InfoRow label="Баланс приёмника" value={d.drain.balance !== null ? `${d.drain.balance.toLocaleString("ru-RU")} R$` : "—"} />
+            <InfoRow label="К сливу (донор)" value={
+              d.donor.balance !== null
+                ? <span style={{ color: target > 0 ? C.accent : C.textTertiary }}>{d.donor.balance.toLocaleString("ru-RU")} R$</span>
+                : "—"
+            } />
+            <InfoRow label="Геймпасс" last value={
+              gp
+                ? (gpReady ? `${gp.name} · ${gp.price?.toLocaleString("ru-RU")} R$${gp.isForSale ? "" : " · не продаётся"}` : (gp.error ?? "ошибка"))
+                : "не задан"
+            } />
+          </>
+        ) : (
+          <div style={{ padding: "20px 16px", textAlign: "center" }}>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>💧</div>
+            <div style={{ fontSize: 16, color: C.textSecondary }}>Аккаунт-приёмник не задан</div>
+            <div style={{ fontSize: 14, color: C.textTertiary, marginTop: 4 }}>Настройте cookie и геймпасс ниже</div>
+          </div>
+        )}
+      </Card>
+
+      <div style={{ display: "flex", gap: 8 }}>
+        {canDrain && (
+          <button className="twa-press" onClick={() => { haptic.impact("medium"); setConfirm(true); }}
+            style={{ flex: 1, background: C.accent, border: "none", borderRadius: 12, color: "#fff", fontSize: 15, fontWeight: 700, padding: "14px", cursor: "pointer" }}>
+            💧 Слить остаток ({target.toLocaleString("ru-RU")} R$)
+          </button>
+        )}
+        <button className="twa-press" onClick={() => { haptic.impact("light"); setShowConfig(v => !v); }}
+          style={{ flex: canDrain ? "none" : 1, background: C.card, border: "none", borderRadius: 12, color: showConfig ? C.orange : C.textSecondary, fontSize: 15, fontWeight: 600, padding: "14px 18px", cursor: "pointer" }}>
+          ⚙️ Настройка
+        </button>
+      </div>
+
+      {showConfig && (
+        <Card>
+          <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 13, color: C.textTertiary, marginBottom: 6, paddingLeft: 2 }}>Cookie аккаунта-приёмника (.ROBLOSECURITY)</div>
+              <textarea value={cookieInput} onChange={e => setCookieInput(e.target.value)} placeholder=".ROBLOSECURITY значение…" rows={3}
+                style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "12px 14px", resize: "vertical", outline: "none", fontFamily: "monospace", lineHeight: 1.4, boxSizing: "border-box" }} />
+              <button className="twa-press" onClick={() => { haptic.impact("medium"); saveCookie(); }} disabled={savingCookie || !cookieInput.trim()}
+                style={{ marginTop: 8, width: "100%", background: cookieInput.trim() ? C.green : C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 600, padding: "13px", cursor: savingCookie ? "default" : "pointer", opacity: savingCookie || !cookieInput.trim() ? 0.5 : 1 }}>
+                {savingCookie ? "Проверяю…" : "💾 Сохранить cookie приёмника"}
+              </button>
+            </div>
+            <div style={{ height: 1, background: C.border }} />
+            <div>
+              <div style={{ fontSize: 13, color: C.textTertiary, marginBottom: 6, paddingLeft: 2 }}>ID / URL геймпасса на аккаунте-приёмнике</div>
+              <input value={gpInput} onChange={e => setGpInput(e.target.value)} placeholder="ID или URL геймпасса…"
+                style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
+              <button className="twa-press" onClick={() => { haptic.impact("medium"); saveGp(); }} disabled={savingGp || !gpInput.trim()}
+                style={{ marginTop: 8, width: "100%", background: gpInput.trim() ? C.green : C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 600, padding: "13px", cursor: savingGp ? "default" : "pointer", opacity: savingGp || !gpInput.trim() ? 0.5 : 1 }}>
+                {savingGp ? "Проверяю…" : "💾 Сохранить геймпасс"}
+              </button>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {confirm && (
+        <DrainConfirm
+          target={target}
+          drainName={d?.drain.accountName ?? null}
+          donorName={d?.donor.accountName ?? null}
+          draining={draining}
+          onConfirm={doDrain}
+          onCancel={() => { if (!draining) setConfirm(false); }}
+        />
       )}
     </div>
   );
@@ -1514,10 +1876,20 @@ export default function BossrobuxScreen({ token }: { token: string }) {
           <BuyoutSection
             token={token}
             balance={info?.balance ?? null}
+            accountName={info?.accountName ?? null}
             onBalanceChange={(delta) => setInfo(prev => prev && prev.balance !== null ? { ...prev, balance: prev.balance + delta } : prev)}
           />
         </section>
       )}
+
+      {/* ── Слив остатка донора → мой аккаунт ────────────────────────────── */}
+      <section>
+        <SectionHeader title="Слив остатка" />
+        <DrainSection
+          token={token}
+          onDonorBalance={(b) => setInfo(prev => prev ? { ...prev, balance: b } : prev)}
+        />
+      </section>
 
       {/* ── Transaction History ──────────────────────────────────────── */}
       <section>

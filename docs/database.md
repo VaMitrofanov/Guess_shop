@@ -43,8 +43,10 @@ robloxUsername, userId+createdAt).
 `DirectIntentStatus`. Предотвращает «мёртвые» полу-заказы.
 
 ### `GlobalSettings` (id=`global`)
-Настройки выкупа: `robloxCookie` (`.ROBLOSECURITY`), `robloxCookieUpdatedAt`,
-`robloxAccountName` (ник куки-аккаунта), `purchaseRate` (R$/₽), `usdToRub`.
+Настройки выкупа: `robloxCookie` (`.ROBLOSECURITY` донора), `robloxCookieUpdatedAt`,
+`robloxAccountName` (ник донора), `purchaseRate` (R$/₽), `usdToRub`.
+Аккаунт-приёмник слива («мой акк»): `drainCookie`, `drainCookieUpdatedAt`, `drainAccountName`,
+`drainGamepassId` (геймпасс, чью цену меняем), `drainProductId` (кэш productId для покупки).
 
 > ⚠️ `usdToRub` — `Float` без default. Любой `globalSettings.upsert` **обязан** передавать
 > `usdToRub` в блоке `create`, даже если фактически сработает `update` — Prisma валидирует
@@ -54,6 +56,11 @@ robloxUsername, userId+createdAt).
 ### `User`
 `tgId` (@unique), `vkId` (@unique), `balance` (бонусы R$), `role` (`USER`/`ADMIN`),
 `robloxUsername`, `username` (@handle для кнопки «Написать» в TWA).
+
+### `PurchaseBatch`
+Durable-запись одной пачки «Выкупить всё»: `accountName` (донор), `startedAt`/`finishedAt`,
+`totalGross` (грязные R$), `okCount`/`failCount`, `items` (JSONB: `[{orderId,nick,wbCode,gross,ok,reason}]`).
+Пишется клиентом после пакетного выкупа (`api/twa/purchase-batch` action `save`).
 
 ## Legacy-модели (вне WB-воркфлоу)
 

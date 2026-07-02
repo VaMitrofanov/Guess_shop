@@ -987,6 +987,16 @@ function OrderCard({
             </span>
           </DataRow>
         )}
+        {order.status === "COMPLETED" && currentTab !== "DONE" && (
+          <DataRow icon="💳" copyText={order.purchaserUsername ?? undefined}>
+            <span style={{ color: C.textSecondary }}>
+              Выкуп:{" "}
+              <span style={{ fontWeight: 600, color: order.purchaserUsername ? "#e5e5ea" : C.textTertiary }}>
+                {order.purchaserUsername ?? "Ручные"}
+              </span>
+            </span>
+          </DataRow>
+        )}
 
         {/* Notes */}
         <div style={{ marginTop: 8 }}>
