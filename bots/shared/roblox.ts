@@ -771,12 +771,21 @@ export async function listForSaleGamepasses(
   userId: number,
   fallbackUsername: string,
 ): Promise<GamepassSearchResult[]> {
-  const gRes = await rFetch(
-    `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=10`
-  );
-  if (!gRes.ok) return [];
-  const gData = await gRes.json().catch(() => null);
-  const universes: any[] = gData?.data ?? [];
+  // Fetch all public games with cursor-based pagination (up to 3 pages / 150 games)
+  const universes: any[] = [];
+  let gamesCursor: string | null = null;
+  for (let page = 0; page < 3; page++) {
+    const cursorParam = gamesCursor ? `&cursor=${encodeURIComponent(gamesCursor)}` : "";
+    const gRes = await rFetch(
+      `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=50${cursorParam}`
+    ).catch(() => null);
+    if (!gRes?.ok) break;
+    const gData = await gRes.json().catch(() => null);
+    universes.push(...(gData?.data ?? []));
+    gamesCursor = gData?.nextPageCursor ?? null;
+    if (!gamesCursor) break;
+  }
+
   if (universes.length === 0) {
     console.log(`[Roblox/bots] listForSaleGamepasses: no public games for userId=${userId}`);
     return [];
@@ -785,7 +794,7 @@ export async function listForSaleGamepasses(
   const passBatches = await Promise.all(universes.map(async (game: any) => {
     const placeId: number = game.rootPlaceId ?? game.rootPlace?.id ?? 0;
     const pRes = await rFetch(
-      `https://apis.roblox.com/game-passes/v1/universes/${game.id}/game-passes?passView=Full&pageSize=30`
+      `https://apis.roblox.com/game-passes/v1/universes/${game.id}/game-passes?passView=Full&pageSize=100`
     ).catch(() => null);
     if (!pRes?.ok) return [];
     const pData = await pRes.json().catch(() => null);
@@ -804,8 +813,21 @@ export async function listForSaleGamepasses(
     (tData?.data ?? []).map((t: any) => [t.targetId, t.imageUrl])
   );
 
-  return all
-    .filter((gp: any) => gp.isForSale === true && (gp.price ?? 0) > 0)
+  // Relaxed filter: isForSale !== false (not strict === true) + price > 0.
+  // The strict === true filter was silently dropping gamepasses where the API
+  // omitted the isForSale field — the site never had this problem because
+  // src/lib/roblox.ts returns all passes without filtering.
+  const filtered = all
+    .filter((gp: any) => gp.isForSale !== false && (gp.price ?? 0) > 0);
+
+  if (all.length > 0 && filtered.length === 0) {
+    console.warn(
+      `[Roblox/bots] listForSaleGamepasses: ${all.length} passes found but ALL filtered out ` +
+      `for userId=${userId}. Sample:`, JSON.stringify(all[0])
+    );
+  }
+
+  return filtered
     .map((gp: any): GamepassSearchResult => ({
       gamepassId: gp.id,
       productId:  gp.productId ?? 0,

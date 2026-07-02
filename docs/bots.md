@@ -9,7 +9,8 @@ Telegram (`bots/shared/notify.ts` → `tgSend` → `ADMIN_IDS`).
 - `bots/shared/roblox.ts` — валидация геймпасса. Богаче, чем `src/lib/roblox.ts`: возвращает
   `validationSkipped`, `isNotInCatalog`, `isGamePrivate`, `isAgeRestricted`, managed-pricing.
 - `bots/shared/gamepass-search.ts` — `searchGamepassesByNick` → union `user_not_found /
-  no_gamepasses / ok`.
+  no_gamepasses / ok`. Поиск: до 150 публичных игр (cursor-pagination, limit=50 × 3 стр),
+  до 100 геймпассов на игру. Фильтр `isForSale !== false` (не strict `=== true`).
 - Сессии — **in-memory** (`session.ts`): `pendingLink`, `pendingRobloxNick`,
   `pendingDirectFlow`, `pendingNickEdit`, `pendingReview`, `pendingPaymentScreenshot` и т.д.
   После рестарта восстанавливаются из БД (см. ниже).
@@ -24,8 +25,9 @@ Telegram (`bots/shared/notify.ts` → `tgSend` → `ADMIN_IDS`).
 - Rate-limit: 5 стартов / мин на sessionId|tgId; дедуп дубля iOS-deep-link (`recentCodeStarts`).
 - Без кода → приветствие по статусу клиента: активный `AWAITING_GAMEPASS` → персональная
   инструкция; активный заказ → статус; вернувшийся → апселл прямых заказов; новый → подписка.
-- С кодом → provisional TX (claim + `AWAITING_GAMEPASS`) → админ-уведомление → гейт подписки
-  (опц.) → инструкция или one-tap подтверждение.
+- С кодом → provisional TX (claim + `AWAITING_GAMEPASS`, предзаполнение `robloxUsername`
+  если returning user) → админ-уведомление → гейт подписки (опц.) → инструкция или one-tap.
+  Returning user с сохранённым ником видит `🎮 Ник: X` и кнопку `✅ Найти у X` (auto-search).
 
 ### Текстовый роутер (`registerText` / `bot.on("text")`)
 Приоритеты: reply-keyboard кнопки → админ-режимы (reject-reason, payment-details) →

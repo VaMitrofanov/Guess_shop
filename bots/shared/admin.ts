@@ -378,6 +378,7 @@ export const CB = {
   // up to ~12 digits, well under the 64-byte callback limit.
   findGpStart:   "find_gp",                                  // 7 b
   findGpRetry:   "find_gp_retry",                            // 13 b
+  findGpSaved:   "find_gp_saved",                            // 13 b
   gpPick:        (passId: string) => `gp_pick:${passId}`,    // ≤ 22 b
   // "change my Roblox nick / gamepass" on an already-placed order (передумал)
   changeNick:    "change_nick",                              // 11 b

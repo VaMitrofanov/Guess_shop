@@ -297,8 +297,14 @@ export function registerStart(bot: Telegraf): void {
             pendingLink.set(ctx.from.id, { wbCode: awaitingOrder.wbCode, denomination: awaitingOrder.amount });
             // One-tap: gamepass already picked on the website → offer confirm.
             if (await offerPreselectedGamepass(ctx, awaitingOrder.wbCode, passPrice, startGuideUrl)) return;
+            const startNick = startUser.robloxUsername;
+            const startNickLine = startNick ? `\n🎮 Ник: <b>${escapeHtml(startNick)}</b>` : "";
+            const startSearchBtns = startNick
+              ? [[Markup.button.callback(`✅ Найти геймпассы у ${startNick}`, CB.findGpSaved)],
+                 [Markup.button.callback("🔎 Другой ник", CB.findGpStart)]]
+              : [[Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)]];
             await ctx.reply(
-              `С возвращением! 👋 Твой код активирован · цена геймпасса <b>${passPrice} R$</b>\n\n` +
+              `С возвращением! 👋 Твой код активирован · цена геймпасса <b>${passPrice} R$</b>${startNickLine}\n\n` +
               `📖 Вот твоя <b>персональная инструкция</b> — заказ оформляется <b>там же</b>: создай геймпасс и найди его по нику Roblox 🔎\n\n` +
               `🔔 Здесь, в боте, ты получишь <b>уведомления о заказе</b> — приняли → выкупаем → готово.`,
               {
@@ -306,7 +312,7 @@ export function registerStart(bot: Telegraf): void {
                 link_preview_options: { is_disabled: true },
                 ...Markup.inlineKeyboard([
                   [Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", startGuideUrl)],
-                  [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
+                  ...startSearchBtns,
                 ]),
               }
             );
@@ -492,6 +498,7 @@ export function registerStart(bot: Telegraf): void {
             platform: "TG",
             userId: user.id,
             wbCode: wbCode.code,
+            ...(user.robloxUsername ? { robloxUsername: user.robloxUsername } : {}),
           },
         });
       });
@@ -570,18 +577,21 @@ export function registerStart(bot: Telegraf): void {
     // confirm instead of the standard "напиши ник" welcome.
     if (!isAdmin && await offerPreselectedGamepass(ctx, code, passPrice, guideUrl)) return;
 
-    // Just-activated code: the user understands nothing yet — send them
-    // straight into the instruction and NOTHING else. One button. (No nick
-    // search / status / direct-buy clutter — that all lives in /menu later.)
+    // Returning user with a saved nick — offer auto-search shortcut
+    const savedNick = user.robloxUsername;
+    const nickLine = savedNick ? `\n🎮 Ник: <b>${escapeHtml(savedNick)}</b>` : "";
     const clientInline = !isAdmin
       ? Markup.inlineKeyboard([
           [Markup.button.url("📖 ОТКРЫТЬ ИНСТРУКЦИЮ", guideUrl)],
-          [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
+          ...(savedNick
+            ? [[Markup.button.callback(`✅ Найти геймпассы у ${savedNick}`, CB.findGpSaved)],
+               [Markup.button.callback("🔎 Другой ник", CB.findGpStart)]]
+            : [[Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)]]),
         ])
       : {};
     await ctx.reply(
       `${greetLine}\n` +
-      `✅ Код <b>${code}</b> активирован · номинал <b>${wbCode.denomination} R$</b> → геймпасс <b>${passPrice} R$</b>\n\n` +
+      `✅ Код <b>${code}</b> активирован · номинал <b>${wbCode.denomination} R$</b> → геймпасс <b>${passPrice} R$</b>${nickLine}\n\n` +
       `📖 Открой <b>инструкцию</b> по кнопке ниже — она проведёт тебя по шагам. Заказ оформляется прямо там 👇`,
       {
         parse_mode: "HTML",
@@ -1554,7 +1564,7 @@ export function registerText(bot: Telegraf): void {
         // still get a meaningful response instead of "no active orders".
         const tgUser = await (db as any).user.findUnique({
           where: { tgId },
-          select: { id: true, balance: true },
+          select: { id: true, balance: true, robloxUsername: true },
         });
 
         if (tgUser) {
@@ -1581,8 +1591,14 @@ export function registerText(bot: Telegraf): void {
               const recoverGuideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`;
               // One-tap: gamepass already picked on the website → offer confirm.
               if (await offerPreselectedGamepass(ctx, state.wbCode, passPrice, recoverGuideUrl)) return;
+              const recoverNick = tgUser.robloxUsername;
+              const recoverNickLine = recoverNick ? `\n🎮 Ник: <b>${escapeHtml(recoverNick)}</b>` : "";
+              const recoverSearchBtns = recoverNick
+                ? [[Markup.button.callback(`✅ Найти геймпассы у ${recoverNick}`, CB.findGpSaved)],
+                   [Markup.button.callback("🔎 Другой ник", CB.findGpStart)]]
+                : [[Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)]];
               await ctx.reply(
-                `Твой код уже активирован! 📌 Цена геймпасса: <b>${passPrice} R$</b>\n\n` +
+                `Твой код уже активирован! 📌 Цена геймпасса: <b>${passPrice} R$</b>${recoverNickLine}\n\n` +
                 `📖 Открой свою <b>персональную инструкцию</b> — заказ оформляется <b>там же</b>: создай геймпасс и найди его по нику Roblox 🔎\n` +
                 `👉 ${recoverGuideUrl}\n\n` +
                 `🔔 Здесь, в боте, придут <b>уведомления о заказе</b>.`,
@@ -1591,7 +1607,7 @@ export function registerText(bot: Telegraf): void {
                   link_preview_options: { is_disabled: true },
                   ...Markup.inlineKeyboard([
                     [Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", recoverGuideUrl)],
-                    [Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)],
+                    ...recoverSearchBtns,
                   ]),
                 }
               );
@@ -2962,6 +2978,33 @@ export function registerCallbacks(bot: Telegraf): void {
         `<i>Если передумал — пришли ссылку на геймпасс как обычно.</i>`,
         { parse_mode: "HTML" }
       );
+      return;
+    }
+
+    // ── 🔎 find_gp_saved: auto-search by saved Roblox nick ──────────────
+    if (data === CB.findGpSaved) {
+      const tgIdNum = ctx.from.id;
+      const user = await (db as any).user.findUnique({
+        where: { tgId: String(tgIdNum) },
+        select: { id: true, robloxUsername: true },
+      });
+      if (!user?.robloxUsername) {
+        await ctx.answerCbQuery("Ник не найден — введи вручную");
+        return;
+      }
+      const order = await (db as any).wbOrder.findFirst({
+        where: { userId: user.id, status: { in: CHANGEABLE_ORDER_STATUSES } },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!order) {
+        await ctx.answerCbQuery("Активного заказа нет");
+        return;
+      }
+      const state: LinkState = { wbCode: order.wbCode, denomination: order.amount };
+      pendingLink.set(tgIdNum, state);
+      pendingRobloxNick.set(tgIdNum, state);
+      await ctx.answerCbQuery("Ищу…");
+      await handleRobloxNickInput(bot, ctx, user.robloxUsername);
       return;
     }
 

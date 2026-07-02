@@ -153,7 +153,7 @@ export async function getUserGames(username: string) {
     if (!user) return [];
 
     const res = await rFetch(
-      `https://games.roblox.com/v2/users/${user.id}/games?accessFilter=Public&limit=25&sortOrder=Desc`
+      `https://games.roblox.com/v2/users/${user.id}/games?accessFilter=Public&limit=50&sortOrder=Desc`
     );
     if (!res.ok) return [];
 
@@ -187,7 +187,7 @@ export async function getUserGames(username: string) {
 export async function getUniverseGamepasses(universeId: string) {
   try {
     const res = await rFetch(
-      `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes?passView=Full&pageSize=50`
+      `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes?passView=Full&pageSize=100`
     );
     if (!res.ok) return [];
 
@@ -229,7 +229,7 @@ export async function getUserGamepasses(username: string) {
 
     // 1. Fetch user's public games
     const gamesRes = await rFetch(
-      `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=10`
+      `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=50`
     );
     if (!gamesRes.ok) return [];
 
@@ -242,7 +242,7 @@ export async function getUserGamepasses(username: string) {
       const placeId: number = game.rootPlaceId ?? game.rootPlace?.id ?? 0;
       try {
         const res = await rFetch(
-          `https://apis.roblox.com/game-passes/v1/universes/${game.id}/game-passes?passView=Full&pageSize=30`
+          `https://apis.roblox.com/game-passes/v1/universes/${game.id}/game-passes?passView=Full&pageSize=100`
         );
         if (!res.ok) return [];
         const data = await res.json();

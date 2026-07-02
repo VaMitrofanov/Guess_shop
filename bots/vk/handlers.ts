@@ -695,18 +695,27 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       const startGuideUrl = isDirect
         ? `https://robloxbank.ru/guide?source=direct`
         : `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`;
+      const awUserData = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { robloxUsername: true } });
+      const awNick = awUserData?.robloxUsername;
+      const awNickLine = awNick ? `\n🎮 Ник: ${awNick}` : "";
+      const awKb = Keyboard.builder()
+        .urlButton({ label: "📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", url: startGuideUrl })
+        .row();
+      if (awNick) {
+        awKb.textButton({ label: `✅ Найти у ${awNick}`, payload: { command: "find_gp_saved" }, color: "positive" })
+            .row()
+            .textButton({ label: "🔎 Другой ник", payload: { command: "find_gp_start" }, color: "primary" });
+      } else {
+        awKb.textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" });
+      }
       await ctx.reply({
         message:
           `${getGreeting(custStatus, firstName)}\n` +
-          `✅ Код активирован! 📌 Цена геймпасса: ${passPrice} R$\n\n` +
+          `✅ Код активирован! 📌 Цена геймпасса: ${passPrice} R$${awNickLine}\n\n` +
           `📖 Открой свою персональную инструкцию — заказ оформляется там же: создай геймпасс и найди его по нику Roblox 🔎\n` +
           `👉 ${startGuideUrl}\n\n` +
           `🔔 Здесь, в боте, придут уведомления о заказе.`,
-        keyboard: Keyboard.builder()
-          .urlButton({ label: "📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", url: startGuideUrl })
-          .row()
-          .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
-          .inline(),
+        keyboard: awKb.inline(),
       });
       return;
     }
@@ -728,17 +737,26 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         : `https://robloxbank.ru/guide?source=wb&skip=1&code=${restoredState.wbCode}`;
       // One-tap: gamepass already picked on the website → offer confirm.
       if (await vkOfferPreselectedGamepass(ctx, restoredState.wbCode, passPrice, restoredGuideUrl)) return;
+      const resUser = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { robloxUsername: true } });
+      const resNick = resUser?.robloxUsername;
+      const resNickLine = resNick ? `\n🎮 Ник: ${resNick}` : "";
+      const resKb = Keyboard.builder()
+        .urlButton({ label: "📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", url: restoredGuideUrl })
+        .row();
+      if (resNick) {
+        resKb.textButton({ label: `✅ Найти у ${resNick}`, payload: { command: "find_gp_saved" }, color: "positive" })
+             .row()
+             .textButton({ label: "🔎 Другой ник", payload: { command: "find_gp_start" }, color: "primary" });
+      } else {
+        resKb.textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" });
+      }
       await ctx.reply({
         message:
           `${getGreeting(custStatus, firstName)}\n` +
-          `✅ Код активирован · цена геймпасса ${passPrice} R$\n\n` +
+          `✅ Код активирован · цена геймпасса ${passPrice} R$${resNickLine}\n\n` +
           `📖 Вот твоя персональная инструкция — заказ оформляется там же: создай геймпасс и найди его по нику Roblox 🔎\n\n` +
           `🔔 Здесь, в боте, ты получишь уведомления о заказе — приняли → выкупаем → готово.`,
-        keyboard: Keyboard.builder()
-          .urlButton({ label: "📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", url: restoredGuideUrl })
-          .row()
-          .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
-          .inline(),
+        keyboard: resKb.inline(),
       });
       return;
     }
@@ -953,6 +971,11 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // ── 🔎 Find gamepass by Roblox nick (item 7) ───────────────────────────────
   if (msgPayload?.command === "find_gp_start") {
     await handleFindGpStart(ctx, vkUserId);
+    return;
+  }
+  // ── 🔎 Auto-search by saved Roblox nick ───────────────────────────────────
+  if (msgPayload?.command === "find_gp_saved") {
+    await handleFindGpSaved(ctx, vkUserId);
     return;
   }
   // ── ✏️ Change nick / gamepass on an order that isn't bought yet ────────────
@@ -1240,6 +1263,7 @@ async function handleRefActivation(
           platform: "VK",
           userId: user.id,
           wbCode: wbCode.code,
+          ...(user.robloxUsername ? { robloxUsername: user.robloxUsername } : {}),
         },
       });
       provisionalCreated = true;
@@ -1283,19 +1307,25 @@ async function handleRefActivation(
   const vkGuideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${code}`;
   // One-tap: gamepass already picked on the website → offer confirm.
   if (await vkOfferPreselectedGamepass(ctx, code, passPrice, vkGuideUrl)) return;
-  // Just-activated code: the user understands nothing yet — send them straight
-  // into the instruction and NOTHING else. One button. (Status / direct-buy /
-  // nick-search clutter lives in the buyer menu later.)
+  // Returning user with saved nick — show it and offer auto-search
+  const vkSavedNick = user.robloxUsername;
+  const vkNickLine = vkSavedNick ? `\n🎮 Ник: ${vkSavedNick}` : "";
+  const kb = Keyboard.builder()
+    .urlButton({ label: "📖 ОТКРЫТЬ ИНСТРУКЦИЮ", url: vkGuideUrl })
+    .row();
+  if (vkSavedNick) {
+    kb.textButton({ label: `✅ Найти у ${vkSavedNick}`, payload: { command: "find_gp_saved" }, color: "positive" })
+      .row()
+      .textButton({ label: "🔎 Другой ник", payload: { command: "find_gp_start" }, color: "primary" });
+  } else {
+    kb.textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" });
+  }
   await ctx.reply({
     message:
       greetLine + `\n` +
-      `✅ Код ${code} активирован · номинал ${totalAmount} R$ → геймпасс ${passPrice} R$\n\n` +
+      `✅ Код ${code} активирован · номинал ${totalAmount} R$ → геймпасс ${passPrice} R$${vkNickLine}\n\n` +
       `📖 Открой инструкцию по кнопке ниже — она проведёт тебя по шагам. Заказ оформляется прямо там 👇`,
-    keyboard: Keyboard.builder()
-      .urlButton({ label: "📖 ОТКРЫТЬ ИНСТРУКЦИЮ", url: vkGuideUrl })
-      .row()
-      .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
-      .inline(),
+    keyboard: kb.inline(),
   });
 }
 
@@ -1671,6 +1701,31 @@ async function handleFindGpStart(ctx: MessageContext, vkUserId: number): Promise
     `Я найду все твои геймпассы за ${passPrice} R$ — и предложу выбрать нужный.\n` +
     `Если передумал — пришли ссылку на геймпасс как обычно.`
   );
+}
+
+async function handleFindGpSaved(ctx: MessageContext, vkUserId: number): Promise<void> {
+  const user = await (db as any).user.findUnique({
+    where: { vkId: String(vkUserId) },
+    select: { id: true, robloxUsername: true },
+  });
+  if (!user?.robloxUsername) {
+    await handleFindGpStart(ctx, vkUserId);
+    return;
+  }
+  const order = await (db as any).wbOrder.findFirst({
+    where: { userId: user.id, status: { in: VK_CHANGEABLE_ORDER_STATUSES } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!order) {
+    await ctx.reply("У тебя сейчас нет активного заказа. Введи код WB чтобы начать.");
+    return;
+  }
+  setState(vkUserId, {
+    type: "AWAITING_ROBLOX_NICK",
+    wbCode: order.wbCode,
+    denomination: order.amount,
+  });
+  await handleRobloxNickInput(ctx, vkUserId, user.robloxUsername, order.wbCode, order.amount);
 }
 
 /**
