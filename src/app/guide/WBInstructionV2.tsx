@@ -135,7 +135,9 @@ export default function WBInstructionV2({
     setView({ kind: "idle" });
     setSearching(true);
     try {
-      const res = await fetch(`/api/roblox/gamepasses?query=${encodeURIComponent(n)}`);
+      // `code` lets the server stamp the nick on the order right away (early
+      // nick capture) — even if the user never finishes the one-tap.
+      const res = await fetch(`/api/roblox/gamepasses?query=${encodeURIComponent(n)}${code ? `&code=${encodeURIComponent(code)}` : ""}`);
       const data = await res.json();
       if (!data?.success) { setSearchErr("Поиск временно недоступен — попробуй ещё раз."); return; }
       const sellable: Pass[] = (data.gamepasses ?? []).filter((g: Pass) => g.isForSale && g.price > 0);

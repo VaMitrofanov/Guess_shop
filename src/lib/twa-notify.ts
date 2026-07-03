@@ -160,13 +160,14 @@ export async function notifyRebind(
  * Текст идентичен ботовскому «геймпасс принят», чтобы клиент не заметил разницы.
  * Возвращает канал реальной доставки — TWA показывает менеджеру честный статус.
  */
-export async function notifyGamepassAttached(user: UserRef, orderId: string): Promise<"tg" | "vk" | null> {
-  const shortId = orderId.slice(-6).toUpperCase();
+export async function notifyGamepassAttached(user: UserRef, wbCode: string): Promise<"tg" | "vk" | null> {
+  // Без «номера заявки» — идентификатор для клиента всегда код ВБ
+  // (номера заказов убраны из клиентских сообщений 2026-06-24, de7d7fd).
   const tgMsg =
     `🎉 Отлично, геймпасс принят!\n\n` +
-    `🆔 Номер заявки: <code>${shortId}</code>\n\n` +
     `⏳ Выкупим в течение нескольких часов — обычно быстрее. Как только будет готово — напишем.\n` +
-    `💡 <i>Робуксы начислит Roblox — обычно в течение 5–7 дней после выкупа.</i>`;
+    `💡 <i>Робуксы начислит Roblox — обычно в течение 5–7 дней после выкупа.</i>\n\n` +
+    `Код ВБ: <code>${wbCode}</code> · Статус и бонусы — в меню`;
   const vkMsg = tgMsg.replace(/<[^>]+>/g, "");
 
   if (user.tgId) return (await tgPost(user.tgId, tgMsg)) ? "tg" : null;
@@ -176,11 +177,10 @@ export async function notifyGamepassAttached(user: UserRef, orderId: string): Pr
 
 export async function notifyOrderRejected(
   user: UserRef,
-  orderId: string,
+  wbCode: string,
   reason: string,
   amount: number,
 ) {
-  const shortId    = orderId.slice(-6).toUpperCase();
   const reasonLine = reason && reason !== "не указана" ? `💬 Причина: <i>${reason}</i>\n\n` : "";
   const isPrivate  = reason.toLowerCase().includes("закрыт");
 
@@ -195,7 +195,8 @@ export async function notifyOrderRejected(
       `• Геймпасс не выставлен на продажу\n\n` +
       `Исправь и отправь ссылку заново:`;
 
-  const tgMsg = `❌ <b>Заказ отклонён</b> [${shortId}]\n\n${reasonLine}${fixTg}`;
+  // Идентификатор для клиента = код ВБ, не внутренний номер (C2, 2026-07-03).
+  const tgMsg = `❌ <b>Заказ отклонён</b> (код <code>${wbCode}</code>)\n\n${reasonLine}${fixTg}`;
   const vkMsg = tgMsg.replace(/<\/?[bi]>/g, "").replace(/<\/?i>/g, "");
 
   if (user.tgId) await tgPost(user.tgId, tgMsg);

@@ -54,10 +54,17 @@
 Серверная ре-валидация: цена ±2 R$ и `isActive`; если Roblox недоступен — принимает
 (`validationSkipped`), как бот.
 
-### `GET /api/roblox/gamepasses?query=` — поиск по нику/ID
+### `GET /api/roblox/gamepasses?query=&code=` — поиск по нику/ID
 `extractGamepassId()` парсит URL/чистый ID → прямой lookup; иначе `getUserGamepasses(nick)`.
 Если пусто — доп. `getRobloxUser` чтобы отличить «нет такого юзера» от «есть, но нет
 публичных геймпассов на продаже» (зеркалит ветвление бота).
+
+Опциональный `code` (гайд передаёт его при поиске с шага 9): если ник подтверждён Roblox'ом,
+роут сразу отмечает его на заказе — `noteProbableNickByCode` (`src/lib/capture-nick.ts`)
+дописывает `[НИК? дата] ник (site-search)` в `adminNote`. Ранний захват ника: менеджер видит
+вероятный ник ещё до того, как клиент дошлёт геймпасс (кейс VFNCQMT). В основное поле
+`robloxUsername` вероятный ник **не** пишется — только подтверждённые пути (валидация
+геймпасса, one-tap выбор).
 
 ### `GET /api/wb-link` — коридор сайт → VK
 Читает `wb_code` из JWT-сессии (записан при VK-логине в `auth.ts`), линкует `userId`

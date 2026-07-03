@@ -215,22 +215,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               if (isActiveActivation) {
                 const denomination = wbCodeRecord?.denomination ?? 0;
                 const passPrice    = denomination > 0 ? Math.ceil(denomination / 0.7) : null;
-                const shortId      = provisionalOrder.id.slice(-6).toUpperCase();
                 const dateStr = new Date().toLocaleString("ru-RU", {
                   timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
                   year: "numeric", hour: "2-digit", minute: "2-digit",
                 }) + " МСК";
+                // Заголовок = код ВБ (номера заказов убраны — C2, 2026-07-03).
                 msg =
-                  `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
+                  `📦 <b>ЗАКАЗ <code>${wbCode}</code></b>\n` +
                   `━━━━━━━━━━━━━━━━\n` +
                   (isGuideMode ? `📖 Режим: <b>Инструкция</b>\n` : ``) +
                   `📘 Источник: <b>VK (сайт)</b>\n` +
                   `📅 Время: <b>${dateStr}</b>\n` +
                   `👤 Юзер: <a href="https://vk.com/id${vkId}">${escapeHtml(name)}</a>\n` +
-                  `🔑 Код ВБ: <code>${wbCode}</code>\n` +
                   (denomination > 0 ? `💎 Сумма: <b>${denomination} R$</b>${passPrice ? ` (Геймпасс: ${passPrice} R$)` : ""}\n` : ``) +
                   `📊 Статус: ⌛ Ожидаем ссылку на геймпасс`;
-                const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(shortId)}`;
+                const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(wbCode!)}`;
                 reply_markup = {
                   inline_keyboard: [
                     [{ text: "📊 Открыть в дашборде", web_app: { url: twaUrl } }],

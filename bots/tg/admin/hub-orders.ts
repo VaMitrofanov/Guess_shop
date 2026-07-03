@@ -104,15 +104,15 @@ export async function showActiveOrders(ctx: Context): Promise<void> {
   const buttons: any[][] = [];
 
   for (const o of orders) {
-    const shortId = o.id.slice(-6).toUpperCase();
     const statusIcon =
       o.status === "IN_PROGRESS"      ? "🔧" :
       o.status === "AWAITING_PAYMENT" ? "🔷" :
       o.status === "PAYMENT_PENDING"  ? "💳" : "⏳";
     const directTag = o.isDirectOrder ? " 🔷" : "";
     const wait = waitTime(o.createdAt);
-    text += `${statusIcon} <code>${shortId}</code> — <b>${o.amount} R$</b>${directTag} · ⏱${wait}\n`;
-    buttons.push([Markup.button.callback(`🔍 ${shortId} (${o.amount}R$)`, CB.orderView(o.id))]);
+    // Идентификатор = код (ВБ / DIR- / AV-), не внутренний номер (C2).
+    text += `${statusIcon} <code>${o.wbCode}</code> — <b>${o.amount} R$</b>${directTag} · ⏱${wait}\n`;
+    buttons.push([Markup.button.callback(`🔍 ${o.wbCode} (${o.amount}R$)`, CB.orderView(o.id))]);
   }
 
   buttons.push([Markup.button.callback("⬅️ Назад", CB.ordersBack)]);
@@ -137,7 +137,6 @@ export async function showOrderCard(ctx: Context, orderId: string): Promise<void
 }
 
 export async function renderExtendedCard(order: any) {
-  const shortId = order.id.slice(-6).toUpperCase();
   const passPrice = Math.ceil(order.amount / 0.7);
   const wait = waitTime(order.createdAt);
 
@@ -170,9 +169,11 @@ export async function renderExtendedCard(order: any) {
     }
   }
 
-  // Loyalty
-  const totalOrders = await (db as any).wbOrder.count({ where: { userId: order.userId } }).catch(() => 1);
-  const prev = Math.max(0, totalOrders - 1);
+  // Loyalty — прошлые заказы без текущего и без висячих AWAITING (иначе
+  // свежепромоутнутый заказ считает сам себя → ложный «ПОВТОРНЫЙ КЛИЕНТ»).
+  const prev = await (db as any).wbOrder.count({
+    where: { userId: order.userId, id: { not: order.id }, status: { notIn: ["AWAITING_GAMEPASS"] } },
+  }).catch(() => 0);
   const loyaltyLine =
     prev >= 5 ? `👑 <b>VIP КЛИЕНТ (${prev} заказов)</b>\n` :
     prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>\n` : "";
@@ -196,8 +197,9 @@ export async function renderExtendedCard(order: any) {
     ? `💳 Реквизиты: <code>${order.paymentDetails}</code>\n` : "";
 
   // ── Card text ──────────────────────────────────────────────────────────
+  // Заголовок = код (ВБ / DIR- / AV-), не внутренний номер (C2, 2026-07-03).
   const text =
-    `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
+    `📦 <b>ЗАКАЗ <code>${order.wbCode}</code></b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
     directLine +
     loyaltyLine +
@@ -207,7 +209,6 @@ export async function renderExtendedCard(order: any) {
     `👤 Юзер: ${userLabel}\n` +
     reviewLine +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
-    (order.isDirectOrder ? `` : `🔑 Код ВБ: <code>${order.wbCode}</code>\n`) +
     payDetailsLine +
     `📊 Статус: <b>${STATUS_LABELS[order.status] || order.status}</b>${reasonLine}`;
 
@@ -288,7 +289,7 @@ export async function takeOrderInWork(
       try {
         await bot.telegram.sendMessage(
           order.user.tgId,
-          `🔧 Ваш заказ #${orderId.slice(-6).toUpperCase()} взят в работу! Ожидайте выкупа.`,
+          `🔧 Ваш заказ на ${order.amount} R$ взят в работу! Ожидайте выкупа.`,
           { parse_mode: "HTML" }
         );
       } catch { /* non-fatal */ }
@@ -309,8 +310,7 @@ export async function enterSearchMode(ctx: Context): Promise<void> {
     ctx,
     `🔎 <b>ПОИСК ЗАКАЗА</b>\n━━━━━━━━━━━━━━━━\n\n` +
     `Введи одно из:\n` +
-    `• Последние символы ID заказа\n` +
-    `• Код Wildberries\n` +
+    `• Код заказа (ВБ / DIR-… / AV-…)\n` +
     `• Ник пользователя\n\n` +
     `<i>Ожидаю ввод…</i>`,
     Markup.inlineKeyboard([[Markup.button.callback("⬅️ Отмена", CB.ordersBack)]])
@@ -324,8 +324,10 @@ export async function handleSearchQuery(ctx: Context, query: string): Promise<vo
   const upper = q.toUpperCase();
   const lower = q.toLowerCase();
 
+  // Код заказа (ВБ / DIR- / AV-) — основной идентификатор (C2); id оставлен
+  // для обратной совместимости со старыми карточками, где был #SHORTID.
   let order = await (db as any).wbOrder.findFirst({
-    where: { OR: [{ id: lower }, { id: { endsWith: lower } }] },
+    where: { OR: [{ wbCode: upper }, { id: lower }, { id: { endsWith: lower } }] },
     include: { user: true },
     orderBy: { createdAt: "desc" },
   });
@@ -396,12 +398,11 @@ export async function showHistory24h(ctx: Context): Promise<void> {
   const buttons: any[][] = [];
 
   for (const o of orders) {
-    const shortId = o.id.slice(-6).toUpperCase();
     const time = new Date(o.updatedAt).toLocaleString("ru-RU", {
       timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit",
     });
-    text += `✅ <code>${shortId}</code> — <b>${o.amount} R$</b> · ${time}\n`;
-    buttons.push([Markup.button.callback(`🔍 ${shortId}`, CB.orderView(o.id))]);
+    text += `✅ <code>${o.wbCode}</code> — <b>${o.amount} R$</b> · ${time}\n`;
+    buttons.push([Markup.button.callback(`🔍 ${o.wbCode}`, CB.orderView(o.id))]);
   }
 
   buttons.push([Markup.button.callback("⬅️ Назад", CB.ordersBack)]);
@@ -429,13 +430,12 @@ export async function showRejectedOrders(ctx: Context): Promise<void> {
   const buttons: any[][] = [];
 
   for (const o of orders) {
-    const shortId = o.id.slice(-6).toUpperCase();
     const time = new Date(o.updatedAt).toLocaleString("ru-RU", {
       timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
     });
     const reason = o.rejectionReason ? ` — ${o.rejectionReason.slice(0, 30)}…` : "";
-    text += `❌ <code>${shortId}</code> · ${o.amount} R$ · ${time}${reason}\n`;
-    buttons.push([Markup.button.callback(`🔍 ${shortId}`, CB.orderView(o.id))]);
+    text += `❌ <code>${o.wbCode}</code> · ${o.amount} R$ · ${time}${reason}\n`;
+    buttons.push([Markup.button.callback(`🔍 ${o.wbCode}`, CB.orderView(o.id))]);
   }
 
   buttons.push([Markup.button.callback("⬅️ Назад", CB.ordersBack)]);
@@ -462,10 +462,9 @@ export async function showBatchView(ctx: Context): Promise<void> {
   text += `<b>Ссылки для выкупа:</b>\n`;
 
   for (const o of pending) {
-    const shortId = o.id.slice(-6).toUpperCase();
     text += o.gamepassUrl
-      ? `• <a href="${o.gamepassUrl}">#${shortId}</a> — ${o.amount} R$\n`
-      : `• #${shortId} — ${o.amount} R$ (ожидаем ссылку)\n`;
+      ? `• <a href="${o.gamepassUrl}">${o.wbCode}</a> — ${o.amount} R$\n`
+      : `• ${o.wbCode} — ${o.amount} R$ (ожидаем ссылку)\n`;
   }
 
   text += `\n<i>Откройте все ссылки, выкупите геймпассы, затем нажмите «Подтвердить».</i>`;
@@ -506,7 +505,7 @@ export async function confirmBatchFulfill(
       try {
         await bot.telegram.sendMessage(
           order.user.tgId,
-          `✅ Заказ #${order.id.slice(-6).toUpperCase()} выкуплен! Робуксы придут через 5-7 дней.`,
+          `✅ Заказ на ${order.amount} R$ выкуплен! Робуксы придут через 5-7 дней.`,
           { parse_mode: "HTML" }
         );
       } catch { /* non-fatal */ }

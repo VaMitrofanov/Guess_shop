@@ -107,6 +107,8 @@ export async function GET(req: NextRequest) {
     const orClauses: any[] = [
       { gamepassUrl:    { contains: q,           mode: "insensitive" } },
       { robloxUsername: { contains: qClean,      mode: "insensitive" } },
+      // adminNote держит «вероятные» ники ([НИК? дата] ник) — ищем и по ним.
+      { adminNote:      { contains: qClean,      mode: "insensitive" } },
       { wbCode:         { contains: q.toUpperCase() } },
       { id:             { endsWith: q.toLowerCase() } },
       { user: { name:     { contains: q,         mode: "insensitive" } } },
@@ -396,6 +398,35 @@ export async function POST(req: NextRequest) {
     if (!amount || typeof amount !== "number" || amount < 1)
       return NextResponse.json({ error: "amount обязателен (число > 0)" }, { status: 400 });
 
+    // Дедуп: на этот геймпасс уже есть активный заказ → 409, пока менеджер
+    // явно не подтвердит повтор (force: true). COMPLETED/REJECTED не блокируют.
+    const gpMatch = String(gamepassUrl ?? "").match(/game-pass(?:es)?\/(\d+)/);
+    if (gpMatch && body.force !== true) {
+      const candidates = await (prisma as any).wbOrder.findMany({
+        where: {
+          isTest: false,
+          status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] },
+          gamepassUrl: { contains: `/${gpMatch[1]}` },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+        select: { wbCode: true, status: true, orderSource: true, createdAt: true, gamepassUrl: true },
+      });
+      // `contains` может зацепить более длинный id — сверяем точным парсингом.
+      const existing = candidates.find(
+        (o: any) => (o.gamepassUrl ?? "").match(/game-pass(?:es)?\/(\d+)/)?.[1] === gpMatch[1],
+      );
+      if (existing) {
+        return NextResponse.json(
+          {
+            error: `На этот геймпасс уже есть активный заказ ${existing.wbCode}`,
+            existing: { wbCode: existing.wbCode, status: existing.status, orderSource: existing.orderSource, createdAt: existing.createdAt },
+          },
+          { status: 409 },
+        );
+      }
+    }
+
     const code = `AV-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
     const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
@@ -462,6 +493,8 @@ export async function POST(req: NextRequest) {
           OR: [
             { wbCode:         { contains: q.toUpperCase() } },
             { robloxUsername: { contains: qClean, mode: "insensitive" } },
+            // adminNote держит «вероятные» ники ([НИК? дата] ник) — ищем и по ним.
+            { adminNote:      { contains: qClean, mode: "insensitive" } },
             { user: { username: { contains: qClean, mode: "insensitive" } } },
             { user: { name:     { contains: q,      mode: "insensitive" } } },
           ],
@@ -574,7 +607,7 @@ export async function POST(req: NextRequest) {
       data:  { status: "REJECTED", rejectionReason },
     });
     cachedCounts = null;
-    notifyOrderRejected(order.user, orderId, rejectionReason, order.amount).catch(() => {});
+    notifyOrderRejected(order.user, order.wbCode, rejectionReason, order.amount).catch(() => {});
     return NextResponse.json({ ok: true });
   }
 
@@ -800,12 +833,11 @@ export async function POST(req: NextRequest) {
 
     // Дожидаемся реальной отправки: менеджер должен знать, дошло ли уведомление
     // (VK error 901 у юзеров без диалога с сообществом теряется молча).
-    const notified = await notifyGamepassAttached(order.user, orderId).catch(() => null);
+    const notified = await notifyGamepassAttached(order.user, order.wbCode).catch(() => null);
 
     return NextResponse.json({
       ok: true,
       wbCode: order.wbCode,
-      shortId: orderId.slice(-6).toUpperCase(),
       notified,
     });
   }

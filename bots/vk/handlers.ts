@@ -17,6 +17,7 @@ import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
 import { getGamepassDetails, getGamepassProductInfo } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
+import { noteProbableNick } from "../shared/nick";
 
 // VK API instance injected from bot.ts to avoid circular import.
 let _vkApi: any = null;
@@ -911,7 +912,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     kb.textButton({ label: "💎 Заказать снова", payload: { command: "start_direct" }, color: "positive" });
     await ctx.reply({ message: "❌ Заявка отменена.", keyboard: kb.inline() });
     await Promise.allSettled(
-      ADMIN_IDS.map(id => tgSend(id, `❌ Заявка #${intentId.slice(-6).toUpperCase()} отменена покупателем (VK).`))
+      ADMIN_IDS.map(id => tgSend(id, `❌ Заявка ${escapeHtml(intent.robloxUsername)} · ${intent.totalAmount} R$ отменена покупателем (VK).`))
     );
     return;
   }
@@ -951,9 +952,8 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         await tx.user.update({ where: { id: ucdOrder.user.id }, data: updateData });
       }
     });
-    const shortId = ucdOrderId.slice(-6).toUpperCase();
     await ctx.reply({
-      message: `❌ Заказ #${shortId} отменён.\n\nЕсли хочешь — создай новый заказ.`,
+      message: `❌ Заказ на ${baseAmount} R$ отменён.\n\nЕсли хочешь — создай новый заказ.`,
       keyboard: Keyboard.builder()
         .textButton({ label: "💎 Заказать напрямую", payload: { command: "start_direct" }, color: "positive" })
         .inline(),
@@ -961,7 +961,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     // Notify admins via TG
     const fullName = await vkGetName(vkUserId);
     const adminText =
-      `❌ <b>Заказ #${shortId} отменён покупателем</b>\n` +
+      `❌ <b>Заказ <code>${ucdOrder.wbCode}</code> отменён покупателем</b>\n` +
       `👤 <a href="https://vk.com/id${vkUserId}">${escapeHtml(fullName)}</a> (VK)\n` +
       `💎 ${baseAmount} R$`;
     await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, adminText)));
@@ -1113,7 +1113,6 @@ async function vkOfferPreselectedGamepass(
       select: { id: true, status: true },
     });
     if (order && order.status !== "AWAITING_GAMEPASS" && order.status !== "REJECTED") {
-      const shortId = String(order.id).slice(-6).toUpperCase();
       await ctx.reply({
         message:
           `✅ Заказ уже оформлен — твой геймпасс принят! 🙌\n\n` +
@@ -1183,7 +1182,6 @@ async function handleRefActivation(
         select: { id: true, status: true },
       });
       if (placedOrder && ["PENDING", "IN_PROGRESS", "COMPLETED"].includes(placedOrder.status)) {
-        const shortId = String(placedOrder.id).slice(-6).toUpperCase();
         const done = placedOrder.status === "COMPLETED";
         await ctx.reply({
           message: done
@@ -1388,6 +1386,14 @@ async function handleGamepassLink(
   let validatedPrice: number | null = null;
   if (!gamepassInfo.validationSkipped) {
     // Normal validation — only runs when Roblox API was reachable
+
+    // Early nick capture: Roblox already told us the creator — note it (в заметку
+    // заказа) even if validation fails below (wrong price / not for sale), so
+    // the manager sees the probable nick immediately.
+    if (gamepassInfo.creatorName) {
+      void noteProbableNick({ nick: gamepassInfo.creatorName, source: "gp-validation", wbCode });
+    }
+
     if (!gamepassInfo.isActive) {
       if (gamepassInfo.isNotInCatalog) {
         await ctx.reply({
@@ -1484,10 +1490,12 @@ async function handleGamepassLink(
     return;
   }
 
-  // Count completed/pending/rejected orders only — exclude the current provisional
-  // AWAITING_GAMEPASS order so a first-time user doesn't get the "returning" badge.
+  // Count completed/pending/rejected orders only — exclude the current order
+  // entirely (by wbCode): if it was already promoted to PENDING (e.g. by the
+  // site one-tap a minute earlier), the old status-only filter counted the
+  // order itself → false «ПОВТОРНЫЙ КЛИЕНТ» badge.
   const previousOrderCount = await (db as any).wbOrder.count({
-    where: { userId: user.id, status: { notIn: ["AWAITING_GAMEPASS"] } },
+    where: { userId: user.id, status: { notIn: ["AWAITING_GAMEPASS"] }, wbCode: { not: wbCode } },
   }).catch(() => 0);
 
   // ── Atomic claim + order creation ──────────────────────────────────────
@@ -1497,8 +1505,10 @@ async function handleGamepassLink(
   // Bonus balance is preserved — only spent on direct bot orders.
   // If any step fails the whole transaction rolls back — code stays unclaimed.
   let order: any;
+  let duplicateSubmission = false;
+  let replacedGamepassUrl: string | null = null;
   try {
-    order = await (db as any).$transaction(async (tx: any) => {
+    const txResult = await (db as any).$transaction(async (tx: any) => {
       const claimed = await tx.wbCode.updateMany({
         where: {
           code: { equals: wbCode, mode: "insensitive" },
@@ -1531,6 +1541,7 @@ async function handleGamepassLink(
       });
 
       let newOrder;
+      let replacedUrl: string | null = null;
       if (existingOrder) {
         // AWAITING_GAMEPASS / REJECTED → first gamepass; PENDING / IN_PROGRESS →
         // the user re-picked their nick ("передумал") before it was bought. Both
@@ -1539,6 +1550,15 @@ async function handleGamepassLink(
         if (existingOrder.status === "COMPLETED") {
           throw Object.assign(new Error("Order already exists"), { code: "P2002" });
         }
+        const isProcessing = existingOrder.status === "PENDING" || existingOrder.status === "IN_PROGRESS";
+        if (isProcessing && existingOrder.gamepassUrl === cleanLink) {
+          // Same gamepass re-submitted while the order is already queued —
+          // idempotent no-op: no re-PENDING, no duplicate admin card (bug
+          // «двойные карточки» J2XVS0: site one-tap + bot submit of same pass).
+          return { order: existingOrder, duplicate: true, replacedUrl: null };
+        }
+        // A DIFFERENT pass on a queued order = замена — card gets a 🔁 marker.
+        if (isProcessing) replacedUrl = existingOrder.gamepassUrl;
         // Promote / re-point to PENDING with the (new) gamepass link
         newOrder = await tx.wbOrder.update({
           where: { id: existingOrder.id },
@@ -1569,8 +1589,11 @@ async function handleGamepassLink(
 
       // Bonus balance is preserved — only spent on direct bot orders, not WB-code orders.
 
-      return newOrder;
+      return { order: newOrder, duplicate: false, replacedUrl };
     });
+    order = txResult.order;
+    duplicateSubmission = txResult.duplicate;
+    replacedGamepassUrl = txResult.replacedUrl;
   } catch (err: any) {
     if (err.isClaimed) {
       clearState(vkUserId);
@@ -1588,6 +1611,18 @@ async function handleGamepassLink(
   }
 
   clearState(vkUserId);
+
+  if (duplicateSubmission) {
+    // Same pass on an already-queued order — confirm to the user, but do NOT
+    // re-send the admin card (root cause of «двойные карточки»).
+    await ctx.reply({
+      message: "✅ Этот геймпасс уже принят — заказ в обработке, выкупим в ближайшее время.\n\nСтатус — по кнопке ниже 👇",
+      keyboard: Keyboard.builder()
+        .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "positive" })
+        .inline(),
+    });
+    return;
+  }
 
   if (validatedCreator) {
     try { await (db as any).user.update({ where: { vkId: String(vkUserId) }, data: { robloxUsername: validatedCreator } }); } catch {}
@@ -1661,6 +1696,7 @@ async function handleGamepassLink(
     creatorName:         validatedCreator ?? undefined,
     isAgeRestricted:     gamepassInfo.isAgeRestricted ?? false,
     viaWebOneTap,
+    replacedGamepassUrl: replacedGamepassUrl ?? undefined,
   });
 }
 
@@ -1813,6 +1849,13 @@ async function handleRobloxNickInput(
 
   // Always return to LINK state — picker handles next move via VK payload button.
   setState(vkUserId, { type: "AWAITING_LINK", wbCode, denomination });
+
+  // Early nick capture: every branch except user_not_found means the nick is a
+  // real Roblox account — note it on the order (заметка, не основное поле:
+  // юзер мог опечататься), even if the gamepass never materialises (VFNCQMT).
+  if (outcome.status !== "user_not_found") {
+    void noteProbableNick({ nick, source: "nick-search", wbCode });
+  }
 
   const guideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}`;
 
@@ -2290,10 +2333,9 @@ async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Prom
     where: { userId: user.id, status: "PENDING" },
   });
   if (existingIntent) {
-    const shortId = existingIntent.id.slice(-6).toUpperCase();
     const kb = Keyboard.builder();
     kb.textButton({ label: "❌ Отменить заявку", payload: { command: "direct_cancel_intent", intentId: existingIntent.id }, color: "negative" });
-    await ctx.reply({ message: `⏳ У тебя уже есть активная заявка #${shortId}.\n\nДождись реквизитов от менеджера или отмени заявку.`, keyboard: kb.inline() });
+    await ctx.reply({ message: `⏳ У тебя уже есть активная заявка на ${existingIntent.totalAmount} R$.\n\nДождись реквизитов от менеджера или отмени заявку.`, keyboard: kb.inline() });
     return;
   }
   const existingOrder = await (db as any).wbOrder.findFirst({
@@ -2301,7 +2343,7 @@ async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Prom
   });
   if (existingOrder) {
     await ctx.reply({
-      message: `⏳ У тебя уже есть активный заказ #${existingOrder.id.slice(-6).toUpperCase()}.\n\nДождись реквизитов от менеджера, а затем оформи новый.`,
+      message: `⏳ У тебя уже есть активный заказ на ${existingOrder.amount} R$.\n\nДождись реквизитов от менеджера, а затем оформи новый.`,
       keyboard: vkFaqKb(),
     });
     return;
@@ -2329,7 +2371,6 @@ async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Prom
     return;
   }
 
-  const shortId = intent.id.slice(-6).toUpperCase();
   const vkName = user.name ?? await vkGetName(vkUserId);
   const prevOrdersCount = await (db as any).wbOrder.count({
     where: { userId: user.id, status: "COMPLETED" },
@@ -2359,7 +2400,7 @@ async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Prom
   kb.textButton({ label: "❌ Отменить заявку", payload: { command: "direct_cancel_intent", intentId: intent.id }, color: "negative" });
   await ctx.reply({
     message:
-      `✅ Заявка #${shortId} отправлена!\n\n` +
+      `✅ Заявка отправлена!\n\n` +
       `📦 ${state.totalAmount} R$ → ${state.robloxUsername}\n` +
       `💰 К оплате: ${fmtRub(state.rublePrice)}\n\n` +
       `⏱ Менеджер пришлёт реквизиты — обычно в течение 5 минут.\nОжидай сообщения 👇`,
@@ -2667,16 +2708,16 @@ async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<v
     lines.push("");
     lines.push("── Активные заказы ──");
     for (const o of activeOrders) {
-      const shortId = String(o.id).slice(-6).toUpperCase();
       const statusLbl = VK_STATUS_LABEL[o.status] ?? o.status;
-      lines.push(`📦 #${shortId} · ${o.amount} R$ · ${statusLbl}`);
+      // Идентификатор для клиента = сумма+статус, без внутреннего номера (C2).
+      lines.push(`📦 ${o.amount} R$ · ${statusLbl}`);
     }
   }
 
   if (lastCompleted) {
     lines.push("");
     const dt = new Date(lastCompleted.createdAt).toLocaleDateString("ru-RU");
-    lines.push(`✅ Последний: #${String(lastCompleted.id).slice(-6).toUpperCase()} · ${lastCompleted.amount} R$ · ${dt}`);
+    lines.push(`✅ Последний: ${lastCompleted.amount} R$ · ${dt}`);
   }
 
   lines.push("");
@@ -2835,7 +2876,6 @@ async function handleIdleMessage(
     };
 
     const passPrice = Math.ceil((order.amount as number) / 0.7);
-    const shortId   = (order.id as string).slice(-6).toUpperCase();
     const pendingAgeMs   = Date.now() - new Date(order.createdAt).getTime();
     const pendingOver120 = order.status === "PENDING" && pendingAgeMs > 120 * 60 * 1000;
     // PENDING shows a time-based pseudo-stage so it visibly "moves" over time.
@@ -2909,7 +2949,7 @@ async function handleIdleMessage(
     await ctx.reply({
       message:
         (String(order.wbCode).startsWith("DIR-")
-          ? `📦 Заказ #${shortId}\n`
+          ? `📦 Прямой заказ\n`
           : `🔑 Код ВБ: ${order.wbCode}\n`) +
         `📅 ${new Date(order.createdAt).toLocaleDateString("ru-RU")}\n` +
         `💎 Номинал: ${order.amount} R$\n` +

@@ -42,7 +42,6 @@ export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {
   }
 
   const passPrice = Math.ceil(order.amount / 0.7);
-  const shortId = order.id.slice(-6).toUpperCase();
   const dateStr =
     new Date().toLocaleString("ru-RU", {
       timeZone: "Europe/Moscow",
@@ -63,8 +62,9 @@ export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {
     ? `🎮 Создатель ГП: <b>${escapeHtml(order.creatorName)}</b>\n`
     : "";
 
+  // Заголовок = код ВБ (номера заказов убраны — C2, 2026-07-03).
   const text =
-    `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
+    `📦 <b>ЗАКАЗ <code>${order.wbCode}</code></b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
     `🌐 <b>ONE-TAP С САЙТА</b>\n` +
     loyaltyLine +
@@ -73,7 +73,6 @@ export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {
     `👤 Юзер: ${order.userDisplay}\n` +
     creatorLine +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
-    `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
     `📊 Статус: ⏳ В обработке\n\n` +
     `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>` +
     (() => {
@@ -81,7 +80,7 @@ export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {
       return m ? `\n🎫 Pass ID: <code>${m[1]}</code>` : "";
     })();
 
-  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(shortId)}`;
+  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(order.wbCode)}`;
   const reply_markup = {
     inline_keyboard: [
       [

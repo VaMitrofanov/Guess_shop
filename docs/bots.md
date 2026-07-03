@@ -6,6 +6,14 @@ Telegram (`bots/shared/notify.ts` → `tgSend` → `ADMIN_IDS`).
 ## Общее
 
 - `bots/shared/admin.ts` — карточки заказов/отзывов, объект `CB` со всеми `callback_data`.
+  **Идентификатор в карточках и сообщениях — код заказа** (ВБ / `DIR-…` / `AV-…`), внутренние
+  номера `#SHORTID` убраны везде (решение владельца, вариант C2, 2026-07-03). Клиент видит
+  код ВБ или «заказ на N R$»; заявки (intents) кода не имеют — идентифицируются `ник · сумма`.
+  TWA-диплинк из карточек — `?q=<код>`.
+- `bots/shared/nick.ts` — `noteProbableNick`: ранний захват ника Roblox в `adminNote`
+  заказа (`[НИК? дата] ник (источник)`), веб-зеркало — `src/lib/capture-nick.ts`. Вероятный
+  ник **не** пишется в `robloxUsername` (юзер мог опечататься) — основное поле заполняют
+  только подтверждённые пути (успешная валидация геймпасса, one-tap, менеджер).
 - `bots/shared/roblox.ts` — валидация геймпасса. Богаче, чем `src/lib/roblox.ts`: возвращает
   `validationSkipped`, `isNotInCatalog`, `isGamePrivate`, `isAgeRestricted`, managed-pricing.
 - `bots/shared/gamepass-search.ts` — `searchGamepassesByNick` → union `user_not_found /
@@ -46,6 +54,22 @@ Telegram (`bots/shared/notify.ts` → `tgSend` → `ADMIN_IDS`).
 
 Финальная транзакция атомарна: claim кода (`updateMany` с OR-guard на RESERVED/null/provisional)
 + промоушен/создание `WbOrder → PENDING`. `COMPLETED` — единственный терминальный блок.
+
+**Идемпотентность повторной отправки (фикс «двойных карточек», 2026-07-03, оба бота):**
+- тот же геймпасс на заказ в `PENDING`/`IN_PROGRESS` → no-op в транзакции: без пере-PENDING,
+  без второй админ-карточки; клиенту — «✅ Этот геймпасс уже принят» (кейс J2XVS0: one-tap
+  с сайта + отправка того же пасса в бот минутой позже);
+- **другая** ссылка на заказ в обработке (клиент передумал) → апдейт как раньше, но карточка
+  идёт с маркером `🔁 ЗАМЕНА ГЕЙМПАССА (было: <passId>)` (`replacedGamepassUrl` в
+  `sendAdminOrderCard`) — менеджер видит, что это не новый заказ;
+- `previousOrderCount` («ПОВТОРНЫЙ КЛИЕНТ») исключает сам текущий заказ (`wbCode != текущий`)
+  — раньше свежепромоутнутый сайтом заказ считал сам себя и давал ложный бейдж; тот же фикс
+  в `renderExtendedCard` admin-хаба (`id != order.id`).
+
+**Ранний захват ника** (`noteProbableNick`): при вводе ника в поиск (все ветки кроме
+`user_not_found`) и в fail-ветках валидации геймпасса (`creatorName` от Roblox) ник
+дописывается в `adminNote` заказа — менеджер может привязать геймпасс из TWA, не дожидаясь
+клиента.
 
 ### Прямые заказы (без WB-кода)
 `startDirectFlow` → выбор пакета (`buildPackKb`, бонусы/скидки) → подтверждение → ник →

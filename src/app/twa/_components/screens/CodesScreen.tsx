@@ -403,11 +403,8 @@ function CodeRow({ c }: { c: WbCodeRow }) {
               <span style={{ color: C.textTertiary, fontSize: 11.5, letterSpacing: 0.3, textTransform: "uppercase" as const, fontWeight: 600 }}>
                 Заказ
               </span>
-              <span style={{ fontFamily: "ui-monospace, monospace" }}>
-                #{c.order.id.slice(-6).toUpperCase()}
-              </span>
               <span style={{ color: C.textSecondary, fontSize: 12 }}>
-                · {c.order.status} · {c.order.amount} R$
+                {c.order.status} · {c.order.amount} R$
               </span>
             </div>
           )}

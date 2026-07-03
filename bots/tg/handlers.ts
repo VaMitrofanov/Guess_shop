@@ -11,10 +11,11 @@ import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, vkSendPhoto, stripHtml, tgSend, escapeHtml } from "../shared/notify";
 import { getSbpQrBuffer } from "../shared/sbp";
-import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUserHurdle, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminIntentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, formatUserHandle, formatUserHandleHtml } from "../shared/admin";
+import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUserHurdle, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminIntentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, formatUserHandle, formatUserHandleHtml, orderCode } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
 import { getGamepassDetails, getGamepassProductInfo, buildPurchaseScript, purchaseGamepassDirect, getRobuxBalance, getAuthenticatedUser, resetPurchaseCsrf } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
+import { noteProbableNick } from "../shared/nick";
 import { buildAdminKeyboard } from "./admin";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -409,13 +410,12 @@ export function registerStart(bot: Telegraf): void {
           select: { id: true, status: true },
         });
         if (placedOrder && ["PENDING", "IN_PROGRESS", "COMPLETED"].includes(placedOrder.status)) {
-          const shortId = String(placedOrder.id).slice(-6).toUpperCase();
           const done = placedOrder.status === "COMPLETED";
           await ctx.reply(
             (done
               ? `✅ <b>Заказ выполнен</b> — спасибо! 🎉\n\nХочешь ещё робуксов? 💎`
               : `✅ <b>Заказ оформлен</b> — твой геймпасс с сайта принят! 🙌\n\n` +
-                `🔑 Код ВБ: <code>${placedOrder.wbCode ?? shortId}</code>\n` +
+                `🔑 Код ВБ: <code>${code}</code>\n` +
                 `📊 Слежу за статусом: приняли → выкупаем → готово ✨\n\n` +
                 `Как только выкупим — сразу напишу сюда.`),
             {
@@ -1156,9 +1156,10 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   // PENDING shows the time-based pseudo-stage; everything else uses its label.
   const statusLabel = stage ? stage.label : (label[order.status] ?? order.status);
 
+  // Прямые заказы идентифицируются ником+суммой (строки ниже) — без номера (C2).
   const codeLine = order.wbCode && !String(order.wbCode).startsWith("DIR-")
     ? `🔑 Код ВБ: <b>${order.wbCode}</b>\n`
-    : `📦 Заказ #${order.id.slice(-6).toUpperCase()}\n`;
+    : `📦 Прямой заказ\n`;
 
   const showDelayBanner = order.status === "PENDING" || order.status === "IN_PROGRESS";
 
@@ -1299,16 +1300,16 @@ async function buildBuyerMenu(tgId: string, name?: string): Promise<StatusMessag
     lines.push("");
     lines.push("── <b>Активные заказы</b> ──");
     for (const o of activeOrders) {
-      const shortId = o.id.slice(-6).toUpperCase();
       const statusLbl = STATUS_LABEL[o.status] ?? o.status;
-      lines.push(`📦 #${shortId} · ${o.amount} R$ · ${statusLbl}`);
+      // Идентификатор для клиента = сумма+статус (для WB видит код в статусе).
+      lines.push(`📦 ${o.amount} R$ · ${statusLbl}`);
     }
   }
 
   if (lastCompleted) {
     lines.push("");
     const dt = new Date(lastCompleted.createdAt).toLocaleDateString("ru-RU");
-    lines.push(`✅ Последний выполненный: #${lastCompleted.id.slice(-6).toUpperCase()} · ${lastCompleted.amount} R$ · ${dt}`);
+    lines.push(`✅ Последний выполненный: ${lastCompleted.amount} R$ · ${dt}`);
   }
 
   const nickBtn = robloxNick
@@ -1421,13 +1422,12 @@ export function registerText(bot: Telegraf): void {
         where: { id: paymentDetailsOrderId },
         data: { paymentDetails: text, status: "PAYMENT_PENDING" },
       });
-      const shortId = dirOrder.id.slice(-6).toUpperCase();
       const payUser = await (db as any).user.findUnique({ where: { id: dirOrder.userId } });
       if (payUser?.tgId) {
         try {
           await bot.telegram.sendMessage(
             payUser.tgId,
-            `💳 <b>Реквизиты для оплаты заказа #${shortId}:</b>\n\n` +
+            `💳 <b>Реквизиты для оплаты заказа на ${dirOrder.amount} R$:</b>\n\n` +
             `<code>${text}</code>\n\n` +
             `Переведи деньги и пришли скриншот подтверждения сюда (фотографией, не файлом) 👇`,
             {
@@ -1442,13 +1442,13 @@ export function registerText(bot: Telegraf): void {
       } else if (payUser?.vkId) {
         try {
           await vkSend(payUser.vkId,
-            `💳 Реквизиты для оплаты заказа #${shortId}:\n\n` +
+            `💳 Реквизиты для оплаты заказа на ${dirOrder.amount} R$:\n\n` +
             `${text}\n\n` +
             `Переведи деньги и пришли скриншот подтверждения сюда (фотографией, не файлом) 👇`
           );
         } catch { }
       }
-      await ctx.reply(`✅ Реквизиты отправлены пользователю (Заказ #${shortId})`, { parse_mode: "HTML" });
+      await ctx.reply(`✅ Реквизиты отправлены пользователю (заказ <code>${dirOrder.wbCode}</code>)`, { parse_mode: "HTML" });
       return;
     }
 
@@ -1856,6 +1856,13 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
   // User has moved past the input stage in every branch below.
   pendingRobloxNick.delete(tgIdNum);
 
+  // Early nick capture: every branch except user_not_found means the nick is a
+  // real Roblox account — note it on the order (заметка, не основное поле:
+  // юзер мог опечататься), even if the gamepass never materialises (VFNCQMT).
+  if (outcome.status !== "user_not_found") {
+    void noteProbableNick({ nick, source: "nick-search", wbCode: state.wbCode });
+  }
+
   const guideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`;
 
   // ── Branch 1: nickname doesn't exist on Roblox ───────────────────────────
@@ -2006,6 +2013,13 @@ async function processGamepassSubmission(
     if (!gamepassInfo.validationSkipped) {
       // Normal validation — only runs when Roblox API was reachable
 
+      // Early nick capture: Roblox already told us the creator — note it
+      // (в заметку заказа) even if validation fails below (wrong price / not
+      // for sale), so the manager sees the probable nick immediately.
+      if (gamepassInfo.creatorName) {
+        void noteProbableNick({ nick: gamepassInfo.creatorName, source: "gp-validation", wbCode: state.wbCode });
+      }
+
       /** Notify admins about a validation rejection so they're aware. Non-fatal. */
       const notifyAdminValidationFail = async (reason: string) => {
         const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name || "Пользователь");
@@ -2155,8 +2169,10 @@ async function processGamepassSubmission(
     //  3. Clear bonus balance
     // If any step fails the whole transaction rolls back — the code stays unclaimed.
     let order: any;
+    let duplicateSubmission = false;
+    let replacedGamepassUrl: string | null = null;
     try {
-      order = await (db as any).$transaction(async (tx: any) => {
+      const txResult = await (db as any).$transaction(async (tx: any) => {
         // Direct orders have a synthetic DIR- code — no WbCode record exists, skip claim step.
         if (!state.wbCode.startsWith("DIR-")) {
         const claimed = await tx.wbCode.updateMany({
@@ -2196,6 +2212,7 @@ async function processGamepassSubmission(
         });
 
         let newOrder;
+        let replacedUrl: string | null = null;
         if (existingOrder) {
           // AWAITING_GAMEPASS / REJECTED → first gamepass; PENDING / IN_PROGRESS →
           // the user re-picked their nick ("передумал") before it was bought.
@@ -2204,6 +2221,16 @@ async function processGamepassSubmission(
           if (existingOrder.status === "COMPLETED") {
             throw Object.assign(new Error("Order already exists"), { code: "P2002" });
           }
+          const isProcessing = existingOrder.status === "PENDING" || existingOrder.status === "IN_PROGRESS";
+          if (isProcessing && existingOrder.gamepassUrl === cleanLink) {
+            // Same gamepass re-submitted while the order is already queued —
+            // idempotent no-op: no re-PENDING, no duplicate admin card (bug
+            // «двойные карточки»: site one-tap + bot submit of the same pass).
+            return { order: existingOrder, duplicate: true, replacedUrl: null };
+          }
+          // A DIFFERENT pass on a queued order = замена — the card gets a
+          // 🔁 marker so the manager knows it's not a new order.
+          if (isProcessing) replacedUrl = existingOrder.gamepassUrl;
           // Promote / re-point to PENDING with the (new) gamepass link
           newOrder = await tx.wbOrder.update({
             where: { id: existingOrder.id },
@@ -2234,8 +2261,11 @@ async function processGamepassSubmission(
 
         // Bonus balance is preserved — it's only spent on direct bot orders, not WB-code orders.
 
-        return newOrder;
+        return { order: newOrder, duplicate: false, replacedUrl };
       });
+      order = txResult.order;
+      duplicateSubmission = txResult.duplicate;
+      replacedGamepassUrl = txResult.replacedUrl;
     } catch (err: any) {
       if (err.isClaimed) {
         pendingLink.delete(ctx.from.id);
@@ -2270,6 +2300,19 @@ async function processGamepassSubmission(
 
     pendingLink.delete(ctx.from.id);
     clearFailCounts(ctx.from.id);
+
+    if (duplicateSubmission) {
+      // Same pass on an already-queued order — confirm to the user, but do NOT
+      // re-send the admin card (root cause of «двойные карточки»).
+      await ctx.reply(
+        "✅ Этот геймпасс уже принят — заказ в обработке, выкупим в ближайшее время.",
+        Markup.inlineKeyboard([
+          [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
+          [supportBtn("💬 Если что-то не так", "order_dupe", ctx)],
+        ])
+      );
+      return;
+    }
 
     if (validatedCreator) {
       try { await (db as any).user.update({ where: { tgId: String(ctx.from.id) }, data: { robloxUsername: validatedCreator } }); } catch {}
@@ -2324,7 +2367,7 @@ async function processGamepassSubmission(
         include: { user: true }
       });
       if (fullOrder) {
-        const { text: cardText, reply_markup } = await renderOrderCard(fullOrder, validatedCreator ?? undefined, gamepassInfo.isAgeRestricted);
+        const { text: cardText, reply_markup } = await renderOrderCard(fullOrder, validatedCreator ?? undefined, gamepassInfo.isAgeRestricted, replacedGamepassUrl ?? undefined);
         for (const adminId of ADMIN_IDS) {
           try { await bot.telegram.sendMessage(adminId, cardText, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } }); } catch { }
         }
@@ -2338,8 +2381,7 @@ async function processGamepassSubmission(
  * Universal renderer for the admin order card.
  * Returns text and reply_markup ready for ctx.reply or edit.
  */
-async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted?: boolean) {
-  const shortId = order.id.slice(-6).toUpperCase();
+async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted?: boolean, replacedGamepassUrl?: string) {
   const passPrice = Math.ceil(order.amount / 0.7);
   const statusLabels: any = {
     AWAITING_GAMEPASS: "⌛ Ожидаем геймпасс",
@@ -2375,9 +2417,11 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
   const bonusLine = bonus > 0 ? `🎁 Использован бонус: <b>${bonus} R$</b>\n` : "";
   const reviewLine = wbCode?.reviewBonusClaimed ? `🌟 Отзыв: <b>Оставлен (+100 R$)</b>\n` : `🌟 Отзыв: <b>Нет</b>\n`;
 
-  // Loyalty tag — subtract 1 to get count of orders BEFORE the current one
-  const totalOrders = await (db as any).wbOrder.count({ where: { userId: order.userId } }).catch(() => 1);
-  const prev = Math.max(0, totalOrders - 1);
+  // Loyalty tag — orders that moved past AWAITING, excluding this one. A
+  // freshly promoted order used to count itself → false «ПОВТОРНЫЙ КЛИЕНТ».
+  const prev = await (db as any).wbOrder.count({
+    where: { userId: order.userId, id: { not: order.id }, status: { notIn: ["AWAITING_GAMEPASS"] } },
+  }).catch(() => 0);
   const loyaltyLine =
     prev >= 5 ? `👑 <b>VIP КЛИЕНТ (${prev} заказов)</b>\n` :
       prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>\n` :
@@ -2396,9 +2440,19 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
     (order.gamepassUrl ?? "").includes(String(wbCode.selectedGamepassId));
   const webOneTapLine = pickedOnSite ? `🌐 <b>ONE-TAP С САЙТА</b>\n` : "";
 
+  // The user swapped the pass on an already-queued order — not a new order.
+  const replacedLine = replacedGamepassUrl
+    ? (() => {
+        const m = replacedGamepassUrl.match(/game-pass(?:es)?\/(\d+)/);
+        return `🔁 <b>ЗАМЕНА ГЕЙМПАССА</b>${m ? ` (было: <code>${m[1]}</code>)` : ""}\n`;
+      })()
+    : "";
+
+  // Header identifier = код (ВБ / DIR- / AV-), не внутренний номер заказа.
   const text =
-    `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
+    `📦 <b>ЗАКАЗ <code>${order.wbCode}</code></b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
+    replacedLine +
     webOneTapLine +
     directTag +
     loyaltyLine +
@@ -2410,15 +2464,14 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
     ageRestrictLine +
     (order.isDirectOrder ? `` : reviewLine) +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
-    (order.isDirectOrder ? `` : `🔑 Код ВБ: <code>${order.wbCode}</code>\n`) +
     `📊 Статус: <b>${statusLabels[order.status] || order.status}</b>${reasonLine}` +
     (order.gamepassUrl ? `\n\n🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>` : ``);
 
   // Action buttons for PENDING and IN_PROGRESS orders, plus a one-tap deep-link
-  // into the TWA Orders screen prefocused on this order (?q=<shortId> matches
-  // the order id suffix). Mirrors sendAdminOrderCard so every admin card —
+  // into the TWA Orders screen prefocused on this order (?q=<код> — TWA ищет
+  // и по коду ВБ). Mirrors sendAdminOrderCard so every admin card —
   // new-order notify, search result, status refresh — leads back into the app.
-  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(shortId)}`;
+  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(order.wbCode)}`;
   const reply_markup = (order.status === "PENDING" || order.status === "IN_PROGRESS") ? {
     inline_keyboard: [
       [
@@ -2866,11 +2919,11 @@ async function performAdminReject(bot: Telegraf, ctx: any, orderId: string, reas
     if (updated.count === 0) {
       const current = await (db as any).wbOrder.findUnique({
         where: { id: orderId },
-        select: { status: true },
+        select: { status: true, wbCode: true },
       });
       await ctx.reply(
         current
-          ? `⚠️ Заказ #${orderId.slice(-6).toUpperCase()} уже в статусе <b>${current.status}</b> — отклонение не выполнено.`
+          ? `⚠️ Заказ <code>${current.wbCode}</code> уже в статусе <b>${current.status}</b> — отклонение не выполнено.`
           : "❌ Заказ не найден.",
         { parse_mode: "HTML" }
       );
@@ -2886,8 +2939,7 @@ async function performAdminReject(bot: Telegraf, ctx: any, orderId: string, reas
       return;
     }
 
-    const shortId = order.id.slice(-6).toUpperCase();
-    await ctx.reply(`❌ <b>Заказ #${shortId} отклонён.</b>\nПричина: <i>${displayReason}</i>`, { parse_mode: "HTML" });
+    await ctx.reply(`❌ <b>Заказ <code>${order.wbCode}</code> отклонён.</b>\nПричина: <i>${displayReason}</i>`, { parse_mode: "HTML" });
 
     if (order.user) {
       await notifyUserRejected(bot, order.user, order.id, displayReason, order.amount, order.wbCode);
@@ -3142,7 +3194,7 @@ export function registerCallbacks(bot: Telegraf): void {
         }
 
         const lines: string[] = [];
-        lines.push(`📋 <b>Скрипт выкупа</b> · Заказ #${orderId.slice(-6).toUpperCase()}`);
+        lines.push(`📋 <b>Скрипт выкупа</b> · Заказ <code>${order.wbCode}</code>`);
         lines.push(`🎮 ${escapeHtml(info.name)} · ${info.priceInRobux} R$ · ${escapeHtml(info.creatorName)}`);
 
         if (!info.isForSale) {
@@ -3233,10 +3285,9 @@ export function registerCallbacks(bot: Telegraf): void {
             if (user) await notifyUserCompleted(bot, user, orderId, order.amount, order.isDirectOrder ?? false);
           }
 
-          const shortId = orderId.slice(-6).toUpperCase();
           const editedText =
             `✅ <b>Автовыкуп</b> · ${adminTag}\n` +
-            `Заказ #${shortId} · ${info.priceInRobux} R$` +
+            `Заказ <code>${order.wbCode}</code> · ${info.priceInRobux} R$` +
             priceWarning;
           try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch {};
         } else {
@@ -3248,7 +3299,7 @@ export function registerCallbacks(bot: Telegraf): void {
           const balanceLine = balance !== null ? `\n💰 Баланс: ${balance.toLocaleString()} R$` : "";
           await ctx.reply(
             `❌ <b>Ошибка автовыкупа</b>\n` +
-            `Заказ #${orderId.slice(-6).toUpperCase()}\n` +
+            `Заказ <code>${order.wbCode}</code>\n` +
             `Геймпасс: ${escapeHtml(info.name)} · ${info.priceInRobux} R$${priceWarning}\n` +
             `Причина: <code>${escapeHtml(result.msg)}</code>${balanceLine}\n\n` +
             `<i>Используйте 📋 Скрипт как запасной вариант.</i>`,
@@ -3295,7 +3346,7 @@ export function registerCallbacks(bot: Telegraf): void {
           ? await (db as any).user.findUnique({ where: { id: order.userId } })
           : null;
 
-        const editedText = `✅ <b>Выполнено админом ${adminTag}</b>\nЗаказ #${orderId.slice(-6).toUpperCase()} · ${order.amount} R$`;
+        const editedText = `✅ <b>Выполнено админом ${adminTag}</b>\nЗаказ <code>${order.wbCode}</code> · ${order.amount} R$`;
         try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch { }
 
         if (user) await notifyUserCompleted(bot, user, orderId, order.amount, order.isDirectOrder ?? false);
@@ -3311,8 +3362,9 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("admin_reject_init:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const orderId = data.split(":")[1];
+      const rejCode = await orderCode(orderId);
       await ctx.reply(
-        `⚠️ Отклонить заказ <code>${orderId.slice(-6).toUpperCase()}</code>?\n\nЭто действие уведомит пользователя.`,
+        `⚠️ Отклонить заказ <code>${rejCode ?? "?"}</code>?\n\nЭто действие уведомит пользователя.`,
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([[
@@ -3329,8 +3381,9 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("confirm_reject:")) {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const orderId = data.split(":")[1];
+      const rejCode2 = await orderCode(orderId);
       try { await ctx.editMessageText(
-        `📋 Выбери причину отклонения заказа <code>${orderId.slice(-6).toUpperCase()}</code>:`,
+        `📋 Выбери причину отклонения заказа <code>${rejCode2 ?? "?"}</code>:`,
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
@@ -3374,8 +3427,9 @@ export function registerCallbacks(bot: Telegraf): void {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const orderId = data.split(":")[1];
       pendingRejectionReason.set(ctx.from.id, orderId);
+      const rejCode3 = await orderCode(orderId);
       try { await ctx.editMessageText(
-        `✏️ Напиши причину отклонения заказа <code>${orderId.slice(-6).toUpperCase()}</code>:`,
+        `✏️ Напиши причину отклонения заказа <code>${rejCode3 ?? "?"}</code>:`,
         { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", `cancel_reject:${orderId}`)]]) }
       ); } catch { }
       await ctx.answerCbQuery();
@@ -3615,7 +3669,7 @@ export function registerCallbacks(bot: Telegraf): void {
         await ctx.answerCbQuery("У тебя уже есть активная заявка");
         try {
           await ctx.editMessageText(
-            `⏳ У тебя уже есть активная заявка <b>#${existingIntent.id.slice(-6).toUpperCase()}</b>.\n\n` +
+            `⏳ У тебя уже есть активная заявка на <b>${existingIntent.totalAmount} R$</b>.\n\n` +
             `Дождись реквизитов от менеджера или отмени заявку.`,
             { parse_mode: "HTML", ...Markup.inlineKeyboard([
               [Markup.button.callback("❌ Отменить заявку", CB.userCancelIntent(existingIntent.id))],
@@ -3632,7 +3686,7 @@ export function registerCallbacks(bot: Telegraf): void {
         await ctx.answerCbQuery("У тебя уже есть активный заказ");
         try {
           await ctx.editMessageText(
-            `⏳ У тебя уже есть активный заказ <b>#${existingOrder.id.slice(-6).toUpperCase()}</b>.\n\n` +
+            `⏳ У тебя уже есть активный заказ на <b>${existingOrder.amount} R$</b>.\n\n` +
             `Дождись реквизитов от менеджера, а затем оформи новый.`,
             { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("📊 Статус заказа", CB.refreshStatus)]]) }
           );
@@ -3663,7 +3717,6 @@ export function registerCallbacks(bot: Telegraf): void {
         return;
       }
 
-      const shortId = intent.id.slice(-6).toUpperCase();
       const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name || "Пользователь");
       const prevOrdersCount = await (db as any).wbOrder.count({
         where: { userId: dirUser.id, status: "COMPLETED" },
@@ -3692,7 +3745,7 @@ export function registerCallbacks(bot: Telegraf): void {
         [faqBtn()],
       ]);
       const intentMsg =
-        `✅ <b>Заявка #${shortId} отправлена!</b>\n\n` +
+        `✅ <b>Заявка отправлена!</b>\n\n` +
         `📦 ${flow.totalAmount} R$ → <b>${escapeHtml(flow.robloxUsername!)}</b>\n` +
         `💰 К оплате: <b>${fmtRub(flow.rublePrice!)}</b>\n\n` +
         `⏱ Менеджер пришлёт реквизиты — обычно в течение 5 минут.\nОжидай сообщения 👇`;
@@ -3721,7 +3774,7 @@ export function registerCallbacks(bot: Telegraf): void {
         });
       } catch { }
       await Promise.allSettled(
-        ADMIN_IDS.map(id => tgSend(id, `❌ Заявка #${intentId.slice(-6).toUpperCase()} отменена покупателем.`))
+        ADMIN_IDS.map(id => tgSend(id, `❌ Заявка ${escapeHtml(intent.robloxUsername)} · ${intent.totalAmount} R$ отменена покупателем.`))
       );
       await ctx.answerCbQuery("Заявка отменена");
       return;
@@ -3787,10 +3840,9 @@ export function registerCallbacks(bot: Telegraf): void {
         }
       });
 
-      const shortId = ucdOrderId.slice(-6).toUpperCase();
       try {
         await ctx.editMessageText(
-          `❌ <b>Заказ #${shortId} отменён.</b>\n\nЕсли хочешь — создай новый заказ.`,
+          `❌ <b>Заказ на ${baseAmount} R$ отменён.</b>\n\nЕсли хочешь — создай новый заказ.`,
           { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("💎 Заказать напрямую", CB.startDirect)]]) }
         );
       } catch { }
@@ -3799,7 +3851,7 @@ export function registerCallbacks(bot: Telegraf): void {
       // Notify admins
       const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "Пользователь");
       const adminText =
-        `❌ <b>Заказ #${shortId} отменён покупателем</b>\n` +
+        `❌ <b>Заказ <code>${code}</code> отменён покупателем</b>\n` +
         `👤 ${escapeHtml(tgDisplay)}\n` +
         `💎 ${baseAmount} R$`;
       await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, adminText)));
@@ -3819,7 +3871,7 @@ export function registerCallbacks(bot: Telegraf): void {
       pendingPaymentDetails.set(ctx.from.id, spdOrderId);
       await ctx.reply(
         `💳 <b>Введи реквизиты для пользователя</b>\n` +
-        `Заказ #${spdOrderId.slice(-6).toUpperCase()}\n\n` +
+        `Заказ <code>${spdOrder.wbCode}</code> · ${spdOrder.amount} R$\n\n` +
         `Просто напиши — я отправлю напрямую покупателю:`,
         { parse_mode: "HTML" }
       );
@@ -3851,7 +3903,6 @@ export function registerCallbacks(bot: Telegraf): void {
         return;
       }
 
-      const sqrShortId  = sqrOrderId.slice(-6).toUpperCase();
       const rublePrice  = directPrice(sqrOrder.amount);
       await (db as any).wbOrder.update({
         where: { id: sqrOrderId },
@@ -3868,7 +3919,7 @@ export function registerCallbacks(bot: Telegraf): void {
             { source: qr },
             {
               caption:
-                `💳 <b>Оплата заказа #${sqrShortId}</b>\n\n` +
+                `💳 <b>Оплата заказа на ${sqrOrder.amount} R$</b>\n\n` +
                 `Сумма к оплате: <b>${rublePrice} ₽</b>\n` +
                 `Отсканируй QR в приложении банка (по СБП) и переведи <b>точную сумму</b>.\n\n` +
                 `После перевода пришли сюда <b>скриншот или чек об оплате</b> (фотографией, не файлом) 👇`,
@@ -3888,7 +3939,7 @@ export function registerCallbacks(bot: Telegraf): void {
         delivered = await vkSendPhoto(
           sqrUser.vkId,
           qr,
-          `💳 Оплата заказа #${sqrShortId}\n\n` +
+          `💳 Оплата заказа на ${sqrOrder.amount} R$\n\n` +
           `Сумма к оплате: ${rublePrice} ₽\n` +
           `Отсканируй QR в приложении банка (по СБП) и переведи точную сумму.\n\n` +
           `После перевода пришли сюда скриншот или чек об оплате (фотографией, не файлом) 👇`
@@ -3896,11 +3947,11 @@ export function registerCallbacks(bot: Telegraf): void {
       }
 
       if (delivered) {
-        await ctx.reply(`✅ QR отправлен покупателю (Заказ #${sqrShortId}).`, { parse_mode: "HTML" });
+        await ctx.reply(`✅ QR отправлен покупателю (заказ <code>${sqrOrder.wbCode}</code>).`, { parse_mode: "HTML" });
         await ctx.answerCbQuery("✅ QR отправлен");
       } else {
         await ctx.reply(
-          `⚠️ Не удалось доставить QR покупателю (Заказ #${sqrShortId}). ` +
+          `⚠️ Не удалось доставить QR покупателю (заказ <code>${sqrOrder.wbCode}</code>). ` +
           `Проверь, что у пользователя есть активный диалог с ботом.`,
           { parse_mode: "HTML" }
         );
@@ -3928,7 +3979,7 @@ export function registerCallbacks(bot: Telegraf): void {
         try {
           await bot.telegram.sendMessage(
             cdoUser.tgId,
-            `❌ <b>Заказ #${cdoOrderId.slice(-6).toUpperCase()} отменён.</b>\n\nЕсли хочешь — создай новый заказ.`,
+            `❌ <b>Заказ на ${cdoOrder.amount} R$ отменён.</b>\n\nЕсли хочешь — создай новый заказ.`,
             // No ctx here: this keyboard goes to the USER, but ctx belongs to the
             // admin callback — passing it fired a false «admin застрял» hurdle alert.
             { parse_mode: "HTML", ...Markup.inlineKeyboard([
@@ -3940,7 +3991,7 @@ export function registerCallbacks(bot: Telegraf): void {
       } else if (cdoUser?.vkId) {
         try {
           await vkSend(cdoUser.vkId,
-            `❌ Заказ #${cdoOrderId.slice(-6).toUpperCase()} отменён.\n\nЕсли хочешь — создай новый заказ напрямую (нажми кнопку "💎 Купить напрямую").\n\nЕсли считаешь, что это ошибка — https://t.me/RobloxBank_PA`
+            `❌ Заказ на ${cdoOrder.amount} R$ отменён.\n\nЕсли хочешь — создай новый заказ напрямую (нажми кнопку "💎 Купить напрямую").\n\nЕсли считаешь, что это ошибка — https://t.me/RobloxBank_PA`
           );
         } catch { }
       }
@@ -4007,7 +4058,6 @@ export function registerCallbacks(bot: Telegraf): void {
         return;
       }
 
-      const sqiShortId = newOrder.id.slice(-6).toUpperCase();
       const sqiRublePrice = intent.rublePrice;
       if (intent.user.tgId) {
         try {
@@ -4016,7 +4066,7 @@ export function registerCallbacks(bot: Telegraf): void {
             { source: qr },
             {
               caption:
-                `💳 <b>Оплата заказа #${sqiShortId}</b>\n\n` +
+                `💳 <b>Оплата заказа на ${intent.totalAmount} R$</b>\n\n` +
                 `Сумма к оплате: <b>${sqiRublePrice} ₽</b>\n` +
                 `Отсканируй QR в приложении банка (по СБП) и переведи <b>точную сумму</b>.\n\n` +
                 `После перевода пришли сюда <b>скриншот или чек об оплате</b> (фотографией, не файлом) 👇`,
@@ -4029,11 +4079,11 @@ export function registerCallbacks(bot: Telegraf): void {
       } else if (intent.user.vkId) {
         const delivered = await vkSendPhoto(
           intent.user.vkId, qr,
-          `💳 Оплата заказа #${sqiShortId}\n\nСумма к оплате: ${sqiRublePrice} ₽\nОтсканируй QR в приложении банка (по СБП) и переведи точную сумму.\n\nПосле перевода пришли скриншот (фотографией, не файлом) 👇`
+          `💳 Оплата заказа на ${intent.totalAmount} R$\n\nСумма к оплате: ${sqiRublePrice} ₽\nОтсканируй QR в приложении банка (по СБП) и переведи точную сумму.\n\nПосле перевода пришли скриншот (фотографией, не файлом) 👇`
         );
         if (!delivered) console.error("[TG] sqi vkSendPhoto failed");
       }
-      try { await ctx.editMessageText(`✅ QR отправлен — ${adminTag}\nЗаявка #${intentId.slice(-6).toUpperCase()} → Заказ #${sqiShortId}`, { parse_mode: "HTML" }); } catch { }
+      try { await ctx.editMessageText(`✅ QR отправлен — ${adminTag}\nЗаявка ${escapeHtml(intent.robloxUsername)} · ${intent.totalAmount} R$ → Заказ <code>${dirCode}</code>`, { parse_mode: "HTML" }); } catch { }
       await ctx.answerCbQuery("✅ QR отправлен");
       return;
     }
@@ -4089,12 +4139,11 @@ export function registerCallbacks(bot: Telegraf): void {
       }
 
       pendingPaymentDetails.set(ctx.from.id, newOrder.id);
-      const spiShortId = newOrder.id.slice(-6).toUpperCase();
       await ctx.reply(
-        `💳 <b>Введи реквизиты для пользователя</b>\nЗаказ #${spiShortId}\n\nПросто напиши — я отправлю напрямую покупателю:`,
+        `💳 <b>Введи реквизиты для пользователя</b>\nЗаказ <code>${dirCode}</code> · ${intent.totalAmount} R$\n\nПросто напиши — я отправлю напрямую покупателю:`,
         { parse_mode: "HTML" }
       );
-      try { await ctx.editMessageText(`💳 Реквизиты → #${spiShortId} — ${adminTag}\nЗаявка #${intentId.slice(-6).toUpperCase()} → Заказ #${spiShortId}`, { parse_mode: "HTML" }); } catch { }
+      try { await ctx.editMessageText(`💳 Реквизиты — ${adminTag}\nЗаявка ${escapeHtml(intent.robloxUsername)} · ${intent.totalAmount} R$ → Заказ <code>${dirCode}</code>`, { parse_mode: "HTML" }); } catch { }
       await ctx.answerCbQuery();
       return;
     }
@@ -4117,7 +4166,7 @@ export function registerCallbacks(bot: Telegraf): void {
       } else if (intent.user.vkId) {
         try { await vkSend(intent.user.vkId, `❌ Заявка отклонена. Попробуй оформить новую.`); } catch { }
       }
-      try { await ctx.editMessageText(`❌ Заявка #${intentId.slice(-6).toUpperCase()} отклонена — ${adminTag}`, { parse_mode: "HTML" }); } catch { }
+      try { await ctx.editMessageText(`❌ Заявка ${escapeHtml(intent.robloxUsername)} · ${intent.totalAmount} R$ отклонена — ${adminTag}`, { parse_mode: "HTML" }); } catch { }
       await ctx.answerCbQuery("Заявка отклонена");
       return;
     }
@@ -4191,7 +4240,7 @@ export function registerCallbacks(bot: Telegraf): void {
           } catch { }
         }
       }
-      const payOkCaption = `✅ Оплата принята — ${adminTag}\nЗаказ #${payOkOrderId.slice(-6).toUpperCase()}`;
+      const payOkCaption = `✅ Оплата принята — ${adminTag}\nЗаказ <code>${payOkOrder.wbCode}</code> · ${payOkOrder.amount} R$`;
       try { await ctx.editMessageCaption(payOkCaption, { parse_mode: "HTML" }); } catch { }
       await ctx.answerCbQuery("✅ Оплата подтверждена");
       return;
@@ -4380,7 +4429,7 @@ export function registerCallbacks(bot: Telegraf): void {
         await vkSend(user.vkId, stripHtml(bonusMsg));
       }
 
-      const caption = `🎁 Бонус начислен — ${adminTag}\nЗаказ #${orderId.slice(-6).toUpperCase()}`;
+      const caption = `🎁 Бонус начислен — ${adminTag}\nЗаказ <code>${(await orderCode(orderId)) ?? "?"}</code>`;
       try { await ctx.editMessageCaption(caption, { parse_mode: "HTML" }); } catch { }
       await ctx.answerCbQuery("+100 R$ начислено");
       return;
@@ -4391,7 +4440,7 @@ export function registerCallbacks(bot: Telegraf): void {
       if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
       const [, orderId, userId] = data.split(":");
       await ctx.reply(
-        `⚠️ Отклонить скриншот отзыва для заказа <code>${orderId.slice(-6).toUpperCase()}</code>?\n\nПользователь будет уведомлён и сможет отправить скриншот повторно.`,
+        `⚠️ Отклонить скриншот отзыва для заказа <code>${(await orderCode(orderId)) ?? "?"}</code>?\n\nПользователь будет уведомлён и сможет отправить скриншот повторно.`,
         {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([[
@@ -4447,7 +4496,7 @@ export function registerCallbacks(bot: Telegraf): void {
       const reason = reasonMap[key] ?? key;
 
       // Update admin card
-      const caption = `❌ Отзыв отклонён — ${adminTag}\nЗаказ #${orderId.slice(-6).toUpperCase()}\nПричина: ${reason}`;
+      const caption = `❌ Отзыв отклонён — ${adminTag}\nЗаказ <code>${(await orderCode(orderId)) ?? "?"}</code>\nПричина: ${reason}`;
       try { await ctx.editMessageText(caption, { parse_mode: "HTML" }); } catch { }
 
       // Notify user and restore review state
@@ -4650,7 +4699,6 @@ async function notifyUserRejected(
   amount: number,
   wbCode: string
 ): Promise<void> {
-  const shortId = orderId.slice(-6).toUpperCase();
   const reasonLine = reason && reason !== "не указана"
     ? `💬 Причина: <i>${reason}</i>\n\n`
     : "";
@@ -4667,9 +4715,10 @@ async function notifyUserRejected(
       `• Геймпасс не выставлен на продажу\n\n` +
       `Исправь и нажми кнопку ниже, чтобы отправить ссылку заново:`;
 
+  // Прямой заказ клиент узнаёт по сумме — без внутреннего номера (C2).
   const codeLabel = wbCode && !wbCode.startsWith("DIR-")
     ? `Код ВБ: ${wbCode}`
-    : `Заказ #${shortId}`;
+    : `Заказ на ${amount} R$`;
   const msg =
     `❌ <b>${codeLabel} — отклонён</b>\n\n` +
     reasonLine +

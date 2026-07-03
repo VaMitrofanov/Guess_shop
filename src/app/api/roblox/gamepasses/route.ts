@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserGamepasses, getRobloxUser } from "@/lib/roblox";
+import { noteProbableNickByCode } from "@/lib/capture-nick";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,9 @@ function extractGamepassId(input: string): string | null {
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("query")?.trim() ?? "";
+  // Optional WB code — lets us stamp the searched nick on the order right away
+  // (early nick capture), even if the user never completes the one-tap.
+  const wbCode = searchParams.get("code")?.trim() ?? "";
 
   if (!q) {
     return NextResponse.json({ error: "Query is required" }, { status: 400 });
@@ -62,6 +66,7 @@ export async function GET(req: NextRequest) {
     // ── Username lookup ──────────────────────────────────────────────
     const gamepasses = await getUserGamepasses(q);
     if (gamepasses.length > 0) {
+      if (wbCode) await noteProbableNickByCode(wbCode, q, "site-search");
       return NextResponse.json({
         success: true,
         gamepasses,
@@ -75,6 +80,7 @@ export async function GET(req: NextRequest) {
     // created). Mirrors the bot's searchGamepassesByNick branching. We only pay
     // for this extra resolve when the fast path returned nothing.
     const user = await getRobloxUser(q);
+    if (user && wbCode) await noteProbableNickByCode(wbCode, q, "site-search");
     return NextResponse.json({
       success: true,
       gamepasses: [],

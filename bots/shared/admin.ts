@@ -8,6 +8,21 @@
  */
 
 import { tgSend, tgSendPhoto, escapeHtml } from "./notify";
+import { db } from "./db";
+
+/**
+ * Идентификатор заказа в карточках = его код (ВБ / DIR- / AV-), не внутренний
+ * номер (#SHORTID убраны по решению владельца 2026-07-03, вариант C2).
+ * Резолвит код по id заказа для карточек, куда код не передаётся явно.
+ */
+export async function orderCode(orderId: string): Promise<string | null> {
+  try {
+    const o = await (db as any).wbOrder.findUnique({ where: { id: orderId }, select: { wbCode: true } });
+    return o?.wbCode ?? null;
+  } catch {
+    return null;
+  }
+}
 
 // ── Direct order pricing ───────────────────────────────────────────────────────
 
@@ -413,6 +428,8 @@ export interface OrderCardPayload {
   isAgeRestricted?:    boolean;
   /** true when the customer picked this gamepass via the website nick-search (one-tap). */
   viaWebOneTap?:       boolean;
+  /** Old gamepassUrl when the user swapped the pass on an already-queued order (🔁 marker). */
+  replacedGamepassUrl?: string;
 }
 
 export interface ReviewCardPayload {
@@ -466,7 +483,6 @@ export interface PaymentScreenshotCardPayload {
  */
 export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void> {
   const passPrice = Math.ceil(order.amount / 0.7);
-  const shortId   = order.id.slice(-6).toUpperCase();
 
   const dateStr = order.createdAt 
     ? new Date(order.createdAt).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " МСК" 
@@ -490,9 +506,19 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
 
   const webOneTapLine = order.viaWebOneTap ? `🌐 <b>ONE-TAP С САЙТА</b>\n` : "";
 
+  // The user swapped the pass on an already-queued order — not a new order.
+  const replacedLine = order.replacedGamepassUrl
+    ? (() => {
+        const m = order.replacedGamepassUrl!.match(/game-pass(?:es)?\/(\d+)/);
+        return `🔁 <b>ЗАМЕНА ГЕЙМПАССА</b>${m ? ` (было: <code>${m[1]}</code>)` : ""}\n`;
+      })()
+    : "";
+
+  // Header identifier = код (ВБ / DIR- / AV-), не внутренний номер заказа.
   const text =
-    `📦 <b>ЗАКАЗ #${shortId}</b>\n` +
+    `📦 <b>ЗАКАЗ <code>${order.wbCode}</code></b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
+    replacedLine +
     webOneTapLine +
     loyaltyLine +
     `${platformEmoji} Источник: <b>${order.platform}</b>\n` +
@@ -502,7 +528,6 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
     creatorLine +
     ageRestrictLine +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
-    `🔑 Код ВБ: <code>${order.wbCode}</code>\n` +
     `📊 Статус: ⏳ В обработке\n\n` +
     `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>` +
     (() => {
@@ -510,10 +535,10 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
       return m ? `\n🎫 Pass ID: <code>${m[1]}</code>` : "";
     })();
 
-  // One-tap deep-link into the TWA Orders screen, prefocused on this order.
-  // web_app inline buttons launch the Web App in personal chats with the given
-  // URL — no Direct Link app name needed.
-  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(shortId)}`;
+  // One-tap deep-link into the TWA Orders screen, prefocused on this order
+  // (?q=<код> — TWA search matches wbCode). web_app inline buttons launch the
+  // Web App in personal chats with the given URL — no Direct Link app name needed.
+  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(order.wbCode)}`;
   const reply_markup = {
     inline_keyboard: [
       [
@@ -538,7 +563,7 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
  * Admin can send payment details or cancel the order.
  */
 export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload): Promise<void> {
-  const shortId = payload.orderId.slice(-6).toUpperCase();
+  const code = await orderCode(payload.orderId);
   const dateStr = new Date(payload.createdAt).toLocaleString("ru-RU", {
     timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
     year: "numeric", hour: "2-digit", minute: "2-digit",
@@ -557,7 +582,7 @@ export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload):
   const rublePrice = directPrice(paidRobux);
 
   const text =
-    `🔷 <b>ПРЯМОЙ ЗАКАЗ #${shortId}</b>\n` +
+    `🔷 <b>ПРЯМОЙ ЗАКАЗ${code ? ` <code>${code}</code>` : ""}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
     loyaltyLine +
     `📅 Время: <b>${dateStr}</b>\n` +
@@ -567,7 +592,7 @@ export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload):
     `💎 Выдать: <b>${payload.amount} R$</b> (Геймпасс: ${Math.ceil(payload.amount / 0.7)} R$)\n` +
     `📊 Статус: ⏳ Ожидаем реквизиты`;
 
-  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(shortId)}`;
+  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(code ?? payload.orderId.slice(-6))}`;
   const reply_markup = {
     inline_keyboard: [
       [
@@ -593,7 +618,6 @@ export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload):
  * Admin can send QR / payment details or reject.
  */
 export async function sendAdminIntentCard(payload: DirectIntentCardPayload): Promise<void> {
-  const shortId = payload.intentId.slice(-6).toUpperCase();
   const dateStr = new Date(payload.createdAt).toLocaleString("ru-RU", {
     timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
     year: "numeric", hour: "2-digit", minute: "2-digit",
@@ -611,8 +635,9 @@ export async function sendAdminIntentCard(payload: DirectIntentCardPayload): Pro
   const passPrice = Math.ceil(payload.totalAmount / 0.7);
   const gpName = payload.gamepassName ? ` · "${escapeHtml(payload.gamepassName)}"` : "";
 
+  // Заявка (intent) кода не имеет — идентификатор для менеджера: ник + сумма.
   const text =
-    `🔷 <b>ЗАЯВКА #${shortId}</b>\n` +
+    `🔷 <b>ЗАЯВКА · ${escapeHtml(payload.robloxUsername)} · ${payload.totalAmount} R$</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
     loyaltyLine +
     `📅 Время: <b>${dateStr}</b>\n` +
@@ -646,11 +671,11 @@ export async function sendAdminIntentCard(payload: DirectIntentCardPayload): Pro
  * Send a payment screenshot card to all admins for confirmation.
  */
 export async function sendAdminPaymentCard(payload: PaymentScreenshotCardPayload): Promise<void> {
-  const shortId = payload.orderId.slice(-6).toUpperCase();
+  const code = await orderCode(payload.orderId);
   const amountLine = payload.amount ? `💎 Сумма: <b>${payload.amount} R$</b>\n` : "";
   const caption =
     `💳 <b>Скриншот оплаты</b>\n` +
-    `Заказ #${shortId}\n` +
+    (code ? `Заказ <code>${code}</code>\n` : "") +
     amountLine +
     `Юзер: ${payload.userDisplay}`;
 
@@ -673,10 +698,10 @@ export async function sendAdminPaymentCard(payload: PaymentScreenshotCardPayload
  * Admin chooses [🎁 Начислить +100 R$] or [❌ Отклонить].
  */
 export async function sendAdminReviewCard(payload: ReviewCardPayload): Promise<void> {
-  const shortId = payload.orderId.slice(-6).toUpperCase();
+  const code = await orderCode(payload.orderId);
   const caption =
     `📸 <b>Скриншот отзыва</b>\n` +
-    `Заказ #${shortId}\n` +
+    (code ? `Заказ <code>${code}</code>\n` : "") +
     `Юзер: ${payload.userDisplay}`;
 
   const reply_markup = {

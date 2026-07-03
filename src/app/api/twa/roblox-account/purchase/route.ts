@@ -15,6 +15,44 @@ async function getCookie(): Promise<string | null> {
   return s?.robloxCookie ?? null;
 }
 
+export interface ExistingOrderRef {
+  wbCode: string;
+  status: string;
+  orderSource: string;
+  createdAt: Date;
+}
+
+/**
+ * Дедуп заказов: находит заказы, уже ссылающиеся на эти геймпассы, чтобы поиск
+ * подсветил «уже в заказе» и менеджер не создал дубль (Авито и не только).
+ * REJECTED не блокирует. Возвращает map gamepassId → последний такой заказ.
+ */
+async function findExistingOrders(gamepassIds: (string | number)[]): Promise<Record<string, ExistingOrderRef>> {
+  const ids = [...new Set(gamepassIds.map(String).filter((s) => /^\d+$/.test(s)))];
+  if (ids.length === 0) return {};
+  try {
+    const orders = await (prisma as any).wbOrder.findMany({
+      where: {
+        isTest: false,
+        status: { notIn: ["REJECTED"] },
+        OR: ids.map((id) => ({ gamepassUrl: { contains: `/${id}` } })),
+      },
+      orderBy: { createdAt: "desc" },
+      select: { wbCode: true, status: true, orderSource: true, createdAt: true, gamepassUrl: true },
+    });
+    const map: Record<string, ExistingOrderRef> = {};
+    for (const o of orders) {
+      // `contains` может зацепить более длинный id — сверяем точным парсингом URL.
+      const m = (o.gamepassUrl ?? "").match(/game-pass(?:es)?\/(\d+)/);
+      if (!m || !ids.includes(m[1]) || map[m[1]]) continue;
+      map[m[1]] = { wbCode: o.wbCode, status: o.status, orderSource: o.orderSource, createdAt: o.createdAt };
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
 export async function POST(req: NextRequest) {
   if (!await extractTwaUser(req))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -76,6 +114,7 @@ export async function POST(req: NextRequest) {
       thumbMap = Object.fromEntries((tData?.data ?? []).map((t: any) => [t.targetId, t.imageUrl]));
     }
 
+    const existingMap = await findExistingOrders(forSale.map((gp: any) => gp.id));
     const gamepasses = forSale.map((gp: any) => ({
       gamepassId: gp.id,
       productId:  gp.productId ?? 0,
@@ -83,6 +122,7 @@ export async function POST(req: NextRequest) {
       price:      gp.price ?? 0,
       sellerName: gp.creator?.name ?? resolvedName,
       image:      thumbMap[gp.id] ?? null,
+      existingOrder: existingMap[String(gp.id)] ?? null,
     }));
 
     return NextResponse.json({ gamepasses, username: resolvedName });
@@ -124,6 +164,7 @@ export async function POST(req: NextRequest) {
       }
     } catch { /* ok */ }
 
+    const existingMap = await findExistingOrders([gpId]);
     return NextResponse.json({
       gamepassId:  Number(gpId),
       productId:   info.ProductId,
@@ -135,6 +176,7 @@ export async function POST(req: NextRequest) {
       isManagedPricing: price !== base,
       basePriceInRobux: base,
       image,
+      existingOrder: existingMap[gpId] ?? null,
     });
   }
 

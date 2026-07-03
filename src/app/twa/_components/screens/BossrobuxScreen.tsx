@@ -24,7 +24,16 @@ interface GamepassItem {
   isForSale?: boolean;
   isManagedPricing?: boolean;
   basePriceInRobux?: number;
+  /** Активный/выполненный заказ, уже ссылающийся на этот геймпасс (дедуп). */
+  existingOrder?: { wbCode: string; status: string; orderSource: string } | null;
 }
+
+const ORDER_STATUS_RU: Record<string, string> = {
+  AWAITING_GAMEPASS: "ждёт ГП",
+  PENDING:           "в обработке",
+  IN_PROGRESS:       "в работе",
+  COMPLETED:         "выкуплен",
+};
 
 function SectionHeader({ title }: { title: string }) {
   return (
@@ -145,6 +154,11 @@ function GamepassCard({
           {gp.price.toLocaleString()} R$ · {gp.sellerName}
           {gp.isManagedPricing && <span style={{ color: C.orange }}> · MP</span>}
         </div>
+        {gp.existingOrder && (
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.orange, marginTop: 3 }}>
+            📦 уже в заказе {gp.existingOrder.wbCode} · {ORDER_STATUS_RU[gp.existingOrder.status] ?? gp.existingOrder.status}
+          </div>
+        )}
       </div>
       {bought ? (
         <span style={{ fontSize: 15, fontWeight: 600, color: C.green, flexShrink: 0 }}>✅</span>
@@ -797,8 +811,10 @@ function CreateAvitoSection({ token, onCreated }: { token: string; onCreated: ()
   const [nick, setNick] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  // Дедуп: сервер ответил 409 — активный заказ на этот геймпасс уже есть.
+  const [dup, setDup] = useState<{ wbCode: string; status: string } | null>(null);
 
-  async function submit() {
+  async function submit(force = false) {
     const amt = parseInt(amount, 10);
     if (!amt || amt < 1) { haptic.notify("error"); toast("Укажи сумму R$", "error"); return; }
     setSaving(true);
@@ -820,13 +836,19 @@ function CreateAvitoSection({ token, onCreated }: { token: string; onCreated: ()
           gamepassUrl,
           robloxUsername: nick.trim() || null,
           note: note.trim() || null,
+          force,
         }),
       });
       const d = await r.json();
+      if (r.status === 409 && d.existing) {
+        haptic.notify("warning");
+        setDup({ wbCode: d.existing.wbCode, status: d.existing.status });
+        return;
+      }
       if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
       haptic.notify("success");
       toast(`Заказ Авито создан · ${amt} R$`, "success");
-      setAmount(""); setGpInput(""); setNick(""); setNote("");
+      setAmount(""); setGpInput(""); setNick(""); setNote(""); setDup(null);
       setOpen(false);
       onCreated();
     } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
@@ -877,7 +899,7 @@ function CreateAvitoSection({ token, onCreated }: { token: string; onCreated: ()
 
         <input
           value={gpInput}
-          onChange={e => setGpInput(e.target.value)}
+          onChange={e => { setGpInput(e.target.value); setDup(null); }}
           placeholder="ID или URL геймпасса (опционально)"
           style={{
             width: "100%", background: C.elevated, border: "none", borderRadius: 10,
@@ -908,9 +930,20 @@ function CreateAvitoSection({ token, onCreated }: { token: string; onCreated: ()
           }}
         />
 
+        {dup && (
+          <div style={{
+            padding: "10px 12px", borderRadius: 10, background: `${C.orange}18`,
+            fontSize: 14, color: C.orange, lineHeight: 1.4,
+          }}>
+            ⚠️ Этот геймпасс уже в заказе <b>{dup.wbCode}</b>{" "}
+            ({ORDER_STATUS_RU[dup.status] ?? dup.status}). Нажми «Создать всё равно»,
+            если нужен второй заказ.
+          </div>
+        )}
+
         <button
           className="twa-press"
-          onClick={submit}
+          onClick={() => submit(!!dup)}
           disabled={saving || !amount.trim()}
           style={{
             width: "100%", padding: "14px", border: "none", borderRadius: 12,
@@ -920,7 +953,7 @@ function CreateAvitoSection({ token, onCreated }: { token: string; onCreated: ()
             fontFamily: "inherit", transition: "all 0.2s",
           }}
         >
-          {saving ? "Создаю…" : "Создать заказ Авито"}
+          {saving ? "Создаю…" : dup ? "Создать всё равно" : "Создать заказ Авито"}
         </button>
       </div>
     </Card>
@@ -1729,6 +1762,8 @@ export default function BossrobuxScreen({ token }: { token: string }) {
 
   const [confirmGp, setConfirmGp] = useState<GamepassItem | null>(null);
   const [attachGp, setAttachGp] = useState<GamepassItem | null>(null);
+  // Дедуп Авито: сервер ответил 409 — на геймпасс уже есть активный заказ.
+  const [avitoDup, setAvitoDup] = useState<{ gp: GamepassItem; existing: { wbCode: string; status: string } } | null>(null);
   const [buyoutKey, setBuyoutKey] = useState(0);
   const [buying, setBuying] = useState(false);
   const [boughtIds, setBoughtIds] = useState<Set<number>>(new Set());
@@ -1898,7 +1933,7 @@ export default function BossrobuxScreen({ token }: { token: string }) {
   }
 
   // ── Create Avito from search result ─────────────────────────────────────
-  async function createAvitoFromSearch(gp: GamepassItem) {
+  async function createAvitoFromSearch(gp: GamepassItem, force = false) {
     if (creatingAvito) return;
     setCreatingAvito(true);
     try {
@@ -1912,9 +1947,16 @@ export default function BossrobuxScreen({ token }: { token: string }) {
           gamepassUrl,
           robloxUsername: gp.sellerName || null,
           note: null,
+          force,
         }),
       });
       const d = await r.json();
+      // Дедуп: на этот геймпасс уже есть активный заказ → спрашиваем менеджера.
+      if (r.status === 409 && d.existing) {
+        haptic.notify("warning");
+        setAvitoDup({ gp, existing: d.existing });
+        return;
+      }
       if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
       haptic.notify("success");
       toast(`Авито · ${gp.name} · ${amount} R$`, "success");
@@ -2181,6 +2223,57 @@ export default function BossrobuxScreen({ token }: { token: string }) {
           onClose={() => setAttachGp(null)}
           onAttached={() => setBuyoutKey(k => k + 1)}
         />
+      )}
+
+      {/* Avito dedup confirm: активный заказ на этот геймпасс уже есть */}
+      {avitoDup && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 9999,
+            background: "rgba(0,0,0,0.65)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 24,
+          }}
+          onClick={e => { if (e.target === e.currentTarget && !creatingAvito) setAvitoDup(null); }}
+        >
+          <div style={{ background: C.card, borderRadius: 16, padding: 20, width: "100%", maxWidth: 340 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: "#e5e5ea", marginBottom: 8 }}>
+              ⚠️ Заказ уже есть
+            </div>
+            <div style={{ fontSize: 15, color: C.textSecondary, lineHeight: 1.45, marginBottom: 16 }}>
+              Геймпасс <b style={{ color: "#e5e5ea" }}>{avitoDup.gp.name}</b> уже в заказе{" "}
+              <b style={{ color: C.orange }}>{avitoDup.existing.wbCode}</b>{" "}
+              ({ORDER_STATUS_RU[avitoDup.existing.status] ?? avitoDup.existing.status}).
+              Создать ещё один?
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className="twa-press"
+                onClick={() => setAvitoDup(null)}
+                disabled={creatingAvito}
+                style={{
+                  flex: 1, padding: "12px 0", border: "none", borderRadius: 10,
+                  background: C.elevated, color: "#e5e5ea", fontSize: 15, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                Отмена
+              </button>
+              <button
+                className="twa-press"
+                onClick={() => { const gp = avitoDup.gp; setAvitoDup(null); createAvitoFromSearch(gp, true); }}
+                disabled={creatingAvito}
+                style={{
+                  flex: 1, padding: "12px 0", border: "none", borderRadius: 10,
+                  background: C.orange, color: "#fff", fontSize: 15, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                Создать ещё
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
