@@ -177,8 +177,10 @@ export async function GET(req: NextRequest) {
   const services: Promise<ServiceCheck>[] = [
     checkService("Web", process.env.MAIN_HEALTH_URL ?? "https://www.robloxbank.ru", "web"),
     checkService("Guide", process.env.GUIDE_HEALTH_URL ?? "https://www.robloxbank.ru/guide", "web"),
-    checkService("VK Bot", process.env.VK_BOT_HEALTH_URL ?? "http://5.223.95.11:3000", "bot"),
-    checkService("TG Bot", process.env.TG_BOT_HEALTH_URL ?? "http://5.223.95.11:3000", "bot"),
+    // Health URLs come from env only — no hardcoded fallback (public repo).
+    // Missing env → checkService returns ok:false/ms:0 ("нет данных").
+    checkService("VK Bot", process.env.VK_BOT_HEALTH_URL ?? "", "bot"),
+    checkService("TG Bot", process.env.TG_BOT_HEALTH_URL ?? "", "bot"),
   ];
 
   const [serviceResults, hetzner, vdsina, neon, lastOrder] = await Promise.all([

@@ -42,8 +42,10 @@ git push origin main
 
 **Bridge:** `VALIDATOR_KEY`, `VALIDATOR_PORT`.
 
-**Опционально (health в TWA/боте):** `TG_BOT_HEALTH_URL`, `VK_BOT_HEALTH_URL` — если не заданы,
-код падает на захардкоженные IP-фолбэки (рекомендуется задать env, см. [security.md](security.md)).
+**Health в TWA/боте:** `TG_BOT_HEALTH_URL`, `VK_BOT_HEALTH_URL` — **обязательны** для
+health-виджета: с 2026-07-03 захардкоженных IP-фолбэков нет (репо публичный, см.
+[security.md](security.md), риск #4). Без env сервис показывается как «нет данных»
+(ok:false). Значения — в `HANDOFF.md`.
 
 ## Режим техработ (скрытие витрины)
 

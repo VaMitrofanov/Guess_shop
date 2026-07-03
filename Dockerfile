@@ -2,8 +2,8 @@
 
 # ────────────────────────────────────────────────────────────────────────────
 # Multi-stage Dockerfile for the Next.js 16 storefront (standalone build).
-# Tuned for the production deploy host: 89.110.94.117 — Ubuntu 22.04,
-# 2 vCPU / 4 GB RAM / 100 GB disk, Moscow.
+# Tuned for the production deploy host (Ubuntu 22.04, 2 vCPU / 4 GB RAM,
+# Moscow — адрес в HANDOFF.md, не в публичном репо).
 #
 # Monorepo context (new layout — share with bots/vk/Dockerfile, bots/tg/Dockerfile):
 #   Base Directory      = /              (repo root)

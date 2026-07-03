@@ -20,14 +20,6 @@ function limited(request: Request, capacity: number, refillPerSec: number) {
 }
 
 export async function POST(request: Request) {
-  // Log the resolved client key on reservation attempts — low volume, doubles
-  // as an abuse-monitoring signal. Reveals whether the proxy forwards a real
-  // per-client IP or collapses everyone to the host IP.
-  console.log(
-    `[wb-code] POST reserve from ip=${clientIp(request)} ` +
-      `cf=${!!request.headers.get("cf-connecting-ip")} ` +
-      `xff=${request.headers.get("x-forwarded-for") ?? "-"}`
-  );
   const rl = limited(request, 10, 0.2); // burst 10, then 1 per 5s
   if (rl) return rl;
   try {
