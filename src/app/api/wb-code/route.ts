@@ -9,12 +9,10 @@ const db = prisma as unknown as PrismaClientWithWb;
 // enters one code; these limits are generous for that but choke brute-force
 // scanning of the code space.
 function limited(request: Request, capacity: number, refillPerSec: number) {
-  const { ok, retryAfter } = rateLimit(
-    `wb-code:${clientIp(request)}`,
-    capacity,
-    refillPerSec
-  );
+  const ip = clientIp(request);
+  const { ok, retryAfter } = rateLimit(`wb-code:${ip}`, capacity, refillPerSec);
   if (ok) return null;
+  console.warn(`[wb-code] rate-limited ip=${ip} retryAfter=${retryAfter}s`);
   return NextResponse.json(
     { error: "Слишком много запросов. Попробуйте через минуту." },
     { status: 429, headers: { "retry-after": String(retryAfter) } }
@@ -22,6 +20,14 @@ function limited(request: Request, capacity: number, refillPerSec: number) {
 }
 
 export async function POST(request: Request) {
+  // Log the resolved client key on reservation attempts — low volume, doubles
+  // as an abuse-monitoring signal. Reveals whether the proxy forwards a real
+  // per-client IP or collapses everyone to the host IP.
+  console.log(
+    `[wb-code] POST reserve from ip=${clientIp(request)} ` +
+      `cf=${!!request.headers.get("cf-connecting-ip")} ` +
+      `xff=${request.headers.get("x-forwarded-for") ?? "-"}`
+  );
   const rl = limited(request, 10, 0.2); // burst 10, then 1 per 5s
   if (rl) return rl;
   try {
