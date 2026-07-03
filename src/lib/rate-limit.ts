@@ -66,9 +66,25 @@ export function rateLimit(
   return { ok: false, retryAfter };
 }
 
-/** Best-effort client IP from proxy headers (Coolify/Traefik sets these). */
+/**
+ * Best-effort client IP from proxy headers.
+ *
+ * Order matters in this deployment: traffic arrives through a Cloudflare
+ * tunnel (cloudflared → Traefik → container). The leftmost `x-forwarded-for`
+ * entry the container sees is a Cloudflare edge IP that varies per request
+ * (parallel requests fan out across many CF edges), so keying on it defeats
+ * rate limiting entirely. Cloudflare's `cf-connecting-ip` is the stable real
+ * client IP and must be preferred.
+ */
 export function clientIp(req: Request): string {
+  const cf = req.headers.get("cf-connecting-ip")?.trim();
+  if (cf) return cf;
+
+  const trueClient = req.headers.get("true-client-ip")?.trim();
+  if (trueClient) return trueClient;
+
   const xff = req.headers.get("x-forwarded-for");
   if (xff) return xff.split(",")[0].trim();
+
   return req.headers.get("x-real-ip")?.trim() || "unknown";
 }
