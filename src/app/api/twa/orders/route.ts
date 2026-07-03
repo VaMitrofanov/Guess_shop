@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
-import { notifyOrderCompleted, notifyOrderRejected, notifyRebind } from "@/lib/twa-notify";
+import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached } from "@/lib/twa-notify";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
@@ -370,6 +370,39 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ users });
   }
 
+  // Не требует orderId — список заказов, к которым можно привязать геймпасс
+  // из «Поиск и выкуп» (бот проспал ссылку / заказ отклонён / ошибка).
+  if (action === "attachable-orders") {
+    const q = String(body.query ?? "").trim();
+    const qClean = q.replace(/^@/, "");
+    const searchWhere = q.length >= 2
+      ? {
+          OR: [
+            { wbCode:         { contains: q.toUpperCase() } },
+            { robloxUsername: { contains: qClean, mode: "insensitive" } },
+            { user: { username: { contains: qClean, mode: "insensitive" } } },
+            { user: { name:     { contains: q,      mode: "insensitive" } } },
+          ],
+        }
+      : {};
+
+    const orders = await (prisma as any).wbOrder.findMany({
+      where: {
+        isTest: false,
+        status: { in: ["AWAITING_GAMEPASS", "REJECTED", "ERROR"] },
+        ...searchWhere,
+      },
+      orderBy: { createdAt: "desc" },
+      take: 30,
+      select: {
+        id: true, wbCode: true, amount: true, status: true, platform: true,
+        robloxUsername: true, gamepassUrl: true, createdAt: true,
+        user: { select: { tgId: true, vkId: true, name: true, username: true } },
+      },
+    });
+    return NextResponse.json({ orders });
+  }
+
   if (!orderId)
     return NextResponse.json({ error: "orderId required" }, { status: 400 });
 
@@ -652,6 +685,44 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true, script, name, price, base, creatorName,
       isForSale, isManagedPricing, gamepassId: gpId,
+    });
+  }
+
+  if (action === "attach-gamepass") {
+    const raw = String(body.gamepassId ?? "").trim();
+    const idMatch = raw.match(/game-pass(?:es)?\/(\d+)/i) ?? raw.match(/^(\d+)$/);
+    if (!idMatch)
+      return NextResponse.json({ error: "gamepassId обязателен (ID или URL)" }, { status: 400 });
+    const gamepassUrl = `https://www.roblox.com/game-pass/${idMatch[1]}`;
+
+    const ATTACHABLE = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING"];
+    if (!ATTACHABLE.includes(order.status))
+      return NextResponse.json({ error: `Нельзя привязать геймпасс к заказу в статусе ${order.status}` }, { status: 400 });
+
+    const now = new Date().toISOString().slice(0, 10);
+    const auditNote = `[GP-ATTACH ${now}] ${gamepassUrl} (вручную из TWA)`;
+    const existingNote = order.adminNote ? order.adminNote + "\n" : "";
+
+    await (prisma as any).wbOrder.update({
+      where: { id: orderId },
+      data: {
+        gamepassUrl,
+        status: "PENDING",
+        pendingAt: order.status === "PENDING" ? order.pendingAt : new Date(),
+        rejectionReason: null,
+        adminId: null,
+        adminNote: (existingNote + auditNote).slice(0, 2000),
+      },
+    });
+    cachedCounts = null;
+
+    notifyGamepassAttached(order.user, orderId).catch(() => {});
+
+    return NextResponse.json({
+      ok: true,
+      wbCode: order.wbCode,
+      shortId: orderId.slice(-6).toUpperCase(),
+      notified: order.user?.tgId ? "tg" : order.user?.vkId ? "vk" : null,
     });
   }
 

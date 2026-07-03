@@ -110,7 +110,7 @@ function SegmentControl({ value, onChange }: { value: "nick" | "id"; onChange: (
 
 // ── Gamepass Card ────────────────────────────────────────────────────────────
 function GamepassCard({
-  gp, buying, bought, onBuy, onCreateAvito, creatingAvito,
+  gp, buying, bought, onBuy, onCreateAvito, creatingAvito, onAttach,
 }: {
   gp: GamepassItem;
   buying: boolean;
@@ -118,6 +118,7 @@ function GamepassCard({
   onBuy: () => void;
   onCreateAvito?: () => void;
   creatingAvito?: boolean;
+  onAttach?: () => void;
 }) {
   return (
     <div style={{
@@ -149,6 +150,20 @@ function GamepassCard({
         <span style={{ fontSize: 15, fontWeight: 600, color: C.green, flexShrink: 0 }}>✅</span>
       ) : (
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          {onAttach && (
+            <button
+              className="twa-press-sm"
+              onClick={onAttach}
+              title="Привязать к существующему заказу"
+              style={{
+                padding: "9px 12px", border: "none", borderRadius: 10,
+                background: `${C.blue}22`, color: C.blue, fontSize: 15, fontWeight: 600,
+                cursor: "pointer", fontFamily: "inherit",
+              }}
+            >
+              📎
+            </button>
+          )}
           {onCreateAvito && (
             <button
               className="twa-press-sm"
@@ -260,6 +275,200 @@ function ConfirmPurchase({
           >
             {buying ? "Покупаю…" : "✅ Купить"}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Attach gamepass to an existing order (bot missed the link / rejected / error)
+// ═════════════════════════════════════════════════════════════════════════════
+interface AttachableOrder {
+  id: string;
+  wbCode: string;
+  amount: number;
+  status: string;
+  platform: string;
+  robloxUsername: string | null;
+  gamepassUrl: string | null;
+  createdAt: string;
+  user: { tgId: string | null; vkId: string | null; name: string | null; username: string | null };
+}
+
+const ATTACH_STATUS_BADGE: Record<string, { label: string; color: string }> = {
+  AWAITING_GAMEPASS: { label: "Ждёт ссылку", color: C.yellow },
+  REJECTED:          { label: "Отклонён",    color: C.red },
+  ERROR:             { label: "Ошибка",      color: C.red },
+};
+
+function AttachOrderModal({ gp, token, onClose, onAttached }: {
+  gp: GamepassItem;
+  token: string;
+  onClose: () => void;
+  onAttached: () => void;
+}) {
+  const [orders, setOrders] = useState<AttachableOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("");
+  const [selected, setSelected] = useState<AttachableOrder | null>(null);
+  const [attaching, setAttaching] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/twa/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action: "attachable-orders" }),
+        });
+        const d = await r.json().catch(() => null);
+        if (r.ok) setOrders(d?.orders ?? []);
+        else toast(d?.error ?? "Ошибка загрузки заказов", "error");
+      } catch { toast("Ошибка сети", "error"); }
+      finally { setLoading(false); }
+    })();
+  }, [token]);
+
+  async function doAttach() {
+    if (!selected || attaching) return;
+    setAttaching(true);
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "attach-gamepass", orderId: selected.id, gamepassId: String(gp.gamepassId) }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok) { haptic.notify("error"); toast(d?.error ?? "Ошибка", "error"); return; }
+      haptic.notify("success");
+      toast(`📎 ${selected.wbCode} · геймпасс привязан${d?.notified ? ", клиент уведомлён" : ""}`, "success");
+      onAttached();
+      onClose();
+    } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
+    finally { setAttaching(false); }
+  }
+
+  const f = filter.trim().toLowerCase();
+  const shown = f
+    ? orders.filter(o =>
+        o.wbCode.toLowerCase().includes(f) ||
+        (o.user.username ?? "").toLowerCase().includes(f) ||
+        (o.user.name ?? "").toLowerCase().includes(f) ||
+        (o.robloxUsername ?? "").toLowerCase().includes(f))
+    : orders;
+
+  const neededPrice = selected ? Math.ceil(selected.amount / 0.7) : null;
+  const priceMismatch = selected !== null && neededPrice !== gp.price;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+      onClick={e => { if (e.target === e.currentTarget && !attaching) onClose(); }}>
+      <div style={{ background: C.card, borderRadius: 18, width: "100%", maxWidth: 380, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.5)" }}>
+        {/* Header: gamepass summary */}
+        <div style={{ padding: "18px 20px 12px" }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#e5e5ea", marginBottom: 6 }}>📎 Привязать к заказу</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {gp.image && <img src={gp.image} alt="" style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0 }} />}
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "#e5e5ea", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{gp.name}</div>
+              <div style={{ fontSize: 13, color: C.textTertiary }}>{gp.price.toLocaleString("ru-RU")} R$ · {gp.sellerName}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Filter */}
+        <div style={{ padding: "0 20px 10px" }}>
+          <input
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            placeholder="Код ВБ, ник, имя…"
+            style={{
+              width: "100%", background: C.elevated, border: "none", borderRadius: 10,
+              color: "#fff", fontSize: 15, padding: "10px 12px",
+              outline: "none", fontFamily: "inherit", boxSizing: "border-box",
+            }}
+          />
+        </div>
+
+        <div style={{ height: 1, background: C.border }} />
+
+        {/* Order list */}
+        <div style={{ overflowY: "auto", flex: 1 }}>
+          {loading ? (
+            <div style={{ padding: 24, textAlign: "center", color: C.textTertiary, fontSize: 15 }}>Загружаю…</div>
+          ) : shown.length === 0 ? (
+            <div style={{ padding: 24, textAlign: "center", color: C.textTertiary, fontSize: 15 }}>
+              {orders.length === 0 ? "Нет заказов, ожидающих геймпасс" : "Ничего не найдено"}
+            </div>
+          ) : shown.map((o, i) => {
+            const isSel = selected?.id === o.id;
+            const needed = Math.ceil(o.amount / 0.7);
+            const match = needed === gp.price;
+            const nick = o.user.username ? `@${o.user.username}` : o.user.name ?? "—";
+            const sb = ATTACH_STATUS_BADGE[o.status];
+            return (
+              <div key={o.id}>
+                {i > 0 && <div style={{ height: 1, background: C.border, marginLeft: 20 }} />}
+                <button
+                  className="twa-press"
+                  onClick={() => { haptic.select(); setSelected(isSel ? null : o); }}
+                  style={{
+                    width: "100%", padding: "12px 20px", border: "none", cursor: "pointer",
+                    background: isSel ? `${C.blue}14` : "transparent",
+                    display: "flex", flexDirection: "column", gap: 5,
+                    textAlign: "left", fontFamily: "inherit", transition: "background 0.15s",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, width: "100%" }}>
+                    <span style={{
+                      fontSize: 11, fontWeight: 800, color: "#fff",
+                      background: o.user.tgId ? "#229ED9" : o.user.vkId ? "#0077FF" : C.elevated,
+                      borderRadius: 4, padding: "2px 6px", flexShrink: 0,
+                    }}>{o.user.tgId ? "T" : o.user.vkId ? "V" : "—"}</span>
+                    <span style={{ fontSize: 15, fontWeight: 600, color: "#7ec5ff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{nick}</span>
+                    {sb && (
+                      <span style={{ fontSize: 11, fontWeight: 600, color: sb.color, background: `${sb.color}1c`, padding: "2px 7px", borderRadius: 999, flexShrink: 0 }}>{sb.label}</span>
+                    )}
+                    <span style={{ fontSize: 13, color: ageColor(o.createdAt), marginLeft: "auto", flexShrink: 0, ...tabular }}>⏱ {fmtAge(o.createdAt)}</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
+                    <span style={{ fontFamily: MONO, fontWeight: 700, color: C.accent, letterSpacing: 1, fontSize: 14 }}>{o.wbCode}</span>
+                    <span style={{ fontSize: 14, color: match ? C.green : C.orange, marginLeft: "auto", ...tabular }}>
+                      {match ? "✓" : "⚠️"} нужно {needed.toLocaleString("ru-RU")} R$
+                    </span>
+                  </div>
+                  {isSel && <span style={{ fontSize: 12, color: C.textTertiary }}>({o.amount.toLocaleString("ru-RU")} чистых · заказ от {new Date(o.createdAt).toLocaleDateString("ru-RU")})</span>}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ height: 1, background: C.border }} />
+
+        {/* Footer */}
+        <div style={{ padding: "12px 20px", display: "flex", flexDirection: "column", gap: 8 }}>
+          {priceMismatch && selected && (
+            <div style={{ background: `${C.orange}18`, borderRadius: 10, padding: "8px 12px", fontSize: 13, color: C.orange }}>
+              ⚠️ Цена ГП {gp.price.toLocaleString("ru-RU")} R$ ≠ требуемой {neededPrice?.toLocaleString("ru-RU")} R$ — проверь перед выкупом
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 10 }}>
+            <button className="twa-press" onClick={onClose} disabled={attaching}
+              style={{ flex: 1, padding: "13px 0", border: "none", borderRadius: 12, background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+              Отмена
+            </button>
+            <button className="twa-press" onClick={doAttach} disabled={!selected || attaching}
+              style={{
+                flex: 2, padding: "13px 0", border: "none", borderRadius: 12,
+                background: selected ? C.blue : C.elevated, color: "#fff",
+                fontSize: 15, fontWeight: 600, cursor: !selected || attaching ? "default" : "pointer",
+                fontFamily: "inherit", opacity: !selected || attaching ? 0.5 : 1, transition: "all 0.2s",
+              }}>
+              {attaching ? "Привязываю…" : selected ? `📎 Привязать · ${selected.wbCode}` : "Выбери заказ"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1507,6 +1716,8 @@ export default function BossrobuxScreen({ token }: { token: string }) {
   const [hasSearched, setHasSearched] = useState(false);
 
   const [confirmGp, setConfirmGp] = useState<GamepassItem | null>(null);
+  const [attachGp, setAttachGp] = useState<GamepassItem | null>(null);
+  const [buyoutKey, setBuyoutKey] = useState(0);
   const [buying, setBuying] = useState(false);
   const [boughtIds, setBoughtIds] = useState<Set<number>>(new Set());
   const buyLock = useRef(false);
@@ -1778,6 +1989,7 @@ export default function BossrobuxScreen({ token }: { token: string }) {
                       onBuy={() => setConfirmGp(gp)}
                       onCreateAvito={() => createAvitoFromSearch(gp)}
                       creatingAvito={creatingAvito}
+                      onAttach={() => { haptic.impact("light"); setAttachGp(gp); }}
                     />
                   </div>
                 ))}
@@ -1915,6 +2127,7 @@ export default function BossrobuxScreen({ token }: { token: string }) {
         <section>
           <SectionHeader title="К выкупу" />
           <BuyoutSection
+            key={buyoutKey}
             token={token}
             balance={info?.balance ?? null}
             accountName={info?.accountName ?? null}
@@ -1945,6 +2158,16 @@ export default function BossrobuxScreen({ token }: { token: string }) {
           buying={buying}
           onConfirm={doPurchase}
           onCancel={() => { if (!buying) setConfirmGp(null); }}
+        />
+      )}
+
+      {/* Attach-to-order modal */}
+      {attachGp && (
+        <AttachOrderModal
+          gp={attachGp}
+          token={token}
+          onClose={() => setAttachGp(null)}
+          onAttached={() => setBuyoutKey(k => k + 1)}
         />
       )}
     </div>

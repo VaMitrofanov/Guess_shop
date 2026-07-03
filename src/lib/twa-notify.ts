@@ -132,6 +132,23 @@ export async function notifyRebind(
   }
 }
 
+/**
+ * Менеджер вручную привязал геймпасс к заказу из TWA («Поиск и выкуп» → 📎).
+ * Текст идентичен ботовскому «геймпасс принят», чтобы клиент не заметил разницы.
+ */
+export async function notifyGamepassAttached(user: UserRef, orderId: string) {
+  const shortId = orderId.slice(-6).toUpperCase();
+  const tgMsg =
+    `🎉 Отлично, геймпасс принят!\n\n` +
+    `🆔 Номер заявки: <code>${shortId}</code>\n\n` +
+    `⏳ Выкупим в течение нескольких часов — обычно быстрее. Как только будет готово — напишем.\n` +
+    `💡 <i>Робуксы начислит Roblox — обычно в течение 5–7 дней после выкупа.</i>`;
+  const vkMsg = tgMsg.replace(/<[^>]+>/g, "");
+
+  if (user.tgId) await tgPost(user.tgId, tgMsg);
+  else if (user.vkId) await vkPost(user.vkId, vkMsg);
+}
+
 export async function notifyOrderRejected(
   user: UserRef,
   orderId: string,
