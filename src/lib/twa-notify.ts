@@ -6,26 +6,41 @@ interface UserRef {
   vkId?: string | null;
 }
 
-async function tgPost(chatId: string, text: string, extra: Record<string, unknown> = {}) {
+/** true = отправка прошла (или бридж принял), false = точно не доставлено. */
+async function tgPost(chatId: string, text: string, extra: Record<string, unknown> = {}): Promise<boolean> {
   const bridgeUrl = process.env.VALIDATOR_SOURCE_URL?.trim();
   const payload   = { token: process.env.TG_TOKEN, chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true, ...extra };
 
   if (bridgeUrl) {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (process.env.VALIDATOR_KEY) headers["x-validator-key"] = process.env.VALIDATOR_KEY;
-    await fetch(`${bridgeUrl}/tg-proxy`, { method: "POST", headers, body: JSON.stringify(payload) })
-      .catch(e => console.warn("[twa-notify] bridge error:", e?.message));
-    return;
+    try {
+      const r = await fetch(`${bridgeUrl}/tg-proxy`, { method: "POST", headers, body: JSON.stringify(payload) });
+      const j: any = await r.json().catch(() => null);
+      return r.ok && j?.ok !== false;
+    } catch (e: any) {
+      console.warn("[twa-notify] bridge error:", e?.message);
+      return false;
+    }
   }
 
-  await fetch(`https://api.telegram.org/bot${process.env.TG_TOKEN}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  }).catch(e => console.warn("[twa-notify] tg direct error:", e?.message));
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${process.env.TG_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const j: any = await r.json().catch(() => null);
+    if (j?.ok !== true) console.warn("[twa-notify] tg send failed:", j?.description ?? r.status);
+    return j?.ok === true;
+  } catch (e: any) {
+    console.warn("[twa-notify] tg direct error:", e?.message);
+    return false;
+  }
 }
 
-async function vkPost(vkUserId: string, message: string) {
+/** true = VK принял сообщение, false = ошибка (напр. 901 — юзер не писал сообществу). */
+async function vkPost(vkUserId: string, message: string): Promise<boolean> {
   const params = new URLSearchParams({
     user_id:      vkUserId,
     message,
@@ -33,11 +48,19 @@ async function vkPost(vkUserId: string, message: string) {
     access_token: process.env.VK_TOKEN ?? "",
     v:            "5.131",
   });
-  await fetch("https://api.vk.com/method/messages.send", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: params.toString(),
-  }).catch(e => console.warn("[twa-notify] vk error:", e?.message));
+  try {
+    const r = await fetch("https://api.vk.com/method/messages.send", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+    });
+    const j: any = await r.json().catch(() => null);
+    if (j?.error) { console.warn("[twa-notify] vk error:", j.error.error_msg); return false; }
+    return j?.response !== undefined;
+  } catch (e: any) {
+    console.warn("[twa-notify] vk error:", e?.message);
+    return false;
+  }
 }
 
 export async function notifyOrderCompleted(
@@ -135,8 +158,9 @@ export async function notifyRebind(
 /**
  * Менеджер вручную привязал геймпасс к заказу из TWA («Поиск и выкуп» → 📎).
  * Текст идентичен ботовскому «геймпасс принят», чтобы клиент не заметил разницы.
+ * Возвращает канал реальной доставки — TWA показывает менеджеру честный статус.
  */
-export async function notifyGamepassAttached(user: UserRef, orderId: string) {
+export async function notifyGamepassAttached(user: UserRef, orderId: string): Promise<"tg" | "vk" | null> {
   const shortId = orderId.slice(-6).toUpperCase();
   const tgMsg =
     `🎉 Отлично, геймпасс принят!\n\n` +
@@ -145,8 +169,9 @@ export async function notifyGamepassAttached(user: UserRef, orderId: string) {
     `💡 <i>Робуксы начислит Roblox — обычно в течение 5–7 дней после выкупа.</i>`;
   const vkMsg = tgMsg.replace(/<[^>]+>/g, "");
 
-  if (user.tgId) await tgPost(user.tgId, tgMsg);
-  else if (user.vkId) await vkPost(user.vkId, vkMsg);
+  if (user.tgId) return (await tgPost(user.tgId, tgMsg)) ? "tg" : null;
+  if (user.vkId) return (await vkPost(user.vkId, vkMsg)) ? "vk" : null;
+  return null;
 }
 
 export async function notifyOrderRejected(

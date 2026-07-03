@@ -348,8 +348,13 @@ function AttachOrderModal({ gp, token, onClose, onAttached }: {
       });
       const d = await r.json().catch(() => null);
       if (!r.ok) { haptic.notify("error"); toast(d?.error ?? "Ошибка", "error"); return; }
-      haptic.notify("success");
-      toast(`📎 ${selected.wbCode} · геймпасс привязан${d?.notified ? ", клиент уведомлён" : ""}`, "success");
+      if (d?.notified) {
+        haptic.notify("success");
+        toast(`📎 ${selected.wbCode} · привязан, клиент уведомлён (${d.notified === "tg" ? "TG" : "VK"})`, "success");
+      } else {
+        haptic.notify("warning");
+        toast(`📎 ${selected.wbCode} · привязан, но уведомление НЕ доставлено — напиши клиенту вручную`, "error");
+      }
       onAttached();
       onClose();
     } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }

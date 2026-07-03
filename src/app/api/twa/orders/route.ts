@@ -716,13 +716,15 @@ export async function POST(req: NextRequest) {
     });
     cachedCounts = null;
 
-    notifyGamepassAttached(order.user, orderId).catch(() => {});
+    // Дожидаемся реальной отправки: менеджер должен знать, дошло ли уведомление
+    // (VK error 901 у юзеров без диалога с сообществом теряется молча).
+    const notified = await notifyGamepassAttached(order.user, orderId).catch(() => null);
 
     return NextResponse.json({
       ok: true,
       wbCode: order.wbCode,
       shortId: orderId.slice(-6).toUpperCase(),
-      notified: order.user?.tgId ? "tg" : order.user?.vkId ? "vk" : null,
+      notified,
     });
   }
 
