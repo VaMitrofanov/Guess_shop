@@ -1,10 +1,29 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { PrismaClientWithWb } from "@/types/prisma-wb";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 const db = prisma as unknown as PrismaClientWithWb;
 
+// Per-IP throttle on code reservation/status (risk #2). A real WB customer
+// enters one code; these limits are generous for that but choke brute-force
+// scanning of the code space.
+function limited(request: Request, capacity: number, refillPerSec: number) {
+  const { ok, retryAfter } = rateLimit(
+    `wb-code:${clientIp(request)}`,
+    capacity,
+    refillPerSec
+  );
+  if (ok) return null;
+  return NextResponse.json(
+    { error: "Слишком много запросов. Попробуйте через минуту." },
+    { status: 429, headers: { "retry-after": String(retryAfter) } }
+  );
+}
+
 export async function POST(request: Request) {
+  const rl = limited(request, 10, 0.2); // burst 10, then 1 per 5s
+  if (rl) return rl;
   try {
     const body = await request.json();
     const rawCode: string = (body?.code ?? "").toString().trim().toUpperCase();
@@ -98,6 +117,8 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const rl = limited(request, 20, 0.5); // burst 20, then 1 per 2s (status polling)
+  if (rl) return rl;
   const url = new URL(request.url);
   const code = url.searchParams.get("code")?.trim().toUpperCase();
   if (!code || code.length !== 7) {

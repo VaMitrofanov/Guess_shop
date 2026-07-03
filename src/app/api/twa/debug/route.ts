@@ -21,8 +21,10 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const raw   = process.env.WB_API_TOKEN ?? "";
   const clean = getWbToken();
+  // Never surface any part of the token in production, even behind ADMIN_SECRET
+  // (risk #3, docs/security.md). Only its length is safe to report.
+  const isProd = process.env.NODE_ENV === "production";
 
   // 1. Simulate EXACTLY what dashboard route does: Promise.all with DB + WB
   let statsInParallel: string = "not_run";
@@ -51,7 +53,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     tokenLen:        clean.length,
-    tokenFirst12:    clean.slice(0, 12) || "(empty)",
+    tokenFirst12:    isProd ? "(hidden in prod)" : clean.slice(0, 12) || "(empty)",
     statsInParallel,
     statsAlone,
     dbWorked,

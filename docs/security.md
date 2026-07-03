@@ -29,14 +29,17 @@
 доступа. Если какое-то устройство реально не отдаёт → заменить публичный `userId` на
 подписанный `TWA_FALLBACK_SECRET`.
 
-### 2. Rate-limiting на публичных API
-`/api/wb-code` (резерв/статус) не имеет rate-limit → теоретический перебор кодов
-(пространство 36^7 велико, но GET раскрывает `denomination` и `claimed`). При активном
-WB-потоке добавить лимит по IP/сессии.
+### 2. Rate-limiting на публичных API — ✅ ЗАКРЫТО (2026-07-03)
+`/api/wb-code` (резерв/статус) теперь за in-memory token-bucket по IP (`src/lib/rate-limit.ts`):
+POST — burst 10, затем 1/5с; GET — burst 20, затем 1/2с. При превышении — 429 + `Retry-After`.
+Лимитер модульный (Map), достаточно для одного Web-контейнера; при масштабировании на
+несколько реплик нужен общий стор (Redis). Проверено: burst проходит, дальше 429, разные IP
+изолированы.
 
-### 3. `debug`-роут
-`/api/twa/debug` за `ADMIN_SECRET`, но светит первые 12 символов `WB_API_TOKEN`.
-Диагностический — удалить из прод-сборки.
+### 3. `debug`-роут — ✅ ЗАКРЫТО (2026-07-03)
+`/api/twa/debug` (за `ADMIN_SECRET` + `timingSafeEqual`) больше не отдаёт первые 12 символов
+`WB_API_TOKEN`: в проде поле `tokenFirst12` = `"(hidden in prod)"`, длина токена остаётся для
+диагностики. Полный превью доступен только при `NODE_ENV !== "production"`.
 
 ### 4. Захардкоженные IP серверов
 `Dockerfile`, `bots/tg/admin/hub-system.ts`, `src/app/api/twa/system/route.ts`,
