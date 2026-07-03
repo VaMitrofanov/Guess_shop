@@ -5,6 +5,14 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const { initData, userId: rawUserId, firstName: rawFirstName } = body;
 
+  // Инструментирование риска #1 (docs/security.md): выясняем, отдают ли
+  // целевые устройства initData. Если во всех логах hasInitData=true —
+  // Path 2 удаляется без потери доступа.
+  console.log(
+    `[twa-auth] hasInitData=${!!initData} platform=${body.platform ?? "?"} ` +
+      `path2=${!initData ? `userId=${rawUserId ?? "?"}` : "no"}`
+  );
+
   // Path 1: full HMAC validation (most secure)
   if (initData) {
     const result = validateInitData(initData);

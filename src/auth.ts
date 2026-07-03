@@ -4,6 +4,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { sendTelegramMessage } from "@/lib/telegram";
+import { verifyVkIdUser } from "@/lib/vk-id";
 
 // VK display names are user-controlled and embedded into Telegram HTML
 // notifications — unescaped "<" breaks the whole message (silently lost).
@@ -79,25 +80,32 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       id: "vk-id",
       name: "VK ID",
       credentials: {
-        vk_id: { label: "VK ID", type: "text" },
-        name: { label: "Name", type: "text" },
-        image: { label: "Image", type: "text" },
-        wb_code: { label: "WB Code", type: "text" }, // Добавляем опциональный код зациты
+        // Raw tokens from VKID.Auth.exchangeCode() — identity is resolved
+        // server-side via VK (see src/lib/vk-id.ts). Client-supplied
+        // vk_id/name are no longer accepted (risk #5, docs/security.md).
+        access_token: { label: "Access Token", type: "text" },
+        id_token: { label: "ID Token", type: "text" },
+        wb_code: { label: "WB Code", type: "text" }, // опциональный код защиты
       },
       async authorize(credentials) {
         console.log("[auth][vk-id] authorize() called", {
-          hasVkId: !!credentials?.vk_id,
+          hasAccessToken: !!credentials?.access_token,
+          hasIdToken: !!credentials?.id_token,
           hasWbCode: !!(credentials as any)?.wb_code,
         });
 
-        if (!credentials?.vk_id) {
-          console.warn("[auth][vk-id] no vk_id in credentials — abort");
+        const verified = await verifyVkIdUser(
+          (credentials?.access_token as string) ?? "",
+          (credentials?.id_token as string) ?? ""
+        );
+        if (!verified) {
+          console.warn("[auth][vk-id] VK rejected the token(s) — abort");
           return null;
         }
 
-        const vkId = credentials.vk_id as string;
-        const name = credentials.name as string;
-        const image = credentials.image as string;
+        const vkId = verified.vkId;
+        const name = verified.name || "VK User";
+        const image = verified.avatar;
         const rawWbCode = (credentials.wb_code as string)?.trim().toUpperCase() ?? "";
         // Strip guide-mode prefix ("GD" + 7-char code = 9 chars total)
         const wbCode = rawWbCode.startsWith("GD") && rawWbCode.length === 9
@@ -129,7 +137,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             try {
               user = await prisma.user.update({
                 where: { id: user.id },
-                data: { name, image },
+                // Пустой ответ VK (нет имени/аватара) не должен затирать
+                // реальные данные в БД — обновляем только непустые поля.
+                data: {
+                  ...(verified.name ? { name } : {}),
+                  ...(image ? { image } : {}),
+                },
               });
             } catch (updErr) {
               console.error("[auth][vk-id] prisma.user.update failed:", updErr);

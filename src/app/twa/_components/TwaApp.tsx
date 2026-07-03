@@ -35,6 +35,7 @@ declare global {
         };
         colorScheme: "dark" | "light";
         themeParams: Record<string, string>;
+        platform?: string;
         close: () => void;
       };
     };
@@ -94,6 +95,9 @@ export default function TwaApp() {
     }
 
     async function doAuth(payload: Record<string, unknown>) {
+      // platform (ios/android/macos/tdesktop…) — для серверного лога
+      // [twa-auth]: инструментирование риска #1 (наличие initData).
+      payload.platform = window.Telegram?.WebApp?.platform ?? "unknown";
       const res = await fetch("/api/twa/auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

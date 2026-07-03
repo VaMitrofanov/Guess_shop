@@ -109,28 +109,6 @@ export default function VKAuthButton({
           VKID.Auth.exchangeCode(payload.code, payload.device_id)
             .then(async (data) => {
               try {
-                let name  = "VK User";
-                let image = "";
-
-                if (data.id_token) {
-                  try {
-                    const base64Url   = data.id_token.split(".")[1];
-                    const base64      = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-                    const jsonPayload = decodeURIComponent(
-                      window.atob(base64).split("").map((c) =>
-                        "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2)
-                      ).join("")
-                    );
-                    const decoded   = JSON.parse(jsonPayload);
-                    const firstName = decoded.first_name || "";
-                    const lastName  = decoded.last_name  || "";
-                    name  = decoded.name || `${firstName} ${lastName}`.trim() || decoded.nickname || "VK User";
-                    image = decoded.picture || decoded.photo_max || decoded.photo_200 || "";
-                  } catch (jwtErr) {
-                    console.error("JWT Decode Error:", jwtErr);
-                  }
-                }
-
                 const isLoginMode = mode === "login";
 
                 const cookieMatch  = document.cookie.match(/wb_code=([^;]+)/);
@@ -146,10 +124,13 @@ export default function VKAuthButton({
                 const resolvedWbCode = finalWbCode ? finalWbCode.toUpperCase() : "";
 
                 const { signIn } = await import("next-auth/react");
+                // Only the raw VK tokens go to the server — it resolves the
+                // identity (vk_id / name / avatar) through VK's user_info /
+                // public_info endpoints itself. Client-supplied identity
+                // fields are no longer trusted (docs/security.md, риск #5).
                 const credentials: Record<string, string> = {
-                  vk_id: String(data.user_id),
-                  name,
-                  image,
+                  access_token: data.access_token ?? "",
+                  id_token: data.id_token ?? "",
                 };
                 if (resolvedWbCode) credentials.wb_code = resolvedWbCode;
 
