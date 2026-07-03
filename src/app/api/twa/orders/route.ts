@@ -393,7 +393,7 @@ export async function POST(req: NextRequest) {
         ...searchWhere,
       },
       orderBy: { createdAt: "desc" },
-      take: 30,
+      take: 50,
       select: {
         id: true, wbCode: true, amount: true, status: true, platform: true,
         robloxUsername: true, gamepassUrl: true, createdAt: true,

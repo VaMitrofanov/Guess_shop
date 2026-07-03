@@ -314,21 +314,28 @@ function AttachOrderModal({ gp, token, onClose, onAttached }: {
   const [selected, setSelected] = useState<AttachableOrder | null>(null);
   const [attaching, setAttaching] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await fetch("/api/twa/orders", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ action: "attachable-orders" }),
-        });
-        const d = await r.json().catch(() => null);
-        if (r.ok) setOrders(d?.orders ?? []);
-        else toast(d?.error ?? "Ошибка загрузки заказов", "error");
-      } catch { toast("Ошибка сети", "error"); }
-      finally { setLoading(false); }
-    })();
+  // Server-side search: локальный список — только 50 свежих, старые заказы
+  // (как MTXS3KS двухнедельной давности) ищутся по query в БД.
+  const load = useCallback(async (q: string) => {
+    setLoading(true);
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "attachable-orders", ...(q.length >= 2 ? { query: q } : {}) }),
+      });
+      const d = await r.json().catch(() => null);
+      if (r.ok) setOrders(d?.orders ?? []);
+      else toast(d?.error ?? "Ошибка загрузки заказов", "error");
+    } catch { toast("Ошибка сети", "error"); }
+    finally { setLoading(false); }
   }, [token]);
+
+  useEffect(() => {
+    const q = filter.trim();
+    const t = setTimeout(() => load(q), q ? 350 : 0);
+    return () => clearTimeout(t);
+  }, [filter, load]);
 
   async function doAttach() {
     if (!selected || attaching) return;
@@ -394,12 +401,12 @@ function AttachOrderModal({ gp, token, onClose, onAttached }: {
         <div style={{ height: 1, background: C.border }} />
 
         {/* Order list */}
-        <div style={{ overflowY: "auto", flex: 1 }}>
-          {loading ? (
+        <div style={{ overflowY: "auto", flex: 1, opacity: loading && orders.length > 0 ? 0.5 : 1, transition: "opacity 0.15s" }}>
+          {loading && orders.length === 0 ? (
             <div style={{ padding: 24, textAlign: "center", color: C.textTertiary, fontSize: 15 }}>Загружаю…</div>
           ) : shown.length === 0 ? (
             <div style={{ padding: 24, textAlign: "center", color: C.textTertiary, fontSize: 15 }}>
-              {orders.length === 0 ? "Нет заказов, ожидающих геймпасс" : "Ничего не найдено"}
+              {loading ? "Ищу…" : orders.length === 0 ? "Нет заказов, ожидающих геймпасс" : "Ничего не найдено"}
             </div>
           ) : shown.map((o, i) => {
             const isSel = selected?.id === o.id;
