@@ -30,7 +30,8 @@ git push origin main
 
 **Web:** `DATABASE_URL`, `AUTH_SECRET` (или `NEXTAUTH_SECRET`), `NEXTAUTH_URL`,
 `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_VK_APP_ID`, `TG_TOKEN`, `TG_CHAT_ID`, `ADMIN_IDS`,
-`ADMIN_SECRET`, `WB_API_TOKEN`. (Legacy: `TINKOFF_SECRET_KEY`, `LOCAL_BOT_URL`,
+`ADMIN_SECRET`, `WB_API_TOKEN`, `MAINTENANCE_MODE` (опц., см. ниже), `SITE_UNLOCK_SECRET`
+(опц., байпас техработ). (Legacy: `TINKOFF_SECRET_KEY`, `LOCAL_BOT_URL`,
 `INTERNAL_WEBHOOK_SECRET`, `BOT_API_TOKEN`.)
 
 **TG-бот:** `DATABASE_URL`, `TG_TOKEN`, `TG_CHANNEL_ID` (опц., гейт подписки), `ADMIN_IDS`,
@@ -43,6 +44,23 @@ git push origin main
 
 **Опционально (health в TWA/боте):** `TG_BOT_HEALTH_URL`, `VK_BOT_HEALTH_URL` — если не заданы,
 код падает на захардкоженные IP-фолбэки (рекомендуется задать env, см. [security.md](security.md)).
+
+## Режим техработ (скрытие витрины)
+
+`src/proxy.ts` (Next 16 Proxy, бывший middleware) гейтит **только витринные страницы**
+Web-контейнера: `/`, `/faq`, `/reviews`, `/checkout`, `/dashboard`, `/login`, `/register`,
+`/payment`, `/legal`, `/privacy`, `/guarantees`, `/admin`. Коридор `/guide` (отдельный
+контейнер, из Guide-сборки proxy вырезается в `Dockerfile.guide`), `/twa`, все `/api/*` и
+статика **не затрагиваются** — боты, коридор и TWA работают в любом режиме.
+
+- **Включить:** env `MAINTENANCE_MODE=on` на Web в Coolify → Restart. Выключить: удалить
+  переменную или любое другое значение.
+- Посетители получают rewrite на `/maintenance` с HTTP 503 (+ `Retry-After`).
+- **Байпас владельца** (два способа):
+  1. NextAuth-сессия с `role: ADMIN`;
+  2. открыть любую страницу с `?unlock=<SITE_UNLOCK_SECRET>` → ставится подписанная
+     HMAC-cookie `site_unlock` (30 дней), редирект на чистый URL — дальше браузер ходит
+     свободно. Без env `SITE_UNLOCK_SECRET` этот способ выключен.
 
 ## Заметки
 
