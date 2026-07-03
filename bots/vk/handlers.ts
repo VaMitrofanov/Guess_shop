@@ -2172,12 +2172,16 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
   if (!state || (state.type !== "AWAITING_DIRECT_NICK" && state.type !== "AWAITING_DIRECT_NICK_INPUT")) return;
 
   const passPrice = Math.ceil(state.totalAmount / 0.7);
-  await (db as any).user.updateMany({ where: { vkId: String(vkUserId) }, data: { robloxUsername: nick } });
 
   setState(vkUserId, { type: "AWAITING_DIRECT_GAMEPASS", robloxUsername: nick, amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus, rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice });
 
   await ctx.reply(`🔎 Ищу геймпассы у ${nick}…`);
   const result = await searchGamepassesByNick(nick, passPrice);
+
+  if (result.status !== "user_not_found") {
+    // Nick confirmed by Roblox (userId resolved) — only now persist it.
+    await (db as any).user.updateMany({ where: { vkId: String(vkUserId) }, data: { robloxUsername: nick } });
+  }
 
   if (result.status === "user_not_found") {
     setState(vkUserId, { type: "AWAITING_DIRECT_NICK_INPUT", amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus, rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice });
@@ -2206,17 +2210,18 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
   // Auto-skip: exactly 1 price-matched gamepass → go straight to summary
   if (matches.length === 1 && nonMatches.length === 0) {
     const g = matches[0];
-    const gpDetails = await getGamepassDetails(String(g.id));
+    const gpDetails = await getGamepassDetails(String(g.gamepassId));
     if (gpDetails) {
-      const gamepassUrl = `https://www.roblox.com/game-pass/${g.id}`;
+      const gamepassUrl = `https://www.roblox.com/game-pass/${g.gamepassId}`;
       setState(vkUserId, {
         type: "AWAITING_DIRECT_SUMMARY",
         robloxUsername: nick,
-        gamepassId: String(g.id), gamepassUrl, gamepassName: gpDetails.name,
+        gamepassId: String(g.gamepassId), gamepassUrl, gamepassName: gpDetails.name,
+        gamepassRobux: gpDetails.price,
         amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus,
         rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice,
       });
-      await showVkSummary(ctx, state, nick, String(g.id), gpDetails.robux, gpDetails.name);
+      await showVkSummary(ctx, state, nick, String(g.gamepassId), gpDetails.price, gpDetails.name);
       return;
     }
   }
@@ -2226,7 +2231,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
   if (matches.length === 0 && nonMatches.length > 0) {
     const topWrong = nonMatches.slice(0, MAX_PICK_BUTTONS);
     for (const g of topWrong) {
-      kb.textButton({ label: `${g.robux} R$ · ${g.name.slice(0, 18)}`, payload: { command: "direct_gp_pick", passId: String(g.id) }, color: "primary" });
+      kb.textButton({ label: `${g.robux} R$ · ${g.name.slice(0, 18)}`, payload: { command: "direct_gp_pick", passId: String(g.gamepassId) }, color: "primary" });
       kb.row();
     }
     kb.textButton({ label: "✏️ Другой ник", payload: { command: "direct_nick_new" }, color: "secondary" });
@@ -2243,7 +2248,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
   const all = [...matches, ...nonMatches.slice(0, 3)];
   for (const g of all.slice(0, MAX_PICK_BUTTONS)) {
     const prefix = g.isPriceMatch ? "✅ " : "";
-    kb.textButton({ label: `${prefix}${g.robux} R$ · ${g.name.slice(0, 16)}`, payload: { command: "direct_gp_pick", passId: String(g.id) }, color: g.isPriceMatch ? "positive" : "primary" });
+    kb.textButton({ label: `${prefix}${g.robux} R$ · ${g.name.slice(0, 16)}`, payload: { command: "direct_gp_pick", passId: String(g.gamepassId) }, color: g.isPriceMatch ? "positive" : "primary" });
     kb.row();
   }
   kb.textButton({ label: "✏️ Другой ник", payload: { command: "direct_nick_new" }, color: "secondary" });
@@ -2307,11 +2312,12 @@ async function handleVkDirectGpPick(ctx: MessageContext, vkUserId: number, passI
     gamepassId: passId,
     gamepassUrl,
     gamepassName: gpDetails.name,
+    gamepassRobux: gpDetails.price,
     amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus,
     rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice,
   });
 
-  await showVkSummary(ctx, state, state.robloxUsername, passId, gpDetails.robux, gpDetails.name);
+  await showVkSummary(ctx, state, state.robloxUsername, passId, gpDetails.price, gpDetails.name);
 }
 
 async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Promise<void> {
@@ -2387,6 +2393,7 @@ async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Prom
       robloxUsername:       state.robloxUsername,
       gamepassUrl:         state.gamepassUrl,
       gamepassName:        state.gamepassName,
+      gamepassRobux:       state.gamepassRobux,
       userDisplay:         `${vkUserDisplay(vkName, vkUserId)} (VK ID: ${vkUserId})`,
       platform:            "VK",
       createdAt:           intent.createdAt,

@@ -39,6 +39,8 @@ export interface DirectFlowState {
   gamepassId?: string;
   gamepassUrl?: string;
   gamepassName?: string;
+  /** Actual price of the picked gamepass (may differ from expected passPrice). */
+  gamepassRobux?: number;
 }
 export const pendingDirectFlow = new Map<number, DirectFlowState>();
 

@@ -753,10 +753,14 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
   flow.step = "gamepass";
 
   const tgId = String(ctx.from.id);
-  await (db as any).user.updateMany({ where: { tgId }, data: { robloxUsername: nick } });
 
   await ctx.reply(`🔎 Ищу геймпассы у <b>${escapeHtml(nick)}</b>…`, { parse_mode: "HTML" });
   const result = await searchGamepassesByNick(nick, flow.passPrice);
+
+  if (result.status !== "user_not_found") {
+    // Nick confirmed by Roblox (userId resolved) — only now persist it.
+    await (db as any).user.updateMany({ where: { tgId }, data: { robloxUsername: nick } });
+  }
 
   if (result.status === "user_not_found") {
     flow.step = "nick_input";
@@ -791,13 +795,14 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
   // Auto-skip: exactly 1 price-matched gamepass → go straight to summary
   if (matches.length === 1 && nonMatches.length === 0) {
     const g = matches[0];
-    const gpDetails = await getGamepassDetails(String(g.id));
+    const gpDetails = await getGamepassDetails(String(g.gamepassId));
     if (gpDetails) {
-      flow.gamepassId = String(g.id);
-      flow.gamepassUrl = `https://www.roblox.com/game-pass/${g.id}`;
+      flow.gamepassId = String(g.gamepassId);
+      flow.gamepassUrl = `https://www.roblox.com/game-pass/${g.gamepassId}`;
       flow.gamepassName = gpDetails.name;
+      flow.gamepassRobux = gpDetails.price;
       flow.step = "summary";
-      await showSummary(ctx, flow, gpDetails.robux, gpDetails.name);
+      await showSummary(ctx, flow, gpDetails.price, gpDetails.name);
       return;
     }
   }
@@ -807,7 +812,7 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
     const btns = topWrong.map(g => [
       Markup.button.callback(
         `${g.robux} R$ · ${g.name.slice(0, 20)}`,
-        CB.directGpPick(String(g.id))
+        CB.directGpPick(String(g.gamepassId))
       ),
     ]);
     btns.push([Markup.button.callback("✏️ Другой ник", CB.directNickNew)]);
@@ -824,7 +829,7 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
   const btns = all.slice(0, 5).map(g => [
     Markup.button.callback(
       `${g.isPriceMatch ? "✅ " : ""}${g.robux} R$ · ${g.name.slice(0, 20)}`,
-      CB.directGpPick(String(g.id))
+      CB.directGpPick(String(g.gamepassId))
     ),
   ]);
   btns.push([Markup.button.callback("✏️ Другой ник", CB.directNickNew)]);
@@ -3635,8 +3640,9 @@ export function registerCallbacks(bot: Telegraf): void {
       flow.gamepassId = passId;
       flow.gamepassUrl = `https://www.roblox.com/game-pass/${passId}`;
       flow.gamepassName = gpDetails.name;
+      flow.gamepassRobux = gpDetails.price;
       flow.step = "summary";
-      await showSummary(ctx, flow, gpDetails.robux, gpDetails.name);
+      await showSummary(ctx, flow, gpDetails.price, gpDetails.name);
       await ctx.answerCbQuery();
       return;
     }
@@ -3732,6 +3738,7 @@ export function registerCallbacks(bot: Telegraf): void {
         robloxUsername:       flow.robloxUsername!,
         gamepassUrl:         flow.gamepassUrl!,
         gamepassName:        flow.gamepassName,
+        gamepassRobux:       flow.gamepassRobux,
         userDisplay:         `${tgDisplay} (ID: ${ctx.from.id})`,
         tgId,
         platform:            "TG",

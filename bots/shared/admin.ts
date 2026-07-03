@@ -460,6 +460,8 @@ export interface DirectIntentCardPayload {
   robloxUsername:        string;
   gamepassUrl:          string;
   gamepassName?:        string;
+  /** Actual price of the picked gamepass — may differ from ceil(totalAmount/0.7). */
+  gamepassRobux?:       number;
   userDisplay:          string;
   tgId?:                string;
   platform:             "TG" | "VK";
@@ -632,7 +634,13 @@ export async function sendAdminIntentCard(payload: DirectIntentCardPayload): Pro
     prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ (${prev} заказ${prev === 1 ? "" : prev < 5 ? "а" : "ов"})</b>\n` :
     `🆕 <b>НОВЫЙ КЛИЕНТ</b>\n`;
 
-  const passPrice = Math.ceil(payload.totalAmount / 0.7);
+  const expectedPassPrice = Math.ceil(payload.totalAmount / 0.7);
+  // Show the ACTUAL picked gamepass price; the flow allows picking a pass with a
+  // "wrong" price, and the manager must see the mismatch before sending реквизиты.
+  const actualPassPrice = payload.gamepassRobux ?? expectedPassPrice;
+  const priceMismatch = Math.abs(actualPassPrice - expectedPassPrice) > 2
+    ? ` ⚠️ <b>ожидалось ${expectedPassPrice} R$</b>`
+    : "";
   const gpName = payload.gamepassName ? ` · "${escapeHtml(payload.gamepassName)}"` : "";
 
   // Заявка (intent) кода не имеет — идентификатор для менеджера: ник + сумма.
@@ -644,7 +652,7 @@ export async function sendAdminIntentCard(payload: DirectIntentCardPayload): Pro
     `👤 Юзер: ${payload.userDisplay}\n` +
     bonusLine +
     `🎮 Ник: <b>${escapeHtml(payload.robloxUsername)}</b>\n` +
-    `🎫 Геймпасс: <b>${passPrice} R$</b>${gpName}\n` +
+    `🎫 Геймпасс: <b>${actualPassPrice} R$</b>${priceMismatch}${gpName}\n` +
     `🔗 <a href="${payload.gamepassUrl}">Открыть Gamepass</a>\n` +
     `💰 К оплате: <b>${payload.rublePrice} ₽</b>\n` +
     `💎 Выдать: <b>${payload.totalAmount} R$</b>\n` +

@@ -645,15 +645,15 @@ export async function getGamepassForPurchase(gamepassId: string): Promise<Gamepa
     // Strategy 1: universe asset → game-passes list (pageSize=100, one cursor page)
     const uRes = await rFetch(`https://apis.roblox.com/universes/v1/assets/${gamepassId}/universe`).catch(() => null);
     if (uRes?.ok) {
-      const uData = await uRes.json().catch(() => null);
+      const uData: any = await uRes.json().catch(() => null);
       const universeId: number | undefined = uData?.universeId;
       if (universeId) {
         const [gRes, pRes] = await Promise.all([
           rFetch(`https://games.roblox.com/v1/games?universeIds=${universeId}`),
           rFetch(`https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes?passView=Full&pageSize=100`),
         ]);
-        const gData  = gRes.ok  ? await gRes.json().catch(() => null)  : null;
-        const pData  = pRes.ok  ? await pRes.json().catch(() => null)  : null;
+        const gData: any  = gRes.ok  ? await gRes.json().catch(() => null)  : null;
+        const pData: any  = pRes.ok  ? await pRes.json().catch(() => null)  : null;
         const placeId: number = gData?.data?.[0]?.rootPlaceId ?? 0;
 
         let gp = (pData?.gamePasses ?? []).find((p: any) => String(p.id) === String(gamepassId));
@@ -663,7 +663,7 @@ export async function getGamepassForPurchase(gamepassId: string): Promise<Gamepa
           const p2Res = await rFetch(
             `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes?passView=Full&pageSize=100&cursor=${encodeURIComponent(pData.nextPageCursor)}`
           ).catch(() => null);
-          const p2Data = p2Res?.ok ? await p2Res.json().catch(() => null) : null;
+          const p2Data: any = p2Res?.ok ? await p2Res.json().catch(() => null) : null;
           gp = (p2Data?.gamePasses ?? []).find((p: any) => String(p.id) === String(gamepassId));
         }
 
@@ -671,7 +671,7 @@ export async function getGamepassForPurchase(gamepassId: string): Promise<Gamepa
           const tRes = await rFetch(
             `https://thumbnails.roblox.com/v1/game-passes?gamePassIds=${gamepassId}&size=150x150&format=Png&isCircular=false`
           ).catch(() => null);
-          const tData = tRes?.ok ? await tRes.json().catch(() => null) : null;
+          const tData: any = tRes?.ok ? await tRes.json().catch(() => null) : null;
           const image = tData?.data?.[0]?.imageUrl
             ?? `https://www.roblox.com/asset-thumbnail/image?assetId=${gamepassId}&width=150&height=150&format=png`;
 
@@ -699,14 +699,14 @@ export async function getGamepassForPurchase(gamepassId: string): Promise<Gamepa
 
     const eRes = await rFetch(`https://economy.roblox.com/v1/game-passes/${gamepassId}/details`).catch(() => null);
     if (eRes?.ok) {
-      const eData = await eRes.json().catch(() => null);
+      const eData: any = await eRes.json().catch(() => null);
       creatorName = eData?.Creator?.Name ?? eData?.creatorName ?? null;
     }
 
     if (!creatorName) {
       const rRes = await rFetch(`https://apis.roproxy.com/game-passes/v1/game-passes/${gamepassId}/product-info`).catch(() => null);
       if (rRes?.ok) {
-        const rData = await rRes.json().catch(() => null);
+        const rData: any = await rRes.json().catch(() => null);
         creatorName = rData?.Creator?.Name ?? null;
       }
     }
@@ -749,7 +749,7 @@ export async function resolveRobloxUserId(username: string): Promise<number | nu
       body:    JSON.stringify({ usernames: [username], excludeBannedUsers: true }),
     });
     if (!uRes.ok) return null;
-    const uData = await uRes.json().catch(() => null);
+    const uData: any = await uRes.json().catch(() => null);
     const userId: number | undefined = uData?.data?.[0]?.id;
     return userId ?? null;
   } catch (err: any) {
@@ -797,7 +797,7 @@ export async function listForSaleGamepasses(
       `https://apis.roblox.com/game-passes/v1/universes/${game.id}/game-passes?passView=Full&pageSize=100`
     ).catch(() => null);
     if (!pRes?.ok) return [];
-    const pData = await pRes.json().catch(() => null);
+    const pData: any = await pRes.json().catch(() => null);
     return (pData?.gamePasses ?? []).map((gp: any) => ({ ...gp, _placeId: placeId }));
   }));
 
@@ -808,7 +808,7 @@ export async function listForSaleGamepasses(
   const tRes = await rFetch(
     `https://thumbnails.roblox.com/v1/game-passes?gamePassIds=${ids}&size=150x150&format=Png&isCircular=false`
   ).catch(() => null);
-  const tData = tRes?.ok ? await tRes.json().catch(() => null) : null;
+  const tData: any = tRes?.ok ? await tRes.json().catch(() => null) : null;
   const thumbMap: Record<number, string> = Object.fromEntries(
     (tData?.data ?? []).map((t: any) => [t.targetId, t.imageUrl])
   );
