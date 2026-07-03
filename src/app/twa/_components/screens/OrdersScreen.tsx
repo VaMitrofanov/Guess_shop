@@ -1,12 +1,17 @@
 "use client";
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { C, SHADOW, tabular, MONO } from "../theme";
 import { haptic } from "../haptics";
 import { toast } from "../Toast";
 import Pressable from "../Pressable";
 
 type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED" | "ERROR";
-type FilterTab = "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "FAVORITES";
+// ATTENTION — не чип, а серверная выборка «Требуют внимания» для вкладки «Все».
+type FilterTab = "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "FAVORITES" | "ATTENTION";
+
+// «Ждут ссылку»: сервер отдаёт первые N — самые свежие, дальше хвост от самых
+// старых (см. fetchAwaitingLinkHybrid в api/twa/orders). Здесь — для разделителя.
+const AWAITING_LINK_HEAD = 5;
 
 interface Order {
   id: string;
@@ -46,6 +51,7 @@ interface OrdersData {
   total: number;
   counts: Record<string, number>;
   sums?: Record<string, number> | null;
+  oldest?: Record<string, string | null> | null;
   page: number;
   pages: number;
 }
@@ -66,6 +72,7 @@ const TAB_META: Record<FilterTab, { label: string; color: string }> = {
   AWAITING_LINK: { label: "Ждут ссылку",    color: C.yellow },
   DONE:          { label: "Готово",          color: C.green },
   FAVORITES:     { label: "Избранное",      color: "#ffd60a" },
+  ATTENTION:     { label: "Требуют внимания", color: C.orange },
 };
 
 const FILTERS: { id: FilterTab }[] = [
@@ -875,14 +882,18 @@ function OrderCard({
   const shortName = userShortName(order.user);
   const passId = extractGamepassId(order.gamepassUrl);
 
-  const showDirty = currentTab === "BUYOUT" || currentTab === "DIRECT" || currentTab === "AVITO" || currentTab === "ERROR";
+  // В «Требуют внимания» карточка ведёт себя как в родной вкладке заказа:
+  // те же кнопки действий и формат суммы, что видел бы менеджер в BUYOUT/ERROR/….
+  const viewTab = currentTab === "ATTENTION" ? orderToTab(order) : currentTab;
+
+  const showDirty = viewTab === "BUYOUT" || viewTab === "DIRECT" || viewTab === "AVITO" || viewTab === "ERROR";
   const dirtyAmount = Math.ceil(order.amount / 0.7);
   const displayAmount = showDirty ? dirtyAmount : order.amount;
-  const showCleanHint = currentTab === "BUYOUT";
+  const showCleanHint = viewTab === "BUYOUT";
 
-  const tabBadge = currentTab === "ALL" ? orderTabBadge(order) : null;
-  const showMoveBtn = currentTab === "AWAITING_LINK" || currentTab === "FAVORITES";
-  const isEditableAvito = currentTab === "AVITO" && order.orderSource === "AVITO" && ["PENDING", "AWAITING_GAMEPASS", "ERROR"].includes(order.status);
+  const tabBadge = currentTab === "ALL" || currentTab === "ATTENTION" ? orderTabBadge(order) : null;
+  const showMoveBtn = viewTab === "AWAITING_LINK" || viewTab === "FAVORITES";
+  const isEditableAvito = viewTab === "AVITO" && order.orderSource === "AVITO" && ["PENDING", "AWAITING_GAMEPASS", "ERROR"].includes(order.status);
 
   const timeRef = order.createdAt;
   // Second timer: how long the order has been sitting in the "К выкупу" queue
@@ -1095,7 +1106,7 @@ function OrderCard({
       {/* Action panel */}
       <ActionPanel
         order={order}
-        currentTab={currentTab}
+        currentTab={viewTab}
         token={token}
         onRunAction={onRunAction}
         onPurchaseDone={onPurchaseDone}
@@ -1194,6 +1205,8 @@ export default function OrdersScreen({
 }) {
   const [filter, setFilter] = useState<FilterTab>("ALL");
   const [query, setQuery] = useState(initialQuery ?? "");
+  // Вкладка «Все»: по умолчанию показываем «Требуют внимания», полная лента — по кнопке.
+  const [allView, setAllView] = useState<"attention" | "list">("attention");
   useEffect(() => {
     if (initialQuery) onInitialQueryConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1228,7 +1241,8 @@ export default function OrdersScreen({
       if (!res.ok || reqId !== reqIdRef.current) return;
       const d: OrdersData = await res.json();
       if (reqId !== reqIdRef.current) return;
-      setData(prev => append && prev ? { ...d, counts: prev.counts } : d);
+      // append-страницы идут с skipCounts=1 (counts/sums/oldest = null) — сохраняем прежние.
+      setData(prev => append && prev ? { ...d, counts: prev.counts, sums: prev.sums, oldest: prev.oldest } : d);
       setAllOrders(prev => append ? [...prev, ...applyCache(d.orders)] : applyCache(d.orders));
     } finally {
       if (reqId === reqIdRef.current) {
@@ -1238,11 +1252,14 @@ export default function OrdersScreen({
     }
   }, [token, applyCache]);
 
+  const isAttentionView = filter === "ALL" && !query && allView === "attention";
+  const serverTab: FilterTab = isAttentionView ? "ATTENTION" : filter;
+
   useEffect(() => {
     setPage(1);
     setAllOrders([]);
-    fetchOrders(filter, query, 1, false);
-  }, [filter, query, fetchOrders]);
+    fetchOrders(serverTab, query, 1, false);
+  }, [serverTab, query, fetchOrders]);
 
   useEffect(() => {
     const need = allOrders
@@ -1270,8 +1287,8 @@ export default function OrdersScreen({
     if (!data || page >= data.pages || loadingMore || loading) return;
     const next = page + 1;
     setPage(next);
-    fetchOrders(filter, query, next, true);
-  }, [data, page, loadingMore, loading, filter, query, fetchOrders]);
+    fetchOrders(serverTab, query, next, true);
+  }, [data, page, loadingMore, loading, serverTab, query, fetchOrders]);
 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -1298,28 +1315,43 @@ export default function OrdersScreen({
 
     haptic.impact(action === "complete" ? "medium" : "light");
 
-    const leaves = filter !== "ALL" && (toTab === "ALL" || toTab !== filter);
+    // В «Требуют внимания» карточка уходит после выкупа/отклонения;
+    // set-error оставляет её в подборке (ошибки — тоже «внимание»).
+    const leaves = isAttentionView
+      ? toTab === "ALL"
+      : filter !== "ALL" && (toTab === "ALL" || toTab !== filter);
+    const attnDelta = isAttentionView && leaves ? 1 : 0;
 
     setAllOrders(prev => prev.map(o => o.id === order.id
       ? { ...o, status: newStatus!, rejectionReason: action === "reject" ? (reason || "не указана") : o.rejectionReason }
       : o));
     if (data?.counts && toTab) {
-      setData(prev => prev ? {
-        ...prev,
-        counts: shiftCounts(prev.counts, fromTab, toTab!),
-        sums: prev.sums ? shiftSums(prev.sums, fromTab, toTab!, order.amount) : prev.sums,
-      } : prev);
+      setData(prev => {
+        if (!prev) return prev;
+        let counts = shiftCounts(prev.counts, fromTab, toTab!);
+        if (attnDelta) counts = { ...counts, ATTENTION: Math.max(0, (counts["ATTENTION"] ?? 0) - attnDelta) };
+        return {
+          ...prev,
+          counts,
+          sums: prev.sums ? shiftSums(prev.sums, fromTab, toTab!, order.amount) : prev.sums,
+        };
+      });
     }
     if (leaves) setExiting(prev => new Set(prev).add(order.id));
 
     const rollback = () => {
       setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: order.status } : o));
       if (data?.counts && toTab) {
-        setData(prev => prev ? {
-          ...prev,
-          counts: shiftCounts(prev.counts, toTab!, fromTab),
-          sums: prev.sums ? shiftSums(prev.sums, toTab!, fromTab, order.amount) : prev.sums,
-        } : prev);
+        setData(prev => {
+          if (!prev) return prev;
+          let counts = shiftCounts(prev.counts, toTab!, fromTab);
+          if (attnDelta) counts = { ...counts, ATTENTION: (counts["ATTENTION"] ?? 0) + attnDelta };
+          return {
+            ...prev,
+            counts,
+            sums: prev.sums ? shiftSums(prev.sums, toTab!, fromTab, order.amount) : prev.sums,
+          };
+        });
       }
       setExiting(prev => { const n = new Set(prev); n.delete(order.id); return n; });
     };
@@ -1349,7 +1381,7 @@ export default function OrdersScreen({
       rollback(); haptic.notify("error");
       return { ok: false, error: "Ошибка сети" };
     }
-  }, [token, filter, data, onActionDone]);
+  }, [token, filter, data, onActionDone, isAttentionView]);
 
   const saveNote = useCallback(async (orderId: string, note: string): Promise<ActionResult> => {
     let prevNote: string | null = null;
@@ -1391,11 +1423,13 @@ export default function OrdersScreen({
         next["FAVORITES"] = (next["FAVORITES"] ?? 0) + 1;
         const fromTab = orderToTab(order);
         if (fromTab !== "ALL") next[fromTab] = Math.max(0, (next[fromTab] ?? 0) - 1);
+        // Избранное исключается из «Требуют внимания» по определению выборки.
+        if (isAttentionView) next["ATTENTION"] = Math.max(0, (next["ATTENTION"] ?? 0) - 1);
       }
       return { ...prev, counts: next };
     });
 
-    if (filter !== "ALL" && !wasFav) {
+    if ((filter !== "ALL" || isAttentionView) && !wasFav) {
       setExiting(prev => new Set(prev).add(order.id));
       window.setTimeout(() => {
         setAllOrders(prev => prev.filter(o => o.id !== order.id));
@@ -1414,7 +1448,7 @@ export default function OrdersScreen({
     } catch {
       setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, isFavorite: wasFav } : o));
     }
-  }, [token, filter]);
+  }, [token, filter, isAttentionView]);
 
   function cachedCountsInvalidate() {
     // force refresh on next tab switch
@@ -1423,12 +1457,17 @@ export default function OrdersScreen({
   const handlePurchaseDone = useCallback((order: Order) => {
     const fromTab = orderToTab(order);
     setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: "COMPLETED" as any } : o));
-    setData(prev => prev ? {
-      ...prev,
-      counts: shiftCounts(prev.counts, fromTab, "ALL"),
-      sums: prev.sums ? shiftSums(prev.sums, fromTab, "ALL", order.amount) : prev.sums,
-    } : prev);
-    if (filter !== "ALL") {
+    setData(prev => {
+      if (!prev) return prev;
+      let counts = shiftCounts(prev.counts, fromTab, "ALL");
+      if (isAttentionView) counts = { ...counts, ATTENTION: Math.max(0, (counts["ATTENTION"] ?? 0) - 1) };
+      return {
+        ...prev,
+        counts,
+        sums: prev.sums ? shiftSums(prev.sums, fromTab, "ALL", order.amount) : prev.sums,
+      };
+    });
+    if (filter !== "ALL" || isAttentionView) {
       setExiting(prev => new Set(prev).add(order.id));
       window.setTimeout(() => {
         setAllOrders(prev => prev.filter(o => o.id !== order.id));
@@ -1437,10 +1476,10 @@ export default function OrdersScreen({
       }, 260);
     }
     onActionDone?.();
-  }, [filter, onActionDone]);
+  }, [filter, onActionDone, isAttentionView]);
 
   const handleMoved = useCallback((order: Order) => {
-    if (filter !== "ALL") {
+    if (filter !== "ALL" || isAttentionView) {
       setExiting(prev => new Set(prev).add(order.id));
       window.setTimeout(() => {
         setAllOrders(prev => prev.filter(o => o.id !== order.id));
@@ -1449,14 +1488,15 @@ export default function OrdersScreen({
       }, 260);
     }
     onActionDone?.();
-  }, [filter, onActionDone]);
+  }, [filter, onActionDone, isAttentionView]);
 
   const summaryText = useMemo(() => {
     if (!data) return "";
     if (query) return `По запросу «${query}» · ${data.total}`;
+    if (isAttentionView) return `Требуют внимания · ${data.total}`;
     const meta = TAB_META[filter];
     return `${meta.label} · ${data.total}`;
-  }, [data, query, filter]);
+  }, [data, query, filter, isAttentionView]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: C.bg }}>
@@ -1517,21 +1557,53 @@ export default function OrdersScreen({
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
-        {/* Mini dashboard for ALL tab */}
+        {/* Dashboard: сетка категорий на «Все», своя карточка внутри BUYOUT / AWAITING_LINK */}
         {data?.sums && !query && filter === "ALL" && (
           <div style={{ paddingTop: 10 }}>
-            <MiniDashboard counts={data.counts} sums={data.sums} onTap={setFilter} />
+            <MiniDashboard counts={data.counts} sums={data.sums} oldest={data.oldest} onTap={setFilter} />
+          </div>
+        )}
+        {data?.sums && !query && (filter === "BUYOUT" || filter === "AWAITING_LINK") && (
+          <div style={{ paddingTop: 10 }}>
+            <MiniDashboard
+              counts={data.counts}
+              sums={data.sums}
+              oldest={data.oldest}
+              groups={DASHBOARD_GROUPS.filter(g => g.filter === filter)}
+            />
           </div>
         )}
 
         {loading ? (
           <Skeleton />
         ) : allOrders.length === 0 ? (
-          <EmptyState filter={filter} query={query} />
+          <EmptyState
+            filter={filter}
+            query={query}
+            attention={isAttentionView}
+            onShowAll={isAttentionView ? () => { haptic.select(); setAllView("list"); } : undefined}
+          />
         ) : (
           <div className="twa-fade-in" style={{ padding: "12px 16px 32px", display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 2px" }}>
-              <span style={{ fontSize: 14, color: C.textSecondary, letterSpacing: 0.1 }}>{summaryText}</span>
+              <span style={{ fontSize: 14, color: C.textSecondary, letterSpacing: 0.1 }}>
+                {isAttentionView && "⚠ "}{summaryText}
+              </span>
+              {filter === "ALL" && !query && (
+                <button
+                  className="twa-press-sm"
+                  onClick={() => { haptic.select(); setAllView(v => v === "attention" ? "list" : "attention"); }}
+                  style={{
+                    background: "transparent", border: "none", cursor: "pointer",
+                    color: C.accent, fontSize: 14, fontWeight: 600,
+                    padding: "4px 2px", flexShrink: 0, whiteSpace: "nowrap",
+                  }}
+                >
+                  {allView === "attention"
+                    ? "Все заказы →"
+                    : `⚠ Внимание${(data?.counts?.["ATTENTION"] ?? 0) > 0 ? ` (${data?.counts?.["ATTENTION"]})` : ""}`}
+                </button>
+              )}
             </div>
 
             {filter === "DONE" ? (
@@ -1593,19 +1665,29 @@ export default function OrdersScreen({
               </>
 
             ) : (
-              allOrders.map(order => (
-                <OrderCard
-                  key={order.id}
-                  order={order}
-                  token={token}
-                  currentTab={filter}
-                  exiting={exiting.has(order.id)}
-                  onRunAction={(action, reason) => runAction(order, action, reason)}
-                  onSaveNote={(note) => saveNote(order.id, note)}
-                  onPurchaseDone={() => handlePurchaseDone(order)}
-                  onToggleFavorite={() => toggleFavorite(order)}
-                  onMoved={() => handleMoved(order)}
-                />
+              allOrders.map((order, idx) => (
+                <Fragment key={order.id}>
+                  {filter === "AWAITING_LINK" && !query && idx === AWAITING_LINK_HEAD && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "2px 2px" }}>
+                      <div style={{ flex: 1, height: 1, background: C.hairline }} />
+                      <span style={{ fontSize: 13, color: C.textTertiary, whiteSpace: "nowrap" }}>
+                        ⬆ свежие · ниже — с самых старых
+                      </span>
+                      <div style={{ flex: 1, height: 1, background: C.hairline }} />
+                    </div>
+                  )}
+                  <OrderCard
+                    order={order}
+                    token={token}
+                    currentTab={isAttentionView ? "ATTENTION" : filter}
+                    exiting={exiting.has(order.id)}
+                    onRunAction={(action, reason) => runAction(order, action, reason)}
+                    onSaveNote={(note) => saveNote(order.id, note)}
+                    onPurchaseDone={() => handlePurchaseDone(order)}
+                    onToggleFavorite={() => toggleFavorite(order)}
+                    onMoved={() => handleMoved(order)}
+                  />
+                </Fragment>
               ))
             )}
 
@@ -1644,45 +1726,61 @@ function fmtRobux(n: number): string {
   return n.toLocaleString("ru-RU");
 }
 
-const DASHBOARD_GROUPS: { key: string; label: string; sumKey: string; filter: FilterTab; color: string; showClean: boolean }[] = [
-  { key: "buyout", label: "К выкупу", sumKey: "BUYOUT", filter: "BUYOUT", color: C.green, showClean: false },
-  { key: "link", label: "Ждут ссылку", sumKey: "AWAITING_LINK", filter: "AWAITING_LINK", color: C.yellow, showClean: true },
+// Режим суммы: amount в БД — чистые R$ (клиенту), грязные = ceil(amount / 0.7)
+// (цена геймпасса, что спишется с донора). Крупная цифра — то, чем оперирует
+// менеджер в этой категории; в скобках — второе значение (grossOnly — без скобок,
+// в этих вкладках карточки показывают только грязные).
+type DashSumMode = "grossClean" | "cleanGross" | "grossOnly";
+
+const DASHBOARD_GROUPS: { key: string; label: string; sumKey: string; filter: FilterTab; color: string; mode: DashSumMode; oldestKey?: string }[] = [
+  { key: "buyout", label: "К выкупу",    sumKey: "BUYOUT",        filter: "BUYOUT",        color: C.green,  mode: "grossClean", oldestKey: "BUYOUT" },
+  { key: "link",   label: "Ждут ссылку", sumKey: "AWAITING_LINK", filter: "AWAITING_LINK", color: C.yellow, mode: "cleanGross", oldestKey: "AWAITING_LINK" },
+  { key: "direct", label: "Прямой",      sumKey: "DIRECT",        filter: "DIRECT",        color: C.blue,   mode: "grossOnly" },
+  { key: "avito",  label: "Авито",       sumKey: "AVITO",         filter: "AVITO",         color: C.orange, mode: "grossOnly" },
+  { key: "new",    label: "Новые",       sumKey: "NEW",           filter: "NEW",           color: C.accent, mode: "cleanGross" },
+  { key: "error",  label: "Ошибка",      sumKey: "ERROR",         filter: "ERROR",         color: C.red,    mode: "grossClean" },
 ];
 
-function MiniDashboard({ counts, sums, onTap }: {
+function MiniDashboard({ counts, sums, oldest, onTap, groups = DASHBOARD_GROUPS }: {
   counts: Record<string, number>;
   sums: Record<string, number>;
-  onTap: (filter: FilterTab) => void;
+  oldest?: Record<string, string | null> | null;
+  onTap?: (filter: FilterTab) => void;
+  groups?: typeof DASHBOARD_GROUPS;
 }) {
+  const visible = groups.filter(g => (counts[g.filter] ?? 0) > 0);
+  if (visible.length === 0) return null;
+
   return (
-    <div style={{ display: "flex", gap: 8, padding: "0 16px 6px" }}>
-      {DASHBOARD_GROUPS.map(g => {
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: visible.length > 1 ? "1fr 1fr" : "1fr",
+      gap: 8, padding: "0 16px 6px",
+    }}>
+      {visible.map(g => {
         const count = counts[g.filter] ?? 0;
-        const dirtyRobux = sums[g.sumKey] ?? 0;
-        if (count === 0) return null;
+        const cleanRobux = sums[g.sumKey] ?? 0;
+        const grossRobux = Math.ceil(cleanRobux / 0.7);
+        const primary = g.mode === "cleanGross" ? cleanRobux : grossRobux;
+        const secondary = g.mode === "grossClean" ? cleanRobux : g.mode === "cleanGross" ? grossRobux : null;
+        const oldestIso = g.oldestKey ? (oldest?.[g.oldestKey] ?? null) : null;
 
-        const grossRobux = Math.ceil(dirtyRobux / 0.7);
-        const primary = g.showClean ? dirtyRobux : grossRobux;
-        const secondary = g.showClean ? grossRobux : dirtyRobux;
+        const cardStyle: React.CSSProperties = {
+          minWidth: 0,
+          background: C.card,
+          borderRadius: 14,
+          padding: "12px 14px",
+          display: "flex", flexDirection: "column", gap: 3,
+          boxShadow: SHADOW.card,
+          position: "relative",
+          overflow: "hidden",
+          border: "none",
+          cursor: onTap ? "pointer" : "default",
+          textAlign: "left",
+        };
 
-        return (
-          <Pressable
-            key={g.key}
-            variant="press-sm"
-            onClick={() => { haptic.impact("light"); onTap(g.filter); }}
-            style={{
-              flex: 1, minWidth: 0,
-              background: C.card,
-              borderRadius: 14,
-              padding: "12px 14px",
-              display: "flex", flexDirection: "column", gap: 3,
-              boxShadow: SHADOW.card,
-              position: "relative",
-              overflow: "hidden",
-              border: "none", cursor: "pointer",
-              textAlign: "left",
-            }}
-          >
+        const inner = (
+          <>
             <div style={{
               position: "absolute", inset: 0, borderRadius: 14, pointerEvents: "none",
               background: `linear-gradient(180deg, ${g.color}0d 0%, transparent 60%)`,
@@ -1702,24 +1800,50 @@ function MiniDashboard({ counts, sums, onTap }: {
             }}>
               {fmtRobux(primary)}
               <span style={{ fontSize: 13, fontWeight: 500, color: C.textSecondary, marginLeft: 2 }}>R$</span>
-              <span style={{ fontSize: 13, fontWeight: 500, color: C.textTertiary, marginLeft: 4 }}>
-                ({fmtRobux(secondary)})
-              </span>
+              {secondary !== null && (
+                <span style={{ fontSize: 13, fontWeight: 500, color: C.textTertiary, marginLeft: 4 }}>
+                  ({fmtRobux(secondary)})
+                </span>
+              )}
             </div>
             <div style={{
               fontSize: 13, color: C.textTertiary, ...tabular,
               position: "relative",
+              display: "flex", justifyContent: "space-between", gap: 6,
             }}>
-              {count} {count === 1 ? "заказ" : count < 5 ? "заказа" : "заказов"}
+              <span>{count} {count === 1 ? "заказ" : count < 5 ? "заказа" : "заказов"}</span>
+              {oldestIso && (
+                <span title="Старейший в очереди" style={{ color: ageColor(oldestIso) }}>
+                  ⏳ {fmtAge(oldestIso)}
+                </span>
+              )}
             </div>
+          </>
+        );
+
+        return onTap ? (
+          <Pressable
+            key={g.key}
+            variant="press-sm"
+            onClick={() => { haptic.impact("light"); onTap(g.filter); }}
+            style={cardStyle}
+          >
+            {inner}
           </Pressable>
+        ) : (
+          <div key={g.key} style={cardStyle}>{inner}</div>
         );
       })}
     </div>
   );
 }
 
-function EmptyState({ filter, query }: { filter: FilterTab; query: string }) {
+function EmptyState({ filter, query, attention, onShowAll }: {
+  filter: FilterTab;
+  query: string;
+  attention?: boolean;
+  onShowAll?: () => void;
+}) {
   if (query) {
     return (
       <div style={{ padding: 48, textAlign: "center", color: C.textSecondary }}>
@@ -1728,6 +1852,30 @@ function EmptyState({ filter, query }: { filter: FilterTab; query: string }) {
         <div style={{ fontSize: 14, color: C.textTertiary }}>
           Попробуй ник Roblox, @username, WB-код или ID
         </div>
+      </div>
+    );
+  }
+  if (attention) {
+    return (
+      <div style={{ padding: 48, textAlign: "center", color: C.textSecondary }}>
+        <div style={{ fontSize: 36, marginBottom: 10 }}>✅</div>
+        <div style={{ fontSize: 16, marginBottom: 4 }}>Всё под контролем</div>
+        <div style={{ fontSize: 14, color: C.textTertiary, marginBottom: 18 }}>
+          Ничего не требует внимания
+        </div>
+        {onShowAll && (
+          <button
+            className="twa-press-sm"
+            onClick={onShowAll}
+            style={{
+              background: "rgba(118,118,128,0.18)", border: "none", borderRadius: 10,
+              color: C.accent, fontSize: 15, fontWeight: 600,
+              padding: "10px 18px", cursor: "pointer",
+            }}
+          >
+            Все заказы →
+          </button>
+        )}
       </div>
     );
   }
@@ -1741,6 +1889,7 @@ function EmptyState({ filter, query }: { filter: FilterTab; query: string }) {
     AWAITING_LINK: "Все оформили заказы",
     DONE: "Нет выкупленных заказов",
     FAVORITES: "Нет избранных",
+    ATTENTION: "Ничего не требует внимания",
   };
   return (
     <div style={{ padding: 48, textAlign: "center", color: C.textSecondary }}>

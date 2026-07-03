@@ -5,11 +5,23 @@ import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepass
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
-type FilterTab = "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "FAVORITES";
+type FilterTab = "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "FAVORITES" | "ATTENTION";
 
 const NEW_CUTOFF_HOURS = 40;
+// «Ждут ссылку»: первые N карточек — самые свежие (клиент ещё тёплый), дальше
+// хвост очереди от самых старых к новым.
+const AWAITING_LINK_HEAD = 5;
+// «Требуют внимания» (секция на вкладке «Все»): пороги просроченности.
+const ATTENTION_BUYOUT_HOURS = 12;
+const ATTENTION_LINK_DAYS = 5;
+const ATTENTION_TAKE = 50;
 
-let cachedCounts: { data: Record<string, number>; sums: Record<string, number>; ts: number } | null = null;
+let cachedCounts: {
+  data: Record<string, number>;
+  sums: Record<string, number>;
+  oldest: Record<string, string | null>;
+  ts: number;
+} | null = null;
 const COUNT_CACHE_TTL = 30_000;
 
 function buildTabWhere(tab: FilterTab): any {
@@ -33,6 +45,19 @@ function buildTabWhere(tab: FilterTab): any {
       return { status: "COMPLETED" };
     case "FAVORITES":
       return { isFavorite: true };
+    case "ATTENTION": {
+      const buyoutOverdue = new Date(Date.now() - ATTENTION_BUYOUT_HOURS * 3600_000);
+      const linkOverdue = new Date(Date.now() - ATTENTION_LINK_DAYS * 24 * 3600_000);
+      return {
+        isFavorite: false,
+        OR: [
+          { status: "ERROR" },
+          { status: { in: ["PENDING", "IN_PROGRESS"] }, isDirectOrder: false, orderSource: { not: "AVITO" }, pendingAt: { lte: buyoutOverdue } },
+          { isDirectOrder: true, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING"] } },
+          { status: "AWAITING_GAMEPASS", createdAt: { lte: linkOverdue } },
+        ],
+      };
+    }
     default:
       return {};
   }
@@ -40,8 +65,18 @@ function buildTabWhere(tab: FilterTab): any {
 
 function orderByForTab(tab: FilterTab): any {
   if (tab === "BUYOUT" || tab === "DIRECT" || tab === "AVITO") return [{ pendingAt: "asc" }, { createdAt: "asc" }];
-  if (tab === "ERROR" || tab === "AWAITING_LINK") return { createdAt: "asc" };
+  if (tab === "ERROR" || tab === "AWAITING_LINK" || tab === "ATTENTION") return { createdAt: "asc" };
   return { createdAt: "desc" };
+}
+
+// Серьёзность внутри «Требуют внимания»: ошибка → подвисший выкуп →
+// прямой ждёт оплату → давно ждут ссылку. Внутри группы — старые сверху
+// (сортировка стабильная, базовый порядок createdAt asc сохраняется).
+function attentionRank(o: { status: string }): number {
+  if (o.status === "ERROR") return 0;
+  if (o.status === "PENDING" || o.status === "IN_PROGRESS") return 1;
+  if (o.status === "AWAITING_PAYMENT" || o.status === "PAYMENT_PENDING") return 2;
+  return 3;
 }
 
 export async function GET(req: NextRequest) {
@@ -58,7 +93,7 @@ export async function GET(req: NextRequest) {
   const lite        = searchParams.get("lite") === "1";
   const sourceFilter = searchParams.get("source") as string | null;
 
-  const isVirtualTab = ["ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES"].includes(tab);
+  const isVirtualTab = ["ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES", "ATTENTION"].includes(tab);
   const tabWhere = isVirtualTab
     ? buildTabWhere(tab as FilterTab)
     : (VALID_STATUSES.includes(tab as any) ? { status: tab } : {});
@@ -94,25 +129,38 @@ export async function GET(req: NextRequest) {
     : { ...notTest, ...tabWhere, ...sourceWhere };
 
   const take = skipCounts ? limit + 1 : limit;
-  const ordersPromise = (prisma as any).wbOrder.findMany({
-    where,
-    orderBy,
-    skip,
-    take,
-    include: {
-      user: { select: {
-        tgId: true, vkId: true, name: true, username: true,
-        balance: true, reviewBonusGrantedAt: true,
-      } },
-    },
-  });
+  const userInclude = {
+    user: { select: {
+      tgId: true, vkId: true, name: true, username: true,
+      balance: true, reviewBonusGrantedAt: true,
+    } },
+  };
 
+  let ordersPromise: Promise<any[]>;
+  if (tab === "ATTENTION") {
+    // Секция небольшая по природе — берём одним куском (без пагинации)
+    // и ранжируем по серьёзности уже в памяти.
+    ordersPromise = (prisma as any).wbOrder
+      .findMany({ where, orderBy, take: ATTENTION_TAKE, include: userInclude })
+      .then((rows: any[]) => rows.sort((a, b) => attentionRank(a) - attentionRank(b)));
+  } else if (tab === "AWAITING_LINK" && !q) {
+    ordersPromise = fetchAwaitingLinkHybrid(where, skip, take, userInclude);
+  } else {
+    ordersPromise = (prisma as any).wbOrder.findMany({ where, orderBy, skip, take, include: userInclude });
+  }
+
+  const emptyCounts = {
+    total: 0,
+    counts: null as Record<string, number> | null,
+    sums: null as Record<string, number> | null,
+    oldest: null as Record<string, string | null> | null,
+  };
   const countsPromise = skipCounts
-    ? Promise.resolve({ total: 0, counts: null as Record<string, number> | null, sums: null as Record<string, number> | null })
+    ? Promise.resolve(emptyCounts)
     : (async () => {
         if (!q) {
           if (cachedCounts && Date.now() - cachedCounts.ts < COUNT_CACHE_TTL) {
-            return { total: tabTotal(tab, cachedCounts.data), counts: cachedCounts.data, sums: cachedCounts.sums };
+            return { total: tabTotal(tab, cachedCounts.data), counts: cachedCounts.data, sums: cachedCounts.sums, oldest: cachedCounts.oldest };
           }
           const rows: any[] = await (prisma as any).$queryRawUnsafe(`
             SELECT
@@ -125,30 +173,42 @@ export async function GET(req: NextRequest) {
               COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "AWAITING_LINK",
               COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS "DONE",
               COUNT(*) FILTER (WHERE "isFavorite" = true)::int AS "FAVORITES",
+              COUNT(*) FILTER (WHERE "isFavorite" = false AND (
+                status = 'ERROR'
+                OR (status IN ('PENDING','IN_PROGRESS') AND "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "pendingAt" <= NOW() - INTERVAL '${ATTENTION_BUYOUT_HOURS} hours')
+                OR ("isDirectOrder" = true AND status IN ('AWAITING_PAYMENT','PAYMENT_PENDING'))
+                OR (status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${ATTENTION_LINK_DAYS} days')
+              ))::int AS "ATTENTION",
               COALESCE(SUM(amount) FILTER (WHERE status IN ('PENDING','IN_PROGRESS') AND "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "isFavorite" = false), 0)::int AS "SUM_BUYOUT",
               COALESCE(SUM(amount) FILTER (WHERE "isDirectOrder" = true AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_DIRECT",
               COALESCE(SUM(amount) FILTER (WHERE "orderSource" = 'AVITO' AND status IN ('PENDING','IN_PROGRESS','AWAITING_GAMEPASS','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_AVITO",
-              COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "isFavorite" = false), 0)::int AS "SUM_AWAITING_LINK"
+              COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "isFavorite" = false), 0)::int AS "SUM_AWAITING_LINK",
+              COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false), 0)::int AS "SUM_NEW",
+              COALESCE(SUM(amount) FILTER (WHERE status = 'ERROR' AND "isFavorite" = false), 0)::int AS "SUM_ERROR",
+              MIN("pendingAt") FILTER (WHERE status IN ('PENDING','IN_PROGRESS') AND "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "isFavorite" = false) AS "OLDEST_BUYOUT",
+              MIN("createdAt") FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false) AS "OLDEST_AWAITING_LINK"
             FROM "WbOrder"
             WHERE "isTest" = false
           `);
           const r = rows[0] ?? {};
           const counts: Record<string, number> = {};
           const sums: Record<string, number> = {};
-          for (const k of ["ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES"] as const)
+          for (const k of ["ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES", "ATTENTION"] as const)
             counts[k] = Number(r[k] ?? 0);
-          sums["BUYOUT"] = Number(r["SUM_BUYOUT"] ?? 0);
-          sums["DIRECT"] = Number(r["SUM_DIRECT"] ?? 0);
-          sums["AVITO"] = Number(r["SUM_AVITO"] ?? 0);
-          sums["AWAITING_LINK"] = Number(r["SUM_AWAITING_LINK"] ?? 0);
-          cachedCounts = { data: counts, sums, ts: Date.now() };
-          return { total: tabTotal(tab, counts), counts, sums };
+          for (const k of ["BUYOUT", "DIRECT", "AVITO", "AWAITING_LINK", "NEW", "ERROR"] as const)
+            sums[k] = Number(r[`SUM_${k}`] ?? 0);
+          const oldest: Record<string, string | null> = {
+            BUYOUT: r["OLDEST_BUYOUT"] ? new Date(r["OLDEST_BUYOUT"]).toISOString() : null,
+            AWAITING_LINK: r["OLDEST_AWAITING_LINK"] ? new Date(r["OLDEST_AWAITING_LINK"]).toISOString() : null,
+          };
+          cachedCounts = { data: counts, sums, oldest, ts: Date.now() };
+          return { total: tabTotal(tab, counts), counts, sums, oldest };
         }
         const cnt = await (prisma as any).wbOrder.count({ where });
-        return { total: cnt, counts: null, sums: null };
+        return { ...emptyCounts, total: cnt };
       })();
 
-  const [rawOrders, { total, counts, sums }] = await Promise.all([ordersPromise, countsPromise]);
+  const [rawOrders, { total, counts, sums, oldest }] = await Promise.all([ordersPromise, countsPromise]);
   const hasMore = skipCounts && rawOrders.length > limit;
   const orders = hasMore ? rawOrders.slice(0, limit) : rawOrders;
   const finalTotal = skipCounts
@@ -249,11 +309,33 @@ export async function GET(req: NextRequest) {
     void enrichVkUsers(vkEnrichOrders);
   }
 
-  return NextResponse.json({ orders, total: finalTotal, counts, sums, page, pages: Math.ceil(finalTotal / limit) });
+  // ATTENTION отдаётся одним куском (до ATTENTION_TAKE) — пагинации нет.
+  const pages = tab === "ATTENTION" ? 1 : Math.ceil(finalTotal / limit);
+  return NextResponse.json({ orders, total: finalTotal, counts, sums, oldest, page, pages });
 }
 
 function tabTotal(tab: string, counts: Record<string, number>): number {
   return counts[tab] ?? counts["ALL"] ?? 0;
+}
+
+// «Ждут ссылку»: голова = AWAITING_LINK_HEAD самых свежих (desc), хвост = все
+// остальные от самых старых (asc). Собирается на сервере, чтобы порядок
+// переживал пагинацию; окно страницы [skip, skip+take) режется по обеим частям.
+async function fetchAwaitingLinkHybrid(where: any, skip: number, take: number, include: any): Promise<any[]> {
+  const head: any[] = await (prisma as any).wbOrder.findMany({
+    where, orderBy: { createdAt: "desc" }, take: AWAITING_LINK_HEAD, include,
+  });
+  const headSlice = head.slice(skip, skip + take);
+  const tailTake = take - headSlice.length;
+  if (tailTake <= 0) return headSlice;
+  const tail: any[] = await (prisma as any).wbOrder.findMany({
+    where: { ...where, id: { notIn: head.map(h => h.id) } },
+    orderBy: { createdAt: "asc" },
+    skip: Math.max(0, skip - head.length),
+    take: tailTake,
+    include,
+  });
+  return [...headSlice, ...tail];
 }
 
 async function enrichVkUsers(orders: any[]) {
