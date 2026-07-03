@@ -53,14 +53,37 @@ Web-контейнера: `/`, `/faq`, `/reviews`, `/checkout`, `/dashboard`, `/
 контейнер, из Guide-сборки proxy вырезается в `Dockerfile.guide`), `/twa`, все `/api/*` и
 статика **не затрагиваются** — боты, коридор и TWA работают в любом режиме.
 
-- **Включить:** env `MAINTENANCE_MODE=on` на Web в Coolify → Restart. Выключить: удалить
-  переменную или любое другое значение.
-- Посетители получают rewrite на `/maintenance` с HTTP 503 (+ `Retry-After`).
+- **Включить:** на Web в Coolify выставить `MAINTENANCE_MODE=on` (значение ровно `on`; всё
+  прочее = выключено) и `SITE_UNLOCK_SECRET=<секрет>`, затем **Restart** (env читается при
+  создании контейнера). Выключить — `MAINTENANCE_MODE=off` (или удалить) + Restart.
+- Посетители получают rewrite на `/maintenance` (route handler `src/app/api/../maintenance`,
+  сам отдаёт HTTP 503 + `Retry-After`; кастомный статус у `rewrite()` в проде игнорируется).
 - **Байпас владельца** (два способа):
   1. NextAuth-сессия с `role: ADMIN`;
   2. открыть любую страницу с `?unlock=<SITE_UNLOCK_SECRET>` → ставится подписанная
      HMAC-cookie `site_unlock` (30 дней), редирект на чистый URL — дальше браузер ходит
      свободно. Без env `SITE_UNLOCK_SECRET` этот способ выключен.
+
+> ⚠️ **Healthcheck обязан бить в негейтируемый путь.** Docker healthcheck Web-контейнера
+> ходит в `/api/health` (ungated), **не** в `/`. Если healthcheck бьёт в `/`, то при
+> `MAINTENANCE_MODE=on` он получает 503 → Docker метит контейнер `unhealthy` → Traefik
+> выкидывает **весь** Web из ротации (включая `/twa` и `/api`), сайт падает целиком. Это
+> ровно то, что случилось при первом включении 2026-07-03; фикс — `/api/health` в `Dockerfile`.
+
+> **Управление через Coolify API** (токен — в разделе Coolify выше; UUID Web —
+> `z10ws7m1q45h281zwedmhei4`):
+> ```bash
+> B=http://89.110.94.117:8000/api/v1; A=z10ws7m1q45h281zwedmhei4
+> # выставить/поменять env:
+> curl -s -X POST  -H "Authorization: Bearer $COOLIFY_TOKEN" -H 'Content-Type: application/json' \
+>   "$B/applications/$A/envs" -d '{"key":"MAINTENANCE_MODE","value":"on","is_preview":false}'
+> curl -s -X PATCH -H "Authorization: Bearer $COOLIFY_TOKEN" -H 'Content-Type: application/json' \
+>   "$B/applications/$A/envs" -d '{"key":"MAINTENANCE_MODE","value":"off","is_preview":false}'
+> # применить (Restart — быстро, без пересборки; env читается при создании контейнера):
+> curl -s -X POST  -H "Authorization: Bearer $COOLIFY_TOKEN" "$B/applications/$A/restart"
+> ```
+> Поле `is_build_time` API отклоняет — не передавать. После Restart проверить:
+> `docker exec robloxbank-web printenv MAINTENANCE_MODE` и `docker inspect … Health.Status`.
 
 ## Заметки
 
