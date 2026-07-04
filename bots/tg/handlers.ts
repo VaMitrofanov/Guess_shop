@@ -2957,16 +2957,43 @@ export function registerAdmin(bot: Telegraf): void {
       return;
     }
 
-    const s = await (db as any).globalSettings.findUnique({ where: { id: "global" }, select: { gpWatchEnabled: true } });
-    const watching = await (db as any).wbOrder.count({
-      where: { status: "AWAITING_GAMEPASS", isTest: false, robloxUsername: null, probableNick: { not: null } },
-    });
+    const modeMatch = arg.match(/^mode\s+(admin|customer|both)$/);
+    if (modeMatch) {
+      await (db as any).globalSettings.upsert({
+        where: { id: "global" },
+        update: { gpWatchNotify: modeMatch[1] },
+        create: { id: "global", usdToRub: 90, gpWatchNotify: modeMatch[1] },
+      });
+      const modeHuman = { admin: "только алерт менеджеру", customer: "только пинг клиенту", both: "клиенту пинг + алерт менеджеру" }[modeMatch[1]]!;
+      await ctx.reply(`👁 GP-watch режим: <b>${modeMatch[1]}</b> — ${modeHuman}.`, { parse_mode: "HTML" });
+      return;
+    }
+
+    const s = await (db as any).globalSettings.findUnique({ where: { id: "global" }, select: { gpWatchEnabled: true, gpWatchNotify: true } });
+    const [watching, lastChecked, notified] = await Promise.all([
+      (db as any).wbOrder.count({
+        where: { status: "AWAITING_GAMEPASS", isTest: false, robloxUsername: null, probableNick: { not: null } },
+      }),
+      (db as any).wbOrder.findFirst({
+        where: { gpWatchLastCheckAt: { not: null } },
+        orderBy: { gpWatchLastCheckAt: "desc" },
+        select: { gpWatchLastCheckAt: true },
+      }),
+      (db as any).wbOrder.count({
+        where: { status: "AWAITING_GAMEPASS", isTest: false, gpWatchNotifiedPassId: { not: null } },
+      }),
+    ]);
+    const lastTick = lastChecked?.gpWatchLastCheckAt
+      ? new Date(lastChecked.gpWatchLastCheckAt).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })
+      : "ещё не было";
     await ctx.reply(
       `👁 <b>GP-watch по вероятному нику</b>\n\n` +
-      `Статус: <b>${s?.gpWatchEnabled ? "🟢 ВКЛЮЧЁН" : "🔴 ВЫКЛЮЧЕН"}</b>\n` +
-      `Под наблюдением: <b>${watching}</b> заказов «Ждут ссылку» с вероятным ником\n\n` +
-      `<code>/gpwatch on</code> · <code>/gpwatch off</code>\n` +
-      `<i>Следит за геймпассом по «карандашному» нику; как найдёт — просит клиента подтвердить.</i>`,
+      `Статус: <b>${s?.gpWatchEnabled ? "🟢 ВКЛЮЧЁН" : "🔴 ВЫКЛЮЧЕН"}</b> · режим <b>${s?.gpWatchNotify ?? "both"}</b>\n` +
+      `Под наблюдением: <b>${watching}</b> заказов «Ждут ссылку» с вероятным ником\n` +
+      `Найден ГП, клиент оповещён, ждём ✅: <b>${notified}</b>\n` +
+      `Последняя проверка: <b>${lastTick}</b> МСК\n\n` +
+      `<code>/gpwatch on</code> · <code>/gpwatch off</code> · <code>/gpwatch mode admin|customer|both</code>\n` +
+      `<i>Следит за геймпассом по «карандашному» нику; как найдёт — алертит менеджеру и/или просит клиента подтвердить (по режиму).</i>`,
       { parse_mode: "HTML" },
     );
   });

@@ -129,12 +129,17 @@ export async function vkGetName(vkUserId: number): Promise<string> {
   return `VK #${vkUserId}`;
 }
 
-/** Send a text message to a VK user. Pass `extra` for e.g. an inline `keyboard`. */
+/**
+ * Send a text message to a VK user. Pass `extra` for e.g. an inline `keyboard`.
+ * Returns true only when VK confirmed the send — error 901 (user never wrote
+ * to the community) and friends otherwise vanish silently, and callers like the
+ * GP-watcher must know to retry / alert instead of marking "notified".
+ */
 export async function vkSend(
   vkUserId: string | number,
   message: string,
   extra: Record<string, string> = {}
-): Promise<void> {
+): Promise<boolean> {
   const params = new URLSearchParams({
     user_id:    String(vkUserId),
     message,
@@ -144,13 +149,20 @@ export async function vkSend(
     ...extra,
   });
   try {
-    await fetch(vkApiUrl("messages.send"), {
+    const res = await fetch(vkApiUrl("messages.send"), {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: params.toString(),
     });
+    const json = (await res.json().catch(() => null)) as any;
+    if (json?.error) {
+      console.warn("[notify] vkSend VK error:", json.error.error_code, json.error.error_msg);
+      return false;
+    }
+    return json?.response !== undefined;
   } catch (err: any) {
     console.warn("[notify] vkSend error:", err?.message ?? err);
+    return false;
   }
 }
 

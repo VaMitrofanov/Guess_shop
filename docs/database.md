@@ -56,7 +56,9 @@ robloxUsername, userId+createdAt).
 а берём заново из `product-info` в момент слива. Колонка оставлена, чтобы не плодить миграцию.
 Автовыкуп (+1): `autoBuyoutEnabled` (kill-switch, default OFF), `autoBuyoutThreshold` (порог
 слива, R$, default 150), `autoBuyoutMaxPerTick` (default 5), `autoBuyoutBelowSince` (дедуп
-алерта «пора сливать»). GP-watch (+3): `gpWatchEnabled` (kill-switch, default OFF).
+алерта «пора сливать»). GP-watch (+3): `gpWatchEnabled` (kill-switch, default OFF),
+`gpWatchNotify` (`admin`/`customer`/`both`, default `both` — кому сообщать о найденном ГП:
+алерт менеджеру и/или пинг клиенту; миграция `20260704_add_gpwatch_notify_mode`).
 
 > ⚠️ `usdToRub` — `Float` без default. Любой `globalSettings.upsert` **обязан** передавать
 > `usdToRub` в блоке `create`, даже если фактически сработает `update` — Prisma валидирует

@@ -272,6 +272,9 @@ model GlobalSettings {
   autoBuyoutBelowSince  DateTime?               // when balance first went ≤ threshold (alert dedup)
   // ── GP-watcher (+3) ──────────────────────────────────────────────────────
   gpWatchEnabled        Boolean   @default(false) // kill-switch for the probable-nick gamepass watcher
+  /// Who the watcher tells about a found gamepass: "admin" | "customer" | "both".
+  /// "both" keeps the customer auto-ping AND gives managers full visibility.
+  gpWatchNotify         String    @default("both")
 }
 
 /// Durable record of a "Выкупить всё" batch — one row per bulk-buyout session.

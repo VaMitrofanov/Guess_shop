@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
-import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached } from "@/lib/twa-notify";
+import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing } from "@/lib/twa-notify";
+import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
@@ -884,9 +885,53 @@ export async function POST(req: NextRequest) {
 
     cachedCounts = null;
 
-    notifyRebind(targetUser, order.amount, order.wbCode, !!order.gamepassUrl).catch(() => {});
+    // Дожидаемся отправки — менеджер должен видеть, дошло ли (VK 901 молчалив).
+    const notified = await notifyRebind(targetUser, order.amount, order.wbCode, !!order.gamepassUrl).catch(() => null);
 
-    return NextResponse.json({ ok: true, platform: newPlatform });
+    return NextResponse.json({ ok: true, platform: newPlatform, notified });
+  }
+
+  // ── 👁 GP-watch из карточки: live-поиск ГП по вероятному нику + пинг клиенту ─
+  // Кнопка «Найти ГП и оповестить» / «Оповестить ещё раз» во вкладке «Ждут ссылку».
+  if (action === "gpwatch-notify") {
+    if (order.status !== "AWAITING_GAMEPASS")
+      return NextResponse.json({ error: `Заказ уже в статусе ${order.status}` }, { status: 400 });
+    const nick = order.probableNick ?? order.robloxUsername;
+    if (!nick)
+      return NextResponse.json({ error: "У заказа нет вероятного ника" }, { status: 400 });
+
+    const search = await searchForSalePassesByNick(nick);
+    if (search.status === "user_not_found")
+      return NextResponse.json({ error: `Ник «${nick}» не найден на Roblox` }, { status: 404 });
+    if (search.status === "error")
+      return NextResponse.json({ error: "Roblox не ответил — попробуй ещё раз" }, { status: 502 });
+
+    const want = Math.ceil(order.amount / 0.7);
+    const match = search.passes
+      .filter((p) => Math.abs(p.price - want) <= 2)
+      .sort((a, b) => Math.abs(a.price - want) - Math.abs(b.price - want))[0];
+    if (!match)
+      return NextResponse.json({
+        found: false,
+        want,
+        passes: search.passes.length,
+        error: `У «${nick}» нет геймпасса за ${want} R$ (в продаже: ${search.passes.length})`,
+      }, { status: 404 });
+
+    const notified = await notifyGpWatchPing(order.user, order.id, nick, match.name, match.price).catch(() => null);
+    if (notified) {
+      await (prisma as any).wbOrder.update({
+        where: { id: orderId },
+        data: { gpWatchNotifiedPassId: String(match.gamepassId), gpWatchLastCheckAt: new Date() },
+      });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      found: true,
+      pass: { gamepassId: match.gamepassId, name: match.name, price: match.price },
+      notified,
+    });
   }
 
   return NextResponse.json({ error: "Invalid action" }, { status: 400 });

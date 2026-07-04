@@ -40,13 +40,14 @@ async function tgPost(chatId: string, text: string, extra: Record<string, unknow
 }
 
 /** true = VK принял сообщение, false = ошибка (напр. 901 — юзер не писал сообществу). */
-async function vkPost(vkUserId: string, message: string): Promise<boolean> {
+async function vkPost(vkUserId: string, message: string, extra: Record<string, string> = {}): Promise<boolean> {
   const params = new URLSearchParams({
     user_id:      vkUserId,
     message,
     random_id:    String(Date.now() + Math.floor(Math.random() * 1000)),
     access_token: process.env.VK_TOKEN ?? "",
     v:            "5.131",
+    ...extra,
   });
   try {
     const r = await fetch("https://api.vk.com/method/messages.send", {
@@ -127,32 +128,98 @@ export async function notifyOrderCompleted(
   else if (user.vkId) await vkPost(user.vkId, vkMsg);
 }
 
+/**
+ * Менеджер привязал заказ к аккаунту клиента (rebind из TWA — кросс-платформенный
+ * логин, Авито-заказ и т.п.). Текст выглядит как обычная активация кода — клиент
+ * не должен чувствовать «за меня что-то сделали руками» (запрос владельца 04.07).
+ * Возвращает канал реальной доставки (как notifyGamepassAttached) — TWA показывает
+ * менеджеру честный статус.
+ */
 export async function notifyRebind(
   user: UserRef,
   amount: number,
   wbCode: string,
   hasGamepass: boolean,
-) {
+): Promise<"tg" | "vk" | null> {
   const dirty = Math.ceil(amount / 0.7);
   const instructionUrl = `https://robloxbank.ru/guide?skip=1&code=${wbCode}`;
+  // AV-/DIR-коды — внутренние, клиенту их не показываем (политика «идентификатор
+  // для клиента = код ВБ или ник», 2026-06-24). WB-код — показываем как при активации.
+  const isInternalCode = /^(AV|DIR)-/.test(wbCode);
+  const head = isInternalCode
+    ? `✅ <b>Заказ на ${amount} R$ оформлен</b> · цена геймпасса <b>${dirty} R$</b>`
+    : `✅ Код <b>${wbCode}</b> активирован · номинал <b>${amount} R$</b> → геймпасс <b>${dirty} R$</b>`;
 
   if (hasGamepass) {
-    const tgMsg = `🔄 <b>Заказ ${wbCode} привязан к вашему аккаунту</b>\n\nСумма: <b>${dirty} R$</b> (${amount} чистых)\nГеймпасс уже отправлен — мы выкупим его в ближайшее время.`;
-    const vkMsg = `🔄 Заказ ${wbCode} привязан к вашему аккаунту\n\nСумма: ${dirty} R$ (${amount} чистых)\nГеймпасс уже отправлен — мы выкупим его в ближайшее время.`;
-    if (user.tgId) await tgPost(user.tgId, tgMsg);
-    else if (user.vkId) await vkPost(user.vkId, vkMsg);
-  } else {
-    const tgMsg = `🔄 <b>Заказ ${wbCode} привязан к вашему аккаунту</b>\n\nСумма: <b>${dirty} R$</b> (${amount} чистых)\nОтправьте ссылку на геймпасс, чтобы получить робуксы.`;
-    const vkMsg = `🔄 Заказ ${wbCode} привязан к вашему аккаунту\n\nСумма: ${dirty} R$ (${amount} чистых)\nОтправьте ссылку на геймпасс, чтобы получить робуксы.`;
-
-    if (user.tgId) {
-      await tgPost(user.tgId, tgMsg, {
-        reply_markup: { inline_keyboard: [[{ text: "📋 Инструкция", url: instructionUrl }]] },
-      });
-    } else if (user.vkId) {
-      await vkPost(user.vkId, vkMsg + `\n\n📋 Инструкция: ${instructionUrl}`);
-    }
+    const tgMsg = `${head}\n\nГеймпасс уже у нас — выкупим в ближайшее время и напишем, как будет готово 💛`;
+    const vkMsg = tgMsg.replace(/<[^>]+>/g, "");
+    if (user.tgId) return (await tgPost(user.tgId, tgMsg)) ? "tg" : null;
+    if (user.vkId) return (await vkPost(user.vkId, vkMsg)) ? "vk" : null;
+    return null;
   }
+
+  const tgMsg = `${head}\n\nСоздай геймпасс за <b>${dirty} R$</b> и пришли ссылку сюда — выкупим и начислим робуксы 💛`;
+  const vkMsg = tgMsg.replace(/<[^>]+>/g, "") + `\n\n📖 Инструкция: ${instructionUrl}`;
+
+  if (user.tgId) {
+    return (await tgPost(user.tgId, tgMsg, {
+      reply_markup: { inline_keyboard: [[{ text: "📖 ОТКРЫТЬ ИНСТРУКЦИЮ", url: instructionUrl }]] },
+    })) ? "tg" : null;
+  }
+  if (user.vkId) return (await vkPost(user.vkId, vkMsg)) ? "vk" : null;
+  return null;
+}
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * Пинг GP-watch из TWA-карточки («📣 Оповестить»): тот же текст и те же кнопки
+ * ✅/❌, что шлёт воркер (gpw_ok:/gpw_no: ловят боты) — для клиента источник
+ * неотличим. Возвращает канал реальной доставки.
+ */
+export async function notifyGpWatchPing(
+  user: UserRef,
+  orderId: string,
+  nick: string,
+  passName: string,
+  priceRobux: number,
+): Promise<"tg" | "vk" | null> {
+  const tgMsg =
+    `🎉 <b>Похоже, твой геймпасс готов!</b>\n\n` +
+    `Ник: <b>${escHtml(nick)}</b>\n` +
+    `Геймпасс: <b>${escHtml(passName)}</b> · <b>${priceRobux} R$</b>\n\n` +
+    `Это твой геймпасс? Подтверди — и мы сразу заберём его в выкуп 💛`;
+
+  if (user.tgId) {
+    const ok = await tgPost(user.tgId, tgMsg, {
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "✅ Да, это мой", callback_data: `gpw_ok:${orderId}` },
+          { text: "❌ Не мой ник", callback_data: `gpw_no:${orderId}` },
+        ]],
+      },
+    });
+    return ok ? "tg" : null;
+  }
+  if (user.vkId) {
+    const vkKb = JSON.stringify({
+      inline: true,
+      buttons: [[
+        { action: { type: "text", label: "✅ Да, это мой", payload: JSON.stringify({ command: "gpw_ok", orderId }) }, color: "positive" },
+        { action: { type: "text", label: "❌ Не мой ник", payload: JSON.stringify({ command: "gpw_no", orderId }) }, color: "negative" },
+      ]],
+    });
+    const ok = await vkPost(
+      user.vkId,
+      `🎉 Похоже, твой геймпасс готов!\n\nНик: ${nick}\nГеймпасс: ${passName} · ${priceRobux} R$\n\n` +
+      `Это твой геймпасс? Подтверди — заберём его в выкуп 💛`,
+      { keyboard: vkKb },
+    );
+    return ok ? "vk" : null;
+  }
+  return null;
 }
 
 /**

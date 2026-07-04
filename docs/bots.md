@@ -121,13 +121,23 @@ WB-коридор не был задет (его `gp_pick` использует 
 - **👁 GP-watch по вероятному нику (+3).** Тик 15 мин. Для заказов `AWAITING_GAMEPASS` с
   `probableNick` (см. «Ранний захват ника») и без `robloxUsername`, младше 30 дней, ищет
   `searchGamepassesByNick` геймпасс с ценой `±2`. Нашёл (и это не тот же `gpWatchNotifiedPassId`)
-  → шлёт клиенту «🎉 Похоже, твой геймпасс готов!» с кнопками **✅ Да, это мой / ❌ Не мой ник**
-  (TG callback `gpw_ok:/gpw_no:`, VK payload `gpw_ok/gpw_no`). Троттлинг: <3 дней — каждый тик,
+  → действует по режиму **`GlobalSettings.gpWatchNotify`** (`admin`/`customer`/`both`,
+  default `both`):
+  - `customer|both`: клиенту «🎉 Похоже, твой геймпасс готов!» с кнопками
+    **✅ Да, это мой / ❌ Не мой ник** (TG callback `gpw_ok:/gpw_no:`, VK payload `gpw_ok/gpw_no`);
+  - `admin|both`: алерт менеджерам «👁 GP-watch: нашёл геймпасс…» (код, ник, пасс, цена,
+    статус клиентского пинга) — до 04.07 воркер работал молча для менеджера, и включённый
+    `/gpwatch on` выглядел как «ничего не сработало».
+  **Fail-safe доставки:** `vkSend` читает ответ VK API (error 901 «юзер не писал сообществу»
+  раньше терял пинг молча); недоставленный пинг откатывает `gpWatchNotifiedPassId` → ретрай
+  следующим тиком + алерт. Троттлинг: <3 дней — каждый тик,
   дальше раз в 2 ч (`gpWatchLastCheckAt`); лимит 20 проверок/тик. Подтверждение
   (`bots/shared/gp-watch-confirm.ts`, общий для TG+VK): ре-валидация → заказ `PENDING`,
   `robloxUsername = probableNick` (теперь подтверждён), карточка «👁 GP-WATCH подтверждён»
   админам; дальше подхватывает автовыкуп/менеджер. Отказ → `probableNick=null` +
-  `[НИК-ОТКАЗ …]`. Управление: `/gpwatch` (статус), `/gpwatch on|off`.
+  `[НИК-ОТКАЗ …]`. Управление: `/gpwatch` (статус: режим, наблюдаемые, «ждём ✅», последний
+  тик), `/gpwatch on|off`, `/gpwatch mode admin|customer|both`. Ручной пинг тем же текстом —
+  кнопка «👁 Найти ГП по нику и оповестить» в TWA-карточке (см. docs/twa-admin.md).
 
 ### Ранний захват ника → `probableNick` (структурно) + `adminNote` (история)
 `bots/shared/nick.ts` (`noteProbableNick`) и `src/lib/capture-nick.ts` пишут вероятный ник

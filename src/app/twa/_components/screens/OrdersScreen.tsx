@@ -31,6 +31,8 @@ interface Order {
   pendingAt: string | null;
   takenAt: string | null;
   robloxUsername: string | null;
+  probableNick: string | null;
+  gpWatchNotifiedPassId: string | null;
   purchaserUsername: string | null;
   orderSource: "WB" | "DIRECT" | "AVITO" | "MANUAL";
   reviewStatus: "PENDING" | "SUBMITTED" | null;
@@ -599,7 +601,9 @@ function RebindModal({ order, token, onDone, onClose }: {
       const d = await r.json();
       if (!r.ok) { toast(d.error ?? "Ошибка", "error"); setLoading(false); return; }
       haptic.notify("success");
-      toast("Перепривязан", "success");
+      // Честный статус доставки — как у 📎-привязки (VK 901 теряется молча).
+      if (d.notified) toast(`Перепривязан · клиент уведомлён (${String(d.notified).toUpperCase()})`, "success");
+      else toast("Перепривязан, но уведомление клиенту НЕ доставлено", "error");
       onDone();
     } catch { toast("Ошибка сети", "error"); }
     finally { setLoading(false); }
@@ -877,6 +881,35 @@ function OrderCard({
   const [moveOpen, setMoveOpen] = useState(false);
   const [editAvitoOpen, setEditAvitoOpen] = useState(false);
   const [rebindOpen, setRebindOpen] = useState(false);
+  // GP-watch: локально трекаем «клиент оповещён об этом ГП» — сервер после
+  // «Оповестить» отдаёт свежий passId, перезагрузка вкладки не нужна.
+  const [gpwPassId, setGpwPassId] = useState<string | null>(order.gpWatchNotifiedPassId);
+  const [gpwLoading, setGpwLoading] = useState(false);
+
+  async function gpwNotify() {
+    if (gpwLoading) return;
+    setGpwLoading(true);
+    haptic.impact("light");
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "gpwatch-notify", orderId: order.id }),
+      });
+      const d = await r.json();
+      if (!r.ok) { toast(d.error ?? "Ошибка", "error"); return; }
+      if (d.notified) {
+        haptic.notify("success");
+        setGpwPassId(String(d.pass.gamepassId));
+        toast(`Клиент оповещён (${String(d.notified).toUpperCase()}): «${d.pass.name}» · ${d.pass.price} R$`, "success");
+      } else {
+        toast(`ГП найден («${d.pass.name}» · ${d.pass.price} R$), но пинг НЕ доставлен`, "error");
+      }
+    } catch { toast("Ошибка сети", "error"); }
+    finally { setGpwLoading(false); }
+  }
+
+  const showGpWatch = order.status === "AWAITING_GAMEPASS" && !!order.probableNick && !order.robloxUsername;
 
   const platform: "tg" | "vk" | "—" = order.user.tgId ? "tg" : order.user.vkId ? "vk" : "—";
   const shortName = userShortName(order.user);
@@ -996,6 +1029,12 @@ function OrderCard({
             <span style={{ fontWeight: 600 }}>{order.robloxUsername}</span>
           </DataRow>
         )}
+        {!order.robloxUsername && order.probableNick && (
+          <DataRow icon="👁" copyText={order.probableNick}>
+            <span style={{ fontWeight: 600, color: C.yellow }}>{order.probableNick}</span>
+            <span style={{ fontSize: 13, color: C.textTertiary }}> · вероятный ник</span>
+          </DataRow>
+        )}
         {order.gamepassUrl && (
           <DataRow icon="🔗" copyText={order.gamepassUrl}>
             <span style={{ color: C.blue }}>{order.gamepassUrl.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}</span>
@@ -1024,6 +1063,39 @@ function OrderCard({
           <NotesEditor order={order} onSave={onSaveNote} />
         </div>
       </div>
+
+      {/* 👁 GP-watch: вероятный ник есть, подтверждённого нет — найти ГП и оповестить */}
+      {showGpWatch && (
+        <div style={{ padding: "0 14px 10px", display: "flex", flexDirection: "column", gap: 8 }}>
+          {gpwPassId && (
+            <div style={{
+              padding: "8px 10px", background: `${C.green}14`, borderRadius: 8,
+              fontSize: 14, color: C.green, display: "flex", alignItems: "center", gap: 6,
+              flexWrap: "wrap",
+            }}>
+              <span style={{ fontWeight: 600 }}>👁 ГП найден по нику — клиент оповещён, ждём ✅</span>
+              <a
+                href={`https://www.roblox.com/game-pass/${gpwPassId}`}
+                target="_blank" rel="noreferrer"
+                onClick={e => e.stopPropagation()}
+                style={{ color: C.blue, fontSize: 13 }}
+              >
+                game-pass/{gpwPassId}
+              </a>
+            </div>
+          )}
+          <button className="twa-press-sm" disabled={gpwLoading}
+            onClick={e => { e.stopPropagation(); gpwNotify(); }}
+            style={{
+              width: "100%", padding: "10px", borderRadius: 10,
+              border: `1px solid ${gpwPassId ? C.textTertiary + "44" : C.yellow + "55"}`,
+              background: "transparent", color: gpwPassId ? C.textSecondary : C.yellow,
+              fontSize: 14, fontWeight: 600, cursor: "pointer", opacity: gpwLoading ? 0.5 : 1,
+            }}>
+            {gpwLoading ? "Ищу ГП на Roblox…" : gpwPassId ? "📣 Оповестить клиента ещё раз" : "👁 Найти ГП по нику и оповестить"}
+          </button>
+        </div>
+      )}
 
       {/* Rejection reason for ALL tab */}
       {currentTab === "ALL" && order.status === "REJECTED" && order.rejectionReason && (

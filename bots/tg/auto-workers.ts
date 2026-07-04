@@ -210,8 +210,11 @@ export async function runGpWatchTick(bot: Telegraf): Promise<void> {
   if (gpWatchTickRunning.v) return;
   gpWatchTickRunning.v = true;
   try {
-    const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" }, select: { gpWatchEnabled: true } });
+    const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" }, select: { gpWatchEnabled: true, gpWatchNotify: true } });
     if (!settings?.gpWatchEnabled) return;
+    const mode: string = settings.gpWatchNotify ?? "both";
+    const pingCustomer = mode !== "admin";
+    const alertAdmin   = mode !== "customer";
 
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const candidates = await (db as any).wbOrder.findMany({
@@ -249,34 +252,60 @@ export async function runGpWatchTick(bot: Telegraf): Promise<void> {
       const pass = outcome.matches[0];
       if (String(pass.gamepassId) === order.gpWatchNotifiedPassId) continue; // already pinged for this pass
 
+      // Claim the dedup slot before sending (no double-ping if we crash mid-send),
+      // but ROLL BACK on a confirmed delivery failure so the next tick retries.
       await (db as any).wbOrder.update({ where: { id: order.id }, data: { gpWatchNotifiedPassId: String(pass.gamepassId) } });
 
-      const tgMsg =
-        `🎉 <b>Похоже, твой геймпасс готов!</b>\n\n` +
-        `Ник: <b>${escapeHtml(order.probableNick)}</b>\n` +
-        `Геймпасс: <b>${escapeHtml(pass.name)}</b> · <b>${pass.robux} R$</b>\n\n` +
-        `Это твой геймпасс? Подтверди — и мы сразу заберём его в выкуп 💛`;
-      const kb = {
-        inline_keyboard: [[
-          { text: "✅ Да, это мой", callback_data: `gpw_ok:${order.id}` },
-          { text: "❌ Не мой ник", callback_data: `gpw_no:${order.id}` },
-        ]],
-      };
-
-      if (order.user?.tgId) {
-        await tgSend(order.user.tgId, tgMsg, { parse_mode: "HTML", reply_markup: kb });
-      } else if (order.user?.vkId) {
-        const vkKb = JSON.stringify({
-          inline: true,
-          buttons: [[
-            { action: { type: "text", label: "✅ Да, это мой", payload: JSON.stringify({ command: "gpw_ok", orderId: order.id }) }, color: "positive" },
-            { action: { type: "text", label: "❌ Не мой ник", payload: JSON.stringify({ command: "gpw_no", orderId: order.id }) }, color: "negative" },
+      let delivered: "tg" | "vk" | "skip" | null = pingCustomer ? null : "skip";
+      if (pingCustomer) {
+        const tgMsg =
+          `🎉 <b>Похоже, твой геймпасс готов!</b>\n\n` +
+          `Ник: <b>${escapeHtml(order.probableNick)}</b>\n` +
+          `Геймпасс: <b>${escapeHtml(pass.name)}</b> · <b>${pass.robux} R$</b>\n\n` +
+          `Это твой геймпасс? Подтверди — и мы сразу заберём его в выкуп 💛`;
+        const kb = {
+          inline_keyboard: [[
+            { text: "✅ Да, это мой", callback_data: `gpw_ok:${order.id}` },
+            { text: "❌ Не мой ник", callback_data: `gpw_no:${order.id}` },
           ]],
-        });
-        await vkSend(order.user.vkId,
-          `🎉 Похоже, твой геймпасс готов!\n\nНик: ${order.probableNick}\nГеймпасс: ${pass.name} · ${pass.robux} R$\n\n` +
-          `Это твой геймпасс? Подтверди — заберём его в выкуп 💛`,
-          { keyboard: vkKb });
+        };
+
+        if (order.user?.tgId) {
+          const res = await tgSend(order.user.tgId, tgMsg, { parse_mode: "HTML", reply_markup: kb });
+          if ((res as any)?.ok !== false) delivered = "tg";
+        } else if (order.user?.vkId) {
+          const vkKb = JSON.stringify({
+            inline: true,
+            buttons: [[
+              { action: { type: "text", label: "✅ Да, это мой", payload: JSON.stringify({ command: "gpw_ok", orderId: order.id }) }, color: "positive" },
+              { action: { type: "text", label: "❌ Не мой ник", payload: JSON.stringify({ command: "gpw_no", orderId: order.id }) }, color: "negative" },
+            ]],
+          });
+          const ok = await vkSend(order.user.vkId,
+            `🎉 Похоже, твой геймпасс готов!\n\nНик: ${order.probableNick}\nГеймпасс: ${pass.name} · ${pass.robux} R$\n\n` +
+            `Это твой геймпасс? Подтверди — заберём его в выкуп 💛`,
+            { keyboard: vkKb });
+          if (ok) delivered = "vk";
+        }
+
+        if (delivered === null) {
+          // Confirmed failure (e.g. VK 901) — free the dedup slot for a retry.
+          await (db as any).wbOrder.update({ where: { id: order.id }, data: { gpWatchNotifiedPassId: null } });
+        }
+      }
+
+      if (alertAdmin) {
+        const pingLine =
+          delivered === "skip" ? "клиенту НЕ отправлял (режим admin) — оповести из карточки TWA" :
+          delivered            ? `клиент оповещён (${delivered.toUpperCase()}), ждём ✅/❌` :
+                                 "⚠️ пинг клиенту НЕ доставлен — повторим следующим тиком";
+        await alertAdmins(
+          `👁 <b>GP-watch: нашёл геймпасс по вероятному нику</b>\n` +
+          `Заказ <code>${order.wbCode}</code> · ник <b>${escapeHtml(order.probableNick)}</b>\n` +
+          `«${escapeHtml(pass.name)}» · <b>${pass.robux} R$</b> (ожидалось ${want})\n` +
+          `${pingLine}\n` +
+          `📊 TWA: поиск <code>${order.wbCode}</code>`
+        );
       }
       await sleep(jitter(1500, 4000));
     }
