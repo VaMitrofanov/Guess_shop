@@ -46,7 +46,12 @@ export async function noteProbableNick(opts: {
     const prefix = order.adminNote ? `${order.adminNote}\n` : "";
     await (db as any).wbOrder.update({
       where: { id: order.id },
-      data: { adminNote: `${prefix}[НИК? ${stamp}] ${nick} (${opts.source})`.slice(0, 2000) },
+      data: {
+        adminNote: `${prefix}[НИК? ${stamp}] ${nick} (${opts.source})`.slice(0, 2000),
+        // Structured mirror for the GP-watcher (+3) — last probable nick wins.
+        probableNick: nick,
+        probableNickAt: new Date(),
+      },
     });
   } catch (err: any) {
     console.warn(`[nick-capture] failed (${opts.source}):`, err?.message ?? err);

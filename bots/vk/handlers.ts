@@ -18,6 +18,7 @@ import { Keyboard } from "vk-io";
 import { getGamepassDetails, getGamepassProductInfo } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { noteProbableNick } from "../shared/nick";
+import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 
 // VK API instance injected from bot.ts to avoid circular import.
 let _vkApi: any = null;
@@ -564,6 +565,26 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // ── 👤 Buyer mini-profile hub ─────────────────────────────────────────────
   if (msgPayload?.command === "menu") {
     await sendVkBuyerMenu(ctx, vkUserId);
+    return;
+  }
+
+  // ── 👁 GP-watch (+3): клиент подтверждает/отклоняет найденный геймпасс ─────
+  if (msgPayload?.command === "gpw_ok" && msgPayload?.orderId) {
+    const res = await confirmGpWatch(String(msgPayload.orderId));
+    await ctx.reply(
+      res.status === "ok"
+        ? `✅ Отлично! Геймпасс ${res.passName} (${res.robux} R$) принят на ник ${res.nick}.\n\nЗаказ в очереди на выкуп — как только выкупим, сразу напишу сюда 💛`
+        : res.status === "already"
+        ? "✅ Этот заказ уже в работе — ничего делать не нужно."
+        : res.status === "gone"
+        ? "⚠️ Геймпасс сейчас не находится по этому нику. Проверь, что он выставлен на продажу за нужную цену, и пришли ссылку сюда."
+        : "⚠️ Не получилось обработать. Пришли ссылку на геймпасс сюда, помогу.",
+    );
+    return;
+  }
+  if (msgPayload?.command === "gpw_no" && msgPayload?.orderId) {
+    await declineGpWatch(String(msgPayload.orderId));
+    await ctx.reply("Понял 👍 Если знаешь свой точный ник Roblox — пришли его сюда, и я найду твой геймпасс.");
     return;
   }
 

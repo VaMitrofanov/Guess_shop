@@ -129,10 +129,11 @@ export async function vkGetName(vkUserId: number): Promise<string> {
   return `VK #${vkUserId}`;
 }
 
-/** Send a text message to a VK user. */
+/** Send a text message to a VK user. Pass `extra` for e.g. an inline `keyboard`. */
 export async function vkSend(
   vkUserId: string | number,
-  message: string
+  message: string,
+  extra: Record<string, string> = {}
 ): Promise<void> {
   const params = new URLSearchParams({
     user_id:    String(vkUserId),
@@ -140,6 +141,7 @@ export async function vkSend(
     random_id:  String(Date.now() + Math.floor(Math.random() * 1000)),
     access_token: process.env.VK_TOKEN ?? "",
     v:          "5.131",
+    ...extra,
   });
   try {
     await fetch(vkApiUrl("messages.send"), {

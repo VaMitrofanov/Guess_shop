@@ -27,9 +27,13 @@ Neon Postgres + Prisma 7 (`engineType=library`, adapter `PrismaPg`). Модел�
 Ключевые поля: `amount` (**чистые** R$), `gamepassUrl`, `status` (`WbOrderStatus`),
 `platform` (`TG`/`VK`), `wbCode` (**@unique** — один заказ на код), `userId`,
 `orderSource` (`WB`/`DIRECT`/`AVITO`/`MANUAL`), `isDirectOrder`, `isFavorite`, `isTest`,
-`adminNote` (только для админа), `robloxUsername` (продавец), `purchaserUsername`
-(куки-аккаунт-покупатель), `purchaseRate` (снапшот курса при выкупе), `pendingAt`
-(момент попадания в «К выкупу» — для сортировки), `rejectionReason`.
+`adminNote` (только для админа), `robloxUsername` (продавец, **только подтверждённый** ник),
+`purchaserUsername` (куки-аккаунт-покупатель), `purchaseRate` (снапшот курса при выкупе),
+`pendingAt` (момент попадания в «К выкупу» — для сортировки), `rejectionReason`.
+Ранний захват ника (+3): `probableNick` / `probableNickAt` — **вероятный** ник «карандашом»
+(из nick-поиска / fail-валидации / сайта / VK-бэкфилла; в `robloxUsername` не пишется, пока
+клиент не подтвердит). GP-watch: `gpWatchLastCheckAt` (троттлинг проверок),
+`gpWatchNotifiedPassId` (дедуп уведомлений). Индекс `[status, probableNick]` — выборка воркера.
 
 Статусы (`WbOrderStatus`):
 `AWAITING_PAYMENT` · `PAYMENT_PENDING` · `AWAITING_GAMEPASS` (provisional, ждём ссылку) ·
@@ -50,6 +54,9 @@ robloxUsername, userId+createdAt).
 пишется**: у современных геймпассов ProductId > INT32 (2.1 млрд) → запись падала с
 `ValueOutOfRange` и роняла `set-gamepass` («Ошибка сети» в TWA). Фикс: productId не кэшируем,
 а берём заново из `product-info` в момент слива. Колонка оставлена, чтобы не плодить миграцию.
+Автовыкуп (+1): `autoBuyoutEnabled` (kill-switch, default OFF), `autoBuyoutThreshold` (порог
+слива, R$, default 150), `autoBuyoutMaxPerTick` (default 5), `autoBuyoutBelowSince` (дедуп
+алерта «пора сливать»). GP-watch (+3): `gpWatchEnabled` (kill-switch, default OFF).
 
 > ⚠️ `usdToRub` — `Float` без default. Любой `globalSettings.upsert` **обязан** передавать
 > `usdToRub` в блоке `create`, даже если фактически сработает `update` — Prisma валидирует

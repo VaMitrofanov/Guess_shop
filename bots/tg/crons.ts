@@ -7,6 +7,7 @@ import { Markup, type Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { CB, ADMIN_IDS } from "../shared/admin";
 import { tgSend, vkSend, stripHtml } from "../shared/notify";
+import { startAutoWorkers } from "./auto-workers";
 
 const BONUS_AMOUNT = 100;
 const EXPIRY_DAYS = 30;
@@ -345,6 +346,9 @@ export function startReviewReminderCron(bot: Telegraf): void {
       console.error("[AwaitingReminder] error:", err)
     );
   }, 2 * 60 * 60 * 1000); // every 2 hours
+
+  // Auto-buyout (+1) + GP-watcher (+3) — both kill-switched OFF by default.
+  startAutoWorkers(bot);
 
   console.log("[ReviewReminder] Cron started ✅");
   console.log("[StockAlert] Cron started ✅");

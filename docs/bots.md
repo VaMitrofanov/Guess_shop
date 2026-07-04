@@ -98,6 +98,46 @@ WB-коридор не был задет (его `gp_pick` использует 
 ### Admin-хаб (`bots/tg/admin/`)
 `hub-orders`, `hub-stats`, `hub-wildberries` (WB API), `hub-system` (health сервисов),
 `hub-rates`, `hub-autobuy`. Health-URL ботов берётся из env (`*_BOT_HEALTH_URL`).
+⚠️ Эти `hub-*` **осиротели** — вся админ-UI живёт в TWA (кнопка Launch Dashboard); из
+`hub-*` живы только фоновые мониторы (`registerAdminHubs`). Управление новыми фичами —
+командами бота (см. ниже), не хабами.
+
+### Фоновые воркеры (`bots/tg/auto-workers.ts`, старт из `crons.ts` → `startAutoWorkers`)
+
+Оба kill-switch по умолчанию **OFF** (в `GlobalSettings`), включает владелец командой.
+
+- **🤖 Автовыкуп до порога слива (+1).** Тик 60 с. Пока `autoBuyoutEnabled=true` и баланс
+  донора > `autoBuyoutThreshold`, берёт новые `PENDING`-заказы (`isTest=false`, по `pendingAt`,
+  ≤ `autoBuyoutMaxPerTick` за тик) и выкупает донорским cookie
+  (`purchaseGamepassDirect` — та же механика, что ручной выкуп в TWA). Защиты: **атомарный
+  claim** `PENDING→IN_PROGRESS` (нет гонки с ручным выкупом в TWA), проверка цены
+  `= ceil(amount/0.7) ±2` + `isForSale` + совпадение продавца с ником (если ник подтверждён);
+  несоответствие → `[AUTOBUY-SKIP …]` в adminNote, заказ не трогаем. Успех → `COMPLETED`
+  (+`purchaserUsername`) + штатное клиентское уведомление + алерт админам. Провал → откат в
+  `PENDING`, `[AUTOBUY-FAIL …]`, алерт; протухший cookie / 3 провала подряд → пауза 15 мин +
+  алерт (сам флаг не снимается). Достигли порога → обязательный алерт «💧 пора сливать»
+  (дедуп 6 ч через `autoBuyoutBelowSince`); сам слив остаётся ручным (💧 в TWA). Управление:
+  `/autobuy` (статус), `/autobuy on|off`, `/autobuy threshold N`.
+- **👁 GP-watch по вероятному нику (+3).** Тик 15 мин. Для заказов `AWAITING_GAMEPASS` с
+  `probableNick` (см. «Ранний захват ника») и без `robloxUsername`, младше 30 дней, ищет
+  `searchGamepassesByNick` геймпасс с ценой `±2`. Нашёл (и это не тот же `gpWatchNotifiedPassId`)
+  → шлёт клиенту «🎉 Похоже, твой геймпасс готов!» с кнопками **✅ Да, это мой / ❌ Не мой ник**
+  (TG callback `gpw_ok:/gpw_no:`, VK payload `gpw_ok/gpw_no`). Троттлинг: <3 дней — каждый тик,
+  дальше раз в 2 ч (`gpWatchLastCheckAt`); лимит 20 проверок/тик. Подтверждение
+  (`bots/shared/gp-watch-confirm.ts`, общий для TG+VK): ре-валидация → заказ `PENDING`,
+  `robloxUsername = probableNick` (теперь подтверждён), карточка «👁 GP-WATCH подтверждён»
+  админам; дальше подхватывает автовыкуп/менеджер. Отказ → `probableNick=null` +
+  `[НИК-ОТКАЗ …]`. Управление: `/gpwatch` (статус), `/gpwatch on|off`.
+
+### Ранний захват ника → `probableNick` (структурно) + `adminNote` (история)
+`bots/shared/nick.ts` (`noteProbableNick`) и `src/lib/capture-nick.ts` пишут вероятный ник
+в **`WbOrder.probableNick`** (структурно, для GP-watch — «последний побеждает») **и** строкой
+`[НИК? дата] ник (источник)` в `adminNote` (история). В `robloxUsername` — по-прежнему НИКОГДА
+(ник не подтверждён). Бэкфилл старых заказов «Ждут ссылку» — `scripts/backfill-probable-nicks.mjs`
+(источники: `User.robloxUsername`, `WbCode.robloxNick`, другие заказы юзера, VK-диалог через
+`messages.getHistory` → creator геймпасса / ник-токены с валидацией через Roblox users API;
+TG-историю API не отдаёт). Миграция `20260704_add_autobuyout_and_gpwatch` переносит уже
+записанные `[НИК?]` из adminNote в `probableNick`.
 
 ## VK-бот — `bots/vk/handlers.ts`
 

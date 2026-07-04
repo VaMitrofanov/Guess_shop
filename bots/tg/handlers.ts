@@ -16,6 +16,7 @@ import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pen
 import { getGamepassDetails, getGamepassProductInfo, buildPurchaseScript, purchaseGamepassDirect, getRobuxBalance, getAuthenticatedUser, resetPurchaseCsrf } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { noteProbableNick } from "../shared/nick";
+import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 import { buildAdminKeyboard } from "./admin";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -2898,6 +2899,77 @@ export function registerAdmin(bot: Telegraf): void {
       { parse_mode: "HTML" },
     );
   });
+
+  // ── 🤖 Автовыкуп до порога слива (+1) ────────────────────────────────────
+  // /autobuy               — статус
+  // /autobuy on | off      — kill-switch
+  // /autobuy threshold N   — порог слива (R$)
+  bot.command("autobuy", async (ctx) => {
+    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
+    const arg = ctx.message.text.replace(/^\/autobuy\s*/, "").trim().toLowerCase();
+    const s = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
+
+    if (arg === "on" || arg === "off") {
+      await (db as any).globalSettings.upsert({
+        where: { id: "global" },
+        update: { autoBuyoutEnabled: arg === "on" },
+        create: { id: "global", usdToRub: 90, autoBuyoutEnabled: arg === "on" },
+      });
+      await ctx.reply(`🤖 Автовыкуп: <b>${arg === "on" ? "🟢 ВКЛЮЧЁН" : "🔴 ВЫКЛЮЧЕН"}</b>`, { parse_mode: "HTML" });
+      return;
+    }
+    const thr = arg.match(/^threshold\s+(\d+)$/);
+    if (thr) {
+      await (db as any).globalSettings.upsert({
+        where: { id: "global" },
+        update: { autoBuyoutThreshold: Number(thr[1]) },
+        create: { id: "global", usdToRub: 90, autoBuyoutThreshold: Number(thr[1]) },
+      });
+      await ctx.reply(`🤖 Порог слива: <b>${Number(thr[1])} R$</b>`, { parse_mode: "HTML" });
+      return;
+    }
+
+    const bal = s?.robloxCookie ? await getRobuxBalance(s.robloxCookie) : null;
+    await ctx.reply(
+      `🤖 <b>Автовыкуп до порога слива</b>\n\n` +
+      `Статус: <b>${s?.autoBuyoutEnabled ? "🟢 ВКЛЮЧЁН" : "🔴 ВЫКЛЮЧЕН"}</b>\n` +
+      `Порог слива: <b>${s?.autoBuyoutThreshold ?? 150} R$</b>\n` +
+      `Макс/тик: <b>${s?.autoBuyoutMaxPerTick ?? 5}</b>\n` +
+      `Баланс донора: <b>${bal !== null ? `${bal.toLocaleString()} R$` : "нет данных"}</b>\n\n` +
+      `<code>/autobuy on</code> · <code>/autobuy off</code> · <code>/autobuy threshold 150</code>\n` +
+      `<i>Покупает новые PENDING-заказы автоматически, пока баланс не дойдёт до порога, затем алерт «пора сливать».</i>`,
+      { parse_mode: "HTML" },
+    );
+  });
+
+  // ── 👁 GP-watch по вероятному нику (+3) ───────────────────────────────────
+  bot.command("gpwatch", async (ctx) => {
+    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
+    const arg = ctx.message.text.replace(/^\/gpwatch\s*/, "").trim().toLowerCase();
+
+    if (arg === "on" || arg === "off") {
+      await (db as any).globalSettings.upsert({
+        where: { id: "global" },
+        update: { gpWatchEnabled: arg === "on" },
+        create: { id: "global", usdToRub: 90, gpWatchEnabled: arg === "on" },
+      });
+      await ctx.reply(`👁 GP-watch: <b>${arg === "on" ? "🟢 ВКЛЮЧЁН" : "🔴 ВЫКЛЮЧЕН"}</b>`, { parse_mode: "HTML" });
+      return;
+    }
+
+    const s = await (db as any).globalSettings.findUnique({ where: { id: "global" }, select: { gpWatchEnabled: true } });
+    const watching = await (db as any).wbOrder.count({
+      where: { status: "AWAITING_GAMEPASS", isTest: false, robloxUsername: null, probableNick: { not: null } },
+    });
+    await ctx.reply(
+      `👁 <b>GP-watch по вероятному нику</b>\n\n` +
+      `Статус: <b>${s?.gpWatchEnabled ? "🟢 ВКЛЮЧЁН" : "🔴 ВЫКЛЮЧЕН"}</b>\n` +
+      `Под наблюдением: <b>${watching}</b> заказов «Ждут ссылку» с вероятным ником\n\n` +
+      `<code>/gpwatch on</code> · <code>/gpwatch off</code>\n` +
+      `<i>Следит за геймпассом по «карандашному» нику; как найдёт — просит клиента подтвердить.</i>`,
+      { parse_mode: "HTML" },
+    );
+  });
 }
 
 // Old admin view functions (showAdminStats, showAdminQueue, showAdminHistory,
@@ -2968,6 +3040,35 @@ export function registerCallbacks(bot: Telegraf): void {
     const tgId = String(ctx.from.id);
     const adminId = tgId;
     const adminTag = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "Админ";
+
+    // ── 👁 GP-watch (+3): customer answers "this gamepass is/ isn't mine" ─────
+    if (data.startsWith("gpw_ok:")) {
+      const orderId = data.slice("gpw_ok:".length);
+      await ctx.answerCbQuery("⏳ Проверяю…");
+      const res = await confirmGpWatch(orderId);
+      const reply =
+        res.status === "ok"
+          ? `✅ Отлично! Геймпасс <b>${escapeHtml(res.passName)}</b> (${res.robux} R$) принят на ник <b>${escapeHtml(res.nick)}</b>.\n\nЗаказ в очереди на выкуп — как только выкупим, сразу напишу сюда 💛`
+          : res.status === "already"
+          ? "✅ Этот заказ уже в работе — ничего делать не нужно."
+          : res.status === "gone"
+          ? "⚠️ Геймпасс сейчас не находится по этому нику. Проверь, что он выставлен на продажу за нужную цену, и пришли ссылку сюда."
+          : "⚠️ Не получилось обработать. Пришли ссылку на геймпасс сюда, помогу.";
+      try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+      await ctx.reply(reply, { parse_mode: "HTML" });
+      return;
+    }
+    if (data.startsWith("gpw_no:")) {
+      const orderId = data.slice("gpw_no:".length);
+      await declineGpWatch(orderId);
+      await ctx.answerCbQuery("Понял, не твой ник");
+      try { await ctx.editMessageReplyMarkup(undefined); } catch {}
+      await ctx.reply(
+        "Понял 👍 Если знаешь свой точный ник Roblox — пришли его сюда, и я найду твой геймпасс.",
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
 
     // ── 🔎 find_gp: user wants to search by Roblox nick (item 7) ──────────
     // ── ✏️ change_nick: re-pick nick/gamepass on an order that isn't bought yet ─
@@ -4588,7 +4689,7 @@ export function registerCallbacks(bot: Telegraf): void {
 // Private helpers: user notifications after admin action
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function notifyUserCompleted(
+export async function notifyUserCompleted(
   bot: Telegraf,
   user: { tgId?: string | null; vkId?: string | null; id: string },
   orderId: string,

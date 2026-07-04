@@ -34,7 +34,12 @@ export async function noteProbableNickByCode(wbCode: string, rawNick: string, so
     const prefix = order.adminNote ? `${order.adminNote}\n` : "";
     await (prisma as any).wbOrder.update({
       where: { id: order.id },
-      data: { adminNote: `${prefix}[НИК? ${stamp}] ${nick} (${source})`.slice(0, 2000) },
+      data: {
+        adminNote: `${prefix}[НИК? ${stamp}] ${nick} (${source})`.slice(0, 2000),
+        // Structured mirror for the GP-watcher (+3) — last probable nick wins.
+        probableNick: nick,
+        probableNickAt: new Date(),
+      },
     });
   } catch (err: any) {
     console.warn(`[nick-capture] failed (${source}):`, err?.message ?? err);
