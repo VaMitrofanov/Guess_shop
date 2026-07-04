@@ -1855,7 +1855,8 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
     // so sends users with a valid nick into a retyping spiral. Be honest.
     console.error("[TG/find-gp] searchGamepassesByNick failed:", err?.message ?? err);
     try { await bot.telegram.deleteMessage(ctx.chat.id, checkingMsg.message_id); } catch {}
-    pendingRobloxNick.delete(tgIdNum);
+    // pendingRobloxNick сохраняем: после инфра-сбоя клиент, скорее всего,
+    // просто пришлёт ник ещё раз — текст должен уйти в поиск, а не в ошибку.
     const downGuideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`;
     await ctx.reply(
       "⚠️ Поиск по нику временно недоступен — не получилось связаться с Roblox.\n\n" +
@@ -1897,7 +1898,8 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
         link_preview_options: { is_disabled: true },
         ...Markup.inlineKeyboard([
           [Markup.button.url("📖 ИНСТРУКЦИЯ", guideUrl)],
-          [Markup.button.callback("🔎 Попробовать ещё раз", CB.findGpRetry)],
+          // Опечатка → нужен НОВЫЙ ввод (findGpStart), а не перепроверка того же ника
+          [Markup.button.callback("🔎 Ввести ник ещё раз", CB.findGpStart)],
         ]),
       }
     );
@@ -1919,6 +1921,7 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
         ...Markup.inlineKeyboard([
           [Markup.button.url("📖 ИНСТРУКЦИЯ", guideUrl)],
           [Markup.button.callback("🔎 Уже сделал — проверить", CB.findGpRetry)],
+          [Markup.button.callback("✏️ Поменять ник", CB.findGpStart)],
         ]),
       }
     );
@@ -1944,6 +1947,7 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
         ...Markup.inlineKeyboard([
           [Markup.button.url("📖 ИНСТРУКЦИЯ", guideUrl)],
           [Markup.button.callback("🔎 Уже исправил — проверить", CB.findGpRetry)],
+          [Markup.button.callback("✏️ Поменять ник", CB.findGpStart)],
         ]),
       }
     );
@@ -1959,7 +1963,7 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
       `Это он? Жми «✅ Да» — отправлю на проверку.`;
     const keyboard = Markup.inlineKeyboard([
       [Markup.button.callback(`✅ Да, выкупаем (${m.robux} R$)`, CB.gpPick(String(m.gamepassId)))],
-      [Markup.button.callback("🔎 Другой ник", CB.findGpRetry)],
+      [Markup.button.callback("🔎 Другой ник", CB.findGpStart)],
     ]);
     try {
       await ctx.replyWithPhoto(m.image, { caption, parse_mode: "HTML", ...keyboard });
@@ -1983,7 +1987,7 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
         ...shown.map(m => [
           Markup.button.callback(`💎 ${m.name.slice(0, 32)} · ${m.robux} R$`, CB.gpPick(String(m.gamepassId))),
         ]),
-        [Markup.button.callback("🔎 Другой ник", CB.findGpRetry)],
+        [Markup.button.callback("🔎 Другой ник", CB.findGpStart)],
       ]),
     }
   );
@@ -3146,11 +3150,16 @@ export function registerCallbacks(bot: Telegraf): void {
       return;
     }
 
+    // «Уже сделал/исправил — проверить» (findGpRetry): перепроверяем ник,
+    // который клиент УЖЕ вводил (probableNick из раннего захвата →
+    // robloxUsername заказа → сохранённый ник юзера). Раньше кнопка была
+    // синонимом findGpStart и заставляла вводить ник заново (жалоба владельца
+    // 2026-07-04). Если ника нигде нет — фолбэк на обычный ввод ниже.
     if (data === CB.findGpStart || data === CB.findGpRetry) {
       const tgIdNum = ctx.from.id;
       const user = await (db as any).user.findUnique({
         where: { tgId: String(tgIdNum) },
-        select: { id: true, balance: true },
+        select: { id: true, balance: true, robloxUsername: true },
       });
       if (!user) {
         await ctx.answerCbQuery("Сессия истекла — напиши /start");
@@ -3169,6 +3178,18 @@ export function registerCallbacks(bot: Telegraf): void {
         return;
       }
       const state: LinkState = { wbCode: order.wbCode, denomination: order.amount };
+
+      if (data === CB.findGpRetry) {
+        const recheckNick = order.probableNick ?? order.robloxUsername ?? user.robloxUsername;
+        if (recheckNick) {
+          pendingLink.set(tgIdNum, state);
+          pendingRobloxNick.set(tgIdNum, state);
+          await ctx.answerCbQuery("Проверяю…");
+          await handleRobloxNickInput(bot, ctx, recheckNick);
+          return;
+        }
+      }
+
       pendingRobloxNick.set(tgIdNum, state);
       const passPrice = Math.ceil(order.amount / 0.7);
       await ctx.answerCbQuery();

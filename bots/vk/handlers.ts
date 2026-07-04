@@ -1046,6 +1046,11 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     await handleFindGpSaved(ctx, vkUserId);
     return;
   }
+  // ── 🔎 Re-check the nick the user already entered (probableNick) ──────────
+  if (msgPayload?.command === "find_gp_recheck") {
+    await handleFindGpRecheck(ctx, vkUserId);
+    return;
+  }
   // ── ✏️ Change nick / gamepass on an order that isn't bought yet ────────────
   if (msgPayload?.command === "change_nick") {
     await handleChangeNick(ctx, vkUserId);
@@ -1833,6 +1838,43 @@ async function handleFindGpSaved(ctx: MessageContext, vkUserId: number): Promise
 }
 
 /**
+ * «🔎 Уже сделал/исправил — проверить» — повторный поиск по нику, который клиент
+ * УЖЕ вводил (order.probableNick из раннего захвата → order.robloxUsername →
+ * сохранённый User.robloxUsername). Раньше кнопка вела на find_gp_start и
+ * заставляла вводить ник заново (жалоба владельца 2026-07-04). Если ника нигде
+ * нет — фолбэк на обычный ввод.
+ */
+async function handleFindGpRecheck(ctx: MessageContext, vkUserId: number): Promise<void> {
+  const user = await (db as any).user.findUnique({
+    where: { vkId: String(vkUserId) },
+    select: { id: true, robloxUsername: true },
+  });
+  if (!user) {
+    await ctx.reply("Сессия истекла — напиши «Начать», чтобы продолжить.");
+    return;
+  }
+  const order = await (db as any).wbOrder.findFirst({
+    where: { userId: user.id, status: { in: VK_CHANGEABLE_ORDER_STATUSES } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!order) {
+    await ctx.reply("У тебя сейчас нет активного заказа. Введи код WB чтобы начать.");
+    return;
+  }
+  const nick = order.probableNick ?? order.robloxUsername ?? user.robloxUsername;
+  if (!nick) {
+    await handleFindGpStart(ctx, vkUserId);
+    return;
+  }
+  setState(vkUserId, {
+    type: "AWAITING_ROBLOX_NICK",
+    wbCode: order.wbCode,
+    denomination: order.amount,
+  });
+  await handleRobloxNickInput(ctx, vkUserId, nick, order.wbCode, order.amount);
+}
+
+/**
  * "Передумал" — re-pick nick / gamepass on an order that hasn't been bought yet.
  * Same machinery as {@link handleFindGpStart} but with copy that makes the intent
  * explicit (we re-bind the order to the newly chosen gamepass). Direct/paid
@@ -1909,7 +1951,7 @@ async function handleRobloxNickInput(
       keyboard: Keyboard.builder()
         .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: downGuideUrl })
         .row()
-        .textButton({ label: "🔎 Попробовать ещё раз", payload: { command: "find_gp_start" }, color: "primary" })
+        .textButton({ label: "🔎 Попробовать ещё раз", payload: { command: "find_gp_recheck" }, color: "primary" })
         .inline(),
     });
     return;
@@ -1954,7 +1996,9 @@ async function handleRobloxNickInput(
       keyboard: Keyboard.builder()
         .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: guideUrl })
         .row()
-        .textButton({ label: "🔎 Уже сделал — проверить", payload: { command: "find_gp_start" }, color: "primary" })
+        .textButton({ label: "🔎 Уже сделал — проверить", payload: { command: "find_gp_recheck" }, color: "primary" })
+        .row()
+        .textButton({ label: "✏️ Поменять ник", payload: { command: "find_gp_start" }, color: "secondary" })
         .inline(),
     });
     return;
@@ -1975,7 +2019,9 @@ async function handleRobloxNickInput(
       keyboard: Keyboard.builder()
         .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: guideUrl })
         .row()
-        .textButton({ label: "🔎 Уже исправил — проверить", payload: { command: "find_gp_start" }, color: "primary" })
+        .textButton({ label: "🔎 Уже исправил — проверить", payload: { command: "find_gp_recheck" }, color: "primary" })
+        .row()
+        .textButton({ label: "✏️ Поменять ник", payload: { command: "find_gp_start" }, color: "secondary" })
         .inline(),
     });
     return;
