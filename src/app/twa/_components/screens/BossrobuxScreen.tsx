@@ -1292,6 +1292,33 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange }: { token
     const startedAt = new Date().toISOString();
     let ok = 0;
 
+    // Прогрессивная запись батча: закрытие TWA сразу после пачки раньше убивало
+    // единственный финальный fetch — отчёт терялся (кейс «1 отчёт из 3 акков»).
+    // Теперь батч создаётся ДО первой покупки, item'ы дозаписываются по ходу,
+    // а недофинишированные батчи дошлёт свипер TG-бота.
+    let batchId: string | null = null;
+    try {
+      const r = await fetch("/api/twa/purchase-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "start", accountName, startedAt }),
+      });
+      const d = await r.json().catch(() => null);
+      if (r.ok && d?.batchId) batchId = d.batchId;
+    } catch { /* батч-трекинг не должен блокировать выкуп */ }
+
+    async function pushItem(item: BatchItem) {
+      if (!batchId) return;
+      try {
+        await fetch("/api/twa/purchase-batch", {
+          method: "POST",
+          keepalive: true,
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action: "item", batchId, item }),
+        });
+      } catch { /* item переживёт — finish/свипер восстановят из клиентского списка */ }
+    }
+
     for (let i = 0; i < queue.length; i++) {
       if (bulkStop.current) break;
       const order = queue[i];
@@ -1311,14 +1338,17 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange }: { token
           onBalanceChange(-gross);
           setOrders(prev => prev.filter(o => o.id !== order.id));
           items.push({ orderId: order.id, nick, wbCode: order.wbCode, gross, ok: true });
+          await pushItem(items[items.length - 1]);
           haptic.impact("light");
         } else {
           const reason = d?.msg ?? d?.error ?? (r.ok ? "не куплено" : `HTTP ${r.status}`);
           items.push({ orderId: order.id, nick, wbCode: order.wbCode, gross, ok: false, reason });
+          await pushItem(items[items.length - 1]);
           if (STOP_RE.test(String(reason))) { bulkStop.current = true; }
         }
       } catch {
         items.push({ orderId: order.id, nick, wbCode: order.wbCode, gross, ok: false, reason: "ошибка сети" });
+        await pushItem(items[items.length - 1]);
       }
       setBulkProgress({ done: i + 1, total: queue.length, ok });
     }
@@ -1330,12 +1360,21 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange }: { token
     setReport({ items, total, ok, fail });
     haptic.notify(fail === 0 ? "success" : "warning");
 
-    // Persist the batch + DM the report to the manager who ran it.
-    fetch("/api/twa/purchase-batch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ action: "save", accountName, startedAt, items, notify: true }),
-    }).catch(() => {});
+    // Финализация + отчёт менеджеру. keepalive — запрос переживает закрытие
+    // TWA; await — не показываем отчёт раньше, чем он ушёл. Если start не
+    // долетел (batchId нет) — легаси-путь save одним запросом.
+    try {
+      await fetch("/api/twa/purchase-batch", {
+        method: "POST",
+        keepalive: true,
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(
+          batchId
+            ? { action: "finish", batchId, items, notify: true }
+            : { action: "save", accountName, startedAt, items, notify: true }
+        ),
+      });
+    } catch { /* отчёт дошлёт свипер TG-бота по недофинишированному батчу */ }
   }
 
   if (loading) return (

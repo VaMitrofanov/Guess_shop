@@ -307,6 +307,54 @@ async function processAwaitingReminders(bot: Telegraf): Promise<void> {
   }
 }
 
+/* ── Stale purchase-batch sweeper ─────────────────────────────────────────────
+   «Выкупить всё» в TWA пишет батч прогрессивно (start → item → finish). Если
+   TWA закрыли до finish (типично: пачка кончилась → менеджер ушёл менять
+   cookie-аккаунт), отчёт раньше терялся. Свипер финализирует батчи с
+   finishedAt=null старше 15 мин по фактически записанным item'ам и досылает
+   отчёт админам с пометкой «восстановлен».
+   ───────────────────────────────────────────────────────────────────────── */
+
+const STALE_BATCH_MIN = 15;
+
+interface SweptBatchItem { orderId: string; nick: string; wbCode: string; gross: number; ok: boolean; reason?: string }
+
+async function sweepStalePurchaseBatches(): Promise<void> {
+  const cutoff = new Date(Date.now() - STALE_BATCH_MIN * 60_000);
+  const stale = await (db as any).purchaseBatch.findMany({
+    where: { finishedAt: null, startedAt: { lt: cutoff } },
+    take: 10,
+  });
+
+  for (const batch of stale) {
+    const items: SweptBatchItem[] = Array.isArray(batch.items) ? batch.items : [];
+    const okCount = items.filter((i) => i.ok).length;
+    const failCount = items.length - okCount;
+    const totalGross = items.filter((i) => i.ok).reduce((s, i) => s + (Number(i.gross) || 0), 0);
+
+    await (db as any).purchaseBatch.update({
+      where: { id: batch.id },
+      data: { finishedAt: new Date(), okCount, failCount, totalGross },
+    });
+
+    const lines = items.slice(0, 40).map((it) => {
+      const mark = it.ok ? "✅" : "❌";
+      const tail = it.ok ? `− ${it.gross.toLocaleString("ru-RU")} R$` : (it.reason ?? "ошибка");
+      return `${mark} ${it.nick} · ${it.wbCode} · ${tail}`;
+    });
+    const more = items.length > 40 ? `\n…и ещё ${items.length - 40}` : "";
+    const msg =
+      `🧾 <b>Выкуп пачки завершён</b> <i>(отчёт восстановлен — TWA закрылась до финиша)</i>\n` +
+      `Аккаунт: <b>${batch.accountName ?? "—"}</b>\n` +
+      `Успешно: <b>${okCount}</b> · Ошибок: <b>${failCount}</b>\n` +
+      `Списано: <b>${totalGross.toLocaleString("ru-RU")} R$</b> (грязных)\n\n` +
+      (lines.length > 0 ? lines.join("\n") + more : "<i>покупки записаться не успели</i>");
+
+    await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, msg)));
+    console.log(`[BatchSweeper] финализирован осиротевший батч ${batch.id}: ok=${okCount} fail=${failCount}`);
+  }
+}
+
 export function startReviewReminderCron(bot: Telegraf): void {
   // Run once shortly after startup, then every hour
   setTimeout(() => {
@@ -346,6 +394,19 @@ export function startReviewReminderCron(bot: Telegraf): void {
       console.error("[AwaitingReminder] error:", err)
     );
   }, 2 * 60 * 60 * 1000); // every 2 hours
+
+  // Stale purchase-batch sweeper — every 10 min
+  setTimeout(() => {
+    sweepStalePurchaseBatches().catch(err =>
+      console.error("[BatchSweeper] error:", err)
+    );
+  }, 90_000); // 1.5 min after boot
+
+  setInterval(() => {
+    sweepStalePurchaseBatches().catch(err =>
+      console.error("[BatchSweeper] error:", err)
+    );
+  }, 10 * 60 * 1000); // every 10 min
 
   // Auto-buyout (+1) + GP-watcher (+3) — both kill-switched OFF by default.
   startAutoWorkers(bot);
