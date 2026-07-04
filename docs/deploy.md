@@ -87,6 +87,24 @@ Web-контейнера: `/`, `/faq`, `/reviews`, `/checkout`, `/dashboard`, `/
 > Поле `is_build_time` API отклоняет — не передавать. После Restart проверить:
 > `docker exec robloxbank-web printenv MAINTENANCE_MODE` и `docker inspect … Health.Status`.
 
+## Сеть и доступность из РФ (2026-07-04)
+
+- **DNS:** `robloxbank.ru` — **прямой A** на `89.110.94.117` (RF, grey-cloud; NS всё ещё
+  Cloudflare). Раньше запись была proxied и трафик шёл через `cloudflared`-туннель — но
+  Cloudflare деградирован у российских розничных провайдеров (ТСПУ), сайт «работал только с
+  VPN». Прямой A это чинит. `panel.robloxbank.ru` остаётся proxied (CF). Цепочка сейчас:
+  клиент → Traefik (`coolify-proxy`, Let's Encrypt) → контейнер Web/Guide. Разделение
+  Web/Guide по путям (`/_next-guide` → Guide) — на Traefik, см. `next.config.guide.ts`.
+  ⚠️ Обратная сторона — IP источника публичен (docs/security.md #7).
+- **Внешние скрипты self-hosted** (`public/vendor/`): `telegram-web-app.js` и
+  `vkid-sdk-<ver>.js` отдаются со своего домена, а не с telegram.org / unpkg.com (оба за
+  Cloudflare → без VPN у RU-юзеров не грузились; VKID-кнопка на сайте была мертва, а
+  блокирующий `beforeInteractive`-скрипт с внешнего домена мог белым экраном ронять весь сайт).
+  Подключение — `src/app/layout.tsx`. При апдейте Bot API / VK ID SDK обновлять файл в
+  `public/vendor/` и версию в пути.
+- Мониторить доступность из РФ можно через check-host.net API (ru-ноды) — датацентровые ноды
+  ≠ розничные провайдеры с ТСПУ, для реальной картины просить клиентов проверить без VPN.
+
 ## Заметки
 
 - `ADMIN_IDS` — кому слать карточки заказов/отзывов (TG user IDs).

@@ -2816,13 +2816,39 @@ export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl, tes
   };
 
   if (isRestoring) {
+    // Этот экран — SSR-разметка: если JS-чанки не догрузились (обрывы сети у
+    // российских провайдеров), гидрация не случится и 10-сек таймаут не тикнет —
+    // спиннер завис бы навсегда. Фолбэк ниже всплывает чистым CSS через 12 с и
+    // работает без JS: перезагрузка страницы + продолжение в боте (бот-коридор
+    // от сайта не зависит).
+    const tgFallbackHref = wbCodeFromUrl
+      ? `https://t.me/RobloxBankBot?start=wb_${encodeURIComponent(wbCodeFromUrl)}`
+      : "https://t.me/RobloxBankBot";
     return (
       <div className="min-h-screen bg-[#0a0e1a] flex flex-col items-center justify-center p-4">
+        <style>{`@keyframes guideStallIn{to{opacity:1;visibility:visible}}`}</style>
         <div className="w-16 h-16 rounded-full bg-[#1c1c1e] animate-pulse mb-6 border border-[#c9a84c]/20" />
         <div className="w-48 h-4 bg-[#1c1c1e] rounded animate-pulse mb-3" />
         <div className="w-32 h-3 bg-[#1c1c1e] rounded animate-pulse" />
         <div className="mt-8 text-xs uppercase tracking-widest text-[#c9a84c]/60 font-pixel animate-pulse">
           Восстановление сессии...
+        </div>
+        <div
+          className="mt-10 flex flex-col items-center gap-3 text-center"
+          style={{ opacity: 0, visibility: "hidden", animation: "guideStallIn .5s ease 12s forwards" }}
+        >
+          <div className="text-sm text-zinc-400">Загрузка затянулась?</div>
+          <a href="" className="px-5 py-2.5 rounded-xl bg-[#c9a84c] text-[#0a0e1a] text-sm font-semibold">
+            Обновить страницу
+          </a>
+          <div className="flex gap-4 text-sm">
+            <a href={tgFallbackHref} className="text-[#c9a84c] underline underline-offset-4">
+              Продолжить в Telegram
+            </a>
+            <a href="https://vk.me/club237309399" className="text-[#c9a84c] underline underline-offset-4">
+              Продолжить в VK
+            </a>
+          </div>
         </div>
       </div>
     );

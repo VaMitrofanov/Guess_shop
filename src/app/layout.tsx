@@ -52,12 +52,16 @@ export default function RootLayout({
           }}
         />
         <SessionProvider>
+          {/* Self-hosted copies (public/vendor/): telegram.org и unpkg.com (за
+              Cloudflare) нестабильны у российских провайдеров без VPN, а
+              beforeInteractive-скрипт с внешнего домена блокировал парсинг всей
+              страницы. Обновлять при апдейтах Bot API / VK ID SDK. */}
           <Script
-            src="https://telegram.org/js/telegram-web-app.js"
+            src="/vendor/telegram-web-app.js"
             strategy="beforeInteractive"
           />
           <Script
-            src="https://unpkg.com/@vkid/sdk@<3.0.0/dist-sdk/umd/index.js"
+            src="/vendor/vkid-sdk-2.6.5.js"
             strategy="afterInteractive"
           />
           <PageLoader />
