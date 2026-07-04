@@ -17,6 +17,7 @@ import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
 import { getGamepassDetails, getGamepassProductInfo } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
+import { enforceVkInlineKbLimits } from "../shared/vk-kb";
 import { noteProbableNick } from "../shared/nick";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 
@@ -30,23 +31,27 @@ let _vkApi: any = null;
 // spams "не принял ссылку" on top of the human chat. Keyed by VK user id → expiry.
 const SUPPORT_PAUSE_MS = 30 * 60 * 1000;
 const RESUME_KEYWORDS  = ["+бот", "+bot", "бот+"];
-const supportPause = new Map<number, number>();
+const supportPause = new Map<number, { exp: number; hinted: boolean }>();
 
 function pauseSupport(vkUserId: number): void {
-  supportPause.set(vkUserId, Date.now() + SUPPORT_PAUSE_MS);
+  supportPause.set(vkUserId, { exp: Date.now() + SUPPORT_PAUSE_MS, hinted: false });
 }
 function isSupportPaused(vkUserId: number): boolean {
-  const exp = supportPause.get(vkUserId);
-  if (!exp) return false;
-  if (Date.now() < exp) return true;
+  const p = supportPause.get(vkUserId);
+  if (!p) return false;
+  if (Date.now() < p.exp) return true;
   supportPause.delete(vkUserId); // expired
   return false;
 }
-function refreshSupportPause(vkUserId: number): void {
-  if (supportPause.has(vkUserId)) supportPause.set(vkUserId, Date.now() + SUPPORT_PAUSE_MS);
-}
 function resumeSupport(vkUserId: number): void {
   supportPause.delete(vkUserId);
+}
+/** Одноразовый (на окно паузы) хинт «бот на паузе» — true, если ещё не показывали. */
+function shouldHintSupportPause(vkUserId: number): boolean {
+  const p = supportPause.get(vkUserId);
+  if (!p || p.hinted) return false;
+  p.hinted = true;
+  return true;
 }
 
 /** After the manager hands control back, nudge the user to continue the bot flow. */
@@ -72,7 +77,14 @@ async function rePromptAfterSupport(vkUserId: number): Promise<void> {
 
 // Natural-language ways a user might ask for a human — so support is reachable by
 // simply writing, not only via the button. Substring match (stems cover endings).
-const SUPPORT_WORDS = ["оператор", "поддержк", "менеджер", "помощь", "помоги", "саппорт", "support", "живой человек", "живого человека", "жалоб"];
+// «support» — ТОЛЬКО как отдельное слово: substring ловил латинские ники вида
+// Support_Kid и уводил ввод ника в саппорт-паузу (кириллические стемы в латинском
+// нике встретиться не могут, им substring безопасен).
+const SUPPORT_WORDS = ["оператор", "поддержк", "менеджер", "помощь", "помоги", "саппорт", "живой человек", "живого человека", "жалоб"];
+const SUPPORT_WORD_RE = /\bsupport\b/i;
+function looksLikeSupportRequest(lower: string): boolean {
+  return SUPPORT_WORDS.some((w) => lower.includes(w)) || SUPPORT_WORD_RE.test(lower);
+}
 
 /** Single entry point for "user wants a manager": alert admins, pause the bot,
  *  and reply with a clear explanation of what happens next. */
@@ -503,20 +515,35 @@ async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null, deno
 
 // ── Entry point: called for every message_new event ───────────────────────────
 
+/**
+ * Исходящие сообщения сообщества (событие message_reply; в handleMessage —
+ * страховка на message_new с out-флагом). Различаем живого менеджера и самого
+ * бота по `admin_author_id`: он есть только у сообщений, отправленных админом
+ * вручную из интерфейса сообщества (random_id ненадёжен — у менеджерских
+ * сообщений он тоже бывает ненулевым, проверено историей). Сообщения бота
+ * паузу НЕ трогают — иначе она самоподдерживалась бы бесконечно.
+ */
+export async function handleOutboxMessage(ctx: MessageContext): Promise<void> {
+  const peer = typeof (ctx as any).peerId === "number" ? (ctx as any).peerId : undefined;
+  if (peer === undefined || peer <= 0) return;
+  const t = (ctx.text ?? "").trim().toLowerCase();
+  const adminAuthorId =
+    (ctx as any).adminAuthorId ??
+    (ctx as any)?.message?.admin_author_id ??
+    (ctx as any)?.payload?.admin_author_id;
+  if (RESUME_KEYWORDS.includes(t)) {
+    // Менеджер вернул бота командой «+бот» из чата сообщества.
+    resumeSupport(peer);
+    void rePromptAfterSupport(peer);
+  } else if (adminAuthorId) {
+    // Живой менеджер пишет клиенту → бот замолкает (ставим/продлеваем паузу).
+    pauseSupport(peer);
+  }
+}
+
 export async function handleMessage(ctx: MessageContext): Promise<void> {
   if (ctx.isOutbox) {
-    // Manager replied from the community. Keep the bot paused while the live
-    // conversation is active; let the manager hand control back with a keyword.
-    const peer = typeof (ctx as any).peerId === "number" ? (ctx as any).peerId : undefined;
-    if (peer !== undefined) {
-      const t = (ctx.text ?? "").trim().toLowerCase();
-      if (RESUME_KEYWORDS.includes(t)) {
-        resumeSupport(peer);
-        void rePromptAfterSupport(peer);
-      } else {
-        refreshSupportPause(peer);
-      }
-    }
+    await handleOutboxMessage(ctx);
     return; // never process community's own messages as user input
   }
 
@@ -664,7 +691,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   if (
     text.length > 0 &&
     extractPassId(text) === null &&
-    SUPPORT_WORDS.some((w) => lower.includes(w)) &&
+    looksLikeSupportRequest(lower) &&
     !(messageHasPhoto(ctx) && await hasPendingProofPhoto(vkUserId))
   ) {
     if (isSupportPaused(vkUserId)) {
@@ -692,11 +719,31 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     // got no acknowledgement at all. Let an *eligible* proof photo fall through
     // to the photo-routing below; non-eligible photos (e.g. a screenshot meant
     // for the live manager) still stay silent so the bot doesn't hijack the chat.
-    if (!hasKnownPayload && !(messageHasPhoto(ctx) && await hasPendingProofPhoto(vkUserId))) {
+    //
+    // Терминальные для флоу ТЕКСТЫ тоже не глотаем: ссылка/ID геймпасса, WB-код,
+    // ник Roblox (когда флоу ждёт ник). Раньше они молча пропадали на 30 минут —
+    // клиент видел «бот не ищет по нику», менеджер не видел ничего.
+    const pausedState = getState(vkUserId);
+    const awaitsNick =
+      pausedState?.type === "AWAITING_LINK" ||
+      pausedState?.type === "AWAITING_ROBLOX_NICK" ||
+      pausedState?.type === "AWAITING_DIRECT_NICK_INPUT" ||
+      pausedState?.type === "AWAITING_NICK_EDIT";
+    const looksLikeFlowInput =
+      extractPassId(text) !== null ||
+      (/^[A-Za-z0-9]{7}$/.test(text.trim()) && /[A-Za-z]/.test(text.trim())) ||
+      (awaitsNick && ROBLOX_NICK_RE.test(text.trim().replace(/^@/, "")));
+    if (!hasKnownPayload && !looksLikeFlowInput && !(messageHasPhoto(ctx) && await hasPendingProofPhoto(vkUserId))) {
+      // Не молчим совсем: один раз за окно паузы говорим, что происходит.
+      if (shouldHintSupportPause(vkUserId)) {
+        await ctx.reply("⏸ Сейчас с тобой на связи менеджер — бот не вмешивается.\nВернуть бота: напиши «+бот».");
+      }
       return;
     }
     if (hasKnownPayload) {
       console.log(`[VK] support-pause bypass: payload command "${msgPayload.command}" from vkUserId=${vkUserId}`);
+    } else if (looksLikeFlowInput) {
+      console.log(`[VK] support-pause bypass: flow-input text from vkUserId=${vkUserId}`);
     } else {
       console.log(`[VK] support-pause bypass: eligible proof photo from vkUserId=${vkUserId}`);
     }
@@ -1951,7 +1998,8 @@ async function handleRobloxNickInput(
     return;
   }
 
-  // Branch 4: 2–5 price-matches → text-button list
+  // Branch 4: 2–5 price-matches → text-button list.
+  // 5 рядов пассов + ряд «Другой ник» = ровно 6 рядов (лимит VK) — страховка обязательна.
   const shown = matches.slice(0, MAX_PICK_BUTTONS);
   const kb = Keyboard.builder();
   for (const m of shown) {
@@ -1966,7 +2014,7 @@ async function handleRobloxNickInput(
     message:
       `У ${nick} нашёл несколько подходящих геймпассов.\n` +
       `Выбери тот, который хочешь продать:`,
-    keyboard: kb.inline(),
+    keyboard: enforceVkInlineKbLimits(kb.inline(), "VK/find-gp"),
   });
 }
 
@@ -2193,11 +2241,29 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
   if (!state || (state.type !== "AWAITING_DIRECT_NICK" && state.type !== "AWAITING_DIRECT_NICK_INPUT")) return;
 
   const passPrice = Math.ceil(state.totalAmount / 0.7);
+  const flowData = { amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus, rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice };
 
-  setState(vkUserId, { type: "AWAITING_DIRECT_GAMEPASS", robloxUsername: nick, amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus, rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice });
+  setState(vkUserId, { type: "AWAITING_DIRECT_GAMEPASS", robloxUsername: nick, ...flowData });
 
   await ctx.reply(`🔎 Ищу геймпассы у ${nick}…`);
-  const result = await searchGamepassesByNick(nick, passPrice);
+  let result: GamepassSearchOutcome;
+  try {
+    result = await searchGamepassesByNick(nick, passPrice);
+  } catch (err: any) {
+    // Инфра-сбой (Roblox/мост) ≠ «ника нет» — честный ответ + возврат к вводу
+    // ника, как в WB-коридоре. Раньше исключение улетало в глобальный catch
+    // («⚠️ Произошла ошибка») и юзер оставался в AWAITING_DIRECT_GAMEPASS-тупике.
+    console.error("[VK/direct] searchGamepassesByNick failed:", err?.message ?? err);
+    setState(vkUserId, { type: "AWAITING_DIRECT_NICK_INPUT", ...flowData });
+    const kb = Keyboard.builder();
+    kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
+    kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
+    await ctx.reply({
+      message: "⚠️ Поиск по нику временно недоступен — не получилось связаться с Roblox.\n\nПодожди минуту и пришли ник ещё раз:",
+      keyboard: kb.inline(),
+    });
+    return;
+  }
 
   if (result.status !== "user_not_found") {
     // Nick confirmed by Roblox (userId resolved) — only now persist it.
@@ -2247,39 +2313,41 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
     }
   }
 
+  // ⚠️ Лимиты VK inline-клавиатур: ≤10 кнопок / ≤6 рядов / ≤5 в ряду.
+  // До 5 рядов пассов + ОДИН сервисный ряд из трёх кнопок = 6 рядов, 8 кнопок.
+  // Раньше сервисные кнопки занимали два ряда → 7 рядов → VK отвергал сообщение,
+  // и прямой заказ падал у любого клиента с ≥5 геймпассами (кейс ypa_0982).
   const kb = Keyboard.builder();
+  const listIsWrongPriceOnly = matches.length === 0 && nonMatches.length > 0;
+  const shownPasses = listIsWrongPriceOnly
+    ? nonMatches.slice(0, MAX_PICK_BUTTONS)
+    : [...matches, ...nonMatches.slice(0, 3)].slice(0, MAX_PICK_BUTTONS);
 
-  if (matches.length === 0 && nonMatches.length > 0) {
-    const topWrong = nonMatches.slice(0, MAX_PICK_BUTTONS);
-    for (const g of topWrong) {
-      kb.textButton({ label: `${g.robux} R$ · ${g.name.slice(0, 18)}`, payload: { command: "direct_gp_pick", passId: String(g.gamepassId) }, color: "primary" });
-      kb.row();
-    }
-    kb.textButton({ label: "✏️ Другой ник", payload: { command: "direct_nick_new" }, color: "secondary" });
-    kb.row();
-    kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
-    kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
-    await ctx.reply({
-      message: `${gpHeader}\n\n⚠️ Нет геймпассов с нужной ценой ${passPrice} R$.\n\nВот что нашлось у ${nick} — выбери подходящий или создай новый с правильной ценой:`,
-      keyboard: kb.inline(),
-    });
-    return;
-  }
-
-  const all = [...matches, ...nonMatches.slice(0, 3)];
-  for (const g of all.slice(0, MAX_PICK_BUTTONS)) {
+  for (const g of shownPasses) {
     const prefix = g.isPriceMatch ? "✅ " : "";
     kb.textButton({ label: `${prefix}${g.robux} R$ · ${g.name.slice(0, 16)}`, payload: { command: "direct_gp_pick", passId: String(g.gamepassId) }, color: g.isPriceMatch ? "positive" : "primary" });
     kb.row();
   }
   kb.textButton({ label: "✏️ Другой ник", payload: { command: "direct_nick_new" }, color: "secondary" });
-  kb.row();
   kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
   kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
-  await ctx.reply({
-    message: `${gpHeader}\n\n🎫 Геймпассы ${nick} — выбери для заказа:`,
-    keyboard: kb.inline(),
-  });
+
+  const listMessage = listIsWrongPriceOnly
+    ? `${gpHeader}\n\n⚠️ Нет геймпассов с нужной ценой ${passPrice} R$.\n\nВот что нашлось у ${nick} — выбери подходящий или создай новый с правильной ценой:`
+    : `${gpHeader}\n\n🎫 Геймпассы ${nick} — выбери для заказа:`;
+
+  try {
+    await ctx.reply({
+      message: listMessage,
+      keyboard: enforceVkInlineKbLimits(kb.inline(), "VK/direct"),
+    });
+  } catch (err: any) {
+    // Отправка списка не прошла (VK отверг клавиатуру и т.п.) — не бросаем юзера
+    // в AWAITING_DIRECT_GAMEPASS-тупике «Используй кнопки выше».
+    console.error("[VK/direct] список геймпассов не отправился:", err?.message ?? err);
+    setState(vkUserId, { type: "AWAITING_DIRECT_NICK_INPUT", ...flowData });
+    await ctx.reply("⚠️ Не получилось показать список геймпассов. Пришли ник ещё раз:");
+  }
 }
 
 async function showVkSummary(ctx: MessageContext, flowState: { totalAmount: number; bonus: number; rubleDiscount: number; rublePrice: number }, nick: string, gamepassId: string, gpRobux: number, gpName: string): Promise<void> {

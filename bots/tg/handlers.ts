@@ -756,7 +756,22 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
   const tgId = String(ctx.from.id);
 
   await ctx.reply(`🔎 Ищу геймпассы у <b>${escapeHtml(nick)}</b>…`, { parse_mode: "HTML" });
-  const result = await searchGamepassesByNick(nick, flow.passPrice);
+  let result: GamepassSearchOutcome;
+  try {
+    result = await searchGamepassesByNick(nick, flow.passPrice);
+  } catch (err: any) {
+    // Инфра-сбой (Roblox/мост) ≠ «ника нет» — честный ответ + возврат к вводу
+    // ника, как в WB-коридоре. Раньше исключение улетало в bot.catch.
+    console.error("[TG/direct] searchGamepassesByNick failed:", err?.message ?? err);
+    flow.step = "nick_input";
+    await ctx.reply(
+      "⚠️ Поиск по нику временно недоступен — не получилось связаться с Roblox.\n\nПодожди минуту и пришли ник ещё раз:",
+      { parse_mode: "HTML", ...Markup.inlineKeyboard([
+        [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
+      ]) }
+    );
+    return;
+  }
 
   if (result.status !== "user_not_found") {
     // Nick confirmed by Roblox (userId resolved) — only now persist it.

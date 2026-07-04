@@ -26,7 +26,7 @@
 
 import "dotenv/config";
 import { VK } from "vk-io";
-import { handleMessage, initVkHandlers } from "./handlers";
+import { handleMessage, handleOutboxMessage, initVkHandlers } from "./handlers";
 import { startBridgeServer } from "../shared/bridge";
 
 console.log("🚀 DEPLOY_VERSION: 4.0 - LOYALTY_HARD_SYNC");
@@ -54,6 +54,18 @@ vk.updates.on("message_new", async (ctx) => {
   }
 });
 
+// message_reply — исходящие сообщения сообщества (живой менеджер из интерфейса VK
+// или сам бот). Нужно для support-pause: менеджерское сообщение (admin_author_id)
+// ставит паузу, «+бот» от менеджера возвращает бота. Без этой подписки outbox-ветка
+// не получала событий вовсе (бот был подписан только на message_new).
+vk.updates.on("message_reply", async (ctx) => {
+  try {
+    await handleOutboxMessage(ctx as any);
+  } catch (err) {
+    console.error("[VK] Unhandled error in message_reply:", err);
+  }
+});
+
 // ── Bridge server ────────────────────────────────────────────────────────────
 // Start when VALIDATOR_KEY is set.
 if (process.env.VALIDATOR_KEY) {
@@ -66,6 +78,25 @@ if (process.env.VALIDATOR_KEY) {
 }
 
 // ── Start long polling ───────────────────────────────────────────────────────
+// Явно фиксируем события Bots Long Poll (идемпотентно): на проде
+// getLongPollSettings показывал is_enabled=false при живом message_new — не
+// полагаемся на магию. message_reply нужен support-pause (пауза от живого
+// менеджера, «+бот»), group_join — бесшовному гейту подписки (PLAN +5.D).
+// vk-io сам настройки НЕ включает (только groups.getLongPollServer).
+vk.api.groups
+  .setLongPollSettings({
+    group_id: groupId,
+    enabled: true,
+    api_version: "5.131",
+    message_new: true,
+    message_reply: true,
+    group_join: true,
+  })
+  .then(() => console.log("[VK] LongPoll settings ensured (message_new, message_reply, group_join)"))
+  .catch((err: any) =>
+    console.warn("[VK] setLongPollSettings failed (нужны manage-права токена):", err?.message ?? err)
+  );
+
 vk.updates
   .startPolling()
   .then(() => {
