@@ -78,13 +78,17 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/prisma       ./prisma
 COPY --from=deps /app/package.json ./package.json
 
-COPY bots/shared            ./bots/shared
-COPY bots/tg/bot.ts         ./bots/tg/bot.ts
-COPY bots/tg/handlers.ts    ./bots/tg/handlers.ts
-COPY bots/tg/session.ts     ./bots/tg/session.ts
-COPY bots/tg/crons.ts       ./bots/tg/crons.ts
-COPY bots/tg/admin          ./bots/tg/admin
-COPY bots/tsconfig.json     ./bots/tsconfig.json
+# ⚠️ Sources are copied file-by-file: a new .ts file in bots/tg/ MUST be added
+# here, or the container crash-loops at startup with MODULE_NOT_FOUND while the
+# image still builds green (tsx resolves imports only at runtime).
+COPY bots/shared              ./bots/shared
+COPY bots/tg/bot.ts           ./bots/tg/bot.ts
+COPY bots/tg/handlers.ts      ./bots/tg/handlers.ts
+COPY bots/tg/session.ts       ./bots/tg/session.ts
+COPY bots/tg/crons.ts         ./bots/tg/crons.ts
+COPY bots/tg/auto-workers.ts  ./bots/tg/auto-workers.ts
+COPY bots/tg/admin            ./bots/tg/admin
+COPY bots/tsconfig.json       ./bots/tsconfig.json
 
 # Explicit ownership transfer for the entire app tree AFTER all COPYs.
 # /home/botuser is also handed over so HOME-rooted writes (npm cache, prisma
