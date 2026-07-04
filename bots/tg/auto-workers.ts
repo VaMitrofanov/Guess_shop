@@ -325,9 +325,11 @@ export function startAutoWorkers(bot: Telegraf): void {
   setTimeout(() => runAutoBuyoutTick(bot).catch((e) => console.error("[auto-buyout] boot:", e)), 50_000);
   setInterval(() => runAutoBuyoutTick(bot).catch((e) => console.error("[auto-buyout] tick:", e)), 60_000);
 
-  // GP-watcher: 15 min cadence.
+  // GP-watcher: hourly cadence (owner 2026-07-04: «каждые 15 мин — часто,
+  // я бы сделал каждый час хотя бы»). Boot tick stays at +70s so a fresh
+  // deploy proves the worker alive within минуты, не через час.
   setTimeout(() => runGpWatchTick(bot).catch((e) => console.error("[gp-watch] boot:", e)), 70_000);
-  setInterval(() => runGpWatchTick(bot).catch((e) => console.error("[gp-watch] tick:", e)), 15 * 60 * 1000);
+  setInterval(() => runGpWatchTick(bot).catch((e) => console.error("[gp-watch] tick:", e)), 60 * 60 * 1000);
 
   console.log("[auto-buyout] worker started ✅ (kill-switch in GlobalSettings.autoBuyoutEnabled)");
   console.log("[gp-watch] worker started ✅ (kill-switch in GlobalSettings.gpWatchEnabled)");

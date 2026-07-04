@@ -118,7 +118,9 @@ WB-коридор не был задет (его `gp_pick` использует 
   алерт (сам флаг не снимается). Достигли порога → обязательный алерт «💧 пора сливать»
   (дедуп 6 ч через `autoBuyoutBelowSince`); сам слив остаётся ручным (💧 в TWA). Управление:
   `/autobuy` (статус), `/autobuy on|off`, `/autobuy threshold N`.
-- **👁 GP-watch по вероятному нику (+3).** Тик 15 мин. Для заказов `AWAITING_GAMEPASS` с
+- **👁 GP-watch по вероятному нику (+3).** Тик 60 мин (решение владельца 04.07: «15 мин —
+  часто»; boot-тик через 70 с после старта контейнера — деплой сразу показывает, что воркер
+  жив). Для заказов `AWAITING_GAMEPASS` с
   `probableNick` (см. «Ранний захват ника») и без `robloxUsername`, младше 30 дней, ищет
   `searchGamepassesByNick` геймпасс с ценой `±2`. Нашёл (и это не тот же `gpWatchNotifiedPassId`)
   → действует по режиму **`GlobalSettings.gpWatchNotify`** (`admin`/`customer`/`both`,
