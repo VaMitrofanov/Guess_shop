@@ -74,6 +74,11 @@ Durable-запись одной пачки «Выкупить всё»: `account
 `totalGross` (грязные R$), `okCount`/`failCount`, `items` (JSONB: `[{orderId,nick,wbCode,gross,ok,reason}]`).
 Пишется клиентом после пакетного выкупа (`api/twa/purchase-batch` action `save`).
 
+### `DrainEvent` (2026-07-05)
+Учёт сливов остатка донора в приёмник: `donorName`, `drainName`, `amount` (грязные R$),
+`gamepassId`, `source` (`manual` — кнопка 💧 в TWA / `auto` — автослив-воркер), `createdAt`.
+Пишется при успешном сливе; читается «Историей покупок» (`/api/twa/drain?events=1`).
+
 ## Legacy-модели (вне WB-воркфлоу)
 
 `Product`, `Order` (`OrderStatus`), `Review`, `FAQ`, `MarketRate`, `RateSnapshot`,
