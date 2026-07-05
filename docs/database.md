@@ -44,7 +44,9 @@ robloxUsername, userId+createdAt).
 
 ### `DirectIntent` — намерение прямого заказа
 Создаётся только когда есть реквизиты (сумма/бонус/скидка/ник/gamepass). Статус
-`DirectIntentStatus`. Предотвращает «мёртвые» полу-заказы.
+`DirectIntentStatus`: `PENDING` (ждёт менеджера, живёт 24 ч) → `CONSUMED` (превращён в
+`WbOrder` `DIR-…` через QR/реквизиты — из TG-карточки или TWA-вкладки «Прямой») /
+`CANCELLED` (отклонён) / `EXPIRED` (>24 ч, авто). Предотвращает «мёртвые» полу-заказы.
 
 ### `GlobalSettings` (id=`global`)
 Настройки выкупа: `robloxCookie` (`.ROBLOSECURITY` донора), `robloxCookieUpdatedAt`,
@@ -59,6 +61,10 @@ robloxUsername, userId+createdAt).
 алерта «пора сливать»). GP-watch (+3): `gpWatchEnabled` (kill-switch, default OFF),
 `gpWatchNotify` (`admin`/`customer`/`both`, default `both` — кому сообщать о найденном ГП:
 алерт менеджеру и/или пинг клиенту; миграция `20260704_add_gpwatch_notify_mode`).
+Автослив (+5.G.3): `autoDrainEnabled` (kill-switch, default OFF; миграция
+`20260705_add_autodrain_flag`). СБП-QR: `sbpQrBase64` — base64-картинка QR прямых заказов
+(миграция `20260706_add_sbp_qr`; до неё колонки в проде НЕ БЫЛО, боты ловили 42703 и
+отвечали «QR не настроен» — см. `docs/bots.md`).
 
 > ⚠️ `usdToRub` — `Float` без default. Любой `globalSettings.upsert` **обязан** передавать
 > `usdToRub` в блоке `create`, даже если фактически сработает `update` — Prisma валидирует

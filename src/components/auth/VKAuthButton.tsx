@@ -49,6 +49,10 @@ export default function VKAuthButton({
   const [error, setError]  = useState<string | null>(null);
   const [busy, setBusy]    = useState(false); // spinner while popup is open
   const [ready, setReady]  = useState(false); // SDK widget mounted
+  // Order mode: URL диалога сообщества, показываем interstitial ПЕРЕД уходом в VK.
+  // VK-логин на сайте создаёт юзера БЕЗ диалога с сообществом — если человек не
+  // нажмёт «Начать» в чате, бот не сможет ему писать (VK 901, PLAN +5.I.2).
+  const [vkRedirect, setVkRedirect] = useState<string | null>(null);
 
   // ── Bootstrap VK ID SDK + mount hidden OneTap widget ──────────────────────
   useEffect(() => {
@@ -142,7 +146,11 @@ export default function VKAuthButton({
                     return;
                   }
                   if (resolvedWbCode) {
-                    window.location.href = customRedirectUrl || `${VK_CLUB_HREF}?ref=${resolvedWbCode}`;
+                    // Не редиректим молча: без «Начать» в диалоге сообщества
+                    // уведомления о заказе не дойдут (VK 901). Interstitial
+                    // объясняет шаг — уход в VK по явному тапу.
+                    setBusy(false);
+                    setVkRedirect(customRedirectUrl || `${VK_CLUB_HREF}?ref=${resolvedWbCode}`);
                   } else {
                     window.location.href = customRedirectUrl || "/dashboard";
                   }
@@ -256,6 +264,30 @@ export default function VKAuthButton({
         >
           {error}
         </p>
+      )}
+
+      {/* Interstitial перед уходом в диалог VK-сообщества (order mode).
+          Без «Начать» в диалоге бот не сможет прислать уведомления о заказе. */}
+      {vkRedirect && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-[#0077FF]/50 bg-[#0d1220] p-6 text-center shadow-[0_12px_48px_rgba(0,0,0,0.6)]">
+            <div className="text-4xl mb-3">✅</div>
+            <h3 className="text-white text-lg font-black mb-2">Код привязан!</h3>
+            <p className="text-white/80 text-sm leading-relaxed mb-1">
+              Остался один шаг: сейчас откроется диалог с нашим сообществом ВКонтакте.
+            </p>
+            <p className="text-[#7fb0ff] text-sm font-bold leading-relaxed mb-4">
+              Обязательно нажми «Начать» (или отправь сообщение) и разреши сообщения от
+              сообщества — туда придут статус заказа и выплата.
+            </p>
+            <a
+              href={vkRedirect}
+              className="block w-full rounded-xl bg-[#0077FF] px-4 py-3.5 text-white font-black text-sm uppercase tracking-wider hover:bg-[#2b8cff] transition-colors"
+            >
+              Открыть диалог VK →
+            </a>
+          </div>
+        </div>
       )}
     </div>
   );

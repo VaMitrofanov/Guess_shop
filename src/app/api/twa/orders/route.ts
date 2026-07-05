@@ -165,6 +165,11 @@ export async function GET(req: NextRequest) {
           if (cachedCounts && Date.now() - cachedCounts.ts < COUNT_CACHE_TTL) {
             return { total: tabTotal(tab, cachedCounts.data), counts: cachedCounts.data, sums: cachedCounts.sums, oldest: cachedCounts.oldest };
           }
+          // Заявки прямых заказов (DirectIntent, «ожидаем реквизиты») живут 24ч;
+          // бейдж вкладки «Прямой» = заказы + заявки (клиент складывает сам).
+          const intentsPromise: Promise<number> = (prisma as any).directIntent.count({
+            where: { status: "PENDING", createdAt: { gt: new Date(Date.now() - 24 * 3600_000) } },
+          }).catch(() => 0);
           const rows: any[] = await (prisma as any).$queryRawUnsafe(`
             SELECT
               COUNT(*)::int AS "ALL",
@@ -198,6 +203,7 @@ export async function GET(req: NextRequest) {
           const sums: Record<string, number> = {};
           for (const k of ["ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES", "ATTENTION"] as const)
             counts[k] = Number(r[k] ?? 0);
+          counts["INTENTS"] = await intentsPromise;
           for (const k of ["BUYOUT", "DIRECT", "AVITO", "AWAITING_LINK", "NEW", "ERROR"] as const)
             sums[k] = Number(r[`SUM_${k}`] ?? 0);
           const oldest: Record<string, string | null> = {
@@ -562,12 +568,24 @@ export async function POST(req: NextRequest) {
     const note = typeof body.note === "string" ? body.note.trim() : "";
     if (!note) return NextResponse.json({ error: "Заметка обязательна при переводе" }, { status: 400 });
 
+    // «Избранное» — не статус, а флаг: заказ остаётся в своём статусе.
+    if (target === "FAVORITES") {
+      await (prisma as any).wbOrder.update({
+        where: { id: orderId },
+        data:  { isFavorite: true, adminNote: note.slice(0, 2000) },
+      });
+      cachedCounts = null;
+      return NextResponse.json({ ok: true });
+    }
+
     const statusMap: Record<string, string> = {
       BUYOUT: "PENDING",
       DIRECT: "PENDING",
+      AVITO: "PENDING",
       NEW: "AWAITING_GAMEPASS",
       ERROR: "ERROR",
       AWAITING_LINK: "AWAITING_GAMEPASS",
+      DONE: "COMPLETED",
     };
     const newStatus = statusMap[target];
     if (!newStatus) return NextResponse.json({ error: "Invalid target" }, { status: 400 });
@@ -578,7 +596,18 @@ export async function POST(req: NextRequest) {
       isFavorite: false,
     };
     if (target === "DIRECT") { data.isDirectOrder = true; data.orderSource = "DIRECT"; }
-    if (target === "BUYOUT") { data.isDirectOrder = false; }
+    if (target === "BUYOUT") { data.isDirectOrder = false; data.orderSource = order.orderSource === "AVITO" ? "MANUAL" : order.orderSource; }
+    // Вкладка «Авито» фильтрует по orderSource — одного статуса мало.
+    if (target === "AVITO")  { data.isDirectOrder = false; data.orderSource = "AVITO"; }
+    // Перенос в «Готово» — тихая переклассификация (без уведомления клиенту,
+    // в отличие от кнопки «Выкуплено»); курс фиксируем как при обычном выкупе.
+    if (target === "DONE") {
+      const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+      data.purchaseRate = settings?.purchaseRate ?? null;
+    }
+    if ((target === "BUYOUT" || target === "DIRECT" || target === "AVITO") && !order.pendingAt) {
+      data.pendingAt = new Date();
+    }
 
     await (prisma as any).wbOrder.update({ where: { id: orderId }, data });
     cachedCounts = null;

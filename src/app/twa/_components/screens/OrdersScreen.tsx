@@ -38,6 +38,8 @@ interface Order {
   reviewStatus: "PENDING" | "SUBMITTED" | null;
   userOrderNumber: number | null;
   userOrderTotal: number | null;
+  /** true — сообщество не может написать VK-юзеру (VK 901); только личка менеджера. */
+  vkUnreachable?: boolean | null;
   user: {
     tgId: string | null;
     vkId: string | null;
@@ -46,6 +48,22 @@ interface Order {
     balance: number | null;
     reviewBonusGrantedAt: string | null;
   };
+}
+
+/** Заявка прямого заказа (DirectIntent) — «⏳ Ожидаем реквизиты». */
+interface Intent {
+  id: string;
+  amount: number;
+  bonus: number;
+  totalAmount: number;
+  rublePrice: number;
+  robloxUsername: string;
+  gamepassId: string;
+  gamepassUrl: string;
+  platform: string;
+  createdAt: string;
+  prevOrders: number;
+  user: Order["user"];
 }
 
 interface OrdersData {
@@ -62,6 +80,7 @@ interface EnrichValue {
   userOrderNumber: number | null;
   userOrderTotal: number | null;
   reviewStatus: "PENDING" | "SUBMITTED" | null;
+  vkUnreachable?: boolean | null;
 }
 
 const TAB_META: Record<FilterTab, { label: string; color: string }> = {
@@ -372,6 +391,25 @@ function ActionPanel({
   const showError = currentTab !== "ERROR";
   const hasGamepass = !!order.gamepassUrl;
 
+  // Прямой заказ до подтверждения оплаты: выкупать/завершать нечего (сервер
+  // отвергнет), оплату подтверждает скриншот в боте. Доступна только отмена.
+  if (["AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status)) {
+    return (
+      <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "12px 16px 16px" }}>
+        <span style={{
+          flex: 1, padding: "12px 14px", borderRadius: 12,
+          background: `${C.yellow}14`, color: C.yellow, fontSize: 14, fontWeight: 600,
+        }}>
+          💳 {order.status === "PAYMENT_PENDING" ? "Ждём оплату — скрин придёт в бота" : "Ожидает реквизиты"}
+        </span>
+        <button className="twa-press" onClick={() => doAction("reject")} disabled={loading}
+          style={{ width: 44, flexShrink: 0, padding: "14px 0", border: `1px solid ${C.red}55`, borderRadius: 12, background: "transparent", color: C.red, fontSize: 18, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+          ✕
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: "flex", gap: 8, padding: "12px 16px 16px" }}>
       {hasGamepass && (
@@ -399,16 +437,21 @@ function ActionPanel({
 }
 
 /* ───────────── MoveToModal ───────────── */
+// Все разделы, кроме «Все» (заказ и так виден в «Все») и текущего
+// (перенаправляем ИЗ него — выбор себя бессмыслен, фильтруется по currentTab).
 const MOVE_TARGETS: { id: string; label: string; color: string }[] = [
   { id: "BUYOUT", label: "К выкупу", color: C.green },
   { id: "DIRECT", label: "Прямой выкуп", color: C.blue },
+  { id: "AVITO", label: "Авито", color: C.orange },
   { id: "NEW", label: "Новые", color: C.accent },
   { id: "ERROR", label: "Ошибка", color: C.red },
   { id: "AWAITING_LINK", label: "Ждут ссылку", color: C.yellow },
+  { id: "DONE", label: "Готово", color: C.green },
+  { id: "FAVORITES", label: "Избранное", color: "#ffd60a" },
 ];
 
-function MoveToModal({ order, token, onDone, onClose }: {
-  order: Order; token: string; onDone: () => void; onClose: () => void;
+function MoveToModal({ order, token, currentTab, onDone, onClose }: {
+  order: Order; token: string; currentTab: FilterTab; onDone: () => void; onClose: () => void;
 }) {
   const [target, setTarget] = useState("");
   const [note, setNote] = useState("");
@@ -444,7 +487,7 @@ function MoveToModal({ order, token, onDone, onClose }: {
     }}>
       <div style={{ fontSize: 14, fontWeight: 600, color: C.textSecondary }}>Перевести в раздел:</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-        {MOVE_TARGETS.map(t => (
+        {MOVE_TARGETS.filter(t => t.id !== currentTab).map(t => (
           <button key={t.id} className="twa-press-sm"
             onClick={() => setTarget(t.id)}
             style={{
@@ -1097,6 +1140,26 @@ function OrderCard({
         </div>
       )}
 
+      {/* 🚫 VK-клиент недостижим для сообщества (VK 901) — писать только с личного акка */}
+      {order.vkUnreachable === true && order.user.vkId && (
+        <div style={{
+          margin: "0 14px 10px", padding: "8px 10px",
+          background: `${C.red}14`, borderRadius: 8,
+          fontSize: 14, color: C.red,
+          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+        }}>
+          <span style={{ fontWeight: 600 }}>🚫 Бот не может написать (VK)</span>
+          <a
+            href={`https://vk.com/id${order.user.vkId}`}
+            target="_blank" rel="noreferrer"
+            onClick={e => e.stopPropagation()}
+            style={{ color: C.blue, fontSize: 13, fontWeight: 600 }}
+          >
+            профиль VK — писать с личного
+          </a>
+        </div>
+      )}
+
       {/* Rejection reason for ALL tab */}
       {currentTab === "ALL" && order.status === "REJECTED" && order.rejectionReason && (
         <div style={{
@@ -1126,6 +1189,7 @@ function OrderCard({
         <MoveToModal
           order={order}
           token={token}
+          currentTab={viewTab}
           onDone={() => { setMoveOpen(false); onMoved(); }}
           onClose={() => setMoveOpen(false)}
         />
@@ -1292,6 +1356,11 @@ export default function OrdersScreen({
   const [doneSourceFilter, setDoneSourceFilter] = useState<SourceFilter>("ALL");
   const reqIdRef = useRef(0);
 
+  // Заявки прямых заказов (DirectIntent) — видны на вкладке «Прямой».
+  const [intents, setIntents] = useState<Intent[]>([]);
+  const [intentsLoading, setIntentsLoading] = useState(false);
+  const [qrConfigured, setQrConfigured] = useState(true);
+
   const enrichCache = useRef<Map<string, EnrichValue>>(new Map());
   const requestedRef = useRef<Set<string>>(new Set());
 
@@ -1332,6 +1401,32 @@ export default function OrdersScreen({
     setAllOrders([]);
     fetchOrders(serverTab, query, 1, false);
   }, [serverTab, query, fetchOrders]);
+
+  const fetchIntents = useCallback(async () => {
+    setIntentsLoading(true);
+    try {
+      const r = await fetch("/api/twa/intents", { headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) return;
+      const d = await r.json();
+      setIntents(d.intents ?? []);
+      setQrConfigured(d.qrConfigured !== false);
+    } catch { /* non-fatal */ }
+    finally { setIntentsLoading(false); }
+  }, [token]);
+
+  useEffect(() => {
+    if (filter === "DIRECT" && !query) fetchIntents();
+  }, [filter, query, fetchIntents]);
+
+  const handleIntentGone = useCallback((id: string, result: "consumed" | "rejected") => {
+    setIntents(prev => prev.filter(i => i.id !== id));
+    setData(prev => prev?.counts
+      ? { ...prev, counts: { ...prev.counts, INTENTS: Math.max(0, (prev.counts["INTENTS"] ?? 0) - 1) } }
+      : prev);
+    // QR/реквизиты создают заказ DIR-… (PAYMENT_PENDING) — сразу дотягиваем список.
+    if (result === "consumed") { setPage(1); fetchOrders(serverTab, query, 1, false); }
+    onActionDone?.();
+  }, [serverTab, query, fetchOrders, onActionDone]);
 
   useEffect(() => {
     const need = allOrders
@@ -1592,7 +1687,9 @@ export default function OrdersScreen({
         }}>
           {FILTERS.map(f => {
             const meta = TAB_META[f.id];
-            const count = data?.counts?.[f.id] ?? 0;
+            // «Прямой»: бейдж = заказы + заявки (DirectIntent, «ожидаем реквизиты»).
+            const count = (data?.counts?.[f.id] ?? 0)
+              + (f.id === "DIRECT" ? (data?.counts?.["INTENTS"] ?? 0) : 0);
             const isActive = filter === f.id;
             const isUrgent = ["BUYOUT", "DIRECT", "AVITO", "ERROR"].includes(f.id) && count > 0;
             return (
@@ -1644,6 +1741,17 @@ export default function OrdersScreen({
               groups={DASHBOARD_GROUPS.filter(g => g.filter === filter)}
             />
           </div>
+        )}
+
+        {/* Заявки прямых заказов — до отправки реквизитов (видны даже при пустом списке заказов) */}
+        {filter === "DIRECT" && !query && (
+          <IntentsSection
+            token={token}
+            intents={intents}
+            qrConfigured={qrConfigured}
+            loading={intentsLoading}
+            onIntentGone={handleIntentGone}
+          />
         )}
 
         {loading ? (
@@ -1786,6 +1894,248 @@ export default function OrdersScreen({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ───────────── Direct intents («⏳ Ожидаем реквизиты») ─────────────
+   Заявки прямых заказов из ботов до отправки реквизитов. Кнопки = TG-карточке
+   заявки: 📷 QR (СБП) / 💳 Реквизиты текстом / ❌ Отклонить. После QR или
+   реквизитов заявка превращается в заказ DIR-… (PAYMENT_PENDING) и появляется
+   в списке вкладки «Прямой» штатно. */
+function IntentCard({ intent, token, qrConfigured, onGone }: {
+  intent: Intent;
+  token: string;
+  qrConfigured: boolean;
+  onGone: (result: "consumed" | "rejected") => void;
+}) {
+  const [busy, setBusy] = useState<null | "qr" | "details" | "reject">(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsText, setDetailsText] = useState("");
+  const [confirmReject, setConfirmReject] = useState(false);
+
+  const platform: "tg" | "vk" | "—" = intent.user.tgId ? "tg" : intent.user.vkId ? "vk" : "—";
+  const expectedPass = Math.ceil(intent.totalAmount / 0.7);
+
+  async function run(action: "send-qr" | "send-details" | "reject") {
+    if (busy) return;
+    setBusy(action === "send-qr" ? "qr" : action === "send-details" ? "details" : "reject");
+    try {
+      const r = await fetch("/api/twa/intents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          action, intentId: intent.id,
+          ...(action === "send-details" ? { details: detailsText.trim() } : {}),
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        haptic.notify("error");
+        toast(d.error ?? "Ошибка", "error");
+        // 409/410 — заявку уже обработали из TG или она просрочена: убираем.
+        if (r.status === 409 || r.status === 410) onGone("consumed");
+        return;
+      }
+      haptic.notify("success");
+      if (action === "reject") {
+        toast(d.notified ? "Заявка отклонена, клиент уведомлён" : "Заявка отклонена (уведомление не доставлено)", "default");
+        onGone("rejected");
+      } else {
+        const what = action === "send-qr" ? "QR отправлен" : "Реквизиты отправлены";
+        toast(
+          d.notified
+            ? `✅ ${what} (${String(d.notified).toUpperCase()}) · заказ ${d.code}`
+            : `⚠️ Заказ ${d.code} создан, но сообщение НЕ доставлено — напиши клиенту сам`,
+          d.notified ? "success" : "error",
+        );
+        onGone("consumed");
+      }
+    } catch {
+      haptic.notify("error");
+      toast("Ошибка сети", "error");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <article style={{
+      background: C.card,
+      borderRadius: 16,
+      overflow: "hidden",
+      boxShadow: SHADOW.card,
+      border: `1px solid ${C.blue}33`,
+    }}>
+      <div style={{ padding: "14px 16px 0", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <span style={{
+            fontSize: 12, fontWeight: 800, color: "#fff",
+            background: platform === "tg" ? "#229ED9" : platform === "vk" ? "#0077FF" : C.elevated,
+            borderRadius: 5, padding: "4px 8px", flexShrink: 0,
+          }}>
+            {platform === "tg" ? "T" : platform === "vk" ? "V" : "—"}
+          </span>
+          <span
+            onClick={e => { e.stopPropagation(); haptic.impact("light"); openContact(intent.user); }}
+            style={{
+              fontSize: 17, fontWeight: 600, color: "#7ec5ff", cursor: "pointer",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0,
+            }}
+          >
+            {userShortName(intent.user)}
+          </span>
+          <span style={{
+            fontSize: 12, fontWeight: 600, color: C.blue,
+            background: `${C.blue}1c`, padding: "4px 9px",
+            borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
+          }}>
+            ⏳ заявка
+          </span>
+          {intent.prevOrders > 0 && (
+            <span style={{
+              fontSize: 11, fontWeight: 600, color: C.green,
+              background: `${C.green}1c`, padding: "3px 8px",
+              borderRadius: 999, flexShrink: 0, whiteSpace: "nowrap",
+            }}>
+              🔄 ×{intent.prevOrders}
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 16, fontWeight: 500, color: ageColor(intent.createdAt), ...tabular }}>
+            ⏱ {fmtAge(intent.createdAt)}
+          </span>
+          <span style={{ fontSize: 14, color: C.textTertiary }}>—</span>
+          <span style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, ...tabular }}>
+            {intent.totalAmount.toLocaleString("ru-RU")}
+          </span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: C.accent }}>R$</span>
+          <span style={{ fontSize: 16, fontWeight: 600, color: C.green, ...tabular }}>
+            → {intent.rublePrice.toLocaleString("ru-RU")} ₽
+          </span>
+          {intent.bonus > 0 && (
+            <span style={{ fontSize: 13, color: C.yellow }}>🎁 +{intent.bonus}</span>
+          )}
+        </div>
+      </div>
+
+      <div style={{ padding: "6px 16px 12px" }}>
+        <DataRow icon="🎮" copyText={intent.robloxUsername}>
+          <span style={{ fontWeight: 600 }}>{intent.robloxUsername}</span>
+        </DataRow>
+        <DataRow icon="🔗" copyText={intent.gamepassUrl}>
+          <a
+            href={intent.gamepassUrl}
+            target="_blank" rel="noreferrer"
+            onClick={e => e.stopPropagation()}
+            style={{ color: C.blue }}
+          >
+            {intent.gamepassUrl.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}
+          </a>
+        </DataRow>
+        <div style={{ fontSize: 13, color: C.textTertiary, padding: "2px 0 0 26px" }}>
+          геймпасс ≈ {expectedPass.toLocaleString("ru-RU")} R$ · выдать {intent.totalAmount.toLocaleString("ru-RU")} R$
+        </div>
+      </div>
+
+      {detailsOpen && (
+        <div onClick={e => e.stopPropagation()} style={{
+          padding: "10px 14px 4px",
+          borderTop: `1px solid ${C.hairline}`,
+          display: "flex", flexDirection: "column", gap: 8,
+        }}>
+          <textarea
+            placeholder="Реквизиты (номер карты/телефона, банк)…"
+            value={detailsText}
+            onChange={e => setDetailsText(e.target.value)}
+            rows={2}
+            style={{
+              background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10,
+              color: C.textPrimary, fontSize: 15, lineHeight: 1.4,
+              padding: "10px 12px", resize: "none", outline: "none",
+              width: "100%", boxSizing: "border-box", fontFamily: "inherit",
+            }}
+          />
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, padding: "10px 14px 14px" }}>
+        {!detailsOpen ? (
+          <>
+            <button className="twa-press" disabled={!!busy || !qrConfigured}
+              title={qrConfigured ? undefined : "QR не загружен в БД"}
+              onClick={() => run("send-qr")}
+              style={{ flex: 2, padding: "13px", border: "none", borderRadius: 12, background: "rgba(10,132,255,0.14)", color: C.blue, fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: busy || !qrConfigured ? 0.5 : 1 }}>
+              {busy === "qr" ? "⏳…" : "📷 QR (СБП)"}
+            </button>
+            <button className="twa-press" disabled={!!busy}
+              onClick={() => { setDetailsOpen(true); setConfirmReject(false); }}
+              style={{ flex: 2, padding: "13px", border: "none", borderRadius: 12, background: "rgba(48,209,88,0.12)", color: C.green, fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: busy ? 0.5 : 1 }}>
+              💳 Реквизиты
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="twa-press" disabled={!!busy}
+              onClick={() => { setDetailsOpen(false); setDetailsText(""); }}
+              style={{ flex: 1, padding: "13px", border: "none", borderRadius: 12, background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
+              Отмена
+            </button>
+            <button className="twa-press" disabled={!!busy || !detailsText.trim()}
+              onClick={() => run("send-details")}
+              style={{ flex: 2, padding: "13px", border: "none", borderRadius: 12, background: C.accent, color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: busy || !detailsText.trim() ? 0.5 : 1 }}>
+              {busy === "details" ? "⏳…" : "Отправить клиенту"}
+            </button>
+          </>
+        )}
+        {!detailsOpen && (
+          confirmReject ? (
+            <button className="twa-press" disabled={!!busy}
+              onClick={() => run("reject")}
+              style={{ flexShrink: 0, padding: "13px 12px", border: "none", borderRadius: 12, background: C.red, color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: busy ? 0.5 : 1 }}>
+              {busy === "reject" ? "⏳…" : "Точно?"}
+            </button>
+          ) : (
+            <button className="twa-press" disabled={!!busy}
+              onClick={() => { setConfirmReject(true); window.setTimeout(() => setConfirmReject(false), 3500); }}
+              style={{ width: 44, flexShrink: 0, padding: "13px 0", border: `1px solid ${C.red}55`, borderRadius: 12, background: "transparent", color: C.red, fontSize: 18, cursor: "pointer", opacity: busy ? 0.5 : 1 }}>
+              ✕
+            </button>
+          )
+        )}
+      </div>
+    </article>
+  );
+}
+
+function IntentsSection({ token, intents, qrConfigured, loading, onIntentGone }: {
+  token: string;
+  intents: Intent[];
+  qrConfigured: boolean;
+  loading: boolean;
+  onIntentGone: (id: string, result: "consumed" | "rejected") => void;
+}) {
+  if (loading && intents.length === 0) return null;
+  if (intents.length === 0) return null;
+  return (
+    <div style={{ padding: "12px 16px 0", display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 2px" }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: C.blue, whiteSpace: "nowrap" }}>
+          ⏳ Заявки · ожидают реквизиты ({intents.length})
+        </span>
+        <div style={{ flex: 1, height: 1, background: C.hairline }} />
+      </div>
+      {intents.map(i => (
+        <IntentCard
+          key={i.id}
+          intent={i}
+          token={token}
+          qrConfigured={qrConfigured}
+          onGone={(result) => onIntentGone(i.id, result)}
+        />
+      ))}
     </div>
   );
 }

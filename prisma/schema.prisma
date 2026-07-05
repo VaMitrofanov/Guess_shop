@@ -279,6 +279,9 @@ model GlobalSettings {
   /// Who the watcher tells about a found gamepass: "admin" | "customer" | "both".
   /// "both" keeps the customer auto-ping AND gives managers full visibility.
   gpWatchNotify         String    @default("both")
+  /// СБП-QR прямых заказов: base64-картинка (приватно в БД — репо публичный).
+  /// Читают боты (bots/shared/sbp.ts) и TWA (/api/twa/intents → отправка, /api/sbp-qr).
+  sbpQrBase64           String?
 }
 
 /// Durable record of a "Выкупить всё" batch — one row per bulk-buyout session.
