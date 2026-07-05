@@ -714,7 +714,7 @@ async function showNickStep(bot: Telegraf, ctx: any): Promise<void> {
   }
 }
 
-async function showSummary(ctx: any, flow: DirectFlowState, gpRobux: number, gpName: string): Promise<void> {
+async function showSummary(ctx: any, flow: DirectFlowState, gpRobux: number, gpName: string, editTarget?: { chatId: number; messageId: number }): Promise<void> {
   const bonusLine = flow.bonus && flow.bonus > 0 ? `\n🎁 Бонус:       +${flow.bonus} R$` : "";
   const discountLine = flow.rubleDiscount && flow.rubleDiscount > 0 ? `\n💰 Скидка:      −${flow.rubleDiscount} ₽` : "";
 
@@ -741,7 +741,13 @@ async function showSummary(ctx: any, flow: DirectFlowState, gpRobux: number, gpN
     [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
   ]);
   try {
-    await ctx.editMessageText(summaryText, { parse_mode: "HTML", ...summaryKb });
+    if (editTarget) {
+      // Текстовый путь (автопропуск после поиска): итог редактируется в пузырь
+      // «Ищу…», чтобы ответ был виден без пролистывания.
+      await ctx.telegram.editMessageText(editTarget.chatId, editTarget.messageId, undefined, summaryText, { parse_mode: "HTML", ...summaryKb });
+    } else {
+      await ctx.editMessageText(summaryText, { parse_mode: "HTML", ...summaryKb });
+    }
   } catch {
     await ctx.reply(summaryText, { parse_mode: "HTML", ...summaryKb });
   }
@@ -755,7 +761,19 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
 
   const tgId = String(ctx.from.id);
 
-  await ctx.reply(`🔎 Ищу геймпассы у <b>${escapeHtml(nick)}</b>…`, { parse_mode: "HTML" });
+  const searchingMsg = await ctx.reply(`🔎 Ищу геймпассы у <b>${escapeHtml(nick)}</b>…`, { parse_mode: "HTML" });
+
+  // Edit-in-place: результат появляется в том же видимом пузыре «Ищу…»
+  // (см. handleRobloxNickInput — та же жалоба «ответа не видно»).
+  const showResult = async (text: string, extra: Record<string, unknown>): Promise<void> => {
+    try {
+      await ctx.telegram.editMessageText(ctx.chat.id, searchingMsg.message_id, undefined, text, extra as any);
+    } catch {
+      try { await ctx.telegram.deleteMessage(ctx.chat.id, searchingMsg.message_id); } catch {}
+      await ctx.reply(text, extra);
+    }
+  };
+
   let result: GamepassSearchOutcome;
   try {
     result = await searchGamepassesByNick(nick, flow.passPrice);
@@ -764,7 +782,7 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
     // ника, как в WB-коридоре. Раньше исключение улетало в bot.catch.
     console.error("[TG/direct] searchGamepassesByNick failed:", err?.message ?? err);
     flow.step = "nick_input";
-    await ctx.reply(
+    await showResult(
       "⚠️ Поиск по нику временно недоступен — не получилось связаться с Roblox.\n\nПодожди минуту и пришли ник ещё раз:",
       { parse_mode: "HTML", ...Markup.inlineKeyboard([
         [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
@@ -780,7 +798,7 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
 
   if (result.status === "user_not_found") {
     flow.step = "nick_input";
-    await ctx.reply(
+    await showResult(
       `❌ Пользователь <b>${escapeHtml(nick)}</b> не найден на Roblox.\n\nПроверь написание и отправь ещё раз:`,
       { parse_mode: "HTML", ...Markup.inlineKeyboard([
         [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
@@ -790,7 +808,7 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
   }
   if (result.status === "no_gamepasses") {
     flow.step = "nick_input";
-    await ctx.reply(
+    await showResult(
       `⚠️ У <b>${escapeHtml(nick)}</b> нет геймпассов на продаже.\n\n` +
       `Создай геймпасс по инструкции и отправь ник ещё раз:`,
       {
@@ -818,7 +836,7 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
       flow.gamepassName = gpDetails.name;
       flow.gamepassRobux = gpDetails.price;
       flow.step = "summary";
-      await showSummary(ctx, flow, gpDetails.price, gpDetails.name);
+      await showSummary(ctx, flow, gpDetails.price, gpDetails.name, { chatId: ctx.chat.id, messageId: searchingMsg.message_id });
       return;
     }
   }
@@ -833,7 +851,7 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
     ]);
     btns.push([Markup.button.callback("✏️ Другой ник", CB.directNickNew)]);
     btns.push([Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)]);
-    await ctx.reply(
+    await showResult(
       `${gpHeader}\n\n⚠️ Нет геймпассов с нужной ценой <b>${flow.passPrice} R$</b>.\n\n` +
       `Вот что нашлось у <b>${escapeHtml(nick)}</b> — выбери подходящий или создай новый с правильной ценой:`,
       { parse_mode: "HTML", ...Markup.inlineKeyboard(btns) }
@@ -850,7 +868,7 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
   ]);
   btns.push([Markup.button.callback("✏️ Другой ник", CB.directNickNew)]);
   btns.push([Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)]);
-  await ctx.reply(
+  await showResult(
     `${gpHeader}\n\n🎫 Геймпассы <b>${escapeHtml(nick)}</b> — выбери для заказа:`,
     { parse_mode: "HTML", ...Markup.inlineKeyboard(btns) }
   );
@@ -1847,6 +1865,20 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
   await ctx.sendChatAction("typing");
   const checkingMsg = await ctx.reply(`🔎 Ищу геймпассы у <b>${nick}</b>…`, { parse_mode: "HTML" });
 
+  // Результат РЕДАКТИРУЕТСЯ в пузырь «Ищу…» (edit-in-place): delete+send
+  // оставлял клиента на его сообщении, а результат приходил ниже видимой
+  // области — жалоба «анимация исчезает, ответа не видно без пролистывания».
+  // Прокрутить чат Bot API не может, поэтому результат должен появиться в том
+  // же видимом сообщении. Фолбэк на delete+reply — если edit не прошёл.
+  const showResult = async (text: string, extra: Record<string, unknown>): Promise<void> => {
+    try {
+      await bot.telegram.editMessageText(ctx.chat.id, checkingMsg.message_id, undefined, text, extra as any);
+    } catch {
+      try { await bot.telegram.deleteMessage(ctx.chat.id, checkingMsg.message_id); } catch {}
+      await ctx.reply(text, extra);
+    }
+  };
+
   let outcome: GamepassSearchOutcome;
   try {
     outcome = await searchGamepassesByNick(nick, expectedPrice);
@@ -1854,11 +1886,10 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
     // Infra failure (bridge/Roblox down) is NOT «ника нет на Roblox» — saying
     // so sends users with a valid nick into a retyping spiral. Be honest.
     console.error("[TG/find-gp] searchGamepassesByNick failed:", err?.message ?? err);
-    try { await bot.telegram.deleteMessage(ctx.chat.id, checkingMsg.message_id); } catch {}
     // pendingRobloxNick сохраняем: после инфра-сбоя клиент, скорее всего,
     // просто пришлёт ник ещё раз — текст должен уйти в поиск, а не в ошибку.
     const downGuideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`;
-    await ctx.reply(
+    await showResult(
       "⚠️ Поиск по нику временно недоступен — не получилось связаться с Roblox.\n\n" +
       "Попробуй ещё раз через минуту или пришли ссылку на геймпасс вручную.\n\n" +
       "📖 Вся инструкция по созданию и оформлению — по кнопке ниже.",
@@ -1873,7 +1904,6 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
     );
     return;
   }
-  try { await bot.telegram.deleteMessage(ctx.chat.id, checkingMsg.message_id); } catch {}
 
   // User has moved past the input stage in every branch below.
   pendingRobloxNick.delete(tgIdNum);
@@ -1889,7 +1919,7 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
 
   // ── Branch 1: nickname doesn't exist on Roblox ───────────────────────────
   if (outcome.status === "user_not_found") {
-    await ctx.reply(
+    await showResult(
       `🤷 Пользователя <b>${nick}</b> нет на Roblox.\n\n` +
       `Скорее всего опечатка. Скопируй ник прямо со страницы профиля и пришли заново.\n\n` +
       `📖 Как найти ник и создать геймпасс — в инструкции:`,
@@ -1910,7 +1940,7 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
   // Most common reason: the user's place is private. Guide them to opening it
   // before sending them to the generic support button.
   if (outcome.status === "no_gamepasses") {
-    await ctx.reply(
+    await showResult(
       `🙈 У <b>${nick}</b> не нашли публичных геймпассов.\n\n` +
       `Скорее всего геймпасс ещё не создан, не выставлен на продажу или плейс закрыт.\n\n` +
       `⚠️ <b>Пройди инструкцию</b> — там по шагам: создание, разблокировка, правильная цена <b>${expectedPrice} R$</b>:\n` +
@@ -1936,7 +1966,7 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
   if (matches.length === 0) {
     const top = nonMatches.slice(0, MAX_PICK_BUTTONS);
     const listLines = top.map(g => `• <b>${escapeHtml(g.name)}</b> · ${g.robux} R$`).join("\n");
-    await ctx.reply(
+    await showResult(
       `У <b>${nick}</b> нашли геймпассы, но ни один не за <b>${expectedPrice} R$</b>:\n\n` +
       `${listLines}\n\n` +
       `Нужен геймпасс ровно на <b>${expectedPrice} R$</b>. Как исправить — в инструкции:\n` +
@@ -1966,19 +1996,24 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
       [Markup.button.callback("🔎 Другой ник", CB.findGpStart)],
     ]);
     try {
-      await ctx.replyWithPhoto(m.image, { caption, parse_mode: "HTML", ...keyboard });
+      // Фото-карточка тоже edit-in-place: «Ищу…» превращается в карточку.
+      await bot.telegram.editMessageMedia(
+        ctx.chat.id, checkingMsg.message_id, undefined,
+        { type: "photo", media: m.image, caption, parse_mode: "HTML" },
+        { reply_markup: keyboard.reply_markup },
+      );
     } catch (err: any) {
       // Telegram occasionally rejects external thumbnail URLs (CDN expiry,
-      // rate limit). Fall back to text so the user is never blocked.
-      console.warn("[TG/find-gp] replyWithPhoto failed, falling back to text:", err?.message ?? err);
-      await ctx.reply(caption, { parse_mode: "HTML", ...keyboard });
+      // rate limit). Fall back to a text card so the user is never blocked.
+      console.warn("[TG/find-gp] editMessageMedia failed, falling back to text:", err?.message ?? err);
+      await showResult(caption, { parse_mode: "HTML", ...keyboard });
     }
     return;
   }
 
   // ── Branch 4: 2–5 price-matching gamepasses → text-button list ───────────
   const shown = matches.slice(0, MAX_PICK_BUTTONS);
-  await ctx.reply(
+  await showResult(
     `У <b>${nick}</b> нашёл несколько подходящих геймпассов.\n` +
     `Выбери тот, который хочешь продать:`,
     {
@@ -2014,16 +2049,33 @@ async function processGamepassSubmission(
     // Show a "checking" message — validation can take 10–30 s via bridge/retries.
     await ctx.sendChatAction("typing");
     const checkingMsg = await ctx.reply("⏳ Проверяем геймпасс…");
+
+    // Edit-in-place (пункт F): первый ответ ветки редактируется в пузырь
+    // «⏳ Проверяем…», чтобы результат был виден без пролистывания. Одноразовый:
+    // повторные вызовы (ветка validationSkipped шлёт и предупреждение, и итог)
+    // уходят обычным reply. Фолбэк — delete+reply, если edit не прошёл.
+    let checkingMsgConsumed = false;
+    const showResult = async (text: string, extra?: object): Promise<void> => {
+      if (!checkingMsgConsumed) {
+        checkingMsgConsumed = true;
+        try {
+          await bot.telegram.editMessageText(ctx.chat!.id, checkingMsg.message_id, undefined, text, extra as any);
+          return;
+        } catch {
+          try { await bot.telegram.deleteMessage(ctx.chat!.id, checkingMsg.message_id); } catch {}
+        }
+      }
+      await ctx.reply(text, extra);
+    };
+
     let validatedCreator: string | null = null;
     let validatedPrice: number | null = null;
     const gamepassInfo = await getGamepassDetails(passId);
-    // Delete the placeholder before sending the actual result.
-    try { await bot.telegram.deleteMessage(ctx.chat!.id, checkingMsg.message_id); } catch {}
 
     if (!gamepassInfo) {
       // Roblox returned HTTP responses but no usable data → gamepass doesn't exist.
       // "Тупик" — user can't fix this without external help, show support immediately.
-      await ctx.reply(
+      await showResult(
         "❌ Геймпасс не найден на Roblox.\n\n" +
         "Убедись, что:\n" +
         "• Геймпасс <b>опубликован</b> (не в черновиках)\n" +
@@ -2064,7 +2116,7 @@ async function processGamepassSubmission(
         fc.notActive++;
         if (gamepassInfo.isNotInCatalog) {
           if (fc.notActive === 1) await notifyAdminValidationFail("Геймпасс не найден в каталоге — скорее всего закрытая игра");
-          await ctx.reply(
+          await showResult(
             `❌ <b>Геймпасс недоступен</b> — скорее всего, игра, в которой он создан, закрыта (Private).\n\n` +
             `Два варианта:\n` +
             `1. Открой игру: Creator Hub → Experience → Settings → Permissions → <b>Public</b> → сохрани. Затем пришли ссылку снова.\n` +
@@ -2076,7 +2128,7 @@ async function processGamepassSubmission(
           );
         } else if (gamepassInfo.isGamePrivate) {
           if (fc.notActive === 1) await notifyAdminValidationFail("Игра закрыта (private) — геймпасс не продаётся");
-          await ctx.reply(
+          await showResult(
             `❌ <b>Геймпасс в закрытой игре</b> — выкупить невозможно.\n\n` +
             `Как открыть игру:\n` +
             `1. Нажми на плейс → <b>Configure → Settings</b>\n` +
@@ -2096,7 +2148,7 @@ async function processGamepassSubmission(
             `Зайди в Creator Dashboard → Creations → Passes, найди геймпасс <b>${passId}</b>, ` +
             `нажми «Edit» и поставь галочку «On Sale». После этого пришли ссылку снова.\n\n` +
             `📖 Как правильно создать и активировать — в инструкции:`;
-          await ctx.reply(notActiveText, {
+          await showResult(notActiveText, {
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([
               [Markup.button.url("📖 ИНСТРУКЦИЯ", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
@@ -2132,7 +2184,7 @@ async function processGamepassSubmission(
             `❗️ Чаще всего причина — включённый <b>Managed pricing</b>. Он автоматически меняет цену, и выкупить геймпасс <b>невозможно</b>, пока цена не совпадёт.\n\n` +
             `Исправь: Passes → твой пасс → ☰ → Sales → отключи <b>Managed pricing</b> → поставь правильную цену → <b>Save Changes</b>. Потом пришли ссылку снова.\n\n` +
             `📖 Подробная инструкция:`;
-        await ctx.reply(priceMismatchText, {
+        await showResult(priceMismatchText, {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([
             [Markup.button.url("📖 ИНСТРУКЦИЯ", `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`)],
@@ -2150,7 +2202,7 @@ async function processGamepassSubmission(
         `[TG] Roblox API unreachable — accepting passId=${passId} without validation. ` +
         `Admin must verify price manually.`
       );
-      await ctx.reply(
+      await showResult(
         `⚠️ Не удалось автоматически проверить геймпасс — серверы Roblox временно недоступны.\n\n` +
         `Убедись, что цена геймпасса установлена ровно <b>${Math.ceil(state.denomination / 0.7)} R$</b>. ` +
         `Мы проверим вручную — просто жди уведомления.`,
@@ -2177,7 +2229,7 @@ async function processGamepassSubmission(
 
     const user = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
     if (!user) {
-      await ctx.reply(
+      await showResult(
         "Что-то пошло не так — напиши нам, разберёмся вместе:",
         {
           parse_mode: "HTML",
@@ -2296,7 +2348,7 @@ async function processGamepassSubmission(
         pendingLink.delete(ctx.from.id);
         clearFailCounts(ctx.from.id);
         // "Тупик" — user cannot resolve this themselves
-        await ctx.reply(
+        await showResult(
           "⚠️ Этот код уже был активирован другим пользователем.\n\nЕсли уверен, что код твой — напиши нам:",
           { parse_mode: "HTML", ...withSupportKb() }
         );
@@ -2305,7 +2357,7 @@ async function processGamepassSubmission(
       if (err.code === "P2002") {
         pendingLink.delete(ctx.from.id);
         clearFailCounts(ctx.from.id);
-        await ctx.reply(
+        await showResult(
           "⚠️ Заказ по этому коду уже создан и сейчас обрабатывается.",
           Markup.inlineKeyboard([
             [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
@@ -2316,7 +2368,7 @@ async function processGamepassSubmission(
       }
       console.error("[TG] Order create error:", err);
       // "Тупик" — DB/infrastructure error, user helpless
-      await ctx.reply(
+      await showResult(
         "❌ Ошибка при создании заказа. Попробуй ещё раз через минуту.\n\nЕсли ошибка повторяется:",
         { parse_mode: "HTML", ...withSupportKb() }
       );
@@ -2329,7 +2381,7 @@ async function processGamepassSubmission(
     if (duplicateSubmission) {
       // Same pass on an already-queued order — confirm to the user, but do NOT
       // re-send the admin card (root cause of «двойные карточки»).
-      await ctx.reply(
+      await showResult(
         "✅ Этот геймпасс уже принят — заказ в обработке, выкупим в ближайшее время.",
         Markup.inlineKeyboard([
           [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
@@ -2345,7 +2397,7 @@ async function processGamepassSubmission(
 
     const creatorLine = validatedCreator ? `👤 Создатель: ${escapeHtml(validatedCreator)}\n` : "";
     const priceLine = validatedPrice != null ? `💰 Цена: ${validatedPrice} R$\n` : "";
-    await ctx.reply(
+    await showResult(
       `🎉 Твой геймпасс принят!\n` +
       creatorLine +
       priceLine +

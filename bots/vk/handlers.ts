@@ -119,6 +119,37 @@ async function triggerSupport(ctx: any, vkUserId: number, ctxKey: string): Promi
   );
 }
 
+/**
+ * Edit-in-place для VK: результат долгой операции редактируется в пузырь
+ * «🔎 Ищу…» (messages.edit), чтобы ответ был виден без пролистывания —
+ * delete/новое сообщение оставляли клиента на его сообщении, а результат
+ * приходил ниже видимой области. Фолбэк — обычный reply (edit не прошёл:
+ * нет cmid, сообщение старше 24 ч и т.п.).
+ */
+function buildVkEditInPlace(ctx: MessageContext, vkUserId: number, sentMsg: any) {
+  // Одноразовый: первый вызов редактирует плейсхолдер, последующие (ветки,
+  // шлющие несколько сообщений) уходят обычным reply.
+  let consumed = false;
+  return async (payload: string | { message: string; keyboard?: unknown }): Promise<void> => {
+    const p = typeof payload === "string" ? { message: payload } : payload;
+    const cmid = sentMsg?.conversationMessageId ?? sentMsg?.id;
+    if (!consumed) {
+      consumed = true;
+      try {
+        if (!_vkApi || !cmid) throw new Error("no api/cmid");
+        await _vkApi.messages.edit({
+          peer_id: vkUserId,
+          conversation_message_id: cmid,
+          message: p.message,
+          ...(p.keyboard ? { keyboard: p.keyboard } : {}),
+        });
+        return;
+      } catch { /* fall through to reply */ }
+    }
+    await ctx.reply(p as any);
+  };
+}
+
 /** Format roubles with thousands separator, e.g. 3500 → "3 500 ₽". */
 function fmtRub(n: number): string {
   if (n >= 1000) return `${Math.floor(n / 1000)} ${String(n % 1000).padStart(3, "0")} ₽`;
@@ -1438,13 +1469,15 @@ async function handleGamepassLink(
 
   // ── Roblox API validation ─────────────────────────────────────────────
   // Warn the user — validation can take 10–30 s via bridge/retries.
-  await ctx.reply("⏳ Проверяем геймпасс…");
+  const checkingMsg: any = await ctx.reply("⏳ Проверяем геймпасс…");
+  // Edit-in-place (пункт F): первый ответ ветки редактируется в «⏳ Проверяем…».
+  const showResult = buildVkEditInPlace(ctx, vkUserId, checkingMsg);
   const expectedPrice = Math.ceil(denomination / 0.7);
   const gamepassInfo  = await getGamepassDetails(passId);
 
   if (!gamepassInfo) {
     // Roblox returned HTTP responses but no usable data → gamepass doesn't exist
-    await ctx.reply(
+    await showResult(
       "❌ Геймпасс не найден на Roblox.\n\n" +
       "Убедись, что:\n" +
       "• Геймпасс опубликован (не в черновиках)\n" +
@@ -1469,7 +1502,7 @@ async function handleGamepassLink(
 
     if (!gamepassInfo.isActive) {
       if (gamepassInfo.isNotInCatalog) {
-        await ctx.reply({
+        await showResult({
           message:
             `❌ Геймпасс недоступен — скорее всего, игра, в которой он создан, закрыта (Private).\n\n` +
             `Два варианта:\n` +
@@ -1482,7 +1515,7 @@ async function handleGamepassLink(
             .inline(),
         });
       } else if (gamepassInfo.isGamePrivate) {
-        await ctx.reply({
+        await showResult({
           message:
             `❌ Геймпасс в закрытой игре — выкупить невозможно.\n\n` +
             `Как открыть игру:\n` +
@@ -1497,7 +1530,7 @@ async function handleGamepassLink(
             .inline(),
         });
       } else {
-        await ctx.reply({
+        await showResult({
           message:
             `⚠️ Геймпасс №${passId} не выставлен на продажу.\n\n` +
             `Убедись, что он активен и доступен для покупки, затем пришли ссылку снова.\n\n` +
@@ -1511,7 +1544,7 @@ async function handleGamepassLink(
     }
 
     if (Math.abs(gamepassInfo.price - expectedPrice) > 2) {
-      await ctx.reply({
+      await showResult({
         message:
           `⚠️ Цена геймпасса не совпадает с ожидаемой.\n\n` +
           `Установлено: ${gamepassInfo.price} R$\n` +
@@ -1535,7 +1568,7 @@ async function handleGamepassLink(
       `[VK] Roblox API unreachable — accepting passId=${passId} without validation. ` +
       `Admin must verify price manually.`
     );
-    await ctx.reply(
+    await showResult(
       `⚠️ Не удалось автоматически проверить геймпасс — серверы Roblox временно недоступны.\n\n` +
       `Убедись, что цена геймпасса установлена ровно ${Math.ceil(denomination / 0.7)} R$. ` +
       `Мы проверим вручную — просто жди уведомления.`
@@ -1558,7 +1591,7 @@ async function handleGamepassLink(
 
   const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });
   if (!user) {
-    await ctx.reply("Ошибка сессии. Напиши нам: https://t.me/RobloxBank_PA — разберёмся вместе.");
+    await showResult("Ошибка сессии. Напиши нам: https://t.me/RobloxBank_PA — разберёмся вместе.");
     clearState(vkUserId);
     return;
   }
@@ -1670,16 +1703,16 @@ async function handleGamepassLink(
   } catch (err: any) {
     if (err.isClaimed) {
       clearState(vkUserId);
-      await ctx.reply("⚠️ Этот код уже был активирован другим пользователем. Обратись в поддержку.\nhttps://t.me/RobloxBank_PA");
+      await showResult("⚠️ Этот код уже был активирован другим пользователем. Обратись в поддержку.\nhttps://t.me/RobloxBank_PA");
       return;
     }
     if (err.code === "P2002") {
       clearState(vkUserId);
-      await ctx.reply("⚠️ Заказ по этому коду уже создан и сейчас обрабатывается. Напиши «статус» чтобы проверить.\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
+      await showResult("⚠️ Заказ по этому коду уже создан и сейчас обрабатывается. Напиши «статус» чтобы проверить.\n\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");
       return;
     }
     console.error("[VK] Order/transaction error:", err);
-    await ctx.reply("❌ Ошибка при создании заказа. Попробуй позже или напиши нам: https://t.me/RobloxBank_PA");
+    await showResult("❌ Ошибка при создании заказа. Попробуй позже или напиши нам: https://t.me/RobloxBank_PA");
     return;
   }
 
@@ -1688,7 +1721,7 @@ async function handleGamepassLink(
   if (duplicateSubmission) {
     // Same pass on an already-queued order — confirm to the user, but do NOT
     // re-send the admin card (root cause of «двойные карточки»).
-    await ctx.reply({
+    await showResult({
       message: "✅ Этот геймпасс уже принят — заказ в обработке, выкупим в ближайшее время.\n\nСтатус — по кнопке ниже 👇",
       keyboard: Keyboard.builder()
         .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "positive" })
@@ -1703,7 +1736,7 @@ async function handleGamepassLink(
 
   const creatorLine = validatedCreator ? `\n👤 Создатель: ${validatedCreator}` : "";
   const priceLine = validatedPrice != null ? `\n💰 Цена: ${validatedPrice} R$` : "";
-  await ctx.reply({
+  await showResult({
     message:
       `🎉 Твой геймпасс принят!` +
       creatorLine +
@@ -1932,7 +1965,8 @@ async function handleRobloxNickInput(
     return;
   }
 
-  await ctx.reply(`🔎 Ищу геймпассы у ${nick}…`);
+  const searchingMsg: any = await ctx.reply(`🔎 Ищу геймпассы у ${nick}…`);
+  const showResult = buildVkEditInPlace(ctx, vkUserId, searchingMsg);
   const expectedPrice = Math.ceil(denomination / 0.7);
 
   let outcome: GamepassSearchOutcome;
@@ -1943,7 +1977,7 @@ async function handleRobloxNickInput(
     console.error("[VK/find-gp] searchGamepassesByNick failed:", err?.message ?? err);
     setState(vkUserId, { type: "AWAITING_LINK", wbCode, denomination });
     const downGuideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${wbCode}`;
-    await ctx.reply({
+    await showResult({
       message:
         "⚠️ Поиск по нику временно недоступен — не получилось связаться с Roblox.\n\n" +
         "Попробуй ещё раз через минуту или пришли ссылку на геймпасс вручную.\n\n" +
@@ -1971,7 +2005,7 @@ async function handleRobloxNickInput(
 
   // Branch 1: nickname doesn't exist on Roblox
   if (outcome.status === "user_not_found") {
-    await ctx.reply({
+    await showResult({
       message:
         `🤷 Пользователя ${nick} нет на Roblox.\n\n` +
         `Скорее всего опечатка. Скопируй ник прямо со страницы профиля и пришли заново.\n\n` +
@@ -1987,7 +2021,7 @@ async function handleRobloxNickInput(
 
   // Branch 2: nick exists but no public for-sale gamepasses
   if (outcome.status === "no_gamepasses") {
-    await ctx.reply({
+    await showResult({
       message:
         `🙈 У ${nick} не нашли публичных геймпассов.\n\n` +
         `Скорее всего геймпасс ещё не создан, не выставлен на продажу или плейс закрыт.\n\n` +
@@ -2011,7 +2045,7 @@ async function handleRobloxNickInput(
   if (matches.length === 0) {
     const top = nonMatches.slice(0, MAX_PICK_BUTTONS);
     const listLines = top.map(g => `• ${g.name} · ${g.robux} R$`).join("\n");
-    await ctx.reply({
+    await showResult({
       message:
         `У ${nick} нашли геймпассы, но ни один не за ${expectedPrice} R$:\n\n` +
         `${listLines}\n\n` +
@@ -2030,7 +2064,7 @@ async function handleRobloxNickInput(
   // Branch 3: exactly 1 price-match (VK = text confirmation, no photo)
   if (matches.length === 1) {
     const m = matches[0];
-    await ctx.reply({
+    await showResult({
       message:
         `🎯 Нашёл у ${nick} подходящий геймпасс:\n\n` +
         `💎 ${m.name} · ${m.robux} R$\n\n` +
@@ -2056,7 +2090,7 @@ async function handleRobloxNickInput(
     }).row();
   }
   kb.textButton({ label: "🔎 Другой ник", payload: { command: "find_gp_start" }, color: "secondary" });
-  await ctx.reply({
+  await showResult({
     message:
       `У ${nick} нашёл несколько подходящих геймпассов.\n` +
       `Выбери тот, который хочешь продать:`,
@@ -2291,7 +2325,8 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
 
   setState(vkUserId, { type: "AWAITING_DIRECT_GAMEPASS", robloxUsername: nick, ...flowData });
 
-  await ctx.reply(`🔎 Ищу геймпассы у ${nick}…`);
+  const searchingMsg: any = await ctx.reply(`🔎 Ищу геймпассы у ${nick}…`);
+  const showResult = buildVkEditInPlace(ctx, vkUserId, searchingMsg);
   let result: GamepassSearchOutcome;
   try {
     result = await searchGamepassesByNick(nick, passPrice);
@@ -2304,7 +2339,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
     const kb = Keyboard.builder();
     kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
     kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
-    await ctx.reply({
+    await showResult({
       message: "⚠️ Поиск по нику временно недоступен — не получилось связаться с Roblox.\n\nПодожди минуту и пришли ник ещё раз:",
       keyboard: kb.inline(),
     });
@@ -2321,7 +2356,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
     const kb = Keyboard.builder();
     kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
     kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
-    await ctx.reply({ message: `❌ Пользователь ${nick} не найден на Roblox.\n\nПроверь написание и отправь ещё раз:`, keyboard: kb.inline() });
+    await showResult({ message: `❌ Пользователь ${nick} не найден на Roblox.\n\nПроверь написание и отправь ещё раз:`, keyboard: kb.inline() });
     return;
   }
   if (result.status === "no_gamepasses") {
@@ -2333,7 +2368,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
     kb.row();
     kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
     kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
-    await ctx.reply({ message: `⚠️ У ${nick} нет геймпассов на продаже.\n\nСоздай геймпасс по инструкции и отправь ник ещё раз:`, keyboard: kb.inline() });
+    await showResult({ message: `⚠️ У ${nick} нет геймпассов на продаже.\n\nСоздай геймпасс по инструкции и отправь ник ещё раз:`, keyboard: kb.inline() });
     return;
   }
 
@@ -2354,7 +2389,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
         amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus,
         rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice,
       });
-      await showVkSummary(ctx, state, nick, String(g.gamepassId), gpDetails.price, gpDetails.name);
+      await showVkSummary(ctx, state, nick, String(g.gamepassId), gpDetails.price, gpDetails.name, showResult);
       return;
     }
   }
@@ -2383,7 +2418,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
     : `${gpHeader}\n\n🎫 Геймпассы ${nick} — выбери для заказа:`;
 
   try {
-    await ctx.reply({
+    await showResult({
       message: listMessage,
       keyboard: enforceVkInlineKbLimits(kb.inline(), "VK/direct"),
     });
@@ -2396,7 +2431,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
   }
 }
 
-async function showVkSummary(ctx: MessageContext, flowState: { totalAmount: number; bonus: number; rubleDiscount: number; rublePrice: number }, nick: string, gamepassId: string, gpRobux: number, gpName: string): Promise<void> {
+async function showVkSummary(ctx: MessageContext, flowState: { totalAmount: number; bonus: number; rubleDiscount: number; rublePrice: number }, nick: string, gamepassId: string, gpRobux: number, gpName: string, edit?: (p: { message: string; keyboard?: unknown }) => Promise<void>): Promise<void> {
   const bonusLine = flowState.bonus > 0 ? `\n🎁 Бонус:       +${flowState.bonus} R$` : "";
   const discountLine = flowState.rubleDiscount > 0 ? `\n💰 Скидка:      −${flowState.rubleDiscount} ₽` : "";
 
@@ -2424,7 +2459,10 @@ async function showVkSummary(ctx: MessageContext, flowState: { totalAmount: numb
   kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
   kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
 
-  await ctx.reply({ message: summaryText, keyboard: kb.inline() });
+  // Автопропуск после текстового ввода ника: итог редактируется в пузырь
+  // «Ищу…», чтобы ответ был виден без пролистывания (edit-in-place, пункт F).
+  if (edit) await edit({ message: summaryText, keyboard: kb.inline() });
+  else await ctx.reply({ message: summaryText, keyboard: kb.inline() });
 }
 
 async function handleVkDirectGpPick(ctx: MessageContext, vkUserId: number, passId: string): Promise<void> {
