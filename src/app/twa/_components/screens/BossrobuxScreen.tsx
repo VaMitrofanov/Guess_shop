@@ -534,10 +534,22 @@ const TX_SOURCE_BADGE: Record<string, { label: string; color: string }> = {
   MANUAL: { label: "Ручной", color: C.textTertiary },
 };
 
+/** Слив остатка донора (DrainEvent) — показывается в истории вместе с выкупами. */
+interface DrainEv {
+  id: string;
+  donorName: string | null;
+  drainName: string | null;
+  amount: number;
+  createdAt: string;
+}
+
 interface PurchaserGroup {
   purchaser: string;
   orders: TxOrder[];
+  drains: DrainEv[];
+  /** Итог по аккаунту = выкупы + сливы (решение владельца: слив в общей трате). */
   totalDirty: number;
+  drainTotal: number;
   latestDate: string;
 }
 
@@ -559,7 +571,7 @@ function pluralPurchases(n: number): string {
   return `${n} покупок`;
 }
 
-function buildGroups(orders: TxOrder[], sourceFilter: TxSourceFilter = "ALL"): PurchaserGroup[] {
+function buildGroups(orders: TxOrder[], sourceFilter: TxSourceFilter = "ALL", drains: DrainEv[] = []): PurchaserGroup[] {
   const filtered = sourceFilter === "ALL" ? orders : orders.filter(o => o.orderSource === sourceFilter);
   const map = new Map<string, TxOrder[]>();
   for (const o of filtered) {
@@ -567,14 +579,30 @@ function buildGroups(orders: TxOrder[], sourceFilter: TxSourceFilter = "ALL"): P
     const arr = map.get(key);
     if (arr) arr.push(o); else map.set(key, [o]);
   }
+  // Сливы показываем только в «Все» — это не заказы, у них нет источника.
+  const drainMap = new Map<string, DrainEv[]>();
+  if (sourceFilter === "ALL") {
+    for (const d of drains) {
+      const key = d.donorName ?? "Ручные";
+      const arr = drainMap.get(key);
+      if (arr) arr.push(d); else drainMap.set(key, [d]);
+      if (!map.has(key)) map.set(key, []); // донор без выкупов — своя группа
+    }
+  }
   const groups: PurchaserGroup[] = [];
   for (const [purchaser, ords] of map) {
     ords.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    const grpDrains = (drainMap.get(purchaser) ?? [])
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const buyoutTotal = ords.reduce((s, o) => s + Math.ceil(o.amount / 0.7), 0);
+    const drainTotal = grpDrains.reduce((s, d) => s + d.amount, 0);
     groups.push({
       purchaser,
       orders: ords,
-      totalDirty: ords.reduce((s, o) => s + Math.ceil(o.amount / 0.7), 0),
-      latestDate: ords[0].updatedAt,
+      drains: grpDrains,
+      totalDirty: buyoutTotal + drainTotal,
+      drainTotal,
+      latestDate: [ords[0]?.updatedAt, grpDrains[0]?.createdAt].filter(Boolean).sort().reverse()[0] ?? new Date(0).toISOString(),
     });
   }
   groups.sort((a, b) => new Date(b.latestDate).getTime() - new Date(a.latestDate).getTime());
@@ -612,6 +640,7 @@ function PurchaserAccordion({ group }: { group: PurchaserGroup }) {
           </span>
           <span style={{ fontSize: 13, color: C.textTertiary }}>
             {pluralPurchases(group.orders.length)}
+            {group.drainTotal > 0 && <> · <span style={{ color: C.blue }}>💧 {group.drainTotal.toLocaleString("ru-RU")}</span></>}
           </span>
         </div>
         <span style={{
@@ -625,6 +654,21 @@ function PurchaserAccordion({ group }: { group: PurchaserGroup }) {
       {open && (
         <div>
           <div style={{ height: 1, background: C.border }} />
+          {group.drains.map((d, i) => (
+            <div key={d.id}>
+              {i > 0 && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
+              <div style={{ padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 14, color: C.textTertiary, ...tabular }}>{fmtTxDate(d.createdAt)}</span>
+                <span style={{ fontSize: 13, color: C.blue }}>
+                  💧 Слив → {d.drainName ?? "приёмник"}
+                </span>
+                <span style={{ fontSize: 15, fontWeight: 600, color: C.blue, ...tabular }}>
+                  − {d.amount.toLocaleString("ru-RU")} R$
+                </span>
+              </div>
+            </div>
+          ))}
+          {group.drains.length > 0 && group.orders.length > 0 && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
           {group.orders.map((tx, i) => {
             const dirty = Math.ceil(tx.amount / 0.7);
             const gpId = extractGpId(tx.gamepassUrl);
@@ -688,6 +732,7 @@ function PurchaserAccordion({ group }: { group: PurchaserGroup }) {
 
 function TransactionHistory({ token }: { token: string }) {
   const [orders, setOrders] = useState<TxOrder[]>([]);
+  const [drains, setDrains] = useState<DrainEv[]>([]);
   const [loading, setLoading] = useState(true);
   const [doneCount, setDoneCount] = useState(0);
   const [loadedAll, setLoadedAll] = useState(false);
@@ -696,6 +741,11 @@ function TransactionHistory({ token }: { token: string }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      // Сливы (DrainEvent) — параллельно с заказами, не блокируют историю.
+      fetch("/api/twa/drain?events=1", { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : null)
+        .then(j => { if (Array.isArray(j?.events)) setDrains(j.events); })
+        .catch(() => {});
       let all: TxOrder[] = [];
       let page = 1;
       const limit = 50;
@@ -728,7 +778,7 @@ function TransactionHistory({ token }: { token: string }) {
     <div style={{ background: C.card, borderRadius: 14, height: 80, animation: "pulse 1.5s ease-in-out infinite" }} />
   );
 
-  if (orders.length === 0) return (
+  if (orders.length === 0 && drains.length === 0) return (
     <Card>
       <div style={{ padding: "24px 16px", textAlign: "center" }}>
         <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
@@ -739,8 +789,9 @@ function TransactionHistory({ token }: { token: string }) {
 
   const sc = txCountBySource(orders);
   const hasMultipleSources = (Object.keys(sc) as TxSourceFilter[]).filter(k => k !== "ALL" && sc[k] > 0).length > 1;
-  const groups = buildGroups(orders, sourceFilter);
+  const groups = buildGroups(orders, sourceFilter, drains);
   const totalDirty = groups.reduce((s, g) => s + g.totalDirty, 0);
+  const totalDrain = groups.reduce((s, g) => s + g.drainTotal, 0);
   const filteredCount = groups.reduce((s, g) => s + g.orders.length, 0);
 
   return (
@@ -790,8 +841,15 @@ function TransactionHistory({ token }: { token: string }) {
         <span style={{ fontSize: 14, color: C.textSecondary }}>
           {pluralPurchases(filteredCount)} · {groups.length} акк.
         </span>
-        <span style={{ fontSize: 15, fontWeight: 600, color: C.accent, ...tabular }}>
-          − {totalDirty.toLocaleString("ru-RU")} R$
+        <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
+          <span style={{ fontSize: 15, fontWeight: 600, color: C.accent, ...tabular }}>
+            − {totalDirty.toLocaleString("ru-RU")} R$
+          </span>
+          {totalDrain > 0 && (
+            <span style={{ fontSize: 12, color: C.blue, ...tabular }}>
+              💧 из них слив: {totalDrain.toLocaleString("ru-RU")} R$
+            </span>
+          )}
         </span>
       </div>
 
@@ -1648,6 +1706,14 @@ function DrainSection({ token, onDonorBalance }: { token: string; onDonorBalance
       else { haptic.notify("error"); toast(`❌ ${j.msg}`, "error"); }
       setConfirm(false);
       if (j.donorBalanceAfter !== undefined) onDonorBalance?.(j.donorBalanceAfter);
+      // Балансы из ответа применяем сразу — не ждём полного refetch (PLAN +5.G.1).
+      if (j.donorBalanceAfter !== undefined || j.drainBalanceAfter !== undefined) {
+        setD(prev => prev ? {
+          ...prev,
+          donor: { ...prev.donor, balance: j.donorBalanceAfter ?? prev.donor.balance },
+          drain: { ...prev.drain, balance: j.drainBalanceAfter ?? prev.drain.balance },
+        } : prev);
+      }
       await load();
     } catch { haptic.notify("error"); toast("Ошибка сети — слив мог не завершиться", "error"); }
     finally { setDraining(false); }
@@ -1701,6 +1767,11 @@ function DrainSection({ token, onDonorBalance }: { token: string; onDonorBalance
             💧 Слить остаток ({target.toLocaleString("ru-RU")} R$)
           </button>
         )}
+        <button className="twa-press" onClick={() => { haptic.impact("light"); load(); }} disabled={loading}
+          aria-label="Обновить балансы"
+          style={{ flex: "none", background: C.card, border: "none", borderRadius: 12, color: C.textSecondary, fontSize: 15, fontWeight: 600, padding: "14px 16px", cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+          ↻
+        </button>
         <button className="twa-press" onClick={() => { haptic.impact("light"); setShowConfig(v => !v); }}
           style={{ flex: canDrain ? "none" : 1, background: C.card, border: "none", borderRadius: 12, color: showConfig ? C.orange : C.textSecondary, fontSize: 15, fontWeight: 600, padding: "14px 18px", cursor: "pointer" }}>
           ⚙️ Настройка

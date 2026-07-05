@@ -142,6 +142,16 @@ export async function GET(req: NextRequest) {
   if (!await extractTwaUser(req))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  // Лёгкий режим ?events=1 — только история сливов (для «Истории покупок»),
+  // без походов в Roblox.
+  if (new URL(req.url).searchParams.get("events")) {
+    const events = await (prisma as any).drainEvent.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    }).catch(() => []);
+    return NextResponse.json({ events });
+  }
+
   const s = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
 
   const drainCookie = s?.drainCookie as string | undefined;
@@ -321,6 +331,16 @@ export async function POST(req: NextRequest) {
     const [donorAfter, drainAfter] = await Promise.all([currency(donorCookie), currency(drainCookie)]);
 
     if (pData?.purchased) {
+      // Учёт в истории (PLAN +5.G.2): раньше успешный слив нигде не записывался.
+      await (prisma as any).drainEvent.create({
+        data: {
+          donorName: s?.robloxAccountName ?? null,
+          drainName: s?.drainAccountName ?? null,
+          amount: pData.price ?? target,
+          gamepassId: gpId,
+          source: "manual",
+        },
+      }).catch((e: any) => console.warn("[drain] DrainEvent write failed:", e?.message ?? e));
       return NextResponse.json({
         ok: true, success: true,
         drained: pData.price ?? target,

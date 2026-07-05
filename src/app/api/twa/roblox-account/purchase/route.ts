@@ -63,21 +63,37 @@ export async function POST(req: NextRequest) {
 
   // ── Search by username ──────────────────────────────────────────────────
   if (body.action === "search-by-username") {
-    const username = String(body.username ?? "").trim();
-    if (!username || username.length < 2 || username.length > 20)
+    // Квикфикс (PLAN +5.J): менеджер вставляет «@nick» или ссылку на профиль
+    // roblox.com/users/<id>/profile — раньше Roblox такое не находил.
+    const rawInput = String(body.username ?? "").trim();
+    const profileMatch = rawInput.match(/roblox\.com\/users\/(\d+)/i);
+    const username = rawInput.replace(/^@+/, "");
+    if (!profileMatch && (!username || username.length < 2 || username.length > 20))
       return NextResponse.json({ error: "Невалидный ник" }, { status: 400 });
 
-    const uRes = await fetch("https://users.roblox.com/v1/usernames/users", {
-      method: "POST",
-      headers: { ...ROBLOX_UA, "Content-Type": "application/json" },
-      body: JSON.stringify({ usernames: [username], excludeBannedUsers: true }),
-      signal: AbortSignal.timeout(10_000),
-    }).catch(() => null);
-    if (!uRes?.ok) return NextResponse.json({ error: "Не удалось найти пользователя" }, { status: 502 });
-    const uData = await uRes.json().catch(() => null);
-    const userId: number | undefined = uData?.data?.[0]?.id;
-    if (!userId) return NextResponse.json({ error: `Пользователь «${username}» не найден` }, { status: 404 });
-    const resolvedName: string = uData.data[0].name ?? username;
+    let userId: number | undefined;
+    let resolvedName: string;
+    if (profileMatch) {
+      userId = Number(profileMatch[1]);
+      const pRes = await fetch(`https://users.roblox.com/v1/users/${userId}`, {
+        headers: ROBLOX_UA, signal: AbortSignal.timeout(10_000),
+      }).catch(() => null);
+      const pData = pRes?.ok ? await pRes.json().catch(() => null) : null;
+      if (!pData?.name) return NextResponse.json({ error: "Профиль по ссылке не найден" }, { status: 404 });
+      resolvedName = pData.name;
+    } else {
+      const uRes = await fetch("https://users.roblox.com/v1/usernames/users", {
+        method: "POST",
+        headers: { ...ROBLOX_UA, "Content-Type": "application/json" },
+        body: JSON.stringify({ usernames: [username], excludeBannedUsers: true }),
+        signal: AbortSignal.timeout(10_000),
+      }).catch(() => null);
+      if (!uRes?.ok) return NextResponse.json({ error: "Не удалось найти пользователя" }, { status: 502 });
+      const uData = await uRes.json().catch(() => null);
+      userId = uData?.data?.[0]?.id;
+      if (!userId) return NextResponse.json({ error: `Пользователь «${username}» не найден` }, { status: 404 });
+      resolvedName = uData.data[0].name ?? username;
+    }
 
     const gRes = await fetch(
       `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=10`,

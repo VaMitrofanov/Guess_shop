@@ -295,6 +295,24 @@ model PurchaseBatch {
   @@index([startedAt(sort: Desc)])
 }
 
+/// Учёт сливов остатка донора в приёмник (PLAN +5.G.2). Раньше успешный слив
+/// нигде не записывался — в истории трат аккаунтов его не было видно.
+model DrainEvent {
+  id         String   @id @default(cuid())
+  /// Roblox-ник донора (кто платил остатком).
+  donorName  String?
+  /// Roblox-ник приёмника (куда слили).
+  drainName  String?
+  /// Слитая сумма, R$ (грязными — цена геймпасса приёмника).
+  amount     Int
+  gamepassId String?
+  /// "manual" (кнопка 💧 в TWA) | "auto" (автослив-воркер).
+  source     String   @default("manual")
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+}
+
 /// Cost basis for WB products — used for unit economics calculation.
 /// One row per nmID. Admin sets costPrice via bot; WB commission/tax defaults cover 95% of cases.
 model WbProductCost {
