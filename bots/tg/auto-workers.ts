@@ -28,6 +28,7 @@ import {
   getRobuxBalance,
 } from "../shared/roblox";
 import { searchGamepassesByNick } from "../shared/gamepass-search";
+import { runDrain, drainAuthedUser, drainUserGamepasses, ownsGamepass, drainCurrency } from "../shared/drain";
 import { notifyUserCompleted } from "./handlers";
 
 const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
@@ -201,6 +202,107 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// +5.G.3 Auto-drain — слив остатка донора в приёмник, когда баланс упал ниже
+// минимальной цены выкупа (143 R$ грязными = 100 R$ чистыми). Kill-switch OFF.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Минимальная грязная цена выкупа: ceil(100 / 0.7). Ниже неё донор бесполезен. */
+export const AUTO_DRAIN_BELOW = 143;
+
+const autoDrainTickRunning = { v: false };
+let autoDrainBackoffUntil = 0;
+// Дедуп алертов «все пассы заняты / нет кандидата» — не чаще раза в 6 ч.
+let noCandidateAlertAt = 0;
+
+export async function runAutoDrainTick(): Promise<void> {
+  if (autoDrainTickRunning.v || Date.now() < autoDrainBackoffUntil) return;
+  autoDrainTickRunning.v = true;
+  try {
+    const s = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
+    if (!s?.autoDrainEnabled) return;
+    const donorCookie: string | undefined = s.robloxCookie;
+    const drainCookie: string | undefined = s.drainCookie;
+    if (!donorCookie || !drainCookie) return; // без пары cookie сливать нечем
+
+    const balance = await drainCurrency(donorCookie);
+    if (balance === null) {
+      autoDrainBackoffUntil = Date.now() + 15 * 60 * 1000;
+      await alertAdmins("⚠️ Автослив: не удалось прочитать баланс донора (cookie протух?). Пауза 15 мин.");
+      return;
+    }
+    // Сливаем только «мёртвый» остаток: 0 < баланс < минимальной цены выкупа.
+    // Выше порога остаток ещё нужен автовыкупу/менеджеру.
+    if (balance < 1 || balance >= AUTO_DRAIN_BELOW) return;
+
+    const [donor, receiver] = await Promise.all([
+      drainAuthedUser(donorCookie),
+      drainAuthedUser(drainCookie),
+    ]);
+    if (!donor || !receiver) {
+      autoDrainBackoffUntil = Date.now() + 15 * 60 * 1000;
+      await alertAdmins("⚠️ Автослив: cookie донора или приёмника невалиден. Пауза 15 мин.");
+      return;
+    }
+
+    // Кандидат: пасс приёмника, которым донор ещё НЕ владеет (Roblox не даёт
+    // владеть двумя копиями — «один пасс = один слив на донора»). Настроенный
+    // drainGamepassId пробуем первым.
+    const passes = await drainUserGamepasses(receiver.id, drainCookie);
+    if (s.drainGamepassId) {
+      const idx = passes.findIndex((p) => p.gamepassId === String(s.drainGamepassId));
+      if (idx > 0) passes.unshift(passes.splice(idx, 1)[0]);
+    }
+    let candidate: { gamepassId: string; name: string } | null = null;
+    for (const p of passes) {
+      const owned = await ownsGamepass(donor.id, p.gamepassId);
+      if (owned === false) { candidate = p; break; }
+      // owned === null (проверка не удалась) — пасс пропускаем, не рискуем.
+    }
+    if (!candidate) {
+      if (Date.now() - noCandidateAlertAt > 6 * 60 * 60 * 1000) {
+        noCandidateAlertAt = Date.now();
+        await alertAdmins(
+          `💧 <b>Автослив: нет свободного геймпасса приёмника</b>\n` +
+          `Баланс донора <b>${balance} R$</b> &lt; ${AUTO_DRAIN_BELOW} R$, но все пассы ` +
+          `приёмника (${passes.length}) донор уже выкупал. Создай новый геймпасс у ` +
+          `<b>${escapeHtml(receiver.name)}</b> — или слей вручную из TWA с другим донором.`
+        );
+      }
+      return;
+    }
+
+    const res = await runDrain(donorCookie, drainCookie, candidate.gamepassId);
+    if (res.success) {
+      await (db as any).drainEvent.create({
+        data: {
+          donorName: donor.name,
+          drainName: receiver.name,
+          amount: res.drained ?? balance,
+          gamepassId: candidate.gamepassId,
+          source: "auto",
+        },
+      }).catch((e: any) => console.warn("[auto-drain] DrainEvent write failed:", e?.message ?? e));
+      await alertAdmins(
+        `💧 <b>Автослив: ${res.drained ?? balance} R$ → ${escapeHtml(receiver.name)}</b>\n` +
+        `Пасс «${escapeHtml(candidate.name)}» · донор ${escapeHtml(donor.name)}\n` +
+        `Баланс донора: ${res.donorBalanceAfter ?? "?"} R$ · приёмника: ${res.drainBalanceAfter ?? "?"} R$`
+      );
+    } else {
+      autoDrainBackoffUntil = Date.now() + 15 * 60 * 1000;
+      await alertAdmins(
+        `⚠️ <b>Автослив не прошёл</b> (пауза 15 мин)\n` +
+        `Пасс «${escapeHtml(candidate.name)}» · ${balance} R$\n` +
+        `Причина: <code>${escapeHtml(res.msg)}</code>`
+      );
+    }
+  } catch (err: any) {
+    console.error("[auto-drain] tick error:", err?.message ?? err);
+  } finally {
+    autoDrainTickRunning.v = false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // +3 GP-watcher
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -331,6 +433,11 @@ export function startAutoWorkers(bot: Telegraf): void {
   setTimeout(() => runGpWatchTick(bot).catch((e) => console.error("[gp-watch] boot:", e)), 70_000);
   setInterval(() => runGpWatchTick(bot).catch((e) => console.error("[gp-watch] tick:", e)), 60 * 60 * 1000);
 
+  // Auto-drain: 15-минутный цикл (слив — редкое событие, чаще незачем).
+  setTimeout(() => runAutoDrainTick().catch((e) => console.error("[auto-drain] boot:", e)), 90_000);
+  setInterval(() => runAutoDrainTick().catch((e) => console.error("[auto-drain] tick:", e)), 15 * 60 * 1000);
+
   console.log("[auto-buyout] worker started ✅ (kill-switch in GlobalSettings.autoBuyoutEnabled)");
   console.log("[gp-watch] worker started ✅ (kill-switch in GlobalSettings.gpWatchEnabled)");
+  console.log("[auto-drain] worker started ✅ (kill-switch in GlobalSettings.autoDrainEnabled)");
 }

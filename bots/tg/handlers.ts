@@ -3064,6 +3064,37 @@ export function registerAdmin(bot: Telegraf): void {
     );
   });
 
+  // ── 💧 Автослив остатка донора (+5.G.3) ───────────────────────────────────
+  bot.command("autodrain", async (ctx) => {
+    if (!ADMIN_IDS.includes(String(ctx.from.id))) return;
+    const arg = ctx.message.text.replace(/^\/autodrain\s*/, "").trim().toLowerCase();
+
+    if (arg === "on" || arg === "off") {
+      await (db as any).globalSettings.upsert({
+        where: { id: "global" },
+        update: { autoDrainEnabled: arg === "on" },
+        create: { id: "global", usdToRub: 90, autoDrainEnabled: arg === "on" },
+      });
+      await ctx.reply(`💧 Автослив: <b>${arg === "on" ? "🟢 ВКЛЮЧЁН" : "🔴 ВЫКЛЮЧЕН"}</b>`, { parse_mode: "HTML" });
+      return;
+    }
+
+    const s = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
+    const bal = s?.robloxCookie ? await getRobuxBalance(s.robloxCookie) : null;
+    const drainCnt = await (db as any).drainEvent.count({ where: { source: "auto" } }).catch(() => 0);
+    await ctx.reply(
+      `💧 <b>Автослив остатка донора</b>\n\n` +
+      `Статус: <b>${s?.autoDrainEnabled ? "🟢 ВКЛЮЧЁН" : "🔴 ВЫКЛЮЧЕН"}</b>\n` +
+      `Порог: баланс донора &lt; <b>143 R$</b> (мин. грязная цена выкупа)\n` +
+      `Приёмник: <b>${s?.drainAccountName ?? "не задан"}</b>${s?.drainCookie ? "" : " · ⚠️ cookie не задан"}\n` +
+      `Баланс донора: <b>${bal !== null ? `${bal.toLocaleString()} R$` : "нет данных"}</b>\n` +
+      `Автосливов всего: <b>${drainCnt}</b>\n\n` +
+      `<code>/autodrain on</code> · <code>/autodrain off</code>\n` +
+      `<i>Когда донору не хватает даже на минимальный выкуп, остаток сливается в приёмник сам (пасс, которым донор ещё не владеет). Тик 15 мин.</i>`,
+      { parse_mode: "HTML" },
+    );
+  });
+
   // ── 👁 GP-watch по вероятному нику (+3) ───────────────────────────────────
   bot.command("gpwatch", async (ctx) => {
     if (!ADMIN_IDS.includes(String(ctx.from.id))) return;

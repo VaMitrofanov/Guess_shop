@@ -270,6 +270,10 @@ model GlobalSettings {
   autoBuyoutThreshold   Int       @default(150) // R$ — stop buying at/below this, leftover goes to drain
   autoBuyoutMaxPerTick  Int       @default(5)   // cap purchases per tick (blast-radius guard)
   autoBuyoutBelowSince  DateTime?               // when balance first went ≤ threshold (alert dedup)
+  // ── Auto-drain worker (+5.G.3) ───────────────────────────────────────────
+  // Когда баланс донора падает ниже минимальной цены выкупа (143 R$ грязными),
+  // воркер сливает остаток в приёмник сам. Kill-switch, default OFF.
+  autoDrainEnabled      Boolean   @default(false)
   // ── GP-watcher (+3) ──────────────────────────────────────────────────────
   gpWatchEnabled        Boolean   @default(false) // kill-switch for the probable-nick gamepass watcher
   /// Who the watcher tells about a found gamepass: "admin" | "customer" | "both".
