@@ -361,6 +361,8 @@ export const CB = {
   confirmDirectNb:     "confirm_direct_nb",
   cancelDirect:        "cancel_direct",
   customDirect:        "dp:custom",
+  directCatalog:       "dp:all",   // «📋 Все паки» — раскрыть полный каталог (PLAN +5.C)
+  directCompact:       "dp:back",  // «◀️ Назад» из каталога к компактному шагу 1
   directPack:          (amount: number) => `dp:${amount}`,                                // 8 b max
   sendPaymentDetails:  (orderId: string) => `spd:${orderId}`,                             // 29 b
   sendQr:              (orderId: string) => `sqr:${orderId}`,                             // 29 b

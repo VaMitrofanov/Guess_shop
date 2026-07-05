@@ -50,38 +50,77 @@ function stepBar(current: number, label: string): string {
   return `${bar}  <b>Шаг ${current}/5 · ${label}</b>`;
 }
 
-/** Build an inline keyboard with predefined Robux packs and their ruble prices. */
+// ── Клавиатура паков прямого заказа (PLAN +5.C) ──────────────────────────
+// Шаг 1 компактный: [🔄 прошлый пак] + топ-3 (500/1000/2000) + «📋 Все паки»
+// + [✏️ Своё][❌ Отменить]. Полный каталог раскрывается редактированием
+// того же сообщения.
+
+const FEATURED_PACKS = [500, 1000, 2000];
+
+function packBtnLabel(amt: number, userBonus: number, rubleDiscount: number): string {
+  const tag = userBonus > 0 && amt >= BONUS_MIN_PACK ? ` +${userBonus}🎁` : "";
+  const basePrice = directPrice(amt);
+  const price = rubleDiscount > 0 ? Math.max(0, basePrice - rubleDiscount) : basePrice;
+  return `${amt}${tag} R$ — ${fmtRub(price)}`;
+}
+
+/** Компактный первый экран выбора пака. */
 function buildPackKb(userBonus = 0, rubleDiscount = 0, lastOrderAmount?: number) {
   const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
   if (lastOrderAmount && DIRECT_PACKS.includes(lastOrderAmount)) {
-    const tag = userBonus > 0 && lastOrderAmount >= BONUS_MIN_PACK ? ` +${userBonus}🎁` : "";
-    const basePrice = directPrice(lastOrderAmount);
-    const price = rubleDiscount > 0 ? Math.max(0, basePrice - rubleDiscount) : basePrice;
     buttons.push([Markup.button.callback(
-      `🔄 ${lastOrderAmount}${tag} R$ — ${fmtRub(price)}`,
+      `🔄 ${packBtnLabel(lastOrderAmount, userBonus, rubleDiscount)}`,
       CB.directPack(lastOrderAmount)
     )]);
   }
-  const rows = [
-    DIRECT_PACKS.slice(0, 3),   // 100, 200, 300
-    DIRECT_PACKS.slice(3, 6),   // 400, 500, 800
-    DIRECT_PACKS.slice(6, 9),   // 1000, 1200, 1500
-    DIRECT_PACKS.slice(9),      // 2000
-  ] as number[][];
-  for (const row of rows) {
-    buttons.push(row.map(amt => {
-      const tag = userBonus > 0 && amt >= BONUS_MIN_PACK ? ` +${userBonus}🎁` : "";
-      const basePrice = directPrice(amt);
-      const price = rubleDiscount > 0 ? Math.max(0, basePrice - rubleDiscount) : basePrice;
-      return Markup.button.callback(
-        `${amt}${tag} R$ — ${fmtRub(price)}`,
-        CB.directPack(amt)
-      );
-    }));
-  }
-  buttons.push([Markup.button.callback("✏️ Своё количество", CB.customDirect)]);
-  buttons.push([Markup.button.callback("❌ Отменить", CB.cancelDirect)]);
+  buttons.push(FEATURED_PACKS.map(amt =>
+    Markup.button.callback(packBtnLabel(amt, userBonus, rubleDiscount), CB.directPack(amt))
+  ));
+  buttons.push([Markup.button.callback("📋 Все паки (100–2000)", CB.directCatalog)]);
+  buttons.push([
+    Markup.button.callback("✏️ Своё количество", CB.customDirect),
+    Markup.button.callback("❌ Отменить", CB.cancelDirect),
+  ]);
   return Markup.inlineKeyboard(buttons);
+}
+
+/** Полный каталог: все 10 паков по 2 в ряд + сервисные ряды. */
+function buildPackCatalogKb(userBonus = 0, rubleDiscount = 0) {
+  const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+  for (let i = 0; i < DIRECT_PACKS.length; i += 2) {
+    buttons.push(DIRECT_PACKS.slice(i, i + 2).map((amt: number) =>
+      Markup.button.callback(packBtnLabel(amt, userBonus, rubleDiscount), CB.directPack(amt))
+    ));
+  }
+  buttons.push([
+    Markup.button.callback("✏️ Своё количество", CB.customDirect),
+    Markup.button.callback("❌ Отменить", CB.cancelDirect),
+  ]);
+  buttons.push([Markup.button.callback("◀️ Назад", CB.directCompact)]);
+  return Markup.inlineKeyboard(buttons);
+}
+
+/** Параметры клавиатуры паков (бонус/скидка/прошлый пак) — для катал./возврата. */
+async function getDirectKbParams(tgId: string): Promise<{ bonus: number; rubleDiscount: number; lastOrderAmount?: number }> {
+  const u = await (db as any).user.findUnique({
+    where: { tgId },
+    select: { id: true, balance: true, bonusExpiresAt: true, rubleDiscount: true },
+  }).catch(() => null);
+  const now = new Date();
+  const rawBonus = u?.balance ?? 0;
+  const bonusExpired = u?.bonusExpiresAt ? u.bonusExpiresAt <= now : false;
+  const bonus = rawBonus > 0 && !bonusExpired ? rawBonus : 0;
+  const rubleDiscount = u?.rubleDiscount ?? 0;
+  let lastOrderAmount: number | undefined;
+  if (u?.id) {
+    const lastOrder = await (db as any).wbOrder.findFirst({
+      where: { userId: u.id, status: "COMPLETED", isDirectOrder: true },
+      orderBy: { createdAt: "desc" },
+      select: { amount: true },
+    }).catch(() => null);
+    if (lastOrder) lastOrderAmount = lastOrder.amount;
+  }
+  return { bonus, rubleDiscount, lastOrderAmount };
 }
 
 
@@ -3738,6 +3777,25 @@ export function registerCallbacks(bot: Telegraf): void {
         await ctx.editMessageText(customPrompt, { parse_mode: "HTML", ...customKb });
       } catch {
         await ctx.reply(customPrompt, { parse_mode: "HTML", ...customKb });
+      }
+      await ctx.answerCbQuery();
+      return;
+    }
+
+    // dp:all / dp:back — раскрыть каталог паков / вернуться к компакту (+5.C).
+    // Редактируем клавиатуру того же сообщения; фолбэк — новое сообщение.
+    if (data === CB.directCatalog || data === CB.directCompact) {
+      const kbParams = await getDirectKbParams(String(ctx.from.id));
+      const kb = data === CB.directCatalog
+        ? buildPackCatalogKb(kbParams.bonus, kbParams.rubleDiscount)
+        : buildPackKb(kbParams.bonus, kbParams.rubleDiscount, kbParams.lastOrderAmount);
+      try {
+        await ctx.editMessageReplyMarkup(kb.reply_markup);
+      } catch {
+        await ctx.reply(
+          `${stepBar(1, "Выбери пак")}\n\nВыбери количество:`,
+          { parse_mode: "HTML", ...kb }
+        );
       }
       await ctx.answerCbQuery();
       return;

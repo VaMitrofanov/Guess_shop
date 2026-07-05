@@ -162,47 +162,63 @@ function stepBar(current: number, label: string): string {
   return `${bar}  Шаг ${current}/5 · ${label}`;
 }
 
-// VK inline keyboards: max 10 buttons. Drop 400 & 1200 (close neighbours exist).
-const VK_PACKS = [100, 200, 300, 500, 800, 1000, 1500, 2000];
+// ── Клавиатура паков прямого заказа (PLAN +5.C) ──────────────────────────
+// Шаг 1 компактный: [🔄 прошлый пак] + топ-3 (500/1000/2000) + «📋 Все паки»
+// + [✏️ Своё][❌ Отменить] = максимум 7 кнопок / 5 рядов (лимит VK: 10/6/5).
+// Каталог: 8 паков (без 400 и 1200 — полный набор из 10 в inline не влезает)
+// по 2 в ряд + [✏️][❌] = ровно 10 кнопок / 5 рядов.
 
-/** Build VK inline keyboard with predefined Robux packs and their ruble prices. */
+const VK_PACKS = [100, 200, 300, 500, 800, 1000, 1500, 2000];
+const VK_FEATURED_PACKS = [500, 1000, 2000];
+
+function vkPackBtnLabel(amt: number, userBonus: number, rubleDiscount: number): string {
+  const tag = userBonus > 0 && amt >= BONUS_MIN_PACK ? ` +${userBonus}🎁` : "";
+  const basePrice = directPrice(amt);
+  const price = rubleDiscount > 0 ? Math.max(0, basePrice - rubleDiscount) : basePrice;
+  return `${amt}${tag} R$ — ${fmtRub(price)}`;
+}
+
+/** Компактный первый экран выбора пака. */
 function buildVkPackKb(userBonus = 0, rubleDiscount = 0, lastOrderAmount?: number) {
   const kb = Keyboard.builder();
-  const hasReorder = !!(lastOrderAmount && DIRECT_PACKS.includes(lastOrderAmount));
-
-  // With reorder: 1 reorder + 7 packs + ✏️ + ❌ = 10
-  // Without:      8 packs + ✏️ + ❌ = 10
-  let packs: number[];
-  if (hasReorder) {
-    packs = VK_PACKS.filter(p => p !== lastOrderAmount).slice(0, 7);
-    const tag = userBonus > 0 && lastOrderAmount! >= BONUS_MIN_PACK ? ` +${userBonus}🎁` : "";
-    const basePrice = directPrice(lastOrderAmount!);
-    const price = rubleDiscount > 0 ? Math.max(0, basePrice - rubleDiscount) : basePrice;
+  if (lastOrderAmount && DIRECT_PACKS.includes(lastOrderAmount)) {
     kb.textButton({
-      label: `🔄 ${lastOrderAmount}${tag} R$ — ${fmtRub(price)}`,
+      label: `🔄 ${vkPackBtnLabel(lastOrderAmount, userBonus, rubleDiscount)}`,
       payload: { command: "direct_pack", amount: lastOrderAmount },
       color: "positive",
     });
     kb.row();
-  } else {
-    packs = [...VK_PACKS];
   }
-
-  for (let i = 0; i < packs.length; i++) {
-    const amt = packs[i];
-    const tag = userBonus > 0 && amt >= BONUS_MIN_PACK ? ` +${userBonus}🎁` : "";
-    const basePrice = directPrice(amt);
-    const price = rubleDiscount > 0 ? Math.max(0, basePrice - rubleDiscount) : basePrice;
+  for (const amt of VK_FEATURED_PACKS) {
     kb.textButton({
-      label: `${amt}${tag} R$ — ${fmtRub(price)}`,
+      label: vkPackBtnLabel(amt, userBonus, rubleDiscount),
+      payload: { command: "direct_pack", amount: amt },
+      color: "primary",
+    });
+  }
+  kb.row();
+  kb.textButton({ label: "📋 Все паки (100–2000)", payload: { command: "direct_catalog" }, color: "secondary" });
+  kb.row();
+  kb.textButton({ label: "✏️ Своё количество", payload: { command: "direct_custom" }, color: "secondary" });
+  kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
+  return enforceVkInlineKbLimits(kb.inline(), "VK/pack-kb");
+}
+
+/** Каталог: 8 паков по 2 в ряд + сервисный ряд — ровно 10 кнопок. */
+function buildVkPackCatalogKb(userBonus = 0, rubleDiscount = 0) {
+  const kb = Keyboard.builder();
+  for (let i = 0; i < VK_PACKS.length; i++) {
+    const amt = VK_PACKS[i];
+    kb.textButton({
+      label: vkPackBtnLabel(amt, userBonus, rubleDiscount),
       payload: { command: "direct_pack", amount: amt },
       color: userBonus > 0 && amt >= BONUS_MIN_PACK ? "positive" : "primary",
     });
-    if ((i + 1) % 4 === 0 || i === packs.length - 1) kb.row();
+    if ((i + 1) % 2 === 0) kb.row();
   }
   kb.textButton({ label: "✏️ Своё количество", payload: { command: "direct_custom" }, color: "secondary" });
   kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
-  return kb.inline();
+  return enforceVkInlineKbLimits(kb.inline(), "VK/pack-catalog");
 }
 export function initVkHandlers(vkInstance: any): void {
   _vkApi = vkInstance.api;
@@ -1027,6 +1043,21 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     if (!isNaN(packAmt) && DIRECT_PACKS.includes(packAmt)) {
       await handleDirectPackSelect(ctx, vkUserId, packAmt);
     }
+    return;
+  }
+  // «📋 Все паки» — полный каталог (PLAN +5.C)
+  if (msgPayload?.command === "direct_catalog") {
+    const cu = await (db as any).user.findUnique({
+      where: { vkId: String(vkUserId) },
+      select: { balance: true, bonusExpiresAt: true, rubleDiscount: true },
+    }).catch(() => null);
+    const cRaw = cu?.balance ?? 0;
+    const cExpired = cu?.bonusExpiresAt ? cu.bonusExpiresAt <= new Date() : false;
+    const cBonus = cRaw > 0 && !cExpired ? cRaw : 0;
+    await ctx.reply({
+      message: "📋 Все паки — выбери количество:",
+      keyboard: buildVkPackCatalogKb(cBonus, cu?.rubleDiscount ?? 0),
+    });
     return;
   }
   if (msgPayload?.command === "direct_confirm") {
