@@ -2865,16 +2865,24 @@ export function registerPhoto(bot: Telegraf): void {
     // 2. DB fallback: latest COMPLETED WB order whose review bonus is not yet claimed
     if (!orderId) {
       const order = await (db as any).wbOrder.findFirst({
-        where: { userId: user.id, status: "COMPLETED", isDirectOrder: false },
+        where: { userId: user.id, status: "COMPLETED" },
         orderBy: { updatedAt: "desc" },
       });
-      const linked = order
-        ? await (db as any).wbCode.findFirst({
-          where: { userId: user.id, reviewBonusClaimed: false },
-        })
-        : null;
 
-      if (!order || !linked) {
+      let eligible = false;
+      if (order) {
+        const isDirect = (order.wbCode as string).startsWith("DIR-");
+        if (isDirect) {
+          eligible = !user.reviewBonusGrantedAt;
+        } else {
+          const linked = await (db as any).wbCode.findFirst({
+            where: { code: order.wbCode, reviewBonusClaimed: false },
+          });
+          eligible = !!linked;
+        }
+      }
+
+      if (!order || !eligible) {
         await ctx.reply(
           "У тебя пока нет выполненных заказов, за которые можно получить бонус.\n\n" +
           "Когда заказ будет выполнен, оставь отзыв на Wildberries <b>с текстом и фото</b> — пришли скриншот сюда и получишь +100 R$ (действует на любой номинал)!",
@@ -4855,16 +4863,23 @@ export function registerCallbacks(bot: Telegraf): void {
     // ── 📸 review_hint: prompt user to send review screenshot ────────────
     if (data === CB.reviewHint) {
       // Restore pendingReview so the text handler can remind them if they type instead of sending a photo
-      const tgUser = await (db as any).user.findUnique({ where: { tgId: adminId } });
+      const tgUser = await (db as any).user.findUnique({ where: { tgId: adminId }, select: { id: true, reviewBonusGrantedAt: true } });
       if (tgUser) {
         const reviewOrder = await (db as any).wbOrder.findFirst({
-          where: { userId: tgUser.id, status: "COMPLETED", isDirectOrder: false },
+          where: { userId: tgUser.id, status: "COMPLETED" },
           orderBy: { updatedAt: "desc" },
         });
-        const linked = reviewOrder
-          ? await (db as any).wbCode.findFirst({ where: { userId: tgUser.id, reviewBonusClaimed: false } })
-          : null;
-        if (reviewOrder && linked) {
+        let eligible = false;
+        if (reviewOrder) {
+          const isDirect = (reviewOrder.wbCode as string).startsWith("DIR-");
+          if (isDirect) {
+            eligible = !tgUser.reviewBonusGrantedAt;
+          } else {
+            const linked = await (db as any).wbCode.findFirst({ where: { code: reviewOrder.wbCode, reviewBonusClaimed: false } });
+            eligible = !!linked;
+          }
+        }
+        if (reviewOrder && eligible) {
           pendingReview.set(ctx.from.id, reviewOrder.id as string);
         }
       }

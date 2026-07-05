@@ -466,7 +466,7 @@ async function hasPendingProofPhoto(vkUserId: number): Promise<boolean> {
       return !user.reviewBonusGrantedAt;
     }
     const unclaimed = await (db as any).wbCode.findFirst({
-      where: { userId: user.id, reviewBonusClaimed: false }, select: { code: true },
+      where: { code: completed.wbCode, reviewBonusClaimed: false }, select: { code: true },
     });
     return !!unclaimed;
   } catch (e) {
@@ -2852,17 +2852,21 @@ async function handleReviewScreenshot(
       orderBy: { updatedAt: "desc" },
     });
 
-    // Direct orders (wbCode starts with "DIR-") have no WbCode record in DB,
-    // so skip the reviewBonusClaimed check for them.
-    const isDirectOrder = (order?.wbCode as string | undefined)?.startsWith("DIR-");
-    const linked = (order && !isDirectOrder)
-      ? await (db as any).wbCode.findFirst({
-          where: { userId: user.id, reviewBonusClaimed: false },
-        })
-      : order ?? null; // direct orders: truthy if order exists
+    let eligible = false;
+    if (order) {
+      const isDirectOrder = (order.wbCode as string).startsWith("DIR-");
+      if (isDirectOrder) {
+        eligible = !user.reviewBonusGrantedAt;
+      } else {
+        const linked = await (db as any).wbCode.findFirst({
+          where: { code: order.wbCode, reviewBonusClaimed: false },
+        });
+        eligible = !!linked;
+      }
+    }
 
-    if (!order || !linked) {
-      console.log(`[VK] handleReviewScreenshot: no eligible order/code for userId=${user.id} vkId=${vkUserId} hasOrder=${!!order} isDirectOrder=${!!isDirectOrder} hasLinked=${!!linked}`);
+    if (!order || !eligible) {
+      console.log(`[VK] handleReviewScreenshot: no eligible order/code for userId=${user.id} vkId=${vkUserId} hasOrder=${!!order} eligible=${eligible}`);
       await ctx.reply(
         "📸 У тебя сейчас нет выполненных заявок, ожидающих отзыва.\n\n" +
         "Если у тебя возникла проблема или вопрос — напиши сюда, ответим здесь. Или в Telegram: https://t.me/RobloxBank_PA"
