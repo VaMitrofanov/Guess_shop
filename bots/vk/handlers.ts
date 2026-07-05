@@ -518,13 +518,21 @@ function orderAgeMsFromOrder(order: any): number {
 
 const SUPPORT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
-/** Sends the subscription prompt and inline buttons. */
-async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null, denomination?: number): Promise<void> {
+/**
+ * Sends the subscription prompt and inline buttons.
+ * `after` — контекст продолжения после «✅ Я вступил» (напр. "start_direct"):
+ * без него check_sub не знает, откуда пришёл юзер, и отвечает «отправь код ВБ»
+ * — тупик для прямого заказа (шов гейта, PLAN +5.D).
+ */
+async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null, denomination?: number, after?: string): Promise<void> {
   const groupId  = process.env.VK_GROUP_ID;
   const groupUrl = groupId ? `https://vk.com/club${groupId}` : "https://vk.com";
   const orderLine = refCode && denomination
     ? `📦 Заказ ${refCode} · ${denomination} R$ — создан\n\n`
     : "";
+  const payload: Record<string, string> = { command: "check_sub" };
+  if (refCode) payload.ref = refCode;
+  if (after) payload.after = after;
   await ctx.reply({
     message:
       orderLine +
@@ -535,13 +543,118 @@ async function sendVkSubPrompt(ctx: MessageContext, refCode: string | null, deno
     keyboard: Keyboard.builder()
       .urlButton({ label: "🔔 Подписаться", url: groupUrl })
       .row()
-      .textButton({
-        label:   "✅ Я вступил",
-        payload: refCode ? { command: "check_sub", ref: refCode } : { command: "check_sub" },
-        color:   "positive",
-      })
+      .textButton({ label: "✅ Я вступил", payload, color: "positive" })
       .inline(),
   });
+}
+
+// ── Бесшовный гейт (PLAN +5.D): stash текста, съеденного idle-гейтом ─────────
+// Неподписанный шлёт код/ссылку → гейт. После «Я вступил» / вступления в группу
+// текст переигрывается штатно, юзеру не приходится вводить его заново.
+const gateStash = new Map<number, { text: string; at: number }>();
+// «Купить напрямую» упёрся в гейт → после подписки продолжаем прямой заказ
+// (нужно для group_join, где payload-кнопки нет).
+const gateDirectPending = new Map<number, number>();
+const GATE_STASH_TTL_MS = 30 * 60 * 1000;
+
+function popGateStash(vkUserId: number): string | null {
+  const s = gateStash.get(vkUserId);
+  gateStash.delete(vkUserId);
+  if (s && Date.now() - s.at < GATE_STASH_TTL_MS) return s.text;
+  return null;
+}
+
+function popGateDirectPending(vkUserId: number): boolean {
+  const at = gateDirectPending.get(vkUserId);
+  gateDirectPending.delete(vkUserId);
+  return !!at && Date.now() - at < GATE_STASH_TTL_MS;
+}
+
+/**
+ * Продолжение флоу после подтверждённой подписки (кнопка «Я вступил» или
+ * событие group_join). Возвращает true, если продолжение отправлено.
+ * При AWAITING_LINK и известном нике даём кнопки «Найти у <ник>» — не
+ * заставляем вводить ник заново (шов 3 гейта).
+ */
+async function sendPostSubscribeContinuation(ctx: MessageContext, vkUserId: number): Promise<boolean> {
+  let st = getState(vkUserId);
+  if (!st || st.type !== "AWAITING_LINK") {
+    const restored = await tryRestoreState(vkUserId);
+    if (restored !== "restored") return false;
+    st = getState(vkUserId);
+    if (!st || st.type !== "AWAITING_LINK") return false;
+  }
+  const passPrice = Math.ceil(st.denomination / 0.7);
+  const user = await (db as any).user.findUnique({
+    where: { vkId: String(vkUserId) },
+    select: { id: true, robloxUsername: true },
+  }).catch(() => null);
+  const order = user
+    ? await (db as any).wbOrder.findFirst({
+        where: { userId: user.id, wbCode: st.wbCode },
+        select: { probableNick: true, robloxUsername: true },
+      }).catch(() => null)
+    : null;
+  const knownNick = order?.probableNick ?? order?.robloxUsername ?? user?.robloxUsername ?? null;
+  if (knownNick) {
+    await ctx.reply({
+      message:
+        `✅ Подписка подтверждена!\n\n` +
+        `🎮 Твой ник: ${knownNick}\n` +
+        `📌 Цена геймпасса: ${passPrice} R$\n\n` +
+        `Продолжим? Найду твои геймпассы сам 🔎`,
+      keyboard: Keyboard.builder()
+        .textButton({ label: `✅ Найти у ${knownNick}`, payload: { command: "find_gp_recheck" }, color: "positive" })
+        .row()
+        .textButton({ label: "🔎 Другой ник", payload: { command: "find_gp_start" }, color: "secondary" })
+        .inline(),
+    });
+  } else {
+    await ctx.reply(
+      `✅ Подписка подтверждена!\n\n` +
+      `Пришли свой ник в Roblox — найду геймпасс сам 🔎\n` +
+      `📌 Цена геймпасса: ${passPrice} R$\n\n` +
+      `Также можно прислать ссылку или Asset ID.`
+    );
+  }
+  return true;
+}
+
+/**
+ * VK событие group_join (шов 4 гейта, PLAN +5.D): юзер подписался сам, не
+ * нажимая «Я вступил» — продолжаем флоу сразу. Пишем ТОЛЬКО тем, у кого есть
+ * незакрытый контекст (гейт прямого заказа / съеденный текст / активный или
+ * восстановимый заказ) — случайных вступивших не трогаем. Ошибки отправки
+ * (VK 901 у юзеров без диалога) глотаем: подписка без диалога легальна.
+ */
+export async function handleVkGroupJoin(vkUserId: number): Promise<void> {
+  if (!_vkApi || !vkUserId || vkUserId <= 0) return;
+  const pseudoCtx: any = {
+    reply: async (payload: string | { message: string; keyboard?: unknown }) => {
+      const p = typeof payload === "string" ? { message: payload } : payload;
+      return _vkApi.messages.send({
+        peer_id: vkUserId,
+        random_id: Math.floor(Math.random() * 1e9),
+        message: p.message,
+        ...(p.keyboard ? { keyboard: p.keyboard } : {}),
+      });
+    },
+    vk: { api: _vkApi },
+  };
+  try {
+    if (popGateDirectPending(vkUserId)) {
+      await handleStartDirect(pseudoCtx, vkUserId);
+      return;
+    }
+    const stashed = popGateStash(vkUserId);
+    if (stashed) {
+      await handleIdleMessage(pseudoCtx, vkUserId, stashed);
+      return;
+    }
+    await sendPostSubscribeContinuation(pseudoCtx, vkUserId);
+  } catch (err: any) {
+    console.warn(`[VK/group_join] continuation failed for ${vkUserId}:`, err?.message ?? err);
+  }
 }
 
 // ── Entry point: called for every message_new event ───────────────────────────
@@ -692,19 +805,22 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         await handleRefActivation(ctx, vkUserId, refToActivate);
         return;
       }
-      // Came from the gamepass-submission gate — AWAITING_LINK state is still active
-      const existingState = getState(vkUserId);
-      if (existingState?.type === "AWAITING_LINK") {
-        const passPrice = Math.ceil(existingState.denomination / 0.7);
-        await ctx.reply(
-          `✅ Подписка подтверждена!\n\n` +
-          `Пришли свой ник в Roblox — найду геймпасс сам 🔎\n` +
-          `📌 Цена геймпасса: ${passPrice} R$\n\n` +
-          `Также можно прислать ссылку или Asset ID.`
-        );
-      } else {
-        await ctx.reply("✅ Подписка подтверждена! Теперь отправь свой код с карточки Wildberries — бот выдаст инструкцию.");
+      if (msgPayload?.after === "start_direct" || popGateDirectPending(vkUserId)) {
+        // Пришли из гейта «Купить напрямую» — продолжаем прямой заказ, а не
+        // «отправь код ВБ» (шов 2 гейта, PLAN +5.D).
+        await handleStartDirect(ctx, vkUserId);
+        return;
       }
+      // Came from the gamepass-submission gate — AWAITING_LINK state is still
+      // active (or restorable). Known nick → «Найти у <ник>» buttons (шов 3).
+      if (await sendPostSubscribeContinuation(ctx, vkUserId)) return;
+      // Idle-гейт съел текст (код/ссылку/ник)? Переигрываем его штатно (шов 1).
+      const stashed = popGateStash(vkUserId);
+      if (stashed) {
+        await handleIdleMessage(ctx, vkUserId, stashed);
+        return;
+      }
+      await ctx.reply("✅ Подписка подтверждена! Теперь отправь свой код с карточки Wildberries — бот выдаст инструкцию.");
       return;
     } catch (err) {
       console.error("[VK] check_sub handler failed:", err);
@@ -2142,7 +2258,10 @@ async function handleStartDirect(ctx: MessageContext, vkUserId: number): Promise
   if (process.env.VK_GROUP_ID) {
     const subbed = await isVkSubscribed(ctx, vkUserId);
     if (!subbed) {
-      await sendVkSubPrompt(ctx, null);
+      // after: "start_direct" — после «Я вступил» продолжаем прямой заказ, а не
+      // просим код ВБ (шов 2 гейта); маркер — для group_join, где payload нет.
+      gateDirectPending.set(vkUserId, Date.now());
+      await sendVkSubPrompt(ctx, null, undefined, "start_direct");
       return;
     }
   }
@@ -2945,24 +3064,36 @@ async function handleIdleMessage(
   // ── PRIORITY 0: Subscription gate for idle messages ────────────────────
   // Runs before loyalty/state logic. Fail-open: if the VK API is down,
   // isVkSubscribed returns true and the user is not blocked.
+  //
+  // Шов 1 гейта (PLAN +5.D): валидный WB-код активируем ДО гейта — внутри
+  // handleRefActivation свой гейт с ref в payload, после «Я вступил» активация
+  // продолжается сама. Раньше idle-гейт съедал код, и после подписки бот просил
+  // «отправь код» заново. Остальной текст стэшим и переигрываем после подписки.
+  const trimmedIdle = text.trim();
+  const looksLikeWbCode = /^[A-Za-z0-9]{7}$/.test(trimmedIdle) && /[A-Za-z]/.test(trimmedIdle);
+  if (looksLikeWbCode) {
+    const preGateCode = await (db as any).wbCode.findFirst({
+      where: { code: { equals: trimmedIdle.toUpperCase(), mode: "insensitive" } },
+      select: { id: true },
+    }).catch(() => null);
+    if (preGateCode) {
+      await handleRefActivation(ctx, vkUserId, trimmedIdle.toUpperCase());
+      return;
+    }
+  }
   if (process.env.VK_GROUP_ID) {
     const subbed = await isVkSubscribed(ctx, vkUserId);
     if (!subbed) {
+      if (trimmedIdle.length > 0) gateStash.set(vkUserId, { text: trimmedIdle, at: Date.now() });
       await sendVkSubPrompt(ctx, null);
       return;
     }
   }
 
   // ── PRIORITY 1: Direct WB code entry (7 alphanumeric chars, at least one letter) ──
-  if (/^[A-Za-z0-9]{7}$/.test(text.trim()) && /[A-Za-z]/.test(text.trim())) {
-    const codeExists = await (db as any).wbCode.findFirst({
-      where: { code: { equals: text.trim().toUpperCase(), mode: "insensitive" } },
-      select: { id: true },
-    });
-    if (codeExists) {
-      await handleRefActivation(ctx, vkUserId, text.trim().toUpperCase());
-      return;
-    }
+  if (looksLikeWbCode) {
+    // Код с валидным lookup обработан до гейта; сюда доходит только не-найденный
+    // 7-символьник — возможно, это ник Roblox для активного заказа.
     // Not a known code — could be a 7-char Roblox nick for an active order
     // (e.g. a direct order right after payment confirmation, when the VK bot
     // has no in-memory state). Restore from DB and route into the link flow,

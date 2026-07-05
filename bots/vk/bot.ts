@@ -26,7 +26,7 @@
 
 import "dotenv/config";
 import { VK } from "vk-io";
-import { handleMessage, handleOutboxMessage, initVkHandlers } from "./handlers";
+import { handleMessage, handleOutboxMessage, handleVkGroupJoin, initVkHandlers } from "./handlers";
 import { startBridgeServer } from "../shared/bridge";
 
 console.log("🚀 DEPLOY_VERSION: 4.0 - LOYALTY_HARD_SYNC");
@@ -63,6 +63,17 @@ vk.updates.on("message_reply", async (ctx) => {
     await handleOutboxMessage(ctx as any);
   } catch (err) {
     console.error("[VK] Unhandled error in message_reply:", err);
+  }
+});
+
+// group_join — бесшовный гейт подписки (PLAN +5.D): юзер вступил в сообщество
+// сам, без кнопки «Я вступил» — продолжаем его флоу сразу.
+vk.updates.on("group_join" as any, async (ctx: any) => {
+  try {
+    const uid = ctx.userId ?? ctx.user_id ?? ctx?.wrapped?.user_id;
+    if (typeof uid === "number" && uid > 0) await handleVkGroupJoin(uid);
+  } catch (err) {
+    console.error("[VK] Unhandled error in group_join:", err);
   }
 });
 

@@ -394,6 +394,9 @@ export const CB = {
   findGpStart:   "find_gp",                                  // 7 b
   findGpRetry:   "find_gp_retry",                            // 13 b
   findGpSaved:   "find_gp_saved",                            // 13 b
+  // Гейт подписки: «✅ Я подписался — продолжить» (фолбэк, если chat_member
+  // не пришёл или юзер подписался раньше, чем нажал ссылку) — PLAN +5.D.
+  subRecheck:    "sub_recheck",                              // 11 b
   gpPick:        (passId: string) => `gp_pick:${passId}`,    // ≤ 22 b
   // "change my Roblox nick / gamepass" on an already-placed order (передумал)
   changeNick:    "change_nick",                              // 11 b

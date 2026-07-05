@@ -557,9 +557,10 @@ export function registerStart(bot: Telegraf): void {
         {
           parse_mode: "HTML",
           link_preview_options: { is_disabled: true },
-          ...Markup.inlineKeyboard([[
-            Markup.button.url("⭐ Подписаться", "https://t.me/Roblox_Bank_Tg")
-          ]]),
+          ...Markup.inlineKeyboard([
+            [Markup.button.url("⭐ Подписаться", "https://t.me/Roblox_Bank_Tg")],
+            [Markup.button.callback("✅ Я подписался — продолжить", CB.subRecheck)],
+          ]),
         }
       );
       return;
@@ -2731,7 +2732,10 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
       {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
-        ...Markup.inlineKeyboard([[Markup.button.url("⭐ Подписаться", "https://t.me/Roblox_Bank_Tg")]]),
+        ...Markup.inlineKeyboard([
+          [Markup.button.url("⭐ Подписаться", "https://t.me/Roblox_Bank_Tg")],
+          [Markup.button.callback("✅ Я подписался — продолжить", CB.subRecheck)],
+        ]),
       }
     );
     return;
@@ -3198,6 +3202,52 @@ export function registerCallbacks(bot: Telegraf): void {
         `Пришли <b>новый ник Roblox</b> — найду геймпассы за <b>${passPrice} R$</b> и переоформлю заказ.\n\n` +
         `<i>Используй это только если ошибся с ником при оформлении.</i>`,
         { parse_mode: "HTML" }
+      );
+      return;
+    }
+
+    // «✅ Я подписался — продолжить» — кнопка-фолбэк гейта (PLAN +5.D): если
+    // chat_member не дошёл (событие потеряно) или юзер подписался раньше, чем
+    // открыл чат. Re-check подписки + то же продолжение, что в chat_member.
+    if (data === CB.subRecheck) {
+      const subbed = await checkSubscription(bot, ctx.from.id);
+      if (!subbed) {
+        await ctx.answerCbQuery("Подписка ещё не видна — подпишись и нажми снова", { show_alert: true });
+        return;
+      }
+      await ctx.answerCbQuery("✅ Подписка подтверждена");
+      const tgIdNum = ctx.from.id;
+      const subUser = await (db as any).user.findUnique({ where: { tgId: String(tgIdNum) } });
+      const pendingOrder = subUser
+        ? await (db as any).wbOrder.findFirst({
+            where: { userId: subUser.id, status: "AWAITING_GAMEPASS" },
+            orderBy: { createdAt: "desc" },
+          })
+        : null;
+      const gateState = pendingLink.get(tgIdNum);
+      const gateCode = gateState?.wbCode ?? pendingOrder?.wbCode;
+      const gateDenom = gateState?.denomination ?? pendingOrder?.amount;
+      if (!gateCode || !gateDenom) {
+        await ctx.reply("✅ Подписка подтверждена! Отправь свой код с карточки Wildberries — бот выдаст инструкцию.");
+        return;
+      }
+      const gatePassPrice = Math.ceil(gateDenom / 0.7);
+      const gateNick = pendingOrder?.probableNick ?? pendingOrder?.robloxUsername ?? subUser?.robloxUsername ?? null;
+      await ctx.reply(
+        `✅ Код <code>${gateCode}</code> активирован 🎉\n\n` +
+        `📖 Вот твоя <b>персональная инструкция</b> — заказ оформляется <b>прямо там</b>: создашь геймпасс (цена ровно <b>${gatePassPrice} R$</b>) и найдёшь его по <b>своему нику Roblox</b> 🔎 — на этот аккаунт и придут робуксы.\n\n` +
+        `🔔 А здесь, в боте, придут <b>уведомления о заказе</b> — приняли → выкупаем → готово.`,
+        {
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+          ...Markup.inlineKeyboard([
+            [Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", `https://robloxbank.ru/guide?source=wb&skip=1&code=${gateCode}`)],
+            ...(gateNick
+              ? [[Markup.button.callback(`✅ Найти геймпассы у ${gateNick}`, CB.findGpRetry)],
+                 [Markup.button.callback("🔎 Другой ник", CB.findGpStart)]]
+              : [[Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)]]),
+          ]),
+        }
       );
       return;
     }
