@@ -26,6 +26,13 @@ git push origin main
 Ручной re-deploy / статус — через Coolify UI или API (детали и токен — в `HANDOFF.md`).
 Вручную вызывать API деплоя, вставлять записи в БД и т.п. **не нужно**.
 
+> ⚠️ **Автодеплой НЕ покрывает Guide** — его деплоить вручную (Coolify UI/API) при
+> изменениях в `src/app/guide/`, `src/app/layout.tsx`, `public/`, `VKAuthButton` и
+> других файлах Guide-сборки. **Запускать ПОСЛЕ завершения Web-автодеплоя**: обе
+> сборки идут на одном RF-сервере, параллельный запуск роняет Guide-билд без
+> compile-ошибки (exit 255 после `npm ci` — так упала первая попытка 2026-07-06;
+> ретрай после Web-сборки прошёл).
+
 > ⚠️ **Dockerfile'ы ботов копируют исходники поимённо** (`COPY bots/tg/crons.ts …`), а не
 > папкой. Новый `.ts`-файл в `bots/tg/` или `bots/vk/` **обязан быть добавлен в COPY-список**
 > соответствующего Dockerfile — иначе образ соберётся зелёным (tsx резолвит импорты только в
@@ -99,9 +106,13 @@ Web-контейнера: `/`, `/faq`, `/reviews`, `/checkout`, `/dashboard`, `/
 - **DNS:** `robloxbank.ru` — **прямой A** на `89.110.94.117` (RF, grey-cloud; NS всё ещё
   Cloudflare). Раньше запись была proxied и трафик шёл через `cloudflared`-туннель — но
   Cloudflare деградирован у российских розничных провайдеров (ТСПУ), сайт «работал только с
-  VPN». Прямой A это чинит. `panel.robloxbank.ru` остаётся proxied (CF). Цепочка сейчас:
-  клиент → Traefik (`coolify-proxy`, Let's Encrypt) → контейнер Web/Guide. Разделение
-  Web/Guide по путям (`/_next-guide` → Guide) — на Traefik, см. `next.config.guide.ts`.
+  VPN». Прямой A это чинит. **Переключение на прямой A делал владелец сам** (подтверждено
+  06.07.2026) — инцидента доступа к Cloudflare не было, вопрос закрыт. `panel.robloxbank.ru`
+  остаётся proxied (CF). Контейнер `cloudflared-new` на RF осиротел для трафика сайта
+  (последняя активность туннеля 03.07) — оставлен работать для panel; трогать не нужно.
+  Цепочка сейчас: клиент → Traefik (`coolify-proxy`, Let's Encrypt) → контейнер Web/Guide.
+  Разделение Web/Guide по путям (`/_next-guide` → Guide) — на Traefik,
+  см. `next.config.guide.ts`.
   ⚠️ Обратная сторона — IP источника публичен (docs/security.md #7).
 - **Внешние скрипты self-hosted** (`public/vendor/`): `telegram-web-app.js` и
   `vkid-sdk-<ver>.js` отдаются со своего домена, а не с telegram.org / unpkg.com (оба за
