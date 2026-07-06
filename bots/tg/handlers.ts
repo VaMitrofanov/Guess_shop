@@ -1493,8 +1493,15 @@ export function registerText(bot: Telegraf): void {
 
     // 1z. USER ROBLOX-NICK input (item 7 — "find gamepass by nick")
     if (!isAdmin && pendingRobloxNick.has(ctx.from.id)) {
-      await handleRobloxNickInput(bot, ctx, text);
-      return;
+      // П2: стейт мог отстать от БД — перепроверяем статус заказа.
+      const nickState = pendingRobloxNick.get(ctx.from.id)!;
+      const sweep = await sweepStaleOrderState(ctx, nickState.wbCode, text);
+      if (sweep === "replied") return;
+      if (sweep === "valid") {
+        await handleRobloxNickInput(bot, ctx, text);
+        return;
+      }
+      // "cleared" — валидный WB-код: падаем дальше, обработается штатным маршрутом.
     }
 
     // 1a. ADMIN PAYMENT DETAILS flow
@@ -1593,6 +1600,15 @@ export function registerText(bot: Telegraf): void {
     }
 
     let state = pendingLink.get(ctx.from.id);
+
+    // П2 (стейл-стейт): pendingLink мог отстать от БД (gpw_ok, attach из TWA,
+    // выкуп) — перепроверяем статус заказа, прежде чем гнать текст в
+    // геймпасс/ник-обработку с формат-ошибками.
+    if (state && !isAdmin) {
+      const sweep = await sweepStaleOrderState(ctx, state.wbCode, text);
+      if (sweep === "replied") return;
+      if (sweep === "cleared") state = undefined; // WB-код уйдёт штатным маршрутом ниже
+    }
 
     // 2. ADMIN SEARCH
     // Run for admins whenever the text is NOT a recognisable gamepass URL/ID.
@@ -1893,6 +1909,66 @@ async function offerPreselectedGamepass(
  * Tapping the confirm button fires CB.gpPick → callback handler funnels into
  * {@link processGamepassSubmission} (the canonical link → order pipeline).
  */
+/**
+ * П2 (стейл-стейт): стейты, привязанные к заказу (pendingLink/pendingRobloxNick),
+ * могли отстать от БД — gpw_ok, attach из TWA или выкуп уже перевели заказ
+ * дальше, а Map-стейт остался и съедал любой текст формат-ошибкой «Напиши ник…»
+ * (кейс DCTAKAJ/Эсмира). Перед обработкой перепроверяем статус заказа:
+ *  - "valid"   — заказ всё ещё ждёт геймпасс (AWAITING_GAMEPASS/REJECTED) или
+ *                БД недоступна: обрабатываем штатно;
+ *  - "cleared" — стейт снят, текст (валидный WB-код) должен уйти обычным маршрутом;
+ *  - "replied" — стейт снят, юзеру честно отвечено по фактическому статусу.
+ */
+async function sweepStaleOrderState(ctx: any, wbCode: string, text: string): Promise<"valid" | "cleared" | "replied"> {
+  let order: any = null;
+  try {
+    order = await (db as any).wbOrder.findFirst({
+      where: { wbCode },
+      select: { status: true, wbCode: true },
+    });
+  } catch { return "valid"; }
+  if (!order || order.status === "AWAITING_GAMEPASS" || order.status === "REJECTED") return "valid";
+
+  pendingLink.delete(ctx.from.id);
+  pendingRobloxNick.delete(ctx.from.id);
+  pendingNickEdit.delete(ctx.from.id);
+  linkFailCounts.delete(ctx.from.id);
+
+  // Валидный существующий WB-код не глотаем — пусть активируется штатно.
+  if (/^[A-Za-z0-9]{7}$/.test(text) && /[A-Za-z]/.test(text)) {
+    const codeExists = await (db as any).wbCode.findFirst({
+      where: { code: { equals: text.toUpperCase(), mode: "insensitive" } },
+      select: { id: true },
+    }).catch(() => null);
+    if (codeExists) return "cleared";
+  }
+
+  const statusKb = Markup.inlineKeyboard([[Markup.button.callback("📊 Мой заказ", CB.refreshStatus)]]);
+  if (order.status === "PENDING" || order.status === "IN_PROGRESS") {
+    await ctx.reply(
+      `✅ По заказу <code>${order.wbCode}</code> всё уже принято — он в очереди на выкуп, ничего присылать не нужно.\n\n` +
+      `Как выкупим — сразу напишу сюда 💛`,
+      { parse_mode: "HTML", ...statusKb }
+    );
+  } else if (order.status === "COMPLETED") {
+    await ctx.reply(
+      `🎉 Заказ <code>${order.wbCode}</code> уже выполнен!\n\nХочешь ещё робуксов? Оформи прямой заказ — без карты WB, быстрее и выгоднее.`,
+      { parse_mode: "HTML", ...Markup.inlineKeyboard([
+        [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
+        [Markup.button.callback("📊 Мой заказ", CB.refreshStatus)],
+      ]) }
+    );
+  } else if (order.status === "AWAITING_PAYMENT" || order.status === "PAYMENT_PENDING") {
+    await ctx.reply(
+      `💳 Заказ <code>${order.wbCode}</code> ждёт оплату — реквизиты выше в чате. После оплаты пришли скрин сюда.`,
+      { parse_mode: "HTML", ...statusKb }
+    );
+  } else {
+    await ctx.reply(`ℹ️ Статус заказа <code>${order.wbCode}</code> изменился — проверь кнопкой ниже.`, { parse_mode: "HTML", ...statusKb });
+  }
+  return "replied";
+}
+
 async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Promise<void> {
   const tgIdNum = ctx.from.id;
   const state = pendingRobloxNick.get(tgIdNum);
@@ -3234,6 +3310,13 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("gpw_ok:")) {
       const orderId = data.slice("gpw_ok:".length);
       await ctx.answerCbQuery("⏳ Проверяю…");
+      // П2: заказ уходит в очередь — стейты «жди ссылку/ник» больше не нужны,
+      // иначе следующий текст юзера падал в формат-ошибку «Напиши ник…».
+      pendingLink.delete(ctx.from.id);
+      pendingRobloxNick.delete(ctx.from.id);
+      pendingNickEdit.delete(ctx.from.id);
+      pendingDirectFlow.delete(ctx.from.id);
+      linkFailCounts.delete(ctx.from.id);
       const res = await confirmGpWatch(orderId);
       const reply =
         res.status === "ok"
@@ -3249,7 +3332,17 @@ export function registerCallbacks(bot: Telegraf): void {
     }
     if (data.startsWith("gpw_no:")) {
       const orderId = data.slice("gpw_no:".length);
-      await declineGpWatch(orderId);
+      // П2: чистим стейлы и сразу взводим ввод ника — «пришли его сюда»
+      // должно реально уводить текст в ник-поиск, а не в формат-ошибку.
+      pendingLink.delete(ctx.from.id);
+      pendingRobloxNick.delete(ctx.from.id);
+      pendingNickEdit.delete(ctx.from.id);
+      pendingDirectFlow.delete(ctx.from.id);
+      linkFailCounts.delete(ctx.from.id);
+      const declined = await declineGpWatch(orderId);
+      if (declined) {
+        pendingRobloxNick.set(ctx.from.id, { wbCode: declined.wbCode, denomination: declined.amount });
+      }
       await ctx.answerCbQuery("Понял, не твой ник");
       try { await ctx.editMessageReplyMarkup(undefined); } catch {}
       await ctx.reply(

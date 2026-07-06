@@ -63,11 +63,18 @@ export async function confirmGpWatch(orderId: string): Promise<GpWatchConfirmRes
   }
 }
 
-/** User tapped "❌ Не мой ник". Stop watching until they enter a nick again. */
-export async function declineGpWatch(orderId: string): Promise<void> {
+/**
+ * User tapped "❌ Не мой ник". Stop watching until they enter a nick again.
+ * Returns the order's code/amount so callers can arm the nick-input state
+ * («пришли свой ник сюда» must actually route into the nick search — П2).
+ */
+export async function declineGpWatch(orderId: string): Promise<{ wbCode: string; amount: number } | null> {
   try {
-    const order = await (db as any).wbOrder.findUnique({ where: { id: orderId }, select: { adminNote: true, status: true } });
-    if (!order || order.status !== "AWAITING_GAMEPASS") return;
+    const order = await (db as any).wbOrder.findUnique({
+      where: { id: orderId },
+      select: { adminNote: true, status: true, wbCode: true, amount: true },
+    });
+    if (!order || order.status !== "AWAITING_GAMEPASS") return null;
     const stamp = new Date().toISOString().slice(0, 10);
     const prefix = order.adminNote ? `${order.adminNote}\n` : "";
     await (db as any).wbOrder.update({
@@ -78,7 +85,9 @@ export async function declineGpWatch(orderId: string): Promise<void> {
         adminNote: `${prefix}[НИК-ОТКАЗ ${stamp}] юзер отклонил GP-watch`.slice(0, 2000),
       },
     });
+    return { wbCode: order.wbCode, amount: order.amount };
   } catch (err: any) {
     console.error("[gp-watch] decline error:", err?.message ?? err);
+    return null;
   }
 }

@@ -757,6 +757,10 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
 
   // ── 👁 GP-watch (+3): клиент подтверждает/отклоняет найденный геймпасс ─────
   if (msgPayload?.command === "gpw_ok" && msgPayload?.orderId) {
+    // П2 (кейс DCTAKAJ/Эсмира): заказ уходит в очередь — старый стейт
+    // AWAITING_LINK больше не нужен, иначе следующий текст юзера падал в
+    // «Не удалось распознать. Напиши свой ник…».
+    clearState(vkUserId);
     const res = await confirmGpWatch(String(msgPayload.orderId));
     await ctx.reply(
       res.status === "ok"
@@ -770,7 +774,13 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     return;
   }
   if (msgPayload?.command === "gpw_no" && msgPayload?.orderId) {
-    await declineGpWatch(String(msgPayload.orderId));
+    // П2: чистим стейл и сразу взводим ввод ника — «пришли его сюда»
+    // должно реально уводить следующий текст в ник-поиск.
+    clearState(vkUserId);
+    const declined = await declineGpWatch(String(msgPayload.orderId));
+    if (declined) {
+      setState(vkUserId, { type: "AWAITING_ROBLOX_NICK", wbCode: declined.wbCode, denomination: declined.amount });
+    }
     await ctx.reply("Понял 👍 Если знаешь свой точный ник Roblox — пришли его сюда, и я найду твой геймпасс.");
     return;
   }
@@ -1238,12 +1248,22 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     await handleGpPick(ctx, vkUserId, msgPayload.passId);
     return;
   }
-  if (state?.type === "AWAITING_ROBLOX_NICK") {
-    await handleRobloxNickInput(ctx, vkUserId, text, state.wbCode, state.denomination);
-    return;
-  }
-
-  if (state?.type === "AWAITING_LINK") {
+  // П2 (стейл-стейт): стейты, привязанные к заказу, могли отстать от БД —
+  // gpw_ok, attach из TWA или выкуп уже перевели заказ дальше, а Map-стейт
+  // остался и съедал любой текст формат-ошибкой (кейс DCTAKAJ: «❤️❤️» →
+  // «Напиши свой ник…» при заказе давно в очереди). Перепроверяем статус.
+  if (state?.type === "AWAITING_ROBLOX_NICK" || state?.type === "AWAITING_LINK") {
+    const sweep = await sweepStaleVkOrderState(ctx, vkUserId, state.wbCode, text);
+    if (sweep === "replied") return;
+    if (sweep === "cleared") {
+      // Валидный WB-код — стейт снят, уходим в штатный маршрут (PRIORITY-1 активация).
+      await handleIdleMessage(ctx, vkUserId, text);
+      return;
+    }
+    if (state.type === "AWAITING_ROBLOX_NICK") {
+      await handleRobloxNickInput(ctx, vkUserId, text, state.wbCode, state.denomination);
+      return;
+    }
     await handleGamepassLink(ctx, vkUserId, text, state.wbCode, state.denomination);
     return;
   }
@@ -1332,6 +1352,75 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   // "status" button payload routes to the same handler as the "статус" keyword.
   const effectiveText = msgPayload?.command === "status" ? "статус" : text;
   await handleIdleMessage(ctx, vkUserId, effectiveText);
+}
+
+/**
+ * П2 (стейл-стейт): перед обработкой стейта, привязанного к заказу
+ * (AWAITING_LINK / AWAITING_ROBLOX_NICK), перепроверяем статус заказа в БД.
+ * Терминальные события (gpw_ok, attach из TWA, выкуп) могли перевести заказ
+ * дальше, а Map-стейт остался.
+ *  - "valid"   — заказ всё ещё ждёт геймпасс (AWAITING_GAMEPASS/REJECTED) или
+ *                БД недоступна: обрабатываем штатно;
+ *  - "cleared" — стейт снят, текст (валидный WB-код) должен уйти обычным маршрутом;
+ *  - "replied" — стейт снят, юзеру честно отвечено по фактическому статусу.
+ */
+async function sweepStaleVkOrderState(
+  ctx: MessageContext,
+  vkUserId: number,
+  wbCode: string,
+  text: string,
+): Promise<"valid" | "cleared" | "replied"> {
+  let order: any = null;
+  try {
+    order = await (db as any).wbOrder.findFirst({
+      where: { wbCode },
+      select: { status: true, wbCode: true },
+    });
+  } catch { return "valid"; }
+  if (!order || order.status === "AWAITING_GAMEPASS" || order.status === "REJECTED") return "valid";
+
+  clearState(vkUserId);
+
+  // Валидный существующий WB-код не глотаем — пусть активируется штатно.
+  if (/^[A-Za-z0-9]{7}$/.test(text) && /[A-Za-z]/.test(text)) {
+    const codeExists = await (db as any).wbCode.findFirst({
+      where: { code: { equals: text.toUpperCase(), mode: "insensitive" } },
+      select: { id: true },
+    }).catch(() => null);
+    if (codeExists) return "cleared";
+  }
+
+  const statusKb = Keyboard.builder()
+    .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "primary" })
+    .inline();
+  if (order.status === "PENDING" || order.status === "IN_PROGRESS") {
+    await ctx.reply({
+      message:
+        `✅ По заказу ${order.wbCode} всё уже принято — он в очереди на выкуп, ничего присылать не нужно.\n\n` +
+        `Как выкупим — сразу напишу сюда 💛`,
+      keyboard: statusKb,
+    });
+  } else if (order.status === "COMPLETED") {
+    await ctx.reply({
+      message: `🎉 Заказ ${order.wbCode} уже выполнен!\n\nХочешь ещё робуксов? Оформи прямой заказ — без карты WB, быстрее и выгоднее.`,
+      keyboard: Keyboard.builder()
+        .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "positive" })
+        .row()
+        .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "primary" })
+        .inline(),
+    });
+  } else if (order.status === "AWAITING_PAYMENT" || order.status === "PAYMENT_PENDING") {
+    await ctx.reply({
+      message: `💳 Заказ ${order.wbCode} ждёт оплату — реквизиты выше в чате. После оплаты пришли скрин сюда.`,
+      keyboard: statusKb,
+    });
+  } else {
+    await ctx.reply({
+      message: `ℹ️ Статус заказа ${order.wbCode} изменился — проверь кнопкой ниже.`,
+      keyboard: statusKb,
+    });
+  }
+  return "replied";
 }
 
 /**
