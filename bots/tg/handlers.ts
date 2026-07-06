@@ -16,6 +16,7 @@ import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pen
 import { getGamepassDetails, getGamepassProductInfo, buildPurchaseScript, purchaseGamepassDirect, getRobuxBalance, getAuthenticatedUser, resetPurchaseCsrf } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { noteProbableNick } from "../shared/nick";
+import { resolveReviewEligibility, reviewIneligibleMessage } from "../shared/review-eligibility";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 import { buildAdminKeyboard } from "./admin";
 
@@ -2947,35 +2948,29 @@ export function registerPhoto(bot: Telegraf): void {
     // 1. Check in-memory state first (fastest path)
     let orderId = pendingReview.get(ctx.from.id);
 
-    // 2. DB fallback: latest COMPLETED WB order whose review bonus is not yet claimed
+    // 2. DB fallback: eligible COMPLETED order — ищем и по кодам юзера
+    //    (кросс-платформенный заказ может висеть на другом User-ряду)
     if (!orderId) {
-      const order = await (db as any).wbOrder.findFirst({
-        where: { userId: user.id, status: "COMPLETED" },
-        orderBy: { updatedAt: "desc" },
-      });
+      const elig = await resolveReviewEligibility(user);
 
-      let eligible = false;
-      if (order) {
-        const isDirect = (order.wbCode as string).startsWith("DIR-");
-        if (isDirect) {
-          eligible = !user.reviewBonusGrantedAt;
-        } else {
-          const linked = await (db as any).wbCode.findFirst({
-            where: { code: order.wbCode, reviewBonusClaimed: false },
+      if (elig.kind !== "eligible") {
+        if (elig.kind === "already_granted") {
+          await ctx.reply(reviewIneligibleMessage(elig, { html: true }), {
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([[Markup.button.callback("💎 Купить напрямую", CB.startDirect)]]),
           });
-          eligible = !!linked;
+        } else if (elig.kind === "active_order") {
+          await ctx.reply(reviewIneligibleMessage(elig, { html: true }), { parse_mode: "HTML" });
+        } else {
+          await ctx.reply(
+            "У тебя пока нет выполненных заказов, за которые можно получить бонус.\n\n" +
+            "Когда заказ будет выполнен, оставь отзыв на Wildberries <b>с текстом и фото</b> — пришли скриншот сюда и получишь +100 R$ (действует на любой номинал)!",
+            withSupportKb()
+          );
         }
-      }
-
-      if (!order || !eligible) {
-        await ctx.reply(
-          "У тебя пока нет выполненных заказов, за которые можно получить бонус.\n\n" +
-          "Когда заказ будет выполнен, оставь отзыв на Wildberries <b>с текстом и фото</b> — пришли скриншот сюда и получишь +100 R$ (действует на любой номинал)!",
-          withSupportKb()
-        );
         return;
       }
-      orderId = order.id as string;
+      orderId = elig.orderId;
     }
 
     pendingReview.delete(ctx.from.id);
@@ -4996,24 +4991,27 @@ export function registerCallbacks(bot: Telegraf): void {
     // ── 📸 review_hint: prompt user to send review screenshot ────────────
     if (data === CB.reviewHint) {
       // Restore pendingReview so the text handler can remind them if they type instead of sending a photo
-      const tgUser = await (db as any).user.findUnique({ where: { tgId: adminId }, select: { id: true, reviewBonusGrantedAt: true } });
+      const tgUser = await (db as any).user.findUnique({
+        where: { tgId: adminId },
+        select: { id: true, balance: true, reviewBonusGrantedAt: true },
+      });
       if (tgUser) {
-        const reviewOrder = await (db as any).wbOrder.findFirst({
-          where: { userId: tgUser.id, status: "COMPLETED" },
-          orderBy: { updatedAt: "desc" },
-        });
-        let eligible = false;
-        if (reviewOrder) {
-          const isDirect = (reviewOrder.wbCode as string).startsWith("DIR-");
-          if (isDirect) {
-            eligible = !tgUser.reviewBonusGrantedAt;
-          } else {
-            const linked = await (db as any).wbCode.findFirst({ where: { code: reviewOrder.wbCode, reviewBonusClaimed: false } });
-            eligible = !!linked;
-          }
-        }
-        if (reviewOrder && eligible) {
-          pendingReview.set(ctx.from.id, reviewOrder.id as string);
+        const elig = await resolveReviewEligibility(tgUser);
+        if (elig.kind === "eligible") {
+          pendingReview.set(ctx.from.id, elig.orderId);
+        } else if (elig.kind === "already_granted" || elig.kind === "active_order") {
+          // Ветвление вместо обещания бонуса, который не начислится
+          await ctx.reply(
+            reviewIneligibleMessage(elig, { html: true }),
+            elig.kind === "already_granted"
+              ? {
+                  parse_mode: "HTML",
+                  ...Markup.inlineKeyboard([[Markup.button.callback("💎 Купить напрямую", CB.startDirect)]]),
+                }
+              : { parse_mode: "HTML" }
+          );
+          await ctx.answerCbQuery();
+          return;
         }
       }
       await ctx.reply(

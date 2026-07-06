@@ -19,6 +19,7 @@ import { getGamepassDetails, getGamepassProductInfo } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { enforceVkInlineKbLimits } from "../shared/vk-kb";
 import { noteProbableNick } from "../shared/nick";
+import { resolveReviewEligibility, reviewIneligibleMessage } from "../shared/review-eligibility";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 
 // VK API instance injected from bot.ts to avoid circular import.
@@ -457,18 +458,10 @@ async function hasPendingProofPhoto(vkUserId: number): Promise<boolean> {
       where: { userId: user.id, status: "PAYMENT_PENDING", isDirectOrder: true }, select: { id: true },
     });
     if (pendingPay) return true;
-    const completed = await (db as any).wbOrder.findFirst({
-      where: { userId: user.id, status: "COMPLETED" }, select: { wbCode: true },
-    });
-    if (!completed) return false;
-    // Direct orders have no WbCode row — gate on reviewBonusGrantedAt instead.
-    if ((completed.wbCode as string | undefined)?.startsWith("DIR-")) {
-      return !user.reviewBonusGrantedAt;
-    }
-    const unclaimed = await (db as any).wbCode.findFirst({
-      where: { code: completed.wbCode, reviewBonusClaimed: false }, select: { code: true },
-    });
-    return !!unclaimed;
+    // П1: единая eligibility (ищет COMPLETED-заказ и по кодам юзера) — иначе
+    // кросс-платформенный скрин отзыва глотался бы support-паузой.
+    const elig = await resolveReviewEligibility(user);
+    return elig.kind === "eligible";
   } catch (e) {
     console.error("[VK] hasPendingProofPhoto check failed:", e);
     return false;
@@ -2942,36 +2935,32 @@ async function handleReviewScreenshot(
     return;
   }
 
-  // Resolve the order to attach this review to
+  // Resolve the order to attach this review to. П1: eligibility ищет заказ и по
+  // кодам юзера (кросс-платформенный заказ может висеть на другом User-ряду).
   let orderId = knownOrderId;
   if (!orderId) {
-    const order = await (db as any).wbOrder.findFirst({
-      where:   { userId: user.id, status: "COMPLETED" },
-      orderBy: { updatedAt: "desc" },
-    });
+    const elig = await resolveReviewEligibility(user);
 
-    let eligible = false;
-    if (order) {
-      const isDirectOrder = (order.wbCode as string).startsWith("DIR-");
-      if (isDirectOrder) {
-        eligible = !user.reviewBonusGrantedAt;
-      } else {
-        const linked = await (db as any).wbCode.findFirst({
-          where: { code: order.wbCode, reviewBonusClaimed: false },
+    if (elig.kind !== "eligible") {
+      console.log(`[VK] handleReviewScreenshot: not eligible (${elig.kind}) for userId=${user.id} vkId=${vkUserId}`);
+      if (elig.kind === "already_granted") {
+        await ctx.reply({
+          message: reviewIneligibleMessage(elig, { html: false }),
+          keyboard: Keyboard.builder()
+            .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "positive" })
+            .inline(),
         });
-        eligible = !!linked;
+      } else if (elig.kind === "active_order") {
+        await ctx.reply(reviewIneligibleMessage(elig, { html: false }));
+      } else {
+        await ctx.reply(
+          "📸 У тебя сейчас нет выполненных заявок, ожидающих отзыва.\n\n" +
+          "Если у тебя возникла проблема или вопрос — напиши сюда, ответим здесь. Или в Telegram: https://t.me/RobloxBank_PA"
+        );
       }
-    }
-
-    if (!order || !eligible) {
-      console.log(`[VK] handleReviewScreenshot: no eligible order/code for userId=${user.id} vkId=${vkUserId} hasOrder=${!!order} eligible=${eligible}`);
-      await ctx.reply(
-        "📸 У тебя сейчас нет выполненных заявок, ожидающих отзыва.\n\n" +
-        "Если у тебя возникла проблема или вопрос — напиши сюда, ответим здесь. Или в Telegram: https://t.me/RobloxBank_PA"
-      );
       return;
     }
-    orderId = order.id as string;
+    orderId = elig.orderId;
   }
 
   clearState(vkUserId);

@@ -181,6 +181,18 @@ TG — `editMessageText` / `editMessageMedia` (фото-карточка одн�
   Дополнительно: TG-бот фильтровал `isDirectOrder: false` → прямые заказы полностью
   исключались из бонуса за отзыв; фильтр убран, добавлена поддержка DIR-заказов через
   `user.reviewBonusGrantedAt` (паритет с VK).
+- **Отзывы-v2 (П1, 2026-07-06):** eligibility вынесена в общий
+  `bots/shared/review-eligibility.ts` (`resolveReviewEligibility`) и используется в
+  TG `registerPhoto`/`reviewHint`, VK `handleReviewScreenshot`/`hasPendingProofPhoto`.
+  Два изменения поведения:
+  1. COMPLETED-заказ ищется по `userId` **или по кодам юзера** (`WbCode.userId →
+     WbOrder.wbCode`) — кросс-платформенный заказ на другом User-ряду больше не даёт
+     ложное «нет выполненных заказов»; перебираются все COMPLETED (не только последний).
+  2. Вместо catch-all — ветвление ответов (`reviewIneligibleMessage`):
+     `already_granted` → «бонус уже начислен DD.MM, на балансе N R$ до DD.MM» +
+     кнопка «💎 Купить напрямую»; `active_order` → «заказ ещё в работе, скрин после
+     выкупа»; `none` → прежний текст. Даты — Europe/Moscow, срок = 30 дней от
+     `user.reviewBonusGrantedAt`.
 - `crons.ts`: напоминание об отзыве (через час, эскалация по расписанию), алерт о стоке
   WB-кодов (каждые 30 мин), напоминание по `AWAITING_GAMEPASS` (каждые 2 часа).
 
