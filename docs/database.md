@@ -36,7 +36,9 @@ Neon Postgres + Prisma 7 (`engineType=library`, adapter `PrismaPg`). Модел�
 Ранний захват ника (+3): `probableNick` / `probableNickAt` — **вероятный** ник «карандашом»
 (из nick-поиска / fail-валидации / сайта / VK-бэкфилла; в `robloxUsername` не пишется, пока
 клиент не подтвердит). GP-watch: `gpWatchLastCheckAt` (троттлинг проверок),
-`gpWatchNotifiedPassId` (дедуп уведомлений). Индекс `[status, probableNick]` — выборка воркера.
+`gpWatchNotifiedPassId` (дедуп уведомлений), `gpWatchDeclinedAt` (П3, миграция
+`20260706_add_gpwatch_declined_at`: клиент ответил «❌ Не мой ник» — бейдж в TWA;
+сбрасывается при новом probableNick). Индекс `[status, probableNick]` — выборка воркера.
 
 Статусы (`WbOrderStatus`):
 `AWAITING_PAYMENT` · `PAYMENT_PENDING` · `AWAITING_GAMEPASS` (provisional, ждём ссылку) ·

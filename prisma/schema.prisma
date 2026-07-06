@@ -170,6 +170,9 @@ model WbOrder {
   /// GP-watcher bookkeeping: throttle checks and dedup "gamepass found" pings.
   gpWatchLastCheckAt    DateTime?
   gpWatchNotifiedPassId String?
+  /// П3: customer tapped «❌ Не мой ник» on the GP-watch ping. Surfaces a badge
+  /// in TWA («кого дожимать вручную»); cleared when a new probable nick arrives.
+  gpWatchDeclinedAt     DateTime?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 

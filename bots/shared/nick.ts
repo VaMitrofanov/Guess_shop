@@ -51,6 +51,9 @@ export async function noteProbableNick(opts: {
         // Structured mirror for the GP-watcher (+3) — last probable nick wins.
         probableNick: nick,
         probableNickAt: new Date(),
+        // П3: новый вероятный ник снимает бейдж «клиент отверг ник» —
+        // GP-watch возобновляется по свежему нику.
+        gpWatchDeclinedAt: null,
       },
     });
   } catch (err: any) {

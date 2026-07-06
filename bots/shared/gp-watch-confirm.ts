@@ -72,7 +72,7 @@ export async function declineGpWatch(orderId: string): Promise<{ wbCode: string;
   try {
     const order = await (db as any).wbOrder.findUnique({
       where: { id: orderId },
-      select: { adminNote: true, status: true, wbCode: true, amount: true },
+      select: { adminNote: true, status: true, wbCode: true, amount: true, probableNick: true },
     });
     if (!order || order.status !== "AWAITING_GAMEPASS") return null;
     const stamp = new Date().toISOString().slice(0, 10);
@@ -82,9 +82,17 @@ export async function declineGpWatch(orderId: string): Promise<{ wbCode: string;
       data: {
         probableNick: null,
         gpWatchNotifiedPassId: null,
+        // П3: структурный маркер отказа — бейдж в TWA, надёжнее парсинга adminNote.
+        gpWatchDeclinedAt: new Date(),
         adminNote: `${prefix}[НИК-ОТКАЗ ${stamp}] юзер отклонил GP-watch`.slice(0, 2000),
       },
     });
+    // П3: менеджер должен узнать об отказе сразу (симметрично алерту «нашёл ГП»).
+    await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id,
+      `❌ <b>GP-watch: клиент отверг ник</b> · <code>${order.wbCode}</code>\n` +
+      (order.probableNick ? `Предложенный ник: <b>${escapeHtml(order.probableNick)}</b>\n` : "") +
+      `Бот попросил прислать правильный ник; заказ помечен бейджем в TWA («Ждут ссылку»).`,
+      { parse_mode: "HTML" })));
     return { wbCode: order.wbCode, amount: order.amount };
   } catch (err: any) {
     console.error("[gp-watch] decline error:", err?.message ?? err);

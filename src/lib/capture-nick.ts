@@ -39,6 +39,8 @@ export async function noteProbableNickByCode(wbCode: string, rawNick: string, so
         // Structured mirror for the GP-watcher (+3) — last probable nick wins.
         probableNick: nick,
         probableNickAt: new Date(),
+        // П3: новый вероятный ник снимает бейдж «клиент отверг ник».
+        gpWatchDeclinedAt: null,
       },
     });
   } catch (err: any) {

@@ -33,6 +33,8 @@ interface Order {
   robloxUsername: string | null;
   probableNick: string | null;
   gpWatchNotifiedPassId: string | null;
+  /** П3: клиент ответил «❌ Не мой ник» на GP-watch-пинг — дожимать вручную. */
+  gpWatchDeclinedAt: string | null;
   purchaserUsername: string | null;
   orderSource: "WB" | "DIRECT" | "AVITO" | "MANUAL";
   reviewStatus: "PENDING" | "SUBMITTED" | null;
@@ -1137,6 +1139,22 @@ function OrderCard({
             }}>
             {gpwLoading ? "Ищу ГП на Roblox…" : gpwPassId ? "📣 Оповестить клиента ещё раз" : "👁 Найти ГП по нику и оповестить"}
           </button>
+        </div>
+      )}
+
+      {/* ❌ П3: клиент отверг GP-watch-ник — вероятного ника больше нет, дожать вручную */}
+      {order.gpWatchDeclinedAt && order.status === "AWAITING_GAMEPASS" && !order.robloxUsername && (
+        <div style={{
+          margin: "0 14px 10px", padding: "8px 10px",
+          background: `${C.red}14`, borderRadius: 8,
+          fontSize: 14, color: C.red,
+          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+        }}>
+          <span style={{ fontWeight: 600 }}>❌ Клиент сказал: не его ник</span>
+          <span style={{ fontSize: 13, color: C.textTertiary }}>
+            {new Date(order.gpWatchDeclinedAt).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
+            {" · "}ждём правильный ник — дожать вручную
+          </span>
         </div>
       )}
 
