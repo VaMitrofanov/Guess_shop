@@ -768,13 +768,22 @@ async function showSummary(ctx: any, flow: DirectFlowState, gpRobux: number, gpN
     }
   } catch { /* non-critical */ }
 
+  // П5: клиент выбрал пасс с ценой ≠ расчётной (например, старый пасс от
+  // прошлого заказа) — предупреждаем его, а не только админскую карточку.
+  const expectedGp = flow.passPrice ?? Math.ceil((flow.totalAmount ?? 0) / 0.7);
+  const wrongPriceLine = expectedGp > 0 && Math.abs(gpRobux - expectedGp) > 2
+    ? `\n\n⚠️ <b>Цена геймпасса не совпадает:</b> этот пасс стоит ${gpRobux} R$, ` +
+      `а для ${flow.totalAmount} R$ нужен пасс на <b>${expectedGp} R$</b>. ` +
+      `Лучше создать новый с правильной ценой — иначе выкуп задержится.`
+    : "";
+
   const summaryText =
     `${stepBar(5, "Итого")}\n\n` +
     `📦 Получишь:    <b>${flow.totalAmount} R$</b>${bonusLine}\n` +
     `🎮 Ник:         <b>${escapeHtml(flow.robloxUsername!)}</b>\n` +
     `🎫 Геймпасс:    <b>${gpRobux} R$</b> · "${escapeHtml(gpName.slice(0, 30))}"${discountLine}\n` +
     `💰 К оплате:    <b>${fmtRub(flow.rublePrice!)}</b>` +
-    mpLine;
+    mpLine + wrongPriceLine;
 
   const summaryKb = Markup.inlineKeyboard([
     [Markup.button.callback("✅ Оформить", CB.directSubmit)],
@@ -4555,7 +4564,7 @@ export function registerCallbacks(bot: Telegraf): void {
       if (payOkOrder.gamepassUrl) {
         await (db as any).wbOrder.update({
           where: { id: payOkOrderId },
-          data: { status: "PENDING", pendingAt: new Date() },
+          data: { status: "PENDING", pendingAt: new Date(), paidAt: new Date() },
         });
         const payOkUser = await (db as any).user.findUnique({ where: { id: payOkUserId } });
         if (payOkUser?.tgId) {
@@ -4572,7 +4581,7 @@ export function registerCallbacks(bot: Telegraf): void {
         // Legacy flow: no gamepassUrl → need user to create gamepass
         await (db as any).wbOrder.update({
           where: { id: payOkOrderId },
-          data: { status: "AWAITING_GAMEPASS" },
+          data: { status: "AWAITING_GAMEPASS", paidAt: new Date() },
         });
         const payOkUser = await (db as any).user.findUnique({ where: { id: payOkUserId } });
         if (payOkUser?.tgId) {

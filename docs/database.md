@@ -29,7 +29,10 @@ Neon Postgres + Prisma 7 (`engineType=library`, adapter `PrismaPg`). Модел�
 `orderSource` (`WB`/`DIRECT`/`AVITO`/`MANUAL`), `isDirectOrder`, `isFavorite`, `isTest`,
 `adminNote` (только для админа), `robloxUsername` (продавец, **только подтверждённый** ник),
 `purchaserUsername` (куки-аккаунт-покупатель), `purchaseRate` (снапшот курса при выкупе),
-`pendingAt` (момент попадания в «К выкупу» — для сортировки), `rejectionReason`.
+`pendingAt` (момент попадания в «К выкупу» — для сортировки), `rejectionReason`,
+`paidAt` (2026-07-06, миграция `20260706_add_paid_at`) — момент подтверждения оплаты
+прямого заказа (`pay_ok:` в TG); DIR без `paidAt` исключён из всех путей выкупа
+(гейт — `docs/twa-admin.md`); бэкфилл: DIR в PENDING/IN_PROGRESS/COMPLETED → `updatedAt`.
 Ранний захват ника (+3): `probableNick` / `probableNickAt` — **вероятный** ник «карандашом»
 (из nick-поиска / fail-валидации / сайта / VK-бэкфилла; в `robloxUsername` не пишется, пока
 клиент не подтвердит). GP-watch: `gpWatchLastCheckAt` (троттлинг проверок),

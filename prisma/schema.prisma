@@ -156,6 +156,10 @@ model WbOrder {
   isFavorite      Boolean       @default(false)
   /// Roblox username of the cookie account that purchased this gamepass.
   purchaserUsername String?
+  /// When the customer's payment for a direct order was confirmed (pay_ok).
+  /// Unpaid DIR orders (isDirectOrder && paidAt == null) are excluded from
+  /// every buyout path: TWA queue, purchase actions, auto-buyout worker.
+  paidAt          DateTime?
   /// Probable Roblox nick captured "in pencil" before the customer sent a
   /// gamepass (nick search / failed validation / site / VK backfill). Mirrors
   /// the [НИК?] adminNote history but structured, so the GP-watcher (+3) can

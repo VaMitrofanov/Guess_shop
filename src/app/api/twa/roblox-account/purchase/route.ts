@@ -202,6 +202,31 @@ export async function POST(req: NextRequest) {
     if (!productId || !price || !sellerId)
       return NextResponse.json({ error: "productId, price, sellerId required" }, { status: 400 });
 
+    // П5 (PLAN «+7»): покупка за реальные робуксы по геймпассу неоплаченного
+    // прямого заказа запрещена — этот роут раньше не проверял статус вовсе.
+    const gpIdRaw = String(body.gamepassId ?? "").match(/(\d+)/)?.[1];
+    if (gpIdRaw) {
+      const candidates = await (prisma as any).wbOrder.findMany({
+        where: {
+          isTest: false,
+          isDirectOrder: true,
+          paidAt: null,
+          status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING", "PENDING", "IN_PROGRESS", "ERROR"] },
+          gamepassUrl: { contains: `/${gpIdRaw}` },
+        },
+        select: { wbCode: true, gamepassUrl: true },
+      });
+      // `contains` может зацепить более длинный id — сверяем точным парсингом.
+      const unpaid = candidates.find(
+        (o: any) => (o.gamepassUrl ?? "").match(/game-pass(?:es)?\/(\d+)/)?.[1] === gpIdRaw,
+      );
+      if (unpaid)
+        return NextResponse.json(
+          { error: `💳 Геймпасс привязан к неоплаченному прямому заказу ${unpaid.wbCode} — сначала подтверди оплату` },
+          { status: 409 },
+        );
+    }
+
     const cookie = await getCookie();
     if (!cookie) return NextResponse.json({ error: "Cookie не задан" }, { status: 400 });
 

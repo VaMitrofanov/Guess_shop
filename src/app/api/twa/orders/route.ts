@@ -25,6 +25,37 @@ let cachedCounts: {
 } | null = null;
 const COUNT_CACHE_TTL = 30_000;
 
+// ── П5: живая цена геймпасса для карточек очереди (кэш product-info) ────────
+const gpInfoCache = new Map<string, { price: number | null; isForSale: boolean; ts: number }>();
+const GP_INFO_TTL = 10 * 60_000;
+
+function gpIdOf(url: string | null | undefined): string | null {
+  const m = url?.match(/game-pass(?:es)?\/(\d+)/);
+  return m ? m[1] : null;
+}
+
+async function getGpInfoCached(gpId: string): Promise<{ price: number | null; isForSale: boolean } | null> {
+  const hit = gpInfoCache.get(gpId);
+  if (hit && Date.now() - hit.ts < GP_INFO_TTL) return hit;
+  const urls = [
+    `https://apis.roblox.com/game-passes/v1/game-passes/${gpId}/product-info`,
+    `https://apis.roproxy.com/game-passes/v1/game-passes/${gpId}/product-info`,
+  ];
+  for (const url of urls) {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (r.ok) {
+        const j: any = await r.json().catch(() => null);
+        if (!j) continue;
+        const entry = { price: j.PriceInRobux ?? null, isForSale: j.IsForSale ?? false, ts: Date.now() };
+        gpInfoCache.set(gpId, entry);
+        return entry;
+      }
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
 function buildTabWhere(tab: FilterTab): any {
   const cutoff = new Date(Date.now() - NEW_CUTOFF_HOURS * 3600_000);
   switch (tab) {
@@ -525,6 +556,55 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ orders });
   }
 
+  // Не требует orderId — обогащение карточек очереди выкупа: живая цена ГП
+  // (⚠️ при расхождении с расчётной) и «этот геймпасс уже выкупался в <код>»
+  // (сигнал, что донор может уже владеть пассом — Roblox не продаст вторую
+  // копию тому же аккаунту). П5 (PLAN «+7»): карточка выкупа честнее.
+  if (action === "gp-live-check") {
+    const ids: string[] = Array.isArray(body.orderIds) ? body.orderIds.slice(0, 30).map(String) : [];
+    if (ids.length === 0) return NextResponse.json({ results: {} });
+
+    const checkOrders: any[] = await (prisma as any).wbOrder.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, amount: true, gamepassUrl: true, wbCode: true },
+    });
+
+    const gpIds = [...new Set(checkOrders.map((o) => gpIdOf(o.gamepassUrl)).filter(Boolean))] as string[];
+    const completed: any[] = gpIds.length > 0
+      ? await (prisma as any).wbOrder.findMany({
+          where: {
+            isTest: false,
+            status: "COMPLETED",
+            OR: gpIds.map((id) => ({ gamepassUrl: { contains: `/${id}` } })),
+          },
+          orderBy: { updatedAt: "desc" },
+          select: { wbCode: true, gamepassUrl: true },
+        })
+      : [];
+    const reusedBy = new Map<string, string>();
+    for (const c of completed) {
+      const id = gpIdOf(c.gamepassUrl);
+      if (id && !reusedBy.has(id)) reusedBy.set(id, c.wbCode);
+    }
+
+    const results: Record<string, any> = {};
+    await Promise.all(checkOrders.map(async (o) => {
+      const gpId = gpIdOf(o.gamepassUrl);
+      if (!gpId) return;
+      const expected = Math.ceil(o.amount / 0.7);
+      const info = await getGpInfoCached(gpId);
+      const reusedCode = reusedBy.get(gpId);
+      results[o.id] = {
+        expected,
+        livePrice: info?.price ?? null,
+        isForSale: info?.isForSale ?? null,
+        priceMismatch: info?.price != null && Math.abs(info.price - expected) > 2,
+        reusedIn: reusedCode && reusedCode !== o.wbCode ? reusedCode : null,
+      };
+    }));
+    return NextResponse.json({ results });
+  }
+
   if (!orderId)
     return NextResponse.json({ error: "orderId required" }, { status: 400 });
 
@@ -533,6 +613,11 @@ export async function POST(req: NextRequest) {
     include: { user: { select: { id: true, tgId: true, vkId: true, username: true } } },
   });
   if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
+
+  // П5 (PLAN «+7»): неоплаченный прямой заказ не должен доходить до выкупа
+  // ни одним путём — робуксы донора тратятся только после подтверждения оплаты.
+  const unpaidDirect = order.isDirectOrder && !order.paidAt;
+  const UNPAID_DIR_ERROR = `💳 Прямой заказ ${order.wbCode} не оплачен — сначала подтверди оплату (pay_ok в TG-карточке)`;
 
   if (action === "set-note") {
     const note = typeof body.note === "string" ? body.note.trim().slice(0, 2000) : "";
@@ -590,6 +675,11 @@ export async function POST(req: NextRequest) {
     const newStatus = statusMap[target];
     if (!newStatus) return NextResponse.json({ error: "Invalid target" }, { status: 400 });
 
+    // Неоплаченный DIR нельзя руками перевести в очередь выкупа или «Готово» —
+    // это открыло бы автовыкупу/менеджеру путь потратить робуксы без оплаты.
+    if (unpaidDirect && (newStatus === "PENDING" || newStatus === "COMPLETED"))
+      return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
+
     const data: any = {
       status: newStatus,
       adminNote: note.slice(0, 2000),
@@ -615,6 +705,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "complete") {
+    if (unpaidDirect) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
     if (!["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status))
       return NextResponse.json({ error: "Order must be PENDING, IN_PROGRESS or ERROR" }, { status: 400 });
     const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
@@ -642,6 +733,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "purchase") {
+    if (unpaidDirect) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
     if (!["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status))
       return NextResponse.json({ error: "Order must be PENDING, IN_PROGRESS or ERROR" }, { status: 400 });
 
@@ -787,6 +879,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "purchase-script") {
+    if (unpaidDirect) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
     const gpMatch = order.gamepassUrl?.match(/game-pass(?:es)?\/(\d+)/);
     if (!gpMatch) return NextResponse.json({ error: "No gamepass URL" }, { status: 400 });
     const gpId = gpMatch[1];
@@ -834,6 +927,8 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "attach-gamepass") {
+    // attach переводит заказ в PENDING (очередь выкупа) — для неоплаченного DIR закрыто.
+    if (unpaidDirect) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
     const raw = String(body.gamepassId ?? "").trim();
     const idMatch = raw.match(/game-pass(?:es)?\/(\d+)/i) ?? raw.match(/^(\d+)$/);
     if (!idMatch)

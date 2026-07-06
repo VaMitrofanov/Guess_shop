@@ -1032,8 +1032,21 @@ interface BuyoutOrder {
   robloxUsername: string | null;
   createdAt: string;
   pendingAt: string | null;
+  paidAt: string | null;
   user: { tgId: string | null; vkId: string | null; name: string | null; username: string | null };
 }
+
+/** Живая проверка геймпасса карточки (П5): фактическая цена + «уже выкупался». */
+interface GpLiveInfo {
+  expected: number;
+  livePrice: number | null;
+  isForSale: boolean | null;
+  priceMismatch: boolean;
+  reusedIn: string | null;
+}
+
+/** Неоплаченный прямой заказ — исключается из всех путей выкупа (П5). */
+const isUnpaidDirect = (o: BuyoutOrder) => o.isDirectOrder && !o.paidAt;
 
 function fmtAge(iso: string): string {
   const mins = (Date.now() - new Date(iso).getTime()) / 60000;
@@ -1157,8 +1170,8 @@ function groupBySource(orders: BuyoutOrder[]) {
 }
 
 function BuyoutOrderCard({
-  order, buying, onPurchase, dimmed,
-}: { order: BuyoutOrder; buying: string | null; onPurchase: (o: BuyoutOrder) => void; dimmed?: boolean }) {
+  order, buying, onPurchase, dimmed, live,
+}: { order: BuyoutOrder; buying: string | null; onPurchase: (o: BuyoutOrder) => void; dimmed?: boolean; live?: GpLiveInfo }) {
   const dirty = Math.ceil(order.amount / 0.7);
   const nick = order.user.username ? `@${order.user.username}` : order.user.name ?? "—";
   const isBuying = buying === order.id;
@@ -1231,6 +1244,22 @@ function BuyoutOrderCard({
         )}
       </div>
 
+      {/* П5: честная карточка — фактическая живая цена ГП и «уже выкупался» */}
+      {live?.priceMismatch && live.livePrice != null && (
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.orange }}>
+          ⚠️ Фактическая цена пасса {live.livePrice.toLocaleString("ru-RU")} R$ ≠ расчётной {live.expected.toLocaleString("ru-RU")} R$
+        </div>
+      )}
+      {live?.isForSale === false && (
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.red }}>
+          ⛔ Геймпасс сейчас не на продаже
+        </div>
+      )}
+      {live?.reusedIn && (
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.red }}>
+          ♻️ Уже выкупался в {live.reusedIn} — донор может им владеть
+        </div>
+      )}
       {order.robloxUsername && (
         <div style={{ fontSize: 15, color: C.textSecondary }}>
           🎮 {order.robloxUsername}
@@ -1247,6 +1276,7 @@ function BuyoutOrderCard({
 
 function renderGroupedOrders(
   orders: BuyoutOrder[], buying: string | null, onPurchase: (o: BuyoutOrder) => void, dimmed?: boolean,
+  liveMap?: Record<string, GpLiveInfo>,
 ) {
   const { direct, avito, wb } = groupBySource(orders);
   const groups: { label: string; color: string; items: BuyoutOrder[] }[] = [];
@@ -1270,7 +1300,7 @@ function renderGroupedOrders(
         return (
           <div key={order.id}>
             {showSep && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
-            <BuyoutOrderCard order={order} buying={buying} onPurchase={onPurchase} dimmed={dimmed} />
+            <BuyoutOrderCard order={order} buying={buying} onPurchase={onPurchase} dimmed={dimmed} live={liveMap?.[order.id]} />
           </div>
         );
       })}
@@ -1290,12 +1320,31 @@ function buyoutNick(o: BuyoutOrder): string {
 
 function BuyoutSection({ token, balance, accountName, onBalanceChange }: { token: string; balance: number | null; accountName: string | null; onBalanceChange: (delta: number) => void }) {
   const [orders, setOrders] = useState<BuyoutOrder[]>([]);
+  // Неоплаченные DIR (П5): не в очереди — отдельная свёрнутая секция «Ждём оплату».
+  const [awaitingPay, setAwaitingPay] = useState<BuyoutOrder[]>([]);
+  const [liveMap, setLiveMap] = useState<Record<string, GpLiveInfo>>({});
   const [loading, setLoading] = useState(true);
   const [buying, setBuying] = useState<string | null>(null);
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; ok: number } | null>(null);
   const [report, setReport] = useState<{ items: BatchItem[]; total: number; ok: number; fail: number } | null>(null);
   const bulkStop = useRef(false);
+
+  // Живая проверка ГП карточек (фактическая цена, «уже выкупался») — после
+  // загрузки списка, не блокируя его; ошибки не критичны.
+  const checkLive = useCallback(async (list: BuyoutOrder[]) => {
+    const ids = list.filter(o => o.gamepassUrl).map(o => o.id).slice(0, 30);
+    if (ids.length === 0) return;
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "gp-live-check", orderIds: ids }),
+      });
+      const d = await r.json().catch(() => null);
+      if (r.ok && d?.results) setLiveMap(d.results);
+    } catch { /* non-fatal */ }
+  }, [token]);
 
   const load = useCallback(async () => {
     try {
@@ -1308,10 +1357,14 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange }: { token
       const direct = rDirect.ok ? ((await rDirect.json()).orders ?? []) : [];
       const buyout = rBuyout.ok ? ((await rBuyout.json()).orders ?? []) : [];
       const avito = rAvito.ok ? ((await rAvito.json()).orders ?? []) : [];
-      setOrders([...direct, ...buyout, ...avito]);
+      const all: BuyoutOrder[] = [...direct, ...buyout, ...avito];
+      const queue = all.filter(o => !isUnpaidDirect(o));
+      setOrders(queue);
+      setAwaitingPay(all.filter(isUnpaidDirect));
+      void checkLive(all);
     } catch {}
     finally { setLoading(false); }
-  }, [token]);
+  }, [token, checkLive]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1439,16 +1492,29 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange }: { token
     <div style={{ background: C.card, borderRadius: 14, height: 80, animation: "pulse 1.5s ease-in-out infinite" }} />
   );
 
+  // Свёрнутая секция неоплаченных DIR — видна во всех состояниях очереди.
+  const awaitingPayBlock = awaitingPay.length > 0
+    ? <AwaitingPaySection orders={awaitingPay} liveMap={liveMap} />
+    : null;
+
   if (orders.length === 0) return (
-    <Card>
-      <div style={{ padding: "20px 16px", textAlign: "center", color: C.textTertiary, fontSize: 16 }}>
-        Нет заказов к выкупу
-      </div>
-    </Card>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <Card>
+        <div style={{ padding: "20px 16px", textAlign: "center", color: C.textTertiary, fontSize: 16 }}>
+          Нет заказов к выкупу
+        </div>
+      </Card>
+      {awaitingPayBlock}
+    </div>
   );
 
   if (balance === null) {
-    return <Card>{renderGroupedOrders(orders, buying, doPurchase)}</Card>;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <Card>{renderGroupedOrders(orders, buying, doPurchase, false, liveMap)}</Card>
+        {awaitingPayBlock}
+      </div>
+    );
   }
 
   const plan = buildBuyoutPlan(orders, balance);
@@ -1521,7 +1587,7 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange }: { token
           <div style={{ padding: "10px 16px 4px", fontSize: 12, fontWeight: 700, color: C.green, textTransform: "uppercase", letterSpacing: 0.5 }}>
             Выкупить · {plan.selected.length}
           </div>
-          {renderGroupedOrders(plan.selected, buying, doPurchase)}
+          {renderGroupedOrders(plan.selected, buying, doPurchase, false, liveMap)}
         </Card>
       )}
 
@@ -1531,14 +1597,56 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange }: { token
           <div style={{ padding: "10px 16px 4px", fontSize: 12, fontWeight: 700, color: C.textTertiary, textTransform: "uppercase", letterSpacing: 0.5 }}>
             Ожидают баланс · {plan.waiting.length}
           </div>
-          {renderGroupedOrders(plan.waiting, buying, doPurchase, true)}
+          {renderGroupedOrders(plan.waiting, buying, doPurchase, true, liveMap)}
         </Card>
       )}
+
+      {awaitingPayBlock}
 
       {report && (
         <BulkReport report={report} onClose={() => setReport(null)} />
       )}
     </div>
+  );
+}
+
+// ── Неоплаченные прямые заказы (П5) — свёрнутая секция «💳 Ждём оплату» ──────
+// Кнопки выкупа нет намеренно: до подтверждения оплаты (pay_ok в TG) заказ
+// исключён из очереди, пачки и «Выкупить всё»; сервер такие действия отвергает.
+function AwaitingPaySection({ orders, liveMap }: { orders: BuyoutOrder[]; liveMap: Record<string, GpLiveInfo> }) {
+  const [open, setOpen] = useState(false);
+  const totalDirty = orders.reduce((s, o) => s + Math.ceil(o.amount / 0.7), 0);
+  return (
+    <Card>
+      <button
+        className="twa-press"
+        onClick={() => { haptic.impact("light"); setOpen(v => !v); }}
+        style={{
+          width: "100%", padding: "13px 16px", border: "none", background: "transparent",
+          display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+          textAlign: "left", fontFamily: "inherit",
+        }}
+      >
+        <span style={{ fontSize: 12, fontWeight: 700, color: C.yellow, textTransform: "uppercase", letterSpacing: 0.5, flex: 1 }}>
+          💳 Ждём оплату · {orders.length}
+        </span>
+        <span style={{ fontSize: 13, color: C.textTertiary, ...tabular }}>
+          {totalDirty.toLocaleString("ru-RU")} R$
+        </span>
+        <span style={{ fontSize: 12, color: C.textTertiary, transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }}>▼</span>
+      </button>
+      {open && orders.map(o => (
+        <div key={o.id}>
+          <div style={{ height: 1, background: C.border, marginLeft: 16 }} />
+          <BuyoutOrderCard order={o} buying={null} onPurchase={() => {}} dimmed live={liveMap[o.id]} />
+        </div>
+      ))}
+      {open && (
+        <div style={{ padding: "4px 16px 12px", fontSize: 12, color: C.textTertiary }}>
+          Прямые заказы без подтверждённой оплаты — в очередь выкупа попадут после «✅ Оплата пришла» в TG-карточке.
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -2016,10 +2124,17 @@ export default function BossrobuxScreen({ token }: { token: string }) {
 
       const r = await fetch("/api/twa/roblox-account/purchase", {
         method: "POST", headers: purchaseHeaders,
-        body: JSON.stringify({ action: "purchase", productId, price, sellerId }),
+        // gamepassId — для серверного guard'а «неоплаченный прямой заказ» (П5).
+        body: JSON.stringify({ action: "purchase", productId, price, sellerId, gamepassId: confirmGp.gamepassId }),
       });
       const d = await r.json();
 
+      if (r.status === 409) {
+        haptic.notify("error");
+        setSearchError(d.error ?? "Заказ не оплачен");
+        setConfirmGp(null);
+        return;
+      }
       if (d.success) {
         haptic.notify("success");
         setBoughtIds(prev => new Set(prev).add(confirmGp!.gamepassId));

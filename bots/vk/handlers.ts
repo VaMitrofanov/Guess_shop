@@ -2595,13 +2595,22 @@ async function showVkSummary(ctx: MessageContext, flowState: { totalAmount: numb
     }
   } catch { /* non-critical */ }
 
+  // П5: клиент выбрал пасс с ценой ≠ расчётной — предупреждаем его,
+  // а не только админскую карточку (зеркально TG showSummary).
+  const expectedGp = Math.ceil(flowState.totalAmount / 0.7);
+  const wrongPriceLine = expectedGp > 0 && Math.abs(gpRobux - expectedGp) > 2
+    ? `\n\n⚠️ Цена геймпасса не совпадает: этот пасс стоит ${gpRobux} R$, ` +
+      `а для ${flowState.totalAmount} R$ нужен пасс на ${expectedGp} R$. ` +
+      `Лучше создать новый с правильной ценой — иначе выкуп задержится.`
+    : "";
+
   const summaryText =
     `${stepBar(5, "Итого")}\n\n` +
     `📦 Получишь:    ${flowState.totalAmount} R$${bonusLine}\n` +
     `🎮 Ник:         ${nick}\n` +
     `🎫 Геймпасс:    ${gpRobux} R$ · "${gpName.slice(0, 30)}"${discountLine}\n` +
     `💰 К оплате:    ${fmtRub(flowState.rublePrice)}` +
-    mpLine;
+    mpLine + wrongPriceLine;
 
   const kb = Keyboard.builder();
   kb.textButton({ label: "✅ Оформить", payload: { command: "direct_submit" }, color: "positive" });

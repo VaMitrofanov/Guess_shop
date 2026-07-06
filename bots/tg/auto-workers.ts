@@ -111,7 +111,9 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
 
     const maxPerTick = settings.autoBuyoutMaxPerTick ?? 5;
     const orders = await (db as any).wbOrder.findMany({
-      where: { status: "PENDING", isTest: false },
+      // Пояс+подтяжки (П5): неоплаченный DIR в PENDING оказаться не должен
+      // (guard'ы в TWA), но даже если окажется — автовыкуп его не тронет.
+      where: { status: "PENDING", isTest: false, NOT: { isDirectOrder: true, paidAt: null } },
       orderBy: { pendingAt: "asc" },
       take: maxPerTick + autobuySkip.size, // headroom so skipped ones don't starve the tick
       include: { user: { select: { id: true, tgId: true, vkId: true } } },
