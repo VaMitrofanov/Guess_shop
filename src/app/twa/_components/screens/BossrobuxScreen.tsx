@@ -3,6 +3,7 @@ import { C, MONO, tabular, tint } from "../theme";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { haptic } from "../haptics";
 import { toast } from "../Toast";
+import CreateManualModal from "../CreateManualModal";
 
 interface AccountInfo {
   hasCookie:      boolean;
@@ -119,7 +120,7 @@ function SegmentControl({ value, onChange }: { value: "nick" | "id"; onChange: (
 
 // ── Gamepass Card ────────────────────────────────────────────────────────────
 function GamepassCard({
-  gp, buying, bought, onBuy, onCreateAvito, creatingAvito, onAttach,
+  gp, buying, bought, onBuy, onCreateAvito, creatingAvito, onAttach, onCreateOrder, buyDisabled,
 }: {
   gp: GamepassItem;
   buying: boolean;
@@ -128,6 +129,10 @@ function GamepassCard({
   onCreateAvito?: () => void;
   creatingAvito?: boolean;
   onAttach?: () => void;
+  /** ➕ Создать ручной заказ с этим геймпассом (CreateManualModal). */
+  onCreateOrder?: () => void;
+  /** Cookie не задан/истёк: поиск работает, выкуп — нет. */
+  buyDisabled?: boolean;
 }) {
   return (
     <div style={{
@@ -178,6 +183,20 @@ function GamepassCard({
               📎
             </button>
           )}
+          {onCreateOrder && (
+            <button
+              className="twa-press-sm"
+              onClick={onCreateOrder}
+              title="Создать ручной заказ с этим геймпассом"
+              style={{
+                padding: "9px 12px", border: "none", borderRadius: 10,
+                background: `${C.accent}22`, color: C.accent, fontSize: 16, fontWeight: 700,
+                cursor: "pointer", fontFamily: "inherit", lineHeight: 1,
+              }}
+            >
+              ＋
+            </button>
+          )}
           {onCreateAvito && (
             <button
               className="twa-press-sm"
@@ -197,12 +216,13 @@ function GamepassCard({
           <button
             className="twa-press-sm"
             onClick={onBuy}
-            disabled={buying || gp.isForSale === false}
+            disabled={buying || gp.isForSale === false || buyDisabled}
+            title={buyDisabled ? "Cookie не задан/истёк — выкуп недоступен" : undefined}
             style={{
               padding: "9px 16px", border: "none", borderRadius: 10,
-              background: gp.isForSale === false ? C.elevated : C.green,
+              background: gp.isForSale === false || buyDisabled ? C.elevated : C.green,
               color: "#fff", fontSize: 15, fontWeight: 600, cursor: buying ? "default" : "pointer",
-              opacity: buying ? 0.5 : (gp.isForSale === false ? 0.4 : 1),
+              opacity: buying ? 0.5 : (gp.isForSale === false || buyDisabled ? 0.4 : 1),
               fontFamily: "inherit", transition: "opacity 0.2s",
             }}
           >
@@ -1980,6 +2000,8 @@ export default function BossrobuxScreen({ token }: { token: string }) {
 
   const [confirmGp, setConfirmGp] = useState<GamepassItem | null>(null);
   const [attachGp, setAttachGp] = useState<GamepassItem | null>(null);
+  // ➕ из результата поиска: ручной заказ с предзаполненным геймпассом.
+  const [manualGp, setManualGp] = useState<GamepassItem | null>(null);
   // Дедуп Авито: сервер ответил 409 — на геймпасс уже есть активный заказ.
   const [avitoDup, setAvitoDup] = useState<{ gp: GamepassItem; existing: { wbCode: string; status: string } } | null>(null);
   const [buyoutKey, setBuyoutKey] = useState(0);
@@ -2207,9 +2229,11 @@ export default function BossrobuxScreen({ token }: { token: string }) {
   return (
     <div style={{ padding: "16px 16px 32px", display: "flex", flexDirection: "column", gap: 22, overflowY: "auto", height: "100%" }}>
 
-      {/* ── Search & Purchase (FIRST — main function) ──────────────────── */}
-      {cookieReady && (
-        <section>
+      {/* ── Search & Purchase (FIRST — main function) ────────────────────
+          Поиск ходит в публичные Roblox API и работает без cookie — секция
+          видна всегда (раньше пряталась целиком при протухшем cookie или
+          таймауте Roblox, «пропал поиск»). Без cookie дизейблится только 🛒. */}
+      <section>
           <SectionHeader title="Поиск и выкуп" />
 
           <Card>
@@ -2266,9 +2290,11 @@ export default function BossrobuxScreen({ token }: { token: string }) {
                       buying={buying && confirmGp?.gamepassId === gp.gamepassId}
                       bought={boughtIds.has(gp.gamepassId)}
                       onBuy={() => setConfirmGp(gp)}
+                      buyDisabled={!cookieReady}
                       onCreateAvito={() => createAvitoFromSearch(gp)}
                       creatingAvito={creatingAvito}
                       onAttach={() => { haptic.impact("light"); setAttachGp(gp); }}
+                      onCreateOrder={() => { haptic.impact("light"); setManualGp(gp); }}
                     />
                   </div>
                 ))}
@@ -2285,8 +2311,13 @@ export default function BossrobuxScreen({ token }: { token: string }) {
               </div>
             )}
           </Card>
+
+          {!cookieReady && (
+            <div style={{ marginTop: 8, padding: "0 4px", fontSize: 13, color: C.textTertiary }}>
+              🔑 Cookie не задан или истёк — поиск работает, выкуп недоступен
+            </div>
+          )}
         </section>
-      )}
 
       {/* ── Account info + inline cookie ───────────────────────────────── */}
       <section>
@@ -2447,6 +2478,18 @@ export default function BossrobuxScreen({ token }: { token: string }) {
           token={token}
           onClose={() => setAttachGp(null)}
           onAttached={() => setBuyoutKey(k => k + 1)}
+        />
+      )}
+
+      {/* ➕ Ручной заказ из результата поиска (общая модалка с Orders) */}
+      {manualGp && (
+        <CreateManualModal
+          token={token}
+          initialGamepassUrl={`https://www.roblox.com/game-pass/${manualGp.gamepassId}`}
+          initialNick={manualGp.sellerName}
+          initialAmount={Math.floor(manualGp.price * 0.7)}
+          onClose={() => setManualGp(null)}
+          onDone={() => { setManualGp(null); setBuyoutKey(k => k + 1); setHistoryKey(k => k + 1); }}
         />
       )}
 
