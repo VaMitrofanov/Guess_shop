@@ -2483,13 +2483,30 @@ async function processGamepassSubmission(
       if (err.code === "P2002") {
         pendingLink.delete(ctx.from.id);
         clearFailCounts(ctx.from.id);
-        await showResult(
-          "⚠️ Заказ по этому коду уже создан и сейчас обрабатывается.",
-          Markup.inlineKeyboard([
-            [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
-            [supportBtn("💬 Если что-то не так", "order_dupe", ctx)],
-          ])
-        );
+        // Синтетический P2002 бросается только для COMPLETED-заказа (см. tx выше);
+        // настоящий P2002 (гонка create) — редкость. Уточняем статус, чтобы не
+        // врать «обрабатывается» про давно выполненный заказ (кейс CXH5GAP).
+        const dupOrder = await (db as any).wbOrder.findUnique({
+          where: { wbCode: state.wbCode }, select: { status: true },
+        }).catch(() => null);
+        if (dupOrder?.status === "COMPLETED") {
+          await showResult(
+            "✅ Заказ по этому коду уже выполнен — один код даёт один заказ.\n\n" +
+            "Хочешь ещё робуксов? Закажи напрямую в боте — без карты WB:",
+            Markup.inlineKeyboard([
+              [Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
+              [supportBtn("💬 Если что-то не так", "order_dupe")],
+            ])
+          );
+        } else {
+          await showResult(
+            "⚠️ Заказ по этому коду уже создан и сейчас обрабатывается.",
+            Markup.inlineKeyboard([
+              [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
+              [supportBtn("💬 Если что-то не так", "order_dupe")],
+            ])
+          );
+        }
         return;
       }
       console.error("[TG] Order create error:", err);
@@ -2506,12 +2523,15 @@ async function processGamepassSubmission(
 
     if (duplicateSubmission) {
       // Same pass on an already-queued order — confirm to the user, but do NOT
-      // re-send the admin card (root cause of «двойные карточки»).
+      // re-send the admin card (root cause of «двойные карточки»). supportBtn
+      // без ctx: юзер получил ✅ и НЕ застрял — show-time hurdle «Дублирующийся
+      // заказ» был ложной тревогой (штатный сценарий one-tap сайта + дослать
+      // тот же пасс в боте). Реальный SOS по тапу кнопки остаётся.
       await showResult(
         "✅ Этот геймпасс уже принят — заказ в обработке, выкупим в ближайшее время.",
         Markup.inlineKeyboard([
           [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
-          [supportBtn("💬 Если что-то не так", "order_dupe", ctx)],
+          [supportBtn("💬 Если что-то не так", "order_dupe")],
         ])
       );
       return;
