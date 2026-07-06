@@ -79,6 +79,9 @@ async function maybeThresholdAlert(settings: any, balance: number): Promise<void
     }
     return;
   }
+  // П7: баланс 0 — сливать уже нечего (аккаунт слит); молчим и дедуп не взводим,
+  // чтобы после пополнения цикл начался чисто.
+  if (balance <= 0) return;
   const since = settings.autoBuyoutBelowSince ? new Date(settings.autoBuyoutBelowSince).getTime() : 0;
   const sixHours = 6 * 60 * 60 * 1000;
   if (Date.now() - since < sixHours) return; // already alerted recently
@@ -284,6 +287,10 @@ export async function runAutoDrainTick(): Promise<void> {
           source: "auto",
         },
       }).catch((e: any) => console.warn("[auto-drain] DrainEvent write failed:", e?.message ?? e));
+      // П7: слив состоялся — сброс дедупа «пора сливать», следующий цикл чистый.
+      await (db as any).globalSettings.update({
+        where: { id: "global" }, data: { autoBuyoutBelowSince: null },
+      }).catch(() => {});
       await alertAdmins(
         `💧 <b>Автослив: ${res.drained ?? balance} R$ → ${escapeHtml(receiver.name)}</b>\n` +
         `Пасс «${escapeHtml(candidate.name)}» · донор ${escapeHtml(donor.name)}\n` +

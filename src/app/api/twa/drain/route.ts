@@ -341,6 +341,11 @@ export async function POST(req: NextRequest) {
           source: "manual",
         },
       }).catch((e: any) => console.warn("[drain] DrainEvent write failed:", e?.message ?? e));
+      // П7: слив состоялся — сброс дедупа алерта «💧 пора сливать» у автовыкупа,
+      // чтобы после пополнения донора цикл начался чисто.
+      await (prisma as any).globalSettings.update({
+        where: { id: "global" }, data: { autoBuyoutBelowSince: null },
+      }).catch((e: any) => console.warn("[drain] belowSince reset failed:", e?.message ?? e));
       return NextResponse.json({
         ok: true, success: true,
         drained: pData.price ?? target,
