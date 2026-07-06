@@ -1536,16 +1536,11 @@ async function handleRefActivation(
     return;
   }
 
-  // Fetch real name from VK API
-  let fullName = "VK User";
-  try {
-    const [userData] = await (ctx as any).vk.api.users.get({ user_ids: [vkUserId] });
-    if (userData?.first_name) {
-      fullName = [userData.first_name, userData.last_name].filter(Boolean).join(" ");
-    }
-  } catch (nameErr) {
-    console.error("[VK] users.get failed, using fallback name:", nameErr);
-  }
+  // Fetch real name from VK API. У MessageContext нет свойства `vk` —
+  // прежний `(ctx as any).vk.api` всегда падал в TypeError, и каждый новый
+  // юзер записывался в БД как «VK User». vkGetName ходит в API по токену;
+  // её фолбэк «VK #<id>» ниже самолечится (update при следующем контакте).
+  const fullName = await vkGetName(vkUserId);
 
   // Lazy registration — always persist the real name
   let user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) } });

@@ -200,6 +200,47 @@ export async function notifyUserHurdle(p: SupportAlertPayload): Promise<void> {
   await Promise.allSettled(ADMIN_IDS.map(id => tgSend(id, text)));
 }
 
+/**
+ * «Бот упал на сообщении юзера» — алерт админам из глобального catch
+ * (VK `message_new` / TG `bot.catch`). Юзер в этот момент получил
+ * «⚠️ Произошла ошибка» — админ должен узнать сразу, а не из жалоб
+ * (P0 2026-07-06: три юзера VK молча получали ошибку на прямых заказах).
+ * Дедуп: одна связка юзер+тип ошибки — не чаще раза в 10 минут.
+ */
+const botErrorSeen = new Map<string, number>();
+const BOT_ERROR_TTL_MS = 10 * 60 * 1000;
+
+export async function notifyBotError(p: {
+  platform: "TG" | "VK";
+  userId: string | number;
+  err: unknown;
+}): Promise<void> {
+  try {
+    const firstLine = String((p.err as any)?.message ?? p.err).split("\n")[0].slice(0, 200);
+    const key = `ERR:${p.platform}:${p.userId}:${firstLine}`;
+    const now = Date.now();
+    const last = botErrorSeen.get(key);
+    if (last && now - last < BOT_ERROR_TTL_MS) return;
+    botErrorSeen.set(key, now);
+    if (botErrorSeen.size > 500) {
+      for (const [k, t] of botErrorSeen) if (now - t > BOT_ERROR_TTL_MS) botErrorSeen.delete(k);
+    }
+    const userRef = p.platform === "VK"
+      ? `<a href="https://vk.com/id${p.userId}">vk.com/id${p.userId}</a>`
+      : `<a href="tg://user?id=${p.userId}">tg://${p.userId}</a>`;
+    const time = new Date().toLocaleString("ru-RU", {
+      timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit",
+    });
+    const text =
+      `🚨 <b>${p.platform}-бот упал на сообщении</b>\n` +
+      `👤 ${userRef} получил «Произошла ошибка»\n` +
+      `<code>${escapeHtml(firstLine)}</code> · ${time} МСК`;
+    await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text)));
+  } catch (alertErr) {
+    console.error("[admin] notifyBotError failed:", alertErr);
+  }
+}
+
 /** Comma-separated list of Telegram admin chat IDs from env. */
 export const ADMIN_IDS: string[] = (
   process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? ""

@@ -40,6 +40,7 @@ import {
 } from "./handlers";
 import { registerAdminHubs, setupMenuButton } from "./admin";
 import { startReviewReminderCron } from "./crons";
+import { notifyBotError } from "../shared/admin";
 
 const token = process.env.TG_TOKEN;
 if (!token) throw new Error("[TG] TG_TOKEN is not set");
@@ -48,6 +49,9 @@ export const bot = new Telegraf(token);
 
 bot.catch((err: any, ctx: any) => {
   console.error("[TG] Unhandled error:", err);
+  // Юзер получает «Произошла ошибка» → админы должны узнать сразу.
+  const uid = ctx?.from?.id;
+  if (uid) notifyBotError({ platform: "TG", userId: uid, err }).catch(() => {});
   try {
     ctx?.reply?.("⚠️ Произошла ошибка. Попробуй ещё раз или напиши /start");
   } catch {}

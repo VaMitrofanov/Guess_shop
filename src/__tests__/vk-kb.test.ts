@@ -63,4 +63,44 @@ describe("enforceVkInlineKbLimits", () => {
     expect(enforceVkInlineKbLimits("не json")).toBe("не json");
     expect(enforceVkInlineKbLimits({ foo: 1 })).toBe(JSON.stringify({ foo: 1 }));
   });
+
+  // Регресс P0 2026-07-05/06: vk-io KeyboardBuilder сериализуется в формат VK
+  // только через toString(); JSON.stringify(builder) отдаёт внутренние поля
+  // (isInline/rows/currentRow) без `buttons` → VK 911 «buttons property should
+  // be array» → все прямые заказы VK падали в «⚠️ Произошла ошибка». Тесты выше
+  // гоняют plain-объекты и регресс не ловили. FakeBuilder воспроизводит контракт
+  // vk-io (проверен на настоящем vk-io 4.9: JSON.stringify ≠ String); сам vk-io
+  // в jest не импортируется (ESM).
+  class FakeBuilder {
+    isOneTime = false;
+    isInline = true;
+    rows: unknown[][] = [];
+    currentRow: unknown[] = [];
+    add(label: string) { this.currentRow.push(btn(label)); return this; }
+    row() { if (this.currentRow.length) { this.rows.push(this.currentRow); this.currentRow = []; } return this; }
+    inline() { return this; }
+    toString(): string {
+      const buttons = this.currentRow.length ? [...this.rows, this.currentRow] : this.rows;
+      return JSON.stringify({ one_time: this.isOneTime, inline: this.isInline, buttons });
+    }
+  }
+
+  it("KeyboardBuilder (toString-контракт vk-io) → валидный VK-формат с buttons", () => {
+    const builder = new FakeBuilder().add("💎 pass · 1143 R$").row().add("🔎 Другой ник");
+    const out = parse(enforceVkInlineKbLimits(builder.inline(), "test"));
+    expect(Array.isArray(out.buttons)).toBe(true);
+    expect(out.buttons).toHaveLength(2);
+    expect(out).not.toHaveProperty("rows");
+    expect(out).not.toHaveProperty("currentRow");
+  });
+
+  it("билдер за лимитами (7 рядов) тоже усекается, сервисный ряд жив", () => {
+    const builder = new FakeBuilder();
+    for (let i = 0; i < 6; i++) builder.add(`p${i}`).row();
+    builder.add("🔎 Другой ник");
+    const out = parse(enforceVkInlineKbLimits(builder.inline(), "test"));
+    expect(out.buttons.length).toBeLessThanOrEqual(VK_INLINE_MAX_ROWS);
+    const last = (out.buttons.at(-1) as { action: { label: string } }[]).map(b => b.action.label);
+    expect(last).toEqual(["🔎 Другой ник"]);
+  });
 });

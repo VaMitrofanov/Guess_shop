@@ -285,6 +285,18 @@ TG-историю API не отдаёт). Миграция `20260704_add_autobuy
   последний (сервисный) ряд сохраняет всегда; тест — `src/__tests__/vk-kb.test.ts`.
   `buildVkPackKb` использует 8 пакетов (`VK_PACKS = [100,200,300,500,800,1000,1500,2000]`);
   «✏️ Своё» и «❌» — в одной строке. С reorder-кнопкой: 7 пакетов + reorder + ✏️ + ❌ = 10.
+  - **P0 2026-07-06 (регресс самой страховки):** vk-io KeyboardBuilder отдаёт формат VK
+    только через `toString()`; `JSON.stringify(builder)` сериализует внутренние поля
+    (`isInline`/`rows`/`currentRow`) без `buttons` → VK 911 «buttons property should be
+    array». `enforceVkInlineKbLimits` делала именно stringify, т.е. **ломала каждую
+    клавиатуру, которую страховала** — все 4 вызова (паки, каталог, find-gp, direct-пикер)
+    падали в «⚠️ Произошла ошибка»; прямые заказы VK были мертвы с деплоя 650e18a (05.07).
+    Второй слой: при >6 рядов `toString()` vk-io сам кидает RangeError — функция теперь
+    ловит его и собирает `buttons` из внутреннего состояния, затем усекает как обычно.
+- **Алерт о падении бота (2026-07-07):** глобальные catch обоих ботов (`VK message_new`,
+  TG `bot.catch`) шлют админам `notifyBotError` (`bots/shared/admin.ts`): 🚨 платформа,
+  ссылка на юзера, первая строка ошибки. Дедуп: юзер+ошибка ≤1 раза в 10 мин. Юзер больше
+  не получает «Произошла ошибка» незаметно для админки.
 - **Восстановление состояния** (`tryRestoreState`): `WbCode(userId, no order)` →
   `WbOrder(AWAITING_GAMEPASS)` → `WbOrder(REJECTED)`.
 - `handleRefActivation` — точка входа с `ref=КОД` (или `GD+КОД` → guide-режим).

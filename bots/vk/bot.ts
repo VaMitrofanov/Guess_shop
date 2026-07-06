@@ -27,6 +27,7 @@
 import "dotenv/config";
 import { VK } from "vk-io";
 import { handleMessage, handleOutboxMessage, handleVkGroupJoin, initVkHandlers } from "./handlers";
+import { notifyBotError } from "../shared/admin";
 import { startBridgeServer } from "../shared/bridge";
 
 console.log("🚀 DEPLOY_VERSION: 4.0 - LOYALTY_HARD_SYNC");
@@ -47,6 +48,8 @@ vk.updates.on("message_new", async (ctx) => {
   } catch (err) {
     console.error("[VK] Unhandled error in message_new:", err);
     if (!ctx.isOutbox) {
+      // Юзер получает «Произошла ошибка» → админы должны узнать сразу.
+      notifyBotError({ platform: "VK", userId: ctx.senderId, err }).catch(() => {});
       try {
         await ctx.reply("⚠️ Произошла ошибка. Попробуй ещё раз или напиши нам: https://t.me/RobloxBank_PA");
       } catch {}

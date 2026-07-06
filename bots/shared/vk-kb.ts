@@ -32,12 +32,40 @@ interface ParsedKb {
  * vk-io принимает `keyboard` строкой — результат передаётся в ctx.reply как есть.
  */
 export function enforceVkInlineKbLimits(kb: unknown, tag = "vk-kb"): string {
-  const json = typeof kb === "string" ? kb : JSON.stringify(kb);
+  // vk-io KeyboardBuilder сериализуется в формат VK ТОЛЬКО через toString():
+  // JSON.stringify(builder) отдаёт внутренние поля (isInline/rows/currentRow)
+  // без `buttons` — VK отвечает 911 «buttons property should be array», падает
+  // ВСЯ отправка (регресс P0 2026-07-05/06: каждая клавиатура через эту
+  // функцию ломалась, прямые заказы VK умирали в «⚠️ Произошла ошибка»).
+  // Нюанс: при >6 рядов toString() у vk-io САМ кидает RangeError — тогда
+  // берём внутреннее состояние (JSON.stringify) и собираем buttons вручную.
+  let json: string;
+  if (typeof kb === "string") {
+    json = kb;
+  } else {
+    try {
+      const str = String(kb);
+      json = str.startsWith("[object ") ? JSON.stringify(kb) : str;
+    } catch {
+      json = JSON.stringify(kb);
+    }
+  }
   let parsed: ParsedKb;
   try {
     parsed = JSON.parse(json);
   } catch {
     return json; // не наш формат — не трогаем
+  }
+  // Внутреннее состояние KeyboardBuilder → формат VK (ветка RangeError выше).
+  if (!Array.isArray(parsed?.buttons) && Array.isArray((parsed as Record<string, unknown>)?.rows)) {
+    const innerRows = (parsed as { rows: unknown[][] }).rows;
+    const cur = (parsed as { currentRow?: unknown[] }).currentRow;
+    parsed = {
+      one_time: Boolean((parsed as { isOneTime?: unknown }).isOneTime),
+      inline:   Boolean((parsed as { isInline?: unknown }).isInline),
+      buttons:  Array.isArray(cur) && cur.length ? [...innerRows, cur] : [...innerRows],
+    };
+    json = JSON.stringify(parsed);
   }
   const rows = parsed?.buttons;
   if (!Array.isArray(rows) || rows.length === 0) return json;
