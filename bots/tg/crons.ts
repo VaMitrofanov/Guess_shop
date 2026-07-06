@@ -268,11 +268,19 @@ async function processAwaitingReminders(bot: Telegraf): Promise<void> {
     const newLevel = order.remindersSent + 1;
     const guideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}`;
 
-    await (db as any).wbOrder.update({
-      where: { id: order.id },
+    // Клейм уровня атомарно И со статус-гардом: пока цикл шёл (последовательные
+    // await), заказ мог уехать в PENDING через one-tap сайта — «создай геймпасс»
+    // после оформленного заказа выглядит как бред бота (кейс 3K1X0AB 06.07).
+    const claimed = await (db as any).wbOrder.updateMany({
+      where: { id: order.id, status: "AWAITING_GAMEPASS", remindersSent: order.remindersSent },
       data: { remindersSent: newLevel },
     });
+    if (claimed.count === 0) continue;
 
+    // Доставка. delivered=false (VK 901 «юзер не писал сообществу» и т.п.) —
+    // возвращаем уровень: иначе все 3 напоминания молча сгорают в никуда, и
+    // юзер, так и не открывший диалог, не получит ни одного.
+    let delivered = false;
     if (order.user.tgId) {
       try {
         const extra: Record<string, unknown> = {
@@ -298,11 +306,19 @@ async function processAwaitingReminders(bot: Telegraf): Promise<void> {
           buildReminderMsg(newLevel, guideUrl),
           extra,
         );
+        delivered = true;
       } catch { }
     } else if (order.user.vkId) {
       try {
-        await vkSend(order.user.vkId, buildReminderMsgPlain(newLevel, guideUrl));
+        delivered = await vkSend(order.user.vkId, buildReminderMsgPlain(newLevel, guideUrl));
       } catch { }
+    }
+
+    if (!delivered) {
+      await (db as any).wbOrder.updateMany({
+        where: { id: order.id, remindersSent: newLevel },
+        data: { remindersSent: order.remindersSent },
+      }).catch(() => {});
     }
   }
 }
