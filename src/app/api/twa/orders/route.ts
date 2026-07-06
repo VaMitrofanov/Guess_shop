@@ -423,7 +423,8 @@ async function enrichVkUsers(orders: any[]) {
 }
 
 export async function POST(req: NextRequest) {
-  if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const twaUser = await extractTwaUser(req);
+  if (!twaUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => null);
   if (!body?.action)
@@ -492,6 +493,186 @@ export async function POST(req: NextRequest) {
     });
     cachedCounts = null;
     return NextResponse.json({ ok: true, order: created });
+  }
+
+  // П4 (PLAN «+7»): живая валидация полей модалки «➕ Создать заказ».
+  // Ничего не создаёт; предупреждения (цена/продавец) НЕ блокируют создание.
+  if (action === "manual-validate") {
+    const out: any = {};
+
+    const rawCode = String(body.wbCode ?? "").trim().toUpperCase();
+    if (rawCode) {
+      if (!/^[A-Z0-9]{7}$/.test(rawCode)) {
+        out.code = { ok: false, error: "Код — 7 символов A-Z/0-9" };
+      } else {
+        const codeRow = await (prisma as any).wbCode.findUnique({
+          where: { code: rawCode },
+          select: {
+            denomination: true, isTest: true,
+            user: { select: { id: true, tgId: true, vkId: true, name: true, username: true } },
+          },
+        });
+        if (!codeRow) out.code = { ok: false, error: "Код не найден" };
+        else if (codeRow.isTest) out.code = { ok: false, error: "Тестовый код" };
+        else {
+          const orderOnCode = await (prisma as any).wbOrder.findFirst({
+            where: { wbCode: rawCode },
+            select: { status: true },
+          });
+          if (orderOnCode) {
+            out.code = { ok: false, error: `По коду уже есть заказ (${orderOnCode.status}) — используй 📎/rebind` };
+          } else {
+            out.code = { ok: true, denomination: codeRow.denomination, claimedBy: codeRow.user ?? null };
+          }
+        }
+      }
+    }
+
+    const gpRaw = String(body.gamepassUrl ?? "").trim();
+    const gpId = gpRaw.match(/game-pass(?:es)?\/(\d+)/)?.[1] ?? (/^\d{6,}$/.test(gpRaw) ? gpRaw : null);
+    if (gpRaw && !gpId) out.gamepass = { error: "Нужна ссылка roblox.com/game-pass/<id> или ID" };
+    else if (gpId) {
+      const amount = Number(body.amount) || out.code?.denomination || 0;
+      const expected = amount > 0 ? Math.ceil(amount / 0.7) : null;
+      const info = await getGpInfoCached(gpId);
+      const candidates = await (prisma as any).wbOrder.findMany({
+        where: { isTest: false, status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] }, gamepassUrl: { contains: `/${gpId}` } },
+        orderBy: { createdAt: "desc" }, take: 5,
+        select: { wbCode: true, status: true, gamepassUrl: true },
+      });
+      const existing = candidates.find((o: any) => gpIdOf(o.gamepassUrl) === gpId);
+      // Продавец vs ник: числится ли пасс среди for-sale пассов этого ника.
+      let sellerMatch: boolean | null = null;
+      const nick = String(body.robloxUsername ?? "").trim().replace(/^@/, "");
+      if (nick) {
+        const res = await searchForSalePassesByNick(nick).catch(() => null);
+        sellerMatch = res?.status === "ok" ? res.passes.some((p) => String(p.gamepassId) === gpId) : null;
+      }
+      out.gamepass = {
+        gamepassId: gpId,
+        livePrice: info?.price ?? null,
+        isForSale: info?.isForSale ?? null,
+        expected,
+        priceMismatch: expected != null && info?.price != null && Math.abs(info.price - expected) > 2,
+        sellerMatch,
+        existing: existing ? { wbCode: existing.wbCode, status: existing.status } : null,
+      };
+    }
+
+    return NextResponse.json(out);
+  }
+
+  // П4 (PLAN «+7»): ручное создание заказа целиком из TWA (кейс 2ZELJMZ — код
+  // CLAIMED, заказа нет, attach/rebind не помогают). Паритет с ботовским флоу:
+  // ре-привязка кода к клиенту, PENDING при геймпассе, опциональный увед клиенту
+  // «как будто сам активировал» (notifyRebind).
+  if (action === "create-manual") {
+    const rawCode = String(body.wbCode ?? "").trim().toUpperCase() || null;
+    const nick = String(body.robloxUsername ?? "").trim().replace(/^@/, "") || null;
+    const noteText = String(body.note ?? "").trim() || null;
+    const clientUserId = String(body.clientUserId ?? "").trim() || null;
+
+    // 1) Код ВБ (опционален): существует, не тест, заказа по нему нет.
+    let codeRow: any = null;
+    if (rawCode) {
+      if (!/^[A-Z0-9]{7}$/.test(rawCode))
+        return NextResponse.json({ error: "Код — 7 символов A-Z/0-9" }, { status: 400 });
+      codeRow = await (prisma as any).wbCode.findUnique({
+        where: { code: rawCode },
+        select: { id: true, denomination: true, isTest: true, usedAt: true },
+      });
+      if (!codeRow) return NextResponse.json({ error: `Код ${rawCode} не найден` }, { status: 400 });
+      if (codeRow.isTest) return NextResponse.json({ error: `Код ${rawCode} — тестовый` }, { status: 400 });
+      const orderOnCode = await (prisma as any).wbOrder.findFirst({
+        where: { wbCode: rawCode }, select: { status: true },
+      });
+      if (orderOnCode)
+        return NextResponse.json({ error: `По коду ${rawCode} уже есть заказ (${orderOnCode.status})` }, { status: 409 });
+    }
+
+    // 2) Номинал: из кода или руками.
+    const amount = codeRow?.denomination ?? Number(body.amount);
+    if (!amount || !Number.isFinite(amount) || amount < 1)
+      return NextResponse.json({ error: "Укажи код ВБ или номинал в R$" }, { status: 400 });
+
+    // 3) Клиент (опционален): без клиента — служебный юзер (как в Авито).
+    let client: any = null;
+    if (clientUserId) {
+      client = await (prisma as any).user.findUnique({
+        where: { id: clientUserId },
+        select: { id: true, tgId: true, vkId: true, name: true, username: true },
+      });
+      if (!client) return NextResponse.json({ error: "Клиент не найден" }, { status: 400 });
+    }
+
+    // 4) Геймпасс (опционален): дедуп как в create-avito (force обходит).
+    const gpRaw = String(body.gamepassUrl ?? "").trim();
+    const gpId = gpRaw.match(/game-pass(?:es)?\/(\d+)/)?.[1] ?? (/^\d{6,}$/.test(gpRaw) ? gpRaw : null);
+    if (gpRaw && !gpId)
+      return NextResponse.json({ error: "Геймпасс: нужна ссылка roblox.com/game-pass/<id> или ID" }, { status: 400 });
+    if (gpId && body.force !== true) {
+      const candidates = await (prisma as any).wbOrder.findMany({
+        where: { isTest: false, status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] }, gamepassUrl: { contains: `/${gpId}` } },
+        orderBy: { createdAt: "desc" }, take: 5,
+        select: { wbCode: true, status: true, orderSource: true, createdAt: true, gamepassUrl: true },
+      });
+      const existing = candidates.find((o: any) => gpIdOf(o.gamepassUrl) === gpId);
+      if (existing)
+        return NextResponse.json({
+          error: `На этот геймпасс уже есть активный заказ ${existing.wbCode}`,
+          existing: { wbCode: existing.wbCode, status: existing.status, orderSource: existing.orderSource, createdAt: existing.createdAt },
+        }, { status: 409 });
+    }
+
+    const gamepassUrl = gpId ? `https://www.roblox.com/game-pass/${gpId}` : null;
+    const code = rawCode ?? `MN-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    const stamp = new Date().toISOString().slice(0, 10);
+    const manualMark = `[MANUAL ${stamp} от ${twaUser.firstName}]`;
+    const platform = client?.vkId && !client?.tgId ? "VK" : "TG";
+
+    const created = await (prisma as any).$transaction(async (tx: any) => {
+      const order = await tx.wbOrder.create({
+        data: {
+          amount,
+          gamepassUrl,
+          robloxUsername: nick,
+          status: gamepassUrl ? "PENDING" : "AWAITING_GAMEPASS",
+          platform,
+          wbCode: code,
+          isDirectOrder: false,
+          orderSource: "MANUAL",
+          adminNote: noteText ? `${manualMark} ${noteText}` : manualMark,
+          pendingAt: gamepassUrl ? new Date() : null,
+          user: client
+            ? { connect: { id: client.id } }
+            : { connectOrCreate: { where: { tgId: "admin" }, create: { tgId: "admin", name: "Admin (Manual)" } } },
+        },
+      });
+      // Ре-привязка кода (паритет с ботовской активацией): код закрывается для
+      // повторного использования и вешается на выбранного клиента.
+      if (codeRow) {
+        await tx.wbCode.update({
+          where: { id: codeRow.id },
+          data: {
+            isUsed: true,
+            status: "CLAIMED",
+            usedAt: codeRow.usedAt ?? new Date(),
+            ...(client ? { userId: client.id } : {}),
+            ...(nick ? { robloxNick: nick } : {}),
+          },
+        });
+      }
+      return order;
+    });
+
+    // 5) Увед клиенту (checkbox в модалке; только при выбранном клиенте).
+    let notified: "tg" | "vk" | null = null;
+    if (body.notify === true && client) {
+      notified = await notifyRebind(client, amount, code, !!gamepassUrl).catch(() => null);
+    }
+
+    cachedCounts = null;
+    return NextResponse.json({ ok: true, order: created, notified });
   }
 
   // Не требует orderId — клиент шлёт только { action, query }.

@@ -143,9 +143,10 @@ export async function notifyRebind(
 ): Promise<"tg" | "vk" | null> {
   const dirty = Math.ceil(amount / 0.7);
   const instructionUrl = `https://robloxbank.ru/guide?skip=1&code=${wbCode}`;
-  // AV-/DIR-коды — внутренние, клиенту их не показываем (политика «идентификатор
-  // для клиента = код ВБ или ник», 2026-06-24). WB-код — показываем как при активации.
-  const isInternalCode = /^(AV|DIR)-/.test(wbCode);
+  // AV-/DIR-/MN-коды — внутренние, клиенту их не показываем (политика
+  // «идентификатор для клиента = код ВБ или ник», 2026-06-24). WB-код —
+  // показываем как при активации. MN- — ручные заказы из TWA (П4).
+  const isInternalCode = /^(AV|DIR|MN)-/.test(wbCode);
   const head = isInternalCode
     ? `✅ <b>Заказ на ${amount} R$ оформлен</b> · цена геймпасса <b>${dirty} R$</b>`
     : `✅ Код <b>${wbCode}</b> активирован · номинал <b>${amount} R$</b> → геймпасс <b>${dirty} R$</b>`;

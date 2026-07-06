@@ -774,6 +774,340 @@ function RebindModal({ order, token, onDone, onClose }: {
   );
 }
 
+/* ───────────── CreateManualModal (П4): ручное создание заказа ───────────── */
+interface ManualValidation {
+  code?: { ok: boolean; error?: string; denomination?: number; claimedBy?: RebindUser | null };
+  gamepass?: {
+    error?: string;
+    gamepassId?: string;
+    livePrice?: number | null;
+    isForSale?: boolean | null;
+    expected?: number | null;
+    priceMismatch?: boolean;
+    sellerMatch?: boolean | null;
+    existing?: { wbCode: string; status: string } | null;
+  };
+}
+
+const manualInputStyle: React.CSSProperties = {
+  width: "100%", background: C.elevated, border: "none", borderRadius: 10,
+  color: "#fff", fontSize: 15, padding: "11px 12px", outline: "none",
+  fontFamily: "inherit", boxSizing: "border-box",
+};
+
+function CreateManualModal({ token, onDone, onClose }: {
+  token: string; onDone: () => void; onClose: () => void;
+}) {
+  const [wbCode, setWbCode] = useState("");
+  const [amount, setAmount] = useState("");
+  const [nick, setNick] = useState("");
+  const [gpInput, setGpInput] = useState("");
+  const [note, setNote] = useState("");
+  const [notify, setNotify] = useState(true);
+  const [client, setClient] = useState<RebindUser | null>(null);
+  const [clientQuery, setClientQuery] = useState("");
+  const [clientResults, setClientResults] = useState<RebindUser[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [valid, setValid] = useState<ManualValidation>({});
+  const [checking, setChecking] = useState(false);
+  const [creating, setCreating] = useState(false);
+  // 409-дедуп геймпасса: показываем существующий заказ, кнопка → «Создать всё равно».
+  const [dup, setDup] = useState<{ wbCode: string; status: string } | null>(null);
+  const searchDebounce = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const validateDebounce = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+
+  // Поиск клиента — как в RebindModal (search-users).
+  useEffect(() => {
+    if (clientQuery.trim().length < 2) { setClientResults([]); return; }
+    clearTimeout(searchDebounce.current);
+    searchDebounce.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const r = await fetch("/api/twa/orders", {
+          method: "POST", headers,
+          body: JSON.stringify({ action: "search-users", query: clientQuery.trim() }),
+        });
+        const d = await r.json();
+        if (r.ok && d.users) setClientResults(d.users);
+      } catch {}
+      setSearching(false);
+    }, 300);
+    return () => clearTimeout(searchDebounce.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientQuery, token]);
+
+  // Живая валидация кода/геймпасса (manual-validate) — не блокирует, подсвечивает.
+  useEffect(() => {
+    const codeTrim = wbCode.trim();
+    const gpTrim = gpInput.trim();
+    setDup(null);
+    if (!codeTrim && !gpTrim) { setValid({}); return; }
+    clearTimeout(validateDebounce.current);
+    validateDebounce.current = setTimeout(async () => {
+      setChecking(true);
+      try {
+        const r = await fetch("/api/twa/orders", {
+          method: "POST", headers,
+          body: JSON.stringify({
+            action: "manual-validate",
+            wbCode: codeTrim, gamepassUrl: gpTrim,
+            robloxUsername: nick.trim(), amount: Number(amount) || undefined,
+          }),
+        });
+        const d = await r.json();
+        if (r.ok) setValid(d);
+      } catch {}
+      setChecking(false);
+    }, 500);
+    return () => clearTimeout(validateDebounce.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wbCode, gpInput, nick, amount, token]);
+
+  const codeState = wbCode.trim() ? valid.code : undefined;
+  const gpState = gpInput.trim() ? valid.gamepass : undefined;
+  const effAmount = codeState?.ok && codeState.denomination ? codeState.denomination : (Number(amount) || null);
+  const canSubmit = !creating && !!effAmount && (!wbCode.trim() || codeState?.ok === true) && (!gpInput.trim() || !gpState?.error);
+
+  function userLabel(u: RebindUser) {
+    const platform = u.tgId ? "TG" : u.vkId ? "VK" : "—";
+    const name = u.username ? `@${u.username}` : u.name || u.tgId || u.vkId || u.id.slice(-6);
+    return { platform, name };
+  }
+
+  async function submit(force = false) {
+    if (!canSubmit) return;
+    setCreating(true);
+    haptic.impact("light");
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST", headers,
+        body: JSON.stringify({
+          action: "create-manual",
+          wbCode: wbCode.trim() || undefined,
+          amount: Number(amount) || undefined,
+          clientUserId: client?.id ?? undefined,
+          robloxUsername: nick.trim() || undefined,
+          gamepassUrl: gpInput.trim() || undefined,
+          note: note.trim() || undefined,
+          notify: notify && !!client,
+          force,
+        }),
+      });
+      const d = await r.json();
+      if (r.status === 409 && d.existing) {
+        haptic.notify("warning");
+        setDup({ wbCode: d.existing.wbCode, status: d.existing.status });
+        return;
+      }
+      if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
+      haptic.notify("success");
+      const created = d.order;
+      let msg = `Заказ ${created.wbCode} создан · ${created.status === "PENDING" ? "К выкупу" : "Ждёт геймпасс"}`;
+      if (notify && client) {
+        msg += d.notified ? ` · клиент уведомлён (${String(d.notified).toUpperCase()})` : " · увед НЕ доставлен";
+      }
+      toast(msg, d.notified === null && notify && client ? "error" : "success");
+      onDone();
+    } catch { toast("Ошибка сети", "error"); }
+    finally { setCreating(false); }
+  }
+
+  const warn = (text: string, color: string = C.orange) => (
+    <div style={{ fontSize: 13, color, lineHeight: 1.35 }}>{text}</div>
+  );
+
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+      onClick={e => { if (e.target === e.currentTarget && !creating) onClose(); }}
+    >
+      <div style={{
+        background: C.card, borderRadius: 18, width: "100%", maxWidth: 400, maxHeight: "88vh",
+        display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+      }}>
+        <div style={{ padding: "18px 20px 4px", flexShrink: 0 }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#e5e5ea" }}>➕ Создать заказ</div>
+          <div style={{ fontSize: 13, color: C.textTertiary, marginTop: 4 }}>
+            Ручной заказ: WB-код без заказа, восстановление, обмен.
+          </div>
+        </div>
+
+        <div style={{ padding: "12px 20px 8px", display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
+          {/* Код ВБ */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <input
+              value={wbCode}
+              onChange={e => setWbCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7))}
+              placeholder="Код ВБ (опц., 7 символов)"
+              autoCapitalize="characters" autoCorrect="off" spellCheck={false}
+              style={{ ...manualInputStyle, fontFamily: MONO, letterSpacing: 2 }}
+            />
+            {codeState && !codeState.ok && warn(`✖ ${codeState.error}`, C.red)}
+            {codeState?.ok && (
+              <div style={{ fontSize: 13, color: C.green }}>
+                ✓ Номинал <b>{codeState.denomination} R$</b>
+                {codeState.claimedBy && (
+                  <span style={{ color: C.textTertiary }}>
+                    {" · активирован: "}{userLabel(codeState.claimedBy).name}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Номинал — только без валидного кода */}
+          {!codeState?.ok && (
+            <input
+              value={amount}
+              onChange={e => setAmount(e.target.value.replace(/\D/g, ""))}
+              placeholder="Номинал R$ (если без кода)"
+              inputMode="numeric"
+              style={manualInputStyle}
+            />
+          )}
+
+          {/* Клиент */}
+          {client ? (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 8,
+              background: "rgba(255,255,255,0.06)", borderRadius: 10, padding: "9px 12px",
+            }}>
+              <span style={{
+                fontSize: 11, fontWeight: 800, color: "#fff",
+                background: userLabel(client).platform === "TG" ? "#229ED9" : "#0077FF",
+                borderRadius: 4, padding: "3px 6px", flexShrink: 0,
+              }}>{userLabel(client).platform}</span>
+              <span style={{ flex: 1, fontSize: 15, fontWeight: 600, color: C.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {userLabel(client).name}
+              </span>
+              <button onClick={() => setClient(null)} style={{ background: "transparent", border: "none", color: C.textTertiary, fontSize: 17, cursor: "pointer", padding: 2 }}>✕</button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <input
+                value={clientQuery}
+                onChange={e => setClientQuery(e.target.value)}
+                placeholder="Клиент (опц.): @username, имя, ID"
+                style={manualInputStyle}
+              />
+              {searching && <div style={{ fontSize: 13, color: C.textTertiary }}>Поиск…</div>}
+              {clientResults.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 150, overflowY: "auto" }}>
+                  {clientResults.map(u => {
+                    const lbl = userLabel(u);
+                    return (
+                      <button key={u.id} className="twa-press-sm"
+                        onClick={() => { haptic.impact("light"); setClient(u); setClientQuery(""); setClientResults([]); if (u.robloxUsername && !nick) setNick(u.robloxUsername); }}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 8, width: "100%",
+                          padding: "9px 12px", borderRadius: 10, border: "none", cursor: "pointer",
+                          background: "rgba(255,255,255,0.06)", textAlign: "left",
+                        }}>
+                        <span style={{
+                          fontSize: 11, fontWeight: 800, color: "#fff",
+                          background: lbl.platform === "TG" ? "#229ED9" : lbl.platform === "VK" ? "#0077FF" : C.elevated,
+                          borderRadius: 4, padding: "3px 6px", flexShrink: 0,
+                        }}>{lbl.platform}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{lbl.name}</div>
+                          {u.robloxUsername && <div style={{ fontSize: 12, color: C.textTertiary }}>🎮 {u.robloxUsername}</div>}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Ник Roblox */}
+          <input
+            value={nick}
+            onChange={e => setNick(e.target.value)}
+            placeholder="Ник Roblox (опц.)"
+            autoCapitalize="off" autoCorrect="off" spellCheck={false}
+            style={manualInputStyle}
+          />
+
+          {/* Геймпасс */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <input
+              value={gpInput}
+              onChange={e => setGpInput(e.target.value)}
+              placeholder="Геймпасс: ссылка или ID (опц.)"
+              autoCapitalize="off" autoCorrect="off" spellCheck={false}
+              style={manualInputStyle}
+            />
+            {gpState?.error && warn(`✖ ${gpState.error}`, C.red)}
+            {gpState && !gpState.error && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                {gpState.livePrice != null && (
+                  <div style={{ fontSize: 13, color: gpState.priceMismatch ? C.orange : C.green }}>
+                    {gpState.priceMismatch
+                      ? `⚠️ Цена ГП ${gpState.livePrice} R$ ≠ расчётной ${gpState.expected} R$`
+                      : `✓ Цена ГП ${gpState.livePrice} R$${gpState.expected ? ` (ожидается ${gpState.expected})` : ""}`}
+                  </div>
+                )}
+                {gpState.isForSale === false && warn("⚠️ Геймпасс сейчас не в продаже")}
+                {gpState.sellerMatch === false && warn("⚠️ Пасс не найден среди for-sale пассов этого ника")}
+                {gpState.existing && warn(`⚠️ Уже в активном заказе ${gpState.existing.wbCode} (${gpState.existing.status})`)}
+              </div>
+            )}
+            {checking && <div style={{ fontSize: 12, color: C.textTertiary }}>Проверяю…</div>}
+          </div>
+
+          {/* Заметка */}
+          <input
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder="Заметка (опц.)"
+            style={manualInputStyle}
+          />
+
+          {/* Уведомить клиента */}
+          {client && (
+            <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", userSelect: "none" }}>
+              <input type="checkbox" checked={notify} onChange={e => setNotify(e.target.checked)} style={{ width: 18, height: 18, accentColor: C.accent }} />
+              <span style={{ fontSize: 14, color: C.textSecondary }}>
+                Уведомить клиента («код активирован → заказ в очереди»)
+              </span>
+            </label>
+          )}
+
+          {/* 409-дедуп: активный заказ на этот геймпасс */}
+          {dup && (
+            <div style={{
+              padding: "9px 12px", background: `${C.orange}18`, borderRadius: 10,
+              fontSize: 13, color: C.orange, lineHeight: 1.4,
+            }}>
+              ⚠️ На этот геймпасс уже есть активный заказ <b style={{ fontFamily: MONO }}>{dup.wbCode}</b> ({dup.status}).
+              Нажми «Создать всё равно», если это осознанный повтор.
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding: "10px 20px 18px", display: "flex", gap: 8, flexShrink: 0 }}>
+          <button className="twa-press" onClick={onClose} disabled={creating}
+            style={{ flex: 1, padding: "13px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
+            Отмена
+          </button>
+          <button className="twa-press" onClick={() => submit(!!dup)} disabled={!canSubmit}
+            style={{
+              flex: 2, padding: "13px", borderRadius: 10, border: "none",
+              background: dup ? C.orange : C.accent, color: "#fff",
+              fontSize: 15, fontWeight: 600, cursor: "pointer",
+              opacity: canSubmit ? 1 : 0.45,
+            }}>
+            {creating ? "…" : dup ? "Создать всё равно" : "Создать заказ"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ───────────── DONE tab: accordion grouped by purchaserUsername ───────────── */
 type SourceFilter = "ALL" | "WB" | "DIRECT" | "AVITO" | "MANUAL";
 const SOURCE_CHIPS: { id: SourceFilter; label: string; color: string }[] = [
@@ -1361,6 +1695,8 @@ export default function OrdersScreen({
   const [query, setQuery] = useState(initialQuery ?? "");
   // Вкладка «Все»: по умолчанию показываем «Требуют внимания», полная лента — по кнопке.
   const [allView, setAllView] = useState<"attention" | "list">("attention");
+  // П4: модалка «➕ Создать заказ» (ручной заказ целиком из TWA).
+  const [createOpen, setCreateOpen] = useState(false);
   useEffect(() => {
     if (initialQuery) onInitialQueryConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1694,7 +2030,24 @@ export default function OrdersScreen({
         flexShrink: 0,
         display: "flex", flexDirection: "column", gap: 9,
       }}>
-        <SearchBar value={query} onChange={setQuery} />
+        <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <SearchBar value={query} onChange={setQuery} />
+          </div>
+          <button
+            className="twa-press-sm"
+            title="Создать заказ вручную"
+            onClick={() => { haptic.impact("light"); setCreateOpen(true); }}
+            style={{
+              flexShrink: 0, width: 42, borderRadius: 10, border: "none",
+              background: C.accent, color: "#fff", fontSize: 24, fontWeight: 500,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              lineHeight: 1, paddingBottom: 2,
+            }}
+          >
+            +
+          </button>
+        </div>
 
         <div className="twa-no-scrollbar" style={{
           display: "flex", gap: 7,
@@ -1912,6 +2265,20 @@ export default function OrdersScreen({
           </div>
         )}
       </div>
+
+      {/* П4: модалка ручного создания заказа */}
+      {createOpen && (
+        <CreateManualModal
+          token={token}
+          onClose={() => setCreateOpen(false)}
+          onDone={() => {
+            setCreateOpen(false);
+            setPage(1);
+            fetchOrders(serverTab, query, 1, false);
+            onActionDone?.();
+          }}
+        />
+      )}
     </div>
   );
 }
