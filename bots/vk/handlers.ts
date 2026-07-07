@@ -742,6 +742,29 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     return;
   }
 
+  // ── 📸 review_hint — клиент тапнул «Отзыв = +100 R$» на карточке COMPLETED ──
+  if (msgPayload?.command === "review_hint") {
+    const rhUser = await (db as any).user.findUnique({
+      where: { vkId: String(vkUserId) },
+      select: { id: true, balance: true, reviewBonusGrantedAt: true },
+    }).catch(() => null);
+    if (rhUser) {
+      const elig = await resolveReviewEligibility(rhUser);
+      if (elig.kind === "eligible") {
+        setState(vkUserId, { type: "AWAITING_REVIEW", orderId: elig.orderId });
+      } else if (elig.kind === "already_granted" || elig.kind === "active_order") {
+        await ctx.reply({ message: reviewIneligibleMessage(elig, { html: false }) });
+        return;
+      }
+    }
+    await ctx.reply({
+      message:
+        "📸 Оставь отзыв на Wildberries с текстом и фото, сделай скриншот и пришли его сюда фотографией (не файлом).\n\n" +
+        "После проверки бонус +100 R$ придёт автоматически (действует на любой номинал).",
+    });
+    return;
+  }
+
   // ── 👤 Buyer mini-profile hub ─────────────────────────────────────────────
   if (msgPayload?.command === "menu") {
     await sendVkBuyerMenu(ctx, vkUserId);
@@ -3139,10 +3162,15 @@ async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<v
   lines.push("");
   lines.push(`💎 Заказать Robux напрямую — без карты WB, быстрее и выгоднее 👇`);
 
+  // Инструкция показывается только пока есть активный заказ, которому она нужна.
+  // Все заказы выполнены → никакого WB, только прямой заказ (решение владельца).
   const firstActiveWb = activeOrders.find(o => o.wbCode && !String(o.wbCode).startsWith("DIR-") && !o.isDirectOrder);
+  const firstActiveDirect = activeOrders.find(o => o.isDirectOrder || String(o.wbCode).startsWith("DIR-"));
   const guideUrl = firstActiveWb
     ? `https://robloxbank.ru/guide?source=wb&skip=1&code=${firstActiveWb.wbCode}`
-    : "https://robloxbank.ru/guide?source=wb";
+    : firstActiveDirect
+    ? "https://robloxbank.ru/guide?source=direct"
+    : null;
 
   const kb = Keyboard.builder();
   if (robloxNick) {
@@ -3151,7 +3179,7 @@ async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<v
     kb.textButton({ label: "💎 Купить Robux напрямую", payload: { command: "start_direct" }, color: "positive" }).row();
   }
   if (activeOrders.length > 0) kb.textButton({ label: "📦 Мой заказ", payload: { command: "status" }, color: "primary" }).row();
-  kb.urlButton({ label: "📖 Инструкция", url: guideUrl }).row();
+  if (guideUrl) kb.urlButton({ label: "📖 Инструкция", url: guideUrl }).row();
   const relevantOrder = activeOrders[0] ?? lastCompleted;
   if (relevantOrder && orderAgeMsFromOrder(relevantOrder) < SUPPORT_COOLDOWN_MS) {
     kb.textButton({ label: "❓ Частые вопросы", payload: { command: "faq" }, color: "secondary" });
@@ -3342,7 +3370,10 @@ async function handleIdleMessage(
         ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Исправь геймпасс и нажми кнопку ниже — отправим на проверку заново.`
         : "";
 
-    const gamepassLine = order.gamepassUrl ? `🔗 Геймпасс: ${order.gamepassUrl}\n` : "";
+    // Выполненный WB-заказ отработан: код и ссылка на геймпасс больше не нужны —
+    // карточка уводит в прямые заказы (владелец: никакого WB после выкупа).
+    const isCompletedCard = order.status === "COMPLETED";
+    const gamepassLine = order.gamepassUrl && !isCompletedCard ? `🔗 Геймпасс: ${order.gamepassUrl}\n` : "";
     // Spell out that this nick is the recipient — so the user reads it as "robux
     // land HERE", not just some technical field.
     const nickLine = order.robloxUsername ? `🎮 Робуксы придут на ник: ${order.robloxUsername}\n` : "";
@@ -3359,8 +3390,12 @@ async function handleIdleMessage(
     } else if (order.status === "AWAITING_GAMEPASS") {
       kb.urlButton({ label: "📖 ИНСТРУКЦИЯ", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}` }).row()
         .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" }).row();
-    } else if (order.status === "COMPLETED" && reviewClaimed) {
+    } else if (order.status === "COMPLETED") {
+      // Всегда уводим в прямой заказ. Кнопка отзыва — только пока бонус не начислен.
       kb.textButton({ label: "💎 Заказать напрямую", payload: { command: "start_direct" }, color: "positive" }).row();
+      if (!reviewClaimed && !order.isDirectOrder) {
+        kb.textButton({ label: "📸 Отзыв = +100 R$ бонус", payload: { command: "review_hint" }, color: "primary" }).row();
+      }
     } else if ((order.status === "PENDING" || order.status === "IN_PROGRESS") && !order.isDirectOrder) {
       // "Передумал" — re-pick nick/gamepass while the order isn't bought yet.
       kb.textButton({ label: "⚠️ Ошибся с ником? Изменить заказ", payload: { command: "change_nick" }, color: "negative" }).row();
@@ -3376,7 +3411,9 @@ async function handleIdleMessage(
 
     await ctx.reply({
       message:
-        (String(order.wbCode).startsWith("DIR-")
+        (isCompletedCard
+          ? `✅ Заказ выполнен\n`
+          : String(order.wbCode).startsWith("DIR-")
           ? `📦 Прямой заказ\n`
           : `🔑 Код ВБ: ${order.wbCode}\n`) +
         `📅 ${new Date(order.createdAt).toLocaleDateString("ru-RU")}\n` +

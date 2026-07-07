@@ -998,37 +998,42 @@ export function registerStatus(bot: Telegraf): void {
   // /help — personal instruction link (tied to the user's active code/order) +
   // how to reach a human. No raw command names in the text — buttons only.
   bot.command("help", async (ctx) => {
-    // Resolve the user's latest order so the instruction link carries their code
-    // (→ opens straight into the instruction, not the code-entry gate).
-    let guideUrl = "https://robloxbank.ru/guide?source=wb";
+    // Инструкция уместна только пока заказ ещё «в работе» (не выкуплен). Как только
+    // WB-заказ выполнен, /help не тащит клиента обратно в WB-инструкцию — уводит в
+    // прямые заказы (владелец: никакого WB после выполненного заказа).
+    let guideUrl: string | null = null;
     try {
       const helpUser = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
       if (helpUser) {
         const helpOrder = await findRelevantOrder(helpUser.id);
-        if (helpOrder?.wbCode && !(helpOrder.wbCode as string).startsWith("DIR-") && !helpOrder.isDirectOrder) {
+        const stillActive = helpOrder && CHANGEABLE_ORDER_STATUSES.includes(helpOrder.status);
+        if (stillActive && helpOrder.wbCode && !String(helpOrder.wbCode).startsWith("DIR-") && !helpOrder.isDirectOrder) {
           guideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${helpOrder.wbCode}`;
-        } else if (helpOrder?.isDirectOrder) {
+        } else if (stillActive && helpOrder.isDirectOrder) {
           guideUrl = "https://robloxbank.ru/guide?source=direct";
         }
       }
     } catch (err) {
       console.error("[TG] /help order lookup failed:", err);
     }
-    await ctx.reply(
-      `🆘 <b>Помощь</b>\n\n` +
-      `📖 Твоя инструкция — как создать геймпасс и получить робуксы. Заказ оформляется прямо там, по нику Roblox.\n\n` +
-      `🔔 Статус заказа и уведомления — здесь, в боте.\n` +
-      `💎 А ещё можно купить Robux напрямую — без карты WB, быстрее и выгоднее.`,
-      {
-        parse_mode: "HTML",
-        link_preview_options: { is_disabled: true },
-        ...Markup.inlineKeyboard([
-          [Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", guideUrl)],
-          [Markup.button.callback("📊 Мой заказ", CB.refreshStatus), Markup.button.callback("💎 Купить напрямую", CB.startDirect)],
-          [faqBtn()],
-        ]),
-      }
-    );
+    const helpRows: ReturnType<typeof Markup.button.callback>[][] = [];
+    if (guideUrl) helpRows.push([Markup.button.url("📖 ОТКРЫТЬ МОЮ ИНСТРУКЦИЮ", guideUrl)] as any);
+    helpRows.push([Markup.button.callback("📊 Мой заказ", CB.refreshStatus), Markup.button.callback("💎 Купить напрямую", CB.startDirect)]);
+    helpRows.push([faqBtn()]);
+    const helpText = guideUrl
+      ? `🆘 <b>Помощь</b>\n\n` +
+        `📖 Твоя инструкция — как создать геймпасс и получить робуксы. Заказ оформляется прямо там, по нику Roblox.\n\n` +
+        `🔔 Статус заказа и уведомления — здесь, в боте.\n` +
+        `💎 А ещё можно купить Robux напрямую — без карты WB, быстрее и выгоднее.`
+      : `🆘 <b>Помощь</b>\n\n` +
+        `🔔 Статус заказов и уведомления — здесь, в боте.\n` +
+        `💎 Готов к новому заказу? Покупай Robux <b>напрямую</b> — без карты WB, быстрее и выгоднее.\n\n` +
+        `❓ Частые вопросы — кнопка ниже.`;
+    await ctx.reply(helpText, {
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+      ...Markup.inlineKeyboard(helpRows),
+    });
   });
 }
 
@@ -1232,7 +1237,11 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
       `🚀 <i>Хочешь заказать ещё? Постоянным клиентам — прямое обслуживание без Wildberries по лучшему курсу!</i>`;
   }
 
-  const gamepassLine = order.gamepassUrl
+  // После выкупа WB-заказ «закрыт»: код и ссылка на геймпасс больше не нужны —
+  // карточка уводит клиента в прямые заказы (решение владельца: никакого WB
+  // после выполненного заказа). Ссылка на геймпасс остаётся только на живых заказах.
+  const isCompletedCard = order.status === "COMPLETED";
+  const gamepassLine = order.gamepassUrl && !isCompletedCard
     ? `🔗 <a href="${order.gamepassUrl}">Геймпасс</a>\n`
     : ``;
 
@@ -1246,7 +1255,10 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
   const statusLabel = stage ? stage.label : (label[order.status] ?? order.status);
 
   // Прямые заказы идентифицируются ником+суммой (строки ниже) — без номера (C2).
-  const codeLine = order.wbCode && !String(order.wbCode).startsWith("DIR-")
+  // Выполненный WB-заказ код не показывает: он отработан, дальше — только прямые.
+  const codeLine = isCompletedCard
+    ? `✅ <b>Заказ выполнен</b>\n`
+    : order.wbCode && !String(order.wbCode).startsWith("DIR-")
     ? `🔑 Код ВБ: <b>${order.wbCode}</b>\n`
     : `📦 Прямой заказ\n`;
 
@@ -1300,8 +1312,12 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
       menuRow,
     ]);
   } else if (order.status === "COMPLETED") {
+    // Отзыв — единственная оставшаяся WB-механика, и только пока бонус не начислен.
+    // Начислили → карточка полностью прямая (никакого WB).
+    const reviewPending = !order.isDirectOrder && !user.reviewBonusGrantedAt;
     keyboard = Markup.inlineKeyboard([
       [Markup.button.callback("💎 Заказать напрямую", CB.startDirect)],
+      ...(reviewPending ? [[Markup.button.callback("📸 Отзыв = +100 R$ бонус", CB.reviewHint)]] : []),
       refreshRow,
       [faqBtn()],
       menuRow,
@@ -1459,21 +1475,34 @@ export function registerText(bot: Telegraf): void {
     }
     if (!isAdmin && text === MENU_BTN.guide) {
       clearUserSession();
-      let guideUrl = "https://robloxbank.ru/guide?source=wb";
+      let guideUrl: string | null = null;
       try {
         const gu = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } });
         if (gu) {
           const go = await findRelevantOrder(gu.id);
-          if (go?.wbCode && !String(go.wbCode).startsWith("DIR-") && !go.isDirectOrder) {
+          const stillActive = go && CHANGEABLE_ORDER_STATUSES.includes(go.status);
+          if (stillActive && go.wbCode && !String(go.wbCode).startsWith("DIR-") && !go.isDirectOrder) {
             guideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${go.wbCode}`;
+          } else if (stillActive && go.isDirectOrder) {
+            guideUrl = "https://robloxbank.ru/guide?source=direct";
           }
         }
       } catch {}
-      await ctx.reply(
-        `📖 Твоя персональная инструкция 👇\n${guideUrl}`,
-        { parse_mode: "HTML", link_preview_options: { is_disabled: true },
-          ...Markup.inlineKeyboard([[Markup.button.url("📖 ОТКРЫТЬ ИНСТРУКЦИЮ", guideUrl)]]) }
-      );
+      if (guideUrl) {
+        await ctx.reply(
+          `📖 Твоя персональная инструкция 👇\n${guideUrl}`,
+          { parse_mode: "HTML", link_preview_options: { is_disabled: true },
+            ...Markup.inlineKeyboard([[Markup.button.url("📖 ОТКРЫТЬ ИНСТРУКЦИЮ", guideUrl)]]) }
+        );
+      } else {
+        // Активного заказа нет — инструкция не нужна, уводим в прямой заказ.
+        await ctx.reply(
+          `✅ Все твои заказы выполнены — инструкция сейчас не нужна.\n\n` +
+          `💎 Готов к новому заказу? Оформи Robux <b>напрямую</b> — без карты WB, быстрее и выгоднее 👇`,
+          { parse_mode: "HTML", link_preview_options: { is_disabled: true },
+            ...Markup.inlineKeyboard([[Markup.button.callback("💎 Купить напрямую", CB.startDirect)]]) }
+        );
+      }
       return;
     }
     if (!isAdmin && text === MENU_BTN.faq) {
