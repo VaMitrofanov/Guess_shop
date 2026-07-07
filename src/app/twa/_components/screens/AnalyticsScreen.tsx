@@ -1,7 +1,12 @@
 "use client";
-import { C } from "../theme";
+import { C, tint } from "../theme";
 import { useEffect, useState } from "react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  ComposedChart, Line, Area, LineChart, ReferenceLine, Legend,
+} from "recharts";
+
+// ── Shared types ──────────────────────────────────────────────────────────────
 
 interface DayData  { date: string; count: number; sum: number }
 interface DashData { daily: DayData[]; week: { orders: number; sum: number }; prevWeek: { orders: number; sum: number }; apiAvailable: boolean }
@@ -12,7 +17,27 @@ interface AdvertData {
   campaigns: { id: number; status: number; balance: number; spend7d: number; orders7d: number }[];
   empty?: boolean;
 }
+interface FunnelItem { article: string; orders: number; buyouts: number; revenue: number; pctBuyout: number; retPct: number }
+interface GoodItem { nmID: number; article: string; price: number; discount: number; discountedPrice: number }
+interface FunnelData { funnel: FunnelItem[]; goods: GoodItem[] }
 
+interface BuyerBucket { label: string; count: number }
+interface BuyerFunnelData {
+  nicks: BuyerBucket[]; gamepasses: BuyerBucket[];
+  range: { type: string; from: string; to: string };
+  totals: { nicks: number; gamepasses: number; conversionPct: number };
+}
+
+interface PredictData {
+  daily: { date: string; orders: number; amount: number }[];
+  trendLine: { date: string; value: number }[];
+  regression: { slope: number; intercept: number; r2: number; direction: "up" | "down" | "flat" };
+  metrics: { avgDaily7d: number; avgDaily30d: number; growthWoW: number | null; growthMoM: number | null; revenue7d: number; revenue30d: number };
+  projections: { orders30d: number; orders60d: number; orders90d: number; revenue30d: number; revenue60d: number; revenue90d: number };
+  funnelTrend: { week: string; nicks: number; gamepasses: number; conversionPct: number }[];
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function rub(n: number) { return n.toLocaleString("ru-RU") + " ₽"; }
 function pctDelta(a: number, b: number) {
@@ -20,6 +45,36 @@ function pctDelta(a: number, b: number) {
   const d = Math.round(((a - b) / b) * 100);
   return { d, up: d >= 0 };
 }
+function computeTicks(maxVal: number, scale: number): number[] {
+  if (maxVal === 0) return [0];
+  const ceiling = Math.ceil(maxVal / scale) * scale;
+  const ticks: number[] = [];
+  for (let t = 0; t <= ceiling; t += scale) ticks.push(t);
+  return ticks;
+}
+
+const tooltipStyle = { background: C.elevated, border: "none", borderRadius: 8, fontSize: 12 };
+
+// ── Pill selector (reusable) ──────────────────────────────────────────────────
+
+function PillRow<T extends string | number>({ items, value, onChange, small }: {
+  items: { id: T; label: string }[]; value: T; onChange: (v: T) => void; small?: boolean;
+}) {
+  return (
+    <div style={{ display: "flex", background: C.elevated, borderRadius: 8, padding: 2, gap: 1, flexWrap: "wrap" }}>
+      {items.map(t => (
+        <button key={String(t.id)} onClick={() => onChange(t.id)} style={{
+          padding: small ? "3px 7px" : "4px 12px", borderRadius: 6, border: "none", cursor: "pointer",
+          fontSize: small ? 11 : 12, fontWeight: 500, whiteSpace: "nowrap",
+          background: value === t.id ? C.accent : "none",
+          color: value === t.id ? "#fff" : C.textSecondary,
+        }}>{t.label}</button>
+      ))}
+    </div>
+  );
+}
+
+// ── DynamicsTab ───────────────────────────────────────────────────────────────
 
 function DynamicsTab({ token }: { token: string }) {
   const [data,    setData]    = useState<DashData | null>(null);
@@ -59,30 +114,15 @@ function DynamicsTab({ token }: { token: string }) {
       <div style={{ background: C.card, borderRadius: 12, padding: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <span style={{ fontWeight: 600, fontSize: 14 }}>7 дней</span>
-          <div style={{ display: "flex", background: C.elevated, borderRadius: 8, padding: 2, gap: 1 }}>
-            {(["count", "sum"] as const).map(v => (
-              <button key={v} onClick={() => setView(v)} style={{
-                padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer",
-                fontSize: 12, fontWeight: 500,
-                background: view === v ? C.accent : "none",
-                color: view === v ? "#fff" : C.textSecondary,
-              }}>{v === "count" ? "Шт" : "₽"}</button>
-            ))}
-          </div>
+          <PillRow items={[{ id: "count" as const, label: "Шт" }, { id: "sum" as const, label: "₽" }]} value={view} onChange={setView} />
         </div>
         <ResponsiveContainer width="100%" height={180}>
           <BarChart data={data.daily} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
             <XAxis dataKey="date" tick={{ fill: C.textSecondary, fontSize: 11 }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fill: C.textSecondary, fontSize: 11 }} axisLine={false} tickLine={false} />
-            <Tooltip
-              contentStyle={{ background: C.elevated, border: "none", borderRadius: 8, fontSize: 12 }}
-              labelStyle={{ color: "#fff" }}
-              formatter={(v) => {
-                const n = Number(v ?? 0);
-                return view === "sum" ? [rub(n), "Выручка"] : [n, "Заказов"];
-              }}
-            />
+            <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: "#fff" }}
+              formatter={(v) => { const n = Number(v ?? 0); return view === "sum" ? [rub(n), "Выручка"] : [n, "Заказов"]; }} />
             <Bar dataKey={view} fill={C.accent} radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
@@ -90,6 +130,8 @@ function DynamicsTab({ token }: { token: string }) {
     </div>
   );
 }
+
+// ── AdvertTab ─────────────────────────────────────────────────────────────────
 
 function AdvertTab({ token }: { token: string }) {
   const [data,    setData]    = useState<AdvertData | null>(null);
@@ -188,47 +230,197 @@ function AdvertTab({ token }: { token: string }) {
   );
 }
 
-interface FunnelItem {
-  article: string;
-  orders: number; buyouts: number;
-  revenue: number; pctBuyout: number; retPct: number;
-}
-interface GoodItem {
-  nmID: number; article: string;
-  price: number; discount: number; discountedPrice: number;
-}
-interface FunnelData { funnel: FunnelItem[]; goods: GoodItem[] }
+// ── BuyerFunnelSection ────────────────────────────────────────────────────────
 
-function FunnelTab({ token }: { token: string }) {
-  const [data, setData] = useState<FunnelData | null>(null);
+const RANGES = [
+  { id: "day" as const,        label: "День" },
+  { id: "week" as const,       label: "Неделя" },
+  { id: "half-month" as const, label: "Полмес." },
+  { id: "month" as const,      label: "Месяц" },
+];
+const SCALES = [1, 5, 10, 20, 30, 50, 100].map(s => ({ id: s, label: `×${s}` }));
+
+function BuyerFunnelSection({ token }: { token: string }) {
+  const [range, setRange] = useState<"day" | "week" | "half-month" | "month">("week");
+  const [scale, setScale] = useState(5);
+  const [data, setData]   = useState<BuyerFunnelData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/twa/funnel", { headers: { Authorization: `Bearer ${token}` } })
+    setLoading(true);
+    fetch(`/api/twa/buyer-funnel?range=${range}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null).then(setData)
       .catch(() => {}).finally(() => setLoading(false));
-  }, [token]);
+  }, [token, range]);
 
   if (loading) return <Skeleton />;
-  if (!data || data.funnel.length === 0) return (
-    <div style={{ padding: 24, textAlign: "center" as const, color: C.textSecondary, fontSize: 13 }}>
-      <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
-      Нет данных воронки.<br />Данные появятся после первых заказов за 30 дней.
+  if (!data) return <Empty text="Нет данных воронки" icon="👥" />;
+
+  const maxNick = Math.max(...data.nicks.map(b => b.count), 1);
+  const maxGP   = Math.max(...data.gamepasses.map(b => b.count), 1);
+  const maxAll  = Math.max(maxNick, maxGP);
+  const nickTicks = computeTicks(maxNick, scale);
+  const gpTicks   = computeTicks(maxGP, scale);
+  const allTicks  = computeTicks(maxAll, scale);
+
+  // Correlation data
+  const corrData = data.nicks.map((n, i) => ({
+    label: n.label,
+    nicks: n.count,
+    gp: data.gamepasses[i]?.count ?? 0,
+    gap: n.count - (data.gamepasses[i]?.count ?? 0),
+  }));
+
+  // Funnel direction
+  const half = Math.floor(corrData.length / 2);
+  const avgGapFirst = half > 0 ? corrData.slice(0, half).reduce((s, d) => s + d.gap, 0) / half : 0;
+  const avgGapSecond = half > 0 ? corrData.slice(half).reduce((s, d) => s + d.gap, 0) / (corrData.length - half) : 0;
+  const funnelImproving = avgGapSecond < avgGapFirst;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* Controls */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 11, color: C.textSecondary, flexShrink: 0 }}>Период</span>
+          <PillRow items={RANGES} value={range} onChange={setRange} small />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 11, color: C.textSecondary, flexShrink: 0 }}>Шаг Y</span>
+          <PillRow items={SCALES} value={scale} onChange={setScale} small />
+        </div>
+      </div>
+
+      {/* Summary cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+        <div style={{ background: C.card, borderRadius: 12, padding: "10px 12px", textAlign: "center" as const }}>
+          <div style={{ fontSize: 11, color: C.textSecondary }}>Ники</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: C.blue, marginTop: 4 }}>{data.totals.nicks}</div>
+        </div>
+        <div style={{ background: C.card, borderRadius: 12, padding: "10px 12px", textAlign: "center" as const }}>
+          <div style={{ fontSize: 11, color: C.textSecondary }}>Геймпассы</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: C.green, marginTop: 4 }}>{data.totals.gamepasses}</div>
+        </div>
+        <div style={{ background: C.card, borderRadius: 12, padding: "10px 12px", textAlign: "center" as const }}>
+          <div style={{ fontSize: 11, color: C.textSecondary }}>Конверсия</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: C.accent, marginTop: 4 }}>{data.totals.conversionPct}%</div>
+        </div>
+      </div>
+
+      {/* Chart 1: Nicks */}
+      <div style={{ background: C.card, borderRadius: 12, padding: 16 }}>
+        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>Регистрация ников</div>
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={data.nicks} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+            <XAxis dataKey="label" tick={{ fill: C.textSecondary, fontSize: 10 }} axisLine={false} tickLine={false}
+              interval={range === "month" ? 2 : "preserveStartEnd"} />
+            <YAxis ticks={nickTicks} domain={[0, nickTicks[nickTicks.length - 1]]}
+              tick={{ fill: C.textSecondary, fontSize: 11 }} axisLine={false} tickLine={false} />
+            <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: "#fff" }}
+              formatter={(v) => [Number(v), "Ников"]} />
+            <Bar dataKey="count" fill={C.blue} radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Chart 2: Gamepasses */}
+      <div style={{ background: C.card, borderRadius: 12, padding: 16 }}>
+        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>Регистрация геймпассов</div>
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={data.gamepasses} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+            <XAxis dataKey="label" tick={{ fill: C.textSecondary, fontSize: 10 }} axisLine={false} tickLine={false}
+              interval={range === "month" ? 2 : "preserveStartEnd"} />
+            <YAxis ticks={gpTicks} domain={[0, gpTicks[gpTicks.length - 1]]}
+              tick={{ fill: C.textSecondary, fontSize: 11 }} axisLine={false} tickLine={false} />
+            <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: "#fff" }}
+              formatter={(v) => [Number(v), "Геймпассов"]} />
+            <Bar dataKey="count" fill={C.green} radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Chart 3: Correlation */}
+      <div style={{ background: C.card, borderRadius: 12, padding: 16 }}>
+        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>Корреляция: ники vs геймпассы</div>
+        <ResponsiveContainer width="100%" height={220}>
+          <ComposedChart data={corrData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+            <XAxis dataKey="label" tick={{ fill: C.textSecondary, fontSize: 10 }} axisLine={false} tickLine={false}
+              interval={range === "month" ? 2 : "preserveStartEnd"} />
+            <YAxis ticks={allTicks} domain={[0, allTicks[allTicks.length - 1]]}
+              tick={{ fill: C.textSecondary, fontSize: 11 }} axisLine={false} tickLine={false} />
+            <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: "#fff" }} />
+            <Legend wrapperStyle={{ fontSize: 11, color: C.textSecondary }} />
+            <Bar dataKey="nicks" name="Ники" fill={C.blue} fillOpacity={0.6} radius={[3, 3, 0, 0]} />
+            <Bar dataKey="gp" name="Геймпассы" fill={C.green} fillOpacity={0.6} radius={[3, 3, 0, 0]} />
+            <Area dataKey="gap" name="Разрыв" fill={C.yellow} fillOpacity={0.15} stroke={C.yellow} strokeWidth={1} />
+          </ComposedChart>
+        </ResponsiveContainer>
+        <div style={{
+          textAlign: "center" as const, marginTop: 8, fontSize: 13, fontWeight: 600,
+          color: funnelImproving ? C.green : C.red,
+        }}>
+          {funnelImproving ? "↓ Воронка сужается (улучшение)" : "↑ Воронка расходится"}
+        </div>
+      </div>
     </div>
   );
+}
 
+// ── FunnelTab (with buyer sub-tabs) ───────────────────────────────────────────
+
+function FunnelTab({ token }: { token: string }) {
+  const [sub, setSub] = useState<"buyers" | "wb">("buyers");
+  const [wbData, setWbData] = useState<FunnelData | null>(null);
+  const [wbLoading, setWbLoading] = useState(false);
+
+  useEffect(() => {
+    if (sub !== "wb" || wbData) return;
+    setWbLoading(true);
+    fetch("/api/twa/funnel", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null).then(setWbData)
+      .catch(() => {}).finally(() => setWbLoading(false));
+  }, [token, sub, wbData]);
+
+  return (
+    <div style={{ padding: "12px 16px 0", display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* Sub-tab selector */}
+      <div style={{ display: "flex", background: C.card, borderRadius: 10, padding: 3, gap: 2 }}>
+        {([
+          { id: "buyers" as const, label: "Покупатели" },
+          { id: "wb" as const, label: "WB товары" },
+        ]).map(t => (
+          <button key={t.id} onClick={() => setSub(t.id)} style={{
+            flex: 1, padding: "7px 0", borderRadius: 8, border: "none", cursor: "pointer",
+            fontSize: 13, fontWeight: 500,
+            background: sub === t.id ? C.elevated : "none",
+            color: sub === t.id ? "#fff" : C.textSecondary,
+          }}>{t.label}</button>
+        ))}
+      </div>
+
+      {sub === "buyers" && <BuyerFunnelSection token={token} />}
+
+      {sub === "wb" && (
+        wbLoading ? <Skeleton /> : !wbData || wbData.funnel.length === 0 ? (
+          <Empty text="Нет данных воронки WB" icon="🔍" />
+        ) : <WbFunnelContent data={wbData} />
+      )}
+    </div>
+  );
+}
+
+function WbFunnelContent({ data }: { data: FunnelData }) {
   const totalOrders = data.funnel.reduce((s, f) => s + f.orders, 0);
   const totalRev    = data.funnel.reduce((s, f) => s + f.revenue, 0);
 
-  function buyoutColor(val: number) {
-    return val >= 85 ? C.green : val >= 70 ? C.yellow : C.red;
-  }
-  function retColor(val: number) {
-    return val <= 5 ? C.green : val <= 15 ? C.yellow : C.red;
-  }
+  function buyoutColor(val: number) { return val >= 85 ? C.green : val >= 70 ? C.yellow : C.red; }
+  function retColor(val: number) { return val <= 5 ? C.green : val <= 15 ? C.yellow : C.red; }
 
   return (
-    <div style={{ padding: "12px 16px 0", display: "flex", flexDirection: "column", gap: 10 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <div style={{ background: C.card, borderRadius: 12, padding: "10px 14px" }}>
           <div style={{ fontSize: 11, color: C.textSecondary }}>Заказов (30д)</div>
@@ -250,18 +442,10 @@ function FunnelTab({ token }: { token: string }) {
         <div key={item.article} style={{ background: C.card, borderRadius: 12, padding: "10px 12px" }}>
           <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 1fr 1fr 1fr", gap: 4, alignItems: "center" }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: C.accent }}>{item.article} R$</div>
-            <div style={{ textAlign: "center" as const }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>{item.orders.toLocaleString("ru-RU")}</div>
-            </div>
-            <div style={{ textAlign: "center" as const }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>{item.buyouts.toLocaleString("ru-RU")}</div>
-            </div>
-            <div style={{ textAlign: "center" as const }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: buyoutColor(item.pctBuyout) }}>{item.pctBuyout}%</div>
-            </div>
-            <div style={{ textAlign: "center" as const }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: retColor(item.retPct) }}>{item.retPct}%</div>
-            </div>
+            <div style={{ textAlign: "center" as const }}><div style={{ fontSize: 13, fontWeight: 600 }}>{item.orders.toLocaleString("ru-RU")}</div></div>
+            <div style={{ textAlign: "center" as const }}><div style={{ fontSize: 13, fontWeight: 600 }}>{item.buyouts.toLocaleString("ru-RU")}</div></div>
+            <div style={{ textAlign: "center" as const }}><div style={{ fontSize: 14, fontWeight: 700, color: buyoutColor(item.pctBuyout) }}>{item.pctBuyout}%</div></div>
+            <div style={{ textAlign: "center" as const }}><div style={{ fontSize: 14, fontWeight: 700, color: retColor(item.retPct) }}>{item.retPct}%</div></div>
           </div>
         </div>
       ))}
@@ -290,8 +474,147 @@ function FunnelTab({ token }: { token: string }) {
   );
 }
 
+// ── PredictTab ────────────────────────────────────────────────────────────────
+
+function PredictTab({ token }: { token: string }) {
+  const [data, setData] = useState<PredictData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/twa/predict", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null).then(setData)
+      .catch(() => {}).finally(() => setLoading(false));
+  }, [token]);
+
+  if (loading) return <Skeleton />;
+  if (!data || data.daily.length < 7) return <Empty text="Недостаточно данных для прогноза (нужно > 7 дней)" icon="🔮" />;
+
+  const { metrics: m, regression: reg, projections: proj, funnelTrend } = data;
+
+  const wowDelta = m.growthWoW !== null ? { d: m.growthWoW, up: m.growthWoW >= 0 } : null;
+  const momDelta = m.growthMoM !== null ? { d: m.growthMoM, up: m.growthMoM >= 0 } : null;
+
+  // Trend chart data
+  const trendChartData = data.trendLine.map((t, i) => ({
+    date: t.date.slice(5),
+    actual: i < data.daily.length ? data.daily[i].orders : undefined,
+    trend: i < data.daily.length ? t.value : undefined,
+    projection: i >= data.daily.length ? t.value : undefined,
+  }));
+
+  // Confidence
+  const confLabel = reg.r2 >= 0.7 ? "высокая" : reg.r2 >= 0.4 ? "средняя" : "низкая";
+  const confColor = reg.r2 >= 0.7 ? C.green : reg.r2 >= 0.4 ? C.yellow : C.red;
+  const dirLabel = reg.direction === "up" ? "↑ рост" : reg.direction === "down" ? "↓ спад" : "→ стабильно";
+
+  // Funnel conversion chart
+  const avgConv = funnelTrend.length > 0
+    ? Math.round(funnelTrend.reduce((s, f) => s + f.conversionPct, 0) / funnelTrend.length)
+    : 0;
+  const funnelChartData = funnelTrend.map(f => ({ week: f.week.slice(5), conv: f.conversionPct }));
+  const firstConv = funnelTrend[0]?.conversionPct ?? 0;
+  const lastConv = funnelTrend[funnelTrend.length - 1]?.conversionPct ?? 0;
+
+  return (
+    <div style={{ padding: "12px 16px 0", display: "flex", flexDirection: "column", gap: 12, paddingBottom: 24 }}>
+      {/* Summary cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        {[
+          { label: "Ср./день (7д)", val: String(m.avgDaily7d), delta: wowDelta, sub: "vs пред. неделя" },
+          { label: "Ср./день (30д)", val: String(m.avgDaily30d), delta: momDelta, sub: "vs пред. месяц" },
+          { label: "Выручка (7д)", val: `${m.revenue7d.toLocaleString("ru-RU")} R$`, delta: null, sub: "" },
+          { label: "Выручка (30д)", val: `${m.revenue30d.toLocaleString("ru-RU")} R$`, delta: null, sub: "" },
+        ].map(c => (
+          <div key={c.label} style={{ background: C.card, borderRadius: 12, padding: "12px 14px" }}>
+            <div style={{ fontSize: 12, color: C.textSecondary }}>{c.label}</div>
+            <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2 }}>{c.val}</div>
+            {c.delta && (
+              <div style={{ fontSize: 12, color: c.delta.up ? C.green : C.red, marginTop: 2 }}>
+                {c.delta.up ? "↑" : "↓"}{Math.abs(c.delta.d)}% {c.sub}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Trend chart */}
+      <div style={{ background: C.card, borderRadius: 12, padding: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <span style={{ fontWeight: 600, fontSize: 14 }}>Тренд заказов</span>
+          <span style={{
+            fontSize: 11, padding: "2px 8px", borderRadius: 6,
+            background: tint(confColor, 0.15), color: confColor,
+          }}>
+            R² {reg.r2} · {confLabel} · {dirLabel}
+          </span>
+        </div>
+        <ResponsiveContainer width="100%" height={220}>
+          <ComposedChart data={trendChartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+            <XAxis dataKey="date" tick={{ fill: C.textSecondary, fontSize: 9 }} axisLine={false} tickLine={false}
+              interval={Math.ceil(trendChartData.length / 10)} />
+            <YAxis tick={{ fill: C.textSecondary, fontSize: 11 }} axisLine={false} tickLine={false} />
+            <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: "#fff" }} />
+            <Area dataKey="actual" name="Факт" fill={C.accent} fillOpacity={0.2} stroke={C.accent} strokeWidth={1.5} connectNulls={false} />
+            <Line dataKey="trend" name="Тренд" stroke={C.blue} strokeWidth={2} strokeDasharray="6 3" dot={false} connectNulls={false} />
+            <Line dataKey="projection" name="Прогноз" stroke={C.blue} strokeWidth={2} strokeDasharray="3 3" strokeOpacity={0.5} dot={false} connectNulls={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Projections table */}
+      <div style={{ background: C.card, borderRadius: 12, padding: 16 }}>
+        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>Прогноз</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {[
+            { label: "Через 1 мес", orders: proj.orders30d, rev: proj.revenue30d },
+            { label: "Через 2 мес", orders: proj.orders60d, rev: proj.revenue60d },
+            { label: "Через 3 мес", orders: proj.orders90d, rev: proj.revenue90d },
+          ].map(r => (
+            <div key={r.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ color: C.textSecondary, fontSize: 14 }}>{r.label}</span>
+              <div style={{ textAlign: "right" as const }}>
+                <span style={{ fontWeight: 600, fontSize: 14 }}>{r.orders.toLocaleString("ru-RU")} заказов</span>
+                <span style={{ color: C.textSecondary, fontSize: 12, marginLeft: 8 }}>{r.rev.toLocaleString("ru-RU")} R$</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 11, color: C.muted, marginTop: 12, textAlign: "center" as const }}>
+          На основе линейной регрессии последних 90 дней
+        </div>
+      </div>
+
+      {/* Funnel conversion trend */}
+      {funnelTrend.length >= 2 && (
+        <div style={{ background: C.card, borderRadius: 12, padding: 16 }}>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>Воронка: ник → геймпасс</div>
+          <ResponsiveContainer width="100%" height={180}>
+            <LineChart data={funnelChartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+              <XAxis dataKey="week" tick={{ fill: C.textSecondary, fontSize: 10 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: C.textSecondary, fontSize: 11 }} axisLine={false} tickLine={false}
+                domain={[0, "auto"]} unit="%" />
+              <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: "#fff" }}
+                formatter={(v) => [`${v}%`, "Конверсия"]} />
+              <ReferenceLine y={avgConv} stroke={C.yellow} strokeDasharray="4 4" strokeWidth={1} />
+              <Line dataKey="conv" name="Конверсия" stroke={C.green} strokeWidth={2} dot={{ r: 3, fill: C.green }} />
+            </LineChart>
+          </ResponsiveContainer>
+          <div style={{ textAlign: "center" as const, marginTop: 8, fontSize: 13, color: C.textSecondary }}>
+            Конверсия: <b style={{ color: lastConv >= firstConv ? C.green : C.red }}>{firstConv}% → {lastConv}%</b> за {funnelTrend.length} нед
+            <span style={{ marginLeft: 8, color: C.muted }}>· ср. {avgConv}%</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main AnalyticsScreen ──────────────────────────────────────────────────────
+
 export default function AnalyticsScreen({ token }: { token: string }) {
-  const [tab, setTab] = useState<"dynamics" | "advert" | "funnel">("dynamics");
+  const [tab, setTab] = useState<"dynamics" | "advert" | "funnel" | "predict">("dynamics");
 
   return (
     <div style={{ paddingBottom: 24 }}>
@@ -301,6 +624,7 @@ export default function AnalyticsScreen({ token }: { token: string }) {
             { id: "dynamics", label: "Динамика" },
             { id: "advert",   label: "Реклама"  },
             { id: "funnel",   label: "Воронка"  },
+            { id: "predict",  label: "Предикт"  },
           ] as const).map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
               flex: 1, padding: "8px 0", borderRadius: 8, border: "none", cursor: "pointer",
@@ -315,9 +639,12 @@ export default function AnalyticsScreen({ token }: { token: string }) {
       {tab === "dynamics" && <DynamicsTab token={token} />}
       {tab === "advert"   && <AdvertTab token={token} />}
       {tab === "funnel"   && <FunnelTab token={token} />}
+      {tab === "predict"  && <PredictTab token={token} />}
     </div>
   );
 }
+
+// ── Shared UI atoms ───────────────────────────────────────────────────────────
 
 function Skeleton() {
   return (
