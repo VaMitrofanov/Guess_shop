@@ -5213,7 +5213,25 @@ export async function notifyUserCompleted(
       await bot.telegram.sendMessage(user.tgId, tgMsg, { parse_mode: "HTML", ...keyboard });
     } catch { }
   } else if (user.vkId) {
-    await vkSend(user.vkId, vkMsg);
+    const vkExtra: Record<string, string> = {};
+    if (!isDirectOrder && wbCompletedCount === 1) {
+      vkExtra.keyboard = JSON.stringify({
+        inline: true,
+        buttons: [[{
+          action: { type: "text", label: "📸 Отзыв = +100 R$ бонус", payload: JSON.stringify({ command: "review_hint" }) },
+          color: "primary",
+        }]],
+      });
+    } else {
+      vkExtra.keyboard = JSON.stringify({
+        inline: true,
+        buttons: [[{
+          action: { type: "text", label: "💎 Купить напрямую", payload: JSON.stringify({ command: "start_direct" }) },
+          color: "positive",
+        }]],
+      });
+    }
+    await vkSend(user.vkId, vkMsg, vkExtra);
   }
 }
 
