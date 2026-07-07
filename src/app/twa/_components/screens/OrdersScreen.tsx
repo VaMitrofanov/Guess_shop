@@ -1095,6 +1095,34 @@ function OrderCard({
             </span>
           </DataRow>
         )}
+        {order.status === "COMPLETED" && order.reviewStatus && (() => {
+          const granted = order.user.reviewBonusGrantedAt;
+          if (order.reviewStatus === "PENDING") {
+            return (
+              <DataRow icon="📸">
+                <span style={{ color: C.yellow, fontWeight: 600 }}>Ждёт отзыв</span>
+                <span style={{ fontSize: 13, color: C.textTertiary }}> · скрин = +100 R$</span>
+              </DataRow>
+            );
+          }
+          const bal = order.user.balance ?? 0;
+          if (bal > 0 && granted) {
+            const expiry = new Date(new Date(granted).getTime() + 30 * 86_400_000);
+            return (
+              <DataRow icon="✅">
+                <span style={{ color: C.green, fontWeight: 600 }}>+100 R$ начислен</span>
+                <span style={{ fontSize: 13, color: C.textTertiary }}>
+                  {" · "}баланс {bal} R$ до {expiry.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
+                </span>
+              </DataRow>
+            );
+          }
+          return (
+            <DataRow icon="💳">
+              <span style={{ color: C.textTertiary, fontWeight: 600 }}>Бонус использован</span>
+            </DataRow>
+          );
+        })()}
 
         {/* Notes */}
         <div style={{ marginTop: 8 }}>
