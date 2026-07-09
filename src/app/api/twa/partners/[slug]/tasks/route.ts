@@ -1,3 +1,5 @@
+import { createHash } from "crypto";
+
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 
@@ -36,8 +38,14 @@ const GOOGLE_SYNC_TTL_MS = 60_000;
 const GOOGLE_SYNC_RUNNING_STALE_MS = 2 * 60_000;
 const GOOGLE_STATUS_PENDING = "в ожидании";
 const GOOGLE_STATUS_DONE = "готово";
+// Чип «ошибка» в колонке E: строка подсвечивается красным условным форматированием
+// на стороне таблицы, причина пишется в F («комментарий»). Ставим его только для
+// row-level проблем, которые Антон может исправить; внутренние ошибки операций
+// (cookie, баланс партнёра) колонку E не трогают.
+const GOOGLE_STATUS_ERROR = "ошибка";
 const GOOGLE_MAX_SHEETS = 80;
 const GOOGLE_MAX_ROWS_PER_SHEET = 800;
+const ACTIVE_TASK_STATUSES = ["NEW", "READY", "FAILED"] as const;
 
 type ParsedPartnerImportRow = {
   rowNumber: number;
@@ -85,8 +93,18 @@ type GoogleSyncSheetDiagnostics = GoogleSyncFilterStats & {
   title: string;
 };
 
+type GoogleSyncReconciliationStats = {
+  closedFromSheet: number;
+  failedFromSheet: number;
+  cancelledFromSheet: number;
+  deletedFromSheet: number;
+  revived: number;
+  conflicts: number;
+};
+
 type GoogleSyncDiagnostics = GoogleSyncFilterStats & {
   sheets: GoogleSyncSheetDiagnostics[];
+  reconciliation?: GoogleSyncReconciliationStats;
 };
 
 type GoogleSyncResult = {
@@ -255,20 +273,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function computeGoogleRowHash(cells: unknown[]) {
+  const normalized = Array.from({ length: 6 }, (_, i) => String(cells[i] ?? "").trim());
+  return createHash("sha1").update(JSON.stringify(normalized)).digest("hex").slice(0, 16);
+}
+
 function buildGoogleSheetRaw(input: {
   spreadsheetId: string;
   sheetTitle: string;
+  sheetId?: number | null;
   rowNumber: number;
   cells: unknown[];
   syncedBy?: string | null;
+  sheetPriceRobux?: number | null;
+  priceMismatch?: boolean;
 }) {
   return toJsonObject({
     source: "google-sheets",
     spreadsheetId: input.spreadsheetId,
     sheetTitle: input.sheetTitle,
+    sheetId: input.sheetId ?? null,
     rowNumber: input.rowNumber,
     range: `${input.sheetTitle}!A${input.rowNumber}:F${input.rowNumber}`,
     cells: input.cells,
+    rowHash: computeGoogleRowHash(input.cells),
+    sheetPriceRobux: input.sheetPriceRobux ?? null,
+    priceMismatch: input.priceMismatch ?? false,
     syncedAt: new Date().toISOString(),
     syncedBy: input.syncedBy || null,
   });
@@ -528,18 +558,31 @@ async function importPartnerXlsx(partner: Partner, user: NonNullable<TwaUser>, f
   return result;
 }
 
-async function writeBackPartnerTask(task: PartnerBuyoutTask, kind: "done" | "error", message?: string) {
+/**
+ * kind="done"    -> E="готово", F очищается.
+ * kind="error"   -> E="ошибка" (красная строка у Антона) + причина в F («комментарий»).
+ *                   Строка выходит из фильтра «в ожидании» до ручного исправления.
+ * kind="comment" -> только F; E не трогаем (внутренние ошибки операций: cookie,
+ *                   баланс партнёра — строка должна остаться «в ожидании»).
+ */
+async function writeBackPartnerTask(task: PartnerBuyoutTask, kind: "done" | "error" | "comment", message?: string) {
   const meta = getGoogleTaskMeta(task);
   if (!meta || !isGoogleSheetsConfigured()) return;
 
+  const errorMessage = truncateGoogleMessage(message || task.error || "Ошибка обработки");
   const updates: GoogleSheetsValueUpdate[] = kind === "done"
     ? [
       { range: googleCellRange(meta.sheetTitle, "E", meta.rowNumber), values: [[GOOGLE_STATUS_DONE]] },
       { range: googleCellRange(meta.sheetTitle, "F", meta.rowNumber), values: [[""]] },
     ]
-    : [
-      { range: googleCellRange(meta.sheetTitle, "F", meta.rowNumber), values: [[truncateGoogleMessage(message || task.error || "Ошибка обработки")]] },
-    ];
+    : kind === "error"
+      ? [
+        { range: googleCellRange(meta.sheetTitle, "E", meta.rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
+        { range: googleCellRange(meta.sheetTitle, "F", meta.rowNumber), values: [[errorMessage]] },
+      ]
+      : [
+        { range: googleCellRange(meta.sheetTitle, "F", meta.rowNumber), values: [[errorMessage]] },
+      ];
 
   try {
     await batchUpdateGoogleSheetValues(meta.spreadsheetId, updates);
@@ -564,6 +607,128 @@ async function writeBackPartnerTask(task: PartnerBuyoutTask, kind: "done" | "err
       },
     });
   }
+}
+
+type GoogleTaskUpsertData = {
+  status: "READY" | "FAILED";
+  robloxUsername: string | null;
+  gamepassId: string | null;
+  gamepassUrl: string | null;
+  productId?: string | null;
+  sellerId?: string | null;
+  sellerName?: string | null;
+  priceRobux: number | null;
+  error: string | null;
+  note?: string | null;
+};
+
+/**
+ * П7: skip no-op-обновлений. Каждый sync раньше переписывал все совпавшие задачи,
+ * из-за чего updatedAt «прыгал» и список пересортировывался. Обновляем только если
+ * изменилось содержимое строки (rowHash), результат резолва или флаг расхождения.
+ */
+function isGoogleTaskUnchanged(existing: PartnerBuyoutTask, data: GoogleTaskUpsertData, input: {
+  rowHash: string;
+  priceMismatch: boolean;
+  sheetId: number | null;
+}) {
+  const raw = isRecord(existing.sheetRaw) ? existing.sheetRaw : null;
+  return existing.status === data.status
+    && (existing.robloxUsername ?? null) === (data.robloxUsername ?? null)
+    && (existing.gamepassId ?? null) === (data.gamepassId ?? null)
+    && (existing.gamepassUrl ?? null) === (data.gamepassUrl ?? null)
+    && (existing.productId ?? null) === (data.productId ?? null)
+    && (existing.sellerId ?? null) === (data.sellerId ?? null)
+    && (existing.sellerName ?? null) === (data.sellerName ?? null)
+    && (existing.priceRobux ?? null) === (data.priceRobux ?? null)
+    && (existing.error ?? null) === (data.error ?? null)
+    && (existing.note ?? null) === (data.note ?? null)
+    && raw?.rowHash === input.rowHash
+    && Boolean(raw?.priceMismatch) === input.priceMismatch
+    && (raw?.sheetId ?? null) === (input.sheetId ?? null);
+}
+
+type ReconcileOutcome = {
+  kind: "closed" | "failed" | "cancelled" | "conflict";
+  message: string;
+};
+
+/**
+ * П3: реконсиляция ручной правки статуса E для существующей задачи GOOGLE_SHEETS
+ * в активном статусе (NEW/READY/FAILED). Денег не двигает: «готово» из таблицы
+ * закрывает задачу БЕЗ списания USDT (бейдж «из таблицы», решение о «Списать» отложено).
+ */
+async function reconcilePartnerGoogleRow(input: {
+  task: PartnerBuyoutTask;
+  rowStatus: string;
+  rowComment: string;
+  rowGamepassId: string | null;
+  stats: GoogleSyncReconciliationStats;
+}): Promise<ReconcileOutcome | null> {
+  const { task, rowStatus, rowGamepassId, stats } = input;
+  if (!(ACTIVE_TASK_STATUSES as readonly string[]).includes(task.status)) return null;
+
+  // Защита от сдвига нумерации (вставили/удалили строки выше): если в C теперь другой
+  // геймпасс, чужую строку не закрываем и не отменяем — только конфликт-метка.
+  if (rowGamepassId && task.gamepassId && rowGamepassId !== task.gamepassId) {
+    const conflict = `Строка сместилась: в C геймпасс ${rowGamepassId}, в задаче ${task.gamepassId} — проверь вручную`;
+    stats.conflicts += 1;
+    if ((isRecord(task.sheetRaw) ? task.sheetRaw.conflict : null) === conflict) {
+      return { kind: "conflict", message: conflict };
+    }
+    await prisma.partnerBuyoutTask.update({
+      where: { id: task.id },
+      data: { sheetRaw: mergeTaskSheetRaw(task, { conflict, conflictAt: new Date().toISOString() }) },
+    });
+    return { kind: "conflict", message: conflict };
+  }
+
+  if (rowStatus === GOOGLE_STATUS_DONE) {
+    await prisma.partnerBuyoutTask.update({
+      where: { id: task.id },
+      data: {
+        status: "DONE",
+        completedAt: new Date(),
+        error: null,
+        note: "Закрыто из таблицы: E=«готово» выставлено вручную",
+        sheetRaw: mergeTaskSheetRaw(task, {
+          closedFromSheet: true,
+          conflict: null,
+          reconciledAt: new Date().toISOString(),
+        }),
+      },
+    });
+    stats.closedFromSheet += 1;
+    return { kind: "closed", message: "Закрыта из таблицы (E=готово), без списания USDT" };
+  }
+
+  if (rowStatus === GOOGLE_STATUS_ERROR) {
+    // FAILED + E=«ошибка» — консистентно (наш же write-back), не трогаем.
+    if (task.status === "FAILED") return null;
+    const reason = input.rowComment ? `Помечено ошибкой в таблице: ${input.rowComment}` : "Помечено ошибкой в таблице";
+    await prisma.partnerBuyoutTask.update({
+      where: { id: task.id },
+      data: {
+        status: "FAILED",
+        error: truncateGoogleMessage(reason),
+        sheetRaw: mergeTaskSheetRaw(task, { errorFromSheet: true, reconciledAt: new Date().toISOString() }),
+      },
+    });
+    stats.failedFromSheet += 1;
+    return { kind: "failed", message: "Помечена ошибкой из таблицы" };
+  }
+
+  const statusLabel = rowStatus || "пусто";
+  await prisma.partnerBuyoutTask.update({
+    where: { id: task.id },
+    data: {
+      status: "CANCELLED",
+      note: `Строка вышла из ожидания: статус «${statusLabel}»`,
+      sheetRaw: mergeTaskSheetRaw(task, { cancelledFromSheet: true, reconciledAt: new Date().toISOString() }),
+    },
+  });
+  stats.cancelledFromSheet += 1;
+  return { kind: "cancelled", message: `Отменена: E=«${statusLabel}»` };
 }
 
 async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options: { force?: boolean } = {}) {
@@ -614,13 +779,39 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
     },
   });
   const writeBacks: GoogleSheetsValueUpdate[] = [];
+  const reconciliation: GoogleSyncReconciliationStats = {
+    closedFromSheet: 0,
+    failedFromSheet: 0,
+    cancelledFromSheet: 0,
+    deletedFromSheet: 0,
+    revived: 0,
+    conflicts: 0,
+  };
+  result.diagnostics.reconciliation = reconciliation;
 
   try {
-    const sheets = (await listGoogleSheets(spreadsheetId)).slice(0, GOOGLE_MAX_SHEETS);
+    const existingTasks = await prisma.partnerBuyoutTask.findMany({
+      where: { partnerId: partner.id, externalSource: "GOOGLE_SHEETS" },
+    });
+    const tasksByRowId = new Map<string, PartnerBuyoutTask>();
+    for (const task of existingTasks) {
+      if (task.externalRowId) tasksByRowId.set(task.externalRowId, task);
+    }
+    const seenRowIds = new Set<string>();
+    const scannedSheetTitles = new Set<string>();
+    // Guard реконсиляции «строка удалена»: не отменяем задачи, если скан обрезан лимитами.
+    let scanComplete = true;
+
+    const allSheets = await listGoogleSheets(spreadsheetId);
+    if (allSheets.length > GOOGLE_MAX_SHEETS) scanComplete = false;
+    const sheets = allSheets.slice(0, GOOGLE_MAX_SHEETS);
     result.sheetCount = sheets.length;
 
     for (const sheet of sheets) {
-      const rows = (await readGoogleSheetRows(spreadsheetId, sheet.title, "A:F")).values.slice(0, GOOGLE_MAX_ROWS_PER_SHEET);
+      const allRows = (await readGoogleSheetRows(spreadsheetId, sheet.title, "A:F")).values;
+      if (allRows.length > GOOGLE_MAX_ROWS_PER_SHEET) scanComplete = false;
+      const rows = allRows.slice(0, GOOGLE_MAX_ROWS_PER_SHEET);
+      scannedSheetTitles.add(sheet.title);
       const sheetDiagnostics: GoogleSyncSheetDiagnostics = {
         title: sheet.title,
         ...createGoogleFilterStats(),
@@ -630,38 +821,48 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
       for (let index = 0; index < rows.length; index += 1) {
         const cells = rows[index] || [];
         const rowNumber = index + 1;
+        const externalRowId = buildGoogleExternalRowId(spreadsheetId, sheet.title, rowNumber);
+        seenRowIds.add(externalRowId);
         const nominal = cells[3];
         const status = normalizeGoogleStatus(cells[4]);
         const hasAmount = String(nominal ?? "").trim() !== "";
         const isPending = status === GOOGLE_STATUS_PENDING;
         bumpGoogleFilterStats(result.diagnostics, { hasAmount, isPending, status });
         bumpGoogleFilterStats(sheetDiagnostics, { hasAmount, isPending, status });
-        if (!hasAmount || !isPending) continue;
-
-        result.rowCount += 1;
         const rowItem = (statusOverride: GoogleSyncItem["status"], gamepassId: string | null, message: string) => {
           result.items.push({ sheet: sheet.title, row: rowNumber, gamepassId, status: statusOverride, message });
         };
-        const externalRowId = buildGoogleExternalRowId(spreadsheetId, sheet.title, rowNumber);
+
+        if (!isPending) {
+          // Реконсиляция ручных статусов: E сменили руками — приводим внутреннюю задачу
+          // в соответствие (готово -> DONE без списания, ошибка -> FAILED, прочее -> CANCELLED).
+          const task = tasksByRowId.get(externalRowId);
+          if (task) {
+            const outcome = await reconcilePartnerGoogleRow({
+              task,
+              rowStatus: status,
+              rowComment: String(cells[5] ?? "").trim(),
+              rowGamepassId: parseGamepassId(String(cells[2] ?? "").trim()),
+              stats: reconciliation,
+            });
+            if (outcome) {
+              if (outcome.kind === "conflict") result.skipped += 1;
+              else result.updated += 1;
+              rowItem(outcome.kind === "conflict" ? "skipped" : "updated", task.gamepassId, outcome.message);
+            }
+          }
+          continue;
+        }
+        if (!hasAmount) continue;
+
+        result.rowCount += 1;
         const gamepassInput = String(cells[2] ?? "").trim();
         const gamepassId = parseGamepassId(gamepassInput);
         const sheetPrice = parseImportNumber(nominal);
-        const sheetRaw = buildGoogleSheetRaw({
-          spreadsheetId,
-          sheetTitle: sheet.title,
-          rowNumber,
-          cells,
-          syncedBy: user ? operatorLabel(user) : null,
-        });
-        const existing = await prisma.partnerBuyoutTask.findUnique({
-          where: {
-            partnerId_externalSource_externalRowId: {
-              partnerId: partner.id,
-              externalSource: "GOOGLE_SHEETS",
-              externalRowId,
-            },
-          },
-        });
+        const rowHash = computeGoogleRowHash(cells);
+        const existing = tasksByRowId.get(externalRowId) ?? null;
+        const existingCancelledFromSheet = existing?.status === "CANCELLED"
+          && isRecord(existing.sheetRaw) && existing.sheetRaw.cancelledFromSheet === true;
 
         if (existing?.status === "DONE") {
           result.skipped += 1;
@@ -672,7 +873,9 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           );
           continue;
         }
-        if (existing?.status === "PURCHASING" || existing?.status === "CANCELLED") {
+        // CANCELLED, отменённые самой реконсиляцией, реанимируем обычным импортом:
+        // Антон вернул строку в «в ожидании». Ручные отмены из TWA остаются отменёнными.
+        if (existing?.status === "PURCHASING" || (existing?.status === "CANCELLED" && !existingCancelledFromSheet)) {
           result.skipped += 1;
           rowItem("skipped", existing.gamepassId, `Задача сейчас в статусе ${existing.status}`);
           continue;
@@ -690,11 +893,30 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
             gamepassUrl: gamepassId ? `https://www.roblox.com/game-pass/${gamepassId}` : null,
             priceRobux: sheetPrice ? Math.round(sheetPrice) : null,
             error: message,
-            sheetRaw,
+            sheetRaw: buildGoogleSheetRaw({
+              spreadsheetId,
+              sheetTitle: sheet.title,
+              sheetId: sheet.sheetId,
+              rowNumber,
+              cells,
+              syncedBy: user ? operatorLabel(user) : null,
+              sheetPriceRobux: sheetPrice ? Math.round(sheetPrice) : null,
+            }),
           };
+          if (existing && isGoogleTaskUnchanged(existing, data, { rowHash, priceMismatch: false, sheetId: sheet.sheetId })) {
+            result.skipped += 1;
+            result.failed += 1;
+            rowItem("skipped", gamepassId, `${message} (без изменений)`);
+            writeBacks.push(
+              { range: googleCellRange(sheet.title, "E", rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
+              { range: googleCellRange(sheet.title, "F", rowNumber), values: [[message]] },
+            );
+            continue;
+          }
           if (existing) {
             await prisma.partnerBuyoutTask.update({ where: { id: existing.id }, data });
             result.updated += 1;
+            if (existingCancelledFromSheet) reconciliation.revived += 1;
             rowItem("updated", gamepassId, message);
           } else {
             await prisma.partnerBuyoutTask.create({ data });
@@ -702,7 +924,10 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
             rowItem("created", gamepassId, message);
           }
           result.failed += 1;
-          writeBacks.push({ range: googleCellRange(sheet.title, "F", rowNumber), values: [[message]] });
+          writeBacks.push(
+            { range: googleCellRange(sheet.title, "E", rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
+            { range: googleCellRange(sheet.title, "F", rowNumber), values: [[message]] },
+          );
           continue;
         }
 
@@ -710,9 +935,11 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           const gp = await resolveGamepass(gamepassInput || gamepassId);
           const ready = Boolean(gp.isForSale && gp.price && gp.price > 0 && gp.productId && gp.sellerId);
           const gpPrice = gp.price || Math.round(sheetPrice);
-          const mismatchNote = gp.price && Math.round(sheetPrice) !== gp.price
-            ? `Номинал из Sheets: ${Math.round(sheetPrice)} R$, цена GP: ${gp.price} R$`
-            : `Номинал из Sheets: ${Math.round(sheetPrice)} R$`;
+          const roundedSheetPrice = Math.round(sheetPrice);
+          const priceMismatch = Boolean(gp.price && roundedSheetPrice !== gp.price);
+          const mismatchNote = priceMismatch
+            ? `Номинал из Sheets: ${roundedSheetPrice} R$, цена GP: ${gp.price} R$`
+            : `Номинал из Sheets: ${roundedSheetPrice} R$`;
           const message = ready ? "Готова к выкупу" : "Геймпасс не продаётся или нет productId/sellerId";
           const data = {
             partnerId: partner.id,
@@ -728,12 +955,36 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
             priceRobux: gpPrice,
             error: ready ? null : message,
             note: mismatchNote,
-            sheetRaw,
+            sheetRaw: buildGoogleSheetRaw({
+              spreadsheetId,
+              sheetTitle: sheet.title,
+              sheetId: sheet.sheetId,
+              rowNumber,
+              cells,
+              syncedBy: user ? operatorLabel(user) : null,
+              sheetPriceRobux: roundedSheetPrice,
+              priceMismatch,
+            }),
           };
+
+          // Расхождение цены — не ошибка: E не трогаем, но предупреждаем Антона в F
+          // («комментарий»), если там ещё нет этого текста.
+          const mismatchWarning = priceMismatch ? `Цена ГП: ${gp.price} R$, в таблице ${roundedSheetPrice} R$` : null;
+          if (ready && mismatchWarning && String(cells[5] ?? "").trim() !== mismatchWarning) {
+            writeBacks.push({ range: googleCellRange(sheet.title, "F", rowNumber), values: [[mismatchWarning]] });
+          }
+
+          if (existing && isGoogleTaskUnchanged(existing, data, { rowHash, priceMismatch, sheetId: sheet.sheetId })) {
+            result.skipped += 1;
+            if (!ready) result.failed += 1;
+            rowItem("skipped", String(gp.gamepassId || gamepassId), "Без изменений");
+            continue;
+          }
 
           if (existing) {
             await prisma.partnerBuyoutTask.update({ where: { id: existing.id }, data });
             result.updated += 1;
+            if (existingCancelledFromSheet) reconciliation.revived += 1;
             rowItem("updated", String(gp.gamepassId || gamepassId), message);
           } else {
             await prisma.partnerBuyoutTask.create({ data });
@@ -742,10 +993,17 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           }
           if (!ready) {
             result.failed += 1;
-            writeBacks.push({ range: googleCellRange(sheet.title, "F", rowNumber), values: [[message]] });
+            writeBacks.push(
+              { range: googleCellRange(sheet.title, "E", rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
+              { range: googleCellRange(sheet.title, "F", rowNumber), values: [[message]] },
+            );
           }
         } catch (err) {
           const message = truncateGoogleMessage(err instanceof Error ? err.message : "Ошибка проверки геймпасса");
+          // BuyoutError = постоянная проблема строки (невалидный/несуществующий ГП) — чип
+          // «ошибка». Прочее (сеть, Roblox API) — временное: E оставляем «в ожидании»,
+          // чтобы строка попала в следующий sync.
+          const permanentRowError = err instanceof BuyoutError;
           const data = {
             partnerId: partner.id,
             externalSource: "GOOGLE_SHEETS" as const,
@@ -756,11 +1014,20 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
             gamepassUrl: `https://www.roblox.com/game-pass/${gamepassId}`,
             priceRobux: Math.round(sheetPrice),
             error: message,
-            sheetRaw,
+            sheetRaw: buildGoogleSheetRaw({
+              spreadsheetId,
+              sheetTitle: sheet.title,
+              sheetId: sheet.sheetId,
+              rowNumber,
+              cells,
+              syncedBy: user ? operatorLabel(user) : null,
+              sheetPriceRobux: Math.round(sheetPrice),
+            }),
           };
           if (existing) {
             await prisma.partnerBuyoutTask.update({ where: { id: existing.id }, data });
             result.updated += 1;
+            if (existingCancelledFromSheet) reconciliation.revived += 1;
             rowItem("updated", gamepassId, message);
           } else {
             await prisma.partnerBuyoutTask.create({ data });
@@ -768,8 +1035,49 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
             rowItem("created", gamepassId, message);
           }
           result.failed += 1;
+          if (permanentRowError) {
+            writeBacks.push({ range: googleCellRange(sheet.title, "E", rowNumber), values: [[GOOGLE_STATUS_ERROR]] });
+          }
           writeBacks.push({ range: googleCellRange(sheet.title, "F", rowNumber), values: [[message]] });
         }
+      }
+    }
+
+    // Реконсиляция удалённых строк: активная задача есть, а её строки в скане нет.
+    // Срабатывает только при полном скане; если исчез целый лист (удалён/скрыт/переименован),
+    // задачи не отменяем, а помечаем конфликт для ручной проверки.
+    if (scanComplete) {
+      for (const task of existingTasks) {
+        if (!task.externalRowId || seenRowIds.has(task.externalRowId)) continue;
+        if (!(ACTIVE_TASK_STATUSES as readonly string[]).includes(task.status)) continue;
+        const meta = getGoogleTaskMeta(task);
+        if (!meta || meta.spreadsheetId !== spreadsheetId) continue;
+
+        if (!scannedSheetTitles.has(meta.sheetTitle)) {
+          const conflict = `Лист «${meta.sheetTitle}» не найден в таблице — проверь задачу вручную`;
+          if ((isRecord(task.sheetRaw) ? task.sheetRaw.conflict : null) !== conflict) {
+            await prisma.partnerBuyoutTask.update({
+              where: { id: task.id },
+              data: { sheetRaw: mergeTaskSheetRaw(task, { conflict, conflictAt: new Date().toISOString() }) },
+            });
+          }
+          reconciliation.conflicts += 1;
+          result.skipped += 1;
+          result.items.push({ sheet: meta.sheetTitle, row: meta.rowNumber, gamepassId: task.gamepassId, status: "skipped", message: conflict });
+          continue;
+        }
+
+        await prisma.partnerBuyoutTask.update({
+          where: { id: task.id },
+          data: {
+            status: "CANCELLED",
+            note: "Строка удалена из таблицы",
+            sheetRaw: mergeTaskSheetRaw(task, { cancelledFromSheet: true, reconciledAt: new Date().toISOString() }),
+          },
+        });
+        reconciliation.deletedFromSheet += 1;
+        result.updated += 1;
+        result.items.push({ sheet: meta.sheetTitle, row: meta.rowNumber, gamepassId: task.gamepassId, status: "updated", message: "Отменена: строка удалена из таблицы" });
       }
     }
 
@@ -876,12 +1184,22 @@ async function loadPartnerState(partner: Partner) {
 
   const balanceUsdt = balanceAgg._sum.amount ?? 0;
   const spentUsdt = Math.abs(spentAgg._sum.amount ?? 0);
+  // Закрытые вручную из таблицы (closedFromSheet) не попадают в «Выкуплено»:
+  // по ним не было ни покупки, ни списания USDT.
   const doneRobux = tasks
-    .filter((task) => task.status === "DONE")
+    .filter((task) => task.status === "DONE" && !(isRecord(task.sheetRaw) && task.sheetRaw.closedFromSheet === true))
     .reduce((sum, task) => sum + getTaskPrice(task), 0);
   const reservedUsdt = tasks
     .filter((task) => task.status === "READY" || task.status === "PURCHASING")
     .reduce((sum, task) => sum + taskCostUsdt(getTaskPrice(task), partner), 0);
+  const mismatches = tasks
+    .filter((task) => (task.status === "NEW" || task.status === "READY" || task.status === "PURCHASING")
+      && isRecord(task.sheetRaw) && task.sheetRaw.priceMismatch === true)
+    .length;
+  const conflicts = tasks
+    .filter((task) => (ACTIVE_TASK_STATUSES as readonly string[]).includes(task.status)
+      && isRecord(task.sheetRaw) && Boolean(task.sheetRaw.conflict))
+    .length;
 
   return {
     tasks,
@@ -905,6 +1223,8 @@ async function loadPartnerState(partner: Partner) {
       purchasing: tasks.filter((task) => task.status === "PURCHASING").length,
       done: tasks.filter((task) => task.status === "DONE").length,
       failed: tasks.filter((task) => task.status === "FAILED").length,
+      mismatches,
+      conflicts,
     },
   };
 }
@@ -1135,11 +1455,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       if (!task || task.partnerId !== partner.id) return json({ ok: false, error: "Задача не найдена" }, 404);
       if (!settings?.robloxCookie) {
-        const failedTask = await prisma.partnerBuyoutTask.update({
+        // Внутренняя ошибка операций — в таблицу Антона не пишем вообще.
+        await prisma.partnerBuyoutTask.update({
           where: { id: task.id },
           data: { status: "FAILED", error: "Roblox cookie не задан" },
         });
-        await writeBackPartnerTask(failedTask, "error", "Roblox cookie не задан");
         return json({ ok: false, error: "Roblox cookie не задан" }, 409);
       }
 
@@ -1158,11 +1478,13 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const priceUsdt = taskCostUsdt(price, partner);
       const balanceBeforePurchase = await getPartnerBalance(partner);
       if (balanceBeforePurchase < priceUsdt) {
+        // Не ошибка строки: чип «ошибка» не ставим, но Антону в «комментарий» пишем —
+        // нехватка его баланса решается пополнением.
         const failedTask = await prisma.partnerBuyoutTask.update({
           where: { id: task.id },
           data: { status: "READY", error: "Недостаточно баланса партнёра" },
         });
-        await writeBackPartnerTask(failedTask, "error", "Недостаточно баланса партнёра");
+        await writeBackPartnerTask(failedTask, "comment", "Недостаточно баланса партнёра");
         return json({ ok: false, error: "Недостаточно баланса партнёра", partner, ...(await loadPartnerState(partner)) }, 409);
       }
 
@@ -1172,7 +1494,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           where: { id: task.id },
           data: { status: "FAILED", error: result.msg },
         });
-        await writeBackPartnerTask(failedTask, "error", result.msg);
+        // Протухший cookie и нехватка Robux на доноре — наши проблемы, не Антона:
+        // строку красным не помечаем, чтобы она осталась «в ожидании» для ретрая.
+        const internalFailure = /cookie|insufficient.?funds|недостаточно/i.test(result.msg || "");
+        await writeBackPartnerTask(failedTask, internalFailure ? "comment" : "error", result.msg);
         return json({ ok: true, success: false, error: result.msg, balance: result.balance, partner, ...(await loadPartnerState(partner)) });
       }
 
