@@ -31,6 +31,11 @@ Web-фичи, которые меняют Prisma-схему, требуют си
 Для партнёрского режима `Антон` это диагностируется как `503 PARTNER_SCHEMA_NOT_READY`
 от `/api/twa/partners/anton/tasks`.
 
+Порядок для таких случаев: сначала read-only `npx prisma migrate status`, затем аудит SQL на
+destructive changes/существующие таблицы, только после этого `npx prisma migrate deploy`.
+После применения проверять `migrate status` и сам API. 2026-07-09 этот порядок использован для
+трёх partner-миграций; прод-БД после этого показывает `Database schema is up to date`.
+
 > ⚠️ **Автодеплой НЕ покрывает Guide** — его деплоить вручную (Coolify UI/API) при
 > изменениях в `src/app/guide/`, `src/app/layout.tsx`, `public/`, `VKAuthButton` и
 > других файлах Guide-сборки. **Запускать ПОСЛЕ завершения Web-автодеплоя**: обе

@@ -121,6 +121,10 @@ B2B/partner-ops контур для сторонних выкупов, перв�
 `/api/twa/partners/anton/tasks` возвращает `503 PARTNER_SCHEMA_NOT_READY`, чтобы не
 маскировать ошибку схемы нулевым балансом.
 
+Прод-БД синхронизирована с этими миграциями 2026-07-09: partner-таблицы созданы, enum
+`PartnerExternalSource` содержит `XLSX_UPLOAD`, baseline Антона виден в TWA/API как 8 DONE-задач
+на `19 106 R$`, ledger `150.00 - 96.49 = 53.51 USDT`.
+
 ### `DrainEvent` (2026-07-05)
 Учёт сливов остатка донора в приёмник: `donorName`, `drainName`, `amount` (грязные R$),
 `gamepassId`, `source` (`manual` — кнопка 💧 в TWA / `auto` — автослив-воркер), `createdAt`.
