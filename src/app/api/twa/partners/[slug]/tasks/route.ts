@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 
-import type { Partner, PartnerBuyoutTask, Prisma } from "@prisma/client";
+import { Prisma, type Partner, type PartnerBuyoutTask } from "@prisma/client";
 
 import { BuyoutError, purchaseGamepassWithCookie, resolveGamepass } from "@/lib/roblox-buyout";
 import { prisma } from "@/lib/prisma";
@@ -20,6 +20,8 @@ const PARTNER_NAME_BY_SLUG: Record<string, string> = {
 };
 const DEFAULT_PARTNER_CURRENCY = "USDT";
 const DEFAULT_ANTON_RATE_USDT_PER_1000_R = 5.05;
+const PARTNER_SCHEMA_NOT_READY = "PARTNER_SCHEMA_NOT_READY";
+const PARTNER_SCHEMA_NOT_READY_MESSAGE = "Партнёрский раздел требует применения новых миграций на сервере";
 const MAX_XLSX_BYTES = 5 * 1024 * 1024;
 const MAX_XLSX_ROWS = 300;
 
@@ -49,6 +51,44 @@ type PartnerImportResult = {
 
 function json(data: unknown, status = 200) {
   return NextResponse.json(data, { status });
+}
+
+function isPartnerSchemaNotReadyError(err: unknown) {
+  if (err instanceof Prisma.PrismaClientKnownRequestError) {
+    return ["P2010", "P2021", "P2022"].includes(err.code);
+  }
+
+  const text = err instanceof Error ? err.message : String(err ?? "");
+  const lower = text.toLowerCase();
+  const partnerField = [
+    "partner",
+    "partnerbuyouttask",
+    "partnerledgerentry",
+    "ledgercurrency",
+    "robuxrateusdtper1000",
+    "googlesheet",
+    "externalsource",
+    "xlsx_upload",
+  ].some((needle) => lower.includes(needle));
+  const schemaSignal = [
+    "does not exist",
+    "unknown argument",
+    "unknown field",
+    "column",
+    "relation",
+    "enum",
+    "database",
+  ].some((needle) => lower.includes(needle));
+
+  return partnerField && schemaSignal;
+}
+
+function partnerSchemaNotReadyResponse() {
+  return json({
+    ok: false,
+    code: PARTNER_SCHEMA_NOT_READY,
+    error: PARTNER_SCHEMA_NOT_READY_MESSAGE,
+  }, 503);
 }
 
 function operatorLabel(user: NonNullable<TwaUser>) {
@@ -424,6 +464,10 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     return json({ ok: true, partner, ...state });
   } catch (err) {
     if (err instanceof BuyoutError) return json({ ok: false, error: err.message }, err.status);
+    if (isPartnerSchemaNotReadyError(err)) {
+      console.error("[partners/tasks GET schema]", err);
+      return partnerSchemaNotReadyResponse();
+    }
     console.error("[partners/tasks GET]", err);
     return json({ ok: false, error: "Ошибка загрузки партнёрских задач" }, 500);
   }
@@ -692,6 +736,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     return json({ ok: false, error: "Неизвестное действие" }, 400);
   } catch (err) {
     if (err instanceof BuyoutError) return json({ ok: false, error: err.message }, err.status);
+    if (isPartnerSchemaNotReadyError(err)) {
+      console.error("[partners/tasks POST schema]", err);
+      return partnerSchemaNotReadyResponse();
+    }
     console.error("[partners/tasks POST]", err);
     return json({ ok: false, error: "Ошибка партнёрского действия" }, 500);
   }

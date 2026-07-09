@@ -115,6 +115,12 @@ B2B/partner-ops контур для сторонних выкупов, перв�
 `150 USDT` пополнения, 8 уже выкупленных XLSX-строк (`19 106 R$`) и агрегированное списание
 `96.49 USDT`, расчётный остаток `53.51 USDT`.
 
+Для рабочей TWA-фичи на проде должны быть применены миграции
+`20260709_add_partner_buyout`, `20260709_partner_anton_usdt_sheets` и
+`20260709_partner_xlsx_upload_source`. Если Web-контейнер уже обновился, а БД ещё нет,
+`/api/twa/partners/anton/tasks` возвращает `503 PARTNER_SCHEMA_NOT_READY`, чтобы не
+маскировать ошибку схемы нулевым балансом.
+
 ### `DrainEvent` (2026-07-05)
 Учёт сливов остатка донора в приёмник: `donorName`, `drainName`, `amount` (грязные R$),
 `gamepassId`, `source` (`manual` — кнопка 💧 в TWA / `auto` — автослив-воркер), `createdAt`.

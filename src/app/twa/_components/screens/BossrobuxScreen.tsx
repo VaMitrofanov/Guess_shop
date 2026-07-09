@@ -2215,6 +2215,7 @@ function PartnerTaskRow({
 function PartnerAntonSection({ token, accountName }: { token: string; accountName: string | null }) {
   const [state, setState] = useState<PartnerState | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [gamepassInput, setGamepassInput] = useState("");
   const [nickInput, setNickInput] = useState("");
@@ -2230,20 +2231,26 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   const applyPartnerState = (payload: Record<string, unknown>) => {
     if (payload.partner && Array.isArray(payload.tasks) && Array.isArray(payload.ledgerEntries) && payload.summary) {
       setState(payload as unknown as PartnerState);
+      setLoadError(null);
     }
   };
 
   const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
       const r = await fetch("/api/twa/partners/anton/tasks", { headers: { Authorization: `Bearer ${token}` } });
       const d = await r.json().catch(() => null);
       if (!r.ok || !d) {
+        const message = d?.error ?? "Ошибка загрузки Антона";
+        setLoadError(message);
         haptic.notify("error");
-        toast(d?.error ?? "Ошибка загрузки Антона", "error");
+        toast(message, "error");
         return;
       }
       applyPartnerState(d);
     } catch {
+      setLoadError("Ошибка сети");
       haptic.notify("error");
       toast("Ошибка сети", "error");
     } finally {
@@ -2364,6 +2371,26 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
         <SectionHeader title="Антон" />
         <Card>
           <div style={{ padding: "18px 16px", color: C.textSecondary, fontSize: 15 }}>Загружаю…</div>
+        </Card>
+      </section>
+    );
+  }
+
+  if (loadError && !state) {
+    return (
+      <section>
+        <SectionHeader title="Антон" />
+        <Card>
+          <div style={{ padding: "18px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ color: C.red, fontSize: 15, fontWeight: 700 }}>{loadError}</div>
+            <div style={{ color: C.textSecondary, fontSize: 13, lineHeight: 1.35 }}>
+              Данные Антона не загружены, операции временно недоступны.
+            </div>
+            <button className="twa-press" onClick={() => { haptic.impact("medium"); void load(); }} disabled={loading}
+              style={{ width: "100%", background: C.accent, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 700, padding: "13px", cursor: "pointer", opacity: loading ? 0.55 : 1 }}>
+              Повторить
+            </button>
+          </div>
         </Card>
       </section>
     );
