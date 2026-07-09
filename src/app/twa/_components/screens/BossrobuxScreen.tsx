@@ -29,6 +29,53 @@ interface GamepassItem {
   existingOrder?: { wbCode: string; status: string; orderSource: string } | null;
 }
 
+type BuyoutWorkspace = "own" | "anton";
+type PartnerTaskStatus = "NEW" | "READY" | "PURCHASING" | "DONE" | "FAILED" | "CANCELLED";
+
+interface PartnerTask {
+  id: string;
+  status: PartnerTaskStatus;
+  robloxUsername: string | null;
+  gamepassId: string | null;
+  gamepassUrl: string | null;
+  sellerName: string | null;
+  priceRobux: number | null;
+  purchasePriceRobux: number | null;
+  purchaseAccountName: string | null;
+  completedAt: string | null;
+  error: string | null;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface PartnerLedgerEntry {
+  id: string;
+  type: string;
+  amount: number;
+  currency: string;
+  reference: string | null;
+  comment: string | null;
+  createdAt: string;
+}
+
+interface PartnerSummary {
+  balanceRobux: number;
+  spentRobux: number;
+  total: number;
+  ready: number;
+  purchasing: number;
+  done: number;
+  failed: number;
+}
+
+interface PartnerState {
+  partner: { id: string; slug: string; name: string };
+  tasks: PartnerTask[];
+  ledgerEntries: PartnerLedgerEntry[];
+  summary: PartnerSummary;
+}
+
 const ORDER_STATUS_RU: Record<string, string> = {
   AWAITING_GAMEPASS: "ждёт ГП",
   PENDING:           "в обработке",
@@ -1977,6 +2024,358 @@ function DrainSection({ token, onDonorBalance }: { token: string; onDonorBalance
   );
 }
 
+function WorkspaceSwitch({ value, onChange }: { value: BuyoutWorkspace; onChange: (v: BuyoutWorkspace) => void }) {
+  const opts: { id: BuyoutWorkspace; label: string }[] = [
+    { id: "own", label: "Свои" },
+    { id: "anton", label: "Антон" },
+  ];
+  return (
+    <div style={{ display: "flex", background: C.elevated, borderRadius: 12, padding: 3, gap: 3 }}>
+      {opts.map(o => (
+        <button
+          key={o.id}
+          className="twa-press-sm"
+          onClick={() => { if (o.id !== value) { haptic.select(); onChange(o.id); } }}
+          style={{
+            flex: 1,
+            minHeight: 42,
+            border: "none",
+            borderRadius: 9,
+            cursor: "pointer",
+            fontSize: 15,
+            fontWeight: 700,
+            fontFamily: "inherit",
+            background: value === o.id ? C.card : "transparent",
+            color: value === o.id ? "#e5e5ea" : C.textTertiary,
+            boxShadow: value === o.id ? "0 1px 3px rgba(0,0,0,0.28)" : "none",
+            transition: "background 0.18s, color 0.18s",
+          }}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const PARTNER_STATUS: Record<PartnerTaskStatus, { label: string; color: string }> = {
+  NEW: { label: "Новая", color: C.textTertiary },
+  READY: { label: "Готова", color: C.accent },
+  PURCHASING: { label: "Покупка", color: C.orange },
+  DONE: { label: "Готово", color: C.green },
+  FAILED: { label: "Ошибка", color: C.red },
+  CANCELLED: { label: "Отмена", color: C.textTertiary },
+};
+
+function fmtPartnerDate(iso: string | null) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function PartnerActionButton({
+  label,
+  color,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  color: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className="twa-press-sm"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        flex: 1,
+        minHeight: 38,
+        border: "none",
+        borderRadius: 9,
+        background: disabled ? C.elevated : color,
+        color: "#fff",
+        fontSize: 14,
+        fontWeight: 700,
+        fontFamily: "inherit",
+        cursor: disabled ? "default" : "pointer",
+        opacity: disabled ? 0.55 : 1,
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function PartnerTaskRow({
+  task,
+  busy,
+  onPurchase,
+  onMarkDone,
+  onCancel,
+}: {
+  task: PartnerTask;
+  busy: boolean;
+  onPurchase: (task: PartnerTask) => void;
+  onMarkDone: (task: PartnerTask) => void;
+  onCancel: (task: PartnerTask) => void;
+}) {
+  const status = PARTNER_STATUS[task.status];
+  const canPurchase = task.status === "READY" || task.status === "FAILED";
+  const canClose = task.status !== "DONE" && task.status !== "CANCELLED" && task.status !== "PURCHASING";
+  const title = task.sellerName || task.robloxUsername || (task.gamepassId ? `ГП ${task.gamepassId}` : "Геймпасс");
+  const price = task.priceRobux ?? task.purchasePriceRobux;
+
+  return (
+    <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#e5e5ea", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {title}
+          </div>
+          <div style={{ marginTop: 4, fontSize: 13, color: C.textTertiary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {task.gamepassUrl || (task.gamepassId ? `game-pass/${task.gamepassId}` : task.id)}
+          </div>
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div style={{ fontSize: 15, color: price != null ? C.accent : C.textTertiary, fontWeight: 700, ...tabular }}>
+            {price != null ? `${price.toLocaleString("ru-RU")} R$` : "—"}
+          </div>
+          <div style={{ marginTop: 4, fontSize: 13, color: status.color, fontWeight: 700 }}>
+            {status.label}
+          </div>
+        </div>
+      </div>
+
+      {(task.error || task.note || task.purchaseAccountName) && (
+        <div style={{ fontSize: 13, color: task.error ? C.red : C.textTertiary, lineHeight: 1.35 }}>
+          {task.error || task.note || `Аккаунт: ${task.purchaseAccountName}`}
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12, color: C.textTertiary }}>
+        <span>{fmtPartnerDate(task.createdAt)}</span>
+        {task.completedAt && <span>Готово {fmtPartnerDate(task.completedAt)}</span>}
+      </div>
+
+      {canClose && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <PartnerActionButton label="Купить" color={C.accent} disabled={busy || !canPurchase} onClick={() => onPurchase(task)} />
+          <PartnerActionButton label="Готово" color={C.green} disabled={busy} onClick={() => onMarkDone(task)} />
+          <PartnerActionButton label="Отмена" color={C.red} disabled={busy} onClick={() => onCancel(task)} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PartnerAntonSection({ token, accountName }: { token: string; accountName: string | null }) {
+  const [state, setState] = useState<PartnerState | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [gamepassInput, setGamepassInput] = useState("");
+  const [nickInput, setNickInput] = useState("");
+  const [noteInput, setNoteInput] = useState("");
+  const [topupAmount, setTopupAmount] = useState("");
+  const [topupComment, setTopupComment] = useState("");
+
+  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+
+  const applyPartnerState = (payload: Record<string, unknown>) => {
+    if (payload.partner && Array.isArray(payload.tasks) && Array.isArray(payload.ledgerEntries) && payload.summary) {
+      setState(payload as unknown as PartnerState);
+    }
+  };
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch("/api/twa/partners/anton/tasks", { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d) {
+        haptic.notify("error");
+        toast(d?.error ?? "Ошибка загрузки Антона", "error");
+        return;
+      }
+      applyPartnerState(d);
+    } catch {
+      haptic.notify("error");
+      toast("Ошибка сети", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => { void Promise.resolve().then(load); }, [load]);
+
+  async function post(action: string, body: Record<string, unknown>) {
+    if (busy) return false;
+    setBusy(true);
+    try {
+      const r = await fetch("/api/twa/partners/anton/tasks", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ action, ...body }),
+      });
+      const d = await r.json().catch(() => null);
+      if (d) applyPartnerState(d);
+      if (!r.ok || !d || d.ok === false || d.success === false) {
+        haptic.notify("error");
+        toast(d?.error ?? d?.msg ?? "Ошибка", "error");
+        return false;
+      }
+      haptic.notify("success");
+      return true;
+    } catch {
+      haptic.notify("error");
+      toast("Ошибка сети", "error");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createTask() {
+    const gamepass = gamepassInput.trim();
+    if (!gamepass) return;
+    const ok = await post("create-task", {
+      gamepass,
+      robloxUsername: nickInput.trim() || null,
+      note: noteInput.trim() || null,
+    });
+    if (ok) {
+      setGamepassInput("");
+      setNickInput("");
+      setNoteInput("");
+      toast("Задача создана", "success");
+    }
+  }
+
+  async function topup() {
+    const amount = Math.floor(Number(topupAmount.replace(",", ".")));
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    const ok = await post("ledger-topup", {
+      amount,
+      comment: topupComment.trim() || null,
+    });
+    if (ok) {
+      setTopupAmount("");
+      setTopupComment("");
+      toast("Баланс Антона пополнен", "success");
+    }
+  }
+
+  const tasks = state?.tasks ?? [];
+  const ledger = state?.ledgerEntries ?? [];
+  const summary = state?.summary;
+
+  if (loading) {
+    return (
+      <section>
+        <SectionHeader title="Антон" />
+        <Card>
+          <div style={{ padding: "18px 16px", color: C.textSecondary, fontSize: 15 }}>Загружаю…</div>
+        </Card>
+      </section>
+    );
+  }
+
+  return (
+    <>
+      <section>
+        <SectionHeader title="Антон" />
+        <Card>
+          <InfoRow label="Баланс" value={`${(summary?.balanceRobux ?? 0).toLocaleString("ru-RU")} R$`} />
+          <InfoRow label="Потрачено" value={`${(summary?.spentRobux ?? 0).toLocaleString("ru-RU")} R$`} />
+          <InfoRow label="Задачи" value={`${summary?.total ?? 0} · готово ${summary?.done ?? 0}`} />
+          <InfoRow label="В работе" value={`${summary?.ready ?? 0} ready · ${summary?.purchasing ?? 0} buying`} last />
+        </Card>
+      </section>
+
+      <section>
+        <SectionHeader title="Новая задача" />
+        <Card>
+          <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+            <input value={gamepassInput} onChange={e => setGamepassInput(e.target.value)} placeholder="ID или URL геймпасса…"
+              style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 16, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
+            <input value={nickInput} onChange={e => setNickInput(e.target.value)} placeholder="Ник продавца…"
+              style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
+            <input value={noteInput} onChange={e => setNoteInput(e.target.value)} placeholder="Заметка…"
+              style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
+            <button className="twa-press" onClick={() => { haptic.impact("medium"); createTask(); }} disabled={busy || !gamepassInput.trim()}
+              style={{ width: "100%", background: gamepassInput.trim() ? C.accent : C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 700, padding: "13px", cursor: busy ? "default" : "pointer", opacity: busy || !gamepassInput.trim() ? 0.55 : 1 }}>
+              Добавить
+            </button>
+          </div>
+        </Card>
+      </section>
+
+      <section>
+        <SectionHeader title="Пополнение" />
+        <Card>
+          <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+            <input value={topupAmount} onChange={e => setTopupAmount(e.target.value)} inputMode="numeric" placeholder="Сумма R$…"
+              style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 16, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
+            <input value={topupComment} onChange={e => setTopupComment(e.target.value)} placeholder="Комментарий…"
+              style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
+            <button className="twa-press" onClick={() => { haptic.impact("medium"); topup(); }} disabled={busy || !topupAmount.trim()}
+              style={{ width: "100%", background: topupAmount.trim() ? C.green : C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 700, padding: "13px", cursor: busy ? "default" : "pointer", opacity: busy || !topupAmount.trim() ? 0.55 : 1 }}>
+              Пополнить
+            </button>
+          </div>
+        </Card>
+      </section>
+
+      <section>
+        <SectionHeader title="Задачи" />
+        <Card>
+          {tasks.length === 0 ? (
+            <div style={{ padding: "18px 16px", color: C.textSecondary, fontSize: 15, textAlign: "center" }}>Задач пока нет</div>
+          ) : (
+            tasks.map((task, i) => (
+              <div key={task.id}>
+                {i > 0 && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
+                <PartnerTaskRow
+                  task={task}
+                  busy={busy}
+                  onPurchase={(t) => { haptic.impact("medium"); post("purchase-task", { taskId: t.id }); }}
+                  onMarkDone={(t) => { haptic.impact("medium"); post("mark-done", { taskId: t.id, purchaseAccountName: accountName || null }); }}
+                  onCancel={(t) => { haptic.impact("light"); post("cancel-task", { taskId: t.id }); }}
+                />
+              </div>
+            ))
+          )}
+        </Card>
+      </section>
+
+      <section>
+        <SectionHeader title="Ledger" />
+        <Card>
+          {ledger.length === 0 ? (
+            <div style={{ padding: "16px", color: C.textSecondary, fontSize: 15, textAlign: "center" }}>Операций пока нет</div>
+          ) : (
+            ledger.slice(0, 8).map((entry, i) => (
+              <div key={entry.id}>
+                {i > 0 && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
+                <div style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", gap: 12 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ color: "#e5e5ea", fontSize: 15, fontWeight: 700 }}>{entry.type}</div>
+                    <div style={{ marginTop: 3, color: C.textTertiary, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {entry.comment || entry.reference || fmtPartnerDate(entry.createdAt)}
+                    </div>
+                  </div>
+                  <div style={{ color: entry.amount >= 0 ? C.green : C.red, fontSize: 15, fontWeight: 700, ...tabular }}>
+                    {entry.amount > 0 ? "+" : ""}{entry.amount.toLocaleString("ru-RU")} {entry.currency}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </Card>
+      </section>
+    </>
+  );
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // Main Screen
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1985,6 +2384,7 @@ export default function BossrobuxScreen({ token }: { token: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [workspace, setWorkspace] = useState<BuyoutWorkspace>("own");
 
   const [cookieInput, setCookieInput] = useState("");
   const [saving, setSaving] = useState(false);
@@ -2228,12 +2628,15 @@ export default function BossrobuxScreen({ token }: { token: string }) {
 
   return (
     <div style={{ padding: "16px 16px 32px", display: "flex", flexDirection: "column", gap: 22, overflowY: "auto", height: "100%" }}>
+      <WorkspaceSwitch value={workspace} onChange={setWorkspace} />
 
-      {/* ── Search & Purchase (FIRST — main function) ────────────────────
-          Поиск ходит в публичные Roblox API и работает без cookie — секция
-          видна всегда (раньше пряталась целиком при протухшем cookie или
-          таймауте Roblox, «пропал поиск»). Без cookie дизейблится только 🛒. */}
-      <section>
+      {workspace === "own" ? (
+        <>
+          {/* ── Search & Purchase (FIRST — main function) ────────────────────
+              Поиск ходит в публичные Roblox API и работает без cookie — секция
+              видна всегда (раньше пряталась целиком при протухшем cookie или
+              таймауте Roblox, «пропал поиск»). Без cookie дизейблится только 🛒. */}
+          <section>
           <SectionHeader title="Поиск и выкуп" />
 
           <Card>
@@ -2542,6 +2945,10 @@ export default function BossrobuxScreen({ token }: { token: string }) {
             </div>
           </div>
         </div>
+      )}
+        </>
+      ) : (
+        <PartnerAntonSection token={token} accountName={info?.accountName ?? null} />
       )}
     </div>
   );
