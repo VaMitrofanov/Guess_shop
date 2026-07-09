@@ -368,6 +368,7 @@ model Partner {
   googleSheetUrl String?
   tasks         PartnerBuyoutTask[]
   ledgerEntries PartnerLedgerEntry[]
+  importRuns    PartnerImportRun[]
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
 }
@@ -425,6 +426,31 @@ model PartnerLedgerEntry {
 
   @@index([partnerId, createdAt(sort: Desc)])
   @@index([taskId])
+}
+
+/// Journal of server-side partner imports/syncs. Google Sheets sync writes one
+/// run per attempt so TWA can show the last result and ops can inspect failures.
+model PartnerImportRun {
+  id            String                @id @default(cuid())
+  partnerId     String
+  partner       Partner               @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  source        PartnerExternalSource
+  status        String                @default("RUNNING")
+  spreadsheetId String?
+  sheetCount    Int                   @default(0)
+  rowCount      Int                   @default(0)
+  createdCount  Int                   @default(0)
+  updatedCount  Int                   @default(0)
+  failedCount   Int                   @default(0)
+  skippedCount  Int                   @default(0)
+  diagnostics   Json?
+  error         String?
+  startedAt     DateTime              @default(now())
+  finishedAt    DateTime?
+  createdBy     String?
+
+  @@index([partnerId, startedAt(sort: Desc)])
+  @@index([partnerId, source, status])
 }
 
 /// Cost basis for WB products — used for unit economics calculation.

@@ -3,7 +3,15 @@ import * as XLSX from "xlsx";
 
 import { Prisma, type Partner, type PartnerBuyoutTask } from "@prisma/client";
 
-import { BuyoutError, purchaseGamepassWithCookie, resolveGamepass } from "@/lib/roblox-buyout";
+import {
+  batchUpdateGoogleSheetValues,
+  googleCellRange,
+  isGoogleSheetsConfigured,
+  listGoogleSheets,
+  readGoogleSheetRows,
+  type GoogleSheetsValueUpdate,
+} from "@/lib/google-sheets";
+import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepass } from "@/lib/roblox-buyout";
 import { prisma } from "@/lib/prisma";
 import { extractTwaUser } from "@/lib/twa-auth";
 
@@ -24,6 +32,12 @@ const PARTNER_SCHEMA_NOT_READY = "PARTNER_SCHEMA_NOT_READY";
 const PARTNER_SCHEMA_NOT_READY_MESSAGE = "Партнёрский раздел требует применения новых миграций на сервере";
 const MAX_XLSX_BYTES = 5 * 1024 * 1024;
 const MAX_XLSX_ROWS = 300;
+const GOOGLE_SYNC_TTL_MS = 60_000;
+const GOOGLE_SYNC_RUNNING_STALE_MS = 2 * 60_000;
+const GOOGLE_STATUS_PENDING = "в ожидании";
+const GOOGLE_STATUS_DONE = "готово";
+const GOOGLE_MAX_SHEETS = 80;
+const GOOGLE_MAX_ROWS_PER_SHEET = 800;
 
 type ParsedPartnerImportRow = {
   rowNumber: number;
@@ -49,6 +63,45 @@ type PartnerImportResult = {
   }>;
 };
 
+type GoogleSyncItem = {
+  sheet: string;
+  row: number;
+  gamepassId: string | null;
+  status: "created" | "updated" | "skipped" | "failed";
+  message: string;
+};
+
+type GoogleSyncFilterStats = {
+  readRows: number;
+  amountFilledRows: number;
+  pendingStatusRows: number;
+  matchedRows: number;
+  emptyAmountRows: number;
+  nonPendingStatusRows: number;
+  statusCounts: Record<string, number>;
+};
+
+type GoogleSyncSheetDiagnostics = GoogleSyncFilterStats & {
+  title: string;
+};
+
+type GoogleSyncDiagnostics = GoogleSyncFilterStats & {
+  sheets: GoogleSyncSheetDiagnostics[];
+};
+
+type GoogleSyncResult = {
+  status: "success" | "partial" | "failed" | "skipped";
+  sheetCount: number;
+  rowCount: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  diagnostics: GoogleSyncDiagnostics;
+  items: GoogleSyncItem[];
+  error?: string;
+};
+
 function json(data: unknown, status = 200) {
   return NextResponse.json(data, { status });
 }
@@ -64,11 +117,13 @@ function isPartnerSchemaNotReadyError(err: unknown) {
     "partner",
     "partnerbuyouttask",
     "partnerledgerentry",
+    "partnerimportrun",
     "ledgercurrency",
     "robuxrateusdtper1000",
     "googlesheet",
     "externalsource",
     "xlsx_upload",
+    "createdcount",
   ].some((needle) => lower.includes(needle));
   const schemaSignal = [
     "does not exist",
@@ -144,6 +199,99 @@ function parseImportNumber(value: unknown) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeGoogleStatus(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function createGoogleFilterStats(): GoogleSyncFilterStats {
+  return {
+    readRows: 0,
+    amountFilledRows: 0,
+    pendingStatusRows: 0,
+    matchedRows: 0,
+    emptyAmountRows: 0,
+    nonPendingStatusRows: 0,
+    statusCounts: {},
+  };
+}
+
+function createGoogleDiagnostics(): GoogleSyncDiagnostics {
+  return {
+    ...createGoogleFilterStats(),
+    sheets: [],
+  };
+}
+
+function bumpGoogleFilterStats(stats: GoogleSyncFilterStats, input: {
+  hasAmount: boolean;
+  isPending: boolean;
+  status: string;
+}) {
+  const statusKey = input.status || "(empty)";
+  stats.readRows += 1;
+  stats.statusCounts[statusKey] = (stats.statusCounts[statusKey] ?? 0) + 1;
+
+  if (input.hasAmount) stats.amountFilledRows += 1;
+  else stats.emptyAmountRows += 1;
+
+  if (input.isPending) stats.pendingStatusRows += 1;
+  else stats.nonPendingStatusRows += 1;
+
+  if (input.hasAmount && input.isPending) stats.matchedRows += 1;
+}
+
+function buildGoogleExternalRowId(spreadsheetId: string, sheetTitle: string, rowNumber: number) {
+  return `${spreadsheetId}:${sheetTitle}:${rowNumber}`;
+}
+
+function truncateGoogleMessage(value: unknown) {
+  return String(value ?? "").trim().slice(0, 300);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function buildGoogleSheetRaw(input: {
+  spreadsheetId: string;
+  sheetTitle: string;
+  rowNumber: number;
+  cells: unknown[];
+  syncedBy?: string | null;
+}) {
+  return toJsonObject({
+    source: "google-sheets",
+    spreadsheetId: input.spreadsheetId,
+    sheetTitle: input.sheetTitle,
+    rowNumber: input.rowNumber,
+    range: `${input.sheetTitle}!A${input.rowNumber}:F${input.rowNumber}`,
+    cells: input.cells,
+    syncedAt: new Date().toISOString(),
+    syncedBy: input.syncedBy || null,
+  });
+}
+
+function getGoogleTaskMeta(task: Pick<PartnerBuyoutTask, "externalSource" | "sheetRaw">) {
+  if (task.externalSource !== "GOOGLE_SHEETS" || !isRecord(task.sheetRaw)) return null;
+
+  const spreadsheetId = String(task.sheetRaw.spreadsheetId || "").trim();
+  const sheetTitle = String(task.sheetRaw.sheetTitle || "").trim();
+  const rowNumber = Number(task.sheetRaw.rowNumber);
+  if (!spreadsheetId || !sheetTitle || !Number.isInteger(rowNumber) || rowNumber < 1) return null;
+
+  return { spreadsheetId, sheetTitle, rowNumber, raw: task.sheetRaw };
+}
+
+function mergeTaskSheetRaw(task: Pick<PartnerBuyoutTask, "sheetRaw">, patch: Record<string, unknown>) {
+  return toJsonObject({
+    ...(isRecord(task.sheetRaw) ? task.sheetRaw : {}),
+    ...patch,
+  });
+}
+
 function extractGamepassIdFromImport(input: string) {
   const gamepassMatch = input.match(/game-pass(?:es)?\/(\d+)/i);
   if (gamepassMatch?.[1]) return gamepassMatch[1];
@@ -156,7 +304,7 @@ function importFileKey(fileName: string) {
   return fileName.replace(/[^a-zA-Z0-9_.-]+/g, "_").slice(0, 80) || "upload";
 }
 
-function toJsonObject(value: Record<string, unknown>) {
+function toJsonObject(value: unknown) {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonObject;
 }
 
@@ -380,6 +528,296 @@ async function importPartnerXlsx(partner: Partner, user: NonNullable<TwaUser>, f
   return result;
 }
 
+async function writeBackPartnerTask(task: PartnerBuyoutTask, kind: "done" | "error", message?: string) {
+  const meta = getGoogleTaskMeta(task);
+  if (!meta || !isGoogleSheetsConfigured()) return;
+
+  const updates: GoogleSheetsValueUpdate[] = kind === "done"
+    ? [
+      { range: googleCellRange(meta.sheetTitle, "E", meta.rowNumber), values: [[GOOGLE_STATUS_DONE]] },
+      { range: googleCellRange(meta.sheetTitle, "F", meta.rowNumber), values: [[""]] },
+    ]
+    : [
+      { range: googleCellRange(meta.sheetTitle, "F", meta.rowNumber), values: [[truncateGoogleMessage(message || task.error || "Ошибка обработки")]] },
+    ];
+
+  try {
+    await batchUpdateGoogleSheetValues(meta.spreadsheetId, updates);
+    await prisma.partnerBuyoutTask.update({
+      where: { id: task.id },
+      data: {
+        sheetRaw: mergeTaskSheetRaw(task, {
+          writeBackAt: new Date().toISOString(),
+          lastWriteBackError: null,
+        }),
+      },
+    });
+  } catch (err) {
+    const error = err instanceof Error ? err.message : "Ошибка записи в Google Sheets";
+    await prisma.partnerBuyoutTask.update({
+      where: { id: task.id },
+      data: {
+        sheetRaw: mergeTaskSheetRaw(task, {
+          lastWriteBackError: error,
+          lastWriteBackFailedAt: new Date().toISOString(),
+        }),
+      },
+    });
+  }
+}
+
+async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options: { force?: boolean } = {}) {
+  const result: GoogleSyncResult = {
+    status: "skipped",
+    sheetCount: 0,
+    rowCount: 0,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0,
+    diagnostics: createGoogleDiagnostics(),
+    items: [],
+  };
+  const spreadsheetId = partner.googleSheetId?.trim();
+  if (!spreadsheetId) return { ...result, error: "Google Sheet ID не задан" };
+  if (!isGoogleSheetsConfigured()) return { ...result, error: "Google service account не настроен" };
+
+  if (!options.force) {
+    const latestRun = await prisma.partnerImportRun.findFirst({
+      where: { partnerId: partner.id, source: "GOOGLE_SHEETS" },
+      orderBy: { startedAt: "desc" },
+    });
+    if (latestRun?.finishedAt && Date.now() - latestRun.finishedAt.getTime() < GOOGLE_SYNC_TTL_MS) {
+      return {
+        ...result,
+        sheetCount: latestRun.sheetCount,
+        rowCount: latestRun.rowCount,
+        created: latestRun.createdCount,
+        updated: latestRun.updatedCount,
+        skipped: latestRun.skippedCount,
+        failed: latestRun.failedCount,
+        diagnostics: isRecord(latestRun.diagnostics) ? latestRun.diagnostics as GoogleSyncDiagnostics : createGoogleDiagnostics(),
+        error: "Sync недавно уже выполнялся",
+      };
+    }
+    if (latestRun?.status === "RUNNING" && Date.now() - latestRun.startedAt.getTime() < GOOGLE_SYNC_RUNNING_STALE_MS) {
+      return { ...result, error: "Sync уже выполняется" };
+    }
+  }
+
+  const run = await prisma.partnerImportRun.create({
+    data: {
+      partnerId: partner.id,
+      source: "GOOGLE_SHEETS",
+      spreadsheetId,
+      createdBy: user ? operatorLabel(user) : null,
+    },
+  });
+  const writeBacks: GoogleSheetsValueUpdate[] = [];
+
+  try {
+    const sheets = (await listGoogleSheets(spreadsheetId)).slice(0, GOOGLE_MAX_SHEETS);
+    result.sheetCount = sheets.length;
+
+    for (const sheet of sheets) {
+      const rows = (await readGoogleSheetRows(spreadsheetId, sheet.title, "A:F")).values.slice(0, GOOGLE_MAX_ROWS_PER_SHEET);
+      const sheetDiagnostics: GoogleSyncSheetDiagnostics = {
+        title: sheet.title,
+        ...createGoogleFilterStats(),
+      };
+      result.diagnostics.sheets.push(sheetDiagnostics);
+
+      for (let index = 0; index < rows.length; index += 1) {
+        const cells = rows[index] || [];
+        const rowNumber = index + 1;
+        const nominal = cells[3];
+        const status = normalizeGoogleStatus(cells[4]);
+        const hasAmount = String(nominal ?? "").trim() !== "";
+        const isPending = status === GOOGLE_STATUS_PENDING;
+        bumpGoogleFilterStats(result.diagnostics, { hasAmount, isPending, status });
+        bumpGoogleFilterStats(sheetDiagnostics, { hasAmount, isPending, status });
+        if (!hasAmount || !isPending) continue;
+
+        result.rowCount += 1;
+        const rowItem = (statusOverride: GoogleSyncItem["status"], gamepassId: string | null, message: string) => {
+          result.items.push({ sheet: sheet.title, row: rowNumber, gamepassId, status: statusOverride, message });
+        };
+        const externalRowId = buildGoogleExternalRowId(spreadsheetId, sheet.title, rowNumber);
+        const gamepassInput = String(cells[2] ?? "").trim();
+        const gamepassId = parseGamepassId(gamepassInput);
+        const sheetPrice = parseImportNumber(nominal);
+        const sheetRaw = buildGoogleSheetRaw({
+          spreadsheetId,
+          sheetTitle: sheet.title,
+          rowNumber,
+          cells,
+          syncedBy: user ? operatorLabel(user) : null,
+        });
+        const existing = await prisma.partnerBuyoutTask.findUnique({
+          where: {
+            partnerId_externalSource_externalRowId: {
+              partnerId: partner.id,
+              externalSource: "GOOGLE_SHEETS",
+              externalRowId,
+            },
+          },
+        });
+
+        if (existing?.status === "DONE") {
+          result.skipped += 1;
+          rowItem("skipped", existing.gamepassId, "Задача уже выполнена");
+          writeBacks.push(
+            { range: googleCellRange(sheet.title, "E", rowNumber), values: [[GOOGLE_STATUS_DONE]] },
+            { range: googleCellRange(sheet.title, "F", rowNumber), values: [[""]] },
+          );
+          continue;
+        }
+        if (existing?.status === "PURCHASING" || existing?.status === "CANCELLED") {
+          result.skipped += 1;
+          rowItem("skipped", existing.gamepassId, `Задача сейчас в статусе ${existing.status}`);
+          continue;
+        }
+
+        if (!gamepassId || !sheetPrice || sheetPrice <= 0) {
+          const message = !gamepassId ? "Не найден ID геймпасса в колонке C" : "Некорректный номинал в колонке D";
+          const data = {
+            partnerId: partner.id,
+            externalSource: "GOOGLE_SHEETS" as const,
+            externalRowId,
+            status: "FAILED" as const,
+            robloxUsername: String(cells[0] ?? "").trim() || null,
+            gamepassId,
+            gamepassUrl: gamepassId ? `https://www.roblox.com/game-pass/${gamepassId}` : null,
+            priceRobux: sheetPrice ? Math.round(sheetPrice) : null,
+            error: message,
+            sheetRaw,
+          };
+          if (existing) {
+            await prisma.partnerBuyoutTask.update({ where: { id: existing.id }, data });
+            result.updated += 1;
+            rowItem("updated", gamepassId, message);
+          } else {
+            await prisma.partnerBuyoutTask.create({ data });
+            result.created += 1;
+            rowItem("created", gamepassId, message);
+          }
+          result.failed += 1;
+          writeBacks.push({ range: googleCellRange(sheet.title, "F", rowNumber), values: [[message]] });
+          continue;
+        }
+
+        try {
+          const gp = await resolveGamepass(gamepassInput || gamepassId);
+          const ready = Boolean(gp.isForSale && gp.price && gp.price > 0 && gp.productId && gp.sellerId);
+          const gpPrice = gp.price || Math.round(sheetPrice);
+          const mismatchNote = gp.price && Math.round(sheetPrice) !== gp.price
+            ? `Номинал из Sheets: ${Math.round(sheetPrice)} R$, цена GP: ${gp.price} R$`
+            : `Номинал из Sheets: ${Math.round(sheetPrice)} R$`;
+          const message = ready ? "Готова к выкупу" : "Геймпасс не продаётся или нет productId/sellerId";
+          const data = {
+            partnerId: partner.id,
+            externalSource: "GOOGLE_SHEETS" as const,
+            externalRowId,
+            status: ready ? "READY" as const : "FAILED" as const,
+            robloxUsername: String(cells[0] ?? "").trim() || null,
+            gamepassId: String(gp.gamepassId || gamepassId),
+            gamepassUrl: `https://www.roblox.com/game-pass/${gp.gamepassId || gamepassId}`,
+            productId: gp.productId ? String(gp.productId) : null,
+            sellerId: gp.sellerId ? String(gp.sellerId) : null,
+            sellerName: gp.sellerName || null,
+            priceRobux: gpPrice,
+            error: ready ? null : message,
+            note: mismatchNote,
+            sheetRaw,
+          };
+
+          if (existing) {
+            await prisma.partnerBuyoutTask.update({ where: { id: existing.id }, data });
+            result.updated += 1;
+            rowItem("updated", String(gp.gamepassId || gamepassId), message);
+          } else {
+            await prisma.partnerBuyoutTask.create({ data });
+            result.created += 1;
+            rowItem("created", String(gp.gamepassId || gamepassId), message);
+          }
+          if (!ready) {
+            result.failed += 1;
+            writeBacks.push({ range: googleCellRange(sheet.title, "F", rowNumber), values: [[message]] });
+          }
+        } catch (err) {
+          const message = truncateGoogleMessage(err instanceof Error ? err.message : "Ошибка проверки геймпасса");
+          const data = {
+            partnerId: partner.id,
+            externalSource: "GOOGLE_SHEETS" as const,
+            externalRowId,
+            status: "FAILED" as const,
+            robloxUsername: String(cells[0] ?? "").trim() || null,
+            gamepassId,
+            gamepassUrl: `https://www.roblox.com/game-pass/${gamepassId}`,
+            priceRobux: Math.round(sheetPrice),
+            error: message,
+            sheetRaw,
+          };
+          if (existing) {
+            await prisma.partnerBuyoutTask.update({ where: { id: existing.id }, data });
+            result.updated += 1;
+            rowItem("updated", gamepassId, message);
+          } else {
+            await prisma.partnerBuyoutTask.create({ data });
+            result.created += 1;
+            rowItem("created", gamepassId, message);
+          }
+          result.failed += 1;
+          writeBacks.push({ range: googleCellRange(sheet.title, "F", rowNumber), values: [[message]] });
+        }
+      }
+    }
+
+    try {
+      await batchUpdateGoogleSheetValues(spreadsheetId, writeBacks);
+    } catch (err) {
+      result.status = "partial";
+      result.error = err instanceof Error ? err.message : "Ошибка write-back в Google Sheets";
+    }
+
+    if (result.status !== "partial") result.status = result.failed > 0 ? "partial" : "success";
+    await prisma.partnerImportRun.update({
+      where: { id: run.id },
+      data: {
+        status: result.status === "success" ? "SUCCESS" : "PARTIAL",
+        sheetCount: result.sheetCount,
+        rowCount: result.rowCount,
+        createdCount: result.created,
+        updatedCount: result.updated,
+        failedCount: result.failed,
+        skippedCount: result.skipped,
+        diagnostics: toJsonObject(result.diagnostics),
+        error: result.error || null,
+        finishedAt: new Date(),
+      },
+    });
+    return result;
+  } catch (err) {
+    const error = err instanceof Error ? err.message : "Ошибка sync Google Sheets";
+    await prisma.partnerImportRun.update({
+      where: { id: run.id },
+      data: {
+        status: "FAILED",
+        sheetCount: result.sheetCount,
+        rowCount: result.rowCount,
+        createdCount: result.created,
+        updatedCount: result.updated,
+        failedCount: result.failed,
+        skippedCount: result.skipped,
+        diagnostics: toJsonObject(result.diagnostics),
+        error,
+        finishedAt: new Date(),
+      },
+    });
+    return { ...result, status: "failed" as const, error };
+  }
+}
+
 async function requireTwaUser(req: NextRequest) {
   const user = await extractTwaUser(req);
   if (!user) throw new BuyoutError("Unauthorized", 401);
@@ -410,7 +848,7 @@ async function getPartner(slug: string) {
 
 async function loadPartnerState(partner: Partner) {
   const currency = moneyCurrency(partner);
-  const [tasks, ledgerEntries, balanceAgg, spentAgg] = await Promise.all([
+  const [tasks, ledgerEntries, importRuns, balanceAgg, spentAgg] = await Promise.all([
     prisma.partnerBuyoutTask.findMany({
       where: { partnerId: partner.id },
       orderBy: [{ updatedAt: "desc" }],
@@ -420,6 +858,11 @@ async function loadPartnerState(partner: Partner) {
       where: { partnerId: partner.id, currency },
       orderBy: [{ createdAt: "desc" }],
       take: 20,
+    }),
+    prisma.partnerImportRun.findMany({
+      where: { partnerId: partner.id, source: "GOOGLE_SHEETS" },
+      orderBy: [{ startedAt: "desc" }],
+      take: 5,
     }),
     prisma.partnerLedgerEntry.aggregate({
       where: { partnerId: partner.id, currency },
@@ -443,6 +886,13 @@ async function loadPartnerState(partner: Partner) {
   return {
     tasks,
     ledgerEntries,
+    importRuns,
+    googleSync: {
+      configured: Boolean(partner.googleSheetId),
+      serviceAccountConfigured: isGoogleSheetsConfigured(),
+      lastSyncAt: importRuns[0]?.finishedAt ?? importRuns[0]?.startedAt ?? null,
+      latestRun: importRuns[0] ?? null,
+    },
     summary: {
       balanceUsdt,
       spentUsdt,
@@ -474,8 +924,9 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     const partner = await getPartner(slug);
     if (!partner) return json({ ok: false, error: "Партнёр не найден" }, 404);
 
+    const syncResult = await syncPartnerGoogleSheets(partner, null, { force: false });
     const state = await loadPartnerState(partner);
-    return json({ ok: true, partner, ...state });
+    return json({ ok: true, partner, syncResult, ...state });
   } catch (err) {
     if (err instanceof BuyoutError) return json({ ok: false, error: err.message }, err.status);
     if (isPartnerSchemaNotReadyError(err)) {
@@ -501,6 +952,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const importResult = await importPartnerXlsx(partner, user, file);
       const state = await loadPartnerState(partner);
       return json({ ok: true, partner, importResult, ...state });
+    }
+
+    if (action === "sync-google-sheets") {
+      const syncResult = await syncPartnerGoogleSheets(partner, user, { force: true });
+      const state = await loadPartnerState(partner);
+      return json({ ok: true, partner, syncResult, ...state });
     }
 
     if (action === "create-task") {
@@ -656,6 +1113,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         });
       }
 
+      await writeBackPartnerTask(updatedTask, "done");
       const state = await loadPartnerState(partner);
       return json({ ok: true, partner, ...state });
     }
@@ -677,10 +1135,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       if (!task || task.partnerId !== partner.id) return json({ ok: false, error: "Задача не найдена" }, 404);
       if (!settings?.robloxCookie) {
-        await prisma.partnerBuyoutTask.update({
+        const failedTask = await prisma.partnerBuyoutTask.update({
           where: { id: task.id },
           data: { status: "FAILED", error: "Roblox cookie не задан" },
         });
+        await writeBackPartnerTask(failedTask, "error", "Roblox cookie не задан");
         return json({ ok: false, error: "Roblox cookie не задан" }, 409);
       }
 
@@ -688,33 +1147,36 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const productId = Number(task.productId);
       const sellerId = Number(task.sellerId);
       if (!price || !productId || !sellerId) {
-        await prisma.partnerBuyoutTask.update({
+        const failedTask = await prisma.partnerBuyoutTask.update({
           where: { id: task.id },
           data: { status: "FAILED", error: "В задаче нет цены/productId/sellerId" },
         });
+        await writeBackPartnerTask(failedTask, "error", "В задаче нет цены/productId/sellerId");
         return json({ ok: false, error: "В задаче нет цены/productId/sellerId" }, 409);
       }
 
       const priceUsdt = taskCostUsdt(price, partner);
       const balanceBeforePurchase = await getPartnerBalance(partner);
       if (balanceBeforePurchase < priceUsdt) {
-        await prisma.partnerBuyoutTask.update({
+        const failedTask = await prisma.partnerBuyoutTask.update({
           where: { id: task.id },
           data: { status: "READY", error: "Недостаточно баланса партнёра" },
         });
+        await writeBackPartnerTask(failedTask, "error", "Недостаточно баланса партнёра");
         return json({ ok: false, error: "Недостаточно баланса партнёра", partner, ...(await loadPartnerState(partner)) }, 409);
       }
 
       const result = await purchaseGamepassWithCookie(settings.robloxCookie, { productId, price, sellerId });
       if (!result.success) {
-        await prisma.partnerBuyoutTask.update({
+        const failedTask = await prisma.partnerBuyoutTask.update({
           where: { id: task.id },
           data: { status: "FAILED", error: result.msg },
         });
+        await writeBackPartnerTask(failedTask, "error", result.msg);
         return json({ ok: true, success: false, error: result.msg, balance: result.balance, partner, ...(await loadPartnerState(partner)) });
       }
 
-      await prisma.partnerBuyoutTask.update({
+      const doneTask = await prisma.partnerBuyoutTask.update({
         where: { id: task.id },
         data: {
           status: "DONE",
@@ -724,6 +1186,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           error: null,
         },
       });
+      await writeBackPartnerTask(doneTask, "done");
 
       const existingBuyout = await prisma.partnerLedgerEntry.findFirst({
         where: { partnerId: partner.id, taskId: task.id, type: "BUYOUT" },

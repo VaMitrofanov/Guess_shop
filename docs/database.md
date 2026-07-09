@@ -85,7 +85,7 @@ Durable-запись одной пачки «Выкупить всё»: `account
 `totalGross` (грязные R$), `okCount`/`failCount`, `items` (JSONB: `[{orderId,nick,wbCode,gross,ok,reason}]`).
 Пишется клиентом после пакетного выкупа (`api/twa/purchase-batch` action `save`).
 
-### `Partner`, `PartnerBuyoutTask`, `PartnerLedgerEntry` (2026-07-09)
+### `Partner`, `PartnerBuyoutTask`, `PartnerLedgerEntry`, `PartnerImportRun` (2026-07-09 / 07-10)
 B2B/partner-ops контур для сторонних выкупов, первый instance — `slug=anton` / «Антон».
 Это отдельный bounded context и он **не использует `WbOrder`**.
 
@@ -94,7 +94,7 @@ B2B/partner-ops контур для сторонних выкупов, перв�
 `googleSheetId`, `googleSheetTab`, `googleSheetUrl`.
 Боевой `googleSheetId` Антона: `1jzWZZ_AeM0IMyHaljaLBei0hu_zDwktiysbgGt324rs`; фиксированного
 `googleSheetTab` нет, потому что каждый лист таблицы соответствует новой дате.
-`GET /api/twa/partners/anton/tasks` синхронизирует `googleSheetId/googleSheetUrl` из env
+`GET /api/twa/partners/[slug]/tasks` синхронизирует `googleSheetId/googleSheetUrl` из env
 `ANTON_GOOGLE_SHEETS_SPREADSHEET_ID` при upsert партнёра; если env отсутствует, существующие
 поля в БД не затираются.
 
@@ -107,8 +107,19 @@ B2B/partner-ops контур для сторонних выкупов, перв�
 нужен под idempotent ручной импорт `.xlsx` и будущий Google Sheets sync; индексы покрывают
 `partnerId+status`, `partnerId+updatedAt`, `gamepassId`. Для `.xlsx` бинарный файл не хранится:
 в `sheetRaw` сохраняются source/file/row metadata и исходные значения строки.
-Для Google Sheets `externalRowId` должен включать tab title и row number; в `sheetRaw` стоит
-сохранять исходные `A/C/D/E/F`, чтобы write-back и диагностика ошибок были воспроизводимыми.
+Для Google Sheets `externalRowId` = `spreadsheetId:sheetTitle:rowNumber`; в `sheetRaw`
+сохраняются `spreadsheetId`, `sheetTitle`, `rowNumber`, `range`, исходные ячейки `A:F`, время
+sync и результат write-back (`writeBackAt` / `lastWriteBackError`), чтобы write-back и
+диагностика ошибок были воспроизводимыми.
+
+`PartnerImportRun` (миграция `20260710_partner_google_sheets_sync`): журнал прогонов
+серверного импорта/sync. Поля: `source` (`GOOGLE_SHEETS`), `status`
+(`RUNNING`/`SUCCESS`/`PARTIAL`/`FAILED`), `spreadsheetId`, счётчики `sheetCount`/`rowCount`/
+`createdCount`/`updatedCount`/`failedCount`/`skippedCount`, `diagnostics` (JSON: фильтр по
+листам — прочитано / прошло / отсев по `D` и `E` / статусы `E`), `error`, `startedAt`/
+`finishedAt`, `createdBy`. Индексы `[partnerId, startedAt desc]` и `[partnerId, source, status]`.
+Нужен для статуса sync в TWA и защиты от параллельных прогонов (TTL 60 с + проверка
+`status=RUNNING` с порогом 2 мин).
 
 `PartnerLedgerEntry`: отдельный ledger партнёрских денег. Для Антона ledger ведётся только
 в `USDT`; R$ остаются ценой геймпасса в `PartnerBuyoutTask`.
@@ -123,14 +134,15 @@ B2B/partner-ops контур для сторонних выкупов, перв�
 `96.49 USDT`, расчётный остаток `53.51 USDT`.
 
 Для рабочей TWA-фичи на проде должны быть применены миграции
-`20260709_add_partner_buyout`, `20260709_partner_anton_usdt_sheets` и
-`20260709_partner_xlsx_upload_source`. Если Web-контейнер уже обновился, а БД ещё нет,
-`/api/twa/partners/anton/tasks` возвращает `503 PARTNER_SCHEMA_NOT_READY`, чтобы не
-маскировать ошибку схемы нулевым балансом.
+`20260709_add_partner_buyout`, `20260709_partner_anton_usdt_sheets`,
+`20260709_partner_xlsx_upload_source` и `20260710_partner_google_sheets_sync`. Если
+Web-контейнер уже обновился, а БД ещё нет, `/api/twa/partners/[slug]/tasks` возвращает
+`503 PARTNER_SCHEMA_NOT_READY`, чтобы не маскировать ошибку схемы нулевым балансом.
 
-Прод-БД синхронизирована с этими миграциями 2026-07-09: partner-таблицы созданы, enum
-`PartnerExternalSource` содержит `XLSX_UPLOAD`, baseline Антона виден в TWA/API как 8 DONE-задач
-на `19 106 R$`, ledger `150.00 - 96.49 = 53.51 USDT`.
+Прод-БД синхронизирована с этими миграциями (последняя — `20260710_partner_google_sheets_sync`,
+применена 2026-07-10): partner-таблицы + `PartnerImportRun` созданы, enum
+`PartnerExternalSource` содержит `XLSX_UPLOAD`/`GOOGLE_SHEETS`, baseline Антона виден в TWA/API
+как 8 DONE-задач на `19 106 R$`, ledger `150.00 - 96.49 = 53.51 USDT`.
 
 ### `DrainEvent` (2026-07-05)
 Учёт сливов остатка донора в приёмник: `donorName`, `drainName`, `amount` (грязные R$),

@@ -65,19 +65,22 @@ Traefik напрямую; вариант (а) стал реалистичным 
 `crowdsec` на хосте) / вернуть CF proxy только для не-РФ гео. `panel.robloxbank.ru` остаётся
 proxied (CF) — это ок.
 
-### 8. Google Sheets credentials для B2B sync — 🆕 (2026-07-09)
-B2B-режим `Антон` готовится к Google Sheets sync/write-back. Для подключения понадобится
-service-account JSON с доступом к таблице. Это секрет: хранить только в env/Coolify или
+### 8. Google Sheets credentials для B2B sync — 🆕 (2026-07-09, sync включён 2026-07-10)
+B2B-режим `Антон` использует Google Sheets sync/write-back (`src/lib/google-sheets.ts`).
+Для подключения нужен service-account JSON с доступом к таблице. Это секрет: хранить только в env/Coolify или
 локальном `HANDOFF.md`, не в `docs/` и не в коммитах. Публичная документация может описывать
 только имена env, схему колонок и правила sync. Саму таблицу лучше шарить на конкретный
 service-account с минимальным доступом Editor только к нужному документу, а не на весь диск.
 Для Антона публично фиксируется только `spreadsheetId`, маппинг колонок и статусы; локальный
 путь к JSON и содержимое credentials остаются вне git. Прод-подключение использует env
 `ANTON_GOOGLE_SHEETS_SPREADSHEET_ID` и `GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON`; значение JSON
-нельзя логировать и нельзя добавлять в `.env.example`/docs. Перед прод-подключением нужно
-проверить, что Google Sheet расшарен на service-account email из JSON с правом Editor.
+нельзя логировать и нельзя добавлять в `.env.example`/docs. `google-sheets.ts` не логирует
+JSON credentials, private key, access token и raw-ответы Google, а `GoogleSheetsError` несёт
+только короткий текст. Google Sheet расшарен на service-account email из JSON с правом Editor
+(write-back пишет в `E/F`); scope ограничен `spreadsheets`. Sync ходит в Google только с
+сервера — клиентский TWA работает с задачами из БД, а не с таблицей напрямую.
 
-Пока Google sync не подключён, TWA принимает ручной `.xlsx` upload для Антона. Ограничения:
+TWA также принимает ручной `.xlsx` upload для Антона как запасной путь импорта. Ограничения:
 до `5 MB`, до `300` строк, бинарный файл не сохраняется, в БД остаются только metadata строки.
 В такие файлы нельзя добавлять cookie, seed-фразы, токены, service-account JSON и другие
 секреты. Зависимость `xlsx` нужно держать обновлённой и проверять через `npm audit`, потому

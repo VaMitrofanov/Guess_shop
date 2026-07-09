@@ -421,10 +421,10 @@ SQL: три параллельных запроса (daily 90д, weekly funnel 1
 
 ## B2B: партнёрский раздел `Антон`
 
-На 2026-07-09 реализован ручной TWA/server MVP для партнёра `anton`/«Антон». В экране
-«Аккаунт» есть переключатель **`Свои | Антон`**: `Свои` оставляет прежний менеджерский
-выкуп, `Антон` открывает отдельный партнёрский контур для **сторонних** геймпассов на
-деньги партнёра, не смешивая поток с WB/DIRECT/AVITO.
+На 2026-07-10 реализован TWA/server MVP для партнёра `anton`/«Антон» с рабочим Google Sheets
+sync. В экране «Аккаунт» есть переключатель **`Свои | Антон`**: `Свои` оставляет прежний
+менеджерский выкуп, `Антон` открывает отдельный партнёрский контур для **сторонних**
+геймпассов на деньги партнёра, не смешивая поток с WB/DIRECT/AVITO.
 
 Опорная точка — уже существующий `BossrobuxScreen`:
 
@@ -435,10 +435,14 @@ SQL: три параллельных запроса (daily 90д, weekly funnel 1
 
 Текущий серверный контур:
 
-- `GET /api/twa/partners/anton/tasks` — задачи, summary, последние ledger-записи;
-- `POST /api/twa/partners/anton/tasks` — actions `create-task`, `ledger-topup`,
-  `import-xlsx`, `set-rate`, `cancel-task`, `mark-done`, `purchase-task`;
-- данные живут в `Partner`, `PartnerBuyoutTask`, `PartnerLedgerEntry`;
+- `GET /api/twa/partners/[slug]/tasks` — задачи, summary, последние ledger-записи,
+  `googleSync`/`importRuns` + opportunistic Google Sheets sync (TTL 60 с);
+- `POST /api/twa/partners/[slug]/tasks` — actions `create-task`, `ledger-topup`,
+  `import-xlsx`, `sync-google-sheets`, `set-rate`, `cancel-task`, `mark-done`, `purchase-task`;
+- данные живут в `Partner`, `PartnerBuyoutTask`, `PartnerLedgerEntry`, `PartnerImportRun`;
+- Google Sheets: `src/lib/google-sheets.ts` (service-account, read/write), sync/write-back —
+  `syncPartnerGoogleSheets`/`writeBackPartnerTask` в роуте; успешный выкуп пишет `готово` в `E`,
+  ошибка — в `F`; прогоны логируются в `PartnerImportRun`;
 - покупка идёт через общий `src/lib/roblox-buyout.ts`;
 - отдельного cookie для Антона пока нет: используется общий `.ROBLOSECURITY` из
   `GlobalSettings.robloxCookie`, тот же donor-контур, что и в `Свои`;
@@ -456,29 +460,40 @@ SQL: три параллельных запроса (daily 90д, weekly funnel 1
 
 - верхний segmented control `Свои | Антон` в `BossrobuxScreen`;
 - сводка партнёра: USDT-баланс, потрачено, курс, выкупленные R$, задачи, ready/buying;
-- блок Google Sheets показывает, подключена ли таблица, и ожидаемые колонки `GP · Ник · Номинал`;
-  статус подключения берётся из `Partner.googleSheetId/googleSheetUrl`, а
-  `GET /api/twa/partners/anton/tasks` подтягивает эти поля из env
-  `ANTON_GOOGLE_SHEETS_SPREADSHEET_ID` при upsert партнёра;
-  боевой sync должен читать таблицу `1jzWZZ_AeM0IMyHaljaLBei0hu_zDwktiysbgGt324rs`, сканировать
-  date-листы, брать строки с `D != empty` и `E == "в ожидании"`, читать `A` как ник/инфу,
-  `C` как GP/gamepass id или URL, `D` как номинал/цену, а write-back писать в `E/F`;
+- блок Google Sheets: статус подключения (`Подключена`/`Нужен sheetId`/`Нет service account`),
+  `lastSyncAt`, итог последнего `PartnerImportRun` (`+created / upd / err`), диагностика фильтра
+  (прочитано / прошло / отсев по `D` и `E` / топ статусов `E`), колонки `C GP · D сумма ·
+  E статус · F ошибка` и кнопка `Синхронизировать` (`action=sync-google-sheets`). Статус
+  подключения берётся из `Partner.googleSheetId/googleSheetUrl`, которые `GET` подтягивает из
+  env `ANTON_GOOGLE_SHEETS_SPREADSHEET_ID` при upsert партнёра. Sync читает таблицу
+  `1jzWZZ_AeM0IMyHaljaLBei0hu_zDwktiysbgGt324rs`, сканирует date-листы, берёт строки с
+  `D != empty` и `E == "в ожидании"`, читает `A` как ник/инфу, `C` как GP/gamepass id или URL,
+  `D` как номинал/цену, write-back пишет `готово`/ошибку в `E/F`;
 - блок XLSX позволяет вручную загрузить файл с колонками `ГП/GP`, `Ник`, `Номинал`; файл
   не хранится, в задачах остаются row/file metadata и исходные значения;
 - курс можно заменить из TWA через форму `Курс`;
 - ручное создание задачи по ID/URL геймпасса, нику и заметке;
 - ручное пополнение ledger в USDT;
-- список задач с R$-ценой, USDT-стоимостью, действиями `Купить`, `Готово`, `Отмена`;
+- список задач с R$-ценой, USDT-стоимостью, бейджем источника (`Manual`/`XLSX`/
+  `Google sheetTitle:row`), отметкой write-back `E/F`, действиями `Купить`, `Готово`, `Отмена`;
 - последние ledger-операции.
+
+Google Sheets автообновление (реализовано): при входе/обновлении вкладки `Антон` `GET`
+запускает opportunistic sync с TTL 60 с (кнопка `Синхронизировать` — принудительный `force`),
+API синхронизирует Google Sheet в `PartnerBuyoutTask`, а UI перерисовывает готовые задачи.
+TWA не читает Google Sheets напрямую — только задачи из БД. Успешный `Купить`/`Готово` пишет
+`готово` в `E`; ошибка покупки пишет причину в `F` и оставляет строку `в ожидании` для повтора.
+Write-back best-effort: если покупка прошла, а запись в Google упала, задача остаётся `DONE`,
+в `sheetRaw` пишется `lastWriteBackError`, а следующий sync/выкуп дописывает `готово`.
+Подробный план sync, идемпотентности, write-back и проверок —
+в [b2b-saas.md](b2b-saas.md#этап-4-интеграция-с-google-sheets).
 
 Стартовый кейс Антона зафиксирован миграцией: `150 USDT` пополнения, 8 уже выкупленных
 XLSX-строк на `19 106 R$`, списание `96.49 USDT`, расчётный остаток `53.51 USDT`.
-После применения prod-миграций 2026-07-09 экран `Аккаунт → Антон` подтверждён в TWA:
-summary и задачи загружаются, `PARTNER_SCHEMA_NOT_READY` больше не воспроизводится.
-После деплоя `036ed61` 2026-07-09 live API `/api/twa/partners/anton/tasks` подтвердил
-заполненные `Partner.googleSheetId/googleSheetUrl` из env; блок Google Sheets больше не должен
-показывать `Нужен sheetId` после обновления экрана.
+Prod-миграции применены (последняя — `20260710_partner_google_sheets_sync`, добавляет
+`PartnerImportRun`); экран `Аккаунт → Антон` работает, `PARTNER_SCHEMA_NOT_READY` не
+воспроизводится, блок Google Sheets показывает подключённую таблицу.
 
-Ограничения MVP: отдельный donor-cookie партнёра, фактический Google Sheets sync/write-back,
-batch-выкуп и партнёрский отчёт ещё не реализованы. Детальный продуктовый и технический
+Ограничения MVP: отдельный donor-cookie партнёра, batch-выкуп и партнёрский отчёт ещё не
+реализованы (Google Sheets sync/write-back — уже готовы). Детальный продуктовый и технический
 план — в [b2b-saas.md](b2b-saas.md).

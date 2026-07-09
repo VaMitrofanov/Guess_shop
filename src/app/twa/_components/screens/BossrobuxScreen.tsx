@@ -31,10 +31,25 @@ interface GamepassItem {
 
 type BuyoutWorkspace = "own" | "anton";
 type PartnerTaskStatus = "NEW" | "READY" | "PURCHASING" | "DONE" | "FAILED" | "CANCELLED";
+type PartnerExternalSource = "MANUAL" | "GOOGLE_SHEETS" | "XLSX_UPLOAD";
+
+interface PartnerSheetRaw {
+  source?: string;
+  spreadsheetId?: string;
+  sheetTitle?: string;
+  rowNumber?: number;
+  range?: string;
+  syncedAt?: string;
+  writeBackAt?: string | null;
+  lastWriteBackError?: string | null;
+  cells?: unknown[];
+}
 
 interface PartnerTask {
   id: string;
   status: PartnerTaskStatus;
+  externalSource: PartnerExternalSource;
+  externalRowId: string | null;
   robloxUsername: string | null;
   gamepassId: string | null;
   gamepassUrl: string | null;
@@ -45,6 +60,7 @@ interface PartnerTask {
   completedAt: string | null;
   error: string | null;
   note: string | null;
+  sheetRaw: PartnerSheetRaw | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -73,6 +89,57 @@ interface PartnerSummary {
   failed: number;
 }
 
+interface GoogleSyncFilterDiagnostics {
+  readRows?: number;
+  amountFilledRows?: number;
+  pendingStatusRows?: number;
+  matchedRows?: number;
+  emptyAmountRows?: number;
+  nonPendingStatusRows?: number;
+  statusCounts?: Record<string, number>;
+}
+
+interface GoogleSyncSheetDiagnostics extends GoogleSyncFilterDiagnostics {
+  title: string;
+}
+
+interface GoogleSyncDiagnostics extends GoogleSyncFilterDiagnostics {
+  sheets?: GoogleSyncSheetDiagnostics[];
+}
+
+interface PartnerImportRun {
+  id: string;
+  status: string;
+  source: PartnerExternalSource;
+  spreadsheetId: string | null;
+  sheetCount: number;
+  rowCount: number;
+  createdCount: number;
+  updatedCount: number;
+  failedCount: number;
+  skippedCount: number;
+  diagnostics: GoogleSyncDiagnostics | null;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  createdBy: string | null;
+}
+
+interface GoogleSyncResult {
+  status: "skipped" | "success" | "partial" | "failed";
+  message?: string;
+  runId?: string;
+  sheetCount?: number;
+  rowCount?: number;
+  created?: number;
+  updated?: number;
+  failed?: number;
+  skipped?: number;
+  diagnostics?: GoogleSyncDiagnostics | null;
+  error?: string;
+  errors?: string[];
+}
+
 interface PartnerState {
   partner: {
     id: string;
@@ -86,6 +153,14 @@ interface PartnerState {
   };
   tasks: PartnerTask[];
   ledgerEntries: PartnerLedgerEntry[];
+  importRuns?: PartnerImportRun[];
+  googleSync?: {
+    configured: boolean;
+    serviceAccountConfigured: boolean;
+    lastSyncAt: string | null;
+    latestRun: PartnerImportRun | null;
+  };
+  syncResult?: GoogleSyncResult;
   summary: PartnerSummary;
 }
 
@@ -2163,6 +2238,15 @@ function PartnerTaskRow({
   const title = task.sellerName || task.robloxUsername || (task.gamepassId ? `ГП ${task.gamepassId}` : "Геймпасс");
   const price = task.priceRobux ?? task.purchasePriceRobux;
   const costUsdt = partnerTaskCostUsdt(price, rateUsdtPer1000);
+  const googleRow = task.externalSource === "GOOGLE_SHEETS" && task.sheetRaw?.sheetTitle && task.sheetRaw?.rowNumber
+    ? `${task.sheetRaw.sheetTitle}:${task.sheetRaw.rowNumber}`
+    : null;
+  const sourceLabel = task.externalSource === "GOOGLE_SHEETS"
+    ? (googleRow ? `Google ${googleRow}` : "Google")
+    : task.externalSource === "XLSX_UPLOAD"
+      ? "XLSX"
+      : "Manual";
+  const writeBackError = task.sheetRaw?.lastWriteBackError || null;
 
   return (
     <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -2173,6 +2257,16 @@ function PartnerTaskRow({
           </div>
           <div style={{ marginTop: 4, fontSize: 13, color: C.textTertiary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {task.gamepassUrl || (task.gamepassId ? `game-pass/${task.gamepassId}` : task.id)}
+          </div>
+          <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
+            <span style={{ borderRadius: 7, background: C.elevated, padding: "4px 7px", color: C.textSecondary, fontSize: 12, fontWeight: 700 }}>
+              {sourceLabel}
+            </span>
+            {task.sheetRaw?.writeBackAt && (
+              <span style={{ borderRadius: 7, background: tint(C.green, 0.14), padding: "4px 7px", color: C.green, fontSize: 12, fontWeight: 700 }}>
+                E/F {fmtPartnerDate(task.sheetRaw.writeBackAt)}
+              </span>
+            )}
           </div>
         </div>
         <div style={{ textAlign: "right", flexShrink: 0 }}>
@@ -2193,6 +2287,11 @@ function PartnerTaskRow({
       {(task.error || task.note || task.purchaseAccountName) && (
         <div style={{ fontSize: 13, color: task.error ? C.red : C.textTertiary, lineHeight: 1.35 }}>
           {task.error || task.note || `Аккаунт: ${task.purchaseAccountName}`}
+        </div>
+      )}
+      {writeBackError && (
+        <div style={{ fontSize: 13, color: C.orange, lineHeight: 1.35 }}>
+          Google write-back: {writeBackError}
         </div>
       )}
 
@@ -2224,6 +2323,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   const [topupComment, setTopupComment] = useState("");
   const [rateInput, setRateInput] = useState("");
   const [importResult, setImportResult] = useState<PartnerImportResult | null>(null);
+  const [googleSyncResult, setGoogleSyncResult] = useState<GoogleSyncResult | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
@@ -2231,6 +2331,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   const applyPartnerState = (payload: Record<string, unknown>) => {
     if (payload.partner && Array.isArray(payload.tasks) && Array.isArray(payload.ledgerEntries) && payload.summary) {
       setState(payload as unknown as PartnerState);
+      if (payload.syncResult) setGoogleSyncResult(payload.syncResult as GoogleSyncResult);
       setLoadError(null);
     }
   };
@@ -2319,6 +2420,37 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
     }
   }
 
+  async function syncGoogleSheets() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await fetch("/api/twa/partners/anton/tasks", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ action: "sync-google-sheets" }),
+      });
+      const d = await r.json().catch(() => null);
+      if (d) applyPartnerState(d);
+      const result = d?.syncResult as GoogleSyncResult | undefined;
+      setGoogleSyncResult(result ?? null);
+      if (!r.ok || !d || d.ok === false || d.success === false || result?.status === "failed") {
+        haptic.notify("error");
+        toast(d?.error ?? result?.error ?? result?.message ?? "Ошибка Google Sheets", "error");
+        return;
+      }
+      haptic.notify(result?.status === "partial" ? "warning" : "success");
+      toast(result
+        ? `Google: прочитано ${result.diagnostics?.readRows ?? 0}, фильтр ${result.diagnostics?.matchedRows ?? result.rowCount ?? 0}, ошибок ${result.failed ?? 0}`
+        : "Google Sheets обновлены",
+        result?.status === "partial" ? "default" : "success");
+    } catch {
+      haptic.notify("error");
+      toast("Ошибка Google Sheets", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createTask() {
     const gamepass = gamepassInput.trim();
     if (!gamepass) return;
@@ -2364,6 +2496,24 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   const summary = state?.summary;
   const rate = summary?.robuxRateUsdtPer1000 ?? state?.partner.robuxRateUsdtPer1000 ?? 5.05;
   const sheetConnected = !!state?.partner.googleSheetId || !!state?.partner.googleSheetUrl;
+  const googleSync = state?.googleSync;
+  const latestRun = googleSync?.latestRun ?? null;
+  const latestSyncResult = googleSyncResult ?? state?.syncResult ?? null;
+  const latestDiagnostics = latestSyncResult?.diagnostics ?? latestRun?.diagnostics ?? null;
+  const googleMatchedRows = latestDiagnostics?.matchedRows ?? latestSyncResult?.rowCount ?? latestRun?.rowCount ?? 0;
+  const googleStatusCountSummary = latestDiagnostics?.statusCounts
+    ? Object.entries(latestDiagnostics.statusCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([status, count]) => `${status === "(empty)" ? "пусто" : status} ${count}`)
+      .join(" · ")
+    : "";
+  const googleStatus = !sheetConnected
+    ? "Нужен sheetId"
+    : googleSync?.serviceAccountConfigured === false
+      ? "Нет service account"
+      : "Подключена";
+  const canSyncGoogle = sheetConnected && googleSync?.serviceAccountConfigured !== false;
 
   if (loading) {
     return (
@@ -2413,8 +2563,40 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
       <section>
         <SectionHeader title="Google Sheets" />
         <Card>
-          <InfoRow label="Статус" value={sheetConnected ? "Подключена" : "Нужен sheetId"} />
-          <InfoRow label="Колонки" value="GP · Ник · Номинал" last />
+          <InfoRow label="Статус" value={googleStatus} />
+          <InfoRow label="Последний sync" value={fmtPartnerDate(googleSync?.lastSyncAt ?? latestRun?.finishedAt ?? null)} />
+          {latestRun && (
+            <InfoRow
+              label="Run"
+              value={`${latestRun.status} · +${latestRun.createdCount} / upd ${latestRun.updatedCount} / err ${latestRun.failedCount}`}
+            />
+          )}
+          {latestSyncResult && (
+            <InfoRow
+              label="Итог"
+              value={`${latestSyncResult.status} · фильтр ${googleMatchedRows} · ошибок ${latestSyncResult.failed ?? 0}`}
+            />
+          )}
+          {latestDiagnostics && (
+            <>
+              <InfoRow label="Прочитано" value={`${latestDiagnostics.readRows ?? 0} · прошло ${googleMatchedRows}`} />
+              <InfoRow label="Фильтр" value={`D ${latestDiagnostics.amountFilledRows ?? 0} · E ${latestDiagnostics.pendingStatusRows ?? 0}`} />
+              <InfoRow label="Отсев" value={`D пусто ${latestDiagnostics.emptyAmountRows ?? 0} · E не ждёт ${latestDiagnostics.nonPendingStatusRows ?? 0}`} />
+              {googleStatusCountSummary && <InfoRow label="Статусы E" value={googleStatusCountSummary} />}
+            </>
+          )}
+          <InfoRow label="Колонки" value="C GP · D сумма · E статус · F ошибка" />
+          <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+            <button className="twa-press" onClick={() => { haptic.impact("medium"); syncGoogleSheets(); }} disabled={busy || !canSyncGoogle}
+              style={{ width: "100%", background: canSyncGoogle ? C.accent : C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 700, padding: "13px", cursor: busy || !canSyncGoogle ? "default" : "pointer", opacity: busy || !canSyncGoogle ? 0.55 : 1 }}>
+              Синхронизировать
+            </button>
+            {(latestRun?.error || latestSyncResult?.error || latestSyncResult?.message || latestSyncResult?.errors?.[0]) && (
+              <div style={{ color: latestRun?.status === "FAILED" || latestSyncResult?.status === "failed" ? C.red : C.textTertiary, fontSize: 13, lineHeight: 1.35 }}>
+                {latestRun?.error || latestSyncResult?.errors?.[0] || latestSyncResult?.error || latestSyncResult?.message}
+              </div>
+            )}
+          </div>
         </Card>
       </section>
 
