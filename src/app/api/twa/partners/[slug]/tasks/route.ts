@@ -95,6 +95,16 @@ function operatorLabel(user: NonNullable<TwaUser>) {
   return `${user.firstName || "TWA"}:${user.userId}`;
 }
 
+function getAntonGoogleSheetConfig() {
+  const googleSheetId = process.env.ANTON_GOOGLE_SHEETS_SPREADSHEET_ID?.trim();
+  if (!googleSheetId) return {};
+
+  return {
+    googleSheetId,
+    googleSheetUrl: `https://docs.google.com/spreadsheets/d/${googleSheetId}/edit`,
+  };
+}
+
 function getTaskPrice(task: Pick<PartnerBuyoutTask, "priceRobux" | "purchasePriceRobux">) {
   return task.purchasePriceRobux ?? task.priceRobux ?? 0;
 }
@@ -380,16 +390,20 @@ async function getPartner(slug: string) {
   const name = PARTNER_NAME_BY_SLUG[slug];
   if (!name) return null;
 
+  const antonSheetConfig = slug === "anton" ? getAntonGoogleSheetConfig() : {};
+
   return prisma.partner.upsert({
     where: { slug },
     update: slug === "anton" ? {
       ledgerCurrency: DEFAULT_PARTNER_CURRENCY,
+      ...antonSheetConfig,
     } : {},
     create: {
       slug,
       name,
       ledgerCurrency: DEFAULT_PARTNER_CURRENCY,
       robuxRateUsdtPer1000: DEFAULT_ANTON_RATE_USDT_PER_1000_R,
+      ...antonSheetConfig,
     },
   });
 }

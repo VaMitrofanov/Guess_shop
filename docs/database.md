@@ -92,6 +92,11 @@ B2B/partner-ops контур для сторонних выкупов, перв�
 `Partner`: справочник партнёров (`slug`, `name`, `isActive`, `notes`). Для Антона добавлены
 денежные и Sheets-настройки: `ledgerCurrency=USDT`, `robuxRateUsdtPer1000` (сейчас `5.05`),
 `googleSheetId`, `googleSheetTab`, `googleSheetUrl`.
+Боевой `googleSheetId` Антона: `1jzWZZ_AeM0IMyHaljaLBei0hu_zDwktiysbgGt324rs`; фиксированного
+`googleSheetTab` нет, потому что каждый лист таблицы соответствует новой дате.
+`GET /api/twa/partners/anton/tasks` синхронизирует `googleSheetId/googleSheetUrl` из env
+`ANTON_GOOGLE_SHEETS_SPREADSHEET_ID` при upsert партнёра; если env отсутствует, существующие
+поля в БД не затираются.
 
 `PartnerBuyoutTask`: одна партнёрская строка/задача на выкуп геймпасса. Статусы
 `PartnerTaskStatus`: `NEW` · `READY` · `PURCHASING` · `DONE` · `FAILED` · `CANCELLED`.
@@ -102,6 +107,8 @@ B2B/partner-ops контур для сторонних выкупов, перв�
 нужен под idempotent ручной импорт `.xlsx` и будущий Google Sheets sync; индексы покрывают
 `partnerId+status`, `partnerId+updatedAt`, `gamepassId`. Для `.xlsx` бинарный файл не хранится:
 в `sheetRaw` сохраняются source/file/row metadata и исходные значения строки.
+Для Google Sheets `externalRowId` должен включать tab title и row number; в `sheetRaw` стоит
+сохранять исходные `A/C/D/E/F`, чтобы write-back и диагностика ошибок были воспроизводимыми.
 
 `PartnerLedgerEntry`: отдельный ledger партнёрских денег. Для Антона ledger ведётся только
 в `USDT`; R$ остаются ценой геймпасса в `PartnerBuyoutTask`.

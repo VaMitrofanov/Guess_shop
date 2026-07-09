@@ -457,6 +457,12 @@ SQL: три параллельных запроса (daily 90д, weekly funnel 1
 - верхний segmented control `Свои | Антон` в `BossrobuxScreen`;
 - сводка партнёра: USDT-баланс, потрачено, курс, выкупленные R$, задачи, ready/buying;
 - блок Google Sheets показывает, подключена ли таблица, и ожидаемые колонки `GP · Ник · Номинал`;
+  статус подключения берётся из `Partner.googleSheetId/googleSheetUrl`, а
+  `GET /api/twa/partners/anton/tasks` подтягивает эти поля из env
+  `ANTON_GOOGLE_SHEETS_SPREADSHEET_ID` при upsert партнёра;
+  боевой sync должен читать таблицу `1jzWZZ_AeM0IMyHaljaLBei0hu_zDwktiysbgGt324rs`, сканировать
+  date-листы, брать строки с `D != empty` и `E == "в ожидании"`, читать `A` как ник/инфу,
+  `C` как GP/gamepass id или URL, `D` как номинал/цену, а write-back писать в `E/F`;
 - блок XLSX позволяет вручную загрузить файл с колонками `ГП/GP`, `Ник`, `Номинал`; файл
   не хранится, в задачах остаются row/file metadata и исходные значения;
 - курс можно заменить из TWA через форму `Курс`;
@@ -470,6 +476,6 @@ XLSX-строк на `19 106 R$`, списание `96.49 USDT`, расчётн�
 После применения prod-миграций 2026-07-09 экран `Аккаунт → Антон` подтверждён в TWA:
 summary и задачи загружаются, `PARTNER_SCHEMA_NOT_READY` больше не воспроизводится.
 
-Ограничения MVP: отдельный donor-cookie партнёра, Google Sheets sync/write-back,
+Ограничения MVP: отдельный donor-cookie партнёра, фактический Google Sheets sync/write-back,
 batch-выкуп и партнёрский отчёт ещё не реализованы. Детальный продуктовый и технический
 план — в [b2b-saas.md](b2b-saas.md).
