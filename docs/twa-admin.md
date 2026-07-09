@@ -475,6 +475,9 @@ SQL: три параллельных запроса (daily 90д, weekly funnel 1
 XLSX-строк на `19 106 R$`, списание `96.49 USDT`, расчётный остаток `53.51 USDT`.
 После применения prod-миграций 2026-07-09 экран `Аккаунт → Антон` подтверждён в TWA:
 summary и задачи загружаются, `PARTNER_SCHEMA_NOT_READY` больше не воспроизводится.
+После деплоя `036ed61` 2026-07-09 live API `/api/twa/partners/anton/tasks` подтвердил
+заполненные `Partner.googleSheetId/googleSheetUrl` из env; блок Google Sheets больше не должен
+показывать `Нужен sheetId` после обновления экрана.
 
 Ограничения MVP: отдельный donor-cookie партнёра, фактический Google Sheets sync/write-back,
 batch-выкуп и партнёрский отчёт ещё не реализованы. Детальный продуктовый и технический
