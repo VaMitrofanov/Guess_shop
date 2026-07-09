@@ -992,7 +992,9 @@ export async function POST(req: NextRequest) {
     if (!purchaseData)
       return NextResponse.json({ error: "Нет ответа от Roblox" }, { status: 502 });
 
-    if (purchaseData.purchased) {
+    const isAlreadyOwned = /already.?own/i.test(purchaseData.reason ?? "");
+
+    if (purchaseData.purchased || isAlreadyOwned) {
       const currentRate = settings?.purchaseRate ?? null;
       const purchaserUsername = settings?.robloxAccountName ?? null;
       await (prisma as any).wbOrder.updateMany({
@@ -1002,6 +1004,9 @@ export async function POST(req: NextRequest) {
       cachedCounts = null;
       notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder ?? false).catch(() => {});
       const mpWarn = isManagedPricing ? ` (MP: ${price}/${base})` : "";
+      if (isAlreadyOwned) {
+        return NextResponse.json({ ok: true, success: true, msg: `Куплено (AlreadyOwned — предыдущая покупка прошла)${mpWarn}` });
+      }
       return NextResponse.json({ ok: true, success: true, msg: `Куплено за ${purchaseData.price ?? price} R$${mpWarn}` });
     }
 

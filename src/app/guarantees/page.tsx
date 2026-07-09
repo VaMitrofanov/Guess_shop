@@ -6,7 +6,7 @@ import { ShieldCheck, Zap, Users, Star, Lock, HeartHandshake, ArrowRight } from 
 const guarantees = [
   {
     title: "Безопасные платежи",
-    desc: "Все транзакции проходят через официальный шлюз Тинькофф. Мы не храним данные карт. Все операции защищены 3D-Secure.",
+    desc: "Все транзакции проходят через защищённый шлюз Тинькофф. Мы не храним данные карт. Все операции защищены 3D-Secure.",
     icon: Lock,
     tag: "SECURITY",
   },
@@ -17,8 +17,8 @@ const guarantees = [
     tag: "AUTO",
   },
   {
-    title: "Официальный курс",
-    desc: "Работаем напрямую с поставщиками. Предлагаем один из лучших курсов на рынке СНГ.",
+    title: "Актуальный курс",
+    desc: "Курс обновляется автоматически и фиксируется на момент оформления заказа. Никаких скрытых доплат — цена в калькуляторе финальная.",
     icon: HeartHandshake,
     tag: "FAIR PRICE",
   },
@@ -29,14 +29,14 @@ const guarantees = [
     tag: "SUPPORT",
   },
   {
-    title: "Опыт и репутация",
-    desc: "Работаем с 2024 года. Более 5 000 выполненных заказов. Ваша покупка в надёжных руках.",
+    title: "Прозрачные условия",
+    desc: "Публичная оферта и политика конфиденциальности по закону РФ. Каждый заказ — под гарантией возврата при невыполнении.",
     icon: Users,
-    tag: "TRUSTED",
+    tag: "LEGAL",
   },
   {
     title: "Реальные отзывы",
-    desc: "Тысячи довольных клиентов в Telegram и VK. Проверьте сами, почитав реальные истории.",
+    desc: "Отзывы покупателей — в нашем сообществе VK и Telegram. Читайте живые истории клиентов.",
     icon: Star,
     tag: "VERIFIED",
   },
@@ -57,7 +57,7 @@ export default function GuaranteesPage() {
             <span className="gold-text">гарантии</span>
           </h1>
           <p className="text-zinc-400 font-medium max-w-lg">
-            Мы несём полную ответственность за каждый заказ. Вот почему тысячи игроков доверяют нам.
+            Мы несём ответственность за каждый заказ. Вот почему игроки выбирают нас.
           </p>
         </div>
 
@@ -98,10 +98,10 @@ export default function GuaranteesPage() {
             <div className="space-y-3">
               <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">JOIN US</div>
               <h2 className="text-2xl md:text-4xl font-black uppercase tracking-tight leading-tight">
-                Тысячи игроков<br />выбирают нас каждый день
+                Покупай Robux<br />быстро и безопасно
               </h2>
               <p className="text-zinc-500 text-sm font-medium">
-                Присоединяйся к самому надёжному сервису в СНГ
+                Актуальный курс, доставка через геймпасс без пароля
               </p>
             </div>
             <Link

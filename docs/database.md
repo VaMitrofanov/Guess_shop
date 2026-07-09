@@ -85,6 +85,27 @@ Durable-запись одной пачки «Выкупить всё»: `account
 `totalGross` (грязные R$), `okCount`/`failCount`, `items` (JSONB: `[{orderId,nick,wbCode,gross,ok,reason}]`).
 Пишется клиентом после пакетного выкупа (`api/twa/purchase-batch` action `save`).
 
+### `Partner`, `PartnerBuyoutTask`, `PartnerLedgerEntry` (2026-07-09)
+B2B/partner-ops контур для сторонних выкупов, первый instance — `slug=anton` / «Антон».
+Это отдельный bounded context и он **не использует `WbOrder`**.
+
+`Partner`: справочник партнёров (`slug`, `name`, `isActive`, `notes`).
+
+`PartnerBuyoutTask`: одна партнёрская строка/задача на выкуп геймпасса. Статусы
+`PartnerTaskStatus`: `NEW` · `READY` · `PURCHASING` · `DONE` · `FAILED` · `CANCELLED`.
+Ключевые поля: `externalSource` (`MANUAL`/`GOOGLE_SHEETS`), `externalRowId`,
+`robloxUsername`, `gamepassId`, `gamepassUrl`, `productId`, `sellerId`, `sellerName`,
+`priceRobux`, `purchasePriceRobux`, `sheetRaw`, `purchaseAccountName`, `purchaseBatchId`,
+`completedAt`, `error`, `note`. Unique `[partnerId, externalSource, externalRowId]`
+нужен под idempotent Google Sheets sync; индексы покрывают `partnerId+status`,
+`partnerId+updatedAt`, `gamepassId`.
+
+`PartnerLedgerEntry`: отдельный ledger партнёрских денег в R$.
+Типы `PartnerLedgerType`: `TOPUP` · `BUYOUT` · `ADJUSTMENT` · `REFUND`.
+`amount` хранится со знаком: пополнение положительное, выкуп отрицательный. API `Антон`
+считает баланс aggregate по всему ledger, проверяет его перед ручным закрытием/покупкой и
+блокирует повторное `BUYOUT`-списание по одной задаче.
+
 ### `DrainEvent` (2026-07-05)
 Учёт сливов остатка донора в приёмник: `donorName`, `drainName`, `amount` (грязные R$),
 `gamepassId`, `source` (`manual` — кнопка 💧 в TWA / `auto` — автослив-воркер), `createdAt`.

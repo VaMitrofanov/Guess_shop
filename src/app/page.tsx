@@ -2,7 +2,7 @@ import Link from "next/link";
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
 import Calculator from "@/components/calculator";
-import { Zap, ShieldCheck, Clock, TrendingUp, Users, Check, Star } from "lucide-react";
+import { Zap, ShieldCheck, TrendingUp } from "lucide-react";
 import AnoAI from "@/components/ui/animated-shader-background";
 import { GlowCard } from "@/components/ui/spotlight-card";
 
@@ -101,7 +101,7 @@ export default function Home() {
             </h1>
 
             <p className="text-zinc-400 text-lg font-medium max-w-lg mx-auto leading-relaxed">
-              Официальный курс обновляется каждые 10 минут.
+              Актуальный курс обновляется автоматически.
               Доставка через геймпасс — без ввода пароля.
             </p>
           </div>
@@ -114,10 +114,10 @@ export default function Home() {
           {/* Trust row */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-w-3xl mx-auto">
             {[
-              { icon: Zap, label: "~10 мин", sub: "Время доставки" },
-              { icon: ShieldCheck, label: "Гарантия", sub: "Возврат денег" },
-              { icon: RobuxIcon, label: "5 000+ заказов", sub: "С 2024 года" },
-              { icon: TrendingUp, label: "Лучший курс", sub: "Авто-обновление" },
+              { icon: Zap, label: "~10 мин", sub: "Обработка заказа" },
+              { icon: ShieldCheck, label: "Гарантия", sub: "Возврат при сбое" },
+              { icon: RobuxIcon, label: "Геймпасс", sub: "Без пароля" },
+              { icon: TrendingUp, label: "Актуальный курс", sub: "Авто-обновление" },
             ].map(({ icon: Icon, label, sub }) => (
               <GlowCard
                 key={label}
@@ -144,9 +144,9 @@ export default function Home() {
         <div className="container mx-auto px-4">
           <div className="grid grid-cols-3 gap-6 max-w-2xl mx-auto">
             {[
-              { value: "5 247", label: "Выполнено заказов", pixel: true },
-              { value: "99.8%", label: "Успешных сделок", pixel: true },
-              { value: "~10 мин", label: "Среднее время", pixel: true },
+              { value: "24/7", label: "Обработка заказов", pixel: true },
+              { value: "~10 мин", label: "Оформление", pixel: true },
+              { value: "5–7 дн", label: "Зачисление Robux", pixel: true },
             ].map(({ value, label }) => (
               <div key={label} className="text-center space-y-2">
                 <div className="font-pixel text-[#00b06f] text-sm md:text-base">{value}</div>
@@ -244,9 +244,9 @@ export default function Home() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {[
               {
-                title: "Прямые поставки",
-                desc: "Работаем напрямую с поставщиками Robux. Никаких посредников — только честная цена.",
-                tag: "OFFICIAL",
+                title: "Доставка геймпассом",
+                desc: "Robux зачисляются через выкуп вашего геймпасса — без передачи пароля и доступа к аккаунту.",
+                tag: "SAFE",
               },
               {
                 title: "Гарантия возврата",

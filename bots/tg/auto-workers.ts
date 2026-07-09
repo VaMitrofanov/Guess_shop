@@ -158,7 +158,9 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
 
       const result = await purchaseGamepassDirect(info.productId, info.priceInRobux, info.creatorId, cookie);
 
-      if (result.success) {
+      const isAlreadyOwned = !result.success && /already.?own/i.test(result.msg);
+
+      if (result.success || isAlreadyOwned) {
         consecutiveFails = 0;
         await (db as any).wbOrder.updateMany({
           where: { id: order.id, status: "IN_PROGRESS" },
@@ -167,13 +169,13 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
         if (order.user) {
           try { await notifyUserCompleted(bot, order.user, order.id, order.amount, order.isDirectOrder ?? false); } catch { /* user may have blocked */ }
         }
-        balance -= (result.price ?? info.priceInRobux);
+        if (!isAlreadyOwned) balance -= (result.price ?? info.priceInRobux);
         bought++;
+        const ownedTag = isAlreadyOwned ? " (AlreadyOwned)" : "";
         await alertAdmins(
           `🤖 <b>Автовыкуп</b> · <code>${order.wbCode}</code> · ${result.price ?? info.priceInRobux} R$ · ` +
-          `${escapeHtml(info.creatorName)} — ✅\n💰 Баланс донора: ${balance.toLocaleString()} R$`
+          `${escapeHtml(info.creatorName)} — ✅${ownedTag}\n💰 Баланс донора: ${balance.toLocaleString()} R$`
         );
-        // Crossed the threshold with this purchase → drain alert.
         if (balance <= threshold) { await maybeThresholdAlert({ ...settings, autoBuyoutBelowSince: null }, balance); break; }
         await sleep(jitter(2000, 8000));
       } else {
@@ -181,8 +183,6 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
         await (db as any).wbOrder.updateMany({ where: { id: order.id, status: "IN_PROGRESS" }, data: { status: "PENDING" } });
         consecutiveFails++;
         const cookieDead = result.reason === "CookieExpired";
-        // "Already owned" and cookie-death shouldn't be retried this run.
-        if (cookieDead || /already own/i.test(result.msg)) autobuySkip.add(order.id);
         await annotateOnce(order.id, "[AUTOBUY-FAIL", result.msg.slice(0, 120));
         await alertAdmins(
           `⚠️ <b>Автовыкуп не прошёл</b> · <code>${order.wbCode}</code> · ${info.priceInRobux} R$\n` +

@@ -286,12 +286,17 @@ export async function POST(req: NextRequest) {
       }
     } catch { /* ok */ }
 
-    if (purchaseData.purchased) {
+    const isAlreadyOwned = /already.?own/i.test(purchaseData.reason ?? "");
+
+    if (purchaseData.purchased || isAlreadyOwned) {
       return NextResponse.json({
         ok: true, success: true,
-        msg: `Куплено за ${purchaseData.price ?? price} R$`,
+        msg: isAlreadyOwned
+          ? `Куплено (AlreadyOwned — предыдущая покупка прошла)`
+          : `Куплено за ${purchaseData.price ?? price} R$`,
         price: purchaseData.price ?? price,
         balance,
+        alreadyOwned: isAlreadyOwned,
       });
     }
 

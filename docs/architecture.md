@@ -30,6 +30,18 @@
 (VK-логин на сайте создаёт юзера без диалога → заказ привязан «не туда») решаются
 перепривязкой заказа в TWA (`rebind-order`).
 
+## B2B-направление (server MVP)
+
+Следующая продуктовая ветка — партнёрский выкуп сторонних геймпассов через тот же TWA.
+Первый реальный кейс: партнёр **«Антон»** с Google-таблицей и отдельным бюджетом на выкуп.
+На 2026-07-09 реализован server MVP без TWA-экрана и без Google Sheets sync.
+
+Важно: это **не продолжение `WbOrder`**, а отдельный bounded context поверх уже готового
+buyout-движка (`search/resolve/purchase`, cookie-аккаунты, батчи, история покупок).
+В коде контур живёт в `Partner`, `PartnerBuyoutTask`, `PartnerLedgerEntry`,
+`src/lib/roblox-buyout.ts` и `GET/POST /api/twa/partners/anton/tasks`. Детали статуса и
+rollout — в [b2b-saas.md](b2b-saas.md).
+
 ## Карта файлов
 
 ```
@@ -43,10 +55,12 @@ src/
     api/wb-link/route.ts         линковка кода к юзеру после VK-логина (коридор → VK)
     api/roblox/gamepasses        поиск геймпассов по нику/ID (напрямую в Roblox)
     api/twa/**                   API TWA-админки (все под extractTwaUser)
+    api/twa/partners/[slug]/tasks B2B server MVP: задачи/ledger/выкуп партнёра `anton`
   auth.ts                        NextAuth (admin + vk-id провайдеры)
   lib/
     twa-auth.ts                  initData HMAC + JWT для TWA
     roblox.ts                    Roblox API для сайта (4 эндпоинта details)
+    roblox-buyout.ts             shared resolve/purchase helper для retail и B2B
     pricing.ts, wb-api.ts        цены + Wildberries API (для TWA-аналитики)
 
 bots/

@@ -148,7 +148,9 @@ PENDING / IN_PROGRESS — вернёт **409** с данными заказа; U
 Авито / Новые / Ошибка / Ждут ссылку / Готово / Избранное; заметка обязательна; AVITO ставит
 `orderSource=AVITO`, DONE — тихий `COMPLETED` с фиксацией `purchaseRate` и БЕЗ уведомления
 клиенту, FAVORITES — только флаг `isFavorite`, статус не трогает), `complete`, `reject`,
-`purchase` (реальный серверный выкуп через `.ROBLOSECURITY` cookie из `GlobalSettings`),
+`purchase` (реальный серверный выкуп через `.ROBLOSECURITY` cookie из `GlobalSettings`;
+  `AlreadyOwned` от Roblox трактуется как успех — донор уже владеет геймпассом = предыдущая
+  покупка прошла, заказ → COMPLETED + увед клиенту; аналогично в автовыкупе и `roblox-account/purchase`),
 `edit-avito`, `set-source`, `purchase-script` (генерит JS для ручного выкупа в консоли),
 `search-users`, `rebind-order` (перепривязка заказа к другому юзеру, транзакция
 `WbOrder + WbCode`, аудит в `adminNote`; уведомление новому юзеру — **в стиле обычной
@@ -416,3 +418,29 @@ SQL: три параллельных запроса (daily 90д, weekly funnel 1
 
 9 кодов, единый `src/lib/test-codes.ts`. Сброс из Settings → «Тестовые коды»
 (или `npm run dev:reset-test`). Тестовые заказы помечаются `isTest` и скрыты из списков.
+
+## B2B: партнёрский раздел `Антон`
+
+На 2026-07-09 реализован server MVP, но отдельного TWA-экрана ещё нет. Цель — добавить
+внутри «Аккаунта» режим для выкупа **сторонних** геймпассов на деньги партнёра, не смешивая
+поток с WB/DIRECT/AVITO.
+
+Опорная точка — уже существующий `BossrobuxScreen`:
+
+- reuse поиска геймпассов;
+- reuse серверного purchase-flow через cookie;
+- reuse live-check, дедупа и batch purchase;
+- но **без** использования `WbOrder` как основной сущности.
+
+Текущий серверный контур:
+
+- `GET /api/twa/partners/anton/tasks` — задачи, summary, последние ledger-записи;
+- `POST /api/twa/partners/anton/tasks` — actions `create-task`, `ledger-topup`,
+  `cancel-task`, `mark-done`, `purchase-task`;
+- данные живут в `Partner`, `PartnerBuyoutTask`, `PartnerLedgerEntry`;
+- покупка идёт через общий `src/lib/roblox-buyout.ts`;
+- перед покупкой и ручным закрытием проверяется баланс партнёра в R$;
+- повторное списание `BUYOUT` по одной задаче блокируется.
+
+Рекомендуемое размещение: не новый нижний таб, а переключатель внутри экрана «Аккаунт»
+(`Свои | Антон`). Детальный продуктовый и технический план — в [b2b-saas.md](b2b-saas.md).
