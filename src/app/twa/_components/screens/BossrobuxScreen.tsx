@@ -60,8 +60,12 @@ interface PartnerLedgerEntry {
 }
 
 interface PartnerSummary {
-  balanceRobux: number;
-  spentRobux: number;
+  balanceUsdt: number;
+  spentUsdt: number;
+  doneRobux: number;
+  reservedUsdt: number;
+  ledgerCurrency: string;
+  robuxRateUsdtPer1000: number;
   total: number;
   ready: number;
   purchasing: number;
@@ -70,10 +74,32 @@ interface PartnerSummary {
 }
 
 interface PartnerState {
-  partner: { id: string; slug: string; name: string };
+  partner: {
+    id: string;
+    slug: string;
+    name: string;
+    ledgerCurrency: string;
+    robuxRateUsdtPer1000: number;
+    googleSheetUrl: string | null;
+    googleSheetId: string | null;
+    googleSheetTab: string | null;
+  };
   tasks: PartnerTask[];
   ledgerEntries: PartnerLedgerEntry[];
   summary: PartnerSummary;
+}
+
+interface PartnerImportResult {
+  totalRows: number;
+  created: number;
+  skipped: number;
+  failed: number;
+  items: Array<{
+    row: number;
+    gamepassId: string | null;
+    status: "created" | "skipped" | "failed";
+    message: string;
+  }>;
 }
 
 const ORDER_STATUS_RU: Record<string, string> = {
@@ -2072,6 +2098,15 @@ function fmtPartnerDate(iso: string | null) {
   return new Date(iso).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+function fmtUsdt(value: number | null | undefined) {
+  return `${(value ?? 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`;
+}
+
+function partnerTaskCostUsdt(priceRobux: number | null | undefined, rate: number) {
+  if (!priceRobux) return 0;
+  return Math.round((priceRobux * rate / 1000) * 100) / 100;
+}
+
 function PartnerActionButton({
   label,
   color,
@@ -2110,12 +2145,14 @@ function PartnerActionButton({
 function PartnerTaskRow({
   task,
   busy,
+  rateUsdtPer1000,
   onPurchase,
   onMarkDone,
   onCancel,
 }: {
   task: PartnerTask;
   busy: boolean;
+  rateUsdtPer1000: number;
   onPurchase: (task: PartnerTask) => void;
   onMarkDone: (task: PartnerTask) => void;
   onCancel: (task: PartnerTask) => void;
@@ -2125,6 +2162,7 @@ function PartnerTaskRow({
   const canClose = task.status !== "DONE" && task.status !== "CANCELLED" && task.status !== "PURCHASING";
   const title = task.sellerName || task.robloxUsername || (task.gamepassId ? `ГП ${task.gamepassId}` : "Геймпасс");
   const price = task.priceRobux ?? task.purchasePriceRobux;
+  const costUsdt = partnerTaskCostUsdt(price, rateUsdtPer1000);
 
   return (
     <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -2141,6 +2179,11 @@ function PartnerTaskRow({
           <div style={{ fontSize: 15, color: price != null ? C.accent : C.textTertiary, fontWeight: 700, ...tabular }}>
             {price != null ? `${price.toLocaleString("ru-RU")} R$` : "—"}
           </div>
+          {price != null && (
+            <div style={{ marginTop: 3, fontSize: 12, color: C.textTertiary, fontWeight: 700, ...tabular }}>
+              {fmtUsdt(costUsdt)}
+            </div>
+          )}
           <div style={{ marginTop: 4, fontSize: 13, color: status.color, fontWeight: 700 }}>
             {status.label}
           </div>
@@ -2178,6 +2221,9 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   const [noteInput, setNoteInput] = useState("");
   const [topupAmount, setTopupAmount] = useState("");
   const [topupComment, setTopupComment] = useState("");
+  const [rateInput, setRateInput] = useState("");
+  const [importResult, setImportResult] = useState<PartnerImportResult | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
 
@@ -2234,6 +2280,38 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
     }
   }
 
+  async function importXlsx(file: File | null) {
+    if (!file || busy) return;
+    setBusy(true);
+    try {
+      const formData = new FormData();
+      formData.append("action", "import-xlsx");
+      formData.append("file", file);
+      const r = await fetch("/api/twa/partners/anton/tasks", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const d = await r.json().catch(() => null);
+      if (d) applyPartnerState(d);
+      if (!r.ok || !d || d.ok === false || d.success === false) {
+        haptic.notify("error");
+        toast(d?.error ?? d?.msg ?? "Ошибка XLSX", "error");
+        return;
+      }
+      const result = d.importResult as PartnerImportResult | undefined;
+      setImportResult(result ?? null);
+      haptic.notify("success");
+      toast(result ? `XLSX: +${result.created}, пропущено ${result.skipped}, ошибок ${result.failed}` : "XLSX загружен", "success");
+    } catch {
+      haptic.notify("error");
+      toast("Ошибка загрузки XLSX", "error");
+    } finally {
+      setBusy(false);
+      if (uploadInputRef.current) uploadInputRef.current.value = "";
+    }
+  }
+
   async function createTask() {
     const gamepass = gamepassInput.trim();
     if (!gamepass) return;
@@ -2251,7 +2329,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   }
 
   async function topup() {
-    const amount = Math.floor(Number(topupAmount.replace(",", ".")));
+    const amount = Number(topupAmount.replace(",", "."));
     if (!Number.isFinite(amount) || amount <= 0) return;
     const ok = await post("ledger-topup", {
       amount,
@@ -2264,9 +2342,21 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
     }
   }
 
+  async function saveRate() {
+    const rate = Number(rateInput.replace(",", "."));
+    if (!Number.isFinite(rate) || rate <= 0) return;
+    const ok = await post("set-rate", { robuxRateUsdtPer1000: rate });
+    if (ok) {
+      setRateInput("");
+      toast("Курс Антона обновлён", "success");
+    }
+  }
+
   const tasks = state?.tasks ?? [];
   const ledger = state?.ledgerEntries ?? [];
   const summary = state?.summary;
+  const rate = summary?.robuxRateUsdtPer1000 ?? state?.partner.robuxRateUsdtPer1000 ?? 5.05;
+  const sheetConnected = !!state?.partner.googleSheetId || !!state?.partner.googleSheetUrl;
 
   if (loading) {
     return (
@@ -2284,10 +2374,72 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
       <section>
         <SectionHeader title="Антон" />
         <Card>
-          <InfoRow label="Баланс" value={`${(summary?.balanceRobux ?? 0).toLocaleString("ru-RU")} R$`} />
-          <InfoRow label="Потрачено" value={`${(summary?.spentRobux ?? 0).toLocaleString("ru-RU")} R$`} />
+          <InfoRow label="Баланс" value={fmtUsdt(summary?.balanceUsdt)} />
+          <InfoRow label="Потрачено" value={fmtUsdt(summary?.spentUsdt)} />
+          <InfoRow label="Курс" value={`${rate.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} USDT / 1000 R$`} />
+          <InfoRow label="Выкуплено" value={`${(summary?.doneRobux ?? 0).toLocaleString("ru-RU")} R$`} />
           <InfoRow label="Задачи" value={`${summary?.total ?? 0} · готово ${summary?.done ?? 0}`} />
           <InfoRow label="В работе" value={`${summary?.ready ?? 0} ready · ${summary?.purchasing ?? 0} buying`} last />
+        </Card>
+      </section>
+
+      <section>
+        <SectionHeader title="Google Sheets" />
+        <Card>
+          <InfoRow label="Статус" value={sheetConnected ? "Подключена" : "Нужен sheetId"} />
+          <InfoRow label="Колонки" value="GP · Ник · Номинал" last />
+        </Card>
+      </section>
+
+      <section>
+        <SectionHeader title="XLSX" />
+        <Card>
+          <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+            <input
+              ref={uploadInputRef}
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              style={{ display: "none" }}
+              onChange={(e) => importXlsx(e.target.files?.[0] ?? null)}
+            />
+            <button className="twa-press" onClick={() => { haptic.impact("medium"); uploadInputRef.current?.click(); }} disabled={busy}
+              style={{ width: "100%", background: busy ? C.elevated : C.accent, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 700, padding: "13px", cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}>
+              Загрузить XLSX
+            </button>
+            <div style={{ color: C.textTertiary, fontSize: 13, lineHeight: 1.35 }}>Ожидаемые колонки: GP/ГП, Ник, Номинал.</div>
+            {importResult && (
+              <div style={{ background: C.elevated, borderRadius: 10, overflow: "hidden" }}>
+                <InfoRow label="Строк" value={importResult.totalRows} />
+                <InfoRow label="Создано" value={importResult.created} />
+                <InfoRow label="Пропущено" value={importResult.skipped} />
+                <InfoRow label="Ошибки" value={importResult.failed} last />
+                {importResult.items.slice(0, 6).map((item) => (
+                  <div key={`${item.row}-${item.gamepassId ?? item.message}`} style={{ padding: "10px 14px", borderTop: `1px solid ${C.border}` }}>
+                    <div style={{ color: "#e5e5ea", fontSize: 13, fontWeight: 700 }}>
+                      Row {item.row}{item.gamepassId ? ` · GP ${item.gamepassId}` : ""}
+                    </div>
+                    <div style={{ color: item.status === "failed" ? C.red : item.status === "skipped" ? C.orange : C.textTertiary, fontSize: 12, marginTop: 3 }}>
+                      {item.message}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Card>
+      </section>
+
+      <section>
+        <SectionHeader title="Курс" />
+        <Card>
+          <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+            <input value={rateInput} onChange={e => setRateInput(e.target.value)} inputMode="decimal" placeholder={`${rate.toLocaleString("ru-RU")} USDT за 1000 R$`}
+              style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 16, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
+            <button className="twa-press" onClick={() => { haptic.impact("medium"); saveRate(); }} disabled={busy || !rateInput.trim()}
+              style={{ width: "100%", background: rateInput.trim() ? C.accent : C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 700, padding: "13px", cursor: busy ? "default" : "pointer", opacity: busy || !rateInput.trim() ? 0.55 : 1 }}>
+              Сохранить курс
+            </button>
+          </div>
         </Card>
       </section>
 
@@ -2313,7 +2465,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
         <SectionHeader title="Пополнение" />
         <Card>
           <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-            <input value={topupAmount} onChange={e => setTopupAmount(e.target.value)} inputMode="numeric" placeholder="Сумма R$…"
+            <input value={topupAmount} onChange={e => setTopupAmount(e.target.value)} inputMode="decimal" placeholder="Сумма USDT…"
               style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 16, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
             <input value={topupComment} onChange={e => setTopupComment(e.target.value)} placeholder="Комментарий…"
               style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
@@ -2337,6 +2489,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
                 <PartnerTaskRow
                   task={task}
                   busy={busy}
+                  rateUsdtPer1000={rate}
                   onPurchase={(t) => { haptic.impact("medium"); post("purchase-task", { taskId: t.id }); }}
                   onMarkDone={(t) => { haptic.impact("medium"); post("mark-done", { taskId: t.id, purchaseAccountName: accountName || null }); }}
                   onCancel={(t) => { haptic.impact("light"); post("cancel-task", { taskId: t.id }); }}
@@ -2364,7 +2517,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
                     </div>
                   </div>
                   <div style={{ color: entry.amount >= 0 ? C.green : C.red, fontSize: 15, fontWeight: 700, ...tabular }}>
-                    {entry.amount > 0 ? "+" : ""}{entry.amount.toLocaleString("ru-RU")} {entry.currency}
+                    {entry.amount > 0 ? "+" : ""}{entry.amount.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {entry.currency}
                   </div>
                 </div>
               </div>

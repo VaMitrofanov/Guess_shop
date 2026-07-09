@@ -146,6 +146,7 @@ enum PartnerLedgerType {
 enum PartnerExternalSource {
   MANUAL
   GOOGLE_SHEETS
+  XLSX_UPLOAD
 }
 
 /// WB withdrawal order: tracks gamepass link submissions from WB card buyers.
@@ -356,14 +357,24 @@ model Partner {
   name          String
   isActive      Boolean              @default(true)
   notes         String?
+  /// Money ledger currency for this partner. Anton uses USDT only.
+  ledgerCurrency String              @default("USDT")
+  /// Partner-specific buyout rate: USDT charged per 1000 dirty R$.
+  robuxRateUsdtPer1000 Float         @default(5.05)
+  /// Google Sheets source config for future sync/write-back. Values are not
+  /// secrets, but sheet URLs/IDs should still be treated as operational config.
+  googleSheetId  String?
+  googleSheetTab String?
+  googleSheetUrl String?
   tasks         PartnerBuyoutTask[]
   ledgerEntries PartnerLedgerEntry[]
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
 }
 
-/// One partner gamepass to buy out. For Anton MVP this is created manually in
-/// TWA; Google Sheets import will reuse externalSource/externalRowId later.
+/// One partner gamepass to buy out. For Anton MVP this is created manually or
+/// imported from XLSX in TWA; Google Sheets sync will reuse
+/// externalSource/externalRowId later.
 model PartnerBuyoutTask {
   id                  String                @id @default(cuid())
   partnerId           String
@@ -396,8 +407,8 @@ model PartnerBuyoutTask {
   @@index([purchaseBatchId])
 }
 
-/// Partner ledger in internal units. Anton MVP stores topups and buyout debits
-/// in R$ so operators can compare directly with gamepass prices.
+/// Partner ledger in partner money. Anton uses USDT only; each BUYOUT entry is
+/// derived from the task's dirty R$ price and Partner.robuxRateUsdtPer1000.
 model PartnerLedgerEntry {
   id        String            @id @default(cuid())
   partnerId String
@@ -406,7 +417,7 @@ model PartnerLedgerEntry {
   task      PartnerBuyoutTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
   type      PartnerLedgerType
   amount    Float
-  currency  String            @default("R$")
+  currency  String            @default("USDT")
   reference String?
   comment   String?
   createdBy String?

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import * as XLSX from "xlsx";
 
-import type { PartnerBuyoutTask } from "@prisma/client";
+import type { Partner, PartnerBuyoutTask, Prisma } from "@prisma/client";
 
 import { BuyoutError, purchaseGamepassWithCookie, resolveGamepass } from "@/lib/roblox-buyout";
 import { prisma } from "@/lib/prisma";
@@ -17,6 +18,34 @@ type TwaUser = Awaited<ReturnType<typeof extractTwaUser>>;
 const PARTNER_NAME_BY_SLUG: Record<string, string> = {
   anton: "Антон",
 };
+const DEFAULT_PARTNER_CURRENCY = "USDT";
+const DEFAULT_ANTON_RATE_USDT_PER_1000_R = 5.05;
+const MAX_XLSX_BYTES = 5 * 1024 * 1024;
+const MAX_XLSX_ROWS = 300;
+
+type ParsedPartnerImportRow = {
+  rowNumber: number;
+  gamepassId: string | null;
+  gamepassInput: string;
+  robuxAmount: number | null;
+  sheetPriceRobux: number | null;
+  robloxUsername: string | null;
+  robloxUserId: string | null;
+  raw: Record<string, unknown>;
+};
+
+type PartnerImportResult = {
+  totalRows: number;
+  created: number;
+  skipped: number;
+  failed: number;
+  items: Array<{
+    row: number;
+    gamepassId: string | null;
+    status: "created" | "skipped" | "failed";
+    message: string;
+  }>;
+};
 
 function json(data: unknown, status = 200) {
   return NextResponse.json(data, { status });
@@ -28,6 +57,277 @@ function operatorLabel(user: NonNullable<TwaUser>) {
 
 function getTaskPrice(task: Pick<PartnerBuyoutTask, "priceRobux" | "purchasePriceRobux">) {
   return task.purchasePriceRobux ?? task.priceRobux ?? 0;
+}
+
+function moneyCurrency(partner: Pick<Partner, "ledgerCurrency">) {
+  return partner.ledgerCurrency || DEFAULT_PARTNER_CURRENCY;
+}
+
+function taskCostUsdt(robuxPrice: number, partner: Pick<Partner, "robuxRateUsdtPer1000">) {
+  return Math.round((robuxPrice * partner.robuxRateUsdtPer1000 / 1000) * 100) / 100;
+}
+
+function normalizeImportHeader(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/[^a-zа-я0-9]/g, "");
+}
+
+function getImportValue(row: Record<string, unknown>, aliases: string[]) {
+  const normalizedAliases = aliases.map(normalizeImportHeader);
+  for (const [key, value] of Object.entries(row)) {
+    if (normalizedAliases.includes(normalizeImportHeader(key))) return value;
+  }
+  return null;
+}
+
+function parseImportNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const text = String(value ?? "").replace(/\s/g, "");
+  const normalized = /^\d{1,3}([,.]\d{3})+$/.test(text)
+    ? text.replace(/[,.]/g, "")
+    : text.replace(",", ".");
+  const match = normalized.match(/\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function extractGamepassIdFromImport(input: string) {
+  const gamepassMatch = input.match(/game-pass(?:es)?\/(\d+)/i);
+  if (gamepassMatch?.[1]) return gamepassMatch[1];
+
+  const numericMatch = input.match(/\b(\d{5,})\b/);
+  return numericMatch?.[1] ?? null;
+}
+
+function importFileKey(fileName: string) {
+  return fileName.replace(/[^a-zA-Z0-9_.-]+/g, "_").slice(0, 80) || "upload";
+}
+
+function toJsonObject(value: Record<string, unknown>) {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonObject;
+}
+
+function parsePartnerXlsx(buffer: Buffer) {
+  const workbook = XLSX.read(buffer, { type: "buffer" });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) throw new BuyoutError("В XLSX нет листов", 400);
+
+  const sheet = workbook.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+    defval: null,
+    raw: true,
+  });
+
+  if (rows.length > MAX_XLSX_ROWS) {
+    throw new BuyoutError(`Слишком много строк: максимум ${MAX_XLSX_ROWS}`, 400);
+  }
+
+  return rows
+    .map((row, index): ParsedPartnerImportRow => {
+      const gamepassValue = getImportValue(row, [
+        "gamepass",
+        "gamepassid",
+        "gamepassurl",
+        "gp",
+        "гп",
+        "ссылкагп",
+        "ссылка",
+        "url",
+      ]);
+      const usernameValue = getImportValue(row, [
+        "robloxusername",
+        "username",
+        "nick",
+        "nickname",
+        "ник",
+        "никроблокс",
+      ]);
+      const amountValue = getImportValue(row, [
+        "robuxamount",
+        "robux",
+        "amount",
+        "номинал",
+        "чистые",
+        "r",
+      ]);
+      const priceValue = getImportValue(row, [
+        "gamepassprice",
+        "price",
+        "cost",
+        "цена",
+        "ценагп",
+        "грязные",
+      ]);
+      const userIdValue = getImportValue(row, [
+        "robloxuserid",
+        "userid",
+        "user",
+        "robloxid",
+        "id",
+      ]);
+      const gamepassInput = String(gamepassValue ?? "").trim();
+
+      return {
+        rowNumber: index + 2,
+        gamepassId: extractGamepassIdFromImport(gamepassInput),
+        gamepassInput,
+        robuxAmount: parseImportNumber(amountValue),
+        sheetPriceRobux: parseImportNumber(priceValue),
+        robloxUsername: String(usernameValue ?? "").trim() || null,
+        robloxUserId: String(userIdValue ?? "").trim() || null,
+        raw: row,
+      };
+    })
+    .filter((row) => row.gamepassInput || row.robloxUsername || row.robuxAmount || row.sheetPriceRobux);
+}
+
+async function readPartnerPostBody(req: NextRequest) {
+  const contentType = req.headers.get("content-type") || "";
+  if (!contentType.includes("multipart/form-data")) {
+    return {
+      body: (await req.json().catch(() => ({}))) as Record<string, unknown>,
+      file: null as File | null,
+    };
+  }
+
+  const formData = await req.formData();
+  const body: Record<string, unknown> = {};
+  let file: File | null = null;
+
+  for (const [key, value] of formData.entries()) {
+    if (typeof value === "string") {
+      body[key] = value;
+    } else if (key === "file") {
+      file = value;
+    }
+  }
+
+  return { body, file };
+}
+
+async function importPartnerXlsx(partner: Partner, user: NonNullable<TwaUser>, file: File | null) {
+  if (!file) throw new BuyoutError("Приложите XLSX-файл", 400);
+  if (!file.name.toLowerCase().endsWith(".xlsx")) throw new BuyoutError("Поддерживается только .xlsx", 400);
+  if (file.size > MAX_XLSX_BYTES) throw new BuyoutError("XLSX слишком большой: максимум 5 MB", 400);
+
+  const rows = parsePartnerXlsx(Buffer.from(await file.arrayBuffer()));
+  const result: PartnerImportResult = {
+    totalRows: rows.length,
+    created: 0,
+    skipped: 0,
+    failed: 0,
+    items: [],
+  };
+  const sourceFile = importFileKey(file.name);
+
+  for (const row of rows) {
+    if (!row.gamepassId) {
+      result.failed += 1;
+      result.items.push({
+        row: row.rowNumber,
+        gamepassId: null,
+        status: "failed",
+        message: "Не найден ID геймпасса",
+      });
+      continue;
+    }
+
+    const externalRowId = `xlsx:${sourceFile}:row${row.rowNumber}:gp${row.gamepassId}`;
+    const duplicate = await prisma.partnerBuyoutTask.findFirst({
+      where: {
+        partnerId: partner.id,
+        OR: [
+          {
+            gamepassId: row.gamepassId,
+            status: { not: "CANCELLED" },
+          },
+          {
+            externalSource: "XLSX_UPLOAD",
+            externalRowId,
+          },
+        ],
+      },
+      select: { id: true, status: true },
+    });
+    if (duplicate) {
+      result.skipped += 1;
+      result.items.push({
+        row: row.rowNumber,
+        gamepassId: row.gamepassId,
+        status: "skipped",
+        message: `Уже есть задача ${duplicate.status}`,
+      });
+      continue;
+    }
+
+    const baseTask = {
+      partnerId: partner.id,
+      externalSource: "XLSX_UPLOAD" as const,
+      externalRowId,
+      robloxUsername: row.robloxUsername,
+      gamepassId: row.gamepassId,
+      gamepassUrl: `https://www.roblox.com/game-pass/${row.gamepassId}`,
+      note: row.robuxAmount ? `Номинал: ${row.robuxAmount} R$` : null,
+      sheetRaw: toJsonObject({
+        source: "twa-xlsx",
+        fileName: file.name,
+        row: row.rowNumber,
+        robuxAmount: row.robuxAmount,
+        sheetPriceRobux: row.sheetPriceRobux,
+        robloxUserId: row.robloxUserId,
+        importedBy: operatorLabel(user),
+        raw: row.raw,
+      }),
+    };
+
+    try {
+      const gp = await resolveGamepass(row.gamepassInput || row.gamepassId);
+      const ready = Boolean(gp.isForSale && gp.price && gp.price > 0 && gp.productId && gp.sellerId);
+
+      await prisma.partnerBuyoutTask.create({
+        data: {
+          ...baseTask,
+          status: ready ? "READY" : "FAILED",
+          productId: gp.productId ? String(gp.productId) : null,
+          sellerId: gp.sellerId ? String(gp.sellerId) : null,
+          sellerName: gp.sellerName || null,
+          priceRobux: gp.price || row.sheetPriceRobux || null,
+          error: ready ? null : "Геймпасс не продаётся или нет productId/sellerId",
+        },
+      });
+
+      result.created += 1;
+      result.items.push({
+        row: row.rowNumber,
+        gamepassId: row.gamepassId,
+        status: "created",
+        message: ready ? "Готова к выкупу" : "Создана с ошибкой проверки",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Ошибка проверки геймпасса";
+      await prisma.partnerBuyoutTask.create({
+        data: {
+          ...baseTask,
+          status: "FAILED",
+          priceRobux: row.sheetPriceRobux || null,
+          error: message,
+        },
+      });
+
+      result.created += 1;
+      result.items.push({
+        row: row.rowNumber,
+        gamepassId: row.gamepassId,
+        status: "created",
+        message: `Создана с ошибкой: ${message}`,
+      });
+    }
+  }
+
+  return result;
 }
 
 async function requireTwaUser(req: NextRequest) {
@@ -42,42 +342,60 @@ async function getPartner(slug: string) {
 
   return prisma.partner.upsert({
     where: { slug },
-    update: {},
-    create: { slug, name },
+    update: slug === "anton" ? {
+      ledgerCurrency: DEFAULT_PARTNER_CURRENCY,
+    } : {},
+    create: {
+      slug,
+      name,
+      ledgerCurrency: DEFAULT_PARTNER_CURRENCY,
+      robuxRateUsdtPer1000: DEFAULT_ANTON_RATE_USDT_PER_1000_R,
+    },
   });
 }
 
-async function loadPartnerState(partnerId: string) {
+async function loadPartnerState(partner: Partner) {
+  const currency = moneyCurrency(partner);
   const [tasks, ledgerEntries, balanceAgg, spentAgg] = await Promise.all([
     prisma.partnerBuyoutTask.findMany({
-      where: { partnerId },
+      where: { partnerId: partner.id },
       orderBy: [{ updatedAt: "desc" }],
       take: 100,
     }),
     prisma.partnerLedgerEntry.findMany({
-      where: { partnerId, currency: "R$" },
+      where: { partnerId: partner.id, currency },
       orderBy: [{ createdAt: "desc" }],
       take: 20,
     }),
     prisma.partnerLedgerEntry.aggregate({
-      where: { partnerId, currency: "R$" },
+      where: { partnerId: partner.id, currency },
       _sum: { amount: true },
     }),
     prisma.partnerLedgerEntry.aggregate({
-      where: { partnerId, currency: "R$", type: "BUYOUT" },
+      where: { partnerId: partner.id, currency, type: "BUYOUT" },
       _sum: { amount: true },
     }),
   ]);
 
-  const balanceRobux = balanceAgg._sum.amount ?? 0;
-  const spentRobux = Math.abs(spentAgg._sum.amount ?? 0);
+  const balanceUsdt = balanceAgg._sum.amount ?? 0;
+  const spentUsdt = Math.abs(spentAgg._sum.amount ?? 0);
+  const doneRobux = tasks
+    .filter((task) => task.status === "DONE")
+    .reduce((sum, task) => sum + getTaskPrice(task), 0);
+  const reservedUsdt = tasks
+    .filter((task) => task.status === "READY" || task.status === "PURCHASING")
+    .reduce((sum, task) => sum + taskCostUsdt(getTaskPrice(task), partner), 0);
 
   return {
     tasks,
     ledgerEntries,
     summary: {
-      balanceRobux,
-      spentRobux,
+      balanceUsdt,
+      spentUsdt,
+      doneRobux,
+      reservedUsdt,
+      ledgerCurrency: currency,
+      robuxRateUsdtPer1000: partner.robuxRateUsdtPer1000,
       total: tasks.length,
       ready: tasks.filter((task) => task.status === "READY").length,
       purchasing: tasks.filter((task) => task.status === "PURCHASING").length,
@@ -87,9 +405,9 @@ async function loadPartnerState(partnerId: string) {
   };
 }
 
-async function getPartnerBalance(partnerId: string) {
+async function getPartnerBalance(partner: Partner) {
   const aggregate = await prisma.partnerLedgerEntry.aggregate({
-    where: { partnerId, currency: "R$" },
+    where: { partnerId: partner.id, currency: moneyCurrency(partner) },
     _sum: { amount: true },
   });
   return aggregate._sum.amount ?? 0;
@@ -102,7 +420,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     const partner = await getPartner(slug);
     if (!partner) return json({ ok: false, error: "Партнёр не найден" }, 404);
 
-    const state = await loadPartnerState(partner.id);
+    const state = await loadPartnerState(partner);
     return json({ ok: true, partner, ...state });
   } catch (err) {
     if (err instanceof BuyoutError) return json({ ok: false, error: err.message }, err.status);
@@ -118,8 +436,14 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const partner = await getPartner(slug);
     if (!partner) return json({ ok: false, error: "Партнёр не найден" }, 404);
 
-    const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+    const { body, file } = await readPartnerPostBody(req);
     const action = String(body.action || "");
+
+    if (action === "import-xlsx") {
+      const importResult = await importPartnerXlsx(partner, user, file);
+      const state = await loadPartnerState(partner);
+      return json({ ok: true, partner, importResult, ...state });
+    }
 
     if (action === "create-task") {
       const rawGamepass = String(body.gamepass || body.gamepassUrl || body.gamepassId || "").trim();
@@ -157,7 +481,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         },
       });
 
-      const state = await loadPartnerState(partner.id);
+      const state = await loadPartnerState(partner);
       return json({ ok: true, partner, ...state });
     }
 
@@ -172,14 +496,32 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           partnerId: partner.id,
           type: "TOPUP",
           amount,
-          currency: "R$",
-          comment: String(body.comment || "").trim() || "Пополнение баланса партнёра",
+          currency: moneyCurrency(partner),
+          comment: String(body.comment || "").trim() || "Пополнение баланса партнёра в USDT",
           createdBy: operatorLabel(user),
         },
       });
 
-      const state = await loadPartnerState(partner.id);
+      const state = await loadPartnerState(partner);
       return json({ ok: true, partner, ...state });
+    }
+
+    if (action === "set-rate") {
+      const rate = Number(body.robuxRateUsdtPer1000);
+      if (!Number.isFinite(rate) || rate <= 0) {
+        return json({ ok: false, error: "Курс должен быть больше 0" }, 400);
+      }
+      if (rate > 1000) {
+        return json({ ok: false, error: "Слишком большой курс" }, 400);
+      }
+
+      const updatedPartner = await prisma.partner.update({
+        where: { id: partner.id },
+        data: { robuxRateUsdtPer1000: Math.round(rate * 10000) / 10000 },
+      });
+
+      const state = await loadPartnerState(updatedPartner);
+      return json({ ok: true, partner: updatedPartner, ...state });
     }
 
     if (action === "cancel-task") {
@@ -192,7 +534,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       });
       if (cancelled.count !== 1) return json({ ok: false, error: "Задача уже обрабатывается или завершена" }, 409);
 
-      const state = await loadPartnerState(partner.id);
+      const state = await loadPartnerState(partner);
       return json({ ok: true, partner, ...state });
     }
 
@@ -221,10 +563,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         return json({ ok: false, error: "Фактическая цена должна быть больше 0" }, 400);
       }
 
-      const price = manualPrice ?? getTaskPrice(task);
-      if (price > 0) {
-        const balance = await getPartnerBalance(partner.id);
-        if (balance < price) {
+      const priceRobux = manualPrice ?? getTaskPrice(task);
+      const priceUsdt = priceRobux > 0 ? taskCostUsdt(priceRobux, partner) : 0;
+      if (priceUsdt > 0) {
+        const balance = await getPartnerBalance(partner);
+        if (balance < priceUsdt) {
           return json({ ok: false, error: "Недостаточно баланса партнёра" }, 409);
         }
       }
@@ -240,22 +583,22 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         },
       });
 
-      if (price > 0) {
+      if (priceUsdt > 0) {
         await prisma.partnerLedgerEntry.create({
           data: {
             partnerId: partner.id,
             taskId: updatedTask.id,
             type: "BUYOUT",
-            amount: -price,
-            currency: "R$",
+            amount: -priceUsdt,
+            currency: moneyCurrency(partner),
             reference: updatedTask.gamepassId,
-            comment: "Ручная отметка партнёрского выкупа",
+            comment: `Ручная отметка партнёрского выкупа: ${priceRobux} R$ × ${partner.robuxRateUsdtPer1000} USDT / 1000 R$`,
             createdBy: operatorLabel(user),
           },
         });
       }
 
-      const state = await loadPartnerState(partner.id);
+      const state = await loadPartnerState(partner);
       return json({ ok: true, partner, ...state });
     }
 
@@ -294,13 +637,14 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         return json({ ok: false, error: "В задаче нет цены/productId/sellerId" }, 409);
       }
 
-      const balanceBeforePurchase = await getPartnerBalance(partner.id);
-      if (balanceBeforePurchase < price) {
+      const priceUsdt = taskCostUsdt(price, partner);
+      const balanceBeforePurchase = await getPartnerBalance(partner);
+      if (balanceBeforePurchase < priceUsdt) {
         await prisma.partnerBuyoutTask.update({
           where: { id: task.id },
           data: { status: "READY", error: "Недостаточно баланса партнёра" },
         });
-        return json({ ok: false, error: "Недостаточно баланса партнёра", partner, ...(await loadPartnerState(partner.id)) }, 409);
+        return json({ ok: false, error: "Недостаточно баланса партнёра", partner, ...(await loadPartnerState(partner)) }, 409);
       }
 
       const result = await purchaseGamepassWithCookie(settings.robloxCookie, { productId, price, sellerId });
@@ -309,7 +653,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           where: { id: task.id },
           data: { status: "FAILED", error: result.msg },
         });
-        return json({ ok: true, success: false, error: result.msg, balance: result.balance, partner, ...(await loadPartnerState(partner.id)) });
+        return json({ ok: true, success: false, error: result.msg, balance: result.balance, partner, ...(await loadPartnerState(partner)) });
       }
 
       await prisma.partnerBuyoutTask.update({
@@ -332,16 +676,16 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             partnerId: partner.id,
             taskId: task.id,
             type: "BUYOUT",
-            amount: -price,
-            currency: "R$",
+            amount: -priceUsdt,
+            currency: moneyCurrency(partner),
             reference: task.gamepassId,
-            comment: `Партнёрский выкуп через ${settings.robloxAccountName || "cookie-аккаунт"}`,
+            comment: `Партнёрский выкуп через ${settings.robloxAccountName || "cookie-аккаунт"}: ${price} R$ × ${partner.robuxRateUsdtPer1000} USDT / 1000 R$`,
             createdBy: operatorLabel(user),
           },
         });
       }
 
-      const state = await loadPartnerState(partner.id);
+      const state = await loadPartnerState(partner);
       return json({ ok: true, success: true, balance: result.balance, partner, ...state });
     }
 
