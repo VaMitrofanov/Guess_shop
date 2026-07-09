@@ -13,7 +13,7 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | Файл | О чём |
 |------|-------|
 | [architecture.md](architecture.md) | Обзор системы, стек, три канала как единая экосистема, поток данных |
-| [b2b-saas.md](b2b-saas.md) | Партнёрское/B2B-направление: TWA/server MVP `Антон`, ledger, rollout Sheets/batch |
+| [b2b-saas.md](b2b-saas.md) | Партнёрское/B2B-направление: TWA/server MVP `Антон`, USDT-ledger, ручной XLSX import, rollout Sheets/batch |
 | [corridor-and-site.md](corridor-and-site.md) | WB-гейт, сайт `/guide`, API коридора, восстановление сессии |
 | [bots.md](bots.md) | TG- и VK-боты: активация, приём геймпасса, прямые заказы, поддержка, отзывы |
 | [twa-admin.md](twa-admin.md) | Telegram Web App админка: аутентификация, заказы, выкуп, аккаунт |

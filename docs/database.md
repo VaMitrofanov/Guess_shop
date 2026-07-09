@@ -89,22 +89,31 @@ Durable-запись одной пачки «Выкупить всё»: `account
 B2B/partner-ops контур для сторонних выкупов, первый instance — `slug=anton` / «Антон».
 Это отдельный bounded context и он **не использует `WbOrder`**.
 
-`Partner`: справочник партнёров (`slug`, `name`, `isActive`, `notes`).
+`Partner`: справочник партнёров (`slug`, `name`, `isActive`, `notes`). Для Антона добавлены
+денежные и Sheets-настройки: `ledgerCurrency=USDT`, `robuxRateUsdtPer1000` (сейчас `5.05`),
+`googleSheetId`, `googleSheetTab`, `googleSheetUrl`.
 
 `PartnerBuyoutTask`: одна партнёрская строка/задача на выкуп геймпасса. Статусы
 `PartnerTaskStatus`: `NEW` · `READY` · `PURCHASING` · `DONE` · `FAILED` · `CANCELLED`.
-Ключевые поля: `externalSource` (`MANUAL`/`GOOGLE_SHEETS`), `externalRowId`,
+Ключевые поля: `externalSource` (`MANUAL`/`XLSX_UPLOAD`/`GOOGLE_SHEETS`), `externalRowId`,
 `robloxUsername`, `gamepassId`, `gamepassUrl`, `productId`, `sellerId`, `sellerName`,
 `priceRobux`, `purchasePriceRobux`, `sheetRaw`, `purchaseAccountName`, `purchaseBatchId`,
 `completedAt`, `error`, `note`. Unique `[partnerId, externalSource, externalRowId]`
-нужен под idempotent Google Sheets sync; индексы покрывают `partnerId+status`,
-`partnerId+updatedAt`, `gamepassId`.
+нужен под idempotent ручной импорт `.xlsx` и будущий Google Sheets sync; индексы покрывают
+`partnerId+status`, `partnerId+updatedAt`, `gamepassId`. Для `.xlsx` бинарный файл не хранится:
+в `sheetRaw` сохраняются source/file/row metadata и исходные значения строки.
 
-`PartnerLedgerEntry`: отдельный ledger партнёрских денег в R$.
+`PartnerLedgerEntry`: отдельный ledger партнёрских денег. Для Антона ledger ведётся только
+в `USDT`; R$ остаются ценой геймпасса в `PartnerBuyoutTask`.
 Типы `PartnerLedgerType`: `TOPUP` · `BUYOUT` · `ADJUSTMENT` · `REFUND`.
 `amount` хранится со знаком: пополнение положительное, выкуп отрицательный. API `Антон`
-считает баланс aggregate по всему ledger, проверяет его перед ручным закрытием/покупкой и
-блокирует повторное `BUYOUT`-списание по одной задаче.
+считает баланс aggregate по USDT-ledger, перед ручным закрытием/покупкой конвертирует
+грязную R$-цену задачи по `Partner.robuxRateUsdtPer1000`, проверяет баланс и блокирует
+повторное `BUYOUT`-списание по одной задаче.
+
+Миграция `20260709_partner_anton_usdt_sheets` фиксирует стартовый кейс Антона:
+`150 USDT` пополнения, 8 уже выкупленных XLSX-строк (`19 106 R$`) и агрегированное списание
+`96.49 USDT`, расчётный остаток `53.51 USDT`.
 
 ### `DrainEvent` (2026-07-05)
 Учёт сливов остатка донора в приёмник: `donorName`, `drainName`, `amount` (грязные R$),
