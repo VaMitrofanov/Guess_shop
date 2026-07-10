@@ -43,6 +43,7 @@ const GOOGLE_STATUS_DONE = "готово";
 // row-level проблем, которые Антон может исправить; внутренние ошибки операций
 // (cookie, баланс партнёра) колонку E не трогают.
 const GOOGLE_STATUS_ERROR = "ошибка";
+const GOOGLE_CANCELLED_COMMENT = "Отменено менеджером";
 const GOOGLE_MAX_SHEETS = 80;
 const GOOGLE_MAX_ROWS_PER_SHEET = 800;
 const ACTIVE_TASK_STATUSES = ["NEW", "READY", "FAILED"] as const;
@@ -559,23 +560,28 @@ async function importPartnerXlsx(partner: Partner, user: NonNullable<TwaUser>, f
 }
 
 /**
- * kind="done"    -> E="готово", F очищается.
- * kind="error"   -> E="ошибка" (красная строка у Антона) + причина в F («комментарий»).
- *                   Строка выходит из фильтра «в ожидании» до ручного исправления.
- * kind="comment" -> только F; E не трогаем (внутренние ошибки операций: cookie,
- *                   баланс партнёра — строка должна остаться «в ожидании»).
+ * kind="done"      -> E="готово", F очищается.
+ * kind="error"     -> E="ошибка" (красная строка у Антона) + причина в F («комментарий»).
+ *                     Строка выходит из фильтра «в ожидании» до ручного исправления.
+ * kind="comment"   -> только F; E не трогаем (внутренние ошибки операций: cookie,
+ *                     баланс партнёра — строка должна остаться «в ожидании»).
+ * kind="cancelled" -> E="ошибка" + F="Отменено менеджером": отмена из TWA должна быть
+ *                     видна Антону. Успешная запись ставит cancelWriteBackAt — только
+ *                     после неё возврат E в «в ожидании» реанимирует задачу.
  */
-async function writeBackPartnerTask(task: PartnerBuyoutTask, kind: "done" | "error" | "comment", message?: string) {
+async function writeBackPartnerTask(task: PartnerBuyoutTask, kind: "done" | "error" | "comment" | "cancelled", message?: string) {
   const meta = getGoogleTaskMeta(task);
   if (!meta || !isGoogleSheetsConfigured()) return;
 
-  const errorMessage = truncateGoogleMessage(message || task.error || "Ошибка обработки");
+  const errorMessage = truncateGoogleMessage(
+    message || (kind === "cancelled" ? GOOGLE_CANCELLED_COMMENT : task.error) || "Ошибка обработки",
+  );
   const updates: GoogleSheetsValueUpdate[] = kind === "done"
     ? [
       { range: googleCellRange(meta.sheetTitle, "E", meta.rowNumber), values: [[GOOGLE_STATUS_DONE]] },
       { range: googleCellRange(meta.sheetTitle, "F", meta.rowNumber), values: [[""]] },
     ]
-    : kind === "error"
+    : kind === "error" || kind === "cancelled"
       ? [
         { range: googleCellRange(meta.sheetTitle, "E", meta.rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
         { range: googleCellRange(meta.sheetTitle, "F", meta.rowNumber), values: [[errorMessage]] },
@@ -592,6 +598,7 @@ async function writeBackPartnerTask(task: PartnerBuyoutTask, kind: "done" | "err
         sheetRaw: mergeTaskSheetRaw(task, {
           writeBackAt: new Date().toISOString(),
           lastWriteBackError: null,
+          ...(kind === "cancelled" ? { cancelWriteBackAt: new Date().toISOString() } : {}),
         }),
       },
     });
@@ -652,6 +659,35 @@ type ReconcileOutcome = {
   kind: "closed" | "failed" | "cancelled" | "conflict";
   message: string;
 };
+
+/**
+ * Строку удалили/очистили в таблице — задача удаляется из TWA полностью (решение
+ * владельца 2026-07-10). Guard: если по задаче уже есть ledger-записи (не должно быть
+ * у активных, но деньги дороже), не удаляем, а отменяем с заметкой.
+ */
+async function deletePartnerTaskForRemovedRow(
+  task: PartnerBuyoutTask,
+  stats: GoogleSyncReconciliationStats,
+  reason: string,
+) {
+  const ledgerCount = await prisma.partnerLedgerEntry.count({ where: { taskId: task.id } });
+  if (ledgerCount > 0) {
+    await prisma.partnerBuyoutTask.update({
+      where: { id: task.id },
+      data: {
+        status: "CANCELLED",
+        note: `${reason}; задача не удалена — по ней есть ledger-записи`,
+        sheetRaw: mergeTaskSheetRaw(task, { cancelledFromSheet: true, reconciledAt: new Date().toISOString() }),
+      },
+    });
+    stats.cancelledFromSheet += 1;
+    return "cancelled" as const;
+  }
+
+  await prisma.partnerBuyoutTask.delete({ where: { id: task.id } });
+  stats.deletedFromSheet += 1;
+  return "deleted" as const;
+}
 
 /**
  * П3: реконсиляция ручной правки статуса E для существующей задачи GOOGLE_SHEETS
@@ -833,36 +869,60 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           result.items.push({ sheet: sheet.title, row: rowNumber, gamepassId, status: statusOverride, message });
         };
 
+        const gamepassInput = String(cells[2] ?? "").trim();
+        const gamepassId = parseGamepassId(gamepassInput);
+        const existing = tasksByRowId.get(externalRowId) ?? null;
+        // Строку очистили (A:D пустые, чип E мог остаться предвыставленным «в ожидании») —
+        // это удаление заказа: задача уходит из TWA полностью. E=«готово»/«ошибка» не трогаем:
+        // готово — операционная история, ошибка — наш же write-back.
+        const rowCleared = [0, 1, 2, 3].every((i) => String(cells[i] ?? "").trim() === "");
+        if (rowCleared && existing && status !== GOOGLE_STATUS_DONE && status !== GOOGLE_STATUS_ERROR) {
+          // DONE/PURCHASING не трогаем и «готово» в очищенную строку не переписываем:
+          // Антон мог очистить строку под переиспользование.
+          if (existing.status === "DONE" || existing.status === "PURCHASING") continue;
+          const outcome = await deletePartnerTaskForRemovedRow(existing, reconciliation, "Строка очищена в таблице");
+          result.updated += 1;
+          rowItem("updated", existing.gamepassId, outcome === "deleted"
+            ? "Удалена из TWA: строка очищена в таблице"
+            : "Отменена: строка очищена, но по задаче есть ledger-записи");
+          continue;
+        }
+
         if (!isPending) {
           // Реконсиляция ручных статусов: E сменили руками — приводим внутреннюю задачу
           // в соответствие (готово -> DONE без списания, ошибка -> FAILED, прочее -> CANCELLED).
-          const task = tasksByRowId.get(externalRowId);
-          if (task) {
+          if (existing) {
             const outcome = await reconcilePartnerGoogleRow({
-              task,
+              task: existing,
               rowStatus: status,
               rowComment: String(cells[5] ?? "").trim(),
-              rowGamepassId: parseGamepassId(String(cells[2] ?? "").trim()),
+              rowGamepassId: gamepassId,
               stats: reconciliation,
             });
             if (outcome) {
               if (outcome.kind === "conflict") result.skipped += 1;
               else result.updated += 1;
-              rowItem(outcome.kind === "conflict" ? "skipped" : "updated", task.gamepassId, outcome.message);
+              rowItem(outcome.kind === "conflict" ? "skipped" : "updated", existing.gamepassId, outcome.message);
             }
           }
           continue;
         }
-        if (!hasAmount) continue;
+        // Пустой D у строки без задачи и без ГП в C — шаблонная строка с предвыставленным
+        // чипом «в ожидании», молча пропускаем. Но если задача уже есть или в C есть ГП,
+        // строка настоящая: пустой номинал = ошибка строки, а не повод для зомби-задачи.
+        if (!hasAmount && !existing && !gamepassId) continue;
 
         result.rowCount += 1;
-        const gamepassInput = String(cells[2] ?? "").trim();
-        const gamepassId = parseGamepassId(gamepassInput);
         const sheetPrice = parseImportNumber(nominal);
         const rowHash = computeGoogleRowHash(cells);
-        const existing = tasksByRowId.get(externalRowId) ?? null;
-        const existingCancelledFromSheet = existing?.status === "CANCELLED"
-          && isRecord(existing.sheetRaw) && existing.sheetRaw.cancelledFromSheet === true;
+        const existingRaw = existing && isRecord(existing.sheetRaw) ? existing.sheetRaw : null;
+        // CANCELLED реанимируем обычным импортом, если отмену видел Антон: отмены самой
+        // реконсиляции (cancelledFromSheet) и отмены менеджера, дошедшие до таблицы
+        // write-back'ом (cancelWriteBackAt). Возврат E в «в ожидании» = явный повторный заказ.
+        const existingRevivableCancelled = existing?.status === "CANCELLED" && (
+          existingRaw?.cancelledFromSheet === true
+          || (existingRaw?.cancelledByManager === true && Boolean(existingRaw?.cancelWriteBackAt))
+        );
 
         if (existing?.status === "DONE") {
           result.skipped += 1;
@@ -873,16 +933,23 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           );
           continue;
         }
-        // CANCELLED, отменённые самой реконсиляцией, реанимируем обычным импортом:
-        // Антон вернул строку в «в ожидании». Ручные отмены из TWA остаются отменёнными.
-        if (existing?.status === "PURCHASING" || (existing?.status === "CANCELLED" && !existingCancelledFromSheet)) {
+        if (existing?.status === "PURCHASING" || (existing?.status === "CANCELLED" && !existingRevivableCancelled)) {
           result.skipped += 1;
           rowItem("skipped", existing.gamepassId, `Задача сейчас в статусе ${existing.status}`);
+          // Отмена менеджера, не дошедшая до таблицы (write-back упал): строка всё ещё
+          // «в ожидании» — допишем отмену, чтобы Антон её увидел.
+          if (existing.status === "CANCELLED" && existingRaw?.cancelledByManager === true && !existingRaw?.cancelWriteBackAt) {
+            await writeBackPartnerTask(existing, "cancelled");
+          }
           continue;
         }
 
         if (!gamepassId || !sheetPrice || sheetPrice <= 0) {
-          const message = !gamepassId ? "Не найден ID геймпасса в колонке C" : "Некорректный номинал в колонке D";
+          const message = !gamepassId
+            ? "Не найден ID геймпасса в колонке C"
+            : !hasAmount
+              ? "Пустой номинал в колонке D"
+              : "Некорректный номинал в колонке D";
           const data = {
             partnerId: partner.id,
             externalSource: "GOOGLE_SHEETS" as const,
@@ -916,7 +983,7 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           if (existing) {
             await prisma.partnerBuyoutTask.update({ where: { id: existing.id }, data });
             result.updated += 1;
-            if (existingCancelledFromSheet) reconciliation.revived += 1;
+            if (existingRevivableCancelled) reconciliation.revived += 1;
             rowItem("updated", gamepassId, message);
           } else {
             await prisma.partnerBuyoutTask.create({ data });
@@ -940,12 +1007,19 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           const mismatchNote = priceMismatch
             ? `Номинал из Sheets: ${roundedSheetPrice} R$, цена GP: ${gp.price} R$`
             : `Номинал из Sheets: ${roundedSheetPrice} R$`;
-          const message = ready ? "Готова к выкупу" : "Геймпасс не продаётся или нет productId/sellerId";
+          // Расхождение «номинал D vs live-цена ГП» — ошибка строки (решение владельца
+          // 2026-07-10): задача FAILED, в E пишется «ошибка», причина — в F. Антон правит
+          // D (или цену ГП) и возвращает E в «в ожидании» — задача снова станет READY.
+          const mismatchWarning = priceMismatch ? `Цена ГП: ${gp.price} R$, в таблице ${roundedSheetPrice} R$` : null;
+          const rowOk = ready && !priceMismatch;
+          const message = !ready
+            ? "Геймпасс не продаётся или нет productId/sellerId"
+            : mismatchWarning ?? "Готова к выкупу";
           const data = {
             partnerId: partner.id,
             externalSource: "GOOGLE_SHEETS" as const,
             externalRowId,
-            status: ready ? "READY" as const : "FAILED" as const,
+            status: rowOk ? "READY" as const : "FAILED" as const,
             robloxUsername: String(cells[0] ?? "").trim() || null,
             gamepassId: String(gp.gamepassId || gamepassId),
             gamepassUrl: `https://www.roblox.com/game-pass/${gp.gamepassId || gamepassId}`,
@@ -953,6 +1027,8 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
             sellerId: gp.sellerId ? String(gp.sellerId) : null,
             sellerName: gp.sellerName || null,
             priceRobux: gpPrice,
+            // Для расхождения error не дублируем: warning-блок в карточке рисуется
+            // по sheetRaw.priceMismatch.
             error: ready ? null : message,
             note: mismatchNote,
             sheetRaw: buildGoogleSheetRaw({
@@ -966,17 +1042,17 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
               priceMismatch,
             }),
           };
-
-          // Расхождение цены — не ошибка: E не трогаем, но предупреждаем Антона в F
-          // («комментарий»), если там ещё нет этого текста.
-          const mismatchWarning = priceMismatch ? `Цена ГП: ${gp.price} R$, в таблице ${roundedSheetPrice} R$` : null;
-          if (ready && mismatchWarning && String(cells[5] ?? "").trim() !== mismatchWarning) {
-            writeBacks.push({ range: googleCellRange(sheet.title, "F", rowNumber), values: [[mismatchWarning]] });
-          }
+          // Строка сейчас «в ожидании», а задача не ок — write-back нужен и на skip-пути:
+          // прошлый batch мог упасть, либо Антон вернул E в «в ожидании», не исправив строку.
+          const errorWriteBack: GoogleSheetsValueUpdate[] = rowOk ? [] : [
+            { range: googleCellRange(sheet.title, "E", rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
+            { range: googleCellRange(sheet.title, "F", rowNumber), values: [[!ready ? message : mismatchWarning ?? message]] },
+          ];
 
           if (existing && isGoogleTaskUnchanged(existing, data, { rowHash, priceMismatch, sheetId: sheet.sheetId })) {
             result.skipped += 1;
-            if (!ready) result.failed += 1;
+            if (!rowOk) result.failed += 1;
+            writeBacks.push(...errorWriteBack);
             rowItem("skipped", String(gp.gamepassId || gamepassId), "Без изменений");
             continue;
           }
@@ -984,19 +1060,16 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           if (existing) {
             await prisma.partnerBuyoutTask.update({ where: { id: existing.id }, data });
             result.updated += 1;
-            if (existingCancelledFromSheet) reconciliation.revived += 1;
+            if (existingRevivableCancelled) reconciliation.revived += 1;
             rowItem("updated", String(gp.gamepassId || gamepassId), message);
           } else {
             await prisma.partnerBuyoutTask.create({ data });
             result.created += 1;
             rowItem("created", String(gp.gamepassId || gamepassId), message);
           }
-          if (!ready) {
+          if (!rowOk) {
             result.failed += 1;
-            writeBacks.push(
-              { range: googleCellRange(sheet.title, "E", rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
-              { range: googleCellRange(sheet.title, "F", rowNumber), values: [[message]] },
-            );
+            writeBacks.push(...errorWriteBack);
           }
         } catch (err) {
           const message = truncateGoogleMessage(err instanceof Error ? err.message : "Ошибка проверки геймпасса");
@@ -1027,7 +1100,7 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           if (existing) {
             await prisma.partnerBuyoutTask.update({ where: { id: existing.id }, data });
             result.updated += 1;
-            if (existingCancelledFromSheet) reconciliation.revived += 1;
+            if (existingRevivableCancelled) reconciliation.revived += 1;
             rowItem("updated", gamepassId, message);
           } else {
             await prisma.partnerBuyoutTask.create({ data });
@@ -1043,9 +1116,9 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
       }
     }
 
-    // Реконсиляция удалённых строк: активная задача есть, а её строки в скане нет.
-    // Срабатывает только при полном скане; если исчез целый лист (удалён/скрыт/переименован),
-    // задачи не отменяем, а помечаем конфликт для ручной проверки.
+    // Реконсиляция удалённых строк: активная задача есть, а её строки в скане нет —
+    // задача удаляется из TWA. Срабатывает только при полном скане; если исчез целый лист
+    // (удалён/скрыт/переименован), задачи не трогаем, а помечаем конфликт для ручной проверки.
     if (scanComplete) {
       for (const task of existingTasks) {
         if (!task.externalRowId || seenRowIds.has(task.externalRowId)) continue;
@@ -1067,17 +1140,17 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           continue;
         }
 
-        await prisma.partnerBuyoutTask.update({
-          where: { id: task.id },
-          data: {
-            status: "CANCELLED",
-            note: "Строка удалена из таблицы",
-            sheetRaw: mergeTaskSheetRaw(task, { cancelledFromSheet: true, reconciledAt: new Date().toISOString() }),
-          },
-        });
-        reconciliation.deletedFromSheet += 1;
+        const outcome = await deletePartnerTaskForRemovedRow(task, reconciliation, "Строка удалена из таблицы");
         result.updated += 1;
-        result.items.push({ sheet: meta.sheetTitle, row: meta.rowNumber, gamepassId: task.gamepassId, status: "updated", message: "Отменена: строка удалена из таблицы" });
+        result.items.push({
+          sheet: meta.sheetTitle,
+          row: meta.rowNumber,
+          gamepassId: task.gamepassId,
+          status: "updated",
+          message: outcome === "deleted"
+            ? "Удалена из TWA: строка удалена из таблицы"
+            : "Отменена: строка удалена, но по задаче есть ledger-записи",
+        });
       }
     }
 
@@ -1192,8 +1265,9 @@ async function loadPartnerState(partner: Partner) {
   const reservedUsdt = tasks
     .filter((task) => task.status === "READY" || task.status === "PURCHASING")
     .reduce((sum, task) => sum + taskCostUsdt(getTaskPrice(task), partner), 0);
+  // Расхождение цены с 2026-07-10 переводит задачу в FAILED, поэтому FAILED тоже считаем.
   const mismatches = tasks
-    .filter((task) => (task.status === "NEW" || task.status === "READY" || task.status === "PURCHASING")
+    .filter((task) => task.status !== "DONE" && task.status !== "CANCELLED"
       && isRecord(task.sheetRaw) && task.sheetRaw.priceMismatch === true)
     .length;
   const conflicts = tasks
@@ -1365,9 +1439,21 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       const cancelled = await prisma.partnerBuyoutTask.updateMany({
         where: { id: taskId, partnerId: partner.id, status: { notIn: ["DONE", "CANCELLED", "PURCHASING"] } },
-        data: { status: "CANCELLED", error: null },
+        data: { status: "CANCELLED", error: null, note: "Отменена менеджером из TWA" },
       });
       if (cancelled.count !== 1) return json({ ok: false, error: "Задача уже обрабатывается или завершена" }, 409);
+
+      // Отмена должна быть видна Антону: E=«ошибка» + «Отменено менеджером» в F.
+      // cancelledByManager отличает её от отмен реконсиляции; вернуть задачу в работу
+      // Антон может, выставив E обратно в «в ожидании» (после успешного write-back).
+      const task = await prisma.partnerBuyoutTask.findUnique({ where: { id: taskId } });
+      if (task) {
+        const markedTask = await prisma.partnerBuyoutTask.update({
+          where: { id: task.id },
+          data: { sheetRaw: mergeTaskSheetRaw(task, { cancelledByManager: true, cancelledAt: new Date().toISOString() }) },
+        });
+        await writeBackPartnerTask(markedTask, "cancelled");
+      }
 
       const state = await loadPartnerState(partner);
       return json({ ok: true, partner, ...state });

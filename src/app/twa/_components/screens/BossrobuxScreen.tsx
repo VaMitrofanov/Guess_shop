@@ -45,6 +45,9 @@ interface PartnerSheetRaw {
   priceMismatch?: boolean;
   closedFromSheet?: boolean;
   cancelledFromSheet?: boolean;
+  cancelledByManager?: boolean;
+  cancelledAt?: string | null;
+  cancelWriteBackAt?: string | null;
   errorFromSheet?: boolean;
   conflict?: string | null;
   conflictAt?: string | null;
@@ -2716,7 +2719,8 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
               ? [
                 (recon.closedFromSheet ?? 0) > 0 ? `закрыто ${recon.closedFromSheet}` : null,
                 (recon.failedFromSheet ?? 0) > 0 ? `ошибка ${recon.failedFromSheet}` : null,
-                ((recon.cancelledFromSheet ?? 0) + (recon.deletedFromSheet ?? 0)) > 0 ? `отмена ${(recon.cancelledFromSheet ?? 0) + (recon.deletedFromSheet ?? 0)}` : null,
+                (recon.cancelledFromSheet ?? 0) > 0 ? `отмена ${recon.cancelledFromSheet}` : null,
+                (recon.deletedFromSheet ?? 0) > 0 ? `удалено ${recon.deletedFromSheet}` : null,
                 (recon.revived ?? 0) > 0 ? `возврат ${recon.revived}` : null,
                 (recon.conflicts ?? 0) > 0 ? `конфликты ${recon.conflicts}` : null,
               ].filter(Boolean)
