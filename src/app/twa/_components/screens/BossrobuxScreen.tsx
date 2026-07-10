@@ -209,10 +209,15 @@ const ORDER_STATUS_RU: Record<string, string> = {
   COMPLETED:         "выкуплен",
 };
 
-function SectionHeader({ title }: { title: string }) {
+function SectionHeader({ title, hint }: { title: string; hint?: string | null }) {
   return (
-    <div style={{ fontSize: 14, fontWeight: 600, color: C.textSecondary, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8, paddingLeft: 4 }}>
-      {title}
+    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, fontSize: 14, fontWeight: 600, color: C.textSecondary, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8, paddingLeft: 4 }}>
+      <span>{title}</span>
+      {hint && (
+        <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400, fontSize: 14, color: C.textTertiary, paddingRight: 4 }}>
+          {hint}
+        </span>
+      )}
     </div>
   );
 }
@@ -2207,6 +2212,16 @@ function partnerTaskCostUsdt(priceRobux: number | null | undefined, rate: number
   return Math.round((priceRobux * rate / 1000) * 100) / 100;
 }
 
+function fmtSyncAgo(value: string | null | undefined) {
+  if (!value) return null;
+  const ts = new Date(value).getTime();
+  if (!Number.isFinite(ts)) return null;
+  const mins = Math.round((Date.now() - ts) / 60_000);
+  if (mins < 1) return "обновлено только что";
+  if (mins < 60) return `обновлено ${mins} мин назад`;
+  return `обновлено ${Math.floor(mins / 60)} ч назад`;
+}
+
 function PartnerActionButton({
   label,
   color,
@@ -2271,6 +2286,11 @@ function PartnerTaskRow({
     : task.externalSource === "XLSX_UPLOAD"
       ? "XLSX"
       : "Manual";
+  // Прямая ссылка на строку таблицы (sheetId=gid сохраняется в sheetRaw при sync).
+  const sheetRowLink = task.externalSource === "GOOGLE_SHEETS"
+    && task.sheetRaw?.spreadsheetId && task.sheetRaw?.sheetId != null && task.sheetRaw?.rowNumber
+    ? `https://docs.google.com/spreadsheets/d/${task.sheetRaw.spreadsheetId}/edit#gid=${task.sheetRaw.sheetId}&range=A${task.sheetRaw.rowNumber}`
+    : null;
   const writeBackError = task.sheetRaw?.lastWriteBackError || null;
   const isClosedTask = task.status === "DONE" || task.status === "CANCELLED";
   const sheetPrice = task.sheetRaw?.sheetPriceRobux ?? null;
@@ -2284,36 +2304,44 @@ function PartnerTaskRow({
           <div style={{ fontSize: 16, fontWeight: 700, color: "#e5e5ea", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {title}
           </div>
-          <div style={{ marginTop: 4, fontSize: 13, color: C.textTertiary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {task.gamepassUrl || (task.gamepassId ? `game-pass/${task.gamepassId}` : task.id)}
+          <div style={{ marginTop: 4, fontSize: 14, color: C.textTertiary }}>
+            {sheetRowLink ? (
+              <a href={sheetRowLink} target="_blank" rel="noreferrer" style={{ color: C.accent, textDecoration: "none" }}>
+                GP {task.gamepassId ?? "?"}{googleRow ? ` · ${googleRow}` : ""} ↗
+              </a>
+            ) : (
+              <>GP {task.gamepassId || task.id}</>
+            )}
           </div>
           <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
-            <span style={{ borderRadius: 7, background: C.elevated, padding: "4px 7px", color: C.textSecondary, fontSize: 12, fontWeight: 700 }}>
+            <span style={{ borderRadius: 7, background: C.elevated, padding: "4px 8px", color: C.textSecondary, fontSize: 14, fontWeight: 700 }}>
               {sourceLabel}
             </span>
             {task.sheetRaw?.writeBackAt && (
-              <span style={{ borderRadius: 7, background: tint(C.green, 0.14), padding: "4px 7px", color: C.green, fontSize: 12, fontWeight: 700 }}>
-                E/F {fmtPartnerDate(task.sheetRaw.writeBackAt)}
+              <span style={{ borderRadius: 7, background: tint(C.green, 0.14), padding: "4px 8px", color: C.green, fontSize: 14, fontWeight: 700 }}>
+                D/E {fmtPartnerDate(task.sheetRaw.writeBackAt)}
               </span>
             )}
             {task.sheetRaw?.closedFromSheet && (
-              <span style={{ borderRadius: 7, background: tint(C.green, 0.14), padding: "4px 7px", color: C.green, fontSize: 12, fontWeight: 700 }}>
+              <span style={{ borderRadius: 7, background: tint(C.green, 0.14), padding: "4px 8px", color: C.green, fontSize: 14, fontWeight: 700 }}>
                 из таблицы
               </span>
             )}
           </div>
         </div>
         <div style={{ textAlign: "right", flexShrink: 0 }}>
-          <div style={{ fontSize: 15, color: price != null ? C.accent : C.textTertiary, fontWeight: 700, ...tabular }}>
+          <div style={{ fontSize: 16, color: price != null ? C.accent : C.textTertiary, fontWeight: 700, ...tabular }}>
             {price != null ? `${price.toLocaleString("ru-RU")} R$` : "—"}
           </div>
           {price != null && (
-            <div style={{ marginTop: 3, fontSize: 12, color: C.textTertiary, fontWeight: 700, ...tabular }}>
+            <div style={{ marginTop: 3, fontSize: 14, color: C.textTertiary, fontWeight: 700, ...tabular }}>
               {fmtUsdt(costUsdt)}
             </div>
           )}
-          <div style={{ marginTop: 4, fontSize: 13, color: status.color, fontWeight: 700 }}>
-            {status.label}
+          <div style={{ marginTop: 4 }}>
+            <span style={{ fontSize: 14, color: status.color, fontWeight: 700, background: tint(status.color, 0.14), borderRadius: 7, padding: "3px 8px" }}>
+              {status.label}
+            </span>
           </div>
         </div>
       </div>
@@ -2329,17 +2357,17 @@ function PartnerTaskRow({
         </div>
       )}
       {(task.error || (task.note && !showMismatch) || task.purchaseAccountName) && (
-        <div style={{ fontSize: 13, color: task.error ? C.red : C.textTertiary, lineHeight: 1.35 }}>
+        <div style={{ fontSize: 14, color: task.error ? C.red : C.textTertiary, lineHeight: 1.35 }}>
           {task.error || (!showMismatch && task.note) || `Аккаунт: ${task.purchaseAccountName}`}
         </div>
       )}
       {writeBackError && (
-        <div style={{ fontSize: 13, color: C.orange, lineHeight: 1.35 }}>
+        <div style={{ fontSize: 14, color: C.orange, lineHeight: 1.35 }}>
           Google write-back: {writeBackError}
         </div>
       )}
 
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12, color: C.textTertiary }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 14, color: C.textTertiary }}>
         <span>{fmtPartnerDate(task.createdAt)}</span>
         {task.completedAt && <span>Готово {fmtPartnerDate(task.completedAt)}</span>}
       </div>
@@ -2402,6 +2430,82 @@ function PartnerMismatchConfirm({ task, rate, busy, onConfirm, onCancel }: {
   );
 }
 
+interface PartnerBatchItem {
+  taskId: string;
+  gamepassId: string | null;
+  nick: string | null;
+  robux: number;
+  usdt: number;
+  ok: boolean;
+  reason?: string;
+}
+
+function buildPartnerBuyoutPlan(tasks: PartnerTask[], balanceUsdt: number, rateUsdtPer1000: number) {
+  const ready = tasks
+    .filter(t => t.status === "READY")
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  let usdt = 0;
+  const selected: PartnerTask[] = [];
+  const waiting: PartnerTask[] = [];
+  for (const t of ready) {
+    const price = t.priceRobux ?? t.purchasePriceRobux ?? 0;
+    const cost = partnerTaskCostUsdt(price, rateUsdtPer1000);
+    if (usdt + cost <= balanceUsdt) {
+      selected.push(t);
+      usdt += cost;
+    } else {
+      waiting.push(t);
+    }
+  }
+  const totalRobux = selected.reduce((s, t) => s + (t.priceRobux ?? t.purchasePriceRobux ?? 0), 0);
+  return { selected, waiting, totalRobux, totalUsdt: usdt };
+}
+
+function PartnerBatchReport({ report, onClose }: {
+  report: { items: PartnerBatchItem[]; totalRobux: number; totalUsdt: number; ok: number; fail: number };
+  onClose: () => void;
+}) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: C.card, borderRadius: 18, width: "100%", maxWidth: 380, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.5)" }}>
+        <div style={{ padding: "18px 20px 12px" }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#e5e5ea", marginBottom: 8 }}>Отчёт выкупа Антона</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: C.green, background: `${C.green}1c`, padding: "4px 10px", borderRadius: 999 }}>✅ {report.ok}</span>
+            {report.fail > 0 && <span style={{ fontSize: 14, fontWeight: 600, color: C.red, background: `${C.red}1c`, padding: "4px 10px", borderRadius: 999 }}>❌ {report.fail}</span>}
+            <span style={{ fontSize: 14, fontWeight: 600, color: C.accent, background: `${C.accent}1c`, padding: "4px 10px", borderRadius: 999, ...tabular }}>
+              {report.totalRobux.toLocaleString("ru-RU")} R$ ≈ {fmtUsdt(report.totalUsdt)}
+            </span>
+          </div>
+        </div>
+        <div style={{ height: 1, background: C.border }} />
+        <div style={{ overflowY: "auto", padding: "8px 0" }}>
+          {report.items.map((it, i) => (
+            <div key={it.taskId + i} style={{ padding: "8px 20px", display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 15, flexShrink: 0 }}>{it.ok ? "✅" : "❌"}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, color: "#e5e5ea", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.nick || `GP ${it.gamepassId}`}</div>
+                <div style={{ fontSize: 14, color: C.textTertiary }}>{it.robux.toLocaleString("ru-RU")} R${!it.ok && it.reason ? ` · ${it.reason}` : ""}</div>
+              </div>
+              <span style={{ fontSize: 14, fontWeight: 600, color: it.ok ? C.green : C.textTertiary, flexShrink: 0, ...tabular }}>
+                {it.ok ? fmtUsdt(it.usdt) : "—"}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div style={{ height: 1, background: C.border }} />
+        <div style={{ padding: "12px 20px" }}>
+          <button className="twa-press" onClick={onClose}
+            style={{ width: "100%", padding: "13px", border: "none", borderRadius: 12, background: C.accent, color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+            Готово
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PartnerAntonSection({ token, accountName }: { token: string; accountName: string | null }) {
   const [state, setState] = useState<PartnerState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -2417,6 +2521,12 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   const [googleSyncResult, setGoogleSyncResult] = useState<GoogleSyncResult | null>(null);
   const [taskFilter, setTaskFilter] = useState<"all" | "errors" | "mismatch">("all");
   const [confirmMismatchTask, setConfirmMismatchTask] = useState<PartnerTask | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyLimit, setHistoryLimit] = useState(20);
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; current?: string } | null>(null);
+  const bulkStopRef = useRef(false);
+  const [bulkReport, setBulkReport] = useState<{ items: PartnerBatchItem[]; totalRobux: number; totalUsdt: number; ok: number; fail: number } | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
@@ -2429,13 +2539,25 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
     }
   };
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError(null);
+  // П1: silent-refresh — фоновый GET не показывает скелетон, не сбрасывает формы
+  // и молчит при ошибках (сеть моргнула — экран не трогаем, следующий тик доедет).
+  const loadInFlightRef = useRef(false);
+  const busyRef = useRef(false);
+  useEffect(() => { busyRef.current = busy; }, [busy]);
+
+  const load = useCallback(async (opts: { background?: boolean } = {}) => {
+    const background = opts.background === true;
+    if (loadInFlightRef.current) return;
+    loadInFlightRef.current = true;
+    if (!background) {
+      setLoading(true);
+      setLoadError(null);
+    }
     try {
       const r = await fetch("/api/twa/partners/anton/tasks", { headers: { Authorization: `Bearer ${token}` } });
       const d = await r.json().catch(() => null);
       if (!r.ok || !d) {
+        if (background) return;
         const message = d?.error ?? "Ошибка загрузки Антона";
         setLoadError(message);
         haptic.notify("error");
@@ -2444,15 +2566,37 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
       }
       applyPartnerState(d);
     } catch {
-      setLoadError("Ошибка сети");
-      haptic.notify("error");
-      toast("Ошибка сети", "error");
+      if (!background) {
+        setLoadError("Ошибка сети");
+        haptic.notify("error");
+        toast("Ошибка сети", "error");
+      }
     } finally {
-      setLoading(false);
+      loadInFlightRef.current = false;
+      if (!background) setLoading(false);
     }
   }, [token]);
 
-  useEffect(() => { void Promise.resolve().then(load); }, [load]);
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
+
+  // Пока открыт workspace «Антон» и вкладка видима, раз в ~75 с подтягиваем свежие
+  // задачи (сервер сам делает opportunistic Google sync на GET с TTL 60 с). Возврат
+  // в TWA — немедленный тик; переключение workspace монтирует секцию заново (mount-load).
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState !== "visible" || busyRef.current) return;
+      void load({ background: true });
+    };
+    const interval = window.setInterval(tick, 75_000);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [load]);
 
   async function post(action: string, body: Record<string, unknown>) {
     if (busy) return false;
@@ -2584,6 +2728,53 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
     }
   }
 
+  async function doPartnerBulk(queue: PartnerTask[]) {
+    if (bulkRunning || queue.length === 0) return;
+    setBulkRunning(true);
+    bulkStopRef.current = false;
+    setBulkProgress({ done: 0, total: queue.length });
+    const items: PartnerBatchItem[] = [];
+    let ok = 0;
+    const rateVal = summary?.robuxRateUsdtPer1000 ?? state?.partner.robuxRateUsdtPer1000 ?? 5.05;
+    for (let i = 0; i < queue.length; i++) {
+      if (bulkStopRef.current) break;
+      const t = queue[i];
+      const price = t.priceRobux ?? t.purchasePriceRobux ?? 0;
+      const usdt = partnerTaskCostUsdt(price, rateVal);
+      if (i > 0) await new Promise(r => setTimeout(r, 2000 + Math.floor(Math.random() * 6000)));
+      if (bulkStopRef.current) break;
+      setBulkProgress({ done: i, total: queue.length, current: t.robloxUsername || `GP ${t.gamepassId}` });
+      try {
+        const r = await fetch("/api/twa/partners/anton/tasks", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ action: "purchase-task", taskId: t.id }),
+        });
+        const d = await r.json().catch(() => null);
+        if (d) applyPartnerState(d);
+        if (r.ok && d && d.ok !== false && d.success !== false) {
+          ok++;
+          items.push({ taskId: t.id, gamepassId: t.gamepassId, nick: t.robloxUsername, robux: price, usdt, ok: true });
+          haptic.impact("light");
+        } else {
+          const reason = d?.error ?? d?.msg ?? `HTTP ${r.status}`;
+          items.push({ taskId: t.id, gamepassId: t.gamepassId, nick: t.robloxUsername, robux: price, usdt, ok: false, reason });
+        }
+      } catch {
+        items.push({ taskId: t.id, gamepassId: t.gamepassId, nick: t.robloxUsername, robux: price, usdt, ok: false, reason: "ошибка сети" });
+      }
+      setBulkProgress({ done: i + 1, total: queue.length });
+    }
+    const fail = items.length - ok;
+    const totalRobux = items.filter(x => x.ok).reduce((s, x) => s + x.robux, 0);
+    const totalUsdt = items.filter(x => x.ok).reduce((s, x) => s + x.usdt, 0);
+    setBulkRunning(false);
+    setBulkProgress(null);
+    setBulkReport({ items, totalRobux, totalUsdt, ok, fail });
+    haptic.notify(fail === 0 ? "success" : "warning");
+    void load({ background: true });
+  }
+
   const tasks = state?.tasks ?? [];
   const ledger = state?.ledgerEntries ?? [];
   const summary = state?.summary;
@@ -2598,6 +2789,10 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
     : taskFilter === "mismatch"
       ? tasks.filter(isMismatchTask)
       : tasks;
+  const HISTORY_STATUSES = new Set(["DONE", "CANCELLED"]);
+  const activeTasks = filteredTasks.filter(t => !HISTORY_STATUSES.has(t.status));
+  const historyTasks = filteredTasks.filter(t => HISTORY_STATUSES.has(t.status));
+  const visibleHistory = historyTasks.slice(0, historyLimit);
   const purchaseTask = (t: PartnerTask) => {
     // Расхождение «номинал таблицы vs live-цена ГП» — покупка только через confirm.
     if (isMismatchTask(t)) {
@@ -2662,7 +2857,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   return (
     <>
       <section>
-        <SectionHeader title="Антон" />
+        <SectionHeader title="Антон" hint={fmtSyncAgo(googleSync?.lastSyncAt ?? null)} />
         <Card>
           <InfoRow label="Баланс" value={fmtUsdt(summary?.balanceUsdt)} />
           <InfoRow label="Потрачено" value={fmtUsdt(summary?.spentUsdt)} />
@@ -2708,9 +2903,9 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
           {latestDiagnostics && (
             <>
               <InfoRow label="Прочитано" value={`${latestDiagnostics.readRows ?? 0} · прошло ${googleMatchedRows}`} />
-              <InfoRow label="Фильтр" value={`D ${latestDiagnostics.amountFilledRows ?? 0} · E ${latestDiagnostics.pendingStatusRows ?? 0}`} />
-              <InfoRow label="Отсев" value={`D пусто ${latestDiagnostics.emptyAmountRows ?? 0} · E не ждёт ${latestDiagnostics.nonPendingStatusRows ?? 0}`} />
-              {googleStatusCountSummary && <InfoRow label="Статусы E" value={googleStatusCountSummary} />}
+              <InfoRow label="Фильтр" value={`C ${latestDiagnostics.amountFilledRows ?? 0} · D ${latestDiagnostics.pendingStatusRows ?? 0}`} />
+              <InfoRow label="Отсев" value={`C пусто ${latestDiagnostics.emptyAmountRows ?? 0} · D не ждёт ${latestDiagnostics.nonPendingStatusRows ?? 0}`} />
+              {googleStatusCountSummary && <InfoRow label="Статусы D" value={googleStatusCountSummary} />}
             </>
           )}
           {(() => {
@@ -2727,7 +2922,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
               : [];
             return parts.length > 0 ? <InfoRow label="Из таблицы" value={parts.join(" · ")} /> : null;
           })()}
-          <InfoRow label="Колонки" value="C GP · D сумма · E статус · F комментарий" />
+          <InfoRow label="Колонки" value="A ник · B GP · C номинал · D статус · E комментарий" />
           <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
             <button className="twa-press" onClick={() => { haptic.impact("medium"); syncGoogleSheets(); }} disabled={busy || !canSyncGoogle}
               style={{ width: "100%", background: canSyncGoogle ? C.accent : C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 700, padding: "13px", cursor: busy || !canSyncGoogle ? "default" : "pointer", opacity: busy || !canSyncGoogle ? 0.55 : 1 }}>
@@ -2830,6 +3025,66 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
 
       <section>
         <SectionHeader title="Задачи" />
+        {(() => {
+          const plan = buildPartnerBuyoutPlan(tasks, summary?.balanceUsdt ?? 0, rate);
+          if (plan.selected.length > 0 && !bulkRunning) return (
+            <Card>
+              <div style={{ padding: "12px 16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: "#e5e5ea" }}>
+                    Готово к выкупу: {plan.selected.length}
+                  </span>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: C.accent, ...tabular }}>
+                    {plan.totalRobux.toLocaleString("ru-RU")} R$ ≈ {fmtUsdt(plan.totalUsdt)}
+                  </span>
+                </div>
+                {plan.waiting.length > 0 && (
+                  <div style={{ fontSize: 14, color: C.orange, marginBottom: 8 }}>
+                    Не хватает баланса на {plan.waiting.length} задач
+                  </div>
+                )}
+                <button className="twa-press" disabled={busy}
+                  onClick={() => { haptic.impact("heavy"); void doPartnerBulk(plan.selected); }}
+                  style={{
+                    width: "100%", padding: "13px", border: "none", borderRadius: 12,
+                    background: C.green, color: "#fff", fontSize: 15, fontWeight: 700,
+                    cursor: "pointer", fontFamily: "inherit", opacity: busy ? 0.5 : 1,
+                  }}>
+                  Выкупить всё ({plan.selected.length})
+                </button>
+              </div>
+            </Card>
+          );
+          if (bulkRunning && bulkProgress) return (
+            <Card>
+              <div style={{ padding: "12px 16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: "#e5e5ea" }}>
+                    Выкуп: {bulkProgress.done}/{bulkProgress.total}
+                  </span>
+                  {bulkProgress.current && (
+                    <span style={{ fontSize: 14, color: C.textSecondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }}>
+                      {bulkProgress.current}
+                    </span>
+                  )}
+                </div>
+                <div style={{ height: 4, borderRadius: 2, background: C.elevated, marginBottom: 10, overflow: "hidden" }}>
+                  <div style={{ height: "100%", borderRadius: 2, background: C.green, transition: "width .3s", width: `${(bulkProgress.done / bulkProgress.total) * 100}%` }} />
+                </div>
+                <button className="twa-press"
+                  onClick={() => { bulkStopRef.current = true; haptic.impact("medium"); }}
+                  style={{
+                    width: "100%", padding: "13px", border: "none", borderRadius: 12,
+                    background: C.red, color: "#fff", fontSize: 15, fontWeight: 700,
+                    cursor: "pointer", fontFamily: "inherit",
+                  }}>
+                  Остановить
+                </button>
+              </div>
+            </Card>
+          );
+          return null;
+        })()}
         {(errorCount > 0 || mismatchCount > 0) && (
           <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
             {([
@@ -2854,12 +3109,12 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
           </div>
         )}
         <Card>
-          {filteredTasks.length === 0 ? (
+          {activeTasks.length === 0 ? (
             <div style={{ padding: "18px 16px", color: C.textSecondary, fontSize: 15, textAlign: "center" }}>
-              {tasks.length === 0 ? "Задач пока нет" : "Нет задач по фильтру"}
+              {tasks.length === 0 ? "Задач пока нет" : "Нет активных задач"}
             </div>
           ) : (
-            filteredTasks.map((task, i) => (
+            activeTasks.map((task, i) => (
               <div key={task.id}>
                 {i > 0 && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
                 <PartnerTaskRow
@@ -2876,6 +3131,53 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
         </Card>
       </section>
 
+      {historyTasks.length > 0 && (
+        <section>
+          <button className="twa-press" onClick={() => { haptic.select(); setShowHistory(h => !h); }}
+            style={{
+              display: "flex", alignItems: "center", gap: 8, border: "none", background: "none",
+              padding: "14px 4px 8px", cursor: "pointer", fontFamily: "inherit", width: "100%",
+            }}>
+            <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: C.textSecondary }}>
+              История
+            </span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: C.textTertiary, background: C.elevated, borderRadius: 999, padding: "2px 9px", ...tabular }}>
+              {historyTasks.length}
+            </span>
+            <span style={{ marginLeft: "auto", fontSize: 14, color: C.textTertiary, transition: "transform .15s", transform: showHistory ? "rotate(90deg)" : "rotate(0)" }}>▶</span>
+          </button>
+          {showHistory && (
+            <>
+              <Card>
+                {visibleHistory.map((task, i) => (
+                  <div key={task.id}>
+                    {i > 0 && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
+                    <PartnerTaskRow
+                      task={task}
+                      busy={busy}
+                      rateUsdtPer1000={rate}
+                      onPurchase={purchaseTask}
+                      onMarkDone={(t) => { haptic.impact("medium"); post("mark-done", { taskId: t.id, purchaseAccountName: accountName || null }); }}
+                      onCancel={(t) => { haptic.impact("light"); post("cancel-task", { taskId: t.id }); }}
+                    />
+                  </div>
+                ))}
+              </Card>
+              {historyTasks.length > historyLimit && (
+                <button className="twa-press" onClick={() => { haptic.select(); setHistoryLimit(l => l + 20); }}
+                  style={{
+                    display: "block", width: "100%", margin: "8px 0 0", padding: "12px", border: "none",
+                    borderRadius: 12, background: C.elevated, color: C.accent, fontSize: 14, fontWeight: 600,
+                    cursor: "pointer", fontFamily: "inherit", textAlign: "center",
+                  }}>
+                  Показать ещё 20
+                </button>
+              )}
+            </>
+          )}
+        </section>
+      )}
+
       {confirmMismatchTask && (
         <PartnerMismatchConfirm
           task={confirmMismatchTask}
@@ -2888,6 +3190,10 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
           }}
           onCancel={() => { if (!busy) setConfirmMismatchTask(null); }}
         />
+      )}
+
+      {bulkReport && (
+        <PartnerBatchReport report={bulkReport} onClose={() => setBulkReport(null)} />
       )}
 
       <section>

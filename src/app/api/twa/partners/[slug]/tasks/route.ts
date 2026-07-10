@@ -38,14 +38,23 @@ const GOOGLE_SYNC_TTL_MS = 60_000;
 const GOOGLE_SYNC_RUNNING_STALE_MS = 2 * 60_000;
 const GOOGLE_STATUS_PENDING = "в ожидании";
 const GOOGLE_STATUS_DONE = "готово";
-// Чип «ошибка» в колонке E: строка подсвечивается красным условным форматированием
-// на стороне таблицы, причина пишется в F («комментарий»). Ставим его только для
+// Чип «ошибка» в колонке статуса: строка подсвечивается красным условным форматированием
+// на стороне таблицы, причина пишется в колонку «комментарий». Ставим его только для
 // row-level проблем, которые Антон может исправить; внутренние ошибки операций
-// (cookie, баланс партнёра) колонку E не трогают.
+// (cookie, баланс партнёра) колонку статуса не трогают.
 const GOOGLE_STATUS_ERROR = "ошибка";
 const GOOGLE_CANCELLED_COMMENT = "Отменено менеджером";
 const GOOGLE_MAX_SHEETS = 80;
 const GOOGLE_MAX_ROWS_PER_SHEET = 800;
+// П9 (2026-07-10): владелец удалил старый столбец B — актуальная структура листа:
+// A=ник, B=айди геймпасса, C=номинал грязными, D=статус заказа, E=комментарий.
+const SHEET_COL = { nickname: 0, gamepass: 1, amount: 2, status: 3, comment: 4 } as const;
+const SHEET_GAMEPASS_LETTER = "B";
+const SHEET_AMOUNT_LETTER = "C";
+const SHEET_STATUS_LETTER = "D";
+const SHEET_COMMENT_LETTER = "E";
+const SHEET_READ_RANGE = `A:${SHEET_COMMENT_LETTER}`;
+const SHEET_CELL_COUNT = 5;
 const ACTIVE_TASK_STATUSES = ["NEW", "READY", "FAILED"] as const;
 
 type ParsedPartnerImportRow = {
@@ -275,7 +284,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function computeGoogleRowHash(cells: unknown[]) {
-  const normalized = Array.from({ length: 6 }, (_, i) => String(cells[i] ?? "").trim());
+  const normalized = Array.from({ length: SHEET_CELL_COUNT }, (_, i) => String(cells[i] ?? "").trim());
   return createHash("sha1").update(JSON.stringify(normalized)).digest("hex").slice(0, 16);
 }
 
@@ -295,7 +304,7 @@ function buildGoogleSheetRaw(input: {
     sheetTitle: input.sheetTitle,
     sheetId: input.sheetId ?? null,
     rowNumber: input.rowNumber,
-    range: `${input.sheetTitle}!A${input.rowNumber}:F${input.rowNumber}`,
+    range: `${input.sheetTitle}!A${input.rowNumber}:${SHEET_COMMENT_LETTER}${input.rowNumber}`,
     cells: input.cells,
     rowHash: computeGoogleRowHash(input.cells),
     sheetPriceRobux: input.sheetPriceRobux ?? null,
@@ -560,14 +569,14 @@ async function importPartnerXlsx(partner: Partner, user: NonNullable<TwaUser>, f
 }
 
 /**
- * kind="done"      -> E="готово", F очищается.
- * kind="error"     -> E="ошибка" (красная строка у Антона) + причина в F («комментарий»).
+ * kind="done"      -> D="готово", E очищается.
+ * kind="error"     -> D="ошибка" (красная строка у Антона) + причина в E («комментарий»).
  *                     Строка выходит из фильтра «в ожидании» до ручного исправления.
- * kind="comment"   -> только F; E не трогаем (внутренние ошибки операций: cookie,
+ * kind="comment"   -> только E; D не трогаем (внутренние ошибки операций: cookie,
  *                     баланс партнёра — строка должна остаться «в ожидании»).
- * kind="cancelled" -> E="ошибка" + F="Отменено менеджером": отмена из TWA должна быть
+ * kind="cancelled" -> D="ошибка" + E="Отменено менеджером": отмена из TWA должна быть
  *                     видна Антону. Успешная запись ставит cancelWriteBackAt — только
- *                     после неё возврат E в «в ожидании» реанимирует задачу.
+ *                     после неё возврат D в «в ожидании» реанимирует задачу.
  */
 async function writeBackPartnerTask(task: PartnerBuyoutTask, kind: "done" | "error" | "comment" | "cancelled", message?: string) {
   const meta = getGoogleTaskMeta(task);
@@ -578,16 +587,16 @@ async function writeBackPartnerTask(task: PartnerBuyoutTask, kind: "done" | "err
   );
   const updates: GoogleSheetsValueUpdate[] = kind === "done"
     ? [
-      { range: googleCellRange(meta.sheetTitle, "E", meta.rowNumber), values: [[GOOGLE_STATUS_DONE]] },
-      { range: googleCellRange(meta.sheetTitle, "F", meta.rowNumber), values: [[""]] },
+      { range: googleCellRange(meta.sheetTitle, SHEET_STATUS_LETTER, meta.rowNumber), values: [[GOOGLE_STATUS_DONE]] },
+      { range: googleCellRange(meta.sheetTitle, SHEET_COMMENT_LETTER, meta.rowNumber), values: [[""]] },
     ]
     : kind === "error" || kind === "cancelled"
       ? [
-        { range: googleCellRange(meta.sheetTitle, "E", meta.rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
-        { range: googleCellRange(meta.sheetTitle, "F", meta.rowNumber), values: [[errorMessage]] },
+        { range: googleCellRange(meta.sheetTitle, SHEET_STATUS_LETTER, meta.rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
+        { range: googleCellRange(meta.sheetTitle, SHEET_COMMENT_LETTER, meta.rowNumber), values: [[errorMessage]] },
       ]
       : [
-        { range: googleCellRange(meta.sheetTitle, "F", meta.rowNumber), values: [[errorMessage]] },
+        { range: googleCellRange(meta.sheetTitle, SHEET_COMMENT_LETTER, meta.rowNumber), values: [[errorMessage]] },
       ];
 
   try {
@@ -690,7 +699,7 @@ async function deletePartnerTaskForRemovedRow(
 }
 
 /**
- * П3: реконсиляция ручной правки статуса E для существующей задачи GOOGLE_SHEETS
+ * П3: реконсиляция ручной правки статуса D для существующей задачи GOOGLE_SHEETS
  * в активном статусе (NEW/READY/FAILED). Денег не двигает: «готово» из таблицы
  * закрывает задачу БЕЗ списания USDT (бейдж «из таблицы», решение о «Списать» отложено).
  */
@@ -704,10 +713,10 @@ async function reconcilePartnerGoogleRow(input: {
   const { task, rowStatus, rowGamepassId, stats } = input;
   if (!(ACTIVE_TASK_STATUSES as readonly string[]).includes(task.status)) return null;
 
-  // Защита от сдвига нумерации (вставили/удалили строки выше): если в C теперь другой
+  // Защита от сдвига нумерации (вставили/удалили строки выше): если в B теперь другой
   // геймпасс, чужую строку не закрываем и не отменяем — только конфликт-метка.
   if (rowGamepassId && task.gamepassId && rowGamepassId !== task.gamepassId) {
-    const conflict = `Строка сместилась: в C геймпасс ${rowGamepassId}, в задаче ${task.gamepassId} — проверь вручную`;
+    const conflict = `Строка сместилась: в ${SHEET_GAMEPASS_LETTER} геймпасс ${rowGamepassId}, в задаче ${task.gamepassId} — проверь вручную`;
     stats.conflicts += 1;
     if ((isRecord(task.sheetRaw) ? task.sheetRaw.conflict : null) === conflict) {
       return { kind: "conflict", message: conflict };
@@ -726,7 +735,7 @@ async function reconcilePartnerGoogleRow(input: {
         status: "DONE",
         completedAt: new Date(),
         error: null,
-        note: "Закрыто из таблицы: E=«готово» выставлено вручную",
+        note: "Закрыто из таблицы: D=«готово» выставлено вручную",
         sheetRaw: mergeTaskSheetRaw(task, {
           closedFromSheet: true,
           conflict: null,
@@ -735,11 +744,11 @@ async function reconcilePartnerGoogleRow(input: {
       },
     });
     stats.closedFromSheet += 1;
-    return { kind: "closed", message: "Закрыта из таблицы (E=готово), без списания USDT" };
+    return { kind: "closed", message: "Закрыта из таблицы (D=готово), без списания USDT" };
   }
 
   if (rowStatus === GOOGLE_STATUS_ERROR) {
-    // FAILED + E=«ошибка» — консистентно (наш же write-back), не трогаем.
+    // FAILED + D=«ошибка» — консистентно (наш же write-back), не трогаем.
     if (task.status === "FAILED") return null;
     const reason = input.rowComment ? `Помечено ошибкой в таблице: ${input.rowComment}` : "Помечено ошибкой в таблице";
     await prisma.partnerBuyoutTask.update({
@@ -764,7 +773,7 @@ async function reconcilePartnerGoogleRow(input: {
     },
   });
   stats.cancelledFromSheet += 1;
-  return { kind: "cancelled", message: `Отменена: E=«${statusLabel}»` };
+  return { kind: "cancelled", message: `Отменена: D=«${statusLabel}»` };
 }
 
 async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options: { force?: boolean } = {}) {
@@ -844,7 +853,7 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
     result.sheetCount = sheets.length;
 
     for (const sheet of sheets) {
-      const allRows = (await readGoogleSheetRows(spreadsheetId, sheet.title, "A:F")).values;
+      const allRows = (await readGoogleSheetRows(spreadsheetId, sheet.title, SHEET_READ_RANGE)).values;
       if (allRows.length > GOOGLE_MAX_ROWS_PER_SHEET) scanComplete = false;
       const rows = allRows.slice(0, GOOGLE_MAX_ROWS_PER_SHEET);
       scannedSheetTitles.add(sheet.title);
@@ -859,8 +868,8 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
         const rowNumber = index + 1;
         const externalRowId = buildGoogleExternalRowId(spreadsheetId, sheet.title, rowNumber);
         seenRowIds.add(externalRowId);
-        const nominal = cells[3];
-        const status = normalizeGoogleStatus(cells[4]);
+        const nominal = cells[SHEET_COL.amount];
+        const status = normalizeGoogleStatus(cells[SHEET_COL.status]);
         const hasAmount = String(nominal ?? "").trim() !== "";
         const isPending = status === GOOGLE_STATUS_PENDING;
         bumpGoogleFilterStats(result.diagnostics, { hasAmount, isPending, status });
@@ -869,13 +878,14 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           result.items.push({ sheet: sheet.title, row: rowNumber, gamepassId, status: statusOverride, message });
         };
 
-        const gamepassInput = String(cells[2] ?? "").trim();
+        const gamepassInput = String(cells[SHEET_COL.gamepass] ?? "").trim();
         const gamepassId = parseGamepassId(gamepassInput);
         const existing = tasksByRowId.get(externalRowId) ?? null;
-        // Строку очистили (A:D пустые, чип E мог остаться предвыставленным «в ожидании») —
-        // это удаление заказа: задача уходит из TWA полностью. E=«готово»/«ошибка» не трогаем:
+        // Строку очистили (A:C пустые, чип D мог остаться предвыставленным «в ожидании») —
+        // это удаление заказа: задача уходит из TWA полностью. D=«готово»/«ошибка» не трогаем:
         // готово — операционная история, ошибка — наш же write-back.
-        const rowCleared = [0, 1, 2, 3].every((i) => String(cells[i] ?? "").trim() === "");
+        const rowCleared = [SHEET_COL.nickname, SHEET_COL.gamepass, SHEET_COL.amount]
+          .every((i) => String(cells[i] ?? "").trim() === "");
         if (rowCleared && existing && status !== GOOGLE_STATUS_DONE && status !== GOOGLE_STATUS_ERROR) {
           // DONE/PURCHASING не трогаем и «готово» в очищенную строку не переписываем:
           // Антон мог очистить строку под переиспользование.
@@ -889,13 +899,13 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
         }
 
         if (!isPending) {
-          // Реконсиляция ручных статусов: E сменили руками — приводим внутреннюю задачу
+          // Реконсиляция ручных статусов: D сменили руками — приводим внутреннюю задачу
           // в соответствие (готово -> DONE без списания, ошибка -> FAILED, прочее -> CANCELLED).
           if (existing) {
             const outcome = await reconcilePartnerGoogleRow({
               task: existing,
               rowStatus: status,
-              rowComment: String(cells[5] ?? "").trim(),
+              rowComment: String(cells[SHEET_COL.comment] ?? "").trim(),
               rowGamepassId: gamepassId,
               stats: reconciliation,
             });
@@ -907,9 +917,10 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           }
           continue;
         }
-        // Пустой D у строки без задачи и без ГП в C — шаблонная строка с предвыставленным
-        // чипом «в ожидании», молча пропускаем. Но если задача уже есть или в C есть ГП,
-        // строка настоящая: пустой номинал = ошибка строки, а не повод для зомби-задачи.
+        // Пустой номинал (C) у строки без задачи и без ГП в B — шаблонная строка с
+        // предвыставленным чипом «в ожидании», молча пропускаем. Но если задача уже есть
+        // или в B есть ГП, строка настоящая: пустой номинал = ошибка строки, а не повод
+        // для зомби-задачи.
         if (!hasAmount && !existing && !gamepassId) continue;
 
         result.rowCount += 1;
@@ -918,7 +929,7 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
         const existingRaw = existing && isRecord(existing.sheetRaw) ? existing.sheetRaw : null;
         // CANCELLED реанимируем обычным импортом, если отмену видел Антон: отмены самой
         // реконсиляции (cancelledFromSheet) и отмены менеджера, дошедшие до таблицы
-        // write-back'ом (cancelWriteBackAt). Возврат E в «в ожидании» = явный повторный заказ.
+        // write-back'ом (cancelWriteBackAt). Возврат D в «в ожидании» = явный повторный заказ.
         const existingRevivableCancelled = existing?.status === "CANCELLED" && (
           existingRaw?.cancelledFromSheet === true
           || (existingRaw?.cancelledByManager === true && Boolean(existingRaw?.cancelWriteBackAt))
@@ -928,8 +939,8 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           result.skipped += 1;
           rowItem("skipped", existing.gamepassId, "Задача уже выполнена");
           writeBacks.push(
-            { range: googleCellRange(sheet.title, "E", rowNumber), values: [[GOOGLE_STATUS_DONE]] },
-            { range: googleCellRange(sheet.title, "F", rowNumber), values: [[""]] },
+            { range: googleCellRange(sheet.title, SHEET_STATUS_LETTER, rowNumber), values: [[GOOGLE_STATUS_DONE]] },
+            { range: googleCellRange(sheet.title, SHEET_COMMENT_LETTER, rowNumber), values: [[""]] },
           );
           continue;
         }
@@ -946,16 +957,16 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
 
         if (!gamepassId || !sheetPrice || sheetPrice <= 0) {
           const message = !gamepassId
-            ? "Не найден ID геймпасса в колонке C"
+            ? `Не найден ID геймпасса в колонке ${SHEET_GAMEPASS_LETTER}`
             : !hasAmount
-              ? "Пустой номинал в колонке D"
-              : "Некорректный номинал в колонке D";
+              ? `Пустой номинал в колонке ${SHEET_AMOUNT_LETTER}`
+              : `Некорректный номинал в колонке ${SHEET_AMOUNT_LETTER}`;
           const data = {
             partnerId: partner.id,
             externalSource: "GOOGLE_SHEETS" as const,
             externalRowId,
             status: "FAILED" as const,
-            robloxUsername: String(cells[0] ?? "").trim() || null,
+            robloxUsername: String(cells[SHEET_COL.nickname] ?? "").trim() || null,
             gamepassId,
             gamepassUrl: gamepassId ? `https://www.roblox.com/game-pass/${gamepassId}` : null,
             priceRobux: sheetPrice ? Math.round(sheetPrice) : null,
@@ -975,8 +986,8 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
             result.failed += 1;
             rowItem("skipped", gamepassId, `${message} (без изменений)`);
             writeBacks.push(
-              { range: googleCellRange(sheet.title, "E", rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
-              { range: googleCellRange(sheet.title, "F", rowNumber), values: [[message]] },
+              { range: googleCellRange(sheet.title, SHEET_STATUS_LETTER, rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
+              { range: googleCellRange(sheet.title, SHEET_COMMENT_LETTER, rowNumber), values: [[message]] },
             );
             continue;
           }
@@ -992,8 +1003,8 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           }
           result.failed += 1;
           writeBacks.push(
-            { range: googleCellRange(sheet.title, "E", rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
-            { range: googleCellRange(sheet.title, "F", rowNumber), values: [[message]] },
+            { range: googleCellRange(sheet.title, SHEET_STATUS_LETTER, rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
+            { range: googleCellRange(sheet.title, SHEET_COMMENT_LETTER, rowNumber), values: [[message]] },
           );
           continue;
         }
@@ -1007,9 +1018,9 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           const mismatchNote = priceMismatch
             ? `Номинал из Sheets: ${roundedSheetPrice} R$, цена GP: ${gp.price} R$`
             : `Номинал из Sheets: ${roundedSheetPrice} R$`;
-          // Расхождение «номинал D vs live-цена ГП» — ошибка строки (решение владельца
-          // 2026-07-10): задача FAILED, в E пишется «ошибка», причина — в F. Антон правит
-          // D (или цену ГП) и возвращает E в «в ожидании» — задача снова станет READY.
+          // Расхождение «номинал C vs live-цена ГП» — ошибка строки (решение владельца
+          // 2026-07-10): задача FAILED, в D пишется «ошибка», причина — в E. Антон правит
+          // C (или цену ГП) и возвращает D в «в ожидании» — задача снова станет READY.
           const mismatchWarning = priceMismatch ? `Цена ГП: ${gp.price} R$, в таблице ${roundedSheetPrice} R$` : null;
           const rowOk = ready && !priceMismatch;
           const message = !ready
@@ -1020,7 +1031,7 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
             externalSource: "GOOGLE_SHEETS" as const,
             externalRowId,
             status: rowOk ? "READY" as const : "FAILED" as const,
-            robloxUsername: String(cells[0] ?? "").trim() || null,
+            robloxUsername: String(cells[SHEET_COL.nickname] ?? "").trim() || null,
             gamepassId: String(gp.gamepassId || gamepassId),
             gamepassUrl: `https://www.roblox.com/game-pass/${gp.gamepassId || gamepassId}`,
             productId: gp.productId ? String(gp.productId) : null,
@@ -1043,10 +1054,10 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
             }),
           };
           // Строка сейчас «в ожидании», а задача не ок — write-back нужен и на skip-пути:
-          // прошлый batch мог упасть, либо Антон вернул E в «в ожидании», не исправив строку.
+          // прошлый batch мог упасть, либо Антон вернул D в «в ожидании», не исправив строку.
           const errorWriteBack: GoogleSheetsValueUpdate[] = rowOk ? [] : [
-            { range: googleCellRange(sheet.title, "E", rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
-            { range: googleCellRange(sheet.title, "F", rowNumber), values: [[!ready ? message : mismatchWarning ?? message]] },
+            { range: googleCellRange(sheet.title, SHEET_STATUS_LETTER, rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
+            { range: googleCellRange(sheet.title, SHEET_COMMENT_LETTER, rowNumber), values: [[!ready ? message : mismatchWarning ?? message]] },
           ];
 
           if (existing && isGoogleTaskUnchanged(existing, data, { rowHash, priceMismatch, sheetId: sheet.sheetId })) {
@@ -1074,7 +1085,7 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
         } catch (err) {
           const message = truncateGoogleMessage(err instanceof Error ? err.message : "Ошибка проверки геймпасса");
           // BuyoutError = постоянная проблема строки (невалидный/несуществующий ГП) — чип
-          // «ошибка». Прочее (сеть, Roblox API) — временное: E оставляем «в ожидании»,
+          // «ошибка». Прочее (сеть, Roblox API) — временное: D оставляем «в ожидании»,
           // чтобы строка попала в следующий sync.
           const permanentRowError = err instanceof BuyoutError;
           const data = {
@@ -1082,7 +1093,7 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
             externalSource: "GOOGLE_SHEETS" as const,
             externalRowId,
             status: "FAILED" as const,
-            robloxUsername: String(cells[0] ?? "").trim() || null,
+            robloxUsername: String(cells[SHEET_COL.nickname] ?? "").trim() || null,
             gamepassId,
             gamepassUrl: `https://www.roblox.com/game-pass/${gamepassId}`,
             priceRobux: Math.round(sheetPrice),
@@ -1109,9 +1120,9 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           }
           result.failed += 1;
           if (permanentRowError) {
-            writeBacks.push({ range: googleCellRange(sheet.title, "E", rowNumber), values: [[GOOGLE_STATUS_ERROR]] });
+            writeBacks.push({ range: googleCellRange(sheet.title, SHEET_STATUS_LETTER, rowNumber), values: [[GOOGLE_STATUS_ERROR]] });
           }
-          writeBacks.push({ range: googleCellRange(sheet.title, "F", rowNumber), values: [[message]] });
+          writeBacks.push({ range: googleCellRange(sheet.title, SHEET_COMMENT_LETTER, rowNumber), values: [[message]] });
         }
       }
     }
@@ -1443,9 +1454,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       });
       if (cancelled.count !== 1) return json({ ok: false, error: "Задача уже обрабатывается или завершена" }, 409);
 
-      // Отмена должна быть видна Антону: E=«ошибка» + «Отменено менеджером» в F.
+      // Отмена должна быть видна Антону: D=«ошибка» + «Отменено менеджером» в E.
       // cancelledByManager отличает её от отмен реконсиляции; вернуть задачу в работу
-      // Антон может, выставив E обратно в «в ожидании» (после успешного write-back).
+      // Антон может, выставив D обратно в «в ожидании» (после успешного write-back).
       const task = await prisma.partnerBuyoutTask.findUnique({ where: { id: taskId } });
       if (task) {
         const markedTask = await prisma.partnerBuyoutTask.update({
