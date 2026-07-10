@@ -44,6 +44,7 @@ interface PartnerSheetRaw {
   sheetPriceRobux?: number | null;
   priceMismatch?: boolean;
   closedFromSheet?: boolean;
+  rowDeletedFromSheet?: boolean;
   cancelledFromSheet?: boolean;
   cancelledByManager?: boolean;
   cancelledAt?: string | null;
@@ -123,6 +124,7 @@ interface GoogleSyncReconciliationStats {
   failedFromSheet?: number;
   cancelledFromSheet?: number;
   deletedFromSheet?: number;
+  doneMarkedDeleted?: number;
   revived?: number;
   conflicts?: number;
 }
@@ -2327,6 +2329,11 @@ function PartnerTaskRow({
                 из таблицы
               </span>
             )}
+            {task.sheetRaw?.rowDeletedFromSheet && (
+              <span style={{ borderRadius: 7, background: tint(C.orange, 0.14), padding: "4px 8px", color: C.orange, fontSize: 14, fontWeight: 700 }}>
+                удалена из таблицы
+              </span>
+            )}
           </div>
         </div>
         <div style={{ textAlign: "right", flexShrink: 0 }}>
@@ -2522,6 +2529,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   const [taskFilter, setTaskFilter] = useState<"all" | "errors" | "mismatch">("all");
   const [confirmMismatchTask, setConfirmMismatchTask] = useState<PartnerTask | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [showManualAdd, setShowManualAdd] = useState(false);
   const [historyLimit, setHistoryLimit] = useState(20);
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; current?: string } | null>(null);
@@ -2543,7 +2551,14 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   // и молчит при ошибках (сеть моргнула — экран не трогаем, следующий тик доедет).
   const loadInFlightRef = useRef(false);
   const busyRef = useRef(false);
+  // GET не ждёт Google sync (сервер уводит его в after): если sync запланирован,
+  // через ~12 с тихо перечитываем состояние, чтобы подтянуть его результат.
+  const syncFollowUpRef = useRef<number | null>(null);
+  const loadRef = useRef<((opts?: { background?: boolean }) => Promise<void>) | null>(null);
   useEffect(() => { busyRef.current = busy; }, [busy]);
+  useEffect(() => () => {
+    if (syncFollowUpRef.current) window.clearTimeout(syncFollowUpRef.current);
+  }, []);
 
   const load = useCallback(async (opts: { background?: boolean } = {}) => {
     const background = opts.background === true;
@@ -2565,6 +2580,13 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
         return;
       }
       applyPartnerState(d);
+      if (d.syncScheduled === true) {
+        if (syncFollowUpRef.current) window.clearTimeout(syncFollowUpRef.current);
+        syncFollowUpRef.current = window.setTimeout(() => {
+          syncFollowUpRef.current = null;
+          void loadRef.current?.({ background: true });
+        }, 12_000);
+      }
     } catch {
       if (!background) {
         setLoadError("Ошибка сети");
@@ -2577,6 +2599,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
     }
   }, [token]);
 
+  useEffect(() => { loadRef.current = load; }, [load]);
   useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   // Пока открыт workspace «Антон» и вкладка видима, раз в ~75 с подтягиваем свежие
@@ -2806,16 +2829,10 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   const sheetConnected = !!state?.partner.googleSheetId || !!state?.partner.googleSheetUrl;
   const googleSync = state?.googleSync;
   const latestRun = googleSync?.latestRun ?? null;
-  const latestSyncResult = googleSyncResult ?? state?.syncResult ?? null;
-  const latestDiagnostics = latestSyncResult?.diagnostics ?? latestRun?.diagnostics ?? null;
-  const googleMatchedRows = latestDiagnostics?.matchedRows ?? latestSyncResult?.rowCount ?? latestRun?.rowCount ?? 0;
-  const googleStatusCountSummary = latestDiagnostics?.statusCounts
-    ? Object.entries(latestDiagnostics.statusCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([status, count]) => `${status === "(empty)" ? "пусто" : status} ${count}`)
-      .join(" · ")
-    : "";
+  const latestSyncResult = googleSyncResult ?? null;
+  const latestRecon = (latestSyncResult?.diagnostics ?? latestRun?.diagnostics)?.reconciliation ?? null;
+  const googleSheetUrl = state?.partner.googleSheetUrl
+    ?? (state?.partner.googleSheetId ? `https://docs.google.com/spreadsheets/d/${state.partner.googleSheetId}/edit` : null);
   const googleStatus = !sheetConnected
     ? "Нужен sheetId"
     : googleSync?.serviceAccountConfigured === false
@@ -2890,85 +2907,40 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
           <InfoRow label="Последний sync" value={fmtPartnerDate(googleSync?.lastSyncAt ?? latestRun?.finishedAt ?? null)} />
           {latestRun && (
             <InfoRow
-              label="Run"
-              value={`${latestRun.status} · +${latestRun.createdCount} / upd ${latestRun.updatedCount} / err ${latestRun.failedCount}`}
-            />
-          )}
-          {latestSyncResult && (
-            <InfoRow
               label="Итог"
-              value={`${latestSyncResult.status} · фильтр ${googleMatchedRows} · ошибок ${latestSyncResult.failed ?? 0}`}
+              value={`${latestRun.status === "SUCCESS" ? "" : `${latestRun.status} · `}+${latestRun.createdCount} · обновлено ${latestRun.updatedCount} · ошибок ${latestRun.failedCount}`}
             />
-          )}
-          {latestDiagnostics && (
-            <>
-              <InfoRow label="Прочитано" value={`${latestDiagnostics.readRows ?? 0} · прошло ${googleMatchedRows}`} />
-              <InfoRow label="Фильтр" value={`C ${latestDiagnostics.amountFilledRows ?? 0} · D ${latestDiagnostics.pendingStatusRows ?? 0}`} />
-              <InfoRow label="Отсев" value={`C пусто ${latestDiagnostics.emptyAmountRows ?? 0} · D не ждёт ${latestDiagnostics.nonPendingStatusRows ?? 0}`} />
-              {googleStatusCountSummary && <InfoRow label="Статусы D" value={googleStatusCountSummary} />}
-            </>
           )}
           {(() => {
-            const recon = latestDiagnostics?.reconciliation;
-            const parts = recon
+            const parts = latestRecon
               ? [
-                (recon.closedFromSheet ?? 0) > 0 ? `закрыто ${recon.closedFromSheet}` : null,
-                (recon.failedFromSheet ?? 0) > 0 ? `ошибка ${recon.failedFromSheet}` : null,
-                (recon.cancelledFromSheet ?? 0) > 0 ? `отмена ${recon.cancelledFromSheet}` : null,
-                (recon.deletedFromSheet ?? 0) > 0 ? `удалено ${recon.deletedFromSheet}` : null,
-                (recon.revived ?? 0) > 0 ? `возврат ${recon.revived}` : null,
-                (recon.conflicts ?? 0) > 0 ? `конфликты ${recon.conflicts}` : null,
+                (latestRecon.closedFromSheet ?? 0) > 0 ? `закрыто ${latestRecon.closedFromSheet}` : null,
+                (latestRecon.failedFromSheet ?? 0) > 0 ? `ошибка ${latestRecon.failedFromSheet}` : null,
+                (latestRecon.cancelledFromSheet ?? 0) > 0 ? `отмена ${latestRecon.cancelledFromSheet}` : null,
+                (latestRecon.deletedFromSheet ?? 0) > 0 ? `удалено ${latestRecon.deletedFromSheet}` : null,
+                (latestRecon.doneMarkedDeleted ?? 0) > 0 ? `готово-удалено ${latestRecon.doneMarkedDeleted}` : null,
+                (latestRecon.revived ?? 0) > 0 ? `возврат ${latestRecon.revived}` : null,
+                (latestRecon.conflicts ?? 0) > 0 ? `конфликты ${latestRecon.conflicts}` : null,
               ].filter(Boolean)
               : [];
             return parts.length > 0 ? <InfoRow label="Из таблицы" value={parts.join(" · ")} /> : null;
           })()}
-          <InfoRow label="Колонки" value="A ник · B GP · C номинал · D статус · E комментарий" />
           <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-            <button className="twa-press" onClick={() => { haptic.impact("medium"); syncGoogleSheets(); }} disabled={busy || !canSyncGoogle}
-              style={{ width: "100%", background: canSyncGoogle ? C.accent : C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 700, padding: "13px", cursor: busy || !canSyncGoogle ? "default" : "pointer", opacity: busy || !canSyncGoogle ? 0.55 : 1 }}>
-              Синхронизировать
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="twa-press" onClick={() => { haptic.impact("medium"); syncGoogleSheets(); }} disabled={busy || !canSyncGoogle}
+                style={{ flex: 1, background: canSyncGoogle ? C.accent : C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 700, padding: "13px", cursor: busy || !canSyncGoogle ? "default" : "pointer", opacity: busy || !canSyncGoogle ? 0.55 : 1 }}>
+                Синхронизировать
+              </button>
+              {googleSheetUrl && (
+                <a className="twa-press" href={googleSheetUrl} target="_blank" rel="noreferrer"
+                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: C.elevated, borderRadius: 10, color: C.accent, fontSize: 15, fontWeight: 700, padding: "13px 0", textDecoration: "none" }}>
+                  Таблица ↗
+                </a>
+              )}
+            </div>
             {(latestRun?.error || latestSyncResult?.error || latestSyncResult?.message || latestSyncResult?.errors?.[0]) && (
               <div style={{ color: latestRun?.status === "FAILED" || latestSyncResult?.status === "failed" ? C.red : C.textTertiary, fontSize: 13, lineHeight: 1.35 }}>
                 {latestRun?.error || latestSyncResult?.errors?.[0] || latestSyncResult?.error || latestSyncResult?.message}
-              </div>
-            )}
-          </div>
-        </Card>
-      </section>
-
-      <section>
-        <SectionHeader title="XLSX" />
-        <Card>
-          <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-            <input
-              ref={uploadInputRef}
-              type="file"
-              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              style={{ display: "none" }}
-              onChange={(e) => importXlsx(e.target.files?.[0] ?? null)}
-            />
-            <button className="twa-press" onClick={() => { haptic.impact("medium"); uploadInputRef.current?.click(); }} disabled={busy}
-              style={{ width: "100%", background: busy ? C.elevated : C.accent, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 700, padding: "13px", cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}>
-              Загрузить XLSX
-            </button>
-            <div style={{ color: C.textTertiary, fontSize: 13, lineHeight: 1.35 }}>Ожидаемые колонки: GP/ГП, Ник, Номинал.</div>
-            {importResult && (
-              <div style={{ background: C.elevated, borderRadius: 10, overflow: "hidden" }}>
-                <InfoRow label="Строк" value={importResult.totalRows} />
-                <InfoRow label="Создано" value={importResult.created} />
-                <InfoRow label="Пропущено" value={importResult.skipped} />
-                <InfoRow label="Ошибки" value={importResult.failed} last />
-                {importResult.items.slice(0, 6).map((item) => (
-                  <div key={`${item.row}-${item.gamepassId ?? item.message}`} style={{ padding: "10px 14px", borderTop: `1px solid ${C.border}` }}>
-                    <div style={{ color: "#e5e5ea", fontSize: 13, fontWeight: 700 }}>
-                      Row {item.row}{item.gamepassId ? ` · GP ${item.gamepassId}` : ""}
-                    </div>
-                    <div style={{ color: item.status === "failed" ? C.red : item.status === "skipped" ? C.orange : C.textTertiary, fontSize: 12, marginTop: 3 }}>
-                      {item.message}
-                    </div>
-                  </div>
-                ))}
               </div>
             )}
           </div>
@@ -2984,24 +2956,6 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
             <button className="twa-press" onClick={() => { haptic.impact("medium"); saveRate(); }} disabled={busy || !rateInput.trim()}
               style={{ width: "100%", background: rateInput.trim() ? C.accent : C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 700, padding: "13px", cursor: busy ? "default" : "pointer", opacity: busy || !rateInput.trim() ? 0.55 : 1 }}>
               Сохранить курс
-            </button>
-          </div>
-        </Card>
-      </section>
-
-      <section>
-        <SectionHeader title="Новая задача" />
-        <Card>
-          <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-            <input value={gamepassInput} onChange={e => setGamepassInput(e.target.value)} placeholder="ID или URL геймпасса…"
-              style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 16, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
-            <input value={nickInput} onChange={e => setNickInput(e.target.value)} placeholder="Ник продавца…"
-              style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
-            <input value={noteInput} onChange={e => setNoteInput(e.target.value)} placeholder="Заметка…"
-              style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
-            <button className="twa-press" onClick={() => { haptic.impact("medium"); createTask(); }} disabled={busy || !gamepassInput.trim()}
-              style={{ width: "100%", background: gamepassInput.trim() ? C.accent : C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 700, padding: "13px", cursor: busy ? "default" : "pointer", opacity: busy || !gamepassInput.trim() ? 0.55 : 1 }}>
-              Добавить
             </button>
           </div>
         </Card>
@@ -3177,6 +3131,73 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
           )}
         </section>
       )}
+
+      {/* Ручные пути добавления (запасные: основной поток — Google Sheets) спрятаны
+          в свёрнутую секцию, чтобы не мешать операционному сценарию. */}
+      <section>
+        <button className="twa-press" onClick={() => { haptic.select(); setShowManualAdd(v => !v); }}
+          style={{
+            display: "flex", alignItems: "center", gap: 8, border: "none", background: "none",
+            padding: "14px 4px 8px", cursor: "pointer", fontFamily: "inherit", width: "100%",
+          }}>
+          <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: C.textSecondary }}>
+            Добавить вручную
+          </span>
+          <span style={{ marginLeft: "auto", fontSize: 14, color: C.textTertiary, transition: "transform .15s", transform: showManualAdd ? "rotate(90deg)" : "rotate(0)" }}>▶</span>
+        </button>
+        {showManualAdd && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <Card>
+              <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                <input value={gamepassInput} onChange={e => setGamepassInput(e.target.value)} placeholder="ID или URL геймпасса…"
+                  style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 16, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
+                <input value={nickInput} onChange={e => setNickInput(e.target.value)} placeholder="Ник продавца…"
+                  style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
+                <input value={noteInput} onChange={e => setNoteInput(e.target.value)} placeholder="Заметка…"
+                  style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
+                <button className="twa-press" onClick={() => { haptic.impact("medium"); createTask(); }} disabled={busy || !gamepassInput.trim()}
+                  style={{ width: "100%", background: gamepassInput.trim() ? C.accent : C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 700, padding: "13px", cursor: busy ? "default" : "pointer", opacity: busy || !gamepassInput.trim() ? 0.55 : 1 }}>
+                  Добавить задачу
+                </button>
+              </div>
+            </Card>
+            <Card>
+              <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                <input
+                  ref={uploadInputRef}
+                  type="file"
+                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  style={{ display: "none" }}
+                  onChange={(e) => importXlsx(e.target.files?.[0] ?? null)}
+                />
+                <button className="twa-press" onClick={() => { haptic.impact("medium"); uploadInputRef.current?.click(); }} disabled={busy}
+                  style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: C.accent, fontSize: 15, fontWeight: 700, padding: "13px", cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}>
+                  Загрузить XLSX
+                </button>
+                <div style={{ color: C.textTertiary, fontSize: 13, lineHeight: 1.35 }}>Ожидаемые колонки: GP/ГП, Ник, Номинал.</div>
+                {importResult && (
+                  <div style={{ background: C.elevated, borderRadius: 10, overflow: "hidden" }}>
+                    <InfoRow label="Строк" value={importResult.totalRows} />
+                    <InfoRow label="Создано" value={importResult.created} />
+                    <InfoRow label="Пропущено" value={importResult.skipped} />
+                    <InfoRow label="Ошибки" value={importResult.failed} last />
+                    {importResult.items.slice(0, 6).map((item) => (
+                      <div key={`${item.row}-${item.gamepassId ?? item.message}`} style={{ padding: "10px 14px", borderTop: `1px solid ${C.border}` }}>
+                        <div style={{ color: "#e5e5ea", fontSize: 13, fontWeight: 700 }}>
+                          Row {item.row}{item.gamepassId ? ` · GP ${item.gamepassId}` : ""}
+                        </div>
+                        <div style={{ color: item.status === "failed" ? C.red : item.status === "skipped" ? C.orange : C.textTertiary, fontSize: 12, marginTop: 3 }}>
+                          {item.message}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Card>
+          </div>
+        )}
+      </section>
 
       {confirmMismatchTask && (
         <PartnerMismatchConfirm

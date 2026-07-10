@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 
 import { Prisma, type Partner, type PartnerBuyoutTask } from "@prisma/client";
@@ -108,6 +108,8 @@ type GoogleSyncReconciliationStats = {
   failedFromSheet: number;
   cancelledFromSheet: number;
   deletedFromSheet: number;
+  /** DONE-задачи, чью строку удалили из таблицы: деньги/статус не трогаем, только бейдж. */
+  doneMarkedDeleted: number;
   revived: number;
   conflicts: number;
 };
@@ -829,6 +831,7 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
     failedFromSheet: 0,
     cancelledFromSheet: 0,
     deletedFromSheet: 0,
+    doneMarkedDeleted: 0,
     revived: 0,
     conflicts: 0,
   };
@@ -1127,15 +1130,53 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
       }
     }
 
-    // Реконсиляция удалённых строк: активная задача есть, а её строки в скане нет —
-    // задача удаляется из TWA. Срабатывает только при полном скане; если исчез целый лист
-    // (удалён/скрыт/переименован), задачи не трогаем, а помечаем конфликт для ручной проверки.
+    // Реконсиляция удалённых строк (правило владельца 2026-07-10, П10):
+    // - активная задача (не выкуплена) — удаляется из TWA полностью («нигде не отмечать»);
+    // - DONE (выкуплена/закрыта) — остаётся с деньгами, получает бейдж «удалена из таблицы»;
+    // - CANCELLED без денег — тоже удаляется полностью (не выкуплена).
+    // Срабатывает только при полном скане; если исчез целый лист (удалён/скрыт/переименован),
+    // задачи не трогаем, а активным помечаем конфликт для ручной проверки.
     if (scanComplete) {
       for (const task of existingTasks) {
         if (!task.externalRowId || seenRowIds.has(task.externalRowId)) continue;
-        if (!(ACTIVE_TASK_STATUSES as readonly string[]).includes(task.status)) continue;
         const meta = getGoogleTaskMeta(task);
         if (!meta || meta.spreadsheetId !== spreadsheetId) continue;
+
+        if (!(ACTIVE_TASK_STATUSES as readonly string[]).includes(task.status)) {
+          if (!scannedSheetTitles.has(meta.sheetTitle)) continue;
+          if (task.status === "DONE") {
+            // Деньги/статус не трогаем: заказ выполнен, списание остаётся. Только бейдж.
+            if (isRecord(task.sheetRaw) && task.sheetRaw.rowDeletedFromSheet === true) continue;
+            await prisma.partnerBuyoutTask.update({
+              where: { id: task.id },
+              data: { sheetRaw: mergeTaskSheetRaw(task, { rowDeletedFromSheet: true, rowDeletedAt: new Date().toISOString() }) },
+            });
+            reconciliation.doneMarkedDeleted += 1;
+            result.updated += 1;
+            result.items.push({
+              sheet: meta.sheetTitle,
+              row: meta.rowNumber,
+              gamepassId: task.gamepassId,
+              status: "updated",
+              message: "Строка удалена из таблицы — помечена в истории, списание сохранено",
+            });
+          } else if (task.status === "CANCELLED") {
+            // Не выкуплена и строки больше нет — из TWA убираем полностью (guard: деньги).
+            const ledgerCount = await prisma.partnerLedgerEntry.count({ where: { taskId: task.id } });
+            if (ledgerCount > 0) continue;
+            await prisma.partnerBuyoutTask.delete({ where: { id: task.id } });
+            reconciliation.deletedFromSheet += 1;
+            result.updated += 1;
+            result.items.push({
+              sheet: meta.sheetTitle,
+              row: meta.rowNumber,
+              gamepassId: task.gamepassId,
+              status: "updated",
+              message: "Удалена из TWA: отменённая задача, строка удалена из таблицы",
+            });
+          }
+          continue;
+        }
 
         if (!scannedSheetTitles.has(meta.sheetTitle)) {
           const conflict = `Лист «${meta.sheetTitle}» не найден в таблице — проверь задачу вручную`;
@@ -1208,6 +1249,24 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
     });
     return { ...result, status: "failed" as const, error };
   }
+}
+
+/**
+ * Быстрая проверка «нужен ли фоновый sync» для GET: тот же TTL/RUNNING-гейт, что и внутри
+ * syncPartnerGoogleSheets (он перепроверит ещё раз перед стартом). Возвращает true и когда
+ * sync уже идёт — клиенту в обоих случаях стоит перечитать состояние через несколько секунд.
+ */
+async function shouldScheduleGoogleSync(partner: Partner) {
+  if (!partner.googleSheetId?.trim() || !isGoogleSheetsConfigured()) return false;
+
+  const latestRun = await prisma.partnerImportRun.findFirst({
+    where: { partnerId: partner.id, source: "GOOGLE_SHEETS" },
+    orderBy: { startedAt: "desc" },
+    select: { status: true, startedAt: true, finishedAt: true },
+  });
+  if (!latestRun) return true;
+  if (latestRun.finishedAt && Date.now() - latestRun.finishedAt.getTime() < GOOGLE_SYNC_TTL_MS) return false;
+  return true;
 }
 
 async function requireTwaUser(req: NextRequest) {
@@ -1329,9 +1388,21 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     const partner = await getPartner(slug);
     if (!partner) return json({ ok: false, error: "Партнёр не найден" }, 404);
 
-    const syncResult = await syncPartnerGoogleSheets(partner, null, { force: false });
+    // Opportunistic sync больше не блокирует GET: скан листов + resolve геймпассов занимал
+    // десятки секунд, и экран «Антон» висел на «Загружаю…». Отдаём состояние из БД сразу,
+    // sync уходит в фон (after), клиент подтянет результат silent-refresh'ем.
+    const syncScheduled = await shouldScheduleGoogleSync(partner);
+    if (syncScheduled) {
+      after(async () => {
+        try {
+          await syncPartnerGoogleSheets(partner, null, { force: false });
+        } catch (err) {
+          console.error("[partners/tasks GET background sync]", err);
+        }
+      });
+    }
     const state = await loadPartnerState(partner);
-    return json({ ok: true, partner, syncResult, ...state });
+    return json({ ok: true, partner, syncScheduled, ...state });
   } catch (err) {
     if (err instanceof BuyoutError) return json({ ok: false, error: err.message }, err.status);
     if (isPartnerSchemaNotReadyError(err)) {
