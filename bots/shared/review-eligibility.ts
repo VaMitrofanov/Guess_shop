@@ -119,7 +119,7 @@ export function reviewIneligibleMessage(
     return (
       `✅ Бонус ${b(`+${REVIEW_BONUS_AMOUNT} R$`)} за отзыв уже начислен ${fmtDate(elig.grantedAt)}!\n\n` +
       balanceLine +
-      `Потрать его на прямой заказ от 1000 R$ — бонус спишется автоматически.`
+      `Он добавится к любому прямому заказу автоматически — просто оформи заказ в боте (без карточки WB).`
     );
   }
 

@@ -7,10 +7,12 @@ import { Markup, type Telegraf } from "telegraf";
 import { db } from "../shared/db";
 import { CB, ADMIN_IDS } from "../shared/admin";
 import { tgSend, vkSend, stripHtml } from "../shared/notify";
+import { REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { startAutoWorkers } from "./auto-workers";
 
-const BONUS_AMOUNT = 100;
-const EXPIRY_DAYS = 30;
+// Одно место правды о бонусе — review-eligibility.ts (Ф3, 2026-07-12).
+const BONUS_AMOUNT = REVIEW_BONUS_AMOUNT;
+const EXPIRY_DAYS = REVIEW_BONUS_EXPIRY_DAYS;
 // reviewReminderLevel is incremented each time we send a reminder (1–4)
 const REMINDER_SCHEDULE: Array<{ level: number; dayThreshold: number }> = [
   { level: 1, dayThreshold: 7  },
@@ -52,7 +54,7 @@ async function processReviewReminders(bot: Telegraf): Promise<void> {
 
       const expiredMsg =
         `⏰ <b>Срок бонуса истёк.</b>\n\n` +
-        `Ваш бонус <b>100 R$</b> за отзыв сгорел (действовал 30 дней, для прямых заказов от 1000 R$).\n\n` +
+        `Ваш бонус <b>${BONUS_AMOUNT} R$</b> за отзыв сгорел (действовал ${EXPIRY_DAYS} дней).\n\n` +
         `Купить робуксы напрямую можно в любое время:`;
       if (user.tgId) {
         try {
@@ -82,13 +84,13 @@ async function processReviewReminders(bot: Telegraf): Promise<void> {
     if (newLevel === 4) {
       msg =
         `🚨 <b>Бонус сгорает через 3 дня!</b>\n\n` +
-        `У вас есть <b>100 R$</b> на счёту — они действуют до <b>${expiryStr}</b>.\n\n` +
-        `Оформите прямой заказ от 1000 R$ — бонус спишется автоматически.`;
+        `У вас есть <b>${BONUS_AMOUNT} R$</b> на счёту — они действуют до <b>${expiryStr}</b>.\n\n` +
+        `Бонус добавится к любому прямому заказу автоматически — просто оформите заказ в боте (без карточки WB).`;
     } else {
       msg =
-        `💰 <b>Напоминание: у вас есть бонус 100 R$!</b>\n\n` +
+        `💰 <b>Напоминание: у вас есть бонус ${BONUS_AMOUNT} R$!</b>\n\n` +
         `Бонус за отзыв действует ещё <b>${daysLeft} ${daysWord(daysLeft)}</b> — до ${expiryStr}.\n\n` +
-        `Используйте на прямой заказ от 1000 R$ (без карточки WB).`;
+        `Он добавится к любому прямому заказу автоматически — просто оформите заказ в боте (без карточки WB).`;
     }
 
     await (db as any).user.update({
