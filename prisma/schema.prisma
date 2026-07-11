@@ -369,8 +369,24 @@ model Partner {
   tasks         PartnerBuyoutTask[]
   ledgerEntries PartnerLedgerEntry[]
   importRuns    PartnerImportRun[]
+  rateChanges   PartnerRateChange[]
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
+}
+
+/// Journal of partner rate changes (USDT per 1000 R$). Written by set-rate so
+/// reports can show when each rate was active and who changed it. Buyout ledger
+/// entries additionally pin the rate used at debit time (rateUsdtPer1000).
+model PartnerRateChange {
+  id           String   @id @default(cuid())
+  partnerId    String
+  partner      Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  rate         Float
+  previousRate Float?
+  createdBy    String?
+  createdAt    DateTime @default(now())
+
+  @@index([partnerId, createdAt(sort: Desc)])
 }
 
 /// One partner gamepass to buy out. For Anton MVP this is created manually or
@@ -419,6 +435,11 @@ model PartnerLedgerEntry {
   type      PartnerLedgerType
   amount    Float
   currency  String            @default("USDT")
+  /// Rate (USDT per 1000 R$) the debit was computed with. Structured copy of what
+  /// the comment says, so per-rate reports do not parse comment strings.
+  rateUsdtPer1000 Float?
+  /// Dirty R$ amount behind a BUYOUT debit; survives task deletion (taskId SetNull).
+  robuxAmount     Int?
   reference String?
   comment   String?
   createdBy String?

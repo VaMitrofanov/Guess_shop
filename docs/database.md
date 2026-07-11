@@ -128,6 +128,16 @@ sync и результат write-back (`writeBackAt` / `lastWriteBackError`), ч
 считает баланс aggregate по USDT-ledger, перед ручным закрытием/покупкой конвертирует
 грязную R$-цену задачи по `Partner.robuxRateUsdtPer1000`, проверяет баланс и блокирует
 повторное `BUYOUT`-списание по одной задаче.
+С миграции `20260711_partner_rate_history` (Этап 5.9) `BUYOUT`-записи дополнительно
+хранят `rateUsdtPer1000` (курс списания) и `robuxAmount` (грязные R$) структурно —
+отчёт «сколько куплено по какому курсу» строится `groupBy` по этим полям и не зависит
+от join к задаче (`taskId` — `SetNull`). Старые записи бэкфиллятся скриптом
+`scripts/anton-backfill-rates.mjs` (курс парсится из `comment`).
+
+`PartnerRateChange` (та же миграция): журнал смен курса партнёра — `rate`,
+`previousRate`, `createdBy`, `createdAt`, индекс `[partnerId, createdAt desc]`.
+Пишется action'ом `set-rate` (no-op смена на тот же курс запись не создаёт);
+стартовую запись создаёт бэкфилл-скрипт.
 
 Миграция `20260709_partner_anton_usdt_sheets` фиксирует стартовый кейс Антона:
 `150 USDT` пополнения, 8 уже выкупленных XLSX-строк (`19 106 R$`) и агрегированное списание

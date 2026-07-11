@@ -7,6 +7,7 @@ import { Prisma, type Partner, type PartnerBuyoutTask } from "@prisma/client";
 
 import {
   batchUpdateGoogleSheetStructural,
+  batchGetGoogleSheetValues,
   batchUpdateGoogleSheetValues,
   buildAddProtectedRangeRequest,
   buildDeleteProtectedRangeRequest,
@@ -16,7 +17,7 @@ import {
   isGoogleSheetsConfigured,
   listGoogleSheetProtectedRanges,
   listGoogleSheets,
-  readGoogleSheetRows,
+  quoteGoogleSheetTitle,
   type GoogleProtectedRangeInfo,
   type GoogleSheetsRequest,
   type GoogleSheetsValueUpdate,
@@ -939,6 +940,8 @@ async function debitPartnerTaskFromSheet(
       type: "BUYOUT",
       amount: -priceUsdt,
       currency: moneyCurrency(partner),
+      rateUsdtPer1000: partner.robuxRateUsdtPer1000,
+      robuxAmount: priceRobux,
       reference: task.gamepassId,
       comment: `${reason}: ${priceRobux} R$ × ${partner.robuxRateUsdtPer1000} USDT / 1000 R$`,
       createdBy: user ? operatorLabel(user) : "sheet-sync",
@@ -1383,8 +1386,16 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
     const sheets = allSheets.slice(0, GOOGLE_MAX_SHEETS);
     result.sheetCount = sheets.length;
 
+    // Квота Google (60 read/min): все листы читаются одним values:batchGet вместо
+    // values.get на каждый лист — прогон стоит 2 read-запроса, а не 1+N.
+    const sheetRange = (title: string) => `${quoteGoogleSheetTitle(title)}!${SHEET_READ_RANGE}`;
+    const rowsBySheetRange = await batchGetGoogleSheetValues(
+      spreadsheetId,
+      sheets.map((sheet) => sheetRange(sheet.title)),
+    );
+
     for (const sheet of sheets) {
-      const allRows = (await readGoogleSheetRows(spreadsheetId, sheet.title, SHEET_READ_RANGE)).values;
+      const allRows = rowsBySheetRange.get(sheetRange(sheet.title)) ?? [];
       if (allRows.length > GOOGLE_MAX_ROWS_PER_SHEET) scanComplete = false;
       const rows = allRows.slice(0, GOOGLE_MAX_ROWS_PER_SHEET);
       scannedSheetTitles.add(sheet.title);
@@ -1968,7 +1979,7 @@ async function getPartner(slug: string) {
 
 async function loadPartnerState(partner: Partner) {
   const currency = moneyCurrency(partner);
-  const [tasks, ledgerEntries, importRuns, balanceAgg, spentAgg, statusGroups, doneWithPurchaseAgg, doneWithoutPurchaseAgg] = await Promise.all([
+  const [tasks, ledgerEntries, importRuns, balanceAgg, spentAgg, statusGroups, doneWithPurchaseAgg, doneWithoutPurchaseAgg, rateGroups, rateChanges] = await Promise.all([
     prisma.partnerBuyoutTask.findMany({
       where: { partnerId: partner.id },
       orderBy: [{ updatedAt: "desc" }],
@@ -2009,6 +2020,19 @@ async function loadPartnerState(partner: Partner) {
       where: { partnerId: partner.id, status: "DONE", purchasePriceRobux: null },
       _sum: { priceRobux: true },
     }),
+    // 5.9 A4: отчёт «по какому курсу сколько куплено» — по структурному rateUsdtPer1000
+    // BUYOUT-списаний (записи до бэкфилла группируются в rate=null → «курс не записан»).
+    prisma.partnerLedgerEntry.groupBy({
+      by: ["rateUsdtPer1000"],
+      where: { partnerId: partner.id, currency, type: "BUYOUT" },
+      _count: { _all: true },
+      _sum: { amount: true, robuxAmount: true },
+    }),
+    prisma.partnerRateChange.findMany({
+      where: { partnerId: partner.id },
+      orderBy: [{ createdAt: "desc" }],
+      take: 10,
+    }),
   ]);
 
   const balanceUsdt = balanceAgg._sum.amount ?? 0;
@@ -2030,6 +2054,14 @@ async function loadPartnerState(partner: Partner) {
     .filter((task) => (ACTIVE_TASK_STATUSES as readonly string[]).includes(task.status)
       && isRecord(task.sheetRaw) && Boolean(task.sheetRaw.conflict))
     .length;
+  const rateReport = rateGroups
+    .map((group) => ({
+      rate: group.rateUsdtPer1000,
+      buyouts: group._count._all,
+      totalRobux: group._sum.robuxAmount ?? 0,
+      totalUsdt: Math.abs(group._sum.amount ?? 0),
+    }))
+    .sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1));
 
   return {
     tasks,
@@ -2056,6 +2088,8 @@ async function loadPartnerState(partner: Partner) {
       mismatches,
       conflicts,
     },
+    rateReport,
+    rateChanges,
   };
 }
 
@@ -2212,10 +2246,25 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         return json({ ok: false, error: "Слишком большой курс" }, 400);
       }
 
-      const updatedPartner = await prisma.partner.update({
-        where: { id: partner.id },
-        data: { robuxRateUsdtPer1000: Math.round(rate * 10000) / 10000 },
-      });
+      const newRate = Math.round(rate * 10000) / 10000;
+      // 5.9 A2: каждая смена курса — запись в журнал, отчёт «по какому курсу сколько
+      // куплено» опирается на неё и на rateUsdtPer1000 в BUYOUT-списаниях.
+      const [updatedPartner] = await prisma.$transaction([
+        prisma.partner.update({
+          where: { id: partner.id },
+          data: { robuxRateUsdtPer1000: newRate },
+        }),
+        ...(newRate !== partner.robuxRateUsdtPer1000
+          ? [prisma.partnerRateChange.create({
+            data: {
+              partnerId: partner.id,
+              rate: newRate,
+              previousRate: partner.robuxRateUsdtPer1000,
+              createdBy: operatorLabel(user),
+            },
+          })]
+          : []),
+      ]);
 
       const state = await loadPartnerState(updatedPartner);
       return json({ ok: true, partner: updatedPartner, ...state });
@@ -2305,6 +2354,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             type: "BUYOUT",
             amount: -priceUsdt,
             currency: moneyCurrency(partner),
+            rateUsdtPer1000: partner.robuxRateUsdtPer1000,
+            robuxAmount: priceRobux,
             reference: updatedTask.gamepassId,
             comment: `Ручная отметка партнёрского выкупа: ${priceRobux} R$ × ${partner.robuxRateUsdtPer1000} USDT / 1000 R$`,
             createdBy: operatorLabel(user),
@@ -2419,6 +2470,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             type: "BUYOUT",
             amount: -priceUsdt,
             currency: moneyCurrency(partner),
+            rateUsdtPer1000: partner.robuxRateUsdtPer1000,
+            robuxAmount: price,
             reference: task.gamepassId,
             comment: `Партнёрский выкуп через ${settings.robloxAccountName || "cookie-аккаунт"}: ${price} R$ × ${partner.robuxRateUsdtPer1000} USDT / 1000 R$`,
             createdBy: operatorLabel(user),

@@ -1,5 +1,5 @@
 "use client";
-import { C, MONO, tabular, tint } from "../theme";
+import { C, MONO, SHADOW, tabular, tint } from "../theme";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { haptic } from "../haptics";
 import { toast } from "../Toast";
@@ -117,6 +117,22 @@ interface PartnerSummary {
   conflicts?: number;
 }
 
+/** 5.9 A4: строка отчёта «по какому курсу сколько куплено» (rate=null — до бэкфилла). */
+interface PartnerRateReportRow {
+  rate: number | null;
+  buyouts: number;
+  totalRobux: number;
+  totalUsdt: number;
+}
+
+interface PartnerRateChangeEntry {
+  id: string;
+  rate: number;
+  previousRate: number | null;
+  createdBy: string | null;
+  createdAt: string;
+}
+
 interface GoogleSyncFilterDiagnostics {
   readRows?: number;
   amountFilledRows?: number;
@@ -213,6 +229,8 @@ interface PartnerState {
   };
   syncResult?: GoogleSyncResult;
   summary: PartnerSummary;
+  rateReport?: PartnerRateReportRow[];
+  rateChanges?: PartnerRateChangeEntry[];
 }
 
 interface PartnerImportResult {
@@ -2567,6 +2585,236 @@ function PartnerBatchReport({ report, onClose }: {
   );
 }
 
+function fmtRate(rate: number) {
+  return rate.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+}
+
+/** Стат-плитка дашборда: label обычным текстом, значение — крупно (5.9 B3). */
+function PartnerStatTile({ label, value, sub }: { label: string; value: string; sub?: string | null }) {
+  return (
+    <div style={{ background: C.bgElevated, borderRadius: 12, padding: "10px 12px", minWidth: 0 }}>
+      <div style={{ fontSize: 14, color: C.textSecondary }}>{label}</div>
+      <div style={{ marginTop: 2, fontSize: 17, fontWeight: 700, color: C.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {value}
+      </div>
+      {sub && <div style={{ marginTop: 1, fontSize: 14, color: C.textTertiary }}>{sub}</div>}
+    </div>
+  );
+}
+
+/** Оверлей-модалка в стиле confirm-диалогов экрана (тап по фону закрывает). */
+function PartnerSheet({ title, icon, busy, onClose, children }: {
+  title: string;
+  icon: string;
+  busy: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+      onClick={e => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+      <div style={{ background: C.card, borderRadius: 18, padding: "24px 20px", width: "100%", maxWidth: 340, maxHeight: "80vh", overflowY: "auto", boxShadow: SHADOW.pop }}>
+        <div style={{ textAlign: "center", marginBottom: 16 }}>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>{icon}</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary }}>{title}</div>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const sheetInputStyle: React.CSSProperties = {
+  width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff",
+  fontSize: 16, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box",
+};
+
+const sheetPrimaryBtn = (enabled: boolean, color: string): React.CSSProperties => ({
+  flex: 1, padding: "13px 0", border: "none", borderRadius: 12,
+  background: enabled ? color : C.elevated, color: "#fff", fontSize: 15, fontWeight: 700,
+  cursor: enabled ? "pointer" : "default", fontFamily: "inherit", opacity: enabled ? 1 : 0.55,
+});
+
+const sheetSecondaryBtn: React.CSSProperties = {
+  flex: 1, padding: "13px 0", border: "none", borderRadius: 12,
+  background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 600,
+  cursor: "pointer", fontFamily: "inherit",
+};
+
+/** 5.9 B1: пополнение из hero-кнопки — ввод + confirm в одной модалке (О3). */
+function PartnerTopupSheet({ busy, onSubmit, onClose }: {
+  busy: boolean;
+  onSubmit: (amount: number, comment: string | null) => Promise<boolean>;
+  onClose: () => void;
+}) {
+  const [amount, setAmount] = useState("");
+  const [comment, setComment] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const parsed = Number(amount.replace(",", "."));
+  const valid = Number.isFinite(parsed) && parsed > 0;
+
+  if (confirming) {
+    return (
+      <PartnerSheet title="Пополнить баланс?" icon="💰" busy={busy} onClose={onClose}>
+        <div style={{ background: C.elevated, borderRadius: 12, padding: "14px 16px", marginBottom: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, color: C.textSecondary }}>
+            <span>Сумма</span>
+            <span style={{ fontWeight: 700, color: C.green, ...tabular }}>+{fmtUsdt(parsed)}</span>
+          </div>
+          {comment.trim() && (
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 15, color: C.textSecondary }}>
+              <span>Комментарий</span>
+              <span style={{ fontWeight: 600, color: C.textPrimary, textAlign: "right", overflow: "hidden", textOverflow: "ellipsis" }}>{comment.trim()}</span>
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="twa-press" onClick={() => setConfirming(false)} disabled={busy} style={sheetSecondaryBtn}>
+            Назад
+          </button>
+          <button className="twa-press" disabled={busy}
+            onClick={async () => {
+              haptic.impact("medium");
+              const ok = await onSubmit(parsed, comment.trim() || null);
+              if (ok) onClose();
+            }}
+            style={sheetPrimaryBtn(!busy, C.green)}>
+            {busy ? "Пополняю…" : "Подтвердить"}
+          </button>
+        </div>
+      </PartnerSheet>
+    );
+  }
+
+  return (
+    <PartnerSheet title="Пополнение" icon="💰" busy={busy} onClose={onClose}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <input value={amount} onChange={e => setAmount(e.target.value)} inputMode="decimal" placeholder="Сумма USDT…" autoFocus style={sheetInputStyle} />
+        <input value={comment} onChange={e => setComment(e.target.value)} placeholder="Комментарий…" style={{ ...sheetInputStyle, fontSize: 15 }} />
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="twa-press" onClick={onClose} disabled={busy} style={sheetSecondaryBtn}>
+            Отмена
+          </button>
+          <button className="twa-press" disabled={!valid || busy}
+            onClick={() => { haptic.impact("light"); setConfirming(true); }}
+            style={sheetPrimaryBtn(valid && !busy, C.green)}>
+            Пополнить
+          </button>
+        </div>
+      </div>
+    </PartnerSheet>
+  );
+}
+
+/** 5.9 B2 + A4: смена курса с confirm «старый → новый», история смен и отчёт по курсам (О1). */
+function PartnerRateSheet({ busy, currentRate, rateChanges, rateReport, onSubmit, onClose }: {
+  busy: boolean;
+  currentRate: number;
+  rateChanges: PartnerRateChangeEntry[];
+  rateReport: PartnerRateReportRow[];
+  onSubmit: (rate: number) => Promise<boolean>;
+  onClose: () => void;
+}) {
+  const [rateInput, setRateInput] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const parsed = Number(rateInput.replace(",", "."));
+  const valid = Number.isFinite(parsed) && parsed > 0 && parsed <= 1000;
+
+  if (confirming) {
+    return (
+      <PartnerSheet title="Сменить курс?" icon="💱" busy={busy} onClose={onClose}>
+        <div style={{ background: C.elevated, borderRadius: 12, padding: "16px", marginBottom: 12, textAlign: "center" }}>
+          <span style={{ fontSize: 20, fontWeight: 700, color: C.textSecondary, ...tabular }}>{fmtRate(currentRate)}</span>
+          <span style={{ fontSize: 20, fontWeight: 700, color: C.textTertiary }}> → </span>
+          <span style={{ fontSize: 20, fontWeight: 700, color: C.accent, ...tabular }}>{fmtRate(parsed)}</span>
+          <div style={{ marginTop: 4, fontSize: 14, color: C.textSecondary }}>USDT / 1000 R$</div>
+        </div>
+        <div style={{ background: tint(C.orange, 0.12), borderRadius: 10, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: C.orange, lineHeight: 1.35 }}>
+          Применится только к будущим выкупам. Уже выкупленные заказы зафиксированы по курсу на момент выкупа.
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="twa-press" onClick={() => setConfirming(false)} disabled={busy} style={sheetSecondaryBtn}>
+            Назад
+          </button>
+          <button className="twa-press" disabled={busy}
+            onClick={async () => {
+              haptic.impact("medium");
+              const ok = await onSubmit(parsed);
+              if (ok) onClose();
+            }}
+            style={sheetPrimaryBtn(!busy, C.accent)}>
+            {busy ? "Сохраняю…" : "Подтвердить"}
+          </button>
+        </div>
+      </PartnerSheet>
+    );
+  }
+
+  return (
+    <PartnerSheet title="Курс" icon="💱" busy={busy} onClose={onClose}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, color: C.textSecondary }}>
+          <span>Текущий</span>
+          <span style={{ fontWeight: 700, color: C.textPrimary, ...tabular }}>{fmtRate(currentRate)} USDT / 1000 R$</span>
+        </div>
+        <input value={rateInput} onChange={e => setRateInput(e.target.value)} inputMode="decimal"
+          placeholder="Новый курс, USDT за 1000 R$…" autoFocus style={sheetInputStyle} />
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="twa-press" onClick={onClose} disabled={busy} style={sheetSecondaryBtn}>
+            Закрыть
+          </button>
+          <button className="twa-press" disabled={!valid || busy}
+            onClick={() => { haptic.impact("light"); setConfirming(true); }}
+            style={sheetPrimaryBtn(valid && !busy, C.accent)}>
+            Сменить
+          </button>
+        </div>
+
+        {rateReport.length > 0 && (
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: C.textSecondary, margin: "10px 0 6px" }}>
+              Выкуплено по курсам
+            </div>
+            <div style={{ background: C.elevated, borderRadius: 12, overflow: "hidden" }}>
+              {rateReport.map((row, i) => (
+                <div key={row.rate ?? "unknown"} style={{ padding: "10px 12px", borderTop: i > 0 ? `1px solid ${C.border}` : "none" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 15 }}>
+                    <span style={{ fontWeight: 700, color: row.rate === null ? C.textTertiary : C.textPrimary, ...tabular }}>
+                      {row.rate === null ? "курс не записан" : fmtRate(row.rate)}
+                    </span>
+                    <span style={{ color: C.textSecondary, ...tabular }}>{row.buyouts} шт · {row.totalRobux.toLocaleString("ru-RU")} R$</span>
+                  </div>
+                  <div style={{ marginTop: 2, fontSize: 14, color: C.textTertiary, textAlign: "right", ...tabular }}>
+                    −{fmtUsdt(row.totalUsdt)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {rateChanges.length > 0 && (
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: C.textSecondary, margin: "10px 0 6px" }}>
+              История курса
+            </div>
+            <div style={{ background: C.elevated, borderRadius: 12, overflow: "hidden" }}>
+              {rateChanges.map((change, i) => (
+                <div key={change.id} style={{ padding: "10px 12px", display: "flex", justifyContent: "space-between", gap: 10, borderTop: i > 0 ? `1px solid ${C.border}` : "none" }}>
+                  <span style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary, ...tabular }}>
+                    {change.previousRate !== null ? `${fmtRate(change.previousRate)} → ` : ""}{fmtRate(change.rate)}
+                  </span>
+                  <span style={{ fontSize: 14, color: C.textTertiary, ...tabular }}>{fmtPartnerDate(change.createdAt)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </PartnerSheet>
+  );
+}
+
 function PartnerAntonSection({ token, accountName }: { token: string; accountName: string | null }) {
   const [state, setState] = useState<PartnerState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -2575,9 +2823,9 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   const [gamepassInput, setGamepassInput] = useState("");
   const [nickInput, setNickInput] = useState("");
   const [noteInput, setNoteInput] = useState("");
-  const [topupAmount, setTopupAmount] = useState("");
-  const [topupComment, setTopupComment] = useState("");
-  const [rateInput, setRateInput] = useState("");
+  // 5.9 B1/B2: пополнение и курс живут в модалках дашборда, не в секциях.
+  const [showTopupSheet, setShowTopupSheet] = useState(false);
+  const [showRateSheet, setShowRateSheet] = useState(false);
   const [importResult, setImportResult] = useState<PartnerImportResult | null>(null);
   const [googleSyncResult, setGoogleSyncResult] = useState<GoogleSyncResult | null>(null);
   const [taskFilter, setTaskFilter] = useState<"all" | "errors" | "mismatch">("all");
@@ -2785,28 +3033,18 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
     }
   }
 
-  async function topup() {
-    const amount = Number(topupAmount.replace(",", "."));
-    if (!Number.isFinite(amount) || amount <= 0) return;
-    const ok = await post("ledger-topup", {
-      amount,
-      comment: topupComment.trim() || null,
-    });
-    if (ok) {
-      setTopupAmount("");
-      setTopupComment("");
-      toast("Баланс Антона пополнен", "success");
-    }
+  async function topup(amount: number, comment: string | null) {
+    if (!Number.isFinite(amount) || amount <= 0) return false;
+    const ok = await post("ledger-topup", { amount, comment });
+    if (ok) toast("Баланс Антона пополнен", "success");
+    return ok;
   }
 
-  async function saveRate() {
-    const rate = Number(rateInput.replace(",", "."));
-    if (!Number.isFinite(rate) || rate <= 0) return;
+  async function saveRate(rate: number) {
+    if (!Number.isFinite(rate) || rate <= 0) return false;
     const ok = await post("set-rate", { robuxRateUsdtPer1000: rate });
-    if (ok) {
-      setRateInput("");
-      toast("Курс Антона обновлён", "success");
-    }
+    if (ok) toast("Курс Антона обновлён", "success");
+    return ok;
   }
 
   async function doPartnerBulk(queue: PartnerTask[]) {
@@ -2867,6 +3105,8 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   const ledger = state?.ledgerEntries ?? [];
   const summary = state?.summary;
   const rate = summary?.robuxRateUsdtPer1000 ?? state?.partner.robuxRateUsdtPer1000 ?? 5.05;
+  const rateReport = state?.rateReport ?? [];
+  const rateChanges = state?.rateChanges ?? [];
   const errorCount = summary?.failed ?? 0;
   const mismatchCount = summary?.mismatches ?? 0;
   const conflictCount = summary?.conflicts ?? 0;
@@ -2899,6 +3139,13 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
     }
     haptic.impact("medium");
     void post("purchase-task", { taskId: t.id });
+  };
+  // 5.9 B4: тап по чипу проблем в дашборде = фильтр списка задач + скролл к нему.
+  const tasksSectionRef = useRef<HTMLElement | null>(null);
+  const jumpToTasks = (filter: "errors" | "mismatch" | null) => {
+    haptic.select();
+    if (filter) setTaskFilter(filter);
+    tasksSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
   const sheetConnected = !!state?.partner.googleSheetId || !!state?.partner.googleSheetUrl;
   const googleSync = state?.googleSync;
@@ -2952,12 +3199,26 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
       <section>
         <SectionHeader title="Антон" hint={fmtSyncAgo(googleSync?.lastSyncAt ?? null)} />
         <Card>
-          <InfoRow
-            label="Баланс"
-            value={(summary?.balanceUsdt ?? 0) < 0
-              ? <span style={{ color: C.red }}>{fmtUsdt(summary?.balanceUsdt)}</span>
-              : fmtUsdt(summary?.balanceUsdt)}
-          />
+          {/* 5.9 B1: hero-баланс + «Пополнить». Пропорциональные цифры: tabular на
+              крупном одиночном числе разряжает «0» и выглядит рыхло. */}
+          <div style={{ padding: "16px 16px 14px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: C.textSecondary }}>Баланс</div>
+              <div style={{ marginTop: 3, fontSize: 34, fontWeight: 700, letterSpacing: -0.5, lineHeight: 1.15, color: (summary?.balanceUsdt ?? 0) < 0 ? C.red : C.textPrimary }}>
+                {(summary?.balanceUsdt ?? 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                <span style={{ fontSize: 17, fontWeight: 600, color: C.textSecondary, marginLeft: 6 }}>USDT</span>
+              </div>
+            </div>
+            <button className="twa-press" disabled={busy}
+              onClick={() => { haptic.impact("medium"); setShowTopupSheet(true); }}
+              style={{
+                flexShrink: 0, minHeight: 44, padding: "0 16px", border: "none", borderRadius: 12,
+                background: tint(C.green, 0.16), color: C.green, fontSize: 15, fontWeight: 700,
+                cursor: busy ? "default" : "pointer", fontFamily: "inherit", opacity: busy ? 0.55 : 1,
+              }}>
+              Пополнить
+            </button>
+          </div>
           {(summary?.balanceUsdt ?? 0) < 0 && (
             <div style={{ padding: "0 16px 12px" }}>
               <div style={{ background: tint(C.red, 0.14), borderRadius: 10, padding: "10px 12px", fontSize: 14, color: C.red, fontWeight: 600, lineHeight: 1.35 }}>
@@ -2965,28 +3226,62 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
               </div>
             </div>
           )}
-          <InfoRow label="Потрачено" value={fmtUsdt(summary?.spentUsdt)} />
-          <InfoRow label="Курс" value={`${rate.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} USDT / 1000 R$`} />
-          <InfoRow label="Выкуплено" value={`${(summary?.doneRobux ?? 0).toLocaleString("ru-RU")} R$`} />
-          <InfoRow label="Задачи" value={`${summary?.total ?? 0} · готово ${summary?.done ?? 0}`} />
-          <InfoRow label="В работе" value={`${summary?.ready ?? 0} ready · ${summary?.purchasing ?? 0} buying`} last={(summary?.reservedUsdt ?? 0) <= 0 && errorCount + mismatchCount + conflictCount === 0} />
+          <div style={{ height: 1, background: C.border, marginLeft: 16 }} />
+          {/* 5.9 B2: строка курса целиком тап-таргет — открывает модалку смены/истории. */}
+          <button className="twa-press" disabled={busy}
+            onClick={() => { haptic.impact("light"); setShowRateSheet(true); }}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+              width: "100%", minHeight: 48, padding: "12px 16px", border: "none", background: "none",
+              cursor: busy ? "default" : "pointer", fontFamily: "inherit", textAlign: "left",
+            }}>
+            <span style={{ fontSize: 15, color: C.textSecondary }}>Курс</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+              <span style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary, ...tabular }}>{fmtRate(rate)} USDT / 1000 R$</span>
+              <span style={{ fontSize: 15, fontWeight: 600, color: C.accent, flexShrink: 0 }}>Изменить ›</span>
+            </span>
+          </button>
+          <div style={{ height: 1, background: C.border, marginLeft: 16 }} />
+          {/* 5.9 B3: стат-плитки. */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: 12 }}>
+            <PartnerStatTile label="Выкуплено" value={`${(summary?.doneRobux ?? 0).toLocaleString("ru-RU")} R$`} />
+            <PartnerStatTile label="Потрачено" value={fmtUsdt(summary?.spentUsdt)} />
+            <PartnerStatTile
+              label="В работе"
+              value={`${(summary?.ready ?? 0) + (summary?.purchasing ?? 0)}`}
+              sub={`ready ${summary?.ready ?? 0} · buying ${summary?.purchasing ?? 0}`}
+            />
+            <PartnerStatTile
+              label="Задачи"
+              value={`${summary?.total ?? 0}`}
+              sub={`готово ${summary?.done ?? 0}`}
+            />
+          </div>
           {(summary?.reservedUsdt ?? 0) > 0 && (
-            <InfoRow label="Зарезервировано" value={`≈ ${fmtUsdt(summary?.reservedUsdt)} под выкуп`} last={errorCount + mismatchCount + conflictCount === 0} />
+            <div style={{ padding: "0 16px 12px", fontSize: 14, color: C.textSecondary }}>
+              Зарезервировано под выкуп ≈ {fmtUsdt(summary?.reservedUsdt)}
+            </div>
           )}
           {errorCount + mismatchCount + conflictCount > 0 && (
-            <InfoRow
-              label="Проблемы"
-              value={
-                <span style={{ color: C.orange }}>
-                  {[
-                    errorCount > 0 ? `ошибки ${errorCount}` : null,
-                    mismatchCount > 0 ? `расхожд. ${mismatchCount}` : null,
-                    conflictCount > 0 ? `конфликты ${conflictCount}` : null,
-                  ].filter(Boolean).join(" · ")}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "0 12px 12px" }}>
+              {errorCount > 0 && (
+                <button className="twa-press-sm" onClick={() => jumpToTasks("errors")}
+                  style={{ border: "none", borderRadius: 9, padding: "8px 12px", minHeight: 36, fontSize: 14, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", background: tint(C.red, 0.14), color: C.red }}>
+                  ошибки {errorCount}
+                </button>
+              )}
+              {mismatchCount > 0 && (
+                <button className="twa-press-sm" onClick={() => jumpToTasks("mismatch")}
+                  style={{ border: "none", borderRadius: 9, padding: "8px 12px", minHeight: 36, fontSize: 14, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", background: tint(C.orange, 0.14), color: C.orange }}>
+                  расхожд. {mismatchCount}
+                </button>
+              )}
+              {conflictCount > 0 && (
+                <span style={{ borderRadius: 9, padding: "8px 12px", minHeight: 36, boxSizing: "border-box", fontSize: 14, fontWeight: 700, background: tint(C.orange, 0.14), color: C.orange }}>
+                  конфликты {conflictCount}
                 </span>
-              }
-              last
-            />
+              )}
+            </div>
           )}
         </Card>
       </section>
@@ -3053,37 +3348,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
         </Card>
       </section>
 
-      <section>
-        <SectionHeader title="Курс" />
-        <Card>
-          <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-            <input value={rateInput} onChange={e => setRateInput(e.target.value)} inputMode="decimal" placeholder={`${rate.toLocaleString("ru-RU")} USDT за 1000 R$`}
-              style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 16, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
-            <button className="twa-press" onClick={() => { haptic.impact("medium"); saveRate(); }} disabled={busy || !rateInput.trim()}
-              style={{ width: "100%", background: rateInput.trim() ? C.accent : C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 700, padding: "13px", cursor: busy ? "default" : "pointer", opacity: busy || !rateInput.trim() ? 0.55 : 1 }}>
-              Сохранить курс
-            </button>
-          </div>
-        </Card>
-      </section>
-
-      <section>
-        <SectionHeader title="Пополнение" />
-        <Card>
-          <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-            <input value={topupAmount} onChange={e => setTopupAmount(e.target.value)} inputMode="decimal" placeholder="Сумма USDT…"
-              style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 16, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
-            <input value={topupComment} onChange={e => setTopupComment(e.target.value)} placeholder="Комментарий…"
-              style={{ width: "100%", background: C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "12px 14px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
-            <button className="twa-press" onClick={() => { haptic.impact("medium"); topup(); }} disabled={busy || !topupAmount.trim()}
-              style={{ width: "100%", background: topupAmount.trim() ? C.green : C.elevated, border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 700, padding: "13px", cursor: busy ? "default" : "pointer", opacity: busy || !topupAmount.trim() ? 0.55 : 1 }}>
-              Пополнить
-            </button>
-          </div>
-        </Card>
-      </section>
-
-      <section>
+      <section ref={tasksSectionRef}>
         <SectionHeader title="Задачи" />
         {(() => {
           const plan = buildPartnerBuyoutPlan(tasks, summary?.balanceUsdt ?? 0, rate);
@@ -3321,6 +3586,25 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
 
       {bulkReport && (
         <PartnerBatchReport report={bulkReport} onClose={() => setBulkReport(null)} />
+      )}
+
+      {showTopupSheet && (
+        <PartnerTopupSheet
+          busy={busy}
+          onSubmit={topup}
+          onClose={() => { if (!busy) setShowTopupSheet(false); }}
+        />
+      )}
+
+      {showRateSheet && (
+        <PartnerRateSheet
+          busy={busy}
+          currentRate={rate}
+          rateChanges={rateChanges}
+          rateReport={rateReport}
+          onSubmit={saveRate}
+          onClose={() => { if (!busy) setShowRateSheet(false); }}
+        />
       )}
 
       <section>

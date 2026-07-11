@@ -171,6 +171,14 @@ async function googleFetch<T>(path: string, init: RequestInit = {}) {
   });
   const data = await response.json().catch(() => ({})) as T & { error?: { message?: string; status?: string } };
   if (!response.ok) {
+    // 429 отдаём по-русски: сырой текст квоты Google попадает прямо в TWA-экран.
+    if (response.status === 429 || data.error?.status === "RESOURCE_EXHAUSTED") {
+      throw new GoogleSheetsError(
+        "Квота Google Sheets исчерпана (минутный лимит запросов) — повтори через минуту",
+        429,
+        "RESOURCE_EXHAUSTED",
+      );
+    }
     throw new GoogleSheetsError(data.error?.message || "Google Sheets request failed", response.status, data.error?.status || "GOOGLE_SHEETS_REQUEST_FAILED");
   }
   return data;
@@ -212,6 +220,32 @@ export async function readGoogleSheetRows(spreadsheetId: string, title: string, 
     range: data.range,
     values: data.values || [],
   };
+}
+
+/**
+ * Чтение сразу многих диапазонов одним values:batchGet — квота Google считает это
+ * ОДНИМ read-запросом. Прогон sync по ~31 листу-дате раньше делал 31 values.get и
+ * упирался в лимит «60 read requests per minute per user» (скрин владельца 2026-07-11).
+ * Ranges режутся чанками по 30, чтобы не раздувать URL GET-запроса.
+ */
+export async function batchGetGoogleSheetValues(spreadsheetId: string, ranges: string[]) {
+  const CHUNK = 30;
+  const result = new Map<string, unknown[][]>();
+  for (let offset = 0; offset < ranges.length; offset += CHUNK) {
+    const chunk = ranges.slice(offset, offset + CHUNK);
+    const params = new URLSearchParams({ majorDimension: "ROWS", valueRenderOption: "UNFORMATTED_VALUE" });
+    for (const range of chunk) params.append("ranges", range);
+    const data = await googleFetch<{ valueRanges?: Array<{ range?: string; values?: unknown[][] }> }>(
+      `/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchGet?${params.toString()}`,
+    );
+    const valueRanges = data.valueRanges || [];
+    // Google возвращает valueRanges в порядке запрошенных ranges — маппим по индексу:
+    // формат range в ответе нормализован (другие кавычки/регистр) и для ключа не годится.
+    for (let i = 0; i < chunk.length; i += 1) {
+      result.set(chunk[i], valueRanges[i]?.values || []);
+    }
+  }
+  return result;
 }
 
 export async function batchUpdateGoogleSheetValues(spreadsheetId: string, updates: GoogleSheetsValueUpdate[]) {
