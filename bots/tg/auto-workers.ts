@@ -24,7 +24,7 @@ import { ADMIN_IDS } from "../shared/admin";
 import { tgSend, vkSend, escapeHtml } from "../shared/notify";
 import {
   getGamepassProductInfo,
-  purchaseGamepassDirect,
+  purchaseGamepassVerified,
   getRobuxBalance,
 } from "../shared/roblox";
 import { searchGamepassesByNick } from "../shared/gamepass-search";
@@ -156,7 +156,9 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
       });
       if (claim.count === 0) continue;
 
-      const result = await purchaseGamepassDirect(info.productId, info.priceInRobux, info.creatorId, cookie);
+      // Ф1: покупка с контрольной проверкой владения — таймаут/5xx у Roblox
+      // нередко значит «куплено»; recovered-успех спасает заказ от ложного отката.
+      const result = await purchaseGamepassVerified(info.productId, info.priceInRobux, info.creatorId, cookie, gpId);
 
       const isAlreadyOwned = !result.success && /already.?own/i.test(result.msg);
 
@@ -169,9 +171,17 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
         if (order.user) {
           try { await notifyUserCompleted(bot, order.user, order.id, order.amount, order.isDirectOrder ?? false); } catch { /* user may have blocked */ }
         }
-        if (!isAlreadyOwned) balance -= (result.price ?? info.priceInRobux);
+        if (result.recovered) {
+          // Робуксы реально списаны, но цены из ответа нет — перечитываем баланс.
+          await annotateOnce(order.id, "[AUTOBUY-RECOVERED", "владение подтверждено после ошибки ответа Roblox");
+          const fresh = await getRobuxBalance(cookie);
+          balance = fresh ?? (balance - (result.price ?? info.priceInRobux));
+        } else if (!isAlreadyOwned) {
+          balance -= (result.price ?? info.priceInRobux);
+        }
         bought++;
-        const ownedTag = isAlreadyOwned ? " (AlreadyOwned)" : "";
+        const ownedTag = isAlreadyOwned ? " (AlreadyOwned)"
+          : result.recovered ? " (✅ recovered — владение подтверждено после ошибки)" : "";
         await alertAdmins(
           `🤖 <b>Автовыкуп</b> · <code>${order.wbCode}</code> · ${result.price ?? info.priceInRobux} R$ · ` +
           `${escapeHtml(info.creatorName)} — ✅${ownedTag}\n💰 Баланс донора: ${balance.toLocaleString()} R$`

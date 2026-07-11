@@ -209,3 +209,48 @@ function classifyPurchaseFailure(reason: string): PurchaseFailureKind {
   if (/price.?changed|not.?for.?sale|invalid.?product|seller/i.test(reason)) return "row";
   return "unknown";
 }
+
+// ── Контрольная проверка владения после ошибки выкупа (Ф1) ──────────────────
+//
+// Roblox при таймауте/5xx нередко всё же проводит транзакцию, а клиентский код
+// видит провал. Любой провал, кроме «чистых отказов без списания», перепроверяем
+// по inventory-API: владение = покупка на самом деле прошла (recovered-успех).
+// Зеркало: bots/shared/roblox.ts (bots/ и src/ не импортируют друг друга) —
+// менять синхронно.
+
+/** Отказы, при которых Roblox гарантированно НЕ провёл транзакцию. */
+const CLEAN_REFUSAL_RE = /insufficient.?funds|not.?for.?sale|price.?changed|cookie/i;
+
+/**
+ * Нужна ли контрольная проверка владения после провала покупки.
+ * reason отсутствует у сетевых ошибок/таймаутов/нераспарсенных ответов —
+ * там проверка нужна обязательно.
+ */
+export function needsOwnershipCheck(reason: string | null | undefined): boolean {
+  return !(reason && CLEAN_REFUSAL_RE.test(reason));
+}
+
+/**
+ * Владеет ли аккаунт cookie геймпассом. true/false — достоверный ответ,
+ * null — проверка недоступна (сеть/авторизация), трактовать консервативно.
+ */
+export async function verifyGamepassOwnership(
+  cookie: string,
+  gamepassId: string | number,
+): Promise<boolean | null> {
+  const uRes = await fetch("https://users.roblox.com/v1/users/authenticated", {
+    headers: { ...ROBLOX_UA, Cookie: `.ROBLOSECURITY=${cookie}` },
+    signal: AbortSignal.timeout(8_000),
+  }).catch(() => null);
+  if (!uRes?.ok) return null;
+  const user = (await uRes.json().catch(() => null)) as { id?: number } | null;
+  if (!user?.id) return null;
+
+  const res = await fetch(
+    `https://inventory.roblox.com/v1/users/${user.id}/items/GamePass/${gamepassId}`,
+    { headers: ROBLOX_UA, signal: AbortSignal.timeout(8_000) },
+  ).catch(() => null);
+  if (!res?.ok) return null;
+  const json = (await res.json().catch(() => null)) as { data?: unknown[] } | null;
+  return Array.isArray(json?.data) ? json.data.length > 0 : null;
+}

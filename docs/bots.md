@@ -239,7 +239,8 @@ TG — `editMessageText` / `editMessageMedia` (фото-карточка одн�
 - **🤖 Автовыкуп до порога слива (+1).** Тик 60 с. Пока `autoBuyoutEnabled=true` и баланс
   донора > `autoBuyoutThreshold`, берёт новые `PENDING`-заказы (`isTest=false`, по `pendingAt`,
   ≤ `autoBuyoutMaxPerTick` за тик) и выкупает донорским cookie
-  (`purchaseGamepassDirect` — та же механика, что ручной выкуп в TWA). Защиты: **атомарный
+  (`purchaseGamepassVerified` — та же механика, что ручной выкуп в TWA, плюс
+  контрольная проверка владения, см. ниже). Защиты: **атомарный
   claim** `PENDING→IN_PROGRESS` (нет гонки с ручным выкупом в TWA), проверка цены
   `= ceil(amount/0.7) ±2` + `isForSale` + совпадение продавца с ником (если ник подтверждён);
   несоответствие → `[AUTOBUY-SKIP …]` в adminNote, заказ не трогаем. Успех (включая
@@ -247,7 +248,19 @@ TG — `editMessageText` / `editMessageMedia` (фото-карточка одн�
   (+`purchaserUsername`) + штатное клиентское уведомление + алерт админам (при AlreadyOwned
   баланс не декрементим, т.к. деньги списались ранее). Провал → откат в
   `PENDING`, `[AUTOBUY-FAIL …]`, алерт; протухший cookie / 3 провала подряд → пауза 15 мин +
-  алерт (сам флаг не снимается). Достигли порога → обязательный алерт «💧 пора сливать»
+  алерт (сам флаг не снимается).
+  **Контрольная проверка владения (Ф1, 2026-07-12).** Roblox при таймауте/5xx нередко
+  всё же проводит покупку — раньше такой заказ ложно откатывался в `PENDING` и копил
+  `consecutiveFails`. Теперь `purchaseGamepassVerified` (`bots/shared/roblox.ts`, зеркало
+  `verifyGamepassOwnership` в `src/lib/roblox-buyout.ts`) при любом провале, кроме чистых
+  отказов без списания (`InsufficientFunds`/`NotForSale`/`PriceChanged`/протухший cookie),
+  ждёт ~2.5 с и проверяет владение через
+  `inventory.roblox.com/v1/users/{uid}/items/GamePass/{gpId}`; при провале без каноничного
+  reason (таймаут, нераспарсенный ответ) — вторая проверка через ~5 с. Владеет →
+  recovered-успех: заказ идёт по обычной COMPLETED-ветке, в adminNote —
+  `[AUTOBUY-RECOVERED …]`, баланс донора перечитывается через `getRobuxBalance`
+  (робуксы реально списаны), в алерте админам — пометка «recovered». Каждый случай —
+  warn в консоли (видно частоту такого поведения Roblox). Достигли порога → обязательный алерт «💧 пора сливать»
   (дедуп 6 ч через `autoBuyoutBelowSince`); сам слив остаётся ручным (💧 в TWA). **П7
   (2026-07-06):** алерт только при `0 < balance ≤ threshold` — при балансе 0 (уже слито)
   молчим и дедуп не взводим; успешный слив (ручной из TWA `/api/twa/drain` и автослив)

@@ -780,7 +780,7 @@ export async function listForSaleGamepasses(
       `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=50${cursorParam}`
     ).catch(() => null);
     if (!gRes?.ok) break;
-    const gData = await gRes.json().catch(() => null);
+    const gData: any = await gRes.json().catch(() => null);
     universes.push(...(gData?.data ?? []));
     gamesCursor = gData?.nextPageCursor ?? null;
     if (!gamesCursor) break;
@@ -1121,4 +1121,88 @@ export async function getAuthenticatedUser(
   } catch {
     return null;
   }
+}
+
+// ── Контрольная проверка владения после ошибки выкупа (Ф1) ──────────────────
+//
+// Roblox при таймауте/5xx нередко всё же проводит транзакцию, а клиентский код
+// видит провал. Любой провал, кроме «чистых отказов без списания», перепроверяем
+// по inventory-API: владение = покупка на самом деле прошла (recovered-успех).
+// Зеркало: src/lib/roblox-buyout.ts (bots/ и src/ не импортируют друг друга) —
+// менять синхронно.
+
+/** Отказы, при которых Roblox гарантированно НЕ провёл транзакцию. */
+const CLEAN_REFUSAL_RE = /insufficient.?funds|not.?for.?sale|price.?changed|cookie/i;
+
+/**
+ * Нужна ли контрольная проверка владения после провала покупки.
+ * reason отсутствует у сетевых ошибок/таймаутов/нераспарсенных ответов —
+ * там проверка нужна обязательно.
+ */
+export function needsOwnershipCheck(reason: string | null | undefined): boolean {
+  return !(reason && CLEAN_REFUSAL_RE.test(reason));
+}
+
+/**
+ * Владеет ли аккаунт cookie геймпассом. true/false — достоверный ответ,
+ * null — проверка недоступна (сеть/авторизация), трактовать консервативно.
+ */
+export async function verifyGamepassOwnership(
+  cookie: string,
+  gamepassId: string | number,
+): Promise<boolean | null> {
+  try {
+    const user = await getAuthenticatedUser(cookie);
+    if (!user) return null;
+    const res = await purchaseFetch(
+      `https://inventory.roblox.com/v1/users/${user.id}/items/GamePass/${gamepassId}`,
+      cookie,
+    );
+    if (!res.ok) return null;
+    const json: any = await res.json().catch(() => null);
+    return Array.isArray(json?.data) ? json.data.length > 0 : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface VerifiedPurchaseResult extends PurchaseResult {
+  /** Покупка провалилась по ответу Roblox, но владение подтвердилось проверкой. */
+  recovered?: boolean;
+}
+
+/**
+ * purchaseGamepassDirect + контрольная проверка владения при провале.
+ * При таймауте/«нет ответа» (без каноничного reason) проверка повторяется
+ * ещё раз — покупка могла провестись на стороне Roblox с задержкой.
+ */
+export async function purchaseGamepassVerified(
+  productId: number,
+  expectedPrice: number,
+  expectedSellerId: number,
+  cookie: string,
+  gamepassId: string | number,
+  delays: { firstMs?: number; retryMs?: number } = {},
+): Promise<VerifiedPurchaseResult> {
+  const result = await purchaseGamepassDirect(productId, expectedPrice, expectedSellerId, cookie);
+  if (result.success || !needsOwnershipCheck(result.reason)) return result;
+
+  await sleep(delays.firstMs ?? 2_500);
+  let owned = await verifyGamepassOwnership(cookie, gamepassId);
+  if (owned !== true && (owned === null || !result.reason)) {
+    await sleep(delays.retryMs ?? 5_000);
+    owned = await verifyGamepassOwnership(cookie, gamepassId);
+  }
+  if (owned === true) {
+    console.warn(
+      `[Roblox/purchase] recovered: продукт ${productId} — владение подтверждено после ошибки «${result.msg}»`,
+    );
+    return {
+      success: true,
+      recovered: true,
+      msg: `Куплено (владение подтверждено проверкой после ошибки: ${result.msg})`,
+      price: expectedPrice,
+    };
+  }
+  return result;
 }
