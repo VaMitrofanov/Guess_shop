@@ -497,7 +497,7 @@ export async function confirmBatchFulfill(
   const ids = orders.map((o: any) => o.id);
   await (db as any).wbOrder.updateMany({
     where: { id: { in: ids } },
-    data: { status: "COMPLETED", adminId, purchaseRate: currentRate },
+    data: { status: "COMPLETED", adminId, purchaseRate: currentRate, completedAt: new Date() },
   });
 
   for (const order of orders) {

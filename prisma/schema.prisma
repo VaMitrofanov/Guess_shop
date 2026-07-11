@@ -195,6 +195,13 @@ model WbOrder {
   /// П3: customer tapped «❌ Не мой ник» on the GP-watch ping. Surfaces a badge
   /// in TWA («кого дожимать вручную»); cleared when a new probable nick arrives.
   gpWatchDeclinedAt     DateTime?
+  /// Ф6.3: момент фактического выкупа (перехода в COMPLETED) — базис таймера
+  /// разблокировки робуксов Roblox (completedAt + 5 дней). Ставится во ВСЕХ
+  /// путях COMPLETED; у старых заказов NULL — крон разблокировки их не трогает.
+  completedAt           DateTime?
+  /// Ф6.3: уровень пуша о разблокировке робуксов (0 = не слали,
+  /// 1 = день 5 «уже могли разблокироваться», 2 = день 7 «точно разблокированы»).
+  robuxUnlockRemindLevel Int         @default(0)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 

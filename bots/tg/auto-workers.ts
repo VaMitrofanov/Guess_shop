@@ -166,7 +166,7 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
         consecutiveFails = 0;
         await (db as any).wbOrder.updateMany({
           where: { id: order.id, status: "IN_PROGRESS" },
-          data: { status: "COMPLETED", purchaseRate: settings.purchaseRate ?? null, purchaserUsername: settings.robloxAccountName ?? null },
+          data: { status: "COMPLETED", purchaseRate: settings.purchaseRate ?? null, purchaserUsername: settings.robloxAccountName ?? null, completedAt: new Date() },
         });
         if (order.user) {
           try { await notifyUserCompleted(bot, order.user, order.id, order.amount, order.isDirectOrder ?? false); } catch { /* user may have blocked */ }

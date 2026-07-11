@@ -876,6 +876,7 @@ export async function POST(req: NextRequest) {
     if (target === "DONE") {
       const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
       data.purchaseRate = settings?.purchaseRate ?? null;
+      data.completedAt = new Date(); // Ф6.3: базис таймера разблокировки робуксов
     }
     if ((target === "BUYOUT" || target === "DIRECT" || target === "AVITO") && !order.pendingAt) {
       data.pendingAt = new Date();
@@ -894,7 +895,7 @@ export async function POST(req: NextRequest) {
     const currentRate = settings?.purchaseRate ?? null;
     await (prisma as any).wbOrder.update({
       where: { id: orderId },
-      data:  { status: "COMPLETED", purchaseRate: currentRate },
+      data:  { status: "COMPLETED", purchaseRate: currentRate, completedAt: new Date() },
     });
     cachedCounts = null;
     notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder).catch(() => {});
@@ -1011,7 +1012,7 @@ export async function POST(req: NextRequest) {
       const purchaserUsername = settings?.robloxAccountName ?? null;
       await (prisma as any).wbOrder.updateMany({
         where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
-        data: { status: "COMPLETED", purchaseRate: currentRate, purchaserUsername },
+        data: { status: "COMPLETED", purchaseRate: currentRate, purchaserUsername, completedAt: new Date() },
       });
       cachedCounts = null;
       notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder ?? false).catch(() => {});

@@ -13,7 +13,7 @@ import { vkSend, vkSendPhoto, stripHtml, tgSend, escapeHtml } from "../shared/no
 import { getSbpQrBuffer } from "../shared/sbp";
 import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUserHurdle, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminIntentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, formatUserHandle, formatUserHandleHtml, orderCode } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
-import { getGamepassDetails, getGamepassProductInfo, buildPurchaseScript, purchaseGamepassDirect, getRobuxBalance, getAuthenticatedUser, resetPurchaseCsrf } from "../shared/roblox";
+import { getGamepassDetails, getGamepassProductInfo, buildPurchaseScript, purchaseGamepassVerified, getRobuxBalance, getAuthenticatedUser, resetPurchaseCsrf } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { noteProbableNick } from "../shared/nick";
 import { resolveReviewEligibility, reviewIneligibleMessage } from "../shared/review-eligibility";
@@ -3760,11 +3760,14 @@ export function registerCallbacks(bot: Telegraf): void {
           priceWarning = `\n⚠️ Managed pricing: ${info.priceInRobux} R$ (продавец: ${info.userBasePriceInRobux} R$)`;
         }
 
-        const result = await purchaseGamepassDirect(
+        // Ф1: покупка с контрольной проверкой владения при провале —
+        // таймаут/5xx у Roblox нередко значит «куплено».
+        const result = await purchaseGamepassVerified(
           info.productId,
           info.priceInRobux,
           info.creatorId,
           cookie,
+          gpId,
         );
 
         if (result.success) {
@@ -3772,7 +3775,7 @@ export function registerCallbacks(bot: Telegraf): void {
           const purchaserUsername = settings?.robloxAccountName ?? null;
           const updated = await (db as any).wbOrder.updateMany({
             where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
-            data: { status: "COMPLETED", adminId, purchaseRate: currentRate, purchaserUsername },
+            data: { status: "COMPLETED", adminId, purchaseRate: currentRate, purchaserUsername, completedAt: new Date() },
           });
 
           if (updated.count > 0) {
@@ -3823,7 +3826,7 @@ export function registerCallbacks(bot: Telegraf): void {
         // Prevents double-notification when two admins click simultaneously.
         const updatedCount = await (db as any).wbOrder.updateMany({
           where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
-          data: { status: "COMPLETED", adminId, purchaseRate: currentRate },
+          data: { status: "COMPLETED", adminId, purchaseRate: currentRate, completedAt: new Date() },
         });
 
         if (updatedCount.count === 0) {

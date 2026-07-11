@@ -39,6 +39,15 @@ Neon Postgres + Prisma 7 (`engineType=library`, adapter `PrismaPg`). Модел�
 `gpWatchNotifiedPassId` (дедуп уведомлений), `gpWatchDeclinedAt` (П3, миграция
 `20260706_add_gpwatch_declined_at`: клиент ответил «❌ Не мой ник» — бейдж в TWA;
 сбрасывается при новом probableNick). Индекс `[status, probableNick]` — выборка воркера.
+Таймер разблокировки робуксов (Ф6.3, миграция
+`20260712_wborder_completed_at_unlock_remind`, **применена к прод-Neon 2026-07-12**):
+`completedAt` — момент фактического выкупа (перехода в `COMPLETED`), базис
+«Roblox разблокирует ~ completedAt + 5 дней»; ставится во ВСЕХ путях COMPLETED
+(TWA `complete`/`purchase`/move-to DONE, автовыкуп, TG-карточка `pb:`/`admin_ok:`,
+hub bulk-complete; батч «Выкупить всё» ходит через `purchase`). Старые заказы —
+NULL (крон разблокировки их не трогает, нет пушей задним числом).
+`robuxUnlockRemindLevel` (0=не слали, 1=пуш 5-го дня «могли разблокироваться»,
+2=пуш 7-го дня «точно разблокированы») — уровни крона разблокировки (Ф6.3/О3).
 
 Статусы (`WbOrderStatus`):
 `AWAITING_PAYMENT` · `PAYMENT_PENDING` · `AWAITING_GAMEPASS` (provisional, ждём ссылку) ·
