@@ -1994,7 +1994,7 @@ async function handleGamepassLink(
       `3. Roblox начислит робуксы — это 5–7 дней после выкупа\n\n` +
       `⚠️ Обязательно проверь, что Managed pricing отключён (Sales → переключатель OFF). Если он включён — Roblox изменит цену и мы не сможем выкупить геймпасс, пока ты не исправишь. Подробности — шаг 7 инструкции.\n\n` +
       `Ничего делать не нужно — просто жди сообщение 👌` +
-      ROBLOX_DELAY_BANNER +
+      BUYOUT_ETA_NOTE +
       `\n\nКод ВБ: ${wbCode} · Статус и бонусы — в меню 👇`,
     keyboard: Keyboard.builder()
       .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "positive" })
@@ -3046,7 +3046,9 @@ const VK_STATUS_LABEL: Record<string, string> = {
 // Statuses where the user may still re-pick their nick / gamepass (not yet bought).
 const VK_CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "REJECTED"];
 
-const ROBLOX_DELAY_BANNER = `\n\n⚠️ Roblox ввёл ограничения на выкуп геймпассов — сроки выросли до 1–3 дней. Это не зависит от нас — выкупаем при первой возможности.`;
+// Ф7 (2026-07-12): нейтральная нота вместо прежнего алармистского баннера
+// «Roblox ввёл ограничения… 1–3 дня». Зеркало — bots/tg/handlers.ts.
+const BUYOUT_ETA_NOTE = `\n\n⏱ Выкупаем в течение суток — обычно быстрее. Иногда чуть дольше — уведомим сразу, как выкупим.`;
 
 /**
  * Plain-text VK mirror of the TG `pendingStage` — gives a PENDING order a sense
@@ -3060,8 +3062,8 @@ function vkPendingStage(createdAt: Date | string): { label: string; note: string
   if (mins < 12)  return { label: "🔍 Проверяем геймпасс",      note: "Сверяем геймпасс и цену перед выкупом." };
   if (mins < 30)  return { label: "📋 Поставлен в очередь",     note: "Заказ в очереди — скоро возьмём в работу." };
   if (mins < 90)  return { label: "💼 Готовим к выкупу",        note: "Менеджер вот-вот возьмёт твой геймпасс в работу." };
-  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Сейчас задержки на стороне Roblox — мы всё сделаем, как только они разрешат. Уведомим сразу 🙏" };
-  return            { label: "⏳ В очереди на выкуп",        note: "Roblox ограничил выкуп геймпассов на своей стороне — ждём окна. Уведомим сразу, как выкупим 🙏" };
+  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Очередь сегодня больше обычного — выкупим в течение суток, уведомим сразу 🙏" };
+  return            { label: "⏳ В очереди на выкуп",        note: "Заказ в очереди — почти всегда выкупаем в течение суток. Уведомим сразу, как выкупим 🙏" };
 }
 
 /** Russian day pluralization: 1 день · 2 дня · 5 дней. */
@@ -3407,7 +3409,7 @@ async function handleIdleMessage(
     }
     kb.row().textButton({ label: "👤 В моё меню", payload: { command: "menu" }, color: "secondary" });
 
-    const vkShowDelayBanner = order.status === "PENDING" || order.status === "IN_PROGRESS";
+    const vkShowEtaNote = order.status === "PENDING" || order.status === "IN_PROGRESS";
 
     await ctx.reply({
       message:
@@ -3422,7 +3424,7 @@ async function handleIdleMessage(
         gamepassLine +
         `📊 Статус: ${statusStr}` +
         hint +
-        (vkShowDelayBanner ? ROBLOX_DELAY_BANNER : ""),
+        (vkShowEtaNote ? BUYOUT_ETA_NOTE : ""),
       keyboard: kb.inline(),
     });
     return;

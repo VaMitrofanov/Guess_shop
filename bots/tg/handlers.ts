@@ -1130,7 +1130,9 @@ async function findRelevantOrder(userId: string): Promise<any | null> {
 // (paid is final; rejected has its own "fix link" resubmit flow).
 const CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "REJECTED"];
 
-const ROBLOX_DELAY_BANNER = `\n\n⚠️ <i>Roblox ввёл ограничения на выкуп геймпассов — сроки выросли до 1–3 дней. Это не зависит от нас — выкупаем при первой возможности.</i>`;
+// Ф7 (2026-07-12): нейтральная нота вместо прежнего алармистского баннера
+// «Roblox ввёл ограничения… 1–3 дня». Зеркало — bots/vk/handlers.ts.
+const BUYOUT_ETA_NOTE = `\n\n⏱ <i>Выкупаем в течение суток — обычно быстрее. Иногда чуть дольше — уведомим сразу, как выкупим.</i>`;
 
 /**
  * Gives a PENDING order a sense of forward motion even while it just sits in the
@@ -1145,8 +1147,8 @@ function pendingStage(createdAt: Date | string): { label: string; note: string }
   if (mins < 12)  return { label: "🔍 Проверяем геймпасс",      note: "Сверяем геймпасс и цену перед выкупом." };
   if (mins < 30)  return { label: "📋 Поставлен в очередь",     note: "Заказ в очереди — скоро возьмём в работу." };
   if (mins < 90)  return { label: "💼 Готовим к выкупу",        note: "Менеджер вот-вот возьмёт твой геймпасс в работу." };
-  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Сейчас задержки на стороне Roblox — мы всё сделаем, как только они разрешат. Уведомим сразу 🙏" };
-  return            { label: "⏳ В очереди на выкуп",        note: "Roblox ограничил выкуп геймпассов на своей стороне — ждём окна. Уведомим сразу, как выкупим 🙏" };
+  if (mins < 360) return { label: "⏳ В очереди на выкуп",      note: "Очередь сегодня больше обычного — выкупим в течение суток, уведомим сразу 🙏" };
+  return            { label: "⏳ В очереди на выкуп",        note: "Заказ в очереди — почти всегда выкупаем в течение суток. Уведомим сразу, как выкупим 🙏" };
 }
 
 /** Builds /status text + keyboard. Shows support button when PENDING > 60 min. */
@@ -1262,7 +1264,7 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     ? `🔑 Код ВБ: <b>${order.wbCode}</b>\n`
     : `📦 Прямой заказ\n`;
 
-  const showDelayBanner = order.status === "PENDING" || order.status === "IN_PROGRESS";
+  const showEtaNote = order.status === "PENDING" || order.status === "IN_PROGRESS";
 
   const text =
     codeLine +
@@ -1272,7 +1274,7 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     gamepassLine +
     `📊 Статус: <b>${statusLabel}</b>` +
     note +
-    (showDelayBanner ? ROBLOX_DELAY_BANNER : "");
+    (showEtaNote ? BUYOUT_ETA_NOTE : "");
 
   // Keyboard varies by status
   let keyboard: ReturnType<typeof Markup.inlineKeyboard>;
@@ -2582,7 +2584,7 @@ async function processGamepassSubmission(
       `3. Roblox начислит робуксы — это <b>5–7 дней</b> после выкупа\n\n` +
       `⚠️ Обязательно проверь, что <b>Managed pricing</b> отключён (Sales → переключатель OFF). Если он включён — Roblox изменит цену и мы <b>не сможем</b> выкупить геймпасс, пока ты не исправишь. Подробности — шаг 7 инструкции.\n\n` +
       `Ничего делать не нужно — просто жди сообщение 👌` +
-      ROBLOX_DELAY_BANNER +
+      BUYOUT_ETA_NOTE +
       `\n\nКод ВБ: <code>${state.wbCode}</code> · Статус и бонусы — в меню 👇`,
       {
         parse_mode: "HTML",
