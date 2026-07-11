@@ -23,12 +23,22 @@ export interface ResolvedGamepass {
   image: string | null;
 }
 
+/**
+ * Классификация неуспешной покупки у источника (по HTTP-статусу и каноничному
+ * `reason` Roblox, а не по итоговому локализованному msg):
+ * - internal — наша проблема (cookie, Robux донора): ретрай уместен, продавца не касается;
+ * - row      — проблема геймпасса/строки (цена сменилась, не продаётся): исправляет партнёр;
+ * - unknown  — не классифицировано, трактовать консервативно (не вешать на партнёра).
+ */
+export type PurchaseFailureKind = "internal" | "row" | "unknown";
+
 export interface PurchaseResult {
   success: boolean;
   msg: string;
   price?: number;
   balance: number | null;
   alreadyOwned?: boolean;
+  failureKind?: PurchaseFailureKind;
 }
 
 type RobloxProductInfo = {
@@ -166,7 +176,7 @@ export async function purchaseGamepassWithCookie(
   }
 
   if (purchaseRes?.status === 401) {
-    return { success: false, msg: "Cookie истёк — обнови", balance: null };
+    return { success: false, msg: "Cookie истёк — обнови", balance: null, failureKind: "internal" };
   }
 
   const purchaseData = (await purchaseRes?.json().catch(() => null)) as RobloxPurchaseResponse | null;
@@ -190,5 +200,12 @@ export async function purchaseGamepassWithCookie(
     success: false,
     msg: purchaseData.reason ?? purchaseData.errorMsg ?? "Неизвестная ошибка",
     balance,
+    failureKind: classifyPurchaseFailure(purchaseData.reason ?? purchaseData.errorMsg ?? ""),
   };
+}
+
+function classifyPurchaseFailure(reason: string): PurchaseFailureKind {
+  if (/insufficient.?funds/i.test(reason)) return "internal";
+  if (/price.?changed|not.?for.?sale|invalid.?product|seller/i.test(reason)) return "row";
+  return "unknown";
 }

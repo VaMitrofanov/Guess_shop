@@ -13,7 +13,7 @@ import {
   readGoogleSheetRows,
   type GoogleSheetsValueUpdate,
 } from "@/lib/google-sheets";
-import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepass } from "@/lib/roblox-buyout";
+import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepass, type PurchaseResult } from "@/lib/roblox-buyout";
 import { prisma } from "@/lib/prisma";
 import { extractTwaUser } from "@/lib/twa-auth";
 
@@ -112,6 +112,14 @@ type GoogleSyncReconciliationStats = {
   doneMarkedDeleted: number;
   revived: number;
   conflicts: number;
+  /** 5.7 B1: строки «готово» без задачи, импортированные как выкупленные со списанием. */
+  importedDone: number;
+  /** 5.7 B2: строки, переиспользованные под новый заказ (старая DONE-задача в архиве). */
+  rowsReused: number;
+  /** 5.7 C1: исправленные строки-ошибки, возвращённые в READY + чип «в ожидании». */
+  reactivated: number;
+  /** 5.7 C2: правки строк «готово» после выкупа (задача не мутирует, только пометка). */
+  editedAfterDone: number;
 };
 
 type GoogleSyncDiagnostics = GoogleSyncFilterStats & {
@@ -290,6 +298,25 @@ function computeGoogleRowHash(cells: unknown[]) {
   return createHash("sha1").update(JSON.stringify(normalized)).digest("hex").slice(0, 16);
 }
 
+// Содержимое заказа = A:C (ник, ГП, номинал). D/E — статус и комментарий, их меняем и мы,
+// и Антон; для проверок «эта ли строка выкуплена» (B2) и «строку исправили» (C1) они не в счёт.
+const SHEET_CONTENT_CELLS = [SHEET_COL.nickname, SHEET_COL.gamepass, SHEET_COL.amount] as const;
+
+function normalizeContentCells(cells: unknown[]) {
+  return SHEET_CONTENT_CELLS.map((i) => String(cells[i] ?? "").trim());
+}
+
+function computeGoogleRowContentHash(cells: unknown[]) {
+  return createHash("sha1").update(JSON.stringify(normalizeContentCells(cells))).digest("hex").slice(0, 16);
+}
+
+function getStoredContentHash(task: Pick<PartnerBuyoutTask, "sheetRaw">) {
+  if (!isRecord(task.sheetRaw)) return null;
+  if (typeof task.sheetRaw.contentHash === "string" && task.sheetRaw.contentHash) return task.sheetRaw.contentHash;
+  if (Array.isArray(task.sheetRaw.cells)) return computeGoogleRowContentHash(task.sheetRaw.cells);
+  return null;
+}
+
 function buildGoogleSheetRaw(input: {
   spreadsheetId: string;
   sheetTitle: string;
@@ -309,6 +336,7 @@ function buildGoogleSheetRaw(input: {
     range: `${input.sheetTitle}!A${input.rowNumber}:${SHEET_COMMENT_LETTER}${input.rowNumber}`,
     cells: input.cells,
     rowHash: computeGoogleRowHash(input.cells),
+    contentHash: computeGoogleRowContentHash(input.cells),
     sheetPriceRobux: input.sheetPriceRobux ?? null,
     priceMismatch: input.priceMismatch ?? false,
     syncedAt: new Date().toISOString(),
@@ -476,13 +504,16 @@ async function importPartnerXlsx(partner: Partner, user: NonNullable<TwaUser>, f
     }
 
     const externalRowId = `xlsx:${sourceFile}:row${row.rowNumber}:gp${row.gamepassId}`;
+    // Единый дедуп ГП для ручных путей (№6 ультра-ревью, как в create-task): блокируют
+    // только активные задачи — повторный выкуп того же ГП после DONE легитимен (в боевой
+    // таблице заказы полностью повторяются). Google дедупится по строке by design.
     const duplicate = await prisma.partnerBuyoutTask.findFirst({
       where: {
         partnerId: partner.id,
         OR: [
           {
             gamepassId: row.gamepassId,
-            status: { not: "CANCELLED" },
+            status: { notIn: ["DONE", "CANCELLED"] },
           },
           {
             externalSource: "XLSX_UPLOAD",
@@ -539,13 +570,25 @@ async function importPartnerXlsx(partner: Partner, user: NonNullable<TwaUser>, f
         },
       });
 
-      result.created += 1;
-      result.items.push({
-        row: row.rowNumber,
-        gamepassId: row.gamepassId,
-        status: "created",
-        message: ready ? "Готова к выкупу" : "Создана с ошибкой проверки",
-      });
+      // №11 ультра-ревью: created — только реально готовые задачи; созданная сразу
+      // FAILED идёт в failed, чтобы «+N» в тосте не выглядел успехом.
+      if (ready) {
+        result.created += 1;
+        result.items.push({
+          row: row.rowNumber,
+          gamepassId: row.gamepassId,
+          status: "created",
+          message: "Готова к выкупу",
+        });
+      } else {
+        result.failed += 1;
+        result.items.push({
+          row: row.rowNumber,
+          gamepassId: row.gamepassId,
+          status: "failed",
+          message: "Создана с ошибкой проверки",
+        });
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Ошибка проверки геймпасса";
       await prisma.partnerBuyoutTask.create({
@@ -557,11 +600,11 @@ async function importPartnerXlsx(partner: Partner, user: NonNullable<TwaUser>, f
         },
       });
 
-      result.created += 1;
+      result.failed += 1;
       result.items.push({
         row: row.rowNumber,
         gamepassId: row.gamepassId,
-        status: "created",
+        status: "failed",
         message: `Создана с ошибкой: ${message}`,
       });
     }
@@ -672,6 +715,42 @@ type ReconcileOutcome = {
 };
 
 /**
+ * 5.7 B1: ручное «готово» в таблице = выкупленный заказ, USDT списывается по номиналу C.
+ * Баланс может уйти в минус (решение владельца: факт выкупа важнее, предупреждение в TWA).
+ * Guard от повторного списания — существующая BUYOUT-запись по задаче.
+ */
+async function debitPartnerTaskFromSheet(
+  partner: Partner,
+  task: Pick<PartnerBuyoutTask, "id" | "gamepassId">,
+  priceRobux: number,
+  user: TwaUser,
+  reason: string,
+) {
+  if (!priceRobux || priceRobux <= 0) return 0;
+  const existingBuyout = await prisma.partnerLedgerEntry.findFirst({
+    where: { partnerId: partner.id, taskId: task.id, type: "BUYOUT" },
+    select: { id: true },
+  });
+  if (existingBuyout) return 0;
+
+  const priceUsdt = taskCostUsdt(priceRobux, partner);
+  if (priceUsdt <= 0) return 0;
+  await prisma.partnerLedgerEntry.create({
+    data: {
+      partnerId: partner.id,
+      taskId: task.id,
+      type: "BUYOUT",
+      amount: -priceUsdt,
+      currency: moneyCurrency(partner),
+      reference: task.gamepassId,
+      comment: `${reason}: ${priceRobux} R$ × ${partner.robuxRateUsdtPer1000} USDT / 1000 R$`,
+      createdBy: user ? operatorLabel(user) : "sheet-sync",
+    },
+  });
+  return priceUsdt;
+}
+
+/**
  * Строку удалили/очистили в таблице — задача удаляется из TWA полностью (решение
  * владельца 2026-07-10). Guard: если по задаче уже есть ledger-записи (не должно быть
  * у активных, но деньги дороже), не удаляем, а отменяем с заметкой.
@@ -701,15 +780,19 @@ async function deletePartnerTaskForRemovedRow(
 }
 
 /**
- * П3: реконсиляция ручной правки статуса D для существующей задачи GOOGLE_SHEETS
- * в активном статусе (NEW/READY/FAILED). Денег не двигает: «готово» из таблицы
- * закрывает задачу БЕЗ списания USDT (бейдж «из таблицы», решение о «Списать» отложено).
+ * П3 (переписано в 5.7 B1): реконсиляция ручной правки статуса D для существующей задачи
+ * GOOGLE_SHEETS в активном статусе (NEW/READY/FAILED). Ручное «готово» теперь закрывает
+ * задачу КАК ВЫКУПЛЕННУЮ — со списанием USDT по номиналу C (решение владельца 2026-07-11,
+ * отменяет прежнее «closedFromSheet без списания»).
  */
 async function reconcilePartnerGoogleRow(input: {
+  partner: Partner;
+  user: TwaUser;
   task: PartnerBuyoutTask;
   rowStatus: string;
   rowComment: string;
   rowGamepassId: string | null;
+  sheetPriceRobux: number | null;
   stats: GoogleSyncReconciliationStats;
 }): Promise<ReconcileOutcome | null> {
   const { task, rowStatus, rowGamepassId, stats } = input;
@@ -731,12 +814,18 @@ async function reconcilePartnerGoogleRow(input: {
   }
 
   if (rowStatus === GOOGLE_STATUS_DONE) {
-    await prisma.partnerBuyoutTask.update({
+    // Списываем по номиналу C (правило владельца); если C не распарсился — по цене задачи.
+    const debitRobux = input.sheetPriceRobux && input.sheetPriceRobux > 0
+      ? Math.round(input.sheetPriceRobux)
+      : getTaskPrice(task);
+    const updatedTask = await prisma.partnerBuyoutTask.update({
       where: { id: task.id },
       data: {
         status: "DONE",
         completedAt: new Date(),
         error: null,
+        purchasePriceRobux: debitRobux > 0 ? debitRobux : undefined,
+        priceRobux: task.priceRobux ?? (debitRobux > 0 ? debitRobux : undefined),
         note: "Закрыто из таблицы: D=«готово» выставлено вручную",
         sheetRaw: mergeTaskSheetRaw(task, {
           closedFromSheet: true,
@@ -745,8 +834,20 @@ async function reconcilePartnerGoogleRow(input: {
         }),
       },
     });
+    const debitedUsdt = await debitPartnerTaskFromSheet(
+      input.partner,
+      updatedTask,
+      debitRobux,
+      input.user,
+      "Ручное «готово» в таблице",
+    );
     stats.closedFromSheet += 1;
-    return { kind: "closed", message: "Закрыта из таблицы (D=готово), без списания USDT" };
+    return {
+      kind: "closed",
+      message: debitedUsdt > 0
+        ? `Закрыта из таблицы (D=готово), списано ${debitedUsdt} USDT`
+        : "Закрыта из таблицы (D=готово), без цены — списания нет",
+    };
   }
 
   if (rowStatus === GOOGLE_STATUS_ERROR) {
@@ -776,6 +877,230 @@ async function reconcilePartnerGoogleRow(input: {
   });
   stats.cancelledFromSheet += 1;
   return { kind: "cancelled", message: `Отменена: D=«${statusLabel}»` };
+}
+
+/**
+ * 5.7 C2: правка строки со статусом «готово» — DONE-задача не мутирует (остаётся такой,
+ * какой была выкуплена), но получает пометку editedAfterDone с diff ячеек A:C и бейдж
+ * «изменено после выкупа» в истории TWA. `before` фиксирует содержимое на момент выкупа,
+ * editedAfterDoneHash защищает от повторных записей той же правки на каждом прогоне.
+ */
+async function markDoneRowEdited(task: PartnerBuyoutTask, cells: unknown[], stats: GoogleSyncReconciliationStats) {
+  const currentHash = computeGoogleRowContentHash(cells);
+  const storedHash = getStoredContentHash(task);
+  if (!storedHash || storedHash === currentHash) return false;
+
+  const raw = isRecord(task.sheetRaw) ? task.sheetRaw : {};
+  if (raw.editedAfterDoneHash === currentHash) return false;
+  const prevEdited = isRecord(raw.editedAfterDone) ? raw.editedAfterDone : null;
+  const before = prevEdited && Array.isArray(prevEdited.before)
+    ? prevEdited.before
+    : Array.isArray(raw.cells) ? normalizeContentCells(raw.cells) : [];
+
+  await prisma.partnerBuyoutTask.update({
+    where: { id: task.id },
+    data: {
+      sheetRaw: mergeTaskSheetRaw(task, {
+        editedAfterDone: { at: new Date().toISOString(), before, after: normalizeContentCells(cells) },
+        editedAfterDoneHash: currentHash,
+      }),
+    },
+  });
+  stats.editedAfterDone += 1;
+  return true;
+}
+
+/**
+ * 5.7 B1: строка «готово» без задачи — исторический выкуп, внесённый в таблицу напрямую
+ * (переходный период: владелец сам вписывает старые заказы чипом «готово»). Импортируется
+ * как DONE-задача со списанием по номиналу C. resolveGamepass не зовём: это свершившийся
+ * факт, а не заявка на выкуп — валидацию такая строка не проходит.
+ */
+async function importDoneRowFromSheet(input: {
+  partner: Partner;
+  user: TwaUser;
+  spreadsheetId: string;
+  sheetTitle: string;
+  sheetId: number | null;
+  rowNumber: number;
+  externalRowId: string;
+  cells: unknown[];
+  gamepassId: string | null;
+  sheetPriceRobux: number;
+  stats: GoogleSyncReconciliationStats;
+}) {
+  const priceRobux = Math.round(input.sheetPriceRobux);
+  const task = await prisma.partnerBuyoutTask.create({
+    data: {
+      partnerId: input.partner.id,
+      externalSource: "GOOGLE_SHEETS",
+      externalRowId: input.externalRowId,
+      status: "DONE",
+      completedAt: new Date(),
+      robloxUsername: String(input.cells[SHEET_COL.nickname] ?? "").trim() || null,
+      gamepassId: input.gamepassId,
+      gamepassUrl: input.gamepassId ? `https://www.roblox.com/game-pass/${input.gamepassId}` : null,
+      priceRobux,
+      purchasePriceRobux: priceRobux,
+      note: "Импортировано из таблицы как выкупленное: D=«готово»",
+      sheetRaw: toJsonObject({
+        ...buildGoogleSheetRaw({
+          spreadsheetId: input.spreadsheetId,
+          sheetTitle: input.sheetTitle,
+          sheetId: input.sheetId,
+          rowNumber: input.rowNumber,
+          cells: input.cells,
+          syncedBy: input.user ? operatorLabel(input.user) : null,
+          sheetPriceRobux: priceRobux,
+        }),
+        closedFromSheet: true,
+        importedDoneFromSheet: true,
+      }),
+    },
+  });
+  const debitedUsdt = await debitPartnerTaskFromSheet(
+    input.partner,
+    task,
+    priceRobux,
+    input.user,
+    "Импорт строки «готово» из таблицы",
+  );
+  input.stats.importedDone += 1;
+  return { task, debitedUsdt };
+}
+
+/**
+ * 5.7 C1: строка с чипом «ошибка». Антон исправляет данные, не трогая чип, — sync замечает
+ * смену содержимого A:C (contentHash) и перепроверяет строку: ошибка устранена → задача
+ * READY + write-back D=«в ожидании» (заказ сам возвращается в очередь), ошибка осталась →
+ * FAILED с новой причиной в E. Строка «ошибка» без задачи проверяется и создаётся первым же
+ * sync. Перепроверка только при смене contentHash — не грузим Roblox на каждый прогон.
+ */
+async function processErrorStatusRow(input: {
+  partner: Partner;
+  user: TwaUser;
+  spreadsheetId: string;
+  sheetTitle: string;
+  sheetId: number | null;
+  rowNumber: number;
+  externalRowId: string;
+  cells: unknown[];
+  existing: PartnerBuyoutTask | null;
+  gamepassInput: string;
+  gamepassId: string | null;
+  sheetPriceRobux: number | null;
+  stats: GoogleSyncReconciliationStats;
+}): Promise<{ action: "created" | "updated" | "skipped"; failed: boolean; message: string; writeBacks: GoogleSheetsValueUpdate[] } | null> {
+  const { existing, partner, user } = input;
+  if (existing) {
+    const storedHash = getStoredContentHash(existing);
+    // Перепроверяем только исправленные строки: содержимое A:C не менялось — причина
+    // ошибки уже отражена и в задаче, и в комментарии E.
+    if (!storedHash || storedHash === computeGoogleRowContentHash(input.cells)) return null;
+  }
+
+  const nickname = String(input.cells[SHEET_COL.nickname] ?? "").trim() || null;
+  const sheetPrice = input.sheetPriceRobux && input.sheetPriceRobux > 0 ? Math.round(input.sheetPriceRobux) : null;
+  const action = existing ? "updated" as const : "created" as const;
+  const commentWriteBack = (message: string): GoogleSheetsValueUpdate[] => [
+    { range: googleCellRange(input.sheetTitle, SHEET_COMMENT_LETTER, input.rowNumber), values: [[truncateGoogleMessage(message)]] },
+  ];
+  const buildRaw = (priceMismatch = false) => buildGoogleSheetRaw({
+    spreadsheetId: input.spreadsheetId,
+    sheetTitle: input.sheetTitle,
+    sheetId: input.sheetId,
+    rowNumber: input.rowNumber,
+    cells: input.cells,
+    syncedBy: user ? operatorLabel(user) : null,
+    sheetPriceRobux: sheetPrice,
+    priceMismatch,
+  });
+
+  if (!input.gamepassId || !sheetPrice) {
+    const message = !input.gamepassId
+      ? `Не найден ID геймпасса в колонке ${SHEET_GAMEPASS_LETTER}`
+      : `Пустой или некорректный номинал в колонке ${SHEET_AMOUNT_LETTER}`;
+    const data = {
+      partnerId: partner.id,
+      externalSource: "GOOGLE_SHEETS" as const,
+      externalRowId: input.externalRowId,
+      status: "FAILED" as const,
+      robloxUsername: nickname,
+      gamepassId: input.gamepassId,
+      gamepassUrl: input.gamepassId ? `https://www.roblox.com/game-pass/${input.gamepassId}` : null,
+      priceRobux: sheetPrice,
+      error: message,
+      sheetRaw: buildRaw(),
+    };
+    if (existing) await prisma.partnerBuyoutTask.update({ where: { id: existing.id }, data });
+    else await prisma.partnerBuyoutTask.create({ data });
+    return { action, failed: true, message, writeBacks: commentWriteBack(message) };
+  }
+
+  try {
+    const gp = await resolveGamepass(input.gamepassInput || input.gamepassId);
+    const ready = Boolean(gp.isForSale && gp.price && gp.price > 0 && gp.productId && gp.sellerId);
+    const priceMismatch = Boolean(gp.price && sheetPrice !== gp.price);
+    const mismatchWarning = priceMismatch ? `Цена ГП: ${gp.price} R$, в таблице ${sheetPrice} R$` : null;
+    const rowOk = ready && !priceMismatch;
+    const message = !ready ? "Геймпасс не продаётся или нет productId/sellerId" : mismatchWarning ?? "Готова к выкупу";
+    const data = {
+      partnerId: partner.id,
+      externalSource: "GOOGLE_SHEETS" as const,
+      externalRowId: input.externalRowId,
+      status: rowOk ? "READY" as const : "FAILED" as const,
+      robloxUsername: nickname,
+      gamepassId: String(gp.gamepassId || input.gamepassId),
+      gamepassUrl: `https://www.roblox.com/game-pass/${gp.gamepassId || input.gamepassId}`,
+      productId: gp.productId ? String(gp.productId) : null,
+      sellerId: gp.sellerId ? String(gp.sellerId) : null,
+      sellerName: gp.sellerName || null,
+      priceRobux: gp.price || sheetPrice,
+      error: ready ? null : message,
+      note: priceMismatch
+        ? `Номинал из Sheets: ${sheetPrice} R$, цена GP: ${gp.price} R$`
+        : `Номинал из Sheets: ${sheetPrice} R$`,
+      sheetRaw: buildRaw(priceMismatch),
+    };
+    if (existing) await prisma.partnerBuyoutTask.update({ where: { id: existing.id }, data });
+    else await prisma.partnerBuyoutTask.create({ data });
+
+    if (rowOk) {
+      input.stats.reactivated += 1;
+      return {
+        action,
+        failed: false,
+        message: "Исправлена: чип возвращён в «в ожидании»",
+        writeBacks: [
+          { range: googleCellRange(input.sheetTitle, SHEET_STATUS_LETTER, input.rowNumber), values: [[GOOGLE_STATUS_PENDING]] },
+          { range: googleCellRange(input.sheetTitle, SHEET_COMMENT_LETTER, input.rowNumber), values: [[""]] },
+        ],
+      };
+    }
+    return { action, failed: true, message, writeBacks: commentWriteBack(message) };
+  } catch (err) {
+    const message = truncateGoogleMessage(err instanceof Error ? err.message : "Ошибка проверки геймпасса");
+    if (err instanceof BuyoutError) {
+      const data = {
+        partnerId: partner.id,
+        externalSource: "GOOGLE_SHEETS" as const,
+        externalRowId: input.externalRowId,
+        status: "FAILED" as const,
+        robloxUsername: nickname,
+        gamepassId: input.gamepassId,
+        gamepassUrl: `https://www.roblox.com/game-pass/${input.gamepassId}`,
+        priceRobux: sheetPrice,
+        error: message,
+        sheetRaw: buildRaw(),
+      };
+      if (existing) await prisma.partnerBuyoutTask.update({ where: { id: existing.id }, data });
+      else await prisma.partnerBuyoutTask.create({ data });
+      return { action, failed: true, message, writeBacks: commentWriteBack(message) };
+    }
+    // Временная ошибка (сеть/Roblox API): задачу не трогаем — contentHash не обновится,
+    // следующий sync перепроверит строку ещё раз.
+    return { action: "skipped", failed: false, message: `Временная ошибка проверки: ${message}`, writeBacks: [] };
+  }
 }
 
 async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options: { force?: boolean } = {}) {
@@ -834,6 +1159,10 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
     doneMarkedDeleted: 0,
     revived: 0,
     conflicts: 0,
+    importedDone: 0,
+    rowsReused: 0,
+    reactivated: 0,
+    editedAfterDone: 0,
   };
   result.diagnostics.reconciliation = reconciliation;
 
@@ -883,13 +1212,14 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
 
         const gamepassInput = String(cells[SHEET_COL.gamepass] ?? "").trim();
         const gamepassId = parseGamepassId(gamepassInput);
-        const existing = tasksByRowId.get(externalRowId) ?? null;
+        let existing = tasksByRowId.get(externalRowId) ?? null;
         // Строку очистили (A:C пустые, чип D мог остаться предвыставленным «в ожидании») —
-        // это удаление заказа: задача уходит из TWA полностью. D=«готово»/«ошибка» не трогаем:
-        // готово — операционная история, ошибка — наш же write-back.
-        const rowCleared = [SHEET_COL.nickname, SHEET_COL.gamepass, SHEET_COL.amount]
+        // это удаление заказа: задача уходит из TWA полностью. D=«готово» не трогаем
+        // (операционная история); D=«ошибка» с 5.7 (A3) тоже удаляет задачу — раньше
+        // очистка строки-ошибки оставляла вечную зомби-FAILED в активном списке.
+        const rowCleared = SHEET_CONTENT_CELLS
           .every((i) => String(cells[i] ?? "").trim() === "");
-        if (rowCleared && existing && status !== GOOGLE_STATUS_DONE && status !== GOOGLE_STATUS_ERROR) {
+        if (rowCleared && existing && status !== GOOGLE_STATUS_DONE) {
           // DONE/PURCHASING не трогаем и «готово» в очищенную строку не переписываем:
           // Антон мог очистить строку под переиспользование.
           if (existing.status === "DONE" || existing.status === "PURCHASING") continue;
@@ -902,14 +1232,90 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
         }
 
         if (!isPending) {
+          const rowComment = String(cells[SHEET_COL.comment] ?? "").trim();
+          const nonPendingSheetPrice = parseImportNumber(nominal);
+
+          if (status === GOOGLE_STATUS_DONE) {
+            if (existing?.status === "DONE") {
+              // 5.7 C2: правка строки после выкупа — задача не мутирует, только пометка с diff.
+              if (await markDoneRowEdited(existing, cells, reconciliation)) {
+                result.updated += 1;
+                rowItem("updated", existing.gamepassId, "Строка изменена после выкупа — помечена в истории");
+              }
+              continue;
+            }
+            if (!existing) {
+              if (nonPendingSheetPrice && nonPendingSheetPrice > 0) {
+                // 5.7 B1: исторический выкуп, внесённый чипом «готово» напрямую —
+                // импортируем как выполненный со списанием по номиналу C.
+                const { debitedUsdt } = await importDoneRowFromSheet({
+                  partner,
+                  user,
+                  spreadsheetId,
+                  sheetTitle: sheet.title,
+                  sheetId: sheet.sheetId,
+                  rowNumber,
+                  externalRowId,
+                  cells,
+                  gamepassId,
+                  sheetPriceRobux: nonPendingSheetPrice,
+                  stats: reconciliation,
+                });
+                result.created += 1;
+                rowItem("created", gamepassId, `Импортирована как выкупленная (D=«готово»), списано ${debitedUsdt} USDT`);
+              } else if (gamepassId || hasAmount || String(cells[SHEET_COL.nickname] ?? "").trim()) {
+                // «готово» без распознанного номинала — списание посчитать нечем.
+                result.skipped += 1;
+                rowItem("skipped", gamepassId, `Строка «готово» без номинала в ${SHEET_AMOUNT_LETTER} — не импортирована`);
+              }
+              continue;
+            }
+            // Активная задача + ручное «готово» → реконсиляция ниже (DONE + списание).
+          }
+
+          // 5.7 C1: чип «ошибка» — перепроверяем исправленное содержимое строки
+          // (FAILED-задача с изменившимся A:C) или создаём задачу по строке без задачи.
+          if (status === GOOGLE_STATUS_ERROR
+            && (existing ? existing.status === "FAILED" : Boolean(gamepassId || hasAmount))) {
+            const checked = await processErrorStatusRow({
+              partner,
+              user,
+              spreadsheetId,
+              sheetTitle: sheet.title,
+              sheetId: sheet.sheetId,
+              rowNumber,
+              externalRowId,
+              cells,
+              existing,
+              gamepassInput,
+              gamepassId,
+              sheetPriceRobux: nonPendingSheetPrice,
+              stats: reconciliation,
+            });
+            if (checked) {
+              if (checked.action === "created") result.created += 1;
+              else if (checked.action === "updated") result.updated += 1;
+              else result.skipped += 1;
+              if (checked.failed) result.failed += 1;
+              writeBacks.push(...checked.writeBacks);
+              rowItem(checked.action, gamepassId, checked.message);
+              continue;
+            }
+            if (!existing) continue;
+            // FAILED-задача без изменений строки — реконсиляция ниже ничего не сделает.
+          }
+
           // Реконсиляция ручных статусов: D сменили руками — приводим внутреннюю задачу
-          // в соответствие (готово -> DONE без списания, ошибка -> FAILED, прочее -> CANCELLED).
+          // в соответствие (готово -> DONE со списанием, ошибка -> FAILED, прочее -> CANCELLED).
           if (existing) {
             const outcome = await reconcilePartnerGoogleRow({
+              partner,
+              user,
               task: existing,
               rowStatus: status,
-              rowComment: String(cells[SHEET_COL.comment] ?? "").trim(),
+              rowComment,
               rowGamepassId: gamepassId,
+              sheetPriceRobux: nonPendingSheetPrice,
               stats: reconciliation,
             });
             if (outcome) {
@@ -939,13 +1345,37 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
         );
 
         if (existing?.status === "DONE") {
-          result.skipped += 1;
-          rowItem("skipped", existing.gamepassId, "Задача уже выполнена");
-          writeBacks.push(
-            { range: googleCellRange(sheet.title, SHEET_STATUS_LETTER, rowNumber), values: [[GOOGLE_STATUS_DONE]] },
-            { range: googleCellRange(sheet.title, SHEET_COMMENT_LETTER, rowNumber), values: [[""]] },
-          );
-          continue;
+          // 5.7 B2: «в ожидании» на строке выкупленной задачи — проверяем, выкуплена ли
+          // ИМЕННО ЭТА строка (contentHash A:C), а не геймпасс: заказы могут полностью
+          // повторяться (ник+ГП+номинал). Совпадает → восстанавливаем чип «готово».
+          // Отличается → строку переиспользовали под новый заказ: DONE-задача уходит в
+          // архив (externalRowId освобождается, списание остаётся), по строке создаётся
+          // новая задача. Закрывает HIGH-баг №1 ультра-ревью 5.6 (тихая потеря заказа).
+          const storedContentHash = getStoredContentHash(existing);
+          if (!storedContentHash || storedContentHash === computeGoogleRowContentHash(cells)) {
+            result.skipped += 1;
+            rowItem("skipped", existing.gamepassId, "Задача уже выполнена");
+            writeBacks.push(
+              { range: googleCellRange(sheet.title, SHEET_STATUS_LETTER, rowNumber), values: [[GOOGLE_STATUS_DONE]] },
+              { range: googleCellRange(sheet.title, SHEET_COMMENT_LETTER, rowNumber), values: [[""]] },
+            );
+            continue;
+          }
+          await prisma.partnerBuyoutTask.update({
+            where: { id: existing.id },
+            data: {
+              externalRowId: `${externalRowId}#done:${existing.id}`,
+              sheetRaw: mergeTaskSheetRaw(existing, {
+                rowReusedForNewOrder: true,
+                rowReusedAt: new Date().toISOString(),
+                archivedRowId: externalRowId,
+              }),
+            },
+          });
+          reconciliation.rowsReused += 1;
+          result.updated += 1;
+          rowItem("updated", existing.gamepassId, "Строка переиспользована под новый заказ — старый выкуп в архиве");
+          existing = null;
         }
         if (existing?.status === "PURCHASING" || (existing?.status === "CANCELLED" && !existingRevivableCancelled)) {
           result.skipped += 1;
@@ -1146,7 +1576,11 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           if (!scannedSheetTitles.has(meta.sheetTitle)) continue;
           if (task.status === "DONE") {
             // Деньги/статус не трогаем: заказ выполнен, списание остаётся. Только бейдж.
-            if (isRecord(task.sheetRaw) && task.sheetRaw.rowDeletedFromSheet === true) continue;
+            const doneRaw = isRecord(task.sheetRaw) ? task.sheetRaw : null;
+            // Архив B2: строка жива, но принадлежит новому заказу — «удалена из таблицы»
+            // для такой задачи неверно.
+            if (doneRaw?.rowReusedForNewOrder === true) continue;
+            if (doneRaw?.rowDeletedFromSheet === true) continue;
             await prisma.partnerBuyoutTask.update({
               where: { id: task.id },
               data: { sheetRaw: mergeTaskSheetRaw(task, { rowDeletedFromSheet: true, rowDeletedAt: new Date().toISOString() }) },
@@ -1299,7 +1733,7 @@ async function getPartner(slug: string) {
 
 async function loadPartnerState(partner: Partner) {
   const currency = moneyCurrency(partner);
-  const [tasks, ledgerEntries, importRuns, balanceAgg, spentAgg] = await Promise.all([
+  const [tasks, ledgerEntries, importRuns, balanceAgg, spentAgg, statusGroups, doneWithPurchaseAgg, doneWithoutPurchaseAgg] = await Promise.all([
     prisma.partnerBuyoutTask.findMany({
       where: { partnerId: partner.id },
       orderBy: [{ updatedAt: "desc" }],
@@ -1323,15 +1757,32 @@ async function loadPartnerState(partner: Partner) {
       where: { partnerId: partner.id, currency, type: "BUYOUT" },
       _sum: { amount: true },
     }),
+    // 5.7: счётчики статусов и «Выкуплено» — по всей БД, а не по срезу take:100,
+    // иначе контрольная цифра владельца ломается при росте числа задач.
+    prisma.partnerBuyoutTask.groupBy({
+      by: ["status"],
+      where: { partnerId: partner.id },
+      _count: { _all: true },
+    }),
+    // Цена задачи = purchasePriceRobux ?? priceRobux (getTaskPrice) — COALESCE в Prisma
+    // aggregate не выразить, поэтому две суммы по наличию purchasePriceRobux.
+    prisma.partnerBuyoutTask.aggregate({
+      where: { partnerId: partner.id, status: "DONE", purchasePriceRobux: { not: null } },
+      _sum: { purchasePriceRobux: true },
+    }),
+    prisma.partnerBuyoutTask.aggregate({
+      where: { partnerId: partner.id, status: "DONE", purchasePriceRobux: null },
+      _sum: { priceRobux: true },
+    }),
   ]);
 
   const balanceUsdt = balanceAgg._sum.amount ?? 0;
   const spentUsdt = Math.abs(spentAgg._sum.amount ?? 0);
-  // Закрытые вручную из таблицы (closedFromSheet) не попадают в «Выкуплено»:
-  // по ним не было ни покупки, ни списания USDT.
-  const doneRobux = tasks
-    .filter((task) => task.status === "DONE" && !(isRecord(task.sheetRaw) && task.sheetRaw.closedFromSheet === true))
-    .reduce((sum, task) => sum + getTaskPrice(task), 0);
+  const statusCount = (status: string) => statusGroups.find((group) => group.status === status)?._count._all ?? 0;
+  const totalTasks = statusGroups.reduce((sum, group) => sum + group._count._all, 0);
+  // 5.7 B1: «Выкуплено» считает ВСЕ DONE — ручные «готово» из таблицы теперь тоже
+  // списываются и являются выкупленными (исключение closedFromSheet убрано).
+  const doneRobux = (doneWithPurchaseAgg._sum.purchasePriceRobux ?? 0) + (doneWithoutPurchaseAgg._sum.priceRobux ?? 0);
   const reservedUsdt = tasks
     .filter((task) => task.status === "READY" || task.status === "PURCHASING")
     .reduce((sum, task) => sum + taskCostUsdt(getTaskPrice(task), partner), 0);
@@ -1362,11 +1813,11 @@ async function loadPartnerState(partner: Partner) {
       reservedUsdt,
       ledgerCurrency: currency,
       robuxRateUsdtPer1000: partner.robuxRateUsdtPer1000,
-      total: tasks.length,
-      ready: tasks.filter((task) => task.status === "READY").length,
-      purchasing: tasks.filter((task) => task.status === "PURCHASING").length,
-      done: tasks.filter((task) => task.status === "DONE").length,
-      failed: tasks.filter((task) => task.status === "FAILED").length,
+      total: totalTasks,
+      ready: statusCount("READY"),
+      purchasing: statusCount("PURCHASING"),
+      done: statusCount("DONE"),
+      failed: statusCount("FAILED"),
       mismatches,
       conflicts,
     },
@@ -1497,6 +1948,26 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       return json({ ok: true, partner, ...state });
     }
 
+    if (action === "cancel-ledger-entry") {
+      // 5.7 E1: отмена ошибочного пополнения = полное удаление записи (решение владельца,
+      // сторно-ADJUSTMENT не заводим). Только TOPUP без привязки к задаче.
+      const entryId = String(body.entryId || "");
+      if (!entryId) return json({ ok: false, error: "entryId обязателен" }, 400);
+
+      const entry = await prisma.partnerLedgerEntry.findFirst({
+        where: { id: entryId, partnerId: partner.id },
+      });
+      if (!entry) return json({ ok: false, error: "Запись не найдена" }, 404);
+      if (entry.type !== "TOPUP" || entry.taskId) {
+        return json({ ok: false, error: "Отменить можно только пополнение" }, 409);
+      }
+
+      await prisma.partnerLedgerEntry.delete({ where: { id: entry.id } });
+
+      const state = await loadPartnerState(partner);
+      return json({ ok: true, partner, ...state });
+    }
+
     if (action === "set-rate") {
       const rate = Number(body.robuxRateUsdtPer1000);
       if (!Number.isFinite(rate) || rate <= 0) {
@@ -1567,7 +2038,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       }
 
       const priceRobux = manualPrice ?? getTaskPrice(task);
-      const priceUsdt = priceRobux > 0 ? taskCostUsdt(priceRobux, partner) : 0;
+      // №8 ультра-ревью: «Готово» без цены закрывало задачу бесплатно — неучтённый выкуп.
+      // Требуем цену: номинал в строке таблицы (и re-sync) или purchasePriceRobux в запросе.
+      if (!priceRobux || priceRobux <= 0) {
+        return json({ ok: false, error: "У задачи нет цены — заполните номинал в таблице или передайте фактическую цену" }, 400);
+      }
+      const priceUsdt = taskCostUsdt(priceRobux, partner);
       if (priceUsdt > 0) {
         const balance = await getPartnerBalance(partner);
         if (balance < priceUsdt) {
@@ -1623,10 +2099,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       if (!task || task.partnerId !== partner.id) return json({ ok: false, error: "Задача не найдена" }, 404);
       if (!settings?.robloxCookie) {
-        // Внутренняя ошибка операций — в таблицу Антона не пишем вообще.
+        // Внутренняя ошибка операций — в таблицу Антона не пишем вообще, а задачу
+        // возвращаем в READY (№7): наша проблема не должна выбивать её из батч-плана.
         await prisma.partnerBuyoutTask.update({
           where: { id: task.id },
-          data: { status: "FAILED", error: "Roblox cookie не задан" },
+          data: { status: "READY", error: "Roblox cookie не задан" },
         });
         return json({ ok: false, error: "Roblox cookie не задан" }, 409);
       }
@@ -1656,16 +2133,31 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         return json({ ok: false, error: "Недостаточно баланса партнёра", partner, ...(await loadPartnerState(partner)) }, 409);
       }
 
-      const result = await purchaseGamepassWithCookie(settings.robloxCookie, { productId, price, sellerId });
+      let result: PurchaseResult;
+      try {
+        result = await purchaseGamepassWithCookie(settings.robloxCookie, { productId, price, sellerId });
+      } catch (err) {
+        // CSRF/сеть/нет ответа Roblox — внутреннее и временное: раньше задача зависала
+        // в PURCHASING навсегда. Возвращаем READY, в таблицу не пишем.
+        const message = err instanceof Error ? err.message : "Ошибка покупки Roblox";
+        await prisma.partnerBuyoutTask.update({
+          where: { id: task.id },
+          data: { status: "READY", error: message },
+        });
+        return json({ ok: false, error: message }, err instanceof BuyoutError ? err.status : 502);
+      }
       if (!result.success) {
+        // №5+№7 ультра-ревью: классификация — typed-код из purchaseGamepassWithCookie,
+        // а не regex по локализованному msg. internal (cookie, Robux донора) — наша
+        // проблема: задача возвращается в READY (остаётся в батч-плане), строку красным
+        // не помечаем. row (цена сменилась, не продаётся) — FAILED + чип «ошибка».
+        // unknown — FAILED для ручного разбора, но на Антона не вешаем (только комментарий).
+        const internalFailure = result.failureKind === "internal";
         const failedTask = await prisma.partnerBuyoutTask.update({
           where: { id: task.id },
-          data: { status: "FAILED", error: result.msg },
+          data: { status: internalFailure ? "READY" : "FAILED", error: result.msg },
         });
-        // Протухший cookie и нехватка Robux на доноре — наши проблемы, не Антона:
-        // строку красным не помечаем, чтобы она осталась «в ожидании» для ретрая.
-        const internalFailure = /cookie|insufficient.?funds|недостаточно/i.test(result.msg || "");
-        await writeBackPartnerTask(failedTask, internalFailure ? "comment" : "error", result.msg);
+        await writeBackPartnerTask(failedTask, result.failureKind === "row" ? "error" : "comment", result.msg);
         return json({ ok: true, success: false, error: result.msg, balance: result.balance, partner, ...(await loadPartnerState(partner)) });
       }
 
