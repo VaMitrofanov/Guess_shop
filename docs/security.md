@@ -77,8 +77,13 @@ service-account с минимальным доступом Editor только �
 нельзя логировать и нельзя добавлять в `.env.example`/docs. `google-sheets.ts` не логирует
 JSON credentials, private key, access token и raw-ответы Google, а `GoogleSheetsError` несёт
 только короткий текст. Google Sheet расшарен на service-account email из JSON с правом Editor
-(write-back пишет в `E/F`); scope ограничен `spreadsheets`. Sync ходит в Google только с
+(write-back пишет в `D/E`); scope ограничен `spreadsheets`. Sync ходит в Google только с
 сервера — клиентский TWA работает с задачами из БД, а не с таблицей напрямую.
+С Этапа 5.8 (2026-07-11) бот дополнительно лочит выполненные строки `addProtectedRange`
+(анти-tampering: сотрудники не могут править/удалять уже оплаченные строки `A:D`).
+Редакторы защиты берутся из `client_email` credentials + env
+`GOOGLE_SHEETS_PROTECTED_EDITORS` (email владельца таблицы) — email'ы не хардкодятся
+в публичном репозитории.
 
 TWA также принимает ручной `.xlsx` upload для Антона как запасной путь импорта. Ограничения:
 до `5 MB`, до `300` строк, бинарный файл не сохраняется, в БД остаются только metadata строки.

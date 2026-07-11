@@ -56,8 +56,10 @@ destructive changes/существующие таблицы, только пос
 **Web:** `DATABASE_URL`, `AUTH_SECRET` (или `NEXTAUTH_SECRET`), `NEXTAUTH_URL`,
 `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_VK_APP_ID`, `TG_TOKEN`, `TG_CHAT_ID`, `ADMIN_IDS`,
 `ADMIN_SECRET`, `WB_API_TOKEN`, `MAINTENANCE_MODE` (опц., см. ниже), `SITE_UNLOCK_SECRET`
-(опц., байпас техработ). (Legacy: `TINKOFF_SECRET_KEY`, `LOCAL_BOT_URL`,
-`INTERNAL_WEBHOOK_SECRET`, `BOT_API_TOKEN`.)
+(опц., байпас техработ); B2B «Антон»: `ANTON_GOOGLE_SHEETS_SPREADSHEET_ID`,
+`GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHEETS_PROTECTED_EDITORS` (email владельца
+таблицы для защиты выполненных строк, Этап 5.8). (Legacy: `TINKOFF_SECRET_KEY`,
+`LOCAL_BOT_URL`, `INTERNAL_WEBHOOK_SECRET`, `BOT_API_TOKEN`.)
 
 **TG-бот:** `DATABASE_URL`, `TG_TOKEN`, `TG_CHANNEL_ID` (опц., гейт подписки), `ADMIN_IDS`,
 `VALIDATOR_SOURCE_URL`, `VALIDATOR_KEY`, health-мониторинг (`HETZNER_API_TOKEN`, `VDSINA_*`).

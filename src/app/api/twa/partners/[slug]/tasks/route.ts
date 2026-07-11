@@ -6,11 +6,19 @@ import * as XLSX from "xlsx";
 import { Prisma, type Partner, type PartnerBuyoutTask } from "@prisma/client";
 
 import {
+  batchUpdateGoogleSheetStructural,
   batchUpdateGoogleSheetValues,
+  buildAddProtectedRangeRequest,
+  buildDeleteProtectedRangeRequest,
+  buildUpdateCellRequest,
+  getGoogleProtectionEditors,
   googleCellRange,
   isGoogleSheetsConfigured,
+  listGoogleSheetProtectedRanges,
   listGoogleSheets,
   readGoogleSheetRows,
+  type GoogleProtectedRangeInfo,
+  type GoogleSheetsRequest,
   type GoogleSheetsValueUpdate,
 } from "@/lib/google-sheets";
 import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepass, type PurchaseResult } from "@/lib/roblox-buyout";
@@ -56,6 +64,12 @@ const SHEET_COMMENT_LETTER = "E";
 const SHEET_READ_RANGE = `A:${SHEET_COMMENT_LETTER}`;
 const SHEET_CELL_COUNT = 5;
 const ACTIVE_TASK_STATUSES = ["NEW", "READY", "FAILED"] as const;
+// 5.8: выполненные строки лочатся addProtectedRange — в таблице работает Apps Script
+// против ручной смены статусов, но API-записи он не видит, поэтому защиту ставит бот.
+// Диапазон A:D (E остаётся каналом комментариев); редакторы — владелец таблицы
+// (env GOOGLE_SHEETS_PROTECTED_EDITORS) + сервисный аккаунт (client_email credentials).
+const SHEET_PROTECTION_DESCRIPTION_PREFIX = "Заблокировано ботом";
+const SHEET_PROTECTION_END_COLUMN = SHEET_COL.status + 1;
 
 type ParsedPartnerImportRow = {
   rowNumber: number;
@@ -122,10 +136,28 @@ type GoogleSyncReconciliationStats = {
   editedAfterDone: number;
 };
 
+/** 5.8: итоги установки/снятия защит строк за прогон. */
+type GoogleSyncProtectionStats = {
+  /** Новые защиты, поставленные этим прогоном. */
+  locked: number;
+  /** Защита уже стояла в таблице, задаче дописан потерянный protectedRangeId. */
+  healed: number;
+  /** Снятые защиты (переиспользование строки, B2-архив). */
+  unlocked: number;
+  /** Задачи, для которых установка защиты не удалась (дочинит следующий sync). */
+  failed: number;
+};
+
 type GoogleSyncDiagnostics = GoogleSyncFilterStats & {
   sheets: GoogleSyncSheetDiagnostics[];
   reconciliation?: GoogleSyncReconciliationStats;
+  protection?: GoogleSyncProtectionStats;
 };
+
+/** 5.8: отложенные операции защиты строк, применяются одним батчем в конце прогона. */
+type PartnerProtectionOp =
+  | { kind: "protect"; taskId: string; sheetId: number; rowNumber: number }
+  | { kind: "unprotect"; protectedRangeId: number };
 
 type GoogleSyncResult = {
   status: "success" | "partial" | "failed" | "skipped";
@@ -353,6 +385,43 @@ function getGoogleTaskMeta(task: Pick<PartnerBuyoutTask, "externalSource" | "she
   if (!spreadsheetId || !sheetTitle || !Number.isInteger(rowNumber) || rowNumber < 1) return null;
 
   return { spreadsheetId, sheetTitle, rowNumber, raw: task.sheetRaw };
+}
+
+function getTaskProtectedRangeId(task: Pick<PartnerBuyoutTask, "sheetRaw">) {
+  if (!isRecord(task.sheetRaw)) return null;
+  const id = task.sheetRaw.protectedRangeId;
+  return typeof id === "number" && Number.isInteger(id) ? id : null;
+}
+
+function buildPartnerRowProtectRequest(sheetId: number, rowNumber: number) {
+  return buildAddProtectedRangeRequest({
+    sheetId,
+    rowNumber,
+    startColumnIndex: SHEET_COL.nickname,
+    endColumnIndex: SHEET_PROTECTION_END_COLUMN,
+    description: `${SHEET_PROTECTION_DESCRIPTION_PREFIX} (строка ${rowNumber})`,
+    editors: getGoogleProtectionEditors(),
+  });
+}
+
+function findBotRowProtection(protections: GoogleProtectedRangeInfo[], sheetId: number, rowNumber: number) {
+  return protections.find((protection) => protection.range.sheetId === sheetId
+    && protection.range.startRowIndex === rowNumber - 1
+    && protection.range.endRowIndex === rowNumber
+    && protection.description.startsWith(SHEET_PROTECTION_DESCRIPTION_PREFIX)) ?? null;
+}
+
+/**
+ * Патч sheetRaw по свежей версии задачи из БД: между постановкой отложенной операции
+ * и её применением задача могла обновиться другим кодом прогона.
+ */
+async function patchTaskSheetRaw(taskId: string, patch: Record<string, unknown>) {
+  const task = await prisma.partnerBuyoutTask.findUnique({ where: { id: taskId } });
+  if (!task) return;
+  await prisma.partnerBuyoutTask.update({
+    where: { id: taskId },
+    data: { sheetRaw: mergeTaskSheetRaw(task, patch) },
+  });
 }
 
 function mergeTaskSheetRaw(task: Pick<PartnerBuyoutTask, "sheetRaw">, patch: Record<string, unknown>) {
@@ -614,9 +683,13 @@ async function importPartnerXlsx(partner: Partner, user: NonNullable<TwaUser>, f
 }
 
 /**
- * kind="done"      -> D="готово", E очищается.
+ * kind="done"      -> 5.8: одним атомарным spreadsheets.batchUpdate — D="готово",
+ *                     E очищается и на A:D строки ставится addProtectedRange (в таблице
+ *                     Apps Script запрещает сотрудникам менять статусы, но API-записи
+ *                     он не видит — защиту выполненной строки ставит сам бот).
  * kind="error"     -> D="ошибка" (красная строка у Антона) + причина в E («комментарий»).
  *                     Строка выходит из фильтра «в ожидании» до ручного исправления.
+ *                     Защита НЕ ставится: сотрудники могут вернуть «в ожидании».
  * kind="comment"   -> только E; D не трогаем (внутренние ошибки операций: cookie,
  *                     баланс партнёра — строка должна остаться «в ожидании»).
  * kind="cancelled" -> D="ошибка" + E="Отменено менеджером": отмена из TWA должна быть
@@ -627,46 +700,170 @@ async function writeBackPartnerTask(task: PartnerBuyoutTask, kind: "done" | "err
   const meta = getGoogleTaskMeta(task);
   if (!meta || !isGoogleSheetsConfigured()) return;
 
+  if (kind === "done") {
+    await writeBackPartnerTaskDone(task, meta);
+    return;
+  }
+
   const errorMessage = truncateGoogleMessage(
     message || (kind === "cancelled" ? GOOGLE_CANCELLED_COMMENT : task.error) || "Ошибка обработки",
   );
-  const updates: GoogleSheetsValueUpdate[] = kind === "done"
+  const updates: GoogleSheetsValueUpdate[] = kind === "error" || kind === "cancelled"
     ? [
-      { range: googleCellRange(meta.sheetTitle, SHEET_STATUS_LETTER, meta.rowNumber), values: [[GOOGLE_STATUS_DONE]] },
-      { range: googleCellRange(meta.sheetTitle, SHEET_COMMENT_LETTER, meta.rowNumber), values: [[""]] },
+      { range: googleCellRange(meta.sheetTitle, SHEET_STATUS_LETTER, meta.rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
+      { range: googleCellRange(meta.sheetTitle, SHEET_COMMENT_LETTER, meta.rowNumber), values: [[errorMessage]] },
     ]
-    : kind === "error" || kind === "cancelled"
-      ? [
-        { range: googleCellRange(meta.sheetTitle, SHEET_STATUS_LETTER, meta.rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
-        { range: googleCellRange(meta.sheetTitle, SHEET_COMMENT_LETTER, meta.rowNumber), values: [[errorMessage]] },
-      ]
-      : [
-        { range: googleCellRange(meta.sheetTitle, SHEET_COMMENT_LETTER, meta.rowNumber), values: [[errorMessage]] },
-      ];
+    : [
+      { range: googleCellRange(meta.sheetTitle, SHEET_COMMENT_LETTER, meta.rowNumber), values: [[errorMessage]] },
+    ];
 
   try {
     await batchUpdateGoogleSheetValues(meta.spreadsheetId, updates);
-    await prisma.partnerBuyoutTask.update({
-      where: { id: task.id },
-      data: {
-        sheetRaw: mergeTaskSheetRaw(task, {
-          writeBackAt: new Date().toISOString(),
-          lastWriteBackError: null,
-          ...(kind === "cancelled" ? { cancelWriteBackAt: new Date().toISOString() } : {}),
-        }),
-      },
+    await patchTaskSheetRaw(task.id, {
+      writeBackAt: new Date().toISOString(),
+      lastWriteBackError: null,
+      ...(kind === "cancelled" ? { cancelWriteBackAt: new Date().toISOString() } : {}),
     });
   } catch (err) {
     const error = err instanceof Error ? err.message : "Ошибка записи в Google Sheets";
-    await prisma.partnerBuyoutTask.update({
-      where: { id: task.id },
-      data: {
-        sheetRaw: mergeTaskSheetRaw(task, {
-          lastWriteBackError: error,
-          lastWriteBackFailedAt: new Date().toISOString(),
-        }),
-      },
+    await patchTaskSheetRaw(task.id, {
+      lastWriteBackError: error,
+      lastWriteBackFailedAt: new Date().toISOString(),
     });
+  }
+}
+
+/**
+ * 5.8: успешное «готово». Повторный вызов защиту не дублирует: protectedRangeId хранится
+ * в sheetRaw, а при его отсутствии существующая защита ищется в таблице по диапазону и
+ * описанию (страховка после чисток БД, когда знание об id потеряно). Если sheetId листа
+ * неизвестен и не резолвится — значения пишутся старым values-путём, защиту дочинит
+ * ближайший sync (DONE-ветка «инвариант DONE = залочено»).
+ */
+async function writeBackPartnerTaskDone(task: PartnerBuyoutTask, meta: NonNullable<ReturnType<typeof getGoogleTaskMeta>>) {
+  try {
+    let sheetId = typeof meta.raw.sheetId === "number" ? meta.raw.sheetId : null;
+    if (sheetId === null) {
+      const sheet = (await listGoogleSheets(meta.spreadsheetId)).find((info) => info.title === meta.sheetTitle);
+      sheetId = sheet?.sheetId ?? null;
+    }
+    if (sheetId === null) {
+      await batchUpdateGoogleSheetValues(meta.spreadsheetId, [
+        { range: googleCellRange(meta.sheetTitle, SHEET_STATUS_LETTER, meta.rowNumber), values: [[GOOGLE_STATUS_DONE]] },
+        { range: googleCellRange(meta.sheetTitle, SHEET_COMMENT_LETTER, meta.rowNumber), values: [[""]] },
+      ]);
+      await patchTaskSheetRaw(task.id, {
+        writeBackAt: new Date().toISOString(),
+        lastWriteBackError: null,
+        protectError: "sheetId листа не найден — защита строки будет установлена sync'ом",
+      });
+      return;
+    }
+
+    let protectedRangeId = getTaskProtectedRangeId(task);
+    if (protectedRangeId === null) {
+      const existing = findBotRowProtection(
+        await listGoogleSheetProtectedRanges(meta.spreadsheetId),
+        sheetId,
+        meta.rowNumber,
+      );
+      protectedRangeId = existing?.protectedRangeId ?? null;
+    }
+
+    const requests: GoogleSheetsRequest[] = [
+      buildUpdateCellRequest({ sheetId, rowNumber: meta.rowNumber, columnIndex: SHEET_COL.status, value: GOOGLE_STATUS_DONE }),
+      buildUpdateCellRequest({ sheetId, rowNumber: meta.rowNumber, columnIndex: SHEET_COL.comment, value: "" }),
+    ];
+    let protectIndex = -1;
+    if (protectedRangeId === null) {
+      protectIndex = requests.length;
+      requests.push(buildPartnerRowProtectRequest(sheetId, meta.rowNumber));
+    }
+    const { replies } = await batchUpdateGoogleSheetStructural(meta.spreadsheetId, requests);
+    if (protectIndex >= 0) {
+      const replyId = replies[protectIndex]?.addProtectedRange?.protectedRange?.protectedRangeId;
+      if (typeof replyId === "number") protectedRangeId = replyId;
+    }
+    await patchTaskSheetRaw(task.id, {
+      writeBackAt: new Date().toISOString(),
+      lastWriteBackError: null,
+      protectError: null,
+      ...(protectedRangeId !== null ? { protectedRangeId, protectedAt: new Date().toISOString() } : {}),
+    });
+  } catch (err) {
+    const error = err instanceof Error ? err.message : "Ошибка записи в Google Sheets";
+    await patchTaskSheetRaw(task.id, {
+      lastWriteBackError: error,
+      lastWriteBackFailedAt: new Date().toISOString(),
+    });
+  }
+}
+
+/**
+ * 5.8: применение отложенных защит строк одним структурным batchUpdate в конце прогона
+ * sync. Перед добавлением сверяемся с существующими защитами таблицы: защита без
+ * записанного id «лечится» (id дописывается задаче), дубль не создаётся. Ошибка не
+ * роняет прогон — инвариант «DONE = залочено» дочинит следующий sync (DONE-ветка).
+ */
+async function applyPartnerProtectionOps(
+  spreadsheetId: string,
+  ops: PartnerProtectionOp[],
+  stats: GoogleSyncProtectionStats,
+): Promise<string | null> {
+  if (ops.length === 0) return null;
+  const protectOpsCount = ops.filter((op) => op.kind === "protect").length;
+
+  try {
+    const protections = await listGoogleSheetProtectedRanges(spreadsheetId);
+    const knownIds = new Set(protections.map((protection) => protection.protectedRangeId));
+    const requests: GoogleSheetsRequest[] = [];
+    const pendingProtects: Array<{ taskId: string; requestIndex: number }> = [];
+    const seenTargets = new Set<string>();
+    let deleteCount = 0;
+
+    for (const op of ops) {
+      if (op.kind === "unprotect") {
+        // Снимаем только реально существующую защиту: deleteProtectedRange с чужим id
+        // валит весь батч.
+        if (knownIds.has(op.protectedRangeId)) {
+          requests.push(buildDeleteProtectedRangeRequest(op.protectedRangeId));
+          deleteCount += 1;
+        }
+        continue;
+      }
+      const targetKey = `${op.sheetId}:${op.rowNumber}`;
+      if (seenTargets.has(targetKey)) continue;
+      seenTargets.add(targetKey);
+      const existing = findBotRowProtection(protections, op.sheetId, op.rowNumber);
+      if (existing) {
+        await patchTaskSheetRaw(op.taskId, {
+          protectedRangeId: existing.protectedRangeId,
+          protectedAt: new Date().toISOString(),
+          protectError: null,
+        });
+        stats.healed += 1;
+        continue;
+      }
+      pendingProtects.push({ taskId: op.taskId, requestIndex: requests.length });
+      requests.push(buildPartnerRowProtectRequest(op.sheetId, op.rowNumber));
+    }
+    if (requests.length === 0) return null;
+
+    const { replies } = await batchUpdateGoogleSheetStructural(spreadsheetId, requests);
+    stats.unlocked += deleteCount;
+    for (const pending of pendingProtects) {
+      const replyId = replies[pending.requestIndex]?.addProtectedRange?.protectedRange?.protectedRangeId;
+      await patchTaskSheetRaw(pending.taskId, {
+        ...(typeof replyId === "number" ? { protectedRangeId: replyId } : {}),
+        protectedAt: new Date().toISOString(),
+        protectError: null,
+      });
+      stats.locked += 1;
+    }
+    return null;
+  } catch (err) {
+    stats.failed += protectOpsCount;
+    return err instanceof Error ? err.message : "Ошибка установки защиты строк";
   }
 }
 
@@ -1151,6 +1348,8 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
     },
   });
   const writeBacks: GoogleSheetsValueUpdate[] = [];
+  // 5.8: защиты строк копятся за прогон и применяются одним структурным batchUpdate.
+  const protectionOps: PartnerProtectionOp[] = [];
   const reconciliation: GoogleSyncReconciliationStats = {
     closedFromSheet: 0,
     failedFromSheet: 0,
@@ -1237,6 +1436,11 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
 
           if (status === GOOGLE_STATUS_DONE) {
             if (existing?.status === "DONE") {
+              // 5.8: инвариант «DONE = списано = залочено» — дочиняем защиту, если её нет
+              // (бэкфилл старых строк, ретрай упавшего addProtectedRange).
+              if (getTaskProtectedRangeId(existing) === null) {
+                protectionOps.push({ kind: "protect", taskId: existing.id, sheetId: sheet.sheetId, rowNumber });
+              }
               // 5.7 C2: правка строки после выкупа — задача не мутирует, только пометка с diff.
               if (await markDoneRowEdited(existing, cells, reconciliation)) {
                 result.updated += 1;
@@ -1248,7 +1452,7 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
               if (nonPendingSheetPrice && nonPendingSheetPrice > 0) {
                 // 5.7 B1: исторический выкуп, внесённый чипом «готово» напрямую —
                 // импортируем как выполненный со списанием по номиналу C.
-                const { debitedUsdt } = await importDoneRowFromSheet({
+                const { task: importedDoneTask, debitedUsdt } = await importDoneRowFromSheet({
                   partner,
                   user,
                   spreadsheetId,
@@ -1261,6 +1465,8 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
                   sheetPriceRobux: nonPendingSheetPrice,
                   stats: reconciliation,
                 });
+                // 5.8 (О1): ручное «готово» тоже лочится — строка оплачена.
+                protectionOps.push({ kind: "protect", taskId: importedDoneTask.id, sheetId: sheet.sheetId, rowNumber });
                 result.created += 1;
                 rowItem("created", gamepassId, `Импортирована как выкупленная (D=«готово»), списано ${debitedUsdt} USDT`);
               } else if (gamepassId || hasAmount || String(cells[SHEET_COL.nickname] ?? "").trim()) {
@@ -1319,6 +1525,10 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
               stats: reconciliation,
             });
             if (outcome) {
+              // 5.8 (О1): ручное «готово» = выкуплено со списанием → строка лочится.
+              if (outcome.kind === "closed" && getTaskProtectedRangeId(existing) === null) {
+                protectionOps.push({ kind: "protect", taskId: existing.id, sheetId: sheet.sheetId, rowNumber });
+              }
               if (outcome.kind === "conflict") result.skipped += 1;
               else result.updated += 1;
               rowItem(outcome.kind === "conflict" ? "skipped" : "updated", existing.gamepassId, outcome.message);
@@ -1359,7 +1569,17 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
               { range: googleCellRange(sheet.title, SHEET_STATUS_LETTER, rowNumber), values: [[GOOGLE_STATUS_DONE]] },
               { range: googleCellRange(sheet.title, SHEET_COMMENT_LETTER, rowNumber), values: [[""]] },
             );
+            // 5.8: восстановление «готово» тоже чинит защиту (упавший addProtectedRange).
+            if (getTaskProtectedRangeId(existing) === null) {
+              protectionOps.push({ kind: "protect", taskId: existing.id, sheetId: sheet.sheetId, rowNumber });
+            }
             continue;
+          }
+          // 5.8 (О2): строка уходит новому заказу — защита старого выкупа снимается,
+          // чтобы новая задача прожила обычный жизненный цикл.
+          const archivedProtectionId = getTaskProtectedRangeId(existing);
+          if (archivedProtectionId !== null) {
+            protectionOps.push({ kind: "unprotect", protectedRangeId: archivedProtectionId });
           }
           await prisma.partnerBuyoutTask.update({
             where: { id: existing.id },
@@ -1369,6 +1589,8 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
                 rowReusedForNewOrder: true,
                 rowReusedAt: new Date().toISOString(),
                 archivedRowId: externalRowId,
+                protectedRangeId: null,
+                protectedAt: null,
               }),
             },
           });
@@ -1645,6 +1867,19 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
     } catch (err) {
       result.status = "partial";
       result.error = err instanceof Error ? err.message : "Ошибка write-back в Google Sheets";
+    }
+
+    // 5.8: защиты строк — отдельным структурным батчем (значения выше — values-путь).
+    const protection: GoogleSyncProtectionStats = { locked: 0, healed: 0, unlocked: 0, failed: 0 };
+    const protectionError = await applyPartnerProtectionOps(spreadsheetId, protectionOps, protection);
+    if (protection.locked || protection.healed || protection.unlocked || protection.failed) {
+      result.diagnostics.protection = protection;
+    }
+    if (protectionError) {
+      result.status = "partial";
+      result.error = result.error
+        ? `${result.error}; защита строк: ${protectionError}`
+        : `Защита строк: ${protectionError}`;
     }
 
     if (result.status !== "partial") result.status = result.failed > 0 ? "partial" : "success";

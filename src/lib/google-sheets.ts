@@ -32,6 +32,26 @@ export type GoogleSheetsValueUpdate = {
   values: unknown[][];
 };
 
+/** Структурный request для spreadsheets.batchUpdate (updateCells/addProtectedRange/...). */
+export type GoogleSheetsRequest = Record<string, unknown>;
+
+export type GoogleSheetsBatchReply = {
+  addProtectedRange?: { protectedRange?: { protectedRangeId?: number } };
+};
+
+export type GoogleProtectedRangeInfo = {
+  protectedRangeId: number;
+  description: string;
+  warningOnly: boolean;
+  range: {
+    sheetId?: number;
+    startRowIndex?: number;
+    endRowIndex?: number;
+    startColumnIndex?: number;
+    endColumnIndex?: number;
+  };
+};
+
 export class GoogleSheetsError extends Error {
   status: number;
   code: string;
@@ -74,6 +94,28 @@ function getServiceAccount() {
 
 export function isGoogleSheetsConfigured() {
   return Boolean(process.env.GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON?.trim());
+}
+
+export function getGoogleServiceAccountEmail() {
+  try {
+    return getServiceAccount().client_email;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Редакторы защищённых диапазонов: сервисный аккаунт (из client_email credentials)
+ * + владелец таблицы из env GOOGLE_SHEETS_PROTECTED_EDITORS (через запятую).
+ * Email'ы не хардкодятся — репозиторий публичный.
+ */
+export function getGoogleProtectionEditors() {
+  const extra = (process.env.GOOGLE_SHEETS_PROTECTED_EDITORS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const serviceAccountEmail = getGoogleServiceAccountEmail();
+  return [...new Set([...(serviceAccountEmail ? [serviceAccountEmail] : []), ...extra])];
 }
 
 async function getAccessToken() {
@@ -182,4 +224,96 @@ export async function batchUpdateGoogleSheetValues(spreadsheetId: string, update
       data: updates,
     }),
   });
+}
+
+/**
+ * Структурный batchUpdate (updateCells + addProtectedRange + deleteProtectedRange и т.п.).
+ * Атомарен: либо применяются все requests, либо ни один.
+ */
+export async function batchUpdateGoogleSheetStructural(spreadsheetId: string, requests: GoogleSheetsRequest[]) {
+  if (requests.length === 0) return { replies: [] as GoogleSheetsBatchReply[] };
+
+  const data = await googleFetch<{ replies?: GoogleSheetsBatchReply[] }>(
+    `/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}:batchUpdate`,
+    {
+      method: "POST",
+      body: JSON.stringify({ requests }),
+    },
+  );
+  return { replies: data.replies || [] };
+}
+
+/** Запись одной ячейки структурным request'ом; value="" очищает ячейку. */
+export function buildUpdateCellRequest(input: {
+  sheetId: number;
+  rowNumber: number;
+  columnIndex: number;
+  value: string;
+}): GoogleSheetsRequest {
+  return {
+    updateCells: {
+      rows: [{ values: [input.value === "" ? {} : { userEnteredValue: { stringValue: input.value } }] }],
+      fields: "userEnteredValue",
+      start: { sheetId: input.sheetId, rowIndex: input.rowNumber - 1, columnIndex: input.columnIndex },
+    },
+  };
+}
+
+/** Защита ячеек одной строки: [startColumnIndex, endColumnIndex) при warningOnly=false. */
+export function buildAddProtectedRangeRequest(input: {
+  sheetId: number;
+  rowNumber: number;
+  startColumnIndex: number;
+  endColumnIndex: number;
+  description: string;
+  editors: string[];
+}): GoogleSheetsRequest {
+  return {
+    addProtectedRange: {
+      protectedRange: {
+        range: {
+          sheetId: input.sheetId,
+          startRowIndex: input.rowNumber - 1,
+          endRowIndex: input.rowNumber,
+          startColumnIndex: input.startColumnIndex,
+          endColumnIndex: input.endColumnIndex,
+        },
+        description: input.description,
+        warningOnly: false,
+        editors: { users: input.editors },
+      },
+    },
+  };
+}
+
+export function buildDeleteProtectedRangeRequest(protectedRangeId: number): GoogleSheetsRequest {
+  return { deleteProtectedRange: { protectedRangeId } };
+}
+
+export async function listGoogleSheetProtectedRanges(spreadsheetId: string) {
+  const fields = "sheets(protectedRanges(protectedRangeId,description,warningOnly,range))";
+  const data = await googleFetch<{
+    sheets?: Array<{
+      protectedRanges?: Array<{
+        protectedRangeId?: number;
+        description?: string;
+        warningOnly?: boolean;
+        range?: GoogleProtectedRangeInfo["range"];
+      }>;
+    }>;
+  }>(`/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=${encodeURIComponent(fields)}`);
+
+  const result: GoogleProtectedRangeInfo[] = [];
+  for (const sheet of data.sheets || []) {
+    for (const range of sheet.protectedRanges || []) {
+      if (typeof range.protectedRangeId !== "number") continue;
+      result.push({
+        protectedRangeId: range.protectedRangeId,
+        description: range.description || "",
+        warningOnly: Boolean(range.warningOnly),
+        range: range.range || {},
+      });
+    }
+  }
+  return result;
 }

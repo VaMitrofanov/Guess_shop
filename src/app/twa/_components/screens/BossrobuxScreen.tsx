@@ -63,6 +63,10 @@ interface PartnerSheetRaw {
   syncedAt?: string;
   writeBackAt?: string | null;
   lastWriteBackError?: string | null;
+  /** 5.8: id защиты A:D строки в Google Sheets (addProtectedRange). */
+  protectedRangeId?: number | null;
+  protectedAt?: string | null;
+  protectError?: string | null;
   cells?: unknown[];
 }
 
@@ -141,9 +145,17 @@ interface GoogleSyncReconciliationStats {
   editedAfterDone?: number;
 }
 
+interface GoogleSyncProtectionStats {
+  locked?: number;
+  healed?: number;
+  unlocked?: number;
+  failed?: number;
+}
+
 interface GoogleSyncDiagnostics extends GoogleSyncFilterDiagnostics {
   sheets?: GoogleSyncSheetDiagnostics[];
   reconciliation?: GoogleSyncReconciliationStats;
+  protection?: GoogleSyncProtectionStats;
 }
 
 interface PartnerImportRun {
@@ -2346,6 +2358,11 @@ function PartnerTaskRow({
                 из таблицы
               </span>
             )}
+            {task.sheetRaw?.protectedRangeId != null && (
+              <span style={{ borderRadius: 7, background: tint(C.green, 0.14), padding: "4px 8px", color: C.green, fontSize: 14, fontWeight: 700 }}>
+                🔒 защищена
+              </span>
+            )}
             {task.sheetRaw?.rowDeletedFromSheet && (
               <span style={{ borderRadius: 7, background: tint(C.orange, 0.14), padding: "4px 8px", color: C.orange, fontSize: 14, fontWeight: 700 }}>
                 удалена из таблицы
@@ -2398,6 +2415,11 @@ function PartnerTaskRow({
       {writeBackError && (
         <div style={{ fontSize: 14, color: C.orange, lineHeight: 1.35 }}>
           Google write-back: {writeBackError}
+        </div>
+      )}
+      {task.sheetRaw?.protectError && (
+        <div style={{ fontSize: 14, color: C.orange, lineHeight: 1.35 }}>
+          Защита строки: {task.sheetRaw.protectError}
         </div>
       )}
       {editedDiff && (
@@ -2883,6 +2905,8 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   const latestRun = googleSync?.latestRun ?? null;
   const latestSyncResult = googleSyncResult ?? null;
   const latestRecon = (latestSyncResult?.diagnostics ?? latestRun?.diagnostics)?.reconciliation ?? null;
+  // 5.8: итоги установки защит строк (addProtectedRange) последнего прогона.
+  const latestProtection = (latestSyncResult?.diagnostics ?? latestRun?.diagnostics)?.protection ?? null;
   const googleSheetUrl = state?.partner.googleSheetUrl
     ?? (state?.partner.googleSheetId ? `https://docs.google.com/spreadsheets/d/${state.partner.googleSheetId}/edit` : null);
   const googleStatus = !sheetConnected
@@ -2995,6 +3019,17 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
               ].filter(Boolean)
               : [];
             return parts.length > 0 ? <InfoRow label="Из таблицы" value={parts.join(" · ")} /> : null;
+          })()}
+          {(() => {
+            const parts = latestProtection
+              ? [
+                (latestProtection.locked ?? 0) > 0 ? `🔒 ${latestProtection.locked}` : null,
+                (latestProtection.healed ?? 0) > 0 ? `восстановлено ${latestProtection.healed}` : null,
+                (latestProtection.unlocked ?? 0) > 0 ? `снято ${latestProtection.unlocked}` : null,
+                (latestProtection.failed ?? 0) > 0 ? `не удалось ${latestProtection.failed}` : null,
+              ].filter(Boolean)
+              : [];
+            return parts.length > 0 ? <InfoRow label="Защита строк" value={parts.join(" · ")} /> : null;
           })()}
           <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", gap: 8 }}>
