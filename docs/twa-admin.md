@@ -150,7 +150,18 @@ PENDING / IN_PROGRESS — вернёт **409** с данными заказа; U
 клиенту, FAVORITES — только флаг `isFavorite`, статус не трогает), `complete`, `reject`,
 `purchase` (реальный серверный выкуп через `.ROBLOSECURITY` cookie из `GlobalSettings`;
   `AlreadyOwned` от Roblox трактуется как успех — донор уже владеет геймпассом = предыдущая
-  покупка прошла, заказ → COMPLETED + увед клиенту; аналогично в автовыкупе и `roblox-account/purchase`),
+  покупка прошла, заказ → COMPLETED + увед клиенту; аналогично в автовыкупе и `roblox-account/purchase`.
+  **Контрольная проверка владения (Ф1, 2026-07-12):** любой провал покупки, кроме чистых
+  отказов без списания (`InsufficientFunds`/`NotForSale`/`PriceChanged`/протухший cookie),
+  перед переводом в ERROR (и перед 502 «Нет ответа от Roblox») перепроверяется по
+  `verifyOwnershipAfterFailure` из `src/lib/roblox-buyout.ts` (пауза ~2.5 с → inventory-API;
+  таймаут/нет reason → вторая проверка через ~5 с): донор владеет → заказ идёт по
+  COMPLETED-ветке с msg «Куплено (владение подтверждено проверкой после ошибки: …)» + warn
+  в логах. То же в `roblox-account/purchase` (одиночный выкуп из поиска; батч «Выкупить всё»
+  ходит через orders/`purchase`) и в партнёрском `purchaseGamepassWithCookie`
+  (`purchase-task` Антона передаёт `gamepassId`; recovered-успех = DONE + списание USDT,
+  БЕЗ ложного refund). Зеркало для ботов — `purchaseGamepassVerified` в
+  `bots/shared/roblox.ts`, см. docs/bots.md «Автовыкуп»),
 `edit-avito`, `set-source`, `purchase-script` (генерит JS для ручного выкупа в консоли),
 `search-users`, `rebind-order` (перепривязка заказа к другому юзеру, транзакция
 `WbOrder + WbCode`, аудит в `adminNote`; уведомление новому юзеру — **в стиле обычной

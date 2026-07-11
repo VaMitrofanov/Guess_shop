@@ -2421,7 +2421,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       let result: PurchaseResult;
       try {
-        result = await purchaseGamepassWithCookie(settings.robloxCookie, { productId, price, sellerId });
+        // gamepassId — для контрольной проверки владения при провале (Ф1):
+        // ложный провал здесь = ложный refund в USDT-ledger партнёра.
+        result = await purchaseGamepassWithCookie(settings.robloxCookie, { productId, price, sellerId, gamepassId: task.gamepassId ?? undefined });
       } catch (err) {
         // CSRF/сеть/нет ответа Roblox — внутреннее и временное: раньше задача зависала
         // в PURCHASING навсегда. Возвращаем READY, в таблицу не пишем.

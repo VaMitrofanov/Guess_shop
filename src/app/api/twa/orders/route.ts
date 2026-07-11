@@ -3,6 +3,7 @@ import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
 import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing } from "@/lib/twa-notify";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
+import { needsOwnershipCheck, verifyOwnershipAfterFailure } from "@/lib/roblox-buyout";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
@@ -989,12 +990,23 @@ export async function POST(req: NextRequest) {
 
     const purchaseData: any = await purchaseRes?.json().catch(() => null);
 
-    if (!purchaseData)
-      return NextResponse.json({ error: "Нет ответа от Roblox" }, { status: 502 });
+    const isAlreadyOwned = /already.?own/i.test(purchaseData?.reason ?? "");
+    let purchased = Boolean(purchaseData?.purchased) || isAlreadyOwned;
 
-    const isAlreadyOwned = /already.?own/i.test(purchaseData.reason ?? "");
+    // Ф1: провал/«Нет ответа» не значит «не куплено» — Roblox при таймауте/5xx
+    // нередко проводит транзакцию. Перед ERROR/502 проверяем владение донором.
+    let recovered = false;
+    const canonicalReason: string | null = purchaseData?.reason ?? purchaseData?.errorMsg ?? null;
+    if (!purchased && needsOwnershipCheck(canonicalReason)) {
+      const owned = await verifyOwnershipAfterFailure(cookie, gpId, canonicalReason !== null);
+      if (owned === true) {
+        purchased = true;
+        recovered = true;
+        console.warn(`[twa/orders] recovered: заказ ${order.wbCode} — владение подтверждено после ошибки «${canonicalReason ?? "нет ответа"}»`);
+      }
+    }
 
-    if (purchaseData.purchased || isAlreadyOwned) {
+    if (purchased) {
       const currentRate = settings?.purchaseRate ?? null;
       const purchaserUsername = settings?.robloxAccountName ?? null;
       await (prisma as any).wbOrder.updateMany({
@@ -1007,8 +1019,14 @@ export async function POST(req: NextRequest) {
       if (isAlreadyOwned) {
         return NextResponse.json({ ok: true, success: true, msg: `Куплено (AlreadyOwned — предыдущая покупка прошла)${mpWarn}` });
       }
+      if (recovered) {
+        return NextResponse.json({ ok: true, success: true, msg: `Куплено (владение подтверждено проверкой после ошибки: ${canonicalReason ?? "нет ответа от Roblox"})${mpWarn}` });
+      }
       return NextResponse.json({ ok: true, success: true, msg: `Куплено за ${purchaseData.price ?? price} R$${mpWarn}` });
     }
+
+    if (!purchaseData)
+      return NextResponse.json({ error: "Нет ответа от Roblox" }, { status: 502 });
 
     await (prisma as any).wbOrder.updateMany({
       where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },

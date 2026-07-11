@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
+import { needsOwnershipCheck, verifyOwnershipAfterFailure } from "@/lib/roblox-buyout";
 
 const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
@@ -270,7 +271,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, success: false, msg: "Cookie истёк — обнови" });
 
     const purchaseData: any = await purchaseRes?.json().catch(() => null);
-    if (!purchaseData)
+
+    // Ф1: провал/«Нет ответа» не значит «не куплено» — Roblox при таймауте/5xx
+    // нередко проводит транзакцию. gamepassId клиент шлёт всегда (guard П5).
+    const isAlreadyOwned = /already.?own/i.test(purchaseData?.reason ?? "");
+    let purchased = Boolean(purchaseData?.purchased) || isAlreadyOwned;
+    let recovered = false;
+    const canonicalReason: string | null = purchaseData?.reason ?? purchaseData?.errorMsg ?? null;
+    if (!purchased && gpIdRaw && needsOwnershipCheck(canonicalReason)) {
+      const owned = await verifyOwnershipAfterFailure(cookie, gpIdRaw, canonicalReason !== null);
+      if (owned === true) {
+        purchased = true;
+        recovered = true;
+        console.warn(`[twa/roblox-account] recovered: gamepass ${gpIdRaw} — владение подтверждено после ошибки «${canonicalReason ?? "нет ответа"}»`);
+      }
+    }
+
+    if (!purchaseData && !recovered)
       return NextResponse.json({ error: "Нет ответа от Roblox" }, { status: 502 });
 
     // Fetch updated balance
@@ -286,21 +303,21 @@ export async function POST(req: NextRequest) {
       }
     } catch { /* ok */ }
 
-    const isAlreadyOwned = /already.?own/i.test(purchaseData.reason ?? "");
-
-    if (purchaseData.purchased || isAlreadyOwned) {
+    if (purchased) {
       return NextResponse.json({
         ok: true, success: true,
         msg: isAlreadyOwned
           ? `Куплено (AlreadyOwned — предыдущая покупка прошла)`
-          : `Куплено за ${purchaseData.price ?? price} R$`,
-        price: purchaseData.price ?? price,
+          : recovered
+            ? `Куплено (владение подтверждено проверкой после ошибки: ${canonicalReason ?? "нет ответа от Roblox"})`
+            : `Куплено за ${purchaseData.price ?? price} R$`,
+        price: purchaseData?.price ?? price,
         balance,
         alreadyOwned: isAlreadyOwned,
       });
     }
 
-    const reason = purchaseData.reason ?? purchaseData.errorMsg ?? "Неизвестная ошибка";
+    const reason = canonicalReason ?? "Неизвестная ошибка";
     return NextResponse.json({ ok: true, success: false, msg: reason, balance });
   }
 

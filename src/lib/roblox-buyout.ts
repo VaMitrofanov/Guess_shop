@@ -38,6 +38,8 @@ export interface PurchaseResult {
   price?: number;
   balance: number | null;
   alreadyOwned?: boolean;
+  /** Ф1: покупка провалилась по ответу Roblox, но владение подтвердилось проверкой. */
+  recovered?: boolean;
   failureKind?: PurchaseFailureKind;
 }
 
@@ -138,7 +140,9 @@ async function getBalance(cookie: string): Promise<number | null> {
 
 export async function purchaseGamepassWithCookie(
   cookie: string,
-  input: { productId: string | number; price: number; sellerId: string | number },
+  // gamepassId — опционален: с ним провал покупки перепроверяется по inventory-API
+  // (Ф1; без него ложный провал при таймауте/5xx приведёт к ложному refund).
+  input: { productId: string | number; price: number; sellerId: string | number; gamepassId?: string | number },
 ): Promise<PurchaseResult> {
   const csrfRes = await fetch("https://auth.roblox.com/v2/logout", {
     method: "POST",
@@ -180,7 +184,25 @@ export async function purchaseGamepassWithCookie(
   }
 
   const purchaseData = (await purchaseRes?.json().catch(() => null)) as RobloxPurchaseResponse | null;
-  if (!purchaseData) throw new BuyoutError("Нет ответа от Roblox", 502);
+  if (!purchaseData) {
+    // Ф1: «Нет ответа» не значит «не куплено» — Roblox при таймауте/5xx нередко
+    // всё же проводит транзакцию. Владение подтвердилось → это успех, а не 502
+    // (иначе ложный откат/refund при фактически купленном пассе).
+    if (input.gamepassId) {
+      const owned = await verifyOwnershipAfterFailure(cookie, input.gamepassId, false);
+      if (owned === true) {
+        console.warn(`[roblox-buyout] recovered: продукт ${input.productId} — владение подтверждено после «Нет ответа»`);
+        return {
+          success: true,
+          msg: "Куплено (владение подтверждено проверкой после «Нет ответа от Roblox»)",
+          price: input.price,
+          balance: await getBalance(cookie),
+          recovered: true,
+        };
+      }
+    }
+    throw new BuyoutError("Нет ответа от Roblox", 502);
+  }
 
   const balance = await getBalance(cookie);
   const alreadyOwned = /already.?own/i.test(purchaseData.reason ?? "");
@@ -196,9 +218,30 @@ export async function purchaseGamepassWithCookie(
     };
   }
 
+  const failReason = purchaseData.reason ?? purchaseData.errorMsg ?? "Неизвестная ошибка";
+
+  // Ф1: провал с неканоничным reason тоже перепроверяем — владение = успех.
+  if (input.gamepassId && needsOwnershipCheck(purchaseData.reason ?? purchaseData.errorMsg)) {
+    const owned = await verifyOwnershipAfterFailure(
+      cookie,
+      input.gamepassId,
+      Boolean(purchaseData.reason ?? purchaseData.errorMsg),
+    );
+    if (owned === true) {
+      console.warn(`[roblox-buyout] recovered: продукт ${input.productId} — владение подтверждено после ошибки «${failReason}»`);
+      return {
+        success: true,
+        msg: `Куплено (владение подтверждено проверкой после ошибки: ${failReason})`,
+        price: input.price,
+        balance: await getBalance(cookie),
+        recovered: true,
+      };
+    }
+  }
+
   return {
     success: false,
-    msg: purchaseData.reason ?? purchaseData.errorMsg ?? "Неизвестная ошибка",
+    msg: failReason,
     balance,
     failureKind: classifyPurchaseFailure(purchaseData.reason ?? purchaseData.errorMsg ?? ""),
   };
@@ -253,4 +296,25 @@ export async function verifyGamepassOwnership(
   if (!res?.ok) return null;
   const json = (await res.json().catch(() => null)) as { data?: unknown[] } | null;
   return Array.isArray(json?.data) ? json.data.length > 0 : null;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Контрольная проверка владения после провала покупки: пауза ~2.5 с (Roblox
+ * проводит транзакцию с задержкой) → проверка; при провале без каноничного
+ * reason (таймаут/«Нет ответа») или недоступной проверке — повтор через ~5 с.
+ */
+export async function verifyOwnershipAfterFailure(
+  cookie: string,
+  gamepassId: string | number,
+  hasCanonicalReason: boolean,
+): Promise<boolean | null> {
+  await sleep(2_500);
+  let owned = await verifyGamepassOwnership(cookie, gamepassId);
+  if (owned !== true && (owned === null || !hasCanonicalReason)) {
+    await sleep(5_000);
+    owned = await verifyGamepassOwnership(cookie, gamepassId);
+  }
+  return owned;
 }
