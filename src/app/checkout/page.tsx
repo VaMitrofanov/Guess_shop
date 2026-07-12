@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import Navbar from "@/components/navbar";
@@ -32,11 +32,12 @@ function CheckoutContent() {
     const searchParams = useSearchParams();
     const amountStr = searchParams.get("amount") || "0";
     const productId = searchParams.get("productId") || null;
+    const rememberedUsername = searchParams.get("username")?.trim() || "";
 
-    const { rubPerRobux, loading: priceLoading, getPrice } = usePricing();
+    const { loading: priceLoading, getPrice, getBreakdown } = usePricing();
 
     const [step, setStep] = useState<"form" | "confirm">("form");
-    const [searchQuery, setSearchQuery] = useState("");
+    const [searchQuery, setSearchQuery] = useState(rememberedUsername);
     const [username, setUsername] = useState("");
     const [method, setMethod] = useState("Gamepass");
     const [gamepassId, setGamepassId] = useState("");
@@ -59,6 +60,22 @@ function CheckoutContent() {
 
     const [robux, setRobux] = useState(Math.max(0, parseInt(amountStr) || 0));
     const price = getPrice(robux);
+    const priceBreakdown = getBreakdown(robux);
+
+    // A returning TG/VK customer should never have to remember their Roblox
+    // nickname again. The endpoint exposes only the current signed-in user's
+    // own saved profile value and never replaces a value they just typed.
+    useEffect(() => {
+        if (rememberedUsername) return;
+        fetch("/api/account/me")
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+                if (data?.robloxUsername) {
+                    setSearchQuery((current) => current || data.robloxUsername);
+                }
+            })
+            .catch(() => {});
+    }, [rememberedUsername]);
 
     const handlePay = async () => {
         if (!username) { setError("Введите ваш никнейм в Roblox"); return; }
@@ -454,7 +471,9 @@ function CheckoutContent() {
                                 <span className="text-3xl font-black text-[#00b06f]">
                                     {priceLoading ? "..." : `${price.toLocaleString()}₽`}
                                 </span>
-                                <p className="font-pixel text-[9px] text-zinc-500">{rubPerRobux} ₽/R$</p>
+                                <p className="font-pixel text-[9px] text-zinc-500">
+                                    {priceBreakdown.rubPerRobux} ₽/R${priceBreakdown.smallOrderSurcharge ? ` + ${priceBreakdown.smallOrderSurcharge} ₽` : ""}
+                                </p>
                             </div>
                         </div>
                     </div>

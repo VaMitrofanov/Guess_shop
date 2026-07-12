@@ -89,6 +89,29 @@ robloxUsername, userId+createdAt).
 `tgId` (@unique), `vkId` (@unique), `balance` (бонусы R$), `role` (`USER`/`ADMIN`),
 `robloxUsername`, `username` (@handle для кнопки «Написать» в TWA).
 
+### Identity, бонусы и цена витрины (foundation эквайринга, migration применена 2026-07-12)
+
+- `UserIdentity` — серверно проверенная внешняя identity (`TG`/`VK`/`EMAIL`) с уникальностью
+  `(provider, subject)`. Пока legacy-поля `tgId`/`vkId`/`email` остаются для ботов; миграция
+  backfill-ит их в identities без создания или слияния `User`. Email-регистрация создаёт
+  `User` и `UserIdentity(EMAIL)` в одной транзакции; VK web-login сначала ищет эту таблицу,
+  затем legacy `vkId`.
+- `User.robloxUsername` — подтверждённый ник клиента. При migration пустое поле заполняется
+  только последним непустым `WbOrder.robloxUsername` того же `userId`; существующее значение
+  никогда не перезаписывается. Ник не является доказательством личности и не используется
+  для account merge.
+- `BonusLedger` — append-only журнал изменения R$-бонусов. `User.balance` остаётся быстрым
+  итогом; migration записывает текущий ненулевой balance как одну opening-строку с
+  idempotency key. Новые начисления/списания должны писать обе сущности в одной транзакции.
+- `AccountMergeAudit` — audit-след будущего merge: source/target, доказательства свежих
+  авторизаций, результат и rollback-marker. Автоматически объединять пользователей по нику,
+  имени или email нельзя.
+- `PricingPolicy` хранит версию и JSON-представление опубликованной политики; расчёт
+  `retail-direct-v1` остаётся чистой общей функцией `bots/shared/retail-pricing.ts`.
+- `PriceQuote` фиксирует на 15 минут версию, сумму R$, бонус, скидку и итог в **целых
+  копейках**. `POST /api/pricing/quote` создаёт запись для гостя или текущего User; до
+  подключения к каноническому order/payment flow она не является разрешением на оплату.
+
 ### `PurchaseBatch`
 Durable-запись одной пачки «Выкупить всё»: `accountName` (донор), `startedAt`/`finishedAt`,
 `totalGross` (грязные R$), `okCount`/`failCount`, `items` (JSONB: `[{orderId,nick,wbCode,gross,ok,reason}]`).

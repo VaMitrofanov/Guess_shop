@@ -24,25 +24,14 @@ function RobuxIcon({ className }: { className?: string }) {
 
 export default function Calculator() {
   const [robux, setRobux] = useState<string>("1000");
-  const [rub, setRub] = useState<string>("");
-  const { rubPerRobux, loading, getPrice } = usePricing();
+  const { loading, getPrice, getBreakdown } = usePricing();
 
-  const displayRub = rub !== ""
-    ? rub
-    : getPrice(parseFloat(robux) || 0).toString();
+  const amount = parseFloat(robux) || 0;
+  const breakdown = getBreakdown(amount);
+  const displayRub = getPrice(amount).toString();
 
   const handleRobuxChange = (val: string) => {
     setRobux(val);
-    setRub(getPrice(parseFloat(val) || 0).toString());
-  };
-
-  const handleRubChange = (val: string) => {
-    setRub(val);
-    setRobux(
-      rubPerRobux > 0
-        ? Math.round((parseFloat(val) || 0) / rubPerRobux).toString()
-        : "0"
-    );
   };
 
   return (
@@ -59,10 +48,10 @@ export default function Calculator() {
             <div className="text-sm font-black uppercase tracking-widest text-zinc-300 mt-0.5">Калькулятор</div>
           </div>
         </div>
-        {/* Live indicator */}
+        {/* Channel-consistent price indicator */}
         <div className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-none bg-[#00b06f] animate-pulse block" />
-          <span className="text-xs font-black uppercase tracking-widest text-[#00b06f]/70">Live курс</span>
+          <span className="w-1.5 h-1.5 rounded-none bg-[#00b06f] block" />
+          <span className="text-xs font-black uppercase tracking-widest text-[#00b06f]/70">Цена TG · VK · сайт</span>
         </div>
       </div>
 
@@ -102,19 +91,22 @@ export default function Calculator() {
             <input
               type="number"
               value={loading ? "" : displayRub}
-              onChange={(e) => handleRubChange(e.target.value)}
-              className="w-full h-16 bg-[#080c18] border-2 border-[#1e2a45] focus:border-[#00b06f]/60 rounded-none px-5 text-2xl font-black outline-none transition-all hover:border-[#1e2a45]/80 text-white"
+              readOnly
+              aria-readonly="true"
+              className="w-full h-16 bg-[#080c18] border-2 border-[#1e2a45] rounded-none px-5 text-2xl font-black outline-none text-white cursor-default"
               placeholder={loading ? "Загрузка..." : "0"}
             />
             <span className="absolute right-5 top-1/2 -translate-y-1/2 text-2xl font-black text-zinc-600">₽</span>
           </div>
         </div>
 
-        {/* Rate badge */}
-        {!loading && rubPerRobux > 0 && (
+        {/* Tier badge */}
+        {!loading && breakdown.amountRobux > 0 && (
           <div className="flex items-center justify-between px-3 py-2 bg-[#00b06f]/5 border border-[#00b06f]/15 rounded-none">
-            <span className="text-xs font-black uppercase tracking-widest text-zinc-400">Текущий курс</span>
-            <span className="text-[10px] font-pixel text-[#00b06f]">{rubPerRobux} ₽/R$</span>
+            <span className="text-xs font-black uppercase tracking-widest text-zinc-400">Ступень цены</span>
+            <span className="text-[10px] font-pixel text-[#00b06f]">
+              {breakdown.rubPerRobux} ₽/R${breakdown.smallOrderSurcharge ? ` + ${breakdown.smallOrderSurcharge} ₽` : ""}
+            </span>
           </div>
         )}
 
@@ -129,7 +121,7 @@ export default function Calculator() {
       </div>
 
       <p className="mt-5 text-center text-xs text-zinc-500 uppercase tracking-widest">
-        * Цена включает 30% комиссию Roblox
+        * Цена и пакеты совпадают с Telegram и ВКонтакте. Комиссию Roblox учитывает цена геймпасса в инструкции.
       </p>
     </div>
   );

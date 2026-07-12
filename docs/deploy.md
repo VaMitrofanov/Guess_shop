@@ -36,6 +36,12 @@ destructive changes/существующие таблицы, только пос
 После применения проверять `migrate status` и сам API. 2026-07-09 этот порядок использован для
 трёх partner-миграций; прод-БД после этого показывает `Database schema is up to date`.
 
+> ⚠️ Миграция `20260712_identity_quote_foundation` должна быть применена **до** деплоя Web,
+> содержащего `src/auth.ts` с `UserIdentity`: иначе VK-вход fail-closed, а `/api/pricing/quote`
+> отдаёт `503`. Она additive: создаёт identity/ledger/policy/quote-таблицы, backfill-ит только
+> legacy идентификаторы и opening-строки ненулевых бонусов; перед применением всё равно нужен
+> обычный `migrate status` и backup/reconciliation из master plan.
+
 > ⚠️ **Автодеплой НЕ покрывает Guide** — его деплоить вручную (Coolify UI/API) при
 > изменениях в `src/app/guide/`, `src/app/layout.tsx`, `public/`, `VKAuthButton` и
 > других файлах Guide-сборки. **Запускать ПОСЛЕ завершения Web-автодеплоя**: обе

@@ -27,7 +27,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid data", details: validated.error.issues }, { status: 400 });
     }
 
-    const { email, password, name } = validated.data;
+    const { password, name } = validated.data;
+    const email = validated.data.email.trim().toLowerCase();
 
     // 1. Check if user already exists
     const existingUser = await prisma.user.findUnique({
@@ -42,12 +43,18 @@ export async function POST(req: NextRequest) {
     const hashedPassword = await bcrypt.hash(password, 12);
 
     // 3. Create user (role defaults to USER in schema)
-    const user = await prisma.user.create({
-      data: {
-        email,
-        password: hashedPassword,
-        name,
-      },
+    const user = await prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          email,
+          password: hashedPassword,
+          name,
+        },
+      });
+      await tx.userIdentity.create({
+        data: { provider: "EMAIL", subject: email, userId: created.id },
+      });
+      return created;
     });
 
     return NextResponse.json({

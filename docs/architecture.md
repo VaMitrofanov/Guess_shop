@@ -27,8 +27,14 @@
 
 Клиент может начать на сайте и продолжить в TG или VK — состояние живёт в БД, а не в памяти
 процесса. Один код = один `WbOrder`, привязанный к одному `User`. Кросс-платформенные грабли
-(VK-логин на сайте создаёт юзера без диалога → заказ привязан «не туда») решаются
-перепривязкой заказа в TWA (`rebind-order`).
+(VK-логин на сайте создаёт юзера без диалога → заказ привязан «не туда») устраняются
+`UserIdentity`: после server-side проверки VK subject сначала находит прежний `User`, поэтому
+его заказы и бонусы не теряются. Legacy `vkId`/`tgId` переходно сохраняются для ботов;
+TG-login и безопасный step-up merge — следующие инкременты. Цена прямого заказа в TG/VK/Web
+считается одной чистой `retail-direct-v1` функцией; серверный `PriceQuote` хранит итог в
+копейках, но пока не включён в legacy checkout. ЛК читает оба источника истории: legacy
+`Order` (SITE) и `WbOrder` (WB/DIRECT/AVITO/MANUAL), а также текущий активный bonus balance;
+кнопки link/merge до fresh-auth flow не показываются.
 
 ## B2B-направление (TWA/server MVP)
 
@@ -60,6 +66,7 @@ src/
     api/wb-code/select-gamepass  материализация заказа при выборе геймпасса на сайте (one-tap)
     api/wb-link/route.ts         линковка кода к юзеру после VK-логина (коридор → VK)
     api/roblox/gamepasses        поиск геймпассов по нику/ID (напрямую в Roblox)
+    api/pricing/quote             короткая серверная котировка (ещё не payment-authority)
     api/twa/**                   API TWA-админки (все под extractTwaUser)
     api/twa/partners/[slug]/tasks B2B server MVP: задачи/ledger/выкуп партнёра `anton`
   auth.ts                        NextAuth (admin + vk-id провайдеры)
@@ -67,6 +74,9 @@ src/
     twa-auth.ts                  initData HMAC + JWT для TWA
     roblox.ts                    Roblox API для сайта (4 эндпоинта details)
     roblox-buyout.ts             shared resolve/purchase helper для retail и B2B
+    retail-pricing.ts            web-facade общего TG/VK/Web price policy
+    price-quote.ts               calculation + persistence краткой котировки
+    user-identity.ts             verified identity → канонический User без auto-merge
     pricing.ts, wb-api.ts        цены + Wildberries API (для TWA-аналитики)
 
 bots/

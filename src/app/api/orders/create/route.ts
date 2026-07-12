@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { initTinkoffPayment } from "@/lib/tinkoff";
 import { getRobloxUser } from "@/lib/roblox";
-import { getStorefrontPricing } from "@/lib/pricing";
+import { CUSTOM_MAX, CUSTOM_MIN, directPrice } from "@/lib/retail-pricing";
 import { auth } from "@/auth";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 
@@ -23,7 +23,7 @@ const TERMS_VERSION = "2026-04-28";
 
 const CreateOrderSchema = z.object({
   username: z.string().min(1),
-  amountRobux: z.number().int().min(100),
+  amountRobux: z.number().int().min(CUSTOM_MIN).max(CUSTOM_MAX),
   productId: z.string().optional(),
   method: z.string().default("Gamepass"),
   gamepassId: z.string().optional(),
@@ -157,22 +157,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Roblox user not found" }, { status: 404 });
     }
 
-    // 2. Calculate price dynamically
-    let amountRUB = 0;
+    // 2. Website uses the same canonical direct-order policy as TG and VK.
+    // Product catalog prices are intentionally not accepted as an alternate
+    // source of truth; the legacy Product FK is removed in the canonical-order
+    // migration that follows this pricing step.
+    const amountRUB = directPrice(amountRobux);
     const finalProductId = productId || null;
-
-    if (productId) {
-      // Fixed-price product from catalog
-      const product = await prisma.product.findUnique({ where: { id: productId } });
-      if (!product || !product.isActive) {
-        return NextResponse.json({ error: "Product not found or inactive" }, { status: 404 });
-      }
-      amountRUB = product.rubPrice;
-    } else {
-      // Dynamic pricing from market rates (includes Roblox 30% tax + margins)
-      const pricing = await getStorefrontPricing();
-      amountRUB = Math.round(amountRobux * pricing.finalRubPerRobux);
-    }
 
     // 3. Create the order in DB. The terms-acceptance triple is written
     //    atomically with the rest of the row — there is no window in

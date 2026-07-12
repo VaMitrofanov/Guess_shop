@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { sendTelegramMessage } from "@/lib/telegram";
 import { verifyVkIdUser } from "@/lib/vk-id";
+import { findOrCreateVerifiedIdentity } from "@/lib/user-identity";
 
 // VK display names are user-controlled and embedded into Telegram HTML
 // notifications — unescaped "<" breaks the whole message (silently lost).
@@ -114,40 +115,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const isGuideMode = rawWbCode.startsWith("GD") && rawWbCode.length === 9;
 
         try {
-          // Upsert user in DB
+          // Resolve the server-verified VK subject through UserIdentity. It
+          // first finds legacy vkId users, so existing bot customers retain
+          // their original User, orders and bonus balance on web sign-in.
           let user;
           try {
-            user = await prisma.user.findUnique({ where: { vkId } });
+            user = await findOrCreateVerifiedIdentity({
+              provider: "VK",
+              subject: vkId,
+              name: verified.name || undefined,
+              image: image || undefined,
+            });
           } catch (findErr) {
-            console.error("[auth][vk-id] prisma.user.findUnique failed — DB unreachable or schema mismatch:", findErr);
+            console.error("[auth][vk-id] identity resolution failed — DB unreachable, migration missing, or conflicting identity:", findErr);
             throw findErr;
-          }
-
-          if (!user) {
-            try {
-              user = await prisma.user.create({
-                data: { vkId, name, image, role: "USER", balance: 0 },
-              });
-              console.log(`[auth][vk-id] created new user id=${user.id} vkId=${vkId}`);
-            } catch (createErr) {
-              console.error("[auth][vk-id] prisma.user.create failed:", createErr);
-              throw createErr;
-            }
-          } else {
-            try {
-              user = await prisma.user.update({
-                where: { id: user.id },
-                // Пустой ответ VK (нет имени/аватара) не должен затирать
-                // реальные данные в БД — обновляем только непустые поля.
-                data: {
-                  ...(verified.name ? { name } : {}),
-                  ...(image ? { image } : {}),
-                },
-              });
-            } catch (updErr) {
-              console.error("[auth][vk-id] prisma.user.update failed:", updErr);
-              throw updErr;
-            }
           }
 
           // Link WB code if passed in credentials (works for both regular and guide mode

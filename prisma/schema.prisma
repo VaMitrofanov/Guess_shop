@@ -38,8 +38,124 @@ model User {
   wbCodes            WbCode[]
   wbOrders           WbOrder[]
   directIntents      DirectIntent[]
+  identities         UserIdentity[]
+  bonusLedgerEntries BonusLedger[]
+  priceQuotes        PriceQuote[]
+  mergeSources       AccountMergeAudit[] @relation("AccountMergeSource")
+  mergeTargets       AccountMergeAudit[] @relation("AccountMergeTarget")
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
+}
+
+/// A server-verified external identity. Legacy `tgId`/`vkId`/`email` remain
+/// during the transition, but no new feature should use an unverified client
+/// claim as an account key.
+model UserIdentity {
+  id         String               @id @default(cuid())
+  provider   UserIdentityProvider
+  subject    String
+  userId     String
+  user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verifiedAt DateTime             @default(now())
+  metadata   Json?
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+
+  @@unique([provider, subject])
+  @@unique([userId, provider])
+  @@index([userId])
+}
+
+enum UserIdentityProvider {
+  TG
+  VK
+  EMAIL
+}
+
+/// Append-only bonus history. `User.balance` remains a fast cached balance;
+/// each future mutation must also write exactly one idempotent ledger entry.
+model BonusLedger {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deltaRobux     Int
+  balanceAfter   Int
+  reason         String
+  referenceId    String?
+  idempotencyKey String   @unique
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([referenceId])
+}
+
+/// Explicit record of a manual, step-up-authenticated profile merge. The
+/// actual merge workflow is added separately; this table makes it auditable.
+model AccountMergeAudit {
+  id           String   @id @default(cuid())
+  sourceUserId String
+  sourceUser   User     @relation("AccountMergeSource", fields: [sourceUserId], references: [id])
+  targetUserId String
+  targetUser   User     @relation("AccountMergeTarget", fields: [targetUserId], references: [id])
+  status       String   @default("PENDING")
+  evidence     Json
+  result       Json?
+  rolledBackAt DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([sourceUserId, createdAt(sort: Desc)])
+  @@index([targetUserId, createdAt(sort: Desc)])
+}
+
+/// A versioned policy is the database record selected by a quote. The
+/// deterministic calculation itself lives in bots/shared/retail-pricing.ts.
+model PricingPolicy {
+  id        String       @id @default(cuid())
+  version   String       @unique
+  definition Json
+  isActive  Boolean      @default(false)
+  validFrom DateTime     @default(now())
+  validUntil DateTime?
+  createdBy String?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  quotes    PriceQuote[]
+
+  @@index([isActive, validFrom])
+}
+
+enum PriceQuoteStatus {
+  ACTIVE
+  CONSUMED
+  EXPIRED
+  VOID
+}
+
+/// A short-lived server quote. Monetary values are always integer kopecks;
+/// `requestedRobux` and `bonusRobux` are integer R$ values.
+model PriceQuote {
+  id                   String           @id @default(cuid())
+  userId               String?
+  user                 User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  policyId             String
+  policy               PricingPolicy    @relation(fields: [policyId], references: [id])
+  policyVersion        String
+  requestedRobux       Int
+  bonusRobux           Int              @default(0)
+  baseAmountKopecks    Int
+  discountKopecks      Int              @default(0)
+  finalAmountKopecks   Int
+  status               PriceQuoteStatus @default(ACTIVE)
+  expiresAt            DateTime
+  consumedAt           DateTime?
+  contextHash          String?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  @@index([userId, status, expiresAt])
+  @@index([policyId, createdAt(sort: Desc)])
 }
 
 model Product {
