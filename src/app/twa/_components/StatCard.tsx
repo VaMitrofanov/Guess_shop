@@ -6,7 +6,7 @@ export default function StatCard({ title, value, sub, subColor, accent = false }
   title: string; value: string | number; sub?: string; subColor?: string; accent?: boolean;
 }) {
   return (
-    <div style={{
+    <div className="twa-glass-card" style={{
       background: C.card, borderRadius: RADIUS.md, padding: "14px 16px",
       borderLeft: accent ? `3px solid ${C.accent}` : "1px solid transparent",
     }}>

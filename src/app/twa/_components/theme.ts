@@ -1,30 +1,30 @@
 /* ─────────────────────────────────────────────────────────────────────────────
    theme.ts — single source of truth for the Telegram admin app (TWA).
 
-   Apple-style dark: layered greys, vibrant accents at limited contrast,
-   hairlines instead of borders. Every screen should import { C } from here
-   instead of redefining a local palette. Values are the superset of what the
-   individual screens used, taking OrdersScreen's refined tokens as canonical.
+   Liquid Glass / Ultraviolet: deep graphite-violet canvas, translucent layers,
+   restrained blur and iOS system accents. The card values intentionally use
+   alpha so the static ambient background can show through without adding a
+   backdrop-filter to every repeated order card (important on older iPhones).
    ───────────────────────────────────────────────────────────────────────── */
 
 export const C = {
   /* Surfaces */
-  bg:         "#1c1c1e",
-  bgElevated: "#242426",
-  card:       "#2c2c2e",
-  cardTop:    "rgba(255,255,255,0.04)",   // inner top-edge highlight
-  elevated:   "#3a3a3c",
-  hairline:   "rgba(255,255,255,0.07)",
-  border:     "#3a3a3c",
+  bg:         "#120f1c",
+  bgElevated: "rgba(31,25,45,0.90)",
+  card:       "rgba(41,34,57,0.76)",
+  cardTop:    "rgba(255,255,255,0.065)",
+  elevated:   "rgba(255,255,255,0.10)",
+  hairline:   "rgba(255,255,255,0.09)",
+  border:     "rgba(255,255,255,0.12)",
 
   /* Text */
-  textPrimary:   "#f2f2f7",
-  textSecondary: "#98989d",
-  textTertiary:  "#636366",
-  muted:         "#48484a",
+  textPrimary:   "#f7f5ff",
+  textSecondary: "#aaa4b8",
+  textTertiary:  "#777181",
+  muted:         "#575161",
 
   /* Accents — iOS system palette */
-  accent: "#bf5af2",
+  accent: "#a78bfa",
   green:  "#30d158",
   red:    "#ff453a",
   yellow: "#ffd60a",
@@ -32,11 +32,11 @@ export const C = {
   blue:   "#0a84ff",
 } as const;
 
-export const RADIUS = { sm: 10, md: 12, lg: 14, xl: 18, pill: 999 } as const;
+export const RADIUS = { sm: 11, md: 14, lg: 17, xl: 22, pill: 999 } as const;
 
 export const SHADOW = {
-  card: "0 1px 0 rgba(255,255,255,0.04) inset, 0 6px 20px rgba(0,0,0,0.18)",
-  pop:  "0 8px 30px rgba(0,0,0,0.30)",
+  card: "0 1px 0 rgba(255,255,255,0.06) inset, 0 14px 34px rgba(3,0,12,0.18)",
+  pop:  "0 18px 50px rgba(3,0,12,0.42)",
 } as const;
 
 /* Apple's "snappy" motion curves */

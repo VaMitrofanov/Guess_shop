@@ -28,7 +28,7 @@ export default function WbScreen({ token }: { token: string }) {
         display: "flex", gap: 6, padding: "10px 16px 0",
         flexShrink: 0,
       }}>
-        <div style={{
+        <div className="twa-glass-segment" style={{
           display: "flex", background: C.card, borderRadius: 10, padding: 3,
           width: "100%",
         }}>

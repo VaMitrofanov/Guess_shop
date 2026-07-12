@@ -15,7 +15,7 @@ const SystemScreen    = dynamic(() => import("./screens/SystemScreen"),   { ssr:
 
 function ScreenSkeleton() {
   return (
-    <div style={{ padding: "32px 16px", color: "#636366", fontSize: 13, textAlign: "center" }}>
+    <div style={{ padding: "32px 16px", color: C.textSecondary, fontSize: 13, textAlign: "center" }}>
       Загружаем экран…
     </div>
   );
@@ -223,19 +223,19 @@ export default function TwaApp() {
     // not a layout pop. Cuts perceived load time even when the JWT verify
     // takes its usual ~150 ms.
     return (
-      <div className="twa-root" style={{
+      <div className="twa-root twa-liquid-root twa-loading-shell" style={{
         display: "flex", flexDirection: "column", height: "100dvh",
-        background: "#1c1c1e", color: "#fff",
+        background: C.bg, color: C.textPrimary,
         fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       }}>
-        <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid #2c2c2e" }}>
-          <div style={{ width: 90, height: 18, borderRadius: 5, background: "#2c2c2e" }} />
-          <div style={{ width: 60, height: 11, borderRadius: 4, background: "#2c2c2e", marginTop: 4 }} />
+        <div className="twa-liquid-titlebar">
+          <div style={{ width: 118, height: 24, borderRadius: 7, background: C.elevated }} />
+          <div style={{ width: 74, height: 12, borderRadius: 5, background: C.elevated, marginTop: 5 }} />
         </div>
         <div style={{ flex: 1, padding: "16px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
           {[0, 1, 2, 3].map(i => (
             <div key={i} style={{
-              height: 96, borderRadius: 18, background: "#2c2c2e",
+              height: 96, borderRadius: 20, background: C.card,
               boxShadow: "0 1px 0 rgba(255,255,255,0.04) inset",
               opacity: 0.7 - i * 0.12,
             }} />
@@ -247,7 +247,7 @@ export default function TwaApp() {
 
   if (auth === "error") {
     return (
-      <div className="twa-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: "#1c1c1e", color: "#ff453a", padding: 24 }}>
+      <div className="twa-root twa-liquid-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: C.bg, color: C.red, padding: 24 }}>
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 36, marginBottom: 12 }}>🔒</div>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Доступ запрещён</div>
@@ -261,7 +261,7 @@ export default function TwaApp() {
   const sp = { token: token! };
 
   return (
-    <div className="twa-root" style={{
+    <div className="twa-root twa-liquid-root" style={{
       display: "flex", flexDirection: "column", height: "100dvh",
       background: C.bg,
       fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
@@ -269,7 +269,7 @@ export default function TwaApp() {
     }}>
       {/* Title bar — doubles as a context zone: back chevron on drill-down
           screens, date otherwise. */}
-      <div style={{ padding: "14px 16px 10px", borderBottom: `1px solid ${C.hairline}`, flexShrink: 0 }}>
+      <div className="twa-liquid-titlebar">
         {(() => {
           const parent = SCREEN_PARENT[screen];
           if (parent) {
@@ -288,24 +288,24 @@ export default function TwaApp() {
                   <span style={{ fontSize: 19, lineHeight: 1, marginTop: -1 }}>‹</span>
                   {SCREEN_TITLES[parent]}
                 </button>
-                <div style={{ fontWeight: 700, fontSize: 18, letterSpacing: -0.3 }}>{SCREEN_TITLES[screen]}</div>
+                <div className="twa-liquid-title">{SCREEN_TITLES[screen]}</div>
               </>
             );
           }
           return (
             <>
-              <div style={{ fontWeight: 700, fontSize: 18, letterSpacing: -0.3 }}>{SCREEN_TITLES[screen]}</div>
-              <div style={{ fontSize: 12, color: C.textTertiary, marginTop: 1 }}>
+              <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 1 }}>
                 {new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}
               </div>
+              <div className="twa-liquid-title">{SCREEN_TITLES[screen]}</div>
             </>
           );
         })()}
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
-        {screen === "dashboard"  && <Dashboard      {...sp} />}
+      <div className="twa-liquid-content" style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
+        {screen === "dashboard"  && <Dashboard      {...sp} onOpenOrders={() => setScreen("orders")} />}
         {screen === "orders"     && <OrdersScreen   {...sp} onActionDone={refreshBadge} initialQuery={orderQueryPreload} initialTab={ordersTabPreload} onInitialQueryConsumed={() => { setOrderQueryPreload(""); setOrdersTabPreload(""); }} />}
         {screen === "wb"         && <WbScreen       {...sp} />}
         {screen === "account"    && <AccountScreen  {...sp} onOpenErrors={() => { setOrdersTabPreload("ERROR"); setScreen("orders"); }} />}

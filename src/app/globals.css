@@ -382,6 +382,338 @@ body {
 .twa-root ::-webkit-scrollbar { width: 0; height: 0; }
 .twa-root ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); }
 
+/* Liquid Glass / Ultraviolet shell. The ambient layers are static and the
+ * expensive blur is limited to the title, tab bar and a handful of summary
+ * surfaces; repeated order cards stay translucent without per-card blur. */
+.twa-liquid-root {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 88% 8%, rgba(167,139,250,.18), transparent 34%),
+    radial-gradient(circle at 5% 58%, rgba(10,132,255,.09), transparent 38%),
+    #120f1c !important;
+}
+.twa-liquid-root::before,
+.twa-liquid-root::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 50%;
+  filter: blur(54px);
+}
+.twa-liquid-root::before {
+  width: 270px;
+  height: 270px;
+  right: -130px;
+  top: 80px;
+  background: rgba(191,90,242,.10);
+}
+.twa-liquid-root::after {
+  width: 320px;
+  height: 320px;
+  left: -190px;
+  bottom: 8%;
+  background: rgba(10,132,255,.07);
+}
+.twa-liquid-titlebar {
+  position: relative;
+  z-index: 5;
+  flex-shrink: 0;
+  padding: 12px 18px 11px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  background: rgba(18,15,28,.72);
+  -webkit-backdrop-filter: blur(18px) saturate(1.22);
+  backdrop-filter: blur(18px) saturate(1.22);
+}
+.twa-liquid-title {
+  color: #f7f5ff;
+  font-size: 29px;
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -.045em;
+}
+.twa-liquid-content {
+  position: relative;
+  z-index: 1;
+  padding-bottom: 4px;
+}
+.twa-glass-card,
+.twa-glass-segment {
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(41,34,57,.70) !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,.06) inset, 0 16px 34px rgba(3,0,12,.16);
+  -webkit-backdrop-filter: blur(12px) saturate(1.12);
+  backdrop-filter: blur(12px) saturate(1.12);
+}
+.twa-glass-order {
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(41,34,57,.75) !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,.055) inset, 0 14px 32px rgba(3,0,12,.16) !important;
+}
+.twa-orders-toolbar {
+  border-bottom-color: rgba(255,255,255,.08) !important;
+  background: rgba(18,15,28,.68) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(1.18);
+  backdrop-filter: blur(16px) saturate(1.18);
+}
+
+/* Dashboard */
+.twa-liquid-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 14px 16px 28px;
+}
+.twa-liquid-alert {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px;
+  border: 1px solid rgba(255,214,10,.20);
+  border-radius: 15px;
+  color: #ffd60a;
+  background: rgba(255,214,10,.08);
+}
+.twa-liquid-alert div { display: flex; flex-direction: column; }
+.twa-liquid-alert span { color: #aaa4b8; font-size: 12px; }
+.twa-revenue-glass,
+.twa-stock-glass {
+  padding: 17px;
+  border: 1px solid rgba(255,255,255,.11);
+  border-radius: 23px;
+  background: linear-gradient(145deg, rgba(74,59,99,.66), rgba(38,31,53,.58));
+  box-shadow: 0 1px 0 rgba(255,255,255,.08) inset, 0 20px 52px rgba(3,0,12,.19);
+  -webkit-backdrop-filter: blur(16px) saturate(1.16);
+  backdrop-filter: blur(16px) saturate(1.16);
+}
+.twa-revenue-label,
+.twa-revenue-meta,
+.twa-stock-glass > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.twa-revenue-label { color: #aaa4b8; font-size: 13px; }
+.twa-revenue-label b {
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: #f7f5ff;
+  background: rgba(167,139,250,.23);
+  font-size: 10px;
+  letter-spacing: .04em;
+}
+.twa-revenue-glass > strong {
+  display: block;
+  margin: 6px 0 2px;
+  color: #f7f5ff;
+  font-size: 31px;
+  line-height: 1.06;
+  letter-spacing: -.045em;
+  font-variant-numeric: tabular-nums;
+}
+.twa-revenue-meta { color: #aaa4b8; font-size: 12px; }
+.twa-revenue-line {
+  height: 44px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(167,139,250,.15), transparent);
+}
+.twa-revenue-line i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(165deg, transparent 46%, rgba(167,139,250,.9) 48%, rgba(167,139,250,.9) 51%, transparent 53%);
+  clip-path: polygon(0 80%, 14% 66%, 28% 70%, 42% 42%, 57% 50%, 70% 27%, 82% 35%, 100% 8%, 100% 16%, 82% 43%, 70% 35%, 57% 58%, 42% 50%, 28% 78%, 14% 74%, 0 88%);
+}
+.twa-quick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.twa-quick-glass {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 18px;
+  background: rgba(41,34,57,.64);
+  color: #f7f5ff;
+  text-align: left;
+  box-shadow: 0 1px 0 rgba(255,255,255,.05) inset;
+}
+.twa-quick-glass > span {
+  width: 31px;
+  height: 31px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  color: #d8ccff;
+  background: rgba(167,139,250,.18);
+}
+.twa-quick-glass small,
+.twa-quick-glass strong,
+.twa-quick-glass em { display: block; }
+.twa-quick-glass small { color: #aaa4b8; font-size: 12px; }
+.twa-quick-glass strong { margin-top: 1px; font-size: 23px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.twa-quick-glass em { margin-top: 2px; color: #777181; font-size: 11px; font-style: normal; }
+.twa-dashboard-section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 2px 0; }
+.twa-dashboard-section-title button { border: 0; background: none; color: #a78bfa; font-size: 13px; }
+.twa-next-action {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 2px;
+  border: 0;
+  border-top: 1px solid rgba(255,255,255,.10);
+  border-bottom: 1px solid rgba(255,255,255,.10);
+  background: transparent;
+  color: #f7f5ff;
+  text-align: left;
+}
+.twa-next-action > span:first-child {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  color: #e0d6ff;
+  background: rgba(167,139,250,.21);
+}
+.twa-next-action > span:nth-child(2) { flex: 1; display: flex; flex-direction: column; }
+.twa-next-action small { color: #aaa4b8; font-size: 12px; }
+.twa-stock-list { display: flex; flex-direction: column; gap: 10px; margin-top: 13px; }
+.twa-stock-list > div { display: grid; grid-template-columns: 58px 1fr 28px; align-items: center; gap: 8px; font-size: 12px; }
+.twa-stock-list > div > div { height: 5px; overflow: hidden; border-radius: 999px; background: rgba(255,255,255,.09); }
+.twa-stock-list i { display: block; height: 100%; border-radius: inherit; }
+.twa-liquid-skeleton {
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 22px;
+  background: rgba(41,34,57,.62);
+  animation: twa-liquid-pulse 1.45s ease-in-out infinite;
+}
+.twa-liquid-error { min-height: 260px; display: grid; place-content: center; justify-items: center; gap: 7px; padding: 30px; color: #aaa4b8; text-align: center; }
+.twa-liquid-error strong { color: #f7f5ff; }
+.twa-liquid-error span { font-size: 12px; }
+@keyframes twa-liquid-pulse { 50% { opacity: .42; } }
+
+/* Floating iOS tab bar + "More" sheet. */
+.twa-nav-zone {
+  position: relative;
+  z-index: 20;
+  flex-shrink: 0;
+  padding: 7px 12px calc(8px + env(safe-area-inset-bottom));
+  pointer-events: none;
+}
+.twa-liquid-tabbar {
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 8px 5px 9px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 24px;
+  background: rgba(17,14,25,.72);
+  box-shadow: 0 18px 52px rgba(3,0,12,.34), 0 1px 0 rgba(255,255,255,.07) inset;
+  -webkit-backdrop-filter: blur(22px) saturate(1.28);
+  backdrop-filter: blur(22px) saturate(1.28);
+}
+.twa-tab {
+  min-width: 0;
+  padding: 4px 1px 2px;
+  border: 0;
+  background: none;
+  color: #777181;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+}
+.twa-tab.is-selected { color: #b9a6ff; }
+.twa-tab-icon { position: relative; display: grid; place-items: center; min-height: 22px; }
+.twa-tab-icon b {
+  position: absolute;
+  top: -7px;
+  left: calc(50% + 4px);
+  min-width: 16px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+  text-align: center;
+}
+.twa-more-sheet {
+  pointer-events: auto;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(82px + env(safe-area-inset-bottom));
+  overflow: hidden;
+  padding: 13px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 24px;
+  background: rgba(31,25,45,.90);
+  box-shadow: 0 22px 60px rgba(3,0,12,.46), 0 1px 0 rgba(255,255,255,.07) inset;
+  -webkit-backdrop-filter: blur(24px) saturate(1.28);
+  backdrop-filter: blur(24px) saturate(1.28);
+}
+.twa-more-sheet-head { display: flex; justify-content: space-between; align-items: center; padding: 2px 2px 11px; }
+.twa-more-sheet-head > div { display: flex; flex-direction: column; }
+.twa-more-sheet-head span { color: #777181; font-size: 11px; }
+.twa-more-sheet-head strong { color: #f7f5ff; font-size: 21px; }
+.twa-icon-button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 50%;
+  background: rgba(255,255,255,.07);
+  color: #f7f5ff;
+}
+.twa-more-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 2px;
+  border: 0;
+  border-top: 1px solid rgba(255,255,255,.09);
+  background: transparent;
+  color: #f7f5ff;
+  text-align: left;
+}
+.twa-more-row > span:nth-child(2) { flex: 1; display: flex; flex-direction: column; }
+.twa-more-row small { color: #aaa4b8; font-size: 12px; }
+.twa-more-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 11px; color: #d8ccff; background: rgba(167,139,250,.17); }
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .twa-liquid-titlebar,
+  .twa-liquid-tabbar,
+  .twa-more-sheet,
+  .twa-glass-card,
+  .twa-glass-segment,
+  .twa-revenue-glass,
+  .twa-stock-glass { background: #211a30 !important; }
+}
+
+@media (min-width: 780px) {
+  .twa-liquid-content {
+    width: min(720px, 100%);
+    margin: 0 auto;
+  }
+  .twa-liquid-titlebar {
+    padding-left: max(18px, calc((100% - 720px) / 2 + 18px));
+    padding-right: max(18px, calc((100% - 720px) / 2 + 18px));
+  }
+  .twa-nav-zone {
+    width: min(560px, 100%);
+    margin: 0 auto;
+  }
+}
+
 .twa-press {
   touch-action: manipulation;
   -webkit-user-select: none; user-select: none;

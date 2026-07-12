@@ -21,7 +21,7 @@ function SectionHeader({ title }: { title: string }) {
 }
 
 function Card({ children }: { children: React.ReactNode }) {
-  return <div style={{ background: C.card, borderRadius: 14, overflow: "hidden" }}>{children}</div>;
+  return <div className="twa-glass-card" style={{ background: C.card, borderRadius: 17, overflow: "hidden" }}>{children}</div>;
 }
 
 function RowSep() {

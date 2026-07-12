@@ -1,115 +1,105 @@
 "use client";
-import React from "react";
+
+import { useState } from "react";
+import {
+  CircleUserRound,
+  ClipboardList,
+  Ellipsis,
+  House,
+  Settings,
+  Warehouse,
+  X,
+} from "lucide-react";
 import { haptic } from "./haptics";
-import { C, tint } from "./theme";
+import { C } from "./theme";
 
 type Screen = "dashboard" | "orders" | "wb" | "account" | "settings" | "system";
 
-const HomeIcon = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9.5z"/>
-    <path d="M9 21V12h6v9"/>
-  </svg>
-);
-
-const OrdersIcon = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
-    <rect x="9" y="3" width="6" height="4" rx="1"/>
-    <line x1="9"  y1="12" x2="15" y2="12"/>
-    <line x1="9"  y1="16" x2="13" y2="16"/>
-  </svg>
-);
-
-const WbIcon = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-  </svg>
-);
-
-const AccountIcon = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-    <circle cx="12" cy="7" r="4"/>
-  </svg>
-);
-
-const SettingsIcon = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="3"/>
-    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-  </svg>
-);
-
-const TABS: { id: Screen; label: string; Icon: () => React.ReactElement }[] = [
-  { id: "orders",     label: "Заказы",   Icon: OrdersIcon      },
-  { id: "wb",         label: "WB",       Icon: WbIcon          },
-  { id: "account",    label: "Аккаунт",  Icon: AccountIcon     },
-  { id: "dashboard",  label: "Главная",  Icon: HomeIcon        },
-  { id: "settings",   label: "Настройки",Icon: SettingsIcon    },
+const MAIN_TABS = [
+  { id: "dashboard" as const, label: "Главная", Icon: House },
+  { id: "orders" as const, label: "Заказы", Icon: ClipboardList },
+  { id: "wb" as const, label: "WB", Icon: Warehouse },
 ];
 
 export default function BottomNav({
-  active, onChange, ordersBadge = 0,
+  active,
+  onChange,
+  ordersBadge = 0,
 }: {
   active: Screen;
-  onChange: (s: Screen) => void;
+  onChange: (screen: Screen) => void;
   ordersBadge?: number;
 }) {
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreActive = active === "account" || active === "settings" || active === "system";
+
+  function navigate(screen: Screen) {
+    if (screen !== active) haptic.select();
+    setMoreOpen(false);
+    onChange(screen);
+  }
+
   return (
-    <nav style={{
-      display: "flex",
-      borderTop: `1px solid ${C.hairline}`,
-      background: C.bg,
-      flexShrink: 0,
-      paddingBottom: "env(safe-area-inset-bottom)",
-    }}>
-      {TABS.map(({ id, label, Icon }) => {
-        const isActive = active === id || (id === "settings" && active === "system");
-        const badge = id === "orders" && ordersBadge > 0 ? ordersBadge : 0;
-        return (
-          <button
-            key={id}
-            className="twa-press"
-            onClick={() => { if (!isActive) haptic.select(); onChange(id); }}
-            style={{
-              flex: 1, padding: "10px 1px 8px", border: "none", background: "none",
-              cursor: "pointer", display: "flex", flexDirection: "column",
-              alignItems: "center", gap: 3,
-              color: isActive ? C.accent : C.textTertiary,
-              transition: "color 0.15s",
-              position: "relative",
-            }}
-          >
-            <div style={{
-              position: "relative",
-              display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
-              background: isActive ? tint(C.accent, 0.15) : "transparent",
-              borderRadius: 14,
-              padding: "5px 14px",
-              transition: "background 0.15s",
-            }}>
-              <div style={{ position: "relative" as const }}>
-                <Icon />
-                {badge > 0 && (
-                  <div style={{
-                    position: "absolute", top: -4, right: -6,
-                    background: C.red, color: "#fff",
-                    fontSize: 10, fontWeight: 700, lineHeight: 1,
-                    padding: "2px 5px", borderRadius: 8, minWidth: 15,
-                    textAlign: "center" as const,
-                  }}>
-                    {badge > 99 ? "99+" : badge}
-                  </div>
-                )}
-              </div>
-              <span style={{ fontSize: 11, fontWeight: isActive ? 600 : 400, letterSpacing: 0.1 }}>
-                {label}
-              </span>
+    <div className="twa-nav-zone">
+      {moreOpen && (
+        <div className="twa-more-sheet twa-glass-strong twa-fade-up">
+          <div className="twa-more-sheet-head">
+            <div>
+              <span>Разделы</span>
+              <strong>Ещё</strong>
             </div>
+            <button
+              type="button"
+              className="twa-icon-button twa-press-sm"
+              aria-label="Закрыть меню"
+              onClick={() => { haptic.select(); setMoreOpen(false); }}
+            >
+              <X size={18} />
+            </button>
+          </div>
+          <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("account")}>
+            <span className="twa-more-icon"><CircleUserRound size={19} /></span>
+            <span><strong>Аккаунт</strong><small>Выкуп, доноры и баланс</small></span>
+            <span aria-hidden="true">›</span>
           </button>
-        );
-      })}
-    </nav>
+          <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("settings")}>
+            <span className="twa-more-icon"><Settings size={19} /></span>
+            <span><strong>Настройки</strong><small>Система, курсы и автобай</small></span>
+            <span aria-hidden="true">›</span>
+          </button>
+        </div>
+      )}
+
+      <nav className="twa-liquid-tabbar" aria-label="Основная навигация">
+        {MAIN_TABS.map(({ id, label, Icon }) => {
+          const selected = active === id;
+          const badge = id === "orders" && ordersBadge > 0 ? ordersBadge : 0;
+          return (
+            <button
+              key={id}
+              type="button"
+              className={`twa-tab twa-press${selected ? " is-selected" : ""}`}
+              aria-current={selected ? "page" : undefined}
+              onClick={() => navigate(id)}
+            >
+              <span className="twa-tab-icon">
+                <Icon size={21} strokeWidth={selected ? 2.2 : 1.8} />
+                {badge > 0 && <b style={{ background: C.red }}>{badge > 99 ? "99+" : badge}</b>}
+              </span>
+              <span>{label}</span>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          className={`twa-tab twa-press${moreActive || moreOpen ? " is-selected" : ""}`}
+          aria-expanded={moreOpen}
+          onClick={() => { haptic.select(); setMoreOpen(open => !open); }}
+        >
+          <span className="twa-tab-icon"><Ellipsis size={22} /></span>
+          <span>Ещё</span>
+        </button>
+      </nav>
+    </div>
   );
 }

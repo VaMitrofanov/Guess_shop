@@ -1066,7 +1066,7 @@ function OrderCard({
   const inBuyoutQueue = !!order.pendingAt && ["PENDING", "IN_PROGRESS"].includes(order.status);
 
   return (
-    <article className={exiting ? "twa-card-exit" : undefined} style={{
+    <article className={`twa-glass-order${exiting ? " twa-card-exit" : ""}`} style={{
       background: C.card,
       borderRadius: 16,
       overflow: "hidden",
@@ -1860,12 +1860,12 @@ export default function OrdersScreen({
   }, [data, query, filter, isAttentionView]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: C.bg }}>
+    <div className="twa-orders-shell" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: "transparent" }}>
 
       {/* Sticky: search + tab chips */}
-      <div style={{
+      <div className="twa-orders-toolbar" style={{
         padding: "10px 16px 8px",
-        background: C.bg,
+        background: C.bgElevated,
         borderBottom: `1px solid ${C.hairline}`,
         flexShrink: 0,
         display: "flex", flexDirection: "column", gap: 9,
@@ -2186,7 +2186,7 @@ function IntentCard({ intent, token, qrConfigured, onGone }: {
   }
 
   return (
-    <article style={{
+    <article className="twa-glass-order" style={{
       background: C.card,
       borderRadius: 16,
       overflow: "hidden",
