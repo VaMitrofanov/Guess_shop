@@ -26,7 +26,7 @@ interface GamepassItem {
   isManagedPricing?: boolean;
   basePriceInRobux?: number;
   /** Активный/выполненный заказ, уже ссылающийся на этот геймпасс (дедуп). */
-  existingOrder?: { wbCode: string; status: string; orderSource: string } | null;
+  existingOrder?: { wbCode: string; status: string; orderSource: string; expectedPrice?: number } | null;
 }
 
 type BuyoutWorkspace = "own" | "anton";
@@ -403,6 +403,10 @@ function GamepassCard({
         {gp.existingOrder && (
           <div style={{ fontSize: 13, fontWeight: 600, color: C.orange, marginTop: 3 }}>
             📦 уже в заказе {gp.existingOrder.wbCode} · {ORDER_STATUS_RU[gp.existingOrder.status] ?? gp.existingOrder.status}
+            {/* Прайс-гард (Ш3): цена ≠ ожидаемой по номиналу заказа — сервер такой выкуп заблокирует */}
+            {gp.existingOrder.expectedPrice != null && gp.existingOrder.expectedPrice !== gp.price && (
+              <span style={{ color: C.red }}> · ⛔ нужна цена {gp.existingOrder.expectedPrice.toLocaleString("ru-RU")} R$</span>
+            )}
           </div>
         )}
       </div>

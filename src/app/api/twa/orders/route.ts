@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing } from "@/lib/twa-notify";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
 import { needsOwnershipCheck, verifyOwnershipAfterFailure } from "@/lib/roblox-buyout";
+import { checkGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
@@ -55,6 +56,20 @@ async function getGpInfoCached(gpId: string): Promise<{ price: number | null; is
     } catch { /* try next */ }
   }
   return null;
+}
+
+// Дописать аудит-строку к adminNote (обрезка до 2000, как в attach-gamepass);
+// одна и та же пометка повторно не дублируется (как annotateOnce автовыкупа).
+async function appendAdminNote(orderId: string, line: string): Promise<void> {
+  try {
+    const o = await (prisma as any).wbOrder.findUnique({ where: { id: orderId }, select: { adminNote: true } });
+    if (o?.adminNote?.includes(line)) return;
+    const prefix = o?.adminNote ? `${o.adminNote}\n` : "";
+    await (prisma as any).wbOrder.update({
+      where: { id: orderId },
+      data: { adminNote: `${prefix}${line}`.slice(0, 2000) },
+    });
+  } catch { /* best-effort: аудит не должен ронять выкуп */ }
 }
 
 function buildTabWhere(tab: FilterTab): any {
@@ -949,6 +964,27 @@ export async function POST(req: NextRequest) {
     const base = info.UserBasePriceInRobux ?? price;
     const isManagedPricing = price !== base;
     const creatorId = info.Creator?.Id ?? info.Creator?.CreatorTargetId ?? 0;
+    const creatorName: string | null = info.Creator?.Name ?? null;
+
+    // ЦЕНА-СТОП (PLAN-gp-price-guard Ш1, инцидент 12.07): выкуп возможен только
+    // по цене, ожидаемой из номинала заказа. Раньше покупали по live-цене без
+    // сверки — клиент, поднявший цену пасса после приёма ботом, получал больше.
+    // Статус заказа НЕ меняем: это проблема строки, не «ошибка выкупа».
+    const stamp = new Date().toISOString().slice(0, 10);
+    const { ok: priceOk, expected } = checkGamepassPrice(order.amount, price);
+    if (!priceOk) {
+      const mp = isManagedPricing ? ` (MP, base ${base} R$)` : "";
+      await appendAdminNote(orderId, `[ЦЕНА-СТОП ${stamp}] пасс ${price} R$${mp} ≠ ожид ${expected} R$ — выкуп заблокирован`);
+      return NextResponse.json({ ok: true, success: false,
+        msg: `⛔ Цена пасса ${price} R$${mp} ≠ ожидаемой ${expected} R$ (номинал ${order.amount}). Выкуп заблокирован — нужен пасс ровно за ${expected} R$.` });
+    }
+    // ПРОДАВЕЦ-СТОП: подтверждённый ник заказа должен совпадать с создателем
+    // пасса (перенос seller-check из автовыкупа — ловит подменённый ГП).
+    if (!sellerMatchesOrder(order.robloxUsername, creatorName)) {
+      await appendAdminNote(orderId, `[ПРОДАВЕЦ-СТОП ${stamp}] продавец ${creatorName} ≠ ник ${order.robloxUsername} — выкуп заблокирован`);
+      return NextResponse.json({ ok: true, success: false,
+        msg: `⛔ Продавец пасса ${creatorName} ≠ нику заказа ${order.robloxUsername}. Выкуп заблокирован — проверь, чей это геймпасс.` });
+    }
 
     const csrfRes = await fetch("https://auth.roblox.com/v2/logout", {
       method: "POST",
@@ -972,6 +1008,9 @@ export async function POST(req: NextRequest) {
           },
           body: JSON.stringify({
             expectedCurrency: 1,
+            // Вторая линия гарда: цена провалидирована выше (±PRICE_TOL от
+            // номинала), а строгую сверку expectedPrice против live делает сам
+            // Roblox — гонку «цену подняли между проверкой и POST» он отклонит.
             expectedPrice: price,
             expectedSellerId: creatorId,
           }),
@@ -1111,6 +1150,15 @@ export async function POST(req: NextRequest) {
     const creatorName = info.Creator?.Name ?? "Unknown";
     const name = info.Name ?? "Gamepass";
 
+    // ЦЕНА-СТОП (PLAN-gp-price-guard Ш2): скрипт с live-ценой радостно купил бы
+    // и подороженный пасс — при расхождении с номиналом скрипт не выдаётся.
+    const { ok: priceOk, expected } = checkGamepassPrice(order.amount, price);
+    if (!priceOk)
+      return NextResponse.json(
+        { error: `⛔ Цена пасса ${price} R$ ≠ ожидаемой ${expected} R$ (номинал ${order.amount}) — скрипт не выдан` },
+        { status: 409 },
+      );
+
     const script = [
       `(async()=>{`,
       `const r=await fetch("https://auth.roblox.com/v2/logout",{method:"POST",credentials:"include"});`,
@@ -1119,7 +1167,9 @@ export async function POST(req: NextRequest) {
       `const b=await fetch("https://economy.roblox.com/v1/purchases/products/${info.ProductId}",{`,
       `method:"POST",credentials:"include",`,
       `headers:{"Content-Type":"application/json","X-CSRF-TOKEN":t},`,
-      `body:JSON.stringify({expectedCurrency:1,expectedPrice:${price},expectedSellerId:${creatorId}})`,
+      // В скрипт зашита ожидаемая по номиналу цена (не live): даже скопированный
+      // заранее скрипт Roblox отклонит, если цена пасса уже не ровно ожидаемая.
+      `body:JSON.stringify({expectedCurrency:1,expectedPrice:${expected},expectedSellerId:${creatorId}})`,
       `});const j=await b.json();`,
       `console.log(j.purchased?"✅ Куплено: "+j.price+" R$":"❌ Ошибка: "+j.reason)`,
       `})()`,

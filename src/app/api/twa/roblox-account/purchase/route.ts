@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
 import { needsOwnershipCheck, verifyOwnershipAfterFailure } from "@/lib/roblox-buyout";
+import { checkGamepassPrice, expectedGamepassPrice } from "@/lib/purchase-guard";
 
 const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
@@ -21,6 +22,8 @@ export interface ExistingOrderRef {
   status: string;
   orderSource: string;
   createdAt: Date;
+  /** Ожидаемая цена пасса по номиналу заказа — UI-подсказка прайс-гарда (Ш3). */
+  expectedPrice: number;
 }
 
 /**
@@ -39,14 +42,17 @@ async function findExistingOrders(gamepassIds: (string | number)[]): Promise<Rec
         OR: ids.map((id) => ({ gamepassUrl: { contains: `/${id}` } })),
       },
       orderBy: { createdAt: "desc" },
-      select: { wbCode: true, status: true, orderSource: true, createdAt: true, gamepassUrl: true },
+      select: { wbCode: true, status: true, orderSource: true, createdAt: true, gamepassUrl: true, amount: true },
     });
     const map: Record<string, ExistingOrderRef> = {};
     for (const o of orders) {
       // `contains` может зацепить более длинный id — сверяем точным парсингом URL.
       const m = (o.gamepassUrl ?? "").match(/game-pass(?:es)?\/(\d+)/);
       if (!m || !ids.includes(m[1]) || map[m[1]]) continue;
-      map[m[1]] = { wbCode: o.wbCode, status: o.status, orderSource: o.orderSource, createdAt: o.createdAt };
+      map[m[1]] = {
+        wbCode: o.wbCode, status: o.status, orderSource: o.orderSource, createdAt: o.createdAt,
+        expectedPrice: expectedGamepassPrice(o.amount),
+      };
     }
     return map;
   } catch {
@@ -226,6 +232,30 @@ export async function POST(req: NextRequest) {
           { error: `💳 Геймпасс привязан к неоплаченному прямому заказу ${unpaid.wbCode} — сначала подтверди оплату` },
           { status: 409 },
         );
+
+      // ЦЕНА-СТОП (PLAN-gp-price-guard Ш3): пасс привязан к активному заказу ⇒
+      // цена покупки обязана совпадать с ожидаемой по номиналу этого заказа.
+      // price приходит из body (live-цена с экрана) — Roblox сверит её сам,
+      // а занижать её для обхода гарда бессмысленно: покупка тогда не пройдёт.
+      const linkedCandidates = await (prisma as any).wbOrder.findMany({
+        where: {
+          isTest: false,
+          status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "AWAITING_PAYMENT", "PAYMENT_PENDING"] },
+          gamepassUrl: { contains: `/${gpIdRaw}` },
+        },
+        select: { wbCode: true, amount: true, gamepassUrl: true },
+      });
+      const linked = linkedCandidates.find(
+        (o: any) => (o.gamepassUrl ?? "").match(/game-pass(?:es)?\/(\d+)/)?.[1] === gpIdRaw,
+      );
+      if (linked) {
+        const { ok: priceOk, expected } = checkGamepassPrice(linked.amount, Number(price));
+        if (!priceOk)
+          return NextResponse.json(
+            { error: `⛔ Пасс привязан к заказу ${linked.wbCode}: цена ${price} R$ ≠ ожидаемой ${expected} R$ (номинал ${linked.amount}). Выкуп заблокирован — нужен пасс ровно за ${expected} R$.` },
+            { status: 409 },
+          );
+      }
     }
 
     const cookie = await getCookie();

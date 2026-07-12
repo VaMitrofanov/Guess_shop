@@ -86,6 +86,15 @@ interface EnrichValue {
   vkUnreachable?: boolean | null;
 }
 
+/** Живая проверка ГП (gp-live-check): фактическая цена vs ожидаемая по номиналу. */
+interface GpLiveInfo {
+  expected: number;
+  livePrice: number | null;
+  isForSale: boolean | null;
+  priceMismatch: boolean;
+  reusedIn: string | null;
+}
+
 const TAB_META: Record<FilterTab, { label: string; color: string }> = {
   ALL:           { label: "Все",            color: C.textPrimary },
   BUYOUT:        { label: "К выкупу",       color: C.green },
@@ -904,7 +913,7 @@ function DoneAccordion({ group, token, onRunAction, onSaveNote, onPurchaseDone, 
 
 /* ───────────── OrderCard — compact layout ───────────── */
 function OrderCard({
-  order, token, currentTab, exiting, onRunAction, onSaveNote, onPurchaseDone, onToggleFavorite, onMoved,
+  order, token, currentTab, exiting, onRunAction, onSaveNote, onPurchaseDone, onToggleFavorite, onMoved, live,
 }: {
   order: Order;
   token: string;
@@ -915,6 +924,8 @@ function OrderCard({
   onPurchaseDone?: () => void;
   onToggleFavorite: () => void;
   onMoved: () => void;
+  /** Прайс-гард (Ш4): живая цена ГП — бейдж расхождения с номиналом. */
+  live?: GpLiveInfo;
 }) {
   const [moveOpen, setMoveOpen] = useState(false);
   const [editAvitoOpen, setEditAvitoOpen] = useState(false);
@@ -1076,6 +1087,20 @@ function OrderCard({
         {order.gamepassUrl && (
           <DataRow icon="🔗" copyText={order.gamepassUrl}>
             <span style={{ color: C.blue }}>{order.gamepassUrl.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}</span>
+          </DataRow>
+        )}
+        {/* Прайс-гард (Ш4): расхождение живой цены пасса с номиналом видно до
+            нажатия «Выкупить» — сервер такой выкуп всё равно заблокирует. */}
+        {live?.priceMismatch && live.livePrice != null && (
+          <DataRow icon="⚠️">
+            <span style={{ color: C.orange, fontWeight: 600 }}>
+              цена ≠ номиналу: пасс {live.livePrice.toLocaleString("ru-RU")} R$, ожид {live.expected.toLocaleString("ru-RU")} R$
+            </span>
+          </DataRow>
+        )}
+        {live?.isForSale === false && (
+          <DataRow icon="⛔">
+            <span style={{ color: C.red, fontWeight: 600 }}>геймпасс не на продаже</span>
           </DataRow>
         )}
         {!order.isDirectOrder && (
@@ -1408,6 +1433,11 @@ export default function OrdersScreen({
   const enrichCache = useRef<Map<string, EnrichValue>>(new Map());
   const requestedRef = useRef<Set<string>>(new Set());
 
+  // Прайс-гард (Ш4): живая цена ГП для карточек выкупных статусов —
+  // бейдж «⚠️ цена ≠ номиналу» до нажатия «Выкупить», не блокируя список.
+  const [liveMap, setLiveMap] = useState<Record<string, GpLiveInfo>>({});
+  const liveRequestedRef = useRef<Set<string>>(new Set());
+
   const applyCache = useCallback((list: Order[]): Order[] =>
     list.map(o => {
       const e = enrichCache.current.get(o.id);
@@ -1490,6 +1520,33 @@ export default function OrdersScreen({
         for (const [id, v] of Object.entries(map)) enrichCache.current.set(id, v);
         setAllOrders(prev => prev.map(o => (map[o.id] ? { ...o, ...map[o.id] } : o)));
       } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [allOrders, token]);
+
+  // gp-live-check для карточек с геймпассом в выкупных статусах (сервер отдаёт
+  // expected/livePrice/priceMismatch, режет пачку до 30). Ошибки не критичны.
+  useEffect(() => {
+    const need = allOrders
+      .filter(o => o.gamepassUrl
+        && ["PENDING", "IN_PROGRESS", "ERROR"].includes(o.status)
+        && !liveRequestedRef.current.has(o.id))
+      .map(o => o.id)
+      .slice(0, 30);
+    if (need.length === 0) return;
+    need.forEach(id => liveRequestedRef.current.add(id));
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/twa/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action: "gp-live-check", orderIds: need }),
+        });
+        const d = await r.json().catch(() => null);
+        if (cancelled || !r.ok || !d?.results) return;
+        setLiveMap(prev => ({ ...prev, ...d.results }));
+      } catch { /* non-fatal */ }
     })();
     return () => { cancelled = true; };
   }, [allOrders, token]);
@@ -1921,6 +1978,7 @@ export default function OrdersScreen({
                     order={order}
                     token={token}
                     currentTab={isAttentionView ? "ATTENTION" : filter}
+                    live={liveMap[order.id]}
                     exiting={exiting.has(order.id)}
                     onRunAction={(action, reason) => runAction(order, action, reason)}
                     onSaveNote={(note) => saveNote(order.id, note)}
