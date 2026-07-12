@@ -8,6 +8,7 @@ import { db } from "../shared/db";
 import { CB, ADMIN_IDS } from "../shared/admin";
 import { tgSend, vkSend, stripHtml } from "../shared/notify";
 import { REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
+import { ROBUX_UNLOCK_DAYS, robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
 import { startAutoWorkers } from "./auto-workers";
 
 // Одно место правды о бонусе — review-eligibility.ts (Ф3, 2026-07-12).
@@ -325,6 +326,86 @@ async function processAwaitingReminders(bot: Telegraf): Promise<void> {
   }
 }
 
+/* ── Robux unlock pushes (Ф6.3, 2026-07-12) ──────────────────────────────────
+   Roblox держит робуксы за геймпасс в Pending ~5 дней (до 7). Два пуша по
+   WbOrder.robuxUnlockRemindLevel: день 5 — «уже могли разблокироваться»,
+   день 7 — «точно разблокированы» + [💎 Заказать ещё] (О3). Старые заказы
+   (completedAt=null — до миграции) не трогаем; окно 14 дней, чтобы
+   недоставленные (VK 901 → откат уровня) не ретраились вечно.
+   ───────────────────────────────────────────────────────────────────────── */
+
+const UNLOCK_PUSH_WINDOW_DAYS = 14;
+
+async function processRobuxUnlockPushes(bot: Telegraf): Promise<void> {
+  const now = Date.now();
+
+  const orders = await (db as any).wbOrder.findMany({
+    where: {
+      status: "COMPLETED",
+      isTest: false,
+      robuxUnlockRemindLevel: { lt: 2 },
+      completedAt: {
+        lte: new Date(now - ROBUX_UNLOCK_DAYS * 86_400_000),
+        gte: new Date(now - UNLOCK_PUSH_WINDOW_DAYS * 86_400_000),
+      },
+    },
+    include: { user: { select: { tgId: true, vkId: true } } },
+  });
+
+  for (const order of orders) {
+    const daysSince = (now - new Date(order.completedAt).getTime()) / 86_400_000;
+    // Если бот стоял и заказ «перепрыгнул» день 5 — шлём сразу пуш 7-го дня,
+    // без бессмысленного «могли разблокироваться» задним числом.
+    const targetLevel = daysSince >= 7 ? 2 : 1;
+    if (targetLevel <= order.robuxUnlockRemindLevel) continue;
+
+    // Клейм уровня атомарно со статус-гардом (образец — processAwaitingReminders).
+    const claimed = await (db as any).wbOrder.updateMany({
+      where: { id: order.id, status: "COMPLETED", robuxUnlockRemindLevel: order.robuxUnlockRemindLevel },
+      data: { robuxUnlockRemindLevel: targetLevel },
+    });
+    if (claimed.count === 0) continue;
+
+    const unlockStr = fmtDateRu(robuxUnlockDate(new Date(order.completedAt)));
+    const msg = targetLevel === 1
+      ? `⏳ <b>5 дней прошло — робуксы по заказу на ${order.amount} R$ уже могли разблокироваться!</b>\n\n` +
+        `Проверь: https://www.roblox.com/transactions — строка Pending должна перейти в Available (ориентир — ${unlockStr}).`
+      : `✅ <b>Робуксы по заказу на ${order.amount} R$ уже разблокированы — проверь баланс!</b>\n\n` +
+        `Если их не видно: https://www.roblox.com/transactions → строка Pending. Не пришли — напиши нам, разберёмся.`;
+
+    let delivered = false;
+    if (order.user?.tgId) {
+      try {
+        const extra: Record<string, unknown> = { parse_mode: "HTML", disable_web_page_preview: true };
+        if (targetLevel === 2) {
+          extra.reply_markup = { inline_keyboard: [[{ text: "💎 Заказать ещё", callback_data: CB.startDirect }]] };
+        }
+        await bot.telegram.sendMessage(order.user.tgId, msg, extra);
+        delivered = true;
+      } catch { /* заблокировал бота */ }
+    } else if (order.user?.vkId) {
+      try {
+        const extra: Record<string, string> = {};
+        if (targetLevel === 2) {
+          extra.keyboard = JSON.stringify({
+            inline: true,
+            buttons: [[{ action: { type: "text", label: "💎 Заказать ещё", payload: JSON.stringify({ command: "start_direct" }) }, color: "positive" }]],
+          });
+        }
+        delivered = await vkSend(order.user.vkId, stripHtml(msg), extra);
+      } catch { }
+    }
+
+    // Не доставлено (VK 901, блок) — вернуть уровень, попробуем в следующий час.
+    if (!delivered) {
+      await (db as any).wbOrder.updateMany({
+        where: { id: order.id, robuxUnlockRemindLevel: targetLevel },
+        data: { robuxUnlockRemindLevel: order.robuxUnlockRemindLevel },
+      }).catch(() => {});
+    }
+  }
+}
+
 /* ── Stale purchase-batch sweeper ─────────────────────────────────────────────
    «Выкупить всё» в TWA пишет батч прогрессивно (start → item → finish). Если
    TWA закрыли до finish (типично: пачка кончилась → менеджер ушёл менять
@@ -413,6 +494,19 @@ export function startReviewReminderCron(bot: Telegraf): void {
     );
   }, 2 * 60 * 60 * 1000); // every 2 hours
 
+  // Robux unlock pushes (день 5 / день 7) — every hour
+  setTimeout(() => {
+    processRobuxUnlockPushes(bot).catch(err =>
+      console.error("[UnlockPush] error:", err)
+    );
+  }, 75_000); // 1.25 min after boot
+
+  setInterval(() => {
+    processRobuxUnlockPushes(bot).catch(err =>
+      console.error("[UnlockPush] error:", err)
+    );
+  }, 60 * 60 * 1000); // every 1 hour
+
   // Stale purchase-batch sweeper — every 10 min
   setTimeout(() => {
     sweepStalePurchaseBatches().catch(err =>
@@ -432,4 +526,5 @@ export function startReviewReminderCron(bot: Telegraf): void {
   console.log("[ReviewReminder] Cron started ✅");
   console.log("[StockAlert] Cron started ✅");
   console.log("[AwaitingReminder] Cron started ✅");
+  console.log("[UnlockPush] Cron started ✅");
 }

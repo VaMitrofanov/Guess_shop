@@ -19,7 +19,8 @@ import { getGamepassDetails, getGamepassProductInfo } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { enforceVkInlineKbLimits } from "../shared/vk-kb";
 import { noteProbableNick } from "../shared/nick";
-import { resolveReviewEligibility, reviewIneligibleMessage } from "../shared/review-eligibility";
+import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
+import { robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 
 // VK API instance injected from bot.ts to avoid circular import.
@@ -500,6 +501,8 @@ function vkSupportKb(ctxKey: string) {
 const VK_FAQ_ITEMS: { key: string; label: string; answer: string }[] = [
   { key: "when_buy",  label: "⏳ Когда выкупят?",           answer: "Обычно выкупаем за пару часов, максимум — в течение суток.\nКак только выкупим — бот пришлёт уведомление прямо сюда. Ничего делать не нужно, просто жди 👌" },
   { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа Roblox замораживает робуксы на 5–7 дней (это их стандартная процедура — «Pending Robux»).\n\nПроверить: roblox.com/transactions → строка Pending.\n\nМы на это повлиять не можем — дальше всё на стороне Roblox." },
+  // Ф6.1 (2026-07-12): механика бонуса — одно место правды review-eligibility.ts.
+  { key: "bonus",     label: "🎁 Бонус за отзыв",           answer: `За отзыв на Wildberries дарим +${REVIEW_BONUS_AMOUNT} R$ к любому прямому заказу.\n\nКак получить:\n1. Оставь отзыв с текстом и фото (только оценка не подойдёт).\n2. Пришли скриншот сюда фотографией (не файлом).\n3. После проверки начислим сразу — бонус действует ${REVIEW_BONUS_EXPIRY_DAYS} дней.\n\nКак потратить: оформи прямой заказ в боте — бонус добавится к номиналу автоматически (без карточки WB).` },
   { key: "what_now",  label: "🤔 Что мне делать сейчас?",   answer: "Если заказ оформлен — просто жди. Бот сам пришлёт уведомление, когда геймпасс будет выкуплен.\n\nЕсли ещё не создал геймпасс — открой 📖 Инструкцию и пройди все шаги." },
   { key: "wrong_gp",  label: "✏️ Не тот геймпасс/ник",     answer: "Напиши «сменить ник» — можно перевыбрать ник и геймпасс в любой момент до выкупа." },
   { key: "how_gp",    label: "📖 Как создать геймпасс?",    answer: "Полная пошаговая инструкция — по кнопке 📖 ИНСТРУКЦИЯ.\n\nВкратце: зайди на create.roblox.com → выбери свою игру → Monetization → Passes → Create Pass → поставь нужную цену → сохрани." },
@@ -726,15 +729,39 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
 
   // ── ❓ FAQ — self-service answers ─────────────────────────────────────────
   if (msgPayload?.command === "faq") {
+    // Ф6.2: when_rbx персонализируется датой разблокировки последнего заказа.
+    let whenRbxExtra = "";
+    try {
+      const faqUser = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { id: true } });
+      const lastDone = faqUser
+        ? await (db as any).wbOrder.findFirst({
+            where: { userId: faqUser.id, status: "COMPLETED", completedAt: { not: null } },
+            orderBy: { completedAt: "desc" },
+            select: { amount: true, completedAt: true },
+          })
+        : null;
+      if (lastDone) {
+        const unlock = robuxUnlockDate(new Date(lastDone.completedAt));
+        const daysLeft = Math.ceil((unlock.getTime() - Date.now()) / 86_400_000);
+        whenRbxExtra = daysLeft > 0
+          ? `\n📌 По твоему заказу на ${lastDone.amount} R$: разблокировка ~ ${fmtDateRu(unlock)} (осталось ${daysLeft} ${vkPluralDays(daysLeft)}).`
+          : `\n📌 По твоему заказу на ${lastDone.amount} R$ робуксы уже должны быть доступны — проверь transactions.`;
+      }
+    } catch { /* персонализация — не повод ронять FAQ */ }
+
     const lines = ["❓ Частые вопросы\n"];
     for (const item of VK_FAQ_ITEMS) {
-      lines.push(`${item.label}\n${item.answer}\n`);
+      lines.push(`${item.label}\n${item.answer}${item.key === "when_rbx" ? whenRbxExtra : ""}\n`);
     }
     lines.push("💬 Не нашёл ответ? Напиши прямо сюда — ответим здесь, или в Telegram: https://t.me/RobloxBank_PA");
     await ctx.reply({
       message: lines.join("\n"),
       keyboard: Keyboard.builder()
         .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "primary" })
+        .row()
+        // Ф6.1: кнопки бонусного FAQ-пункта (в TG — на самом пункте).
+        .textButton({ label: "📸 Прислать отзыв", payload: { command: "review_hint" }, color: "primary" })
+        .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "positive" })
         .row()
         .textButton({ label: "👤 В моё меню", payload: { command: "menu" }, color: "secondary" })
         .inline(),
@@ -3083,10 +3110,11 @@ function vkPluralDays(n: number): string {
  * ~5 days (up to 7). Answers the recurring "а сколько ждать?".
  */
 function vkRobuxCountdown(completedAt: Date | string): string {
-  const since = Math.floor((Date.now() - new Date(completedAt).getTime()) / 86_400_000);
-  const left = 5 - since;
-  if (left >= 2) return `⏳ Примерно через ${left} ${vkPluralDays(left)} робуксы станут доступны.`;
-  if (left === 1) return `⏳ Уже завтра робуксы должны стать доступны.`;
+  // Ф6.3: конкретная дата (completedAt+5д) вместо абстрактных «5–7 дней».
+  const unlock = robuxUnlockDate(new Date(completedAt));
+  const left = Math.ceil((unlock.getTime() - Date.now()) / 86_400_000);
+  if (left >= 2) return `⏳ Робуксы станут доступны ~ ${fmtDateRu(unlock)} (через ${left} ${vkPluralDays(left)}).`;
+  if (left === 1) return `⏳ Уже завтра (${fmtDateRu(unlock)}) робуксы должны стать доступны.`;
   return `⏳ Робуксы вот-вот появятся. Roblox иногда держит пендинг до 7 дней — если их пока нет, подожди ещё чуть-чуть.`;
 }
 
@@ -3361,7 +3389,7 @@ async function handleIdleMessage(
         : order.status === "IN_PROGRESS"
         ? "\n\n🔧 Менеджер уже работает над твоим заказом. Скоро всё будет готово!"
         : order.status === "COMPLETED"
-        ? "\n\n" + vkRobuxCountdown(order.updatedAt) +
+        ? "\n\n" + vkRobuxCountdown(order.completedAt ?? order.updatedAt) +
           "\n💡 Они уже у тебя в Roblox — лежат в пендинге (заморожены самим Roblox). Проверить: roblox.com/transactions → строка Pending." +
           (reviewClaimed
             ? "\n\n🚀 Хочешь заказать ещё? Постоянным клиентам — прямое обслуживание без очереди по лучшему курсу! Пиши: https://t.me/RobloxBank_PA"

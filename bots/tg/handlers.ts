@@ -16,8 +16,8 @@ import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pen
 import { getGamepassDetails, getGamepassProductInfo, buildPurchaseScript, purchaseGamepassVerified, getRobuxBalance, getAuthenticatedUser, resetPurchaseCsrf } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { noteProbableNick } from "../shared/nick";
-import { resolveReviewEligibility, reviewIneligibleMessage } from "../shared/review-eligibility";
-import { buildCompletedMessages } from "../shared/completed-messages";
+import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
+import { buildCompletedMessages, robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 import { buildAdminKeyboard } from "./admin";
 
@@ -128,9 +128,12 @@ async function getDirectKbParams(tgId: string): Promise<{ bonus: number; rubleDi
 
 // ── FAQ / Self-service (replaces support in the first 24h) ────────────────
 
-const FAQ_ITEMS: { key: string; label: string; answer: string }[] = [
+const FAQ_ITEMS: { key: string; label: string; answer: string; buttons?: { label: string; cb: string }[][] }[] = [
   { key: "when_buy",  label: "⏳ Когда выкупят?",           answer: "Обычно выкупаем за пару часов, максимум — в течение суток.\nКак только выкупим — бот пришлёт уведомление прямо сюда. Ничего делать не нужно, просто жди 👌" },
   { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа <b>Roblox замораживает робуксы на 5–7 дней</b> (это их стандартная процедура — «Pending Robux»).\n\nПроверить: <a href=\"https://www.roblox.com/transactions\">roblox.com/transactions</a> → строка <b>Pending</b>.\n\nМы на это повлиять не можем — дальше всё на стороне Roblox." },
+  // Ф6.1 (2026-07-12): механика бонуса — одно место правды review-eligibility.ts.
+  { key: "bonus",     label: "🎁 Бонус за отзыв",           answer: `За отзыв на Wildberries дарим <b>+${REVIEW_BONUS_AMOUNT} R$</b> к любому прямому заказу.\n\nКак получить:\n1. Оставь отзыв <b>с текстом и фото</b> (только оценка не подойдёт).\n2. Пришли скриншот сюда фотографией (не файлом).\n3. После проверки начислим сразу — бонус действует ${REVIEW_BONUS_EXPIRY_DAYS} дней.\n\nКак потратить: оформи прямой заказ в боте — бонус добавится к номиналу автоматически (без карточки WB).`,
+    buttons: [[{ label: "📸 Прислать отзыв", cb: "review_hint" }, { label: "💎 Купить напрямую", cb: "start_direct" }]] },
   { key: "what_now",  label: "🤔 Что мне делать сейчас?",   answer: "Если заказ <b>оформлен</b> — просто жди. Бот сам пришлёт уведомление, когда геймпасс будет выкуплен.\n\nЕсли ещё <b>не создал геймпасс</b> — открой 📖 Инструкцию и пройди все шаги." },
   { key: "wrong_gp",  label: "✏️ Не тот геймпасс/ник",     answer: "Нажми кнопку <b>«✏️ Сменить ник Roblox»</b> в карточке заказа — можно перевыбрать ник и геймпасс в любой момент до выкупа." },
   { key: "how_gp",    label: "📖 Как создать геймпасс?",    answer: "Полная пошаговая инструкция — по кнопке 📖 ИНСТРУКЦИЯ в меню.\n\nВкратце: зайди на create.roblox.com → выбери свою игру → Monetization → Passes → Create Pass → поставь нужную цену → сохрани." },
@@ -1094,10 +1097,11 @@ function pluralDays(n: number): string {
  * in ~5 days (occasionally up to 7). Answers the recurring "а сколько ждать?".
  */
 function robuxCountdown(completedAt: Date | string): string {
-  const since = Math.floor((Date.now() - new Date(completedAt).getTime()) / 86_400_000);
-  const left = 5 - since;
-  if (left >= 2) return `⏳ <b>Примерно через ${left} ${pluralDays(left)}</b> робуксы станут доступны.`;
-  if (left === 1) return `⏳ <b>Уже завтра</b> робуксы должны стать доступны.`;
+  // Ф6.3: конкретная дата (completedAt+5д) вместо абстрактных «5–7 дней».
+  const unlock = robuxUnlockDate(new Date(completedAt));
+  const left = Math.ceil((unlock.getTime() - Date.now()) / 86_400_000);
+  if (left >= 2) return `⏳ Робуксы станут доступны ~ <b>${fmtDateRu(unlock)}</b> (через ${left} ${pluralDays(left)}).`;
+  if (left === 1) return `⏳ <b>Уже завтра</b> (${fmtDateRu(unlock)}) робуксы должны стать доступны.`;
   return `⏳ Робуксы вот-вот появятся. Roblox иногда держит пендинг до 7 дней — если их пока нет, подожди ещё чуть-чуть.`;
 }
 
@@ -1234,7 +1238,7 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     }
   } else if (order.status === "COMPLETED") {
     note =
-      `\n\n${robuxCountdown(order.updatedAt)}\n` +
+      `\n\n${robuxCountdown(order.completedAt ?? order.updatedAt)}\n` +
       `💡 <i>Они уже у тебя в Roblox — лежат в пендинге (заморожены самим Roblox). ` +
       `Проверить: <a href="https://www.roblox.com/transactions">roblox.com/transactions</a> → строка Pending.</i>\n\n` +
       `🚀 <i>Хочешь заказать ещё? Постоянным клиентам — прямое обслуживание без Wildberries по лучшему курсу!</i>`;
@@ -3613,15 +3617,36 @@ export function registerCallbacks(bot: Telegraf): void {
       const item = FAQ_ITEMS.find(i => i.key === key);
       if (!item) { await ctx.answerCbQuery("❌"); return; }
       await ctx.answerCbQuery(item.label);
+
+      // Ф6.2: when_rbx персонализируется датой разблокировки последнего заказа.
+      let answer = item.answer;
+      if (key === "when_rbx") {
+        const faqUser = await (db as any).user.findUnique({ where: { tgId }, select: { id: true } }).catch(() => null);
+        const lastDone = faqUser
+          ? await (db as any).wbOrder.findFirst({
+              where: { userId: faqUser.id, status: "COMPLETED", completedAt: { not: null } },
+              orderBy: { completedAt: "desc" },
+              select: { amount: true, completedAt: true },
+            }).catch(() => null)
+          : null;
+        if (lastDone) {
+          const unlock = robuxUnlockDate(new Date(lastDone.completedAt));
+          const daysLeft = Math.ceil((unlock.getTime() - Date.now()) / 86_400_000);
+          answer += daysLeft > 0
+            ? `\n\n📌 По твоему заказу на <b>${lastDone.amount} R$</b>: разблокировка ~ <b>${fmtDateRu(unlock)}</b> (осталось ${daysLeft} ${pluralDays(daysLeft)}).`
+            : `\n\n📌 По твоему заказу на <b>${lastDone.amount} R$</b> робуксы уже должны быть доступны — проверь transactions.`;
+        }
+      }
+
+      const rows = (item.buttons ?? []).map(row => row.map(b => Markup.button.callback(b.label, b.cb)));
+      rows.push([Markup.button.callback("⬅️ Все вопросы", CB.faq)]);
+      rows.push([supportBtn("💬 Не помогло — написать менеджеру")]);
       await ctx.reply(
-        `<b>${item.label}</b>\n\n${item.answer}`,
+        `<b>${item.label}</b>\n\n${answer}`,
         {
           parse_mode: "HTML",
           link_preview_options: { is_disabled: true },
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback("⬅️ Все вопросы", CB.faq)],
-            [supportBtn("💬 Не помогло — написать менеджеру")],
-          ]),
+          ...Markup.inlineKeyboard(rows),
         }
       );
       return;
