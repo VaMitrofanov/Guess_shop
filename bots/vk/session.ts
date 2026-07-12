@@ -18,6 +18,9 @@ interface DirectFlowData {
   bonus: number;
   rubleDiscount: number;
   rublePrice: number;
+  /** Ф4 (О1): флоу 5 шагов с экраном «🎁 Бонус» (bonus>0) или 4 шага без него.
+   *  Фиксируется при выборе пака и не меняется, даже если юзер выбрал «Без бонуса». */
+  hasBonusStep: boolean;
 }
 
 export type VKState =

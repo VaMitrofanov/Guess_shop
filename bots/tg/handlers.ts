@@ -47,9 +47,16 @@ function fmtRub(n: number): string {
 }
 
 /** Visual step indicator: ● ● ○ ○ ○  Шаг 2 · Подтверждение */
-function stepBar(current: number, label: string): string {
-  const bar = Array.from({ length: 5 }, (_, i) => i < current ? "●" : "○").join(" ");
-  return `${bar}  <b>Шаг ${current}/5 · ${label}</b>`;
+// Ф4: число шагов динамическое — 4 без экрана «Бонус», 5 с ним (О1).
+function stepBar(current: number, total: number, label: string): string {
+  const bar = Array.from({ length: total }, (_, i) => i < current ? "●" : "○").join(" ");
+  return `${bar}  <b>Шаг ${current}/${total} · ${label}</b>`;
+}
+
+/** Номер и total шага для фаз после выбора пака (сдвиг на −1 без экрана «Бонус»). */
+function dirStep(flow: { hasBonusStep?: boolean }, phase: "nick" | "gamepass" | "summary"): [number, number] {
+  const base = { nick: 3, gamepass: 4, summary: 5 }[phase];
+  return flow.hasBonusStep ? [base, 5] : [base - 1, 4];
 }
 
 // ── Клавиатура паков прямого заказа (PLAN +5.C) ──────────────────────────
@@ -664,7 +671,7 @@ async function getAdminKeyboard(uid?: string | number) {
 
 // ── Direct intent flow helpers ────────────────────────────────────────────────
 
-async function handleDirectPackChosen(ctx: any, amt: number): Promise<void> {
+async function handleDirectPackChosen(bot: Telegraf, ctx: any, amt: number): Promise<void> {
   const tgId = String(ctx.from.id);
   const dirUser = await (db as any).user.findUnique({
     where: { tgId },
@@ -681,39 +688,39 @@ async function handleDirectPackChosen(ctx: any, amt: number): Promise<void> {
 
   const flow: DirectFlowState = {
     step: "bonus", amount: amt, bonus, totalAmount, passPrice,
-    rublePrice, rubleDiscount: discount,
+    rublePrice, rubleDiscount: discount, hasBonusStep: bonus > 0,
   };
   pendingDirectFlow.set(ctx.from.id, flow);
 
-  const bonusSection = bonus > 0
-    ? `💎 Запрос:          ${amt} R$\n` +
-      `🎁 Твой бонус:     +${bonus} R$\n` +
-      `━━━━━━━━━━━━━━━━\n` +
-      `📦 Итого получишь:  ${totalAmount} R$\n`
-    : `📦 Получишь:       ${totalAmount} R$\n`;
+  // О1: без бонуса экран «Подтверждение» был пустым лишним кликом — сразу к нику
+  // (4 шага). Решение о бонусе обязано быть ДО геймпасса: passPrice зависит от него.
+  if (bonus === 0) {
+    await showNickStep(bot, ctx);
+    return;
+  }
+
   const discountLine = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
   const rateLine = amt >= 1000 ? `📊 Курс:            ${customRate(amt)} ₽/R$\n` : "";
-  const confirmText =
-    `${stepBar(2, "Подтверждение")}\n\n` +
-    bonusSection + rateLine + discountLine +
-    `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
-    `📌 Цена геймпасса:  ${passPrice} R$`;
+  const bonusText =
+    `${stepBar(2, 5, "Бонус")}\n\n` +
+    `🎁 У тебя бонус <b>+${bonus} R$</b> — использовать в этом заказе?\n\n` +
+    `💎 Запрос:          ${amt} R$\n` +
+    `🎁 Твой бонус:     +${bonus} R$\n` +
+    `━━━━━━━━━━━━━━━━\n` +
+    `📦 Итого получишь:  ${totalAmount} R$\n` +
+    rateLine + discountLine +
+    `💰 К оплате:       ${fmtRub(rublePrice)} (бонус бесплатный)\n\n` +
+    `📌 С бонусом цена геймпасса — <b>${passPrice} R$</b> (без бонуса — ${Math.ceil(amt / 0.7)} R$).`;
 
-  const confirmBtns = bonus > 0
-    ? [
-        [Markup.button.callback(`✅ С бонусом (+${bonus} R$)`, CB.confirmDirect)],
-        [Markup.button.callback("✅ Без бонуса", CB.confirmDirectNb)],
-        [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
-      ]
-    : [
-        [Markup.button.callback("✅ Подтвердить", CB.confirmDirect)],
-        [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
-      ];
-  const confirmKb = Markup.inlineKeyboard(confirmBtns);
+  const bonusKb = Markup.inlineKeyboard([
+    [Markup.button.callback(`✅ С бонусом (+${bonus} R$)`, CB.confirmDirect)],
+    [Markup.button.callback("Без бонуса", CB.confirmDirectNb)],
+    [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
+  ]);
   try {
-    await ctx.editMessageText(confirmText, { parse_mode: "HTML", ...confirmKb });
+    await ctx.editMessageText(bonusText, { parse_mode: "HTML", ...bonusKb });
   } catch {
-    await ctx.reply(confirmText, { parse_mode: "HTML", ...confirmKb });
+    await ctx.reply(bonusText, { parse_mode: "HTML", ...bonusKb });
   }
 }
 
@@ -727,7 +734,7 @@ async function showNickStep(bot: Telegraf, ctx: any): Promise<void> {
   const savedNick = user?.robloxUsername;
   flow.step = "nick";
 
-  const nickHeader = stepBar(3, "Ник Roblox");
+  const nickHeader = stepBar(...dirStep(flow, "nick"), "Ник Roblox");
 
   if (savedNick) {
     flow.robloxUsername = savedNick;
@@ -783,7 +790,7 @@ async function showSummary(ctx: any, flow: DirectFlowState, gpRobux: number, gpN
     : "";
 
   const summaryText =
-    `${stepBar(5, "Итого")}\n\n` +
+    `${stepBar(...dirStep(flow, "summary"), "Подтверждение")}\n\n` +
     `📦 Получишь:    <b>${flow.totalAmount} R$</b>${bonusLine}\n` +
     `🎮 Ник:         <b>${escapeHtml(flow.robloxUsername!)}</b>\n` +
     `🎫 Геймпасс:    <b>${gpRobux} R$</b> · "${escapeHtml(gpName.slice(0, 30))}"${discountLine}\n` +
@@ -877,7 +884,7 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
     return;
   }
 
-  const gpHeader = stepBar(4, "Геймпасс");
+  const gpHeader = stepBar(...dirStep(flow, "gamepass"), "Геймпасс");
   const { matches, nonMatches } = result;
 
   // Auto-skip: exactly 1 price-matched gamepass → go straight to summary
@@ -962,7 +969,7 @@ async function startDirectFlow(ctx: any): Promise<void> {
   const notesBlock = notes.length > 0 ? "\n" + notes.join("\n") : "";
   pendingDirectFlow.set(ctx.from.id, { step: "amount" });
   await ctx.reply(
-    `${stepBar(1, "Выбери пак")}\n\n💎 <b>Прямой заказ Robux</b>${nickNote}${notesBlock}\n\nВыбери количество:`,
+    `${stepBar(1, bonus > 0 ? 5 : 4, "Выбери пак")}\n\n💎 <b>Прямой заказ Robux</b>${nickNote}${notesBlock}\n\nВыбери количество:`,
     { parse_mode: "HTML", ...buildPackKb(bonus, rubleDiscount, lastOrderAmount) }
   );
 }
@@ -1596,7 +1603,7 @@ export function registerText(bot: Telegraf): void {
           );
           return;
         }
-        await handleDirectPackChosen(ctx, num);
+        await handleDirectPackChosen(bot, ctx, num);
         return;
       }
       if (dirFlow.step === "nick_input") {
@@ -3985,7 +3992,8 @@ export function registerCallbacks(bot: Telegraf): void {
     // dp:custom: user wants to enter a custom amount
     if (data === CB.customDirect) {
       pendingDirectFlow.set(ctx.from.id, { step: "amount" });
-      const customPrompt = `${stepBar(1, "Своё количество")}\n\nВведи количество робуксов от ${CUSTOM_MIN} до ${CUSTOM_MAX.toLocaleString("ru-RU")}:`;
+      const customParams = await getDirectKbParams(String(ctx.from.id));
+      const customPrompt = `${stepBar(1, customParams.bonus > 0 ? 5 : 4, "Своё количество")}\n\nВведи количество робуксов от ${CUSTOM_MIN} до ${CUSTOM_MAX.toLocaleString("ru-RU")}:`;
       const customKb = Markup.inlineKeyboard([
         [Markup.button.callback("◀️ К пакам", CB.startDirect), Markup.button.callback("❌ Отменить", CB.cancelDirect)],
       ]);
@@ -4009,7 +4017,7 @@ export function registerCallbacks(bot: Telegraf): void {
         await ctx.editMessageReplyMarkup(kb.reply_markup);
       } catch {
         await ctx.reply(
-          `${stepBar(1, "Выбери пак")}\n\nВыбери количество:`,
+          `${stepBar(1, kbParams.bonus > 0 ? 5 : 4, "Выбери пак")}\n\nВыбери количество:`,
           { parse_mode: "HTML", ...kb }
         );
       }
@@ -4024,7 +4032,7 @@ export function registerCallbacks(bot: Telegraf): void {
         await ctx.answerCbQuery("Неверный пак");
         return;
       }
-      await handleDirectPackChosen(ctx, amt);
+      await handleDirectPackChosen(bot, ctx, amt);
       await ctx.answerCbQuery();
       return;
     }
@@ -4111,7 +4119,10 @@ export function registerCallbacks(bot: Telegraf): void {
       if (step === "bonus") {
         await startDirectFlow(ctx);
       } else if (step === "nick" || step === "nick_input") {
-        await handleDirectPackChosen(ctx, flow.amount!);
+        // Ф4: без экрана «Бонус» предыдущий шаг ника — выбор пака
+        // (handleDirectPackChosen при bonus=0 снова прыгнул бы на ник — цикл).
+        if (flow.hasBonusStep) await handleDirectPackChosen(bot, ctx, flow.amount!);
+        else await startDirectFlow(ctx);
       } else if (step === "gamepass") {
         await showNickStep(bot, ctx);
       } else if (step === "summary") {

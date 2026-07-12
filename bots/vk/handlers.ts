@@ -158,10 +158,17 @@ function fmtRub(n: number): string {
   return `${n} ₽`;
 }
 
-/** Visual step indicator (plain text for VK). */
-function stepBar(current: number, label: string): string {
-  const bar = Array.from({ length: 5 }, (_, i) => i < current ? "●" : "○").join(" ");
-  return `${bar}  Шаг ${current}/5 · ${label}`;
+/** Visual step indicator (plain text for VK).
+ *  Ф4: число шагов динамическое — 4 без экрана «Бонус», 5 с ним (О1). */
+function stepBar(current: number, total: number, label: string): string {
+  const bar = Array.from({ length: total }, (_, i) => i < current ? "●" : "○").join(" ");
+  return `${bar}  Шаг ${current}/${total} · ${label}`;
+}
+
+/** Номер и total шага для фаз после выбора пака (сдвиг на −1 без экрана «Бонус»). */
+function dirStep(fd: { hasBonusStep?: boolean }, phase: "nick" | "gamepass" | "summary"): [number, number] {
+  const base = { nick: 3, gamepass: 4, summary: 5 }[phase];
+  return fd.hasBonusStep ? [base, 5] : [base - 1, 4];
 }
 
 // ── Клавиатура паков прямого заказа (PLAN +5.C) ──────────────────────────
@@ -1149,17 +1156,19 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     if (st === "AWAITING_DIRECT_CONFIRM") {
       await handleStartDirect(ctx, vkUserId);
     } else if (st === "AWAITING_DIRECT_NICK" || st === "AWAITING_DIRECT_NICK_INPUT") {
-      await handleDirectPackSelect(ctx, vkUserId, backState.amount);
+      // Ф4: без экрана «Бонус» предыдущий шаг ника — выбор пака
+      // (handleDirectPackSelect при bonus=0 снова прыгнул бы на ник — цикл).
+      if (backState.hasBonusStep) await handleDirectPackSelect(ctx, vkUserId, backState.amount);
+      else await handleStartDirect(ctx, vkUserId);
     } else if (st === "AWAITING_DIRECT_GAMEPASS") {
-      const fd = { amount: backState.amount, totalAmount: backState.totalAmount, bonus: backState.bonus, rubleDiscount: backState.rubleDiscount, rublePrice: backState.rublePrice };
+      const fd = { amount: backState.amount, totalAmount: backState.totalAmount, bonus: backState.bonus, rubleDiscount: backState.rubleDiscount, rublePrice: backState.rublePrice, hasBonusStep: backState.hasBonusStep };
       await showVkNickStep(ctx, vkUserId, fd);
     } else if (st === "AWAITING_DIRECT_SUMMARY") {
+      const fd = { amount: backState.amount, totalAmount: backState.totalAmount, bonus: backState.bonus, rubleDiscount: backState.rubleDiscount, rublePrice: backState.rublePrice, hasBonusStep: backState.hasBonusStep };
       if (backState.robloxUsername) {
-        const fd = { amount: backState.amount, totalAmount: backState.totalAmount, bonus: backState.bonus, rubleDiscount: backState.rubleDiscount, rublePrice: backState.rublePrice };
         setState(vkUserId, { type: "AWAITING_DIRECT_NICK", ...fd });
         await handleVkDirectNickResolved(ctx, vkUserId, backState.robloxUsername);
       } else {
-        const fd = { amount: backState.amount, totalAmount: backState.totalAmount, bonus: backState.bonus, rubleDiscount: backState.rubleDiscount, rublePrice: backState.rublePrice };
         await showVkNickStep(ctx, vkUserId, fd);
       }
     } else {
@@ -1184,7 +1193,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       await ctx.reply("⏳ Сессия истекла. Начни заново.");
       return;
     }
-    setState(vkUserId, { type: "AWAITING_DIRECT_NICK_INPUT", amount: nickState.amount, totalAmount: nickState.totalAmount, bonus: nickState.bonus, rubleDiscount: nickState.rubleDiscount, rublePrice: nickState.rublePrice });
+    setState(vkUserId, { type: "AWAITING_DIRECT_NICK_INPUT", amount: nickState.amount, totalAmount: nickState.totalAmount, bonus: nickState.bonus, rubleDiscount: nickState.rubleDiscount, rublePrice: nickState.rublePrice, hasBonusStep: nickState.hasBonusStep });
     const kb = Keyboard.builder();
     kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
     kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
@@ -2454,7 +2463,7 @@ async function handleStartDirect(ctx: MessageContext, vkUserId: number): Promise
   setState(vkUserId, { type: "AWAITING_DIRECT_AMOUNT" });
 
   await ctx.reply({
-    message: `${stepBar(1, "Выбери пак")}\n\n💎 Прямой заказ Robux${nickNote}${notesBlock}\n\nВыбери количество:`,
+    message: `${stepBar(1, bonus > 0 ? 5 : 4, "Выбери пак")}\n\n💎 Прямой заказ Robux${nickNote}${notesBlock}\n\nВыбери количество:`,
     keyboard: buildVkPackKb(bonus, rubleDiscount, lastOrderAmount),
   });
 }
@@ -2488,54 +2497,41 @@ async function handleDirectPackSelect(ctx: MessageContext, vkUserId: number, amo
   const discount = user?.rubleDiscount ?? 0;
   const rublePrice = discount > 0 ? Math.max(0, baseRublePrice - discount) : baseRublePrice;
 
-  const flowData = { amount, totalAmount, bonus, rubleDiscount: discount, rublePrice };
+  const flowData = { amount, totalAmount, bonus, rubleDiscount: discount, rublePrice, hasBonusStep: bonus > 0 };
 
-  if (bonus > 0) {
-    setState(vkUserId, { type: "AWAITING_DIRECT_CONFIRM", ...flowData });
+  // О1: без бонуса экран «Подтверждение» был пустым лишним кликом — сразу к нику
+  // (4 шага). Решение о бонусе обязано быть ДО геймпасса: passPrice зависит от него.
+  if (bonus === 0) {
+    await showVkNickStep(ctx, vkUserId, flowData);
+    return;
+  }
 
-    const bonusSection =
+  setState(vkUserId, { type: "AWAITING_DIRECT_CONFIRM", ...flowData });
+
+  const discountLine = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
+  const rateLine = amount >= 1000 ? `📊 Курс:            ${customRate(amount)} ₽/R$\n` : "";
+
+  const kb = Keyboard.builder();
+  kb.textButton({ label: `✅ С бонусом (+${bonus} R$)`, payload: { command: "direct_confirm" }, color: "positive" });
+  kb.row();
+  kb.textButton({ label: "Без бонуса", payload: { command: "direct_confirm_nb" }, color: "secondary" });
+  kb.row();
+  kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
+  kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
+
+  await ctx.reply({
+    message:
+      `${stepBar(2, 5, "Бонус")}\n\n` +
+      `🎁 У тебя бонус +${bonus} R$ — использовать в этом заказе?\n\n` +
       `💎 Запрос:          ${amount} R$\n` +
       `🎁 Твой бонус:     +${bonus} R$\n` +
       `─────────────────\n` +
-      `📦 Итого получишь:  ${totalAmount} R$\n`;
-    const discountLine = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
-    const rateLine = amount >= 1000 ? `📊 Курс:            ${customRate(amount)} ₽/R$\n` : "";
-
-    const kb = Keyboard.builder();
-    kb.textButton({ label: `✅ С бонусом (+${bonus} R$)`, payload: { command: "direct_confirm" }, color: "positive" });
-    kb.row();
-    kb.textButton({ label: "✅ Без бонуса", payload: { command: "direct_confirm_nb" }, color: "secondary" });
-    kb.row();
-    kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
-    kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
-
-    await ctx.reply({
-      message:
-        `${stepBar(2, "Подтверждение")}\n\n` +
-        bonusSection + rateLine + discountLine +
-        `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
-        `📌 Цена геймпасса:  ${passPrice} R$`,
-      keyboard: kb.inline(),
-    });
-  } else {
-    setState(vkUserId, { type: "AWAITING_DIRECT_CONFIRM", ...flowData });
-    const kb = Keyboard.builder();
-    kb.textButton({ label: "✅ Подтвердить", payload: { command: "direct_confirm" }, color: "positive" });
-    kb.row();
-    kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
-    kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
-    const discountLine2 = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
-    const rateLine2 = amount >= 1000 ? `📊 Курс:            ${customRate(amount)} ₽/R$\n` : "";
-    await ctx.reply({
-      message:
-        `${stepBar(2, "Подтверждение")}\n\n` +
-        `📦 Получишь:       ${totalAmount} R$\n` +
-        rateLine2 + discountLine2 +
-        `💰 К оплате:       ${fmtRub(rublePrice)}\n` +
-        `📌 Цена геймпасса:  ${passPrice} R$`,
-      keyboard: kb.inline(),
-    });
-  }
+      `📦 Итого получишь:  ${totalAmount} R$\n` +
+      rateLine + discountLine +
+      `💰 К оплате:       ${fmtRub(rublePrice)} (бонус бесплатный)\n\n` +
+      `📌 С бонусом цена геймпасса — ${passPrice} R$ (без бонуса — ${Math.ceil(amount / 0.7)} R$).`,
+    keyboard: kb.inline(),
+  });
 }
 
 async function handleDirectConfirm(ctx: MessageContext, vkUserId: number, skipBonus = false): Promise<void> {
@@ -2557,16 +2553,18 @@ async function handleDirectConfirm(ctx: MessageContext, vkUserId: number, skipBo
     ? Math.max(0, directPrice(amount) - rubleDiscount)
     : rublePrice;
 
-  const flowData = { amount, totalAmount, bonus, rubleDiscount, rublePrice: recalcedRublePrice };
+  // hasBonusStep остаётся true и при «Без бонуса» — нумерация шагов не скачет.
+  const flowData = { amount, totalAmount, bonus, rubleDiscount, rublePrice: recalcedRublePrice, hasBonusStep: state.hasBonusStep };
   setState(vkUserId, { type: "AWAITING_DIRECT_NICK", ...flowData });
   await showVkNickStep(ctx, vkUserId, flowData);
 }
 
-async function showVkNickStep(ctx: MessageContext, vkUserId: number, flowData: { amount: number; totalAmount: number; bonus: number; rubleDiscount: number; rublePrice: number }): Promise<void> {
+async function showVkNickStep(ctx: MessageContext, vkUserId: number, flowData: { amount: number; totalAmount: number; bonus: number; rubleDiscount: number; rublePrice: number; hasBonusStep: boolean }): Promise<void> {
   const user = await (db as any).user.findUnique({
     where: { vkId: String(vkUserId) }, select: { robloxUsername: true },
   });
   const savedNick = user?.robloxUsername;
+  const nickHeader = stepBar(...dirStep(flowData, "nick"), "Ник Roblox");
 
   if (savedNick) {
     setState(vkUserId, { type: "AWAITING_DIRECT_NICK", ...flowData });
@@ -2578,7 +2576,7 @@ async function showVkNickStep(ctx: MessageContext, vkUserId: number, flowData: {
     kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
     kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
     await ctx.reply({
-      message: `${stepBar(3, "Ник Roblox")}\n\nТвой сохранённый ник: ${savedNick}\n\nПродолжить с ним?`,
+      message: `${nickHeader}\n\nТвой сохранённый ник: ${savedNick}\n\nПродолжить с ним?`,
       keyboard: kb.inline(),
     });
   } else {
@@ -2587,7 +2585,7 @@ async function showVkNickStep(ctx: MessageContext, vkUserId: number, flowData: {
     kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
     kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
     await ctx.reply({
-      message: `${stepBar(3, "Ник Roblox")}\n\nВведи свой ник Roblox — напиши его в чат:`,
+      message: `${nickHeader}\n\nВведи свой ник Roblox — напиши его в чат:`,
       keyboard: kb.inline(),
     });
   }
@@ -2598,7 +2596,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
   if (!state || (state.type !== "AWAITING_DIRECT_NICK" && state.type !== "AWAITING_DIRECT_NICK_INPUT")) return;
 
   const passPrice = Math.ceil(state.totalAmount / 0.7);
-  const flowData = { amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus, rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice };
+  const flowData = { amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus, rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice, hasBonusStep: state.hasBonusStep };
 
   setState(vkUserId, { type: "AWAITING_DIRECT_GAMEPASS", robloxUsername: nick, ...flowData });
 
@@ -2629,7 +2627,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
   }
 
   if (result.status === "user_not_found") {
-    setState(vkUserId, { type: "AWAITING_DIRECT_NICK_INPUT", amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus, rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice });
+    setState(vkUserId, { type: "AWAITING_DIRECT_NICK_INPUT", ...flowData });
     const kb = Keyboard.builder();
     kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
     kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
@@ -2637,7 +2635,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
     return;
   }
   if (result.status === "no_gamepasses") {
-    setState(vkUserId, { type: "AWAITING_DIRECT_NICK_INPUT", amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus, rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice });
+    setState(vkUserId, { type: "AWAITING_DIRECT_NICK_INPUT", ...flowData });
     const kb = Keyboard.builder();
     kb.urlButton({ label: "📖 Инструкция", url: "https://robloxbank.ru/guide?source=direct" });
     kb.row();
@@ -2649,7 +2647,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
     return;
   }
 
-  const gpHeader = stepBar(4, "Геймпасс");
+  const gpHeader = stepBar(...dirStep(state, "gamepass"), "Геймпасс");
   const { matches, nonMatches } = result;
 
   // Auto-skip: exactly 1 price-matched gamepass → go straight to summary
@@ -2663,8 +2661,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
         robloxUsername: nick,
         gamepassId: String(g.gamepassId), gamepassUrl, gamepassName: gpDetails.name,
         gamepassRobux: gpDetails.price,
-        amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus,
-        rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice,
+        ...flowData,
       });
       await showVkSummary(ctx, state, nick, String(g.gamepassId), gpDetails.price, gpDetails.name, showResult);
       return;
@@ -2708,7 +2705,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
   }
 }
 
-async function showVkSummary(ctx: MessageContext, flowState: { totalAmount: number; bonus: number; rubleDiscount: number; rublePrice: number }, nick: string, gamepassId: string, gpRobux: number, gpName: string, edit?: (p: { message: string; keyboard?: unknown }) => Promise<void>): Promise<void> {
+async function showVkSummary(ctx: MessageContext, flowState: { totalAmount: number; bonus: number; rubleDiscount: number; rublePrice: number; hasBonusStep: boolean }, nick: string, gamepassId: string, gpRobux: number, gpName: string, edit?: (p: { message: string; keyboard?: unknown }) => Promise<void>): Promise<void> {
   const bonusLine = flowState.bonus > 0 ? `\n🎁 Бонус:       +${flowState.bonus} R$` : "";
   const discountLine = flowState.rubleDiscount > 0 ? `\n💰 Скидка:      −${flowState.rubleDiscount} ₽` : "";
 
@@ -2732,7 +2729,7 @@ async function showVkSummary(ctx: MessageContext, flowState: { totalAmount: numb
     : "";
 
   const summaryText =
-    `${stepBar(5, "Итого")}\n\n` +
+    `${stepBar(...dirStep(flowState, "summary"), "Подтверждение")}\n\n` +
     `📦 Получишь:    ${flowState.totalAmount} R$${bonusLine}\n` +
     `🎮 Ник:         ${nick}\n` +
     `🎫 Геймпасс:    ${gpRobux} R$ · "${gpName.slice(0, 30)}"${discountLine}\n` +
@@ -2774,6 +2771,7 @@ async function handleVkDirectGpPick(ctx: MessageContext, vkUserId: number, passI
     gamepassRobux: gpDetails.price,
     amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus,
     rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice,
+    hasBonusStep: state.hasBonusStep,
   });
 
   await showVkSummary(ctx, state, state.robloxUsername, passId, gpDetails.price, gpDetails.name);

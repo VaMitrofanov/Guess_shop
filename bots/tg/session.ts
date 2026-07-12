@@ -29,6 +29,9 @@ export type DirectFlowStep = "amount" | "bonus" | "nick" | "nick_input" | "gamep
 
 export interface DirectFlowState {
   step: DirectFlowStep;
+  /** Ф4 (О1): флоу 5 шагов с экраном «🎁 Бонус» (bonus>0) или 4 шага без него.
+   *  Фиксируется при выборе пака и не меняется, даже если юзер выбрал «Без бонуса». */
+  hasBonusStep?: boolean;
   amount?: number;
   bonus?: number;
   totalAmount?: number;
