@@ -74,6 +74,8 @@ export default function TwaApp() {
     const fromStartParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param ?? "";
     return (fromUrl || fromStartParam || "").trim();
   });
+  // Ф2: виджет «Ошибки» дашборда «Свои» открывает Заказы сразу на вкладке ERROR.
+  const [ordersTabPreload,   setOrdersTabPreload]   = useState<string>("");
 
   useEffect(() => {
     let cancelled = false;
@@ -304,9 +306,9 @@ export default function TwaApp() {
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
         {screen === "dashboard"  && <Dashboard      {...sp} />}
-        {screen === "orders"     && <OrdersScreen   {...sp} onActionDone={refreshBadge} initialQuery={orderQueryPreload} onInitialQueryConsumed={() => setOrderQueryPreload("")} />}
+        {screen === "orders"     && <OrdersScreen   {...sp} onActionDone={refreshBadge} initialQuery={orderQueryPreload} initialTab={ordersTabPreload} onInitialQueryConsumed={() => { setOrderQueryPreload(""); setOrdersTabPreload(""); }} />}
         {screen === "wb"         && <WbScreen       {...sp} />}
-        {screen === "account"    && <AccountScreen  {...sp} />}
+        {screen === "account"    && <AccountScreen  {...sp} onOpenErrors={() => { setOrdersTabPreload("ERROR"); setScreen("orders"); }} />}
         {screen === "settings"   && <SettingsScreen  {...sp} onNavigate={(s) => setScreen(s as Screen)} />}
         {screen === "system"     && <SystemScreen    {...sp} />}
       </div>

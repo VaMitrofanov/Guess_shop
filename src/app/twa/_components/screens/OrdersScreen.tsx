@@ -1371,14 +1371,16 @@ function orderToTab(order: Order): FilterTab {
    Main screen
    ───────────────────────────────────────────────────────────────────────── */
 export default function OrdersScreen({
-  token, onActionDone, initialQuery, onInitialQueryConsumed,
+  token, onActionDone, initialQuery, initialTab, onInitialQueryConsumed,
 }: {
   token: string;
   onActionDone?: () => void;
   initialQuery?: string;
+  /** Ф2: открыть сразу на вкладке (виджет «Ошибки» дашборда «Свои» → ERROR). */
+  initialTab?: string;
   onInitialQueryConsumed?: () => void;
 }) {
-  const [filter, setFilter] = useState<FilterTab>("ALL");
+  const [filter, setFilter] = useState<FilterTab>((initialTab as FilterTab) || "ALL");
   const [query, setQuery] = useState(initialQuery ?? "");
   // Вкладка «Все»: по умолчанию хронологическая лента (новые сверху),
   // подборка «Требуют внимания» — по кнопке «⚠ Внимание (N)» (решение 2026-07-06).
@@ -1386,7 +1388,7 @@ export default function OrdersScreen({
   // П4: модалка «➕ Создать заказ» (ручной заказ целиком из TWA).
   const [createOpen, setCreateOpen] = useState(false);
   useEffect(() => {
-    if (initialQuery) onInitialQueryConsumed?.();
+    if (initialQuery || initialTab) onInitialQueryConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [data, setData] = useState<OrdersData | null>(null);

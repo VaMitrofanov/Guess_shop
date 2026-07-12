@@ -253,17 +253,36 @@ const ORDER_STATUS_RU: Record<string, string> = {
   COMPLETED:         "выкуплен",
 };
 
-function SectionHeader({ title, hint }: { title: string; hint?: string | null }) {
+function SectionHeader({ title, hint, hintColor }: { title: string; hint?: string | null; hintColor?: string }) {
   return (
     <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, fontSize: 14, fontWeight: 600, color: C.textSecondary, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8, paddingLeft: 4 }}>
       <span>{title}</span>
       {hint && (
-        <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400, fontSize: 14, color: C.textTertiary, paddingRight: 4 }}>
+        <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400, fontSize: 14, color: hintColor ?? C.textTertiary, paddingRight: 4 }}>
           {hint}
         </span>
       )}
     </div>
   );
+}
+
+/** Ф2: возраст cookie для hero «Донор»; warn — жёлтая подсветка (>20 дн). */
+function cookieAgeInfo(updatedAt: string | null): { text: string; warn: boolean } | null {
+  if (!updatedAt) return null;
+  const days = Math.floor((Date.now() - new Date(updatedAt).getTime()) / 86_400_000);
+  if (!Number.isFinite(days) || days < 0) return null;
+  const text = days === 0 ? "cookie обновлён сегодня" : `cookie обновлён ${days} дн назад`;
+  return { text, warn: days > 20 };
+}
+
+/** Ф2: подпись виджета «Очередь» — сумма, «хватает на K из N», «ждут оплату M». */
+function queueWidgetSub(s: OwnQueueStats | null): string | null {
+  if (!s) return null;
+  if (s.queue === 0) return s.awaitingPay > 0 ? `ждут оплату ${s.awaitingPay}` : "очередь пуста";
+  const parts = [`${s.dirty.toLocaleString("ru-RU")} R$ грязными`];
+  if (s.affordable !== null) parts.push(`хватает на ${s.affordable} из ${s.queue}`);
+  if (s.awaitingPay > 0) parts.push(`ждут оплату ${s.awaitingPay}`);
+  return parts.join(" · ");
 }
 
 function Card({ children }: { children: React.ReactNode }) {
@@ -1560,7 +1579,10 @@ function buyoutNick(o: BuyoutOrder): string {
   return o.user.username ? `@${o.user.username}` : o.user.name ?? "—";
 }
 
-function BuyoutSection({ token, balance, accountName, onBalanceChange }: { token: string; balance: number | null; accountName: string | null; onBalanceChange: (delta: number) => void }) {
+/** Ф2: статы очереди для виджета «Очередь» дашборда «Свои». */
+interface OwnQueueStats { queue: number; dirty: number; affordable: number | null; awaitingPay: number }
+
+function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }: { token: string; balance: number | null; accountName: string | null; onBalanceChange: (delta: number) => void; onStats?: (s: OwnQueueStats) => void }) {
   const [orders, setOrders] = useState<BuyoutOrder[]>([]);
   // Неоплаченные DIR (П5): не в очереди — отдельная свёрнутая секция «Ждём оплату».
   const [awaitingPay, setAwaitingPay] = useState<BuyoutOrder[]>([]);
@@ -1609,6 +1631,14 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange }: { token
   }, [token, checkLive]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Ф2: виджет «Очередь» — статы наверх при каждом изменении очереди/баланса.
+  useEffect(() => {
+    if (!onStats) return;
+    const dirty = orders.reduce((s, o) => s + Math.ceil(o.amount / 0.7), 0);
+    const affordable = balance === null ? null : buildBuyoutPlan(orders, balance).selected.length;
+    onStats({ queue: orders.length, dirty, affordable, awaitingPay: awaitingPay.length });
+  }, [orders, awaitingPay, balance, onStats]);
 
   async function doPurchase(order: BuyoutOrder) {
     if (buying) return;
@@ -2590,15 +2620,35 @@ function fmtRate(rate: number) {
 }
 
 /** Стат-плитка дашборда: label обычным текстом, значение — крупно (5.9 B3). */
-function PartnerStatTile({ label, value, sub }: { label: string; value: string; sub?: string | null }) {
-  return (
-    <div style={{ background: C.bgElevated, borderRadius: 12, padding: "10px 12px", minWidth: 0 }}>
+/** Ф2: общая стат-плитка «Свои» и «Антона» (бывш. PartnerStatTile).
+ *  onClick делает плитку кнопкой (виджеты дашборда «Свои» ведут к секциям). */
+function StatTile({ label, value, sub, valueColor, subColor, onClick }: {
+  label: string;
+  value: string;
+  sub?: string | null;
+  valueColor?: string;
+  subColor?: string;
+  onClick?: () => void;
+}) {
+  const inner = (
+    <>
       <div style={{ fontSize: 14, color: C.textSecondary }}>{label}</div>
-      <div style={{ marginTop: 2, fontSize: 17, fontWeight: 700, color: C.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <div style={{ marginTop: 2, fontSize: 17, fontWeight: 700, color: valueColor ?? C.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {value}
       </div>
-      {sub && <div style={{ marginTop: 1, fontSize: 14, color: C.textTertiary }}>{sub}</div>}
-    </div>
+      {sub && <div style={{ marginTop: 1, fontSize: 14, color: subColor ?? C.textTertiary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub}</div>}
+    </>
+  );
+  const boxStyle: React.CSSProperties = { background: C.bgElevated, borderRadius: 12, padding: "10px 12px", minWidth: 0 };
+  if (!onClick) return <div style={boxStyle}>{inner}</div>;
+  return (
+    <button
+      className="twa-press-sm"
+      onClick={() => { haptic.impact("light"); onClick(); }}
+      style={{ ...boxStyle, border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left", display: "block", width: "100%" }}
+    >
+      {inner}
+    </button>
   );
 }
 
@@ -3244,14 +3294,14 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
           <div style={{ height: 1, background: C.border, marginLeft: 16 }} />
           {/* 5.9 B3: стат-плитки. */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: 12 }}>
-            <PartnerStatTile label="Выкуплено" value={`${(summary?.doneRobux ?? 0).toLocaleString("ru-RU")} R$`} />
-            <PartnerStatTile label="Потрачено" value={fmtUsdt(summary?.spentUsdt)} />
-            <PartnerStatTile
+            <StatTile label="Выкуплено" value={`${(summary?.doneRobux ?? 0).toLocaleString("ru-RU")} R$`} />
+            <StatTile label="Потрачено" value={fmtUsdt(summary?.spentUsdt)} />
+            <StatTile
               label="В работе"
               value={`${(summary?.ready ?? 0) + (summary?.purchasing ?? 0)}`}
               sub={`ready ${summary?.ready ?? 0} · buying ${summary?.purchasing ?? 0}`}
             />
-            <PartnerStatTile
+            <StatTile
               label="Задачи"
               value={`${summary?.total ?? 0}`}
               sub={`готово ${summary?.done ?? 0}`}
@@ -3695,12 +3745,20 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
 // ═════════════════════════════════════════════════════════════════════════════
 // Main Screen
 // ═════════════════════════════════════════════════════════════════════════════
-export default function BossrobuxScreen({ token }: { token: string }) {
+export default function BossrobuxScreen({ token, onOpenErrors }: { token: string; onOpenErrors?: () => void }) {
   const [info, setInfo] = useState<AccountInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [workspace, setWorkspace] = useState<BuyoutWorkspace>("own");
+
+  // ── Ф2: дашборд «Свои» — данные виджетов ────────────────────────────────
+  const [queueStats, setQueueStats] = useState<OwnQueueStats | null>(null);
+  const [todayStats, setTodayStats] = useState<{ count: number; dirty: number; errorCount: number } | null>(null);
+  const [lastDrain, setLastDrain] = useState<{ amount: number; createdAt: string } | null>(null);
+  const [showTxHistory, setShowTxHistory] = useState(false);
+  const queueRef = useRef<HTMLElement | null>(null);
+  const drainRef = useRef<HTMLElement | null>(null);
 
   const [cookieInput, setCookieInput] = useState("");
   const [saving, setSaving] = useState(false);
@@ -3745,6 +3803,40 @@ export default function BossrobuxScreen({ token }: { token: string }) {
   }, [token]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Ф2: виджеты «Сегодня»/«Ошибки»/«Слив» — один лёгкий фетч первой страницы
+  // DONE (в ней же counts.ERROR) + события сливов. Не зависит от свёрнутой
+  // «Истории покупок» (она грузит ВСЕ страницы — потому и аккордеон).
+  const loadOwnStats = useCallback(async () => {
+    const hdrs = { Authorization: `Bearer ${token}` };
+    try {
+      const r = await fetch(`/api/twa/orders?status=DONE&limit=50&lite=1`, { headers: hdrs });
+      if (r.ok) {
+        const d = await r.json();
+        const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+        const today = (d.orders ?? []).filter((o: TxOrder) => new Date(o.updatedAt) >= midnight);
+        setTodayStats({
+          count: today.length,
+          dirty: today.reduce((s: number, o: TxOrder) => s + Math.ceil(o.amount / 0.7), 0),
+          errorCount: d.counts?.ERROR ?? 0,
+        });
+      }
+    } catch { /* виджеты не критичны */ }
+    try {
+      const r = await fetch(`/api/twa/drain?events=1`, { headers: hdrs });
+      const j = r.ok ? await r.json() : null;
+      const ev = Array.isArray(j?.events) ? j.events[0] : null;
+      setLastDrain(ev ? { amount: ev.amount, createdAt: ev.createdAt } : null);
+    } catch { }
+  }, [token]);
+
+  useEffect(() => { loadOwnStats(); }, [loadOwnStats]);
+
+  const handleQueueStats = useCallback((s: OwnQueueStats) => setQueueStats(s), []);
+
+  const scrollToSection = (ref: React.MutableRefObject<HTMLElement | null>) => {
+    ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   async function refreshBalance() {
     setRefreshing(true);
@@ -3948,6 +4040,173 @@ export default function BossrobuxScreen({ token }: { token: string }) {
 
       {workspace === "own" ? (
         <>
+          {/* ── Ф2: hero «Донор» + виджеты — зеркало языка дашборда Антона (5.9).
+              Виджеты кликабельны: Очередь/Слив скроллят к секции, Ошибки —
+              переход на вкладку Заказы/ERROR (язык 5.10). */}
+          <section>
+            <SectionHeader
+              title="Донор"
+              hint={cookieAgeInfo(info?.cookieUpdatedAt ?? null)?.text ?? null}
+              hintColor={cookieAgeInfo(info?.cookieUpdatedAt ?? null)?.warn ? C.yellow : undefined}
+            />
+            <Card>
+              {info?.hasCookie ? (
+                <div style={{ padding: "16px 16px 14px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: C.textSecondary }}>
+                      <StatusDot valid={info.cookieValid !== false} />
+                      {info.accountName ?? "Неизвестный"}
+                      {info.cookieValid === false && <span style={{ marginLeft: 8, color: C.red }}>Cookie истёк</span>}
+                    </div>
+                    <div style={{ marginTop: 3, fontSize: 34, fontWeight: 700, letterSpacing: -0.5, lineHeight: 1.15, color: C.textPrimary, ...tabular }}>
+                      {info.balance !== null ? info.balance.toLocaleString("ru-RU") : "—"}
+                      <span style={{ fontSize: 17, fontWeight: 600, color: C.textSecondary, marginLeft: 6 }}>R$</span>
+                    </div>
+                    {info.balance !== null && (
+                      <div style={{ marginTop: 2, fontSize: 14, color: C.textTertiary, ...tabular }}>
+                        ≈ {Math.floor(info.balance * 0.7).toLocaleString("ru-RU")} R$ чистыми
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                    <button
+                      className="twa-press"
+                      onClick={() => { haptic.impact("light"); refreshBalance(); }}
+                      disabled={refreshing}
+                      title="Обновить баланс"
+                      style={{
+                        minHeight: 44, minWidth: 44, border: "none", borderRadius: 12,
+                        background: tint(C.accent, 0.14), color: C.accent, fontSize: 18,
+                        cursor: refreshing ? "default" : "pointer", opacity: refreshing ? 0.55 : 1,
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      {refreshing ? "…" : "🔄"}
+                    </button>
+                    <button
+                      className="twa-press"
+                      onClick={() => { haptic.impact("light"); setShowCookie(v => !v); }}
+                      style={{
+                        minHeight: 44, padding: "0 14px", border: "none", borderRadius: 12,
+                        background: C.elevated, color: showCookie ? C.orange : C.textSecondary,
+                        fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                      }}
+                    >
+                      🔑
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ padding: "20px 16px", textAlign: "center" }}>
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>🔑</div>
+                  <div style={{ fontSize: 16, color: C.textSecondary }}>Cookie не задан</div>
+                  <div style={{ fontSize: 14, color: C.textTertiary, marginTop: 4 }}>Вставьте .ROBLOSECURITY — кнопка 🔑</div>
+                  <button
+                    className="twa-press"
+                    onClick={() => { haptic.impact("light"); setShowCookie(v => !v); }}
+                    style={{
+                      marginTop: 12, minHeight: 40, padding: "0 18px", border: "none", borderRadius: 10,
+                      background: C.elevated, color: showCookie ? C.orange : C.accent,
+                      fontSize: 15, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                    }}
+                  >
+                    🔑 Cookie
+                  </button>
+                </div>
+              )}
+              <div style={{ height: 1, background: C.border, marginLeft: 16 }} />
+              {/* Виджеты 2×2 (О4): Очередь / Сегодня / Ошибки / Слив. */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: 12 }}>
+                <StatTile
+                  label="Очередь"
+                  value={queueStats ? `${queueStats.queue} шт` : "…"}
+                  sub={queueWidgetSub(queueStats)}
+                  subColor={queueStats && queueStats.queue > 0 && queueStats.affordable === 0 ? C.red : undefined}
+                  onClick={cookieReady ? () => scrollToSection(queueRef) : undefined}
+                />
+                <StatTile
+                  label="Сегодня"
+                  value={todayStats ? `${todayStats.count} шт` : "…"}
+                  sub={todayStats ? `− ${todayStats.dirty.toLocaleString("ru-RU")} R$ спущено` : null}
+                />
+                <StatTile
+                  label="Ошибки"
+                  value={todayStats ? String(todayStats.errorCount) : "…"}
+                  valueColor={todayStats && todayStats.errorCount > 0 ? C.red : undefined}
+                  sub={todayStats ? (todayStats.errorCount > 0 ? "открыть ERROR ›" : "всё чисто") : null}
+                  subColor={todayStats && todayStats.errorCount > 0 ? C.red : undefined}
+                  onClick={onOpenErrors}
+                />
+                <StatTile
+                  label="Слив"
+                  value={
+                    info?.balance !== null && info?.balance !== undefined && info.balance > 0 && info.balance <= MAX_REMAINDER_DIRTY
+                      ? "Пора сливать"
+                      : lastDrain ? `${lastDrain.amount.toLocaleString("ru-RU")} R$` : "—"
+                  }
+                  valueColor={
+                    info?.balance !== null && info?.balance !== undefined && info.balance > 0 && info.balance <= MAX_REMAINDER_DIRTY
+                      ? C.orange : undefined
+                  }
+                  sub={
+                    info?.balance !== null && info?.balance !== undefined && info.balance > 0 && info.balance <= MAX_REMAINDER_DIRTY
+                      ? `остаток ${info.balance.toLocaleString("ru-RU")} R$`
+                      : lastDrain ? `слив ${fmtPartnerDate(lastDrain.createdAt)}` : "сливов ещё не было"
+                  }
+                  onClick={() => scrollToSection(drainRef)}
+                />
+              </div>
+            </Card>
+
+            {showCookie && (
+              <div style={{ marginTop: 10 }}>
+                <Card>
+                  <div style={{ padding: 12 }}>
+                    <textarea
+                      value={cookieInput}
+                      onChange={e => setCookieInput(e.target.value)}
+                      placeholder=".ROBLOSECURITY значение…"
+                      rows={3}
+                      style={{
+                        width: "100%", background: C.elevated, border: "none", borderRadius: 10,
+                        color: "#fff", fontSize: 15, padding: "12px 14px",
+                        resize: "vertical", outline: "none", fontFamily: "monospace",
+                        lineHeight: 1.4, boxSizing: "border-box",
+                      }}
+                    />
+                    <button
+                      className="twa-press"
+                      onClick={() => { haptic.impact("medium"); saveCookie(); }}
+                      disabled={saving || !cookieInput.trim()}
+                      style={{
+                        marginTop: 8, width: "100%",
+                        background: cookieInput.trim() ? C.green : C.elevated,
+                        border: "none", borderRadius: 10,
+                        color: "#fff", fontSize: 15, fontWeight: 600,
+                        padding: "14px", cursor: saving ? "default" : "pointer",
+                        opacity: saving || !cookieInput.trim() ? 0.5 : 1,
+                        transition: "background 0.2s, opacity 0.2s",
+                      }}
+                    >
+                      {saving ? "Проверяю…" : "💾 Сохранить cookie"}
+                    </button>
+                  </div>
+                </Card>
+
+                {saveMsg && (
+                  <div style={{
+                    marginTop: 8, padding: "10px 14px", borderRadius: 10,
+                    background: saveMsg.ok ? `${C.green}22` : `${C.red}22`,
+                    color: saveMsg.ok ? C.green : C.red,
+                    fontSize: 15, fontWeight: 500,
+                  }}>
+                    {saveMsg.ok ? "✅" : "❌"} {saveMsg.text}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+
           {/* ── Search & Purchase (FIRST — main function) ────────────────────
               Поиск ходит в публичные Roblox API и работает без cookie — секция
               видна всегда (раньше пряталась целиком при протухшем cookie или
@@ -4038,122 +4297,9 @@ export default function BossrobuxScreen({ token }: { token: string }) {
           )}
         </section>
 
-      {/* ── Account info + inline cookie ───────────────────────────────── */}
-      <section>
-        <SectionHeader title="Roblox-аккаунт" />
-        <Card>
-          {info?.hasCookie ? (
-            <>
-              <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
-                <StatusDot valid={info.cookieValid !== false} />
-                <span style={{ fontSize: 18, fontWeight: 600, color: "#e5e5ea" }}>
-                  {info.accountName ?? "Неизвестный"}
-                </span>
-                {info.cookieValid === false && (
-                  <span style={{ fontSize: 14, color: C.red, fontWeight: 500 }}>Cookie истёк</span>
-                )}
-              </div>
-              <div style={{ height: 1, background: C.border, marginLeft: 16 }} />
-              <InfoRow label="ID" value={info.accountId?.toLocaleString() ?? "—"} />
-              <InfoRow label="Баланс" value={
-                info.balance !== null
-                  ? <>{info.balance.toLocaleString()} R$ <span style={{ color: C.textTertiary, fontWeight: 400 }}>({Math.floor(info.balance * 0.7).toLocaleString()} чистых)</span></>
-                  : "—"
-              } />
-              <InfoRow label="Cookie обновлён" value={formatDate(info.cookieUpdatedAt)} last />
-            </>
-          ) : (
-            <div style={{ padding: "20px 16px", textAlign: "center" }}>
-              <div style={{ fontSize: 28, marginBottom: 8 }}>🔑</div>
-              <div style={{ fontSize: 16, color: C.textSecondary }}>Cookie не задан</div>
-              <div style={{ fontSize: 14, color: C.textTertiary, marginTop: 4 }}>Вставьте .ROBLOSECURITY ниже</div>
-            </div>
-          )}
-        </Card>
-
-        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-          {info?.hasCookie && (
-            <button
-              className="twa-press"
-              onClick={() => { haptic.impact("light"); refreshBalance(); }}
-              disabled={refreshing}
-              style={{
-                flex: 1,
-                background: C.card, border: "none", borderRadius: 12,
-                color: C.accent, fontSize: 15, fontWeight: 600,
-                padding: "14px", cursor: refreshing ? "default" : "pointer",
-                opacity: refreshing ? 0.6 : 1,
-              }}
-            >
-              {refreshing ? "Обновляю…" : "🔄 Обновить баланс"}
-            </button>
-          )}
-          <button
-            className="twa-press"
-            onClick={() => { haptic.impact("light"); setShowCookie(v => !v); }}
-            style={{
-              flex: info?.hasCookie ? "none" : 1,
-              background: C.card, border: "none", borderRadius: 12,
-              color: showCookie ? C.orange : C.textSecondary, fontSize: 15, fontWeight: 600,
-              padding: "14px 18px", cursor: "pointer",
-            }}
-          >
-            🔑 Cookie
-          </button>
-        </div>
-
-        {showCookie && (
-          <div style={{ marginTop: 10 }}>
-            <Card>
-              <div style={{ padding: 12 }}>
-                <textarea
-                  value={cookieInput}
-                  onChange={e => setCookieInput(e.target.value)}
-                  placeholder=".ROBLOSECURITY значение…"
-                  rows={3}
-                  style={{
-                    width: "100%", background: C.elevated, border: "none", borderRadius: 10,
-                    color: "#fff", fontSize: 15, padding: "12px 14px",
-                    resize: "vertical", outline: "none", fontFamily: "monospace",
-                    lineHeight: 1.4, boxSizing: "border-box",
-                  }}
-                />
-                <button
-                  className="twa-press"
-                  onClick={() => { haptic.impact("medium"); saveCookie(); }}
-                  disabled={saving || !cookieInput.trim()}
-                  style={{
-                    marginTop: 8, width: "100%",
-                    background: cookieInput.trim() ? C.green : C.elevated,
-                    border: "none", borderRadius: 10,
-                    color: "#fff", fontSize: 15, fontWeight: 600,
-                    padding: "14px", cursor: saving ? "default" : "pointer",
-                    opacity: saving || !cookieInput.trim() ? 0.5 : 1,
-                    transition: "background 0.2s, opacity 0.2s",
-                  }}
-                >
-                  {saving ? "Проверяю…" : "💾 Сохранить cookie"}
-                </button>
-              </div>
-            </Card>
-
-            {saveMsg && (
-              <div style={{
-                marginTop: 8, padding: "10px 14px", borderRadius: 10,
-                background: saveMsg.ok ? `${C.green}22` : `${C.red}22`,
-                color: saveMsg.ok ? C.green : C.red,
-                fontSize: 15, fontWeight: 500,
-              }}>
-                {saveMsg.ok ? "✅" : "❌"} {saveMsg.text}
-              </div>
-            )}
-          </div>
-        )}
-      </section>
-
       {/* ── Buyout Orders ───────────────────────────────────────────────── */}
       {cookieReady && (
-        <section>
+        <section ref={queueRef}>
           <SectionHeader title="К выкупу" />
           <BuyoutSection
             key={buyoutKey}
@@ -4161,12 +4307,13 @@ export default function BossrobuxScreen({ token }: { token: string }) {
             balance={info?.balance ?? null}
             accountName={info?.accountName ?? null}
             onBalanceChange={(delta) => setInfo(prev => prev && prev.balance !== null ? { ...prev, balance: prev.balance + delta } : prev)}
+            onStats={handleQueueStats}
           />
         </section>
       )}
 
       {/* ── Слив остатка донора → мой аккаунт ────────────────────────────── */}
-      <section>
+      <section ref={drainRef}>
         <SectionHeader title="Слив остатка" />
         <DrainSection
           token={token}
@@ -4174,10 +4321,24 @@ export default function BossrobuxScreen({ token }: { token: string }) {
         />
       </section>
 
-      {/* ── Transaction History ──────────────────────────────────────── */}
+      {/* ── Transaction History — аккордеон: грузит ВСЕ страницы DONE,
+             поэтому по умолчанию свёрнута и монтируется только по тапу (Ф2). */}
       <section>
-        <SectionHeader title="История покупок" />
-        <TransactionHistory key={historyKey} token={token} />
+        <button
+          className="twa-press-sm"
+          onClick={() => { haptic.select(); setShowTxHistory(v => !v); }}
+          style={{
+            display: "flex", alignItems: "center", gap: 8, width: "100%",
+            border: "none", background: "none", cursor: "pointer", fontFamily: "inherit",
+            padding: "0 4px", marginBottom: 8,
+            fontSize: 14, fontWeight: 600, color: C.textSecondary,
+            textTransform: "uppercase", letterSpacing: 0.6,
+          }}
+        >
+          <span>История покупок</span>
+          <span style={{ marginLeft: "auto", fontSize: 14, color: C.textTertiary, transition: "transform .15s", transform: showTxHistory ? "rotate(90deg)" : "rotate(0)" }}>▶</span>
+        </button>
+        {showTxHistory && <TransactionHistory key={historyKey} token={token} />}
       </section>
 
       {/* Confirm modal */}
