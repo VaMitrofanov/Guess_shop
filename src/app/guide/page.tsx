@@ -1,5 +1,7 @@
 import { Metadata } from "next";
 import GuideClient from "./GuideClient";
+import SiteGuide from "./SiteGuide";
+import { CUSTOM_MAX, CUSTOM_MIN } from "@/lib/retail-pricing";
 
 export const metadata: Metadata = {
   title: "Инструкция по созданию геймпасса | Roblox Bank",
@@ -8,11 +10,11 @@ export const metadata: Metadata = {
 };
 
 interface GuidPageProps {
-  searchParams: Promise<{ source?: string; skip?: string; code?: string; test?: string; nom?: string; preview?: string }>;
+  searchParams: Promise<{ source?: string; skip?: string; code?: string; test?: string; nom?: string; preview?: string; amount?: string }>;
 }
 
 export default async function GuidePage({ searchParams }: GuidPageProps) {
-  const { source, skip, code, test, nom, preview } = await searchParams;
+  const { source, skip, code, test, nom, preview, amount } = await searchParams;
   const isWB = source === "wb";
   const skipGate = isWB && !!skip;
   // code passed by TG/VK bot so the instruction page opens even in Telegram's WebView
@@ -30,6 +32,11 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
   //   /guide?source=wb&preview=1[&nom=1000]
   const previewMode = isWB && preview === "1";
   const testNom = nom ? Math.max(0, parseInt(nom, 10) || 0) : undefined;
+  const siteAmount = Math.min(CUSTOM_MAX, Math.max(CUSTOM_MIN, parseInt(amount ?? "1000", 10) || 1000));
+
+  if (!isWB && source !== "direct") {
+    return <SiteGuide initialAmount={siteAmount} minAmount={CUSTOM_MIN} maxAmount={CUSTOM_MAX} />;
+  }
 
   return (
     <>
@@ -40,7 +47,7 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
         style={{ display: "none" }}
         aria-hidden="true"
       />
-      <GuideClient isWB={isWB} guideMode={source === "site" ? "SITE" : source === "direct" ? "BOT" : isWB ? "WB" : "SITE"} skipGate={skipGate} wbCodeFromUrl={wbCodeFromUrl} testMode={testMode} previewMode={previewMode} testNom={testNom} />
+      <GuideClient isWB={isWB} guideMode={source === "direct" ? "BOT" : "WB"} skipGate={skipGate} wbCodeFromUrl={wbCodeFromUrl} testMode={testMode} previewMode={previewMode} testNom={testNom} />
     </>
   );
 }

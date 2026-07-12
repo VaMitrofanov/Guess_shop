@@ -62,8 +62,11 @@ cookie партнёра не добавлен.
 ```
 src/
   app/
-    guide/GuideClient.tsx        роутер фаз коридора (intro / gate / instruction)
-    guide/WBInstructionV2.tsx    9-шаговая WB-инструкция + поиск по нику
+    guide/GuideClient.tsx        роутер фаз WB/BOT-коридора (intro / gate / instruction)
+    guide/WBInstructionV2.tsx    9-шаговая WB/BOT-инструкция + поиск по нику
+    guide/SiteGuide.tsx          отдельная site-инструкция: пакет → gross-цена → ник → checkout
+    checkout/page.tsx            site order flow: поиск аккаунта/игры/пасса → quote → оплата
+    checkout/checkout.module.css rounded Violet/Frost UI checkout без legacy pixel-card
     guide/page.tsx               серверная обёртка гейта (query-флаги: skip/code/test/preview)
     api/wb-code/route.ts         резерв/статус кода (POST reserve, GET status)
     api/wb-code/select-gamepass  материализация заказа при выборе геймпасса на сайте (one-tap)

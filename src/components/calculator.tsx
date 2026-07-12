@@ -1,128 +1,69 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronRight } from "lucide-react";
 import Link from "next/link";
+import { ArrowRight, Check, LockKeyhole } from "lucide-react";
 import { usePricing } from "@/hooks/usePricing";
+import styles from "@/app/storefront.module.css";
 
-// Pixel Robux icon — inline SVG to match Roblox aesthetic
-function RobuxIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect x="9" y="2" width="6" height="3" fill="currentColor" />
-      <rect x="6" y="5" width="3" height="3" fill="currentColor" />
-      <rect x="15" y="5" width="3" height="3" fill="currentColor" />
-      <rect x="3" y="8" width="3" height="8" fill="currentColor" />
-      <rect x="18" y="8" width="3" height="8" fill="currentColor" />
-      <rect x="6" y="16" width="3" height="3" fill="currentColor" />
-      <rect x="15" y="16" width="3" height="3" fill="currentColor" />
-      <rect x="9" y="19" width="6" height="3" fill="currentColor" />
-      <rect x="6" y="8" width="6" height="6" fill="currentColor" />
-    </svg>
-  );
-}
+const PACKS = [500, 1000, 2000, 5000];
 
 export default function Calculator() {
-  const [robux, setRobux] = useState<string>("1000");
+  const [robux, setRobux] = useState("1000");
   const { loading, getPrice, getBreakdown } = usePricing();
-
-  const amount = parseFloat(robux) || 0;
+  const amount = Math.max(0, Number(robux) || 0);
+  const price = getPrice(amount);
   const breakdown = getBreakdown(amount);
-  const displayRub = getPrice(amount).toString();
-
-  const handleRobuxChange = (val: string) => {
-    setRobux(val);
-  };
 
   return (
-    <div className="w-full max-w-xl mx-auto gold-glow pixel-card p-8 rounded-none relative">
-
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-[#00b06f]/20 border border-[#00b06f]/30 flex items-center justify-center rounded-none">
-            <RobuxIcon className="w-4 h-4 text-[#00b06f]" />
-          </div>
-          <div>
-            <div className="text-[10px] font-pixel text-[#00b06f] tracking-wider">ROBLOX BANK</div>
-            <div className="text-sm font-black uppercase tracking-widest text-zinc-300 mt-0.5">Калькулятор</div>
-          </div>
-        </div>
-        {/* Channel-consistent price indicator */}
-        <div className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-none bg-[#00b06f] block" />
-          <span className="text-xs font-black uppercase tracking-widest text-[#00b06f]/70">Цена TG · VK · сайт</span>
-        </div>
+    <div className={styles.calculator}>
+      <div className={styles.calculatorBadge}>Калькулятор</div>
+      <div className={styles.calculatorHead}>
+        <div><span>Твой пакет</span><h2>Сколько Robux нужно?</h2></div>
+        <div className={styles.rateState}><i /> Курс обновлён</div>
       </div>
 
-      <div className="space-y-5">
-        {/* Robux input */}
-        <div className="space-y-2">
-          <label className="text-xs font-black text-zinc-400 uppercase tracking-[0.2em]">
-            Вы получите (Robux)
-          </label>
-          <div className="relative">
-            <input
-              type="number"
-              value={robux}
-              onChange={(e) => handleRobuxChange(e.target.value)}
-              className="w-full h-16 bg-[#080c18] border-2 border-[#1e2a45] focus:border-[#00b06f]/60 rounded-none pl-5 pr-16 text-2xl font-black outline-none transition-all hover:border-[#1e2a45]/80 text-white"
-              placeholder="0"
-            />
-            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-2xl font-black text-[#00b06f]">R$</span>
-          </div>
-        </div>
-
-        {/* Arrow divider */}
-        <div className="flex items-center gap-3">
-          <div className="flex-1 h-px bg-[#1e2a45]" />
-          <div className="w-8 h-8 border-2 border-[#1e2a45] bg-[#080c18] flex items-center justify-center rounded-none flex-shrink-0">
-            <ChevronRight className="w-4 h-4 text-[#00b06f] rotate-90" />
-          </div>
-          <div className="flex-1 h-px bg-[#1e2a45]" />
-        </div>
-
-        {/* RUB input */}
-        <div className="space-y-2">
-          <label className="text-xs font-black text-zinc-400 uppercase tracking-[0.2em]">
-            Вы потратите (рублей)
-          </label>
-          <div className="relative">
-            <input
-              type="number"
-              value={loading ? "" : displayRub}
-              readOnly
-              aria-readonly="true"
-              className="w-full h-16 bg-[#080c18] border-2 border-[#1e2a45] rounded-none px-5 text-2xl font-black outline-none text-white cursor-default"
-              placeholder={loading ? "Загрузка..." : "0"}
-            />
-            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-2xl font-black text-zinc-600">₽</span>
-          </div>
-        </div>
-
-        {/* Tier badge */}
-        {!loading && breakdown.amountRobux > 0 && (
-          <div className="flex items-center justify-between px-3 py-2 bg-[#00b06f]/5 border border-[#00b06f]/15 rounded-none">
-            <span className="text-xs font-black uppercase tracking-widest text-zinc-400">Ступень цены</span>
-            <span className="text-[10px] font-pixel text-[#00b06f]">
-              {breakdown.rubPerRobux} ₽/R${breakdown.smallOrderSurcharge ? ` + ${breakdown.smallOrderSurcharge} ₽` : ""}
-            </span>
-          </div>
-        )}
-
-        {/* CTA */}
-        <Link
-          href={`/checkout?amount=${robux}`}
-          className="w-full flex h-14 gold-gradient items-center justify-center gap-3 font-black text-sm uppercase tracking-widest text-white hover:opacity-90 active:scale-[0.98] transition-all rounded-none mt-2"
-        >
-          Перейти к оплате
-          <ChevronRight className="w-4 h-4" />
-        </Link>
+      <label className={styles.fieldLabel} htmlFor="robux-amount">
+        <span>Получишь на аккаунт</span><strong>R$</strong>
+      </label>
+      <div className={styles.amountField}>
+        <input
+          id="robux-amount"
+          inputMode="numeric"
+          min="100"
+          max="10000"
+          type="number"
+          value={robux}
+          onChange={(event) => setRobux(event.target.value)}
+          aria-label="Количество Robux"
+        />
+        <span>R$</span>
+      </div>
+      <div className={styles.packGrid}>
+        {PACKS.map((pack) => (
+          <button
+            key={pack}
+            type="button"
+            className={amount === pack ? styles.packActive : styles.pack}
+            onClick={() => setRobux(String(pack))}
+          >
+            {amount === pack && <Check size={13} />} {pack.toLocaleString("ru-RU")}
+          </button>
+        ))}
       </div>
 
-      <p className="mt-5 text-center text-xs text-zinc-500 uppercase tracking-widest">
-        * Цена и пакеты совпадают с Telegram и ВКонтакте. Комиссию Roblox учитывает цена геймпасса в инструкции.
-      </p>
+      <div className={styles.priceSummary}>
+        <div><span>Количество</span><strong>{amount.toLocaleString("ru-RU")} R$</strong></div>
+        <div><span>Комиссия Roblox</span><strong>Учтена в цене пасса</strong></div>
+        <div className={styles.total}><span>К оплате</span><strong>{loading ? "…" : `${price.toLocaleString("ru-RU")} ₽`}</strong></div>
+      </div>
+      {!loading && amount > 0 && (
+        <p className={styles.tierNote}>Расчёт: {breakdown.rubPerRobux} ₽/R${breakdown.smallOrderSurcharge ? ` + ${breakdown.smallOrderSurcharge} ₽` : ""}</p>
+      )}
+      <Link href={`/guide?source=site&amount=${amount || 1000}`} className={styles.checkoutAction}>
+        Купить на сайте <ArrowRight size={18} />
+      </Link>
+      <p className={styles.securityNote}><LockKeyhole size={13} /> Пароль Roblox не потребуется</p>
     </div>
   );
 }

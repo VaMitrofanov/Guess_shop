@@ -128,9 +128,32 @@ production rollout и реальная payment test matrix ещё не выпо�
 
 ### 3.2 Новая инструкция `/guide`
 
-Сейчас `/guide?source=wb` использует новый mobile-first `WBInstructionV2` с актуальными
-скриншотами, видео, Managed pricing и поиском геймпасса. Обычный `/guide`/`source=direct`
-показывает старый шестишаговый компонент. В итоге прямая витрина ведёт по устаревшему пути.
+**Локальный UI-этап 13.07.2026:** витрина и site-инструкция переведены на выбранный
+Violet / Frost. Обычный `/guide`/`source=site` теперь не отправляет клиента в бота:
+выбранный пакет и ник передаются прямо в checkout, который автоматически начинает поиск
+игр по предзаполненному нику. WB route оставлен на существующем `GuideClient` и проверен
+через `?source=wb&test=1`. Это локальная UX-реализация; payment launch gates ниже не сняты.
+После локальной приёмки минимальный вторичный кегль увеличен: навигация, подписи
+калькулятора, подсказки site guide, футер и checkout больше не используют визуальный текст
+7–10 px; компактные подписи приведены примерно к 11–14 px в зависимости от контекста.
+
+**Implementation batch 13.07 — выполнено:**
+
+- [x] Полностью убрать квадратный legacy checkout и собрать rounded Violet / Frost flow.
+- [x] Сохранить server quote, проверку gross-цены, email/consent и payment handoff без
+  изменения доменного контракта.
+- [x] Добавить в site guide произвольный amount из единого pricing policy:
+  `CUSTOM_MIN=100`, `CUSTOM_MAX=100 000`; быстрые варианты включают `10k/20k`.
+- [x] Синхронно пересчитывать gross pass price и передавать amount+username в checkout.
+- [x] Поднять базовый body до 17 px, мелкий текст критического потока — минимум до 13 px.
+- [x] Проверить checkout/guide на 390 px: горизонтального overflow нет; ручной `25 000 R$`
+  даёт gross-цену `35 715 R$`.
+- [ ] После решения launch gates выполнить боевой payment E2E; этот UI batch сам по себе
+  не снимает maintenance и `SITE_ACQUIRING_ENABLED=false`.
+
+`/guide?source=wb` использует mobile-first `WBInstructionV2` с актуальными скриншотами,
+видео, Managed pricing и поиском геймпасса. Обычный `/guide`/`source=site` теперь использует
+новый `SiteGuide`; `source=direct` продолжает bot-oriented `WBInstructionV2`.
 
 Целевой вариант:
 

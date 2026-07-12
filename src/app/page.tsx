@@ -1,325 +1,152 @@
 import Link from "next/link";
+import {
+  ArrowRight,
+  BadgeCheck,
+  BookOpen,
+  CircleCheck,
+  Clock3,
+  Gamepad2,
+  LockKeyhole,
+  Search,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
 import Calculator from "@/components/calculator";
-import { Zap, ShieldCheck, TrendingUp } from "lucide-react";
-import AnoAI from "@/components/ui/animated-shader-background";
-import { GlowCard } from "@/components/ui/spotlight-card";
+import styles from "./storefront.module.css";
 
-// Pixel Robux icon
-function RobuxIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none">
-      <rect x="9" y="2" width="6" height="3" fill="currentColor" />
-      <rect x="6" y="5" width="3" height="3" fill="currentColor" />
-      <rect x="15" y="5" width="3" height="3" fill="currentColor" />
-      <rect x="3" y="8" width="3" height="8" fill="currentColor" />
-      <rect x="18" y="8" width="3" height="8" fill="currentColor" />
-      <rect x="6" y="16" width="3" height="3" fill="currentColor" />
-      <rect x="15" y="16" width="3" height="3" fill="currentColor" />
-      <rect x="9" y="19" width="6" height="3" fill="currentColor" />
-      <rect x="6" y="8" width="6" height="6" fill="currentColor" />
-    </svg>
-  );
-}
+const steps = [
+  {
+    number: "01",
+    icon: Sparkles,
+    title: "Выбери количество",
+    text: "Калькулятор сразу покажет стоимость. Итоговая цена фиксируется перед оплатой.",
+  },
+  {
+    number: "02",
+    icon: Gamepad2,
+    title: "Создай геймпасс",
+    text: "Новая инструкция проведёт по Creator Hub и рассчитает правильную цену пасса.",
+    href: "/guide?source=site&amount=1000",
+  },
+  {
+    number: "03",
+    icon: CircleCheck,
+    title: "Оформи заказ",
+    text: "Введи ник, выбери найденный геймпасс и следи за состоянием заказа на сайте.",
+  },
+];
 
-// Floating pixel block decoration
-function PixelBlocks() {
-  return (
-    <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
-      {[
-        { size: 12, top: "15%", left: "8%", delay: "0s", color: "#00b06f" },
-        { size: 8, top: "25%", right: "10%", delay: "1s", color: "#00b06f" },
-        { size: 16, top: "60%", left: "5%", delay: "2s", color: "#3b82f6" },
-        { size: 10, top: "70%", right: "8%", delay: "0.5s", color: "#00b06f" },
-        { size: 6, top: "40%", left: "92%", delay: "1.5s", color: "#6366f1" },
-        { size: 14, top: "80%", left: "15%", delay: "3s", color: "#00b06f" },
-      ].map(({ size, top, left, right, delay, color }, i) => (
-        <div
-          key={i}
-          className="pixel-float absolute opacity-20"
-          style={{
-            width: size, height: size,
-            top, left, right,
-            backgroundColor: color,
-            animationDelay: delay,
-            borderRadius: 0,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
+const assurances = [
+  { icon: LockKeyhole, title: "Пароль не нужен", text: "Покупка проходит через твой геймпасс." },
+  { icon: BadgeCheck, title: "Цена перед оплатой", text: "Сумма и количество Robux видны заранее." },
+  { icon: Search, title: "Поиск по нику", text: "Сайт найдёт игры и доступные геймпассы." },
+  { icon: ShieldCheck, title: "Заказ под контролем", text: "Статус и важные действия собраны в одном месте." },
+];
 
 export default function Home() {
   return (
-    <main className="min-h-screen relative bg-[#080c18]"> 
-      {/* 1. Шейдер как фиксированный фон */}
-      <div className="fixed inset-0 z-0 pointer-events-none opacity-50">
-        <AnoAI />
-      </div>
+    <main className={styles.page}>
+      <Navbar />
 
-      {/* 2. Контент поверх фона (z-10 чтобы быть выше) */}
-      <div className="relative z-10">
-        <Navbar />
-
-      {/* ── HERO ─────────────────────────────────────────────── */}
-      <section className="relative pt-16 pb-24 overflow-hidden scanlines">
-        <PixelBlocks />
-
-        {/* Subtle grid */}
-        <div
-          className="absolute inset-0 opacity-[0.025] pointer-events-none"
-          style={{
-            backgroundImage: `linear-gradient(rgba(0,176,111,0.8) 1px, transparent 1px),
-                              linear-gradient(90deg, rgba(0,176,111,0.8) 1px, transparent 1px)`,
-            backgroundSize: "40px 40px",
-          }}
-        />
-
-        <div className="container mx-auto px-4 relative z-10">
-
-          {/* Status badge */}
-          <div className="flex justify-center mb-10">
-            <div className="inline-flex items-center gap-2 px-4 py-2 border border-[#00b06f]/20 bg-[#00b06f]/5 text-[#00b06f] text-xs font-black uppercase tracking-[0.15em] rounded-none">
-              <span className="w-1.5 h-1.5 bg-[#00b06f] animate-pulse block rounded-none" />
-              Система активна · Заказы обрабатываются
-            </div>
+      <section className={styles.hero}>
+        <div className={styles.heroGlow} aria-hidden="true" />
+        <div className={styles.heroCopy}>
+          <div className={styles.eyebrow}>
+            <span className={styles.statusDot} />
+            Покупка Robux через геймпасс
           </div>
-
-          {/* Main headline */}
-          <div className="text-center max-w-5xl mx-auto mb-4 space-y-6">
-
-            <h1 className="text-5xl md:text-7xl lg:text-8xl font-black tracking-[-0.04em] leading-[0.88] uppercase">
-              Купи{" "}
-              <span className="inline-flex items-center gap-3">
-                <RobuxIcon className="w-12 h-12 md:w-16 md:h-16 text-[#00b06f] coin-spin inline-block" />
-                <span className="gold-text">Robux</span>
-              </span>
-              <br />
-              <span className="text-4xl md:text-6xl text-zinc-300">быстро и безопасно</span>
-            </h1>
-
-            <p className="text-zinc-400 text-lg font-medium max-w-lg mx-auto leading-relaxed">
-              Актуальный курс обновляется автоматически.
-              Доставка через геймпасс — без ввода пароля.
-            </p>
+          <h1 className={styles.title}>
+            Robux.
+            <br />
+            Без пароля.
+            <br />
+            <span>Без лишних шагов.</span>
+          </h1>
+          <p className={styles.lead}>
+            Выбери количество, создай геймпасс по понятной инструкции и оформи заказ прямо на сайте.
+          </p>
+          <div className={styles.heroActions}>
+            <a href="#calculator" className={styles.primaryAction}>
+              Рассчитать стоимость <ArrowRight size={18} />
+            </a>
+            <Link href="/guide?source=site&amount=1000" className={styles.secondaryAction}>
+              <BookOpen size={17} /> Открыть инструкцию
+            </Link>
           </div>
-
-          {/* Calculator */}
-          <div className="max-w-lg mx-auto mb-14 mt-12">
-            <Calculator />
-          </div>
-
-          {/* Trust row */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-w-3xl mx-auto">
-            {[
-              { icon: Zap, label: "~10 мин", sub: "Обработка заказа" },
-              { icon: ShieldCheck, label: "Гарантия", sub: "Возврат при сбое" },
-              { icon: RobuxIcon, label: "Геймпасс", sub: "Без пароля" },
-              { icon: TrendingUp, label: "Актуальный курс", sub: "Авто-обновление" },
-            ].map(({ icon: Icon, label, sub }) => (
-              <GlowCard
-                key={label}
-                customSize
-                glowColor="green"
-                className="bg-[#0f1528] p-4 flex flex-col items-center gap-2 text-center"
-              >
-                <Icon className="w-5 h-5 text-[#00b06f]" />
-                <span className="text-xs font-black uppercase tracking-wider text-white">{label}</span>
-                <span className="text-xs text-zinc-500 uppercase tracking-wider">{sub}</span>
-              </GlowCard>
-            ))}
+          <div className={styles.heroFacts}>
+            <span><LockKeyhole size={15} /> Без доступа к аккаунту</span>
+            <span><Clock3 size={15} /> Инструкция занимает 5–7 минут</span>
           </div>
         </div>
 
-        {/* Glow orb */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[400px] rounded-full bg-[#00b06f]/[0.03] blur-[100px] pointer-events-none" />
+        <div id="calculator" className={styles.calculatorWrap}>
+          <Calculator />
+        </div>
       </section>
 
-      <div className="accent-line" />
+      <section className={styles.assuranceStrip} aria-label="Преимущества покупки">
+        {assurances.map(({ icon: Icon, title, text }) => (
+          <article key={title} className={styles.assuranceItem}>
+            <span className={styles.assuranceIcon}><Icon size={18} /></span>
+            <span><strong>{title}</strong><small>{text}</small></span>
+          </article>
+        ))}
+      </section>
 
-      {/* ── STATS BAR ────────────────────────────────────────── */}
-      <section className="py-12 bg-[#0a0e1a]">
-        <div className="container mx-auto px-4">
-          <div className="grid grid-cols-3 gap-6 max-w-2xl mx-auto">
-            {[
-              { value: "24/7", label: "Обработка заказов", pixel: true },
-              { value: "~10 мин", label: "Оформление", pixel: true },
-              { value: "5–7 дн", label: "Зачисление Robux", pixel: true },
-            ].map(({ value, label }) => (
-              <div key={label} className="text-center space-y-2">
-                <div className="font-pixel text-[#00b06f] text-sm md:text-base">{value}</div>
-                <div className="text-xs font-black uppercase tracking-wider text-zinc-400">{label}</div>
+      <section className={styles.section}>
+        <div className={styles.sectionHeading}>
+          <div>
+            <span className={styles.sectionKicker}>Как это работает</span>
+            <h2>От выбора пакета<br />до готового заказа</h2>
+          </div>
+          <p>Технические детали остаются внутри сервиса. Пользователь видит только следующий понятный шаг.</p>
+        </div>
+        <div className={styles.stepsGrid}>
+          {steps.map(({ number, icon: Icon, title, text, href }) => (
+            <article key={number} className={styles.stepCard}>
+              <div className={styles.stepTop}>
+                <span>{number} / 03</span>
+                <span className={styles.stepIcon}><Icon size={22} /></span>
               </div>
-            ))}
-          </div>
+              <div className={styles.stepProgress}><i style={{ width: `${Number(number) * 33.33}%` }} /></div>
+              <div>
+                <h3>{title}</h3>
+                <p>{text}</p>
+                {href && <Link href={href}>Перейти к инструкции <ArrowRight size={15} /></Link>}
+              </div>
+            </article>
+          ))}
         </div>
       </section>
 
-      <div className="accent-line" />
-
-      {/* ── HOW IT WORKS ─────────────────────────────────────── */}
-      <section className="py-20 bg-[#080c18]">
-        <div className="container mx-auto px-4 max-w-4xl">
-          <div className="flex items-center gap-4 mb-14">
-            <div className="h-px flex-1 bg-[#1e2a45]" />
-            <div className="text-center space-y-1">
-              <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">TUTORIAL</div>
-              <h2 className="text-2xl md:text-3xl font-black uppercase tracking-tight">Как это работает</h2>
+      <section className={styles.controlSection}>
+        <div className={styles.controlCard}>
+          <div>
+            <span className={styles.sectionKicker}>Статус заказа</span>
+            <h2>Всегда понятно,<br />что происходит дальше</h2>
+            <p>После оформления заказ получает понятный timeline: создан, оплачен, геймпасс проверен, выкуп завершён.</p>
+          </div>
+          <div className={styles.orderWidget}>
+            <div className={styles.orderWidgetTop}>
+              <span>Заказ #RB-2048</span><strong>Геймпасс проверяется</strong>
             </div>
-            <div className="h-px flex-1 bg-[#1e2a45]" />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {[
-              {
-                step: "01",
-                icon: "🎮",
-                title: "Создай геймпасс",
-                desc: "Открой Roblox Creator Hub, создай геймпасс в своей игре и установи нужную цену.",
-                link: "/guide",
-                cta: "Смотреть инструкцию",
-                color: "#00b06f",
-              },
-              {
-                step: "02",
-                icon: "💳",
-                title: "Оформи заказ",
-                desc: "Введи ник, найди геймпасс через поиск, оплати удобным способом.",
-                link: "/checkout",
-                cta: "Оформить заказ",
-                color: "#3b82f6",
-              },
-              {
-                step: "03",
-                icon: "⚡",
-                title: "Получи Robux",
-                desc: "Наш бот купит твой геймпасс. Robux поступят через 5–7 дней по правилам Roblox.",
-                link: null,
-                cta: null,
-                color: "#00b06f",
-              },
-            ].map(({ step, icon, title, desc, link, cta, color }) => (
-              <GlowCard
-                key={step}
-                customSize
-                glowColor="green"
-                className="bg-[#0f1528] p-6 space-y-4"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-pixel text-[10px] tracking-wider" style={{ color }}>{step}</span>
-                  <span className="text-2xl">{icon}</span>
-                </div>
-                <div className="rb-progress">
-                  <div className="rb-progress-fill" style={{ width: step === "01" ? "33%" : step === "02" ? "66%" : "100%", background: color }} />
-                </div>
-                <h3 className="text-lg font-black uppercase tracking-tight">{title}</h3>
-                <p className="text-sm text-zinc-400 font-medium leading-relaxed">{desc}</p>
-                {link && (
-                  <Link href={link} className="text-xs font-black uppercase tracking-widest hover:opacity-70 transition-opacity flex items-center gap-1" style={{ color }}>
-                    {cta} →
-                  </Link>
-                )}
-              </GlowCard>
-            ))}
+            <div className={styles.orderTrack}><i /><i /><i className={styles.current} /><i /></div>
+            <div className={styles.orderLabels}><span>Создан</span><span>Оплачен</span><span>Проверка</span><span>Готово</span></div>
           </div>
         </div>
       </section>
 
-      <div className="accent-line" />
-
-      {/* ── WHY US ───────────────────────────────────────────── */}
-      <section className="py-20 bg-[#0a0e1a]">
-        <div className="container mx-auto px-4 max-w-4xl">
-          <div className="flex items-center gap-4 mb-14">
-            <div className="h-px flex-1 bg-[#1e2a45]" />
-            <div className="text-center space-y-1">
-              <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">PERKS</div>
-              <h2 className="text-2xl md:text-3xl font-black uppercase tracking-tight">Почему мы</h2>
-            </div>
-            <div className="h-px flex-1 bg-[#1e2a45]" />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {[
-              {
-                title: "Доставка геймпассом",
-                desc: "Robux зачисляются через выкуп вашего геймпасса — без передачи пароля и доступа к аккаунту.",
-                tag: "SAFE",
-              },
-              {
-                title: "Гарантия возврата",
-                desc: "Если заказ не выполнен в срок — возвращаем деньги без вопросов.",
-                tag: "ГАРАНТИЯ",
-              },
-              {
-                title: "Полная автоматизация",
-                desc: "Заказы обрабатываются системой круглосуточно. Мгновенно после оплаты.",
-                tag: "24/7",
-              },
-              {
-                title: "Без скрытых комиссий",
-                desc: "Цена в калькуляторе — финальная. Налог Roblox уже учтён в стоимости.",
-                tag: "ЧЕСТНО",
-              },
-
-            ].map(({ title, desc, tag }) => (
-              <GlowCard
-                key={title}
-                customSize
-                glowColor="green"
-                className="bg-[#0f1528]/80 backdrop-blur-xl p-6 flex gap-4"
-              >
-                <div className="w-2 h-full min-h-[60px] bg-[#00b06f]/20 flex-shrink-0 relative">
-                  <div className="absolute top-0 left-0 w-full h-1/2 bg-[#00b06f]" />
-                </div>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-black uppercase tracking-tight text-sm">{title}</h3>
-                    <span className="font-pixel text-[9px] text-[#00b06f]/60 border border-[#00b06f]/20 px-1.5 py-0.5">{tag}</span>
-                  </div>
-                  <p className="text-sm text-zinc-400 font-medium leading-relaxed">{desc}</p>
-                </div>
-              </GlowCard>
-            ))}
-          </div>
+      <section className={styles.bottomCta}>
+        <div>
+          <span className={styles.sectionKicker}>Готов начать?</span>
+          <h2>Рассчитай свой пакет Robux</h2>
         </div>
-      </section>
-
-      <div className="accent-line" />
-
-      {/* ── CTA ──────────────────────────────────────────────── */}
-      <section className="py-20 bg-[#080c18] relative overflow-hidden">
-        <PixelBlocks />
-        <div className="container mx-auto px-4 max-w-2xl text-center space-y-8 relative z-10">
-          <div className="font-pixel text-[10px] text-[#00b06f]/60 tracking-wider">READY?</div>
-          <h2 className="text-4xl md:text-6xl font-black uppercase tracking-[-0.03em] leading-tight">
-            Начни<br />
-            <span className="gold-text flex items-center justify-center gap-3">
-              <RobuxIcon className="w-10 h-10 coin-spin" />
-              прямо сейчас
-            </span>
-          </h2>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Link
-              href="/checkout"
-              className="h-14 px-10 gold-gradient flex items-center justify-center font-black text-sm uppercase tracking-widest text-white hover:opacity-90 active:scale-[0.97] transition-all rounded-none"
-            >
-              Купить Robux
-            </Link>
-            <Link
-              href="/guide"
-              className="h-14 px-10 border-2 border-[#1e2a45] hover:border-[#00b06f]/30 flex items-center justify-center font-black text-sm uppercase tracking-widest hover:text-[#00b06f] transition-all rounded-none"
-            >
-              Инструкция
-            </Link>
-          </div>
-        </div>
+        <a href="#calculator" className={styles.primaryAction}>К калькулятору <ArrowRight size={18} /></a>
       </section>
 
       <Footer />
-      </div>{/* /relative z-10 */}
     </main>
   );
 }

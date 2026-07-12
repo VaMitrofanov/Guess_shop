@@ -10,7 +10,7 @@
 | Query | Смысл |
 |-------|-------|
 | `?source=wb` | WB-коридор: intro/gate, затем единый gamepass guide |
-| `?source=site` | тот же актуальный gamepass guide с CTA сайта |
+| `?source=site&amount=1000` | отдельная Violet/Frost-инструкция витрины; пакет и ник уходят в checkout сайта |
 | `?source=direct` | тот же актуальный gamepass guide с CTA бота |
 | `&skip=1&code=XXXX` | открыть инструкцию напрямую (ссылка от бота; работает в Telegram WebView, где localStorage изолирован) |
 | `&test=1` или `code=TESTDEV` | тихий QA-просмотр: без резерва/бота/БД/алертов, кнопки TG/VK **инертны** |
@@ -21,12 +21,24 @@
 `?code=` из URL → `GET /api/wb-code?code=` → если `claimed` показывает фазу instruction.
 Таймаут 10 с на восстановление.
 
-## Единая инструкция
+## Инструкции WB и сайта
 
-Все публичные варианты теперь рендерят одну актуальную девятишаговую основу
-`WBInstructionV2.tsx` (фактически `GamepassGuide`). Различаются только mode-label, номинал,
-WB code/session и финальный handoff. Старый `Instruction` в `GuideClient.tsx` пока оставлен
-как неисполняемый legacy-код для безопасного отдельного удаления; роут его больше не рендерит.
+- `?source=wb` и `?source=direct` по-прежнему обслуживает `GuideClient` →
+  `WBInstructionV2`; WB gate, восстановление кода и bot handoff не менялись.
+- Обычный `/guide` и `?source=site` рендерят отдельный `SiteGuide.tsx` в визуальном
+  направлении Violet / Frost. Это site-путь: пакет Robux можно менять прямо в инструкции
+  быстрыми кнопками или произвольным полем в каноническом диапазоне `100–100 000 R$`
+  (`CUSTOM_MIN/CUSTOM_MAX`), gross-цена пасса (`ceil(amount / 0.7)`) пересчитывается и
+  копируется в один клик.
+- Финальный шаг site-инструкции принимает Roblox username и ведёт в
+  `/checkout?amount=…&username=…`. Checkout сразу предзаполняет ник и запускает поиск игр;
+  пользователь выбирает игру/пасс и продолжает заказ без бота.
+- Checkout больше не использует legacy pixel/square-вёрстку: `checkout.module.css` задаёт
+  тот же rounded Violet / Frost shell, три последовательные зоны выбора (аккаунт → игра →
+  пасс), проверку ожидаемой gross-цены, sticky-summary и отдельный экран подтверждения.
+
+Общие Roblox assets пока остаются в `public/guide`. Следующий этап — вынести общие данные
+шагов/предупреждений WB и SITE в один schema-модуль без объединения разных финальных CTA.
 
 ## WBGate — ввод кода
 

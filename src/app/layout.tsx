@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Press_Start_2P } from "next/font/google";
+import { Geist, Geist_Mono, Press_Start_2P, Unbounded } from "next/font/google";
 import "./globals.css";
 import SessionProvider from "@/components/session-provider";
 import { PageLoader } from "@/components/page-loader";
@@ -17,6 +17,12 @@ const geistMono = Geist_Mono({
 const pressStart = Press_Start_2P({
   variable: "--font-pixel",
   weight: "400",
+  subsets: ["latin", "cyrillic"],
+});
+
+const unbounded = Unbounded({
+  variable: "--font-display",
+  weight: ["600", "700"],
   subsets: ["latin", "cyrillic"],
 });
 
@@ -51,7 +57,7 @@ export default function RootLayout({
   return (
     <html
       lang="ru"
-      className={`${geistSans.variable} ${geistMono.variable} ${pressStart.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${pressStart.variable} ${unbounded.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         <SessionProvider>
