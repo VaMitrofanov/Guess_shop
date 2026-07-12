@@ -31,15 +31,16 @@
 - **2026-07-13, production:** Web commit `324a930` развёрнут, контейнер `healthy`; прямой
   HTTPS на `robloxbank.ru` и `www` возвращает `retail-direct-v1`. Корень намеренно остаётся
   `503` в maintenance (`MAINTENANCE_MODE=on`) до launch gates, поэтому это не incident.
-- **2026-07-13, локально (ещё не production):** checkout переведён с legacy `Order/Product`
+- **2026-07-13, production:** checkout переведён с legacy `Order/Product`
   на канонический `WbOrder(SITE/WEB)`: quote одноразово потребляется вместе с созданием
   `PaymentAttempt`, `OrderEvent` и `OutboxMessage`; сервер проверяет ownership/TTL/version,
   Roblox owner/sale-state/точную gross-цену. Добавлены обязательный idempotency UUID,
   email чека, случайный status-token (в БД только hash) и строгая callback state machine со
   сверкой terminal/payment/order/amount. Bonus ledger/баланс и одноразовая скидка потребляются
   атомарно с quote, поэтому параллельные quotes не дают double-spend. Боевой `Init` закрыт `SITE_ACQUIRING_ENABLED=false`
-  и fail-closed ККТ env. Migration `20260713_canonical_web_order_foundation` **не применена**;
-  outbox worker, возвраты/чеки, staging test matrix и внешние gates остаются.
+  и fail-closed ККТ env. Migration `20260713_canonical_web_order_foundation` **применена к
+  production** 13.07 (аддитивная, с полным backup и сверкой counts), код задеплоен на Web и
+  боты; outbox worker, возвраты/чеки, staging test matrix и внешние gates остаются.
 - **Внешние launch-gates остаются обязательными:** письменная категория Т-Банка, юрпроверка
   модели/бренда, реквизиты/ККТ и фактическая локализация первичной БД в РФ не заменяются
   программным кодом.
@@ -53,7 +54,7 @@
 | Приоритет | Блокер | Подтверждённое состояние |
 |---|---|---|
 | P0 | Публичный сайт закрыт | `https://robloxbank.ru/` отвечает `503` и переписывается на maintenance; `/api/health` и тестовый WB-гайд доступны |
-| P0 | Канонический checkout ещё не развёрнут | Локальный код больше не зависит от `Product/default-calc`, но migration/staging/prod rollout не выполнены и kill-switch выключен |
+| P0 | Канонический checkout развёрнут, но не прошёл payment E2E | Migration применена и код задеплоен 13.07 без legacy `Product/default-calc`; kill-switch выключен, боевой Init/receipt/callback test matrix впереди |
 | P0 | Цена не прошла payment E2E | Quote уже одноразово потребляется каноническим order flow, но сумма ещё не проверена реальным Init/receipt/callback test matrix |
 | P0 | Общий клиентский аккаунт не завершён | Identity foundation и ЛК с `WbOrder`/бонусами готовы; Telegram-login и безопасный link/merge отсутствуют |
 | P0 | Payment E2E не завершён | Strict callback/event/outbox foundation готов локально; нет production migration, outbox worker/retry/dead-letter, refund/ККТ test matrix |
@@ -224,9 +225,9 @@ Definition of Done: новый пользователь без подсказк�
 Legacy `Order` не является хорошим вторым источником заказов: в нём нет ни одной production
 записи, а рабочие 433 заказа находятся в `WbOrder`. Рекомендуемый минимально рискованный путь:
 
-**Статус 2026-07-13:** пункты 1–2 и server-side consumption quote реализованы локально через
-additive migration; legacy adapter/удаление старой модели, outbox worker и production rollout
-ещё не выполнены.
+**Статус 2026-07-13:** пункты 1–2 и server-side consumption quote реализованы и задеплоены
+(additive migration применена к production); legacy adapter/удаление старой модели и
+outbox worker ещё не выполнены.
 
 1. Сделать `WbOrder` каноническим retail-заказом (позже нейтрально переименовать), добавить
    `SITE` в `orderSource` и `WEB` в канал создания.
@@ -453,8 +454,8 @@ VK  ─┘                              │
 
 ### Этап 5. Т-Банк, ККТ и fulfillment — 5–8 дней
 
-- Новый checkout поверх канонического заказа/quote/payment attempt. **Код готов локально;
-  migration/staging rollout впереди.**
+- Новый checkout поверх канонического заказа/quote/payment attempt. **Код задеплоен,
+  migration применена; staging/terminal test matrix впереди.**
 - Полный `Init`, receipt/items, callback state machine и строгие сверки. **Foundation готов;
   реальные terminal/ККТ test cases впереди.**
 - Durable outbox, retry/dead-letter, ручное восстановление и алертинг. **Таблицы/события
