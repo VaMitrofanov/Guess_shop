@@ -1111,6 +1111,76 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  // Универсальное редактирование заказа из карточки (обобщение edit-avito на
+  // все источники): менеджер правит номинал/ник/геймпасс ЗА клиента — кейс
+  // QARJR71 12.07 (замена подставленного пасса + корректировка номинала).
+  // Заметка правится в NotesEditor карточки; изменения аудируются в adminNote.
+  if (action === "edit-order") {
+    if (unpaidDirect) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
+    if (!["PENDING", "AWAITING_GAMEPASS", "ERROR"].includes(order.status))
+      return NextResponse.json({ error: "Нельзя редактировать в этом статусе" }, { status: 400 });
+
+    const data: any = {};
+    const changes: string[] = [];
+
+    if (body.amount !== undefined) {
+      const amt = Number(body.amount);
+      if (!amt || !Number.isFinite(amt) || amt < 1)
+        return NextResponse.json({ error: "amount должен быть > 0" }, { status: 400 });
+      if (order.isDirectOrder && amt !== order.amount)
+        return NextResponse.json({ error: "У прямого заказа номинал привязан к оплате — правь ник/геймпасс" }, { status: 400 });
+      if (amt !== order.amount) { data.amount = amt; changes.push(`номинал ${order.amount}→${amt}`); }
+    }
+
+    if (body.robloxUsername !== undefined) {
+      const nick = String(body.robloxUsername ?? "").trim().replace(/^@/, "") || null;
+      if (nick !== (order.robloxUsername ?? null)) {
+        data.robloxUsername = nick;
+        changes.push(`ник ${order.robloxUsername ?? "—"}→${nick ?? "—"}`);
+      }
+    }
+
+    if (body.gamepassUrl !== undefined) {
+      const raw = String(body.gamepassUrl ?? "").trim();
+      const gpId = raw.match(/game-pass(?:es)?\/(\d+)/)?.[1] ?? (/^\d{6,}$/.test(raw) ? raw : null);
+      if (raw && !gpId)
+        return NextResponse.json({ error: "Геймпасс: нужна ссылка roblox.com/game-pass/<id> или ID" }, { status: 400 });
+      const oldId = gpIdOf(order.gamepassUrl);
+      if ((gpId ?? null) !== (oldId ?? null)) {
+        // Дедуп как в create-manual: ГП уже в другом активном заказе → 409,
+        // force обходит (осознанное решение менеджера).
+        if (gpId && body.force !== true) {
+          const candidates = await (prisma as any).wbOrder.findMany({
+            where: { isTest: false, id: { not: orderId }, status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] }, gamepassUrl: { contains: `/${gpId}` } },
+            orderBy: { createdAt: "desc" }, take: 5,
+            select: { wbCode: true, status: true, gamepassUrl: true },
+          });
+          const existing = candidates.find((o: any) => gpIdOf(o.gamepassUrl) === gpId);
+          if (existing)
+            return NextResponse.json({
+              error: `На этот геймпасс уже есть активный заказ ${existing.wbCode}`,
+              existing: { wbCode: existing.wbCode, status: existing.status },
+            }, { status: 409 });
+        }
+        data.gamepassUrl = gpId ? `https://www.roblox.com/game-pass/${gpId}` : null;
+        changes.push(gpId ? `ГП ${oldId ?? "—"}→${gpId}` : `ГП ${oldId} снят`);
+        // Переходы статуса — паритет с edit-avito: появился пасс → в очередь,
+        // сняли пасс → ждать ссылку. Замена пасса в ERROR статус не трогает.
+        if (!gpId) { data.status = "AWAITING_GAMEPASS"; data.pendingAt = null; }
+        else if (!order.gamepassUrl) { data.status = "PENDING"; data.pendingAt = new Date(); }
+      }
+    }
+
+    if (Object.keys(data).length === 0)
+      return NextResponse.json({ error: "Нет изменений" }, { status: 400 });
+
+    await (prisma as any).wbOrder.update({ where: { id: orderId }, data });
+    const stamp = new Date().toISOString().slice(0, 10);
+    await appendAdminNote(orderId, `[EDIT ${stamp} от ${twaUser.firstName}] ${changes.join(", ")}`);
+    cachedCounts = null;
+    return NextResponse.json({ ok: true });
+  }
+
   if (action === "set-source") {
     const src = body.source as string;
     if (!["WB", "DIRECT", "AVITO", "MANUAL"].includes(src))

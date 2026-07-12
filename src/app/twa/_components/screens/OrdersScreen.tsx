@@ -538,33 +538,43 @@ function MoveToModal({ order, token, currentTab, onDone, onClose }: {
   );
 }
 
-/* ───────────── Edit Avito Modal ───────────── */
-function EditAvitoModal({ order, token, onDone, onClose }: {
+/* ───────────── Edit Order Modal — правка номинала/ника/ГП за клиента ───────────── */
+function EditOrderModal({ order, token, onDone, onClose }: {
   order: Order; token: string; onDone: () => void; onClose: () => void;
 }) {
   const [amount, setAmount] = useState(String(order.amount));
   const [gpInput, setGpInput] = useState(order.gamepassUrl ?? "");
   const [nick, setNick] = useState(order.robloxUsername ?? "");
-  const [note, setNote] = useState(order.adminNote ?? "");
+  // Дедуп ГП: сервер вернул 409 + existing — просим подтвердить force-сохранение.
+  const [dup, setDup] = useState<{ wbCode: string; status: string } | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function submit() {
-    const amt = parseInt(amount, 10);
-    if (!amt || amt < 1) { toast("Укажи сумму R$", "error"); return; }
+  const amt = parseInt(amount, 10) || 0;
+  // Прайс-гард пропустит выкуп только по этой цене — показываем сразу.
+  const expected = amt > 0 ? Math.ceil(amt / 0.7) : 0;
+  const dirty =
+    (!order.isDirectOrder && amt !== order.amount) ||
+    gpInput.trim() !== (order.gamepassUrl ?? "") ||
+    nick.trim() !== (order.robloxUsername ?? "");
+
+  async function submit(force = false) {
+    if (!order.isDirectOrder && (!amt || amt < 1)) { toast("Укажи номинал R$", "error"); return; }
     setLoading(true);
     try {
+      const payload: any = {
+        action: "edit-order", orderId: order.id,
+        gamepassUrl: gpInput.trim(),
+        robloxUsername: nick.trim(),
+      };
+      if (!order.isDirectOrder) payload.amount = amt;
+      if (force) payload.force = true;
       const r = await fetch("/api/twa/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          action: "edit-avito", orderId: order.id,
-          amount: amt,
-          gamepassUrl: gpInput.trim(),
-          robloxUsername: nick.trim(),
-          note: note.trim(),
-        }),
+        body: JSON.stringify(payload),
       });
       const d = await r.json();
+      if (r.status === 409 && d.existing) { haptic.notify("warning"); setDup(d.existing); return; }
       if (!r.ok) { toast(d.error ?? "Ошибка", "error"); return; }
       haptic.notify("success");
       toast("Сохранено", "success");
@@ -573,6 +583,12 @@ function EditAvitoModal({ order, token, onDone, onClose }: {
     finally { setLoading(false); }
   }
 
+  const inputStyle: React.CSSProperties = {
+    width: "100%", background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10,
+    color: "#fff", fontSize: 15, padding: "10px 12px", outline: "none",
+    fontFamily: "inherit", boxSizing: "border-box",
+  };
+
   return (
     <div onClick={e => e.stopPropagation()} style={{
       padding: "12px 14px 14px",
@@ -580,23 +596,39 @@ function EditAvitoModal({ order, token, onDone, onClose }: {
       background: "rgba(0,0,0,0.15)",
       display: "flex", flexDirection: "column", gap: 8,
     }}>
-      <div style={{ fontSize: 14, fontWeight: 600, color: C.orange }}>Редактировать Авито</div>
-      <input value={amount} onChange={e => setAmount(e.target.value.replace(/\D/g, ""))} placeholder="Сумма R$" inputMode="numeric"
-        style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "10px 12px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
-      <input value={gpInput} onChange={e => setGpInput(e.target.value)} placeholder="ID или URL геймпасса"
-        style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "10px 12px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
-      <input value={nick} onChange={e => setNick(e.target.value)} placeholder="Ник продавца"
-        style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "10px 12px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
-      <input value={note} onChange={e => setNote(e.target.value)} placeholder="Заметка"
-        style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10, color: "#fff", fontSize: 15, padding: "10px 12px", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }} />
+      <div style={{ fontSize: 14, fontWeight: 600, color: C.orange }}>✏️ Редактировать заказ</div>
+      {order.isDirectOrder ? (
+        <div style={{ fontSize: 14, color: C.textTertiary }}>
+          Номинал {order.amount.toLocaleString("ru-RU")} R$ привязан к оплате — правь ник/геймпасс
+        </div>
+      ) : (
+        <>
+          <input value={amount} onChange={e => setAmount(e.target.value.replace(/\D/g, ""))} placeholder="Номинал R$" inputMode="numeric"
+            style={inputStyle} />
+          {expected > 0 && (
+            <div style={{ fontSize: 14, color: C.textTertiary }}>
+              → выкуп пройдёт только с пассом за <span style={{ color: C.textSecondary, fontWeight: 600 }}>{expected.toLocaleString("ru-RU")} R$</span>
+            </div>
+          )}
+        </>
+      )}
+      <input value={gpInput} onChange={e => { setGpInput(e.target.value); setDup(null); }} placeholder="ID или URL геймпасса (пусто — снять)"
+        style={inputStyle} />
+      <input value={nick} onChange={e => setNick(e.target.value)} placeholder="Ник Roblox (продавец пасса)"
+        style={inputStyle} />
+      {dup && (
+        <div style={{ fontSize: 14, fontWeight: 600, color: C.orange }}>
+          ⚠️ Этот геймпасс уже в заказе {dup.wbCode} ({dup.status}) — сохранить всё равно?
+        </div>
+      )}
       <div style={{ display: "flex", gap: 8 }}>
         <button className="twa-press" onClick={onClose}
           style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
           Отмена
         </button>
-        <button className="twa-press" onClick={submit} disabled={loading || !amount.trim()}
-          style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: C.orange, color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading || !amount.trim() ? 0.5 : 1 }}>
-          {loading ? "…" : "Сохранить"}
+        <button className="twa-press" onClick={() => submit(!!dup)} disabled={loading || !dirty}
+          style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: dup ? C.red : C.orange, color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading || !dirty ? 0.5 : 1 }}>
+          {loading ? "…" : dup ? "Сохранить всё равно" : "Сохранить"}
         </button>
       </div>
     </div>
@@ -928,7 +960,7 @@ function OrderCard({
   live?: GpLiveInfo;
 }) {
   const [moveOpen, setMoveOpen] = useState(false);
-  const [editAvitoOpen, setEditAvitoOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [rebindOpen, setRebindOpen] = useState(false);
   // GP-watch: локально трекаем «клиент оповещён об этом ГП» — сервер после
   // «Оповестить» отдаёт свежий passId, перезагрузка вкладки не нужна.
@@ -975,7 +1007,8 @@ function OrderCard({
 
   const tabBadge = currentTab === "ALL" || currentTab === "ATTENTION" ? orderTabBadge(order) : null;
   const showMoveBtn = viewTab === "AWAITING_LINK" || viewTab === "FAVORITES";
-  const isEditableAvito = viewTab === "AVITO" && order.orderSource === "AVITO" && ["PENDING", "AWAITING_GAMEPASS", "ERROR"].includes(order.status);
+  // Редактирование за клиента (номинал/ник/ГП) — любой источник, не только Авито.
+  const isEditable = ["PENDING", "AWAITING_GAMEPASS", "ERROR"].includes(order.status);
 
   const timeRef = order.createdAt;
   // Second timer: how long the order has been sitting in the "К выкупу" queue
@@ -1259,10 +1292,10 @@ function OrderCard({
         />
       )}
 
-      {/* Edit Avito button */}
-      {isEditableAvito && !editAvitoOpen && (
+      {/* Edit order button — правка номинала/ника/ГП за клиента */}
+      {isEditable && !editOpen && (
         <div style={{ padding: "0 14px 6px" }}>
-          <button className="twa-press-sm" onClick={e => { e.stopPropagation(); setEditAvitoOpen(true); }}
+          <button className="twa-press-sm" onClick={e => { e.stopPropagation(); setEditOpen(true); }}
             style={{
               width: "100%", padding: "10px", borderRadius: 10, border: `1px solid ${C.orange}44`,
               background: "transparent", color: C.orange, fontSize: 14, fontWeight: 600, cursor: "pointer",
@@ -1272,12 +1305,12 @@ function OrderCard({
         </div>
       )}
 
-      {editAvitoOpen && (
-        <EditAvitoModal
+      {editOpen && (
+        <EditOrderModal
           order={order}
           token={token}
-          onDone={() => { setEditAvitoOpen(false); onMoved(); }}
-          onClose={() => setEditAvitoOpen(false)}
+          onDone={() => { setEditOpen(false); onMoved(); }}
+          onClose={() => setEditOpen(false)}
         />
       )}
 
