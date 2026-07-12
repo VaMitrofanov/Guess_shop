@@ -1981,6 +1981,7 @@ const WBG_CSS = `
 .wbg-root{--gold:#7556e8;--gold2:#a68bff;--grn:#45d6aa;--line:var(--rb-border);--mut:var(--rb-muted);color:var(--rb-text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased}
 .wbg-root *{box-sizing:border-box}
 .wbg-stage{width:min(1120px,100%);display:grid;grid-template-columns:minmax(0,.92fr) minmax(390px,.78fr);gap:70px;align-items:center}
+.wbg-stage>*{min-width:0}
 .wbg-welcome{position:relative;padding:20px 0}
 .wbg-badge{width:max-content;display:flex;align-items:center;gap:9px;padding:9px 13px;border:1px solid var(--line);border-radius:999px;background:var(--rb-surface);color:var(--gold2);font-size:12px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
 .wbg-welcome h1{margin:24px 0 19px;font-family:var(--font-display),sans-serif;font-size:clamp(46px,6vw,76px);line-height:.98;letter-spacing:-.065em}
@@ -1989,7 +1990,7 @@ const WBG_CSS = `
 .wbg-flow{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:28px}
 .wbg-flow div{padding:14px;border:1px solid var(--line);border-radius:15px;background:var(--rb-surface)}
 .wbg-flow b,.wbg-flow span{display:block}.wbg-flow b{color:var(--grn);font-size:13px}.wbg-flow span{margin-top:4px;color:var(--mut);font-size:12px;line-height:1.35}
-.wbg-card{position:relative;border:1px solid var(--line);background:var(--rb-surface);border-radius:26px;padding:26px 22px;box-shadow:10px 10px 0 var(--rb-strong),0 28px 70px rgba(15,8,30,.2)}
+.wbg-card{position:relative;min-width:0;width:100%;border:1px solid var(--line);background:var(--rb-surface);border-radius:26px;padding:26px 22px;box-shadow:10px 10px 0 var(--rb-strong),0 28px 70px rgba(15,8,30,.2)}
 @media(min-width:640px){.wbg-card{padding:34px 30px}}
 .wbg-icon{width:62px;height:62px;border-radius:18px;border:1px solid color-mix(in srgb,var(--gold) 46%,transparent);background:color-mix(in srgb,var(--gold) 12%,transparent);display:flex;align-items:center;justify-content:center;margin:0 auto 16px}
 .wbg-eye{font-size:11px;letter-spacing:2.5px;color:var(--gold);font-weight:700;text-transform:uppercase}
