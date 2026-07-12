@@ -378,24 +378,49 @@ model WbOrder {
 /// One provider-side payment initialization/charge lifecycle. The amount and
 /// merchant order id are immutable snapshots used to verify notifications.
 model PaymentAttempt {
-  id             String               @id @default(cuid())
-  orderId        String
-  order          WbOrder              @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  provider       String
-  publicOrderId  String               @unique
-  paymentId      String?              @unique
-  amountKopecks  Int
-  status         PaymentAttemptStatus @default(CREATED)
-  idempotencyKey String               @unique
-  paymentUrl     String?
-  rawEventHash   String?
-  initiatedAt    DateTime?
-  finalizedAt    DateTime?
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
+  id                    String               @id @default(cuid())
+  orderId               String
+  order                 WbOrder              @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  provider              String
+  publicOrderId         String               @unique
+  paymentId             String?              @unique
+  amountKopecks         Int
+  status                PaymentAttemptStatus @default(CREATED)
+  idempotencyKey        String               @unique
+  paymentUrl            String?
+  rawEventHash          String?
+  /// Cumulative amount acknowledged as refunded by provider notifications.
+  /// Integer kopecks; never inferred from the order state alone.
+  refundedAmountKopecks Int                  @default(0)
+  initiatedAt           DateTime?
+  finalizedAt           DateTime?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  refunds               PaymentRefund[]
 
   @@index([orderId, createdAt(sort: Desc)])
   @@index([provider, status, updatedAt])
+}
+
+/// Idempotent operator request to T-Bank Cancel. The row is created before the
+/// network call so two taps can never issue two refunds. A SUBMIT_UNKNOWN row
+/// must be reconciled with the provider instead of being blindly retried.
+model PaymentRefund {
+  id               String         @id @default(cuid())
+  paymentAttemptId String
+  paymentAttempt   PaymentAttempt @relation(fields: [paymentAttemptId], references: [id], onDelete: Restrict)
+  idempotencyKey   String         @unique
+  amountKopecks    Int
+  reason           String?
+  status           String         @default("PENDING")
+  providerStatus   String?
+  responseHash     String?
+  requestedBy      String
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([paymentAttemptId, createdAt(sort: Desc)])
+  @@index([status, updatedAt])
 }
 
 /// Immutable domain/audit event. Provider event hashes make webhook retries
@@ -425,6 +450,7 @@ model OutboxMessage {
   attempts      Int          @default(0)
   nextAttemptAt DateTime     @default(now())
   lastError     String?
+  lockedAt      DateTime?
   deliveredAt   DateTime?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt

@@ -13,12 +13,12 @@ const commonCsp = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://telegram.org",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
-  "connect-src 'self' https://id.vk.com https://oauth.vk.com https://api.vk.com",
-  "frame-src 'self' https://id.vk.com https://oauth.vk.com",
+  "connect-src 'self' https://id.vk.com https://oauth.vk.com https://api.vk.com https://telegram.org",
+  "frame-src 'self' https://id.vk.com https://oauth.vk.com https://oauth.telegram.org https://telegram.org",
   "form-action 'self'",
 ].join("; ");
 

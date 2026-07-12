@@ -19,6 +19,7 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [bots.md](bots.md) | TG- и VK-боты: активация, приём геймпасса, прямые заказы, поддержка, отзывы |
 | [twa-admin.md](twa-admin.md) | Telegram Web App админка: аутентификация, заказы, выкуп, аккаунт |
 | [database.md](database.md) | Модели Prisma и статусы заказов/кодов |
+| [payments-and-kkt.md](payments-and-kkt.md) | Эквайринг, outbox worker, refund и ККТ test matrix |
 | [deploy.md](deploy.md) | Как деплоится каждый сервис (без секретов) |
 | [security.md](security.md) | Модель угроз, известные риски, что проверять перед прод-изменениями |
 
@@ -30,8 +31,8 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 - **TWA** — админка внутри Telegram для менеджера (заказы, выкуп, аналитика).
 
 Публичный корень `robloxbank.ru` пока закрыт maintenance-режимом; рабочая точка входа —
-WB-гайд. Новый checkout использует канонический `WbOrder`/quote/payment-attempt и задеплоен
-(migration применена 13.07), но боевой payment E2E ещё не выполнен; kill-switch
+WB-гайд. Новый checkout использует канонический `WbOrder`/quote/payment-attempt; outbox
+worker, refund и локальная ККТ contract matrix готовы, но боевой payment E2E ещё не выполнен; kill-switch
 (`SITE_ACQUIRING_ENABLED=false`) выключен, поэтому он не готов к деньгам и не участвует в
 текущем воркфлоу —
 см. [architecture.md](architecture.md#legacy) и

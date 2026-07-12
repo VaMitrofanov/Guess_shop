@@ -40,7 +40,7 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
         style={{ display: "none" }}
         aria-hidden="true"
       />
-      <GuideClient isWB={isWB} skipGate={skipGate} wbCodeFromUrl={wbCodeFromUrl} testMode={testMode} previewMode={previewMode} testNom={testNom} />
+      <GuideClient isWB={isWB} guideMode={source === "site" ? "SITE" : source === "direct" ? "BOT" : isWB ? "WB" : "SITE"} skipGate={skipGate} wbCodeFromUrl={wbCodeFromUrl} testMode={testMode} previewMode={previewMode} testNom={testNom} />
     </>
   );
 }

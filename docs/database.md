@@ -103,15 +103,20 @@ robloxUsername, userId+createdAt).
 - `BonusLedger` — append-only журнал изменения R$-бонусов. `User.balance` остаётся быстрым
   итогом; migration записывает текущий ненулевой balance как одну opening-строку с
   idempotency key. Новые начисления/списания должны писать обе сущности в одной транзакции.
-- `AccountMergeAudit` — audit-след будущего merge: source/target, доказательства свежих
-  авторизаций, результат и rollback-marker. Автоматически объединять пользователей по нику,
-  имени или email нельзя.
+- `AccountMergeAudit` — audit-след step-up merge: source/target, доказательства двух свежих
+  авторизаций, результат и rollback-marker. TG link переносит identities/orders/intents,
+  суммирует бонус через отдельную ledger-строку и оставляет source как инертный audit anchor.
+  Автоматически объединять пользователей по нику, имени или email нельзя.
 - `PricingPolicy` хранит версию и JSON-представление опубликованной политики; расчёт
   `retail-direct-v1` остаётся чистой общей функцией `bots/shared/retail-pricing.ts`.
 - `PriceQuote` фиксирует на 15 минут версию, сумму R$, бонус, скидку и итог в **целых
   копейках**. `POST /api/pricing/quote` создаёт запись для гостя или текущего User.
 
-### Канонический SITE-order и деньги (код 2026-07-13; migration ещё не применена к production)
+### Канонический SITE-order и деньги (foundation migration применена 2026-07-13)
+
+Дополняющая migration `20260713_payment_outbox_refund` добавляет refund accounting,
+`PaymentRefund` и outbox lease; применена к production 2026-07-13 до push нового
+Prisma-клиента.
 
 Миграция `20260713_canonical_web_order_foundation` расширяет `WbOrder` без изменения старых
 строк. Для `orderSource=SITE`, `platform=WEB` он хранит ссылку на одноразовый `PriceQuote`,
@@ -121,10 +126,14 @@ robloxUsername, userId+createdAt).
 audit-event и outbox.
 
 - `PaymentAttempt` — неизменяемые `provider/publicOrderId/amountKopecks/idempotencyKey` плюс
-  provider `paymentId`, URL и монотонный статус. Raw callback не хранится: остаётся SHA-256.
+  provider `paymentId`, URL, монотонный статус и cumulative `refundedAmountKopecks`. Raw
+  callback не хранится: остаётся SHA-256.
+- `PaymentRefund` — идемпотентный операторский запрос полного/частичного возврата; создаётся
+  до provider call и различает `SUBMITTED`, `CONFIRMED`, `SUBMIT_UNKNOWN`.
 - `OrderEvent` — append-only события с уникальным idempotency key.
 - `OutboxMessage` — durable-доставка (`PENDING/PROCESSING/DELIVERED/DEAD`, attempts,
-  `nextAttemptAt`, `lastError`). Worker/retry/dead-letter ещё не реализованы.
+  `nextAttemptAt`, `lockedAt`, `lastError`). TG-service worker реализует lease, capped
+  exponential retry и dead-letter alert; детали — `payments-and-kkt.md`.
 
 Checkout принимает только `quoteId`: сервер повторно проверяет ownership/TTL/status/version,
 Roblox owner, sale-state и точную gross-цену. Создание SITE-order пока требует verified

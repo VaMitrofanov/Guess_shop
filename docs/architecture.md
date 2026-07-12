@@ -30,12 +30,14 @@
 (VK-логин на сайте создаёт юзера без диалога → заказ привязан «не туда») устраняются
 `UserIdentity`: после server-side проверки VK subject сначала находит прежний `User`, поэтому
 его заказы и бонусы не теряются. Legacy `vkId`/`tgId` переходно сохраняются для ботов;
-TG-login и безопасный step-up merge — следующие инкременты. Цена прямого заказа в TG/VK/Web
+TG web-login и TG→current-account step-up merge реализованы через две свежие provider proofs;
+VK link/unlink и recovery-console остаются следующими инкрементами. Цена прямого заказа в TG/VK/Web
 считается одной чистой `retail-direct-v1` функцией; серверный `PriceQuote` хранит итог в
 копейках и одноразово потребляется новым `WbOrder(SITE/WEB)`. `PaymentAttempt`, `OrderEvent`
-и `OutboxMessage` образуют durable payment boundary; production Init закрыт kill-switch до
-внешних launch-gates. ЛК читает legacy `Order` и `WbOrder` всех источников, а также bonus balance;
-кнопки link/merge до fresh-auth flow не показываются.
+и `OutboxMessage` образуют durable payment boundary; TG-сервис исполняет outbox с retry/dead-letter,
+а refund имеет отдельный идемпотентный audit. Production Init закрыт kill-switch до внешних
+launch-gates. ЛК читает legacy `Order` и `WbOrder` всех источников, bonus balance и предлагает
+TG link только внутри fresh-auth window.
 
 ## B2B-направление (TWA/server MVP)
 

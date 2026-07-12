@@ -7,6 +7,7 @@ import { Mail, Lock, Loader2, ArrowRight, Eye, EyeOff, User } from "lucide-react
 import Navbar from "@/components/navbar";
 import Link from "next/link";
 import VKAuthButton from "@/components/auth/VKAuthButton";
+import TelegramLoginButton from "@/components/auth/TelegramLoginButton";
 
 export default function LoginPage() {
   const [email, setEmail]           = useState("");
@@ -158,6 +159,9 @@ export default function LoginPage() {
                     <div className="h-px flex-1 bg-[#1e2a45]" />
                   </div>
                   
+                  <div className="mb-3 bg-[#229ED9]/5 border border-[#229ED9]/20 p-4 min-h-16 flex items-center justify-center">
+                    <TelegramLoginButton mode="login" />
+                  </div>
                   <div className="bg-[#0077FF]/5 border border-[#0077FF]/20 p-4 transition-all hover:bg-[#0077FF]/10">
                     <VKAuthButton mode="login" />
                   </div>

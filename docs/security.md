@@ -109,7 +109,7 @@ Postgres; сделать backup/restore drill, миграцию и сверку 
 оформить как отдельный трансграничный контур после юрпроверки. Секретные host/credentials
 остаются только в env/`HANDOFF.md`.
 
-### 10. Checkout/webhook Т-Банка — P0, 🟡 КОД УСИЛЕН, PROD GATE ОТКРЫТ (2026-07-13)
+### 10. Checkout/webhook Т-Банка — P0, 🟡 КОД/WORKER/REFUND ГОТОВЫ, ВНЕШНИЕ GATES ОТКРЫТЫ (2026-07-13)
 
 **Было:** legacy callback подтверждал `OK` даже неверную подпись/исключение, не сверял
 `TerminalKey/PaymentId/OrderId/Amount`, а checkout доверял клиентской сумме и не проверял
@@ -126,12 +126,16 @@ strict signature/terminal/payment/order/amount checks и serializable commit, р
 **Риск:** потерянная подтверждённая оплата, двойное выполнение, подмена параметров заказа,
 вечные PENDING/PROCESSING и невозможность надёжной сверки/возврата.
 
-**Остаток до запуска:** migration ещё не применена к production; kill-switch остаётся false.
-Нужны staging callbacks из кабинета Т-Банка, outbox worker/retry/dead-letter, алерты,
-confirmed fulfillment, cancel/refund/partial refund и полный чековый цикл ККТ/ОФД. До этого
-риск остаётся P0 и maintenance снимать нельзя. Полная матрица — master plan.
+**Добавлено:** TG long-running worker с lease/retry/dead-letter, идемпотентный full/partial
+refund через `/v2/Cancel`, partial-refund receipt, cumulative refund accounting и запрет
+blind retry при неизвестном результате provider call.
 
-### 11. Связывание TG/VK/email-аккаунтов — HIGH, 🔴 ОТКРЫТО (2026-07-12)
+**Остаток до запуска:** kill-switch остаётся false. Нужны реальные DEMO-terminal callbacks,
+fault injection, официальный прогон «Общие»/«Формирование чека», сверка ККТ/ОФД и ручной
+replay/reconciliation UI. До этого риск остаётся P0 и maintenance снимать нельзя. Полная
+матрица — `payments-and-kkt.md`.
+
+### 11. Связывание TG/VK/email-аккаунтов — HIGH, 🟡 TG FLOW ЗАКРЫТ, VK LINK/UNLINK ОСТАЛИСЬ (2026-07-13)
 
 БД у каналов общая, но модель identities отсутствует: TG- и VK-поля живут непосредственно
 в `User`, Telegram-login на сайте отсутствует, email-регистрация создаёт новый профиль.
@@ -142,10 +146,14 @@ link/merge. Автослияние по Roblox username небезопасно: 
 **Риск:** захват/переключение аккаунта, потеря видимости заказов, ошибочное объединение и
 двойное либо потерянное списание бонусов.
 
-**До запуска:** `UserIdentity(provider, subject)` с server-side проверкой провайдера,
-step-up re-auth обеих identities для link/merge, транзакционный `AccountMergeAudit` и
-неизменяемый `BonusLedger`. Ник, имя, avatar и непроверенный email не являются доказательством
-владения. Перед/после backfill обязательна агрегатная сверка заказов и бонусов.
+**Сделано:** Telegram Login Widget проверяется HMAC на сервере и принимается только 5 минут;
+login резолвит legacy TG-профиль через `UserIdentity`. Link/merge требует web-session моложе
+10 минут и новую TG-подпись, запрещён для ADMIN, не использует ник/email/имя, атомарно
+переносит заказы и identities, суммирует бонус с ledger-записью и пишет `AccountMergeAudit`.
+
+**До запуска:** browser E2E с доменом в BotFather, негативная merge matrix на prod-like clone,
+аналогичные явные link/unlink для VK и recovery/admin-console. Source-профиль пока остаётся
+инертным audit anchor; автоматического rollback UI нет.
 
 ### 14. Выкуп геймпасса по live-цене без сверки с номиналом (TOCTOU) — ✅ ЗАКРЫТО (2026-07-12)
 

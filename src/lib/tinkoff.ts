@@ -21,7 +21,7 @@ function getRequiredEnv(key: string): string {
  * 4. Concatenate values
  * 5. SHA-256 hash of the concatenated string
  */
-function buildToken(params: Record<string, unknown>, secretKey: string): string {
+export function buildTinkoffToken(params: Record<string, unknown>, secretKey: string): string {
   const EXCLUDED_KEYS = new Set(["Token", "Receipt", "DATA", "Items", "Shops"]);
 
   const pairs: { key: string; value: string }[] = [];
@@ -68,7 +68,7 @@ export async function initTinkoffPayment(
   };
 
   // Compute and attach token
-  const token = buildToken(params, secretKey);
+  const token = buildTinkoffToken(params, secretKey);
   const body  = { ...params, Token: token };
 
   const res = await fetch("https://securepay.tinkoff.ru/v2/Init", {
@@ -104,6 +104,25 @@ export type CanonicalPaymentInit = {
   statusToken: string;
 };
 
+export function buildCanonicalReceipt(email: string, amountKopecks: number) {
+  if (!Number.isSafeInteger(amountKopecks) || amountKopecks <= 0) {
+    throw new Error("[Tinkoff] Receipt amount must be positive integer kopecks");
+  }
+  return {
+    Email: email.trim().toLowerCase(),
+    Taxation: getRequiredEnv("TINKOFF_TAXATION"),
+    Items: [{
+      Name: "Цифровая услуга по заказу",
+      Price: amountKopecks,
+      Quantity: 1,
+      Amount: amountKopecks,
+      Tax: getRequiredEnv("TINKOFF_ITEM_TAX"),
+      PaymentMethod: getRequiredEnv("TINKOFF_PAYMENT_METHOD"),
+      PaymentObject: getRequiredEnv("TINKOFF_PAYMENT_OBJECT"),
+    }],
+  };
+}
+
 /**
  * Fiscalized Init for the canonical SITE flow. Unlike the legacy adapter this
  * accepts integer kopecks, includes NotificationURL and fails closed unless
@@ -112,10 +131,6 @@ export type CanonicalPaymentInit = {
 export async function initCanonicalTinkoffPayment(input: CanonicalPaymentInit) {
   const terminalKey = getRequiredEnv("TINKOFF_TERMINAL_KEY");
   const secretKey = getRequiredEnv("TINKOFF_SECRET_KEY");
-  const taxation = getRequiredEnv("TINKOFF_TAXATION");
-  const tax = getRequiredEnv("TINKOFF_ITEM_TAX");
-  const paymentMethod = getRequiredEnv("TINKOFF_PAYMENT_METHOD");
-  const paymentObject = getRequiredEnv("TINKOFF_PAYMENT_OBJECT");
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru";
   const statusQuery = `orderId=${encodeURIComponent(input.publicOrderId)}&token=${encodeURIComponent(input.statusToken)}`;
 
@@ -128,22 +143,10 @@ export async function initCanonicalTinkoffPayment(input: CanonicalPaymentInit) {
     SuccessURL: `${appUrl}/payment/status?${statusQuery}&result=success`,
     FailURL: `${appUrl}/payment/status?${statusQuery}&result=fail`,
     DATA: { Email: input.receiptEmail },
-    Receipt: {
-      Email: input.receiptEmail,
-      Taxation: taxation,
-      Items: [{
-        Name: "Цифровая услуга по заказу",
-        Price: input.amountKopecks,
-        Quantity: 1,
-        Amount: input.amountKopecks,
-        Tax: tax,
-        PaymentMethod: paymentMethod,
-        PaymentObject: paymentObject,
-      }],
-    },
+    Receipt: buildCanonicalReceipt(input.receiptEmail, input.amountKopecks),
   };
 
-  const body = { ...params, Token: buildToken(params, secretKey) };
+  const body = { ...params, Token: buildTinkoffToken(params, secretKey) };
   const res = await fetch("https://securepay.tinkoff.ru/v2/Init", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -160,6 +163,38 @@ export async function initCanonicalTinkoffPayment(input: CanonicalPaymentInit) {
     paymentId: String(data.PaymentId),
     paymentUrl: String(data.PaymentURL),
   };
+}
+
+export async function cancelCanonicalTinkoffPayment(input: {
+  paymentId: string;
+  amountKopecks: number;
+  totalAmountKopecks: number;
+  receiptEmail: string;
+}) {
+  const terminalKey = getRequiredEnv("TINKOFF_TERMINAL_KEY");
+  const secretKey = getRequiredEnv("TINKOFF_SECRET_KEY");
+  if (!Number.isSafeInteger(input.amountKopecks) || input.amountKopecks <= 0 || input.amountKopecks > input.totalAmountKopecks) {
+    throw new Error("[Tinkoff] Invalid refund amount");
+  }
+  const partial = input.amountKopecks < input.totalAmountKopecks;
+  const params: Record<string, unknown> = {
+    TerminalKey: terminalKey,
+    PaymentId: input.paymentId,
+    Amount: input.amountKopecks,
+    // T-Bank forms a full-refund receipt automatically. For a partial refund
+    // the exact returned position is mandatory when online KKT is connected.
+    ...(partial ? { Receipt: buildCanonicalReceipt(input.receiptEmail, input.amountKopecks) } : {}),
+  };
+  const response = await fetch("https://securepay.tinkoff.ru/v2/Cancel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...params, Token: buildTinkoffToken(params, secretKey) }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`[Tinkoff] Cancel failed with HTTP ${response.status}`);
+  const data = await response.json();
+  if (!data.Success) throw new Error(`[Tinkoff] Cancel error: ${data.Message ?? data.ErrorCode ?? "Unknown"}`);
+  return { status: String(data.Status ?? "UNKNOWN"), raw: data as Record<string, unknown> };
 }
 
 // ── Webhook signature verification ───────────────────────────────────────────
@@ -181,7 +216,7 @@ export function verifyTinkoffSignature(data: Record<string, unknown>): boolean {
     return false;
   }
 
-  const computedToken = buildToken(data, secretKey);
+  const computedToken = buildTinkoffToken(data, secretKey);
 
   // Timing-safe comparison to prevent timing attacks
   try {

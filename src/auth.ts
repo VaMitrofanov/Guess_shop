@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs";
 import { sendTelegramMessage } from "@/lib/telegram";
 import { verifyVkIdUser } from "@/lib/vk-id";
 import { findOrCreateVerifiedIdentity } from "@/lib/user-identity";
+import { verifyTelegramLogin } from "@/lib/telegram-login";
 
 // VK display names are user-controlled and embedded into Telegram HTML
 // notifications — unescaped "<" breaks the whole message (silently lost).
@@ -75,6 +76,41 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           name: user.name,
           role: user.role,
         };
+      },
+    }),
+    CredentialsProvider({
+      id: "telegram-login",
+      name: "Telegram",
+      credentials: {
+        id: { label: "Telegram ID", type: "text" },
+        first_name: { label: "First name", type: "text" },
+        last_name: { label: "Last name", type: "text" },
+        username: { label: "Username", type: "text" },
+        photo_url: { label: "Photo", type: "text" },
+        auth_date: { label: "Auth date", type: "text" },
+        hash: { label: "Hash", type: "text" },
+      },
+      async authorize(credentials) {
+        const verified = verifyTelegramLogin({
+          id: String(credentials?.id ?? ""),
+          first_name: String(credentials?.first_name ?? ""),
+          last_name: credentials?.last_name ? String(credentials.last_name) : undefined,
+          username: credentials?.username ? String(credentials.username) : undefined,
+          photo_url: credentials?.photo_url ? String(credentials.photo_url) : undefined,
+          auth_date: String(credentials?.auth_date ?? ""),
+          hash: String(credentials?.hash ?? ""),
+        });
+        if (!verified) return null;
+        const user = await findOrCreateVerifiedIdentity({
+          provider: "TG",
+          subject: verified.subject,
+          name: verified.name,
+          image: verified.image,
+        });
+        if (verified.username && user.username !== verified.username) {
+          return prisma.user.update({ where: { id: user.id }, data: { username: verified.username } });
+        }
+        return user;
       },
     }),
     CredentialsProvider({
@@ -259,6 +295,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.role = (user as any).role;
         token.vkId = (user as any).vkId;
         token.balance = (user as any).balance;
+        token.auth_time = Math.floor(Date.now() / 1000);
         token.wb_code = (user as any).wb_code ?? null;
         token.is_guide_mode = (user as any).is_guide_mode ?? false;
       }
@@ -270,6 +307,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         (session.user as any).role = token.role;
         (session.user as any).vkId = token.vkId;
         (session.user as any).balance = token.balance;
+        (session.user as any).auth_time = token.auth_time;
         (session.user as any).wb_code = token.wb_code ?? null;
         (session.user as any).is_guide_mode = token.is_guide_mode ?? false;
       }

@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * WBInstructionV2 — redesigned Wildberries instruction (approved mockup port).
+ * GamepassGuide — the single current gamepass instruction for WB, site and bot.
  * Self-contained, scoped CSS (all classes prefixed `wbi-`), real assets from
  * /public/guide, dynamic denomination/price/code, lazy media (IntersectionObserver),
- * live price overlay on the Default-Price screenshot. Standard (non-WB) guide path
- * is untouched — this renders only for the WB instruction phase.
+ * live price overlay on the Default-Price screenshot. Channel-specific labels
+ * and handoff behavior are data, while the nine instructional steps stay shared.
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -94,7 +94,8 @@ export default function WBInstructionV2({
   code,
   onReset,
   testMode = false,
-}: { denomination?: number; code?: string; onReset?: () => void; testMode?: boolean }) {
+  mode = "WB",
+}: { denomination?: number; code?: string; onReset?: () => void; testMode?: boolean; mode?: "WB" | "SITE" | "BOT" }) {
   const nomDefault = denomination && denomination > 0 ? denomination : 1000;
   const [nom, setNom] = useState<number>(nomDefault);
   const [copied, setCopied] = useState(false);
@@ -229,7 +230,7 @@ export default function WBInstructionV2({
         {/* top bar */}
         <div className="wbi-top">
           <div>
-            <div className="wbi-eye">WILDBERRIES × ROBLOXBANK</div>
+            <div className="wbi-eye">{mode === "WB" ? "WILDBERRIES × ROBLOXBANK" : mode === "SITE" ? "ROBLOXBANK · ПОКУПКА НА САЙТЕ" : "ROBLOXBANK · ЗАКАЗ В БОТЕ"}</div>
             <div style={{ fontSize: 13, color: "#fff", marginTop: 2 }}>Инструкция</div>
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -368,7 +369,7 @@ export default function WBInstructionV2({
             <div className="wbi-checknote" style={{ background: "rgba(255,60,60,0.12)", borderColor: "#ff4444" }}>⚠️ <b>ВАЖНО: «Managed pricing»</b> (региональные цены) должен быть <b>ОТКЛЮЧЁН</b>. Если он включён — Roblox автоматически изменит цену и мы <b>не сможем</b> выкупить геймпасс, пока ты не исправишь. По умолчанию он отключён, но обязательно проверь!</div>
             <div className="wbi-calc">
               <div className="wbi-lbl">ЦЕНА ПАСА — ВСТАВЬ ЕЁ В ROBLOX</div>
-              <div className="wbi-nomrow">Номинал твоей карты: <input className="wbi-input" type="number" min={1} inputMode="numeric" value={nom}
+              <div className="wbi-nomrow">{mode === "WB" ? "Номинал твоей карты" : "Сколько R$ ты получаешь"}: <input className="wbi-input" type="number" min={1} inputMode="numeric" value={nom}
                 onChange={(e) => setNom(Math.max(0, parseInt(e.target.value || "0", 10)))} /> R$</div>
               <div className="wbi-v wbi-copy" onClick={copy} role="button" tabIndex={0}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") copy(); }}>

@@ -10,6 +10,7 @@ import { tgSend, vkSend, stripHtml } from "../shared/notify";
 import { REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { ROBUX_UNLOCK_DAYS, robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
 import { startAutoWorkers } from "./auto-workers";
+import { startPaymentOutboxWorker } from "../shared/payment-outbox";
 
 // Одно место правды о бонусе — review-eligibility.ts (Ф3, 2026-07-12).
 const BONUS_AMOUNT = REVIEW_BONUS_AMOUNT;
@@ -522,6 +523,7 @@ export function startReviewReminderCron(bot: Telegraf): void {
 
   // Auto-buyout (+1) + GP-watcher (+3) — both kill-switched OFF by default.
   startAutoWorkers(bot);
+  startPaymentOutboxWorker(bot);
 
   console.log("[ReviewReminder] Cron started ✅");
   console.log("[StockAlert] Cron started ✅");

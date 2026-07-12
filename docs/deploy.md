@@ -91,6 +91,11 @@ destructive changes/существующие таблицы, только пос
 **VK-бот:** `DATABASE_URL`, `VK_TOKEN`, `VK_GROUP_ID`, `ADMIN_IDS`, `VALIDATOR_SOURCE_URL`,
 `VALIDATOR_KEY`, `TG_TOKEN` (уведомления менеджерам идут через Telegram).
 
+TG-сервис также является единственным payment outbox worker. После deploy в логах обязательна
+строка `[PaymentOutbox] Worker started`; `DATABASE_URL`, `TG_TOKEN` и `ADMIN_IDS` нужны ему для
+claim/delivery/dead-letter alerts. Не запускай второй polling TG instance без отдельной проверки
+atomic claim и Telegram polling topology.
+
 **Bridge:** `VALIDATOR_KEY`, `VALIDATOR_PORT`.
 
 **Health в TWA/боте:** `TG_BOT_HEALTH_URL`, `VK_BOT_HEALTH_URL` — **обязательны** для

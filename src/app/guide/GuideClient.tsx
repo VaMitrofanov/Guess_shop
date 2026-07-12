@@ -2757,7 +2757,7 @@ function WBIntro({ onDone }: { onDone: () => void }) {
 
 // ─── Main export ───────────────────────────────────────────────────────────────
 
-export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl, testMode = false, previewMode = false, testNom }: { isWB: boolean; skipGate?: boolean; wbCodeFromUrl?: string; testMode?: boolean; previewMode?: boolean; testNom?: number }) {
+export default function GuideClient({ isWB, guideMode = "SITE", skipGate = false, wbCodeFromUrl, testMode = false, previewMode = false, testNom }: { isWB: boolean; guideMode?: "WB" | "SITE" | "BOT"; skipGate?: boolean; wbCodeFromUrl?: string; testMode?: boolean; previewMode?: boolean; testNom?: number }) {
   // Both modes open the instruction directly (no gate/intro/bot/DB/session).
   // Difference: testMode renders the Telegram/VK buttons inert (silent QA),
   // previewMode keeps them working — "as if a code was already activated".
@@ -2871,15 +2871,10 @@ export default function GuideClient({ isWB, skipGate = false, wbCodeFromUrl, tes
         code={activeCode}
         onReset={directInstruction ? undefined : handleWBReset}
         testMode={testMode}
+        mode="WB"
       />
     );
   }
 
-  return (
-    <Instruction
-      isWB={false}
-      denomination={denomination}
-      code={activeCode}
-    />
-  );
+  return <WBInstructionV2 denomination={denomination || 1000} code={activeCode || undefined} mode={guideMode} />;
 }

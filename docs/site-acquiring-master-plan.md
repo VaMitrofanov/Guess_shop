@@ -458,9 +458,10 @@ VK  ─┘                              │
   migration применена; staging/terminal test matrix впереди.**
 - Полный `Init`, receipt/items, callback state machine и строгие сверки. **Foundation готов;
   реальные terminal/ККТ test cases впереди.**
-- Durable outbox, retry/dead-letter, ручное восстановление и алертинг. **Таблицы/события
-  готовы; worker и эксплуатационный контур впереди.**
+- Durable outbox, retry/dead-letter, ручное восстановление и алертинг. **Worker с lease,
+  retry/dead-letter и alert готов; ручной replay UI остаётся.**
 - Cancel/refund, чеки предоплаты/закрытия/возврата, сверка с личным кабинетом Т-Банка/ОФД.
+  **Full/partial refund contract готов; DEMO-terminal/ОФД matrix остаётся.**
 - Пройти официальные test cases, отдельно дубликат callback, timeout и падение downstream.
 
 **DoD:** ни один повтор callback не дублирует заказ/бонус/выкуп; временная ошибка реально

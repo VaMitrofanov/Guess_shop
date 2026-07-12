@@ -43,6 +43,11 @@ interface Order {
   userOrderTotal: number | null;
   /** true — сообщество не может написать VK-юзеру (VK 901); только личка менеджера. */
   vkUnreachable?: boolean | null;
+  paymentAttempts?: Array<{
+    status: "CREATED" | "INITIATED" | "AUTHORIZED" | "CONFIRMED" | "REJECTED" | "CANCELED" | "FAILED" | "PARTIALLY_REFUNDED" | "REFUNDED";
+    amountKopecks: number;
+    refundedAmountKopecks: number;
+  }>;
   user: {
     tgId: string | null;
     vkId: string | null;
@@ -635,6 +640,44 @@ function EditOrderModal({ order, token, onDone, onClose }: {
   );
 }
 
+function RefundModal({ order, token, onDone, onClose }: { order: Order; token: string; onDone: () => void; onClose: () => void }) {
+  const payment = order.paymentAttempts?.[0];
+  const remaining = payment ? payment.amountKopecks - payment.refundedAmountKopecks : 0;
+  const [rubles, setRubles] = useState((remaining / 100).toFixed(2));
+  const [reason, setReason] = useState("");
+  const [loading, setLoading] = useState(false);
+  async function submit() {
+    const amountKopecks = Math.round(Number(rubles.replace(",", ".")) * 100);
+    if (!Number.isSafeInteger(amountKopecks) || amountKopecks <= 0 || amountKopecks > remaining) {
+      toast("Проверь сумму возврата", "error"); return;
+    }
+    if (!window.confirm(`Вернуть ${(amountKopecks / 100).toFixed(2)} ₽ по заказу ${order.wbCode}?`)) return;
+    setLoading(true);
+    try {
+      const response = await fetch("/api/twa/payments/refund", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ orderId: order.id, amountKopecks, reason: reason.trim() || undefined, idempotencyKey: crypto.randomUUID() }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) { toast(data.error ?? "Возврат не отправлен", "error"); return; }
+      haptic.notify("success"); toast("Возврат отправлен; ждём callback банка", "success"); onDone();
+    } catch { toast("Ошибка сети", "error"); }
+    finally { setLoading(false); }
+  }
+  return (
+    <div onClick={event => event.stopPropagation()} style={{ padding: "12px 14px", borderTop: `1px solid ${C.hairline}`, display: "flex", flexDirection: "column", gap: 8 }}>
+      <b style={{ color: C.red }}>↩️ Возврат · доступно {(remaining / 100).toFixed(2)} ₽</b>
+      <input value={rubles} onChange={event => setRubles(event.target.value)} inputMode="decimal" placeholder="Сумма, ₽" style={{ background: C.elevated, color: C.textPrimary, border: 0, borderRadius: 10, padding: 12 }} />
+      <input value={reason} onChange={event => setReason(event.target.value)} maxLength={500} placeholder="Причина (для аудита)" style={{ background: C.elevated, color: C.textPrimary, border: 0, borderRadius: 10, padding: 12 }} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={onClose} style={{ flex: 1, padding: 12, border: 0, borderRadius: 10, background: C.elevated, color: C.textSecondary }}>Отмена</button>
+        <button disabled={loading} onClick={submit} style={{ flex: 2, padding: 12, border: 0, borderRadius: 10, background: C.red, color: "#fff", fontWeight: 700 }}>{loading ? "…" : "Вернуть"}</button>
+      </div>
+    </div>
+  );
+}
+
 /* ───────────── RebindModal ───────────── */
 // RebindUser — общий тип, живёт в CreateManualModal (модалка тоже ищет клиентов).
 function RebindModal({ order, token, onDone, onClose }: {
@@ -964,6 +1007,7 @@ function OrderCard({
   const [moveOpen, setMoveOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [rebindOpen, setRebindOpen] = useState(false);
+  const [refundOpen, setRefundOpen] = useState(false);
   // GP-watch: локально трекаем «клиент оповещён об этом ГП» — сервер после
   // «Оповестить» отдаёт свежий passId, перезагрузка вкладки не нужна.
   const [gpwPassId, setGpwPassId] = useState<string | null>(order.gpWatchNotifiedPassId);
@@ -1011,6 +1055,10 @@ function OrderCard({
   const showMoveBtn = viewTab === "AWAITING_LINK" || viewTab === "FAVORITES";
   // Редактирование за клиента (номинал/ник/ГП) — любой источник, не только Авито.
   const isEditable = ["PENDING", "AWAITING_GAMEPASS", "ERROR"].includes(order.status);
+  const payment = order.paymentAttempts?.[0];
+  const canRefund = order.orderSource === "SITE" && !!payment &&
+    ["CONFIRMED", "PARTIALLY_REFUNDED"].includes(payment.status) &&
+    payment.refundedAmountKopecks < payment.amountKopecks;
 
   const timeRef = order.createdAt;
   // Second timer: how long the order has been sitting in the "К выкупу" queue
@@ -1315,6 +1363,16 @@ function OrderCard({
           onClose={() => setEditOpen(false)}
         />
       )}
+
+      {canRefund && !refundOpen && (
+        <div style={{ padding: "0 14px 6px" }}>
+          <button className="twa-press-sm" onClick={event => { event.stopPropagation(); setRefundOpen(true); }}
+            style={{ width: "100%", padding: 10, borderRadius: 10, border: `1px solid ${C.red}55`, background: "transparent", color: C.red, fontWeight: 600 }}>
+            ↩️ Оформить возврат
+          </button>
+        </div>
+      )}
+      {refundOpen && <RefundModal order={order} token={token} onDone={() => { setRefundOpen(false); onMoved(); }} onClose={() => setRefundOpen(false)} />}
 
       {/* Rebind button */}
       {["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"].includes(order.status) && !rebindOpen && (

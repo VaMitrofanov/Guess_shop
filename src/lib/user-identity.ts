@@ -133,3 +133,116 @@ export async function findOrCreateVerifiedIdentity(input: VerifiedIdentityInput)
 
   throw new Error("Identity resolution exhausted its retry budget");
 }
+
+function laterDate(a: Date | null, b: Date | null) {
+  if (!a) return b;
+  if (!b) return a;
+  return a > b ? a : b;
+}
+
+/**
+ * Links a freshly verified provider to the freshly authenticated web account.
+ * If the provider already owns a legacy profile, that profile is merged into
+ * the current one inside one serializable transaction and retained as an
+ * inert audit anchor. No match by email, display name or Roblox nick is used.
+ */
+export async function linkOrMergeVerifiedIdentity(targetUserId: string, input: VerifiedIdentityInput) {
+  const subject = normalizeSubject(input.provider, input.subject);
+  return prisma.$transaction(async (tx) => {
+    const [target, identity] = await Promise.all([
+      tx.user.findUnique({ where: { id: targetUserId }, include: { identities: true } }),
+      tx.userIdentity.findUnique({ where: { provider_subject: { provider: input.provider, subject } }, include: { user: true } }),
+    ]);
+    if (!target) throw new Error("Target user not found");
+    if (target.role === "ADMIN") throw new Error("Privileged accounts cannot be merged");
+
+    const targetProvider = target.identities.find((item) => item.provider === input.provider);
+    if (targetProvider && targetProvider.subject !== subject) throw new Error("Provider already linked to another subject");
+    if (identity?.userId === target.id || targetProvider?.subject === subject) {
+      await tx.userIdentity.update({ where: { id: (identity ?? targetProvider)!.id }, data: { verifiedAt: new Date() } });
+      return { userId: target.id, merged: false, alreadyLinked: true };
+    }
+
+    if (!identity) {
+      await tx.userIdentity.create({ data: { provider: input.provider, subject, userId: target.id } });
+      await tx.user.update({
+        where: { id: target.id },
+        data: {
+          ...profileUpdate(input),
+          ...(input.provider === "TG" ? { tgId: subject } : input.provider === "VK" ? { vkId: subject } : { email: subject }),
+        },
+      });
+      return { userId: target.id, merged: false, alreadyLinked: false };
+    }
+
+    const source = identity.user;
+    if (source.role === "ADMIN") throw new Error("Privileged accounts cannot be merged");
+    const sourceIdentities = await tx.userIdentity.findMany({ where: { userId: source.id } });
+    const overlapping = sourceIdentities.find((item) => target.identities.some((targetItem) => targetItem.provider === item.provider));
+    if (overlapping) throw new Error(`Both profiles already have ${overlapping.provider} identities`);
+
+    const audit = await tx.accountMergeAudit.create({
+      data: {
+        sourceUserId: source.id,
+        targetUserId: target.id,
+        status: "PROCESSING",
+        evidence: {
+          method: "dual-fresh-auth",
+          currentSessionUserId: target.id,
+          linkedProvider: input.provider,
+          sourceProviders: sourceIdentities.map((item) => item.provider),
+          targetProviders: target.identities.map((item) => item.provider),
+        },
+      },
+    });
+
+    await Promise.all([
+      tx.order.updateMany({ where: { userId: source.id }, data: { userId: target.id } }),
+      tx.wbCode.updateMany({ where: { userId: source.id }, data: { userId: target.id } }),
+      tx.wbOrder.updateMany({ where: { userId: source.id }, data: { userId: target.id } }),
+      tx.directIntent.updateMany({ where: { userId: source.id }, data: { userId: target.id } }),
+      tx.userIdentity.updateMany({ where: { userId: source.id }, data: { userId: target.id, verifiedAt: new Date() } }),
+      tx.priceQuote.updateMany({ where: { userId: source.id, status: "ACTIVE" }, data: { status: "VOID" } }),
+    ]);
+
+    const mergedBalance = target.balance + source.balance;
+    if (source.balance !== 0) {
+      await tx.bonusLedger.create({
+        data: {
+          userId: target.id,
+          deltaRobux: source.balance,
+          balanceAfter: mergedBalance,
+          reason: "ACCOUNT_MERGE",
+          referenceId: audit.id,
+          idempotencyKey: `account-merge:${audit.id}:bonus`,
+          metadata: { sourceUserId: source.id },
+        },
+      });
+    }
+    // Release legacy unique keys before assigning them to the target.
+    await tx.user.update({
+      where: { id: source.id },
+      data: { tgId: null, vkId: null, email: null, password: null, balance: 0, rubleDiscount: 0, bonusExpiresAt: null, promoExpiresAt: null },
+    });
+    await tx.user.update({
+      where: { id: target.id },
+      data: {
+        balance: mergedBalance,
+        bonusExpiresAt: laterDate(target.bonusExpiresAt, source.bonusExpiresAt),
+        rubleDiscount: Math.max(target.rubleDiscount, source.rubleDiscount),
+        promoExpiresAt: laterDate(target.promoExpiresAt, source.promoExpiresAt),
+        robloxUsername: target.robloxUsername ?? source.robloxUsername,
+        ...profileUpdate(input),
+        ...(input.provider === "TG" ? { tgId: subject } : input.provider === "VK" ? { vkId: subject } : { email: subject }),
+      },
+    });
+    await tx.accountMergeAudit.update({
+      where: { id: audit.id },
+      data: {
+        status: "COMPLETED",
+        result: { movedOrders: true, movedIdentities: sourceIdentities.length, transferredBonusRobux: source.balance },
+      },
+    });
+    return { userId: target.id, merged: true, alreadyLinked: false, auditId: audit.id };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}

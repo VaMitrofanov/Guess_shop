@@ -47,23 +47,55 @@ export async function POST(req: NextRequest) {
     if (attempt.amountKopecks !== amountKopecks) return fail("amount mismatch", 409);
     if (!paymentTransitionAllowed(attempt.status, nextStatus)) return fail("invalid status transition", 409);
 
-    const eventKey = `tbank:${paymentId}:${String(body.Status)}:${amountKopecks}`;
+    const eventHash = crypto.createHash("sha256").update(rawBody, "utf8").digest("hex");
+    // Multiple legitimate partial refunds share PaymentId/Status/Amount. Their
+    // signed raw bodies are the only safe idempotency discriminator available.
+    const refundNotification = nextStatus === "PARTIALLY_REFUNDED" || nextStatus === "REFUNDED";
+    if (refundNotification && attempt.rawEventHash === eventHash) return new NextResponse("OK", { status: 200 });
+    const refundCandidate = refundNotification
+      ? await prisma.paymentRefund.findFirst({
+          where: { paymentAttemptId: attempt.id, status: { in: ["PENDING", "SUBMITTED", "SUBMIT_UNKNOWN"] } },
+          orderBy: { createdAt: "asc" }, select: { id: true },
+        })
+      : null;
+    const eventKey = refundNotification
+      ? `tbank:${paymentId}:${String(body.Status)}:${refundCandidate?.id ?? eventHash}`
+      : `tbank:${paymentId}:${String(body.Status)}:${amountKopecks}`;
     const duplicate = await prisma.orderEvent.findUnique({ where: { idempotencyKey: eventKey }, select: { id: true } });
     if (duplicate) return new NextResponse("OK", { status: 200 });
 
-    const eventHash = crypto.createHash("sha256").update(rawBody, "utf8").digest("hex");
     await prisma.$transaction(async (tx) => {
+      const submittedRefunds = refundNotification
+        ? await tx.paymentRefund.findMany({
+            where: { paymentAttemptId: attempt.id, status: { in: ["PENDING", "SUBMITTED", "SUBMIT_UNKNOWN"] } },
+            orderBy: { createdAt: "asc" },
+            ...(nextStatus === "PARTIALLY_REFUNDED" ? { take: 1 } : {}),
+            select: { id: true, amountKopecks: true },
+          })
+        : [];
+      const acknowledgedNow = submittedRefunds.reduce((sum, refund) => sum + refund.amountKopecks, 0);
+      const refundedAmountKopecks = nextStatus === "REFUNDED"
+        ? attempt.amountKopecks
+        : Math.min(attempt.amountKopecks, attempt.refundedAmountKopecks + acknowledgedNow);
       const transitioned = await tx.paymentAttempt.updateMany({
         where: { id: attempt.id, status: attempt.status, paymentId, amountKopecks },
         data: {
           status: nextStatus,
           rawEventHash: eventHash,
+          ...(refundNotification ? { refundedAmountKopecks } : {}),
           ...(nextStatus === "CONFIRMED" || nextStatus === "REJECTED" || nextStatus === "CANCELED" || nextStatus === "REFUNDED"
             ? { finalizedAt: new Date() }
             : {}),
         },
       });
       if (transitioned.count !== 1) throw new Error("concurrent payment transition");
+
+      if (submittedRefunds.length > 0) {
+        await tx.paymentRefund.updateMany({
+          where: { id: { in: submittedRefunds.map((refund) => refund.id) }, status: { in: ["PENDING", "SUBMITTED", "SUBMIT_UNKNOWN"] } },
+          data: { status: "CONFIRMED", providerStatus: String(body.Status) },
+        });
+      }
 
       if (nextStatus === "CONFIRMED") {
         await tx.wbOrder.update({
@@ -87,7 +119,11 @@ export async function POST(req: NextRequest) {
           data: {
             eventId: event.id,
             topic: nextStatus === "CONFIRMED" ? "payment.confirmed" : "payment.refund.recorded",
-            payload: { orderId: attempt.order.id, paymentAttemptId: attempt.id },
+            payload: {
+              orderId: attempt.order.id,
+              paymentAttemptId: attempt.id,
+              ...(refundNotification ? { refundedAmountKopecks, needsReconciliation: submittedRefunds.length === 0 } : {}),
+            },
           },
         });
       }

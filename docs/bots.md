@@ -429,3 +429,10 @@ TG-историю API не отдаёт). Миграция `20260704_add_autobuy
 
 **Админы (TG):** provisional-заказ (карточка `sendAdminOrderCard` с [✅ ВЫКУПЛЕНО][❌ ОШИБКА]),
 VK-логин с кодом / без, fail валидации геймпасса, нажатие поддержки, фото отзыва.
+
+## Payment outbox worker
+
+Polling TG-процесс запускает `bots/shared/payment-outbox.ts`: durable уведомления об
+оплате/возврате забираются lease-claim'ом, повторяются с capped exponential backoff и после
+8 ошибок переходят в `DEAD` с admin alert. Это единственный worker instance; подробности и
+операционная матрица — `payments-and-kkt.md`.

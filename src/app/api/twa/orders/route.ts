@@ -184,6 +184,10 @@ export async function GET(req: NextRequest) {
       tgId: true, vkId: true, name: true, username: true,
       balance: true, reviewBonusGrantedAt: true,
     } },
+    paymentAttempts: {
+      orderBy: { createdAt: "desc" as const }, take: 1,
+      select: { status: true, amountKopecks: true, refundedAmountKopecks: true },
+    },
   };
 
   let ordersPromise: Promise<any[]>;

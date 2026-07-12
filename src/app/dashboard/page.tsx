@@ -7,6 +7,7 @@ import {
   User, Package, Clock, CheckCircle2, XCircle,
   ArrowRight, ShoppingCart, LogOut, Zap, Gift,
 } from "lucide-react";
+import TelegramLoginButton from "@/components/auth/TelegramLoginButton";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -152,6 +153,12 @@ export default async function DashboardPage() {
               {user.role === "ADMIN" && <div className="flex justify-between items-center"><span className="text-xs text-zinc-500 font-black uppercase tracking-wider">Роль</span><span className="font-pixel text-[9px] text-amber-400 border border-amber-400/20 bg-amber-400/10 px-2 py-1">АДМИНИСТРАТОР</span></div>}
               <div className="flex justify-between items-center"><span className="text-xs text-zinc-500 font-black uppercase tracking-wider">С нами с</span><span className="text-sm font-black text-zinc-300">{formatDate(user.createdAt)}</span></div>
             </div>
+            {!user.identities.some((identity) => identity.provider === "TG") && user.role !== "ADMIN" && (
+              <div className="border-t border-[#1e2a45] pt-4 space-y-2">
+                <p className="text-xs text-zinc-500 font-medium">Свяжите Telegram после свежего входа — старые заказы и бонусы объединятся безопасно.</p>
+                <TelegramLoginButton mode="link" />
+              </div>
+            )}
           </div>
           <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
             {[
