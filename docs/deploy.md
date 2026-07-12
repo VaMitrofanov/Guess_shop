@@ -61,6 +61,15 @@ destructive changes/существующие таблицы, только пос
 таблицы для защиты выполненных строк, Этап 5.8). (Legacy: `TINKOFF_SECRET_KEY`,
 `LOCAL_BOT_URL`, `INTERNAL_WEBHOOK_SECRET`, `BOT_API_TOKEN`.)
 
+`BOOTSTRAP_ADMIN_EMAIL` + `BOOTSTRAP_ADMIN_PASSWORD` — опциональная **одноразовая** пара
+только для `prisma db seed` на новом окружении. Обе задаются вместе, пароль — от 16 символов,
+после первого входа меняется. Без пары seed не создаёт admin; значения нельзя добавлять в
+`.env.example`, docs или commit.
+
+`SEED_DEMO_CONTENT=true` разрешён только локально: он добавляет непроверенные демонстрационные
+отзывы. В production его не задавать — реальные отзывы приходят только из проверяемого
+операционного потока.
+
 **TG-бот:** `DATABASE_URL`, `TG_TOKEN`, `TG_CHANNEL_ID` (опц., гейт подписки), `ADMIN_IDS`,
 `VALIDATOR_SOURCE_URL`, `VALIDATOR_KEY`, health-мониторинг (`HETZNER_API_TOKEN`, `VDSINA_*`).
 
@@ -134,10 +143,10 @@ Web-контейнера: `/`, `/faq`, `/reviews`, `/checkout`, `/dashboard`, `/
   ⚠️ Обратная сторона — IP источника публичен (docs/security.md #7).
 - **Внешние скрипты self-hosted** (`public/vendor/`): `telegram-web-app.js` и
   `vkid-sdk-<ver>.js` отдаются со своего домена, а не с telegram.org / unpkg.com (оба за
-  Cloudflare → без VPN у RU-юзеров не грузились; VKID-кнопка на сайте была мертва, а
-  блокирующий `beforeInteractive`-скрипт с внешнего домена мог белым экраном ронять весь сайт).
-  Подключение — `src/app/layout.tsx`. При апдейте Bot API / VK ID SDK обновлять файл в
-  `public/vendor/` и версию в пути.
+  Cloudflare → без VPN у RU-юзеров не грузились). SDK больше не грузятся на каждой витринной
+  странице: Telegram подключён только в `src/app/twa/layout.tsx`, VK ID — в
+  `VKAuthButton`. Это устраняет побочный effect/hydration mismatch обычной витрины. При
+  апдейте Bot API / VK ID SDK обновлять файл в `public/vendor/` и версию в пути.
 - Мониторить доступность из РФ можно через check-host.net API (ru-ноды) — датацентровые ноды
   ≠ розничные провайдеры с ТСПУ, для реальной картины просить клиентов проверить без VPN.
 

@@ -5,6 +5,7 @@ import { initTinkoffPayment } from "@/lib/tinkoff";
 import { getRobloxUser } from "@/lib/roblox";
 import { getStorefrontPricing } from "@/lib/pricing";
 import { auth } from "@/auth";
+import { clientIp, rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -82,6 +83,14 @@ function resolveClientIp(req: NextRequest): string | null {
 }
 
 export async function POST(req: NextRequest) {
+  const { ok, retryAfter } = rateLimit(`checkout:${clientIp(req)}`, 5, 1 / 30);
+  if (!ok) {
+    return NextResponse.json(
+      { error: "Слишком много попыток оплаты. Попробуйте через минуту." },
+      { status: 429, headers: { "retry-after": String(retryAfter) } },
+    );
+  }
+
   try {
     const session = await auth();
     const body = await req.json();

@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
+import { securityHeaders } from "./next-security";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  poweredByHeader: false,
+  headers: securityHeaders,
 
   // Isolates static chunks from the Main site.
   // Browser requests: /_next-guide/_next/static/...

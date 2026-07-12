@@ -144,18 +144,21 @@ step-up re-auth обеих identities для link/merge, транзакцион�
 неизменяемый `BonusLedger`. Ник, имя, avatar и непроверенный email не являются доказательством
 владения. Перед/после backfill обязательна агрегатная сверка заказов и бонусов.
 
-### 12. Детерминированный пароль в seed — MEDIUM, 🟠 ШАБЛОН НЕБЕЗОПАСЕН (2026-07-12)
+### 12. Детерминированный пароль в seed — ✅ ЗАКРЫТО В КОДЕ (2026-07-12)
 
 `prisma/seed.js` содержит публичные admin email и фиксированный предсказуемый пароль.
 Read-only проверка production на 2026-07-12 подтвердила: такой пользователь там отсутствует,
 активного default-пароля нет. Немедленного компромета production не обнаружено, но будущий
 запуск seed на новом окружении создаст известные всем credentials.
 
-**Исправление до следующего seed/deploy:** удалить фиксированный пароль; admin bootstrap
-выполнять одноразовым случайным секретом из env с обязательной сменой либо отдельной
-операторской командой. Добавить тест/secret scan, запрещающий известные default credentials.
+**Фикс `P0 foundation`:** seed больше не содержит
+фиксированных credentials и создаёт admin только если одновременно переданы
+`BOOTSTRAP_ADMIN_EMAIL` и `BOOTSTRAP_ADMIN_PASSWORD` длиной от 16 символов. Пароль хешируется
+с cost 12, а оператор обязан сменить его после первого входа. Без обеих переменных seed не
+создаёт privileged user. Примерные отзывы также не seed-ятся без явного локального
+`SEED_DEMO_CONTENT=true` и помечаются непроверенными.
 
-### 13. Публичная витрина: headers, abuse и глобальные SDK — HIGH, 🔴 ОТКРЫТО (2026-07-12)
+### 13. Публичная витрина: headers, abuse и глобальные SDK — HIGH, 🟡 ЧАСТИЧНО ЗАКРЫТО (2026-07-12)
 
 На проверенных public routes нет полного набора HSTS/CSP/Referrer-Policy/
 Permissions-Policy/frame-ограничений; виден `X-Powered-By`. Rate-limit закрывает только часть
@@ -163,9 +166,16 @@ WB API, но не checkout, регистрацию и дорогие Roblox look
 глобально и изменяет `<html>` до hydration даже на обычной витрине, что уже воспроизводит
 hydration mismatch; VK SDK также загружается шире необходимого.
 
-**До запуска:** route-aware CSP и security headers, `poweredByHeader: false`, общий
-distributed rate limit/abuse telemetry для auth/checkout/lookups, SDK только в нужных
-layouts или лениво по действию, тесты CSP для VK/TG callback и отсутствие hydration errors.
+**Сделано `P0 foundation`:** `poweredByHeader: false`;
+общие HSTS, nosniff, referrer/permissions policy и совместимый CSP в обоих Next-билдах;
+отдельный `frame-ancestors` для `/twa`; Telegram SDK перенесён из root layout в TWA route,
+VK ID SDK грузится только когда отображается `VKAuthButton`; добавлен in-memory rate limit на
+регистрацию, checkout и публичные Roblox lookup, плюс unit-тест limiter.
+
+**Остаётся до запуска:** проверка CSP и логинов на реальных TG/VK WebView; distributed
+rate-limit/telemetry перед горизонтальным масштабированием; убрать `unsafe-inline`/
+`unsafe-eval` через nonce-based CSP после этой матрицы. Текущий limiter намеренно не
+подменяет WAF/Redis при нескольких репликах.
 
 ### 3. `debug`-роут — ✅ ЗАКРЫТО (2026-07-03)
 `/api/twa/debug` (за `ADMIN_SECRET` + `timingSafeEqual`) больше не отдаёт первые 12 символов

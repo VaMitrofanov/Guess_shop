@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Script from "next/script";
 
 // VK community ID for order-mode redirect
 const VK_CLUB_HREF = "https://vk.me/club237309399";
@@ -217,6 +218,10 @@ export default function VKAuthButton({
 
   return (
     <div className="vk-auth-shell relative w-full h-full flex items-stretch min-h-[44px]">
+      {/* The self-hosted SDK is loaded only on routes that render VK login.
+          This keeps the ordinary storefront free of third-party SDK side
+          effects and avoids the root-layout hydration mismatch. */}
+      <Script src="/vendor/vkid-sdk-2.6.5.js" strategy="afterInteractive" />
       {/* Visible button — matches Telegram pixel-style sibling */}
       <button
         type="button"

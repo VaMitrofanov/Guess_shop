@@ -9,6 +9,7 @@ export default function TwaPage() {
         fontFamily: "monospace", display: "none",
       }} />
       <script dangerouslySetInnerHTML={{ __html: `
+        window.__tgHash=location.hash;
         try{window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.ready()}catch(e){}
         var el=document.getElementById('__twa_err');
         if(el){el.style.display='none';window.addEventListener('error',function(e){el.style.display='block';el.textContent='ERR: '+e.message+' @ '+e.filename+':'+e.lineno});}

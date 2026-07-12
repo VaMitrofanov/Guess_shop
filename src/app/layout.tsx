@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Press_Start_2P } from "next/font/google";
 import "./globals.css";
-import Script from "next/script";
 import SessionProvider from "@/components/session-provider";
 import { PageLoader } from "@/components/page-loader";
 
@@ -55,24 +54,7 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} ${pressStart.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `window.__tgHash=location.hash;window.onerror=function(m,s,l,c,e){var d=document.getElementById('__twa_err');if(d)d.textContent='JS Error: '+m+' at '+s+':'+l;};window.onunhandledrejection=function(e){var d=document.getElementById('__twa_err');if(d)d.textContent='Promise: '+(e.reason||e);};`,
-          }}
-        />
         <SessionProvider>
-          {/* Self-hosted copies (public/vendor/): telegram.org и unpkg.com (за
-              Cloudflare) нестабильны у российских провайдеров без VPN, а
-              beforeInteractive-скрипт с внешнего домена блокировал парсинг всей
-              страницы. Обновлять при апдейтах Bot API / VK ID SDK. */}
-          <Script
-            src="/vendor/telegram-web-app.js"
-            strategy="beforeInteractive"
-          />
-          <Script
-            src="/vendor/vkid-sdk-2.6.5.js"
-            strategy="afterInteractive"
-          />
           <PageLoader />
           {children}
         </SessionProvider>

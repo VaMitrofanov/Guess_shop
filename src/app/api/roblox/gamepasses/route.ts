@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserGamepasses, getRobloxUser } from "@/lib/roblox";
 import { noteProbableNickByCode } from "@/lib/capture-nick";
+import { clientIp, rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +40,14 @@ function extractGamepassId(input: string): string | null {
 }
 
 export async function GET(req: NextRequest) {
+  const { ok, retryAfter } = rateLimit(`roblox-gamepasses:${clientIp(req)}`, 20, 0.5);
+  if (!ok) {
+    return NextResponse.json(
+      { error: "Слишком много запросов. Попробуйте через минуту." },
+      { status: 429, headers: { "retry-after": String(retryAfter) } },
+    );
+  }
+
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("query")?.trim() ?? "";
   // Optional WB code — lets us stamp the searched nick on the order right away
