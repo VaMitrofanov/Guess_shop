@@ -3097,6 +3097,18 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
     return ok;
   }
 
+  // Увед в админку о выкупе (владелец: обязательно). Fire-and-forget — деньги
+  // уже списаны и state перечитан, доставка карточки не должна держать UI.
+  // Суммы сервер берёт из БД по id, здесь передаём только список выкупленных задач.
+  function notifyBuyout(taskIds: string[], failCount = 0) {
+    if (taskIds.length === 0) return;
+    void fetch("/api/twa/partners/anton/tasks", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ action: "notify-buyout", taskIds, failCount }),
+    }).catch(() => {});
+  }
+
   async function doPartnerBulk(queue: PartnerTask[]) {
     if (bulkRunning || busy || queue.length === 0) return;
     setBulkRunning(true);
@@ -3148,6 +3160,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
     setBulkProgress(null);
     setBulkReport({ items, totalRobux, totalUsdt, ok, fail });
     haptic.notify(fail === 0 ? "success" : "warning");
+    notifyBuyout(items.filter(x => x.ok).map(x => x.taskId), fail);
     void load({ background: true });
   }
 
@@ -3177,7 +3190,13 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
       ? tasks.filter(isMismatchTask)
       : tasks;
   const HISTORY_STATUSES = new Set(["DONE", "CANCELLED"]);
-  const activeTasks = filteredTasks.filter(t => !HISTORY_STATUSES.has(t.status));
+  // Задачи с ошибкой в таблице (FAILED — вкл. расхождение цены) уходят ВНИЗ активного
+  // списка, чтобы рабочие READY-задачи были сверху (запрос владельца). .filter() отдаёт
+  // новый массив, поэтому .sort() не мутирует state; сорт стабилен → внутри групп
+  // сохраняется серверный порядок updatedAt desc.
+  const activeTasks = filteredTasks
+    .filter(t => !HISTORY_STATUSES.has(t.status))
+    .sort((a, b) => (a.status === "FAILED" ? 1 : 0) - (b.status === "FAILED" ? 1 : 0));
   const historyTasks = filteredTasks.filter(t => HISTORY_STATUSES.has(t.status));
   const visibleHistory = historyTasks.slice(0, historyLimit);
   const purchaseTask = (t: PartnerTask) => {
@@ -3188,7 +3207,9 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
       return;
     }
     haptic.impact("medium");
-    void post("purchase-task", { taskId: t.id });
+    void (async () => {
+      if (await post("purchase-task", { taskId: t.id })) notifyBuyout([t.id]);
+    })();
   };
   // 5.9 B4: тап по чипу проблем в дашборде = фильтр списка задач + скролл к нему.
   const tasksSectionRef = useRef<HTMLElement | null>(null);
@@ -3497,7 +3518,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
                   busy={busy}
                   rateUsdtPer1000={rate}
                   onPurchase={purchaseTask}
-                  onMarkDone={(t) => { haptic.impact("medium"); post("mark-done", { taskId: t.id, purchaseAccountName: accountName || null }); }}
+                  onMarkDone={(t) => { haptic.impact("medium"); void (async () => { if (await post("mark-done", { taskId: t.id, purchaseAccountName: accountName || null })) notifyBuyout([t.id]); })(); }}
                   onCancel={(t) => { haptic.impact("light"); post("cancel-task", { taskId: t.id }); }}
                 />
               </div>
@@ -3532,7 +3553,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
                       busy={busy}
                       rateUsdtPer1000={rate}
                       onPurchase={purchaseTask}
-                      onMarkDone={(t) => { haptic.impact("medium"); post("mark-done", { taskId: t.id, purchaseAccountName: accountName || null }); }}
+                      onMarkDone={(t) => { haptic.impact("medium"); void (async () => { if (await post("mark-done", { taskId: t.id, purchaseAccountName: accountName || null })) notifyBuyout([t.id]); })(); }}
                       onCancel={(t) => { haptic.impact("light"); post("cancel-task", { taskId: t.id }); }}
                     />
                   </div>
@@ -3627,7 +3648,8 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
           busy={busy}
           onConfirm={async () => {
             haptic.impact("medium");
-            await post("purchase-task", { taskId: confirmMismatchTask.id });
+            const taskId = confirmMismatchTask.id;
+            if (await post("purchase-task", { taskId })) notifyBuyout([taskId]);
             setConfirmMismatchTask(null);
           }}
           onCancel={() => { if (!busy) setConfirmMismatchTask(null); }}

@@ -8,4 +8,9 @@ module.exports = {
   transform: {
     ...tsJestTransformCfg,
   },
+  moduleNameMapper: {
+    // Mirror the Next.js "@/..." path alias (tsconfig paths) so src/ modules
+    // and their siblings resolve under ts-jest.
+    "^@/(.*)$": "<rootDir>/src/$1",
+  },
 };

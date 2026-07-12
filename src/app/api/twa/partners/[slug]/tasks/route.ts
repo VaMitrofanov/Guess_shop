@@ -23,6 +23,7 @@ import {
   type GoogleSheetsValueUpdate,
 } from "@/lib/google-sheets";
 import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepass, type PurchaseResult } from "@/lib/roblox-buyout";
+import { notifyPartnerBuyout, type PartnerBuyoutNotifyItem } from "@/lib/partner-buyout-notify";
 import { prisma } from "@/lib/prisma";
 import { extractTwaUser } from "@/lib/twa-auth";
 
@@ -2327,13 +2328,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       if (!priceRobux || priceRobux <= 0) {
         return json({ ok: false, error: "У задачи нет цены — заполните номинал в таблице или передайте фактическую цену" }, 400);
       }
+      // Баланс НЕ блокирует ручное «Готово»: владелец разрешил уходить в минус —
+      // ручной выкуп должен срабатывать всегда. Отрицательный баланс подсвечивается
+      // в TWA и гасится пополнением.
       const priceUsdt = taskCostUsdt(priceRobux, partner);
-      if (priceUsdt > 0) {
-        const balance = await getPartnerBalance(partner);
-        if (balance < priceUsdt) {
-          return json({ ok: false, error: "Недостаточно баланса партнёра" }, 409);
-        }
-      }
 
       const updatedTask = await prisma.partnerBuyoutTask.update({
         where: { id: task.id },
@@ -2406,18 +2404,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         return json({ ok: false, error: "В задаче нет цены/productId/sellerId" }, 409);
       }
 
+      // Баланс НЕ блокирует выкуп: владелец разрешил уходить в минус — кнопка «Купить»
+      // должна срабатывать всегда (даже в минус). Списание в ledger идёт как обычно;
+      // отрицательный баланс подсвечивается в TWA и гасится пополнением.
       const priceUsdt = taskCostUsdt(price, partner);
-      const balanceBeforePurchase = await getPartnerBalance(partner);
-      if (balanceBeforePurchase < priceUsdt) {
-        // Не ошибка строки: чип «ошибка» не ставим, но Антону в «комментарий» пишем —
-        // нехватка его баланса решается пополнением.
-        const failedTask = await prisma.partnerBuyoutTask.update({
-          where: { id: task.id },
-          data: { status: "READY", error: "Недостаточно баланса партнёра" },
-        });
-        await writeBackPartnerTask(failedTask, "comment", "Недостаточно баланса партнёра");
-        return json({ ok: false, error: "Недостаточно баланса партнёра", partner, ...(await loadPartnerState(partner)) }, 409);
-      }
 
       let result: PurchaseResult;
       try {
@@ -2483,6 +2473,52 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       const state = await loadPartnerState(partner);
       return json({ ok: true, success: true, balance: result.balance, partner, ...state });
+    }
+
+    if (action === "notify-buyout") {
+      // Уведомление в админку о выкупе пачки/задачи Антона (владелец: обязательно).
+      // Клиент шлёт только список id выкупленных задач; суммы берём из БД
+      // (DONE-задачи + их BUYOUT-списания), чтобы карточку нельзя было подделать.
+      const rawIds = Array.isArray(body.taskIds) ? body.taskIds : [];
+      const taskIds = rawIds.map((x) => String(x)).filter(Boolean);
+      const failRaw = Number(body.failCount);
+      const failCount = Number.isFinite(failRaw) && failRaw > 0 ? Math.floor(failRaw) : 0;
+      if (taskIds.length === 0) return json({ ok: false, error: "taskIds обязателен" }, 400);
+
+      const doneTasks = await prisma.partnerBuyoutTask.findMany({
+        where: { id: { in: taskIds }, partnerId: partner.id, status: "DONE" },
+      });
+      if (doneTasks.length === 0) return json({ ok: true, notified: { admins: 0, sent: 0 } });
+
+      const buyouts = await prisma.partnerLedgerEntry.findMany({
+        where: { partnerId: partner.id, type: "BUYOUT", taskId: { in: doneTasks.map((t) => t.id) } },
+      });
+      const buyoutByTask = new Map(buyouts.map((b) => [b.taskId, b]));
+
+      const items: PartnerBuyoutNotifyItem[] = doneTasks.map((t) => {
+        const b = buyoutByTask.get(t.id);
+        return {
+          nick: t.robloxUsername,
+          gamepassId: t.gamepassId,
+          robux: b?.robuxAmount ?? getTaskPrice(t),
+          usdt: b ? Math.abs(b.amount) : taskCostUsdt(getTaskPrice(t), partner),
+        };
+      });
+      const totalRobux = items.reduce((sum, it) => sum + it.robux, 0);
+      const totalUsdt = items.reduce((sum, it) => sum + it.usdt, 0);
+      const balanceUsdt = await getPartnerBalance(partner);
+
+      const notified = await notifyPartnerBuyout({
+        partnerName: partner.name,
+        items,
+        totalRobux,
+        totalUsdt,
+        balanceUsdt,
+        rate: partner.robuxRateUsdtPer1000,
+        failCount,
+        operator: operatorLabel(user),
+      });
+      return json({ ok: true, notified });
     }
 
     return json({ ok: false, error: "Неизвестное действие" }, 400);
