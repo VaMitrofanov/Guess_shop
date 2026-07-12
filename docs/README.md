@@ -15,6 +15,7 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [architecture.md](architecture.md) | Обзор системы, стек, три канала как единая экосистема, поток данных |
 | [b2b-saas.md](b2b-saas.md) | Партнёрское/B2B-направление: TWA/server MVP `Антон`, USDT-ledger, ручной XLSX import, rollout Sheets/batch |
 | [corridor-and-site.md](corridor-and-site.md) | WB-гейт, сайт `/guide`, API коридора, восстановление сессии |
+| [site-acquiring-master-plan.md](site-acquiring-master-plan.md) | Ультра-ревью `robloxbank.ru`, P0-блокеры эквайринга, единые цена/identity/orders, дизайн и поэтапный launch plan |
 | [bots.md](bots.md) | TG- и VK-боты: активация, приём геймпасса, прямые заказы, поддержка, отзывы |
 | [twa-admin.md](twa-admin.md) | Telegram Web App админка: аутентификация, заказы, выкуп, аккаунт |
 | [database.md](database.md) | Модели Prisma и статусы заказов/кодов |
@@ -28,9 +29,11 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 - **VK-бот** `vk.me/club237309399` — альтернатива для VK-аудитории (воркфлоу идентичен TG).
 - **TWA** — админка внутри Telegram для менеджера (заказы, выкуп, аналитика).
 
-Основной сайт `robloxbank.ru` пока не запущен (собирается клиентская база). Legacy-подсистема
-прямой продажи через сайт (checkout → Tinkoff → автоматизация) присутствует в коде, но
-не участвует в текущем воркфлоу — см. [architecture.md](architecture.md#legacy).
+Публичный корень `robloxbank.ru` пока закрыт maintenance-режимом; рабочая точка входа —
+WB-гайд. Legacy-подсистема прямой продажи через сайт (checkout → Tinkoff → автоматизация)
+присутствует в коде, но не готова к деньгам и не участвует в текущем воркфлоу —
+см. [architecture.md](architecture.md#legacy) и
+[master plan эквайринга](site-acquiring-master-plan.md).
 
 ## Локальный запуск
 
