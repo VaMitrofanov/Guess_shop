@@ -64,70 +64,190 @@ async function vkPost(vkUserId: string, message: string, extra: Record<string, s
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Ф5 (2026-07-12): уведомление о выкупе = ДВА сообщения (операционное + бонусное).
+// ЗЕРКАЛО bots/shared/completed-messages.ts — bots/ и src/ не импортируют друг
+// друга, менять СИНХРОННО. Ветвление msg2: питч отзыва (2 кнопки, О2) →
+// напоминание о бонусе на балансе → TIER-2 питч → благодарность (+скидка DIR<500).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Roblox держит робуксы за геймпасс в Pending ~5 дней. */
+export const ROBUX_UNLOCK_DAYS = 5;
+
+export function robuxUnlockDate(completedAt: Date): Date {
+  return new Date(completedAt.getTime() + ROBUX_UNLOCK_DAYS * 86_400_000);
+}
+
+export function fmtDateRu(d: Date): string {
+  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: "Europe/Moscow" });
+}
+
+type CompletedButton = {
+  label: string;
+  /** TG callback_data и VK payload.command — одинаковые строки. */
+  command: "review_hint" | "start_direct";
+};
+
+interface CompletedMessagesInput {
+  isDirectOrder: boolean;
+  /** Все COMPLETED-заказы юзера (включая этот). */
+  completedCount: number;
+  /** Момент выкупа (WbOrder.completedAt); null у легаси-путей → сейчас. */
+  completedAt: Date | null;
+  /** user.reviewBonusGrantedAt — бонус сейчас на балансе (крон обнуляет по истечении). */
+  bonusGrantedAt: Date | null;
+  /** user.balance (R$ бонуса). */
+  bonusBalance: number;
+  /** WbCode этого заказа существует и reviewBonusClaimed=false (WB-код, отзыв ещё не оплачен). */
+  codeUnclaimed: boolean;
+  /** DIR <500 R$ — начислена скидка 60 ₽ (сайд-эффект на вызывающей стороне). */
+  discountGranted: boolean;
+}
+
+interface CompletedMessages {
+  kind: "review_pitch" | "bonus_reminder" | "tier2" | "thanks";
+  /** HTML-версии для TG. */
+  tgMsg1: string;
+  tgMsg2: string;
+  /** Plain-версии для VK (ссылки текстом). */
+  vkMsg1: string;
+  vkMsg2: string;
+  buttons: CompletedButton[];
+}
+
+const BTN_REVIEW: CompletedButton = { label: "📸 Прислать отзыв", command: "review_hint" };
+const BTN_DIRECT: CompletedButton = { label: "💎 Купить напрямую", command: "start_direct" };
+const BTN_USE_BONUS: CompletedButton = { label: "💎 Использовать бонус", command: "start_direct" };
+
+const BONUS_EXPIRY_DAYS = 30; // = REVIEW_BONUS_EXPIRY_DAYS (bots/shared/review-eligibility.ts)
+
+function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMessages {
+  const unlockStr = fmtDateRu(robuxUnlockDate(inp.completedAt ?? new Date()));
+
+  const tgMsg1 =
+    `✅ <b>Заказ выкуплен!</b> Робуксы уже в пути 🚀\n\n` +
+    `Roblox зачислит их до <b>${unlockStr}</b> — это стандартная заморозка «Pending» на их стороне.\n\n` +
+    `📊 Проверить: https://www.roblox.com/transactions → строка <b>Pending</b>`;
+  const vkMsg1 =
+    `✅ Заказ выкуплен! Робуксы уже в пути 🚀\n\n` +
+    `Roblox зачислит их до ${unlockStr} — это стандартная заморозка «Pending» на их стороне.\n\n` +
+    `📊 Проверить: https://www.roblox.com/transactions → строка Pending`;
+
+  const discountTg = inp.discountGranted ? `\n\n💰 Дарю тебе скидку <b>60 рублей</b> к следующему заказу.` : "";
+  const discountVk = inp.discountGranted ? `\n\n💰 Дарю тебе скидку 60 рублей к следующему заказу.` : "";
+
+  // 1. Питч отзыва: WB-заказ, бонуса на балансе нет, код не заклеймлен.
+  if (!inp.isDirectOrder && !inp.bonusGrantedAt && inp.codeUnclaimed) {
+    const tgMsg2 =
+      `🎁 <b>Бонус за отзыв: +100 R$</b> к любому прямому заказу.\n\n` +
+      `Как получить:\n` +
+      `1. Оставь отзыв на Wildberries — с текстом и фото (только оценка не подойдёт).\n` +
+      `2. Пришли скриншот сюда фотографией (не файлом).\n\n` +
+      `После проверки начислим сразу. Действует ${BONUS_EXPIRY_DAYS} дней.`;
+    return {
+      kind: "review_pitch",
+      tgMsg1, vkMsg1, tgMsg2,
+      vkMsg2: tgMsg2.replace(/<\/?b>/g, ""),
+      buttons: [BTN_REVIEW, BTN_DIRECT],
+    };
+  }
+
+  // 2. Бонус уже на балансе — напомнить потратить.
+  if (inp.bonusGrantedAt) {
+    const expiresStr = fmtDateRu(new Date(inp.bonusGrantedAt.getTime() + BONUS_EXPIRY_DAYS * 86_400_000));
+    const balanceStr = inp.bonusBalance > 0 ? `${inp.bonusBalance} R$` : `+100 R$`;
+    const tgMsg2 =
+      `🎁 У тебя бонус <b>${balanceStr}</b> — действует до <b>${expiresStr}</b>.\n\n` +
+      `Он добавится к любому прямому заказу автоматически (без карточки WB).`;
+    return {
+      kind: "bonus_reminder",
+      tgMsg1, vkMsg1, tgMsg2,
+      vkMsg2: tgMsg2.replace(/<\/?b>/g, ""),
+      buttons: [BTN_USE_BONUS],
+    };
+  }
+
+  // 3. Повторный WB-клиент — TIER-2 питч закрытого формата (текст без изменений).
+  if (!inp.isDirectOrder && inp.completedCount > 1) {
+    const tgMsg2 =
+      `Это уже твой <b>${inp.completedCount}-й</b> заказ в RobloxBank. Спасибо за доверие! 💛\n\n` +
+      `Кстати, для постоянных клиентов у нас есть закрытый формат. Чтобы не ждать поставок на Wildberries и оформлять заказы по самому выгодному курсу (без лишних комиссий), пиши нам в поддержку напрямую: @RobloxBank_PA\n\n` +
+      `Это <b>быстрее, проще и всегда выгоднее</b>. Мы закрепим за тобой персональное обслуживание.\n\n` +
+      `Всё ли было удобно в этот раз? Если есть идеи по улучшению — напиши в поддержку, мы читаем каждое сообщение!`;
+    const vkMsg2 = tgMsg2.replace(/<\/?b>/g, "").replace("@RobloxBank_PA", "https://t.me/RobloxBank_PA");
+    return { kind: "tier2", tgMsg1, vkMsg1, tgMsg2, vkMsg2, buttons: [BTN_DIRECT] };
+  }
+
+  // 4. Прямой заказ / остальное — благодарность (+скидка для DIR <500).
+  const tgMsg2 = inp.completedCount > 1
+    ? `Это уже твой <b>${inp.completedCount}-й</b> заказ — спасибо за доверие! 💛${discountTg}\n\n` +
+      `Всё ли было удобно? Напиши нам — мы читаем каждое сообщение.`
+    : `Спасибо, что выбрал RobloxBank! Заказывай ещё — мы всегда здесь 💛${discountTg}`;
+  const vkMsg2 = inp.completedCount > 1
+    ? `Это уже твой ${inp.completedCount}-й заказ — спасибо за доверие! 💛${discountVk}\n\n` +
+      `Всё ли было удобно? Напиши нам — мы читаем каждое сообщение.`
+    : `Спасибо, что выбрал RobloxBank! Заказывай ещё — мы всегда здесь 💛${discountVk}`;
+  return { kind: "thanks", tgMsg1, vkMsg1, tgMsg2, vkMsg2, buttons: [BTN_DIRECT] };
+}
+
 export async function notifyOrderCompleted(
   user: UserRef,
   orderId: string,
   amount: number,
   isDirectOrder: boolean
 ) {
-  const completedCount = await (prisma as any).wbOrder.count({
-    where: { userId: user.id, status: "COMPLETED" },
-  });
-  const wbCompletedCount = isDirectOrder
-    ? await (prisma as any).wbOrder.count({
-        where: { userId: user.id, status: "COMPLETED", isDirectOrder: false },
-      })
-    : completedCount;
+  const [completedCount, order, dbUser] = await Promise.all([
+    (prisma as any).wbOrder.count({ where: { userId: user.id, status: "COMPLETED" } }),
+    (prisma as any).wbOrder.findUnique({ where: { id: orderId }, select: { wbCode: true, completedAt: true } }),
+    (prisma as any).user.findUnique({ where: { id: user.id }, select: { balance: true, reviewBonusGrantedAt: true } }),
+  ]);
 
-  const pendingLineTg  = `\n\n📊 Проверить зачисление: <a href="https://www.roblox.com/transactions">roblox.com/transactions</a> → строка <b>Pending</b>`;
-  const pendingLineVk  = `\n\n📊 Проверить зачисление: https://www.roblox.com/transactions → строка Pending`;
+  // Код этого заказа существует как WbCode и отзыв по нему ещё не оплачен
+  // (отсекает AV-/DIR-/MN- псевдокоды — отзыв на WB там невозможен).
+  const codeRow = order?.wbCode
+    ? await (prisma as any).wbCode.findFirst({ where: { code: order.wbCode }, select: { reviewBonusClaimed: true } })
+    : null;
 
-  let tgMsg: string;
-  let vkMsg: string;
-
-  if (isDirectOrder) {
-    if (completedCount <= 1) {
-      tgMsg = `✅ <b>Заказ выкуплен!</b> Робуксы уже в пути 🚀\n\nRoblox зачислит их в течение 5–7 дней — это их стандартный процесс.` + pendingLineTg + `\n\nСпасибо, что выбрал RobloxBank! Заказывай ещё — мы всегда здесь 💛`;
-    } else {
-      tgMsg = `✅ Заказ выкуплен! Это уже твой <b>${completedCount}-й</b> заказ — спасибо за доверие! 💛\n\nРобуксы появятся в течение 5–7 дней.` + pendingLineTg + `\n\nВсё ли было удобно? Напиши нам — мы читаем каждое сообщение.`;
+  // Скидка 60 ₽ за DIR <500 — как в ботах (notifyUserCompleted); раньше
+  // TWA-путь её не начислял и клиенты одного продукта получали разные условия.
+  const discountGranted = isDirectOrder && amount < 500;
+  if (discountGranted) {
+    try {
+      await (prisma as any).user.update({ where: { id: user.id }, data: { rubleDiscount: 60 } });
+    } catch (err) {
+      console.warn("[twa-notify] failed to set rubleDiscount:", err);
     }
-    vkMsg = tgMsg.replace(/<\/?b>/g, "").replace(pendingLineTg, pendingLineVk).replace(/<a href="[^"]+">([^<]+)<\/a>/g, "$1");
-  } else if (wbCompletedCount === 1) {
-    tgMsg =
-      `✅ <b>Заказ выкуплен!</b> Робуксы уже в пути 🚀\n\n` +
-      `Roblox зачислит их в течение 5–7 дней — это их стандартный процесс.` +
-      pendingLineTg + `\n\n` +
-      // Механика бонуса: BONUS_MIN_PACK=0 — любой номинал; 30 дней. Зеркало
-      // формулировки — bots/shared/review-eligibility.ts (менять синхронно).
-      `🎁 <b>Оставь отзыв и получи +100 R$ в подарок!</b>\n` +
-      `Бонус добавится к любому прямому заказу автоматически (без карточки WB), действует 30 дней.\n` +
-      `Напиши отзыв на Wildberries, сделай скриншот и отправь его сюда (фотографией, не файлом). После проверки бонус начислим сразу!`;
-    vkMsg =
-      `✅ Заказ выкуплен! Робуксы уже в пути 🚀\n\n` +
-      `Roblox зачислит их в течение 5–7 дней — это их стандартный процесс.` +
-      pendingLineVk + `\n\n` +
-      `Оставь отзыв и получи +100 R$ в подарок!\n` +
-      `Бонус добавится к любому прямому заказу автоматически (без карточки WB), действует 30 дней.\n` +
-      `Напиши отзыв на Wildberries, сделай скриншот и отправь его в этот чат. После проверки бонус начислим сразу!`;
-  } else {
-    tgMsg =
-      `✅ Заказ выкуплен! Это уже твой <b>${completedCount}-й</b> заказ в RobloxBank. Спасибо за доверие! 💛\n\n` +
-      `Робуксы появятся в течение 5–7 дней.` +
-      pendingLineTg + `\n\n` +
-      `Кстати, для постоянных клиентов у нас есть закрытый формат. Чтобы не ждать поставок на Wildberries и оформлять заказы по самому выгодному курсу (без лишних комиссий), пиши нам в поддержку напрямую: @RobloxBank_PA\n\n` +
-      `Это <b>быстрее, проще и всегда выгоднее</b>. Мы закрепим за тобой персональное обслуживание.\n\n` +
-      `Всё ли было удобно в этот раз? Если есть идеи по улучшению — напиши в поддержку, мы читаем каждое сообщение!`;
-    vkMsg =
-      `✅ Заказ выкуплен! Это уже твой ${completedCount}-й заказ в RobloxBank. Спасибо за доверие! 💛\n\n` +
-      `Робуксы появятся в течение 5–7 дней.` +
-      pendingLineVk + `\n\n` +
-      `Кстати, для постоянных клиентов у нас есть закрытый формат. Чтобы не ждать поставок на Wildberries и оформлять заказы по самому выгодному курсу (без лишних комиссий), пиши нам в поддержку напрямую: https://t.me/RobloxBank_PA\n\n` +
-      `Это быстрее, проще и всегда выгоднее. Мы закрепим за тобой персональное обслуживание.\n\n` +
-      `Всё ли было удобно в этот раз? Если есть идеи по улучшению — напиши в поддержку, мы читаем каждое сообщение!`;
   }
 
-  if (user.tgId) await tgPost(user.tgId, tgMsg);
-  else if (user.vkId) await vkPost(user.vkId, vkMsg);
+  const m = buildCompletedMessages({
+    isDirectOrder,
+    completedCount,
+    completedAt: order?.completedAt ? new Date(order.completedAt) : new Date(),
+    bonusGrantedAt: dbUser?.reviewBonusGrantedAt ? new Date(dbUser.reviewBonusGrantedAt) : null,
+    bonusBalance: dbUser?.balance ?? 0,
+    codeUnclaimed: codeRow ? codeRow.reviewBonusClaimed === false : false,
+    discountGranted,
+  });
+  if (m.kind === "tier2") console.log(`[CRM] Direct pitch sent for order #${completedCount}`);
+
+  if (user.tgId) {
+    await tgPost(user.tgId, m.tgMsg1);
+    await tgPost(user.tgId, m.tgMsg2, {
+      reply_markup: { inline_keyboard: m.buttons.map((b) => [{ text: b.label, callback_data: b.command }]) },
+    });
+    // pendingReview (питч отзыва) восстановит сам бот: callback review_hint
+    // и фолбэк в photo-handler работают без предустановленного состояния.
+  } else if (user.vkId) {
+    await vkPost(user.vkId, m.vkMsg1);
+    const vkKb = JSON.stringify({
+      inline: true,
+      buttons: m.buttons.map((b) => [{
+        action: { type: "text", label: b.label, payload: JSON.stringify({ command: b.command }) },
+        color: b.command === "start_direct" ? "positive" : "primary",
+      }]),
+    });
+    await vkPost(user.vkId, m.vkMsg2, { keyboard: vkKb });
+  }
 }
 
 /**

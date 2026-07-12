@@ -17,6 +17,7 @@ import { getGamepassDetails, getGamepassProductInfo, buildPurchaseScript, purcha
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { noteProbableNick } from "../shared/nick";
 import { resolveReviewEligibility, reviewIneligibleMessage } from "../shared/review-eligibility";
+import { buildCompletedMessages } from "../shared/completed-messages";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 import { buildAdminKeyboard } from "./admin";
 
@@ -5119,124 +5120,58 @@ export async function notifyUserCompleted(
   amount: number,
   isDirectOrder: boolean
 ): Promise<void> {
-  const completedCount = await (db as any).wbOrder.count({
-    where: { userId: user.id, status: "COMPLETED" },
-  });
+  // Ф5: два сообщения (операционное + бонусное) — тексты и ветвление в
+  // bots/shared/completed-messages.ts (зеркало — src/lib/twa-notify.ts).
+  const [completedCount, order, dbUser] = await Promise.all([
+    (db as any).wbOrder.count({ where: { userId: user.id, status: "COMPLETED" } }),
+    (db as any).wbOrder.findUnique({ where: { id: orderId }, select: { wbCode: true, completedAt: true } }),
+    (db as any).user.findUnique({ where: { id: user.id }, select: { balance: true, reviewBonusGrantedAt: true } }),
+  ]);
 
-  // Count WB-only completed orders (review prompt is only relevant for WB purchases)
-  const wbCompletedCount = isDirectOrder ? await (db as any).wbOrder.count({
-    where: { userId: user.id, status: "COMPLETED", isDirectOrder: false },
-  }) : completedCount;
-
-  let tgMsg: string;
-  let vkMsg: string;
-
-  const pendingLine =
-    `\n\n📊 Проверить зачисление: <a href="https://www.roblox.com/transactions">roblox.com/transactions</a> → строка <b>Pending</b>`;
-  const pendingLineVk =
-    `\n\n📊 Проверить зачисление: https://www.roblox.com/transactions → строка Pending`;
+  // Код этого заказа существует как WbCode и отзыв по нему ещё не оплачен
+  // (отсекает AV-/DIR-/MN- псевдокоды — отзыв на WB там невозможен).
+  const codeRow = order?.wbCode
+    ? await (db as any).wbCode.findFirst({ where: { code: order.wbCode }, select: { reviewBonusClaimed: true } })
+    : null;
 
   // Post-purchase discount: direct orders < 500 R$ get 60₽ off next order
-  if (isDirectOrder && amount < 500) {
+  const discountGranted = isDirectOrder && amount < 500;
+  if (discountGranted) {
     try {
-      await (db as any).user.update({
-        where: { id: user.id },
-        data: { rubleDiscount: 60 },
-      });
+      await (db as any).user.update({ where: { id: user.id }, data: { rubleDiscount: 60 } });
     } catch (err) {
       console.error("[TG] Failed to set rubleDiscount:", err);
     }
   }
 
-  const discountNote = isDirectOrder && amount < 500
-    ? `\n\n💰 Дарю тебе скидку <b>60 рублей</b> к следующему заказу.`
-    : "";
-
-  if (isDirectOrder) {
-    if (completedCount <= 1) {
-      tgMsg =
-        `✅ <b>Спасибо за покупку!</b> Робуксы будут выкуплены в течение нескольких часов.\n\n` +
-        `Roblox зачислит их в течение 5–7 дней — это их стандартный процесс.` +
-        pendingLine + discountNote + `\n\n` +
-        `Спасибо, что выбрал RobloxBank! Заказывай ещё — мы всегда здесь 💛`;
-    } else {
-      tgMsg =
-        `✅ Заказ выкуплен! Это уже твой <b>${completedCount}-й</b> заказ — спасибо за доверие! 💛\n\n` +
-        `Робуксы появятся в течение 5–7 дней.` +
-        pendingLine + discountNote + `\n\n` +
-        `Всё ли было удобно? Напиши нам — мы читаем каждое сообщение.`;
-    }
-    vkMsg = tgMsg.replace(/<\/?b>/g, "").replace(pendingLine, pendingLineVk).replace(/<a href="[^"]+">([^<]+)<\/a>/g, "$1");
-  } else if (wbCompletedCount === 1) {
-    tgMsg =
-      `✅ <b>Заказ выкуплен!</b> Робуксы уже в пути 🚀\n\n` +
-      `Roblox зачислит их в течение 5–7 дней — это их стандартный процесс.` +
-      pendingLine + `\n\n` +
-      `🎁 <b>Оставь отзыв и получи +100 R$ в подарок!</b>\n` +
-      `Отзыв должен быть <b>с текстом и фото</b> — только оценка не подойдёт.\n` +
-      `Пришли скриншот сюда (фотографией, не файлом) — после проверки бонус начислим сразу!`;
-    vkMsg =
-      `✅ Заказ выкуплен! Робуксы уже в пути 🚀\n\n` +
-      `Roblox зачислит их в течение 5–7 дней — это их стандартный процесс.` +
-      pendingLineVk + `\n\n` +
-      `Оставь отзыв и получи +100 R$ в подарок!\n` +
-      `Отзыв должен быть с текстом и фото — только оценка не подойдёт.\n` +
-      `Пришли скриншот в этот чат (фотографией, не файлом) — после проверки бонус начислим сразу!`;
-  } else {
-    // TIER 2: Returning / VIP — direct order pitch
-    console.log(`[CRM] Direct pitch sent for order #${completedCount}`);
-    tgMsg =
-      `✅ Заказ выкуплен! Это уже твой <b>${completedCount}-й</b> заказ в RobloxBank. Спасибо за доверие! 💛\n\n` +
-      `Робуксы появятся в течение 5–7 дней.` +
-      pendingLine + `\n\n` +
-      `Кстати, для постоянных клиентов у нас есть закрытый формат. Чтобы не ждать поставок на Wildberries и оформлять заказы по самому выгодному курсу (без лишних комиссий), пиши нам в поддержку напрямую: @RobloxBank_PA\n\n` +
-      `Это <b>быстрее, проще и всегда выгоднее</b>. Мы закрепим за тобой персональное обслуживание.\n\n` +
-      `Всё ли было удобно в этот раз? Если есть идеи по улучшению — напиши в поддержку, мы читаем каждое сообщение!`;
-    vkMsg =
-      `✅ Заказ выкуплен! Это уже твой ${completedCount}-й заказ в RobloxBank. Спасибо за доверие! 💛\n\n` +
-      `Робуксы появятся в течение 5–7 дней.` +
-      pendingLineVk + `\n\n` +
-      `Кстати, для постоянных клиентов у нас есть закрытый формат. Чтобы не ждать поставок на Wildberries и оформлять заказы по самому выгодному курсу (без лишних комиссий), пиши нам в поддержку напрямую: https://t.me/RobloxBank_PA\n\n` +
-      `Это быстрее, проще и всегда выгоднее. Мы закрепим за тобой персональное обслуживание.\n\n` +
-      `Всё ли было удобно в этот раз? Если есть идеи по улучшению — напиши в поддержку, мы читаем каждое сообщение!`;
-  }
+  const m = buildCompletedMessages({
+    isDirectOrder,
+    completedCount,
+    completedAt: order?.completedAt ? new Date(order.completedAt) : new Date(),
+    bonusGrantedAt: dbUser?.reviewBonusGrantedAt ? new Date(dbUser.reviewBonusGrantedAt) : null,
+    bonusBalance: dbUser?.balance ?? 0,
+    codeUnclaimed: codeRow ? codeRow.reviewBonusClaimed === false : false,
+    discountGranted,
+  });
+  if (m.kind === "tier2") console.log(`[CRM] Direct pitch sent for order #${completedCount}`);
 
   if (user.tgId) {
     try {
-      let keyboard: ReturnType<typeof Markup.inlineKeyboard>;
-      if (!isDirectOrder && wbCompletedCount === 1) {
-        keyboard = Markup.inlineKeyboard([
-          [Markup.button.callback("📸 Отзыв = +100 R$ бонус", CB.reviewHint)],
-          [Markup.button.url("💬 Написать менеджеру", SUPPORT_URL)],
-        ]);
-        pendingReview.set(parseInt(user.tgId), orderId);
-      } else {
-        keyboard = Markup.inlineKeyboard([
-          [Markup.button.callback("💎 Заказать напрямую", CB.startDirect)],
-        ]);
-      }
-      await bot.telegram.sendMessage(user.tgId, tgMsg, { parse_mode: "HTML", ...keyboard });
-    } catch { }
+      await bot.telegram.sendMessage(user.tgId, m.tgMsg1, { parse_mode: "HTML" });
+      const keyboard = Markup.inlineKeyboard(m.buttons.map((b) => [Markup.button.callback(b.label, b.command)]));
+      await bot.telegram.sendMessage(user.tgId, m.tgMsg2, { parse_mode: "HTML", ...keyboard });
+      if (m.kind === "review_pitch") pendingReview.set(parseInt(user.tgId), orderId);
+    } catch { /* user may have blocked the bot */ }
   } else if (user.vkId) {
-    const vkExtra: Record<string, string> = {};
-    if (!isDirectOrder && wbCompletedCount === 1) {
-      vkExtra.keyboard = JSON.stringify({
-        inline: true,
-        buttons: [[{
-          action: { type: "text", label: "📸 Отзыв = +100 R$ бонус", payload: JSON.stringify({ command: "review_hint" }) },
-          color: "primary",
-        }]],
-      });
-    } else {
-      vkExtra.keyboard = JSON.stringify({
-        inline: true,
-        buttons: [[{
-          action: { type: "text", label: "💎 Купить напрямую", payload: JSON.stringify({ command: "start_direct" }) },
-          color: "positive",
-        }]],
-      });
-    }
-    await vkSend(user.vkId, vkMsg, vkExtra);
+    await vkSend(user.vkId, m.vkMsg1);
+    const vkKb = JSON.stringify({
+      inline: true,
+      buttons: m.buttons.map((b) => [{
+        action: { type: "text", label: b.label, payload: JSON.stringify({ command: b.command }) },
+        color: b.command === "start_direct" ? "positive" : "primary",
+      }]),
+    });
+    await vkSend(user.vkId, m.vkMsg2, { keyboard: vkKb });
   }
 }
 
