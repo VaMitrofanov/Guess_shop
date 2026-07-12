@@ -1981,7 +1981,7 @@ const WBG_CSS = `
 .wbg-root{--gold:#7556e8;--gold2:#a68bff;--grn:#45d6aa;--line:var(--rb-border);--mut:var(--rb-muted);color:var(--rb-text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased}
 .wbg-root *{box-sizing:border-box}
 .wbg-stage{width:min(1120px,100%);display:grid;grid-template-columns:minmax(0,.92fr) minmax(390px,.78fr);gap:70px;align-items:center}
-.wbg-stage>*{min-width:0}
+.wbg-card-column{min-width:0;width:100%}
 .wbg-welcome{position:relative;padding:20px 0}
 .wbg-badge{width:max-content;display:flex;align-items:center;gap:9px;padding:9px 13px;border:1px solid var(--line);border-radius:999px;background:var(--rb-surface);color:var(--gold2);font-size:12px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
 .wbg-welcome h1{margin:24px 0 19px;font-family:var(--font-display),sans-serif;font-size:clamp(46px,6vw,76px);line-height:.98;letter-spacing:-.065em}
@@ -2134,7 +2134,7 @@ function WBGate() {
             </div>
           </section>
 
-          <div>
+          <div className="wbg-card-column">
           <div className="wbg-card animate-in fade-in zoom-in animate-delay-200">
             {/* Header */}
             <div style={{ textAlign: "center" }}>
