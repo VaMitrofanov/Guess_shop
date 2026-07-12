@@ -16,35 +16,35 @@ datasource db {
 }
 
 model User {
-  id                 String    @id @default(cuid())
-  vkId               String?   @unique
-  tgId               String?   @unique
-  email              String?   @unique
-  password           String?
-  name               String?
-  username           String?
-  image              String?
-  robloxUsername     String?
-  balance               Int       @default(0)
-  bonusExpiresAt        DateTime?
-  rubleDiscount         Int       @default(0)
-  promoExpiresAt        DateTime?
-  promoSentAt           DateTime?
-  role                  String    @default("USER")
-  reviewBonusClaimed    Boolean   @default(false)
-  reviewBonusGrantedAt  DateTime?
-  reviewReminderLevel   Int       @default(0)
-  orders                Order[]
-  wbCodes            WbCode[]
-  wbOrders           WbOrder[]
-  directIntents      DirectIntent[]
-  identities         UserIdentity[]
-  bonusLedgerEntries BonusLedger[]
-  priceQuotes        PriceQuote[]
-  mergeSources       AccountMergeAudit[] @relation("AccountMergeSource")
-  mergeTargets       AccountMergeAudit[] @relation("AccountMergeTarget")
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  id                   String              @id @default(cuid())
+  vkId                 String?             @unique
+  tgId                 String?             @unique
+  email                String?             @unique
+  password             String?
+  name                 String?
+  username             String?
+  image                String?
+  robloxUsername       String?
+  balance              Int                 @default(0)
+  bonusExpiresAt       DateTime?
+  rubleDiscount        Int                 @default(0)
+  promoExpiresAt       DateTime?
+  promoSentAt          DateTime?
+  role                 String              @default("USER")
+  reviewBonusClaimed   Boolean             @default(false)
+  reviewBonusGrantedAt DateTime?
+  reviewReminderLevel  Int                 @default(0)
+  orders               Order[]
+  wbCodes              WbCode[]
+  wbOrders             WbOrder[]
+  directIntents        DirectIntent[]
+  identities           UserIdentity[]
+  bonusLedgerEntries   BonusLedger[]
+  priceQuotes          PriceQuote[]
+  mergeSources         AccountMergeAudit[] @relation("AccountMergeSource")
+  mergeTargets         AccountMergeAudit[] @relation("AccountMergeTarget")
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
 }
 
 /// A server-verified external identity. Legacy `tgId`/`vkId`/`email` remain
@@ -93,17 +93,17 @@ model BonusLedger {
 /// Explicit record of a manual, step-up-authenticated profile merge. The
 /// actual merge workflow is added separately; this table makes it auditable.
 model AccountMergeAudit {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   sourceUserId String
-  sourceUser   User     @relation("AccountMergeSource", fields: [sourceUserId], references: [id])
+  sourceUser   User      @relation("AccountMergeSource", fields: [sourceUserId], references: [id])
   targetUserId String
-  targetUser   User     @relation("AccountMergeTarget", fields: [targetUserId], references: [id])
-  status       String   @default("PENDING")
+  targetUser   User      @relation("AccountMergeTarget", fields: [targetUserId], references: [id])
+  status       String    @default("PENDING")
   evidence     Json
   result       Json?
   rolledBackAt DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([sourceUserId, createdAt(sort: Desc)])
   @@index([targetUserId, createdAt(sort: Desc)])
@@ -112,16 +112,16 @@ model AccountMergeAudit {
 /// A versioned policy is the database record selected by a quote. The
 /// deterministic calculation itself lives in bots/shared/retail-pricing.ts.
 model PricingPolicy {
-  id        String       @id @default(cuid())
-  version   String       @unique
+  id         String       @id @default(cuid())
+  version    String       @unique
   definition Json
-  isActive  Boolean      @default(false)
-  validFrom DateTime     @default(now())
+  isActive   Boolean      @default(false)
+  validFrom  DateTime     @default(now())
   validUntil DateTime?
-  createdBy String?
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
-  quotes    PriceQuote[]
+  createdBy  String?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  quotes     PriceQuote[]
 
   @@index([isActive, validFrom])
 }
@@ -136,23 +136,24 @@ enum PriceQuoteStatus {
 /// A short-lived server quote. Monetary values are always integer kopecks;
 /// `requestedRobux` and `bonusRobux` are integer R$ values.
 model PriceQuote {
-  id                   String           @id @default(cuid())
-  userId               String?
-  user                 User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
-  policyId             String
-  policy               PricingPolicy    @relation(fields: [policyId], references: [id])
-  policyVersion        String
-  requestedRobux       Int
-  bonusRobux           Int              @default(0)
-  baseAmountKopecks    Int
-  discountKopecks      Int              @default(0)
-  finalAmountKopecks   Int
-  status               PriceQuoteStatus @default(ACTIVE)
-  expiresAt            DateTime
-  consumedAt           DateTime?
-  contextHash          String?
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
+  id                 String           @id @default(cuid())
+  userId             String?
+  user               User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  policyId           String
+  policy             PricingPolicy    @relation(fields: [policyId], references: [id])
+  policyVersion      String
+  requestedRobux     Int
+  bonusRobux         Int              @default(0)
+  baseAmountKopecks  Int
+  discountKopecks    Int              @default(0)
+  finalAmountKopecks Int
+  status             PriceQuoteStatus @default(ACTIVE)
+  expiresAt          DateTime
+  consumedAt         DateTime?
+  contextHash        String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  webOrder           WbOrder?
 
   @@index([userId, status, expiresAt])
   @@index([policyId, createdAt(sort: Desc)])
@@ -199,17 +200,18 @@ model Order {
   // request, so the timestamp/IP/version triple is independent of anything
   // the client could forge after the fact. Nullable for backwards-compat
   // with rows created before this migration.
-  termsAcceptedAt    DateTime?
-  termsVersion       String?
-  termsIpAddress     String?
+  termsAcceptedAt DateTime?
+  termsVersion    String?
+  termsIpAddress  String?
 
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 enum Platform {
   VK
   TG
+  WEB
 }
 
 enum WbOrderStatus {
@@ -235,6 +237,26 @@ enum OrderSource {
   DIRECT
   AVITO
   MANUAL
+  SITE
+}
+
+enum PaymentAttemptStatus {
+  CREATED
+  INITIATED
+  AUTHORIZED
+  CONFIRMED
+  REJECTED
+  CANCELED
+  FAILED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  DELIVERED
+  DEAD
 }
 
 enum WbCodeStatus {
@@ -267,59 +289,72 @@ enum PartnerExternalSource {
 
 /// WB withdrawal order: tracks gamepass link submissions from WB card buyers.
 model WbOrder {
-  id              String        @id @default(cuid())
-  amount          Int
-  gamepassUrl     String?
-  status          WbOrderStatus @default(PENDING)
-  platform        Platform
-  userId          String
-  user            User          @relation(fields: [userId], references: [id])
-  wbCode          String        @unique
-  adminId         String?
-  rejectionReason String?
+  id                     String           @id @default(cuid())
+  amount                 Int
+  gamepassUrl            String?
+  status                 WbOrderStatus    @default(PENDING)
+  platform               Platform
+  userId                 String
+  user                   User             @relation(fields: [userId], references: [id])
+  wbCode                 String           @unique
+  /// Canonical web-checkout fields. Nullable for historical WB/bot orders.
+  priceQuoteId           String?          @unique
+  priceQuote             PriceQuote?      @relation(fields: [priceQuoteId], references: [id])
+  publicOrderId          String?          @unique
+  statusTokenHash        String?          @unique
+  paymentAmountKopecks   Int?
+  receiptEmail           String?
+  termsAcceptedAt        DateTime?
+  termsVersion           String?
+  termsIpAddress         String?
+  webIdempotencyKey      String?          @unique
+  adminId                String?
+  rejectionReason        String?
   /// Snapshot of the purchase rate (R$/₽) at the time of fulfillment.
   /// Allows accurate historical profit calculations.
-  purchaseRate    Float?
-  isDirectOrder   Boolean       @default(false)
-  orderSource     OrderSource   @default(WB)
-  isTest          Boolean       @default(false)
-  paymentDetails  String?
-  robloxUsername  String?
+  purchaseRate           Float?
+  isDirectOrder          Boolean          @default(false)
+  orderSource            OrderSource      @default(WB)
+  isTest                 Boolean          @default(false)
+  paymentDetails         String?
+  robloxUsername         String?
   /// Free-text admin note (current status / problem) — admin-only, shown in the
   /// TWA order card. Never surfaced to the customer.
-  adminNote       String?
-  pendingAt       DateTime?
-  takenAt         DateTime?
-  remindersSent   Int           @default(0)
-  isFavorite      Boolean       @default(false)
+  adminNote              String?
+  pendingAt              DateTime?
+  takenAt                DateTime?
+  remindersSent          Int              @default(0)
+  isFavorite             Boolean          @default(false)
   /// Roblox username of the cookie account that purchased this gamepass.
-  purchaserUsername String?
+  purchaserUsername      String?
   /// When the customer's payment for a direct order was confirmed (pay_ok).
   /// Unpaid DIR orders (isDirectOrder && paidAt == null) are excluded from
   /// every buyout path: TWA queue, purchase actions, auto-buyout worker.
-  paidAt          DateTime?
+  paidAt                 DateTime?
   /// Probable Roblox nick captured "in pencil" before the customer sent a
   /// gamepass (nick search / failed validation / site / VK backfill). Mirrors
   /// the [НИК?] adminNote history but structured, so the GP-watcher (+3) can
   /// query it without parsing free text. Last confirmed-shape nick wins; NOT
   /// authoritative (never promoted to robloxUsername until the user confirms).
-  probableNick          String?
-  probableNickAt        DateTime?
+  probableNick           String?
+  probableNickAt         DateTime?
   /// GP-watcher bookkeeping: throttle checks and dedup "gamepass found" pings.
-  gpWatchLastCheckAt    DateTime?
-  gpWatchNotifiedPassId String?
+  gpWatchLastCheckAt     DateTime?
+  gpWatchNotifiedPassId  String?
   /// П3: customer tapped «❌ Не мой ник» on the GP-watch ping. Surfaces a badge
   /// in TWA («кого дожимать вручную»); cleared when a new probable nick arrives.
-  gpWatchDeclinedAt     DateTime?
+  gpWatchDeclinedAt      DateTime?
   /// Ф6.3: момент фактического выкупа (перехода в COMPLETED) — базис таймера
   /// разблокировки робуксов Roblox (completedAt + 5 дней). Ставится во ВСЕХ
   /// путях COMPLETED; у старых заказов NULL — крон разблокировки их не трогает.
-  completedAt           DateTime?
+  completedAt            DateTime?
   /// Ф6.3: уровень пуша о разблокировке робуксов (0 = не слали,
   /// 1 = день 5 «уже могли разблокироваться», 2 = день 7 «точно разблокированы»).
-  robuxUnlockRemindLevel Int         @default(0)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  robuxUnlockRemindLevel Int              @default(0)
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  paymentAttempts        PaymentAttempt[]
+  events                 OrderEvent[]
 
   @@index([userId])
   @@index([status])
@@ -335,8 +370,66 @@ model WbOrder {
   @@index([purchaserUsername])
   // Filter by order source (WB/DIRECT/AVITO/MANUAL).
   @@index([orderSource])
+  @@index([publicOrderId])
   // GP-watcher (+3) selection: AWAITING orders that carry a probable nick.
   @@index([status, probableNick])
+}
+
+/// One provider-side payment initialization/charge lifecycle. The amount and
+/// merchant order id are immutable snapshots used to verify notifications.
+model PaymentAttempt {
+  id             String               @id @default(cuid())
+  orderId        String
+  order          WbOrder              @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  provider       String
+  publicOrderId  String               @unique
+  paymentId      String?              @unique
+  amountKopecks  Int
+  status         PaymentAttemptStatus @default(CREATED)
+  idempotencyKey String               @unique
+  paymentUrl     String?
+  rawEventHash   String?
+  initiatedAt    DateTime?
+  finalizedAt    DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([orderId, createdAt(sort: Desc)])
+  @@index([provider, status, updatedAt])
+}
+
+/// Immutable domain/audit event. Provider event hashes make webhook retries
+/// idempotent without storing the raw payload (which may contain PII).
+model OrderEvent {
+  id             String         @id @default(cuid())
+  orderId        String
+  order          WbOrder        @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  type           String
+  idempotencyKey String         @unique
+  payload        Json
+  createdAt      DateTime       @default(now())
+  outbox         OutboxMessage?
+
+  @@index([orderId, createdAt])
+}
+
+/// Durable handoff to fulfillment/notifications. Workers claim PENDING rows,
+/// retry with backoff and move exhausted messages to DEAD for investigation.
+model OutboxMessage {
+  id            String       @id @default(cuid())
+  eventId       String       @unique
+  event         OrderEvent   @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  topic         String
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  attempts      Int          @default(0)
+  nextAttemptAt DateTime     @default(now())
+  lastError     String?
+  deliveredAt   DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([status, nextAttemptAt])
 }
 
 model FAQ {
@@ -392,13 +485,13 @@ model RateSnapshot {
 /// Global system settings — single-row config table.
 /// Always upsert with id = "global".
 model GlobalSettings {
-  id           String   @id @default("global")
-  usdToRub     Float
+  id                    String    @id @default("global")
+  usdToRub              Float
   /// Manual purchase rate in ₽ per R$ — set by admin via bot.
-  purchaseRate Float?
-  lastUpdated  DateTime @updatedAt
-  autoBuyEnabled Boolean  @default(false)
-  autoBuyRate    Float    @default(4.0)
+  purchaseRate          Float?
+  lastUpdated           DateTime  @updatedAt
+  autoBuyEnabled        Boolean   @default(false)
+  autoBuyRate           Float     @default(4.0)
   robloxCookie          String?
   robloxCookieUpdatedAt DateTime?
   robloxAccountName     String?
@@ -420,8 +513,8 @@ model GlobalSettings {
   // drain threshold, then alerts admins. Kill-switch defaults OFF.
   autoBuyoutEnabled     Boolean   @default(false)
   autoBuyoutThreshold   Int       @default(150) // R$ — stop buying at/below this, leftover goes to drain
-  autoBuyoutMaxPerTick  Int       @default(5)   // cap purchases per tick (blast-radius guard)
-  autoBuyoutBelowSince  DateTime?               // when balance first went ≤ threshold (alert dedup)
+  autoBuyoutMaxPerTick  Int       @default(5) // cap purchases per tick (blast-radius guard)
+  autoBuyoutBelowSince  DateTime? // when balance first went ≤ threshold (alert dedup)
   // ── Auto-drain worker (+5.G.3) ───────────────────────────────────────────
   // Когда баланс донора падает ниже минимальной цены выкупа (143 R$ грязными),
   // воркер сливает остаток в приёмник сам. Kill-switch, default OFF.
@@ -475,26 +568,26 @@ model DrainEvent {
 /// B2B partner account. Partner buyouts deliberately live outside WbOrder:
 /// partner tasks are not WB customer orders and have separate money/accounting.
 model Partner {
-  id            String               @id @default(cuid())
-  slug          String               @unique
-  name          String
-  isActive      Boolean              @default(true)
-  notes         String?
+  id                   String               @id @default(cuid())
+  slug                 String               @unique
+  name                 String
+  isActive             Boolean              @default(true)
+  notes                String?
   /// Money ledger currency for this partner. Anton uses USDT only.
-  ledgerCurrency String              @default("USDT")
+  ledgerCurrency       String               @default("USDT")
   /// Partner-specific buyout rate: USDT charged per 1000 dirty R$.
-  robuxRateUsdtPer1000 Float         @default(5.05)
+  robuxRateUsdtPer1000 Float                @default(5.05)
   /// Google Sheets source config for future sync/write-back. Values are not
   /// secrets, but sheet URLs/IDs should still be treated as operational config.
-  googleSheetId  String?
-  googleSheetTab String?
-  googleSheetUrl String?
-  tasks         PartnerBuyoutTask[]
-  ledgerEntries PartnerLedgerEntry[]
-  importRuns    PartnerImportRun[]
-  rateChanges   PartnerRateChange[]
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
+  googleSheetId        String?
+  googleSheetTab       String?
+  googleSheetUrl       String?
+  tasks                PartnerBuyoutTask[]
+  ledgerEntries        PartnerLedgerEntry[]
+  importRuns           PartnerImportRun[]
+  rateChanges          PartnerRateChange[]
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
 }
 
 /// Journal of partner rate changes (USDT per 1000 R$). Written by set-rate so
@@ -550,23 +643,23 @@ model PartnerBuyoutTask {
 /// Partner ledger in partner money. Anton uses USDT only; each BUYOUT entry is
 /// derived from the task's dirty R$ price and Partner.robuxRateUsdtPer1000.
 model PartnerLedgerEntry {
-  id        String            @id @default(cuid())
-  partnerId String
-  partner   Partner           @relation(fields: [partnerId], references: [id], onDelete: Cascade)
-  taskId    String?
-  task      PartnerBuyoutTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  type      PartnerLedgerType
-  amount    Float
-  currency  String            @default("USDT")
+  id              String             @id @default(cuid())
+  partnerId       String
+  partner         Partner            @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  taskId          String?
+  task            PartnerBuyoutTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  type            PartnerLedgerType
+  amount          Float
+  currency        String             @default("USDT")
   /// Rate (USDT per 1000 R$) the debit was computed with. Structured copy of what
   /// the comment says, so per-rate reports do not parse comment strings.
   rateUsdtPer1000 Float?
   /// Dirty R$ amount behind a BUYOUT debit; survives task deletion (taskId SetNull).
   robuxAmount     Int?
-  reference String?
-  comment   String?
-  createdBy String?
-  createdAt DateTime          @default(now())
+  reference       String?
+  comment         String?
+  createdBy       String?
+  createdAt       DateTime           @default(now())
 
   @@index([partnerId, createdAt(sort: Desc)])
   @@index([taskId])
@@ -604,22 +697,22 @@ model WbProductCost {
   // No separate @unique or @@index needed.
   nmID          Int      @id
   vendorCode    String
-  costPrice     Int      @default(0)   // Purchase/production cost in RUB
+  costPrice     Int      @default(0) // Purchase/production cost in RUB
   wbCommission  Float    @default(0.245) // WB commission rate (0–1), e.g. 0.245 = 24.5%
-  logisticsCost Float    @default(87.5)  // Per-unit WB logistics cost in RUB
-  taxRate       Float    @default(0.07)  // Simplified tax rate (0–1)
-  denomination  Int?                     // Robux denomination (300, 500, 800, etc.)
-  adCostPerUnit Float    @default(0)     // Advertising cost per unit (₽)
+  logisticsCost Float    @default(87.5) // Per-unit WB logistics cost in RUB
+  taxRate       Float    @default(0.07) // Simplified tax rate (0–1)
+  denomination  Int? // Robux denomination (300, 500, 800, etc.)
+  adCostPerUnit Float    @default(0) // Advertising cost per unit (₽)
   updatedAt     DateTime @updatedAt
 }
 
 /// Global Wildberries unit economics settings (singleton, id=1).
 model WbSettings {
   id                 Int       @id @default(1)
-  kursRb             Float     @default(4)    // закупочный курс (руб. за единицу)
-  kursUsd            Float     @default(75)   // курс USD/RUB
+  kursRb             Float     @default(4) // закупочный курс (руб. за единицу)
+  kursUsd            Float     @default(75) // курс USD/RUB
   fixedCost          Float     @default(87.5) // фиксированные затраты на единицу (₽)
-  lastAdAttributedAt DateTime?               // дата последнего атрибутирования рекламы к заказу
+  lastAdAttributedAt DateTime? // дата последнего атрибутирования рекламы к заказу
 }
 
 /// Activation codes printed on Wildberries card inserts.
@@ -654,21 +747,21 @@ model WbCode {
 /// Pre-order intent for direct purchases. Persisted to DB so it survives bot restarts.
 /// WbOrder is only created when admin sends payment details (consuming the intent).
 model DirectIntent {
-  id             String              @id @default(cuid())
+  id             String             @id @default(cuid())
   userId         String
-  user           User                @relation(fields: [userId], references: [id])
+  user           User               @relation(fields: [userId], references: [id])
   amount         Int
-  bonus          Int                 @default(0)
+  bonus          Int                @default(0)
   totalAmount    Int
-  rubleDiscount  Int                 @default(0)
+  rubleDiscount  Int                @default(0)
   rublePrice     Int
-  robloxUsername  String
+  robloxUsername String
   gamepassId     String
   gamepassUrl    String
   platform       Platform
-  status         DirectIntentStatus  @default(PENDING)
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  status         DirectIntentStatus @default(PENDING)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
 
   @@index([userId, status])
 }

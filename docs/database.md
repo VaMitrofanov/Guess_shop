@@ -25,8 +25,8 @@ Neon Postgres + Prisma 7 (`engineType=library`, adapter `PrismaPg`). Модел�
 
 ### `WbOrder` — заказы на выкуп
 Ключевые поля: `amount` (**чистые** R$), `gamepassUrl`, `status` (`WbOrderStatus`),
-`platform` (`TG`/`VK`), `wbCode` (**@unique** — один заказ на код), `userId`,
-`orderSource` (`WB`/`DIRECT`/`AVITO`/`MANUAL`), `isDirectOrder`, `isFavorite`, `isTest`,
+`platform` (`TG`/`VK`/`WEB`), `wbCode` (**@unique** — один заказ на код/публичный WEB-id), `userId`,
+`orderSource` (`WB`/`DIRECT`/`AVITO`/`MANUAL`/`SITE`), `isDirectOrder`, `isFavorite`, `isTest`,
 `adminNote` (только для админа), `robloxUsername` (продавец, **только подтверждённый** ник),
 `purchaserUsername` (куки-аккаунт-покупатель), `purchaseRate` (снапшот курса при выкупе),
 `pendingAt` (момент попадания в «К выкупу» — для сортировки), `rejectionReason`,
@@ -109,8 +109,32 @@ robloxUsername, userId+createdAt).
 - `PricingPolicy` хранит версию и JSON-представление опубликованной политики; расчёт
   `retail-direct-v1` остаётся чистой общей функцией `bots/shared/retail-pricing.ts`.
 - `PriceQuote` фиксирует на 15 минут версию, сумму R$, бонус, скидку и итог в **целых
-  копейках**. `POST /api/pricing/quote` создаёт запись для гостя или текущего User; до
-  подключения к каноническому order/payment flow она не является разрешением на оплату.
+  копейках**. `POST /api/pricing/quote` создаёт запись для гостя или текущего User.
+
+### Канонический SITE-order и деньги (код 2026-07-13; migration ещё не применена к production)
+
+Миграция `20260713_canonical_web_order_foundation` расширяет `WbOrder` без изменения старых
+строк. Для `orderSource=SITE`, `platform=WEB` он хранит ссылку на одноразовый `PriceQuote`,
+случайный `publicOrderId`, только SHA-256 хеш status-token, сумму в копейках, email чека,
+версию/момент/IP принятия оферты и обязательный UUID идемпотентности. Quote переводится
+`ACTIVE → CONSUMED` в той же serializable-транзакции, где создаются заказ, попытка оплаты,
+audit-event и outbox.
+
+- `PaymentAttempt` — неизменяемые `provider/publicOrderId/amountKopecks/idempotencyKey` плюс
+  provider `paymentId`, URL и монотонный статус. Raw callback не хранится: остаётся SHA-256.
+- `OrderEvent` — append-only события с уникальным idempotency key.
+- `OutboxMessage` — durable-доставка (`PENDING/PROCESSING/DELIVERED/DEAD`, attempts,
+  `nextAttemptAt`, `lastError`). Worker/retry/dead-letter ещё не реализованы.
+
+Checkout принимает только `quoteId`: сервер повторно проверяет ownership/TTL/status/version,
+Roblox owner, sale-state и точную gross-цену. Создание SITE-order пока требует verified
+web-сессию; гостевой verified email/magic-link остаётся отдельным инкрементом. Боевой Init
+fail-closed за `SITE_ACQUIRING_ENABLED=false` и обязательными ККТ-классификаторами env.
+Зафиксированный bonus списывается compare-and-set из `User.balance` и отрицательной строкой
+`BonusLedger` в той же транзакции; одноразовый `rubleDiscount` обнуляется там же. Поэтому две
+параллельные quotes не могут потратить одну льготу дважды. При неопределённом результате Init
+льгота остаётся привязанной к сохранённому заказу до reconciliation/cancel, а не возвращается
+автоматически с риском двойного расхода.
 
 ### `PurchaseBatch`
 Durable-запись одной пачки «Выкупить всё»: `accountName` (донор), `startedAt`/`finishedAt`,

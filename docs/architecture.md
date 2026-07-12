@@ -32,8 +32,9 @@
 его заказы и бонусы не теряются. Legacy `vkId`/`tgId` переходно сохраняются для ботов;
 TG-login и безопасный step-up merge — следующие инкременты. Цена прямого заказа в TG/VK/Web
 считается одной чистой `retail-direct-v1` функцией; серверный `PriceQuote` хранит итог в
-копейках, но пока не включён в legacy checkout. ЛК читает оба источника истории: legacy
-`Order` (SITE) и `WbOrder` (WB/DIRECT/AVITO/MANUAL), а также текущий активный bonus balance;
+копейках и одноразово потребляется новым `WbOrder(SITE/WEB)`. `PaymentAttempt`, `OrderEvent`
+и `OutboxMessage` образуют durable payment boundary; production Init закрыт kill-switch до
+внешних launch-gates. ЛК читает legacy `Order` и `WbOrder` всех источников, а также bonus balance;
 кнопки link/merge до fresh-auth flow не показываются.
 
 ## B2B-направление (TWA/server MVP)
@@ -66,7 +67,9 @@ src/
     api/wb-code/select-gamepass  материализация заказа при выборе геймпасса на сайте (one-tap)
     api/wb-link/route.ts         линковка кода к юзеру после VK-логина (коридор → VK)
     api/roblox/gamepasses        поиск геймпассов по нику/ID (напрямую в Roblox)
-    api/pricing/quote             короткая серверная котировка (ещё не payment-authority)
+    api/pricing/quote             короткая серверная котировка
+    api/orders/create             quote → канонический SITE-order + payment attempt
+    api/webhooks/tinkoff          strict callback state machine + durable event/outbox
     api/twa/**                   API TWA-админки (все под extractTwaUser)
     api/twa/partners/[slug]/tasks B2B server MVP: задачи/ledger/выкуп партнёра `anton`
   auth.ts                        NextAuth (admin + vk-id провайдеры)
@@ -76,6 +79,8 @@ src/
     roblox-buyout.ts             shared resolve/purchase helper для retail и B2B
     retail-pricing.ts            web-facade общего TG/VK/Web price policy
     price-quote.ts               calculation + persistence краткой котировки
+    canonical-web-order.ts       quote/gamepass invariants + atomic order foundation
+    payment-notification.ts      разрешённые монотонные переходы платежа
     user-identity.ts             verified identity → канонический User без auto-merge
     pricing.ts, wb-api.ts        цены + Wildberries API (для TWA-аналитики)
 
@@ -114,13 +119,10 @@ prisma/schema.prisma    схема БД
 - **Робуксы.** `amount` в БД = **чистые** робуксы (что получает продавец).
   **Грязные** (номинал геймпасса) = `Math.ceil(amount / 0.7)` — Roblox забирает 30%.
 
-## <a name="legacy"></a>Legacy-подсистема (вне текущего воркфлоу)
+## <a name="legacy"></a>Переход от legacy checkout
 
-В коде живёт исходная модель «прямая продажа через сайт» из `PLAN.md`:
-`/checkout`, `/payment/status`, `api/orders/create`, `api/orders/[id]`,
-`api/orders/webhook-to-automation`, `api/webhooks/tinkoff`, `lib/tinkoff.ts`,
-`api/admin/*` (CRUD товаров/FAQ/отзывов), `src/components/admin/*`, `hooks/usePricing`.
-
-Сайт `robloxbank.ru` пока не запущен, эта ветка не участвует в WB-коридоре. Решение —
-за владельцем: либо доудалить (если робуксы продаются только через коридор + прямые заказы
-в ботах), либо изолировать и задокументировать как «будущий функционал». Пока оставлена.
+`/checkout`, `api/orders/create`, `api/orders/[id]` и T-Bank webhook уже переведены на
+`WbOrder(SITE)`/quote/payment-attempt. Старая таблица `Order`, Product FK,
+`api/orders/webhook-to-automation` и admin CRUD товара пока остаются read-only/legacy до
+подтверждения нулевого production-остатка и удаления отдельной миграцией. Публичный сайт и
+Init выключены maintenance + `SITE_ACQUIRING_ENABLED=false`.

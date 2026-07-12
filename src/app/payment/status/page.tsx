@@ -9,7 +9,9 @@ import { CheckCircle2, XCircle, Clock, Loader2, ArrowRight } from "lucide-react"
 function StatusContent() {
   const searchParams = useSearchParams();
   const orderId = searchParams.get("orderId");
-  const [status, setStatus] = useState<string>("PENDING");
+  const token = searchParams.get("token");
+  const [status, setStatus] = useState<string>("PAYMENT_PENDING");
+  const [paymentStatus, setPaymentStatus] = useState<string | null>(null);
   const [, setLoading] = useState(true);
 
   useEffect(() => {
@@ -17,12 +19,14 @@ function StatusContent() {
 
     const poll = async () => {
       try {
-        const res = await fetch(`/api/orders/${orderId}`);
+        const query = token ? `?token=${encodeURIComponent(token)}` : "";
+        const res = await fetch(`/api/orders/${encodeURIComponent(orderId)}${query}`);
         const data = await res.json();
 
         if (data.status) {
           setStatus(data.status);
-          if (["PAID", "FULFILLED", "FAILED"].includes(data.status)) {
+          setPaymentStatus(data.paymentStatus ?? null);
+          if (["PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"].includes(data.status)) {
             setLoading(false);
             return;
           }
@@ -36,7 +40,7 @@ function StatusContent() {
     poll(); // Initial check
 
     return () => clearInterval(interval);
-  }, [orderId]);
+  }, [orderId, token]);
 
   if (!orderId) {
     return (
@@ -60,7 +64,7 @@ function StatusContent() {
     <div className="container mx-auto px-4 pt-24 pb-16 flex flex-col items-center">
       <div className="w-full max-w-md pixel-card border-2 border-[#1e2a45] p-10 text-center flex flex-col items-center gap-8">
 
-        {status === "PENDING" && (
+        {["AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(status) && (
           <>
             <Loader2 className="w-16 h-16 text-amber-400 animate-spin" />
             <div className="space-y-3">
@@ -71,7 +75,7 @@ function StatusContent() {
           </>
         )}
 
-        {(status === "PAID" || status === "FULFILLED") && (
+        {["PENDING", "IN_PROGRESS", "COMPLETED"].includes(status) && (
           <>
             <div className="w-16 h-16 border-2 border-[#00b06f]/30 bg-[#00b06f]/10 flex items-center justify-center">
               <CheckCircle2 className="w-8 h-8 text-[#00b06f]" />
@@ -87,13 +91,13 @@ function StatusContent() {
               <span className="font-pixel text-[9px] text-zinc-500 tracking-wider">СТАТУС</span>
               <span className="inline-flex items-center gap-1.5 font-black text-xs uppercase tracking-wider text-[#00b06f]">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                Оплачено
+                {status === "COMPLETED" ? "Выполнено" : "Оплачено"}
               </span>
             </div>
           </>
         )}
 
-        {status === "FAILED" && (
+        {(["REJECTED", "ERROR"].includes(status) || ["REJECTED", "CANCELED", "FAILED"].includes(paymentStatus ?? "")) && (
           <>
             <div className="w-16 h-16 border-2 border-red-500/30 bg-red-500/5 flex items-center justify-center">
               <XCircle className="w-8 h-8 text-red-400" />

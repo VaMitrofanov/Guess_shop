@@ -96,6 +96,72 @@ export async function initTinkoffPayment(
   };
 }
 
+export type CanonicalPaymentInit = {
+  publicOrderId: string;
+  amountKopecks: number;
+  receiptEmail: string;
+  description: string;
+  statusToken: string;
+};
+
+/**
+ * Fiscalized Init for the canonical SITE flow. Unlike the legacy adapter this
+ * accepts integer kopecks, includes NotificationURL and fails closed unless
+ * the merchant's accountant/KKT operator supplied every receipt classifier.
+ */
+export async function initCanonicalTinkoffPayment(input: CanonicalPaymentInit) {
+  const terminalKey = getRequiredEnv("TINKOFF_TERMINAL_KEY");
+  const secretKey = getRequiredEnv("TINKOFF_SECRET_KEY");
+  const taxation = getRequiredEnv("TINKOFF_TAXATION");
+  const tax = getRequiredEnv("TINKOFF_ITEM_TAX");
+  const paymentMethod = getRequiredEnv("TINKOFF_PAYMENT_METHOD");
+  const paymentObject = getRequiredEnv("TINKOFF_PAYMENT_OBJECT");
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru";
+  const statusQuery = `orderId=${encodeURIComponent(input.publicOrderId)}&token=${encodeURIComponent(input.statusToken)}`;
+
+  const params: Record<string, unknown> = {
+    TerminalKey: terminalKey,
+    Amount: input.amountKopecks,
+    OrderId: input.publicOrderId,
+    Description: input.description.slice(0, 140),
+    NotificationURL: `${appUrl}/api/webhooks/tinkoff`,
+    SuccessURL: `${appUrl}/payment/status?${statusQuery}&result=success`,
+    FailURL: `${appUrl}/payment/status?${statusQuery}&result=fail`,
+    DATA: { Email: input.receiptEmail },
+    Receipt: {
+      Email: input.receiptEmail,
+      Taxation: taxation,
+      Items: [{
+        Name: "Цифровая услуга по заказу",
+        Price: input.amountKopecks,
+        Quantity: 1,
+        Amount: input.amountKopecks,
+        Tax: tax,
+        PaymentMethod: paymentMethod,
+        PaymentObject: paymentObject,
+      }],
+    },
+  };
+
+  const body = { ...params, Token: buildToken(params, secretKey) };
+  const res = await fetch("https://securepay.tinkoff.ru/v2/Init", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`[Tinkoff] Init failed with HTTP ${res.status}`);
+
+  const data = await res.json();
+  if (!data.Success || !data.PaymentId || !data.PaymentURL) {
+    throw new Error(`[Tinkoff] Init error: ${data.Message ?? data.ErrorCode ?? "Unknown"}`);
+  }
+  return {
+    paymentId: String(data.PaymentId),
+    paymentUrl: String(data.PaymentURL),
+  };
+}
+
 // ── Webhook signature verification ───────────────────────────────────────────
 
 /**

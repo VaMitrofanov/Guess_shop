@@ -37,7 +37,7 @@ interface Order {
   /** П3: клиент ответил «❌ Не мой ник» на GP-watch-пинг — дожимать вручную. */
   gpWatchDeclinedAt: string | null;
   purchaserUsername: string | null;
-  orderSource: "WB" | "DIRECT" | "AVITO" | "MANUAL";
+  orderSource: "WB" | "DIRECT" | "AVITO" | "MANUAL" | "SITE";
   reviewStatus: "PENDING" | "SUBMITTED" | null;
   userOrderNumber: number | null;
   userOrderTotal: number | null;
@@ -809,11 +809,12 @@ function RebindModal({ order, token, onDone, onClose }: {
 }
 
 /* ───────────── DONE tab: accordion grouped by purchaserUsername ───────────── */
-type SourceFilter = "ALL" | "WB" | "DIRECT" | "AVITO" | "MANUAL";
+type SourceFilter = "ALL" | "WB" | "DIRECT" | "AVITO" | "MANUAL" | "SITE";
 const SOURCE_CHIPS: { id: SourceFilter; label: string; color: string }[] = [
   { id: "ALL",    label: "Все",     color: C.textPrimary },
   { id: "WB",     label: "WB",      color: C.green },
   { id: "DIRECT", label: "Прямой",  color: C.blue },
+  { id: "SITE",   label: "Сайт",    color: C.blue },
   { id: "AVITO",  label: "Авито",   color: C.orange },
   { id: "MANUAL", label: "Ручные",  color: C.textTertiary },
 ];
@@ -821,6 +822,7 @@ const SOURCE_CHIPS: { id: SourceFilter; label: string; color: string }[] = [
 const SOURCE_BADGE_META: Record<string, { label: string; color: string }> = {
   WB:     { label: "WB",     color: C.green },
   DIRECT: { label: "Прямой", color: C.blue },
+  SITE:   { label: "Сайт",   color: C.blue },
   AVITO:  { label: "Авито",  color: C.orange },
   MANUAL: { label: "Ручной", color: C.textTertiary },
 };

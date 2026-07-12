@@ -12,6 +12,17 @@ import { cn } from "@/lib/utils";
 import { usePricing } from "@/hooks/usePricing";
 import { Checkbox } from "@/components/ui/checkbox";
 
+type PriceQuote = {
+    quoteId: string;
+    requestedRobux: number;
+    bonusRobux: number;
+    gamepassPriceRobux: number;
+    baseAmountKopecks: number;
+    discountKopecks: number;
+    finalAmountKopecks: number;
+    expiresAt: string;
+};
+
 function RobuxIcon({ className }: { className?: string }) {
     return (
         <svg className={className} viewBox="0 0 24 24" fill="none">
@@ -31,7 +42,6 @@ function RobuxIcon({ className }: { className?: string }) {
 function CheckoutContent() {
     const searchParams = useSearchParams();
     const amountStr = searchParams.get("amount") || "0";
-    const productId = searchParams.get("productId") || null;
     const rememberedUsername = searchParams.get("username")?.trim() || "";
 
     const { loading: priceLoading, getPrice, getBreakdown } = usePricing();
@@ -51,6 +61,10 @@ function CheckoutContent() {
     const [searching, setSearching] = useState(false);
     const [loadingPasses, setLoadingPasses] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [quoteLoading, setQuoteLoading] = useState(false);
+    const [quote, setQuote] = useState<PriceQuote | null>(null);
+    const [receiptEmail, setReceiptEmail] = useState("");
+    const [idempotencyKey] = useState(() => crypto.randomUUID());
     const [error, setError] = useState("");
     // Mandatory consent — ст. 26.1 ЗоЗПП + ФЗ-152. Acts as legal acceptance
     // of the public offer; without it we cannot lawfully process the
@@ -81,6 +95,11 @@ function CheckoutContent() {
         if (!username) { setError("Введите ваш никнейм в Roblox"); return; }
         if (method === "Gamepass" && !gamepassId) { setError("Выберите геймпасс"); return; }
         if (robux < 100) { setError("Минимальная сумма — 100 Robux"); return; }
+        if (!quote || new Date(quote.expiresAt) <= new Date()) {
+            setError("Котировка истекла. Вернитесь назад и обновите цену.");
+            return;
+        }
+        if (!receiptEmail) { setError("Укажите email для электронного чека"); return; }
         if (!agreedToTerms) {
             setError("Необходимо согласие с офертой и политикой конфиденциальности");
             return;
@@ -90,13 +109,45 @@ function CheckoutContent() {
             const res = await fetch("/api/orders/create", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username, amountRobux: robux, productId, method, gamepassId, agreedToTerms }),
+                body: JSON.stringify({
+                    quoteId: quote.quoteId,
+                    username,
+                    gamepassId,
+                    receiptEmail,
+                    agreedToTerms,
+                    idempotencyKey: idempotencyKey || crypto.randomUUID(),
+                }),
             });
             const data = await res.json();
             if (data.success && data.paymentUrl) window.location.href = data.paymentUrl;
             else setError(data.error || "Ошибка инициализации оплаты");
         } catch { setError("Ошибка сети. Попробуйте еще раз."); }
         finally { setLoading(false); }
+    };
+
+    const prepareConfirmation = async () => {
+        if (!username || !gamepassId) { setError("Укажите ник и выберите геймпасс"); return; }
+        setError("");
+        setQuoteLoading(true);
+        try {
+            const res = await fetch("/api/pricing/quote", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ amountRobux: robux }),
+            });
+            const data = await res.json();
+            if (!res.ok) { setError(data.error || "Не удалось зафиксировать цену"); return; }
+            if (selectedGp && Number(selectedGp.price) !== data.gamepassPriceRobux) {
+                setError(`Установите цену геймпасса ${data.gamepassPriceRobux} R$ и найдите его снова.`);
+                return;
+            }
+            setQuote(data);
+            setStep("confirm");
+        } catch {
+            setError("Не удалось зафиксировать цену. Проверьте соединение.");
+        } finally {
+            setQuoteLoading(false);
+        }
     };
 
     // Detect if query is a direct gamepass ID or URL
@@ -350,6 +401,7 @@ function CheckoutContent() {
                                                 setGamepassId(gp.id.toString());
                                                 setSelectedGp(gp);
                                                 setRobux(netRobux);
+                                                setQuote(null);
                                             }}
                                             className={cn(
                                                 "pixel-card p-4 text-left flex gap-4 transition-all relative",
@@ -423,13 +475,11 @@ function CheckoutContent() {
 
                     {/* Next step */}
                     <button
-                        onClick={() => {
-                            if (!username || !gamepassId) { setError("Укажите ник и выберите геймпасс"); return; }
-                            setStep("confirm");
-                        }}
+                        onClick={prepareConfirmation}
+                        disabled={quoteLoading}
                         className="w-full h-14 gold-gradient font-black text-sm uppercase tracking-widest text-white hover:opacity-90 active:scale-[0.98] transition-all rounded-none flex items-center justify-center gap-3"
                     >
-                        К ПОДТВЕРЖДЕНИЮ <ArrowRight className="w-4 h-4" />
+                        {quoteLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>К ПОДТВЕРЖДЕНИЮ <ArrowRight className="w-4 h-4" /></>}
                     </button>
                 </div>
 
@@ -462,20 +512,40 @@ function CheckoutContent() {
                                 <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">Вы получите</p>
                                 <div className="flex items-center gap-2">
                                     <RobuxIcon className="w-5 h-5 text-[#00b06f]" />
-                                    <span className="text-3xl font-black">{robux.toLocaleString()}</span>
+                                    <span className="text-3xl font-black">{(quote ? quote.requestedRobux + quote.bonusRobux : robux).toLocaleString()}</span>
                                 </div>
-                                <p className="font-pixel text-[9px] text-zinc-500">чистых R$</p>
+                                <p className="font-pixel text-[9px] text-zinc-500">
+                                    {quote?.bonusRobux ? `${quote.requestedRobux} + ${quote.bonusRobux} бонус` : "чистых R$"}
+                                </p>
                             </div>
                             <div className="bg-[#080c18] border border-[#1e2a45] p-5 space-y-2">
                                 <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">К оплате</p>
                                 <span className="text-3xl font-black text-[#00b06f]">
-                                    {priceLoading ? "..." : `${price.toLocaleString()}₽`}
+                                    {quote ? `${(quote.finalAmountKopecks / 100).toLocaleString("ru-RU")}₽` : priceLoading ? "..." : `${price.toLocaleString()}₽`}
                                 </span>
                                 <p className="font-pixel text-[9px] text-zinc-500">
-                                    {priceBreakdown.rubPerRobux} ₽/R${priceBreakdown.smallOrderSurcharge ? ` + ${priceBreakdown.smallOrderSurcharge} ₽` : ""}
+                                    {quote?.discountKopecks
+                                        ? `база ${quote.baseAmountKopecks / 100} ₽ − скидка ${quote.discountKopecks / 100} ₽`
+                                        : `${priceBreakdown.rubPerRobux} ₽/R$${priceBreakdown.smallOrderSurcharge ? ` + ${priceBreakdown.smallOrderSurcharge} ₽` : ""}`}
                                 </p>
                             </div>
                         </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label htmlFor="receipt-email" className="text-xs font-black text-zinc-400 uppercase tracking-[0.2em]">
+                            Email для электронного чека
+                        </label>
+                        <input
+                            id="receipt-email"
+                            type="email"
+                            autoComplete="email"
+                            value={receiptEmail}
+                            onChange={(event) => setReceiptEmail(event.target.value.trim())}
+                            placeholder="you@example.com"
+                            className="w-full h-14 bg-[#080c18] border-2 border-[#1e2a45] focus:border-[#00b06f]/50 px-4 outline-none font-bold text-sm text-white"
+                        />
+                        <p className="text-[11px] text-zinc-600">Email передаётся оператору кассы только для отправки чека.</p>
                     </div>
 
                     {/* Instructions */}
@@ -550,10 +620,10 @@ function CheckoutContent() {
                         </button>
                         <button
                             onClick={handlePay}
-                            disabled={loading || !agreedToTerms}
+                            disabled={loading || !agreedToTerms || !quote || !receiptEmail}
                             className={cn(
                                 "flex-[2] h-14 font-black text-xs uppercase tracking-widest text-white transition-all rounded-none flex items-center justify-center gap-3",
-                                agreedToTerms && !loading
+                                agreedToTerms && quote && receiptEmail && !loading
                                     ? "gold-gradient hover:opacity-90 active:scale-[0.98] cursor-pointer"
                                     : "bg-[#1e2a45] text-zinc-500 cursor-not-allowed",
                             )}

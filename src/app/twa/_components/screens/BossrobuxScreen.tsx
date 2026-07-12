@@ -777,17 +777,18 @@ interface TxOrder {
   purchaserUsername: string | null;
   wbCode: string;
   isDirectOrder: boolean;
-  orderSource: "WB" | "DIRECT" | "AVITO" | "MANUAL";
+  orderSource: "WB" | "DIRECT" | "AVITO" | "MANUAL" | "SITE";
   createdAt: string;
   updatedAt: string;
   user: { tgId: string | null; vkId: string | null; name: string | null; username: string | null };
 }
 
-type TxSourceFilter = "ALL" | "WB" | "DIRECT" | "AVITO" | "MANUAL";
+type TxSourceFilter = "ALL" | "WB" | "DIRECT" | "AVITO" | "MANUAL" | "SITE";
 const TX_SOURCE_CHIPS: { id: TxSourceFilter; label: string; color: string }[] = [
   { id: "ALL",    label: "Все",     color: C.textPrimary },
   { id: "WB",     label: "WB",      color: C.green },
   { id: "DIRECT", label: "Прямой",  color: C.blue },
+  { id: "SITE",   label: "Сайт",    color: C.blue },
   { id: "AVITO",  label: "Авито",   color: C.orange },
   { id: "MANUAL", label: "Ручные",  color: C.textTertiary },
 ];
@@ -795,6 +796,7 @@ const TX_SOURCE_CHIPS: { id: TxSourceFilter; label: string; color: string }[] = 
 const TX_SOURCE_BADGE: Record<string, { label: string; color: string }> = {
   WB:     { label: "WB",     color: C.green },
   DIRECT: { label: "Прямой", color: C.blue },
+  SITE:   { label: "Сайт",   color: C.blue },
   AVITO:  { label: "Авито",  color: C.orange },
   MANUAL: { label: "Ручной", color: C.textTertiary },
 };

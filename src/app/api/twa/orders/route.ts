@@ -171,7 +171,7 @@ export async function GET(req: NextRequest) {
   }
 
   const notTest = { isTest: false };
-  const sourceWhere = sourceFilter && ["WB", "DIRECT", "AVITO", "MANUAL"].includes(sourceFilter)
+  const sourceWhere = sourceFilter && ["WB", "DIRECT", "AVITO", "MANUAL", "SITE"].includes(sourceFilter)
     ? { orderSource: sourceFilter }
     : {};
   const where = q

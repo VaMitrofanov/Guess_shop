@@ -16,9 +16,9 @@
   `UserIdentity`, `BonusLedger`, `AccountMergeAudit`, `PricingPolicy` и `PriceQuote`;
   migration backfill-ит legacy TG/VK/email identity и открывающие остатки бонусов без
   изменения баланса. VK web-login переведён на `UserIdentity`, а `POST /api/pricing/quote`
-  создаёт короткую серверную котировку в копейках. Quote пока **не подключена** к legacy
-  checkout и не делает его готовым к приёму денег — это следующий канонический order/payment
-  инкремент. Reconciliation после migrate: `420 User = 420 UserIdentity`, opening ledger:
+  создаёт короткую серверную котировку в копейках. На этом production-коммите quote ещё не
+  была подключена к checkout; локальный инкремент 2026-07-13 ниже закрывает разрыв в коде.
+  Reconciliation после migrate: `420 User = 420 UserIdentity`, opening ledger:
   `50` строк / `4900 R$`, Roblox-ник есть у `340` User, активна одна policy.
 - **2026-07-12:** исправлен email credentials provider; ЛК теперь
   объединяет legacy SITE и реальные `WbOrder` (WB/DIRECT/AVITO/MANUAL), показывает активные
@@ -31,6 +31,15 @@
 - **2026-07-13, production:** Web commit `324a930` развёрнут, контейнер `healthy`; прямой
   HTTPS на `robloxbank.ru` и `www` возвращает `retail-direct-v1`. Корень намеренно остаётся
   `503` в maintenance (`MAINTENANCE_MODE=on`) до launch gates, поэтому это не incident.
+- **2026-07-13, локально (ещё не production):** checkout переведён с legacy `Order/Product`
+  на канонический `WbOrder(SITE/WEB)`: quote одноразово потребляется вместе с созданием
+  `PaymentAttempt`, `OrderEvent` и `OutboxMessage`; сервер проверяет ownership/TTL/version,
+  Roblox owner/sale-state/точную gross-цену. Добавлены обязательный idempotency UUID,
+  email чека, случайный status-token (в БД только hash) и строгая callback state machine со
+  сверкой terminal/payment/order/amount. Bonus ledger/баланс и одноразовая скидка потребляются
+  атомарно с quote, поэтому параллельные quotes не дают double-spend. Боевой `Init` закрыт `SITE_ACQUIRING_ENABLED=false`
+  и fail-closed ККТ env. Migration `20260713_canonical_web_order_foundation` **не применена**;
+  outbox worker, возвраты/чеки, staging test matrix и внешние gates остаются.
 - **Внешние launch-gates остаются обязательными:** письменная категория Т-Банка, юрпроверка
   модели/бренда, реквизиты/ККТ и фактическая локализация первичной БД в РФ не заменяются
   программным кодом.
@@ -44,11 +53,11 @@
 | Приоритет | Блокер | Подтверждённое состояние |
 |---|---|---|
 | P0 | Публичный сайт закрыт | `https://robloxbank.ru/` отвечает `503` и переписывается на maintenance; `/api/health` и тестовый WB-гайд доступны |
-| P0 | Checkout не создаёт валидный заказ | В production `Product=0`, а legacy `Order.productId` имеет обязательный FK; `default-calc` отсутствует, legacy-заказов `0` |
-| P0 | Цена ещё не зафиксирована на оплату | Базовая цена TG/VK/Web уже едина (`retail-direct-v1`), но quote пока не потребляется каноническим order/payment flow |
-| P0 | Нет общего клиентского аккаунта | БД физически общая, но TG/VK/email — отдельные идентичности; Telegram-login отсутствует, безопасного link/merge нет, ЛК не читает `WbOrder` и бонусы |
-| P0 | Платёжный callback небезопасен | Нет строгой сверки terminal/payment/amount, атомарной идемпотентности и durable-доставки; ошибки callback часто получают `200 OK` и теряют повтор Т-Банка |
-| P0 | Нет готовой фискализации | Checkout не собирает контакт для чека и не передаёт `Receipt/Items`; нет возвратного/закрывающего чека и проверенного сценария ККТ |
+| P0 | Канонический checkout ещё не развёрнут | Локальный код больше не зависит от `Product/default-calc`, но migration/staging/prod rollout не выполнены и kill-switch выключен |
+| P0 | Цена не прошла payment E2E | Quote уже одноразово потребляется каноническим order flow, но сумма ещё не проверена реальным Init/receipt/callback test matrix |
+| P0 | Общий клиентский аккаунт не завершён | Identity foundation и ЛК с `WbOrder`/бонусами готовы; Telegram-login и безопасный link/merge отсутствуют |
+| P0 | Payment E2E не завершён | Strict callback/event/outbox foundation готов локально; нет production migration, outbox worker/retry/dead-letter, refund/ККТ test matrix |
+| P0 | Нет готовой фискализации | Checkout собирает email и формирует `Receipt/Items` fail-closed, но нет согласованных ККТ-классификаторов, возвратного/закрывающего чека и проверенного сценария ОФД |
 | P0 | Не выполнен публичный чек-лист Т-Банка | Нет заполненных реквизитов и полноценных контактов/возвратов; тексты содержат placeholder и непроверенные обещания |
 | P0 | Риск 152-ФЗ | Основная БД находится вне РФ, хотя политика заявляет локализацию в РФ; не зафиксированы локализация первичного сбора, уведомление РКН и трансграничный контур |
 | P0 | Категория и бренд требуют письменного решения | Правила Roblox ограничивают стороннюю продажу/передачу Robux и коммерческое использование бренда; слово «Банк» также требует юрпроверки |
@@ -77,10 +86,9 @@
 ### 3.1 Единый курс сайта, TG и VK
 
 Первое расхождение устранено 2026-07-12: TG, VK и Web импортируют одну чистую
-`retail-direct-v1` функцию; `/api/pricing`, калькулятор и legacy checkout используют её же.
-Точные пакеты и границы покрыты contract-тестом. Это **не** заменяет следующий подэтап:
-пока нет сохранённой серверной котировки, UI не является источником истины, а цена не
-зафиксирована на время оплаты.
+`retail-direct-v1` функцию; `/api/pricing` и калькулятор используют её же. Точные пакеты и
+границы покрыты contract-тестом. С 2026-07-13 новый checkout принимает только server quote;
+production rollout и реальная payment test matrix ещё не выполнены.
 
 Текущая каноническая политика ботов, которую предлагается сделать базовой для сайта:
 
@@ -215,6 +223,10 @@ Definition of Done: новый пользователь без подсказк�
 
 Legacy `Order` не является хорошим вторым источником заказов: в нём нет ни одной production
 записи, а рабочие 433 заказа находятся в `WbOrder`. Рекомендуемый минимально рискованный путь:
+
+**Статус 2026-07-13:** пункты 1–2 и server-side consumption quote реализованы локально через
+additive migration; legacy adapter/удаление старой модели, outbox worker и production rollout
+ещё не выполнены.
 
 1. Сделать `WbOrder` каноническим retail-заказом (позже нейтрально переименовать), добавить
    `SITE` в `orderSource` и `WEB` в канал создания.
@@ -441,9 +453,12 @@ VK  ─┘                              │
 
 ### Этап 5. Т-Банк, ККТ и fulfillment — 5–8 дней
 
-- Новый checkout поверх канонического заказа/quote/payment attempt.
-- Полный `Init`, receipt/items, callback state machine и строгие сверки.
-- Durable outbox, retry/dead-letter, ручное восстановление и алертинг.
+- Новый checkout поверх канонического заказа/quote/payment attempt. **Код готов локально;
+  migration/staging rollout впереди.**
+- Полный `Init`, receipt/items, callback state machine и строгие сверки. **Foundation готов;
+  реальные terminal/ККТ test cases впереди.**
+- Durable outbox, retry/dead-letter, ручное восстановление и алертинг. **Таблицы/события
+  готовы; worker и эксплуатационный контур впереди.**
 - Cancel/refund, чеки предоплаты/закрытия/возврата, сверка с личным кабинетом Т-Банка/ОФД.
 - Пройти официальные test cases, отдельно дубликат callback, timeout и падение downstream.
 

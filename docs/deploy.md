@@ -42,6 +42,12 @@ destructive changes/существующие таблицы, только пос
 > legacy идентификаторы и opening-строки ненулевых бонусов; перед применением всё равно нужен
 > обычный `migrate status` и backup/reconciliation из master plan.
 
+> ⚠️ Миграция `20260713_canonical_web_order_foundation` должна идти до Web-кода нового
+> checkout/webhook. Она additive для исторических заказов и добавляет `SITE/WEB`,
+> `PaymentAttempt`, `OrderEvent`, `OutboxMessage`. После migration оставить
+> `SITE_ACQUIRING_ENABLED=false`: включение требует отдельной staging test matrix,
+> согласованных ККТ-параметров и всех launch-gates master plan.
+
 > ⚠️ **Автодеплой НЕ покрывает Guide** — его деплоить вручную (Coolify UI/API) при
 > изменениях в `src/app/guide/`, `src/app/layout.tsx`, `public/`, `VKAuthButton` и
 > других файлах Guide-сборки. **Запускать ПОСЛЕ завершения Web-автодеплоя**: обе
@@ -64,8 +70,11 @@ destructive changes/существующие таблицы, только пос
 `ADMIN_SECRET`, `WB_API_TOKEN`, `MAINTENANCE_MODE` (опц., см. ниже), `SITE_UNLOCK_SECRET`
 (опц., байпас техработ); B2B «Антон»: `ANTON_GOOGLE_SHEETS_SPREADSHEET_ID`,
 `GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHEETS_PROTECTED_EDITORS` (email владельца
-таблицы для защиты выполненных строк, Этап 5.8). (Legacy: `TINKOFF_SECRET_KEY`,
-`LOCAL_BOT_URL`, `INTERNAL_WEBHOOK_SECRET`, `BOT_API_TOKEN`.)
+таблицы для защиты выполненных строк, Этап 5.8). SITE-эквайринг (по умолчанию выключен):
+`SITE_ACQUIRING_ENABLED`, `TINKOFF_TERMINAL_KEY`, `TINKOFF_SECRET_KEY`, `TINKOFF_TAXATION`,
+`TINKOFF_ITEM_TAX`, `TINKOFF_PAYMENT_METHOD`, `TINKOFF_PAYMENT_OBJECT`. Классификаторы чека
+не имеют default: их значения подтверждают бухгалтер/ККТ-оператор. Legacy automation:
+`LOCAL_BOT_URL`, `INTERNAL_WEBHOOK_SECRET`, `BOT_API_TOKEN`.
 
 `BOOTSTRAP_ADMIN_EMAIL` + `BOOTSTRAP_ADMIN_PASSWORD` — опциональная **одноразовая** пара
 только для `prisma db seed` на новом окружении. Обе задаются вместе, пароль — от 16 символов,
@@ -119,24 +128,16 @@ Web-контейнера: `/`, `/faq`, `/reviews`, `/checkout`, `/dashboard`, `/
 > выкидывает **весь** Web из ротации (включая `/twa` и `/api`), сайт падает целиком. Это
 > ровно то, что случилось при первом включении 2026-07-03; фикс — `/api/health` в `Dockerfile`.
 
-> **Управление через Coolify API** (токен — в разделе Coolify выше; UUID Web —
-> `z10ws7m1q45h281zwedmhei4`):
-> ```bash
-> B=http://89.110.94.117:8000/api/v1; A=z10ws7m1q45h281zwedmhei4
-> # выставить/поменять env:
-> curl -s -X POST  -H "Authorization: Bearer $COOLIFY_TOKEN" -H 'Content-Type: application/json' \
->   "$B/applications/$A/envs" -d '{"key":"MAINTENANCE_MODE","value":"on","is_preview":false}'
-> curl -s -X PATCH -H "Authorization: Bearer $COOLIFY_TOKEN" -H 'Content-Type: application/json' \
->   "$B/applications/$A/envs" -d '{"key":"MAINTENANCE_MODE","value":"off","is_preview":false}'
-> # применить (Restart — быстро, без пересборки; env читается при создании контейнера):
-> curl -s -X POST  -H "Authorization: Bearer $COOLIFY_TOKEN" "$B/applications/$A/restart"
-> ```
+> **Управление через Coolify API:** base URL, token и UUID Web хранятся только в локальном
+> `HANDOFF.md`. Env меняется через application env endpoint, затем нужен Restart без
+> пересборки (env читается при создании контейнера).
 > Поле `is_build_time` API отклоняет — не передавать. После Restart проверить:
 > `docker exec robloxbank-web printenv MAINTENANCE_MODE` и `docker inspect … Health.Status`.
 
 ## Сеть и доступность из РФ (2026-07-04)
 
-- **DNS:** `robloxbank.ru` — **прямой A** на `89.110.94.117` (RF, grey-cloud; NS всё ещё
+- **DNS:** `robloxbank.ru` — **прямой A** на RF-хост (точный IP только в `HANDOFF.md`,
+  grey-cloud; NS всё ещё
   Cloudflare). Раньше запись была proxied и трафик шёл через `cloudflared`-туннель — но
   Cloudflare деградирован у российских розничных провайдеров (ТСПУ), сайт «работал только с
   VPN». Прямой A это чинит. **Переключение на прямой A делал владелец сам** (подтверждено

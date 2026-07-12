@@ -30,8 +30,9 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 - **TWA** — админка внутри Telegram для менеджера (заказы, выкуп, аналитика).
 
 Публичный корень `robloxbank.ru` пока закрыт maintenance-режимом; рабочая точка входа —
-WB-гайд. Legacy-подсистема прямой продажи через сайт (checkout → Tinkoff → автоматизация)
-присутствует в коде, но не готова к деньгам и не участвует в текущем воркфлоу —
+WB-гайд. Новый checkout уже использует канонический `WbOrder`/quote/payment-attempt, но
+migration и боевой payment E2E ещё не выполнены; kill-switch выключен, поэтому он не готов
+к деньгам и не участвует в текущем воркфлоу —
 см. [architecture.md](architecture.md#legacy) и
 [master plan эквайринга](site-acquiring-master-plan.md).
 
