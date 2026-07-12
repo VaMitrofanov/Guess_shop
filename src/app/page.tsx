@@ -52,6 +52,12 @@ export default function Home() {
 
       <section className={styles.hero}>
         <div className={styles.heroGlow} aria-hidden="true" />
+        <div className={styles.vaultBackdrop} aria-hidden="true">
+          <div className={styles.vaultDoor}>
+            <div className={styles.vaultBolts}>{Array.from({ length: 8 }).map((_, index) => <i key={index} />)}</div>
+            <div className={styles.vaultWheel}><span>R$</span></div>
+          </div>
+        </div>
         <div className={styles.heroCopy}>
           <div className={styles.eyebrow}>
             <span className={styles.statusDot} />
@@ -64,6 +70,7 @@ export default function Home() {
             <br />
             <span>Без лишних шагов.</span>
           </h1>
+          <div className={styles.bankSignature}><strong>ROBLOXBANK</strong><span>цифровой сейф для твоих Robux</span></div>
           <p className={styles.lead}>
             Выбери количество, создай геймпасс по понятной инструкции и оформи заказ прямо на сайте.
           </p>

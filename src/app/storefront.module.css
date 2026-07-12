@@ -19,12 +19,24 @@
 }
 
 .heroGlow { position: absolute; inset: 10% -18% auto auto; width: 420px; height: 420px; border: 1px solid rgba(117,86,232,.12); border-radius: 50%; box-shadow: 0 0 0 70px rgba(117,86,232,.035), 0 0 0 140px rgba(69,214,170,.025); pointer-events: none; }
+.vaultBackdrop { position:absolute; z-index:0; right:-90px; top:30px; width:510px; height:510px; opacity:.09; filter:blur(1.5px); transform:rotate(8deg); pointer-events:none; }
+.vaultDoor { position:absolute; inset:0; border:28px solid #7556e8; border-radius:50%; box-shadow:inset 0 0 0 18px #251b3f,0 0 0 9px rgba(69,214,170,.7); }
+.vaultDoor::before { content:""; position:absolute; inset:70px; border:9px solid #7556e8; border-radius:50%; }
+.vaultBolts i { position:absolute; left:50%; top:50%; width:20px; height:20px; margin:-10px; border-radius:50%; background:#251b3f; transform:rotate(calc(var(--i, 0) * 45deg)) translateY(-218px); }
+.vaultBolts i:nth-child(1){--i:0}.vaultBolts i:nth-child(2){--i:1}.vaultBolts i:nth-child(3){--i:2}.vaultBolts i:nth-child(4){--i:3}.vaultBolts i:nth-child(5){--i:4}.vaultBolts i:nth-child(6){--i:5}.vaultBolts i:nth-child(7){--i:6}.vaultBolts i:nth-child(8){--i:7}
+.vaultWheel { position:absolute; left:50%; top:50%; width:144px; height:144px; margin:-72px; display:grid; place-items:center; border:14px solid #251b3f; border-radius:50%; color:#251b3f; font-family:var(--font-display),sans-serif; font-size:44px; font-weight:950; }
+.vaultWheel::before,.vaultWheel::after { content:""; position:absolute; width:210px; height:14px; border-radius:99px; background:#251b3f; }
+.vaultWheel::after { transform:rotate(90deg); }
+.vaultWheel span { position:relative; z-index:1; padding:8px; background:#fbfaff; border-radius:13px; }
 .heroCopy,.calculatorWrap { position: relative; z-index: 1; }
 .eyebrow { display: inline-flex; align-items: center; gap: 10px; padding: 9px 13px; border: 1px solid #ded7f6; border-radius: 999px; background: rgba(255,255,255,.76); color: #6751b9; font-size: 13px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .statusDot { width: 8px; height: 8px; border-radius: 50%; background: #45d6aa; box-shadow: 0 0 0 5px rgba(69,214,170,.15); }
 .title { margin: 26px 0 24px; font-family: var(--font-display), var(--font-geist-sans), sans-serif; font-size: clamp(50px, 6.5vw, 88px); line-height: .98; letter-spacing: -.075em; font-weight: 700; }
 .title span { position: relative; display: inline; background: linear-gradient(90deg,#7556e8,#5e83ee); background-clip: text; color: transparent; }
 .lead { max-width: 590px; color: #6f6782; font-size: 18px; line-height: 1.65; font-weight: 500; }
+.bankSignature { width:max-content; max-width:100%; margin:-8px 0 22px; display:flex; flex-wrap:wrap; align-items:center; gap:9px 12px; }
+.bankSignature strong { padding:7px 10px; border:2px solid #251b3f; border-radius:8px; background:#45d6aa; color:#193c32; font-size:15px; letter-spacing:.08em; box-shadow:3px 3px 0 #7556e8; }
+.bankSignature span { color:#655b79; font-size:16px; font-weight:800; }
 .heroActions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 30px; }
 .primaryAction,.secondaryAction { min-height: 52px; display: inline-flex; align-items: center; justify-content: center; gap: 10px; border-radius: 13px; padding: 0 20px; font-size: 13px; font-weight: 800; transition: transform .2s ease, box-shadow .2s ease; }
 .primaryAction { background: #7556e8; color: white; box-shadow: 4px 4px 0 #251b3f; }
@@ -36,39 +48,47 @@
 .calculator { position: relative; padding: 28px; border: 1px solid #cfc6ee; border-radius: 26px; background: rgba(255,255,255,.95); box-shadow: 12px 12px 0 #251b3f, 0 26px 70px rgba(54,35,91,.12); transform: rotate(1deg); }
 .calculatorBadge { position: absolute; right: 24px; top: -15px; padding: 7px 12px; border: 1px solid #251b3f; border-radius: 999px; background: #7556e8; color: white; font-size: 13px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
 .calculatorHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 24px; }
-.calculatorHead span { color: #7b728e; font-size: 13px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.calculatorHead span { color: #7b728e; font-size: 15px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
 .calculatorHead h2 { margin: 4px 0 0; font-size: 22px; line-height: 1.2; letter-spacing: -.035em; }
-.rateState { display: flex; align-items: center; gap: 6px; color: #408f77; font-size: 13px; font-weight: 800; white-space: nowrap; }
+.rateState { display: flex; align-items: center; gap: 6px; color: #408f77; font-size: 15px; font-weight: 800; white-space: nowrap; }
 .rateState i { width: 7px; height: 7px; background: #45d6aa; border-radius: 50%; }
-.fieldLabel { display: flex; justify-content: space-between; margin-bottom: 8px; color: #736b85; font-size: 13px; font-weight: 800; }
+.fieldLabel { display: flex; justify-content: space-between; margin-bottom: 8px; color: #736b85; font-size: 16px; font-weight: 800; }
 .amountField { display: flex; align-items: center; gap: 10px; min-height: 66px; padding: 0 14px 0 17px; border: 1.5px solid #bdb1e7; border-radius: 15px; background: #f5f2ff; }
 .amountField input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: #251b3f; font-size: 28px; font-weight: 800; }
 .amountField span { padding: 7px 9px; border-radius: 9px; background: #45d6aa; color: #15382e; font-size: 13px; font-weight: 900; }
 .packGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-top: 9px; }
-.pack,.packActive { min-height: 42px; border: 1px solid #ded8f1; border-radius: 10px; background: white; color: #5d5570; font-size: 13px; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 4px; cursor: pointer; }
+.pack,.packActive { min-height: 48px; border: 1px solid #ded8f1; border-radius: 10px; background: white; color: #5d5570; font-size: 15px; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 4px; cursor: pointer; }
 .packActive { background: #251b3f; border-color: #251b3f; color: white; }
 .priceSummary { margin-top: 20px; padding: 15px 16px; border-radius: 15px; background: #f3f0fa; }
-.priceSummary div { display: flex; justify-content: space-between; gap: 16px; margin: 9px 0; color: #746c85; font-size: 13px; }
+.priceSummary div { display: flex; justify-content: space-between; gap: 16px; margin: 10px 0; color: #746c85; font-size: 16px; }
 .priceSummary strong { color: #3d3551; text-align: right; }
 .priceSummary .total { margin-top: 12px; padding-top: 12px; border-top: 1px solid #dcd5ec; color: #251b3f; font-size: 15px; font-weight: 800; }
 .priceSummary .total strong { color: #7556e8; font-size: 18px; }
-.tierNote { margin: 10px 0 0; color: #8b8499; text-align: center; font-size: 13px; }
-.checkoutAction { width: 100%; min-height: 56px; margin-top: 16px; display: flex; align-items: center; justify-content: center; gap: 9px; border-radius: 13px; background: #7556e8; color: white; font-size: 15px; font-weight: 900; box-shadow: 4px 4px 0 #251b3f; transition: transform .2s ease; }
+.tierNote { margin: 10px 0 0; color: #8b8499; text-align: center; font-size: 15px; }
+.nicknameLabel { display:block; margin:18px 0 8px; color:#655b79; font-size:16px; font-weight:900; }
+.nicknameField { min-height:60px; display:flex; align-items:center; gap:11px; padding:0 15px; border:2px solid #cfc6e9; border-radius:14px; background:#fff; color:#7556e8; transition:border-color .2s,box-shadow .2s; }
+.nicknameField:focus-within { border-color:#7556e8; box-shadow:0 0 0 4px rgba(117,86,232,.12); }
+.nicknameFieldReady { border-color:#45b994; }
+.nicknameField input { min-width:0; width:100%; border:0; outline:0; background:transparent; color:#251b3f; font-size:18px; font-weight:800; }
+.nicknameField input::placeholder { color:#9e96aa; }
+.nicknameNote { margin:8px 0 0; color:#7a718b; font-size:15px; line-height:1.45; }
+.checkoutAction,.checkoutActionDisabled { width:100%; min-height:60px; margin-top:16px; display:flex; align-items:center; justify-content:center; gap:9px; border-radius:13px; background:#7556e8; color:white; font-size:17px; font-weight:900; box-shadow:4px 4px 0 #251b3f; transition:transform .2s ease; }
+.checkoutActionDisabled { background:#d9d4e4; color:#8b8397; box-shadow:none; cursor:not-allowed; }
 .checkoutAction:hover { transform: translateY(-2px); }
-.securityNote { margin: 14px 0 0; display: flex; align-items: center; justify-content: center; gap: 6px; color: #8b8499; font-size: 13px; }
+.securityNote { margin: 14px 0 0; display: flex; align-items: center; justify-content: center; gap: 6px; color: #8b8499; font-size: 15px; }
 
 .assuranceStrip { width: min(1240px, calc(100% - 40px)); margin: 0 auto; padding: 18px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; border: 1px solid #e0daf2; border-radius: 20px; background: rgba(255,255,255,.7); }
 .assuranceItem { display: flex; gap: 11px; align-items: center; padding: 12px; }
 .assuranceIcon { width: 38px; height: 38px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 12px; background: #ece7ff; color: #7556e8; }
 .assuranceItem strong,.assuranceItem small { display: block; }
-.assuranceItem strong { font-size: 14px; }
-.assuranceItem small { margin-top: 3px; color: #81798f; font-size: 13px; line-height: 1.45; }
+.assuranceItem strong { font-size: 16px; }
+.assuranceItem small { margin-top: 3px; color: #81798f; font-size: 15px; line-height: 1.45; }
 
 .section,.controlSection { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 100px 0; }
 .sectionHeading { display: flex; align-items: flex-end; justify-content: space-between; gap: 40px; margin-bottom: 38px; }
 .sectionHeading h2,.controlCard h2,.bottomCta h2 { margin: 9px 0 0; font-family: var(--font-display), sans-serif; font-size: clamp(34px, 4.5vw, 54px); line-height: 1.05; letter-spacing: -.055em; }
-.sectionHeading p { max-width: 420px; margin: 0; color: #786f8c; font-size: 14px; line-height: 1.65; }
-.sectionKicker { color: #7556e8; font-size: 13px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.sectionHeading p { max-width: 440px; margin: 0; color: #786f8c; font-size: 17px; line-height: 1.65; }
+.sectionKicker { color: #7556e8; font-size: 15px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
 .stepsGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .stepCard { min-height: 290px; padding: 24px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid #dbd4ed; border-radius: 22px; background: #fff; transition: transform .2s ease, border-color .2s ease; }
 .stepCard:nth-child(2) { background: #7556e8; color: white; border-color: #7556e8; }
@@ -80,14 +100,14 @@
 .stepProgress { height: 3px; margin: 22px 0; overflow: hidden; border-radius: 99px; background: rgba(104,93,127,.15); }
 .stepProgress i { display: block; height: 100%; background: #45d6aa; }
 .stepCard h3 { margin: 0 0 11px; font-size: 24px; letter-spacing: -.04em; }
-.stepCard p { margin: 0; color: #7a7289; font-size: 15px; line-height: 1.6; }
+.stepCard p { margin: 0; color: #7a7289; font-size: 17px; line-height: 1.6; }
 .stepCard:nth-child(2) p,.stepCard:nth-child(3) p { color: rgba(255,255,255,.72); }
 .stepCard a { margin-top: 18px; display: inline-flex; align-items: center; gap: 7px; color: white; font-size: 13px; font-weight: 800; }
 
 .controlSection { padding-top: 0; }
 .controlCard { position: relative; overflow: hidden; padding: 44px; display: grid; grid-template-columns: 1.1fr .9fr; gap: 60px; align-items: center; border-radius: 28px; background: #e9e3ff; }
 .controlCard::after { content: "R$"; position: absolute; right: -28px; bottom: -105px; font-family: var(--font-display), sans-serif; font-size: 250px; color: rgba(117,86,232,.075); transform: rotate(-8deg); }
-.controlCard p { max-width: 540px; color: #6c6381; font-size: 14px; line-height: 1.65; }
+.controlCard p { max-width: 540px; color: #6c6381; font-size: 17px; line-height: 1.65; }
 .orderWidget { position: relative; z-index: 1; padding: 22px; border: 1px solid #c9bdeb; border-radius: 19px; background: rgba(255,255,255,.88); box-shadow: 8px 8px 0 #7556e8; }
 .orderWidgetTop { display: flex; flex-direction: column; gap: 5px; }
 .orderWidgetTop span { color: #847b96; font-size: 13px; font-weight: 800; text-transform: uppercase; }
@@ -109,6 +129,7 @@
 
 @media (max-width: 720px) {
   .hero { width: min(100% - 28px, 620px); padding: 54px 0; }
+  .vaultBackdrop { right:-250px; top:130px; opacity:.06; }
   .title { font-size: clamp(42px,13vw,62px); }
   .lead { font-size: 17px; }
   .heroActions { flex-direction: column; }
@@ -125,3 +146,40 @@
   .orderLabels { font-size: 12px; }
   .bottomCta { width: calc(100% - 28px); padding: 30px 22px; align-items: flex-start; flex-direction: column; }
 }
+
+:global(html[data-theme="dark"]) .page {
+  color: #f4f0ff;
+  background:
+    radial-gradient(circle at 78% 5%, rgba(117, 86, 232, .22), transparent 30rem),
+    linear-gradient(180deg, #0b0912 0%, #100c19 54%, #0b0912 100%);
+}
+:global(html[data-theme="dark"]) .eyebrow,
+:global(html[data-theme="dark"]) .secondaryAction,
+:global(html[data-theme="dark"]) .calculator,
+:global(html[data-theme="dark"]) .assuranceStrip,
+:global(html[data-theme="dark"]) .stepCard,
+:global(html[data-theme="dark"]) .orderWidget {
+  border-color: #352b48;
+  background: rgba(22, 17, 33, .9);
+}
+:global(html[data-theme="dark"]) .calculator { box-shadow: 12px 12px 0 #7556e8, 0 28px 70px rgba(0,0,0,.34); }
+:global(html[data-theme="dark"]) .amountField,
+:global(html[data-theme="dark"]) .pack,
+:global(html[data-theme="dark"]) .priceSummary,
+:global(html[data-theme="dark"]) .nicknameField { border-color: #3a304b; background: #100d18; }
+:global(html[data-theme="dark"]) .amountField input,
+:global(html[data-theme="dark"]) .secondaryAction,
+:global(html[data-theme="dark"]) .pack,
+:global(html[data-theme="dark"]) .priceSummary strong,
+:global(html[data-theme="dark"]) .nicknameField input,
+:global(html[data-theme="dark"]) .orderWidget { color: #f4f0ff; }
+:global(html[data-theme="dark"]) .lead,
+:global(html[data-theme="dark"]) .heroFacts,
+:global(html[data-theme="dark"]) .assuranceItem small,
+:global(html[data-theme="dark"]) .sectionHeading p,
+:global(html[data-theme="dark"]) .stepCard p,
+:global(html[data-theme="dark"]) .controlCard p,
+:global(html[data-theme="dark"]) .orderLabels { color: #aaa3b8; }
+:global(html[data-theme="dark"]) .controlCard { background: linear-gradient(135deg,#211831,#171020); }
+:global(html[data-theme="dark"]) .bottomCta { background: #7556e8; }
+:global(html[data-theme="dark"]) .bottomCta .sectionKicker { color: #bff5e4; }

@@ -32,6 +32,83 @@
     --muted-foreground: 258 12% 48%;
     --border: 258 34% 90%;
     --radius: 0.75rem;
+    --rb-bg: #fbfaff;
+    --rb-surface: #ffffff;
+    --rb-surface-2: #f4f1fb;
+    --rb-nav: rgba(251, 250, 255, .9);
+    --rb-footer: #f4f1fb;
+    --rb-text: #251b3f;
+    --rb-muted: #706780;
+    --rb-border: #ded8f1;
+    --rb-accent: #7556e8;
+    --rb-accent-soft: #ece7ff;
+    --rb-strong: #251b3f;
+  }
+
+  html[data-theme="dark"] {
+    --background: 252 32% 7%;
+    --foreground: 252 30% 95%;
+    --card: 252 24% 11%;
+    --card-foreground: 252 30% 95%;
+    --muted: 252 20% 15%;
+    --muted-foreground: 252 10% 67%;
+    --border: 252 18% 22%;
+    --rb-bg: #0b0912;
+    --rb-surface: #151120;
+    --rb-surface-2: #100d18;
+    --rb-nav: rgba(11, 9, 18, .9);
+    --rb-footer: #100d18;
+    --rb-text: #f4f0ff;
+    --rb-muted: #aaa3b8;
+    --rb-border: #30283f;
+    --rb-accent: #a68bff;
+    --rb-accent-soft: #241b3b;
+    --rb-strong: #7556e8;
+  }
+}
+
+:root {
+  --rb-bg: #fbfaff;
+  --rb-surface: #ffffff;
+  --rb-surface-2: #f4f1fb;
+  --rb-nav: rgba(251, 250, 255, .9);
+  --rb-footer: #f4f1fb;
+  --rb-text: #251b3f;
+  --rb-muted: #706780;
+  --rb-border: #ded8f1;
+  --rb-accent: #7556e8;
+  --rb-accent-soft: #ece7ff;
+  --rb-strong: #251b3f;
+}
+
+html[data-theme="dark"] {
+  --rb-bg: #0b0912;
+  --rb-surface: #151120;
+  --rb-surface-2: #100d18;
+  --rb-nav: rgba(11, 9, 18, .9);
+  --rb-footer: #100d18;
+  --rb-text: #f4f0ff;
+  --rb-muted: #aaa3b8;
+  --rb-border: #30283f;
+  --rb-accent: #a68bff;
+  --rb-accent-soft: #241b3b;
+  --rb-strong: #7556e8;
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme]) {
+    --rb-bg: #0b0912;
+    --rb-surface: #151120;
+    --rb-surface-2: #100d18;
+    --rb-nav: rgba(11, 9, 18, .9);
+    --rb-footer: #100d18;
+    --rb-text: #f4f0ff;
+    --rb-muted: #aaa3b8;
+    --rb-border: #30283f;
+    --rb-accent: #a68bff;
+    --rb-accent-soft: #241b3b;
+    --rb-strong: #7556e8;
+    color-scheme: dark;
   }
 }
 
@@ -49,13 +126,62 @@
 }
 
 body {
-  background-color: #fbfaff;
-  color: #251b3f;
+  background-color: var(--rb-bg);
+  color: var(--rb-text);
   font-size: 17px;
   line-height: 1.6;
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui;
   background-image: radial-gradient(ellipse 65% 38% at 75% -8%, rgba(117,86,232,.09), transparent 58%);
 }
+
+.theme-toggle-button {
+  min-width: 42px;
+  height: 42px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--rb-border);
+  border-radius: 12px;
+  background: var(--rb-surface);
+  color: var(--rb-text);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform .2s ease, border-color .2s ease, background .2s ease;
+}
+.theme-toggle-button:hover { transform: translateY(-1px); border-color: var(--rb-accent); }
+.theme-toggle-button-compact { width: 42px; padding: 0; }
+.theme-toggle-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 9px);
+  z-index: 100;
+  width: 210px;
+  padding: 8px;
+  border: 1px solid var(--rb-border);
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--rb-surface) 94%, transparent);
+  color: var(--rb-text);
+  box-shadow: 0 18px 45px rgba(10, 7, 20, .22);
+  backdrop-filter: blur(18px);
+}
+.theme-toggle-title { padding: 7px 9px 8px; color: var(--rb-muted); font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.theme-toggle-menu button { width: 100%; min-height: 42px; padding: 0 10px; display: flex; align-items: center; gap: 9px; border: 0; border-radius: 10px; background: transparent; color: inherit; font-size: 13px; font-weight: 750; cursor: pointer; }
+.theme-toggle-menu button:hover,.theme-toggle-menu button[aria-checked="true"] { background: var(--rb-accent-soft); color: var(--rb-accent); }
+
+.wb-intro {
+  color: var(--rb-text);
+  background:
+    radial-gradient(circle at 78% 18%, rgba(117,86,232,.2), transparent 30rem),
+    radial-gradient(circle at 20% 82%, rgba(69,214,170,.1), transparent 28rem),
+    var(--rb-bg);
+}
+.wb-intro-orbit { position:absolute; border:1px solid color-mix(in srgb,var(--rb-accent) 22%,transparent); border-radius:50%; pointer-events:none; animation:wb-intro-float 8s ease-in-out infinite alternate; }
+.wb-intro-orbit-one { width:520px; height:520px; right:-180px; top:-190px; box-shadow:0 0 0 70px color-mix(in srgb,var(--rb-accent) 5%,transparent),0 0 0 140px color-mix(in srgb,var(--rb-accent) 3%,transparent); }
+.wb-intro-orbit-two { width:360px; height:360px; left:-190px; bottom:-160px; animation-delay:-3s; }
+@keyframes wb-intro-float { to { transform:translate3d(-28px,32px,0) rotate(8deg); } }
 
 .glass {
   background: rgba(15, 21, 40, 0.8);
@@ -81,8 +207,8 @@ body {
 }
 
 .pixel-card {
-  background: #ffffff;
-  border: 2px solid #ded8f1;
+  background: var(--rb-surface);
+  border: 2px solid var(--rb-border);
   position: relative;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -95,7 +221,7 @@ body {
   position: absolute;
   width: 8px;
   height: 8px;
-  background: #fbfaff;
+  background: var(--rb-bg);
   z-index: 1;
 }
 .pixel-card::before { top: -2px; right: -2px; }
@@ -181,6 +307,22 @@ body {
 .vf-checkout [class~="text-[11px]"] { font-size: 13px; line-height: 1.5; }
 .vf-checkout .text-xs { font-size: 14px; line-height: 1.5; }
 .vf-checkout .tracking-widest { letter-spacing: .08em; }
+
+html[data-theme="dark"] .vf-checkout {
+  background:
+    radial-gradient(circle at 82% 10%, rgba(117,86,232,.22), transparent 28rem),
+    #0b0912;
+  color: #f4f0ff;
+}
+html[data-theme="dark"] .vf-checkout .pixel-card,
+html[data-theme="dark"] .vf-checkout .bg-\[\#080c18\] { background-color:#151120; border-color:#352b48; }
+html[data-theme="dark"] .vf-checkout input,
+html[data-theme="dark"] .vf-checkout select,
+html[data-theme="dark"] .vf-checkout textarea { background:#100d18!important; border-color:#403453!important; color:#f4f0ff!important; }
+html[data-theme="dark"] .vf-checkout .text-zinc-300 { color:#ddd6e9; }
+html[data-theme="dark"] .vf-checkout .text-zinc-400 { color:#b3abba; }
+html[data-theme="dark"] .vf-checkout .text-zinc-500 { color:#9991a7; }
+html[data-theme="dark"] .vf-checkout .border-\[\#1e2a45\] { border-color:#352b48; }
 
 /* ── Page enter animation ──────────────────────────────── */
 @keyframes page-enter {

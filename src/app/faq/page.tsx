@@ -3,6 +3,8 @@ import Footer from "@/components/footer";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import FAQClient from "@/components/faq-client";
+import { ArrowRight, Headphones } from "lucide-react";
+import styles from "../public-sections.module.css";
 
 // Force dynamic rendering — the FAQ list lives in DB, so we don't want
 // `next build` to try and prerender this page (Coolify build env may not
@@ -79,45 +81,17 @@ export default async function FAQPage() {
   const displayFaqs = faqs.length > 0 ? JSON.parse(JSON.stringify(faqs)) : DEFAULT_FAQS;
 
   return (
-    <main className="min-h-screen">
+    <main className={styles.page}>
       <Navbar />
-
-      <section className="container mx-auto px-4 pt-16 pb-24 max-w-3xl">
-
-        {/* Header */}
-        <div className="mb-14 space-y-4">
-          <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">HELP CENTER</div>
-          <h1 className="text-4xl md:text-6xl font-black uppercase tracking-[-0.03em] leading-none">
-            Частые<br />
-            <span className="gold-text">вопросы</span>
-          </h1>
-          <p className="text-zinc-400 font-medium max-w-lg">
-            Ответы на самые популярные вопросы о покупке Robux через Roblox Bank.
-          </p>
-        </div>
-
-        {/* Accent line */}
-        <div className="accent-line mb-10" />
-
-        {/* FAQ list */}
+      <div className={styles.shell}>
+        <header className={styles.hero}>
+          <div className={styles.heroCopy}><span className={styles.kicker}>Центр помощи RobloxBank</span><h1>Ответ рядом.<br /><span>Без мелкого шрифта.</span></h1><p>Собрали понятные ответы о цене, геймпассе, оплате, сроках и возврате. Самый частый вопрос уже открыт.</p></div>
+          <div className={styles.seal}>?</div>
+        </header>
+        <div className={styles.sectionTop}><h2>Популярные вопросы</h2><p>Нажми на вопрос, чтобы открыть ответ. Всё читается нормально даже с телефона.</p></div>
         <FAQClient initialFaqs={displayFaqs} />
-
-        {/* Still have questions */}
-        <div className="mt-16 pixel-card border-2 border-[#1e2a45] p-8 space-y-5">
-          <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider">SUPPORT</div>
-          <h2 className="text-2xl font-black uppercase tracking-tight">Остались вопросы?</h2>
-          <p className="text-zinc-400 font-medium text-sm leading-relaxed">
-            Напишите нам — обычно отвечаем в течение нескольких минут.
-          </p>
-          <Link
-            href="https://t.me/RobloxBank_PA"
-            className="inline-flex h-12 px-8 gold-gradient font-black text-[10px] uppercase tracking-widest text-white hover:opacity-90 transition-all rounded-none items-center gap-2"
-          >
-            Написать в Telegram →
-          </Link>
-        </div>
-      </section>
-      
+        <section className={styles.cta}><div className={styles.ctaText}><Headphones size={30} /><h2>Нужен человек?</h2><p>Напиши менеджеру и приложи номер заказа или скрин проблемы.</p></div><Link href="https://t.me/RobloxBank_PA" className={styles.button}>Написать в Telegram <ArrowRight size={19} /></Link></section>
+      </div>
       <Footer />
     </main>
   );

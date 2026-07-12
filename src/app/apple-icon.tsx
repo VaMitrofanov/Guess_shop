@@ -11,32 +11,32 @@ export default function AppleIcon() {
         style={{
           width: 180,
           height: 180,
-          background: "#0D0D1A",
+          background: "#251B3F",
           borderRadius: 40,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
         }}
       >
-        {/* Coin outer ring */}
+        {/* RobloxBank vault door */}
         <div
           style={{
             width: 148,
             height: 148,
-            borderRadius: "50%",
-            background: "#9A6F00",
+            borderRadius: 38,
+            background: "#7556E8",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
           }}
         >
-          {/* Coin face */}
           <div
             style={{
-              width: 132,
-              height: 132,
+              width: 112,
+              height: 112,
               borderRadius: "50%",
-              background: "#F0B429",
+              background: "#FBFAFF",
+              border: "10px solid #45D6AA",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -44,15 +44,15 @@ export default function AppleIcon() {
           >
             <span
               style={{
-                color: "#0D0D1A",
-                fontSize: 84,
+                color: "#251B3F",
+                fontSize: 48,
                 fontWeight: 900,
                 fontFamily: "Arial Black, Arial, sans-serif",
                 lineHeight: 1,
                 marginTop: 4,
               }}
             >
-              R
+              R$
             </span>
           </div>
         </div>

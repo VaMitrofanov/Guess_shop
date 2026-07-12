@@ -10,11 +10,11 @@ export const metadata: Metadata = {
 };
 
 interface GuidPageProps {
-  searchParams: Promise<{ source?: string; skip?: string; code?: string; test?: string; nom?: string; preview?: string; amount?: string }>;
+  searchParams: Promise<{ source?: string; skip?: string; code?: string; test?: string; nom?: string; preview?: string; amount?: string; username?: string }>;
 }
 
 export default async function GuidePage({ searchParams }: GuidPageProps) {
-  const { source, skip, code, test, nom, preview, amount } = await searchParams;
+  const { source, skip, code, test, nom, preview, amount, username } = await searchParams;
   const isWB = source === "wb";
   const skipGate = isWB && !!skip;
   // code passed by TG/VK bot so the instruction page opens even in Telegram's WebView
@@ -35,7 +35,7 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
   const siteAmount = Math.min(CUSTOM_MAX, Math.max(CUSTOM_MIN, parseInt(amount ?? "1000", 10) || 1000));
 
   if (!isWB && source !== "direct") {
-    return <SiteGuide initialAmount={siteAmount} minAmount={CUSTOM_MIN} maxAmount={CUSTOM_MAX} />;
+    return <SiteGuide initialAmount={siteAmount} initialUsername={username ?? ""} minAmount={CUSTOM_MIN} maxAmount={CUSTOM_MAX} />;
   }
 
   return (

@@ -11,6 +11,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import VKAuthButton from "@/components/auth/VKAuthButton";
 import { getOrInitSessionId } from "@/lib/wb-session";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const RATE = 0.7; // Roblox keeps 30%
 const calcPrice = (n: number) => (n > 0 ? Math.ceil(n / RATE) : 0);
@@ -231,13 +232,14 @@ export default function WBInstructionV2({
         <div className="wbi-top">
           <div>
             <div className="wbi-eye">{mode === "WB" ? "WILDBERRIES × ROBLOXBANK" : mode === "SITE" ? "ROBLOXBANK · ПОКУПКА НА САЙТЕ" : "ROBLOXBANK · ЗАКАЗ В БОТЕ"}</div>
-            <div style={{ fontSize: 13, color: "#fff", marginTop: 2 }}>Инструкция</div>
+            <div className="wbi-top-sub">Инструкция</div>
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <div className="wbi-tag">Номинал {nomDefault} R$</div>
             {onReset && (
               <button className="wbi-reset" onClick={onReset}>‹ Новый код</button>
             )}
+            <ThemeToggle compact />
           </div>
         </div>
 
@@ -262,11 +264,13 @@ export default function WBInstructionV2({
         <div className="wbi-tl">
 
           <Step n="1">
-            <div className="wbi-cols wbi-media">
+            <div className="wbi-cols wbi-media wbi-intro-step">
               <div><div className="wbi-ttl">Открой Creator Hub</div>
-                <p className="wbi-t">Это официальный сайт Roblox — где создаётся геймпасс. Кнопка ведёт прямо в нужный раздел.</p>
-                <p className="wbi-s" style={{ marginTop: 6 }}>💡 Лучше открыть в обычном браузере (Safari / Chrome), где ты уже вошёл в свой аккаунт Roblox. Если открылось внутри Telegram/ВК и просит вход — нажми «⋯» вверху → «Открыть в браузере».</p>
-                <p className="wbi-s" style={{ marginTop: 6 }}>📱 Можно создать геймпасс и прямо в приложении Roblox — скоро добавим пошаговую инструкцию.</p></div>
+                <p className="wbi-t">Перейди на официальный сайт Roblox, где создаются геймпассы. Лучше открыть его в Safari или Chrome.</p>
+                <div className="wbi-quicknotes">
+                  <span>✓ Если ты уже вошёл в Roblox, нужный раздел откроется сразу.</span>
+                  <span>↗ Открылось внутри Telegram или VK? Нажми «⋯» → «Открыть в браузере».</span>
+                </div></div>
               <div className="wbi-mcol">
                 <a className="wbi-btnL" href="https://create.roblox.com/dashboard/creations" target="_blank" rel="noopener noreferrer">🔗 Открыть Creator Hub</a>
                 <div className="wbi-url">create.roblox.com/dashboard/creations</div>
@@ -589,24 +593,25 @@ function Step({ n, pulse, cls, children }: { n: string; pulse?: boolean; cls?: s
 }
 
 const CSS = `
-.wbi-root{--gold:#c9a84c;--gold2:#f0c040;--grn:#00d484;--bg:#05070f;--panel:#0a0d18;--line:#1c2740;--txt:#e7e9ee;--mut:#aab1c0;position:relative;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden;min-height:100vh}
+.wbi-root{--gold:#a68bff;--gold2:#c2b2ff;--grn:#45d6aa;--bg:#0b0912;--panel:#151120;--line:#30283f;--txt:#f4f0ff;--mut:#aaa3b8;position:relative;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden;min-height:100vh}
 .wbi-root *{box-sizing:border-box}
 .wbi-bgfx{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
 .wbi-blob{position:absolute;border-radius:50%;filter:blur(90px);opacity:.16}
-.wbi-b1{width:520px;height:520px;background:#c9a84c;top:-160px;right:-140px;animation:wbi-drift1 22s ease-in-out infinite}
-.wbi-b2{width:460px;height:460px;background:#0a6b6b;bottom:-180px;left:-160px;animation:wbi-drift2 26s ease-in-out infinite}
+.wbi-b1{width:520px;height:520px;background:#7556e8;top:-160px;right:-140px;animation:wbi-drift1 22s ease-in-out infinite}
+.wbi-b2{width:460px;height:460px;background:#237e69;bottom:-180px;left:-160px;animation:wbi-drift2 26s ease-in-out infinite}
 @keyframes wbi-drift1{50%{transform:translate(-40px,60px)}}
 @keyframes wbi-drift2{50%{transform:translate(50px,-50px)}}
 .wbi-wrap{position:relative;z-index:1;max-width:880px;margin:0 auto;padding:0 18px 70px}
 .wbi-top{display:flex;align-items:center;justify-content:space-between;padding:18px 0;border-bottom:1px solid rgba(201,168,76,.22);gap:12px;flex-wrap:wrap}
 .wbi-eye{font-size:11px;letter-spacing:2.5px;color:var(--gold)}
+.wbi-top-sub{font-size:13px;color:var(--txt);margin-top:2px}
 .wbi-tag{font-size:13px;color:var(--gold2);border:1px solid rgba(201,168,76,.4);padding:4px 12px;border-radius:8px;background:rgba(201,168,76,.06);white-space:nowrap}
 .wbi-reset{font-size:12px;color:var(--gold);background:transparent;border:1px solid rgba(201,168,76,.3);padding:5px 12px;border-radius:8px;cursor:pointer;transition:border-color .2s}
 .wbi-reset:hover{border-color:rgba(201,168,76,.7)}
 .wbi-hero{padding:40px 0 30px;text-align:center}
 .wbi-kick{font-size:12px;letter-spacing:3px;color:rgba(0,212,132,.8);margin-bottom:14px}
 .wbi-h1{font-size:clamp(34px,7vw,58px);font-weight:900;text-transform:uppercase;line-height:.95;letter-spacing:-.02em}
-.wbi-g{background:linear-gradient(100deg,#c9a84c,#f7d574,#c9a84c);background-size:200% auto;-webkit-background-clip:text;background-clip:text;color:transparent;animation:wbi-shine 5s linear infinite}
+.wbi-g{background:linear-gradient(100deg,#7556e8,#c2b2ff,#45d6aa,#7556e8);background-size:240% auto;-webkit-background-clip:text;background-clip:text;color:transparent;animation:wbi-shine 6s linear infinite}
 @keyframes wbi-shine{to{background-position:200% center}}
 .wbi-lead{color:var(--mut);font-size:18px;max-width:560px;margin:18px auto 0}
 .wbi-chips{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:24px}
@@ -624,7 +629,7 @@ const CSS = `
 .wbi-dot{position:absolute;left:-50px;top:2px;width:36px;height:36px;border-radius:50%;background:#0d1120;border:2px solid rgba(201,168,76,.55);display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--gold2);font-size:15px;z-index:2}
 .wbi-dot.wbi-pulse{animation:wbi-pulse 2.6s infinite}
 @keyframes wbi-pulse{0%{box-shadow:0 0 0 0 rgba(240,192,64,.45)}70%{box-shadow:0 0 0 14px rgba(240,192,64,0)}100%{box-shadow:0 0 0 0 rgba(240,192,64,0)}}
-.wbi-card{border:1px solid var(--line);background:linear-gradient(180deg,rgba(18,22,36,.85),rgba(10,13,24,.9));border-radius:16px;padding:22px;transition:transform .3s,border-color .3s,box-shadow .3s}
+.wbi-card{border:1px solid var(--line);background:linear-gradient(180deg,rgba(26,20,39,.9),rgba(16,13,24,.94));border-radius:20px;padding:22px;transition:transform .3s,border-color .3s,box-shadow .3s}
 .wbi-card.wbi-key{border:1px solid rgba(201,168,76,.5);animation:wbi-glow 3.4s ease-in-out infinite}
 @keyframes wbi-glow{0%,100%{box-shadow:0 0 0 1px rgba(201,168,76,.25),0 0 22px rgba(201,168,76,.08)}50%{box-shadow:0 0 0 1px rgba(201,168,76,.6),0 0 44px rgba(201,168,76,.2)}}
 .wbi-kbadge{display:inline-block;background:linear-gradient(90deg,#c9a84c,#f7d574);color:#1a1405;font-size:11px;font-weight:800;letter-spacing:1px;padding:5px 12px;border-radius:20px;margin-bottom:14px}
@@ -638,9 +643,15 @@ const CSS = `
 .wbi-t{color:#c3c9d4;font-size:16.5px;margin:8px 0;line-height:1.65}
 .wbi-card b,.wbi-card strong{color:#fff;font-weight:700}
 .wbi-cols{display:grid;grid-template-columns:1fr;gap:20px;align-items:center;margin-top:6px}
-@media(min-width:660px){.wbi-cols.wbi-media{grid-template-columns:1fr 360px}.wbi-cols.wbi-rev .wbi-mcol{order:-1}}
+@media(min-width:860px){.wbi-cols.wbi-media{grid-template-columns:minmax(0,1fr) minmax(300px,360px)}.wbi-cols.wbi-rev .wbi-mcol{order:-1}}
 .wbi-mcol{display:flex;flex-direction:column;align-items:center}
-.wbi-figure{width:100%;max-width:440px;margin:0}
+.wbi-intro-step{align-items:start}
+.wbi-intro-step .wbi-mcol{width:100%;max-width:420px;justify-self:end}
+.wbi-intro-step .wbi-btnL{width:100%}
+.wbi-quicknotes{display:grid;gap:8px;margin-top:14px}
+.wbi-quicknotes span{display:block;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:rgba(51,95,255,.07);color:var(--mut);font-size:14px;line-height:1.45}
+.wbi-figure{width:100%;max-width:440px;margin:0;position:relative}
+.wbi-figure::before{content:'ROBLOX  ·  CREATOR HUB';position:absolute;z-index:5;right:9px;top:9px;padding:5px 8px;border:1px solid rgba(255,255,255,.15);border-radius:7px;background:rgba(17,18,20,.9);color:#f7f7f8;font-size:9px;font-weight:800;letter-spacing:.08em;line-height:1;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.25)}
 .wbi-figure img{width:100%;border-radius:12px;border:1px solid #26314a;display:block;transition:transform .35s}
 .wbi-figure:hover img{transform:scale(1.015)}
 .wbi-figure.wbi-spot{position:relative;border-radius:12px}
@@ -672,20 +683,25 @@ const CSS = `
 .wbi-input::-webkit-outer-spin-button,.wbi-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .wbi-copyhint{font-size:13.5px;color:#8ff0bf;margin-top:10px}
 /* ── Annotation overlay layer (highlights/labels live in CSS, screenshots stay clean) ── */
-.wbi-anno{position:relative;display:block;line-height:0;container-type:inline-size}
+.wbi-anno{position:relative;display:block;line-height:0;container-type:inline-size;overflow:hidden;border-radius:12px;animation:wbi-media-focus 7s cubic-bezier(.22,1,.36,1) infinite}
 .wbi-anno img{display:block}
 .wbi-figure:hover .wbi-anno img{transform:none}
 .wbi-box{position:absolute;border:3px solid transparent;border-radius:11px;pointer-events:none;z-index:2}
 .wbi-box.pill{border-radius:999px}
-.wbi-box.g{border-color:#00e08a;box-shadow:0 0 0 1px rgba(0,0,0,.4),0 0 16px rgba(0,224,138,.5)}
+.wbi-box.g{border-color:#335fff;box-shadow:0 0 0 1px rgba(0,0,0,.45),0 0 16px rgba(51,95,255,.58);animation:wbi-target-pulse 2.2s ease-in-out infinite}
+.wbi-box.g::after{content:'';position:absolute;left:50%;top:50%;width:18px;height:18px;border:3px solid #fff;border-radius:50%;background:rgba(51,95,255,.82);box-shadow:0 0 0 7px rgba(51,95,255,.2),0 3px 12px rgba(0,0,0,.35);transform:translate(-50%,-50%);animation:wbi-roblox-tap 2.2s cubic-bezier(.22,1,.36,1) infinite}
 .wbi-box.y{border-color:#f2c14e;box-shadow:0 0 0 1px rgba(0,0,0,.4),0 0 16px rgba(242,193,78,.45)}
 .wbi-tip{position:absolute;transform:translate(-50%,-50%);z-index:3;pointer-events:none;line-height:1;font-weight:800;letter-spacing:.4px;white-space:nowrap;font-size:clamp(10px,2.7cqw,15px);padding:.42em .62em;border-radius:7px;box-shadow:0 3px 10px rgba(0,0,0,.35)}
-.wbi-tip.g{background:#00c277;color:#06210f}
+.wbi-tip.g{background:#335fff;color:#fff;animation:wbi-tip-float 2.2s ease-in-out infinite}
 .wbi-tip.y{background:#f2c14e;color:#241a02}
 .wbi-tip.r{background:#ff4444;color:#fff}
 .wbi-tip.caret{font-size:clamp(9px,2.4cqw,14px)}
-.wbi-tip.caret::after{content:"";position:absolute;left:50%;bottom:-7px;transform:translateX(-50%);border:5px solid transparent;border-top-color:#00c277;border-bottom:0}
+.wbi-tip.caret::after{content:"";position:absolute;left:50%;bottom:-7px;transform:translateX(-50%);border:5px solid transparent;border-top-color:#335fff;border-bottom:0}
 .wbi-tip.r.caret::after{border-top-color:#ff4444}
+@keyframes wbi-media-focus{0%,18%,100%{transform:scale(1)}45%,72%{transform:scale(1.025)}}
+@keyframes wbi-target-pulse{0%,100%{box-shadow:0 0 0 1px rgba(0,0,0,.45),0 0 10px rgba(51,95,255,.34)}50%{box-shadow:0 0 0 5px rgba(51,95,255,.2),0 0 30px rgba(51,95,255,.82)}}
+@keyframes wbi-roblox-tap{0%,18%,100%{opacity:0;transform:translate(-50%,-50%) scale(.55)}35%,64%{opacity:1;transform:translate(-50%,-50%) scale(1)}76%{opacity:0;transform:translate(-50%,-50%) scale(1.65)}}
+@keyframes wbi-tip-float{0%,100%{margin-top:0}50%{margin-top:-5px}}
 .wbi-price6{position:absolute;left:13%;top:65.7%;transform:translateY(-50%);z-index:2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-weight:500;font-size:4.7cqw;line-height:1;color:#f1f1f3;white-space:nowrap;letter-spacing:.3px}
 /* ── Step-7 verification gate + nick search ── */
 .wbi-checks{display:flex;flex-direction:column;gap:10px;margin-top:14px}
@@ -751,9 +767,28 @@ const CSS = `
 .wbi-note{font-size:12px;color:#5e6678;text-align:center;margin-top:26px;font-style:italic}
 .wbi-reveal{opacity:0;transform:translateY(26px);transition:opacity .65s cubic-bezier(.2,.7,.2,1),transform .65s cubic-bezier(.2,.7,.2,1)}
 .wbi-reveal.wbi-in{opacity:1;transform:none}
+:is(html[data-theme="light"]) .wbi-root{--bg:#fbfaff;--panel:#fff;--line:#ded8f1;--txt:#251b3f;--mut:#706780;background:radial-gradient(circle at 80% 5%,rgba(117,86,232,.12),transparent 28rem),#fbfaff}
+:is(html[data-theme="light"]) .wbi-card{background:rgba(255,255,255,.94);box-shadow:0 18px 50px rgba(68,48,109,.055)}
+:is(html[data-theme="light"]) .wbi-ttl,:is(html[data-theme="light"]) .wbi-card b,:is(html[data-theme="light"]) .wbi-card strong{color:#251b3f}
+:is(html[data-theme="light"]) .wbi-t,:is(html[data-theme="light"]) .wbi-ol li,:is(html[data-theme="light"]) .wbi-ctext,:is(html[data-theme="light"]) .wbi-blist li{color:#62596f}
+:is(html[data-theme="light"]) .wbi-chip,:is(html[data-theme="light"]) .wbi-check,:is(html[data-theme="light"]) .wbi-gpcard,:is(html[data-theme="light"]) .wbi-blist li{background:#fff}
+:is(html[data-theme="light"]) .wbi-input,:is(html[data-theme="light"]) .wbi-sinput{background:#fff;color:#251b3f}
+:is(html[data-theme="light"]) .wbi-calc,:is(html[data-theme="light"]) .wbi-cta{background:#f4f0ff}
+:is(html[data-theme="light"]) .wbi-g{background-image:linear-gradient(100deg,#6246d9,#7556e8,#367aa6,#6246d9)}
+:is(html[data-theme="light"]) .wbi-top{border-bottom-color:#d9d1ee}
+:is(html[data-theme="light"]) .wbi-eye{color:#674bd2}
+:is(html[data-theme="light"]) .wbi-tag{color:#5d44b8;border-color:#b9aae8;background:#f2effd}
+:is(html[data-theme="light"]) .wbi-must{border-color:#d79b28;background:linear-gradient(145deg,#fffaf0,#fff4d9);box-shadow:0 12px 30px rgba(139,91,0,.08)}
+:is(html[data-theme="light"]) .wbi-must-h{color:#765000}
+:is(html[data-theme="light"]) .wbi-must-it{border-top-color:rgba(118,80,0,.18)}
+:is(html[data-theme="light"]) .wbi-must-it .wbi-n{color:#765000;border-color:#d79b28;background:#ffedbf}
+:is(html[data-theme="light"]) .wbi-must-it span{color:#4d3a17}
+:is(html[data-theme="light"]) .wbi-must-it b,:is(html[data-theme="light"]) .wbi-must-ft b{color:#2f220b}
+:is(html[data-theme="light"]) .wbi-must-ft{color:#6b501c}
+:is(html[data-theme="light"]) .wbi-quicknotes span{border-color:#d9d1ee;background:#f6f3ff;color:#554b69}
 @media(max-width:480px){.wbi-tl{padding-left:42px}.wbi-dot{left:-42px;width:32px;height:32px}.wbi-tl::before{left:15px}}
 @media (prefers-reduced-motion: reduce){
- .wbi-blob,.wbi-g,.wbi-dot.wbi-pulse,.wbi-card.wbi-key,.wbi-figure.wbi-spot::after{animation:none !important}
+ .wbi-blob,.wbi-g,.wbi-dot.wbi-pulse,.wbi-card.wbi-key,.wbi-figure.wbi-spot::after,.wbi-anno,.wbi-box.g,.wbi-box.g::after,.wbi-tip.g{animation:none !important}
  .wbi-reveal{opacity:1 !important;transform:none !important}
 }
 `;

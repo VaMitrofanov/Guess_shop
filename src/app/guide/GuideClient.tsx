@@ -11,15 +11,14 @@ import {
   Monitor, Smartphone, MoreHorizontal, Hash,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ParticleTextEffect } from "@/components/ui/particle-text-effect";
 import VKAuthButton from "@/components/auth/VKAuthButton";
 import WBInstructionV2 from "./WBInstructionV2";
 // Visual components imported directly. None of them tug in heavy deps now
 // (three.js was dropped in favour of CSS gradients), so dynamic chunk
 // splitting just adds round-trips and deploy fragility for zero kB win.
-import AnimatedShaderBackground from "@/components/ui/animated-shader-background";
 import ScrollFeatureTeaser from "@/components/ui/scroll-feature-teaser";
 import { ConnectivityAssistant } from "@/components/connectivity-assistant";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { getOrInitSessionId, loadWBSession, saveWBSession, clearWBSession } from "@/lib/wb-session";
 
 // ─── Step definitions ──────────────────────────────────────────────────────────
@@ -1938,43 +1937,37 @@ function StandardDoneBlock() {
 
 function WBStaticHeader({ denomination, onReset }: { denomination?: number; onReset?: () => void }) {
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-[#c9a84c]/10 bg-[#0a0e1a]/95 backdrop-blur-xl select-none">
+    <header className="sticky top-0 z-50 w-full border-b border-[var(--rb-border)] bg-[var(--rb-nav)] text-[var(--rb-text)] backdrop-blur-xl select-none">
       <div className="container mx-auto px-4 h-16 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="relative w-9 h-9 flex-shrink-0">
-            <div className="absolute inset-0 bg-[#c9a84c] rounded-[4px]" />
-            <div className="absolute top-0 right-0 w-2 h-2 bg-[#0a0e1a] rounded-none" />
-            <div className="absolute bottom-0 left-0 w-2 h-2 bg-[#0a0e1a] rounded-none" />
+            <div className="absolute inset-0 bg-[#7556e8] rounded-[11px] border-2 border-[var(--rb-text)] shadow-[3px_3px_0_#45d6aa]" />
             <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-[#0a0e1a] font-black text-[11px] tracking-wider relative z-10">WB</span>
+              <span className="text-white font-black text-[11px] tracking-wider relative z-10">WB</span>
             </div>
           </div>
           <div className="hidden sm:flex flex-col leading-none">
-            <span className="text-xs font-black uppercase tracking-[0.2em] text-white">Wildberries</span>
-            <span className="text-xs font-black uppercase tracking-[0.2em] text-[#c9a84c]">× RobloxBank</span>
+            <span className="text-xs font-black uppercase tracking-[0.16em] text-[var(--rb-text)]">Wildberries</span>
+            <span className="text-xs font-black uppercase tracking-[0.16em] text-[var(--rb-accent)]">× RobloxBank</span>
           </div>
         </div>
 
-        {/* Denomination badge */}
-        {denomination && denomination > 0 && (
-          <div className="flex items-center gap-2 px-3 py-1.5 border border-[#c9a84c]/30 bg-[#c9a84c]/10">
-            <span className="font-pixel text-[11px] text-[#c9a84c]/70 tracking-widest hidden sm:block">НОМИНАЛ</span>
-            <span className="font-black text-lg leading-none" style={{ color: "#f0c040" }}>{denomination} R$</span>
-          </div>
-        )}
-
-        {/* Enter new code button */}
-        {onReset && (
-          <button
-            onClick={onReset}
-            className="flex items-center gap-1.5 h-8 px-3 border border-[#c9a84c]/20 hover:border-[#c9a84c]/50 text-[#c9a84c]/50 hover:text-[#c9a84c] transition-all font-black text-xs uppercase tracking-widest"
-          >
-            <ArrowRight className="w-3 h-3 rotate-180" />
-            <span className="hidden sm:inline">Новый код</span>
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {denomination && denomination > 0 && (
+            <div className="flex items-center gap-2 rounded-xl border border-[var(--rb-border)] bg-[var(--rb-surface)] px-3 py-1.5">
+              <span className="font-pixel text-[10px] text-[var(--rb-muted)] tracking-widest hidden sm:block">НОМИНАЛ</span>
+              <span className="font-black text-lg leading-none text-[var(--rb-accent)]">{denomination} R$</span>
+            </div>
+          )}
+          {onReset && (
+            <button onClick={onReset} className="flex h-9 items-center gap-1.5 rounded-xl border border-[var(--rb-border)] px-3 text-[var(--rb-muted)] transition-all hover:border-[var(--rb-accent)] hover:text-[var(--rb-accent)] font-black text-xs uppercase tracking-wider">
+              <ArrowRight className="w-3 h-3 rotate-180" /><span className="hidden sm:inline">Новый код</span>
+            </button>
+          )}
+          <ThemeToggle compact />
+        </div>
       </div>
-      <div className="h-[2px] bg-gradient-to-r from-transparent via-[#c9a84c]/30 to-transparent" />
+      <div className="h-[2px] bg-gradient-to-r from-transparent via-[#7556e8]/45 to-transparent" />
     </header>
   );
 }
@@ -1985,21 +1978,35 @@ function WBStaticHeader({ denomination, onReset }: { denomination?: number; onRe
 // (soft -apple-system type, rounded gradient cards, circular gold step badges,
 // chunky 3D channel buttons) so the entry screen feels like one product with it.
 const WBG_CSS = `
-.wbg-root{--gold:#c9a84c;--gold2:#f0c040;--grn:#00d484;--line:#1c2740;--mut:#aab1c0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+.wbg-root{--gold:#7556e8;--gold2:#a68bff;--grn:#45d6aa;--line:var(--rb-border);--mut:var(--rb-muted);color:var(--rb-text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased}
 .wbg-root *{box-sizing:border-box}
-.wbg-card{position:relative;border:1px solid var(--line);background:linear-gradient(180deg,rgba(18,22,36,.88),rgba(10,13,24,.94));border-radius:22px;padding:26px 22px;box-shadow:0 24px 60px rgba(0,0,0,.45)}
+.wbg-stage{width:min(1120px,100%);display:grid;grid-template-columns:minmax(0,.92fr) minmax(390px,.78fr);gap:70px;align-items:center}
+.wbg-welcome{position:relative;padding:20px 0}
+.wbg-badge{width:max-content;display:flex;align-items:center;gap:9px;padding:9px 13px;border:1px solid var(--line);border-radius:999px;background:var(--rb-surface);color:var(--gold2);font-size:12px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
+.wbg-welcome h1{margin:24px 0 19px;font-family:var(--font-display),sans-serif;font-size:clamp(46px,6vw,76px);line-height:.98;letter-spacing:-.065em}
+.wbg-welcome h1 span{background:linear-gradient(90deg,#7556e8,#5e83ee);background-clip:text;color:transparent}
+.wbg-welcome>p{max-width:560px;margin:0;color:var(--mut);font-size:18px;line-height:1.65}
+.wbg-flow{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:28px}
+.wbg-flow div{padding:14px;border:1px solid var(--line);border-radius:15px;background:var(--rb-surface)}
+.wbg-flow b,.wbg-flow span{display:block}.wbg-flow b{color:var(--grn);font-size:13px}.wbg-flow span{margin-top:4px;color:var(--mut);font-size:12px;line-height:1.35}
+.wbg-card{position:relative;border:1px solid var(--line);background:var(--rb-surface);border-radius:26px;padding:26px 22px;box-shadow:10px 10px 0 var(--rb-strong),0 28px 70px rgba(15,8,30,.2)}
 @media(min-width:640px){.wbg-card{padding:34px 30px}}
-.wbg-icon{width:62px;height:62px;border-radius:18px;border:1px solid rgba(201,168,76,.45);background:rgba(201,168,76,.08);display:flex;align-items:center;justify-content:center;margin:0 auto 16px}
+.wbg-icon{width:62px;height:62px;border-radius:18px;border:1px solid color-mix(in srgb,var(--gold) 46%,transparent);background:color-mix(in srgb,var(--gold) 12%,transparent);display:flex;align-items:center;justify-content:center;margin:0 auto 16px}
 .wbg-eye{font-size:11px;letter-spacing:2.5px;color:var(--gold);font-weight:700;text-transform:uppercase}
-.wbg-h1{font-size:clamp(27px,6vw,34px);font-weight:900;color:#fff;line-height:1.05;letter-spacing:-.01em;margin:8px 0 0}
+.wbg-h1{font-size:clamp(27px,6vw,34px);font-weight:900;color:var(--rb-text);line-height:1.05;letter-spacing:-.01em;margin:8px 0 0}
 .wbg-lead{color:var(--mut);font-size:15.5px;line-height:1.6;margin:10px auto 0;max-width:330px}
 .wbg-hr{height:1px;background:linear-gradient(90deg,transparent,rgba(201,168,76,.32),transparent)}
 .wbg-step-h{display:flex;align-items:center;gap:11px;margin-bottom:12px}
-.wbg-dot{flex-shrink:0;width:32px;height:32px;border-radius:50%;background:#0d1120;border:2px solid rgba(201,168,76,.55);display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--gold2);font-size:15px;transition:all .25s}
+.wbg-dot{flex-shrink:0;width:32px;height:32px;border-radius:10px;background:var(--rb-accent-soft);border:1px solid color-mix(in srgb,var(--gold) 55%,transparent);display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--gold2);font-size:15px;transition:all .25s}
 .wbg-dot.done{background:rgba(0,212,132,.12);border-color:rgba(0,212,132,.6);color:var(--grn)}
-.wbg-ttl{font-size:17.5px;font-weight:800;color:#fff;line-height:1.2}
-.wbg-t{color:#c3c9d4;font-size:14.5px;line-height:1.55;margin:0 0 14px}
-.wbg-input{width:100%;background:#0d1424;border:1px solid rgba(201,168,76,.5);color:#fff;border-radius:13px;padding:16px;font-size:25px;font-weight:800;text-align:center;letter-spacing:.3em;text-indent:.3em;outline:none;transition:border-color .2s,box-shadow .2s}
+.wbg-ttl{font-size:17.5px;font-weight:800;color:var(--rb-text);line-height:1.2}
+.wbg-t{color:var(--mut);font-size:14.5px;line-height:1.55;margin:0 0 14px}
+.wbg-code-focus{position:relative;margin-top:8px;padding:9px;border-radius:20px;background:color-mix(in srgb,var(--gold) 7%,transparent);isolation:isolate}
+.wbg-code-focus::before,.wbg-code-focus::after{content:"";position:absolute;inset:0;border:2px solid color-mix(in srgb,var(--gold) 66%,transparent);border-radius:20px;z-index:-1;animation:wbg-code-radar 2.1s ease-out infinite}
+.wbg-code-focus::after{animation-delay:1.05s}
+.wbg-code-callout{position:absolute;right:10px;top:-29px;display:flex;align-items:center;gap:7px;padding:7px 10px;border-radius:999px;background:var(--gold);color:#fff;font-size:12px;font-weight:950;letter-spacing:.05em;text-transform:uppercase;box-shadow:3px 3px 0 var(--grn);animation:wbg-code-bounce 1.25s ease-in-out infinite}
+.wbg-code-callout::after{content:"";width:8px;height:8px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg) translateY(-1px)}
+.wbg-input{width:100%;background:var(--rb-bg);border:1.5px solid color-mix(in srgb,var(--gold) 56%,transparent);color:var(--rb-text);border-radius:14px;padding:16px;font-size:25px;font-weight:800;text-align:center;letter-spacing:.3em;text-indent:.3em;outline:none;transition:border-color .2s,box-shadow .2s}
 .wbg-input::placeholder{color:#46506b;font-weight:700}
 .wbg-input:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(201,168,76,.16)}
 .wbg-input.ready{border-color:rgba(0,212,132,.6);box-shadow:0 0 0 3px rgba(0,212,132,.14)}
@@ -2019,6 +2026,8 @@ const WBG_CSS = `
 .wbg-btn.vk:not(:disabled):active{box-shadow:0 2px 0 #0a4aa0}
 .wbg-spin{width:16px;height:16px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:wbg-spin .7s linear infinite}
 @keyframes wbg-spin{to{transform:rotate(360deg)}}
+@keyframes wbg-code-radar{0%{opacity:.75;transform:scale(.98)}70%,100%{opacity:0;transform:scale(1.09)}}
+@keyframes wbg-code-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(5px)}}
 .wbg-err{border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.07);border-radius:12px;padding:11px 13px;display:flex;align-items:center;gap:9px}
 .wbg-err p{color:#fca5a5;font-size:14px;font-weight:600;margin:0}
 .wbg-errhelp{font-size:12px;color:#8a91a3;margin:6px 0 0}
@@ -2032,8 +2041,11 @@ const WBG_CSS = `
 .wbg-help{margin-top:14px;display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:14px;background:rgba(10,13,24,.55);padding:13px 15px;text-decoration:none;transition:border-color .2s,background .2s}
 .wbg-help:hover{border-color:rgba(201,168,76,.4);background:rgba(201,168,76,.05)}
 .wbg-help-t{display:flex;flex-direction:column;line-height:1.25}
-.wbg-help-t b{font-size:13.5px;color:#fff;font-weight:800}
+.wbg-help-t b{font-size:13.5px;color:var(--rb-text);font-weight:800}
 .wbg-help-t span{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;font-weight:700}
+@media(max-width:900px){.wbg-stage{grid-template-columns:1fr;gap:32px;max-width:620px}.wbg-welcome{text-align:center}.wbg-badge{margin-inline:auto}.wbg-welcome>p{margin-inline:auto}}
+@media(max-width:520px){.wbg-welcome h1{font-size:42px}.wbg-welcome>p{font-size:18px}.wbg-flow{grid-template-columns:1fr}.wbg-flow div{display:flex;align-items:center;gap:8px}.wbg-flow span{margin-top:0}.wbg-card{box-shadow:6px 6px 0 var(--rb-strong)}.wbg-code-callout{right:6px;font-size:11px}.wbg-input{font-size:27px;min-height:68px}}
+@media(prefers-reduced-motion:reduce){.wbg-code-focus::before,.wbg-code-focus::after,.wbg-code-callout{animation:none}}
 `;
 
 function WBGate() {
@@ -2105,15 +2117,24 @@ function WBGate() {
     <main className="min-h-screen flex flex-col relative">
       <WBStaticHeader />
 
-      {/* Lazy WebGL shader background — desktop-only inside the component;
-          on mobile it self-degrades to a static CSS gradient. */}
-      <AnimatedShaderBackground className="-z-10" />
-
-      <div className="flex-1 flex items-center justify-center px-4 py-8 sm:py-14 bg-[#05070f]/80 relative">
-        <div className="wbg-root w-full max-w-md animate-in fade-in zoom-in">
+      <div className="flex-1 flex items-center justify-center px-4 py-10 sm:py-16 bg-[var(--rb-bg)] relative overflow-hidden">
+        <div className="pointer-events-none absolute -left-48 top-0 h-[560px] w-[560px] rounded-full bg-[#45d6aa]/10 blur-[100px]" />
+        <div className="pointer-events-none absolute -right-40 bottom-0 h-[520px] w-[520px] rounded-full bg-[#7556e8]/15 blur-[100px]" />
+        <div className="wbg-root wbg-stage animate-in fade-in zoom-in">
           <style>{WBG_CSS}</style>
+          <section className="wbg-welcome animate-in fade-in animate-delay-100">
+            <div className="wbg-badge"><ShoppingBag className="w-4 h-4" /> Покупка на Wildberries подтверждена</div>
+            <h1>Спасибо<br />за покупку.<br /><span>Robux уже близко.</span></h1>
+            <p>Активируй код с карточки и выбери удобный мессенджер. Бот сохранит заказ, покажет инструкцию и сообщит, когда всё готово.</p>
+            <div className="wbg-flow" aria-label="Что будет дальше">
+              <div><b>01 · Код</b><span>7 символов с карточки</span></div>
+              <div><b>02 · Бот</b><span>Telegram или VK</span></div>
+              <div><b>03 · Robux</b><span>Статус всегда под рукой</span></div>
+            </div>
+          </section>
 
-          <div className="wbg-card animate-in fade-in zoom-in animate-delay-100">
+          <div>
+          <div className="wbg-card animate-in fade-in zoom-in animate-delay-200">
             {/* Header */}
             <div style={{ textAlign: "center" }}>
               <div className="wbg-icon">
@@ -2132,18 +2153,23 @@ function WBGate() {
                 <span className={`wbg-dot${codeReady ? " done" : ""}`} aria-hidden>{codeReady ? "✓" : "1"}</span>
                 <span className="wbg-ttl">Код с карточки</span>
               </div>
-              <input
-                ref={inputRef}
-                type="text"
-                inputMode="text"
-                value={code}
-                onChange={handleInput}
-                placeholder="ABC1234"
-                autoComplete="off"
-                spellCheck={false}
-                className={`wbg-input${codeReady ? " ready" : ""}`}
-                aria-label="Уникальный код с карточки"
-              />
+              <div className="wbg-code-focus">
+                {!codeReady && <span className="wbg-code-callout">Введи код сюда</span>}
+                <input
+                  ref={inputRef}
+                  type="text"
+                  inputMode="text"
+                  value={code}
+                  onChange={handleInput}
+                  placeholder="ABC1234"
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  autoFocus
+                  spellCheck={false}
+                  className={`wbg-input${codeReady ? " ready" : ""}`}
+                  aria-label="Уникальный код с карточки"
+                />
+              </div>
               <div className="wbg-meta">
                 <span>7 символов с обратной стороны карточки</span>
                 <span className={`wbg-count${codeReady ? " ready" : ""}`}>{code.length}/7</span>
@@ -2257,6 +2283,7 @@ function WBGate() {
             </span>
             <ExternalLink className="w-4 h-4 flex-shrink-0" style={{ marginLeft: "auto", color: "#71798c" }} />
           </a>
+          </div>
         </div>
       </div>
     </main>
@@ -2717,36 +2744,46 @@ function WBIntro({ onDone }: { onDone: () => void }) {
     setTimeout(onDone, 750);
   }, [fading, onDone]);
 
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const timer = window.setTimeout(handleDone, 6500);
+    return () => window.clearTimeout(timer);
+  }, [handleDone]);
+
   return (
     <div
-      className="fixed inset-0 z-[9999] bg-black flex flex-col"
+      className="wb-intro fixed inset-0 z-[9999] flex flex-col overflow-hidden"
       style={{
         transition: "opacity 0.75s ease",
         opacity: fading ? 0 : 1,
         pointerEvents: fading ? "none" : "auto",
       }}
     >
-      {/* Particle canvas fills the whole screen */}
-      <div className="flex-1 relative">
-        <ParticleTextEffect
-          words={["СПАСИБО\nЗА ПОКУПКУ!", "ROBLOXBANK"]}
-          fullScreen
-          showHint={false}
-          onComplete={handleDone}
-        />
+      <div className="wb-intro-orbit wb-intro-orbit-one" aria-hidden="true" />
+      <div className="wb-intro-orbit wb-intro-orbit-two" aria-hidden="true" />
+      <div className="flex flex-1 items-center justify-center px-5 py-12 relative z-10">
+        <motion.div initial={{ opacity: 0, y: 28, scale: .96 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: .8, ease: [0.16,1,0.3,1] }} className="w-full max-w-[920px] text-center">
+          <div className="mx-auto mb-8 grid h-20 w-20 -rotate-6 place-items-center rounded-[24px] border-[3px] border-[var(--rb-text)] bg-[#7556e8] text-xl font-black text-white shadow-[7px_7px_0_#45d6aa]">R$</div>
+          <div className="mb-5 text-xs font-black uppercase tracking-[.22em] text-[var(--rb-accent)]">Wildberries × RobloxBank</div>
+          <h1 className="font-[var(--font-display)] text-[clamp(48px,9vw,104px)] font-bold leading-[.94] tracking-[-.075em] text-[var(--rb-text)]">Спасибо<br />за покупку!</h1>
+          <p className="mx-auto mt-7 max-w-[620px] text-[clamp(16px,2.2vw,20px)] font-medium leading-relaxed text-[var(--rb-muted)]">Сейчас активируем код, откроем понятную инструкцию и доведём заказ до готовых Robux.</p>
+          <button onClick={handleDone} className="mt-9 inline-flex min-h-14 items-center gap-3 rounded-2xl bg-[#7556e8] px-7 text-sm font-black text-white shadow-[5px_5px_0_#45d6aa] transition-transform hover:-translate-y-1">
+            Активировать код <ArrowRight className="h-5 w-5" />
+          </button>
+          <div className="mt-6 flex items-center justify-center gap-2 text-xs font-bold text-[var(--rb-muted)]"><Lock className="h-4 w-4" /> Пароль Roblox не понадобится</div>
+        </motion.div>
       </div>
 
-      {/* Bottom bar */}
-      <div className="flex items-center justify-between px-8 py-5 border-t border-white/5">
+      <div className="relative z-10 flex items-center justify-between border-t border-[var(--rb-border)] px-5 py-4 sm:px-8">
         <div className="flex items-center gap-3">
-          <div className="w-1.5 h-1.5 rounded-full bg-[#c9a84c] animate-pulse" />
-          <span className="font-pixel text-[11px] text-[#c9a84c]/70 tracking-widest">
-            WILDBERRIES × ROBLOXBANK
+          <div className="w-1.5 h-1.5 rounded-full bg-[#45d6aa] animate-pulse" />
+          <span className="font-pixel text-[10px] text-[var(--rb-muted)] tracking-widest">
+            БЕЗОПАСНАЯ АКТИВАЦИЯ
           </span>
         </div>
         <button
           onClick={handleDone}
-          className="font-pixel text-[11px] text-zinc-400 hover:text-[#c9a84c] tracking-widest uppercase transition-colors"
+          className="font-pixel text-[10px] text-[var(--rb-muted)] hover:text-[var(--rb-accent)] tracking-widest uppercase transition-colors"
         >
           Пропустить →
         </button>

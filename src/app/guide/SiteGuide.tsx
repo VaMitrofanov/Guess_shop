@@ -62,9 +62,9 @@ const guideSteps = [
   },
 ];
 
-export default function SiteGuide({ initialAmount, minAmount, maxAmount }: { initialAmount: number; minAmount: number; maxAmount: number }) {
+export default function SiteGuide({ initialAmount, initialUsername, minAmount, maxAmount }: { initialAmount: number; initialUsername: string; minAmount: number; maxAmount: number }) {
   const [amountInput, setAmountInput] = useState(String(initialAmount));
-  const [username, setUsername] = useState("");
+  const [username, setUsername] = useState(initialUsername.replace(/[^A-Za-z0-9_]/g, "").slice(0, 20));
   const [copied, setCopied] = useState(false);
   const amount = useMemo(() => Math.min(maxAmount, Math.max(minAmount, Number.parseInt(amountInput, 10) || minAmount)), [amountInput, minAmount, maxAmount]);
   const price = useMemo(() => passPrice(amount), [amount]);
@@ -128,7 +128,7 @@ export default function SiteGuide({ initialAmount, minAmount, maxAmount }: { ini
         <aside className={styles.progressRail}>
           <span className={styles.kicker}>Прогресс</span>
           <strong>5 шагов в Roblox<br />+ оформление заказа</strong>
-          <div className={styles.railTrack}>{[1,2,3,4,5,6].map((step) => <a key={step} href={`#step-${step}`}><i>{step}</i><span>{step === 6 ? "Заказ" : `Шаг ${step}`}</span></a>)}</div>
+          <div className={styles.railTrack}>{["Creator Hub", "Выбор игры", "Раздел Passes", "Новый геймпасс", "Цена и продажа", "Оформление"].map((label, index) => <a key={label} href={`#step-${index + 1}`}><i>{index + 1}</i><span>{label} <small>(шаг {index + 1})</small></span></a>)}</div>
           <div className={styles.railHelp}><ShieldCheck size={19} /><span><strong>Что-то не получается?</strong><small>Можно вернуться к любому шагу — введённый пакет не потеряется.</small></span></div>
         </aside>
 
@@ -138,7 +138,7 @@ export default function SiteGuide({ initialAmount, minAmount, maxAmount }: { ini
               <div className={styles.stepHeading}><span>{step.number}</span><div><small>Шаг {step.number} из 6</small><h2>{step.title}</h2></div></div>
               <p>{step.text}</p>
               {step.action && <a className={styles.externalAction} href={step.action.href} target="_blank" rel="noopener noreferrer">{step.action.label} <ExternalLink size={16} /></a>}
-              {step.image && <figure className={styles.figure}><Image src={step.image} alt={step.imageAlt ?? ""} width={1000} height={620} sizes="(max-width: 900px) 100vw, 720px" /></figure>}
+              {step.image && <figure className={styles.figure} data-step={step.number}><Image src={step.image} alt={step.imageAlt ?? ""} width={1000} height={620} sizes="(max-width: 900px) 100vw, 720px" /><span className={styles.focusLabel}>Нажми здесь</span></figure>}
               {step.critical && (
                 <div className={styles.criticalBox}>
                   <CircleAlert size={21} />
