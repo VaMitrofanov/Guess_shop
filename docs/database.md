@@ -12,6 +12,8 @@ USD/1000 R$, USD/RUB фиксируется отдельно. Legacy NULL не �
 
 Release order строгий: сначала `npx prisma migrate deploy`, затем новая версия приложения и
 ботов. Новый Prisma Client читает эти колонки в стандартном `WbOrder.findMany`.
+На production Neon migration применена 13.07.2026 вместе с
+`20260713_partner_sync_lease_ledger_v2`, до rollout commit `6551aab`.
 
 ## Модели воркфлоу
 

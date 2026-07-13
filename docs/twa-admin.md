@@ -46,8 +46,8 @@ ambient-подсветка, полупрозрачные слои, крупны�
 AVITO требует цену продажи в рублях. DIRECT переносит цену из заявки. При завершении новых
 заказов фиксируются `saleAmountKopecks`, `purchaseRobuxAmount`, `purchaseRateUsdPer1k`,
 `purchaseUsdToRub`, `purchaseCostKopecks`, `profitKopecks`. Legacy без цены продажи показывает
-`нет точных данных`. До запуска нового Prisma Client обязательна миграция
-`20260713_twa_order_profit_snapshots`.
+`нет точных данных`. Миграция `20260713_twa_order_profit_snapshots` применена к production
+13.07.2026 до запуска нового Prisma Client.
 
 Проверка baseline-релиза: web TypeScript, bot TypeScript, Jest и production build.
 Новые компоненты `BottomNav`, `Dashboard`, `StatCard` и `theme` проходят ESLint отдельно;
