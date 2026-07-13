@@ -3357,17 +3357,21 @@ async function performAdminReject(bot: Telegraf, ctx: any, orderId: string, reas
 export function registerCallbacks(bot: Telegraf): void {
   bot.on("callback_query", async (ctx) => {
     const cbq = ctx.callbackQuery;
-    if (!("data" in cbq)) return ctx.answerCbQuery();
+    if (!("data" in cbq)) return ctx.answerCbQuery().catch(() => {});
 
     const data = cbq.data;
     const tgId = String(ctx.from.id);
     const adminId = tgId;
     const adminTag = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name ?? "Админ";
 
+    // Dismiss Telegram's loading spinner immediately — before any DB/API work.
+    // Handlers that need a visible toast re-answer below (harmless duplicate).
+    await ctx.answerCbQuery().catch(() => {});
+
     // ── 👁 GP-watch (+3): customer answers "this gamepass is/ isn't mine" ─────
     if (data.startsWith("gpw_ok:")) {
       const orderId = data.slice("gpw_ok:".length);
-      await ctx.answerCbQuery("⏳ Проверяю…");
+      await ctx.answerCbQuery("⏳ Проверяю…").catch(() => {});
       // П2: заказ уходит в очередь — стейты «жди ссылку/ник» больше не нужны,
       // иначе следующий текст юзера падал в формат-ошибку «Напиши ник…».
       pendingLink.delete(ctx.from.id);
@@ -3401,7 +3405,7 @@ export function registerCallbacks(bot: Telegraf): void {
       if (declined) {
         pendingRobloxNick.set(ctx.from.id, { wbCode: declined.wbCode, denomination: declined.amount });
       }
-      await ctx.answerCbQuery("Понял, не твой ник");
+      await ctx.answerCbQuery("Понял, не твой ник").catch(() => {});
       try { await ctx.editMessageReplyMarkup(undefined); } catch {}
       await ctx.reply(
         "Понял 👍 Если знаешь свой точный ник Roblox — пришли его сюда, и я найду твой геймпасс.",
@@ -3419,7 +3423,7 @@ export function registerCallbacks(bot: Telegraf): void {
         select: { id: true },
       });
       if (!user) {
-        await ctx.answerCbQuery("Сессия истекла — напиши /start");
+        await ctx.answerCbQuery("Сессия истекла — напиши /start").catch(() => {});
         return;
       }
       const order = await (db as any).wbOrder.findFirst({
@@ -3427,13 +3431,13 @@ export function registerCallbacks(bot: Telegraf): void {
         orderBy: { createdAt: "desc" },
       });
       if (!order) {
-        await ctx.answerCbQuery("Нет заказа, который можно изменить");
+        await ctx.answerCbQuery("Нет заказа, который можно изменить").catch(() => {});
         return;
       }
       const state: LinkState = { wbCode: order.wbCode, denomination: order.amount };
       pendingRobloxNick.set(tgIdNum, state);
       const passPrice = Math.ceil(order.amount / 0.7);
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       await ctx.reply(
         `⚠️ <b>Внимание: меняем ник и геймпасс в заказе!</b>\n\n` +
         `Текущий геймпасс будет заменён на новый.\n` +
@@ -3450,10 +3454,10 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data === CB.subRecheck) {
       const subbed = await checkSubscription(bot, ctx.from.id);
       if (!subbed) {
-        await ctx.answerCbQuery("Подписка ещё не видна — подпишись и нажми снова", { show_alert: true });
+        await ctx.answerCbQuery("Подписка ещё не видна — подпишись и нажми снова", { show_alert: true }).catch(() => {});
         return;
       }
-      await ctx.answerCbQuery("✅ Подписка подтверждена");
+      await ctx.answerCbQuery("✅ Подписка подтверждена").catch(() => {});
       const tgIdNum = ctx.from.id;
       const subUser = await (db as any).user.findUnique({ where: { tgId: String(tgIdNum) } });
       const pendingOrder = subUser
@@ -3502,7 +3506,7 @@ export function registerCallbacks(bot: Telegraf): void {
         select: { id: true, balance: true, robloxUsername: true },
       });
       if (!user) {
-        await ctx.answerCbQuery("Сессия истекла — напиши /start");
+        await ctx.answerCbQuery("Сессия истекла — напиши /start").catch(() => {});
         return;
       }
       const order = await (db as any).wbOrder.findFirst({
@@ -3510,7 +3514,7 @@ export function registerCallbacks(bot: Telegraf): void {
         orderBy: { createdAt: "desc" },
       });
       if (!order) {
-        await ctx.answerCbQuery("Активного заказа нет");
+        await ctx.answerCbQuery("Активного заказа нет").catch(() => {});
         await ctx.reply(
           "У тебя сейчас нет активного заказа. Введи код WB чтобы начать.",
           { parse_mode: "HTML" }
@@ -3524,7 +3528,7 @@ export function registerCallbacks(bot: Telegraf): void {
         if (recheckNick) {
           pendingLink.set(tgIdNum, state);
           pendingRobloxNick.set(tgIdNum, state);
-          await ctx.answerCbQuery("Проверяю…");
+          await ctx.answerCbQuery("Проверяю…").catch(() => {});
           await handleRobloxNickInput(bot, ctx, recheckNick);
           return;
         }
@@ -3532,7 +3536,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
       pendingRobloxNick.set(tgIdNum, state);
       const passPrice = Math.ceil(order.amount / 0.7);
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       await ctx.reply(
         `🔎 Введи свой <b>ник в Roblox</b> (то, как ты заходишь в игру).\n\n` +
         `Я найду все твои геймпассы за <b>${passPrice} R$</b> — и предложу выбрать нужный.\n` +
@@ -3550,7 +3554,7 @@ export function registerCallbacks(bot: Telegraf): void {
         select: { id: true, robloxUsername: true },
       });
       if (!user?.robloxUsername) {
-        await ctx.answerCbQuery("Ник не найден — введи вручную");
+        await ctx.answerCbQuery("Ник не найден — введи вручную").catch(() => {});
         return;
       }
       const order = await (db as any).wbOrder.findFirst({
@@ -3558,13 +3562,13 @@ export function registerCallbacks(bot: Telegraf): void {
         orderBy: { createdAt: "desc" },
       });
       if (!order) {
-        await ctx.answerCbQuery("Активного заказа нет");
+        await ctx.answerCbQuery("Активного заказа нет").catch(() => {});
         return;
       }
       const state: LinkState = { wbCode: order.wbCode, denomination: order.amount };
       pendingLink.set(tgIdNum, state);
       pendingRobloxNick.set(tgIdNum, state);
-      await ctx.answerCbQuery("Ищу…");
+      await ctx.answerCbQuery("Ищу…").catch(() => {});
       await handleRobloxNickInput(bot, ctx, user.robloxUsername);
       return;
     }
@@ -3573,7 +3577,7 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("gp_pick:")) {
       const passId = data.slice("gp_pick:".length);
       if (!/^\d{3,15}$/.test(passId)) {
-        await ctx.answerCbQuery("Некорректный ID");
+        await ctx.answerCbQuery("Некорректный ID").catch(() => {});
         return;
       }
       const tgIdNum = ctx.from.id;
@@ -3582,7 +3586,7 @@ export function registerCallbacks(bot: Telegraf): void {
         select: { id: true, balance: true },
       });
       if (!user) {
-        await ctx.answerCbQuery("Сессия истекла — напиши /start");
+        await ctx.answerCbQuery("Сессия истекла — напиши /start").catch(() => {});
         return;
       }
       // Re-derive state from the active order — pendingRobloxNick may have expired
@@ -3593,13 +3597,13 @@ export function registerCallbacks(bot: Telegraf): void {
         orderBy: { createdAt: "desc" },
       });
       if (!order) {
-        await ctx.answerCbQuery("Активного заказа нет");
+        await ctx.answerCbQuery("Активного заказа нет").catch(() => {});
         return;
       }
       const state: LinkState = { wbCode: order.wbCode, denomination: order.amount };
       pendingLink.set(tgIdNum, state);
       pendingRobloxNick.delete(tgIdNum);
-      await ctx.answerCbQuery("Проверяю…");
+      await ctx.answerCbQuery("Проверяю…").catch(() => {});
       // Reuse the canonical gamepass-submission pipeline so all the existing
       // validation/transaction/admin-notify logic runs untouched.
       await processGamepassSubmission(bot, ctx, state, passId);
@@ -3608,7 +3612,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
     // ── ❓ FAQ — self-service answers (hides support for first 24h) ──────
     if (data === CB.faq) {
-      await ctx.answerCbQuery("Частые вопросы 👇");
+      await ctx.answerCbQuery("Частые вопросы 👇").catch(() => {});
       const rows = FAQ_ITEMS.map(item => [Markup.button.callback(item.label, CB.faqItem(item.key))]);
       rows.push([supportBtn("💬 Не нашёл ответ — написать менеджеру")]);
       rows.push([Markup.button.callback("👤 В моё меню", CB.buyerMenu)]);
@@ -3622,8 +3626,8 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("fq:")) {
       const key = data.slice(3);
       const item = FAQ_ITEMS.find(i => i.key === key);
-      if (!item) { await ctx.answerCbQuery("❌"); return; }
-      await ctx.answerCbQuery(item.label);
+      if (!item) { await ctx.answerCbQuery("❌").catch(() => {}); return; }
+      await ctx.answerCbQuery(item.label).catch(() => {});
 
       // Ф6.2: when_rbx персонализируется датой разблокировки последнего заказа.
       let answer = item.answer;
@@ -3690,7 +3694,7 @@ export function registerCallbacks(bot: Telegraf): void {
         platform: "TG", userDisplay, tgId, contextKey: ctxKey,
         wbCode, denomination: denom,
       });
-      await ctx.answerCbQuery("Поддержка 👇");
+      await ctx.answerCbQuery("Поддержка 👇").catch(() => {});
       // Final hand-off — single-tap URL button lands the user in the support
       // chat. Keeping it as an inline_keyboard (not a hyperlink in text) gives
       // a bigger touch target on mobile.
@@ -3706,17 +3710,17 @@ export function registerCallbacks(bot: Telegraf): void {
 
     // ── 📋 ps: purchase script for manual buy in Antik console ───────────
     if (data.startsWith("ps:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const orderId = data.slice(3);
       try {
         const order = await (db as any).wbOrder.findUnique({ where: { id: orderId } });
-        if (!order) { await ctx.answerCbQuery("⚠️ Заказ не найден"); return; }
+        if (!order) { await ctx.answerCbQuery("⚠️ Заказ не найден").catch(() => {}); return; }
 
         const gpMatch = order.gamepassUrl?.match(/game-pass(?:es)?\/(\d+)/);
-        if (!gpMatch) { await ctx.answerCbQuery("⚠️ Нет ссылки на геймпасс"); return; }
+        if (!gpMatch) { await ctx.answerCbQuery("⚠️ Нет ссылки на геймпасс").catch(() => {}); return; }
         const gpId = gpMatch[1];
 
-        await ctx.answerCbQuery("⏳ Загружаю данные…");
+        await ctx.answerCbQuery("⏳ Загружаю данные…").catch(() => {});
         const info = await getGamepassProductInfo(gpId);
         if (!info) {
           await ctx.reply(`❌ Не удалось получить product-info для геймпасса <code>${gpId}</code>`, { parse_mode: "HTML" });
@@ -3753,29 +3757,29 @@ export function registerCallbacks(bot: Telegraf): void {
 
     // ── 🛒 pb: auto-purchase gamepass via stored cookie ────────────────
     if (data.startsWith("pb:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const orderId = data.slice(3);
       try {
         const order = await (db as any).wbOrder.findUnique({ where: { id: orderId } });
-        if (!order) { await ctx.answerCbQuery("⚠️ Заказ не найден"); return; }
+        if (!order) { await ctx.answerCbQuery("⚠️ Заказ не найден").catch(() => {}); return; }
         if (!["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status)) {
-          await ctx.answerCbQuery("⚠️ Заказ уже обработан");
+          await ctx.answerCbQuery("⚠️ Заказ уже обработан").catch(() => {});
           return;
         }
 
         const gpMatch = order.gamepassUrl?.match(/game-pass(?:es)?\/(\d+)/);
-        if (!gpMatch) { await ctx.answerCbQuery("⚠️ Нет ссылки на геймпасс"); return; }
+        if (!gpMatch) { await ctx.answerCbQuery("⚠️ Нет ссылки на геймпасс").catch(() => {}); return; }
         const gpId = gpMatch[1];
 
         const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
         const cookie = settings?.robloxCookie;
         if (!cookie) {
           await ctx.reply("❌ Cookie не задан. Установи через /setcookie");
-          await ctx.answerCbQuery("❌ Нет cookie");
+          await ctx.answerCbQuery("❌ Нет cookie").catch(() => {});
           return;
         }
 
-        await ctx.answerCbQuery("⏳ Выкупаю…");
+        await ctx.answerCbQuery("⏳ Выкупаю…").catch(() => {});
 
         const info = await getGamepassProductInfo(gpId);
         if (!info) {
@@ -3848,7 +3852,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
     // ── ✅ admin_ok: order completed ──────────────────────────────────────
     if (data.startsWith("admin_ok:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const orderId = data.split(":")[1];
       try {
         // Snapshot purchase rate at fulfillment time
@@ -3863,7 +3867,7 @@ export function registerCallbacks(bot: Telegraf): void {
         });
 
         if (updatedCount.count === 0) {
-          await ctx.answerCbQuery("⚠️ Уже обработан другим админом");
+          await ctx.answerCbQuery("⚠️ Уже обработан другим админом").catch(() => {});
           try {
             await ctx.editMessageText("✅ Выполнено (другим админом)", { parse_mode: "HTML" });
           } catch {}
@@ -3872,7 +3876,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
         const order = await (db as any).wbOrder.findUnique({ where: { id: orderId } });
         if (!order) {
-          await ctx.answerCbQuery("⚠️ Заказ не найден");
+          await ctx.answerCbQuery("⚠️ Заказ не найден").catch(() => {});
           return;
         }
         const user = order.userId
@@ -3883,7 +3887,7 @@ export function registerCallbacks(bot: Telegraf): void {
         try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch { }
 
         if (user) await notifyUserCompleted(bot, user, orderId, order.amount, order.isDirectOrder ?? false);
-        await ctx.answerCbQuery("✅ Выполнено");
+        await ctx.answerCbQuery("✅ Выполнено").catch(() => {});
       } catch (err) {
         console.error("[admin_ok] error:", err);
         await ctx.answerCbQuery("❌ Ошибка, попробуйте ещё раз").catch(() => {});
@@ -3893,7 +3897,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
     // ── ❌ admin_reject_init: safety confirmation step ─────────────────────────
     if (data.startsWith("admin_reject_init:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const orderId = data.split(":")[1];
       const rejCode = await orderCode(orderId);
       await ctx.reply(
@@ -3906,13 +3910,13 @@ export function registerCallbacks(bot: Telegraf): void {
           ]])
         }
       );
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
     // ── ✅ confirm_reject: confirmed → show preset reason buttons ───────────
     if (data.startsWith("confirm_reject:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const orderId = data.split(":")[1];
       const rejCode2 = await orderCode(orderId);
       try { await ctx.editMessageText(
@@ -3929,13 +3933,13 @@ export function registerCallbacks(bot: Telegraf): void {
           ])
         }
       ); } catch { }
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
     // ── 📋 ord_rr: preset order rejection reason ─────────────────────────────
     if (data.startsWith("ord_rr:") && !data.startsWith("ord_rr_txt:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const parts = data.split(":");
       const orderId = parts[1];
       const key     = parts[2];
@@ -3950,14 +3954,14 @@ export function registerCallbacks(bot: Telegraf): void {
       try {
         await performAdminReject(bot, ctx, orderId, reason);
       } finally {
-        await ctx.answerCbQuery("✅ Заказ отклонён");
+        await ctx.answerCbQuery("✅ Заказ отклонён").catch(() => {});
       }
       return;
     }
 
     // ── ✏️ ord_rr_txt: admin wants to type a custom reason ──────────────────
     if (data.startsWith("ord_rr_txt:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const orderId = data.split(":")[1];
       pendingRejectionReason.set(ctx.from.id, orderId);
       const rejCode3 = await orderCode(orderId);
@@ -3965,18 +3969,18 @@ export function registerCallbacks(bot: Telegraf): void {
         `✏️ Напиши причину отклонения заказа <code>${rejCode3 ?? "?"}</code>:`,
         { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("❌ Отмена", `cancel_reject:${orderId}`)]]) }
       ); } catch { }
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
     // ── ❌ cancel_reject: admin cancelled rejection ──────────────────────────
     if (data.startsWith("cancel_reject:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       // Also exit free-text reason mode — otherwise the admin's next message
       // would be consumed as a rejection reason and reject the order.
       pendingRejectionReason.delete(ctx.from.id);
       try { await ctx.editMessageText("✅ Отклонение отменено."); } catch { }
-      await ctx.answerCbQuery("Отменено");
+      await ctx.answerCbQuery("Отменено").catch(() => {});
       return;
     }
 
@@ -3985,7 +3989,7 @@ export function registerCallbacks(bot: Telegraf): void {
     // start_direct: user opens direct order flow — show predefined packs
     if (data === CB.startDirect) {
       await startDirectFlow(ctx);
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
@@ -4002,7 +4006,7 @@ export function registerCallbacks(bot: Telegraf): void {
       } catch {
         await ctx.reply(customPrompt, { parse_mode: "HTML", ...customKb });
       }
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
@@ -4021,7 +4025,7 @@ export function registerCallbacks(bot: Telegraf): void {
           { parse_mode: "HTML", ...kb }
         );
       }
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
@@ -4029,11 +4033,11 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data.startsWith("dp:")) {
       const amt = parseInt(data.slice(3), 10);
       if (isNaN(amt) || !DIRECT_PACKS.includes(amt)) {
-        await ctx.answerCbQuery("Неверный пак");
+        await ctx.answerCbQuery("Неверный пак").catch(() => {});
         return;
       }
       await handleDirectPackChosen(bot, ctx, amt);
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
@@ -4041,7 +4045,7 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data === CB.confirmDirect) {
       const flow = pendingDirectFlow.get(ctx.from.id);
       if (!flow || flow.step !== "bonus") {
-        await ctx.answerCbQuery("Начни заново");
+        await ctx.answerCbQuery("Начни заново").catch(() => {});
         try {
           await ctx.editMessageText(
             "⏳ <b>Время подтверждения вышло.</b>\n\nНажми кнопку — начнём заново.",
@@ -4052,7 +4056,7 @@ export function registerCallbacks(bot: Telegraf): void {
       }
       // bonus stays as-is (already set by handleDirectPackChosen)
       await showNickStep(bot, ctx);
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
@@ -4060,7 +4064,7 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data === CB.confirmDirectNb) {
       const flow = pendingDirectFlow.get(ctx.from.id);
       if (!flow || flow.step !== "bonus") {
-        await ctx.answerCbQuery("Начни заново");
+        await ctx.answerCbQuery("Начни заново").catch(() => {});
         try {
           await ctx.editMessageText(
             "⏳ <b>Время подтверждения вышло.</b>\n\nНажми кнопку — начнём заново.",
@@ -4078,7 +4082,7 @@ export function registerCallbacks(bot: Telegraf): void {
         flow.rublePrice = Math.max(0, flow.rublePrice - flow.rubleDiscount);
       }
       await showNickStep(bot, ctx);
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
@@ -4091,7 +4095,7 @@ export function registerCallbacks(bot: Telegraf): void {
           { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("💎 Заказать снова", CB.startDirect)]]) }
         );
       } catch { }
-      await ctx.answerCbQuery("Отменено");
+      await ctx.answerCbQuery("Отменено").catch(() => {});
       return;
     }
 
@@ -4104,7 +4108,7 @@ export function registerCallbacks(bot: Telegraf): void {
           { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("💎 Заказать снова", CB.startDirect)]]) }
         );
       } catch { }
-      await ctx.answerCbQuery("Отменено");
+      await ctx.answerCbQuery("Отменено").catch(() => {});
       return;
     }
 
@@ -4112,7 +4116,7 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data === CB.directBack) {
       const flow = pendingDirectFlow.get(ctx.from.id);
       if (!flow) {
-        await ctx.answerCbQuery("Начни заново");
+        await ctx.answerCbQuery("Начни заново").catch(() => {});
         return;
       }
       const step = flow.step;
@@ -4135,7 +4139,7 @@ export function registerCallbacks(bot: Telegraf): void {
       } else {
         await startDirectFlow(ctx);
       }
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
@@ -4143,19 +4147,19 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data === CB.directNickOk) {
       const flow = pendingDirectFlow.get(ctx.from.id);
       if (!flow || !flow.robloxUsername || flow.step !== "nick") {
-        await ctx.answerCbQuery("Начни заново");
+        await ctx.answerCbQuery("Начни заново").catch(() => {});
         return;
       }
       flow.step = "gamepass";
       await handleDirectNickResolved(bot, ctx, flow.robloxUsername);
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
     // dir_nick_new: user wants to enter a different nick
     if (data === CB.directNickNew) {
       const flow = pendingDirectFlow.get(ctx.from.id);
-      if (!flow) { await ctx.answerCbQuery("Начни заново"); return; }
+      if (!flow) { await ctx.answerCbQuery("Начни заново").catch(() => {}); return; }
       flow.step = "nick_input";
       const nickNewKb = Markup.inlineKeyboard([
         [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
@@ -4171,7 +4175,7 @@ export function registerCallbacks(bot: Telegraf): void {
           { parse_mode: "HTML", ...nickNewKb }
         );
       }
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
@@ -4180,12 +4184,12 @@ export function registerCallbacks(bot: Telegraf): void {
       const passId = data.slice(4);
       const flow = pendingDirectFlow.get(ctx.from.id);
       if (!flow || flow.step !== "gamepass") {
-        await ctx.answerCbQuery("Начни заново");
+        await ctx.answerCbQuery("Начни заново").catch(() => {});
         return;
       }
       const gpDetails = await getGamepassDetails(passId);
       if (!gpDetails) {
-        await ctx.answerCbQuery("Геймпасс не найден");
+        await ctx.answerCbQuery("Геймпасс не найден").catch(() => {});
         return;
       }
       flow.gamepassId = passId;
@@ -4194,7 +4198,7 @@ export function registerCallbacks(bot: Telegraf): void {
       flow.gamepassRobux = gpDetails.price;
       flow.step = "summary";
       await showSummary(ctx, flow, gpDetails.price, gpDetails.name);
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
@@ -4202,7 +4206,7 @@ export function registerCallbacks(bot: Telegraf): void {
     if (data === CB.directSubmit) {
       const flow = pendingDirectFlow.get(ctx.from.id);
       if (!flow || flow.step !== "summary" || !flow.gamepassId || !flow.robloxUsername) {
-        await ctx.answerCbQuery("Начни заново");
+        await ctx.answerCbQuery("Начни заново").catch(() => {});
         return;
       }
       pendingDirectFlow.delete(ctx.from.id);
@@ -4223,7 +4227,7 @@ export function registerCallbacks(bot: Telegraf): void {
         where: { userId: dirUser.id, status: "PENDING" },
       });
       if (existingIntent) {
-        await ctx.answerCbQuery("У тебя уже есть активная заявка");
+        await ctx.answerCbQuery("У тебя уже есть активная заявка").catch(() => {});
         try {
           await ctx.editMessageText(
             `⏳ У тебя уже есть активная заявка на <b>${existingIntent.totalAmount} R$</b>.\n\n` +
@@ -4240,7 +4244,7 @@ export function registerCallbacks(bot: Telegraf): void {
         where: { userId: dirUser.id, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING"] } },
       });
       if (existingOrder) {
-        await ctx.answerCbQuery("У тебя уже есть активный заказ");
+        await ctx.answerCbQuery("У тебя уже есть активный заказ").catch(() => {});
         try {
           await ctx.editMessageText(
             `⏳ У тебя уже есть активный заказ на <b>${existingOrder.amount} R$</b>.\n\n` +
@@ -4269,7 +4273,7 @@ export function registerCallbacks(bot: Telegraf): void {
         });
       } catch (err) {
         console.error("[TG] DirectIntent create error:", err);
-        await ctx.answerCbQuery("Ошибка — попробуй снова");
+        await ctx.answerCbQuery("Ошибка — попробуй снова").catch(() => {});
         await ctx.reply("❌ Не удалось оформить заявку. Попробуй снова.", { parse_mode: "HTML" });
         return;
       }
@@ -4312,7 +4316,7 @@ export function registerCallbacks(bot: Telegraf): void {
       } catch {
         await ctx.reply(intentMsg, { parse_mode: "HTML", ...intentKb });
       }
-      await ctx.answerCbQuery("✅ Заявка отправлена!");
+      await ctx.answerCbQuery("✅ Заявка отправлена!").catch(() => {});
       return;
     }
 
@@ -4321,7 +4325,7 @@ export function registerCallbacks(bot: Telegraf): void {
       const intentId = data.slice(4);
       const intent = await (db as any).directIntent.findUnique({ where: { id: intentId } });
       if (!intent || intent.status !== "PENDING") {
-        await ctx.answerCbQuery("Заявка уже обработана");
+        await ctx.answerCbQuery("Заявка уже обработана").catch(() => {});
         return;
       }
       await (db as any).directIntent.update({ where: { id: intentId }, data: { status: "CANCELLED" } });
@@ -4334,7 +4338,7 @@ export function registerCallbacks(bot: Telegraf): void {
       await Promise.allSettled(
         ADMIN_IDS.map(id => tgSend(id, `❌ Заявка ${escapeHtml(intent.robloxUsername)} · ${intent.totalAmount} R$ отменена покупателем.`))
       );
-      await ctx.answerCbQuery("Заявка отменена");
+      await ctx.answerCbQuery("Заявка отменена").catch(() => {});
       return;
     }
 
@@ -4349,7 +4353,7 @@ export function registerCallbacks(bot: Telegraf): void {
       } catch {
         await ctx.reply(`🎮 <b>Введи новый ник Roblox</b>\n\nНапиши его в чат:`, { parse_mode: "HTML" });
       }
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
@@ -4360,13 +4364,13 @@ export function registerCallbacks(bot: Telegraf): void {
         where: { id: ucdOrderId },
         include: { user: { select: { id: true, tgId: true, vkId: true, balance: true, rubleDiscount: true } } },
       });
-      if (!ucdOrder) { await ctx.answerCbQuery("Заказ не найден"); return; }
+      if (!ucdOrder) { await ctx.answerCbQuery("Заказ не найден").catch(() => {}); return; }
       if (ucdOrder.status !== "AWAITING_PAYMENT") {
-        await ctx.answerCbQuery("Заказ уже нельзя отменить");
+        await ctx.answerCbQuery("Заказ уже нельзя отменить").catch(() => {});
         return;
       }
       const ownsTg = ucdOrder.user?.tgId === String(ctx.from.id);
-      if (!ownsTg) { await ctx.answerCbQuery("⛔ Это не твой заказ"); return; }
+      if (!ownsTg) { await ctx.answerCbQuery("⛔ Это не твой заказ").catch(() => {}); return; }
 
       // Restore bonus & discount that were deducted at order creation
       const updateData: any = {};
@@ -4404,7 +4408,7 @@ export function registerCallbacks(bot: Telegraf): void {
           { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("💎 Заказать напрямую", CB.startDirect)]]) }
         );
       } catch { }
-      await ctx.answerCbQuery("Заказ отменён");
+      await ctx.answerCbQuery("Заказ отменён").catch(() => {});
 
       // Notify admins
       const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || "Пользователь");
@@ -4418,12 +4422,12 @@ export function registerCallbacks(bot: Telegraf): void {
 
     // spd: admin sends payment details to user
     if (data.startsWith("spd:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const spdOrderId = data.slice(4);
       const spdOrder = await (db as any).wbOrder.findUnique({ where: { id: spdOrderId } });
-      if (!spdOrder) { await ctx.answerCbQuery("Заказ не найден"); return; }
+      if (!spdOrder) { await ctx.answerCbQuery("Заказ не найден").catch(() => {}); return; }
       if (spdOrder.status !== "AWAITING_PAYMENT") {
-        await ctx.answerCbQuery("Реквизиты уже отправлены");
+        await ctx.answerCbQuery("Реквизиты уже отправлены").catch(() => {});
         return;
       }
       pendingPaymentDetails.set(ctx.from.id, spdOrderId);
@@ -4433,7 +4437,7 @@ export function registerCallbacks(bot: Telegraf): void {
         `Просто напиши — я отправлю напрямую покупателю:`,
         { parse_mode: "HTML" }
       );
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
@@ -4441,18 +4445,18 @@ export function registerCallbacks(bot: Telegraf): void {
     // Works for both TG (multipart from buffer) and VK (vkSendPhoto upload).
     // Allowed in AWAITING_PAYMENT *and* PAYMENT_PENDING so the QR can be re-sent.
     if (data.startsWith("sqr:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const sqrOrderId = data.slice(4);
       const sqrOrder = await (db as any).wbOrder.findUnique({ where: { id: sqrOrderId } });
-      if (!sqrOrder) { await ctx.answerCbQuery("Заказ не найден"); return; }
+      if (!sqrOrder) { await ctx.answerCbQuery("Заказ не найден").catch(() => {}); return; }
       if (!["AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(sqrOrder.status)) {
-        await ctx.answerCbQuery("Заказ уже обрабатывается или завершён");
+        await ctx.answerCbQuery("Заказ уже обрабатывается или завершён").catch(() => {});
         return;
       }
 
       const qr = await getSbpQrBuffer();
       if (!qr) {
-        await ctx.answerCbQuery("QR не настроен");
+        await ctx.answerCbQuery("QR не настроен").catch(() => {});
         await ctx.reply(
           "⚠️ QR не настроен в БД (GlobalSettings.sbpQrBase64). " +
           "Загрузи изображение или отправь реквизиты текстом.",
@@ -4506,26 +4510,26 @@ export function registerCallbacks(bot: Telegraf): void {
 
       if (delivered) {
         await ctx.reply(`✅ QR отправлен покупателю (заказ <code>${sqrOrder.wbCode}</code>).`, { parse_mode: "HTML" });
-        await ctx.answerCbQuery("✅ QR отправлен");
+        await ctx.answerCbQuery("✅ QR отправлен").catch(() => {});
       } else {
         await ctx.reply(
           `⚠️ Не удалось доставить QR покупателю (заказ <code>${sqrOrder.wbCode}</code>). ` +
           `Проверь, что у пользователя есть активный диалог с ботом.`,
           { parse_mode: "HTML" }
         );
-        await ctx.answerCbQuery("Не доставлено");
+        await ctx.answerCbQuery("Не доставлено").catch(() => {});
       }
       return;
     }
 
     // cdo: admin cancels direct order
     if (data.startsWith("cdo:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const cdoOrderId = data.slice(4);
       const cdoOrder = await (db as any).wbOrder.findUnique({ where: { id: cdoOrderId } });
-      if (!cdoOrder) { await ctx.answerCbQuery("Заказ не найден"); return; }
+      if (!cdoOrder) { await ctx.answerCbQuery("Заказ не найден").catch(() => {}); return; }
       if (!["AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(cdoOrder.status)) {
-        await ctx.answerCbQuery("Заказ уже обрабатывается или завершён");
+        await ctx.answerCbQuery("Заказ уже обрабатывается или завершён").catch(() => {});
         return;
       }
       await (db as any).wbOrder.update({
@@ -4558,25 +4562,25 @@ export function registerCallbacks(bot: Telegraf): void {
         `\n\n❌ Отменён — ${adminTag}`,
         { parse_mode: "HTML" }
       ); } catch { }
-      await ctx.answerCbQuery("Заказ отменён");
+      await ctx.answerCbQuery("Заказ отменён").catch(() => {});
       return;
     }
 
     // sqi: admin sends QR for an intent (creates WbOrder from intent)
     if (data.startsWith("sqi:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const intentId = data.slice(4);
       const intent = await (db as any).directIntent.findUnique({ where: { id: intentId }, include: { user: true } });
-      if (!intent) { await ctx.answerCbQuery("Заявка не найдена"); return; }
-      if (intent.status !== "PENDING") { await ctx.answerCbQuery("Заявка уже обработана"); return; }
+      if (!intent) { await ctx.answerCbQuery("Заявка не найдена").catch(() => {}); return; }
+      if (intent.status !== "PENDING") { await ctx.answerCbQuery("Заявка уже обработана").catch(() => {}); return; }
       if (Date.now() - new Date(intent.createdAt).getTime() > 24 * 60 * 60 * 1000) {
         await (db as any).directIntent.update({ where: { id: intentId }, data: { status: "EXPIRED" } });
-        await ctx.answerCbQuery("Заявка просрочена (>24ч)");
+        await ctx.answerCbQuery("Заявка просрочена (>24ч).catch(() => {})");
         return;
       }
 
       const qr = await getSbpQrBuffer();
-      if (!qr) { await ctx.answerCbQuery("QR не настроен"); return; }
+      if (!qr) { await ctx.answerCbQuery("QR не настроен").catch(() => {}); return; }
 
       const dirCode = generateDirectCode();
       let newOrder: any;
@@ -4612,7 +4616,7 @@ export function registerCallbacks(bot: Telegraf): void {
         });
       } catch (err) {
         console.error("[TG] sqi: intent consume error:", err);
-        await ctx.answerCbQuery("Ошибка создания заказа");
+        await ctx.answerCbQuery("Ошибка создания заказа").catch(() => {});
         return;
       }
 
@@ -4642,20 +4646,20 @@ export function registerCallbacks(bot: Telegraf): void {
         if (!delivered) console.error("[TG] sqi vkSendPhoto failed");
       }
       try { await ctx.editMessageText(`✅ QR отправлен — ${adminTag}\nЗаявка ${escapeHtml(intent.robloxUsername)} · ${intent.totalAmount} R$ → Заказ <code>${dirCode}</code>`, { parse_mode: "HTML" }); } catch { }
-      await ctx.answerCbQuery("✅ QR отправлен");
+      await ctx.answerCbQuery("✅ QR отправлен").catch(() => {});
       return;
     }
 
     // spi: admin sends payment details for an intent (creates WbOrder, then asks admin for text)
     if (data.startsWith("spi:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const intentId = data.slice(4);
       const intent = await (db as any).directIntent.findUnique({ where: { id: intentId }, include: { user: true } });
-      if (!intent) { await ctx.answerCbQuery("Заявка не найдена"); return; }
-      if (intent.status !== "PENDING") { await ctx.answerCbQuery("Заявка уже обработана"); return; }
+      if (!intent) { await ctx.answerCbQuery("Заявка не найдена").catch(() => {}); return; }
+      if (intent.status !== "PENDING") { await ctx.answerCbQuery("Заявка уже обработана").catch(() => {}); return; }
       if (Date.now() - new Date(intent.createdAt).getTime() > 24 * 60 * 60 * 1000) {
         await (db as any).directIntent.update({ where: { id: intentId }, data: { status: "EXPIRED" } });
-        await ctx.answerCbQuery("Заявка просрочена (>24ч)");
+        await ctx.answerCbQuery("Заявка просрочена (>24ч).catch(() => {})");
         return;
       }
 
@@ -4692,7 +4696,7 @@ export function registerCallbacks(bot: Telegraf): void {
         });
       } catch (err) {
         console.error("[TG] spi: intent consume error:", err);
-        await ctx.answerCbQuery("Ошибка создания заказа");
+        await ctx.answerCbQuery("Ошибка создания заказа").catch(() => {});
         return;
       }
 
@@ -4702,17 +4706,17 @@ export function registerCallbacks(bot: Telegraf): void {
         { parse_mode: "HTML" }
       );
       try { await ctx.editMessageText(`💳 Реквизиты — ${adminTag}\nЗаявка ${escapeHtml(intent.robloxUsername)} · ${intent.totalAmount} R$ → Заказ <code>${dirCode}</code>`, { parse_mode: "HTML" }); } catch { }
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
     // cai: admin cancels/rejects an intent
     if (data.startsWith("cai:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const intentId = data.slice(4);
       const intent = await (db as any).directIntent.findUnique({ where: { id: intentId }, include: { user: true } });
-      if (!intent) { await ctx.answerCbQuery("Заявка не найдена"); return; }
-      if (intent.status !== "PENDING") { await ctx.answerCbQuery("Заявка уже обработана"); return; }
+      if (!intent) { await ctx.answerCbQuery("Заявка не найдена").catch(() => {}); return; }
+      if (intent.status !== "PENDING") { await ctx.answerCbQuery("Заявка уже обработана").catch(() => {}); return; }
       await (db as any).directIntent.update({ where: { id: intentId }, data: { status: "CANCELLED" } });
       if (intent.user.tgId) {
         try {
@@ -4725,18 +4729,18 @@ export function registerCallbacks(bot: Telegraf): void {
         try { await vkSend(intent.user.vkId, `❌ Заявка отклонена. Попробуй оформить новую.`); } catch { }
       }
       try { await ctx.editMessageText(`❌ Заявка ${escapeHtml(intent.robloxUsername)} · ${intent.totalAmount} R$ отклонена — ${adminTag}`, { parse_mode: "HTML" }); } catch { }
-      await ctx.answerCbQuery("Заявка отклонена");
+      await ctx.answerCbQuery("Заявка отклонена").catch(() => {});
       return;
     }
 
     // pay_ok: admin confirms payment screenshot
     if (data.startsWith("pay_ok:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const [, payOkOrderId, payOkUserId] = data.split(":");
       const payOkOrder = await (db as any).wbOrder.findUnique({ where: { id: payOkOrderId } });
-      if (!payOkOrder) { await ctx.answerCbQuery("Заказ не найден"); return; }
+      if (!payOkOrder) { await ctx.answerCbQuery("Заказ не найден").catch(() => {}); return; }
       if (payOkOrder.status !== "PAYMENT_PENDING") {
-        await ctx.answerCbQuery("Оплата уже обработана");
+        await ctx.answerCbQuery("Оплата уже обработана").catch(() => {});
         return;
       }
       // New flow: gamepassUrl already filled from intent → skip AWAITING_GAMEPASS
@@ -4800,13 +4804,13 @@ export function registerCallbacks(bot: Telegraf): void {
       }
       const payOkCaption = `✅ Оплата принята — ${adminTag}\nЗаказ <code>${payOkOrder.wbCode}</code> · ${payOkOrder.amount} R$`;
       try { await ctx.editMessageCaption(payOkCaption, { parse_mode: "HTML" }); } catch { }
-      await ctx.answerCbQuery("✅ Оплата подтверждена");
+      await ctx.answerCbQuery("✅ Оплата подтверждена").catch(() => {});
       return;
     }
 
     // pay_no: admin rejects payment screenshot
     if (data.startsWith("pay_no:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const [, payNoOrderId, payNoUserId] = data.split(":");
       const payNoOrder = await (db as any).wbOrder.findUnique({ where: { id: payNoOrderId }, select: { paymentDetails: true } });
       const payNoUser = await (db as any).user.findUnique({ where: { id: payNoUserId } });
@@ -4838,17 +4842,17 @@ export function registerCallbacks(bot: Telegraf): void {
         } catch { }
       }
       try { await ctx.editMessageCaption(`❌ Оплата отклонена — ${adminTag}`, { parse_mode: "HTML" }); } catch { }
-      await ctx.answerCbQuery("Отклонено");
+      await ctx.answerCbQuery("Отклонено").catch(() => {});
       return;
     }
 
     // ── ❌ admin_reject_none: reject without reason ─────────────────────────
     if (data.startsWith("admin_reject_none:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const orderId = data.split(":")[1];
       pendingRejectionReason.delete(ctx.from.id);
       await performAdminReject(bot, ctx, orderId, "");
-      await ctx.answerCbQuery("Отклонено без причины");
+      await ctx.answerCbQuery("Отклонено без причины").catch(() => {});
       return;
     }
 
@@ -4859,7 +4863,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
       // DIR- codes are synthetic — they can't have a gamepass link resubmitted
       if (code?.startsWith("DIR-")) {
-        await ctx.answerCbQuery("Прямой заказ нельзя переоформить так");
+        await ctx.answerCbQuery("Прямой заказ нельзя переоформить так").catch(() => {});
         await ctx.reply(
           "Для нового прямого заказа используй кнопку ниже.",
           { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("💎 Заказать напрямую", CB.startDirect)]]) }
@@ -4873,7 +4877,7 @@ export function registerCallbacks(bot: Telegraf): void {
       });
       if (!existingOrder) {
         await ctx.reply("Заказ не найден — возможно, он уже завершён.", { parse_mode: "HTML", ...withSupportKb("💬 Разобраться с заказом") });
-        await ctx.answerCbQuery("Заказ не найден");
+        await ctx.answerCbQuery("Заказ не найден").catch(() => {});
         return;
       }
 
@@ -4881,7 +4885,7 @@ export function registerCallbacks(bot: Telegraf): void {
       const callerUser = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) } });
       if (!callerUser || existingOrder.userId !== callerUser.id) {
         await ctx.reply("⛔ Этот заказ не принадлежит твоему аккаунту.\n\nЕсли уверен, что это твой заказ:", { parse_mode: "HTML", ...withSupportKb() });
-        await ctx.answerCbQuery("⛔ Нет доступа");
+        await ctx.answerCbQuery("⛔ Нет доступа").catch(() => {});
         return;
       }
 
@@ -4891,7 +4895,7 @@ export function registerCallbacks(bot: Telegraf): void {
           parse_mode: "HTML",
           ...Markup.inlineKeyboard([[Markup.button.callback("📊 Проверить статус", CB.refreshStatus)]]),
         });
-        await ctx.answerCbQuery("Заказ уже в работе — исправлять ссылку не нужно.");
+        await ctx.answerCbQuery("Заказ уже в работе — исправлять ссылку не нужно.").catch(() => {});
         return;
       }
 
@@ -4914,19 +4918,19 @@ export function registerCallbacks(bot: Telegraf): void {
           ]),
         }
       );
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
     // ── 🎁 review_ok: approve review bonus ───────────────────────────────
     if (data.startsWith("review_ok:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const [, orderId, userId] = data.split(":");
 
       // Resolve which specific WB code to mark — prevents marking ALL codes for this user.
       const reviewOrder = await (db as any).wbOrder.findUnique({ where: { id: orderId } });
       if (!reviewOrder) {
-        await ctx.answerCbQuery("Заказ не найден");
+        await ctx.answerCbQuery("Заказ не найден").catch(() => {});
         return;
       }
 
@@ -4954,7 +4958,7 @@ export function registerCallbacks(bot: Telegraf): void {
       });
 
       if (!paid) {
-        await ctx.answerCbQuery("✅ Бонус уже начислен ранее");
+        await ctx.answerCbQuery("✅ Бонус уже начислен ранее").catch(() => {});
         return;
       }
 
@@ -4989,13 +4993,13 @@ export function registerCallbacks(bot: Telegraf): void {
 
       const caption = `🎁 Бонус начислен — ${adminTag}\nЗаказ <code>${(await orderCode(orderId)) ?? "?"}</code>`;
       try { await ctx.editMessageCaption(caption, { parse_mode: "HTML" }); } catch { }
-      await ctx.answerCbQuery("+100 R$ начислено");
+      await ctx.answerCbQuery("+100 R$ начислено").catch(() => {});
       return;
     }
 
     // ── ❌ review_no: safety confirmation step ────────────────────────────
     if (data.startsWith("review_no:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const [, orderId, userId] = data.split(":");
       await ctx.reply(
         `⚠️ Отклонить скриншот отзыва для заказа <code>${(await orderCode(orderId)) ?? "?"}</code>?\n\nПользователь будет уведомлён и сможет отправить скриншот повторно.`,
@@ -5007,13 +5011,13 @@ export function registerCallbacks(bot: Telegraf): void {
           ]])
         }
       );
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
     // ── ✅ crn: confirmed → show preset reasons ──────────────────────────
     if (data.startsWith("crn:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const [, orderId, userId] = data.split(":");
       try { await ctx.editMessageText(
         `📋 Выбери причину отклонения:`,
@@ -5026,21 +5030,21 @@ export function registerCallbacks(bot: Telegraf): void {
           ])
         }
       ); } catch { }
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
     // ── ❌ xrn: admin cancelled review rejection ─────────────────────────
     if (data.startsWith("xrn:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       try { await ctx.editMessageText("✅ Отклонение отзыва отменено."); } catch { }
-      await ctx.answerCbQuery("Отменено");
+      await ctx.answerCbQuery("Отменено").catch(() => {});
       return;
     }
 
     // ── 📋 rr: preset review rejection reason selected ───────────────────
     if (data.startsWith("rr:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("⛔ Доступ запрещён").catch(() => {});
       const parts = data.split(":");
       const orderId = parts[1];
       const userId  = parts[2];
@@ -5060,23 +5064,23 @@ export function registerCallbacks(bot: Telegraf): void {
       // Notify user and restore review state
       await notifyReviewRejected(bot, userId, orderId, reason);
 
-      await ctx.answerCbQuery("✅ Отзыв отклонён");
+      await ctx.answerCbQuery("✅ Отзыв отклонён").catch(() => {});
       return;
     }
 
     // ── 🔍 admin_view: open full order card ────────────────────────────────
     if (data.startsWith("admin_view:")) {
-      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("Доступ запрещен");
+      if (!ADMIN_IDS.includes(adminId)) return ctx.answerCbQuery("Доступ запрещен").catch(() => {});
       const orderId = data.split(":")[1];
       const order = await (db as any).wbOrder.findUnique({
         where: { id: orderId },
         include: { user: true }
       });
-      if (!order) return ctx.answerCbQuery("Заказ не найден");
+      if (!order) return ctx.answerCbQuery("Заказ не найден").catch(() => {});
 
       const { text, reply_markup } = await renderOrderCard(order);
       await ctx.reply(text, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } });
-      return ctx.answerCbQuery();
+      return ctx.answerCbQuery().catch(() => {});
     }
 
     // ── 📸 review_hint: prompt user to send review screenshot ────────────
@@ -5101,7 +5105,7 @@ export function registerCallbacks(bot: Telegraf): void {
                 }
               : { parse_mode: "HTML" }
           );
-          await ctx.answerCbQuery();
+          await ctx.answerCbQuery().catch(() => {});
           return;
         }
       }
@@ -5110,7 +5114,7 @@ export function registerCallbacks(bot: Telegraf): void {
         "После проверки бонус <b>+100 R$</b> придёт автоматически (действует на любой номинал).",
         { parse_mode: "HTML" }
       );
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery().catch(() => {});
       return;
     }
 
@@ -5124,7 +5128,7 @@ export function registerCallbacks(bot: Telegraf): void {
           ...keyboard,
         });
       } catch { }
-      return ctx.answerCbQuery("Обновлено");
+      return ctx.answerCbQuery("Обновлено").catch(() => {});
     }
 
     // ── 👤 menu: buyer mini-profile hub ──────────────────────────────────
@@ -5138,10 +5142,10 @@ export function registerCallbacks(bot: Telegraf): void {
       if (nickButton) {
         await ctx.reply("⚙️ Настройки:", { parse_mode: "HTML", ...nickButton });
       }
-      return ctx.answerCbQuery();
+      return ctx.answerCbQuery().catch(() => {});
     }
 
-    await ctx.answerCbQuery();
+    await ctx.answerCbQuery().catch(() => {});
   });
 }
 

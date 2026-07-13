@@ -28,6 +28,14 @@ Telegram (`bots/shared/notify.ts` → `tgSend` → `ADMIN_IDS`).
 Регистрация: `registerStart`, `registerStatus`, `registerText`, `registerPhoto`,
 `registerAdmin`, `registerCallbacks`, `registerChatMember` + admin-хабы (`admin/index.ts`).
 
+### `answerCallbackQuery` — ранний ответ (2026-07-13)
+
+`registerCallbacks` первым делом вызывает `ctx.answerCbQuery().catch(() => {})` — до
+любых БД-запросов и Roblox API. Это снимает спиннер Telegram с кнопки немедленно;
+без раннего ответа тяжёлые операции (выкуп, sync, поиск) заставляли кнопку крутиться
+десятки секунд и давали клиенту «query is too old». Все последующие `answerCbQuery`
+вызовы тоже обёрнуты в `.catch(() => {})` — повторный ответ Telegram молча отбрасывает.
+
 ### Активация (`bot.start`)
 - Парсит `wbg_`/`wb_` payload (код + sessionId + guide-флаг).
 - Rate-limit: 5 стартов / мин на sessionId|tgId; дедуп дубля iOS-deep-link (`recentCodeStarts`).
