@@ -18,7 +18,7 @@ type Screen = "dashboard" | "orders" | "wb" | "account" | "settings" | "system";
 const MAIN_TABS = [
   { id: "dashboard" as const, label: "Главная", Icon: House },
   { id: "orders" as const, label: "Заказы", Icon: ClipboardList },
-  { id: "wb" as const, label: "WB", Icon: Warehouse },
+  { id: "account" as const, label: "Аккаунт", Icon: CircleUserRound },
 ];
 
 export default function BottomNav({
@@ -31,7 +31,7 @@ export default function BottomNav({
   ordersBadge?: number;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
-  const moreActive = active === "account" || active === "settings" || active === "system";
+  const moreActive = active === "wb" || active === "settings" || active === "system";
 
   function navigate(screen: Screen) {
     if (screen !== active) haptic.select();
@@ -57,9 +57,9 @@ export default function BottomNav({
               <X size={18} />
             </button>
           </div>
-          <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("account")}>
-            <span className="twa-more-icon"><CircleUserRound size={19} /></span>
-            <span><strong>Аккаунт</strong><small>Выкуп, доноры и баланс</small></span>
+          <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("wb")}>
+            <span className="twa-more-icon"><Warehouse size={19} /></span>
+            <span><strong>Wildberries</strong><small>Аналитика, склад и коды</small></span>
             <span aria-hidden="true">›</span>
           </button>
           <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("settings")}>
