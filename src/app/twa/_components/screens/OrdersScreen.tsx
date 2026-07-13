@@ -1,5 +1,6 @@
 "use client";
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { C, SHADOW, tabular, MONO } from "../theme";
 import { haptic } from "../haptics";
 import { toast } from "../Toast";
@@ -1073,22 +1074,11 @@ function OrderCard({
   // (since it entered PENDING). pendingAt is set when the gamepass link arrives.
   const inBuyoutQueue = !!order.pendingAt && ["PENDING", "IN_PROGRESS"].includes(order.status);
 
-  return (
+  // Компактная сводка используется дважды: строкой в ленте и шапкой detail-sheet.
+  // Сам sheet рендерится порталом в body: position:fixed внутри iOS-скролла ленты
+  // глючит (containing block + layout shift), карточка «вылезала на весь экран».
+  const compactSummary = (
     <>
-    {expanded && <button type="button" className="twa-order-sheet-backdrop" aria-label="Закрыть заказ" onClick={() => setExpanded(false)} />}
-    <article className={`twa-glass-order${expanded ? " is-sheet" : ""}${exiting ? " twa-card-exit" : ""}`} style={{
-      background: C.card,
-      borderRadius: 16,
-      overflow: "hidden",
-      boxShadow: SHADOW.card,
-      position: "relative",
-    }}>
-      <button
-        type="button"
-        className="twa-compact-order twa-press-sm"
-        aria-expanded={expanded}
-        onClick={() => { haptic.select(); setExpanded(value => !value); }}
-      >
         <span className="twa-compact-order-top">
           <b style={{ color: tabBadge?.color ?? SOURCE_BADGE_META[order.orderSource]?.color ?? C.accent }}>
             {tabBadge?.label ?? SOURCE_BADGE_META[order.orderSource]?.label ?? order.orderSource}
@@ -1113,9 +1103,40 @@ function OrderCard({
                   order.gpWatchDeclinedAt ? "Клиент отклонил найденный ник" : "Заказ требует исправления"}
           </span>
         )}
-      </button>
+    </>
+  );
 
-      {expanded && <>
+  return (
+    <>
+    <article className={`twa-glass-order${exiting ? " twa-card-exit" : ""}`} style={{
+      background: C.card,
+      borderRadius: 16,
+      overflow: "hidden",
+      boxShadow: SHADOW.card,
+      position: "relative",
+    }}>
+      <button
+        type="button"
+        className="twa-compact-order twa-press-sm"
+        aria-expanded={expanded}
+        onClick={() => { haptic.select(); setExpanded(value => !value); }}
+      >
+        {compactSummary}
+      </button>
+    </article>
+
+    {expanded && createPortal(
+      <div className="twa-order-sheet-layer" role="presentation" onClick={() => setExpanded(false)}>
+      <article className="twa-order-sheet twa-fade-up" role="dialog" aria-modal="true" aria-label="Карточка заказа" onClick={event => event.stopPropagation()}>
+      <button
+        type="button"
+        className="twa-compact-order twa-press-sm"
+        aria-expanded={expanded}
+        onClick={() => { haptic.select(); setExpanded(false); }}
+      >
+        {compactSummary}
+      </button>
+      <>
       {/* Header: platform badge + nick + star */}
       <div style={{ padding: "14px 16px 0", display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
@@ -1447,8 +1468,11 @@ function OrderCard({
         onRunAction={onRunAction}
         onPurchaseDone={onPurchaseDone}
       />
-      </>}
-    </article>
+      </>
+      </article>
+      </div>,
+      document.body,
+    )}
     </>
   );
 }
@@ -1995,6 +2019,31 @@ export default function OrdersScreen({
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
+        {/* Mini-dashboard: суммы и возраст очередей. «В работе» — три рабочие
+            категории (контракт WORK), «Все» — полная сетка, внутри категории —
+            её карточка. Скроллится вместе с лентой, высоту тулбара не отбирает. */}
+        {data?.sums && !query && (filter === "WORK" || filter === "ALL") && !isAttentionView && (
+          <div style={{ paddingTop: 10, paddingBottom: 2 }}>
+            <MiniDashboard
+              counts={data.counts}
+              sums={data.sums}
+              oldest={data.oldest}
+              onTap={setFilter}
+              groups={filter === "WORK" ? DASHBOARD_GROUPS.filter(g => WORK_DASHBOARD_KEYS.has(g.key)) : DASHBOARD_GROUPS}
+            />
+          </div>
+        )}
+        {data?.sums && !query && (filter === "BUYOUT" || filter === "AWAITING_LINK") && (
+          <div style={{ paddingTop: 10, paddingBottom: 2 }}>
+            <MiniDashboard
+              counts={data.counts}
+              sums={data.sums}
+              oldest={data.oldest}
+              groups={DASHBOARD_GROUPS.filter(g => g.filter === filter)}
+            />
+          </div>
+        )}
+
         {/* Заявки прямых заказов — до отправки реквизитов (видны даже при пустом списке заказов) */}
         {filter === "DIRECT" && !query && (
           <IntentsSection
@@ -2403,6 +2452,84 @@ function IntentsSection({ token, intents, qrConfigured, loading, onIntentGone }:
           onGone={(result) => onIntentGone(i.id, result)}
         />
       ))}
+    </div>
+  );
+}
+
+/* ───────────── MiniDashboard — summary-карточки в Premium Calm стиле ───────────── */
+function fmtRobux(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 10_000) return `${(n / 1_000).toFixed(0)}K`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString("ru-RU");
+}
+
+function pluralOrders(n: number): string {
+  const m = n % 100;
+  if (m >= 11 && m <= 14) return "заказов";
+  const d = n % 10;
+  return d === 1 ? "заказ" : d >= 2 && d <= 4 ? "заказа" : "заказов";
+}
+
+// Режим суммы: amount в БД — чистые R$ (клиенту), грязные = ceil(amount / 0.7)
+// (цена геймпасса, что спишется с донора). Крупная цифра — то, чем оперирует
+// менеджер в этой категории; в скобках — второе значение (grossOnly — без скобок).
+type DashSumMode = "grossClean" | "cleanGross" | "grossOnly";
+
+const DASHBOARD_GROUPS: { key: string; label: string; sumKey: string; filter: FilterTab; color: string; mode: DashSumMode; oldestKey?: string }[] = [
+  { key: "buyout", label: "К выкупу",    sumKey: "BUYOUT",        filter: "BUYOUT",        color: C.green,  mode: "grossClean", oldestKey: "BUYOUT" },
+  { key: "link",   label: "Ждут ссылку", sumKey: "AWAITING_LINK", filter: "AWAITING_LINK", color: C.yellow, mode: "cleanGross", oldestKey: "AWAITING_LINK" },
+  { key: "direct", label: "Прямой",      sumKey: "DIRECT",        filter: "DIRECT",        color: C.blue,   mode: "grossOnly" },
+  { key: "avito",  label: "Авито",       sumKey: "AVITO",         filter: "AVITO",         color: C.orange, mode: "grossOnly" },
+  { key: "new",    label: "Новые",       sumKey: "NEW",           filter: "NEW",           color: C.accent, mode: "cleanGross" },
+  { key: "error",  label: "Ошибка",      sumKey: "ERROR",         filter: "ERROR",         color: C.red,    mode: "grossClean" },
+];
+// «В работе» показывает ровно видимый контракт WORK: выкуп + старые ссылки + ошибки.
+const WORK_DASHBOARD_KEYS = new Set(["buyout", "link", "error"]);
+
+function MiniDashboard({ counts, sums, oldest, onTap, groups = DASHBOARD_GROUPS }: {
+  counts: Record<string, number>;
+  sums: Record<string, number>;
+  oldest?: Record<string, string | null> | null;
+  onTap?: (filter: FilterTab) => void;
+  groups?: typeof DASHBOARD_GROUPS;
+}) {
+  const visible = groups.filter(g => (counts[g.filter] ?? 0) > 0);
+  if (visible.length === 0) return null;
+
+  return (
+    <div className={`twa-dash-grid${visible.length === 1 ? " is-single" : ""}`}>
+      {visible.map(g => {
+        const count = counts[g.filter] ?? 0;
+        const cleanRobux = sums[g.sumKey] ?? 0;
+        const grossRobux = Math.ceil(cleanRobux / 0.7);
+        const primary = g.mode === "cleanGross" ? cleanRobux : grossRobux;
+        const secondary = g.mode === "grossClean" ? cleanRobux : g.mode === "cleanGross" ? grossRobux : null;
+        const oldestIso = g.oldestKey ? (oldest?.[g.oldestKey] ?? null) : null;
+
+        const body = (
+          <>
+            <span className="twa-dash-label"><i style={{ background: g.color }} />{g.label}</span>
+            <span className="twa-dash-value">
+              {fmtRobux(primary)}<small>R$</small>
+              {secondary !== null && <em>({fmtRobux(secondary)})</em>}
+            </span>
+            <span className="twa-dash-meta">
+              <span>{count} {pluralOrders(count)}</span>
+              {oldestIso && <b title="Старейший в очереди" style={{ color: ageColor(oldestIso) }}>ждёт {fmtAge(oldestIso)}</b>}
+            </span>
+          </>
+        );
+
+        return onTap ? (
+          <button key={g.key} type="button" className="twa-dash-card twa-press-sm"
+            onClick={() => { haptic.impact("light"); onTap(g.filter); }}>
+            {body}
+          </button>
+        ) : (
+          <div key={g.key} className="twa-dash-card" style={{ cursor: "default" }}>{body}</div>
+        );
+      })}
     </div>
   );
 }
