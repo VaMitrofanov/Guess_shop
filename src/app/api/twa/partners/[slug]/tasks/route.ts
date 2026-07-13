@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 
 import { after, NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
@@ -24,6 +24,7 @@ import {
 } from "@/lib/google-sheets";
 import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepass, type PurchaseResult } from "@/lib/roblox-buyout";
 import { notifyPartnerBuyout, type PartnerBuyoutNotifyItem } from "@/lib/partner-buyout-notify";
+import { partnerGamepassCommentValue, settledPartnerRowPolicy } from "@/lib/partner-sheet-policy";
 import { prisma } from "@/lib/prisma";
 import { extractTwaUser } from "@/lib/twa-auth";
 
@@ -71,6 +72,7 @@ const ACTIVE_TASK_STATUSES = ["NEW", "READY", "FAILED"] as const;
 // Диапазон A:D (E остаётся каналом комментариев); редакторы — владелец таблицы
 // (env GOOGLE_SHEETS_PROTECTED_EDITORS) + сервисный аккаунт (client_email credentials).
 const SHEET_PROTECTION_DESCRIPTION_PREFIX = "Заблокировано ботом";
+const SHEET_PENDING_PROTECTION_DESCRIPTION_PREFIX = "Статус заблокирован ботом";
 const SHEET_PROTECTION_END_COLUMN = SHEET_COL.status + 1;
 
 type ParsedPartnerImportRow = {
@@ -148,6 +150,10 @@ type GoogleSyncProtectionStats = {
   unlocked: number;
   /** Задачи, для которых установка защиты не удалась (дочинит следующий sync). */
   failed: number;
+  /** 5.11: новые точечные D-локи у активных pending-строк. */
+  pendingLocked: number;
+  /** 5.11: D-локи, снятые при DONE/FAILED/CANCELLED. */
+  pendingUnlocked: number;
 };
 
 type GoogleSyncDiagnostics = GoogleSyncFilterStats & {
@@ -159,7 +165,8 @@ type GoogleSyncDiagnostics = GoogleSyncFilterStats & {
 /** 5.8: отложенные операции защиты строк, применяются одним батчем в конце прогона. */
 type PartnerProtectionOp =
   | { kind: "protect"; taskId: string; sheetId: number; rowNumber: number }
-  | { kind: "unprotect"; protectedRangeId: number };
+  | { kind: "protect-pending"; taskId: string; sheetId: number; rowNumber: number }
+  | { kind: "unprotect"; protectedRangeId: number; taskId?: string; clearField?: "protectedRangeId" | "pendingProtectedRangeId" };
 
 type GoogleSyncResult = {
   status: "success" | "partial" | "failed" | "skipped";
@@ -395,6 +402,12 @@ function getTaskProtectedRangeId(task: Pick<PartnerBuyoutTask, "sheetRaw">) {
   return typeof id === "number" && Number.isInteger(id) ? id : null;
 }
 
+function getTaskPendingProtectedRangeId(task: Pick<PartnerBuyoutTask, "sheetRaw">) {
+  if (!isRecord(task.sheetRaw)) return null;
+  const id = task.sheetRaw.pendingProtectedRangeId;
+  return typeof id === "number" && Number.isInteger(id) ? id : null;
+}
+
 function buildPartnerRowProtectRequest(sheetId: number, rowNumber: number) {
   return buildAddProtectedRangeRequest({
     sheetId,
@@ -406,11 +419,29 @@ function buildPartnerRowProtectRequest(sheetId: number, rowNumber: number) {
   });
 }
 
+function buildPartnerPendingProtectRequest(sheetId: number, rowNumber: number) {
+  return buildAddProtectedRangeRequest({
+    sheetId,
+    rowNumber,
+    startColumnIndex: SHEET_COL.status,
+    endColumnIndex: SHEET_COL.status + 1,
+    description: `${SHEET_PENDING_PROTECTION_DESCRIPTION_PREFIX} (строка ${rowNumber})`,
+    editors: getGoogleProtectionEditors(),
+  });
+}
+
 function findBotRowProtection(protections: GoogleProtectedRangeInfo[], sheetId: number, rowNumber: number) {
   return protections.find((protection) => protection.range.sheetId === sheetId
     && protection.range.startRowIndex === rowNumber - 1
     && protection.range.endRowIndex === rowNumber
     && protection.description.startsWith(SHEET_PROTECTION_DESCRIPTION_PREFIX)) ?? null;
+}
+
+function findBotPendingProtection(protections: GoogleProtectedRangeInfo[], sheetId: number, rowNumber: number) {
+  return protections.find((protection) => protection.range.sheetId === sheetId
+    && protection.range.startRowIndex === rowNumber - 1
+    && protection.range.endRowIndex === rowNumber
+    && protection.description.startsWith(SHEET_PENDING_PROTECTION_DESCRIPTION_PREFIX)) ?? null;
 }
 
 /**
@@ -813,15 +844,17 @@ async function applyPartnerProtectionOps(
   stats: GoogleSyncProtectionStats,
 ): Promise<string | null> {
   if (ops.length === 0) return null;
-  const protectOpsCount = ops.filter((op) => op.kind === "protect").length;
+  const protectOpsCount = ops.filter((op) => op.kind !== "unprotect").length;
 
   try {
     const protections = await listGoogleSheetProtectedRanges(spreadsheetId);
     const knownIds = new Set(protections.map((protection) => protection.protectedRangeId));
     const requests: GoogleSheetsRequest[] = [];
-    const pendingProtects: Array<{ taskId: string; requestIndex: number }> = [];
+    const pendingProtects: Array<{ taskId: string; requestIndex: number; kind: "protect" | "protect-pending" }> = [];
+    const pendingClears: Array<{ taskId: string; clearField: "protectedRangeId" | "pendingProtectedRangeId" }> = [];
     const seenTargets = new Set<string>();
     let deleteCount = 0;
+    let pendingDeleteCount = 0;
 
     for (const op of ops) {
       if (op.kind === "unprotect") {
@@ -829,38 +862,62 @@ async function applyPartnerProtectionOps(
         // валит весь батч.
         if (knownIds.has(op.protectedRangeId)) {
           requests.push(buildDeleteProtectedRangeRequest(op.protectedRangeId));
-          deleteCount += 1;
+          if (op.clearField === "pendingProtectedRangeId") pendingDeleteCount += 1;
+          else deleteCount += 1;
         }
+        if (op.taskId && op.clearField) pendingClears.push({ taskId: op.taskId, clearField: op.clearField });
         continue;
       }
-      const targetKey = `${op.sheetId}:${op.rowNumber}`;
+      const targetKey = `${op.kind}:${op.sheetId}:${op.rowNumber}`;
       if (seenTargets.has(targetKey)) continue;
       seenTargets.add(targetKey);
-      const existing = findBotRowProtection(protections, op.sheetId, op.rowNumber);
+      const isPending = op.kind === "protect-pending";
+      const existing = isPending
+        ? findBotPendingProtection(protections, op.sheetId, op.rowNumber)
+        : findBotRowProtection(protections, op.sheetId, op.rowNumber);
       if (existing) {
         await patchTaskSheetRaw(op.taskId, {
-          protectedRangeId: existing.protectedRangeId,
-          protectedAt: new Date().toISOString(),
+          [isPending ? "pendingProtectedRangeId" : "protectedRangeId"]: existing.protectedRangeId,
+          [isPending ? "pendingProtectedAt" : "protectedAt"]: new Date().toISOString(),
           protectError: null,
         });
-        stats.healed += 1;
+        if (!isPending) stats.healed += 1;
         continue;
       }
-      pendingProtects.push({ taskId: op.taskId, requestIndex: requests.length });
-      requests.push(buildPartnerRowProtectRequest(op.sheetId, op.rowNumber));
+      pendingProtects.push({ taskId: op.taskId, requestIndex: requests.length, kind: op.kind });
+      requests.push(isPending
+        ? buildPartnerPendingProtectRequest(op.sheetId, op.rowNumber)
+        : buildPartnerRowProtectRequest(op.sheetId, op.rowNumber));
     }
-    if (requests.length === 0) return null;
+    if (requests.length === 0) {
+      for (const clear of pendingClears) {
+        await patchTaskSheetRaw(clear.taskId, {
+          [clear.clearField]: null,
+          ...(clear.clearField === "pendingProtectedRangeId" ? { pendingProtectedAt: null } : { protectedAt: null }),
+        });
+      }
+      return null;
+    }
 
     const { replies } = await batchUpdateGoogleSheetStructural(spreadsheetId, requests);
     stats.unlocked += deleteCount;
+    stats.pendingUnlocked += pendingDeleteCount;
+    for (const clear of pendingClears) {
+      await patchTaskSheetRaw(clear.taskId, {
+        [clear.clearField]: null,
+        ...(clear.clearField === "pendingProtectedRangeId" ? { pendingProtectedAt: null } : { protectedAt: null }),
+      });
+    }
     for (const pending of pendingProtects) {
       const replyId = replies[pending.requestIndex]?.addProtectedRange?.protectedRange?.protectedRangeId;
+      const isPending = pending.kind === "protect-pending";
       await patchTaskSheetRaw(pending.taskId, {
-        ...(typeof replyId === "number" ? { protectedRangeId: replyId } : {}),
-        protectedAt: new Date().toISOString(),
+        ...(typeof replyId === "number" ? { [isPending ? "pendingProtectedRangeId" : "protectedRangeId"]: replyId } : {}),
+        [isPending ? "pendingProtectedAt" : "protectedAt"]: new Date().toISOString(),
         protectError: null,
       });
-      stats.locked += 1;
+      if (isPending) stats.pendingLocked += 1;
+      else stats.locked += 1;
     }
     return null;
   } catch (err) {
@@ -943,12 +1000,55 @@ async function debitPartnerTaskFromSheet(
       currency: moneyCurrency(partner),
       rateUsdtPer1000: partner.robuxRateUsdtPer1000,
       robuxAmount: priceRobux,
+      purchaseAccountName: "Вручную / из таблицы",
+      batchId: `sheet:${task.id}`,
+      itemCount: 1,
       reference: task.gamepassId,
-      comment: `${reason}: ${priceRobux} R$ × ${partner.robuxRateUsdtPer1000} USDT / 1000 R$`,
+      comment: `${reason}: ${priceUsdt.toFixed(2)} USDT (1 геймпасс · ${priceRobux} R$)`,
       createdBy: user ? operatorLabel(user) : "sheet-sync",
     },
   });
   return priceUsdt;
+}
+
+async function appendPartnerBuyoutBatch(input: {
+  partner: Partner;
+  batchId: string;
+  priceRobux: number;
+  priceUsdt: number;
+  purchaseAccountName: string;
+  createdBy: string;
+}) {
+  const ledger = await prisma.partnerLedgerEntry.upsert({
+    where: {
+      partnerId_batchId: { partnerId: input.partner.id, batchId: input.batchId },
+    },
+    create: {
+      partnerId: input.partner.id,
+      taskId: null,
+      type: "BUYOUT",
+      amount: -input.priceUsdt,
+      currency: moneyCurrency(input.partner),
+      rateUsdtPer1000: input.partner.robuxRateUsdtPer1000,
+      robuxAmount: input.priceRobux,
+      purchaseAccountName: input.purchaseAccountName,
+      batchId: input.batchId,
+      itemCount: 1,
+      reference: `batch:${input.batchId}`,
+      comment: "Пачка партнёрского выкупа",
+      createdBy: input.createdBy,
+    },
+    update: {
+      amount: { decrement: input.priceUsdt },
+      robuxAmount: { increment: input.priceRobux },
+      itemCount: { increment: 1 },
+    },
+  });
+  const comment = `Списано за пачку: ${Math.abs(ledger.amount).toFixed(2)} USDT (${ledger.itemCount} геймпассов · ${(ledger.robuxAmount ?? 0).toLocaleString("ru-RU")} R$)`;
+  return prisma.partnerLedgerEntry.update({
+    where: { id: ledger.id },
+    data: { comment },
+  });
 }
 
 /**
@@ -993,45 +1093,48 @@ async function reconcilePartnerGoogleRow(input: {
   rowStatus: string;
   rowComment: string;
   rowGamepassId: string | null;
+  rowCells: unknown[];
   sheetPriceRobux: number | null;
   stats: GoogleSyncReconciliationStats;
 }): Promise<ReconcileOutcome | null> {
   const { task, rowStatus, rowGamepassId, stats } = input;
   if (!(ACTIVE_TASK_STATUSES as readonly string[]).includes(task.status)) return null;
 
-  // Защита от сдвига нумерации (вставили/удалили строки выше): если в B теперь другой
-  // геймпасс, чужую строку не закрываем и не отменяем — только конфликт-метка.
-  if (rowGamepassId && task.gamepassId && rowGamepassId !== task.gamepassId) {
-    const conflict = `Строка сместилась: в ${SHEET_GAMEPASS_LETTER} геймпасс ${rowGamepassId}, в задаче ${task.gamepassId} — проверь вручную`;
-    stats.conflicts += 1;
-    if ((isRecord(task.sheetRaw) ? task.sheetRaw.conflict : null) === conflict) {
+  if (rowStatus === GOOGLE_STATUS_DONE) {
+    // Trello 2026-07-13: ручное «готово» фиксирует именно снимок A:C в момент
+    // перехода и списывает ровно номинал C. Без положительного C факт не закрываем:
+    // fallback на старую цену мог бы списать не ту сумму после одновременной правки.
+    if (!input.sheetPriceRobux || input.sheetPriceRobux <= 0) {
+      const conflict = `D=«готово», но в ${SHEET_AMOUNT_LETTER} нет положительного номинала — списание не выполнено`;
+      stats.conflicts += 1;
+      await prisma.partnerBuyoutTask.update({
+        where: { id: task.id },
+        data: { sheetRaw: mergeTaskSheetRaw(task, { conflict, conflictAt: new Date().toISOString() }) },
+      });
       return { kind: "conflict", message: conflict };
     }
-    await prisma.partnerBuyoutTask.update({
-      where: { id: task.id },
-      data: { sheetRaw: mergeTaskSheetRaw(task, { conflict, conflictAt: new Date().toISOString() }) },
-    });
-    return { kind: "conflict", message: conflict };
-  }
-
-  if (rowStatus === GOOGLE_STATUS_DONE) {
-    // Списываем по номиналу C (правило владельца); если C не распарсился — по цене задачи.
-    const debitRobux = input.sheetPriceRobux && input.sheetPriceRobux > 0
-      ? Math.round(input.sheetPriceRobux)
-      : getTaskPrice(task);
+    const debitRobux = Math.round(input.sheetPriceRobux);
+    const snapshotAt = new Date();
     const updatedTask = await prisma.partnerBuyoutTask.update({
       where: { id: task.id },
       data: {
         status: "DONE",
-        completedAt: new Date(),
+        completedAt: snapshotAt,
+        robloxUsername: String(input.rowCells[SHEET_COL.nickname] ?? "").trim() || null,
+        gamepassId: rowGamepassId,
+        gamepassUrl: rowGamepassId ? `https://www.roblox.com/game-pass/${rowGamepassId}` : null,
         error: null,
-        purchasePriceRobux: debitRobux > 0 ? debitRobux : undefined,
-        priceRobux: task.priceRobux ?? (debitRobux > 0 ? debitRobux : undefined),
+        purchasePriceRobux: debitRobux,
+        priceRobux: debitRobux,
         note: "Закрыто из таблицы: D=«готово» выставлено вручную",
         sheetRaw: mergeTaskSheetRaw(task, {
           closedFromSheet: true,
           conflict: null,
-          reconciledAt: new Date().toISOString(),
+          cells: normalizeContentCells(input.rowCells),
+          rowHash: computeGoogleRowHash(input.rowCells),
+          contentHash: computeGoogleRowContentHash(input.rowCells),
+          manualDoneSnapshotAt: snapshotAt.toISOString(),
+          reconciledAt: snapshotAt.toISOString(),
         }),
       },
     });
@@ -1049,6 +1152,23 @@ async function reconcilePartnerGoogleRow(input: {
         ? `Закрыта из таблицы (D=готово), списано ${debitedUsdt} USDT`
         : "Закрыта из таблицы (D=готово), без цены — списания нет",
     };
+  }
+
+  // Защита от сдвига нумерации (вставили/удалили строки выше): если в B теперь другой
+  // геймпасс, чужую активную строку не закрываем и не отменяем — только конфликт-метка.
+  // Для D=«готово» проверка выше намеренно не применяется: комментарий владельца требует
+  // зафиксировать данные строки именно на момент ручного завершения.
+  if (rowGamepassId && task.gamepassId && rowGamepassId !== task.gamepassId) {
+    const conflict = `Строка сместилась: в ${SHEET_GAMEPASS_LETTER} геймпасс ${rowGamepassId}, в задаче ${task.gamepassId} — проверь вручную`;
+    stats.conflicts += 1;
+    if ((isRecord(task.sheetRaw) ? task.sheetRaw.conflict : null) === conflict) {
+      return { kind: "conflict", message: conflict };
+    }
+    await prisma.partnerBuyoutTask.update({
+      where: { id: task.id },
+      data: { sheetRaw: mergeTaskSheetRaw(task, { conflict, conflictAt: new Date().toISOString() }) },
+    });
+    return { kind: "conflict", message: conflict };
   }
 
   if (rowStatus === GOOGLE_STATUS_ERROR) {
@@ -1203,8 +1323,8 @@ async function processErrorStatusRow(input: {
   const nickname = String(input.cells[SHEET_COL.nickname] ?? "").trim() || null;
   const sheetPrice = input.sheetPriceRobux && input.sheetPriceRobux > 0 ? Math.round(input.sheetPriceRobux) : null;
   const action = existing ? "updated" as const : "created" as const;
-  const commentWriteBack = (message: string): GoogleSheetsValueUpdate[] => [
-    { range: googleCellRange(input.sheetTitle, SHEET_COMMENT_LETTER, input.rowNumber), values: [[truncateGoogleMessage(message)]] },
+  const commentWriteBack = (valid: boolean, message: string): GoogleSheetsValueUpdate[] => [
+    { range: googleCellRange(input.sheetTitle, SHEET_COMMENT_LETTER, input.rowNumber), values: [[truncateGoogleMessage(partnerGamepassCommentValue(valid, message))]] },
   ];
   const buildRaw = (priceMismatch = false) => buildGoogleSheetRaw({
     spreadsheetId: input.spreadsheetId,
@@ -1235,7 +1355,7 @@ async function processErrorStatusRow(input: {
     };
     if (existing) await prisma.partnerBuyoutTask.update({ where: { id: existing.id }, data });
     else await prisma.partnerBuyoutTask.create({ data });
-    return { action, failed: true, message, writeBacks: commentWriteBack(message) };
+    return { action, failed: true, message, writeBacks: commentWriteBack(false, message) };
   }
 
   try {
@@ -1274,11 +1394,11 @@ async function processErrorStatusRow(input: {
         message: "Исправлена: чип возвращён в «в ожидании»",
         writeBacks: [
           { range: googleCellRange(input.sheetTitle, SHEET_STATUS_LETTER, input.rowNumber), values: [[GOOGLE_STATUS_PENDING]] },
-          { range: googleCellRange(input.sheetTitle, SHEET_COMMENT_LETTER, input.rowNumber), values: [[""]] },
+          ...commentWriteBack(true, message),
         ],
       };
     }
-    return { action, failed: true, message, writeBacks: commentWriteBack(message) };
+    return { action, failed: true, message, writeBacks: commentWriteBack(false, message) };
   } catch (err) {
     const message = truncateGoogleMessage(err instanceof Error ? err.message : "Ошибка проверки геймпасса");
     if (err instanceof BuyoutError) {
@@ -1296,7 +1416,7 @@ async function processErrorStatusRow(input: {
       };
       if (existing) await prisma.partnerBuyoutTask.update({ where: { id: existing.id }, data });
       else await prisma.partnerBuyoutTask.create({ data });
-      return { action, failed: true, message, writeBacks: commentWriteBack(message) };
+      return { action, failed: true, message, writeBacks: commentWriteBack(false, message) };
     }
     // Временная ошибка (сеть/Roblox API): задачу не трогаем — contentHash не обновится,
     // следующий sync перепроверит строку ещё раз.
@@ -1343,6 +1463,24 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
     }
   }
 
+  // DB-backed lease closes the race between a background GET-sync and a manual/force
+  // sync running in another web instance. The old latestRun check was read-then-create:
+  // two callers could both pass it and hit the task composite unique constraint.
+  const leaseId = randomUUID();
+  const leaseNow = new Date();
+  const leaseStaleBefore = new Date(leaseNow.getTime() - GOOGLE_SYNC_RUNNING_STALE_MS);
+  const lease = await prisma.partner.updateMany({
+    where: {
+      id: partner.id,
+      OR: [
+        { googleSyncLeaseAt: null },
+        { googleSyncLeaseAt: { lt: leaseStaleBefore } },
+      ],
+    },
+    data: { googleSyncLeaseId: leaseId, googleSyncLeaseAt: leaseNow },
+  });
+  if (lease.count !== 1) return { ...result, error: "Sync уже выполняется" };
+
   const run = await prisma.partnerImportRun.create({
     data: {
       partnerId: partner.id,
@@ -1350,6 +1488,12 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
       spreadsheetId,
       createdBy: user ? operatorLabel(user) : null,
     },
+  }).catch(async (err) => {
+    await prisma.partner.updateMany({
+      where: { id: partner.id, googleSyncLeaseId: leaseId },
+      data: { googleSyncLeaseId: null, googleSyncLeaseAt: null },
+    });
+    throw err;
   });
   const writeBacks: GoogleSheetsValueUpdate[] = [];
   // 5.8: защиты строк копятся за прогон и применяются одним структурным batchUpdate.
@@ -1423,17 +1567,45 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
 
         const gamepassInput = String(cells[SHEET_COL.gamepass] ?? "").trim();
         const gamepassId = parseGamepassId(gamepassInput);
-        let existing = tasksByRowId.get(externalRowId) ?? null;
+        const existing = tasksByRowId.get(externalRowId) ?? null;
         // Строку очистили (A:C пустые, чип D мог остаться предвыставленным «в ожидании») —
         // это удаление заказа: задача уходит из TWA полностью. D=«готово» не трогаем
         // (операционная история); D=«ошибка» с 5.7 (A3) тоже удаляет задачу — раньше
         // очистка строки-ошибки оставляла вечную зомби-FAILED в активном списке.
         const rowCleared = SHEET_CONTENT_CELLS
           .every((i) => String(cells[i] ?? "").trim() === "");
+
+        // Trello 2026-07-13: externalRowId выкупленной строки — одноразовый.
+        // После DONE строку нельзя освободить под новый заказ, даже если владелец успел
+        // изменить A:C или снять чип. Сохраняем исходную задачу и BUYOUT, отмечаем правку,
+        // восстанавливаем «готово» и защиту. Это исключает второй выкуп/списание по той же
+        // физической строке и одновременно лечит удалённую вручную защиту.
+        const settledPolicy = settledPartnerRowPolicy(existing?.status ?? null, status);
+        if (existing && settledPolicy.preserveTask) {
+          const edited = await markDoneRowEdited(existing, cells, reconciliation);
+          if (edited) {
+            result.updated += 1;
+            rowItem("updated", existing.gamepassId, "Выкупленная строка изменена — повторный выкуп запрещён");
+          } else {
+            result.skipped += 1;
+            rowItem("skipped", existing.gamepassId, "Задача уже выкуплена; строка закреплена за этим выкупом");
+          }
+          if (settledPolicy.restoreDoneStatus || String(cells[SHEET_COL.comment] ?? "").trim() !== "") {
+            writeBacks.push(
+              { range: googleCellRange(sheet.title, SHEET_STATUS_LETTER, rowNumber), values: [[GOOGLE_STATUS_DONE]] },
+              { range: googleCellRange(sheet.title, SHEET_COMMENT_LETTER, rowNumber), values: [[""]] },
+            );
+          }
+          if (getTaskProtectedRangeId(existing) === null) {
+            protectionOps.push({ kind: "protect", taskId: existing.id, sheetId: sheet.sheetId, rowNumber });
+          }
+          continue;
+        }
+
         if (rowCleared && existing && status !== GOOGLE_STATUS_DONE) {
           // DONE/PURCHASING не трогаем и «готово» в очищенную строку не переписываем:
           // Антон мог очистить строку под переиспользование.
-          if (existing.status === "DONE" || existing.status === "PURCHASING") continue;
+          if (existing.status === "PURCHASING") continue;
           const outcome = await deletePartnerTaskForRemovedRow(existing, reconciliation, "Строка очищена в таблице");
           result.updated += 1;
           rowItem("updated", existing.gamepassId, outcome === "deleted"
@@ -1447,19 +1619,6 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           const nonPendingSheetPrice = parseImportNumber(nominal);
 
           if (status === GOOGLE_STATUS_DONE) {
-            if (existing?.status === "DONE") {
-              // 5.8: инвариант «DONE = списано = залочено» — дочиняем защиту, если её нет
-              // (бэкфилл старых строк, ретрай упавшего addProtectedRange).
-              if (getTaskProtectedRangeId(existing) === null) {
-                protectionOps.push({ kind: "protect", taskId: existing.id, sheetId: sheet.sheetId, rowNumber });
-              }
-              // 5.7 C2: правка строки после выкупа — задача не мутирует, только пометка с diff.
-              if (await markDoneRowEdited(existing, cells, reconciliation)) {
-                result.updated += 1;
-                rowItem("updated", existing.gamepassId, "Строка изменена после выкупа — помечена в истории");
-              }
-              continue;
-            }
             if (!existing) {
               if (nonPendingSheetPrice && nonPendingSheetPrice > 0) {
                 // 5.7 B1: исторический выкуп, внесённый чипом «готово» напрямую —
@@ -1533,6 +1692,7 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
               rowStatus: status,
               rowComment,
               rowGamepassId: gamepassId,
+              rowCells: cells,
               sheetPriceRobux: nonPendingSheetPrice,
               stats: reconciliation,
             });
@@ -1566,51 +1726,6 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
           || (existingRaw?.cancelledByManager === true && Boolean(existingRaw?.cancelWriteBackAt))
         );
 
-        if (existing?.status === "DONE") {
-          // 5.7 B2: «в ожидании» на строке выкупленной задачи — проверяем, выкуплена ли
-          // ИМЕННО ЭТА строка (contentHash A:C), а не геймпасс: заказы могут полностью
-          // повторяться (ник+ГП+номинал). Совпадает → восстанавливаем чип «готово».
-          // Отличается → строку переиспользовали под новый заказ: DONE-задача уходит в
-          // архив (externalRowId освобождается, списание остаётся), по строке создаётся
-          // новая задача. Закрывает HIGH-баг №1 ультра-ревью 5.6 (тихая потеря заказа).
-          const storedContentHash = getStoredContentHash(existing);
-          if (!storedContentHash || storedContentHash === computeGoogleRowContentHash(cells)) {
-            result.skipped += 1;
-            rowItem("skipped", existing.gamepassId, "Задача уже выполнена");
-            writeBacks.push(
-              { range: googleCellRange(sheet.title, SHEET_STATUS_LETTER, rowNumber), values: [[GOOGLE_STATUS_DONE]] },
-              { range: googleCellRange(sheet.title, SHEET_COMMENT_LETTER, rowNumber), values: [[""]] },
-            );
-            // 5.8: восстановление «готово» тоже чинит защиту (упавший addProtectedRange).
-            if (getTaskProtectedRangeId(existing) === null) {
-              protectionOps.push({ kind: "protect", taskId: existing.id, sheetId: sheet.sheetId, rowNumber });
-            }
-            continue;
-          }
-          // 5.8 (О2): строка уходит новому заказу — защита старого выкупа снимается,
-          // чтобы новая задача прожила обычный жизненный цикл.
-          const archivedProtectionId = getTaskProtectedRangeId(existing);
-          if (archivedProtectionId !== null) {
-            protectionOps.push({ kind: "unprotect", protectedRangeId: archivedProtectionId });
-          }
-          await prisma.partnerBuyoutTask.update({
-            where: { id: existing.id },
-            data: {
-              externalRowId: `${externalRowId}#done:${existing.id}`,
-              sheetRaw: mergeTaskSheetRaw(existing, {
-                rowReusedForNewOrder: true,
-                rowReusedAt: new Date().toISOString(),
-                archivedRowId: externalRowId,
-                protectedRangeId: null,
-                protectedAt: null,
-              }),
-            },
-          });
-          reconciliation.rowsReused += 1;
-          result.updated += 1;
-          rowItem("updated", existing.gamepassId, "Строка переиспользована под новый заказ — старый выкуп в архиве");
-          existing = null;
-        }
         if (existing?.status === "PURCHASING" || (existing?.status === "CANCELLED" && !existingRevivableCancelled)) {
           result.skipped += 1;
           rowItem("skipped", existing.gamepassId, `Задача сейчас в статусе ${existing.status}`);
@@ -1874,6 +1989,40 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
       }
     }
 
+    // 5.11: reconcile protection state from the DB after row processing. Active rows
+    // receive a point D-lock; terminal/error rows lose it; DONE keeps/repairs A:D.
+    // The operations still flush in one structural batch below.
+    const protectionTasks = await prisma.partnerBuyoutTask.findMany({
+      where: { partnerId: partner.id, externalSource: "GOOGLE_SHEETS" },
+    });
+    const sheetIds = new Map(sheets.map((sheet) => [sheet.title, sheet.sheetId]));
+    for (const task of protectionTasks) {
+      const meta = getGoogleTaskMeta(task);
+      if (!meta) continue;
+      const sheetId = typeof meta.raw.sheetId === "number" ? meta.raw.sheetId : sheetIds.get(meta.sheetTitle);
+      if (typeof sheetId !== "number") continue;
+      const pendingProtectionId = getTaskPendingProtectedRangeId(task);
+      const pendingStatus = task.status === "NEW" || task.status === "READY" || task.status === "PURCHASING";
+
+      if (pendingStatus) {
+        if (pendingProtectionId === null) {
+          protectionOps.push({ kind: "protect-pending", taskId: task.id, sheetId, rowNumber: meta.rowNumber });
+        }
+        continue;
+      }
+      if (pendingProtectionId !== null) {
+        protectionOps.push({
+          kind: "unprotect",
+          protectedRangeId: pendingProtectionId,
+          taskId: task.id,
+          clearField: "pendingProtectedRangeId",
+        });
+      }
+      if (task.status === "DONE" && getTaskProtectedRangeId(task) === null) {
+        protectionOps.push({ kind: "protect", taskId: task.id, sheetId, rowNumber: meta.rowNumber });
+      }
+    }
+
     try {
       await batchUpdateGoogleSheetValues(spreadsheetId, writeBacks);
     } catch (err) {
@@ -1882,9 +2031,17 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
     }
 
     // 5.8: защиты строк — отдельным структурным батчем (значения выше — values-путь).
-    const protection: GoogleSyncProtectionStats = { locked: 0, healed: 0, unlocked: 0, failed: 0 };
+    const protection: GoogleSyncProtectionStats = {
+      locked: 0,
+      healed: 0,
+      unlocked: 0,
+      failed: 0,
+      pendingLocked: 0,
+      pendingUnlocked: 0,
+    };
     const protectionError = await applyPartnerProtectionOps(spreadsheetId, protectionOps, protection);
-    if (protection.locked || protection.healed || protection.unlocked || protection.failed) {
+    if (protection.locked || protection.healed || protection.unlocked || protection.failed
+      || protection.pendingLocked || protection.pendingUnlocked) {
       result.diagnostics.protection = protection;
     }
     if (protectionError) {
@@ -1929,6 +2086,11 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
       },
     });
     return { ...result, status: "failed" as const, error };
+  } finally {
+    await prisma.partner.updateMany({
+      where: { id: partner.id, googleSyncLeaseId: leaseId },
+      data: { googleSyncLeaseId: null, googleSyncLeaseAt: null },
+    });
   }
 }
 
@@ -1988,8 +2150,11 @@ async function loadPartnerState(partner: Partner) {
     }),
     prisma.partnerLedgerEntry.findMany({
       where: { partnerId: partner.id, currency },
-      orderBy: [{ createdAt: "desc" }],
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 20,
+      include: {
+        task: { select: { id: true, robloxUsername: true, gamepassId: true } },
+      },
     }),
     prisma.partnerImportRun.findMany({
       where: { partnerId: partner.id, source: "GOOGLE_SHEETS" },
@@ -2026,8 +2191,7 @@ async function loadPartnerState(partner: Partner) {
     prisma.partnerLedgerEntry.groupBy({
       by: ["rateUsdtPer1000"],
       where: { partnerId: partner.id, currency, type: "BUYOUT" },
-      _count: { _all: true },
-      _sum: { amount: true, robuxAmount: true },
+      _sum: { amount: true, robuxAmount: true, itemCount: true },
     }),
     prisma.partnerRateChange.findMany({
       where: { partnerId: partner.id },
@@ -2058,7 +2222,7 @@ async function loadPartnerState(partner: Partner) {
   const rateReport = rateGroups
     .map((group) => ({
       rate: group.rateUsdtPer1000,
-      buyouts: group._count._all,
+      buyouts: group._sum.itemCount ?? 0,
       totalRobux: group._sum.robuxAmount ?? 0,
       totalUsdt: Math.abs(group._sum.amount ?? 0),
     }))
@@ -2094,6 +2258,43 @@ async function loadPartnerState(partner: Partner) {
   };
 }
 
+const PARTNER_VIEW_PAGE_SIZE = 30;
+type PartnerView = "ledger" | "history" | "tasks";
+
+async function loadPartnerView(partner: Partner, view: PartnerView, cursor: string | null) {
+  const take = PARTNER_VIEW_PAGE_SIZE + 1;
+
+  if (view === "ledger") {
+    const rows = await prisma.partnerLedgerEntry.findMany({
+      where: { partnerId: partner.id, currency: moneyCurrency(partner) },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take,
+      cursor: cursor ? { id: cursor } : undefined,
+      skip: cursor ? 1 : undefined,
+      include: {
+        task: { select: { id: true, robloxUsername: true, gamepassId: true } },
+      },
+    });
+    const hasMore = rows.length > PARTNER_VIEW_PAGE_SIZE;
+    const items = hasMore ? rows.slice(0, PARTNER_VIEW_PAGE_SIZE) : rows;
+    return { items, nextCursor: hasMore ? items.at(-1)?.id ?? null : null };
+  }
+
+  const rows = await prisma.partnerBuyoutTask.findMany({
+    where: {
+      partnerId: partner.id,
+      ...(view === "history" ? { status: { in: ["DONE", "CANCELLED"] as const } } : {}),
+    },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    take,
+    cursor: cursor ? { id: cursor } : undefined,
+    skip: cursor ? 1 : undefined,
+  });
+  const hasMore = rows.length > PARTNER_VIEW_PAGE_SIZE;
+  const items = hasMore ? rows.slice(0, PARTNER_VIEW_PAGE_SIZE) : rows;
+  return { items, nextCursor: hasMore ? items.at(-1)?.id ?? null : null };
+}
+
 async function getPartnerBalance(partner: Partner) {
   const aggregate = await prisma.partnerLedgerEntry.aggregate({
     where: { partnerId: partner.id, currency: moneyCurrency(partner) },
@@ -2108,6 +2309,12 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     const { slug } = await ctx.params;
     const partner = await getPartner(slug);
     if (!partner) return json({ ok: false, error: "Партнёр не найден" }, 404);
+
+    const view = req.nextUrl.searchParams.get("view");
+    if (view === "ledger" || view === "history" || view === "tasks") {
+      const cursor = req.nextUrl.searchParams.get("cursor");
+      return json({ ok: true, view, ...(await loadPartnerView(partner, view, cursor)) });
+    }
 
     // Opportunistic sync больше не блокирует GET: скан листов + resolve геймпассов занимал
     // десятки секунд, и экран «Антон» висел на «Загружаю…». Отдаём состояние из БД сразу,
@@ -2339,6 +2546,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           status: "DONE",
           completedAt: new Date(),
           purchaseAccountName: String(body.purchaseAccountName || "").trim() || null,
+          purchaseBatchId: `manual:${task.id}`,
           purchasePriceRobux: manualPrice ?? undefined,
           error: null,
         },
@@ -2354,8 +2562,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             currency: moneyCurrency(partner),
             rateUsdtPer1000: partner.robuxRateUsdtPer1000,
             robuxAmount: priceRobux,
+            purchaseAccountName: updatedTask.purchaseAccountName || "Вручную / из таблицы",
+            batchId: updatedTask.purchaseBatchId,
+            itemCount: 1,
             reference: updatedTask.gamepassId,
-            comment: `Ручная отметка партнёрского выкупа: ${priceRobux} R$ × ${partner.robuxRateUsdtPer1000} USDT / 1000 R$`,
+            comment: `Ручная отметка: ${priceUsdt.toFixed(2)} USDT (1 геймпасс · ${priceRobux} R$)`,
             createdBy: operatorLabel(user),
           },
         });
@@ -2369,6 +2580,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (action === "purchase-task") {
       const taskId = String(body.taskId || "");
       if (!taskId) return json({ ok: false, error: "taskId обязателен" }, 400);
+      const purchaseBatchId = (String(body.purchaseBatchId || "").trim() || randomUUID()).slice(0, 120);
 
       const claimed = await prisma.partnerBuyoutTask.updateMany({
         where: { id: taskId, partnerId: partner.id, status: { in: ["READY", "FAILED"] } },
@@ -2445,31 +2657,21 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           status: "DONE",
           completedAt: new Date(),
           purchaseAccountName: settings.robloxAccountName || null,
+          purchaseBatchId,
           purchasePriceRobux: price,
           error: null,
         },
       });
       await writeBackPartnerTask(doneTask, "done");
 
-      const existingBuyout = await prisma.partnerLedgerEntry.findFirst({
-        where: { partnerId: partner.id, taskId: task.id, type: "BUYOUT" },
+      await appendPartnerBuyoutBatch({
+        partner,
+        batchId: purchaseBatchId,
+        priceRobux: price,
+        priceUsdt,
+        purchaseAccountName: settings.robloxAccountName || "cookie-аккаунт",
+        createdBy: operatorLabel(user),
       });
-      if (!existingBuyout) {
-        await prisma.partnerLedgerEntry.create({
-          data: {
-            partnerId: partner.id,
-            taskId: task.id,
-            type: "BUYOUT",
-            amount: -priceUsdt,
-            currency: moneyCurrency(partner),
-            rateUsdtPer1000: partner.robuxRateUsdtPer1000,
-            robuxAmount: price,
-            reference: task.gamepassId,
-            comment: `Партнёрский выкуп через ${settings.robloxAccountName || "cookie-аккаунт"}: ${price} R$ × ${partner.robuxRateUsdtPer1000} USDT / 1000 R$`,
-            createdBy: operatorLabel(user),
-          },
-        });
-      }
 
       const state = await loadPartnerState(partner);
       return json({ ok: true, success: true, balance: result.balance, partner, ...state });
@@ -2490,18 +2692,29 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       });
       if (doneTasks.length === 0) return json({ ok: true, notified: { admins: 0, sent: 0 } });
 
+      const batchIds = doneTasks.map((task) => task.purchaseBatchId).filter((id): id is string => Boolean(id));
       const buyouts = await prisma.partnerLedgerEntry.findMany({
-        where: { partnerId: partner.id, type: "BUYOUT", taskId: { in: doneTasks.map((t) => t.id) } },
+        where: {
+          partnerId: partner.id,
+          type: "BUYOUT",
+          OR: [
+            { taskId: { in: doneTasks.map((task) => task.id) } },
+            ...(batchIds.length > 0 ? [{ batchId: { in: batchIds } }] : []),
+          ],
+        },
       });
       const buyoutByTask = new Map(buyouts.map((b) => [b.taskId, b]));
+      const buyoutByBatch = new Map(buyouts.filter((entry) => entry.batchId).map((entry) => [entry.batchId, entry]));
 
       const items: PartnerBuyoutNotifyItem[] = doneTasks.map((t) => {
-        const b = buyoutByTask.get(t.id);
+        const b = (t.purchaseBatchId ? buyoutByBatch.get(t.purchaseBatchId) : null) ?? buyoutByTask.get(t.id);
+        const robux = getTaskPrice(t);
+        const rate = b?.rateUsdtPer1000 ?? partner.robuxRateUsdtPer1000;
         return {
           nick: t.robloxUsername,
           gamepassId: t.gamepassId,
-          robux: b?.robuxAmount ?? getTaskPrice(t),
-          usdt: b ? Math.abs(b.amount) : taskCostUsdt(getTaskPrice(t), partner),
+          robux,
+          usdt: Math.round((robux * rate / 1000) * 100) / 100,
         };
       });
       const totalRobux = items.reduce((sum, it) => sum + it.robux, 0);

@@ -37,6 +37,12 @@ declare global {
         themeParams: Record<string, string>;
         platform?: string;
         close: () => void;
+        BackButton?: {
+          show: () => void;
+          hide: () => void;
+          onClick: (callback: () => void) => void;
+          offClick: (callback: () => void) => void;
+        };
       };
     };
   }
@@ -224,7 +230,7 @@ export default function TwaApp() {
     // takes its usual ~150 ms.
     return (
       <div className="twa-root twa-liquid-root twa-loading-shell" style={{
-        display: "flex", flexDirection: "column", height: "100dvh",
+        display: "flex", flexDirection: "column",
         background: C.bg, color: C.textPrimary,
         fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       }}>
@@ -247,7 +253,7 @@ export default function TwaApp() {
 
   if (auth === "error") {
     return (
-      <div className="twa-root twa-liquid-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", background: C.bg, color: C.red, padding: 24 }}>
+      <div className="twa-root twa-liquid-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", background: C.bg, color: C.red, padding: 24 }}>
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 36, marginBottom: 12 }}>🔒</div>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Доступ запрещён</div>
@@ -262,7 +268,7 @@ export default function TwaApp() {
 
   return (
     <div className="twa-root twa-liquid-root" style={{
-      display: "flex", flexDirection: "column", height: "100dvh",
+      display: "flex", flexDirection: "column",
       background: C.bg,
       fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       color: C.textPrimary,
@@ -304,7 +310,7 @@ export default function TwaApp() {
       </div>
 
       {/* Content */}
-      <div className="twa-liquid-content" style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
+      <div className="twa-liquid-content" style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
         {screen === "dashboard"  && <Dashboard      {...sp} onOpenOrders={() => setScreen("orders")} />}
         {screen === "orders"     && <OrdersScreen   {...sp} onActionDone={refreshBadge} initialQuery={orderQueryPreload} initialTab={ordersTabPreload} onInitialQueryConsumed={() => { setOrderQueryPreload(""); setOrdersTabPreload(""); }} />}
         {screen === "wb"         && <WbScreen       {...sp} />}

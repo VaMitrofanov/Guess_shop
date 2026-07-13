@@ -28,7 +28,8 @@ Neon Postgres + Prisma 7 (`engineType=library`, adapter `PrismaPg`). Модел�
 `platform` (`TG`/`VK`/`WEB`), `wbCode` (**@unique** — один заказ на код/публичный WEB-id), `userId`,
 `orderSource` (`WB`/`DIRECT`/`AVITO`/`MANUAL`/`SITE`), `isDirectOrder`, `isFavorite`, `isTest`,
 `adminNote` (только для админа), `robloxUsername` (продавец, **только подтверждённый** ник),
-`purchaserUsername` (куки-аккаунт-покупатель), `purchaseRate` (снапшот курса при выкупе),
+`purchaserUsername` (куки-аккаунт-покупатель), `purchaseRate` (снапшот закупки в $ за
+1000 R$ при выкупе),
 `pendingAt` (момент попадания в «К выкупу» — для сортировки), `rejectionReason`,
 `paidAt` (2026-07-06, миграция `20260706_add_paid_at`) — момент подтверждения оплаты
 прямого заказа (`pay_ok:` в TG); DIR без `paidAt` исключён из всех путей выкупа
@@ -64,7 +65,7 @@ robloxUsername, userId+createdAt).
 
 ### `GlobalSettings` (id=`global`)
 Настройки выкупа: `robloxCookie` (`.ROBLOSECURITY` донора), `robloxCookieUpdatedAt`,
-`robloxAccountName` (ник донора), `purchaseRate` (R$/₽), `usdToRub`.
+`robloxAccountName` (ник донора), `purchaseRate` ($ за 1000 R$), `usdToRub`.
 Аккаунт-приёмник слива («мой акк»): `drainCookie`, `drainCookieUpdatedAt`, `drainAccountName`,
 `drainGamepassId` (геймпасс, чью цену меняем). `drainProductId` (`Int`) — **legacy, больше не
 пишется**: у современных геймпассов ProductId > INT32 (2.1 млрд) → запись падала с
@@ -193,6 +194,11 @@ sync и результат write-back (`writeBackAt` / `lastWriteBackError`), ч
 считает баланс aggregate по USDT-ledger, перед ручным закрытием/покупкой конвертирует
 грязную R$-цену задачи по `Partner.robuxRateUsdtPer1000`, проверяет баланс и блокирует
 повторное `BUYOUT`-списание по одной задаче.
+С миграции `20260713_partner_sync_lease_ledger_v2` один фактический batch-выкуп хранится
+одной строкой: `batchId` — идемпотентный идентификатор запуска, `itemCount` — число
+успешных геймпассов, `robuxAmount`/`amount` — суммарные R$/USDT,
+`purchaseAccountName` — donor/cookie-аккаунт. Уникальность `(partnerId, batchId)` не даёт
+создать второе списание той же пачки; legacy BUYOUT получают `batchId=legacy:<id>`.
 С миграции `20260711_partner_rate_history` (Этап 5.9) `BUYOUT`-записи дополнительно
 хранят `rateUsdtPer1000` (курс списания) и `robuxAmount` (грязные R$) структурно —
 отчёт «сколько куплено по какому курсу» строится `groupBy` по этим полям и не зависит
@@ -210,12 +216,15 @@ sync и результат write-back (`writeBackAt` / `lastWriteBackError`), ч
 
 Для рабочей TWA-фичи на проде должны быть применены миграции
 `20260709_add_partner_buyout`, `20260709_partner_anton_usdt_sheets`,
-`20260709_partner_xlsx_upload_source` и `20260710_partner_google_sheets_sync`. Если
+`20260709_partner_xlsx_upload_source`, `20260710_partner_google_sheets_sync` и
+`20260713_partner_sync_lease_ledger_v2`. Последняя также добавляет DB-lease
+`Partner.googleSyncLeaseId/googleSyncLeaseAt`, общий для manual/force/background sync. Если
 Web-контейнер уже обновился, а БД ещё нет, `/api/twa/partners/[slug]/tasks` возвращает
 `503 PARTNER_SCHEMA_NOT_READY`, чтобы не маскировать ошибку схемы нулевым балансом.
 
-Прод-БД синхронизирована с этими миграциями (последняя — `20260710_partner_google_sheets_sync`,
-применена 2026-07-10): partner-таблицы + `PartnerImportRun` созданы, enum
+Подтверждённое состояние прод-БД на 2026-07-10: последней применена
+`20260710_partner_google_sheets_sync`; новую миграцию 2026-07-13 надо применить перед
+деплоем этого кода. Partner-таблицы + `PartnerImportRun` созданы, enum
 `PartnerExternalSource` содержит `XLSX_UPLOAD`/`GOOGLE_SHEETS`, baseline Антона виден в TWA/API
 как 8 DONE-задач на `19 106 R$`, ledger `150.00 - 96.49 = 53.51 USDT`.
 

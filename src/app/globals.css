@@ -531,6 +531,12 @@ html[data-theme="dark"] .vf-checkout .border-\[\#1e2a45\] { border-color:#352b48
   position: relative;
   isolation: isolate;
   overflow: hidden;
+  /* Telegram iOS reports the usable mini-app viewport through its SDK CSS
+   * variable. 100dvh can include Telegram's native header, which pushes the
+   * bottom tab bar below the visible webview and leaves a large empty plate. */
+  height: var(--tg-viewport-height, 100dvh);
+  max-height: var(--tg-viewport-height, 100dvh);
+  min-height: 0;
   background:
     radial-gradient(circle at 88% 8%, rgba(167,139,250,.18), transparent 34%),
     radial-gradient(circle at 5% 58%, rgba(10,132,255,.09), transparent 38%),
@@ -579,6 +585,7 @@ html[data-theme="dark"] .vf-checkout .border-\[\#1e2a45\] { border-color:#352b48
 .twa-liquid-content {
   position: relative;
   z-index: 1;
+  min-height: 0;
   padding-bottom: 4px;
 }
 .twa-glass-card,
@@ -744,8 +751,8 @@ html[data-theme="dark"] .vf-checkout .border-\[\#1e2a45\] { border-color:#352b48
 .twa-nav-zone {
   position: relative;
   z-index: 20;
-  flex-shrink: 0;
-  padding: 7px 12px calc(8px + env(safe-area-inset-bottom));
+  flex: 0 0 auto;
+  padding: 7px 12px calc(8px + max(env(safe-area-inset-bottom, 0px), var(--tg-content-safe-area-inset-bottom, 0px)));
   pointer-events: none;
 }
 .twa-liquid-tabbar {
@@ -791,7 +798,7 @@ html[data-theme="dark"] .vf-checkout .border-\[\#1e2a45\] { border-color:#352b48
   position: absolute;
   left: 12px;
   right: 12px;
-  bottom: calc(82px + env(safe-area-inset-bottom));
+  bottom: calc(82px + max(env(safe-area-inset-bottom, 0px), var(--tg-content-safe-area-inset-bottom, 0px)));
   overflow: hidden;
   padding: 13px;
   border: 1px solid rgba(255,255,255,.12);

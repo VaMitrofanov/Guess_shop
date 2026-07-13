@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { haptic } from "../haptics";
 import { toast } from "../Toast";
 import CreateManualModal from "../CreateManualModal";
+import { groupPartnerLedgerEntries, type PartnerLedgerRow } from "@/lib/partner-ledger";
 
 interface AccountInfo {
   hasCookie:      boolean;
@@ -32,6 +33,7 @@ interface GamepassItem {
 type BuyoutWorkspace = "own" | "anton";
 type PartnerTaskStatus = "NEW" | "READY" | "PURCHASING" | "DONE" | "FAILED" | "CANCELLED";
 type PartnerExternalSource = "MANUAL" | "GOOGLE_SHEETS" | "XLSX_UPLOAD";
+type PartnerSubScreenKey = "bought" | "ledger" | "tasks";
 
 interface PartnerSheetRaw {
   source?: string;
@@ -66,6 +68,8 @@ interface PartnerSheetRaw {
   /** 5.8: id защиты A:D строки в Google Sheets (addProtectedRange). */
   protectedRangeId?: number | null;
   protectedAt?: string | null;
+  pendingProtectedRangeId?: number | null;
+  pendingProtectedAt?: string | null;
   protectError?: string | null;
   cells?: unknown[];
 }
@@ -97,7 +101,13 @@ interface PartnerLedgerEntry {
   currency: string;
   reference: string | null;
   comment: string | null;
+  rateUsdtPer1000?: number | null;
+  robuxAmount?: number | null;
+  purchaseAccountName?: string | null;
+  batchId?: string | null;
+  itemCount?: number;
   taskId?: string | null;
+  task?: { id: string; robloxUsername: string | null; gamepassId: string | null } | null;
   createdAt: string;
 }
 
@@ -166,6 +176,8 @@ interface GoogleSyncProtectionStats {
   healed?: number;
   unlocked?: number;
   failed?: number;
+  pendingLocked?: number;
+  pendingUnlocked?: number;
 }
 
 interface GoogleSyncDiagnostics extends GoogleSyncFilterDiagnostics {
@@ -2645,7 +2657,7 @@ function StatTile({ label, value, sub, valueColor, subColor, onClick }: {
       {sub && <div style={{ marginTop: 1, fontSize: 14, color: subColor ?? C.textTertiary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub}</div>}
     </>
   );
-  const boxStyle: React.CSSProperties = { background: C.bgElevated, borderRadius: 12, padding: "10px 12px", minWidth: 0 };
+  const boxStyle: React.CSSProperties = { position: "relative", background: C.bgElevated, borderRadius: 12, padding: onClick ? "10px 30px 10px 12px" : "10px 12px", minWidth: 0, minHeight: 44 };
   if (!onClick) return <div style={boxStyle}>{inner}</div>;
   return (
     <button
@@ -2654,7 +2666,50 @@ function StatTile({ label, value, sub, valueColor, subColor, onClick }: {
       style={{ ...boxStyle, border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left", display: "block", width: "100%" }}
     >
       {inner}
+      <span aria-hidden="true" style={{ position: "absolute", right: 11, top: "50%", transform: "translateY(-50%)", color: C.textTertiary, fontSize: 18 }}>›</span>
     </button>
+  );
+}
+
+function PartnerSubScreenPanel({ title, summary, onClose, children }: {
+  title: string;
+  summary?: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const backButton = window.Telegram?.WebApp?.BackButton as undefined | {
+      show: () => void;
+      hide: () => void;
+      onClick: (callback: () => void) => void;
+      offClick: (callback: () => void) => void;
+    };
+    backButton?.show();
+    backButton?.onClick(onClose);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      backButton?.offClick(onClose);
+      backButton?.hide();
+    };
+  }, [onClose]);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 9000, background: C.bg, overflowY: "auto", WebkitOverflowScrolling: "touch", animation: "partner-slide-in .24s ease-out" }}>
+      <style>{`@keyframes partner-slide-in{from{transform:translateX(100%)}to{transform:translateX(0)}}`}</style>
+      <header style={{ position: "sticky", top: 0, zIndex: 2, background: `${C.bg}f2`, backdropFilter: "blur(18px)", borderBottom: `1px solid ${C.border}`, padding: "8px 12px 10px" }}>
+        <button className="twa-press" onClick={onClose}
+          style={{ minHeight: 44, border: "none", background: "none", color: C.accent, fontSize: 15, fontWeight: 700, padding: "0 8px", cursor: "pointer", fontFamily: "inherit" }}>
+          ‹ Назад
+        </button>
+        <div style={{ padding: "0 8px 4px" }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: C.textPrimary }}>{title}</div>
+          {summary && <div style={{ marginTop: 3, fontSize: 14, color: C.textSecondary }}>{summary}</div>}
+        </div>
+      </header>
+      <div style={{ padding: "14px 16px calc(96px + env(safe-area-inset-bottom))" }}>{children}</div>
+    </div>
   );
 }
 
@@ -2888,9 +2943,14 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   const [confirmMismatchTask, setConfirmMismatchTask] = useState<PartnerTask | null>(null);
   // 5.7 E1: отмена ошибочного пополнения — только через confirm-диалог.
   const [confirmCancelTopup, setConfirmCancelTopup] = useState<PartnerLedgerEntry | null>(null);
-  const [showHistory, setShowHistory] = useState(false);
   const [showManualAdd, setShowManualAdd] = useState(false);
-  const [historyLimit, setHistoryLimit] = useState(20);
+  const [subScreen, setSubScreen] = useState<PartnerSubScreenKey | null>(null);
+  const [subScreenItems, setSubScreenItems] = useState<Array<PartnerTask | PartnerLedgerEntry>>([]);
+  const [subScreenCursor, setSubScreenCursor] = useState<string | null>(null);
+  const [subScreenLoading, setSubScreenLoading] = useState(false);
+  const [subTaskFilter, setSubTaskFilter] = useState<"all" | "ready" | "failed" | "done" | "cancelled">("all");
+  const [ledgerFilter, setLedgerFilter] = useState<"all" | "topup" | "buyout">("all");
+  const [expandedLedgerGroup, setExpandedLedgerGroup] = useState<string | null>(null);
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; current?: string } | null>(null);
   const bulkStopRef = useRef(false);
@@ -2982,6 +3042,42 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [load]);
+
+  const loadSubScreenPage = useCallback(async (screen: PartnerSubScreenKey, cursor: string | null, append: boolean) => {
+    setSubScreenLoading(true);
+    try {
+      const view = screen === "bought" ? "history" : screen;
+      const params = new URLSearchParams({ view });
+      if (cursor) params.set("cursor", cursor);
+      const r = await fetch(`/api/twa/partners/anton/tasks?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const payload = await r.json().catch(() => null);
+      if (!r.ok || !payload || !Array.isArray(payload.items)) {
+        toast(payload?.error ?? "Не удалось загрузить детализацию", "error");
+        return;
+      }
+      setSubScreenItems((previous) => append ? [...previous, ...payload.items] : payload.items);
+      setSubScreenCursor(typeof payload.nextCursor === "string" ? payload.nextCursor : null);
+    } catch {
+      toast("Ошибка сети при загрузке детализации", "error");
+    } finally {
+      setSubScreenLoading(false);
+    }
+  }, [token]);
+
+  const openSubScreen = useCallback((screen: PartnerSubScreenKey) => {
+    haptic.select();
+    setSubScreen(screen);
+    setSubScreenItems([]);
+    setSubScreenCursor(null);
+    setSubTaskFilter("all");
+    setLedgerFilter("all");
+    setExpandedLedgerGroup(null);
+    void loadSubScreenPage(screen, null, false);
+  }, [loadSubScreenPage]);
+
+  const closeSubScreen = useCallback(() => setSubScreen(null), []);
 
   async function post(action: string, body: Record<string, unknown>) {
     if (busy) return false;
@@ -3125,6 +3221,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
     setBulkProgress({ done: 0, total: queue.length });
     const items: PartnerBatchItem[] = [];
     let ok = 0;
+    const purchaseBatchId = globalThis.crypto.randomUUID();
     const rateVal = summary?.robuxRateUsdtPer1000 ?? state?.partner.robuxRateUsdtPer1000 ?? 5.05;
     try {
       for (let i = 0; i < queue.length; i++) {
@@ -3139,7 +3236,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
           const r = await fetch("/api/twa/partners/anton/tasks", {
             method: "POST",
             headers,
-            body: JSON.stringify({ action: "purchase-task", taskId: t.id }),
+            body: JSON.stringify({ action: "purchase-task", taskId: t.id, purchaseBatchId }),
           });
           const d = await r.json().catch(() => null);
           if (d) applyPartnerState(d);
@@ -3203,8 +3300,6 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   const activeTasks = filteredTasks
     .filter(t => !HISTORY_STATUSES.has(t.status))
     .sort((a, b) => (a.status === "FAILED" ? 1 : 0) - (b.status === "FAILED" ? 1 : 0));
-  const historyTasks = filteredTasks.filter(t => HISTORY_STATUSES.has(t.status));
-  const visibleHistory = historyTasks.slice(0, historyLimit);
   const purchaseTask = (t: PartnerTask) => {
     // Расхождение «номинал таблицы vs live-цена ГП» — покупка только через confirm.
     if (isMismatchTask(t)) {
@@ -3279,13 +3374,15 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
           {/* 5.9 B1: hero-баланс + «Пополнить». Пропорциональные цифры: tabular на
               крупном одиночном числе разряжает «0» и выглядит рыхло. */}
           <div style={{ padding: "16px 16px 14px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-            <div style={{ minWidth: 0 }}>
+            <button className="twa-press" onClick={() => openSubScreen("ledger")}
+              style={{ position: "relative", minWidth: 0, minHeight: 44, flex: 1, border: "none", background: "none", padding: "0 24px 0 0", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: C.textSecondary }}>Баланс</div>
               <div style={{ marginTop: 3, fontSize: 34, fontWeight: 700, letterSpacing: -0.5, lineHeight: 1.15, color: (summary?.balanceUsdt ?? 0) < 0 ? C.red : C.textPrimary }}>
                 {(summary?.balanceUsdt ?? 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 <span style={{ fontSize: 17, fontWeight: 600, color: C.textSecondary, marginLeft: 6 }}>USDT</span>
               </div>
-            </div>
+              <span aria-hidden="true" style={{ position: "absolute", right: 2, top: "50%", transform: "translateY(-50%)", color: C.textTertiary, fontSize: 22 }}>›</span>
+            </button>
             <button className="twa-press" disabled={busy}
               onClick={() => { haptic.impact("medium"); setShowTopupSheet(true); }}
               style={{
@@ -3321,17 +3418,19 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
           <div style={{ height: 1, background: C.border, marginLeft: 16 }} />
           {/* 5.9 B3: стат-плитки. */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: 12 }}>
-            <StatTile label="Выкуплено" value={`${(summary?.doneRobux ?? 0).toLocaleString("ru-RU")} R$`} />
-            <StatTile label="Потрачено" value={fmtUsdt(summary?.spentUsdt)} />
+            <StatTile label="Выкуплено" value={`${(summary?.doneRobux ?? 0).toLocaleString("ru-RU")} R$`} onClick={() => openSubScreen("bought")} />
+            <StatTile label="Потрачено" value={fmtUsdt(summary?.spentUsdt)} onClick={() => openSubScreen("ledger")} />
             <StatTile
               label="В работе"
               value={`${(summary?.ready ?? 0) + (summary?.purchasing ?? 0)}`}
               sub={`ready ${summary?.ready ?? 0} · buying ${summary?.purchasing ?? 0}`}
+              onClick={() => jumpToTasks(null)}
             />
             <StatTile
               label="Задачи"
               value={`${summary?.total ?? 0}`}
               sub={`готово ${summary?.done ?? 0}`}
+              onClick={() => openSubScreen("tasks")}
             />
           </div>
           {(summary?.reservedUsdt ?? 0) > 0 && (
@@ -3398,6 +3497,8 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
                 (latestProtection.locked ?? 0) > 0 ? `🔒 ${latestProtection.locked}` : null,
                 (latestProtection.healed ?? 0) > 0 ? `восстановлено ${latestProtection.healed}` : null,
                 (latestProtection.unlocked ?? 0) > 0 ? `снято ${latestProtection.unlocked}` : null,
+                (latestProtection.pendingLocked ?? 0) > 0 ? `D-лок ${latestProtection.pendingLocked}` : null,
+                (latestProtection.pendingUnlocked ?? 0) > 0 ? `D-снято ${latestProtection.pendingUnlocked}` : null,
                 (latestProtection.failed ?? 0) > 0 ? `не удалось ${latestProtection.failed}` : null,
               ].filter(Boolean)
               : [];
@@ -3533,53 +3634,6 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
         </Card>
       </section>
 
-      {historyTasks.length > 0 && (
-        <section>
-          <button className="twa-press" onClick={() => { haptic.select(); setShowHistory(h => !h); }}
-            style={{
-              display: "flex", alignItems: "center", gap: 8, border: "none", background: "none",
-              padding: "14px 4px 8px", cursor: "pointer", fontFamily: "inherit", width: "100%",
-            }}>
-            <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: C.textSecondary }}>
-              История
-            </span>
-            <span style={{ fontSize: 14, fontWeight: 600, color: C.textTertiary, background: C.elevated, borderRadius: 999, padding: "2px 9px", ...tabular }}>
-              {historyTasks.length}
-            </span>
-            <span style={{ marginLeft: "auto", fontSize: 14, color: C.textTertiary, transition: "transform .15s", transform: showHistory ? "rotate(90deg)" : "rotate(0)" }}>▶</span>
-          </button>
-          {showHistory && (
-            <>
-              <Card>
-                {visibleHistory.map((task, i) => (
-                  <div key={task.id}>
-                    {i > 0 && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
-                    <PartnerTaskRow
-                      task={task}
-                      busy={busy}
-                      rateUsdtPer1000={rate}
-                      onPurchase={purchaseTask}
-                      onMarkDone={(t) => { haptic.impact("medium"); void (async () => { if (await post("mark-done", { taskId: t.id, purchaseAccountName: accountName || null })) notifyBuyout([t.id]); })(); }}
-                      onCancel={(t) => { haptic.impact("light"); post("cancel-task", { taskId: t.id }); }}
-                    />
-                  </div>
-                ))}
-              </Card>
-              {historyTasks.length > historyLimit && (
-                <button className="twa-press" onClick={() => { haptic.select(); setHistoryLimit(l => l + 20); }}
-                  style={{
-                    display: "block", width: "100%", margin: "8px 0 0", padding: "12px", border: "none",
-                    borderRadius: 12, background: C.elevated, color: C.accent, fontSize: 14, fontWeight: 600,
-                    cursor: "pointer", fontFamily: "inherit", textAlign: "center",
-                  }}>
-                  Показать ещё 20
-                </button>
-              )}
-            </>
-          )}
-        </section>
-      )}
-
       {/* Ручные пути добавления (запасные: основной поток — Google Sheets) спрятаны
           в свёрнутую секцию, чтобы не мешать операционному сценарию. */}
       <section>
@@ -3685,45 +3739,188 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
         />
       )}
 
-      <section>
-        <SectionHeader title="Ledger" />
-        <Card>
-          {ledger.length === 0 ? (
-            <div style={{ padding: "16px", color: C.textSecondary, fontSize: 15, textAlign: "center" }}>Операций пока нет</div>
-          ) : (
-            ledger.slice(0, 8).map((entry, i) => (
-              <div key={entry.id}>
-                {i > 0 && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
-                <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ color: "#e5e5ea", fontSize: 15, fontWeight: 700 }}>{entry.type}</div>
-                    <div style={{ marginTop: 3, color: C.textTertiary, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {fmtPartnerDate(entry.createdAt)}{(entry.comment || entry.reference) ? ` · ${entry.comment || entry.reference}` : ""}
-                    </div>
-                  </div>
-                  <div style={{ color: entry.amount >= 0 ? C.green : C.red, fontSize: 15, fontWeight: 700, flexShrink: 0, ...tabular }}>
-                    {entry.amount > 0 ? "+" : ""}{entry.amount.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {entry.currency}
-                  </div>
-                  {entry.type === "TOPUP" && !entry.taskId && (
-                    <button
-                      className="twa-press-sm"
-                      onClick={() => { haptic.impact("light"); setConfirmCancelTopup(entry); }}
-                      disabled={busy}
-                      aria-label="Отменить пополнение"
-                      style={{
-                        flexShrink: 0, width: 32, height: 32, border: "none", borderRadius: 9,
-                        background: tint(C.red, 0.14), color: C.red, fontSize: 16, fontWeight: 700,
-                        cursor: busy ? "default" : "pointer", fontFamily: "inherit", opacity: busy ? 0.5 : 1,
-                      }}>
-                      ✕
+      {(() => {
+        const compact = groupPartnerLedgerEntries(ledger as PartnerLedgerRow[]).slice(0, 3);
+        return (
+          <section>
+            <button className="twa-press" onClick={() => openSubScreen("ledger")}
+              style={{ width: "100%", minHeight: 44, padding: "8px 4px", border: "none", background: "none", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", fontFamily: "inherit" }}>
+              <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: C.textSecondary }}>Ledger</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: C.accent }}>Все операции ›</span>
+            </button>
+            <Card>
+              {compact.length === 0 ? (
+                <div style={{ padding: "16px", color: C.textSecondary, fontSize: 15, textAlign: "center" }}>Операций пока нет</div>
+              ) : compact.map((item, i) => {
+                const entry = item.kind === "entry" ? item.entry : item.entries[0];
+                const title = item.kind === "buyout-group"
+                  ? `Выкуп 🎮 ${item.accountName}`
+                  : item.entry.type === "TOPUP" ? "Пополнение" : item.entry.type;
+                const detail = item.kind === "buyout-group"
+                  ? `${item.totalItems} шт · ${item.totalRobux.toLocaleString("ru-RU")} R$`
+                  : fmtPartnerDate(item.entry.createdAt);
+                const amount = item.kind === "buyout-group" ? -item.totalUsdt : item.entry.amount;
+                return (
+                  <button key={`${item.kind}-${item.kind === "buyout-group" ? item.key : entry.id}-${i}`} className="twa-press" onClick={() => openSubScreen("ledger")}
+                    style={{ width: "100%", minHeight: 52, padding: "11px 16px", border: "none", borderTop: i > 0 ? `1px solid ${C.border}` : "none", background: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ display: "block", color: C.textPrimary, fontSize: 15, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+                      <span style={{ display: "block", marginTop: 2, color: C.textTertiary, fontSize: 14 }}>{detail}</span>
+                    </span>
+                    <span style={{ color: amount >= 0 ? C.green : C.red, fontSize: 15, fontWeight: 700, flexShrink: 0, ...tabular }}>
+                      {amount > 0 ? "+" : ""}{amount.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {entry.currency}
+                    </span>
+                  </button>
+                );
+              })}
+            </Card>
+          </section>
+        );
+      })()}
+
+      {subScreen && (() => {
+        const pagedTasks = subScreenItems.filter((item): item is PartnerTask => "status" in item);
+        const pagedLedger = subScreenItems.filter((item): item is PartnerLedgerEntry => "type" in item);
+        const taskFilterOptions = subScreen === "bought"
+          ? [
+            { id: "all" as const, label: "Все" },
+            { id: "done" as const, label: "Выкуплены" },
+            { id: "cancelled" as const, label: "Отменены" },
+          ]
+          : [
+            { id: "all" as const, label: "Все" },
+            { id: "ready" as const, label: "Готовы" },
+            { id: "failed" as const, label: "Ошибки" },
+            { id: "done" as const, label: "Выкуплены" },
+            { id: "cancelled" as const, label: "Отменены" },
+          ];
+        const filteredPagedTasks = subTaskFilter === "all" ? pagedTasks : pagedTasks.filter((task) => {
+          if (subTaskFilter === "ready") return task.status === "READY" || task.status === "PURCHASING" || task.status === "NEW";
+          if (subTaskFilter === "failed") return task.status === "FAILED";
+          if (subTaskFilter === "done") return task.status === "DONE";
+          return task.status === "CANCELLED";
+        });
+        const filteredPagedLedger = ledgerFilter === "all" ? pagedLedger : pagedLedger.filter((entry) => ledgerFilter === "topup" ? entry.type === "TOPUP" : entry.type === "BUYOUT");
+        const ledgerTimeline = groupPartnerLedgerEntries(filteredPagedLedger as PartnerLedgerRow[]);
+        const title = subScreen === "bought" ? "Выкуплено" : subScreen === "ledger" ? "Ledger" : "Задачи";
+        const panelSummary = subScreen === "bought"
+          ? `${(summary?.doneRobux ?? 0).toLocaleString("ru-RU")} R$ · ${summary?.done ?? 0} шт`
+          : subScreen === "ledger"
+            ? `Баланс ${fmtUsdt(summary?.balanceUsdt)} · потрачено ${fmtUsdt(summary?.spentUsdt)}`
+            : `Всего ${summary?.total ?? 0} · в работе ${(summary?.ready ?? 0) + (summary?.purchasing ?? 0)}`;
+
+        return (
+          <PartnerSubScreenPanel title={title} summary={panelSummary} onClose={closeSubScreen}>
+            {subScreen === "ledger" ? (
+              <>
+                {rateReport.length > 0 && (
+                  <Card>
+                    <div style={{ padding: "12px 14px 6px", fontSize: 14, fontWeight: 700, color: C.textSecondary }}>Выкуплено по курсам</div>
+                    {rateReport.map((row, i) => (
+                      <div key={row.rate ?? "unknown"} style={{ minHeight: 48, padding: "10px 14px", borderTop: i > 0 ? `1px solid ${C.border}` : "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                        <span style={{ fontSize: 14, color: C.textSecondary }}>{row.rate === null ? "Курс не записан" : `${fmtRate(row.rate)} / 1000 R$`}</span>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary, ...tabular }}>{row.buyouts} шт · −{fmtUsdt(row.totalUsdt)}</span>
+                      </div>
+                    ))}
+                  </Card>
+                )}
+                <div style={{ display: "flex", gap: 7, margin: "12px 0" }}>
+                  {([{"id":"all","label":"Все"},{"id":"topup","label":"Пополнения"},{"id":"buyout","label":"Списания"}] as const).map((option) => (
+                    <button key={option.id} className="twa-press-sm" onClick={() => setLedgerFilter(option.id)}
+                      style={{ minHeight: 44, flex: 1, border: "none", borderRadius: 10, background: ledgerFilter === option.id ? C.accent : C.elevated, color: ledgerFilter === option.id ? "#fff" : C.textSecondary, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                      {option.label}
                     </button>
-                  )}
+                  ))}
                 </div>
-              </div>
-            ))
-          )}
-        </Card>
-      </section>
+                <Card>
+                  {ledgerTimeline.length === 0 && !subScreenLoading ? (
+                    <div style={{ padding: 18, color: C.textSecondary, fontSize: 15, textAlign: "center" }}>Операций нет</div>
+                  ) : ledgerTimeline.map((item, index) => {
+                    if (item.kind === "entry") {
+                      const entry = item.entry as PartnerLedgerEntry;
+                      return (
+                        <div key={entry.id} style={{ minHeight: 56, padding: "11px 14px", borderTop: index > 0 ? `1px solid ${C.border}` : "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary }}>{entry.type === "TOPUP" ? "Пополнение" : entry.type}</div>
+                            <div style={{ marginTop: 2, fontSize: 14, color: C.textTertiary }}>{fmtPartnerDate(entry.createdAt)}</div>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ fontSize: 15, fontWeight: 700, color: entry.amount >= 0 ? C.green : C.red, ...tabular }}>{entry.amount > 0 ? "+" : ""}{fmtUsdt(entry.amount)}</span>
+                            {entry.type === "TOPUP" && !entry.taskId && (
+                              <button className="twa-press-sm" onClick={() => setConfirmCancelTopup(entry)} disabled={busy} aria-label="Отменить пополнение"
+                                style={{ width: 44, height: 44, border: "none", borderRadius: 10, background: tint(C.red, 0.14), color: C.red, fontSize: 17, cursor: "pointer" }}>✕</button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+                    const groupId = `${item.key}-${index}`;
+                    const expanded = expandedLedgerGroup === groupId;
+                    return (
+                      <div key={groupId} style={{ borderTop: index > 0 ? `1px solid ${C.border}` : "none" }}>
+                        <button className="twa-press" onClick={() => setExpandedLedgerGroup(expanded ? null : groupId)}
+                          style={{ width: "100%", minHeight: 62, padding: "11px 14px", border: "none", background: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
+                          <span style={{ minWidth: 0 }}>
+                            <span style={{ display: "block", fontSize: 15, fontWeight: 700, color: C.textPrimary }}>🎮 {item.accountName} · {item.dayKey.split("-").reverse().join(".")}</span>
+                            <span style={{ display: "block", marginTop: 3, fontSize: 14, color: C.textTertiary }}>{item.totalItems} геймпассов · {item.totalRobux.toLocaleString("ru-RU")} R$</span>
+                          </span>
+                          <span style={{ flexShrink: 0, textAlign: "right" }}>
+                            <span style={{ display: "block", fontSize: 15, fontWeight: 700, color: C.red, ...tabular }}>−{fmtUsdt(item.totalUsdt)}</span>
+                            <span style={{ display: "block", marginTop: 2, fontSize: 14, color: C.textTertiary }}>{expanded ? "▲" : "▼"}</span>
+                          </span>
+                        </button>
+                        {expanded && item.entries.map((entry) => (
+                          <div key={entry.id} style={{ padding: "9px 14px 9px 30px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", gap: 10 }}>
+                            <span style={{ minWidth: 0, fontSize: 14, color: C.textSecondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {new Date(entry.createdAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })} · {entry.task?.robloxUsername || `GP ${entry.task?.gamepassId || entry.reference || "—"}`}
+                            </span>
+                            <span style={{ flexShrink: 0, fontSize: 14, color: C.textPrimary, ...tabular }}>{(entry.robuxAmount ?? 0).toLocaleString("ru-RU")} R$ · −{fmtUsdt(Math.abs(entry.amount))}</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </Card>
+              </>
+            ) : (
+              <>
+                <div style={{ display: "flex", gap: 7, overflowX: "auto", paddingBottom: 10 }}>
+                  {taskFilterOptions.map((option) => (
+                    <button key={option.id} className="twa-press-sm" onClick={() => setSubTaskFilter(option.id)}
+                      style={{ minHeight: 44, flexShrink: 0, padding: "0 14px", border: "none", borderRadius: 10, background: subTaskFilter === option.id ? C.accent : C.elevated, color: subTaskFilter === option.id ? "#fff" : C.textSecondary, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <Card>
+                  {filteredPagedTasks.length === 0 && !subScreenLoading ? (
+                    <div style={{ padding: 18, color: C.textSecondary, fontSize: 15, textAlign: "center" }}>Задач нет</div>
+                  ) : filteredPagedTasks.map((task, i) => (
+                    <div key={task.id}>
+                      {i > 0 && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
+                      <PartnerTaskRow
+                        task={task}
+                        busy={busy}
+                        rateUsdtPer1000={rate}
+                        onPurchase={purchaseTask}
+                        onMarkDone={(item) => { void (async () => { if (await post("mark-done", { taskId: item.id, purchaseAccountName: accountName || null })) notifyBuyout([item.id]); })(); }}
+                        onCancel={(item) => { void post("cancel-task", { taskId: item.id }); }}
+                      />
+                    </div>
+                  ))}
+                </Card>
+              </>
+            )}
+            {subScreenLoading && <div style={{ padding: 18, textAlign: "center", color: C.textSecondary, fontSize: 14 }}>Загружаю…</div>}
+            {subScreenCursor && !subScreenLoading && (
+              <button className="twa-press" onClick={() => void loadSubScreenPage(subScreen, subScreenCursor, true)}
+                style={{ width: "100%", minHeight: 48, marginTop: 10, border: "none", borderRadius: 12, background: C.elevated, color: C.accent, fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                Показать ещё
+              </button>
+            )}
+          </PartnerSubScreenPanel>
+        );
+      })()}
 
       {confirmCancelTopup && (
         <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}

@@ -310,7 +310,7 @@ model WbOrder {
   webIdempotencyKey      String?          @unique
   adminId                String?
   rejectionReason        String?
-  /// Snapshot of the purchase rate (R$/₽) at the time of fulfillment.
+  /// Snapshot of the purchase rate ($ per 1000 R$) at the time of fulfillment.
   /// Allows accurate historical profit calculations.
   purchaseRate           Float?
   isDirectOrder          Boolean          @default(false)
@@ -608,6 +608,10 @@ model Partner {
   googleSheetId        String?
   googleSheetTab       String?
   googleSheetUrl       String?
+  /// Cross-process lease for Google Sheets sync. Force/manual and background
+  /// syncs share it so two web instances cannot import the same row at once.
+  googleSyncLeaseId    String?
+  googleSyncLeaseAt    DateTime?
   tasks                PartnerBuyoutTask[]
   ledgerEntries        PartnerLedgerEntry[]
   importRuns           PartnerImportRun[]
@@ -666,27 +670,35 @@ model PartnerBuyoutTask {
   @@index([purchaseBatchId])
 }
 
-/// Partner ledger in partner money. Anton uses USDT only; each BUYOUT entry is
-/// derived from the task's dirty R$ price and Partner.robuxRateUsdtPer1000.
+/// Partner ledger in partner money. Anton uses USDT only; each BUYOUT row is one
+/// actual purchase batch aggregated from task R$ prices at the partner rate.
 model PartnerLedgerEntry {
-  id              String             @id @default(cuid())
-  partnerId       String
-  partner         Partner            @relation(fields: [partnerId], references: [id], onDelete: Cascade)
-  taskId          String?
-  task            PartnerBuyoutTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  type            PartnerLedgerType
-  amount          Float
-  currency        String             @default("USDT")
+  id                  String             @id @default(cuid())
+  partnerId           String
+  partner             Partner            @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  taskId              String?
+  task                PartnerBuyoutTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  type                PartnerLedgerType
+  amount              Float
+  currency            String             @default("USDT")
   /// Rate (USDT per 1000 R$) the debit was computed with. Structured copy of what
   /// the comment says, so per-rate reports do not parse comment strings.
-  rateUsdtPer1000 Float?
+  rateUsdtPer1000     Float?
   /// Dirty R$ amount behind a BUYOUT debit; survives task deletion (taskId SetNull).
-  robuxAmount     Int?
-  reference       String?
-  comment         String?
-  createdBy       String?
-  createdAt       DateTime           @default(now())
+  robuxAmount         Int?
+  /// Donor/cookie account used for the buyout. Null means a manual/Sheets fact.
+  /// Kept on the ledger row so grouped history survives task deletion.
+  purchaseAccountName String?
+  /// Durable id of a user-visible buyout batch. BUYOUT rows use it for atomic
+  /// aggregation; non-buyout ledger entries keep it null.
+  batchId             String?
+  itemCount           Int                @default(1)
+  reference           String?
+  comment             String?
+  createdBy           String?
+  createdAt           DateTime           @default(now())
 
+  @@unique([partnerId, batchId])
   @@index([partnerId, createdAt(sort: Desc)])
   @@index([taskId])
 }
