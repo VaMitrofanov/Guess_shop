@@ -19,7 +19,7 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [design-rework-concept.html](design-rework-concept.html) | Интерактивный визуальный концепт глобального реворка главной и mobile-first WB guide |
 | [bots.md](bots.md) | TG- и VK-боты: активация, приём геймпасса, прямые заказы, поддержка, отзывы |
 | [twa-admin.md](twa-admin.md) | Telegram Web App админка: аутентификация, заказы, выкуп, аккаунт |
-| [twa-design-redesign-plan.md](twa-design-redesign-plan.md) | План глубокого редизайна TWA: навигация, единый поиск, compact cards/history, прибыль DIRECT/AVITO и слив |
+| [twa-design-redesign-plan.md](twa-design-redesign-plan.md) | Контракт редизайна TWA: навигация, поиск, compact cards/history, прибыль и Premium Calm для Аккаунта/Заказов |
 | [database.md](database.md) | Модели Prisma и статусы заказов/кодов |
 | [payments-and-kkt.md](payments-and-kkt.md) | Эквайринг, outbox worker, refund и ККТ test matrix |
 | [deploy.md](deploy.md) | Как деплоится каждый сервис (без секретов) |

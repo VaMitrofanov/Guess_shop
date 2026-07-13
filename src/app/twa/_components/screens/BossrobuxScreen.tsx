@@ -5,6 +5,7 @@ import { haptic } from "../haptics";
 import { toast } from "../Toast";
 import CreateManualModal from "../CreateManualModal";
 import { groupPartnerLedgerEntries, type PartnerLedgerRow } from "@/lib/partner-ledger";
+import { ChevronRight, CircleAlert, Droplets, History, KeyRound, MoreHorizontal, RefreshCw, Search, ShoppingBag } from "lucide-react";
 
 interface AccountInfo {
   hasCookie:      boolean;
@@ -298,7 +299,7 @@ function queueWidgetSub(s: OwnQueueStats | null): string | null {
 }
 
 function Card({ children }: { children: React.ReactNode }) {
-  return <div style={{ background: C.card, borderRadius: 14, overflow: "hidden" }}>{children}</div>;
+  return <div className="twa-account-card" style={{ background: C.card, borderRadius: 14, overflow: "hidden" }}>{children}</div>;
 }
 
 function InfoRow({ label, value, last = false }: { label: string; value: React.ReactNode; last?: boolean }) {
@@ -1449,7 +1450,7 @@ function BuyoutOrderCard({
   const nick = order.user.username ? `@${order.user.username}` : order.user.name ?? "—";
   const isBuying = buying === order.id;
   return (
-    <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10, opacity: dimmed ? 0.45 : 1 }}>
+    <div className="twa-buyout-row" style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10, opacity: dimmed ? 0.45 : 1 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
           <span style={{
@@ -1807,6 +1808,7 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {/* Summary bar */}
+      <div className="twa-buyout-summary">
       <Card>
         <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1837,6 +1839,7 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
           </div>
         </div>
       </Card>
+      </div>
 
       {/* Bulk buyout control */}
       {plan.selected.length > 0 && (
@@ -2247,7 +2250,7 @@ function WorkspaceSwitch({ value, onChange }: { value: BuyoutWorkspace; onChange
     { id: "anton", label: "Антон" },
   ];
   return (
-    <div style={{ display: "flex", background: C.elevated, borderRadius: 12, padding: 3, gap: 3 }}>
+    <div className="twa-account-workspace" style={{ display: "flex", background: C.elevated, borderRadius: 12, padding: 3, gap: 3 }}>
       {opts.map(o => (
         <button
           key={o.id}
@@ -3961,6 +3964,82 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   );
 }
 
+function AccountHero({
+  info,
+  queueStats,
+  errorCount,
+  lastDrain,
+  refreshing,
+  onRefresh,
+  onOpenMenu,
+  onQueue,
+  onErrors,
+  onDrain,
+  onHistory,
+}: {
+  info: AccountInfo | null;
+  queueStats: OwnQueueStats | null;
+  errorCount: number | null;
+  lastDrain: { amount: number; createdAt: string } | null;
+  refreshing: boolean;
+  onRefresh: () => void;
+  onOpenMenu: () => void;
+  onQueue: () => void;
+  onErrors?: () => void;
+  onDrain: () => void;
+  onHistory: () => void;
+}) {
+  const balance = info?.balance ?? 0;
+  const needed = Math.max(0, (queueStats?.dirty ?? 0) - balance);
+  const progress = queueStats?.dirty ? Math.min(100, (balance / queueStats.dirty) * 100) : 100;
+  const cookie = cookieAgeInfo(info?.cookieUpdatedAt ?? null);
+  const queueLabel = queueStats ? `${queueStats.queue}` : "…";
+  const drainLabel = balance > 0 && balance <= MAX_REMAINDER_DIRTY
+    ? `${balance.toLocaleString("ru-RU")} R$`
+    : lastDrain ? `${lastDrain.amount.toLocaleString("ru-RU")} R$` : "—";
+
+  const rows = [
+    { label: "Очередь", value: queueLabel, Icon: ShoppingBag, color: C.accent, onClick: onQueue },
+    { label: "Ошибки", value: errorCount == null ? "…" : String(errorCount), Icon: CircleAlert, color: errorCount ? C.red : C.textSecondary, onClick: onErrors },
+    { label: "Слив", value: drainLabel, Icon: Droplets, color: C.accent, onClick: onDrain },
+    { label: "История", value: "", Icon: History, color: C.accent, onClick: onHistory },
+  ];
+
+  return (
+    <>
+      <section className="twa-account-hero">
+        <div className="twa-account-hero-head">
+          <div><small>Донор</small><strong><StatusDot valid={info?.cookieValid !== false} />{info?.accountName ?? "Не настроен"}</strong></div>
+          <span className={cookie?.warn ? "is-warning" : ""}>{cookie?.text ?? "cookie не задан"}</span>
+        </div>
+        <div className="twa-account-balance-row">
+          <div><strong>{info?.balance == null ? "—" : info.balance.toLocaleString("ru-RU")} <small>R$</small></strong><span>≈ {Math.floor(balance * 0.7).toLocaleString("ru-RU")} R$ чистыми</span></div>
+          <div className="twa-account-hero-actions">
+            <button type="button" className="twa-icon-button twa-press-sm" aria-label="Обновить баланс" onClick={onRefresh} disabled={refreshing}><RefreshCw size={18} className={refreshing ? "is-spinning" : ""} /></button>
+            <button type="button" className="twa-icon-button twa-press-sm" aria-label="Настройки донора" onClick={onOpenMenu}><MoreHorizontal size={19} /></button>
+          </div>
+        </div>
+        <div className="twa-account-queue-state">
+          <div><span>{needed > 0 ? "Нужно пополнить донора" : queueStats?.queue ? "Баланс покрывает очередь" : "Очередь под контролем"}</span><strong>{queueStats?.queue ?? 0} заказов{needed > 0 ? ` · ${needed.toLocaleString("ru-RU")} R$` : ""}</strong></div>
+          <button type="button" className="twa-press" onClick={onQueue}>{queueStats?.queue ? "К очереди" : "Проверить"}</button>
+          <div className="twa-account-progress" aria-label={`Покрытие очереди ${Math.round(progress)}%`}><i style={{ width: `${progress}%` }} /></div>
+        </div>
+      </section>
+
+      <div className="twa-account-operations">
+        {rows.map(({ label, value, Icon, color, onClick }) => (
+          <button type="button" className="twa-press-sm" key={label} onClick={onClick} disabled={!onClick}>
+            <Icon size={18} color={color} />
+            <span>{label}</span>
+            {value && <b style={{ color: label === "Ошибки" && errorCount ? C.red : C.textPrimary }}>{value}</b>}
+            <ChevronRight size={17} />
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // Main Screen
 // ═════════════════════════════════════════════════════════════════════════════
@@ -4264,15 +4343,28 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
   const cookieReady = info?.hasCookie && info?.cookieValid !== false;
 
   return (
-    <div style={{ padding: "16px 16px 32px", display: "flex", flexDirection: "column", gap: 22, overflowY: "auto", height: "100%" }}>
+    <div className="twa-account-calm" style={{ padding: "10px 16px 32px", display: "flex", flexDirection: "column", gap: 12, overflowY: "auto", height: "100%" }}>
       <WorkspaceSwitch value={workspace} onChange={setWorkspace} />
 
       {workspace === "own" ? (
         <>
+          <AccountHero
+            info={info}
+            queueStats={queueStats}
+            errorCount={todayStats?.errorCount ?? null}
+            lastDrain={lastDrain}
+            refreshing={refreshing}
+            onRefresh={() => { haptic.impact("light"); void refreshBalance(); }}
+            onOpenMenu={() => { haptic.impact("light"); setShowCookie(value => !value); }}
+            onQueue={() => scrollToSection(queueRef)}
+            onErrors={onOpenErrors}
+            onDrain={() => { setShowDrain(true); window.setTimeout(() => scrollToSection(drainRef), 0); }}
+            onHistory={() => setShowTxHistory(value => !value)}
+          />
           {/* ── Ф2: hero «Донор» + виджеты — зеркало языка дашборда Антона (5.9).
               Виджеты кликабельны: Очередь/Слив скроллят к секции, Ошибки —
               переход на вкладку Заказы/ERROR (язык 5.10). */}
-          <section>
+          <section className="twa-account-legacy-summary" aria-hidden="true">
             <SectionHeader
               title="Донор"
               hint={cookieAgeInfo(info?.cookieUpdatedAt ?? null)?.text ?? null}
@@ -4436,17 +4528,27 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
             )}
           </section>
 
+          {showCookie && (
+            <section className="twa-account-cookie-sheet twa-fade-up">
+              <div className="twa-account-cookie-head"><KeyRound size={18} /><div><strong>Cookie донора</strong><small>Редкое действие · значение не показывается после сохранения</small></div></div>
+              <textarea value={cookieInput} onChange={event => setCookieInput(event.target.value)} placeholder=".ROBLOSECURITY значение…" rows={3} />
+              <button type="button" className="twa-press" onClick={() => { haptic.impact("medium"); void saveCookie(); }} disabled={saving || !cookieInput.trim()}>{saving ? "Проверяю…" : "Проверить и сохранить"}</button>
+              {saveMsg && <span className={saveMsg.ok ? "is-success" : "is-error"}>{saveMsg.text}</span>}
+            </section>
+          )}
+
           {/* ── Search & Purchase (FIRST — main function) ────────────────────
               Поиск ходит в публичные Roblox API и работает без cookie — секция
               видна всегда (раньше пряталась целиком при протухшем cookie или
               таймауте Roblox, «пропал поиск»). Без cookie дизейблится только 🛒. */}
-          <section>
+          <section className="twa-account-search-section">
           <SectionHeader title="Поиск и выкуп" />
 
           <Card>
             <div style={{ padding: 12 }}>
               <div style={{ display: "flex", gap: 8 }}>
                 <input
+                  className="twa-account-search-input"
                   value={searchInput}
                   onChange={e => setSearchInput(e.target.value)}
                   onKeyDown={e => { if (e.key === "Enter" && searchInput.trim()) doSearch(); }}
@@ -4459,7 +4561,8 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
                   }}
                 />
                 <button
-                  className="twa-press"
+                  className="twa-account-search-button twa-press"
+                  aria-label="Найти геймпасс"
                   onClick={() => { haptic.impact("light"); doSearch(); }}
                   disabled={searching || !searchInput.trim()}
                   style={{
@@ -4470,7 +4573,7 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
                     fontFamily: "inherit", transition: "all 0.2s",
                   }}
                 >
-                  {searching ? "…" : "🔍"}
+                  {searching ? "…" : <Search size={19} />}
                 </button>
               </div>
             </div>
@@ -4529,7 +4632,7 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
       {/* ── Buyout Orders ───────────────────────────────────────────────── */}
       {cookieReady && (
         <section ref={queueRef}>
-          <SectionHeader title="К выкупу" />
+          <SectionHeader title="Очередь" hint={queueStats ? `${queueStats.queue} заказов` : null} />
           <BuyoutSection
             key={buyoutKey}
             token={token}

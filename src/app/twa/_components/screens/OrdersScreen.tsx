@@ -3,12 +3,11 @@ import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "rea
 import { C, SHADOW, tabular, MONO } from "../theme";
 import { haptic } from "../haptics";
 import { toast } from "../Toast";
-import Pressable from "../Pressable";
 import CreateManualModal, { type RebindUser } from "../CreateManualModal";
 
 type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED" | "ERROR";
 // ATTENTION — не чип, а серверная выборка «Требуют внимания» для вкладки «Все».
-type FilterTab = "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "FAVORITES" | "ATTENTION";
+type FilterTab = "WORK" | "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "FAVORITES" | "ATTENTION";
 
 // «Ждут ссылку»: сервер отдаёт первые N — самые свежие, дальше хвост от самых
 // старых (см. fetchAwaitingLinkHybrid в api/twa/orders). Здесь — для разделителя.
@@ -101,6 +100,7 @@ interface GpLiveInfo {
 }
 
 const TAB_META: Record<FilterTab, { label: string; color: string }> = {
+  WORK:          { label: "В работе",       color: C.accent },
   ALL:           { label: "Все",            color: C.textPrimary },
   BUYOUT:        { label: "К выкупу",       color: C.green },
   DIRECT:        { label: "Прямой",         color: C.blue },
@@ -114,7 +114,6 @@ const TAB_META: Record<FilterTab, { label: string; color: string }> = {
 };
 
 const FILTERS: { id: FilterTab }[] = [
-  { id: "ALL" },
   { id: "BUYOUT" },
   { id: "DIRECT" },
   { id: "AVITO" },
@@ -124,6 +123,14 @@ const FILTERS: { id: FilterTab }[] = [
   { id: "DONE" },
   { id: "FAVORITES" },
 ];
+
+const ORDER_MODES: { id: "work" | "all" | "history"; label: string; filter: FilterTab; countKey: FilterTab }[] = [
+  { id: "work", label: "В работе", filter: "WORK", countKey: "WORK" },
+  { id: "all", label: "Все", filter: "ALL", countKey: "ALL" },
+  { id: "history", label: "История", filter: "DONE", countKey: "DONE" },
+];
+
+const WORK_FILTERS = new Set<FilterTab>(["WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "FAVORITES", "ATTENTION"]);
 
 function orderTabBadge(order: Order): { label: string; color: string } | null {
   const cutoff = Date.now() - 40 * 3600_000;
@@ -1052,7 +1059,7 @@ function OrderCard({
   const displayAmount = showDirty ? dirtyAmount : order.amount;
   const showCleanHint = viewTab === "BUYOUT";
 
-  const tabBadge = currentTab === "ALL" || currentTab === "ATTENTION" ? orderTabBadge(order) : null;
+  const tabBadge = currentTab === "ALL" || currentTab === "WORK" || currentTab === "ATTENTION" ? orderTabBadge(order) : null;
   const showMoveBtn = viewTab === "AWAITING_LINK" || viewTab === "FAVORITES";
   // Редактирование за клиента (номинал/ник/ГП) — любой источник, не только Авито.
   const isEditable = ["PENDING", "AWAITING_GAMEPASS", "ERROR"].includes(order.status);
@@ -1067,7 +1074,9 @@ function OrderCard({
   const inBuyoutQueue = !!order.pendingAt && ["PENDING", "IN_PROGRESS"].includes(order.status);
 
   return (
-    <article className={`twa-glass-order${exiting ? " twa-card-exit" : ""}`} style={{
+    <>
+    {expanded && <button type="button" className="twa-order-sheet-backdrop" aria-label="Закрыть заказ" onClick={() => setExpanded(false)} />}
+    <article className={`twa-glass-order${expanded ? " is-sheet" : ""}${exiting ? " twa-card-exit" : ""}`} style={{
       background: C.card,
       borderRadius: 16,
       overflow: "hidden",
@@ -1440,6 +1449,7 @@ function OrderCard({
       />
       </>}
     </article>
+    </>
   );
 }
 
@@ -1520,6 +1530,14 @@ function orderToTab(order: Order): FilterTab {
   return "ALL";
 }
 
+function isWorkOrder(order: Order): boolean {
+  if (order.isFavorite) return false;
+  const cutoff = Date.now() - 40 * 3600_000;
+  if (order.status === "ERROR") return true;
+  if (["PENDING", "IN_PROGRESS"].includes(order.status) && !order.isDirectOrder && order.orderSource !== "AVITO") return true;
+  return order.status === "AWAITING_GAMEPASS" && new Date(order.createdAt).getTime() <= cutoff;
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
    Main screen
    ───────────────────────────────────────────────────────────────────────── */
@@ -1533,13 +1551,14 @@ export default function OrdersScreen({
   initialTab?: string;
   onInitialQueryConsumed?: () => void;
 }) {
-  const [filter, setFilter] = useState<FilterTab>((initialTab as FilterTab) || "ALL");
+  const [filter, setFilter] = useState<FilterTab>(initialQuery ? "ALL" : (initialTab as FilterTab) || "WORK");
   const [query, setQuery] = useState(initialQuery ?? "");
   // Вкладка «Все»: по умолчанию хронологическая лента (новые сверху),
   // подборка «Требуют внимания» — по кнопке «⚠ Внимание (N)» (решение 2026-07-06).
   const [allView, setAllView] = useState<"attention" | "list">("list");
   // П4: модалка «➕ Создать заказ» (ручной заказ целиком из TWA).
   const [createOpen, setCreateOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   useEffect(() => {
     if (initialQuery || initialTab) onInitialQueryConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1717,6 +1736,9 @@ export default function OrdersScreen({
       ? toTab === "ALL"
       : filter !== "ALL" && (toTab === "ALL" || toTab !== filter);
     const attnDelta = isAttentionView && leaves ? 1 : 0;
+    // WORK = видимый контракт strip (К выкупу + Ждут ссылку + Ошибка):
+    // set-error из NEW добавляет заказ в работу, complete/reject — убирает.
+    const workDelta = (isWorkOrder({ ...order, status: newStatus }) ? 1 : 0) - (isWorkOrder(order) ? 1 : 0);
 
     setAllOrders(prev => prev.map(o => o.id === order.id
       ? { ...o, status: newStatus!, rejectionReason: action === "reject" ? (reason || "не указана") : o.rejectionReason }
@@ -1725,6 +1747,7 @@ export default function OrdersScreen({
       setData(prev => {
         if (!prev) return prev;
         let counts = shiftCounts(prev.counts, fromTab, toTab!);
+        if (workDelta) counts = { ...counts, WORK: Math.max(0, (counts.WORK ?? 0) + workDelta) };
         if (attnDelta) counts = { ...counts, ATTENTION: Math.max(0, (counts["ATTENTION"] ?? 0) - attnDelta) };
         return {
           ...prev,
@@ -1741,6 +1764,7 @@ export default function OrdersScreen({
         setData(prev => {
           if (!prev) return prev;
           let counts = shiftCounts(prev.counts, toTab!, fromTab);
+          if (workDelta) counts = { ...counts, WORK: Math.max(0, (counts.WORK ?? 0) - workDelta) };
           if (attnDelta) counts = { ...counts, ATTENTION: (counts["ATTENTION"] ?? 0) + attnDelta };
           return {
             ...prev,
@@ -1815,8 +1839,10 @@ export default function OrdersScreen({
       const next = { ...prev.counts };
       if (wasFav) {
         next["FAVORITES"] = Math.max(0, (next["FAVORITES"] ?? 0) - 1);
+        if (isWorkOrder({ ...order, isFavorite: false })) next.WORK = (next.WORK ?? 0) + 1;
       } else {
         next["FAVORITES"] = (next["FAVORITES"] ?? 0) + 1;
+        if (isWorkOrder(order)) next.WORK = Math.max(0, (next.WORK ?? 0) - 1);
         const fromTab = orderToTab(order);
         if (fromTab !== "ALL") next[fromTab] = Math.max(0, (next[fromTab] ?? 0) - 1);
         // Избранное исключается из «Требуют внимания» по определению выборки.
@@ -1856,6 +1882,7 @@ export default function OrdersScreen({
     setData(prev => {
       if (!prev) return prev;
       let counts = shiftCounts(prev.counts, fromTab, "ALL");
+      if (isWorkOrder(order)) counts = { ...counts, WORK: Math.max(0, (counts.WORK ?? 0) - 1) };
       if (isAttentionView) counts = { ...counts, ATTENTION: Math.max(0, (counts["ATTENTION"] ?? 0) - 1) };
       return {
         ...prev,
@@ -1894,101 +1921,80 @@ export default function OrdersScreen({
     return `${meta.label} · ${data.total}`;
   }, [data, query, filter, isAttentionView]);
 
+  const activeMode = filter === "ALL" ? "all" : filter === "DONE" ? "history" : "work";
+
   return (
     <div className="twa-orders-shell" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: "transparent" }}>
 
-      {/* Sticky: search + tab chips */}
-      <div className="twa-orders-toolbar" style={{
-        padding: "10px 16px 8px",
-        background: C.bgElevated,
-        borderBottom: `1px solid ${C.hairline}`,
-        flexShrink: 0,
-        display: "flex", flexDirection: "column", gap: 9,
-      }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
+      {/* Premium Calm: three primary modes, compact status strip and secondary filters in a sheet. */}
+      <div className="twa-orders-toolbar twa-orders-toolbar-calm">
+        <div className="twa-orders-search-row">
+          <div className="twa-orders-search-wrap">
             <SearchBar value={query} onChange={setQuery} />
           </div>
           <button
-            className="twa-press-sm"
+            className="twa-order-add twa-press-sm"
+            type="button"
+            aria-label="Создать заказ вручную"
             title="Создать заказ вручную"
             onClick={() => { haptic.impact("light"); setCreateOpen(true); }}
-            style={{
-              flexShrink: 0, width: 42, borderRadius: 10, border: "none",
-              background: C.accent, color: "#fff", fontSize: 24, fontWeight: 500,
-              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-              lineHeight: 1, paddingBottom: 2,
-            }}
           >
             +
           </button>
         </div>
 
-        <div className="twa-no-scrollbar" style={{
-          display: "flex", gap: 7,
-          overflowX: "auto",
-          marginRight: -16, paddingRight: 16,
-          WebkitMaskImage: "linear-gradient(90deg, #000 90%, transparent)",
-          maskImage: "linear-gradient(90deg, #000 90%, transparent)",
-        }}>
-          {FILTERS.map(f => {
-            const meta = TAB_META[f.id];
-            // «Прямой»: бейдж = заказы + заявки (DirectIntent, «ожидаем реквизиты»).
-            const count = (data?.counts?.[f.id] ?? 0)
-              + (f.id === "DIRECT" ? (data?.counts?.["INTENTS"] ?? 0) : 0);
-            const isActive = filter === f.id;
-            const isUrgent = ["BUYOUT", "DIRECT", "AVITO", "ERROR"].includes(f.id) && count > 0;
-            return (
-              <button
-                key={f.id}
-                className="twa-press-sm"
-                onClick={() => { if (f.id !== filter) haptic.select(); setFilter(f.id); }}
-                style={{
-                  flexShrink: 0, padding: "9px 16px", borderRadius: 999,
-                  border: "none",
-                  background: isActive ? C.accent : "rgba(118,118,128,0.22)",
-                  color: isActive ? "#fff" : C.textPrimary,
-                  fontSize: 15, fontWeight: isActive ? 600 : 500,
-                  cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
-                  letterSpacing: 0.1,
-                }}
-              >
-                {meta.label}
-                {count > 0 && (
-                  <span style={{
-                    background: isActive ? "rgba(255,255,255,0.28)" : isUrgent ? C.red : "rgba(255,255,255,0.18)",
-                    color: "#fff", fontSize: 12, fontWeight: 700,
-                    padding: "3px 8px", borderRadius: 999, minWidth: 20, textAlign: "center",
-                    ...tabular,
-                  }}>
-                    {count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+        <div className="twa-orders-modes" role="tablist" aria-label="Режим заказов">
+          {ORDER_MODES.map(mode => (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeMode === mode.id}
+              key={mode.id}
+              className={`twa-press-sm${activeMode === mode.id ? " is-active" : ""}`}
+              onClick={() => { haptic.select(); setFilter(mode.filter); setAllView("list"); }}
+            >
+              <strong>{mode.label}</strong>
+              <span>{data?.counts?.[mode.countKey] ?? 0}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="twa-orders-status-strip twa-no-scrollbar">
+          {(["BUYOUT", "AWAITING_LINK", "ERROR"] as FilterTab[]).map(id => (
+            <button
+              type="button"
+              key={id}
+              className={`twa-press-sm${filter === id ? " is-active" : ""}`}
+              onClick={() => { haptic.select(); setFilter(id); }}
+            >
+              <i style={{ background: TAB_META[id].color }} />
+              <span>{TAB_META[id].label}</span>
+              <b>{data?.counts?.[id] ?? 0}</b>
+            </button>
+          ))}
+          <button type="button" className="twa-orders-filter-trigger twa-press-sm" onClick={() => setFiltersOpen(true)}>
+            Фильтры{WORK_FILTERS.has(filter) && filter !== "WORK" && !["BUYOUT", "AWAITING_LINK", "ERROR"].includes(filter) ? " · 1" : ""}
+          </button>
         </div>
       </div>
 
+      {filtersOpen && (
+        <div className="twa-filter-sheet-layer" role="presentation" onClick={() => setFiltersOpen(false)}>
+          <section className="twa-filter-sheet twa-fade-up" role="dialog" aria-modal="true" aria-label="Фильтры заказов" onClick={event => event.stopPropagation()}>
+            <div className="twa-filter-sheet-head"><div><small>Заказы</small><strong>Фильтры</strong></div><button type="button" className="twa-icon-button twa-press-sm" onClick={() => setFiltersOpen(false)}>×</button></div>
+            <div className="twa-filter-options">
+              <button type="button" className={filter === "WORK" ? "is-active" : ""} onClick={() => { setFilter("WORK"); setFiltersOpen(false); }}><span>Все в работе</span><b>{data?.counts?.WORK ?? 0}</b></button>
+              {FILTERS.filter(item => item.id !== "DONE").map(item => {
+                const count = (data?.counts?.[item.id] ?? 0) + (item.id === "DIRECT" ? (data?.counts?.INTENTS ?? 0) : 0);
+                return <button type="button" key={item.id} className={filter === item.id ? "is-active" : ""} onClick={() => { haptic.select(); setFilter(item.id); setFiltersOpen(false); }}><span>{TAB_META[item.id].label}</span><b>{count}</b></button>;
+              })}
+            </div>
+          </section>
+        </div>
+      )}
+
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
-        {/* Dashboard: сетка категорий на «Все», своя карточка внутри BUYOUT / AWAITING_LINK */}
-        {data?.sums && !query && filter === "ALL" && (
-          <div style={{ paddingTop: 10 }}>
-            <MiniDashboard counts={data.counts} sums={data.sums} oldest={data.oldest} onTap={setFilter} />
-          </div>
-        )}
-        {data?.sums && !query && (filter === "BUYOUT" || filter === "AWAITING_LINK") && (
-          <div style={{ paddingTop: 10 }}>
-            <MiniDashboard
-              counts={data.counts}
-              sums={data.sums}
-              oldest={data.oldest}
-              groups={DASHBOARD_GROUPS.filter(g => g.filter === filter)}
-            />
-          </div>
-        )}
-
         {/* Заявки прямых заказов — до отправки реквизитов (видны даже при пустом списке заказов) */}
         {filter === "DIRECT" && !query && (
           <IntentsSection
@@ -2010,8 +2016,8 @@ export default function OrdersScreen({
             onShowAll={isAttentionView ? () => { haptic.select(); setAllView("list"); } : undefined}
           />
         ) : (
-          <div className="twa-fade-in" style={{ padding: "12px 16px 32px", display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 2px" }}>
+          <div className={`twa-fade-in${filter === "DONE" ? "" : " twa-orders-list-stack"}`} style={{ padding: "12px 16px 32px", display: "flex", flexDirection: "column", gap: 12 }}>
+            {(query || isAttentionView || filter === "DONE") && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 2px" }}>
               <span style={{ fontSize: 14, color: C.textSecondary, letterSpacing: 0.1 }}>
                 {isAttentionView && "⚠ "}{summaryText}
               </span>
@@ -2030,7 +2036,7 @@ export default function OrdersScreen({
                     : `⚠ Внимание${(data?.counts?.["ATTENTION"] ?? 0) > 0 ? ` (${data?.counts?.["ATTENTION"]})` : ""}`}
                 </button>
               )}
-            </div>
+            </div>}
 
             {filter === "DONE" ? (
               <>
@@ -2401,126 +2407,6 @@ function IntentsSection({ token, intents, qrConfigured, loading, onIntentGone }:
   );
 }
 
-/* ───────────── MiniDashboard ───────────── */
-function fmtRobux(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 10_000) return `${(n / 1_000).toFixed(0)}K`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toLocaleString("ru-RU");
-}
-
-// Режим суммы: amount в БД — чистые R$ (клиенту), грязные = ceil(amount / 0.7)
-// (цена геймпасса, что спишется с донора). Крупная цифра — то, чем оперирует
-// менеджер в этой категории; в скобках — второе значение (grossOnly — без скобок,
-// в этих вкладках карточки показывают только грязные).
-type DashSumMode = "grossClean" | "cleanGross" | "grossOnly";
-
-const DASHBOARD_GROUPS: { key: string; label: string; sumKey: string; filter: FilterTab; color: string; mode: DashSumMode; oldestKey?: string }[] = [
-  { key: "buyout", label: "К выкупу",    sumKey: "BUYOUT",        filter: "BUYOUT",        color: C.green,  mode: "grossClean", oldestKey: "BUYOUT" },
-  { key: "link",   label: "Ждут ссылку", sumKey: "AWAITING_LINK", filter: "AWAITING_LINK", color: C.yellow, mode: "cleanGross", oldestKey: "AWAITING_LINK" },
-  { key: "direct", label: "Прямой",      sumKey: "DIRECT",        filter: "DIRECT",        color: C.blue,   mode: "grossOnly" },
-  { key: "avito",  label: "Авито",       sumKey: "AVITO",         filter: "AVITO",         color: C.orange, mode: "grossOnly" },
-  { key: "new",    label: "Новые",       sumKey: "NEW",           filter: "NEW",           color: C.accent, mode: "cleanGross" },
-  { key: "error",  label: "Ошибка",      sumKey: "ERROR",         filter: "ERROR",         color: C.red,    mode: "grossClean" },
-];
-
-function MiniDashboard({ counts, sums, oldest, onTap, groups = DASHBOARD_GROUPS }: {
-  counts: Record<string, number>;
-  sums: Record<string, number>;
-  oldest?: Record<string, string | null> | null;
-  onTap?: (filter: FilterTab) => void;
-  groups?: typeof DASHBOARD_GROUPS;
-}) {
-  const visible = groups.filter(g => (counts[g.filter] ?? 0) > 0);
-  if (visible.length === 0) return null;
-
-  return (
-    <div style={{
-      display: "grid",
-      gridTemplateColumns: visible.length > 1 ? "1fr 1fr" : "1fr",
-      gap: 8, padding: "0 16px 6px",
-    }}>
-      {visible.map(g => {
-        const count = counts[g.filter] ?? 0;
-        const cleanRobux = sums[g.sumKey] ?? 0;
-        const grossRobux = Math.ceil(cleanRobux / 0.7);
-        const primary = g.mode === "cleanGross" ? cleanRobux : grossRobux;
-        const secondary = g.mode === "grossClean" ? cleanRobux : g.mode === "cleanGross" ? grossRobux : null;
-        const oldestIso = g.oldestKey ? (oldest?.[g.oldestKey] ?? null) : null;
-
-        const cardStyle: React.CSSProperties = {
-          minWidth: 0,
-          background: C.card,
-          borderRadius: 14,
-          padding: "12px 14px",
-          display: "flex", flexDirection: "column", gap: 3,
-          boxShadow: SHADOW.card,
-          position: "relative",
-          overflow: "hidden",
-          border: "none",
-          cursor: onTap ? "pointer" : "default",
-          textAlign: "left",
-        };
-
-        const inner = (
-          <>
-            <div style={{
-              position: "absolute", inset: 0, borderRadius: 14, pointerEvents: "none",
-              background: `linear-gradient(180deg, ${g.color}0d 0%, transparent 60%)`,
-            }} />
-            <div style={{
-              fontSize: 12, fontWeight: 600, color: g.color,
-              letterSpacing: 0.3, textTransform: "uppercase",
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              position: "relative",
-            }}>
-              {g.label}
-            </div>
-            <div style={{
-              fontSize: 20, fontWeight: 700, color: C.textPrimary,
-              letterSpacing: -0.5, ...tabular, lineHeight: 1.1,
-              position: "relative",
-            }}>
-              {fmtRobux(primary)}
-              <span style={{ fontSize: 13, fontWeight: 500, color: C.textSecondary, marginLeft: 2 }}>R$</span>
-              {secondary !== null && (
-                <span style={{ fontSize: 13, fontWeight: 500, color: C.textTertiary, marginLeft: 4 }}>
-                  ({fmtRobux(secondary)})
-                </span>
-              )}
-            </div>
-            <div style={{
-              fontSize: 13, color: C.textTertiary, ...tabular,
-              position: "relative",
-              display: "flex", justifyContent: "space-between", gap: 6,
-            }}>
-              <span>{count} {count === 1 ? "заказ" : count < 5 ? "заказа" : "заказов"}</span>
-              {oldestIso && (
-                <span title="Старейший в очереди" style={{ color: ageColor(oldestIso) }}>
-                  ⏳ {fmtAge(oldestIso)}
-                </span>
-              )}
-            </div>
-          </>
-        );
-
-        return onTap ? (
-          <Pressable
-            key={g.key}
-            variant="press-sm"
-            onClick={() => { haptic.impact("light"); onTap(g.filter); }}
-            style={cardStyle}
-          >
-            {inner}
-          </Pressable>
-        ) : (
-          <div key={g.key} style={cardStyle}>{inner}</div>
-        );
-      })}
-    </div>
-  );
-}
-
 function EmptyState({ filter, query, attention, onShowAll }: {
   filter: FilterTab;
   query: string;
@@ -2563,6 +2449,7 @@ function EmptyState({ filter, query, attention, onShowAll }: {
     );
   }
   const labels: Record<FilterTab, string> = {
+    WORK: "В работе пока ничего нет",
     ALL: "Заказов пока нет",
     BUYOUT: "Нет заказов к выкупу",
     DIRECT: "Нет прямых заказов",

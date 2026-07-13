@@ -9,7 +9,7 @@ import { buildOrderProfitSnapshot } from "@/lib/order-profit";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
-type FilterTab = "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "FAVORITES" | "ATTENTION";
+type FilterTab = "WORK" | "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "FAVORITES" | "ATTENTION";
 
 const NEW_CUTOFF_HOURS = 40;
 // «Ждут ссылку»: первые N карточек — самые свежие (клиент ещё тёплый), дальше
@@ -76,6 +76,15 @@ async function appendAdminNote(orderId: string, line: string): Promise<void> {
 function buildTabWhere(tab: FilterTab): any {
   const cutoff = new Date(Date.now() - NEW_CUTOFF_HOURS * 3600_000);
   switch (tab) {
+    case "WORK":
+      return {
+        isFavorite: false,
+        OR: [
+          { status: "ERROR" },
+          { status: { in: ["PENDING", "IN_PROGRESS"] }, isDirectOrder: false, orderSource: { not: "AVITO" } },
+          { status: "AWAITING_GAMEPASS", createdAt: { lte: cutoff } },
+        ],
+      };
     case "ALL":
       return {};
     case "BUYOUT":
@@ -113,6 +122,7 @@ function buildTabWhere(tab: FilterTab): any {
 }
 
 function orderByForTab(tab: FilterTab): any {
+  if (tab === "WORK") return [{ updatedAt: "desc" }, { createdAt: "desc" }];
   if (tab === "BUYOUT" || tab === "DIRECT" || tab === "AVITO") return [{ pendingAt: "asc" }, { createdAt: "asc" }];
   if (tab === "ERROR" || tab === "AWAITING_LINK" || tab === "ATTENTION") return { createdAt: "asc" };
   return { createdAt: "desc" };
@@ -142,7 +152,7 @@ export async function GET(req: NextRequest) {
   const lite        = searchParams.get("lite") === "1";
   const sourceFilter = searchParams.get("source") as string | null;
 
-  const isVirtualTab = ["ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES", "ATTENTION"].includes(tab);
+  const isVirtualTab = ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES", "ATTENTION"].includes(tab);
   const tabWhere = isVirtualTab
     ? buildTabWhere(tab as FilterTab)
     : (VALID_STATUSES.includes(tab as any) ? { status: tab } : {});
@@ -224,6 +234,11 @@ export async function GET(req: NextRequest) {
           }).catch(() => 0);
           const rows: any[] = await (prisma as any).$queryRawUnsafe(`
             SELECT
+              COUNT(*) FILTER (WHERE "isFavorite" = false AND (
+                status = 'ERROR'
+                OR (status IN ('PENDING','IN_PROGRESS') AND "isDirectOrder" = false AND "orderSource" != 'AVITO')
+                OR (status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours')
+              ))::int AS "WORK",
               COUNT(*)::int AS "ALL",
               COUNT(*) FILTER (WHERE status IN ('PENDING','IN_PROGRESS') AND "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "isFavorite" = false)::int AS "BUYOUT",
               COUNT(*) FILTER (WHERE "isDirectOrder" = true AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false)::int AS "DIRECT",
@@ -253,7 +268,7 @@ export async function GET(req: NextRequest) {
           const r = rows[0] ?? {};
           const counts: Record<string, number> = {};
           const sums: Record<string, number> = {};
-          for (const k of ["ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES", "ATTENTION"] as const)
+          for (const k of ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES", "ATTENTION"] as const)
             counts[k] = Number(r[k] ?? 0);
           counts["INTENTS"] = await intentsPromise;
           for (const k of ["BUYOUT", "DIRECT", "AVITO", "AWAITING_LINK", "NEW", "ERROR"] as const)
