@@ -3,6 +3,16 @@
 Neon Postgres + Prisma 7 (`engineType=library`, adapter `PrismaPg`). Модели WB-домена иногда
 кастуются в `any` в ботах (генератор отстаёт).
 
+## Миграция точной прибыли TWA (13.07.2026)
+
+`20260713_twa_order_profit_snapshots` добавляет в `WbOrder` immutable snapshots DIRECT/AVITO:
+`saleAmountKopecks`, `purchaseRobuxAmount`, `purchaseRateUsdPer1k`, `purchaseUsdToRub`,
+`purchaseCostKopecks`, `profitKopecks`. Деньги хранятся в целых копейках; ставка закупа —
+USD/1000 R$, USD/RUB фиксируется отдельно. Legacy NULL не пересчитывается текущим курсом.
+
+Release order строгий: сначала `npx prisma migrate deploy`, затем новая версия приложения и
+ботов. Новый Prisma Client читает эти колонки в стандартном `WbOrder.findMany`.
+
 ## Модели воркфлоу
 
 ### `WbCode` — физические коды на вкладышах WB-карт
@@ -29,7 +39,9 @@ Neon Postgres + Prisma 7 (`engineType=library`, adapter `PrismaPg`). Модел�
 `orderSource` (`WB`/`DIRECT`/`AVITO`/`MANUAL`/`SITE`), `isDirectOrder`, `isFavorite`, `isTest`,
 `adminNote` (только для админа), `robloxUsername` (продавец, **только подтверждённый** ник),
 `purchaserUsername` (куки-аккаунт-покупатель), `purchaseRate` (снапшот закупки в $ за
-1000 R$ при выкупе),
+1000 R$ при выкупе), `saleAmountKopecks`, `purchaseRobuxAmount`,
+`purchaseRateUsdPer1k`, `purchaseUsdToRub`, `purchaseCostKopecks`, `profitKopecks`
+(immutable snapshots точной прибыли новых DIRECT/AVITO),
 `pendingAt` (момент попадания в «К выкупу» — для сортировки), `rejectionReason`,
 `paidAt` (2026-07-06, миграция `20260706_add_paid_at`) — момент подтверждения оплаты
 прямого заказа (`pay_ok:` в TG); DIR без `paidAt` исключён из всех путей выкупа

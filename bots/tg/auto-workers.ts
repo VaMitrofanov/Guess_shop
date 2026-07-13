@@ -30,6 +30,7 @@ import {
 import { searchGamepassesByNick } from "../shared/gamepass-search";
 import { runDrain, drainAuthedUser, drainUserGamepasses, ownsGamepass, drainCurrency } from "../shared/drain";
 import { notifyUserCompleted } from "./handlers";
+import { buildOrderProfitSnapshot } from "../shared/order-profit";
 
 const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
 const PRICE_TOL = 2;
@@ -164,9 +165,10 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
 
       if (result.success || isAlreadyOwned) {
         consecutiveFails = 0;
+        const money = buildOrderProfitSnapshot(order, settings, result.price ?? info.priceInRobux);
         await (db as any).wbOrder.updateMany({
           where: { id: order.id, status: "IN_PROGRESS" },
-          data: { status: "COMPLETED", purchaseRate: settings.purchaseRate ?? null, purchaserUsername: settings.robloxAccountName ?? null, completedAt: new Date() },
+          data: { status: "COMPLETED", purchaseRate: settings.purchaseRate ?? null, purchaserUsername: settings.robloxAccountName ?? null, completedAt: new Date(), ...(money ?? {}) },
         });
         if (order.user) {
           try { await notifyUserCompleted(bot, order.user, order.id, order.amount, order.isDirectOrder ?? false); } catch { /* user may have blocked */ }

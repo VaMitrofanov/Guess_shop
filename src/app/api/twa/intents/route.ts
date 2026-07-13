@@ -127,6 +127,7 @@ export async function POST(req: NextRequest) {
           wbCode:         dirCode,
           isDirectOrder:  true,
           orderSource:    "DIRECT",
+          saleAmountKopecks: intent.rublePrice * 100,
           paymentDetails: action === "send-qr" ? "СБП QR" : details.slice(0, 2000),
         },
       });

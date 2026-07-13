@@ -20,6 +20,7 @@ import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT,
 import { buildCompletedMessages, robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 import { buildAdminKeyboard } from "./admin";
+import { buildOrderProfitSnapshot } from "../shared/order-profit";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -3810,9 +3811,10 @@ export function registerCallbacks(bot: Telegraf): void {
         if (result.success) {
           const currentRate = settings?.purchaseRate ?? null;
           const purchaserUsername = settings?.robloxAccountName ?? null;
+          const money = buildOrderProfitSnapshot(order, settings ?? {}, result.price ?? info.priceInRobux);
           const updated = await (db as any).wbOrder.updateMany({
             where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
-            data: { status: "COMPLETED", adminId, purchaseRate: currentRate, purchaserUsername, completedAt: new Date() },
+            data: { status: "COMPLETED", adminId, purchaseRate: currentRate, purchaserUsername, completedAt: new Date(), ...(money ?? {}) },
           });
 
           if (updated.count > 0) {
@@ -3858,12 +3860,16 @@ export function registerCallbacks(bot: Telegraf): void {
         // Snapshot purchase rate at fulfillment time
         const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
         const currentRate = settings?.purchaseRate ?? null;
+        const moneyOrder = await (db as any).wbOrder.findUnique({ where: { id: orderId } });
+        const money = moneyOrder
+          ? buildOrderProfitSnapshot(moneyOrder, settings ?? {}, Math.ceil(moneyOrder.amount / 0.7))
+          : null;
 
         // Atomic guard: only update if the order is still in an actionable state.
         // Prevents double-notification when two admins click simultaneously.
         const updatedCount = await (db as any).wbOrder.updateMany({
           where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
-          data: { status: "COMPLETED", adminId, purchaseRate: currentRate, completedAt: new Date() },
+          data: { status: "COMPLETED", adminId, purchaseRate: currentRate, completedAt: new Date(), ...(money ?? {}) },
         });
 
         if (updatedCount.count === 0) {
@@ -4597,6 +4603,7 @@ export function registerCallbacks(bot: Telegraf): void {
               wbCode:        dirCode,
               isDirectOrder: true,
               orderSource:   "DIRECT",
+              saleAmountKopecks: intent.rublePrice * 100,
               paymentDetails: "СБП QR",
             },
           });
@@ -4678,6 +4685,7 @@ export function registerCallbacks(bot: Telegraf): void {
               wbCode:        dirCode,
               isDirectOrder: true,
               orderSource:   "DIRECT",
+              saleAmountKopecks: intent.rublePrice * 100,
             },
           });
           await tx.directIntent.update({ where: { id: intentId }, data: { status: "CONSUMED" } });

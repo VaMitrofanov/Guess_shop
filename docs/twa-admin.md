@@ -26,21 +26,30 @@ ambient-подсветка, полупрозрачные слои, крупны�
 Контентный flex-child имеет `min-height: 0`, tab bar — `flex: 0 0 auto`; нижний отступ берёт
 максимум из browser safe-area и `--tg-content-safe-area-inset-bottom`.
 
-> **Зафиксированная граница текущего релиза:** бизнес-логика и внутренняя информационная
-> архитектура вкладок **«Заказы» (`OrdersScreen`) и «Аккаунт» (`BossrobuxScreen`) не
-> меняются**. Сейчас они получают только общий shell/палитру. Их глубокий UX/UI-редизайн
-> выполняется позже отдельной задачей с отдельной приёмкой, чтобы не затронуть выкуп,
-> возвраты, заявки, сортировки и партнёрские операции.
+Глубокий редизайн реализован: TWA открывается с Главной, результат умного поиска появляется
+только после ввода, обычная карточка заказа трёхстрочная и раскрываемая, история плоская и
+постраничная, слив свёрнут в одну строку. Полный контракт и release gate — в
+[twa-design-redesign-plan.md](twa-design-redesign-plan.md).
 
-Глубокий UX/UI-редизайн этой отдельной задачей теперь проработан и ожидает подтверждения
-владельца: целевая навигация `Главная / Заказы / Аккаунт / Ещё`, единый поиск на главной,
-полное Order Intelligence-досье найденного заказа, compact cards, новая история с точной
-прибылью DIRECT/AVITO и компактный слив. Полный
-контракт, порядок миграций и release gates — в
-[twa-design-redesign-plan.md](twa-design-redesign-plan.md). До подтверждения план не меняет
-текущую production-реализацию.
+### Умный поиск и Order Intelligence
 
-Проверка релиза: web TypeScript, bot TypeScript, 109 Jest-тестов и production build.
+- `GET /api/twa/search?q=` ищет заказ по коду/ID, `@username`, TG/VK ID, Roblox-нику,
+  gamepass URL/ID и параллельно возвращает live Roblox gamepasses.
+- Частичный сбой Roblox попадает в `partialErrors[]` и не скрывает результаты БД.
+- `GET /api/twa/orders/[id]/intelligence` объединяет заказ, verified identities,
+  gamepass live-state, payments/refunds, immutable money snapshots, fulfillment, события,
+  связанные заказы и warnings в `FULL|PARTIAL` dossier.
+- Cookie, токены и сырые секреты в response не входят; оба endpoint защищены TWA JWT.
+
+### Точная прибыль DIRECT/AVITO
+
+AVITO требует цену продажи в рублях. DIRECT переносит цену из заявки. При завершении новых
+заказов фиксируются `saleAmountKopecks`, `purchaseRobuxAmount`, `purchaseRateUsdPer1k`,
+`purchaseUsdToRub`, `purchaseCostKopecks`, `profitKopecks`. Legacy без цены продажи показывает
+`нет точных данных`. До запуска нового Prisma Client обязательна миграция
+`20260713_twa_order_profit_snapshots`.
+
+Проверка baseline-релиза: web TypeScript, bot TypeScript, Jest и production build.
 Новые компоненты `BottomNav`, `Dashboard`, `StatCard` и `theme` проходят ESLint отдельно;
 полный legacy TWA lint пока сохраняет ранее существовавшие нарушения в больших
 `OrdersScreen`/`SettingsScreen` (их исправление не смешивается с этим визуальным релизом).

@@ -310,9 +310,15 @@ model WbOrder {
   webIdempotencyKey      String?          @unique
   adminId                String?
   rejectionReason        String?
-  /// Snapshot of the purchase rate ($ per 1000 R$) at the time of fulfillment.
-  /// Allows accurate historical profit calculations.
+  /// Legacy alias: snapshot of the purchase rate in USD per 1000 R$.
   purchaseRate           Float?
+  /// Immutable money snapshots for exact DIRECT/AVITO history.
+  saleAmountKopecks      Int?
+  purchaseRobuxAmount    Int?
+  purchaseRateUsdPer1k   Float?
+  purchaseUsdToRub       Float?
+  purchaseCostKopecks    Int?
+  profitKopecks          Int?
   isDirectOrder          Boolean          @default(false)
   orderSource            OrderSource      @default(WB)
   isTest                 Boolean          @default(false)
@@ -513,7 +519,7 @@ model RateSnapshot {
 model GlobalSettings {
   id                    String    @id @default("global")
   usdToRub              Float
-  /// Manual purchase rate in ₽ per R$ — set by admin via bot.
+  /// Manual purchase rate in USD per 1000 R$ — set by admin via bot/TWA.
   purchaseRate          Float?
   lastUpdated           DateTime  @updatedAt
   autoBuyEnabled        Boolean   @default(false)

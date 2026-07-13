@@ -5,6 +5,7 @@ import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepass
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
 import { needsOwnershipCheck, verifyOwnershipAfterFailure } from "@/lib/roblox-buyout";
 import { checkGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
+import { buildOrderProfitSnapshot } from "@/lib/order-profit";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
@@ -371,7 +372,14 @@ export async function GET(req: NextRequest) {
 
   // ATTENTION отдаётся одним куском (до ATTENTION_TAKE) — пагинации нет.
   const pages = tab === "ATTENTION" ? 1 : Math.ceil(finalTotal / limit);
-  return NextResponse.json({ orders, total: finalTotal, counts, sums, oldest, page, pages });
+  const profitSummary = tab === "DONE" && !skipCounts
+    ? await (prisma as any).wbOrder.aggregate({
+        where,
+        _sum: { profitKopecks: true },
+        _count: { profitKopecks: true },
+      })
+    : null;
+  return NextResponse.json({ orders, total: finalTotal, counts, sums, oldest, profitSummary, page, pages });
 }
 
 function tabTotal(tab: string, counts: Record<string, number>): number {
@@ -454,8 +462,11 @@ export async function POST(req: NextRequest) {
 
   if (action === "create-avito") {
     const { amount, gamepassUrl, robloxUsername, note } = body;
+    const saleRubles = Number(body.saleRubles);
     if (!amount || typeof amount !== "number" || amount < 1)
       return NextResponse.json({ error: "amount обязателен (число > 0)" }, { status: 400 });
+    if (!Number.isFinite(saleRubles) || saleRubles <= 0)
+      return NextResponse.json({ error: "saleRubles обязателен для точной прибыли Авито" }, { status: 400 });
 
     // Дедуп: на этот геймпасс уже есть активный заказ → 409, пока менеджер
     // явно не подтвердит повтор (force: true). COMPLETED/REJECTED не блокируют.
@@ -500,6 +511,7 @@ export async function POST(req: NextRequest) {
         wbCode: code,
         isDirectOrder: false,
         orderSource: "AVITO",
+        saleAmountKopecks: Math.round(saleRubles * 100),
         adminNote: note || null,
         pendingAt: gamepassUrl ? new Date() : null,
         purchaserUsername: settings?.robloxAccountName ?? null,
@@ -896,6 +908,7 @@ export async function POST(req: NextRequest) {
       const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
       data.purchaseRate = settings?.purchaseRate ?? null;
       data.completedAt = new Date(); // Ф6.3: базис таймера разблокировки робуксов
+      Object.assign(data, buildOrderProfitSnapshot(order, settings ?? {}, Math.ceil(order.amount / 0.7)) ?? {});
     }
     if ((target === "BUYOUT" || target === "DIRECT" || target === "AVITO") && !order.pendingAt) {
       data.pendingAt = new Date();
@@ -912,9 +925,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Order must be PENDING, IN_PROGRESS or ERROR" }, { status: 400 });
     const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
     const currentRate = settings?.purchaseRate ?? null;
+    const purchaseRobux = Math.ceil(order.amount / 0.7);
+    const money = buildOrderProfitSnapshot(order, settings ?? {}, purchaseRobux);
     await (prisma as any).wbOrder.update({
       where: { id: orderId },
-      data:  { status: "COMPLETED", purchaseRate: currentRate, completedAt: new Date() },
+      data:  { status: "COMPLETED", purchaseRate: currentRate, completedAt: new Date(), ...(money ?? {}) },
     });
     cachedCounts = null;
     notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder).catch(() => {});
@@ -1053,9 +1068,10 @@ export async function POST(req: NextRequest) {
     if (purchased) {
       const currentRate = settings?.purchaseRate ?? null;
       const purchaserUsername = settings?.robloxAccountName ?? null;
+      const money = buildOrderProfitSnapshot(order, settings ?? {}, Number(purchaseData?.price ?? price));
       await (prisma as any).wbOrder.updateMany({
         where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
-        data: { status: "COMPLETED", purchaseRate: currentRate, purchaserUsername, completedAt: new Date() },
+        data: { status: "COMPLETED", purchaseRate: currentRate, purchaserUsername, completedAt: new Date(), ...(money ?? {}) },
       });
       cachedCounts = null;
       notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder ?? false).catch(() => {});

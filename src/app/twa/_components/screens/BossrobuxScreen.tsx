@@ -792,6 +792,9 @@ interface TxOrder {
   orderSource: "WB" | "DIRECT" | "AVITO" | "MANUAL" | "SITE";
   createdAt: string;
   updatedAt: string;
+  saleAmountKopecks: number | null;
+  purchaseCostKopecks: number | null;
+  profitKopecks: number | null;
   user: { tgId: string | null; vkId: string | null; name: string | null; username: string | null };
 }
 
@@ -800,9 +803,7 @@ const TX_SOURCE_CHIPS: { id: TxSourceFilter; label: string; color: string }[] = 
   { id: "ALL",    label: "Все",     color: C.textPrimary },
   { id: "WB",     label: "WB",      color: C.green },
   { id: "DIRECT", label: "Прямой",  color: C.blue },
-  { id: "SITE",   label: "Сайт",    color: C.blue },
   { id: "AVITO",  label: "Авито",   color: C.orange },
-  { id: "MANUAL", label: "Ручные",  color: C.textTertiary },
 ];
 
 const TX_SOURCE_BADGE: Record<string, { label: string; color: string }> = {
@@ -1011,53 +1012,43 @@ function PurchaserAccordion({ group }: { group: PurchaserGroup }) {
 
 function TransactionHistory({ token }: { token: string }) {
   const [orders, setOrders] = useState<TxOrder[]>([]);
-  const [drains, setDrains] = useState<DrainEv[]>([]);
   const [loading, setLoading] = useState(true);
-  const [doneCount, setDoneCount] = useState(0);
-  const [loadedAll, setLoadedAll] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [profitSummary, setProfitSummary] = useState<{ kopecks: number; exactCount: number }>({ kopecks: 0, exactCount: 0 });
   const [sourceFilter, setSourceFilter] = useState<TxSourceFilter>("ALL");
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (nextPage = 1, append = false) => {
+    if (append) setLoadingMore(true); else setLoading(true);
     try {
-      // Сливы (DrainEvent) — параллельно с заказами, не блокируют историю.
-      fetch("/api/twa/drain?events=1", { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.ok ? r.json() : null)
-        .then(j => { if (Array.isArray(j?.events)) setDrains(j.events); })
-        .catch(() => {});
-      let all: TxOrder[] = [];
-      let page = 1;
-      const limit = 50;
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const params = new URLSearchParams({
-          status: "DONE", limit: String(limit), page: String(page), lite: "1",
-          ...(page === 1 ? {} : { skipCounts: "1" }),
-        });
-        const r = await fetch(`/api/twa/orders?${params}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!r.ok) break;
-        const d = await r.json();
-        const batch: TxOrder[] = d.orders ?? [];
-        if (page === 1) setDoneCount(d.counts?.DONE ?? d.total ?? batch.length);
-        all = all.concat(batch);
-        if (batch.length < limit) break;
-        page++;
-      }
-      setOrders(all);
-      setLoadedAll(true);
+      const params = new URLSearchParams({ status: "DONE", limit: "20", page: String(nextPage), lite: "1" });
+      if (sourceFilter !== "ALL") params.set("source", sourceFilter);
+      if (append) params.set("skipCounts", "1");
+      const response = await fetch(`/api/twa/orders?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!response.ok) return;
+      const data = await response.json();
+      const batch: TxOrder[] = data.orders ?? [];
+      setOrders(previous => append ? [...previous, ...batch] : batch);
+      setPage(nextPage);
+      setPages(data.pages ?? (batch.length === 20 ? nextPage + 1 : nextPage));
+      if (!append) setTotal(data.total ?? batch.length);
+      if (!append) setProfitSummary({
+        kopecks: Number(data.profitSummary?._sum?.profitKopecks ?? 0),
+        exactCount: Number(data.profitSummary?._count?.profitKopecks ?? 0),
+      });
     } catch {}
-    finally { setLoading(false); }
-  }, [token]);
+    finally { setLoading(false); setLoadingMore(false); }
+  }, [token, sourceFilter]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { setOrders([]); load(1, false); }, [load]);
 
   if (loading) return (
     <div style={{ background: C.card, borderRadius: 14, height: 80, animation: "pulse 1.5s ease-in-out infinite" }} />
   );
 
-  if (orders.length === 0 && drains.length === 0) return (
+  if (orders.length === 0) return (
     <Card>
       <div style={{ padding: "24px 16px", textAlign: "center" }}>
         <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
@@ -1066,21 +1057,10 @@ function TransactionHistory({ token }: { token: string }) {
     </Card>
   );
 
-  const sc = txCountBySource(orders);
-  const hasMultipleSources = (Object.keys(sc) as TxSourceFilter[]).filter(k => k !== "ALL" && sc[k] > 0).length > 1;
-  const groups = buildGroups(orders, sourceFilter, drains);
-  const totalDirty = groups.reduce((s, g) => s + g.totalDirty, 0);
-  const totalDrain = groups.reduce((s, g) => s + g.drainTotal, 0);
-  const filteredCount = groups.reduce((s, g) => s + g.orders.length, 0);
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {/* Source filter chips */}
-      {hasMultipleSources && (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <div className="twa-no-scrollbar" style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 1 }}>
           {TX_SOURCE_CHIPS.map(chip => {
-            const cnt = sc[chip.id];
-            if (chip.id !== "ALL" && cnt === 0) return null;
             const isActive = sourceFilter === chip.id;
             return (
               <button
@@ -1098,19 +1078,10 @@ function TransactionHistory({ token }: { token: string }) {
                 }}
               >
                 {chip.label}
-                {cnt > 0 && (
-                  <span style={{
-                    fontSize: 11, fontWeight: 700,
-                    background: isActive ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.12)",
-                    color: "#fff", padding: "2px 6px", borderRadius: 999,
-                    ...tabular,
-                  }}>{cnt}</span>
-                )}
               </button>
             );
           })}
-        </div>
-      )}
+      </div>
 
       {/* Summary */}
       <div style={{
@@ -1118,22 +1089,30 @@ function TransactionHistory({ token }: { token: string }) {
         padding: "10px 14px", background: tint(C.accent, 0.08), borderRadius: 12,
       }}>
         <span style={{ fontSize: 14, color: C.textSecondary }}>
-          {pluralPurchases(filteredCount)} · {groups.length} акк.
+          {total} покупок · показано {orders.length}
         </span>
         <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
           <span style={{ fontSize: 15, fontWeight: 600, color: C.accent, ...tabular }}>
-            − {totalDirty.toLocaleString("ru-RU")} R$
+            {profitSummary.exactCount > 0 ? `${profitSummary.kopecks >= 0 ? "+" : ""}${(profitSummary.kopecks / 100).toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₽` : "Точных данных нет"}
           </span>
-          {totalDrain > 0 && (
-            <span style={{ fontSize: 12, color: C.blue, ...tabular }}>
-              💧 из них слив: {totalDrain.toLocaleString("ru-RU")} R$
-            </span>
-          )}
+          <span style={{ fontSize: 11, color: C.textTertiary }}>точная прибыль · {profitSummary.exactCount} заказов</span>
         </span>
       </div>
 
-      {/* Seller groups */}
-      {groups.map(g => <PurchaserAccordion key={g.purchaser} group={g} />)}
+      <div className="twa-history-list">
+        {orders.map(order => {
+          const badge = TX_SOURCE_BADGE[order.orderSource] ?? TX_SOURCE_BADGE.MANUAL;
+          const username = order.user.username ? `@${order.user.username}` : order.user.name ?? "—";
+          return (
+            <div className="twa-history-row" key={order.id}>
+              <div className="twa-history-primary"><strong>{order.robloxUsername ?? "Ник не указан"}</strong><b>{order.amount.toLocaleString("ru-RU")} R$</b></div>
+              <div className="twa-history-secondary"><code>{order.wbCode}</code><span>{username}</span><em style={{ color: badge.color }}>{badge.label}</em></div>
+              <div className="twa-history-tertiary"><span>{fmtTxDate(order.updatedAt)}</span>{(order.orderSource === "DIRECT" || order.orderSource === "AVITO") && <b style={{ color: order.profitKopecks == null ? C.textTertiary : order.profitKopecks >= 0 ? C.green : C.red }}>{order.profitKopecks == null ? "нет точных данных" : `${order.profitKopecks >= 0 ? "+" : ""}${(order.profitKopecks / 100).toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₽`}</b>}</div>
+            </div>
+          );
+        })}
+      </div>
+      {page < pages && <button type="button" className="twa-primary-row twa-press" disabled={loadingMore} onClick={() => load(page + 1, true)}>{loadingMore ? "Загружаем…" : "Показать ещё"}</button>}
     </div>
   );
 }
@@ -1144,6 +1123,7 @@ function TransactionHistory({ token }: { token: string }) {
 function CreateAvitoSection({ token, onCreated }: { token: string; onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
+  const [saleRubles, setSaleRubles] = useState("");
   const [gpInput, setGpInput] = useState("");
   const [nick, setNick] = useState("");
   const [note, setNote] = useState("");
@@ -1153,7 +1133,9 @@ function CreateAvitoSection({ token, onCreated }: { token: string; onCreated: ()
 
   async function submit(force = false) {
     const amt = parseInt(amount, 10);
+    const sale = Number(saleRubles.replace(",", "."));
     if (!amt || amt < 1) { haptic.notify("error"); toast("Укажи сумму R$", "error"); return; }
+    if (!Number.isFinite(sale) || sale <= 0) { haptic.notify("error"); toast("Укажи цену продажи в ₽", "error"); return; }
     setSaving(true);
     try {
       let gamepassUrl: string | null = null;
@@ -1170,6 +1152,7 @@ function CreateAvitoSection({ token, onCreated }: { token: string; onCreated: ()
         body: JSON.stringify({
           action: "create-avito",
           amount: amt,
+          saleRubles: sale,
           gamepassUrl,
           robloxUsername: nick.trim() || null,
           note: note.trim() || null,
@@ -1185,7 +1168,7 @@ function CreateAvitoSection({ token, onCreated }: { token: string; onCreated: ()
       if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
       haptic.notify("success");
       toast(`Заказ Авито создан · ${amt} R$`, "success");
-      setAmount(""); setGpInput(""); setNick(""); setNote(""); setDup(null);
+      setAmount(""); setSaleRubles(""); setGpInput(""); setNick(""); setNote(""); setDup(null);
       setOpen(false);
       onCreated();
     } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
@@ -1230,6 +1213,17 @@ function CreateAvitoSection({ token, onCreated }: { token: string; onCreated: ()
               flex: 1, background: C.elevated, border: "none", borderRadius: 10,
               color: "#fff", fontSize: 16, padding: "12px 14px",
               outline: "none", fontFamily: "inherit", boxSizing: "border-box",
+            }}
+          />
+          <input
+            value={saleRubles}
+            onChange={e => setSaleRubles(e.target.value.replace(/[^\d.,]/g, ""))}
+            placeholder="Продали, ₽"
+            inputMode="decimal"
+            style={{
+              flex: 1, background: C.elevated, border: "none", borderRadius: 10,
+              color: "#fff", fontSize: 16, padding: "12px 14px",
+              outline: "none", fontFamily: "inherit", boxSizing: "border-box", minWidth: 0,
             }}
           />
         </div>
@@ -1281,12 +1275,12 @@ function CreateAvitoSection({ token, onCreated }: { token: string; onCreated: ()
         <button
           className="twa-press"
           onClick={() => submit(!!dup)}
-          disabled={saving || !amount.trim()}
+          disabled={saving || !amount.trim() || !saleRubles.trim()}
           style={{
             width: "100%", padding: "14px", border: "none", borderRadius: 12,
-            background: amount.trim() ? C.orange : C.elevated,
+            background: amount.trim() && saleRubles.trim() ? C.orange : C.elevated,
             color: "#fff", fontSize: 16, fontWeight: 600, cursor: saving ? "default" : "pointer",
-            opacity: saving || !amount.trim() ? 0.5 : 1,
+            opacity: saving || !amount.trim() || !saleRubles.trim() ? 0.5 : 1,
             fontFamily: "inherit", transition: "all 0.2s",
           }}
         >
@@ -3982,6 +3976,7 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
   const [todayStats, setTodayStats] = useState<{ count: number; dirty: number; errorCount: number } | null>(null);
   const [lastDrain, setLastDrain] = useState<{ amount: number; createdAt: string } | null>(null);
   const [showTxHistory, setShowTxHistory] = useState(false);
+  const [showDrain, setShowDrain] = useState(false);
   const queueRef = useRef<HTMLElement | null>(null);
   const drainRef = useRef<HTMLElement | null>(null);
 
@@ -4002,7 +3997,7 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
   // ➕ из результата поиска: ручной заказ с предзаполненным геймпассом.
   const [manualGp, setManualGp] = useState<GamepassItem | null>(null);
   // Дедуп Авито: сервер ответил 409 — на геймпасс уже есть активный заказ.
-  const [avitoDup, setAvitoDup] = useState<{ gp: GamepassItem; existing: { wbCode: string; status: string } } | null>(null);
+  const [avitoDup, setAvitoDup] = useState<{ gp: GamepassItem; saleRubles: number; existing: { wbCode: string; status: string } } | null>(null);
   const [buyoutKey, setBuyoutKey] = useState(0);
   const [buying, setBuying] = useState(false);
   const [boughtIds, setBoughtIds] = useState<Set<number>>(new Set());
@@ -4213,8 +4208,16 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
   }
 
   // ── Create Avito from search result ─────────────────────────────────────
-  async function createAvitoFromSearch(gp: GamepassItem, force = false) {
+  async function createAvitoFromSearch(gp: GamepassItem, force = false, knownSaleRubles?: number) {
     if (creatingAvito) return;
+    const entered = knownSaleRubles === undefined ? window.prompt("За сколько продали на Авито, ₽?", "") : String(knownSaleRubles);
+    if (entered === null) return;
+    const saleRubles = Number(entered.replace(",", "."));
+    if (!Number.isFinite(saleRubles) || saleRubles <= 0) {
+      haptic.notify("error");
+      toast("Нужна цена продажи в ₽", "error");
+      return;
+    }
     setCreatingAvito(true);
     try {
       const amount = Math.floor(gp.price * 0.7);
@@ -4224,6 +4227,7 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
         body: JSON.stringify({
           action: "create-avito",
           amount,
+          saleRubles,
           gamepassUrl,
           robloxUsername: gp.sellerName || null,
           note: null,
@@ -4234,7 +4238,7 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
       // Дедуп: на этот геймпасс уже есть активный заказ → спрашиваем менеджера.
       if (r.status === 409 && d.existing) {
         haptic.notify("warning");
-        setAvitoDup({ gp, existing: d.existing });
+        setAvitoDup({ gp, saleRubles, existing: d.existing });
         return;
       }
       if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
@@ -4378,7 +4382,7 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
                       ? `остаток ${info.balance.toLocaleString("ru-RU")} R$`
                       : lastDrain ? `слив ${fmtPartnerDate(lastDrain.createdAt)}` : "сливов ещё не было"
                   }
-                  onClick={() => scrollToSection(drainRef)}
+                  onClick={() => { setShowDrain(true); window.setTimeout(() => scrollToSection(drainRef), 0); }}
                 />
               </div>
             </Card>
@@ -4539,11 +4543,17 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
 
       {/* ── Слив остатка донора → мой аккаунт ────────────────────────────── */}
       <section ref={drainRef}>
-        <SectionHeader title="Слив остатка" />
-        <DrainSection
-          token={token}
-          onDonorBalance={(b) => setInfo(prev => prev ? { ...prev, balance: b } : prev)}
-        />
+        <button type="button" className="twa-drain-summary twa-press-sm" onClick={() => { haptic.select(); setShowDrain(value => !value); }}>
+          <span className="twa-result-icon">💧</span>
+          <span><strong>Слив остатка</strong><small>{info?.accountName ?? "Донор не определён"} · {info?.balance == null ? "баланс —" : `${info.balance.toLocaleString("ru-RU")} R$`} · {lastDrain ? `последний ${lastDrain.amount.toLocaleString("ru-RU")} R$ ${fmtPartnerDate(lastDrain.createdAt)}` : "сливов ещё не было"}</small></span>
+          <span>{showDrain ? "⌃" : "⌄"}</span>
+        </button>
+        {showDrain && <div className="twa-fade-up" style={{ marginTop: 10 }}>
+          <DrainSection
+            token={token}
+            onDonorBalance={(b) => setInfo(prev => prev ? { ...prev, balance: b } : prev)}
+          />
+        </div>}
       </section>
 
       {/* ── Transaction History — аккордеон: грузит ВСЕ страницы DONE,
@@ -4634,7 +4644,7 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
               </button>
               <button
                 className="twa-press"
-                onClick={() => { const gp = avitoDup.gp; setAvitoDup(null); createAvitoFromSearch(gp, true); }}
+                onClick={() => { const { gp, saleRubles } = avitoDup; setAvitoDup(null); createAvitoFromSearch(gp, true, saleRubles); }}
                 disabled={creatingAvito}
                 style={{
                   flex: 1, padding: "12px 0", border: "none", borderRadius: 10,

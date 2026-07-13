@@ -1008,6 +1008,7 @@ function OrderCard({
   const [editOpen, setEditOpen] = useState(false);
   const [rebindOpen, setRebindOpen] = useState(false);
   const [refundOpen, setRefundOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   // GP-watch: локально трекаем «клиент оповещён об этом ГП» — сервер после
   // «Оповестить» отдаёт свежий passId, перезагрузка вкладки не нужна.
   const [gpwPassId, setGpwPassId] = useState<string | null>(order.gpWatchNotifiedPassId);
@@ -1073,6 +1074,39 @@ function OrderCard({
       boxShadow: SHADOW.card,
       position: "relative",
     }}>
+      <button
+        type="button"
+        className="twa-compact-order twa-press-sm"
+        aria-expanded={expanded}
+        onClick={() => { haptic.select(); setExpanded(value => !value); }}
+      >
+        <span className="twa-compact-order-top">
+          <b style={{ color: tabBadge?.color ?? SOURCE_BADGE_META[order.orderSource]?.color ?? C.accent }}>
+            {tabBadge?.label ?? SOURCE_BADGE_META[order.orderSource]?.label ?? order.orderSource}
+          </b>
+          <small>{fmtAge(timeRef)}</small>
+          <i>{expanded ? "⌃" : "⌄"}</i>
+        </span>
+        <span className="twa-compact-order-main">
+          <strong>{order.robloxUsername ?? order.probableNick ?? "Ник не указан"}</strong>
+          <b>{displayAmount.toLocaleString("ru-RU")} <small>R$</small></b>
+        </span>
+        <span className="twa-compact-order-meta">
+          <span>{shortName}</span>
+          <code>{order.wbCode}</code>
+          {showCleanHint && <span>{order.amount.toLocaleString("ru-RU")} чистыми</span>}
+        </span>
+        {(live?.priceMismatch || live?.isForSale === false || order.vkUnreachable || order.gpWatchDeclinedAt || order.status === "ERROR") && (
+          <span className="twa-compact-warning">
+            {live?.priceMismatch ? `Цена пасса ${live.livePrice} R$ ≠ ${live.expected} R$` :
+              live?.isForSale === false ? "Геймпасс снят с продажи" :
+                order.vkUnreachable ? "VK недоступен — написать вручную" :
+                  order.gpWatchDeclinedAt ? "Клиент отклонил найденный ник" : "Заказ требует исправления"}
+          </span>
+        )}
+      </button>
+
+      {expanded && <>
       {/* Header: platform badge + nick + star */}
       <div style={{ padding: "14px 16px 0", display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
@@ -1404,6 +1438,7 @@ function OrderCard({
         onRunAction={onRunAction}
         onPurchaseDone={onPurchaseDone}
       />
+      </>}
     </article>
   );
 }

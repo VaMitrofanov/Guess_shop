@@ -68,7 +68,12 @@ const SCREEN_PARENT: Partial<Record<Screen, Screen>> = {
 export default function TwaApp() {
   const [auth,               setAuth]               = useState<"loading" | "ok" | "error">("loading");
   const [token,              setToken]              = useState<string | null>(null);
-  const [screen,             setScreen]             = useState<Screen>("orders");
+  const [screen,             setScreen]             = useState<Screen>(() => {
+    if (typeof window === "undefined") return "dashboard";
+    const q = new URLSearchParams(window.location.search).get("q");
+    const start = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
+    return q || start ? "orders" : "dashboard";
+  });
   const [debugMsg,           setDebugMsg]           = useState("");
   const [ordersBadge,        setOrdersBadge]        = useState(0);
   // Pre-focus the Orders search when launched via admin notification deep-link.
@@ -311,7 +316,10 @@ export default function TwaApp() {
 
       {/* Content */}
       <div className="twa-liquid-content" style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
-        {screen === "dashboard"  && <Dashboard      {...sp} onOpenOrders={() => setScreen("orders")} />}
+        {screen === "dashboard"  && <Dashboard      {...sp}
+          onOpenOrders={(query) => { setOrderQueryPreload(query ?? ""); setScreen("orders"); }}
+          onOpenAccount={() => setScreen("account")}
+        />}
         {screen === "orders"     && <OrdersScreen   {...sp} onActionDone={refreshBadge} initialQuery={orderQueryPreload} initialTab={ordersTabPreload} onInitialQueryConsumed={() => { setOrderQueryPreload(""); setOrdersTabPreload(""); }} />}
         {screen === "wb"         && <WbScreen       {...sp} />}
         {screen === "account"    && <AccountScreen  {...sp} onOpenErrors={() => { setOrdersTabPreload("ERROR"); setScreen("orders"); }} />}
