@@ -8,6 +8,7 @@ import {
   expectedGamepassPrice,
   checkGamepassPrice,
   hasRegionalPrice,
+  matchesRegionalPriceOverride,
   sellerMatchesOrder,
 } from "../lib/purchase-guard";
 
@@ -76,6 +77,29 @@ describe("hasRegionalPrice — жёсткий стоп региональной 
   test("равная или отсутствующая base-цена не считается региональной", () => {
     expect(hasRegionalPrice(1429, 1429)).toBe(false);
     expect(hasRegionalPrice(1429, null)).toBe(false);
+  });
+});
+
+describe("matchesRegionalPriceOverride — разовый payout experiment", () => {
+  const context = { orderCode: "TEST-ORDER", buyerPrice: 2573, basePrice: 2858 };
+
+  test("принимает только точное подтверждение кода и свежих цен", () => {
+    expect(matchesRegionalPriceOverride({
+      mode: "PAYOUT_EXPERIMENT",
+      orderCode: "test-order",
+      buyerPrice: 2573,
+      basePrice: 2858,
+    }, context)).toBe(true);
+  });
+
+  test.each([
+    [{ mode: "PAYOUT_EXPERIMENT", orderCode: "OTHER", buyerPrice: 2573, basePrice: 2858 }],
+    [{ mode: "PAYOUT_EXPERIMENT", orderCode: "TEST-ORDER", buyerPrice: 2572, basePrice: 2858 }],
+    [{ mode: "PAYOUT_EXPERIMENT", orderCode: "TEST-ORDER", buyerPrice: 2573, basePrice: 2857 }],
+    [{ mode: "NORMAL", orderCode: "TEST-ORDER", buyerPrice: 2573, basePrice: 2858 }],
+    [null],
+  ])("отклоняет неполное или устаревшее подтверждение: %p", (request) => {
+    expect(matchesRegionalPriceOverride(request, context)).toBe(false);
   });
 });
 

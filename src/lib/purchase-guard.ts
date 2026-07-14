@@ -11,9 +11,36 @@
 export const PRICE_TOL = 2;
 export const BUYOUT_ERROR_REGIONAL_PRICE = "REGIONAL_PRICE";
 
+export type RegionalPriceOverrideContext = {
+  orderCode: string;
+  buyerPrice: number;
+  basePrice: number;
+};
+
+/**
+ * Deliberately narrow escape hatch for a supervised payout experiment.
+ *
+ * The TWA route is admin-authenticated, but the caller must still echo the
+ * exact order code and the two prices fetched immediately before purchase.
+ * This keeps a stale tab, an ordinary button press, a batch, and bot workers
+ * from silently opting into regional pricing.
+ */
+export function matchesRegionalPriceOverride(
+  request: unknown,
+  context: RegionalPriceOverrideContext,
+): boolean {
+  if (!request || typeof request !== "object" || Array.isArray(request)) return false;
+  const value = request as Record<string, unknown>;
+  return value.mode === "PAYOUT_EXPERIMENT"
+    && typeof value.orderCode === "string"
+    && value.orderCode.trim().toUpperCase() === context.orderCode.trim().toUpperCase()
+    && value.buyerPrice === context.buyerPrice
+    && value.basePrice === context.basePrice;
+}
+
 export const expectedGamepassPrice = (amount: number): number => Math.ceil(amount / 0.7);
 
-/** Regional/Managed Pricing is active for this donor account. Never buy it. */
+/** Regional/Managed Pricing is active for this donor account. Stop by default. */
 export function hasRegionalPrice(livePrice: number, userBasePrice?: number | null): boolean {
   return Number.isFinite(livePrice)
     && Number.isFinite(userBasePrice)

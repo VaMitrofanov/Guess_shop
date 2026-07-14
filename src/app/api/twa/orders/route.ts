@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing, notifyRegionalPriceNeeded } from "@/lib/twa-notify";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
 import { BuyoutError, needsOwnershipCheck, resolveGamepassForBuyer, verifyGamepassOwnership, verifyOwnershipAfterFailure, type ResolvedGamepass } from "@/lib/roblox-buyout";
-import { BUYOUT_ERROR_REGIONAL_PRICE, checkGamepassPrice, hasRegionalPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
+import { BUYOUT_ERROR_REGIONAL_PRICE, checkGamepassPrice, hasRegionalPrice, matchesRegionalPriceOverride, sellerMatchesOrder } from "@/lib/purchase-guard";
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
@@ -1024,7 +1024,9 @@ export async function POST(req: NextRequest) {
     if (!cookie) return NextResponse.json({ error: "Cookie не задан. /setcookie в боте" }, { status: 400 });
 
     // Fetch donor-specific info immediately before purchase. A regional price
-    // is never purchased: first try another full-price pass of the same nick.
+    // normally triggers a full-price replacement search. The only bypass is a
+    // supervised, admin-authenticated payout experiment that echoes the exact
+    // order code and both freshly fetched prices.
     let info: ResolvedGamepass;
     try {
       info = await resolveGamepassForBuyer(gpId, cookie);
@@ -1037,7 +1039,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Геймпасс не на продаже" }, { status: 400 });
 
     const stamp = new Date().toISOString().slice(0, 10);
-    if (hasRegionalPrice(info.price, info.basePriceInRobux)) {
+    const regionalPrice = hasRegionalPrice(info.price, info.basePriceInRobux);
+    const regionalOverride = regionalPrice && matchesRegionalPriceOverride(
+      body.regionalPriceOverride,
+      { orderCode: order.wbCode, buyerPrice: info.price, basePrice: info.basePriceInRobux },
+    );
+    if (regionalPrice && !regionalOverride) {
       const original = info;
       const replacement = await findFullPriceReplacement(order, cookie, gpId);
       if (!replacement) {
@@ -1077,11 +1084,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (regionalOverride) {
+      await appendAdminNote(
+        orderId,
+        `[РЕГ-ТЕСТ ${stamp} от ${twaUser.firstName}] GP ${gpId}: явный разовый override ${info.price}/${info.basePriceInRobux} R$`,
+      );
+    }
+
     const price = info.price;
     const base = info.basePriceInRobux;
     const creatorId = info.sellerId;
     const creatorName: string | null = info.sellerName;
-    if (order.buyoutErrorCode === BUYOUT_ERROR_REGIONAL_PRICE) {
+    if (!regionalOverride && order.buyoutErrorCode === BUYOUT_ERROR_REGIONAL_PRICE) {
       await (prisma as any).wbOrder.update({ where: { id: orderId }, data: { buyoutErrorCode: null } });
     }
 
@@ -1171,6 +1185,12 @@ export async function POST(req: NextRequest) {
         where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
         data: { status: "COMPLETED", buyoutErrorCode: null, purchaseRate: currentRate, purchaserUsername, completedAt: new Date(), ...(money ?? {}) },
       });
+      if (regionalOverride) {
+        await appendAdminNote(
+          orderId,
+          `[РЕГ-ТЕСТ-КУПЛЕНО ${stamp}] списано ${Number(purchaseData?.price ?? price)} R$, база ${base} R$, номинал ${order.amount} R$`,
+        );
+      }
       cachedCounts = null;
       notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder ?? false).catch(() => {});
       if (isAlreadyOwned) {
@@ -1179,7 +1199,14 @@ export async function POST(req: NextRequest) {
       if (recovered) {
         return NextResponse.json({ ok: true, success: true, msg: `Куплено (владение подтверждено проверкой после ошибки: ${canonicalReason ?? "нет ответа от Roblox"})` });
       }
-      return NextResponse.json({ ok: true, success: true, msg: `Куплено за ${purchaseData.price ?? price} R$` });
+      return NextResponse.json({
+        ok: true,
+        success: true,
+        regionalPriceOverride: regionalOverride,
+        chargedPrice: Number(purchaseData.price ?? price),
+        basePrice: base,
+        msg: `Куплено за ${purchaseData.price ?? price} R$`,
+      });
     }
 
     if (!purchaseData)
