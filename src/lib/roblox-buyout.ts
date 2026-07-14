@@ -128,6 +128,54 @@ export async function resolveGamepass(raw: string): Promise<ResolvedGamepass> {
   };
 }
 
+/**
+ * Resolves the price Roblox will charge a particular cookie account.
+ *
+ * Managed/Regional Pricing makes `PriceInRobux` depend on the authenticated
+ * buyer while `UserBasePriceInRobux` remains the seller's configured global
+ * price. Purchase paths must use this resolver immediately before POSTing to
+ * economy.roblox.com; public/roproxy product-info can otherwise cause a
+ * deterministic `PriceChanged` refusal.
+ *
+ * The Roblox cookie is sent only to the official Roblox origin, never to a
+ * proxy fallback.
+ */
+export async function resolveGamepassForBuyer(
+  raw: string,
+  cookie: string,
+): Promise<ResolvedGamepass> {
+  const gpId = parseGamepassId(raw);
+  if (!gpId) throw new BuyoutError("Невалидный ID геймпасса", 400);
+
+  const r = await fetch(
+    `https://apis.roblox.com/game-passes/v1/game-passes/${gpId}/product-info`,
+    {
+      headers: { ...ROBLOX_UA, Cookie: `.ROBLOSECURITY=${cookie}` },
+      signal: AbortSignal.timeout(8_000),
+      cache: "no-store",
+    },
+  ).catch(() => null);
+  if (!r?.ok) throw new BuyoutError("Не удалось получить персональную цену Roblox", 502);
+
+  const info = (await r.json().catch(() => null)) as RobloxProductInfo | null;
+  if (!info?.ProductId) throw new BuyoutError("Геймпасс не найден", 404);
+
+  const price = info.PriceInRobux ?? 0;
+  const base = info.UserBasePriceInRobux ?? price;
+  return {
+    gamepassId: Number(gpId),
+    productId: info.ProductId,
+    name: info.Name ?? "Gamepass",
+    price,
+    sellerName: info.Creator?.Name ?? "Unknown",
+    sellerId: info.Creator?.Id ?? info.Creator?.CreatorTargetId ?? 0,
+    isForSale: info.IsForSale ?? false,
+    isManagedPricing: price !== base,
+    basePriceInRobux: base,
+    image: null,
+  };
+}
+
 async function getBalance(cookie: string): Promise<number | null> {
   const bRes = await fetch("https://economy.roblox.com/v1/user/currency", {
     headers: { ...ROBLOX_UA, Cookie: `.ROBLOSECURITY=${cookie}` },

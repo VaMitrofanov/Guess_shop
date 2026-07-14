@@ -912,12 +912,18 @@ export interface GamepassProductInfo {
  */
 export async function getGamepassProductInfo(
   gamepassId: string,
+  buyerCookie?: string,
 ): Promise<GamepassProductInfo | null> {
   try {
     const res = await rFetch(
       `https://apis.roblox.com/game-passes/v1/game-passes/${gamepassId}/product-info`,
+      buyerCookie ? { headers: { Cookie: `.ROBLOSECURITY=${buyerCookie}` } } : {},
     );
     if (!res.ok) {
+      // Never send .ROBLOSECURITY to a proxy. For purchase paths a public
+      // fallback is unsafe too: it lacks the buyer-specific regional price
+      // and deterministically produces PriceChanged.
+      if (buyerCookie) return null;
       // Fallback to roproxy
       const rr = await rFetch(
         `https://apis.roproxy.com/game-passes/v1/game-passes/${gamepassId}/product-info`,

@@ -7,6 +7,7 @@ import {
   PRICE_TOL,
   expectedGamepassPrice,
   checkGamepassPrice,
+  hasRegionalPrice,
   sellerMatchesOrder,
 } from "../lib/purchase-guard";
 
@@ -54,8 +55,27 @@ describe("checkGamepassPrice — допуск ±PRICE_TOL", () => {
   });
 
   test("managed pricing: сверяется фактическое списание (PriceInRobux)", () => {
-    // Пасс создан за 715, но MP поднял фактическую цену — блок.
+    // Без UserBasePriceInRobux старый/public контракт остаётся строгим.
     expect(checkGamepassPrice(500, 793).ok).toBe(false);
+  });
+
+  test("regional pricing: базовая цена отдельно валидирует номинал", () => {
+    expect(checkGamepassPrice(1000, 1287, 1429)).toEqual({ ok: true, expected: 1429 });
+  });
+
+  test("regional pricing не маскирует неверную базовую цену", () => {
+    expect(checkGamepassPrice(1000, 1287, 1143)).toEqual({ ok: false, expected: 1429 });
+  });
+});
+
+describe("hasRegionalPrice — жёсткий стоп региональной цены", () => {
+  test("любое отличие buyer price от base включает стоп", () => {
+    expect(hasRegionalPrice(1287, 1429)).toBe(true);
+    expect(hasRegionalPrice(1428, 1429)).toBe(true);
+  });
+  test("равная или отсутствующая base-цена не считается региональной", () => {
+    expect(hasRegionalPrice(1429, 1429)).toBe(false);
+    expect(hasRegionalPrice(1429, null)).toBe(false);
   });
 });
 

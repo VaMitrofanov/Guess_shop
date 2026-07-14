@@ -23,6 +23,7 @@ interface Order {
   wbCode: string;
   rejectionReason: string | null;
   adminNote: string | null;
+  buyoutErrorCode: string | null;
   isDirectOrder: boolean;
   isFavorite: boolean;
   paymentDetails: string | null;
@@ -1097,7 +1098,8 @@ function OrderCard({
         </span>
         {(live?.priceMismatch || live?.isForSale === false || order.vkUnreachable || order.gpWatchDeclinedAt || order.status === "ERROR") && (
           <span className="twa-compact-warning">
-            {live?.priceMismatch ? `Цена пасса ${live.livePrice} R$ ≠ ${live.expected} R$` :
+            {order.buyoutErrorCode === "REGIONAL_PRICE" ? "Рег. цена — полная замена ГП не найдена" :
+              live?.priceMismatch ? `Цена пасса ${live.livePrice} R$ ≠ ${live.expected} R$` :
               live?.isForSale === false ? "Геймпасс снят с продажи" :
                 order.vkUnreachable ? "VK недоступен — написать вручную" :
                   order.gpWatchDeclinedAt ? "Клиент отклонил найденный ник" : "Заказ требует исправления"}
@@ -1248,6 +1250,13 @@ function OrderCard({
         {live?.isForSale === false && (
           <DataRow icon="⛔">
             <span style={{ color: C.red, fontWeight: 600 }}>геймпасс не на продаже</span>
+          </DataRow>
+        )}
+        {order.buyoutErrorCode === "REGIONAL_PRICE" && (
+          <DataRow icon="🌍">
+            <span style={{ color: C.red, fontWeight: 600 }}>
+              Рег. цена на доноре — автоматическая полная замена по нику не найдена
+            </span>
           </DataRow>
         )}
         {!order.isDirectOrder && (

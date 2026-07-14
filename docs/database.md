@@ -40,6 +40,8 @@ Release order строгий: сначала `npx prisma migrate deploy`, зат
 `platform` (`TG`/`VK`/`WEB`), `wbCode` (**@unique** — один заказ на код/публичный WEB-id), `userId`,
 `orderSource` (`WB`/`DIRECT`/`AVITO`/`MANUAL`/`SITE`), `isDirectOrder`, `isFavorite`, `isTest`,
 `adminNote` (только для админа), `robloxUsername` (продавец, **только подтверждённый** ник),
+`buyoutErrorCode` (структурированная причина `ERROR`; `REGIONAL_PRICE` = региональная цена
+на доноре и не найдена безопасная full-price замена),
 `purchaserUsername` (куки-аккаунт-покупатель), `purchaseRate` (снапшот закупки в $ за
 1000 R$ при выкупе), `saleAmountKopecks`, `purchaseRobuxAmount`,
 `purchaseRateUsdPer1k`, `purchaseUsdToRub`, `purchaseCostKopecks`, `profitKopecks`
@@ -187,6 +189,10 @@ B2B/partner-ops контур для сторонних выкупов, перв�
 нужен под idempotent ручной импорт `.xlsx` и будущий Google Sheets sync; индексы покрывают
 `partnerId+status`, `partnerId+updatedAt`, `gamepassId`. Для `.xlsx` бинарный файл не хранится:
 в `sheetRaw` сохраняются source/file/row metadata и исходные значения строки.
+
+`priceRobux` — согласованная глобальная/базовая цена продавца и база партнёрского ledger;
+`purchasePriceRobux` — фактически списанная цена Roblox. Региональную цену покупать запрещено,
+поэтому новый `purchase-task` при `PriceInRobux != UserBasePriceInRobux` завершается `FAILED`.
 Для Google Sheets `externalRowId` = `spreadsheetId:sheetTitle:rowNumber`; в `sheetRaw`
 сохраняются `spreadsheetId`, `sheetTitle`, `rowNumber`, `range`, исходные ячейки `A:F`, время
 sync и результат write-back (`writeBackAt` / `lastWriteBackError`), чтобы write-back и

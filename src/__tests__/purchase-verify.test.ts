@@ -5,6 +5,7 @@
  */
 import {
   needsOwnershipCheck as srcNeedsCheck,
+  resolveGamepassForBuyer,
   verifyGamepassOwnership as srcVerifyOwnership,
 } from "../lib/roblox-buyout";
 import {
@@ -132,5 +133,46 @@ describe("verifyGamepassOwnership (src-зеркало)", () => {
 
     authOk = false; // авторизация недоступна → null
     expect(await srcVerifyOwnership("cookie", 999)).toBe(null);
+  });
+});
+
+describe("resolveGamepassForBuyer (regional pricing)", () => {
+  test("читает buyer-specific цену с cookie, сохраняя базу продавца", async () => {
+    global.fetch = jest.fn(async (input: any, init?: RequestInit) => {
+      expect(String(input)).toContain("apis.roblox.com/game-passes/v1/game-passes/999/product-info");
+      expect(new Headers(init?.headers).get("Cookie")).toBe(".ROBLOSECURITY=secret-cookie");
+      return jsonResponse({
+        ProductId: 111,
+        PriceInRobux: 1287,
+        UserBasePriceInRobux: 1429,
+        Name: "Regional pass",
+        Creator: { Id: 42, Name: "Seller" },
+        IsForSale: true,
+      });
+    }) as any;
+
+    const gp = await resolveGamepassForBuyer("999", "secret-cookie");
+    expect(gp).toMatchObject({
+      productId: 111,
+      price: 1287,
+      basePriceInRobux: 1429,
+      isManagedPricing: true,
+      sellerId: 42,
+      isForSale: true,
+    });
+  });
+
+  test("не отправляет cookie в proxy fallback при ошибке official API", async () => {
+    const calls: string[] = [];
+    global.fetch = jest.fn(async (input: any) => {
+      calls.push(String(input));
+      return new Response("", { status: 503 });
+    }) as any;
+
+    await expect(resolveGamepassForBuyer("999", "secret-cookie"))
+      .rejects.toThrow("персональную цену Roblox");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("apis.roblox.com");
+    expect(calls[0]).not.toContain("roproxy");
   });
 });

@@ -22,11 +22,12 @@ import {
   type GoogleSheetsRequest,
   type GoogleSheetsValueUpdate,
 } from "@/lib/google-sheets";
-import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepass, type PurchaseResult } from "@/lib/roblox-buyout";
+import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepass, resolveGamepassForBuyer, type PurchaseResult } from "@/lib/roblox-buyout";
 import { notifyPartnerBuyout, type PartnerBuyoutNotifyItem } from "@/lib/partner-buyout-notify";
 import { partnerGamepassCommentValue, settledPartnerRowPolicy } from "@/lib/partner-sheet-policy";
 import { prisma } from "@/lib/prisma";
 import { extractTwaUser } from "@/lib/twa-auth";
+import { hasRegionalPrice } from "@/lib/purchase-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -2605,15 +2606,46 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       }
 
       const price = task.priceRobux ?? 0;
-      const productId = Number(task.productId);
-      const sellerId = Number(task.sellerId);
-      if (!price || !productId || !sellerId) {
+      if (!price || !task.gamepassId) {
         const failedTask = await prisma.partnerBuyoutTask.update({
           where: { id: task.id },
-          data: { status: "FAILED", error: "В задаче нет цены/productId/sellerId" },
+          data: { status: "FAILED", error: "В задаче нет цены/gamepassId" },
         });
-        await writeBackPartnerTask(failedTask, "error", "В задаче нет цены/productId/sellerId");
-        return json({ ok: false, error: "В задаче нет цены/productId/sellerId" }, 409);
+        await writeBackPartnerTask(failedTask, "error", "В задаче нет цены/gamepassId");
+        return json({ ok: false, error: "В задаче нет цены/gamepassId" }, 409);
+      }
+
+      // Managed/Regional Pricing: task.priceRobux is the seller's global/base
+      // price, while Roblox requires the authenticated buyer's current price
+      // in expectedPrice. Re-resolve immediately before every real purchase.
+      let buyerGp;
+      try {
+        buyerGp = await resolveGamepassForBuyer(task.gamepassId, settings.robloxCookie);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Не удалось получить персональную цену Roblox";
+        await prisma.partnerBuyoutTask.update({
+          where: { id: task.id },
+          data: { status: "READY", error: message },
+        });
+        return json({ ok: false, error: message }, err instanceof BuyoutError ? err.status : 502);
+      }
+      if (!buyerGp.isForSale || Math.abs(buyerGp.basePriceInRobux - price) > 2) {
+        const message = !buyerGp.isForSale
+          ? "Геймпасс не на продаже"
+          : `Базовая цена ГП ${buyerGp.basePriceInRobux} R$, в задаче ${price} R$`;
+        const failedTask = await prisma.partnerBuyoutTask.update({
+          where: { id: task.id }, data: { status: "FAILED", error: message },
+        });
+        await writeBackPartnerTask(failedTask, "error", message);
+        return json({ ok: true, success: false, error: message, partner, ...(await loadPartnerState(partner)) });
+      }
+      if (hasRegionalPrice(buyerGp.price, buyerGp.basePriceInRobux)) {
+        const message = `Региональная цена ${buyerGp.price}/${buyerGp.basePriceInRobux} R$: покупка запрещена`;
+        const failedTask = await prisma.partnerBuyoutTask.update({
+          where: { id: task.id }, data: { status: "FAILED", error: message },
+        });
+        await writeBackPartnerTask(failedTask, "error", message);
+        return json({ ok: true, success: false, error: message, partner, ...(await loadPartnerState(partner)) });
       }
 
       // Баланс НЕ блокирует выкуп: владелец разрешил уходить в минус — кнопка «Купить»
@@ -2625,7 +2657,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       try {
         // gamepassId — для контрольной проверки владения при провале (Ф1):
         // ложный провал здесь = ложный refund в USDT-ledger партнёра.
-        result = await purchaseGamepassWithCookie(settings.robloxCookie, { productId, price, sellerId, gamepassId: task.gamepassId ?? undefined });
+        result = await purchaseGamepassWithCookie(settings.robloxCookie, {
+          productId: buyerGp.productId,
+          price: buyerGp.price,
+          sellerId: buyerGp.sellerId,
+          gamepassId: task.gamepassId,
+        });
       } catch (err) {
         // CSRF/сеть/нет ответа Roblox — внутреннее и временное: раньше задача зависала
         // в PURCHASING навсегда. Возвращаем READY, в таблицу не пишем.
@@ -2658,7 +2695,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           completedAt: new Date(),
           purchaseAccountName: settings.robloxAccountName || null,
           purchaseBatchId,
-          purchasePriceRobux: price,
+          purchasePriceRobux: result.price ?? buyerGp.price,
           error: null,
         },
       });

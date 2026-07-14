@@ -300,8 +300,9 @@ TG — `editMessageText` / `editMessageMedia` (фото-карточка одн�
   ≤ `autoBuyoutMaxPerTick` за тик) и выкупает донорским cookie
   (`purchaseGamepassVerified` — та же механика, что ручной выкуп в TWA, плюс
   контрольная проверка владения, см. ниже). Защиты: **атомарный
-  claim** `PENDING→IN_PROGRESS` (нет гонки с ручным выкупом в TWA), проверка цены
-  `= ceil(amount/0.7) ±2` + `isForSale` + совпадение продавца с ником (если ник подтверждён);
+  claim** `PENDING→IN_PROGRESS` (нет гонки с ручным выкупом в TWA), проверка **базовой цены
+  продавца** `UserBasePriceInRobux = ceil(amount/0.7) ±2` + `isForSale` + совпадение
+  продавца с ником (если ник подтверждён);
   несоответствие → `[AUTOBUY-SKIP …]` в adminNote, заказ не трогаем. Успех (включая
   `AlreadyOwned` — донор уже владеет геймпассом, предыдущая покупка прошла) → `COMPLETED`
   (+`purchaserUsername`) + штатное клиентское уведомление + алерт админам (при AlreadyOwned
@@ -312,6 +313,11 @@ TG — `editMessageText` / `editMessageMedia` (фото-карточка одн�
   (2026-07-06):** алерт только при `0 < balance ≤ threshold` — при балансе 0 (уже слито)
   молчим и дедуп не взводим; успешный слив (ручной из TWA `/api/twa/drain` и автослив)
   сбрасывает `autoBuyoutBelowSince`, чтобы цикл после пополнения начинался чисто.
+  **Managed/Regional Pricing (фикс 2026-07-14):** product-info перед покупкой читается с
+  cookie donor на официальном домене Roblox. `UserBasePriceInRobux` валидирует номинал;
+  если `PriceInRobux` от неё отличается, бот не покупает и ставит заказу
+  `ERROR/REGIONAL_PRICE`. Полный поиск замены по нику запускается из TWA Account. Cookie
+  никогда не отправляется roproxy; недоступный buyer lookup останавливает денежную операцию.
   Управление: `/autobuy` (статус), `/autobuy on|off`, `/autobuy threshold N`.
   **Контрольная проверка владения (Ф1, 2026-07-12).** Roblox при таймауте/5xx нередко
   всё же проводит покупку — раньше такой заказ ложно откатывался в `PENDING` и копил

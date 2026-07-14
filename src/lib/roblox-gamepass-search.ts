@@ -30,17 +30,27 @@ export async function searchForSalePassesByNick(nick: string): Promise<NickSearc
   if (!userId) return { status: "user_not_found" };
   const resolvedName: string = uData.data[0].name ?? nick;
 
-  const gRes = await fetch(
-    `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=10`,
-    { headers: ROBLOX_UA, signal: AbortSignal.timeout(10_000) },
-  ).catch(() => null);
-  if (!gRes?.ok) return { status: "error" };
-  const gData: any = await gRes.json().catch(() => null);
-  const universes: any[] = gData?.data ?? [];
+  // Roblox paginates creations. A replacement search must not stop at the
+  // first ten experiences: scan every page we can safely reach (150 max),
+  // matching the bot-side implementation.
+  const universes: any[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < 3; page++) {
+    const suffix = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
+    const gRes = await fetch(
+      `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=50${suffix}`,
+      { headers: ROBLOX_UA, signal: AbortSignal.timeout(10_000) },
+    ).catch(() => null);
+    if (!gRes?.ok) return { status: "error" };
+    const gData: any = await gRes.json().catch(() => null);
+    universes.push(...(gData?.data ?? []));
+    cursor = gData?.nextPageCursor ?? null;
+    if (!cursor) break;
+  }
 
   const batches = await Promise.all(universes.map(async (game: any) => {
     const pRes = await fetch(
-      `https://apis.roblox.com/game-passes/v1/universes/${game.id}/game-passes?passView=Full&pageSize=30`,
+      `https://apis.roblox.com/game-passes/v1/universes/${game.id}/game-passes?passView=Full&pageSize=100`,
       { headers: ROBLOX_UA, signal: AbortSignal.timeout(10_000) },
     ).catch(() => null);
     if (!pRes?.ok) return [];
@@ -48,9 +58,17 @@ export async function searchForSalePassesByNick(nick: string): Promise<NickSearc
     return (pData?.gamePasses ?? []) as any[];
   }));
 
+  const seen = new Set<number>();
   const passes: ForSalePass[] = batches
     .flat()
-    .filter((gp: any) => gp.isForSale === true && (gp.price ?? 0) > 0)
+    // Some Roblox responses omit isForSale for otherwise purchasable passes.
+    .filter((gp: any) => gp.isForSale !== false && (gp.price ?? 0) > 0)
+    .filter((gp: any) => {
+      const id = Number(gp.id);
+      if (!Number.isFinite(id) || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    })
     .map((gp: any) => ({
       gamepassId: gp.id,
       name: gp.name ?? gp.displayName ?? "Gamepass",

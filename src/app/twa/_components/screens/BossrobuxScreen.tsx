@@ -1307,6 +1307,7 @@ interface BuyoutOrder {
   createdAt: string;
   pendingAt: string | null;
   paidAt: string | null;
+  buyoutErrorCode: string | null;
   user: { tgId: string | null; vkId: string | null; name: string | null; username: string | null };
 }
 
@@ -1635,7 +1636,7 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
       const buyout = rBuyout.ok ? ((await rBuyout.json()).orders ?? []) : [];
       const avito = rAvito.ok ? ((await rAvito.json()).orders ?? []) : [];
       const all: BuyoutOrder[] = [...direct, ...buyout, ...avito];
-      const queue = all.filter(o => !isUnpaidDirect(o));
+      const queue = all.filter(o => !isUnpaidDirect(o) && o.buyoutErrorCode !== "REGIONAL_PRICE");
       setOrders(queue);
       setAwaitingPay(all.filter(isUnpaidDirect));
       void checkLive(all);
@@ -1673,6 +1674,10 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
       } else {
         haptic.notify("error");
         toast(`❌ ${d.msg}`, "error");
+        if (d.failureCode === "REGIONAL_PRICE") {
+          setOrders(prev => prev.filter(o => o.id !== order.id));
+          await load();
+        }
       }
     } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
     finally { setBuying(null); }
@@ -1715,12 +1720,20 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
       } catch { /* item переживёт — finish/свипер восстановят из клиентского списка */ }
     }
 
-    for (let i = 0; i < queue.length; i++) {
+    let remaining = [...queue];
+    let localBalance = balance ?? Number.MAX_SAFE_INTEGER;
+    let processed = 0;
+    while (remaining.length > 0) {
       if (bulkStop.current) break;
-      const order = queue[i];
+      // Rebuild the affordable pack after every result. A REGIONAL_PRICE row
+      // spends nothing, so a previously waiting order may enter immediately.
+      const next = buildBuyoutPlan(remaining, localBalance).selected[0];
+      if (!next) break;
+      const order = next;
+      remaining = remaining.filter(o => o.id !== order.id);
       const gross = Math.ceil(order.amount / 0.7);
       const nick = buyoutNick(order);
-      if (i > 0) await sleep(bulkPause());
+      if (processed > 0) await sleep(bulkPause());
       if (bulkStop.current) break;
       try {
         const r = await fetch("/api/twa/orders", {
@@ -1731,6 +1744,7 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
         const d = await r.json().catch(() => null);
         if (r.ok && d?.success) {
           ok++;
+          localBalance -= gross;
           onBalanceChange(-gross);
           setOrders(prev => prev.filter(o => o.id !== order.id));
           items.push({ orderId: order.id, nick, wbCode: order.wbCode, gross, ok: true });
@@ -1740,13 +1754,17 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
           const reason = d?.msg ?? d?.error ?? (r.ok ? "не куплено" : `HTTP ${r.status}`);
           items.push({ orderId: order.id, nick, wbCode: order.wbCode, gross, ok: false, reason });
           await pushItem(items[items.length - 1]);
+          if (d?.failureCode === "REGIONAL_PRICE") {
+            setOrders(prev => prev.filter(o => o.id !== order.id));
+          }
           if (STOP_RE.test(String(reason))) { bulkStop.current = true; }
         }
       } catch {
         items.push({ orderId: order.id, nick, wbCode: order.wbCode, gross, ok: false, reason: "ошибка сети" });
         await pushItem(items[items.length - 1]);
       }
-      setBulkProgress({ done: i + 1, total: queue.length, ok });
+      processed++;
+      setBulkProgress({ done: processed, total: queue.length, ok });
     }
 
     const fail = items.length - ok;
@@ -1771,6 +1789,7 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
         ),
       });
     } catch { /* отчёт дошлёт свипер TG-бота по недофинишированному батчу */ }
+    await load();
   }
 
   if (loading) return (
@@ -1861,7 +1880,7 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
             </div>
           </Card>
         ) : (
-          <button className="twa-press" onClick={() => { haptic.impact("medium"); doBulk(plan.selected); }} disabled={!!buying}
+          <button className="twa-press" onClick={() => { haptic.impact("medium"); doBulk(orders); }} disabled={!!buying}
             style={{ width: "100%", padding: "15px", border: "none", borderRadius: 14, background: C.green, color: "#fff", fontSize: 16, fontWeight: 700, cursor: buying ? "default" : "pointer", opacity: buying ? 0.5 : 1, fontFamily: "inherit" }}>
             ⚡ Выкупить всё ({plan.selected.length} · {plan.totalDirty.toLocaleString("ru-RU")} R$)
           </button>

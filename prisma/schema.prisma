@@ -327,6 +327,10 @@ model WbOrder {
   /// Free-text admin note (current status / problem) — admin-only, shown in the
   /// TWA order card. Never surfaced to the customer.
   adminNote              String?
+  /// Structured reason for status=ERROR in the buyout pipeline. First value:
+  /// REGIONAL_PRICE — donor sees a managed/regional price and no safe
+  /// full-price replacement gamepass was found for this Roblox username.
+  buyoutErrorCode        String?
   pendingAt              DateTime?
   takenAt                DateTime?
   remindersSent          Int              @default(0)
@@ -364,6 +368,7 @@ model WbOrder {
 
   @@index([userId])
   @@index([status])
+  @@index([status, buyoutErrorCode])
   // Main TWA Orders listing — sort by createdAt desc within a status chip.
   @@index([status, createdAt(sort: Desc)])
   // Identity-cluster numbering in /api/twa/orders + GP-by-nick search.

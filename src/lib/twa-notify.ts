@@ -250,6 +250,24 @@ export async function notifyOrderCompleted(
   }
 }
 
+/** A safe full-price replacement was not found after Roblox enabled a donor-specific price. */
+export async function notifyRegionalPriceNeeded(
+  user: UserRef,
+  wbCode: string,
+  expectedPrice: number,
+): Promise<boolean> {
+  const tgText =
+    `⚠️ <b>Нужен новый геймпасс</b>\n\n` +
+    `Roblox включил региональную цену для текущего пасса заказа <b>${wbCode}</b>, поэтому мы безопасно остановили выкуп. ` +
+    `Создай новый геймпасс за <b>${expectedPrice} R$</b> без Managed/Regional Pricing и пришли ссылку в бот — заказ продолжится.`;
+  const plainText =
+    `⚠️ Нужен новый геймпасс\n\nRoblox включил региональную цену для текущего пасса заказа ${wbCode}, ` +
+    `поэтому мы безопасно остановили выкуп. Создай новый геймпасс за ${expectedPrice} R$ без Managed/Regional Pricing и пришли ссылку в бот — заказ продолжится.`;
+  if (user.tgId) return tgPost(user.tgId, tgText);
+  if (user.vkId) return vkPost(user.vkId, plainText);
+  return false;
+}
+
 /**
  * Менеджер привязал заказ к аккаунту клиента (rebind из TWA — кросс-платформенный
  * логин, Авито-заказ и т.п.). Текст выглядит как обычная активация кода — клиент

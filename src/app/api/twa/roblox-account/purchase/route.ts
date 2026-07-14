@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
-import { needsOwnershipCheck, verifyOwnershipAfterFailure } from "@/lib/roblox-buyout";
-import { checkGamepassPrice, expectedGamepassPrice } from "@/lib/purchase-guard";
+import { BuyoutError, needsOwnershipCheck, resolveGamepassForBuyer, verifyOwnershipAfterFailure } from "@/lib/roblox-buyout";
+import { BUYOUT_ERROR_REGIONAL_PRICE, checkGamepassPrice, expectedGamepassPrice, hasRegionalPrice } from "@/lib/purchase-guard";
 
 const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
@@ -163,7 +163,19 @@ export async function POST(req: NextRequest) {
       `https://apis.roproxy.com/game-passes/v1/game-passes/${gpId}/product-info`,
     ];
     let info: any = null;
-    for (const url of infoUrls) {
+    const cookie = await getCookie();
+    // Prefer the authenticated official response: PriceInRobux is regional to
+    // the buyer account, UserBasePriceInRobux is the seller's configured price.
+    if (cookie) {
+      try {
+        const r = await fetch(infoUrls[0], {
+          headers: { ...ROBLOX_UA, Cookie: `.ROBLOSECURITY=${cookie}` },
+          signal: AbortSignal.timeout(8_000), cache: "no-store",
+        });
+        if (r.ok) info = await r.json();
+      } catch { /* public fallback below */ }
+    }
+    for (const url of info ? [] : infoUrls) {
       try {
         const r = await fetch(url, { headers: ROBLOX_UA, signal: AbortSignal.timeout(8_000) });
         if (r.ok) { info = await r.json(); break; }
@@ -205,14 +217,26 @@ export async function POST(req: NextRequest) {
 
   // ── Purchase ────────────────────────────────────────────────────────────
   if (body.action === "purchase") {
-    const { productId, price, sellerId } = body;
-    if (!productId || !price || !sellerId)
-      return NextResponse.json({ error: "productId, price, sellerId required" }, { status: 400 });
-
     // П5 (PLAN «+7»): покупка за реальные робуксы по геймпассу неоплаченного
     // прямого заказа запрещена — этот роут раньше не проверял статус вовсе.
     const gpIdRaw = String(body.gamepassId ?? "").match(/(\d+)/)?.[1];
-    if (gpIdRaw) {
+    if (!gpIdRaw)
+      return NextResponse.json({ error: "gamepassId required" }, { status: 400 });
+
+    const cookie = await getCookie();
+    if (!cookie) return NextResponse.json({ error: "Cookie не задан" }, { status: 400 });
+
+    let buyerInfo;
+    try {
+      buyerInfo = await resolveGamepassForBuyer(gpIdRaw, cookie);
+    } catch (err) {
+      const status = err instanceof BuyoutError ? err.status : 502;
+      return NextResponse.json({ error: err instanceof Error ? err.message : "Не удалось получить персональную цену Roblox" }, { status });
+    }
+    if (!buyerInfo.isForSale)
+      return NextResponse.json({ error: "Геймпасс не на продаже" }, { status: 409 });
+
+    {
       const candidates = await (prisma as any).wbOrder.findMany({
         where: {
           isTest: false,
@@ -233,33 +257,52 @@ export async function POST(req: NextRequest) {
           { status: 409 },
         );
 
-      // ЦЕНА-СТОП (PLAN-gp-price-guard Ш3): пасс привязан к активному заказу ⇒
-      // цена покупки обязана совпадать с ожидаемой по номиналу этого заказа.
-      // price приходит из body (live-цена с экрана) — Roblox сверит её сам,
-      // а занижать её для обхода гарда бессмысленно: покупка тогда не пройдёт.
+      // ЦЕНА-СТОП (PLAN-gp-price-guard Ш3): валидируем глобальную цену
+      // продавца и отдельно запрещаем buyer-specific regional price. Все
+      // значения перечитаны сервером; productId/price/sellerId из body не доверяем.
       const linkedCandidates = await (prisma as any).wbOrder.findMany({
         where: {
           isTest: false,
           status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "AWAITING_PAYMENT", "PAYMENT_PENDING"] },
           gamepassUrl: { contains: `/${gpIdRaw}` },
         },
-        select: { wbCode: true, amount: true, gamepassUrl: true },
+        select: { id: true, wbCode: true, amount: true, gamepassUrl: true },
       });
       const linked = linkedCandidates.find(
         (o: any) => (o.gamepassUrl ?? "").match(/game-pass(?:es)?\/(\d+)/)?.[1] === gpIdRaw,
       );
       if (linked) {
-        const { ok: priceOk, expected } = checkGamepassPrice(linked.amount, Number(price));
+        const { ok: priceOk, expected } = checkGamepassPrice(
+          linked.amount,
+          buyerInfo.price,
+          buyerInfo.basePriceInRobux,
+        );
         if (!priceOk)
           return NextResponse.json(
-            { error: `⛔ Пасс привязан к заказу ${linked.wbCode}: цена ${price} R$ ≠ ожидаемой ${expected} R$ (номинал ${linked.amount}). Выкуп заблокирован — нужен пасс ровно за ${expected} R$.` },
+            { error: `⛔ Пасс привязан к заказу ${linked.wbCode}: базовая цена ${buyerInfo.basePriceInRobux} R$ ≠ ожидаемой ${expected} R$ (номинал ${linked.amount}). Выкуп заблокирован — нужен пасс с базой ${expected} R$.` },
             { status: 409 },
           );
+        if (hasRegionalPrice(buyerInfo.price, buyerInfo.basePriceInRobux)) {
+          await (prisma as any).wbOrder.update({
+            where: { id: linked.id },
+            data: { status: "ERROR", buyoutErrorCode: BUYOUT_ERROR_REGIONAL_PRICE },
+          });
+          return NextResponse.json(
+            { error: `Рег. цена ${buyerInfo.price}/${buyerInfo.basePriceInRobux} R$ — покупка запрещена; запускай выкуп из очереди для автозамены`, failureCode: BUYOUT_ERROR_REGIONAL_PRICE },
+            { status: 409 },
+          );
+        }
       }
+      if (!linked && hasRegionalPrice(buyerInfo.price, buyerInfo.basePriceInRobux))
+        return NextResponse.json(
+          { error: `Рег. цена ${buyerInfo.price}/${buyerInfo.basePriceInRobux} R$ — покупка запрещена`, failureCode: BUYOUT_ERROR_REGIONAL_PRICE },
+          { status: 409 },
+        );
     }
 
-    const cookie = await getCookie();
-    if (!cookie) return NextResponse.json({ error: "Cookie не задан" }, { status: 400 });
+    const productId = buyerInfo.productId;
+    const price = buyerInfo.price;
+    const sellerId = buyerInfo.sellerId;
 
     const csrfRes = await fetch("https://auth.roblox.com/v2/logout", {
       method: "POST",

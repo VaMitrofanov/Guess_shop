@@ -3739,9 +3739,12 @@ export function registerCallbacks(bot: Telegraf): void {
         }
 
         if (info.isManagedPricing) {
-          lines.push(`\n⚠️ <b>MANAGED PRICING ВКЛЮЧЁН!</b>`);
+          lines.push(`\n⛔ <b>MANAGED PRICING ВКЛЮЧЁН!</b>`);
           lines.push(`Цена Roblox: <b>${info.priceInRobux} R$</b> · Цена продавца: <b>${info.userBasePriceInRobux} R$</b>`);
-          lines.push(`Выкуп пройдёт по цене Roblox (${info.priceInRobux} R$).`);
+          lines.push(`Выкуп запрещён. Запусти заказ из TWA: там будет поиск полной замены по нику.`);
+          await (db as any).wbOrder.update({ where: { id: orderId }, data: { status: "ERROR", buyoutErrorCode: "REGIONAL_PRICE" } });
+          await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
+          return;
         }
 
         const script = buildPurchaseScript(info);
@@ -3782,7 +3785,7 @@ export function registerCallbacks(bot: Telegraf): void {
 
         await ctx.answerCbQuery("⏳ Выкупаю…").catch(() => {});
 
-        const info = await getGamepassProductInfo(gpId);
+        const info = await getGamepassProductInfo(gpId, cookie);
         if (!info) {
           await ctx.reply(`❌ Не удалось получить product-info для <code>${gpId}</code>`, { parse_mode: "HTML" });
           return;
@@ -3793,10 +3796,29 @@ export function registerCallbacks(bot: Telegraf): void {
           return;
         }
 
-        let priceWarning = "";
-        if (info.isManagedPricing) {
-          priceWarning = `\n⚠️ Managed pricing: ${info.priceInRobux} R$ (продавец: ${info.userBasePriceInRobux} R$)`;
+        const expected = Math.ceil(order.amount / 0.7);
+        if (Math.abs(info.userBasePriceInRobux - expected) > 2) {
+          await ctx.reply(
+            `⛔ Базовая цена геймпасса <b>${info.userBasePriceInRobux} R$</b>, ` +
+            `а для заказа нужна <b>${expected} R$</b>. Выкуп заблокирован.`,
+            { parse_mode: "HTML" },
+          );
+          return;
         }
+
+        if (info.isManagedPricing) {
+          await (db as any).wbOrder.update({
+            where: { id: orderId },
+            data: { status: "ERROR", buyoutErrorCode: "REGIONAL_PRICE" },
+          });
+          await ctx.reply(
+            `⚠️ <b>Рег. цена ${info.priceInRobux}/${info.userBasePriceInRobux} R$</b>\n` +
+            `Заказ <code>${order.wbCode}</code> перенесён в ошибку. Запусти его из TWA — там система найдёт полную замену по нику.`,
+            { parse_mode: "HTML" },
+          );
+          return;
+        }
+        const priceWarning = "";
 
         // Ф1: покупка с контрольной проверкой владения при провале —
         // таймаут/5xx у Roblox нередко значит «куплено».
@@ -3814,7 +3836,7 @@ export function registerCallbacks(bot: Telegraf): void {
           const money = buildOrderProfitSnapshot(order, settings ?? {}, result.price ?? info.priceInRobux);
           const updated = await (db as any).wbOrder.updateMany({
             where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
-            data: { status: "COMPLETED", adminId, purchaseRate: currentRate, purchaserUsername, completedAt: new Date(), ...(money ?? {}) },
+            data: { status: "COMPLETED", buyoutErrorCode: null, adminId, purchaseRate: currentRate, purchaserUsername, completedAt: new Date(), ...(money ?? {}) },
           });
 
           if (updated.count > 0) {
@@ -3869,7 +3891,7 @@ export function registerCallbacks(bot: Telegraf): void {
         // Prevents double-notification when two admins click simultaneously.
         const updatedCount = await (db as any).wbOrder.updateMany({
           where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
-          data: { status: "COMPLETED", adminId, purchaseRate: currentRate, completedAt: new Date(), ...(money ?? {}) },
+          data: { status: "COMPLETED", buyoutErrorCode: null, adminId, purchaseRate: currentRate, completedAt: new Date(), ...(money ?? {}) },
         });
 
         if (updatedCount.count === 0) {

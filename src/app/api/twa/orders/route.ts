@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
-import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing } from "@/lib/twa-notify";
+import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing, notifyRegionalPriceNeeded } from "@/lib/twa-notify";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
-import { needsOwnershipCheck, verifyOwnershipAfterFailure } from "@/lib/roblox-buyout";
-import { checkGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
+import { BuyoutError, needsOwnershipCheck, resolveGamepassForBuyer, verifyGamepassOwnership, verifyOwnershipAfterFailure, type ResolvedGamepass } from "@/lib/roblox-buyout";
+import { BUYOUT_ERROR_REGIONAL_PRICE, checkGamepassPrice, hasRegionalPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
@@ -71,6 +71,52 @@ async function appendAdminNote(orderId: string, line: string): Promise<void> {
       data: { adminNote: `${prefix}${line}`.slice(0, 2000) },
     });
   } catch { /* best-effort: аудит не должен ронять выкуп */ }
+}
+
+/** Find a safe full-price pass owned by the same seller for this donor. */
+async function findFullPriceReplacement(
+  order: any,
+  cookie: string,
+  currentGpId: string,
+): Promise<{ info: ResolvedGamepass; resolvedName: string } | null> {
+  const nick = order.robloxUsername ?? order.probableNick;
+  if (!nick) return null;
+  const found = await searchForSalePassesByNick(nick).catch(() => null);
+  if (!found || found.status !== "ok") return null;
+
+  const expected = Math.ceil(order.amount / 0.7);
+  const plausible = found.passes.filter((pass) =>
+    String(pass.gamepassId) !== currentGpId && Math.abs(pass.price - expected) <= 2,
+  );
+  if (plausible.length === 0) return null;
+
+  const referenced = await (prisma as any).wbOrder.findMany({
+    where: {
+      id: { not: order.id },
+      status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"] },
+      gamepassUrl: { not: null },
+    },
+    select: { gamepassUrl: true },
+  });
+  const usedIds = new Set<string>(referenced.map((row: any) => gpIdOf(row.gamepassUrl)).filter(Boolean));
+
+  for (const pass of plausible) {
+    const passId = String(pass.gamepassId);
+    if (usedIds.has(passId)) continue;
+    let info: ResolvedGamepass;
+    try {
+      info = await resolveGamepassForBuyer(passId, cookie);
+    } catch {
+      continue;
+    }
+    if (!info.isForSale || hasRegionalPrice(info.price, info.basePriceInRobux)) continue;
+    if (!checkGamepassPrice(order.amount, info.price, info.basePriceInRobux).ok) continue;
+    if (!sellerMatchesOrder(found.resolvedName, info.sellerName)) continue;
+    // null means the ownership check itself is unavailable: fail closed.
+    if (await verifyGamepassOwnership(cookie, passId) !== false) continue;
+    return { info, resolvedName: found.resolvedName };
+  }
+  return null;
 }
 
 function buildTabWhere(tab: FilterTab): any {
@@ -944,7 +990,7 @@ export async function POST(req: NextRequest) {
     const money = buildOrderProfitSnapshot(order, settings ?? {}, purchaseRobux);
     await (prisma as any).wbOrder.update({
       where: { id: orderId },
-      data:  { status: "COMPLETED", purchaseRate: currentRate, completedAt: new Date(), ...(money ?? {}) },
+      data:  { status: "COMPLETED", buyoutErrorCode: null, purchaseRate: currentRate, completedAt: new Date(), ...(money ?? {}) },
     });
     cachedCounts = null;
     notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder).catch(() => {});
@@ -957,7 +1003,7 @@ export async function POST(req: NextRequest) {
     const rejectionReason = String(reason ?? "не указана");
     await (prisma as any).wbOrder.update({
       where: { id: orderId },
-      data:  { status: "REJECTED", rejectionReason },
+      data:  { status: "REJECTED", buyoutErrorCode: null, rejectionReason },
     });
     cachedCounts = null;
     notifyOrderRejected(order.user, order.wbCode, rejectionReason, order.amount).catch(() => {});
@@ -971,46 +1017,83 @@ export async function POST(req: NextRequest) {
 
     const gpMatch = order.gamepassUrl?.match(/game-pass(?:es)?\/(\d+)/);
     if (!gpMatch) return NextResponse.json({ error: "No gamepass URL" }, { status: 400 });
-    const gpId = gpMatch[1];
+    let gpId = gpMatch[1];
 
     const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
     const cookie = settings?.robloxCookie;
     if (!cookie) return NextResponse.json({ error: "Cookie не задан. /setcookie в боте" }, { status: 400 });
 
-    const infoUrls = [
-      `https://apis.roblox.com/game-passes/v1/game-passes/${gpId}/product-info`,
-      `https://apis.roproxy.com/game-passes/v1/game-passes/${gpId}/product-info`,
-    ];
-    let info: any = null;
-    for (const url of infoUrls) {
-      try {
-        const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
-        if (r.ok) { info = await r.json(); break; }
-      } catch { /* try next */ }
+    // Fetch donor-specific info immediately before purchase. A regional price
+    // is never purchased: first try another full-price pass of the same nick.
+    let info: ResolvedGamepass;
+    try {
+      info = await resolveGamepassForBuyer(gpId, cookie);
+    } catch (err) {
+      const status = err instanceof BuyoutError ? err.status : 502;
+      return NextResponse.json({ error: err instanceof Error ? err.message : "Не удалось получить product-info" }, { status });
     }
-    if (!info?.ProductId)
-      return NextResponse.json({ error: "Не удалось получить product-info" }, { status: 502 });
 
-    if (!info.IsForSale)
+    if (!info.isForSale)
       return NextResponse.json({ error: "Геймпасс не на продаже" }, { status: 400 });
 
-    const price = info.PriceInRobux ?? 0;
-    const base = info.UserBasePriceInRobux ?? price;
-    const isManagedPricing = price !== base;
-    const creatorId = info.Creator?.Id ?? info.Creator?.CreatorTargetId ?? 0;
-    const creatorName: string | null = info.Creator?.Name ?? null;
+    const stamp = new Date().toISOString().slice(0, 10);
+    if (hasRegionalPrice(info.price, info.basePriceInRobux)) {
+      const original = info;
+      const replacement = await findFullPriceReplacement(order, cookie, gpId);
+      if (!replacement) {
+        const wasRegional = order.buyoutErrorCode === BUYOUT_ERROR_REGIONAL_PRICE;
+        const line = `[РЕГ-ЦЕНА ${stamp}] GP ${gpId}: донор ${original.price} R$, база ${original.basePriceInRobux} R$; полная замена по нику не найдена`;
+        await (prisma as any).wbOrder.update({
+          where: { id: orderId },
+          data: { status: "ERROR", buyoutErrorCode: BUYOUT_ERROR_REGIONAL_PRICE },
+        });
+        await appendAdminNote(orderId, line);
+        cachedCounts = null;
+        if (!wasRegional) {
+          notifyRegionalPriceNeeded(order.user, order.wbCode, Math.ceil(order.amount / 0.7)).catch(() => {});
+        }
+        return NextResponse.json({
+          ok: true,
+          success: false,
+          failureCode: BUYOUT_ERROR_REGIONAL_PRICE,
+          status: "ERROR",
+          msg: `Рег. цена ${original.price}/${original.basePriceInRobux} R$ — безопасной замены по нику не найдено`,
+        });
+      }
+
+      gpId = String(replacement.info.gamepassId);
+      info = replacement.info;
+      await (prisma as any).wbOrder.update({
+        where: { id: orderId },
+        data: {
+          gamepassUrl: `https://www.roblox.com/game-pass/${gpId}`,
+          robloxUsername: replacement.resolvedName,
+          buyoutErrorCode: null,
+        },
+      });
+      await appendAdminNote(
+        orderId,
+        `[РЕГ-ЗАМЕНА ${stamp}] GP ${original.gamepassId} (${original.price}/${original.basePriceInRobux} R$) → GP ${gpId} (${info.price} R$)`,
+      );
+    }
+
+    const price = info.price;
+    const base = info.basePriceInRobux;
+    const creatorId = info.sellerId;
+    const creatorName: string | null = info.sellerName;
+    if (order.buyoutErrorCode === BUYOUT_ERROR_REGIONAL_PRICE) {
+      await (prisma as any).wbOrder.update({ where: { id: orderId }, data: { buyoutErrorCode: null } });
+    }
 
     // ЦЕНА-СТОП (PLAN-gp-price-guard Ш1, инцидент 12.07): выкуп возможен только
     // по цене, ожидаемой из номинала заказа. Раньше покупали по live-цене без
     // сверки — клиент, поднявший цену пасса после приёма ботом, получал больше.
     // Статус заказа НЕ меняем: это проблема строки, не «ошибка выкупа».
-    const stamp = new Date().toISOString().slice(0, 10);
-    const { ok: priceOk, expected } = checkGamepassPrice(order.amount, price);
+    const { ok: priceOk, expected } = checkGamepassPrice(order.amount, price, base);
     if (!priceOk) {
-      const mp = isManagedPricing ? ` (MP, base ${base} R$)` : "";
-      await appendAdminNote(orderId, `[ЦЕНА-СТОП ${stamp}] пасс ${price} R$${mp} ≠ ожид ${expected} R$ — выкуп заблокирован`);
+      await appendAdminNote(orderId, `[ЦЕНА-СТОП ${stamp}] пасс ${price} R$ ≠ ожид ${expected} R$ — выкуп заблокирован`);
       return NextResponse.json({ ok: true, success: false,
-        msg: `⛔ Цена пасса ${price} R$${mp} ≠ ожидаемой ${expected} R$ (номинал ${order.amount}). Выкуп заблокирован — нужен пасс ровно за ${expected} R$.` });
+        msg: `⛔ Цена пасса ${price} R$ ≠ ожидаемой ${expected} R$ (номинал ${order.amount}). Выкуп заблокирован — нужен пасс ровно за ${expected} R$.` });
     }
     // ПРОДАВЕЦ-СТОП: подтверждённый ник заказа должен совпадать с создателем
     // пасса (перенос seller-check из автовыкупа — ловит подменённый ГП).
@@ -1032,7 +1115,7 @@ export async function POST(req: NextRequest) {
     let purchaseRes: Response | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       purchaseRes = await fetch(
-        `https://economy.roblox.com/v1/purchases/products/${info.ProductId}`,
+        `https://economy.roblox.com/v1/purchases/products/${info.productId}`,
         {
           method: "POST",
           headers: {
@@ -1086,18 +1169,17 @@ export async function POST(req: NextRequest) {
       const money = buildOrderProfitSnapshot(order, settings ?? {}, Number(purchaseData?.price ?? price));
       await (prisma as any).wbOrder.updateMany({
         where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
-        data: { status: "COMPLETED", purchaseRate: currentRate, purchaserUsername, completedAt: new Date(), ...(money ?? {}) },
+        data: { status: "COMPLETED", buyoutErrorCode: null, purchaseRate: currentRate, purchaserUsername, completedAt: new Date(), ...(money ?? {}) },
       });
       cachedCounts = null;
       notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder ?? false).catch(() => {});
-      const mpWarn = isManagedPricing ? ` (MP: ${price}/${base})` : "";
       if (isAlreadyOwned) {
-        return NextResponse.json({ ok: true, success: true, msg: `Куплено (AlreadyOwned — предыдущая покупка прошла)${mpWarn}` });
+        return NextResponse.json({ ok: true, success: true, msg: "Куплено (AlreadyOwned — предыдущая покупка прошла)" });
       }
       if (recovered) {
-        return NextResponse.json({ ok: true, success: true, msg: `Куплено (владение подтверждено проверкой после ошибки: ${canonicalReason ?? "нет ответа от Roblox"})${mpWarn}` });
+        return NextResponse.json({ ok: true, success: true, msg: `Куплено (владение подтверждено проверкой после ошибки: ${canonicalReason ?? "нет ответа от Roblox"})` });
       }
-      return NextResponse.json({ ok: true, success: true, msg: `Куплено за ${purchaseData.price ?? price} R$${mpWarn}` });
+      return NextResponse.json({ ok: true, success: true, msg: `Куплено за ${purchaseData.price ?? price} R$` });
     }
 
     if (!purchaseData)
@@ -1131,9 +1213,11 @@ export async function POST(req: NextRequest) {
       const raw = String(body.gamepassUrl ?? "").trim();
       if (raw) {
         data.gamepassUrl = raw.includes("roblox.com") ? raw : /^\d+$/.test(raw) ? `https://www.roblox.com/game-pass/${raw}` : raw;
+        data.buyoutErrorCode = null;
         if (!order.gamepassUrl) { data.status = "PENDING"; data.pendingAt = new Date(); }
       } else {
         data.gamepassUrl = null;
+        data.buyoutErrorCode = null;
         data.status = "AWAITING_GAMEPASS";
         data.pendingAt = null;
       }
@@ -1198,6 +1282,7 @@ export async function POST(req: NextRequest) {
             }, { status: 409 });
         }
         data.gamepassUrl = gpId ? `https://www.roblox.com/game-pass/${gpId}` : null;
+        data.buyoutErrorCode = null;
         changes.push(gpId ? `ГП ${oldId ?? "—"}→${gpId}` : `ГП ${oldId} снят`);
         // Переходы статуса — паритет с edit-avito: появился пасс → в очередь,
         // сняли пасс → ждать ссылку. Замена пасса в ERROR статус не трогает.
@@ -1312,6 +1397,7 @@ export async function POST(req: NextRequest) {
         rejectionReason: null,
         adminId: null,
         adminNote: (existingNote + auditNote).slice(0, 2000),
+        buyoutErrorCode: null,
       },
     });
     cachedCounts = null;

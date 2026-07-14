@@ -131,14 +131,24 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
       const gpId = gpMatch(order.gamepassUrl);
       if (!gpId) continue;
 
-      const info = await getGamepassProductInfo(gpId);
+      const info = await getGamepassProductInfo(gpId, cookie);
       if (!info) { autobuySkip.add(order.id); await annotateOnce(order.id, "[AUTOBUY-SKIP", "product-info недоступен"); continue; }
 
       const want = expectedPrice(order.amount);
       if (!info.isForSale) { autobuySkip.add(order.id); await annotateOnce(order.id, "[AUTOBUY-SKIP", "не на продаже"); continue; }
-      if (Math.abs(info.priceInRobux - want) > PRICE_TOL) {
+      if (Math.abs(info.userBasePriceInRobux - want) > PRICE_TOL) {
         autobuySkip.add(order.id);
-        await annotateOnce(order.id, "[AUTOBUY-SKIP", `цена ${info.priceInRobux}≠ожид ${want} — ручной выкуп`);
+        await annotateOnce(order.id, "[AUTOBUY-SKIP", `базовая цена ${info.userBasePriceInRobux}≠ожид ${want} — ручной выкуп`);
+        continue;
+      }
+      if (info.isManagedPricing) {
+        autobuySkip.add(order.id);
+        await (db as any).wbOrder.update({
+          where: { id: order.id },
+          data: { status: "ERROR", buyoutErrorCode: "REGIONAL_PRICE" },
+        });
+        await annotateOnce(order.id, "[РЕГ-ЦЕНА", `донор ${info.priceInRobux} R$, база ${info.userBasePriceInRobux} R$ — нужен выкуп из TWA с автозаменой`);
+        await alertAdmins(`⚠️ <b>Рег. цена</b> · ${order.wbCode}\n${info.priceInRobux}/${info.userBasePriceInRobux} R$ — заказ перенесён в ошибку; автозамена доступна в TWA.`);
         continue;
       }
       // Seller must match the confirmed nick when we have one (guards a swapped GP).
@@ -168,7 +178,7 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
         const money = buildOrderProfitSnapshot(order, settings, result.price ?? info.priceInRobux);
         await (db as any).wbOrder.updateMany({
           where: { id: order.id, status: "IN_PROGRESS" },
-          data: { status: "COMPLETED", purchaseRate: settings.purchaseRate ?? null, purchaserUsername: settings.robloxAccountName ?? null, completedAt: new Date(), ...(money ?? {}) },
+          data: { status: "COMPLETED", buyoutErrorCode: null, purchaseRate: settings.purchaseRate ?? null, purchaserUsername: settings.robloxAccountName ?? null, completedAt: new Date(), ...(money ?? {}) },
         });
         if (order.user) {
           try { await notifyUserCompleted(bot, order.user, order.id, order.amount, order.isDirectOrder ?? false); } catch { /* user may have blocked */ }
