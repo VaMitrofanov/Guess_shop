@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing, notifyRegionalPriceNeeded } from "@/lib/twa-notify";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
 import { BuyoutError, needsOwnershipCheck, resolveGamepassForBuyer, verifyGamepassOwnership, verifyOwnershipAfterFailure, type ResolvedGamepass } from "@/lib/roblox-buyout";
-import { BUYOUT_ERROR_REGIONAL_PRICE, checkGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
+import { BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, checkGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
@@ -140,7 +140,7 @@ function buildTabWhere(tab: FilterTab): any {
         isFavorite: false,
         OR: [
           { status: { in: ["PENDING", "IN_PROGRESS"] } },
-          { status: "ERROR", buyoutErrorCode: BUYOUT_ERROR_REGIONAL_PRICE },
+          { status: "ERROR", buyoutErrorCode: { in: [BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW] } },
         ],
       };
     case "DIRECT":
@@ -294,7 +294,7 @@ export async function GET(req: NextRequest) {
                 OR (status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours')
               ))::int AS "WORK",
               COUNT(*)::int AS "ALL",
-              COUNT(*) FILTER (WHERE "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "isFavorite" = false AND (status IN ('PENDING','IN_PROGRESS') OR (status = 'ERROR' AND "buyoutErrorCode" = 'REGIONAL_PRICE')))::int AS "BUYOUT",
+              COUNT(*) FILTER (WHERE "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "isFavorite" = false AND (status IN ('PENDING','IN_PROGRESS') OR (status = 'ERROR' AND "buyoutErrorCode" IN ('REGIONAL_PRICE','ROBLOX_PLUS_FLOW'))))::int AS "BUYOUT",
               COUNT(*) FILTER (WHERE "isDirectOrder" = true AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false)::int AS "DIRECT",
               COUNT(*) FILTER (WHERE "orderSource" = 'AVITO' AND status IN ('PENDING','IN_PROGRESS','AWAITING_GAMEPASS','ERROR') AND "isFavorite" = false)::int AS "AVITO",
               COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "NEW",
@@ -308,7 +308,7 @@ export async function GET(req: NextRequest) {
                 OR ("isDirectOrder" = true AND status IN ('AWAITING_PAYMENT','PAYMENT_PENDING'))
                 OR (status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${ATTENTION_LINK_DAYS} days')
               ))::int AS "ATTENTION",
-              COALESCE(SUM(amount) FILTER (WHERE "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "isFavorite" = false AND (status IN ('PENDING','IN_PROGRESS') OR (status = 'ERROR' AND "buyoutErrorCode" = 'REGIONAL_PRICE'))), 0)::int AS "SUM_BUYOUT",
+              COALESCE(SUM(amount) FILTER (WHERE "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "isFavorite" = false AND (status IN ('PENDING','IN_PROGRESS') OR (status = 'ERROR' AND "buyoutErrorCode" IN ('REGIONAL_PRICE','ROBLOX_PLUS_FLOW')))), 0)::int AS "SUM_BUYOUT",
               COALESCE(SUM(amount) FILTER (WHERE "isDirectOrder" = true AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_DIRECT",
               COALESCE(SUM(amount) FILTER (WHERE "orderSource" = 'AVITO' AND status IN ('PENDING','IN_PROGRESS','AWAITING_GAMEPASS','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_AVITO",
               COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "isFavorite" = false), 0)::int AS "SUM_AWAITING_LINK",
@@ -1045,8 +1045,8 @@ export async function POST(req: NextRequest) {
     if (!cookie) return NextResponse.json({ error: "Cookie не задан. /setcookie в боте" }, { status: 400 });
 
     // Fetch donor-specific info immediately before purchase. Typed Roblox Plus
-    // is allowed at its buyer price; unknown/Regional differences still trigger
-    // the full-price replacement search and remain fail-closed.
+    // is used for pack/accounting, but its cookie-only transport is blocked
+    // below. Unknown/Regional differences still trigger replacement search.
     let info: ResolvedGamepass;
     try {
       info = await resolveGamepassForBuyer(gpId, cookie);
@@ -1133,6 +1133,28 @@ export async function POST(req: NextRequest) {
         msg: `⛔ Продавец пасса ${creatorName} ≠ нику заказа ${order.robloxUsername}. Выкуп заблокирован — проверь, чей это геймпасс.` });
     }
 
+    // Production canary 2026-07-14: legacy Economy v1 rejects both base and
+    // Plus buyer-price with PriceChanged; Economy v2 user-products returns 404
+    // for game passes. Roblox documents PromptGamePassPurchase as the supported
+    // Plus-aware flow. Do not spend/guess through an unsupported cookie API.
+    if (info.robloxPlusDiscountPercent) {
+      await (prisma as any).wbOrder.update({
+        where: { id: orderId },
+        data: { status: "ERROR", buyoutErrorCode: BUYOUT_ERROR_ROBLOX_PLUS_FLOW },
+      });
+      cachedCounts = null;
+      return NextResponse.json({
+        ok: true,
+        success: false,
+        failureCode: BUYOUT_ERROR_ROBLOX_PLUS_FLOW,
+        status: "ERROR",
+        buyerPrice: price,
+        basePrice: base,
+        discountPercent: info.robloxPlusDiscountPercent,
+        msg: `Roblox Plus −${info.robloxPlusDiscountPercent}% распознан (${price}/${base} R$), но cookie-only покупка pass больше не поддерживается Roblox. Нужен donor без Plus или официальный client/experience flow.`,
+      });
+    }
+
     const csrfRes = await fetch("https://auth.roblox.com/v2/logout", {
       method: "POST",
       headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
@@ -1145,7 +1167,7 @@ export async function POST(req: NextRequest) {
     let purchaseRes: Response | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       purchaseRes = await fetch(
-        `https://economy.roblox.com/v2/user-products/${info.productId}/purchase`,
+        `https://economy.roblox.com/v1/purchases/products/${info.productId}`,
         {
           method: "POST",
           headers: {
@@ -1201,10 +1223,6 @@ export async function POST(req: NextRequest) {
         where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
         data: { status: "COMPLETED", buyoutErrorCode: null, purchaseRate: currentRate, purchaserUsername, completedAt: new Date(), ...(money ?? {}) },
       });
-      if (info.robloxPlusDiscountPercent) await appendAdminNote(
-        orderId,
-        `[ROBLOX PLUS КУПЛЕНО ${stamp}] списано ${Number(purchaseData?.price ?? price)} R$, база ${base} R$, номинал ${order.amount} R$`,
-      );
       cachedCounts = null;
       notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder ?? false).catch(() => {});
       if (isAlreadyOwned) {
@@ -1233,9 +1251,8 @@ export async function POST(req: NextRequest) {
     cachedCounts = null;
 
     const failReason = purchaseData.reason ?? purchaseData.errorMsg ?? "Неизвестная ошибка";
-    // Economy v2 evolves independently from the legacy v1 schema. Expose only
-    // primitive response fields to the authenticated admin so a new refusal
-    // can be diagnosed without logging cookies, CSRF or opaque tokens.
+    // Expose only primitive response fields to the authenticated admin so a
+    // new Roblox refusal can be diagnosed without logging cookies or tokens.
     const robloxDiagnostic = Object.fromEntries(
       Object.entries(purchaseData)
         .filter(([, value]) => value === null || ["string", "number", "boolean"].includes(typeof value))
@@ -1385,27 +1402,39 @@ export async function POST(req: NextRequest) {
     if (!gpMatch) return NextResponse.json({ error: "No gamepass URL" }, { status: 400 });
     const gpId = gpMatch[1];
 
-    const urls = [
-      `https://apis.roblox.com/game-passes/v1/game-passes/${gpId}/product-info`,
-      `https://apis.roproxy.com/game-passes/v1/game-passes/${gpId}/product-info`,
-    ];
-    let info: any = null;
-    for (const url of urls) {
-      try {
-        const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
-        if (r.ok) { info = await r.json(); break; }
-      } catch { /* try next */ }
-    }
-    if (!info?.ProductId)
-      return NextResponse.json({ error: "Failed to fetch product info" }, { status: 502 });
+    const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+    const donorCookie = settings?.robloxCookie as string | null | undefined;
+    if (!donorCookie)
+      return NextResponse.json({ error: "Cookie не задан. /setcookie в боте" }, { status: 400 });
 
-    const price = info.PriceInRobux ?? 0;
-    const base = info.UserBasePriceInRobux ?? price;
-    const isManagedPricing = price !== base;
-    const isForSale = info.IsForSale ?? false;
-    const creatorId = info.Creator?.Id ?? info.Creator?.CreatorTargetId ?? 0;
-    const creatorName = info.Creator?.Name ?? "Unknown";
-    const name = info.Name ?? "Gamepass";
+    let info: ResolvedGamepass;
+    try {
+      info = await resolveGamepassForBuyer(gpId, donorCookie);
+    } catch (err) {
+      const status = err instanceof BuyoutError ? err.status : 502;
+      return NextResponse.json({ error: err instanceof Error ? err.message : "Не удалось получить персональную цену Roblox" }, { status });
+    }
+
+    const price = info.price;
+    const base = info.basePriceInRobux;
+    const isManagedPricing = info.isManagedPricing;
+    const isForSale = info.isForSale;
+    const creatorId = info.sellerId;
+    const creatorName = info.sellerName;
+    const name = info.name;
+
+    if (info.robloxPlusDiscountPercent) {
+      return NextResponse.json({
+        error: `Roblox Plus −${info.robloxPlusDiscountPercent}% распознан (${price}/${base} R$), но cookie-only скрипт покупки pass не поддерживается Roblox`,
+        failureCode: BUYOUT_ERROR_ROBLOX_PLUS_FLOW,
+      }, { status: 409 });
+    }
+    if (info.hasUnsafeBuyerPrice) {
+      return NextResponse.json({
+        error: `Рег. или неизвестная цена ${price}/${base} R$ — скрипт не выдан`,
+        failureCode: BUYOUT_ERROR_REGIONAL_PRICE,
+      }, { status: 409 });
+    }
 
     // ЦЕНА-СТОП (PLAN-gp-price-guard Ш2): скрипт с live-ценой радостно купил бы
     // и подороженный пасс — при расхождении с номиналом скрипт не выдаётся.
@@ -1421,7 +1450,7 @@ export async function POST(req: NextRequest) {
       `const r=await fetch("https://auth.roblox.com/v2/logout",{method:"POST",credentials:"include"});`,
       `const t=r.headers.get("x-csrf-token");`,
       `if(!t){console.log("❌ Не залогинен");return}`,
-      `const b=await fetch("https://economy.roblox.com/v2/user-products/${info.ProductId}/purchase",{`,
+      `const b=await fetch("https://economy.roblox.com/v1/purchases/products/${info.productId}",{`,
       `method:"POST",credentials:"include",`,
       `headers:{"Content-Type":"application/json","X-CSRF-TOKEN":t},`,
       // В скрипт зашита ожидаемая по номиналу цена (не live): даже скопированный

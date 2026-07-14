@@ -47,7 +47,7 @@ describe("purchaseGamepassVerified (bots)", () => {
     global.fetch = jest.fn(async (input: any) => {
       const url = String(input);
       calls.push(url);
-      if (url.includes("/user-products/") && url.includes("/purchase")) {
+      if (url.includes("/purchases/products/")) {
         // нераспарсенный ответ → провал без каноничного reason
         return new Response("<html>gateway error</html>", { status: 200 });
       }
@@ -72,7 +72,7 @@ describe("purchaseGamepassVerified (bots)", () => {
     global.fetch = jest.fn(async (input: any) => {
       const url = String(input);
       calls.push(url);
-      if (url.includes("/user-products/") && url.includes("/purchase")) {
+      if (url.includes("/purchases/products/")) {
         return jsonResponse({ purchased: false, reason: "InsufficientFunds" });
       }
       throw new Error(`unexpected fetch: ${url}`);
@@ -91,7 +91,7 @@ describe("purchaseGamepassVerified (bots)", () => {
   test("провал с reason и без владения → остаётся провалом", async () => {
     global.fetch = jest.fn(async (input: any) => {
       const url = String(input);
-      if (url.includes("/user-products/") && url.includes("/purchase")) {
+      if (url.includes("/purchases/products/")) {
         return jsonResponse({ purchased: false, reason: "SomethingWeird" });
       }
       if (url.includes("users/authenticated")) return jsonResponse({ id: 42, name: "Donor" });

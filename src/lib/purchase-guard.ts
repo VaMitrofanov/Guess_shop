@@ -10,6 +10,7 @@
  */
 export const PRICE_TOL = 2;
 export const BUYOUT_ERROR_REGIONAL_PRICE = "REGIONAL_PRICE";
+export const BUYOUT_ERROR_ROBLOX_PLUS_FLOW = "ROBLOX_PLUS_FLOW";
 
 export type RobloxPriceDiscountDetail = {
   Type?: string;
@@ -25,9 +26,11 @@ export type BuyerPriceClassification = {
 };
 
 /**
- * Roblox Plus is the only buyer-specific discount currently accepted by the
- * buyout system. Roblox identifies it explicitly in PriceDiscountDetails and
- * subsidises the discount, so the seller payout still follows basePrice.
+ * Roblox Plus is the only buyer-specific discount that may be classified as
+ * safe for pack/accounting calculations. Roblox identifies it explicitly in
+ * PriceDiscountDetails and subsidises the discount, so the seller payout still
+ * follows basePrice. Purchase transport is a separate policy: cookie-only
+ * pass buying is blocked for Plus until an official client flow exists.
  * Unknown, mixed or arithmetically inconsistent discounts stay fail-closed.
  */
 export function classifyBuyerPrice(
@@ -64,7 +67,7 @@ export function classifyBuyerPrice(
 
 export const expectedGamepassPrice = (amount: number): number => Math.ceil(amount / 0.7);
 
-/** Unknown/Regional buyer pricing is active. Typed Roblox Plus is safe. */
+/** Unknown/Regional buyer pricing is active. Typed Roblox Plus is known, not regional. */
 export function hasRegionalPrice(
   livePrice: number,
   userBasePrice?: number | null,
@@ -80,7 +83,8 @@ export function checkGamepassPrice(
 ): { ok: boolean; expected: number } {
   const expected = expectedGamepassPrice(amount);
   // Base price validates the seller's nominal. Buyer price is used for the
-  // actual debit only after classifyBuyerPrice() has accepted typed Plus.
+  // expected debit for pack/accounting; the purchase route still applies its
+  // separate transport policy and currently blocks cookie-only Plus purchases.
   const validationPrice = Number.isFinite(userBasePrice) && Number(userBasePrice) > 0
     ? Number(userBasePrice)
     : livePrice;

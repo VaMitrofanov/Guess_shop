@@ -2646,6 +2646,13 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         await writeBackPartnerTask(failedTask, "error", message);
         return json({ ok: true, success: false, error: message, partner, ...(await loadPartnerState(partner)) });
       }
+      if (buyerGp.robloxPlusDiscountPercent) {
+        const message = `Roblox Plus −${buyerGp.robloxPlusDiscountPercent}% (${buyerGp.price}/${buyerGp.basePriceInRobux} R$): cookie-only покупка pass не поддерживается Roblox`;
+        await prisma.partnerBuyoutTask.update({
+          where: { id: task.id }, data: { status: "READY", error: message },
+        });
+        return json({ ok: true, success: false, error: message, partner, ...(await loadPartnerState(partner)) });
+      }
 
       // Баланс НЕ блокирует выкуп: владелец разрешил уходить в минус — кнопка «Купить»
       // должна срабатывать всегда (даже в минус). Списание в ledger идёт как обычно;

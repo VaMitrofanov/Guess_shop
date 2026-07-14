@@ -3746,6 +3746,12 @@ export function registerCallbacks(bot: Telegraf): void {
           await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
           return;
         }
+        if (info.robloxPlusDiscountPercent) {
+          lines.push(`\n⛔ <b>Roblox Plus −${info.robloxPlusDiscountPercent}%</b>`);
+          lines.push(`Cookie-only скрипт покупки pass больше не поддерживается Roblox. Используй donor без Plus или официальный client/experience flow.`);
+          await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
+          return;
+        }
 
         const script = buildPurchaseScript(info);
         lines.push(`\nВставь в консоль (F12 → Console) на roblox.com:`);
@@ -3814,6 +3820,14 @@ export function registerCallbacks(bot: Telegraf): void {
           await ctx.reply(
             `⚠️ <b>Рег. цена ${info.priceInRobux}/${info.userBasePriceInRobux} R$</b>\n` +
             `Заказ <code>${order.wbCode}</code> перенесён в ошибку. Запусти его из TWA — там система найдёт полную замену по нику.`,
+            { parse_mode: "HTML" },
+          );
+          return;
+        }
+        if (info.robloxPlusDiscountPercent) {
+          await ctx.reply(
+            `⛔ <b>Roblox Plus −${info.robloxPlusDiscountPercent}% (${info.priceInRobux}/${info.userBasePriceInRobux} R$)</b>\n` +
+            `Cookie-only покупка pass не поддерживается Roblox. Нужен donor без Plus или официальный client/experience flow.`,
             { parse_mode: "HTML" },
           );
           return;

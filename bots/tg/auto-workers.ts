@@ -151,6 +151,16 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
         await alertAdmins(`⚠️ <b>Рег. цена</b> · ${order.wbCode}\n${info.priceInRobux}/${info.userBasePriceInRobux} R$ — заказ перенесён в ошибку; автозамена доступна в TWA.`);
         continue;
       }
+      if (info.robloxPlusDiscountPercent) {
+        autobuySkip.add(order.id);
+        await (db as any).wbOrder.update({
+          where: { id: order.id },
+          data: { status: "ERROR", buyoutErrorCode: "ROBLOX_PLUS_FLOW" },
+        });
+        await annotateOnce(order.id, "[ROBLOX-PLUS-FLOW", `скидка ${info.robloxPlusDiscountPercent}%, ${info.priceInRobux}/${info.userBasePriceInRobux} R$ — нужен donor без Plus или официальный client flow`);
+        await alertAdmins(`⚠️ <b>Roblox Plus ${info.robloxPlusDiscountPercent}%</b> · ${order.wbCode}\nCookie-only покупка pass не поддерживается Roblox; заказ перенесён в ошибку без списания.`);
+        continue;
+      }
       // Seller must match the confirmed nick when we have one (guards a swapped GP).
       if (order.robloxUsername && info.creatorName &&
           order.robloxUsername.toLowerCase() !== info.creatorName.toLowerCase()) {

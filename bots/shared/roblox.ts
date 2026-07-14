@@ -993,7 +993,7 @@ export function buildPurchaseScript(info: GamepassProductInfo): string {
     `const r=await fetch("https://auth.roblox.com/v2/logout",{method:"POST",credentials:"include"});`,
     `const t=r.headers.get("x-csrf-token");`,
     `if(!t){console.log("❌ Не залогинен");return}`,
-    `const b=await fetch("https://economy.roblox.com/v2/user-products/${info.productId}/purchase",{`,
+    `const b=await fetch("https://economy.roblox.com/v1/purchases/products/${info.productId}",{`,
     `method:"POST",credentials:"include",`,
     `headers:{"Content-Type":"application/json","X-CSRF-TOKEN":t},`,
     `body:JSON.stringify({expectedCurrency:1,expectedPrice:${info.priceInRobux},expectedSellerId:${info.creatorId}})`,
@@ -1088,7 +1088,7 @@ export async function purchaseGamepassDirect(
 ): Promise<PurchaseResult> {
   try {
     const res = await purchaseFetch(
-      `https://economy.roblox.com/v2/user-products/${productId}/purchase`,
+      `https://economy.roblox.com/v1/purchases/products/${productId}`,
       cookie,
       {
         method: "POST",

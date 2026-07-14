@@ -1463,6 +1463,7 @@ function BuyoutOrderCard({
     : Math.ceil(order.amount / 0.7);
   const nick = order.user.username ? `@${order.user.username}` : order.user.name ?? "—";
   const isBuying = buying === order.id;
+  const plusBlocked = Boolean(live?.robloxPlusDiscountPercent && !live?.hasUnsafeBuyerPrice);
   return (
     <div className="twa-buyout-row" style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10, opacity: dimmed ? 0.45 : 1 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -1519,15 +1520,17 @@ function BuyoutOrderCard({
           <button
             className="twa-press"
             onClick={() => onPurchase(order)}
-            disabled={!!buying}
+            disabled={!!buying || plusBlocked}
+            title={plusBlocked ? "Для этого donor нужен официальный Roblox client flow или аккаунт без Plus" : undefined}
             style={{
               padding: "10px 18px", border: "none", borderRadius: 10,
-              background: "rgba(48,209,88,0.14)", color: "#30d158",
+              background: plusBlocked ? "rgba(255,159,10,0.14)" : "rgba(48,209,88,0.14)",
+              color: plusBlocked ? C.orange : "#30d158",
               fontSize: 15, fontWeight: 600, cursor: "pointer",
-              opacity: isBuying ? 0.5 : 1,
+              opacity: isBuying ? 0.5 : plusBlocked ? 0.8 : 1,
             }}
           >
-            {isBuying ? "⏳…" : "Выкупить"}
+            {isBuying ? "⏳…" : plusBlocked ? "Нужен donor без Plus" : "Выкупить"}
           </button>
         )}
       </div>

@@ -315,10 +315,14 @@ TG — `editMessageText` / `editMessageMedia` (фото-карточка одн�
   сбрасывает `autoBuyoutBelowSince`, чтобы цикл после пополнения начинался чисто.
   **Roblox Plus / Managed Pricing (фикс 2026-07-14):** product-info перед покупкой читается
   с cookie donor на официальном домене Roblox. `UserBasePriceInRobux` валидирует номинал;
-  `PriceInRobux` используется как фактическое списание. Бот разрешает разницу только при
-  единственном корректном detail `RobloxPlusSubscription` 10%/20%; unknown/mixed скидка
-  ставит `ERROR/REGIONAL_PRICE`. Покупка идёт через Economy API v2. Cookie никогда не
-  отправляется roproxy; недоступный buyer lookup останавливает денежную операцию.
+  `PriceInRobux` используется для расчёта ожидаемого списания и пачки. Бот распознаёт
+  разницу как Plus только при единственном корректном detail `RobloxPlusSubscription`
+  10%/20%; unknown/mixed скидка ставит `ERROR/REGIONAL_PRICE`. Production-canary доказал,
+  что cookie-only pass purchase не принимает Plus buyer-price: manual/script, partner и
+  auto-buyout теперь останавливаются с `ROBLOX_PLUS_FLOW` без purchase POST. Non-Plus
+  покупки остаются на legacy Economy v1; auto-buyout переносит Plus-заказ в `ERROR` с
+  отдельным кодом для фильтрации. Cookie никогда не отправляется roproxy;
+  недоступный buyer lookup останавливает денежную операцию.
   Управление: `/autobuy` (статус), `/autobuy on|off`, `/autobuy threshold N`.
   **Контрольная проверка владения (Ф1, 2026-07-12).** Roblox при таймауте/5xx нередко
   всё же проводит покупку — раньше такой заказ ложно откатывался в `PENDING` и копил

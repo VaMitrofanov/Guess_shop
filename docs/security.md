@@ -203,24 +203,28 @@ cookie не передаётся proxy-fallback. Регресс покрыт uni
 
 **Контролируемое исключение 14.07 — удалено.** Scoped `PAYOUT_EXPERIMENT` доказал, что
 legacy v1 возвращает `PriceChanged`, но не стал постоянным обходом. Рабочий контракт не
-принимает скидку из клиента: сервер читает свежий authenticated product-info, разрешает
-только один арифметически корректный detail `RobloxPlusSubscription` на 10% или 20% и
-покупает через Economy API v2. Unknown, mixed или поддельный detail остаётся fail-closed.
+принимает скидку из клиента: сервер читает свежий authenticated product-info и распознаёт
+только один арифметически корректный detail `RobloxPlusSubscription` на 10% или 20%.
+Unknown, mixed или поддельный detail остаётся fail-closed.
 
 Production-попытка с корректной buyer-price вернула `PriceChanged`, balance/ownership не
 изменились. Повторный аудит `PriceDiscountDetails` уточнил угрозу: все 12 случаев имели
 typed-причину `RobloxPlusSubscription:10`, а не Regional Pricing. Roblox Plus официально
 субсидирует 10–20% и сохраняет доход продавца. Реализованный контракт allowlist-ит только
 typed Plus-detail, проверяет процент, сумму скидки и base-price, а любой unknown/mixed
-discount оставляет fail-closed. Все денежные cookie-пути переведены с legacy
-`/v1/purchases/products` на `/v2/user-products/{productId}/purchase`. Полный план —
-`docs/roblox-plus-buyout-plan.md`.
+discount оставляет fail-closed. Реальный canary показал, что legacy v1 отклоняет и base,
+и buyer-price как `PriceChanged`, а `/v2/user-products/{productId}/purchase` для pass
+возвращает 404. Баланс, ownership и заказ не изменились. Поэтому non-Plus cookie-flow
+возвращён на legacy v1, а Plus-покупка во всех денежных путях блокируется typed-кодом
+`ROBLOX_PLUS_FLOW` до официального client/experience flow. Перебор guessed endpoint на
+реальных заказах запрещён. Полный план — `docs/roblox-plus-buyout-plan.md`.
 
 Операционный инвариант: базовая цена отвечает на вопрос «правильный ли геймпасс для заказа»;
-buyer-specific цена отвечает на вопрос «сколько реально спишется». Отличие разрешено только
-при доказанном Plus-detail; во всех остальных случаях это стоп-сигнал и поиск замены.
+buyer-specific цена отвечает на вопрос «сколько ожидаемо спишется» и используется для
+расчёта пачки. Отличие классифицируется как Plus только при доказанном detail, но сам
+cookie-only purchase остаётся заблокирован; остальные отличия — стоп-сигнал и поиск замены.
 Официальные описания: https://create.roblox.com/docs/production/monetization/roblox-plus и
-https://create.roblox.com/docs/production/monetization/regional-pricing
+https://create.roblox.com/docs/production/monetization/passes
 
 ### 15. Компрометация кода до покупателя (ПВЗ-фрод) — HIGH, 🔴 ОТКРЫТО, план утверждён (2026-07-13)
 

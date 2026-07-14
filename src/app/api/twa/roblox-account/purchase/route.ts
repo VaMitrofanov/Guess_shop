@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
 import { BuyoutError, needsOwnershipCheck, resolveGamepassForBuyer, verifyOwnershipAfterFailure } from "@/lib/roblox-buyout";
-import { BUYOUT_ERROR_REGIONAL_PRICE, checkGamepassPrice, expectedGamepassPrice } from "@/lib/purchase-guard";
+import { BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, checkGamepassPrice, expectedGamepassPrice } from "@/lib/purchase-guard";
 
 const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
@@ -304,6 +304,13 @@ export async function POST(req: NextRequest) {
     const price = buyerInfo.price;
     const sellerId = buyerInfo.sellerId;
 
+    if (buyerInfo.robloxPlusDiscountPercent) {
+      return NextResponse.json({
+        error: `Roblox Plus −${buyerInfo.robloxPlusDiscountPercent}% распознан (${price}/${buyerInfo.basePriceInRobux} R$), но cookie-only покупка pass не поддерживается Roblox`,
+        failureCode: BUYOUT_ERROR_ROBLOX_PLUS_FLOW,
+      }, { status: 409 });
+    }
+
     const csrfRes = await fetch("https://auth.roblox.com/v2/logout", {
       method: "POST",
       headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
@@ -316,7 +323,7 @@ export async function POST(req: NextRequest) {
     let purchaseRes: Response | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       purchaseRes = await fetch(
-        `https://economy.roblox.com/v2/user-products/${productId}/purchase`,
+        `https://economy.roblox.com/v1/purchases/products/${productId}`,
         {
           method: "POST",
           headers: {
