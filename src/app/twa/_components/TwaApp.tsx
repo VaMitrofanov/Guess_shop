@@ -210,6 +210,25 @@ export default function TwaApp() {
     return () => { cancelled = true; };
   }, []);
 
+  // ready()+expand() гарантированно после реальной загрузки SDK: путь с
+  // сохранённым токеном раньше их пропускал, и на iOS Telegram viewport мог
+  // остаться неразвёрнутым (нижний бар за пределами видимой области).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const deadline = Date.now() + 6000;
+      while (!cancelled && Date.now() < deadline) {
+        const wa = window.Telegram?.WebApp;
+        if (wa) {
+          try { wa.ready(); wa.expand(); } catch { /* SDK ещё гидрируется */ }
+          return;
+        }
+        await new Promise(r => setTimeout(r, 100));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // Fetch urgent orders count for badge after auth.
   // Uses the lightweight /urgent-count endpoint (single COUNT on indexed
   // status column) instead of the full Orders pipeline.
