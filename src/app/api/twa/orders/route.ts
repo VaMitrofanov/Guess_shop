@@ -1233,7 +1233,22 @@ export async function POST(req: NextRequest) {
     cachedCounts = null;
 
     const failReason = purchaseData.reason ?? purchaseData.errorMsg ?? "Неизвестная ошибка";
-    return NextResponse.json({ ok: true, success: false, msg: failReason });
+    // Economy v2 evolves independently from the legacy v1 schema. Expose only
+    // primitive response fields to the authenticated admin so a new refusal
+    // can be diagnosed without logging cookies, CSRF or opaque tokens.
+    const robloxDiagnostic = Object.fromEntries(
+      Object.entries(purchaseData)
+        .filter(([, value]) => value === null || ["string", "number", "boolean"].includes(typeof value))
+        .slice(0, 20),
+    );
+    return NextResponse.json({
+      ok: true,
+      success: false,
+      msg: failReason,
+      robloxHttpStatus: purchaseRes?.status ?? null,
+      robloxDiagnostic,
+      robloxKeys: Object.keys(purchaseData).slice(0, 30),
+    });
   }
 
   if (action === "edit-avito") {
