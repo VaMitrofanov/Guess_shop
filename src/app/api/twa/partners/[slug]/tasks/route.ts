@@ -27,7 +27,6 @@ import { notifyPartnerBuyout, type PartnerBuyoutNotifyItem } from "@/lib/partner
 import { partnerGamepassCommentValue, settledPartnerRowPolicy } from "@/lib/partner-sheet-policy";
 import { prisma } from "@/lib/prisma";
 import { extractTwaUser } from "@/lib/twa-auth";
-import { hasRegionalPrice } from "@/lib/purchase-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -2639,7 +2638,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         await writeBackPartnerTask(failedTask, "error", message);
         return json({ ok: true, success: false, error: message, partner, ...(await loadPartnerState(partner)) });
       }
-      if (hasRegionalPrice(buyerGp.price, buyerGp.basePriceInRobux)) {
+      if (buyerGp.hasUnsafeBuyerPrice) {
         const message = `Региональная цена ${buyerGp.price}/${buyerGp.basePriceInRobux} R$: покупка запрещена`;
         const failedTask = await prisma.partnerBuyoutTask.update({
           where: { id: task.id }, data: { status: "FAILED", error: message },

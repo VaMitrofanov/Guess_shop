@@ -5,10 +5,10 @@
  */
 import {
   PRICE_TOL,
+  classifyBuyerPrice,
   expectedGamepassPrice,
   checkGamepassPrice,
   hasRegionalPrice,
-  matchesRegionalPriceOverride,
   sellerMatchesOrder,
 } from "../lib/purchase-guard";
 
@@ -78,28 +78,26 @@ describe("hasRegionalPrice — жёсткий стоп региональной 
     expect(hasRegionalPrice(1429, 1429)).toBe(false);
     expect(hasRegionalPrice(1429, null)).toBe(false);
   });
-});
 
-describe("matchesRegionalPriceOverride — разовый payout experiment", () => {
-  const context = { orderCode: "TEST-ORDER", buyerPrice: 2573, basePrice: 2858 };
-
-  test("принимает только точное подтверждение кода и свежих цен", () => {
-    expect(matchesRegionalPriceOverride({
-      mode: "PAYOUT_EXPERIMENT",
-      orderCode: "test-order",
-      buyerPrice: 2573,
-      basePrice: 2858,
-    }, context)).toBe(true);
+  test.each([10, 20])("typed Roblox Plus %p%% разрешён", (percent) => {
+    const base = 2858;
+    const discount = Math.floor(base * percent / 100);
+    const details = [{ Type: "RobloxPlusSubscription", Percent: percent, AmountInRobux: discount }];
+    expect(hasRegionalPrice(base - discount, base, details)).toBe(false);
+    expect(classifyBuyerPrice(base - discount, base, details)).toEqual({
+      kind: "ROBLOX_PLUS",
+      discountPercent: percent,
+      discountAmount: discount,
+    });
   });
 
-  test.each([
-    [{ mode: "PAYOUT_EXPERIMENT", orderCode: "OTHER", buyerPrice: 2573, basePrice: 2858 }],
-    [{ mode: "PAYOUT_EXPERIMENT", orderCode: "TEST-ORDER", buyerPrice: 2572, basePrice: 2858 }],
-    [{ mode: "PAYOUT_EXPERIMENT", orderCode: "TEST-ORDER", buyerPrice: 2573, basePrice: 2857 }],
-    [{ mode: "NORMAL", orderCode: "TEST-ORDER", buyerPrice: 2573, basePrice: 2858 }],
-    [null],
-  ])("отклоняет неполное или устаревшее подтверждение: %p", (request) => {
-    expect(matchesRegionalPriceOverride(request, context)).toBe(false);
+  test("unknown, mixed и поддельная Plus-арифметика остаются заблокированы", () => {
+    expect(hasRegionalPrice(2573, 2858, [{ Type: "RegionalPricing", Percent: 10, AmountInRobux: 285 }])).toBe(true);
+    expect(hasRegionalPrice(2573, 2858, [
+      { Type: "RobloxPlusSubscription", Percent: 10, AmountInRobux: 285 },
+      { Type: "OtherDiscount", Percent: 1, AmountInRobux: 1 },
+    ])).toBe(true);
+    expect(hasRegionalPrice(2573, 2858, [{ Type: "RobloxPlusSubscription", Percent: 10, AmountInRobux: 284 }])).toBe(true);
   });
 });
 

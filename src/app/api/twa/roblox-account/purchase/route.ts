@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
 import { BuyoutError, needsOwnershipCheck, resolveGamepassForBuyer, verifyOwnershipAfterFailure } from "@/lib/roblox-buyout";
-import { BUYOUT_ERROR_REGIONAL_PRICE, checkGamepassPrice, expectedGamepassPrice, hasRegionalPrice } from "@/lib/purchase-guard";
+import { BUYOUT_ERROR_REGIONAL_PRICE, checkGamepassPrice, expectedGamepassPrice } from "@/lib/purchase-guard";
 
 const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
@@ -282,7 +282,7 @@ export async function POST(req: NextRequest) {
             { error: `⛔ Пасс привязан к заказу ${linked.wbCode}: базовая цена ${buyerInfo.basePriceInRobux} R$ ≠ ожидаемой ${expected} R$ (номинал ${linked.amount}). Выкуп заблокирован — нужен пасс с базой ${expected} R$.` },
             { status: 409 },
           );
-        if (hasRegionalPrice(buyerInfo.price, buyerInfo.basePriceInRobux)) {
+        if (buyerInfo.hasUnsafeBuyerPrice) {
           await (prisma as any).wbOrder.update({
             where: { id: linked.id },
             data: { status: "ERROR", buyoutErrorCode: BUYOUT_ERROR_REGIONAL_PRICE },
@@ -293,7 +293,7 @@ export async function POST(req: NextRequest) {
           );
         }
       }
-      if (!linked && hasRegionalPrice(buyerInfo.price, buyerInfo.basePriceInRobux))
+      if (!linked && buyerInfo.hasUnsafeBuyerPrice)
         return NextResponse.json(
           { error: `Рег. цена ${buyerInfo.price}/${buyerInfo.basePriceInRobux} R$ — покупка запрещена`, failureCode: BUYOUT_ERROR_REGIONAL_PRICE },
           { status: 409 },
@@ -316,7 +316,7 @@ export async function POST(req: NextRequest) {
     let purchaseRes: Response | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       purchaseRes = await fetch(
-        `https://economy.roblox.com/v1/purchases/products/${productId}`,
+        `https://economy.roblox.com/v2/user-products/${productId}/purchase`,
         {
           method: "POST",
           headers: {

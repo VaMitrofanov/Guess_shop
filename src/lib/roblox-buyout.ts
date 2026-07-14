@@ -1,3 +1,5 @@
+import { classifyBuyerPrice, type RobloxPriceDiscountDetail } from "@/lib/purchase-guard";
+
 export const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
 export class BuyoutError extends Error {
@@ -20,6 +22,9 @@ export interface ResolvedGamepass {
   isForSale: boolean;
   isManagedPricing: boolean;
   basePriceInRobux: number;
+  priceDiscountDetails: RobloxPriceDiscountDetail[];
+  robloxPlusDiscountPercent: number | null;
+  hasUnsafeBuyerPrice: boolean;
   image: string | null;
 }
 
@@ -47,6 +52,7 @@ type RobloxProductInfo = {
   ProductId?: number;
   PriceInRobux?: number;
   UserBasePriceInRobux?: number;
+  PriceDiscountDetails?: RobloxPriceDiscountDetail[];
   Name?: string;
   Creator?: {
     Name?: string;
@@ -103,6 +109,8 @@ export async function resolveGamepass(raw: string): Promise<ResolvedGamepass> {
 
   const price = info.PriceInRobux ?? 0;
   const base = info.UserBasePriceInRobux ?? price;
+  const priceDiscountDetails = Array.isArray(info.PriceDiscountDetails) ? info.PriceDiscountDetails : [];
+  const buyerPrice = classifyBuyerPrice(price, base, priceDiscountDetails);
   let image: string | null = null;
 
   const tRes = await fetch(
@@ -124,6 +132,9 @@ export async function resolveGamepass(raw: string): Promise<ResolvedGamepass> {
     isForSale: info.IsForSale ?? false,
     isManagedPricing: price !== base,
     basePriceInRobux: base,
+    priceDiscountDetails,
+    robloxPlusDiscountPercent: buyerPrice.kind === "ROBLOX_PLUS" ? buyerPrice.discountPercent : null,
+    hasUnsafeBuyerPrice: buyerPrice.kind === "UNSAFE_DISCOUNT",
     image,
   };
 }
@@ -162,6 +173,8 @@ export async function resolveGamepassForBuyer(
 
   const price = info.PriceInRobux ?? 0;
   const base = info.UserBasePriceInRobux ?? price;
+  const priceDiscountDetails = Array.isArray(info.PriceDiscountDetails) ? info.PriceDiscountDetails : [];
+  const buyerPrice = classifyBuyerPrice(price, base, priceDiscountDetails);
   return {
     gamepassId: Number(gpId),
     productId: info.ProductId,
@@ -172,6 +185,9 @@ export async function resolveGamepassForBuyer(
     isForSale: info.IsForSale ?? false,
     isManagedPricing: price !== base,
     basePriceInRobux: base,
+    priceDiscountDetails,
+    robloxPlusDiscountPercent: buyerPrice.kind === "ROBLOX_PLUS" ? buyerPrice.discountPercent : null,
+    hasUnsafeBuyerPrice: buyerPrice.kind === "UNSAFE_DISCOUNT",
     image: null,
   };
 }
@@ -202,7 +218,7 @@ export async function purchaseGamepassWithCookie(
 
   let purchaseRes: Response | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
-    purchaseRes = await fetch(`https://economy.roblox.com/v1/purchases/products/${input.productId}`, {
+    purchaseRes = await fetch(`https://economy.roblox.com/v2/user-products/${input.productId}/purchase`, {
       method: "POST",
       headers: {
         Cookie: `.ROBLOSECURITY=${cookie}`,

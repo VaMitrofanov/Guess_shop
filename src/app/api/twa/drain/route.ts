@@ -331,7 +331,7 @@ export async function POST(req: NextRequest) {
 
     let purchaseRes: Response | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
-      purchaseRes = await fetch(`https://economy.roblox.com/v1/purchases/products/${productId}`, {
+      purchaseRes = await fetch(`https://economy.roblox.com/v2/user-products/${productId}/purchase`, {
         method: "POST",
         headers: {
           Cookie: `.ROBLOSECURITY=${donorCookie}`,

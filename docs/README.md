@@ -25,6 +25,7 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [deploy.md](deploy.md) | Как деплоится каждый сервис (без секретов) |
 | [security.md](security.md) | Модель угроз, известные риски, что проверять перед прод-изменениями |
 | [trello-workflow.md](trello-workflow.md) | Правила работы с Trello: понятные карточки, техническая расшифровка и статусы |
+| [roblox-plus-buyout-plan.md](roblox-plus-buyout-plan.md) | План поддержки Roblox Plus 10–20%: классификация скидок, фильтр пачки, purchase transport и rollout |
 
 ## Три канала — единая экосистема
 

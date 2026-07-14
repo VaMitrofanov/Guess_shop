@@ -3738,7 +3738,7 @@ export function registerCallbacks(bot: Telegraf): void {
           return;
         }
 
-        if (info.isManagedPricing) {
+        if (info.hasUnsafeBuyerPrice) {
           lines.push(`\n⛔ <b>MANAGED PRICING ВКЛЮЧЁН!</b>`);
           lines.push(`Цена Roblox: <b>${info.priceInRobux} R$</b> · Цена продавца: <b>${info.userBasePriceInRobux} R$</b>`);
           lines.push(`Выкуп запрещён. Запусти заказ из TWA: там будет поиск полной замены по нику.`);
@@ -3806,7 +3806,7 @@ export function registerCallbacks(bot: Telegraf): void {
           return;
         }
 
-        if (info.isManagedPricing) {
+        if (info.hasUnsafeBuyerPrice) {
           await (db as any).wbOrder.update({
             where: { id: orderId },
             data: { status: "ERROR", buyoutErrorCode: "REGIONAL_PRICE" },

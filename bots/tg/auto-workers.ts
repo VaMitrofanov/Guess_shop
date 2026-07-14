@@ -141,7 +141,7 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
         await annotateOnce(order.id, "[AUTOBUY-SKIP", `базовая цена ${info.userBasePriceInRobux}≠ожид ${want} — ручной выкуп`);
         continue;
       }
-      if (info.isManagedPricing) {
+      if (info.hasUnsafeBuyerPrice) {
         autobuySkip.add(order.id);
         await (db as any).wbOrder.update({
           where: { id: order.id },

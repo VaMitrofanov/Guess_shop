@@ -1315,8 +1315,11 @@ interface BuyoutOrder {
 interface GpLiveInfo {
   expected: number;
   livePrice: number | null;
+  basePrice: number | null;
   isForSale: boolean | null;
   priceMismatch: boolean;
+  robloxPlusDiscountPercent: number | null;
+  hasUnsafeBuyerPrice: boolean;
   reusedIn: string | null;
 }
 
@@ -1351,9 +1354,17 @@ function sortByAge(a: BuyoutOrder, b: BuyoutOrder) {
 
 const MAX_REMAINDER_DIRTY = 143;
 
-function optimizeWbSubset(wbOrders: BuyoutOrder[], budget: number) {
+function buyoutCost(order: BuyoutOrder, liveMap: Record<string, GpLiveInfo>): number {
+  const expected = Math.ceil(order.amount / 0.7);
+  const live = liveMap[order.id];
+  return live?.robloxPlusDiscountPercent && live.livePrice != null && !live.priceMismatch && !live.hasUnsafeBuyerPrice
+    ? live.livePrice
+    : expected;
+}
+
+function optimizeWbSubset(wbOrders: BuyoutOrder[], budget: number, liveMap: Record<string, GpLiveInfo>) {
   const n = wbOrders.length;
-  const d = wbOrders.map(o => Math.ceil(o.amount / 0.7));
+  const d = wbOrders.map(o => buyoutCost(o, liveMap));
   const total = d.reduce((a, b) => a + b, 0);
   if (total <= budget) return { selectedIdx: new Set(d.map((_, i) => i)), targetSum: total };
 
@@ -1397,13 +1408,13 @@ function optimizeWbSubset(wbOrders: BuyoutOrder[], budget: number) {
   return { selectedIdx, targetSum: bestSum };
 }
 
-function buildBuyoutPlan(orders: BuyoutOrder[], balance: number) {
+function buildBuyoutPlan(orders: BuyoutOrder[], balance: number, liveMap: Record<string, GpLiveInfo>) {
   const { direct, avito, wb } = groupBySource(orders);
   direct.sort(sortByAge);
   avito.sort(sortByAge);
   wb.sort(sortByAge);
 
-  const mandatoryDirty = [...direct, ...avito].reduce((s, o) => s + Math.ceil(o.amount / 0.7), 0);
+  const mandatoryDirty = [...direct, ...avito].reduce((s, o) => s + buyoutCost(o, liveMap), 0);
   const wbBudget = balance - mandatoryDirty;
 
   let selectedWb: BuyoutOrder[];
@@ -1415,13 +1426,13 @@ function buildBuyoutPlan(orders: BuyoutOrder[], balance: number) {
     waitingWb = wb;
     wbDirtyUsed = 0;
   } else {
-    const totalWbDirty = wb.reduce((s, o) => s + Math.ceil(o.amount / 0.7), 0);
+    const totalWbDirty = wb.reduce((s, o) => s + buyoutCost(o, liveMap), 0);
     if (totalWbDirty <= wbBudget) {
       selectedWb = wb;
       waitingWb = [];
       wbDirtyUsed = totalWbDirty;
     } else {
-      const { selectedIdx, targetSum } = optimizeWbSubset(wb, wbBudget);
+      const { selectedIdx, targetSum } = optimizeWbSubset(wb, wbBudget, liveMap);
       selectedWb = wb.filter((_, i) => selectedIdx.has(i));
       waitingWb = wb.filter((_, i) => !selectedIdx.has(i));
       wbDirtyUsed = targetSum;
@@ -1447,7 +1458,9 @@ function groupBySource(orders: BuyoutOrder[]) {
 function BuyoutOrderCard({
   order, buying, onPurchase, dimmed, live,
 }: { order: BuyoutOrder; buying: string | null; onPurchase: (o: BuyoutOrder) => void; dimmed?: boolean; live?: GpLiveInfo }) {
-  const dirty = Math.ceil(order.amount / 0.7);
+  const dirty = live?.robloxPlusDiscountPercent && live.livePrice != null && !live.priceMismatch && !live.hasUnsafeBuyerPrice
+    ? live.livePrice
+    : Math.ceil(order.amount / 0.7);
   const nick = order.user.username ? `@${order.user.username}` : order.user.name ?? "—";
   const isBuying = buying === order.id;
   return (
@@ -1523,6 +1536,16 @@ function BuyoutOrderCard({
       {live?.priceMismatch && live.livePrice != null && (
         <div style={{ fontSize: 13, fontWeight: 600, color: C.orange }}>
           ⚠️ Фактическая цена пасса {live.livePrice.toLocaleString("ru-RU")} R$ ≠ расчётной {live.expected.toLocaleString("ru-RU")} R$
+        </div>
+      )}
+      {live?.robloxPlusDiscountPercent && live.livePrice != null && live.basePrice != null && (
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.green }}>
+          ✨ Roblox Plus −{live.robloxPlusDiscountPercent}%: списание {live.livePrice.toLocaleString("ru-RU")} R$, база продавца {live.basePrice.toLocaleString("ru-RU")} R$
+        </div>
+      )}
+      {live?.hasUnsafeBuyerPrice && (
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.red }}>
+          ⛔ Неизвестная/региональная buyer-цена — сервер заблокирует покупку
         </div>
       )}
       {live?.isForSale === false && (
@@ -1636,7 +1659,9 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
       const buyout = rBuyout.ok ? ((await rBuyout.json()).orders ?? []) : [];
       const avito = rAvito.ok ? ((await rAvito.json()).orders ?? []) : [];
       const all: BuyoutOrder[] = [...direct, ...buyout, ...avito];
-      const queue = all.filter(o => !isUnpaidDirect(o) && o.buyoutErrorCode !== "REGIONAL_PRICE");
+      // REGIONAL_PRICE rows are included: gp-live-check now distinguishes a
+      // typed Roblox Plus discount from an actually unsafe buyer price.
+      const queue = all.filter(o => !isUnpaidDirect(o));
       setOrders(queue);
       setAwaitingPay(all.filter(isUnpaidDirect));
       void checkLive(all);
@@ -1649,10 +1674,10 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
   // Ф2: виджет «Очередь» — статы наверх при каждом изменении очереди/баланса.
   useEffect(() => {
     if (!onStats) return;
-    const dirty = orders.reduce((s, o) => s + Math.ceil(o.amount / 0.7), 0);
-    const affordable = balance === null ? null : buildBuyoutPlan(orders, balance).selected.length;
+    const dirty = orders.reduce((s, o) => s + buyoutCost(o, liveMap), 0);
+    const affordable = balance === null ? null : buildBuyoutPlan(orders, balance, liveMap).selected.length;
     onStats({ queue: orders.length, dirty, affordable, awaitingPay: awaitingPay.length });
-  }, [orders, awaitingPay, balance, onStats]);
+  }, [orders, awaitingPay, balance, liveMap, onStats]);
 
   async function doPurchase(order: BuyoutOrder) {
     if (buying) return;
@@ -1668,8 +1693,8 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
       if (d.success) {
         haptic.notify("success");
         toast(`✅ ${d.msg}`, "success");
-        const dirty = Math.ceil(order.amount / 0.7);
-        onBalanceChange(-dirty);
+        const charged = Number(d.chargedPrice ?? buyoutCost(order, liveMap));
+        onBalanceChange(-charged);
         setOrders(prev => prev.filter(o => o.id !== order.id));
       } else {
         haptic.notify("error");
@@ -1727,11 +1752,11 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
       if (bulkStop.current) break;
       // Rebuild the affordable pack after every result. A REGIONAL_PRICE row
       // spends nothing, so a previously waiting order may enter immediately.
-      const next = buildBuyoutPlan(remaining, localBalance).selected[0];
+      const next = buildBuyoutPlan(remaining, localBalance, liveMap).selected[0];
       if (!next) break;
       const order = next;
       remaining = remaining.filter(o => o.id !== order.id);
-      const gross = Math.ceil(order.amount / 0.7);
+      let gross = buyoutCost(order, liveMap);
       const nick = buyoutNick(order);
       if (processed > 0) await sleep(bulkPause());
       if (bulkStop.current) break;
@@ -1744,6 +1769,7 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
         const d = await r.json().catch(() => null);
         if (r.ok && d?.success) {
           ok++;
+          gross = Number(d.chargedPrice ?? gross);
           localBalance -= gross;
           onBalanceChange(-gross);
           setOrders(prev => prev.filter(o => o.id !== order.id));
@@ -1821,8 +1847,8 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
     );
   }
 
-  const plan = buildBuyoutPlan(orders, balance);
-  const waitingDirty = plan.waiting.reduce((s, o) => s + Math.ceil(o.amount / 0.7), 0);
+  const plan = buildBuyoutPlan(orders, balance, liveMap);
+  const waitingDirty = plan.waiting.reduce((s, o) => s + buyoutCost(o, liveMap), 0);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

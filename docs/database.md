@@ -192,7 +192,10 @@ B2B/partner-ops контур для сторонних выкупов, перв�
 
 `priceRobux` — согласованная глобальная/базовая цена продавца и база партнёрского ledger;
 `purchasePriceRobux` — фактически списанная цена Roblox. Региональную цену покупать запрещено,
-поэтому новый `purchase-task` при `PriceInRobux != UserBasePriceInRobux` завершается `FAILED`.
+поэтому новый `purchase-task` при неизвестном/региональном
+`PriceInRobux != UserBasePriceInRobux` завершается `FAILED`. Единственное исключение —
+серверно подтверждённый `RobloxPlusSubscription` 10%/20% с корректной арифметикой: Roblox
+субсидирует разницу, а `purchaseRobuxAmount` хранит фактическое списание buyer-price.
 Для Google Sheets `externalRowId` = `spreadsheetId:sheetTitle:rowNumber`; в `sheetRaw`
 сохраняются `spreadsheetId`, `sheetTitle`, `rowNumber`, `range`, исходные ячейки `A:F`, время
 sync и результат write-back (`writeBackAt` / `lastWriteBackError`), чтобы write-back и

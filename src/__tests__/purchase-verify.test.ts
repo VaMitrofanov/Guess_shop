@@ -47,7 +47,7 @@ describe("purchaseGamepassVerified (bots)", () => {
     global.fetch = jest.fn(async (input: any) => {
       const url = String(input);
       calls.push(url);
-      if (url.includes("/purchases/products/")) {
+      if (url.includes("/user-products/") && url.includes("/purchase")) {
         // нераспарсенный ответ → провал без каноничного reason
         return new Response("<html>gateway error</html>", { status: 200 });
       }
@@ -72,7 +72,7 @@ describe("purchaseGamepassVerified (bots)", () => {
     global.fetch = jest.fn(async (input: any) => {
       const url = String(input);
       calls.push(url);
-      if (url.includes("/purchases/products/")) {
+      if (url.includes("/user-products/") && url.includes("/purchase")) {
         return jsonResponse({ purchased: false, reason: "InsufficientFunds" });
       }
       throw new Error(`unexpected fetch: ${url}`);
@@ -91,7 +91,7 @@ describe("purchaseGamepassVerified (bots)", () => {
   test("провал с reason и без владения → остаётся провалом", async () => {
     global.fetch = jest.fn(async (input: any) => {
       const url = String(input);
-      if (url.includes("/purchases/products/")) {
+      if (url.includes("/user-products/") && url.includes("/purchase")) {
         return jsonResponse({ purchased: false, reason: "SomethingWeird" });
       }
       if (url.includes("users/authenticated")) return jsonResponse({ id: 42, name: "Donor" });
@@ -157,8 +157,34 @@ describe("resolveGamepassForBuyer (regional pricing)", () => {
       price: 1287,
       basePriceInRobux: 1429,
       isManagedPricing: true,
+      hasUnsafeBuyerPrice: true,
+      robloxPlusDiscountPercent: null,
       sellerId: 42,
       isForSale: true,
+    });
+  });
+
+  test("распознаёт typed Roblox Plus и не помечает его региональным", async () => {
+    global.fetch = jest.fn(async () => jsonResponse({
+      ProductId: 111,
+      PriceInRobux: 2573,
+      UserBasePriceInRobux: 2858,
+      PriceDiscountDetails: [{
+        Type: "RobloxPlusSubscription",
+        AmountInRobux: 285,
+        Percent: 10,
+        EndTime: null,
+      }],
+      Creator: { Id: 42, Name: "Seller" },
+      IsForSale: true,
+    })) as any;
+
+    const gp = await resolveGamepassForBuyer("999", "secret-cookie");
+    expect(gp).toMatchObject({
+      price: 2573,
+      basePriceInRobux: 2858,
+      robloxPlusDiscountPercent: 10,
+      hasUnsafeBuyerPrice: false,
     });
   });
 

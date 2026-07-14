@@ -904,6 +904,9 @@ export interface GamepassProductInfo {
   name:                string;
   isForSale:           boolean;
   isManagedPricing:    boolean;
+  priceDiscountDetails: Array<{ Type?: string; AmountInRobux?: number; Percent?: number; EndTime?: string | null }>;
+  robloxPlusDiscountPercent: number | null;
+  hasUnsafeBuyerPrice: boolean;
 }
 
 /**
@@ -944,6 +947,8 @@ function parseProductInfo(d: any): GamepassProductInfo | null {
   if (!d || !d.ProductId) return null;
   const price = d.PriceInRobux ?? 0;
   const base  = d.UserBasePriceInRobux ?? price;
+  const details = Array.isArray(d.PriceDiscountDetails) ? d.PriceDiscountDetails : [];
+  const plus = classifyRobloxPlusPrice(price, base, details);
   return {
     productId:            d.ProductId,
     priceInRobux:         price,
@@ -953,7 +958,29 @@ function parseProductInfo(d: any): GamepassProductInfo | null {
     name:                 d.Name ?? "Gamepass",
     isForSale:            d.IsForSale ?? false,
     isManagedPricing:     price !== base,
+    priceDiscountDetails: details,
+    robloxPlusDiscountPercent: plus.percent,
+    hasUnsafeBuyerPrice: price !== base && !plus.valid,
   };
+}
+
+function classifyRobloxPlusPrice(
+  price: number,
+  base: number,
+  details: Array<{ Type?: string; AmountInRobux?: number; Percent?: number }>,
+): { valid: boolean; percent: number | null } {
+  if (price === base) return { valid: false, percent: null };
+  if (details.length !== 1) return { valid: false, percent: null };
+  const d = details[0];
+  const percent = Number(d.Percent);
+  const amount = Number(d.AmountInRobux);
+  const valid = d.Type === "RobloxPlusSubscription"
+    && (percent === 10 || percent === 20)
+    && Number.isInteger(amount)
+    && amount > 0
+    && amount === Math.floor(base * percent / 100)
+    && price === base - amount;
+  return { valid, percent: valid ? percent : null };
 }
 
 /**
@@ -966,7 +993,7 @@ export function buildPurchaseScript(info: GamepassProductInfo): string {
     `const r=await fetch("https://auth.roblox.com/v2/logout",{method:"POST",credentials:"include"});`,
     `const t=r.headers.get("x-csrf-token");`,
     `if(!t){console.log("❌ Не залогинен");return}`,
-    `const b=await fetch("https://economy.roblox.com/v1/purchases/products/${info.productId}",{`,
+    `const b=await fetch("https://economy.roblox.com/v2/user-products/${info.productId}/purchase",{`,
     `method:"POST",credentials:"include",`,
     `headers:{"Content-Type":"application/json","X-CSRF-TOKEN":t},`,
     `body:JSON.stringify({expectedCurrency:1,expectedPrice:${info.priceInRobux},expectedSellerId:${info.creatorId}})`,
@@ -1061,7 +1088,7 @@ export async function purchaseGamepassDirect(
 ): Promise<PurchaseResult> {
   try {
     const res = await purchaseFetch(
-      `https://economy.roblox.com/v1/purchases/products/${productId}`,
+      `https://economy.roblox.com/v2/user-products/${productId}/purchase`,
       cookie,
       {
         method: "POST",

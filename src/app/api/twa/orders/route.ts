@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing, notifyRegionalPriceNeeded } from "@/lib/twa-notify";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
 import { BuyoutError, needsOwnershipCheck, resolveGamepassForBuyer, verifyGamepassOwnership, verifyOwnershipAfterFailure, type ResolvedGamepass } from "@/lib/roblox-buyout";
-import { BUYOUT_ERROR_REGIONAL_PRICE, checkGamepassPrice, hasRegionalPrice, matchesRegionalPriceOverride, sellerMatchesOrder } from "@/lib/purchase-guard";
+import { BUYOUT_ERROR_REGIONAL_PRICE, checkGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
@@ -109,7 +109,7 @@ async function findFullPriceReplacement(
     } catch {
       continue;
     }
-    if (!info.isForSale || hasRegionalPrice(info.price, info.basePriceInRobux)) continue;
+    if (!info.isForSale || info.hasUnsafeBuyerPrice) continue;
     if (!checkGamepassPrice(order.amount, info.price, info.basePriceInRobux).ok) continue;
     if (!sellerMatchesOrder(found.resolvedName, info.sellerName)) continue;
     // null means the ownership check itself is unavailable: fail closed.
@@ -134,7 +134,15 @@ function buildTabWhere(tab: FilterTab): any {
     case "ALL":
       return {};
     case "BUYOUT":
-      return { status: { in: ["PENDING", "IN_PROGRESS"] }, isDirectOrder: false, orderSource: { not: "AVITO" }, isFavorite: false };
+      return {
+        isDirectOrder: false,
+        orderSource: { not: "AVITO" },
+        isFavorite: false,
+        OR: [
+          { status: { in: ["PENDING", "IN_PROGRESS"] } },
+          { status: "ERROR", buyoutErrorCode: BUYOUT_ERROR_REGIONAL_PRICE },
+        ],
+      };
     case "DIRECT":
       return { isDirectOrder: true, status: { in: ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING", "ERROR"] }, isFavorite: false };
     case "AVITO":
@@ -286,7 +294,7 @@ export async function GET(req: NextRequest) {
                 OR (status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours')
               ))::int AS "WORK",
               COUNT(*)::int AS "ALL",
-              COUNT(*) FILTER (WHERE status IN ('PENDING','IN_PROGRESS') AND "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "isFavorite" = false)::int AS "BUYOUT",
+              COUNT(*) FILTER (WHERE "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "isFavorite" = false AND (status IN ('PENDING','IN_PROGRESS') OR (status = 'ERROR' AND "buyoutErrorCode" = 'REGIONAL_PRICE')))::int AS "BUYOUT",
               COUNT(*) FILTER (WHERE "isDirectOrder" = true AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false)::int AS "DIRECT",
               COUNT(*) FILTER (WHERE "orderSource" = 'AVITO' AND status IN ('PENDING','IN_PROGRESS','AWAITING_GAMEPASS','ERROR') AND "isFavorite" = false)::int AS "AVITO",
               COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "NEW",
@@ -300,7 +308,7 @@ export async function GET(req: NextRequest) {
                 OR ("isDirectOrder" = true AND status IN ('AWAITING_PAYMENT','PAYMENT_PENDING'))
                 OR (status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${ATTENTION_LINK_DAYS} days')
               ))::int AS "ATTENTION",
-              COALESCE(SUM(amount) FILTER (WHERE status IN ('PENDING','IN_PROGRESS') AND "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "isFavorite" = false), 0)::int AS "SUM_BUYOUT",
+              COALESCE(SUM(amount) FILTER (WHERE "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "isFavorite" = false AND (status IN ('PENDING','IN_PROGRESS') OR (status = 'ERROR' AND "buyoutErrorCode" = 'REGIONAL_PRICE'))), 0)::int AS "SUM_BUYOUT",
               COALESCE(SUM(amount) FILTER (WHERE "isDirectOrder" = true AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_DIRECT",
               COALESCE(SUM(amount) FILTER (WHERE "orderSource" = 'AVITO' AND status IN ('PENDING','IN_PROGRESS','AWAITING_GAMEPASS','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_AVITO",
               COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "isFavorite" = false), 0)::int AS "SUM_AWAITING_LINK",
@@ -842,6 +850,11 @@ export async function POST(req: NextRequest) {
       where: { id: { in: ids } },
       select: { id: true, amount: true, gamepassUrl: true, wbCode: true },
     });
+    const settings = await (prisma as any).globalSettings.findUnique({
+      where: { id: "global" },
+      select: { robloxCookie: true },
+    });
+    const buyerCookie = settings?.robloxCookie ?? null;
 
     const gpIds = [...new Set(checkOrders.map((o) => gpIdOf(o.gamepassUrl)).filter(Boolean))] as string[];
     const completed: any[] = gpIds.length > 0
@@ -866,13 +879,21 @@ export async function POST(req: NextRequest) {
       const gpId = gpIdOf(o.gamepassUrl);
       if (!gpId) return;
       const expected = Math.ceil(o.amount / 0.7);
-      const info = await getGpInfoCached(gpId);
+      const buyerInfo = buyerCookie
+        ? await resolveGamepassForBuyer(gpId, buyerCookie).catch(() => null)
+        : null;
+      const publicInfo = buyerInfo ? null : await getGpInfoCached(gpId);
       const reusedCode = reusedBy.get(gpId);
+      const livePrice = buyerInfo?.price ?? publicInfo?.price ?? null;
+      const basePrice = buyerInfo?.basePriceInRobux ?? publicInfo?.price ?? null;
       results[o.id] = {
         expected,
-        livePrice: info?.price ?? null,
-        isForSale: info?.isForSale ?? null,
-        priceMismatch: info?.price != null && Math.abs(info.price - expected) > 2,
+        livePrice,
+        basePrice,
+        isForSale: buyerInfo?.isForSale ?? publicInfo?.isForSale ?? null,
+        priceMismatch: basePrice != null && Math.abs(basePrice - expected) > 2,
+        robloxPlusDiscountPercent: buyerInfo?.robloxPlusDiscountPercent ?? null,
+        hasUnsafeBuyerPrice: buyerInfo?.hasUnsafeBuyerPrice ?? false,
         reusedIn: reusedCode && reusedCode !== o.wbCode ? reusedCode : null,
       };
     }));
@@ -1023,10 +1044,9 @@ export async function POST(req: NextRequest) {
     const cookie = settings?.robloxCookie;
     if (!cookie) return NextResponse.json({ error: "Cookie не задан. /setcookie в боте" }, { status: 400 });
 
-    // Fetch donor-specific info immediately before purchase. A regional price
-    // normally triggers a full-price replacement search. The only bypass is a
-    // supervised, admin-authenticated payout experiment that echoes the exact
-    // order code and both freshly fetched prices.
+    // Fetch donor-specific info immediately before purchase. Typed Roblox Plus
+    // is allowed at its buyer price; unknown/Regional differences still trigger
+    // the full-price replacement search and remain fail-closed.
     let info: ResolvedGamepass;
     try {
       info = await resolveGamepassForBuyer(gpId, cookie);
@@ -1039,12 +1059,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Геймпасс не на продаже" }, { status: 400 });
 
     const stamp = new Date().toISOString().slice(0, 10);
-    const regionalPrice = hasRegionalPrice(info.price, info.basePriceInRobux);
-    const regionalOverride = regionalPrice && matchesRegionalPriceOverride(
-      body.regionalPriceOverride,
-      { orderCode: order.wbCode, buyerPrice: info.price, basePrice: info.basePriceInRobux },
-    );
-    if (regionalPrice && !regionalOverride) {
+    const unsafeBuyerPrice = info.hasUnsafeBuyerPrice;
+    if (unsafeBuyerPrice) {
       const original = info;
       const replacement = await findFullPriceReplacement(order, cookie, gpId);
       if (!replacement) {
@@ -1084,10 +1100,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (regionalOverride) {
+    if (info.robloxPlusDiscountPercent) {
       await appendAdminNote(
         orderId,
-        `[РЕГ-ТЕСТ ${stamp} от ${twaUser.firstName}] GP ${gpId}: явный разовый override ${info.price}/${info.basePriceInRobux} R$`,
+        `[ROBLOX PLUS ${stamp}] GP ${gpId}: скидка ${info.robloxPlusDiscountPercent}%, списание ${info.price} R$, база продавца ${info.basePriceInRobux} R$`,
       );
     }
 
@@ -1095,7 +1111,7 @@ export async function POST(req: NextRequest) {
     const base = info.basePriceInRobux;
     const creatorId = info.sellerId;
     const creatorName: string | null = info.sellerName;
-    if (!regionalOverride && order.buyoutErrorCode === BUYOUT_ERROR_REGIONAL_PRICE) {
+    if (!unsafeBuyerPrice && order.buyoutErrorCode === BUYOUT_ERROR_REGIONAL_PRICE) {
       await (prisma as any).wbOrder.update({ where: { id: orderId }, data: { buyoutErrorCode: null } });
     }
 
@@ -1129,7 +1145,7 @@ export async function POST(req: NextRequest) {
     let purchaseRes: Response | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       purchaseRes = await fetch(
-        `https://economy.roblox.com/v1/purchases/products/${info.productId}`,
+        `https://economy.roblox.com/v2/user-products/${info.productId}/purchase`,
         {
           method: "POST",
           headers: {
@@ -1185,24 +1201,22 @@ export async function POST(req: NextRequest) {
         where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
         data: { status: "COMPLETED", buyoutErrorCode: null, purchaseRate: currentRate, purchaserUsername, completedAt: new Date(), ...(money ?? {}) },
       });
-      if (regionalOverride) {
-        await appendAdminNote(
-          orderId,
-          `[РЕГ-ТЕСТ-КУПЛЕНО ${stamp}] списано ${Number(purchaseData?.price ?? price)} R$, база ${base} R$, номинал ${order.amount} R$`,
-        );
-      }
+      if (info.robloxPlusDiscountPercent) await appendAdminNote(
+        orderId,
+        `[ROBLOX PLUS КУПЛЕНО ${stamp}] списано ${Number(purchaseData?.price ?? price)} R$, база ${base} R$, номинал ${order.amount} R$`,
+      );
       cachedCounts = null;
       notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder ?? false).catch(() => {});
       if (isAlreadyOwned) {
-        return NextResponse.json({ ok: true, success: true, msg: "Куплено (AlreadyOwned — предыдущая покупка прошла)" });
+        return NextResponse.json({ ok: true, success: true, chargedPrice: 0, msg: "Куплено (AlreadyOwned — предыдущая покупка прошла)" });
       }
       if (recovered) {
-        return NextResponse.json({ ok: true, success: true, msg: `Куплено (владение подтверждено проверкой после ошибки: ${canonicalReason ?? "нет ответа от Roblox"})` });
+        return NextResponse.json({ ok: true, success: true, chargedPrice: price, msg: `Куплено (владение подтверждено проверкой после ошибки: ${canonicalReason ?? "нет ответа от Roblox"})` });
       }
       return NextResponse.json({
         ok: true,
         success: true,
-        regionalPriceOverride: regionalOverride,
+        robloxPlusDiscountPercent: info.robloxPlusDiscountPercent,
         chargedPrice: Number(purchaseData.price ?? price),
         basePrice: base,
         msg: `Куплено за ${purchaseData.price ?? price} R$`,
@@ -1381,7 +1395,7 @@ export async function POST(req: NextRequest) {
       `const r=await fetch("https://auth.roblox.com/v2/logout",{method:"POST",credentials:"include"});`,
       `const t=r.headers.get("x-csrf-token");`,
       `if(!t){console.log("❌ Не залогинен");return}`,
-      `const b=await fetch("https://economy.roblox.com/v1/purchases/products/${info.ProductId}",{`,
+      `const b=await fetch("https://economy.roblox.com/v2/user-products/${info.ProductId}/purchase",{`,
       `method:"POST",credentials:"include",`,
       `headers:{"Content-Type":"application/json","X-CSRF-TOKEN":t},`,
       // В скрипт зашита ожидаемая по номиналу цена (не live): даже скопированный

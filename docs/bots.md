@@ -313,11 +313,12 @@ TG — `editMessageText` / `editMessageMedia` (фото-карточка одн�
   (2026-07-06):** алерт только при `0 < balance ≤ threshold` — при балансе 0 (уже слито)
   молчим и дедуп не взводим; успешный слив (ручной из TWA `/api/twa/drain` и автослив)
   сбрасывает `autoBuyoutBelowSince`, чтобы цикл после пополнения начинался чисто.
-  **Managed/Regional Pricing (фикс 2026-07-14):** product-info перед покупкой читается с
-  cookie donor на официальном домене Roblox. `UserBasePriceInRobux` валидирует номинал;
-  если `PriceInRobux` от неё отличается, бот не покупает и ставит заказу
-  `ERROR/REGIONAL_PRICE`. Полный поиск замены по нику запускается из TWA Account. Cookie
-  никогда не отправляется roproxy; недоступный buyer lookup останавливает денежную операцию.
+  **Roblox Plus / Managed Pricing (фикс 2026-07-14):** product-info перед покупкой читается
+  с cookie donor на официальном домене Roblox. `UserBasePriceInRobux` валидирует номинал;
+  `PriceInRobux` используется как фактическое списание. Бот разрешает разницу только при
+  единственном корректном detail `RobloxPlusSubscription` 10%/20%; unknown/mixed скидка
+  ставит `ERROR/REGIONAL_PRICE`. Покупка идёт через Economy API v2. Cookie никогда не
+  отправляется roproxy; недоступный buyer lookup останавливает денежную операцию.
   Управление: `/autobuy` (статус), `/autobuy on|off`, `/autobuy threshold N`.
   **Контрольная проверка владения (Ф1, 2026-07-12).** Roblox при таймауте/5xx нередко
   всё же проводит покупку — раньше такой заказ ложно откатывался в `PENDING` и копил

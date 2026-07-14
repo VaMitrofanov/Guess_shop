@@ -201,17 +201,26 @@ cookie-аккаунт имел другую buyer-specific цену. Перед�
 `ERROR/REGIONAL_PRICE`. Клиентский `price/productId/sellerId` не является источником истины;
 cookie не передаётся proxy-fallback. Регресс покрыт unit-тестами регионального стопа.
 
-**Контролируемое исключение 14.07.** Для одного наблюдаемого payout-эксперимента TWA
-`purchase` принимает региональную цену только после админской авторизации и точного echo
-кода заказа, buyer-price и base-price из свежего product-info. Обычная кнопка, пачка,
-Account purchase, партнёрские задачи и боты эти поля не отправляют, поэтому остаются
-fail-closed. Все попытки и успех пишутся в `adminNote`; после подтверждения суммы продавцом
-override нужно либо удалить, либо оформить как отдельную утверждённую политику с лимитами.
+**Контролируемое исключение 14.07 — удалено.** Scoped `PAYOUT_EXPERIMENT` доказал, что
+legacy v1 возвращает `PriceChanged`, но не стал постоянным обходом. Рабочий контракт не
+принимает скидку из клиента: сервер читает свежий authenticated product-info, разрешает
+только один арифметически корректный detail `RobloxPlusSubscription` на 10% или 20% и
+покупает через Economy API v2. Unknown, mixed или поддельный detail остаётся fail-closed.
+
+Production-попытка с корректной buyer-price вернула `PriceChanged`, balance/ownership не
+изменились. Повторный аудит `PriceDiscountDetails` уточнил угрозу: все 12 случаев имели
+typed-причину `RobloxPlusSubscription:10`, а не Regional Pricing. Roblox Plus официально
+субсидирует 10–20% и сохраняет доход продавца. Реализованный контракт allowlist-ит только
+typed Plus-detail, проверяет процент, сумму скидки и base-price, а любой unknown/mixed
+discount оставляет fail-closed. Все денежные cookie-пути переведены с legacy
+`/v1/purchases/products` на `/v2/user-products/{productId}/purchase`. Полный план —
+`docs/roblox-plus-buyout-plan.md`.
 
 Операционный инвариант: базовая цена отвечает на вопрос «правильный ли геймпасс для заказа»;
-buyer-specific цена обязана ей равняться, кроме явно подтверждённого payout-эксперимента.
-В штатных потоках отличие — стоп-сигнал и поиск замены, а не скидка для покупки. Официальное
-описание: https://create.roblox.com/docs/production/monetization/regional-pricing
+buyer-specific цена отвечает на вопрос «сколько реально спишется». Отличие разрешено только
+при доказанном Plus-detail; во всех остальных случаях это стоп-сигнал и поиск замены.
+Официальные описания: https://create.roblox.com/docs/production/monetization/roblox-plus и
+https://create.roblox.com/docs/production/monetization/regional-pricing
 
 ### 15. Компрометация кода до покупателя (ПВЗ-фрод) — HIGH, 🔴 ОТКРЫТО, план утверждён (2026-07-13)
 
