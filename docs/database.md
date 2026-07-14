@@ -70,6 +70,12 @@ NULL (крон разблокировки их не трогает, нет пу�
 `AWAITING_PAYMENT` · `PAYMENT_PENDING` · `AWAITING_GAMEPASS` (provisional, ждём ссылку) ·
 `PENDING` (ссылка принята) · `IN_PROGRESS` · `COMPLETED` · `REJECTED` · `ERROR` (неуспешный выкуп).
 
+Ручное восстановление `ERROR → PENDING` выполняется TWA action `restore-to-buyout`:
+требует сохранённый `gamepassUrl` и подтверждённую оплату для DIR, не вызывает Roblox,
+очищает активный `buyoutErrorCode`, обновляет `pendingAt` и дописывает audit в `adminNote`.
+Источник заказа не меняется. Общий `move-to` также доступен из папки `Ошибка`; он больше
+не перезаписывает историю заметки, а дописывает причину перевода.
+
 Индексы покрывают все вкладки TWA (status+createdAt, favorites, purchaserUsername, orderSource,
 robloxUsername, userId+createdAt).
 

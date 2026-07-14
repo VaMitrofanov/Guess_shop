@@ -436,12 +436,21 @@ function ActionPanel({
     );
   }
 
+  const isError = currentTab === "ERROR" && order.status === "ERROR";
+
   return (
-    <div style={{ display: "flex", gap: 8, padding: "12px 16px 16px" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "12px 16px 16px" }}>
+      {isError && hasGamepass && (
+        <button className="twa-press" onClick={() => doAction("restore-to-buyout")} disabled={loading}
+          style={{ width: "100%", padding: "14px", border: "none", borderRadius: 12, background: "rgba(48,209,88,0.18)", color: C.green, fontSize: 15, fontWeight: 700, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+          {loading ? "⏳…" : "↩ Вернуть к выкупу"}
+        </button>
+      )}
+      <div style={{ display: "flex", gap: 8 }}>
       {hasGamepass && (
         <button className="twa-press" onClick={doPurchase} disabled={loading}
           style={{ flex: 2, padding: "14px", border: "none", borderRadius: 12, background: "rgba(48,209,88,0.14)", color: "#30d158", fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
-          {loading ? "⏳…" : "Выкупить"}
+          {loading ? "⏳…" : isError ? "Повторить выкуп" : "Выкупить"}
         </button>
       )}
       {showError && (
@@ -458,6 +467,7 @@ function ActionPanel({
         style={{ width: 44, flexShrink: 0, padding: "14px 0", border: `1px solid ${C.red}55`, borderRadius: 12, background: "transparent", color: C.red, fontSize: 18, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
         ✕
       </button>
+      </div>
     </div>
   );
 }
@@ -1062,7 +1072,7 @@ function OrderCard({
   const showCleanHint = viewTab === "BUYOUT";
 
   const tabBadge = currentTab === "ALL" || currentTab === "WORK" || currentTab === "ATTENTION" ? orderTabBadge(order) : null;
-  const showMoveBtn = viewTab === "AWAITING_LINK" || viewTab === "FAVORITES";
+  const showMoveBtn = viewTab === "AWAITING_LINK" || viewTab === "FAVORITES" || viewTab === "ERROR";
   // Редактирование за клиента (номинал/ник/ГП) — любой источник, не только Авито.
   const isEditable = ["PENDING", "AWAITING_GAMEPASS", "ERROR"].includes(order.status);
   const payment = order.paymentAttempts?.[0];
@@ -1392,7 +1402,8 @@ function OrderCard({
         </div>
       )}
 
-      {/* Move button for AWAITING_LINK / FAVORITES */}
+      {/* Ошибка тоже должна быть рабочей папкой: вернуть — быстрым действием,
+          переместить в любой другой раздел — через эту форму с аудитом. */}
       {showMoveBtn && !moveOpen && (
         <div style={{ padding: "0 14px 10px" }}>
           <button className="twa-press-sm" onClick={e => { e.stopPropagation(); setMoveOpen(true); }}
@@ -1400,7 +1411,7 @@ function OrderCard({
               width: "100%", padding: "12px", borderRadius: 10, border: `1px solid ${C.accent}44`,
               background: "transparent", color: C.accent, fontSize: 14, fontWeight: 600, cursor: "pointer",
             }}>
-            Перевести в другой раздел
+            ↪ Переместить в другой раздел
           </button>
         </div>
       )}
@@ -1759,6 +1770,10 @@ export default function OrdersScreen({
     if (action === "complete") { newStatus = "COMPLETED"; toTab = "ALL"; }
     else if (action === "reject") { newStatus = "REJECTED"; toTab = "ALL"; }
     else if (action === "set-error") { newStatus = "ERROR"; toTab = "ERROR"; }
+    else if (action === "restore-to-buyout") {
+      newStatus = "PENDING";
+      toTab = order.isDirectOrder ? "DIRECT" : order.orderSource === "AVITO" ? "AVITO" : "BUYOUT";
+    }
     else return { ok: false, error: "Invalid action" };
 
     haptic.impact(action === "complete" ? "medium" : "light");
@@ -1774,7 +1789,13 @@ export default function OrdersScreen({
     const workDelta = (isWorkOrder({ ...order, status: newStatus }) ? 1 : 0) - (isWorkOrder(order) ? 1 : 0);
 
     setAllOrders(prev => prev.map(o => o.id === order.id
-      ? { ...o, status: newStatus!, rejectionReason: action === "reject" ? (reason || "не указана") : o.rejectionReason }
+      ? {
+          ...o,
+          status: newStatus!,
+          rejectionReason: action === "reject" ? (reason || "не указана") : o.rejectionReason,
+          buyoutErrorCode: action === "restore-to-buyout" ? null : o.buyoutErrorCode,
+          pendingAt: action === "restore-to-buyout" ? new Date().toISOString() : o.pendingAt,
+        }
       : o));
     if (data?.counts && toTab) {
       setData(prev => {
@@ -1792,7 +1813,14 @@ export default function OrdersScreen({
     if (leaves) setExiting(prev => new Set(prev).add(order.id));
 
     const rollback = () => {
-      setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: order.status } : o));
+      setAllOrders(prev => prev.map(o => o.id === order.id
+        ? {
+            ...o,
+            status: order.status,
+            buyoutErrorCode: order.buyoutErrorCode,
+            pendingAt: order.pendingAt,
+          }
+        : o));
       if (data?.counts && toTab) {
         setData(prev => {
           if (!prev) return prev;
@@ -1827,7 +1855,13 @@ export default function OrdersScreen({
           setData(prev => prev ? { ...prev, total: Math.max(0, prev.total - 1) } : prev);
         }, 260);
       }
-      const msg = action === "complete" ? "Выкуплено ✓" : action === "set-error" ? "→ Ошибка" : "Отклонён";
+      const msg = action === "complete"
+        ? "Выкуплено ✓"
+        : action === "set-error"
+          ? "→ Ошибка"
+          : action === "restore-to-buyout"
+            ? "Возвращён к выкупу"
+            : "Отклонён";
       toast(msg, action === "reject" ? "default" : "success");
       return { ok: true };
     } catch {

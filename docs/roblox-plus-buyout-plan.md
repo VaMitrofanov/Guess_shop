@@ -76,6 +76,11 @@ endpoint, а дальнейший перебор guessed endpoint на реал�
 
 ## Текущее production-поведение
 
+Операционное уточнение 14.07: по решению владельца 12 пригодных заказов были вручную
+возвращены из `ERROR` в `PENDING` без попытки покупки. Геймпассы и источники сохранены,
+активные коды ошибки очищены. Это восстановление очереди, а не снятие transport-блокировки:
+до смены donor/client-flow повторный cookie-only purchase Plus-пасса останется fail-closed.
+
 - обычный non-Plus cookie-flow возвращён на проверенный legacy v1;
 - typed Plus продолжает участвовать в фильтре и расчёте Account-пачки;
 - на этапе покупки TWA, Account, partners, TG manual/script и auto-buyout возвращают

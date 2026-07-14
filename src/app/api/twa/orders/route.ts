@@ -6,6 +6,7 @@ import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
 import { BuyoutError, needsOwnershipCheck, resolveGamepassForBuyer, verifyGamepassOwnership, verifyOwnershipAfterFailure, type ResolvedGamepass } from "@/lib/roblox-buyout";
 import { BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, checkGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
+import { appendOrderAudit, buildRestoreToBuyoutData } from "@/lib/order-recovery";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
@@ -943,6 +944,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  if (action === "restore-to-buyout") {
+    const recovery = buildRestoreToBuyoutData(order, twaUser.firstName);
+    if (!recovery.ok) {
+      return NextResponse.json({ error: recovery.error }, { status: recovery.status });
+    }
+    const restored = await (prisma as any).wbOrder.updateMany({
+      where: { id: orderId, status: "ERROR" },
+      data: recovery.data,
+    });
+    if (restored.count !== 1) {
+      return NextResponse.json({ error: "Заказ уже перемещён другим администратором" }, { status: 409 });
+    }
+    cachedCounts = null;
+    return NextResponse.json({ ok: true, status: "PENDING" });
+  }
+
   if (action === "move-to") {
     const target = body.target as string;
     const note = typeof body.note === "string" ? body.note.trim() : "";
@@ -950,9 +967,16 @@ export async function POST(req: NextRequest) {
 
     // «Избранное» — не статус, а флаг: заказ остаётся в своём статусе.
     if (target === "FAVORITES") {
+      const stamp = new Date().toISOString().slice(0, 10);
       await (prisma as any).wbOrder.update({
         where: { id: orderId },
-        data:  { isFavorite: true, adminNote: note.slice(0, 2000) },
+        data:  {
+          isFavorite: true,
+          adminNote: appendOrderAudit(
+            order.adminNote,
+            `[ПЕРЕНОС ${stamp} от ${twaUser.firstName}] → Избранное: ${note}`,
+          ),
+        },
       });
       cachedCounts = null;
       return NextResponse.json({ ok: true });
@@ -975,9 +999,13 @@ export async function POST(req: NextRequest) {
     if (unpaidDirect && (newStatus === "PENDING" || newStatus === "COMPLETED"))
       return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
 
+    const stamp = new Date().toISOString().slice(0, 10);
     const data: any = {
       status: newStatus,
-      adminNote: note.slice(0, 2000),
+      adminNote: appendOrderAudit(
+        order.adminNote,
+        `[ПЕРЕНОС ${stamp} от ${twaUser.firstName}] ${order.status}→${newStatus} (${target}): ${note}`,
+      ),
       isFavorite: false,
     };
     if (target === "DIRECT") { data.isDirectOrder = true; data.orderSource = "DIRECT"; }
@@ -992,7 +1020,10 @@ export async function POST(req: NextRequest) {
       data.completedAt = new Date(); // Ф6.3: базис таймера разблокировки робуксов
       Object.assign(data, buildOrderProfitSnapshot(order, settings ?? {}, Math.ceil(order.amount / 0.7)) ?? {});
     }
-    if ((target === "BUYOUT" || target === "DIRECT" || target === "AVITO") && !order.pendingAt) {
+    if (target !== "ERROR") data.buyoutErrorCode = null;
+    if (target === "AWAITING_LINK" || target === "NEW") data.pendingAt = null;
+    if ((target === "BUYOUT" || target === "DIRECT" || target === "AVITO")
+        && (order.status !== "PENDING" && order.status !== "IN_PROGRESS")) {
       data.pendingAt = new Date();
     }
 
