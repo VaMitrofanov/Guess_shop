@@ -1241,12 +1241,23 @@ export async function POST(req: NextRequest) {
         .filter(([, value]) => value === null || ["string", "number", "boolean"].includes(typeof value))
         .slice(0, 20),
     );
+    const robloxErrors = Array.isArray((purchaseData as any).errors)
+      ? (purchaseData as any).errors.slice(0, 10).map((error: unknown) => {
+          if (!error || typeof error !== "object" || Array.isArray(error)) return {};
+          return Object.fromEntries(
+            Object.entries(error)
+              .filter(([, value]) => value === null || ["string", "number", "boolean"].includes(typeof value))
+              .slice(0, 10),
+          );
+        })
+      : [];
     return NextResponse.json({
       ok: true,
       success: false,
       msg: failReason,
       robloxHttpStatus: purchaseRes?.status ?? null,
       robloxDiagnostic,
+      robloxErrors,
       robloxKeys: Object.keys(purchaseData).slice(0, 30),
     });
   }
