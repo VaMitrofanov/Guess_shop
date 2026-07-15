@@ -41,15 +41,18 @@
   и fail-closed ККТ env. Migration `20260713_canonical_web_order_foundation` **применена к
   production** 13.07 (аддитивная, с полным backup и сверкой counts), код задеплоен на Web и
   боты; outbox worker, возвраты/чеки, staging test matrix и внешние gates остаются.
-- **2026-07-15, локальный UI batch:** storefront переведён на search-first: пакет+ник ведут
+- **2026-07-15, production UI release `dfc9a4e`:** storefront переведён на search-first:
+  пакет+ник ведут
   сразу к агрегированному списку всех геймпассов, а инструкция стала fallback. Отдельный
   `SiteGuide` удалён; `WB/SITE/BOT` используют одну девятишаговую основу с разными CTA.
   Исправлена hydration-гонка темы, увеличена типографика/контраст инструкции, усилена
   фоновая дверца сейфа и заменён экран восстановления сессии. ЛК в исходниках уже на общем
-  Violet/Frost shell и читает `Order + WbOrder`; production-паритет требует отдельного
-  деплоя/авторизованного smoke и не заявляется выполненным этим локальным batch. Финальный
-  локальный gate: `21 suites / 148 tests`, web+bot TypeScript, Prisma validate, scoped
-  ESLint, production build и `git diff --check` — зелёные.
+  Violet/Frost shell и читает `Order + WbOrder`; авторизованный visual/data smoke ЛК ещё
+  обязателен. Web и Guide развёрнуты последовательно и `running:healthy`; production-smoke
+  коридора прошёл `23/23`, маркеры WB/SITE/DIRECT и owner-only storefront/checkout/auth
+  отвечают `200`. Maintenance и `SITE_ACQUIRING_ENABLED=false` не снимались. Предрелизный
+  gate: `21 suites / 148 tests`, web+bot TypeScript, Prisma validate, scoped ESLint,
+  production build и `git diff --check` — зелёные.
 - **Внешние launch-gates остаются обязательными:** письменная категория Т-Банка, юрпроверка
   модели/бренда, реквизиты/ККТ и фактическая локализация первичной БД в РФ не заменяются
   программным кодом.
@@ -155,7 +158,8 @@ production rollout и реальная payment test matrix ещё не выпо�
 
 ### 3.2 Новая инструкция `/guide`
 
-**Локальный UI-этап 15.07.2026:** витрина и инструкция работают по search-first модели.
+**Production UI-релиз `dfc9a4e` от 15.07.2026:** витрина и инструкция работают по
+search-first модели.
 После пакета и ника клиент сначала видит все геймпассы на продажу, отсортированные по
 готовности цены; только пустой/неверный результат ведёт в гайд. Девять шагов теперь общие
 для `WB/SITE/BOT`, а SITE сохраняет свой checkout-финал и редактирование желаемой суммы
@@ -185,7 +189,7 @@ production rollout и реальная payment test matrix ещё не выпо�
 `WBInstructionV2` с актуальными скриншотами, видео, Managed pricing и поиском геймпасса.
 Режим задаёт только номинал/редактирование и финальный CTA; дублирующего SITE JSX больше нет.
 
-Целевой вариант (пункты 1–4 закрыты локальным batch 15.07):
+Целевой вариант (пункты 1–4 развёрнуты в production 15.07):
 
 1. Выделить общую основу `GamepassGuide`: создание experience/pass, отключение Managed
    pricing, расчёт gross-цены, публикация и поиск по нику.
@@ -241,8 +245,8 @@ Definition of Done: новый пользователь без подсказк�
 
 Закрыто после исходного аудита: `/dashboard` читает legacy `Order` и `WbOrder` всех
 источников, показывает реальные статусы/бонусы, а credentials provider и форма входа
-согласованы. ЛК уже использует Violet/Frost shell; перед публичным заявлением о паритете
-нужен production deploy и авторизованный visual/data smoke.
+согласованы. ЛК уже использует развёрнутый Violet/Frost shell; перед публичным заявлением
+о полном паритете нужен авторизованный visual/data smoke на реальных данных.
 
 Целевая модель:
 
@@ -497,8 +501,8 @@ VK  ─┘                              │
 
 ### Этап 4. Guide, витрина и публичные документы — 3–5 дней
 
-- Собрать единый `GamepassGuide` из актуальной WB-версии. **Готово локально 15.07:
-  `WBInstructionV2` обслуживает WB/SITE/BOT, отдельный `SiteGuide` удалён.**
+- Собрать единый `GamepassGuide` из актуальной WB-версии. **Развёрнуто 15.07 в `dfc9a4e`:
+  `WBInstructionV2` обслуживает WB/SITE/BOT, отдельный `SiteGuide` удалён; smoke 23/23.**
 - Внедрить выбранную brand/design direction, честные тексты, mobile-first checkout.
 - Страницы: контакты/реквизиты, оферта, ПД/consent, возвраты, способы оплаты, FAQ,
   status и 404/500.
