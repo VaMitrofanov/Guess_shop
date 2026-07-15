@@ -1,5 +1,6 @@
 .page {
   min-height: 100vh;
+  min-height: 100dvh;
   overflow-x: hidden;
   color: #251b3f;
   background:
@@ -70,7 +71,7 @@
 .nicknameField { min-height:60px; display:flex; align-items:center; gap:11px; padding:0 15px; border:2px solid #cfc6e9; border-radius:14px; background:#fff; color:#7556e8; transition:border-color .2s,box-shadow .2s; }
 .nicknameField:focus-within { border-color:#7556e8; box-shadow:0 0 0 4px rgba(117,86,232,.12); }
 .nicknameFieldReady { border-color:#45b994; }
-.nicknameField input { min-width:0; width:100%; border:0; outline:0; background:transparent; color:#251b3f; font-size:18px; font-weight:800; }
+.nicknameField input { min-width:0; width:100%; border:0; outline:0; background:transparent; color:#251b3f; font-size:18px; font-weight:800; scroll-margin-block:24px 180px; }
 .nicknameField input::placeholder { color:#9e96aa; }
 .nicknameNote { margin:8px 0 0; color:#7a718b; font-size:15px; line-height:1.45; }
 .checkoutAction,.checkoutActionDisabled { width:100%; min-height:60px; margin-top:16px; display:flex; align-items:center; justify-content:center; gap:9px; border-radius:13px; background:#7556e8; color:white; font-size:17px; font-weight:900; box-shadow:4px 4px 0 #251b3f; transition:transform .2s ease; }

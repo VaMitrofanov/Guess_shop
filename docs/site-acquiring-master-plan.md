@@ -53,6 +53,19 @@
   отвечают `200`. Maintenance и `SITE_ACQUIRING_ENABLED=false` не снимались. Предрелизный
   gate: `21 suites / 148 tests`, web+bot TypeScript, Prisma validate, scoped ESLint,
   production build и `git diff --check` — зелёные.
+- **2026-07-15, follow-up ЛК + webview (готов к rollout):** `/dashboard` перестроен в
+  action-center «Личный сейф»: события и требуемые действия идут перед единой историей,
+  мобильная таблица заменена карточками, а канонические SITE-заказы показывают безопасный
+  payment/receipt snapshot и email чека. Отдельная identity settings-поверхность показывает
+  verified TG/VK/EMAIL и оставляет только server-verified TG link; небезопасный VK merge не
+  маскируется под готовую кнопку. Канонический `PENDING` исправлен с ошибочного «ожидает
+  оплаты» на «в очереди на выкуп». Root viewport получил `viewport-fit=cover`,
+  `interactive-widget=resizes-content`, dynamic viewport, safe-area и keyboard scroll-margin
+  для storefront/checkout/guide. Read-only visual/data QA ЛК выполнен на реальных историях
+  без изменения заказов: desktop `1440×1000`, mobile `390×844`, overflow отсутствует;
+  guide дополнительно проверен при высоте `500 px` с активным полем. Локальный gate:
+  `22 suites / 156 tests`, web+bot TypeScript, Prisma validate, scoped ESLint, production
+  build и `git diff --check` — зелёные.
 - **Внешние launch-gates остаются обязательными:** письменная категория Т-Банка, юрпроверка
   модели/бренда, реквизиты/ККТ и фактическая локализация первичной БД в РФ не заменяются
   программным кодом.
@@ -63,6 +76,7 @@
 
 1. Собрать замечания владельца по текущему production-релизу, занести их в Trello и сначала
    исправить найденные регрессии/P0–P1; закрытым релиз считать только после повторного smoke.
+   **Feedback-check 15.07 пройден: новых замечаний нет.**
 2. Завершить production-приёмку search-first checkout, единого `WB/SITE/BOT` guide и
    авторизованного ЛК на реальных данных без изменения заказов.
 3. Проверить iPhone Safari, Android Chrome, Telegram WebView и VK WebView: клавиатуру,
@@ -245,8 +259,10 @@ Definition of Done: новый пользователь без подсказк�
 
 Закрыто после исходного аудита: `/dashboard` читает legacy `Order` и `WbOrder` всех
 источников, показывает реальные статусы/бонусы, а credentials provider и форма входа
-согласованы. ЛК уже использует развёрнутый Violet/Frost shell; перед публичным заявлением
-о полном паритете нужен авторизованный visual/data smoke на реальных данных.
+согласованы. Follow-up 15.07 добавил новый Violet/Frost action-center, карточки истории,
+события, payment/receipt snapshot и identity settings; read-only visual/data QA прошёл на
+реальных историях. Production-паритет отмечается только после rollout этого follow-up и
+повторного авторизованного smoke.
 
 Целевая модель:
 
@@ -492,8 +508,10 @@ VK  ─┘                              │
 - Исправить credentials provider; решить судьбу email/password (verification, reset,
   throttling) или заменить magic link.
 - Новый dashboard: история всех источников, бонусы, receipt/статус, identity settings,
-  warm welcome и notifications. **Violet/Frost shell, общая история и бонусы готовы;
-  receipt/identity settings/notifications остаются.**
+  warm welcome и notifications. **Follow-up 15.07 завершил клиентскую поверхность: action
+  center, корректные source-aware статусы, карточки истории, payment/receipt snapshot,
+  verified identity settings и contextual notifications. Полные link/unlink/merge и
+  предпочтения доставки уведомлений остаются отдельным identity foundation.**
 - Admin merge-console только с audit, preview и двухэтапным подтверждением.
 
 **DoD:** существующие TG/VK-пользователи видят свои заказы/бонусы; негативные тесты не дают

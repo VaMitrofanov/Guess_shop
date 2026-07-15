@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Press_Start_2P, Unbounded } from "next/font/google";
 import "./globals.css";
 import SessionProvider from "@/components/session-provider";
@@ -48,6 +48,20 @@ export const metadata: Metadata = {
     title: "Roblox Bank — купить Robux за рубли",
     description: "Покупка Robux за рубли. Актуальный курс, доставка через геймпасс.",
   },
+};
+
+// Keep form actions visible when iOS/Android or an embedded TG/VK browser
+// opens the software keyboard. `viewportFit: cover` also makes the safe-area
+// env variables available to the route CSS on notched devices.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#fbfaff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b0912" },
+  ],
 };
 
 export default function RootLayout({

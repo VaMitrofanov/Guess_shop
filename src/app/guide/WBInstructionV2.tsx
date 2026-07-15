@@ -629,7 +629,7 @@ function Step({ n, pulse, cls, children }: { n: string; pulse?: boolean; cls?: s
 }
 
 const CSS = `
-.wbi-root{--gold:#a68bff;--gold2:#c2b2ff;--grn:#45d6aa;--bg:#0b0912;--panel:#151120;--line:#30283f;--txt:#f4f0ff;--mut:#aaa3b8;position:relative;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden;min-height:100vh}
+.wbi-root{--gold:#a68bff;--gold2:#c2b2ff;--grn:#45d6aa;--bg:#0b0912;--panel:#151120;--line:#30283f;--txt:#f4f0ff;--mut:#aaa3b8;position:relative;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden;min-height:100vh;min-height:100dvh}
 .wbi-root *{box-sizing:border-box}
 .wbi-bgfx{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
 .wbi-blob{position:absolute;border-radius:50%;filter:blur(90px);opacity:.16}
@@ -637,7 +637,7 @@ const CSS = `
 .wbi-b2{width:460px;height:460px;background:#237e69;bottom:-180px;left:-160px;animation:wbi-drift2 26s ease-in-out infinite}
 @keyframes wbi-drift1{50%{transform:translate(-40px,60px)}}
 @keyframes wbi-drift2{50%{transform:translate(50px,-50px)}}
-.wbi-wrap{position:relative;z-index:1;max-width:880px;margin:0 auto;padding:0 18px 70px}
+.wbi-wrap{position:relative;z-index:1;max-width:880px;margin:0 auto;padding:env(safe-area-inset-top,0px) max(18px,env(safe-area-inset-right,0px)) calc(70px + env(safe-area-inset-bottom,0px)) max(18px,env(safe-area-inset-left,0px))}
 .wbi-top{display:flex;align-items:center;justify-content:space-between;padding:18px 0;border-bottom:1px solid rgba(201,168,76,.22);gap:12px;flex-wrap:wrap}
 .wbi-eye{font-size:13px;font-weight:800;letter-spacing:2.2px;color:var(--gold)}
 .wbi-top-sub{font-size:15px;color:var(--txt);margin-top:2px}
@@ -757,7 +757,7 @@ const CSS = `
 .wbi-sinput:disabled{cursor:not-allowed;opacity:.7}
 .wbi-sbtn:disabled{cursor:not-allowed}
 .wbi-srow{display:flex;gap:10px;flex-wrap:wrap}
-.wbi-sinput{flex:1 1 180px;min-width:0;font-size:18px;background:#0d1424;border:1px solid rgba(201,168,76,.5);color:#fff;border-radius:11px;padding:14px}
+.wbi-sinput{flex:1 1 180px;min-width:0;font-size:18px;background:#0d1424;border:1px solid rgba(201,168,76,.5);color:#fff;border-radius:11px;padding:14px;scroll-margin-block:24px 180px}
 .wbi-sinput:focus{outline:none;border-color:var(--gold2)}
 .wbi-sinput::placeholder{color:#6b7280}
 .wbi-sbtn{flex:0 0 auto;font-size:16px;font-weight:800;color:#06210f;background:linear-gradient(180deg,#00e08a,#00b46f);border:1px solid rgba(0,224,138,.6);border-radius:11px;padding:14px 22px;cursor:pointer;transition:transform .12s,opacity .2s;white-space:nowrap}

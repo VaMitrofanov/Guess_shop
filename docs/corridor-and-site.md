@@ -70,6 +70,11 @@
 - `/guarantees`, `/reviews`, `/faq` и `/dashboard` переведены со старого pixel/dark shell
   на общий Violet/Frost язык: крупные заголовки, rounded cards, safe/seal элементы,
   читаемые CTA и базовый размер смыслового текста 15–20 px.
+- Follow-up ЛК 15.07 развил shell в action-center «Личный сейф»: contextual события и
+  действия показываются перед историей, горизонтальная mobile-таблица заменена карточками,
+  SITE-заказ раскрывает payment/receipt snapshot, а отдельная identity settings-секция
+  показывает server-verified TG/VK/EMAIL. Статус `WbOrder.PENDING` в клиентском UI означает
+  «в очереди на выкуп», а не «ожидает оплаты».
 - Checkout и единый guide получили увеличенные подписи, подсказки, карточки выбора и legal
   текст. Измеренный desktop baseline инструкции: основной текст `17 px`, поля `18 px`,
   figcaption `16 px`, overlay-метки `13–17 px`; на зелёных success-поверхностях используется
@@ -80,6 +85,11 @@
   сервиса `running:healthy`, синтетический smoke гейта/API/чанков/CSP прошёл `23/23`, а
   WB/SITE/DIRECT отдают маркеры новой инструкции. Maintenance оставлен включённым;
   авторизованная сверка данных ЛК остаётся отдельным приёмочным шагом.
+- Для iOS/Android/TG/VK webview добавлены `viewport-fit=cover`,
+  `interactive-widget=resizes-content`, `100dvh`, safe-area padding и keyboard scroll-margin.
+  Browser-gate без записи данных прошёл на `390×844` и при высоте `500 px`: поле ника и CTA
+  полностью видимы, `scrollWidth <= innerWidth`. Реальные Safari/Chrome/TG/VK устройства и
+  крупный системный шрифт по-прежнему остаются ручным acceptance, эмуляцией не закрываются.
 
 ## Инструкции WB и сайта
 
@@ -234,3 +244,6 @@ TG-уведомление «КОД АКТИВИРОВАН (сайт → VK)»), 
 **Личный кабинет:** `/dashboard` читает legacy `Order` и `WbOrder` всех источников. Вход
 доступен через server-verified VK и TG; свежая web-сессия может привязать TG, а если subject
 уже владеет legacy-профилем — безопасно объединить его заказы и бонусы с audit trail.
+Action-center показывает требуемые действия, общую историю, бонусный сейф, безопасный
+payment/receipt snapshot канонических SITE-заказов и verified identity settings. Read-only
+визуальная сверка на реальных историях пройдена для `1440×1000` и `390×844` без overflow.
