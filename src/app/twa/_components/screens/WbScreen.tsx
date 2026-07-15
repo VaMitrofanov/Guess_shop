@@ -18,8 +18,8 @@ const TABS = [
 type WbTab = typeof TABS[number]["id"];
 
 
-export default function WbScreen({ token }: { token: string }) {
-  const [tab, setTab] = useState<WbTab>("analytics");
+export default function WbScreen({ token, initialTab = "analytics" }: { token: string; initialTab?: WbTab }) {
+  const [tab, setTab] = useState<WbTab>(initialTab);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>

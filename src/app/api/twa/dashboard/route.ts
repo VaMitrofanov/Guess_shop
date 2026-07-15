@@ -1,16 +1,83 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
-import { getStats30d } from "@/lib/wb-api";
+import { getFeedbackSummary, getStats30d } from "@/lib/wb-api";
 import { prisma } from "@/lib/prisma";
+
+type AttentionRow = {
+  buyout: number;
+  awaitingLink: number;
+  errors: number;
+  requiredRobux: number;
+  oldestAt: Date | null;
+};
+
+async function getDonorSnapshot() {
+  const settings = await prisma.globalSettings.findUnique({
+    where: { id: "global" },
+    select: { robloxCookie: true, robloxAccountName: true },
+  });
+  if (!settings?.robloxCookie) return { available: false, accountName: null, balance: null };
+  try {
+    const response = await fetch("https://economy.roblox.com/v1/user/currency", {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Roblox/WinInet",
+        Cookie: `.ROBLOSECURITY=${settings.robloxCookie}`,
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(6_000),
+    });
+    const payload = response.ok ? await response.json() as { robux?: number } : null;
+    return {
+      available: response.ok && typeof payload?.robux === "number",
+      accountName: settings.robloxAccountName,
+      balance: typeof payload?.robux === "number" ? payload.robux : null,
+    };
+  } catch {
+    return { available: false, accountName: settings.robloxAccountName, balance: null };
+  }
+}
 
 export async function GET(req: NextRequest) {
   if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const [stats, codes, wbOrders] = await Promise.all([
+  const [stats, codes, attentionRows, firstError, feedback, donor] = await Promise.all([
     getStats30d(),
-    (prisma as any).wbCode.groupBy({ by: ["denomination"], _count: { _all: true }, where: { isUsed: false, isTest: false } }),
-    (prisma as any).wbOrder.count({ where: { status: { in: ["PENDING", "IN_PROGRESS"] }, isTest: false } }),
+    prisma.wbCode.groupBy({ by: ["denomination"], _count: { _all: true }, where: { isUsed: false, isTest: false } }),
+    prisma.$queryRaw<AttentionRow[]>`
+      SELECT
+        COUNT(*) FILTER (
+          WHERE status IN ('PENDING', 'IN_PROGRESS')
+            AND "isDirectOrder" = false
+            AND "orderSource" <> 'AVITO'
+        )::int AS "buyout",
+        COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS')::int AS "awaitingLink",
+        COUNT(*) FILTER (WHERE status = 'ERROR')::int AS "errors",
+        COALESCE(SUM(CEIL(amount / 0.7)) FILTER (
+          WHERE status IN ('PENDING', 'IN_PROGRESS')
+            AND "isDirectOrder" = false
+            AND "orderSource" <> 'AVITO'
+        ), 0)::int AS "requiredRobux",
+        LEAST(
+          MIN(COALESCE("pendingAt", "createdAt")) FILTER (
+            WHERE status IN ('PENDING', 'IN_PROGRESS')
+              AND "isDirectOrder" = false
+              AND "orderSource" <> 'AVITO'
+          ),
+          MIN("createdAt") FILTER (WHERE status IN ('AWAITING_GAMEPASS', 'ERROR'))
+        ) AS "oldestAt"
+      FROM "WbOrder"
+      WHERE "isTest" = false AND "isFavorite" = false
+    `,
+    prisma.wbOrder.findFirst({
+      where: { isTest: false, isFavorite: false, status: "ERROR" },
+      orderBy: { createdAt: "asc" },
+      select: { buyoutErrorCode: true, adminNote: true },
+    }),
+    getFeedbackSummary(),
+    getDonorSnapshot(),
   ]);
+  const attention = attentionRows[0] ?? { buyout: 0, awaitingLink: 0, errors: 0, requiredRobux: 0, oldestAt: null };
 
   const todayStr = new Date().toISOString().split("T")[0];
   const weekAgo  = Date.now() - 7 * 864e5;
@@ -20,6 +87,19 @@ export async function GET(req: NextRequest) {
   const weekOrders   = stats?.orders.filter(o => new Date(o.date).getTime() >= weekAgo && !o.isCancel) ?? [];
   const prevWOrders  = stats?.orders.filter(o => { const t = new Date(o.date).getTime(); return t >= prevWeek && t < weekAgo && !o.isCancel; }) ?? [];
   const todaySales   = stats?.sales.filter(s => s.date.startsWith(todayStr)) ?? [];
+  const inbox = {
+    available: feedback !== null,
+    feedbacks: feedback?.unansweredFeedbacks ?? 0,
+    questions: feedback?.unansweredQuestions ?? 0,
+    total: (feedback?.unansweredFeedbacks ?? 0) + (feedback?.unansweredQuestions ?? 0),
+  };
+  const donorBalance = donor.balance;
+  const donorCoverage = {
+    ...donor,
+    requiredRobux: attention.requiredRobux,
+    covered: donorBalance === null ? null : donorBalance >= attention.requiredRobux,
+    shortfall: donorBalance === null ? null : Math.max(0, attention.requiredRobux - donorBalance),
+  };
 
   // 7-day daily breakdown
   const daily: { date: string; count: number; sum: number }[] = [];
@@ -35,8 +115,17 @@ export async function GET(req: NextRequest) {
     week:    { orders: weekOrders.length, sum: Math.round(weekOrders.reduce((a, o) => a + o.priceWithDisc, 0)) },
     prevWeek:{ orders: prevWOrders.length, sum: Math.round(prevWOrders.reduce((a, o) => a + o.priceWithDisc, 0)) },
     daily,
-    codes: codes.sort((a: any, b: any) => a.denomination - b.denomination).map((g: any) => ({ denom: g.denomination, count: g._count._all })),
-    wbOrders,
+    codes: codes.sort((a, b) => a.denomination - b.denomination).map(g => ({ denom: g.denomination, count: g._count._all })),
+    attention: {
+      total: attention.buyout + attention.awaitingLink + attention.errors + inbox.total,
+      buyout: attention.buyout,
+      awaitingLink: attention.awaitingLink,
+      errors: attention.errors,
+      oldestAt: attention.oldestAt?.toISOString() ?? null,
+      firstError: firstError?.buyoutErrorCode ?? firstError?.adminNote?.split("\n")[0]?.slice(0, 90) ?? null,
+    },
+    donorCoverage,
+    inbox,
     apiAvailable: !!stats,
     tokenPresent: !!(process.env.WB_API_TOKEN),
   });

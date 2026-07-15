@@ -3,6 +3,7 @@ import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
 import type { Prisma } from "@prisma/client";
+import { getOrderMatchReason } from "@/lib/twa-search-match";
 
 interface RobloxProductInfo {
   Name?: string;
@@ -33,6 +34,7 @@ async function lookupGamepass(id: string) {
         isForSale: Boolean(item.IsForSale),
         url: `https://www.roblox.com/game-pass/${id}`,
         observedAt: new Date().toISOString(),
+        matchReason: "по gamepass ID",
       };
     } catch { /* try fallback */ }
   }
@@ -96,6 +98,7 @@ export async function GET(req: NextRequest) {
         isForSale: true,
         url: `https://www.roblox.com/game-pass/${pass.gamepassId}`,
         observedAt,
+        matchReason: "по Roblox-нику",
       }));
     } catch {
       partialErrors.push("Roblox: live-поиск превысил таймаут");
@@ -104,5 +107,16 @@ export async function GET(req: NextRequest) {
   })();
 
   const [orders, gamepasses] = await Promise.all([ordersPromise, livePromise]);
-  return NextResponse.json({ query, orders, gamepasses, partialErrors });
+  const matchedOrders = orders.map(order => ({
+    ...order,
+    source: "db" as const,
+    matchReason: getOrderMatchReason(order, query),
+  }));
+  return NextResponse.json({
+    query,
+    orders: matchedOrders,
+    gamepasses: gamepasses.map(pass => ({ ...pass, source: "live" as const })),
+    counts: { all: matchedOrders.length + gamepasses.length, orders: matchedOrders.length, gamepasses: gamepasses.length },
+    partialErrors,
+  });
 }

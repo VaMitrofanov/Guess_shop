@@ -1,8 +1,8 @@
 "use client";
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { createPortal } from "react-dom";
 import { C, SHADOW, tabular, MONO } from "../theme";
 import { haptic } from "../haptics";
+import BottomSheet from "../BottomSheet";
 import { toast } from "../Toast";
 import CreateManualModal, { type RebindUser } from "../CreateManualModal";
 
@@ -1028,6 +1028,7 @@ function OrderCard({
   const [rebindOpen, setRebindOpen] = useState(false);
   const [refundOpen, setRefundOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [sheetExpanded, setSheetExpanded] = useState(false);
   // GP-watch: локально трекаем «клиент оповещён об этом ГП» — сервер после
   // «Оповестить» отдаёт свежий passId, перезагрузка вкладки не нужна.
   const [gpwPassId, setGpwPassId] = useState<string | null>(order.gpWatchNotifiedPassId);
@@ -1137,9 +1138,15 @@ function OrderCard({
       </button>
     </article>
 
-    {expanded && createPortal(
-      <div className="twa-order-sheet-layer" role="presentation" onClick={() => setExpanded(false)}>
-      <article className="twa-order-sheet twa-fade-up" role="dialog" aria-modal="true" aria-label="Карточка заказа" onClick={event => event.stopPropagation()}>
+    <BottomSheet
+      open={expanded}
+      onClose={() => { setExpanded(false); setSheetExpanded(false); }}
+      ariaLabel="Карточка заказа"
+      className="twa-order-sheet"
+      expandable
+      expanded={sheetExpanded}
+      onExpandedChange={setSheetExpanded}
+    >
       <button
         type="button"
         className="twa-compact-order twa-press-sm"
@@ -1489,10 +1496,7 @@ function OrderCard({
         onPurchaseDone={onPurchaseDone}
       />
       </>
-      </article>
-      </div>,
-      document.body,
-    )}
+    </BottomSheet>
     </>
   );
 }

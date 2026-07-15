@@ -1011,7 +1011,7 @@ function PurchaserAccordion({ group }: { group: PurchaserGroup }) {
   );
 }
 
-function TransactionHistory({ token }: { token: string }) {
+function TransactionHistory({ token, onReady }: { token: string; onReady?: () => void }) {
   const [orders, setOrders] = useState<TxOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -1044,6 +1044,12 @@ function TransactionHistory({ token }: { token: string }) {
   }, [token, sourceFilter]);
 
   useEffect(() => { setOrders([]); load(1, false); }, [load]);
+
+  useEffect(() => {
+    if (loading || orders.length === 0 || !onReady) return;
+    const frame = window.requestAnimationFrame(onReady);
+    return () => window.cancelAnimationFrame(frame);
+  }, [loading, onReady, orders.length]);
 
   if (loading) return (
     <div style={{ background: C.card, borderRadius: 14, height: 80, animation: "pulse 1.5s ease-in-out infinite" }} />
@@ -4106,6 +4112,7 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
   const [showDrain, setShowDrain] = useState(false);
   const queueRef = useRef<HTMLElement | null>(null);
   const drainRef = useRef<HTMLElement | null>(null);
+  const historyRef = useRef<HTMLElement | null>(null);
 
   const [cookieInput, setCookieInput] = useState("");
   const [saving, setSaving] = useState(false);
@@ -4184,6 +4191,16 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
   const scrollToSection = (ref: React.MutableRefObject<HTMLElement | null>) => {
     ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+
+  const openHistory = () => {
+    setShowTxHistory(true);
+    window.setTimeout(() => scrollToSection(historyRef), 0);
+  };
+
+  const revealFirstHistoryRow = useCallback(() => {
+    const firstRow = historyRef.current?.querySelector<HTMLElement>(".twa-history-row");
+    (firstRow ?? historyRef.current)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
 
   async function refreshBalance() {
     setRefreshing(true);
@@ -4407,7 +4424,7 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
             onQueue={() => scrollToSection(queueRef)}
             onErrors={onOpenErrors}
             onDrain={() => { setShowDrain(true); window.setTimeout(() => scrollToSection(drainRef), 0); }}
-            onHistory={() => setShowTxHistory(value => !value)}
+            onHistory={openHistory}
           />
           {/* ── Ф2: hero «Донор» + виджеты — зеркало языка дашборда Антона (5.9).
               Виджеты кликабельны: Очередь/Слив скроллят к секции, Ошибки —
@@ -4709,7 +4726,7 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
 
       {/* ── Transaction History — аккордеон: грузит ВСЕ страницы DONE,
              поэтому по умолчанию свёрнута и монтируется только по тапу (Ф2). */}
-      <section>
+      <section ref={historyRef}>
         <button
           className="twa-press-sm"
           onClick={() => { haptic.select(); setShowTxHistory(v => !v); }}
@@ -4724,7 +4741,7 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
           <span>История покупок</span>
           <span style={{ marginLeft: "auto", fontSize: 14, color: C.textTertiary, transition: "transform .15s", transform: showTxHistory ? "rotate(90deg)" : "rotate(0)" }}>▶</span>
         </button>
-        {showTxHistory && <TransactionHistory key={historyKey} token={token} />}
+        {showTxHistory && <TransactionHistory key={historyKey} token={token} onReady={revealFirstHistoryRow} />}
       </section>
 
       {/* Confirm modal */}

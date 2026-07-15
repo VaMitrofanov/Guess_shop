@@ -87,6 +87,7 @@ export default function TwaApp() {
   });
   // Ф2: виджет «Ошибки» дашборда «Свои» открывает Заказы сразу на вкладке ERROR.
   const [ordersTabPreload,   setOrdersTabPreload]   = useState<string>("");
+  const [wbTabPreload,       setWbTabPreload]       = useState<"analytics" | "reviews">("analytics");
 
   useEffect(() => {
     let cancelled = false;
@@ -336,11 +337,12 @@ export default function TwaApp() {
       {/* Content */}
       <div className="twa-liquid-content" style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
         {screen === "dashboard"  && <Dashboard      {...sp}
-          onOpenOrders={(query) => { setOrderQueryPreload(query ?? ""); setScreen("orders"); }}
+          onOpenOrders={(query, tab) => { setOrderQueryPreload(query ?? ""); setOrdersTabPreload(tab ?? ""); setScreen("orders"); }}
           onOpenAccount={() => setScreen("account")}
+          onOpenInbox={() => { setWbTabPreload("reviews"); setScreen("wb"); }}
         />}
         {screen === "orders"     && <OrdersScreen   {...sp} onActionDone={refreshBadge} initialQuery={orderQueryPreload} initialTab={ordersTabPreload} onInitialQueryConsumed={() => { setOrderQueryPreload(""); setOrdersTabPreload(""); }} />}
-        {screen === "wb"         && <WbScreen       {...sp} />}
+        {screen === "wb"         && <WbScreen       {...sp} initialTab={wbTabPreload} />}
         {screen === "account"    && <AccountScreen  {...sp} onOpenErrors={() => { setOrdersTabPreload("ERROR"); setScreen("orders"); }} />}
         {screen === "settings"   && <SettingsScreen  {...sp} onNavigate={(s) => setScreen(s as Screen)} />}
         {screen === "system"     && <SystemScreen    {...sp} />}
