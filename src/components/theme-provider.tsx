@@ -20,15 +20,19 @@ function resolveTheme(preference: ThemePreference, media?: MediaQueryList): Reso
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [preference, setPreferenceState] = useState<ThemePreference>(() => {
-    if (typeof window === "undefined") return "auto";
+  // The first render must be identical on the server and in the browser.
+  // Reading localStorage/matchMedia in the state initializer made the theme
+  // toggle render different icons during hydration on dark-system devices.
+  const [preference, setPreferenceState] = useState<ThemePreference>("auto");
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>("light");
+
+  useEffect(() => {
     const stored = window.localStorage.getItem(STORAGE_KEY);
-    return stored === "light" || stored === "dark" || stored === "auto" ? stored : "auto";
-  });
-  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => {
-    if (typeof window === "undefined") return "light";
-    return resolveTheme("auto", window.matchMedia("(prefers-color-scheme: dark)"));
-  });
+    if (stored === "light" || stored === "dark" || stored === "auto") {
+      const timer = window.setTimeout(() => setPreferenceState(stored), 0);
+      return () => window.clearTimeout(timer);
+    }
+  }, []);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");

@@ -62,10 +62,9 @@ cookie партнёра не добавлен.
 ```
 src/
   app/
-    guide/GuideClient.tsx        роутер фаз WB/BOT-коридора (intro / gate / instruction)
-    guide/WBInstructionV2.tsx    9-шаговая WB/BOT-инструкция + поиск по нику
-    guide/SiteGuide.tsx          отдельная site-инструкция: пакет → gross-цена → ник → checkout
-    checkout/page.tsx            site order flow: поиск аккаунта/игры/пасса → quote → оплата
+    guide/GuideClient.tsx        роутер WB/SITE/BOT (intro / gate / shared instruction)
+    guide/WBInstructionV2.tsx    единая 9-шаговая инструкция; channel-specific amount/CTA
+    checkout/page.tsx            search-first: все пассы по нику → quote → оплата
     checkout/checkout.module.css rounded Violet/Frost UI checkout без legacy pixel-card
     guide/page.tsx               серверная обёртка гейта (query-флаги: skip/code/test/preview)
     api/wb-code/route.ts         резерв/статус кода (POST reserve, GET status)
@@ -79,6 +78,7 @@ src/
     api/twa/partners/[slug]/tasks B2B server MVP: задачи/ledger/выкуп партнёра `anton`
   auth.ts                        NextAuth (admin + vk-id провайдеры)
   lib/
+    gamepass-search-view.ts      sellable-filter, ranking и price-match результатов
     twa-auth.ts                  initData HMAC + JWT для TWA
     roblox.ts                    Roblox API для сайта (4 эндпоинта details)
     roblox-buyout.ts             shared resolve/purchase helper для retail и B2B

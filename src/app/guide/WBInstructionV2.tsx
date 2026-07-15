@@ -12,6 +12,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import VKAuthButton from "@/components/auth/VKAuthButton";
 import { getOrInitSessionId } from "@/lib/wb-session";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { gamepassPriceMatches, rankSellableGamepasses } from "@/lib/gamepass-search-view";
+import { CUSTOM_MAX, CUSTOM_MIN } from "@/lib/retail-pricing";
 
 const RATE = 0.7; // Roblox keeps 30%
 const calcPrice = (n: number) => (n > 0 ? Math.ceil(n / RATE) : 0);
@@ -92,12 +94,14 @@ function useReveal() {
 
 export default function WBInstructionV2({
   denomination,
+  initialUsername = "",
   code,
   onReset,
   testMode = false,
   mode = "WB",
-}: { denomination?: number; code?: string; onReset?: () => void; testMode?: boolean; mode?: "WB" | "SITE" | "BOT" }) {
+}: { denomination?: number; initialUsername?: string; code?: string; onReset?: () => void; testMode?: boolean; mode?: "WB" | "SITE" | "BOT" }) {
   const nomDefault = denomination && denomination > 0 ? denomination : 1000;
+  const isSite = mode === "SITE";
   const [nom, setNom] = useState<number>(nomDefault);
   const [copied, setCopied] = useState(false);
   const price = calcPrice(nom);
@@ -115,11 +119,10 @@ export default function WBInstructionV2({
   }, [price]);
 
   // ── Step 7: live gamepass search by Roblox nick (one-tap handoff to bot) ──
-  // Expected price is keyed off the code's real denomination, NOT the editable
-  // calculator `nom`, so the price-match check stays correct even if the user
-  // toyed with the calculator in step 6.
-  const expectedPrice = calcPrice(nomDefault);
-  const [nick, setNick] = useState("");
+  // WB is fixed by the activated card. SITE/BOT can edit the desired amount at
+  // the calculation step, therefore their expected gamepass price follows `nom`.
+  const expectedPrice = calcPrice(mode === "WB" ? nomDefault : nom);
+  const [nick, setNick] = useState(initialUsername.trim().replace(/^@/, ""));
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState<string | null>(null);
   const [view, setView] = useState<SearchView>({ kind: "idle" });
@@ -142,14 +145,12 @@ export default function WBInstructionV2({
       const res = await fetch(`/api/roblox/gamepasses?query=${encodeURIComponent(n)}${code ? `&code=${encodeURIComponent(code)}` : ""}`);
       const data = await res.json();
       if (!data?.success) { setSearchErr("Поиск временно недоступен — попробуй ещё раз."); return; }
-      const sellable: Pass[] = (data.gamepasses ?? []).filter((g: Pass) => g.isForSale && g.price > 0);
+      const sellable = rankSellableGamepasses<Pass>(data.gamepasses ?? [], expectedPrice);
       if (sellable.length === 0) {
         setView(data.userExists === false ? { kind: "user_not_found", nick: n } : { kind: "no_gamepasses", nick: n });
         return;
       }
-      const annotated = sellable
-        .map((g) => ({ ...g, isPriceMatch: Math.abs(g.price - expectedPrice) <= 2 }))
-        .sort((a, b) => Math.abs(a.price - expectedPrice) - Math.abs(b.price - expectedPrice));
+      const annotated = sellable.map((g) => ({ ...g, isPriceMatch: gamepassPriceMatches(g.price, expectedPrice, isSite ? 0 : undefined) }));
       const matches = annotated.filter((g) => g.isPriceMatch);
       if (matches.length === 0) setView({ kind: "wrong_price", nick: n, passes: annotated.slice(0, 5) });
       else setView({ kind: "matches", nick: n, passes: matches.slice(0, 5) });
@@ -158,7 +159,7 @@ export default function WBInstructionV2({
     } finally {
       setSearching(false);
     }
-  }, [nick, expectedPrice]);
+  }, [nick, expectedPrice, isSite]);
 
   // Which channel did the user pick earlier (TG/VK)? Drives the single CTA button
   // at the bottom. orderPlaced = the order is already materialised (site one-tap
@@ -168,8 +169,6 @@ export default function WBInstructionV2({
   const [robloxUsername, setRobloxUsername] = useState<string | null>(null);
   // True when orderPlaced was detected on mount (re-entry), not from a fresh pick.
   const [isReEntry, setIsReEntry] = useState(false);
-
-  const [redirecting, setRedirecting] = useState(false);
 
   useEffect(() => {
     if (!code || testMode) return;
@@ -196,15 +195,16 @@ export default function WBInstructionV2({
     : tgHref;
 
   // Auto-redirect only on fresh picks (not re-entries — let the user see their nick).
+  const redirecting = orderPlaced && !isReEntry && !testMode && !!channel;
   useEffect(() => {
-    if (!orderPlaced || isReEntry || testMode || !channel) return;
-    setRedirecting(true);
+    if (!redirecting) return;
     const t = setTimeout(() => { window.location.href = returnHref; }, 1800);
     return () => clearTimeout(t);
-  }, [orderPlaced, isReEntry, channel, testMode, returnHref]);
+  }, [redirecting, returnHref]);
 
   const pick = useCallback(async (p: Pass, searchedNick: string) => {
     setPicked({ id: String(p.id), name: p.name, price: p.price });
+    if (isSite) return;
     // Materialise the order on the server (promote provisional → PENDING + fire
     // the admin card). Advisory/idempotent — the bot one-tap stays a fallback.
     // Skipped in test/preview or without a code.
@@ -219,7 +219,7 @@ export default function WBInstructionV2({
         if (res.ok && (data?.ordered || data?.alreadyOrdered)) setOrderPlaced(true);
       } catch { /* non-blocking: bot nick-search remains as fallback */ }
     }
-  }, [code, testMode]);
+  }, [code, isSite, testMode]);
 
   return (
     <div className="wbi-root" ref={root}>
@@ -235,7 +235,7 @@ export default function WBInstructionV2({
             <div className="wbi-top-sub">Инструкция</div>
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <div className="wbi-tag">Номинал {nomDefault} R$</div>
+            <div className="wbi-tag">{isSite ? "Желаемая сумма" : "Номинал"} {isSite ? nom : nomDefault} R$</div>
             {onReset && (
               <button className="wbi-reset" onClick={onReset}>‹ Новый код</button>
             )}
@@ -373,8 +373,8 @@ export default function WBInstructionV2({
             <div className="wbi-checknote" style={{ background: "rgba(255,60,60,0.12)", borderColor: "#ff4444" }}>⚠️ <b>ВАЖНО: «Managed pricing»</b> (региональные цены) должен быть <b>ОТКЛЮЧЁН</b>. Если он включён — Roblox автоматически изменит цену и мы <b>не сможем</b> выкупить геймпасс, пока ты не исправишь. По умолчанию он отключён, но обязательно проверь!</div>
             <div className="wbi-calc">
               <div className="wbi-lbl">ЦЕНА ПАСА — ВСТАВЬ ЕЁ В ROBLOX</div>
-              <div className="wbi-nomrow">{mode === "WB" ? "Номинал твоей карты" : "Сколько R$ ты получаешь"}: <input className="wbi-input" type="number" min={1} inputMode="numeric" value={nom}
-                onChange={(e) => setNom(Math.max(0, parseInt(e.target.value || "0", 10)))} /> R$</div>
+              <div className="wbi-nomrow">{mode === "WB" ? "Номинал твоей карты" : "Сколько R$ ты получаешь"}:{mode === "WB" ? <strong> {nomDefault.toLocaleString("ru-RU")} R$</strong> : <><input className="wbi-input" type="number" min={CUSTOM_MIN} max={CUSTOM_MAX} inputMode="numeric" value={nom}
+                onChange={(e) => { setNom(Math.min(CUSTOM_MAX, Math.max(CUSTOM_MIN, parseInt(e.target.value || String(CUSTOM_MIN), 10)))); setPicked(null); setView({ kind: "idle" }); }} /> R$</>}</div>
               <div className="wbi-v wbi-copy" onClick={copy} role="button" tabIndex={0}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") copy(); }}>
                 <span>{price}</span><span className="wbi-ci">{copied ? "✓" : "📋"}</span>
@@ -385,14 +385,14 @@ export default function WBInstructionV2({
               <span className="wbi-anno">
                 <img src="/guide/wb-step6-sales.png" alt="Вкладка Sales: Price, Item for sale, Managed pricing отключён, Save Changes" loading="lazy" decoding="async" />
                 {/* Item for sale — user must turn it ON */}
-                <span className="wbi-tip g caret" style={{ left: "78%", top: "12%", fontSize: "clamp(8px,2.1cqw,12px)" }}>ВКЛЮЧИ ✓</span>
+                <span className="wbi-tip g caret" style={{ left: "78%", top: "12%" }}>ВКЛЮЧИ ✓</span>
                 {/* Price field + live price */}
                 <span className="wbi-box g" style={{ left: "3.5%", top: "24%", width: "93%", height: "15%" }} />
                 <span className="wbi-price6" style={{ left: "7.8%", top: "30%", fontSize: "3.7cqw", background: "#131215", padding: "0.1em 1.1em 0.1em 0.3em" }}>{price}</span>
-                <span className="wbi-tip g caret" style={{ left: "26%", top: "17%", fontSize: "clamp(8px,2.1cqw,12px)" }}>ТВОЯ ЦЕНА ↓</span>
+                <span className="wbi-tip g caret" style={{ left: "26%", top: "17%" }}>ТВОЯ ЦЕНА ↓</span>
                 {/* Managed pricing — highlight it must be OFF */}
                 <span className="wbi-box" style={{ left: "3.5%", top: "42%", width: "93%", height: "9%", borderColor: "#ff4444" }} />
-                <span className="wbi-tip r caret" style={{ left: "72%", top: "44%", fontSize: "clamp(8px,2.1cqw,12px)" }}>⚠️ ОТКЛЮЧЁН ✓</span>
+                <span className="wbi-tip r caret" style={{ left: "72%", top: "44%" }}>⚠️ ОТКЛЮЧЁН ✓</span>
                 {/* Save Changes */}
                 <span className="wbi-box g" style={{ left: "3.5%", top: "85%", width: "93%", height: "13%" }} />
                 <span className="wbi-tip g caret" style={{ left: "50%", top: "81%" }}>НАЖМИ — СОХРАНИТЬ</span>
@@ -419,9 +419,11 @@ export default function WBInstructionV2({
               </>
             ) : (
               <>
-            <div className="wbi-kbadge">🏁 ФИНИШ — ОФОРМЛЯЕМ ЗАКАЗ</div>
-            <div className="wbi-ttl">Геймпасс готов — оформи заказ</div>
-            <p className="wbi-t">🎉 Самое сложное позади! Впиши <b>ник аккаунта Roblox, на который придут робуксы</b> — мы сами найдём твой геймпасс и <b>оформим заказ</b>. Дальше всё в <b>боте</b> (Telegram или ВКонтакте — туда ты перейдёшь ниже): он сам выкупит пасс, там же статус заказа, уведомления и бонусы за отзыв.</p>
+            <div className="wbi-kbadge">🏁 ФИНИШ — {isSite ? "ПРОВЕРЯЕМ ГЕЙМПАСС" : "ОФОРМЛЯЕМ ЗАКАЗ"}</div>
+            <div className="wbi-ttl">{isSite ? "Найди готовый геймпасс" : "Геймпасс готов — оформи заказ"}</div>
+            <p className="wbi-t">{isSite
+              ? <>Впиши <b>ник аккаунта Roblox</b>. Мы покажем подходящий геймпасс и передадим его в оформление на сайте — повторно искать по играм не придётся.</>
+              : <>🎉 Самое сложное позади! Впиши <b>ник аккаунта Roblox, на который придут робуксы</b> — мы сами найдём твой геймпасс и <b>оформим заказ</b>. Дальше всё в <b>боте</b> (Telegram или ВКонтакте — туда ты перейдёшь ниже): он сам выкупит пасс, там же статус заказа, уведомления и бонусы за отзыв.</>}</p>
             <div className="wbi-shint" style={{ margin: "2px 0 10px" }}>💡 Это <b>твой</b> ник Roblox — именно на этот аккаунт зачислятся робуксы.</div>
               </>
             )}
@@ -490,10 +492,12 @@ export default function WBInstructionV2({
 
               {picked && (
                 <div className="wbi-picked">
-                  <div className="wbi-picked-h">{orderPlaced ? "✅ ЗАКАЗ ОФОРМЛЕН" : "⏳ ОФОРМЛЯЕМ ЗАКАЗ…"}</div>
+                  <div className="wbi-picked-h">{isSite ? "✅ ГЕЙМПАСС ВЫБРАН" : orderPlaced ? "✅ ЗАКАЗ ОФОРМЛЕН" : "⏳ ОФОРМЛЯЕМ ЗАКАЗ…"}</div>
                   <div className="wbi-picked-b"><b>{picked.name}</b> · {picked.price} R$</div>
                   <div className="wbi-shint" style={{ marginTop: 8 }}>
-                    {orderPlaced
+                    {isSite
+                      ? "Готово. Ниже откроется оформление с уже выбранными суммой, ником и геймпассом."
+                      : orderPlaced
                       ? "Готово! Сейчас вернём тебя в бота — там статус заказа и уведомления. Если не открылось автоматически — нажми кнопку ниже 👇"
                       : "Оформляем твой заказ, подожди немного — затем сами вернём тебя в бота 👌"}
                   </div>
@@ -504,23 +508,54 @@ export default function WBInstructionV2({
           </Step>
 
           <Step n="9">
-            <div className="wbi-cols wbi-media wbi-rev">
-              <div><div className="wbi-ttl">Зачем нужен бот</div>
-                <p className="wbi-t">Бот — это твой личный кабинет заказа. Тебе только нажимать кнопки:</p>
-                <ul className="wbi-blist">
-                  <li>🔔 <b>Статус заказа</b> — приняли → выкупаем → готово</li>
-                  <li>{orderPlaced ? "✅ " : "✅ "}<b>{orderPlaced ? "Заказ уже оформлен" : "Подтвердить выкуп"}</b>{picked && !orderPlaced ? " — в один тап" : ""}</li>
-                  <li>🎁 <b>Бонус</b> за короткий отзыв</li>
-                </ul>
-                <div className="wbi-directnote">💎 <b>Самое главное:</b> в боте можно <b>купить Robux напрямую</b> — без карты WB. Это <b>быстрее, дешевле и выгоднее</b>. Многие об этом не знают — попробуй!</div>
-                <div className="wbi-warn">Не меняй цену и не удаляй геймпасс до сообщения «всё готово».</div></div>
-              <div className="wbi-mcol"><div className="wbi-icoTile">🤖</div></div>
-            </div>
+            {isSite ? (
+              <div className="wbi-cols wbi-media wbi-rev">
+                <div><div className="wbi-ttl">Проверь и перейди к оплате</div>
+                  <p className="wbi-t">На следующем экране мы ещё раз сверим цену, зафиксируем рублёвую сумму и покажем состав заказа до оплаты.</p>
+                  <ul className="wbi-blist">
+                    <li>✅ <b>Ник и геймпасс</b> уже перенесены</li>
+                    <li>🧾 <b>Email нужен только для чека</b></li>
+                    <li>🔒 <b>Пароль Roblox не требуется</b></li>
+                  </ul>
+                  <div className="wbi-warn">Не меняй цену и не удаляй геймпасс до сообщения «всё готово».</div></div>
+                <div className="wbi-mcol"><div className="wbi-icoTile">🔐</div></div>
+              </div>
+            ) : (
+              <div className="wbi-cols wbi-media wbi-rev">
+                <div><div className="wbi-ttl">Зачем нужен бот</div>
+                  <p className="wbi-t">Бот — это твой личный кабинет заказа. Тебе только нажимать кнопки:</p>
+                  <ul className="wbi-blist">
+                    <li>🔔 <b>Статус заказа</b> — приняли → выкупаем → готово</li>
+                    <li>✅ <b>{orderPlaced ? "Заказ уже оформлен" : "Подтвердить выкуп"}</b>{picked && !orderPlaced ? " — в один тап" : ""}</li>
+                    <li>🎁 <b>Бонус</b> за короткий отзыв</li>
+                  </ul>
+                  <div className="wbi-directnote">💎 <b>Самое главное:</b> в боте можно <b>купить Robux напрямую</b> — без карты WB. Это <b>быстрее, дешевле и выгоднее</b>. Многие об этом не знают — попробуй!</div>
+                  <div className="wbi-warn">Не меняй цену и не удаляй геймпасс до сообщения «всё готово».</div></div>
+                <div className="wbi-mcol"><div className="wbi-icoTile">🤖</div></div>
+              </div>
+            )}
           </Step>
 
         </div>
 
-        {/* CTA */}
+        {/* Channel-specific handoff after the shared instruction. */}
+        {isSite ? (
+          <div className="wbi-cta wbi-reveal">
+            <h3>{picked ? "Геймпасс готов к оформлению" : "Сначала найди и выбери геймпасс"}</h3>
+            <div className="wbi-s">Желаемая сумма {nom.toLocaleString("ru-RU")} R$ · цена пасса {expectedPrice.toLocaleString("ru-RU")} R${picked ? <> · <b>{picked.name}</b></> : null}</div>
+            {picked ? (
+              <a
+                className="wbi-sitepay"
+                href={`/checkout?amount=${nom}&username=${encodeURIComponent(nick.trim().replace(/^@/, ""))}&gamepassId=${encodeURIComponent(picked.id)}`}
+              >
+                Перейти к оформлению →
+              </a>
+            ) : (
+              <span className="wbi-sitepay disabled" aria-disabled="true">Выбери геймпасс на шаге 8</span>
+            )}
+            <a className="wbi-support" href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer">Остались вопросы? Написать живому менеджеру →</a>
+          </div>
+        ) : (
         <div className="wbi-cta wbi-reveal">
           <h3>{isReEntry && orderPlaced
             ? "Заказ оформлен — статус в боте"
@@ -576,6 +611,7 @@ export default function WBInstructionV2({
           )}
           <a className="wbi-support" href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer">Остались вопросы? Написать живому менеджеру (не боту) →</a>
         </div>
+        )}
 
         <div className="wbi-note">Инструкция оформлена для мобильных устройств. Если что-то не получается — пиши менеджеру выше.</div>
       </div>
@@ -603,26 +639,26 @@ const CSS = `
 @keyframes wbi-drift2{50%{transform:translate(50px,-50px)}}
 .wbi-wrap{position:relative;z-index:1;max-width:880px;margin:0 auto;padding:0 18px 70px}
 .wbi-top{display:flex;align-items:center;justify-content:space-between;padding:18px 0;border-bottom:1px solid rgba(201,168,76,.22);gap:12px;flex-wrap:wrap}
-.wbi-eye{font-size:11px;letter-spacing:2.5px;color:var(--gold)}
-.wbi-top-sub{font-size:13px;color:var(--txt);margin-top:2px}
-.wbi-tag{font-size:13px;color:var(--gold2);border:1px solid rgba(201,168,76,.4);padding:4px 12px;border-radius:8px;background:rgba(201,168,76,.06);white-space:nowrap}
-.wbi-reset{font-size:12px;color:var(--gold);background:transparent;border:1px solid rgba(201,168,76,.3);padding:5px 12px;border-radius:8px;cursor:pointer;transition:border-color .2s}
+.wbi-eye{font-size:13px;font-weight:800;letter-spacing:2.2px;color:var(--gold)}
+.wbi-top-sub{font-size:15px;color:var(--txt);margin-top:2px}
+.wbi-tag{font-size:14px;font-weight:750;color:var(--gold2);border:1px solid rgba(201,168,76,.4);padding:6px 12px;border-radius:8px;background:rgba(201,168,76,.06);white-space:nowrap}
+.wbi-reset{font-size:14px;color:var(--gold);background:transparent;border:1px solid rgba(201,168,76,.3);padding:7px 12px;border-radius:8px;cursor:pointer;transition:border-color .2s}
 .wbi-reset:hover{border-color:rgba(201,168,76,.7)}
 .wbi-hero{padding:40px 0 30px;text-align:center}
-.wbi-kick{font-size:12px;letter-spacing:3px;color:rgba(0,212,132,.8);margin-bottom:14px}
+.wbi-kick{font-size:14px;font-weight:800;letter-spacing:2.5px;color:#71e0bd;margin-bottom:14px}
 .wbi-h1{font-size:clamp(34px,7vw,58px);font-weight:900;text-transform:uppercase;line-height:.95;letter-spacing:-.02em}
 .wbi-g{background:linear-gradient(100deg,#7556e8,#c2b2ff,#45d6aa,#7556e8);background-size:240% auto;-webkit-background-clip:text;background-clip:text;color:transparent;animation:wbi-shine 6s linear infinite}
 @keyframes wbi-shine{to{background-position:200% center}}
 .wbi-lead{color:var(--mut);font-size:18px;max-width:560px;margin:18px auto 0}
 .wbi-chips{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:24px}
 .wbi-chip{display:flex;flex-direction:column;align-items:center;gap:3px;border:1px solid var(--line);background:rgba(255,255,255,.02);border-radius:12px;padding:12px 18px;min-width:92px}
-.wbi-chip b{color:var(--grn);font-size:16px}.wbi-chip span{font-size:10px;letter-spacing:1px;color:var(--mut)}
+.wbi-chip b{color:var(--grn);font-size:17px}.wbi-chip span{font-size:12px;font-weight:750;letter-spacing:1px;color:var(--mut)}
 .wbi-must{max-width:560px;margin:24px auto 0;text-align:left;border:1px solid rgba(245,158,11,.45);background:radial-gradient(circle at 50% 0,rgba(245,158,11,.1),transparent 70%),#0b0d18;border-radius:16px;padding:18px 20px}
 .wbi-must-h{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:800;letter-spacing:1px;color:#fcd34d;margin-bottom:12px}
 .wbi-must-it{display:flex;gap:12px;align-items:flex-start;padding:9px 0;border-top:1px solid rgba(255,255,255,.06)}
 .wbi-must-it .wbi-n{flex-shrink:0;width:26px;height:26px;border-radius:8px;background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.5);color:#fcd34d;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px}
 .wbi-must-it b{color:#fff}.wbi-must-it span{font-size:16px;color:#e7d4a6;line-height:1.5}
-.wbi-must-ft{font-size:12.5px;color:#bba26a;margin-top:10px;font-style:italic}
+.wbi-must-ft{font-size:14px;color:#d7c17f;margin-top:10px;font-style:italic;line-height:1.5}
 .wbi-tl{position:relative;margin-top:34px;padding-left:50px}
 .wbi-tl::before{content:'';position:absolute;left:17px;top:8px;bottom:40px;width:2px;background:linear-gradient(180deg,rgba(201,168,76,.05),rgba(201,168,76,.55),rgba(0,212,132,.5),rgba(201,168,76,.05))}
 .wbi-step{position:relative;margin-bottom:26px}
@@ -632,7 +668,7 @@ const CSS = `
 .wbi-card{border:1px solid var(--line);background:linear-gradient(180deg,rgba(26,20,39,.9),rgba(16,13,24,.94));border-radius:20px;padding:22px;transition:transform .3s,border-color .3s,box-shadow .3s}
 .wbi-card.wbi-key{border:1px solid rgba(201,168,76,.5);animation:wbi-glow 3.4s ease-in-out infinite}
 @keyframes wbi-glow{0%,100%{box-shadow:0 0 0 1px rgba(201,168,76,.25),0 0 22px rgba(201,168,76,.08)}50%{box-shadow:0 0 0 1px rgba(201,168,76,.6),0 0 44px rgba(201,168,76,.2)}}
-.wbi-kbadge{display:inline-block;background:linear-gradient(90deg,#c9a84c,#f7d574);color:#1a1405;font-size:11px;font-weight:800;letter-spacing:1px;padding:5px 12px;border-radius:20px;margin-bottom:14px}
+.wbi-kbadge{display:inline-block;background:linear-gradient(90deg,#c9a84c,#f7d574);color:#1a1405;font-size:14px;font-weight:850;letter-spacing:.8px;padding:7px 13px;border-radius:20px;margin-bottom:14px}
 /* Finish step — green "finish line" accent so it can't be missed when scrolling fast */
 .wbi-card.wbi-finish{border:1px solid rgba(0,224,138,.6);animation:wbi-glow-fin 3s ease-in-out infinite}
 @keyframes wbi-glow-fin{0%,100%{box-shadow:0 0 0 1px rgba(0,224,138,.3),0 0 26px rgba(0,224,138,.12)}50%{box-shadow:0 0 0 1px rgba(0,224,138,.72),0 0 54px rgba(0,224,138,.28)}}
@@ -640,7 +676,7 @@ const CSS = `
 .wbi-step:has(.wbi-finish) .wbi-dot.wbi-pulse{background:#00e08a;color:#06210f;animation:wbi-pulse-fin 2.6s infinite}
 @keyframes wbi-pulse-fin{0%{box-shadow:0 0 0 0 rgba(0,224,138,.5)}70%{box-shadow:0 0 0 14px rgba(0,224,138,0)}100%{box-shadow:0 0 0 0 rgba(0,224,138,0)}}
 .wbi-ttl{font-size:24px;font-weight:800;color:#fff;margin-bottom:6px}
-.wbi-t{color:#c3c9d4;font-size:16.5px;margin:8px 0;line-height:1.65}
+.wbi-t{color:#c3c9d4;font-size:17px;margin:8px 0;line-height:1.65}
 .wbi-card b,.wbi-card strong{color:#fff;font-weight:700}
 .wbi-cols{display:grid;grid-template-columns:1fr;gap:20px;align-items:center;margin-top:6px}
 @media(min-width:860px){.wbi-cols.wbi-media{grid-template-columns:minmax(0,1fr) minmax(300px,360px)}.wbi-cols.wbi-rev .wbi-mcol{order:-1}}
@@ -649,27 +685,27 @@ const CSS = `
 .wbi-intro-step .wbi-mcol{width:100%;max-width:420px;justify-self:end}
 .wbi-intro-step .wbi-btnL{width:100%}
 .wbi-quicknotes{display:grid;gap:8px;margin-top:14px}
-.wbi-quicknotes span{display:block;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:rgba(51,95,255,.07);color:var(--mut);font-size:14px;line-height:1.45}
+.wbi-quicknotes span{display:block;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:rgba(51,95,255,.07);color:var(--mut);font-size:15.5px;line-height:1.5}
 .wbi-figure{width:100%;max-width:440px;margin:0;position:relative}
-.wbi-figure::before{content:'ROBLOX  ·  CREATOR HUB';position:absolute;z-index:5;right:9px;top:9px;padding:5px 8px;border:1px solid rgba(255,255,255,.15);border-radius:7px;background:rgba(17,18,20,.9);color:#f7f7f8;font-size:9px;font-weight:800;letter-spacing:.08em;line-height:1;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.wbi-figure::before{content:'ROBLOX  ·  CREATOR HUB';position:absolute;z-index:5;right:9px;top:9px;padding:6px 9px;border:1px solid rgba(255,255,255,.2);border-radius:7px;background:rgba(17,18,20,.94);color:#f7f7f8;font-size:12px;font-weight:850;letter-spacing:.06em;line-height:1;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.25)}
 .wbi-figure img{width:100%;border-radius:12px;border:1px solid #26314a;display:block;transition:transform .35s}
 .wbi-figure:hover img{transform:scale(1.015)}
 .wbi-figure.wbi-spot{position:relative;border-radius:12px}
 .wbi-figure.wbi-spot::after{content:'';position:absolute;inset:-4px;border-radius:14px;border:2px solid rgba(0,212,132,0);animation:wbi-ring 2.8s ease-in-out infinite;pointer-events:none}
 @keyframes wbi-ring{0%,100%{border-color:rgba(0,212,132,0)}50%{border-color:rgba(0,212,132,.55)}}
 .wbi-figure video{width:100%;border-radius:12px;border:1px solid #26314a;display:block;background:#070b15}
-.wbi-figure figcaption{font-size:15px;color:#d6dbe4;margin-top:10px;background:rgba(0,176,111,.08);border-left:3px solid var(--grn);padding:10px 14px;border-radius:0 8px 8px 0;line-height:1.5}
+.wbi-figure figcaption{font-size:16px;color:#d6dbe4;margin-top:10px;background:rgba(0,176,111,.08);border-left:3px solid var(--grn);padding:11px 14px;border-radius:0 8px 8px 0;line-height:1.55}
 .wbi-shot{width:100%;max-width:660px;margin:18px auto 0}
 .wbi-btnL{display:inline-block;background:linear-gradient(180deg,#2aa8e0,#1f8fc6);border:1px solid rgba(34,158,217,.8);box-shadow:0 5px 0 #14638c,0 10px 22px rgba(34,158,217,.32);color:#fff;font-weight:800;font-size:16px;padding:16px 26px;border-radius:12px;text-decoration:none;text-align:center;transition:transform .12s}
 .wbi-btnL:active{transform:translateY(3px);box-shadow:0 2px 0 #14638c}
-.wbi-url{text-align:center;font-size:12.5px;color:#71798c;margin-top:9px}
+.wbi-url{text-align:center;font-size:14px;color:#a3aabc;margin-top:9px}
 .wbi-ol{list-style:none;counter-reset:s;margin:8px 0;padding:0}
 .wbi-ol li{counter-increment:s;position:relative;padding:10px 0 10px 44px;font-size:16.5px;line-height:1.5;border-bottom:1px solid rgba(255,255,255,.05)}
 .wbi-ol li:last-child{border-bottom:0}
 .wbi-ol li::before{content:counter(s);position:absolute;left:0;top:7px;width:27px;height:27px;border-radius:50%;background:rgba(201,168,76,.12);border:1px solid rgba(201,168,76,.5);color:var(--gold2);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800}
 .wbi-pill{display:inline-block;font-weight:800;color:#fff;background:#1d4ed8;padding:2px 11px;border-radius:7px}
-.wbi-ok{font-size:15.5px;color:#8ff0bf;background:rgba(0,176,111,.1);padding:12px 15px;border-radius:10px;margin-top:14px;border:1px solid rgba(0,212,132,.25);line-height:1.5}
-.wbi-warn{font-size:15.5px;color:#fcd34d;background:rgba(245,158,11,.09);padding:12px 15px;border-radius:10px;margin-top:10px;border:1px solid rgba(245,158,11,.25);line-height:1.5}
+.wbi-ok{font-size:16px;color:#a3f3d2;background:rgba(0,176,111,.1);padding:12px 15px;border-radius:10px;margin-top:14px;border:1px solid rgba(0,212,132,.25);line-height:1.55}
+.wbi-warn{font-size:16px;color:#fcd34d;background:rgba(245,158,11,.09);padding:12px 15px;border-radius:10px;margin-top:10px;border:1px solid rgba(245,158,11,.25);line-height:1.55}
 .wbi-calc{border:2px solid rgba(201,168,76,.5);background:radial-gradient(circle at 50% 0,rgba(201,168,76,.14),transparent 72%),#070b15;border-radius:16px;padding:22px 24px;text-align:center;width:100%;max-width:330px;margin:14px auto 0}
 .wbi-lbl{font-size:14px;letter-spacing:2px;color:var(--gold);font-weight:800}
 .wbi-v{font-size:64px;line-height:1;color:var(--gold2);font-weight:900;margin:10px 0 6px;text-shadow:0 0 26px rgba(240,192,64,.4)}
@@ -681,7 +717,7 @@ const CSS = `
 .wbi-input{width:104px;font-size:22px;font-weight:800;text-align:center;background:#0d1424;border:1px solid rgba(201,168,76,.5);color:#fff;border-radius:8px;padding:7px 8px;margin:0 4px;-moz-appearance:textfield}
 .wbi-input:focus{outline:none;border-color:var(--gold2)}
 .wbi-input::-webkit-outer-spin-button,.wbi-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
-.wbi-copyhint{font-size:13.5px;color:#8ff0bf;margin-top:10px}
+.wbi-copyhint{font-size:15.5px;color:#8ff0bf;margin-top:10px;line-height:1.45}
 /* ── Annotation overlay layer (highlights/labels live in CSS, screenshots stay clean) ── */
 .wbi-anno{position:relative;display:block;line-height:0;container-type:inline-size;overflow:hidden;border-radius:12px;animation:wbi-media-focus 7s cubic-bezier(.22,1,.36,1) infinite}
 .wbi-anno img{display:block}
@@ -691,11 +727,11 @@ const CSS = `
 .wbi-box.g{border-color:#335fff;box-shadow:0 0 0 1px rgba(0,0,0,.45),0 0 16px rgba(51,95,255,.58);animation:wbi-target-pulse 2.2s ease-in-out infinite}
 .wbi-box.g::after{content:'';position:absolute;left:50%;top:50%;width:18px;height:18px;border:3px solid #fff;border-radius:50%;background:rgba(51,95,255,.82);box-shadow:0 0 0 7px rgba(51,95,255,.2),0 3px 12px rgba(0,0,0,.35);transform:translate(-50%,-50%);animation:wbi-roblox-tap 2.2s cubic-bezier(.22,1,.36,1) infinite}
 .wbi-box.y{border-color:#f2c14e;box-shadow:0 0 0 1px rgba(0,0,0,.4),0 0 16px rgba(242,193,78,.45)}
-.wbi-tip{position:absolute;transform:translate(-50%,-50%);z-index:3;pointer-events:none;line-height:1;font-weight:800;letter-spacing:.4px;white-space:nowrap;font-size:clamp(10px,2.7cqw,15px);padding:.42em .62em;border-radius:7px;box-shadow:0 3px 10px rgba(0,0,0,.35)}
+.wbi-tip{position:absolute;transform:translate(-50%,-50%);z-index:3;pointer-events:none;line-height:1;font-weight:850;letter-spacing:.3px;white-space:nowrap;font-size:clamp(13px,2.7cqw,17px);padding:.46em .66em;border-radius:7px;box-shadow:0 3px 10px rgba(0,0,0,.4)}
 .wbi-tip.g{background:#335fff;color:#fff;animation:wbi-tip-float 2.2s ease-in-out infinite}
 .wbi-tip.y{background:#f2c14e;color:#241a02}
 .wbi-tip.r{background:#ff4444;color:#fff}
-.wbi-tip.caret{font-size:clamp(9px,2.4cqw,14px)}
+.wbi-tip.caret{font-size:clamp(13px,2.4cqw,16px)}
 .wbi-tip.caret::after{content:"";position:absolute;left:50%;bottom:-7px;transform:translateX(-50%);border:5px solid transparent;border-top-color:#335fff;border-bottom:0}
 .wbi-tip.r.caret::after{border-top-color:#ff4444}
 @keyframes wbi-media-focus{0%,18%,100%{transform:scale(1)}45%,72%{transform:scale(1.025)}}
@@ -713,7 +749,7 @@ const CSS = `
 .wbi-check.on .wbi-cbox{background:#00e08a;border-color:#00e08a;color:#06210f}
 .wbi-ctext{font-size:15.5px;color:#cdd3de;line-height:1.45;padding-top:1px}
 .wbi-check.on .wbi-ctext{color:#e7e9ee}
-.wbi-checknote{font-size:14px;color:#9aa1b0;line-height:1.5;padding:2px 4px}
+.wbi-checknote{font-size:15.5px;color:#b9c0cf;line-height:1.55;padding:4px 6px}
 .wbi-checknote b{color:#c3c9d4}
 .wbi-search{margin-top:16px;transition:opacity .25s}
 .wbi-search.locked{opacity:.55}
@@ -721,13 +757,13 @@ const CSS = `
 .wbi-sinput:disabled{cursor:not-allowed;opacity:.7}
 .wbi-sbtn:disabled{cursor:not-allowed}
 .wbi-srow{display:flex;gap:10px;flex-wrap:wrap}
-.wbi-sinput{flex:1 1 180px;min-width:0;font-size:17px;background:#0d1424;border:1px solid rgba(201,168,76,.5);color:#fff;border-radius:11px;padding:14px}
+.wbi-sinput{flex:1 1 180px;min-width:0;font-size:18px;background:#0d1424;border:1px solid rgba(201,168,76,.5);color:#fff;border-radius:11px;padding:14px}
 .wbi-sinput:focus{outline:none;border-color:var(--gold2)}
 .wbi-sinput::placeholder{color:#6b7280}
 .wbi-sbtn{flex:0 0 auto;font-size:16px;font-weight:800;color:#06210f;background:linear-gradient(180deg,#00e08a,#00b46f);border:1px solid rgba(0,224,138,.6);border-radius:11px;padding:14px 22px;cursor:pointer;transition:transform .12s,opacity .2s;white-space:nowrap}
 .wbi-sbtn:active{transform:translateY(1px)}
 .wbi-sbtn:disabled{opacity:.6;cursor:default}
-.wbi-shint{font-size:14px;color:var(--mut);margin-top:10px;line-height:1.5}
+.wbi-shint{font-size:16px;color:var(--mut);margin-top:10px;line-height:1.55}
 .wbi-gplist{display:flex;flex-direction:column;gap:10px;margin-top:12px}
 .wbi-gpcard{display:flex;align-items:center;gap:14px;width:100%;text-align:left;border:1px solid var(--line);background:#0d1424;border-radius:12px;padding:12px 14px}
 .wbi-gpcard.pick{cursor:pointer;border-color:rgba(0,224,138,.45);transition:transform .12s,border-color .2s,box-shadow .2s}
@@ -736,12 +772,12 @@ const CSS = `
 .wbi-gpthumb{width:54px;height:54px;border-radius:10px;flex-shrink:0;object-fit:cover;background:#070b15;border:1px solid #26314a}
 .wbi-gpmeta{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
 .wbi-gpmeta b{color:#fff;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.wbi-gpmeta span{color:var(--gold2);font-size:14px;font-weight:700}
-.wbi-pickbadge{flex-shrink:0;font-size:13px;font-weight:800;color:#06210f;background:#00e08a;border-radius:999px;padding:6px 12px}
+.wbi-gpmeta span{color:var(--gold2);font-size:16px;font-weight:750}
+.wbi-pickbadge{flex-shrink:0;font-size:14px;font-weight:850;color:#06210f;background:#63e8b6;border-radius:999px;padding:7px 12px}
 .wbi-picked{margin-top:14px;border:1px solid rgba(0,224,138,.5);background:radial-gradient(circle at 50% 0,rgba(0,224,138,.12),transparent 70%),#060f0b;border-radius:14px;padding:18px;text-align:center}
-.wbi-picked-h{font-size:13px;font-weight:800;letter-spacing:1.5px;color:#8ff0bf}
+.wbi-picked-h{font-size:14px;font-weight:850;letter-spacing:1.2px;color:#a3f3d2}
 .wbi-picked-b{font-size:21px;color:#fff;font-weight:800;margin-top:6px}
-.wbi-relink{margin-top:14px;font-size:13px;color:var(--gold);background:transparent;border:1px solid rgba(201,168,76,.3);border-radius:8px;padding:7px 14px;cursor:pointer}
+.wbi-relink{margin-top:14px;font-size:14.5px;color:var(--gold);background:transparent;border:1px solid rgba(201,168,76,.3);border-radius:8px;padding:8px 14px;cursor:pointer}
 .wbi-relink:hover{border-color:rgba(201,168,76,.7)}
 .wbi-blist{list-style:none;margin:10px 0 4px;padding:0;display:flex;flex-direction:column;gap:10px}
 .wbi-blist li{position:relative;padding:11px 14px;font-size:15.5px;line-height:1.5;color:#c3c9d4;border:1px solid var(--line);background:rgba(255,255,255,.02);border-radius:11px}
@@ -750,7 +786,10 @@ const CSS = `
 .wbi-directnote b{color:#7df0b6}
 .wbi-icoTile{width:100%;max-width:300px;aspect-ratio:16/10;border-radius:14px;border:1px solid var(--line);background:radial-gradient(circle at 50% 40%,rgba(201,168,76,.1),transparent 70%),#070b15;display:flex;align-items:center;justify-content:center;font-size:64px}
 .wbi-cta{border:1px solid rgba(201,168,76,.45);background:radial-gradient(circle at 50% 0,rgba(201,168,76,.12),transparent 70%),#0a0d18;border-radius:18px;padding:26px;margin-top:30px;text-align:center}
-.wbi-cta h3{font-size:19px;color:#fff}.wbi-cta .wbi-s{font-size:13px;color:var(--mut);margin-top:5px}
+.wbi-cta h3{font-size:22px;color:#fff}.wbi-cta .wbi-s{font-size:15px;color:var(--mut);margin-top:7px;line-height:1.55}
+.wbi-sitepay{display:flex;align-items:center;justify-content:center;width:min(100%,360px);min-height:58px;margin:20px auto 0;padding:0 22px;border-radius:13px;background:#7556e8;color:#fff;font-size:17px;font-weight:900;text-decoration:none;box-shadow:4px 4px 0 #45d6aa;transition:transform .15s}
+.wbi-sitepay:hover{transform:translateY(-2px)}
+.wbi-sitepay.disabled{background:#474052;color:#aaa3b8;box-shadow:none;cursor:not-allowed}
 .wbi-row{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:20px;align-items:stretch}
 .wbi-tg{display:inline-flex;align-items:center;justify-content:center;gap:12px;padding:20px 30px;border-radius:14px;font-size:21px;font-weight:800;letter-spacing:.3px;white-space:nowrap;color:#fff;text-decoration:none;transition:transform .15s,box-shadow .15s;flex:1 1 240px;max-width:300px;background:linear-gradient(180deg,#2aa8e0,#1f8fc6);border:1px solid rgba(34,158,217,.8);box-shadow:0 5px 0 #14638c,0 10px 22px rgba(34,158,217,.32)}
 .wbi-tg svg{width:28px;height:28px;flex-shrink:0}
@@ -763,8 +802,8 @@ const CSS = `
 .wbi-redirect{margin-top:14px;font-size:13.5px;line-height:1.5;color:#bcd9ff;background:rgba(61,139,255,.10);border:1px solid rgba(61,139,255,.34);border-radius:11px;padding:10px 13px;text-align:center}
 .wbi-directcta{margin-top:16px;font-size:14.5px;line-height:1.5;color:#bff3d6;background:rgba(0,224,138,.08);border:1px solid rgba(0,224,138,.32);border-radius:11px;padding:11px 14px}
 .wbi-directcta b{color:#fff}
-.wbi-support{display:inline-block;margin-top:22px;font-size:13px;color:var(--gold);text-decoration:none;border-bottom:1px solid rgba(201,168,76,.3)}
-.wbi-note{font-size:12px;color:#5e6678;text-align:center;margin-top:26px;font-style:italic}
+.wbi-support{display:inline-block;margin-top:22px;font-size:16px;color:var(--gold);text-decoration:none;border-bottom:1px solid rgba(201,168,76,.3)}
+.wbi-note{font-size:14px;color:#858da0;text-align:center;margin-top:26px;font-style:italic}
 .wbi-reveal{opacity:0;transform:translateY(26px);transition:opacity .65s cubic-bezier(.2,.7,.2,1),transform .65s cubic-bezier(.2,.7,.2,1)}
 .wbi-reveal.wbi-in{opacity:1;transform:none}
 :is(html[data-theme="light"]) .wbi-root{--bg:#fbfaff;--panel:#fff;--line:#ded8f1;--txt:#251b3f;--mut:#706780;background:radial-gradient(circle at 80% 5%,rgba(117,86,232,.12),transparent 28rem),#fbfaff}
@@ -786,6 +825,9 @@ const CSS = `
 :is(html[data-theme="light"]) .wbi-must-it b,:is(html[data-theme="light"]) .wbi-must-ft b{color:#2f220b}
 :is(html[data-theme="light"]) .wbi-must-ft{color:#6b501c}
 :is(html[data-theme="light"]) .wbi-quicknotes span{border-color:#d9d1ee;background:#f6f3ff;color:#554b69}
+:is(html[data-theme="light"]) .wbi-ok{color:#185f47;background:#e9f8f2;border-color:#87d7bb}
+:is(html[data-theme="light"]) .wbi-picked{background:#e8f8f1;border-color:#6ccaaa}
+:is(html[data-theme="light"]) .wbi-picked-h{color:#185f47}
 @media(max-width:480px){.wbi-tl{padding-left:42px}.wbi-dot{left:-42px;width:32px;height:32px}.wbi-tl::before{left:15px}}
 @media (prefers-reduced-motion: reduce){
  .wbi-blob,.wbi-g,.wbi-dot.wbi-pulse,.wbi-card.wbi-key,.wbi-figure.wbi-spot::after,.wbi-anno,.wbi-box.g,.wbi-box.g::after,.wbi-tip.g{animation:none !important}

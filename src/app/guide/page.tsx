@@ -1,6 +1,5 @@
 import { Metadata } from "next";
 import GuideClient from "./GuideClient";
-import SiteGuide from "./SiteGuide";
 import { CUSTOM_MAX, CUSTOM_MIN } from "@/lib/retail-pricing";
 
 export const metadata: Metadata = {
@@ -34,10 +33,6 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
   const testNom = nom ? Math.max(0, parseInt(nom, 10) || 0) : undefined;
   const siteAmount = Math.min(CUSTOM_MAX, Math.max(CUSTOM_MIN, parseInt(amount ?? "1000", 10) || 1000));
 
-  if (!isWB && source !== "direct") {
-    return <SiteGuide initialAmount={siteAmount} initialUsername={username ?? ""} minAmount={CUSTOM_MIN} maxAmount={CUSTOM_MAX} />;
-  }
-
   return (
     <>
       {/* Visible in "View Source" — confirms this response came from RobloxBank-Guide container */}
@@ -47,7 +42,17 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
         style={{ display: "none" }}
         aria-hidden="true"
       />
-      <GuideClient isWB={isWB} guideMode={source === "direct" ? "BOT" : "WB"} skipGate={skipGate} wbCodeFromUrl={wbCodeFromUrl} testMode={testMode} previewMode={previewMode} testNom={testNom} />
+      <GuideClient
+        isWB={isWB}
+        guideMode={source === "direct" ? "BOT" : isWB ? "WB" : "SITE"}
+        skipGate={skipGate}
+        wbCodeFromUrl={wbCodeFromUrl}
+        testMode={testMode}
+        previewMode={previewMode}
+        testNom={testNom}
+        initialAmount={siteAmount}
+        initialUsername={username ?? ""}
+      />
     </>
   );
 }

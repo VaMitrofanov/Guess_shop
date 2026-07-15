@@ -41,9 +41,36 @@
   и fail-closed ККТ env. Migration `20260713_canonical_web_order_foundation` **применена к
   production** 13.07 (аддитивная, с полным backup и сверкой counts), код задеплоен на Web и
   боты; outbox worker, возвраты/чеки, staging test matrix и внешние gates остаются.
+- **2026-07-15, локальный UI batch:** storefront переведён на search-first: пакет+ник ведут
+  сразу к агрегированному списку всех геймпассов, а инструкция стала fallback. Отдельный
+  `SiteGuide` удалён; `WB/SITE/BOT` используют одну девятишаговую основу с разными CTA.
+  Исправлена hydration-гонка темы, увеличена типографика/контраст инструкции, усилена
+  фоновая дверца сейфа и заменён экран восстановления сессии. ЛК в исходниках уже на общем
+  Violet/Frost shell и читает `Order + WbOrder`; production-паритет требует отдельного
+  деплоя/авторизованного smoke и не заявляется выполненным этим локальным batch. Финальный
+  локальный gate: `21 suites / 148 tests`, web+bot TypeScript, Prisma validate, scoped
+  ESLint, production build и `git diff --check` — зелёные.
 - **Внешние launch-gates остаются обязательными:** письменная категория Т-Банка, юрпроверка
   модели/бренда, реквизиты/ККТ и фактическая локализация первичной БД в РФ не заменяются
   программным кодом.
+
+### Точка входа следующей сессии
+
+Следующую сессию начинать без повторного общего аудита, в таком порядке:
+
+1. Собрать замечания владельца по текущему production-релизу, занести их в Trello и сначала
+   исправить найденные регрессии/P0–P1; закрытым релиз считать только после повторного smoke.
+2. Завершить production-приёмку search-first checkout, единого `WB/SITE/BOT` guide и
+   авторизованного ЛК на реальных данных без изменения заказов.
+3. Проверить iPhone Safari, Android Chrome, Telegram WebView и VK WebView: клавиатуру,
+   back/refresh/deep link, плохую сеть, восстановление сессии и крупный системный шрифт.
+4. Доделать оставшийся scope ЛК: receipt, identity settings и notifications; затем закрыть
+   публичные 404/500, SEO/OpenGraph, accessibility и Core Web Vitals.
+5. После UX-хвоста продолжить обязательные launch-gates этапов 1, 3, 5–7: identity/link/merge,
+   ПД и публичные документы, terminal/ККТ test matrix, E2E, monitoring и soft launch.
+
+Новые замечания владельца по развёрнутой версии имеют приоритет над этим порядком и должны
+добавляться в тот же release checklist, а не теряться в отдельном списке.
 
 ## 1. Итог ревью: сейчас NO-GO
 
@@ -62,7 +89,7 @@
 | P0 | Не выполнен публичный чек-лист Т-Банка | Нет заполненных реквизитов и полноценных контактов/возвратов; тексты содержат placeholder и непроверенные обещания |
 | P0 | Риск 152-ФЗ | Основная БД находится вне РФ, хотя политика заявляет локализацию в РФ; не зафиксированы локализация первичного сбора, уведомление РКН и трансграничный контур |
 | P0 | Категория и бренд требуют письменного решения | Правила Roblox ограничивают стороннюю продажу/передачу Robux и коммерческое использование бренда; слово «Банк» также требует юрпроверки |
-| P1 | Прод-качество не закрыто | Глобальный Telegram SDK вызывает hydration mismatch на обычной витрине; нет E2E, security headers и полноценного rate limit; ESLint не зелёный |
+| P1 | Прод-качество не закрыто | SDK/headers/rate-limit foundation и локальная theme hydration-гонка закрыты; остаются полноценные E2E, accessibility/performance baseline и общий ESLint debt |
 
 Вывод: maintenance оставляем включённым до прохождения launch gates из раздела 10.
 
@@ -128,14 +155,11 @@ production rollout и реальная payment test matrix ещё не выпо�
 
 ### 3.2 Новая инструкция `/guide`
 
-**Локальный UI-этап 13.07.2026:** витрина и site-инструкция переведены на выбранный
-Violet / Frost. Обычный `/guide`/`source=site` теперь не отправляет клиента в бота:
-выбранный пакет и ник передаются прямо в checkout, который автоматически начинает поиск
-игр по предзаполненному нику. WB route оставлен на существующем `GuideClient` и проверен
-через `?source=wb&test=1`. Это локальная UX-реализация; payment launch gates ниже не сняты.
-После локальной приёмки минимальный вторичный кегль увеличен: навигация, подписи
-калькулятора, подсказки site guide, футер и checkout больше не используют визуальный текст
-7–10 px; компактные подписи приведены примерно к 11–14 px в зависимости от контекста.
+**Локальный UI-этап 15.07.2026:** витрина и инструкция работают по search-first модели.
+После пакета и ника клиент сначала видит все геймпассы на продажу, отсортированные по
+готовности цены; только пустой/неверный результат ведёт в гайд. Девять шагов теперь общие
+для `WB/SITE/BOT`, а SITE сохраняет свой checkout-финал и редактирование желаемой суммы
+только на шаге расчёта. Payment launch gates ниже не сняты.
 
 **Implementation batch 13.07 — выполнено:**
 
@@ -148,14 +172,20 @@ Violet / Frost. Обычный `/guide`/`source=site` теперь не отпр
 - [x] Поднять базовый body до 17 px, мелкий текст критического потока — минимум до 13 px.
 - [x] Проверить checkout/guide на 390 px: горизонтального overflow нет; ручной `25 000 R$`
   даёт gross-цену `35 715 R$`.
+- [x] Удалить отдельный `SiteGuide` и использовать актуальную WB-медиа-основу для SITE.
+- [x] Перенести пакет+ник сразу в checkout; показывать все sellable passes и единственное
+  ценовое совпадение выбирать автоматически.
+- [x] Сохранять `amount+username+gamepassId` при возврате из инструкции в checkout.
+- [x] Исправить SSR/client theme mismatch; измеренный минимум overlay-меток — `13 px`,
+  основной текст — `17 px`, поля — `18 px`.
 - [ ] После решения launch gates выполнить боевой payment E2E; этот UI batch сам по себе
   не снимает maintenance и `SITE_ACQUIRING_ENABLED=false`.
 
-`/guide?source=wb` использует mobile-first `WBInstructionV2` с актуальными скриншотами,
-видео, Managed pricing и поиском геймпасса. Обычный `/guide`/`source=site` теперь использует
-новый `SiteGuide`; `source=direct` продолжает bot-oriented `WBInstructionV2`.
+`/guide?source=wb`, обычный `/guide?source=site` и `source=direct` используют mobile-first
+`WBInstructionV2` с актуальными скриншотами, видео, Managed pricing и поиском геймпасса.
+Режим задаёт только номинал/редактирование и финальный CTA; дублирующего SITE JSX больше нет.
 
-Целевой вариант:
+Целевой вариант (пункты 1–4 закрыты локальным batch 15.07):
 
 1. Выделить общую основу `GamepassGuide`: создание experience/pass, отключение Managed
    pricing, расчёт gross-цены, публикация и поиск по нику.
@@ -202,16 +232,17 @@ Definition of Done: новый пользователь без подсказк�
 Есть как минимум один повторяющийся Roblox username у разных `User`, поэтому ник Roblox
 нельзя использовать для автоматического объединения аккаунтов.
 
-Текущие дефекты:
+Открытые дефекты идентичности:
 
 - VK-login узнаёт существующий `vkId`, но кнопка «привязать VK» фактически выполняет новый
   вход и может переключить сессию вместо безопасного merge.
 - Telegram-login на сайте отсутствует.
 - Email-регистрация создаёт отдельный `User`; безопасного объединения с ботом нет.
-- `/dashboard` читает только пустой legacy `Order`, не показывает `WbOrder`, бонусы и
-  реальные статусы.
-- Credentials provider назван `admin-login`, а формы вызывают `signIn("credentials")`;
-  email-login требует отдельного исправления и теста.
+
+Закрыто после исходного аудита: `/dashboard` читает legacy `Order` и `WbOrder` всех
+источников, показывает реальные статусы/бонусы, а credentials provider и форма входа
+согласованы. ЛК уже использует Violet/Frost shell; перед публичным заявлением о паритете
+нужен production deploy и авторизованный visual/data smoke.
 
 Целевая модель:
 
@@ -457,7 +488,8 @@ VK  ─┘                              │
 - Исправить credentials provider; решить судьбу email/password (verification, reset,
   throttling) или заменить magic link.
 - Новый dashboard: история всех источников, бонусы, receipt/статус, identity settings,
-  warm welcome и notifications.
+  warm welcome и notifications. **Violet/Frost shell, общая история и бонусы готовы;
+  receipt/identity settings/notifications остаются.**
 - Admin merge-console только с audit, preview и двухэтапным подтверждением.
 
 **DoD:** существующие TG/VK-пользователи видят свои заказы/бонусы; негативные тесты не дают
@@ -465,7 +497,8 @@ VK  ─┘                              │
 
 ### Этап 4. Guide, витрина и публичные документы — 3–5 дней
 
-- Собрать единый `GamepassGuide` из актуальной WB-версии.
+- Собрать единый `GamepassGuide` из актуальной WB-версии. **Готово локально 15.07:
+  `WBInstructionV2` обслуживает WB/SITE/BOT, отдельный `SiteGuide` удалён.**
 - Внедрить выбранную brand/design direction, честные тексты, mobile-first checkout.
 - Страницы: контакты/реквизиты, оферта, ПД/consent, возвраты, способы оплаты, FAQ,
   status и 404/500.
@@ -496,7 +529,8 @@ VK  ─┘                              │
   retry/refund.
 - Unit/property/contract tests цены; integration tests БД и webhook; load/abuse tests.
 - Убрать hydration mismatch; настроить ESLint ignore для чужих worktrees и нулевой baseline
-  хотя бы для затронутого storefront/auth/payment scope.
+  хотя бы для затронутого storefront/auth/payment scope. **Theme SSR/client mismatch закрыт
+  15.07; общий ESLint baseline остаётся.**
 - Security headers/CSP, dependency audit, accessibility, Core Web Vitals и реальные webviews.
 - Наблюдаемость: payment success, callback lag, stuck orders, outbox retries, quote drift,
   auth/link failures; алерты без PII.

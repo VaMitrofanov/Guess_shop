@@ -89,12 +89,12 @@ export default function Calculator() {
         {username && !validUsername ? "Нужно 3–20 латинских букв, цифр или _." : "Для зарегистрированных подставим сохранённый ник — его можно изменить."}
       </p>
       <Link
-        href={`/guide?source=site&amount=${amount || 1000}&username=${encodeURIComponent(normalizedUsername)}`}
+        href={`/checkout?amount=${amount || 1000}&username=${encodeURIComponent(normalizedUsername)}`}
         aria-disabled={!validUsername}
         onClick={(event) => { if (!validUsername) event.preventDefault(); }}
         className={validUsername ? styles.checkoutAction : styles.checkoutActionDisabled}
       >
-        Купить на сайте <ArrowRight size={18} />
+        Найти мои геймпассы <ArrowRight size={18} />
       </Link>
       <p className={styles.securityNote}><LockKeyhole size={13} /> Пароль Roblox не потребуется</p>
     </div>

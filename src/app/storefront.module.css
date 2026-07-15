@@ -18,16 +18,17 @@
   align-items: center;
 }
 
-.heroGlow { position: absolute; inset: 10% -18% auto auto; width: 420px; height: 420px; border: 1px solid rgba(117,86,232,.12); border-radius: 50%; box-shadow: 0 0 0 70px rgba(117,86,232,.035), 0 0 0 140px rgba(69,214,170,.025); pointer-events: none; }
-.vaultBackdrop { position:absolute; z-index:0; right:-90px; top:30px; width:510px; height:510px; opacity:.09; filter:blur(1.5px); transform:rotate(8deg); pointer-events:none; }
-.vaultDoor { position:absolute; inset:0; border:28px solid #7556e8; border-radius:50%; box-shadow:inset 0 0 0 18px #251b3f,0 0 0 9px rgba(69,214,170,.7); }
+.heroGlow { position:absolute; inset:1% -9% auto auto; width:560px; height:610px; border-radius:72px; background:radial-gradient(circle at 50% 46%,rgba(117,86,232,.12),rgba(69,214,170,.04) 43%,transparent 70%); pointer-events:none; }
+.vaultBackdrop { position:absolute; z-index:0; right:230px; top:-6px; width:530px; height:530px; opacity:.16; transform:rotate(7deg); pointer-events:none; }
+.vaultDoor { position:absolute; inset:0; border:28px solid #7556e8; border-radius:50%; background:radial-gradient(circle at 50% 50%,rgba(69,214,170,.12),transparent 52%); box-shadow:inset 0 0 0 18px #251b3f,0 0 0 9px rgba(69,214,170,.7),0 28px 80px rgba(117,86,232,.2); }
 .vaultDoor::before { content:""; position:absolute; inset:70px; border:9px solid #7556e8; border-radius:50%; }
 .vaultBolts i { position:absolute; left:50%; top:50%; width:20px; height:20px; margin:-10px; border-radius:50%; background:#251b3f; transform:rotate(calc(var(--i, 0) * 45deg)) translateY(-218px); }
 .vaultBolts i:nth-child(1){--i:0}.vaultBolts i:nth-child(2){--i:1}.vaultBolts i:nth-child(3){--i:2}.vaultBolts i:nth-child(4){--i:3}.vaultBolts i:nth-child(5){--i:4}.vaultBolts i:nth-child(6){--i:5}.vaultBolts i:nth-child(7){--i:6}.vaultBolts i:nth-child(8){--i:7}
-.vaultWheel { position:absolute; left:50%; top:50%; width:144px; height:144px; margin:-72px; display:grid; place-items:center; border:14px solid #251b3f; border-radius:50%; color:#251b3f; font-family:var(--font-display),sans-serif; font-size:44px; font-weight:950; }
+.vaultWheel { position:absolute; left:50%; top:50%; width:144px; height:144px; margin:-72px; display:grid; place-items:center; border:14px solid #251b3f; border-radius:50%; color:#251b3f; font-family:var(--font-display),sans-serif; font-size:44px; font-weight:950; animation:vaultTurn 12s cubic-bezier(.65,0,.35,1) infinite; }
 .vaultWheel::before,.vaultWheel::after { content:""; position:absolute; width:210px; height:14px; border-radius:99px; background:#251b3f; }
 .vaultWheel::after { transform:rotate(90deg); }
 .vaultWheel span { position:relative; z-index:1; padding:8px; background:#fbfaff; border-radius:13px; }
+@keyframes vaultTurn { 0%,22%,100%{transform:rotate(0)} 38%,62%{transform:rotate(28deg)} 78%{transform:rotate(-8deg)} }
 .heroCopy,.calculatorWrap { position: relative; z-index: 1; }
 .eyebrow { display: inline-flex; align-items: center; gap: 10px; padding: 9px 13px; border: 1px solid #ded7f6; border-radius: 999px; background: rgba(255,255,255,.76); color: #6751b9; font-size: 13px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .statusDot { width: 8px; height: 8px; border-radius: 50%; background: #45d6aa; box-shadow: 0 0 0 5px rgba(69,214,170,.15); }
@@ -129,7 +130,7 @@
 
 @media (max-width: 720px) {
   .hero { width: min(100% - 28px, 620px); padding: 54px 0; }
-  .vaultBackdrop { right:-250px; top:130px; opacity:.06; }
+  .vaultBackdrop { right:-225px; top:105px; opacity:.12; }
   .title { font-size: clamp(42px,13vw,62px); }
   .lead { font-size: 17px; }
   .heroActions { flex-direction: column; }
@@ -163,6 +164,11 @@
   background: rgba(22, 17, 33, .9);
 }
 :global(html[data-theme="dark"]) .calculator { box-shadow: 12px 12px 0 #7556e8, 0 28px 70px rgba(0,0,0,.34); }
+:global(html[data-theme="dark"]) .vaultDoor { box-shadow:inset 0 0 0 18px #0b0912,0 0 0 9px rgba(69,214,170,.7),0 28px 80px rgba(117,86,232,.34); }
+:global(html[data-theme="dark"]) .vaultWheel { border-color:#f4f0ff; color:#f4f0ff; }
+:global(html[data-theme="dark"]) .vaultWheel::before,
+:global(html[data-theme="dark"]) .vaultWheel::after { background:#f4f0ff; }
+:global(html[data-theme="dark"]) .vaultWheel span { background:#151120; }
 :global(html[data-theme="dark"]) .amountField,
 :global(html[data-theme="dark"]) .pack,
 :global(html[data-theme="dark"]) .priceSummary,
@@ -183,3 +189,4 @@
 :global(html[data-theme="dark"]) .controlCard { background: linear-gradient(135deg,#211831,#171020); }
 :global(html[data-theme="dark"]) .bottomCta { background: #7556e8; }
 :global(html[data-theme="dark"]) .bottomCta .sectionKicker { color: #bff5e4; }
+@media (prefers-reduced-motion: reduce) { .vaultWheel { animation:none; } }

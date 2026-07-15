@@ -2795,7 +2795,27 @@ function WBIntro({ onDone }: { onDone: () => void }) {
 
 // ─── Main export ───────────────────────────────────────────────────────────────
 
-export default function GuideClient({ isWB, guideMode = "SITE", skipGate = false, wbCodeFromUrl, testMode = false, previewMode = false, testNom }: { isWB: boolean; guideMode?: "WB" | "SITE" | "BOT"; skipGate?: boolean; wbCodeFromUrl?: string; testMode?: boolean; previewMode?: boolean; testNom?: number }) {
+export default function GuideClient({
+  isWB,
+  guideMode = "SITE",
+  skipGate = false,
+  wbCodeFromUrl,
+  testMode = false,
+  previewMode = false,
+  testNom,
+  initialAmount = 1000,
+  initialUsername = "",
+}: {
+  isWB: boolean;
+  guideMode?: "WB" | "SITE" | "BOT";
+  skipGate?: boolean;
+  wbCodeFromUrl?: string;
+  testMode?: boolean;
+  previewMode?: boolean;
+  testNom?: number;
+  initialAmount?: number;
+  initialUsername?: string;
+}) {
   // Both modes open the instruction directly (no gate/intro/bot/DB/session).
   // Difference: testMode renders the Telegram/VK buttons inert (silent QA),
   // previewMode keeps them working — "as if a code was already activated".
@@ -2805,13 +2825,10 @@ export default function GuideClient({ isWB, guideMode = "SITE", skipGate = false
   );
   const [denomination, setDenomination] = useState<number>(directInstruction ? (testNom && testNom > 0 ? testNom : 1000) : 0);
   const [activeCode, setActiveCode] = useState<string>(testMode ? "TESTDEV" : "");
-  const [isRestoring, setIsRestoring] = useState(true);
+  const [isRestoring, setIsRestoring] = useState(isWB && !directInstruction);
 
   useEffect(() => {
-    if (!isWB || directInstruction) {
-      setIsRestoring(false);
-      return;
-    }
+    if (!isWB || directInstruction) return;
     const restoreSession = async () => {
       const saved = loadWBSession();
       // wbCodeFromUrl is passed by the bot link (?code=...) — works even in Telegram WebView
@@ -2863,27 +2880,49 @@ export default function GuideClient({ isWB, guideMode = "SITE", skipGate = false
       ? `https://t.me/RobloxBankBot?start=wb_${encodeURIComponent(wbCodeFromUrl)}`
       : "https://t.me/RobloxBankBot";
     return (
-      <div className="min-h-screen bg-[#0a0e1a] flex flex-col items-center justify-center p-4">
-        <style>{`@keyframes guideStallIn{to{opacity:1;visibility:visible}}`}</style>
-        <div className="w-16 h-16 rounded-full bg-[#1c1c1e] animate-pulse mb-6 border border-[#c9a84c]/20" />
-        <div className="w-48 h-4 bg-[#1c1c1e] rounded animate-pulse mb-3" />
-        <div className="w-32 h-3 bg-[#1c1c1e] rounded animate-pulse" />
-        <div className="mt-8 text-xs uppercase tracking-widest text-[#c9a84c]/60 font-pixel animate-pulse">
-          Восстановление сессии...
+      <div className="guideRestoreRoot">
+        <style>{`
+          @keyframes guideStallIn{to{opacity:1;visibility:visible}}
+          @keyframes guideVaultTurn{50%{transform:rotate(28deg)}100%{transform:rotate(0)}}
+          @keyframes guideVaultGlow{50%{box-shadow:0 0 0 9px rgba(69,214,170,.1),0 24px 70px rgba(117,86,232,.32)}}
+          .guideRestoreRoot{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;color:#f4f0ff;background:radial-gradient(circle at 50% 18%,rgba(117,86,232,.28),transparent 28rem),#0b0912;text-align:center}
+          .guideRestoreVault{position:relative;width:174px;height:174px;border:14px solid #7556e8;border-radius:50%;background:#151120;box-shadow:0 0 0 7px #45d6aa,0 24px 70px rgba(117,86,232,.22);animation:guideVaultGlow 2.4s ease-in-out infinite}
+          .guideRestoreVault::before{content:"";position:absolute;inset:22px;border:4px solid #45375f;border-radius:50%}
+          .guideRestoreWheel{position:absolute;left:50%;top:50%;width:72px;height:72px;margin:-36px;border:8px solid #c2b2ff;border-radius:50%;animation:guideVaultTurn 2.4s ease-in-out infinite}
+          .guideRestoreWheel::before,.guideRestoreWheel::after{content:"";position:absolute;left:50%;top:50%;width:112px;height:7px;margin:-3.5px -56px;border-radius:99px;background:#c2b2ff}
+          .guideRestoreWheel::after{transform:rotate(90deg)}
+          .guideRestoreMark{position:absolute;left:50%;top:50%;z-index:2;transform:translate(-50%,-50%);display:grid;place-items:center;width:42px;height:42px;border-radius:12px;background:#45d6aa;color:#173c31;font-weight:950;font-size:17px}
+          .guideRestoreKicker{margin-top:28px;color:#9f8cff;font-size:14px;font-weight:900;letter-spacing:.12em;text-transform:uppercase}
+          .guideRestoreTitle{margin:8px 0 0;font-size:clamp(28px,6vw,42px);line-height:1.05;letter-spacing:-.04em}
+          .guideRestoreText{max-width:430px;margin:12px auto 0;color:#b8b0c5;font-size:17px;line-height:1.6}
+          .guideRestoreEgg{margin-top:14px;padding:8px 12px;border:1px dashed rgba(69,214,170,.38);border-radius:999px;color:#88e8c9;font-size:14px}
+          .guideRestoreFallback{margin-top:28px;display:flex;flex-direction:column;align-items:center;gap:12px;color:#b8b0c5;font-size:15px}
+          .guideRestoreReload{padding:12px 20px;border-radius:12px;background:#7556e8;color:#fff;font-size:16px;font-weight:850;box-shadow:4px 4px 0 #45d6aa;text-decoration:none}
+          .guideRestoreLinks{display:flex;gap:18px;flex-wrap:wrap;justify-content:center}
+          .guideRestoreLinks a{color:#bbaaff;text-decoration:underline;text-underline-offset:4px}
+          @media(prefers-reduced-motion:reduce){.guideRestoreVault,.guideRestoreWheel{animation:none}}
+        `}</style>
+        <div className="guideRestoreVault" aria-hidden="true">
+          <div className="guideRestoreWheel" />
+          <div className="guideRestoreMark">R$</div>
         </div>
+        <div className="guideRestoreKicker">Личный сейф RobloxBank</div>
+        <h1 className="guideRestoreTitle">Восстанавливаем твою сессию</h1>
+        <p className="guideRestoreText">Проверяем код и возвращаем тебя к нужному шагу. Обычно это занимает пару секунд.</p>
+        <div className="guideRestoreEgg">Пасхалка: ищем тот самый R$, который закатился за дверцу сейфа.</div>
         <div
-          className="mt-10 flex flex-col items-center gap-3 text-center"
+          className="guideRestoreFallback"
           style={{ opacity: 0, visibility: "hidden", animation: "guideStallIn .5s ease 12s forwards" }}
         >
-          <div className="text-sm text-zinc-400">Загрузка затянулась?</div>
-          <a href="" className="px-5 py-2.5 rounded-xl bg-[#c9a84c] text-[#0a0e1a] text-sm font-semibold">
+          <div>Загрузка затянулась?</div>
+          <a href="" className="guideRestoreReload">
             Обновить страницу
           </a>
-          <div className="flex gap-4 text-sm">
-            <a href={tgFallbackHref} className="text-[#c9a84c] underline underline-offset-4">
+          <div className="guideRestoreLinks">
+            <a href={tgFallbackHref}>
               Продолжить в Telegram
             </a>
-            <a href="https://vk.me/club237309399" className="text-[#c9a84c] underline underline-offset-4">
+            <a href="https://vk.me/club237309399">
               Продолжить в VK
             </a>
           </div>
@@ -2914,5 +2953,12 @@ export default function GuideClient({ isWB, guideMode = "SITE", skipGate = false
     );
   }
 
-  return <WBInstructionV2 denomination={denomination || 1000} code={activeCode || undefined} mode={guideMode} />;
+  return (
+    <WBInstructionV2
+      denomination={guideMode === "SITE" ? initialAmount : denomination || 1000}
+      initialUsername={initialUsername}
+      code={activeCode || undefined}
+      mode={guideMode}
+    />
+  );
 }

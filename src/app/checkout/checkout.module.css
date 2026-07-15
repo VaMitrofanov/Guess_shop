@@ -25,6 +25,7 @@
 .accountChip { margin-top:16px; padding:13px; display:flex; align-items:center; gap:11px; border-radius:15px; background:#e5faf3; color:#2d6b58; }
 .accountChip>span { width:35px; height:35px; display:grid; place-items:center; border-radius:11px; background:#45d6aa; color:#163f33; font-size:14px; font-weight:900; }
 .accountChip div { flex:1; }.accountChip small,.accountChip strong { display:block; }.accountChip small { font-size:13px; }.accountChip strong { font-size:15px; }
+.resultLead { margin:-8px 0 16px; color:#746b86; font-size:16px; line-height:1.55; }
 .choiceGrid,.passGrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
 .choice,.choiceSelected,.passCard,.passSelected { min-width:0; display:flex; align-items:center; gap:11px; padding:13px; border:1px solid #ddd6ed; border-radius:15px; background:#fbfaff; color:#251b3f; text-align:left; cursor:pointer; transition:border-color .2s ease,transform .2s ease,background .2s ease; }
 .choice:hover,.passCard:hover { border-color:#aa98e7; transform:translateY(-1px); }
@@ -35,7 +36,7 @@
 .passInfo { min-width:0; flex:1; }.passInfo strong,.passInfo small,.passInfo em { display:block; }.passInfo strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:16px; }.passInfo small { margin-top:3px; color:#665d78; font-size:15px; font-weight:800; }.passInfo em { width:max-content; max-width:100%; margin-top:6px; padding:4px 7px; border-radius:7px; font-size:14px; font-style:normal; font-weight:800; }
 .priceOk { background:#ddf8ef; color:#31745f; }.priceWrong { background:#fff0f2; color:#bd5267; }
 .loadingState { min-height:90px; display:flex; align-items:center; justify-content:center; gap:9px; color:#766d87; font-size:15px; font-weight:700; }
-.errorBox { display:flex; align-items:flex-start; gap:10px; padding:15px; border:1px solid #f0c1ca; border-radius:14px; background:#fff2f4; color:#b53f58; font-size:14px; font-weight:750; line-height:1.5; }.errorBox svg { flex:0 0 auto; margin-top:1px; }
+.errorBox { display:flex; align-items:flex-start; gap:10px; padding:15px; border:1px solid #f0c1ca; border-radius:14px; background:#fff2f4; color:#a42e47; font-size:16px; font-weight:750; line-height:1.5; }.errorBox svg { flex:0 0 auto; margin-top:2px; }.errorBox a { display:block; width:max-content; max-width:100%; margin-top:6px; color:#7556e8; font-weight:900; text-decoration:underline; text-underline-offset:3px; }
 .summaryCard { position:sticky; top:94px; padding:26px; }
 .summaryCard h2 { margin:7px 0 21px; font-family:var(--font-display),sans-serif; font-size:38px; letter-spacing:-.05em; }
 .summaryRows { padding:15px 0; border-block:1px solid #e2dcee; }
@@ -55,6 +56,7 @@
 :global(html[data-theme="dark"]) .shell { color:#f4f0ff; }
 :global(html[data-theme="dark"]) .progressHeader p,
 :global(html[data-theme="dark"]) .helper,
+:global(html[data-theme="dark"]) .resultLead,
 :global(html[data-theme="dark"]) .summaryRows div,
 :global(html[data-theme="dark"]) .choice small,
 :global(html[data-theme="dark"]) .choiceSelected small { color:#aaa3b8; }
