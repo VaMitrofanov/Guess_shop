@@ -85,11 +85,21 @@
   сервиса `running:healthy`, синтетический smoke гейта/API/чанков/CSP прошёл `23/23`, а
   WB/SITE/DIRECT отдают маркеры новой инструкции. Maintenance оставлен включённым;
   авторизованная сверка данных ЛК остаётся отдельным приёмочным шагом.
+- Follow-up `008735e` с action-center ЛК и webview hardening также развёрнут 15.07.2026:
+  Web auto-deploy и последовательный Guide deploy завершены `running:healthy` на одном SHA,
+  очередь пуста, повторный smoke коридора — `23/23`. Production HTML Guide содержит
+  `viewport-fit=cover` и `interactive-widget=resizes-content`; maintenance и acquiring
+  kill-switch не менялись.
 - Для iOS/Android/TG/VK webview добавлены `viewport-fit=cover`,
   `interactive-widget=resizes-content`, `100dvh`, safe-area padding и keyboard scroll-margin.
   Browser-gate без записи данных прошёл на `390×844` и при высоте `500 px`: поле ника и CTA
   полностью видимы, `scrollWidth <= innerWidth`. Реальные Safari/Chrome/TG/VK устройства и
   крупный системный шрифт по-прежнему остаются ручным acceptance, эмуляцией не закрываются.
+- Новый ЛК прошёл read-only visual/data QA на реальных production-историях локально с
+  production DB: `1440×1000` и `390×844`, без overflow и console errors. SITE-заказов ещё
+  нет из-за выключенного acquiring, поэтому receipt-поверхность дополнительно защищена
+  contract-тестами. Live signed-in production acceptance выполняется отдельно под реальной
+  учётной записью; боевые auth-секреты для синтетической сессии не извлекаются.
 
 ## Инструкции WB и сайта
 

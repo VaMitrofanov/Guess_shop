@@ -53,7 +53,7 @@
   отвечают `200`. Maintenance и `SITE_ACQUIRING_ENABLED=false` не снимались. Предрелизный
   gate: `21 suites / 148 tests`, web+bot TypeScript, Prisma validate, scoped ESLint,
   production build и `git diff --check` — зелёные.
-- **2026-07-15, follow-up ЛК + webview (готов к rollout):** `/dashboard` перестроен в
+- **2026-07-15, production follow-up ЛК + webview `008735e`:** `/dashboard` перестроен в
   action-center «Личный сейф»: события и требуемые действия идут перед единой историей,
   мобильная таблица заменена карточками, а канонические SITE-заказы показывают безопасный
   payment/receipt snapshot и email чека. Отдельная identity settings-поверхность показывает
@@ -65,7 +65,14 @@
   без изменения заказов: desktop `1440×1000`, mobile `390×844`, overflow отсутствует;
   guide дополнительно проверен при высоте `500 px` с активным полем. Локальный gate:
   `22 suites / 156 tests`, web+bot TypeScript, Prisma validate, scoped ESLint, production
-  build и `git diff --check` — зелёные.
+  build и `git diff --check` — зелёные. Commit опубликован в `main`; Web auto-deploy и
+  последующий Guide deploy завершились `running:healthy` на одном SHA, очередь Coolify
+  пуста. Повторный production-smoke коридора прошёл `23/23`, а HTML Guide подтверждает
+  `viewport-fit=cover` и `interactive-widget=resizes-content`. Maintenance и
+  `SITE_ACQUIRING_ENABLED=false` не снимались. Авторизованный экран проверен локально на
+  read-only снимке реальных production-историй; live signed-in acceptance непосредственно
+  на production остаётся ручным контрольным пунктом, потому что тестовая локальная сессия
+  не должна и не может подменять боевой auth-secret.
 - **Внешние launch-gates остаются обязательными:** письменная категория Т-Банка, юрпроверка
   модели/бренда, реквизиты/ККТ и фактическая локализация первичной БД в РФ не заменяются
   программным кодом.
@@ -74,16 +81,13 @@
 
 Следующую сессию начинать без повторного общего аудита, в таком порядке:
 
-1. Собрать замечания владельца по текущему production-релизу, занести их в Trello и сначала
-   исправить найденные регрессии/P0–P1; закрытым релиз считать только после повторного smoke.
-   **Feedback-check 15.07 пройден: новых замечаний нет.**
-2. Завершить production-приёмку search-first checkout, единого `WB/SITE/BOT` guide и
-   авторизованного ЛК на реальных данных без изменения заказов.
-3. Проверить iPhone Safari, Android Chrome, Telegram WebView и VK WebView: клавиатуру,
+1. Выполнить live signed-in acceptance нового ЛК на production под реальной учётной записью:
+   проверить историю, бонусы, receipt/status, identity settings и contextual notices без
+   изменения заказов. Автоматизированный read-only data/visual gate уже пройден.
+2. Проверить iPhone Safari, Android Chrome, Telegram WebView и VK WebView: клавиатуру,
    back/refresh/deep link, плохую сеть, восстановление сессии и крупный системный шрифт.
-4. Доделать оставшийся scope ЛК: receipt, identity settings и notifications; затем закрыть
-   публичные 404/500, SEO/OpenGraph, accessibility и Core Web Vitals.
-5. После UX-хвоста продолжить обязательные launch-gates этапов 1, 3, 5–7: identity/link/merge,
+3. Закрыть публичные 404/500, SEO/OpenGraph, accessibility и Core Web Vitals.
+4. После UX-хвоста продолжить обязательные launch-gates этапов 1, 3, 5–7: identity/link/merge,
    ПД и публичные документы, terminal/ККТ test matrix, E2E, monitoring и soft launch.
 
 Новые замечания владельца по развёрнутой версии имеют приоритет над этим порядком и должны
@@ -261,8 +265,9 @@ Definition of Done: новый пользователь без подсказк�
 источников, показывает реальные статусы/бонусы, а credentials provider и форма входа
 согласованы. Follow-up 15.07 добавил новый Violet/Frost action-center, карточки истории,
 события, payment/receipt snapshot и identity settings; read-only visual/data QA прошёл на
-реальных историях. Production-паритет отмечается только после rollout этого follow-up и
-повторного авторизованного smoke.
+реальных историях. Follow-up `008735e` развёрнут на Web и Guide с повторным smoke `23/23`;
+до полного production-паритета остаётся live signed-in acceptance под реальной учётной
+записью.
 
 Целевая модель:
 
