@@ -7,6 +7,7 @@ const links = [
   { href: "/reviews", label: "Отзывы" },
   { href: "/legal/offer", label: "Оферта" },
   { href: "/legal/policy", label: "Конфиденциальность" },
+  { href: "/legal/details", label: "Реквизиты и контакты" },
 ];
 
 export default function Footer() {

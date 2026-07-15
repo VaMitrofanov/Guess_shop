@@ -1,6 +1,7 @@
 # RobloxBank.ru: ультра-ревью и master plan эквайринга
 
-**Статус:** реализация начата; публичный запуск и подключение боевого эквайринга по-прежнему
+**Статус:** реализация начата; юридические реквизиты для публичных документов получены и
+внесены 16.07.2026, но публичный запуск и подключение боевого эквайринга по-прежнему
 заблокированы launch-gates из раздела 10.
 
 **Дата аудита:** 2026-07-12.  
@@ -133,7 +134,7 @@
 | P0 | Общий клиентский аккаунт не завершён | Email и TG login/link, identity foundation и ЛК с `WbOrder`/бонусами готовы; остаются real-provider acceptance, безопасные VK link/unlink, recovery и admin merge-console |
 | P0 | Payment E2E не завершён | Strict callback/event/outbox foundation и production migrations готовы; outbox worker развёрнут, но нет terminal/refund/ККТ test matrix и reconciliation UI |
 | P0 | Нет готовой фискализации | Checkout собирает email и формирует `Receipt/Items` fail-closed, но нет согласованных ККТ-классификаторов, возвратного/закрывающего чека и проверенного сценария ОФД |
-| P0 | Не выполнен публичный чек-лист Т-Банка | Нет заполненных реквизитов и полноценных контактов/возвратов; тексты содержат placeholder и непроверенные обещания |
+| P0 | Не выполнен публичный чек-лист Т-Банка | Юридические реквизиты, email, телефон, часы поддержки и SLA заполнены; остаются юридическая приёмка, ККТ/ОФД и проверка возвратов |
 | P0 | Риск 152-ФЗ | Основная БД находится вне РФ, хотя политика заявляет локализацию в РФ; не зафиксированы локализация первичного сбора, уведомление РКН и трансграничный контур |
 | P0 | Категория и бренд требуют письменного решения | Правила Roblox ограничивают стороннюю продажу/передачу Robux и коммерческое использование бренда; слово «Банк» также требует юрпроверки |
 | P1 | Прод-качество не закрыто | SDK/headers/rate-limit foundation и локальная theme hydration-гонка закрыты; остаются полноценные E2E, accessibility/performance baseline и общий ESLint debt |
@@ -232,6 +233,8 @@ search-first модели.
 `/guide?source=wb`, обычный `/guide?source=site` и `source=direct` используют mobile-first
 `WBInstructionV2` с актуальными скриншотами, видео, Managed pricing и поиском геймпасса.
 Режим задаёт только номинал/редактирование и финальный CTA; дублирующего SITE JSX больше нет.
+SITE-режим дополнительно рендерит общий верхний `Navbar`, поэтому инструкция доступна из
+верхнего меню работающей витрины; WB-режим сохраняет отдельный заголовок и входной гейт.
 
 Целевой вариант (пункты 1–4 развёрнуты в production 15.07):
 
@@ -561,8 +564,9 @@ VK  ─┘                              │
   `WBInstructionV2` обслуживает WB/SITE/BOT, отдельный `SiteGuide` удалён; smoke 23/23.**
 - Внедрить выбранную brand/design direction, честные тексты, mobile-first checkout.
 - Страницы: контакты/реквизиты, оферта, ПД/consent, возвраты, способы оплаты, FAQ,
-  status и 404/500. **16.07 custom 404/error surfaces готовы; legal pages fail-safe
-  `noindex` и исключены из sitemap до передачи реквизитов.**
+  status и 404/500. **16.07 custom 404/error surfaces готовы; юридические реквизиты и
+  email, телефон, часы поддержки и SLA внесены в `/legal/offer`, `/legal/policy` и `/legal/details`; legal pages остаются
+  fail-safe `noindex` и исключены из sitemap до полной приёмки документов.**
 - Реальные отзывы либо скрытый блок; никакого seed/fake content.
 - SEO, OpenGraph, sitemap/robots, accessibility и performance budget.
   **Metadata/canonical/robots boundaries и сбор CWV готовы; реальные field CWV и финальный
@@ -670,7 +674,8 @@ VK  ─┘                              │
 - [ ] TG/VK-login, link/merge и ЛК проходят E2E на существующих клиентах.
 - [ ] Канонический SITE-order создаётся без legacy `Product` FK.
 - [ ] `Init`, receipt, callbacks, outbox, refund и ККТ прошли test matrix.
-- [ ] Публичные реквизиты/контакты/документы заполнены, fake/placeholder скрыты.
+- [~] Публичные реквизиты/контакты/документы: юридические данные, email, телефон, часы
+  поддержки и SLA заполнены; юридическая приёмка и финальные возвраты ещё не закрыты.
 - [ ] Security, accessibility, mobile/webview, build и scoped lint gates зелёные.
 - [ ] Есть monitoring, support/runbook, checkout kill switch и rollback drill.
 

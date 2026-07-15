@@ -2,12 +2,12 @@
 import { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
 import BottomNav from "./BottomNav";
-import OrdersScreen from "./screens/OrdersScreen";
 import { ToastHost } from "./Toast";
 import { C } from "./theme";
 import { haptic } from "./haptics";
 
 const Dashboard       = dynamic(() => import("./screens/Dashboard"),      { ssr: false, loading: () => <ScreenSkeleton /> });
+const OrdersScreen    = dynamic(() => import("./screens/OrdersScreen"),   { ssr: false, loading: () => <ScreenSkeleton /> });
 const WbScreen        = dynamic(() => import("./screens/WbScreen"),       { ssr: false, loading: () => <ScreenSkeleton /> });
 const AccountScreen   = dynamic(() => import("./screens/BossrobuxScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
 const SettingsScreen  = dynamic(() => import("./screens/SettingsScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });

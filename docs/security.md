@@ -302,6 +302,10 @@ message, stack, query string, email, order token, cookie и user/session ID ко
 дашборду, а перед несколькими Web-репликами перенести alert bucket в общий store. Нельзя
 расширять payload raw exception/URL без отдельного privacy-review.
 
+Сигналы по pathname `/twa` относятся к TWA и проверяются отдельно от внешних шаблонных
+проектов. Уведомление с pathname вроде `artifact-template-analytics-dashboard` не является
+сигналом RobloxBank и не диагностирует этот репозиторий.
+
 ### 12. Детерминированный пароль в seed — ✅ ЗАКРЫТО В КОДЕ (2026-07-12)
 
 `prisma/seed.js` содержит публичные admin email и фиксированный предсказуемый пароль.

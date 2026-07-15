@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { LegalDocument, SectionTitle } from "@/components/legal/legal-document";
+import { LEGAL_DETAILS } from "@/lib/legal-details";
 
 export const metadata: Metadata = {
   title: "Политика конфиденциальности — Roblox Bank",
@@ -10,13 +11,7 @@ export const metadata: Metadata = {
 };
 
 export default function PolicyPage() {
-  // Placeholders — заполнить после регистрации ИП/ООО.
-  const ENTITY = "[ИП / ООО — наименование]";
-  const INN = "[ИНН]";
-  const OGRN = "[ОГРНИП / ОГРН]";
-  const ADDRESS = "[Адрес регистрации]";
-  const EMAIL = "[support@robloxbank.ru]";
-  const lastUpdated = "28 апреля 2026 г.";
+  const { entity: ENTITY, inn: INN, ogrn: OGRN, address: ADDRESS, email: EMAIL, phone: PHONE, lastUpdated } = LEGAL_DETAILS;
 
   return (
     <LegalDocument
@@ -113,7 +108,7 @@ export default function PolicyPage() {
         <SectionTitle number="06">Передача данных третьим лицам</SectionTitle>
         <p>Оператор передаёт персональные данные следующим категориям третьих лиц исключительно в объёме, необходимом для достижения целей обработки:</p>
         <ul>
-          <li><strong>ПАО «Тинькофф Банк»</strong> — для проведения платёжных операций (имя плательщика, сумма, идентификатор заказа). Передача осуществляется по защищённому каналу в рамках интеграции с Tinkoff Acquiring;</li>
+          <li><strong>АО «ТБанк»</strong> — для проведения платёжных операций (имя плательщика, сумма, идентификатор заказа). Передача осуществляется по защищённому каналу в рамках интеграции с Т‑Банк Эквайринг;</li>
           <li><strong>Хостинг-провайдеры</strong> (Vercel Inc. / провайдер VPS) — в рамках хранения данных на серверах. Оператор обеспечивает локализацию хранения персональных данных граждан РФ в соответствии с ч. 5 ст. 18 ФЗ-152;</li>
           <li><strong>Telegram Messenger Inc., VK</strong> — при отправке уведомлений в соответствующие мессенджеры по запросу Субъекта;</li>
           <li><strong>Государственные органы</strong> — в случаях и в порядке, предусмотренных законодательством РФ.</li>
@@ -183,7 +178,9 @@ export default function PolicyPage() {
           <li><strong>ИНН:</strong> {INN}</li>
           <li><strong>ОГРН / ОГРНИП:</strong> {OGRN}</li>
           <li><strong>Адрес:</strong> {ADDRESS}</li>
+          <li><strong>Телефон:</strong> <a href={`tel:${PHONE.replace(/[^+\d]/g, "")}`}>{PHONE}</a></li>
           <li><strong>Электронная почта:</strong> {EMAIL}</li>
+          <li><strong>Часы поддержки:</strong> {LEGAL_DETAILS.supportHours}; {LEGAL_DETAILS.supportSla.toLowerCase()}.</li>
         </ul>
       </section>
     </LegalDocument>

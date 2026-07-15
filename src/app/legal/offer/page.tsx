@@ -1,26 +1,17 @@
 import type { Metadata } from "next";
 import { LegalDocument, SectionTitle } from "@/components/legal/legal-document";
+import { LEGAL_DETAILS } from "@/lib/legal-details";
 
 export const metadata: Metadata = {
   title: "Публичная оферта — Roblox Bank",
   description:
     "Публичная оферта на оказание услуг по продаже цифровых товаров (Robux) и услуг пополнения внутриигрового баланса Roblox.",
   alternates: { canonical: "https://robloxbank.ru/legal/offer" },
-  // До получения реквизитов документ содержит явные placeholders и не должен
-  // попадать в поиск или использоваться как готовая оферта при модерации.
   robots: { index: false, follow: false },
 };
 
 export default function OfferPage() {
-  // Placeholders — заполнить после регистрации ИП/ООО.
-  // Текст оферты НЕ переписывается ad-hoc: каждое изменение фиксируется
-  // в дате lastUpdated и логируется (CHANGELOG.md в корне).
-  const ENTITY = "[ИП / ООО — наименование]";
-  const INN = "[ИНН]";
-  const OGRN = "[ОГРНИП / ОГРН]";
-  const ADDRESS = "[Адрес регистрации]";
-  const EMAIL = "[support@robloxbank.ru]";
-  const lastUpdated = "28 апреля 2026 г.";
+  const { entity: ENTITY, inn: INN, ogrn: OGRN, address: ADDRESS, email: EMAIL, phone: PHONE, lastUpdated } = LEGAL_DETAILS;
 
   return (
     <LegalDocument
@@ -106,7 +97,7 @@ export default function OfferPage() {
           Цена Цифрового товара и Услуги пополнения указывается на Сайте в российских рублях и формируется на основании текущего курса Robux к рублю, который может изменяться без предварительного уведомления. Окончательная цена фиксируется в момент оформления Заказа.
         </p>
         <p>
-          Оплата производится единовременно через платёжную систему ПАО «Тинькофф Банк» (Tinkoff Acquiring) с использованием банковских карт международных платёжных систем, СБП и иных способов, доступных на странице оплаты.
+          Оплата производится единовременно через платёжную систему АО «ТБанк» (Т‑Банк) с использованием банковских карт, СБП и иных способов, доступных на странице оплаты.
         </p>
         <p>
           Все расчёты между сторонами производятся в безналичной форме. Документы по операции (электронный кассовый чек) направляются Заказчику в соответствии с требованиями ФЗ-54 «О применении контрольно-кассовой техники».
@@ -188,7 +179,9 @@ export default function OfferPage() {
           <li><strong>ИНН:</strong> {INN}</li>
           <li><strong>ОГРН / ОГРНИП:</strong> {OGRN}</li>
           <li><strong>Юридический адрес:</strong> {ADDRESS}</li>
+          <li><strong>Телефон поддержки:</strong> <a href={`tel:${PHONE.replace(/[^+\d]/g, "")}`}>{PHONE}</a></li>
           <li><strong>Электронная почта:</strong> {EMAIL}</li>
+          <li><strong>Поддержка:</strong> {LEGAL_DETAILS.supportHours}; {LEGAL_DETAILS.supportSla.toLowerCase()}.</li>
           <li><strong>Сайт:</strong> <a href="https://robloxbank.ru">https://robloxbank.ru</a></li>
         </ul>
       </section>

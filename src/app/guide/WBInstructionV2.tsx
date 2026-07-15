@@ -10,6 +10,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import VKAuthButton from "@/components/auth/VKAuthButton";
+import Navbar from "@/components/navbar";
 import { getOrInitSessionId } from "@/lib/wb-session";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { gamepassPriceMatches, rankSellableGamepasses } from "@/lib/gamepass-search-view";
@@ -222,8 +223,10 @@ export default function WBInstructionV2({
   }, [code, isSite, testMode]);
 
   return (
-    <div className="wbi-root" ref={root}>
-      <style>{CSS}</style>
+    <>
+      {isSite && <Navbar />}
+      <div className="wbi-root" ref={root}>
+        <style>{CSS}</style>
 
       <div className="wbi-bgfx"><div className="wbi-blob wbi-b1" /><div className="wbi-blob wbi-b2" /></div>
 
@@ -615,7 +618,8 @@ export default function WBInstructionV2({
 
         <div className="wbi-note">Инструкция оформлена для мобильных устройств. Если что-то не получается — пиши менеджеру выше.</div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 
