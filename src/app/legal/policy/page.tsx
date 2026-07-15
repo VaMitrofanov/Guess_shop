@@ -6,6 +6,7 @@ export const metadata: Metadata = {
   description:
     "Политика обработки персональных данных пользователей сервиса Roblox Bank в соответствии с ФЗ-152 «О персональных данных».",
   alternates: { canonical: "https://robloxbank.ru/legal/policy" },
+  robots: { index: false, follow: false },
 };
 
 export default function PolicyPage() {

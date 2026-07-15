@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import type { PrismaClientWithWb } from "@/types/prisma-wb";
 import { getGamepassDetails } from "@/lib/roblox";
 import { sendWebOrderCard } from "@/lib/admin-card";
-
-const db = prisma as unknown as PrismaClientWithWb;
+import { clientIp, rateLimit } from "@/lib/rate-limit";
 
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
+
+class HandoffError extends Error {
+  constructor(public status: number, message: string, public code: string) {
+    super(message);
+  }
+}
 
 /**
  * Website Step-9 handoff → ORDER MATERIALISER.
@@ -29,6 +33,13 @@ const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
  * so the bot's one-tap remains a clean fallback if the promotion somehow fails.
  */
 export async function POST(request: Request) {
+  const limited = rateLimit(`wb-select-gamepass:${clientIp(request)}`, 8, 1 / 15);
+  if (!limited.ok) {
+    return NextResponse.json(
+      { error: "Слишком много попыток. Подождите и повторите." },
+      { status: 429, headers: { "retry-after": String(limited.retryAfter) } },
+    );
+  }
   try {
     const body = await request.json();
     const rawCode: string = (body?.code ?? "").toString().trim().toUpperCase();
@@ -46,7 +57,7 @@ export async function POST(request: Request) {
     }
 
     // ── 1. Lookup the code (need denomination for the price check + card) ──────
-    const wbCode = await (db as any).wbCode.findFirst({
+    const wbCode = await prisma.wbCode.findFirst({
       where: { code: { equals: rawCode, mode: "insensitive" } },
       select: { id: true, isUsed: true, userId: true, denomination: true },
     });
@@ -85,13 +96,13 @@ export async function POST(request: Request) {
     const gamepassUrl = `https://www.roblox.com/game-pass/${gamepassId}`;
 
     // ── 3. Promote the provisional order (transactional, idempotent) ──────────
-    const result = await (db as any).$transaction(async (tx: any) => {
+    const result = await prisma.$transaction(async (tx) => {
       const order = await tx.wbOrder.findFirst({
         where: { wbCode: { equals: rawCode, mode: "insensitive" } },
       });
       if (!order) {
         // Code claimed but no order row — let the bot handle it as fallback.
-        throw { status: 409, message: "Заказ не найден", code: "NO_BOT_ORDER" };
+        throw new HandoffError(409, "Заказ не найден", "NO_BOT_ORDER");
       }
 
       // Always persist the hint so the bot one-tap stays consistent.
@@ -134,18 +145,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, alreadyOrdered: true });
     }
 
-    try { await (db as any).user.update({ where: { id: wbCode.userId }, data: { robloxUsername: nick } }); } catch {}
+    try { await prisma.user.update({ where: { id: wbCode.userId }, data: { robloxUsername: nick } }); } catch {}
 
 
     // ── 4. Fire the admin card (non-blocking failure) ─────────────────────────
     try {
       const order = result.order;
       const [user, previousOrderCount] = await Promise.all([
-        (db as any).user.findUnique({
+        prisma.user.findUnique({
           where: { id: order.userId },
           select: { tgId: true, vkId: true, name: true, username: true },
         }),
-        (db as any).wbOrder.count({ where: { userId: order.userId, status: "COMPLETED" } }),
+        prisma.wbOrder.count({ where: { userId: order.userId, status: "COMPLETED" } }),
       ]);
 
       const safeName = (user?.name ?? "Пользователь")
@@ -178,8 +189,8 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ ok: true, ordered: true });
-  } catch (err: any) {
-    if (err?.status) {
+  } catch (err: unknown) {
+    if (err instanceof HandoffError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
     }
     console.error("[wb-code/select-gamepass] error:", err);

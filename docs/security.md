@@ -29,7 +29,7 @@
 доступа. Если какое-то устройство реально не отдаёт → заменить публичный `userId` на
 подписанный `TWA_FALLBACK_SECRET`.
 
-### 2. Rate-limiting на публичных API — ⚠️ ЧАСТИЧНО (2026-07-03)
+### 2. Rate-limiting на публичных API — 🟡 ОСНОВНОЙ SITE-SCOPE ЗАКРЫТ (2026-07-16)
 `/api/wb-code` за in-memory token-bucket (`src/lib/rate-limit.ts`): POST burst 10 / 1-в-5с,
 GET burst 20 / 1-в-2с, 429 + `Retry-After`. Код верный — **прямой тест контейнера**
 (в обход прокси, ключ «unknown») даёт ровно 20 проходов + 10×429.
@@ -46,6 +46,12 @@ headers) + cloudflared, тогда per-IP лимит заработает как
 rate-limiting на **Cloudflare WAF** (rate-limiting rules) — естественное место, раз трафик и
 так через CF; (в) оставить как есть (грубый троттл + abuse-лог). Лимитер безвреден и остаётся.
 Также: при масштабировании на >1 реплику Web нужен общий стор (Redis) вместо in-memory Map.
+
+**Обновление 2026-07-16:** отдельные buckets теперь есть на регистрации, quote, checkout,
+Roblox games/gamepasses, TG login challenge, identity-link, WB reserve/read,
+`select-gamepass`, polling статуса SITE-заказа и client observability. Для текущей одной
+Web-реплики это закрывает основной site abuse-scope; перед горизонтальным масштабированием
+по-прежнему нужен общий Redis/WAF limiter и production-подтверждение реального client IP.
 
 **Обновление 2026-07-04:** DNS переключён на **прямой A к RF-хосту**
 (grey-cloud, минуя Cloudflare-tunnel — см. риск #7). Теперь client-IP в принципе доходит до
@@ -284,6 +290,18 @@ https://create.roblox.com/docs/production/monetization/passes
 Остаток: живой прогон VK-входа с тестовым кодом (нужен реальный VK-аккаунт) — за
 владельцем; полный мониторинг коридора по расписанию — карточка Trello от 2026-07-14.
 
+### 17. Клиентская телеметрия сайта — 🟢 PII-SAFE FOUNDATION (2026-07-16)
+
+`SiteObservability` отправляет только тип сигнала, pathname без query, известное имя Web
+Vital, численное значение/rating либо локальный 8-символьный fingerprint ошибки. Raw error
+message, stack, query string, email, order token, cookie и user/session ID контрактом
+запрещены (`ClientSignalSchema`). Серверный endpoint ограничен token-bucket; в TG уходят
+только poor/error-сигналы и не больше четырёх алертов за burst с медленным refill.
+
+Это базовая наблюдаемость, не полноценный APM: server logs нужно подключить к retention/
+дашборду, а перед несколькими Web-репликами перенести alert bucket в общий store. Нельзя
+расширять payload raw exception/URL без отдельного privacy-review.
+
 ### 12. Детерминированный пароль в seed — ✅ ЗАКРЫТО В КОДЕ (2026-07-12)
 
 `prisma/seed.js` содержит публичные admin email и фиксированный предсказуемый пароль.
@@ -313,7 +331,7 @@ VK ID SDK грузится только когда отображается `VKA
 регистрацию, checkout и публичные Roblox lookup, плюс unit-тест limiter.
 
 **Остаётся до запуска:** проверка CSP и логинов на реальных TG/VK WebView; distributed
-rate-limit/telemetry перед горизонтальным масштабированием; убрать `unsafe-inline`/
+rate-limit перед горизонтальным масштабированием; убрать `unsafe-inline`/
 `unsafe-eval` через nonce-based CSP после этой матрицы. Текущий limiter намеренно не
 подменяет WAF/Redis при нескольких репликах.
 

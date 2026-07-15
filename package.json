@@ -11,6 +11,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "jest",
+    "smoke:site": "node scripts/smoke-site.mjs",
     "postinstall": "prisma generate",
     "bot:tg": "npm --prefix bots/tg run dev",
     "bot:vk": "npm --prefix bots/vk run dev",

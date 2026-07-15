@@ -3,13 +3,20 @@ import { ArrowRight, BadgeCheck, CreditCard, FileCheck2, LockKeyhole, MessageCir
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
 import styles from "../public-sections.module.css";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Как защищены аккаунт, цена и заказ — RobloxBank",
+  description: "Как RobloxBank проверяет аккаунт, цену геймпасса, платёж и статус заказа без запроса пароля Roblox.",
+  alternates: { canonical: "/guarantees" },
+};
 
 const guarantees = [
   { title: "Пароль остаётся у тебя", text: "Для доставки нужен только публичный геймпасс. Доступ к аккаунту, cookie и коды подтверждения мы не просим.", icon: LockKeyhole, tag: "Защита аккаунта" },
   { title: "Сумма видна заранее", text: "До оплаты показываем пакет, цену геймпасса, скидку и итог в рублях. Сервер фиксирует расчёт на время оформления.", icon: ScanSearch, tag: "Прозрачная цена" },
-  { title: "Оплата через банк", text: "Карточные данные обрабатывает платёжный провайдер. RobloxBank их не получает и не хранит.", icon: CreditCard, tag: "Безопасный платёж" },
+  { title: "Платёжный контур закрыт до проверки", text: "Оплата на сайте появится только после проверки банка и кассы. Карточные данные будет обрабатывать платёжный провайдер, а не RobloxBank.", icon: CreditCard, tag: "Безопасный запуск" },
   { title: "Заказ под контролем", text: "После оплаты у заказа есть статус. Мы сверяем владельца, продажу и точную цену геймпасса перед выкупом.", icon: BadgeCheck, tag: "Проверка заказа" },
-  { title: "Условия без мелкого шрифта", text: "Оферта, политика и правила возврата открыты до покупки. Электронный чек отправляется на указанный email.", icon: FileCheck2, tag: "Документы" },
+  { title: "Условия до оплаты", text: "До публичного запуска мы заполним реквизиты, оферту, политику и правила возврата. Электронный чек будет отправляться на указанный email.", icon: FileCheck2, tag: "Документы" },
   { title: "Есть живой человек", text: "Если что-то пошло не так, поддержка помогает найти заказ, проверить геймпасс и следующий шаг.", icon: MessageCircleMore, tag: "Поддержка" },
 ];
 

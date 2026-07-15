@@ -57,7 +57,22 @@ destructive changes/существующие таблицы, только пос
 > force-redeploy вручную, сборка завершилась успешно, TWA-партнёрский раздел проверен рабочим.
 > После деплоя Web и/или Guide прогонять `node scripts/smoke-corridor.mjs` —
 > проверяет гейт, чанки `/_next-guide`, vendor SDK, CSP-хосты VK (риск №16) и
-> `/api/wb-code`; «страница 200» сама по себе ничего не гарантирует.
+> `/api/wb-code`; «страница 200» сама по себе ничего не гарантирует. С 16.07 обе сборки
+> также отдают `X-RobloxBank-Guide-Release` — детерминированный fingerprint общих guide-
+> исходников и assets. Smoke сравнивает SITE-ответ Web с WB-ответом Guide и падает, если
+> контейнеры собраны из разных состояний. Это обнаружение рассинхрона, а не разрешение
+> запускать две тяжёлые сборки параллельно: порядок Web → Guide остаётся обязательным.
+
+Read-only smoke основной витрины:
+
+```bash
+npm run smoke:site                                      # production: 200 или штатный 503 root
+npm run smoke:site -- --base=http://127.0.0.1:3000 --expect-public
+npm run smoke:site -- --expect-maintenance
+```
+
+Он не пишет в БД: проверяет health и security headers, 404, robots/sitemap, SITE guide,
+OpenGraph и корректный maintenance-ответ.
 
 > ⚠️ **Dockerfile'ы ботов копируют исходники поимённо** (`COPY bots/tg/crons.ts …`), а не
 > папкой. Новый `.ts`-файл в `bots/tg/` или `bots/vk/` **обязан быть добавлен в COPY-список**

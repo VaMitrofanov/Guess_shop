@@ -5,6 +5,13 @@ import Link from "next/link";
 import FAQClient from "@/components/faq-client";
 import { ArrowRight, Headphones } from "lucide-react";
 import styles from "../public-sections.module.css";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Помощь и частые вопросы — RobloxBank",
+  description: "Ответы о покупке Robux через геймпасс, цене, сроках, статусе заказа и поддержке RobloxBank.",
+  alternates: { canonical: "/faq" },
+};
 
 // Force dynamic rendering — the FAQ list lives in DB, so we don't want
 // `next build` to try and prerender this page (Coolify build env may not
@@ -37,9 +44,9 @@ const DEFAULT_FAQS = [
   },
   {
     id: "default-4",
-    question: "Какие есть способы оплаты?",
+    question: "Можно ли оплатить заказ на сайте?",
     answer:
-      "Оплата банковской картой и через СБП. Платежи проходят через защищённый шлюз Тинькофф с поддержкой 3-D Secure. Данные вашей карты мы не храним.",
+      "Пока публичная оплата на сайте закрыта: мы завершаем проверку платёжного и кассового контура. Доступный способ оформления будет явно показан перед подтверждением заказа — без передачи карточных данных RobloxBank.",
   },
   {
     id: "default-5",
@@ -51,7 +58,7 @@ const DEFAULT_FAQS = [
     id: "default-6",
     question: "Что если заказ не будет выполнен?",
     answer:
-      "Если мы не смогли выполнить заказ — возвращаем оплату. Возврат за уже доставленные цифровые товары не предусмотрен (ст. 26.1 ЗоЗПП). Полные условия — в публичной оферте.",
+      "Обратитесь к менеджеру с номером заказа. Порядок отмены и возврата будет указан в утверждённой публичной оферте до запуска оплаты на сайте.",
   },
   {
     id: "default-7",
@@ -63,7 +70,7 @@ const DEFAULT_FAQS = [
     id: "default-8",
     question: "Как связаться с поддержкой?",
     answer:
-      "Напишите в наш Telegram @RobloxBank_PA или в сообщество VK. Обычно отвечаем в течение нескольких минут.",
+      "Напишите в наш Telegram @RobloxBank_PA или в сообщество VK. Менеджер ответит в рабочее время; точные часы и срок ответа появятся вместе с реквизитами до публичного запуска.",
   },
 ];
 

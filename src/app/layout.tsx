@@ -4,6 +4,7 @@ import "./globals.css";
 import SessionProvider from "@/components/session-provider";
 import { PageLoader } from "@/components/page-loader";
 import { ThemeProvider } from "@/components/theme-provider";
+import { SiteObservability } from "@/components/site-observability";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -78,6 +79,7 @@ export default function RootLayout({
         <ThemeProvider>
           <SessionProvider>
             <PageLoader />
+            <SiteObservability />
             {children}
           </SessionProvider>
         </ThemeProvider>

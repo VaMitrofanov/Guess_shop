@@ -43,6 +43,12 @@ worker, refund и локальная ККТ contract matrix готовы, но �
 см. [architecture.md](architecture.md#legacy) и
 [master plan эквайринга](site-acquiring-master-plan.md).
 
+С 16.07 публичный shell имеет custom 404/error recovery, корректные SEO/noindex-границы,
+PII-safe Core Web Vitals/client-error telemetry и read-only `npm run smoke:site`. Web и
+отдельный Guide-контейнер отдают общий source fingerprint; corridor-smoke автоматически
+обнаруживает отставший Guide. Это закрывает локальный hardening, но не заменяет реальные
+TG/VK/iPhone/Android acceptance, реквизиты, ККТ/payment E2E и soft launch.
+
 Личный кабинет и все три поверхности входа используют общий Violet/Frost shell. Email-вход
 нормализует адрес, Telegram login/link идёт через одноразовый bot-assisted challenge с
 серверной HMAC-проверкой, а VK identity проверяется сервером. Email-сценарий ЛК принят на

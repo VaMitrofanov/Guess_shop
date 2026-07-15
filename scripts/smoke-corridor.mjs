@@ -13,6 +13,8 @@
  *   5. GET /api/wb-code?code=TESTDEV   → 200 (жив Prisma-путь чтения кода);
  *   6. (--reserve) POST /api/wb-code с TEST300 → ok:true (жив резерв; код
  *      останется RESERVED до 60 мин — сброс из TWA Settings → «Тестовые коды»).
+ *   7. SITE и WB Guide отдают одинаковый source fingerprint — отдельный
+ *      Guide-контейнер не отстал от Web по коду/ассетам.
  *
  * Usage:
  *   node scripts/smoke-corridor.mjs                     # против prod
@@ -86,6 +88,25 @@ if (gateRes) {
   gateHtml = await gateRes.text();
   if (gateHtml.includes("RobloxBank-Guide")) ok("ответ пришёл из Guide-контейнера (__svc marker)");
   else fail("__svc marker", "HTML без data-served-by=RobloxBank-Guide — отвечает не Guide?");
+}
+
+// ── 1.1 Web/Guide source fingerprint ───────────────────────────────────────
+console.log("\n1.1) Версия Web ↔ Guide");
+try {
+  const siteGuideRes = await fetchWithTimeout(`${BASE}/guide?source=site&amount=1000`);
+  const webRelease = siteGuideRes.headers.get("x-robloxbank-guide-release");
+  const guideRelease = gateRes?.headers.get("x-robloxbank-guide-release");
+  if (siteGuideRes.status !== 200) {
+    fail("SITE guide version", `HTTP ${siteGuideRes.status}`);
+  } else if (!webRelease || !guideRelease) {
+    fail("Web/Guide release header", "x-robloxbank-guide-release отсутствует");
+  } else if (webRelease !== guideRelease) {
+    fail("Web/Guide version", `Web=${webRelease}, Guide=${guideRelease} — нужен последовательный redeploy Guide`);
+  } else {
+    ok(`Web и Guide на одном source fingerprint ${webRelease}`);
+  }
+} catch (e) {
+  fail("Web/Guide version", e.message);
 }
 
 // ── 2. Все чанки гейта (префикс /_next-guide, НЕ голый /_next!) ────────────

@@ -137,7 +137,7 @@ export default function Home() {
           </div>
           <div className={styles.orderWidget}>
             <div className={styles.orderWidgetTop}>
-              <span>Заказ #RB-2048</span><strong>Геймпасс проверяется</strong>
+              <span>Демо статуса заказа</span><strong>Геймпасс проверяется</strong>
             </div>
             <div className={styles.orderTrack}><i /><i /><i className={styles.current} /><i /></div>
             <div className={styles.orderLabels}><span>Создан</span><span>Оплачен</span><span>Проверка</span><span>Готово</span></div>

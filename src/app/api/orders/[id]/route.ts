@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { hashStatusToken } from "@/lib/canonical-web-order";
 import { prisma } from "@/lib/prisma";
+import { clientIp, rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,13 @@ function tokenMatches(candidate: string, expectedHash: string | null) {
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const limited = rateLimit(`order-status:${clientIp(req)}`, 30, 1);
+  if (!limited.ok) {
+    return NextResponse.json(
+      { error: "Too many requests" },
+      { status: 429, headers: { "retry-after": String(limited.retryAfter) } },
+    );
+  }
   const { id } = await params;
   const order = await prisma.wbOrder.findUnique({
     where: { publicOrderId: id },

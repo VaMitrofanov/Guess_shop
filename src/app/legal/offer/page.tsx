@@ -6,6 +6,9 @@ export const metadata: Metadata = {
   description:
     "Публичная оферта на оказание услуг по продаже цифровых товаров (Robux) и услуг пополнения внутриигрового баланса Roblox.",
   alternates: { canonical: "https://robloxbank.ru/legal/offer" },
+  // До получения реквизитов документ содержит явные placeholders и не должен
+  // попадать в поиск или использоваться как готовая оферта при модерации.
+  robots: { index: false, follow: false },
 };
 
 export default function OfferPage() {

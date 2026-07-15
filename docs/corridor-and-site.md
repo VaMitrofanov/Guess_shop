@@ -3,6 +3,33 @@
 Точка входа с Wildberries: `robloxbank.ru/guide?source=wb`. Отдельный контейнер (Guide)
 обслуживает только этот путь.
 
+## Site hardening и наблюдаемость (16.07.2026)
+
+- Добавлены фирменные App Router surfaces `not-found.tsx`, `error.tsx` и
+  `global-error.tsx`: 404 действительно возвращает HTTP 404, неожиданный render error даёт
+  безопасный retry и показывает только диагностический digest без текста исключения/ПД.
+- Root layout передаёт Core Web Vitals (`CLS/FCP/INP/LCP/TTFB`) и fingerprint клиентских
+  ошибок в `/api/observability/client`. Контракт не принимает query string, raw message,
+  email или произвольный payload; poor/error-сигналы rate-limited и могут алертить
+  `ADMIN_IDS`/`TG_CHAT_ID`, остальные остаются структурированными server logs.
+- Checkout, login/register, payment-status и незавершённые legal pages отдают
+  `noindex,nofollow`. Оферта/политика исключены из sitemap, пока владелец не передаст
+  реквизиты и документы не пройдут приёмку. Public FAQ/guarantees/reviews получили
+  собственные title/description/canonical.
+- Из видимого сайта удалены неподтверждённые обещания `Apple Pay / Google Pay`,
+  «мгновенно», «авто-выдача», «поддержка 24/7». Пока acquiring закрыт, guide/FAQ прямо
+  говорят, что платёжная кнопка появится только после внешних launch gates.
+- `/api/wb-code/select-gamepass` и `/api/orders/[id]` получили отдельные per-IP buckets;
+  статус заказа по-прежнему раскрывается только владельцу сессии или по случайному token.
+- Web и Guide отдают `X-RobloxBank-Guide-Release`: fingerprint общих guide-исходников,
+  компонентов, libs и assets. `scripts/smoke-corridor.mjs` сравнивает значения SITE/Web и
+  WB/Guide и падает при отставшем контейнере; это минимальная автоматическая защита, пока
+  последовательный автодеплой двух Coolify applications не настроен.
+- Read-only `npm run smoke:site` проверяет health/security headers, custom 404,
+  robots/sitemap, SITE guide, maintenance/public root и OpenGraph. Локальный production
+  build 16.07: `15/15`; browser QA `1440×1000` и `390×844`, overflow отсутствует,
+  checkout/legal `noindex` подтверждён, console errors = 0.
+
 ## Фазы гейта — `GuideClient.tsx`
 
 `intro → gate → instruction`. Стартовая фаза выбирается по props из `page.tsx`:

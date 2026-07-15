@@ -110,7 +110,9 @@
    WebView и отсутствие переключения чужой сессии.
 2. Проверить iPhone Safari, Android Chrome, Telegram WebView и VK WebView: клавиатуру,
    back/refresh/deep link, плохую сеть, восстановление сессии и крупный системный шрифт.
-3. Закрыть публичные 404/500, SEO/OpenGraph, accessibility и Core Web Vitals.
+3. После deploy проверить новые 404/500 и PII-safe CWV/error telemetry в production;
+   эмуляционный desktop/mobile gate уже закрыт, физические устройства и полевой CWV
+   baseline остаются ручной приёмкой.
 4. После UX-хвоста продолжить обязательные launch-gates этапов 1, 3, 5–7: identity/link/merge,
    ПД и публичные документы, terminal/ККТ test matrix, E2E, monitoring и soft launch.
 
@@ -559,9 +561,12 @@ VK  ─┘                              │
   `WBInstructionV2` обслуживает WB/SITE/BOT, отдельный `SiteGuide` удалён; smoke 23/23.**
 - Внедрить выбранную brand/design direction, честные тексты, mobile-first checkout.
 - Страницы: контакты/реквизиты, оферта, ПД/consent, возвраты, способы оплаты, FAQ,
-  status и 404/500.
+  status и 404/500. **16.07 custom 404/error surfaces готовы; legal pages fail-safe
+  `noindex` и исключены из sitemap до передачи реквизитов.**
 - Реальные отзывы либо скрытый блок; никакого seed/fake content.
 - SEO, OpenGraph, sitemap/robots, accessibility и performance budget.
+  **Metadata/canonical/robots boundaries и сбор CWV готовы; реальные field CWV и финальный
+  accessibility audit остаются launch gate.**
 
 **DoD:** content/legal checklist принят владельцем и юристом; гайд проходит usability test;
 никаких placeholder и недоказуемых обещаний.
@@ -588,10 +593,12 @@ VK  ─┘                              │
 - Unit/property/contract tests цены; integration tests БД и webhook; load/abuse tests.
 - Убрать hydration mismatch; настроить ESLint ignore для чужих worktrees и нулевой baseline
   хотя бы для затронутого storefront/auth/payment scope. **Theme SSR/client mismatch закрыт
-  15.07; общий ESLint baseline остаётся.**
+  15.07; worktrees исключены 16.07, затронутый site-scope проходит без errors; общий legacy
+  warning baseline остаётся.**
 - Security headers/CSP, dependency audit, accessibility, Core Web Vitals и реальные webviews.
 - Наблюдаемость: payment success, callback lag, stuck orders, outbox retries, quote drift,
-  auth/link failures; алерты без PII.
+  auth/link failures; алерты без PII. **Клиентские CWV/render errors и Web↔Guide version
+  drift закрыты foundation 16.07; payment/business dashboards остаются.**
 
 **DoD:** CI зелёный; критический E2E повторяем на staging; нет P0/P1 дефектов.
 

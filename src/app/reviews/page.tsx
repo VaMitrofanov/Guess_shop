@@ -5,6 +5,13 @@ import Footer from "@/components/footer";
 import ReviewsClient from "@/components/reviews-client";
 import { prisma } from "@/lib/prisma";
 import styles from "../public-sections.module.css";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Отзывы клиентов — RobloxBank",
+  description: "Опубликованные отзывы клиентов RobloxBank с отметкой подтверждённой покупки.",
+  alternates: { canonical: "/reviews" },
+};
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

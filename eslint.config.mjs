@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Local agent worktrees are independent checkouts and must not pollute the
+    // lint baseline of this workspace.
+    ".claude/worktrees/**",
   ]),
 ]);
 

@@ -1,4 +1,7 @@
 import type { NextConfig } from "next";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import path from "node:path";
 
 /**
  * Shared response headers for the main storefront and the separately-built
@@ -27,6 +30,44 @@ const commonCsp = [
   "form-action 'self'",
 ].join("; ");
 
+// Web and Guide are built as separate Coolify applications. Hash only inputs
+// that survive Dockerfile.guide route pruning; the same checkout must produce
+// the same value in both containers, while an older Guide build exposes a
+// different header and fails scripts/smoke-corridor.mjs.
+const GUIDE_RELEASE_INPUTS = [
+  "next-security.ts",
+  "package.json",
+  "package-lock.json",
+  "src/app/guide",
+  "src/auth.ts",
+  "src/components",
+  "src/hooks",
+  "src/lib",
+  "public/guide",
+  "public/vendor",
+];
+
+function releaseFiles(entry: string): string[] {
+  const absolute = path.resolve(process.cwd(), entry);
+  if (!existsSync(absolute)) return [];
+  if (!statSync(absolute).isDirectory()) return [absolute];
+  return readdirSync(absolute, { withFileTypes: true })
+    .filter((item) => item.name !== ".DS_Store")
+    .flatMap((item) => releaseFiles(path.join(entry, item.name)))
+    .sort();
+}
+
+export function guideReleaseFingerprint(): string {
+  const hash = createHash("sha256");
+  for (const file of GUIDE_RELEASE_INPUTS.flatMap(releaseFiles).sort()) {
+    hash.update(path.relative(process.cwd(), file));
+    hash.update("\0");
+    hash.update(readFileSync(file));
+    hash.update("\0");
+  }
+  return hash.digest("hex").slice(0, 16);
+}
+
 const commonHeaders = [
   { key: "Content-Security-Policy", value: `${commonCsp}; frame-ancestors 'self'` },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
@@ -34,6 +75,7 @@ const commonHeaders = [
   { key: "Strict-Transport-Security", value: "max-age=31536000" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), browsing-topics=()" },
   { key: "X-DNS-Prefetch-Control", value: "off" },
+  { key: "X-RobloxBank-Guide-Release", value: guideReleaseFingerprint() },
 ];
 
 export const securityHeaders: NonNullable<NextConfig["headers"]> = async () => [
