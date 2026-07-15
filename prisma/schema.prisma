@@ -72,6 +72,22 @@ enum UserIdentityProvider {
   EMAIL
 }
 
+/// One-time bridge between the public site and @RobloxBankBot. The raw state
+/// never reaches the database: only its SHA-256 digest is stored. A challenge
+/// is short-lived and consumed atomically before a Telegram identity may log
+/// in or be linked to an existing web account.
+model TelegramWebLoginChallenge {
+  stateHash    String   @id
+  mode         String
+  targetUserId String?
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([targetUserId, createdAt(sort: Desc)])
+}
+
 /// Append-only bonus history. `User.balance` remains a fast cached balance;
 /// each future mutation must also write exactly one idempotent ledger entry.
 model BonusLedger {

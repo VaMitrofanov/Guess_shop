@@ -34,6 +34,7 @@ import {
   Zap,
 } from "lucide-react";
 import TelegramLoginButton from "@/components/auth/TelegramLoginButton";
+import SignOutAction from "@/components/auth/SignOutAction";
 import styles from "./dashboard.module.css";
 
 export const dynamic = "force-dynamic";
@@ -374,7 +375,7 @@ export default async function DashboardPage() {
               <Link href={checkoutHref}><ShoppingCart size={18} /><span><strong>Новый заказ</strong><small>Ник уже подставлен</small></span><ChevronRight size={17} /></Link>
               <Link href="/guide?source=site&amount=1000"><Gamepad2 size={18} /><span><strong>Инструкция</strong><small>Создать геймпасс</small></span><ChevronRight size={17} /></Link>
               <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer"><Bell size={18} /><span><strong>Поддержка</strong><small>Живой менеджер</small></span><ExternalLink size={16} /></a>
-              <Link href="/api/auth/signout"><LogOut size={18} /><span><strong>Выйти</strong><small>Завершить сессию</small></span><ChevronRight size={17} /></Link>
+              <SignOutAction><LogOut size={18} /><span><strong>Выйти</strong><small>Завершить сессию</small></span><ChevronRight size={17} /></SignOutAction>
             </nav>
           </aside>
         </div>

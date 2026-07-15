@@ -7,6 +7,8 @@ import { sendTelegramMessage } from "@/lib/telegram";
 import { verifyVkIdUser } from "@/lib/vk-id";
 import { findOrCreateVerifiedIdentity } from "@/lib/user-identity";
 import { verifyTelegramLogin } from "@/lib/telegram-login";
+import { normalizeLoginEmail } from "@/lib/auth-navigation";
+import { consumeTelegramWebLoginChallenge } from "@/lib/telegram-web-login";
 
 // VK display names are user-controlled and embedded into Telegram HTML
 // notifications — unescaped "<" breaks the whole message (silently lost).
@@ -58,8 +60,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
+        const email = normalizeLoginEmail(String(credentials.email));
+
         const user = await prisma.user.findUnique({
-          where: { email: credentials.email as string },
+          where: { email },
         });
 
         if (!user || !user.password) return null;
@@ -89,6 +93,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         photo_url: { label: "Photo", type: "text" },
         auth_date: { label: "Auth date", type: "text" },
         hash: { label: "Hash", type: "text" },
+        state: { label: "One-time state", type: "text" },
       },
       async authorize(credentials) {
         const verified = verifyTelegramLogin({
@@ -101,6 +106,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           hash: String(credentials?.hash ?? ""),
         });
         if (!verified) return null;
+        const challenge = await consumeTelegramWebLoginChallenge(String(credentials?.state ?? ""), "login");
+        if (!challenge) return null;
         const user = await findOrCreateVerifiedIdentity({
           provider: "TG",
           subject: verified.subject,

@@ -130,6 +130,10 @@ robloxUsername, userId+createdAt).
   авторизаций, результат и rollback-marker. TG link переносит identities/orders/intents,
   суммирует бонус через отдельную ledger-строку и оставляет source как инертный audit anchor.
   Автоматически объединять пользователей по нику, имени или email нельзя.
+- `TelegramWebLoginChallenge` — одноразовый login/link challenge на 5 минут. В БД хранится
+  только SHA-256 случайного state, режим и для link — заранее зафиксированный target User;
+  `consumedAt` выставляется атомарно до создания сессии/merge. Migration
+  `20260715_telegram_web_login_challenge` применена к production 2026-07-15.
 - `PricingPolicy` хранит версию и JSON-представление опубликованной политики; расчёт
   `retail-direct-v1` остаётся чистой общей функцией `bots/shared/retail-pricing.ts`.
 - `PriceQuote` фиксирует на 15 минут версию, сумму R$, бонус, скидку и итог в **целых

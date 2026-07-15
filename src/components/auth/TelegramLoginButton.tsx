@@ -1,62 +1,50 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
-import { signIn } from "next-auth/react";
+import { useState } from "react";
+import { Loader2, Send } from "lucide-react";
 
-type TelegramPayload = Record<string, string | number>;
-
-export default function TelegramLoginButton({ mode = "login" }: { mode?: "login" | "link" }) {
-  const host = useRef<HTMLDivElement>(null);
-  const callbackId = `tgLogin_${useId().replace(/[^a-zA-Z0-9_]/g, "")}`;
-  const [message, setMessage] = useState<string | null>(null);
+export default function TelegramLoginButton({
+  mode = "login",
+  className,
+}: {
+  mode?: "login" | "link";
+  className?: string;
+}) {
   const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    const target = host.current;
-    if (!target) return;
-    const globalWindow = window as typeof window & Record<string, unknown>;
-    globalWindow[callbackId] = async (payload: TelegramPayload) => {
-      setBusy(true);
-      setMessage(null);
-      try {
-        if (mode === "login") {
-          const result = await signIn("telegram-login", { ...payload, redirect: false });
-          if (!result?.ok) throw new Error("Telegram не подтвердил вход");
-          window.location.href = "/dashboard";
-          return;
-        }
-        const response = await fetch("/api/account/identities/link", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ provider: "TG", payload }),
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error ?? "Не удалось связать профили");
-        setMessage(data.merged ? "Профили объединены: заказы и бонусы перенесены." : "Telegram привязан.");
-        window.setTimeout(() => window.location.reload(), 900);
-      } catch (error) {
-        setMessage(error instanceof Error ? error.message : "Ошибка Telegram");
-        setBusy(false);
+  const begin = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/auth/telegram/start?mode=${mode}`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || typeof data.href !== "string") {
+        throw new Error(data.error ?? "Не удалось открыть Telegram");
       }
-    };
-
-    target.innerHTML = "";
-    const script = document.createElement("script");
-    script.async = true;
-    script.src = "https://telegram.org/js/telegram-widget.js?22";
-    script.dataset.telegramLogin = process.env.NEXT_PUBLIC_TG_BOT_USERNAME ?? "RobloxBankBot";
-    script.dataset.size = "large";
-    script.dataset.radius = "0";
-    script.dataset.requestAccess = "write";
-    script.dataset.userpic = "false";
-    script.dataset.onauth = `${callbackId}(user)`;
-    target.appendChild(script);
-    return () => { delete globalWindow[callbackId]; target.innerHTML = ""; };
-  }, [callbackId, mode]);
+      window.location.assign(data.href);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Ошибка Telegram");
+      setBusy(false);
+    }
+  };
 
   return (
-    <div className="space-y-2">
-      <div ref={host} className={busy ? "pointer-events-none opacity-50" : ""} aria-label={mode === "login" ? "Войти через Telegram" : "Привязать Telegram"} />
-      {message && <p className="text-xs font-bold text-zinc-300" role="status">{message}</p>}
+    <div className="w-full">
+      <button
+        type="button"
+        onClick={() => void begin()}
+        disabled={busy}
+        className={className ?? "flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#229ED9] px-4 text-sm font-black text-white transition hover:bg-[#168fca] disabled:cursor-wait disabled:opacity-65"}
+        aria-label={mode === "login" ? "Войти через Telegram" : "Привязать Telegram"}
+      >
+        {busy ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+        <span>{busy ? "Открываем Telegram…" : mode === "login" ? "Telegram" : "Привязать Telegram"}</span>
+      </button>
+      {message && <p className="mt-2 text-xs font-bold text-[#d95770]" role="alert">{message}</p>}
     </div>
   );
 }

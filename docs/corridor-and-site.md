@@ -75,6 +75,12 @@
   SITE-заказ раскрывает payment/receipt snapshot, а отдельная identity settings-секция
   показывает server-verified TG/VK/EMAIL. Статус `WbOrder.PENDING` в клиентском UI означает
   «в очереди на выкуп», а не «ожидает оплаты».
+- Follow-up auth/LK 15.07 перевёл `/login`, `/register` и `/admin/login` на тот же shell,
+  исправил credentials email с пробелами/другим регистром, правильный admin provider и
+  logout без служебной страницы Auth.js. Telegram-кнопка больше не рендерит внешний iframe:
+  сайт выдаёт одноразовый challenge, `@RobloxBankBot` подписывает callback, а сервер
+  принимает HMAC и атомарно гасит state. Это устраняет пользовательскую ошибку
+  `Bot domain invalid`, не ослабляя проверку Telegram identity.
 - Checkout и единый guide получили увеличенные подписи, подсказки, карточки выбора и legal
   текст. Измеренный desktop baseline инструкции: основной текст `17 px`, поля `18 px`,
   figcaption `16 px`, overlay-метки `13–17 px`; на зелёных success-поверхностях используется
@@ -257,3 +263,5 @@ TG-уведомление «КОД АКТИВИРОВАН (сайт → VK)»), 
 Action-center показывает требуемые действия, общую историю, бонусный сейф, безопасный
 payment/receipt snapshot канонических SITE-заказов и verified identity settings. Read-only
 визуальная сверка на реальных историях пройдена для `1440×1000` и `390×844` без overflow.
+Отдельная USER-учётная запись владельца прошла production-регистрацию, повторный email-login
+и открытие пустого ЛК; фиктивные заказы для проверки не создавались.

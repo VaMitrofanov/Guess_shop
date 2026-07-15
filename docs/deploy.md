@@ -89,6 +89,7 @@ destructive changes/существующие таблицы, только пос
 операционного потока.
 
 **TG-бот:** `DATABASE_URL`, `TG_TOKEN`, `TG_CHANNEL_ID` (опц., гейт подписки), `ADMIN_IDS`,
+`NEXT_PUBLIC_APP_URL` (или server-only `WEB_BASE_URL`) для callback bot-assisted web-login,
 `VALIDATOR_SOURCE_URL`, `VALIDATOR_KEY`, health-мониторинг (`HETZNER_API_TOKEN`, `VDSINA_*`).
 
 **VK-бот:** `DATABASE_URL`, `VK_TOKEN`, `VK_GROUP_ID`, `ADMIN_IDS`, `VALIDATOR_SOURCE_URL`,

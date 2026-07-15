@@ -43,6 +43,11 @@ worker, refund и локальная ККТ contract matrix готовы, но �
 см. [architecture.md](architecture.md#legacy) и
 [master plan эквайринга](site-acquiring-master-plan.md).
 
+Личный кабинет и все три поверхности входа используют общий Violet/Frost shell. Email-вход
+нормализует адрес, Telegram login/link идёт через одноразовый bot-assisted challenge с
+серверной HMAC-проверкой, а VK identity проверяется сервером. Email-сценарий ЛК принят на
+production; живой Telegram/VK acceptance остаётся обязательным перед публичным запуском.
+
 ## Локальный запуск
 
 ```bash

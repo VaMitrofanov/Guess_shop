@@ -135,25 +135,29 @@ fault injection, официальный прогон «Общие»/«Форми
 replay/reconciliation UI. До этого риск остаётся P0 и maintenance снимать нельзя. Полная
 матрица — `payments-and-kkt.md`.
 
-### 11. Связывание TG/VK/email-аккаунтов — HIGH, 🟡 TG FLOW ЗАКРЫТ, VK LINK/UNLINK ОСТАЛИСЬ (2026-07-13)
+### 11. Связывание TG/VK/email-аккаунтов — HIGH, 🟡 TG FLOW ЗАКРЫТ, VK LINK/UNLINK ОСТАЛИСЬ (2026-07-15)
 
-БД у каналов общая, но модель identities отсутствует: TG- и VK-поля живут непосредственно
-в `User`, Telegram-login на сайте отсутствует, email-регистрация создаёт новый профиль.
-Кнопка «привязать VK» запускает обычный login и может переключить сессию вместо доказанного
-link/merge. Автослияние по Roblox username небезопасно: в production уже есть одинаковый
-ник у разных профилей.
+БД у каналов общая, legacy TG/VK/email-поля остаются в `User`, а серверно подтверждённые
+субъекты также хранятся в `UserIdentity`. Автослияние по Roblox username небезопасно: в
+production уже есть одинаковый ник у разных профилей. Обычный VK-login поэтому не
+показывается как безопасная привязка/merge.
 
 **Риск:** захват/переключение аккаунта, потеря видимости заказов, ошибочное объединение и
 двойное либо потерянное списание бонусов.
 
-**Сделано:** Telegram Login Widget проверяется HMAC на сервере и принимается только 5 минут;
-login резолвит legacy TG-профиль через `UserIdentity`. Link/merge требует web-session моложе
-10 минут и новую TG-подпись, запрещён для ADMIN, не использует ник/email/имя, атомарно
-переносит заказы и identities, суммирует бонус с ledger-записью и пишет `AccountMergeAudit`.
+**Сделано:** внешний iframe Telegram Login Widget удалён. Web создаёт криптографически
+случайный challenge с TTL 5 минут, хранит только SHA-256 state и передаёт raw state боту в
+deep link. Бот строит callback из Telegram-профиля и HMAC-подписывает его своим токеном;
+Web повторно проверяет подпись/возраст и атомарно потребляет challenge ровно один раз.
+Login резолвит legacy TG-профиль через `UserIdentity`. Link challenge выдаётся только при
+web-session моложе 10 минут, заранее привязан к target User, запрещён для ADMIN и после
+подтверждения переносит identities/orders/intents и бонус через ledger с
+`AccountMergeAudit`. Имя, email и Roblox nick доказательством не являются.
 
-**До запуска:** browser E2E с доменом в BotFather, негативная merge matrix на prod-like clone,
-аналогичные явные link/unlink для VK и recovery/admin-console. Source-профиль пока остаётся
-инертным audit anchor; автоматического rollback UI нет.
+**До запуска:** live Telegram login/link после deploy под реальным пользователем, негативная
+merge matrix на prod-like clone, аналогичные явные link/unlink для VK и
+recovery/admin-console. Source-профиль пока остаётся инертным audit anchor;
+автоматического rollback UI нет.
 
 ### 14. Выкуп геймпасса по live-цене без сверки с номиналом (TOCTOU) — ✅ ЗАКРЫТО (2026-07-12)
 

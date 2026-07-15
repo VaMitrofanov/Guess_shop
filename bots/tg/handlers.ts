@@ -21,6 +21,7 @@ import { buildCompletedMessages, robuxUnlockDate, fmtDateRu } from "../shared/co
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 import { buildAdminKeyboard } from "./admin";
 import { buildOrderProfitSnapshot } from "../shared/order-profit";
+import { buildTelegramWebLoginUrl, parseTelegramWebLoginStart } from "../shared/telegram-web-login";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -279,6 +280,7 @@ export function registerStart(bot: Telegraf): void {
   bot.start(async (ctx) => {
     const tgId = String(ctx.from.id);
     const rawPayload = ctx.startPayload?.trim() ?? "";
+    const webLogin = parseTelegramWebLoginStart(rawPayload);
     let code = rawPayload.toUpperCase();
     let sessionId: string | null = null;
     let isGuideMode = false;
@@ -322,6 +324,28 @@ export function registerStart(bot: Telegraf): void {
           { parse_mode: "HTML", ...withSupportKb("💬 Нужна помощь?") }
         );
       }
+      return;
+    }
+
+    if (webLogin) {
+      const botToken = process.env.TG_TOKEN;
+      if (!botToken) {
+        await ctx.reply("Не удалось подготовить вход. Попробуй позже.");
+        return;
+      }
+      const callbackUrl = buildTelegramWebLoginUrl(ctx.from, webLogin.mode, webLogin.state, {
+        botToken,
+        baseUrl: process.env.WEB_BASE_URL ?? process.env.NEXT_PUBLIC_APP_URL,
+      });
+      await ctx.reply(
+        webLogin.mode === "link"
+          ? "Подтверди привязку Telegram к личному кабинету RobloxBank. Ссылка действует 5 минут."
+          : "Подтверди вход в личный кабинет RobloxBank. Ссылка действует 5 минут.",
+        Markup.inlineKeyboard([[Markup.button.url(
+          webLogin.mode === "link" ? "✅ Привязать Telegram" : "🔐 Войти в кабинет",
+          callbackUrl,
+        )]]),
+      );
       return;
     }
 

@@ -71,8 +71,22 @@
   `viewport-fit=cover` и `interactive-widget=resizes-content`. Maintenance и
   `SITE_ACQUIRING_ENABLED=false` не снимались. Авторизованный экран проверен локально на
   read-only снимке реальных production-историй; live signed-in acceptance непосредственно
-  на production остаётся ручным контрольным пунктом, потому что тестовая локальная сессия
-  не должна и не может подменять боевой auth-secret.
+  на production на момент этого релиза оставался ручным пунктом и закрыт следующим
+  follow-up под отдельной USER-учётной записью.
+- **2026-07-15, auth/LK acceptance follow-up:** владелец указал на старую поверхность
+  `/login` и ошибку Telegram `Bot domain invalid`. `/login`, `/register` и `/admin/login`
+  переведены на общий Violet/Frost shell «Личный сейф» с адаптивными состояниями ошибок;
+  credentials-login нормализует регистр и пробелы email, dashboard выходит без промежуточной
+  страницы Auth.js, а публичный admin-login вынесен из защищённой route group и использует
+  правильный provider `admin-login`. Legacy Telegram iframe удалён: Web выдаёт одноразовый
+  challenge на 5 минут, бот подтверждает Telegram-пользователя подписанной callback-ссылкой,
+  а сервер атомарно потребляет только SHA-256 state. Migration
+  `20260715_telegram_web_login_challenge` применена к production после полного backup.
+  Создана отдельная USER-учётная запись владельца для приёмки; на production проверены
+  регистрация, повторный email-login, новый dashboard, пустая история и EMAIL identity без
+  создания фиктивных заказов. Локально проверены desktop `1440×1000`, mobile `390×844`,
+  отсутствие overflow, отказ USER на admin-login и новый logout. Полный real-provider
+  acceptance Telegram/VK остаётся ручным шагом после deploy под настоящими аккаунтами.
 - **Внешние launch-gates остаются обязательными:** письменная категория Т-Банка, юрпроверка
   модели/бренда, реквизиты/ККТ и фактическая локализация первичной БД в РФ не заменяются
   программным кодом.
@@ -81,9 +95,9 @@
 
 Следующую сессию начинать без повторного общего аудита, в таком порядке:
 
-1. Выполнить live signed-in acceptance нового ЛК на production под реальной учётной записью:
-   проверить историю, бонусы, receipt/status, identity settings и contextual notices без
-   изменения заказов. Автоматизированный read-only data/visual gate уже пройден.
+1. После deploy выполнить real-provider acceptance Telegram-входа/привязки через
+   `@RobloxBankBot` и VK-входа под настоящими аккаунтами; проверить возврат из Telegram/VK
+   WebView и отсутствие переключения чужой сессии.
 2. Проверить iPhone Safari, Android Chrome, Telegram WebView и VK WebView: клавиатуру,
    back/refresh/deep link, плохую сеть, восстановление сессии и крупный системный шрифт.
 3. Закрыть публичные 404/500, SEO/OpenGraph, accessibility и Core Web Vitals.
@@ -104,8 +118,8 @@
 | P0 | Публичный сайт закрыт | `https://robloxbank.ru/` отвечает `503` и переписывается на maintenance; `/api/health` и тестовый WB-гайд доступны |
 | P0 | Канонический checkout развёрнут, но не прошёл payment E2E | Migration применена и код задеплоен 13.07 без legacy `Product/default-calc`; kill-switch выключен, боевой Init/receipt/callback test matrix впереди |
 | P0 | Цена не прошла payment E2E | Quote уже одноразово потребляется каноническим order flow, но сумма ещё не проверена реальным Init/receipt/callback test matrix |
-| P0 | Общий клиентский аккаунт не завершён | Identity foundation и ЛК с `WbOrder`/бонусами готовы; Telegram-login и безопасный link/merge отсутствуют |
-| P0 | Payment E2E не завершён | Strict callback/event/outbox foundation готов локально; нет production migration, outbox worker/retry/dead-letter, refund/ККТ test matrix |
+| P0 | Общий клиентский аккаунт не завершён | Email и TG login/link, identity foundation и ЛК с `WbOrder`/бонусами готовы; остаются real-provider acceptance, безопасные VK link/unlink, recovery и admin merge-console |
+| P0 | Payment E2E не завершён | Strict callback/event/outbox foundation и production migrations готовы; outbox worker развёрнут, но нет terminal/refund/ККТ test matrix и reconciliation UI |
 | P0 | Нет готовой фискализации | Checkout собирает email и формирует `Receipt/Items` fail-closed, но нет согласованных ККТ-классификаторов, возвратного/закрывающего чека и проверенного сценария ОФД |
 | P0 | Не выполнен публичный чек-лист Т-Банка | Нет заполненных реквизитов и полноценных контактов/возвратов; тексты содержат placeholder и непроверенные обещания |
 | P0 | Риск 152-ФЗ | Основная БД находится вне РФ, хотя политика заявляет локализацию в РФ; не зафиксированы локализация первичного сбора, уведомление РКН и трансграничный контур |
@@ -256,9 +270,10 @@ Definition of Done: новый пользователь без подсказк�
 
 Открытые дефекты идентичности:
 
-- VK-login узнаёт существующий `vkId`, но кнопка «привязать VK» фактически выполняет новый
-  вход и может переключить сессию вместо безопасного merge.
-- Telegram-login на сайте отсутствует.
+- VK-login узнаёт существующий `vkId`; безопасные отдельные VK link/unlink и merge-console
+  ещё не реализованы, поэтому ЛК не маскирует обычный login под «привязать VK».
+- Telegram login/link реализован через одноразовый bot-assisted challenge; остаётся живой
+  acceptance после deploy под реальным Telegram-пользователем.
 - Email-регистрация создаёт отдельный `User`; безопасного объединения с ботом нет.
 
 Закрыто после исходного аудита: `/dashboard` читает legacy `Order` и `WbOrder` всех
@@ -266,8 +281,10 @@ Definition of Done: новый пользователь без подсказк�
 согласованы. Follow-up 15.07 добавил новый Violet/Frost action-center, карточки истории,
 события, payment/receipt snapshot и identity settings; read-only visual/data QA прошёл на
 реальных историях. Follow-up `008735e` развёрнут на Web и Guide с повторным smoke `23/23`;
-до полного production-паритета остаётся live signed-in acceptance под реальной учётной
-записью.
+Follow-up 15.07 дополнительно прошёл live email acceptance на production под отдельной
+USER-учётной записью: dashboard, пустая история и EMAIL identity открываются корректно,
+фиктивные заказы не создавались. Real-provider Telegram/VK acceptance остаётся отдельным
+пунктом.
 
 Целевая модель:
 
@@ -283,8 +300,9 @@ Definition of Done: новый пользователь без подсказк�
 
 1. Backfill всех существующих `tgId`, `vkId`, email в `UserIdentity`, не меняя `User.id`.
 2. Вход тем же TG/VK subject всегда открывает существующий профиль и его `WbOrder`/бонусы.
-3. Telegram Web Login/OIDC проверяется на сервере (signature/JWKS, `state`, PKCE,
-   `aud/iss/exp`); VK остаётся с серверной проверкой токенов.
+3. Telegram bot-assisted Web Login проверяет Telegram HMAC, использует случайный
+   одноразовый `state` с TTL 5 минут и хранит в БД только SHA-256; VK остаётся с серверной
+   проверкой токенов.
 4. Связать два существующих профиля можно только после свежей авторизации в обоих каналах.
    Имя, avatar, email или Roblox nick доказательством не являются.
 5. При merge объединить историю и bonus-ledger транзакционно; одинаковые начисления с одним
@@ -508,7 +526,7 @@ VK  ─┘                              │
 
 ### Этап 3. Авторизация и ЛК — 4–6 дней
 
-- Telegram OIDC/Web Login, server validation и привязка домена в BotFather.
+- Telegram login/link через bot-assisted deep link, server HMAC и одноразовый DB challenge.
 - Отдельные действия login/link/unlink/merge для VK и TG; step-up auth для merge.
 - Исправить credentials provider; решить судьбу email/password (verification, reset,
   throttling) или заменить magic link.
@@ -517,6 +535,9 @@ VK  ─┘                              │
   center, корректные source-aware статусы, карточки истории, payment/receipt snapshot,
   verified identity settings и contextual notifications. Полные link/unlink/merge и
   предпочтения доставки уведомлений остаются отдельным identity foundation.**
+- Login/register/admin-login приведены к тому же Violet/Frost shell; credentials email
+  нормализуется, USER не допускается в admin, выход из ЛК не показывает служебный экран
+  Auth.js. Live email acceptance на production выполнен на отдельном тестовом USER.
 - Admin merge-console только с audit, preview и двухэтапным подтверждением.
 
 **DoD:** существующие TG/VK-пользователи видят свои заказы/бонусы; негативные тесты не дают

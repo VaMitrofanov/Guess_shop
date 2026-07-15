@@ -57,14 +57,31 @@ export default function VKAuthButton({
 
   // ── Bootstrap VK ID SDK + mount hidden OneTap widget ──────────────────────
   useEffect(() => {
+    let cancelled = false;
+    let attempts = 0;
+    let retryTimer: number | undefined;
+    let readyTimer: number | undefined;
     const initVK = () => {
+      if (cancelled) return;
       if (!window.VKIDSDK) {
-        setTimeout(initVK, 300);
+        attempts += 1;
+        if (attempts >= 20) {
+          setError("VK ID не загрузился. Проверьте сеть и повторите попытку.");
+          setReady(false);
+          return;
+        }
+        retryTimer = window.setTimeout(initVK, 300);
         return;
       }
 
       const VKID = window.VKIDSDK;
       const origin = window.location.origin.replace(/\/$/, "");
+      const appId = Number(process.env.NEXT_PUBLIC_VK_APP_ID ?? "54539012");
+      if (!Number.isSafeInteger(appId) || appId <= 0) {
+        setError("VK ID временно не настроен");
+        setReady(false);
+        return;
+      }
 
       if (containerRef.current) {
         containerRef.current.innerHTML = "";
@@ -75,7 +92,7 @@ export default function VKAuthButton({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (!(window as any).VKIDSDK_INITIALIZED) {
         VKID.Config.init({
-          app:          54539012,
+          app:          appId,
           redirectUrl:  origin,
           responseMode: VKID.ConfigResponseMode.Callback,
           source:       VKID.ConfigSource.LOWCODE,
@@ -105,6 +122,7 @@ export default function VKAuthButton({
         .on(VKID.WidgetEvents.ERROR, (err) => {
           console.error("VK SDK Error:", err);
           setBusy(false);
+          setReady(false);
           if (err.text !== "NEW TAB HAS BEEN CLOSED") {
             setError(`Ошибка VK ID: ${err.text || "неизвестная ошибка"}`);
           }
@@ -173,10 +191,17 @@ export default function VKAuthButton({
         });
 
       // Give the OneTap widget a beat to actually inject its DOM, then mark ready.
-      setTimeout(() => setReady(true), 600);
+      readyTimer = window.setTimeout(() => {
+        if (!cancelled) setReady(true);
+      }, 600);
     };
 
     initVK();
+    return () => {
+      cancelled = true;
+      if (retryTimer) window.clearTimeout(retryTimer);
+      if (readyTimer) window.clearTimeout(readyTimer);
+    };
   // mode / wbCodeProp captured at mount — intentionally no deps
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
