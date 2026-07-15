@@ -87,6 +87,16 @@
   создания фиктивных заказов. Локально проверены desktop `1440×1000`, mobile `390×844`,
   отсутствие overflow, отказ USER на admin-login и новый logout. Полный real-provider
   acceptance Telegram/VK остаётся ручным шагом после deploy под настоящими аккаунтами.
+  Реализация выпущена commit `54fc400`: Web, TG, VK и затем Guide развёрнуты на одном SHA;
+  Web/Guide `running:healthy`, очередь Coolify пуста. Production acceptance под тестовым
+  USER после deploy подтвердил email-login, новый пустой dashboard/EMAIL identity,
+  Telegram deep link в `@RobloxBankBot`, logout без служебного экрана, доступность
+  `/admin/login` и переход «Кабинет» с главной. HTTP smoke Guide/CSP/API — `24/24`.
+  Полный Telegram callback требует подтверждения в реальном Telegram, а VK SDK в in-app
+  браузере завершился provider timeout, поэтому оба real-provider пункта намеренно не
+  отмечены как закрытые. Maintenance и `SITE_ACQUIRING_ENABLED=false` не менялись. Полный
+  release-отчёт опубликован в Trello-карточках ЛК `r1UmE4AS`, VK auth `yWoGVP2g` и
+  mobile/accessibility `3rAHOEnn`; P0-карточки оставлены открытыми до живой приёмки.
 - **Внешние launch-gates остаются обязательными:** письменная категория Т-Банка, юрпроверка
   модели/бренда, реквизиты/ККТ и фактическая локализация первичной БД в РФ не заменяются
   программным кодом.
