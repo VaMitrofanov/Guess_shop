@@ -221,6 +221,29 @@ export const ADMIN_IDS: string[] = (
   .map((s) => s.trim())
   .filter(Boolean);
 
+export interface RetailBuyoutAdminAlert {
+  wbCode: string;
+  gamepassId: string;
+  chargedPrice: number;
+  donorName?: string | null;
+  balance?: number | null;
+}
+
+/** Notify every Telegram admin after a manual bot buyout is confirmed. */
+export async function notifyAdminsRetailBuyout(input: RetailBuyoutAdminAlert): Promise<void> {
+  const donorLine = input.donorName ? `\nДонор: <b>${escapeHtml(input.donorName)}</b>` : "";
+  const balanceLine = Number.isFinite(input.balance)
+    ? `\nОстаток: <b>${Number(input.balance).toLocaleString("ru-RU")} R$</b>`
+    : "";
+  const text =
+    `✅ <b>Выкуп подтверждён</b> · Telegram\n` +
+    `Заказ: <code>${escapeHtml(input.wbCode)}</code>\n` +
+    `Геймпасс: <code>${escapeHtml(input.gamepassId)}</code>\n` +
+    `Списано: <b>${input.chargedPrice.toLocaleString("ru-RU")} R$</b>` +
+    donorLine + balanceLine;
+  await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text, { parse_mode: "HTML" })));
+}
+
 // ── Unified user-handle formatting ─────────────────────────────────────────────
 
 /** Minimal shape needed by {@link formatUserHandle}. */

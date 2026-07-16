@@ -1063,6 +1063,7 @@ export interface PurchaseResult {
   msg:     string;
   price?:  number;
   reason?: string;
+  balance?: number | null;
 }
 
 /** Roblox removed the legacy cookie purchase endpoint on 2026-04-10. */
@@ -1107,12 +1108,14 @@ export async function purchaseGamepassDirect(
       msg: `Куплено браузером за ${result.price ?? expectedPrice} R$`,
       price: result.price ?? expectedPrice,
       reason: result.reason,
+      balance: result.balanceAfter ?? null,
     };
   }
   return {
     success: false,
     msg: result.reason || "Неизвестная ошибка browser transport",
     reason: result.reason,
+    balance: result.balanceAfter ?? null,
   };
 }
 

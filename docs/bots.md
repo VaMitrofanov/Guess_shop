@@ -314,6 +314,9 @@ endpoints. При недоступности browser service claim откаты�
 [`roblox-plus-buyout-plan.md`](roblox-plus-buyout-plan.md).
 
 Оба kill-switch по умолчанию **OFF** (в `GlobalSettings`), включает владелец командой.
+Сохранение новой donor-cookie в TWA или через `/setcookie` только проверяет аккаунт и обновляет
+`GlobalSettings`; оно намеренно не меняет `autoBuyoutEnabled`. После обязательных 3/3 canary
+автомат включается отдельно через `/autobuy on`.
 
 - **🤖 Автовыкуп до порога слива (+1).** Тик 60 с. Пока `autoBuyoutEnabled=true` и баланс
   донора > `autoBuyoutThreshold`, берёт новые `PENDING`-заказы (`isTest=false`, по `pendingAt`,
@@ -349,7 +352,9 @@ endpoints. При недоступности browser service claim откаты�
   перейти `false→true`, а currency API — показать точную ожидаемую дельту. Inventory у Roblox
   обновляется раньше баланса, поэтому остановка polling на одном ownership давала ложную
   цену 0. `BalanceMismatch/BalanceUnconfirmed` не превращается в recovered-успех и требует
-  ручной сверки.
+  ручной сверки. Успешный автоматический выкуп рассылает карточку каждому `ADMIN_IDS`.
+  Ручная TG-кнопка покупки и оба TWA-пути также делают отдельный broadcast всем
+  администраторам; cookie и служебные токены в сообщения не попадают.
 - **👁 GP-watch по вероятному нику (+3).** Тик 60 мин (решение владельца 04.07: «15 мин —
   часто»; boot-тик через 70 с после старта контейнера — деплой сразу показывает, что воркер
   жив). Для заказов `AWAITING_GAMEPASS` с

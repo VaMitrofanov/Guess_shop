@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
+import { normalizeRobloxSecurityCookie } from "@/lib/roblox-cookie";
 
 const ROBLOX_HEADERS = {
   "User-Agent": "Roblox/WinInet",
@@ -62,7 +63,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "action required" }, { status: 400 });
 
   if (body.action === "set-cookie") {
-    const rawCookie = String(body.cookie ?? "").trim();
+    const rawCookie = normalizeRobloxSecurityCookie(body.cookie);
     if (!rawCookie || rawCookie.length < 50)
       return NextResponse.json({ error: "Невалидный cookie" }, { status: 400 });
 

@@ -110,6 +110,10 @@ OpenGraph и корректный maintenance-ответ.
 **VK-бот:** `DATABASE_URL`, `VK_TOKEN`, `VK_GROUP_ID`, `ADMIN_IDS`, `VALIDATOR_SOURCE_URL`,
 `VALIDATOR_KEY`, `TG_TOKEN` (уведомления менеджерам идут через Telegram).
 
+`ADMIN_IDS` должен быть одинаково задан в Web и TG-контейнере: Web рассылает всем
+администраторам подтверждения ручных TWA-выкупов, TG — ручных покупок и auto-worker.
+Значение — список Telegram ID через запятую; cookie и токены в эти уведомления не входят.
+
 TG-сервис также является единственным payment outbox worker. После deploy в логах обязательна
 строка `[PaymentOutbox] Worker started`; `DATABASE_URL`, `TG_TOKEN` и `ADMIN_IDS` нужны ему для
 claim/delivery/dead-letter alerts. Не запускай второй polling TG instance без отдельной проверки

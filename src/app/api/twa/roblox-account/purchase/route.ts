@@ -3,6 +3,7 @@ import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
 import { BuyoutError, purchaseGamepassWithCookie, resolveGamepassForBuyer } from "@/lib/roblox-buyout";
 import { BUYOUT_ERROR_REGIONAL_PRICE, checkGamepassPrice, expectedGamepassPrice } from "@/lib/purchase-guard";
+import { notifyRetailBuyoutAdmins } from "@/lib/buyout-admin-notify";
 
 const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
@@ -312,6 +313,18 @@ export async function POST(req: NextRequest) {
     });
 
     if (result.success) {
+      const settings = await (prisma as any).globalSettings.findUnique({
+        where: { id: "global" },
+        select: { robloxAccountName: true },
+      });
+      await notifyRetailBuyoutAdmins({
+        source: "twa-account",
+        gamepassId: gpIdRaw,
+        chargedPrice: result.price ?? price,
+        donorName: settings?.robloxAccountName ?? null,
+        sellerName: buyerInfo.sellerName,
+        balance: result.balance,
+      }).catch((err) => console.warn("[twa/roblox-account] admin buyout notification failed:", err));
       return NextResponse.json({
         ok: true, success: true,
         msg: result.msg,

@@ -416,15 +416,20 @@ cookie из защищённого server-to-server запроса, не лог�
 | `src/lib/roblox-purchase-script.ts` и `bots/shared/roblox-purchase-script.ts` | Зеркальные билдеры ручного скрипта с [ЦЕНА-СТОП], [ПРОДАВЕЦ-СТОП], [АККАУНТ-СТОП] и ownership-precheck. |
 
 **Текущий production-контур:** host service и туннель запущены, env Web/TG настроены, код
-интеграции прошёл build/tests. Автовыкуп kill-switch остаётся OFF до deploy и 3/3 canary.
+интеграции развёрнут и прошёл build/tests/runtime health. Автовыкуп kill-switch остаётся OFF
+до 3/3 canary.
 При infrastructure failure заказ остаётся в очереди, а менеджер использует ручной скрипт.
 
 ### Что осталось до автоматизации
 
-1. Установить через `/setcookie` funded donor без 2FA (текущий production donor имеет 0 R$).
+1. В TWA открыть **Аккаунт → 🔑**, вставить funded donor без 2FA и нажать «Проверить и
+   сохранить» (альтернатива — `/setcookie`). TWA должен сразу показать правильные ник и баланс.
+   Сохранение cookie не включает автомат. Текущий production donor имеет 0 R$.
 2. После deploy провести три последовательных canary с проверкой ownership, seller payout и
    точной balance delta; если donor имеет Plus, один canary обязательно Plus.
 3. Только после 3/3 включить `autoBuyoutEnabled`; при любом отказе — стоп и ручной режим.
+4. После включения проверить первый auto-tick: заказ `COMPLETED`, баланс уменьшился на точную
+   buyer-price, клиент получил сообщение, а каждый `ADMIN_IDS` — карточку выкупа.
 
 ### Риски и митигация
 

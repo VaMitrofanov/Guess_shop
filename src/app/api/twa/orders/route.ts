@@ -9,6 +9,7 @@ import { buildGamepassPurchaseScript, gamepassPageUrl } from "@/lib/roblox-purch
 import { BUYOUT_ERROR_LEGACY_PURCHASE_FLOW, BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, checkGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
 import { appendOrderAudit, buildRestoreToBuyoutData } from "@/lib/order-recovery";
+import { notifyRetailBuyoutAdmins } from "@/lib/buyout-admin-notify";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
@@ -1075,7 +1076,7 @@ export async function POST(req: NextRequest) {
 
     const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
     const cookie = settings?.robloxCookie;
-    if (!cookie) return NextResponse.json({ error: "Cookie не задан. /setcookie в боте" }, { status: 400 });
+    if (!cookie) return NextResponse.json({ error: "Cookie не задан. Добавь его в TWA → Аккаунт → 🔑" }, { status: 400 });
 
     // Fetch donor-specific info immediately before purchase. Typed Roblox Plus
     // uses the buyer price in the official browser flow; unknown/regional
@@ -1184,6 +1185,16 @@ export async function POST(req: NextRequest) {
       });
       cachedCounts = null;
       notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder ?? false).catch(() => {});
+      await notifyRetailBuyoutAdmins({
+        source: "twa-order",
+        wbCode: order.wbCode,
+        gamepassId: gpId,
+        amount: order.amount,
+        chargedPrice,
+        donorName: purchaserUsername,
+        sellerName: creatorName,
+        balance: purchaseResult.balance,
+      }).catch((err) => console.warn("[twa/orders] admin buyout notification failed:", err));
       return NextResponse.json({
         ok: true,
         success: true,
@@ -1345,7 +1356,7 @@ export async function POST(req: NextRequest) {
     const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
     const donorCookie = settings?.robloxCookie as string | null | undefined;
     if (!donorCookie)
-      return NextResponse.json({ error: "Cookie не задан. /setcookie в боте" }, { status: 400 });
+      return NextResponse.json({ error: "Cookie не задан. Добавь его в TWA → Аккаунт → 🔑" }, { status: 400 });
 
     let info: ResolvedGamepass;
     try {
