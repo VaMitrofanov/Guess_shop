@@ -11,6 +11,8 @@
  *                                bridge server itself to avoid recursion
  */
 
+import { purchaseGamepassInBrowser } from "./browser-purchase";
+
 // Mobile UA + Roblox-origin headers — mirrors what the Roblox Android app sends.
 // Origin/Referer trick the API into treating the request as same-site frontend.
 const UA =
@@ -1075,44 +1077,43 @@ export async function purchaseGamepassDirect(
   cookie: string,
   gamepassId?: string | number,
 ): Promise<PurchaseResult> {
-  try {
-    const res = await purchaseFetch(
-      `https://economy.roblox.com/v1/purchases/products/${productId}`,
-      cookie,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          expectedCurrency: 1,
-          expectedPrice,
-          expectedSellerId,
-        }),
-      },
-    );
-
-    if (res.status === 401) {
-      return { success: false, msg: "Cookie истёк — обнови через /setcookie", reason: "CookieExpired" };
-    }
-
-    const json: any = await res.json().catch(() => null);
-
-    if (!json) {
-      return { success: false, msg: `HTTP ${res.status} — не удалось распарсить ответ` };
-    }
-
-    if (json.purchased) {
-      return {
-        success: true,
-        msg: `Куплено за ${json.price ?? expectedPrice} R$`,
-        price: json.price ?? expectedPrice,
-      };
-    }
-
-    const reason = json.reason ?? json.errorMsg ?? "Неизвестная ошибка";
-    return { success: false, msg: reason, reason };
-  } catch (err: any) {
-    return { success: false, msg: `Сетевая ошибка: ${err?.message ?? err}` };
+  if (!gamepassId) {
+    return {
+      success: false,
+      msg: "BrowserUnavailable: browser transport требует gamepassId",
+      reason: "BrowserUnavailable",
+    };
   }
+  const buyer = await getAuthenticatedUser(cookie);
+  if (!buyer) {
+    return {
+      success: false,
+      msg: "NotLoggedIn: cookie истёк — обнови через /setcookie",
+      reason: "NotLoggedIn",
+    };
+  }
+
+  const result = await purchaseGamepassInBrowser({
+    cookie,
+    gamepassId,
+    productId,
+    expectedPrice,
+    sellerId: expectedSellerId,
+    buyerUserId: buyer.id,
+  });
+  if (result.purchased) {
+    return {
+      success: true,
+      msg: `Куплено браузером за ${result.price ?? expectedPrice} R$`,
+      price: result.price ?? expectedPrice,
+      reason: result.reason,
+    };
+  }
+  return {
+    success: false,
+    msg: result.reason || "Неизвестная ошибка browser transport",
+    reason: result.reason,
+  };
 }
 
 export async function getRobuxBalance(cookie: string): Promise<number | null> {
@@ -1154,7 +1155,7 @@ export async function getAuthenticatedUser(
 // менять синхронно.
 
 /** Отказы, при которых Roblox гарантированно НЕ провёл транзакцию. */
-const CLEAN_REFUSAL_RE = /insufficient.?funds|not.?for.?sale|price.?changed|cookie|invalid.?arguments|invalid.?parameter/i;
+const CLEAN_REFUSAL_RE = /insufficient.?funds|not.?for.?sale|price.?changed|cookie|invalid.?arguments|invalid.?parameter|BrowserUnavailable|NotLoggedIn|WrongAccount|TwoStepRequired|CookieInjectionFailed|QueueFull|DriverError|BalanceMismatch|BalanceUnconfirmed|GuardStop|ScriptRefused|AlreadyOwned|NotConfirmed|BuyButtonMissing/i;
 
 /**
  * Нужна ли контрольная проверка владения после провала покупки.

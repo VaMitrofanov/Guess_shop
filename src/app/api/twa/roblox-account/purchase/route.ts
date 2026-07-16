@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
-import { BuyoutError, needsOwnershipCheck, resolveGamepassForBuyer, verifyOwnershipAfterFailure } from "@/lib/roblox-buyout";
-import { BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, checkGamepassPrice, expectedGamepassPrice } from "@/lib/purchase-guard";
+import { BuyoutError, purchaseGamepassWithCookie, resolveGamepassForBuyer } from "@/lib/roblox-buyout";
+import { BUYOUT_ERROR_REGIONAL_PRICE, checkGamepassPrice, expectedGamepassPrice } from "@/lib/purchase-guard";
 
 const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
@@ -304,101 +304,24 @@ export async function POST(req: NextRequest) {
     const price = buyerInfo.price;
     const sellerId = buyerInfo.sellerId;
 
-    if (buyerInfo.robloxPlusDiscountPercent) {
-      return NextResponse.json({
-        error: `Roblox Plus −${buyerInfo.robloxPlusDiscountPercent}% распознан (${price}/${buyerInfo.basePriceInRobux} R$), но cookie-only покупка pass не поддерживается Roblox`,
-        failureCode: BUYOUT_ERROR_ROBLOX_PLUS_FLOW,
-      }, { status: 409 });
-    }
+    const result = await purchaseGamepassWithCookie(cookie, {
+      productId,
+      price,
+      sellerId,
+      gamepassId: gpIdRaw,
+    });
 
-    const csrfRes = await fetch("https://auth.roblox.com/v2/logout", {
-      method: "POST",
-      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-      signal: AbortSignal.timeout(10_000),
-    }).catch(() => null);
-    let csrf = csrfRes?.headers.get("x-csrf-token");
-    if (!csrf)
-      return NextResponse.json({ error: "Не удалось получить CSRF — cookie протух?" }, { status: 502 });
-
-    let purchaseRes: Response | null = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      purchaseRes = await fetch(
-        `https://economy.roblox.com/v1/purchases/products/${productId}`,
-        {
-          method: "POST",
-          headers: {
-            Cookie: `.ROBLOSECURITY=${cookie}`,
-            "Content-Type": "application/json",
-            "x-csrf-token": csrf,
-          },
-          body: JSON.stringify({
-            expectedCurrency: 1,
-            expectedPrice: price,
-            expectedSellerId: sellerId,
-          }),
-          signal: AbortSignal.timeout(15_000),
-        },
-      ).catch(() => null);
-
-      if (purchaseRes?.status === 403) {
-        const newCsrf = purchaseRes.headers.get("x-csrf-token");
-        if (newCsrf && attempt === 0) { csrf = newCsrf; continue; }
-      }
-      break;
-    }
-
-    if (purchaseRes?.status === 401)
-      return NextResponse.json({ ok: true, success: false, msg: "Cookie истёк — обнови" });
-
-    const purchaseData: any = await purchaseRes?.json().catch(() => null);
-
-    // Ф1: провал/«Нет ответа» не значит «не куплено» — Roblox при таймауте/5xx
-    // нередко проводит транзакцию. gamepassId клиент шлёт всегда (guard П5).
-    const isAlreadyOwned = /already.?own/i.test(purchaseData?.reason ?? "");
-    let purchased = Boolean(purchaseData?.purchased) || isAlreadyOwned;
-    let recovered = false;
-    const canonicalReason: string | null = purchaseData?.reason ?? purchaseData?.errorMsg ?? null;
-    if (!purchased && gpIdRaw && needsOwnershipCheck(canonicalReason)) {
-      const owned = await verifyOwnershipAfterFailure(cookie, gpIdRaw, canonicalReason !== null);
-      if (owned === true) {
-        purchased = true;
-        recovered = true;
-        console.warn(`[twa/roblox-account] recovered: gamepass ${gpIdRaw} — владение подтверждено после ошибки «${canonicalReason ?? "нет ответа"}»`);
-      }
-    }
-
-    if (!purchaseData && !recovered)
-      return NextResponse.json({ error: "Нет ответа от Roblox" }, { status: 502 });
-
-    // Fetch updated balance
-    let balance: number | null = null;
-    try {
-      const bRes = await fetch("https://economy.roblox.com/v1/user/currency", {
-        headers: { ...ROBLOX_UA, Cookie: `.ROBLOSECURITY=${cookie}` },
-        signal: AbortSignal.timeout(5_000),
-      });
-      if (bRes.ok) {
-        const bData = await bRes.json().catch(() => null);
-        balance = bData?.robux ?? null;
-      }
-    } catch { /* ok */ }
-
-    if (purchased) {
+    if (result.success) {
       return NextResponse.json({
         ok: true, success: true,
-        msg: isAlreadyOwned
-          ? `Куплено (AlreadyOwned — предыдущая покупка прошла)`
-          : recovered
-            ? `Куплено (владение подтверждено проверкой после ошибки: ${canonicalReason ?? "нет ответа от Roblox"})`
-            : `Куплено за ${purchaseData.price ?? price} R$`,
-        price: purchaseData?.price ?? price,
-        balance,
-        alreadyOwned: isAlreadyOwned,
+        msg: result.msg,
+        price: result.price ?? price,
+        balance: result.balance,
+        robloxPlusDiscountPercent: buyerInfo.robloxPlusDiscountPercent,
       });
     }
 
-    const reason = canonicalReason ?? "Неизвестная ошибка";
-    return NextResponse.json({ ok: true, success: false, msg: reason, balance });
+    return NextResponse.json({ ok: true, success: false, msg: result.msg, balance: result.balance });
   }
 
   return NextResponse.json({ error: "Invalid action" }, { status: 400 });

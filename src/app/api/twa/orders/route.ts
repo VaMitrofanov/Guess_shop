@@ -3,7 +3,8 @@ import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
 import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing, notifyRegionalPriceNeeded } from "@/lib/twa-notify";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
-import { BuyoutError, getAuthenticatedUserId, isLegacyPurchaseFlowFailure, needsOwnershipCheck, resolveGamepassForBuyer, verifyGamepassOwnership, verifyOwnershipAfterFailure, type ResolvedGamepass } from "@/lib/roblox-buyout";
+import { BuyoutError, getAuthenticatedUserId, purchaseGamepassWithCookie, resolveGamepassForBuyer, verifyGamepassOwnership, type ResolvedGamepass } from "@/lib/roblox-buyout";
+import { isBrowserInfrastructureFailure } from "@/lib/browser-purchase";
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "@/lib/roblox-purchase-script";
 import { BUYOUT_ERROR_LEGACY_PURCHASE_FLOW, BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, checkGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
@@ -1077,8 +1078,8 @@ export async function POST(req: NextRequest) {
     if (!cookie) return NextResponse.json({ error: "Cookie не задан. /setcookie в боте" }, { status: 400 });
 
     // Fetch donor-specific info immediately before purchase. Typed Roblox Plus
-    // is used for pack/accounting, but its cookie-only transport is blocked
-    // below. Unknown/Regional differences still trigger replacement search.
+    // uses the buyer price in the official browser flow; unknown/regional
+    // differences still trigger replacement search.
     let info: ResolvedGamepass;
     try {
       info = await resolveGamepassForBuyer(gpId, cookie);
@@ -1165,155 +1166,56 @@ export async function POST(req: NextRequest) {
         msg: `⛔ Продавец пасса ${creatorName} ≠ нику заказа ${order.robloxUsername}. Выкуп заблокирован — проверь, чей это геймпасс.` });
     }
 
-    // Production canary 2026-07-14: legacy Economy v1 rejects both base and
-    // Plus buyer-price with PriceChanged; Economy v2 user-products returns 404
-    // for game passes. Roblox documents PromptGamePassPurchase as the supported
-    // Plus-aware flow. Do not spend/guess through an unsupported cookie API.
-    if (info.robloxPlusDiscountPercent) {
-      await (prisma as any).wbOrder.update({
-        where: { id: orderId },
-        data: { status: "ERROR", buyoutErrorCode: BUYOUT_ERROR_ROBLOX_PLUS_FLOW },
-      });
-      cachedCounts = null;
-      return NextResponse.json({
-        ok: true,
-        success: false,
-        failureCode: BUYOUT_ERROR_ROBLOX_PLUS_FLOW,
-        status: "ERROR",
-        buyerPrice: price,
-        basePrice: base,
-        discountPercent: info.robloxPlusDiscountPercent,
-        msg: `Roblox Plus −${info.robloxPlusDiscountPercent}% распознан (${price}/${base} R$), но cookie-only покупка pass больше не поддерживается Roblox. Нужен donor без Plus или официальный client/experience flow.`,
-      });
-    }
+    const purchaseResult = await purchaseGamepassWithCookie(cookie, {
+      productId: info.productId,
+      price,
+      sellerId: creatorId,
+      gamepassId: gpId,
+    });
 
-    const csrfRes = await fetch("https://auth.roblox.com/v2/logout", {
-      method: "POST",
-      headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-      signal: AbortSignal.timeout(10000),
-    }).catch(() => null);
-    let csrf = csrfRes?.headers.get("x-csrf-token");
-    if (!csrf)
-      return NextResponse.json({ error: "Не удалось получить CSRF — cookie протух?" }, { status: 502 });
-
-    let purchaseRes: Response | null = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      purchaseRes = await fetch(
-        `https://economy.roblox.com/v1/purchases/products/${info.productId}`,
-        {
-          method: "POST",
-          headers: {
-            Cookie: `.ROBLOSECURITY=${cookie}`,
-            "Content-Type": "application/json",
-            "x-csrf-token": csrf,
-          },
-          body: JSON.stringify({
-            expectedCurrency: 1,
-            // Вторая линия гарда: цена провалидирована выше (±PRICE_TOL от
-            // номинала), а строгую сверку expectedPrice против live делает сам
-            // Roblox — гонку «цену подняли между проверкой и POST» он отклонит.
-            expectedPrice: price,
-            expectedSellerId: creatorId,
-          }),
-          signal: AbortSignal.timeout(15000),
-        },
-      ).catch(() => null);
-
-      if (purchaseRes?.status === 403) {
-        const newCsrf = purchaseRes.headers.get("x-csrf-token");
-        if (newCsrf && attempt === 0) { csrf = newCsrf; continue; }
-      }
-      break;
-    }
-
-    if (purchaseRes?.status === 401)
-      return NextResponse.json({ ok: true, success: false, msg: "Cookie истёк — обнови через /setcookie" });
-
-    const purchaseData: any = await purchaseRes?.json().catch(() => null);
-
-    const isAlreadyOwned = /already.?own/i.test(purchaseData?.reason ?? "");
-    let purchased = Boolean(purchaseData?.purchased) || isAlreadyOwned;
-
-    // Ф1: провал/«Нет ответа» не значит «не куплено» — Roblox при таймауте/5xx
-    // нередко проводит транзакцию. Перед ERROR/502 проверяем владение донором.
-    let recovered = false;
-    const canonicalReason: string | null = purchaseData?.reason ?? purchaseData?.errorMsg ?? null;
-    if (!purchased && needsOwnershipCheck(canonicalReason)) {
-      const owned = await verifyOwnershipAfterFailure(cookie, gpId, canonicalReason !== null);
-      if (owned === true) {
-        purchased = true;
-        recovered = true;
-        console.warn(`[twa/orders] recovered: заказ ${order.wbCode} — владение подтверждено после ошибки «${canonicalReason ?? "нет ответа"}»`);
-      }
-    }
-
-    if (purchased) {
+    if (purchaseResult.success) {
       const currentRate = settings?.purchaseRate ?? null;
       const purchaserUsername = settings?.robloxAccountName ?? null;
-      const money = buildOrderProfitSnapshot(order, settings ?? {}, Number(purchaseData?.price ?? price));
+      const chargedPrice = Number(purchaseResult.price ?? price);
+      const money = buildOrderProfitSnapshot(order, settings ?? {}, chargedPrice);
       await (prisma as any).wbOrder.updateMany({
         where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
         data: { status: "COMPLETED", buyoutErrorCode: null, purchaseRate: currentRate, purchaserUsername, completedAt: new Date(), ...(money ?? {}) },
       });
       cachedCounts = null;
       notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder ?? false).catch(() => {});
-      if (isAlreadyOwned) {
-        return NextResponse.json({ ok: true, success: true, chargedPrice: 0, msg: "Куплено (AlreadyOwned — предыдущая покупка прошла)" });
-      }
-      if (recovered) {
-        return NextResponse.json({ ok: true, success: true, chargedPrice: price, msg: `Куплено (владение подтверждено проверкой после ошибки: ${canonicalReason ?? "нет ответа от Roblox"})` });
-      }
       return NextResponse.json({
         ok: true,
         success: true,
         robloxPlusDiscountPercent: info.robloxPlusDiscountPercent,
-        chargedPrice: Number(purchaseData.price ?? price),
+        chargedPrice,
         basePrice: base,
-        msg: `Куплено за ${purchaseData.price ?? price} R$`,
+        balance: purchaseResult.balance,
+        msg: purchaseResult.msg,
       });
     }
 
-    if (!purchaseData)
-      return NextResponse.json({ error: "Нет ответа от Roblox" }, { status: 502 });
-
-    const failReason = purchaseData.reason ?? purchaseData.errorMsg ?? "Неизвестная ошибка";
-    const legacyPurchaseFlowRemoved = isLegacyPurchaseFlowFailure(failReason);
-    if (!legacyPurchaseFlowRemoved) {
+    const infrastructureFailure = isBrowserInfrastructureFailure(purchaseResult.reason ?? purchaseResult.msg);
+    if (!infrastructureFailure) {
       await (prisma as any).wbOrder.updateMany({
         where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
-        data: { status: "ERROR" },
+        data: {
+          status: "ERROR",
+          buyoutErrorCode: /already.?own/i.test(purchaseResult.reason ?? purchaseResult.msg)
+            ? "GAMEPASS_REUSED"
+            : null,
+        },
       });
       cachedCounts = null;
     }
-    // Expose only primitive response fields to the authenticated admin so a
-    // new Roblox refusal can be diagnosed without logging cookies or tokens.
-    const robloxDiagnostic = Object.fromEntries(
-      Object.entries(purchaseData)
-        .filter(([, value]) => value === null || ["string", "number", "boolean"].includes(typeof value))
-        .slice(0, 20),
-    );
-    const robloxErrors = Array.isArray((purchaseData as any).errors)
-      ? (purchaseData as any).errors.slice(0, 10).map((error: unknown) => {
-          if (!error || typeof error !== "object" || Array.isArray(error)) return {};
-          return Object.fromEntries(
-            Object.entries(error)
-              .filter(([, value]) => value === null || ["string", "number", "boolean"].includes(typeof value))
-              .slice(0, 10),
-          );
-        })
-      : [];
     return NextResponse.json({
       ok: true,
       success: false,
-      msg: legacyPurchaseFlowRemoved
-        ? "Roblox отключил legacy cookie-выкуп геймпассов. Заказ оставлен в очереди; нужен официальный in-experience purchase bridge."
-        : failReason,
-      failureCode: legacyPurchaseFlowRemoved ? BUYOUT_ERROR_LEGACY_PURCHASE_FLOW : undefined,
-      status: legacyPurchaseFlowRemoved ? order.status : "ERROR",
-      robloxHttpStatus: purchaseRes?.status ?? null,
-      robloxDiagnostic,
-      robloxErrors,
-      robloxKeys: Object.keys(purchaseData).slice(0, 30),
+      msg: infrastructureFailure
+        ? "Браузерный сервис выкупа временно недоступен. Заказ оставлен в очереди; используй ручной скрипт."
+        : purchaseResult.msg,
+      failureCode: infrastructureFailure ? BUYOUT_ERROR_LEGACY_PURCHASE_FLOW : undefined,
+      status: infrastructureFailure ? order.status : "ERROR",
     });
   }
 
@@ -1461,12 +1363,6 @@ export async function POST(req: NextRequest) {
     const creatorName = info.sellerName;
     const name = info.name;
 
-    if (info.robloxPlusDiscountPercent) {
-      return NextResponse.json({
-        error: `Roblox Plus −${info.robloxPlusDiscountPercent}% распознан (${price}/${base} R$), но cookie-only скрипт покупки pass не поддерживается Roblox`,
-        failureCode: BUYOUT_ERROR_ROBLOX_PLUS_FLOW,
-      }, { status: 409 });
-    }
     if (info.hasUnsafeBuyerPrice) {
       return NextResponse.json({
         error: `Рег. или неизвестная цена ${price}/${base} R$ — скрипт не выдан`,
@@ -1476,7 +1372,7 @@ export async function POST(req: NextRequest) {
 
     // ЦЕНА-СТОП (PLAN-gp-price-guard Ш2): скрипт с live-ценой радостно купил бы
     // и подороженный пасс — при расхождении с номиналом скрипт не выдаётся.
-    const { ok: priceOk, expected } = checkGamepassPrice(order.amount, price);
+    const { ok: priceOk, expected } = checkGamepassPrice(order.amount, price, base);
     if (!priceOk)
       return NextResponse.json(
         { error: `⛔ Цена пасса ${price} R$ ≠ ожидаемой ${expected} R$ (номинал ${order.amount}) — скрипт не выдан` },
@@ -1490,7 +1386,7 @@ export async function POST(req: NextRequest) {
     const script = buildGamepassPurchaseScript({
       gamepassId: gpId,
       productId: info.productId,
-      expectedPrice: expected,
+      expectedPrice: price,
       sellerId: creatorId,
       buyerUserId: await getAuthenticatedUserId(donorCookie),
     });

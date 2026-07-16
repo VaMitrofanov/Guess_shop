@@ -306,10 +306,11 @@ TG — `editMessageText` / `editMessageMedia` (фото-карточка одн�
 
 ### Фоновые воркеры (`bots/tg/auto-workers.ts`, старт из `crons.ts` → `startAutoWorkers`)
 
-Browser purchase transport пока **не подключён к автовыкупу**: он используется как
-контролируемый ручной скрипт в TG/TWA и отдельный server-canary. Автовыкуп не пробует
-угаданные Roblox endpoints: после удаления legacy API он оставляет заказ в `PENDING` с
-`LEGACY_PURCHASE_FLOW`. Описание browser runbook и условия будущей интеграции — в
+Browser purchase transport подключён к ручным и автоматическим денежным путям. Бот
+передаёт guarded script и текущую cookie в локальный SG purchase-service; service инъецирует
+cookie в реальный Chrome и сериализует покупки. Автовыкуп не пробует снятые/угаданные Roblox
+endpoints. При недоступности browser service claim откатывается в `PENDING`, пишется
+`[AUTOBUY-BLOCKED]`, включается пауза и остаётся ручной script fallback. Runbook — в
 [`roblox-plus-buyout-plan.md`](roblox-plus-buyout-plan.md).
 
 Оба kill-switch по умолчанию **OFF** (в `GlobalSettings`), включает владелец командой.
@@ -322,10 +323,11 @@ Browser purchase transport пока **не подключён к автовык�
   claim** `PENDING→IN_PROGRESS` (нет гонки с ручным выкупом в TWA), проверка **базовой цены
   продавца** `UserBasePriceInRobux = ceil(amount/0.7) ±2` + `isForSale` + совпадение
   продавца с ником (если ник подтверждён);
-  несоответствие → `[AUTOBUY-SKIP …]` в adminNote, заказ не трогаем. Успех (включая
-  `AlreadyOwned` — донор уже владеет геймпассом, предыдущая покупка прошла) → `COMPLETED`
-  (+`purchaserUsername`) + штатное клиентское уведомление + алерт админам (при AlreadyOwned
-  баланс не декрементим, т.к. деньги списались ранее). Провал → откат в
+  несоответствие → `[AUTOBUY-SKIP …]` в adminNote, заказ не трогаем. Успех подтверждается
+  только парой ownership `false→true` + точная дельта баланса → `COMPLETED`
+  (+`purchaserUsername`) + штатное клиентское уведомление + алерт админам. `AlreadyOwned`
+  больше не считается успехом: это `[ВЛАДЕНИЕ-СТОП]`, `ERROR/GAMEPASS_REUSED` и ручная
+  сверка возможного переиспользования ГП. Обычный провал → откат в
   `PENDING`, `[AUTOBUY-FAIL …]`, алерт; протухший cookie / 3 провала подряд → пауза 15 мин +
   алерт (сам флаг не снимается). Достигли порога → обязательный алерт «💧 пора сливать»
   (дедуп 6 ч через `autoBuyoutBelowSince`); сам слив остаётся ручным (💧 в TWA). **П7
@@ -336,31 +338,18 @@ Browser purchase transport пока **не подключён к автовык�
   с cookie donor на официальном домене Roblox. `UserBasePriceInRobux` валидирует номинал;
   `PriceInRobux` используется для расчёта ожидаемого списания и пачки. Бот распознаёт
   разницу как Plus только при единственном корректном detail `RobloxPlusSubscription`
-  10%/20%; unknown/mixed скидка ставит `ERROR/REGIONAL_PRICE`. Production-canary доказал,
-  что cookie-only pass purchase не принимает Plus buyer-price: manual/script, partner и
-  auto-buyout останавливаются с `ROBLOX_PLUS_FLOW` без purchase POST. 16.07 подтверждено,
-  что Roblox удалил сам legacy Economy v1 purchase endpoint: non-Plus попытка возвращает
-  `InvalidArguments`. Это внутренний transport-блок, а не ошибка GP: автовыкуп откатывает
-  claim в `PENDING`, пишет `[AUTOBUY-BLOCKED]`, алертит админов и после первого отказа
-  делает паузу 60 минут вместо трёх повторов. Cookie никогда не отправляется roproxy;
-  недоступный buyer lookup останавливает денежную операцию.
+  10%/20%; unknown/mixed скидка ставит `ERROR/REGIONAL_PRICE`. Typed Plus buyer-price
+  передаётся официальному browser flow поверх подтверждённой base-price. Cookie никогда не
+  отправляется roproxy и не логируется purchase-service; она живёт только в изолированном
+  Chrome profile. Недоступный buyer lookup или
+  browser transport останавливает денежную операцию. Три production canary обязательны до
+  включения kill-switch; если новый donor имеет Plus, минимум один canary должен быть Plus.
   Управление: `/autobuy` (статус), `/autobuy on|off`, `/autobuy threshold N`.
-  **Контрольная проверка владения (Ф1, 2026-07-12).** Roblox при таймауте/5xx нередко
-  всё же проводит покупку — раньше такой заказ ложно откатывался в `PENDING` и копил
-  `consecutiveFails`. Теперь `purchaseGamepassVerified` (`bots/shared/roblox.ts`, зеркало
-  `verifyGamepassOwnership` в `src/lib/roblox-buyout.ts`) при любом провале, кроме чистых
-  отказов без списания (`InsufficientFunds`/`NotForSale`/`PriceChanged`/протухший cookie),
-  ждёт ~2.5 с и проверяет владение через
-  `inventory.roblox.com/v1/users/{uid}/items/GamePass/{gpId}`; при провале без каноничного
-  reason (таймаут, нераспарсенный ответ) — вторая проверка через ~5 с. Владеет →
-  recovered-успех: заказ идёт по обычной COMPLETED-ветке, в adminNote —
-  `[AUTOBUY-RECOVERED …]`, баланс донора перечитывается через `getRobuxBalance`
-  (робуксы реально списаны), в алерте админам — пометка «recovered». Каждый случай —
-  warn в консоли (видно частоту такого поведения Roblox). То же в автосливе и ручном
-  сливе (Шаг 3, 2026-07-12): провал покупки донором в `runDrain`/`api/twa/drain`
-  (кроме `AlreadyOwned` — это владение ДО попытки) → `ownsGamepass(donorId, gpId)`;
-  владеет → слив засчитан (`drained = target`), балансы перечитываются. В TWA-сливе
-  добавлен пре-чек владения до смены цены (см. docs/twa-admin.md «Слив остатка»).
+  **Подтверждение покупки (17.07).** Browser driver ждёт до 35 секунд: inventory должен
+  перейти `false→true`, а currency API — показать точную ожидаемую дельту. Inventory у Roblox
+  обновляется раньше баланса, поэтому остановка polling на одном ownership давала ложную
+  цену 0. `BalanceMismatch/BalanceUnconfirmed` не превращается в recovered-успех и требует
+  ручной сверки.
 - **👁 GP-watch по вероятному нику (+3).** Тик 60 мин (решение владельца 04.07: «15 мин —
   часто»; boot-тик через 70 с после старта контейнера — деплой сразу показывает, что воркер
   жив). Для заказов `AWAITING_GAMEPASS` с

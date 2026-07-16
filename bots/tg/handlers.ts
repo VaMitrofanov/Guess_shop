@@ -23,6 +23,7 @@ import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 import { buildAdminKeyboard } from "./admin";
 import { buildOrderProfitSnapshot } from "../shared/order-profit";
 import { buildTelegramWebLoginUrl, parseTelegramWebLoginStart } from "../shared/telegram-web-login";
+import { isBrowserInfrastructureFailure } from "../shared/browser-purchase";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -3781,16 +3782,10 @@ export function registerCallbacks(bot: Telegraf): void {
           await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
           return;
         }
-        if (info.robloxPlusDiscountPercent) {
-          lines.push(`\n⛔ <b>Roblox Plus −${info.robloxPlusDiscountPercent}%</b>`);
-          lines.push(`Cookie-only скрипт покупки pass больше не поддерживается Roblox. Используй donor без Plus или официальный client/experience flow.`);
-          await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
-          return;
-        }
-
         // ЦЕНА-СТОП (PLAN-gp-price-guard Ш2): раньше сюда зашивалась live-цена, и
         // скрипт выкупал пасс, подорожавший после приёма ботом. Сверяем с номиналом
-        // по эталону автовыкупа и зашиваем ожидаемую цену, а не текущую.
+        // по эталону автовыкупа и зашиваем buyer-price, подтверждённую поверх
+        // правильной base-price (для Roblox Plus она законно ниже номинала).
         const expected = Math.ceil(order.amount / 0.7);
         if (Math.abs(info.userBasePriceInRobux - expected) > 2) {
           lines.push(`\n⛔ <b>ЦЕНА-СТОП</b>`);
@@ -3803,7 +3798,7 @@ export function registerCallbacks(bot: Telegraf): void {
         const script = buildGamepassPurchaseScript({
           gamepassId: gpId,
           productId: info.productId,
-          expectedPrice: expected,
+          expectedPrice: info.priceInRobux,
           sellerId: info.creatorId,
           buyerUserId: donor?.id ?? null,
         });
@@ -3881,14 +3876,6 @@ export function registerCallbacks(bot: Telegraf): void {
           );
           return;
         }
-        if (info.robloxPlusDiscountPercent) {
-          await ctx.reply(
-            `⛔ <b>Roblox Plus −${info.robloxPlusDiscountPercent}% (${info.priceInRobux}/${info.userBasePriceInRobux} R$)</b>\n` +
-            `Cookie-only покупка pass не поддерживается Roblox. Нужен donor без Plus или официальный client/experience flow.`,
-            { parse_mode: "HTML" },
-          );
-          return;
-        }
         const priceWarning = "";
 
         // Ф1: покупка с контрольной проверкой владения при провале —
@@ -3923,10 +3910,18 @@ export function registerCallbacks(bot: Telegraf): void {
             priceWarning;
           try { await ctx.editMessageText(editedText, { parse_mode: "HTML" }); } catch {};
         } else {
-          await (db as any).wbOrder.updateMany({
-            where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
-            data: { status: "ERROR" },
-          });
+          const infrastructureFailure = isBrowserInfrastructureFailure(result.reason ?? result.msg);
+          if (!infrastructureFailure) {
+            await (db as any).wbOrder.updateMany({
+              where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
+              data: {
+                status: "ERROR",
+                buyoutErrorCode: /already.?own/i.test(result.reason ?? result.msg)
+                  ? "GAMEPASS_REUSED"
+                  : null,
+              },
+            });
+          }
           const balance = await getRobuxBalance(cookie);
           const balanceLine = balance !== null ? `\n💰 Баланс: ${balance.toLocaleString()} R$` : "";
           await ctx.reply(

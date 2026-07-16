@@ -7,13 +7,11 @@
 `window.RobloxItemPurchase.startGamepassPurchaseFlow` вместо снятого Roblox
 `economy.roblox.com/v1/purchases/products/{productId}`.
 
-Серверная (cookie-only) покупка через HTTP остаётся невозможной, и это **не чинится сменой
-URL** — см. «Почему серверный fetch не проходит». Автовыкуп по-прежнему возвращает
-`LEGACY_PURCHASE_FLOW` и оставляет заказ в очереди.
-
-**Браузерный транспорт на сервере доказан** живой покупкой (см. ниже), но в бота/TWA ещё не
-интегрирован. Этапы интеграции и развилка «cookie vs логин формой» — в локальном
-`PLAN-browser-buyout.md`, ждут согласования.
+Серверная cookie-only покупка через голый HTTP остаётся невозможной, и это **не чинится
+сменой URL** — см. «Почему серверный fetch не проходит». Вместо неё SG purchase-service
+инъецирует текущую cookie в настоящий Chrome и вызывает официальный client flow. Web/TWA,
+TG, партнёрский и auto-buyout пути интегрированы; kill-switch автомата остаётся OFF до
+трёх production canary на funded donor.
 
 ### ✅ Canary на сервере пройден (17.07.2026)
 
@@ -47,9 +45,10 @@ device» на spending-окне НЕТ (она есть только на лог
 включённой 2FA: у доноров 2FA выключена, поэтому автовыкупу это не мешает. Обратная
 сторона — донор без 2FA уязвимее; размен принят владельцем.
 
-**Что осталось непроверенным:** работает ли инъекция `.ROBLOSECURITY` в профиль Chrome
-вместо логина формой. От этого зависит, нужны ли вообще логины/пароли доноров в системе,
-или хватит существующего `/setcookie`. Развилка и оба варианта — в `PLAN-browser-buyout.md`.
+**Cookie-инъекция доказана отдельной живой покупкой 17.07.** Чистый профиль без form-login
+после `Network.setCookie` авторизовался правильным donor и купил пасс за 18 R$:
+ownership `false→true`, баланс `275→257`. Поэтому выбран вариант A: существующего
+`/setcookie` достаточно, логины/пароли donor в TWA и БД не добавляются.
 
 ### Почему серверный fetch не проходит
 
@@ -76,8 +75,9 @@ Chef — проверка browser fingerprint: Roblox отдаёт `scriptIdenti
 
 Гарды в скрипте дублируют серверные намеренно:
 
-- **[ЦЕНА-СТОП]** — зашита цена по номиналу (`ceil(amount / 0.7)`), а не live-цена: заранее
-  скопированный скрипт не купит подорожавший пасс;
+- **[ЦЕНА-СТОП]** — зашита server-resolved buyer-price поверх проверенной base-price
+  `ceil(amount / 0.7)`: заранее скопированный скрипт не купит подорожавший пасс, а typed
+  Roblox Plus безопасно использует свою 10/20% цену;
 - **[ПРОДАВЕЦ-СТОП]** — новый purchase API принимает в теле только `expectedPrice`, поэтому
   Roblox больше **не сверяет продавца** на своей стороне. Раньше это делал
   `expectedSellerId` в economy v1. Теперь проверка только наша;
@@ -393,36 +393,38 @@ chef scriptIdentifiers. Без них любой HTTP-клиент ловит `b
 ### Реализованный browser runbook
 
 ```
-TG/TWA → buildGamepassPurchaseScript → ручная консоль менеджера ┐
-                                                                  ├→ прогретый Chrome → официальный Roblox purchase flow
-server driver (JSON stdin) ───────────────────────────────────────┘
+TG/TWA/auto → buildGamepassPurchaseScript → purchase-service (Bearer, single-flight)
+                                             ↓ Network.setCookie
+                                  настоящий Chrome → официальный Roblox purchase flow
+ручной «📋 Скрипт» ──────────────────────────────────────────────┘
 ```
 
-Вместо предполагавшихся headless/stealth-сервиса и инъекции cookie используется реальный
-Google Chrome с постоянным профилем, запущенный заранее. Cookie и учётные данные не передаются
-из бота: они остаются только в профиле браузера. `puppeteer-core` подключается к этому Chrome
-по CDP и поэтому не добавляет `--enable-automation`.
+Используется реальный Google Chrome с постоянным профилем, запущенный заранее.
+`puppeteer-core` подключается по CDP и не добавляет `--enable-automation`. Service получает
+cookie из защищённого server-to-server запроса, не логирует и не пишет её в отдельное
+хранилище, а инъецирует в изолированный Chrome profile
+перед каждой покупкой. На SG он слушает только docker bridge; Web/TWA на RF ходит через
+ограниченный SSH-туннель. Пароли нигде не появляются.
 
 | Инструмент | Назначение |
 |---|---|
 | `scripts/browser-buyout-session.sh` | Поднимает/останавливает Chrome с постоянным профилем и локальным VNC/CDP; вход выполняется формой Roblox. |
 | `scripts/browser-buyout-probe.mjs` | Read-only диагностика: проверяет загруженный purchase module, `webdriver`, бренды браузера и WebGL. Ничего не покупает и не посылает POST. |
 | `scripts/browser-buy-gamepass.mjs` | Принимает JSON со скриптом, открывает официальный purchase modal и подтверждает результат только по ownership и балансу. |
+| `scripts/browser-purchase-service.mjs` | Bearer-auth HTTP bridge, cookie-инъекция через CDP и очередь строго по одной покупке. |
+| `infra/systemd/roblox-purchase-*.service` | Автозапуск SG service и постоянного RF→SG SSH-туннеля. |
 | `src/lib/roblox-purchase-script.ts` и `bots/shared/roblox-purchase-script.ts` | Зеркальные билдеры ручного скрипта с [ЦЕНА-СТОП], [ПРОДАВЕЦ-СТОП], [АККАУНТ-СТОП] и ownership-precheck. |
 
-**Текущий production-контур:** TG и TWA выдают менеджеру ручной browser-скрипт; server driver
-используется только для изолированных canary. Автовыкуп всё ещё fail-closed и не вызывает
-browser driver. Это намеренное ограничение: включение без отдельного решения владельца может
-необратимо скомпрометировать donor-аккаунт.
+**Текущий production-контур:** host service и туннель запущены, env Web/TG настроены, код
+интеграции прошёл build/tests. Автовыкуп kill-switch остаётся OFF до deploy и 3/3 canary.
+При infrastructure failure заказ остаётся в очереди, а менеджер использует ручной скрипт.
 
-### Что осталось решить до автоматизации
+### Что осталось до автоматизации
 
-1. Владелец отдельно подтверждает, нужен ли автоматический выкуп с риском для donor-аккаунта.
-2. Если подтверждено — добавить аутентифицированный сервисный контракт между ботом и browser
-   driver, не передающий cookie, и провести три последовательных canary с проверкой ownership,
-   seller payout и balance delta.
-3. Только после 3/3 canary разрешать интеграцию в auto-buyout; при любом отказе — стоп и
-   возврат к ручному режиму.
+1. Установить через `/setcookie` funded donor без 2FA (текущий production donor имеет 0 R$).
+2. После deploy провести три последовательных canary с проверкой ownership, seller payout и
+   точной balance delta; если donor имеет Plus, один canary обязательно Plus.
+3. Только после 3/3 включить `autoBuyoutEnabled`; при любом отказе — стоп и ручной режим.
 
 ### Риски и митигация
 

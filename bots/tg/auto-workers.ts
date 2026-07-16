@@ -32,6 +32,7 @@ import { searchGamepassesByNick } from "../shared/gamepass-search";
 import { runDrain, drainAuthedUser, drainUserGamepasses, ownsGamepass, drainCurrency } from "../shared/drain";
 import { notifyUserCompleted } from "./handlers";
 import { buildOrderProfitSnapshot } from "../shared/order-profit";
+import { isBrowserInfrastructureFailure } from "../shared/browser-purchase";
 
 const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
 const PRICE_TOL = 2;
@@ -152,16 +153,6 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
         await alertAdmins(`⚠️ <b>Рег. цена</b> · ${order.wbCode}\n${info.priceInRobux}/${info.userBasePriceInRobux} R$ — заказ перенесён в ошибку; автозамена доступна в TWA.`);
         continue;
       }
-      if (info.robloxPlusDiscountPercent) {
-        autobuySkip.add(order.id);
-        await (db as any).wbOrder.update({
-          where: { id: order.id },
-          data: { status: "ERROR", buyoutErrorCode: "ROBLOX_PLUS_FLOW" },
-        });
-        await annotateOnce(order.id, "[ROBLOX-PLUS-FLOW", `скидка ${info.robloxPlusDiscountPercent}%, ${info.priceInRobux}/${info.userBasePriceInRobux} R$ — нужен donor без Plus или официальный client flow`);
-        await alertAdmins(`⚠️ <b>Roblox Plus ${info.robloxPlusDiscountPercent}%</b> · ${order.wbCode}\nCookie-only покупка pass не поддерживается Roblox; заказ перенесён в ошибку без списания.`);
-        continue;
-      }
       // Seller must match the confirmed nick when we have one (guards a swapped GP).
       if (order.robloxUsername && info.creatorName &&
           order.robloxUsername.toLowerCase() !== info.creatorName.toLowerCase()) {
@@ -182,9 +173,7 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
       // нередко значит «куплено»; recovered-успех спасает заказ от ложного отката.
       const result = await purchaseGamepassVerified(info.productId, info.priceInRobux, info.creatorId, cookie, gpId);
 
-      const isAlreadyOwned = !result.success && /already.?own/i.test(result.msg);
-
-      if (result.success || isAlreadyOwned) {
+      if (result.success) {
         consecutiveFails = 0;
         const money = buildOrderProfitSnapshot(order, settings, result.price ?? info.priceInRobux);
         await (db as any).wbOrder.updateMany({
@@ -199,12 +188,11 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
           await annotateOnce(order.id, "[AUTOBUY-RECOVERED", "владение подтверждено после ошибки ответа Roblox");
           const fresh = await getRobuxBalance(cookie);
           balance = fresh ?? (balance - (result.price ?? info.priceInRobux));
-        } else if (!isAlreadyOwned) {
+        } else {
           balance -= (result.price ?? info.priceInRobux);
         }
         bought++;
-        const ownedTag = isAlreadyOwned ? " (AlreadyOwned)"
-          : result.recovered ? " (✅ recovered — владение подтверждено после ошибки)" : "";
+        const ownedTag = result.recovered ? " (✅ recovered — владение подтверждено после ошибки)" : "";
         await alertAdmins(
           `🤖 <b>Автовыкуп</b> · <code>${order.wbCode}</code> · ${result.price ?? info.priceInRobux} R$ · ` +
           `${escapeHtml(info.creatorName)} — ✅${ownedTag}\n💰 Баланс донора: ${balance.toLocaleString()} R$`
@@ -212,26 +200,40 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
         if (balance <= threshold) { await maybeThresholdAlert({ ...settings, autoBuyoutBelowSince: null }, balance); break; }
         await sleep(jitter(2000, 8000));
       } else {
+        if (/already.?own/i.test(result.reason ?? result.msg)) {
+          await (db as any).wbOrder.updateMany({
+            where: { id: order.id, status: "IN_PROGRESS" },
+            data: { status: "ERROR", buyoutErrorCode: "GAMEPASS_REUSED" },
+          });
+          autobuySkip.add(order.id);
+          await annotateOnce(order.id, "[ВЛАДЕНИЕ-СТОП", "донор уже владеет геймпассом — автоматически завершать заказ нельзя");
+          await alertAdmins(
+            `⛔ <b>Геймпасс уже принадлежит донору</b> · <code>${order.wbCode}</code>\n` +
+            `Заказ перенесён в ошибку без повторной покупки: нужна ручная сверка переиспользования ГП.`,
+          );
+          continue;
+        }
         // Revert claim, record, and count the failure.
         await (db as any).wbOrder.updateMany({ where: { id: order.id, status: "IN_PROGRESS" }, data: { status: "PENDING" } });
         consecutiveFails++;
-        const cookieDead = result.reason === "CookieExpired";
-        const legacyFlowRemoved = isLegacyPurchaseFlowFailure(result.reason ?? result.msg);
+        const cookieDead = /CookieExpired|NotLoggedIn/i.test(result.reason ?? "");
+        const transportUnavailable = isBrowserInfrastructureFailure(result.reason ?? result.msg)
+          || isLegacyPurchaseFlowFailure(result.reason ?? result.msg);
         await annotateOnce(
           order.id,
-          legacyFlowRemoved ? "[AUTOBUY-BLOCKED" : "[AUTOBUY-FAIL",
-          legacyFlowRemoved
-            ? "Roblox отключил legacy cookie-выкуп; заказ оставлен в очереди"
+          transportUnavailable ? "[AUTOBUY-BLOCKED" : "[AUTOBUY-FAIL",
+          transportUnavailable
+            ? "браузерный сервис выкупа недоступен; заказ оставлен в очереди"
             : result.msg.slice(0, 120),
         );
         await alertAdmins(
           `⚠️ <b>Автовыкуп не прошёл</b> · <code>${order.wbCode}</code> · ${info.priceInRobux} R$\n` +
-          `Причина: <code>${escapeHtml(legacyFlowRemoved ? "Roblox отключил legacy cookie-выкуп; нужен официальный in-experience bridge" : result.msg)}</code>`
+          `Причина: <code>${escapeHtml(transportUnavailable ? "браузерный сервис выкупа недоступен; используй ручной скрипт" : result.msg)}</code>`
         );
-        if (legacyFlowRemoved || cookieDead || consecutiveFails >= 3) {
-          backoffUntil = Date.now() + (legacyFlowRemoved ? 60 : 15) * 60 * 1000;
+        if (transportUnavailable || cookieDead || consecutiveFails >= 3) {
+          backoffUntil = Date.now() + (transportUnavailable ? 60 : 15) * 60 * 1000;
           await alertAdmins(
-            `⛔ <b>Автовыкуп приостановлен на ${legacyFlowRemoved ? 60 : 15} мин</b> (${legacyFlowRemoved ? "legacy purchase endpoint удалён Roblox" : cookieDead ? "cookie протух" : "3 ошибки подряд"}).\n` +
+            `⛔ <b>Автовыкуп приостановлен на ${transportUnavailable ? 60 : 15} мин</b> (${transportUnavailable ? "browser purchase-service недоступен" : cookieDead ? "cookie протух" : "3 ошибки подряд"}).\n` +
             `Kill-switch НЕ снят — проверь донора и /autobuy status.`
           );
           break;

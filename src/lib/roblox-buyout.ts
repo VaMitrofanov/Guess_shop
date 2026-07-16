@@ -1,4 +1,5 @@
 import { classifyBuyerPrice, type RobloxPriceDiscountDetail } from "@/lib/purchase-guard";
+import { isBrowserInfrastructureFailure, purchaseGamepassInBrowser } from "@/lib/browser-purchase";
 
 export const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
@@ -40,6 +41,7 @@ export type PurchaseFailureKind = "internal" | "row" | "unknown";
 export interface PurchaseResult {
   success: boolean;
   msg: string;
+  reason?: string;
   price?: number;
   balance: number | null;
   alreadyOwned?: boolean;
@@ -64,17 +66,6 @@ type RobloxProductInfo = {
 
 type RobloxThumbnailResponse = {
   data?: Array<{ imageUrl?: string }>;
-};
-
-type RobloxBalanceResponse = {
-  robux?: number;
-};
-
-type RobloxPurchaseResponse = {
-  purchased?: boolean;
-  reason?: string;
-  errorMsg?: string;
-  price?: number;
 };
 
 export function parseGamepassId(raw: string): string | null {
@@ -192,122 +183,62 @@ export async function resolveGamepassForBuyer(
   };
 }
 
-async function getBalance(cookie: string): Promise<number | null> {
-  const bRes = await fetch("https://economy.roblox.com/v1/user/currency", {
-    headers: { ...ROBLOX_UA, Cookie: `.ROBLOSECURITY=${cookie}` },
-    signal: AbortSignal.timeout(5_000),
-  }).catch(() => null);
-  if (!bRes?.ok) return null;
-  const bData = (await bRes.json().catch(() => null)) as RobloxBalanceResponse | null;
-  return bData?.robux ?? null;
-}
-
 export async function purchaseGamepassWithCookie(
   cookie: string,
   // gamepassId — опционален: с ним провал покупки перепроверяется по inventory-API
   // (Ф1; без него ложный провал при таймауте/5xx приведёт к ложному refund).
   input: { productId: string | number; price: number; sellerId: string | number; gamepassId?: string | number },
 ): Promise<PurchaseResult> {
-  const csrfRes = await fetch("https://auth.roblox.com/v2/logout", {
-    method: "POST",
-    headers: { Cookie: `.ROBLOSECURITY=${cookie}` },
-    signal: AbortSignal.timeout(10_000),
-  }).catch(() => null);
-  let csrf = csrfRes?.headers.get("x-csrf-token");
-  if (!csrf) throw new BuyoutError("Не удалось получить CSRF — cookie протух?", 502);
-
-  let purchaseRes: Response | null = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    purchaseRes = await fetch(`https://economy.roblox.com/v1/purchases/products/${input.productId}`, {
-      method: "POST",
-      headers: {
-        Cookie: `.ROBLOSECURITY=${cookie}`,
-        "Content-Type": "application/json",
-        "x-csrf-token": csrf,
-      },
-      body: JSON.stringify({
-        expectedCurrency: 1,
-        expectedPrice: input.price,
-        expectedSellerId: Number(input.sellerId),
-      }),
-      signal: AbortSignal.timeout(15_000),
-    }).catch(() => null);
-
-    if (purchaseRes?.status === 403) {
-      const newCsrf = purchaseRes.headers.get("x-csrf-token");
-      if (newCsrf && attempt === 0) {
-        csrf = newCsrf;
-        continue;
-      }
-    }
-    break;
-  }
-
-  if (purchaseRes?.status === 401) {
-    return { success: false, msg: "Cookie истёк — обнови", balance: null, failureKind: "internal" };
-  }
-
-  const purchaseData = (await purchaseRes?.json().catch(() => null)) as RobloxPurchaseResponse | null;
-  if (!purchaseData) {
-    // Ф1: «Нет ответа» не значит «не куплено» — Roblox при таймауте/5xx нередко
-    // всё же проводит транзакцию. Владение подтвердилось → это успех, а не 502
-    // (иначе ложный откат/refund при фактически купленном пассе).
-    if (input.gamepassId) {
-      const owned = await verifyOwnershipAfterFailure(cookie, input.gamepassId, false);
-      if (owned === true) {
-        console.warn(`[roblox-buyout] recovered: продукт ${input.productId} — владение подтверждено после «Нет ответа»`);
-        return {
-          success: true,
-          msg: "Куплено (владение подтверждено проверкой после «Нет ответа от Roblox»)",
-          price: input.price,
-          balance: await getBalance(cookie),
-          recovered: true,
-        };
-      }
-    }
-    throw new BuyoutError("Нет ответа от Roblox", 502);
-  }
-
-  const balance = await getBalance(cookie);
-  const alreadyOwned = /already.?own/i.test(purchaseData.reason ?? "");
-
-  if (purchaseData.purchased || alreadyOwned) {
-    const price = purchaseData.price ?? input.price;
+  if (!input.gamepassId) {
     return {
-      success: true,
-      msg: alreadyOwned ? "AlreadyOwned — предыдущая покупка прошла" : `Куплено за ${price} R$`,
-      price,
-      balance,
-      alreadyOwned,
+      success: false,
+      msg: "BrowserUnavailable: browser transport требует gamepassId",
+      reason: "BrowserUnavailable",
+      balance: null,
+      failureKind: "internal",
     };
   }
 
-  const failReason = purchaseData.reason ?? purchaseData.errorMsg ?? "Неизвестная ошибка";
+  const buyerUserId = await getAuthenticatedUserId(cookie);
+  if (!buyerUserId) {
+    return {
+      success: false,
+      msg: "NotLoggedIn: cookie истёк — обнови через /setcookie",
+      reason: "NotLoggedIn",
+      balance: null,
+      failureKind: "internal",
+    };
+  }
 
-  // Ф1: провал с неканоничным reason тоже перепроверяем — владение = успех.
-  if (input.gamepassId && needsOwnershipCheck(purchaseData.reason ?? purchaseData.errorMsg)) {
-    const owned = await verifyOwnershipAfterFailure(
-      cookie,
-      input.gamepassId,
-      Boolean(purchaseData.reason ?? purchaseData.errorMsg),
-    );
-    if (owned === true) {
-      console.warn(`[roblox-buyout] recovered: продукт ${input.productId} — владение подтверждено после ошибки «${failReason}»`);
-      return {
-        success: true,
-        msg: `Куплено (владение подтверждено проверкой после ошибки: ${failReason})`,
-        price: input.price,
-        balance: await getBalance(cookie),
-        recovered: true,
-      };
-    }
+  const result = await purchaseGamepassInBrowser({
+    cookie,
+    gamepassId: input.gamepassId,
+    productId: input.productId,
+    expectedPrice: input.price,
+    sellerId: input.sellerId,
+    buyerUserId,
+  });
+  if (result.purchased) {
+    const price = result.price ?? input.price;
+    return {
+      success: true,
+      msg: `Куплено браузером за ${price} R$`,
+      reason: result.reason,
+      price,
+      balance: result.balanceAfter ?? null,
+    };
   }
 
   return {
     success: false,
-    msg: failReason,
-    balance,
-    failureKind: classifyPurchaseFailure(purchaseData.reason ?? purchaseData.errorMsg ?? ""),
+    msg: result.reason || "Неизвестная ошибка browser transport",
+    reason: result.reason,
+    balance: result.balanceAfter ?? result.balanceBefore ?? null,
+    failureKind: isBrowserInfrastructureFailure(result.reason)
+      ? "internal"
+      : /GuardStop|ScriptRefused|AlreadyOwned|NotConfirmed|BuyButtonMissing/i.test(result.reason)
+        ? "row"
+        : "unknown",
   };
 }
 
@@ -335,7 +266,7 @@ export function classifyPurchaseFailure(reason: string): PurchaseFailureKind {
 // менять синхронно.
 
 /** Отказы, при которых Roblox гарантированно НЕ провёл транзакцию. */
-const CLEAN_REFUSAL_RE = /insufficient.?funds|not.?for.?sale|price.?changed|cookie|invalid.?arguments|invalid.?parameter/i;
+const CLEAN_REFUSAL_RE = /insufficient.?funds|not.?for.?sale|price.?changed|cookie|invalid.?arguments|invalid.?parameter|BrowserUnavailable|NotLoggedIn|WrongAccount|TwoStepRequired|CookieInjectionFailed|QueueFull|DriverError|BalanceMismatch|BalanceUnconfirmed|GuardStop|ScriptRefused|AlreadyOwned|NotConfirmed|BuyButtonMissing/i;
 
 /**
  * Нужна ли контрольная проверка владения после провала покупки.

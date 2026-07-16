@@ -22,6 +22,10 @@
 - **Bridge** — прокси для обхода блокировок. На текущий момент Roblox API отвечает
   и напрямую из РФ; `/tg-proxy` всё ещё используется VK-ботом для `api.telegram.org`.
   Перед изменениями перепроверяй доступность `curl`-ом.
+- **Browser purchase-service (SG host, systemd)** — single-flight bridge к настоящему
+  Chrome/Xvfb. TG обращается через SG docker bridge, Web/TWA — через ограниченный RF→SG
+  SSH-туннель. Service инъецирует текущую donor cookie через CDP и подтверждает покупку
+  только по ownership `false→true` и точной дельте баланса; наружу порт не опубликован.
 
 ## Единая экосистема каналов
 

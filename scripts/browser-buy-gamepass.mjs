@@ -11,7 +11,7 @@
  * (его собирает roblox-purchase-script.ts на стороне бота) — так на хосте не нужен репозиторий,
  * а гарды [ЦЕНА-СТОП]/[ПРОДАВЕЦ-СТОП]/[АККАУНТ-СТОП] остаются в одном месте.
  *
- *   echo '{"script":"(async()=>{…})()","gamepassId":"123","expectedBuyerId":456}' \
+ *   echo '{"script":"(async()=>{…})()","gamepassId":"123","expectedBuyerId":456,"expectedPrice":715}' \
  *     | node browser-buy-gamepass.mjs
  *
  * Ответ: { purchased, reason, price, balanceBefore, balanceAfter, ownedBefore, ownedAfter }
@@ -21,10 +21,11 @@
  * connect к чистому Chrome маркера нет (проверено).
  */
 import puppeteer from "puppeteer-core";
+import { pathToFileURL } from "node:url";
 
 const BROWSER_URL = process.env.BROWSER_URL ?? "http://127.0.0.1:9222";
 /** Chef решается нативно и требует времени: сеть + возможный retry запроса Roblox. */
-const SETTLE_MS = 20_000;
+const SETTLE_MS = 35_000;
 const POLL_MS = 2_500;
 
 const readStdin = () => new Promise((res) => {
@@ -33,7 +34,7 @@ const readStdin = () => new Promise((res) => {
   process.stdin.on("end", () => res(b));
 });
 
-const done = (o) => { console.log(JSON.stringify(o)); process.exit(o.purchased ? 0 : 1); };
+const done = (o) => o;
 
 /**
  * Roblox рисует окно покупки на radix-ui, а на странице живёт ещё пачка скрытых
@@ -45,11 +46,11 @@ const DIALOG_FN = `() => {
   return vis.sort((a, b) => (b.innerText || "").length - (a.innerText || "").length)[0] ?? null;
 }`;
 
-const main = async () => {
-  const { script, gamepassId, expectedBuyerId } = JSON.parse(await readStdin());
+export const buyGamepass = async (input, { browserUrl = BROWSER_URL } = {}) => {
+  const { script, gamepassId, expectedBuyerId, expectedPrice } = input ?? {};
   if (!script || !gamepassId) return done({ purchased: false, reason: "BadInput: нужны script и gamepassId" });
 
-  const browser = await puppeteer.connect({ browserURL: BROWSER_URL, defaultViewport: null }).catch(() => null);
+  const browser = await puppeteer.connect({ browserURL: browserUrl, defaultViewport: null }).catch(() => null);
   if (!browser) return done({ purchased: false, reason: "BrowserUnavailable: Chrome не отвечает на CDP" });
 
   try {
@@ -108,21 +109,49 @@ const main = async () => {
     }, DIALOG_FN);
     if (!clicked) return done({ purchased: false, reason: `BuyButtonMissing: в окне ${JSON.stringify(modal.buttons)}`, balanceBefore: before.balance });
 
-    // Успех определяем ТОЛЬКО по ownership + балансу: клик и текст окна не доказывают
-    // списание, а UI Roblox меняется без предупреждения.
+    // Успех определяем ТОЛЬКО по ownership + точной дельте баланса: клик и текст
+    // окна не доказывают списание, а balance API обновляется позже inventory.
     const deadline = Date.now() + SETTLE_MS;
     let after = before;
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, POLL_MS));
       after = await snap();
-      if (after.owned === true) break;
+      const delta = before.balance !== null && after.balance !== null
+        ? before.balance - after.balance
+        : null;
+      const balanceConfirmed = Number.isFinite(Number(expectedPrice))
+        ? delta === Number(expectedPrice)
+        : typeof delta === "number" && delta > 0;
+      if (after.owned === true && balanceConfirmed) break;
     }
 
     if (after.owned === true) {
+      const delta = before.balance !== null && after.balance !== null
+        ? before.balance - after.balance
+        : null;
+      const expected = Number(expectedPrice);
+      if (Number.isFinite(expected) && delta !== expected) {
+        return done({
+          purchased: false,
+          reason: `BalanceMismatch: владение подтверждено, дельта ${delta ?? "unknown"} R$, ожидалось ${expected} R$`,
+          price: delta,
+          balanceBefore: before.balance, balanceAfter: after.balance,
+          ownedBefore: false, ownedAfter: true,
+        });
+      }
+      if (!Number.isFinite(expected) && !(typeof delta === "number" && delta > 0)) {
+        return done({
+          purchased: false,
+          reason: "BalanceUnconfirmed: владение подтверждено, но списание не появилось в balance API",
+          price: delta,
+          balanceBefore: before.balance, balanceAfter: after.balance,
+          ownedBefore: false, ownedAfter: true,
+        });
+      }
       return done({
         purchased: true,
         reason: "OK",
-        price: before.balance !== null && after.balance !== null ? before.balance - after.balance : null,
+        price: delta,
         balanceBefore: before.balance, balanceAfter: after.balance, ownedBefore: false, ownedAfter: true,
       });
     }
@@ -145,4 +174,15 @@ const main = async () => {
   }
 };
 
-await main();
+const isDirectRun = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isDirectRun) {
+  try {
+    const input = JSON.parse(await readStdin());
+    const result = await buyGamepass(input);
+    console.log(JSON.stringify(result));
+    process.exit(result.purchased ? 0 : 1);
+  } catch (err) {
+    console.log(JSON.stringify({ purchased: false, reason: `DriverError: ${err?.message ?? String(err)}` }));
+    process.exit(1);
+  }
+}

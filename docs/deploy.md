@@ -120,16 +120,24 @@ atomic claim и Telegram polling topology.
 ## Browser transport выкупа
 
 Репозиторий содержит инструменты для контролируемого browser-выкупа (`scripts/browser-buyout-
-session.sh`, `scripts/browser-buyout-probe.mjs`, `scripts/browser-buy-gamepass.mjs`). Это
-**не** отдельный Coolify-сервис и не часть текущего автовыкупа: Chrome с постоянным профилем
-живёт на изолированном сервере, а бот/TWA пока выдают менеджеру защищённый ручной скрипт.
-Точные хост, учётные записи и доступ к профилю — только в `HANDOFF.md`.
+session.sh`, `scripts/browser-buyout-probe.mjs`, `scripts/browser-buy-gamepass.mjs`) и
+single-flight host service `scripts/browser-purchase-service.mjs`. Chrome с постоянным
+профилем живёт на изолированном SG-сервере; service слушает только адрес docker bridge и
+защищён Bearer-токеном. TG-контейнер ходит к нему напрямую через bridge, Web/TWA на другом
+хосте — через постоянный ограниченный SSH-туннель. Публичного listener нет. Точные хосты,
+systemd-состояние и доступ — только в `HANDOFF.md`.
 
 Для воспроизводимого запуска после `npm ci` `puppeteer-core` зафиксирован в production-
-зависимостях проекта. Перед покупкой проверяются профиль и fingerprint командой probe; драйвер
-подключается только к уже запущенному Chrome и подтверждает успех по ownership, а не по тексту
-в интерфейсе. Полный порядок действий, границы и решение о будущей автоматизации — в
+зависимостях проекта. Перед каждой покупкой service инъецирует текущую `.ROBLOSECURITY` из
+`GlobalSettings` через CDP; логины и пароли не хранятся. Драйвер подключается только к уже
+запущенному Chrome и подтверждает успех по ownership **и точной дельте баланса**, а не по
+клику/тексту интерфейса. Очередь строго последовательная. Полный порядок действий и границы — в
 [`roblox-plus-buyout-plan.md`](roblox-plus-buyout-plan.md).
+
+Runtime env Web и TG: `ROBLOX_PURCHASE_SERVICE_URL`,
+`ROBLOX_PURCHASE_SERVICE_TOKEN`. URL различается по хосту; token одинаковый и хранится только
+в Coolify/host env. При недоступности service денежные пути fail-closed оставляют заказ в
+очереди и предлагают ручной browser script.
 
 **Health в TWA/боте:** `TG_BOT_HEALTH_URL`, `VK_BOT_HEALTH_URL` — **обязательны** для
 health-виджета: с 2026-07-03 захардкоженных IP-фолбэков нет (репо публичный, см.

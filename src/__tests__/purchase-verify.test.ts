@@ -30,7 +30,9 @@ describe("needsOwnershipCheck (оба зеркала)", () => {
     ["NotForSale", false],
     ["PriceChanged", false],
     ["CookieExpired", false],
-    ["AlreadyOwned", true],   // отдельная ветка у вызывающих, но проверка не вредит
+    ["AlreadyOwned", false],  // reuse/ownership — ручной разбор, не recovered-успех
+    ["BrowserUnavailable: service down", false],
+    ["BalanceMismatch: delta 0", false],
     ["Неизвестная ошибка", true],
     [undefined, true],        // сетевые/таймаут/нераспарсенный ответ
   ];
@@ -42,71 +44,82 @@ describe("needsOwnershipCheck (оба зеркала)", () => {
 });
 
 describe("purchaseGamepassVerified (bots)", () => {
-  test("провал без reason + владение подтверждено → recovered-успех", async () => {
-    const calls: string[] = [];
-    global.fetch = jest.fn(async (input: any) => {
-      const url = String(input);
-      calls.push(url);
-      if (url.includes("/purchases/products/")) {
-        // нераспарсенный ответ → провал без каноничного reason
-        return new Response("<html>gateway error</html>", { status: 200 });
-      }
-      if (url.includes("users/authenticated")) return jsonResponse({ id: 42, name: "Donor" });
-      if (url.includes("inventory.roblox.com")) return jsonResponse({ data: [{ id: 1 }] });
-      throw new Error(`unexpected fetch: ${url}`);
-    }) as any;
-
-    const result = await purchaseGamepassVerified(111, 143, 7, "cookie", "999", {
-      firstMs: 5,
-      retryMs: 5,
-    });
-
-    expect(result.success).toBe(true);
-    expect(result.recovered).toBe(true);
-    expect(result.price).toBe(143);
-    expect(calls.some((u) => u.includes("inventory.roblox.com/v1/users/42/items/GamePass/999"))).toBe(true);
+  beforeEach(() => {
+    process.env.ROBLOX_PURCHASE_SERVICE_URL = "http://purchase-service.test:9223";
+    process.env.ROBLOX_PURCHASE_SERVICE_TOKEN = "t".repeat(32);
   });
 
-  test("чистый отказ (InsufficientFunds) → провал без обращения к inventory", async () => {
+  afterEach(() => {
+    delete process.env.ROBLOX_PURCHASE_SERVICE_URL;
+    delete process.env.ROBLOX_PURCHASE_SERVICE_TOKEN;
+  });
+
+  test("успешный browser transport возвращает подтверждённую цену", async () => {
     const calls: string[] = [];
-    global.fetch = jest.fn(async (input: any) => {
+    global.fetch = jest.fn(async (input: any, init?: RequestInit) => {
       const url = String(input);
       calls.push(url);
-      if (url.includes("/purchases/products/")) {
-        return jsonResponse({ purchased: false, reason: "InsufficientFunds" });
+      if (url.includes("users/authenticated")) return jsonResponse({ id: 42, name: "Donor" });
+      if (url.includes("purchase-service.test")) {
+        const body = JSON.parse(String(init?.body));
+        expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${"t".repeat(32)}`);
+        expect(body).toMatchObject({ cookie: "cookie", gamepassId: "999", expectedBuyerId: 42, expectedPrice: 143 });
+        expect(body.script).toContain("startGamepassPurchaseFlow");
+        return jsonResponse({ purchased: true, reason: "OK", price: 143, balanceBefore: 500, balanceAfter: 357 });
       }
       throw new Error(`unexpected fetch: ${url}`);
     }) as any;
 
-    const result = await purchaseGamepassVerified(111, 143, 7, "cookie", "999", {
-      firstMs: 5,
-      retryMs: 5,
-    });
+    const result = await purchaseGamepassVerified(111, 143, 7, "cookie", "999");
+
+    expect(result.success).toBe(true);
+    expect(result.recovered).toBeUndefined();
+    expect(result.price).toBe(143);
+    expect(calls.some((u) => u.includes("purchase-service.test"))).toBe(true);
+  });
+
+  test("недоступный browser service → провал без обращения к inventory", async () => {
+    const calls: string[] = [];
+    global.fetch = jest.fn(async (input: any) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes("users/authenticated")) return jsonResponse({ id: 42, name: "Donor" });
+      if (url.includes("purchase-service.test")) throw new Error("connect ECONNREFUSED");
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as any;
+
+    const result = await purchaseGamepassVerified(111, 143, 7, "cookie", "999");
 
     expect(result.success).toBe(false);
     expect(result.recovered).toBeUndefined();
+    expect(result.reason).toMatch(/BrowserUnavailable/);
     expect(calls.some((u) => u.includes("inventory.roblox.com"))).toBe(false);
   });
 
-  test("провал с reason и без владения → остаётся провалом", async () => {
+  test("ownership без точной дельты баланса не превращается в recovered-успех", async () => {
+    const calls: string[] = [];
     global.fetch = jest.fn(async (input: any) => {
       const url = String(input);
-      if (url.includes("/purchases/products/")) {
-        return jsonResponse({ purchased: false, reason: "SomethingWeird" });
-      }
+      calls.push(url);
       if (url.includes("users/authenticated")) return jsonResponse({ id: 42, name: "Donor" });
-      if (url.includes("inventory.roblox.com")) return jsonResponse({ data: [] });
+      if (url.includes("purchase-service.test")) {
+        return jsonResponse({
+          purchased: false,
+          reason: "BalanceMismatch: владение подтверждено, дельта 0 R$, ожидалось 143 R$",
+          ownedAfter: true,
+          balanceBefore: 500,
+          balanceAfter: 500,
+        }, 409);
+      }
       throw new Error(`unexpected fetch: ${url}`);
     }) as any;
 
-    const result = await purchaseGamepassVerified(111, 143, 7, "cookie", "999", {
-      firstMs: 5,
-      retryMs: 5,
-    });
+    const result = await purchaseGamepassVerified(111, 143, 7, "cookie", "999");
 
     expect(result.success).toBe(false);
     expect(result.recovered).toBeUndefined();
-    expect(result.msg).toBe("SomethingWeird");
+    expect(result.msg).toMatch(/BalanceMismatch/);
+    expect(calls.some((u) => u.includes("inventory.roblox.com"))).toBe(false);
   });
 });
 
