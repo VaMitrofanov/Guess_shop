@@ -117,6 +117,20 @@ atomic claim и Telegram polling topology.
 
 **Bridge:** `VALIDATOR_KEY`, `VALIDATOR_PORT`.
 
+## Browser transport выкупа
+
+Репозиторий содержит инструменты для контролируемого browser-выкупа (`scripts/browser-buyout-
+session.sh`, `scripts/browser-buyout-probe.mjs`, `scripts/browser-buy-gamepass.mjs`). Это
+**не** отдельный Coolify-сервис и не часть текущего автовыкупа: Chrome с постоянным профилем
+живёт на изолированном сервере, а бот/TWA пока выдают менеджеру защищённый ручной скрипт.
+Точные хост, учётные записи и доступ к профилю — только в `HANDOFF.md`.
+
+Для воспроизводимого запуска после `npm ci` `puppeteer-core` зафиксирован в production-
+зависимостях проекта. Перед покупкой проверяются профиль и fingerprint командой probe; драйвер
+подключается только к уже запущенному Chrome и подтверждает успех по ownership, а не по тексту
+в интерфейсе. Полный порядок действий, границы и решение о будущей автоматизации — в
+[`roblox-plus-buyout-plan.md`](roblox-plus-buyout-plan.md).
+
 **Health в TWA/боте:** `TG_BOT_HEALTH_URL`, `VK_BOT_HEALTH_URL` — **обязательны** для
 health-виджета: с 2026-07-03 захардкоженных IP-фолбэков нет (репо публичный, см.
 [security.md](security.md), риск #4). Без env сервис показывается как «нет данных»

@@ -400,7 +400,7 @@ Production-восстановление 14.07: после dump-а все 12 пр
 - Неоплаченный DIR → 409 (общий гейт `paidAt`); клиент об изменениях не уведомляется
   (правка = помощь по договорённости в чате).
 
-### Прайс-гард выкупа + Managed/Regional Pricing (2026-07-12, фикс 2026-07-14)
+### Прайс-гард и transport выкупа (2026-07-12, фиксы 14–16.07)
 
 Инцидент 12.07: клиент поднял цену пасса между приёмом ботом и ручным выкупом — TWA купила
 по live-цене 1143 при номинале 500 (ожид 715). Теперь **покупка возможна только по цене,
@@ -415,6 +415,18 @@ Production-восстановление 14.07: после dump-а все 12 пр
 обычный доход с полной base-price. Legacy economy POST, однако, вернул `PriceChanged` даже
 при `expectedPrice=buyerPrice`, без списания и владения. План корректной поддержки —
 [roblox-plus-buyout-plan.md](roblox-plus-buyout-plan.md).
+
+**Инцидент 16.07:** корректные non-Plus GP также перестали покупаться и возвращают
+`InvalidArguments` / `Invalid arguments.`. Причина не в GP: Roblox [объявил удаление](https://devforum.roblox.com/t/official-list-of-deprecated-web-endpoints/62889/118)
+legacy `POST economy/v1/purchases/products/{productId}` с 10.04.2026 и требует перейти на
+in-experience purchase API. Donor без Plus больше не является рабочим обходом.
+
+Безопасное поведение после фикса: `InvalidArguments` классифицируется как внутренний
+`LEGACY_PURCHASE_FLOW`; заказ остаётся в рабочей очереди, `buyoutErrorCode` не ставится и
+GP не попадает в «Ошибку». Партнёрская задача возвращается в `READY` без красного
+write-back, а автовыкуп после первого отказа оставляет заказ в `PENDING` и делает паузу
+60 минут. TWA показывает точную причину и требование официального in-experience bridge.
+Перебор guessed endpoint на реальных заказах запрещён.
 
 - **`purchase`**: непосредственно перед POST сервер запрашивает официальный product-info
   **с cookie текущего donor** (cookie никогда не уходит в roproxy). Guard сравнивает
@@ -437,7 +449,12 @@ Production-восстановление 14.07: после dump-а все 12 пр
   в очереди с бейджем.
 - **`purchase-script`**: при Plus или unsafe-расхождении скрипт **не выдаётся** (409).
   Non-Plus скрипт получает ожидаемую цену (не live) — устаревший скрипт Roblox отклонит
-  сам по `expectedPrice`.
+  сам по `expectedPrice`. С 17.07 скрипт покупает через официальный модуль страницы
+  (`startGamepassPurchaseFlow`), а не через снятый Roblox economy endpoint; собирается
+  в `src/lib/roblox-purchase-script.ts` и несёт собственные [ЦЕНА-СТОП]/[ПРОДАВЕЦ-СТОП]/
+  [АККАУНТ-СТОП] — исполняется в браузере менеджера, вне нашего контроля. Ответ содержит
+  `pageUrl`: скрипт надо запускать на странице game-pass, где загружен модуль.
+  См. [roblox-plus-buyout-plan.md](roblox-plus-buyout-plan.md).
 - **`roblox-account/purchase`** (экран «Поиск и выкуп»): productId/price/sellerId из body
   больше не являются источником истины — сервер перечитывает их по `gamepassId` с cookie.
   Если `gamepassId` привязан к

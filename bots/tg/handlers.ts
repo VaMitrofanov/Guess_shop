@@ -13,7 +13,8 @@ import { vkSend, vkSendPhoto, stripHtml, tgSend, escapeHtml } from "../shared/no
 import { getSbpQrBuffer } from "../shared/sbp";
 import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUserHurdle, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminIntentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, formatUserHandle, formatUserHandleHtml, orderCode } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
-import { getGamepassDetails, getGamepassProductInfo, buildPurchaseScript, purchaseGamepassVerified, getRobuxBalance, getAuthenticatedUser, resetPurchaseCsrf } from "../shared/roblox";
+import { getGamepassDetails, getGamepassProductInfo, purchaseGamepassVerified, getRobuxBalance, getAuthenticatedUser, resetPurchaseCsrf } from "../shared/roblox";
+import { buildGamepassPurchaseScript, gamepassPageUrl } from "../shared/roblox-purchase-script";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { noteProbableNick } from "../shared/nick";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
@@ -3745,8 +3746,18 @@ export function registerCallbacks(bot: Telegraf): void {
         if (!gpMatch) { await ctx.answerCbQuery("⚠️ Нет ссылки на геймпасс").catch(() => {}); return; }
         const gpId = gpMatch[1];
 
+        const settings = await (db as any).globalSettings.findUnique({ where: { id: "global" } });
+        const cookie = settings?.robloxCookie;
+        if (!cookie) {
+          await ctx.reply("❌ Cookie не задан. Установи через /setcookie");
+          await ctx.answerCbQuery("❌ Нет cookie").catch(() => {});
+          return;
+        }
+
         await ctx.answerCbQuery("⏳ Загружаю данные…").catch(() => {});
-        const info = await getGamepassProductInfo(gpId);
+        // Cookie донора: product-info без него отдаёт публичную цену, а сверять надо ту,
+        // которую Roblox выставит покупателю.
+        const info = await getGamepassProductInfo(gpId, cookie);
         if (!info) {
           await ctx.reply(`❌ Не удалось получить product-info для геймпасса <code>${gpId}</code>`, { parse_mode: "HTML" });
           return;
@@ -3777,11 +3788,33 @@ export function registerCallbacks(bot: Telegraf): void {
           return;
         }
 
-        const script = buildPurchaseScript(info);
-        lines.push(`\nВставь в консоль (F12 → Console) на roblox.com:`);
+        // ЦЕНА-СТОП (PLAN-gp-price-guard Ш2): раньше сюда зашивалась live-цена, и
+        // скрипт выкупал пасс, подорожавший после приёма ботом. Сверяем с номиналом
+        // по эталону автовыкупа и зашиваем ожидаемую цену, а не текущую.
+        const expected = Math.ceil(order.amount / 0.7);
+        if (Math.abs(info.userBasePriceInRobux - expected) > 2) {
+          lines.push(`\n⛔ <b>ЦЕНА-СТОП</b>`);
+          lines.push(`Цена пасса <b>${info.userBasePriceInRobux} R$</b> ≠ ожидаемой <b>${expected} R$</b> (номинал ${order.amount}). Скрипт не выдан.`);
+          await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
+          return;
+        }
+
+        const donor = await getAuthenticatedUser(cookie);
+        const script = buildGamepassPurchaseScript({
+          gamepassId: gpId,
+          productId: info.productId,
+          expectedPrice: expected,
+          sellerId: info.creatorId,
+          buyerUserId: donor?.id ?? null,
+        });
+
+        lines.push(`\n1. Открой <a href="${gamepassPageUrl(gpId)}">страницу пасса</a> в браузере донора${donor ? ` (<b>${escapeHtml(donor.name)}</b>)` : ""}.`);
+        lines.push(`2. F12 → Console → вставь скрипт → Enter.`);
+        lines.push(`3. Откроется официальное окно Roblox — сверь аккаунт и цену, нажми <b>Buy</b>.`);
+        lines.push(`\nЕсли страница пасса отдаёт 404 (cross-game sales выключены) — открой любую другую страницу game-pass, скрипт всё равно сработает.`);
         lines.push(`<code>${escapeHtml(script)}</code>`);
 
-        await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
+        await ctx.reply(lines.join("\n"), { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
       } catch (err) {
         console.error("[ps] error:", err);
         await ctx.reply("❌ Ошибка генерации скрипта");

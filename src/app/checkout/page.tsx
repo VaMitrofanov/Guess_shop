@@ -17,7 +17,11 @@ import {
 import Navbar from "@/components/navbar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { usePricing } from "@/hooks/usePricing";
-import { gamepassPriceMatches, rankSellableGamepasses } from "@/lib/gamepass-search-view";
+import {
+  gamepassPriceMatches,
+  rankSellableGamepasses,
+  robuxForGamepassPrice,
+} from "@/lib/gamepass-search-view";
 import styles from "./checkout.module.css";
 
 const MIN_ROBUX = 100;
@@ -44,6 +48,13 @@ type RobloxPass = {
   isForSale?: boolean;
 };
 
+type RobloxAccount = {
+  id: string;
+  username: string;
+  displayName: string;
+  avatarUrl?: string | null;
+};
+
 const normalizeAmount = (value: string) => Math.min(MAX_ROBUX, Math.max(MIN_ROBUX, Number.parseInt(value, 10) || 1000));
 const grossPassPrice = (amount: number) => Math.ceil(amount / 0.7);
 
@@ -55,10 +66,11 @@ function CheckoutContent() {
   const { loading: priceLoading, getPrice, getBreakdown } = usePricing();
 
   const [stage, setStage] = useState<"select" | "confirm">("select");
-  const [robux] = useState(initialAmount);
+  const [robux, setRobux] = useState(initialAmount);
   const [searchQuery, setSearchQuery] = useState(rememberedUsername);
   const [username, setUsername] = useState(rememberedUsername);
   const [gamepasses, setGamepasses] = useState<RobloxPass[]>([]);
+  const [account, setAccount] = useState<RobloxAccount | null>(null);
   const [selectedPass, setSelectedPass] = useState<RobloxPass | null>(null);
   const [searching, setSearching] = useState(false);
   const [quoteLoading, setQuoteLoading] = useState(false);
@@ -72,7 +84,7 @@ function CheckoutContent() {
   const price = getPrice(robux);
   const breakdown = getBreakdown(robux);
   const expectedPassPrice = useMemo(() => grossPassPrice(robux), [robux]);
-  const selectedPriceMatches = !!selectedPass && gamepassPriceMatches(Number(selectedPass.price), expectedPassPrice, 0);
+  const selectedPriceMatches = !!selectedPass && gamepassPriceMatches(Number(selectedPass.price), expectedPassPrice);
 
   const lookupUsername = async (nick: string, silent = false) => {
     const normalized = nick.trim();
@@ -81,15 +93,17 @@ function CheckoutContent() {
     setError("");
     setGamepasses([]);
     setSelectedPass(null);
+    setAccount(null);
     try {
       const res = await fetch(`/api/roblox/gamepasses?query=${encodeURIComponent(normalized)}`);
       const data = await res.json();
       if (res.ok && data.success) {
         const ranked = rankSellableGamepasses<RobloxPass>(data.gamepasses ?? [], expectedPassPrice);
         setUsername(data.detectedUsername || normalized);
+        setAccount(data.account ?? null);
         setGamepasses(ranked);
         const remembered = rememberedGamepassId ? ranked.find((pass) => String(pass.id) === rememberedGamepassId) : null;
-        const matching = ranked.filter((pass) => gamepassPriceMatches(Number(pass.price), expectedPassPrice, 0));
+        const matching = ranked.filter((pass) => gamepassPriceMatches(Number(pass.price), expectedPassPrice));
         if (remembered) setSelectedPass(remembered);
         else if (matching.length === 1) setSelectedPass(matching[0]);
         if (ranked.length === 0) {
@@ -138,6 +152,7 @@ function CheckoutContent() {
     setError("");
     setGamepasses([]);
     setSelectedPass(null);
+    setAccount(null);
     try {
       const res = await fetch(`/api/roblox/gamepasses?query=${encodeURIComponent(query)}`);
       const data = await res.json();
@@ -154,6 +169,13 @@ function CheckoutContent() {
     } finally {
       setSearching(false);
     }
+  };
+
+  const selectPass = (pass: RobloxPass) => {
+    const availableRobux = robuxForGamepassPrice(Number(pass.price));
+    setSelectedPass(pass);
+    setError("");
+    if (availableRobux && availableRobux !== robux) setRobux(availableRobux);
   };
 
   const prepareConfirmation = async () => {
@@ -178,7 +200,7 @@ function CheckoutContent() {
         setError(data.error || "Не удалось зафиксировать цену.");
         return;
       }
-      if (Number(selectedPass.price) !== data.gamepassPriceRobux) {
+      if (!gamepassPriceMatches(Number(selectedPass.price), data.gamepassPriceRobux)) {
         setError(`Поставь цену ${data.gamepassPriceRobux.toLocaleString("ru-RU")} R$ и найди пасс снова.`);
         return;
       }
@@ -256,7 +278,10 @@ function CheckoutContent() {
                 <button type="button" onClick={() => void handleSearch()} disabled={searching || !searchQuery.trim()}>{searching ? <Loader2 size={19} className={styles.spin} /> : <Search size={18} />} Найти</button>
               </div>
               <p className={styles.helper}>По нику проверяем все публичные игры автоматически. По ссылке или ID — сразу открываем нужный геймпасс.</p>
-              {username && !searching && <div className={styles.accountChip}><span>{username.slice(0,1).toUpperCase()}</span><div><small>Аккаунт найден</small><strong>{username}</strong></div><Check size={18} /></div>}
+              {username && !searching && <div className={styles.accountChip}>
+                <span className={styles.accountAvatar}>{account?.avatarUrl ? <img src={account.avatarUrl} alt={`Аватар ${username}`} /> : username.slice(0,1).toUpperCase()}</span>
+                <div><small>Аккаунт найден</small><strong>{account?.displayName || username}</strong>{account?.displayName && account.displayName !== username && <em>@{username}</em>}</div><Check size={18} />
+              </div>}
             </div>
 
             {gamepasses.length > 0 && (
@@ -265,11 +290,12 @@ function CheckoutContent() {
                 <p className={styles.resultLead}>Подходящие для {robux.toLocaleString("ru-RU")} R$ уже наверху. Если готов только один — мы выбрали его автоматически.</p>
                 <div className={styles.passGrid}>
                     {gamepasses.map((pass) => {
-                      const matches = gamepassPriceMatches(Number(pass.price), expectedPassPrice, 0);
+                      const matches = gamepassPriceMatches(Number(pass.price), expectedPassPrice);
                       const active = String(selectedPass?.id ?? "") === String(pass.id);
-                      return <button type="button" key={String(pass.id)} onClick={() => setSelectedPass(pass)} className={active ? styles.passSelected : styles.passCard}>
+                      const passRobux = robuxForGamepassPrice(Number(pass.price));
+                      return <button type="button" key={String(pass.id)} onClick={() => selectPass(pass)} className={active ? styles.passSelected : styles.passCard}>
                         <span className={styles.passImage}>{pass.image ? <img src={pass.image} alt="" /> : <WalletCards size={22} />}</span>
-                        <span className={styles.passInfo}><strong>{pass.name}</strong><small>{Number(pass.price).toLocaleString("ru-RU")} R$</small><em className={matches ? styles.priceOk : styles.priceWrong}>{matches ? "Цена подходит" : `Нужно ${expectedPassPrice.toLocaleString("ru-RU")} R$`}</em></span>
+                        <span className={styles.passInfo}><strong>{pass.name}</strong><small>Цена пасса · {Number(pass.price).toLocaleString("ru-RU")} R$</small><em className={matches ? styles.priceOk : passRobux ? styles.priceAlternative : styles.priceWrong}>{matches ? `Получишь ${robux.toLocaleString("ru-RU")} R$` : passRobux ? `Купить ${passRobux.toLocaleString("ru-RU")} R$ через этот пасс` : "Вне доступного диапазона"}</em></span>
                         {active && <Check size={19} />}
                       </button>;
                     })}
@@ -299,9 +325,16 @@ function CheckoutContent() {
           <section className={styles.panel}>
             <button type="button" className={styles.backButton} onClick={() => { setStage("select"); setQuote(null); setError(""); }}><ArrowLeft size={17} /> Назад к выбору</button>
             <div className={styles.panelHeading}><span className={styles.panelIcon}><Check size={21} /></span><div><span>Заказ готов</span><h2>Проверь данные</h2></div></div>
-            <div className={styles.confirmProduct}>
-              <span className={styles.passImage}>{selectedPass?.image ? <img src={selectedPass.image} alt="" /> : <WalletCards size={22} />}</span>
-              <div><small>Геймпасс</small><strong>{selectedPass?.name}</strong><span>{username} · ID {selectedPass?.id}</span></div>
+            <div className={styles.confirmPair}>
+              <div className={styles.confirmIdentity}>
+                <span className={styles.confirmAvatar}>{account?.avatarUrl ? <img src={account.avatarUrl} alt={`Аватар ${username}`} /> : <UserRound size={25} />}</span>
+                <div><small>Roblox-аккаунт</small><strong>{account?.displayName || username}</strong><span>@{username}</span></div>
+              </div>
+              <ArrowRight className={styles.confirmArrow} size={22} aria-hidden="true" />
+              <div className={styles.confirmIdentity}>
+                <span className={styles.passImage}>{selectedPass?.image ? <img src={selectedPass.image} alt={`Геймпасс ${selectedPass.name}`} /> : <WalletCards size={22} />}</span>
+                <div><small>Геймпасс для покупки</small><strong>{selectedPass?.name}</strong><span>{selectedPass?.price.toLocaleString("ru-RU")} R$ · ID {selectedPass?.id}</span></div>
+              </div>
             </div>
             <label className={styles.formLabel} htmlFor="receipt-email">Email для электронного чека</label>
             <input id="receipt-email" className={styles.emailInput} type="email" autoComplete="email" value={receiptEmail} onChange={(event) => setReceiptEmail(event.target.value.trim())} placeholder="you@example.com" />

@@ -24,6 +24,7 @@ import { ADMIN_IDS } from "../shared/admin";
 import { tgSend, vkSend, escapeHtml } from "../shared/notify";
 import {
   getGamepassProductInfo,
+  isLegacyPurchaseFlowFailure,
   purchaseGamepassVerified,
   getRobuxBalance,
 } from "../shared/roblox";
@@ -215,15 +216,22 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
         await (db as any).wbOrder.updateMany({ where: { id: order.id, status: "IN_PROGRESS" }, data: { status: "PENDING" } });
         consecutiveFails++;
         const cookieDead = result.reason === "CookieExpired";
-        await annotateOnce(order.id, "[AUTOBUY-FAIL", result.msg.slice(0, 120));
+        const legacyFlowRemoved = isLegacyPurchaseFlowFailure(result.reason ?? result.msg);
+        await annotateOnce(
+          order.id,
+          legacyFlowRemoved ? "[AUTOBUY-BLOCKED" : "[AUTOBUY-FAIL",
+          legacyFlowRemoved
+            ? "Roblox отключил legacy cookie-выкуп; заказ оставлен в очереди"
+            : result.msg.slice(0, 120),
+        );
         await alertAdmins(
           `⚠️ <b>Автовыкуп не прошёл</b> · <code>${order.wbCode}</code> · ${info.priceInRobux} R$\n` +
-          `Причина: <code>${escapeHtml(result.msg)}</code>`
+          `Причина: <code>${escapeHtml(legacyFlowRemoved ? "Roblox отключил legacy cookie-выкуп; нужен официальный in-experience bridge" : result.msg)}</code>`
         );
-        if (cookieDead || consecutiveFails >= 3) {
-          backoffUntil = Date.now() + 15 * 60 * 1000;
+        if (legacyFlowRemoved || cookieDead || consecutiveFails >= 3) {
+          backoffUntil = Date.now() + (legacyFlowRemoved ? 60 : 15) * 60 * 1000;
           await alertAdmins(
-            `⛔ <b>Автовыкуп приостановлен на 15 мин</b> (${cookieDead ? "cookie протух" : "3 ошибки подряд"}).\n` +
+            `⛔ <b>Автовыкуп приостановлен на ${legacyFlowRemoved ? 60 : 15} мин</b> (${legacyFlowRemoved ? "legacy purchase endpoint удалён Roblox" : cookieDead ? "cookie протух" : "3 ошибки подряд"}).\n` +
             `Kill-switch НЕ снят — проверь донора и /autobuy status.`
           );
           break;

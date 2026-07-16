@@ -26,7 +26,7 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [deploy.md](deploy.md) | Как деплоится каждый сервис (без секретов) |
 | [security.md](security.md) | Модель угроз, известные риски, что проверять перед прод-изменениями |
 | [trello-workflow.md](trello-workflow.md) | Правила работы с Trello: понятные карточки, техническая расшифровка и статусы |
-| [roblox-plus-buyout-plan.md](roblox-plus-buyout-plan.md) | Roblox Plus 10–20%: классификация и пачка, результат production-canary, блок cookie-only покупки и варианты P0 |
+| [roblox-plus-buyout-plan.md](roblox-plus-buyout-plan.md) | Транспорт выкупа ГП: почему серверный fetch не проходит chef, браузерный скрипт покупки и его гарды; Roblox Plus 10–20% — классификация и пачка |
 
 ## Три канала — единая экосистема
 

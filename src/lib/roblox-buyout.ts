@@ -311,8 +311,17 @@ export async function purchaseGamepassWithCookie(
   };
 }
 
-function classifyPurchaseFailure(reason: string): PurchaseFailureKind {
-  if (/insufficient.?funds/i.test(reason)) return "internal";
+/**
+ * Roblox retired `economy/v1/purchases/products` on 2026-04-10. Its current
+ * response is the old-shaped `InvalidArguments`/`Invalid arguments.` error.
+ * This is a transport outage on our side, not a bad partner row/gamepass.
+ */
+export function isLegacyPurchaseFlowFailure(reason: string | null | undefined): boolean {
+  return /invalid.?arguments|invalid.?parameter/i.test(String(reason ?? ""));
+}
+
+export function classifyPurchaseFailure(reason: string): PurchaseFailureKind {
+  if (/insufficient.?funds/i.test(reason) || isLegacyPurchaseFlowFailure(reason)) return "internal";
   if (/price.?changed|not.?for.?sale|invalid.?product|seller/i.test(reason)) return "row";
   return "unknown";
 }
@@ -326,7 +335,7 @@ function classifyPurchaseFailure(reason: string): PurchaseFailureKind {
 // менять синхронно.
 
 /** Отказы, при которых Roblox гарантированно НЕ провёл транзакцию. */
-const CLEAN_REFUSAL_RE = /insufficient.?funds|not.?for.?sale|price.?changed|cookie/i;
+const CLEAN_REFUSAL_RE = /insufficient.?funds|not.?for.?sale|price.?changed|cookie|invalid.?arguments|invalid.?parameter/i;
 
 /**
  * Нужна ли контрольная проверка владения после провала покупки.
@@ -338,6 +347,19 @@ export function needsOwnershipCheck(reason: string | null | undefined): boolean 
 }
 
 /**
+ * userId аккаунта, которому принадлежит cookie. null — определить не удалось.
+ */
+export async function getAuthenticatedUserId(cookie: string): Promise<number | null> {
+  const uRes = await fetch("https://users.roblox.com/v1/users/authenticated", {
+    headers: { ...ROBLOX_UA, Cookie: `.ROBLOSECURITY=${cookie}` },
+    signal: AbortSignal.timeout(8_000),
+  }).catch(() => null);
+  if (!uRes?.ok) return null;
+  const user = (await uRes.json().catch(() => null)) as { id?: number } | null;
+  return user?.id ?? null;
+}
+
+/**
  * Владеет ли аккаунт cookie геймпассом. true/false — достоверный ответ,
  * null — проверка недоступна (сеть/авторизация), трактовать консервативно.
  */
@@ -345,16 +367,11 @@ export async function verifyGamepassOwnership(
   cookie: string,
   gamepassId: string | number,
 ): Promise<boolean | null> {
-  const uRes = await fetch("https://users.roblox.com/v1/users/authenticated", {
-    headers: { ...ROBLOX_UA, Cookie: `.ROBLOSECURITY=${cookie}` },
-    signal: AbortSignal.timeout(8_000),
-  }).catch(() => null);
-  if (!uRes?.ok) return null;
-  const user = (await uRes.json().catch(() => null)) as { id?: number } | null;
-  if (!user?.id) return null;
+  const userId = await getAuthenticatedUserId(cookie);
+  if (!userId) return null;
 
   const res = await fetch(
-    `https://inventory.roblox.com/v1/users/${user.id}/items/GamePass/${gamepassId}`,
+    `https://inventory.roblox.com/v1/users/${userId}/items/GamePass/${gamepassId}`,
     { headers: ROBLOX_UA, signal: AbortSignal.timeout(8_000) },
   ).catch(() => null);
   if (!res?.ok) return null;

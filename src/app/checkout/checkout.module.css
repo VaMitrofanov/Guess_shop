@@ -23,8 +23,9 @@
 .searchRow>button:disabled,.primaryButton:disabled { opacity:.45; cursor:not-allowed; box-shadow:none; }
 .helper { margin:10px 0 0; color:#81788f; font-size:16px; line-height:1.5; }
 .accountChip { margin-top:16px; padding:13px; display:flex; align-items:center; gap:11px; border-radius:15px; background:#e5faf3; color:#2d6b58; }
-.accountChip>span { width:35px; height:35px; display:grid; place-items:center; border-radius:11px; background:#45d6aa; color:#163f33; font-size:14px; font-weight:900; }
-.accountChip div { flex:1; }.accountChip small,.accountChip strong { display:block; }.accountChip small { font-size:13px; }.accountChip strong { font-size:15px; }
+.accountChip>span { width:44px; height:44px; display:grid; place-items:center; overflow:hidden; border-radius:13px; background:#45d6aa; color:#163f33; font-size:14px; font-weight:900; }
+.accountAvatar img { width:100%; height:100%; object-fit:cover; }
+.accountChip div { flex:1; }.accountChip small,.accountChip strong,.accountChip em { display:block; }.accountChip small { font-size:13px; }.accountChip strong { font-size:16px; }.accountChip em { margin-top:2px; color:#4f7d6d; font-size:13px; font-style:normal; }
 .resultLead { margin:-8px 0 16px; color:#746b86; font-size:16px; line-height:1.55; }
 .choiceGrid,.passGrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
 .choice,.choiceSelected,.passCard,.passSelected { min-width:0; display:flex; align-items:center; gap:11px; padding:13px; border:1px solid #ddd6ed; border-radius:15px; background:#fbfaff; color:#251b3f; text-align:left; cursor:pointer; transition:border-color .2s ease,transform .2s ease,background .2s ease; }
@@ -34,7 +35,7 @@
 .choiceAvatar img,.passImage img { width:100%; height:100%; object-fit:cover; }
 .choice>span:nth-child(2),.choiceSelected>span:nth-child(2) { min-width:0; flex:1; }.choice strong,.choice small { display:block; }.choice strong,.choiceSelected strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:16px; }.choice small,.choiceSelected small { margin-top:3px; color:#8c8399; font-size:15px; }
 .passInfo { min-width:0; flex:1; }.passInfo strong,.passInfo small,.passInfo em { display:block; }.passInfo strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:16px; }.passInfo small { margin-top:3px; color:#665d78; font-size:15px; font-weight:800; }.passInfo em { width:max-content; max-width:100%; margin-top:6px; padding:4px 7px; border-radius:7px; font-size:14px; font-style:normal; font-weight:800; }
-.priceOk { background:#ddf8ef; color:#31745f; }.priceWrong { background:#fff0f2; color:#bd5267; }
+.priceOk { background:#ddf8ef; color:#31745f; }.priceAlternative { background:#eee9ff; color:#634ac5; }.priceWrong { background:#fff0f2; color:#bd5267; }
 .loadingState { min-height:90px; display:flex; align-items:center; justify-content:center; gap:9px; color:#766d87; font-size:15px; font-weight:700; }
 .errorBox { display:flex; align-items:flex-start; gap:10px; padding:15px; border:1px solid #f0c1ca; border-radius:14px; background:#fff2f4; color:#a42e47; font-size:16px; font-weight:750; line-height:1.5; }.errorBox svg { flex:0 0 auto; margin-top:2px; }.errorBox a { display:block; width:max-content; max-width:100%; margin-top:6px; color:#7556e8; font-weight:900; text-decoration:underline; text-underline-offset:3px; }
 .summaryCard { position:sticky; top:94px; padding:26px; }
@@ -46,12 +47,15 @@
 .guideLink { margin-top:15px; display:block; color:#7556e8; text-align:center; font-size:15px; font-weight:800; }
 .confirmGrid { grid-template-columns:minmax(0,1fr) 360px; max-width:920px; margin:0 auto; }
 .backButton { margin-bottom:20px; display:flex; align-items:center; gap:7px; border:0; background:transparent; color:#7556e8; font-size:13px; font-weight:800; cursor:pointer; }
-.confirmProduct { display:flex; align-items:center; gap:13px; margin-bottom:22px; padding:14px; border-radius:15px; background:#f1edff; }.confirmProduct small,.confirmProduct strong,.confirmProduct span { display:block; }.confirmProduct small { color:#867d95; font-size:13px; }.confirmProduct strong { margin-top:2px; font-size:16px; }.confirmProduct span { margin-top:3px; color:#766d86; font-size:13px; }
+.confirmPair { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:11px; margin-bottom:22px; }
+.confirmIdentity { min-width:0; display:flex; align-items:center; gap:11px; padding:14px; border-radius:15px; background:#f1edff; }
+.confirmIdentity div { min-width:0; }.confirmIdentity small,.confirmIdentity strong,.confirmIdentity div>span { display:block; }.confirmIdentity small { color:#867d95; font-size:13px; }.confirmIdentity strong { margin-top:2px; overflow:hidden; font-size:16px; text-overflow:ellipsis; white-space:nowrap; }.confirmIdentity div>span { margin-top:3px; overflow:hidden; color:#766d86; font-size:13px; text-overflow:ellipsis; white-space:nowrap; }
+.confirmAvatar { width:46px; height:46px; flex:0 0 auto; display:grid; place-items:center; overflow:hidden; border-radius:14px; background:#e0f7ef; color:#27745c; }.confirmAvatar img { width:100%; height:100%; object-fit:cover; }.confirmArrow { flex:0 0 auto; color:#7556e8; }
 .formLabel { display:block; margin-bottom:8px; color:#61586f; font-size:16px; font-weight:800; }.emailInput { width:100%; min-height:56px; padding:0 15px; border:1.5px solid #c9bfe8; border-radius:14px; outline:0; background:#fbfaff; color:#251b3f; font-size:18px; font-weight:700; scroll-margin-block:24px 180px; }.emailInput:focus { border-color:#7556e8; box-shadow:0 0 0 4px rgba(117,86,232,.1); }
 .consentBox { margin-top:20px; display:flex; align-items:flex-start; gap:11px; padding:15px; border:1px solid #ded7ee; border-radius:14px; background:#fbfaff; color:#62596f; font-size:16px; line-height:1.55; cursor:pointer; }.consentBox a { color:#7556e8; text-decoration:underline; text-underline-offset:2px; }
 .pageLoader { min-height:70vh; display:grid; place-items:center; color:#7556e8; }.spin { animation:checkoutSpin .8s linear infinite; }@keyframes checkoutSpin{to{transform:rotate(360deg)}}
 @media(max-width:900px){.checkoutGrid,.confirmGrid{grid-template-columns:1fr}.summaryCard{position:static}.choiceGrid,.passGrid{grid-template-columns:1fr}.progressHeader{align-items:flex-start}.stageIndicator{padding-top:8px}}
-@media(max-width:620px){.shell{width:calc(100% - 28px);padding:42px 0 74px}.progressHeader{flex-direction:column}.progressHeader h1{font-size:36px}.progressHeader p{font-size:16px}.panel,.summaryCard{padding:20px 16px;border-radius:18px}.searchRow{grid-template-columns:1fr}.searchRow>button{width:100%}.panelHeading h2{font-size:22px}.summaryCard h2{font-size:34px}.choiceGrid,.passGrid{grid-template-columns:1fr}.confirmProduct{align-items:flex-start}.stageIndicator{align-self:flex-start}}
+@media(max-width:620px){.shell{width:calc(100% - 28px);padding:42px 0 74px}.progressHeader{flex-direction:column}.progressHeader h1{font-size:36px}.progressHeader p{font-size:16px}.panel,.summaryCard{padding:20px 16px;border-radius:18px}.searchRow{grid-template-columns:1fr}.searchRow>button{width:100%}.panelHeading h2{font-size:22px}.summaryCard h2{font-size:34px}.choiceGrid,.passGrid{grid-template-columns:1fr}.confirmPair{grid-template-columns:1fr}.confirmArrow{margin:auto;transform:rotate(90deg)}.stageIndicator{align-self:flex-start}}
 
 :global(html[data-theme="dark"]) .shell { color:#f4f0ff; }
 :global(html[data-theme="dark"]) .progressHeader p,
@@ -78,6 +82,6 @@
 :global(html[data-theme="dark"]) .choiceAvatar,
 :global(html[data-theme="dark"]) .passImage,
 :global(html[data-theme="dark"]) .panelIcon,
-:global(html[data-theme="dark"]) .confirmProduct { background:#241b3b; }
+:global(html[data-theme="dark"]) .confirmIdentity { background:#241b3b; }
 :global(html[data-theme="dark"]) .summaryRows { border-color:#352b48; }
 :global(html[data-theme="dark"]) .primaryButton { box-shadow:4px 4px 0 #45d6aa; }

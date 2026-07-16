@@ -52,7 +52,9 @@ export function SiteObservability() {
       seen.add(key);
       send({ type: "client-error", route: route(), kind, fingerprint: fingerprint(source) });
     };
-    const onError = (event: ErrorEvent) => report(event.error?.name || "Error", `${event.message}:${event.filename}`);
+    // Keep the fingerprint stable across deploys: chunk filenames change on
+    // every build and made one browser bug look like several unrelated errors.
+    const onError = (event: ErrorEvent) => report(event.error?.name || "Error", event.message || "script-error");
     const onRejection = (event: PromiseRejectionEvent) => {
       const reason = event.reason;
       report(reason instanceof Error ? reason.name : "UnhandledRejection", String(reason));

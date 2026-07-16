@@ -3,6 +3,19 @@
 Оба бота — отдельные процессы. Воркфлоу идентичен. VK шлёт уведомления менеджерам через
 Telegram (`bots/shared/notify.ts` → `tgSend` → `ADMIN_IDS`).
 
+## Аварийное объявление о недоступности выкупа
+
+Одноразовая рассылка запускается скриптом `scripts/broadcast-roblox-maintenance.mjs`.
+Он публикует согласованный текст в Telegram-канале и на стене VK-сообщества, затем
+отправляет его пользователям с незавершёнными реальными `WbOrder` (тестовые,
+завершённые и отклонённые заказы исключаются). Перед запуском доступен режим
+`--dry-run`, который только показывает размер аудитории.
+
+Последняя рассылка 16.07.2026: публикация в оба сообщества успешна; в личные сообщения
+доставлено 43 из 44 Telegram-уведомлений и 23 из 31 VK-уведомления. Недоставленные
+сообщения не помечаются как доставленные и требуют отдельного ручного контакта при
+необходимости.
+
 ## Общее
 
 - `bots/shared/admin.ts` — карточки заказов/отзывов, объект `CB` со всеми `callback_data`.
@@ -293,6 +306,12 @@ TG — `editMessageText` / `editMessageMedia` (фото-карточка одн�
 
 ### Фоновые воркеры (`bots/tg/auto-workers.ts`, старт из `crons.ts` → `startAutoWorkers`)
 
+Browser purchase transport пока **не подключён к автовыкупу**: он используется как
+контролируемый ручной скрипт в TG/TWA и отдельный server-canary. Автовыкуп не пробует
+угаданные Roblox endpoints: после удаления legacy API он оставляет заказ в `PENDING` с
+`LEGACY_PURCHASE_FLOW`. Описание browser runbook и условия будущей интеграции — в
+[`roblox-plus-buyout-plan.md`](roblox-plus-buyout-plan.md).
+
 Оба kill-switch по умолчанию **OFF** (в `GlobalSettings`), включает владелец командой.
 
 - **🤖 Автовыкуп до порога слива (+1).** Тик 60 с. Пока `autoBuyoutEnabled=true` и баланс
@@ -313,15 +332,17 @@ TG — `editMessageText` / `editMessageMedia` (фото-карточка одн�
   (2026-07-06):** алерт только при `0 < balance ≤ threshold` — при балансе 0 (уже слито)
   молчим и дедуп не взводим; успешный слив (ручной из TWA `/api/twa/drain` и автослив)
   сбрасывает `autoBuyoutBelowSince`, чтобы цикл после пополнения начинался чисто.
-  **Roblox Plus / Managed Pricing (фикс 2026-07-14):** product-info перед покупкой читается
+  **Roblox purchase transport (фиксы 14–16.07):** product-info перед покупкой читается
   с cookie donor на официальном домене Roblox. `UserBasePriceInRobux` валидирует номинал;
   `PriceInRobux` используется для расчёта ожидаемого списания и пачки. Бот распознаёт
   разницу как Plus только при единственном корректном detail `RobloxPlusSubscription`
   10%/20%; unknown/mixed скидка ставит `ERROR/REGIONAL_PRICE`. Production-canary доказал,
   что cookie-only pass purchase не принимает Plus buyer-price: manual/script, partner и
-  auto-buyout теперь останавливаются с `ROBLOX_PLUS_FLOW` без purchase POST. Non-Plus
-  покупки остаются на legacy Economy v1; auto-buyout переносит Plus-заказ в `ERROR` с
-  отдельным кодом для фильтрации. Cookie никогда не отправляется roproxy;
+  auto-buyout останавливаются с `ROBLOX_PLUS_FLOW` без purchase POST. 16.07 подтверждено,
+  что Roblox удалил сам legacy Economy v1 purchase endpoint: non-Plus попытка возвращает
+  `InvalidArguments`. Это внутренний transport-блок, а не ошибка GP: автовыкуп откатывает
+  claim в `PENDING`, пишет `[AUTOBUY-BLOCKED]`, алертит админов и после первого отказа
+  делает паузу 60 минут вместо трёх повторов. Cookie никогда не отправляется roproxy;
   недоступный buyer lookup останавливает денежную операцию.
   Управление: `/autobuy` (статус), `/autobuy on|off`, `/autobuy threshold N`.
   **Контрольная проверка владения (Ф1, 2026-07-12).** Roblox при таймауте/5xx нередко

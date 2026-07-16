@@ -121,8 +121,11 @@ Postgres; сделать backup/restore drill, миграцию и сверку 
 `TerminalKey/PaymentId/OrderId/Amount`, а checkout доверял клиентской сумме и не проверял
 owner/цену геймпасса.
 
-**Код 2026-07-13:** checkout принимает только owned active quote, проверяет TTL/version,
-Roblox owner/sale-state/exact gross price и обязательный UUID. Quote, SITE-order,
+**Код 2026-07-13; UX guard выровнен 2026-07-16:** checkout принимает только owned active
+quote, проверяет TTL/version, Roblox owner/sale-state и gross price с тем же узким допуском
+±2 R$, что production buyout guard (компенсирует только целочисленное округление комиссии),
+а также обязательный UUID. Произвольная цена и чужой/снятый с продажи пасс блокируются.
+Quote, SITE-order,
 `PaymentAttempt`, event и outbox создаются атомарно; публичный статус защищён случайным
 token (в БД только SHA-256) либо сессией владельца. Callback возвращает `OK` только после
 strict signature/terminal/payment/order/amount checks и serializable commit, разрешает
@@ -165,7 +168,7 @@ merge matrix на prod-like clone, аналогичные явные link/unlink
 recovery/admin-console. Source-профиль пока остаётся инертным audit anchor;
 автоматического rollback UI нет.
 
-### 14. Выкуп геймпасса по live-цене без сверки с номиналом (TOCTOU) — ✅ ЗАКРЫТО (2026-07-12)
+### 14. Выкуп геймпасса по live-цене без сверки с номиналом (TOCTOU) — ✅ ЗАКРЫТО (2026-07-12), пробел в TG закрыт 2026-07-17
 
 **Инцидент 12.07:** клиент подложил один геймпасс в два заказа и поднял его цену между
 приёмом ботом и ручным выкупом (715 → 1143 R$). TWA-выкуп покупал по live-цене без сверки
@@ -182,6 +185,12 @@ recovery/admin-console. Source-профиль пока остаётся инер
   провалидированной цене.
 - `api/twa/orders` `purchase-script` — при расхождении скрипт не выдаётся (409); в сам
   скрипт зашита ожидаемая по номиналу цена (не live), устаревший скрипт Roblox отклонит.
+- ⚠️ **Пробел, найденный 17.07:** гард `Ш2` доехал только до TWA. TG-кнопка «📋 Скрипт»
+  (`ps:` в `bots/tg/handlers.ts`) сверки с номиналом **не имела** и зашивала live-цену —
+  тот же сценарий инцидента был воспроизводим через TG. Закрыто 17.07 вместе с переходом
+  на браузерный скрипт: сверка `|base − ceil(amount/0.7)| ≤ 2` и зашитая ожидаемая цена.
+  Урок: точек выкупа четыре (TWA orders, TWA account, TG script, автовыкуп) — гард нужно
+  проверять на каждой, «закрыто» по одной ≠ закрыто.
 - `api/twa/roblox-account/purchase` — если пасс привязан к активному заказу, цена покупки
   сверяется с номиналом этого заказа (409 при расхождении); свободная покупка без заказа
   не блокируется, но поиск показывает ожидаемую цену привязанного заказа.
@@ -228,13 +237,6 @@ discount оставляет fail-closed. Реальный canary показал,
 возвращён на legacy v1, а Plus-покупка во всех денежных путях блокируется typed-кодом
 `ROBLOX_PLUS_FLOW` до официального client/experience flow. Перебор guessed endpoint на
 реальных заказах запрещён. Полный план — `docs/roblox-plus-buyout-plan.md`.
-
-Операционный инвариант: базовая цена отвечает на вопрос «правильный ли геймпасс для заказа»;
-buyer-specific цена отвечает на вопрос «сколько ожидаемо спишется» и используется для
-расчёта пачки. Отличие классифицируется как Plus только при доказанном detail, но сам
-cookie-only purchase остаётся заблокирован; остальные отличия — стоп-сигнал и поиск замены.
-Официальные описания: https://create.roblox.com/docs/production/monetization/roblox-plus и
-https://create.roblox.com/docs/production/monetization/passes
 
 ### 15. Компрометация кода до покупателя (ПВЗ-фрод) — HIGH, 🔴 ОТКРЫТО, план утверждён (2026-07-13)
 
@@ -298,6 +300,12 @@ message, stack, query string, email, order token, cookie и user/session ID ко
 запрещены (`ClientSignalSchema`). Серверный endpoint ограничен token-bucket; в TG уходят
 только poor/error-сигналы и не больше четырёх алертов за burst с медленным refill.
 
+Разбор owner-скриншота 16.07 подтвердил: `FCP/LCP/TTFB/CLS` — это измерения скорости и
+стабильности интерфейса, не ошибки Telegram-бота. Повторяющийся `TypeError` шёл из `/guide`;
+для старых WebView закрыты небезопасные обращения к `matchMedia(...).matches` и
+`IntersectionObserver`. Fingerprint теперь строится без build-chunk filename, поэтому один
+дефект сохраняет один идентификатор между deploy. Raw message по-прежнему не собирается.
+
 Это базовая наблюдаемость, не полноценный APM: server logs нужно подключить к retention/
 дашборду, а перед несколькими Web-репликами перенести alert bucket в общий store. Нельзя
 расширять payload raw exception/URL без отдельного privacy-review.
@@ -305,6 +313,28 @@ message, stack, query string, email, order token, cookie и user/session ID ко
 Сигналы по pathname `/twa` относятся к TWA и проверяются отдельно от внешних шаблонных
 проектов. Уведомление с pathname вроде `artifact-template-analytics-dashboard` не является
 сигналом RobloxBank и не диагностирует этот репозиторий.
+
+### 18. Новый purchase API не сверяет продавца — [ПРОДАВЕЦ-СТОП] остался без второй линии — 🟡 ПРИНЯТО (2026-07-17)
+
+Старый `economy/v1/purchases/products` принимал в теле `expectedCurrency` + `expectedPrice`
++ `expectedSellerId`, и Roblox **сам** отклонял покупку при несовпадении продавца. Это была
+вторая линия защиты после нашего seller-check.
+
+Новый `game-passes/v1/game-passes/{productId}/purchase` принимает в теле **только**
+`expectedPrice` (подтверждено разбором клиентского кода Roblox: ветка `"Game Pass" ===
+assetType` шлёт `{expectedPrice}`). Продавец не сверяется сервером Roblox вообще.
+
+Последствие: `[ПРОДАВЕЦ-СТОП]` теперь **единственная** защита от подмены продавца — сценарий
+общего/чужого ГП (инцидент 12.07, `YTGQ5BQ`/`QARJR71`) ловится только нами. Цена по-прежнему
+имеет вторую линию: `expectedPrice` уходит в Roblox, расхождение = `PriceChanged`.
+
+Митигация: seller-check продублирован на всех точках — сервер (`sellerMatchesOrder`,
+`purchase-guard.ts`) и сам браузерный скрипт (`roblox-purchase-script.ts` сверяет
+`info.Creator.Id` с зашитым числом до открытия окна покупки). Дублирование в скрипте
+намеренное: скрипт исполняется в браузере менеджера, вне нашего контроля.
+
+Остаётся открытым Ш5 из PLAN-gp-price-guard (запрет переиспользования ГП + «AlreadyOwned ≠
+автоуспех») — он от этой смены не зависит.
 
 ### 12. Детерминированный пароль в seed — ✅ ЗАКРЫТО В КОДЕ (2026-07-12)
 

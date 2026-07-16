@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { PriceQuoteStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { PRICE_TOL } from "@/lib/purchase-guard";
 
 export const WEB_ORDER_TERMS_VERSION = "2026-04-28";
 export const MIN_PAYMENT_KOPECKS = 1_000;
@@ -82,10 +83,10 @@ export function validateCheckoutGamepass(
     throw new WebOrderError("GAMEPASS_OWNER_MISMATCH", "Геймпасс принадлежит другому Roblox-пользователю");
   }
   const expected = expectedGamepassPrice(quote);
-  if (gamepass.price !== expected) {
+  if (Math.abs(gamepass.price - expected) > PRICE_TOL) {
     throw new WebOrderError(
       "GAMEPASS_PRICE_MISMATCH",
-      `Цена геймпасса должна быть ровно ${expected} R$`,
+      `Цена геймпасса должна быть ${expected} R$ (допуск ±${PRICE_TOL} R$)`,
     );
   }
   return expected;

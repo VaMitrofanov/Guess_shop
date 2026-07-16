@@ -320,6 +320,10 @@ Write-back: статус → `D`, комментарий → `E`.
   `UserBasePriceInRobux` обязана совпасть с номиналом задачи. Если buyer-specific
   `PriceInRobux` отличается, региональная цена не покупается: задача становится `FAILED`,
   а в таблицу пишется ошибка (фикс массового `PriceChanged`, 2026-07-14).
+  С 16.07 ответ удалённого Roblox legacy endpoint `InvalidArguments` классифицируется
+  отдельно как внутренняя transport-ошибка: задача возвращается в `READY`, списания и
+  write-back `ошибка` нет. Фактический cookie-only выкуп не возобновится без официального
+  in-experience purchase bridge.
 
 Требования к API:
 

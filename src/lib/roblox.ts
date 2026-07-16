@@ -45,6 +45,20 @@ export async function getRobloxUserById(userId: string) {
   }
 }
 
+export async function getRobloxAvatar(userId: string | number) {
+  try {
+    const res = await rFetch(
+      `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=true`,
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.data?.[0]?.imageUrl ?? null;
+  } catch (error) {
+    console.error("[Roblox] getRobloxAvatar:", error);
+    return null;
+  }
+}
+
 export async function getGamepassDetails(gamepassId: string) {
   try {
     // Attempt 1: modern game-passes API
@@ -220,12 +234,10 @@ export async function getUniverseGamepasses(universeId: string) {
   }
 }
 
-export async function getUserGamepasses(username: string) {
+export async function getUserGamepasses(username: string, resolvedUserId?: string | number) {
   try {
-    const user = await getRobloxUser(username);
-    if (!user) return [];
-
-    const userId = user.id;
+    const userId = resolvedUserId ?? (await getRobloxUser(username))?.id;
+    if (!userId) return [];
 
     // 1. Fetch user's public games
     const gamesRes = await rFetch(

@@ -50,11 +50,15 @@ function LazyVideo({ src, poster, alt }: { src: string; poster: string; alt?: st
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
     const arm = () => {
       const s = v.querySelector("source[data-src]") as HTMLSourceElement | null;
       if (s && !s.src) { s.src = s.dataset.src || ""; v.load(); }
     };
+    if (typeof IntersectionObserver === "undefined") {
+      arm();
+      return;
+    }
     const io = new IntersectionObserver((es) => {
       es.forEach((e) => {
         if (e.isIntersecting) {
@@ -84,6 +88,10 @@ function useReveal() {
     const r = root.current;
     if (!r) return;
     const els = Array.from(r.querySelectorAll(".wbi-reveal"));
+    if (typeof IntersectionObserver === "undefined") {
+      els.forEach((el) => el.classList.add("wbi-in"));
+      return;
+    }
     const io = new IntersectionObserver((es) => es.forEach((e) => {
       if (e.isIntersecting) { e.target.classList.add("wbi-in"); io.unobserve(e.target); }
     }), { threshold: 0.12 });

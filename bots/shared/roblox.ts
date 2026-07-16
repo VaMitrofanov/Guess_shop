@@ -983,25 +983,8 @@ function classifyRobloxPlusPrice(
   return { valid, percent: valid ? percent : null };
 }
 
-/**
- * Generates a browser-console JS script for purchasing a gamepass.
- * Values are pre-filled from product-info — manager just pastes into Antik console.
- */
-export function buildPurchaseScript(info: GamepassProductInfo): string {
-  return [
-    `(async()=>{`,
-    `const r=await fetch("https://auth.roblox.com/v2/logout",{method:"POST",credentials:"include"});`,
-    `const t=r.headers.get("x-csrf-token");`,
-    `if(!t){console.log("❌ Не залогинен");return}`,
-    `const b=await fetch("https://economy.roblox.com/v1/purchases/products/${info.productId}",{`,
-    `method:"POST",credentials:"include",`,
-    `headers:{"Content-Type":"application/json","X-CSRF-TOKEN":t},`,
-    `body:JSON.stringify({expectedCurrency:1,expectedPrice:${info.priceInRobux},expectedSellerId:${info.creatorId}})`,
-    `});const j=await b.json();`,
-    `console.log(j.purchased?"✅ Куплено: "+j.price+" R$":"❌ Ошибка: "+j.reason)`,
-    `})()`,
-  ].join("");
-}
+// Скрипт покупки собирается в roblox-purchase-script.ts: он общий для ручной консоли
+// и будущего headless-транспорта, и зашивает цену по номиналу, а не live-цену.
 
 // ── Server-side purchase via .ROBLOSECURITY cookie ──────────────────────────
 
@@ -1080,11 +1063,17 @@ export interface PurchaseResult {
   reason?: string;
 }
 
+/** Roblox removed the legacy cookie purchase endpoint on 2026-04-10. */
+export function isLegacyPurchaseFlowFailure(reason: string | null | undefined): boolean {
+  return /invalid.?arguments|invalid.?parameter/i.test(String(reason ?? ""));
+}
+
 export async function purchaseGamepassDirect(
   productId: number,
   expectedPrice: number,
   expectedSellerId: number,
   cookie: string,
+  gamepassId?: string | number,
 ): Promise<PurchaseResult> {
   try {
     const res = await purchaseFetch(
@@ -1165,7 +1154,7 @@ export async function getAuthenticatedUser(
 // менять синхронно.
 
 /** Отказы, при которых Roblox гарантированно НЕ провёл транзакцию. */
-const CLEAN_REFUSAL_RE = /insufficient.?funds|not.?for.?sale|price.?changed|cookie/i;
+const CLEAN_REFUSAL_RE = /insufficient.?funds|not.?for.?sale|price.?changed|cookie|invalid.?arguments|invalid.?parameter/i;
 
 /**
  * Нужна ли контрольная проверка владения после провала покупки.
@@ -1217,7 +1206,7 @@ export async function purchaseGamepassVerified(
   gamepassId: string | number,
   delays: { firstMs?: number; retryMs?: number } = {},
 ): Promise<VerifiedPurchaseResult> {
-  const result = await purchaseGamepassDirect(productId, expectedPrice, expectedSellerId, cookie);
+  const result = await purchaseGamepassDirect(productId, expectedPrice, expectedSellerId, cookie, gamepassId);
   if (result.success || !needsOwnershipCheck(result.reason)) return result;
 
   await sleep(delays.firstMs ?? 2_500);

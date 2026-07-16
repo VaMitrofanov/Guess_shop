@@ -11,6 +11,8 @@
 export const PRICE_TOL = 2;
 export const BUYOUT_ERROR_REGIONAL_PRICE = "REGIONAL_PRICE";
 export const BUYOUT_ERROR_ROBLOX_PLUS_FLOW = "ROBLOX_PLUS_FLOW";
+/** Roblox removed the legacy cookie purchase endpoint on 2026-04-10. */
+export const BUYOUT_ERROR_LEGACY_PURCHASE_FLOW = "LEGACY_PURCHASE_FLOW";
 
 export type RobloxPriceDiscountDetail = {
   Type?: string;

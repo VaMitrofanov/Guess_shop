@@ -3,8 +3,9 @@ import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
 import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing, notifyRegionalPriceNeeded } from "@/lib/twa-notify";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
-import { BuyoutError, needsOwnershipCheck, resolveGamepassForBuyer, verifyGamepassOwnership, verifyOwnershipAfterFailure, type ResolvedGamepass } from "@/lib/roblox-buyout";
-import { BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, checkGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
+import { BuyoutError, getAuthenticatedUserId, isLegacyPurchaseFlowFailure, needsOwnershipCheck, resolveGamepassForBuyer, verifyGamepassOwnership, verifyOwnershipAfterFailure, type ResolvedGamepass } from "@/lib/roblox-buyout";
+import { buildGamepassPurchaseScript, gamepassPageUrl } from "@/lib/roblox-purchase-script";
+import { BUYOUT_ERROR_LEGACY_PURCHASE_FLOW, BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, checkGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
 import { appendOrderAudit, buildRestoreToBuyoutData } from "@/lib/order-recovery";
 
@@ -1275,13 +1276,15 @@ export async function POST(req: NextRequest) {
     if (!purchaseData)
       return NextResponse.json({ error: "Нет ответа от Roblox" }, { status: 502 });
 
-    await (prisma as any).wbOrder.updateMany({
-      where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
-      data: { status: "ERROR" },
-    });
-    cachedCounts = null;
-
     const failReason = purchaseData.reason ?? purchaseData.errorMsg ?? "Неизвестная ошибка";
+    const legacyPurchaseFlowRemoved = isLegacyPurchaseFlowFailure(failReason);
+    if (!legacyPurchaseFlowRemoved) {
+      await (prisma as any).wbOrder.updateMany({
+        where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS"] } },
+        data: { status: "ERROR" },
+      });
+      cachedCounts = null;
+    }
     // Expose only primitive response fields to the authenticated admin so a
     // new Roblox refusal can be diagnosed without logging cookies or tokens.
     const robloxDiagnostic = Object.fromEntries(
@@ -1302,7 +1305,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       success: false,
-      msg: failReason,
+      msg: legacyPurchaseFlowRemoved
+        ? "Roblox отключил legacy cookie-выкуп геймпассов. Заказ оставлен в очереди; нужен официальный in-experience purchase bridge."
+        : failReason,
+      failureCode: legacyPurchaseFlowRemoved ? BUYOUT_ERROR_LEGACY_PURCHASE_FLOW : undefined,
+      status: legacyPurchaseFlowRemoved ? order.status : "ERROR",
       robloxHttpStatus: purchaseRes?.status ?? null,
       robloxDiagnostic,
       robloxErrors,
@@ -1476,25 +1483,22 @@ export async function POST(req: NextRequest) {
         { status: 409 },
       );
 
-    const script = [
-      `(async()=>{`,
-      `const r=await fetch("https://auth.roblox.com/v2/logout",{method:"POST",credentials:"include"});`,
-      `const t=r.headers.get("x-csrf-token");`,
-      `if(!t){console.log("❌ Не залогинен");return}`,
-      `const b=await fetch("https://economy.roblox.com/v1/purchases/products/${info.productId}",{`,
-      `method:"POST",credentials:"include",`,
-      `headers:{"Content-Type":"application/json","X-CSRF-TOKEN":t},`,
-      // В скрипт зашита ожидаемая по номиналу цена (не live): даже скопированный
-      // заранее скрипт Roblox отклонит, если цена пасса уже не ровно ожидаемая.
-      `body:JSON.stringify({expectedCurrency:1,expectedPrice:${expected},expectedSellerId:${creatorId}})`,
-      `});const j=await b.json();`,
-      `console.log(j.purchased?"✅ Куплено: "+j.price+" R$":"❌ Ошибка: "+j.reason)`,
-      `})()`,
-    ].join("");
+    // В скрипт зашита ожидаемая по номиналу цена (не live): даже скопированный
+    // заранее скрипт откажется покупать, если цена пасса уже не ровно ожидаемая.
+    // buyerUserId — [АККАУНТ-СТОП]: скрипт не сработает в чужой сессии, где залогинен
+    // не донор, а личный аккаунт менеджера.
+    const script = buildGamepassPurchaseScript({
+      gamepassId: gpId,
+      productId: info.productId,
+      expectedPrice: expected,
+      sellerId: creatorId,
+      buyerUserId: await getAuthenticatedUserId(donorCookie),
+    });
 
     return NextResponse.json({
       ok: true, script, name, price, base, creatorName,
       isForSale, isManagedPricing, gamepassId: gpId,
+      pageUrl: gamepassPageUrl(gpId),
     });
   }
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserGamepasses, getRobloxUser } from "@/lib/roblox";
+import { getRobloxAvatar, getUserGamepasses, getRobloxUser } from "@/lib/roblox";
 import { noteProbableNickByCode } from "@/lib/capture-nick";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 
@@ -73,29 +73,50 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Username lookup ──────────────────────────────────────────────
-    const gamepasses = await getUserGamepasses(q);
+    const user = await getRobloxUser(q);
+    if (!user) {
+      return NextResponse.json({
+        success: true,
+        gamepasses: [],
+        isDirect: false,
+        detectedUsername: null,
+        userExists: false,
+        account: null,
+      });
+    }
+    const [gamepasses, avatarUrl] = await Promise.all([
+      getUserGamepasses(user.name ?? q, user.id),
+      getRobloxAvatar(user.id),
+    ]);
+    const account = {
+      id: String(user.id),
+      username: user.name ?? q,
+      displayName: user.displayName ?? user.name ?? q,
+      avatarUrl,
+    };
     if (gamepasses.length > 0) {
       if (wbCode) await noteProbableNickByCode(wbCode, q, "site-search");
       return NextResponse.json({
         success: true,
         gamepasses,
         isDirect: false,
-        detectedUsername: q,
+        detectedUsername: account.username,
         userExists: true,
+        account,
       });
     }
     // Empty — distinguish "no such user on Roblox" (likely a typo) from
     // "user exists but has no public for-sale gamepasses" (place closed / not
     // created). Mirrors the bot's searchGamepassesByNick branching. We only pay
     // for this extra resolve when the fast path returned nothing.
-    const user = await getRobloxUser(q);
-    if (user && wbCode) await noteProbableNickByCode(wbCode, q, "site-search");
+    if (wbCode) await noteProbableNickByCode(wbCode, q, "site-search");
     return NextResponse.json({
       success: true,
       gamepasses: [],
       isDirect: false,
-      detectedUsername: null,
-      userExists: !!user,
+      detectedUsername: account.username,
+      userExists: true,
+      account,
     });
   } catch (error) {
     console.error("[Gamepasses API] Error:", error);

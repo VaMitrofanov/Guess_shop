@@ -74,9 +74,13 @@
 .nicknameField input { min-width:0; width:100%; border:0; outline:0; background:transparent; color:#251b3f; font-size:18px; font-weight:800; scroll-margin-block:24px 180px; }
 .nicknameField input::placeholder { color:#9e96aa; }
 .nicknameNote { margin:8px 0 0; color:#7a718b; font-size:15px; line-height:1.45; }
+.robloxLookup { min-width:0; margin-top:12px; padding:12px; display:flex; align-items:center; gap:11px; border:1px solid #d8d0ea; border-radius:14px; background:#f8f6fd; color:#665b78; }
+.robloxLookup>div { min-width:0; flex:1; }.robloxLookup strong,.robloxLookup small { display:block; }.robloxLookup strong { overflow:hidden; color:#302746; font-size:15px; text-overflow:ellipsis; white-space:nowrap; }.robloxLookup small { margin-top:3px; font-size:14px; line-height:1.35; }
+.lookupAvatar,.lookupIcon { width:42px; height:42px; flex:0 0 auto; display:grid; place-items:center; overflow:hidden; border-radius:13px; background:#e7e1fb; color:#7556e8; }.lookupAvatar img { width:100%; height:100%; object-fit:cover; }.lookupSpin { animation:lookupSpin .8s linear infinite; }@keyframes lookupSpin{to{transform:rotate(360deg)}}
 .checkoutAction,.checkoutActionDisabled { width:100%; min-height:60px; margin-top:16px; display:flex; align-items:center; justify-content:center; gap:9px; border-radius:13px; background:#7556e8; color:white; font-size:17px; font-weight:900; box-shadow:4px 4px 0 #251b3f; transition:transform .2s ease; }
 .checkoutActionDisabled { background:#d9d4e4; color:#8b8397; box-shadow:none; cursor:not-allowed; }
 .checkoutAction:hover { transform: translateY(-2px); }
+.lookupGuideLink { display:block; margin-top:12px; color:#7556e8; font-size:14px; font-weight:850; line-height:1.4; text-align:center; text-decoration:underline; text-underline-offset:3px; }
 .securityNote { margin: 14px 0 0; display: flex; align-items: center; justify-content: center; gap: 6px; color: #8b8499; font-size: 15px; }
 
 .assuranceStrip { width: min(1240px, calc(100% - 40px)); margin: 0 auto; padding: 18px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; border: 1px solid #e0daf2; border-radius: 20px; background: rgba(255,255,255,.7); }
@@ -173,12 +177,14 @@
 :global(html[data-theme="dark"]) .amountField,
 :global(html[data-theme="dark"]) .pack,
 :global(html[data-theme="dark"]) .priceSummary,
-:global(html[data-theme="dark"]) .nicknameField { border-color: #3a304b; background: #100d18; }
+:global(html[data-theme="dark"]) .nicknameField,
+:global(html[data-theme="dark"]) .robloxLookup { border-color: #3a304b; background: #100d18; }
 :global(html[data-theme="dark"]) .amountField input,
 :global(html[data-theme="dark"]) .secondaryAction,
 :global(html[data-theme="dark"]) .pack,
 :global(html[data-theme="dark"]) .priceSummary strong,
 :global(html[data-theme="dark"]) .nicknameField input,
+:global(html[data-theme="dark"]) .robloxLookup strong,
 :global(html[data-theme="dark"]) .orderWidget { color: #f4f0ff; }
 :global(html[data-theme="dark"]) .lead,
 :global(html[data-theme="dark"]) .heroFacts,

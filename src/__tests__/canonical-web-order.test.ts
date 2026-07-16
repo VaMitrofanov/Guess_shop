@@ -40,14 +40,15 @@ describe("canonical web order invariants", () => {
       .toThrow(expect.objectContaining({ code: "PAYMENT_TOO_SMALL" }));
   });
 
-  it("binds the order to the exact owner, sale state and gross gamepass price", () => {
+  it("binds the order to the owner, sale state and guarded gross-price tolerance", () => {
     expect(expectedGamepassPrice(quote)).toBe(715);
     expect(validateCheckoutGamepass(quote, { price: 715, creatorId: 42, isActive: true }, 42)).toBe(715);
     expect(() => validateCheckoutGamepass(quote, { price: 715, creatorId: 42, isActive: false }, 42))
       .toThrow(expect.objectContaining({ code: "GAMEPASS_NOT_FOR_SALE" }));
     expect(() => validateCheckoutGamepass(quote, { price: 715, creatorId: 99, isActive: true }, 42))
       .toThrow(expect.objectContaining({ code: "GAMEPASS_OWNER_MISMATCH" }));
-    expect(() => validateCheckoutGamepass(quote, { price: 716, creatorId: 42, isActive: true }, 42))
+    expect(validateCheckoutGamepass(quote, { price: 716, creatorId: 42, isActive: true }, 42)).toBe(715);
+    expect(() => validateCheckoutGamepass(quote, { price: 718, creatorId: 42, isActive: true }, 42))
       .toThrow(expect.objectContaining({ code: "GAMEPASS_PRICE_MISMATCH" }));
   });
 

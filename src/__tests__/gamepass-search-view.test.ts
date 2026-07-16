@@ -1,6 +1,7 @@
 import {
   gamepassPriceMatches,
   rankSellableGamepasses,
+  robuxForGamepassPrice,
 } from "../lib/gamepass-search-view";
 
 describe("search-first gamepass results", () => {
@@ -25,5 +26,12 @@ describe("search-first gamepass results", () => {
   test("SITE can require the exact canonical checkout price", () => {
     expect(gamepassPriceMatches(1429, 1429, 0)).toBe(true);
     expect(gamepassPriceMatches(1430, 1429, 0)).toBe(false);
+  });
+
+  test("turns any supported existing pass price into a guarded storefront amount", () => {
+    expect(robuxForGamepassPrice(500)).toBe(350);
+    expect(robuxForGamepassPrice(1429)).toBe(1000);
+    expect(robuxForGamepassPrice(1430)).toBe(1001);
+    expect(robuxForGamepassPrice(100)).toBeNull();
   });
 });
