@@ -6,6 +6,7 @@ import FAQClient from "@/components/faq-client";
 import { ArrowRight, Headphones } from "lucide-react";
 import styles from "../public-sections.module.css";
 import type { Metadata } from "next";
+import { LEGAL_DETAILS } from "@/lib/legal-details";
 
 export const metadata: Metadata = {
   title: "Помощь и частые вопросы — RobloxBank",
@@ -58,7 +59,7 @@ const DEFAULT_FAQS = [
     id: "default-6",
     question: "Что если заказ не будет выполнен?",
     answer:
-      "Обратитесь к менеджеру с номером заказа. Порядок отмены и возврата будет указан в утверждённой публичной оферте до запуска оплаты на сайте.",
+      "Обратитесь в поддержку с номером заказа. Условия отмены, замены и возврата уже опубликованы в публичной оферте на странице /legal/offer; заявление можно направить на email из раздела «Реквизиты и контакты».",
   },
   {
     id: "default-7",
@@ -70,7 +71,7 @@ const DEFAULT_FAQS = [
     id: "default-8",
     question: "Как связаться с поддержкой?",
     answer:
-      "Напишите в наш Telegram @RobloxBank_PA или в сообщество VK. Менеджер ответит в рабочее время; точные часы и срок ответа появятся вместе с реквизитами до публичного запуска.",
+      `Напишите в Telegram @RobloxBank_PA или в сообщество VK. Поддержка работает ${LEGAL_DETAILS.supportHours}; ${LEGAL_DETAILS.supportSla.toLowerCase()}. Телефон и email опубликованы в разделе «Реквизиты и контакты».`,
   },
 ];
 

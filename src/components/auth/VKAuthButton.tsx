@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Script from "next/script";
+import { VK_AUTH_ENABLED } from "@/lib/vk-auth-availability";
 
 // VK community ID for order-mode redirect
 const VK_CLUB_HREF = "https://vk.me/club237309399";
@@ -57,6 +58,7 @@ export default function VKAuthButton({
 
   // ── Bootstrap VK ID SDK + mount hidden OneTap widget ──────────────────────
   useEffect(() => {
+    if (!VK_AUTH_ENABLED) return;
     let cancelled = false;
     let attempts = 0;
     let retryTimer: number | undefined;
@@ -240,6 +242,23 @@ export default function VKAuthButton({
   }, [ready]);
 
   const isCompact = variant === "compact";
+
+  if (!VK_AUTH_ENABLED) {
+    if (mode === "login") return null;
+    const directHref = customRedirectUrl || (wbCodeProp
+      ? `${VK_CLUB_HREF}?ref=${encodeURIComponent(wbCodeProp.toUpperCase())}`
+      : VK_CLUB_HREF);
+    return (
+      <a
+        href={directHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex min-h-[44px] w-full items-center justify-center gap-2.5 px-3 text-center text-[11px] font-black uppercase tracking-widest text-white"
+      >
+        Открыть ВКонтакте
+      </a>
+    );
+  }
 
   return (
     <div className="vk-auth-shell relative w-full h-full flex items-stretch min-h-[44px]">

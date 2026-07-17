@@ -13,6 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { getGamepassDetails, getRobloxUser } from "@/lib/roblox";
 import { initCanonicalTinkoffPayment } from "@/lib/tinkoff";
+import { isSiteAcquiringEnabled } from "@/lib/site-acquiring";
 
 export const dynamic = "force-dynamic";
 
@@ -28,10 +29,6 @@ const CreateOrderSchema = z.object({
 function resolveClientIp(req: NextRequest): string | null {
   const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
   return forwarded || req.headers.get("x-real-ip")?.trim() || req.headers.get("cf-connecting-ip")?.trim() || null;
-}
-
-function acquiringEnabled() {
-  return process.env.SITE_ACQUIRING_ENABLED === "true";
 }
 
 export async function POST(req: NextRequest) {
@@ -57,7 +54,7 @@ export async function POST(req: NextRequest) {
   // Launch gate: the legacy checkout must never become a back door around
   // category/legal/KKT approval. Production stays fail-closed until every
   // external gate is explicitly completed and the flag is enabled.
-  if (!acquiringEnabled()) {
+  if (!isSiteAcquiringEnabled()) {
     return NextResponse.json(
       { error: "Оплата на сайте пока закрыта. Воспользуйтесь Telegram или VK." },
       { status: 503, headers: { "retry-after": "3600" } },

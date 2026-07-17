@@ -1,4 +1,5 @@
 import Link from "next/link";
+import PaymentMethods from "@/components/payment-methods";
 
 const links = [
   { href: "/guide?source=site&amount=1000", label: "Инструкция" },
@@ -22,6 +23,10 @@ export default function Footer() {
           <div className="flex flex-wrap gap-x-5 gap-y-3 text-base font-bold text-[var(--rb-muted)]">
             {links.map((item) => <Link key={item.href} href={item.href} className="hover:text-[var(--rb-accent)]">{item.label}</Link>)}
           </div>
+        </div>
+        <div className="mt-7 border-t border-[var(--rb-border)] pt-6">
+          <p className="mb-3 text-sm font-black uppercase tracking-[0.08em] text-[var(--rb-muted)]">Платёжный партнёр и способы оплаты</p>
+          <PaymentMethods showStatus />
         </div>
         <div className="mt-8 flex flex-col gap-3 border-t border-[var(--rb-border)] pt-6 text-base leading-relaxed text-[var(--rb-muted)] md:flex-row md:items-end md:justify-between">
           <p>ROBLOXBANK не связан с Roblox Corporation. Roblox и его логотип — торговые марки Roblox Corporation.</p>

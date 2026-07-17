@@ -6,6 +6,7 @@ import { ArrowRight, CheckCircle2, Eye, EyeOff, Gift, History, Loader2, Lock, Ma
 import Navbar from "@/components/navbar";
 import Link from "next/link";
 import { normalizeLoginEmail } from "@/lib/auth-navigation";
+import { Checkbox } from "@/components/ui/checkbox";
 import styles from "../auth-shell.module.css";
 
 const benefits = [
@@ -19,6 +20,7 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [agreedToPrivacy, setAgreedToPrivacy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
@@ -32,13 +34,22 @@ export default function RegisterPage() {
       setError("Пароль должен быть не короче 8 символов");
       return;
     }
+    if (!agreedToPrivacy) {
+      setError("Подтвердите согласие на обработку персональных данных");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
       const response = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: normalizeLoginEmail(email), password, name: name.trim() }),
+        body: JSON.stringify({
+          email: normalizeLoginEmail(email),
+          password,
+          name: name.trim(),
+          agreedToPrivacy,
+        }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.success) {
@@ -83,8 +94,19 @@ export default function RegisterPage() {
               <span className={styles.field}><Lock size={18} /><input className={styles.input} type={showPassword ? "text" : "password"} autoComplete="new-password" required minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Минимум 8 символов" /><button type="button" className={styles.iconButton} onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></span>
               {password && <span className={styles.strength}><span className={styles.strengthTrack}>{[1,2,3].map((level) => <i key={level} className={strength >= level ? strength === 1 ? styles.activeWeak : strength === 2 ? styles.activeMedium : styles.activeStrong : ""} />)}</span><span>{strengthLabel}</span></span>}
             </label>
+            <label className={styles.agreement}>
+              <Checkbox
+                checked={agreedToPrivacy}
+                onChange={(event) => setAgreedToPrivacy(event.target.checked)}
+                required
+              />
+              <span>
+                Я даю согласие на обработку персональных данных и принимаю{" "}
+                <Link href="/legal/policy" target="_blank">политику конфиденциальности</Link>.
+              </span>
+            </label>
             {error && <p className={styles.error} role="alert">{error}</p>}
-            <button type="submit" className={styles.submit} disabled={loading}>{loading ? <Loader2 size={20} className="animate-spin" /> : <><span>Создать аккаунт</span><ArrowRight size={18} /></>}</button>
+            <button type="submit" className={styles.submit} disabled={loading || !agreedToPrivacy}>{loading ? <Loader2 size={20} className="animate-spin" /> : <><span>Создать аккаунт</span><ArrowRight size={18} /></>}</button>
           </form>
           <p className={styles.footer}>Уже есть аккаунт? <Link href="/login">Войти</Link></p>
         </section>

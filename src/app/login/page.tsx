@@ -9,6 +9,7 @@ import Link from "next/link";
 import VKAuthButton from "@/components/auth/VKAuthButton";
 import TelegramLoginButton from "@/components/auth/TelegramLoginButton";
 import { normalizeLoginEmail, postLoginPath } from "@/lib/auth-navigation";
+import { VK_AUTH_ENABLED } from "@/lib/vk-auth-availability";
 import styles from "../auth-shell.module.css";
 
 const benefits = [
@@ -83,7 +84,7 @@ export default function LoginPage() {
           <div className={styles.divider}>или продолжить через</div>
           <div className={styles.providers}>
             <TelegramLoginButton mode="login" className={styles.providerButton} />
-            <div className={styles.vkProvider}><VKAuthButton mode="login" /></div>
+            {VK_AUTH_ENABLED && <div className={styles.vkProvider}><VKAuthButton mode="login" /></div>}
           </div>
           <p className={styles.footer}>Нет аккаунта? <Link href="/register">Создать</Link><br /><Link href="/admin/login" className={styles.secondaryLink}>Вход для администратора</Link></p>
         </section>

@@ -29,7 +29,7 @@ export function LegalDocument({
   children: React.ReactNode;
 }) {
   return (
-    <main className="min-h-screen relative bg-[#080c18]">
+    <main className="min-h-screen relative overflow-x-clip bg-[#080c18]">
       {/* Background shader — same as /privacy for visual consistency */}
       <div className="fixed inset-0 z-0 pointer-events-none opacity-30">
         <AnoAI />
@@ -38,13 +38,13 @@ export function LegalDocument({
       <div className="relative z-10 flex flex-col min-h-screen">
         <Navbar />
 
-        <article className="flex-grow container mx-auto px-4 py-20 max-w-4xl">
+        <article className="container mx-auto min-w-0 max-w-4xl flex-grow overflow-x-clip px-4 py-20">
           <header className="fade-up mb-12">
             <div className="inline-flex items-center gap-2 px-3 py-1 border border-[#00b06f]/20 bg-[#00b06f]/5 text-[#00b06f] text-[10px] font-black uppercase tracking-widest mb-6">
               <span className="w-1.5 h-1.5 bg-[#00b06f] rounded-none" />
               {badge}
             </div>
-            <h1 className="text-3xl md:text-5xl font-black uppercase tracking-tight mb-3">
+            <h1 className="mb-3 min-w-0 text-3xl font-black uppercase tracking-tight [overflow-wrap:anywhere] md:text-5xl">
               {title}
             </h1>
             {subtitle && (
@@ -80,6 +80,7 @@ export function LegalDocument({
               "[&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:space-y-2 [&_ol]:my-3",
               "[&_li]:leading-relaxed",
               "[&_a]:text-[#00b06f] [&_a]:underline [&_a]:underline-offset-2 [&_a:hover]:opacity-80",
+              "[&_a]:[overflow-wrap:anywhere] [&_li]:min-w-0 [&_p]:min-w-0",
               "[&_strong]:text-white [&_strong]:font-black",
             ].join(" ")}
           >

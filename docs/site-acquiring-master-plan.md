@@ -10,6 +10,26 @@
 
 ## Статус реализации
 
+- **2026-07-17, quick-fix batch для ссылки Т‑Банку:** UI и API используют единый exact-`true`
+  `SITE_ACQUIRING_ENABLED` gate через runtime status; при выключенном эквайринге checkout
+  показывает review-state и никогда не активирует payment CTA. Добавлены логотипы Т‑Банка,
+  МИР, Visa, Mastercard и СБП; `/register` требует privacy consent и клиентом, и API;
+  legal shell исправлен для `390 px`; FAQ/guarantees синхронизированы с опубликованными
+  документами; VK ID скрыт fail-closed до live acceptance. Локально зелёные 31 suite / 203
+  tests, scoped ESLint, web TypeScript, build и mobile browser acceptance. Остаётся
+  последовательный production rollout Web → Guide и финальный corridor/public smoke.
+
+- **2026-07-17, предрелизный аудит ссылки Т‑Банку:** production root уже отвечает `200`,
+  а fail-closed acquiring остаётся выключенным. Code gate: 30 suites / 200 tests, web+bot
+  TypeScript, Prisma validate и production build зелёные; public smoke `15/15`.
+  Интерактивный desktop/mobile проход подтвердил calculator → Roblox lookup → checkout →
+  quote, USER dashboard, Telegram deep link и публичные документы. До отправки ссылки как
+  готовой заявки остаются видимые дефекты: Guide/Web fingerprint mismatch, VK ID timeout,
+  mobile overflow `/legal/policy`, устаревшие FAQ/guarantees и отсутствие платёжных
+  логотипов. Формальный launch денег остаётся NO-GO из-за РФ primary ПД,
+  category/Roblox/brand/age, terminal/KKT/OFD и payment/refund E2E. Полный отчёт:
+  [tbank-precheck-2026-07-17.md](tbank-precheck-2026-07-17.md).
+
 - **2026-07-16, owner-feedback checkout batch (локально, до deploy):** калькулятор витрины
   после валидного ника с debounce сам проверяет Roblox, показывает реальный headshot,
   найденные пассы и правильный следующий CTA: checkout, выбор другого найденного пасса или
@@ -136,19 +156,21 @@
 
 ## 1. Итог ревью: сейчас NO-GO для денег; ссылка на витрину возможна с выключенной оплатой
 
-Предварительную ссылку Т-Банку на публичную витрину можно отправлять после deploy этого
-UX-batch, read-only smoke и снятия `MAINTENANCE_MODE`, оставив
-`SITE_ACQUIRING_ENABLED=false`. Это открывает банку страницы товара, контактов, реквизитов,
-оферты и checkout до платёжного handoff, но технически не позволяет создать `Init` и принять
-деньги. Боевой запуск остаётся NO-GO до launch-gates раздела 10.
+Публичная витрина уже открыта 17.07: `MAINTENANCE_MODE=off`, public smoke `15/15`.
+`SITE_ACQUIRING_ENABLED=true` не задан, поэтому код технически не позволяет создать `Init`
+и принять деньги. Ссылку можно использовать для предварительного просмотра только после
+быстрых UI/auth/Guide фиксов из
+[аудита 17.07](tbank-precheck-2026-07-17.md). Боевой запуск остаётся NO-GO до launch-gates
+раздела 10.
 
-Отправлять текущий сайт на модерацию и принимать на нём деньги нельзя. Это не вопрос
-косметической полировки: одновременно не готовы публичная оферта, идентичность клиента,
-расчёт цены, создание заказа, обработка оплаты и фискализация.
+Представлять текущий сайт как полностью готовый к формальной приёмке и принимать на нём
+деньги нельзя. Code foundation цены, identity, canonical order и обработки событий уже
+реализован, но внешние юридические/данные/terminal/ККТ gates и ряд видимых дефектов не
+закрыты.
 
 | Приоритет | Блокер | Подтверждённое состояние |
 |---|---|---|
-| P0 | Публичный сайт закрыт | `https://robloxbank.ru/` отвечает `503` и переписывается на maintenance; `/api/health` и тестовый WB-гайд доступны |
+| P1 | Предварительная витрина открыта не полностью готовой | `/` отвечает `200`, но Guide отстаёт по fingerprint, VK ID timeout, policy overflow и public copy/logos требуют правок |
 | P0 | Канонический checkout развёрнут, но не прошёл payment E2E | Migration применена и код задеплоен 13.07 без legacy `Product/default-calc`; kill-switch выключен, боевой Init/receipt/callback test matrix впереди |
 | P0 | Цена не прошла payment E2E | Quote уже одноразово потребляется каноническим order flow, но сумма ещё не проверена реальным Init/receipt/callback test matrix |
 | P0 | Общий клиентский аккаунт не завершён | Email и TG login/link, identity foundation и ЛК с `WbOrder`/бонусами готовы; остаются real-provider acceptance, безопасные VK link/unlink, recovery и admin merge-console |
@@ -159,7 +181,8 @@ UX-batch, read-only smoke и снятия `MAINTENANCE_MODE`, оставив
 | P0 | Категория и бренд требуют письменного решения | Правила Roblox ограничивают стороннюю продажу/передачу Robux и коммерческое использование бренда; слово «Банк» также требует юрпроверки |
 | P1 | Прод-качество не закрыто | SDK/headers/rate-limit foundation и локальная theme hydration-гонка закрыты; остаются полноценные E2E, accessibility/performance baseline и общий ESLint debt |
 
-Вывод: maintenance оставляем включённым до прохождения launch gates из раздела 10.
+Вывод: maintenance уже снят только для предварительной витрины; acquiring оставляем
+fail-closed до прохождения launch gates из раздела 10.
 
 ## 2. Что именно проверено
 
@@ -688,16 +711,16 @@ VK  ─┘                              │
 - возвраты/chargeback/support contacts на 100 заказов;
 - Web Vitals и JS errors по route/device/webview.
 
-## 10. Launch gates: когда можно снять maintenance
+## 10. Launch gates: когда можно включить оплату и считать публичный запуск завершённым
 
 Все пункты обязательны:
 
 - [ ] Т-Банк письменно подтвердил категорию/MCC и подключил terminal.
 - [ ] Юрпроверка модели Roblox, бренда, возраста, оферты, ПД и возвратов завершена.
 - [ ] Первичная база ПД локализована в РФ; миграция/restore/reconciliation пройдены.
-- [ ] Одна pricing policy и quote работают одинаково в Web/TG/VK.
+- [x] Одна pricing policy и quote работают одинаково в Web/TG/VK.
 - [ ] TG/VK-login, link/merge и ЛК проходят E2E на существующих клиентах.
-- [ ] Канонический SITE-order создаётся без legacy `Product` FK.
+- [x] Канонический SITE-order создаётся без legacy `Product` FK.
 - [ ] `Init`, receipt, callbacks, outbox, refund и ККТ прошли test matrix.
 - [~] Публичные реквизиты/контакты/документы: юридические данные, email, телефон, часы
   поддержки и SLA заполнены; юридическая приёмка и финальные возвраты ещё не закрыты.

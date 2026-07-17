@@ -8,5 +8,5 @@ export const LEGAL_DETAILS = {
   supportHours: "ежедневно с 12:00 до 20:00 по московскому времени",
   supportSla: "Ответ на обращение — в течение 24 часов",
   taxSystem: "УСН",
-  lastUpdated: "16 июля 2026 г.",
+  lastUpdated: "17 июля 2026 г.",
 } as const;

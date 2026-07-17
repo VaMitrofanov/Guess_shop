@@ -86,13 +86,19 @@ OpenGraph и корректный maintenance-ответ.
 **Web:** `DATABASE_URL`, `AUTH_SECRET` (или `NEXTAUTH_SECRET`), `NEXTAUTH_URL`,
 `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_VK_APP_ID`, `TG_TOKEN`, `TG_CHAT_ID`, `ADMIN_IDS`,
 `ADMIN_SECRET`, `WB_API_TOKEN`, `MAINTENANCE_MODE` (опц., см. ниже), `SITE_UNLOCK_SECRET`
-(опц., байпас техработ); B2B «Антон»: `ANTON_GOOGLE_SHEETS_SPREADSHEET_ID`,
+(опц., байпас техработ), `NEXT_PUBLIC_VK_AUTH_ENABLED` (опц.; fail-closed, VK ID виден
+только при точном `true` после живого acceptance); B2B «Антон»:
+`ANTON_GOOGLE_SHEETS_SPREADSHEET_ID`,
 `GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHEETS_PROTECTED_EDITORS` (email владельца
 таблицы для защиты выполненных строк, Этап 5.8). SITE-эквайринг (по умолчанию выключен):
 `SITE_ACQUIRING_ENABLED`, `TINKOFF_TERMINAL_KEY`, `TINKOFF_SECRET_KEY`, `TINKOFF_TAXATION`,
 `TINKOFF_ITEM_TAX`, `TINKOFF_PAYMENT_METHOD`, `TINKOFF_PAYMENT_OBJECT`. Классификаторы чека
 не имеют default: их значения подтверждают бухгалтер/ККТ-оператор. Legacy automation:
 `LOCAL_BOT_URL`, `INTERNAL_WEBHOOK_SECRET`, `BOT_API_TOKEN`.
+
+Checkout читает runtime-состояние эквайринга из `GET /api/acquiring/status`. При любом
+ответе кроме `{ enabled: true }` UI показывает review-баннер и не активирует платёжный CTA;
+серверный `POST /api/orders/create` независимо проверяет тот же exact-`true` gate.
 
 `BOOTSTRAP_ADMIN_EMAIL` + `BOOTSTRAP_ADMIN_PASSWORD` — опциональная **одноразовая** пара
 только для `prisma db seed` на новом окружении. Обе задаются вместе, пароль — от 16 символов,

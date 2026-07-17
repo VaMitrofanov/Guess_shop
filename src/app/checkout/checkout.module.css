@@ -3,6 +3,11 @@
 .kicker { color:#7556e8; font-size:15px; font-weight:900; letter-spacing:.09em; text-transform:uppercase; }
 .progressHeader h1 { margin:8px 0 7px; font-family:var(--font-display),sans-serif; font-size:clamp(38px,5vw,58px); line-height:1.05; letter-spacing:-.055em; }
 .progressHeader p { margin:0; color:#746b86; font-size:17px; line-height:1.55; }
+.paymentNotice { display:flex; align-items:flex-start; gap:11px; margin:-10px 0 24px; padding:15px 17px; border:1px solid #e8c66c; border-radius:16px; background:#fff8df; color:#725514; }
+.paymentNotice svg { flex:0 0 auto; margin-top:2px; }
+.paymentNotice strong,.paymentNotice small { display:block; }
+.paymentNotice strong { font-size:16px; }
+.paymentNotice small { margin-top:3px; font-size:14px; line-height:1.45; }
 .stageIndicator { display:flex; align-items:center; gap:8px; }
 .stageIndicator span { width:34px; height:34px; display:grid; place-items:center; border:1px solid #d8d0ec; border-radius:11px; background:#fff; color:#938aa1; font-size:13px; font-weight:900; }
 .stageIndicator .stageActive { border-color:#7556e8; background:#7556e8; color:#fff; }
@@ -44,6 +49,7 @@
 .summaryRows div { display:flex; justify-content:space-between; gap:14px; margin:12px 0; color:#7b728c; font-size:16px; }.summaryRows strong { max-width:58%; overflow:hidden; color:#3b324f; text-align:right; text-overflow:ellipsis; white-space:nowrap; }
 .safeNote { margin:18px 0; display:flex; align-items:flex-start; gap:9px; padding:13px; border-radius:14px; background:#e4faf3; color:#37735f; }.safeNote svg { flex:0 0 auto; }.safeNote strong,.safeNote small { display:block; }.safeNote strong { font-size:16px; }.safeNote small { margin-top:2px; font-size:15px; }
 .primaryButton { width:100%; min-height:56px; display:flex; align-items:center; justify-content:center; gap:8px; border:0; border-radius:14px; background:#7556e8; color:#fff; font-size:15px; font-weight:900; box-shadow:4px 4px 0 #251b3f; cursor:pointer; }
+.paymentMethods { margin-top:20px; padding-top:18px; border-top:1px solid #e2dcee; }
 .guideLink { margin-top:15px; display:block; color:#7556e8; text-align:center; font-size:15px; font-weight:800; }
 .confirmGrid { grid-template-columns:minmax(0,1fr) 360px; max-width:920px; margin:0 auto; }
 .backButton { margin-bottom:20px; display:flex; align-items:center; gap:7px; border:0; background:transparent; color:#7556e8; font-size:13px; font-weight:800; cursor:pointer; }
@@ -85,3 +91,5 @@
 :global(html[data-theme="dark"]) .confirmIdentity { background:#241b3b; }
 :global(html[data-theme="dark"]) .summaryRows { border-color:#352b48; }
 :global(html[data-theme="dark"]) .primaryButton { box-shadow:4px 4px 0 #45d6aa; }
+:global(html[data-theme="dark"]) .paymentNotice { border-color:#68562b; background:#27200f; color:#f2d98e; }
+:global(html[data-theme="dark"]) .paymentMethods { border-color:#352b48; }

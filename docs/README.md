@@ -16,6 +16,7 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [b2b-saas.md](b2b-saas.md) | Партнёрское/B2B-направление: TWA/server MVP `Антон`, USDT-ledger, ручной XLSX import, rollout Sheets/batch |
 | [corridor-and-site.md](corridor-and-site.md) | WB-гейт, сайт `/guide`, API коридора, восстановление сессии |
 | [site-acquiring-master-plan.md](site-acquiring-master-plan.md) | Ультра-ревью `robloxbank.ru`, P0-блокеры эквайринга, единые цена/identity/orders, дизайн и поэтапный launch plan |
+| [tbank-precheck-2026-07-17.md](tbank-precheck-2026-07-17.md) | Предрелизный аудит публичной ссылки для Т‑Банка 17.07: фактические тесты, найденные блокеры и план закрытия |
 | [design-rework-concept.html](design-rework-concept.html) | Интерактивный визуальный концепт глобального реворка главной и mobile-first WB guide |
 | [twa-ux-v3-concept.html](twa-ux-v3-concept.html) | Визуальный концепт TWA v3: два варианта Главной, умная выдача и foreground bottom sheet |
 | [bots.md](bots.md) | TG- и VK-боты: активация, приём геймпасса, прямые заказы, поддержка, отзывы |
@@ -35,24 +36,28 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 - **VK-бот** `vk.me/club237309399` — альтернатива для VK-аудитории (воркфлоу идентичен TG).
 - **TWA** — админка внутри Telegram для менеджера (заказы, выкуп, аналитика).
 
-Публичный корень `robloxbank.ru` пока закрыт maintenance-режимом; рабочая точка входа —
-WB-гайд. Новый checkout использует канонический `WbOrder`/quote/payment-attempt; outbox
-worker, refund и локальная ККТ contract matrix готовы, но боевой payment E2E ещё не выполнен; kill-switch
-(`SITE_ACQUIRING_ENABLED=false`) выключен, поэтому он не готов к деньгам и не участвует в
-текущем воркфлоу —
+Публичный корень `robloxbank.ru` открыт 17.07 для предварительного просмотра Т‑Банком;
+WB-гайд остаётся отдельной рабочей точкой входа. Новый checkout использует канонический
+`WbOrder`/quote/payment-attempt; outbox worker, refund и локальная ККТ contract matrix
+готовы, но боевой payment E2E ещё не выполнен. Acquiring fail-closed: значение
+`SITE_ACQUIRING_ENABLED=true` не установлено, поэтому сайт не может создать `Init` и
+принять деньги —
 см. [architecture.md](architecture.md#legacy) и
 [master plan эквайринга](site-acquiring-master-plan.md).
 
 С 16.07 публичный shell имеет custom 404/error recovery, корректные SEO/noindex-границы,
 PII-safe Core Web Vitals/client-error telemetry и read-only `npm run smoke:site`. Web и
-отдельный Guide-контейнер отдают общий source fingerprint; corridor-smoke автоматически
-обнаруживает отставший Guide. Это закрывает локальный hardening, но не заменяет реальные
+отдельный Guide-контейнер должны отдавать общий source fingerprint; аудит 17.07 обнаружил
+расхождение и оставил deploy gate открытым. Quick-fix batch для банковской ссылки уже
+добавил runtime payment-disabled state, платёжные логотипы, registration consent,
+mobile legal fix и актуальный public copy; VK ID скрыт fail-closed до живого acceptance.
+Corridor-smoke автоматически обнаруживает отставший Guide. Это закрывает локальный hardening, но не заменяет реальные
 TG/VK/iPhone/Android acceptance, реквизиты, ККТ/payment E2E и soft launch.
 
 Личный кабинет и все три поверхности входа используют общий Violet/Frost shell. Email-вход
 нормализует адрес, Telegram login/link идёт через одноразовый bot-assisted challenge с
 серверной HMAC-проверкой, а VK identity проверяется сервером. Email-сценарий ЛК принят на
-production; живой Telegram/VK acceptance остаётся обязательным перед публичным запуском.
+production; живой Telegram/VK acceptance остаётся обязательным перед включением оплаты.
 
 ## Локальный запуск
 

@@ -1,14 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
-
-const RegisterSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
-  name: z.string().optional(),
-});
+import { RegisterSchema } from "@/lib/registration";
 
 export async function POST(req: NextRequest) {
   const { ok, retryAfter } = rateLimit(`register:${clientIp(req)}`, 5, 0.1);

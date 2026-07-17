@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import Navbar from "@/components/navbar";
 import { Checkbox } from "@/components/ui/checkbox";
+import PaymentMethods from "@/components/payment-methods";
 import { usePricing } from "@/hooks/usePricing";
 import {
   gamepassPriceMatches,
@@ -78,6 +79,7 @@ function CheckoutContent() {
   const [receiptEmail, setReceiptEmail] = useState("");
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [acquiringEnabled, setAcquiringEnabled] = useState(false);
   const [error, setError] = useState("");
   const [idempotencyKey] = useState(() => crypto.randomUUID());
 
@@ -135,6 +137,19 @@ function CheckoutContent() {
     // The URL-derived identity is the only value that should auto-run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rememberedUsername]);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/acquiring/status", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("status unavailable"))))
+      .then((data) => {
+        if (active) setAcquiringEnabled(data.enabled === true);
+      })
+      .catch(() => {
+        if (active) setAcquiringEnabled(false);
+      });
+    return () => { active = false; };
+  }, []);
 
   const isDirectQuery = (value: string) => {
     const query = value.trim();
@@ -215,6 +230,10 @@ function CheckoutContent() {
   };
 
   const handlePay = async () => {
+    if (!acquiringEnabled) {
+      setError("Оплата временно отключена до завершения проверки банка и кассы.");
+      return;
+    }
     if (!quote || new Date(quote.expiresAt) <= new Date()) {
       setError("Цена заказа истекла. Вернись назад и обнови её.");
       return;
@@ -258,12 +277,23 @@ function CheckoutContent() {
         <div>
           <span className={styles.kicker}>Покупка на сайте</span>
           <h1>{stage === "select" ? "Твои геймпассы" : "Проверь заказ"}</h1>
-          <p>{stage === "select" ? "По нику сразу покажем все геймпассы на продажу и поднимем готовые по цене наверх." : "Цена зафиксирована. Осталось указать email и перейти к оплате."}</p>
+          <p>{stage === "select"
+            ? "По нику сразу покажем все геймпассы на продажу и поднимем готовые по цене наверх."
+            : acquiringEnabled
+              ? "Цена зафиксирована. Осталось указать email и перейти к оплате."
+              : "Цена зафиксирована, но приём платежей временно отключён до завершения проверки банка и кассы."}</p>
         </div>
         <div className={styles.stageIndicator} aria-label={`Шаг ${stage === "select" ? 1 : 2} из 2`}>
           <span className={styles.stageActive}>1</span><i /><span className={stage === "confirm" ? styles.stageActive : ""}>2</span>
         </div>
       </div>
+
+      {!acquiringEnabled && (
+        <div className={styles.paymentNotice} role="status">
+          <CircleAlert size={21} />
+          <span><strong>Оплата временно отключена</strong><small>Витрина открыта для проверки Т‑Банка. Заказ и списание денег сейчас не создаются.</small></span>
+        </div>
+      )}
 
       {stage === "select" ? (
         <div className={styles.checkoutGrid}>
@@ -354,8 +384,9 @@ function CheckoutContent() {
               <div><span>Курс</span><strong>{breakdown.rubPerRobux} ₽/R$</strong></div>
               {!!quote?.discountKopecks && <div><span>Скидка</span><strong>−{(quote.discountKopecks / 100).toLocaleString("ru-RU")} ₽</strong></div>}
             </div>
-            <div className={styles.safeNote}><ShieldCheck size={19} /><span><strong>Цена зафиксирована</strong><small>До окончания котировки.</small></span></div>
-            <button type="button" className={styles.primaryButton} disabled={paying || !agreedToTerms || !receiptEmail || !quote} onClick={() => void handlePay()}>{paying ? <Loader2 size={19} className={styles.spin} /> : <>Перейти к оплате <ArrowRight size={18} /></>}</button>
+            <div className={styles.safeNote}><ShieldCheck size={19} /><span><strong>{acquiringEnabled ? "Цена зафиксирована" : "Денежные операции заблокированы"}</strong><small>{acquiringEnabled ? "До окончания котировки." : "До завершения банковской и кассовой проверки."}</small></span></div>
+            <button type="button" className={styles.primaryButton} disabled={paying || !agreedToTerms || !receiptEmail || !quote || !acquiringEnabled} onClick={() => void handlePay()}>{paying ? <Loader2 size={19} className={styles.spin} /> : acquiringEnabled ? <>Перейти к оплате <ArrowRight size={18} /></> : <>Оплата временно отключена</>}</button>
+            <PaymentMethods className={styles.paymentMethods} showStatus={!acquiringEnabled} />
           </aside>
         </div>
       )}
