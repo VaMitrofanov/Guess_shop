@@ -1619,7 +1619,7 @@ interface BatchItem { orderId: string; nick: string; wbCode: string; gross: numb
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 // Random jitter between bulk purchases so the account doesn't hammer Roblox.
 const bulkPause = () => 2000 + Math.floor(Math.random() * 6000);
-const STOP_RE = /баланс|insufficient|not enough|истёк|expired|csrf|cookie/i;
+const STOP_RE = /баланс|insufficient|not enough|истёк|expired|csrf|cookie|браузер занят|BROWSER_BUSY|QueueFull/i;
 
 function buyoutNick(o: BuyoutOrder): string {
   return o.user.username ? `@${o.user.username}` : o.user.name ?? "—";
@@ -3298,6 +3298,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
           } else {
             const reason = d?.error ?? d?.msg ?? `HTTP ${r.status}`;
             items.push({ taskId: t.id, gamepassId: t.gamepassId, nick: t.robloxUsername, robux: price, usdt, ok: false, reason });
+            if (STOP_RE.test(String(reason))) { bulkStopRef.current = true; }
           }
         } catch {
           items.push({ taskId: t.id, gamepassId: t.gamepassId, nick: t.robloxUsername, robux: price, usdt, ok: false, reason: "ошибка сети" });

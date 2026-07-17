@@ -854,11 +854,6 @@ export async function POST(req: NextRequest) {
       where: { id: { in: ids } },
       select: { id: true, amount: true, gamepassUrl: true, wbCode: true },
     });
-    const settings = await (prisma as any).globalSettings.findUnique({
-      where: { id: "global" },
-      select: { robloxCookie: true },
-    });
-    const buyerCookie = settings?.robloxCookie ?? null;
 
     const gpIds = [...new Set(checkOrders.map((o) => gpIdOf(o.gamepassUrl)).filter(Boolean))] as string[];
     const completed: any[] = gpIds.length > 0
@@ -879,27 +874,24 @@ export async function POST(req: NextRequest) {
     }
 
     const results: Record<string, any> = {};
-    // Browser preflight is deliberately single-flight: processing sequentially
-    // prevents one donor cookie from being replaced underneath another check.
+    // Live-check uses public product-info only — browser service is reserved
+    // for the actual purchase flow. Previous version held the SG single-flight
+    // lock for every order here, blocking concurrent purchase requests.
     for (const o of checkOrders) {
       const gpId = gpIdOf(o.gamepassUrl);
       if (!gpId) continue;
       const expected = Math.ceil(o.amount / 0.7);
-      const buyerInfo = buyerCookie
-        ? await resolveGamepassForBuyer(gpId, buyerCookie).catch(() => null)
-        : null;
-      const publicInfo = buyerInfo ? null : await getGpInfoCached(gpId);
+      const publicInfo = await getGpInfoCached(gpId);
       const reusedCode = reusedBy.get(gpId);
-      const livePrice = buyerInfo?.price ?? publicInfo?.price ?? null;
-      const basePrice = buyerInfo?.basePriceInRobux ?? publicInfo?.price ?? null;
+      const basePrice = publicInfo?.price ?? null;
       results[o.id] = {
         expected,
-        livePrice,
+        livePrice: basePrice,
         basePrice,
-        isForSale: buyerInfo?.isForSale ?? publicInfo?.isForSale ?? null,
+        isForSale: publicInfo?.isForSale ?? null,
         priceMismatch: basePrice != null && Math.abs(basePrice - expected) > 2,
-        robloxPlusDiscountPercent: buyerInfo?.robloxPlusDiscountPercent ?? null,
-        hasUnsafeBuyerPrice: buyerInfo?.hasUnsafeBuyerPrice ?? false,
+        robloxPlusDiscountPercent: null,
+        hasUnsafeBuyerPrice: false,
         reusedIn: reusedCode && reusedCode !== o.wbCode ? reusedCode : null,
       };
     }
