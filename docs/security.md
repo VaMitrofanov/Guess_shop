@@ -107,9 +107,10 @@ TWA также принимает ручной `.xlsx` upload для Антон�
 restore/reconciliation и юридическая редактура документа. На mobile `390 px` дополнительно
 обнаружено обрезание заголовка политики (`scrollWidth 408 > clientWidth 386`).
 
-**UI-fix 17.07:** общий legal shell получил `overflow-wrap`/`overflow-x-clip`; локальная
-production-сборка на viewport `390×844` показывает `scrollWidth 386 == clientWidth 386`,
-заголовок целиком внутри viewport. Инфраструктурное противоречие локализации остаётся P0.
+**UI-fix 17.07, production `b6b699f`:** общий legal shell получил
+`overflow-wrap`/`overflow-x-clip`; проверка viewport `390×844` показывает
+`scrollWidth 386 == clientWidth 386`, заголовок целиком внутри viewport.
+Инфраструктурное противоречие локализации остаётся P0.
 
 Основная production-БД размещена в зарубежном регионе провайдера, при этом публичная
 политика конфиденциальности заявляет хранение/локализацию в РФ. В `User` и заказах есть
@@ -288,7 +289,7 @@ discount остаётся fail-closed; guessed endpoints не использую
 недостаточен; карточку нельзя закрывать до диагностики provider/network/config и реального
 VK callback acceptance.
 
-**Mitigation 17.07:** `NEXT_PUBLIC_VK_AUTH_ENABLED` теперь fail-closed и без точного
+**Mitigation 17.07, production `b6b699f`:** `NEXT_PUBLIC_VK_AUTH_ENABLED` теперь fail-closed и без точного
 `true` полностью убирает VK ID из `/login`; Guide вместо сломанного OAuth показывает
 прямую ссылку на сообщество с безопасным `ref`-кодом. Флаг можно включать только после
 реального login/callback smoke. Это убирает неработающий публичный control, но не закрывает

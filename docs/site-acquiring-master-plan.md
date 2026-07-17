@@ -16,8 +16,9 @@
   МИР, Visa, Mastercard и СБП; `/register` требует privacy consent и клиентом, и API;
   legal shell исправлен для `390 px`; FAQ/guarantees синхронизированы с опубликованными
   документами; VK ID скрыт fail-closed до live acceptance. Локально зелёные 31 suite / 203
-  tests, scoped ESLint, web TypeScript, build и mobile browser acceptance. Остаётся
-  последовательный production rollout Web → Guide и финальный corridor/public smoke.
+  tests, scoped ESLint, web TypeScript, build и mobile browser acceptance.
+  **Rollout завершён:** commit `b6b699f`, Web/Guide `running:healthy`, fingerprint
+  `20183b40b8783d9c`, public smoke `15/15`, corridor `29/29`; acquiring status `false`.
 
 - **2026-07-17, предрелизный аудит ссылки Т‑Банку:** production root уже отвечает `200`,
   а fail-closed acquiring остаётся выключенным. Code gate: 30 suites / 200 tests, web+bot

@@ -10,7 +10,8 @@ URL уже публичен, а приём денег fail-closed. Quick-fix bat
 
 Минимальный сегодняшний gate для предварительной ссылки:
 
-1. [ ] Задеплоить Web, затем `RobloxBank-Guide` на тот же source fingerprint.
+1. [x] Web, затем `RobloxBank-Guide` последовательно развёрнуты на commit `b6b699f`;
+   source fingerprint совпадает: `20183b40b8783d9c`.
 2. [x] VK ID скрыт fail-closed из публичного login; Guide использует прямую VK-ссылку до
    отдельного live provider acceptance.
 3. [x] Mobile overflow `/legal/policy` исправлен: `390 px` viewport даёт
@@ -26,7 +27,7 @@ URL уже публичен, а приём денег fail-closed. Quick-fix bat
 юридическая модель Roblox/бренда/возраста, фактическая РФ-локализация первичной БД,
 terminal/KKT/OFD test matrix и боевой payment/refund E2E.
 
-## Production baseline до quick-fix rollout
+## Production после quick-fix rollout
 
 | Поверхность | Результат 17.07 | Вывод |
 |---|---:|---|
@@ -34,10 +35,10 @@ terminal/KKT/OFD test matrix и боевой payment/refund E2E.
 | `/api/health` | `200`, CSP/nosniff/referrer-policy есть | зелёный |
 | `/guide?source=site` | `200`, SITE marker и fingerprint есть | зелёный |
 | `/guide?source=wb` | `200`, все чанки и vendored SDK `200` | функционально доступен |
-| Web ↔ Guide | fingerprint различается | **P1 deploy blocker** |
-| `/login` | email и Telegram доступны; VK disabled после `timeout` | **P0 auth defect** |
+| Web ↔ Guide | fingerprint `20183b40b8783d9c` одинаковый | corridor `29/29` |
+| `/login` | email и Telegram доступны; неработающий VK ID скрыт fail-closed | зелёный для preview |
 | `/dashboard` | авторизованный USER видит ЛК, пустую историю и EMAIL identity | базовый ЛК работает |
-| `/checkout` | поиск Roblox, avatar, 6 passes, выбор и quote работают | до payment submit зелёный |
+| `/checkout` | поиск/quote работают; review-баннер виден, payment CTA не активируется | зелёный для preview |
 | Приём денег | `SITE_ACQUIRING_ENABLED` не задан как `true`; код разрешает только точное `true` | fail-closed |
 | Legal pages | публичные `200`, реквизиты/телефон/email заполнены | требуется правовая приёмка |
 
@@ -56,8 +57,8 @@ terminal/KKT/OFD test matrix и боевой payment/refund E2E.
 - Bots TypeScript: без ошибок.
 - `prisma validate`: схема валидна.
 - `npm run build`: production build успешен на Next.js 16.2.2.
-- `npm run smoke:site -- --expect-public`: **15/15**.
-- `scripts/smoke-corridor.mjs`: **28 passed / 1 failed** — только Web/Guide fingerprint.
+- `npm run smoke:site -- --expect-public`: **15/15** после rollout.
+- `scripts/smoke-corridor.mjs`: **29/29** после последовательного Web → Guide deploy.
 - Полный `eslint src --quiet`: **389 errors**. Основная масса — legacy
   `no-explicit-any`; есть React hook/compiler-ошибки. Поэтому общий lint gate не зелёный,
   даже если scoped lint изменённых storefront-файлов проходил в предыдущих релизах.
@@ -107,27 +108,22 @@ terminal/KKT/OFD test matrix и боевой payment/refund E2E.
 3. **Платёж и ККТ не приняты.** Нет terminal test matrix, официальных test cases 7/8,
    фактического `Init → callback → receipt → fulfillment → refund`, сверки с кабинетом
    Т‑Банка и ОФД.
-4. **VK ID не работает в живом production browser.** После загрузки `/login` кнопка
-   остаётся disabled, видимый статус — `Ошибка VK ID: timeout`; console фиксирует failed
-   fetch в vendored SDK. CSP-host contract зелёный, значит требуется отдельная диагностика
-   сети/provider/config и живой acceptance.
-5. **Нет согласия на ПД в регистрации.** `/register` собирает имя, email и password до
-   checkout, но не показывает отдельное согласие/ссылку на политику. Правовое основание и
-   UX должны быть подтверждены юристом.
-6. **Нет обязательных логотипов банка/платёжных систем.** Т‑Банк прямо включает их в
-   требования к сайту.
+4. **Корневая проблема VK ID остаётся открыта, публичный дефект mitigated.** Provider
+   продолжает требовать отдельной диагностики и live callback acceptance, но broken control
+   скрыт fail-closed из login; Guide использует прямой VK handoff.
+5. **Registration consent — закрыто 17.07.** `/register` показывает отдельное согласие и
+   ссылку на Политику; API требует literal `true` и отклоняет обход UI.
+6. **Платёжные логотипы — закрыто 17.07.** Footer/checkout показывают Т‑Банк, МИР, Visa,
+   Mastercard и СБП вместе с честным статусом выключенной оплаты.
 
 ### P1 — до сегодняшней предварительной ссылки
 
-1. **Guide отстаёт от Web:** source fingerprint различается. Все текущие чанки отдают
-   `200`, но будущие fixes могут снова не попасть в WB-гейт.
-2. **Mobile policy overflow:** на `390 px` документ имеет `scrollWidth 408`, заголовок
-   «Политика конфиденциальности» обрезан справа.
-3. **Публичный контент выглядит незавершённым:** guarantees и FAQ обещают заполнить
-   реквизиты/правила/часы «до запуска», хотя `/legal/details` уже содержит эти данные.
-4. **Payment CTA выглядит рабочим при выключенной оплате.** После email+consent кнопка
-   активна; только POST вернёт fail-closed `503`. Для банковского ревью лучше показать
-   явный disabled-state/баннер без создания заказа.
+1. **Guide drift — закрыто:** Web/Guide на одном fingerprint, corridor `29/29`.
+2. **Mobile policy overflow — закрыто:** `386/386`, заголовок виден целиком.
+3. **Устаревший public copy — закрыто:** FAQ/guarantees используют опубликованные условия,
+   общие support hours/SLA.
+4. **Payment CTA mismatch — закрыто:** runtime status и сервер используют один exact-`true`
+   gate; при `enabled:false` баннер виден, CTA не активируется.
 5. **Legal copy шире фактической услуги:** оферта описывает также коды и gift cards, хотя
    текущий сайт продаёт услугу через gamepass. Момент исполнения, возвраты, SLA и точный
    предмет расчёта должны быть согласованы с юристом/бухгалтером/ККТ.

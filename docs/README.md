@@ -47,11 +47,11 @@ WB-гайд остаётся отдельной рабочей точкой вх
 
 С 16.07 публичный shell имеет custom 404/error recovery, корректные SEO/noindex-границы,
 PII-safe Core Web Vitals/client-error telemetry и read-only `npm run smoke:site`. Web и
-отдельный Guide-контейнер должны отдавать общий source fingerprint; аудит 17.07 обнаружил
-расхождение и оставил deploy gate открытым. Quick-fix batch для банковской ссылки уже
-добавил runtime payment-disabled state, платёжные логотипы, registration consent,
-mobile legal fix и актуальный public copy; VK ID скрыт fail-closed до живого acceptance.
-Corridor-smoke автоматически обнаруживает отставший Guide. Это закрывает локальный hardening, но не заменяет реальные
+отдельный Guide-контейнер после rollout `b6b699f` отдают общий source fingerprint
+`20183b40b8783d9c`; corridor-smoke `29/29`. Quick-fix batch для банковской ссылки добавил
+runtime payment-disabled state, платёжные логотипы, registration consent, mobile legal fix
+и актуальный public copy; VK ID скрыт fail-closed до живого acceptance. Corridor-smoke
+автоматически обнаруживает будущий drift. Это закрывает storefront hardening, но не заменяет реальные
 TG/VK/iPhone/Android acceptance, реквизиты, ККТ/payment E2E и soft launch.
 
 Личный кабинет и все три поверхности входа используют общий Violet/Frost shell. Email-вход
