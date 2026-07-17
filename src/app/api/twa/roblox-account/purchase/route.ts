@@ -7,12 +7,6 @@ import { notifyRetailBuyoutAdmins } from "@/lib/buyout-admin-notify";
 
 const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
-async function rGet(url: string, timeout = 10_000) {
-  const r = await fetch(url, { headers: ROBLOX_UA, signal: AbortSignal.timeout(timeout) });
-  if (!r.ok) return null;
-  return r.json().catch(() => null);
-}
-
 async function getCookie(): Promise<string | null> {
   const s = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
   return s?.robloxCookie ?? null;
@@ -169,11 +163,15 @@ export async function POST(req: NextRequest) {
     // the buyer account, UserBasePriceInRobux is the seller's configured price.
     if (cookie) {
       try {
-        const r = await fetch(infoUrls[0], {
-          headers: { ...ROBLOX_UA, Cookie: `.ROBLOSECURITY=${cookie}` },
-          signal: AbortSignal.timeout(8_000), cache: "no-store",
-        });
-        if (r.ok) info = await r.json();
+        const resolved = await resolveGamepassForBuyer(gpId, cookie);
+        info = {
+          ProductId: resolved.productId,
+          PriceInRobux: resolved.price,
+          UserBasePriceInRobux: resolved.basePriceInRobux,
+          Name: resolved.name,
+          Creator: { Id: resolved.sellerId, Name: resolved.sellerName },
+          IsForSale: resolved.isForSale,
+        };
       } catch { /* public fallback below */ }
     }
     for (const url of info ? [] : infoUrls) {

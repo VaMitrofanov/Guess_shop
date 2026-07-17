@@ -20,8 +20,39 @@ const jsonResponse = (body: unknown, status = 200) =>
   });
 
 const realFetch = global.fetch;
+beforeEach(() => {
+  process.env.ROBLOX_PURCHASE_SERVICE_URL = "http://purchase-service.test:9223";
+  process.env.ROBLOX_PURCHASE_SERVICE_TOKEN = "t".repeat(32);
+});
 afterEach(() => {
   global.fetch = realFetch;
+  delete process.env.ROBLOX_PURCHASE_SERVICE_URL;
+  delete process.env.ROBLOX_PURCHASE_SERVICE_TOKEN;
+});
+
+const sessionResponse = () => jsonResponse({
+  ok: true,
+  code: "OK",
+  session: { accountId: 42, accountName: "Donor", balance: 500 },
+});
+
+const preflightResponse = (overrides: Record<string, unknown> = {}) => jsonResponse({
+  ok: true,
+  code: "OK",
+  session: { accountId: 42, accountName: "Donor", balance: 500 },
+  gamepass: {
+    gamepassId: 999,
+    productId: 111,
+    name: "Pass",
+    price: 143,
+    basePriceInRobux: 143,
+    priceDiscountDetails: [],
+    sellerName: "Seller",
+    sellerId: 42,
+    isForSale: true,
+    owned: false,
+    ...overrides,
+  },
 });
 
 describe("needsOwnershipCheck (оба зеркала)", () => {
@@ -44,23 +75,13 @@ describe("needsOwnershipCheck (оба зеркала)", () => {
 });
 
 describe("purchaseGamepassVerified (bots)", () => {
-  beforeEach(() => {
-    process.env.ROBLOX_PURCHASE_SERVICE_URL = "http://purchase-service.test:9223";
-    process.env.ROBLOX_PURCHASE_SERVICE_TOKEN = "t".repeat(32);
-  });
-
-  afterEach(() => {
-    delete process.env.ROBLOX_PURCHASE_SERVICE_URL;
-    delete process.env.ROBLOX_PURCHASE_SERVICE_TOKEN;
-  });
-
   test("успешный browser transport возвращает подтверждённую цену", async () => {
     const calls: string[] = [];
     global.fetch = jest.fn(async (input: any, init?: RequestInit) => {
       const url = String(input);
       calls.push(url);
-      if (url.includes("users/authenticated")) return jsonResponse({ id: 42, name: "Donor" });
-      if (url.includes("purchase-service.test")) {
+      if (url.endsWith("/session")) return sessionResponse();
+      if (url.endsWith("/purchase")) {
         const body = JSON.parse(String(init?.body));
         expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${"t".repeat(32)}`);
         expect(body).toMatchObject({ cookie: "cookie", gamepassId: "999", expectedBuyerId: 42, expectedPrice: 143 });
@@ -83,8 +104,8 @@ describe("purchaseGamepassVerified (bots)", () => {
     global.fetch = jest.fn(async (input: any) => {
       const url = String(input);
       calls.push(url);
-      if (url.includes("users/authenticated")) return jsonResponse({ id: 42, name: "Donor" });
-      if (url.includes("purchase-service.test")) throw new Error("connect ECONNREFUSED");
+      if (url.endsWith("/session")) return sessionResponse();
+      if (url.endsWith("/purchase")) throw new Error("connect ECONNREFUSED");
       throw new Error(`unexpected fetch: ${url}`);
     }) as any;
 
@@ -101,8 +122,8 @@ describe("purchaseGamepassVerified (bots)", () => {
     global.fetch = jest.fn(async (input: any) => {
       const url = String(input);
       calls.push(url);
-      if (url.includes("users/authenticated")) return jsonResponse({ id: 42, name: "Donor" });
-      if (url.includes("purchase-service.test")) {
+      if (url.endsWith("/session")) return sessionResponse();
+      if (url.endsWith("/purchase")) {
         return jsonResponse({
           purchased: false,
           reason: "BalanceMismatch: владение подтверждено, дельта 0 R$, ожидалось 143 R$",
@@ -129,10 +150,11 @@ describe("verifyGamepassOwnership (src-зеркало)", () => {
     let authOk = true;
     global.fetch = jest.fn(async (input: any) => {
       const url = String(input);
-      if (url.includes("users/authenticated")) {
-        return authOk ? jsonResponse({ id: 42 }) : new Response("", { status: 401 });
+      if (url.endsWith("/gamepass-preflight")) {
+        if (!authOk) return jsonResponse({ ok: false, code: "DONOR_COOKIE_INVALID", reason: "NotLoggedIn" }, 409);
+        const owned = Array.isArray((inventory as any)?.data) ? (inventory as any).data.length > 0 : null;
+        return preflightResponse({ owned });
       }
-      if (url.includes("inventory.roblox.com")) return jsonResponse(inventory);
       throw new Error(`unexpected fetch: ${url}`);
     }) as any;
 
@@ -152,15 +174,14 @@ describe("verifyGamepassOwnership (src-зеркало)", () => {
 describe("resolveGamepassForBuyer (regional pricing)", () => {
   test("читает buyer-specific цену с cookie, сохраняя базу продавца", async () => {
     global.fetch = jest.fn(async (input: any, init?: RequestInit) => {
-      expect(String(input)).toContain("apis.roblox.com/game-passes/v1/game-passes/999/product-info");
-      expect(new Headers(init?.headers).get("Cookie")).toBe(".ROBLOSECURITY=secret-cookie");
-      return jsonResponse({
-        ProductId: 111,
-        PriceInRobux: 1287,
-        UserBasePriceInRobux: 1429,
-        Name: "Regional pass",
-        Creator: { Id: 42, Name: "Seller" },
-        IsForSale: true,
+      expect(String(input)).toBe("http://purchase-service.test:9223/gamepass-preflight");
+      expect(new Headers(init?.headers).get("Cookie")).toBeNull();
+      const body = JSON.parse(String(init?.body));
+      expect(body).toMatchObject({ cookie: "secret-cookie", gamepassId: "999", source: "web" });
+      return preflightResponse({
+        price: 1287,
+        basePriceInRobux: 1429,
+        name: "Regional pass",
       });
     }) as any;
 
@@ -174,22 +195,22 @@ describe("resolveGamepassForBuyer (regional pricing)", () => {
       robloxPlusDiscountPercent: null,
       sellerId: 42,
       isForSale: true,
+      buyerAccountId: 42,
+      buyerAccountName: "Donor",
+      buyerBalance: 500,
     });
   });
 
   test("распознаёт typed Roblox Plus и не помечает его региональным", async () => {
-    global.fetch = jest.fn(async () => jsonResponse({
-      ProductId: 111,
-      PriceInRobux: 2573,
-      UserBasePriceInRobux: 2858,
-      PriceDiscountDetails: [{
+    global.fetch = jest.fn(async () => preflightResponse({
+      price: 2573,
+      basePriceInRobux: 2858,
+      priceDiscountDetails: [{
         Type: "RobloxPlusSubscription",
         AmountInRobux: 285,
         Percent: 10,
         EndTime: null,
       }],
-      Creator: { Id: 42, Name: "Seller" },
-      IsForSale: true,
     })) as any;
 
     const gp = await resolveGamepassForBuyer("999", "secret-cookie");
@@ -201,17 +222,16 @@ describe("resolveGamepassForBuyer (regional pricing)", () => {
     });
   });
 
-  test("не отправляет cookie в proxy fallback при ошибке official API", async () => {
+  test("не отправляет cookie в Roblox/proxy при ошибке browser service", async () => {
     const calls: string[] = [];
     global.fetch = jest.fn(async (input: any) => {
       calls.push(String(input));
-      return new Response("", { status: 503 });
+      return jsonResponse({ ok: false, code: "BROWSER_SERVICE_UNAVAILABLE", reason: "BrowserUnavailable" }, 503);
     }) as any;
 
     await expect(resolveGamepassForBuyer("999", "secret-cookie"))
-      .rejects.toThrow("персональную цену Roblox");
+      .rejects.toThrow("Браузерный сервис выкупа недоступен");
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toContain("apis.roblox.com");
-    expect(calls[0]).not.toContain("roproxy");
+    expect(calls[0]).toBe("http://purchase-service.test:9223/gamepass-preflight");
   });
 });

@@ -1,5 +1,11 @@
 import { classifyBuyerPrice, type RobloxPriceDiscountDetail } from "@/lib/purchase-guard";
-import { isBrowserInfrastructureFailure, purchaseGamepassInBrowser } from "@/lib/browser-purchase";
+import {
+  browserFailureMessage,
+  getBrowserGamepassPreflight,
+  getBrowserSession,
+  isBrowserInfrastructureFailure,
+  purchaseGamepassInBrowser,
+} from "@/lib/browser-purchase";
 
 export const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
@@ -27,6 +33,10 @@ export interface ResolvedGamepass {
   robloxPlusDiscountPercent: number | null;
   hasUnsafeBuyerPrice: boolean;
   image: string | null;
+  /** Present only for buyer-specific resolution through the SG browser. */
+  buyerAccountId?: number;
+  buyerAccountName?: string;
+  buyerBalance?: number;
 }
 
 /**
@@ -135,12 +145,9 @@ export async function resolveGamepass(raw: string): Promise<ResolvedGamepass> {
  *
  * Managed/Regional Pricing makes `PriceInRobux` depend on the authenticated
  * buyer while `UserBasePriceInRobux` remains the seller's configured global
- * price. Purchase paths must use this resolver immediately before POSTing to
- * economy.roblox.com; public/roproxy product-info can otherwise cause a
- * deterministic `PriceChanged` refusal.
- *
- * The Roblox cookie is sent only to the official Roblox origin, never to a
- * proxy fallback.
+ * price. Purchase paths use this resolver immediately before the browser
+ * purchase. The cookie is sent only to the SG browser service; authenticated
+ * Roblox calls and donor identity are resolved in that same persistent Chrome.
  */
 export async function resolveGamepassForBuyer(
   raw: string,
@@ -148,38 +155,33 @@ export async function resolveGamepassForBuyer(
 ): Promise<ResolvedGamepass> {
   const gpId = parseGamepassId(raw);
   if (!gpId) throw new BuyoutError("Невалидный ID геймпасса", 400);
-
-  const r = await fetch(
-    `https://apis.roblox.com/game-passes/v1/game-passes/${gpId}/product-info`,
-    {
-      headers: { ...ROBLOX_UA, Cookie: `.ROBLOSECURITY=${cookie}` },
-      signal: AbortSignal.timeout(8_000),
-      cache: "no-store",
-    },
-  ).catch(() => null);
-  if (!r?.ok) throw new BuyoutError("Не удалось получить персональную цену Roblox", 502);
-
-  const info = (await r.json().catch(() => null)) as RobloxProductInfo | null;
-  if (!info?.ProductId) throw new BuyoutError("Геймпасс не найден", 404);
-
-  const price = info.PriceInRobux ?? 0;
-  const base = info.UserBasePriceInRobux ?? price;
-  const priceDiscountDetails = Array.isArray(info.PriceDiscountDetails) ? info.PriceDiscountDetails : [];
+  const result = await getBrowserGamepassPreflight(cookie, gpId);
+  if (!result.ok || !result.gamepass) {
+    const status = result.code === "DONOR_COOKIE_INVALID" ? 401 : 502;
+    throw new BuyoutError(browserFailureMessage(result.reason, result.code), status);
+  }
+  const info = result.gamepass;
+  const price = info.price;
+  const base = info.basePriceInRobux;
+  const priceDiscountDetails = info.priceDiscountDetails;
   const buyerPrice = classifyBuyerPrice(price, base, priceDiscountDetails);
   return {
     gamepassId: Number(gpId),
-    productId: info.ProductId,
-    name: info.Name ?? "Gamepass",
+    productId: info.productId,
+    name: info.name,
     price,
-    sellerName: info.Creator?.Name ?? "Unknown",
-    sellerId: info.Creator?.Id ?? info.Creator?.CreatorTargetId ?? 0,
-    isForSale: info.IsForSale ?? false,
+    sellerName: info.sellerName,
+    sellerId: info.sellerId,
+    isForSale: info.isForSale,
     isManagedPricing: price !== base,
     basePriceInRobux: base,
     priceDiscountDetails,
     robloxPlusDiscountPercent: buyerPrice.kind === "ROBLOX_PLUS" ? buyerPrice.discountPercent : null,
     hasUnsafeBuyerPrice: buyerPrice.kind === "UNSAFE_DISCOUNT",
     image: null,
+    buyerAccountId: result.session?.accountId,
+    buyerAccountName: result.session?.accountName,
+    buyerBalance: result.session?.balance,
   };
 }
 
@@ -199,12 +201,14 @@ export async function purchaseGamepassWithCookie(
     };
   }
 
-  const buyerUserId = await getAuthenticatedUserId(cookie);
-  if (!buyerUserId) {
+  const browserSession = await getBrowserSession(cookie);
+  const buyerUserId = browserSession.session?.accountId ?? null;
+  if (!browserSession.ok || !buyerUserId) {
+    const reason = `${browserSession.code}: ${browserSession.reason ?? "browser session недоступна"}`;
     return {
       success: false,
-      msg: "NotLoggedIn: cookie истёк — обнови через /setcookie",
-      reason: "NotLoggedIn",
+      msg: browserFailureMessage(browserSession.reason, browserSession.code),
+      reason,
       balance: null,
       failureKind: "internal",
     };
@@ -229,14 +233,15 @@ export async function purchaseGamepassWithCookie(
     };
   }
 
+  const failureReason = result.code ? `${result.code}: ${result.reason}` : result.reason;
   return {
     success: false,
-    msg: result.reason || "Неизвестная ошибка browser transport",
-    reason: result.reason,
+    msg: browserFailureMessage(result.reason, result.code),
+    reason: failureReason,
     balance: result.balanceAfter ?? result.balanceBefore ?? null,
-    failureKind: isBrowserInfrastructureFailure(result.reason)
+    failureKind: isBrowserInfrastructureFailure(failureReason)
       ? "internal"
-      : /GuardStop|ScriptRefused|AlreadyOwned|NotConfirmed|BuyButtonMissing/i.test(result.reason)
+      : /GuardStop|ScriptRefused|AlreadyOwned|NotConfirmed|BuyButtonMissing|PRICE_GUARD|SELLER_GUARD|OWNERSHIP_GUARD|NOT_FOR_SALE/i.test(failureReason)
         ? "row"
         : "unknown",
   };
@@ -281,13 +286,8 @@ export function needsOwnershipCheck(reason: string | null | undefined): boolean 
  * userId аккаунта, которому принадлежит cookie. null — определить не удалось.
  */
 export async function getAuthenticatedUserId(cookie: string): Promise<number | null> {
-  const uRes = await fetch("https://users.roblox.com/v1/users/authenticated", {
-    headers: { ...ROBLOX_UA, Cookie: `.ROBLOSECURITY=${cookie}` },
-    signal: AbortSignal.timeout(8_000),
-  }).catch(() => null);
-  if (!uRes?.ok) return null;
-  const user = (await uRes.json().catch(() => null)) as { id?: number } | null;
-  return user?.id ?? null;
+  const result = await getBrowserSession(cookie);
+  return result.ok ? result.session?.accountId ?? null : null;
 }
 
 /**
@@ -298,16 +298,8 @@ export async function verifyGamepassOwnership(
   cookie: string,
   gamepassId: string | number,
 ): Promise<boolean | null> {
-  const userId = await getAuthenticatedUserId(cookie);
-  if (!userId) return null;
-
-  const res = await fetch(
-    `https://inventory.roblox.com/v1/users/${userId}/items/GamePass/${gamepassId}`,
-    { headers: ROBLOX_UA, signal: AbortSignal.timeout(8_000) },
-  ).catch(() => null);
-  if (!res?.ok) return null;
-  const json = (await res.json().catch(() => null)) as { data?: unknown[] } | null;
-  return Array.isArray(json?.data) ? json.data.length > 0 : null;
+  const result = await getBrowserGamepassPreflight(cookie, gamepassId);
+  return result.ok ? result.gamepass?.owned ?? null : null;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

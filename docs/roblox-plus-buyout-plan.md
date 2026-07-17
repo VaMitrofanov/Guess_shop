@@ -9,9 +9,166 @@
 
 Серверная cookie-only покупка через голый HTTP остаётся невозможной, и это **не чинится
 сменой URL** — см. «Почему серверный fetch не проходит». Вместо неё SG purchase-service
-инъецирует текущую cookie в настоящий Chrome и вызывает официальный client flow. Web/TWA,
-TG, партнёрский и auto-buyout пути интегрированы; kill-switch автомата остаётся OFF до
-трёх production canary на funded donor.
+инъецирует текущую cookie в настоящий Chrome и вызывает официальный client flow.
+
+**P0-инцидент 17.07:** транспорт и Chrome доступны, но production-версия TWA/Web перед
+покупкой использует ту же donor-cookie с RF-сервера, а затем переносит её в Chrome на SG.
+Две production-попытки дошли до purchase-service и получили `NotLoggedIn`; свежая cookie
+стала `401` через две минуты после сохранения.
+
+**Статус исправления:** P0.1–P0.3 и кодовая часть P0.4 реализованы локально, но ещё не
+задеплоены. `session`, buyer-specific preflight, ownership и purchase теперь проходят через
+один persistent SG Chrome; добавлены стабильные коды ошибок, безопасные structured logs и
+contract-test против повторного donor-cookie egress. Production остаётся на старой версии до
+поэтапного deploy и живого canary. Kill-switch автомата остаётся OFF.
+
+## P0-инцидент: donor-cookie инвалидируется между RF preflight и SG Chrome (17.07.2026)
+
+### Симптом и доказательства
+
+Менеджер получил в TWA, открытой из бота: «Браузерный сервис выкупа временно недоступен.
+Заказ оставлен в очереди; используй ручной скрипт». Это сообщение оказалось слишком общим:
+сервис не был недоступен.
+
+- TG-контейнер и Web через туннель получают от `/health` HTTP 200,
+  `browser=true`, `queued=0`; Chrome CDP отвечает, purchase-service active.
+- В журнале purchase-service есть две фактические попытки: 06:25:12 и 08:20:32 UTC. Обе
+  завершились `purchased=false`, `NotLoggedIn: профиль браузера разлогинен`.
+- Новая cookie была сохранена в 08:18:07 UTC. В Chrome она физически присутствовала с
+  правильными domain/Secure/HttpOnly и полной длиной, но authenticated user и currency API
+  уже отвечали 401. С RF та же cookie после попытки тоже отвечала 401.
+- Покупка не открылась: balance delta и новое ownership отсутствуют; заказ корректно остался
+  в рабочей очереди. `autoBuyoutEnabled=false`.
+
+### Root cause
+
+Application-level причина подтверждена кодом и последовательностью событий:
+
+1. TWA на RF проверяет и сохраняет cookie через прямой authenticated fetch Roblox.
+2. `resolveGamepassForBuyer()` и `getAuthenticatedUserId()` снова используют cookie с RF
+   непосредственно перед отправкой запроса на покупку.
+3. Purchase-service на SG инъецирует ту же cookie в persistent Chrome и только там вызывает
+   официальный purchase flow.
+4. RF-проверка обязана была пройти, иначе `/purchase` не был бы вызван; следующий SG-шаг уже
+   получил 401. Canary проходил в другом режиме: cookie-инъекция и покупка выполнялись на SG,
+   без RF preflight.
+
+Следовательно, сломан не listener, туннель или CDP, а **multi-egress session flow**. Точный
+закрытый алгоритм Roblox не наблюдаем, но результат согласуется с привязкой/ревокацией сессии
+по IP, региону, device/HBA context или их комбинации. Исправление не должно зависеть от
+угадывания конкретного сигнала: donor-cookie вообще нельзя предъявлять Roblox вне одного
+persistent Chrome context.
+
+### Немедленное ограничение до фикса
+
+1. Оставить `autoBuyoutEnabled=false`; не запускать batch/partner buyout и не повторять
+   текущую cookie — она уже невалидна.
+2. Не сохранять новую funded cookie через текущий TWA/Web flow: успешное сообщение от RF
+   ещё не доказывает, что сессия переживёт перенос в SG.
+3. Не добавлять fallback на прямой authenticated fetch с RF или голый HTTP с SG. При
+   недоступности Chrome операция должна останавливаться до Roblox-запроса.
+4. Новую cookie брать только после deploy исправления. Ручной скрипт допустим лишь в уже
+   авторизованном браузере менеджера и не является acceptance автоматического контура.
+
+### План и статус реализации исправления
+
+#### Этап P0.1 — один browser-auth контракт
+
+**✅ Реализовано локально; deploy SG service ожидает отчёта и подтверждения владельца.**
+
+Расширить `scripts/browser-purchase-service.mjs` двумя Bearer-auth операциями, использующими
+тот же Chrome, cookie-injection и single-flight lock, что и покупка:
+
+- `POST /session` — инъекция cookie, browser-context fetch authenticated user + currency;
+  наружу только `{accountId, accountName, balance}` или стабильный error code;
+- `POST /gamepass-preflight` — в том же browser context получить authenticated product-info,
+  identity, balance и ownership; вернуть только нормализованные числа/флаги, необходимые
+  существующим price/Plus/seller guards;
+- `POST /purchase` оставить денежным шагом, но принимать `requestId`/`source` и ожидаемые
+  buyer/product/seller/price. Перед кликом он повторно проверяет те же инварианты.
+
+Все три операции проходят через один no-backlog single-flight lock. Cookie запрещено
+логировать, возвращать или сохранять в service. Read-only операции тоже не должны выполняться
+параллельно с покупкой: иначе один запрос может заменить cookie другого до клика.
+
+Authenticated Roblox fetch выполнять через `page.evaluate(... credentials: "include")` в
+persistent Chrome, а не через Node `fetch` даже на SG. Public product-info/thumbnail без
+cookie может оставаться на текущих серверах.
+
+#### Этап P0.2 — убрать прямой donor-cookie egress из приложения
+
+**✅ Реализовано локально.** Мигрированы TWA account/dashboard/orders/account purchase,
+partner tasks через общий buyout helper, TG manual/auto и donor-часть ручного/автослива.
+Прямые cookie-запросы сохранены только для отдельного аккаунта-приёмника drain, который
+управляет ценой собственного геймпасса и не использует donor-cookie.
+
+Добавить типизированный клиент browser donor service (с зеркалом для `src/` и `bots/` либо
+общим нейтральным модулем) и заменить все прямые authenticated обращения:
+
+- TWA `roblox-account`: set-cookie, refresh и balance;
+- TWA dashboard donor snapshot;
+- orders: `gp-live-check`, поиск замены, `purchase-script` и `purchase`;
+- Account search/batch/purchase;
+- partner `purchase-task`;
+- TG manual buyout и auto-worker;
+- donor-часть `/api/twa/drain` и любые ownership/balance checks с `robloxCookie`.
+
+`resolveGamepassForBuyer()`, `getAuthenticatedUserId()` и cookie-вариант ownership-check не
+должны вызываться из RF/Web. После миграции либо удалить их, либо оставить только за новым
+service boundary. Нужен contract-test, который падает при появлении `.ROBLOSECURITY` в
+Roblox request headers вне browser service. **Никакого direct-fetch fallback:** outage
+service = fail-closed, иначе fallback сам снова инвалидирует cookie.
+
+#### Этап P0.3 — точные ошибки и наблюдаемость
+
+**✅ Реализовано локально.** Service и клиенты используют стабильные коды; UI больше не
+называет invalid cookie общей недоступностью сервиса. Логи содержат operation/source,
+`requestId`, gamepass ID, code и duration, но не cookie, Bearer token или script.
+
+Заменить regex/generic message на стабильные коды:
+
+- `DONOR_COOKIE_INVALID` — обновить cookie после устранения причины;
+- `BROWSER_SERVICE_UNAVAILABLE` — listener/tunnel/CDP;
+- `BROWSER_BUSY` — single-flight занят;
+- `ROBLOX_SESSION_UNAVAILABLE`, `ROBLOX_PRECHECK_UNAVAILABLE` — временный отказ Roblox;
+- `WRONG_DONOR_ACCOUNT`, `TWO_STEP_REQUIRED`;
+- `PRICE_GUARD`, `SELLER_GUARD`, `OWNERSHIP_GUARD`;
+- `BALANCE_MISMATCH`, `BALANCE_UNCONFIRMED`.
+
+UI показывает действие менеджеру, заказ меняет статус только по существующим fail-closed
+правилам. Structured log содержит `requestId`, source, operation, gamepass ID, code,
+duration, ownership/balance result, но никогда cookie/token/script. `/health` остаётся
+liveness-проверкой и больше не используется как доказательство готовности donor session.
+Отдельный authenticated readiness выполняется только по явной команде менеджера.
+
+#### Этап P0.4 — тесты и deploy
+
+**🟡 Код и локальные release-gates готовы; deploy/readiness/canary открыты.** Contract-test
+проверяет запрет прямого donor-cookie egress и отсутствие cookie/script в логах. Финальный
+production acceptance нельзя заменить unit-тестами: нужна новая cookie после deploy и серия
+покупок ниже.
+
+1. Unit/contract: ни один Web/TG call site не посылает donor-cookie Roblox напрямую;
+   ответы service валидируются схемой; неизвестный ответ fail-closed.
+2. Integration с fake service: set-cookie, full price, Plus 10/20%, invalid cookie, wrong
+   account, queue busy, timeout, unsafe discount; ни один отказ не закрывает заказ.
+3. Driver/service: session и preflight сериализованы с purchase; cookie A/B не смешиваются;
+   401 классифицируется как `DONOR_COOKIE_INVALID`; cookie отсутствует в логах.
+4. Deploy order: сначала обратно совместимый SG service, затем health/readiness из TG и Web
+   через туннель, затем Web/TG consumers. Старый direct-fetch путь не оставлять fallback.
+5. После deploy сохранить **новую** funded cookie. Сразу проверить `/session` дважды через
+   Web/TWA и затем из purchase driver: один account ID, баланс и отсутствие 401.
+6. Canary 0 — дешёвый тестовый GP: `ownership false→true`, точная balance delta, seller
+   payout. Затем три реальных заказа по одному; минимум один Plus, если donor имеет Plus.
+7. Только после 3/3 включить auto-buyout и наблюдать первый одиночный auto-tick. Любой 401,
+   account mismatch или balance ambiguity = автомат OFF и ручная сверка.
+
+### Acceptance и rollback
+
+Готово, когда новая cookie ни разу не предъявляется Roblox с RF/Node, TWA save/refresh и все
+buyout-пути получают identity/price/balance из одного Chrome context, а серия canary даёт
+точные ownership + balance + seller payout. Rollback — выключить денежные действия и вернуть
+UI в ручной script-only режим; **возврат к RF authenticated fetch не является rollback**.
 
 ### ✅ Canary на сервере пройден (17.07.2026)
 
@@ -411,21 +568,23 @@ cookie из защищённого server-to-server запроса, не лог�
 | `scripts/browser-buyout-session.sh` | Поднимает/останавливает Chrome с постоянным профилем и локальным VNC/CDP; вход выполняется формой Roblox. |
 | `scripts/browser-buyout-probe.mjs` | Read-only диагностика: проверяет загруженный purchase module, `webdriver`, бренды браузера и WebGL. Ничего не покупает и не посылает POST. |
 | `scripts/browser-buy-gamepass.mjs` | Принимает JSON со скриптом, открывает официальный purchase modal и подтверждает результат только по ownership и балансу. |
-| `scripts/browser-purchase-service.mjs` | Bearer-auth HTTP bridge, cookie-инъекция через CDP и очередь строго по одной покупке. |
+| `scripts/browser-purchase-service.mjs` | Bearer-auth HTTP bridge: `/session`, `/gamepass-preflight`, `/purchase`, cookie-инъекция через CDP и общий no-backlog single-flight. |
 | `infra/systemd/roblox-purchase-*.service` | Автозапуск SG service и постоянного RF→SG SSH-туннеля. |
 | `src/lib/roblox-purchase-script.ts` и `bots/shared/roblox-purchase-script.ts` | Зеркальные билдеры ручного скрипта с [ЦЕНА-СТОП], [ПРОДАВЕЦ-СТОП], [АККАУНТ-СТОП] и ownership-precheck. |
 
-**Текущий production-контур:** host service и туннель запущены, env Web/TG настроены, код
-интеграции развёрнут и прошёл build/tests/runtime health. Автовыкуп kill-switch остаётся OFF
-до 3/3 canary.
-При infrastructure failure заказ остаётся в очереди, а менеджер использует ручной скрипт.
+**Текущий production-контур:** host service, Chrome и туннель запущены, env Web/TG настроены,
+но runtime health проверяет только listener/CDP. Production-попытки 17.07 выявили
+multi-egress invalidation cookie. Исправление P0.1–P0.4 готово локально, но production ещё
+не обновлён; поэтому TWA/Web buyout не готов к новой funded cookie до deploy и canary.
+Автовыкуп kill-switch остаётся OFF. Заказы при отказе остаются в очереди.
 
 ### Что осталось до автоматизации
 
-1. В TWA открыть **Аккаунт → 🔑**, вставить funded donor без 2FA и нажать «Проверить и
-   сохранить» (альтернатива — `/setcookie`). TWA должен сразу показать правильные ник и баланс.
-   Сохранение cookie не включает автомат. Текущий production donor имеет 0 R$.
-2. После deploy провести три последовательных canary с проверкой ownership, seller payout и
+1. После отчёта владельцу задеплоить обратно совместимый SG service, проверить новые
+   `/session` и `/gamepass-preflight`, затем задеплоить Web и TG consumers. До этого не
+   сохранять funded cookie через TWA/Web и не считать `/health` acceptance-проверкой.
+2. После deploy сохранить новую funded cookie без 2FA и провести три последовательных canary
+   с проверкой ownership, seller payout и
    точной balance delta; если donor имеет Plus, один canary обязательно Plus.
 3. Только после 3/3 включить `autoBuyoutEnabled`; при любом отказе — стоп и ручной режим.
 4. После включения проверить первый auto-tick: заказ `COMPLETED`, баланс уменьшился на точную
@@ -496,17 +655,21 @@ PriceChanged → реальная buyer price).
 
 ### Выбор решения
 
-> ✅ Рабочий путь подтверждён 17.07: реальный Chrome с формовым логином и доверенным
-> устройством. Challenge solver не понадобился.
+> ✅ Рабочий путь подтверждён 17.07: реальный persistent Chrome и официальный purchase
+> module. Отдельный canary доказал, что валидная `.ROBLOSECURITY`, инъецированная через CDP,
+> авторизует тот же Chrome и позволяет покупку; постоянный формовый login donor не требуется.
+> VNC/form-login остаётся recovery-инструментом. Challenge solver не понадобился.
 
 | # | Вариант | Описание | Блокер |
 |---|---------|----------|--------|
 | A | **Browser driver** | Подключиться к прогретому реальному Chrome и вызвать официальный purchase module. | Автоматизация требует отдельного решения владельца. |
 | B | **Ручной browser-скрипт** | TG/TWA выдают скрипт для уже залогиненного браузера менеджера. | Рабочий текущий режим, без batch/auto. |
 | C | **Challenge solver** | Программно решить chef challenge через `/challenge/v1/continue` | Требует reverse-engineering JS challenge scripts |
-| D | **Доверенное устройство** | Формовый логин в реальном браузере и подтверждение устройства. | Нужная часть рабочего browser-пути. |
+| D | **Доверенное устройство** | Формовый логин в реальном браузере и подтверждение устройства. | Recovery/диагностика, не основной donor-контракт. |
 
-Рекомендация: оставаться на варианте B, пока владелец отдельно не одобрит риск варианта A.
+Решение владельца: вариант A реализован через закрытый SG service; вариант B остаётся
+ручным fallback. Donor-cookie хранится как раньше, но проверяется и используется только
+внутри SG Chrome — никакого параллельного authenticated RF/Node-контура.
 
 ### Ручной режим
 

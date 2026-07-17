@@ -29,10 +29,10 @@ import {
   getRobuxBalance,
 } from "../shared/roblox";
 import { searchGamepassesByNick } from "../shared/gamepass-search";
-import { runDrain, drainAuthedUser, drainUserGamepasses, ownsGamepass, drainCurrency } from "../shared/drain";
+import { runDrain, drainAuthedUser, drainUserGamepasses } from "../shared/drain";
 import { notifyUserCompleted } from "./handlers";
 import { buildOrderProfitSnapshot } from "../shared/order-profit";
-import { isBrowserInfrastructureFailure } from "../shared/browser-purchase";
+import { browserFailureMessage, getBrowserGamepassPreflight, getBrowserSession, isBrowserInfrastructureFailure } from "../shared/browser-purchase";
 
 const expectedPrice = (amount: number) => Math.ceil(amount / 0.7);
 const PRICE_TOL = 2;
@@ -106,9 +106,11 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
     const cookie = settings.robloxCookie;
     if (!cookie) { await alertAdmins("⚠️ Автовыкуп включён, но cookie донора не задан (/setcookie)."); return; }
 
-    let balance = await getRobuxBalance(cookie);
-    if (balance === null) {
-      await alertAdmins("⚠️ Автовыкуп: не удалось прочитать баланс донора (cookie протух?). Тик пропущен.");
+    const donorSession = await getBrowserSession(cookie);
+    let balance = donorSession.session?.balance ?? null;
+    if (!donorSession.ok || balance === null) {
+      backoffUntil = Date.now() + 15 * 60 * 1000;
+      await alertAdmins(`⚠️ Автовыкуп: ${escapeHtml(browserFailureMessage(donorSession.reason, donorSession.code))}\nПауза 15 минут; kill-switch не изменён.`);
       return;
     }
 
@@ -271,20 +273,21 @@ export async function runAutoDrainTick(): Promise<void> {
     const drainCookie: string | undefined = s.drainCookie;
     if (!donorCookie || !drainCookie) return; // без пары cookie сливать нечем
 
-    const balance = await drainCurrency(donorCookie);
-    if (balance === null) {
+    const donorSession = await getBrowserSession(donorCookie);
+    const balance = donorSession.session?.balance ?? null;
+    if (!donorSession.ok || balance === null) {
       autoDrainBackoffUntil = Date.now() + 15 * 60 * 1000;
-      await alertAdmins("⚠️ Автослив: не удалось прочитать баланс донора (cookie протух?). Пауза 15 мин.");
+      await alertAdmins(`⚠️ Автослив: ${escapeHtml(browserFailureMessage(donorSession.reason, donorSession.code))}\nПауза 15 минут.`);
       return;
     }
     // Сливаем только «мёртвый» остаток: 0 < баланс < минимальной цены выкупа.
     // Выше порога остаток ещё нужен автовыкупу/менеджеру.
     if (balance < 1 || balance >= AUTO_DRAIN_BELOW) return;
 
-    const [donor, receiver] = await Promise.all([
-      drainAuthedUser(donorCookie),
-      drainAuthedUser(drainCookie),
-    ]);
+    const donor = donorSession.session
+      ? { id: donorSession.session.accountId, name: donorSession.session.accountName }
+      : null;
+    const receiver = await drainAuthedUser(drainCookie);
     if (!donor || !receiver) {
       autoDrainBackoffUntil = Date.now() + 15 * 60 * 1000;
       await alertAdmins("⚠️ Автослив: cookie донора или приёмника невалиден. Пауза 15 мин.");
@@ -301,7 +304,8 @@ export async function runAutoDrainTick(): Promise<void> {
     }
     let candidate: { gamepassId: string; name: string } | null = null;
     for (const p of passes) {
-      const owned = await ownsGamepass(donor.id, p.gamepassId);
+      const check = await getBrowserGamepassPreflight(donorCookie, p.gamepassId);
+      const owned = check.ok ? check.gamepass?.owned ?? null : null;
       if (owned === false) { candidate = p; break; }
       // owned === null (проверка не удалась) — пасс пропускаем, не рискуем.
     }

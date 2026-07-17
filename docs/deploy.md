@@ -143,6 +143,24 @@ Runtime env Web и TG: `ROBLOX_PURCHASE_SERVICE_URL`,
 в Coolify/host env. При недоступности service денежные пути fail-closed оставляют заказ в
 очереди и предлагают ручной browser script.
 
+**Single-egress invariant (P0, инцидент 17.07.2026):** наличие `/health` 200 доказывает
+только доступность listener и CDP, но не валидность donor session. Production показал, что
+cookie, использованная для authenticated preflight на RF, затем приходит в SG Chrome как
+неавторизованная и становится 401. Все authenticated user/currency/product-info/ownership
+операции с donor-cookie должны выполняться внутри одного persistent Chrome на SG и
+сериализоваться с purchase. Direct Node/Web fetch и fallback с RF запрещены. До переноса
+всех call sites и новой canary TWA/Web/partner/auto buyout считаются fail-closed; deploy order
+и acceptance описаны в [`roblox-plus-buyout-plan.md`](roblox-plus-buyout-plan.md).
+
+Исправление реализовано локально: SG service имеет Bearer-auth `POST /session`,
+`POST /gamepass-preflight` и `POST /purchase` под одним no-backlog single-flight lock;
+Web/TWA/TG получают только нормализованные session/preflight данные. Безопасный порядок
+релиза обязателен: (1) обновить SG service, не останавливая старый `/purchase`; (2) проверить
+`/health`, затем authenticated `/session` и `/gamepass-preflight` с тестовой cookie;
+(3) обновить Web и TG; (4) сохранить новую funded cookie; (5) cheap canary и 3/3 реальных
+последовательных заказа; (6) только затем отдельно включить auto-buyout. Rollback — выключить
+денежные действия и использовать ручной script-only режим, но не возвращать direct RF fetch.
+
 **Health в TWA/боте:** `TG_BOT_HEALTH_URL`, `VK_BOT_HEALTH_URL` — **обязательны** для
 health-виджета: с 2026-07-03 захардкоженных IP-фолбэков нет (репо публичный, см.
 [security.md](security.md), риск #4). Без env сервис показывается как «нет данных»

@@ -13,7 +13,7 @@ import { vkSend, vkSendPhoto, stripHtml, tgSend, escapeHtml } from "../shared/no
 import { getSbpQrBuffer } from "../shared/sbp";
 import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUserHurdle, notifyAdminsRetailBuyout, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminIntentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, formatUserHandle, formatUserHandleHtml, orderCode } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
-import { getGamepassDetails, getGamepassProductInfo, purchaseGamepassVerified, getRobuxBalance, getAuthenticatedUser, resetPurchaseCsrf } from "../shared/roblox";
+import { getGamepassDetails, getGamepassProductInfo, purchaseGamepassVerified, getRobuxBalance, resetPurchaseCsrf } from "../shared/roblox";
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "../shared/roblox-purchase-script";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { noteProbableNick } from "../shared/nick";
@@ -23,7 +23,7 @@ import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 import { buildAdminKeyboard } from "./admin";
 import { buildOrderProfitSnapshot } from "../shared/order-profit";
 import { buildTelegramWebLoginUrl, parseTelegramWebLoginStart } from "../shared/telegram-web-login";
-import { isBrowserInfrastructureFailure } from "../shared/browser-purchase";
+import { browserFailureMessage, getBrowserSession, isBrowserInfrastructureFailure } from "../shared/browser-purchase";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -3122,8 +3122,8 @@ export function registerAdmin(bot: Telegraf): void {
     const tgId = String(ctx.from.id);
     if (!ADMIN_IDS.includes(tgId)) return;
 
-    const text = ctx.message.text.replace(/^\/setcookie\s*/, "").trim();
-    if (!text) {
+    const submitted = ctx.message.text.replace(/^\/setcookie\s*/, "").trim();
+    if (!submitted) {
       await ctx.reply(
         "📋 <b>Установка cookie</b>\n\n" +
         "<code>/setcookie _|WARNING:-DO-NOT-SHARE...|_xxx</code>\n\n" +
@@ -3135,26 +3135,26 @@ export function registerAdmin(bot: Telegraf): void {
 
     try { await ctx.deleteMessage(); } catch {}
 
-    const user = await getAuthenticatedUser(text);
-    if (!user) {
-      await ctx.reply("❌ Cookie недействителен — не удалось авторизоваться.");
+    const fromHeader = submitted.match(/(?:^|;\s*|cookie:\s*)\.ROBLOSECURITY=([^;]+)/i)?.[1];
+    const rawCookie = (fromHeader ?? submitted).replace(/^"|"$/g, "").trim();
+    const browser = await getBrowserSession(rawCookie);
+    if (!browser.ok || !browser.session) {
+      await ctx.reply(`❌ ${browserFailureMessage(browser.reason, browser.code)}`);
       return;
     }
 
-    const balance = await getRobuxBalance(text);
-
     await (db as any).globalSettings.upsert({
       where: { id: "global" },
-      update: { robloxCookie: text, robloxCookieUpdatedAt: new Date(), robloxAccountName: user.name },
-      create: { id: "global", usdToRub: 90, robloxCookie: text, robloxCookieUpdatedAt: new Date(), robloxAccountName: user.name },
+      update: { robloxCookie: rawCookie, robloxCookieUpdatedAt: new Date(), robloxAccountName: browser.session.accountName },
+      create: { id: "global", usdToRub: 90, robloxCookie: rawCookie, robloxCookieUpdatedAt: new Date(), robloxAccountName: browser.session.accountName },
     });
 
     resetPurchaseCsrf();
 
     await ctx.reply(
       `✅ <b>Cookie установлен!</b>\n` +
-      `👤 Аккаунт: <b>${escapeHtml(user.name)}</b> (ID: ${user.id})\n` +
-      `💰 Баланс: <b>${balance !== null ? `${balance.toLocaleString()} R$` : "не удалось загрузить"}</b>`,
+      `👤 Аккаунт: <b>${escapeHtml(browser.session.accountName)}</b> (ID: ${browser.session.accountId})\n` +
+      `💰 Баланс: <b>${browser.session.balance.toLocaleString()} R$</b>`,
       { parse_mode: "HTML" },
     );
   });
@@ -3170,13 +3170,9 @@ export function registerAdmin(bot: Telegraf): void {
       return;
     }
 
-    const [user, balance] = await Promise.all([
-      getAuthenticatedUser(cookie),
-      getRobuxBalance(cookie),
-    ]);
-
-    if (!user) {
-      await ctx.reply("❌ Cookie недействителен — сессия истекла. Обнови через /setcookie");
+    const browser = await getBrowserSession(cookie);
+    if (!browser.ok || !browser.session) {
+      await ctx.reply(`❌ ${browserFailureMessage(browser.reason, browser.code)}`);
       return;
     }
 
@@ -3186,8 +3182,8 @@ export function registerAdmin(bot: Telegraf): void {
 
     await ctx.reply(
       `💰 <b>Баланс Roblox</b>\n` +
-      `👤 ${escapeHtml(user.name)}${cookieAge}\n` +
-      `💎 <b>${balance !== null ? `${balance.toLocaleString()} R$` : "ошибка загрузки"}</b>`,
+      `👤 ${escapeHtml(browser.session.accountName)}${cookieAge}\n` +
+      `💎 <b>${browser.session.balance.toLocaleString()} R$</b>`,
       { parse_mode: "HTML" },
     );
   });
@@ -3794,16 +3790,19 @@ export function registerCallbacks(bot: Telegraf): void {
           return;
         }
 
-        const donor = await getAuthenticatedUser(cookie);
+        if (!info.buyerUserId) {
+          await ctx.reply("❌ Не удалось подтвердить аккаунт донора в серверном браузере. Скрипт не выдан.");
+          return;
+        }
         const script = buildGamepassPurchaseScript({
           gamepassId: gpId,
           productId: info.productId,
           expectedPrice: info.priceInRobux,
           sellerId: info.creatorId,
-          buyerUserId: donor?.id ?? null,
+          buyerUserId: info.buyerUserId,
         });
 
-        lines.push(`\n1. Открой <a href="${gamepassPageUrl(gpId)}">страницу пасса</a> в браузере донора${donor ? ` (<b>${escapeHtml(donor.name)}</b>)` : ""}.`);
+        lines.push(`\n1. Открой <a href="${gamepassPageUrl(gpId)}">страницу пасса</a> в браузере донора (<b>${escapeHtml(info.buyerName ?? String(info.buyerUserId))}</b>).`);
         lines.push(`2. F12 → Console → вставь скрипт → Enter.`);
         lines.push(`3. Откроется официальное окно Roblox — сверь аккаунт и цену, нажми <b>Buy</b>.`);
         lines.push(`\nЕсли страница пасса отдаёт 404 (cross-game sales выключены) — открой любую другую страницу game-pass, скрипт всё равно сработает.`);
@@ -3935,7 +3934,7 @@ export function registerCallbacks(bot: Telegraf): void {
             `❌ <b>Ошибка автовыкупа</b>\n` +
             `Заказ <code>${order.wbCode}</code>\n` +
             `Геймпасс: ${escapeHtml(info.name)} · ${info.priceInRobux} R$${priceWarning}\n` +
-            `Причина: <code>${escapeHtml(result.msg)}</code>${balanceLine}\n\n` +
+            `Причина: <code>${escapeHtml(infrastructureFailure ? browserFailureMessage(result.reason ?? result.msg) : result.msg)}</code>${balanceLine}\n\n` +
             `<i>Используйте 📋 Скрипт как запасной вариант.</i>`,
             { parse_mode: "HTML" },
           );

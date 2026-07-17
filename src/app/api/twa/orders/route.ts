@@ -3,8 +3,8 @@ import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
 import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing, notifyRegionalPriceNeeded } from "@/lib/twa-notify";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
-import { BuyoutError, getAuthenticatedUserId, purchaseGamepassWithCookie, resolveGamepassForBuyer, verifyGamepassOwnership, type ResolvedGamepass } from "@/lib/roblox-buyout";
-import { isBrowserInfrastructureFailure } from "@/lib/browser-purchase";
+import { BuyoutError, purchaseGamepassWithCookie, resolveGamepassForBuyer, verifyGamepassOwnership, type ResolvedGamepass } from "@/lib/roblox-buyout";
+import { browserFailureMessage, isBrowserInfrastructureFailure } from "@/lib/browser-purchase";
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "@/lib/roblox-purchase-script";
 import { BUYOUT_ERROR_LEGACY_PURCHASE_FLOW, BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, checkGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
@@ -879,9 +879,11 @@ export async function POST(req: NextRequest) {
     }
 
     const results: Record<string, any> = {};
-    await Promise.all(checkOrders.map(async (o) => {
+    // Browser preflight is deliberately single-flight: processing sequentially
+    // prevents one donor cookie from being replaced underneath another check.
+    for (const o of checkOrders) {
       const gpId = gpIdOf(o.gamepassUrl);
-      if (!gpId) return;
+      if (!gpId) continue;
       const expected = Math.ceil(o.amount / 0.7);
       const buyerInfo = buyerCookie
         ? await resolveGamepassForBuyer(gpId, buyerCookie).catch(() => null)
@@ -900,7 +902,7 @@ export async function POST(req: NextRequest) {
         hasUnsafeBuyerPrice: buyerInfo?.hasUnsafeBuyerPrice ?? false,
         reusedIn: reusedCode && reusedCode !== o.wbCode ? reusedCode : null,
       };
-    }));
+    }
     return NextResponse.json({ results });
   }
 
@@ -1223,7 +1225,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       success: false,
       msg: infrastructureFailure
-        ? "Браузерный сервис выкупа временно недоступен. Заказ оставлен в очереди; используй ручной скрипт."
+        ? browserFailureMessage(purchaseResult.reason ?? purchaseResult.msg)
         : purchaseResult.msg,
       failureCode: infrastructureFailure ? BUYOUT_ERROR_LEGACY_PURCHASE_FLOW : undefined,
       status: infrastructureFailure ? order.status : "ERROR",
@@ -1394,12 +1396,15 @@ export async function POST(req: NextRequest) {
     // заранее скрипт откажется покупать, если цена пасса уже не ровно ожидаемая.
     // buyerUserId — [АККАУНТ-СТОП]: скрипт не сработает в чужой сессии, где залогинен
     // не донор, а личный аккаунт менеджера.
+    if (!info.buyerAccountId) {
+      return NextResponse.json({ error: "Не удалось подтвердить аккаунт донора в серверном браузере" }, { status: 503 });
+    }
     const script = buildGamepassPurchaseScript({
       gamepassId: gpId,
       productId: info.productId,
       expectedPrice: price,
       sellerId: creatorId,
-      buyerUserId: await getAuthenticatedUserId(donorCookie),
+      buyerUserId: info.buyerAccountId,
     });
 
     return NextResponse.json({

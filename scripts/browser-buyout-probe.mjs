@@ -3,8 +3,8 @@
  * POST к Roblox не шлёт — только открывает страницу пасса и снимает то, на что смотрит
  * chef-challenge Roblox (см. docs/roblox-plus-buyout-plan.md).
  *
- * Запуск на сервере выкупа (не с российского IP — тест 5c: кривые запросы с РФ убили
- * cookie донора):
+ * Запуск только на SG-сервере выкупа. Probe не проверяет donor readiness: для этого
+ * используется Bearer-auth `/session`; donor-cookie нельзя проверять с RF/Node напрямую.
  *
  *   DISPLAY=:99 CHROME_PATH=/usr/bin/google-chrome-stable node browser-buyout-probe.mjs [gamepassId]
  *

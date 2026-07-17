@@ -66,7 +66,46 @@ const validateInput = (body) => {
     gamepassId: String(body.gamepassId),
     expectedBuyerId: Number(body.expectedBuyerId),
     expectedPrice: Number(body.expectedPrice),
+    requestId: String(body.requestId ?? "").slice(0, 80),
+    source: String(body.source ?? "unknown").slice(0, 40),
   };
+};
+
+const validateCookieInput = (body) => {
+  if (!body || typeof body !== "object") throw new Error("BadInput");
+  if (typeof body.cookie !== "string" || body.cookie.length < 40 || body.cookie.length > 4096)
+    throw new Error("BadCookie");
+  return {
+    cookie: body.cookie,
+    requestId: String(body.requestId ?? "").slice(0, 80),
+    source: String(body.source ?? "unknown").slice(0, 40),
+  };
+};
+
+const validatePreflightInput = (body) => {
+  const input = validateCookieInput(body);
+  if (!/^\d+$/.test(String(body.gamepassId ?? "")) || Number(body.gamepassId) <= 0)
+    throw new Error("BadgamepassId");
+  return { ...input, gamepassId: String(body.gamepassId) };
+};
+
+const codeForReason = (reason) => {
+  const value = String(reason ?? "");
+  if (/NotLoggedIn|not authenticated/i.test(value)) return "DONOR_COOKIE_INVALID";
+  if (/WrongAccount/i.test(value)) return "WRONG_DONOR_ACCOUNT";
+  if (/TwoStepRequired/i.test(value)) return "TWO_STEP_REQUIRED";
+  if (/QueueFull/i.test(value)) return "BROWSER_BUSY";
+  if (/BalanceMismatch/i.test(value)) return "BALANCE_MISMATCH";
+  if (/BalanceUnconfirmed/i.test(value)) return "BALANCE_UNCONFIRMED";
+  if (/AlreadyOwned/i.test(value)) return "OWNERSHIP_GUARD";
+  if (/GuardStop.*ПРОДАВЕЦ|ПРОДАВЕЦ-СТОП/i.test(value)) return "SELLER_GUARD";
+  if (/GuardStop.*ЦЕНА|ЦЕНА-СТОП|PriceChanged/i.test(value)) return "PRICE_GUARD";
+  if (/NotForSale/i.test(value)) return "NOT_FOR_SALE";
+  if (/InsufficientFunds/i.test(value)) return "INSUFFICIENT_FUNDS";
+  if (/NoPurchaseDialog|BuyButtonMissing|NotConfirmed|ScriptRefused/i.test(value)) return "PURCHASE_NOT_CONFIRMED";
+  if (/CookieInjectionFailed/i.test(value)) return "COOKIE_INJECTION_FAILED";
+  if (/BrowserUnavailable|DriverError/i.test(value)) return "BROWSER_SERVICE_UNAVAILABLE";
+  return "PURCHASE_REFUSED";
 };
 
 const injectCookie = async (cookie) => {
@@ -93,6 +132,77 @@ const injectCookie = async (cookie) => {
       sameSite: "None",
     });
     if (!result.success) throw new Error("CookieInjectionFailed");
+  } finally {
+    await browser.disconnect().catch(() => {});
+  }
+};
+
+const browserSnapshot = async ({ cookie, gamepassId = null }) => {
+  await injectCookie(cookie);
+  const browser = await puppeteer.connect({ browserURL: BROWSER_URL, defaultViewport: null }).catch(() => null);
+  if (!browser) throw new Error("BrowserUnavailable: Chrome не отвечает на CDP");
+  try {
+    const page = (await browser.pages()).find((item) => item.url().includes("roblox.com")) ?? (await browser.newPage());
+    // Auth/product-info are read through the persistent browser context; a
+    // navigation is only needed when Chrome has no Roblox origin yet.
+    if (!page.url().includes("roblox.com")) {
+      await page.goto("https://www.roblox.com/home", { waitUntil: "domcontentloaded", timeout: 60_000 });
+    }
+    const snapshot = await page.evaluate(async (gp) => {
+      const read = async (url) => {
+        const response = await fetch(url, { credentials: "include", cache: "no-store" }).catch(() => null);
+        if (!response) return { status: 0, body: null };
+        return { status: response.status, body: await response.json().catch(() => null) };
+      };
+      const user = await read("https://users.roblox.com/v1/users/authenticated");
+      const currency = await read("https://economy.roblox.com/v1/user/currency");
+      if (!gp) return { user, currency, product: null, ownership: null };
+      const product = await read(`https://apis.roblox.com/game-passes/v1/game-passes/${gp}/product-info`);
+      const ownership = user.body?.id
+        ? await read(`https://inventory.roblox.com/v1/users/${user.body.id}/items/GamePass/${gp}`)
+        : null;
+      return { user, currency, product, ownership };
+    }, gamepassId);
+
+    if (snapshot.user.status !== 200 || !snapshot.user.body?.id) {
+      return { ok: false, code: "DONOR_COOKIE_INVALID", reason: "NotLoggedIn: cookie не авторизует persistent Chrome" };
+    }
+    if (snapshot.currency.status !== 200 || !Number.isFinite(Number(snapshot.currency.body?.robux))) {
+      return { ok: false, code: "ROBLOX_SESSION_UNAVAILABLE", reason: `CurrencyUnavailable: HTTP ${snapshot.currency.status}` };
+    }
+
+    const session = {
+      accountId: Number(snapshot.user.body.id),
+      accountName: String(snapshot.user.body.name ?? snapshot.user.body.displayName ?? "Unknown"),
+      balance: Number(snapshot.currency.body.robux),
+    };
+    if (!gamepassId) return { ok: true, code: "OK", session };
+
+    const product = snapshot.product;
+    if (product?.status !== 200 || !product.body?.ProductId) {
+      return { ok: false, code: "ROBLOX_PRECHECK_UNAVAILABLE", reason: `ProductInfoUnavailable: HTTP ${product?.status ?? 0}` };
+    }
+    const body = product.body;
+    const owned = snapshot.ownership?.status === 200 && Array.isArray(snapshot.ownership.body?.data)
+      ? snapshot.ownership.body.data.length > 0
+      : null;
+    return {
+      ok: true,
+      code: "OK",
+      session,
+      gamepass: {
+        gamepassId: Number(gamepassId),
+        productId: Number(body.ProductId),
+        name: String(body.Name ?? "Gamepass"),
+        price: Number(body.PriceInRobux ?? 0),
+        basePriceInRobux: Number(body.UserBasePriceInRobux ?? body.PriceInRobux ?? 0),
+        priceDiscountDetails: Array.isArray(body.PriceDiscountDetails) ? body.PriceDiscountDetails : [],
+        sellerName: String(body.Creator?.Name ?? "Unknown"),
+        sellerId: Number(body.Creator?.Id ?? body.Creator?.CreatorTargetId ?? 0),
+        isForSale: Boolean(body.IsForSale),
+        owned,
+      },
+    };
   } finally {
     await browser.disconnect().catch(() => {});
   }
@@ -125,24 +235,43 @@ const server = http.createServer(async (req, res) => {
     return json(res, browser ? 200 : 503, { ok: browser, browser, queued });
   }
 
-  if (req.method !== "POST" || req.url !== "/purchase") {
+  if (req.method !== "POST" || !["/session", "/gamepass-preflight", "/purchase"].includes(req.url)) {
     return json(res, 404, { ok: false, error: "NotFound" });
   }
 
   try {
+    if (req.url === "/session") {
+      const input = validateCookieInput(await readJson(req));
+      const started = Date.now();
+      const result = await enqueue(() => browserSnapshot(input));
+      console.log(JSON.stringify({ event: "session", requestId: input.requestId, source: input.source, code: result.code, durationMs: Date.now() - started }));
+      return json(res, result.ok ? 200 : 409, result);
+    }
+
+    if (req.url === "/gamepass-preflight") {
+      const input = validatePreflightInput(await readJson(req));
+      const started = Date.now();
+      const result = await enqueue(() => browserSnapshot(input));
+      console.log(JSON.stringify({ event: "gamepass-preflight", requestId: input.requestId, source: input.source, gamepassId: input.gamepassId, code: result.code, durationMs: Date.now() - started }));
+      return json(res, result.ok ? 200 : 409, result);
+    }
+
     const input = validateInput(await readJson(req));
+    const started = Date.now();
     const result = await enqueue(async () => {
       await injectCookie(input.cookie);
       return buyGamepass(input, { browserUrl: BROWSER_URL });
     });
     const status = result.purchased ? 200 : 409;
-    console.log(JSON.stringify({ event: "purchase", purchased: result.purchased, reason: String(result.reason ?? "").slice(0, 160) }));
-    return json(res, status, { ok: true, ...result });
+    const code = result.purchased ? "OK" : codeForReason(result.reason);
+    console.log(JSON.stringify({ event: "purchase", requestId: input.requestId, source: input.source, gamepassId: input.gamepassId, purchased: result.purchased, code, reason: String(result.reason ?? "").slice(0, 160), durationMs: Date.now() - started }));
+    return json(res, status, { ok: true, code, ...result });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "InternalError";
     const status = reason === "QueueFull" ? 429 : /^Bad|BodyTooLarge/.test(reason) ? 400 : 503;
-    console.error(JSON.stringify({ event: "purchase-error", reason: reason.slice(0, 160) }));
-    return json(res, status, { ok: false, purchased: false, reason });
+    const code = codeForReason(reason);
+    console.error(JSON.stringify({ event: "browser-service-error", path: req.url, code, reason: reason.slice(0, 160) }));
+    return json(res, status, { ok: false, purchased: false, code, reason });
   }
 });
 

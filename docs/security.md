@@ -342,6 +342,38 @@ single-flight очередью; Web/TWA подключён через огран
 profile. `AlreadyOwned`/pre-existing ownership — стоп, а не
 успешное завершение заказа.
 
+### 19. Donor-cookie используется из двух egress/context и инвалидируется до покупки — P0, 🟡 ФИКС В КОДЕ; DEPLOY/CANARY ОТКРЫТЫ (2026-07-17)
+
+Новый browser transport перенёс только финальный purchase в persistent Chrome на SG, но
+authenticated preflight остался в Web/TWA на RF: cookie-save/refresh, balance,
+buyer-specific product-info, authenticated user и часть ownership/drain checks выполняются
+прямым Node fetch. Затем та же cookie инъецируется в Chrome с другого egress/context.
+
+Production-доказательства: service/Chrome/tunnel healthy, очередь 0; обе реальные попытки
+`NotLoggedIn`; cookie присутствует в Chrome с правильными атрибутами, но authenticated user
+и currency дают 401. Свежая cookie была сохранена за две минуты до второй попытки. Заказ не
+закрыт, списания и нового ownership нет, автомат OFF. Canary, выполненный целиком на SG, эту
+границу не проверял.
+
+Риск: Roblox может инвалидировать donor session из-за смены IP/региона/device/HBA context.
+Повторная загрузка cookie через текущий TWA даёт ложноположительное «валидна», а generic
+`BrowserUnavailable` скрывает необходимость заменить cookie. Автоматические ретраи способны
+сжечь новые funded sessions и остановить всю очередь.
+
+Митигация реализована локально: один no-backlog single-flight browser-auth boundary на SG
+для session, currency, buyer product-info, ownership и purchase; authenticated direct-fetch
+и fallback с RF/Node удалены из donor-путей. Добавлены стабильные error codes,
+PII/secret-safe structured logs и contract-test, запрещающий `.ROBLOSECURITY` в Roblox
+headers вне browser service. Отдельный cookie аккаунта-приёмника drain остаётся в своём
+контуре и не передаётся donor helpers. До deploy, новой cookie и canary 3/3 все денежные
+автоматические пути выключены. План и acceptance — `docs/roblox-plus-buyout-plan.md`,
+deploy-инвариант — `docs/deploy.md`.
+
+Дополнительный donor guard: buyer-specific preflight возвращает account ID вместе с
+gamepass-данными. Ручной скрипт не может быть выдан с пустым `buyerUserId`, а фоновые
+воркеры при недоступной/невалидной session переходят в 15-минутный backoff вместо частых
+повторов с той же cookie.
+
 ### 12. Детерминированный пароль в seed — ✅ ЗАКРЫТО В КОДЕ (2026-07-12)
 
 `prisma/seed.js` содержит публичные admin email и фиксированный предсказуемый пароль.

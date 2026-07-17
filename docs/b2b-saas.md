@@ -316,7 +316,8 @@ Write-back: статус → `D`, комментарий → `E`.
 - `action=mark-done` — ручное закрытие задачи с отдельным списанием ledger + write-back `готово`.
 - `action=purchase-task` — покупка через общий Roblox cookie-helper с переходом
   `READY/FAILED -> PURCHASING -> DONE/FAILED` + write-back `готово`/ошибки. Перед каждым
-  реальным выкупом задача перечитывает официальный product-info с donor-cookie:
+  реальным выкупом задача перечитывает buyer-specific product-info через единый SG browser
+  boundary с donor-cookie:
   `UserBasePriceInRobux` обязана совпасть с номиналом задачи. Если buyer-specific
   `PriceInRobux` отличается, региональная цена не покупается: задача становится `FAILED`,
   а в таблицу пишется ошибка (фикс массового `PriceChanged`, 2026-07-14).
@@ -338,7 +339,8 @@ MVP route не обращается к `WbOrder`. Денежный учёт ид
 проверяется USDT-баланс, а повторное `BUYOUT`-списание по задаче блокируется.
 
 Важно по cookie: отдельного donor-cookie для Антона пока нет. Покупка использует общий
-`.ROBLOSECURITY` из `GlobalSettings.robloxCookie`, тот же источник, что и экран `Свои`.
+`.ROBLOSECURITY` из `GlobalSettings.robloxCookie`, тот же источник, что и экран `Свои`, но
+session/preflight/ownership/purchase выполняются только внутри persistent SG Chrome.
 Если понадобится отдельный donor-аккаунт партнёра, это надо добавить отдельным полем/настройкой,
 не смешивая с ledger и задачами партнёра.
 

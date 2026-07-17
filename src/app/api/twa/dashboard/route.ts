@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
 import { getFeedbackSummary, getStats30d } from "@/lib/wb-api";
 import { prisma } from "@/lib/prisma";
+import { getBrowserSession } from "@/lib/browser-purchase";
 
 type AttentionRow = {
   buyout: number;
@@ -17,25 +18,13 @@ async function getDonorSnapshot() {
     select: { robloxCookie: true, robloxAccountName: true },
   });
   if (!settings?.robloxCookie) return { available: false, accountName: null, balance: null };
-  try {
-    const response = await fetch("https://economy.roblox.com/v1/user/currency", {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "Roblox/WinInet",
-        Cookie: `.ROBLOSECURITY=${settings.robloxCookie}`,
-      },
-      cache: "no-store",
-      signal: AbortSignal.timeout(6_000),
-    });
-    const payload = response.ok ? await response.json() as { robux?: number } : null;
-    return {
-      available: response.ok && typeof payload?.robux === "number",
-      accountName: settings.robloxAccountName,
-      balance: typeof payload?.robux === "number" ? payload.robux : null,
-    };
-  } catch {
-    return { available: false, accountName: settings.robloxAccountName, balance: null };
-  }
+  const browser = await getBrowserSession(settings.robloxCookie);
+  return {
+    available: browser.ok && typeof browser.session?.balance === "number",
+    accountName: browser.session?.accountName ?? settings.robloxAccountName,
+    balance: browser.session?.balance ?? null,
+    failureCode: browser.ok ? null : browser.code,
+  };
 }
 
 export async function GET(req: NextRequest) {

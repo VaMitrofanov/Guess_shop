@@ -307,16 +307,27 @@ TG — `editMessageText` / `editMessageMedia` (фото-карточка одн�
 ### Фоновые воркеры (`bots/tg/auto-workers.ts`, старт из `crons.ts` → `startAutoWorkers`)
 
 Browser purchase transport подключён к ручным и автоматическим денежным путям. Бот
-передаёт guarded script и текущую cookie в локальный SG purchase-service; service инъецирует
-cookie в реальный Chrome и сериализует покупки. Автовыкуп не пробует снятые/угаданные Roblox
-endpoints. При недоступности browser service claim откатывается в `PENDING`, пишется
-`[AUTOBUY-BLOCKED]`, включается пауза и остаётся ручной script fallback. Runbook — в
+передаёт текущую cookie только в локальный SG purchase-service. Проверка аккаунта/баланса,
+buyer-specific цена и Plus-классификация, ownership и guarded purchase выполняются в одном
+persistent Chrome и сериализуются общим no-backlog lock. Бот и Web не посылают donor cookie
+Roblox напрямую и не имеют direct-fetch fallback. `/setcookie` принимает raw/copy-header,
+нормализует и сохраняет cookie только после успешного SG `/session`. При недоступности
+browser service claim откатывается в `PENDING`, пишется `[AUTOBUY-BLOCKED]`, включается
+пауза и остаётся ручной script fallback. Точные коды различают invalid cookie, другой
+аккаунт, 2FA, busy, временный отказ Roblox, price/seller/ownership guard и неподтверждённый баланс. Код готов
+локально 17.07; production deploy/canary ещё обязательны. Runbook — в
 [`roblox-plus-buyout-plan.md`](roblox-plus-buyout-plan.md).
 
 Оба kill-switch по умолчанию **OFF** (в `GlobalSettings`), включает владелец командой.
 Сохранение новой donor-cookie в TWA или через `/setcookie` только проверяет аккаунт и обновляет
 `GlobalSettings`; оно намеренно не меняет `autoBuyoutEnabled`. После обязательных 3/3 canary
 автомат включается отдельно через `/autobuy on`.
+
+Donor-readiness теперь означает успешный SG `/session`, а не `/health` и не прямой запрос
+Roblox из процесса бота. Buyer-specific preflight возвращает одновременно product/ownership
+и подтверждённые `buyerUserId`/имя/баланс; ручной скрипт не выдаётся без account guard.
+Если session invalid/busy/unavailable, авто-воркер ставит 15-минутную паузу, оставляет
+kill-switch без изменений и сообщает менеджеру точную причину.
 
 - **🤖 Автовыкуп до порога слива (+1).** Тик 60 с. Пока `autoBuyoutEnabled=true` и баланс
   донора > `autoBuyoutThreshold`, берёт новые `PENDING`-заказы (`isTest=false`, по `pendingAt`,

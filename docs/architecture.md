@@ -24,8 +24,12 @@
   Перед изменениями перепроверяй доступность `curl`-ом.
 - **Browser purchase-service (SG host, systemd)** — single-flight bridge к настоящему
   Chrome/Xvfb. TG обращается через SG docker bridge, Web/TWA — через ограниченный RF→SG
-  SSH-туннель. Service инъецирует текущую donor cookie через CDP и подтверждает покупку
-  только по ownership `false→true` и точной дельте баланса; наружу порт не опубликован.
+  SSH-туннель. Bearer-auth операции `/session`, `/gamepass-preflight` и `/purchase` используют
+  один persistent browser context и общий no-backlog lock: donor cookie никогда не
+  предъявляется Roblox из RF/Node. Service возвращает только нормализованные identity,
+  balance, product/ownership и коды ошибок; покупку подтверждает только по ownership
+  `false→true` и точной дельте баланса. Наружу порт не опубликован. Single-egress-фикс
+  реализован локально 17.07 и ждёт поэтапного deploy/canary.
 
 ## Единая экосистема каналов
 

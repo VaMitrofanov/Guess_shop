@@ -2,24 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
 import { normalizeRobloxSecurityCookie } from "@/lib/roblox-cookie";
-
-const ROBLOX_HEADERS = {
-  "User-Agent": "Roblox/WinInet",
-  Accept: "application/json",
-};
-
-async function robloxGet(url: string, cookie: string) {
-  try {
-    const res = await fetch(url, {
-      headers: { ...ROBLOX_HEADERS, Cookie: `.ROBLOSECURITY=${cookie}` },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) return null;
-    return res.json().catch(() => null);
-  } catch {
-    return null;
-  }
-}
+import { browserFailureMessage, getBrowserSession } from "@/lib/browser-purchase";
 
 export async function GET(req: NextRequest) {
   if (!await extractTwaUser(req))
@@ -39,18 +22,16 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const [user, currency] = await Promise.all([
-    robloxGet("https://users.roblox.com/v1/users/authenticated", cookie),
-    robloxGet("https://economy.roblox.com/v1/user/currency", cookie),
-  ]);
+  const browser = await getBrowserSession(cookie);
 
   return NextResponse.json({
     hasCookie: true,
-    cookieValid: !!user?.id,
+    cookieValid: browser.ok,
     cookieUpdatedAt,
-    accountName: user?.name ?? user?.displayName ?? null,
-    accountId: user?.id ?? null,
-    balance: currency?.robux ?? null,
+    accountName: browser.session?.accountName ?? settings?.robloxAccountName ?? null,
+    accountId: browser.session?.accountId ?? null,
+    balance: browser.session?.balance ?? null,
+    failureCode: browser.ok ? null : browser.code,
   });
 }
 
@@ -67,13 +48,13 @@ export async function POST(req: NextRequest) {
     if (!rawCookie || rawCookie.length < 50)
       return NextResponse.json({ error: "Невалидный cookie" }, { status: 400 });
 
-    const user = await robloxGet("https://users.roblox.com/v1/users/authenticated", rawCookie);
-    if (!user?.id)
-      return NextResponse.json({ error: "Cookie невалиден или истёк" }, { status: 400 });
+    const browser = await getBrowserSession(rawCookie);
+    if (!browser.ok || !browser.session) {
+      const status = browser.code === "DONOR_COOKIE_INVALID" ? 400 : 503;
+      return NextResponse.json({ error: browserFailureMessage(browser.reason, browser.code), failureCode: browser.code }, { status });
+    }
 
-    const currency = await robloxGet("https://economy.roblox.com/v1/user/currency", rawCookie);
-
-    const accountName = user.name ?? user.displayName ?? "Unknown";
+    const accountName = browser.session.accountName;
     await (prisma as any).globalSettings.upsert({
       where: { id: "global" },
       create: { id: "global", usdToRub: 90, robloxCookie: rawCookie, robloxCookieUpdatedAt: new Date(), robloxAccountName: accountName },
@@ -82,9 +63,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      accountName: user.name ?? user.displayName ?? "Unknown",
-      accountId: user.id,
-      balance: currency?.robux ?? null,
+      accountName,
+      accountId: browser.session.accountId,
+      balance: browser.session.balance,
     });
   }
 
@@ -94,19 +75,17 @@ export async function POST(req: NextRequest) {
     if (!cookie)
       return NextResponse.json({ error: "Cookie не задан" }, { status: 400 });
 
-    const [user, currency] = await Promise.all([
-      robloxGet("https://users.roblox.com/v1/users/authenticated", cookie),
-      robloxGet("https://economy.roblox.com/v1/user/currency", cookie),
-    ]);
-
-    if (!user?.id)
-      return NextResponse.json({ error: "Cookie истёк — обнови" }, { status: 400 });
+    const browser = await getBrowserSession(cookie);
+    if (!browser.ok || !browser.session) {
+      const status = browser.code === "DONOR_COOKIE_INVALID" ? 400 : 503;
+      return NextResponse.json({ error: browserFailureMessage(browser.reason, browser.code), failureCode: browser.code }, { status });
+    }
 
     return NextResponse.json({
       ok: true,
-      accountName: user.name ?? user.displayName ?? "Unknown",
-      accountId: user.id,
-      balance: currency?.robux ?? null,
+      accountName: browser.session.accountName,
+      accountId: browser.session.accountId,
+      balance: browser.session.balance,
     });
   }
 

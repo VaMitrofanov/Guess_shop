@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Поднимает на сервере выкупа Chrome с постоянным профилем + VNC, чтобы владелец мог
-# руками залогинить аккаунт и подтвердить устройство по email (Э0 PLAN-browser-buyout).
-#
-# Логиниться нужно ФОРМОЙ, а не инъекцией .ROBLOSECURITY: инъекция не регистрирует
-# HBA-ключ, а именно им подписывается x-bound-auth-token при покупке.
+# Поднимает на сервере выкупа Chrome с постоянным профилем + VNC. Production donor-cookie
+# инъецирует browser-purchase-service перед каждой session/preflight/purchase операцией —
+# живая cookie-инъекция и официальный purchase flow подтверждены canary 17.07.2026.
+# Формовый логин через VNC остаётся только диагностическим/recovery-вариантом и не должен
+# создавать второй рабочий donor-контур вне service.
 #
 # На сервере:  bash browser-buyout-session.sh [start|stop|status]   (от root; Chrome
 #              крутится под непривилегированным rbuy — песочница Chrome остаётся

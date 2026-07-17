@@ -11,7 +11,7 @@
  *                                bridge server itself to avoid recursion
  */
 
-import { purchaseGamepassInBrowser } from "./browser-purchase";
+import { getBrowserGamepassPreflight, getBrowserSession, purchaseGamepassInBrowser } from "./browser-purchase";
 
 // Mobile UA + Roblox-origin headers — mirrors what the Roblox Android app sends.
 // Origin/Referer trick the API into treating the request as same-site frontend.
@@ -909,6 +909,9 @@ export interface GamepassProductInfo {
   priceDiscountDetails: Array<{ Type?: string; AmountInRobux?: number; Percent?: number; EndTime?: string | null }>;
   robloxPlusDiscountPercent: number | null;
   hasUnsafeBuyerPrice: boolean;
+  buyerUserId?: number;
+  buyerName?: string;
+  buyerBalance?: number;
 }
 
 /**
@@ -920,15 +923,31 @@ export async function getGamepassProductInfo(
   buyerCookie?: string,
 ): Promise<GamepassProductInfo | null> {
   try {
+    if (buyerCookie) {
+      const preflight = await getBrowserGamepassPreflight(buyerCookie, gamepassId);
+      if (!preflight.ok || !preflight.gamepass) return null;
+      const gp = preflight.gamepass;
+      const parsed = parseProductInfo({
+        ProductId: gp.productId,
+        PriceInRobux: gp.price,
+        UserBasePriceInRobux: gp.basePriceInRobux,
+        PriceDiscountDetails: gp.priceDiscountDetails,
+        Creator: { Id: gp.sellerId, Name: gp.sellerName },
+        Name: gp.name,
+        IsForSale: gp.isForSale,
+      });
+      return parsed ? {
+        ...parsed,
+        buyerUserId: preflight.session?.accountId,
+        buyerName: preflight.session?.accountName,
+        buyerBalance: preflight.session?.balance,
+      } : null;
+    }
     const res = await rFetch(
       `https://apis.roblox.com/game-passes/v1/game-passes/${gamepassId}/product-info`,
-      buyerCookie ? { headers: { Cookie: `.ROBLOSECURITY=${buyerCookie}` } } : {},
+      {},
     );
     if (!res.ok) {
-      // Never send .ROBLOSECURITY to a proxy. For purchase paths a public
-      // fallback is unsafe too: it lacks the buyer-specific regional price
-      // and deterministically produces PriceChanged.
-      if (buyerCookie) return null;
       // Fallback to roproxy
       const rr = await rFetch(
         `https://apis.roproxy.com/game-passes/v1/game-passes/${gamepassId}/product-info`,
@@ -988,74 +1007,11 @@ function classifyRobloxPlusPrice(
 // Скрипт покупки собирается в roblox-purchase-script.ts: он общий для ручной консоли
 // и будущего headless-транспорта, и зашивает цену по номиналу, а не live-цену.
 
-// ── Server-side purchase via .ROBLOSECURITY cookie ──────────────────────────
-
-let purchaseCsrfToken: string | null = null;
+// ── Purchase through the SG browser donor boundary ──────────────────────────
 
 export function resetPurchaseCsrf(): void {
-  purchaseCsrfToken = null;
-}
-
-async function purchaseFetch(
-  url: string,
-  cookie: string,
-  init: RequestInit = {},
-  attempt = 1,
-  _csrfRetried = false,
-): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
-  try {
-    const res = await fetch(url, {
-      ...init,
-      headers: {
-        ...ROBLOX_HEADERS,
-        Cookie: `.ROBLOSECURITY=${cookie}`,
-        ...(purchaseCsrfToken ? { "x-csrf-token": purchaseCsrfToken } : {}),
-        ...(init.headers ?? {}),
-      },
-      signal: controller.signal,
-    });
-
-    if (res.status === 403 && !_csrfRetried) {
-      const csrf = res.headers.get("x-csrf-token");
-      if (csrf) {
-        purchaseCsrfToken = csrf;
-        console.log(`[Roblox/purchase] CSRF 403 — token updated, retrying: ${url}`);
-        clearTimeout(timer);
-        return purchaseFetch(url, cookie, init, attempt, true);
-      }
-    }
-
-    if (res.status === 429 && attempt < MAX_RETRIES) {
-      console.warn(`[Roblox/purchase] 429 rate limited — waiting 2.5s`);
-      await sleep(2_500);
-      return purchaseFetch(url, cookie, init, attempt + 1, _csrfRetried);
-    }
-
-    if (res.status >= 500 && attempt < MAX_RETRIES) {
-      await sleep(RETRY_DELAY);
-      return purchaseFetch(url, cookie, init, attempt + 1, _csrfRetried);
-    }
-
-    return res;
-  } catch (err: any) {
-    const isRetryable =
-      err?.name === "AbortError" ||
-      err?.name === "TimeoutError" ||
-      (err?.name === "TypeError" &&
-        typeof err?.message === "string" &&
-        err.message.toLowerCase().includes("fetch failed"));
-
-    if (isRetryable && attempt < MAX_RETRIES) {
-      await sleep(RETRY_DELAY);
-      return purchaseFetch(url, cookie, init, attempt + 1, _csrfRetried);
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
+  // Browser service has no shared CSRF cache. Kept as a compatibility no-op
+  // for existing /setcookie call sites.
 }
 
 export interface PurchaseResult {
@@ -1085,12 +1041,16 @@ export async function purchaseGamepassDirect(
       reason: "BrowserUnavailable",
     };
   }
-  const buyer = await getAuthenticatedUser(cookie);
-  if (!buyer) {
+  const browserSession = await getBrowserSession(cookie);
+  const buyer = browserSession.session
+    ? { id: browserSession.session.accountId, name: browserSession.session.accountName }
+    : null;
+  if (!browserSession.ok || !buyer) {
+    const reason = `${browserSession.code}: ${browserSession.reason ?? "browser session недоступна"}`;
     return {
       success: false,
-      msg: "NotLoggedIn: cookie истёк — обнови через /setcookie",
-      reason: "NotLoggedIn",
+      msg: reason,
+      reason,
     };
   }
 
@@ -1111,42 +1071,27 @@ export async function purchaseGamepassDirect(
       balance: result.balanceAfter ?? null,
     };
   }
+  const failureReason = result.code ? `${result.code}: ${result.reason}` : result.reason;
   return {
     success: false,
-    msg: result.reason || "Неизвестная ошибка browser transport",
-    reason: result.reason,
+    msg: failureReason || "Неизвестная ошибка browser transport",
+    reason: failureReason,
     balance: result.balanceAfter ?? null,
   };
 }
 
 export async function getRobuxBalance(cookie: string): Promise<number | null> {
-  try {
-    const res = await purchaseFetch(
-      "https://economy.roblox.com/v1/user/currency",
-      cookie,
-    );
-    if (!res.ok) return null;
-    const json: any = await res.json().catch(() => null);
-    return json?.robux ?? null;
-  } catch {
-    return null;
-  }
+  const result = await getBrowserSession(cookie);
+  return result.ok ? result.session?.balance ?? null : null;
 }
 
 export async function getAuthenticatedUser(
   cookie: string,
 ): Promise<{ id: number; name: string } | null> {
-  try {
-    const res = await purchaseFetch(
-      "https://users.roblox.com/v1/users/authenticated",
-      cookie,
-    );
-    if (!res.ok) return null;
-    const json: any = await res.json().catch(() => null);
-    return json?.id ? { id: json.id, name: json.name ?? json.displayName ?? "Unknown" } : null;
-  } catch {
-    return null;
-  }
+  const result = await getBrowserSession(cookie);
+  return result.ok && result.session
+    ? { id: result.session.accountId, name: result.session.accountName }
+    : null;
 }
 
 // ── Контрольная проверка владения после ошибки выкупа (Ф1) ──────────────────
@@ -1177,19 +1122,8 @@ export async function verifyGamepassOwnership(
   cookie: string,
   gamepassId: string | number,
 ): Promise<boolean | null> {
-  try {
-    const user = await getAuthenticatedUser(cookie);
-    if (!user) return null;
-    const res = await purchaseFetch(
-      `https://inventory.roblox.com/v1/users/${user.id}/items/GamePass/${gamepassId}`,
-      cookie,
-    );
-    if (!res.ok) return null;
-    const json: any = await res.json().catch(() => null);
-    return Array.isArray(json?.data) ? json.data.length > 0 : null;
-  } catch {
-    return null;
-  }
+  const result = await getBrowserGamepassPreflight(cookie, gamepassId);
+  return result.ok ? result.gamepass?.owned ?? null : null;
 }
 
 export interface VerifiedPurchaseResult extends PurchaseResult {
