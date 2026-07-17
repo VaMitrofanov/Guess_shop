@@ -152,12 +152,12 @@ cookie, использованная для authenticated preflight на RF, з�
 всех call sites и новой canary TWA/Web/partner/auto buyout считаются fail-closed; deploy order
 и acceptance описаны в [`roblox-plus-buyout-plan.md`](roblox-plus-buyout-plan.md).
 
-Исправление реализовано локально: SG service имеет Bearer-auth `POST /session`,
+Исправление задеплоено 17.07: SG service имеет Bearer-auth `POST /session`,
 `POST /gamepass-preflight` и `POST /purchase` под одним no-backlog single-flight lock;
 Web/TWA/TG получают только нормализованные session/preflight данные. Безопасный порядок
-релиза обязателен: (1) обновить SG service, не останавливая старый `/purchase`; (2) проверить
-`/health`, затем authenticated `/session` и `/gamepass-preflight` с тестовой cookie;
-(3) обновить Web и TG; (4) сохранить новую funded cookie; (5) cheap canary и 3/3 реальных
+релиза выполнен: (1) обновлён SG service с резервной копией; (2) проверены
+`/health`, `/session` и `/gamepass-preflight` с невалидной тестовой строкой из SG, Web и TG;
+(3) обновлены Web и TG; (4) сохранить новую funded cookie; (5) cheap canary и 3/3 реальных
 последовательных заказа; (6) только затем отдельно включить auto-buyout. Rollback — выключить
 денежные действия и использовать ручной script-only режим, но не возвращать direct RF fetch.
 

@@ -16,11 +16,12 @@
 Две production-попытки дошли до purchase-service и получили `NotLoggedIn`; свежая cookie
 стала `401` через две минуты после сохранения.
 
-**Статус исправления:** P0.1–P0.3 и кодовая часть P0.4 реализованы локально, но ещё не
-задеплоены. `session`, buyer-specific preflight, ownership и purchase теперь проходят через
-один persistent SG Chrome; добавлены стабильные коды ошибок, безопасные structured logs и
-contract-test против повторного donor-cookie egress. Production остаётся на старой версии до
-поэтапного deploy и живого canary. Kill-switch автомата остаётся OFF.
+**Статус исправления:** P0.1–P0.3 и кодовая часть P0.4 задеплоены 17.07. `session`,
+buyer-specific preflight, ownership и purchase проходят через один persistent SG Chrome;
+добавлены стабильные коды ошибок, безопасные structured logs и contract-test против
+повторного donor-cookie egress. SG service, Web→SG tunnel и TG→SG bridge прошли безопасный
+readiness smoke с невалидной тестовой строкой. Живой canary с новой funded cookie ещё
+обязателен. Kill-switch автомата остаётся OFF.
 
 ## P0-инцидент: donor-cookie инвалидируется между RF preflight и SG Chrome (17.07.2026)
 
@@ -74,7 +75,8 @@ persistent Chrome context.
 
 #### Этап P0.1 — один browser-auth контракт
 
-**✅ Реализовано локально; deploy SG service ожидает отчёта и подтверждения владельца.**
+**✅ Задеплоено и проверено в production.** SG service обновлён до consumer rollout; `/health`,
+`/session` и `/gamepass-preflight` доступны через рабочие Web и TG маршруты.
 
 Расширить `scripts/browser-purchase-service.mjs` двумя Bearer-auth операциями, использующими
 тот же Chrome, cookie-injection и single-flight lock, что и покупка:
@@ -97,7 +99,7 @@ cookie может оставаться на текущих серверах.
 
 #### Этап P0.2 — убрать прямой donor-cookie egress из приложения
 
-**✅ Реализовано локально.** Мигрированы TWA account/dashboard/orders/account purchase,
+**✅ Задеплоено.** Мигрированы TWA account/dashboard/orders/account purchase,
 partner tasks через общий buyout helper, TG manual/auto и donor-часть ручного/автослива.
 Прямые cookie-запросы сохранены только для отдельного аккаунта-приёмника drain, который
 управляет ценой собственного геймпасса и не использует donor-cookie.
@@ -121,7 +123,7 @@ service = fail-closed, иначе fallback сам снова инвалидир�
 
 #### Этап P0.3 — точные ошибки и наблюдаемость
 
-**✅ Реализовано локально.** Service и клиенты используют стабильные коды; UI больше не
+**✅ Задеплоено.** Service и клиенты используют стабильные коды; UI больше не
 называет invalid cookie общей недоступностью сервиса. Логи содержат operation/source,
 `requestId`, gamepass ID, code и duration, но не cookie, Bearer token или script.
 
@@ -143,10 +145,9 @@ liveness-проверкой и больше не используется как
 
 #### Этап P0.4 — тесты и deploy
 
-**🟡 Код и локальные release-gates готовы; deploy/readiness/canary открыты.** Contract-test
-проверяет запрет прямого donor-cookie egress и отсутствие cookie/script в логах. Финальный
-production acceptance нельзя заменить unit-тестами: нужна новая cookie после deploy и серия
-покупок ниже.
+**🟡 Release-gates и production readiness готовы; canary открыт.** Contract-test проверяет
+запрет прямого donor-cookie egress и отсутствие cookie/script в логах. Финальный production
+acceptance нельзя заменить smoke: нужна новая cookie после deploy и серия покупок ниже.
 
 1. Unit/contract: ни один Web/TG call site не посылает donor-cookie Roblox напрямую;
    ответы service валидируются схемой; неизвестный ответ fail-closed.
@@ -572,18 +573,19 @@ cookie из защищённого server-to-server запроса, не лог�
 | `infra/systemd/roblox-purchase-*.service` | Автозапуск SG service и постоянного RF→SG SSH-туннеля. |
 | `src/lib/roblox-purchase-script.ts` и `bots/shared/roblox-purchase-script.ts` | Зеркальные билдеры ручного скрипта с [ЦЕНА-СТОП], [ПРОДАВЕЦ-СТОП], [АККАУНТ-СТОП] и ownership-precheck. |
 
-**Текущий production-контур:** host service, Chrome и туннель запущены, env Web/TG настроены,
-но runtime health проверяет только listener/CDP. Production-попытки 17.07 выявили
-multi-egress invalidation cookie. Исправление P0.1–P0.4 готово локально, но production ещё
-не обновлён; поэтому TWA/Web buyout не готов к новой funded cookie до deploy и canary.
-Автовыкуп kill-switch остаётся OFF. Заказы при отказе остаются в очереди.
+**Текущий production-контур:** SG service, Chrome, tunnel, Web и TG обновлены до одного
+single-egress контракта. `/health` подтверждает listener/CDP; отдельный readiness smoke
+подтвердил `/session` и `/gamepass-preflight` из Web и TG без использования реальной cookie.
+Production-попытки до rollout остаются доказательством старого multi-egress инцидента, а не
+результатом новой версии. TWA/Web готовы принять новую funded cookie для canary. Автовыкуп
+kill-switch остаётся OFF. Заказы при отказе остаются в очереди.
 
 ### Что осталось до автоматизации
 
-1. После отчёта владельцу задеплоить обратно совместимый SG service, проверить новые
-   `/session` и `/gamepass-preflight`, затем задеплоить Web и TG consumers. До этого не
-   сохранять funded cookie через TWA/Web и не считать `/health` acceptance-проверкой.
-2. После deploy сохранить новую funded cookie без 2FA и провести три последовательных canary
+1. Сохранить через TWA или `/setcookie` **новую** funded cookie без 2FA и подтвердить SG
+   `/session` дважды: одинаковые account ID/баланс, без 401. `/health` сам по себе не
+   является acceptance-проверкой.
+2. Провести cheap canary, затем три последовательных canary
    с проверкой ownership, seller payout и
    точной balance delta; если donor имеет Plus, один canary обязательно Plus.
 3. Только после 3/3 включить `autoBuyoutEnabled`; при любом отказе — стоп и ручной режим.

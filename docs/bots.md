@@ -314,8 +314,8 @@ Roblox напрямую и не имеют direct-fetch fallback. `/setcookie` �
 нормализует и сохраняет cookie только после успешного SG `/session`. При недоступности
 browser service claim откатывается в `PENDING`, пишется `[AUTOBUY-BLOCKED]`, включается
 пауза и остаётся ручной script fallback. Точные коды различают invalid cookie, другой
-аккаунт, 2FA, busy, временный отказ Roblox, price/seller/ownership guard и неподтверждённый баланс. Код готов
-локально 17.07; production deploy/canary ещё обязательны. Runbook — в
+аккаунт, 2FA, busy, временный отказ Roblox, price/seller/ownership guard и неподтверждённый баланс. Контур
+задеплоен 17.07 и прошёл Web/TG readiness; production canary с новой funded cookie ещё обязателен. Runbook — в
 [`roblox-plus-buyout-plan.md`](roblox-plus-buyout-plan.md).
 
 Оба kill-switch по умолчанию **OFF** (в `GlobalSettings`), включает владелец командой.

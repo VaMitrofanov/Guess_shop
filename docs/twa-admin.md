@@ -538,10 +538,11 @@ guard стоит после этих блоков. **Не добавлять б�
   меняется отдельно и остаётся OFF до production canary 3/3.
   **Инцидент 17.07:** production TWA-проверка шла с RF, после чего покупка переносила cookie
   в SG Chrome; реальная попытка получила `NotLoggedIn`, хотя `/health` был зелёным.
-  Single-egress-фикс реализован локально: save/refresh/balance/product-info/ownership и
+  Single-egress-фикс задеплоен: save/refresh/balance/product-info/ownership и
   purchase выполняются только внутри SG Chrome, при недоступности service нет RF fallback,
-  а UI различает invalid cookie, busy и outage. До deploy фикса и readiness новую funded
-  cookie через TWA/Web не сохранять. Детальный статус — `docs/roblox-plus-buyout-plan.md`.
+  а UI различает invalid cookie, busy и outage. SG/Web/TG readiness подтверждён; следующая
+  операция — новая funded cookie и canary, а не включение автомата. Детальный статус —
+  `docs/roblox-plus-buyout-plan.md`.
   Buyer-specific preflight возвращает identity и gamepass одним снимком; поэтому ручной
   purchase-script тоже fail-closed и не выдаётся без подтверждённого donor account guard.
 - **«К выкупу»**: параллельно грузит DIRECT + BUYOUT + AVITO. Прямые и Авито — **обязательные**

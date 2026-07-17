@@ -342,7 +342,7 @@ single-flight очередью; Web/TWA подключён через огран
 profile. `AlreadyOwned`/pre-existing ownership — стоп, а не
 успешное завершение заказа.
 
-### 19. Donor-cookie используется из двух egress/context и инвалидируется до покупки — P0, 🟡 ФИКС В КОДЕ; DEPLOY/CANARY ОТКРЫТЫ (2026-07-17)
+### 19. Donor-cookie используется из двух egress/context и инвалидируется до покупки — P0, 🟡 DEPLOY/READINESS ГОТОВЫ; CANARY ОТКРЫТ (2026-07-17)
 
 Новый browser transport перенёс только финальный purchase в persistent Chrome на SG, но
 authenticated preflight остался в Web/TWA на RF: cookie-save/refresh, balance,
@@ -360,13 +360,14 @@ Production-доказательства: service/Chrome/tunnel healthy, очер
 `BrowserUnavailable` скрывает необходимость заменить cookie. Автоматические ретраи способны
 сжечь новые funded sessions и остановить всю очередь.
 
-Митигация реализована локально: один no-backlog single-flight browser-auth boundary на SG
+Митигация задеплоена: один no-backlog single-flight browser-auth boundary на SG
 для session, currency, buyer product-info, ownership и purchase; authenticated direct-fetch
 и fallback с RF/Node удалены из donor-путей. Добавлены стабильные error codes,
 PII/secret-safe structured logs и contract-test, запрещающий `.ROBLOSECURITY` в Roblox
 headers вне browser service. Отдельный cookie аккаунта-приёмника drain остаётся в своём
-контуре и не передаётся donor helpers. До deploy, новой cookie и canary 3/3 все денежные
-автоматические пути выключены. План и acceptance — `docs/roblox-plus-buyout-plan.md`,
+контуре и не передаётся donor helpers. SG service, Web→SG и TG→SG прошли readiness smoke с
+тестовой невалидной строкой; до новой cookie и canary 3/3 все денежные автоматические пути
+выключены. План и acceptance — `docs/roblox-plus-buyout-plan.md`,
 deploy-инвариант — `docs/deploy.md`.
 
 Дополнительный donor guard: buyer-specific preflight возвращает account ID вместе с
