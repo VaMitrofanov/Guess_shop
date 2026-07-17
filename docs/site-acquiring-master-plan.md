@@ -10,6 +10,17 @@
 
 ## Статус реализации
 
+- **2026-07-17, повторный mobile/auth аудит (локальный release-candidate):** на главной
+  найдено фактическое переполнение: mobile grid-track `1fr` принимал min-content ширину
+  калькулятора (~424 px) и визуально выталкивал карточку вправо. Исправлены zero-min track,
+  ширина mobile container и `min/max-width` дочерних карточек; production build и Jest
+  `31/203` зелёные. Browser matrix на собранном сайте: `/`, checkout, FAQ, reviews,
+  guarantees, login/register, offer/policy/details и guide — без горизонтального overflow
+  на `390×844` и `360×800`; desktop root также без регрессии. Отдельно перепроверен ЛК:
+  базовые email/TG/merge/dashboard механизмы есть, но публичный email lifecycle не готов
+  без verification/reset/throttling/evidence consent и real-provider acceptance. Детальный
+  согласуемый план: [auth-account-readiness-plan.md](auth-account-readiness-plan.md).
+
 - **2026-07-17, quick-fix batch для ссылки Т‑Банку:** UI и API используют единый exact-`true`
   `SITE_ACQUIRING_ENABLED` gate через runtime status; при выключенном эквайринге checkout
   показывает review-state и никогда не активирует payment CTA. Добавлены логотипы Т‑Банка,
@@ -171,10 +182,10 @@
 
 | Приоритет | Блокер | Подтверждённое состояние |
 |---|---|---|
-| P1 | Предварительная витрина открыта не полностью готовой | `/` отвечает `200`, но Guide отстаёт по fingerprint, VK ID timeout, policy overflow и public copy/logos требуют правок |
+| P1 | Предварительная витрина требует release mobile-fix | На release-candidate устранён overflow карточки главной; требуется обычный Web/Guide rollout и production mobile smoke, VK ID остаётся скрыт fail-closed |
 | P0 | Канонический checkout развёрнут, но не прошёл payment E2E | Migration применена и код задеплоен 13.07 без legacy `Product/default-calc`; kill-switch выключен, боевой Init/receipt/callback test matrix впереди |
 | P0 | Цена не прошла payment E2E | Quote уже одноразово потребляется каноническим order flow, но сумма ещё не проверена реальным Init/receipt/callback test matrix |
-| P0 | Общий клиентский аккаунт не завершён | Email и TG login/link, identity foundation и ЛК с `WbOrder`/бонусами готовы; остаются real-provider acceptance, безопасные VK link/unlink, recovery и admin merge-console |
+| P0 | Общий клиентский аккаунт не завершён | Email и TG login/link, identity foundation и ЛК с `WbOrder`/бонусами готовы; остаются email verification/reset/throttling/evidence consent, real-provider acceptance, безопасные VK link/unlink и recovery. Детали: `docs/auth-account-readiness-plan.md` |
 | P0 | Payment E2E не завершён | Strict callback/event/outbox foundation и production migrations готовы; outbox worker развёрнут, но нет terminal/refund/ККТ test matrix и reconciliation UI |
 | P0 | Нет готовой фискализации | Checkout собирает email и формирует `Receipt/Items` fail-closed, но нет согласованных ККТ-классификаторов, возвратного/закрывающего чека и проверенного сценария ОФД |
 | P0 | Не выполнен публичный чек-лист Т-Банка | Юридические реквизиты, email, телефон, часы поддержки и SLA заполнены; остаются юридическая приёмка, ККТ/ОФД и проверка возвратов |

@@ -16,6 +16,7 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [b2b-saas.md](b2b-saas.md) | Партнёрское/B2B-направление: TWA/server MVP `Антон`, USDT-ledger, ручной XLSX import, rollout Sheets/batch |
 | [corridor-and-site.md](corridor-and-site.md) | WB-гейт, сайт `/guide`, API коридора, восстановление сессии |
 | [site-acquiring-master-plan.md](site-acquiring-master-plan.md) | Ультра-ревью `robloxbank.ru`, P0-блокеры эквайринга, единые цена/identity/orders, дизайн и поэтапный launch plan |
+| [auth-account-readiness-plan.md](auth-account-readiness-plan.md) | Повторный аудит ЛК/login/register и согласуемый P0-план email/TG/VK identity, recovery и E2E |
 | [tbank-precheck-2026-07-17.md](tbank-precheck-2026-07-17.md) | Предрелизный аудит публичной ссылки для Т‑Банка 17.07: фактические тесты, найденные блокеры и план закрытия |
 | [design-rework-concept.html](design-rework-concept.html) | Интерактивный визуальный концепт глобального реворка главной и mobile-first WB guide |
 | [twa-ux-v3-concept.html](twa-ux-v3-concept.html) | Визуальный концепт TWA v3: два варианта Главной, умная выдача и foreground bottom sheet |
@@ -56,8 +57,10 @@ TG/VK/iPhone/Android acceptance, реквизиты, ККТ/payment E2E и soft 
 
 Личный кабинет и все три поверхности входа используют общий Violet/Frost shell. Email-вход
 нормализует адрес, Telegram login/link идёт через одноразовый bot-assisted challenge с
-серверной HMAC-проверкой, а VK identity проверяется сервером. Email-сценарий ЛК принят на
-production; живой Telegram/VK acceptance остаётся обязательным перед включением оплаты.
+серверной HMAC-проверкой, а VK identity проверяется сервером и пока скрыт fail-closed.
+Повторный аудит 17.07 подтвердил базовый ЛК, но не завершённый lifecycle публичного
+email-аккаунта: verification/reset, password throttling, evidence согласия и live TG/VK
+acceptance вынесены в согласуемый [план готовности](auth-account-readiness-plan.md).
 
 ## Локальный запуск
 

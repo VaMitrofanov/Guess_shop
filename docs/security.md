@@ -400,6 +400,23 @@ gamepass-данными. Ручной скрипт не может быть вы
 воркеры при недоступной/невалидной session переходят в 15-минутный backoff вместо частых
 повторов с той же cookie.
 
+### 20. Email account lifecycle и доказательство consent — P0, 🔴 ОТКРЫТО (2026-07-17)
+
+Регистрация требует `agreedToPrivacy: true` и bcrypt-хеширует пароль, однако email не
+проверяется одноразовой ссылкой, reset-пути нет, CredentialsProvider не имеет отдельного
+лимита попыток входа, а согласие не сохраняется как versioned evidence. Поэтому `EMAIL`
+identity нельзя трактовать как доказанную пользователем до завершения lifecycle.
+
+**Риск:** захват или блокирование доступа после опечатки/чужого email, password spraying,
+невозможность безопасного recovery и отсутствие доказательства редакции согласия при споре.
+In-memory лимит регистрации не заменяет shared limiter при нескольких web-репликах.
+
+**План:** сначала подтвердить product/legal decisions, затем добавить hashed single-use
+verification/reset tokens, versioned consent record, generic anti-enumeration ответы,
+shared throttle по IP+email, session revocation и E2E acceptance. Не помечать legacy email
+как verified автоматически и не объединять профили по email/имени/Roblox username. Полная
+последовательность и DoD: `docs/auth-account-readiness-plan.md`.
+
 ### 12. Детерминированный пароль в seed — ✅ ЗАКРЫТО В КОДЕ (2026-07-12)
 
 `prisma/seed.js` содержит публичные admin email и фиксированный предсказуемый пароль.

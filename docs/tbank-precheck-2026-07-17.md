@@ -133,7 +133,8 @@ terminal/KKT/OFD test matrix и боевой payment/refund E2E.
 
 - Автоматизировать последовательный Web → Guide deploy и блокировать release при mismatch.
 - Добавить полноценный Playwright E2E guest/email/TG/VK/dashboard/checkout/payment/refund.
-- Закрыть email verification/reset/throttling и безопасные VK link/unlink/merge.
+- Закрыть email verification/reset/throttling, доказательную запись согласия и безопасные
+  VK link/unlink/merge по [согласуемому auth-плану](auth-account-readiness-plan.md).
 - Зафиксировать performance/accessibility baseline на физических iPhone/Android/WebView.
 - Настроить бизнес-алерты по payment/outbox/refund и провести rollback drill.
 
