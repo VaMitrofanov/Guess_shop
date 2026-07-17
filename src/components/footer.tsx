@@ -29,7 +29,7 @@ export default function Footer() {
           <PaymentMethods showStatus />
         </div>
         <div className="mt-8 flex flex-col gap-3 border-t border-[var(--rb-border)] pt-6 text-base leading-relaxed text-[var(--rb-muted)] md:flex-row md:items-end md:justify-between">
-          <p>ROBLOXBANK не связан с Roblox Corporation. Roblox и его логотип — торговые марки Roblox Corporation.</p>
+          <p>Сервис ROBLOXBANK не является банком, кредитной или финансовой организацией. Не связан с Roblox Corporation. Roblox и его логотип — торговые марки Roblox Corporation.</p>
           <a href="https://vk.me/club237309399" target="_blank" rel="noopener noreferrer" className="font-bold text-[#7556e8]">Сообщество ВКонтакте ↗</a>
         </div>
       </div>

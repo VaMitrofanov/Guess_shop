@@ -8,6 +8,8 @@ import { verifyVkIdUser } from "@/lib/vk-id";
 import { findOrCreateVerifiedIdentity } from "@/lib/user-identity";
 import { verifyTelegramLogin } from "@/lib/telegram-login";
 import { normalizeLoginEmail } from "@/lib/auth-navigation";
+import { allowPasswordSignIn } from "@/lib/auth-throttle";
+import { clientIp } from "@/lib/rate-limit";
 import { consumeTelegramWebLoginChallenge } from "@/lib/telegram-web-login";
 
 // VK display names are user-controlled and embedded into Telegram HTML
@@ -57,10 +59,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         if (!credentials?.email || !credentials?.password) return null;
 
         const email = normalizeLoginEmail(String(credentials.email));
+
+        // Throttle before touching the database or bcrypt. A throttled attempt
+        // returns the same null as a wrong password, so the limiter itself
+        // reveals nothing about whether the account exists.
+        if (!allowPasswordSignIn(email, clientIp(request))) {
+          console.warn("[auth][password] sign-in throttled");
+          return null;
+        }
 
         const user = await prisma.user.findUnique({
           where: { email },

@@ -106,12 +106,12 @@ bots/
     bridge.ts           HTTP-прокси (Singapore)
     db.ts               Prisma-клиент для ботов (Pool=3)
   tg/
-    handlers.ts         весь TG-бот (~4700 строк)
+    handlers.ts         весь TG-бот (~5500 строк)
     crons.ts            напоминания (отзыв / сток кодов / ожидание ссылки)
     session.ts          in-memory: pendingLink, pendingRobloxNick, pendingReview, …
     admin/              TG admin hub (orders, stats, WB, system, rates)
   vk/
-    handlers.ts         весь VK-бот (~2900 строк), паритет с TG
+    handlers.ts         весь VK-бот (~3500 строк), паритет с TG
     session.ts          in-memory VK-сессии
 
 prisma/schema.prisma    схема БД

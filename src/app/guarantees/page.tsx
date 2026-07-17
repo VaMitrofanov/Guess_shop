@@ -27,8 +27,8 @@ export default function GuaranteesPage() {
       <div className={styles.shell}>
         <header className={styles.hero}>
           <div className={styles.heroCopy}>
-            <span className={styles.kicker}>Система доверия RobloxBank</span>
-            <h1>Robux хранятся<br /><span>за дверью сейфа.</span></h1>
+            <span className={styles.kicker}>Система защиты заказа</span>
+            <h1>Robux доставляются<br /><span>под защитой.</span></h1>
             <p>Каждый важный этап — цена, платёж, геймпасс и статус заказа — проверяется отдельно. Ни одного обещания, которое нельзя увидеть в интерфейсе.</p>
           </div>
           <div className={styles.seal}>R$</div>
@@ -48,7 +48,7 @@ export default function GuaranteesPage() {
         </section>
 
         <section className={styles.cta}>
-          <div className={styles.ctaText}><h2>Готов открыть свой сейф?</h2><p>Сначала введи ник — пароль Roblox не понадобится.</p></div>
+          <div className={styles.ctaText}><h2>Готов пополнить баланс?</h2><p>Сначала введи ник — пароль Roblox не понадобится.</p></div>
           <Link href="/#calculator" className={styles.button}>Рассчитать покупку <ArrowRight size={19} /></Link>
         </section>
       </div>

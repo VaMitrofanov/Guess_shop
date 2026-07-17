@@ -11,7 +11,8 @@ URL уже публичен, а приём денег fail-closed. Quick-fix bat
 Минимальный сегодняшний gate для предварительной ссылки:
 
 1. [x] Web, затем `RobloxBank-Guide` последовательно развёрнуты на commit `b6b699f`;
-   source fingerprint совпадает: `20183b40b8783d9c`.
+   source fingerprint совпадает: `20183b40b8783d9c`. Web дополнительно поднят до `709f8e8`
+   (mobile card overflow) — см. «Проверка прода на `709f8e8`».
 2. [x] VK ID скрыт fail-closed из публичного login; Guide использует прямую VK-ссылку до
    отдельного live provider acceptance.
 3. [x] Mobile overflow `/legal/policy` исправлен: `390 px` viewport даёт
@@ -26,6 +27,89 @@ URL уже публичен, а приём денег fail-closed. Quick-fix bat
 Даже после этих быстрых правок **нельзя включать оплату**, пока не закрыты категория/MCC,
 юридическая модель Roblox/бренда/возраста, фактическая РФ-локализация первичной БД,
 terminal/KKT/OFD test matrix и боевой payment/refund E2E.
+
+## DEMO-терминал: тест Init + оплата — 18.07.2026
+
+DEMO-терминал `…DEMO` env добавлены в Coolify Web, redeploy выполнен.
+`/api/acquiring/status` → `{"enabled":true}`.
+
+| Шаг | Результат |
+|---|---|
+| Init (прямой вызов API) | ✅ `Success:true`, PaymentId `8875548218`, PaymentURL получен |
+| Тестовая карта `4300…0777` на pay.tbank.ru | ✅ Оплата прошла |
+| GetState | ✅ `Status: CONFIRMED`, Amount 10000 коп |
+| Webhook handler доступен | ✅ `401` на невалидную подпись (корректный reject) |
+| Full Refund (Cancel 100 руб → 0) | ✅ `REFUNDED`, NewAmount=0 |
+| Init 500 руб (для partial) | ✅ PaymentId `8875607284` |
+| Оплата 500 руб тестовой картой | ✅ `CONFIRMED` |
+| Partial Refund (200 из 500) | ✅ `PARTIAL_REFUNDED`, NewAmount=30000 |
+| Second Refund (300 остаток) | ✅ `REFUNDED`, NewAmount=0 |
+| E2E через checkout (auth+quote+БД) | ⏳ следующий шаг |
+
+**Дизайн `/payment/status`:** страница функциональна, но визуально устарела — не соответствует
+текущей системе витрины. TODO: привести к дизайн-системе перед боевым запуском.
+
+## Проверка прода на `709f8e8` — 17.07, 12:0x–12:4x UTC
+
+### Инцидент «деплой упал» — ложная тревога
+
+Запись деплоя `failed` действительно есть, но production она не затронула:
+
+| Deployment | Триггер | Время (UTC) | Итог |
+|---|---|---|---|
+| `uc8h1wnn…` | GitHub webhook (`is_webhook=true`) | 11:59:30 → 12:01:46 | **finished** |
+| `tquzrcpm…` | ручной API force (`is_api=true`, `force_rebuild=true`) | 11:59:54 → 12:05:21 | **failed** |
+
+Обе сборки — один и тот же commit `709f8e82`. Ручной force-deploy стартовал через 24 с
+после webhook-сборки, две параллельные сборки Next.js на RF (2 vCPU / 4 GB) не помещаются:
+вторая умерла на `Running TypeScript ...` c `exit 255` без compile-ошибки. Это тот же
+parallel-build failure mode, что задокументирован для Web→Guide, но здесь Web против Web.
+Упавшая сборка не заменяет работающий контейнер, поэтому прод остался на успешной сборке.
+Правило и диагностика зафиксированы в [deploy.md](deploy.md#как-деплоить).
+
+**Redeploy не потребовался**: прод уже был на нужном коммите. Доказано тремя независимыми
+способами — тег образа `z10ws7m1q45h281zwedmhei4:709f8e82405cfa47fa7b14f71c2f1267037e8591`
+у контейнера `robloxbank-web` (`healthy`); `last-modified: 12:00:40 GMT` у отданных CSS-чанков;
+и сам фикс в отданном CSS (`min-width:0;max-width:100%`, `minmax(0,1fr)`,
+`width:min(620px,100% - 28px)` — минификатор свернул `calc()`).
+
+### Результаты production gate
+
+| Проверка | Результат |
+|---|---|
+| `npm run smoke:site -- --expect-public` | ✅ 15/15 |
+| `node scripts/smoke-corridor.mjs` | ✅ 29/29 |
+| Fingerprint Web == Guide | ✅ `20183b40b8783d9c` |
+| Mobile `390×844`, 11 публичных страниц | ✅ `scrollWidth == clientWidth == 390` везде |
+| `/api/acquiring/status` | ✅ `{"enabled":false}` (fail-closed) |
+| `/login` без VK ID, Telegram на месте | ✅ |
+| Логотипы Т‑Банк/МИР/Visa/Mastercard/СБП | ✅ |
+| `/register` consent | ✅ |
+
+Guide остался на `b6b699f`, и это корректно: `709f8e8` не трогает ни один файл Guide-сборки
+(только `src/app/storefront.module.css` и `docs/`), совпадающий fingerprint и corridor `29/29`
+это подтверждают. Отдельный Guide redeploy не нужен.
+
+Проверено на `709f8e8`: hero/калькулятор на `390 px` укладываются в вьюпорт
+(карточка `362 px`, `left=14 … right=376`), горизонтального скролла нет ни на одной из
+11 публичных страниц (`/`, `/checkout`, `/guide?source=site`, `/faq`, `/guarantees`,
+`/reviews`, `/legal/{policy,offer,details}`, `/login`, `/register`).
+
+### Новое наблюдение — P2, не блокер
+
+- **Гостевая консоль показывает `401` от `/api/account/me`** на каждой публичной странице.
+  Функционально безвредно (клиент так определяет, залогинен ли посетитель; гостевой UI
+  рендерится верно), но в DevTools у ревьюера банка это красная ошибка. Прошлый прогон
+  отчитался «console errors = 0», потому что выполнялся **под сохранённой авторизованной
+  сессией** — под чистым гостем картина другая.
+  **Закрыто в коде 17.07** (ждёт деплоя): проба отвечает `200 {authenticated:false,
+  robloxUsername:null}`. Оба вызывающих места уже использовали `res.ok ? json : null`,
+  поэтому контракт обратно совместим. Гостевой ответ не содержит данных и идентичен для
+  «не входил» и «сессия истекла», так что эндпоинт не подсказывает, есть ли аккаунт
+  (`src/lib/account-session.ts`, 5 тестов).
+- **`429` под быстрым автоматическим обходом** — это сработавший rate limiter, а не дефект:
+  при обычных интервалах все страницы отдают `200`. Будущим автопроверкам надо разносить
+  запросы по времени, иначе они ловят собственный лимит и дают ложные красные.
 
 ## Production после quick-fix rollout
 
@@ -127,11 +211,24 @@ terminal/KKT/OFD test matrix и боевой payment/refund E2E.
 5. **Legal copy шире фактической услуги:** оферта описывает также коды и gift cards, хотя
    текущий сайт продаёт услугу через gamepass. Момент исполнения, возвраты, SLA и точный
    предмет расчёта должны быть согласованы с юристом/бухгалтером/ККТ.
+   (Отдельно: товар «коды активации» теперь прорабатывается — [roblox-codes-plan.md](roblox-codes-plan.md).
+   До его запуска оферта не должна обещать то, чего сайт не продаёт.)
+6. **Контактный email — личный ящик, не на домене (найдено 17.07).** В реквизитах и оферте
+   опубликован `demidispanov@yandex.com`, тогда как ИП — **Юдина Н. А.**. Для банка это
+   двойное несоответствие: адрес не на домене магазина и не бьётся по имени с
+   предпринимателем. Домен вдобавок вообще не имеет `MX`, то есть `@robloxbank.ru` сейчас
+   физически не принимает почту. Закрывается тем же шагом, что и почтовый транспорт для
+   auth: ящик `support@robloxbank.ru` — см.
+   [auth-account-readiness-plan.md](auth-account-readiness-plan.md#рекомендация-яндекс-360-для-бизнеса).
 6. **Общий ESLint не является рабочим release gate:** 389 ошибок при зелёных build/tsc.
 
 ### P2 — после отправки предварительной ссылки
 
-- Автоматизировать последовательный Web → Guide deploy и блокировать release при mismatch.
+- Автоматизировать последовательный Web → Guide deploy и блокировать release при mismatch;
+  заодно исключить параллельную сборку одного сервиса (webhook + ручной force), которая
+  17.07 дала ложный `failed` — см. «Инцидент „деплой упал“».
+- Сделать гостевую проверку сессии тихой: `/api/account/me` не должен писать `401` в консоль
+  публичных страниц.
 - Добавить полноценный Playwright E2E guest/email/TG/VK/dashboard/checkout/payment/refund.
 - Закрыть email verification/reset/throttling, доказательную запись согласия и безопасные
   VK link/unlink/merge по [согласуемому auth-плану](auth-account-readiness-plan.md).

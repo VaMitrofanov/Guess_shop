@@ -16,7 +16,9 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [b2b-saas.md](b2b-saas.md) | Партнёрское/B2B-направление: TWA/server MVP `Антон`, USDT-ledger, ручной XLSX import, rollout Sheets/batch |
 | [corridor-and-site.md](corridor-and-site.md) | WB-гейт, сайт `/guide`, API коридора, восстановление сессии |
 | [site-acquiring-master-plan.md](site-acquiring-master-plan.md) | Ультра-ревью `robloxbank.ru`, P0-блокеры эквайринга, единые цена/identity/orders, дизайн и поэтапный launch plan |
-| [auth-account-readiness-plan.md](auth-account-readiness-plan.md) | Повторный аудит ЛК/login/register и согласуемый P0-план email/TG/VK identity, recovery и E2E |
+| [auth-account-readiness-plan.md](auth-account-readiness-plan.md) | Повторный аудит ЛК/login/register и P0-план email/TG/VK identity, recovery и E2E; решения владельца от 17.07, закрытый throttling и блокер «нет почтового транспорта» |
+| [roblox-codes-plan.md](roblox-codes-plan.md) | Новый товар: коды активации Roblox — прайс, честные 10–15 мин → «моментально» через буфер, безопасность предъявительских кодов, ККТ/юр-гейты и этапы K0–K9 |
+| [email-setup.md](email-setup.md) | Почта `robloxbank.ru`: Яндекс 360, DNS-записи для Cloudflare (MX/SPF/DKIM/DMARC), env для SMTP, приёмка живой доставкой и порядок замены адреса в реквизитах |
 | [tbank-precheck-2026-07-17.md](tbank-precheck-2026-07-17.md) | Предрелизный аудит публичной ссылки для Т‑Банка 17.07: фактические тесты, найденные блокеры и план закрытия |
 | [design-rework-concept.html](design-rework-concept.html) | Интерактивный визуальный концепт глобального реворка главной и mobile-first WB guide |
 | [twa-ux-v3-concept.html](twa-ux-v3-concept.html) | Визуальный концепт TWA v3: два варианта Главной, умная выдача и foreground bottom sheet |
