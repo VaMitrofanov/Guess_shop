@@ -795,6 +795,10 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       message:
         "📸 Оставь отзыв на Wildberries с текстом и фото, сделай скриншот и пришли его сюда фотографией (не файлом).\n\n" +
         "После проверки бонус +100 R$ придёт автоматически (действует на любой номинал).",
+      keyboard: Keyboard.builder()
+        .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "secondary" })
+        .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "positive" })
+        .inline(),
     });
     return;
   }
@@ -1394,10 +1398,15 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     }
   }
 
-  if (state?.type === "AWAITING_REVIEW" || messageHasPhoto(ctx)) {
-    console.log(`[VK] photo routing: vkUserId=${vkUserId} hasPhoto=${messageHasPhoto(ctx)} state=${state?.type ?? "none"}`);
+  if (messageHasPhoto(ctx)) {
+    console.log(`[VK] photo routing: vkUserId=${vkUserId} state=${state?.type ?? "none"}`);
     await handleReviewScreenshot(ctx, vkUserId, state?.type === "AWAITING_REVIEW" ? state.orderId : undefined);
     return;
+  }
+
+  if (state?.type === "AWAITING_REVIEW") {
+    clearState(vkUserId);
+    console.log(`[VK] AWAITING_REVIEW text-escape: vkUserId=${vkUserId}, falling through to idle`);
   }
 
   // ── (C) No active state — DB-derived status / help message ───────────────
@@ -2941,10 +2950,15 @@ async function handleReviewScreenshot(
       return;
     }
     if (knownOrderId) {
-      await ctx.reply(
-        "📸 Оставь отзыв на Wildberries с текстом и фото, пришли скриншот в виде фотографии (не файлом).\n" +
-        "После проверки получишь +100 R$ (действует на любой номинал)."
-      );
+      await ctx.reply({
+        message:
+          "📸 Оставь отзыв на Wildberries с текстом и фото, пришли скриншот в виде фотографии (не файлом).\n" +
+          "После проверки получишь +100 R$ (действует на любой номинал).",
+        keyboard: Keyboard.builder()
+          .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "secondary" })
+          .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "positive" })
+          .inline(),
+      });
     } else {
       // Photo was detected at routing level but URL extraction failed — guide user
       await ctx.reply(
