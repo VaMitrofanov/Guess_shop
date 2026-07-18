@@ -267,6 +267,13 @@
 .shell :global(.pixel-card)::after { display: none !important; }
 .shell :global(.font-pixel) { font-family: inherit !important; line-height: 1.25 !important; letter-spacing: .06em !important; }
 
+/* Legacy admin screens still use a handful of Tailwind pixel utilities. Keep
+   those labels inside the same readable scale as the unified Control Center. */
+.shell :global([class*="text-[8px]"]),
+.shell :global([class*="text-[9px]"]),
+.shell :global([class*="text-[10px]"]) { font-size: 12px !important; }
+.shell :global([class*="text-[11px]"]) { font-size: 13px !important; }
+
 @media (max-width: 1050px) {
   .metricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .overviewGrid { grid-template-columns: 1fr; }
