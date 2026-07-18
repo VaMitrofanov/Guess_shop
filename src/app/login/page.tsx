@@ -1,14 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, Eye, EyeOff, History, Loader2, Lock, Mail, ShieldCheck, Sparkles, UserRoundCheck } from "lucide-react";
 import Navbar from "@/components/navbar";
 import Link from "next/link";
 import VKAuthButton from "@/components/auth/VKAuthButton";
 import TelegramLoginButton from "@/components/auth/TelegramLoginButton";
-import { normalizeLoginEmail, postLoginPath } from "@/lib/auth-navigation";
+import { normalizeLoginEmail, postLoginPath, safeReturnPath } from "@/lib/auth-navigation";
 import { VK_AUTH_ENABLED } from "@/lib/vk-auth-availability";
 import styles from "../auth-shell.module.css";
 
@@ -18,13 +18,15 @@ const benefits = [
   { icon: UserRoundCheck, title: "Один профиль", text: "Бонусы и подтверждённые способы входа не теряются." },
 ];
 
-export default function LoginPage() {
+function LoginContent() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnTo = safeReturnPath(searchParams.get("next"));
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -39,7 +41,7 @@ export default function LoginPage() {
       if (!result?.ok) throw new Error("Неверный email или пароль");
       const response = await fetch("/api/auth/session", { cache: "no-store" });
       const session = await response.json();
-      router.replace(postLoginPath(session?.user?.role));
+      router.replace(postLoginPath(session?.user?.role, returnTo));
       router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Не удалось войти. Попробуйте ещё раз.");
@@ -83,12 +85,16 @@ export default function LoginPage() {
 
           <div className={styles.divider}>или продолжить через</div>
           <div className={styles.providers}>
-            <TelegramLoginButton mode="login" className={styles.providerButton} />
-            {VK_AUTH_ENABLED && <div className={styles.vkProvider}><VKAuthButton mode="login" /></div>}
+            <TelegramLoginButton mode="login" className={styles.providerButton} returnTo={returnTo} />
+            {VK_AUTH_ENABLED && <div className={styles.vkProvider}><VKAuthButton mode="login" customRedirectUrl={returnTo} /></div>}
           </div>
-          <p className={styles.footer}>Нет аккаунта? <Link href="/register">Создать</Link><br /><Link href="/admin/login" className={styles.secondaryLink}>Вход для администратора</Link></p>
+          <p className={styles.footer}>Нет аккаунта? <Link href={`/register?next=${encodeURIComponent(returnTo)}`}>Создать</Link><br /><Link href="/admin/login" className={styles.secondaryLink}>Вход для администратора</Link></p>
         </section>
       </div>
     </main>
   );
+}
+
+export default function LoginPage() {
+  return <Suspense fallback={null}><LoginContent /></Suspense>;
 }

@@ -9,6 +9,19 @@
 flow, ККТ и юридические launch-gates описаны отдельно в
 [site-acquiring-master-plan.md](site-acquiring-master-plan.md).
 
+## Update 18.07.2026
+
+- Согласовано: выбрать ник, геймпасс и цену можно гостем; создание заказа и переход в банк
+  — только после login/register.
+- Локально реализован безопасный `next` return для email/TG/VK и сохранение несекретного
+  checkout draft. Гостевая quote не переносится: после входа выпускается owner-bound quote.
+- ЛК дополнен prominent active-order карточкой и timeline; единая история, чек/возврат,
+  бонусы и identities уже были в foundation.
+- Email verification/reset/evidence, real-provider TG/VK acceptance и merge-conflict всё
+  ещё обязательны до полного `100%` rollout; SMTP/DNS остаётся внешней зависимостью.
+- Общий порядок, WB handoff и payment E2E описаны в
+  [site-launch-implementation-plan.md](site-launch-implementation-plan.md).
+
 ## Что подтверждено сейчас
 
 - `/login` и `/register` используют общий адаптивный shell; на локальной production-сборке

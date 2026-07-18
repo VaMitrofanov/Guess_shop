@@ -109,14 +109,19 @@ OpenGraph и корректный maintenance-ответ.
 `ANTON_GOOGLE_SHEETS_SPREADSHEET_ID`,
 `GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHEETS_PROTECTED_EDITORS` (email владельца
 таблицы для защиты выполненных строк, Этап 5.8). SITE-эквайринг (по умолчанию выключен):
-`SITE_ACQUIRING_ENABLED`, `TINKOFF_TERMINAL_KEY`, `TINKOFF_SECRET_KEY`, `TINKOFF_TAXATION`,
+`SITE_ACQUIRING_ENABLED`, `SITE_ACQUIRING_MODE`, `SITE_ACQUIRING_ALLOWLIST_USER_IDS`,
+`SITE_ACQUIRING_ROLLOUT_PERCENT`, `TINKOFF_TERMINAL_KEY`, `TINKOFF_SECRET_KEY`, `TINKOFF_TAXATION`,
 `TINKOFF_ITEM_TAX`, `TINKOFF_PAYMENT_METHOD`, `TINKOFF_PAYMENT_OBJECT`. Классификаторы чека
 не имеют default: их значения подтверждают бухгалтер/ККТ-оператор. Legacy automation:
 `LOCAL_BOT_URL`, `INTERNAL_WEBHOOK_SECRET`, `BOT_API_TOKEN`.
 
-Checkout читает runtime-состояние эквайринга из `GET /api/acquiring/status`. При любом
-ответе кроме `{ enabled: true }` UI показывает review-баннер и не активирует платёжный CTA;
-серверный `POST /api/orders/create` независимо проверяет тот же exact-`true` gate.
+Checkout читает per-session runtime-состояние эквайринга из `GET /api/acquiring/status`.
+Master flag разрешает только exact `true`; mode принимает только `off`, `allowlist`,
+`percentage`, `on` и fail-closed в `off`. При любом ответе кроме `{ enabled: true }` UI не
+активирует платёжный CTA; серверный `POST /api/orders/create` независимо повторяет auth и
+eligibility. Allowlist — comma-separated internal `User.id`; percentage — целое `0..100`.
+Сначала задаётся mode/allowlist при master `false`, затем один последовательный deploy;
+master включается отдельным изменением только перед allowlist E2E.
 
 `BOOTSTRAP_ADMIN_EMAIL` + `BOOTSTRAP_ADMIN_PASSWORD` — опциональная **одноразовая** пара
 только для `prisma db seed` на новом окружении. Обе задаются вместе, пароль — от 16 символов,

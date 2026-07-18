@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import {
   buildCustomerNotices,
+  customerOrderProgress,
   customerOrderStatus,
   orderRecordLabel,
   paymentAttemptLabel,
@@ -227,6 +228,10 @@ export default async function DashboardPage() {
   const greetingName = user.robloxUsername ?? user.name ?? user.email?.split("@")[0] ?? "друг";
   const checkoutHref = user.robloxUsername ? `/checkout?username=${encodeURIComponent(user.robloxUsername)}` : "/checkout";
   const latestActive = orders.find((order) => customerOrderStatus(order.kind, order.status).active);
+  const latestActiveProgress = latestActive ? customerOrderProgress(latestActive.kind, latestActive.status) : 0;
+  const latestActiveHref = latestActive?.status === "AWAITING_GAMEPASS"
+    ? `/guide?source=site&amount=${latestActive.amountRobux}&username=${encodeURIComponent(latestActive.customer ?? "")}`
+    : latestActive ? orderHref(latestActive) : null;
 
   return (
     <main className={styles.page}>
@@ -263,6 +268,18 @@ export default async function DashboardPage() {
 
         <div className={styles.dashboardGrid}>
           <div className={styles.mainColumn}>
+            {latestActive && (
+              <section className={styles.activeOrder} aria-label="Активный заказ">
+                <div className={styles.activeOrderTop}>
+                  <div><span className={styles.kicker}>Активный заказ · {sourceLabel(latestActive.source)}</span><h2>{latestActive.amountRobux.toLocaleString("ru-RU")} R$</h2><p>{latestActive.displayId} · {latestActive.customer ?? "Roblox-ник уточняется"}</p></div>
+                  <StatusBadge kind={latestActive.kind} status={latestActive.status} />
+                </div>
+                <ol className={styles.orderProgress}>
+                  {["Оплата", "Очередь", "Выкуп", "Готово"].map((label, index) => <li key={label} className={index < latestActiveProgress ? styles.progressDone : index === latestActiveProgress ? styles.progressCurrent : ""}><span>{index < latestActiveProgress ? <CheckCircle2 size={15} /> : index + 1}</span><small>{label}</small></li>)}
+                </ol>
+                <div className={styles.activeOrderBottom}><span>Следующий шаг: <strong>{customerOrderStatus(latestActive.kind, latestActive.status).label}</strong></span>{latestActiveHref && <Link href={latestActiveHref}>Подробнее <ArrowRight size={16} /></Link>}</div>
+              </section>
+            )}
             <section className={styles.sectionCard}>
               <div className={styles.sectionHead}>
                 <div><span className={styles.kicker}>Центр событий</span><h2>Что сейчас важно</h2></div>

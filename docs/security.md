@@ -447,6 +447,25 @@ Roblox Corporation. Возможен cease-and-desist, UDRP-спор о доме
 указание что карточные данные обрабатывает только Т-Банк. Дисклеймеры **смягчают** риск,
 но **не устраняют** его — полное закрытие = переименование (варианты в master-plan §5.1).
 
+### 23. Checkout return и WB channel handoff — 🟡 RETURN ЗАКРЫТ / WB ПЛАН (2026-07-18)
+
+**Checkout return:** обязательный login перед оплатой добавляет redirect-параметр `next`.
+Без проверки это open redirect после успешной авторизации и удобная фишинговая цепочка.
+В коде разрешён только same-origin path до 2048 символов; external URL, protocol-relative
+`//`, backslash, control chars и `/admin` fail-closed ведут в `/dashboard`. Draft переносит
+только `amount`, Roblox username и gamepass id. Telegram return хранится в `sessionStorage`,
+не подменяет одноразовый серверный auth challenge. Инвариант покрыт unit-тестом.
+
+**WB handoff:** будущая выдача на сайте не должна использовать raw WB code как credential
+для связывания identity. Пересланная/утёкшая deep link иначе позволяет захватить reservation
+или создать заказ не тому пользователю. Требуется отдельный random challenge, SHA-256 hash
+в БД, короткий TTL, consume-once, binding к reservation и idempotency `code+user`.
+
+**Продуктовый риск:** требование подписаться как условие выдачи уже оплаченного на WB товара
+создаёт спор, возвраты и обходы. Поэтому обязательным делается подтверждённый диалог/identity
+TG или VK; membership проверяется сервером и может давать бонус, но не удерживает номинал.
+План и rollout: `docs/site-launch-implementation-plan.md`, раздел 4.
+
 ### 21. Коды активации Roblox — предъявительские секреты в БД — P0, 🔵 ПЛАН (2026-07-17)
 
 Планируемый товар «коды активации» вводит в систему **предъявительский инструмент**: строка

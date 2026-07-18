@@ -1,8 +1,9 @@
 # RobloxBank.ru: ультра-ревью и master plan эквайринга
 
-**Статус:** реализация начата; юридические реквизиты для публичных документов получены и
-внесены 16.07.2026, но публичный запуск и подключение боевого эквайринга по-прежнему
-заблокированы launch-gates из раздела 10.
+**Статус:** реализация идёт. Рабочий терминал и credentials получены, но по решению владельца
+они не вставляются до завершения ЛК/checkout/WB-плана. 18.07 production acquiring возвращён
+в `false`, baseline БД снят и проверен. Актуальная последовательность работ:
+[site-launch-implementation-plan.md](site-launch-implementation-plan.md).
 
 **2026-07-18, DEMO-терминал: Init + CONFIRMED ✅**
 
@@ -20,12 +21,21 @@ PaymentAttempt — ожидаемо; подпись при этом проход
 - Second Refund (платёж 2, 300 остаток → 0): `REFUNDED` ✅
 
 Весь DEMO API-цикл пройден: Init → оплата → full refund, Init → оплата → partial →
-full refund. E2E через checkout (с auth + quote + БД) — следующий шаг.
+full refund.
 
-**TODO дизайн — `/payment/status`:** страница показывает «PROCESSING / ОЖИДАЕМ ОПЛАТУ» с
-жёлтым спиннером. Дизайн устаревший, не соответствует текущей визуальной системе витрины.
-Нужно привести к единой дизайн-системе (см. §5.2 Pixel Trust) при подготовке к боевому
-запуску: типографика, цвета, состояния (processing → success → error), mobile layout.
+**Обязательные тесты Т-Банка (18.07) — ВСЕ ПРОЙДЕНЫ:**
+1. Успешная оплата `4300…0777` → CONFIRMED ✅
+2. Неуспешная оплата `5000…0009` → REJECTED ✅
+3. Возврат `4000…0119` → CONFIRMED → Cancel → REFUNDED ✅
+
+**Рабочий терминал одобрен, выдан Т-Банком, credentials получены владельцем.** Замена
+DEMO → production отложена до завершения текущей подготовки сайта; после замены обязателен
+allowlist E2E через checkout с реальной БД и контролируемым возвратом.
+
+**Дизайн `/payment/status` обновлён локально 18.07:** старый pixel UI заменён на Violet/Frost
+order timeline с waiting/paid/work/completed/error/offline состояниями, переходом в ЛК,
+защищённой ссылкой и mobile layout. Production rollout выполняется только вместе с текущим
+batch после согласования.
 
 **Юридические защиты (18.07):**
 - **Footer:** добавлен дисклеймер «не является банком, кредитной или финансовой организацией»
@@ -46,6 +56,16 @@ full refund. E2E через checkout (с auth + quote + БД) — следующ
 клиентам и модерации интернет-эквайринга Т-Банка без расхождения с TG/VK-ботами.
 
 ## Статус реализации
+
+- **2026-07-18, launch-safety + account batch (локально):** production acquiring выключен,
+  backup и aggregate baseline проверены. Добавлен двухслойный gate: master kill switch и
+  `off/allowlist/percentage/on` с детерминированным per-user bucket. Гость сохраняет
+  amount/username/gamepass до обязательного login/register, после входа получает новую
+  owner-bound quote. Email/TG/VK return path ограничен same-origin. ЛК получил активный
+  четырёхэтапный order timeline, `/payment/status` полностью приведён к текущей системе.
+  Jest `35/233`, production build и mobile `390×844` visual QA зелёные. Боевые credentials
+  не менялись; подробный план ЛК, WB channel handoff и production E2E — в
+  [site-launch-implementation-plan.md](site-launch-implementation-plan.md).
 
 - **2026-07-17, повторный mobile/auth аудит (локальный release-candidate):** на главной
   найдено фактическое переполнение: mobile grid-track `1fr` принимал min-content ширину

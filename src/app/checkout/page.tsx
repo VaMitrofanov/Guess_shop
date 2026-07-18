@@ -79,7 +79,10 @@ function CheckoutContent() {
   const [receiptEmail, setReceiptEmail] = useState("");
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [acquiringEnabled, setAcquiringEnabled] = useState(false);
+  const [acquiringAvailable, setAcquiringAvailable] = useState(false);
+  const [acquiringMode, setAcquiringMode] = useState<"off" | "limited" | "on">("off");
   const [error, setError] = useState("");
   const [idempotencyKey] = useState(() => crypto.randomUUID());
 
@@ -87,6 +90,14 @@ function CheckoutContent() {
   const breakdown = getBreakdown(robux);
   const expectedPassPrice = useMemo(() => grossPassPrice(robux), [robux]);
   const selectedPriceMatches = !!selectedPass && gamepassPriceMatches(Number(selectedPass.price), expectedPassPrice);
+  const checkoutReturnPath = (() => {
+    const params = new URLSearchParams({ amount: String(robux) });
+    if (username || searchQuery.trim()) params.set("username", username || searchQuery.trim());
+    if (selectedPass?.id) params.set("gamepassId", String(selectedPass.id));
+    return `/checkout?${params.toString()}`;
+  })();
+  const loginHref = `/login?next=${encodeURIComponent(checkoutReturnPath)}`;
+  const registerHref = `/register?next=${encodeURIComponent(checkoutReturnPath)}`;
 
   const lookupUsername = async (nick: string, silent = false) => {
     const normalized = nick.trim();
@@ -128,12 +139,13 @@ function CheckoutContent() {
       const timer = window.setTimeout(() => void lookupUsername(rememberedUsername, true), 0);
       return () => window.clearTimeout(timer);
     }
-    fetch("/api/account/me")
+    fetch("/api/account/me", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
+        setAuthenticated(data?.authenticated === true);
         if (data?.robloxUsername) setSearchQuery(data.robloxUsername);
       })
-      .catch(() => {});
+      .catch(() => setAuthenticated(false));
     // The URL-derived identity is the only value that should auto-run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rememberedUsername]);
@@ -143,7 +155,12 @@ function CheckoutContent() {
     fetch("/api/acquiring/status", { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : Promise.reject(new Error("status unavailable"))))
       .then((data) => {
-        if (active) setAcquiringEnabled(data.enabled === true);
+        if (active) {
+          setAcquiringEnabled(data.enabled === true);
+          setAcquiringAvailable(data.available === true);
+          setAcquiringMode(data.mode === "on" || data.mode === "limited" ? data.mode : "off");
+          if (typeof data.authenticated === "boolean") setAuthenticated(data.authenticated);
+        }
       })
       .catch(() => {
         if (active) setAcquiringEnabled(false);
@@ -203,6 +220,12 @@ function CheckoutContent() {
       return;
     }
     setError("");
+    if (!authenticated) {
+      setQuote(null);
+      setStage("confirm");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
     setQuoteLoading(true);
     try {
       const res = await fetch("/api/pricing/quote", {
@@ -263,7 +286,10 @@ function CheckoutContent() {
       });
       const data = await res.json();
       if (data.success && data.paymentUrl) window.location.href = data.paymentUrl;
-      else setError(data.error || "Не удалось открыть оплату.");
+      else {
+        if (res.status === 401) setAuthenticated(false);
+        setError(data.error || "Не удалось открыть оплату.");
+      }
     } catch {
       setError("Ошибка сети. Попробуй ещё раз.");
     } finally {
@@ -279,19 +305,28 @@ function CheckoutContent() {
           <h1>{stage === "select" ? "Твои геймпассы" : "Проверь заказ"}</h1>
           <p>{stage === "select"
             ? "По нику сразу покажем все геймпассы на продажу и поднимем готовые по цене наверх."
+            : !authenticated
+              ? "Выбор сохранён. Перед оплатой войди или создай аккаунт — заказ появится в личном кабинете."
             : acquiringEnabled
               ? "Цена зафиксирована. Осталось указать email и перейти к оплате."
-              : "Цена зафиксирована, но приём платежей временно отключён до завершения проверки банка и кассы."}</p>
+              : "Цена зафиксирована, но оплата пока недоступна для этого аккаунта."}</p>
         </div>
-        <div className={styles.stageIndicator} aria-label={`Шаг ${stage === "select" ? 1 : 2} из 2`}>
-          <span className={styles.stageActive}>1</span><i /><span className={stage === "confirm" ? styles.stageActive : ""}>2</span>
+        <div className={styles.stageIndicator} aria-label={`Шаг ${stage === "select" ? 1 : authenticated ? 3 : 2} из 3`}>
+          <span className={styles.stageActive}>1</span><i /><span className={stage === "confirm" ? styles.stageActive : ""}>2</span><i /><span className={stage === "confirm" && authenticated ? styles.stageActive : ""}>3</span>
         </div>
       </div>
 
-      {!acquiringEnabled && (
+      {stage === "select" && !authenticated && (
+        <div className={styles.paymentNotice} role="status">
+          <UserRound size={21} />
+          <span><strong>До оплаты можно без регистрации</strong><small>Выбери ник, геймпасс и сумму. Аккаунт понадобится только перед переходом в банк.</small></span>
+        </div>
+      )}
+
+      {stage === "select" && authenticated && !acquiringEnabled && (
         <div className={styles.paymentNotice} role="status">
           <CircleAlert size={21} />
-          <span><strong>Оплата временно отключена</strong><small>Витрина открыта для проверки Т‑Банка. Заказ и списание денег сейчас не создаются.</small></span>
+          <span><strong>{acquiringMode === "limited" ? "Идёт поэтапный запуск" : "Оплата временно отключена"}</strong><small>{acquiringAvailable ? "Витрина открыта, но этот аккаунт пока не входит в тестовую группу." : "Заказ и списание денег сейчас не создаются."}</small></span>
         </div>
       )}
 
@@ -366,13 +401,23 @@ function CheckoutContent() {
                 <div><small>Геймпасс для покупки</small><strong>{selectedPass?.name}</strong><span>{selectedPass?.price.toLocaleString("ru-RU")} R$ · ID {selectedPass?.id}</span></div>
               </div>
             </div>
-            <label className={styles.formLabel} htmlFor="receipt-email">Email для электронного чека</label>
-            <input id="receipt-email" className={styles.emailInput} type="email" autoComplete="email" value={receiptEmail} onChange={(event) => setReceiptEmail(event.target.value.trim())} placeholder="you@example.com" />
-            <p className={styles.helper}>Используется только для отправки электронного чека.</p>
-            <label className={styles.consentBox}>
-              <Checkbox checked={agreedToTerms} onChange={(event) => setAgreedToTerms(event.target.checked)} />
-              <span>Я согласен с <Link href="/legal/offer" target="_blank">офертой</Link> и <Link href="/legal/policy" target="_blank">политикой конфиденциальности</Link>.</span>
-            </label>
+            {!authenticated ? (
+              <div className={styles.authGate}>
+                <span className={styles.panelIcon}><ShieldCheck size={21} /></span>
+                <div><strong>Сначала сохраним заказ в аккаунте</strong><p>Так статус, чек и история покупки не потеряются после перехода в банк.</p></div>
+                <div className={styles.authActions}><Link href={loginHref}>Войти</Link><Link href={registerHref}>Создать аккаунт</Link></div>
+              </div>
+            ) : (
+              <>
+                <label className={styles.formLabel} htmlFor="receipt-email">Email для электронного чека</label>
+                <input id="receipt-email" className={styles.emailInput} type="email" autoComplete="email" value={receiptEmail} onChange={(event) => setReceiptEmail(event.target.value.trim())} placeholder="you@example.com" />
+                <p className={styles.helper}>Используется только для отправки электронного чека.</p>
+                <label className={styles.consentBox}>
+                  <Checkbox checked={agreedToTerms} onChange={(event) => setAgreedToTerms(event.target.checked)} />
+                  <span>Я согласен с <Link href="/legal/offer" target="_blank">офертой</Link> и <Link href="/legal/policy" target="_blank">политикой конфиденциальности</Link>.</span>
+                </label>
+              </>
+            )}
             {error && <div className={styles.errorBox} role="alert"><CircleAlert size={20} /><span>{error}</span></div>}
           </section>
           <aside className={styles.summaryCard}>
@@ -384,8 +429,8 @@ function CheckoutContent() {
               <div><span>Курс</span><strong>{breakdown.rubPerRobux} ₽/R$</strong></div>
               {!!quote?.discountKopecks && <div><span>Скидка</span><strong>−{(quote.discountKopecks / 100).toLocaleString("ru-RU")} ₽</strong></div>}
             </div>
-            <div className={styles.safeNote}><ShieldCheck size={19} /><span><strong>{acquiringEnabled ? "Цена зафиксирована" : "Денежные операции заблокированы"}</strong><small>{acquiringEnabled ? "До окончания котировки." : "До завершения банковской и кассовой проверки."}</small></span></div>
-            <button type="button" className={styles.primaryButton} disabled={paying || !agreedToTerms || !receiptEmail || !quote || !acquiringEnabled} onClick={() => void handlePay()}>{paying ? <Loader2 size={19} className={styles.spin} /> : acquiringEnabled ? <>Перейти к оплате <ArrowRight size={18} /></> : <>Оплата временно отключена</>}</button>
+            <div className={styles.safeNote}><ShieldCheck size={19} /><span><strong>{!authenticated ? "Выбор сохранён" : acquiringEnabled ? "Цена зафиксирована" : "Денежные операции заблокированы"}</strong><small>{!authenticated ? "После входа обновим персональную цену." : acquiringEnabled ? "До окончания котировки." : "До допуска аккаунта к оплате."}</small></span></div>
+            {!authenticated ? <Link href={loginHref} className={styles.primaryButton}>Войти перед оплатой <ArrowRight size={18} /></Link> : <button type="button" className={styles.primaryButton} disabled={paying || !agreedToTerms || !receiptEmail || !quote || !acquiringEnabled} onClick={() => void handlePay()}>{paying ? <Loader2 size={19} className={styles.spin} /> : acquiringEnabled ? <>Перейти к оплате <ArrowRight size={18} /></> : <>Оплата пока недоступна</>}</button>}
             <PaymentMethods className={styles.paymentMethods} showStatus={!acquiringEnabled} />
           </aside>
         </div>

@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, CheckCircle2, Eye, EyeOff, Gift, History, Loader2, Lock, Mail, ShieldCheck, Sparkles, User, Zap } from "lucide-react";
 import Navbar from "@/components/navbar";
 import Link from "next/link";
-import { normalizeLoginEmail } from "@/lib/auth-navigation";
+import { normalizeLoginEmail, safeReturnPath } from "@/lib/auth-navigation";
 import { Checkbox } from "@/components/ui/checkbox";
 import styles from "../auth-shell.module.css";
 
@@ -15,7 +15,7 @@ const benefits = [
   { icon: Gift, title: "Не терять бонусы", text: "Баланс привязан к подтверждённому профилю клиента." },
 ];
 
-export default function RegisterPage() {
+function RegisterContent() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -25,6 +25,8 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnTo = safeReturnPath(searchParams.get("next"));
   const strength = password.length >= 12 ? 3 : password.length >= 8 ? 2 : password.length > 0 ? 1 : 0;
   const strengthLabel = ["", "Слабый", "Хороший", "Надёжный"][strength];
 
@@ -56,7 +58,7 @@ export default function RegisterPage() {
         throw new Error(data.error === "Email already in use" ? "Этот email уже зарегистрирован" : data.error ?? "Не удалось создать аккаунт");
       }
       setSuccess(true);
-      window.setTimeout(() => router.replace("/login"), 1600);
+      window.setTimeout(() => router.replace(`/login?next=${encodeURIComponent(returnTo)}`), 1600);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Ошибка сети. Попробуйте ещё раз.");
       setLoading(false);
@@ -108,9 +110,13 @@ export default function RegisterPage() {
             {error && <p className={styles.error} role="alert">{error}</p>}
             <button type="submit" className={styles.submit} disabled={loading || !agreedToPrivacy}>{loading ? <Loader2 size={20} className="animate-spin" /> : <><span>Создать аккаунт</span><ArrowRight size={18} /></>}</button>
           </form>
-          <p className={styles.footer}>Уже есть аккаунт? <Link href="/login">Войти</Link></p>
+          <p className={styles.footer}>Уже есть аккаунт? <Link href={`/login?next=${encodeURIComponent(returnTo)}`}>Войти</Link></p>
         </section>
       </div>
     </main>
   );
+}
+
+export default function RegisterPage() {
+  return <Suspense fallback={null}><RegisterContent /></Suspense>;
 }

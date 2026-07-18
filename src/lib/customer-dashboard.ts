@@ -47,6 +47,19 @@ export function customerOrderStatus(kind: CustomerOrderKind, status: string): Cu
   return known ?? { label: status, tone: "neutral", active: false, completed: false };
 }
 
+/** Four customer-facing milestones shared by the dashboard and order page. */
+export function customerOrderProgress(kind: CustomerOrderKind, status: string) {
+  if (kind === "legacy") {
+    if (status === "FULFILLED") return 3;
+    if (status === "PAID") return 1;
+    return 0;
+  }
+  if (status === "COMPLETED") return 3;
+  if (status === "IN_PROGRESS") return 2;
+  if (["AWAITING_GAMEPASS", "PENDING"].includes(status)) return 1;
+  return 0;
+}
+
 export function paymentAttemptLabel(status: string | null) {
   if (!status) return "Не создавался";
   const labels: Record<string, string> = {

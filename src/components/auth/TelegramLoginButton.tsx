@@ -6,9 +6,11 @@ import { Loader2, Send } from "lucide-react";
 export default function TelegramLoginButton({
   mode = "login",
   className,
+  returnTo,
 }: {
   mode?: "login" | "link";
   className?: string;
+  returnTo?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -17,6 +19,7 @@ export default function TelegramLoginButton({
     setBusy(true);
     setMessage(null);
     try {
+      if (mode === "login" && returnTo) sessionStorage.setItem("rb_auth_return", returnTo);
       const response = await fetch(`/api/auth/telegram/start?mode=${mode}`, {
         method: "GET",
         headers: { Accept: "application/json" },

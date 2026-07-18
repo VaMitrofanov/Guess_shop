@@ -1,5 +1,6 @@
 import {
   buildCustomerNotices,
+  customerOrderProgress,
   customerOrderStatus,
   orderRecordLabel,
   paymentAttemptLabel,
@@ -15,6 +16,13 @@ describe("customer dashboard presentation", () => {
     expect(paymentAttemptLabel("CONFIRMED")).toBe("Оплата подтверждена");
     expect(paymentAttemptLabel("REFUNDED")).toBe("Возвращён");
     expect(paymentAttemptLabel(null)).toBe("Не создавался");
+  });
+
+  test("maps canonical status to the four-stage customer timeline", () => {
+    expect(customerOrderProgress("canonical", "PAYMENT_PENDING")).toBe(0);
+    expect(customerOrderProgress("canonical", "PENDING")).toBe(1);
+    expect(customerOrderProgress("canonical", "IN_PROGRESS")).toBe(2);
+    expect(customerOrderProgress("canonical", "COMPLETED")).toBe(3);
   });
 
   test.each([[1, "1 запись"], [2, "2 записи"], [5, "5 записей"], [11, "11 записей"], [21, "21 запись"]])(

@@ -1,5 +1,20 @@
 # Платежи, возвраты и ККТ
 
+## Launch-safety update 18.07.2026
+
+- Рабочие credentials получены владельцем, но ввод отложен до приёмки текущего сайта.
+- Production master flag принудительно установлен в `false`; health и публичный status
+  проверены после штатной пересборки.
+- Новый код требует два явных разрешения: `SITE_ACQUIRING_ENABLED=true` и режим
+  `SITE_ACQUIRING_MODE=allowlist|percentage|on`; default/неизвестное значение — `off`.
+- Allowlist/percentage проверяются по authenticated internal `User.id` и повторно
+  enforcement-ятся сервером в `POST /api/orders/create`.
+- Gate действует только на новые Init. Webhook, payment outbox и refund обязаны продолжать
+  работу при master off.
+- Production E2E выполняется сначала на allowlist: минимальная оплата → signed webhook →
+  order/outbox/ЛК/check → полный возврат и reconciliation. Полная матрица:
+  [site-launch-implementation-plan.md](site-launch-implementation-plan.md#5-боевой-e2e-и-включение).
+
 ## Решение владельца по схеме (16.07.2026)
 
 - Налоговый режим: **УСН**.

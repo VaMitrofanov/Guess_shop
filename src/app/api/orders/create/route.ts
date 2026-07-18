@@ -13,7 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { getGamepassDetails, getRobloxUser } from "@/lib/roblox";
 import { initCanonicalTinkoffPayment } from "@/lib/tinkoff";
-import { isSiteAcquiringEnabled } from "@/lib/site-acquiring";
+import { siteAcquiringDecision } from "@/lib/site-acquiring";
 
 export const dynamic = "force-dynamic";
 
@@ -51,22 +51,23 @@ export async function POST(req: NextRequest) {
     }, { status: 400 });
   }
 
-  // Launch gate: the legacy checkout must never become a back door around
-  // category/legal/KKT approval. Production stays fail-closed until every
-  // external gate is explicitly completed and the flag is enabled.
-  if (!isSiteAcquiringEnabled()) {
-    return NextResponse.json(
-      { error: "Оплата на сайте пока закрыта. Воспользуйтесь Telegram или VK." },
-      { status: 503, headers: { "retry-after": "3600" } },
-    );
-  }
-
   const session = await auth();
   const userId = (session?.user as { id?: string } | undefined)?.id;
   if (!userId) {
     return NextResponse.json(
-      { error: "Войдите через подтверждённый VK/TG-аккаунт и обновите цену." },
+      { error: "Войдите или зарегистрируйтесь, затем обновите цену." },
       { status: 401 },
+    );
+  }
+
+  // Authorization and rollout eligibility are enforced here even if the UI is
+  // bypassed. Webhook, refund and outbox processing deliberately do not depend
+  // on this gate, so already accepted money keeps moving when the kill switch
+  // is turned off.
+  if (!siteAcquiringDecision({ userId }).eligible) {
+    return NextResponse.json(
+      { error: "Оплата на сайте пока закрыта или доступна ограниченной группе." },
+      { status: 503, headers: { "retry-after": "3600" } },
     );
   }
 

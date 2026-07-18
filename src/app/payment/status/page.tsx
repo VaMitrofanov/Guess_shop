@@ -1,159 +1,161 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import {
+  ArrowRight,
+  Check,
+  CheckCircle2,
+  CircleAlert,
+  Clock3,
+  Headphones,
+  Loader2,
+  PackageCheck,
+  ReceiptText,
+  RotateCcw,
+  ShieldCheck,
+  ShoppingBag,
+} from "lucide-react";
 import Navbar from "@/components/navbar";
-import { CheckCircle2, XCircle, Clock, Loader2, ArrowRight } from "lucide-react";
+import styles from "./page.module.css";
+
+type OrderSnapshot = {
+  orderId: string;
+  status: string;
+  paymentStatus: string | null;
+  amountRobux: number;
+  amountKopecks: number | null;
+  createdAt: string;
+};
+
+const FAILED_ORDER = new Set(["REJECTED", "ERROR"]);
+const FAILED_PAYMENT = new Set(["REJECTED", "CANCELED", "FAILED"]);
+const PAID_ORDER = new Set(["PENDING", "IN_PROGRESS", "COMPLETED"]);
+const PAID_PAYMENT = new Set(["AUTHORIZED", "CONFIRMED", "PARTIALLY_REFUNDED", "REFUNDED"]);
+
+function formatMoney(kopecks: number | null | undefined) {
+  return typeof kopecks === "number"
+    ? `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(kopecks / 100)} ₽`
+    : "—";
+}
+
+function phaseFor(snapshot: OrderSnapshot | null) {
+  if (!snapshot) return 0;
+  if (snapshot.status === "COMPLETED") return 3;
+  if (snapshot.status === "IN_PROGRESS") return 2;
+  if (PAID_ORDER.has(snapshot.status) || PAID_PAYMENT.has(snapshot.paymentStatus ?? "")) return 1;
+  return 0;
+}
 
 function StatusContent() {
-  const searchParams = useSearchParams();
-  const orderId = searchParams.get("orderId");
-  const token = searchParams.get("token");
-  const [status, setStatus] = useState<string>("PAYMENT_PENDING");
-  const [paymentStatus, setPaymentStatus] = useState<string | null>(null);
-  const [, setLoading] = useState(true);
+  const params = useSearchParams();
+  const orderId = params.get("orderId");
+  const token = params.get("token");
+  const [snapshot, setSnapshot] = useState<OrderSnapshot | null>(null);
+  const [loading, setLoading] = useState(Boolean(orderId));
+  const [loadError, setLoadError] = useState<"not-found" | "network" | null>(null);
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
-  useEffect(() => {
-    if (!orderId) return;
-
-    const poll = async () => {
-      try {
-        const query = token ? `?token=${encodeURIComponent(token)}` : "";
-        const res = await fetch(`/api/orders/${encodeURIComponent(orderId)}${query}`);
-        const data = await res.json();
-
-        if (data.status) {
-          setStatus(data.status);
-          setPaymentStatus(data.paymentStatus ?? null);
-          if (["PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"].includes(data.status)) {
-            setLoading(false);
-            return;
-          }
-        }
-      } catch (err) {
-        console.error("Polling error:", err);
-      }
-    };
-
-    const interval = setInterval(poll, 3000);
-    poll(); // Initial check
-
-    return () => clearInterval(interval);
+  const load = useCallback(async () => {
+    if (!orderId) return false;
+    try {
+      const query = token ? `?token=${encodeURIComponent(token)}` : "";
+      const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}${query}`, { cache: "no-store" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(response.status === 404 ? "not-found" : "unavailable");
+      setSnapshot(data as OrderSnapshot);
+      setLoadError(null);
+      return data.status === "COMPLETED" || FAILED_ORDER.has(data.status) || FAILED_PAYMENT.has(data.paymentStatus ?? "");
+    } catch (error) {
+      const notFound = error instanceof Error && error.message === "not-found";
+      setLoadError(notFound ? "not-found" : "network");
+      return notFound;
+    } finally {
+      setLoading(false);
+    }
   }, [orderId, token]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      const terminal = await load();
+      if (!cancelled && !terminal) timer = window.setTimeout(poll, 5_000);
+    };
+    void poll();
+    return () => { cancelled = true; if (timer) window.clearTimeout(timer); };
+  }, [load, refreshNonce]);
+
+  const failed = !!snapshot && (FAILED_ORDER.has(snapshot.status) || FAILED_PAYMENT.has(snapshot.paymentStatus ?? ""));
+  const phase = phaseFor(snapshot);
+  const presentation = useMemo(() => {
+    if (failed) return { kicker: "Нужен твой шаг", title: "Оплата не завершена", text: "Деньги не были подтверждены банком. Можно повторить оплату или написать поддержке.", tone: "danger" as const };
+    if (phase === 3) return { kicker: "Заказ выполнен", title: "Robux отправлены", text: "Выкуп завершён. Зачисление через геймпасс ещё может отображаться в Roblox как Pending.", tone: "success" as const };
+    if (phase === 2) return { kicker: "Заказ в работе", title: "Выкупаем геймпасс", text: "Оплата подтверждена, заказ уже у команды исполнения. Обновлять страницу вручную не нужно.", tone: "progress" as const };
+    if (phase === 1) return { kicker: "Оплата подтверждена", title: "Заказ принят", text: "Мы поставили покупку в очередь на выкуп и покажем каждый следующий статус здесь и в кабинете.", tone: "success" as const };
+    return { kicker: "Проверяем банк", title: "Ожидаем подтверждение", text: "Если платёжная форма ещё открыта — заверши оплату. Обычно статус обновляется в течение минуты.", tone: "waiting" as const };
+  }, [failed, phase]);
+
   if (!orderId) {
-    return (
-      <div className="container mx-auto px-4 pt-32 max-w-md flex flex-col items-center gap-6 text-center">
-        <div className="w-16 h-16 border-2 border-red-500/30 bg-red-500/5 flex items-center justify-center">
-          <XCircle className="w-8 h-8 text-red-400" />
-        </div>
-        <h1 className="text-2xl font-black uppercase tracking-tight">Заказ не найден</h1>
-        <p className="text-zinc-500 text-sm font-medium">Проверьте корректность ссылки или обратитесь в поддержку.</p>
-        <Link
-          href="/"
-          className="h-12 px-8 border-2 border-[#1e2a45] hover:border-[#00b06f]/30 flex items-center justify-center font-black text-[10px] uppercase tracking-widest text-zinc-400 hover:text-[#00b06f] transition-all rounded-none"
-        >
-          На главную
-        </Link>
-      </div>
-    );
+    return <main className={styles.page}><Navbar /><section className={styles.missing}><CircleAlert /><h1>Ссылка на заказ неполная</h1><p>Открой заказ из личного кабинета или проверь ссылку из банка.</p><Link href="/dashboard">В личный кабинет</Link></section></main>;
   }
 
+  const steps = [
+    { title: "Оплата", text: phase > 0 ? "Подтверждена банком" : "Ожидаем подтверждение" },
+    { title: "Очередь", text: phase > 1 ? "Заказ передан в работу" : "После успешной оплаты" },
+    { title: "Выкуп", text: phase > 2 ? "Геймпасс выкуплен" : "Покупка геймпасса" },
+    { title: "Готово", text: phase > 2 ? "Заказ завершён" : "Отслеживание в Roblox" },
+  ];
+
   return (
-    <div className="container mx-auto px-4 pt-24 pb-16 flex flex-col items-center">
-      <div className="w-full max-w-md pixel-card border-2 border-[#1e2a45] p-10 text-center flex flex-col items-center gap-8">
+    <main className={styles.page}>
+      <Navbar />
+      <div className={styles.shell}>
+        <header className={`${styles.hero} ${styles[`tone_${presentation.tone}`]}`}>
+          <div className={styles.heroIcon}>{loading && !snapshot ? <Loader2 className={styles.spin} /> : failed ? <CircleAlert /> : phase >= 1 ? <CheckCircle2 /> : <Clock3 />}</div>
+          <div className={styles.heroCopy}>
+            <span>{presentation.kicker}</span>
+            <h1>{presentation.title}</h1>
+            <p>{presentation.text}</p>
+          </div>
+          {snapshot && <dl className={styles.orderSummary}>
+            <div><dt>Заказ</dt><dd>{snapshot.orderId}</dd></div>
+            <div><dt>Получишь</dt><dd>{snapshot.amountRobux.toLocaleString("ru-RU")} R$</dd></div>
+            <div><dt>Оплачено</dt><dd>{formatMoney(snapshot.amountKopecks)}</dd></div>
+          </dl>}
+        </header>
 
-        {["AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(status) && (
-          <>
-            <Loader2 className="w-16 h-16 text-amber-400 animate-spin" />
-            <div className="space-y-3">
-              <div className="font-pixel text-[9px] text-amber-400/70 tracking-wider">PROCESSING</div>
-              <h1 className="text-2xl font-black uppercase tracking-tight">Ожидаем оплату</h1>
-              <p className="text-zinc-400 font-medium text-sm">Завершите оплату в открывшейся вкладке.</p>
-            </div>
-          </>
-        )}
+        {loadError && <div className={styles.networkNotice} role="alert"><CircleAlert size={19} /><span><strong>{loadError === "not-found" ? "Заказ недоступен по этой ссылке" : "Не удалось обновить статус"}</strong><small>{loadError === "not-found" ? "Войди в аккаунт владельца или открой полную секретную ссылку после оплаты." : "Проверь интернет. Последние загруженные данные остались на экране."}</small></span>{loadError === "network" && <button type="button" onClick={() => { setLoading(true); setRefreshNonce((value) => value + 1); }}><RotateCcw size={16} /> Повторить</button>}</div>}
 
-        {["PENDING", "IN_PROGRESS", "COMPLETED"].includes(status) && (
-          <>
-            <div className="w-16 h-16 border-2 border-[#00b06f]/30 bg-[#00b06f]/10 flex items-center justify-center">
-              <CheckCircle2 className="w-8 h-8 text-[#00b06f]" />
-            </div>
-            <div className="space-y-3">
-              <div className="font-pixel text-[9px] text-[#00b06f]/70 tracking-wider">PAID</div>
-              <h1 className="text-2xl font-black uppercase tracking-tight text-[#00b06f]">Оплата прошла</h1>
-              <p className="text-zinc-400 font-medium text-sm leading-relaxed">
-                Заказ принят в обработку. Robux поступят через геймпасс по правилам Roblox.
-              </p>
-            </div>
-            <div className="w-full border-2 border-[#1e2a45] bg-[#080c18] p-4 flex items-center justify-between">
-              <span className="font-pixel text-[9px] text-zinc-500 tracking-wider">СТАТУС</span>
-              <span className="inline-flex items-center gap-1.5 font-black text-xs uppercase tracking-wider text-[#00b06f]">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                {status === "COMPLETED" ? "Выполнено" : "Оплачено"}
-              </span>
-            </div>
-          </>
-        )}
+        <div className={styles.contentGrid}>
+          <section className={styles.timelineCard} aria-label="Этапы заказа">
+            <div className={styles.sectionHeading}><span>Путь заказа</span><h2>Что происходит сейчас</h2></div>
+            <ol className={styles.timeline}>
+              {steps.map((step, index) => {
+                const done = !failed && phase > index;
+                const current = !failed && phase === index;
+                return <li key={step.title} className={done ? styles.stepDone : current ? styles.stepCurrent : styles.stepFuture}>
+                  <span>{done ? <Check size={17} /> : index + 1}</span><div><strong>{step.title}</strong><small>{step.text}</small></div>{current && <em>Сейчас</em>}
+                </li>;
+              })}
+            </ol>
+            {failed && <div className={styles.failedActions}><Link href="/checkout"><RotateCcw size={17} /> Повторить заказ</Link><a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer"><Headphones size={17} /> Написать поддержке</a></div>}
+          </section>
 
-        {(["REJECTED", "ERROR"].includes(status) || ["REJECTED", "CANCELED", "FAILED"].includes(paymentStatus ?? "")) && (
-          <>
-            <div className="w-16 h-16 border-2 border-red-500/30 bg-red-500/5 flex items-center justify-center">
-              <XCircle className="w-8 h-8 text-red-400" />
-            </div>
-            <div className="space-y-3">
-              <div className="font-pixel text-[9px] text-red-400/70 tracking-wider">FAILED</div>
-              <h1 className="text-2xl font-black uppercase tracking-tight text-red-400">Ошибка оплаты</h1>
-              <p className="text-zinc-400 font-medium text-sm">Платёж не был обработан банком.</p>
-            </div>
-            <Link
-              href="/checkout"
-              className="w-full h-12 border-2 border-red-500/30 text-red-400 hover:bg-red-500/5 flex items-center justify-center font-black text-[10px] uppercase tracking-widest transition-all rounded-none"
-            >
-              Попробовать снова
-            </Link>
-          </>
-        )}
-
-        <div className="accent-line w-full" />
-
-        <Link
-          href="/"
-          className="group text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-[#00b06f] transition-colors flex items-center gap-2"
-        >
-          Вернуться в магазин <ArrowRight className="w-3.5 h-3.5" />
-        </Link>
-      </div>
-
-      {/* Roblox pending disclaimer — consistent with the offer (5–7 дней). */}
-      <div className="mt-8 max-w-md pixel-card border-2 border-[#1e2a45] p-5 flex gap-4 items-start">
-        <Clock className="w-5 h-5 text-[#00b06f] shrink-0 mt-0.5" />
-        <div className="space-y-1.5">
-          <span className="font-pixel text-[9px] uppercase tracking-wider text-[#00b06f]/70 block">Важно</span>
-          <p className="text-xs text-zinc-400 leading-relaxed font-medium">
-            По правилам Roblox выкуп через геймпасс держится в статусе Pending до 5–7 дней. Отслеживать
-            можно на странице транзакций Roblox — это нормальная задержка платформы, а не сбой заказа.
-          </p>
+          <aside className={styles.sideColumn}>
+            <section className={styles.trustCard}><ShieldCheck size={21} /><div><strong>Статус защищён</strong><p>Доступ есть только у владельца аккаунта или по секретной ссылке после оплаты.</p></div></section>
+            <section className={styles.infoCard}><ReceiptText size={20} /><div><strong>Чек и история</strong><p>Платёжные данные и все заказы доступны в личном кабинете.</p><Link href="/dashboard">Открыть кабинет <ArrowRight size={15} /></Link></div></section>
+            <section className={styles.infoCard}><PackageCheck size={20} /><div><strong>Pending — это нормально</strong><p>Roblox удерживает Robux после выкупа геймпасса до 5–7 дней.</p><a href="https://www.roblox.com/transactions" target="_blank" rel="noopener noreferrer">Транзакции Roblox <ArrowRight size={15} /></a></div></section>
+          </aside>
         </div>
+
+        <nav className={styles.bottomActions}><Link href="/dashboard"><ShoppingBag size={18} /> Все заказы</Link><Link href="/checkout">Новая покупка <ArrowRight size={17} /></Link></nav>
       </div>
-    </div>
+    </main>
   );
 }
 
 export default function StatusPage() {
-  return (
-    <main className="min-h-screen">
-      <Navbar />
-      <Suspense
-        fallback={
-          <div className="h-screen flex items-center justify-center">
-            <Loader2 className="w-10 h-10 animate-spin text-[#00b06f]" />
-          </div>
-        }
-      >
-        <StatusContent />
-      </Suspense>
-    </main>
-  );
+  return <Suspense fallback={<div className={styles.fullLoader}><Loader2 className={styles.spin} /></div>}><StatusContent /></Suspense>;
 }

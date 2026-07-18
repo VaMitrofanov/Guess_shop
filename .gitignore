@@ -63,3 +63,4 @@ _write_test_ok
 # local ops — не для публичного репо (личные пути/ID бизнес-таблиц, старые ассеты)
 /scripts/update_sheets.py
 /scripts/broadcast-photos/
+/data/

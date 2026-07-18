@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { signIn } from "next-auth/react";
 import { CheckCircle2, Loader2, TriangleAlert } from "lucide-react";
 import Link from "next/link";
+import { safeReturnPath } from "@/lib/auth-navigation";
 
 type CallbackProps = {
   mode: "login" | "link";
@@ -45,9 +46,11 @@ export default function TelegramLoginCallback({ mode, state, payload }: Callback
 
         const result = await signIn("telegram-login", { ...payload, state, redirect: false });
         if (!result?.ok) throw new Error("Telegram не подтвердил вход");
+        const returnTo = safeReturnPath(sessionStorage.getItem("rb_auth_return"));
+        sessionStorage.removeItem("rb_auth_return");
         setStatus("success");
-        setMessage("Вход подтверждён. Открываем кабинет…");
-        window.setTimeout(() => window.location.replace("/dashboard"), 450);
+        setMessage(returnTo.startsWith("/checkout") ? "Вход подтверждён. Возвращаем заказ…" : "Вход подтверждён. Открываем кабинет…");
+        window.setTimeout(() => window.location.replace(returnTo), 450);
       } catch (error) {
         setStatus("error");
         setMessage(error instanceof Error ? error.message : "Не удалось завершить вход");

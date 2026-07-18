@@ -16,6 +16,7 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [b2b-saas.md](b2b-saas.md) | Партнёрское/B2B-направление: TWA/server MVP `Антон`, USDT-ledger, ручной XLSX import, rollout Sheets/batch |
 | [corridor-and-site.md](corridor-and-site.md) | WB-гейт, сайт `/guide`, API коридора, восстановление сессии |
 | [site-acquiring-master-plan.md](site-acquiring-master-plan.md) | Ультра-ревью `robloxbank.ru`, P0-блокеры эквайринга, единые цена/identity/orders, дизайн и поэтапный launch plan |
+| [site-launch-implementation-plan.md](site-launch-implementation-plan.md) | Согласуемый план 18.07: baseline, обязательная регистрация перед оплатой, полноценный ЛК, controlled rollout, WB→сайт→бот/группа и боевой E2E |
 | [auth-account-readiness-plan.md](auth-account-readiness-plan.md) | Повторный аудит ЛК/login/register и P0-план email/TG/VK identity, recovery и E2E; решения владельца от 17.07, закрытый throttling и блокер «нет почтового транспорта» |
 | [roblox-codes-plan.md](roblox-codes-plan.md) | Новый товар: коды активации Roblox — прайс, честные 10–15 мин → «моментально» через буфер, безопасность предъявительских кодов, ККТ/юр-гейты и этапы K0–K9 |
 | [email-setup.md](email-setup.md) | Почта `robloxbank.ru`: Яндекс 360, DNS-записи для Cloudflare (MX/SPF/DKIM/DMARC), env для SMTP, приёмка живой доставкой и порядок замены адреса в реквизитах |
@@ -42,9 +43,10 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 Публичный корень `robloxbank.ru` открыт 17.07 для предварительного просмотра Т‑Банком;
 WB-гайд остаётся отдельной рабочей точкой входа. Новый checkout использует канонический
 `WbOrder`/quote/payment-attempt; outbox worker, refund и локальная ККТ contract matrix
-готовы, но боевой payment E2E ещё не выполнен. Acquiring fail-closed: значение
-`SITE_ACQUIRING_ENABLED=true` не установлено, поэтому сайт не может создать `Init` и
-принять деньги —
+готовы, но боевой payment E2E ещё не выполнен. 18.07 перед вводом production credentials
+снят baseline и production acquiring принудительно возвращён в `false`. Новый gate требует
+одновременно master flag и явный режим `off|allowlist|percentage|on`, поэтому сайт сейчас
+не может создать `Init` и принять деньги —
 см. [architecture.md](architecture.md#legacy) и
 [master plan эквайринга](site-acquiring-master-plan.md).
 
@@ -63,6 +65,11 @@ TG/VK/iPhone/Android acceptance, реквизиты, ККТ/payment E2E и soft 
 Повторный аудит 17.07 подтвердил базовый ЛК, но не завершённый lifecycle публичного
 email-аккаунта: verification/reset, password throttling, evidence согласия и live TG/VK
 acceptance вынесены в согласуемый [план готовности](auth-account-readiness-plan.md).
+
+Текущий implementation batch добавляет сохранение checkout draft через обязательный
+login/register, same-origin return guard, per-user rollout, активный order timeline в ЛК и
+новый `/payment/status` в общей Violet/Frost системе. Детальный порядок до боевого включения
+и целевой WB flow зафиксированы в [плане запуска 18.07](site-launch-implementation-plan.md).
 
 ## Локальный запуск
 
