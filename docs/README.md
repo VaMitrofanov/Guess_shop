@@ -24,7 +24,7 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [design-rework-concept.html](design-rework-concept.html) | Интерактивный визуальный концепт глобального реворка главной и mobile-first WB guide |
 | [twa-ux-v3-concept.html](twa-ux-v3-concept.html) | Визуальный концепт TWA v3: два варианта Главной, умная выдача и foreground bottom sheet |
 | [bots.md](bots.md) | TG- и VK-боты: активация, приём геймпасса, прямые заказы, поддержка, отзывы |
-| [twa-admin.md](twa-admin.md) | Telegram Web App админка: аутентификация, заказы, выкуп, аккаунт |
+| [twa-admin.md](twa-admin.md) | Единая admin-экосистема: desktop `/admin`, Telegram TWA, общий `WbOrder`, досье и журнал |
 | [twa-design-redesign-plan.md](twa-design-redesign-plan.md) | Контракт редизайна TWA: навигация, поиск, compact cards/history, прибыль и Premium Calm для Аккаунта/Заказов |
 | [database.md](database.md) | Модели Prisma и статусы заказов/кодов |
 | [payments-and-kkt.md](payments-and-kkt.md) | Эквайринг, outbox worker, refund и ККТ test matrix |
@@ -38,7 +38,8 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 - **Сайт** `robloxbank.ru/guide?source=wb` — точка входа с WB, инструкция.
 - **TG-бот** `@RobloxBankBot` — основной рабочий канал.
 - **VK-бот** `vk.me/club237309399` — альтернатива для VK-аудитории (воркфлоу идентичен TG).
-- **TWA** — админка внутри Telegram для менеджера (заказы, выкуп, аналитика).
+- **Desktop `/admin`** — Control Center для общей очереди, платежей, досье и audit-журнала.
+- **TWA** — мобильный Action Center внутри Telegram для защищённых операций менеджера.
 
 Публичный корень `robloxbank.ru` открыт 17.07 для предварительного просмотра Т‑Банком;
 WB-гайд остаётся отдельной рабочей точкой входа. Новый checkout использует канонический
@@ -55,13 +56,16 @@ PII-safe Core Web Vitals/client-error telemetry и read-only `npm run smoke:site
 отдельный Guide-контейнер после rollout `b6b699f` отдают общий source fingerprint
 `20183b40b8783d9c`; corridor-smoke `29/29`. Quick-fix batch для банковской ссылки добавил
 runtime payment-disabled state, платёжные логотипы, registration consent, mobile legal fix
-и актуальный public copy; VK ID скрыт fail-closed до живого acceptance. Corridor-smoke
+и актуальный public copy. 19.07 VK ID переведён на официальный SDK 2.6.6 и прямой popup
+вместо зависавшего скрытого OneTap; gate остаётся fail-closed, а полный real-account
+callback — ручным acceptance-пунктом. Corridor-smoke
 автоматически обнаруживает будущий drift. Это закрывает storefront hardening, но не заменяет реальные
 TG/VK/iPhone/Android acceptance, реквизиты, ККТ/payment E2E и soft launch.
 
 Личный кабинет и все три поверхности входа используют общий Violet/Frost shell. Email-вход
 нормализует адрес, Telegram login/link идёт через одноразовый bot-assisted challenge с
-серверной HMAC-проверкой, а VK identity проверяется сервером и пока скрыт fail-closed.
+серверной HMAC-проверкой, а VK identity проверяется сервером; публичность VK-кнопки
+управляется отдельным fail-closed build gate.
 Повторный аудит и batch 18.07 добавили verification/resend, password reset, versioned
 consent evidence и отзыв JWT после смены пароля; токены в БД только hash. До публичного
 email recovery остаются SMTP/DNS и живая доставка; live TG/VK acceptance вынесен в
@@ -69,8 +73,15 @@ email recovery остаются SMTP/DNS и живая доставка; live TG
 
 Текущий implementation batch добавляет сохранение checkout draft через обязательный
 login/register, same-origin return guard, per-user rollout, активный order timeline в ЛК и
-новый `/payment/status` в общей Violet/Frost системе. Детальный порядок до боевого включения
-и целевой WB flow зафиксированы в [плане запуска 18.07](site-launch-implementation-plan.md).
+`/payment/status` как основную страницу подтверждения. Desktop `/admin` и TWA объединены
+вокруг `WbOrder`: широкий обзор/журнал дополняет мобильные protected actions без второй
+копии payment-логики. Детальный порядок до боевого включения и целевой WB flow зафиксированы
+в [плане запуска 18.07](site-launch-implementation-plan.md).
+
+С 19.07 paid-state `/payment/status` завершает post-purchase loop: предлагает персональные
+уведомления через связанный Telegram и добровольную подписку/диалог в TG или VK. Переходы
+видны в admin-журнале как обезличенные channel-intent события; выдача заказа от подписки
+не зависит.
 
 ## Локальный запуск
 

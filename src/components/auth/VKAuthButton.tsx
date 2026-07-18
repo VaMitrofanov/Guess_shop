@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import Script from "next/script";
+import { useCallback, useState } from "react";
+import * as VKID from "@vkid/sdk";
 import { VK_AUTH_ENABLED } from "@/lib/vk-auth-availability";
 
 // VK community ID for order-mode redirect
 const VK_CLUB_HREF = "https://vk.me/club237309399";
+let vkSdkInitialized = false;
 
 interface VKAuthButtonProps {
   /** 'login' — sign in to the site dashboard (default).
@@ -24,21 +25,10 @@ interface VKAuthButtonProps {
 }
 
 /**
- * Custom-styled VK ID auth button.
- * --------------------------------
- * Why two layers (visible button + hidden OneTap widget):
- *   - The VK ID OneTap widget owns the entire OAuth handshake (Config.init,
- *     code exchange, signed JWT id_token). Rebuilding that flow ourselves
- *     would be a regression risk.
- *   - But the OneTap widget renders its own UI — a solid blue card with an
- *     avatar circle and "Получить для Nick" text — that visually clashes
- *     with the Telegram button next to it.
- *   - Solution: mount the OneTap widget but make it invisible (opacity:0 +
- *     pointer-events:none on the wrapper). Render our own <button> on top
- *     in the same shape/style as the Telegram pixel button. On click, find
- *     the actual VK button inside the hidden widget and dispatch click()
- *     synthetically. The OneTap widget then runs its normal flow and emits
- *     LOGIN_SUCCESS, which we still handle below.
+ * Custom-styled VK ID auth button backed by the official SDK.
+ * The auth window is opened directly from the user's click. This avoids the
+ * former hidden OneTap iframe, whose readiness depended on third-party DOM and
+ * could leave the visible button disabled indefinitely.
  */
 export default function VKAuthButton({
   mode = "login",
@@ -47,199 +37,88 @@ export default function VKAuthButton({
   label = "ВКонтакте",
   variant = "match-tg",
 }: VKAuthButtonProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError]  = useState<string | null>(null);
   const [busy, setBusy]    = useState(false); // spinner while popup is open
-  const [ready, setReady]  = useState(false); // SDK widget mounted
   // Order mode: URL диалога сообщества, показываем interstitial ПЕРЕД уходом в VK.
   // VK-логин на сайте создаёт юзера БЕЗ диалога с сообществом — если человек не
   // нажмёт «Начать» в чате, бот не сможет ему писать (VK 901, PLAN +5.I.2).
   const [vkRedirect, setVkRedirect] = useState<string | null>(null);
 
-  // ── Bootstrap VK ID SDK + mount hidden OneTap widget ──────────────────────
-  useEffect(() => {
-    if (!VK_AUTH_ENABLED) return;
-    let cancelled = false;
-    let attempts = 0;
-    let retryTimer: number | undefined;
-    let readyTimer: number | undefined;
-    const initVK = () => {
-      if (cancelled) return;
-      if (!window.VKIDSDK) {
-        attempts += 1;
-        if (attempts >= 20) {
-          setError("VK ID не загрузился. Проверьте сеть и повторите попытку.");
-          setReady(false);
-          return;
-        }
-        retryTimer = window.setTimeout(initVK, 300);
-        return;
-      }
-
-      const VKID = window.VKIDSDK;
-      const origin = window.location.origin.replace(/\/$/, "");
-      const appId = Number(process.env.NEXT_PUBLIC_VK_APP_ID ?? "54539012");
-      if (!Number.isSafeInteger(appId) || appId <= 0) {
-        setError("VK ID временно не настроен");
-        setReady(false);
-        return;
-      }
-
-      if (containerRef.current) {
-        containerRef.current.innerHTML = "";
-      }
-
-      // Config.init must run only once per page load — calling it twice
-      // causes the SDK to hang. Widget rendering (below) runs every mount.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (!(window as any).VKIDSDK_INITIALIZED) {
-        VKID.Config.init({
-          app:          appId,
-          redirectUrl:  origin,
-          responseMode: VKID.ConfigResponseMode.Callback,
-          source:       VKID.ConfigSource.LOWCODE,
-        });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (window as any).VKIDSDK_INITIALIZED = true;
-      }
-
-      if (!containerRef.current) return;
-
-      const oneTap = new VKID.OneTap();
-
-      const renderOptions = {
-        container:            containerRef.current,
-        showAlternativeLogin: false,
-        contentId:            2,
-        styles: {
-          borderRadius: 0,
-          height:       56,
-          width:        320,
-        },
-        scheme: "dark",
-      } as Parameters<InstanceType<typeof VKID.OneTap>["render"]>[0];
-
-      oneTap
-        .render(renderOptions)
-        .on(VKID.WidgetEvents.ERROR, (err) => {
-          console.error("VK SDK Error:", err);
-          setBusy(false);
-          setReady(false);
-          if (err.text !== "NEW TAB HAS BEEN CLOSED") {
-            setError(`Ошибка VK ID: ${err.text || "неизвестная ошибка"}`);
-          }
-        })
-        .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, function (payload) {
-          console.log("VK Auth success. Mode:", mode, "WB Code:", wbCodeProp);
-          VKID.Auth.exchangeCode(payload.code, payload.device_id)
-            .then(async (data) => {
-              try {
-                const isLoginMode = mode === "login";
-
-                const cookieMatch  = document.cookie.match(/wb_code=([^;]+)/);
-                const cookieWbCode = cookieMatch ? cookieMatch[1].trim() : "";
-
-                // Trust only the React prop (passed from parent) or the cookie
-                // (written server-side when user reserved the code).
-                // Ignoring ?code= URL param prevents an attacker from linking
-                // a victim's account to an arbitrary code via a crafted URL.
-                const finalWbCode = isLoginMode
-                  ? null
-                  : (wbCodeProp || cookieWbCode || null);
-                const resolvedWbCode = finalWbCode ? finalWbCode.toUpperCase() : "";
-
-                const { signIn } = await import("next-auth/react");
-                // Only the raw VK tokens go to the server — it resolves the
-                // identity (vk_id / name / avatar) through VK's user_info /
-                // public_info endpoints itself. Client-supplied identity
-                // fields are no longer trusted (docs/security.md, риск #5).
-                const credentials: Record<string, string> = {
-                  access_token: data.access_token ?? "",
-                  id_token: data.id_token ?? "",
-                };
-                if (resolvedWbCode) credentials.wb_code = resolvedWbCode;
-
-                const result = await signIn("vk-id", { ...credentials, redirect: false });
-
-                if (result?.ok) {
-                  if (isLoginMode) {
-                    window.location.href = customRedirectUrl || "/dashboard";
-                    return;
-                  }
-                  if (resolvedWbCode) {
-                    // Не редиректим молча: без «Начать» в диалоге сообщества
-                    // уведомления о заказе не дойдут (VK 901). Interstitial
-                    // объясняет шаг — уход в VK по явному тапу.
-                    setBusy(false);
-                    setVkRedirect(customRedirectUrl || `${VK_CLUB_HREF}?ref=${resolvedWbCode}`);
-                  } else {
-                    window.location.href = customRedirectUrl || "/dashboard";
-                  }
-                } else {
-                  setError(result?.error || "Ошибка авторизации на сервере");
-                  setBusy(false);
-                }
-              } catch (e) {
-                console.error("VK Auth Flow Error:", e);
-                setError("Ошибка обработки данных профиля VK");
-                setBusy(false);
-              }
-            })
-            .catch((err) => {
-              console.error("Exchange Error:", err);
-              setError("Ошибка авторизации (Код ошибки: " + (err.error || "unknown") + ")");
-              setBusy(false);
-            });
-        });
-
-      // Give the OneTap widget a beat to actually inject its DOM, then mark ready.
-      readyTimer = window.setTimeout(() => {
-        if (!cancelled) setReady(true);
-      }, 600);
-    };
-
-    initVK();
-    return () => {
-      cancelled = true;
-      if (retryTimer) window.clearTimeout(retryTimer);
-      if (readyTimer) window.clearTimeout(readyTimer);
-    };
-  // mode / wbCodeProp captured at mount — intentionally no deps
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ── Forward our visible click to the hidden OneTap button ─────────────────
-  const handleVisibleClick = useCallback(() => {
+  // ── Open VK ID directly from the user's click ────────────────────────────
+  const handleVisibleClick = useCallback(async () => {
     setError(null);
-    if (!ready) return;
-    const root = containerRef.current;
-    if (!root) return;
+    if (busy) return;
 
-    // OneTap widget renders a clickable element — usually <button>, sometimes
-    // an <a> inside a custom web component. Try a few selectors.
-    const candidates: HTMLElement[] = Array.from(
-      root.querySelectorAll<HTMLElement>(
-        'button, a, [role="button"], div[class*="OneTapButton"], div[class*="vkidButton"]'
-      )
-    );
-
-    const target = candidates.find((el) => {
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0; // skip hidden ones
-    }) || candidates[0];
-
-    if (!target) {
-      console.warn("[VKAuthButton] OneTap target not found in container");
-      setError("VK виджет не загрузился — обновите страницу");
+    const appId = Number(process.env.NEXT_PUBLIC_VK_APP_ID ?? "54539012");
+    if (!Number.isSafeInteger(appId) || appId <= 0) {
+      setError("VK ID временно не настроен");
       return;
     }
 
     setBusy(true);
-    target.click();
-    // The OneTap popup closes asynchronously; reset busy after a generous
-    // window if no LOGIN_SUCCESS / ERROR fires (e.g., user closes the tab).
-    window.setTimeout(() => setBusy(false), 30_000);
-  }, [ready]);
+    try {
+      // Initialize synchronously inside the click handler so the authorization
+      // window remains a direct user gesture and is not blocked as a popup.
+      if (!vkSdkInitialized) {
+        VKID.Config.init({
+          app:          appId,
+          redirectUrl:  window.location.origin.replace(/\/$/, ""),
+          mode:         VKID.ConfigAuthMode.InNewWindow,
+          responseMode: VKID.ConfigResponseMode.Callback,
+          source:       VKID.ConfigSource.LOWCODE,
+        });
+        vkSdkInitialized = true;
+      }
+      const payload = await VKID.Auth.login({ scheme: VKID.Scheme.DARK }) as VKID.AuthResponse;
+      if (!payload?.code || !payload.device_id) {
+        throw new Error("VK ID did not return an authorization code");
+      }
+      const data = await VKID.Auth.exchangeCode(payload.code, payload.device_id);
+      const isLoginMode = mode === "login";
+
+      const cookieMatch  = document.cookie.match(/wb_code=([^;]+)/);
+      const cookieWbCode = cookieMatch ? cookieMatch[1].trim() : "";
+
+      // Trust only the React prop (passed from parent) or the server-written
+      // cookie. Ignoring ?code= prevents crafted-URL account linking.
+      const finalWbCode = isLoginMode ? null : (wbCodeProp || cookieWbCode || null);
+      const resolvedWbCode = finalWbCode ? finalWbCode.toUpperCase() : "";
+
+      const { signIn } = await import("next-auth/react");
+      // The server resolves identity through VK using this raw token; no
+      // client-supplied profile fields are trusted.
+      const credentials: Record<string, string> = {
+        access_token: data.access_token ?? "",
+      };
+      if (resolvedWbCode) credentials.wb_code = resolvedWbCode;
+
+      const result = await signIn("vk-id", { ...credentials, redirect: false });
+      if (!result?.ok) {
+        setError(result?.error || "Ошибка авторизации на сервере");
+        return;
+      }
+
+      if (isLoginMode) {
+        window.location.href = customRedirectUrl || "/dashboard";
+        return;
+      }
+      if (resolvedWbCode) {
+        // Without «Начать» in the community dialog, VK cannot deliver order
+        // notifications. The interstitial makes that separate step explicit.
+        setVkRedirect(customRedirectUrl || `${VK_CLUB_HREF}?ref=${resolvedWbCode}`);
+      } else {
+        window.location.href = customRedirectUrl || "/dashboard";
+      }
+    } catch (authError) {
+      const vkError = authError as VKID.AuthError;
+      if (vkError?.code !== VKID.AuthErrorCode.NewTabHasBeenClosed) {
+        console.error("[VKAuthButton] VK ID flow failed:", authError);
+        setError("Не удалось войти через VK ID. Попробуйте ещё раз.");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, customRedirectUrl, mode, wbCodeProp]);
 
   const isCompact = variant === "compact";
 
@@ -262,15 +141,11 @@ export default function VKAuthButton({
 
   return (
     <div className="vk-auth-shell relative w-full h-full flex items-stretch min-h-[44px]">
-      {/* The self-hosted SDK is loaded only on routes that render VK login.
-          This keeps the ordinary storefront free of third-party SDK side
-          effects and avoids the root-layout hydration mismatch. */}
-      <Script src="/vendor/vkid-sdk-2.6.5.js" strategy="afterInteractive" />
       {/* Visible button — matches Telegram pixel-style sibling */}
       <button
         type="button"
         onClick={handleVisibleClick}
-        disabled={!ready || busy}
+        disabled={busy}
         aria-label={`Войти через ${label}`}
         className={[
           "relative z-10 w-full h-full",
@@ -278,7 +153,7 @@ export default function VKAuthButton({
           "font-black text-[11px] uppercase tracking-widest text-white",
           "bg-transparent border-0 cursor-pointer",
           "transition-opacity duration-150",
-          (!ready || busy) ? "opacity-60 cursor-wait" : "hover:opacity-100",
+          busy ? "opacity-60 cursor-wait" : "hover:opacity-100",
           isCompact ? "px-3" : "px-2",
         ].join(" ")}
       >
@@ -297,14 +172,6 @@ export default function VKAuthButton({
         )}
         <span>{busy ? "Открываем VK ID…" : label}</span>
       </button>
-
-      {/* Hidden OneTap widget — does the actual OAuth handshake.
-          Sits underneath the visible button, fully transparent, no pointer events. */}
-      <div
-        ref={containerRef}
-        aria-hidden="true"
-        className="vk-auth-widget vk-auth-widget--ghost absolute inset-0 opacity-0 pointer-events-none overflow-hidden"
-      />
 
       {error && (
         <p

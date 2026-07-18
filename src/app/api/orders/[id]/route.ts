@@ -1,18 +1,10 @@
-import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { hashStatusToken } from "@/lib/canonical-web-order";
+import { orderStatusTokenMatches } from "@/lib/order-status-access";
 import { prisma } from "@/lib/prisma";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
-
-function tokenMatches(candidate: string, expectedHash: string | null) {
-  if (!candidate || !expectedHash) return false;
-  const actual = Buffer.from(hashStatusToken(candidate), "hex");
-  const expected = Buffer.from(expectedHash, "hex");
-  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
-}
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const limited = rateLimit(`order-status:${clientIp(req)}`, 30, 1);
@@ -45,7 +37,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const session = await auth();
   const sessionUserId = (session?.user as { id?: string } | undefined)?.id;
   const token = new URL(req.url).searchParams.get("token") ?? "";
-  if (sessionUserId !== order.userId && !tokenMatches(token, order.statusTokenHash)) {
+  if (sessionUserId !== order.userId && !orderStatusTokenMatches(token, order.statusTokenHash)) {
     // Do not reveal whether a predictable/public id exists.
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }

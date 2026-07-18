@@ -281,23 +281,27 @@ discount остаётся fail-closed; guessed endpoints не использую
 
 До внедрения B основная митигация — ручной разбор жалоб менеджером.
 
-### 16. CSP/VK ID provider — 🟠 ПУБЛИЧНЫЙ ДЕФЕКТ СКРЫТ FAIL-CLOSED (2026-07-17), live acceptance открыт
+### 16. CSP/VK ID provider — 🟡 КОД И ПУБЛИЧНЫЙ CONTROL ВОССТАНОВЛЕНЫ (2026-07-19), full-account acceptance открыт
 
-**Повторная production-сверка 17.07:** CSP contract и нужные `vk.ru` hosts зелёные, но
-живой `/login` всё ещё заканчивается `Ошибка VK ID: timeout`, кнопка остаётся disabled,
-а console показывает failed fetch внутри vendored SDK. Значит CSP-фикс необходим, но
-недостаточен; карточку нельзя закрывать до диагностики provider/network/config и реального
-VK callback acceptance.
+**Повторная production-сверка 17.07:** CSP contract и нужные `vk.ru` hosts были зелёными,
+но старый скрытый OneTap iframe завершался `timeout`, из-за чего наша видимая кнопка
+навсегда оставалась disabled. Ошибка была client-side и не оставляла серверного следа.
 
-**Mitigation 17.07, production `b6b699f`:** `NEXT_PUBLIC_VK_AUTH_ENABLED` теперь fail-closed и без точного
-`true` полностью убирает VK ID из `/login`; Guide вместо сломанного OAuth показывает
-прямую ссылку на сообщество с безопасным `ref`-кодом. Флаг можно включать только после
-реального login/callback smoke. Это убирает неработающий публичный control, но не закрывает
-корневую provider/network/config-проблему.
+**Корневой фикс 19.07:** `VKAuthButton` использует официальный bundled npm SDK
+`@vkid/sdk@2.6.6` и открывает `VKID.Auth.login` в режиме `InNewWindow` прямо из
+пользовательского клика. Скрытый OneTap DOM bridge, задержка готовности и синтетический
+`target.click()` удалены. Кнопка активна сразу; popup не зависит от загрузки iframe.
+Клиент по-прежнему передаёт серверу только raw access token, а `vk_id`/имя/avatar сервер
+получает сам через VK. Регрессию фиксирует `src/__tests__/vk-auth-client-flow.test.ts`.
+
+`NEXT_PUBLIC_VK_AUTH_ENABLED` остаётся fail-closed: без точного `true` VK ID скрыт из
+`/login`, а Guide показывает прямую ссылку на сообщество. После production deploy флаг
+включается только в Web/Guide build-time+runtime env. Полный callback acceptance на
+реальном VK-аккаунте остаётся отдельным ручным тестом; CAPTCHA нельзя автоматизировать.
 
 Введённый в рамках риска №13 Content-Security-Policy (`next-security.ts`) разрешает
 `connect-src`/`frame-src` только для `id.vk.com` / `oauth.vk.com` / `api.vk.com`.
-Однако self-hosted VK ID SDK (`public/vendor/vkid-sdk-2.6.5.js`) собирает все свои
+Установленный VK ID SDK собирает все свои
 эндпоинты от домена **`vk.ru`**: `id.vk.ru`, `oauth.vk.ru`, `api.vk.ru`, `login.vk.ru`.
 Обмен кода (`VKID.Auth.exchangeCode` → `fetch https://id.vk.ru/oauth2/auth`) блокируется
 браузером ещё до нашего сервера: клиент проходит окно VK и получает «Ошибка авторизации».
@@ -311,14 +315,14 @@ VK callback acceptance.
 сборки). Регрессия закрыта двумя механизмами:
 
 - контракт-тест `src/__tests__/csp-vk-hosts.test.ts` — извлекает базовые VK-домены из
-  vendored-бандла и требует их id/oauth/api/login-хосты в CSP; любой апдейт SDK или
+  установленного npm-бандла и требует их id/oauth/api/login-хосты в CSP; любой апдейт SDK или
   правка CSP без синхронизации валит CI;
 - синтетический смоук `scripts/smoke-corridor.mjs` — гейт, чанки `/_next-guide`,
   vendor SDK, CSP-хосты, `/api/wb-code` (+ `--reserve` живой резерв, `--alert` в TG);
   ненулевой exit code при любом фейле, пригоден для cron.
 
-Остаток: живой прогон VK-входа с тестовым кодом (нужен реальный VK-аккаунт) — за
-владельцем; полный мониторинг коридора по расписанию — карточка Trello от 2026-07-14.
+Остаток: полный живой прогон callback/login/link/unlink на реальном VK-аккаунте; полный
+мониторинг коридора по расписанию — карточка Trello от 2026-07-14.
 
 ### 17. Клиентская телеметрия сайта — 🟢 PII-SAFE FOUNDATION (2026-07-16)
 

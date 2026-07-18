@@ -14,6 +14,18 @@
 - Production E2E выполняется сначала на allowlist: минимальная оплата → signed webhook →
   order/outbox/ЛК/check → полный возврат и reconciliation. Полная матрица:
   [site-launch-implementation-plan.md](site-launch-implementation-plan.md#5-боевой-e2e-и-включение).
+- Desktop `/admin` теперь читает тот же `WbOrder`/payment/outbox-контур: dashboard показывает
+  открытые платежи, ошибки, `SUBMIT_UNKNOWN` и dead-letter, досье — сумму/PaymentId/refunds/
+  events, а `/admin/activity` — единый журнал без сырых payload. Изменяющие payment-действия
+  по-прежнему выполняются через защищённый TWA API, чтобы не дублировать refund-логику.
+- `/payment/status` — основная клиентская страница подтверждения покупки; ЛК и bot message
+  дополняют её, но не заменяют серверный статус `PaymentAttempt`/`WbOrder`.
+- После paid-state страница предлагает TG/VK opt-in: Telegram identity для персональных
+  статусов плюс TG-канал, VK-сообщество плюс диалог. CTA скрыты до подтверждения и после
+  full refund/failed/canceled. `POST /api/orders/[id]/channel-intent` требует доступ владельца
+  или status bearer token, принимает только четыре allowlisted destination и пишет один
+  immutable `OrderEvent` на order+destination. Event означает только открытие CTA; факт
+  подписки внешней платформой пока не подтверждается и так не называется в аналитике.
 
 ## Решение владельца по схеме (16.07.2026)
 
@@ -58,8 +70,10 @@ Worker запускается в long-running TG-сервисе вместе с 
 - `DELIVERED` ставится только когда Telegram принял хотя бы одно admin-уведомление;
 - неизвестная topic fail-closed и в итоге попадает в dead-letter.
 
-Темы: `payment.confirmed`, `payment.refund.recorded`. Ручной replay dead-letter пока только
-через контролируемое изменение записи оператором; перед снятием maintenance нужен admin UI/runbook.
+Темы: `payment.confirmed`, `payment.refund.recorded`. Dead-letter виден на dashboard и в
+`/admin/activity`, но ручной replay пока только через контролируемое изменение записи
+оператором. До снятия maintenance нужен отдельный безопасный replay action/runbook; наличие
+read-only журнала не считается автоматической починкой доставки.
 
 ## Refund
 

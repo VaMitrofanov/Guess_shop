@@ -1,7 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import ProductList from "@/components/admin/product-list";
 import AddProductModal from "@/components/admin/add-product-modal";
-import { Package } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +12,8 @@ export default async function ProductsPage() {
       <div className="flex items-center justify-between">
         <div>
           <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider mb-2">PRODUCT MANAGEMENT</div>
-          <h1 className="text-3xl font-black uppercase tracking-tight">Товары</h1>
-          <p className="text-zinc-500 text-sm font-medium mt-1">{products.length} позиций</p>
+          <h1 className="text-3xl font-black uppercase tracking-tight">Legacy-каталог</h1>
+          <p className="text-zinc-500 text-sm font-medium mt-1">{products.length} позиций · канонический SITE-checkout использует PricingPolicy, не этот список</p>
         </div>
         <AddProductModal />
       </div>

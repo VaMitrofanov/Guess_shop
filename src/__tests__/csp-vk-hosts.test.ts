@@ -1,29 +1,37 @@
 /**
- * Contract: every VK host family referenced by the vendored VK ID SDK must be
+ * Contract: every VK host family referenced by the installed VK ID SDK must be
  * whitelisted in the CSP (next-security.ts).
  *
- * Инцидент 2026-07-14 (docs/security.md, риск №16): SDK 2.6.5 строит свои
+ * Инцидент 2026-07-14 (docs/security.md, риск №16): SDK строит свои
  * эндпоинты от домена `vk.ru` (id.vk.ru / oauth.vk.ru / api.vk.ru /
  * login.vk.ru), а CSP разрешал только *.vk.com — обмен OAuth-кода молча
  * блокировался браузером, VK-логин был сломан на проде сутки без серверных
- * следов. Этот тест валит CI при любом рассинхроне «vendored SDK ↔ CSP»:
+ * следов. Этот тест валит CI при любом рассинхроне «installed SDK ↔ CSP»:
  * и при обновлении SDK (новый домен внутри бандла), и при правке CSP.
  */
 
-import { readdirSync, readFileSync } from "fs";
+import { readFileSync } from "fs";
 import path from "path";
 import { securityHeaders } from "../../next-security";
 
-const VENDOR_DIR = path.join(__dirname, "..", "..", "public", "vendor");
+const SDK_FILE = path.join(
+  __dirname,
+  "..",
+  "..",
+  "node_modules",
+  "@vkid",
+  "sdk",
+  "dist-sdk",
+  "umd",
+  "index.js",
+);
 
 /** Subdomains the SDK derives from each base domain (see bundle: `"id.".concat(base)` etc.). */
 const CONNECT_SUBDOMAINS = ["id", "oauth", "api", "login"];
 const FRAME_SUBDOMAINS = ["id", "oauth", "login"];
 
 function loadSdkSources(): { file: string; source: string }[] {
-  return readdirSync(VENDOR_DIR)
-    .filter((f) => /^vkid-sdk-.*\.js$/.test(f))
-    .map((f) => ({ file: f, source: readFileSync(path.join(VENDOR_DIR, f), "utf8") }));
+  return [{ file: SDK_FILE, source: readFileSync(SDK_FILE, "utf8") }];
 }
 
 /** Base VK domains ("vk.ru" / "vk.com") referenced as string literals in the bundle. */
@@ -48,11 +56,11 @@ async function getCspDirectives(): Promise<Record<string, string>> {
   return directives;
 }
 
-describe("CSP covers every VK host family used by the vendored VK ID SDK", () => {
+describe("CSP covers every VK host family used by the installed VK ID SDK", () => {
   const sdks = loadSdkSources();
 
-  it("finds at least one vendored VK ID SDK bundle", () => {
-    expect(sdks.length).toBeGreaterThan(0);
+  it("finds the installed VK ID SDK bundle", () => {
+    expect(sdks).toHaveLength(1);
   });
 
   it("extracts at least one VK base domain from each bundle", () => {

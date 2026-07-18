@@ -12,7 +12,7 @@ export default async function AdminUsersPage() {
     orderBy: { createdAt: "desc" },
     select: {
       id: true, email: true, name: true, role: true, createdAt: true,
-      _count: { select: { orders: true } },
+      _count: { select: { wbOrders: true } },
     },
   });
 
@@ -79,7 +79,7 @@ export default async function AdminUsersPage() {
                     {user.role}
                   </span>
                 </td>
-                <td className="px-5 py-3.5 font-black text-sm text-zinc-300 hidden md:table-cell">{user._count.orders}</td>
+                <td className="px-5 py-3.5 font-black text-sm text-zinc-300 hidden md:table-cell">{user._count.wbOrders}</td>
                 <td className="px-5 py-3.5 text-xs text-zinc-500 hidden lg:table-cell whitespace-nowrap">
                   <span className="flex items-center gap-1.5">
                     <Calendar className="w-3 h-3" />

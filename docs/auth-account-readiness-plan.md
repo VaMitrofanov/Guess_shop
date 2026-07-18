@@ -38,8 +38,10 @@ flow, ККТ и юридические launch-gates описаны отдель�
 - Telegram login использует одноразовый state: в БД хранится только SHA-256, TTL — 5 минут,
   callback проверяется HMAC Telegram и state потребляется атомарно. TG link требует свежую
   web-сессию, а merge ведёт `AccountMergeAudit` и переносит заказы/бонусы транзакционно.
-- VK ID скрыт fail-closed (`NEXT_PUBLIC_VK_AUTH_ENABLED` не равен `true`) до отдельного
-  live acceptance. Не включать его как часть этого плана без проверки провайдера.
+- VK ID переведён 19.07 на официальный `@vkid/sdk@2.6.6` и прямой popup `Auth.login`
+  вместо зависавшего скрытого OneTap iframe. Gate остаётся fail-closed; production-флаг
+  включается вместе с browser smoke, а полный callback/login/link/unlink на реальном
+  аккаунте остаётся acceptance-пунктом.
 - ЛК читает legacy и canonical заказы, бонусы, статусы и привязанные identity; гость
   перенаправляется на `/login`.
 
@@ -52,7 +54,7 @@ flow, ККТ и юридические launch-gates описаны отдель�
 | ~~P0~~ **закрыто 17.07** | ~~Нет отдельного throttling для password sign-in~~ | Реализовано в `src/lib/auth-throttle.ts`, подключено в `src/auth.ts`. Подробности ниже. |
 | ~~P0~~ **код готов 18.07** | ~~Согласие не имеет доказательной записи~~ | `ConsentEvidence` пишет timestamp, version `2026-07-18`, source и keyed IP hash без raw IP/UA. |
 | P0 | Полный Telegram callback/link/merge не принят на реальном аккаунте | Deep link и криптографический код проверены, но end-to-end возврат из Telegram/WebView не выполнялся в этом аудите. |
-| P1 | VK login/link/unlink не готов | Контрол скрыт правильно, но provider timeout и безопасные действия для VK остаются открытыми. |
+| P1 | VK full-account acceptance не завершён | Popup-flow и public control исправлены; нужно вручную пройти callback/login/link/unlink на реальном VK-аккаунте. |
 | P1 | Политика абсолютного/idle TTL и кнопка «выйти везде» не завершены | Смена пароля уже отзывает все JWT по `sessionVersion`; отдельный self-service revoke и TTL-контракт остаются. |
 | P1 | Нет повторяемого E2E набора | Нынешние unit/build/browser проверки не заменяют guest/email/TG/VK/merge/dashboard matrix. |
 

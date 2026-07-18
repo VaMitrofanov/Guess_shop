@@ -1,6 +1,6 @@
 /**
- * VK ID is hidden by default while the production provider is under repair.
- * This public build-time flag must be enabled only after a live login check.
+ * VK ID stays fail-closed unless production explicitly enables it.
+ * This is a public build-time flag, not a security boundary.
  */
 export function isVkAuthEnabled(value = process.env.NEXT_PUBLIC_VK_AUTH_ENABLED) {
   return value === "true";

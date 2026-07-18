@@ -19,8 +19,10 @@
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
+    "@babel/runtime": "^7.29.7",
     "@prisma/adapter-pg": "^7.6.0",
     "@prisma/client": "^7.7.0",
+    "@vkid/sdk": "^2.6.6",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "dotenv": "^17.3.1",

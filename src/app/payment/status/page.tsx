@@ -5,19 +5,24 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowRight,
+  BellRing,
   Check,
   CheckCircle2,
   CircleAlert,
   Clock3,
   Headphones,
+  Gift,
   Loader2,
+  MessageCircle,
   PackageCheck,
   ReceiptText,
   RotateCcw,
   ShieldCheck,
   ShoppingBag,
+  Send,
 } from "lucide-react";
 import Navbar from "@/components/navbar";
+import type { PostPurchaseChannelDestination } from "@/lib/post-purchase-channel";
 import styles from "./page.module.css";
 
 type OrderSnapshot = {
@@ -56,6 +61,8 @@ function StatusContent() {
   const [loading, setLoading] = useState(Boolean(orderId));
   const [loadError, setLoadError] = useState<"not-found" | "network" | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const [channelBusy, setChannelBusy] = useState(false);
+  const [channelError, setChannelError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!orderId) return false;
@@ -89,6 +96,39 @@ function StatusContent() {
 
   const failed = !!snapshot && (FAILED_ORDER.has(snapshot.status) || FAILED_PAYMENT.has(snapshot.paymentStatus ?? ""));
   const phase = phaseFor(snapshot);
+  const showChannels = phase >= 1 && !failed && snapshot?.paymentStatus !== "REFUNDED";
+
+  const recordChannelIntent = useCallback(async (destination: PostPurchaseChannelDestination) => {
+    if (!orderId) return;
+    const query = token ? `?token=${encodeURIComponent(token)}` : "";
+    await fetch(`/api/orders/${encodeURIComponent(orderId)}/channel-intent${query}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ destination }),
+      cache: "no-store",
+      keepalive: true,
+    }).catch(() => undefined);
+  }, [orderId, token]);
+
+  const connectTelegram = useCallback(async () => {
+    setChannelBusy(true);
+    setChannelError(null);
+    await recordChannelIntent("TG_NOTIFICATIONS");
+    try {
+      const response = await fetch("/api/auth/telegram/start?mode=link", {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || typeof data.href !== "string") {
+        throw new Error(data.error ?? "Не удалось открыть Telegram");
+      }
+      window.location.assign(data.href);
+    } catch (error) {
+      setChannelError(error instanceof Error ? error.message : "Не удалось открыть Telegram");
+      setChannelBusy(false);
+    }
+  }, [recordChannelIntent]);
   const presentation = useMemo(() => {
     if (failed) return { kicker: "Нужен твой шаг", title: "Оплата не завершена", text: "Деньги не были подтверждены банком. Можно повторить оплату или написать поддержке.", tone: "danger" as const };
     if (phase === 3) return { kicker: "Заказ выполнен", title: "Robux отправлены", text: "Выкуп завершён. Зачисление через геймпасс ещё может отображаться в Roblox как Pending.", tone: "success" as const };
@@ -149,6 +189,43 @@ function StatusContent() {
             <section className={styles.infoCard}><PackageCheck size={20} /><div><strong>Pending — это нормально</strong><p>Roblox удерживает Robux после выкупа геймпасса до 5–7 дней.</p><a href="https://www.roblox.com/transactions" target="_blank" rel="noopener noreferrer">Транзакции Roblox <ArrowRight size={15} /></a></div></section>
           </aside>
         </div>
+
+        {showChannels && (
+          <section className={styles.channelSection} aria-labelledby="post-purchase-channels">
+            <div className={styles.channelHeading}>
+              <span className={styles.channelHeadingIcon}><BellRing /></span>
+              <div>
+                <span>Оставайся на связи</span>
+                <h2 id="post-purchase-channels">Получай статусы там, где удобно</h2>
+                <p>Подключи Telegram для персональных уведомлений или подпишись на наши площадки — там новости, розыгрыши и предложения для постоянных клиентов.</p>
+              </div>
+            </div>
+            <div className={styles.channelGrid}>
+              <article className={`${styles.channelCard} ${styles.telegramCard}`}>
+                <span className={styles.channelLogo}><Send /></span>
+                <div><strong>Telegram</strong><p>Свяжем бот с твоим кабинетом и будем присылать изменения по заказам.</p></div>
+                <button type="button" disabled={channelBusy} onClick={() => void connectTelegram()}>
+                  {channelBusy ? <Loader2 className={styles.spin} /> : <BellRing />} {channelBusy ? "Открываем…" : "Подключить уведомления"}
+                </button>
+                <a href="https://t.me/Roblox_Bank_Tg" target="_blank" rel="noopener noreferrer" onClick={() => void recordChannelIntent("TG_CHANNEL")}>
+                  <Gift /> Канал, акции и розыгрыши <ArrowRight />
+                </a>
+              </article>
+              <article className={`${styles.channelCard} ${styles.vkCard}`}>
+                <span className={styles.channelLogo}><MessageCircle /></span>
+                <div><strong>ВКонтакте</strong><p>Подпишись на сообщество, чтобы не пропускать розыгрыши, новости и новые предложения.</p></div>
+                <a className={styles.channelPrimaryLink} href="https://vk.ru/bankroblox" target="_blank" rel="noopener noreferrer" onClick={() => void recordChannelIntent("VK_COMMUNITY")}>
+                  <Gift /> Подписаться ВКонтакте
+                </a>
+                <a href="https://vk.me/club237309399" target="_blank" rel="noopener noreferrer" onClick={() => void recordChannelIntent("VK_MESSAGES")}>
+                  <MessageCircle /> Открыть сообщения <ArrowRight />
+                </a>
+              </article>
+            </div>
+            {channelError && <p className={styles.channelError} role="alert">{channelError} Открой личный кабинет или подпишись на канал по ссылке ниже.</p>}
+            <p className={styles.channelConsent}>Подписка добровольна и не влияет на оплату, очередь или выдачу заказа. Отписаться можно в любой момент.</p>
+          </section>
+        )}
 
         <nav className={styles.bottomActions}><Link href="/dashboard"><ShoppingBag size={18} /> Все заказы</Link><Link href="/checkout">Новая покупка <ArrowRight size={17} /></Link></nav>
       </div>

@@ -8,7 +8,7 @@ import path from "node:path";
  * guide container. Keep this file outside `src/`: both Next configs import it
  * during build, before route pruning in Dockerfile.guide.
  *
- * CSP intentionally permits the self-hosted VK SDK and the Next runtime. A
+ * CSP intentionally permits the bundled official VK SDK and the Next runtime. A
  * nonce-based policy is a later hardening step: it needs WebView coverage for
  * VK ID and Telegram before enforcement can be tightened safely.
  */
@@ -20,7 +20,7 @@ const commonCsp = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
-  // ⚠️ The vendored VK ID SDK (public/vendor/vkid-sdk-*.js) builds its
+  // ⚠️ The official @vkid/sdk package builds its
   // endpoints from the vk.ru domain (id.vk.ru / oauth.vk.ru / api.vk.ru /
   // login.vk.ru), NOT vk.com — both families must stay whitelisted or the
   // OAuth code exchange is blocked client-side with no server-side trace

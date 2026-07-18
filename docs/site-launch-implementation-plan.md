@@ -7,6 +7,36 @@
 не входят по решению владельца. Это решение не означает, что технические риски этих
 пунктов исчезли; оно только исключает их из текущего графика.
 
+## Решение владельца по этапам 0–2 — 18.07.2026
+
+- **Этап 0:** юридическая квалификация схемы и перенос БД в РФ закрыты только как задачи
+  текущей итерации и отложены. Это не юридическое заключение и не снятие рисков; перед
+  отдельным решением о `100% on` к ним нужно вернуться.
+- **Этап 1:** desktop `/admin` переведён с legacy `Order` на тот же канонический `WbOrder`,
+  которым пользуются сайт и TWA. Добавлены общий обзор, очередь всех каналов, досье заказа
+  и `/admin/activity` с событиями платежей, возвратов, outbox и identity merge. TWA остаётся
+  мобильной command-поверхностью для защищённых операций, desktop — обзором, поиском,
+  сверкой и handoff в TWA; отдельные расходящиеся копии бизнес-логики не создаются.
+- **Этап 2, пункт 1:** `/payment/status` закреплён как основное уведомление о покупке на
+  сайте. Он показывает ожидание банка, подтверждение, очередь, работу, завершение, ошибку,
+  отмену и возврат; офлайн/retry не меняют серверный статус. ЛК остаётся историей и второй
+  точкой возврата, а bot-notification — дополнительным каналом, но не источником истины.
+- **Post-purchase traffic loop (19.07):** после подтверждённой оплаты `/payment/status`
+  предлагает четыре добровольных действия: связать Telegram с кабинетом для персональных
+  статусов, подписаться на TG-канал, подписаться на VK-сообщество или открыть сообщения VK.
+  Подписка не блокирует очередь/выдачу и не показывается после failed/canceled/refunded.
+  Каждый первый переход записывается идемпотентным `POST_PURCHASE_*_OPENED` в `OrderEvent`,
+  поэтому в `/admin/activity` виден channel-intent без PII; это метрика клика, а не ложное
+  подтверждение фактической подписки.
+- **Этап 3 не начат:** production credentials, SMTP/фискальная конфигурация, реальный платёж,
+  возврат и rollout не выполнялись. Master gate должен оставаться `false`, mode — `off`.
+
+Локальный gate после post-purchase/admin/VK batch: root+bot TypeScript и scoped ESLint —
+green, Jest — `42 suites / 256 tests`; mobile `390×844` без horizontal overflow.
+Next 16.2.2 production build green (только известное pg SSL future-semantics warning).
+VK-кнопка локально активна сразу, а прямой `Auth.login` запускается из клика; полный
+callback остаётся real-account acceptance. Релизный smoke выполняется после deploy.
+
 ## 1. Что уже зафиксировано
 
 - Создан и проверен восстановимый baseline dump production-БД; файл хранится локально в
@@ -40,7 +70,7 @@
 | B | Поэтапный допуск `off → allowlist → percentage → on`, server-side enforcement | 0,5 дня | **код готов, deploy после согласования** |
 | C | Guest draft → обязательный login/register → возврат в checkout | 0,5–1 день | **код готов, deploy после согласования** |
 | D | Полноценный ЛК: активный заказ, статусы, история, платёж/чек/возврат, identity | 1,5–3 дня | **timeline + email verify/reset/consent/session revoke готовы; SMTP и live TG/VK остаются** |
-| E | Новый `/payment/status`: timeline, offline/retry, success/error/refund-safe states | 0,5–1 день | **в production с acquiring off; 320/390 px overflow fix готов к следующему deploy** |
+| E | Новый `/payment/status`: timeline, offline/retry, success/error/refund-safe states | 0,5–1 день | **основная страница подтверждения; в production с acquiring off** |
 | F | Дизайн-аудит всех клиентских маршрутов и реальных устройств | 1–2 дня | **автоматизировано: `/`, checkout, login/register, WB guide, status на 390 px; status 320 px defect исправлен; реальные WebView остаются** |
 | G | WB-выдача на сайте с обязательным channel handoff | 3–5 дней | **foundation уже работает: bot identity до site one-tap order; G1/G2 hardening остаётся** |
 | H | Боевой E2E: allowlist-аккаунт → минимальная оплата → webhook → outbox → возврат | 0,5–1 день | **после A–G и ввода production credentials** |
