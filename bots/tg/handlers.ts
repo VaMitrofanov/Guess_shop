@@ -19,6 +19,7 @@ import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/ga
 import { noteProbableNick } from "../shared/nick";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { buildCompletedMessages, robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
+import { formatOrderAge } from "../shared/order-age";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 import { buildAdminKeyboard } from "./admin";
 import { buildOrderProfitSnapshot } from "../shared/order-profit";
@@ -143,7 +144,7 @@ const FAQ_ITEMS: { key: string; label: string; answer: string; buttons?: { label
   { key: "when_buy",  label: "⏳ Когда выкупят?",           answer: "Обычно выкупаем за пару часов, максимум — в течение суток.\nКак только выкупим — бот пришлёт уведомление прямо сюда. Ничего делать не нужно, просто жди 👌" },
   { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа <b>Roblox замораживает робуксы на 5–7 дней</b> (это их стандартная процедура — «Pending Robux»).\n\nПроверить: <a href=\"https://www.roblox.com/transactions\">roblox.com/transactions</a> → строка <b>Pending</b>.\n\nМы на это повлиять не можем — дальше всё на стороне Roblox." },
   // Ф6.1 (2026-07-12): механика бонуса — одно место правды review-eligibility.ts.
-  { key: "bonus",     label: "🎁 Бонус за отзыв",           answer: `За отзыв на Wildberries дарим <b>+${REVIEW_BONUS_AMOUNT} R$</b> к любому прямому заказу.\n\nКак получить:\n1. Оставь отзыв <b>с текстом и фото</b> (только оценка не подойдёт).\n2. Пришли скриншот сюда фотографией (не файлом).\n3. После проверки начислим сразу — бонус действует ${REVIEW_BONUS_EXPIRY_DAYS} дней.\n\nКак потратить: оформи прямой заказ в боте — бонус добавится к номиналу автоматически (без карточки WB).`,
+  { key: "bonus",     label: "🎁 Бонус за отзыв",           answer: `За отзыв на Wildberries дарим <b>+${REVIEW_BONUS_AMOUNT} R$</b> к следующей прямой покупке в RobloxBank.\n\nКак получить:\n1. Оставь отзыв <b>с текстом и фото</b> (только оценка не подойдёт).\n2. Пришли скриншот сюда фотографией (не файлом).\n3. После проверки бонус появится на балансе на ${REVIEW_BONUS_EXPIRY_DAYS} дней.\n\nВажно: отдельно ${REVIEW_BONUS_AMOUNT} R$ не выдаются и к покупке на WB не добавляются. Оформи следующий прямой заказ в боте или на robloxbank.ru — бонус автоматически увеличит его номинал.`,
     buttons: [[{ label: "📸 Прислать отзыв", cb: "review_hint" }, { label: "💎 Купить напрямую", cb: "start_direct" }]] },
   { key: "what_now",  label: "🤔 Что мне делать сейчас?",   answer: "Если заказ <b>оформлен</b> — просто жди. Бот сам пришлёт уведомление, когда геймпасс будет выкуплен.\n\nЕсли ещё <b>не создал геймпасс</b> — открой 📖 Инструкцию и пройди все шаги." },
   { key: "wrong_gp",  label: "✏️ Не тот геймпасс/ник",     answer: "Нажми кнопку <b>«✏️ Сменить ник Roblox»</b> в карточке заказа — можно перевыбрать ник и геймпасс в любой момент до выкупа." },
@@ -1358,7 +1359,7 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     const reviewPending = !order.isDirectOrder && !user.reviewBonusGrantedAt;
     keyboard = Markup.inlineKeyboard([
       [Markup.button.callback("💎 Заказать напрямую", CB.startDirect)],
-      ...(reviewPending ? [[Markup.button.callback("📸 Отзыв = +100 R$ бонус", CB.reviewHint)]] : []),
+      ...(reviewPending ? [[Markup.button.callback("📸 Отзыв → бонус к покупке", CB.reviewHint)]] : []),
       refreshRow,
       [faqBtn()],
       menuRow,
@@ -2751,6 +2752,7 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
     loyaltyLine +
     `${platformEmoji} Источник: <b>${order.platform}</b>\n` +
     (dateStr ? `📅 Время: <b>${dateStr}</b>\n` : "") +
+    (order.createdAt ? `⏳ Возраст заказа: <b>${formatOrderAge(order.createdAt)}</b>\n` : "") +
     `👤 Юзер: ${userLabel}\n` +
     bonusLine +
     gpCreatorLine +
@@ -3054,7 +3056,7 @@ export function registerPhoto(bot: Telegraf): void {
         } else {
           await ctx.reply(
             "У тебя пока нет выполненных заказов, за которые можно получить бонус.\n\n" +
-            "Когда заказ будет выполнен, оставь отзыв на Wildberries <b>с текстом и фото</b> — пришли скриншот сюда и получишь +100 R$ (действует на любой номинал)!",
+            "Когда заказ будет выполнен, оставь отзыв на Wildberries <b>с текстом и фото</b> и пришли скриншот сюда. После проверки получишь <b>+100 R$ к следующей прямой покупке</b> в боте или на robloxbank.ru — отдельно бонус не выдаётся.",
             withSupportKb()
           );
         }
@@ -5213,7 +5215,7 @@ export function registerCallbacks(bot: Telegraf): void {
       }
       await ctx.reply(
         "📸 Оставь отзыв на Wildberries <b>с текстом и фото</b>, сделай скриншот и отправь сюда фотографией (не файлом).\n\n" +
-        "После проверки бонус <b>+100 R$</b> придёт автоматически (действует на любой номинал).",
+        "После проверки <b>+100 R$</b> появятся на бонусном балансе на 30 дней. Это не отдельная выдача и не бонус к покупке на WB: сумма автоматически добавится к <b>следующей прямой покупке</b> в боте или на robloxbank.ru.",
         { parse_mode: "HTML" }
       );
       await ctx.answerCbQuery().catch(() => {});

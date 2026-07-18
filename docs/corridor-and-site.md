@@ -10,8 +10,13 @@
   безопасный retry и показывает только диагностический digest без текста исключения/ПД.
 - Root layout передаёт Core Web Vitals (`CLS/FCP/INP/LCP/TTFB`) и fingerprint клиентских
   ошибок в `/api/observability/client`. Контракт не принимает query string, raw message,
-  email или произвольный payload; poor/error-сигналы rate-limited и могут алертить
-  `ADMIN_IDS`/`TG_CHAT_ID`, остальные остаются структурированными server logs.
+  email или произвольный payload. С 18.07.2026 endpoint пишет принятые сигналы только в
+  структурированные server logs и **никогда не пересылает их в операционный Telegram**:
+  отдельные browser-error/LCP не являются заказными событиями и создавали шум/повторы.
+  Диагностика релиза ведётся по логам и агрегатам, а бот остаётся каналом действий.
+  `SiteObservability` использует стабильный callback (требование Next.js) и session-level
+  dedup по `metric.id`/`route+fingerprint`, поэтому повторный render/navigation одного tab
+  не размножает одинаковый сигнал; новый page load остаётся отдельным измерением.
 - Checkout, login/register, payment-status и незавершённые legal pages отдают
   `noindex,nofollow`. Оферта/политика исключены из sitemap, пока владелец не передаст
   реквизиты и документы не пройдут приёмку. Public FAQ/guarantees/reviews получили
@@ -242,6 +247,11 @@ VK-кнопка работает через self-hosted VK ID SDK (`public/vendo
 «🌐 ONE-TAP С САЙТА». Идемпотентно (guard по статусу в транзакции → карточка ровно раз).
 Серверная ре-валидация: цена ±2 R$ и `isActive`; если Roblox недоступен — принимает
 (`validationSkipped`), как бот.
+
+Карточка использует исходный `WbOrder.createdAt`, а не время one-tap-промоушена, и показывает
+`⏳ Возраст заказа` с приоритетом: 🟢 до суток, 🟡 1–2 дня, 🟠 3–6 дней, 🔴 от 7 дней.
+Поэтому заказ, который неделю ждал геймпасс и только сейчас стал готов к выкупу, помечается
+`🔴 … · недельный`. Web и боты используют зеркальные `order-age` formatter + contract test.
 
 ### `GET /api/roblox/gamepasses?query=&code=` — поиск по нику/ID
 `extractGamepassId()` парсит URL/чистый ID → прямой lookup; иначе `getUserGamepasses(nick)`.

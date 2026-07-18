@@ -11,6 +11,7 @@ import { db } from "../../shared/db";
 import { CB, ADMIN_IDS, formatUserHandle } from "../../shared/admin";
 import { sendOrEditWidget, editWidget } from "./widgets";
 import { pendingAdminSearch, pendingBatchFulfill } from "../session";
+import { formatOrderAge } from "../../shared/order-age";
 
 // ── VK community ID for direct-message links ────────────────────────────────
 const VK_GROUP_ID = process.env.VK_GROUP_ID ?? "";
@@ -18,12 +19,7 @@ const VK_GROUP_ID = process.env.VK_GROUP_ID ?? "";
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function waitTime(createdAt: Date): string {
-  const diff = Date.now() - new Date(createdAt).getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 60) return `${mins} мин`;
-  const hrs = Math.floor(mins / 60);
-  const rm = mins % 60;
-  return `${hrs}ч ${rm}м`;
+  return formatOrderAge(createdAt);
 }
 
 const STATUS_LABELS: Record<string, string> = {

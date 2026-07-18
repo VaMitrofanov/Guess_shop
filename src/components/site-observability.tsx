@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useReportWebVitals } from "next/web-vitals";
 
 const ENDPOINT = "/api/observability/client";
+const sentInMemory = new Set<string>();
 
 function route() {
   return window.location.pathname.replace(/[^A-Za-z0-9_\-./]/g, "").slice(0, 160) || "/";
@@ -18,7 +19,21 @@ function fingerprint(value: string) {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-function send(payload: Record<string, unknown>) {
+function claimSignal(key: string): boolean {
+  const storageKey = `rb-obsv:${fingerprint(key)}`;
+  if (sentInMemory.has(storageKey)) return false;
+  try {
+    if (window.sessionStorage.getItem(storageKey)) return false;
+    window.sessionStorage.setItem(storageKey, "1");
+  } catch {
+    // Private-mode/storage failures still get process-lifetime dedup below.
+  }
+  sentInMemory.add(storageKey);
+  return true;
+}
+
+function send(payload: Record<string, unknown>, dedupeKey: string) {
+  if (!claimSignal(dedupeKey)) return;
   const body = JSON.stringify(payload);
   if (navigator.sendBeacon) {
     navigator.sendBeacon(ENDPOINT, new Blob([body], { type: "application/json" }));
@@ -32,25 +47,30 @@ function send(payload: Record<string, unknown>) {
   }).catch(() => undefined);
 }
 
+const reportWebVital: Parameters<typeof useReportWebVitals>[0] = (metric) => {
+  if (!["CLS", "FCP", "INP", "LCP", "TTFB"].includes(metric.name)) return;
+  const currentRoute = route();
+  send({
+    type: "web-vital",
+    route: currentRoute,
+    name: metric.name,
+    value: metric.value,
+    rating: metric.rating,
+  }, `vital:${currentRoute}:${metric.name}:${metric.id}`);
+};
+
 export function SiteObservability() {
-  useReportWebVitals((metric) => {
-    if (!["CLS", "FCP", "INP", "LCP", "TTFB"].includes(metric.name)) return;
-    send({
-      type: "web-vital",
-      route: route(),
-      name: metric.name,
-      value: metric.value,
-      rating: metric.rating,
-    });
-  });
+  // A stable callback is required by Next.js to avoid duplicate metric reports.
+  useReportWebVitals(reportWebVital);
 
   useEffect(() => {
-    const seen = new Set<string>();
     const report = (kind: string, source: string) => {
       const key = `${kind}:${fingerprint(source)}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      send({ type: "client-error", route: route(), kind, fingerprint: fingerprint(source) });
+      const currentRoute = route();
+      send(
+        { type: "client-error", route: currentRoute, kind, fingerprint: fingerprint(source) },
+        `error:${currentRoute}:${key}`,
+      );
     };
     // Keep the fingerprint stable across deploys: chunk filenames change on
     // every build and made one browser bug look like several unrelated errors.

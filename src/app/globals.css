@@ -731,27 +731,27 @@ html[data-theme="dark"] .vf-checkout .border-\[\#1e2a45\] { border-color:#352b48
 }
 .twa-sheet {
   width: min(560px, 100%);
-  max-height: min(72dvh, calc(var(--tg-viewport-height, 100dvh) - 84px));
+  max-height: min(76dvh, calc(var(--tg-viewport-height, 100dvh) - 52px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid rgba(255,255,255,.14);
-  border-radius: 25px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 28px 28px 24px 24px;
   outline: 0;
-  background: rgba(28,23,41,.98);
+  background: linear-gradient(180deg, rgba(43,35,62,.99) 0%, rgba(28,23,41,.99) 22%, rgba(25,20,37,.99) 100%);
   color: #f7f5ff;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  box-shadow: 0 30px 90px rgba(0,0,0,.62), 0 1px 0 rgba(255,255,255,.08) inset;
+  box-shadow: 0 -1px 0 rgba(255,255,255,.08) inset, 0 30px 90px rgba(0,0,0,.68), 0 1px 0 rgba(255,255,255,.12) inset;
   animation: twa-sheet-up .28s cubic-bezier(.22,1,.36,1) both;
   transition: max-height .25s cubic-bezier(.22,1,.36,1);
 }
 .twa-sheet button, .twa-sheet input, .twa-sheet textarea { font-family: inherit; }
 .twa-sheet.is-expanded { max-height: calc(var(--tg-viewport-height, 100dvh) - 20px); }
-.twa-sheet-handle-zone { flex: 0 0 auto; display: grid; place-items: center; height: 20px; }
+.twa-sheet-handle-zone { flex: 0 0 auto; display: grid; place-items: center; height: 26px; }
 .twa-sheet-handle { width: 44px; height: 14px; padding: 0; border: 0; background: transparent; }
-.twa-sheet-handle::after { content: ""; display: block; width: 38px; height: 5px; margin: auto; border-radius: 999px; background: rgba(255,255,255,.22); }
+.twa-sheet-handle::after { content: ""; display: block; width: 36px; height: 4px; margin: auto; border-radius: 999px; background: rgba(255,255,255,.28); }
 .twa-sheet-scroll { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
-.twa-sheet-footer { flex: 0 0 auto; padding: 10px 14px max(10px, env(safe-area-inset-bottom, 0px)); border-top: 1px solid rgba(255,255,255,.09); background: rgba(28,23,41,.98); box-shadow: 0 -12px 30px rgba(3,0,12,.18); }
+.twa-sheet-footer { flex: 0 0 auto; padding: 10px 14px max(10px, env(safe-area-inset-bottom, 0px)); border-top: 1px solid rgba(255,255,255,.10); background: linear-gradient(180deg, rgba(28,23,41,.88), rgba(28,23,41,.99)); box-shadow: 0 -12px 30px rgba(3,0,12,.24); }
 .twa-sheet-footer > button { width: 100%; min-height: 56px; }
 @keyframes twa-sheet-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
 .twa-order-sheet {
@@ -1143,22 +1143,79 @@ html[data-theme="dark"] .vf-checkout .border-\[\#1e2a45\] { border-color:#352b48
 .twa-search-preview-client code { color: #b9a6ff; font-size: 16px; font-weight: 700; }
 .twa-search-preview-status { display: flex; align-items: center; gap: 8px; margin-top: 15px; padding: 12px; border-radius: 14px; background: rgba(48,209,88,.10); color: #62df82; font-size: 16px; font-weight: 700; }
 .twa-search-preview-status.is-error { background: rgba(255,69,58,.11); color: #ff8178; }
-.twa-search-dossier.twa-intelligence { margin: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
-.twa-search-dossier .twa-intelligence-head span { font-size: 14px; }
-.twa-search-dossier .twa-intelligence-head strong { font-size: 23px; }
-.twa-search-dossier .twa-intelligence-person strong { overflow: visible; font-size: 29px; line-height: 1.1; text-overflow: clip; white-space: normal; }
-.twa-search-dossier .twa-intelligence-person span { font-size: 16px; }
-.twa-search-dossier .twa-intelligence-person > b { font-size: 25px; }
-.twa-search-dossier .twa-inset-row { min-height: 92px; }
-.twa-search-dossier .twa-inset-row > span:first-child { font-size: 14px; }
-.twa-search-dossier .twa-inset-row strong { overflow: visible; font-size: 21px; text-overflow: clip; white-space: normal; }
-.twa-search-dossier .twa-inset-row small { overflow: visible; font-size: 16px; text-overflow: clip; white-space: normal; }
+.twa-search-dossier { padding: 0 14px 18px; color: #f7f5ff; }
+.twa-dossier-hero { padding: 2px 2px 15px; border-bottom: 1px solid rgba(255,255,255,.10); }
+.twa-dossier-kicker, .twa-dossier-summary, .twa-dossier-section-head, .twa-dossier-note > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.twa-dossier-kicker { color: #a7a0b3; font-size: 12px; font-weight: 670; letter-spacing: .035em; text-transform: uppercase; }
+.twa-dossier-kicker b { flex: 0 0 auto; padding: 4px 7px; border-radius: 999px; font-size: 10px; letter-spacing: .045em; }
+.twa-dossier-kicker .is-ready { background: rgba(48,209,88,.13); color: #68df86; }
+.twa-dossier-kicker .is-partial { background: rgba(255,159,10,.14); color: #ffbd61; }
+.twa-dossier-code-row { display: flex; align-items: center; gap: 9px; margin-top: 10px; }
+.twa-dossier-code-row > strong { overflow-wrap: anywhere; font-size: 22px; font-weight: 780; letter-spacing: -.025em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.twa-dossier-summary { margin-top: 11px; }
+.twa-dossier-summary > div { min-width: 0; display: grid; gap: 2px; }
+.twa-dossier-summary span { color: #aaa4b8; font-size: 12px; font-weight: 600; }
+.twa-dossier-summary strong { overflow-wrap: anywhere; font-size: 15px; line-height: 1.2; }
+.twa-dossier-summary > b { flex: 0 0 auto; color: #cbbaff; font-size: 21px; font-weight: 780; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+.twa-dossier-summary > b small { font-size: 13px; letter-spacing: 0; }
+.twa-dossier-section { margin-top: 10px; padding: 13px; border: 1px solid rgba(255,255,255,.09); border-radius: 18px; background: rgba(255,255,255,.035); }
+.twa-dossier-section-head { align-items: flex-start; color: #a9a2b6; font-size: 12px; line-height: 1.2; }
+.twa-dossier-section-head > span { display: flex; align-items: center; gap: 6px; color: #d7d1e3; font-weight: 700; }
+.twa-dossier-section-head > small { max-width: 52%; color: #a9a2b6; font-size: 11px; text-align: right; overflow-wrap: anywhere; }
+.twa-dossier-value { display: grid; gap: 3px; margin-top: 10px; }
+.twa-dossier-value strong { overflow-wrap: anywhere; font-size: 17px; line-height: 1.16; letter-spacing: -.015em; }
+.twa-dossier-value span { color: #aaa4b8; font-size: 13px; overflow-wrap: anywhere; }
+.twa-dossier-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+.twa-dossier-action { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 10px; border: 1px solid rgba(190,169,255,.18); border-radius: 10px; background: rgba(167,139,250,.11); color: #dcd1ff; font: 680 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-decoration: none; cursor: pointer; overflow-wrap: anywhere; }
+.twa-dossier-action:active { transform: scale(.98); background: rgba(167,139,250,.22); }
+.twa-dossier-action.is-compact { min-height: 30px; padding: 6px 8px; font-size: 11px; }
+.twa-dossier-finances { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 11px; }
+.twa-dossier-finances > div { min-width: 0; display: grid; gap: 4px; padding: 9px 8px; border-radius: 12px; background: rgba(0,0,0,.13); }
+.twa-dossier-finances small { color: #9e97aa; font-size: 10px; }
+.twa-dossier-finances strong { overflow-wrap: anywhere; color: #f2eff8; font-size: 13px; font-variant-numeric: tabular-nums; }
+.twa-dossier-finances .is-negative strong { color: #ff9b95; }
+.twa-dossier-facts { display: grid; gap: 0; margin-top: 8px; }
+.twa-dossier-facts > div, .twa-dossier-related { min-height: 42px; display: grid; align-content: center; gap: 2px; padding: 8px 0; border-top: 1px solid rgba(255,255,255,.075); background: transparent; color: #f7f5ff; text-align: left; }
+.twa-dossier-facts > div:first-child { border-top: 0; }
+.twa-dossier-facts span { color: #aaa4b8; font-size: 11px; }
+.twa-dossier-facts strong { overflow-wrap: anywhere; font-size: 13px; line-height: 1.2; font-weight: 650; }
+.twa-dossier-facts small { color: #8f889d; font-size: 11px; }
+.twa-dossier-related { width: 100%; border-right: 0; border-left: 0; cursor: pointer; }
+.twa-dossier-related strong { display: flex; align-items: center; justify-content: space-between; gap: 7px; color: #d8ccff; }
+.twa-dossier-note { margin-top: 10px; padding: 13px; border: 1px solid rgba(255,188,70,.16); border-radius: 16px; background: rgba(255,188,70,.06); }
+.twa-dossier-note span { color: #ffd283; font-size: 12px; font-weight: 700; }
+.twa-dossier-note p { margin: 9px 0 0; color: #d7d1e3; font-size: 13px; line-height: 1.42; white-space: pre-wrap; overflow-wrap: anywhere; }
+.twa-search-dossier .twa-intelligence-warning, .twa-dossier-partial { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; padding: 10px 11px; border-radius: 13px; color: #ffc36e; background: rgba(255,159,10,.09); font-size: 12px; line-height: 1.3; }
+.twa-dossier-partial { color: #d7c9ff; background: rgba(167,139,250,.10); }
+.twa-dossier-management { border-color: rgba(167,139,250,.19); background: linear-gradient(140deg, rgba(167,139,250,.10), rgba(255,255,255,.035)); }
+.twa-dossier-manage-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 11px; }
+.twa-dossier-manage-action { min-height: 38px; padding: 8px; border: 1px solid rgba(255,255,255,.11); border-radius: 11px; background: rgba(0,0,0,.13); color: #ded9e9; font: 700 12px/1.15 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; cursor: pointer; }
+.twa-dossier-manage-action:active, .twa-dossier-move-targets button:active { transform: scale(.98); }
+.twa-dossier-manage-action:disabled { opacity: .52; cursor: default; }
+.twa-dossier-manage-action.is-success { border-color: rgba(48,209,88,.30); background: rgba(48,209,88,.13); color: #6ee58d; }
+.twa-dossier-manage-action.is-warning { border-color: rgba(255,159,10,.30); background: rgba(255,159,10,.12); color: #ffc36e; }
+.twa-dossier-manage-action.is-quiet { color: #cfc0ff; }
+.twa-dossier-move-form { display: grid; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.09); }
+.twa-dossier-move-targets { display: flex; flex-wrap: wrap; gap: 6px; }
+.twa-dossier-move-targets button { min-height: 31px; padding: 6px 9px; border: 1px solid rgba(255,255,255,.11); border-radius: 999px; background: rgba(0,0,0,.14); color: #bdb6ca; font: 650 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; cursor: pointer; }
+.twa-dossier-move-targets button.is-selected { border-color: rgba(190,169,255,.48); background: rgba(167,139,250,.21); color: #f2eff8; }
+.twa-dossier-move-form textarea { width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid rgba(255,255,255,.10); border-radius: 11px; outline: 0; background: rgba(0,0,0,.16); color: #f7f5ff; padding: 9px 10px; font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.twa-dossier-move-form textarea::placeholder { color: #8f889d; }
+.twa-dossier-move-submit { min-height: 37px; border: 0; border-radius: 11px; background: #a78bfa; color: #201934; font: 750 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; cursor: pointer; }
+.twa-dossier-move-submit:disabled { opacity: .55; cursor: default; }
+.twa-dossier-action-result { margin-top: 9px; color: #6ee58d; font-size: 12px; line-height: 1.3; }
+.twa-dossier-action-result.is-error { color: #ff9b95; }
 
 @media (max-width: 370px) {
   .twa-action-hero > strong { font-size: 42px; }
   .twa-action-metrics small { font-size: 13px; }
   .twa-liquid-dashboard .twa-action-list .twa-inset-row strong,
   .twa-smart-search .twa-result-row strong { font-size: 21px; }
+  .twa-dossier-section { padding: 12px; }
+  .twa-dossier-summary > b { font-size: 19px; }
+  .twa-dossier-finances { gap: 5px; }
+  .twa-dossier-finances > div { padding: 8px 6px; }
+  .twa-dossier-finances strong { font-size: 12px; }
 }
 .twa-next-action {
   width: 100%;

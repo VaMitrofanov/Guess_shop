@@ -48,3 +48,13 @@ export async function sendTelegramMessage(
     return false;
   }
 }
+
+/** Unique Telegram admin recipients; prevents duplicate fan-out from repeated env IDs. */
+export function telegramAdminRecipients(): string[] {
+  return [...new Set(
+    (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  )];
+}

@@ -139,11 +139,11 @@ function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMessages 
   // 1. Питч отзыва: WB-заказ, бонуса на балансе нет, код не заклеймлен.
   if (!inp.isDirectOrder && !inp.bonusGrantedAt && inp.codeUnclaimed) {
     const tgMsg2 =
-      `🎁 <b>Бонус за отзыв: +100 R$</b> к любому прямому заказу.\n\n` +
+      `🎁 <b>Бонус за отзыв: +100 R$</b> к следующей прямой покупке в RobloxBank.\n\n` +
       `Как получить:\n` +
       `1. Оставь отзыв на Wildberries — с текстом и фото (только оценка не подойдёт).\n` +
       `2. Пришли скриншот сюда фотографией (не файлом).\n\n` +
-      `После проверки начислим сразу. Действует ${BONUS_EXPIRY_DAYS} дней.`;
+      `После проверки бонус появится на балансе на ${BONUS_EXPIRY_DAYS} дней. Отдельно 100 R$ не выдаются и к покупке на WB не добавляются: оформи следующий прямой заказ в боте или на robloxbank.ru.`;
     return {
       kind: "review_pitch",
       tgMsg1, vkMsg1, tgMsg2,
@@ -158,7 +158,7 @@ function buildCompletedMessages(inp: CompletedMessagesInput): CompletedMessages 
     const balanceStr = inp.bonusBalance > 0 ? `${inp.bonusBalance} R$` : `+100 R$`;
     const tgMsg2 =
       `🎁 У тебя бонус <b>${balanceStr}</b> — действует до <b>${expiresStr}</b>.\n\n` +
-      `Он добавится к любому прямому заказу автоматически (без карточки WB).`;
+      `Он автоматически добавится к следующей прямой покупке в боте или на robloxbank.ru; к покупке на WB бонус не применяется.`;
     return {
       kind: "bonus_reminder",
       tgMsg1, vkMsg1, tgMsg2,

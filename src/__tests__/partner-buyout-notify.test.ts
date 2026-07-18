@@ -111,14 +111,14 @@ describe("notifyPartnerBuyout (broadcast fan-out)", () => {
     process.env = { ...realEnv };
   });
 
-  it("sends one admin card per ADMIN_IDS entry", async () => {
+  it("sends one admin card per unique ADMIN_IDS entry", async () => {
     const calls: Array<{ url: string; body: string }> = [];
     global.fetch = jest.fn(async (url: any, init: any) => {
       calls.push({ url: String(url), body: String(init?.body ?? "") });
       return { ok: true, status: 200, text: async () => "" } as any;
     }) as any;
 
-    process.env = { ...realEnv, TG_TOKEN: "test-token", ADMIN_IDS: "111,222", VALIDATOR_SOURCE_URL: "" };
+    process.env = { ...realEnv, TG_TOKEN: "test-token", ADMIN_IDS: "111,222,111", VALIDATOR_SOURCE_URL: "" };
 
     const result = await notifyPartnerBuyout({
       partnerName: "Антон",

@@ -65,7 +65,7 @@ badge/status не ниже `14 px`. Строки имеют высоту `92–9
 Поиск показывает chips с реальными counts, разделяет БД и Roblox live и подписывает причину
 совпадения. Тап по DB-заказу сначала открывает компактный preview, затем полное досье в
 общем `BottomSheet`. Shell отвечает за portal, body-scroll lock, safe-area, pinned action,
-focus trap/return, `Escape`, Telegram `BackButton`, reduced motion и раскрытие `72% → full`.
+focus trap/return, `Escape`, Telegram `BackButton`, reduced motion и раскрытие `76% → full`.
 На mobile release gate `390×844` и `430×932` горизонтального переполнения нет; длинные
 значения переносятся, нижняя навигация не перекрывает шторку.
 
@@ -78,6 +78,15 @@ focus trap/return, `Escape`, Telegram `BackButton`, reduced motion и раскр
   gamepass live-state, payments/refunds, immutable money snapshots, fulfillment, события,
   связанные заказы и warnings в `FULL|PARTIAL` dossier.
 - Cookie, токены и сырые секреты в response не входят; оба endpoint защищены TWA JWT.
+- В шторке досье значения превращены в рабочие: код заказа, TG/VK ID, email, Pass ID,
+  ссылка на gamepass и заметка копируются отдельной кнопкой; ссылки на контакт и Roblox
+  открываются явно. Экран группирует клиента, геймпасс, деньги и след заказа без гигантских
+  статичных строк.
+- Блок «Управление» выполняет только существующие защищённые операции `/api/twa/orders`:
+  отметить выкупленным (с подтверждением и уведомлением клиента), отправить в ошибку,
+  вернуть из ошибки к выкупу, добавить/убрать избранное и перенести. Для переноса обязательны
+  целевой раздел и заметка, поэтому сервер добавляет audit-запись. «Полный заказ» оставлен
+  как безопасный переход для собственно выкупа и сложных операций (refund/rebind/edit).
 
 ### Точная прибыль DIRECT/AVITO
 

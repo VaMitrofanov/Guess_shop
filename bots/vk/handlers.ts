@@ -509,7 +509,7 @@ const VK_FAQ_ITEMS: { key: string; label: string; answer: string }[] = [
   { key: "when_buy",  label: "⏳ Когда выкупят?",           answer: "Обычно выкупаем за пару часов, максимум — в течение суток.\nКак только выкупим — бот пришлёт уведомление прямо сюда. Ничего делать не нужно, просто жди 👌" },
   { key: "when_rbx",  label: "💎 Когда придут робуксы?",    answer: "После выкупа Roblox замораживает робуксы на 5–7 дней (это их стандартная процедура — «Pending Robux»).\n\nПроверить: roblox.com/transactions → строка Pending.\n\nМы на это повлиять не можем — дальше всё на стороне Roblox." },
   // Ф6.1 (2026-07-12): механика бонуса — одно место правды review-eligibility.ts.
-  { key: "bonus",     label: "🎁 Бонус за отзыв",           answer: `За отзыв на Wildberries дарим +${REVIEW_BONUS_AMOUNT} R$ к любому прямому заказу.\n\nКак получить:\n1. Оставь отзыв с текстом и фото (только оценка не подойдёт).\n2. Пришли скриншот сюда фотографией (не файлом).\n3. После проверки начислим сразу — бонус действует ${REVIEW_BONUS_EXPIRY_DAYS} дней.\n\nКак потратить: оформи прямой заказ в боте — бонус добавится к номиналу автоматически (без карточки WB).` },
+  { key: "bonus",     label: "🎁 Бонус за отзыв",           answer: `За отзыв на Wildberries дарим +${REVIEW_BONUS_AMOUNT} R$ к следующей прямой покупке в RobloxBank.\n\nКак получить:\n1. Оставь отзыв с текстом и фото (только оценка не подойдёт).\n2. Пришли скриншот сюда фотографией (не файлом).\n3. После проверки бонус появится на балансе на ${REVIEW_BONUS_EXPIRY_DAYS} дней.\n\nВажно: отдельно ${REVIEW_BONUS_AMOUNT} R$ не выдаются и к покупке на WB не добавляются. Оформи следующий прямой заказ в боте или на robloxbank.ru — бонус автоматически увеличит его номинал.` },
   { key: "what_now",  label: "🤔 Что мне делать сейчас?",   answer: "Если заказ оформлен — просто жди. Бот сам пришлёт уведомление, когда геймпасс будет выкуплен.\n\nЕсли ещё не создал геймпасс — открой 📖 Инструкцию и пройди все шаги." },
   { key: "wrong_gp",  label: "✏️ Не тот геймпасс/ник",     answer: "Напиши «сменить ник» — можно перевыбрать ник и геймпасс в любой момент до выкупа." },
   { key: "how_gp",    label: "📖 Как создать геймпасс?",    answer: "Полная пошаговая инструкция — по кнопке 📖 ИНСТРУКЦИЯ.\n\nВкратце: зайди на create.roblox.com → выбери свою игру → Monetization → Passes → Create Pass → поставь нужную цену → сохрани." },
@@ -776,7 +776,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     return;
   }
 
-  // ── 📸 review_hint — клиент тапнул «Отзыв = +100 R$» на карточке COMPLETED ──
+  // ── 📸 review_hint — клиент тапнул «Отзыв → бонус к покупке» на COMPLETED ──
   if (msgPayload?.command === "review_hint") {
     const rhUser = await (db as any).user.findUnique({
       where: { vkId: String(vkUserId) },
@@ -794,7 +794,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     await ctx.reply({
       message:
         "📸 Оставь отзыв на Wildberries с текстом и фото, сделай скриншот и пришли его сюда фотографией (не файлом).\n\n" +
-        "После проверки бонус +100 R$ придёт автоматически (действует на любой номинал).",
+        "После проверки +100 R$ появятся на бонусном балансе на 30 дней. Это не отдельная выдача и не бонус к покупке на WB: сумма автоматически добавится к следующей прямой покупке в боте или на robloxbank.ru.",
       keyboard: Keyboard.builder()
         .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "secondary" })
         .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "positive" })
@@ -2953,7 +2953,7 @@ async function handleReviewScreenshot(
       await ctx.reply({
         message:
           "📸 Оставь отзыв на Wildberries с текстом и фото, пришли скриншот в виде фотографии (не файлом).\n" +
-          "После проверки получишь +100 R$ (действует на любой номинал).",
+          "После проверки получишь +100 R$ к следующей прямой покупке в боте или на robloxbank.ru. Отдельно бонус не выдаётся и к покупке на WB не добавляется.",
         keyboard: Keyboard.builder()
           .textButton({ label: "📊 Мой заказ", payload: { command: "status" }, color: "secondary" })
           .textButton({ label: "💎 Купить напрямую", payload: { command: "start_direct" }, color: "positive" })
@@ -3022,7 +3022,7 @@ async function handleReviewScreenshot(
 
   clearState(vkUserId);
 
-  await ctx.reply("✅ Отзыв получен! Менеджер проверит его в ближайшее время и начислит бонус 100 R$ (действует на любой номинал).");
+  await ctx.reply("✅ Отзыв получен! Менеджер проверит его в ближайшее время. После одобрения +100 R$ появятся на бонусном балансе для следующей прямой покупки в боте или на robloxbank.ru.");
 
   // Forward to Telegram admins
   const reviewerName = user.name ?? await vkGetName(vkUserId);
@@ -3405,7 +3405,7 @@ async function handleIdleMessage(
           "\n💡 Они уже у тебя в Roblox — лежат в пендинге (заморожены самим Roblox). Проверить: roblox.com/transactions → строка Pending." +
           (reviewClaimed
             ? "\n\n🚀 Хочешь заказать ещё? Постоянным клиентам — прямое обслуживание без очереди по лучшему курсу! Пиши: https://t.me/RobloxBank_PA"
-            : "\n\n🎁 Оставь отзыв на Wildberries с текстом и фото — получи +100 R$ бонусом (действует на любой номинал)!\nПришли скриншот отзыва сюда фотографией.")
+            : "\n\n🎁 Оставь отзыв на Wildberries с текстом и фото — получи +100 R$ к следующей прямой покупке в боте или на robloxbank.ru. Отдельно бонус не выдаётся.\nПришли скриншот отзыва сюда фотографией.")
         : order.status === "REJECTED" && order.isDirectOrder
         ? `\n\n${order.rejectionReason ? `Причина: ${order.rejectionReason}\n\n` : ""}Если хочешь — оформи новый заказ.`
         : order.status === "REJECTED"
@@ -3436,7 +3436,7 @@ async function handleIdleMessage(
       // Всегда уводим в прямой заказ. Кнопка отзыва — только пока бонус не начислен.
       kb.textButton({ label: "💎 Заказать напрямую", payload: { command: "start_direct" }, color: "positive" }).row();
       if (!reviewClaimed && !order.isDirectOrder) {
-        kb.textButton({ label: "📸 Отзыв = +100 R$ бонус", payload: { command: "review_hint" }, color: "primary" }).row();
+        kb.textButton({ label: "📸 Отзыв → бонус к покупке", payload: { command: "review_hint" }, color: "primary" }).row();
       }
     } else if ((order.status === "PENDING" || order.status === "IN_PROGRESS") && !order.isDirectOrder) {
       // "Передумал" — re-pick nick/gamepass while the order isn't bought yet.

@@ -234,7 +234,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           // brief sign-in card for login without code.
           try {
             const tgToken   = process.env.TG_TOKEN;
-            const tgChatIds = process.env.TG_CHAT_ID?.split(",").map((id) => id.trim()) ?? [];
+            const tgChatIds = [...new Set(
+              process.env.TG_CHAT_ID?.split(",").map((id) => id.trim()).filter(Boolean) ?? [],
+            )];
             if (tgToken && tgChatIds.length > 0) {
               let msg: string;
               let reply_markup: unknown = undefined;

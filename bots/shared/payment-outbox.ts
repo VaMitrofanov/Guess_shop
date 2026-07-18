@@ -38,8 +38,10 @@ async function dispatch(message: any, bot: TelegramSender) {
   });
   if (!order) throw new Error("outbox order not found");
   const payment = order.paymentAttempts[0];
-  const adminIds = (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")
-    .split(",").map((id) => id.trim()).filter(Boolean);
+  const adminIds = [...new Set(
+    (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")
+      .split(",").map((id) => id.trim()).filter(Boolean),
+  )];
   if (adminIds.length === 0) throw new Error("ADMIN_IDS/TG_CHAT_ID is not configured");
 
   let adminText: string;
@@ -114,8 +116,12 @@ async function processBatch(bot: TelegramSender) {
         },
       });
       if (dead) {
-        await Promise.allSettled((process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "").split(",").filter(Boolean)
-          .map((id) => tgSend(id.trim(), `🚨 <b>OUTBOX DEAD-LETTER</b>\nID: <code>${message.id}</code>\n${escapeHtml(lastError)}`)));
+        const adminIds = [...new Set(
+          (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")
+            .split(",").map((id) => id.trim()).filter(Boolean),
+        )];
+        await Promise.allSettled(adminIds
+          .map((id) => tgSend(id, `🚨 <b>OUTBOX DEAD-LETTER</b>\nID: <code>${message.id}</code>\n${escapeHtml(lastError)}`)));
       }
     }
   }

@@ -183,6 +183,7 @@ export async function POST(request: Request) {
         userDisplay,
         creatorName: nick,
         previousOrderCount,
+        createdAt: order.createdAt,
       });
     } catch (cardErr) {
       console.error("[wb-code/select-gamepass] admin card failed:", cardErr);

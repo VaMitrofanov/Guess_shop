@@ -1,4 +1,4 @@
-import { sendTelegramMessage } from "@/lib/telegram";
+import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
 
 export type RetailBuyoutSource = "twa-order" | "twa-account";
 
@@ -18,12 +18,7 @@ function escapeHtml(value: string): string {
 }
 
 function adminIds(): string[] {
-  return [...new Set(
-    (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean),
-  )];
+  return telegramAdminRecipients();
 }
 
 export function buildRetailBuyoutAdminCard(input: RetailBuyoutAdminInput): string {

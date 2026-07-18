@@ -5,7 +5,10 @@ import {
   ChevronRight,
   CircleAlert,
   CircleDollarSign,
+  Clipboard,
+  ExternalLink,
   Gamepad2,
+  History,
   Link2,
   MessageCircleQuestion,
   PackageOpen,
@@ -15,6 +18,7 @@ import {
   ShieldCheck,
   ShoppingBag,
   TriangleAlert,
+  UserRound,
   X,
 } from "lucide-react";
 import BottomSheet from "../BottomSheet";
@@ -83,13 +87,27 @@ interface SearchPayload {
 interface OrderDossier {
   completeness: "FULL" | "PARTIAL";
   observedAt: string;
-  order: { id: string; code: string; source: string; status: string; amount: number; robloxUsername: string | null };
-  client: { username: string | null; displayName: string | null; tgId: string | null; vkId: string | null };
-  gamepass: { id: string | null; name?: string; livePrice?: number; reusedIn?: { wbCode: string } | null };
-  money: { saleAmountKopecks: number | null; purchaseCostKopecks: number | null; profitKopecks: number | null; payments: Array<{ status: string }> };
+  order: {
+    id: string; code: string; source: string; status: string; amount: number; robloxUsername: string | null;
+    createdAt: string; pendingAt: string | null; completedAt: string | null; favorite: boolean; note: string | null;
+  };
+  client: {
+    username: string | null; displayName: string | null; tgId: string | null; vkId: string | null; email: string | null;
+    balance: number; identities: Array<{ provider: string; subject: string; verifiedAt: string | null }>;
+  };
+  gamepass: {
+    id: string | null; url: string | null; name?: string; expectedPrice: number; livePrice?: number; isForSale?: boolean;
+    sellerName?: string | null; observedAt?: string; reusedIn?: { wbCode: string; status: string } | null;
+  };
+  money: {
+    saleAmountKopecks: number | null; purchaseCostKopecks: number | null; profitKopecks: number | null;
+    payments: Array<{ status: string; provider: string; amountKopecks: number; refundedAmountKopecks: number; updatedAt: string }>;
+  };
   fulfillment: { purchaserUsername: string | null; paidAt: string | null; completedAt: string | null };
-  related: Array<{ id: string }>;
+  communications: { events: Array<{ type: string; createdAt: string }> };
+  related: Array<{ id: string; wbCode: string; status: string; amount: number; orderSource: string; createdAt: string }>;
   warnings: string[];
+  partialErrors: string[];
 }
 
 type SearchFilter = "all" | "orders" | "gamepasses";
@@ -128,41 +146,209 @@ function plural(count: number, one: string, few: string, many: string) {
   return many;
 }
 
-function DossierContent({ dossier }: { dossier: OrderDossier }) {
-  const money = dossier.money ?? {};
-  const groups = [
-    { label: "Клиент", value: dossier.client?.username ? `@${dossier.client.username}` : dossier.client?.displayName ?? "—", sub: dossier.client?.tgId ? `TG ${dossier.client.tgId}` : dossier.client?.vkId ? `VK ${dossier.client.vkId}` : "identity не указана" },
-    { label: "Геймпасс", value: dossier.gamepass?.name ?? dossier.gamepass?.id ?? "—", sub: dossier.gamepass?.livePrice != null ? `${dossier.gamepass.livePrice} R$ · live` : "live-данные недоступны" },
-    { label: "Оплата", value: money.payments?.[0]?.status ?? (dossier.fulfillment?.paidAt ? "Подтверждена" : "—"), sub: money.saleAmountKopecks != null ? `Продажа ${kopecks(money.saleAmountKopecks)}` : "точная продажа не зафиксирована" },
-    { label: "Выкуп", value: dossier.fulfillment?.purchaserUsername ?? "Не назначен", sub: dossier.fulfillment?.completedAt ? new Date(dossier.fulfillment.completedAt).toLocaleString("ru-RU") : "ещё не завершён" },
-    { label: "Связи", value: `${dossier.related?.length ?? 0} прошлых заказов`, sub: dossier.gamepass?.reusedIn ? `ГП также в ${dossier.gamepass.reusedIn.wbCode}` : "дубликатов не найдено" },
-    { label: "Контроль", value: dossier.completeness === "FULL" ? "Досье полное" : "Частичные данные", sub: new Date(dossier.observedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) },
-  ];
+function dateTime(value: string | null | undefined) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Moscow" }) + " МСК";
+}
+
+function eventLabel(type: string) {
+  const labels: Record<string, string> = {
+    CREATED: "Создан", PENDING: "В очереди", IN_PROGRESS: "В работе", COMPLETED: "Выкуплен", REJECTED: "Отклонён",
+    PAYMENT_CONFIRMED: "Оплата подтверждена", PAYMENT_REFUNDED: "Возврат подтверждён",
+  };
+  return labels[type] ?? type.replaceAll("_", " ");
+}
+
+function CopyAction({ value, label, compact = false }: { value: string | null | undefined; label: string; compact?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  if (!value) return null;
+  const copy = async () => {
+    let copiedNow = false;
+    try {
+      await navigator.clipboard.writeText(value);
+      copiedNow = true;
+    } catch {
+      try {
+        const input = document.createElement("textarea");
+        input.value = value;
+        input.style.position = "fixed";
+        input.style.opacity = "0";
+        document.body.append(input);
+        input.select();
+        copiedNow = document.execCommand("copy");
+        input.remove();
+      } catch { /* clipboard unavailable */ }
+    }
+    if (copiedNow) {
+      haptic.notify("success");
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1_600);
+    }
+  };
   return (
-    <div className="twa-intelligence twa-search-dossier">
-      <div className="twa-intelligence-head">
-        <div><span>{dossier.order.source} · {dossier.order.status}</span><strong>{dossier.order.code}</strong></div>
-        <ShieldCheck size={24} color={dossier.completeness === "FULL" ? C.green : C.yellow} />
-      </div>
-      <div className="twa-intelligence-person">
-        <div><strong>{dossier.order.robloxUsername ?? "Ник не подтверждён"}</strong><span>{dossier.client?.username ? `@${dossier.client.username}` : dossier.client?.displayName ?? "Клиент без username"}</span></div>
-        <b>{dossier.order.amount.toLocaleString("ru-RU")} R$</b>
-      </div>
-      {(money.saleAmountKopecks != null || money.purchaseCostKopecks != null) && (
-        <div className="twa-money-triplet">
-          <span><small>Продажа</small><b>{kopecks(money.saleAmountKopecks)}</b></span>
-          <span><small>Себестоимость</small><b>{kopecks(money.purchaseCostKopecks)}</b></span>
-          <span><small>Прибыль</small><b style={{ color: money.profitKopecks != null && money.profitKopecks < 0 ? C.red : C.green }}>{kopecks(money.profitKopecks)}</b></span>
+    <button type="button" className={`twa-dossier-action${compact ? " is-compact" : ""}`} onClick={() => void copy()}>
+      <Clipboard size={compact ? 15 : 16} />{copied ? "Скопировано" : label}
+    </button>
+  );
+}
+
+function DossierLink({ href, label }: { href: string | null | undefined; label: string }) {
+  if (!href) return null;
+  return <a className="twa-dossier-action" href={href} target="_blank" rel="noreferrer"><ExternalLink size={16} />{label}</a>;
+}
+
+const DOSSIER_MOVE_TARGETS = [
+  ["BUYOUT", "К выкупу"], ["AWAITING_LINK", "Ждут ссылку"], ["ERROR", "Ошибка"],
+  ["DONE", "Готово"], ["FAVORITES", "Избранное"],
+] as const;
+
+function DossierContent({ dossier, token, onOpenOrder, onDossierChange }: {
+  dossier: OrderDossier; token: string; onOpenOrder: (code: string) => void; onDossierChange: (next: OrderDossier) => void;
+}) {
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveTarget, setMoveTarget] = useState<(typeof DOSSIER_MOVE_TARGETS)[number][0] | "">("");
+  const [moveNote, setMoveNote] = useState("");
+  const [actionResult, setActionResult] = useState<{ text: string; error?: boolean } | null>(null);
+  const money = dossier.money ?? {};
+  const clientTitle = dossier.client?.username ? `@${dossier.client.username}` : dossier.client?.displayName ?? "Клиент без имени";
+  const primaryId = dossier.client?.tgId ? `TG ${dossier.client.tgId}` : dossier.client?.vkId ? `VK ${dossier.client.vkId}` : "Контакт не привязан";
+  const payment = money.payments?.[0];
+  const profitTone = money.profitKopecks != null && money.profitKopecks < 0 ? "is-negative" : "";
+  const liveState = dossier.gamepass?.livePrice != null
+    ? `${dossier.gamepass.livePrice.toLocaleString("ru-RU")} R$ · ${dossier.gamepass.isForSale === false ? "снят с продажи" : "live"}`
+    : `ожидалось ${dossier.gamepass?.expectedPrice.toLocaleString("ru-RU")} R$`;
+  const contactLink = dossier.client?.tgId ? `tg://user?id=${dossier.client.tgId}` : dossier.client?.vkId ? `https://vk.com/id${dossier.client.vkId}` : null;
+
+  async function runAction(action: "complete" | "set-error" | "restore-to-buyout" | "toggle-favorite" | "move-to") {
+    if (busyAction) return;
+    if (action === "complete" && !window.confirm("Отметить заказ выкупленным? Клиенту уйдёт уведомление.")) return;
+    if (action === "set-error" && !window.confirm("Переместить заказ в ошибки?")) return;
+    if (action === "move-to" && (!moveTarget || !moveNote.trim())) {
+      setActionResult({ text: "Для переноса выберите раздел и оставьте заметку.", error: true });
+      return;
+    }
+    setBusyAction(action);
+    setActionResult(null);
+    try {
+      const response = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          action,
+          orderId: dossier.order.id,
+          ...(action === "move-to" ? { target: moveTarget, note: moveNote.trim() } : {}),
+        }),
+      });
+      const payload = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) {
+        haptic.notify("error");
+        setActionResult({ text: payload.error ?? "Действие не выполнено", error: true });
+        return;
+      }
+      haptic.notify("success");
+      const moveStatus = moveTarget === "BUYOUT" ? "PENDING"
+        : moveTarget === "AWAITING_LINK" ? "AWAITING_GAMEPASS"
+          : moveTarget === "ERROR" ? "ERROR"
+            : moveTarget === "DONE" ? "COMPLETED"
+              : dossier.order.status;
+      const status = action === "complete" ? "COMPLETED"
+        : action === "set-error" ? "ERROR"
+          : action === "restore-to-buyout" ? "PENDING"
+            : action === "move-to" ? moveStatus : dossier.order.status;
+      onDossierChange({ ...dossier, order: { ...dossier.order, status, favorite: action === "toggle-favorite" ? !dossier.order.favorite : dossier.order.favorite } });
+      if (action === "move-to") { setMoveOpen(false); setMoveNote(""); setMoveTarget(""); }
+      setActionResult({ text: action === "complete" ? "Заказ отмечен выкупленным" : action === "set-error" ? "Заказ перенесён в ошибки" : action === "restore-to-buyout" ? "Заказ возвращён к выкупу" : action === "toggle-favorite" ? "Избранное обновлено" : "Заказ перенесён" });
+    } catch {
+      haptic.notify("error");
+      setActionResult({ text: "Ошибка сети — статус не менялся", error: true });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  return (
+    <div className="twa-search-dossier">
+      <header className="twa-dossier-hero">
+        <div className="twa-dossier-kicker"><span>Операционное досье · {dossier.order.source}</span><b className={dossier.completeness === "FULL" ? "is-ready" : "is-partial"}>{dossier.completeness === "FULL" ? "Проверено" : "Частично"}</b></div>
+        <div className="twa-dossier-code-row"><strong>{dossier.order.code}</strong><CopyAction value={dossier.order.code} label="Код" compact /></div>
+        <div className="twa-dossier-summary">
+          <div><span>{dossier.order.status}</span><strong>{dossier.order.robloxUsername ?? "Ник Roblox не подтверждён"}</strong></div>
+          <b>{dossier.order.amount.toLocaleString("ru-RU")} <small>R$</small></b>
         </div>
-      )}
+      </header>
+
       {dossier.warnings?.map(warning => <div key={warning} className="twa-intelligence-warning"><CircleAlert size={17} />{warning}</div>)}
-      <div className="twa-inset-group">
-        {groups.map(group => (
-          <div className="twa-inset-row" key={group.label}>
-            <span>{group.label}</span><div><strong>{group.value}</strong><small>{group.sub}</small></div>
+      {dossier.partialErrors?.map(error => <div key={error} className="twa-dossier-partial"><CircleAlert size={16} />{error}</div>)}
+
+      <section className="twa-dossier-section">
+        <div className="twa-dossier-section-head"><span><UserRound size={16} />Клиент</span><small>{primaryId}</small></div>
+        <div className="twa-dossier-value"><strong>{clientTitle}</strong><span>{dossier.client?.displayName && dossier.client.displayName !== clientTitle ? dossier.client.displayName : ""}</span></div>
+        <div className="twa-dossier-actions">
+          <CopyAction value={dossier.client?.tgId} label={`TG ${dossier.client?.tgId ?? ""}`} />
+          <CopyAction value={dossier.client?.vkId} label={`VK ${dossier.client?.vkId ?? ""}`} />
+          <CopyAction value={dossier.client?.email} label="Email" />
+          <DossierLink href={contactLink} label="Открыть чат" />
+        </div>
+      </section>
+
+      <section className="twa-dossier-section twa-dossier-management">
+        <div className="twa-dossier-section-head"><span><ShieldCheck size={16} />Управление</span><small>переносы пишутся в аудит</small></div>
+        <div className="twa-dossier-manage-actions">
+          {dossier.order.status === "ERROR" ? (
+            <button type="button" className="twa-dossier-manage-action is-success" disabled={!!busyAction} onClick={() => void runAction("restore-to-buyout")}>Вернуть к выкупу</button>
+          ) : ["PENDING", "IN_PROGRESS"].includes(dossier.order.status) && (
+            <button type="button" className="twa-dossier-manage-action is-success" disabled={!!busyAction} onClick={() => void runAction("complete")}>{busyAction === "complete" ? "Отмечаем…" : "Выкуплено"}</button>
+          )}
+          {["PENDING", "IN_PROGRESS", "ERROR"].includes(dossier.order.status) && dossier.order.status !== "ERROR" && (
+            <button type="button" className="twa-dossier-manage-action is-warning" disabled={!!busyAction} onClick={() => void runAction("set-error")}>В ошибку</button>
+          )}
+          <button type="button" className="twa-dossier-manage-action" disabled={!!busyAction} onClick={() => setMoveOpen(value => !value)}>Переместить</button>
+          <button type="button" className="twa-dossier-manage-action" disabled={!!busyAction} onClick={() => void runAction("toggle-favorite")}>{dossier.order.favorite ? "Убрать из избранного" : "В избранное"}</button>
+          <button type="button" className="twa-dossier-manage-action is-quiet" onClick={() => onOpenOrder(dossier.order.code)}>Полный заказ</button>
+        </div>
+        {moveOpen && (
+          <div className="twa-dossier-move-form">
+            <div className="twa-dossier-move-targets">{DOSSIER_MOVE_TARGETS.map(([id, label]) => <button key={id} type="button" className={moveTarget === id ? "is-selected" : ""} onClick={() => setMoveTarget(id)}>{label}</button>)}</div>
+            <textarea value={moveNote} onChange={event => setMoveNote(event.target.value)} rows={2} maxLength={500} placeholder="Почему переносим? Эта заметка попадёт в аудит." aria-label="Заметка к переносу" />
+            <button type="button" className="twa-dossier-move-submit" disabled={busyAction === "move-to"} onClick={() => void runAction("move-to")}>{busyAction === "move-to" ? "Переносим…" : "Подтвердить перенос"}</button>
           </div>
-        ))}
-      </div>
+        )}
+        {actionResult && <div className={`twa-dossier-action-result${actionResult.error ? " is-error" : ""}`}>{actionResult.text}</div>}
+      </section>
+
+      <section className="twa-dossier-section">
+        <div className="twa-dossier-section-head"><span><Gamepad2 size={16} />Геймпасс</span><small>{liveState}</small></div>
+        <div className="twa-dossier-value"><strong>{dossier.gamepass?.name ?? "Геймпасс не привязан"}</strong><span>{dossier.gamepass?.sellerName ? `Создатель: ${dossier.gamepass.sellerName}` : dossier.gamepass?.id ? `Pass ID ${dossier.gamepass.id}` : ""}</span></div>
+        <div className="twa-dossier-actions">
+          <CopyAction value={dossier.gamepass?.id} label="Скопировать ID" />
+          <CopyAction value={dossier.gamepass?.url} label="Скопировать ссылку" />
+          <DossierLink href={dossier.gamepass?.url} label="Открыть Roblox" />
+        </div>
+      </section>
+
+      <section className="twa-dossier-section">
+        <div className="twa-dossier-section-head"><span><CircleDollarSign size={16} />Деньги</span><small>{payment?.status ?? (dossier.fulfillment?.paidAt ? "Подтверждена" : "Не зафиксирована")}</small></div>
+        <div className="twa-dossier-finances">
+          <div><small>Продажа</small><strong>{kopecks(money.saleAmountKopecks)}</strong></div>
+          <div><small>Себестоимость</small><strong>{kopecks(money.purchaseCostKopecks)}</strong></div>
+          <div className={profitTone}><small>Прибыль</small><strong>{kopecks(money.profitKopecks)}</strong></div>
+        </div>
+      </section>
+
+      <section className="twa-dossier-section">
+        <div className="twa-dossier-section-head"><span><History size={16} />След и контроль</span><small>{dateTime(dossier.observedAt)}</small></div>
+        <div className="twa-dossier-facts">
+          <div><span>Создан</span><strong>{dateTime(dossier.order.createdAt)}</strong></div>
+          <div><span>Выкуп</span><strong>{dossier.fulfillment?.purchaserUsername ?? "Не назначен"}</strong><small>{dateTime(dossier.fulfillment?.completedAt ?? dossier.fulfillment?.paidAt)}</small></div>
+          {dossier.related?.length > 0 && <button type="button" className="twa-dossier-related" onClick={() => onOpenOrder(dossier.related[0].wbCode)}><span>Связанные заказы</span><strong>{dossier.related.length} · открыть последний <ChevronRight size={15} /></strong></button>}
+          {dossier.communications?.events?.slice(0, 3).map(event => <div key={`${event.type}-${event.createdAt}`}><span>{eventLabel(event.type)}</span><strong>{dateTime(event.createdAt)}</strong></div>)}
+        </div>
+      </section>
+
+      {dossier.order.note && <section className="twa-dossier-note"><div><span>Заметка менеджера</span><CopyAction value={dossier.order.note} label="Копировать" compact /></div><p>{dossier.order.note}</p></section>}
     </div>
   );
 }
@@ -299,7 +485,7 @@ function SmartSearch({ token, onOpenOrder, onOpenAccount }: { token: string; onO
           </button>
         )}
       >
-        {dossier ? <DossierContent dossier={dossier} /> : selectedOrder ? <SearchPreview order={selectedOrder} /> : null}
+        {dossier ? <DossierContent dossier={dossier} token={token} onOpenOrder={onOpenOrder} onDossierChange={setDossier} /> : selectedOrder ? <SearchPreview order={selectedOrder} /> : null}
       </BottomSheet>
     </section>
   );

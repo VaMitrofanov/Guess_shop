@@ -10,6 +10,7 @@
 import { tgSend, tgSendPhoto, escapeHtml } from "./notify";
 import { db } from "./db";
 import { directPrice } from "./retail-pricing";
+import { formatOrderAge } from "./order-age";
 export {
   BONUS_MIN_PACK,
   CUSTOM_MAX,
@@ -215,11 +216,13 @@ export async function notifyBotError(p: {
 
 /** Comma-separated list of Telegram admin chat IDs from env. */
 export const ADMIN_IDS: string[] = (
-  process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? ""
-)
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+  [...new Set(
+    (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  )]
+);
 
 export interface RetailBuyoutAdminAlert {
   wbCode: string;
@@ -530,6 +533,7 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   const dateStr = order.createdAt 
     ? new Date(order.createdAt).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " МСК" 
     : new Date().toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " МСК";
+  const age = formatOrderAge(order.createdAt ?? new Date());
 
   const platformEmojis: Record<string, string> = { TG: "📱", VK: "📘", WEB: "🌐" };
   const platformEmoji = platformEmojis[order.platform] || "📦";
@@ -566,6 +570,7 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
     loyaltyLine +
     `${platformEmoji} Источник: <b>${order.platform}</b>\n` +
     `📅 Время: <b>${dateStr}</b>\n` +
+    `⏳ Возраст заказа: <b>${age}</b>\n` +
     `👤 Юзер: ${order.userDisplay}\n` +
     bonusLine +
     creatorLine +

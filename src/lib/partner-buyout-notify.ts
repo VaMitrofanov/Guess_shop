@@ -1,4 +1,4 @@
-import { sendTelegramMessage } from "@/lib/telegram";
+import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
 
 /**
  * Admin notification for a partner (B2B) buyout.
@@ -117,10 +117,7 @@ export async function notifyPartnerBuyout(
   input: PartnerBuyoutCardInput,
 ): Promise<{ admins: number; sent: number }> {
   const token = process.env.TG_TOKEN;
-  const adminIds = (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const adminIds = telegramAdminRecipients();
 
   if (!token || adminIds.length === 0) {
     console.warn("[partner-buyout-notify] TG_TOKEN or admin IDs missing — buyout card not sent");

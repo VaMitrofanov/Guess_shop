@@ -1,4 +1,5 @@
-import { sendTelegramMessage } from "@/lib/telegram";
+import { formatOrderAge } from "@/lib/order-age";
+import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
 
 /**
  * Web-side admin order card.
@@ -27,23 +28,13 @@ export interface WebOrderCard {
   userDisplay: string; // pre-escaped HTML
   creatorName?: string;
   previousOrderCount?: number;
+  createdAt: Date | string;
 }
 
-export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {
-  const token = process.env.TG_TOKEN;
-  const adminIds = (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  if (!token || adminIds.length === 0) {
-    console.warn("[admin-card] TG_TOKEN or admin IDs missing — web order card not sent");
-    return;
-  }
-
+export function buildWebOrderCardText(order: WebOrderCard, now: Date | number = Date.now()): string {
   const passPrice = Math.ceil(order.amount / 0.7);
   const dateStr =
-    new Date().toLocaleString("ru-RU", {
+    new Date(order.createdAt).toLocaleString("ru-RU", {
       timeZone: "Europe/Moscow",
       day: "2-digit",
       month: "2-digit",
@@ -51,25 +42,22 @@ export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {
       hour: "2-digit",
       minute: "2-digit",
     }) + " МСК";
-
   const platformEmoji = order.platform === "VK" ? "📘" : "📱";
-
   const prev = order.previousOrderCount ?? 0;
   const loyaltyLine =
     prev >= 5 ? `👑 <b>VIP КЛИЕНТ (${prev} заказов)</b>\n` : prev >= 1 ? `🔄 <b>ПОВТОРНЫЙ КЛИЕНТ</b>\n` : "";
-
   const creatorLine = order.creatorName
     ? `🎮 Создатель ГП: <b>${escapeHtml(order.creatorName)}</b>\n`
     : "";
 
-  // Заголовок = код ВБ (номера заказов убраны — C2, 2026-07-03).
-  const text =
+  return (
     `📦 <b>ЗАКАЗ <code>${order.wbCode}</code></b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
     `🌐 <b>ONE-TAP С САЙТА</b>\n` +
     loyaltyLine +
     `${platformEmoji} Источник: <b>${order.platform} (сайт)</b>\n` +
     `📅 Время: <b>${dateStr}</b>\n` +
+    `⏳ Возраст заказа: <b>${formatOrderAge(order.createdAt, now)}</b>\n` +
     `👤 Юзер: ${order.userDisplay}\n` +
     creatorLine +
     `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
@@ -78,7 +66,20 @@ export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {
     (() => {
       const m = order.gamepassUrl.match(/game-pass(?:es)?\/(\d+)/);
       return m ? `\n🎫 Pass ID: <code>${m[1]}</code>` : "";
-    })();
+    })()
+  );
+}
+
+export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {
+  const token = process.env.TG_TOKEN;
+  const adminIds = telegramAdminRecipients();
+
+  if (!token || adminIds.length === 0) {
+    console.warn("[admin-card] TG_TOKEN or admin IDs missing — web order card not sent");
+    return;
+  }
+
+  const text = buildWebOrderCardText(order);
 
   const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(order.wbCode)}`;
   const reply_markup = {
