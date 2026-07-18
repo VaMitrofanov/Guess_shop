@@ -7,6 +7,9 @@ import {
 describe("post-purchase channel acquisition", () => {
   test("appears only after a confirmed payment and never after a full refund", () => {
     expect(canOfferPostPurchaseChannels("PAYMENT_PENDING", "INITIATED")).toBe(false);
+    expect(canOfferPostPurchaseChannels("PENDING", null)).toBe(false);
+    expect(canOfferPostPurchaseChannels("COMPLETED", null)).toBe(false);
+    expect(canOfferPostPurchaseChannels("PENDING", "AUTHORIZED")).toBe(true);
     expect(canOfferPostPurchaseChannels("PENDING", "CONFIRMED")).toBe(true);
     expect(canOfferPostPurchaseChannels("IN_PROGRESS", "CONFIRMED")).toBe(true);
     expect(canOfferPostPurchaseChannels("COMPLETED", "CONFIRMED")).toBe(true);

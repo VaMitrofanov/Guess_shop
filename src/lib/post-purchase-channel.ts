@@ -7,7 +7,6 @@ export const POST_PURCHASE_CHANNEL_DESTINATIONS = [
 
 export type PostPurchaseChannelDestination = typeof POST_PURCHASE_CHANNEL_DESTINATIONS[number];
 
-const PAID_ORDER_STATUSES = new Set(["PENDING", "IN_PROGRESS", "COMPLETED"]);
 const PAID_PAYMENT_STATUSES = new Set(["AUTHORIZED", "CONFIRMED", "PARTIALLY_REFUNDED"]);
 const CLOSED_PAYMENT_STATUSES = new Set(["REJECTED", "CANCELED", "FAILED", "REFUNDED"]);
 
@@ -24,7 +23,11 @@ export function canOfferPostPurchaseChannels(
   paymentStatus: string | null | undefined,
 ) {
   if (CLOSED_PAYMENT_STATUSES.has(paymentStatus ?? "")) return false;
-  return PAID_ORDER_STATUSES.has(orderStatus) || PAID_PAYMENT_STATUSES.has(paymentStatus ?? "");
+  // Never infer payment from a fulfillment status alone. A legacy/manual
+  // order can be PENDING or COMPLETED without a canonical PaymentAttempt;
+  // showing acquisition CTAs there would falsely claim a paid purchase.
+  void orderStatus;
+  return PAID_PAYMENT_STATUSES.has(paymentStatus ?? "");
 }
 
 export function postPurchaseChannelEventType(destination: PostPurchaseChannelDestination) {

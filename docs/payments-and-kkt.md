@@ -26,6 +26,9 @@
   или status bearer token, принимает только четыре allowlisted destination и пишет один
   immutable `OrderEvent` на order+destination. Event означает только открытие CTA; факт
   подписки внешней платформой пока не подтверждается и так не называется в аналитике.
+  Paid-state не выводится из одного статуса `WbOrder`: нужен последний `PaymentAttempt` в
+  `AUTHORIZED`, `CONFIRMED` или `PARTIALLY_REFUNDED`, чтобы legacy/manual order не выглядел
+  как оплаченный при рассинхроне.
 
 ## Решение владельца по схеме (16.07.2026)
 

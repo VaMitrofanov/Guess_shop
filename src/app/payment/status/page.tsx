@@ -22,7 +22,10 @@ import {
   Send,
 } from "lucide-react";
 import Navbar from "@/components/navbar";
-import type { PostPurchaseChannelDestination } from "@/lib/post-purchase-channel";
+import {
+  canOfferPostPurchaseChannels,
+  type PostPurchaseChannelDestination,
+} from "@/lib/post-purchase-channel";
 import styles from "./page.module.css";
 
 type OrderSnapshot = {
@@ -36,8 +39,6 @@ type OrderSnapshot = {
 
 const FAILED_ORDER = new Set(["REJECTED", "ERROR"]);
 const FAILED_PAYMENT = new Set(["REJECTED", "CANCELED", "FAILED"]);
-const PAID_ORDER = new Set(["PENDING", "IN_PROGRESS", "COMPLETED"]);
-const PAID_PAYMENT = new Set(["AUTHORIZED", "CONFIRMED", "PARTIALLY_REFUNDED", "REFUNDED"]);
 
 function formatMoney(kopecks: number | null | undefined) {
   return typeof kopecks === "number"
@@ -47,10 +48,10 @@ function formatMoney(kopecks: number | null | undefined) {
 
 function phaseFor(snapshot: OrderSnapshot | null) {
   if (!snapshot) return 0;
+  if (!canOfferPostPurchaseChannels(snapshot.status, snapshot.paymentStatus)) return 0;
   if (snapshot.status === "COMPLETED") return 3;
   if (snapshot.status === "IN_PROGRESS") return 2;
-  if (PAID_ORDER.has(snapshot.status) || PAID_PAYMENT.has(snapshot.paymentStatus ?? "")) return 1;
-  return 0;
+  return 1;
 }
 
 function StatusContent() {
@@ -96,7 +97,8 @@ function StatusContent() {
 
   const failed = !!snapshot && (FAILED_ORDER.has(snapshot.status) || FAILED_PAYMENT.has(snapshot.paymentStatus ?? ""));
   const phase = phaseFor(snapshot);
-  const showChannels = phase >= 1 && !failed && snapshot?.paymentStatus !== "REFUNDED";
+  const showChannels = !!snapshot && !failed
+    && canOfferPostPurchaseChannels(snapshot.status, snapshot.paymentStatus);
 
   const recordChannelIntent = useCallback(async (destination: PostPurchaseChannelDestination) => {
     if (!orderId) return;

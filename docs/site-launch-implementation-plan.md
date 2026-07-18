@@ -28,6 +28,8 @@
   Каждый первый переход записывается идемпотентным `POST_PURCHASE_*_OPENED` в `OrderEvent`,
   поэтому в `/admin/activity` виден channel-intent без PII; это метрика клика, а не ложное
   подтверждение фактической подписки.
+  Gate проверяет именно `PaymentAttempt` в состояниях `AUTHORIZED|CONFIRMED|PARTIALLY_REFUNDED`;
+  один только `WbOrder.status=PENDING/COMPLETED` не считается оплатой.
 - **Этап 3 не начат:** production credentials, SMTP/фискальная конфигурация, реальный платёж,
   возврат и rollout не выполнялись. Master gate должен оставаться `false`, mode — `off`.
 
