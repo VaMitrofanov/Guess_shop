@@ -400,7 +400,7 @@ gamepass-данными. Ручной скрипт не может быть вы
 воркеры при недоступной/невалидной session переходят в 15-минутный backoff вместо частых
 повторов с той же cookie.
 
-### 20. Email account lifecycle и доказательство consent — P0, 🟠 ЧАСТИЧНО ЗАКРЫТО (2026-07-17)
+### 20. Email account lifecycle и доказательство consent — 🟡 КОД ГОТОВ / SMTP ACCEPTANCE (2026-07-18)
 
 Регистрация требует `agreedToPrivacy: true` и bcrypt-хеширует пароль, однако email не
 проверяется одноразовой ссылкой, reset-пути нет, а согласие не сохраняется как versioned
@@ -415,20 +415,22 @@ evidence. Поэтому `EMAIL` identity нельзя трактовать ка
 иначе один хост выжигает бюджет жертвы и **блокирует ей вход** (поймано тестом на первой
 версии). Инвариант закреплён тестом.
 
-**Остаётся открытым:** verification link, password reset, versioned consent evidence,
-generic anti-enumeration ответы (сейчас `/api/auth/register` отвечает `Email already in
-use` и тем самым **позволяет перебирать, какие адреса зарегистрированы**), session
-revocation после reset.
+**Закрыто в коде 18.07:** verification/resend и password reset используют random 256-bit
+bearer, в БД хранится только SHA-256; TTL 24 часа/30 минут, consume-once выполняется
+атомарно. Регистрация даёт generic anti-enumeration ответ, `EMAIL` identity создаётся лишь
+после verification. `ConsentEvidence` хранит version/timestamp/source/keyed-IP-hash без
+сырого IP/UA. Reset пишет bcrypt-12 и увеличивает `sessionVersion`; JWT другой версии
+инвалидируется. Legacy JWT без версии намеренно потребует повторный вход один раз после
+rollout, иначе такой токен нельзя было бы отозвать.
 
-**Блокер:** в проекте **нет почтового транспорта** (ни SMTP, ни Resend/SendGrid — проверено
-17.07). Verification/reset физически нечем отправить, поэтому клиент, потерявший пароль,
-сегодня не может вернуть доступ сам. Требуется решение владельца по провайдеру и
-доставляемости в РФ + SPF/DKIM/DMARC. Детали: `docs/auth-account-readiness-plan.md`.
+**Остаточный внешний блокер:** mailer и шаблоны готовы, но production SMTP/DNS ещё не
+приняты. Без `SMTP_USER`/`SMTP_PASSWORD` отправка честно отвечает `not_configured`; reset
+не создаёт ложное обещание доставки. Требуются Яндекс 360, MX/SPF/DKIM/DMARC и живая
+доставка на Yandex/Mail.ru/Gmail. Детали: `docs/email-setup.md`.
 
-**Риск (остаточный):** захват или блокирование доступа после опечатки/чужого email,
-невозможность безопасного recovery, отсутствие доказательства редакции согласия при споре,
-enumeration зарегистрированных адресов. In-memory лимит не заменяет shared limiter при
-нескольких web-репликах.
+**Риск (остаточный):** до SMTP acceptance самостоятельный recovery недоступен; in-memory
+лимит не заменяет shared limiter при нескольких web-репликах; абсолютный/idle TTL и кнопка
+«выйти на всех устройствах» остаются отдельным P1.
 
 ### 22. Название «Roblox Bank» — юридический / комплаенс риск — 🟡 ЧАСТИЧНО ЗАКРЫТО (2026-07-18)
 

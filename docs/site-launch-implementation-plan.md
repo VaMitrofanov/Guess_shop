@@ -39,10 +39,10 @@
 | A | Безопасный baseline, backup, counts, kill switch, health | 0,5 дня | **готово** |
 | B | Поэтапный допуск `off → allowlist → percentage → on`, server-side enforcement | 0,5 дня | **код готов, deploy после согласования** |
 | C | Guest draft → обязательный login/register → возврат в checkout | 0,5–1 день | **код готов, deploy после согласования** |
-| D | Полноценный ЛК: активный заказ, статусы, история, платёж/чек/возврат, identity | 1,5–3 дня | **основа и активный timeline готовы; lifecycle email ниже остаётся** |
-| E | Новый `/payment/status`: timeline, offline/retry, success/error/refund-safe states | 0,5–1 день | **код готов, visual QA пройден** |
-| F | Дизайн-аудит всех клиентских маршрутов и реальных устройств | 1–2 дня | **частично: desktop + 390 px для изменённых экранов** |
-| G | WB-выдача на сайте с обязательным channel handoff | 3–5 дней | **проектное решение ниже; реализация после согласования** |
+| D | Полноценный ЛК: активный заказ, статусы, история, платёж/чек/возврат, identity | 1,5–3 дня | **timeline + email verify/reset/consent/session revoke готовы; SMTP и live TG/VK остаются** |
+| E | Новый `/payment/status`: timeline, offline/retry, success/error/refund-safe states | 0,5–1 день | **в production с acquiring off; 320/390 px overflow fix готов к следующему deploy** |
+| F | Дизайн-аудит всех клиентских маршрутов и реальных устройств | 1–2 дня | **автоматизировано: `/`, checkout, login/register, WB guide, status на 390 px; status 320 px defect исправлен; реальные WebView остаются** |
+| G | WB-выдача на сайте с обязательным channel handoff | 3–5 дней | **foundation уже работает: bot identity до site one-tap order; G1/G2 hardening остаётся** |
 | H | Боевой E2E: allowlist-аккаунт → минимальная оплата → webhook → outbox → возврат | 0,5–1 день | **после A–G и ввода production credentials** |
 | I | Soft launch: команда → 10% → 50% → 100% с метриками и stop conditions | 1–3 дня | **ожидает H** |
 
@@ -80,16 +80,15 @@ batch добавлена верхняя карточка активного за
 
 До публичного `100% on` остаётся:
 
-1. Email verification, повторная отправка и password reset с одноразовыми hash-токенами.
-2. Evidence согласия: версия политики, timestamp, минимизированный IP/audit record.
-3. Проверка живых TG/VK login/link на реальных аккаунтах и безопасный merge-конфликт.
-4. Пагинация истории после 50 заказов и отдельный detail URL для WB-заказа без public id.
-5. Refund timeline и причина отклонения в customer-safe формулировке.
-6. Набор E2E: пустой/1/50+ заказов, длинные значения, expired session, offline и повторный вход.
+1. Подключить SMTP/DNS и принять живую доставку verification/reset; код, tokens и UI готовы.
+2. Проверить живые TG/VK login/link на реальных аккаунтах и безопасный merge-конфликт.
+3. Пагинация истории после 50 заказов и отдельный detail URL для WB-заказа без public id.
+4. Refund timeline и причина отклонения в customer-safe формулировке.
+5. Набор E2E: пустой/1/50+ заказов, длинные значения, expired session, offline и повторный вход.
 
-Email lifecycle зависит от рабочего SMTP/DNS из `email-setup.md`. До него email-регистрация
-может использоваться только как ограниченный способ входа; забытый пароль восстановить
-невозможно. TG/VK остаются альтернативными подтверждёнными каналами.
+Email lifecycle зависит от рабочего SMTP/DNS из `email-setup.md`. Без него email-регистрация
+остаётся мягким способом входа, но UI честно сообщает, что письмо не настроено, а reset не
+обещает несуществующую доставку. TG/VK остаются альтернативными подтверждёнными каналами.
 
 ### F. Матрица дизайн-приёмки
 
@@ -136,6 +135,22 @@ Email lifecycle зависит от рабочего SMTP/DNS из `email-setup.
 | G3 | TG `getChatMember` / VK membership check при достаточных правах бота | результат проверяется сервером, отказ не блокирует номинал |
 | G4 | Материализация `WbOrder` только после identity binding; idempotency на code+user | повтор callback не создаёт второй заказ |
 | G5 | ЛК + bot notifications + recovery + desktop/mobile/WebView E2E | один статус во всех каналах |
+
+### Что уже есть в текущем production foundation
+
+- сайт резервирует код, но без подтверждённого TG/VK пользователя `select-gamepass`
+  возвращает `NO_BOT_ORDER` и не создаёт выдачу;
+- TG `/start` и VK «Начать» первыми сохраняют достижимый platform identity и provisional
+  `AWAITING_GAMEPASS`, поэтому клиент уже аккумулируется до подписочного шага;
+- подписка проверяется сервером, но заказ сохраняется до неё и номинал не теряется;
+- ник/геймпасс выбираются на сайте, а `select-gamepass` идемпотентно переводит заказ в
+  `PENDING`; статус и follow-up остаются в боте и ЛК;
+- VK interstitial требует открыть диалог и нажать «Начать», иначе сообщество не сможет
+  писать клиенту.
+
+То есть продуктовый ответ владельцу уже реализован как **гибрид**, а не «сайт вместо
+групп». До rollout нового варианта остаются G1 funnel events и G2 opaque challenge: текущий
+deep link всё ещё несёт raw WB code и поэтому не должен считаться финальным security DoD.
 
 Ключевые метрики: доля `code_reserved → identity_bound`, доля начавших диалог, подписка,
 успешное создание заказа, среднее время до gamepass, повторная прямая покупка за 30 дней,

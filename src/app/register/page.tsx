@@ -24,16 +24,17 @@ function RegisterContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [verificationAvailable, setVerificationAvailable] = useState(true);
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnTo = safeReturnPath(searchParams.get("next"));
-  const strength = password.length >= 12 ? 3 : password.length >= 8 ? 2 : password.length > 0 ? 1 : 0;
+  const strength = password.length >= 14 ? 3 : password.length >= 10 ? 2 : password.length > 0 ? 1 : 0;
   const strengthLabel = ["", "Слабый", "Хороший", "Надёжный"][strength];
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (password.length < 8) {
-      setError("Пароль должен быть не короче 8 символов");
+    if (password.length < 10) {
+      setError("Пароль должен быть не короче 10 символов");
       return;
     }
     if (!agreedToPrivacy) {
@@ -55,8 +56,9 @@ function RegisterContent() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.success) {
-        throw new Error(data.error === "Email already in use" ? "Этот email уже зарегистрирован" : data.error ?? "Не удалось создать аккаунт");
+        throw new Error(data.error ?? "Не удалось создать аккаунт");
       }
+      setVerificationAvailable(data.verificationAvailable !== false);
       setSuccess(true);
       window.setTimeout(() => router.replace(`/login?next=${encodeURIComponent(returnTo)}`), 1600);
     } catch (caught) {
@@ -66,7 +68,7 @@ function RegisterContent() {
   };
 
   if (success) {
-    return <main className={`${styles.page} grid place-items-center p-5`}><section className={styles.successCard}><span className={styles.successIcon}><CheckCircle2 size={30} /></span><h1>Аккаунт создан</h1><p>Перенаправляем на безопасный вход…</p></section></main>;
+    return <main className={`${styles.page} grid place-items-center p-5`}><section className={styles.successCard}><span className={styles.successIcon}><CheckCircle2 size={30} /></span><h1>{verificationAvailable ? "Проверьте почту" : "Аккаунт создан"}</h1><p>{verificationAvailable ? "Отправили ссылку подтверждения. Войти можно уже сейчас — чувствительные действия откроются после подтверждения." : "Почтовая отправка ещё настраивается. Пока используйте вход через Telegram или сохраните пароль."}</p></section></main>;
   }
 
   return (
@@ -93,7 +95,7 @@ function RegisterContent() {
               <span className={styles.field}><Mail size={18} /><input className={styles.input} type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.ru" /></span>
             </label>
             <label className={styles.label}>Пароль
-              <span className={styles.field}><Lock size={18} /><input className={styles.input} type={showPassword ? "text" : "password"} autoComplete="new-password" required minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Минимум 8 символов" /><button type="button" className={styles.iconButton} onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></span>
+              <span className={styles.field}><Lock size={18} /><input className={styles.input} type={showPassword ? "text" : "password"} autoComplete="new-password" required minLength={10} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Минимум 10 символов" /><button type="button" className={styles.iconButton} onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></span>
               {password && <span className={styles.strength}><span className={styles.strengthTrack}>{[1,2,3].map((level) => <i key={level} className={strength >= level ? strength === 1 ? styles.activeWeak : strength === 2 ? styles.activeMedium : styles.activeStrong : ""} />)}</span><span>{strengthLabel}</span></span>}
             </label>
             <label className={styles.agreement}>

@@ -17,7 +17,7 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [corridor-and-site.md](corridor-and-site.md) | WB-гейт, сайт `/guide`, API коридора, восстановление сессии |
 | [site-acquiring-master-plan.md](site-acquiring-master-plan.md) | Ультра-ревью `robloxbank.ru`, P0-блокеры эквайринга, единые цена/identity/orders, дизайн и поэтапный launch plan |
 | [site-launch-implementation-plan.md](site-launch-implementation-plan.md) | Согласуемый план 18.07: baseline, обязательная регистрация перед оплатой, полноценный ЛК, controlled rollout, WB→сайт→бот/группа и боевой E2E |
-| [auth-account-readiness-plan.md](auth-account-readiness-plan.md) | Повторный аудит ЛК/login/register и P0-план email/TG/VK identity, recovery и E2E; решения владельца от 17.07, закрытый throttling и блокер «нет почтового транспорта» |
+| [auth-account-readiness-plan.md](auth-account-readiness-plan.md) | ЛК/login/register и email/TG/VK identity: verify/reset/consent/session revoke готовы в коде; SMTP и live-provider acceptance остаются |
 | [roblox-codes-plan.md](roblox-codes-plan.md) | Новый товар: коды активации Roblox — прайс, честные 10–15 мин → «моментально» через буфер, безопасность предъявительских кодов, ККТ/юр-гейты и этапы K0–K9 |
 | [email-setup.md](email-setup.md) | Почта `robloxbank.ru`: Яндекс 360, DNS-записи для Cloudflare (MX/SPF/DKIM/DMARC), env для SMTP, приёмка живой доставкой и порядок замены адреса в реквизитах |
 | [tbank-precheck-2026-07-17.md](tbank-precheck-2026-07-17.md) | Предрелизный аудит публичной ссылки для Т‑Банка 17.07: фактические тесты, найденные блокеры и план закрытия |
@@ -62,9 +62,10 @@ TG/VK/iPhone/Android acceptance, реквизиты, ККТ/payment E2E и soft 
 Личный кабинет и все три поверхности входа используют общий Violet/Frost shell. Email-вход
 нормализует адрес, Telegram login/link идёт через одноразовый bot-assisted challenge с
 серверной HMAC-проверкой, а VK identity проверяется сервером и пока скрыт fail-closed.
-Повторный аудит 17.07 подтвердил базовый ЛК, но не завершённый lifecycle публичного
-email-аккаунта: verification/reset, password throttling, evidence согласия и live TG/VK
-acceptance вынесены в согласуемый [план готовности](auth-account-readiness-plan.md).
+Повторный аудит и batch 18.07 добавили verification/resend, password reset, versioned
+consent evidence и отзыв JWT после смены пароля; токены в БД только hash. До публичного
+email recovery остаются SMTP/DNS и живая доставка; live TG/VK acceptance вынесен в
+[план готовности](auth-account-readiness-plan.md).
 
 Текущий implementation batch добавляет сохранение checkout draft через обязательный
 login/register, same-origin return guard, per-user rollout, активный order timeline в ЛК и

@@ -89,6 +89,23 @@ npm run smoke:site -- --base=http://127.0.0.1:3000 --expect-public
 npm run smoke:site -- --expect-maintenance
 ```
 
+### Release email lifecycle (18.07.2026)
+
+Migration `20260718_email_account_lifecycle` аддитивная, но новый Web обращается к новым
+колонкам/таблицам. Порядок не менять:
+
+1. fresh backup и checksum;
+2. `npx prisma migrate status` и ручная сверка SQL;
+3. `npx prisma migrate deploy`;
+4. только затем push/deploy Web;
+5. smoke `/login`, `/register`, `/forgot-password`, `/email/verified?status=invalid`, ЛК;
+6. без SMTP проверить fail-closed copy; после SMTP — живые verify/reset и отзыв старой сессии.
+
+Переменные SMTP и DNS acceptance описаны в `docs/email-setup.md`. Отсутствие SMTP не должно
+ронять Web, но означает, что email recovery нельзя объявлять запущенным. Первый релиз
+намеренно завершит legacy JWT без `sessionVersion`: это одноразовый безопасный logout для
+старых web-сессий.
+
 Он не пишет в БД: проверяет health и security headers, 404, robots/sitemap, SITE guide,
 OpenGraph и корректный maintenance-ответ.
 

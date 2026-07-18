@@ -79,6 +79,7 @@ function LoginContent() {
             <label className={styles.label}>Пароль
               <span className={styles.field}><Lock size={18} /><input className={styles.input} type={showPassword ? "text" : "password"} autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Введите пароль" /><button type="button" className={styles.iconButton} onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></span>
             </label>
+            <div className={styles.formMeta}><Link href="/forgot-password">Забыли пароль?</Link></div>
             {error && <p className={styles.error} role="alert">{error}</p>}
             <button type="submit" className={styles.submit} disabled={loading}>{loading ? <Loader2 size={20} className="animate-spin" /> : <><span>Войти в кабинет</span><ArrowRight size={18} /></>}</button>
           </form>

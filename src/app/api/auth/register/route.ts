@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
+import { Prisma } from "@prisma/client";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { RegisterSchema } from "@/lib/registration";
+import {
+  consentIpHash,
+  PRIVACY_POLICY_VERSION,
+  sendVerificationEmail,
+} from "@/lib/email-account-lifecycle";
+import { isMailerConfigured } from "@/lib/mailer";
 
 export async function POST(req: NextRequest) {
   const { ok, retryAfter } = rateLimit(`register:${clientIp(req)}`, 5, 0.1);
@@ -23,20 +30,26 @@ export async function POST(req: NextRequest) {
 
     const { password, name } = validated.data;
     const email = validated.data.email.trim().toLowerCase();
+    const verificationAvailable = isMailerConfigured();
 
-    // 1. Check if user already exists
     const existingUser = await prisma.user.findUnique({
       where: { email },
+      select: { id: true, email: true, emailVerifiedAt: true },
     });
 
     if (existingUser) {
-      return NextResponse.json({ error: "Email already in use" }, { status: 400 });
+      // Registration is deliberately anti-enumeration: an existing address gets
+      // the same response as a newly created account. If it is still unverified,
+      // sending another verification link is safe and useful to the real owner.
+      if (!existingUser.emailVerifiedAt && existingUser.email) {
+        await sendVerificationEmail(existingUser.id, existingUser.email);
+      }
+      return NextResponse.json({ success: true, verificationAvailable });
     }
 
-    // 2. Hash password
     const hashedPassword = await bcrypt.hash(password, 12);
+    const ipHash = consentIpHash(clientIp(req));
 
-    // 3. Create user (role defaults to USER in schema)
     const user = await prisma.$transaction(async (tx) => {
       const created = await tx.user.create({
         data: {
@@ -45,23 +58,30 @@ export async function POST(req: NextRequest) {
           name,
         },
       });
-      await tx.userIdentity.create({
-        data: { provider: "EMAIL", subject: email, userId: created.id },
+      await tx.consentEvidence.create({
+        data: {
+          userId: created.id,
+          type: "PRIVACY_POLICY",
+          documentVersion: PRIVACY_POLICY_VERSION,
+          source: "WEB_REGISTRATION",
+          ipHash,
+        },
       });
       return created;
     });
 
+    await sendVerificationEmail(user.id, email);
+
     return NextResponse.json({
       success: true,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-      },
+      verificationAvailable,
     });
 
   } catch (error) {
-    console.error("Registration Error:", error);
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return NextResponse.json({ success: true, verificationAvailable: isMailerConfigured() });
+    }
+    console.error("[registration] unable to complete request", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

@@ -20,6 +20,7 @@ model User {
   vkId                 String?             @unique
   tgId                 String?             @unique
   email                String?             @unique
+  emailVerifiedAt      DateTime?
   password             String?
   name                 String?
   username             String?
@@ -31,6 +32,7 @@ model User {
   promoExpiresAt       DateTime?
   promoSentAt          DateTime?
   role                 String              @default("USER")
+  sessionVersion       Int                 @default(0)
   reviewBonusClaimed   Boolean             @default(false)
   reviewBonusGrantedAt DateTime?
   reviewReminderLevel  Int                 @default(0)
@@ -41,10 +43,50 @@ model User {
   identities           UserIdentity[]
   bonusLedgerEntries   BonusLedger[]
   priceQuotes          PriceQuote[]
+  emailActionTokens    EmailActionToken[]
+  consentEvidences     ConsentEvidence[]
   mergeSources         AccountMergeAudit[] @relation("AccountMergeSource")
   mergeTargets         AccountMergeAudit[] @relation("AccountMergeTarget")
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
+}
+
+enum EmailActionPurpose {
+  VERIFY_EMAIL
+  RESET_PASSWORD
+}
+
+/// Single-use email lifecycle token. Only the SHA-256 digest is persisted;
+/// the bearer value exists solely in the email link and is never logged.
+model EmailActionToken {
+  id         String             @id @default(cuid())
+  userId     String
+  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose    EmailActionPurpose
+  tokenHash  String             @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime           @default(now())
+
+  @@index([userId, purpose, createdAt(sort: Desc)])
+  @@index([expiresAt])
+}
+
+/// Append-only evidence of an explicit customer consent. Raw IP addresses and
+/// user-agent strings are intentionally not stored; ipHash is keyed server-side.
+model ConsentEvidence {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type            String
+  documentVersion String
+  source          String
+  ipHash          String?
+  acceptedAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  @@index([userId, acceptedAt(sort: Desc)])
+  @@index([type, documentVersion])
 }
 
 /// A server-verified external identity. Legacy `tgId`/`vkId`/`email` remain
@@ -77,12 +119,12 @@ enum UserIdentityProvider {
 /// is short-lived and consumed atomically before a Telegram identity may log
 /// in or be linked to an existing web account.
 model TelegramWebLoginChallenge {
-  stateHash    String   @id
+  stateHash    String    @id
   mode         String
   targetUserId String?
   expiresAt    DateTime
   consumedAt   DateTime?
-  createdAt    DateTime @default(now())
+  createdAt    DateTime  @default(now())
 
   @@index([expiresAt])
   @@index([targetUserId, createdAt(sort: Desc)])

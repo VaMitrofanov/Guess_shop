@@ -89,6 +89,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           email: user.email,
           name: user.name,
           role: user.role,
+          sessionVersion: user.sessionVersion,
         };
       },
     }),
@@ -289,6 +290,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             name: user.name,
             image: user.image,
             role: user.role,
+            sessionVersion: user.sessionVersion,
             wb_code: wbCode && wbCode.length === 7 ? wbCode : null,
             is_guide_mode: isGuideMode,
           };
@@ -315,10 +317,30 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.auth_time = Math.floor(Date.now() / 1000);
         token.wb_code = (user as any).wb_code ?? null;
         token.is_guide_mode = (user as any).is_guide_mode ?? false;
+        token.sessionVersion = (user as any).sessionVersion ?? 0;
+        token.invalidated = false;
+      } else if (token.id) {
+        // Tokens issued before sessionVersion existed cannot be revoked safely:
+        // accepting them would leave a pre-reset session alive forever. Invalidate
+        // that small legacy cohort once at rollout; every fresh login gets the
+        // current version and remains active until an explicit password reset.
+        if (typeof token.sessionVersion !== "number") {
+          token.invalidated = true;
+        } else {
+          const current = await prisma.user.findUnique({
+            where: { id: String(token.id) },
+            select: { sessionVersion: true },
+          });
+          if (!current || current.sessionVersion !== token.sessionVersion) token.invalidated = true;
+        }
       }
       return token;
     },
     async session({ session, token }) {
+      if (token.invalidated) {
+        (session as any).user = undefined;
+        return session;
+      }
       if (session.user) {
         (session.user as any).id = token.id;
         (session.user as any).role = token.role;

@@ -3,6 +3,22 @@
 Neon Postgres + Prisma 7 (`engineType=library`, adapter `PrismaPg`). Модели WB-домена иногда
 кастуются в `any` в ботах (генератор отстаёт).
 
+## Email account lifecycle (18.07.2026)
+
+Аддитивная migration `20260718_email_account_lifecycle` добавляет:
+
+- `User.emailVerifiedAt` и `User.sessionVersion` (`0` по умолчанию);
+- `EmailActionToken` для `VERIFY_EMAIL`/`RESET_PASSWORD`: только SHA-256 hash, TTL,
+  `consumedAt`, индексы по user/purpose и expiry;
+- `ConsentEvidence`: append-only запись версии документа, источника, времени принятия и
+  keyed IP hash без сырого IP/user-agent.
+
+`UserIdentity(provider=EMAIL)` больше не создаётся при регистрации: он появляется только
+после атомарного consume verification-token. Reset увеличивает `sessionVersion`, поэтому
+все JWT старой версии перестают давать пользовательскую сессию. Release order: backup →
+`prisma migrate status` → `prisma migrate deploy` → Web deploy; без SMTP схема и Web
+остаются рабочими, отправка писем отвечает fail-closed.
+
 ## Миграция точной прибыли TWA (13.07.2026)
 
 `20260713_twa_order_profit_snapshots` добавляет в `WbOrder` immutable snapshots DIRECT/AVITO:

@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import TelegramLoginButton from "@/components/auth/TelegramLoginButton";
 import SignOutAction from "@/components/auth/SignOutAction";
+import EmailVerificationAction from "@/components/auth/EmailVerificationAction";
 import styles from "./dashboard.module.css";
 
 export const dynamic = "force-dynamic";
@@ -128,6 +129,7 @@ export default async function DashboardPage() {
       select: {
         id: true,
         email: true,
+        emailVerifiedAt: true,
         name: true,
         role: true,
         createdAt: true,
@@ -369,16 +371,18 @@ export default async function DashboardPage() {
               <div className={styles.identityList}>
                 {(["TG", "VK", "EMAIL"] as const).map((provider) => {
                   const identity = identityNames.get(provider);
+                  const verified = provider === "EMAIL" ? Boolean(user.emailVerifiedAt) : Boolean(identity);
                   const label = provider === "TG" ? "Telegram" : provider === "VK" ? "ВКонтакте" : "Email";
                   return (
-                    <div key={provider} className={identity ? styles.identityOn : styles.identityOff}>
+                    <div key={provider} className={verified ? styles.identityOn : styles.identityOff}>
                       <span>{provider === "TG" ? "TG" : provider === "VK" ? "VK" : "@"}</span>
-                      <div><strong>{label}</strong><small>{identity ? `Подтверждён ${formatDate(identity.verifiedAt)}` : "Не связан"}</small></div>
-                      {identity ? <CheckCircle2 size={18} /> : <CircleUserRound size={18} />}
+                      <div><strong>{label}</strong><small>{verified ? `Подтверждён ${formatDate(provider === "EMAIL" ? user.emailVerifiedAt! : identity!.verifiedAt)}` : provider === "EMAIL" && user.email ? "Ожидает подтверждения" : "Не связан"}</small></div>
+                      {verified ? <CheckCircle2 size={18} /> : <CircleUserRound size={18} />}
                     </div>
                   );
                 })}
               </div>
+              {user.email && !user.emailVerifiedAt && <EmailVerificationAction />}
               {!identityNames.has("TG") && user.role !== "ADMIN" && (
                 <div className={styles.linkAction}>
                   <p>Связать Telegram можно после свежего подтверждения входа.</p>
