@@ -24,23 +24,24 @@ describe("partner ledger v2", () => {
     expect(grouped[0]).toMatchObject({ kind: "buyout-group", accountName: "Donor", totalUsdt: 9.35, totalRobux: 1850, totalItems: 7 });
   });
 
-  it("does not merge two different batches from the same account and day", () => {
+  it("groups different batches from the same account into one expandable account", () => {
     const grouped = groupPartnerLedgerEntries([
       row({ id: "a", type: "BUYOUT", createdAt: "2026-07-13T10:00:00Z", batchId: "batch-a", purchaseAccountName: "Donor" }),
       row({ id: "b", type: "BUYOUT", createdAt: "2026-07-13T09:00:00Z", batchId: "batch-b", purchaseAccountName: "Donor" }),
     ]);
 
-    expect(grouped).toHaveLength(2);
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0]).toMatchObject({ kind: "buyout-group", totalItems: 2 });
   });
 
-  it("keeps topups in chronology and breaks a visual buyout batch", () => {
+  it("keeps topups in chronology while keeping the account group intact", () => {
     const grouped = groupPartnerLedgerEntries([
       row({ id: "a", type: "BUYOUT", createdAt: "2026-07-13T10:00:00Z", batchId: "batch-a", purchaseAccountName: "Donor" }),
       row({ id: "topup", type: "TOPUP", createdAt: "2026-07-13T09:30:00Z", amount: 10 }),
       row({ id: "b", type: "BUYOUT", createdAt: "2026-07-13T09:00:00Z", batchId: "batch-b", purchaseAccountName: "Donor" }),
     ]);
 
-    expect(grouped.map((item) => item.kind)).toEqual(["buyout-group", "entry", "buyout-group"]);
+    expect(grouped.map((item) => item.kind)).toEqual(["buyout-group", "entry"]);
   });
 
   it("uses the manual bucket when no donor account was recorded", () => {

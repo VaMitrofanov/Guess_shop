@@ -45,15 +45,28 @@ const SaleSchema = z.object({
   date: z.string(),
   supplierArticle: z.string(),
   priceWithDisc: z.number(),
+  // The operational feed contains both sales (S…) and returns (R…). Keep the
+  // identifier even though the dashboard only uses this feed as a pulse.
+  saleID: z.string().optional().default(""),
+  srid: z.string().optional().default(""),
+  sticker: z.string().optional().default(""),
 });
 
-const StockSchema = z.object({
-  supplierArticle: z.string(),
+const WbWarehouseStockSchema = z.object({
+  nmId: z.number(),
+  chrtId: z.number().optional().default(0),
+  warehouseId: z.number().optional().default(0),
+  warehouseName: z.string().optional().default(""),
+  regionName: z.string().optional().default(""),
   quantity: z.number(),
-  quantityFull: z.number(),
   inWayToClient: z.number().optional().default(0),
   inWayFromClient: z.number().optional().default(0),
-  Price: z.number(),
+});
+
+const WbWarehouseStocksResponseSchema = z.object({
+  data: z.object({
+    items: z.array(WbWarehouseStockSchema).optional().default([]),
+  }).optional().default({ items: [] }),
 });
 
 const AdvertCountSchema = z.object({
@@ -87,20 +100,62 @@ const FullStatsSchema = z.array(z.object({
   })).optional().default([]),
 }));
 
+const WbMoneySchema = z.union([z.number(), z.string()]).optional().default(0).transform(value => {
+  const parsed = typeof value === "number" ? value : Number(value.replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : 0;
+});
+
+// POST /finance/v1/sales-reports/detailed is the current finance API. Its
+// money fields are strings, unlike the retired statistics v5 endpoint.
 const RealizRowSchema = z.object({
-  nm_id:                     z.number().optional().default(0),
-  sa_name:                   z.string().optional().default(""),
-  doc_type_name:             z.string().optional().default(""),
-  quantity:                  z.number().optional().default(0),
-  retail_price_withdisc_rub: z.number().optional().default(0),
-  ppvz_for_pay:              z.number().optional().default(0),
-  delivery_rub:              z.number().optional().default(0),
-  ppvz_sales_commission:     z.number().optional().default(0),
-  storage_fee:               z.number().optional().default(0),
-  penalty:                   z.number().optional().default(0),
-  deduction:                 z.number().optional().default(0),
-  supplier_oper_name:        z.string().optional().default(""),
-  sale_dt:                   z.string().optional().default(""),
+  rrdId:                   z.number().optional().default(0),
+  nmId:                    z.number().optional().default(0),
+  vendorCode:              z.string().optional().default(""),
+  docTypeName:             z.string().optional().default(""),
+  quantity:                z.number().optional().default(0),
+  retailPriceWithDisc:     WbMoneySchema,
+  forPay:                  WbMoneySchema,
+  deliveryService:         WbMoneySchema,
+  ppvzSalesCommission:     WbMoneySchema,
+  paidStorage:             WbMoneySchema,
+  penalty:                 WbMoneySchema,
+  deduction:               WbMoneySchema,
+  additionalPayment:       WbMoneySchema,
+  sellerOperName:          z.string().optional().default(""),
+  saleDt:                  z.string().optional().default(""),
+  srid:                    z.string().optional().default(""),
+});
+
+const SalesFunnelProductSchema = z.object({
+  product: z.object({
+    nmId: z.number(),
+    vendorCode: z.string().optional().default(""),
+  }),
+  statistic: z.object({
+    selected: z.object({
+      orderCount: z.number().optional().default(0),
+      buyoutCount: z.number().optional().default(0),
+      buyoutSum: z.number().optional().default(0),
+      cancelCount: z.number().optional().default(0),
+      conversions: z.object({
+        buyoutPercent: z.number().optional().default(0),
+      }).optional().default({ buyoutPercent: 0 }),
+    }).optional().default({
+      orderCount: 0,
+      buyoutCount: 0,
+      buyoutSum: 0,
+      cancelCount: 0,
+      conversions: { buyoutPercent: 0 },
+    }),
+  }).optional().default({
+    selected: { orderCount: 0, buyoutCount: 0, buyoutSum: 0, cancelCount: 0, conversions: { buyoutPercent: 0 } },
+  }),
+});
+
+const SalesFunnelResponseSchema = z.object({
+  data: z.object({
+    products: z.array(SalesFunnelProductSchema).optional().default([]),
+  }).optional().default({ products: [] }),
 });
 
 const NmReportCardSchema = z.object({
@@ -209,7 +264,7 @@ const cache: {
   stats?:    CacheEntry<TwaStats30d>;
   stocks?:   CacheEntry<TwaStockItem[]>;
   advert?:   CacheEntry<AdvertPeriodData> & { fromDate: string };
-  realiz?:   CacheEntry<TwaRealizData>;
+  realiz?:   CacheEntry<TwaRealizData> & { weeks: number };
   funnel?:   CacheEntry<NmFunnelItem[]>;
   feedback?: CacheEntry<FeedbackSummary>;
   supplies?: CacheEntry<TwaSupply[]>;
@@ -257,20 +312,44 @@ export interface TwaStockItem {
 export async function getStocks(): Promise<TwaStockItem[] | null> {
   if (cache.stocks && Date.now() - cache.stocks.ts < TTL) return cache.stocks.data;
 
-  const raw = await fetchWb(
-    "https://statistics-api.wildberries.ru/api/v1/supplier/stocks?dateFrom=2023-01-01T00:00:00Z",
-    z.array(StockSchema)
-  );
+  // The old statistics /supplier/stocks method was retired by WB. The current
+  // endpoint is warehouse-granular and deliberately does not include price or
+  // vendorCode, so join it with the catalog response by nmId.
+  const [raw, goods] = await Promise.all([
+    fetchWb(
+      "https://seller-analytics-api.wildberries.ru/api/analytics/v1/stocks-report/wb-warehouses",
+      WbWarehouseStocksResponseSchema,
+      {
+        method: "POST",
+        body: JSON.stringify({ nmIds: [], chrtIds: [], limit: 250_000, offset: 0 }),
+      },
+    ),
+    getGoods(),
+  ]);
   if (!raw) return cache.stocks?.data ?? null;
 
+  const goodsByNmId = new Map((goods ?? []).map(g => [g.nmID, g]));
+
   const grouped = new Map<string, TwaStockItem>();
-  for (const s of raw) {
-    const ex = grouped.get(s.supplierArticle) ?? { article: s.supplierArticle, quantity: 0, quantityFull: 0, inWayToClient: 0, inWayFromClient: 0, price: s.Price };
+  for (const s of raw.data.items) {
+    const product = goodsByNmId.get(s.nmId);
+    const article = product?.article || String(s.nmId);
+    const ex = grouped.get(article) ?? {
+      article,
+      quantity: 0,
+      // Kept for the existing TWA contract. The replacement API has no
+      // quantityFull equivalent; do not silently treat in-transit goods as
+      // sellable stock.
+      quantityFull: 0,
+      inWayToClient: 0,
+      inWayFromClient: 0,
+      price: product?.discountedPrice ?? 0,
+    };
     ex.quantity += s.quantity;
-    ex.quantityFull += s.quantityFull;
+    ex.quantityFull += s.quantity;
     ex.inWayToClient += s.inWayToClient;
     ex.inWayFromClient += s.inWayFromClient;
-    grouped.set(s.supplierArticle, ex);
+    grouped.set(article, ex);
   }
   const result = [...grouped.values()];
   cache.stocks = { data: result, ts: Date.now() };
@@ -346,7 +425,8 @@ export interface TwaRealizData {
   totalLogistics: number;
   totalStorage:   number;
   totalPenalties: number;
-  byArticle: { article: string; sales: number; payout: number; commPct: number; logPerUnit: number; retPct: number; storagePerUnit: number }[];
+  totalAdditionalPayments: number;
+  byArticle: { article: string; sales: number; payout: number; commPct: number; logPerUnit: number; retPct: number; storagePerUnit: number; penaltyPerUnit: number }[];
 }
 
 export interface AdvertPeriodData {
@@ -402,67 +482,95 @@ export async function getAdvertSpendSince(fromDate: string): Promise<number | nu
 }
 
 export async function getRealizData(weeks = 4): Promise<TwaRealizData | null> {
-  if (cache.realiz && Date.now() - cache.realiz.ts < TTL) return cache.realiz.data;
+  if (cache.realiz && cache.realiz.weeks === weeks && Date.now() - cache.realiz.ts < TTL) return cache.realiz.data;
 
   const dateTo   = new Date().toISOString().split("T")[0];
   const dateFrom = new Date(Date.now() - weeks * 7 * 864e5).toISOString().split("T")[0];
 
   const rows = await fetchWb(
-    `https://statistics-api.wildberries.ru/api/v5/supplier/reportDetailByPeriod?dateFrom=${dateFrom}&dateTo=${dateTo}&rrdid=0`,
-    z.array(RealizRowSchema)
+    "https://finance-api.wildberries.ru/api/finance/v1/sales-reports/detailed",
+    z.array(RealizRowSchema),
+    {
+      method: "POST",
+      body: JSON.stringify({
+        dateFrom,
+        dateTo,
+        limit: 100_000,
+        rrdId: 0,
+        period: "weekly",
+        fields: [
+          "rrdId", "nmId", "vendorCode", "docTypeName", "quantity",
+          "retailPriceWithDisc", "forPay", "deliveryService", "ppvzSalesCommission",
+          "paidStorage", "penalty", "deduction", "additionalPayment",
+          "sellerOperName", "saleDt", "srid",
+        ],
+      }),
+    },
   );
   if (!rows) return cache.realiz?.data ?? null;
   if (rows.length === 0) return null;
 
   let salesCount = 0, returnCount = 0;
-  let totalRevenue = 0, totalPayout = 0, totalLogistics = 0, totalStorage = 0, totalPenalties = 0;
-  const byArt = new Map<string, { sales: number; returns: number; revenue: number; payout: number; logistics: number; commSum: number; storage: number }>();
+  let totalRevenue = 0, totalPayout = 0, totalLogistics = 0, totalStorage = 0, totalPenalties = 0, totalAdditionalPayments = 0;
+  const byArt = new Map<string, {
+    sales: number; returns: number; revenue: number; payout: number;
+    logistics: number; storage: number; penalties: number;
+  }>();
 
   for (const row of rows) {
-    const doc  = row.doc_type_name.toLowerCase();
-    const oper = row.supplier_oper_name.toLowerCase();
-    const key  = row.sa_name || String(row.nm_id);
+    const doc  = row.docTypeName.toLowerCase();
+    const oper = row.sellerOperName.toLowerCase();
+    const key  = row.vendorCode || (row.nmId > 0 ? String(row.nmId) : "");
+    const penalties = Math.abs(row.penalty) + Math.abs(row.deduction);
 
-    if (!key || key === "0") {
-      if (oper.includes("хранение") || row.storage_fee > 0) totalStorage += row.storage_fee;
-      else if (oper.includes("штраф")) totalPenalties += Math.abs(row.penalty) + Math.abs(row.deduction);
-      continue;
-    }
+    // Financial operations arrive as separate lines. Count every fee exactly
+    // once, whether WB attached it to a sale, a logistics event, or a general
+    // retention. Product-level allocation is only made when WB supplied an SKU.
+    totalLogistics += row.deliveryService;
+    totalStorage += row.paidStorage;
+    totalPenalties += penalties;
+    totalAdditionalPayments += row.additionalPayment;
 
-    const a = byArt.get(key) ?? { sales: 0, returns: 0, revenue: 0, payout: 0, logistics: 0, commSum: 0, storage: 0 };
+    if (!key) continue;
+    const a = byArt.get(key) ?? { sales: 0, returns: 0, revenue: 0, payout: 0, logistics: 0, storage: 0, penalties: 0 };
+    a.logistics += row.deliveryService;
+    a.storage += row.paidStorage;
+    a.penalties += penalties;
 
-    if (doc.includes("продажа")) {
+    if (doc.includes("продажа") && oper.includes("продажа")) {
       const qty = Math.abs(row.quantity) || 1;
-      const rev = row.retail_price_withdisc_rub * qty;
-      a.sales     += qty; a.revenue += rev; a.payout += row.ppvz_for_pay;
-      a.logistics += row.delivery_rub;
-      a.commSum   += rev - row.ppvz_for_pay - row.delivery_rub;
-      salesCount  += qty; totalRevenue += rev; totalPayout += row.ppvz_for_pay; totalLogistics += row.delivery_rub;
+      const rev = row.retailPriceWithDisc * qty;
+      a.sales += qty;
+      a.revenue += rev;
+      a.payout += row.forPay;
+      salesCount += qty;
+      totalRevenue += rev;
+      totalPayout += row.forPay;
     } else if (doc.includes("возврат")) {
       const qty = Math.abs(row.quantity) || 1;
-      a.returns += qty; returnCount += qty;
-      totalPayout += row.ppvz_for_pay;
-    } else if (oper.includes("хранение") || row.storage_fee > 0) {
-      a.storage    += row.storage_fee;
-      totalStorage += row.storage_fee;
-    } else if (doc.includes("штраф") || oper.includes("штраф")) {
-      totalPenalties += Math.abs(row.penalty) + Math.abs(row.deduction);
+      a.returns += qty;
+      returnCount += qty;
+      totalPayout += row.forPay;
     }
     byArt.set(key, a);
   }
 
   const realiz: TwaRealizData = {
     period: { from: dateFrom, to: dateTo },
-    salesCount, returnCount, totalRevenue, totalPayout, totalLogistics, totalStorage, totalPenalties,
+    salesCount, returnCount, totalRevenue, totalPayout, totalLogistics, totalStorage, totalPenalties, totalAdditionalPayments,
     byArticle: [...byArt.entries()].map(([article, a]) => ({
       article, sales: a.sales, payout: Math.round(a.payout),
-      commPct:       a.revenue > 0 ? Math.round((a.commSum / a.revenue) * 1000) / 10 : 0,
+      // Effective marketplace deduction after separately accounted logistics.
+      // It includes WB commission and acquiring; it is intentionally not
+      // presented as the catalog tariff.
+      commPct:       a.revenue > 0 ? Math.round(((a.revenue - a.payout - a.logistics) / a.revenue) * 1000) / 10 : 0,
       logPerUnit:    a.sales > 0 ? Math.round(a.logistics / a.sales) : 0,
       retPct:        a.sales > 0 ? Math.round((a.returns / a.sales) * 100) : 0,
       storagePerUnit: a.sales > 0 ? Math.round((a.storage / a.sales) * 10) / 10 : 0,
+      penaltyPerUnit: a.sales > 0 ? Math.round((a.penalties / a.sales) * 10) / 10 : 0,
     })).sort((a, b) => b.payout - a.payout),
   };
-  cache.realiz = { data: realiz, ts: Date.now() };
+  cache.realiz = { data: realiz, ts: Date.now(), weeks };
   return realiz;
 }
 
@@ -536,38 +644,54 @@ export async function getGoods(): Promise<TwaGoodItem[] | null> {
 export async function getNmFunnel(): Promise<NmFunnelItem[] | null> {
   if (cache.funnel && Date.now() - cache.funnel.ts < FUNNEL_TTL) return cache.funnel.data;
 
-  const [stats, realiz] = await Promise.all([getStats30d(), getRealizData()]);
-  if (!stats) return cache.funnel?.data ?? null;
+  const [goods, realiz] = await Promise.all([getGoods(), getRealizData()]);
+  const nmIds = (goods ?? []).map(g => g.nmID);
+  if (nmIds.length === 0) return cache.funnel?.data ?? null;
 
-  const byArticle = new Map<string, { orders: number; buyouts: number; revenue: number }>();
-
-  for (const o of stats.orders) {
-    if (o.isCancel) continue;
-    const a = byArticle.get(o.supplierArticle) ?? { orders: 0, buyouts: 0, revenue: 0 };
-    a.orders++;
-    byArticle.set(o.supplierArticle, a);
-  }
-  for (const s of stats.sales) {
-    const a = byArticle.get(s.supplierArticle) ?? { orders: 0, buyouts: 0, revenue: 0 };
-    a.buyouts++;
-    a.revenue += s.priceWithDisc;
-    byArticle.set(s.supplierArticle, a);
-  }
+  // Use completed UTC days: the current day is still mutable in WB, while a
+  // 30-day card should be reproducible throughout the day.
+  const dateEnd = new Date(Date.now() - 864e5);
+  const selectedStart = new Date(dateEnd.getTime() - 29 * 864e5);
+  const pastEnd = new Date(selectedStart.getTime() - 864e5);
+  const pastStart = new Date(pastEnd.getTime() - 29 * 864e5);
+  const formatDate = (date: Date) => date.toISOString().split("T")[0];
+  const raw = await fetchWb(
+    "https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products",
+    SalesFunnelResponseSchema,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        selectedPeriod: { start: formatDate(selectedStart), end: formatDate(dateEnd) },
+        pastPeriod: { start: formatDate(pastStart), end: formatDate(pastEnd) },
+        nmIds,
+        brandNames: [],
+        subjectIds: [],
+        tagIds: [],
+        skipDeletedNm: false,
+        orderBy: { field: "orderCount", mode: "desc" },
+        limit: 1_000,
+        offset: 0,
+      }),
+    },
+  );
+  if (!raw) return cache.funnel?.data ?? null;
 
   const retByArticle = new Map<string, number>(
     (realiz?.byArticle ?? []).map(a => [a.article, a.retPct])
   );
 
-  const result: NmFunnelItem[] = [...byArticle.entries()]
-    .filter(([, v]) => v.orders > 0 || v.buyouts > 0)
-    .map(([article, v]) => ({
-      article,
-      orders:    v.orders,
-      buyouts:   v.buyouts,
-      revenue:   v.revenue,
-      pctBuyout: v.orders > 0 ? Math.round(v.buyouts / v.orders * 100) : 0,
-      retPct:    retByArticle.get(article) ?? 0,
+  const result: NmFunnelItem[] = raw.data.products
+    .map(item => ({
+      article: item.product.vendorCode || String(item.product.nmId),
+      orders: item.statistic.selected.orderCount,
+      buyouts: item.statistic.selected.buyoutCount,
+      revenue: item.statistic.selected.buyoutSum,
+      // WB calculates this from completed outcomes, so active deliveries do
+      // not create impossible 100%+ ratios.
+      pctBuyout: item.statistic.selected.conversions.buyoutPercent,
+      retPct: retByArticle.get(item.product.vendorCode || String(item.product.nmId)) ?? 0,
     }))
+    .filter(item => item.orders > 0 || item.buyouts > 0)
     .sort((a, b) => b.orders - a.orders);
 
   cache.funnel = { data: result, ts: Date.now() };

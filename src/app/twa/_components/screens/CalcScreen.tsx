@@ -11,6 +11,7 @@ interface RealizSummary {
   totalLogistics: number;
   totalStorage:   number;
   totalPenalties: number;
+  totalAdditionalPayments: number;
   byArticle:      { article: string; sales: number }[];
 }
 
@@ -28,6 +29,7 @@ interface UeData {
   retPct:            number;
   retByArticle:      Record<string, number>;
   penaltyPerUnit:    number;
+  penaltyByArticle:  Record<string, number>;
   commByArticle:     Record<string, number>;
   defaultCommissionPct: number | null; // live WB category commission (fallback for unsold)
   defaultLogistics:     number | null; // live WB digital-warehouse logistics ₽ (fallback)
@@ -103,7 +105,7 @@ function computeRow(
   const storage   = ud.storageByArticle[article] ?? ud.storagePerUnit;
   const logistics = ud.logByArticle[article] ?? ud.defaultLogistics ?? ud.logPerUnit;
   const retPct    = ud.retByArticle[article] ?? ud.retPct;
-  const penalty   = ud.penaltyPerUnit ?? 0;
+  const penalty   = ud.penaltyByArticle[article] ?? ud.penaltyPerUnit ?? 0;
 
   const afterComm  = sellPrice * (1 - commission);
   const afterTax   = afterComm * (1 - taxRate);
@@ -203,7 +205,7 @@ export default function CalcScreen({ token }: { token: string }) {
   // Logistics priority: realization (fact) → live WB digital-warehouse tariff → global avg
   const logistics = ud ? (ud.logByArticle[article] ?? ud.defaultLogistics ?? ud.logPerUnit) : 0;
   const retPct    = ud ? (ud.retByArticle[article]     ?? ud.retPct)          : 0;
-  const penalty   = ud?.penaltyPerUnit ?? 0;
+  const penalty   = ud ? (ud.penaltyByArticle[article] ?? ud.penaltyPerUnit) : 0;
 
   const afterComm = sellPrice * (1 - commission);
   const afterTax  = afterComm * (1 - taxRate);
@@ -240,7 +242,7 @@ export default function CalcScreen({ token }: { token: string }) {
 
   const totalProfit = useMemo(() => {
     if (!realizData) return null;
-    const { salesCount, totalPayout, totalLogistics, totalStorage, totalPenalties, byArticle } = realizData;
+    const { salesCount, totalPayout, totalLogistics, totalStorage, totalPenalties, totalAdditionalPayments, byArticle } = realizData;
 
     const totalTax        = totalPayout * taxRate;
     const totalFixedCosts = salesCount  * fixedCost;
@@ -255,8 +257,8 @@ export default function CalcScreen({ token }: { token: string }) {
       }
     }
 
-    const net = totalPayout - totalTax - totalFixedCosts - totalRobuxCost - totalLogistics - totalStorage - totalPenalties;
-    return { totalTax, totalFixedCosts, totalRobuxCost, totalLogistics, totalStorage, totalPenalties, totalPayout, net, hasKurs: kursRb > 0 };
+    const net = totalPayout + totalAdditionalPayments - totalTax - totalFixedCosts - totalRobuxCost - totalLogistics - totalStorage - totalPenalties;
+    return { totalTax, totalFixedCosts, totalRobuxCost, totalLogistics, totalStorage, totalPenalties, totalAdditionalPayments, totalPayout, net, hasKurs: kursRb > 0 };
   }, [realizData, taxRate, fixedCost, kursRb, kursUsd]);
 
   const equivLabel = (() => {
@@ -443,9 +445,10 @@ export default function CalcScreen({ token }: { token: string }) {
         <div style={{ borderBottom: `1px solid ${C.border}`, paddingBottom: 10, marginBottom: 10 }}>
           <Row label="Цена продажи" value={hasPrice ? fmt(sellPrice) : "нет данных WB"} />
           <Row
-            label={`−Комиссия WB (${Math.round(commission * 100)}%)`}
+            label={isRealComm ? `−Удержание WB (${Math.round(commission * 100)}%)` : `−Комиссия WB (${Math.round(commission * 100)}%)`}
             value={hasPrice ? "−" + fmt(Math.round(sellPrice - afterComm)) : "—"}
             badge={isRealComm ? <Badge label="отч" color="#5ac8fa" /> : undefined}
+            note={isRealComm ? "комиссия + эквайринг" : undefined}
           />
           <Row
             label={`−Налог УСН (${Math.round(taxRate * 100)}%)`}
@@ -489,7 +492,7 @@ export default function CalcScreen({ token }: { token: string }) {
               label="−Штрафы/ед"
               value={"−" + fmt(Math.round(penalty))}
               badge={<Badge label="отч" color="#5ac8fa" />}
-              note="среднее"
+              note={ud?.penaltyByArticle[article] ? "арт." : "среднее"}
             />
           )}
           {retPct > 0 && returnLoss > 0 && (
@@ -622,6 +625,7 @@ export default function CalcScreen({ token }: { token: string }) {
 
             <div style={{ borderBottom: `1px solid ${C.border}`, paddingBottom: 10, marginBottom: 10 }}>
               <Row label="Выплата WB"          value={fmt(Math.round(totalProfit.totalPayout))} />
+              {totalProfit.totalAdditionalPayments !== 0 && <Row label="Корректировки WB" value={fmt(Math.round(totalProfit.totalAdditionalPayments))} />}
               <Row label={`−Налог УСН (${Math.round(taxRate * 100)}%)`} value={"−" + fmt(Math.round(totalProfit.totalTax))} />
               <Row label="−Логистика"           value={"−" + fmt(Math.round(totalProfit.totalLogistics))} />
               {totalProfit.totalStorage   > 0 && <Row label="−Хранение"       value={"−" + fmt(Math.round(totalProfit.totalStorage))} />}

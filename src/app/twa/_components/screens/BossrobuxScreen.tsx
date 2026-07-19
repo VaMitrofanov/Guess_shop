@@ -109,6 +109,7 @@ interface PartnerLedgerEntry {
   itemCount?: number;
   taskId?: string | null;
   task?: { id: string; robloxUsername: string | null; gamepassId: string | null } | null;
+  tasks?: Array<{ id: string; robloxUsername: string | null; gamepassId: string | null }>;
   createdAt: string;
 }
 
@@ -3852,7 +3853,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
           if (subTaskFilter === "done") return task.status === "DONE";
           return task.status === "CANCELLED";
         });
-        const filteredPagedLedger = ledgerFilter === "all" ? pagedLedger : pagedLedger.filter((entry) => ledgerFilter === "topup" ? entry.type === "TOPUP" : entry.type === "BUYOUT");
+        const filteredPagedLedger = ledgerFilter === "all" ? pagedLedger : pagedLedger.filter((entry) => ledgerFilter === "topup" ? entry.type === "TOPUP" : entry.type === "BUYOUT" || entry.type === "REFUND");
         const ledgerTimeline = groupPartnerLedgerEntries(filteredPagedLedger as PartnerLedgerRow[]);
         const title = subScreen === "bought" ? "Выкуплено" : subScreen === "ledger" ? "Ledger" : "Задачи";
         const panelSummary = subScreen === "bought"
@@ -3893,7 +3894,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
                       return (
                         <div key={entry.id} style={{ minHeight: 56, padding: "11px 14px", borderTop: index > 0 ? `1px solid ${C.border}` : "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary }}>{entry.type === "TOPUP" ? "Пополнение" : entry.type}</div>
+                            <div style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary }}>{entry.type === "TOPUP" ? "Пополнение" : entry.type === "REFUND" ? "Возврат" : entry.type === "ADJUSTMENT" ? "Корректировка" : entry.type}</div>
                             <div style={{ marginTop: 2, fontSize: 14, color: C.textTertiary }}>{fmtPartnerDate(entry.createdAt)}</div>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -3913,7 +3914,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
                         <button className="twa-press" onClick={() => setExpandedLedgerGroup(expanded ? null : groupId)}
                           style={{ width: "100%", minHeight: 62, padding: "11px 14px", border: "none", background: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
                           <span style={{ minWidth: 0 }}>
-                            <span style={{ display: "block", fontSize: 15, fontWeight: 700, color: C.textPrimary }}>🎮 {item.accountName} · {item.dayKey.split("-").reverse().join(".")}</span>
+                            <span style={{ display: "block", fontSize: 15, fontWeight: 700, color: C.textPrimary }}>🎮 {item.accountName}</span>
                             <span style={{ display: "block", marginTop: 3, fontSize: 14, color: C.textTertiary }}>{item.totalItems} геймпассов · {item.totalRobux.toLocaleString("ru-RU")} R$</span>
                           </span>
                           <span style={{ flexShrink: 0, textAlign: "right" }}>
@@ -3921,14 +3922,24 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
                             <span style={{ display: "block", marginTop: 2, fontSize: 14, color: C.textTertiary }}>{expanded ? "▲" : "▼"}</span>
                           </span>
                         </button>
-                        {expanded && item.entries.map((entry) => (
-                          <div key={entry.id} style={{ padding: "9px 14px 9px 30px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", gap: 10 }}>
-                            <span style={{ minWidth: 0, fontSize: 14, color: C.textSecondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {new Date(entry.createdAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })} · {entry.task?.robloxUsername || `GP ${entry.task?.gamepassId || entry.reference || "—"}`}
-                            </span>
-                            <span style={{ flexShrink: 0, fontSize: 14, color: C.textPrimary, ...tabular }}>{(entry.robuxAmount ?? 0).toLocaleString("ru-RU")} R$ · −{fmtUsdt(Math.abs(entry.amount))}</span>
-                          </div>
-                        ))}
+                        {expanded && (() => {
+                          const passes = [...new Map(item.entries.flatMap((entry) =>
+                            entry.tasks?.length ? entry.tasks : entry.task ? [entry.task] : [],
+                          ).map((task) => [task.id, task])).values()];
+                          return passes.length > 0 ? passes.map((task) => (
+                            <div key={task.id} style={{ padding: "9px 14px 9px 30px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", gap: 10 }}>
+                              <span style={{ minWidth: 0, fontSize: 14, color: C.textSecondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                ГП {task.gamepassId || "—"} · {task.robloxUsername || "без ника"}
+                              </span>
+                              <span style={{ flexShrink: 0, fontSize: 14, color: C.textPrimary, ...tabular }}>выкуплен</span>
+                            </div>
+                          )) : item.entries.map((entry) => (
+                            <div key={entry.id} style={{ padding: "9px 14px 9px 30px", borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", gap: 10 }}>
+                              <span style={{ minWidth: 0, fontSize: 14, color: C.textSecondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>ГП {entry.reference || "—"}</span>
+                              <span style={{ flexShrink: 0, fontSize: 14, color: C.textPrimary, ...tabular }}>{(entry.robuxAmount ?? 0).toLocaleString("ru-RU")} R$</span>
+                            </div>
+                          ));
+                        })()}
                       </div>
                     );
                   })}

@@ -57,6 +57,11 @@ BackButton, cursor pagination для задач/history/ledger, durable BUYOUT-�
 семь купленных геймпассов отображаются как одно списание `(7 геймпассов · N R$)`.
 В колонке `E` хранится только актуальный результат проверки: после исправления ГП старый
 комментарий очищается, при новой ошибке заменяется новым текстом.
+**2026-07-19**: вторая одновременно активная Google Sheets-строка с тем же `gamepassId`
+становится row-level ошибкой и не может быть куплена. Ledger TWA показывает «аккаунт-
+покупатель → геймпассы», включая несколько пачек одного аккаунта. Ошибочное историческое
+списание исправляется видимым `REFUND`/сторно: он согласованно меняет баланс, расход и
+отчёт по курсу.
 Ошибка со скрина `Unique constraint failed (partnerId, externalSource, externalRowId)`
 закрыта DB-lease на `Partner`: manual/force и background sync больше не могут идти
 одновременно на разных Web-инстансах. Нужны миграция
@@ -130,7 +135,9 @@ Write-back: статус → `D`, комментарий → `E`.
 - Google Sheets sync (`action=sync-google-sheets` + opportunistic sync на GET с TTL 60 с)
   сканирует date-листы боевой таблицы, импортирует строки `в ожидании` в
   `PartnerBuyoutTask` (`externalSource=GOOGLE_SHEETS`), резолвит геймпасс, идемпотентен по
-  `partnerId+externalSource+externalRowId`, а write-back пишет `готово` в `D` / ошибку+причину в `D`+`E`.
+  `partnerId+externalSource+externalRowId`. Параллельная активная задача с тем же GP
+  становится row-level ошибкой и не выкупается; write-back пишет `готово` в `D` /
+  ошибку+причину в `D`+`E`.
 - Каждый прогон sync пишет `PartnerImportRun` (счётчики created/updated/failed/skipped +
   диагностика фильтра по листам) для статуса в TWA и защиты от параллельных sync.
 

@@ -18,6 +18,8 @@ export type PartnerLedgerRow = {
   comment: string | null;
   taskId?: string | null;
   task?: PartnerLedgerTaskRef;
+  /** All tasks behind a durable batch ledger row (batch rows have no taskId). */
+  tasks?: Exclude<PartnerLedgerTaskRef, null>[];
   createdAt: string;
 };
 
@@ -50,11 +52,13 @@ export function partnerLedgerDayKey(value: string | Date) {
 }
 
 /**
- * New BUYOUT rows are already durable purchase batches and must never be merged with
- * another click. The account/day fallback is retained only for pre-v2 rows.
+ * The ledger is an accounting journal, but the TWA first shows the operational
+ * question: which donor account bought which gamepasses. Group all BUYOUT rows by
+ * donor account, while preserving the individual durable ledger rows inside.
  */
 export function groupPartnerLedgerEntries(entries: PartnerLedgerRow[]): PartnerLedgerTimelineItem[] {
   const result: PartnerLedgerTimelineItem[] = [];
+  const groupsByAccount = new Map<string, Extract<PartnerLedgerTimelineItem, { kind: "buyout-group" }>>();
 
   for (const entry of entries) {
     if (entry.type !== "BUYOUT") {
@@ -64,17 +68,17 @@ export function groupPartnerLedgerEntries(entries: PartnerLedgerRow[]): PartnerL
 
     const accountName = entry.purchaseAccountName?.trim() || "Вручную / из таблицы";
     const dayKey = partnerLedgerDayKey(entry.createdAt);
-    const key = entry.batchId ? `batch:${entry.batchId}` : `legacy:${accountName}\u0000${dayKey}`;
-    const previous = result.at(-1);
-    if (previous?.kind === "buyout-group" && previous.key === key) {
-      previous.entries.push(entry);
-      previous.totalUsdt += Math.abs(entry.amount);
-      previous.totalRobux += entry.robuxAmount ?? 0;
-      previous.totalItems += entry.itemCount ?? 1;
+    const key = `account:${accountName}`;
+    const existing = groupsByAccount.get(key);
+    if (existing) {
+      existing.entries.push(entry);
+      existing.totalUsdt += Math.abs(entry.amount);
+      existing.totalRobux += entry.robuxAmount ?? 0;
+      existing.totalItems += entry.itemCount ?? 1;
       continue;
     }
 
-    result.push({
+    const group: Extract<PartnerLedgerTimelineItem, { kind: "buyout-group" }> = {
       kind: "buyout-group",
       key,
       accountName,
@@ -83,7 +87,9 @@ export function groupPartnerLedgerEntries(entries: PartnerLedgerRow[]): PartnerL
       totalUsdt: Math.abs(entry.amount),
       totalRobux: entry.robuxAmount ?? 0,
       totalItems: entry.itemCount ?? 1,
-    });
+    };
+    groupsByAccount.set(key, group);
+    result.push(group);
   }
 
   return result;

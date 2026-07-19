@@ -1835,6 +1835,43 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
               priceMismatch,
             }),
           };
+          // A sheet row is its own idempotency key, but a second pending row
+          // with the same gamepass would send the same asset to purchase twice.
+          // Keep the first task actionable and return the later row to Anton as
+          // a row-level error. Completed tasks remain allowed for a later donor.
+          const resolvedGamepassId = String(gp.gamepassId || gamepassId);
+          const activeDuplicate = rowOk ? await prisma.partnerBuyoutTask.findFirst({
+            where: {
+              partnerId: partner.id,
+              gamepassId: resolvedGamepassId,
+              ...(existing ? { id: { not: existing.id } } : {}),
+              status: { in: ["NEW", "READY", "FAILED", "PURCHASING"] },
+            },
+            select: { id: true },
+          }) : null;
+          if (activeDuplicate) {
+            const duplicateMessage = "Этот геймпасс уже есть в другой ожидающей строке";
+            const duplicateData = {
+              ...data,
+              status: "FAILED" as const,
+              error: duplicateMessage,
+              sheetRaw: { ...data.sheetRaw, duplicateOfTaskId: activeDuplicate.id },
+            };
+            if (existing) {
+              await prisma.partnerBuyoutTask.update({ where: { id: existing.id }, data: duplicateData });
+              result.updated += 1;
+            } else {
+              await prisma.partnerBuyoutTask.create({ data: duplicateData });
+              result.created += 1;
+            }
+            result.failed += 1;
+            writeBacks.push(
+              { range: googleCellRange(sheet.title, SHEET_STATUS_LETTER, rowNumber), values: [[GOOGLE_STATUS_ERROR]] },
+              { range: googleCellRange(sheet.title, SHEET_COMMENT_LETTER, rowNumber), values: [[duplicateMessage]] },
+            );
+            rowItem("updated", resolvedGamepassId, duplicateMessage);
+            continue;
+          }
           // Строка сейчас «в ожидании», а задача не ок — write-back нужен и на skip-пути:
           // прошлый batch мог упасть, либо Антон вернул D в «в ожидании», не исправив строку.
           const errorWriteBack: GoogleSheetsValueUpdate[] = rowOk ? [] : [
@@ -2140,6 +2177,52 @@ async function getPartner(slug: string) {
   });
 }
 
+/**
+ * A modern BUYOUT ledger row represents a whole browser batch and deliberately
+ * has no taskId. Hydrate its tasks before sending it to the TWA, so the ledger
+ * can be navigated account → bought gamepasses rather than just account → sum.
+ */
+async function attachPartnerLedgerTasks(
+  partnerId: string,
+  entries: Array<Prisma.PartnerLedgerEntryGetPayload<{
+    include: { task: { select: { id: true; robloxUsername: true; gamepassId: true } } };
+  }>>,
+) {
+  const taskIds = entries.flatMap((entry) => entry.taskId ? [entry.taskId] : []);
+  const batchIds = entries.flatMap((entry) => entry.batchId ? [entry.batchId] : []);
+  if (taskIds.length === 0 && batchIds.length === 0) return entries;
+
+  const tasks = await prisma.partnerBuyoutTask.findMany({
+    where: {
+      partnerId,
+      OR: [
+        ...(taskIds.length > 0 ? [{ id: { in: taskIds } }] : []),
+        ...(batchIds.length > 0 ? [{ purchaseBatchId: { in: batchIds } }] : []),
+      ],
+    },
+    select: { id: true, robloxUsername: true, gamepassId: true, purchaseBatchId: true },
+    orderBy: [{ completedAt: "asc" }, { createdAt: "asc" }],
+  });
+  const byTaskId = new Map(tasks.map((task) => [task.id, task]));
+  const byBatchId = new Map<string, typeof tasks>();
+  for (const task of tasks) {
+    if (!task.purchaseBatchId) continue;
+    const batch = byBatchId.get(task.purchaseBatchId) ?? [];
+    batch.push(task);
+    byBatchId.set(task.purchaseBatchId, batch);
+  }
+
+  return entries.map((entry) => {
+    const related = [
+      ...(entry.taskId && byTaskId.has(entry.taskId) ? [byTaskId.get(entry.taskId)!] : []),
+      ...(entry.batchId ? byBatchId.get(entry.batchId) ?? [] : []),
+    ];
+    const tasks = [...new Map(related.map((task) => [task.id, task])).values()]
+      .map(({ id, robloxUsername, gamepassId }) => ({ id, robloxUsername, gamepassId }));
+    return { ...entry, tasks };
+  });
+}
+
 async function loadPartnerState(partner: Partner) {
   const currency = moneyCurrency(partner);
   const [tasks, ledgerEntries, importRuns, balanceAgg, spentAgg, statusGroups, doneWithPurchaseAgg, doneWithoutPurchaseAgg, rateGroups, rateChanges] = await Promise.all([
@@ -2166,7 +2249,9 @@ async function loadPartnerState(partner: Partner) {
       _sum: { amount: true },
     }),
     prisma.partnerLedgerEntry.aggregate({
-      where: { partnerId: partner.id, currency, type: "BUYOUT" },
+      // Refunds reverse an erroneous BUYOUT and must reduce the dashboard
+      // spend, rather than merely fixing the visible balance.
+      where: { partnerId: partner.id, currency, type: { in: ["BUYOUT", "REFUND"] } },
       _sum: { amount: true },
     }),
     // 5.7: счётчики статусов и «Выкуплено» — по всей БД, а не по срезу take:100,
@@ -2190,7 +2275,7 @@ async function loadPartnerState(partner: Partner) {
     // BUYOUT-списаний (записи до бэкфилла группируются в rate=null → «курс не записан»).
     prisma.partnerLedgerEntry.groupBy({
       by: ["rateUsdtPer1000"],
-      where: { partnerId: partner.id, currency, type: "BUYOUT" },
+      where: { partnerId: partner.id, currency, type: { in: ["BUYOUT", "REFUND"] } },
       _sum: { amount: true, robuxAmount: true, itemCount: true },
     }),
     prisma.partnerRateChange.findMany({
@@ -2228,9 +2313,11 @@ async function loadPartnerState(partner: Partner) {
     }))
     .sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1));
 
+  const hydratedLedgerEntries = await attachPartnerLedgerTasks(partner.id, ledgerEntries);
+
   return {
     tasks,
-    ledgerEntries,
+    ledgerEntries: hydratedLedgerEntries,
     importRuns,
     googleSync: {
       configured: Boolean(partner.googleSheetId),
@@ -2277,7 +2364,7 @@ async function loadPartnerView(partner: Partner, view: PartnerView, cursor: stri
     });
     const hasMore = rows.length > PARTNER_VIEW_PAGE_SIZE;
     const items = hasMore ? rows.slice(0, PARTNER_VIEW_PAGE_SIZE) : rows;
-    return { items, nextCursor: hasMore ? items.at(-1)?.id ?? null : null };
+    return { items: await attachPartnerLedgerTasks(partner.id, items), nextCursor: hasMore ? items.at(-1)?.id ?? null : null };
   }
 
   const rows = await prisma.partnerBuyoutTask.findMany({

@@ -95,7 +95,8 @@ src/
     canonical-web-order.ts       quote/gamepass invariants + atomic order foundation
     payment-notification.ts      разрешённые монотонные переходы платежа
     user-identity.ts             verified identity → канонический User без auto-merge
-    pricing.ts, wb-api.ts        цены + Wildberries API (для TWA-аналитики)
+    pricing.ts, wb-api.ts        цены + WB API: finance v1 (P&L), sales-funnel v3,
+                                 warehouse stocks v1; old operational statistics only for pulse
 
 bots/
   shared/
