@@ -3007,6 +3007,9 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; current?: string } | null>(null);
   const bulkStopRef = useRef(false);
   const [bulkReport, setBulkReport] = useState<{ items: PartnerBatchItem[]; totalRobux: number; totalUsdt: number; ok: number; fail: number } | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [bulkDoneRunning, setBulkDoneRunning] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
@@ -3320,6 +3323,46 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
     void load({ background: true });
   }
 
+  async function doPartnerBulkMarkDone(taskIds: string[]) {
+    if (busy || bulkDoneRunning || taskIds.length === 0) return;
+    setBulkDoneRunning(true);
+    setBusy(true);
+    try {
+      const r = await fetch("/api/twa/partners/anton/tasks", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ action: "mark-done-bulk", taskIds, purchaseAccountName: accountName || null }),
+      });
+      const d = await r.json().catch(() => null);
+      if (d) applyPartnerState(d);
+      if (!r.ok || !d || d.ok === false) {
+        haptic.notify("error");
+        toast(d?.error ?? "Ошибка", "error");
+        return;
+      }
+      const report = d.bulkDoneReport;
+      if (report) {
+        const rateVal = summary?.robuxRateUsdtPer1000 ?? state?.partner.robuxRateUsdtPer1000 ?? 5.05;
+        const items: PartnerBatchItem[] = report.results.map((r: any) => {
+          const task = (state?.tasks ?? []).find(t => t.id === r.taskId);
+          const robux = task ? (task.priceRobux ?? task.purchasePriceRobux ?? 0) : 0;
+          return { taskId: r.taskId, gamepassId: task?.gamepassId ?? null, nick: task?.robloxUsername ?? null, robux, usdt: partnerTaskCostUsdt(robux, rateVal), ok: r.ok, reason: r.reason };
+        });
+        setBulkReport({ items, totalRobux: report.totalRobux, totalUsdt: report.totalUsdt, ok: report.ok, fail: report.fail });
+        notifyBuyout(items.filter(x => x.ok).map(x => x.taskId), report.fail);
+      }
+      haptic.notify("success");
+      setSelectMode(false);
+      setSelectedTaskIds(new Set());
+    } catch {
+      haptic.notify("error");
+      toast("Ошибка сети", "error");
+    } finally {
+      setBulkDoneRunning(false);
+      setBusy(false);
+    }
+  }
+
   const tasks = state?.tasks ?? [];
   const ledger = state?.ledgerEntries ?? [];
   const summary = state?.summary;
@@ -3599,15 +3642,26 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
                     Не хватает баланса на {plan.waiting.length} задач
                   </div>
                 )}
-                <button className="twa-press" disabled={busy}
-                  onClick={() => { haptic.impact("heavy"); void doPartnerBulk(plan.selected); }}
-                  style={{
-                    width: "100%", padding: "13px", border: "none", borderRadius: 12,
-                    background: C.green, color: "#fff", fontSize: 15, fontWeight: 700,
-                    cursor: "pointer", fontFamily: "inherit", opacity: busy ? 0.5 : 1,
-                  }}>
-                  Выкупить всё ({plan.selected.length})
-                </button>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="twa-press" disabled={busy}
+                    onClick={() => { haptic.impact("heavy"); void doPartnerBulk(plan.selected); }}
+                    style={{
+                      flex: 1, padding: "13px", border: "none", borderRadius: 12,
+                      background: C.green, color: "#fff", fontSize: 15, fontWeight: 700,
+                      cursor: "pointer", fontFamily: "inherit", opacity: busy ? 0.5 : 1,
+                    }}>
+                    Выкупить всё ({plan.selected.length})
+                  </button>
+                  <button className="twa-press" disabled={busy || bulkDoneRunning}
+                    onClick={() => { haptic.impact("heavy"); void doPartnerBulkMarkDone(activeTasks.filter(t => t.status !== "PURCHASING").map(t => t.id)); }}
+                    style={{
+                      flex: 1, padding: "13px", border: "none", borderRadius: 12,
+                      background: C.accent, color: "#fff", fontSize: 15, fontWeight: 700,
+                      cursor: "pointer", fontFamily: "inherit", opacity: busy ? 0.5 : 1,
+                    }}>
+                    {bulkDoneRunning ? "Отмечаю..." : `Выкуплено всё (${activeTasks.filter(t => t.status !== "PURCHASING").length})`}
+                  </button>
+                </div>
               </div>
             </Card>
           );
@@ -3664,6 +3718,54 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
             ))}
           </div>
         )}
+        {activeTasks.length > 0 && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 8, justifyContent: "flex-end" }}>
+            {!selectMode ? (
+              <button className="twa-press-sm" onClick={() => { haptic.select(); setSelectMode(true); setSelectedTaskIds(new Set()); }}
+                style={{ border: "none", borderRadius: 9, padding: "8px 12px", minHeight: 36, fontSize: 14, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", background: C.elevated, color: C.textSecondary }}>
+                Выбрать
+              </button>
+            ) : (
+              <>
+                <button className="twa-press-sm" onClick={() => {
+                  haptic.select();
+                  const closableIds = activeTasks.filter(t => t.status !== "PURCHASING").map(t => t.id);
+                  setSelectedTaskIds(prev => prev.size === closableIds.length ? new Set() : new Set(closableIds));
+                }}
+                  style={{ border: "none", borderRadius: 9, padding: "8px 12px", minHeight: 36, fontSize: 14, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", background: C.elevated, color: C.textSecondary }}>
+                  {selectedTaskIds.size === activeTasks.filter(t => t.status !== "PURCHASING").length ? "Снять всё" : "Выбрать всё"}
+                </button>
+                <button className="twa-press-sm" onClick={() => { haptic.select(); setSelectMode(false); setSelectedTaskIds(new Set()); }}
+                  style={{ border: "none", borderRadius: 9, padding: "8px 12px", minHeight: 36, fontSize: 14, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", background: C.elevated, color: C.textSecondary }}>
+                  Отмена
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        {selectMode && selectedTaskIds.size > 0 && (
+          <Card>
+            <div style={{ padding: "12px 16px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "#e5e5ea" }}>
+                  Выбрано: {selectedTaskIds.size}
+                </span>
+                <span style={{ fontSize: 14, fontWeight: 600, color: C.green, ...tabular }}>
+                  {activeTasks.filter(t => selectedTaskIds.has(t.id)).reduce((s, t) => s + (t.priceRobux ?? t.purchasePriceRobux ?? 0), 0).toLocaleString("ru-RU")} R$
+                </span>
+              </div>
+              <button className="twa-press" disabled={busy || bulkDoneRunning}
+                onClick={() => { haptic.impact("heavy"); void doPartnerBulkMarkDone([...selectedTaskIds]); }}
+                style={{
+                  width: "100%", padding: "13px", border: "none", borderRadius: 12,
+                  background: C.green, color: "#fff", fontSize: 15, fontWeight: 700,
+                  cursor: "pointer", fontFamily: "inherit", opacity: busy ? 0.5 : 1,
+                }}>
+                {bulkDoneRunning ? "Отмечаю..." : `Выкуплено всё (${selectedTaskIds.size})`}
+              </button>
+            </div>
+          </Card>
+        )}
         <Card>
           {activeTasks.length === 0 ? (
             <div style={{ padding: "18px 16px", color: C.textSecondary, fontSize: 15, textAlign: "center" }}>
@@ -3671,16 +3773,42 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
             </div>
           ) : (
             activeTasks.map((task, i) => (
-              <div key={task.id}>
-                {i > 0 && <div style={{ height: 1, background: C.border, marginLeft: 16 }} />}
-                <PartnerTaskRow
-                  task={task}
-                  busy={busy}
-                  rateUsdtPer1000={rate}
-                  onPurchase={purchaseTask}
-                  onMarkDone={(t) => { haptic.impact("medium"); void (async () => { if (await post("mark-done", { taskId: t.id, purchaseAccountName: accountName || null })) notifyBuyout([t.id]); })(); }}
-                  onCancel={(t) => { haptic.impact("light"); post("cancel-task", { taskId: t.id }); }}
-                />
+              <div key={task.id} style={{ display: "flex", alignItems: "stretch" }}>
+                {selectMode && task.status !== "PURCHASING" && (
+                  <button
+                    onClick={() => {
+                      haptic.select();
+                      setSelectedTaskIds(prev => {
+                        const next = new Set(prev);
+                        next.has(task.id) ? next.delete(task.id) : next.add(task.id);
+                        return next;
+                      });
+                    }}
+                    style={{
+                      flexShrink: 0, width: 44, display: "flex", alignItems: "center", justifyContent: "center",
+                      background: "none", border: "none", cursor: "pointer", padding: 0,
+                    }}>
+                    <span style={{
+                      width: 22, height: 22, borderRadius: 6, border: `2px solid ${selectedTaskIds.has(task.id) ? C.green : C.textTertiary}`,
+                      background: selectedTaskIds.has(task.id) ? C.green : "transparent",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 14, color: "#fff", fontWeight: 700, transition: "all .15s",
+                    }}>
+                      {selectedTaskIds.has(task.id) && "✓"}
+                    </span>
+                  </button>
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {i > 0 && <div style={{ height: 1, background: C.border, marginLeft: selectMode ? 0 : 16 }} />}
+                  <PartnerTaskRow
+                    task={task}
+                    busy={busy}
+                    rateUsdtPer1000={rate}
+                    onPurchase={purchaseTask}
+                    onMarkDone={(t) => { haptic.impact("medium"); void (async () => { if (await post("mark-done", { taskId: t.id, purchaseAccountName: accountName || null })) notifyBuyout([t.id]); })(); }}
+                    onCancel={(t) => { haptic.impact("light"); post("cancel-task", { taskId: t.id }); }}
+                  />
+                </div>
               </div>
             ))
           )}

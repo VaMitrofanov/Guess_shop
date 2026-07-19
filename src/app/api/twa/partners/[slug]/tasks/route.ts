@@ -2664,6 +2664,84 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       return json({ ok: true, partner, ...state });
     }
 
+    if (action === "mark-done-bulk") {
+      const taskIds: string[] = Array.isArray(body.taskIds) ? body.taskIds.map(String).slice(0, 200) : [];
+      if (taskIds.length === 0) return json({ ok: false, error: "taskIds обязателен" }, 400);
+
+      const tasks = await prisma.partnerBuyoutTask.findMany({
+        where: { id: { in: taskIds }, partnerId: partner.id },
+      });
+      const closable = tasks.filter(t => t.status !== "DONE" && t.status !== "CANCELLED");
+      if (closable.length === 0) return json({ ok: false, error: "Нет задач для закрытия" }, 400);
+
+      const existingBuyouts = await prisma.partnerLedgerEntry.findMany({
+        where: { partnerId: partner.id, taskId: { in: closable.map(t => t.id) }, type: "BUYOUT" },
+        select: { taskId: true },
+      });
+      const alreadyHasLedger = new Set(existingBuyouts.map(e => e.taskId));
+      const eligible = closable.filter(t => !alreadyHasLedger.has(t.id));
+      if (eligible.length === 0) return json({ ok: false, error: "По всем задачам уже есть списание" }, 409);
+
+      const batchId = `bulk-done:${Date.now()}`;
+      const accountName = String(body.purchaseAccountName || "").trim() || null;
+      const results: { taskId: string; ok: boolean; reason?: string }[] = [];
+      let totalRobux = 0;
+      let totalUsdt = 0;
+
+      for (const task of eligible) {
+        const priceRobux = getTaskPrice(task);
+        if (!priceRobux || priceRobux <= 0) {
+          results.push({ taskId: task.id, ok: false, reason: "Нет цены" });
+          continue;
+        }
+        const priceUsdt = taskCostUsdt(priceRobux, partner);
+
+        await prisma.partnerBuyoutTask.update({
+          where: { id: task.id },
+          data: {
+            status: "DONE",
+            completedAt: new Date(),
+            purchaseAccountName: accountName,
+            purchaseBatchId: batchId,
+            error: null,
+          },
+        });
+
+        if (priceUsdt > 0) {
+          await appendPartnerBuyoutBatch({
+            partner,
+            batchId,
+            priceRobux,
+            priceUsdt,
+            purchaseAccountName: accountName || "Массовая отметка",
+            createdBy: operatorLabel(user),
+          });
+        }
+
+        const updated = await prisma.partnerBuyoutTask.findUnique({ where: { id: task.id } });
+        if (updated) writeBackPartnerTask(updated, "done").catch(() => {});
+
+        totalRobux += priceRobux;
+        totalUsdt += priceUsdt;
+        results.push({ taskId: task.id, ok: true });
+      }
+
+      const state = await loadPartnerState(partner);
+      return json({
+        ok: true,
+        partner,
+        ...state,
+        bulkDoneReport: {
+          total: eligible.length,
+          ok: results.filter(r => r.ok).length,
+          fail: results.filter(r => !r.ok).length,
+          totalRobux,
+          totalUsdt,
+          results,
+        },
+      });
+    }
+
     if (action === "purchase-task") {
       const taskId = String(body.taskId || "");
       if (!taskId) return json({ ok: false, error: "taskId обязателен" }, 400);
