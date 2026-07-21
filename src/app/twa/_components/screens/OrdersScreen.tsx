@@ -8,7 +8,7 @@ import CreateManualModal, { type RebindUser } from "../CreateManualModal";
 
 type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED" | "ERROR";
 // ATTENTION — не чип, а серверная выборка «Требуют внимания» для вкладки «Все».
-type FilterTab = "WORK" | "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "FAVORITES" | "ATTENTION";
+type FilterTab = "WORK" | "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "REJECTED" | "FAVORITES" | "ATTENTION";
 
 // «Ждут ссылку»: сервер отдаёт первые N — самые свежие, дальше хвост от самых
 // старых (см. fetchAwaitingLinkHybrid в api/twa/orders). Здесь — для разделителя.
@@ -111,6 +111,7 @@ const TAB_META: Record<FilterTab, { label: string; color: string }> = {
   ERROR:         { label: "Ошибка",         color: C.red },
   AWAITING_LINK: { label: "Ждут ссылку",    color: C.yellow },
   DONE:          { label: "Готово",          color: C.green },
+  REJECTED:      { label: "Отменены",        color: C.red },
   FAVORITES:     { label: "Избранное",      color: "#ffd60a" },
   ATTENTION:     { label: "Требуют внимания", color: C.orange },
 };
@@ -123,6 +124,7 @@ const FILTERS: { id: FilterTab }[] = [
   { id: "ERROR" },
   { id: "AWAITING_LINK" },
   { id: "DONE" },
+  { id: "REJECTED" },
   { id: "FAVORITES" },
 ];
 
@@ -132,7 +134,7 @@ const ORDER_MODES: { id: "work" | "all" | "history"; label: string; filter: Filt
   { id: "history", label: "История", filter: "DONE", countKey: "DONE" },
 ];
 
-const WORK_FILTERS = new Set<FilterTab>(["WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "FAVORITES", "ATTENTION"]);
+const WORK_FILTERS = new Set<FilterTab>(["WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "REJECTED", "FAVORITES", "ATTENTION"]);
 
 function orderTabBadge(order: Order): { label: string; color: string } | null {
   const cutoff = Date.now() - 40 * 3600_000;
@@ -473,8 +475,8 @@ function ActionPanel({
 }
 
 /* ───────────── MoveToModal ───────────── */
-// Все разделы, кроме «Все» (заказ и так виден в «Все») и текущего
-// (перенаправляем ИЗ него — выбор себя бессмыслен, фильтруется по currentTab).
+// Все разделы, кроме текущего (перенаправляем ИЗ него — выбор себя бессмыслен,
+// фильтруется по currentTab). «Все» намеренно не является целью: это общая куча.
 const MOVE_TARGETS: { id: string; label: string; color: string }[] = [
   { id: "BUYOUT", label: "К выкупу", color: C.green },
   { id: "DIRECT", label: "Прямой выкуп", color: C.blue },
@@ -483,6 +485,7 @@ const MOVE_TARGETS: { id: string; label: string; color: string }[] = [
   { id: "ERROR", label: "Ошибка", color: C.red },
   { id: "AWAITING_LINK", label: "Ждут ссылку", color: C.yellow },
   { id: "DONE", label: "Готово", color: C.green },
+  { id: "REJECTED", label: "Отменены", color: C.red },
   { id: "FAVORITES", label: "Избранное", color: "#ffd60a" },
 ];
 
@@ -1072,10 +1075,10 @@ function OrderCard({
   const displayAmount = showDirty ? dirtyAmount : order.amount;
   const showCleanHint = viewTab === "BUYOUT";
 
-  const tabBadge = currentTab === "ALL" || currentTab === "WORK" || currentTab === "ATTENTION" ? orderTabBadge(order) : null;
-  const showMoveBtn = viewTab === "AWAITING_LINK" || viewTab === "FAVORITES" || viewTab === "ERROR";
+  const tabBadge = currentTab === "ALL" || currentTab === "WORK" || currentTab === "ATTENTION" || currentTab === "REJECTED" ? orderTabBadge(order) : null;
+  const showMoveBtn = viewTab === "AWAITING_LINK" || viewTab === "FAVORITES" || viewTab === "ERROR" || viewTab === "REJECTED" || (currentTab === "ALL" && order.status === "REJECTED");
   // Редактирование за клиента (номинал/ник/ГП) — любой источник, не только Авито.
-  const isEditable = ["PENDING", "AWAITING_GAMEPASS", "ERROR"].includes(order.status);
+  const isEditable = ["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED"].includes(order.status);
   const payment = order.paymentAttempts?.[0];
   const canRefund = order.orderSource === "SITE" && !!payment &&
     ["CONFIRMED", "PARTIALLY_REFUNDED"].includes(payment.status) &&
@@ -1398,7 +1401,7 @@ function OrderCard({
       )}
 
       {/* Rejection reason for ALL tab */}
-      {currentTab === "ALL" && order.status === "REJECTED" && order.rejectionReason && (
+      {(currentTab === "ALL" || currentTab === "REJECTED") && order.status === "REJECTED" && order.rejectionReason && (
         <div style={{
           margin: "0 14px 10px", padding: "6px 10px",
           background: `${C.red}14`, borderRadius: 8,
@@ -1466,7 +1469,7 @@ function OrderCard({
       {refundOpen && <RefundModal order={order} token={token} onDone={() => { setRefundOpen(false); onMoved(); }} onClose={() => setRefundOpen(false)} />}
 
       {/* Rebind button */}
-      {["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"].includes(order.status) && !rebindOpen && (
+      {["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "REJECTED"].includes(order.status) && !rebindOpen && (
         <div style={{ padding: "0 14px 6px" }}>
           <button className="twa-press-sm" onClick={e => { e.stopPropagation(); setRebindOpen(true); }}
             style={{
@@ -1554,8 +1557,11 @@ function SearchBar({ value, onChange }: { value: string; onChange: (v: string) =
 /* ───────────── Counts helpers ───────────── */
 function shiftCounts(counts: Record<string, number>, fromTab: string, toTab: string): Record<string, number> {
   const next = { ...counts };
-  if (fromTab in next) next[fromTab] = Math.max(0, (next[fromTab] ?? 0) - 1);
-  if (toTab in next) next[toTab] = (next[toTab] ?? 0) + 1;
+  // ALL is the immutable union of every non-test order. Moving a card between
+  // virtual folders must not change that total; only the source/target chips
+  // change.
+  if (fromTab !== "ALL" && fromTab in next) next[fromTab] = Math.max(0, (next[fromTab] ?? 0) - 1);
+  if (toTab !== "ALL" && toTab in next) next[toTab] = (next[toTab] ?? 0) + 1;
   return next;
 }
 
@@ -1571,6 +1577,7 @@ function orderToTab(order: Order): FilterTab {
   const created = new Date(order.createdAt).getTime();
   if (order.isFavorite) return "FAVORITES";
   if (order.status === "COMPLETED") return "DONE";
+  if (order.status === "REJECTED") return "REJECTED";
   if (order.status === "ERROR") return "ERROR";
   if (order.status === "AWAITING_GAMEPASS") return created > cutoff ? "NEW" : "AWAITING_LINK";
   if (order.isDirectOrder && ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status)) return "DIRECT";
@@ -1771,8 +1778,8 @@ export default function OrdersScreen({
     let toTab: FilterTab | null = null;
     let newStatus: OrderStatus | null = null;
 
-    if (action === "complete") { newStatus = "COMPLETED"; toTab = "ALL"; }
-    else if (action === "reject") { newStatus = "REJECTED"; toTab = "ALL"; }
+    if (action === "complete") { newStatus = "COMPLETED"; toTab = "DONE"; }
+    else if (action === "reject") { newStatus = "REJECTED"; toTab = "REJECTED"; }
     else if (action === "set-error") { newStatus = "ERROR"; toTab = "ERROR"; }
     else if (action === "restore-to-buyout") {
       newStatus = "PENDING";
@@ -1785,8 +1792,8 @@ export default function OrdersScreen({
     // В «Требуют внимания» карточка уходит после выкупа/отклонения;
     // set-error оставляет её в подборке (ошибки — тоже «внимание»).
     const leaves = isAttentionView
-      ? toTab === "ALL"
-      : filter !== "ALL" && (toTab === "ALL" || toTab !== filter);
+      ? toTab !== "ERROR"
+      : filter !== "ALL" && toTab !== filter;
     const attnDelta = isAttentionView && leaves ? 1 : 0;
     // WORK = видимый контракт strip (К выкупу + Ждут ссылку + Ошибка):
     // set-error из NEW добавляет заказ в работу, complete/reject — убирает.
@@ -1797,7 +1804,7 @@ export default function OrdersScreen({
           ...o,
           status: newStatus!,
           rejectionReason: action === "reject" ? (reason || "не указана") : o.rejectionReason,
-          buyoutErrorCode: action === "restore-to-buyout" ? null : o.buyoutErrorCode,
+          buyoutErrorCode: ["complete", "reject", "restore-to-buyout"].includes(action) ? null : o.buyoutErrorCode,
           pendingAt: action === "restore-to-buyout" ? new Date().toISOString() : o.pendingAt,
         }
       : o));
@@ -1821,6 +1828,7 @@ export default function OrdersScreen({
         ? {
             ...o,
             status: order.status,
+            rejectionReason: order.rejectionReason,
             buyoutErrorCode: order.buyoutErrorCode,
             pendingAt: order.pendingAt,
           }
@@ -1952,13 +1960,13 @@ export default function OrdersScreen({
     setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: "COMPLETED" as any } : o));
     setData(prev => {
       if (!prev) return prev;
-      let counts = shiftCounts(prev.counts, fromTab, "ALL");
+      let counts = shiftCounts(prev.counts, fromTab, "DONE");
       if (isWorkOrder(order)) counts = { ...counts, WORK: Math.max(0, (counts.WORK ?? 0) - 1) };
       if (isAttentionView) counts = { ...counts, ATTENTION: Math.max(0, (counts["ATTENTION"] ?? 0) - 1) };
       return {
         ...prev,
         counts,
-        sums: prev.sums ? shiftSums(prev.sums, fromTab, "ALL", order.amount) : prev.sums,
+        sums: prev.sums ? shiftSums(prev.sums, fromTab, "DONE", order.amount) : prev.sums,
       };
     });
     if (filter !== "ALL" || isAttentionView) {
@@ -1979,10 +1987,18 @@ export default function OrdersScreen({
         setAllOrders(prev => prev.filter(o => o.id !== order.id));
         setExiting(prev => { const n = new Set(prev); n.delete(order.id); return n; });
         setData(prev => prev ? { ...prev, total: Math.max(0, prev.total - 1) } : prev);
+        setPage(1);
+        void fetchOrders(serverTab, query, 1, false);
       }, 260);
+    } else {
+      // «Все» must keep the order in the union, but its status/source can
+      // change. Reload page 1 so the card and all virtual-folder counters stay
+      // consistent after a move out of REJECTED.
+      setPage(1);
+      void fetchOrders(serverTab, query, 1, false);
     }
     onActionDone?.();
-  }, [filter, onActionDone, isAttentionView]);
+  }, [filter, onActionDone, isAttentionView, fetchOrders, serverTab, query]);
 
   const summaryText = useMemo(() => {
     if (!data) return "";
@@ -2031,7 +2047,7 @@ export default function OrdersScreen({
         </div>
 
         <div className="twa-orders-status-strip twa-no-scrollbar">
-          {(["BUYOUT", "AWAITING_LINK", "ERROR"] as FilterTab[]).map(id => (
+          {(["BUYOUT", "AWAITING_LINK", "ERROR", "REJECTED"] as FilterTab[]).map(id => (
             <button
               type="button"
               key={id}
@@ -2632,6 +2648,7 @@ function EmptyState({ filter, query, attention, onShowAll }: {
     ERROR: "Нет ошибок",
     AWAITING_LINK: "Все оформили заказы",
     DONE: "Нет выкупленных заказов",
+    REJECTED: "Нет отменённых заказов",
     FAVORITES: "Нет избранных",
     ATTENTION: "Ничего не требует внимания",
   };

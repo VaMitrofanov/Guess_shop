@@ -13,7 +13,7 @@ import { notifyRetailBuyoutAdmins } from "@/lib/buyout-admin-notify";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
-type FilterTab = "WORK" | "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "FAVORITES" | "ATTENTION";
+type FilterTab = "WORK" | "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "REJECTED" | "FAVORITES" | "ATTENTION";
 
 const NEW_CUTOFF_HOURS = 40;
 // «Ждут ссылку»: первые N карточек — самые свежие (клиент ещё тёплый), дальше
@@ -159,6 +159,8 @@ function buildTabWhere(tab: FilterTab): any {
       return { status: "AWAITING_GAMEPASS", createdAt: { lte: cutoff }, isFavorite: false };
     case "DONE":
       return { status: "COMPLETED" };
+    case "REJECTED":
+      return { status: "REJECTED" };
     case "FAVORITES":
       return { isFavorite: true };
     case "ATTENTION": {
@@ -210,7 +212,7 @@ export async function GET(req: NextRequest) {
   const lite        = searchParams.get("lite") === "1";
   const sourceFilter = searchParams.get("source") as string | null;
 
-  const isVirtualTab = ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES", "ATTENTION"].includes(tab);
+  const isVirtualTab = ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION"].includes(tab);
   const tabWhere = isVirtualTab
     ? buildTabWhere(tab as FilterTab)
     : (VALID_STATUSES.includes(tab as any) ? { status: tab } : {});
@@ -305,6 +307,7 @@ export async function GET(req: NextRequest) {
               COUNT(*) FILTER (WHERE status = 'ERROR' AND "isFavorite" = false)::int AS "ERROR",
               COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "AWAITING_LINK",
               COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS "DONE",
+              COUNT(*) FILTER (WHERE status = 'REJECTED')::int AS "REJECTED",
               COUNT(*) FILTER (WHERE "isFavorite" = true)::int AS "FAVORITES",
               COUNT(*) FILTER (WHERE "isFavorite" = false AND (
                 status = 'ERROR'
@@ -326,7 +329,7 @@ export async function GET(req: NextRequest) {
           const r = rows[0] ?? {};
           const counts: Record<string, number> = {};
           const sums: Record<string, number> = {};
-          for (const k of ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "FAVORITES", "ATTENTION"] as const)
+          for (const k of ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION"] as const)
             counts[k] = Number(r[k] ?? 0);
           counts["INTENTS"] = await intentsPromise;
           for (const k of ["BUYOUT", "DIRECT", "AVITO", "AWAITING_LINK", "NEW", "ERROR"] as const)
@@ -987,6 +990,7 @@ export async function POST(req: NextRequest) {
       ERROR: "ERROR",
       AWAITING_LINK: "AWAITING_GAMEPASS",
       DONE: "COMPLETED",
+      REJECTED: "REJECTED",
     };
     const newStatus = statusMap[target];
     if (!newStatus) return NextResponse.json({ error: "Invalid target" }, { status: 400 });
@@ -1017,6 +1021,7 @@ export async function POST(req: NextRequest) {
       data.completedAt = new Date(); // Ф6.3: базис таймера разблокировки робуксов
       Object.assign(data, buildOrderProfitSnapshot(order, settings ?? {}, Math.ceil(order.amount / 0.7)) ?? {});
     }
+    if (target === "REJECTED") data.rejectionReason = note;
     if (target !== "ERROR") data.buyoutErrorCode = null;
     if (target === "AWAITING_LINK" || target === "NEW") data.pendingAt = null;
     if ((target === "BUYOUT" || target === "DIRECT" || target === "AVITO")
@@ -1265,7 +1270,7 @@ export async function POST(req: NextRequest) {
   // Заметка правится в NotesEditor карточки; изменения аудируются в adminNote.
   if (action === "edit-order") {
     if (unpaidDirect) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
-    if (!["PENDING", "AWAITING_GAMEPASS", "ERROR"].includes(order.status))
+    if (!["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED"].includes(order.status))
       return NextResponse.json({ error: "Нельзя редактировать в этом статусе" }, { status: 400 });
 
     const data: any = {};
@@ -1452,7 +1457,7 @@ export async function POST(req: NextRequest) {
     const { targetUserId, note } = body;
     if (!targetUserId) return NextResponse.json({ error: "targetUserId обязателен" }, { status: 400 });
 
-    const REBINDABLE = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"];
+    const REBINDABLE = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "REJECTED"];
     if (!REBINDABLE.includes(order.status))
       return NextResponse.json({ error: `Нельзя перепривязать заказ в статусе ${order.status}` }, { status: 400 });
 
