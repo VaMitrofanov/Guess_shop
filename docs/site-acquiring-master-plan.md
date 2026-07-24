@@ -44,6 +44,13 @@ pass, checkout проверяет exact ID в актуальном публич�
 и затем применяет без изменений owner/sale/price guard. Это не обходит проверку до `Init` и не
 ослабляет allowlist; задача — убрать ложный отказ «Геймпасс не найден» перед controlled E2E.
 
+**25.07.2026, первый production Init:** owner allowlist прошёл checkout validation, но
+получил банковский отказ до `PaymentId` и payment URL. Денег, callback, чека и выдачи нет.
+В банковском кабинете рабочий terminal всё ещё выключен; это внешний gate, а не повторная
+попытка оплаты. `SITE_ACQUIRING_ENABLED` немедленно возвращён в `false` и должен оставаться
+таким до активации terminal Т‑Банком; затем запускается минимальная controlled проверка и
+полная цепочка confirmation/outbox/receipt/refund.
+
 **Дизайн `/payment/status` обновлён локально 18.07:** старый pixel UI заменён на Violet/Frost
 order timeline с waiting/paid/work/completed/error/offline состояниями, переходом в ЛК,
 защищённой ссылкой и mobile layout. Production rollout выполняется только вместе с текущим

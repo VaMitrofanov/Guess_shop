@@ -41,6 +41,11 @@
   владельца, если Roblox item-detail endpoints отвечают недоступностью. Fallback строго
   ограничен owner+pass ID и проходит прежние проверки `owner / for-sale / exact guarded price`;
   это исправляет ложный 404, но не расширяет допуск к оплате.
+- **Controlled E2E stop (25.07):** первая owner allowlist-попытка прошла серверную валидацию,
+  но завершилась до выдачи банковского `PaymentId`/payment URL. Это не было списанием и не
+  запустило webhook, чек или выдачу. В кабинете Т‑Банка рабочий terminal остаётся выключенным;
+  master возвращён в `false` до завершения банковской активации. После неё повторяем только
+  минимальный controlled E2E, затем webhook → outbox → receipt → full refund.
 
 Локальный gate после post-purchase/admin/VK batch: root+bot TypeScript и scoped ESLint —
 green, Jest — `42 suites / 256 tests`; mobile `390×844` без horizontal overflow.

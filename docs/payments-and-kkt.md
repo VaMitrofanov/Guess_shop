@@ -28,6 +28,11 @@
   вызывает T‑Bank до успешной проверки. Поэтому временная недоступность detail endpoint
   не должна давать ложный «Геймпасс не найден», но чужой/снятый с продажи/неподходящий по
   цене pass по-прежнему fail-closed.
+- **Controlled E2E update 25.07.2026:** первая allowlist-попытка дошла до `Init`, но банк
+  не выдал `PaymentId` и payment URL; списания, callback, чека и выдачи не было. Рабочий
+  terminal в кабинете банка ещё имеет статус «выключен», поэтому acceptance остановлена на
+  банковской активации. Master kill-switch сразу возвращён в `false`; до его повторного
+  включения после активации новые `Init` недоступны даже owner allowlist.
 - Desktop `/admin` теперь читает тот же `WbOrder`/payment/outbox-контур: dashboard показывает
   открытые платежи, ошибки, `SUBMIT_UNKNOWN` и dead-letter, досье — сумму/PaymentId/refunds/
   events, а `/admin/activity` — единый журнал без сырых payload. Изменяющие payment-действия
