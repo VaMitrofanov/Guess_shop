@@ -7,7 +7,7 @@
   status были проверены после штатной пересборки.
 - **Технический preflight 24.07.2026:** production runtime использует non-DEMO terminal и
   SecretKey (значения только в Coolify), ККТ-набор заполнен. Master включён только в режиме
-  `SITE_ACQUIRING_MODE=allowlist` для одной внутренней учётной записи владельца; публичный
+  `SITE_ACQUIRING_MODE=allowlist` для двух внутренних owner-учётных записей; публичный
   status для гостя показывает `available:true`, `mode:limited`, но не даёт оплатить.
   Реальная минимальная оплата/3DS, signed webhook, доставка уведомления, чек и полный возврат
   ещё не совершались и остаются обязательной controlled E2E-приёмкой.

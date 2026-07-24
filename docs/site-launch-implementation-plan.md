@@ -31,7 +31,7 @@
   Gate проверяет именно `PaymentAttempt` в состояниях `AUTHORIZED|CONFIRMED|PARTIALLY_REFUNDED`;
   один только `WbOrder.status=PENDING/COMPLETED` не считается оплатой.
 - **Этап 3 частично подготовлен:** production credentials внесены напрямую в runtime Coolify
-  и классифицированы как non-DEMO; allowlist содержит одну внутреннюю учётную запись. Master
+  и классифицированы как non-DEMO; allowlist содержит две внутренние owner-учётные записи. Master
   включён только для этого allowlist, поэтому гостевой status показывает `limited`, а не
   открытый rollout. Реальный платёж, чек и возврат ещё не выполнялись: следующий обязательный
   шаг — controlled E2E под учётной записью владельца с картой/3DS.
