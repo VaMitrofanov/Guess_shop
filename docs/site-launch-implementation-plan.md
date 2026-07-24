@@ -30,8 +30,11 @@
   подтверждение фактической подписки.
   Gate проверяет именно `PaymentAttempt` в состояниях `AUTHORIZED|CONFIRMED|PARTIALLY_REFUNDED`;
   один только `WbOrder.status=PENDING/COMPLETED` не считается оплатой.
-- **Этап 3 не начат:** production credentials, SMTP/фискальная конфигурация, реальный платёж,
-  возврат и rollout не выполнялись. Master gate должен оставаться `false`, mode — `off`.
+- **Этап 3 частично подготовлен:** runtime allowlist создан для одной внутренней учётной записи,
+  master flag остаётся выключен. Production credentials ещё не внесены (runtime terminal DEMO),
+  поэтому реальный платёж,
+  возврат и rollout не выполнялись. Master gate остаётся `false`, поэтому публичный status
+  корректно показывает mode `off` до controlled E2E.
 
 Локальный gate после post-purchase/admin/VK batch: root+bot TypeScript и scoped ESLint —
 green, Jest — `42 suites / 256 tests`; mobile `390×844` без horizontal overflow.

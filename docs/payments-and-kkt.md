@@ -5,6 +5,11 @@
 - Рабочие credentials получены владельцем, но ввод отложен до приёмки текущего сайта.
 - Production master flag принудительно установлен в `false`; health и публичный status
   проверены после штатной пересборки.
+- **Технический preflight 24.07.2026:** runtime-контур подготовлен как
+  `SITE_ACQUIRING_MODE=allowlist` с одной внутренней учётной записью владельца, но master
+  остаётся `false`. ККТ-набор env заполнен, однако runtime `TINKOFF_TERMINAL_KEY` всё ещё
+  относится к DEMO; это блокирует боевой Init. Production TerminalKey/SecretKey должны быть
+  введены напрямую в Coolify и проверены как non-DEMO перед изменением master flag.
 - Новый код требует два явных разрешения: `SITE_ACQUIRING_ENABLED=true` и режим
   `SITE_ACQUIRING_MODE=allowlist|percentage|on`; default/неизвестное значение — `off`.
 - Allowlist/percentage проверяются по authenticated internal `User.id` и повторно

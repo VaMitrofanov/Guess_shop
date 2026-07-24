@@ -32,6 +32,11 @@ full refund.
 DEMO → production отложена до завершения текущей подготовки сайта; после замены обязателен
 allowlist E2E через checkout с реальной БД и контролируемым возвратом.
 
+**24.07.2026:** production runtime подготовлен к одному controlled E2E через `allowlist`,
+но kill switch оставлен `false`. Preflight подтвердил, что текущий runtime TerminalKey — DEMO;
+боевые ключи не находятся в репозитории и должны быть введены только напрямую в Coolify.
+До этого реальная оплата, чек и возврат не запускаются.
+
 **Дизайн `/payment/status` обновлён локально 18.07:** старый pixel UI заменён на Violet/Frost
 order timeline с waiting/paid/work/completed/error/offline состояниями, переходом в ЛК,
 защищённой ссылкой и mobile layout. Production rollout выполняется только вместе с текущим
