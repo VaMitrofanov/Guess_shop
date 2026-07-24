@@ -10,6 +10,8 @@ import { BUYOUT_ERROR_LEGACY_PURCHASE_FLOW, BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
 import { appendOrderAudit, buildRestoreToBuyoutData } from "@/lib/order-recovery";
 import { notifyRetailBuyoutAdmins } from "@/lib/buyout-admin-notify";
+import { generateDirectCode } from "@/lib/twa-direct";
+import { directPrice } from "@/lib/retail-pricing";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
@@ -675,10 +677,18 @@ export async function POST(req: NextRequest) {
   // ре-привязка кода к клиенту, PENDING при геймпассе, опциональный увед клиенту
   // «как будто сам активировал» (notifyRebind).
   if (action === "create-manual") {
+    const isDirect = body.direct === true;
     const rawCode = String(body.wbCode ?? "").trim().toUpperCase() || null;
     const nick = String(body.robloxUsername ?? "").trim().replace(/^@/, "") || null;
     const noteText = String(body.note ?? "").trim() || null;
     const clientUserId = String(body.clientUserId ?? "").trim() || null;
+
+    if (isDirect && rawCode)
+      return NextResponse.json({ error: "Для прямого заказа WB-код не нужен" }, { status: 400 });
+    if (isDirect && !clientUserId)
+      return NextResponse.json({ error: "Выбери юзера, с которым общался" }, { status: 400 });
+    if (isDirect && !nick)
+      return NextResponse.json({ error: "Укажи ник Roblox и найди его геймпасс" }, { status: 400 });
 
     // 1) Код ВБ (опционален): существует, не тест, заказа по нему нет.
     let codeRow: any = null;
@@ -699,8 +709,8 @@ export async function POST(req: NextRequest) {
     }
 
     // 2) Номинал: из кода или руками.
-    const amount = codeRow?.denomination ?? Number(body.amount);
-    if (!amount || !Number.isFinite(amount) || amount < 1)
+    let amount = codeRow?.denomination ?? Number(body.amount);
+    if (!isDirect && (!amount || !Number.isFinite(amount) || amount < 1))
       return NextResponse.json({ error: "Укажи код ВБ или номинал в R$" }, { status: 400 });
 
     // 3) Клиент (опционален): без клиента — служебный юзер (как в Авито).
@@ -718,6 +728,19 @@ export async function POST(req: NextRequest) {
     const gpId = gpRaw.match(/game-pass(?:es)?\/(\d+)/)?.[1] ?? (/^\d{6,}$/.test(gpRaw) ? gpRaw : null);
     if (gpRaw && !gpId)
       return NextResponse.json({ error: "Геймпасс: нужна ссылка roblox.com/game-pass/<id> или ID" }, { status: 400 });
+
+    if (isDirect) {
+      if (!gpId) return NextResponse.json({ error: "Выбери геймпасс из результатов поиска" }, { status: 400 });
+      const info = await getGpInfoCached(gpId);
+      if (!info?.price || info.isForSale === false)
+        return NextResponse.json({ error: "Не удалось подтвердить цену геймпасса или он снят с продажи" }, { status: 400 });
+      // Для ручного DIRECT сумма клиенту = цена геймпасса × 70%.
+      // Так order.amount совпадает с обычным DIR-прайс-гардом ceil(amount / 0.7).
+      amount = Math.floor(info.price * 0.7);
+      if (amount < 1) return NextResponse.json({ error: "Цена геймпасса слишком мала" }, { status: 400 });
+    }
+    if (!amount || !Number.isFinite(amount) || amount < 1)
+      return NextResponse.json({ error: "Не удалось определить сумму заказа" }, { status: 400 });
     if (gpId && body.force !== true) {
       const candidates = await (prisma as any).wbOrder.findMany({
         where: { isTest: false, status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] }, gamepassUrl: { contains: `/${gpId}` } },
@@ -733,9 +756,11 @@ export async function POST(req: NextRequest) {
     }
 
     const gamepassUrl = gpId ? `https://www.roblox.com/game-pass/${gpId}` : null;
-    const code = rawCode ?? `MN-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    const code = isDirect
+      ? generateDirectCode()
+      : rawCode ?? `MN-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
     const stamp = new Date().toISOString().slice(0, 10);
-    const manualMark = `[MANUAL ${stamp} от ${twaUser.firstName}]`;
+    const manualMark = `[MANUAL${isDirect ? " DIRECT" : ""} ${stamp} от ${twaUser.firstName}]`;
     const platform = client?.vkId && !client?.tgId ? "VK" : "TG";
 
     const created = await (prisma as any).$transaction(async (tx: any) => {
@@ -747,10 +772,17 @@ export async function POST(req: NextRequest) {
           status: gamepassUrl ? "PENDING" : "AWAITING_GAMEPASS",
           platform,
           wbCode: code,
-          isDirectOrder: false,
-          orderSource: "MANUAL",
+          isDirectOrder: isDirect,
+          orderSource: isDirect ? "DIRECT" : "MANUAL",
           adminNote: noteText ? `${manualMark} ${noteText}` : manualMark,
           pendingAt: gamepassUrl ? new Date() : null,
+          ...(isDirect ? {
+            // Админский ручной direct считается подтверждённым: он сразу
+            // проходит DIR-гейт и попадает в рабочую очередь выкупа.
+            paidAt: new Date(),
+            paymentDetails: "Ручной прямой заказ: подтверждён менеджером",
+            saleAmountKopecks: directPrice(amount) * 100,
+          } : {}),
           user: client
             ? { connect: { id: client.id } }
             : { connectOrCreate: { where: { tgId: "admin" }, create: { tgId: "admin", name: "Admin (Manual)" } } },

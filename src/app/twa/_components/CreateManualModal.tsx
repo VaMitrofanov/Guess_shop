@@ -42,20 +42,24 @@ interface FoundPass {
   existingOrder?: { wbCode: string; status: string } | null;
 }
 
+export type CreateOrderMode = "manual" | "direct";
+
 const manualInputStyle: React.CSSProperties = {
   width: "100%", background: C.elevated, border: "none", borderRadius: 10,
   color: "#fff", fontSize: 15, padding: "11px 12px", outline: "none",
   fontFamily: "inherit", boxSizing: "border-box",
 };
 
-export default function CreateManualModal({ token, onDone, onClose, initialGamepassUrl, initialNick, initialAmount }: {
+export default function CreateManualModal({ token, onDone, onClose, initialGamepassUrl, initialNick, initialAmount, mode = "manual" }: {
   token: string;
   onDone: () => void;
   onClose: () => void;
   initialGamepassUrl?: string;
   initialNick?: string;
   initialAmount?: number;
+  mode?: CreateOrderMode;
 }) {
+  const isDirect = mode === "direct";
   const [wbCode, setWbCode] = useState("");
   const [amount, setAmount] = useState(initialAmount ? String(initialAmount) : "");
   const [nick, setNick] = useState(initialNick ?? "");
@@ -71,6 +75,7 @@ export default function CreateManualModal({ token, onDone, onClose, initialGamep
   const [creating, setCreating] = useState(false);
   // Поиск геймпассов по нику/ссылке на профиль — связка с «Поиск и выкуп».
   const [gpFound, setGpFound] = useState<FoundPass[]>([]);
+  const [selectedDirectPass, setSelectedDirectPass] = useState<FoundPass | null>(null);
   const [gpSearching, setGpSearching] = useState(false);
   const [gpSearchMsg, setGpSearchMsg] = useState("");
   // 409-дедуп геймпасса: показываем существующий заказ, кнопка → «Создать всё равно».
@@ -130,7 +135,9 @@ export default function CreateManualModal({ token, onDone, onClose, initialGamep
   const codeState = wbCode.trim() ? valid.code : undefined;
   const gpState = gpInput.trim() ? valid.gamepass : undefined;
   const effAmount = codeState?.ok && codeState.denomination ? codeState.denomination : (Number(amount) || null);
-  const canSubmit = !creating && !!effAmount && (!wbCode.trim() || codeState?.ok === true) && (!gpInput.trim() || !gpState?.error);
+  const canSubmit = isDirect
+    ? !creating && !!client && !!nick.trim() && !!selectedDirectPass && !!gpInput.trim() && !gpState?.error
+    : !creating && !!effAmount && (!wbCode.trim() || codeState?.ok === true) && (!gpInput.trim() || !gpState?.error);
   const expectedPrice = effAmount ? Math.ceil(effAmount / 0.7) : null;
 
   function userLabel(u: RebindUser) {
@@ -171,13 +178,14 @@ export default function CreateManualModal({ token, onDone, onClose, initialGamep
         method: "POST", headers,
         body: JSON.stringify({
           action: "create-manual",
+          direct: isDirect,
           wbCode: wbCode.trim() || undefined,
           amount: Number(amount) || undefined,
           clientUserId: client?.id ?? undefined,
           robloxUsername: nick.trim() || undefined,
           gamepassUrl: gpInput.trim() || undefined,
           note: note.trim() || undefined,
-          notify: notify && !!client,
+          notify: !isDirect && notify && !!client,
           force,
         }),
       });
@@ -190,11 +198,11 @@ export default function CreateManualModal({ token, onDone, onClose, initialGamep
       if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
       haptic.notify("success");
       const created = d.order;
-      let msg = `Заказ ${created.wbCode} создан · ${created.status === "PENDING" ? "К выкупу" : "Ждёт геймпасс"}`;
-      if (notify && client) {
+      let msg = `${isDirect ? "Прямой заказ" : "Заказ"} ${created.wbCode} создан · ${created.status === "PENDING" ? "К выкупу" : "Ждёт геймпасс"}`;
+      if (!isDirect && notify && client) {
         msg += d.notified ? ` · клиент уведомлён (${String(d.notified).toUpperCase()})` : " · увед НЕ доставлен";
       }
-      toast(msg, d.notified === null && notify && client ? "error" : "success");
+      toast(msg, d.notified === null && !isDirect && notify && client ? "error" : "success");
       onDone();
     } catch { toast("Ошибка сети", "error"); }
     finally { setCreating(false); }
@@ -214,15 +222,17 @@ export default function CreateManualModal({ token, onDone, onClose, initialGamep
         display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
       }}>
         <div style={{ padding: "18px 20px 4px", flexShrink: 0 }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: "#e5e5ea" }}>➕ Создать заказ</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#e5e5ea" }}>{isDirect ? "🔷 Создать прямой заказ" : "➕ Создать заказ"}</div>
           <div style={{ fontSize: 13, color: C.textTertiary, marginTop: 4 }}>
-            Ручной заказ: WB-код без заказа, восстановление, обмен.
+            {isDirect
+              ? "Найди геймпасс по нику и выбери юзера, с которым общался. Заказ сразу попадёт в «Прямой» и будет готов к выкупу."
+              : "Ручной заказ: WB-код без заказа, восстановление, обмен."}
           </div>
         </div>
 
         <div style={{ padding: "12px 20px 8px", display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
-          {/* Код ВБ */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {/* Код ВБ — только для обычного ручного заказа. */}
+          {!isDirect && <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <input
               value={wbCode}
               onChange={e => setWbCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7))}
@@ -241,10 +251,10 @@ export default function CreateManualModal({ token, onDone, onClose, initialGamep
                 )}
               </div>
             )}
-          </div>
+          </div>}
 
           {/* Номинал — только без валидного кода */}
-          {!codeState?.ok && (
+          {!isDirect && !codeState?.ok && (
             <input
               value={amount}
               onChange={e => setAmount(e.target.value.replace(/\D/g, ""))}
@@ -275,7 +285,7 @@ export default function CreateManualModal({ token, onDone, onClose, initialGamep
               <input
                 value={clientQuery}
                 onChange={e => setClientQuery(e.target.value)}
-                placeholder="Клиент (опц.): @username, имя, ID"
+                placeholder={isDirect ? "Юзер: @username, имя или ID" : "Клиент (опц.): @username, имя, ID"}
                 style={manualInputStyle}
               />
               {searching && <div style={{ fontSize: 13, color: C.textTertiary }}>Поиск…</div>}
@@ -313,8 +323,8 @@ export default function CreateManualModal({ token, onDone, onClose, initialGamep
             <div style={{ display: "flex", gap: 6 }}>
               <input
                 value={nick}
-                onChange={e => { setNick(e.target.value); setGpFound([]); setGpSearchMsg(""); }}
-                placeholder="Ник Roblox или ссылка на профиль (опц.)"
+                onChange={e => { setNick(e.target.value); setGpFound([]); setGpSearchMsg(""); setSelectedDirectPass(null); }}
+                placeholder={isDirect ? "Ник Roblox — сначала найди геймпасс" : "Ник Roblox или ссылка на профиль (опц.)"}
                 autoCapitalize="off" autoCorrect="off" spellCheck={false}
                 style={{ ...manualInputStyle, flex: 1, width: "auto", minWidth: 0 }}
               />
@@ -344,6 +354,8 @@ export default function CreateManualModal({ token, onDone, onClose, initialGamep
                       onClick={() => {
                         haptic.impact("light");
                         setGpInput(`https://www.roblox.com/game-pass/${gp.gamepassId}`);
+                        setSelectedDirectPass(gp);
+                        setAmount(String(Math.floor(gp.price * 0.7)));
                         setGpFound([]); setGpSearchMsg("");
                       }}
                       style={{
@@ -371,8 +383,9 @@ export default function CreateManualModal({ token, onDone, onClose, initialGamep
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <input
               value={gpInput}
-              onChange={e => setGpInput(e.target.value)}
-              placeholder="Геймпасс: ссылка или ID (опц.)"
+              onChange={e => { setGpInput(e.target.value); if (isDirect) setSelectedDirectPass(null); }}
+              readOnly={isDirect}
+              placeholder={isDirect ? "Выбери геймпасс из результатов поиска" : "Геймпасс: ссылка или ID (опц.)"}
               autoCapitalize="off" autoCorrect="off" spellCheck={false}
               style={manualInputStyle}
             />
@@ -392,6 +405,11 @@ export default function CreateManualModal({ token, onDone, onClose, initialGamep
               </div>
             )}
             {checking && <div style={{ fontSize: 12, color: C.textTertiary }}>Проверяю…</div>}
+            {isDirect && selectedDirectPass && (
+              <div style={{ fontSize: 13, color: C.green }}>
+                ✓ Клиенту: <b>{amount} R$</b> · цена пасса {selectedDirectPass.price.toLocaleString("ru-RU")} R$
+              </div>
+            )}
           </div>
 
           {/* Заметка */}
@@ -403,7 +421,7 @@ export default function CreateManualModal({ token, onDone, onClose, initialGamep
           />
 
           {/* Уведомить клиента */}
-          {client && (
+          {!isDirect && client && (
             <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", userSelect: "none" }}>
               <input type="checkbox" checked={notify} onChange={e => setNotify(e.target.checked)} style={{ width: 18, height: 18, accentColor: C.accent }} />
               <span style={{ fontSize: 14, color: C.textSecondary }}>
@@ -436,7 +454,7 @@ export default function CreateManualModal({ token, onDone, onClose, initialGamep
               fontSize: 15, fontWeight: 600, cursor: "pointer",
               opacity: canSubmit ? 1 : 0.45,
             }}>
-            {creating ? "…" : dup ? "Создать всё равно" : "Создать заказ"}
+            {creating ? "…" : dup ? "Создать всё равно" : isDirect ? "Создать и поставить на выкуп" : "Создать заказ"}
           </button>
         </div>
       </div>

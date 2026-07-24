@@ -141,6 +141,14 @@ robloxUsername, userId+createdAt).
 `WbOrder` `DIR-…` через QR/реквизиты — из TG-карточки или TWA-вкладки «Прямой») /
 `CANCELLED` (отклонён) / `EXPIRED` (>24 ч, авто). Предотвращает «мёртвые» полу-заказы.
 
+С 24.07.2026 менеджер может создать прямой заказ вручную из TWA → Orders → «Прямой» → «+».
+После поиска ника Roblox выбирается for-sale геймпасс, сумма `WbOrder.amount` считается как
+`floor(priceRobux × 0.7)`, а юзер выбирается через `search-users`. Такой заказ получает
+синтетический код `DIR-…`, `isDirectOrder=true`, `orderSource=DIRECT`, `PENDING`,
+`pendingAt=now` и `paidAt=now`: ручное действие менеджера считается подтверждением для
+немедленного попадания в очередь выкупа. В `paymentDetails` и `adminNote` остаётся явная
+пометка ручного создания; `WbCode` для этого сценария не создаётся.
+
 ### `GlobalSettings` (id=`global`)
 Настройки выкупа: `robloxCookie` (`.ROBLOSECURITY` донора), `robloxCookieUpdatedAt`,
 `robloxAccountName` (ник донора), `purchaseRate` ($ за 1000 R$), `usdToRub`.

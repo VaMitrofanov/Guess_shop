@@ -1613,6 +1613,7 @@ export default function OrdersScreen({
   const [allView, setAllView] = useState<"attention" | "list">("list");
   // П4: модалка «➕ Создать заказ» (ручной заказ целиком из TWA).
   const [createOpen, setCreateOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<"manual" | "direct">("manual");
   const [filtersOpen, setFiltersOpen] = useState(false);
   useEffect(() => {
     if (initialQuery || initialTab) onInitialQueryConsumed?.();
@@ -2024,7 +2025,7 @@ export default function OrdersScreen({
             type="button"
             aria-label="Создать заказ вручную"
             title="Создать заказ вручную"
-            onClick={() => { haptic.impact("light"); setCreateOpen(true); }}
+            onClick={() => { haptic.impact("light"); setCreateMode(filter === "DIRECT" ? "direct" : "manual"); setCreateOpen(true); }}
           >
             +
           </button>
@@ -2264,6 +2265,7 @@ export default function OrdersScreen({
       {createOpen && (
         <CreateManualModal
           token={token}
+          mode={createMode}
           onClose={() => setCreateOpen(false)}
           onDone={() => {
             setCreateOpen(false);
