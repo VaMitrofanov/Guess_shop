@@ -294,6 +294,54 @@ export async function getUserGamepasses(username: string, resolvedUserId?: strin
   }
 }
 
+type CheckoutGamepass = {
+  id: string;
+  name: string;
+  price: number;
+  creatorId: number;
+  isActive: boolean;
+};
+
+type ListedGamepass = {
+  id: string | number;
+  name?: string;
+  price?: number;
+  isForSale?: boolean;
+};
+
+/**
+ * Resolves a pass immediately before a web payment is created.
+ *
+ * Roblox's item-detail endpoints are intermittently unavailable from some
+ * server IP ranges, while the public universe listing used by the checkout
+ * search still returns the same pass. A successful fallback is deliberately
+ * restricted to the requested Roblox owner's current public pass list, so it
+ * cannot weaken the ownership, sale-state or price checks in the order guard.
+ */
+export async function getCheckoutGamepassDetails(
+  gamepassId: string,
+  owner: { id: string | number; username: string },
+  dependencies: {
+    getDirect?: (id: string) => Promise<CheckoutGamepass | null>;
+    listOwned?: (username: string, userId: string | number) => Promise<ListedGamepass[]>;
+  } = {},
+): Promise<CheckoutGamepass | null> {
+  const direct = await (dependencies.getDirect ?? getGamepassDetails)(gamepassId);
+  if (direct) return direct;
+
+  const ownedPasses = await (dependencies.listOwned ?? getUserGamepasses)(owner.username, owner.id);
+  const listedPass = ownedPasses.find((pass) => String(pass.id) === String(gamepassId));
+  if (!listedPass) return null;
+
+  return {
+    id: String(listedPass.id),
+    name: listedPass.name ?? "Gamepass",
+    price: Number(listedPass.price ?? 0),
+    creatorId: Number(owner.id),
+    isActive: listedPass.isForSale === true,
+  };
+}
+
 export async function verifyUserGamepass(username: string, gamepassId: string, _requiredRobux: number) {
   const user = await getRobloxUser(username);
   if (!user) return { success: false, message: "User not found" };

@@ -20,6 +20,14 @@
 - Production E2E выполняется сначала на allowlist: минимальная оплата → signed webhook →
   order/outbox/ЛК/check → полный возврат и reconciliation. Полная матрица:
   [site-launch-implementation-plan.md](site-launch-implementation-plan.md#5-боевой-e2e-и-включение).
+- **Checkout reliability update 25.07.2026:** consent checkbox теперь явно отображает
+  controlled state с короткой анимацией; `POST /api/orders/create` перед `Init` сначала
+  проверяет pass через обычные Roblox item-detail API, а при их временной недоступности
+  сверяет тот же ID с текущим публичным списком пассов именно выбранного владельца. Fallback
+  передаёт в прежний server-side guard owner, sale-state и цену; он не создаёт заказ и не
+  вызывает T‑Bank до успешной проверки. Поэтому временная недоступность detail endpoint
+  не должна давать ложный «Геймпасс не найден», но чужой/снятый с продажи/неподходящий по
+  цене pass по-прежнему fail-closed.
 - Desktop `/admin` теперь читает тот же `WbOrder`/payment/outbox-контур: dashboard показывает
   открытые платежи, ошибки, `SUBMIT_UNKNOWN` и dead-letter, досье — сумму/PaymentId/refunds/
   events, а `/admin/activity` — единый журнал без сырых payload. Изменяющие payment-действия

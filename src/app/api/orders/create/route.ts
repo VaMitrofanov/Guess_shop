@@ -11,7 +11,7 @@ import {
 } from "@/lib/canonical-web-order";
 import { prisma } from "@/lib/prisma";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
-import { getGamepassDetails, getRobloxUser } from "@/lib/roblox";
+import { getCheckoutGamepassDetails, getRobloxUser } from "@/lib/roblox";
 import { initCanonicalTinkoffPayment } from "@/lib/tinkoff";
 import { siteAcquiringDecision } from "@/lib/site-acquiring";
 
@@ -97,11 +97,12 @@ export async function POST(req: NextRequest) {
     });
     const checkedQuote = validateCheckoutQuote(quote, userId);
 
-    const [robloxUser, gamepass] = await Promise.all([
-      getRobloxUser(input.username),
-      getGamepassDetails(input.gamepassId),
-    ]);
+    const robloxUser = await getRobloxUser(input.username);
     if (!robloxUser) return NextResponse.json({ error: "Roblox-пользователь не найден" }, { status: 404 });
+    const gamepass = await getCheckoutGamepassDetails(input.gamepassId, {
+      id: robloxUser.id,
+      username: String(robloxUser.name ?? input.username),
+    });
     if (!gamepass) return NextResponse.json({ error: "Геймпасс не найден" }, { status: 404 });
     validateCheckoutGamepass(checkedQuote, gamepass, Number(robloxUser.id));
 

@@ -38,6 +38,12 @@ Non-DEMO TerminalKey и SecretKey введены только напрямую �
 записей; public guest status = `limited`. Реальная оплата, чек и возврат ещё не запускались:
 они должны быть проведены owner-аккаунтом с ручным подтверждением карты/3DS.
 
+**25.07.2026, checkout reliability hotfix:** UI-consent теперь имеет явную animated state,
+не зависящую от page-level CSS для input. Если обычные Roblox detail APIs не отдают выбранный
+pass, checkout проверяет exact ID в актуальном публичном списке pass'ов того же Roblox-владельца
+и затем применяет без изменений owner/sale/price guard. Это не обходит проверку до `Init` и не
+ослабляет allowlist; задача — убрать ложный отказ «Геймпасс не найден» перед controlled E2E.
+
 **Дизайн `/payment/status` обновлён локально 18.07:** старый pixel UI заменён на Violet/Frost
 order timeline с waiting/paid/work/completed/error/offline состояниями, переходом в ЛК,
 защищённой ссылкой и mobile layout. Production rollout выполняется только вместе с текущим

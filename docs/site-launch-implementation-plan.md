@@ -35,6 +35,12 @@
   включён только для этого allowlist, поэтому гостевой status показывает `limited`, а не
   открытый rollout. Реальный платёж, чек и возврат ещё не выполнялись: следующий обязательный
   шаг — controlled E2E под учётной записью владельца с картой/3DS.
+- **Checkout hotfix (25.07):** видимый consent-state больше не зависит только от CSS sibling
+  selector: активная галочка и её анимация рендерятся из controlled React state. Перед созданием
+  payment attempt сервер умеет восстановить detail выбранного pass из свежего public listing
+  владельца, если Roblox item-detail endpoints отвечают недоступностью. Fallback строго
+  ограничен owner+pass ID и проходит прежние проверки `owner / for-sale / exact guarded price`;
+  это исправляет ложный 404, но не расширяет допуск к оплате.
 
 Локальный gate после post-purchase/admin/VK batch: root+bot TypeScript и scoped ESLint —
 green, Jest — `42 suites / 256 tests`; mobile `390×844` без horizontal overflow.
