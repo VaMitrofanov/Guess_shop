@@ -3,13 +3,14 @@
 ## Launch-safety update 18.07.2026
 
 - Рабочие credentials получены владельцем, но ввод отложен до приёмки текущего сайта.
-- Production master flag принудительно установлен в `false`; health и публичный status
-  проверены после штатной пересборки.
-- **Технический preflight 24.07.2026:** runtime-контур подготовлен как
-  `SITE_ACQUIRING_MODE=allowlist` с одной внутренней учётной записью владельца, но master
-  остаётся `false`. ККТ-набор env заполнен, однако runtime `TINKOFF_TERMINAL_KEY` всё ещё
-  относится к DEMO; это блокирует боевой Init. Production TerminalKey/SecretKey должны быть
-  введены напрямую в Coolify и проверены как non-DEMO перед изменением master flag.
+- До preflight 24.07 production master flag был принудительно `false`; health и публичный
+  status были проверены после штатной пересборки.
+- **Технический preflight 24.07.2026:** production runtime использует non-DEMO terminal и
+  SecretKey (значения только в Coolify), ККТ-набор заполнен. Master включён только в режиме
+  `SITE_ACQUIRING_MODE=allowlist` для одной внутренней учётной записи владельца; публичный
+  status для гостя показывает `available:true`, `mode:limited`, но не даёт оплатить.
+  Реальная минимальная оплата/3DS, signed webhook, доставка уведомления, чек и полный возврат
+  ещё не совершались и остаются обязательной controlled E2E-приёмкой.
 - Новый код требует два явных разрешения: `SITE_ACQUIRING_ENABLED=true` и режим
   `SITE_ACQUIRING_MODE=allowlist|percentage|on`; default/неизвестное значение — `off`.
 - Allowlist/percentage проверяются по authenticated internal `User.id` и повторно

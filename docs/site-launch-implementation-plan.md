@@ -30,11 +30,11 @@
   подтверждение фактической подписки.
   Gate проверяет именно `PaymentAttempt` в состояниях `AUTHORIZED|CONFIRMED|PARTIALLY_REFUNDED`;
   один только `WbOrder.status=PENDING/COMPLETED` не считается оплатой.
-- **Этап 3 частично подготовлен:** runtime allowlist создан для одной внутренней учётной записи,
-  master flag остаётся выключен. Production credentials ещё не внесены (runtime terminal DEMO),
-  поэтому реальный платёж,
-  возврат и rollout не выполнялись. Master gate остаётся `false`, поэтому публичный status
-  корректно показывает mode `off` до controlled E2E.
+- **Этап 3 частично подготовлен:** production credentials внесены напрямую в runtime Coolify
+  и классифицированы как non-DEMO; allowlist содержит одну внутреннюю учётную запись. Master
+  включён только для этого allowlist, поэтому гостевой status показывает `limited`, а не
+  открытый rollout. Реальный платёж, чек и возврат ещё не выполнялись: следующий обязательный
+  шаг — controlled E2E под учётной записью владельца с картой/3DS.
 
 Локальный gate после post-purchase/admin/VK batch: root+bot TypeScript и scoped ESLint —
 green, Jest — `42 suites / 256 tests`; mobile `390×844` без horizontal overflow.
