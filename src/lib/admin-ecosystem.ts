@@ -208,6 +208,7 @@ function eventPresentation(type: string): Pick<AdminActivityItem, "kind" | "tone
     const channel = normalized.includes("_TG_") ? "Telegram" : "ВКонтакте";
     return { kind: "notification", tone: "success", title: `Клиент открыл ${channel}` };
   }
+  if (normalized === "OUTBOX_REPLAY_REQUESTED") return { kind: "notification", tone: "warning", title: "Повтор доставки запрошен" };
   if (normalized.includes("REFUND")) return { kind: "refund", tone: "warning", title: "Событие возврата" };
   if (normalized.includes("CONFIRMED")) return { kind: "payment", tone: "success", title: "Оплата подтверждена" };
   if (normalized.includes("FAILED") || normalized.includes("REJECTED") || normalized.includes("ERROR")) return { kind: "payment", tone: "danger", title: "Операция требует внимания" };

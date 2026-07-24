@@ -13,6 +13,10 @@
   (`src/lib/vk-id.ts`), клиентские `vk_id`/`name` не принимаются (риск #5 закрыт).
 - **initData** — HMAC-проверка подписи Telegram + отклонение старше 24 ч.
 - **wb-code** — атомарный резерв в транзакции, валидация формата кода.
+- **Ручной replay outbox** — только с desktop-сессией роли `ADMIN`; endpoint принимает UUID
+  idempotency key и допускает исключительно `DEAD → PENDING` в serializable transaction.
+  Он не умеет отправлять банк-операции, не раскрывает payload/текст ошибки и оставляет
+  неизменяемый `OUTBOX_REPLAY_REQUESTED` с hash прежней ошибки. Подробнее: `payments-and-kkt.md`.
 
 ## <a name="twa-auth"></a>Известные риски
 

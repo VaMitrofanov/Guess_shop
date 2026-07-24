@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft, ExternalLink, Smartphone } from "lucide-react";
 import { notFound } from "next/navigation";
 import { getAdminOrderDetail } from "@/lib/admin-ecosystem";
+import OutboxReplayButton from "@/components/admin/outbox-replay-button";
 import styles from "@/components/admin/admin-shell.module.css";
 
 export const dynamic = "force-dynamic";
@@ -101,7 +102,7 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
 
         <section className={`${styles.panel} ${styles.detailPanel} ${styles.widePanel}`}>
           <h2>События и доставка</h2>
-          {order.events.length ? <div className={styles.detailRows}>{order.events.map((event) => <DetailRow key={event.id} label={dateTime(event.createdAt)} value={`${event.type}${event.outbox ? ` · ${event.outbox.topic} / ${event.outbox.status} / попыток ${event.outbox.attempts}` : ""}`} />)}</div> : <div className={styles.empty}>Событий пока нет</div>}
+          {order.events.length ? <div className={styles.detailRows}>{order.events.map((event) => <DetailRow key={event.id} label={dateTime(event.createdAt)} value={<span>{`${event.type}${event.outbox ? ` · ${event.outbox.topic} / ${event.outbox.status} / попыток ${event.outbox.attempts}` : ""}`}{event.outbox?.status === "DEAD" && <span style={{ display: "block", marginTop: 8 }}><OutboxReplayButton outboxId={event.outbox.id} /></span>}</span>} />)}</div> : <div className={styles.empty}>Событий пока нет</div>}
         </section>
 
         {order.adminNote && <section className={`${styles.panel} ${styles.detailPanel} ${styles.widePanel}`}><h2>Заметка менеджера</h2><p style={{ color: "#b7b7bd", fontSize: 12, whiteSpace: "pre-wrap" }}>{order.adminNote}</p></section>}
