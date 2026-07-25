@@ -24,7 +24,10 @@ import {
 } from "@/lib/google-sheets";
 import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepass, resolveGamepassForBuyer, type PurchaseResult } from "@/lib/roblox-buyout";
 import { notifyPartnerBuyout, type PartnerBuyoutNotifyItem } from "@/lib/partner-buyout-notify";
-import { partnerGamepassCommentValue, settledPartnerRowPolicy } from "@/lib/partner-sheet-policy";
+import {
+  buildPartnerSheetRowId, findPartnerSettledRowTwin, partnerGamepassCommentValue,
+  planPartnerRenamedRows, settledPartnerRowPolicy, type PartnerSheetRowRef,
+} from "@/lib/partner-sheet-policy";
 import { prisma } from "@/lib/prisma";
 import { extractTwaUser } from "@/lib/twa-auth";
 
@@ -138,6 +141,12 @@ type GoogleSyncReconciliationStats = {
   reactivated: number;
   /** 5.7 C2: правки строк «готово» после выкупа (задача не мутирует, только пометка). */
   editedAfterDone: number;
+  /** Листы, переименованные владельцем и опознанные по числовому `sheetId`. */
+  sheetsRenamed: number;
+  /** Задачи, чей `externalRowId` перенесён на новое название листа. */
+  rowsRemapped: number;
+  /** Строки «готово» переименованного листа, которые НЕ импортированы повторно (гард денег). */
+  duplicateDoneBlocked: number;
 };
 
 /** 5.8: итоги установки/снятия защит строк за прогон. */
@@ -322,9 +331,7 @@ function bumpGoogleFilterStats(stats: GoogleSyncFilterStats, input: {
   if (input.hasAmount && input.isPending) stats.matchedRows += 1;
 }
 
-function buildGoogleExternalRowId(spreadsheetId: string, sheetTitle: string, rowNumber: number) {
-  return `${spreadsheetId}:${sheetTitle}:${rowNumber}`;
-}
+const buildGoogleExternalRowId = buildPartnerSheetRowId;
 
 function truncateGoogleMessage(value: unknown) {
   return String(value ?? "").trim().slice(0, 300);
@@ -394,6 +401,101 @@ function getGoogleTaskMeta(task: Pick<PartnerBuyoutTask, "externalSource" | "she
   if (!spreadsheetId || !sheetTitle || !Number.isInteger(rowNumber) || rowNumber < 1) return null;
 
   return { spreadsheetId, sheetTitle, rowNumber, raw: task.sheetRaw };
+}
+
+/** Числовой `sheetId` листа из задачи: он переживает переименование таба, в отличие от названия. */
+function getGoogleTaskSheetId(task: Pick<PartnerBuyoutTask, "sheetRaw">) {
+  if (!isRecord(task.sheetRaw)) return null;
+  const id = task.sheetRaw.sheetId;
+  return typeof id === "number" && Number.isInteger(id) ? id : null;
+}
+
+/** Задача → проекция для решений `partner-sheet-policy` про физическую строку листа. */
+function toPartnerSheetRowRef(task: PartnerBuyoutTask): PartnerSheetRowRef {
+  const meta = getGoogleTaskMeta(task);
+  return {
+    id: task.id,
+    status: task.status,
+    externalRowId: task.externalRowId,
+    spreadsheetId: meta?.spreadsheetId ?? null,
+    sheetId: getGoogleTaskSheetId(task),
+    sheetTitle: meta?.sheetTitle ?? null,
+    rowNumber: meta?.rowNumber ?? null,
+  };
+}
+
+/**
+ * Применяет план `planPartnerRenamedRows`: переносит `externalRowId` задач переименованного
+ * листа на новое название (иначе те же физические строки уедут в повторный импорт со
+ * списанием — инцидент 2026-07-19, лист «6» → «19/07/2026», 10 605 R$).
+ */
+async function remapRenamedSheetTasks(input: {
+  spreadsheetId: string;
+  sheets: { title: string; sheetId: number }[];
+  tasks: PartnerBuyoutTask[];
+  tasksByRowId: Map<string, PartnerBuyoutTask>;
+  stats: GoogleSyncReconciliationStats;
+  items: GoogleSyncItem[];
+}) {
+  const plans = planPartnerRenamedRows({
+    spreadsheetId: input.spreadsheetId,
+    sheets: input.sheets,
+    tasks: input.tasks.map(toPartnerSheetRowRef),
+  });
+  if (plans.length === 0) return;
+
+  const byId = new Map(input.tasks.map((task) => [task.id, task]));
+  const renamedSheets = new Set<string>();
+
+  for (const plan of plans) {
+    const task = byId.get(plan.taskId);
+    if (!task) continue;
+
+    if (plan.kind === "conflict") {
+      const conflict = `Лист переименован в «${plan.toSheetTitle}», но строка ${plan.rowNumber} уже занята другой задачей — проверь вручную`;
+      if ((isRecord(task.sheetRaw) ? task.sheetRaw.conflict : null) !== conflict) {
+        const updated = await prisma.partnerBuyoutTask.update({
+          where: { id: task.id },
+          data: { sheetRaw: mergeTaskSheetRaw(task, { conflict, conflictAt: new Date().toISOString() }) },
+        });
+        task.sheetRaw = updated.sheetRaw;
+      }
+      input.stats.conflicts += 1;
+      input.items.push({
+        sheet: plan.toSheetTitle, row: plan.rowNumber, gamepassId: task.gamepassId,
+        status: "skipped", message: conflict,
+      });
+      continue;
+    }
+
+    const updated = await prisma.partnerBuyoutTask.update({
+      where: { id: task.id },
+      data: {
+        externalRowId: plan.nextRowId,
+        sheetRaw: mergeTaskSheetRaw(task, {
+          sheetTitle: plan.toSheetTitle,
+          range: `${plan.toSheetTitle}!A${plan.rowNumber}:${SHEET_COMMENT_LETTER}${plan.rowNumber}`,
+          renamedFromSheetTitle: plan.fromSheetTitle,
+          renamedAt: new Date().toISOString(),
+        }),
+      },
+    });
+    // Карта и объект задачи должны остаться в синхроне: дальше по прогону строка обязана
+    // опознаться как существующая именно по новому rowId.
+    if (task.externalRowId) input.tasksByRowId.delete(task.externalRowId);
+    task.externalRowId = updated.externalRowId;
+    task.sheetRaw = updated.sheetRaw;
+    input.tasksByRowId.set(plan.nextRowId, task);
+
+    renamedSheets.add(plan.toSheetTitle);
+    input.stats.rowsRemapped += 1;
+    input.items.push({
+      sheet: plan.toSheetTitle, row: plan.rowNumber, gamepassId: task.gamepassId,
+      status: "updated", message: `Лист переименован: «${plan.fromSheetTitle}» → «${plan.toSheetTitle}», строка сохранена за задачей`,
+    });
+  }
+
+  input.stats.sheetsRenamed += renamedSheets.size;
 }
 
 function getTaskProtectedRangeId(task: Pick<PartnerBuyoutTask, "sheetRaw">) {
@@ -1510,6 +1612,9 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
     rowsReused: 0,
     reactivated: 0,
     editedAfterDone: 0,
+    sheetsRenamed: 0,
+    rowsRemapped: 0,
+    duplicateDoneBlocked: 0,
   };
   result.diagnostics.reconciliation = reconciliation;
 
@@ -1530,6 +1635,18 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
     if (allSheets.length > GOOGLE_MAX_SHEETS) scanComplete = false;
     const sheets = allSheets.slice(0, GOOGLE_MAX_SHEETS);
     result.sheetCount = sheets.length;
+
+    // До разбора строк: переименованные листы опознаём по числовому sheetId и переносим
+    // задачи на новое название, иначе те же строки уедут в повторный импорт со списанием
+    // (инцидент 19.07, см. remapRenamedSheetTasks).
+    await remapRenamedSheetTasks({
+      spreadsheetId,
+      sheets,
+      tasks: existingTasks,
+      tasksByRowId,
+      stats: reconciliation,
+      items: result.items,
+    });
 
     // Квота Google (60 read/min): все листы читаются одним values:batchGet вместо
     // values.get на каждый лист — прогон стоит 2 read-запроса, а не 1+N.
@@ -1620,6 +1737,18 @@ async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options:
 
           if (status === GOOGLE_STATUS_DONE) {
             if (!existing) {
+              // Гард денег: та же физическая строка (sheetId + номер) уже закрыта задачей под
+              // другим rowId → это переименованный лист, а не новый заказ. Второй раз не платим.
+              const twin = findPartnerSettledRowTwin(existingTasks.map(toPartnerSheetRowRef), {
+                externalRowId, sheetId: sheet.sheetId, rowNumber,
+              });
+              if (twin) {
+                reconciliation.duplicateDoneBlocked += 1;
+                result.skipped += 1;
+                rowItem("skipped", gamepassId,
+                  `Строка уже выкуплена задачей листа «${twin.sheetTitle ?? "?"}» — повторное списание не выполнено`);
+                continue;
+              }
               if (nonPendingSheetPrice && nonPendingSheetPrice > 0) {
                 // 5.7 B1: исторический выкуп, внесённый чипом «готово» напрямую —
                 // импортируем как выполненный со списанием по номиналу C.
