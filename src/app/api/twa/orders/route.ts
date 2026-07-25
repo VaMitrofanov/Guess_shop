@@ -3,7 +3,7 @@ import { extractTwaUser } from "@/lib/twa-auth";
 import { prisma } from "@/lib/prisma";
 import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing, notifyRegionalPriceNeeded } from "@/lib/twa-notify";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
-import { BuyoutError, purchaseGamepassWithCookie, resolveGamepassForBuyer, verifyGamepassOwnership, type ResolvedGamepass } from "@/lib/roblox-buyout";
+import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepassForBuyer, verifyGamepassOwnership, type ResolvedGamepass } from "@/lib/roblox-buyout";
 import { browserFailureMessage, isBrowserInfrastructureFailure } from "@/lib/browser-purchase";
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "@/lib/roblox-purchase-script";
 import { BUYOUT_ERROR_LEGACY_PURCHASE_FLOW, BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, checkGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
@@ -200,11 +200,76 @@ function attentionRank(o: { status: string }): number {
   return 3;
 }
 
+/**
+ * Выгрузка ID геймпассов очереди на выкуп: пока выкупаем вручную, менеджеру нужен весь
+ * список ID сразу, а не копирование по одному из карточек. Границы очереди берём из того же
+ * `buildTabWhere`, что и лента, чтобы «К выкупу» на экране и в выгрузке значили одно и то же.
+ *
+ * Неоплаченные прямые заказы (`isDirectOrder && paidAt == null`) исключены — они и так
+ * выключены из всех путей выкупа; отдаём их числом, чтобы менеджер видел, почему список короче.
+ */
+const GAMEPASS_EXPORT_TABS = ["BUYOUT", "DIRECT", "AVITO", "WORK", "ERROR", "ATTENTION"] as const;
+const GAMEPASS_EXPORT_LIMIT = 500;
+
+async function gamepassExportResponse(tab: FilterTab) {
+  const orders = await prisma.wbOrder.findMany({
+    where: { isTest: false, ...buildTabWhere(tab) },
+    orderBy: orderByForTab(tab),
+    take: GAMEPASS_EXPORT_LIMIT,
+    select: {
+      wbCode: true, amount: true, status: true, orderSource: true, gamepassUrl: true,
+      robloxUsername: true, probableNick: true, isDirectOrder: true, paidAt: true,
+      pendingAt: true, createdAt: true,
+    },
+  });
+
+  let skippedUnpaid = 0;
+  let skippedNoGamepass = 0;
+  const items: {
+    wbCode: string; gamepassId: string; gamepassUrl: string; amount: number;
+    status: string; orderSource: string; robloxUsername: string | null; waitingHours: number;
+  }[] = [];
+
+  for (const order of orders) {
+    if (order.isDirectOrder && !order.paidAt) { skippedUnpaid += 1; continue; }
+    const gamepassId = order.gamepassUrl ? parseGamepassId(order.gamepassUrl) : null;
+    if (!gamepassId) { skippedNoGamepass += 1; continue; }
+    const since = order.pendingAt ?? order.createdAt;
+    items.push({
+      wbCode: order.wbCode,
+      gamepassId,
+      gamepassUrl: order.gamepassUrl ?? "",
+      amount: order.amount,
+      status: order.status,
+      orderSource: order.orderSource,
+      robloxUsername: order.robloxUsername ?? order.probableNick ?? null,
+      waitingHours: Math.max(0, Math.round((Date.now() - since.getTime()) / 3600_000)),
+    });
+  }
+
+  return NextResponse.json({
+    tab,
+    generatedAt: new Date().toISOString(),
+    total: items.length,
+    totalRobux: items.reduce((sum, item) => sum + item.amount, 0),
+    skippedUnpaid,
+    skippedNoGamepass,
+    truncated: orders.length === GAMEPASS_EXPORT_LIMIT,
+    items,
+  });
+}
+
 export async function GET(req: NextRequest) {
   if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = req.nextUrl;
   const tab         = (searchParams.get("status") ?? "ALL") as FilterTab | OrderStatus;
+
+  if (searchParams.get("export") === "gamepass-ids") {
+    const exportTab = (GAMEPASS_EXPORT_TABS as readonly string[]).includes(tab) ? tab as FilterTab : "BUYOUT";
+    return gamepassExportResponse(exportTab);
+  }
+
   const page        = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
   const limit       = Math.min(50, Math.max(5, parseInt(searchParams.get("limit") ?? "20", 10)));
   const skip        = (page - 1) * limit;

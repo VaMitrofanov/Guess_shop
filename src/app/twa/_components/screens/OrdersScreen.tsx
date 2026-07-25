@@ -135,6 +135,9 @@ const ORDER_MODES: { id: "work" | "all" | "history"; label: string; filter: Filt
 ];
 
 const WORK_FILTERS = new Set<FilterTab>(["WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "REJECTED", "FAVORITES", "ATTENTION"]);
+/* Очереди, где выгрузка ID геймпассов имеет смысл: заказ уже с геймпассом и ждёт выкупа.
+   Список синхронен `GAMEPASS_EXPORT_TABS` в `api/twa/orders`. */
+const EXPORTABLE_TABS = new Set<FilterTab>(["BUYOUT", "DIRECT", "AVITO", "WORK", "ERROR", "ATTENTION"]);
 
 function orderTabBadge(order: Order): { label: string; color: string } | null {
   const cutoff = Date.now() - 40 * 3600_000;
@@ -227,6 +230,146 @@ function CopyBtn({ text, label }: { text: string; label?: string }) {
     >
       {copied ? "✓" : "Скопировать"}
     </button>
+  );
+}
+
+/* ───────────── Выгрузка ID геймпассов очереди ───────────── */
+
+interface GamepassExportItem {
+  wbCode: string; gamepassId: string; gamepassUrl: string; amount: number;
+  status: string; orderSource: string; robloxUsername: string | null; waitingHours: number;
+}
+interface GamepassExportData {
+  tab: string; total: number; totalRobux: number;
+  skippedUnpaid: number; skippedNoGamepass: number; truncated: boolean;
+  items: GamepassExportItem[];
+}
+
+type ExportFormat = "ids" | "table" | "urls";
+
+const EXPORT_FORMATS: { id: ExportFormat; label: string }[] = [
+  { id: "ids",   label: "Только ID" },
+  { id: "table", label: "ID · ник · R$" },
+  { id: "urls",  label: "Ссылки" },
+];
+
+/* Выкупаем вручную, поэтому нужен весь список ID сразу: по одному из карточек — долго.
+   Формат по умолчанию — чистые ID построчно, чтобы можно было вставить пачкой. */
+function buildExportText(items: GamepassExportItem[], format: ExportFormat) {
+  if (format === "urls") return items.map(i => `https://www.roblox.com/game-pass/${i.gamepassId}`).join("\n");
+  if (format === "table") {
+    return items.map(i => [i.gamepassId, i.robloxUsername ?? "—", `${i.amount} R$`, i.wbCode].join(" · ")).join("\n");
+  }
+  return items.map(i => i.gamepassId).join("\n");
+}
+
+function GamepassExportSheet({ token, tab, tabLabel, onClose }: {
+  token: string; tab: FilterTab; tabLabel: string; onClose: () => void;
+}) {
+  const [data, setData] = useState<GamepassExportData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [format, setFormat] = useState<ExportFormat>("ids");
+
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/twa/orders?export=gamepass-ids&status=${tab}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (alive) setData(d); })
+      .catch(() => {})
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [token, tab]);
+
+  const text = data ? buildExportText(data.items, format) : "";
+
+  return (
+    <BottomSheet open onClose={onClose} ariaLabel={`Выгрузка ID геймпассов — ${tabLabel}`}>
+      <div style={{ padding: "4px 18px 8px", display: "flex", flexDirection: "column", gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>ID геймпассов · {tabLabel}</div>
+          <div style={{ fontSize: 14, color: C.textSecondary, marginTop: 4 }}>
+            {loading ? "Собираю очередь…" : data
+              ? <>{data.total} шт · {data.totalRobux.toLocaleString("ru-RU")} R$ к выкупу</>
+              : "Не удалось загрузить"}
+          </div>
+        </div>
+
+        {!loading && data && data.total > 0 && (
+          <>
+            <div style={{ display: "flex", background: C.elevated, borderRadius: 10, padding: 3, gap: 2 }}>
+              {EXPORT_FORMATS.map(f => (
+                <button
+                  key={f.id}
+                  type="button"
+                  className="twa-press-sm"
+                  onClick={() => { haptic.select(); setFormat(f.id); }}
+                  style={{
+                    flex: 1, padding: "7px 0", borderRadius: 8, border: "none", cursor: "pointer",
+                    fontSize: 14, fontWeight: format === f.id ? 600 : 400, whiteSpace: "nowrap",
+                    background: format === f.id ? C.card : "transparent",
+                    color: format === f.id ? C.textPrimary : C.textSecondary,
+                  }}
+                >{f.label}</button>
+              ))}
+            </div>
+
+            <textarea
+              readOnly
+              value={text}
+              onFocus={e => e.currentTarget.select()}
+              style={{
+                width: "100%", minHeight: 190, maxHeight: 320, resize: "vertical",
+                background: C.bgElevated, color: C.textPrimary, border: `1px solid ${C.border}`,
+                borderRadius: 12, padding: 12, fontSize: 14, fontFamily: MONO, lineHeight: 1.5,
+                ...tabular,
+              }}
+            />
+
+            {(data.skippedUnpaid > 0 || data.skippedNoGamepass > 0 || data.truncated) && (
+              <div style={{ fontSize: 13, color: C.textSecondary, lineHeight: 1.5 }}>
+                {data.skippedUnpaid > 0 && <div>· не вошли неоплаченные прямые: {data.skippedUnpaid}</div>}
+                {data.skippedNoGamepass > 0 && <div>· без ссылки на геймпасс: {data.skippedNoGamepass}</div>}
+                {data.truncated && <div>· показаны первые 500 заказов очереди</div>}
+              </div>
+            )}
+          </>
+        )}
+
+        {!loading && data && data.total === 0 && (
+          <div style={{ fontSize: 14, color: C.textSecondary }}>
+            В очереди «{tabLabel}» нет заказов с геймпассом.
+            {data.skippedUnpaid > 0 && <> Неоплаченных прямых: {data.skippedUnpaid}.</>}
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 10, padding: "0 18px" }}>
+        <button
+          type="button"
+          className="twa-press-sm"
+          disabled={!text}
+          onClick={() => {
+            copyText(text);
+            haptic.impact("medium");
+            toast(`${data?.total ?? 0} ID скопировано`, "success");
+          }}
+          style={{
+            flex: 1, padding: "14px 0", borderRadius: 12, border: "none",
+            background: text ? C.accent : C.elevated, color: text ? "#fff" : C.textTertiary,
+            fontSize: 16, fontWeight: 600, cursor: text ? "pointer" : "default",
+          }}
+        >Скопировать всё</button>
+        <button
+          type="button"
+          className="twa-press-sm"
+          onClick={onClose}
+          style={{
+            padding: "14px 20px", borderRadius: 12, border: "none",
+            background: C.elevated, color: C.textPrimary, fontSize: 16, cursor: "pointer",
+          }}
+        >Закрыть</button>
+      </div>
+    </BottomSheet>
   );
 }
 
@@ -1612,6 +1755,7 @@ export default function OrdersScreen({
   // подборка «Требуют внимания» — по кнопке «⚠ Внимание (N)» (решение 2026-07-06).
   const [allView, setAllView] = useState<"attention" | "list">("list");
   // П4: модалка «➕ Создать заказ» (ручной заказ целиком из TWA).
+  const [exportOpen, setExportOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createMode, setCreateMode] = useState<"manual" | "direct">("manual");
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -2108,6 +2252,27 @@ export default function OrdersScreen({
           </div>
         )}
 
+        {/* Выкуп пока ручной: список ID геймпассов очереди нужен пачкой, а не по одному. */}
+        {!query && EXPORTABLE_TABS.has(filter) && (
+          <div style={{ padding: "10px 16px 0" }}>
+            <button
+              type="button"
+              className="twa-press-sm"
+              onClick={() => { haptic.impact("light"); setExportOpen(true); }}
+              style={{
+                width: "100%", padding: "12px 14px", borderRadius: 12, cursor: "pointer",
+                background: C.card, border: `1px solid ${C.border}`, color: C.textPrimary,
+                fontSize: 15, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              }}
+            >
+              ⇩ Выгрузить ID геймпассов
+              <span style={{ color: C.textSecondary, fontWeight: 500 }}>
+                {data?.counts?.[filter] ?? 0}
+              </span>
+            </button>
+          </div>
+        )}
+
         {/* Заявки прямых заказов — до отправки реквизитов (видны даже при пустом списке заказов) */}
         {filter === "DIRECT" && !query && (
           <IntentsSection
@@ -2260,6 +2425,16 @@ export default function OrdersScreen({
           </div>
         )}
       </div>
+
+      {/* Выгрузка ID геймпассов текущей очереди (ручной выкуп) */}
+      {exportOpen && (
+        <GamepassExportSheet
+          token={token}
+          tab={filter}
+          tabLabel={TAB_META[filter].label}
+          onClose={() => setExportOpen(false)}
+        />
+      )}
 
       {/* П4: модалка ручного создания заказа */}
       {createOpen && (
