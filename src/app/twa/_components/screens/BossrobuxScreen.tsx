@@ -5,6 +5,8 @@ import { haptic } from "../haptics";
 import { toast } from "../Toast";
 import CreateManualModal from "../CreateManualModal";
 import { groupPartnerLedgerEntries, type PartnerLedgerRow } from "@/lib/partner-ledger";
+/** Неоплаченный прямой заказ — исключается из всех путей выкупа (П5). */
+import { isUnpaidDirect } from "@/lib/buyout-queue";
 import { ChevronRight, CircleAlert, Droplets, History, KeyRound, MoreHorizontal, RefreshCw, Search, ShoppingBag } from "lucide-react";
 
 interface AccountInfo {
@@ -1330,8 +1332,6 @@ interface GpLiveInfo {
   reusedIn: string | null;
 }
 
-/** Неоплаченный прямой заказ — исключается из всех путей выкупа (П5). */
-const isUnpaidDirect = (o: BuyoutOrder) => o.isDirectOrder && !o.paidAt;
 
 function fmtAge(iso: string): string {
   const mins = (Date.now() - new Date(iso).getTime()) / 60000;
@@ -1668,7 +1668,11 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
       const direct = rDirect.ok ? ((await rDirect.json()).orders ?? []) : [];
       const buyout = rBuyout.ok ? ((await rBuyout.json()).orders ?? []) : [];
       const avito = rAvito.ok ? ((await rAvito.json()).orders ?? []) : [];
-      const all: BuyoutOrder[] = [...direct, ...buyout, ...avito];
+      // С 2026-07-25 оплаченный прямой заказ приходит и в BUYOUT, и в DIRECT
+      // (вкладка «Прямой» — срез по источнику), поэтому склейку дедуплицируем по id.
+      const all: BuyoutOrder[] = [...new Map<string, BuyoutOrder>(
+        [...direct, ...buyout, ...avito].map(o => [o.id, o]),
+      ).values()];
       // REGIONAL_PRICE rows are included: gp-live-check now distinguishes a
       // typed Roblox Plus discount from an actually unsafe buyer price.
       const queue = all.filter(o => !isUnpaidDirect(o));

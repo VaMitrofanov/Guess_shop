@@ -5,6 +5,7 @@ import { haptic } from "../haptics";
 import BottomSheet from "../BottomSheet";
 import { toast } from "../Toast";
 import CreateManualModal, { type RebindUser } from "../CreateManualModal";
+import { isUnpaidDirect } from "@/lib/buyout-queue";
 
 type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED" | "ERROR";
 // ATTENTION — не чип, а серверная выборка «Требуют внимания» для вкладки «Все».
@@ -31,6 +32,8 @@ interface Order {
   createdAt: string;
   updatedAt: string;
   pendingAt: string | null;
+  /** Оплата прямого заказа подтверждена. null у прямого = вне очереди выкупа. */
+  paidAt: string | null;
   takenAt: string | null;
   robloxUsername: string | null;
   probableNick: string | null;
@@ -1219,7 +1222,13 @@ function OrderCard({
   const displayAmount = showDirty ? dirtyAmount : order.amount;
   const showCleanHint = viewTab === "BUYOUT";
 
-  const tabBadge = currentTab === "ALL" || currentTab === "WORK" || currentTab === "ATTENTION" || currentTab === "REJECTED" ? orderTabBadge(order) : null;
+  const tabBadge = currentTab === "ALL" || currentTab === "WORK" || currentTab === "ATTENTION" || currentTab === "REJECTED"
+    ? orderTabBadge(order)
+    // «К выкупу» стала общей очередью: помечаем прямые, чтобы менеджер сразу видел,
+    // что деньги от клиента уже пришли и это не WB-карта.
+    : currentTab === "BUYOUT" && order.isDirectOrder
+      ? { label: "Прямой", color: C.blue }
+      : null;
   const showMoveBtn = viewTab === "AWAITING_LINK" || viewTab === "FAVORITES" || viewTab === "ERROR" || viewTab === "REJECTED" || (currentTab === "ALL" && order.status === "REJECTED");
   // Редактирование за клиента (номинал/ник/ГП) — любой источник, не только Авито.
   const isEditable = ["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED"].includes(order.status);
@@ -1724,7 +1733,9 @@ function orderToTab(order: Order): FilterTab {
   if (order.status === "REJECTED") return "REJECTED";
   if (order.status === "ERROR") return "ERROR";
   if (order.status === "AWAITING_GAMEPASS") return created > cutoff ? "NEW" : "AWAITING_LINK";
-  if (order.isDirectOrder && ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status)) return "DIRECT";
+  // Оплаченный прямой заказ живёт в общей очереди «К выкупу» (выкуп ручной, без аккаунтов);
+  // вкладка «Прямой» остаётся срезом по источнику и держит счётчик неоплаченных.
+  if (isUnpaidDirect(order) && ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status)) return "DIRECT";
   if (["PENDING", "IN_PROGRESS"].includes(order.status)) return "BUYOUT";
   return "ALL";
 }
@@ -1733,7 +1744,7 @@ function isWorkOrder(order: Order): boolean {
   if (order.isFavorite) return false;
   const cutoff = Date.now() - 40 * 3600_000;
   if (order.status === "ERROR") return true;
-  if (["PENDING", "IN_PROGRESS"].includes(order.status) && !order.isDirectOrder && order.orderSource !== "AVITO") return true;
+  if (["PENDING", "IN_PROGRESS"].includes(order.status) && !isUnpaidDirect(order) && order.orderSource !== "AVITO") return true;
   return order.status === "AWAITING_GAMEPASS" && new Date(order.createdAt).getTime() <= cutoff;
 }
 
@@ -1929,7 +1940,7 @@ export default function OrdersScreen({
     else if (action === "set-error") { newStatus = "ERROR"; toTab = "ERROR"; }
     else if (action === "restore-to-buyout") {
       newStatus = "PENDING";
-      toTab = order.isDirectOrder ? "DIRECT" : order.orderSource === "AVITO" ? "AVITO" : "BUYOUT";
+      toTab = order.orderSource === "AVITO" ? "AVITO" : isUnpaidDirect(order) ? "DIRECT" : "BUYOUT";
     }
     else return { ok: false, error: "Invalid action" };
 

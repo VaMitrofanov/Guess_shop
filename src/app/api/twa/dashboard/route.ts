@@ -3,6 +3,7 @@ import { extractTwaUser } from "@/lib/twa-auth";
 import { getFeedbackSummary, getStats30d } from "@/lib/wb-api";
 import { prisma } from "@/lib/prisma";
 import { getBrowserSession } from "@/lib/browser-purchase";
+import { PAID_BUYOUT_SQL } from "@/lib/buyout-queue";
 
 type AttentionRow = {
   buyout: number;
@@ -33,31 +34,34 @@ export async function GET(req: NextRequest) {
   const [stats, codes, attentionRows, firstError, feedback, donor] = await Promise.all([
     getStats30d(),
     prisma.wbCode.groupBy({ by: ["denomination"], _count: { _all: true }, where: { isUsed: false, isTest: false } }),
-    prisma.$queryRaw<AttentionRow[]>`
+    // Очередь «К выкупу» = то же множество, что и вкладка BUYOUT в api/twa/orders:
+    // оплаченный прямой заказ выкупается теми же руками, поэтому считается здесь
+    // (и в «нужно робуксов»); неоплаченный прямой — вне выкупа.
+    prisma.$queryRawUnsafe<AttentionRow[]>(`
       SELECT
         COUNT(*) FILTER (
           WHERE status IN ('PENDING', 'IN_PROGRESS')
-            AND "isDirectOrder" = false
+            AND ${PAID_BUYOUT_SQL}
             AND "orderSource" <> 'AVITO'
         )::int AS "buyout",
         COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS')::int AS "awaitingLink",
         COUNT(*) FILTER (WHERE status = 'ERROR')::int AS "errors",
         COALESCE(SUM(CEIL(amount / 0.7)) FILTER (
           WHERE status IN ('PENDING', 'IN_PROGRESS')
-            AND "isDirectOrder" = false
+            AND ${PAID_BUYOUT_SQL}
             AND "orderSource" <> 'AVITO'
         ), 0)::int AS "requiredRobux",
         LEAST(
           MIN(COALESCE("pendingAt", "createdAt")) FILTER (
             WHERE status IN ('PENDING', 'IN_PROGRESS')
-              AND "isDirectOrder" = false
+              AND ${PAID_BUYOUT_SQL}
               AND "orderSource" <> 'AVITO'
           ),
           MIN("createdAt") FILTER (WHERE status IN ('AWAITING_GAMEPASS', 'ERROR'))
         ) AS "oldestAt"
       FROM "WbOrder"
       WHERE "isTest" = false AND "isFavorite" = false
-    `,
+    `),
     prisma.wbOrder.findFirst({
       where: { isTest: false, isFavorite: false, status: "ERROR" },
       orderBy: { createdAt: "asc" },

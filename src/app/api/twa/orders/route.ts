@@ -12,6 +12,7 @@ import { appendOrderAudit, buildRestoreToBuyoutData } from "@/lib/order-recovery
 import { notifyRetailBuyoutAdmins } from "@/lib/buyout-admin-notify";
 import { generateDirectCode } from "@/lib/twa-direct";
 import { directPrice } from "@/lib/retail-pricing";
+import { PAID_BUYOUT_SCOPE, PAID_BUYOUT_SQL } from "@/lib/buyout-queue";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
@@ -133,7 +134,7 @@ function buildTabWhere(tab: FilterTab): any {
         isFavorite: false,
         OR: [
           { status: "ERROR" },
-          { status: { in: ["PENDING", "IN_PROGRESS"] }, isDirectOrder: false, orderSource: { not: "AVITO" } },
+          { status: { in: ["PENDING", "IN_PROGRESS"] }, ...PAID_BUYOUT_SCOPE, orderSource: { not: "AVITO" } },
           { status: "AWAITING_GAMEPASS", createdAt: { lte: cutoff } },
         ],
       };
@@ -141,7 +142,7 @@ function buildTabWhere(tab: FilterTab): any {
       return {};
     case "BUYOUT":
       return {
-        isDirectOrder: false,
+        ...PAID_BUYOUT_SCOPE,
         orderSource: { not: "AVITO" },
         isFavorite: false,
         OR: [
@@ -172,7 +173,7 @@ function buildTabWhere(tab: FilterTab): any {
         isFavorite: false,
         OR: [
           { status: "ERROR" },
-          { status: { in: ["PENDING", "IN_PROGRESS"] }, isDirectOrder: false, orderSource: { not: "AVITO" }, pendingAt: { lte: buyoutOverdue } },
+          { status: { in: ["PENDING", "IN_PROGRESS"] }, ...PAID_BUYOUT_SCOPE, orderSource: { not: "AVITO" }, pendingAt: { lte: buyoutOverdue } },
           { isDirectOrder: true, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING"] } },
           { status: "AWAITING_GAMEPASS", createdAt: { lte: linkOverdue } },
         ],
@@ -363,11 +364,11 @@ export async function GET(req: NextRequest) {
             SELECT
               COUNT(*) FILTER (WHERE "isFavorite" = false AND (
                 status = 'ERROR'
-                OR (status IN ('PENDING','IN_PROGRESS') AND "isDirectOrder" = false AND "orderSource" != 'AVITO')
+                OR (status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL} AND "orderSource" != 'AVITO')
                 OR (status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours')
               ))::int AS "WORK",
               COUNT(*)::int AS "ALL",
-              COUNT(*) FILTER (WHERE "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "isFavorite" = false AND (status IN ('PENDING','IN_PROGRESS') OR (status = 'ERROR' AND "buyoutErrorCode" IN ('REGIONAL_PRICE','ROBLOX_PLUS_FLOW'))))::int AS "BUYOUT",
+              COUNT(*) FILTER (WHERE ${PAID_BUYOUT_SQL} AND "orderSource" != 'AVITO' AND "isFavorite" = false AND (status IN ('PENDING','IN_PROGRESS') OR (status = 'ERROR' AND "buyoutErrorCode" IN ('REGIONAL_PRICE','ROBLOX_PLUS_FLOW'))))::int AS "BUYOUT",
               COUNT(*) FILTER (WHERE "isDirectOrder" = true AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false)::int AS "DIRECT",
               COUNT(*) FILTER (WHERE "orderSource" = 'AVITO' AND status IN ('PENDING','IN_PROGRESS','AWAITING_GAMEPASS','ERROR') AND "isFavorite" = false)::int AS "AVITO",
               COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "NEW",
@@ -378,17 +379,17 @@ export async function GET(req: NextRequest) {
               COUNT(*) FILTER (WHERE "isFavorite" = true)::int AS "FAVORITES",
               COUNT(*) FILTER (WHERE "isFavorite" = false AND (
                 status = 'ERROR'
-                OR (status IN ('PENDING','IN_PROGRESS') AND "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "pendingAt" <= NOW() - INTERVAL '${ATTENTION_BUYOUT_HOURS} hours')
+                OR (status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL} AND "orderSource" != 'AVITO' AND "pendingAt" <= NOW() - INTERVAL '${ATTENTION_BUYOUT_HOURS} hours')
                 OR ("isDirectOrder" = true AND status IN ('AWAITING_PAYMENT','PAYMENT_PENDING'))
                 OR (status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${ATTENTION_LINK_DAYS} days')
               ))::int AS "ATTENTION",
-              COALESCE(SUM(amount) FILTER (WHERE "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "isFavorite" = false AND (status IN ('PENDING','IN_PROGRESS') OR (status = 'ERROR' AND "buyoutErrorCode" IN ('REGIONAL_PRICE','ROBLOX_PLUS_FLOW')))), 0)::int AS "SUM_BUYOUT",
+              COALESCE(SUM(amount) FILTER (WHERE ${PAID_BUYOUT_SQL} AND "orderSource" != 'AVITO' AND "isFavorite" = false AND (status IN ('PENDING','IN_PROGRESS') OR (status = 'ERROR' AND "buyoutErrorCode" IN ('REGIONAL_PRICE','ROBLOX_PLUS_FLOW')))), 0)::int AS "SUM_BUYOUT",
               COALESCE(SUM(amount) FILTER (WHERE "isDirectOrder" = true AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_DIRECT",
               COALESCE(SUM(amount) FILTER (WHERE "orderSource" = 'AVITO' AND status IN ('PENDING','IN_PROGRESS','AWAITING_GAMEPASS','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_AVITO",
               COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "isFavorite" = false), 0)::int AS "SUM_AWAITING_LINK",
               COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false), 0)::int AS "SUM_NEW",
               COALESCE(SUM(amount) FILTER (WHERE status = 'ERROR' AND "isFavorite" = false), 0)::int AS "SUM_ERROR",
-              MIN("pendingAt") FILTER (WHERE status IN ('PENDING','IN_PROGRESS') AND "isDirectOrder" = false AND "orderSource" != 'AVITO' AND "isFavorite" = false) AS "OLDEST_BUYOUT",
+              MIN("pendingAt") FILTER (WHERE status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL} AND "orderSource" != 'AVITO' AND "isFavorite" = false) AS "OLDEST_BUYOUT",
               MIN("createdAt") FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false) AS "OLDEST_AWAITING_LINK"
             FROM "WbOrder"
             WHERE "isTest" = false
@@ -1107,7 +1108,12 @@ export async function POST(req: NextRequest) {
       isFavorite: false,
     };
     if (target === "DIRECT") { data.isDirectOrder = true; data.orderSource = "DIRECT"; }
-    if (target === "BUYOUT") { data.isDirectOrder = false; data.orderSource = order.orderSource === "AVITO" ? "MANUAL" : order.orderSource; }
+    // Оплаченный прямой заказ и так лежит в общей очереди «К выкупу» — перенос не должен
+    // стирать его природу, иначе клиент получит WB-сценарий уведомлений вместо прямого.
+    if (target === "BUYOUT" && !(order.isDirectOrder && order.paidAt)) {
+      data.isDirectOrder = false;
+      data.orderSource = order.orderSource === "AVITO" ? "MANUAL" : order.orderSource;
+    }
     // Вкладка «Авито» фильтрует по orderSource — одного статуса мало.
     if (target === "AVITO")  { data.isDirectOrder = false; data.orderSource = "AVITO"; }
     // Перенос в «Готово» — тихая переклассификация (без уведомления клиенту,
