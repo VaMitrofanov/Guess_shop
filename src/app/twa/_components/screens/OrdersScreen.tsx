@@ -138,6 +138,7 @@ const WORK_FILTERS = new Set<FilterTab>(["WORK", "BUYOUT", "DIRECT", "AVITO", "N
 /* Очереди, где выгрузка ID геймпассов имеет смысл: заказ уже с геймпассом и ждёт выкупа.
    Список синхронен `GAMEPASS_EXPORT_TABS` в `api/twa/orders`. */
 const EXPORTABLE_TABS = new Set<FilterTab>(["BUYOUT", "DIRECT", "AVITO", "WORK", "ERROR", "ATTENTION"]);
+const COUNTABLE_EXPORT_TABS = new Set<FilterTab>(["BUYOUT", "DIRECT", "AVITO"]);
 
 function orderTabBadge(order: Order): { label: string; color: string } | null {
   const cutoff = Date.now() - 40 * 3600_000;
@@ -2266,9 +2267,14 @@ export default function OrdersScreen({
               }}
             >
               ⇩ Выгрузить ID геймпассов
-              <span style={{ color: C.textSecondary, fontWeight: 500 }}>
-                {data?.counts?.[filter] ?? 0}
-              </span>
+              {/* Счётчик только там, где очередь = заказы с геймпассом. В WORK/ERROR/ATTENTION
+                  есть заказы без ссылки, и число вкладки было бы больше выгрузки — точное
+                  количество показывает сама шторка. */}
+              {COUNTABLE_EXPORT_TABS.has(filter) && (
+                <span style={{ color: C.textSecondary, fontWeight: 500 }}>
+                  {data?.counts?.[filter] ?? 0}
+                </span>
+              )}
             </button>
           </div>
         )}
