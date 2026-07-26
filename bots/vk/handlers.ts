@@ -22,6 +22,7 @@ import { noteProbableNick } from "../shared/nick";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
+import { vkActor } from "../shared/ownership";
 
 // VK API instance injected from bot.ts to avoid circular import.
 let _vkApi: any = null;
@@ -815,7 +816,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     // AWAITING_LINK больше не нужен, иначе следующий текст юзера падал в
     // «Не удалось распознать. Напиши свой ник…».
     clearState(vkUserId);
-    const res = await confirmGpWatch(String(msgPayload.orderId));
+    const res = await confirmGpWatch(String(msgPayload.orderId), vkActor(vkUserId));
     await ctx.reply(
       res.status === "ok"
         ? `✅ Отлично! Геймпасс ${res.passName} (${res.robux} R$) принят на ник ${res.nick}.\n\nЗаказ в очереди на выкуп — как только выкупим, сразу напишу сюда 💛`
@@ -823,6 +824,8 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
         ? "✅ Этот заказ уже в работе — ничего делать не нужно."
         : res.status === "gone"
         ? "⚠️ Геймпасс сейчас не находится по этому нику. Проверь, что он выставлен на продажу за нужную цену, и пришли ссылку сюда."
+        : res.status === "forbidden"
+        ? "⚠️ Этот заказ привязан к другому аккаунту — действие отклонено."
         : "⚠️ Не получилось обработать. Пришли ссылку на геймпасс сюда, помогу.",
     );
     return;
@@ -831,7 +834,7 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     // П2: чистим стейл и сразу взводим ввод ника — «пришли его сюда»
     // должно реально уводить следующий текст в ник-поиск.
     clearState(vkUserId);
-    const declined = await declineGpWatch(String(msgPayload.orderId));
+    const declined = await declineGpWatch(String(msgPayload.orderId), vkActor(vkUserId));
     if (declined) {
       setState(vkUserId, { type: "AWAITING_ROBLOX_NICK", wbCode: declined.wbCode, denomination: declined.amount });
     }

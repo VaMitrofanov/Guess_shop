@@ -11,6 +11,7 @@ import { tgSend, tgSendPhoto, escapeHtml } from "./notify";
 import { db } from "./db";
 import { directPrice } from "./retail-pricing";
 import { formatOrderAge } from "./order-age";
+import { twaLaunchUrl } from "./twa-link";
 export {
   BONUS_MIN_PACK,
   CUSTOM_MAX,
@@ -586,8 +587,9 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   // One-tap deep-link into the TWA Orders screen, prefocused on this order
   // (?q=<код> — TWA search matches wbCode). web_app inline buttons launch the
   // Web App in personal chats with the given URL — no Direct Link app name needed.
-  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(order.wbCode)}`;
-  const reply_markup = {
+  // U1: ссылка запуска подписывается персонально под каждого админа, поэтому
+  // клавиатура строится в цикле, а не один раз на всех.
+  const reply_markup = (adminId: string) => ({
     inline_keyboard: [
       [
         { text: "✅ ВЫКУПЛЕНО", callback_data: CB.adminOk(order.id)  },
@@ -596,13 +598,13 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
       [
         { text: "🛒 Выкупить",      callback_data: CB.purchaseBuy(order.id) },
         { text: "📋 Скрипт",        callback_data: CB.purchaseScript(order.id) },
-        { text: "📊 Дашборд",       web_app: { url: twaUrl } },
+        { text: "📊 Дашборд",       web_app: { url: twaLaunchUrl(adminId, { q: order.wbCode }) } },
       ],
     ],
-  };
+  });
 
   await Promise.allSettled(
-    ADMIN_IDS.map((id) => tgSend(id, text, { reply_markup }))
+    ADMIN_IDS.map((id) => tgSend(id, text, { reply_markup: reply_markup(id) }))
   );
 }
 
@@ -640,8 +642,8 @@ export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload):
     `💎 Выдать: <b>${payload.amount} R$</b> (Геймпасс: ${Math.ceil(payload.amount / 0.7)} R$)\n` +
     `📊 Статус: ⏳ Ожидаем реквизиты`;
 
-  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(code ?? payload.orderId.slice(-6))}`;
-  const reply_markup = {
+  const twaQuery = { q: code ?? payload.orderId.slice(-6) };
+  const reply_markup = (adminId: string) => ({
     inline_keyboard: [
       [
         { text: "📷 Отправить QR (СБП)", callback_data: CB.sendQr(payload.orderId) },
@@ -651,13 +653,13 @@ export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload):
         { text: "❌ Отменить заказ",     callback_data: CB.cancelDirectOrder(payload.orderId) },
       ],
       [
-        { text: "📊 Открыть в дашборде", web_app: { url: twaUrl } },
+        { text: "📊 Открыть в дашборде", web_app: { url: twaLaunchUrl(adminId, twaQuery) } },
       ],
     ],
-  };
+  });
 
   await Promise.allSettled(
-    ADMIN_IDS.map((id) => tgSend(id, text, { reply_markup }))
+    ADMIN_IDS.map((id) => tgSend(id, text, { reply_markup: reply_markup(id) }))
   );
 }
 
