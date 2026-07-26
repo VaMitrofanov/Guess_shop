@@ -287,7 +287,7 @@ async function buildWbText(): Promise<{
   const dateStr = (d: Date) => d.toLocaleDateString("ru-RU", { day: "2-digit", month: "long" });
 
   // ── Assemble message ──────────────────────────────────────────────────────
-  let lines: string[] = [];
+  const lines: string[] = [];
 
   lines.push(`🟣 <b>WILDBERRIES</b>`);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
@@ -402,7 +402,7 @@ export async function showStocksHub(ctx: Context): Promise<void> {
   await ctx.answerCbQuery();
   const stocks = await getStocksWithRunway();
 
-  let lines: string[] = [];
+  const lines: string[] = [];
   lines.push(`📦 <b>СКЛАДЫ & ОСТАТКИ</b>`);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
   lines.push("");
@@ -447,7 +447,7 @@ export async function showDynamicsHub(ctx: Context): Promise<void> {
   const prevWeek = getPrevWeekStats();
   const daily    = getDailyBreakdown(7);
 
-  let lines: string[] = [];
+  const lines: string[] = [];
   lines.push(`📈 <b>ДИНАМИКА: эта неделя vs прошлая</b>`);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
   lines.push("");
@@ -523,7 +523,7 @@ export async function showRealizationPeriod(ctx: Context, period: string): Promi
   const marginPct   = data.totalRevenue > 0
     ? Math.round((data.totalPayout / data.totalRevenue) * 100) : 0;
 
-  let lines: string[] = [];
+  const lines: string[] = [];
   lines.push(`📋 <b>РЕАЛИЗАЦИЯ — ${periodLabel}</b>`);
   lines.push(`<i>${data.period.from} — ${data.period.to}</i>`);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
@@ -602,7 +602,7 @@ export async function showAdvertHub(ctx: Context): Promise<void> {
   const pausedCount = data.campaigns.filter(c => c.status === 9).length;
   const hasStats    = data.totalSpend > 0 || data.totalViews > 0;
 
-  let lines: string[] = [];
+  const lines: string[] = [];
   lines.push(`📣 <b>РЕКЛАМА</b>`);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
   lines.push(``);
@@ -666,7 +666,7 @@ export async function showUnitEconHub(ctx: Context): Promise<void> {
     ? settings.lastAdAttributedAt.toLocaleDateString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
     : "30 дней";
 
-  let lines: string[] = [];
+  const lines: string[] = [];
   lines.push(`🧩 <b>ЮНИТ-ЭКОНОМИКА</b>`);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
   lines.push(`<code>Курс: ${settings.kursRb} руб/ед · $1=${settings.kursUsd}₽</code>`);
@@ -1149,7 +1149,7 @@ export async function showReviewsHub(ctx: Context): Promise<void> {
   await ctx.answerCbQuery();
   const reviews = await getUnansweredReviews();
 
-  let lines: string[] = [];
+  const lines: string[] = [];
   lines.push(`⭐ <b>ОТЗЫВЫ И ВОПРОСЫ</b>`);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
   lines.push("");
@@ -1234,7 +1234,7 @@ export async function showFbsHub(ctx: Context): Promise<void> {
   await ctx.answerCbQuery();
   const fbs = await getFbsOrders();
 
-  let lines: string[] = [];
+  const lines: string[] = [];
   lines.push(`🚚 <b>FBS ЗАКАЗЫ (маркетплейс)</b>`);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
   lines.push("");
@@ -1270,7 +1270,7 @@ export async function showWbProducts(ctx: Context): Promise<void> {
   const products = await getProducts();
   const buttons: any[] = [];
 
-  let lines: string[] = [];
+  const lines: string[] = [];
   lines.push(`🏷️ <b>МОИ ТОВАРЫ</b>`);
   lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
   lines.push("");

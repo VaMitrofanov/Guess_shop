@@ -158,31 +158,6 @@ const SalesFunnelResponseSchema = z.object({
   }).optional().default({ products: [] }),
 });
 
-const NmReportCardSchema = z.object({
-  nmID:        z.number(),
-  vendorCode:  z.string().optional().default(""),
-  statistics: z.array(z.object({
-    selectedPeriod: z.object({
-      openCardCount:   z.number().optional().default(0),
-      addToCartCount:  z.number().optional().default(0),
-      ordersCount:     z.number().optional().default(0),
-      ordersSumRub:    z.number().optional().default(0),
-      buyoutsCount:    z.number().optional().default(0),
-      conversions: z.object({
-        addToCartPercent:     z.number().optional().default(0),
-        cartToOrderPercent:   z.number().optional().default(0),
-        orderToBuyoutPercent: z.number().optional().default(0),
-      }).optional(),
-    }).optional(),
-  })).optional().default([]),
-});
-
-const NmReportSchema = z.object({
-  data: z.object({
-    cards: z.array(NmReportCardSchema).optional().default([]),
-  }).optional(),
-});
-
 const GoodItemSchema = z.object({
   nmID:             z.number(),
   vendorCode:       z.string().optional().default(""),

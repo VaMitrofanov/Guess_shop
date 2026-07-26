@@ -569,7 +569,7 @@ export async function getCampaignsStatus(): Promise<string | null> {
     const paused = res.adverts.filter(a => a.status === 9).reduce((s, a) => s + a.count, 0);
     const total  = res.all ?? res.adverts.reduce((s, a) => s + a.count, 0);
 
-    let result = total > 0
+    const result = total > 0
       ? `▶ ${active} акт · ⏸ ${paused} пауза · всего ${total}`
       : "Кампаний нет";
 

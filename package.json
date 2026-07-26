@@ -9,13 +9,16 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "eslint --max-warnings 1141",
     "test": "jest",
     "smoke:site": "node scripts/smoke-site.mjs",
     "postinstall": "prisma generate",
     "bot:tg": "npm --prefix bots/tg run dev",
     "bot:vk": "npm --prefix bots/vk run dev",
-    "dev:reset-test": "node scripts/reset-test-code.mjs"
+    "dev:reset-test": "node scripts/reset-test-code.mjs",
+    "bots:tsc": "tsc --noEmit -p bots/tsconfig.json",
+    "test:bots": "jest --config jest.bots.config.js",
+    "gates": "npm run lint && tsc --noEmit && npm run bots:tsc && npm test && npm run test:bots"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
