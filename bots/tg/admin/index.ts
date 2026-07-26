@@ -13,6 +13,7 @@
 
 import type { Telegraf } from "telegraf";
 import { ADMIN_IDS } from "../../shared/admin";
+import { twaLaunchUrl, twaLinkAuthEnabled } from "../../shared/twa-link";
 import { buildAdminKeyboard } from "./menu";
 import { startWbMonitor } from "./hub-wildberries";
 import { initLogCapture, startServerMonitor } from "./hub-system";
@@ -40,12 +41,14 @@ export function registerAdminHubs(bot: Telegraf): void {
  * Called once at bot startup for every admin chat.
  */
 export async function setupMenuButton(bot: import("telegraf").Telegraf): Promise<void> {
-  const base = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru"}/twa`;
+  if (!twaLinkAuthEnabled()) {
+    console.warn("[TG] TWA_LINK_SECRET не задан — Menu Button без токена запуска (вход только по initData)");
+  }
   await Promise.allSettled(
     ADMIN_IDS.map(id =>
       bot.telegram.setChatMenuButton({
         chatId: Number(id),
-        menuButton: { type: "web_app", text: "Dashboard", web_app: { url: `${base}?uid=${id}` } },
+        menuButton: { type: "web_app", text: "Dashboard", web_app: { url: twaLaunchUrl(id) } },
       })
     )
   );

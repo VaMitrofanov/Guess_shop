@@ -13,12 +13,7 @@
  */
 
 import { Markup } from "telegraf";
-
-/** TWA URL used by the Launch button. Coolify sets NEXT_PUBLIC_APP_URL. */
-function twaUrl(uid?: string | number): string {
-  const base = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru"}/twa`;
-  return uid ? `${base}?uid=${uid}` : base;
-}
+import { twaLaunchUrl } from "../../shared/twa-link";
 
 /**
  * Build the admin Reply Keyboard with a single full-width Launch button.
@@ -28,11 +23,12 @@ function twaUrl(uid?: string | number): string {
  * The button closes the chat and opens the TWA in the standard Mini App
  * frame; admin authenticates via initData (HMAC over TG_TOKEN).
  *
- * `uid` is appended as `?uid=<tgId>` — iOS Telegram v9.6+ omits
- * tgWebAppData from the hash, so the TWA needs the admin ID in the URL.
+ * U1: раньше в ссылку подставлялся голый `?uid=<tgId>` — iOS Telegram v9.6+
+ * не отдаёт tgWebAppData, и TWA входила по публичному идентификатору. Теперь
+ * туда идёт подписанный сервером токен `?k=` (`bots/shared/twa-link.ts`).
  */
 export async function buildAdminKeyboard(uid?: string | number) {
   return Markup.keyboard([
-    [Markup.button.webApp("🚀 Launch Dashboard", twaUrl(uid))],
+    [Markup.button.webApp("🚀 Launch Dashboard", twaLaunchUrl(uid))],
   ]).resize().persistent();
 }

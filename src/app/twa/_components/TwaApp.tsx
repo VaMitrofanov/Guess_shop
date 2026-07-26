@@ -146,22 +146,25 @@ export default function TwaApp() {
         const r = await fetch("/api/twa/ping", { headers: { Authorization: `Bearer ${stored}` } }).catch(() => null);
         if (cancelled) return;
         if (r?.ok) {
-          setToken(stored);
+          // U1: TTL сокращён до 2 ч, ping тихо продлевает пропуск при работе.
+          const body = await r.json().catch(() => null);
+          const fresh = typeof body?.token === "string" ? body.token : stored;
+          if (fresh !== stored) localStorage.setItem("twa_token", fresh);
+          setToken(fresh);
           setAuth("ok");
           return;
         }
         localStorage.removeItem("twa_token");
       }
 
-      // Fast path: initData or initDataUnsafe already populated.
-      const unsafeUserEarly = window.Telegram?.WebApp?.initDataUnsafe?.user;
-      const initDataEarly   = window.Telegram?.WebApp?.initData;
+      // Fast path: initData already populated.
+      //
+      // U1: ветки с `initDataUnsafe.user.id` и `?uid=` убраны — они посылали
+      // серверу неподписанный Telegram ID, а он не секретен. Запасной путь
+      // теперь один: подписанный ботом `?k=` (см. bots/tg/admin/menu.ts).
+      const initDataEarly = window.Telegram?.WebApp?.initData;
       if (initDataEarly) {
         doAuth({ initData: initDataEarly });
-        return;
-      }
-      if (unsafeUserEarly?.id) {
-        doAuth({ userId: unsafeUserEarly.id, firstName: unsafeUserEarly.first_name });
         return;
       }
 
@@ -171,12 +174,6 @@ export default function TwaApp() {
 
       if (initData) {
         doAuth({ initData });
-        return;
-      }
-
-      const unsafeUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
-      if (unsafeUser?.id) {
-        doAuth({ userId: unsafeUser.id, firstName: unsafeUser.first_name });
         return;
       }
 
@@ -190,10 +187,11 @@ export default function TwaApp() {
       }
 
       // Fallback: iOS Telegram v9.6+ omits tgWebAppData from the hash
-      // entirely. The bot embeds ?uid=<adminId> in the web_app URL.
-      const urlUid = new URLSearchParams(window.location.search).get("uid");
-      if (urlUid) {
-        doAuth({ userId: Number(urlUid) });
+      // entirely. Бот подписывает токен запуска и кладёт его в web_app-ссылку
+      // как `?k=` — знание публичного Telegram ID больше не даёт входа.
+      const linkToken = new URLSearchParams(window.location.search).get("k");
+      if (linkToken) {
+        doAuth({ linkToken });
         return;
       }
 
