@@ -81,6 +81,43 @@ destructive changes/существующие таблицы, только пос
 > контейнеры собраны из разных состояний. Это обнаружение рассинхрона, а не разрешение
 > запускать две тяжёлые сборки параллельно: порядок Web → Guide остаётся обязательным.
 
+### Один скрипт вместо ручного шага (26.07.2026, ultra-review U5)
+
+Ручной шаг «не забудь Guide» регулярно забывался: 25.07 прод обслуживал точку входа с
+Wildberries сборкой на несколько коммитов старше сайта, и видно это было только по смоуку.
+Теперь есть:
+
+```bash
+scripts/deploy-web-and-guide.sh              # Web → ждём finished → Guide → smoke
+scripts/deploy-web-and-guide.sh --guide-only # Web уже уехал автодеплоем
+```
+
+Скрипт читает `COOLIFY_URL`, `COOLIFY_TOKEN`, `COOLIFY_WEB_UUID`, `COOLIFY_GUIDE_UUID` из
+окружения/локального `.env` (секретов в репозитории нет), соблюдает обязательный порядок
+Web → Guide и сам гоняет `smoke-corridor` в конце.
+
+Для постоянного контроля — лёгкий режим смоука под cron раз в 15 минут:
+
+```bash
+node scripts/smoke-corridor.mjs --drift-only --alert
+```
+
+Он проверяет только страницу гейта и совпадение `X-RobloxBank-Guide-Release` у Web и Guide
+(8 проверок вместо 30) и шлёт алерт админам в TG при расхождении.
+
+### Обязательный release-чеклист
+
+1. `npm run lint` — с 26.07 это работающий гейт: 0 error, а рост числа warning
+   ограничен `--max-warnings` (текущий потолок зафиксирован в скрипте).
+2. `npx tsc --noEmit`
+3. `npm run bots:tsc` — **новое**: до 26.07 код ботов вообще не проверялся типами.
+4. `npm test` и `npm run test:bots`
+5. `npm run build`
+6. Миграции: аддитивные — **до** деплоя, разрушительные (`DROP TABLE`) — **после**.
+7. Деплой Web → Guide (скрипт выше), затем `node scripts/smoke-corridor.mjs` → ожидаем 30/30.
+
+Одной командой шаги 1–5: `npm run gates`.
+
 Read-only smoke основной витрины:
 
 ```bash
@@ -117,6 +154,19 @@ OpenGraph и корректный maintenance-ответ.
 > целиком — общий код туда добавлять безопасно.
 
 ## Env-переменные (имена, без значений)
+
+Добавлены 26.07.2026 (ultra-review):
+
+| Переменная | Где | Зачем |
+|---|---|---|
+| `TWA_LINK_SECRET` | Web + TG-бот (значения обязаны совпадать) | подпись токена запуска TWA в web_app-ссылке; без неё запасной вход отключён и админка открывается только там, где Telegram отдаёт `initData` (U1) |
+| `TRUSTED_PROXY_MODE` | Web | `direct` (по умолчанию и в проде) или `cloudflare` — как определять IP клиента для лимитов (U2) |
+| `CLOUDFLARE_IP_RANGES` | Web, опционально | переопределение списка CIDR Cloudflare для режима `cloudflare` |
+
+Удалены как мёртвые: `BOT_API_TOKEN`, `INTERNAL_WEBHOOK_SECRET`, `LOCAL_BOT_URL` —
+обслуживавшие их роуты удалены вместе с legacy-слоем магазина (U13); в рабочем окружении
+их и не было, поэтому роуты всегда отвечали 401.
+
 
 **Web:** `DATABASE_URL`, `AUTH_SECRET` (или `NEXTAUTH_SECRET`), `NEXTAUTH_URL`,
 `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_VK_APP_ID`, `TG_TOKEN`, `TG_CHAT_ID`, `ADMIN_IDS`,

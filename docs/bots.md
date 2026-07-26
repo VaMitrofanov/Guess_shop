@@ -509,3 +509,59 @@ Polling TG-процесс запускает `bots/shared/payment-outbox.ts`: du
 оплате/возврате забираются lease-claim'ом, повторяются с capped exponential backoff и после
 8 ошибок переходят в `DEAD` с admin alert. Это единственный worker instance; подробности и
 операционная матрица — `payments-and-kkt.md`.
+
+## Изменения 26.07.2026 (ultra-review)
+
+### Кнопки больше не доверяют `callback_data` (U6, риск №24)
+
+`callback_data` — не доверенный ввод: через неофициальный MTProto-клиент можно вызвать
+`messages.getBotCallbackAnswer` с произвольной строкой, в VK — прислать произвольный
+`payload`. Появился общий хелпер `bots/shared/ownership.ts`:
+
+```ts
+const owned = await assertOwnsOrder(tgActor(ctx.from.id), orderId, { status: true });
+if (!owned.ok) { /* forbidden | not_found */ }
+```
+
+Он резолвит `User` по `tgId`/`vkId` и сверяет владельца сущности; нарушение пишется в лог
+как `[ownership] violation platform=… actor=… order=… owner=…` — это сигнал атаки, а не
+бытовая ошибка. Переведены `gpw_ok:` / `gpw_no:` (обе платформы) и `uci:`.
+`confirmGpWatch`/`declineGpWatch` теперь принимают `actor` и умеют возвращать `forbidden`.
+
+**Правило:** любая новая ветка `callback_query`, которая читает сущность по ID из кнопки,
+обязана либо стоять за `ADMIN_IDS.includes(...)`, либо пройти через `assertOwns*`.
+
+### Деньги клиента (U3/U4, риск №25)
+
+- `bots/shared/order-benefits.ts` — единственная точка изменения баланса на стороне ботов:
+  всегда `increment`, всегда запись в `BonusLedger`, всегда ключ идемпотентности.
+  Прежний `updateData.balance = user.balance + x` (read-modify-write, lost update при
+  гонке) больше не используется.
+- `ucd:` (отмена прямого заказа покупателем) чинён: раньше бонус считался как
+  `amount − WbCode.denomination`, а строки `WbCode` у `DIR-` заказов не существует, поэтому
+  ветка возврата была **недостижима**, а скидка не возвращалась вовсе. Теперь источник —
+  поля `bonusAppliedRobux` / `discountAppliedKopecks` самого заказа, и клиенту в сообщении
+  об отмене видно, что именно вернулось.
+- При создании заказа из `DirectIntent` (`sqi:` и `spi:`) применённые бонус и скидка
+  записываются в заказ, а списание бонуса проходит через леджер.
+- Бонус за отзыв (`review_ok:`) тоже переведён на леджер — раньше это был единственный
+  `increment` в проекте и он не оставлял записи в журнале.
+
+### Новые фоновые задачи TG-сервиса
+
+| Задача | Период | Что делает |
+|---|---|---|
+| `sweepStaleWebOrders` | 15 мин | web-заказы в `AWAITING_PAYMENT`/`PAYMENT_PENDING` старше 2 ч → `REJECTED` + возврат бонуса и скидки |
+| `runRetention` | 24 ч | чистка `PriceQuote` / `EmailActionToken`, счётчик старых `OrderEvent` |
+
+### Вход в TWA (U1)
+
+`bots/shared/twa-link.ts` подписывает токен запуска `v1.<userId>.<exp>.<HMAC>` секретом
+`TWA_LINK_SECRET` и подставляет его в web_app-ссылки (`?k=`) — Menu Button, Launch-кнопка
+и «📊 Дашборд» в карточках. Прежний `?uid=<telegramId>` убран: публичный Telegram ID
+больше не даёт доступа в админку. Карточки для админов строятся **персонально под
+получателя**, потому что токен привязан к конкретному ID.
+
+### Типы и тесты
+
+`npm run bots:tsc` и `npm run test:bots` — см. `docs/architecture.md`.

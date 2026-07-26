@@ -44,8 +44,8 @@ VK link/unlink и recovery-console остаются следующими инк�
 копейках и одноразово потребляется новым `WbOrder(SITE/WEB)`. `PaymentAttempt`, `OrderEvent`
 и `OutboxMessage` образуют durable payment boundary; TG-сервис исполняет outbox с retry/dead-letter,
 а refund имеет отдельный идемпотентный audit. Production Init закрыт kill-switch до внешних
-launch-gates. ЛК читает legacy `Order` и `WbOrder` всех источников, bonus balance и предлагает
-TG link только внутри fresh-auth window.
+launch-gates. ЛК читает `WbOrder` всех источников (legacy-таблица `Order` удалена 26.07),
+bonus balance и предлагает TG link только внутри fresh-auth window.
 
 ## B2B-направление (TWA/server MVP)
 
@@ -118,8 +118,18 @@ bots/
 prisma/schema.prisma    схема БД
 ```
 
-> **ВАЖНО:** `bots/` исключён из корневого `tsconfig.json`. `tsc --noEmit` **не проверяет**
-> бот-файлы — ошибки в ботах видны только в рантайме. Тестируй руками.
+> **`bots/` проверяется отдельным конфигом** (ultra-review U17, 26.07.2026). Код ботов
+> по-прежнему исключён из корневого `tsconfig.json` (другой module/target), но теперь у него
+> есть собственный гейт:
+>
+> ```bash
+> npm run bots:tsc     # tsc --noEmit -p bots/tsconfig.json  → 0 ошибок на 26.07
+> npm run test:bots    # jest --config jest.bots.config.js   → bots/**/__tests__
+> ```
+>
+> Оба входят в release-чеклист (`docs/deploy.md`) и в `npm run gates`. До 26.07 эти 9000+
+> строк — самый нагруженный код системы — не проверялись ничем, и обе находки ревью по
+> бонусам (U4) и по чужим заказам (U6) пришли именно отсюда.
 
 ## Ключевые соглашения
 
@@ -135,8 +145,16 @@ prisma/schema.prisma    схема БД
 
 ## <a name="legacy"></a>Переход от legacy checkout
 
-`/checkout`, `api/orders/create`, `api/orders/[id]` и T-Bank webhook уже переведены на
-`WbOrder(SITE)`/quote/payment-attempt. Старая таблица `Order`, Product FK,
-`api/orders/webhook-to-automation` и admin CRUD товара пока остаются read-only/legacy до
-подтверждения нулевого production-остатка и удаления отдельной миграцией. Публичный сайт и
-Init выключены maintenance + `SITE_ACQUIRING_ENABLED=false`.
+`/checkout`, `api/orders/create`, `api/orders/[id]` и T-Bank webhook переведены на
+`WbOrder(SITE)`/quote/payment-attempt.
+
+**Legacy-слой удалён 26.07.2026 (ultra-review U13).** Нулевой production-остаток
+подтверждён (`SELECT count(*)` по `"Order"` и `"Product"` = 0), после чего удалены роуты
+`api/bot/update-order`, `api/orders/webhook-to-automation`, `api/admin/products/**`,
+`api/admin/orders/[id]/fulfill`, страница `admin/(protected)/products` и диагностический
+`api/twa/debug`; модели `Order`/`Product` и enum `OrderStatus` сняты отдельной миграцией
+`20260726_drop_legacy_shop` (применяется **после** выкатки кода). Два из этих роутов
+всегда отвечали 401 — `BOT_API_TOKEN` и `INTERNAL_WEBHOOK_SECRET` в рабочем окружении
+отсутствовали, то есть это была поверхность атаки с нулевой функцией.
+
+Публичный сайт и Init по-прежнему выключены maintenance + `SITE_ACQUIRING_ENABLED=false`.

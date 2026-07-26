@@ -348,3 +348,43 @@ Web-контейнер уже обновился, а БД ещё нет, `/api/t
 `Product`, `Order` (`OrderStatus`), `Review`, `FAQ`, `MarketRate`, `RateSnapshot`,
 `WbProductCost`, `WbSettings` — часть старой e-commerce-модели и WB-аналитики. `Order`/`Product`
 относятся к спящему checkout-слою (см. [architecture.md](architecture.md#legacy)).
+
+## Изменения 26.07.2026 (ultra-review)
+
+Миграция `20260726_ultra_review_fixes` (аддитивная, применена до деплоя):
+
+| Объект | Что | Зачем |
+|---|---|---|
+| `WbOrder.gamepassId` | `TEXT`, `@@index([gamepassId])` | U18: поиск заказа по геймпассу шёл через `gamepassUrl contains '/<id>'` списком `OR` — индекс неприменим, полное сканирование на каждом поиске и **перед каждой покупкой**. Backfill regexp'ом заполнил 548 из 549 заказов со ссылкой (единственный пропуск — ссылка на `/games/`, а не на геймпасс) |
+| триггер `wborder_gamepass_id_sync` | `BEFORE INSERT OR UPDATE OF "gamepassUrl"` | ссылку на геймпасс пишут больше десяти мест (сайт, оба бота, TWA, ручное создание, замена пасса); триггер снимает класс ошибок «забыли обновить производное поле» целиком |
+| `WbOrder.bonusAppliedRobux`, `WbOrder.discountAppliedKopecks` | `INTEGER` | U3: фактически применённые льготы. Раньше `rubleDiscount` обнулялся «в никуда» и восстановить его при неудачной оплате было нечем |
+| `WbOrder.benefitsRevertedAt` | `TIMESTAMP(3)` | U3: отметка проведённой компенсации — защита от двойного возврата на стыке webhook / catch-ветки `Init` / крона протухших заказов |
+| `WbOrder.termsUserAgent`, `ConsentEvidence.userAgent`, `ConsentEvidence.deploymentId` | `TEXT` | U9: IP сам по себе слабое доказательство согласия с офертой |
+
+Миграция `20260726_drop_legacy_shop` (разрушительная, применяется **после** деплоя):
+`DROP TABLE "Order"`, `DROP TABLE "Product"`, `DROP TYPE "OrderStatus"` — legacy-слой
+магазина с нулевым production-остатком (U13). Разделение на две миграции неслучайно: пока
+в проде крутится предыдущая сборка, её страница ЛК ещё читает `prisma.order`.
+
+### Ретенция (U12)
+
+До 26.07 `deleteMany` был во всём проекте ровно один — для `TelegramWebLoginChallenge`.
+Суточный крон `bots/shared/retention.ts` (TG-сервис):
+
+- `PriceQuote` со `status != CONSUMED`, `expiresAt` старше 7 дней и без привязанного
+  заказа — удаляются;
+- `EmailActionToken` с `expiresAt` старше 30 дней — удаляются;
+- `OrderEvent` старше 18 месяцев — только считаются и выводятся в лог (аудит денежных
+  операций, удаление — решение владельца);
+- `ConsentEvidence` не трогается: юридическое доказательство согласия.
+
+Отдельно: анонимный `POST /api/pricing/quote` больше **не пишет** строку `PriceQuote` —
+потребить её всё равно нельзя (`validateCheckoutQuote` требует совпадения владельца), а
+без ретенции и с обходимым rate-limit это был вектор неограниченного роста БД.
+
+### Журнал бонусов
+
+`BonusLedger` стал единственным способом менять `User.balance`: `src/lib/bonus-ledger.ts`
+и зеркало `bots/shared/order-benefits.ts` всегда используют `increment`, всегда пишут
+строку журнала и требуют ключ идемпотентности. Сверка `SUM(deltaRobux) == balance` —
+`node scripts/bonus-ledger-audit.mjs` (dry-run по умолчанию).

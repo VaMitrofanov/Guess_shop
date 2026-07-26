@@ -110,7 +110,18 @@ Worker запускается в long-running TG-сервисе вместе с 
 `PaymentRefund` создаётся **до** `/v2/Cancel`, поэтому двойной тап не вызывает второй возврат.
 
 - частичный возврат передаёт `Amount` и чек ровно на возвращаемую часть;
-- возврат всего оставшегося остатка не передаёт `Receipt`: итоговый чек возврата формирует банк;
+- полный возврат **первым же действием** не передаёт `Receipt`: закрывающий чек формирует банк;
+- во всех остальных случаях (частичный, а также остаток после частичного) передаётся
+  `Receipt` ровно на возвращаемую часть;
+- ✅ **дефект U7 исправлен 26.07.2026.** Раньше роут передавал в
+  `cancelCanonicalTinkoffPayment` **остаток** (`remaining`), а признак `partial` считался
+  сравнением с этим же остатком. Возврат остатка после частичного давал `600 === 600` →
+  `partial = false` → чек не передавался, и банк выписывал закрывающий чек на **всю**
+  исходную сумму: платёж 1000 ₽, возвраты 400 + 600 → фискально 400 + 1000 = 1400 ₽ при
+  фактических 1000 ₽. Теперь передаются полная сумма платежа (`attempt.amountKopecks`) и
+  уже возвращённое (`attempt.refundedAmountKopecks`), а «без чека» — только когда возврат
+  первый и сразу полный (`refundNeedsReceipt` в `src/lib/tinkoff.ts`). Контракт-тест —
+  `src/__tests__/tinkoff-refund-receipt.test.ts`, 4/4;
 - timeout/обрыв после отправки = `SUBMIT_UNKNOWN`; автоматический повтор запрещён до сверки;
 - `SUBMITTED → CONFIRMED` делает подписанный webhook; cumulative refunded amount хранится в
   `PaymentAttempt.refundedAmountKopecks`;
@@ -132,7 +143,7 @@ Worker запускается в long-running TG-сервисе вместе с 
 | Downstream | Telegram/API временно недоступен | retry/backoff, заказ остаётся оплачен | policy tests ✅; fault injection ⏳ |
 | Downstream | 8 постоянных ошибок | `DEAD` + alert | policy tests ✅; fault injection ⏳ |
 | Refund | полный подтверждённый платёж | `/Cancel`, `REFUNDED`, closing refund receipt | contract ✅; terminal/ОФД ⏳ |
-| Refund | частичный и затем остаток | два события, cumulative total, 2 корректных чека | contract/state ✅; terminal/ОФД ⏳ |
+| Refund | частичный и затем остаток | два события, cumulative total, 2 корректных чека | contract ✅ (U7 исправлен 26.07); terminal/ОФД ⏳ |
 | Refund | duplicate UUID/double tap | один provider call | DB idempotency ✅; staging ⏳ |
 | Refund | timeout после provider accept | `SUBMIT_UNKNOWN`, без blind retry | код ✅; fault injection ⏳ |
 | Refund | внешний refund | callback принят + reconciliation flag | код ✅; staging ⏳ |
