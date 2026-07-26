@@ -36,7 +36,6 @@ model User {
   reviewBonusClaimed   Boolean             @default(false)
   reviewBonusGrantedAt DateTime?
   reviewReminderLevel  Int                 @default(0)
-  orders               Order[]
   wbCodes              WbCode[]
   wbOrders             WbOrder[]
   directIntents        DirectIntent[]
@@ -82,6 +81,10 @@ model ConsentEvidence {
   documentVersion String
   source          String
   ipHash          String?
+  /// U9: IP подделывается и меняется у мобильных операторов — храним ещё и
+  /// клиента, и релиз, на котором согласие было принято.
+  userAgent       String?
+  deploymentId    String?
   acceptedAt      DateTime @default(now())
   createdAt       DateTime @default(now())
 
@@ -217,55 +220,6 @@ model PriceQuote {
   @@index([policyId, createdAt(sort: Desc)])
 }
 
-model Product {
-  id          String   @id @default(cuid())
-  name        String
-  robuxAmount Int
-  rubPrice    Float
-  type        String
-  isActive    Boolean  @default(true)
-  orders      Order[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-}
-
-enum OrderStatus {
-  PENDING
-  PAID
-  FULFILLED
-  FAILED
-}
-
-model Order {
-  id                 String      @id @default(cuid())
-  userId             String?
-  user               User?       @relation(fields: [userId], references: [id])
-  customerRobloxUser String
-  productId          String
-  product            Product     @relation(fields: [productId], references: [id])
-  amountRUB          Float
-  amountRobux        Int
-  tinkoffPaymentID   String?     @unique
-  paymentUrl         String?
-  status             OrderStatus @default(PENDING)
-  botStatus          String?
-  externalId         String?
-  gamepassId         String?
-  method             String
-
-  // ── Acceptance of public offer (ст. 437–438 ГК РФ + ФЗ-152) ─────────────
-  // Captured server-side at the moment /api/orders/create accepts the
-  // request, so the timestamp/IP/version triple is independent of anything
-  // the client could forge after the fact. Nullable for backwards-compat
-  // with rows created before this migration.
-  termsAcceptedAt DateTime?
-  termsVersion    String?
-  termsIpAddress  String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
 enum Platform {
   VK
   TG
@@ -350,6 +304,10 @@ model WbOrder {
   id                     String           @id @default(cuid())
   amount                 Int
   gamepassUrl            String?
+  /// U18: числовой ID геймпасса, извлечённый из `gamepassUrl` при записи.
+  /// Раньше поиск шёл по `gamepassUrl contains '/<id>'` — полное сканирование
+  /// таблицы на каждом поиске и перед каждой покупкой.
+  gamepassId             String?
   status                 WbOrderStatus    @default(PENDING)
   platform               Platform
   userId                 String
@@ -365,6 +323,15 @@ model WbOrder {
   termsAcceptedAt        DateTime?
   termsVersion           String?
   termsIpAddress         String?
+  /// U9: IP сам по себе слабое доказательство согласия — фиксируем и клиента.
+  termsUserAgent         String?
+  /// U3: фактически применённые бонус и скидка. Раньше `rubleDiscount`
+  /// обнулялся «в никуда» и восстановить его при неудачной оплате было нечем.
+  bonusAppliedRobux      Int?
+  discountAppliedKopecks Int?
+  /// U3: компенсация бонуса/скидки уже проведена (защита от двойного возврата
+  /// на стыке webhook / catch-ветки Init / крона протухших заказов).
+  benefitsRevertedAt     DateTime?
   webIdempotencyKey      String?          @unique
   adminId                String?
   rejectionReason        String?
@@ -442,6 +409,8 @@ model WbOrder {
   @@index([publicOrderId])
   // GP-watcher (+3) selection: AWAITING orders that carry a probable nick.
   @@index([status, probableNick])
+  // U18: точный поиск заказа по геймпассу (TWA-поиск + гард перед покупкой).
+  @@index([gamepassId])
 }
 
 /// One provider-side payment initialization/charge lifecycle. The amount and

@@ -14,6 +14,7 @@ import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { getCheckoutGamepassDetails, getRobloxUser } from "@/lib/roblox";
 import { initCanonicalTinkoffPayment } from "@/lib/tinkoff";
 import { siteAcquiringDecision } from "@/lib/site-acquiring";
+import { revertWebOrderBenefits } from "@/lib/web-order-benefits";
 
 export const dynamic = "force-dynamic";
 
@@ -26,9 +27,13 @@ const CreateOrderSchema = z.object({
   idempotencyKey: z.uuid(),
 });
 
-function resolveClientIp(req: NextRequest): string | null {
-  const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return forwarded || req.headers.get("x-real-ip")?.trim() || req.headers.get("cf-connecting-ip")?.trim() || null;
+/**
+ * U9: адрес согласия с офертой берётся тем же `clientIp()`, что и лимиты —
+ * второй локальной реализации (доверявшей подделываемому левому hop'у) больше нет.
+ */
+function consentIp(req: NextRequest): string | null {
+  const ip = clientIp(req);
+  return ip === "unknown" ? null : ip;
 }
 
 export async function POST(req: NextRequest) {
@@ -113,7 +118,8 @@ export async function POST(req: NextRequest) {
       gamepassId: input.gamepassId,
       receiptEmail: input.receiptEmail.toLowerCase(),
       idempotencyKey: input.idempotencyKey,
-      termsIpAddress: resolveClientIp(req),
+      termsIpAddress: consentIp(req),
+      termsUserAgent: req.headers.get("user-agent"),
     });
 
     try {
@@ -166,6 +172,13 @@ export async function POST(req: NextRequest) {
           },
         }),
       ]);
+      // U3: платёж не создан — бонус и скидка возвращаются немедленно, иначе
+      // накопленное клиента сгорало на неудачной попытке оплаты.
+      try {
+        await revertWebOrderBenefits(created.order.id, "PAYMENT_INIT_FAILED");
+      } catch (revertError) {
+        console.error("[orders/create] benefits revert failed", { orderId: created.order.id, revertError });
+      }
       console.error("[orders/create] T-Bank Init failed", { orderId: created.order.publicOrderId, errorHash });
       return NextResponse.json({ error: "Банк временно не создал платёж. Заказ сохранён для проверки." }, { status: 502 });
     }

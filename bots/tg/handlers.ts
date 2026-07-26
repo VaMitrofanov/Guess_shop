@@ -21,6 +21,10 @@ import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT,
 import { buildCompletedMessages, robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
 import { formatOrderAge } from "../shared/order-age";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
+import { twaLaunchUrl } from "../shared/twa-link";
+import { tgActor, assertOwnsIntent } from "../shared/ownership";
+import { applyBonusDeltaTx, revertOrderBenefits, BONUS_REASONS, directOrderBonusKey } from "../shared/order-benefits";
+import { extractGamepassId } from "../shared/gamepass-id";
 import { buildAdminKeyboard } from "./admin";
 import { buildOrderProfitSnapshot } from "../shared/order-profit";
 import { buildTelegramWebLoginUrl, parseTelegramWebLoginStart } from "../shared/telegram-web-login";
@@ -2661,9 +2665,15 @@ async function processGamepassSubmission(
         include: { user: true }
       });
       if (fullOrder) {
-        const { text: cardText, reply_markup } = await renderOrderCard(fullOrder, validatedCreator ?? undefined, gamepassInfo.isAgeRestricted, replacedGamepassUrl ?? undefined);
+        const { text: cardText, buildReplyMarkup } = await renderOrderCard(fullOrder, validatedCreator ?? undefined, gamepassInfo.isAgeRestricted, replacedGamepassUrl ?? undefined);
         for (const adminId of ADMIN_IDS) {
-          try { await bot.telegram.sendMessage(adminId, cardText, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } }); } catch { }
+          try {
+            await bot.telegram.sendMessage(adminId, cardText, {
+              parse_mode: "HTML",
+              reply_markup: buildReplyMarkup(adminId),
+              link_preview_options: { is_disabled: true },
+            });
+          } catch { }
         }
       }
     } catch (err) {
@@ -2766,21 +2776,23 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
   // into the TWA Orders screen prefocused on this order (?q=<код> — TWA ищет
   // и по коду ВБ). Mirrors sendAdminOrderCard so every admin card —
   // new-order notify, search result, status refresh — leads back into the app.
-  const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(order.wbCode)}`;
-  const reply_markup = (order.status === "PENDING" || order.status === "IN_PROGRESS") ? {
-    inline_keyboard: [
-      [
-        { text: "✅ ВЫКУПЛЕНО", callback_data: CB.adminOk(order.id) },
-        { text: "❌ ОШИБКА", callback_data: `admin_reject_init:${order.id}` }
-      ],
-      [
-        { text: "📋 Скрипт выкупа", callback_data: CB.purchaseScript(order.id) },
-        { text: "📊 Дашборд", web_app: { url: twaUrl } },
+  // U1: ссылка запуска TWA подписывается персонально под получателя карточки,
+  // поэтому markup строится функцией, а не константой.
+  const buildReplyMarkup = (viewerId: string | number) =>
+    (order.status === "PENDING" || order.status === "IN_PROGRESS") ? {
+      inline_keyboard: [
+        [
+          { text: "✅ ВЫКУПЛЕНО", callback_data: CB.adminOk(order.id) },
+          { text: "❌ ОШИБКА", callback_data: `admin_reject_init:${order.id}` }
+        ],
+        [
+          { text: "📋 Скрипт выкупа", callback_data: CB.purchaseScript(order.id) },
+          { text: "📊 Дашборд", web_app: { url: twaLaunchUrl(viewerId, { q: order.wbCode }) } },
+        ]
       ]
-    ]
-  } : undefined;
+    } : undefined;
 
-  return { text, reply_markup };
+  return { text, buildReplyMarkup };
 }
 
 /** Admin search logic by ID or WB Code */
@@ -2820,8 +2832,12 @@ async function handleAdminSearch(ctx: any, query: string) {
   }
 
   if (order) {
-    const { text, reply_markup } = await renderOrderCard(order);
-    return ctx.reply(text, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } });
+    const { text, buildReplyMarkup } = await renderOrderCard(order);
+    return ctx.reply(text, {
+      parse_mode: "HTML",
+      reply_markup: buildReplyMarkup(ctx.from?.id ?? ""),
+      link_preview_options: { is_disabled: true },
+    });
   }
 
   return ctx.reply("🔎 Ничего не найдено. Введи ID заказа (последние 6-8 символов) или код WB.");
@@ -3404,7 +3420,7 @@ export function registerCallbacks(bot: Telegraf): void {
       pendingNickEdit.delete(ctx.from.id);
       pendingDirectFlow.delete(ctx.from.id);
       linkFailCounts.delete(ctx.from.id);
-      const res = await confirmGpWatch(orderId);
+      const res = await confirmGpWatch(orderId, tgActor(ctx.from.id));
       const reply =
         res.status === "ok"
           ? `✅ Отлично! Геймпасс <b>${escapeHtml(res.passName)}</b> (${res.robux} R$) принят на ник <b>${escapeHtml(res.nick)}</b>.\n\nЗаказ в очереди на выкуп — как только выкупим, сразу напишу сюда 💛`
@@ -3412,6 +3428,8 @@ export function registerCallbacks(bot: Telegraf): void {
           ? "✅ Этот заказ уже в работе — ничего делать не нужно."
           : res.status === "gone"
           ? "⚠️ Геймпасс сейчас не находится по этому нику. Проверь, что он выставлен на продажу за нужную цену, и пришли ссылку сюда."
+          : res.status === "forbidden"
+          ? "⚠️ Этот заказ привязан к другому аккаунту — действие отклонено."
           : "⚠️ Не получилось обработать. Пришли ссылку на геймпасс сюда, помогу.";
       try { await ctx.editMessageReplyMarkup(undefined); } catch {}
       await ctx.reply(reply, { parse_mode: "HTML" });
@@ -3426,7 +3444,7 @@ export function registerCallbacks(bot: Telegraf): void {
       pendingNickEdit.delete(ctx.from.id);
       pendingDirectFlow.delete(ctx.from.id);
       linkFailCounts.delete(ctx.from.id);
-      const declined = await declineGpWatch(orderId);
+      const declined = await declineGpWatch(orderId, tgActor(ctx.from.id));
       if (declined) {
         pendingRobloxNick.set(ctx.from.id, { wbCode: declined.wbCode, denomination: declined.amount });
       }
@@ -4425,8 +4443,19 @@ export function registerCallbacks(bot: Telegraf): void {
     // uci: user cancels their own intent
     if (data.startsWith("uci:")) {
       const intentId = data.slice(4);
-      const intent = await (db as any).directIntent.findUnique({ where: { id: intentId } });
-      if (!intent || intent.status !== "PENDING") {
+      // U6: раньше заявка отменялась по одному только ID из callback_data —
+      // подделанной кнопкой отменялась чужая. Теперь владелец обязателен.
+      const owned = await assertOwnsIntent<{
+        status: string; robloxUsername: string; totalAmount: number; userId: string;
+      }>(tgActor(ctx.from.id), intentId, { status: true, robloxUsername: true, totalAmount: true });
+      if (!owned.ok) {
+        await ctx.answerCbQuery(
+          owned.reason === "forbidden" ? "Эта заявка не твоя" : "Заявка уже обработана",
+        ).catch(() => {});
+        return;
+      }
+      const intent = owned.entity;
+      if (intent.status !== "PENDING") {
         await ctx.answerCbQuery("Заявка уже обработана").catch(() => {});
         return;
       }
@@ -4474,39 +4503,33 @@ export function registerCallbacks(bot: Telegraf): void {
       const ownsTg = ucdOrder.user?.tgId === String(ctx.from.id);
       if (!ownsTg) { await ctx.answerCbQuery("⛔ Это не твой заказ").catch(() => {}); return; }
 
-      // Restore bonus & discount that were deducted at order creation
-      const updateData: any = {};
       const baseAmount = ucdOrder.amount;
       const code = ucdOrder.wbCode;
-      const bonusApplied = await (async () => {
-        const dirCode = await (db as any).wbCode.findFirst({ where: { code } });
-        if (!dirCode) return 0;
-        return baseAmount - dirCode.denomination;
-      })();
-      // Direct orders don't use wbCode table — bonus is amount - pack value.
-      // We stored totalAmount (pack + bonus) in order.amount. The original pack
-      // was the directPrice key. Restore bonus to user.balance.
-      if (bonusApplied > 0) updateData.balance = (ucdOrder.user.balance ?? 0) + bonusApplied;
-      // Restore ruble discount — it was zeroed at confirmation
-      // We can't know the exact discount that was applied, but the directPrice
-      // calculation path zeroed rubleDiscount. Set it back to 60 (the only
-      // discount value in the system) if it was 0 and order had it.
-      // Simpler: we won't restore discount — it's a minor edge case. The admin
-      // can re-credit manually if needed.
 
-      await (db as any).$transaction(async (tx: any) => {
-        await tx.wbOrder.update({
-          where: { id: ucdOrderId },
-          data: { status: "REJECTED", rejectionReason: "Отменён покупателем" },
-        });
-        if (Object.keys(updateData).length > 0) {
-          await tx.user.update({ where: { id: ucdOrder.user.id }, data: updateData });
-        }
+      // U4: раньше бонус к возврату считался как `amount − WbCode.denomination`,
+      // а строки `WbCode` у DIR-заказов не существует — `bonusApplied` всегда
+      // выходил 0, и ветка возврата была недостижима. Скидка не возвращалась
+      // вовсе. Теперь источник — фактически применённые значения, записанные в
+      // заказ при его создании; движение баланса идёт через `increment` с
+      // записью в `BonusLedger`.
+      await (db as any).wbOrder.update({
+        where: { id: ucdOrderId },
+        data: { status: "REJECTED", rejectionReason: "Отменён покупателем" },
+      });
+      const refund = await revertOrderBenefits(ucdOrderId, {
+        reason: "CANCELLED_BY_CUSTOMER",
+        kind: "DIRECT",
       });
 
+      const refundLine =
+        refund.bonusRobux > 0 || refund.discountKopecks > 0
+          ? `\n\n♻️ Вернул на счёт:` +
+            (refund.bonusRobux > 0 ? `\n• бонус <b>${refund.bonusRobux} R$</b>` : "") +
+            (refund.discountKopecks > 0 ? `\n• скидку <b>${refund.discountKopecks / 100} ₽</b>` : "")
+          : "";
       try {
         await ctx.editMessageText(
-          `❌ <b>Заказ на ${baseAmount} R$ отменён.</b>\n\nЕсли хочешь — создай новый заказ.`,
+          `❌ <b>Заказ на ${baseAmount} R$ отменён.</b>${refundLine}\n\nЕсли хочешь — создай новый заказ.`,
           { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("💎 Заказать напрямую", CB.startDirect)]]) }
         );
       } catch { }
@@ -4517,7 +4540,10 @@ export function registerCallbacks(bot: Telegraf): void {
       const adminText =
         `❌ <b>Заказ <code>${code}</code> отменён покупателем</b>\n` +
         `👤 ${escapeHtml(tgDisplay)}\n` +
-        `💎 ${baseAmount} R$`;
+        `💎 ${baseAmount} R$` +
+        (refund.reverted
+          ? `\n♻️ Возвращено: ${refund.bonusRobux} R$ бонуса, ${refund.discountKopecks / 100} ₽ скидки`
+          : "");
       await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, adminText)));
       return;
     }
@@ -4701,19 +4727,32 @@ export function registerCallbacks(bot: Telegraf): void {
               orderSource:   "DIRECT",
               saleAmountKopecks: intent.rublePrice * 100,
               paymentDetails: "СБП QR",
+              // U3/U4: фактически применённые бонус и скидка — источник правды
+              // для возврата при отмене. Раньше их было неоткуда взять.
+              bonusAppliedRobux: intent.bonus ?? 0,
+              discountAppliedKopecks: (intent.rubleDiscount ?? 0) * 100,
+              gamepassId: extractGamepassId(intent.gamepassUrl),
             },
           });
           await tx.directIntent.update({ where: { id: intentId }, data: { status: "CONSUMED" } });
-          const updateData: any = {};
+          // U4: списание бонуса — через единую точку (`increment` + запись в
+          // `BonusLedger`), а не `balance = 0` без следа в журнале.
           if (intent.bonus > 0) {
-            updateData.balance = 0;
-            updateData.reviewBonusGrantedAt = null;
-            updateData.bonusExpiresAt = null;
-            updateData.reviewReminderLevel = 0;
+            await applyBonusDeltaTx(tx, {
+              userId: intent.userId,
+              deltaRobux: -intent.bonus,
+              reason: BONUS_REASONS.DIRECT_ORDER_REDEMPTION,
+              referenceId: ord.id,
+              idempotencyKey: directOrderBonusKey(ord.id),
+              metadata: { intentId, wbCode: dirCode },
+            });
+            await tx.user.update({
+              where: { id: intent.userId },
+              data: { reviewBonusGrantedAt: null, bonusExpiresAt: null, reviewReminderLevel: 0 },
+            });
           }
-          if (intent.user.rubleDiscount > 0) updateData.rubleDiscount = 0;
-          if (Object.keys(updateData).length > 0) {
-            await tx.user.update({ where: { id: intent.userId }, data: updateData });
+          if (intent.user.rubleDiscount > 0) {
+            await tx.user.update({ where: { id: intent.userId }, data: { rubleDiscount: 0 } });
           }
           return ord;
         });
@@ -4782,19 +4821,29 @@ export function registerCallbacks(bot: Telegraf): void {
               isDirectOrder: true,
               orderSource:   "DIRECT",
               saleAmountKopecks: intent.rublePrice * 100,
+              // U3/U4: см. ветку sqi — фактически применённые бонус и скидка.
+              bonusAppliedRobux: intent.bonus ?? 0,
+              discountAppliedKopecks: (intent.rubleDiscount ?? 0) * 100,
+              gamepassId: extractGamepassId(intent.gamepassUrl),
             },
           });
           await tx.directIntent.update({ where: { id: intentId }, data: { status: "CONSUMED" } });
-          const updateData: any = {};
           if (intent.bonus > 0) {
-            updateData.balance = 0;
-            updateData.reviewBonusGrantedAt = null;
-            updateData.bonusExpiresAt = null;
-            updateData.reviewReminderLevel = 0;
+            await applyBonusDeltaTx(tx, {
+              userId: intent.userId,
+              deltaRobux: -intent.bonus,
+              reason: BONUS_REASONS.DIRECT_ORDER_REDEMPTION,
+              referenceId: ord.id,
+              idempotencyKey: directOrderBonusKey(ord.id),
+              metadata: { intentId, wbCode: dirCode },
+            });
+            await tx.user.update({
+              where: { id: intent.userId },
+              data: { reviewBonusGrantedAt: null, bonusExpiresAt: null, reviewReminderLevel: 0 },
+            });
           }
-          if (intent.user.rubleDiscount > 0) updateData.rubleDiscount = 0;
-          if (Object.keys(updateData).length > 0) {
-            await tx.user.update({ where: { id: intent.userId }, data: updateData });
+          if (intent.user.rubleDiscount > 0) {
+            await tx.user.update({ where: { id: intent.userId }, data: { rubleDiscount: 0 } });
           }
           return ord;
         });
@@ -5054,9 +5103,19 @@ export function registerCallbacks(bot: Telegraf): void {
           });
           if (result.count === 0) return; // already paid
         }
+        // U3: начисление тоже идёт через единую точку — иначе журнал бонусов
+        // расходится с балансом (сверка 26.07 нашла 41 такого пользователя).
+        await applyBonusDeltaTx(tx, {
+          userId,
+          deltaRobux: REVIEW_BONUS_AMOUNT,
+          reason: "REVIEW_BONUS",
+          referenceId: orderId,
+          idempotencyKey: `review-bonus:${reviewOrder.wbCode}`,
+          metadata: { orderId, wbCode: reviewOrder.wbCode },
+        });
         await tx.user.update({
           where: { id: userId },
-          data: { balance: { increment: 100 }, reviewBonusGrantedAt: new Date(), reviewReminderLevel: 0 },
+          data: { reviewBonusGrantedAt: new Date(), reviewReminderLevel: 0 },
         });
         paid = true;
       });
@@ -5182,8 +5241,12 @@ export function registerCallbacks(bot: Telegraf): void {
       });
       if (!order) return ctx.answerCbQuery("Заказ не найден").catch(() => {});
 
-      const { text, reply_markup } = await renderOrderCard(order);
-      await ctx.reply(text, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } });
+      const { text, buildReplyMarkup } = await renderOrderCard(order);
+      await ctx.reply(text, {
+        parse_mode: "HTML",
+        reply_markup: buildReplyMarkup(adminId),
+        link_preview_options: { is_disabled: true },
+      });
       return ctx.answerCbQuery().catch(() => {});
     }
 

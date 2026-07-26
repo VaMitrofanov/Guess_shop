@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { PriceQuoteStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { PRICE_TOL } from "@/lib/purchase-guard";
+import { BONUS_REASONS, webOrderBonusKey } from "@/lib/bonus-ledger";
 
 export const WEB_ORDER_TERMS_VERSION = "2026-04-28";
 export const MIN_PAYMENT_KOPECKS = 1_000;
@@ -112,6 +113,7 @@ type CreateCanonicalWebOrderInput = {
   receiptEmail: string;
   idempotencyKey: string;
   termsIpAddress: string | null;
+  termsUserAgent?: string | null;
   now?: Date;
 };
 
@@ -165,14 +167,18 @@ export async function createCanonicalWebOrder(input: CreateCanonicalWebOrderInpu
         throw new WebOrderError("QUOTE_UNAVAILABLE", "Бонус или скидка изменились — обновите цену");
       }
       if (input.quote.bonusRobux > 0) {
+        // U3: списание идёт через единую точку — она же гарантирует запись в
+        // леджер и идемпотентность. Баланс уже уменьшен `updateMany` выше
+        // (там же атомарная проверка «бонус не изменился»), поэтому здесь
+        // фиксируем только движение в журнале.
         await tx.bonusLedger.create({
           data: {
             userId: input.userId,
             deltaRobux: -input.quote.bonusRobux,
             balanceAfter: currentBenefits.balance - input.quote.bonusRobux,
-            reason: "WEB_ORDER_REDEMPTION",
+            reason: BONUS_REASONS.WEB_ORDER_REDEMPTION,
             referenceId: input.quote.id,
-            idempotencyKey: `web-order-bonus:${input.quote.id}`,
+            idempotencyKey: webOrderBonusKey(input.quote.id),
             metadata: { quoteId: input.quote.id },
           },
         });
@@ -183,6 +189,9 @@ export async function createCanonicalWebOrder(input: CreateCanonicalWebOrderInpu
       data: {
         amount: input.quote.requestedRobux + input.quote.bonusRobux,
         gamepassUrl: `https://www.roblox.com/game-pass/${input.gamepassId}`,
+        // U18: индексируемый ID — поиск заказа по геймпассу больше не идёт
+        // через `gamepassUrl contains`, то есть без полного сканирования.
+        gamepassId: input.gamepassId,
         status: "AWAITING_PAYMENT",
         platform: "WEB",
         userId: input.userId,
@@ -195,6 +204,11 @@ export async function createCanonicalWebOrder(input: CreateCanonicalWebOrderInpu
         termsAcceptedAt: now,
         termsVersion: WEB_ORDER_TERMS_VERSION,
         termsIpAddress: input.termsIpAddress,
+        termsUserAgent: input.termsUserAgent ?? null,
+        // U3: фактически применённые бонус и скидка — без них компенсация при
+        // неудачной оплате восстанавливала бы «примерно столько же».
+        bonusAppliedRobux: input.quote.bonusRobux,
+        discountAppliedKopecks: Math.max(0, input.quote.discountKopecks),
         webIdempotencyKey: input.idempotencyKey,
         isDirectOrder: true,
         orderSource: "SITE",

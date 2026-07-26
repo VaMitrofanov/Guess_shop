@@ -11,6 +11,8 @@ import { REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-
 import { ROBUX_UNLOCK_DAYS, robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
 import { startAutoWorkers } from "./auto-workers";
 import { startPaymentOutboxWorker } from "../shared/payment-outbox";
+import { sweepStaleWebOrders } from "../shared/order-benefits";
+import { runRetention } from "../shared/retention";
 
 // Одно место правды о бонусе — review-eligibility.ts (Ф3, 2026-07-12).
 const BONUS_AMOUNT = REVIEW_BONUS_AMOUNT;
@@ -521,6 +523,33 @@ export function startReviewReminderCron(bot: Telegraf): void {
     );
   }, 10 * 60 * 1000); // every 10 min
 
+  // U3: брошенные без оплаты web-заказы — авто-отмена + возврат бонуса/скидки.
+  // Каждые 15 минут; без этого крона накопленное клиента сгорало молча.
+  const runStaleSweep = () =>
+    sweepStaleWebOrders()
+      .then(({ swept, reverted }) => {
+        if (swept > 0) console.log(`[StaleWebOrders] отменено ${swept}, компенсировано ${reverted}`);
+      })
+      .catch((err) => console.error("[StaleWebOrders] error:", err));
+
+  setTimeout(runStaleSweep, 100_000); // ~1.7 мин после старта
+  setInterval(runStaleSweep, 15 * 60 * 1000);
+
+  // U12: ретенция служебных данных — раз в сутки.
+  const runRetentionJob = () =>
+    runRetention()
+      .then((r) => {
+        console.log(
+          `[Retention] котировок удалено ${r.priceQuotesDeleted}, ` +
+          `email-токенов ${r.emailTokensDeleted}, ` +
+          `OrderEvent старше 18 мес: ${r.orderEventsOverdue} (решение владельца)`,
+        );
+      })
+      .catch((err) => console.error("[Retention] error:", err));
+
+  setTimeout(runRetentionJob, 120_000); // 2 мин после старта
+  setInterval(runRetentionJob, 24 * 60 * 60 * 1000);
+
   // Auto-buyout (+1) + GP-watcher (+3) — both kill-switched OFF by default.
   startAutoWorkers(bot);
   startPaymentOutboxWorker(bot);
@@ -529,4 +558,6 @@ export function startReviewReminderCron(bot: Telegraf): void {
   console.log("[StockAlert] Cron started ✅");
   console.log("[AwaitingReminder] Cron started ✅");
   console.log("[UnlockPush] Cron started ✅");
+  console.log("[StaleWebOrders] Cron started ✅");
+  console.log("[Retention] Cron started ✅");
 }

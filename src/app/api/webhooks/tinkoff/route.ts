@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { notificationStatus, paymentTransitionAllowed } from "@/lib/payment-notification";
 import { verifyTinkoffSignature } from "@/lib/tinkoff";
+import { revertWebOrderBenefits } from "@/lib/web-order-benefits";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +47,9 @@ export async function POST(req: NextRequest) {
     if (attempt.paymentId !== paymentId) return fail("payment id mismatch", 409);
     if (attempt.amountKopecks !== amountKopecks) return fail("amount mismatch", 409);
     if (!paymentTransitionAllowed(attempt.status, nextStatus)) return fail("invalid status transition", 409);
+
+    /** U3: заказ, которому нужно вернуть бонус/скидку после отказа банка. */
+    let benefitsToRevert: string | null = null;
 
     const eventHash = crypto.createHash("sha256").update(rawBody, "utf8").digest("hex");
     // Multiple legitimate partial refunds share PaymentId/Status/Amount. Their
@@ -104,6 +108,8 @@ export async function POST(req: NextRequest) {
         });
       } else if ((nextStatus === "REJECTED" || nextStatus === "CANCELED") && attempt.order.status !== "COMPLETED") {
         await tx.wbOrder.update({ where: { id: attempt.order.id }, data: { status: "REJECTED" } });
+        // U3: банк отказал — бонус и скидка возвращаются клиенту.
+        benefitsToRevert = attempt.order.id;
       }
 
       const event = await tx.orderEvent.create({
@@ -128,6 +134,18 @@ export async function POST(req: NextRequest) {
         });
       }
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    // U3: компенсация бонуса/скидки — отдельной транзакцией после того, как
+    // отказ платежа зафиксирован. Она идемпотентна, поэтому повторный webhook
+    // (T-Bank шлёт их повторно) второго возврата не создаст, а её падение не
+    // откатывает уже принятый статус платежа.
+    if (benefitsToRevert) {
+      try {
+        await revertWebOrderBenefits(benefitsToRevert, "BANK_REJECTED");
+      } catch (revertError) {
+        console.error("[Tinkoff webhook] benefits revert failed", { orderId: benefitsToRevert, revertError });
+      }
+    }
 
     // T-Bank treats this exact body as acknowledgement. It is returned only
     // after the payment transition and durable event/outbox commit.
