@@ -68,6 +68,30 @@ export function guideReleaseFingerprint(): string {
   return hash.digest("hex").slice(0, 16);
 }
 
+/**
+ * U10 (ultra-review), этап 1: строгая политика едет параллельно боевой в режиме
+ * `Report-Only`. Она ничего не блокирует — только присылает нарушения на
+ * `/api/observability/csp-report`, чтобы можно было увидеть, что именно
+ * сломается без `unsafe-inline`/`unsafe-eval`, ДО того как их убрать.
+ *
+ * Enforce включаем отдельным шагом, после чистого отчёта на iPhone, Android,
+ * Telegram WebView и VK WebView. Порядок шагов — docs/security.md, риск №26.
+ */
+const reportOnlyCsp = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  // Целевое состояние: ни unsafe-inline, ни unsafe-eval.
+  "script-src 'self' https://telegram.org",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data:",
+  "connect-src 'self' https://id.vk.com https://oauth.vk.com https://api.vk.com https://login.vk.com https://id.vk.ru https://oauth.vk.ru https://api.vk.ru https://login.vk.ru https://telegram.org",
+  "frame-src 'self' https://id.vk.com https://oauth.vk.com https://login.vk.com https://id.vk.ru https://oauth.vk.ru https://login.vk.ru https://oauth.telegram.org https://telegram.org",
+  "form-action 'self'",
+  "report-uri /api/observability/csp-report",
+].join("; ");
+
 const commonHeaders = [
   { key: "Content-Security-Policy", value: `${commonCsp}; frame-ancestors 'self'` },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
@@ -76,6 +100,7 @@ const commonHeaders = [
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), browsing-topics=()" },
   { key: "X-DNS-Prefetch-Control", value: "off" },
   { key: "X-RobloxBank-Guide-Release", value: guideReleaseFingerprint() },
+  { key: "Content-Security-Policy-Report-Only", value: reportOnlyCsp },
 ];
 
 export const securityHeaders: NonNullable<NextConfig["headers"]> = async () => [

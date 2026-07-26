@@ -123,7 +123,7 @@ export default async function DashboardPage() {
   const userId = (session.user as { id?: string }).id;
   if (!userId) redirect("/login");
 
-  const [user, legacyOrders, canonicalOrders] = await Promise.all([
+  const [user, canonicalOrders] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -140,19 +140,6 @@ export default async function DashboardPage() {
           orderBy: { verifiedAt: "asc" },
           select: { provider: true, verifiedAt: true },
         },
-      },
-    }),
-    prisma.order.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-      select: {
-        id: true,
-        createdAt: true,
-        status: true,
-        amountRobux: true,
-        customerRobloxUser: true,
-        amountRUB: true,
       },
     }),
     prisma.wbOrder.findMany({
@@ -185,21 +172,9 @@ export default async function DashboardPage() {
   ]);
   if (!user) redirect("/login");
 
+  // U13: legacy-слой `Order` удалён (в проде 0 строк, роуты всегда отвечали
+  // 401 из-за отсутствующих секретов). ЛК показывает только канонические заказы.
   const orders: DashboardOrder[] = [
-    ...legacyOrders.map((order) => ({
-      id: order.id,
-      displayId: order.id.slice(-7).toUpperCase(),
-      publicOrderId: null,
-      kind: "legacy" as const,
-      source: "SITE" as const,
-      createdAt: order.createdAt,
-      status: order.status,
-      amountRobux: order.amountRobux,
-      customer: order.customerRobloxUser,
-      amountKopecks: Math.round(order.amountRUB * 100),
-      receiptEmail: null,
-      payment: null,
-    })),
     ...canonicalOrders.map((order) => ({
       id: order.id,
       displayId: order.publicOrderId ?? order.wbCode,

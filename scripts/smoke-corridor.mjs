@@ -38,6 +38,12 @@ const baseArg = process.argv.find((a) => a.startsWith("--base="));
 const BASE = (baseArg ? baseArg.split("=")[1] : "https://robloxbank.ru").replace(/\/$/, "");
 const RESERVE = process.argv.includes("--reserve");
 const ALERT = process.argv.includes("--alert");
+/**
+ * U5: лёгкий режим для крона раз в 15 минут — только страница гейта и сверка
+ * release-фингерпринтов Web ↔ Guide. Полный смоук тянет ~30 чанков и для
+ * постоянного мониторинга избыточен.
+ */
+const DRIFT_ONLY = process.argv.includes("--drift-only");
 
 /** Хосты, которые vendored VK ID SDK использует в рантайме (риск №16). */
 const REQUIRED_VK_HOSTS = ["https://id.vk.ru", "https://oauth.vk.ru", "https://api.vk.ru"];
@@ -110,6 +116,7 @@ try {
 }
 
 // ── 2. Все чанки гейта (префикс /_next-guide, НЕ голый /_next!) ────────────
+if (!DRIFT_ONLY) {
 console.log("\n2) JS/CSS-чанки гейта (/_next-guide)");
 const chunkSet = new Set(
   [...gateHtml.matchAll(/"(\/_next-guide\/_next\/static\/[^"\\]+)"/g)].map((m) => m[1])
@@ -120,9 +127,32 @@ for (const chunk of chunkSet) {
 }
 
 // ── 3. Self-hosted vendor SDK ──────────────────────────────────────────────
+//
+// U15: раньше цикл шёл по всему `public/vendor` и рапортовал ✅ на
+// `vkid-sdk-2.6.5.js`, который приложение не подключает (VKAuthButton
+// импортирует npm-пакет @vkid/sdk). Ложный зелёный. Теперь проверяем только
+// реально используемые файлы + присутствие бандла VK ID в статике Guide.
 console.log("\n3) Vendored SDK (public/vendor)");
-for (const f of readdirSync(resolve(__dirname, "../public/vendor")).filter((f) => f.endsWith(".js"))) {
-  await expectStatus(`${BASE}/vendor/${f}`, 200, `/vendor/${f}`);
+const USED_VENDOR_FILES = ["telegram-web-app.js"];
+const vendorFiles = readdirSync(resolve(__dirname, "../public/vendor")).filter((f) => f.endsWith(".js"));
+for (const f of USED_VENDOR_FILES) {
+  if (!vendorFiles.includes(f)) fail(`/vendor/${f}`, "файл пропал из public/vendor");
+  else await expectStatus(`${BASE}/vendor/${f}`, 200, `/vendor/${f}`);
+}
+const unusedVendor = vendorFiles.filter((f) => !USED_VENDOR_FILES.includes(f));
+if (unusedVendor.length > 0) {
+  fail("public/vendor", `неиспользуемые файлы: ${unusedVendor.join(", ")} — удалить или подключить`);
+} else {
+  ok("в public/vendor нет неиспользуемых файлов");
+}
+
+// VK ID SDK приезжает из npm внутрь чанков Guide — проверяем, что бандл
+// действительно попал в сборку гейта, а не только «файл лежит рядом».
+if (gateHtml.includes("VKIDSDK") || gateHtml.includes("vkid") || gateHtml.includes("id.vk.ru")) {
+  ok("бандл VK ID присутствует в сборке гейта");
+} else {
+  fail("VK ID в сборке гейта", "в HTML/чанках гейта не найдено следов VK ID SDK");
+}
 }
 
 // ── 4. CSP гейта покрывает vk.ru-хосты SDK ─────────────────────────────────
@@ -141,6 +171,7 @@ if (gateRes) {
 }
 
 // ── 5. API коридора: чтение кода ───────────────────────────────────────────
+if (!DRIFT_ONLY) {
 console.log("\n5) API коридора");
 try {
   const res = await fetchWithTimeout(`${BASE}/api/wb-code?code=TESTDEV`);
@@ -152,6 +183,7 @@ try {
   }
 } catch (e) {
   fail("/api/wb-code GET", e.message);
+}
 }
 
 // ── 6. Опциональный живой резерв (пишет в прод-БД тест-кодом) ──────────────

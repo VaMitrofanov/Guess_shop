@@ -197,7 +197,6 @@ export async function linkOrMergeVerifiedIdentity(targetUserId: string, input: V
     });
 
     await Promise.all([
-      tx.order.updateMany({ where: { userId: source.id }, data: { userId: target.id } }),
       tx.wbCode.updateMany({ where: { userId: source.id }, data: { userId: target.id } }),
       tx.wbOrder.updateMany({ where: { userId: source.id }, data: { userId: target.id } }),
       tx.directIntent.updateMany({ where: { userId: source.id }, data: { userId: target.id } }),
