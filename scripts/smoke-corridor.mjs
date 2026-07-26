@@ -122,8 +122,12 @@ const chunkSet = new Set(
   [...gateHtml.matchAll(/"(\/_next-guide\/_next\/static\/[^"\\]+)"/g)].map((m) => m[1])
 );
 if (chunkSet.size === 0 && gateHtml) fail("чанки", "в HTML не найдено ни одного /_next-guide-ассета");
+// Заодно копим тела чанков: ниже по ним проверяется, что бандл VK ID реально
+// попал в сборку гейта (он подключается ленивым import, поэтому в HTML его нет).
+let chunkBodies = "";
 for (const chunk of chunkSet) {
-  await expectStatus(`${BASE}${chunk}`, 200, chunk);
+  const res = await expectStatus(`${BASE}${chunk}`, 200, chunk);
+  if (res && chunk.endsWith(".js")) chunkBodies += await res.text().catch(() => "");
 }
 
 // ── 3. Self-hosted vendor SDK ──────────────────────────────────────────────
@@ -146,12 +150,13 @@ if (unusedVendor.length > 0) {
   ok("в public/vendor нет неиспользуемых файлов");
 }
 
-// VK ID SDK приезжает из npm внутрь чанков Guide — проверяем, что бандл
-// действительно попал в сборку гейта, а не только «файл лежит рядом».
-if (gateHtml.includes("VKIDSDK") || gateHtml.includes("vkid") || gateHtml.includes("id.vk.ru")) {
-  ok("бандл VK ID присутствует в сборке гейта");
+// VK ID SDK приезжает из npm и подключается ленивым import — в HTML его нет,
+// он лежит внутри чанков гейта. Проверяем именно их: если бандл выпадет из
+// сборки, VK-вход на гейте сломается так же тихо, как в инциденте 14.07.
+if (/vk\.ru|VKIDSDK|@vkid/.test(chunkBodies)) {
+  ok("бандл VK ID присутствует в чанках гейта");
 } else {
-  fail("VK ID в сборке гейта", "в HTML/чанках гейта не найдено следов VK ID SDK");
+  fail("VK ID в сборке гейта", "ни в одном чанке гейта не найдено следов VK ID SDK");
 }
 }
 

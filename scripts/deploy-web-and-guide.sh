@@ -47,15 +47,17 @@ done
 
 api() { curl -sS -H "Authorization: Bearer $COOLIFY_TOKEN" "$@"; }
 
+# Прогресс печатается в stderr: stdout функции — это ТОЛЬКО uuid деплоя,
+# который забирает вызывающий через $(...).
 trigger() {
   local uuid="$1" name="$2"
-  echo "→ деплой $name ($uuid)"
+  echo "→ деплой $name ($uuid)" >&2
   local response
   response=$(api -X POST "$COOLIFY_URL/api/v1/deploy?uuid=$uuid&force=true")
   local deployment
   deployment=$(printf '%s' "$response" | python3 -c \
     'import json,sys; d=json.load(sys.stdin); print(d["deployments"][0]["deployment_uuid"])')
-  echo "  deployment: $deployment"
+  echo "  deployment: $deployment" >&2
   printf '%s' "$deployment"
 }
 
