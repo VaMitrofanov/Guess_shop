@@ -88,6 +88,24 @@ export async function createPriceQuote(requestedRobux: number, userId?: string |
   const calculated = calculatePriceQuote(requestedRobux, customer, now);
   const expiresAt = new Date(now.getTime() + PRICE_QUOTE_TTL_MS);
 
+  // U12: анонимную котировку невозможно потребить — `validateCheckoutQuote`
+  // требует совпадения `quote.userId` с текущим пользователем. Раньше такие
+  // строки всё равно писались в БД, и неаутентифицированный POST безлимитно
+  // наливал `PriceQuote` в прод (ретенции для них не было). Теперь до логина
+  // отдаём расчёт без записи.
+  if (!userId) {
+    return {
+      quote: {
+        id: null,
+        expiresAt,
+        userId: null,
+        status: PriceQuoteStatus.ACTIVE,
+      },
+      calculated,
+      persisted: false as const,
+    };
+  }
+
   const quote = await prisma.priceQuote.create({
     data: {
       userId: userId ?? null,
@@ -103,5 +121,5 @@ export async function createPriceQuote(requestedRobux: number, userId?: string |
     },
   });
 
-  return { quote, calculated };
+  return { quote, calculated, persisted: true as const };
 }

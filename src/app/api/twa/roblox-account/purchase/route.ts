@@ -34,17 +34,18 @@ async function findExistingOrders(gamepassIds: (string | number)[]): Promise<Rec
       where: {
         isTest: false,
         status: { notIn: ["REJECTED"] },
-        OR: ids.map((id) => ({ gamepassUrl: { contains: `/${id}` } })),
+        // U18: точное сравнение по индексируемому полю вместо
+        // `gamepassUrl contains` (полное сканирование + постфильтр).
+        gamepassId: { in: ids },
       },
       orderBy: { createdAt: "desc" },
-      select: { wbCode: true, status: true, orderSource: true, createdAt: true, gamepassUrl: true, amount: true },
+      select: { wbCode: true, status: true, orderSource: true, createdAt: true, gamepassId: true, amount: true },
     });
     const map: Record<string, ExistingOrderRef> = {};
     for (const o of orders) {
-      // `contains` может зацепить более длинный id — сверяем точным парсингом URL.
-      const m = (o.gamepassUrl ?? "").match(/game-pass(?:es)?\/(\d+)/);
-      if (!m || !ids.includes(m[1]) || map[m[1]]) continue;
-      map[m[1]] = {
+      const gpId = o.gamepassId as string | null;
+      if (!gpId || map[gpId]) continue;
+      map[gpId] = {
         wbCode: o.wbCode, status: o.status, orderSource: o.orderSource, createdAt: o.createdAt,
         expectedPrice: expectedGamepassPrice(o.amount),
       };
@@ -242,14 +243,11 @@ export async function POST(req: NextRequest) {
           isDirectOrder: true,
           paidAt: null,
           status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING", "PENDING", "IN_PROGRESS", "ERROR"] },
-          gamepassUrl: { contains: `/${gpIdRaw}` },
+          gamepassId: gpIdRaw,
         },
-        select: { wbCode: true, gamepassUrl: true },
+        select: { wbCode: true },
       });
-      // `contains` может зацепить более длинный id — сверяем точным парсингом.
-      const unpaid = candidates.find(
-        (o: any) => (o.gamepassUrl ?? "").match(/game-pass(?:es)?\/(\d+)/)?.[1] === gpIdRaw,
-      );
+      const unpaid = candidates[0];
       if (unpaid)
         return NextResponse.json(
           { error: `💳 Геймпасс привязан к неоплаченному прямому заказу ${unpaid.wbCode} — сначала подтверди оплату` },
@@ -263,13 +261,11 @@ export async function POST(req: NextRequest) {
         where: {
           isTest: false,
           status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "AWAITING_PAYMENT", "PAYMENT_PENDING"] },
-          gamepassUrl: { contains: `/${gpIdRaw}` },
+          gamepassId: gpIdRaw,
         },
-        select: { id: true, wbCode: true, amount: true, gamepassUrl: true },
+        select: { id: true, wbCode: true, amount: true },
       });
-      const linked = linkedCandidates.find(
-        (o: any) => (o.gamepassUrl ?? "").match(/game-pass(?:es)?\/(\d+)/)?.[1] === gpIdRaw,
-      );
+      const linked = linkedCandidates[0];
       if (linked) {
         const { ok: priceOk, expected } = checkGamepassPrice(
           linked.amount,

@@ -32,6 +32,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(
       {
+        // U12: до логина котировка не сохраняется — оформить заказ по ней
+        // всё равно нельзя, а строки в проде копились без ретенции.
         quoteId: quote.id,
         policyVersion: calculated.policyVersion,
         requestedRobux: calculated.requestedRobux,

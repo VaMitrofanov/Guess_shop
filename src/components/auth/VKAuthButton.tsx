@@ -6,6 +6,8 @@ import { VK_AUTH_ENABLED } from "@/lib/vk-auth-availability";
 
 // VK community ID for order-mode redirect
 const VK_CLUB_HREF = "https://vk.me/club237309399";
+/** Поддержка — куда вести клиента с конфликтом кода (U8). */
+const SUPPORT_URL = "https://t.me/RobloxBank_PA";
 let vkSdkInitialized = false;
 
 interface VKAuthButtonProps {
@@ -96,6 +98,22 @@ export default function VKAuthButton({
       if (!result?.ok) {
         setError(result?.error || "Ошибка авторизации на сервере");
         return;
+      }
+
+      // U8: код мог оказаться уже активированным другим аккаунтом. Раньше в
+      // этом случае вход считался успешным молча: пользователь уходил в
+      // коридор по ЧУЖОМУ заказу. Сервер помечает такую сессию флагом.
+      if (resolvedWbCode) {
+        const session = await fetch("/api/auth/session", { cache: "no-store" })
+          .then((r) => r.json())
+          .catch(() => null);
+        if (session?.user?.wb_code_conflict) {
+          setError(
+            "Этот код уже активирован в другом аккаунте. Напишите в поддержку — разберёмся: " +
+            SUPPORT_URL,
+          );
+          return;
+        }
       }
 
       if (isLoginMode) {

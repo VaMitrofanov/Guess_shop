@@ -42,7 +42,13 @@ export async function GET(req: NextRequest) {
   }
 
   const url = new URL(req.url);
-  const days = Number(url.searchParams.get("days") ?? "0");
+  // U11: тем же чеком проходим по остальным роутам с периодом — мусорный
+  // параметр обязан давать 400, а не падение или молчаливый «весь период».
+  const rawDays = url.searchParams.get("days") ?? "0";
+  if (!/^\d{1,4}$/.test(rawDays)) {
+    return NextResponse.json({ error: "Invalid days" }, { status: 400 });
+  }
+  const days = Number(rawDays);
   const since = Number.isFinite(days) && days > 0
     ? new Date(Date.now() - days * 86_400_000)
     : null;

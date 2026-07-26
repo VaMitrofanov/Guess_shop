@@ -62,7 +62,8 @@ export async function GET(req: NextRequest) {
   if (digits.length >= 4) {
     clauses.push({ user: { tgId: { contains: digits } } });
     clauses.push({ user: { vkId: { contains: digits } } });
-    clauses.push({ gamepassUrl: { contains: digits } });
+    // U18: цифровой запрос ищем по индексируемому gamepassId.
+    clauses.push({ gamepassId: digits });
   }
 
   const ordersPromise = prisma.wbOrder.findMany({

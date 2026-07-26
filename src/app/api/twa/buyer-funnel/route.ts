@@ -24,6 +24,16 @@ function fmtWeekday(d: Date): string {
   return `${wd} ${dd}.${mm}`;
 }
 
+/** U11: строгая форма даты + реальная валидность (31 февраля не пройдёт). */
+export function isValidDateParam(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(`${value}T00:00:00+03:00`);
+  if (!Number.isFinite(d.getTime())) return false;
+  const [y, m, day] = value.split("-").map(Number);
+  const check = new Date(Date.UTC(y, m - 1, day));
+  return check.getUTCFullYear() === y && check.getUTCMonth() === m - 1 && check.getUTCDate() === day;
+}
+
 function computeRange(range: string, dateStr: string): { from: Date; to: Date; type: string } {
   const d = new Date(dateStr + "T00:00:00+03:00");
   const y = d.getFullYear(), m = d.getMonth(), day = d.getDate();
@@ -62,6 +72,13 @@ export async function GET(req: NextRequest) {
 
   if (!["day", "week", "half-month", "month"].includes(range))
     return NextResponse.json({ error: "Invalid range" }, { status: 400 });
+
+  // U11: мусорный `?date=` давал `Invalid Date`, и `from.toISOString()` ниже
+  // бросал RangeError без обработчика — оператор видел 500 вместо «неверные
+  // параметры». SQL-инъекции здесь не было (падало до интерполяции), но 400
+  // подменялось 500.
+  if (!isValidDateParam(dateStr))
+    return NextResponse.json({ error: "Invalid date (ожидается YYYY-MM-DD)" }, { status: 400 });
 
   const { from, to, type } = computeRange(range, dateStr);
   const fromISO = from.toISOString();

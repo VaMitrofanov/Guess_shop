@@ -165,25 +165,54 @@ export async function initCanonicalTinkoffPayment(input: CanonicalPaymentInit) {
   };
 }
 
+/**
+ * U7 (ultra-review): раньше сюда передавали **остаток** платежа, а признак
+ * «полный возврат» считался как `amount < remaining`. Возврат остатка после
+ * частичного давал `600 === 600` → `partial = false` → `Receipt` не
+ * передавался, и банк формировал закрывающий чек на **всю** исходную сумму
+ * (1000 ₽ при фактически возвращённых 600 ₽, итого фискально 1400 при
+ * реальных 1000).
+ *
+ * Теперь передаётся полная сумма платежа и сумма уже возвращённого. «Без
+ * чека» — только когда возврат первый и сразу полный: именно в этом случае
+ * закрывающий чек корректно формирует банк.
+ */
+export function refundNeedsReceipt(input: {
+  amountKopecks: number;
+  totalAmountKopecks: number;
+  alreadyRefundedKopecks: number;
+}): boolean {
+  const firstAndFull =
+    input.alreadyRefundedKopecks === 0 && input.amountKopecks === input.totalAmountKopecks;
+  return !firstAndFull;
+}
+
 export async function cancelCanonicalTinkoffPayment(input: {
   paymentId: string;
   amountKopecks: number;
+  /** Полная сумма исходного платежа (НЕ остаток). */
   totalAmountKopecks: number;
+  /** Сколько по этому платежу уже возвращено ранее. */
+  alreadyRefundedKopecks: number;
   receiptEmail: string;
 }) {
   const terminalKey = getRequiredEnv("TINKOFF_TERMINAL_KEY");
   const secretKey = getRequiredEnv("TINKOFF_SECRET_KEY");
-  if (!Number.isSafeInteger(input.amountKopecks) || input.amountKopecks <= 0 || input.amountKopecks > input.totalAmountKopecks) {
+  if (
+    !Number.isSafeInteger(input.amountKopecks) ||
+    input.amountKopecks <= 0 ||
+    input.amountKopecks + input.alreadyRefundedKopecks > input.totalAmountKopecks
+  ) {
     throw new Error("[Tinkoff] Invalid refund amount");
   }
-  const partial = input.amountKopecks < input.totalAmountKopecks;
+  const needsReceipt = refundNeedsReceipt(input);
   const params: Record<string, unknown> = {
     TerminalKey: terminalKey,
     PaymentId: input.paymentId,
     Amount: input.amountKopecks,
-    // T-Bank forms a full-refund receipt automatically. For a partial refund
-    // the exact returned position is mandatory when online KKT is connected.
-    ...(partial ? { Receipt: buildCanonicalReceipt(input.receiptEmail, input.amountKopecks) } : {}),
+    // T-Bank сам формирует закрывающий чек только для первого и сразу полного
+    // возврата. Во всех остальных случаях чек нужен ровно на возвращаемую часть.
+    ...(needsReceipt ? { Receipt: buildCanonicalReceipt(input.receiptEmail, input.amountKopecks) } : {}),
   };
   const response = await fetch("https://securepay.tinkoff.ru/v2/Cancel", {
     method: "POST",

@@ -304,7 +304,8 @@ export async function GET(req: NextRequest) {
     if (isNumericId) {
       orClauses.push({ user: { tgId: { contains: qDigits } } });
       orClauses.push({ user: { vkId: { contains: qDigits } } });
-      orClauses.push({ gamepassUrl: { contains: qDigits } });
+      // U18: цифровой запрос — это ID геймпасса, ищем по индексу.
+      orClauses.push({ gamepassId: qDigits });
     }
     searchWhere = { OR: orClauses };
   }
@@ -620,16 +621,14 @@ export async function POST(req: NextRequest) {
         where: {
           isTest: false,
           status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] },
-          gamepassUrl: { contains: `/${gpMatch[1]}` },
+          // U18: точное сравнение по индексу вместо `contains` + постфильтра.
+          gamepassId: gpMatch[1],
         },
         orderBy: { createdAt: "desc" },
         take: 5,
-        select: { wbCode: true, status: true, orderSource: true, createdAt: true, gamepassUrl: true },
+        select: { wbCode: true, status: true, orderSource: true, createdAt: true },
       });
-      // `contains` может зацепить более длинный id — сверяем точным парсингом.
-      const existing = candidates.find(
-        (o: any) => (o.gamepassUrl ?? "").match(/game-pass(?:es)?\/(\d+)/)?.[1] === gpMatch[1],
-      );
+      const existing = candidates[0];
       if (existing) {
         return NextResponse.json(
           {
@@ -962,15 +961,15 @@ export async function POST(req: NextRequest) {
           where: {
             isTest: false,
             status: "COMPLETED",
-            OR: gpIds.map((id) => ({ gamepassUrl: { contains: `/${id}` } })),
+            gamepassId: { in: gpIds },
           },
           orderBy: { updatedAt: "desc" },
-          select: { wbCode: true, gamepassUrl: true },
+          select: { wbCode: true, gamepassId: true },
         })
       : [];
     const reusedBy = new Map<string, string>();
     for (const c of completed) {
-      const id = gpIdOf(c.gamepassUrl);
+      const id = c.gamepassId as string | null;
       if (id && !reusedBy.has(id)) reusedBy.set(id, c.wbCode);
     }
 

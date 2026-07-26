@@ -67,13 +67,17 @@ export async function POST(req: NextRequest) {
     const existing = prepared.existing;
     return NextResponse.json({ success: existing.status === "SUBMITTED" || existing.status === "CONFIRMED", refund: existing, alreadyExists: true });
   }
-  const { orderId, receiptEmail, attempt, refund, amountKopecks, remaining } = prepared;
+  const { orderId, receiptEmail, attempt, refund, amountKopecks } = prepared;
 
   try {
     const provider = await cancelCanonicalTinkoffPayment({
       paymentId: attempt.paymentId,
       amountKopecks,
-      totalAmountKopecks: remaining,
+      // U7: полная сумма платежа + уже возвращённое, а НЕ остаток. Иначе
+      // возврат остатка классифицировался как «первый и полный» и уходил без
+      // чека — банк выписывал закрывающий чек на всю исходную сумму.
+      totalAmountKopecks: attempt.amountKopecks,
+      alreadyRefundedKopecks: attempt.refundedAmountKopecks ?? 0,
       receiptEmail,
     });
     const responseHash = crypto.createHash("sha256").update(JSON.stringify(provider.raw)).digest("hex");

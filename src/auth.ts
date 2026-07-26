@@ -188,19 +188,55 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           // Link WB code if passed in credentials (works for both regular and guide mode
           // after the GD prefix has been stripped above)
           let wbCodeRecord: any = null;
+          // U8: раньше P2025 («код уже CLAIMED») ловился, логировался — и
+          // выполнение шло дальше: `provisionalOrder` подхватывал ЧУЖОЙ заказ,
+          // а `wb_code` всё равно клался в сессию. Пользователь уходил в
+          // коридор с ощущением успешной активации чужого кода. Теперь
+          // различаем «код наш» и «код занят другим аккаунтом».
+          let wbCodeClaimedByOther = false;
           if (wbCode && wbCode.length === 7) {
             try {
               wbCodeRecord = await (prisma as any).wbCode.findUnique({ where: { code: wbCode } });
               if (wbCodeRecord) {
-                await (prisma as any).wbCode.update({
-                  where: { code: wbCode, status: { not: "CLAIMED" } },
-                  data: { userId: user.id, status: "CLAIMED", isUsed: false },
-                });
-                console.log(`[auth] Linked user ${user.id} to WbCode ${wbCode} via credentials (guideMode=${isGuideMode})`);
+                if (wbCodeRecord.status === "CLAIMED" && wbCodeRecord.userId && wbCodeRecord.userId !== user.id) {
+                  wbCodeClaimedByOther = true;
+                } else {
+                  await (prisma as any).wbCode.update({
+                    where: { code: wbCode, status: { not: "CLAIMED" } },
+                    data: { userId: user.id, status: "CLAIMED", isUsed: false },
+                  });
+                  console.log(`[auth] Linked user ${user.id} to WbCode ${wbCode} via credentials (guideMode=${isGuideMode})`);
+                }
               }
-            } catch (linkErr) {
+            } catch (linkErr: any) {
+              // P2025 = запись под условие не найдена, то есть код перехватили
+              // между чтением и записью. Это тот же исход «занят другим».
+              if (linkErr?.code === "P2025") {
+                wbCodeClaimedByOther = true;
+              }
               console.error("[auth] Failed to link WbCode during authorize:", linkErr);
             }
+          }
+
+          if (wbCodeClaimedByOther) {
+            // Сигнал админам: чужая активация кода — это ещё и индикатор
+            // ПВЗ-фрода (риск №15 в docs/security.md).
+            console.warn(`[auth] wb-code ${wbCode} already claimed by another account — login blocked for ${user.id}`);
+            try {
+              const tgToken = process.env.TG_TOKEN;
+              const chatIds = (process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "")
+                .split(",").map((id) => id.trim()).filter(Boolean);
+              await Promise.allSettled(chatIds.map((chatId) =>
+                fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    chat_id: chatId,
+                    text: `⚠️ Код ${wbCode} пытались активировать вторым аккаунтом (VK-вход). Возможен вскрытый на ПВЗ код — проверьте.`,
+                  }),
+                })
+              ));
+            } catch { /* уведомление не должно ломать вход */ }
           }
 
           // ── Provisional order + admin card (VK code activation) ─────────
@@ -208,7 +244,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           // immediately. The VK bot's handleRefActivation checks for existing
           // orders and skips creation if one already exists.
           let provisionalOrder: any = null;
-          if (wbCode && wbCode.length === 7 && wbCodeRecord) {
+          if (wbCode && wbCode.length === 7 && wbCodeRecord && !wbCodeClaimedByOther) {
             try {
               const existing = await prisma.wbOrder.findUnique({ where: { wbCode } });
               if (!existing) {
@@ -293,7 +329,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             image: user.image,
             role: user.role,
             sessionVersion: user.sessionVersion,
-            wb_code: wbCode && wbCode.length === 7 ? wbCode : null,
+            // U8: занятый чужим аккаунтом код в сессию не кладём — иначе
+            // клиент уходит в коридор по чужому заказу.
+            wb_code: wbCode && wbCode.length === 7 && !wbCodeClaimedByOther ? wbCode : null,
+            wb_code_conflict: wbCodeClaimedByOther || undefined,
             is_guide_mode: isGuideMode,
           };
         } catch (dbErr) {
@@ -318,6 +357,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.balance = (user as any).balance;
         token.auth_time = Math.floor(Date.now() / 1000);
         token.wb_code = (user as any).wb_code ?? null;
+        // U8: код занят другим аккаунтом — коридор покажет экран поддержки,
+        // а не «успешную активацию».
+        token.wb_code_conflict = (user as any).wb_code_conflict ?? false;
         token.is_guide_mode = (user as any).is_guide_mode ?? false;
         token.sessionVersion = (user as any).sessionVersion ?? 0;
         token.invalidated = false;
@@ -350,6 +392,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         (session.user as any).balance = token.balance;
         (session.user as any).auth_time = token.auth_time;
         (session.user as any).wb_code = token.wb_code ?? null;
+        (session.user as any).wb_code_conflict = token.wb_code_conflict ?? false;
         (session.user as any).is_guide_mode = token.is_guide_mode ?? false;
       }
       return session;
