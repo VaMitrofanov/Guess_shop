@@ -5,9 +5,17 @@ import path from "node:path";
 import { THEME_BOOT_SCRIPT } from "./src/lib/theme-boot";
 
 /**
- * D3: boot-скрипт темы — единственный inline-скрипт, который нам нужен, и он
- * разрешён по хешу, а не через `unsafe-inline`. Хеш считается из той же
+ * D3: хеш boot-скрипта темы для строгой политики. Хеш считается из той же
  * константы, что вставляется в разметку, поэтому разъехаться они не могут.
+ *
+ * ⚠️ Хеш живёт **только** в Report-Only. В боевой политике его быть не должно,
+ * пока там есть `'unsafe-inline'`: по спецификации CSP наличие hash- или
+ * nonce-источника **отменяет** `'unsafe-inline'` в той же директиве. 28.07 хеш
+ * добавили в боевую политику — и она мгновенно заблокировала все inline-скрипты
+ * Next.js: гидратация не запускалась вообще, клиентские страницы (`/login`,
+ * `/checkout`) отдавали пустой экран. Убирать `'unsafe-inline'` можно только
+ * вместе с переходом на nonce (риск №26, docs/security.md).
+ * Контракт-тест: src/__tests__/theme-boot.test.ts.
  */
 export const THEME_BOOT_CSP_HASH = `'sha256-${createHash("sha256").update(THEME_BOOT_SCRIPT, "utf8").digest("base64")}'`;
 
@@ -24,7 +32,10 @@ const commonCsp = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
-  `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${THEME_BOOT_CSP_HASH} https://telegram.org`,
+  // Никаких hash/nonce в этой строке, пока в ней есть 'unsafe-inline':
+  // они его отменяют, и Next.js остаётся без своих inline-скриптов.
+  // Boot-скрипт темы здесь разрешён тем же 'unsafe-inline', что и остальные.
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://telegram.org",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",

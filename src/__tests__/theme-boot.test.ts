@@ -61,26 +61,53 @@ describe("boot-скрипт темы", () => {
 });
 
 describe("CSP", () => {
+  /** Директива `script-src` из боевой и из Report-Only политики. */
+  async function scriptSrc(): Promise<{ enforced: string; reportOnly: string }> {
+    const headers = await securityHeaders();
+    const common = headers[0].headers;
+    const pick = (key: string) => common.find((h) => h.key === key)!.value.match(/script-src[^;]*/)![0];
+    return { enforced: pick("Content-Security-Policy"), reportOnly: pick("Content-Security-Policy-Report-Only") };
+  }
+
   it("хеш посчитан именно от вставляемого скрипта", () => {
     const expected = `'sha256-${createHash("sha256").update(THEME_BOOT_SCRIPT, "utf8").digest("base64")}'`;
     expect(THEME_BOOT_CSP_HASH).toBe(expected);
   });
 
-  it("хеш присутствует и в боевой политике, и в Report-Only", async () => {
-    const headers = await securityHeaders();
-    const common = headers[0].headers;
-    const enforced = common.find((h) => h.key === "Content-Security-Policy")!.value;
-    const reportOnly = common.find((h) => h.key === "Content-Security-Policy-Report-Only")!.value;
+  it("хеш живёт в Report-Only и не попадает в боевую политику", async () => {
+    const { enforced, reportOnly } = await scriptSrc();
 
-    expect(enforced).toContain(THEME_BOOT_CSP_HASH);
     expect(reportOnly).toContain(THEME_BOOT_CSP_HASH);
+    expect(enforced).not.toContain(THEME_BOOT_CSP_HASH);
 
     // Строгая политика не должна тихо обзавестись послаблениями в script-src.
     // `style-src 'unsafe-inline'` пока остаётся осознанно — это отдельный шаг
     // (риск №26), поэтому проверяем именно директиву скриптов.
-    const strictScriptSrc = reportOnly.match(/script-src[^;]*/)![0];
-    expect(strictScriptSrc).not.toContain("unsafe-inline");
-    expect(strictScriptSrc).not.toContain("unsafe-eval");
+    expect(reportOnly).not.toContain("unsafe-inline");
+    expect(reportOnly).not.toContain("unsafe-eval");
+  });
+
+  /**
+   * Регресс 28.07: хеш добавили в боевую политику рядом с `'unsafe-inline'`.
+   * По спецификации CSP hash- или nonce-источник отменяет `'unsafe-inline'` в
+   * той же директиве, поэтому браузер заблокировал все inline-скрипты Next.js:
+   * гидратация не запускалась, `/login` и `/checkout` отдавали пустой экран.
+   * Пока в боевой политике есть `'unsafe-inline'`, hash/nonce в ней запрещены.
+   */
+  it("боевая политика не смешивает 'unsafe-inline' с hash или nonce", async () => {
+    const { enforced } = await scriptSrc();
+    if (!enforced.includes("'unsafe-inline'")) return;
+    expect(enforced).not.toMatch(/'sha(256|384|512)-/);
+    expect(enforced).not.toMatch(/'nonce-/);
+  });
+
+  it("правило TWA наследует ту же директиву скриптов", async () => {
+    const headers = await securityHeaders();
+    const twa = headers.find((rule) => rule.source.startsWith("/twa"))!;
+    const twaCsp = twa.headers.find((h) => h.key === "Content-Security-Policy")!.value;
+    const twaScriptSrc = twaCsp.match(/script-src[^;]*/)![0];
+    const { enforced } = await scriptSrc();
+    expect(twaScriptSrc).toBe(enforced);
   });
 
   it("layout вставляет скрипт из общего модуля, а не свой литерал", () => {
