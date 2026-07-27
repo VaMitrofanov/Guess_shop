@@ -1,9 +1,17 @@
 # RobloxBank.ru: ультра-ревью и master plan эквайринга
 
 **Статус:** реализация идёт. Рабочий терминал активирован, production checkout развёрнут в
-owner-only allowlist, но первый боевой E2E заблокирован недействующей парой credentials:
-Т‑Банк отклоняет `Init` до выдачи `PaymentId`. Актуальная последовательность работ:
+owner-only allowlist. Первый боевой payment/refund E2E успешно завершён, но публичный rollout
+ещё не выполнен: раскрытый Password рабочего terminal должен быть перевыпущен и принят новым
+контрольным `Init`. Актуальная последовательность работ:
 [site-launch-implementation-plan.md](site-launch-implementation-plan.md).
+
+**28.07.2026, launch preparation:** storefront остаётся публичным и healthy (`15/15`),
+master включён, но runtime mode намеренно сохранён `allowlist`; guest status = `limited`.
+Дата production `TINKOFF_SECRET_KEY` не менялась после раскрытия Password, поэтому перевод
+`SITE_ACQUIRING_MODE=on` и публикация анонса заблокированы до ротации. Подготовлен отдельный
+fail-closed launch-скрипт: preview безопасен по умолчанию, а `--publish` требует публичный
+`mode=on` и не отправляет массовые личные сообщения.
 
 **2026-07-18, DEMO-терминал: Init + CONFIRMED ✅**
 

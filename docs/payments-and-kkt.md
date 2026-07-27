@@ -72,6 +72,12 @@
   заказ в `REJECTED`, исключая ошибочный выкуп после возврата. Временный полный JSON-аудит
   после E2E выключен; сам acquiring остаётся owner-only. Чеки оплаты/возврата ещё нужно
   визуально сверить в кабинете Т-Банка/ОФД, а раскрытый Password — перевыпустить.
+- **Launch preflight 28.07.2026:** Web healthy, публичная витрина проходит smoke `15/15`,
+  production master остаётся `true`, runtime mode — `allowlist`, guest status — `limited`.
+  Метка обновления `TINKOFF_SECRET_KEY` не изменилась после раскрытия Password, поэтому
+  публичный `mode=on` не применялся. Безопасный порядок: перевыпустить Password → обновить
+  production secret storage → redeploy → один минимальный owner `Init`/payment acceptance →
+  `mode=on` → повторный smoke → только затем публичный анонс.
 - Desktop `/admin` теперь читает тот же `WbOrder`/payment/outbox-контур: dashboard показывает
   открытые платежи, ошибки, `SUBMIT_UNKNOWN` и dead-letter, досье — сумму/PaymentId/refunds/
   events, а `/admin/activity` — единый журнал без сырых payload. Изменяющие payment-действия
