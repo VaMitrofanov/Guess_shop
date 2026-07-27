@@ -1,8 +1,10 @@
 import {
   consentIpHash,
+  emailVerificationResultUrl,
   emailActionTokenHash,
   isEmailActionToken,
   PRIVACY_POLICY_VERSION,
+  publicAppOrigin,
 } from "@/lib/email-account-lifecycle";
 
 describe("email account lifecycle primitives", () => {
@@ -27,5 +29,17 @@ describe("email account lifecycle primitives", () => {
 
   test("uses an explicit policy version for append-only evidence", () => {
     expect(PRIVACY_POLICY_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  test("rejects an internal or attacker-controlled origin for email links", () => {
+    expect(publicAppOrigin("https://0.0.0.0:3000")).toBe("https://robloxbank.ru");
+    expect(publicAppOrigin("https://evil.example/robloxbank.ru")).toBe("https://robloxbank.ru");
+    expect(publicAppOrigin("https://www.robloxbank.ru/some/path")).toBe("https://www.robloxbank.ru");
+    expect(publicAppOrigin("http://localhost:3000")).toBe("http://localhost:3000");
+  });
+
+  test("builds the verification result redirect from the trusted app origin", () => {
+    expect(emailVerificationResultUrl("success", "https://0.0.0.0:3000").toString())
+      .toBe("https://robloxbank.ru/email/verified?status=success");
   });
 });

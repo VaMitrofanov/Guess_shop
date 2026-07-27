@@ -501,6 +501,14 @@ bearer, в БД хранится только SHA-256; TTL 24 часа/30 мин
 инвалидируется. Legacy JWT без версии намеренно потребует повторный вход один раз после
 rollout, иначе такой токен нельзя было бы отозвать.
 
+**Закрыто 27.07 — внутренний origin в verification redirect.** За reverse proxy
+`req.nextUrl.origin` у Route Handler равнялся внутреннему `https://0.0.0.0:3000`. Токен
+успешно потреблялся, но финальный `303 Location` уводил пользователя на локальный адрес;
+кроме UX-дефекта это делало результат зависимым от proxy/Host metadata. Verification route
+теперь строит абсолютный redirect только из allowlist-origin (`robloxbank.ru`, `www` или
+`localhost` в dev), а внутренний/чужой host откатывается на `https://robloxbank.ru`.
+Регрессия закрыта unit-тестом и проверкой production-заголовка `Location`.
+
 **Остаточный внешний блокер:** mailer и шаблоны готовы, но production SMTP/DNS ещё не
 приняты. Без `SMTP_USER`/`SMTP_PASSWORD` отправка честно отвечает `not_configured`; reset
 не создаёт ложное обещание доставки. Требуются Яндекс 360, MX/SPF/DKIM/DMARC и живая
