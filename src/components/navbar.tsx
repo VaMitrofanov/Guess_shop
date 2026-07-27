@@ -42,8 +42,11 @@ export default function Navbar() {
 
         <div className="flex items-center gap-3 lg:gap-6">
           <ThemeToggle compact />
-          <Link href={loggedIn ? (isAdmin ? "/admin" : "/dashboard") : "/login"} className="hidden items-center gap-2 text-sm font-bold text-[var(--rb-muted)] transition-colors hover:text-[var(--rb-accent)] lg:flex">
-            <User size={15} /> {loggedIn ? "Кабинет" : "Войти"}
+          {/* D2: ссылка была `lg:flex`, а бургер — `md:hidden`, поэтому на
+              768–1023 px (все iPad в портрете) в личный кабинет было не попасть
+              вообще. На md показываем иконку, подпись возвращаем с lg. */}
+          <Link href={loggedIn ? (isAdmin ? "/admin" : "/dashboard") : "/login"} aria-label={loggedIn ? "Личный кабинет" : "Войти"} className="hidden items-center gap-2 text-sm font-bold text-[var(--rb-muted)] transition-colors hover:text-[var(--rb-accent)] md:flex">
+            <User size={15} /> <span className="hidden lg:inline">{loggedIn ? "Кабинет" : "Войти"}</span>
           </Link>
           <Link href="/#calculator" className="hidden h-11 items-center gap-2 rounded-xl bg-[var(--rb-strong)] px-4 text-base font-extrabold text-white shadow-[3px_3px_0_#45d6aa] transition-transform hover:-translate-y-0.5 md:flex">
             Купить Robux <ArrowRight size={15} />
@@ -58,9 +61,14 @@ export default function Navbar() {
         <div className="border-t border-[var(--rb-border)] bg-[var(--rb-bg)] px-5 py-4 md:hidden">
           <div className="mx-auto flex max-w-[620px] flex-col gap-1">
             {NAV_LINKS.map((item) => <Link key={item.href} href={item.href} onClick={() => setOpen(false)} className="rounded-xl px-4 py-3 text-sm font-bold text-[var(--rb-muted)] hover:bg-[var(--rb-accent-soft)] hover:text-[var(--rb-accent)]">{item.label}</Link>)}
+            {/* D1: здесь были литеральные `bg-white` и `border-[#dcd5ef]` без
+                цвета текста — он наследовался от `--rb-text`, и в тёмной теме
+                получался белый текст на белом фоне (контраст ≈1.05:1).
+                D7: подпись была всегда «Кабинет», даже когда клиент не вошёл.
+                Цвета публичного шелла — только через токены `--rb-*`. */}
             <div className="mt-2 grid grid-cols-2 gap-2">
-              <Link href={loggedIn ? (isAdmin ? "/admin" : "/dashboard") : "/login"} onClick={() => setOpen(false)} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-[#dcd5ef] bg-white text-sm font-bold"><User size={15} /> Кабинет</Link>
-              <Link href="/#calculator" onClick={() => setOpen(false)} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-[#7556e8] text-base font-bold text-white">Купить <ArrowRight size={15} /></Link>
+              <Link href={loggedIn ? (isAdmin ? "/admin" : "/dashboard") : "/login"} onClick={() => setOpen(false)} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-[var(--rb-border)] bg-[var(--rb-surface)] text-sm font-bold text-[var(--rb-text)]"><User size={15} /> {loggedIn ? "Кабинет" : "Войти"}</Link>
+              <Link href="/#calculator" onClick={() => setOpen(false)} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-[var(--rb-strong)] text-base font-bold text-white">Купить <ArrowRight size={15} /></Link>
             </div>
           </div>
         </div>
