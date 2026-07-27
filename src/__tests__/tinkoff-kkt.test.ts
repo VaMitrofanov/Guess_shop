@@ -23,4 +23,13 @@ describe("T-Bank KKT contract", () => {
     const base = { TerminalKey: "DEMO", Amount: 1000, OrderId: "A", Receipt: { Email: "a@b.c" } };
     expect(buildTinkoffToken(base, "secret")).toBe(buildTinkoffToken({ ...base, Token: "forged", Receipt: { Email: "other@b.c" } }, "secret"));
   });
+
+  it("matches T-Bank's published SHA-256 control vector", () => {
+    expect(buildTinkoffToken({
+      TerminalKey: "MerchantTerminalKey",
+      Amount: 19_200,
+      OrderId: "00000",
+      Description: "Подарочная карта на 1000 рублей",
+    }, "11111111111111")).toBe("72dd466f8ace0a37a1f740ce5fb78101712bc0665d91a8108c7c8a0ccd426db2");
+  });
 });

@@ -4,6 +4,8 @@
  */
 import crypto from "crypto";
 
+const TINKOFF_INIT_ENDPOINT = "https://securepay.tinkoff.ru/v2/Init";
+
 // ── Guard: fail fast if secrets are missing ──────────────────────────────────
 function getRequiredEnv(key: string): string {
   const value = process.env[key];
@@ -104,6 +106,59 @@ export type CanonicalPaymentInit = {
   statusToken: string;
 };
 
+type TinkoffInitDiagnosticResponse = {
+  httpStatus?: number;
+  contentType?: string | null;
+  body?: unknown;
+  networkError?: { name: string; message: string };
+};
+
+function diagnosticJsonLogsEnabled() {
+  return process.env.TBANK_DIAGNOSTIC_JSON_LOGS === "true";
+}
+
+/**
+ * Temporary support diagnostic. The exact Init body is intentionally logged,
+ * including its one-request Token and callback URLs, so T-Bank can reproduce
+ * signature validation. Password/SecretKey never enter the record.
+ *
+ * Keep TBANK_DIAGNOSTIC_JSON_LOGS disabled outside a controlled E2E: the body
+ * contains the receipt email and an order-status bearer token in callback URLs.
+ */
+function logTinkoffInitExchange(
+  requestBody: Record<string, unknown>,
+  response: TinkoffInitDiagnosticResponse,
+) {
+  if (!diagnosticJsonLogsEnabled()) return;
+  console.error(JSON.stringify({
+    event: "tbank.init.exchange",
+    schemaVersion: 1,
+    timestamp: new Date().toISOString(),
+    request: {
+      method: "POST",
+      url: TINKOFF_INIT_ENDPOINT,
+      headers: { "Content-Type": "application/json" },
+      body: requestBody,
+    },
+    response,
+  }));
+}
+
+function parseTinkoffJson(text: string): unknown {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { rawText: text };
+  }
+}
+
+function jsonRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
 export function buildCanonicalReceipt(email: string, amountKopecks: number) {
   if (!Number.isSafeInteger(amountKopecks) || amountKopecks <= 0) {
     throw new Error("[Tinkoff] Receipt amount must be positive integer kopecks");
@@ -147,15 +202,34 @@ export async function initCanonicalTinkoffPayment(input: CanonicalPaymentInit) {
   };
 
   const body = { ...params, Token: buildTinkoffToken(params, secretKey) };
-  const res = await fetch("https://securepay.tinkoff.ru/v2/Init", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(10_000),
+  let res: Response;
+  let responseBody: unknown;
+  try {
+    res = await fetch(TINKOFF_INIT_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000),
+    });
+    responseBody = parseTinkoffJson(await res.text());
+  } catch (error) {
+    logTinkoffInitExchange(body, {
+      networkError: {
+        name: error instanceof Error ? error.name : "Error",
+        message: error instanceof Error ? error.message : String(error),
+      },
+    });
+    throw error;
+  }
+
+  logTinkoffInitExchange(body, {
+    httpStatus: res.status,
+    contentType: res.headers.get("content-type"),
+    body: responseBody,
   });
   if (!res.ok) throw new Error(`[Tinkoff] Init failed with HTTP ${res.status}`);
 
-  const data = await res.json();
+  const data = jsonRecord(responseBody);
   if (!data.Success || !data.PaymentId || !data.PaymentURL) {
     throw new Error(`[Tinkoff] Init error: ${data.Message ?? data.ErrorCode ?? "Unknown"}`);
   }

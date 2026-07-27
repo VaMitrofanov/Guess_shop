@@ -1,8 +1,8 @@
 # RobloxBank.ru: ультра-ревью и master plan эквайринга
 
-**Статус:** реализация идёт. Рабочий терминал и credentials получены, но по решению владельца
-они не вставляются до завершения ЛК/checkout/WB-плана. 18.07 production acquiring возвращён
-в `false`, baseline БД снят и проверен. Актуальная последовательность работ:
+**Статус:** реализация идёт. Рабочий терминал активирован, production checkout развёрнут в
+owner-only allowlist, но первый боевой E2E заблокирован недействующей парой credentials:
+Т‑Банк отклоняет `Init` до выдачи `PaymentId`. Актуальная последовательность работ:
 [site-launch-implementation-plan.md](site-launch-implementation-plan.md).
 
 **2026-07-18, DEMO-терминал: Init + CONFIRMED ✅**
@@ -50,6 +50,16 @@ pass, checkout проверяет exact ID в актуальном публич�
 попытка оплаты. `SITE_ACQUIRING_ENABLED` немедленно возвращён в `false` и должен оставаться
 таким до активации terminal Т‑Банком; затем запускается минимальная controlled проверка и
 полная цепочка confirmation/outbox/receipt/refund.
+
+**27.07.2026, точный диагноз production credentials:** поддержка Т‑Банка подтвердила для
+обоих неудачных заказов `ErrorCode=204` и `Details=Неверный токен. Проверьте пару
+TerminalKey/SecretKey`. Локальная реализация подписи совпадает с официальным контрольным
+SHA-256; минимальный `Init` с production-сервера получил тот же ответ, исключив checkout,
+Roblox, allowlist, геолокацию и клиентский IP. Значения в работающем контейнере точно
+совпали с данными кабинета, следовательно, банк не принимает текущий Password для этого
+TerminalKey. До нового Password повторять оплаты бессмысленно. После перевыпуска — заменить
+только `TINKOFF_SECRET_KEY`, redeploy Web и провести один owner E2E. Acquiring остаётся
+ограниченным owner allowlist; раскрытый Password подлежит обязательной ротации.
 
 **Дизайн `/payment/status` обновлён локально 18.07:** старый pixel UI заменён на Violet/Frost
 order timeline с waiting/paid/work/completed/error/offline состояниями, переходом в ЛК,

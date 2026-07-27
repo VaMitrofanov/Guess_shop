@@ -178,8 +178,10 @@ OpenGraph и корректный maintenance-ответ.
 таблицы для защиты выполненных строк, Этап 5.8). SITE-эквайринг (по умолчанию выключен):
 `SITE_ACQUIRING_ENABLED`, `SITE_ACQUIRING_MODE`, `SITE_ACQUIRING_ALLOWLIST_USER_IDS`,
 `SITE_ACQUIRING_ROLLOUT_PERCENT`, `TINKOFF_TERMINAL_KEY`, `TINKOFF_SECRET_KEY`, `TINKOFF_TAXATION`,
-`TINKOFF_ITEM_TAX`, `TINKOFF_PAYMENT_METHOD`, `TINKOFF_PAYMENT_OBJECT`. Классификаторы чека
-не имеют default: их значения подтверждают бухгалтер/ККТ-оператор. Legacy automation:
+`TINKOFF_ITEM_TAX`, `TINKOFF_PAYMENT_METHOD`, `TINKOFF_PAYMENT_OBJECT`; временная диагностика
+поддержки — `TBANK_DIAGNOSTIC_JSON_LOGS` (включается только exact `true` на один controlled
+E2E и сразу выключается). Классификаторы чека не имеют default: их значения подтверждают
+бухгалтер/ККТ-оператор. Legacy automation:
 `LOCAL_BOT_URL`, `INTERNAL_WEBHOOK_SECRET`, `BOT_API_TOKEN`.
 
 Checkout читает per-session runtime-состояние эквайринга из `GET /api/acquiring/status`.
@@ -189,6 +191,13 @@ Master flag разрешает только exact `true`; mode принимае�
 eligibility. Allowlist — comma-separated internal `User.id`; percentage — целое `0..100`.
 Сначала задаётся mode/allowlist при master `false`, затем один последовательный deploy;
 master включается отдельным изменением только перед allowlist E2E.
+
+При `TBANK_DIAGNOSTIC_JSON_LOGS=true` канонический `Init` пишет в stderr одну JSON-строку
+`event=tbank.init.exchange` с точным URL, headers, request body и HTTP response. Запись
+содержит рассчитанный одноразовый `Token`, email чека и bearer token в callback URL, поэтому
+она доступна только инфраструктурным операторам и не должна пересылаться никому, кроме
+поддержки Т‑Банка по защищённому каналу. `Password`/`SecretKey` в запись не попадают.
+После controlled E2E переменную удалить/переключить в `false` и перезапустить Web.
 
 `BOOTSTRAP_ADMIN_EMAIL` + `BOOTSTRAP_ADMIN_PASSWORD` — опциональная **одноразовая** пара
 только для `prisma db seed` на новом окружении. Обе задаются вместе, пароль — от 16 символов,
