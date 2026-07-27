@@ -42,9 +42,10 @@ export async function POST(req: NextRequest) {
       // the same response as a newly created account. If it is still unverified,
       // sending another verification link is safe and useful to the real owner.
       if (!existingUser.emailVerifiedAt && existingUser.email) {
-        await sendVerificationEmail(existingUser.id, existingUser.email);
+        const delivery = await sendVerificationEmail(existingUser.id, existingUser.email);
+        return NextResponse.json({ success: true, verificationAvailable, verificationSent: delivery.ok });
       }
-      return NextResponse.json({ success: true, verificationAvailable });
+      return NextResponse.json({ success: true, verificationAvailable, verificationSent: verificationAvailable });
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
@@ -70,11 +71,12 @@ export async function POST(req: NextRequest) {
       return created;
     });
 
-    await sendVerificationEmail(user.id, email);
+    const delivery = await sendVerificationEmail(user.id, email);
 
     return NextResponse.json({
       success: true,
       verificationAvailable,
+      verificationSent: delivery.ok,
     });
 
   } catch (error) {

@@ -12,9 +12,9 @@ import nodemailer, { type Transporter } from "nodemailer";
  * nothing here may carry a default password, and no send path may log the
  * password, the recipient's address or a token.
  *
- * Provider: Yandex 360 for the robloxbank.ru domain — chosen for deliverability
- * to yandex/mail.ru, which is where this audience actually reads mail. Swapping
- * providers means changing env only; no caller imports nodemailer directly.
+ * Provider: Brevo SMTP relay for the robloxbank.ru domain. The relay uses the
+ * non-standard port 2525 available on the VPS; swapping providers means changing
+ * deploy env only, with no caller importing nodemailer directly.
  */
 
 export interface MailerConfig {

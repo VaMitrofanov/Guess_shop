@@ -6,6 +6,7 @@ import { ArrowRight, CheckCircle2, Eye, EyeOff, Gift, History, Loader2, Lock, Ma
 import Navbar from "@/components/navbar";
 import Link from "next/link";
 import { normalizeLoginEmail, safeReturnPath } from "@/lib/auth-navigation";
+import { PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 import { Checkbox } from "@/components/ui/checkbox";
 import styles from "../auth-shell.module.css";
 
@@ -25,6 +26,7 @@ function RegisterContent() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
   const [verificationAvailable, setVerificationAvailable] = useState(true);
+  const [verificationSent, setVerificationSent] = useState(true);
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnTo = safeReturnPath(searchParams.get("next"));
@@ -33,8 +35,8 @@ function RegisterContent() {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (password.length < 10) {
-      setError("Пароль должен быть не короче 10 символов");
+    if (password.length < PASSWORD_MIN_LENGTH) {
+      setError(`Пароль должен быть не короче ${PASSWORD_MIN_LENGTH} символов`);
       return;
     }
     if (!agreedToPrivacy) {
@@ -59,6 +61,7 @@ function RegisterContent() {
         throw new Error(data.error ?? "Не удалось создать аккаунт");
       }
       setVerificationAvailable(data.verificationAvailable !== false);
+      setVerificationSent(data.verificationSent !== false);
       setSuccess(true);
       window.setTimeout(() => router.replace(`/login?next=${encodeURIComponent(returnTo)}`), 1600);
     } catch (caught) {
@@ -68,7 +71,7 @@ function RegisterContent() {
   };
 
   if (success) {
-    return <main className={`${styles.page} grid place-items-center p-5`}><section className={styles.successCard}><span className={styles.successIcon}><CheckCircle2 size={30} /></span><h1>{verificationAvailable ? "Проверьте почту" : "Аккаунт создан"}</h1><p>{verificationAvailable ? "Отправили ссылку подтверждения. Войти можно уже сейчас — чувствительные действия откроются после подтверждения." : "Почтовая отправка ещё настраивается. Пока используйте вход через Telegram или сохраните пароль."}</p></section></main>;
+    return <main className={`${styles.page} grid place-items-center p-5`}><section className={styles.successCard}><span className={styles.successIcon}><CheckCircle2 size={30} /></span><h1>{verificationAvailable && verificationSent ? "Проверьте почту" : "Аккаунт создан"}</h1><p>{verificationAvailable && verificationSent ? "Ссылка подтверждения отправлена. Войти можно уже сейчас — чувствительные действия откроются после подтверждения." : verificationAvailable ? "Аккаунт создан, но письмо сейчас не отправилось. Войдите в личный кабинет и попробуйте отправить письмо ещё раз." : "Почтовая отправка ещё настраивается. Пока используйте вход через Telegram или сохраните пароль."}</p></section></main>;
   }
 
   return (
@@ -94,10 +97,11 @@ function RegisterContent() {
             <label className={styles.label}>Email
               <span className={styles.field}><Mail size={18} /><input className={styles.input} type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.ru" /></span>
             </label>
-            <label className={styles.label}>Пароль
-              <span className={styles.field}><Lock size={18} /><input className={styles.input} type={showPassword ? "text" : "password"} autoComplete="new-password" required minLength={10} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Минимум 10 символов" /><button type="button" className={styles.iconButton} onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></span>
+            <div className={styles.label}>
+              <label htmlFor="register-password">Пароль</label>
+              <span className={styles.field}><Lock size={18} /><input id="register-password" className={styles.input} type={showPassword ? "text" : "password"} autoComplete="new-password" required minLength={PASSWORD_MIN_LENGTH} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={`Минимум ${PASSWORD_MIN_LENGTH} символов`} /><button type="button" className={styles.iconButton} onClick={() => setShowPassword((value) => !value)} aria-pressed={showPassword} aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></span>
               {password && <span className={styles.strength}><span className={styles.strengthTrack}>{[1,2,3].map((level) => <i key={level} className={strength >= level ? strength === 1 ? styles.activeWeak : strength === 2 ? styles.activeMedium : styles.activeStrong : ""} />)}</span><span>{strengthLabel}</span></span>}
-            </label>
+            </div>
             <label className={styles.agreement}>
               <Checkbox
                 checked={agreedToPrivacy}

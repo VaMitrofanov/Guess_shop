@@ -46,6 +46,8 @@ describe("public launch gates", () => {
   test("requires explicit privacy consent for email registration", () => {
     const base = { email: "buyer@example.ru", password: "safe-password", name: "Buyer" };
     expect(RegisterSchema.safeParse({ ...base, agreedToPrivacy: true }).success).toBe(true);
+    expect(RegisterSchema.safeParse({ ...base, password: "six!!!", agreedToPrivacy: true }).success).toBe(true);
+    expect(RegisterSchema.safeParse({ ...base, password: "short", agreedToPrivacy: true }).success).toBe(false);
     expect(RegisterSchema.safeParse(base).success).toBe(false);
     expect(RegisterSchema.safeParse({ ...base, agreedToPrivacy: false }).success).toBe(false);
   });

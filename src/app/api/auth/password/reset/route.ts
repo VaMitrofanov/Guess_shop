@@ -3,10 +3,11 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { resetPasswordWithActionToken } from "@/lib/email-account-lifecycle";
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 
 const ResetSchema = z.object({
   token: z.string().min(1).max(256),
-  password: z.string().min(10).max(128),
+  password: z.string().min(PASSWORD_MIN_LENGTH).max(PASSWORD_MAX_LENGTH),
 });
 
 export async function POST(req: NextRequest) {
