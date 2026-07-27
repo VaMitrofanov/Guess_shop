@@ -71,7 +71,7 @@ function RegisterContent() {
   };
 
   if (success) {
-    return <main className={`${styles.page} grid place-items-center p-5`}><section className={styles.successCard}><span className={styles.successIcon}><CheckCircle2 size={30} /></span><h1>{verificationAvailable && verificationSent ? "Проверьте почту" : "Аккаунт создан"}</h1><p>{verificationAvailable && verificationSent ? "Ссылка подтверждения отправлена. Войти можно уже сейчас — чувствительные действия откроются после подтверждения." : verificationAvailable ? "Аккаунт создан, но письмо сейчас не отправилось. Войдите в личный кабинет и попробуйте отправить письмо ещё раз." : "Почтовая отправка ещё настраивается. Пока используйте вход через Telegram или сохраните пароль."}</p></section></main>;
+    return <main className={`${styles.page} grid place-items-center p-5`}><section className={styles.successCard}><span className={styles.successIcon}><CheckCircle2 size={30} /></span><h1>{verificationAvailable && verificationSent ? "Проверьте почту" : "Аккаунт создан"}</h1><p>{verificationAvailable && verificationSent ? "Запрос на отправку принят. Проверьте входящие и спам: окончательная доставка зависит от вашего почтового сервиса. Войти можно уже сейчас." : verificationAvailable ? "Аккаунт создан, но письмо сейчас не отправилось. Войдите в личный кабинет и попробуйте отправить письмо ещё раз." : "Почтовая отправка ещё настраивается. Пока используйте вход через Telegram или сохраните пароль."}</p></section></main>;
   }
 
   return (
@@ -96,6 +96,7 @@ function RegisterContent() {
             </label>
             <label className={styles.label}>Email
               <span className={styles.field}><Mail size={18} /><input className={styles.input} type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.ru" /></span>
+              <span className={styles.formNotice}>Письмо подтверждения может попасть в спам или быть задержано почтовым сервисом. Войти можно сразу; если письмо не придёт, используйте Telegram или другой email.</span>
             </label>
             <div className={styles.label}>
               <label htmlFor="register-password">Пароль</label>

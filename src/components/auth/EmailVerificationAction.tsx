@@ -14,7 +14,7 @@ export default function EmailVerificationAction() {
       const response = await fetch("/api/auth/email/resend", { method: "POST" });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error ?? "Не удалось отправить письмо.");
-      setMessage("Письмо отправлено. Проверь входящие и спам.");
+      setMessage("Запрос на отправку принят. Проверь входящие и спам: доставка зависит от почтового сервиса.");
     } catch (caught) {
       setError(true);
       setMessage(caught instanceof Error ? caught.message : "Не удалось отправить письмо.");
