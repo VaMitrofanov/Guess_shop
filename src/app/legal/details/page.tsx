@@ -5,7 +5,7 @@ import { LEGAL_DETAILS } from "@/lib/legal-details";
 export const metadata: Metadata = {
   title: "Реквизиты и контакты — Roblox Bank",
   description: "Юридическая информация и контакты исполнителя Roblox Bank.",
-  alternates: { canonical: "https://robloxbank.ru/legal/details" },
+  alternates: { canonical: "/legal/details" },
   robots: { index: false, follow: false },
 };
 

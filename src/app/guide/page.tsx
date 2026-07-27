@@ -6,6 +6,9 @@ export const metadata: Metadata = {
   title: "Инструкция по созданию геймпасса | Roblox Bank",
   description:
     "Пошаговая инструкция по созданию геймпасса в Roblox для получения Robux",
+  // D11: страница открывается с разными query (source/amount/code), контент
+  // при этом один — canonical сводит их к одному адресу на apex.
+  alternates: { canonical: "/guide" },
 };
 
 interface GuidPageProps {

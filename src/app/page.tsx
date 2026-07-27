@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -15,6 +16,14 @@ import Footer from "@/components/footer";
 import Calculator from "@/components/calculator";
 import { CODE_DENOMINATIONS } from "@/lib/codes-pricing";
 import styles from "./storefront.module.css";
+
+// D11: canonical объявляется на самой странице, а не в корневом layout —
+// метаданные layout наследуются всеми маршрутами, и «/» в корне заставил бы
+// /login и /checkout выдавать себя за главную. Значение берётся от
+// metadataBase, то есть от канонического хоста (apex).
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
 
 const steps = [
   {

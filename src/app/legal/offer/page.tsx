@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   title: "Публичная оферта — Roblox Bank",
   description:
     "Публичная оферта на оказание услуг по продаже цифровых товаров (Robux) и услуг пополнения внутриигрового баланса Roblox.",
-  alternates: { canonical: "https://robloxbank.ru/legal/offer" },
+  alternates: { canonical: "/legal/offer" },
   robots: { index: false, follow: false },
 };
 
