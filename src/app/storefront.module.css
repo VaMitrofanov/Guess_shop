@@ -204,6 +204,12 @@
   .section,.controlSection,.productsSection { width: calc(100% - 28px); padding: 72px 0; }
   .sectionHeading { align-items: flex-start; flex-direction: column; }
   .codesStore { padding:22px; box-shadow:6px 6px 0 #7556e8; }
+  /* На 390 px заголовок из трёх слов зажимался между иконкой и бейджем и
+     разваливался на три строки — разводим их по двум рядам. */
+  .codesStoreHead { grid-template-columns:auto auto; justify-content:space-between; row-gap:14px; }
+  .codesIcon { grid-area:1/1; }
+  .soonBadge { grid-area:1/2; justify-self:end; }
+  .codesStoreHead h3 { grid-area:2/1/2/3; font-size:23px; }
   .codesGrid { grid-template-columns:repeat(2,1fr); }
   .codesPromise { grid-template-columns:1fr; }
   .stepsGrid { grid-template-columns: 1fr; }
