@@ -2,6 +2,14 @@ import type { NextConfig } from "next";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
+import { THEME_BOOT_SCRIPT } from "./src/lib/theme-boot";
+
+/**
+ * D3: boot-скрипт темы — единственный inline-скрипт, который нам нужен, и он
+ * разрешён по хешу, а не через `unsafe-inline`. Хеш считается из той же
+ * константы, что вставляется в разметку, поэтому разъехаться они не могут.
+ */
+export const THEME_BOOT_CSP_HASH = `'sha256-${createHash("sha256").update(THEME_BOOT_SCRIPT, "utf8").digest("base64")}'`;
 
 /**
  * Shared response headers for the main storefront and the separately-built
@@ -16,7 +24,7 @@ const commonCsp = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://telegram.org",
+  `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${THEME_BOOT_CSP_HASH} https://telegram.org`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
@@ -81,8 +89,9 @@ const reportOnlyCsp = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
-  // Целевое состояние: ни unsafe-inline, ни unsafe-eval.
-  "script-src 'self' https://telegram.org",
+  // Целевое состояние: ни unsafe-inline, ни unsafe-eval — только 'self' и
+  // явно разрешённый по хешу boot-скрипт темы.
+  `script-src 'self' ${THEME_BOOT_CSP_HASH} https://telegram.org`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",

@@ -5,6 +5,7 @@ import SessionProvider from "@/components/session-provider";
 import { PageLoader } from "@/components/page-loader";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SiteObservability } from "@/components/site-observability";
+import { THEME_BOOT_SCRIPT } from "@/lib/theme-boot";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -75,6 +76,12 @@ export default function RootLayout({
       lang="ru"
       className={`${geistSans.variable} ${geistMono.variable} ${pressStart.variable} ${unbounded.variable} h-full antialiased`}
     >
+      <head>
+        {/* D3: ставит data-theme до первой отрисовки, иначе на тёмном телефоне
+            первый кадр приходит в светлой теме и потом скачком перекрашивается.
+            Разрешён в CSP по sha256-хешу (next-security.ts), не unsafe-inline. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+      </head>
       <body className="min-h-full flex flex-col">
         <ThemeProvider>
           <SessionProvider>
