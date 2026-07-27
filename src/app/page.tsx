@@ -96,7 +96,10 @@ export default function Home() {
         </div>
 
         <div className={styles.methodDeck} aria-label="Способы покупки Robux">
-          <article className={styles.gamepassHeroCard}>
+          {/* D5: карточка выглядит кнопкой и на телефоне по ней тапают первой —
+              значит она обязана вести к калькулятору. Обычный <a>, а не Link:
+              это якорь на этой же странице. */}
+          <a href="#calculator" className={styles.gamepassHeroCard} aria-label="Перейти к покупке через геймпасс">
             <div className={styles.methodTopline}>
               <span><Gamepad2 size={14} /> Основной способ</span>
               <small>от 160 ₽</small>
@@ -117,7 +120,7 @@ export default function Home() {
               <span><TimerReset size={16} /> Статус — в кабинете</span>
               <strong>Купить <ArrowRight size={17} /></strong>
             </div>
-          </article>
+          </a>
 
           <div className={styles.codeTeaser}>
             <span className={styles.codeTeaserIcon}><KeyRound size={18} /></span>
