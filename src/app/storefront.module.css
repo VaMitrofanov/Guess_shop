@@ -36,40 +36,42 @@
 .title { margin: 26px 0 24px; font-family: var(--font-display), var(--font-geist-sans), sans-serif; font-size: clamp(50px, 6.5vw, 88px); line-height: .98; letter-spacing: -.075em; font-weight: 700; }
 .title span { position: relative; display: inline; background: linear-gradient(90deg,#7556e8,#5e83ee); background-clip: text; color: transparent; }
 .lead { max-width: 590px; color: #6f6782; font-size: 18px; line-height: 1.65; font-weight: 500; }
-.heroActions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 30px; }
-.primaryAction,.secondaryAction { min-height: 52px; display: inline-flex; align-items: center; justify-content: center; gap: 10px; border-radius: 13px; padding: 0 20px; font-size: 13px; font-weight: 800; transition: transform .2s ease, box-shadow .2s ease; }
-.primaryAction { background: #7556e8; color: white; box-shadow: 4px 4px 0 #251b3f; }
-.secondaryAction { border: 1px solid #d8d1ee; background: rgba(255,255,255,.78); color: #251b3f; }
-.primaryAction:hover,.secondaryAction:hover { transform: translateY(-2px); }
+.heroActions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 30px; }
+.primaryAction { min-height: 52px; display: inline-flex; align-items: center; justify-content: center; gap: 10px; border-radius: 13px; padding: 0 20px; background: #7556e8; color: white; box-shadow: 4px 4px 0 #251b3f; font-size: 15px; font-weight: 800; transition: transform .2s ease, box-shadow .2s ease; }
+.primaryAction:hover { transform: translateY(-2px); }
+/* D4: тихий вход в блок кодов — ссылка, а не кнопка. Покупка кодов не
+   включена, поэтому на первом экране не должно быть ничего, похожего на
+   активную кнопку покупки. */
+.heroTextLink { min-height: 52px; display: inline-flex; align-items: center; gap: 8px; padding: 0 6px; color: #6751b9; font-size: 15px; font-weight: 800; text-decoration: underline; text-underline-offset: 4px; }
+.heroTextLink:hover { color: #7556e8; }
 .heroFacts { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 24px; color: #756e86; font-size: 14px; font-weight: 700; }
 .heroFacts span { display: flex; align-items: center; gap: 7px; }
 
 .methodDeck { display: flex; flex-direction: column; gap: 14px; transform: rotate(1deg); }
-.codeMethodCard { position: relative; overflow: hidden; padding: 27px; border: 1px solid rgba(255,255,255,.2); border-radius: 28px; background: linear-gradient(145deg,#2e2052 0%,#7556e8 58%,#5b82ed 100%); color: white; box-shadow: 12px 12px 0 #45d6aa,0 28px 70px rgba(54,35,91,.2); }
-.codeMethodCard::after { content:"R$"; position:absolute; right:-32px; top:52px; color:rgba(255,255,255,.08); font-family:var(--font-display),sans-serif; font-size:170px; font-weight:900; transform:rotate(-8deg); }
+/* D4: крупная карточка первого экрана — геймпасс (способ, который работает),
+   коды съехали в компактную строку-тизер ниже. */
+.gamepassHeroCard { position: relative; overflow: hidden; display:block; padding: 27px; border: 1px solid rgba(255,255,255,.2); border-radius: 28px; background: linear-gradient(145deg,#2e2052 0%,#7556e8 58%,#5b82ed 100%); color: white; box-shadow: 12px 12px 0 #45d6aa,0 28px 70px rgba(54,35,91,.2); }
+.gamepassHeroCard::after { content:"R$"; position:absolute; right:-32px; top:52px; color:rgba(255,255,255,.08); font-family:var(--font-display),sans-serif; font-size:170px; font-weight:900; transform:rotate(-8deg); }
 .methodTopline,.methodFooter { position:relative; z-index:1; display:flex; align-items:center; justify-content:space-between; gap:16px; }
 .methodTopline>span { display:inline-flex; align-items:center; gap:7px; color:#aaf3dc; font-size:13px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
-.methodTopline small { color:rgba(255,255,255,.64); font-size:13px; font-weight:750; }
+.methodTopline small { color:rgba(255,255,255,.72); font-size:14px; font-weight:800; }
 .methodCopy { position:relative; z-index:1; margin:28px 0 22px; display:flex; align-items:center; gap:14px; }
 .methodIcon { width:50px; height:50px; flex:0 0 auto; display:grid; place-items:center; border-radius:15px; background:#45d6aa; color:#173f34; }
 .methodCopy p { margin:0 0 2px; color:#d9d0ff; font-size:15px; font-weight:800; }
 .methodCopy h2 { margin:0; font-size:clamp(28px,3vw,38px); line-height:1; letter-spacing:-.05em; }
-.codeTicket { position:relative; z-index:1; margin:0 0 22px; padding:18px 20px; border:1px dashed rgba(255,255,255,.38); border-radius:18px; background:rgba(18,12,35,.24); backdrop-filter:blur(8px); }
-.codeTicket::before,.codeTicket::after { content:""; position:absolute; top:50%; width:16px; height:16px; border-radius:50%; background:#6549c8; transform:translateY(-50%); }
-.codeTicket::before { left:-9px; }.codeTicket::after { right:-9px; }
-.codeTicket>div { display:flex; align-items:center; justify-content:space-between; color:#bff6e5; font-size:11px; font-weight:900; letter-spacing:.12em; }
-.codeTicket>div strong { font-size:24px; letter-spacing:-.05em; }
-.codeTicket p { margin:11px 0 8px; font-size:23px; font-weight:900; letter-spacing:.08em; }
-.codeTicket small { color:rgba(255,255,255,.62); font-size:13px; }
-.methodFooter { font-size:14px; font-weight:800; }
+.methodPoints { position:relative; z-index:1; margin:0 0 22px; padding:0; display:grid; gap:9px; list-style:none; }
+.methodPoints li { display:flex; align-items:center; gap:9px; color:rgba(255,255,255,.88); font-size:15px; font-weight:700; line-height:1.35; }
+.methodPoints svg { flex:0 0 auto; color:#8cf0d0; }
+.methodFooter { font-size:15px; font-weight:800; }
 .methodFooter span { display:flex; align-items:center; gap:7px; color:#d9fff3; }
-.methodFooter strong { font-size:20px; }
-.gamepassMethodCard { min-height:90px; padding:18px 20px; display:grid; grid-template-columns:auto 1fr auto auto; align-items:center; gap:14px; border:1px solid #d8d1ee; border-radius:20px; background:rgba(255,255,255,.92); box-shadow:6px 6px 0 #251b3f; color:#251b3f; }
-.gamepassMethodCard .methodIcon { width:45px; height:45px; background:#ece7ff; color:#7556e8; }
-.gamepassMethodCard small,.gamepassMethodCard strong { display:block; }
-.gamepassMethodCard small { color:#7556e8; font-size:11px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; }
-.gamepassMethodCard strong { margin-top:2px; font-size:17px; }
-.gamepassMethodCard>span:nth-last-of-type(1) { color:#6e657f; font-size:14px; font-weight:800; }
+.methodFooter strong { display:inline-flex; align-items:center; gap:8px; font-size:19px; }
+.codeTeaser { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:13px; padding:14px 16px; border:1px dashed #cfc6ea; border-radius:18px; background:rgba(255,255,255,.76); color:#251b3f; }
+.codeTeaserIcon { width:38px; height:38px; flex:0 0 auto; display:grid; place-items:center; border-radius:12px; background:#ece7ff; color:#7556e8; }
+.codeTeaser p { min-width:0; margin:0; }
+.codeTeaser strong,.codeTeaser small { display:block; }
+.codeTeaser strong { font-size:15px; }
+.codeTeaser small { margin-top:1px; color:#6e657f; font-size:14px; font-weight:700; }
+.codeTeaser a { color:#7556e8; font-size:14px; font-weight:900; white-space:nowrap; text-decoration:underline; text-underline-offset:3px; }
 
 .calculator { position: relative; max-width: 100%; padding: 28px; border: 1px solid #cfc6ee; border-radius: 26px; background: rgba(255,255,255,.95); box-shadow: 12px 12px 0 #251b3f, 0 26px 70px rgba(54,35,91,.12); transform: rotate(1deg); }
 .calculatorBadge { position: absolute; right: 24px; top: -15px; padding: 7px 12px; border: 1px solid #251b3f; border-radius: 999px; background: #7556e8; color: white; font-size: 13px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
@@ -108,32 +110,27 @@
 .securityNote { margin: 14px 0 0; display: flex; align-items: center; justify-content: center; gap: 6px; color: #8b8499; font-size: 15px; }
 
 .productsSection { width:min(1180px,calc(100% - 40px)); margin:0 auto; padding:100px 0 24px; scroll-margin-top:88px; }
-.productsGrid { display:grid; grid-template-columns:minmax(0,1.04fr) minmax(420px,.96fr); gap:28px; align-items:start; }
+/* D4: калькулятор (работающий способ) идёт первым и получает больше места;
+   витрина кодов — справа, как анонс. */
+.productsGrid { display:grid; grid-template-columns:minmax(420px,1.04fr) minmax(0,.96fr); gap:28px; align-items:start; }
 .codesStore { position:relative; overflow:hidden; min-height:100%; padding:30px; border:1px solid #bfb0eb; border-radius:28px; background:linear-gradient(160deg,#f1edff 0%,#fff 52%,#e8fff7 100%); box-shadow:9px 9px 0 #7556e8; }
 .codesStore::after { content:""; position:absolute; width:240px; height:240px; right:-100px; bottom:-110px; border:42px solid rgba(69,214,170,.13); border-radius:50%; }
-.codesStoreHead { position:relative; z-index:1; display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:13px; }
+.codesStoreHead { position:relative; z-index:1; display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:13px; }
 .codesIcon { width:50px; height:50px; display:grid; place-items:center; border-radius:15px; background:#251b3f; color:#8cf0d0; }
-.codesStoreHead span:not(.codesIcon):not(.newBadge) { color:#7556e8; font-size:12px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
-.codesStoreHead h3 { margin:2px 0 0; font-size:27px; letter-spacing:-.045em; }
-.newBadge { padding:7px 9px; border:1px solid #251b3f; border-radius:8px; background:#45d6aa; color:#173f34; font-size:11px; font-weight:950; letter-spacing:.1em; box-shadow:3px 3px 0 #7556e8; }
-.codesIntro { position:relative; z-index:1; margin:21px 0; color:#6b627e; font-size:16px; line-height:1.55; }
+.codesStoreHead h3 { margin:0; font-size:25px; letter-spacing:-.045em; }
+.soonBadge { padding:7px 9px; border:1px solid #251b3f; border-radius:8px; background:#e9e3ff; color:#4c3a8c; font-size:12px; font-weight:950; letter-spacing:.1em; }
+.codesIntro { position:relative; z-index:1; margin:18px 0; color:#6b627e; font-size:16px; line-height:1.55; }
 .codesGrid { position:relative; z-index:1; display:grid; grid-template-columns:repeat(3,1fr); gap:9px; }
-.codePack { position:relative; min-height:88px; padding:15px 13px; display:flex; flex-direction:column; justify-content:center; border:1px solid #dcd5ec; border-radius:15px; background:rgba(255,255,255,.82); }
-.codePack strong,.codePack>span { display:block; }
-.codePack strong { color:#251b3f; font-size:18px; letter-spacing:-.03em; }
-.codePack strong span { color:#7556e8; font-size:13px; }
-.codePack>span { margin-top:3px; color:#6f6681; font-size:14px; font-weight:800; }
-.codePackPopular { border:2px solid #7556e8; background:#251b3f; box-shadow:3px 3px 0 #45d6aa; }
-.codePackPopular small { position:absolute; right:8px; top:-9px; padding:3px 6px; border-radius:6px; background:#45d6aa; color:#173f34; font-size:9px; font-weight:950; letter-spacing:.04em; text-transform:uppercase; }
-.codePackPopular strong,.codePackPopular>span { color:white; }.codePackPopular strong span { color:#8cf0d0; }
-.codesPromise { position:relative; z-index:1; margin-top:20px; padding:15px; display:grid; grid-template-columns:1fr 1fr; gap:12px; border:1px dashed #c9bee7; border-radius:17px; background:rgba(255,255,255,.5); }
-.codesPromise>div { display:flex; align-items:flex-start; gap:9px; color:#7556e8; }
-.codesPromise strong,.codesPromise small { display:block; }.codesPromise strong { color:#302746; font-size:13px; }.codesPromise small { margin-top:2px; color:#7a7189; font-size:11px; line-height:1.35; }
-.codesAction { position:relative; z-index:1; width:100%; min-height:57px; margin-top:20px; display:flex; align-items:center; justify-content:center; gap:9px; border:0; border-radius:14px; background:#251b3f; color:white; font-size:16px; font-weight:900; box-shadow:4px 4px 0 #45d6aa; cursor:not-allowed; opacity:.94; }
-.previewNote { position:relative; z-index:1; margin:12px 0 0; color:#82798f; font-size:12px; text-align:center; }
+.codePack { position:relative; min-height:66px; padding:13px; display:flex; flex-direction:column; justify-content:center; border:1px solid #dcd5ec; border-radius:15px; background:rgba(255,255,255,.82); }
+.codePack strong { display:block; color:#251b3f; font-size:18px; letter-spacing:-.03em; }
+.codePack strong span { color:#7556e8; font-size:14px; }
+/* D4: ни кнопки, ни цены — только честное состояние товара и ссылка на
+   способ, который работает прямо сейчас. */
+.codesStatus { position:relative; z-index:1; margin:18px 0 0; color:#6b627e; font-size:15px; line-height:1.5; }
+.codesStatus a { color:#7556e8; font-weight:900; text-decoration:underline; text-underline-offset:3px; }
 .gamepassLabel { margin:0 12px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .gamepassLabel span { display:flex; align-items:center; gap:7px; color:#7556e8; font-size:14px; font-weight:900; text-transform:uppercase; letter-spacing:.06em; }
-.gamepassLabel small { color:#6e657f; font-size:13px; font-weight:800; }
+.gamepassLabel small { color:#6e657f; font-size:14px; font-weight:800; }
 
 .assuranceStrip { width: min(1240px, calc(100% - 40px)); margin: 0 auto; padding: 18px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; border: 1px solid #e0daf2; border-radius: 20px; background: rgba(255,255,255,.7); }
 .assuranceItem { display: flex; gap: 11px; align-items: center; padding: 12px; }
@@ -168,8 +165,6 @@
 .controlCard p { max-width: 540px; color: #6c6381; font-size: 17px; line-height: 1.65; }
 .orderWidget { position: relative; z-index: 1; padding: 22px; border: 1px solid #c9bdeb; border-radius: 19px; background: rgba(255,255,255,.88); box-shadow: 8px 8px 0 #7556e8; }
 .orderWidgets { position:relative; z-index:1; display:flex; flex-direction:column; gap:18px; }
-.codeOrderWidget { box-shadow:8px 8px 0 #45d6aa; }
-.codeOrderWidget .orderTrack { grid-template-columns:repeat(3,1fr); }
 .orderWidgetTop { display: flex; flex-direction: column; gap: 5px; }
 .orderWidgetTop span { color: #847b96; font-size: 13px; font-weight: 800; text-transform: uppercase; }
 .orderWidgetTop strong { font-size: 15px; }
@@ -180,7 +175,9 @@
 .orderLabels { display: flex; justify-content: space-between; color: #82798f; font-size: 13px; font-weight: 700; }
 .bottomCta { width: min(1180px, calc(100% - 40px)); margin: 0 auto 54px; padding: 38px 42px; display: flex; align-items: center; justify-content: space-between; gap: 30px; border-radius: 26px; background: #251b3f; color: white; }
 .bottomCta h2 { font-size: clamp(28px,3.5vw,42px); }
-.bottomActions { display:flex; align-items:center; gap:10px; }.bottomCta .secondaryAction { border-color:rgba(255,255,255,.25); background:rgba(255,255,255,.1); color:white; }
+.bottomActions { display:flex; align-items:center; gap:16px; }
+.bottomTextLink { color:#cfc3ff; font-size:15px; font-weight:800; text-decoration:underline; text-underline-offset:4px; white-space:nowrap; }
+.bottomTextLink:hover { color:#fff; }
 
 @media (max-width: 980px) {
   .hero { grid-template-columns: minmax(0, 1fr); gap: 54px; }
@@ -196,11 +193,9 @@
   .title { font-size: clamp(42px,13vw,62px); }
   .lead { font-size: 17px; }
   .heroActions { flex-direction: column; }
-  .primaryAction,.secondaryAction { width: 100%; }
+  .primaryAction,.heroTextLink { width: 100%; justify-content: center; }
   .methodDeck { transform:none; }
-  .codeMethodCard { padding:22px; box-shadow:7px 7px 0 #45d6aa; }
-  .methodTopline small { display:none; }
-  .gamepassMethodCard { grid-template-columns:auto 1fr auto; }.gamepassMethodCard>span:nth-last-of-type(1) { display:none; }
+  .gamepassHeroCard { padding:22px; box-shadow:7px 7px 0 #45d6aa; }
   .calculator { padding: 22px; transform: none; box-shadow: 7px 7px 0 #251b3f; }
   .calculatorHead { flex-direction: column; }
   .packGrid { grid-template-columns: repeat(2,1fr); }
@@ -213,7 +208,6 @@
   .stepsGrid { grid-template-columns: 1fr; }
   .stepCard { min-height: 250px; }
   .controlCard { padding: 28px 22px; gap: 34px; }
-  .orderLabels { font-size: 12px; }
   .bottomCta { width: calc(100% - 28px); padding: 30px 22px; align-items: flex-start; flex-direction: column; }
   .bottomActions { width:100%; flex-direction:column; }
 }
@@ -225,11 +219,10 @@
     linear-gradient(180deg, #0b0912 0%, #100c19 54%, #0b0912 100%);
 }
 :global(html[data-theme="dark"]) .eyebrow,
-:global(html[data-theme="dark"]) .secondaryAction,
 :global(html[data-theme="dark"]) .calculator,
 :global(html[data-theme="dark"]) .assuranceStrip,
 :global(html[data-theme="dark"]) .stepCard,
-:global(html[data-theme="dark"]) .gamepassMethodCard,
+:global(html[data-theme="dark"]) .codeTeaser,
 :global(html[data-theme="dark"]) .codesStore,
 :global(html[data-theme="dark"]) .orderWidget {
   border-color: #352b48;
@@ -246,28 +239,32 @@
 :global(html[data-theme="dark"]) .priceSummary,
 :global(html[data-theme="dark"]) .nicknameField,
 :global(html[data-theme="dark"]) .robloxLookup,
-:global(html[data-theme="dark"]) .codePack,
-:global(html[data-theme="dark"]) .codesPromise { border-color: #3a304b; background: #100d18; }
+:global(html[data-theme="dark"]) .codePack { border-color: #3a304b; background: #100d18; }
 :global(html[data-theme="dark"]) .amountField input,
-:global(html[data-theme="dark"]) .secondaryAction,
 :global(html[data-theme="dark"]) .pack,
 :global(html[data-theme="dark"]) .priceSummary strong,
 :global(html[data-theme="dark"]) .nicknameField input,
 :global(html[data-theme="dark"]) .robloxLookup strong,
-:global(html[data-theme="dark"]) .gamepassMethodCard,
+:global(html[data-theme="dark"]) .codeTeaser,
 :global(html[data-theme="dark"]) .codePack strong,
-:global(html[data-theme="dark"]) .codesPromise strong,
 :global(html[data-theme="dark"]) .orderWidget { color: #f4f0ff; }
 :global(html[data-theme="dark"]) .lead,
 :global(html[data-theme="dark"]) .heroFacts,
 :global(html[data-theme="dark"]) .assuranceItem small,
 :global(html[data-theme="dark"]) .sectionHeading p,
 :global(html[data-theme="dark"]) .codesIntro,
-:global(html[data-theme="dark"]) .codePack>span,
-:global(html[data-theme="dark"]) .codesPromise small,
+:global(html[data-theme="dark"]) .codesStatus,
+:global(html[data-theme="dark"]) .codeTeaser small,
 :global(html[data-theme="dark"]) .stepCard p,
 :global(html[data-theme="dark"]) .controlCard p,
 :global(html[data-theme="dark"]) .orderLabels { color: #aaa3b8; }
+/* D4/D9: тизер и статус кодов в тёмной теме — акцент из токена, а не
+   литеральный #7556e8 (в тёмной теме он не проходит AA). */
+:global(html[data-theme="dark"]) .heroTextLink,
+:global(html[data-theme="dark"]) .codeTeaser a,
+:global(html[data-theme="dark"]) .codesStatus a { color: var(--rb-accent); }
+:global(html[data-theme="dark"]) .codeTeaserIcon { background: rgba(117,86,232,.18); color: var(--rb-accent); }
+:global(html[data-theme="dark"]) .soonBadge { border-color: #3a304b; background: rgba(117,86,232,.16); color: #cbb9ff; }
 :global(html[data-theme="dark"]) .controlCard { background: linear-gradient(135deg,#211831,#171020); }
 :global(html[data-theme="dark"]) .bottomCta { background: #7556e8; }
 :global(html[data-theme="dark"]) .bottomCta .sectionKicker { color: #bff5e4; }

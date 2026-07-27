@@ -1,11 +1,9 @@
 import Link from "next/link";
 import {
   ArrowRight,
-  BadgeCheck,
   CircleCheck,
-  Clock3,
-  Gift,
   Gamepad2,
+  Gift,
   KeyRound,
   ShieldCheck,
   Sparkles,
@@ -15,7 +13,7 @@ import {
 import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
 import Calculator from "@/components/calculator";
-import { CODE_DENOMINATIONS, CODE_PRICES } from "@/lib/codes-pricing";
+import { CODE_DENOMINATIONS } from "@/lib/codes-pricing";
 import styles from "./storefront.module.css";
 
 const steps = [
@@ -41,16 +39,15 @@ const steps = [
 ];
 
 const assurances = [
-  { icon: WalletCards, title: "Два способа", text: "Код для простоты или геймпасс для выгоды." },
-  { icon: TimerReset, title: "Код за 10–15 минут", text: "Без создания пасса и ожидания выкупа." },
-  { icon: BadgeCheck, title: "Глобальные коды", text: "Одинаково активируются в любом регионе." },
-  { icon: ShieldCheck, title: "Цена заранее", text: "Сумма и количество Robux видны до оплаты." },
+  { icon: ShieldCheck, title: "Без пароля", text: "Пароль Roblox не нужен ни на одном шаге." },
+  { icon: WalletCards, title: "Цена заранее", text: "Сумма и количество Robux видны до оплаты." },
+  { icon: TimerReset, title: "Понятный статус", text: "Каждый шаг заказа виден в личном кабинете." },
+  { icon: KeyRound, title: "Коды — скоро", text: "Мгновенная активация без настройки аккаунта." },
 ];
 
-const codePacks = CODE_DENOMINATIONS.map((amount) => ({
-  amount,
-  price: CODE_PRICES[amount],
-}));
+// D4: номиналы показываем как анонс, без цены — товар пока не продаётся,
+// а цена непродающегося товара это и вопрос к конверсии, и вопрос банка.
+const codeDenominations = [...CODE_DENOMINATIONS];
 
 export default function Home() {
   return (
@@ -68,7 +65,7 @@ export default function Home() {
         <div className={styles.heroCopy}>
           <div className={styles.eyebrow}>
             <span className={styles.statusDot} />
-            Теперь два способа получить Robux
+            Покупка Robux за рубли
           </div>
           <h1 className={styles.title}>
             Robux.
@@ -78,53 +75,58 @@ export default function Home() {
             <span>Твой темп.</span>
           </h1>
           <p className={styles.lead}>
-            Получи код мгновенной активации без настройки аккаунта или выбери выгодную покупку через геймпасс.
-            Оба варианта — без передачи пароля Roblox.
+            Покупка через геймпасс: цена и количество Robux известны до оплаты, пароль Roblox не нужен.
+            Коды мгновенной активации готовим к запуску.
           </p>
           <div className={styles.heroActions}>
-            <a href="#codes" className={styles.primaryAction}>
-              Выбрать код активации <ArrowRight size={18} />
+            <a href="#calculator" className={styles.primaryAction}>
+              Купить через геймпасс <ArrowRight size={18} />
             </a>
-            <a href="#calculator" className={styles.secondaryAction}>
-              <Gamepad2 size={17} /> Купить через геймпасс
+            {/* D4: вход в блок кодов — тихая ссылка, а не кнопка: покупка кодов
+                ещё не включена, и первый экран не должен предлагать кнопку
+                в неработающий сценарий. */}
+            <a href="#codes" className={styles.heroTextLink}>
+              <KeyRound size={16} /> Коды активации — скоро
             </a>
           </div>
           <div className={styles.heroFacts}>
-            <span><KeyRound size={15} /> Код за 10–15 минут</span>
-            <span><Clock3 size={15} /> Геймпасс — выгоднее</span>
+            <span><ShieldCheck size={15} /> Без пароля Roblox</span>
+            <span><Sparkles size={15} /> Цена фиксируется до оплаты</span>
           </div>
         </div>
 
         <div className={styles.methodDeck} aria-label="Способы покупки Robux">
-          <article className={styles.codeMethodCard}>
+          <article className={styles.gamepassHeroCard}>
             <div className={styles.methodTopline}>
-              <span><Sparkles size={14} /> Новый способ</span>
-              <small>Без настройки Roblox</small>
+              <span><Gamepad2 size={14} /> Основной способ</span>
+              <small>от 160 ₽</small>
             </div>
             <div className={styles.methodCopy}>
-              <span className={styles.methodIcon}><KeyRound size={24} /></span>
+              <span className={styles.methodIcon}><Gamepad2 size={24} /></span>
               <div>
-                <p>Код мгновенной активации</p>
-                <h2>Активируй сразу</h2>
+                <p>Покупка через геймпасс</p>
+                <h2>Больше Robux</h2>
               </div>
             </div>
-            <div className={styles.codeTicket} aria-hidden="true">
-              <div><span>ROBLOXBANK</span><strong>R$</strong></div>
-              <p>••••&nbsp; ••••&nbsp; ••••</p>
-              <small>Код появится в личном кабинете</small>
-            </div>
+            <ul className={styles.methodPoints}>
+              <li><CircleCheck size={16} /> Цена и количество видны до оплаты</li>
+              <li><CircleCheck size={16} /> Пароль Roblox не нужен</li>
+              <li><CircleCheck size={16} /> Инструкция проведёт по шагам</li>
+            </ul>
             <div className={styles.methodFooter}>
-              <span><TimerReset size={16} /> 10–15 минут</span>
-              <strong>от 309 ₽</strong>
+              <span><TimerReset size={16} /> Статус — в кабинете</span>
+              <strong>Купить <ArrowRight size={17} /></strong>
             </div>
           </article>
 
-          <article className={styles.gamepassMethodCard}>
-            <span className={styles.methodIcon}><Gamepad2 size={22} /></span>
-            <div><small>Выгоднее</small><strong>Через геймпасс</strong></div>
-            <span>от 160 ₽</span>
-            <ArrowRight size={18} />
-          </article>
+          <div className={styles.codeTeaser}>
+            <span className={styles.codeTeaserIcon}><KeyRound size={18} /></span>
+            <p>
+              <strong>Коды мгновенной активации</strong>
+              <small>Готовим запуск</small>
+            </p>
+            <a href="#codes">Что это</a>
+          </div>
         </div>
       </section>
 
@@ -140,49 +142,41 @@ export default function Home() {
       <section className={styles.productsSection}>
         <div className={styles.sectionHeading}>
           <div>
-            <span className={styles.sectionKicker}>Выбери свой формат</span>
-            <h2>Код или геймпасс —<br />решать тебе</h2>
+            <span className={styles.sectionKicker}>Как купить Robux</span>
+            <h2>Геймпасс сейчас,<br />коды — скоро</h2>
           </div>
-          <p>Код дороже, зато не нужно ничего создавать в Roblox. Геймпасс требует нескольких шагов, но даёт больше Robux за те же деньги.</p>
+          <p>Через геймпасс покупка работает уже сегодня: цена известна до оплаты, пароль не нужен. Коды мгновенной активации готовим к запуску.</p>
         </div>
 
         <div className={styles.productsGrid}>
-          <article id="codes" className={styles.codesStore}>
-            <div className={styles.codesStoreHead}>
-              <span className={styles.codesIcon}><Gift size={23} /></span>
-              <div>
-                <span>Коды мгновенной активации Roblox</span>
-                <h3>Выбери номинал</h3>
-              </div>
-              <span className={styles.newBadge}>NEW</span>
-            </div>
-            <p className={styles.codesIntro}>Фиксированные пакеты Robux. Код активируется сразу после получения; первое время выдаём его в личный кабинет в течение 10–15 минут.</p>
-            <div className={styles.codesGrid}>
-              {codePacks.map(({ amount, price }) => (
-                <div key={amount} className={`${styles.codePack} ${amount === 800 ? styles.codePackPopular : ""}`}>
-                  {amount === 800 && <small>Популярный</small>}
-                  <strong>{amount.toLocaleString("ru-RU")} <span>R$</span></strong>
-                  <span>{price.toLocaleString("ru-RU")} ₽</span>
-                </div>
-              ))}
-            </div>
-            <div className={styles.codesPromise}>
-              <div><BadgeCheck size={18} /><span><strong>Глобальный код</strong><small>Подойдёт для любого региона</small></span></div>
-              <div><TimerReset size={18} /><span><strong>Честные 10–15 минут</strong><small>Статус всегда виден в кабинете</small></span></div>
-            </div>
-            <button type="button" className={styles.codesAction} disabled>
-              Скоро в продаже <ArrowRight size={18} />
-            </button>
-            <p className={styles.previewNote}>Визуальный предпросмотр — покупка кодов пока не включена</p>
-          </article>
-
           <div id="calculator" className={styles.calculatorWrap}>
             <div className={styles.gamepassLabel}>
               <span><Gamepad2 size={16} /> Через геймпасс</span>
-              <small>Лучше цена</small>
+              <small>Работает сейчас</small>
             </div>
             <Calculator />
           </div>
+
+          <article id="codes" className={styles.codesStore}>
+            <div className={styles.codesStoreHead}>
+              <span className={styles.codesIcon}><Gift size={23} /></span>
+              <h3>Коды мгновенной активации</h3>
+              <span className={styles.soonBadge}>СКОРО</span>
+            </div>
+            <p className={styles.codesIntro}>Фиксированные номиналы Robux без настройки аккаунта: код активируется сразу после получения, выдача занимает 10–15 минут.</p>
+            <div className={styles.codesGrid}>
+              {codeDenominations.map((amount) => (
+                <div key={amount} className={styles.codePack}>
+                  <strong>{amount.toLocaleString("ru-RU")} <span>R$</span></strong>
+                </div>
+              ))}
+            </div>
+            {/* D4: вместо disabled-кнопки «Скоро в продаже» — честная строка
+                состояния со ссылкой на способ, который работает. */}
+            <p className={styles.codesStatus}>
+              Покупка кодов пока не включена. Сейчас Robux можно купить <a href="#calculator">через геймпасс</a>.
+            </p>
+          </article>
         </div>
       </section>
 
@@ -217,16 +211,9 @@ export default function Home() {
           <div>
             <span className={styles.sectionKicker}>Статус заказа</span>
             <h2>Всегда понятно,<br />что происходит дальше</h2>
-            <p>У каждого формата свой понятный путь: код готовится к выдаче, а геймпасс проходит проверку и выкуп.</p>
+            <p>Заказ через геймпасс проходит проверку и выкуп — каждый шаг виден в личном кабинете.</p>
           </div>
           <div className={styles.orderWidgets}>
-            <div className={`${styles.orderWidget} ${styles.codeOrderWidget}`}>
-              <div className={styles.orderWidgetTop}>
-                <span>Код мгновенной активации</span><strong>Выдаём код · до 15 минут</strong>
-              </div>
-              <div className={styles.orderTrack}><i /><i /><i className={styles.current} /></div>
-              <div className={styles.orderLabels}><span>Оплачен</span><span>Готовится</span><span>Код выдан</span></div>
-            </div>
             <div className={styles.orderWidget}>
               <div className={styles.orderWidgetTop}>
                 <span>Через геймпасс</span><strong>Геймпасс проверяется</strong>
@@ -241,11 +228,11 @@ export default function Home() {
       <section className={styles.bottomCta}>
         <div>
           <span className={styles.sectionKicker}>Готов начать?</span>
-          <h2>Выбери удобный способ</h2>
+          <h2>Купи Robux через геймпасс</h2>
         </div>
         <div className={styles.bottomActions}>
-          <a href="#codes" className={styles.secondaryAction}><KeyRound size={17} /> К кодам</a>
-          <a href="#calculator" className={styles.primaryAction}>К геймпассам <ArrowRight size={18} /></a>
+          <a href="#calculator" className={styles.primaryAction}>К калькулятору <ArrowRight size={18} /></a>
+          <a href="#codes" className={styles.bottomTextLink}>Коды активации — скоро</a>
         </div>
       </section>
 
