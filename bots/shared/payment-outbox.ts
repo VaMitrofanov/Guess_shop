@@ -9,6 +9,36 @@ const MAX_ATTEMPTS = 8;
 const LEASE_MS = 5 * 60_000;
 const POLL_MS = 15_000;
 
+/**
+ * Единственный источник правды о том, какие топики воркер умеет доставлять.
+ *
+ * Появился после ultra-review 28.07: `createCanonicalWebOrder` клал в очередь
+ * `web.order.created`, обработчика не было, и КАЖДЫЙ заказ с сайта уходил в
+ * 8 попыток по ~2 часа, а затем в `DEAD` с тревогой админам. На проде так
+ * умерли 4 сообщения из 4. Контракт-тест сверяет этот набор с топиками,
+ * которые реально эмитит приложение, — молча разойтись они больше не могут.
+ */
+export const HANDLED_TOPICS = new Set([
+  "payment.confirmed",
+  "payment.refund.recorded",
+  "web.order.created",
+]);
+
+/**
+ * Топик, которого воркер не знает. Это всегда дефект деплоя (код приложения
+ * ушёл вперёд воркера), а не временный сбой, поэтому повторять бессмысленно:
+ * такое сообщение становится `DEAD` с первой же попытки.
+ */
+export class UnsupportedTopicError extends Error {
+  constructor(topic: string) {
+    super(`unsupported outbox topic: ${topic}`);
+    this.name = "UnsupportedTopicError";
+  }
+}
+
+/** Заказ ещё не оплачен — карточка «создан, ждём оплату» уместна. */
+const AWAITING_PAYMENT_STATUSES = new Set(["AWAITING_PAYMENT", "PAYMENT_PENDING"]);
+
 function backoffMs(attempts: number) {
   return Math.min(60 * 60_000, 30_000 * 2 ** (Math.max(1, attempts) - 1));
 }
@@ -25,7 +55,11 @@ async function notifyCustomer(user: { tgId?: string | null; vkId?: string | null
   }
 }
 
-async function dispatch(message: any, bot: TelegramSender) {
+export async function dispatch(message: any, bot: TelegramSender) {
+  // Проверяем топик ДО обращения к БД: неизвестный топик не должен выглядеть
+  // как «заказ не найден» и тратить попытки.
+  if (!HANDLED_TOPICS.has(message.topic)) throw new UnsupportedTopicError(String(message.topic));
+
   const orderId = String(message.payload?.orderId ?? "");
   if (!orderId) throw new Error("outbox payload has no orderId");
 
@@ -45,7 +79,20 @@ async function dispatch(message: any, bot: TelegramSender) {
   if (adminIds.length === 0) throw new Error("ADMIN_IDS/TG_CHAT_ID is not configured");
 
   let adminText: string;
-  if (message.topic === "payment.confirmed") {
+  if (message.topic === "web.order.created") {
+    // Заказ создан, деньги ещё не приняты. Клиенту здесь не пишем: он прямо
+    // сейчас на странице оплаты, сообщение «заказ создан» только помешает.
+    // Пока сообщение лежало в очереди, заказ мог уже оплатиться или отмениться —
+    // тогда карточка неактуальна, и доставлять её не нужно (но и падать нельзя).
+    if (!AWAITING_PAYMENT_STATUSES.has(order.status)) return;
+    const kopecks = order.paymentAmountKopecks ?? payment?.amountKopecks ?? 0;
+    adminText =
+      `🆕 <b>ЗАКАЗ С САЙТА СОЗДАН</b>\n` +
+      `Заказ: <code>${escapeHtml(order.publicOrderId ?? order.wbCode)}</code>\n` +
+      `Сумма: <b>${(kopecks / 100).toFixed(2)} ₽</b> · <b>${order.amount} R$</b>\n` +
+      `Ник: ${escapeHtml(order.robloxUsername ?? "—")}\n` +
+      `Статус: ожидает оплаты`;
+  } else if (message.topic === "payment.confirmed") {
     adminText =
       `💳 <b>ОПЛАТА С САЙТА ПОДТВЕРЖДЕНА</b>\n` +
       `Заказ: <code>${escapeHtml(order.publicOrderId ?? order.wbCode)}</code>\n` +
@@ -61,7 +108,7 @@ async function dispatch(message: any, bot: TelegramSender) {
       `Статус платежа: <b>${escapeHtml(payment?.status ?? "—")}</b>`;
     await notifyCustomer(order.user, "↩️ <b>Возврат подтверждён банком.</b> Срок зачисления зависит от банка вашей карты.", bot);
   } else {
-    throw new Error(`unsupported outbox topic: ${message.topic}`);
+    throw new UnsupportedTopicError(String(message.topic));
   }
 
   const results = await Promise.all(adminIds.map((id) => tgSend(id, adminText)));
@@ -104,7 +151,8 @@ async function processBatch(bot: TelegramSender) {
         data: { status: "DELIVERED", deliveredAt: new Date(), lockedAt: null, lastError: null },
       });
     } catch (error) {
-      const dead = message.attempts >= MAX_ATTEMPTS;
+      // Неизвестный топик повторять незачем — это рассинхрон кода, а не сбой.
+      const dead = error instanceof UnsupportedTopicError || message.attempts >= MAX_ATTEMPTS;
       const lastError = String(error instanceof Error ? error.message : error).slice(0, 500);
       await (db as any).outboxMessage.updateMany({
         where: { id: message.id, status: "PROCESSING" },
