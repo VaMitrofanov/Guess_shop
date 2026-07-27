@@ -9,6 +9,10 @@ export const PASSWORD_RESET_TTL_MS = 30 * 60 * 1_000;
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
+function emailHtml(input: { preheader: string; title: string; body: string; link: string; button: string; note: string }) {
+  return `<!doctype html><html lang="ru"><body style="margin:0;background:#f6f3ff;font-family:Arial,sans-serif;color:#241b43"><div style="display:none;max-height:0;overflow:hidden;opacity:0">${input.preheader}</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:32px 12px;background:#f6f3ff"><tr><td align="center"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border:1px solid #e4ddfa;border-radius:20px"><tr><td style="padding:32px"><p style="margin:0 0 22px;font-size:18px;font-weight:700;color:#7050e8">RobloxBank</p><h1 style="margin:0 0 14px;font-size:28px;line-height:1.15">${input.title}</h1><p style="margin:0 0 26px;font-size:16px;line-height:1.55;color:#6f6784">${input.body}</p><p style="margin:0 0 26px"><a href="${input.link}" style="display:inline-block;padding:14px 22px;border-radius:12px;background:#7352e8;color:#fff;text-decoration:none;font-weight:700">${input.button}</a></p><p style="margin:0;font-size:13px;line-height:1.55;color:#8b839f">${input.note}</p><p style="margin:22px 0 0;font-size:12px;line-height:1.5;color:#8b839f">Если кнопка не работает, откройте ссылку:<br><a href="${input.link}" style="color:#7050e8;word-break:break-all">${input.link}</a></p></td></tr></table></td></tr></table></body></html>`;
+}
+
 export function emailActionTokenHash(token: string) {
   return crypto.createHash("sha256").update(token, "utf8").digest("hex");
 }
@@ -26,7 +30,9 @@ function publicBaseUrl() {
   const candidate = process.env.NEXT_PUBLIC_APP_URL ?? process.env.AUTH_URL ?? process.env.NEXTAUTH_URL;
   try {
     const parsed = new URL(candidate ?? "https://robloxbank.ru");
-    if (parsed.protocol !== "https:" && parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
+    const localHost = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]";
+    const publicHost = parsed.hostname === "robloxbank.ru" || parsed.hostname === "www.robloxbank.ru";
+    if (!publicHost && !(localHost && parsed.protocol === "http:")) {
       return "https://robloxbank.ru";
     }
     return parsed.origin;
@@ -68,8 +74,15 @@ export async function sendVerificationEmail(userId: string, email: string): Prom
   const result = await sendMail({
     to: email,
     subject: "Подтвердите email — RobloxBank",
-    text: `Подтвердите email для аккаунта RobloxBank: ${link}\n\nСсылка действует 24 часа. Если это были не вы, просто проигнорируйте письмо.`,
-    html: `<p>Подтвердите email для аккаунта RobloxBank.</p><p><a href="${link}">Подтвердить email</a></p><p>Ссылка действует 24 часа. Если это были не вы, просто проигнорируйте письмо.</p>`,
+    text: `Подтвердите email для аккаунта RobloxBank:\n\n${link}\n\nСсылка действует 24 часа. Если это были не вы, просто проигнорируйте письмо.`,
+    html: emailHtml({
+      preheader: "Подтвердите email, чтобы восстановление доступа всегда было доступно.",
+      title: "Подтвердите email",
+      body: "Нажмите кнопку ниже, чтобы подтвердить адрес для аккаунта RobloxBank.",
+      link,
+      button: "Подтвердить email",
+      note: "Ссылка действует 24 часа. Если это были не вы, просто проигнорируйте письмо.",
+    }),
   });
   if (!result.ok) await invalidateUndeliveredToken(issued.tokenHash);
   return result;
@@ -81,8 +94,15 @@ export async function sendPasswordResetEmail(userId: string, email: string): Pro
   const result = await sendMail({
     to: email,
     subject: "Восстановление доступа — RobloxBank",
-    text: `Чтобы задать новый пароль RobloxBank, откройте ссылку: ${link}\n\nСсылка действует 30 минут и используется один раз. Если это были не вы, ничего делать не нужно.`,
-    html: `<p>Чтобы задать новый пароль RobloxBank, откройте ссылку:</p><p><a href="${link}">Задать новый пароль</a></p><p>Ссылка действует 30 минут и используется один раз. Если это были не вы, ничего делать не нужно.</p>`,
+    text: `Чтобы задать новый пароль RobloxBank, откройте ссылку:\n\n${link}\n\nСсылка действует 30 минут и используется один раз. Если это были не вы, ничего делать не нужно.`,
+    html: emailHtml({
+      preheader: "Ссылка для восстановления доступа к RobloxBank.",
+      title: "Восстановление доступа",
+      body: "Нажмите кнопку ниже, чтобы задать новый пароль RobloxBank.",
+      link,
+      button: "Задать новый пароль",
+      note: "Ссылка действует 30 минут и используется один раз. Если это были не вы, ничего делать не нужно.",
+    }),
   });
   if (!result.ok) await invalidateUndeliveredToken(issued.tokenHash);
   return result;
