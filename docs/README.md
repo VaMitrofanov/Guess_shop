@@ -17,9 +17,9 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [corridor-and-site.md](corridor-and-site.md) | WB-гейт, сайт `/guide`, API коридора, восстановление сессии |
 | [site-acquiring-master-plan.md](site-acquiring-master-plan.md) | Ультра-ревью `robloxbank.ru`, P0-блокеры эквайринга, единые цена/identity/orders, дизайн и поэтапный launch plan |
 | [site-launch-implementation-plan.md](site-launch-implementation-plan.md) | Согласуемый план 18.07: baseline, обязательная регистрация перед оплатой, полноценный ЛК, controlled rollout, WB→сайт→бот/группа и боевой E2E |
-| [auth-account-readiness-plan.md](auth-account-readiness-plan.md) | ЛК/login/register и email/TG/VK identity: verify/reset/consent/session revoke готовы в коде; SMTP и live-provider acceptance остаются |
+| [auth-account-readiness-plan.md](auth-account-readiness-plan.md) | ЛК/login/register и email/TG/VK identity: Brevo SMTP в production, Gmail verification принят; Mail.ru ждёт пересмотра антиспам-блокировки |
 | [roblox-codes-plan.md](roblox-codes-plan.md) | Новый товар: коды активации Roblox — прайс, честные 10–15 мин → «моментально» через буфер, безопасность предъявительских кодов, ККТ/юр-гейты и этапы K0–K9 |
-| [email-setup.md](email-setup.md) | Почта `robloxbank.ru`: Яндекс 360, DNS-записи для Cloudflare (MX/SPF/DKIM/DMARC), env для SMTP, приёмка живой доставкой и порядок замены адреса в реквизитах |
+| [email-setup.md](email-setup.md) | Почта `robloxbank.ru`: Brevo SMTP relay на порту 2525 работает в production; DNS принят, Gmail принят, Mail.ru appeal на рассмотрении |
 | [tbank-precheck-2026-07-17.md](tbank-precheck-2026-07-17.md) | Предрелизный аудит публичной ссылки для Т‑Банка 17.07: фактические тесты, найденные блокеры и план закрытия |
 | [design-rework-concept.html](design-rework-concept.html) | Интерактивный визуальный концепт глобального реворка главной и mobile-first WB guide |
 | [twa-ux-v3-concept.html](twa-ux-v3-concept.html) | Визуальный концепт TWA v3: два варианта Главной, умная выдача и foreground bottom sheet |

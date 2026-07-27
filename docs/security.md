@@ -509,10 +509,11 @@ rollout, иначе такой токен нельзя было бы отозв�
 `localhost` в dev), а внутренний/чужой host откатывается на `https://robloxbank.ru`.
 Регрессия закрыта unit-тестом и проверкой production-заголовка `Location`.
 
-**Остаточный внешний блокер:** mailer и шаблоны готовы, но production SMTP/DNS ещё не
-приняты. Без `SMTP_USER`/`SMTP_PASSWORD` отправка честно отвечает `not_configured`; reset
-не создаёт ложное обещание доставки. Требуются Яндекс 360, MX/SPF/DKIM/DMARC и живая
-доставка на Yandex/Mail.ru/Gmail. Детали: `docs/email-setup.md`.
+**Статус 28.07:** Brevo SMTP, DKIM/DMARC, branded SPF/return-path, Gmail-доставка и
+verification redirect приняты в production. Mail.ru отклоняет общий Brevo IP с
+`550 spam message rejected`; appeal отправлен через официальную форму провайдера.
+Интерфейс не обещает доставку после одного SMTP acceptance и предлагает Telegram/другой
+email. Входящий MX/служебный ящик остаётся отдельной задачей. Детали: `docs/email-setup.md`.
 
 **Риск (остаточный):** до SMTP acceptance самостоятельный recovery недоступен; in-memory
 лимит не заменяет shared limiter при нескольких web-репликах; абсолютный/idle TTL и кнопка
