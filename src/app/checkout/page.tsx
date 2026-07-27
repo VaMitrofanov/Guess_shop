@@ -27,6 +27,7 @@ import styles from "./checkout.module.css";
 
 const MIN_ROBUX = 100;
 const MAX_ROBUX = 100_000;
+const AMOUNT_PRESETS = [100, 500, 1_000, 2_000, 5_000];
 
 type PriceQuote = {
   quoteId: string;
@@ -68,6 +69,7 @@ function CheckoutContent() {
 
   const [stage, setStage] = useState<"select" | "confirm">("select");
   const [robux, setRobux] = useState(initialAmount);
+  const [amountInput, setAmountInput] = useState(String(initialAmount));
   const [searchQuery, setSearchQuery] = useState(rememberedUsername);
   const [username, setUsername] = useState(rememberedUsername);
   const [gamepasses, setGamepasses] = useState<RobloxPass[]>([]);
@@ -85,6 +87,26 @@ function CheckoutContent() {
   const [acquiringMode, setAcquiringMode] = useState<"off" | "limited" | "on">("off");
   const [error, setError] = useState("");
   const [idempotencyKey] = useState(() => crypto.randomUUID());
+
+  const setOrderAmount = (nextAmount: number, syncInput = true) => {
+    const normalized = normalizeAmount(String(nextAmount));
+    setRobux(normalized);
+    if (syncInput) setAmountInput(String(normalized));
+    setQuote(null);
+    setError("");
+    const nextPassPrice = grossPassPrice(normalized);
+    setGamepasses((current) => rankSellableGamepasses(current, nextPassPrice));
+    setSelectedPass((current) => current && gamepassPriceMatches(Number(current.price), nextPassPrice) ? current : null);
+  };
+
+  const handleAmountInput = (value: string) => {
+    const digits = value.replace(/\D/g, "").slice(0, 6);
+    setAmountInput(digits);
+    const parsed = Number.parseInt(digits, 10);
+    if (Number.isSafeInteger(parsed) && parsed >= MIN_ROBUX && parsed <= MAX_ROBUX) {
+      setOrderAmount(parsed, false);
+    }
+  };
 
   const price = getPrice(robux);
   const breakdown = getBreakdown(robux);
@@ -336,6 +358,35 @@ function CheckoutContent() {
       {stage === "select" ? (
         <div className={styles.checkoutGrid}>
           <section className={styles.mainColumn}>
+            <div className={styles.panel}>
+              <div className={styles.panelHeading}>
+                <span className={styles.panelIcon}><WalletCards size={21} /></span>
+                <div><span>Сумма заказа</span><h2>Сколько Robux купить?</h2></div>
+              </div>
+              <label className={styles.amountLabel} htmlFor="checkout-amount">Получишь на аккаунт</label>
+              <div className={styles.amountField}>
+                <input
+                  id="checkout-amount"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={amountInput}
+                  onChange={(event) => handleAmountInput(event.target.value)}
+                  onBlur={() => setOrderAmount(Number.parseInt(amountInput, 10) || robux)}
+                  onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+                  aria-describedby="checkout-amount-note"
+                />
+                <span>R$</span>
+              </div>
+              <div className={styles.amountPresets} aria-label="Быстрый выбор количества Robux">
+                {AMOUNT_PRESETS.map((amount) => (
+                  <button key={amount} type="button" className={robux === amount ? styles.amountPresetActive : styles.amountPreset} onClick={() => setOrderAmount(amount)}>
+                    {robux === amount && <Check size={14} />} {amount.toLocaleString("ru-RU")}
+                  </button>
+                ))}
+              </div>
+              <p id="checkout-amount-note" className={styles.helper}>Можно указать любое количество от {MIN_ROBUX.toLocaleString("ru-RU")} до {MAX_ROBUX.toLocaleString("ru-RU")} R$.</p>
+            </div>
             <div className={styles.panel}>
               <div className={styles.panelHeading}>
                 <span className={styles.panelIcon}><UserRound size={21} /></span>

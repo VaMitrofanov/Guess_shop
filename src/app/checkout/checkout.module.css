@@ -20,6 +20,15 @@
 .panelIcon { width:42px; height:42px; flex:0 0 auto; display:grid; place-items:center; border-radius:13px; background:#ece7ff; color:#7556e8; }
 .panelHeading span:not(.panelIcon) { color:#837a94; font-size:15px; font-weight:900; letter-spacing:.07em; text-transform:uppercase; }
 .panelHeading h2 { margin:3px 0 0; font-size:24px; line-height:1.2; letter-spacing:-.035em; }
+.amountLabel { display:block; margin-bottom:8px; color:#61586f; font-size:15px; font-weight:850; }
+.amountField { min-height:58px; display:flex; align-items:center; gap:10px; padding:0 16px; border:1.5px solid #c9bfe8; border-radius:14px; background:#fbfaff; color:#7556e8; }
+.amountField:focus-within { border-color:#7556e8; box-shadow:0 0 0 4px rgba(117,86,232,.1); }
+.amountField input { width:100%; min-width:0; border:0; outline:0; background:transparent; color:#251b3f; font-family:var(--font-display),sans-serif; font-size:27px; font-weight:900; letter-spacing:-.035em; }
+.amountField>span { font-size:18px; font-weight:900; }
+.amountPresets { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; margin-top:10px; }
+.amountPreset,.amountPresetActive { min-height:42px; display:flex; align-items:center; justify-content:center; gap:4px; border:1px solid #d8d0ec; border-radius:11px; background:#fbfaff; color:#655b77; font-size:14px; font-weight:900; cursor:pointer; }
+.amountPreset:hover { border-color:#aa98e7; color:#7556e8; }
+.amountPresetActive { border-color:#7556e8; background:#7556e8; color:#fff; }
 .searchRow { display:grid; grid-template-columns:1fr auto; gap:9px; }
 .searchField { min-height:56px; display:flex; align-items:center; gap:10px; padding:0 15px; border:1.5px solid #c9bfe8; border-radius:14px; background:#fbfaff; color:#7556e8; }
 .searchField input { width:100%; min-width:0; border:0; outline:0; background:transparent; color:#251b3f; font-size:18px; font-weight:700; scroll-margin-block:24px 180px; }
@@ -62,7 +71,7 @@
 .authGate { display:grid; grid-template-columns:auto 1fr; gap:12px; padding:17px; border:1px solid #d7cfee; border-radius:16px; background:#faf8ff; }.authGate strong { display:block; font-size:18px; }.authGate p { margin:5px 0 0; color:#746b86; font-size:15px; line-height:1.5; }.authActions { grid-column:1/-1; display:grid; grid-template-columns:1fr 1fr; gap:9px; }.authActions a { min-height:48px; display:grid; place-items:center; border:1px solid #7556e8; border-radius:12px; color:#7556e8; font-size:15px; font-weight:900; }.authActions a:last-child { background:#7556e8; color:#fff; }
 .pageLoader { min-height:70vh; display:grid; place-items:center; color:#7556e8; }.spin { animation:checkoutSpin .8s linear infinite; }@keyframes checkoutSpin{to{transform:rotate(360deg)}}
 @media(max-width:900px){.checkoutGrid,.confirmGrid{grid-template-columns:1fr}.summaryCard{position:static}.choiceGrid,.passGrid{grid-template-columns:1fr}.progressHeader{align-items:flex-start}.stageIndicator{padding-top:8px}}
-@media(max-width:620px){.shell{width:calc(100% - 28px);padding:42px 0 74px}.progressHeader{flex-direction:column}.progressHeader h1{font-size:36px}.progressHeader p{font-size:16px}.panel,.summaryCard{padding:20px 16px;border-radius:18px}.searchRow{grid-template-columns:1fr}.searchRow>button{width:100%}.panelHeading h2{font-size:22px}.summaryCard h2{font-size:34px}.choiceGrid,.passGrid{grid-template-columns:1fr}.confirmPair{grid-template-columns:1fr}.confirmArrow{margin:auto;transform:rotate(90deg)}.stageIndicator{align-self:flex-start}}
+@media(max-width:620px){.shell{width:calc(100% - 28px);padding:42px 0 74px}.progressHeader{flex-direction:column}.progressHeader h1{font-size:36px}.progressHeader p{font-size:16px}.panel,.summaryCard{padding:20px 16px;border-radius:18px}.amountPresets{grid-template-columns:repeat(3,minmax(0,1fr))}.searchRow{grid-template-columns:1fr}.searchRow>button{width:100%}.panelHeading h2{font-size:22px}.summaryCard h2{font-size:34px}.choiceGrid,.passGrid{grid-template-columns:1fr}.confirmPair{grid-template-columns:1fr}.confirmArrow{margin:auto;transform:rotate(90deg)}.stageIndicator{align-self:flex-start}}
 
 :global(html[data-theme="dark"]) .shell { color:#f4f0ff; }
 :global(html[data-theme="dark"]) .progressHeader p,
@@ -78,10 +87,13 @@
 :global(html[data-theme="dark"]) .choiceSelected,
 :global(html[data-theme="dark"]) .passCard,
 :global(html[data-theme="dark"]) .passSelected,
+:global(html[data-theme="dark"]) .amountField,
+:global(html[data-theme="dark"]) .amountPreset,
 :global(html[data-theme="dark"]) .searchField,
 :global(html[data-theme="dark"]) .emailInput,
 :global(html[data-theme="dark"]) .consentBox { border-color:#3a304b; background:#151120; color:#f4f0ff; }
 :global(html[data-theme="dark"]) .searchField input,
+:global(html[data-theme="dark"]) .amountField input,
 :global(html[data-theme="dark"]) .emailInput,
 :global(html[data-theme="dark"]) .summaryRows strong { color:#f4f0ff; }
 :global(html[data-theme="dark"]) .choiceSelected,

@@ -61,6 +61,18 @@ TerminalKey. До нового Password повторять оплаты бесс
 только `TINKOFF_SECRET_KEY`, redeploy Web и провести один owner E2E. Acquiring остаётся
 ограниченным owner allowlist; раскрытый Password подлежит обязательной ротации.
 
+**27.07.2026, credentials подтверждены:** повторный полный production `Init` после
+исправления регистрозависимого символа `I/l` в Password вернул `Success=true`,
+`ErrorCode=0`, `PaymentId`, `PaymentURL`, статус `NEW`. Платёж не оплачивался; это только
+неоплаченная диагностическая сессия. Технический внешний блокер снят, следующий этап —
+один реальный owner checkout → confirmation → webhook/outbox/check → полный возврат.
+Password был раскрыт в переписке и после E2E подлежит обязательной ротации.
+
+В том же hotfix `/checkout` получил собственный редактор суммы: ручной диапазон
+`100..100000 R$` и presets. Поэтому вход из ЛК без query `amount` больше не фиксирует
+покупателя на default `1000 R$`; смена суммы безопасно пересчитывает целевую цену pass,
+переранжирует результаты и снимает несовместимый выбор до создания quote.
+
 **Дизайн `/payment/status` обновлён локально 18.07:** старый pixel UI заменён на Violet/Frost
 order timeline с waiting/paid/work/completed/error/offline состояниями, переходом в ЛК,
 защищённой ссылкой и mobile layout. Production rollout выполняется только вместе с текущим
