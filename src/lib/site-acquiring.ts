@@ -66,3 +66,18 @@ export function publicSiteAcquiringMode(decision: SiteAcquiringDecision): "off" 
   if (!decision.masterEnabled || decision.mode === "off") return "off";
   return decision.mode === "on" ? "on" : "limited";
 }
+
+/**
+ * Принимает ли сайт оплату **в принципе** — вопрос о витрине, а не об аккаунте.
+ *
+ * F3 (ultra-review 28.07): `eligible` требует `userId`, поэтому анонимный
+ * посетитель всегда получал `false` — даже в режиме `on`. Витрина и подвал
+ * из-за этого сообщали «приём платежей отключён» открытому миру. Теперь у
+ * этих двух разных вопросов два разных ответа:
+ *
+ * - `siteAcceptsPayments` — показывать ли предупреждение на витрине;
+ * - `decision.eligible`   — можно ли этому пользователю нажать «Оплатить».
+ */
+export function siteAcceptsPayments(decision: SiteAcquiringDecision): boolean {
+  return decision.masterEnabled && decision.mode !== "off";
+}

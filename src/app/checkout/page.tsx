@@ -83,8 +83,9 @@ function CheckoutContent() {
   const [paying, setPaying] = useState(false);
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [acquiringEnabled, setAcquiringEnabled] = useState(false);
-  const [acquiringAvailable, setAcquiringAvailable] = useState(false);
-  const [acquiringMode, setAcquiringMode] = useState<"off" | "limited" | "on">("off");
+  // F3: принимает ли оплату САЙТ (не зависит от аккаунта). `acquiringEnabled` —
+  // про конкретного пользователя, и для гостя он всегда false.
+  const [acquiringAccepting, setAcquiringAccepting] = useState(true);
   const [error, setError] = useState("");
   const [idempotencyKey] = useState(() => crypto.randomUUID());
 
@@ -182,13 +183,15 @@ function CheckoutContent() {
       .then((data) => {
         if (active) {
           setAcquiringEnabled(data.enabled === true);
-          setAcquiringAvailable(data.available === true);
-          setAcquiringMode(data.mode === "on" || data.mode === "limited" ? data.mode : "off");
+          setAcquiringAccepting(data.accepting !== false);
           if (typeof data.authenticated === "boolean") setAuthenticated(data.authenticated);
         }
       })
       .catch(() => {
-        if (active) setAcquiringEnabled(false);
+        if (active) {
+          setAcquiringEnabled(false);
+          setAcquiringAccepting(false);
+        }
       });
     return () => { active = false; };
   }, []);
@@ -348,10 +351,18 @@ function CheckoutContent() {
         </div>
       )}
 
-      {stage === "select" && authenticated && !acquiringEnabled && (
+      {/* F3: матрица «сайт закрыт / поэтапный запуск / всё работает». Гостя не
+          пугаем: пока он не вошёл, про допуск его аккаунта сказать нечего. */}
+      {stage === "select" && !acquiringAccepting && (
         <div className={styles.paymentNotice} role="status">
           <CircleAlert size={21} />
-          <span><strong>{acquiringMode === "limited" ? "Идёт поэтапный запуск" : "Оплата временно отключена"}</strong><small>{acquiringAvailable ? "Витрина открыта, но этот аккаунт пока не входит в тестовую группу." : "Заказ и списание денег сейчас не создаются."}</small></span>
+          <span><strong>Оплата временно отключена</strong><small>Заказ и списание денег сейчас не создаются.</small></span>
+        </div>
+      )}
+      {stage === "select" && acquiringAccepting && authenticated && !acquiringEnabled && (
+        <div className={styles.paymentNotice} role="status">
+          <CircleAlert size={21} />
+          <span><strong>Идёт поэтапный запуск</strong><small>Витрина открыта, но этот аккаунт пока не входит в тестовую группу.</small></span>
         </div>
       )}
 
@@ -485,7 +496,10 @@ function CheckoutContent() {
             </div>
             <div className={styles.safeNote}><ShieldCheck size={19} /><span><strong>{!authenticated ? "Выбор сохранён" : acquiringEnabled ? "Цена зафиксирована" : "Денежные операции заблокированы"}</strong><small>{!authenticated ? "После входа обновим персональную цену." : acquiringEnabled ? "До окончания котировки." : "До допуска аккаунта к оплате."}</small></span></div>
             {!authenticated ? <Link href={loginHref} className={styles.primaryButton}>Войти перед оплатой <ArrowRight size={18} /></Link> : <button type="button" className={styles.primaryButton} disabled={paying || !agreedToTerms || !receiptEmail || !quote || !acquiringEnabled} onClick={() => void handlePay()}>{paying ? <Loader2 size={19} className={styles.spin} /> : acquiringEnabled ? <>Перейти к оплате <ArrowRight size={18} /></> : <>Оплата пока недоступна</>}</button>}
-            <PaymentMethods className={styles.paymentMethods} showStatus={!acquiringEnabled} />
+            <PaymentMethods
+              className={styles.paymentMethods}
+              statusTone={!acquiringAccepting ? "closed" : authenticated && !acquiringEnabled ? "limited" : undefined}
+            />
           </aside>
         </div>
       )}

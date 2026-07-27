@@ -1,5 +1,6 @@
 import Link from "next/link";
 import PaymentMethods from "@/components/payment-methods";
+import PaymentStatusNotice from "@/components/payment-status-notice";
 
 const links = [
   { href: "/guide?source=site&amount=1000", label: "Инструкция" },
@@ -26,7 +27,11 @@ export default function Footer() {
         </div>
         <div className="mt-7 border-t border-[var(--rb-border)] pt-6">
           <p className="mb-3 text-sm font-black uppercase tracking-[0.08em] text-[var(--rb-muted)]">Платёжный партнёр и способы оплаты</p>
-          <PaymentMethods showStatus />
+          {/* F2/F3: состояние витрины, а не аккаунта — подвал одинаков для гостя
+              и для вошедшего. Раньше здесь стоял безусловный `showStatus`, и
+              «приём платежей отключён» осталось бы на сайте после открытия. */}
+          <PaymentMethods />
+          <PaymentStatusNotice />
         </div>
         <div className="mt-8 flex flex-col gap-3 border-t border-[var(--rb-border)] pt-6 text-base leading-relaxed text-[var(--rb-muted)] md:flex-row md:items-end md:justify-between">
           <p>Сервис ROBLOXBANK не является банком, кредитной или финансовой организацией. Не связан с Roblox Corporation. Roblox и его логотип — торговые марки Roblox Corporation.</p>

@@ -1,11 +1,25 @@
+/**
+ * F2 (ultra-review 28.07): раньше это был булев `showStatus`, который в подвале
+ * стоял без условия — текст «приём платежей отключён» висел на каждой странице
+ * и не изменился бы после открытия сайта. Теперь состояние называется своим
+ * именем, а «всё работает» — это отсутствие баннера, а не отдельный текст.
+ */
+export type PaymentStatusTone = "limited" | "closed";
+
 type PaymentMethodsProps = {
   className?: string;
-  showStatus?: boolean;
+  /** Не передан — баннера нет (обычный рабочий режим). */
+  statusTone?: PaymentStatusTone;
+};
+
+const STATUS_TEXT: Record<PaymentStatusTone, string> = {
+  closed: "Приём платежей временно отключён до завершения проверки банка и кассы.",
+  limited: "Идёт поэтапный запуск: оплата пока открыта части клиентов.",
 };
 
 const brandClass = "inline-flex min-h-10 items-center justify-center rounded-xl border border-[var(--rb-border)] bg-[var(--rb-surface)] px-3 py-2 text-[var(--rb-text)]";
 
-export default function PaymentMethods({ className = "", showStatus = false }: PaymentMethodsProps) {
+export default function PaymentMethods({ className = "", statusTone }: PaymentMethodsProps) {
   return (
     <section className={className} aria-label="Платёжный партнёр и поддерживаемые платёжные системы">
       <div className="flex flex-wrap items-center gap-2.5" role="list">
@@ -41,9 +55,9 @@ export default function PaymentMethods({ className = "", showStatus = false }: P
           </svg>
         </span>
       </div>
-      {showStatus && (
+      {statusTone && (
         <p className="mt-2.5 text-sm leading-relaxed text-[var(--rb-muted)]">
-          Приём платежей временно отключён до завершения проверки банка и кассы.
+          {STATUS_TEXT[statusTone]}
         </p>
       )}
     </section>
