@@ -52,7 +52,7 @@
 .figure[data-step="5"]::after { left:6%; top:53%; width:55%; height:22%; }
 .focusLabel { position:absolute; z-index:3; left:50%; top:12px; transform:translateX(-50%); padding:7px 10px 7px 28px; border-radius:9px; background:#335fff; color:#fff; font-size:12px; font-weight:900; text-transform:uppercase; letter-spacing:.06em; box-shadow:0 5px 18px rgba(0,0,0,.26); animation:guideLabelFloat 2.2s ease-in-out infinite; }
 .focusLabel::before { content:""; position:absolute; left:9px; top:50%; width:11px; height:11px; border:2px solid #fff; border-radius:50%; transform:translateY(-50%); box-shadow:0 0 0 4px rgba(255,255,255,.18); animation:guideRobloxTap 2.2s cubic-bezier(.22,1,.36,1) infinite; }
-.figure::before { content:"ROBLOX  ·  CREATOR HUB"; position:absolute; z-index:4; right:9px; bottom:9px; padding:5px 8px; border:1px solid rgba(255,255,255,.15); border-radius:7px; background:rgba(17,18,20,.9); color:#f7f7f8; font-size:9px; font-weight:800; letter-spacing:.08em; pointer-events:none; }
+.figure::before { content:"ROBLOX  ·  CREATOR HUB"; position:absolute; z-index:4; right:9px; bottom:9px; padding:5px 8px; border:1px solid rgba(255,255,255,.15); border-radius:7px; background:rgba(17,18,20,.9); color:#f7f7f8; font-size:12px; font-weight:800; letter-spacing:.08em; pointer-events:none; }
 @keyframes guideImageFocus { 0%,18%,100%{transform:scale(1)} 45%,72%{transform:scale(1.035)} }
 @keyframes guideTargetPulse { 50%{box-shadow:0 0 0 999px rgba(17,18,20,.22),0 0 0 9px rgba(51,95,255,.14),0 0 40px rgba(51,95,255,.9)} }
 @keyframes guideLabelFloat { 50%{transform:translate(-50%,-4px)} }

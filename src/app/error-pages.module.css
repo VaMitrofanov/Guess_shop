@@ -8,6 +8,6 @@
 .primary,.secondary{min-height:50px;padding:0 20px;display:inline-flex;align-items:center;justify-content:center;border-radius:14px;font-size:15px;font-weight:900;text-decoration:none;cursor:pointer}
 .primary{border:0;background:var(--rb-strong);color:#fff;box-shadow:4px 4px 0 #45d6aa}
 .secondary{border:1px solid var(--rb-border);background:var(--rb-surface-2);color:var(--rb-text)}
-.detail{margin:24px 0 0;color:var(--rb-muted);font-size:12px}
+.detail{margin:24px 0 0;color:var(--rb-muted);font-size:14px}
 @media(max-width:520px){.actions{display:grid}.primary,.secondary{width:100%}.card{border-radius:24px}}
 @media(prefers-reduced-motion:no-preference){.code{animation:float-code 3.8s ease-in-out infinite}@keyframes float-code{50%{transform:rotate(2deg) translateY(-7px)}}}

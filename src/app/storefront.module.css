@@ -84,7 +84,7 @@
 .fieldLabel { display: flex; justify-content: space-between; margin-bottom: 8px; color: #736b85; font-size: 16px; font-weight: 800; }
 .amountField { display: flex; align-items: center; gap: 10px; min-height: 66px; padding: 0 14px 0 17px; border: 1.5px solid #bdb1e7; border-radius: 15px; background: #f5f2ff; }
 .amountField input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: #251b3f; font-size: 28px; font-weight: 800; }
-.amountField span { padding: 7px 9px; border-radius: 9px; background: #45d6aa; color: #15382e; font-size: 13px; font-weight: 900; }
+.amountField span { padding: 7px 9px; border-radius: 9px; background: #45d6aa; color: #15382e; font-size: 14px; font-weight: 900; }
 .packGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-top: 9px; }
 .pack,.packActive { min-height: 48px; border: 1px solid #ded8f1; border-radius: 10px; background: white; color: #5d5570; font-size: 15px; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 4px; cursor: pointer; }
 .packActive { background: #251b3f; border-color: #251b3f; color: white; }
@@ -158,7 +158,7 @@
 .stepCard h3 { margin: 0 0 11px; font-size: 24px; letter-spacing: -.04em; }
 .stepCard p { margin: 0; color: #7a7289; font-size: 17px; line-height: 1.6; }
 .stepCard:nth-child(2) p,.stepCard:nth-child(3) p { color: rgba(255,255,255,.72); }
-.stepCard a { margin-top: 18px; display: inline-flex; align-items: center; gap: 7px; color: white; font-size: 13px; font-weight: 800; }
+.stepCard a { margin-top: 18px; display: inline-flex; align-items: center; gap: 7px; color: white; font-size: 14px; font-weight: 800; }
 
 .controlSection { padding-top: 0; }
 .controlCard { position: relative; overflow: hidden; padding: 44px; display: grid; grid-template-columns: 1.1fr .9fr; gap: 60px; align-items: center; border-radius: 28px; background: #e9e3ff; }

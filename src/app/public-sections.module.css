@@ -9,7 +9,7 @@
 .hero h1 span { background:linear-gradient(90deg,#7556e8,#5d83ed); background-clip:text; color:transparent; }
 .hero p { max-width:650px; margin:22px 0 0; color:var(--rb-muted); font-size:20px; line-height:1.6; font-weight:550; }
 .seal { position:relative; z-index:1; flex:0 0 154px; aspect-ratio:1; display:grid; place-items:center; border:12px solid var(--rb-accent); outline:4px solid #45d6aa; border-radius:50%; color:var(--rb-text); font-family:var(--font-display),sans-serif; font-size:29px; font-weight:950; transform:rotate(8deg); }
-.seal::after { content:"ПРОВЕРЕНО"; position:absolute; bottom:18px; font-family:var(--font-geist-sans),sans-serif; font-size:10px; letter-spacing:.14em; }
+.seal::after { content:"ПРОВЕРЕНО"; position:absolute; bottom:16px; font-family:var(--font-geist-sans),sans-serif; font-size:12px; letter-spacing:.14em; }
 .sectionTop { margin:74px 0 28px; display:flex; align-items:end; justify-content:space-between; gap:30px; }
 .sectionTop h2 { margin:0; font-family:var(--font-display),sans-serif; font-size:clamp(32px,5vw,50px); letter-spacing:-.05em; line-height:1.05; }
 .sectionTop p { max-width:480px; margin:0; color:var(--rb-muted); font-size:17px; line-height:1.55; }
