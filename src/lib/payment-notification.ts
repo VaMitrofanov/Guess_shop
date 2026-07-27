@@ -29,3 +29,16 @@ export function notificationStatus(status: unknown) {
 export function paymentTransitionAllowed(from: PaymentAttemptStatus, to: PaymentAttemptStatus) {
   return from === to || ALLOWED[from].includes(to);
 }
+
+/**
+ * A terminal payment state must also remove an unfulfilled order from every
+ * buyout queue. In particular, a successful full refund used to leave the
+ * order PENDING even though its PaymentAttempt was already REFUNDED.
+ */
+export function paymentClosesUnfulfilledOrder(
+  paymentStatus: PaymentAttemptStatus,
+  orderStatus: string,
+) {
+  return orderStatus !== "COMPLETED"
+    && (paymentStatus === "REJECTED" || paymentStatus === "CANCELED" || paymentStatus === "REFUNDED");
+}

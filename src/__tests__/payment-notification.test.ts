@@ -1,4 +1,8 @@
-import { notificationStatus, paymentTransitionAllowed } from "@/lib/payment-notification";
+import {
+  notificationStatus,
+  paymentClosesUnfulfilledOrder,
+  paymentTransitionAllowed,
+} from "@/lib/payment-notification";
 
 describe("T-Bank notification state matrix", () => {
   test.each([
@@ -20,5 +24,17 @@ describe("T-Bank notification state matrix", () => {
     ["CONFIRMED", "AUTHORIZED", false], ["CANCELED", "CONFIRMED", false],
   ] as const)("transition %s -> %s is %s", (from, to, allowed) => {
     expect(paymentTransitionAllowed(from, to)).toBe(allowed);
+  });
+
+  test.each([
+    ["REFUNDED", "PENDING", true],
+    ["REFUNDED", "IN_PROGRESS", true],
+    ["REFUNDED", "COMPLETED", false],
+    ["PARTIALLY_REFUNDED", "PENDING", false],
+    ["CONFIRMED", "PENDING", false],
+    ["REJECTED", "PAYMENT_PENDING", true],
+    ["CANCELED", "AWAITING_PAYMENT", true],
+  ] as const)("payment %s closes order %s: %s", (payment, order, closes) => {
+    expect(paymentClosesUnfulfilledOrder(payment, order)).toBe(closes);
   });
 });

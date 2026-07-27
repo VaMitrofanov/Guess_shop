@@ -2,7 +2,11 @@ import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { notificationStatus, paymentTransitionAllowed } from "@/lib/payment-notification";
+import {
+  notificationStatus,
+  paymentClosesUnfulfilledOrder,
+  paymentTransitionAllowed,
+} from "@/lib/payment-notification";
 import { verifyTinkoffSignature } from "@/lib/tinkoff";
 import { revertWebOrderBenefits } from "@/lib/web-order-benefits";
 
@@ -106,10 +110,20 @@ export async function POST(req: NextRequest) {
           where: { id: attempt.order.id },
           data: { status: "PENDING", paidAt: new Date(), pendingAt: new Date() },
         });
-      } else if ((nextStatus === "REJECTED" || nextStatus === "CANCELED") && attempt.order.status !== "COMPLETED") {
-        await tx.wbOrder.update({ where: { id: attempt.order.id }, data: { status: "REJECTED" } });
-        // U3: банк отказал — бонус и скидка возвращаются клиенту.
-        benefitsToRevert = attempt.order.id;
+      } else if (paymentClosesUnfulfilledOrder(nextStatus, attempt.order.status)) {
+        await tx.wbOrder.update({
+          where: { id: attempt.order.id },
+          data: {
+            status: "REJECTED",
+            rejectionReason: nextStatus === "REFUNDED"
+              ? "Платёж полностью возвращён"
+              : "Платёж отклонён или отменён банком",
+          },
+        });
+        if (nextStatus === "REJECTED" || nextStatus === "CANCELED") {
+          // U3: банк отказал до оплаты — бонус и скидка возвращаются клиенту.
+          benefitsToRevert = attempt.order.id;
+        }
       }
 
       const event = await tx.orderEvent.create({

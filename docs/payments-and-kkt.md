@@ -62,6 +62,16 @@
   быстрые пресеты. Смена суммы пересортировывает найденные pass по новой целевой цене и
   сбрасывает выбранный pass, если он ей больше не соответствует; quote по-прежнему
   создаётся сервером только после окончательного выбора.
+- **Первый боевой payment/refund E2E 27.07.2026:** owner checkout на `100 R$ / 160 ₽`
+  прошёл `Init → payment form → AUTHORIZED → CONFIRMED`; подписанные callback и
+  `payment.confirmed` outbox доставлены. До выкупа gamepass выполнен один полный
+  идемпотентный возврат: `/v2/Cancel` и callback дали `REFUNDED`, cumulative refund
+  `16000` коп., локальный `PaymentRefund=CONFIRMED`, `payment.refund.recorded=DELIVERED`.
+  В ходе приёмки найден и закрыт дефект: полный refund оставлял незавершённый `WbOrder`
+  в `PENDING`. Теперь terminal `REFUNDED` автоматически переводит любой не-`COMPLETED`
+  заказ в `REJECTED`, исключая ошибочный выкуп после возврата. Временный полный JSON-аудит
+  после E2E выключен; сам acquiring остаётся owner-only. Чеки оплаты/возврата ещё нужно
+  визуально сверить в кабинете Т-Банка/ОФД, а раскрытый Password — перевыпустить.
 - Desktop `/admin` теперь читает тот же `WbOrder`/payment/outbox-контур: dashboard показывает
   открытые платежи, ошибки, `SUBMIT_UNKNOWN` и dead-letter, досье — сумму/PaymentId/refunds/
   events, а `/admin/activity` — единый журнал без сырых payload. Изменяющие payment-действия
@@ -171,7 +181,7 @@ Worker запускается в long-running TG-сервисе вместе с 
 | Callback | duplicate/out-of-order callback | без повторного эффекта | state matrix ✅; staging ⏳ |
 | Downstream | Telegram/API временно недоступен | retry/backoff, заказ остаётся оплачен | policy tests ✅; fault injection ⏳ |
 | Downstream | 8 постоянных ошибок | `DEAD` + alert | policy tests ✅; fault injection ⏳ |
-| Refund | полный подтверждённый платёж | `/Cancel`, `REFUNDED`, closing refund receipt | contract ✅; terminal/ОФД ⏳ |
+| Refund | полный подтверждённый платёж | `/Cancel`, `REFUNDED`, closing refund receipt | production terminal/callback ✅; чек ОФД ⏳ |
 | Refund | частичный и затем остаток | два события, cumulative total, 2 корректных чека | contract ✅ (U7 исправлен 26.07); terminal/ОФД ⏳ |
 | Refund | duplicate UUID/double tap | один provider call | DB idempotency ✅; staging ⏳ |
 | Refund | timeout после provider accept | `SUBMIT_UNKNOWN`, без blind retry | код ✅; fault injection ⏳ |

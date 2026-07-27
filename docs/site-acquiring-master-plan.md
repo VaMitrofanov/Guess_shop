@@ -73,6 +73,16 @@ Password был раскрыт в переписке и после E2E подл�
 покупателя на default `1000 R$`; смена суммы безопасно пересчитывает целевую цену pass,
 переранжирует результаты и снимает несовместимый выбор до создания quote.
 
+**27.07.2026, первый боевой E2E завершён:** owner оплатил `100 R$ / 160 ₽`; банк прислал
+`AUTHORIZED → CONFIRMED`, локальный order/outbox подтвердили оплату. До выкупа gamepass
+выполнен полный возврат: provider и signed callback дали `REFUNDED`, все `16000` коп.
+учтены, refund/outbox подтверждены. При прогоне обнаружено, что full-refund callback менял
+только `PaymentAttempt`, оставляя незавершённый order в `PENDING`; тестовый заказ вручную
+снят с выдачи, а webhook исправлен: `REFUNDED` теперь атомарно закрывает любой
+не-`COMPLETED` order как `REJECTED`. Detailed JSON logging после E2E выключается,
+acquiring остаётся owner-only до завершения launch gates. Остаются визуальная сверка чеков
+в Т-Банке/ОФД и обязательная ротация раскрытого Password.
+
 **Дизайн `/payment/status` обновлён локально 18.07:** старый pixel UI заменён на Violet/Frost
 order timeline с waiting/paid/work/completed/error/offline состояниями, переходом в ЛК,
 защищённой ссылкой и mobile layout. Production rollout выполняется только вместе с текущим
