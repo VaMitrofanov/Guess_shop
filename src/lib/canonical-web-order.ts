@@ -185,6 +185,14 @@ export async function createCanonicalWebOrder(input: CreateCanonicalWebOrderInpu
       }
     }
 
+    // Preserve the first confirmed checkout nick on the customer's profile so
+    // later storefront and checkout visits can prefill it. Never overwrite a
+    // profile value the customer has already chosen.
+    await tx.user.updateMany({
+      where: { id: input.userId, robloxUsername: null },
+      data: { robloxUsername: input.username },
+    });
+
     const order = await tx.wbOrder.create({
       data: {
         amount: input.quote.requestedRobux + input.quote.bonusRobux,

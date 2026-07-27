@@ -15,10 +15,19 @@ export async function GET() {
     return NextResponse.json(accountMePayload(null), { headers: PRIVATE });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { robloxUsername: true },
-  });
+  const [user, recentOrder] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { robloxUsername: true },
+    }),
+    prisma.wbOrder.findFirst({
+      where: { userId, robloxUsername: { not: null } },
+      orderBy: { createdAt: "desc" },
+      select: { robloxUsername: true },
+    }),
+  ]);
 
-  return NextResponse.json(accountMePayload(user), { headers: PRIVATE });
+  return NextResponse.json(accountMePayload({
+    robloxUsername: user?.robloxUsername ?? recentOrder?.robloxUsername ?? null,
+  }), { headers: PRIVATE });
 }

@@ -191,6 +191,10 @@ export default async function DashboardPage() {
     })),
   ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, 50);
 
+  // Historical orders can contain the customer's confirmed Roblox nick even
+  // when the profile field was never backfilled. Use that own order data as a
+  // checkout default, without changing a profile nick the customer already set.
+  const knownRobloxUsername = user.robloxUsername ?? orders.find((order) => order.customer)?.customer ?? null;
   const linkedProviders = user.identities.map((identity) => identity.provider);
   const identityNames = new Map(user.identities.map((identity) => [identity.provider, identity]));
   const bonusActive = user.balance > 0 && (!user.bonusExpiresAt || user.bonusExpiresAt > new Date());
@@ -202,8 +206,8 @@ export default async function DashboardPage() {
   });
   const completedCount = orders.filter((order) => customerOrderStatus(order.kind, order.status).completed).length;
   const activeCount = orders.filter((order) => customerOrderStatus(order.kind, order.status).active).length;
-  const greetingName = user.robloxUsername ?? user.name ?? user.email?.split("@")[0] ?? "друг";
-  const checkoutHref = user.robloxUsername ? `/checkout?username=${encodeURIComponent(user.robloxUsername)}` : "/checkout";
+  const greetingName = knownRobloxUsername ?? user.name ?? user.email?.split("@")[0] ?? "друг";
+  const checkoutHref = knownRobloxUsername ? `/checkout?username=${encodeURIComponent(knownRobloxUsername)}` : "/checkout";
   const latestActive = orders.find((order) => customerOrderStatus(order.kind, order.status).active);
   const latestActiveProgress = latestActive ? customerOrderProgress(latestActive.kind, latestActive.status) : 0;
   const latestActiveHref = latestActive?.status === "AWAITING_GAMEPASS"
@@ -334,7 +338,7 @@ export default async function DashboardPage() {
                 <div><strong>{user.name ?? greetingName}</strong><span>{user.email ?? "Аккаунт RobloxBank"}</span></div>
               </div>
               <dl className={styles.profileRows}>
-                <div><dt>Ник Roblox</dt><dd><Gamepad2 size={15} /> {user.robloxUsername ?? "Не указан"}</dd></div>
+                <div><dt>Ник Roblox</dt><dd><Gamepad2 size={15} /> {knownRobloxUsername ?? "Не указан"}</dd></div>
                 <div><dt>Клиент с</dt><dd>{formatDate(user.createdAt)}</dd></div>
                 {user.role === "ADMIN" && <div><dt>Роль</dt><dd>Администратор</dd></div>}
               </dl>
@@ -368,7 +372,7 @@ export default async function DashboardPage() {
             </section>
 
             <nav className={styles.quickLinks} aria-label="Быстрые действия">
-              <Link href={checkoutHref}><ShoppingCart size={18} /><span><strong>Новый заказ</strong><small>Ник уже подставлен</small></span><ChevronRight size={17} /></Link>
+              <Link href={checkoutHref}><ShoppingCart size={18} /><span><strong>Новый заказ</strong><small>{knownRobloxUsername ? "Ник уже подставлен" : "Укажи ник при оформлении"}</small></span><ChevronRight size={17} /></Link>
               <Link href="/guide?source=site&amount=1000"><Gamepad2 size={18} /><span><strong>Инструкция</strong><small>Создать геймпасс</small></span><ChevronRight size={17} /></Link>
               <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer"><Bell size={18} /><span><strong>Поддержка</strong><small>Живой менеджер</small></span><ExternalLink size={16} /></a>
               <SignOutAction><LogOut size={18} /><span><strong>Выйти</strong><small>Завершить сессию</small></span><ChevronRight size={17} /></SignOutAction>

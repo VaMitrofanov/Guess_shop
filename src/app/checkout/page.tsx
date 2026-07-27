@@ -143,7 +143,10 @@ function CheckoutContent() {
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         setAuthenticated(data?.authenticated === true);
-        if (data?.robloxUsername) setSearchQuery(data.robloxUsername);
+        if (data?.robloxUsername) {
+          setSearchQuery(data.robloxUsername);
+          setUsername(data.robloxUsername);
+        }
       })
       .catch(() => setAuthenticated(false));
     // The URL-derived identity is the only value that should auto-run.
