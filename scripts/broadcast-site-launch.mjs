@@ -9,7 +9,8 @@
  *   node scripts/broadcast-site-launch.mjs
  *   node scripts/broadcast-site-launch.mjs --publish
  *
- * Env for --publish: TG_TOKEN, TG_CHANNEL_ID, VK_TOKEN, VK_GROUP_ID
+ * Env for --publish: TG_TOKEN, TG_CHANNEL_ID, VK_TOKEN, VK_GROUP_ID;
+ * VALIDATOR_SOURCE_URL/VALIDATOR_KEY route Telegram through the SG bridge.
  */
 
 import dotenv from "dotenv";
@@ -75,17 +76,30 @@ async function assertPublicAcquiringIsOn() {
 }
 
 async function tgCall(token, method, body) {
-  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+  const bridgeUrl = process.env.VALIDATOR_SOURCE_URL?.trim();
+  const validatorKey = process.env.VALIDATOR_KEY?.trim();
+  if (Boolean(bridgeUrl) !== Boolean(validatorKey)) {
+    throw new Error("VALIDATOR_SOURCE_URL and VALIDATOR_KEY must be configured together");
+  }
+
+  const useBridge = Boolean(bridgeUrl && validatorKey);
+  const endpoint = useBridge
+    ? `${bridgeUrl.replace(/\/$/, "")}/tg-proxy`
+    : `https://api.telegram.org/bot${token}/${method}`;
+  const response = await fetch(endpoint, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    headers: {
+      "content-type": "application/json",
+      ...(useBridge ? { "x-validator-key": validatorKey } : {}),
+    },
+    body: JSON.stringify(useBridge ? { token, method, ...body } : body),
     signal: AbortSignal.timeout(20_000),
   });
   const payload = await response.json();
   if (!response.ok || !payload.ok) {
     throw new Error(`Telegram publication failed: ${payload.description ?? response.status}`);
   }
-  return payload.result;
+  return payload.result ?? { message_id: null };
 }
 
 async function vkCall(token, method, params) {

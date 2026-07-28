@@ -1,19 +1,16 @@
 # RobloxBank.ru: ультра-ревью и master plan эквайринга
 
-**Статус:** реализация идёт. Рабочий терминал активирован, production checkout развёрнут в
-owner-only allowlist. Первый боевой payment/refund E2E успешно завершён, но публичный rollout
-ещё не выполнен: раскрытый Password рабочего terminal должен быть перевыпущен и принят новым
-контрольным `Init`. Актуальная последовательность работ:
+**Статус:** production checkout публично открыт. Первый боевой payment/refund E2E успешно
+завершён, а rollout `allowlist → 10% → 50% → on` полностью пройден 28.07. Актуальная
+последовательность работ и остаточные задачи:
 [site-launch-implementation-plan.md](site-launch-implementation-plan.md).
 
-**28.07.2026, launch preparation:** storefront остаётся публичным и healthy (`15/15`),
-master включён, runtime mode `allowlist`; исправленный bulk-upsert оркестратор повторно
-применил и проверил этот этап, guest status = `limited`. Переход на 10% остановлен fail-closed
-до любого изменения production env.
-Дата production `TINKOFF_SECRET_KEY` не менялась после раскрытия Password, поэтому перевод
-`SITE_ACQUIRING_MODE=on` и публикация анонса заблокированы до ротации. Подготовлен отдельный
-fail-closed launch-скрипт: preview безопасен по умолчанию, а `--publish` требует публичный
-`mode=on` и не отправляет массовые личные сообщения.
+**28.07.2026, public launch:** оркестратор последовательно принял allowlist, 10%, 50% и
+`mode=on`; между этапами выполнены smoke, worker-readiness и агрегатная проверка платежей.
+Финал: storefront 15/15, сквозной коридор 32/32, worker healthy, backlog 0. Launch-скрипт
+перед отправкой подтвердил публичный `mode=on`, затем опубликовал одобренный текст в
+Telegram и VK. По умолчанию rollout остаётся fail-closed; исключение по секрету требует
+отдельного явно подтверждённого решения владельца и фиксируется в закрытом handoff.
 
 **2026-07-18, DEMO-терминал: Init + CONFIRMED ✅**
 

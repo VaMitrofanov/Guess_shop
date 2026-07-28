@@ -307,6 +307,9 @@ restart-only, поэтому откатывается не только конф
 запуск без флага по-прежнему fail-closed.
 
 **Bridge:** `VALIDATOR_KEY`, `VALIDATOR_PORT`.
+Launch publisher использует `VALIDATOR_SOURCE_URL` + `VALIDATOR_KEY` для Telegram, если они
+заданы: прямой `api.telegram.org` из RF/operator transport может быть недоступен. Публикация
+считается успешной только после `ok` bridge и ответа VK API.
 
 ## Browser transport выкупа
 
