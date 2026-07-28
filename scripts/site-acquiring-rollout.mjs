@@ -68,6 +68,7 @@ if (!Array.isArray(envs)) throw new Error("Coolify env response is not an array"
 const byKey = new Map(envs.filter((entry) => entry && entry.is_preview === false).map((entry) => [entry.key, entry]));
 const currentMode = String(byKey.get("SITE_ACQUIRING_MODE")?.value ?? "off");
 const currentPercentage = String(byKey.get("SITE_ACQUIRING_ROLLOUT_PERCENT")?.value ?? "0");
+const currentMaster = String(byKey.get("SITE_ACQUIRING_ENABLED")?.value ?? "false");
 const requiredPrevious = REQUIRED_PREVIOUS[stageName];
 if (requiredPrevious && (
   currentMode !== requiredPrevious.mode ||
@@ -88,57 +89,68 @@ if (realMoneyStage) {
   if (workers?.healthy !== true) throw new Error("payment worker readiness is not healthy");
 }
 
-// Bulk update is an upsert in Coolify: existing production variables are updated
-// and the rollout percentage is created on older installations where it did not
-// exist yet. A sequence of single PATCH calls is not compatible with every 4.0
-// beta and POST would create ambiguous duplicate keys.
-await coolify(`/applications/${encodeURIComponent(appUuid)}/envs/bulk`, {
-  method: "PATCH",
-  body: JSON.stringify({
-    data: Object.entries({
-      SITE_ACQUIRING_ENABLED: stage.master,
-      SITE_ACQUIRING_MODE: stage.mode,
-      SITE_ACQUIRING_ROLLOUT_PERCENT: stage.percentage,
-    }).map(([key, value]) => ({
-      key,
-      value,
-      is_preview: false,
-      is_build_time: true,
-      is_runtime: true,
-    })),
-  }),
-});
+async function writeRolloutConfig(config) {
+  // Bulk update is an upsert in Coolify: existing production variables are
+  // updated and missing ones are created without ambiguous duplicate keys.
+  await coolify(`/applications/${encodeURIComponent(appUuid)}/envs/bulk`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      data: Object.entries({
+        SITE_ACQUIRING_ENABLED: config.master,
+        SITE_ACQUIRING_MODE: config.mode,
+        SITE_ACQUIRING_ROLLOUT_PERCENT: config.percentage,
+      }).map(([key, value]) => ({
+        key,
+        value,
+        is_preview: false,
+        is_build_time: true,
+        is_runtime: true,
+      })),
+    }),
+  });
+}
+
+await writeRolloutConfig(stage);
 
 const deployRequest = await coolify(`/deploy?uuid=${encodeURIComponent(appUuid)}&force=true`, { method: "POST" });
 const deploymentUuid = deployRequest?.deployments?.[0]?.deployment_uuid;
-if (!deploymentUuid) throw new Error("Coolify did not return a deployment UUID");
+if (!deploymentUuid) {
+  await writeRolloutConfig({ master: currentMaster, mode: currentMode, percentage: currentPercentage });
+  throw new Error("Coolify did not return a deployment UUID; previous rollout env restored");
+}
 console.log(`Rollout stage ${stageName}: env updated, deploy requested.`);
 
 let deploymentFinished = false;
-for (let attempt = 1; attempt <= 40; attempt += 1) {
-  await new Promise((resolve) => setTimeout(resolve, 15_000));
-  const deployment = await coolify(`/deployments/${encodeURIComponent(deploymentUuid)}`);
-  const status = String(deployment?.status ?? "unknown");
-  console.log(`Deploy check ${attempt}/40: ${status}`);
-  if (status === "finished") {
-    deploymentFinished = true;
-    break;
+try {
+  for (let attempt = 1; attempt <= 40; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 15_000));
+    const deployment = await coolify(`/deployments/${encodeURIComponent(deploymentUuid)}`);
+    const status = String(deployment?.status ?? "unknown");
+    console.log(`Deploy check ${attempt}/40: ${status}`);
+    if (status === "finished") {
+      deploymentFinished = true;
+      break;
+    }
+    if (["failed", "cancelled", "canceled"].includes(status)) throw new Error(`deployment failed: ${status}`);
   }
-  if (["failed", "cancelled", "canceled"].includes(status)) throw new Error(`deployment failed: ${status}`);
-}
-if (!deploymentFinished) throw new Error("deployment did not finish within 10 minutes");
+  if (!deploymentFinished) throw new Error("deployment did not finish within 10 minutes");
 
-const deployedApp = await coolify(`/applications/${encodeURIComponent(appUuid)}`);
-if (String(deployedApp?.status) !== "running:healthy") {
-  throw new Error(`application is not healthy after deployment: ${String(deployedApp?.status ?? "unknown")}`);
-}
+  const deployedApp = await coolify(`/applications/${encodeURIComponent(appUuid)}`);
+  if (String(deployedApp?.status) !== "running:healthy") {
+    throw new Error(`application is not healthy after deployment: ${String(deployedApp?.status ?? "unknown")}`);
+  }
 
-const publicStatus = await publicJson("/api/acquiring/status");
-if (publicStatus?.mode !== stage.expectedPublicMode || publicStatus?.available !== (stageName !== "off")) {
-  throw new Error(`public acquiring verification failed for stage ${stageName}`);
+  const publicStatus = await publicJson("/api/acquiring/status");
+  if (publicStatus?.mode !== stage.expectedPublicMode || publicStatus?.available !== (stageName !== "off")) {
+    throw new Error(`public acquiring verification failed for stage ${stageName}`);
+  }
+  if (realMoneyStage) {
+    const workers = await publicJson("/api/health/workers");
+    if (workers?.healthy !== true) throw new Error("payment worker became unhealthy after deploy");
+  }
+  console.log(`Rollout stage ${stageName} verified: public mode=${publicStatus.mode}, available=${publicStatus.available}.`);
+} catch (error) {
+  await writeRolloutConfig({ master: currentMaster, mode: currentMode, percentage: currentPercentage });
+  console.error(`Rollout stage ${stageName} failed; previous env restored.`);
+  throw error;
 }
-if (realMoneyStage) {
-  const workers = await publicJson("/api/health/workers");
-  if (workers?.healthy !== true) throw new Error("payment worker became unhealthy after deploy");
-}
-console.log(`Rollout stage ${stageName} verified: public mode=${publicStatus.mode}, available=${publicStatus.available}.`);
