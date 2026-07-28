@@ -75,6 +75,14 @@ export default function RootLayout({
     <html
       lang="ru"
       className={`${geistSans.variable} ${geistMono.variable} ${pressStart.variable} ${unbounded.variable} h-full antialiased`}
+      // Boot-скрипт ниже намеренно правит `<html>` до гидратации: ставит
+      // `data-theme`, `data-theme-mode` и `color-scheme`. React считал это
+      // расхождением сервера и клиента и писал предупреждение о гидратации на
+      // КАЖДОЙ странице — из-за постоянного шума настоящие рассинхроны терялись
+      // (именно поэтому инцидент с CSP 28.07 заметили поздно). Подавляем ровно
+      // здесь: атрибуты этого узла ставит скрипт, всё остальное дерево
+      // проверяется как обычно.
+      suppressHydrationWarning
     >
       <head>
         {/* D3: ставит data-theme до первой отрисовки, иначе на тёмном телефоне
