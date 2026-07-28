@@ -37,9 +37,6 @@ const SOURCE_LABEL: Record<Source, string> = {
   MANUAL: "Ручные",
 };
 
-const LS_USD    = "econ_usdToRub";
-const LS_RATE   = "econ_rateUsdPer1k";
-const LS_TAX    = "econ_robloxTaxPct";
 const LS_PRICES = "econ_prices";
 
 const PERIODS = [
@@ -155,10 +152,14 @@ export default function EconomicsScreen({ token }: { token: string }) {
         if (!d) { setFailed(true); return; }
         setData(d);
         // Сохранённые правки админа имеют приоритет над значениями из БД.
+        // Курсы всегда из базы, а НЕ из localStorage. Иначе браузер, открывший
+        // экран до смены курса, держал бы старое значение и кнопка «Сохранить
+        // курс в Настройки» вернула бы его в прод (ровно так курс 85 дважды
+        // откатывался на 77.99 29.07). Правки в полях живут в рамках сессии.
         const saved = (k: string) => (typeof window === "undefined" ? null : localStorage.getItem(k));
-        setUsdStr(saved(LS_USD) ?? String(d.defaults.usdToRub));
-        setRateStr(saved(LS_RATE) ?? String(d.defaults.purchaseRateUsdPer1k ?? 4.3));
-        setTaxStr(saved(LS_TAX) ?? String(d.defaults.robloxTaxPct));
+        setUsdStr(String(d.defaults.usdToRub));
+        setRateStr(String(d.defaults.purchaseRateUsdPer1k ?? 4.3));
+        setTaxStr(String(d.defaults.robloxTaxPct));
         const base: Record<number, number> = {};
         for (const [k, v] of Object.entries(d.prices)) base[Number(k)] = v;
         const rawSaved = saved(LS_PRICES);
@@ -181,9 +182,9 @@ export default function EconomicsScreen({ token }: { token: string }) {
     try { localStorage.setItem(key, value); } catch { /* приватный режим — не беда */ }
   }, []);
 
-  const setUsd  = (v: string) => { setUsdStr(v);  persist(LS_USD, v); };
-  const setRate = (v: string) => { setRateStr(v); persist(LS_RATE, v); };
-  const setTax  = (v: string) => { setTaxStr(v);  persist(LS_TAX, v); };
+  const setUsd  = setUsdStr;
+  const setRate = setRateStr;
+  const setTax  = setTaxStr;
   const setPrice = (pack: number, v: string) => {
     const n = Math.max(0, Math.round(Number(v) || 0));
     const next = { ...prices, [pack]: n };
@@ -380,7 +381,8 @@ export default function EconomicsScreen({ token }: { token: string }) {
           </div>
         )}
         <button
-          type="button" onClick={saveRates} disabled={!valid || saving}
+          type="button" onClick={saveRates}
+          disabled={!valid || saving || (usd === data.defaults.usdToRub && rate === (data.defaults.purchaseRateUsdPer1k ?? 4.3))}
           className="twa-press-sm"
           style={{
             marginTop: 10, width: "100%", padding: "11px 0", borderRadius: RADIUS.md,
@@ -389,7 +391,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
             color: valid && !saving ? C.accent : C.textTertiary,
             fontSize: 14, fontWeight: 600, fontFamily: "inherit",
           }}
-        >{saving ? "Сохраняю…" : "Сохранить курс в Настройки"}</button>
+        >{saving ? "Сохраняю…" : usd === data.defaults.usdToRub && rate === (data.defaults.purchaseRateUsdPer1k ?? 4.3) ? "Совпадает с Настройками" : `Записать ${usd} ₽/$ в Настройки`}</button>
       </Card>
 
       {/* Расхождение со снапшотами */}
