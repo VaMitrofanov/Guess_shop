@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "@/auth";
+import { resolveAdminFromSession } from "@/lib/admin-access";
 import { OutboxReplayError, requestOutboxReplay } from "@/lib/outbox-replay";
 
 export const dynamic = "force-dynamic";
@@ -11,9 +11,10 @@ const ReplaySchema = z.object({
 });
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  const user = session?.user as { id?: string; role?: string } | undefined;
-  if (!user?.id || user.role !== "ADMIN") return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+  // A1: доступ решает единственный гейт. Повтор доставки пишется в аудит на
+  // внутренний `User.id`, поэтому запасной вход без него сюда не пройдёт.
+  const admin = await resolveAdminFromSession();
+  if (!admin?.userId) return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
 
   const { id } = await params;
   if (!/^[a-z0-9_-]{8,40}$/i.test(id)) return NextResponse.json({ error: "Invalid outbox ID" }, { status: 400 });
@@ -21,7 +22,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!parsed.success) return NextResponse.json({ error: "Укажите причину и корректный ключ операции" }, { status: 400 });
 
   try {
-    const result = await requestOutboxReplay({ outboxId: id, requestedBy: user.id, ...parsed.data });
+    const result = await requestOutboxReplay({ outboxId: id, requestedBy: admin.userId, ...parsed.data });
     return NextResponse.json({ success: true, alreadyExists: result.kind === "existing", outbox: result.outbox }, { status: 202 });
   } catch (error) {
     if (error instanceof OutboxReplayError) {

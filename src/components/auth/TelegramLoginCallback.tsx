@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { signIn } from "next-auth/react";
 import { CheckCircle2, Loader2, TriangleAlert } from "lucide-react";
 import Link from "next/link";
-import { safeReturnPath } from "@/lib/auth-navigation";
+import { postLoginPath } from "@/lib/auth-navigation";
 
 type CallbackProps = {
   mode: "login" | "link";
@@ -46,11 +46,25 @@ export default function TelegramLoginCallback({ mode, state, payload }: Callback
 
         const result = await signIn("telegram-login", { ...payload, state, redirect: false });
         if (!result?.ok) throw new Error("Telegram не подтвердил вход");
-        const returnTo = safeReturnPath(sessionStorage.getItem("rb_auth_return"));
+        // A1: Telegram — основной вход для админов, поэтому пункт назначения
+        // выбирается так же, как на `/login`: админа ведём в Control Center.
+        // Просто `returnTo` тут не подходит — `safeReturnPath` намеренно
+        // отбрасывает `/admin`, чтобы туда нельзя было направить чужим ретёрном.
+        const stored = sessionStorage.getItem("rb_auth_return");
         sessionStorage.removeItem("rb_auth_return");
+        const session = await fetch("/api/auth/session", { cache: "no-store" })
+          .then((response) => response.json())
+          .catch(() => null);
+        const target = postLoginPath(session?.user?.role, stored);
         setStatus("success");
-        setMessage(returnTo.startsWith("/checkout") ? "Вход подтверждён. Возвращаем заказ…" : "Вход подтверждён. Открываем кабинет…");
-        window.setTimeout(() => window.location.replace(returnTo), 450);
+        setMessage(
+          target.startsWith("/admin")
+            ? "Вход подтверждён. Открываем админку…"
+            : target.startsWith("/checkout")
+              ? "Вход подтверждён. Возвращаем заказ…"
+              : "Вход подтверждён. Открываем кабинет…",
+        );
+        window.setTimeout(() => window.location.replace(target), 450);
       } catch (error) {
         setStatus("error");
         setMessage(error instanceof Error ? error.message : "Не удалось завершить вход");

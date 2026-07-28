@@ -11,6 +11,7 @@ import { normalizeLoginEmail } from "@/lib/auth-navigation";
 import { allowPasswordSignIn } from "@/lib/auth-throttle";
 import { clientIp } from "@/lib/rate-limit";
 import { consumeTelegramWebLoginChallenge } from "@/lib/telegram-web-login";
+import { adminGrantFor, loadAdminCandidate } from "@/lib/admin-grant";
 
 // VK display names are user-controlled and embedded into Telegram HTML
 // notifications — unescaped "<" breaks the whole message (silently lost).
@@ -48,6 +49,28 @@ const escapeHtml = (s: string) =>
     console.warn(`[auth][startup] missing optional env: ${missingOpt.join(", ")}`);
   }
 })();
+
+/**
+ * Роль сессии выводится, а не хранится (этап A1).
+ *
+ * Админом делает проверенная Telegram-личность в `ADMIN_IDS` либо запасной вход
+ * владельца — правило целиком в `adminGrantFor`. Всё остальное — `USER`, даже
+ * если в базе почему-то стоит `role = "ADMIN"`: одной записи в БД для админки
+ * теперь недостаточно.
+ *
+ * Если запрос к базе не удался, роль намеренно понижается до `USER`
+ * (fail-closed): временная недоступность БД не должна открывать админку.
+ */
+async function deriveSessionRole(userId: string, fallbackRole?: string): Promise<string> {
+  try {
+    const candidate = await loadAdminCandidate(userId);
+    if (!candidate) return "USER";
+    return adminGrantFor(candidate) ? "ADMIN" : "USER";
+  } catch (error) {
+    console.error("[auth] deriveSessionRole failed, понижаем до USER", { userId, error });
+    return fallbackRole === "ADMIN" ? "USER" : (fallbackRole ?? "USER");
+  }
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
@@ -352,7 +375,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
-        token.role = (user as any).role;
+        token.role = await deriveSessionRole(user.id!, (user as any).role);
         token.vkId = (user as any).vkId;
         token.balance = (user as any).balance;
         token.auth_time = Math.floor(Date.now() / 1000);
@@ -376,6 +399,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             select: { sessionVersion: true },
           });
           if (!current || current.sessionVersion !== token.sessionVersion) token.invalidated = true;
+        }
+        // A0.2 (этап A1): раньше `role` записывалась в токен один раз при входе
+        // и больше не сверялась, поэтому снятие админа не действовало до
+        // перелогина. Теперь роль выводится заново на каждом обновлении токена
+        // — рядом с уже выполняемым запросом за `sessionVersion`.
+        if (!token.invalidated) {
+          token.role = await deriveSessionRole(String(token.id), token.role as string | undefined);
         }
       }
       return token;

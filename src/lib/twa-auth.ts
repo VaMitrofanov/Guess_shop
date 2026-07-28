@@ -1,9 +1,11 @@
 import crypto from "crypto";
 
-const ADMIN_IDS_RAW = process.env.ADMIN_IDS ?? "";
-const ADMIN_SET = new Set(
-  ADMIN_IDS_RAW.split(",").map(s => s.trim()).filter(Boolean)
-);
+import { adminSetVersion, isAdminTelegramId } from "@/lib/admin-roster";
+
+// A1: список админов больше не разбирается здесь. Единственный источник —
+// `admin-roster.ts`, тот же, что использует веб-админка, поэтому «кто админ»
+// не может разъехаться между поверхностями.
+export { adminSetVersion };
 
 /** U1: пропуск живёт 2 часа вместо 12 и тихо продлевается при активности. */
 export const TWA_TOKEN_TTL_SEC = 2 * 60 * 60;
@@ -48,21 +50,7 @@ export function validateInitData(initData: string): { valid: boolean; userId?: n
 }
 
 export function isAdmin(userId?: number): boolean {
-  if (!userId) return false;
-  return ADMIN_SET.has(String(userId));
-}
-
-/**
- * U1: отпечаток состава `ADMIN_IDS`. Кладётся в токен и сверяется при каждой
- * проверке — смена состава менеджеров немедленно обесценивает все выданные
- * пропуска, не дожидаясь истечения TTL.
- */
-export function adminSetVersion(): string {
-  return crypto
-    .createHash("sha256")
-    .update([...ADMIN_SET].sort().join(","))
-    .digest("hex")
-    .slice(0, 12);
+  return isAdminTelegramId(userId);
 }
 
 const getSecret = () => {

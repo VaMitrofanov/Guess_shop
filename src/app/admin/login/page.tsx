@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowRight, Eye, EyeOff, KeyRound, Loader2, Lock, Mail, ShieldCheck, UserRoundCheck } from "lucide-react";
 import Navbar from "@/components/navbar";
 import Link from "next/link";
+import TelegramLoginButton from "@/components/auth/TelegramLoginButton";
 import { normalizeLoginEmail } from "@/lib/auth-navigation";
 import styles from "../../auth-shell.module.css";
 
@@ -60,7 +61,12 @@ export default function AdminLoginPage() {
         </section>
 
         <section className={styles.card} aria-labelledby="admin-login-title">
-          <header className={styles.cardHeader}><span className={styles.kicker}>Администрирование</span><h1 id="admin-login-title">Подтвердите доступ</h1><p>Используйте административную учётную запись.</p></header>
+          <header className={styles.cardHeader}><span className={styles.kicker}>Администрирование</span><h1 id="admin-login-title">Подтвердите доступ</h1><p>Основной способ — Telegram. Права выдаются по составу администраторов, отдельный пароль не нужен.</p></header>
+
+          <TelegramLoginButton className={styles.providerButton} />
+
+          <p className={styles.divider}>или запасной вход</p>
+
           <form onSubmit={handleSubmit} className={styles.form}>
             <label className={styles.label}>Email
               <span className={styles.field}><Mail size={18} /><input className={styles.input} type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@example.ru" /></span>

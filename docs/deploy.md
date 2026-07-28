@@ -170,6 +170,7 @@ OpenGraph и корректный maintenance-ответ.
 
 **Web:** `DATABASE_URL`, `AUTH_SECRET` (или `NEXTAUTH_SECRET`), `NEXTAUTH_URL`,
 `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_VK_APP_ID`, `TG_TOKEN`, `TG_CHAT_ID`, `ADMIN_IDS`,
+`ADMIN_BREAKGLASS_EMAILS` (опц., запасной вход владельца — см. ниже),
 `ADMIN_SECRET`, `WB_API_TOKEN`, `MAINTENANCE_MODE` (опц., см. ниже), `SITE_UNLOCK_SECRET`
 (опц., байпас техработ), `NEXT_PUBLIC_VK_AUTH_ENABLED` (опц.; fail-closed, VK ID виден
 только при точном `true` после живого acceptance); B2B «Антон»:
@@ -333,7 +334,14 @@ Web-контейнера: `/`, `/faq`, `/reviews`, `/checkout`, `/dashboard`, `/
 
 ## Заметки
 
-- `ADMIN_IDS` — кому слать карточки заказов/отзывов (TG user IDs).
+- `ADMIN_IDS` — **единственный список админов** (TG user IDs). С этапа A1 (28.07.2026) из
+  него выводится и доступ в веб-админку `/admin`, а не только рассылка карточек и вход в TWA.
+  Роль вычисляется на каждом запросе, поэтому снятие ID действует сразу после рестарта Web —
+  правки в БД не нужны и не помогут.
+- `ADMIN_BREAKGLASS_EMAILS` — запасной вход владельца, если Telegram недоступен: адреса через
+  запятую. Работает **только вместе** с `role = "ADMIN"` у той же записи в БД; нужны оба
+  условия. ⚠️ Если переменная не задана, а у админа нет проверенной TG-личности из
+  `ADMIN_IDS`, он в `/admin` не попадёт — задавать **до** деплоя A1.
 - `TG_CHAT_ID` — для уведомлений из `src/auth.ts` (Next.js, не боты).
   В `bots/shared/admin.ts`: `ADMIN_IDS ?? TG_CHAT_ID`.
 - Ротация TG-токена: обновить `TG_TOKEN` и на Web, и на TG-боте, **и на VK-боте**
