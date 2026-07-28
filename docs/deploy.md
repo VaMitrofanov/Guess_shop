@@ -291,6 +291,9 @@ npm run rollout:site -- on --confirm-real-money
 только в `HANDOFF.md`/env.
 Три rollout-переменные обновляются одним `PATCH .../envs/bulk`: это upsert, совместимый с
 production Coolify 4.0 beta, и он не создаёт дубли ключей при повторном запуске этапа.
+После deploy скрипт ждёт `finished` именно у возвращённого `deployment_uuid`, а не принимает
+старый ещё работающий healthy-контейнер за завершение новой сборки. Только потом проверяются
+`running:healthy`, публичный acquiring status и worker readiness.
 
 **Bridge:** `VALIDATOR_KEY`, `VALIDATOR_PORT`.
 

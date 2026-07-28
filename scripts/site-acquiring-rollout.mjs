@@ -105,22 +105,29 @@ await coolify(`/applications/${encodeURIComponent(appUuid)}/envs/bulk`, {
   }),
 });
 
-await coolify(`/deploy?uuid=${encodeURIComponent(appUuid)}&force=true`, { method: "POST" });
+const deployRequest = await coolify(`/deploy?uuid=${encodeURIComponent(appUuid)}&force=true`, { method: "POST" });
+const deploymentUuid = deployRequest?.deployments?.[0]?.deployment_uuid;
+if (!deploymentUuid) throw new Error("Coolify did not return a deployment UUID");
 console.log(`Rollout stage ${stageName}: env updated, deploy requested.`);
 
-let healthy = false;
+let deploymentFinished = false;
 for (let attempt = 1; attempt <= 40; attempt += 1) {
   await new Promise((resolve) => setTimeout(resolve, 15_000));
-  const app = await coolify(`/applications/${encodeURIComponent(appUuid)}`);
-  const status = String(app?.status ?? "unknown");
+  const deployment = await coolify(`/deployments/${encodeURIComponent(deploymentUuid)}`);
+  const status = String(deployment?.status ?? "unknown");
   console.log(`Deploy check ${attempt}/40: ${status}`);
-  if (status === "running:healthy") {
-    healthy = true;
+  if (status === "finished") {
+    deploymentFinished = true;
     break;
   }
-  if (status.includes("failed") || status.includes("unhealthy")) throw new Error(`deployment failed: ${status}`);
+  if (["failed", "cancelled", "canceled"].includes(status)) throw new Error(`deployment failed: ${status}`);
 }
-if (!healthy) throw new Error("deployment did not become healthy within 10 minutes");
+if (!deploymentFinished) throw new Error("deployment did not finish within 10 minutes");
+
+const deployedApp = await coolify(`/applications/${encodeURIComponent(appUuid)}`);
+if (String(deployedApp?.status) !== "running:healthy") {
+  throw new Error(`application is not healthy after deployment: ${String(deployedApp?.status ?? "unknown")}`);
+}
 
 const publicStatus = await publicJson("/api/acquiring/status");
 if (publicStatus?.mode !== stage.expectedPublicMode || publicStatus?.available !== (stageName !== "off")) {
