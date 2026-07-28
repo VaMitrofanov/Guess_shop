@@ -5,8 +5,8 @@ import { RotateCcw, TriangleAlert } from "lucide-react";
 import styles from "./admin-shell.module.css";
 import { cn } from "@/lib/utils";
 import {
-  computeOrder, computeTotals, costKopFor, grossFor, ratesValid,
-  type DirectEconomics, type EconomicsRates, type DirectEconomicsSource,
+  DEFAULT_FEE_RATES, computeOrder, computeTotals, costKopFor, grossFor, ratesValid,
+  type DirectEconomics, type EconomicsRates, type DirectEconomicsSource, type UsnMode,
 } from "@/lib/economics-model";
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -56,6 +56,10 @@ export default function AdminEconomicsClient() {
   const [usdStr, setUsdStr] = useState("");
   const [rateStr, setRateStr] = useState("");
   const [taxStr, setTaxStr] = useState("");
+  const [acqStr, setAcqStr] = useState(String(DEFAULT_FEE_RATES.acquiringPct));
+  const [recStr, setRecStr] = useState(String(DEFAULT_FEE_RATES.receiptPct));
+  const [usnStr, setUsnStr] = useState(String(DEFAULT_FEE_RATES.usnPct));
+  const [usnMode, setUsnMode] = useState<UsnMode>(DEFAULT_FEE_RATES.usnMode);
   const [prices, setPrices] = useState<Record<number, number>>({});
 
   const [period, setPeriod] = useState(0);
@@ -106,6 +110,12 @@ export default function AdminEconomicsClient() {
   const setUsd = setUsdStr;
   const setRate = setRateStr;
   const setTax = setTaxStr;
+  const resetFees = () => {
+    setAcqStr(String(DEFAULT_FEE_RATES.acquiringPct));
+    setRecStr(String(DEFAULT_FEE_RATES.receiptPct));
+    setUsnStr(String(DEFAULT_FEE_RATES.usnPct));
+    setUsnMode(DEFAULT_FEE_RATES.usnMode);
+  };
   const setPrice = (pack: number, v: string) => {
     const next = { ...prices, [pack]: Math.max(0, Math.round(Number(v) || 0)) };
     setPrices(next);
@@ -115,8 +125,12 @@ export default function AdminEconomicsClient() {
   // useMemo, а не литерал: объект курсов уходит в зависимости useMemo ниже, и
   // новая ссылка на каждый рендер пересчитывала бы всю таблицу впустую.
   const rates: EconomicsRates = useMemo(
-    () => ({ usdToRub: Number(usdStr), rateUsdPer1k: Number(rateStr), taxPct: Number(taxStr) }),
-    [usdStr, rateStr, taxStr],
+    () => ({
+      usdToRub: Number(usdStr), rateUsdPer1k: Number(rateStr), taxPct: Number(taxStr),
+      acquiringPct: Number(acqStr), receiptPct: Number(recStr),
+      usnPct: Number(usnStr), usnMode,
+    }),
+    [usdStr, rateStr, taxStr, acqStr, recStr, usnStr, usnMode],
   );
   const valid = ratesValid(rates);
 
@@ -130,6 +144,7 @@ export default function AdminEconomicsClient() {
     setUsd(String(data.defaults.usdToRub));
     setRate(String(data.defaults.purchaseRateUsdPer1k ?? 4.3));
     setTax(String(data.defaults.robloxTaxPct));
+    resetFees();
     const base: Record<number, number> = {};
     for (const [k, v] of Object.entries(data.prices)) base[Number(k)] = v;
     setPrices(base);
@@ -222,9 +237,17 @@ export default function AdminEconomicsClient() {
             <p>
               {totals.withRevenue === 0
                 ? "нет заказов с известной ценой"
-                : <>получили <b>{rubKop(totals.revenueKop)}</b> · робуксы стоили <b>{rubKop(totals.knownCostKop)}</b>
+                : <>получили <b>{rubKop(totals.revenueKop)}</b> · робуксы <b>−{rubKop(totals.knownCostKop)}</b>
+                  {" "}· эквайринг <b>−{rubKop(totals.acquiringKop)}</b> · налог <b>−{rubKop(totals.usnKop)}</b>
                   {totals.marginPct !== null && <> · маржа <b>{totals.marginPct}%</b></>}</>}
             </p>
+            {totals.withRevenue > 0 && (
+              <p style={{ marginTop: 4, fontSize: 13 }}>
+                До комиссий и налога было бы {rubKop(totals.grossProfitKop)} — платёжный контур
+                забирает {rubKop(totals.acquiringKop + totals.usnKop)}
+                {totals.grossProfitKop > 0 && <>, это {Math.round(((totals.acquiringKop + totals.usnKop) / totals.grossProfitKop) * 100)}% «грязной» прибыли</>}.
+              </p>
+            )}
           </section>
 
           <div className={styles.metricGrid}>
@@ -339,6 +362,9 @@ export default function AdminEconomicsClient() {
                                     note={o.usdToRubSnapshot ? `курс ${o.usdToRubSnapshot} ₽/$` : undefined}
                                   />
                                 )}
+                                <Row k={`Эквайринг + «Чеки» (${(rates.acquiringPct + rates.receiptPct).toFixed(1)}%)`} v={`−${rubKop2(r.acquiringKop)}`} />
+                                <Row k={`Налог УСН ${rates.usnPct}% (${rates.usnMode === "income" ? "с выручки" : "с прибыли"})`} v={`−${rubKop2(r.usnKop)}`} />
+                                <Row k="До комиссий и налога" v={r.grossProfitKop == null ? "—" : rubKop2(r.grossProfitKop)} />
                                 <Row k="По вашему прайсу" v={`${rubKop(r.modelRevenueKop)} → ${rubKop(r.modelProfitKop)}`} />
                               </div>
                             </td>
@@ -384,11 +410,50 @@ export default function AdminEconomicsClient() {
               </div>
             </div>
 
+            <div className={styles.rateGrid}>
+              <div className={styles.rateField}>
+                <label htmlFor="econ-acq">Эквайринг</label>
+                <input id="econ-acq" className={styles.rateInput} type="number" step={0.1}
+                  value={acqStr} onChange={(e) => setAcqStr(e.target.value)} />
+                <small>% с платежа · сверь с договором</small>
+              </div>
+              <div className={styles.rateField}>
+                <label htmlFor="econ-rec">Сервис «Чеки»</label>
+                <input id="econ-rec" className={styles.rateInput} type="number" step={0.1}
+                  value={recStr} onChange={(e) => setRecStr(e.target.value)} />
+                <small>% с платежа с чеком</small>
+              </div>
+              <div className={styles.rateField}>
+                <label htmlFor="econ-usn">Налог УСН</label>
+                <input id="econ-usn" className={styles.rateInput} type="number" step={1}
+                  value={usnStr} onChange={(e) => setUsnStr(e.target.value)} />
+                <small>%</small>
+              </div>
+            </div>
+
+            <div style={{ padding: "0 18px 14px" }}>
+              <div className={styles.toolbar} style={{ margin: 0 }}>
+                {([["income", "Доходы"], ["income-minus-expenses", "Доходы − расходы"]] as const).map(([m, label]) => (
+                  <button
+                    key={m} type="button"
+                    className={cn(styles.chip, usnMode === m && styles.chipActive)}
+                    onClick={() => setUsnMode(m)}
+                  >{label}</button>
+                ))}
+              </div>
+            </div>
+
             <div className={styles.formulaBox}>
               {valid ? (
                 <>
                   <div>грязные R$ = выдано ÷ {(1 - rates.taxPct / 100).toFixed(2)}</div>
                   <div>себестоимость = грязные ÷ 1000 × {rates.rateUsdPer1k} $ × {rates.usdToRub} ₽</div>
+                  <div>эквайринг = платёж × {(rates.acquiringPct + rates.receiptPct).toFixed(1)}% <span style={{ opacity: .7 }}>({rates.acquiringPct}% + {rates.receiptPct}% «Чеки»)</span></div>
+                  <div>
+                    налог = {rates.usnMode === "income"
+                      ? <>выручка × {rates.usnPct}%</>
+                      : <>(выручка − робуксы − эквайринг) × {rates.usnPct}%</>}
+                  </div>
                   <div><b>1000 чистых R$ ⟶ {grossFor(1000, rates).toLocaleString("ru-RU")} грязных ⟶ {rubKop2(costKopFor(grossFor(1000, rates), rates))}</b></div>
                 </>
               ) : (

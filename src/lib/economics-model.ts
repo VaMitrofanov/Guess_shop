@@ -49,6 +49,24 @@ export interface DirectEconomics {
 
 /* ── Модель: чистые функции, общие для TWA и веб-админки ──────────────────── */
 
+/** Режим УСН: от базы зависит, с чего берётся налог. */
+export type UsnMode = "income" | "income-minus-expenses";
+
+/**
+ * Стартовые ставки платёжного контура.
+ *
+ * `receiptPct` = 1.5 — не догадка: столько удерживает сервис «Чеки» Т-Банка
+ * (`docs/payments-and-kkt.md`, решение владельца 16.07). `acquiringPct` и
+ * `usnPct` — предположения (типовой интернет-эквайринг и УСН «Доходы»);
+ * в экране они правятся и подписаны как требующие сверки с договором.
+ */
+export const DEFAULT_FEE_RATES = {
+  acquiringPct: 2.9,
+  receiptPct: 1.5,
+  usnPct: 6,
+  usnMode: "income" as UsnMode,
+};
+
 export interface EconomicsRates {
   /** ₽ за 1 $. */
   usdToRub: number;
@@ -56,10 +74,21 @@ export interface EconomicsRates {
   rateUsdPer1k: number;
   /** Комиссия Roblox за геймпасс, %. */
   taxPct: number;
+  /** Комиссия интернет-эквайринга, % от платежа. */
+  acquiringPct: number;
+  /** Сервис «Чеки» Т-Банка, % от платежа с чеком (docs/payments-and-kkt.md). */
+  receiptPct: number;
+  /** Ставка УСН, %. */
+  usnPct: number;
+  /** «Доходы» — налог с выручки; «Доходы − расходы» — с прибыли до налога. */
+  usnMode: UsnMode;
 }
 
 export const ratesValid = (r: EconomicsRates): boolean =>
-  r.usdToRub > 0 && r.rateUsdPer1k > 0 && r.taxPct >= 0 && r.taxPct < 100;
+  r.usdToRub > 0 && r.rateUsdPer1k > 0 && r.taxPct >= 0 && r.taxPct < 100 &&
+  r.acquiringPct >= 0 && r.acquiringPct < 100 &&
+  r.receiptPct >= 0 && r.receiptPct < 100 &&
+  r.usnPct >= 0 && r.usnPct < 100;
 
 /** Цена геймпасса: чтобы клиент получил `net`, купить надо больше на комиссию. */
 export const grossFor = (net: number, r: EconomicsRates): number =>
@@ -90,9 +119,30 @@ export interface ComputedOrder {
   costKop: number;
   /** Во что обошёлся бонус: «купить с бонусом» минус «купить без». */
   bonusCostKop: number;
+  /** Эквайринг + «Чеки», ₽ в копейках. */
+  acquiringKop: number;
+  /** Налог УСН, ₽ в копейках. */
+  usnKop: number;
+  /** Выручка − робуксы (без комиссий и налога). Историческая «грязная» маржа. */
+  grossProfitKop: number | null;
+  /** Выручка − робуксы − эквайринг − налог. Это и есть «на руки». */
   profitKop: number | null;
   modelRevenueKop: number;
   modelProfitKop: number;
+}
+
+/** Комиссии платёжного контура с суммы платежа. */
+export const acquiringKopFor = (revenueKop: number, r: EconomicsRates): number =>
+  ratesValid(r) ? Math.round((revenueKop * (r.acquiringPct + r.receiptPct)) / 100) : 0;
+
+/**
+ * Налог УСН. При «Доходы» база — вся выручка; при «Доходы − расходы» — то, что
+ * осталось после робуксов и комиссий, и отрицательная база налога не создаёт.
+ */
+export function usnKopFor(revenueKop: number, expensesKop: number, r: EconomicsRates): number {
+  if (!ratesValid(r)) return 0;
+  const base = r.usnMode === "income" ? revenueKop : Math.max(0, revenueKop - expensesKop);
+  return Math.round((base * r.usnPct) / 100);
 }
 
 export function computeOrder(
@@ -105,15 +155,26 @@ export function computeOrder(
   const costKop = costKopFor(gross, rates);
   const bonusCostKop = costKop - costKopFor(grossFor(paidRobux, rates), rates);
   const modelRevenueKop = modelPriceKop(paidRobux, prices);
+  const revenueKop = order.revenueKopecks;
+
+  const acquiringKop = revenueKop != null ? acquiringKopFor(revenueKop, rates) : 0;
+  const usnKop = revenueKop != null ? usnKopFor(revenueKop, costKop + acquiringKop, rates) : 0;
+
+  const modelAcquiringKop = acquiringKopFor(modelRevenueKop, rates);
+  const modelUsnKop = usnKopFor(modelRevenueKop, costKop + modelAcquiringKop, rates);
+
   return {
     order,
     paidRobux,
     gross,
     costKop,
     bonusCostKop,
-    profitKop: order.revenueKopecks != null ? order.revenueKopecks - costKop : null,
+    acquiringKop,
+    usnKop,
+    grossProfitKop: revenueKop != null ? revenueKop - costKop : null,
+    profitKop: revenueKop != null ? revenueKop - costKop - acquiringKop - usnKop : null,
     modelRevenueKop,
-    modelProfitKop: modelRevenueKop - costKop,
+    modelProfitKop: modelRevenueKop - costKop - modelAcquiringKop - modelUsnKop,
   };
 }
 
@@ -133,6 +194,12 @@ export interface EconomicsTotals {
   paidRobux: number;
   gross: number;
   bonusCostKop: number;
+  /** Эквайринг + «Чеки» по всем заказам с известной выручкой. */
+  acquiringKop: number;
+  /** Налог УСН по всем заказам с известной выручкой. */
+  usnKop: number;
+  /** Выручка − робуксы, до комиссий и налога. */
+  grossProfitKop: number;
   modelRevenueKop: number;
   modelProfitKop: number;
   snapshotCostKop: number;
@@ -147,8 +214,8 @@ export function computeTotals(rows: ComputedOrder[]): EconomicsTotals {
   const t: EconomicsTotals = {
     orders: rows.length, withRevenue: 0, revenueKop: 0, costKop: 0, costNoRevenueKop: 0,
     knownCostKop: 0, profitKop: 0, marginPct: null, delivered: 0, bonus: 0, paidRobux: 0,
-    gross: 0, bonusCostKop: 0, modelRevenueKop: 0, modelProfitKop: 0,
-    snapshotCostKop: 0, snapshotCount: 0,
+    gross: 0, bonusCostKop: 0, acquiringKop: 0, usnKop: 0, grossProfitKop: 0,
+    modelRevenueKop: 0, modelProfitKop: 0, snapshotCostKop: 0, snapshotCount: 0,
   };
   for (const r of rows) {
     t.delivered += r.order.robuxDelivered;
@@ -161,6 +228,8 @@ export function computeTotals(rows: ComputedOrder[]): EconomicsTotals {
     if (r.order.revenueKopecks != null) {
       t.withRevenue += 1;
       t.revenueKop += r.order.revenueKopecks;
+      t.acquiringKop += r.acquiringKop;
+      t.usnKop += r.usnKop;
     } else {
       t.costNoRevenueKop += r.costKop;
     }
@@ -170,7 +239,8 @@ export function computeTotals(rows: ComputedOrder[]): EconomicsTotals {
     }
   }
   t.knownCostKop = t.costKop - t.costNoRevenueKop;
-  t.profitKop = t.revenueKop - t.knownCostKop;
+  t.grossProfitKop = t.revenueKop - t.knownCostKop;
+  t.profitKop = t.grossProfitKop - t.acquiringKop - t.usnKop;
   t.marginPct = t.revenueKop > 0 ? Math.round((t.profitKop / t.revenueKop) * 100) : null;
   t.modelProfitKop = t.modelRevenueKop - t.costKop;
   return t;

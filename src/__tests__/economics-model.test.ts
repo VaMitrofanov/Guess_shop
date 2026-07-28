@@ -9,7 +9,13 @@ import {
  * счёт, а заказ без известной цены не участвует в прибыли.
  */
 
-const RATES: EconomicsRates = { usdToRub: 85, rateUsdPer1k: 4.3, taxPct: 30 };
+// Базовые курсы без комиссий — ими проверяется «грязная» часть формулы.
+const RATES: EconomicsRates = {
+  usdToRub: 85, rateUsdPer1k: 4.3, taxPct: 30,
+  acquiringPct: 0, receiptPct: 0, usnPct: 0, usnMode: "income",
+};
+/** Боевой контур: эквайринг 2.9% + «Чеки» 1.5% + УСН «Доходы» 6%. */
+const FEES: EconomicsRates = { ...RATES, acquiringPct: 2.9, receiptPct: 1.5, usnPct: 6 };
 const PRICES: Record<number, number> = { 100: 160, 200: 260, 500: 450, 1000: 800 };
 
 const order = (over: Partial<EconomicsOrder> = {}): EconomicsOrder => ({
@@ -113,5 +119,62 @@ describe("computeTotals", () => {
   it("маржа считается от выручки и только когда выручка есть", () => {
     expect(t.marginPct).toBe(Math.round((t.profitKop / t.revenueKop) * 100));
     expect(computeTotals([]).marginPct).toBeNull();
+  });
+});
+
+describe("эквайринг и налог", () => {
+  it("эквайринг берётся с платежа: комиссия банка плюс «Чеки»", () => {
+    const r = computeOrder(order({ revenueKopecks: 100_000 }), FEES, PRICES);
+    // 1000 ₽ × (2.9% + 1.5%) = 44 ₽
+    expect(r.acquiringKop).toBe(4_400);
+  });
+
+  it("УСН «Доходы» считает налог со всей выручки, а не с прибыли", () => {
+    const r = computeOrder(order({ revenueKopecks: 100_000 }), FEES, PRICES);
+    expect(r.usnKop).toBe(6_000); // 1000 ₽ × 6%
+  });
+
+  it("УСН «Доходы − расходы» считает налог с того, что осталось", () => {
+    const rates: EconomicsRates = { ...FEES, usnMode: "income-minus-expenses", usnPct: 15 };
+    const r = computeOrder(order({ robuxDelivered: 200, revenueKopecks: 100_000 }), rates, PRICES);
+    const base = 100_000 - r.costKop - r.acquiringKop;
+    expect(r.usnKop).toBe(Math.round(base * 0.15));
+  });
+
+  it("отрицательная база налога не создаёт: убыточный заказ не даёт вычета", () => {
+    const rates: EconomicsRates = { ...FEES, usnMode: "income-minus-expenses", usnPct: 15 };
+    // Продали 2000 R$ за 100 ₽ — расходы кратно больше выручки.
+    const r = computeOrder(order({ robuxDelivered: 2000, revenueKopecks: 10_000 }), rates, PRICES);
+    expect(r.usnKop).toBe(0);
+    expect(r.profitKop).toBeLessThan(0);
+  });
+
+  it("прибыль «на руки» = выручка − робуксы − эквайринг − налог", () => {
+    const r = computeOrder(order({ revenueKopecks: 100_000 }), FEES, PRICES);
+    expect(r.grossProfitKop).toBe(100_000 - r.costKop);
+    expect(r.profitKop).toBe(100_000 - r.costKop - r.acquiringKop - r.usnKop);
+    expect(r.profitKop!).toBeLessThan(r.grossProfitKop!);
+  });
+
+  it("комиссии не начисляются на заказ без известной цены", () => {
+    const r = computeOrder(order({ revenueKopecks: null, revenueSource: "unknown" }), FEES, PRICES);
+    expect(r.acquiringKop).toBe(0);
+    expect(r.usnKop).toBe(0);
+    expect(r.profitKop).toBeNull();
+  });
+
+  it("итоги вычитают комиссии и налог из общей прибыли", () => {
+    const rows = [computeOrder(order({ revenueKopecks: 100_000 }), FEES, PRICES)];
+    const t = computeTotals(rows);
+    expect(t.acquiringKop).toBe(4_400);
+    expect(t.usnKop).toBe(6_000);
+    expect(t.profitKop).toBe(t.grossProfitKop - t.acquiringKop - t.usnKop);
+  });
+
+  it("нулевые ставки комиссий оставляют формулу прежней", () => {
+    const withFees = computeOrder(order(), RATES, PRICES);
+    expect(withFees.acquiringKop).toBe(0);
+    expect(withFees.usnKop).toBe(0);
+    expect(withFees.profitKop).toBe(withFees.grossProfitKop);
   });
 });

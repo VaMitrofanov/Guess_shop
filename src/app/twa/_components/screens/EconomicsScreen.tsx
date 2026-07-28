@@ -6,8 +6,8 @@ import { C, RADIUS, tabular, tint } from "../theme";
 import { haptic } from "../haptics";
 import { toast } from "../Toast";
 import {
-  computeOrder, computeTotals, costKopFor, grossFor, ratesValid,
-  type DirectEconomics, type DirectEconomicsSource, type EconomicsRates,
+  DEFAULT_FEE_RATES, computeOrder, computeTotals, costKopFor, grossFor, ratesValid,
+  type DirectEconomics, type DirectEconomicsSource, type EconomicsRates, type UsnMode,
 } from "@/lib/economics-model";
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -132,6 +132,10 @@ export default function EconomicsScreen({ token }: { token: string }) {
   const [usdStr, setUsdStr]   = useState("");
   const [rateStr, setRateStr] = useState("");
   const [taxStr, setTaxStr]   = useState("");
+  const [acqStr, setAcqStr]   = useState(String(DEFAULT_FEE_RATES.acquiringPct));
+  const [recStr, setRecStr]   = useState(String(DEFAULT_FEE_RATES.receiptPct));
+  const [usnStr, setUsnStr]   = useState(String(DEFAULT_FEE_RATES.usnPct));
+  const [usnMode, setUsnMode] = useState<UsnMode>(DEFAULT_FEE_RATES.usnMode);
   const [prices, setPrices]   = useState<Record<number, number>>({});
 
   const [period, setPeriod]   = useState<number>(0);
@@ -196,8 +200,12 @@ export default function EconomicsScreen({ token }: { token: string }) {
   // Формула и типы — общие с веб-админкой (`@/lib/economics-model`), чтобы две
   // поверхности не считали прибыль по-разному.
   const rates: EconomicsRates = useMemo(
-    () => ({ usdToRub: Number(usdStr), rateUsdPer1k: Number(rateStr), taxPct: Number(taxStr) }),
-    [usdStr, rateStr, taxStr],
+    () => ({
+      usdToRub: Number(usdStr), rateUsdPer1k: Number(rateStr), taxPct: Number(taxStr),
+      acquiringPct: Number(acqStr), receiptPct: Number(recStr),
+      usnPct: Number(usnStr), usnMode,
+    }),
+    [usdStr, rateStr, taxStr, acqStr, recStr, usnStr, usnMode],
   );
   const { usdToRub: usd, rateUsdPer1k: rate, taxPct: tax } = rates;
   const valid = ratesValid(rates);
@@ -208,6 +216,10 @@ export default function EconomicsScreen({ token }: { token: string }) {
     setUsd(String(data.defaults.usdToRub));
     setRate(String(data.defaults.purchaseRateUsdPer1k ?? 4.3));
     setTax(String(data.defaults.robloxTaxPct));
+    setAcqStr(String(DEFAULT_FEE_RATES.acquiringPct));
+    setRecStr(String(DEFAULT_FEE_RATES.receiptPct));
+    setUsnStr(String(DEFAULT_FEE_RATES.usnPct));
+    setUsnMode(DEFAULT_FEE_RATES.usnMode);
     const base: Record<number, number> = {};
     for (const [k, v] of Object.entries(data.prices)) base[Number(k)] = v;
     setPrices(base);
@@ -314,7 +326,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
         <div style={{ fontSize: 13, color: C.textSecondary, marginTop: 5, lineHeight: 1.5 }}>
           {totals.withRevenue === 0
             ? "нет заказов с известной ценой"
-            : <>получили {rubKop(totals.revenueKop)} · робуксы стоили {rubKop(knownCostKop)}
+            : <>получили {rubKop(totals.revenueKop)} · робуксы −{rubKop(knownCostKop)} · эквайринг −{rubKop(totals.acquiringKop)} · налог −{rubKop(totals.usnKop)}
               {marginPct !== null && <> · маржа <b style={{ color: C.textPrimary }}>{marginPct}%</b></>}</>}
         </div>
       </Card>
@@ -355,6 +367,13 @@ export default function EconomicsScreen({ token }: { token: string }) {
           <Field label="Курс доллара" hint="₽ за 1 $" value={usdStr} onChange={setUsd} step={0.5} suffix="₽" />
           <Field label="Закуп робуксов" hint="$ за 1000 грязных R$" value={rateStr} onChange={setRate} step={0.1} suffix="$" />
           <Field label="Комиссия Roblox" hint="сколько съедает геймпасс" value={taxStr} onChange={setTax} step={1} suffix="%" />
+          <Field label="Эквайринг" hint="% с платежа — сверь с договором" value={acqStr} onChange={setAcqStr} step={0.1} suffix="%" />
+          <Field label="Сервис «Чеки»" hint="% с платежа с чеком" value={recStr} onChange={setRecStr} step={0.1} suffix="%" />
+          <Field label="Налог УСН" hint={usnMode === "income" ? "с выручки" : "с прибыли до налога"} value={usnStr} onChange={setUsnStr} step={1} suffix="%" />
+          <Pills
+            items={[{ id: "income" as UsnMode, label: "Доходы" }, { id: "income-minus-expenses" as UsnMode, label: "Доходы − расходы" }]}
+            value={usnMode} onChange={setUsnMode}
+          />
         </div>
 
         {!valid ? (
@@ -368,6 +387,8 @@ export default function EconomicsScreen({ token }: { token: string }) {
           }}>
             <div>грязные R$ = выдано ÷ {(1 - tax / 100).toFixed(2)} <span style={{ color: C.muted }}>(комиссия {tax}%)</span></div>
             <div>себестоимость = грязные ÷ 1000 × {rate} $ × {usd} ₽</div>
+            <div>эквайринг = платёж × {(rates.acquiringPct + rates.receiptPct).toFixed(1)}%</div>
+            <div>налог = {usnMode === "income" ? "выручка" : "(выручка − робуксы − эквайринг)"} × {rates.usnPct}%</div>
             <div style={{ color: C.textPrimary, marginTop: 3 }}>
               1000 чистых R$ ⟶ {grossFor(1000, rates).toLocaleString("ru-RU")} грязных ⟶ {rubKop2(costKopFor(grossFor(1000, rates), rates))}
             </div>
@@ -429,7 +450,7 @@ export default function EconomicsScreen({ token }: { token: string }) {
             За этот период ничего нет
           </div>
         )}
-        {rows.map(({ order: o, paidRobux, gross, costKop, bonusCostKop, profitKop, modelRevenueKop, modelProfitKop }) => {
+        {rows.map(({ order: o, paidRobux, gross, costKop, bonusCostKop, acquiringKop, usnKop, profitKop, modelRevenueKop, modelProfitKop }) => {
           const open = expanded === o.id;
           return (
             <div key={o.id} style={{ borderTop: `1px solid ${C.hairline}` }}>
@@ -481,7 +502,9 @@ export default function EconomicsScreen({ token }: { token: string }) {
                       <Line k="В базе записано" v={rubKop2(o.costSnapshotKopecks)}
                         note={o.usdToRubSnapshot ? `курс ${o.usdToRubSnapshot} ₽/$` : undefined} />
                     )}
-                    <Line k="Прибыль" v={profitKop == null ? "—" : rubKop2(profitKop)} strong />
+                    <Line k={`Эквайринг + «Чеки» (${(rates.acquiringPct + rates.receiptPct).toFixed(1)}%)`} v={`−${rubKop2(acquiringKop)}`} />
+                    <Line k={`Налог УСН ${rates.usnPct}%`} v={`−${rubKop2(usnKop)}`} />
+                    <Line k="Прибыль на руки" v={profitKop == null ? "—" : rubKop2(profitKop)} strong />
                     <Line k="По вашему прайсу" v={`${rubKop(modelRevenueKop)} → ${rubKop(modelProfitKop)}`} />
                     {!o.paid && o.source === "DIRECT" && (
                       <div style={{ color: C.orange, marginTop: 4 }}>Оплата в базе не отмечена</div>
