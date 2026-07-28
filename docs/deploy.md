@@ -270,6 +270,10 @@ Web-вариант через `src/instrumentation.ts` остаётся fallback
 Docker liveness. Web и VK должны иметь одинаковый `VALIDATOR_KEY`; VK и TG — одинаковые
 `TG_TOKEN`, `ADMIN_IDS`, `VALIDATOR_SOURCE_URL`, `VALIDATOR_KEY`. Для email fallback в Web
 должен быть настроен SMTP, а хотя бы у одного администратора — подтверждённый email.
+Production acceptance 28.07: controlled stop заморозил heartbeat, после пяти минут VK
+перевёл его в `STALE`, Web/SMTP подтвердил доставку и сохранил ненулевой `lastAlertAt`;
+владелец подтвердил письмо скриншотом. После запуска TG heartbeat стал fresh, watchdog —
+`HEALTHY`, recovery доставлен, просроченный backlog остался 0.
 
 Поэтапное включение выполняется отдельными командами и с окном наблюдения между ними:
 

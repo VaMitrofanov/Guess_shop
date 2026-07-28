@@ -29,7 +29,7 @@
 переписке, не ротирован.
 Это единственный подтверждённый security-блокер перехода к 10% — см. §2.
 
-### Волна 2 — release candidate 28.07 (migration production ✅, app deploy ⬜)
+### Волна 2 — release candidate 28.07 (migration/deploy/worker drill ✅)
 
 - F4: один канонический заказ допускает максимум три provider-попытки с разными `OrderId`;
   поздний callback старой попытки не закрывает более новую. Бонус/скидка после компенсации
@@ -39,7 +39,7 @@
 - F7: TG payment-outbox пишет heartbeat в БД. Независимый VK-процесс тревожит после пяти
   минут тишины, сообщает восстановление и отдельно следит за `PENDING` старше 10 минут.
   Если Telegram/bridge не подтвердил доставку, защищённый Web endpoint отправляет alert на
-  подтверждённый email владельца; production drill после этого hotfix ещё требуется.
+  подтверждённый email владельца. Controlled production stop подтвердил stop+recovery.
 - Рассинхрон Roblox смягчён retry временных API-сбоев и exact-ID fallback из главной.
 - QA: критический lint = 0 warnings; старый долг 1123 warnings защищён точным fingerprint;
   TypeScript web+боты чистый; Jest 386/386 + 21/21; production build зелёный.
@@ -219,7 +219,7 @@ TWA с мусорным Bearer → 401, **заблокированных CSP-н�
 Код, деплой и прод-приёмка — см. §3. Осталось два ручных пункта за владельцем:
 боевой заказ (карточка «ЗАКАЗ С САЙТА СОЗДАН») и приёмка на реальных устройствах.
 
-### Волна 2 — деньги и конверсия (код ✅, production acceptance ⬜)
+### Волна 2 — деньги и конверсия (код/deploy ✅, browser acceptance частично открыта)
 
 | # | Задача | Суть | Приёмка |
 |---|---|---|---|
@@ -227,7 +227,7 @@ TWA с мусорным Bearer → 401, **заблокированных CSP-н�
 | F5 🟡 | Рассинхрон суммы | ✅ `selectPass` → `setOrderAmount` | build ✅; browser acceptance ⬜ |
 | F6 🟡 | Повторный login после регистрации | ✅ Авто-`signIn`, safe `next`, fallback login | build ✅; clean-account live ⬜ |
 | S9 🟡 | Email чека | ✅ profile prefill + warnings; чек отправляет банк | payload tests ✅; реальный чек ⬜ |
-| F7 🟡 | TG-worker без наблюдения | ✅ heartbeat + Web-watchdog + backlog alert | unit/build ✅; 6-minute drill ⬜ |
+| F7 ✅ | TG-worker без наблюдения | ✅ heartbeat + VK-watchdog + TG/email fallback + backlog alert | unit/build ✅; controlled 6-minute drill ✅ |
 
 ### Волна 3 — ✅ закрыта 28.07 (`a2e56c1`)
 

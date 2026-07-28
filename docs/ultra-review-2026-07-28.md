@@ -1023,12 +1023,13 @@ verification-флаг, checkout предзаполняет адрес и объ�
 
 #### F7 · Heartbeat фоновых воркеров (закрывает карточку `jYOEHLjT`)
 
-**✅ Реализовано локально 28.07.2026; production drill ещё не выполнен.** `ServiceHeartbeat`
-обновляется TG payment-outbox до и после batch. Первый production drill доказал, что Web
-обнаруживает stale, но RF-контейнер не доставляет Telegram даже через текущий bridge route.
-Основной watchdog поэтому перенесён в независимый VK-процесс на SG с рабочим Telegram
-transport; Web оставляет readiness и отключаемый fallback. Оба используют общий atomic
-dedupe, recovery и `PENDING`>10 минут. `/api/health/workers` отделён от Docker liveness.
+**✅ Реализовано и принято production drill 28.07.2026.** `ServiceHeartbeat` обновляется TG
+payment-outbox до и после batch. VK-процесс независимо обнаруживает stale и backlog; если
+Telegram/bridge не подтверждает доставку, защищённый Web endpoint отправляет письмо только
+подтверждённому владельцу из `ADMIN_IDS`. Третий controlled stop дал `HEALTHY → STALE`,
+ненулевой `lastAlertAt` и реально полученное письмо; после запуска TG зафиксированы свежий
+heartbeat, `STALE → HEALTHY`, recovery delivery и backlog 0. `/api/health/workers` отделён
+от Docker liveness.
 
 **Проблема.** `payment-outbox`, `sweepStaleWebOrders`, `runRetention` живут в TG-боте на
 сингапурском сервере. Бот лёг — оплата подтверждена, но никто не уведомлён, а брошенные
