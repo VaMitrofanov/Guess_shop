@@ -99,7 +99,10 @@ export async function initTinkoffPayment(
 }
 
 export type CanonicalPaymentInit = {
+  /** Stable customer-facing order ID used by our status page. */
   publicOrderId: string;
+  /** Unique provider-side OrderId; differs from publicOrderId on a retry. */
+  providerOrderId?: string;
   amountKopecks: number;
   receiptEmail: string;
   description: string;
@@ -192,7 +195,7 @@ export async function initCanonicalTinkoffPayment(input: CanonicalPaymentInit) {
   const params: Record<string, unknown> = {
     TerminalKey: terminalKey,
     Amount: input.amountKopecks,
-    OrderId: input.publicOrderId,
+    OrderId: input.providerOrderId ?? input.publicOrderId,
     Description: input.description.slice(0, 140),
     NotificationURL: `${appUrl}/api/webhooks/tinkoff`,
     SuccessURL: `${appUrl}/payment/status?${statusQuery}&result=success`,

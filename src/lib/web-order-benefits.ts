@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { BONUS_REASONS, applyBonusDeltaTx, webOrderBonusRevertKey } from "@/lib/bonus-ledger";
+import { BONUS_REASONS, applyBonusDeltaTx, webOrderBonusRevisionRevertKey } from "@/lib/bonus-ledger";
 
 /**
  * Компенсация бонуса и скидки, списанных при создании web-заказа
@@ -44,6 +44,7 @@ export async function revertWebOrderBenefits(
         bonusAppliedRobux: true,
         discountAppliedKopecks: true,
         benefitsRevertedAt: true,
+        benefitsRevision: true,
       },
     });
     if (!order) return { reverted: false, reason: "not_found" as const };
@@ -70,7 +71,7 @@ export async function revertWebOrderBenefits(
         deltaRobux: bonusRobux,
         reason: BONUS_REASONS.WEB_ORDER_REDEMPTION_REVERSED,
         referenceId: referenceKey,
-        idempotencyKey: webOrderBonusRevertKey(referenceKey),
+        idempotencyKey: webOrderBonusRevisionRevertKey(referenceKey, order.benefitsRevision),
         metadata: {
           orderId: order.id,
           publicOrderId: order.publicOrderId,

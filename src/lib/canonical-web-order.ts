@@ -97,7 +97,7 @@ function publicOrderId() {
   return `WEB-${crypto.randomBytes(10).toString("hex").toUpperCase()}`;
 }
 
-function statusToken() {
+export function createStatusToken() {
   return crypto.randomBytes(32).toString("base64url");
 }
 
@@ -125,7 +125,7 @@ type CreateCanonicalWebOrderInput = {
 export async function createCanonicalWebOrder(input: CreateCanonicalWebOrderInput) {
   const now = input.now ?? new Date();
   const publicId = publicOrderId();
-  const rawStatusToken = statusToken();
+  const rawStatusToken = createStatusToken();
   const tokenHash = hashStatusToken(rawStatusToken);
 
   const result = await prisma.$transaction(async (tx) => {

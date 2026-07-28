@@ -10,16 +10,25 @@
 export interface AccountMePayload {
   authenticated: boolean;
   robloxUsername: string | null;
+  email: string | null;
+  emailVerified: boolean;
 }
 
 export const GUEST_ACCOUNT_PAYLOAD: Readonly<AccountMePayload> = Object.freeze({
   authenticated: false,
   robloxUsername: null,
+  email: null,
+  emailVerified: false,
 });
 
 export function accountMePayload(
-  user: { robloxUsername: string | null } | null | undefined,
+  user: { robloxUsername: string | null; email?: string | null; emailVerifiedAt?: Date | null } | null | undefined,
 ): AccountMePayload {
   if (!user) return { ...GUEST_ACCOUNT_PAYLOAD };
-  return { authenticated: true, robloxUsername: user.robloxUsername };
+  return {
+    authenticated: true,
+    robloxUsername: user.robloxUsername,
+    email: user.email ?? null,
+    emailVerified: user.emailVerifiedAt instanceof Date,
+  };
 }

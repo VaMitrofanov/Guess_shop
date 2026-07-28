@@ -9,6 +9,7 @@ import {
 } from "@/lib/payment-notification";
 import { verifyTinkoffSignature } from "@/lib/tinkoff";
 import { revertWebOrderBenefits } from "@/lib/web-order-benefits";
+import { CREATED_ATTEMPT_STALE_MS } from "@/lib/payment-init-retry";
 
 export const dynamic = "force-dynamic";
 
@@ -111,18 +112,34 @@ export async function POST(req: NextRequest) {
           data: { status: "PENDING", paidAt: new Date(), pendingAt: new Date() },
         });
       } else if (paymentClosesUnfulfilledOrder(nextStatus, attempt.order.status)) {
-        await tx.wbOrder.update({
-          where: { id: attempt.order.id },
-          data: {
-            status: "REJECTED",
-            rejectionReason: nextStatus === "REFUNDED"
-              ? "Платёж полностью возвращён"
-              : "Платёж отклонён или отменён банком",
+        // A late callback from an older provider attempt must not reject an
+        // order that already has a newer live attempt. Provider OrderId is
+        // unique per retry precisely so both callbacks can be reconciled.
+        const anotherLiveAttempt = await tx.paymentAttempt.findFirst({
+          where: {
+            orderId: attempt.order.id,
+            id: { not: attempt.id },
+            OR: [
+              { status: "CREATED", createdAt: { gt: new Date(Date.now() - CREATED_ATTEMPT_STALE_MS) } },
+              { status: { in: ["INITIATED", "AUTHORIZED", "CONFIRMED", "PARTIALLY_REFUNDED"] } },
+            ],
           },
+          select: { id: true },
         });
-        if (nextStatus === "REJECTED" || nextStatus === "CANCELED") {
-          // U3: банк отказал до оплаты — бонус и скидка возвращаются клиенту.
-          benefitsToRevert = attempt.order.id;
+        if (!anotherLiveAttempt) {
+          await tx.wbOrder.update({
+            where: { id: attempt.order.id },
+            data: {
+              status: "REJECTED",
+              rejectionReason: nextStatus === "REFUNDED"
+                ? "Платёж полностью возвращён"
+                : "Платёж отклонён или отменён банком",
+            },
+          });
+          if (nextStatus === "REJECTED" || nextStatus === "CANCELED") {
+            // U3: банк отказал до оплаты — бонус и скидка возвращаются клиенту.
+            benefitsToRevert = attempt.order.id;
+          }
         }
       }
 

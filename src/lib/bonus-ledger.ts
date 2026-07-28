@@ -105,6 +105,16 @@ export function webOrderBonusRevertKey(quoteId: string) {
   return `web-order-bonus-revert:${quoteId}`;
 }
 
+export function webOrderBonusRetryKey(orderId: string, revision: number) {
+  return `web-order-bonus-retry:${orderId}:${revision}`;
+}
+
+export function webOrderBonusRevisionRevertKey(orderId: string, revision: number) {
+  return revision === 0
+    ? webOrderBonusRevertKey(orderId)
+    : `web-order-bonus-retry-revert:${orderId}:${revision}`;
+}
+
 export function directOrderBonusKey(orderId: string) {
   return `direct-order-bonus:${orderId}`;
 }

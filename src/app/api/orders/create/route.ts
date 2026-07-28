@@ -15,6 +15,11 @@ import { getCheckoutGamepassDetails, getRobloxUser } from "@/lib/roblox";
 import { initCanonicalTinkoffPayment } from "@/lib/tinkoff";
 import { siteAcquiringDecision } from "@/lib/site-acquiring";
 import { revertWebOrderBenefits } from "@/lib/web-order-benefits";
+import {
+  createPaymentRetry,
+  isLivePaymentAttempt,
+  PaymentRetryError,
+} from "@/lib/payment-init-retry";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +39,84 @@ const CreateOrderSchema = z.object({
 function consentIp(req: NextRequest): string | null {
   const ip = clientIp(req);
   return ip === "unknown" ? null : ip;
+}
+
+async function initializePayment(input: {
+  orderId: string;
+  publicOrderId: string;
+  providerOrderId: string;
+  attemptId: string;
+  amountKopecks: number;
+  receiptEmail: string;
+  statusToken: string;
+}) {
+  let payment: Awaited<ReturnType<typeof initCanonicalTinkoffPayment>>;
+  try {
+    payment = await initCanonicalTinkoffPayment({
+      publicOrderId: input.publicOrderId,
+      providerOrderId: input.providerOrderId,
+      amountKopecks: input.amountKopecks,
+      receiptEmail: input.receiptEmail,
+      description: `Заказ ${input.publicOrderId}`,
+      statusToken: input.statusToken,
+    });
+  } catch (providerError) {
+    const errorHash = crypto.createHash("sha256").update(String(providerError)).digest("hex");
+    await prisma.$transaction([
+      prisma.paymentAttempt.update({
+        where: { id: input.attemptId },
+        data: { status: "FAILED", rawEventHash: errorHash, finalizedAt: new Date() },
+      }),
+      prisma.orderEvent.create({
+        data: {
+          orderId: input.orderId,
+          type: "PAYMENT_INIT_FAILED",
+          idempotencyKey: `payment-init-failed:${input.attemptId}`,
+          payload: { paymentAttemptId: input.attemptId, errorHash },
+        },
+      }),
+    ]);
+    try {
+      await revertWebOrderBenefits(input.orderId, "PAYMENT_INIT_FAILED");
+    } catch (revertError) {
+      console.error("[orders/create] benefits revert failed", { orderId: input.orderId, revertError });
+    }
+    console.error("[orders/create] T-Bank Init failed", { orderId: input.publicOrderId, errorHash });
+    throw providerError;
+  }
+
+  // Persist the provider identifiers first. If the secondary order/audit write
+  // fails, the payment link remains safely reusable instead of being marked
+  // FAILED and allowing a duplicate provider attempt.
+  await prisma.paymentAttempt.update({
+    where: { id: input.attemptId },
+    data: {
+      paymentId: payment.paymentId,
+      paymentUrl: payment.paymentUrl,
+      status: "INITIATED",
+      initiatedAt: new Date(),
+    },
+  });
+  try {
+    await prisma.$transaction([
+      prisma.wbOrder.update({ where: { id: input.orderId }, data: { status: "PAYMENT_PENDING" } }),
+      prisma.orderEvent.create({
+        data: {
+          orderId: input.orderId,
+          type: "PAYMENT_INITIATED",
+          idempotencyKey: `payment-initiated:${input.attemptId}`,
+          payload: { paymentAttemptId: input.attemptId, provider: "TBANK", providerOrderId: input.providerOrderId },
+        },
+      }),
+    ]);
+  } catch (auditError) {
+    console.error("[orders/create] payment durable, secondary audit update failed", {
+      orderId: input.publicOrderId,
+      attemptId: input.attemptId,
+      auditError,
+    });
+  }
+  return { paymentUrl: payment.paymentUrl };
 }
 
 export async function POST(req: NextRequest) {
@@ -78,22 +161,93 @@ export async function POST(req: NextRequest) {
 
   const input = parsed.data;
   try {
-    const existing = await prisma.wbOrder.findUnique({
-      where: { webIdempotencyKey: input.idempotencyKey },
+    // A 5xx response makes the browser rotate its request key. The consumed
+    // quote still identifies the same canonical order, so a rotated key can
+    // resume it instead of failing forever with QUOTE_UNAVAILABLE.
+    const existing = await prisma.wbOrder.findFirst({
+      where: {
+        OR: [
+          { webIdempotencyKey: input.idempotencyKey },
+          { priceQuoteId: input.quoteId },
+        ],
+      },
       select: {
+        id: true,
         userId: true,
         publicOrderId: true,
-        paymentAttempts: { orderBy: { createdAt: "desc" }, take: 1, select: { paymentUrl: true } },
+        robloxUsername: true,
+        gamepassId: true,
+        amount: true,
+        paidAt: true,
+        paymentAttempts: {
+          orderBy: { createdAt: "desc" },
+          select: { status: true, paymentUrl: true, createdAt: true },
+        },
       },
     });
     if (existing) {
       if (existing.userId !== userId) return NextResponse.json({ error: "Заказ не найден" }, { status: 404 });
-      return NextResponse.json({
-        success: true,
-        orderId: existing.publicOrderId,
-        paymentUrl: existing.paymentAttempts[0]?.paymentUrl ?? null,
-        alreadyExists: true,
+      const live = existing.paymentAttempts.find((attempt) => isLivePaymentAttempt(attempt.status, attempt.createdAt));
+      if (live?.paymentUrl && (live.status === "INITIATED" || live.status === "AUTHORIZED")) {
+        return NextResponse.json({
+          success: true,
+          orderId: existing.publicOrderId,
+          paymentUrl: live.paymentUrl,
+          alreadyExists: true,
+        });
+      }
+      if (live || existing.paidAt) {
+        return NextResponse.json({ error: "Платёж уже обрабатывается" }, { status: 409 });
+      }
+      if (
+        existing.gamepassId !== input.gamepassId ||
+        existing.robloxUsername?.toLowerCase() !== input.username.toLowerCase()
+      ) {
+        return NextResponse.json({ error: "Данные сохранённого заказа изменились. Создайте новый заказ." }, { status: 409 });
+      }
+
+      const robloxUser = await getRobloxUser(input.username);
+      if (!robloxUser) return NextResponse.json({ error: "Roblox-пользователь не найден" }, { status: 404 });
+      const gamepass = await getCheckoutGamepassDetails(input.gamepassId, {
+        id: robloxUser.id,
+        username: String(robloxUser.name ?? input.username),
       });
+      if (!gamepass) return NextResponse.json({ error: "Геймпасс не найден" }, { status: 404 });
+      validateCheckoutGamepass(
+        { requestedRobux: existing.amount, bonusRobux: 0 },
+        gamepass,
+        Number(robloxUser.id),
+      );
+
+      const retry = await createPaymentRetry({
+        orderId: existing.id,
+        idempotencyKey: input.idempotencyKey,
+        receiptEmail: input.receiptEmail.toLowerCase(),
+      });
+      try {
+        const payment = await initializePayment({
+          orderId: existing.id,
+          publicOrderId: retry.publicOrderId,
+          providerOrderId: retry.providerOrderId,
+          attemptId: retry.attempt.id,
+          amountKopecks: retry.attempt.amountKopecks,
+          receiptEmail: input.receiptEmail.toLowerCase(),
+          statusToken: retry.statusToken,
+        });
+        return NextResponse.json({
+          success: true,
+          orderId: retry.publicOrderId,
+          statusToken: retry.statusToken,
+          paymentUrl: payment.paymentUrl,
+          retried: true,
+          attemptNumber: retry.attemptNumber,
+        }, { status: 201 });
+      } catch {
+        return NextResponse.json({
+          error: "Банк временно не создал платёж. Нажмите «Оплатить» ещё раз — заказ сохранён.",
+          retryable: true,
+        }, { status: 502 });
+      }
     }
 
     const quote = await prisma.priceQuote.findUnique({
@@ -123,69 +277,34 @@ export async function POST(req: NextRequest) {
     });
 
     try {
-      const payment = await initCanonicalTinkoffPayment({
+      const payment = await initializePayment({
+        orderId: created.order.id,
         publicOrderId: created.order.publicOrderId!,
+        providerOrderId: created.attempt.publicOrderId,
+        attemptId: created.attempt.id,
         amountKopecks: created.attempt.amountKopecks,
         receiptEmail: input.receiptEmail.toLowerCase(),
-        description: `Заказ ${created.order.publicOrderId}`,
         statusToken: created.statusToken,
       });
-      await prisma.$transaction([
-        prisma.paymentAttempt.update({
-          where: { id: created.attempt.id },
-          data: {
-            paymentId: payment.paymentId,
-            paymentUrl: payment.paymentUrl,
-            status: "INITIATED",
-            initiatedAt: new Date(),
-          },
-        }),
-        prisma.wbOrder.update({ where: { id: created.order.id }, data: { status: "PAYMENT_PENDING" } }),
-        prisma.orderEvent.create({
-          data: {
-            orderId: created.order.id,
-            type: "PAYMENT_INITIATED",
-            idempotencyKey: `payment-initiated:${created.attempt.id}`,
-            payload: { paymentAttemptId: created.attempt.id, provider: "TBANK" },
-          },
-        }),
-      ]);
       return NextResponse.json({
         success: true,
         orderId: created.order.publicOrderId,
         statusToken: created.statusToken,
         paymentUrl: payment.paymentUrl,
       }, { status: 201 });
-    } catch (providerError) {
-      const errorHash = crypto.createHash("sha256").update(String(providerError)).digest("hex");
-      await prisma.$transaction([
-        prisma.paymentAttempt.update({
-          where: { id: created.attempt.id },
-          data: { status: "FAILED", rawEventHash: errorHash, finalizedAt: new Date() },
-        }),
-        prisma.orderEvent.create({
-          data: {
-            orderId: created.order.id,
-            type: "PAYMENT_INIT_FAILED",
-            idempotencyKey: `payment-init-failed:${created.attempt.id}`,
-            payload: { paymentAttemptId: created.attempt.id, errorHash },
-          },
-        }),
-      ]);
-      // U3: платёж не создан — бонус и скидка возвращаются немедленно, иначе
-      // накопленное клиента сгорало на неудачной попытке оплаты.
-      try {
-        await revertWebOrderBenefits(created.order.id, "PAYMENT_INIT_FAILED");
-      } catch (revertError) {
-        console.error("[orders/create] benefits revert failed", { orderId: created.order.id, revertError });
-      }
-      console.error("[orders/create] T-Bank Init failed", { orderId: created.order.publicOrderId, errorHash });
-      return NextResponse.json({ error: "Банк временно не создал платёж. Заказ сохранён для проверки." }, { status: 502 });
+    } catch {
+      return NextResponse.json({
+        error: "Банк временно не создал платёж. Нажмите «Оплатить» ещё раз — заказ сохранён.",
+        retryable: true,
+      }, { status: 502 });
     }
   } catch (error) {
     if (error instanceof WebOrderError) {
       const status = error.code.startsWith("GAMEPASS_") ? 409 : 400;
       return NextResponse.json({ error: error.message, code: error.code }, { status });
+    }
+    if (error instanceof PaymentRetryError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
     }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       return NextResponse.json({ error: "Этот запрос уже обрабатывается" }, { status: 409 });

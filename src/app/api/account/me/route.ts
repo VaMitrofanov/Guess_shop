@@ -18,7 +18,7 @@ export async function GET() {
   const [user, recentOrder] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
-      select: { robloxUsername: true },
+      select: { robloxUsername: true, email: true, emailVerifiedAt: true },
     }),
     prisma.wbOrder.findFirst({
       where: { userId, robloxUsername: { not: null } },
@@ -29,5 +29,7 @@ export async function GET() {
 
   return NextResponse.json(accountMePayload({
     robloxUsername: user?.robloxUsername ?? recentOrder?.robloxUsername ?? null,
+    email: user?.email ?? null,
+    emailVerifiedAt: user?.emailVerifiedAt ?? null,
   }), { headers: PRIVATE });
 }

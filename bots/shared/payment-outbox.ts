@@ -1,9 +1,23 @@
 import { db } from "./db";
 import { tgSend, vkSend, stripHtml } from "./notify";
+import { touchPaymentOutboxHeartbeat } from "./worker-heartbeat";
 
 type TelegramSender = {
   telegram: { sendMessage(chatId: string, text: string, extra: { parse_mode: "HTML" }): Promise<unknown> };
 };
+
+type OutboxMessageLike = {
+  id?: string;
+  topic: string;
+  payload: unknown;
+  attempts?: number;
+};
+
+function payloadOrderId(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return "";
+  const value = (payload as Record<string, unknown>).orderId;
+  return typeof value === "string" ? value : "";
+}
 
 const MAX_ATTEMPTS = 8;
 const LEASE_MS = 5 * 60_000;
@@ -55,15 +69,15 @@ async function notifyCustomer(user: { tgId?: string | null; vkId?: string | null
   }
 }
 
-export async function dispatch(message: any, bot: TelegramSender) {
+export async function dispatch(message: OutboxMessageLike, bot: TelegramSender) {
   // Проверяем топик ДО обращения к БД: неизвестный топик не должен выглядеть
   // как «заказ не найден» и тратить попытки.
   if (!HANDLED_TOPICS.has(message.topic)) throw new UnsupportedTopicError(String(message.topic));
 
-  const orderId = String(message.payload?.orderId ?? "");
+  const orderId = payloadOrderId(message.payload);
   if (!orderId) throw new Error("outbox payload has no orderId");
 
-  const order = await (db as any).wbOrder.findUnique({
+  const order = await db.wbOrder.findUnique({
     where: { id: orderId },
     include: {
       user: { select: { tgId: true, vkId: true, name: true } },
@@ -112,28 +126,28 @@ export async function dispatch(message: any, bot: TelegramSender) {
   }
 
   const results = await Promise.all(adminIds.map((id) => tgSend(id, adminText)));
-  if (!results.some((result: any) => result?.ok === true || result?.result)) {
+  if (!results.some((result) => result.ok === true || Boolean(result.result))) {
     throw new Error("admin notification was not accepted by Telegram");
   }
 }
 
 async function claimOne() {
   const now = new Date();
-  const candidate = await (db as any).outboxMessage.findFirst({
+  const candidate = await db.outboxMessage.findFirst({
     where: { status: "PENDING", nextAttemptAt: { lte: now } },
     orderBy: [{ nextAttemptAt: "asc" }, { createdAt: "asc" }],
   });
   if (!candidate) return null;
-  const claimed = await (db as any).outboxMessage.updateMany({
+  const claimed = await db.outboxMessage.updateMany({
     where: { id: candidate.id, status: "PENDING", nextAttemptAt: { lte: now } },
     data: { status: "PROCESSING", lockedAt: now, attempts: { increment: 1 }, lastError: null },
   });
   if (claimed.count !== 1) return null;
-  return (db as any).outboxMessage.findUnique({ where: { id: candidate.id } });
+  return db.outboxMessage.findUnique({ where: { id: candidate.id } });
 }
 
 async function processBatch(bot: TelegramSender) {
-  await (db as any).outboxMessage.updateMany({
+  await db.outboxMessage.updateMany({
     where: {
       status: "PROCESSING",
       OR: [{ lockedAt: null }, { lockedAt: { lt: new Date(Date.now() - LEASE_MS) } }],
@@ -146,7 +160,7 @@ async function processBatch(bot: TelegramSender) {
     if (!message) break;
     try {
       await dispatch(message, bot);
-      await (db as any).outboxMessage.updateMany({
+      await db.outboxMessage.updateMany({
         where: { id: message.id, status: "PROCESSING" },
         data: { status: "DELIVERED", deliveredAt: new Date(), lockedAt: null, lastError: null },
       });
@@ -154,7 +168,7 @@ async function processBatch(bot: TelegramSender) {
       // Неизвестный топик повторять незачем — это рассинхрон кода, а не сбой.
       const dead = error instanceof UnsupportedTopicError || message.attempts >= MAX_ATTEMPTS;
       const lastError = String(error instanceof Error ? error.message : error).slice(0, 500);
-      await (db as any).outboxMessage.updateMany({
+      await db.outboxMessage.updateMany({
         where: { id: message.id, status: "PROCESSING" },
         data: {
           status: dead ? "DEAD" : "PENDING",
@@ -180,7 +194,11 @@ export function startPaymentOutboxWorker(bot: TelegramSender) {
   const tick = async () => {
     if (running) return;
     running = true;
-    try { await processBatch(bot); }
+    try {
+      await touchPaymentOutboxHeartbeat();
+      await processBatch(bot);
+      await touchPaymentOutboxHeartbeat();
+    }
     catch (error) { console.error("[PaymentOutbox] worker error", error); }
     finally { running = false; }
   };

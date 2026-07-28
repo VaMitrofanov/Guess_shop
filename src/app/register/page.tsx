@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { signIn } from "next-auth/react";
 import { ArrowRight, CheckCircle2, Eye, EyeOff, Gift, History, Loader2, Lock, Mail, ShieldCheck, Sparkles, User, Zap } from "lucide-react";
 import Navbar from "@/components/navbar";
 import Link from "next/link";
@@ -62,6 +63,19 @@ function RegisterContent() {
       }
       setVerificationAvailable(data.verificationAvailable !== false);
       setVerificationSent(data.verificationSent !== false);
+      const signedIn = await signIn("admin-login", {
+        email: normalizeLoginEmail(email),
+        password,
+        redirect: false,
+      });
+      if (signedIn?.ok) {
+        router.replace(returnTo);
+        router.refresh();
+        return;
+      }
+      // The registration endpoint intentionally gives an existing email the
+      // same response as a new one. If the supplied password was not that
+      // account's password, preserve anti-enumeration and fall back to login.
       setSuccess(true);
       window.setTimeout(() => router.replace(`/login?next=${encodeURIComponent(returnTo)}`), 1600);
     } catch (caught) {

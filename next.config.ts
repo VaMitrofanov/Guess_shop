@@ -54,6 +54,10 @@ const nextConfig: NextConfig = {
   images: {
     formats: ["image/webp"],
     minimumCacheTTL: 60 * 60 * 24, // 24h — Robux store assets rarely change
+    remotePatterns: [
+      { protocol: "https", hostname: "tr.rbxcdn.com", pathname: "/**" },
+      { protocol: "https", hostname: "www.roblox.com", pathname: "/asset-thumbnail/**" },
+    ],
   },
 
   // ──────────────────────────────────────────────────────────────────────────

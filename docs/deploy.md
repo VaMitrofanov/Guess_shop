@@ -256,6 +256,29 @@ TG-сервис также является единственным payment out
 claim/delivery/dead-letter alerts. Не запускай второй polling TG instance без отдельной проверки
 atomic claim и Telegram polling topology.
 
+Миграция `20260728_wave2_launch_readiness` применена к production 28.07 после проверенного
+custom-format backup. С неё TG-worker пишет `ServiceHeartbeat` до и после
+каждого outbox batch. Web-контейнер запускает **независимый** watchdog через
+`src/instrumentation.ts`; для прямых алертов ему нужны те же `TG_TOKEN` и `ADMIN_IDS` и
+`WORKER_WATCHDOG_ENABLED=true`. `/api/health/workers` возвращает 200 только при heartbeat
+моложе 5 минут и отсутствии `PENDING` старше 10 минут. Этот endpoint не подставлять вместо
+`/api/health` в Docker liveness.
+
+Поэтапное включение выполняется отдельными командами и с окном наблюдения между ними:
+
+```bash
+npm run rollout:site -- allowlist
+npm run rollout:site -- 10 --confirm-real-money
+npm run rollout:site -- 50 --confirm-real-money
+npm run rollout:site -- on --confirm-real-money
+```
+
+Скрипт требует `COOLIFY_API_URL`, `COOLIFY_TOKEN`, `COOLIFY_WEB_APP_UUID`; проверяет
+допустимый предыдущий этап, Web health, worker readiness и факт ротации T-Bank secret после
+известного cutoff, обновляет env, инициирует deploy и сверяет публичный status. `off`
+разрешён из любого состояния как аварийный rollback. Значения инфраструктуры хранятся
+только в `HANDOFF.md`/env.
+
 **Bridge:** `VALIDATOR_KEY`, `VALIDATOR_PORT`.
 
 ## Browser transport выкупа

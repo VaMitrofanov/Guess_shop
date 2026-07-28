@@ -1,7 +1,8 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
@@ -46,6 +47,7 @@ type RobloxPass = {
   price: number;
   creatorName?: string;
   sellerName?: string;
+  creatorId?: number | string;
   image?: string;
   isForSale?: boolean;
 };
@@ -79,6 +81,8 @@ function CheckoutContent() {
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quote, setQuote] = useState<PriceQuote | null>(null);
   const [receiptEmail, setReceiptEmail] = useState("");
+  const [accountEmail, setAccountEmail] = useState<string | null>(null);
+  const [accountEmailVerified, setAccountEmailVerified] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [paying, setPaying] = useState(false);
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
@@ -87,7 +91,7 @@ function CheckoutContent() {
   // про конкретного пользователя, и для гостя он всегда false.
   const [acquiringAccepting, setAcquiringAccepting] = useState(true);
   const [error, setError] = useState("");
-  const [idempotencyKey] = useState(() => crypto.randomUUID());
+  const idempotencyKey = useRef(crypto.randomUUID());
 
   const setOrderAmount = (nextAmount: number, syncInput = true) => {
     const normalized = normalizeAmount(String(nextAmount));
@@ -134,7 +138,21 @@ function CheckoutContent() {
       const res = await fetch(`/api/roblox/gamepasses?query=${encodeURIComponent(normalized)}`);
       const data = await res.json();
       if (res.ok && data.success) {
-        const ranked = rankSellableGamepasses<RobloxPass>(data.gamepasses ?? [], expectedPassPrice);
+        let ranked = rankSellableGamepasses<RobloxPass>(data.gamepasses ?? [], expectedPassPrice);
+        // The storefront passes the exact ID it just found. If Roblox's
+        // universe listing flakes between pages, verify that pass directly
+        // instead of immediately telling the customer that nothing exists.
+        if (ranked.length === 0 && rememberedGamepassId) {
+          const directRes = await fetch(`/api/roblox/gamepasses?query=${encodeURIComponent(rememberedGamepassId)}`);
+          const directData = await directRes.json().catch(() => ({}));
+          const directPass = directRes.ok && directData.success ? directData.gamepasses?.[0] as RobloxPass | undefined : undefined;
+          const creator = (directPass?.creatorName || directPass?.sellerName || "").toLowerCase();
+          const sameOwner = creator === (data.detectedUsername || normalized).toLowerCase()
+            || (directPass?.creatorId && String(directPass.creatorId) === String(data.account?.id));
+          if (directPass && sameOwner) {
+            ranked = rankSellableGamepasses([directPass], expectedPassPrice);
+          }
+        }
         setUsername(data.detectedUsername || normalized);
         setAccount(data.account ?? null);
         setGamepasses(ranked);
@@ -158,20 +176,28 @@ function CheckoutContent() {
   };
 
   useEffect(() => {
-    if (rememberedUsername) {
-      const timer = window.setTimeout(() => void lookupUsername(rememberedUsername, true), 0);
-      return () => window.clearTimeout(timer);
-    }
+    let active = true;
     fetch("/api/account/me", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
+        if (!active) return;
         setAuthenticated(data?.authenticated === true);
-        if (data?.robloxUsername) {
+        setAccountEmail(data?.email ?? null);
+        setAccountEmailVerified(data?.emailVerified === true);
+        if (data?.email) setReceiptEmail((current) => current || data.email);
+        if (!rememberedUsername && data?.robloxUsername) {
           setSearchQuery(data.robloxUsername);
           setUsername(data.robloxUsername);
         }
       })
       .catch(() => setAuthenticated(false));
+    const timer = rememberedUsername
+      ? window.setTimeout(() => void lookupUsername(rememberedUsername, true), 0)
+      : null;
+    return () => {
+      active = false;
+      if (timer !== null) window.clearTimeout(timer);
+    };
     // The URL-derived identity is the only value that should auto-run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rememberedUsername]);
@@ -213,6 +239,7 @@ function CheckoutContent() {
     setGamepasses([]);
     setSelectedPass(null);
     setAccount(null);
+    setUsername("");
     try {
       const res = await fetch(`/api/roblox/gamepasses?query=${encodeURIComponent(query)}`);
       const data = await res.json();
@@ -233,9 +260,9 @@ function CheckoutContent() {
 
   const selectPass = (pass: RobloxPass) => {
     const availableRobux = robuxForGamepassPrice(Number(pass.price));
-    setSelectedPass(pass);
     setError("");
-    if (availableRobux && availableRobux !== robux) setRobux(availableRobux);
+    if (availableRobux && availableRobux !== robux) setOrderAmount(availableRobux);
+    setSelectedPass(pass);
   };
 
   const prepareConfirmation = async () => {
@@ -309,16 +336,20 @@ function CheckoutContent() {
           gamepassId: String(selectedPass?.id ?? ""),
           receiptEmail,
           agreedToTerms,
-          idempotencyKey,
+          idempotencyKey: idempotencyKey.current,
         }),
       });
       const data = await res.json();
       if (data.success && data.paymentUrl) window.location.href = data.paymentUrl;
       else {
+        if (res.status >= 500 || (data.alreadyExists && !data.paymentUrl)) {
+          idempotencyKey.current = crypto.randomUUID();
+        }
         if (res.status === 401) setAuthenticated(false);
         setError(data.error || "Не удалось открыть оплату.");
       }
     } catch {
+      idempotencyKey.current = crypto.randomUUID();
       setError("Ошибка сети. Попробуй ещё раз.");
     } finally {
       setPaying(false);
@@ -409,7 +440,7 @@ function CheckoutContent() {
               </div>
               <p className={styles.helper}>По нику проверяем все публичные игры автоматически. По ссылке или ID — сразу открываем нужный геймпасс.</p>
               {username && !searching && <div className={styles.accountChip}>
-                <span className={styles.accountAvatar}>{account?.avatarUrl ? <img src={account.avatarUrl} alt={`Аватар ${username}`} /> : username.slice(0,1).toUpperCase()}</span>
+                <span className={styles.accountAvatar}>{account?.avatarUrl ? <Image src={account.avatarUrl} width={150} height={150} alt={`Аватар ${username}`} /> : username.slice(0,1).toUpperCase()}</span>
                 <div><small>Аккаунт найден</small><strong>{account?.displayName || username}</strong>{account?.displayName && account.displayName !== username && <em>@{username}</em>}</div><Check size={18} />
               </div>}
             </div>
@@ -424,7 +455,7 @@ function CheckoutContent() {
                       const active = String(selectedPass?.id ?? "") === String(pass.id);
                       const passRobux = robuxForGamepassPrice(Number(pass.price));
                       return <button type="button" key={String(pass.id)} onClick={() => selectPass(pass)} className={active ? styles.passSelected : styles.passCard}>
-                        <span className={styles.passImage}>{pass.image ? <img src={pass.image} alt="" /> : <WalletCards size={22} />}</span>
+                        <span className={styles.passImage}>{pass.image ? <Image src={pass.image} width={150} height={150} alt="" /> : <WalletCards size={22} />}</span>
                         <span className={styles.passInfo}><strong>{pass.name}</strong><small>Цена пасса · {Number(pass.price).toLocaleString("ru-RU")} R$</small><em className={matches ? styles.priceOk : passRobux ? styles.priceAlternative : styles.priceWrong}>{matches ? `Получишь ${robux.toLocaleString("ru-RU")} R$` : passRobux ? `Купить ${passRobux.toLocaleString("ru-RU")} R$ через этот пасс` : "Вне доступного диапазона"}</em></span>
                         {active && <Check size={19} />}
                       </button>;
@@ -457,12 +488,12 @@ function CheckoutContent() {
             <div className={styles.panelHeading}><span className={styles.panelIcon}><Check size={21} /></span><div><span>Заказ готов</span><h2>Проверь данные</h2></div></div>
             <div className={styles.confirmPair}>
               <div className={styles.confirmIdentity}>
-                <span className={styles.confirmAvatar}>{account?.avatarUrl ? <img src={account.avatarUrl} alt={`Аватар ${username}`} /> : <UserRound size={25} />}</span>
+                <span className={styles.confirmAvatar}>{account?.avatarUrl ? <Image src={account.avatarUrl} width={150} height={150} alt={`Аватар ${username}`} /> : <UserRound size={25} />}</span>
                 <div><small>Roblox-аккаунт</small><strong>{account?.displayName || username}</strong><span>@{username}</span></div>
               </div>
               <ArrowRight className={styles.confirmArrow} size={22} aria-hidden="true" />
               <div className={styles.confirmIdentity}>
-                <span className={styles.passImage}>{selectedPass?.image ? <img src={selectedPass.image} alt={`Геймпасс ${selectedPass.name}`} /> : <WalletCards size={22} />}</span>
+                <span className={styles.passImage}>{selectedPass?.image ? <Image src={selectedPass.image} width={150} height={150} alt={`Геймпасс ${selectedPass.name}`} /> : <WalletCards size={22} />}</span>
                 <div><small>Геймпасс для покупки</small><strong>{selectedPass?.name}</strong><span>{selectedPass?.price.toLocaleString("ru-RU")} R$ · ID {selectedPass?.id}</span></div>
               </div>
             </div>
@@ -476,7 +507,13 @@ function CheckoutContent() {
               <>
                 <label className={styles.formLabel} htmlFor="receipt-email">Email для электронного чека</label>
                 <input id="receipt-email" className={styles.emailInput} type="email" autoComplete="email" value={receiptEmail} onChange={(event) => setReceiptEmail(event.target.value.trim())} placeholder="you@example.com" />
-                <p className={styles.helper}>Используется только для отправки электронного чека.</p>
+                <p className={styles.helper}>Чек отправит банк на этот адрес после успешной оплаты.</p>
+                {accountEmail && receiptEmail.toLowerCase() !== accountEmail.toLowerCase() && (
+                  <div className={styles.paymentNotice} role="status"><CircleAlert size={19} /><span><strong>Email отличается от аккаунта</strong><small>Чек уйдёт на {receiptEmail || "указанный адрес"}, а вход в аккаунт останется на {accountEmail}.</small></span></div>
+                )}
+                {accountEmail && !accountEmailVerified && receiptEmail.toLowerCase() === accountEmail.toLowerCase() && (
+                  <div className={styles.paymentNotice} role="status"><CircleAlert size={19} /><span><strong>Email аккаунта ещё не подтверждён</strong><small>Банк всё равно отправит чек; подтвердить адрес или запросить письмо повторно можно в <Link href="/dashboard">личном кабинете</Link>.</small></span></div>
+                )}
                 <label className={styles.consentBox}>
                   <Checkbox checked={agreedToTerms} onChange={(event) => setAgreedToTerms(event.target.checked)} />
                   <span>Я согласен с <Link href="/legal/offer" target="_blank">офертой</Link> и <Link href="/legal/policy" target="_blank">политикой конфиденциальности</Link>.</span>

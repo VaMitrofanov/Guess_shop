@@ -6,16 +6,28 @@
 const UA = "Mozilla/5.0 (compatible; RobloxBank/1.0; +https://robloxbank.ru)";
 const TIMEOUT_MS = 8_000;
 
-function rFetch(url: string, init: RequestInit = {}) {
-  return fetch(url, {
-    ...init,
-    headers: {
-      "User-Agent": UA,
-      "Accept": "application/json",
-      ...(init.headers ?? {}),
-    },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+async function rFetch(url: string, init: RequestInit = {}) {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        ...init,
+        cache: init.cache ?? "no-store",
+        headers: {
+          "User-Agent": UA,
+          "Accept": "application/json",
+          ...(init.headers ?? {}),
+        },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      if (response.status !== 429 && response.status < 500) return response;
+      lastError = new Error(`Roblox HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 150));
+  }
+  throw lastError instanceof Error ? lastError : new Error("Roblox request failed");
 }
 
 export async function getRobloxUser(username: string) {
@@ -151,6 +163,7 @@ export async function getGamepassById(gamepassId: string) {
       id:          gamepassId,
       name:        details.name,
       price:       details.price,
+      creatorId:   details.creatorId,
       image:       imageUrl,
       creatorName,
     };

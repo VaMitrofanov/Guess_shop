@@ -332,6 +332,10 @@ model WbOrder {
   /// U3: компенсация бонуса/скидки уже проведена (защита от двойного возврата
   /// на стыке webhook / catch-ветки Init / крона протухших заказов).
   benefitsRevertedAt     DateTime?
+  /// Monotonic reservation cycle for bonus/discount compensation. A bank-init
+  /// retry re-reserves the same benefits and increments this value, so every
+  /// later compensation has its own idempotency key.
+  benefitsRevision       Int              @default(0)
   webIdempotencyKey      String?          @unique
   adminId                String?
   rejectionReason        String?
@@ -438,6 +442,20 @@ model PaymentAttempt {
 
   @@index([orderId, createdAt(sort: Desc)])
   @@index([provider, status, updatedAt])
+}
+
+/// Durable liveness signal written by a worker process and independently
+/// inspected by the web process. Alert timestamps provide cross-instance
+/// deduplication when more than one web container is running.
+model ServiceHeartbeat {
+  serviceKey  String   @id
+  lastSeenAt  DateTime
+  status      String   @default("UNKNOWN")
+  lastAlertAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([lastSeenAt])
 }
 
 /// Idempotent operator request to T-Bank Cancel. The row is created before the
