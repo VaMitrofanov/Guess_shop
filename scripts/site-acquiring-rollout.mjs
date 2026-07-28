@@ -23,7 +23,7 @@ function requiredEnv(name) {
 const stageName = process.argv[2];
 const stage = STAGES[stageName];
 if (!stage) {
-  console.error("Usage: node scripts/site-acquiring-rollout.mjs <off|allowlist|10|50|on> [--confirm-real-money]");
+  console.error("Usage: node scripts/site-acquiring-rollout.mjs <off|allowlist|10|50|on> [--confirm-real-money] [--accept-existing-secret-risk]");
   process.exit(2);
 }
 
@@ -32,6 +32,7 @@ const token = requiredEnv("COOLIFY_TOKEN");
 const appUuid = requiredEnv("COOLIFY_WEB_APP_UUID");
 const appUrl = (process.env.ROLLOUT_APP_URL?.trim() || "https://robloxbank.ru").replace(/\/$/, "");
 const realMoneyStage = stageName === "10" || stageName === "50" || stageName === "on";
+const acceptExistingSecretRisk = process.argv.includes("--accept-existing-secret-risk");
 if (realMoneyStage && !process.argv.includes("--confirm-real-money")) {
   throw new Error(`${stageName} exposes real checkout traffic; rerun with --confirm-real-money`);
 }
@@ -77,8 +78,11 @@ if (requiredPrevious && (
 
 if (realMoneyStage) {
   const secretUpdatedAt = new Date(byKey.get("TINKOFF_SECRET_KEY")?.updated_at ?? 0);
-  if (!(secretUpdatedAt > COMPROMISED_SECRET_CUTOFF)) {
+  if (!(secretUpdatedAt > COMPROMISED_SECRET_CUTOFF) && !acceptExistingSecretRisk) {
     throw new Error("TINKOFF_SECRET_KEY has not been rotated after the recorded compromise cutoff");
+  }
+  if (!(secretUpdatedAt > COMPROMISED_SECRET_CUTOFF)) {
+    console.warn("SECURITY EXCEPTION: proceeding with the existing T-Bank secret by explicit owner acceptance.");
   }
   const workers = await publicJson("/api/health/workers");
   if (workers?.healthy !== true) throw new Error("payment worker readiness is not healthy");

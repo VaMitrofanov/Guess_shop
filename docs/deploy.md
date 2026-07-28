@@ -295,6 +295,11 @@ production Coolify 4.0 beta, и он не создаёт дубли ключей
 старый ещё работающий healthy-контейнер за завершение новой сборки. Только потом проверяются
 `running:healthy`, публичный acquiring status и worker readiness.
 
+Исключение `--accept-existing-secret-risk` разрешено только после явного решения владельца,
+которому сообщён риск отсутствия ротации. Оно не изображает старый Password новым: скрипт
+печатает `SECURITY EXCEPTION`, а факт принятия риска фиксируется в закрытом handoff. Обычный
+запуск без флага по-прежнему fail-closed.
+
 **Bridge:** `VALIDATOR_KEY`, `VALIDATOR_PORT`.
 
 ## Browser transport выкупа

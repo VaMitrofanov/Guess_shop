@@ -53,9 +53,7 @@ const TG_TEXT = `💜 <b>RobloxBank теперь работает на собс�
 
 Собственный сайт делает RobloxBank удобнее, надёжнее и независимее от маркетплейсов. Мы продолжим развивать его, добавлять новые возможности и улучшать процесс покупки.
 
-Спасибо, что остаётесь с нами. Мы восстановимся, станем сильнее и продолжим двигаться вперёд вместе с вами. 💜
-
-RobloxBank не является банком и не связан с Roblox Corporation.`;
+Спасибо, что остаётесь с нами. Мы восстановимся, станем сильнее и продолжим двигаться вперёд вместе с вами. 💜`;
 
 const VK_TEXT = TG_TEXT
   .replaceAll(/<a href="([^"]+)">([^<]+)<\/a>/g, "$2: $1")
@@ -111,7 +109,7 @@ async function main() {
     console.log(TG_TEXT);
     console.log("\n--- VK ---\n");
     console.log(VK_TEXT);
-    console.log("\nRun with --publish only after secret rotation and the public acquiring rollout.");
+    console.log("\nRun with --publish only after the public acquiring rollout.");
     return;
   }
 
