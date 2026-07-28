@@ -32,9 +32,11 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [twa-ux-v3-concept.html](twa-ux-v3-concept.html) | Визуальный концепт TWA v3: два варианта Главной, умная выдача и foreground bottom sheet |
 | [bots.md](bots.md) | TG- и VK-боты: активация, приём геймпасса, прямые заказы, поддержка, отзывы |
 | [twa-admin.md](twa-admin.md) | Единая admin-экосистема: desktop `/admin`, Telegram TWA, общий `WbOrder`, досье и журнал |
+| [admin-console-plan.md](admin-console-plan.md) | Переезд админки в веб: 9 разделов, вход трёх админов по Telegram, единый `requireAdmin`, этапы A1–A8 |
 | [twa-design-redesign-plan.md](twa-design-redesign-plan.md) | Контракт редизайна TWA: навигация, поиск, compact cards/history, прибыль и Premium Calm для Аккаунта/Заказов |
 | [database.md](database.md) | Модели Prisma и статусы заказов/кодов |
 | [payments-and-kkt.md](payments-and-kkt.md) | Эквайринг, outbox worker, refund и ККТ test matrix |
+| [bot-acquiring-plan.md](bot-acquiring-plan.md) | Перенос официальной платёжки Т‑Банка в TG/VK-ботов вместо ручного СБП-QR: что переиспользуется, четыре препятствия (чек, метка источника, оферта, авторизация бота), шаги Б1–Б9 |
 | [deploy.md](deploy.md) | Как деплоится каждый сервис (без секретов) |
 | [security.md](security.md) | Модель угроз, известные риски, что проверять перед прод-изменениями |
 | [ultra-review-2026-07-25.md](ultra-review-2026-07-25.md) | Сплошное ревью кода 25.07: 18 находок (P0 — обход входа в TWA и обход rate-limit), план фикса и приёмка по каждой, порядок волн |

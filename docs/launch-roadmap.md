@@ -26,6 +26,24 @@
 
 **Открывать сайт на реальный трафик пока нельзя** — см. §2.
 
+### Повторная проверка прода 28.07 (после волн 1 и 3)
+
+Прогон целиком зелёный, регрессий после инцидента с CSP нет:
+
+| Проверка | Результат |
+|---|---|
+| `/api/health` · `/` · `/guide` · `/login` · `/checkout` | ✅ 200 |
+| `smoke:site` · `smoke-corridor` | ✅ 15/15 · 31/31 |
+| `jest` (web) · `jest` (боты) | ✅ 365/365 · 19/19 |
+| `tsc` web · `tsc` боты | ✅ чисто · чисто |
+| Боевая CSP не содержит `sha256` (инвариант после инцидента) | ✅ подтверждено на проде |
+| Хеш boot-скрипта остался только в `Report-Only` | ✅ |
+
+Незакоммиченное в рабочей копии: `scripts/broadcast-roblox-maintenance.mjs` — текст рассылки
+переписан с «выкуп недоступен» на «выкуп снова работает» плюс отдельное сообщение для
+заказов, ждущих ссылку на геймпасс. Скрипт одноразовый, **не запускался**: отправка рассылки
+клиентам — решение владельца.
+
 ---
 
 ## 2. Что осталось до открытия
@@ -252,6 +270,8 @@ D4 (тизер кодов вместо главного CTA), D5 (кликабе
 | Требования к эквайрингу, модерация Т‑Банка, матрица приёмки | [site-acquiring-master-plan.md](site-acquiring-master-plan.md) |
 | Контракт запуска 18.07: регистрация перед оплатой, ЛК, WB-выдача | [site-launch-implementation-plan.md](site-launch-implementation-plan.md) |
 | Эквайринг, outbox, возвраты, ККТ-матрица | [payments-and-kkt.md](payments-and-kkt.md) |
+| Официальная платёжка Т‑Банка в TG/VK-ботах вместо СБП-QR | [bot-acquiring-plan.md](bot-acquiring-plan.md) |
+| Переезд админки в веб, три админа, вход по Telegram | [admin-console-plan.md](admin-console-plan.md) |
 | Модель угроз и реестр рисков (№1–31) | [security.md](security.md) |
 | ЛК, email/TG/VK identity, доставка почты | [auth-account-readiness-plan.md](auth-account-readiness-plan.md), [email-setup.md](email-setup.md) |
 | WB-гейт, `/guide`, Guide-контейнер | [corridor-and-site.md](corridor-and-site.md) |
@@ -266,6 +286,8 @@ D4 (тизер кодов вместо главного CTA), D5 (кликабе
 
 | Направление | Документ | Состояние |
 |---|---|---|
+| Админка на сайте (9 разделов, 3 админа по Telegram) | [admin-console-plan.md](admin-console-plan.md) | план от 28.07, решения владельца приняты. **A1 идёт параллельно запуску**, A3+ — после открытия. Блокер: три Telegram ID для `ADMIN_IDS` |
+| Официальная оплата Т‑Банка в TG/VK-ботах | [bot-acquiring-plan.md](bot-acquiring-plan.md) | **отложено владельцем 28.07** — сначала запуск сайта. План готов, ждёт О1–О4 |
 | Коды активации Roblox (новый товар) | [roblox-codes-plan.md](roblox-codes-plan.md) | этапы K0–K9 не начаты; на витрине только тизер |
 | B2B-контур «Антон» | [b2b-saas.md](b2b-saas.md) | работает; этапы 5.10–5.11 ждут утверждения |
 | Транспорт выкупа геймпассов | [roblox-plus-buyout-plan.md](roblox-plus-buyout-plan.md) | ручной выкуп; автовыкуп открыт |
