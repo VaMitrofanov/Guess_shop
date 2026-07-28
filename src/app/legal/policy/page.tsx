@@ -16,7 +16,7 @@ export default function PolicyPage() {
   return (
     <LegalDocument
       badge="Privacy Policy"
-      title={<>Политика <span className="gold-text">конфиденциальности</span></>}
+      title={<>Политика <span>конфиденциальности</span></>}
       subtitle="Документ описывает порядок обработки персональных данных пользователей сервиса Roblox Bank в соответствии с требованиями Федерального закона от 27.07.2006 № 152-ФЗ «О персональных данных»."
       lastUpdated={lastUpdated}
     >

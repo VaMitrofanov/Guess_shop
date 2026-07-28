@@ -28,6 +28,10 @@ const PUBLIC_MODULES = [
   "src/app/dashboard/dashboard.module.css",
   "src/app/payment/status/page.module.css",
   "src/app/guide/site-guide.module.css",
+  // Оферта, политика и реквизиты: юридически значимый текст, который читают
+  // с телефона. Переведены на общий шелл 28.07.2026 — до этого жили в старом
+  // тёмном макете с собственной палитрой и в этот контракт не попадали.
+  "src/app/legal/legal.module.css",
 ];
 
 /** Абсолютный пол: мельче этого не должно быть ничего, даже бейджа. */

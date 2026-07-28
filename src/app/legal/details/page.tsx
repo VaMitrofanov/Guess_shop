@@ -13,7 +13,7 @@ export default function DetailsPage() {
   return (
     <LegalDocument
       badge="Company details"
-      title={<>Реквизиты <span className="gold-text">и контакты</span></>}
+      title={<>Реквизиты <span>и контакты</span></>}
       subtitle="Юридическая информация исполнителя и адрес для обращений по заказам, возвратам и вопросам обработки персональных данных."
       lastUpdated={LEGAL_DETAILS.lastUpdated}
     >
