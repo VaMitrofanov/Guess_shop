@@ -86,8 +86,34 @@ fi
 guide_deployment=$(trigger "$COOLIFY_GUIDE_UUID" "Guide")
 wait_for "$guide_deployment" "Guide"
 
+# Coolify говорит `finished`, когда собрал и запустил контейнер, но Guide ещё
+# несколько секунд отдаёт страницу без своих ассетов. Смоук, запущенный сразу,
+# из-за этого падал ложными «чанки не найдены» и «нет VK ID» (28.07: 11/2, а
+# повторный прогон через полминуты — чистые 31/31). Ждём, пока гейт реально
+# начнёт отдавать свои чанки, и только потом проверяем.
+wait_ready() {
+  local base="${SMOKE_BASE_URL:-https://robloxbank.ru}"
+  echo "→ ждём готовности Guide на $base" >&2
+  for attempt in $(seq 1 30); do
+    local html=""
+    html=$(curl -sS --max-time 10 "$base/guide?source=wb" 2>/dev/null || true)
+    if [[ -n "$html" ]] && printf '%s' "$html" | grep -q '/_next-guide/'; then
+      echo "  ✅ Guide отдаёт свои ассеты (попытка $attempt)" >&2
+      # Ассеты появились — даём отстояться воркерам, чтобы первый же запрос
+      # смоука не пришёл в ещё прогревающийся контейнер.
+      sleep 3
+      return 0
+    fi
+    sleep 5
+  done
+  echo "  ⚠️  Guide за 150 с не начал отдавать /_next-guide-ассеты." >&2
+  echo "      Смоук запускается всё равно — его вердикт и будет ответом." >&2
+  return 0
+}
+
 if [[ "$RUN_SMOKE" -eq 1 ]]; then
   echo
-  echo "→ smoke-corridor (ожидаем 30/30 и совпадение release-фингерпринтов)"
+  wait_ready
+  echo "→ smoke-corridor (ожидаем 31/31 и совпадение release-фингерпринтов)"
   node scripts/smoke-corridor.mjs
 fi
