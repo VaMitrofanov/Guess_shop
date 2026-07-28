@@ -2,7 +2,7 @@
 
 **Wave 2 release candidate 28.07:** до трёх безопасных повторов bank Init на один заказ,
 синхронизация суммы/pass, автовход после регистрации, profile-prefill email чека,
-retry/exact-ID fallback для Roblox lookup и независимый Web-watchdog TG payment-outbox.
+retry/exact-ID fallback для Roblox lookup и независимый VK-side watchdog TG payment-outbox.
 Критический lint имеет 0 warnings; старый долг защищён точным fingerprint. Production
 rollout ждёт миграцию/deploy, controlled worker drill и ротацию раскрытого Password.
 

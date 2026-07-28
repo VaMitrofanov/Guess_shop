@@ -36,6 +36,7 @@ export async function tgSend(
           disable_web_page_preview: true,
           ...extra,
         }),
+        signal: AbortSignal.timeout(15_000),
       });
       return (res.json() as Promise<Record<string, unknown>>).catch(() => ({}));
     } catch (err: any) {
@@ -54,6 +55,7 @@ export async function tgSend(
       disable_web_page_preview: true,
       ...extra,
     }),
+    signal: AbortSignal.timeout(15_000),
   });
   return res.json() as Promise<Record<string, unknown>>;
 }

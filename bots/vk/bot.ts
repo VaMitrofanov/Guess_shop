@@ -29,6 +29,7 @@ import { VK } from "vk-io";
 import { handleMessage, handleOutboxMessage, handleVkGroupJoin, initVkHandlers } from "./handlers";
 import { notifyBotError } from "../shared/admin";
 import { startBridgeServer } from "../shared/bridge";
+import { startIndependentPaymentWorkerWatchdog } from "../shared/payment-worker-watchdog";
 
 console.log("🚀 DEPLOY_VERSION: 4.0 - LOYALTY_HARD_SYNC");
 
@@ -40,6 +41,7 @@ if (!groupId) throw new Error("[VK] VK_GROUP_ID is not set");
 
 export const vk = new VK({ token, apiVersion: "5.131" });
 initVkHandlers(vk);
+startIndependentPaymentWorkerWatchdog();
 
 // Register message_new handler
 vk.updates.on("message_new", async (ctx) => {

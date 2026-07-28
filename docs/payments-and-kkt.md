@@ -11,7 +11,8 @@
   Четвёртая попытка возвращает 409.
 - `Receipt.Email` предзаполняется из профиля. Текст сообщает, что чек отправляет банк;
   изменение адреса и отсутствие verification не скрываются.
-- Payment outbox имеет durable heartbeat, независимый Web-watchdog и backlog alert.
+- Payment outbox имеет durable heartbeat, независимый VK-side watchdog и backlog alert;
+  Web сохраняет readiness и отключаемый fallback.
   Production stop/recovery drill обязателен после миграции и deploy.
 
 Решение владельца от 28.07: незакрытые ККТ/ОФД и категория Т‑Банка не входят в технический

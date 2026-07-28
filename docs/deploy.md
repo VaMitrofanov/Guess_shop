@@ -258,11 +258,14 @@ atomic claim и Telegram polling topology.
 
 Миграция `20260728_wave2_launch_readiness` применена к production 28.07 после проверенного
 custom-format backup. С неё TG-worker пишет `ServiceHeartbeat` до и после
-каждого outbox batch. Web-контейнер запускает **независимый** watchdog через
-`src/instrumentation.ts`; для прямых алертов ему нужны те же `TG_TOKEN` и `ADMIN_IDS` и
-`WORKER_WATCHDOG_ENABLED=true`. `/api/health/workers` возвращает 200 только при heartbeat
-моложе 5 минут и отсутствии `PENDING` старше 10 минут. Этот endpoint не подставлять вместо
-`/api/health` в Docker liveness.
+каждого outbox batch. Основной **независимый** watchdog запускается в VK-контейнере
+(`VK_WORKER_WATCHDOG_ENABLED=true`): остановка TG не останавливает VK/bridge transport.
+Web-вариант через `src/instrumentation.ts` остаётся fallback, но в RF production должен быть
+`WORKER_WATCHDOG_ENABLED=false`: controlled drill показал `fetch failed` до Telegram при
+корректном stale detection. `/api/health/workers` возвращает 200 только при heartbeat моложе
+5 минут и отсутствии `PENDING` старше 10 минут. Его не подставлять вместо `/api/health` в
+Docker liveness. VK и TG должны иметь одинаковые `TG_TOKEN`, `ADMIN_IDS`,
+`VALIDATOR_SOURCE_URL`, `VALIDATOR_KEY`.
 
 Поэтапное включение выполняется отдельными командами и с окном наблюдения между ними:
 
