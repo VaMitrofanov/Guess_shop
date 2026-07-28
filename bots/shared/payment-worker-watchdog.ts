@@ -17,11 +17,34 @@ function adminRecipients() {
   )];
 }
 
-async function fanout(text: string) {
+type WorkerAlertKind = "worker_stale" | "worker_recovered" | "backlog_stale" | "backlog_recovered";
+
+async function webEmailFallback(kind: WorkerAlertKind, text: string) {
+  const key = process.env.VALIDATOR_KEY?.trim();
+  if (!key) return false;
+  const baseUrl = (process.env.WEB_BASE_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru").trim();
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/api/internal/worker-alert`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-worker-alert-key": key },
+      body: JSON.stringify({ kind, text }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const body = await response.json().catch(() => null) as { delivered?: boolean } | null;
+    return response.ok && body?.delivered === true;
+  } catch (error) {
+    console.warn("[IndependentPaymentWatchdog] email fallback failed", (error as Error)?.message ?? error);
+    return false;
+  }
+}
+
+async function fanout(kind: WorkerAlertKind, text: string) {
   const recipients = adminRecipients();
-  if (!process.env.TG_TOKEN || recipients.length === 0) return false;
-  const results = await Promise.all(recipients.map((id) => tgSend(id, text)));
-  return results.some((result) => result.ok === true || Boolean(result.result));
+  if (process.env.TG_TOKEN && recipients.length > 0) {
+    const results = await Promise.all(recipients.map((id) => tgSend(id, text)));
+    if (results.some((result) => result.ok === true || Boolean(result.result))) return true;
+  }
+  return webEmailFallback(kind, text);
 }
 
 async function inspectHeartbeat(now: Date) {
@@ -37,7 +60,7 @@ async function inspectHeartbeat(now: Date) {
         data: { status: "HEALTHY" },
       });
       if (claimed.count === 1) {
-        const delivered = await fanout("✅ <b>PAYMENT WORKER ВОССТАНОВЛЕН</b>\nHeartbeat Telegram/outbox снова поступает.");
+        const delivered = await fanout("worker_recovered", "✅ <b>PAYMENT WORKER ВОССТАНОВЛЕН</b>\nHeartbeat Telegram/outbox снова поступает.");
         if (!delivered) {
           await db.serviceHeartbeat.updateMany({
             where: { serviceKey: row.serviceKey, status: "HEALTHY" },
@@ -69,7 +92,7 @@ async function inspectHeartbeat(now: Date) {
   if (claimed.count !== 1) return;
 
   const minutes = Math.max(5, Math.floor((now.getTime() - row.lastSeenAt.getTime()) / 60_000));
-  const delivered = await fanout(`🚨 <b>PAYMENT WORKER ОСТАНОВЛЕН</b>\nНет heartbeat Telegram/outbox уже ${minutes} мин. Проверьте TG-процесс; webhook сохраняются, но уведомления задерживаются.`);
+  const delivered = await fanout("worker_stale", `🚨 <b>PAYMENT WORKER ОСТАНОВЛЕН</b>\nНет heartbeat Telegram/outbox уже ${minutes} мин. Проверьте TG-процесс; webhook сохраняются, но уведомления задерживаются.`);
   if (!delivered) {
     await db.serviceHeartbeat.updateMany({
       where: { serviceKey: row.serviceKey, lastAlertAt: now },
@@ -95,7 +118,7 @@ async function inspectBacklog(now: Date) {
         where: { serviceKey: BACKLOG_SERVICE_KEY, status: "STALE" },
         data: { status: "HEALTHY" },
       });
-      if (claimed.count === 1 && !await fanout("✅ <b>PAYMENT OUTBOX РАЗОБРАН</b>\nПросроченных PENDING-сообщений больше нет.")) {
+      if (claimed.count === 1 && !await fanout("backlog_recovered", "✅ <b>PAYMENT OUTBOX РАЗОБРАН</b>\nПросроченных PENDING-сообщений больше нет.")) {
         await db.serviceHeartbeat.updateMany({
           where: { serviceKey: BACKLOG_SERVICE_KEY, status: "HEALTHY" },
           data: { status: "STALE" },
@@ -116,7 +139,7 @@ async function inspectBacklog(now: Date) {
     },
     data: { status: "STALE", lastAlertAt: now },
   });
-  if (claimed.count === 1 && !await fanout(`🚨 <b>PAYMENT OUTBOX ЗАСТРЯЛ</b>\nСообщений PENDING старше 10 минут: ${overdue}. Требуется проверка.`)) {
+  if (claimed.count === 1 && !await fanout("backlog_stale", `🚨 <b>PAYMENT OUTBOX ЗАСТРЯЛ</b>\nСообщений PENDING старше 10 минут: ${overdue}. Требуется проверка.`)) {
     await db.serviceHeartbeat.updateMany({
       where: { serviceKey: BACKLOG_SERVICE_KEY, lastAlertAt: now },
       data: { lastAlertAt: null },

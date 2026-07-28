@@ -36,12 +36,13 @@
   резервируются повторно атомарно с новой revision/idempotency парой.
 - F5/F6/S9: сумма и pass синхронизированы; регистрация автоматически возвращает в checkout
   с сессией; email профиля подставляется для банковского чека с честными предупреждениями.
-- F7: TG payment-outbox пишет heartbeat в БД. Независимый VK-процесс с рабочим SG Telegram
-  transport тревожит после пяти минут тишины, сообщает восстановление и отдельно следит за
-  `PENDING` старше 10 минут; Web оставляет readiness и опциональный fallback.
+- F7: TG payment-outbox пишет heartbeat в БД. Независимый VK-процесс тревожит после пяти
+  минут тишины, сообщает восстановление и отдельно следит за `PENDING` старше 10 минут.
+  Если Telegram/bridge не подтвердил доставку, защищённый Web endpoint отправляет alert на
+  подтверждённый email владельца; production drill после этого hotfix ещё требуется.
 - Рассинхрон Roblox смягчён retry временных API-сбоев и exact-ID fallback из главной.
 - QA: критический lint = 0 warnings; старый долг 1123 warnings защищён точным fingerprint;
-  TypeScript web+боты чистый; Jest 383/383 + 20/20; production build зелёный.
+  TypeScript web+боты чистый; Jest 386/386 + 21/21; production build зелёный.
 
 ### Выкат 28.07 (ночь): вход в админку из интерфейса
 

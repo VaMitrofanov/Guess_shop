@@ -3,6 +3,11 @@
 Оба бота — отдельные процессы. Воркфлоу идентичен. VK шлёт уведомления менеджерам через
 Telegram (`bots/shared/notify.ts` → `tgSend` → `ADMIN_IDS`).
 
+Payment-worker watchdog работает в независимом VK-процессе: durable heartbeat/outbox и
+`lastAlertAt` атомарно дедуплицируют stop/recovery alerts. Если Telegram/SG bridge не
+подтвердил отправку, VK вызывает защищённый Web endpoint, который пишет подтверждённому
+владельцу по email. `lastAlertAt` сохраняется только после успеха хотя бы одного канала.
+
 ## Аварийное объявление о недоступности выкупа
 
 Одноразовая рассылка запускается скриптом `scripts/broadcast-roblox-maintenance.mjs`.
