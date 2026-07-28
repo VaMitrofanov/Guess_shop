@@ -289,6 +289,8 @@ npm run rollout:site -- on --confirm-real-money
 известного cutoff, обновляет env, инициирует deploy и сверяет публичный status. `off`
 разрешён из любого состояния как аварийный rollback. Значения инфраструктуры хранятся
 только в `HANDOFF.md`/env.
+Три rollout-переменные обновляются одним `PATCH .../envs/bulk`: это upsert, совместимый с
+production Coolify 4.0 beta, и он не создаёт дубли ключей при повторном запуске этапа.
 
 **Bridge:** `VALIDATOR_KEY`, `VALIDATOR_PORT`.
 

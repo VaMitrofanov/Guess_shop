@@ -7,7 +7,9 @@ owner-only allowlist. Первый боевой payment/refund E2E успешн�
 [site-launch-implementation-plan.md](site-launch-implementation-plan.md).
 
 **28.07.2026, launch preparation:** storefront остаётся публичным и healthy (`15/15`),
-master включён, но runtime mode намеренно сохранён `allowlist`; guest status = `limited`.
+master включён, runtime mode `allowlist`; исправленный bulk-upsert оркестратор повторно
+применил и проверил этот этап, guest status = `limited`. Переход на 10% остановлен fail-closed
+до любого изменения production env.
 Дата production `TINKOFF_SECRET_KEY` не менялась после раскрытия Password, поэтому перевод
 `SITE_ACQUIRING_MODE=on` и публикация анонса заблокированы до ротации. Подготовлен отдельный
 fail-closed launch-скрипт: preview безопасен по умолчанию, а `--publish` требует публичный

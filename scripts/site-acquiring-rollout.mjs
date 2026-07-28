@@ -84,16 +84,26 @@ if (realMoneyStage) {
   if (workers?.healthy !== true) throw new Error("payment worker readiness is not healthy");
 }
 
-for (const [key, value] of Object.entries({
-  SITE_ACQUIRING_ENABLED: stage.master,
-  SITE_ACQUIRING_MODE: stage.mode,
-  SITE_ACQUIRING_ROLLOUT_PERCENT: stage.percentage,
-})) {
-  await coolify(`/applications/${encodeURIComponent(appUuid)}/envs`, {
-    method: "PATCH",
-    body: JSON.stringify({ key, value, is_preview: false }),
-  });
-}
+// Bulk update is an upsert in Coolify: existing production variables are updated
+// and the rollout percentage is created on older installations where it did not
+// exist yet. A sequence of single PATCH calls is not compatible with every 4.0
+// beta and POST would create ambiguous duplicate keys.
+await coolify(`/applications/${encodeURIComponent(appUuid)}/envs/bulk`, {
+  method: "PATCH",
+  body: JSON.stringify({
+    data: Object.entries({
+      SITE_ACQUIRING_ENABLED: stage.master,
+      SITE_ACQUIRING_MODE: stage.mode,
+      SITE_ACQUIRING_ROLLOUT_PERCENT: stage.percentage,
+    }).map(([key, value]) => ({
+      key,
+      value,
+      is_preview: false,
+      is_build_time: true,
+      is_runtime: true,
+    })),
+  }),
+});
 
 await coolify(`/deploy?uuid=${encodeURIComponent(appUuid)}&force=true`, { method: "POST" });
 console.log(`Rollout stage ${stageName}: env updated, deploy requested.`);
