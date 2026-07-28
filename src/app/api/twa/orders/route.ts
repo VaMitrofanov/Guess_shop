@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { extractTwaUser } from "@/lib/twa-auth";
+import { requireAdmin } from "@/lib/admin-access";
 import { prisma } from "@/lib/prisma";
 import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing, notifyRegionalPriceNeeded } from "@/lib/twa-notify";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
@@ -13,18 +13,19 @@ import { notifyRetailBuyoutAdmins } from "@/lib/buyout-admin-notify";
 import { generateDirectCode } from "@/lib/twa-direct";
 import { directPrice } from "@/lib/retail-pricing";
 import { PAID_BUYOUT_SCOPE, PAID_BUYOUT_SQL } from "@/lib/buyout-queue";
+import {
+  ATTENTION_BUYOUT_HOURS, ATTENTION_LINK_DAYS, NEW_CUTOFF_HOURS,
+  buildTabWhere, isGamepassExportTab, loadGamepassExport, orderByForTab,
+  type FilterTab,
+} from "@/lib/order-queue";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
-type FilterTab = "WORK" | "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "REJECTED" | "FAVORITES" | "ATTENTION";
-
-const NEW_CUTOFF_HOURS = 40;
 // «Ждут ссылку»: первые N карточек — самые свежие (клиент ещё тёплый), дальше
 // хвост очереди от самых старых к новым.
 const AWAITING_LINK_HEAD = 5;
-// «Требуют внимания» (секция на вкладке «Все»): пороги просроченности.
-const ATTENTION_BUYOUT_HOURS = 12;
-const ATTENTION_LINK_DAYS = 5;
+// «Требуют внимания» (секция на вкладке «Все»): пороги просроченности —
+// в @/lib/order-queue, общие с веб-админкой.
 const ATTENTION_TAKE = 50;
 
 let cachedCounts: {
@@ -126,71 +127,6 @@ async function findFullPriceReplacement(
   return null;
 }
 
-function buildTabWhere(tab: FilterTab): any {
-  const cutoff = new Date(Date.now() - NEW_CUTOFF_HOURS * 3600_000);
-  switch (tab) {
-    case "WORK":
-      return {
-        isFavorite: false,
-        OR: [
-          { status: "ERROR" },
-          { status: { in: ["PENDING", "IN_PROGRESS"] }, ...PAID_BUYOUT_SCOPE, orderSource: { not: "AVITO" } },
-          { status: "AWAITING_GAMEPASS", createdAt: { lte: cutoff } },
-        ],
-      };
-    case "ALL":
-      return {};
-    case "BUYOUT":
-      return {
-        ...PAID_BUYOUT_SCOPE,
-        orderSource: { not: "AVITO" },
-        isFavorite: false,
-        OR: [
-          { status: { in: ["PENDING", "IN_PROGRESS"] } },
-          { status: "ERROR", buyoutErrorCode: { in: [BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW] } },
-        ],
-      };
-    case "DIRECT":
-      return { isDirectOrder: true, status: { in: ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING", "ERROR"] }, isFavorite: false };
-    case "AVITO":
-      return { orderSource: "AVITO", status: { in: ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "ERROR"] }, isFavorite: false };
-    case "NEW":
-      return { status: "AWAITING_GAMEPASS", createdAt: { gt: cutoff }, isFavorite: false };
-    case "ERROR":
-      return { status: "ERROR", isFavorite: false };
-    case "AWAITING_LINK":
-      return { status: "AWAITING_GAMEPASS", createdAt: { lte: cutoff }, isFavorite: false };
-    case "DONE":
-      return { status: "COMPLETED" };
-    case "REJECTED":
-      return { status: "REJECTED" };
-    case "FAVORITES":
-      return { isFavorite: true };
-    case "ATTENTION": {
-      const buyoutOverdue = new Date(Date.now() - ATTENTION_BUYOUT_HOURS * 3600_000);
-      const linkOverdue = new Date(Date.now() - ATTENTION_LINK_DAYS * 24 * 3600_000);
-      return {
-        isFavorite: false,
-        OR: [
-          { status: "ERROR" },
-          { status: { in: ["PENDING", "IN_PROGRESS"] }, ...PAID_BUYOUT_SCOPE, orderSource: { not: "AVITO" }, pendingAt: { lte: buyoutOverdue } },
-          { isDirectOrder: true, status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING"] } },
-          { status: "AWAITING_GAMEPASS", createdAt: { lte: linkOverdue } },
-        ],
-      };
-    }
-    default:
-      return {};
-  }
-}
-
-function orderByForTab(tab: FilterTab): any {
-  if (tab === "WORK") return [{ updatedAt: "desc" }, { createdAt: "desc" }];
-  if (tab === "BUYOUT" || tab === "DIRECT" || tab === "AVITO") return [{ pendingAt: "asc" }, { createdAt: "asc" }];
-  if (tab === "ERROR" || tab === "AWAITING_LINK" || tab === "ATTENTION") return { createdAt: "asc" };
-  return { createdAt: "desc" };
-}
-
 // Серьёзность внутри «Требуют внимания»: ошибка → подвисший выкуп →
 // прямой ждёт оплату → давно ждут ссылку. Внутри группы — старые сверху
 // (сортировка стабильная, базовый порядок createdAt asc сохраняется).
@@ -201,74 +137,16 @@ function attentionRank(o: { status: string }): number {
   return 3;
 }
 
-/**
- * Выгрузка ID геймпассов очереди на выкуп: пока выкупаем вручную, менеджеру нужен весь
- * список ID сразу, а не копирование по одному из карточек. Границы очереди берём из того же
- * `buildTabWhere`, что и лента, чтобы «К выкупу» на экране и в выгрузке значили одно и то же.
- *
- * Неоплаченные прямые заказы (`isDirectOrder && paidAt == null`) исключены — они и так
- * выключены из всех путей выкупа; отдаём их числом, чтобы менеджер видел, почему список короче.
- */
-const GAMEPASS_EXPORT_TABS = ["BUYOUT", "DIRECT", "AVITO", "WORK", "ERROR", "ATTENTION"] as const;
-const GAMEPASS_EXPORT_LIMIT = 500;
-
-async function gamepassExportResponse(tab: FilterTab) {
-  const orders = await prisma.wbOrder.findMany({
-    where: { isTest: false, ...buildTabWhere(tab) },
-    orderBy: orderByForTab(tab),
-    take: GAMEPASS_EXPORT_LIMIT,
-    select: {
-      wbCode: true, amount: true, status: true, orderSource: true, gamepassUrl: true,
-      robloxUsername: true, probableNick: true, isDirectOrder: true, paidAt: true,
-      pendingAt: true, createdAt: true,
-    },
-  });
-
-  let skippedUnpaid = 0;
-  let skippedNoGamepass = 0;
-  const items: {
-    wbCode: string; gamepassId: string; gamepassUrl: string; amount: number;
-    status: string; orderSource: string; robloxUsername: string | null; waitingHours: number;
-  }[] = [];
-
-  for (const order of orders) {
-    if (order.isDirectOrder && !order.paidAt) { skippedUnpaid += 1; continue; }
-    const gamepassId = order.gamepassUrl ? parseGamepassId(order.gamepassUrl) : null;
-    if (!gamepassId) { skippedNoGamepass += 1; continue; }
-    const since = order.pendingAt ?? order.createdAt;
-    items.push({
-      wbCode: order.wbCode,
-      gamepassId,
-      gamepassUrl: order.gamepassUrl ?? "",
-      amount: order.amount,
-      status: order.status,
-      orderSource: order.orderSource,
-      robloxUsername: order.robloxUsername ?? order.probableNick ?? null,
-      waitingHours: Math.max(0, Math.round((Date.now() - since.getTime()) / 3600_000)),
-    });
-  }
-
-  return NextResponse.json({
-    tab,
-    generatedAt: new Date().toISOString(),
-    total: items.length,
-    totalRobux: items.reduce((sum, item) => sum + item.amount, 0),
-    skippedUnpaid,
-    skippedNoGamepass,
-    truncated: orders.length === GAMEPASS_EXPORT_LIMIT,
-    items,
-  });
-}
-
 export async function GET(req: NextRequest) {
-  if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // A1/A4: единый гейт — принимает и Bearer-пропуск TWA, и веб-сессию админа.
+  // Не вторая дверь: оба доказательства сходятся к одному правилу (`ADMIN_IDS`).
+  if (!await requireAdmin(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = req.nextUrl;
   const tab         = (searchParams.get("status") ?? "ALL") as FilterTab | OrderStatus;
 
   if (searchParams.get("export") === "gamepass-ids") {
-    const exportTab = (GAMEPASS_EXPORT_TABS as readonly string[]).includes(tab) ? tab as FilterTab : "BUYOUT";
-    return gamepassExportResponse(exportTab);
+    return NextResponse.json(await loadGamepassExport(isGamepassExportTab(tab) ? tab : "BUYOUT"));
   }
 
   const page        = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
@@ -596,8 +474,8 @@ async function enrichVkUsers(orders: any[]) {
 }
 
 export async function POST(req: NextRequest) {
-  const twaUser = await extractTwaUser(req);
-  if (!twaUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const actor = await requireAdmin(req);
+  if (!actor) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => null);
   if (!body?.action)
@@ -825,7 +703,7 @@ export async function POST(req: NextRequest) {
       ? generateDirectCode()
       : rawCode ?? `MN-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
     const stamp = new Date().toISOString().slice(0, 10);
-    const manualMark = `[MANUAL${isDirect ? " DIRECT" : ""} ${stamp} от ${twaUser.firstName}]`;
+    const manualMark = `[MANUAL${isDirect ? " DIRECT" : ""} ${stamp} от ${actor.displayName}]`;
     const platform = client?.vkId && !client?.tgId ? "VK" : "TG";
 
     const created = await (prisma as any).$transaction(async (tx: any) => {
@@ -1042,7 +920,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "restore-to-buyout") {
-    const recovery = buildRestoreToBuyoutData(order, twaUser.firstName);
+    const recovery = buildRestoreToBuyoutData(order, actor.displayName);
     if (!recovery.ok) {
       return NextResponse.json({ error: recovery.error }, { status: recovery.status });
     }
@@ -1071,7 +949,7 @@ export async function POST(req: NextRequest) {
           isFavorite: true,
           adminNote: appendOrderAudit(
             order.adminNote,
-            `[ПЕРЕНОС ${stamp} от ${twaUser.firstName}] → Избранное: ${note}`,
+            `[ПЕРЕНОС ${stamp} от ${actor.displayName}] → Избранное: ${note}`,
           ),
         },
       });
@@ -1102,7 +980,7 @@ export async function POST(req: NextRequest) {
       status: newStatus,
       adminNote: appendOrderAudit(
         order.adminNote,
-        `[ПЕРЕНОС ${stamp} от ${twaUser.firstName}] ${order.status}→${newStatus} (${target}): ${note}`,
+        `[ПЕРЕНОС ${stamp} от ${actor.displayName}] ${order.status}→${newStatus} (${target}): ${note}`,
       ),
       isFavorite: false,
     };
@@ -1432,7 +1310,7 @@ export async function POST(req: NextRequest) {
 
     await (prisma as any).wbOrder.update({ where: { id: orderId }, data });
     const stamp = new Date().toISOString().slice(0, 10);
-    await appendAdminNote(orderId, `[EDIT ${stamp} от ${twaUser.firstName}] ${changes.join(", ")}`);
+    await appendAdminNote(orderId, `[EDIT ${stamp} от ${actor.displayName}] ${changes.join(", ")}`);
     cachedCounts = null;
     return NextResponse.json({ ok: true });
   }

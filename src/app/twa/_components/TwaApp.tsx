@@ -12,6 +12,7 @@ const WbScreen        = dynamic(() => import("./screens/WbScreen"),       { ssr:
 const AccountScreen   = dynamic(() => import("./screens/BossrobuxScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
 const SettingsScreen  = dynamic(() => import("./screens/SettingsScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
 const SystemScreen    = dynamic(() => import("./screens/SystemScreen"),   { ssr: false, loading: () => <ScreenSkeleton /> });
+const EconomicsScreen = dynamic(() => import("./screens/EconomicsScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
 
 function ScreenSkeleton() {
   return (
@@ -48,7 +49,7 @@ declare global {
   }
 }
 
-type Screen = "dashboard" | "orders" | "wb" | "account" | "settings" | "system";
+type Screen = "dashboard" | "orders" | "wb" | "account" | "settings" | "system" | "economics";
 
 const SCREEN_TITLES: Record<Screen, string> = {
   dashboard:  "Главная",
@@ -57,6 +58,7 @@ const SCREEN_TITLES: Record<Screen, string> = {
   account:    "Аккаунт",
   settings:   "Настройки",
   system:     "Система",
+  economics:  "Экономика",
 };
 
 // Drill-down screens reachable from a parent tab (not in the bottom nav).
@@ -344,6 +346,7 @@ export default function TwaApp() {
         {screen === "account"    && <AccountScreen  {...sp} onOpenErrors={() => { setOrdersTabPreload("ERROR"); setScreen("orders"); }} />}
         {screen === "settings"   && <SettingsScreen  {...sp} onNavigate={(s) => setScreen(s as Screen)} />}
         {screen === "system"     && <SystemScreen    {...sp} />}
+        {screen === "economics"  && <EconomicsScreen {...sp} />}
       </div>
 
       <BottomNav active={screen} onChange={setScreen} ordersBadge={ordersBadge} />

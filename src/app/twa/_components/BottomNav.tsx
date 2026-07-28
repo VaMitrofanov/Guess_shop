@@ -8,12 +8,13 @@ import {
   House,
   Settings,
   Warehouse,
+  Wallet,
   X,
 } from "lucide-react";
 import { haptic } from "./haptics";
 import { C } from "./theme";
 
-type Screen = "dashboard" | "orders" | "wb" | "account" | "settings" | "system";
+type Screen = "dashboard" | "orders" | "wb" | "account" | "settings" | "system" | "economics";
 
 const MAIN_TABS = [
   { id: "dashboard" as const, label: "Главная", Icon: House },
@@ -31,7 +32,7 @@ export default function BottomNav({
   ordersBadge?: number;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
-  const moreActive = active === "wb" || active === "settings" || active === "system";
+  const moreActive = active === "wb" || active === "settings" || active === "system" || active === "economics";
 
   function navigate(screen: Screen) {
     if (screen !== active) haptic.select();
@@ -57,6 +58,11 @@ export default function BottomNav({
               <X size={18} />
             </button>
           </div>
+          <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("economics")}>
+            <span className="twa-more-icon"><Wallet size={19} /></span>
+            <span><strong>Экономика</strong><small>Прямые заказы, робуксы и бонусы</small></span>
+            <span aria-hidden="true">›</span>
+          </button>
           <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("wb")}>
             <span className="twa-more-icon"><Warehouse size={19} /></span>
             <span><strong>Wildberries</strong><small>Аналитика, склад и коды</small></span>

@@ -297,3 +297,150 @@
   .logItem { grid-template-columns: 34px minmax(0,1fr); }
   .logMeta { grid-column: 2; text-align: left; }
 }
+
+/* ── Выкуп и Экономика (A4 + аналитика) ──────────────────────────────────── */
+
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
+.toolbarSpacer { flex: 1; }
+
+.chip {
+  height: 34px; display: inline-flex; align-items: center; gap: 7px; padding: 0 13px;
+  border: 1px solid var(--admin-line); border-radius: 999px; color: #929299;
+  background: rgba(255,255,255,.04); font: inherit; font-size: 13px; font-weight: 700;
+  cursor: pointer; transition: color .16s ease, background .16s ease, border-color .16s ease;
+}
+.chip:hover { color: #e6e6ea; background: rgba(255,255,255,.075); }
+.chipActive { color: white; border-color: rgba(157,132,255,.3); background: rgba(139,114,255,.16); }
+.chip b { color: inherit; opacity: .62; font-weight: 700; }
+.chip:disabled { opacity: .45; cursor: default; }
+
+.ghostButton {
+  height: 34px; display: inline-flex; align-items: center; gap: 7px; padding: 0 13px;
+  border: 1px solid var(--admin-line); border-radius: 10px; color: #d4d4d8;
+  background: rgba(255,255,255,.045); font: inherit; font-size: 13px; font-weight: 700;
+  cursor: pointer; transition: color .16s ease, background .16s ease;
+}
+.ghostButton:hover { color: white; background: rgba(255,255,255,.08); }
+.ghostButton:disabled { opacity: .45; cursor: default; }
+.ghostButton svg { width: 15px; height: 15px; }
+
+.hero { padding: 22px 24px; }
+.hero span { display: block; color: var(--admin-muted); font-size: 13px; }
+.hero strong {
+  display: block; margin-top: 6px; font-size: clamp(30px, 3.4vw, 40px);
+  line-height: 1; letter-spacing: -.04em; font-variant-numeric: tabular-nums;
+}
+.hero p { margin: 10px 0 0; color: var(--admin-muted); font-size: 14px; }
+.hero p b { color: var(--admin-text); font-weight: 700; }
+.heroGood strong { color: #63dda0; }
+.heroFlat strong { color: #74747b; }
+
+.noteWarn, .noteInfo {
+  display: flex; gap: 11px; padding: 13px 16px; border-radius: 14px;
+  font-size: 13.5px; line-height: 1.55;
+}
+.noteWarn { border: 1px solid rgba(232,161,63,.28); color: #f3ddbb; background: rgba(232,161,63,.08); }
+.noteInfo { border: 1px solid rgba(125,156,255,.24); color: #cfd9ff; background: rgba(125,156,255,.07); }
+.noteWarn svg, .noteInfo svg { width: 17px; height: 17px; flex-shrink: 0; margin-top: 1px; }
+.noteWarn b { color: #ffca7a; }
+.noteInfo b { color: #a8bcff; }
+
+.stack { display: grid; gap: 15px; }
+.splitGrid { display: grid; grid-template-columns: minmax(0, 1.85fr) minmax(290px, .72fr); gap: 15px; align-items: start; }
+@media (max-width: 1180px) { .splitGrid { grid-template-columns: minmax(0, 1fr); } }
+
+.rateGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 18px; }
+@media (max-width: 720px) { .rateGrid { grid-template-columns: minmax(0, 1fr); } }
+.rateField { display: grid; gap: 6px; }
+.rateField label { color: var(--admin-muted); font-size: 12px; font-weight: 700; }
+.rateField small { color: #74747b; font-size: 11.5px; }
+.rateInput {
+  height: 42px; width: 100%; padding: 0 13px; border: 1px solid var(--admin-line);
+  border-radius: 11px; color: var(--admin-text); background: rgba(255,255,255,.045);
+  font: inherit; font-size: 17px; font-variant-numeric: tabular-nums; outline: none;
+}
+.rateInput:focus { border-color: rgba(157,132,255,.45); box-shadow: 0 0 0 3px rgba(139,114,255,.09); }
+
+.formulaBox {
+  margin: 0 18px 18px; padding: 13px 16px; border-radius: 12px;
+  color: var(--admin-muted); background: rgba(255,255,255,.035);
+  font-size: 13px; line-height: 1.85; font-variant-numeric: tabular-nums;
+}
+.formulaBox b { color: var(--admin-text); font-weight: 700; }
+
+.numeric { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.good { color: #63dda0; }
+.bad { color: #ff7780; }
+.dim { color: var(--admin-muted); }
+
+.expandRow { cursor: pointer; }
+.expandPanel td { padding: 0 16px 16px; border-top: 0; }
+.expandInner {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px 22px;
+  padding: 14px 16px; border-radius: 12px; background: rgba(255,255,255,.035);
+}
+.expandInner div { display: flex; justify-content: space-between; gap: 14px; font-size: 13px; }
+.expandInner span { color: var(--admin-muted); }
+.expandInner b { font-variant-numeric: tabular-nums; font-weight: 700; }
+.expandInner small { display: block; color: #74747b; font-size: 11px; font-weight: 400; }
+
+.priceInput {
+  height: 32px; width: 88px; padding: 0 10px; border: 1px solid var(--admin-line);
+  border-radius: 8px; color: var(--admin-text); background: rgba(255,255,255,.05);
+  font: inherit; font-size: 14px; font-variant-numeric: tabular-nums; text-align: right; outline: none;
+}
+.priceInput:focus { border-color: rgba(157,132,255,.45); }
+
+.donorCard { display: grid; gap: 14px; padding: 20px; }
+.donorHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.donorHead span { color: var(--admin-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.donorHead strong { display: block; margin-top: 5px; font-size: 19px; letter-spacing: -.02em; }
+.donorBalance { font-size: 30px; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+.donorMeter { height: 6px; border-radius: 999px; background: rgba(255,255,255,.08); overflow: hidden; }
+.donorMeter i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #8c73ff, #587dff); }
+.donorMeterShort i { background: linear-gradient(90deg, #ff8a5b, #ff5d6b); }
+
+.copyArea {
+  width: 100%; min-height: 132px; padding: 13px 15px; border: 1px solid var(--admin-line);
+  border-radius: 12px; color: #d8d8dd; background: rgba(255,255,255,.035);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+  line-height: 1.65; resize: vertical; outline: none;
+}
+.copyArea:focus { border-color: rgba(157,132,255,.4); }
+.logMeta b { display: block; margin-top: 4px; color: #c9c9cf; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* Прайс живёт в узкой правой колонке — стандартные отступы таблицы обрезают
+   последнюю колонку. Здесь плотнее, чтобы «маржа» была видна без скролла. */
+.compactTable th { padding: 11px 8px; }
+.compactTable td { padding: 9px 8px; }
+.compactTable .priceInput { width: 74px; }
+
+/* ── Выкуп: выбор строк и покупка ────────────────────────────────────────── */
+
+.checkbox { width: 16px; height: 16px; accent-color: #8c73ff; cursor: pointer; }
+.checkbox:disabled { cursor: default; opacity: .5; }
+.rowSelected { background: rgba(139, 114, 255, .075) !important; }
+
+.rowActions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; white-space: nowrap; }
+.rowActions span { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.rowActions svg { width: 14px; height: 14px; }
+
+.buyButton {
+  height: 34px; display: inline-flex; align-items: center; gap: 7px; padding: 0 14px;
+  border: none; border-radius: 10px; color: white; font: inherit; font-size: 13px;
+  font-weight: 700; cursor: pointer; justify-content: center;
+  background: linear-gradient(135deg, #8c73ff, #587dff);
+  box-shadow: 0 8px 22px rgba(86, 99, 235, .22);
+  transition: filter .16s ease;
+}
+.buyButton:hover { filter: brightness(1.08); }
+.buyButton:disabled { opacity: .45; cursor: default; box-shadow: none; }
+.buyButton svg { width: 15px; height: 15px; }
+
+.buyPanel { border-color: rgba(157, 132, 255, .3); }
+
+.spin { animation: adminSpin 1s linear infinite; }
+@keyframes adminSpin { to { transform: rotate(360deg); } }
+.nowrap { white-space: nowrap; }
+.iconButton { padding: 0 9px; }
+.divider { height: 1px; background: var(--admin-line); }

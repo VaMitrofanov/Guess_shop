@@ -1,5 +1,5 @@
 "use client";
-import { C, tint, tabular } from "../theme";
+import { C, tint } from "../theme";
 import { useEffect, useState } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -28,22 +28,6 @@ interface BuyerFunnelData {
   totals: { nicks: number; gamepasses: number; conversionPct: number };
 }
 
-interface DirectChannel {
-  source: "DIRECT" | "SITE" | "AVITO" | "MANUAL";
-  orders: number; ordersWithMoney: number;
-  revenueKopecks: number; costKopecks: number; profitKopecks: number;
-}
-interface DirectProfitData {
-  period: { days: number; from: string | null };
-  totals: {
-    orders: number; ordersWithMoney: number;
-    revenueKopecks: number; costKopecks: number; profitKopecks: number;
-    robuxSold: number; marginPct: number | null; avgProfitKopecks: number;
-  };
-  channels: DirectChannel[];
-  coverage: { completedOrders: number; withMoney: number; missingMoney: number; pct: number };
-}
-
 interface PredictData {
   daily: { date: string; orders: number; amount: number }[];
   trendLine: { date: string; value: number }[];
@@ -56,8 +40,6 @@ interface PredictData {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function rub(n: number) { return n.toLocaleString("ru-RU") + " ₽"; }
-/* Копейки из денежных снапшотов заказа → «1 234 ₽» (в TWA дроби не показываем). */
-function rubKop(kopecks: number) { return rub(Math.round(kopecks / 100)); }
 function pctDelta(a: number, b: number) {
   if (!b) return null;
   const d = Math.round(((a - b) / b) * 100);
@@ -629,135 +611,10 @@ function PredictTab({ token }: { token: string }) {
   );
 }
 
-// ── ProfitTab (не-WB каналы) ──────────────────────────────────────────────────
-
-const CHANNEL_LABEL: Record<DirectChannel["source"], string> = {
-  DIRECT: "Прямые (бот/TWA)",
-  SITE:   "Сайт",
-  AVITO:  "Авито",
-  MANUAL: "Ручные",
-};
-const PROFIT_RANGES = [
-  { id: 0,  label: "Всё время" },
-  { id: 30, label: "30 дней" },
-  { id: 7,  label: "7 дней" },
-] as const;
-
-function ProfitTab({ token }: { token: string }) {
-  const [days, setDays] = useState<number>(0);
-  const [data, setData] = useState<DirectProfitData | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let alive = true;
-    fetch(`/api/twa/direct-profit?days=${days}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : null).then(d => { if (alive) setData(d); })
-      .catch(() => {}).finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
-  }, [token, days]);
-
-  // Скелет на смену периода включаем из обработчика, а не из эффекта.
-  const changeRange = (value: number) => {
-    if (value === days) return;
-    setLoading(true);
-    setDays(value);
-  };
-
-  const rangePills = (
-    <div style={{ display: "flex", justifyContent: "flex-end" }}>
-      <PillRow items={PROFIT_RANGES.map(r => ({ id: r.id, label: r.label }))} value={days} onChange={changeRange} small />
-    </div>
-  );
-
-  if (loading) return <div style={{ padding: "12px 16px 0", display: "flex", flexDirection: "column", gap: 12 }}>{rangePills}<Skeleton /></div>;
-  if (!data) return <Empty text="Не удалось загрузить" icon="💰" />;
-
-  const { totals, coverage } = data;
-  const noMoney = coverage.withMoney === 0;
-
-  return (
-    <div style={{ padding: "12px 16px 0", display: "flex", flexDirection: "column", gap: 12, paddingBottom: 24 }}>
-      {rangePills}
-
-      {/* Hero: профит */}
-      <div style={{ background: C.card, borderRadius: 12, padding: "16px 18px" }}>
-        <div style={{ fontSize: 12, color: C.textSecondary }}>Заработано (профит)</div>
-        <div style={{ fontSize: 30, fontWeight: 700, marginTop: 4, color: noMoney ? C.textTertiary : C.green, ...tabular }}>
-          {noMoney ? "—" : rubKop(totals.profitKopecks)}
-        </div>
-        <div style={{ fontSize: 13, color: C.textSecondary, marginTop: 4 }}>
-          {noMoney
-            ? "нет заказов с заполненными деньгами"
-            : <>выручка {rubKop(totals.revenueKopecks)} · себестоимость {rubKop(totals.costKopecks)}
-              {totals.marginPct !== null && <> · маржа {totals.marginPct}%</>}</>}
-        </div>
-      </div>
-
-      {/* Полнота данных: пока цифры дозаполняются — это главное предупреждение */}
-      {coverage.missingMoney > 0 && (
-        <div style={{
-          background: tint(C.yellow, 0.12), border: `1px solid ${tint(C.yellow, 0.3)}`,
-          borderRadius: 12, padding: "12px 14px", fontSize: 13, color: C.textPrimary,
-        }}>
-          <b style={{ color: C.yellow }}>Данные неполные:</b> в деньги попало {coverage.withMoney} из {coverage.completedOrders} выполненных
-          заказов ({coverage.pct}%). Остальные {coverage.missingMoney} — без снапшота цены/себестоимости,
-          профит по ним не посчитан. Историю дозаполним отдельно.
-        </div>
-      )}
-
-      {/* Плитки */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        {[
-          { label: "Заказов выполнено", val: String(totals.orders) },
-          { label: "Из них с деньгами", val: `${totals.ordersWithMoney} / ${totals.orders}` },
-          { label: "Средний профит", val: totals.ordersWithMoney > 0 ? rubKop(totals.avgProfitKopecks) : "—" },
-          { label: "Продано робуксов", val: `${totals.robuxSold.toLocaleString("ru-RU")} R$` },
-        ].map(c => (
-          <div key={c.label} style={{ background: C.card, borderRadius: 12, padding: "12px 14px" }}>
-            <div style={{ fontSize: 12, color: C.textSecondary }}>{c.label}</div>
-            <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2, ...tabular }}>{c.val}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* По каналам */}
-      <div style={{ background: C.card, borderRadius: 12, padding: 16 }}>
-        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>По каналам</div>
-        {data.channels.length === 0 && <div style={{ fontSize: 13, color: C.textSecondary }}>Выполненных не-WB заказов пока нет</div>}
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {data.channels.map(ch => (
-            <div key={ch.source} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
-              <div>
-                <div style={{ fontSize: 14 }}>{CHANNEL_LABEL[ch.source]}</div>
-                <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 2 }}>
-                  {ch.orders} заказов · с деньгами {ch.ordersWithMoney}
-                </div>
-              </div>
-              <div style={{ textAlign: "right" as const }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: ch.ordersWithMoney > 0 ? C.green : C.textTertiary, ...tabular }}>
-                  {ch.ordersWithMoney > 0 ? rubKop(ch.profitKopecks) : "—"}
-                </div>
-                {ch.ordersWithMoney > 0 && (
-                  <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 2, ...tabular }}>
-                    выручка {rubKop(ch.revenueKopecks)}
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div style={{ fontSize: 11, color: C.muted, marginTop: 12 }}>
-          WB-коридор сюда не входит: там платит WB, и выручки заказа в базе нет.
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Main AnalyticsScreen ──────────────────────────────────────────────────────
 
 export default function AnalyticsScreen({ token }: { token: string }) {
-  const [tab, setTab] = useState<"dynamics" | "profit" | "advert" | "funnel" | "predict">("dynamics");
+  const [tab, setTab] = useState<"dynamics" | "advert" | "funnel" | "predict">("dynamics");
 
   return (
     <div style={{ paddingBottom: 24 }}>
@@ -765,7 +622,6 @@ export default function AnalyticsScreen({ token }: { token: string }) {
         <div style={{ display: "flex", background: "#2c2c2e", borderRadius: 10, padding: 3, gap: 2 }}>
           {([
             { id: "dynamics", label: "Динамика" },
-            { id: "profit",   label: "Профит"   },
             { id: "advert",   label: "Реклама"  },
             { id: "funnel",   label: "Воронка"  },
             { id: "predict",  label: "Предикт"  },
@@ -781,7 +637,6 @@ export default function AnalyticsScreen({ token }: { token: string }) {
       </div>
 
       {tab === "dynamics" && <DynamicsTab token={token} />}
-      {tab === "profit"   && <ProfitTab token={token} />}
       {tab === "advert"   && <AdvertTab token={token} />}
       {tab === "funnel"   && <FunnelTab token={token} />}
       {tab === "predict"  && <PredictTab token={token} />}

@@ -8,6 +8,7 @@ import { groupPartnerLedgerEntries, type PartnerLedgerRow } from "@/lib/partner-
 /** Неоплаченный прямой заказ — исключается из всех путей выкупа (П5). */
 import { isUnpaidDirect } from "@/lib/buyout-queue";
 import { ChevronRight, CircleAlert, Droplets, History, KeyRound, MoreHorizontal, RefreshCw, Search, ShoppingBag } from "lucide-react";
+import { bulkPause, shouldStopBatch, sleep } from "@/lib/buyout-batch";
 
 interface AccountInfo {
   hasCookie:      boolean;
@@ -1617,10 +1618,8 @@ function renderGroupedOrders(
 }
 
 interface BatchItem { orderId: string; nick: string; wbCode: string; gross: number; ok: boolean; reason?: string; }
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-// Random jitter between bulk purchases so the account doesn't hammer Roblox.
-const bulkPause = () => 2000 + Math.floor(Math.random() * 6000);
-const STOP_RE = /баланс|insufficient|not enough|истёк|expired|csrf|cookie|браузер занят|BROWSER_BUSY|QueueFull/i;
+// Пауза и условия остановки — в `@/lib/buyout-batch`, общие с веб-админкой:
+// два экрана не должны расходиться в том, когда пачку пора прекращать.
 
 function buyoutNick(o: BuyoutOrder): string {
   return o.user.username ? `@${o.user.username}` : o.user.name ?? "—";
@@ -1797,7 +1796,7 @@ function BuyoutSection({ token, balance, accountName, onBalanceChange, onStats }
           if (d?.failureCode === "REGIONAL_PRICE") {
             setOrders(prev => prev.filter(o => o.id !== order.id));
           }
-          if (STOP_RE.test(String(reason))) { bulkStop.current = true; }
+          if (shouldStopBatch(reason)) { bulkStop.current = true; }
         }
       } catch {
         items.push({ orderId: order.id, nick, wbCode: order.wbCode, gross, ok: false, reason: "ошибка сети" });
@@ -3306,7 +3305,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
           } else {
             const reason = d?.error ?? d?.msg ?? `HTTP ${r.status}`;
             items.push({ taskId: t.id, gamepassId: t.gamepassId, nick: t.robloxUsername, robux: price, usdt, ok: false, reason });
-            if (STOP_RE.test(String(reason))) { bulkStopRef.current = true; }
+            if (shouldStopBatch(reason)) { bulkStopRef.current = true; }
           }
         } catch {
           items.push({ taskId: t.id, gamepassId: t.gamepassId, nick: t.robloxUsername, robux: price, usdt, ok: false, reason: "ошибка сети" });

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { extractTwaUser } from "@/lib/twa-auth";
+import { requireAdmin } from "@/lib/admin-access";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -52,7 +52,7 @@ function buildReport(accountName: string | null, items: BatchItem[], totalGross:
 }
 
 export async function GET(req: NextRequest) {
-  if (!await extractTwaUser(req))
+  if (!await requireAdmin(req))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const batches = await (prisma as any).purchaseBatch.findMany({
     orderBy: { startedAt: "desc" },
@@ -62,8 +62,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const me = await extractTwaUser(req);
-  if (!me) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const actor = await requireAdmin(req);
+  if (!actor) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => null);
   if (!body?.action)
@@ -119,8 +119,11 @@ export async function POST(req: NextRequest) {
       where: { id: batchId },
       data: { finishedAt: new Date(), items, okCount, failCount, totalGross },
     });
-    if (body.notify && me.userId) {
-      await tgPost(String(me.userId), buildReport(batch.accountName, items, totalGross, okCount, failCount));
+    // Отчёт уходит в Telegram тому, кто запустил пачку. Это TG ID из
+    // `ADMIN_IDS` (`actor.telegramId`), а НЕ внутренний `User.id`: у запасного
+    // входа Telegram может отсутствовать — тогда отчёт просто не шлём.
+    if (body.notify && actor.via === "telegram") {
+      await tgPost(actor.telegramId, buildReport(batch.accountName, items, totalGross, okCount, failCount));
     }
     return NextResponse.json({ ok: true, batchId, okCount, failCount, totalGross });
   }
@@ -147,8 +150,8 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  if (body.notify && me.userId) {
-    await tgPost(String(me.userId), buildReport(accountName, items, totalGross, okCount, failCount));
+  if (body.notify && actor.via === "telegram") {
+    await tgPost(actor.telegramId, buildReport(accountName, items, totalGross, okCount, failCount));
   }
 
   return NextResponse.json({ ok: true, batchId: batch.id, okCount, failCount, totalGross });

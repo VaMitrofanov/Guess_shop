@@ -10,6 +10,8 @@ import {
   sendSbpQrToUser,
   sbpQrUrl,
 } from "@/lib/twa-direct";
+import { BONUS_REASONS, applyBonusDeltaTx, directOrderBonusKey } from "@/lib/bonus-ledger";
+import { parseGamepassId } from "@/lib/roblox-buyout";
 
 /**
  * Заявки прямых заказов (DirectIntent, «⏳ Ожидаем реквизиты») в TWA.
@@ -129,19 +131,35 @@ export async function POST(req: NextRequest) {
           orderSource:    "DIRECT",
           saleAmountKopecks: intent.rublePrice * 100,
           paymentDetails: action === "send-qr" ? "СБП QR" : details.slice(0, 2000),
+          // U3/U4: фактически применённые бонус и скидка — источник правды для
+          // возврата при отмене (`bots/shared/order-benefits.ts` читает именно
+          // эти поля) и для отчёта «Экономика». До 29.07 этот путь их не писал,
+          // и заказы из TWA выглядели как заказы без бонуса.
+          bonusAppliedRobux: intent.bonus ?? 0,
+          discountAppliedKopecks: (intent.rubleDiscount ?? 0) * 100,
+          gamepassId: intent.gamepassUrl ? parseGamepassId(intent.gamepassUrl) : null,
         },
       });
       await tx.directIntent.update({ where: { id: intentId }, data: { status: "CONSUMED" } });
-      const updateData: any = {};
       if (intent.bonus > 0) {
-        updateData.balance = 0;
-        updateData.reviewBonusGrantedAt = null;
-        updateData.bonusExpiresAt = null;
-        updateData.reviewReminderLevel = 0;
+        // Списание бонуса — только через единую точку (`BonusLedger`), как в
+        // TG-обработчике. Прежний `balance = 0` обнулял баланс мимо журнала:
+        // движение бонуса нигде не оставалось, и сверка журнал↔баланс расходилась.
+        await applyBonusDeltaTx(tx, {
+          userId: intent.userId,
+          deltaRobux: -intent.bonus,
+          reason: BONUS_REASONS.DIRECT_ORDER_REDEMPTION,
+          referenceId: ord.id,
+          idempotencyKey: directOrderBonusKey(ord.id),
+          metadata: { intentId, wbCode: dirCode, via: "twa" },
+        });
+        await tx.user.update({
+          where: { id: intent.userId },
+          data: { reviewBonusGrantedAt: null, bonusExpiresAt: null, reviewReminderLevel: 0 },
+        });
       }
-      if (intent.user.rubleDiscount > 0) updateData.rubleDiscount = 0;
-      if (Object.keys(updateData).length > 0) {
-        await tx.user.update({ where: { id: intent.userId }, data: updateData });
+      if (intent.user.rubleDiscount > 0) {
+        await tx.user.update({ where: { id: intent.userId }, data: { rubleDiscount: 0 } });
       }
       return ord;
     });
