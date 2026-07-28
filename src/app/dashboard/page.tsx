@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { adminGrantFor } from "@/lib/admin-grant";
 import {
   buildCustomerNotices,
   customerOrderProgress,
@@ -28,6 +29,7 @@ import {
   Package,
   Radio,
   ReceiptText,
+  Shield,
   ShieldCheck,
   ShoppingCart,
   User,
@@ -138,7 +140,9 @@ export default async function DashboardPage() {
         robloxUsername: true,
         identities: {
           orderBy: { verifiedAt: "asc" },
-          select: { provider: true, verifiedAt: true },
+          // `subject` нужен, чтобы определить админа тем же правилом, что и гейт
+          // админки: роль после A1 выводится из ADMIN_IDS, а не хранится в БД.
+          select: { provider: true, subject: true, verifiedAt: true },
         },
       },
     }),
@@ -214,6 +218,17 @@ export default async function DashboardPage() {
     ? `/guide?source=site&amount=${latestActive.amountRobux}&username=${encodeURIComponent(latestActive.customer ?? "")}`
     : latestActive ? orderHref(latestActive) : null;
 
+  // После A1 админа делает не `User.role`, а проверенная TG-личность из
+  // ADMIN_IDS, поэтому ЛК обязан спрашивать то же правило, что и гейт админки.
+  // Иначе выходит то, на что наткнулся владелец: человек — админ, но в кабинете
+  // ни отметки роли, ни входа в Control Center, и вернуться туда можно только
+  // угадав адрес `/admin`.
+  const isAdmin = adminGrantFor({
+    email: user.email,
+    role: user.role,
+    telegramSubjects: user.identities.filter((i) => i.provider === "TG").map((i) => i.subject),
+  }) !== null;
+
   return (
     <main className={styles.page}>
       <Navbar />
@@ -227,6 +242,11 @@ export default async function DashboardPage() {
             </p>
             <div className={styles.actions}>
               <Link href={checkoutHref} className={styles.primary}><ShoppingCart size={18} /> Купить Robux</Link>
+              {isAdmin && (
+                <Link href="/admin" className={styles.adminAction}>
+                  <Shield size={18} /> Админка <ArrowRight size={17} />
+                </Link>
+              )}
               {latestActive && orderHref(latestActive) && (
                 <Link href={orderHref(latestActive)!} className={styles.secondary}>Открыть активный заказ <ArrowRight size={17} /></Link>
               )}
@@ -340,7 +360,7 @@ export default async function DashboardPage() {
               <dl className={styles.profileRows}>
                 <div><dt>Ник Roblox</dt><dd><Gamepad2 size={15} /> {knownRobloxUsername ?? "Не указан"}</dd></div>
                 <div><dt>Клиент с</dt><dd>{formatDate(user.createdAt)}</dd></div>
-                {user.role === "ADMIN" && <div><dt>Роль</dt><dd>Администратор</dd></div>}
+                {isAdmin && <div><dt>Роль</dt><dd>Администратор</dd></div>}
               </dl>
             </section>
 
@@ -362,7 +382,7 @@ export default async function DashboardPage() {
                 })}
               </div>
               {user.email && !user.emailVerifiedAt && <EmailVerificationAction />}
-              {!identityNames.has("TG") && user.role !== "ADMIN" && (
+              {!identityNames.has("TG") && !isAdmin && (
                 <div className={styles.linkAction}>
                   <p>Связать Telegram можно после свежего подтверждения входа.</p>
                   <TelegramLoginButton mode="link" />
@@ -375,6 +395,9 @@ export default async function DashboardPage() {
               <Link href={checkoutHref}><ShoppingCart size={18} /><span><strong>Новый заказ</strong><small>{knownRobloxUsername ? "Ник уже подставлен" : "Укажи ник при оформлении"}</small></span><ChevronRight size={17} /></Link>
               <Link href="/guide?source=site&amount=1000"><Gamepad2 size={18} /><span><strong>Инструкция</strong><small>Создать геймпасс</small></span><ChevronRight size={17} /></Link>
               <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer"><Bell size={18} /><span><strong>Поддержка</strong><small>Живой менеджер</small></span><ExternalLink size={16} /></a>
+              {isAdmin && (
+                <Link href="/admin"><Shield size={18} /><span><strong>Админка</strong><small>Заказы, выкуп, журнал</small></span><ChevronRight size={17} /></Link>
+              )}
               <SignOutAction><LogOut size={18} /><span><strong>Выйти</strong><small>Завершить сессию</small></span><ChevronRight size={17} /></SignOutAction>
             </nav>
           </aside>

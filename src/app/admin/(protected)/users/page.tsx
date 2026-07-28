@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { adminGrantFor } from "@/lib/admin-grant";
 import { Users, ShieldCheck, User, Calendar } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -12,12 +13,20 @@ export default async function AdminUsersPage() {
     orderBy: { createdAt: "desc" },
     select: {
       id: true, email: true, name: true, role: true, createdAt: true,
+      // Админа определяет не `role`, а проверенная TG-личность из ADMIN_IDS
+      // (этап A1), поэтому нужен `subject`.
+      identities: { where: { provider: "TG" }, select: { subject: true } },
       _count: { select: { wbOrders: true } },
     },
   });
 
-  const adminCount = users.filter((u) => u.role === "ADMIN").length;
-  const userCount  = users.filter((u) => u.role !== "ADMIN").length;
+  // A1: `role` в базе больше не источник правды — считаем по тому же правилу,
+  // что и гейт админки, иначе экран показывал ноль администраторов.
+  const isAdminUser = (u: { email: string | null; role: string; identities: { subject: string }[] }) =>
+    adminGrantFor({ email: u.email, role: u.role, telegramSubjects: u.identities.map((i) => i.subject) }) !== null;
+  const adminIds = new Set(users.filter(isAdminUser).map((u) => u.id));
+  const adminCount = adminIds.size;
+  const userCount  = users.length - adminCount;
 
   return (
     <div className="p-8 space-y-6">
@@ -72,7 +81,7 @@ export default async function AdminUsersPage() {
                 <td className="px-5 py-3.5 text-sm text-zinc-400 font-medium hidden sm:table-cell">{user.email}</td>
                 <td className="px-5 py-3.5">
                   <span className={`font-pixel text-[8px] px-2 py-1 border ${
-                    user.role === "ADMIN"
+                    adminIds.has(user.id)
                       ? "text-amber-400 border-amber-500/20 bg-amber-500/10"
                       : "text-[#00b06f] border-[#00b06f]/20 bg-[#00b06f]/10"
                   }`}>

@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { ArrowRight, Menu, User, X } from "lucide-react";
+import { ArrowRight, Menu, Shield, User, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -49,7 +49,16 @@ export default function Navbar() {
           {/* D2: ссылка была `lg:flex`, а бургер — `md:hidden`, поэтому на
               768–1023 px (все iPad в портрете) в личный кабинет было не попасть
               вообще. На md показываем иконку, подпись возвращаем с lg. */}
-          <Link href={loggedIn ? (isAdmin ? "/admin" : "/dashboard") : "/login"} aria-label={loggedIn ? "Личный кабинет" : "Войти"} className="hidden items-center gap-2 text-sm font-bold text-[var(--rb-muted)] transition-colors hover:text-[var(--rb-accent)] md:flex">
+          {/* Раньше «Кабинет» у админа вёл в /admin — значит в собственный ЛК он
+              не мог попасть вообще, а выйдя из админки, не мог туда вернуться:
+              ссылки на /admin не было больше нигде. Теперь у админа два разных
+              входа, у обычного клиента — прежний один. */}
+          {isAdmin && (
+            <Link href="/admin" aria-label="Админка" className="hidden items-center gap-2 text-sm font-bold text-[var(--rb-accent)] transition-colors hover:opacity-80 md:flex">
+              <Shield size={15} /> <span className="hidden lg:inline">Админка</span>
+            </Link>
+          )}
+          <Link href={loggedIn ? "/dashboard" : "/login"} aria-label={loggedIn ? "Личный кабинет" : "Войти"} className="hidden items-center gap-2 text-sm font-bold text-[var(--rb-muted)] transition-colors hover:text-[var(--rb-accent)] md:flex">
             <User size={15} /> <span className="hidden lg:inline">{loggedIn ? "Кабинет" : "Войти"}</span>
           </Link>
           <Link href="/#calculator" className="hidden h-11 items-center gap-2 rounded-xl bg-[var(--rb-strong)] px-4 text-base font-extrabold text-white shadow-[3px_3px_0_#45d6aa] transition-transform hover:-translate-y-0.5 md:flex">
@@ -71,7 +80,10 @@ export default function Navbar() {
                 D7: подпись была всегда «Кабинет», даже когда клиент не вошёл.
                 Цвета публичного шелла — только через токены `--rb-*`. */}
             <div className="mt-2 grid grid-cols-2 gap-2 md:hidden">
-              <Link href={loggedIn ? (isAdmin ? "/admin" : "/dashboard") : "/login"} onClick={() => setOpen(false)} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-[var(--rb-border)] bg-[var(--rb-surface)] text-sm font-bold text-[var(--rb-text)]"><User size={15} /> {loggedIn ? "Кабинет" : "Войти"}</Link>
+              {isAdmin && (
+                <Link href="/admin" onClick={() => setOpen(false)} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-[var(--rb-accent)] bg-[var(--rb-accent-soft)] text-sm font-bold text-[var(--rb-accent)]"><Shield size={15} /> Админка</Link>
+              )}
+              <Link href={loggedIn ? "/dashboard" : "/login"} onClick={() => setOpen(false)} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-[var(--rb-border)] bg-[var(--rb-surface)] text-sm font-bold text-[var(--rb-text)]"><User size={15} /> {loggedIn ? "Кабинет" : "Войти"}</Link>
               <Link href="/#calculator" onClick={() => setOpen(false)} className="flex h-11 items-center justify-center gap-2 rounded-xl bg-[var(--rb-strong)] text-base font-bold text-white">Купить <ArrowRight size={15} /></Link>
             </div>
           </div>
