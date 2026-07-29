@@ -109,4 +109,23 @@ describe("admin audience", () => {
     expect(metrics.map((metric) => metric.status)).toEqual(["error", "error"]);
     expect(metrics.map((metric) => metric.members)).toEqual([null, null]);
   });
+
+  it("routes Telegram reads through the authenticated bridge when configured", async () => {
+    delete process.env.TG_TOKEN;
+    process.env.TG_CHANNEL_ID = "@Roblox_Bank_Tg";
+    process.env.VALIDATOR_SOURCE_URL = "https://bridge.example.test";
+    process.env.VALIDATOR_KEY = "validator-secret";
+
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, result: 310 }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, result: { title: "Roblox Bank", username: "Roblox_Bank_Tg" } }) });
+
+    const [telegram] = await getCommunityAudienceMetrics();
+    expect(telegram).toEqual(expect.objectContaining({ members: 310, status: "ok" }));
+    expect(global.fetch).toHaveBeenNthCalledWith(1, "https://bridge.example.test/tg-proxy", expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({ "x-validator-key": "validator-secret" }),
+    }));
+    expect(String((global.fetch as jest.Mock).mock.calls[0][1].body)).not.toContain("token");
+  });
 });

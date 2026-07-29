@@ -22,6 +22,12 @@
 import * as http from "http";
 import { getGamepassDetailsDirect, getUserGamepasses, getGamepassForPurchase } from "./roblox";
 
+export function telegramProxySuccessPayload(method: string, result: unknown) {
+  return method === "getChat" || method === "getChatMemberCount"
+    ? { ok: true, result }
+    : { ok: true };
+}
+
 // Allow overriding port via env for cases where 3000 is already in use
 const BRIDGE_PORT = parseInt(process.env.VALIDATOR_PORT ?? "3000", 10);
 
@@ -72,7 +78,8 @@ export function startBridgeServer(): http.Server {
     }
 
     // ── POST /tg-proxy ──────────────────────────────────────────────────────
-    // Accepts any Telegram Bot API call. Required fields: token, chat_id.
+    // Accepts any Telegram Bot API call. Required field: chat_id. The bot token
+    // stays on the SG bridge and is never accepted from callers.
     // Optional 'method' overrides the TG method (default: auto-detect).
     // All other fields are forwarded verbatim (text, photo, caption,
     // reply_markup, inline_keyboard, etc.).
@@ -91,7 +98,7 @@ export function startBridgeServer(): http.Server {
         return;
       }
 
-      const { method: tgMethod, chat_id, ...rest } = body as any;
+      const { method: tgMethod, chat_id, ...rest } = body;
       const token = process.env.TG_TOKEN;
       if (!token || !chat_id) {
         respond(400, { ok: false, error: "missing_fields" });
@@ -121,10 +128,10 @@ export function startBridgeServer(): http.Server {
             body:    JSON.stringify({ parse_mode: "HTML", ...rest, chat_id }),
           }
         );
-        const tgBody = await tgRes.json();
+        const tgBody = await tgRes.json() as { description?: string; result?: unknown };
         if (!tgRes.ok) {
           // Suppress "chat not found" noise from stale admin IDs
-          const desc: string = (tgBody as any)?.description ?? "";
+          const desc = tgBody.description ?? "";
           if (tgRes.status === 400 && desc.includes("chat not found")) {
             respond(200, { ok: true, warning: "chat_not_found" });
             return;
@@ -138,7 +145,10 @@ export function startBridgeServer(): http.Server {
           return;
         }
         console.log(`[Bridge/tg-proxy] → chat_id=${chat_id} method=${resolvedMethod} delivered`);
-        respond(200, { ok: true });
+        // Read-only calls power server-side operational metrics on the RF Web
+        // host, which cannot reach api.telegram.org directly. Do not widen the
+        // response for send methods: message/chat payloads are unnecessary there.
+        respond(200, telegramProxySuccessPayload(resolvedMethod, tgBody.result));
       } catch (err: any) {
         console.error("[Bridge/tg-proxy] fetch failed:", err?.message ?? err);
         respond(502, { ok: false, error: "tg_unreachable" });

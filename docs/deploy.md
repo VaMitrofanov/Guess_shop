@@ -27,8 +27,9 @@ git push origin main
 Вручную вызывать API деплоя, вставлять записи в БД и т.п. **не нужно**.
 
 > ⚠️ **Не запускать ручной force-deploy сразу после `git push`.** Webhook уже стартовал
-> сборку: ручной `POST /api/v1/deploy?...&force=true` создаёт **вторую параллельную сборку
-> того же сервиса**, и на RF-хосте (2 vCPU / 4 GB) вторая падает на шаге
+> сборки Web, TG и VK: ручной `POST /api/v1/deploy?...&force=true` для любого из них
+> создаёт **вторую параллельную сборку того же сервиса**, и на RF-хосте (2 vCPU / 4 GB)
+> лишняя сборка может упасть на шаге
 > `Running TypeScript ...` с `exit 255` **без compile-ошибки**. Так упал деплой 17.07:
 > webhook-сборка `709f8e82` (11:59:30 → 12:01:46) прошла, а ручная API-сборка того же
 > коммита (11:59:54 → 12:05:21) — упала. Прод при этом не пострадал: упавшая сборка не
@@ -43,6 +44,13 @@ git push origin main
 > `docker ps` на RF показывает тег образа с полным SHA
 > (`z10ws7m1q45h281zwedmhei4:<sha>`), а `last-modified` отданных `/_next/static/chunks/*.css`
 > — время сборки.
+
+**29.07.2026 защита автоматизирована:** `deploy-web-and-guide.sh` по умолчанию больше не
+делает POST для Web. Он находит webhook-запись точного `git rev-parse HEAD`, ждёт именно её
+`finished`, затем запускает Guide. Если Web или Guide уже `queued`/`in_progress`, существующий
+deployment переиспользуется, второй не создаётся даже в режиме `--force-web`. Если webhook
+не появился за 120 секунд, скрипт падает без мутации; аварийный ручной Web deploy требует
+явного `--force-web`.
 
 Web-фичи, которые меняют Prisma-схему, требуют синхронного применения миграций на прод-БД.
 Если образ обновился, а миграции не применились, TWA/API могут падать на новых колонках.
@@ -119,13 +127,15 @@ Wildberries сборкой на несколько коммитов старше
 Теперь есть:
 
 ```bash
-scripts/deploy-web-and-guide.sh              # Web → ждём finished → Guide → smoke
+scripts/deploy-web-and-guide.sh              # ждём webhook Web → Guide → smoke
 scripts/deploy-web-and-guide.sh --guide-only # Web уже уехал автодеплоем
+scripts/deploy-web-and-guide.sh --force-web  # только если webhook проверенно не сработал
 ```
 
 Скрипт читает `COOLIFY_URL`, `COOLIFY_TOKEN`, `COOLIFY_WEB_UUID`, `COOLIFY_GUIDE_UUID` из
-окружения/локального `.env` (секретов в репозитории нет), соблюдает обязательный порядок
-Web → Guide и сам гоняет `smoke-corridor` в конце.
+окружения/локального `.env` (секретов в репозитории нет), по умолчанию присоединяется к
+webhook-deploy Web текущего commit, соблюдает порядок Web → Guide и сам гоняет
+`smoke-corridor` в конце. `--guide-only` нужен, если Web уже принят до запуска скрипта.
 
 Для постоянного контроля — лёгкий режим смоука под cron раз в 15 минут:
 

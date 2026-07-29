@@ -1030,6 +1030,13 @@ Web transport возвращает `fetch failed`; `lastAlertAt` коррект�
 в час. Одновременный отказ TG+VK+Web/SMTP всё ещё требует внешнего инфраструктурного
 мониторинга.
 
+Тот же защищённый SG bridge нужен production Web для read-only размера Telegram-канала:
+RF-хост не достигает `api.telegram.org`. Ответ Bot API проксируется наружу только для
+жёсткого allowlist `getChat`/`getChatMemberCount`; Web передаёт method/chat ID и
+`x-validator-key`, но не собственную копию bot token. Send-методы по-прежнему не возвращают
+payload сообщения. Если bridge/key недоступны, админка показывает «API недоступен», а не
+подставляет ноль или сохранённое значение.
+
 Rollout-скрипт по умолчанию fail-closed запрещает 10/50/on, пока timestamp production
 `TINKOFF_SECRET_KEY` не новее зафиксированного раскрытия. Timestamp не доказывает смену
 значения: оператор должен ротировать Password в кабинете банка, а не пересохранять старый.

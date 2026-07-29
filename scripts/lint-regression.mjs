@@ -16,11 +16,15 @@ import { ESLint } from "eslint";
 // `users.get` вместо прежнего `any`; отпечаток также учитывает сдвиг строк в
 // `bots/shared/db.ts`, `notify.ts`, `tg/bot.ts` и `vk/bot.ts`.
 //
+// 2026-07-29 (1124 → 1122): Telegram bridge теперь типизирует и входной JSON,
+// и ответ Bot API вместо двух `any`; сдвиг строк в `bots/shared/bridge.ts`
+// проверен вместе с новым минимальным контрактом read-only результата.
+//
 // Unlike --max-warnings, this has no spare capacity: adding, moving,
 // replacing or changing even one warning fails the gate. Reduce the baseline
 // only in a dedicated cleanup change after reviewing the full formatter output.
-const BASELINE_WARNING_COUNT = 1124;
-const BASELINE_SHA256 = "5944f89702a8a7e33f9faf3cc5a11d60fa1838703cc970e63946bba9b16002af";
+const BASELINE_WARNING_COUNT = 1122;
+const BASELINE_SHA256 = "df693136b10eedb586b77c85b4264295a91dc8309f1867b2ed8da212e12f0f25";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);

@@ -152,6 +152,8 @@ export function filterAdminAudienceUsers(users: AdminAudienceUser[], filter: Adm
 async function readTelegramAudience(): Promise<CommunityAudienceMetric> {
   const token = process.env.TG_TOKEN;
   const chatId = process.env.TG_CHANNEL_ID || "@Roblox_Bank_Tg";
+  const bridgeUrl = process.env.VALIDATOR_SOURCE_URL?.trim();
+  const validatorKey = process.env.VALIDATOR_KEY?.trim();
   const fallback: CommunityAudienceMetric = {
     platform: "TG",
     label: "Telegram-канал",
@@ -160,19 +162,28 @@ async function readTelegramAudience(): Promise<CommunityAudienceMetric> {
     members: null,
     status: token ? "error" : "unavailable",
   };
-  if (!token) return fallback;
+  const canUseBridge = Boolean(bridgeUrl && validatorKey);
+  if (!canUseBridge && !token) return fallback;
 
   try {
-    const encodedChatId = encodeURIComponent(chatId);
+    const telegramRequest = (method: "getChat" | "getChatMemberCount") => {
+      if (bridgeUrl && validatorKey) {
+        return fetch(`${bridgeUrl}/tg-proxy`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-validator-key": validatorKey },
+          body: JSON.stringify({ method, chat_id: chatId }),
+          cache: "no-store",
+          signal: AbortSignal.timeout(5_000),
+        });
+      }
+      return fetch(`https://api.telegram.org/bot${token!}/${method}?chat_id=${encodeURIComponent(chatId)}`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(4_000),
+      });
+    };
     const [countResponse, chatResponse] = await Promise.all([
-      fetch(`https://api.telegram.org/bot${token}/getChatMemberCount?chat_id=${encodedChatId}`, {
-        cache: "no-store",
-        signal: AbortSignal.timeout(4_000),
-      }),
-      fetch(`https://api.telegram.org/bot${token}/getChat?chat_id=${encodedChatId}`, {
-        cache: "no-store",
-        signal: AbortSignal.timeout(4_000),
-      }),
+      telegramRequest("getChatMemberCount"),
+      telegramRequest("getChat"),
     ]);
     const countPayload = await countResponse.json() as { ok?: boolean; result?: number };
     const chatPayload = await chatResponse.json() as {

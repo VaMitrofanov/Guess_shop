@@ -15,8 +15,9 @@
 #   COOLIFY_GUIDE_UUID   UUID приложения RobloxBank-Guide
 #
 # Использование:
-#   scripts/deploy-web-and-guide.sh              # Web, затем Guide, затем смоук
-#   scripts/deploy-web-and-guide.sh --guide-only # только Guide (Web уже уехал автодеплоем)
+#   scripts/deploy-web-and-guide.sh              # дождаться Web webhook → Guide → smoke
+#   scripts/deploy-web-and-guide.sh --guide-only # Web уже проверен → Guide → smoke
+#   scripts/deploy-web-and-guide.sh --force-web  # явный аварийный deploy Web без webhook
 #   scripts/deploy-web-and-guide.sh --no-smoke
 set -euo pipefail
 
@@ -36,16 +37,68 @@ COOLIFY_URL="${COOLIFY_URL:-}"
 : "${COOLIFY_URL:?COOLIFY_URL не задан (адрес панели Coolify)}"
 
 GUIDE_ONLY=0
+FORCE_WEB=0
 RUN_SMOKE=1
 for arg in "$@"; do
   case "$arg" in
     --guide-only) GUIDE_ONLY=1 ;;
+    --force-web)  FORCE_WEB=1 ;;
     --no-smoke)   RUN_SMOKE=0 ;;
     *) echo "Неизвестный аргумент: $arg" >&2; exit 2 ;;
   esac
 done
 
+if [[ "$GUIDE_ONLY" -eq 1 && "$FORCE_WEB" -eq 1 ]]; then
+  echo "--guide-only и --force-web несовместимы" >&2
+  exit 2
+fi
+
 api() { curl -sS -H "Authorization: Bearer $COOLIFY_TOKEN" "$@"; }
+
+# Coolify возвращает активные deployment как JSON-object с числовыми ключами.
+# Ищем запись по application UUID внутри deployment_url, не по нестабильному
+# внутреннему application_id. stdout — только deployment_uuid.
+find_active_deployment() {
+  local uuid="$1" commit="${2:-}" webhook_only="${3:-0}"
+  api "$COOLIFY_URL/api/v1/deployments" | python3 -c '
+import json,sys
+uuid, commit, webhook_only = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
+payload = json.load(sys.stdin)
+rows = list(payload.values()) if isinstance(payload, dict) else payload
+matches = []
+for row in rows:
+    if f"/application/{uuid}/" not in str(row.get("deployment_url", "")):
+        continue
+    if str(row.get("status", "")) not in {"queued", "in_progress"}:
+        continue
+    if webhook_only and not row.get("is_webhook"):
+        continue
+    if commit and not str(row.get("commit", "")).startswith(commit):
+        continue
+    matches.append(row)
+matches.sort(key=lambda row: int(row.get("id", 0)), reverse=True)
+if matches:
+    print(matches[0].get("deployment_uuid", ""))
+' "$uuid" "$commit" "$webhook_only"
+}
+
+wait_for_webhook() {
+  local uuid="$1" commit="$2"
+  echo "→ ждём webhook-deploy Web для commit ${commit:0:7}" >&2
+  for _ in $(seq 1 24); do
+    local deployment
+    deployment=$(find_active_deployment "$uuid" "$commit" 1)
+    if [[ -n "$deployment" ]]; then
+      echo "  найден webhook deployment: $deployment" >&2
+      printf '%s' "$deployment"
+      return 0
+    fi
+    sleep 5
+  done
+  echo "  ❌ webhook Web не появился за 120 с; force-deploy автоматически НЕ запущен" >&2
+  echo "     Проверьте GitHub/Coolify и только после этого повторите с --force-web." >&2
+  return 1
+}
 
 # Прогресс печатается в stderr: stdout функции — это ТОЛЬКО uuid деплоя,
 # который забирает вызывающий через $(...).
@@ -78,12 +131,27 @@ wait_for() {
 }
 
 if [[ "$GUIDE_ONLY" -eq 0 ]]; then
-  web_deployment=$(trigger "$COOLIFY_WEB_UUID" "Web")
+  if [[ "$FORCE_WEB" -eq 1 ]]; then
+    web_deployment=$(find_active_deployment "$COOLIFY_WEB_UUID")
+    if [[ -n "$web_deployment" ]]; then
+      echo "→ Web уже queued/in_progress; explicit force не создаёт дубль ($web_deployment)" >&2
+    else
+      web_deployment=$(trigger "$COOLIFY_WEB_UUID" "Web (explicit force)")
+    fi
+  else
+    head_commit=$(git rev-parse HEAD)
+    web_deployment=$(wait_for_webhook "$COOLIFY_WEB_UUID" "$head_commit")
+  fi
   wait_for "$web_deployment" "Web"
 fi
 
 # Guide — строго ПОСЛЕ завершения Web-сборки.
-guide_deployment=$(trigger "$COOLIFY_GUIDE_UUID" "Guide")
+guide_deployment=$(find_active_deployment "$COOLIFY_GUIDE_UUID")
+if [[ -n "$guide_deployment" ]]; then
+  echo "→ Guide уже queued/in_progress; повторный deploy не создаём ($guide_deployment)" >&2
+else
+  guide_deployment=$(trigger "$COOLIFY_GUIDE_UUID" "Guide")
+fi
 wait_for "$guide_deployment" "Guide"
 
 # Coolify говорит `finished`, когда собрал и запустил контейнер, но Guide ещё
