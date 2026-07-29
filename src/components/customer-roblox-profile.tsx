@@ -23,6 +23,7 @@ import styles from "@/app/dashboard/dashboard.module.css";
 type ProfilePayload = {
   status: string;
   profile: CustomerRobloxProfile | null;
+  accounts: CustomerRobloxProfile[];
   suggestedUsername?: string | null;
 };
 
@@ -49,8 +50,8 @@ export default function CustomerRobloxProfileCard({
   activeOrderHref,
 }: CustomerRobloxProfileCardProps) {
   const [payload, setPayload] = useState(initial);
-  const [editing, setEditing] = useState(!initial.profile && !initial.suggestedUsername);
-  const [username, setUsername] = useState(initial.profile?.username ?? initial.suggestedUsername ?? "");
+  const [editing, setEditing] = useState(!initial.profile);
+  const [username, setUsername] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -70,7 +71,7 @@ export default function CustomerRobloxProfileCard({
         return;
       }
       setPayload(body);
-      setUsername(body.profile.username);
+      setUsername("");
       setEditing(false);
       setMessage("Профиль обновлён");
     } catch {
@@ -80,16 +81,42 @@ export default function CustomerRobloxProfileCard({
     }
   };
 
+  const selectAccount = async (accountId: string) => {
+    if (busy || payload.profile?.accountId === accountId) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/account/roblox-profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "select", accountId }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body.profile) throw new Error("select failed");
+      setPayload(body);
+      setMessage(`Выбран @${body.profile.username}`);
+    } catch {
+      setMessage("Не удалось выбрать аккаунт");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const disconnect = async () => {
-    if (busy || !window.confirm("Отвязать Roblox-профиль? Старые заказы не изменятся.")) return;
+    if (!payload.profile || busy || !window.confirm("Скрыть этот Roblox-аккаунт из личного кабинета? Старые заказы не изменятся.")) return;
     setBusy(true);
     try {
-      const response = await fetch("/api/account/roblox-profile", { method: "DELETE" });
+      const response = await fetch("/api/account/roblox-profile", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: payload.profile.accountId }),
+      });
       if (!response.ok) throw new Error("disconnect failed");
-      setPayload({ status: "missing-username", profile: null, suggestedUsername: null });
+      const body = await response.json();
+      setPayload(body);
       setUsername("");
-      setEditing(true);
-      setMessage("Профиль отвязан");
+      setEditing(!body.profile);
+      setMessage("Аккаунт скрыт");
     } catch {
       setMessage("Не удалось отвязать профиль");
     } finally {
@@ -98,7 +125,9 @@ export default function CustomerRobloxProfileCard({
   };
 
   const profile = payload.profile;
-  const checkoutHref = profile ? `/checkout?username=${encodeURIComponent(profile.username)}` : "/checkout";
+  const checkoutHref = profile
+    ? `/checkout?accountId=${encodeURIComponent(profile.accountId)}&username=${encodeURIComponent(profile.username)}`
+    : "/checkout";
   return (
     <div className={styles.robloxHeroShell} aria-label="Профиль Roblox">
       <section className={styles.robloxHeroMain}>
@@ -115,22 +144,54 @@ export default function CustomerRobloxProfileCard({
           <div className={styles.robloxHeroCopy}>
             {!profile && <small className={styles.robloxHeroGreeting}>Привет, {fallbackName}</small>}
             <h1 className={styles.robloxHeroTitle}>{profile?.displayName ?? "Подключи Roblox-профиль"}</h1>
-            <span className={styles.robloxHeroUsername}>{profile ? `@${profile.username}` : "Один профиль — быстрые покупки без повторного ввода ника"}</span>
+            <span className={styles.robloxHeroUsername}>{profile ? `@${profile.username}` : "Быстрые покупки без повторного ввода ника"}</span>
             <small className={styles.robloxHeroStatus}>
               {profile
-                ? payload.status === "stale" || profile.stale ? "Последняя сохранённая версия" : "Публичные данные подтверждены Roblox"
-                : "Ник из старого заказа можно предложить, но привязка происходит только после твоего подтверждения"}
+                ? profile.source === "ORDER_HISTORY"
+                  ? `Подтверждён заказом${profile.orderCount > 1 ? ` · покупок: ${profile.orderCount}` : ""}. Это не проверка владения аккаунтом.`
+                  : payload.status === "stale" || profile.stale ? "Добавлен вручную · последняя сохранённая версия" : "Добавлен вручную · публичные данные Roblox"
+                : "Если раньше уже покупал, аккаунты появятся автоматически. Новый ник можно добавить отдельно."}
             </small>
           </div>
         </div>
+        {payload.accounts.length > 1 && (
+          <div className={styles.robloxAccountSwitcher} aria-label="Roblox-аккаунты из ваших заказов">
+            <span>Аккаунт для покупки</span>
+            <div>
+              {payload.accounts.map((item) => (
+                <button
+                  key={item.accountId}
+                  type="button"
+                  className={item.selected ? styles.robloxAccountActive : styles.robloxAccountChoice}
+                  onClick={() => void selectAccount(item.accountId)}
+                  disabled={busy}
+                  aria-pressed={item.selected}
+                >
+                  {item.avatarUrl
+                    ? <Image src={item.avatarUrl} width={30} height={30} alt="" unoptimized />
+                    : <UserRound size={16} />}
+                  <span><strong>{item.displayName}</strong><small>@{item.username}</small></span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {profile?.description && <p className={styles.robloxHeroDescription}>{profile.description}</p>}
         <div className={styles.actions}>
           <Link href={checkoutHref} className={styles.primary}>
             <ShoppingCart size={18} /> {profile ? "Купить на этот аккаунт" : "Купить Robux"}
           </Link>
-          {profile && (
-            <a href={profile.profileUrl} target="_blank" rel="noopener noreferrer" className={styles.secondary}>
-              Открыть профиль <ExternalLink size={16} />
+          {profile?.profileUrl && (
+            <a
+              href={profile.profileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`${styles.secondary} ${styles.robloxExternalAction}`}
+              aria-label={`Открыть официальный профиль ${profile.username} в Roblox`}
+            >
+              <Gamepad2 size={18} />
+              <span><strong>Открыть в Roblox</strong><small>Официальный профиль Roblox</small></span>
+              <ExternalLink size={16} />
             </a>
           )}
           {activeOrderHref && <Link href={activeOrderHref} className={styles.secondary}>Активный заказ <ArrowRight size={17} /></Link>}
@@ -157,14 +218,14 @@ export default function CustomerRobloxProfileCard({
                 {profileDate(profile.createdAt) && <div><dt>Аккаунт с</dt><dd>{profileDate(profile.createdAt)}</dd></div>}
               </dl>
               <div className={styles.robloxProfileControls}>
-                <button type="button" onClick={() => { setEditing((value) => !value); setMessage(null); }}><Pencil size={15} /> Сменить</button>
-                <button type="button" onClick={disconnect} disabled={busy} aria-label="Отвязать Roblox"><Unlink size={15} /></button>
+                <button type="button" onClick={() => { setEditing((value) => !value); setMessage(null); }}><Pencil size={15} /> Добавить ник</button>
+                <button type="button" onClick={disconnect} disabled={busy} aria-label="Скрыть Roblox-аккаунт"><Unlink size={15} /></button>
               </div>
             </>
           ) : (
             <div className={styles.robloxConnectPrompt}>
-              <p>Добавь ник — покажем настоящий аватар и будем подставлять аккаунт в покупку.</p>
-              {!editing && <button type="button" onClick={() => setEditing(true)}>Подключить профиль</button>}
+              <p>Аккаунты из оплаченных и выполненных заказов появятся здесь сами. Другой ник можно добавить вручную.</p>
+              {!editing && <button type="button" onClick={() => setEditing(true)}>Добавить новый ник</button>}
             </div>
           )}
         </div>
@@ -179,7 +240,7 @@ export default function CustomerRobloxProfileCard({
               {busy ? <RefreshCw size={16} className={styles.spin} /> : "Найти"}
             </button>
           </div>
-          <small>Мы загружаем только публичные данные Roblox. Это не проверка владения аккаунтом.</small>
+          <small>Новый ник добавляется отдельно. Мы загружаем только публичные данные Roblox — это не проверка владения аккаунтом.</small>
         </div>
       )}
       {message && <p className={styles.robloxMessage} role="status">{message}</p>}

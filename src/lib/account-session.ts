@@ -10,6 +10,16 @@
 export interface AccountMePayload {
   authenticated: boolean;
   robloxUsername: string | null;
+  selectedRobloxAccountId: string | null;
+  robloxAccounts: Array<{
+    accountId: string;
+    username: string;
+    displayName: string;
+    avatarUrl: string | null;
+    source: "ORDER_HISTORY" | "MANUAL";
+    orderCount: number;
+    selected: boolean;
+  }>;
   email: string | null;
   emailVerified: boolean;
 }
@@ -17,17 +27,27 @@ export interface AccountMePayload {
 export const GUEST_ACCOUNT_PAYLOAD: Readonly<AccountMePayload> = Object.freeze({
   authenticated: false,
   robloxUsername: null,
+  selectedRobloxAccountId: null,
+  robloxAccounts: [],
   email: null,
   emailVerified: false,
 });
 
 export function accountMePayload(
-  user: { robloxUsername: string | null; email?: string | null; emailVerifiedAt?: Date | null } | null | undefined,
+  user: {
+    robloxUsername: string | null;
+    selectedRobloxAccountId?: string | null;
+    robloxAccounts?: AccountMePayload["robloxAccounts"];
+    email?: string | null;
+    emailVerifiedAt?: Date | null;
+  } | null | undefined,
 ): AccountMePayload {
   if (!user) return { ...GUEST_ACCOUNT_PAYLOAD };
   return {
     authenticated: true,
     robloxUsername: user.robloxUsername,
+    selectedRobloxAccountId: user.selectedRobloxAccountId ?? null,
+    robloxAccounts: user.robloxAccounts ? [...user.robloxAccounts] : [],
     email: user.email ?? null,
     emailVerified: user.emailVerifiedAt instanceof Date,
   };

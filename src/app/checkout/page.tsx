@@ -7,9 +7,13 @@ import { useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
+  BadgeCheck,
   Check,
   CircleAlert,
+  Gamepad2,
   Loader2,
+  Plus,
+  ReceiptText,
   Search,
   ShieldCheck,
   UserRound,
@@ -59,6 +63,18 @@ type RobloxAccount = {
   avatarUrl?: string | null;
 };
 
+type KnownRobloxAccount = {
+  accountId: string;
+  username: string;
+  displayName: string;
+  avatarUrl: string | null;
+  source: "ORDER_HISTORY" | "MANUAL";
+  orderCount: number;
+  selected: boolean;
+};
+
+type CustomerRobloxProfileLike = KnownRobloxAccount;
+
 const normalizeAmount = (value: string) => Math.min(MAX_ROBUX, Math.max(MIN_ROBUX, Number.parseInt(value, 10) || 1000));
 const grossPassPrice = (amount: number) => Math.ceil(amount / 0.7);
 
@@ -66,6 +82,7 @@ function CheckoutContent() {
   const searchParams = useSearchParams();
   const initialAmount = normalizeAmount(searchParams.get("amount") ?? "1000");
   const rememberedUsername = searchParams.get("username")?.trim() ?? "";
+  const rememberedAccountId = searchParams.get("accountId")?.trim() ?? "";
   const rememberedGamepassId = searchParams.get("gamepassId")?.trim() ?? "";
   const { loading: priceLoading, getPrice, getBreakdown } = usePricing();
 
@@ -86,6 +103,10 @@ function CheckoutContent() {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [paying, setPaying] = useState(false);
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const [knownAccounts, setKnownAccounts] = useState<KnownRobloxAccount[]>([]);
+  const [selectedKnownAccountId, setSelectedKnownAccountId] = useState(rememberedAccountId);
+  const [manualAccountMode, setManualAccountMode] = useState(false);
+  const [profileBusy, setProfileBusy] = useState(false);
   const [acquiringEnabled, setAcquiringEnabled] = useState(false);
   // F3: принимает ли оплату САЙТ (не зависит от аккаунта). `acquiringEnabled` —
   // про конкретного пользователя, и для гостя он всегда false.
@@ -100,8 +121,16 @@ function CheckoutContent() {
     setQuote(null);
     setError("");
     const nextPassPrice = grossPassPrice(normalized);
-    setGamepasses((current) => rankSellableGamepasses(current, nextPassPrice));
-    setSelectedPass((current) => current && gamepassPriceMatches(Number(current.price), nextPassPrice) ? current : null);
+    const ranked = rankSellableGamepasses(gamepasses, nextPassPrice);
+    const repeatBuyer = authenticated === true && knownAccounts.length > 0;
+    const nextSelected = selectedPass && gamepassPriceMatches(Number(selectedPass.price), nextPassPrice)
+      ? selectedPass
+      : repeatBuyer
+        ? ranked.find((pass) => gamepassPriceMatches(Number(pass.price), nextPassPrice)) ?? null
+        : null;
+    setGamepasses(ranked);
+    setSelectedPass(nextSelected);
+    setQuoteLoading(Boolean(repeatBuyer && nextSelected));
   };
 
   const handleAmountInput = (value: string) => {
@@ -117,8 +146,15 @@ function CheckoutContent() {
   const breakdown = getBreakdown(robux);
   const expectedPassPrice = useMemo(() => grossPassPrice(robux), [robux]);
   const selectedPriceMatches = !!selectedPass && gamepassPriceMatches(Number(selectedPass.price), expectedPassPrice);
+  const repeatBuyerFlow = authenticated === true && knownAccounts.length > 0;
+  const quickQuoteLoading = repeatBuyerFlow && quoteLoading;
+  const selectedKnownAccount = knownAccounts.find((item) => item.accountId === selectedKnownAccountId)
+    ?? knownAccounts.find((item) => item.selected)
+    ?? knownAccounts[0]
+    ?? null;
   const checkoutReturnPath = (() => {
     const params = new URLSearchParams({ amount: String(robux) });
+    if (selectedKnownAccountId) params.set("accountId", selectedKnownAccountId);
     if (username || searchQuery.trim()) params.set("username", username || searchQuery.trim());
     if (selectedPass?.id) params.set("gamepassId", String(selectedPass.id));
     return `/checkout?${params.toString()}`;
@@ -126,13 +162,15 @@ function CheckoutContent() {
   const loginHref = `/login?next=${encodeURIComponent(checkoutReturnPath)}`;
   const registerHref = `/register?next=${encodeURIComponent(checkoutReturnPath)}`;
 
-  const lookupUsername = async (nick: string, silent = false) => {
+  const lookupUsername = async (nick: string, silent = false, autoSelectMatching = false) => {
     const normalized = nick.trim();
     if (!normalized) return;
     setSearching(true);
     setError("");
     setGamepasses([]);
     setSelectedPass(null);
+    setQuote(null);
+    setQuoteLoading(false);
     setAccount(null);
     try {
       const res = await fetch(`/api/roblox/gamepasses?query=${encodeURIComponent(normalized)}`);
@@ -158,8 +196,13 @@ function CheckoutContent() {
         setGamepasses(ranked);
         const remembered = rememberedGamepassId ? ranked.find((pass) => String(pass.id) === rememberedGamepassId) : null;
         const matching = ranked.filter((pass) => gamepassPriceMatches(Number(pass.price), expectedPassPrice));
-        if (remembered) setSelectedPass(remembered);
-        else if (matching.length === 1) setSelectedPass(matching[0]);
+        if (remembered) {
+          setSelectedPass(remembered);
+          if (autoSelectMatching && gamepassPriceMatches(Number(remembered.price), expectedPassPrice)) setQuoteLoading(true);
+        } else if (matching.length === 1 || (autoSelectMatching && matching.length > 0)) {
+          setSelectedPass(matching[0]);
+          if (autoSelectMatching) setQuoteLoading(true);
+        }
         if (ranked.length === 0) {
           setError(data.userExists === false
             ? "Такого пользователя Roblox не нашли. Проверь ник."
@@ -185,22 +228,29 @@ function CheckoutContent() {
         setAccountEmail(data?.email ?? null);
         setAccountEmailVerified(data?.emailVerified === true);
         if (data?.email) setReceiptEmail((current) => current || data.email);
-        if (!rememberedUsername && data?.robloxUsername) {
-          setSearchQuery(data.robloxUsername);
-          setUsername(data.robloxUsername);
+        const accounts = Array.isArray(data?.robloxAccounts) ? data.robloxAccounts as KnownRobloxAccount[] : [];
+        setKnownAccounts(accounts);
+        const selected = accounts.find((item) => item.accountId === rememberedAccountId)
+          ?? accounts.find((item) => item.username.toLowerCase() === rememberedUsername.toLowerCase())
+          ?? accounts.find((item) => item.selected)
+          ?? accounts[0];
+        if (selected) {
+          setSelectedKnownAccountId(selected.accountId);
+          setSearchQuery(selected.username);
+          setUsername(selected.username);
+          setManualAccountMode(false);
+          void lookupUsername(selected.username, true, true);
+        } else if (rememberedUsername) {
+          void lookupUsername(rememberedUsername, true);
         }
       })
       .catch(() => setAuthenticated(false));
-    const timer = rememberedUsername
-      ? window.setTimeout(() => void lookupUsername(rememberedUsername, true), 0)
-      : null;
     return () => {
       active = false;
-      if (timer !== null) window.clearTimeout(timer);
     };
-    // The URL-derived identity is the only value that should auto-run.
+    // Account defaults are private request-time data returned by /api/account/me.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rememberedUsername]);
+  }, [rememberedAccountId, rememberedUsername]);
 
   useEffect(() => {
     let active = true;
@@ -221,6 +271,35 @@ function CheckoutContent() {
       });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (!repeatBuyerFlow || !selectedPass || !selectedPriceMatches) return;
+    const controller = new AbortController();
+    fetch("/api/pricing/quote", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amountRobux: robux }),
+      signal: controller.signal,
+    })
+      .then(async (response) => ({ response, body: await response.json().catch(() => ({})) }))
+      .then(({ response, body }) => {
+        if (!response.ok) throw new Error(body.error || "quote failed");
+        if (!gamepassPriceMatches(Number(selectedPass.price), body.gamepassPriceRobux)) {
+          throw new Error("Цена геймпасса больше не совпадает с заказом.");
+        }
+        setQuote(body);
+      })
+      .catch((quoteError) => {
+        if (controller.signal.aborted) return;
+        setError(quoteError instanceof Error && quoteError.message !== "quote failed"
+          ? quoteError.message
+          : "Не удалось зафиксировать цену. Попробуй ещё раз.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setQuoteLoading(false);
+      });
+    return () => controller.abort();
+  }, [repeatBuyerFlow, robux, selectedPass, selectedPriceMatches]);
 
   const isDirectQuery = (value: string) => {
     const query = value.trim();
@@ -258,9 +337,79 @@ function CheckoutContent() {
     }
   };
 
+  const applyProfilePayload = (body: { profile?: CustomerRobloxProfileLike | null; accounts?: CustomerRobloxProfileLike[] }) => {
+    const accounts = (body.accounts ?? []).map((item) => ({
+      accountId: item.accountId,
+      username: item.username,
+      displayName: item.displayName,
+      avatarUrl: item.avatarUrl,
+      source: item.source,
+      orderCount: item.orderCount,
+      selected: item.selected,
+    } satisfies KnownRobloxAccount));
+    setKnownAccounts(accounts);
+    if (body.profile) setSelectedKnownAccountId(body.profile.accountId);
+    return body.profile ?? null;
+  };
+
+  const chooseKnownAccount = async (item: KnownRobloxAccount) => {
+    if (profileBusy || item.accountId === selectedKnownAccountId) return;
+    setProfileBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/account/roblox-profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "select", accountId: item.accountId }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body.profile) throw new Error("select failed");
+      const selected = applyProfilePayload(body);
+      const nick = selected?.username ?? item.username;
+      setUsername(nick);
+      setSearchQuery(nick);
+      setManualAccountMode(false);
+      await lookupUsername(nick, true, true);
+    } catch {
+      setError("Не удалось выбрать Roblox-аккаунт. Попробуй ещё раз.");
+    } finally {
+      setProfileBusy(false);
+    }
+  };
+
+  const addManualRobloxAccount = async () => {
+    const nick = searchQuery.trim();
+    if (!nick || profileBusy) return;
+    setProfileBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/account/roblox-profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: nick }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body.profile) {
+        setError(body.error || "Не удалось добавить Roblox-аккаунт.");
+        return;
+      }
+      const selected = applyProfilePayload(body);
+      const canonical = selected?.username ?? nick;
+      setUsername(canonical);
+      setSearchQuery(canonical);
+      setManualAccountMode(false);
+      await lookupUsername(canonical, true, true);
+    } catch {
+      setError("Не удалось добавить Roblox-аккаунт. Проверь соединение.");
+    } finally {
+      setProfileBusy(false);
+    }
+  };
+
   const selectPass = (pass: RobloxPass) => {
     const availableRobux = robuxForGamepassPrice(Number(pass.price));
     setError("");
+    setQuote(null);
     if (availableRobux && availableRobux !== robux) setOrderAmount(availableRobux);
     setSelectedPass(pass);
   };
@@ -361,18 +510,22 @@ function CheckoutContent() {
       <div className={styles.progressHeader}>
         <div>
           <span className={styles.kicker}>Покупка на сайте</span>
-          <h1>{stage === "select" ? "Твои геймпассы" : "Проверь заказ"}</h1>
+          <h1>{stage === "select" ? repeatBuyerFlow ? "Купить Robux" : "Твои геймпассы" : "Проверь заказ"}</h1>
           <p>{stage === "select"
-            ? "По нику сразу покажем все геймпассы на продажу и поднимем готовые по цене наверх."
+            ? repeatBuyerFlow
+              ? "Аккаунт и email уже выбраны. Укажи количество — подходящий геймпасс найдём сами."
+              : "По нику сразу покажем все геймпассы на продажу и поднимем готовые по цене наверх."
             : !authenticated
               ? "Выбор сохранён. Перед оплатой войди или создай аккаунт — заказ появится в личном кабинете."
             : acquiringEnabled
               ? "Цена зафиксирована. Осталось указать email и перейти к оплате."
               : "Цена зафиксирована, но оплата пока недоступна для этого аккаунта."}</p>
         </div>
-        <div className={styles.stageIndicator} aria-label={`Шаг ${stage === "select" ? 1 : authenticated ? 3 : 2} из 3`}>
-          <span className={styles.stageActive}>1</span><i /><span className={stage === "confirm" ? styles.stageActive : ""}>2</span><i /><span className={stage === "confirm" && authenticated ? styles.stageActive : ""}>3</span>
-        </div>
+        {repeatBuyerFlow && stage === "select"
+          ? <span className={styles.quickModeBadge}><BadgeCheck size={17} /> Быстрая покупка</span>
+          : <div className={styles.stageIndicator} aria-label={`Шаг ${stage === "select" ? 1 : authenticated ? 3 : 2} из 3`}>
+              <span className={styles.stageActive}>1</span><i /><span className={stage === "confirm" ? styles.stageActive : ""}>2</span><i /><span className={stage === "confirm" && authenticated ? styles.stageActive : ""}>3</span>
+            </div>}
       </div>
 
       {stage === "select" && !authenticated && (
@@ -397,7 +550,127 @@ function CheckoutContent() {
         </div>
       )}
 
-      {stage === "select" ? (
+      {stage === "select" && repeatBuyerFlow ? (
+        <div className={styles.quickCheckoutGrid}>
+          <section className={`${styles.panel} ${styles.quickPanel}`}>
+            <div className={styles.quickProfileHead}>
+              <span className={styles.quickAvatar}>
+                {(account?.avatarUrl || selectedKnownAccount?.avatarUrl)
+                  ? <Image src={(account?.avatarUrl || selectedKnownAccount?.avatarUrl)!} width={84} height={84} alt={`Аватар ${username}`} />
+                  : <UserRound size={31} />}
+              </span>
+              <div>
+                <span className={styles.quickVerified}><BadgeCheck size={15} /> {selectedKnownAccount?.source === "ORDER_HISTORY" ? "Подтверждён заказом" : "Добавлен вручную"}</span>
+                <h2>{account?.displayName || selectedKnownAccount?.displayName || username}</h2>
+                <p>@{username}</p>
+              </div>
+            </div>
+
+            {knownAccounts.length > 1 && (
+              <div className={styles.quickAccounts} aria-label="Выбрать Roblox-аккаунт">
+                {knownAccounts.map((item) => (
+                  <button
+                    key={item.accountId}
+                    type="button"
+                    className={item.accountId === selectedKnownAccountId ? styles.quickAccountActive : styles.quickAccount}
+                    onClick={() => void chooseKnownAccount(item)}
+                    disabled={profileBusy}
+                    aria-pressed={item.accountId === selectedKnownAccountId}
+                  >
+                    {item.avatarUrl ? <Image src={item.avatarUrl} width={30} height={30} alt="" /> : <UserRound size={16} />}
+                    <span><strong>{item.displayName}</strong><small>@{item.username}</small></span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {manualAccountMode ? (
+              <div className={styles.quickAddAccount}>
+                <label className={styles.amountLabel} htmlFor="quick-new-username">Новый ник Roblox</label>
+                <div className={styles.searchRow}>
+                  <div className={styles.searchField}><Search size={18} /><input id="quick-new-username" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void addManualRobloxAccount(); }} placeholder="Например, Builderman" /></div>
+                  <button type="button" onClick={() => void addManualRobloxAccount()} disabled={profileBusy || searchQuery.trim().length < 3}>{profileBusy ? <Loader2 size={18} className={styles.spin} /> : <Plus size={18} />} Добавить</button>
+                </div>
+                <button type="button" className={styles.quickTextButton} onClick={() => { setManualAccountMode(false); setSearchQuery(username); setError(""); }}>Отмена</button>
+              </div>
+            ) : (
+              <button type="button" className={styles.quickTextButton} onClick={() => { setManualAccountMode(true); setSearchQuery(""); setError(""); }}><Plus size={15} /> Добавить другой ник</button>
+            )}
+
+            <div className={styles.quickAmount}>
+              <label className={styles.amountLabel} htmlFor="checkout-amount">Сколько получишь</label>
+              <div className={styles.amountField}>
+                <input
+                  id="checkout-amount"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={amountInput}
+                  onChange={(event) => handleAmountInput(event.target.value)}
+                  onBlur={() => setOrderAmount(Number.parseInt(amountInput, 10) || robux)}
+                  onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+                  aria-describedby="checkout-amount-note"
+                />
+                <span>R$</span>
+              </div>
+              <div className={styles.amountPresets} aria-label="Быстрый выбор количества Robux">
+                {AMOUNT_PRESETS.map((amount) => (
+                  <button key={amount} type="button" className={robux === amount ? styles.amountPresetActive : styles.amountPreset} onClick={() => setOrderAmount(amount)}>
+                    {robux === amount && <Check size={14} />} {amount.toLocaleString("ru-RU")}
+                  </button>
+                ))}
+              </div>
+              <p id="checkout-amount-note" className={styles.helper}>Можно указать любое количество от {MIN_ROBUX.toLocaleString("ru-RU")} до {MAX_ROBUX.toLocaleString("ru-RU")} R$.</p>
+            </div>
+
+            <div className={selectedPass && selectedPriceMatches ? styles.quickReady : styles.quickWaiting} role="status">
+              {searching ? <Loader2 size={21} className={styles.spin} /> : selectedPass && selectedPriceMatches ? <Check size={21} /> : <Gamepad2 size={21} />}
+              <span>
+                <strong>{searching ? "Ищем подходящий геймпасс…" : selectedPass && selectedPriceMatches ? "Геймпасс выбран автоматически" : "Подходящий геймпасс пока не найден"}</strong>
+                <small>{selectedPass && selectedPriceMatches ? `${selectedPass.name} · ${Number(selectedPass.price).toLocaleString("ru-RU")} R$` : "Создай геймпасс по инструкции — повторно вводить ник не потребуется."}</small>
+              </span>
+              {!searching && (!selectedPass || !selectedPriceMatches) && <Link href={`/guide?source=site&amount=${robux}&username=${encodeURIComponent(username)}`}>Инструкция</Link>}
+            </div>
+
+            <div className={styles.quickReceipt}>
+              <ReceiptText size={19} />
+              <span>
+                <strong>{accountEmail ? "Email для чека взят из личного кабинета" : "В личном кабинете нет email для чека"}</strong>
+                {accountEmail
+                  ? <small>{accountEmail}{!accountEmailVerified ? " · адрес ещё не подтверждён" : ""}</small>
+                  : <input className={styles.quickEmailInput} type="email" inputMode="email" autoComplete="email" value={receiptEmail} onChange={(event) => setReceiptEmail(event.target.value)} placeholder="Email для электронного чека" aria-label="Email для электронного чека" />}
+              </span>
+            </div>
+
+            <label className={styles.consentBox}>
+              <Checkbox checked={agreedToTerms} onChange={(event) => setAgreedToTerms(event.target.checked)} />
+              <span>Я согласен с <Link href="/legal/offer" target="_blank">офертой</Link> и <Link href="/legal/policy" target="_blank">политикой конфиденциальности</Link>.</span>
+            </label>
+            {error && <div className={styles.errorBox} role="alert"><CircleAlert size={20} /><span>{error}</span></div>}
+          </section>
+
+          <aside className={styles.summaryCard}>
+            <span className={styles.kicker}>К оплате</span>
+            <h2>{quote ? `${(quote.finalAmountKopecks / 100).toLocaleString("ru-RU")} ₽` : priceLoading || quickQuoteLoading ? "…" : `${price.toLocaleString("ru-RU")} ₽`}</h2>
+            <div className={styles.summaryRows}>
+              <div><span>Получишь</span><strong>{robux.toLocaleString("ru-RU")} R$</strong></div>
+              <div><span>Аккаунт</span><strong>@{username}</strong></div>
+              <div><span>Цена геймпасса</span><strong>{expectedPassPrice.toLocaleString("ru-RU")} R$</strong></div>
+              {!!quote?.discountKopecks && <div><span>Скидка</span><strong>−{(quote.discountKopecks / 100).toLocaleString("ru-RU")} ₽</strong></div>}
+            </div>
+            <div className={styles.safeNote}><ShieldCheck size={19} /><span><strong>{quote ? "Цена зафиксирована" : "Готовим точную цену"}</strong><small>Пароль Roblox не нужен.</small></span></div>
+            <button
+              type="button"
+              className={styles.primaryButton}
+              disabled={paying || quickQuoteLoading || !quote || !selectedPass || !selectedPriceMatches || !agreedToTerms || !receiptEmail || !acquiringEnabled}
+              onClick={() => void handlePay()}
+            >
+              {paying || quickQuoteLoading ? <Loader2 size={19} className={styles.spin} /> : acquiringEnabled ? <>Перейти к оплате <ArrowRight size={18} /></> : <>Оплата пока недоступна</>}
+            </button>
+            <PaymentMethods className={styles.paymentMethods} statusTone={!acquiringAccepting ? "closed" : !acquiringEnabled ? "limited" : undefined} />
+          </aside>
+        </div>
+      ) : stage === "select" ? (
         <div className={styles.checkoutGrid}>
           <section className={styles.mainColumn}>
             <div className={styles.panel}>

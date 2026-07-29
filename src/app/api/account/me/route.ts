@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { accountMePayload } from "@/lib/account-session";
 import { prisma } from "@/lib/prisma";
+import { loadCustomerRobloxProfile } from "@/lib/roblox-profile";
 
 export const dynamic = "force-dynamic";
 
@@ -15,20 +16,26 @@ export async function GET() {
     return NextResponse.json(accountMePayload(null), { headers: PRIVATE });
   }
 
-  const [user, recentOrder] = await Promise.all([
+  const [user, roblox] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
-      select: { robloxUsername: true, email: true, emailVerifiedAt: true },
+      select: { email: true, emailVerifiedAt: true },
     }),
-    prisma.wbOrder.findFirst({
-      where: { userId, robloxUsername: { not: null } },
-      orderBy: { createdAt: "desc" },
-      select: { robloxUsername: true },
-    }),
+    loadCustomerRobloxProfile(userId),
   ]);
 
   return NextResponse.json(accountMePayload({
-    robloxUsername: user?.robloxUsername ?? recentOrder?.robloxUsername ?? null,
+    robloxUsername: roblox.profile?.username ?? null,
+    selectedRobloxAccountId: roblox.profile?.accountId ?? null,
+    robloxAccounts: roblox.accounts.map((account) => ({
+      accountId: account.accountId,
+      username: account.username,
+      displayName: account.displayName,
+      avatarUrl: account.avatarUrl,
+      source: account.source,
+      orderCount: account.orderCount,
+      selected: account.selected,
+    })),
     email: user?.email ?? null,
     emailVerifiedAt: user?.emailVerifiedAt ?? null,
   }), { headers: PRIVATE });

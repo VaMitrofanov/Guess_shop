@@ -3,9 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import {
+  addCustomerRobloxAccount,
   disconnectCustomerRobloxProfile,
   loadCustomerRobloxProfile,
-  refreshCustomerRobloxProfile,
+  selectCustomerRobloxAccount,
 } from "@/lib/roblox-profile";
 
 export const dynamic = "force-dynamic";
@@ -31,8 +32,16 @@ export async function PATCH(req: NextRequest) {
   if (!limited.ok) return NextResponse.json({ error: "Слишком много попыток. Попробуйте позже." }, { status: 429, headers: { ...PRIVATE, "retry-after": String(limited.retryAfter) } });
 
   const body = await req.json().catch(() => ({}));
+  if (body.action === "select") {
+    const accountId = typeof body.accountId === "string" ? body.accountId : "";
+    const result = await selectCustomerRobloxAccount(userId, accountId);
+    if (result.status === "not-found") {
+      return NextResponse.json({ error: "Roblox-аккаунт не найден" }, { status: 404, headers: PRIVATE });
+    }
+    return NextResponse.json(result, { headers: PRIVATE });
+  }
   const username = typeof body.username === "string" ? body.username : "";
-  const result = await refreshCustomerRobloxProfile(userId, username);
+  const result = await addCustomerRobloxAccount(userId, username);
   if (result.status === "not-found" || result.status === "missing-username") {
     return NextResponse.json({ error: "Пользователь Roblox не найден" }, { status: 404, headers: PRIVATE });
   }
@@ -44,6 +53,7 @@ export async function DELETE(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: PRIVATE });
   const limited = rateLimit(`account-roblox-disconnect:${userId}:${clientIp(req)}`, 5, 1 / 60);
   if (!limited.ok) return NextResponse.json({ error: "Слишком много попыток. Попробуйте позже." }, { status: 429, headers: { ...PRIVATE, "retry-after": String(limited.retryAfter) } });
-  await disconnectCustomerRobloxProfile(userId);
-  return NextResponse.json({ ok: true }, { headers: PRIVATE });
+  const body = await req.json().catch(() => ({}));
+  const accountId = typeof body.accountId === "string" ? body.accountId : null;
+  return NextResponse.json(await disconnectCustomerRobloxProfile(userId, accountId), { headers: PRIVATE });
 }

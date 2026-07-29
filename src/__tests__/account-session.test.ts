@@ -5,6 +5,8 @@ describe("public session probe", () => {
     expect(accountMePayload(null)).toEqual({
       authenticated: false,
       robloxUsername: null,
+      selectedRobloxAccountId: null,
+      robloxAccounts: [],
       email: null,
       emailVerified: false,
     });
@@ -24,6 +26,8 @@ describe("public session probe", () => {
     })).toEqual({
       authenticated: true,
       robloxUsername: "KrytishVadim4ick",
+      selectedRobloxAccountId: null,
+      robloxAccounts: [],
       email: "owner@example.com",
       emailVerified: true,
     });
@@ -33,6 +37,8 @@ describe("public session probe", () => {
     expect(accountMePayload({ robloxUsername: null })).toEqual({
       authenticated: true,
       robloxUsername: null,
+      selectedRobloxAccountId: null,
+      robloxAccounts: [],
       email: null,
       emailVerified: false,
     });
@@ -42,5 +48,25 @@ describe("public session probe", () => {
     const payload = accountMePayload(null);
     payload.robloxUsername = "leaked";
     expect(GUEST_ACCOUNT_PAYLOAD.robloxUsername).toBeNull();
+  });
+
+  test("returns only the account summaries supplied by the private owner lookup", () => {
+    const accounts = [{
+      accountId: "rba-1",
+      username: "Builderman",
+      displayName: "Builderman",
+      avatarUrl: null,
+      source: "ORDER_HISTORY" as const,
+      orderCount: 2,
+      selected: true,
+    }];
+    expect(accountMePayload({
+      robloxUsername: "Builderman",
+      selectedRobloxAccountId: "rba-1",
+      robloxAccounts: accounts,
+    })).toEqual(expect.objectContaining({
+      selectedRobloxAccountId: "rba-1",
+      robloxAccounts: accounts,
+    }));
   });
 });

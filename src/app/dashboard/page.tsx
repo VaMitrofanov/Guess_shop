@@ -122,7 +122,6 @@ function orderHref(order: DashboardOrder) {
 
 async function RobloxProfileSection({
   userId,
-  username,
   fallbackName,
   bonusAmount,
   bonusCaption,
@@ -130,14 +129,13 @@ async function RobloxProfileSection({
   activeOrderHref,
 }: {
   userId: string;
-  username: string | null;
   fallbackName: string;
   bonusAmount: number;
   bonusCaption: string;
   isAdmin: boolean;
   activeOrderHref: string | null;
 }) {
-  const initial = await loadCustomerRobloxProfile(userId, username);
+  const initial = await loadCustomerRobloxProfile(userId);
   return (
     <CustomerRobloxProfileCard
       initial={initial}
@@ -169,7 +167,6 @@ export default async function DashboardPage() {
         createdAt: true,
         balance: true,
         bonusExpiresAt: true,
-        robloxUsername: true,
         identities: {
           orderBy: { verifiedAt: "asc" },
           // `subject` нужен, чтобы определить админа тем же правилом, что и гейт
@@ -227,10 +224,6 @@ export default async function DashboardPage() {
     })),
   ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, 50);
 
-  // Historical orders can contain the customer's confirmed Roblox nick even
-  // when the profile field was never backfilled. Use that own order data as a
-  // checkout default, without changing a profile nick the customer already set.
-  const knownRobloxUsername = user.robloxUsername ?? orders.find((order) => order.customer)?.customer ?? null;
   const linkedProviders = user.identities.map((identity) => identity.provider);
   const identityNames = new Map(user.identities.map((identity) => [identity.provider, identity]));
   const bonusActive = user.balance > 0 && (!user.bonusExpiresAt || user.bonusExpiresAt > new Date());
@@ -246,8 +239,11 @@ export default async function DashboardPage() {
   });
   const completedCount = orders.filter((order) => customerOrderStatus(order.kind, order.status).completed).length;
   const activeCount = orders.filter((order) => customerOrderStatus(order.kind, order.status).active).length;
-  const greetingName = knownRobloxUsername ?? user.name ?? user.email?.split("@")[0] ?? "друг";
-  const checkoutHref = knownRobloxUsername ? `/checkout?username=${encodeURIComponent(knownRobloxUsername)}` : "/checkout";
+  const greetingName = user.name ?? user.email?.split("@")[0] ?? "друг";
+  // The checkout API chooses the latest eligible account from the signed-in
+  // user's projection. A generic link cannot accidentally prefill an unpaid
+  // historical draft.
+  const checkoutHref = "/checkout";
   const latestActive = orders.find((order) => customerOrderStatus(order.kind, order.status).active);
   const latestActiveProgress = latestActive ? customerOrderProgress(latestActive.kind, latestActive.status) : 0;
   const latestActiveHref = latestActive?.status === "AWAITING_GAMEPASS"
@@ -273,7 +269,6 @@ export default async function DashboardPage() {
           <Suspense fallback={<div className={styles.robloxHeroLoading}>Загружаем Roblox-профиль…</div>}>
             <RobloxProfileSection
               userId={user.id}
-              username={knownRobloxUsername}
               fallbackName={greetingName}
               bonusAmount={bonusAmount}
               bonusCaption={bonusCaption}
@@ -414,7 +409,7 @@ export default async function DashboardPage() {
             </section>
 
             <nav className={styles.quickLinks} aria-label="Быстрые действия">
-              <Link href={checkoutHref}><ShoppingCart size={18} /><span><strong>Новый заказ</strong><small>{knownRobloxUsername ? "Ник уже подставлен" : "Укажи ник при оформлении"}</small></span><ChevronRight size={17} /></Link>
+              <Link href={checkoutHref}><ShoppingCart size={18} /><span><strong>Новый заказ</strong><small>Аккаунт выберется автоматически</small></span><ChevronRight size={17} /></Link>
               <Link href="/guide?source=site&amount=1000"><Gamepad2 size={18} /><span><strong>Инструкция</strong><small>Создать геймпасс</small></span><ChevronRight size={17} /></Link>
               <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer"><Bell size={18} /><span><strong>Поддержка</strong><small>Живой менеджер</small></span><ExternalLink size={16} /></a>
               {isAdmin && (

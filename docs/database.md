@@ -204,10 +204,16 @@ robloxUsername, userId+createdAt).
   по мере следующего контакта, без слепого массового повышения доверия. Email-регистрация создаёт
   `User` и `UserIdentity(EMAIL)` в одной транзакции; VK web-login сначала ищет эту таблицу,
   затем legacy `vkId`.
-- `User.robloxUsername` — подтверждённый ник клиента. При migration пустое поле заполняется
-  только последним непустым `WbOrder.robloxUsername` того же `userId`; существующее значение
-  никогда не перезаписывается. Ник не является доказательством личности и не используется
-  для account merge.
+- `UserRobloxAccount` — one-to-many проекция Roblox-аккаунтов клиента. Уникальность
+  `(userId, usernameNormalized)` не объединяет разных пользователей; `source` различает
+  `ORDER_HISTORY` и `MANUAL`, `orderCount/firstOrderAt/lastOrderAt` хранят основание,
+  `selectedAt` — выбор, `hiddenAt` — мягкое скрытие. Автопроекция принимает только собственные
+  non-test `WbOrder` с `paidAt IS NOT NULL` или `COMPLETED`; новый заказ после `hiddenAt`
+  возвращает ник в список.
+- `User.roblox*` — совместимое зеркало выбранной `UserRobloxAccount`, а не самостоятельный
+  источник доверия. Migration импортирует старую запись как `MANUAL` только если уже были
+  `robloxUserId` и `robloxProfileSyncedAt`; старый ник от неоплаченного draft исключён.
+  Любой ник не является доказательством личности и не используется для account merge.
 - `BonusLedger` — append-only журнал изменения R$-бонусов. `User.balance` остаётся быстрым
   итогом; migration записывает текущий ненулевой balance как одну opening-строку с
   idempotency key. Новые начисления/списания должны писать обе сущности в одной транзакции.

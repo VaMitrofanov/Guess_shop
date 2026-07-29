@@ -46,15 +46,25 @@ VK link/unlink и recovery-console остаются следующими инк�
 а refund имеет отдельный идемпотентный audit. Production Init закрыт kill-switch до внешних
 launch-gates. ЛК читает `WbOrder` всех источников (legacy-таблица `Order` удалена 26.07),
 bonus balance и предлагает TG link только внутри fresh-auth window.
-ЛК также умеет привязать публичный Roblox-профиль: `User.robloxUserId` — стабильный ключ,
+ЛК хранит несколько публичных Roblox-профилей в `UserRobloxAccount`; поля Roblox на `User`
+остаются совместимым зеркалом выбранной записи. Список проектируется только из собственных
+non-test `WbOrder` с `paidAt` или `COMPLETED`, либо пополняется отдельным ручным действием.
+`probableNick`, чужие заказы и неоплаченные checkout-draft не участвуют. Stable Roblox user ID,
 username/display name/описание/дата/аватар кэшируются на 24 часа и обновляются через
-официальные публичные Users/Thumbnails API. Привязка показывает найденный публичный профиль,
-но не доказывает владение аккаунтом; пароль и `.ROBLOSECURITY` посетителя не запрашиваются.
-С 30.07 подтверждённый профиль является главным hero ЛК: avatar/display name и CTA
+официальные публичные Users/Thumbnails API. Связь с заказом показывает только факт прошлой
+покупки и не доказывает владение аккаунтом; пароль и `.ROBLOSECURITY` посетителя не запрашиваются.
+С 30.07 выбранный профиль является главным hero ЛК: avatar/display name и CTA
 «Купить на этот аккаунт» находятся наверху, бонусы живут компактно в той же карте, а
-дублирующая боковая Roblox-карточка удалена. Ник из исторического заказа только предзаполняет
-редактор: без действия пользователя он не запрашивается у Roblox, не сохраняется как профиль
-и не перепривязывается после unlink.
+дублирующая боковая Roblox-карточка удалена. Последний использованный аккаунт выбирается
+автоматически, при нескольких показывается компактный переключатель, новый ник добавляется
+отдельно. Скрытая запись не возвращается до нового подходящего заказа по этому нику. Внешний
+переход подписан «Открыть в Roblox» и явно обозначен как официальный профиль Roblox.
+
+Для авторизованного повторного покупателя `/checkout` читает приватную проекцию через
+`/api/account/me`, автоматически выбирает аккаунт и подходящий по gross-цене for-sale pass.
+Email чека берётся из ЛК; основной экран оставляет сумму, согласие и один CTA оплаты. Для
+гостей и аккаунтов без истории сохранён прежний search-first flow. Серверная проверка quote,
+owner/sale-state/цены перед созданием заказа не ослаблена.
 
 ## B2B-направление (TWA + desktop Control Center)
 
@@ -83,7 +93,7 @@ src/
   app/
     guide/GuideClient.tsx        роутер WB/SITE/BOT (intro / gate / shared instruction)
     guide/WBInstructionV2.tsx    единая 9-шаговая инструкция; channel-specific amount/CTA
-    checkout/page.tsx            search-first: все пассы по нику → quote → оплата
+    checkout/page.tsx            repeat-buyer fast flow + гостевой search-first checkout
     checkout/checkout.module.css rounded Violet/Frost UI checkout без legacy pixel-card
     guide/page.tsx               серверная обёртка гейта (query-флаги: skip/code/test/preview)
     api/wb-code/route.ts         резерв/статус кода (POST reserve, GET status)

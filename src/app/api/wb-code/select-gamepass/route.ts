@@ -145,9 +145,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, alreadyOrdered: true });
     }
 
-    try { await prisma.user.update({ where: { id: wbCode.userId }, data: { robloxUsername: nick } }); } catch {}
-
-
     // ── 4. Fire the admin card (non-blocking failure) ─────────────────────────
     try {
       const order = result.order;

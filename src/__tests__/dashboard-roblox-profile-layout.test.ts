@@ -19,8 +19,15 @@ describe("dashboard Roblox-first hero", () => {
 
   it("keeps profile purchase and compact bonus actions in one component", () => {
     expect(profile).toContain("Купить на этот аккаунт");
+    expect(profile).toContain("Открыть в Roblox");
+    expect(profile).toContain("Официальный профиль Roblox");
+    expect(profile).not.toContain("Открыть профиль <ExternalLink");
     expect(profile).toContain("styles.robloxBonusCompact");
     expect(profile).toContain("styles.robloxHeroAvatar");
+    expect(profile).toContain("Подтверждён заказом");
+    expect(profile).toContain("Это не проверка владения аккаунтом");
+    expect(profile).toContain("styles.robloxAccountSwitcher");
+    expect(profile).toContain("Добавить ник");
   });
 
   it("protects long Roblox names from horizontal overflow on mobile", () => {

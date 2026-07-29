@@ -53,10 +53,40 @@ model User {
   priceQuotes          PriceQuote[]
   emailActionTokens    EmailActionToken[]
   consentEvidences     ConsentEvidence[]
+  robloxAccounts       UserRobloxAccount[]
   mergeSources         AccountMergeAudit[] @relation("AccountMergeSource")
   mergeTargets         AccountMergeAudit[] @relation("AccountMergeTarget")
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
+}
+
+/// Roblox identities known to one RobloxBank customer. ORDER_HISTORY means
+/// the username appeared in this user's own paid or completed order; it is a
+/// checkout association, not cryptographic proof of Roblox ownership.
+model UserRobloxAccount {
+  id                     String              @id @default(cuid())
+  userId                 String
+  user                   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  robloxUserId           String?
+  username               String
+  usernameNormalized     String
+  displayName            String?
+  avatarUrl              String?
+  description            String?
+  accountCreatedAt       DateTime?
+  profileSyncedAt        DateTime?
+  source                 RobloxAccountSource
+  orderCount             Int                 @default(0)
+  firstOrderAt           DateTime?
+  lastOrderAt            DateTime?
+  selectedAt             DateTime?
+  hiddenAt               DateTime?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+
+  @@unique([userId, usernameNormalized])
+  @@index([userId, hiddenAt, selectedAt(sort: Desc)])
+  @@index([userId, robloxUserId])
 }
 
 enum EmailActionPurpose {
@@ -233,6 +263,11 @@ enum Platform {
   VK
   TG
   WEB
+}
+
+enum RobloxAccountSource {
+  ORDER_HISTORY
+  MANUAL
 }
 
 enum WbOrderStatus {
