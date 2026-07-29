@@ -26,6 +26,15 @@ model User {
   username             String?
   image                String?
   robloxUsername       String?
+  /// Public Roblox profile resolved server-side from robloxUsername. The ID is
+  /// stable across Roblox username changes; these fields are a stale-safe cache,
+  /// not proof that the visitor owns the Roblox account.
+  robloxUserId         String?
+  robloxDisplayName    String?
+  robloxAvatarUrl      String?
+  robloxDescription    String?
+  robloxAccountCreatedAt DateTime?
+  robloxProfileSyncedAt DateTime?
   balance              Int                 @default(0)
   bonusExpiresAt       DateTime?
   rubleDiscount        Int                 @default(0)
@@ -297,6 +306,20 @@ enum PartnerExternalSource {
   MANUAL
   GOOGLE_SHEETS
   XLSX_UPLOAD
+}
+
+/// Which Robux amount a partner's sale rate is quoted against.
+enum PartnerRateBasis {
+  DIRTY
+  NET
+}
+
+/// Provenance of the supplier cost pinned to a partner settlement.
+enum PartnerCostBasis {
+  ASSUMED
+  RATE
+  ACTUAL
+  MANUAL
 }
 
 /// WB withdrawal order: tracks gamepass link submissions from WB card buyers.
@@ -657,8 +680,13 @@ model Partner {
   notes                String?
   /// Money ledger currency for this partner. Anton uses USDT only.
   ledgerCurrency       String               @default("USDT")
-  /// Partner-specific buyout rate: USDT charged per 1000 dirty R$.
-  robuxRateUsdtPer1000 Float                @default(5.05)
+  /// Partner-specific sale rate in USDT per 1000 R$. `rateBasis` defines
+  /// whether it is quoted against the gross gamepass price or the net payout.
+  robuxRateUsdtPer1000 Float                @default(5.3)
+  /// Supplier rate paid by us for 1000 dirty R$.
+  purchaseRateUsdtPer1000 Float             @default(4.7)
+  rateBasis             PartnerRateBasis    @default(NET)
+  robloxFeePct          Float               @default(30)
   /// Google Sheets source config for future sync/write-back. Values are not
   /// secrets, but sheet URLs/IDs should still be treated as operational config.
   googleSheetId        String?
@@ -685,6 +713,11 @@ model PartnerRateChange {
   partner      Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
   rate         Float
   previousRate Float?
+  purchaseRate         Float?
+  previousPurchaseRate Float?
+  rateBasis            PartnerRateBasis?
+  previousRateBasis    PartnerRateBasis?
+  robloxFeePct         Float?
   createdBy    String?
   createdAt    DateTime @default(now())
 
@@ -740,6 +773,18 @@ model PartnerLedgerEntry {
   /// Rate (USDT per 1000 R$) the debit was computed with. Structured copy of what
   /// the comment says, so per-rate reports do not parse comment strings.
   rateUsdtPer1000     Float?
+  /// Immutable economics snapshot. Historical entries are backfilled as
+  /// ASSUMED and are never silently rewritten when the current policy changes.
+  purchaseRateUsdtPer1000 Float?
+  rateBasis            PartnerRateBasis?
+  costBasis            PartnerCostBasis?
+  robloxFeePct         Float?
+  grossRobuxAmount     Int?
+  netRobuxAmount       Int?
+  revenueUsdt          Float?
+  expectedRevenueUsdt  Float?
+  costUsdt             Float?
+  profitUsdt           Float?
   /// Dirty R$ amount behind a BUYOUT debit; survives task deletion (taskId SetNull).
   robuxAmount         Int?
   /// Donor/cookie account used for the buyout. Null means a manual/Sheets fact.

@@ -26,7 +26,7 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 |------|-------|
 | [launch-roadmap.md](launch-roadmap.md) | **Главный документ**: состояние запуска, что осталось (технические волны + внешние гейты + хвосты владельца), точка входа следующей сессии, карта всех планов |
 | [architecture.md](architecture.md) | Обзор системы, стек, три канала как единая экосистема, поток данных |
-| [b2b-saas.md](b2b-saas.md) | Партнёрское/B2B-направление: TWA/server MVP `Антон`, USDT-ledger, ручной XLSX import, rollout Sheets/batch |
+| [b2b-saas.md](b2b-saas.md) | Партнёрский контур `Антон`: TWA + `/admin`, Google Sheets/XLSX, USDT-ledger, NET/DIRTY-экономика и прибыль |
 | [corridor-and-site.md](corridor-and-site.md) | WB-гейт, сайт `/guide`, API коридора, восстановление сессии |
 | [site-acquiring-master-plan.md](site-acquiring-master-plan.md) | Ультра-ревью `robloxbank.ru`, P0-блокеры эквайринга, единые цена/identity/orders, дизайн и поэтапный launch plan |
 | [site-launch-implementation-plan.md](site-launch-implementation-plan.md) | Согласуемый план 18.07: baseline, обязательная регистрация перед оплатой, полноценный ЛК, controlled rollout, WB→сайт→бот/группа и боевой E2E |
@@ -88,6 +88,17 @@ consent evidence и отзыв JWT после смены пароля; токе�
 Email lifecycle работает через Brevo: DNS-аутентификация, Gmail verification-flow и
 Mail.ru delivery приняты; отдельный Yandex recipient-check и live TG/VK acceptance вынесены
 в [план готовности](auth-account-readiness-plan.md).
+
+29.07.2026 ЛК получил публичный Roblox-профиль: по нику показывает avatar/display name,
+стабильно обновляет по Roblox user ID, кэширует на 24 часа и позволяет отвязать. Это не
+проверка владения аккаунтом. Политика конфиденциальности теперь перечисляет фактические
+необходимые cookie (`session`, `wb_code`, условный `site_unlock`) и browser storage;
+рекламных/аналитических cookie нет, поэтому декоративный consent-баннер не добавлялся.
+
+В тот же batch партнёр `Антон` перенесён в `/admin/partners/anton` без второго backend:
+веб и TWA используют общие задачи/Google sync/ledger. Новые партии считаются как
+`5.3 / 1000 чистых` против закупки `4.7 / 1000 грязных` при комиссии 30%; интерфейс
+показывает отрицательную маржу, исторические ставки остаются неизменяемыми snapshot.
 
 Текущий implementation batch добавляет сохранение checkout draft через обязательный
 login/register, same-origin return guard, per-user rollout, активный order timeline в ЛК и

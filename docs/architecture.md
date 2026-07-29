@@ -46,21 +46,27 @@ VK link/unlink и recovery-console остаются следующими инк�
 а refund имеет отдельный идемпотентный audit. Production Init закрыт kill-switch до внешних
 launch-gates. ЛК читает `WbOrder` всех источников (legacy-таблица `Order` удалена 26.07),
 bonus balance и предлагает TG link только внутри fresh-auth window.
+ЛК также умеет привязать публичный Roblox-профиль: `User.robloxUserId` — стабильный ключ,
+username/display name/описание/дата/аватар кэшируются на 24 часа и обновляются через
+официальные публичные Users/Thumbnails API. Привязка показывает найденный публичный профиль,
+но не доказывает владение аккаунтом; пароль и `.ROBLOSECURITY` посетителя не запрашиваются.
 
-## B2B-направление (TWA/server MVP)
+## B2B-направление (TWA + desktop Control Center)
 
-Следующая продуктовая ветка — партнёрский выкуп сторонних геймпассов через тот же TWA.
 Первый реальный кейс: партнёр **«Антон»** с Google-таблицей и отдельным бюджетом на выкуп.
-На 2026-07-09 реализован ручной TWA/server MVP без Google Sheets sync/write-back:
-режим `Антон` живёт внутри экрана «Аккаунт» (`Свои | Антон`), баланс партнёра ведётся
-только в `USDT`, а R$-цена геймпасса конвертируется по курсу партнёра (`5.05 USDT / 1000 R$`
-для текущего кейса). До Google Sheets строки можно вручную загрузить `.xlsx` файлом с
-колонками `ГП/GP`, `Ник`, `Номинал`.
+На 2026-07-29 один серверный контур обслуживает мобильный режим `Антон` внутри экрана
+«Аккаунт» (`Свои | Антон`) и веб-раздел `/admin/partners/anton`. Google Sheets — источник
+задач, `PartnerLedgerEntry` — источник денежных фактов. Баланс ведётся только в USDT;
+новая политика считает `5.3 / 1000` чистых R$ выручки против `4.7 / 1000` грязных R$
+закупки при комиссии Roblox 30%. Google sync/write-back и резервный XLSX импорт работают
+на обеих поверхностях.
 
 Важно: это **не продолжение `WbOrder`**, а отдельный bounded context поверх уже готового
 buyout-движка (`search/resolve/purchase`, cookie-аккаунты, батчи, история покупок).
 В коде контур живёт в `Partner`, `PartnerBuyoutTask`, `PartnerLedgerEntry`,
-`src/lib/roblox-buyout.ts`, `BossrobuxScreen` и `GET/POST /api/twa/partners/anton/tasks`.
+`src/lib/roblox-buyout.ts`, `src/lib/partner-economics.ts`, `BossrobuxScreen` и общий
+контроллер `GET/POST /api/twa/partners/anton/tasks`, доступный вебу также через alias
+`/api/admin/partners/anton/tasks`.
 Покупка Антона пока использует общий donor-cookie `GlobalSettings.robloxCookie`; отдельный
 cookie партнёра не добавлен.
 Детали статуса, Sheets-контракта и rollout — в [b2b-saas.md](b2b-saas.md).

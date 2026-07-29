@@ -71,6 +71,47 @@ export async function getRobloxAvatar(userId: string | number) {
   }
 }
 
+export type RobloxPublicProfile = {
+  id: string;
+  username: string;
+  displayName: string;
+  description: string | null;
+  createdAt: string | null;
+  avatarUrl: string | null;
+  profileUrl: string;
+};
+
+async function hydrateRobloxPublicProfile(user: Record<string, unknown>): Promise<RobloxPublicProfile | null> {
+  const id = String(user.id ?? "").trim();
+  const username = String(user.name ?? user.requestedName ?? "").trim();
+  if (!id || !username) return null;
+  const avatarUrl = await getRobloxAvatar(id);
+  return {
+    id,
+    username,
+    displayName: String(user.displayName ?? username),
+    description: typeof user.description === "string" ? user.description : null,
+    createdAt: typeof user.created === "string" ? user.created : null,
+    avatarUrl,
+    profileUrl: `https://www.roblox.com/users/${encodeURIComponent(id)}/profile`,
+  };
+}
+
+/** Public profile only: no visitor cookie, Roblox password or private inventory. */
+export async function getRobloxPublicProfile(username: string): Promise<RobloxPublicProfile | null> {
+  const basic = await getRobloxUser(username);
+  if (!basic?.id) return null;
+  const detailed = await getRobloxUserById(String(basic.id));
+  return hydrateRobloxPublicProfile((detailed ?? basic) as Record<string, unknown>);
+}
+
+/** Stable-ID refresh survives a Roblox username change. */
+export async function getRobloxPublicProfileById(userId: string): Promise<RobloxPublicProfile | null> {
+  const detailed = await getRobloxUserById(userId);
+  if (!detailed) return null;
+  return hydrateRobloxPublicProfile(detailed as Record<string, unknown>);
+}
+
 export async function getGamepassDetails(gamepassId: string) {
   try {
     // Attempt 1: modern game-passes API

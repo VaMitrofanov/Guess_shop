@@ -24,12 +24,17 @@ import {
 } from "@/lib/google-sheets";
 import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepass, resolveGamepassForBuyer, type PurchaseResult } from "@/lib/roblox-buyout";
 import { notifyPartnerBuyout, type PartnerBuyoutNotifyItem } from "@/lib/partner-buyout-notify";
+import { requireAdmin, type AdminActor } from "@/lib/admin-access";
+import {
+  computePartnerSettlement,
+  partnerPolicyFrom,
+  settlementLedgerData,
+} from "@/lib/partner-economics";
 import {
   buildPartnerSheetRowId, findPartnerSettledRowTwin, partnerGamepassCommentValue,
   planPartnerRenamedRows, settledPartnerRowPolicy, type PartnerSheetRowRef,
 } from "@/lib/partner-sheet-policy";
 import { prisma } from "@/lib/prisma";
-import { extractTwaUser } from "@/lib/twa-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -37,13 +42,15 @@ type RouteContext = {
   params: Promise<{ slug: string }>;
 };
 
-type TwaUser = Awaited<ReturnType<typeof extractTwaUser>>;
+type PartnerOperator = AdminActor;
 
 const PARTNER_NAME_BY_SLUG: Record<string, string> = {
   anton: "Антон",
 };
 const DEFAULT_PARTNER_CURRENCY = "USDT";
-const DEFAULT_ANTON_RATE_USDT_PER_1000_R = 5.05;
+const DEFAULT_ANTON_RATE_USDT_PER_1000_R = 5.3;
+const DEFAULT_ANTON_PURCHASE_RATE_USDT_PER_1000_R = 4.7;
+const DEFAULT_PARTNER_ROBLOX_FEE_PCT = 30;
 const PARTNER_SCHEMA_NOT_READY = "PARTNER_SCHEMA_NOT_READY";
 const PARTNER_SCHEMA_NOT_READY_MESSAGE = "Партнёрский раздел требует применения новых миграций на сервере";
 const MAX_XLSX_BYTES = 5 * 1024 * 1024;
@@ -234,8 +241,9 @@ function partnerSchemaNotReadyResponse() {
   }, 503);
 }
 
-function operatorLabel(user: NonNullable<TwaUser>) {
-  return `${user.firstName || "TWA"}:${user.userId}`;
+function operatorLabel(user: PartnerOperator) {
+  const actorId = "telegramId" in user ? user.telegramId : user.userId ?? user.via;
+  return `${user.displayName || "Admin"}:${actorId}`;
 }
 
 function getAntonGoogleSheetConfig() {
@@ -256,8 +264,20 @@ function moneyCurrency(partner: Pick<Partner, "ledgerCurrency">) {
   return partner.ledgerCurrency || DEFAULT_PARTNER_CURRENCY;
 }
 
-function taskCostUsdt(robuxPrice: number, partner: Pick<Partner, "robuxRateUsdtPer1000">) {
-  return Math.round((robuxPrice * partner.robuxRateUsdtPer1000 / 1000) * 100) / 100;
+function taskSettlement(robuxPrice: number, partner: Pick<Partner,
+  "robuxRateUsdtPer1000" | "purchaseRateUsdtPer1000" | "rateBasis" | "robloxFeePct"
+>) {
+  return computePartnerSettlement({
+    grossRobux: robuxPrice,
+    ...partnerPolicyFrom(partner),
+  });
+}
+
+/** Amount debited from Anton, not our supplier cost. */
+function taskCostUsdt(robuxPrice: number, partner: Pick<Partner,
+  "robuxRateUsdtPer1000" | "purchaseRateUsdtPer1000" | "rateBasis" | "robloxFeePct"
+>) {
+  return taskSettlement(robuxPrice, partner).revenueUsdt;
 }
 
 function normalizeImportHeader(value: string) {
@@ -680,7 +700,7 @@ async function readPartnerPostBody(req: NextRequest) {
   return { body, file };
 }
 
-async function importPartnerXlsx(partner: Partner, user: NonNullable<TwaUser>, file: File | null) {
+async function importPartnerXlsx(partner: Partner, user: PartnerOperator, file: File | null) {
   if (!file) throw new BuyoutError("Приложите XLSX-файл", 400);
   if (!file.name.toLowerCase().endsWith(".xlsx")) throw new BuyoutError("Поддерживается только .xlsx", 400);
   if (file.size > MAX_XLSX_BYTES) throw new BuyoutError("XLSX слишком большой: максимум 5 MB", 400);
@@ -1081,7 +1101,7 @@ async function debitPartnerTaskFromSheet(
   partner: Partner,
   task: Pick<PartnerBuyoutTask, "id" | "gamepassId">,
   priceRobux: number,
-  user: TwaUser,
+  user: PartnerOperator | null,
   reason: string,
 ) {
   if (!priceRobux || priceRobux <= 0) return 0;
@@ -1091,7 +1111,8 @@ async function debitPartnerTaskFromSheet(
   });
   if (existingBuyout) return 0;
 
-  const priceUsdt = taskCostUsdt(priceRobux, partner);
+  const settlement = taskSettlement(priceRobux, partner);
+  const priceUsdt = settlement.revenueUsdt;
   if (priceUsdt <= 0) return 0;
   await prisma.partnerLedgerEntry.create({
     data: {
@@ -1100,8 +1121,7 @@ async function debitPartnerTaskFromSheet(
       type: "BUYOUT",
       amount: -priceUsdt,
       currency: moneyCurrency(partner),
-      rateUsdtPer1000: partner.robuxRateUsdtPer1000,
-      robuxAmount: priceRobux,
+      ...settlementLedgerData(settlement),
       purchaseAccountName: "Вручную / из таблицы",
       batchId: `sheet:${task.id}`,
       itemCount: 1,
@@ -1117,10 +1137,10 @@ async function appendPartnerBuyoutBatch(input: {
   partner: Partner;
   batchId: string;
   priceRobux: number;
-  priceUsdt: number;
   purchaseAccountName: string;
   createdBy: string;
 }) {
+  const settlement = taskSettlement(input.priceRobux, input.partner);
   const ledger = await prisma.partnerLedgerEntry.upsert({
     where: {
       partnerId_batchId: { partnerId: input.partner.id, batchId: input.batchId },
@@ -1129,10 +1149,9 @@ async function appendPartnerBuyoutBatch(input: {
       partnerId: input.partner.id,
       taskId: null,
       type: "BUYOUT",
-      amount: -input.priceUsdt,
+      amount: -settlement.revenueUsdt,
       currency: moneyCurrency(input.partner),
-      rateUsdtPer1000: input.partner.robuxRateUsdtPer1000,
-      robuxAmount: input.priceRobux,
+      ...settlementLedgerData(settlement),
       purchaseAccountName: input.purchaseAccountName,
       batchId: input.batchId,
       itemCount: 1,
@@ -1141,12 +1160,18 @@ async function appendPartnerBuyoutBatch(input: {
       createdBy: input.createdBy,
     },
     update: {
-      amount: { decrement: input.priceUsdt },
+      amount: { decrement: settlement.revenueUsdt },
       robuxAmount: { increment: input.priceRobux },
+      grossRobuxAmount: { increment: settlement.grossRobux },
+      netRobuxAmount: { increment: settlement.netRobux },
+      revenueUsdt: { increment: settlement.revenueUsdt },
+      expectedRevenueUsdt: { increment: settlement.expectedRevenueUsdt },
+      costUsdt: { increment: settlement.costUsdt },
+      profitUsdt: { increment: settlement.profitUsdt },
       itemCount: { increment: 1 },
     },
   });
-  const comment = `Списано за пачку: ${Math.abs(ledger.amount).toFixed(2)} USDT (${ledger.itemCount} геймпассов · ${(ledger.robuxAmount ?? 0).toLocaleString("ru-RU")} R$)`;
+  const comment = `Списано за пачку: ${Math.abs(ledger.amount).toFixed(2)} USDT (${ledger.itemCount} геймпассов · ${(ledger.grossRobuxAmount ?? ledger.robuxAmount ?? 0).toLocaleString("ru-RU")} грязных → ${(ledger.netRobuxAmount ?? 0).toLocaleString("ru-RU")} чистых R$)`;
   return prisma.partnerLedgerEntry.update({
     where: { id: ledger.id },
     data: { comment },
@@ -1190,7 +1215,7 @@ async function deletePartnerTaskForRemovedRow(
  */
 async function reconcilePartnerGoogleRow(input: {
   partner: Partner;
-  user: TwaUser;
+  user: PartnerOperator | null;
   task: PartnerBuyoutTask;
   rowStatus: string;
   rowComment: string;
@@ -1341,7 +1366,7 @@ async function markDoneRowEdited(task: PartnerBuyoutTask, cells: unknown[], stat
  */
 async function importDoneRowFromSheet(input: {
   partner: Partner;
-  user: TwaUser;
+  user: PartnerOperator | null;
   spreadsheetId: string;
   sheetTitle: string;
   sheetId: number | null;
@@ -1401,7 +1426,7 @@ async function importDoneRowFromSheet(input: {
  */
 async function processErrorStatusRow(input: {
   partner: Partner;
-  user: TwaUser;
+  user: PartnerOperator | null;
   spreadsheetId: string;
   sheetTitle: string;
   sheetId: number | null;
@@ -1526,7 +1551,7 @@ async function processErrorStatusRow(input: {
   }
 }
 
-async function syncPartnerGoogleSheets(partner: Partner, user: TwaUser, options: { force?: boolean } = {}) {
+async function syncPartnerGoogleSheets(partner: Partner, user: PartnerOperator | null, options: { force?: boolean } = {}) {
   const result: GoogleSyncResult = {
     status: "skipped",
     sheetCount: 0,
@@ -2278,8 +2303,8 @@ async function shouldScheduleGoogleSync(partner: Partner) {
   return true;
 }
 
-async function requireTwaUser(req: NextRequest) {
-  const user = await extractTwaUser(req);
+async function requirePartnerAdmin(req: NextRequest) {
+  const user = await requireAdmin(req);
   if (!user) throw new BuyoutError("Unauthorized", 401);
   return user;
 }
@@ -2301,6 +2326,9 @@ async function getPartner(slug: string) {
       name,
       ledgerCurrency: DEFAULT_PARTNER_CURRENCY,
       robuxRateUsdtPer1000: DEFAULT_ANTON_RATE_USDT_PER_1000_R,
+      purchaseRateUsdtPer1000: DEFAULT_ANTON_PURCHASE_RATE_USDT_PER_1000_R,
+      rateBasis: "NET",
+      robloxFeePct: DEFAULT_PARTNER_ROBLOX_FEE_PCT,
       ...antonSheetConfig,
     },
   });
@@ -2354,7 +2382,7 @@ async function attachPartnerLedgerTasks(
 
 async function loadPartnerState(partner: Partner) {
   const currency = moneyCurrency(partner);
-  const [tasks, ledgerEntries, importRuns, balanceAgg, spentAgg, statusGroups, doneWithPurchaseAgg, doneWithoutPurchaseAgg, rateGroups, rateChanges] = await Promise.all([
+  const [tasks, ledgerEntries, importRuns, balanceAgg, economicsAgg, spentAgg, statusGroups, doneWithPurchaseAgg, doneWithoutPurchaseAgg, rateGroups, rateChanges] = await Promise.all([
     prisma.partnerBuyoutTask.findMany({
       where: { partnerId: partner.id },
       orderBy: [{ updatedAt: "desc" }],
@@ -2376,6 +2404,16 @@ async function loadPartnerState(partner: Partner) {
     prisma.partnerLedgerEntry.aggregate({
       where: { partnerId: partner.id, currency },
       _sum: { amount: true },
+    }),
+    prisma.partnerLedgerEntry.aggregate({
+      where: { partnerId: partner.id, currency, type: { in: ["BUYOUT", "REFUND"] } },
+      _sum: {
+        revenueUsdt: true,
+        costUsdt: true,
+        profitUsdt: true,
+        grossRobuxAmount: true,
+        netRobuxAmount: true,
+      },
     }),
     prisma.partnerLedgerEntry.aggregate({
       // Refunds reverse an erroneous BUYOUT and must reduce the dashboard
@@ -2403,9 +2441,13 @@ async function loadPartnerState(partner: Partner) {
     // 5.9 A4: отчёт «по какому курсу сколько куплено» — по структурному rateUsdtPer1000
     // BUYOUT-списаний (записи до бэкфилла группируются в rate=null → «курс не записан»).
     prisma.partnerLedgerEntry.groupBy({
-      by: ["rateUsdtPer1000"],
+      by: ["rateUsdtPer1000", "purchaseRateUsdtPer1000", "rateBasis"],
       where: { partnerId: partner.id, currency, type: { in: ["BUYOUT", "REFUND"] } },
-      _sum: { amount: true, robuxAmount: true, itemCount: true },
+      _sum: {
+        amount: true, robuxAmount: true, itemCount: true,
+        grossRobuxAmount: true, netRobuxAmount: true,
+        revenueUsdt: true, costUsdt: true, profitUsdt: true,
+      },
     }),
     prisma.partnerRateChange.findMany({
       where: { partnerId: partner.id },
@@ -2436,9 +2478,15 @@ async function loadPartnerState(partner: Partner) {
   const rateReport = rateGroups
     .map((group) => ({
       rate: group.rateUsdtPer1000,
+      purchaseRate: group.purchaseRateUsdtPer1000,
+      rateBasis: group.rateBasis,
       buyouts: group._sum.itemCount ?? 0,
-      totalRobux: group._sum.robuxAmount ?? 0,
+      totalRobux: group._sum.grossRobuxAmount ?? group._sum.robuxAmount ?? 0,
+      totalNetRobux: group._sum.netRobuxAmount ?? 0,
       totalUsdt: Math.abs(group._sum.amount ?? 0),
+      revenueUsdt: group._sum.revenueUsdt ?? Math.abs(group._sum.amount ?? 0),
+      costUsdt: group._sum.costUsdt ?? null,
+      profitUsdt: group._sum.profitUsdt ?? null,
     }))
     .sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1));
 
@@ -2461,6 +2509,14 @@ async function loadPartnerState(partner: Partner) {
       reservedUsdt,
       ledgerCurrency: currency,
       robuxRateUsdtPer1000: partner.robuxRateUsdtPer1000,
+      purchaseRateUsdtPer1000: partner.purchaseRateUsdtPer1000,
+      rateBasis: partner.rateBasis,
+      robloxFeePct: partner.robloxFeePct,
+      revenueUsdt: economicsAgg._sum.revenueUsdt ?? spentUsdt,
+      costUsdt: economicsAgg._sum.costUsdt ?? null,
+      profitUsdt: economicsAgg._sum.profitUsdt ?? null,
+      grossRobux: economicsAgg._sum.grossRobuxAmount ?? doneRobux,
+      netRobux: economicsAgg._sum.netRobuxAmount ?? Math.floor(doneRobux * (1 - partner.robloxFeePct / 100)),
       total: totalTasks,
       ready: statusCount("READY"),
       purchasing: statusCount("PURCHASING"),
@@ -2521,7 +2577,7 @@ async function getPartnerBalance(partner: Partner) {
 
 export async function GET(req: NextRequest, ctx: RouteContext) {
   try {
-    await requireTwaUser(req);
+    await requirePartnerAdmin(req);
     const { slug } = await ctx.params;
     const partner = await getPartner(slug);
     if (!partner) return json({ ok: false, error: "Партнёр не найден" }, 404);
@@ -2560,7 +2616,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
-    const user = await requireTwaUser(req);
+    const user = await requirePartnerAdmin(req);
     const { slug } = await ctx.params;
     const partner = await getPartner(slug);
     if (!partner) return json({ ok: false, error: "Партнёр не найден" }, 404);
@@ -2642,8 +2698,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }
 
     if (action === "cancel-ledger-entry") {
-      // 5.7 E1: отмена ошибочного пополнения = полное удаление записи (решение владельца,
-      // сторно-ADJUSTMENT не заводим). Только TOPUP без привязки к задаче.
+      // Money ledger is append-only: an operator correction is a visible,
+      // idempotent ADJUSTMENT, never a destructive delete of the original fact.
       const entryId = String(body.entryId || "");
       if (!entryId) return json({ ok: false, error: "entryId обязателен" }, 400);
 
@@ -2655,35 +2711,75 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         return json({ ok: false, error: "Отменить можно только пополнение" }, 409);
       }
 
-      await prisma.partnerLedgerEntry.delete({ where: { id: entry.id } });
+      await prisma.partnerLedgerEntry.upsert({
+        where: {
+          partnerId_batchId: { partnerId: partner.id, batchId: `reversal:${entry.id}` },
+        },
+        create: {
+          partnerId: partner.id,
+          type: "ADJUSTMENT",
+          amount: -entry.amount,
+          currency: entry.currency,
+          batchId: `reversal:${entry.id}`,
+          reference: entry.id,
+          comment: `Сторно пополнения ${entry.id}${entry.comment ? ` · ${entry.comment}` : ""}`,
+          createdBy: operatorLabel(user),
+        },
+        update: {},
+      });
 
       const state = await loadPartnerState(partner);
       return json({ ok: true, partner, ...state });
     }
 
     if (action === "set-rate") {
-      const rate = Number(body.robuxRateUsdtPer1000);
+      const rate = Number(body.robuxRateUsdtPer1000 ?? partner.robuxRateUsdtPer1000);
+      const purchaseRate = Number(body.purchaseRateUsdtPer1000 ?? partner.purchaseRateUsdtPer1000);
+      const rateBasis = body.rateBasis === "DIRTY" ? "DIRTY" : body.rateBasis === "NET" ? "NET" : partner.rateBasis;
+      const robloxFeePct = Number(body.robloxFeePct ?? partner.robloxFeePct);
       if (!Number.isFinite(rate) || rate <= 0) {
-        return json({ ok: false, error: "Курс должен быть больше 0" }, 400);
+        return json({ ok: false, error: "Курс продажи должен быть больше 0" }, 400);
       }
-      if (rate > 1000) {
+      if (!Number.isFinite(purchaseRate) || purchaseRate <= 0) {
+        return json({ ok: false, error: "Курс закупки должен быть больше 0" }, 400);
+      }
+      if (rate > 1000 || purchaseRate > 1000) {
         return json({ ok: false, error: "Слишком большой курс" }, 400);
+      }
+      if (!Number.isFinite(robloxFeePct) || robloxFeePct < 0 || robloxFeePct >= 100) {
+        return json({ ok: false, error: "Комиссия Roblox должна быть от 0 до 99.99%" }, 400);
       }
 
       const newRate = Math.round(rate * 10000) / 10000;
+      const newPurchaseRate = Math.round(purchaseRate * 10000) / 10000;
+      const newFeePct = Math.round(robloxFeePct * 100) / 100;
+      const changed = newRate !== partner.robuxRateUsdtPer1000
+        || newPurchaseRate !== partner.purchaseRateUsdtPer1000
+        || rateBasis !== partner.rateBasis
+        || newFeePct !== partner.robloxFeePct;
       // 5.9 A2: каждая смена курса — запись в журнал, отчёт «по какому курсу сколько
       // куплено» опирается на неё и на rateUsdtPer1000 в BUYOUT-списаниях.
       const [updatedPartner] = await prisma.$transaction([
         prisma.partner.update({
           where: { id: partner.id },
-          data: { robuxRateUsdtPer1000: newRate },
+          data: {
+            robuxRateUsdtPer1000: newRate,
+            purchaseRateUsdtPer1000: newPurchaseRate,
+            rateBasis,
+            robloxFeePct: newFeePct,
+          },
         }),
-        ...(newRate !== partner.robuxRateUsdtPer1000
+        ...(changed
           ? [prisma.partnerRateChange.create({
             data: {
               partnerId: partner.id,
               rate: newRate,
               previousRate: partner.robuxRateUsdtPer1000,
+              purchaseRate: newPurchaseRate,
+              previousPurchaseRate: partner.purchaseRateUsdtPer1000,
+              rateBasis,
+              previousRateBasis: partner.rateBasis,
+              robloxFeePct: newFeePct,
               createdBy: operatorLabel(user),
             },
           })]
@@ -2754,7 +2850,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       // Баланс НЕ блокирует ручное «Готово»: владелец разрешил уходить в минус —
       // ручной выкуп должен срабатывать всегда. Отрицательный баланс подсвечивается
       // в TWA и гасится пополнением.
-      const priceUsdt = taskCostUsdt(priceRobux, partner);
+      const settlement = taskSettlement(priceRobux, partner);
+      const priceUsdt = settlement.revenueUsdt;
 
       const updatedTask = await prisma.partnerBuyoutTask.update({
         where: { id: task.id },
@@ -2776,13 +2873,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             type: "BUYOUT",
             amount: -priceUsdt,
             currency: moneyCurrency(partner),
-            rateUsdtPer1000: partner.robuxRateUsdtPer1000,
-            robuxAmount: priceRobux,
+            ...settlementLedgerData(settlement),
             purchaseAccountName: updatedTask.purchaseAccountName || "Вручную / из таблицы",
             batchId: updatedTask.purchaseBatchId,
             itemCount: 1,
             reference: updatedTask.gamepassId,
-            comment: `Ручная отметка: ${priceUsdt.toFixed(2)} USDT (1 геймпасс · ${priceRobux} R$)`,
+            comment: `Ручная отметка: ${priceUsdt.toFixed(2)} USDT (${settlement.grossRobux} грязных → ${settlement.netRobux} чистых R$)`,
             createdBy: operatorLabel(user),
           },
         });
@@ -2841,7 +2937,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             partner,
             batchId,
             priceRobux,
-            priceUsdt,
             purchaseAccountName: accountName || "Массовая отметка",
             createdBy: operatorLabel(user),
           });
@@ -2943,8 +3038,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       // Баланс НЕ блокирует выкуп: владелец разрешил уходить в минус — кнопка «Купить»
       // должна срабатывать всегда (даже в минус). Списание в ledger идёт как обычно;
       // отрицательный баланс подсвечивается в TWA и гасится пополнением.
-      const priceUsdt = taskCostUsdt(price, partner);
-
       let result: PurchaseResult;
       try {
         // gamepassId — для контрольной проверки владения при провале (Ф1):
@@ -2997,7 +3090,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         partner,
         batchId: purchaseBatchId,
         priceRobux: price,
-        priceUsdt,
         purchaseAccountName: settings.robloxAccountName || "cookie-аккаунт",
         createdBy: operatorLabel(user),
       });
@@ -3038,12 +3130,19 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const items: PartnerBuyoutNotifyItem[] = doneTasks.map((t) => {
         const b = (t.purchaseBatchId ? buyoutByBatch.get(t.purchaseBatchId) : null) ?? buyoutByTask.get(t.id);
         const robux = getTaskPrice(t);
-        const rate = b?.rateUsdtPer1000 ?? partner.robuxRateUsdtPer1000;
+        if (robux <= 0) return { nick: t.robloxUsername, gamepassId: t.gamepassId, robux, usdt: 0 };
+        const settlement = computePartnerSettlement({
+          grossRobux: robux,
+          saleRateUsdtPer1000: b?.rateUsdtPer1000 ?? partner.robuxRateUsdtPer1000,
+          purchaseRateUsdtPer1000: b?.purchaseRateUsdtPer1000 ?? partner.purchaseRateUsdtPer1000,
+          rateBasis: b?.rateBasis ?? partner.rateBasis,
+          robloxFeePct: b?.robloxFeePct ?? partner.robloxFeePct,
+        });
         return {
           nick: t.robloxUsername,
           gamepassId: t.gamepassId,
           robux,
-          usdt: Math.round((robux * rate / 1000) * 100) / 100,
+          usdt: settlement.revenueUsdt,
         };
       });
       const totalRobux = items.reduce((sum, it) => sum + it.robux, 0);

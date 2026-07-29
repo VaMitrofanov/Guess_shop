@@ -160,6 +160,9 @@
 }
 .primaryButton { color: white; background: linear-gradient(135deg, #8c73ff, #587dff); box-shadow: 0 10px 28px rgba(86, 99, 235, .23); }
 .secondaryButton { border: 1px solid var(--admin-line); color: #d4d4d8; background: rgba(255,255,255,.045); }
+.fileButton { cursor: pointer; }
+.fileButton[aria-disabled="true"] { cursor: not-allowed; opacity: .45; }
+.fileButton input { display: none; }
 
 .metricGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; }
 .metricCard, .panel {
@@ -331,6 +334,15 @@
 .panelFooterLink { padding: 0 16px 15px; }
 .panelFooterLink a { color: #a998ff; font-size: 12px; font-weight: 700; }
 
+.partnerHeroGrid { display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);gap:15px }
+.partnerBalance,.partnerPolicy{padding:20px}.partnerBalance>span{display:block;color:var(--admin-muted);font-size:13px}.partnerBalance>strong{display:block;margin-top:5px;font-size:40px;letter-spacing:-.04em}.partnerBalance>small,.partnerPolicy>small{display:block;margin-top:5px;color:#777780;font-size:12px}.partnerBalance>div{display:flex;gap:8px;margin-top:19px}.partnerBalance input,.partnerPolicy input,.partnerForm input{min-width:0;height:40px;border:1px solid var(--admin-line);border-radius:11px;padding:0 12px;background:rgba(255,255,255,.045);color:#fff;font:inherit;outline:none}.partnerBalance input{flex:1}.partnerBalance button,.partnerPolicy button{min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:7px;border:0;border-radius:11px;padding:0 13px;background:linear-gradient(135deg,#8c73ff,#587dff);color:#fff;font:inherit;font-size:13px;font-weight:750;cursor:pointer}.partnerPolicy{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.partnerPolicy>div span{display:block;margin-bottom:6px;color:var(--admin-muted);font-size:12px}.partnerPolicy input{width:100%;font-size:18px;font-weight:750}.partnerPolicy button,.partnerPolicy>small{grid-column:1/-1}.partnerPolicy button{width:100%}.panelHeader>div>strong,.panelHeader>div>span{display:block}.panelHeader>div>span{margin-top:3px}.rowActions{display:flex;gap:5px}.rowActions button{width:32px;height:32px;display:grid;place-items:center;border:1px solid var(--admin-line);border-radius:9px;background:rgba(255,255,255,.04);color:#bbb4e9;cursor:pointer}.rowActions button:disabled,.partnerBalance button:disabled,.partnerPolicy button:disabled{cursor:not-allowed;opacity:.38}.partnerBottomGrid{display:grid;grid-template-columns:minmax(300px,.65fr) minmax(0,1.35fr);gap:15px}.partnerForm{display:grid;gap:12px;padding:17px}.partnerForm label{color:var(--admin-muted);font-size:12px}.partnerForm input{width:100%;margin-top:6px}.partnerLedgerList{display:grid;padding:5px 15px 12px}.partnerLedgerList>div{min-height:63px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;border-bottom:1px solid rgba(255,255,255,.06)}.partnerLedgerList>div:last-child{border-bottom:0}.partnerLedgerList strong,.partnerLedgerList small{display:block}.partnerLedgerList strong{font-size:13px}.partnerLedgerList small{margin-top:3px;color:var(--admin-muted);font-size:11px}.partnerLedgerList b{font-size:13px;font-variant-numeric:tabular-nums}.spin{animation:admin-spin .9s linear infinite}@keyframes admin-spin{to{transform:rotate(360deg)}}
+
+.noteDanger { display: flex; gap: 11px; padding: 13px 16px; border: 1px solid rgba(255,91,106,.25); border-radius: 14px; background: rgba(255,91,106,.08); color: #ffd2d6; font-size: 13px; line-height: 1.5; }
+.noteDanger > svg { width: 18px; height: 18px; flex: 0 0 auto; margin-top: 2px; color: #ff7780; }
+.noteDanger strong, .noteDanger span { display: block; }
+.noteDanger span { margin-top: 2px; color: #e7b9bd; }
+.noteDanger button { margin-top: 9px; min-height: 34px; padding: 0 11px; border: 1px solid rgba(255,119,128,.3); border-radius: 9px; background: rgba(255,119,128,.1); color: #ffd2d6; font: inherit; font-weight: 700; cursor: pointer; }
+
 .heartbeatList { display: grid; padding: 7px 14px 13px; }
 .heartbeatList > div { min-height: 53px; display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; gap: 11px; align-items: center; border-bottom: 1px solid rgba(255,255,255,.06); }
 .heartbeatList > div:last-child { border-bottom: 0; }
@@ -365,6 +377,7 @@
   .overviewGrid, .audienceOverviewGrid { grid-template-columns: 1fr; }
   .healthGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .insightGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .partnerHeroGrid, .partnerBottomGrid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 760px) {
@@ -384,6 +397,10 @@
   .logItem { grid-template-columns: 34px minmax(0,1fr); }
   .logMeta { grid-column: 2; text-align: left; }
   .communityGrid, .audienceStatList, .resourceGrid { grid-template-columns: 1fr; }
+  .partnerPolicy { grid-template-columns: 1fr; }
+  .partnerPolicy button, .partnerPolicy > small { grid-column: auto; }
+  .partnerBalance > div, .panelHeader, .headerActions { align-items: stretch; flex-direction: column; }
+  .headerActions > * { width: 100%; }
 }
 
 /* ── Выкуп и Экономика (A4 + аналитика) ──────────────────────────────────── */

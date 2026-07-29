@@ -20,11 +20,16 @@ import { ESLint } from "eslint";
 // и ответ Bot API вместо двух `any`; сдвиг строк в `bots/shared/bridge.ts`
 // проверен вместе с новым минимальным контрактом read-only результата.
 //
+// 2026-07-29 (1122 → 1122): количество и состав legacy debt не изменились;
+// отпечаток обновлён только из-за смещения существующих warning-строк после
+// добавления NET/DIRTY-экономики в `BossrobuxScreen.tsx`. Новый admin client
+// имеет точечный disable для известного initial-load паттерна и baseline не растит.
+//
 // Unlike --max-warnings, this has no spare capacity: adding, moving,
 // replacing or changing even one warning fails the gate. Reduce the baseline
 // only in a dedicated cleanup change after reviewing the full formatter output.
 const BASELINE_WARNING_COUNT = 1122;
-const BASELINE_SHA256 = "df693136b10eedb586b77c85b4264295a91dc8309f1867b2ed8da212e12f0f25";
+const BASELINE_SHA256 = "6005a077d61ede7218241471492014e6e74377530a40d2712ba0dd2891c5cfa3";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);

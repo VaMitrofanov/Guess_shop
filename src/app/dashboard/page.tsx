@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { adminGrantFor } from "@/lib/admin-grant";
@@ -40,6 +41,8 @@ import TelegramLoginButton from "@/components/auth/TelegramLoginButton";
 import SignOutAction from "@/components/auth/SignOutAction";
 import EmailVerificationAction from "@/components/auth/EmailVerificationAction";
 import styles from "./dashboard.module.css";
+import CustomerRobloxProfileCard from "@/components/customer-roblox-profile";
+import { loadCustomerRobloxProfile } from "@/lib/roblox-profile";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -116,6 +119,11 @@ function sourceLabel(source: DashboardOrder["source"]) {
 
 function orderHref(order: DashboardOrder) {
   return order.publicOrderId ? `/payment/status?orderId=${encodeURIComponent(order.publicOrderId)}` : null;
+}
+
+async function RobloxProfileSection({ userId, username }: { userId: string; username: string | null }) {
+  const initial = await loadCustomerRobloxProfile(userId, username);
+  return <CustomerRobloxProfileCard initial={initial} />;
 }
 
 export default async function DashboardPage() {
@@ -352,6 +360,9 @@ export default async function DashboardPage() {
           </div>
 
           <aside className={styles.sidebar}>
+            <Suspense fallback={<section className={`${styles.profileCard} ${styles.robloxProfileLoading}`}>Загружаем профиль Roblox…</section>}>
+              <RobloxProfileSection userId={user.id} username={knownRobloxUsername} />
+            </Suspense>
             <section className={styles.profileCard}>
               <div className={styles.profileTop}>
                 <span className={styles.avatar}><User size={25} /></span>

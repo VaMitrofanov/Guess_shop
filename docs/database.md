@@ -267,8 +267,10 @@ B2B/partner-ops контур для сторонних выкупов, перв�
 Это отдельный bounded context и он **не использует `WbOrder`**.
 
 `Partner`: справочник партнёров (`slug`, `name`, `isActive`, `notes`). Для Антона добавлены
-денежные и Sheets-настройки: `ledgerCurrency=USDT`, `robuxRateUsdtPer1000` (сейчас `5.05`),
-`googleSheetId`, `googleSheetTab`, `googleSheetUrl`.
+денежные и Sheets-настройки: `ledgerCurrency=USDT`, `robuxRateUsdtPer1000` (продажа),
+`purchaseRateUsdtPer1000` (закупка), `rateBasis` (`DIRTY`/`NET`), `robloxFeePct`,
+`googleSheetId`, `googleSheetTab`, `googleSheetUrl`. Политика новых партий с 29.07.2026:
+`5.3 / 1000 NET`, закупка `4.7 / 1000 DIRTY`, комиссия `30%`.
 Боевой `googleSheetId` Антона: `1jzWZZ_AeM0IMyHaljaLBei0hu_zDwktiysbgGt324rs`; фиксированного
 `googleSheetTab` нет, потому что каждый лист таблицы соответствует новой дате.
 `GET /api/twa/partners/[slug]/tasks` синхронизирует `googleSheetId/googleSheetUrl` из env
@@ -309,9 +311,9 @@ sync и результат write-back (`writeBackAt` / `lastWriteBackError`), ч
 в `USDT`; R$ остаются ценой геймпасса в `PartnerBuyoutTask`.
 Типы `PartnerLedgerType`: `TOPUP` · `BUYOUT` · `ADJUSTMENT` · `REFUND`.
 `amount` хранится со знаком: пополнение положительное, выкуп отрицательный. API `Антон`
-считает баланс aggregate по USDT-ledger, перед ручным закрытием/покупкой конвертирует
-грязную R$-цену задачи по `Partner.robuxRateUsdtPer1000`, проверяет баланс и блокирует
-повторное `BUYOUT`-списание по одной задаче.
+считает баланс aggregate по USDT-ledger и блокирует повторное `BUYOUT`-списание по одной
+задаче. Для `NET` сначала считается `netRobuxAmount=floor(grossRobuxAmount×(1-fee))`,
+затем выручка Антона; себестоимость всегда считается от грязного объёма.
 С миграции `20260713_partner_sync_lease_ledger_v2` один фактический batch-выкуп хранится
 одной строкой: `batchId` — идемпотентный идентификатор запуска, `itemCount` — число
 успешных геймпассов, `robuxAmount`/`amount` — суммарные R$/USDT,
@@ -328,6 +330,20 @@ sync и результат write-back (`writeBackAt` / `lastWriteBackError`), ч
 Пишется action'ом `set-rate` (no-op смена на тот же курс запись не создаёт);
 стартовую запись создаёт бэкфилл-скрипт.
 
+Миграция `20260729_partner_economics_roblox_profile` расширяет журнал ставок полями
+`purchaseRate`, `previousPurchaseRate`, `rateBasis`, `previousRateBasis`, `robloxFeePct`.
+Каждая новая BUYOUT-запись получает неизменяемый snapshot: `rateUsdtPer1000`,
+`purchaseRateUsdtPer1000`, `rateBasis`, `costBasis`, `robloxFeePct`, грязный/чистый объём,
+`revenueUsdt`, `expectedRevenueUsdt`, `costUsdt`, `profitUsdt`. История до 29.07 получает
+закупку `4.3` с `costBasis=ASSUMED`; завершённые записи сменой текущей ставки не
+переписываются. Отмена ошибочного TOPUP создаёт идемпотентный `ADJUSTMENT` с
+`batchId=reversal:<originalId>` и сохраняет исходный факт.
+
+Та же миграция добавляет в `User` кэш публичного Roblox-профиля:
+`robloxUserId`, `robloxDisplayName`, `robloxAvatarUrl`, `robloxDescription`,
+`robloxAccountCreatedAt`, `robloxProfileSyncedAt`. Стабильный `robloxUserId` позволяет
+пережить смену username; кэш обновляется раз в 24 часа и может быть полностью отвязан.
+
 Миграция `20260709_partner_anton_usdt_sheets` фиксирует стартовый кейс Антона:
 `150 USDT` пополнения, 8 уже выкупленных XLSX-строк (`19 106 R$`) и агрегированное списание
 `96.49 USDT`, расчётный остаток `53.51 USDT`.
@@ -335,7 +351,8 @@ sync и результат write-back (`writeBackAt` / `lastWriteBackError`), ч
 Для рабочей TWA-фичи на проде должны быть применены миграции
 `20260709_add_partner_buyout`, `20260709_partner_anton_usdt_sheets`,
 `20260709_partner_xlsx_upload_source`, `20260710_partner_google_sheets_sync` и
-`20260713_partner_sync_lease_ledger_v2`. Последняя также добавляет DB-lease
+`20260713_partner_sync_lease_ledger_v2`, `20260729_partner_economics_roblox_profile`.
+Миграция 13.07 также добавляет DB-lease
 `Partner.googleSyncLeaseId/googleSyncLeaseAt`, общий для manual/force/background sync. Если
 Web-контейнер уже обновился, а БД ещё нет, `/api/twa/partners/[slug]/tasks` возвращает
 `503 PARTNER_SCHEMA_NOT_READY`, чтобы не маскировать ошибку схемы нулевым балансом.

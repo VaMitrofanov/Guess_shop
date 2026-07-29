@@ -1,0 +1,23 @@
+import AdminAntonClient from "@/components/admin/anton-client";
+import styles from "@/components/admin/admin-shell.module.css";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+export default function AdminAntonPage() {
+  return (
+    <div className={styles.page}>
+      <header className={styles.pageHeader}>
+        <div>
+          <span className={styles.eyebrow}>B2B · Google Sheets · единый ledger</span>
+          <h1>Партнёр «Антон»</h1>
+          <p>
+            Задачи, синхронизация, баланс и честная экономика: Антон платит за чистые R$,
+            закупка и комиссия считаются по грязным.
+          </p>
+        </div>
+      </header>
+      <AdminAntonClient />
+    </div>
+  );
+}

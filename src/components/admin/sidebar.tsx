@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, MessageSquare, HelpCircle, Wallet, ShoppingBasket,
-  ShoppingCart, Users, LogOut, Shield, ExternalLink, Activity, Smartphone,
+  ShoppingCart, Users, LogOut, Shield, ExternalLink, Activity, Smartphone, Handshake,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
@@ -17,6 +17,7 @@ const NAV = [
   { href: "/admin/orders",   icon: ShoppingCart,    label: "Заказы"    },
   { href: "/admin/buyout",   icon: ShoppingBasket,  label: "Выкуп"     },
   { href: "/admin/economics", icon: Wallet,         label: "Экономика" },
+  { href: "/admin/partners/anton", icon: Handshake, label: "Антон" },
   { href: "/admin/activity", icon: Activity,        label: "Журнал"    },
   { href: "/admin/users",    icon: Users,           label: "Пользователи" },
   { href: "/admin/reviews",  icon: MessageSquare,   label: "Отзывы"    },
