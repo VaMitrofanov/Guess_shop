@@ -10,11 +10,17 @@ import { ESLint } from "eslint";
 // монтировании `buyout-client.tsx`; тот же паттерн уже лежит в базовой линии по
 // экранам TWA. Правило срабатывает на любой transitive-setState, поэтому убрать
 // предупреждение можно только disable-комментарием. Остальной сдвиг отпечатка —
-// смещение строк в файлах, которых коснулась правка. Unlike --max-warnings, this has no spare capacity: adding, moving,
+// смещение строк в файлах, которых коснулась правка.
+//
+// 2026-07-29 (1125 → 1124): синхронизация профиля VK типизировала ответ
+// `users.get` вместо прежнего `any`; отпечаток также учитывает сдвиг строк в
+// `bots/shared/db.ts`, `notify.ts`, `tg/bot.ts` и `vk/bot.ts`.
+//
+// Unlike --max-warnings, this has no spare capacity: adding, moving,
 // replacing or changing even one warning fails the gate. Reduce the baseline
 // only in a dedicated cleanup change after reviewing the full formatter output.
-const BASELINE_WARNING_COUNT = 1125;
-const BASELINE_SHA256 = "10816db71676aab7778f64b383140c4c21642c62c48a58d913b066931f10d21a";
+const BASELINE_WARNING_COUNT = 1124;
+const BASELINE_SHA256 = "5944f89702a8a7e33f9faf3cc5a11d60fa1838703cc970e63946bba9b16002af";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);

@@ -129,64 +129,145 @@ export async function getAdminOrders(limit = 250): Promise<AdminOrderRow[]> {
 }
 
 export async function getAdminDashboardData() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const now = new Date();
+  const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const since30d = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
   const [
     totalOrders,
     siteOrders,
     activeOrders,
-    completedToday,
+    created24h,
+    completed24h,
+    completedOrders,
+    orders30d,
     errorOrders,
     users,
+    users30d,
     paymentTotals,
+    paymentTotals30d,
     openPayments,
     deadOutbox,
+    pendingOutbox,
     unknownRefunds,
     recentRows,
+    completedRobux,
+    sourceRows,
+    customerOrderCounts,
+    codeRows,
+    heartbeatRows,
   ] = await Promise.all([
     prisma.wbOrder.count({ where: { isTest: false } }),
     prisma.wbOrder.count({ where: { isTest: false, orderSource: "SITE" } }),
     prisma.wbOrder.count({ where: { isTest: false, status: { in: ACTIVE_ORDER_STATUSES } } }),
-    prisma.wbOrder.count({ where: { isTest: false, completedAt: { gte: today } } }),
+    prisma.wbOrder.count({ where: { isTest: false, createdAt: { gte: since24h } } }),
+    prisma.wbOrder.count({ where: { isTest: false, completedAt: { gte: since24h } } }),
+    prisma.wbOrder.count({ where: { isTest: false, status: "COMPLETED" } }),
+    prisma.wbOrder.count({ where: { isTest: false, createdAt: { gte: since30d } } }),
     prisma.wbOrder.count({ where: { isTest: false, status: "ERROR" } }),
     prisma.user.count(),
+    prisma.user.count({ where: { createdAt: { gte: since30d } } }),
     prisma.paymentAttempt.aggregate({
-      where: { status: { in: PAID_PAYMENT_STATUSES } },
+      where: { status: { in: PAID_PAYMENT_STATUSES }, order: { isTest: false } },
       _sum: { amountKopecks: true, refundedAmountKopecks: true },
       _count: { _all: true },
     }),
-    prisma.paymentAttempt.count({ where: { status: { in: OPEN_PAYMENT_STATUSES } } }),
+    prisma.paymentAttempt.aggregate({
+      where: {
+        status: { in: PAID_PAYMENT_STATUSES },
+        finalizedAt: { gte: since30d },
+        order: { isTest: false },
+      },
+      _sum: { amountKopecks: true, refundedAmountKopecks: true },
+      _count: { _all: true },
+    }),
+    prisma.paymentAttempt.count({ where: { status: { in: OPEN_PAYMENT_STATUSES }, order: { isTest: false } } }),
     prisma.outboxMessage.count({ where: { status: "DEAD" } }),
-    prisma.paymentRefund.count({ where: { status: "SUBMIT_UNKNOWN" } }),
+    prisma.outboxMessage.count({ where: { status: { in: ["PENDING", "PROCESSING"] } } }),
+    prisma.paymentRefund.count({
+      where: { status: "SUBMIT_UNKNOWN", paymentAttempt: { order: { isTest: false } } },
+    }),
     prisma.wbOrder.findMany({
       where: { isTest: false },
       orderBy: { createdAt: "desc" },
       take: 8,
       include: orderListInclude,
     }),
+    prisma.wbOrder.aggregate({
+      where: { isTest: false, status: "COMPLETED" },
+      _sum: { amount: true },
+    }),
+    prisma.wbOrder.groupBy({
+      by: ["orderSource"],
+      where: { isTest: false },
+      _count: { _all: true },
+      _sum: { amount: true },
+    }),
+    prisma.wbOrder.groupBy({
+      by: ["userId"],
+      where: { isTest: false },
+      _count: { _all: true },
+    }),
+    prisma.wbCode.groupBy({
+      by: ["status"],
+      _count: { _all: true },
+    }),
+    prisma.serviceHeartbeat.findMany({
+      orderBy: { lastSeenAt: "desc" },
+      take: 6,
+      select: { serviceKey: true, status: true, lastSeenAt: true, lastAlertAt: true },
+    }),
   ]);
 
   const grossKopecks = paymentTotals._sum.amountKopecks ?? 0;
   const refundedKopecks = paymentTotals._sum.refundedAmountKopecks ?? 0;
+  const grossKopecks30d = paymentTotals30d._sum.amountKopecks ?? 0;
+  const refundedKopecks30d = paymentTotals30d._sum.refundedAmountKopecks ?? 0;
+  const codeCounts = Object.fromEntries(codeRows.map((row) => [row.status, row._count._all]));
 
   return {
     metrics: {
       totalOrders,
       siteOrders,
       activeOrders,
-      completedToday,
+      created24h,
+      completed24h,
+      completedOrders,
+      orders30d,
       users,
+      users30d,
+      uniqueBuyers: customerOrderCounts.length,
+      repeatBuyers: customerOrderCounts.filter((row) => row._count._all > 1).length,
       paidPayments: paymentTotals._count._all,
+      averagePaidKopecks: paymentTotals._count._all > 0 ? Math.round(grossKopecks / paymentTotals._count._all) : 0,
       grossKopecks,
       refundedKopecks,
       netKopecks: grossKopecks - refundedKopecks,
+      paidPayments30d: paymentTotals30d._count._all,
+      grossKopecks30d,
+      refundedKopecks30d,
+      netKopecks30d: grossKopecks30d - refundedKopecks30d,
+      completedRobux: completedRobux._sum.amount ?? 0,
       attention: errorOrders + deadOutbox + unknownRefunds,
       errorOrders,
       openPayments,
       deadOutbox,
+      pendingOutbox,
       unknownRefunds,
+      availableCodes: codeCounts.AVAILABLE ?? 0,
+      reservedCodes: codeCounts.RESERVED ?? 0,
+      claimedCodes: codeCounts.CLAIMED ?? 0,
     },
+    sourceBreakdown: sourceRows
+      .map((row) => ({ source: row.orderSource, orders: row._count._all, robux: row._sum.amount ?? 0 }))
+      .sort((a, b) => b.orders - a.orders),
+    heartbeats: heartbeatRows.map((row) => ({
+      service: row.serviceKey,
+      status: row.status,
+      lastSeenAt: row.lastSeenAt.toISOString(),
+      lastAlertAt: iso(row.lastAlertAt),
+      ageSeconds: Math.max(0, Math.floor((now.getTime() - row.lastSeenAt.getTime()) / 1000)),
+    })),
     recentOrders: recentRows.map(serializeOrder),
   };
 }

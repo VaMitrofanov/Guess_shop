@@ -30,15 +30,15 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [corridor-and-site.md](corridor-and-site.md) | WB-гейт, сайт `/guide`, API коридора, восстановление сессии |
 | [site-acquiring-master-plan.md](site-acquiring-master-plan.md) | Ультра-ревью `robloxbank.ru`, P0-блокеры эквайринга, единые цена/identity/orders, дизайн и поэтапный launch plan |
 | [site-launch-implementation-plan.md](site-launch-implementation-plan.md) | Согласуемый план 18.07: baseline, обязательная регистрация перед оплатой, полноценный ЛК, controlled rollout, WB→сайт→бот/группа и боевой E2E |
-| [auth-account-readiness-plan.md](auth-account-readiness-plan.md) | ЛК/login/register и email/TG/VK identity: Brevo SMTP в production, Gmail verification принят; Mail.ru ждёт пересмотра антиспам-блокировки |
+| [auth-account-readiness-plan.md](auth-account-readiness-plan.md) | ЛК/login/register и email/TG/VK identity: Brevo SMTP в production, Gmail verification и Mail.ru delivery приняты; Yandex остаётся отдельной проверкой |
 | [roblox-codes-plan.md](roblox-codes-plan.md) | Новый товар: коды активации Roblox — прайс, честные 10–15 мин → «моментально» через буфер, безопасность предъявительских кодов, ККТ/юр-гейты и этапы K0–K9 |
-| [email-setup.md](email-setup.md) | Почта `robloxbank.ru`: Brevo SMTP relay на порту 2525 работает в production; DNS принят, Gmail принят, Mail.ru appeal на рассмотрении |
+| [email-setup.md](email-setup.md) | Почта `robloxbank.ru`: Brevo SMTP relay на порту 2525 работает в production; DNS, Gmail и Mail.ru приняты, Yandex остаётся отдельной проверкой |
 | [tbank-precheck-2026-07-17.md](tbank-precheck-2026-07-17.md) | Предрелизный аудит публичной ссылки для Т‑Банка 17.07: фактические тесты, найденные блокеры и план закрытия |
 | [design-rework-concept.html](design-rework-concept.html) | Интерактивный визуальный концепт глобального реворка главной и mobile-first WB guide |
 | [twa-ux-v3-concept.html](twa-ux-v3-concept.html) | Визуальный концепт TWA v3: два варианта Главной, умная выдача и foreground bottom sheet |
 | [bots.md](bots.md) | TG- и VK-боты: активация, приём геймпасса, прямые заказы, поддержка, отзывы |
 | [twa-admin.md](twa-admin.md) | Единая admin-экосистема: desktop `/admin`, Telegram TWA, общий `WbOrder`, досье и журнал |
-| [admin-console-plan.md](admin-console-plan.md) | Переезд админки в веб: 9 разделов, вход трёх админов по Telegram, единый `requireAdmin`, этапы A1–A8 |
+| [admin-console-plan.md](admin-console-plan.md) | Переезд админки в веб: production-дашборд, TG/VK-аудитория, 9 разделов, вход трёх админов по Telegram, этапы A1–A8 |
 | [twa-design-redesign-plan.md](twa-design-redesign-plan.md) | Контракт редизайна TWA: навигация, поиск, compact cards/history, прибыль и Premium Calm для Аккаунта/Заказов |
 | [database.md](database.md) | Модели Prisma и статусы заказов/кодов |
 | [payments-and-kkt.md](payments-and-kkt.md) | Эквайринг, outbox worker, refund и ККТ test matrix |
@@ -84,9 +84,10 @@ TG/VK/iPhone/Android acceptance, реквизиты, ККТ/payment E2E и soft 
 серверной HMAC-проверкой, а VK identity проверяется сервером; публичность VK-кнопки
 управляется отдельным fail-closed build gate.
 Повторный аудит и batch 18.07 добавили verification/resend, password reset, versioned
-consent evidence и отзыв JWT после смены пароля; токены в БД только hash. До публичного
-email recovery остаются SMTP/DNS и живая доставка; live TG/VK acceptance вынесен в
-[план готовности](auth-account-readiness-plan.md).
+consent evidence и отзыв JWT после смены пароля; токены в БД только hash.
+Email lifecycle работает через Brevo: DNS-аутентификация, Gmail verification-flow и
+Mail.ru delivery приняты; отдельный Yandex recipient-check и live TG/VK acceptance вынесены
+в [план готовности](auth-account-readiness-plan.md).
 
 Текущий implementation batch добавляет сохранение checkout draft через обязательный
 login/register, same-origin return guard, per-user rollout, активный order timeline в ЛК и
@@ -98,6 +99,11 @@ login/register, same-origin return guard, per-user rollout, активный ord
 19.07.2026 в desktop Control Center увеличена типографика всех рабочих поверхностей
 (навигация, карточки, таблицы, журнал, health и досье), чтобы оператору не приходилось
 масштабировать браузер. Правила платёжной безопасности и контракты API не изменялись.
+
+29.07.2026 обзор Control Center переведён на расширенные production-агрегаты заказов,
+платежей, возвратов, источников, кодов, outbox и heartbeat. Раздел пользователей разделяет
+Telegram/VK/email-профили и живую аудиторию публичных сообществ; legacy-only identity debt
+показан оператору явно и не маскируется как подтверждённая привязка.
 
 С 19.07 paid-state `/payment/status` завершает post-purchase loop: предлагает персональные
 уведомления через связанный Telegram и добровольную подписку/диалог в TG или VK. Переходы

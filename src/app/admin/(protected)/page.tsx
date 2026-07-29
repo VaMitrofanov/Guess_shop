@@ -5,22 +5,41 @@ import {
   CircleAlert,
   CircleDollarSign,
   Clock3,
+  CreditCard,
   Layers3,
+  PackageCheck,
+  Repeat2,
   ShoppingBag,
   Users,
 } from "lucide-react";
-import { getAdminDashboardData } from "@/lib/admin-ecosystem";
+import { getAdminDashboardData, getAdminRuntimeState } from "@/lib/admin-ecosystem";
 import styles from "@/components/admin/admin-shell.module.css";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 function money(kopecks: number) {
-  return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(kopecks / 100);
+  return new Intl.NumberFormat("ru-RU", {
+    style: "currency",
+    currency: "RUB",
+    maximumFractionDigits: 0,
+  }).format(kopecks / 100);
 }
 
 function dateTime(value: string) {
-  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function ageLabel(seconds: number) {
+  if (seconds < 60) return `${seconds} сек назад`;
+  if (seconds < 3_600) return `${Math.floor(seconds / 60)} мин назад`;
+  return `${Math.floor(seconds / 3_600)} ч назад`;
 }
 
 function paymentLabel(status: string | undefined) {
@@ -39,14 +58,30 @@ function paymentLabel(status: string | undefined) {
   return labels[status] ?? status;
 }
 
+const SOURCE_LABELS: Record<string, string> = {
+  WB: "Wildberries",
+  DIRECT: "Прямые",
+  AVITO: "Авито",
+  MANUAL: "Ручные",
+  SITE: "Сайт",
+};
+
 export default async function AdminDashboard() {
-  const { metrics, recentOrders } = await getAdminDashboardData();
+  const [{ metrics, recentOrders, sourceBreakdown, heartbeats }, runtime] = await Promise.all([
+    getAdminDashboardData(),
+    Promise.resolve(getAdminRuntimeState()),
+  ]);
+  const maxSourceOrders = Math.max(1, ...sourceBreakdown.map((source) => source.orders));
 
   const cards = [
-    { label: "Чистый оборот", value: money(metrics.netKopecks), icon: CircleDollarSign },
-    { label: "Все заказы", value: metrics.totalOrders.toLocaleString("ru-RU"), icon: Layers3 },
-    { label: "Сейчас в работе", value: metrics.activeOrders.toLocaleString("ru-RU"), icon: Clock3 },
-    { label: "Пользователи", value: metrics.users.toLocaleString("ru-RU"), icon: Users },
+    { label: "Чистый оборот", value: money(metrics.netKopecks), hint: `${metrics.paidPayments} оплаченных чеков`, icon: CircleDollarSign },
+    { label: "Средний оплаченный чек", value: money(metrics.averagePaidKopecks), hint: "до вычета возвратов", icon: CreditCard },
+    { label: "Выполнено Robux", value: `${metrics.completedRobux.toLocaleString("ru-RU")} R$`, hint: `${metrics.completedOrders} заказов`, icon: PackageCheck },
+    { label: "Профили", value: metrics.users.toLocaleString("ru-RU"), hint: `${metrics.users30d} новых за 30 дней`, icon: Users },
+    { label: "Все заказы", value: metrics.totalOrders.toLocaleString("ru-RU"), hint: `${metrics.orders30d} создано за 30 дней`, icon: Layers3 },
+    { label: "Сейчас в работе", value: metrics.activeOrders.toLocaleString("ru-RU"), hint: "активные статусы", icon: Clock3 },
+    { label: "Покупатели", value: metrics.uniqueBuyers.toLocaleString("ru-RU"), hint: `${metrics.repeatBuyers} повторных`, icon: Repeat2 },
+    { label: "За 24 часа", value: metrics.created24h.toLocaleString("ru-RU"), hint: `${metrics.completed24h} завершено`, icon: ShoppingBag },
   ];
 
   const attention = [
@@ -60,9 +95,9 @@ export default async function AdminDashboard() {
     <div className={styles.page}>
       <header className={styles.pageHeader}>
         <div>
-          <span className={styles.eyebrow}>RobloxBank Control Center</span>
+          <span className={styles.eyebrow}>RobloxBank Control Center · production</span>
           <h1>Общий обзор</h1>
-          <p>Desktop и Telegram TWA работают поверх одной очереди заказов, платежей и возвратов.</p>
+          <p>Деньги, заказы, аудитория и здоровье фоновых процессов — из боевой БД, без тестовых заказов.</p>
         </div>
         <div className={styles.headerActions}>
           <Link className={styles.secondaryButton} href="/admin/activity"><Activity size={15} /> Журнал</Link>
@@ -71,10 +106,10 @@ export default async function AdminDashboard() {
       </header>
 
       <section className={styles.metricGrid} aria-label="Основные показатели">
-        {cards.map(({ label, value, icon: Icon }) => (
+        {cards.map(({ label, value, hint, icon: Icon }) => (
           <article className={styles.metricCard} key={label}>
             <div className={styles.metricIcon}><Icon /></div>
-            <strong>{value}</strong><span>{label}</span>
+            <strong>{value}</strong><span>{label}</span><small>{hint}</small>
           </article>
         ))}
       </section>
@@ -110,12 +145,56 @@ export default async function AdminDashboard() {
               </div>
             ))}
           </div>
-          <div className={styles.panelHeader}><strong>Контур сегодня</strong><span>{metrics.completedToday} завершено</span></div>
+          <div className={styles.panelHeader}><strong>Платежи за 30 дней</strong><span>{metrics.paidPayments30d} финальных</span></div>
           <div className={styles.attentionList}>
-            <div className={styles.attentionItem}><div><ShoppingBag size={17} /><span><strong>Заказы с сайта</strong><small>канонический источник SITE</small></span></div><b>{metrics.siteOrders}</b></div>
-            <div className={styles.attentionItem}><div><CircleAlert size={17} /><span><strong>Возвращено</strong><small>из подтверждённых платежей</small></span></div><b>{money(metrics.refundedKopecks)}</b></div>
+            <div className={styles.attentionItem}><div><CircleDollarSign size={17} /><span><strong>Списано</strong><small>подтверждённые попытки</small></span></div><b>{money(metrics.grossKopecks30d)}</b></div>
+            <div className={styles.attentionItem}><div><CircleAlert size={17} /><span><strong>Возвращено</strong><small>подтверждено провайдером</small></span></div><b>{money(metrics.refundedKopecks30d)}</b></div>
+            <div className={styles.attentionItem}><div><CreditCard size={17} /><span><strong>Нетто</strong><small>списано минус возвраты</small></span></div><b>{money(metrics.netKopecks30d)}</b></div>
           </div>
         </aside>
+      </div>
+
+      <div className={styles.insightGrid}>
+        <section className={styles.panel}>
+          <div className={styles.panelHeader}><strong>Источники заказов</strong><span>{metrics.totalOrders} production-заказов</span></div>
+          <div className={styles.sourceList}>
+            {sourceBreakdown.map((source) => (
+              <div className={styles.sourceRow} key={source.source}>
+                <div><strong>{SOURCE_LABELS[source.source] ?? source.source}</strong><span>{source.robux.toLocaleString("ru-RU")} R$</span></div>
+                <div className={styles.sourceTrack}><i style={{ width: `${Math.max(2, Math.round((source.orders / maxSourceOrders) * 100))}%` }} /></div>
+                <b>{source.orders}</b>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className={styles.panel}>
+          <div className={styles.panelHeader}><strong>Операционный запас</strong><span>БД прямо сейчас</span></div>
+          <div className={styles.resourceGrid}>
+            <div><span>Доступные WB-коды</span><strong className={metrics.availableCodes > 100 ? styles.healthGood : styles.healthWarn}>{metrics.availableCodes}</strong></div>
+            <div><span>Зарезервировано</span><strong>{metrics.reservedCodes}</strong></div>
+            <div><span>Активная outbox</span><strong className={metrics.pendingOutbox === 0 ? styles.healthGood : styles.healthWarn}>{metrics.pendingOutbox}</strong></div>
+            <div><span>Эквайринг</span><strong className={runtime.acquiring === "off" ? styles.healthWarn : styles.healthGood}>{runtime.acquiring}</strong></div>
+          </div>
+          <div className={styles.panelFooterLink}><Link href="/admin/activity">Конфигурация и полный журнал →</Link></div>
+        </section>
+
+        <section className={styles.panel}>
+          <div className={styles.panelHeader}><strong>Heartbeat процессов</strong><span>{heartbeats.length} сигналов</span></div>
+          <div className={styles.heartbeatList}>
+            {heartbeats.map((heartbeat) => {
+              const healthy = heartbeat.status === "HEALTHY" && heartbeat.ageSeconds < 360;
+              return (
+                <div key={heartbeat.service}>
+                  <i className={healthy ? styles.heartbeatGood : styles.heartbeatWarn} />
+                  <span><strong>{heartbeat.service}</strong><small>{ageLabel(heartbeat.ageSeconds)}</small></span>
+                  <b className={cn(healthy ? styles.healthGood : styles.healthWarn)}>{heartbeat.status}</b>
+                </div>
+              );
+            })}
+            {heartbeats.length === 0 && <div className={styles.empty}>Heartbeat ещё не записан.</div>}
+          </div>
+        </section>
       </div>
     </div>
   );

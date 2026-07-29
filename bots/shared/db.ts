@@ -16,7 +16,7 @@
  *       Until then, cast to `(db as any)` for new schema fields.
  */
 
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient, UserIdentityProvider } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 
@@ -62,6 +62,121 @@ if (!(g.__neonKeepalive as boolean)) {
 }
 
 export default db;
+
+export type VerifiedBotProfile = {
+  name?: string | null;
+  username?: string | null;
+  image?: string | null;
+  metadata?: Record<string, string | number | boolean | null | undefined>;
+};
+
+function cleanProfileValue(value: string | null | undefined): string | undefined {
+  const cleaned = value?.trim();
+  return cleaned || undefined;
+}
+
+function legacyPlatformWhere(provider: "TG" | "VK", subject: string) {
+  return provider === "TG" ? { tgId: subject } : { vkId: subject };
+}
+
+/**
+ * A private bot update is provider-authenticated: Telegram/VK supply the actor
+ * id, it is not user-entered text. Persist that evidence in UserIdentity while
+ * retaining the legacy columns used by the existing order/notification paths.
+ * Conflicting identity/legacy owners fail closed and are never merged here.
+ */
+export async function syncVerifiedBotUser(
+  provider: "TG" | "VK",
+  platformId: string | number,
+  profile: VerifiedBotProfile = {},
+) {
+  const subject = String(platformId).trim();
+  if (!/^\d+$/.test(subject)) throw new Error(`Invalid ${provider} actor id`);
+
+  const name = cleanProfileValue(profile.name);
+  const username = cleanProfileValue(profile.username)?.replace(/^@/, "");
+  const image = cleanProfileValue(profile.image);
+  const providerEnum = provider as UserIdentityProvider;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await db.$transaction(async (tx) => {
+        const [identity, legacyUser] = await Promise.all([
+          tx.userIdentity.findUnique({
+            where: { provider_subject: { provider: providerEnum, subject } },
+            include: { user: true },
+          }),
+          tx.user.findUnique({ where: legacyPlatformWhere(provider, subject) }),
+        ]);
+
+        if (identity && legacyUser && identity.userId !== legacyUser.id) {
+          throw new Error(`${provider} identity conflicts with legacy profile`);
+        }
+
+        let user = identity?.user ?? legacyUser;
+        if (!user) {
+          user = await tx.user.create({
+            data: {
+              ...legacyPlatformWhere(provider, subject),
+              ...(name ? { name } : {}),
+              ...(username ? { username } : {}),
+              ...(image ? { image } : {}),
+            },
+          });
+        }
+
+        const providerAlreadyLinked = identity
+          ? null
+          : await tx.userIdentity.findFirst({ where: { userId: user.id, provider: providerEnum } });
+        if (providerAlreadyLinked && providerAlreadyLinked.subject !== subject) {
+          throw new Error(`${provider} profile already has a different verified subject`);
+        }
+
+        const previousMetadata = identity?.metadata && typeof identity.metadata === "object" && !Array.isArray(identity.metadata)
+          ? identity.metadata as Prisma.JsonObject
+          : {};
+        const metadata = {
+          ...previousMetadata,
+          source: "bot-event",
+          profileSyncedAt: new Date().toISOString(),
+          ...(name ? { name } : {}),
+          ...(username ? { username } : {}),
+          ...(image ? { image } : {}),
+          ...Object.fromEntries(Object.entries(profile.metadata ?? {}).filter(([, value]) => value !== undefined)),
+        } as Prisma.InputJsonObject;
+
+        if (identity) {
+          await tx.userIdentity.update({
+            where: { id: identity.id },
+            data: { verifiedAt: new Date(), metadata },
+          });
+        } else if (!providerAlreadyLinked) {
+          await tx.userIdentity.create({
+            data: { provider: providerEnum, subject, userId: user.id, metadata },
+          });
+        }
+
+        const hasOtherLegacyChannel = provider === "TG" ? Boolean(user.vkId) : Boolean(user.tgId);
+        return tx.user.update({
+          where: { id: user.id },
+          data: {
+            ...legacyPlatformWhere(provider, subject),
+            ...(name && (!hasOtherLegacyChannel || !user.name) ? { name } : {}),
+            ...(image && (!hasOtherLegacyChannel || !user.image) ? { image } : {}),
+            ...(username && (!hasOtherLegacyChannel || !user.username) ? { username } : {}),
+          },
+        });
+      });
+    } catch (error) {
+      if (attempt === 0 && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error(`${provider} bot identity sync exhausted retry budget`);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Customer recognition

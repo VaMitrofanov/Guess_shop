@@ -1,108 +1,248 @@
-import { prisma } from "@/lib/prisma";
-import { adminGrantFor } from "@/lib/admin-grant";
-import { Users, ShieldCheck, User, Calendar } from "lucide-react";
+import Link from "next/link";
+import {
+  CalendarDays,
+  Database,
+  ExternalLink,
+  Link2,
+  Mail,
+  MessagesSquare,
+  Repeat2,
+  Send,
+  ShieldCheck,
+  ShoppingBag,
+  UserRoundCheck,
+  Users,
+} from "lucide-react";
+import {
+  AdminAudienceChannel,
+  AdminAudienceFilter,
+  filterAdminAudienceUsers,
+  getAdminAudienceData,
+} from "@/lib/admin-audience";
+import styles from "@/components/admin/admin-shell.module.css";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-function fmtDate(d: Date) {
-  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(d));
+const FILTERS: Array<{ key: AdminAudienceFilter; label: string }> = [
+  { key: "all", label: "Все" },
+  { key: "tg", label: "Telegram" },
+  { key: "vk", label: "VK" },
+  { key: "email", label: "Email" },
+  { key: "multi", label: "Несколько каналов" },
+  { key: "unlinked", label: "Без канала" },
+];
+
+function date(value: string) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(value));
 }
 
-export default async function AdminUsersPage() {
-  const users = await prisma.user.findMany({
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true, email: true, name: true, role: true, createdAt: true,
-      // Админа определяет не `role`, а проверенная TG-личность из ADMIN_IDS
-      // (этап A1), поэтому нужен `subject`.
-      identities: { where: { provider: "TG" }, select: { subject: true } },
-      _count: { select: { wbOrders: true } },
-    },
-  });
+function dateTime(value: string) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
 
-  // A1: `role` в базе больше не источник правды — считаем по тому же правилу,
-  // что и гейт админки, иначе экран показывал ноль администраторов.
-  const isAdminUser = (u: { email: string | null; role: string; identities: { subject: string }[] }) =>
-    adminGrantFor({ email: u.email, role: u.role, telegramSubjects: u.identities.map((i) => i.subject) }) !== null;
-  const adminIds = new Set(users.filter(isAdminUser).map((u) => u.id));
-  const adminCount = adminIds.size;
-  const userCount  = users.length - adminCount;
+function ChannelBadge({ channel, legacyOnly = false }: { channel: AdminAudienceChannel; legacyOnly?: boolean }) {
+  return (
+    <span className={cn(
+      styles.channelBadge,
+      channel === "TG" && styles.channelTg,
+      channel === "VK" && styles.channelVk,
+      channel === "EMAIL" && styles.channelEmail,
+      legacyOnly && styles.channelLegacy,
+    )}>
+      {channel === "TG" ? <Send /> : channel === "VK" ? <MessagesSquare /> : <Mail />}
+      {channel}{legacyOnly ? " · старый формат" : ""}
+    </span>
+  );
+}
+
+function filterCount(filter: AdminAudienceFilter, summary: Awaited<ReturnType<typeof getAdminAudienceData>>["summary"]) {
+  if (filter === "tg") return summary.tgProfiles;
+  if (filter === "vk") return summary.vkProfiles;
+  if (filter === "email") return summary.emailProfiles;
+  if (filter === "multi") return summary.multiChannel;
+  if (filter === "unlinked") return summary.unlinked;
+  return summary.totalProfiles;
+}
+
+export default async function AdminUsersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ channel?: string }>;
+}) {
+  const [{ channel }, data] = await Promise.all([searchParams, getAdminAudienceData()]);
+  const activeFilter = FILTERS.some((filter) => filter.key === channel)
+    ? channel as AdminAudienceFilter
+    : "all";
+  const users = filterAdminAudienceUsers(data.users, activeFilter);
+  const canonicalCoverage = data.summary.socialProfiles > 0
+    ? Math.round((data.summary.canonicalSocialProfiles / data.summary.socialProfiles) * 100)
+    : 100;
 
   return (
-    <div className="p-8 space-y-6">
-      <div>
-        <div className="font-pixel text-[9px] text-[#00b06f]/60 tracking-wider mb-2">USER MANAGEMENT</div>
-        <h1 className="text-3xl font-black uppercase tracking-tight">Пользователи</h1>
-        <p className="text-zinc-500 text-sm font-medium mt-1">Всего: {users.length}</p>
-      </div>
+    <div className={styles.page}>
+      <header className={styles.pageHeader}>
+        <div>
+          <span className={styles.eyebrow}>CRM · профили, каналы и аудитория сообществ</span>
+          <h1>Пользователи</h1>
+          <p>
+            Профили в базе отделены от подписчиков Telegram/VK. Последняя живая сверка API: {dateTime(data.checkedAt)}.
+          </p>
+        </div>
+      </header>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
-        {[
-          { label: "Всего",       value: users.length, icon: Users,       color: "text-white",         bg: "bg-[#1e2a45]/50",    border: "border-[#1e2a45]"     },
-          { label: "Пользователей", value: userCount,  icon: User,        color: "text-[#00b06f]",     bg: "bg-[#00b06f]/10",    border: "border-[#00b06f]/20"  },
-          { label: "Администраторов", value: adminCount, icon: ShieldCheck, color: "text-amber-400",  bg: "bg-amber-500/10",    border: "border-amber-500/20"  },
-        ].map(({ label, value, icon: Icon, color, bg, border }) => (
-          <div key={label} className={`pixel-card border-2 ${border} p-5 flex items-center gap-4`}>
-            <div className={`w-9 h-9 ${bg} border ${border} flex items-center justify-center flex-shrink-0`}>
-              <Icon className={`w-4 h-4 ${color}`} />
-            </div>
-            <div>
-              <div className={`text-2xl font-black ${color}`}>{value}</div>
-              <div className="text-xs font-black text-zinc-500 uppercase tracking-wider">{label}</div>
-            </div>
+      <section className={styles.audienceMetricGrid} aria-label="Профили по каналам">
+        <article className={styles.metricCard}>
+          <div className={styles.metricIcon}><Users /></div>
+          <strong>{data.summary.totalProfiles.toLocaleString("ru-RU")}</strong>
+          <span>Всего профилей</span>
+          <small>{data.summary.customerProfiles} клиентов · {data.summary.admins} админов</small>
+        </article>
+        <article className={styles.metricCard}>
+          <div className={cn(styles.metricIcon, styles.metricIconTg)}><Send /></div>
+          <strong>{data.summary.tgProfiles.toLocaleString("ru-RU")}</strong>
+          <span>Telegram-профили</span>
+          <small>{data.summary.tgOnly} без VK · legacy + identity</small>
+        </article>
+        <article className={styles.metricCard}>
+          <div className={cn(styles.metricIcon, styles.metricIconVk)}><MessagesSquare /></div>
+          <strong>{data.summary.vkProfiles.toLocaleString("ru-RU")}</strong>
+          <span>VK-профили</span>
+          <small>{data.summary.vkOnly} без Telegram · legacy + identity</small>
+        </article>
+        <article className={styles.metricCard}>
+          <div className={cn(styles.metricIcon, styles.metricIconEmail)}><Mail /></div>
+          <strong>{data.summary.emailProfiles.toLocaleString("ru-RU")}</strong>
+          <span>Email-профили</span>
+          <small>{data.summary.verifiedEmails} подтверждено</small>
+        </article>
+      </section>
+
+      <div className={styles.audienceOverviewGrid}>
+        <section className={styles.panel}>
+          <div className={styles.panelHeader}>
+            <strong>Публичные сообщества</strong>
+            <span>Живые данные Telegram Bot API и VK API</span>
           </div>
-        ))}
+          <div className={styles.communityGrid}>
+            {data.communities.map((community) => (
+              <a className={styles.communityCard} href={community.href} target="_blank" rel="noreferrer" key={community.platform}>
+                <div className={cn(styles.communityIcon, community.platform === "TG" ? styles.metricIconTg : styles.metricIconVk)}>
+                  {community.platform === "TG" ? <Send /> : <MessagesSquare />}
+                </div>
+                <div>
+                  <span>{community.label}</span>
+                  <strong>{community.members === null ? "—" : community.members.toLocaleString("ru-RU")}</strong>
+                  <small>{community.members === null ? "API временно недоступен" : "участников / подписчиков"} · {community.handle}</small>
+                </div>
+                <ExternalLink />
+              </a>
+            ))}
+          </div>
+          <p className={styles.panelNote}>
+            Это размер публичных сообществ, а не число профилей в базе: один человек может быть подписан, но ещё не пользоваться ботом — или наоборот.
+          </p>
+        </section>
+
+        <section className={styles.panel}>
+          <div className={styles.panelHeader}><strong>Качество клиентской базы</strong><span>Только production, тестовые заказы исключены</span></div>
+          <div className={styles.audienceStatList}>
+            <div><ShoppingBag /><span><strong>{data.summary.withOrders}</strong><small>профилей с заказами</small></span></div>
+            <div><Repeat2 /><span><strong>{data.summary.repeatBuyers}</strong><small>повторных покупателей</small></span></div>
+            <div><UserRoundCheck /><span><strong>{data.summary.new30d}</strong><small>новых за 30 дней</small></span></div>
+            <div><Link2 /><span><strong>{data.summary.multiChannel}</strong><small>профилей с несколькими каналами</small></span></div>
+          </div>
+        </section>
       </div>
 
-      {/* Table */}
-      <div className="pixel-card border-2 border-[#1e2a45] overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-[#1e2a45] bg-[#080c18]">
-              <th className="text-left px-5 py-3 font-pixel text-[8px] text-zinc-600 tracking-wider">ПОЛЬЗОВАТЕЛЬ</th>
-              <th className="text-left px-5 py-3 font-pixel text-[8px] text-zinc-600 tracking-wider hidden sm:table-cell">EMAIL</th>
-              <th className="text-left px-5 py-3 font-pixel text-[8px] text-zinc-600 tracking-wider">РОЛЬ</th>
-              <th className="text-left px-5 py-3 font-pixel text-[8px] text-zinc-600 tracking-wider hidden md:table-cell">ЗАКАЗЫ</th>
-              <th className="text-left px-5 py-3 font-pixel text-[8px] text-zinc-600 tracking-wider hidden lg:table-cell">ДАТА</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((user) => (
-              <tr key={user.id} className="border-b border-[#1e2a45]/40 hover:bg-[#00b06f]/3 transition-colors">
-                <td className="px-5 py-3.5">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 border border-[#1e2a45] bg-[#080c18] flex items-center justify-center flex-shrink-0">
-                      <User className="w-4 h-4 text-zinc-600" />
+      {data.summary.legacyOnlyProfiles > 0 && (
+        <div className={styles.noteWarn} style={{ marginTop: 15 }}>
+          <Database />
+          <div>
+            <b>Каноническая UserIdentity покрывает {canonicalCoverage}% социальных профилей.</b>{" "}
+            У {data.summary.legacyOnlyProfiles} профилей канал пока хранится только в legacy-поле:
+            Telegram — {data.summary.legacyOnlyTg}, VK — {data.summary.legacyOnlyVk}. В общие числа выше они включены, поэтому аудитория не занижена.
+          </div>
+        </div>
+      )}
+
+      <section className={styles.panel} style={{ marginTop: 15 }}>
+        <div className={styles.panelHeader}>
+          <strong>Профили по каналам</strong>
+          <span>{users.length.toLocaleString("ru-RU")} в текущем срезе</span>
+        </div>
+        <nav className={styles.segmentTabs} aria-label="Фильтр пользователей">
+          {FILTERS.map((filter) => (
+            <Link
+              className={cn(styles.segmentTab, activeFilter === filter.key && styles.segmentTabActive)}
+              href={filter.key === "all" ? "/admin/users" : `/admin/users?channel=${filter.key}`}
+              key={filter.key}
+            >
+              {filter.label}<b>{filterCount(filter.key, data.summary)}</b>
+            </Link>
+          ))}
+        </nav>
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <thead>
+              <tr><th>Пользователь</th><th>Каналы</th><th>Контакт</th><th>Заказы</th><th>Создан</th></tr>
+            </thead>
+            <tbody>
+              {users.map((user) => (
+                <tr key={user.id}>
+                  <td>
+                    <span className={styles.tablePrimary}>{user.name || user.username || "Без имени"}</span>
+                    <span className={styles.tableSecondary}>
+                      {user.isAdmin ? <><ShieldCheck size={12} /> Администратор</> : "Клиент"}
+                    </span>
+                  </td>
+                  <td>
+                    <div className={styles.channelBadges}>
+                      {user.channels.map((channel) => (
+                        <ChannelBadge channel={channel} legacyOnly={user.legacyOnlyChannels.includes(channel as "TG" | "VK")} key={channel} />
+                      ))}
+                      {user.channels.length === 0 && <span className={styles.dim}>Без канала</span>}
                     </div>
-                    <p className="font-black text-sm">{user.name ?? "—"}</p>
-                  </div>
-                </td>
-                <td className="px-5 py-3.5 text-sm text-zinc-400 font-medium hidden sm:table-cell">{user.email}</td>
-                <td className="px-5 py-3.5">
-                  <span className={`font-pixel text-[8px] px-2 py-1 border ${
-                    adminIds.has(user.id)
-                      ? "text-amber-400 border-amber-500/20 bg-amber-500/10"
-                      : "text-[#00b06f] border-[#00b06f]/20 bg-[#00b06f]/10"
-                  }`}>
-                    {user.role}
-                  </span>
-                </td>
-                <td className="px-5 py-3.5 font-black text-sm text-zinc-300 hidden md:table-cell">{user._count.wbOrders}</td>
-                <td className="px-5 py-3.5 text-xs text-zinc-500 hidden lg:table-cell whitespace-nowrap">
-                  <span className="flex items-center gap-1.5">
-                    <Calendar className="w-3 h-3" />
-                    {fmtDate(user.createdAt)}
-                  </span>
-                </td>
-              </tr>
-            ))}
-            {users.length === 0 && (
-              <tr><td colSpan={5} className="px-5 py-12 text-center text-zinc-600 text-sm">Пользователей нет</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+                  </td>
+                  <td>
+                    <div className={styles.contactStack}>
+                      {user.channelDetails.map((detail) => {
+                        if (detail.channel === "EMAIL") {
+                          return <span key={detail.channel}><Mail />{detail.subject}<small>{user.emailVerified ? "подтверждён" : "не подтверждён"}</small></span>;
+                        }
+                        const href = detail.channel === "TG"
+                          ? detail.username ? `https://t.me/${detail.username}` : `tg://user?id=${detail.subject}`
+                          : detail.username ? `https://vk.com/${detail.username}` : `https://vk.com/id${detail.subject}`;
+                        return (
+                          <a href={href} target="_blank" rel="noreferrer" key={detail.channel}>
+                            {detail.channel === "TG" ? <Send /> : <MessagesSquare />}
+                            {detail.username ? `@${detail.username}` : `${detail.channel} ID ${detail.subject}`}
+                            {detail.username && <small>ID {detail.subject}</small>}
+                          </a>
+                        );
+                      })}
+                      {user.channelDetails.length === 0 && <span className={styles.dim}>—</span>}
+                    </div>
+                  </td>
+                  <td><span className={styles.tablePrimary}>{user.orders.toLocaleString("ru-RU")}</span></td>
+                  <td><span className={styles.tableSecondary}><CalendarDays size={12} /> {date(user.createdAt)}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {users.length === 0 && <div className={styles.empty}>В этом сегменте пока нет профилей.</div>}
+      </section>
     </div>
   );
 }

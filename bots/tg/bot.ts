@@ -41,11 +41,19 @@ import {
 import { registerAdminHubs, setupMenuButton } from "./admin";
 import { startReviewReminderCron } from "./crons";
 import { notifyBotError } from "../shared/admin";
+import { syncTelegramActor } from "../shared/user-profile-sync";
 
 const token = process.env.TG_TOKEN;
 if (!token) throw new Error("[TG] TG_TOKEN is not set");
 
 export const bot = new Telegraf(token);
+
+// Telegram supplies `ctx.from` on every private update. Sync at most once per
+// actor per process/6h; profile persistence stays off the reply critical path.
+bot.use(async (ctx, next) => {
+  await next();
+  if (ctx.from) void syncTelegramActor(ctx.from);
+});
 
 bot.catch((err: any, ctx: any) => {
   console.error("[TG] Unhandled error:", err);

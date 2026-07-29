@@ -30,6 +30,7 @@ import { handleMessage, handleOutboxMessage, handleVkGroupJoin, initVkHandlers }
 import { notifyBotError } from "../shared/admin";
 import { startBridgeServer } from "../shared/bridge";
 import { startIndependentPaymentWorkerWatchdog } from "../shared/payment-worker-watchdog";
+import { syncVkActor } from "../shared/user-profile-sync";
 
 console.log("🚀 DEPLOY_VERSION: 4.0 - LOYALTY_HARD_SYNC");
 
@@ -47,6 +48,7 @@ startIndependentPaymentWorkerWatchdog();
 vk.updates.on("message_new", async (ctx) => {
   try {
     await handleMessage(ctx as any);
+    if (!ctx.isOutbox && ctx.senderId > 0) void syncVkActor(ctx.senderId);
   } catch (err) {
     console.error("[VK] Unhandled error in message_new:", err);
     if (!ctx.isOutbox) {

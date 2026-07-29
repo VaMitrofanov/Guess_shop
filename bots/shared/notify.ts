@@ -103,31 +103,67 @@ function vkApiUrl(method: string): string {
   return `https://api.vk.com/method/${method}`;
 }
 
-/**
- * Fetch a VK user's first + last name via users.get.
- * Returns "VK #<id>" as fallback so callers never get undefined.
- */
-export async function vkGetName(vkUserId: number): Promise<string> {
+export type VkPublicProfile = {
+  name: string;
+  username: string | null;
+  image: string | null;
+  deactivated: string | null;
+  isClosed: boolean;
+};
+
+type VkUsersGetPayload = {
+  response?: Array<{
+    id?: number;
+    first_name?: string;
+    last_name?: string;
+    screen_name?: string;
+    photo_100?: string;
+    deactivated?: string;
+    is_closed?: boolean;
+  }>;
+  error?: { error_code?: number; error_msg?: string };
+};
+
+/** Fetch the public fields VK actually returned for a user. A provider/API
+ * failure is `null`, not a made-up profile: callers can preserve known data. */
+export async function vkGetProfile(vkUserId: number): Promise<VkPublicProfile | null> {
   try {
+    const token = process.env.VK_TOKEN;
+    if (!token) return null;
     const params = new URLSearchParams({
       user_ids:     String(vkUserId),
-      fields:       "first_name,last_name",
-      access_token: process.env.VK_TOKEN ?? "",
-      v:            "5.131",
+      fields:       "screen_name,photo_100,deactivated,is_closed",
+      access_token: token,
+      v:            "5.199",
     });
     const res  = await fetch(vkApiUrl("users.get"), {
       method:  "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body:    params.toString(),
+      signal:  AbortSignal.timeout(5_000),
     });
-    const json = (await res.json()) as any;
+    const json = (await res.json().catch(() => null)) as VkUsersGetPayload | null;
     const u    = json?.response?.[0];
-    if (u?.first_name) {
-      return [u.first_name, u.last_name].filter(Boolean).join(" ");
-    }
+    if (!res.ok || json?.error || !u?.first_name) return null;
+    const screenName = typeof u.screen_name === "string" && u.screen_name !== `id${u.id}`
+      ? u.screen_name
+      : null;
+    return {
+      name: [u.first_name, u.last_name].filter(Boolean).join(" "),
+      username: screenName,
+      image: typeof u.photo_100 === "string" ? u.photo_100 : null,
+      deactivated: typeof u.deactivated === "string" ? u.deactivated : null,
+      isClosed: u.is_closed === true,
+    };
   } catch {
-    // non-fatal — fall through to default
+    return null;
   }
+}
+
+/** Backwards-compatible name-only helper for message copy. */
+export async function vkGetName(vkUserId: number): Promise<string> {
+  const profile = await vkGetProfile(vkUserId);
+  if (profile) return profile.name;
   return `VK #${vkUserId}`;
 }
 
