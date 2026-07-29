@@ -24,7 +24,6 @@ import {
   Clock,
   ExternalLink,
   Gamepad2,
-  Gift,
   Link2,
   LogOut,
   Package,
@@ -121,9 +120,34 @@ function orderHref(order: DashboardOrder) {
   return order.publicOrderId ? `/payment/status?orderId=${encodeURIComponent(order.publicOrderId)}` : null;
 }
 
-async function RobloxProfileSection({ userId, username }: { userId: string; username: string | null }) {
+async function RobloxProfileSection({
+  userId,
+  username,
+  fallbackName,
+  bonusAmount,
+  bonusCaption,
+  isAdmin,
+  activeOrderHref,
+}: {
+  userId: string;
+  username: string | null;
+  fallbackName: string;
+  bonusAmount: number;
+  bonusCaption: string;
+  isAdmin: boolean;
+  activeOrderHref: string | null;
+}) {
   const initial = await loadCustomerRobloxProfile(userId, username);
-  return <CustomerRobloxProfileCard initial={initial} />;
+  return (
+    <CustomerRobloxProfileCard
+      initial={initial}
+      fallbackName={fallbackName}
+      bonusAmount={bonusAmount}
+      bonusCaption={bonusCaption}
+      isAdmin={isAdmin}
+      activeOrderHref={activeOrderHref}
+    />
+  );
 }
 
 export default async function DashboardPage() {
@@ -210,6 +234,10 @@ export default async function DashboardPage() {
   const linkedProviders = user.identities.map((identity) => identity.provider);
   const identityNames = new Map(user.identities.map((identity) => [identity.provider, identity]));
   const bonusActive = user.balance > 0 && (!user.bonusExpiresAt || user.bonusExpiresAt > new Date());
+  const bonusAmount = bonusActive ? user.balance : 0;
+  const bonusCaption = bonusActive && user.bonusExpiresAt
+    ? `Доступно до ${formatDate(user.bonusExpiresAt)}`
+    : bonusActive ? "Готовы к следующему заказу" : "Появятся после акций и отзывов";
   const notices = buildCustomerNotices({
     orders: orders.map(({ id, kind, status, amountRobux, createdAt }) => ({ id, kind, status, amountRobux, createdAt })),
     balance: bonusActive ? user.balance : 0,
@@ -242,30 +270,17 @@ export default async function DashboardPage() {
       <Navbar />
       <div className={styles.shell}>
         <header className={styles.hero}>
-          <div className={styles.heroCopy}>
-            <span className={styles.heroBadge}><ShieldCheck size={15} /> Личный сейф</span>
-            <h1>Привет, <span>{greetingName}</span></h1>
-            <p>
-              Заказы, оплата и бонусы собраны в одном месте. Если нужен твой шаг — он будет первым в ленте.
-            </p>
-            <div className={styles.actions}>
-              <Link href={checkoutHref} className={styles.primary}><ShoppingCart size={18} /> Купить Robux</Link>
-              {isAdmin && (
-                <Link href="/admin" className={styles.adminAction}>
-                  <Shield size={18} /> Админка <ArrowRight size={17} />
-                </Link>
-              )}
-              {latestActive && orderHref(latestActive) && (
-                <Link href={orderHref(latestActive)!} className={styles.secondary}>Открыть активный заказ <ArrowRight size={17} /></Link>
-              )}
-            </div>
-          </div>
-          <div className={styles.vaultCard}>
-            <div className={styles.vaultTop}><span>Бонусный сейф</span><Gift size={20} /></div>
-            <strong>{bonusActive ? user.balance : 0}<small> R$</small></strong>
-            <p>{bonusActive && user.bonusExpiresAt ? `Доступно до ${formatDate(user.bonusExpiresAt)}` : bonusActive ? "Готовы к следующему заказу" : "Бонусы появятся после акций и отзывов"}</p>
-            <div className={styles.vaultLine}><i style={{ width: bonusActive ? "72%" : "12%" }} /></div>
-          </div>
+          <Suspense fallback={<div className={styles.robloxHeroLoading}>Загружаем Roblox-профиль…</div>}>
+            <RobloxProfileSection
+              userId={user.id}
+              username={knownRobloxUsername}
+              fallbackName={greetingName}
+              bonusAmount={bonusAmount}
+              bonusCaption={bonusCaption}
+              isAdmin={isAdmin}
+              activeOrderHref={latestActiveHref}
+            />
+          </Suspense>
         </header>
 
         <section className={styles.stats} aria-label="Краткая сводка">
@@ -360,16 +375,12 @@ export default async function DashboardPage() {
           </div>
 
           <aside className={styles.sidebar}>
-            <Suspense fallback={<section className={`${styles.profileCard} ${styles.robloxProfileLoading}`}>Загружаем профиль Roblox…</section>}>
-              <RobloxProfileSection userId={user.id} username={knownRobloxUsername} />
-            </Suspense>
             <section className={styles.profileCard}>
               <div className={styles.profileTop}>
                 <span className={styles.avatar}><User size={25} /></span>
                 <div><strong>{user.name ?? greetingName}</strong><span>{user.email ?? "Аккаунт RobloxBank"}</span></div>
               </div>
               <dl className={styles.profileRows}>
-                <div><dt>Ник Roblox</dt><dd><Gamepad2 size={15} /> {knownRobloxUsername ?? "Не указан"}</dd></div>
                 <div><dt>Клиент с</dt><dd>{formatDate(user.createdAt)}</dd></div>
                 {isAdmin && <div><dt>Роль</dt><dd>Администратор</dd></div>}
               </dl>

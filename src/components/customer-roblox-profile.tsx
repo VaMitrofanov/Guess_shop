@@ -1,8 +1,21 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useState } from "react";
-import { CheckCircle2, ExternalLink, Gamepad2, RefreshCw, Unlink, UserRound } from "lucide-react";
+import {
+  ArrowRight,
+  CheckCircle2,
+  ExternalLink,
+  Gamepad2,
+  Gift,
+  Pencil,
+  RefreshCw,
+  Shield,
+  ShoppingCart,
+  Unlink,
+  UserRound,
+} from "lucide-react";
 
 import type { CustomerRobloxProfile } from "@/lib/roblox-profile";
 import styles from "@/app/dashboard/dashboard.module.css";
@@ -13,12 +26,28 @@ type ProfilePayload = {
   suggestedUsername?: string | null;
 };
 
+type CustomerRobloxProfileCardProps = {
+  initial: ProfilePayload;
+  fallbackName: string;
+  bonusAmount: number;
+  bonusCaption: string;
+  isAdmin: boolean;
+  activeOrderHref: string | null;
+};
+
 function profileDate(value: string | null) {
   if (!value) return null;
   return new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(new Date(value));
 }
 
-export default function CustomerRobloxProfileCard({ initial }: { initial: ProfilePayload }) {
+export default function CustomerRobloxProfileCard({
+  initial,
+  fallbackName,
+  bonusAmount,
+  bonusCaption,
+  isAdmin,
+  activeOrderHref,
+}: CustomerRobloxProfileCardProps) {
   const [payload, setPayload] = useState(initial);
   const [editing, setEditing] = useState(!initial.profile && !initial.suggestedUsername);
   const [username, setUsername] = useState(initial.profile?.username ?? initial.suggestedUsername ?? "");
@@ -69,46 +98,77 @@ export default function CustomerRobloxProfileCard({ initial }: { initial: Profil
   };
 
   const profile = payload.profile;
+  const checkoutHref = profile ? `/checkout?username=${encodeURIComponent(profile.username)}` : "/checkout";
   return (
-    <section className={`${styles.profileCard} ${styles.robloxProfileCard}`} aria-label="Профиль Roblox">
-      <div className={styles.sideHead}>
-        <span><Gamepad2 size={18} /> Профиль Roblox</span>
-        {profile && <CheckCircle2 size={18} />}
-      </div>
-
-      {profile ? (
-        <>
-          <div className={styles.robloxProfileHero}>
-            <span className={styles.robloxAvatar}>
-              {profile.avatarUrl
-                ? <Image src={profile.avatarUrl} width={82} height={82} alt={`Аватар ${profile.username}`} unoptimized />
-                : <UserRound size={34} />}
-            </span>
-            <div>
-              <strong>{profile.displayName}</strong>
-              <span>@{profile.username}</span>
-              <small>{payload.status === "stale" || profile.stale ? "Последняя сохранённая версия" : "Найден в Roblox"}</small>
-            </div>
+    <div className={styles.robloxHeroShell} aria-label="Профиль Roblox">
+      <section className={styles.robloxHeroMain}>
+        <span className={styles.robloxHeroBadge}>
+          {profile ? <CheckCircle2 size={16} /> : <Gamepad2 size={16} />}
+          {profile ? "Мой Roblox" : "Личный кабинет"}
+        </span>
+        <div className={styles.robloxHeroIdentity}>
+          <span className={styles.robloxHeroAvatar}>
+            {profile?.avatarUrl
+              ? <Image src={profile.avatarUrl} width={108} height={108} alt={`Аватар ${profile.username}`} unoptimized />
+              : <UserRound size={42} />}
+          </span>
+          <div className={styles.robloxHeroCopy}>
+            {!profile && <small className={styles.robloxHeroGreeting}>Привет, {fallbackName}</small>}
+            <h1 className={styles.robloxHeroTitle}>{profile?.displayName ?? "Подключи Roblox-профиль"}</h1>
+            <span className={styles.robloxHeroUsername}>{profile ? `@${profile.username}` : "Один профиль — быстрые покупки без повторного ввода ника"}</span>
+            <small className={styles.robloxHeroStatus}>
+              {profile
+                ? payload.status === "stale" || profile.stale ? "Последняя сохранённая версия" : "Публичные данные подтверждены Roblox"
+                : "Ник из старого заказа можно предложить, но привязка происходит только после твоего подтверждения"}
+            </small>
           </div>
-          {profile.description && <p className={styles.robloxDescription}>{profile.description}</p>}
-          <dl className={styles.profileRows}>
-            <div><dt>Roblox ID</dt><dd>{profile.id}</dd></div>
-            {profileDate(profile.createdAt) && <div><dt>Аккаунт с</dt><dd>{profileDate(profile.createdAt)}</dd></div>}
-          </dl>
-          <div className={styles.robloxActions}>
-            <a href={profile.profileUrl} target="_blank" rel="noopener noreferrer">Открыть в Roblox <ExternalLink size={14} /></a>
-            <button type="button" onClick={() => { setEditing((value) => !value); setMessage(null); }}>Сменить</button>
-            <button type="button" onClick={disconnect} disabled={busy} aria-label="Отвязать Roblox"><Unlink size={15} /></button>
-          </div>
-        </>
-      ) : (
-        <div className={styles.robloxEmpty}>
-          <span><Gamepad2 size={25} /></span>
-          <strong>Добавьте Roblox-профиль</strong>
-          <p>Покажем аватар, display name и прямую ссылку на профиль.</p>
-          {!editing && <button type="button" onClick={() => setEditing(true)}>Найти профиль</button>}
         </div>
-      )}
+        {profile?.description && <p className={styles.robloxHeroDescription}>{profile.description}</p>}
+        <div className={styles.actions}>
+          <Link href={checkoutHref} className={styles.primary}>
+            <ShoppingCart size={18} /> {profile ? "Купить на этот аккаунт" : "Купить Robux"}
+          </Link>
+          {profile && (
+            <a href={profile.profileUrl} target="_blank" rel="noopener noreferrer" className={styles.secondary}>
+              Открыть профиль <ExternalLink size={16} />
+            </a>
+          )}
+          {activeOrderHref && <Link href={activeOrderHref} className={styles.secondary}>Активный заказ <ArrowRight size={17} /></Link>}
+          {isAdmin && <Link href="/admin" className={styles.adminAction}><Shield size={18} /> Админка <ArrowRight size={17} /></Link>}
+        </div>
+      </section>
+
+      <aside className={styles.robloxHeroRail} aria-label="Данные профиля и бонусы">
+        <div className={styles.robloxBonusCompact}>
+          <span><Gift size={18} /> Бонусы</span>
+          <strong>{bonusAmount}<small> R$</small></strong>
+          <p>{bonusCaption}</p>
+          <i aria-hidden="true"><b style={{ width: bonusAmount > 0 ? "72%" : "12%" }} /></i>
+        </div>
+        <div className={styles.robloxMetaCard}>
+          <div className={styles.sideHead}>
+            <span><Gamepad2 size={18} /> Профиль Roblox</span>
+            {profile && <CheckCircle2 size={18} />}
+          </div>
+          {profile ? (
+            <>
+              <dl className={styles.profileRows}>
+                <div><dt>Roblox ID</dt><dd>{profile.id}</dd></div>
+                {profileDate(profile.createdAt) && <div><dt>Аккаунт с</dt><dd>{profileDate(profile.createdAt)}</dd></div>}
+              </dl>
+              <div className={styles.robloxProfileControls}>
+                <button type="button" onClick={() => { setEditing((value) => !value); setMessage(null); }}><Pencil size={15} /> Сменить</button>
+                <button type="button" onClick={disconnect} disabled={busy} aria-label="Отвязать Roblox"><Unlink size={15} /></button>
+              </div>
+            </>
+          ) : (
+            <div className={styles.robloxConnectPrompt}>
+              <p>Добавь ник — покажем настоящий аватар и будем подставлять аккаунт в покупку.</p>
+              {!editing && <button type="button" onClick={() => setEditing(true)}>Подключить профиль</button>}
+            </div>
+          )}
+        </div>
+      </aside>
 
       {editing && (
         <div className={styles.robloxEditor}>
@@ -123,6 +183,6 @@ export default function CustomerRobloxProfileCard({ initial }: { initial: Profil
         </div>
       )}
       {message && <p className={styles.robloxMessage} role="status">{message}</p>}
-    </section>
+    </div>
   );
 }

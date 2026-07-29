@@ -106,7 +106,14 @@ export async function loadCustomerRobloxProfile(userId: string, suggestedUsernam
   const cached = cachedProfile(user);
   if (cached && !cached.stale) return { status: "ok" as const, profile: cached, suggestedUsername: user.robloxUsername };
 
-  const username = user.robloxUsername ?? suggestedUsername ?? null;
+  // A nick from an old order is only a convenience hint. Persisting it here
+  // would silently turn historical order data into a profile link and would
+  // also reconnect a profile after the customer explicitly unlinked it.
+  if (!user.robloxUsername && !user.robloxUserId) {
+    return { status: "missing-username" as const, profile: null, suggestedUsername: suggestedUsername ?? null };
+  }
+
+  const username = user.robloxUsername;
   const refreshed = await refreshCustomerRobloxProfile(userId, username);
   return { ...refreshed, suggestedUsername: username };
 }
