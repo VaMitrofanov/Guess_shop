@@ -45,7 +45,7 @@ export function calculatePriceQuote(
   const bonusRobux = bonusIsActive && requestedRobux >= BONUS_MIN_PACK
     ? Math.max(0, customer.balance ?? 0)
     : 0;
-  const baseAmountKopecks = directPrice(requestedRobux) * 100;
+  const baseAmountKopecks = Math.round(directPrice(requestedRobux) * 100);
   // The bot policy has no promo expiry gate: an operator removes the one-shot
   // discount at redemption. Keeping that rule here preserves channel parity.
   const discountKopecks = Math.min(baseAmountKopecks, Math.max(0, customer?.rubleDiscount ?? 0) * 100);

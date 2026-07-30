@@ -732,7 +732,8 @@ async function handleDirectPackChosen(bot: Telegraf, ctx: any, amt: number): Pro
   }
 
   const discountLine = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
-  const rateLine = amt >= 1000 ? `📊 Курс:            ${customRate(amt)} ₽/R$\n` : "";
+  const customerRate = totalAmount > 0 ? rublePrice / totalAmount : customRate(amt);
+  const rateLine = `📊 Твой курс:       ${customerRate.toFixed(3)} ₽/R$\n`;
   const bonusText =
     `${stepBar(2, 5, "Бонус")}\n\n` +
     `🎁 У тебя бонус <b>+${bonus} R$</b> — использовать в этом заказе?\n\n` +
@@ -826,6 +827,7 @@ async function showSummary(ctx: any, flow: DirectFlowState, gpRobux: number, gpN
     `📦 Получишь:    <b>${flow.totalAmount} R$</b>${bonusLine}\n` +
     `🎮 Ник:         <b>${escapeHtml(flow.robloxUsername!)}</b>\n` +
     `🎫 Геймпасс:    <b>${gpRobux} R$</b> · "${escapeHtml(gpName.slice(0, 30))}"${discountLine}\n` +
+    `📊 Твой курс:   <b>${(flow.rublePrice! / flow.totalAmount!).toFixed(3)} ₽/R$</b>\n` +
     `💰 К оплате:    <b>${fmtRub(flow.rublePrice!)}</b>` +
     mpLine + wrongPriceLine;
 

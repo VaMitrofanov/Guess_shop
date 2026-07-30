@@ -14,8 +14,8 @@ const RATES: EconomicsRates = {
   usdToRub: 85, rateUsdPer1k: 4.3, taxPct: 30,
   acquiringPct: 0, receiptPct: 0, usnPct: 0, usnMode: "income",
 };
-/** Боевой контур: эквайринг 2.9% + «Чеки» 1.5% + УСН «Доходы» 6%. */
-const FEES: EconomicsRates = { ...RATES, acquiringPct: 2.9, receiptPct: 1.5, usnPct: 6 };
+/** Консервативная обычная оплата: эквайринг 3.49% + УСН «Доходы» 6%. */
+const FEES: EconomicsRates = { ...RATES, acquiringPct: 3.49, receiptPct: 0, usnPct: 6 };
 const PRICES: Record<number, number> = { 100: 160, 200: 260, 500: 450, 1000: 800 };
 
 const order = (over: Partial<EconomicsOrder> = {}): EconomicsOrder => ({
@@ -64,11 +64,9 @@ describe("modelPriceKop", () => {
     expect(modelPriceKop(1000, PRICES)).toBe(80_000);
   });
 
-  it("нестандартный объём считает по той же лесенке, что бот", () => {
-    // 300 R$: ставка 1 ₽/R$ + надбавка 60 ₽ за малый заказ.
-    expect(modelPriceKop(300, PRICES)).toBe(36_000);
-    // 800 R$: ставка 0.9 ₽/R$, надбавки нет.
-    expect(modelPriceKop(800, PRICES)).toBe(72_000);
+  it("нестандартный объём считает по той же динамической кривой, что бот", () => {
+    expect(modelPriceKop(300, PRICES)).toBe(38_200);
+    expect(modelPriceKop(800, PRICES)).toBe(83_100);
   });
 });
 
@@ -123,10 +121,9 @@ describe("computeTotals", () => {
 });
 
 describe("эквайринг и налог", () => {
-  it("эквайринг берётся с платежа: комиссия банка плюс «Чеки»", () => {
+  it("эквайринг берётся с полной суммы платежа", () => {
     const r = computeOrder(order({ revenueKopecks: 100_000 }), FEES, PRICES);
-    // 1000 ₽ × (2.9% + 1.5%) = 44 ₽
-    expect(r.acquiringKop).toBe(4_400);
+    expect(r.acquiringKop).toBe(3_490);
   });
 
   it("УСН «Доходы» считает налог со всей выручки, а не с прибыли", () => {
@@ -166,7 +163,7 @@ describe("эквайринг и налог", () => {
   it("итоги вычитают комиссии и налог из общей прибыли", () => {
     const rows = [computeOrder(order({ revenueKopecks: 100_000 }), FEES, PRICES)];
     const t = computeTotals(rows);
-    expect(t.acquiringKop).toBe(4_400);
+    expect(t.acquiringKop).toBe(3_490);
     expect(t.usnKop).toBe(6_000);
     expect(t.profitKop).toBe(t.grossProfitKop - t.acquiringKop - t.usnKop);
   });

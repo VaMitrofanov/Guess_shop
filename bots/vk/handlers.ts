@@ -2521,7 +2521,8 @@ async function handleDirectPackSelect(ctx: MessageContext, vkUserId: number, amo
   setState(vkUserId, { type: "AWAITING_DIRECT_CONFIRM", ...flowData });
 
   const discountLine = discount > 0 ? `💰 Скидка:          −${discount} ₽\n` : "";
-  const rateLine = amount >= 1000 ? `📊 Курс:            ${customRate(amount)} ₽/R$\n` : "";
+  const customerRate = totalAmount > 0 ? rublePrice / totalAmount : customRate(amount);
+  const rateLine = `📊 Твой курс:       ${customerRate.toFixed(3)} ₽/R$\n`;
 
   const kb = Keyboard.builder();
   kb.textButton({ label: `✅ С бонусом (+${bonus} R$)`, payload: { command: "direct_confirm" }, color: "positive" });
@@ -2745,6 +2746,7 @@ async function showVkSummary(ctx: MessageContext, flowState: { totalAmount: numb
     `📦 Получишь:    ${flowState.totalAmount} R$${bonusLine}\n` +
     `🎮 Ник:         ${nick}\n` +
     `🎫 Геймпасс:    ${gpRobux} R$ · "${gpName.slice(0, 30)}"${discountLine}\n` +
+    `📊 Твой курс:   ${(flowState.rublePrice / flowState.totalAmount).toFixed(3)} ₽/R$\n` +
     `💰 К оплате:    ${fmtRub(flowState.rublePrice)}` +
     mpLine + wrongPriceLine;
 

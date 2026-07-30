@@ -15,6 +15,7 @@ import Navbar from "@/components/navbar";
 import Footer from "@/components/footer";
 import Calculator from "@/components/calculator";
 import { CODE_DENOMINATIONS } from "@/lib/codes-pricing";
+import { directPrice } from "@/lib/retail-pricing";
 import styles from "./storefront.module.css";
 
 // D11: canonical объявляется на самой странице, а не в корневом layout —
@@ -57,6 +58,7 @@ const assurances = [
 // D4: номиналы показываем как анонс, без цены — товар пока не продаётся,
 // а цена непродающегося товара это и вопрос к конверсии, и вопрос банка.
 const codeDenominations = [...CODE_DENOMINATIONS];
+const minimumGamepassPrice = directPrice(100);
 
 export default function Home() {
   return (
@@ -111,7 +113,7 @@ export default function Home() {
           <a href="#calculator" className={styles.gamepassHeroCard} aria-label="Перейти к покупке через геймпасс">
             <div className={styles.methodTopline}>
               <span><Gamepad2 size={14} /> Основной способ</span>
-              <small>от 160 ₽</small>
+              <small>от {minimumGamepassPrice.toLocaleString("ru-RU")} ₽</small>
             </div>
             <div className={styles.methodCopy}>
               <span className={styles.methodIcon}><Gamepad2 size={24} /></span>

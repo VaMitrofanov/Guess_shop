@@ -226,7 +226,10 @@ robloxUsername, userId+createdAt).
   `consumedAt` выставляется атомарно до создания сессии/merge. Migration
   `20260715_telegram_web_login_challenge` применена к production 2026-07-15.
 - `PricingPolicy` хранит версию и JSON-представление опубликованной политики; расчёт
-  `retail-direct-v1` остаётся чистой общей функцией `bots/shared/retail-pricing.ts`.
+  `retail-direct-v2` остаётся чистой общей функцией `bots/shared/retail-pricing.ts`.
+  Migration `20260730_retail_dynamic_net_pricing` применена к production 2026-07-30:
+  закрывает v1 и активирует кривую владельца с gross-up на УСН 6% и
+  `max(3,49 ₽; 3,49%)`.
 - `PriceQuote` фиксирует на 15 минут версию, сумму R$, бонус, скидку и итог в **целых
   копейках**. `POST /api/pricing/quote` создаёт запись для гостя или текущего User.
 

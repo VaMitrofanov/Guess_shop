@@ -1,4 +1,4 @@
-import { customRate } from "@/lib/retail-pricing";
+import { directPrice } from "@/lib/retail-pricing";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Модель экономики не-WB заказов: типы и чистые функции расчёта.
@@ -55,14 +55,13 @@ export type UsnMode = "income" | "income-minus-expenses";
 /**
  * Стартовые ставки платёжного контура.
  *
- * `receiptPct` = 1.5 — не догадка: столько удерживает сервис «Чеки» Т-Банка
- * (`docs/payments-and-kkt.md`, решение владельца 16.07). `acquiringPct` и
- * `usnPct` — предположения (типовой интернет-эквайринг и УСН «Доходы»);
- * в экране они правятся и подписаны как требующие сверки с договором.
+ * Владелец 30.07 зафиксировал консервативную ставку обычной оплаты 3.49% и
+ * УСН «Доходы» 6%. Отдельные 1.5% «Чеков» не включаются без подтверждения,
+ * что платный сервис действительно активен в кабинете Т-Банка.
  */
 export const DEFAULT_FEE_RATES = {
-  acquiringPct: 2.9,
-  receiptPct: 1.5,
+  acquiringPct: 3.49,
+  receiptPct: 0,
   usnPct: 6,
   usnMode: "income" as UsnMode,
 };
@@ -107,8 +106,7 @@ export function modelPriceKop(netRobux: number, prices: Record<number, number>):
   if (netRobux <= 0) return 0;
   const listed = prices[netRobux];
   if (listed !== undefined) return listed * 100;
-  const surcharge = netRobux < 500 ? 60 : 0;
-  return Math.round(customRate(netRobux) * netRobux + surcharge) * 100;
+  return directPrice(netRobux) * 100;
 }
 
 export interface ComputedOrder {

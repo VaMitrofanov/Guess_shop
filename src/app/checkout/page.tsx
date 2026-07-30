@@ -77,6 +77,10 @@ type CustomerRobloxProfileLike = KnownRobloxAccount;
 
 const normalizeAmount = (value: string) => Math.min(MAX_ROBUX, Math.max(MIN_ROBUX, Number.parseInt(value, 10) || 1000));
 const grossPassPrice = (amount: number) => Math.ceil(amount / 0.7);
+const formatCustomerRate = (rate: number) => rate.toLocaleString("ru-RU", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 3,
+});
 
 function CheckoutContent() {
   const searchParams = useSearchParams();
@@ -114,6 +118,10 @@ function CheckoutContent() {
   const [error, setError] = useState("");
   const idempotencyKey = useRef(crypto.randomUUID());
 
+  const customerRate = quote
+    ? (quote.finalAmountKopecks / 100) / Math.max(1, quote.requestedRobux + quote.bonusRobux)
+    : getBreakdown(robux).rubPerRobux;
+
   const setOrderAmount = (nextAmount: number, syncInput = true) => {
     const normalized = normalizeAmount(String(nextAmount));
     setRobux(normalized);
@@ -143,7 +151,6 @@ function CheckoutContent() {
   };
 
   const price = getPrice(robux);
-  const breakdown = getBreakdown(robux);
   const expectedPassPrice = useMemo(() => grossPassPrice(robux), [robux]);
   const selectedPriceMatches = !!selectedPass && gamepassPriceMatches(Number(selectedPass.price), expectedPassPrice);
   const repeatBuyerFlow = authenticated === true && knownAccounts.length > 0;
@@ -656,6 +663,7 @@ function CheckoutContent() {
               <div><span>Получишь</span><strong>{robux.toLocaleString("ru-RU")} R$</strong></div>
               <div><span>Аккаунт</span><strong>@{username}</strong></div>
               <div><span>Цена геймпасса</span><strong>{expectedPassPrice.toLocaleString("ru-RU")} R$</strong></div>
+              <div><span>Твой курс</span><strong>{formatCustomerRate(customerRate)} ₽/R$</strong></div>
               {!!quote?.discountKopecks && <div><span>Скидка</span><strong>−{(quote.discountKopecks / 100).toLocaleString("ru-RU")} ₽</strong></div>}
             </div>
             <div className={styles.safeNote}><ShieldCheck size={19} /><span><strong>{quote ? "Цена зафиксирована" : "Готовим точную цену"}</strong><small>Пароль Roblox не нужен.</small></span></div>
@@ -801,7 +809,7 @@ function CheckoutContent() {
             <div className={styles.summaryRows}>
               <div><span>Получишь</span><strong>{quote ? (quote.requestedRobux + quote.bonusRobux).toLocaleString("ru-RU") : robux.toLocaleString("ru-RU")} R$</strong></div>
               <div><span>Цена пасса</span><strong>{quote?.gamepassPriceRobux.toLocaleString("ru-RU")} R$</strong></div>
-              <div><span>Курс</span><strong>{breakdown.rubPerRobux} ₽/R$</strong></div>
+              <div><span>Твой курс</span><strong>{formatCustomerRate(customerRate)} ₽/R$</strong></div>
               {!!quote?.discountKopecks && <div><span>Скидка</span><strong>−{(quote.discountKopecks / 100).toLocaleString("ru-RU")} ₽</strong></div>}
             </div>
             <div className={styles.safeNote}><ShieldCheck size={19} /><span><strong>{!authenticated ? "Выбор сохранён" : acquiringEnabled ? "Цена зафиксирована" : "Денежные операции заблокированы"}</strong><small>{!authenticated ? "После входа обновим персональную цену." : acquiringEnabled ? "До окончания котировки." : "До допуска аккаунта к оплате."}</small></span></div>

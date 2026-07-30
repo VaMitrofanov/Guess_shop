@@ -45,7 +45,7 @@
 | Webhook | `src/app/api/webhooks/tinkoff/route.ts` | Проверяет подпись/terminal/сумму; **не содержит ни одной ссылки на `SITE`/`WEB`** — источник заказа ему не важен |
 | Возвраты | `src/app/api/twa/payments/refund/route.ts` | Работает от внутреннего `orderId`, дефект чека U7 закрыт |
 | Outbox | `bots/shared/payment-outbox.ts` | Топики `payment.confirmed`, `payment.refund.recorded` уже доставляются в TG |
-| Цены | `bots/shared/retail-pricing.ts` | `retail-direct-v1` — **один модуль на TG, VK и сайт**. Паки бота уже совпадают с ценами сайта |
+| Цены | `bots/shared/retail-pricing.ts` | `retail-direct-v2` — **один модуль на TG, VK и сайт**. Динамическая цена и клиентский курс совпадают во всех каналах |
 | Пользователь | `User` в Prisma | Клиент бота — уже полноценный `User` (371 TG + 218 VK), поэтому rollout-гейт по `User.id` применим напрямую |
 | Kill switch | `SITE_ACQUIRING_ENABLED` | Аварийное выключение работает и для ботов |
 
@@ -104,13 +104,13 @@
 ## 4. Как это выглядит для покупателя
 
 ```
-Покупатель в боте:  выбирает пак 1000 R$ → 800 ₽
+Покупатель в боте:  выбирает пакет 1000 R$ → 995 ₽ (курс 0,995 ₽/R$)
 Бот (первый заказ): «Куда прислать чек?» → email/телефон
                     «Согласен с офертой?» → [Согласен]
 Бот → сайт:         POST /api/bot/orders/create (HMAC бота)
-Сайт → Т‑Банк:      Init (сумма из retail-direct-v1, Receipt, NotificationURL)
+Сайт → Т‑Банк:      Init (сумма из retail-direct-v2, Receipt, NotificationURL)
 Сайт → бот:         paymentUrl
-Бот → покупателю:   [💳 Оплатить 800 ₽]  ← официальная платёжка Т‑Банка
+Бот → покупателю:   [💳 Оплатить 995 ₽]  ← официальная платёжка Т‑Банка
 Покупатель:         платит картой/СБП, чек приходит на email/телефон
 Т‑Банк → webhook:   CONFIRMED (подпись проверена)
 Outbox → бот:       карточка админу + сообщение покупателю «оплата принята»

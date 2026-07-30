@@ -40,7 +40,8 @@
 его заказы и бонусы не теряются. Legacy `vkId`/`tgId` переходно сохраняются для ботов;
 TG web-login и TG→current-account step-up merge реализованы через две свежие provider proofs;
 VK link/unlink и recovery-console остаются следующими инкрементами. Цена прямого заказа в TG/VK/Web
-считается одной чистой `retail-direct-v1` функцией; серверный `PriceQuote` хранит итог в
+считается одной чистой `retail-direct-v2` функцией: динамический целевой net-курс gross-up'ится
+на УСН 6% и `max(3,49 ₽; 3,49%)`, а клиент видит фактические ₽/R$. Серверный `PriceQuote` хранит итог в
 копейках и одноразово потребляется новым `WbOrder(SITE/WEB)`. `PaymentAttempt`, `OrderEvent`
 и `OutboxMessage` образуют durable payment boundary; TG-сервис исполняет outbox с retry/dead-letter,
 а refund имеет отдельный идемпотентный audit. Production Init закрыт kill-switch до внешних

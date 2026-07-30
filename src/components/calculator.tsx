@@ -9,6 +9,10 @@ import styles from "@/app/storefront.module.css";
 
 const PACKS = [500, 1000, 2000, 5000];
 const grossPassPrice = (amount: number) => Math.ceil(amount / 0.7);
+const formatCustomerRate = (rate: number) => rate.toLocaleString("ru-RU", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 3,
+});
 
 type LookupState = {
   status: "idle" | "loading" | "ready" | "wrong-price" | "no-passes" | "not-found" | "error";
@@ -130,7 +134,7 @@ export default function Calculator() {
         <div className={styles.total}><span>К оплате</span><strong>{loading ? "…" : `${price.toLocaleString("ru-RU")} ₽`}</strong></div>
       </div>
       {!loading && amount > 0 && (
-        <p className={styles.tierNote}>Расчёт: {breakdown.rubPerRobux} ₽/R${breakdown.smallOrderSurcharge ? ` + ${breakdown.smallOrderSurcharge} ₽` : ""}</p>
+        <p className={styles.tierNote}>Твой курс: {formatCustomerRate(breakdown.rubPerRobux)} ₽/R$ · уже с УСН и комиссией оплаты</p>
       )}
       <label className={styles.nicknameLabel} htmlFor="calculator-username">Куда зачислить Robux</label>
       <div className={`${styles.nicknameField} ${validUsername ? styles.nicknameFieldReady : ""}`}>
