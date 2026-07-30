@@ -134,7 +134,7 @@ export default function Calculator() {
         <div className={styles.total}><span>К оплате</span><strong>{loading ? "…" : `${price.toLocaleString("ru-RU")} ₽`}</strong></div>
       </div>
       {!loading && amount > 0 && (
-        <p className={styles.tierNote}>Твой курс: {formatCustomerRate(breakdown.rubPerRobux)} ₽/R$ · уже с УСН и комиссией оплаты</p>
+        <p className={styles.tierNote}>Твой курс: {formatCustomerRate(breakdown.rubPerRobux)} ₽/R$</p>
       )}
       <label className={styles.nicknameLabel} htmlFor="calculator-username">Куда зачислить Robux</label>
       <div className={`${styles.nicknameField} ${validUsername ? styles.nicknameFieldReady : ""}`}>
