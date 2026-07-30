@@ -24,6 +24,8 @@ export interface PartnerBuyoutNotifyItem {
   robux: number;
   /** USDT actually debited from the partner ledger for this task. */
   usdt: number;
+  /** Sale rate pinned for this order, USDT per 1000 R$. */
+  rate?: number;
 }
 
 export interface PartnerBuyoutCardInput {
@@ -83,7 +85,8 @@ export function buildPartnerBuyoutCard(input: PartnerBuyoutCardInput): string {
   const lines = input.items.slice(0, MAX_ITEM_LINES).map((it) => {
     const nick = it.nick ? escapeHtml(it.nick) : "—";
     const gp = it.gamepassId ? `GP ${escapeHtml(it.gamepassId)}` : "GP —";
-    return `• ${nick} · ${gp} · ${fmtRobux(it.robux)} R$`;
+    const rate = Number.isFinite(it.rate) ? ` · ${it.rate}/1000` : "";
+    return `• ${nick} · ${gp} · ${fmtRobux(it.robux)} R$${rate}`;
   });
   const moreLine = n > MAX_ITEM_LINES ? `…и ещё ${n - MAX_ITEM_LINES}` : null;
 
@@ -91,12 +94,20 @@ export function buildPartnerBuyoutCard(input: PartnerBuyoutCardInput): string {
     input.failCount && input.failCount > 0 ? `⚠️ Ошибок в пачке: <b>${input.failCount}</b>\n` : "";
   const operatorLine = input.operator ? `👤 Оператор: ${escapeHtml(input.operator)}\n` : "";
 
+  const itemRates = [...new Set(input.items
+    .map((item) => item.rate)
+    .filter((rate): rate is number => Number.isFinite(rate)))]
+    .sort((a, b) => a - b);
+  const rateLabel = itemRates.length === 0
+    ? String(input.rate)
+    : itemRates.join(" / ");
+
   return (
     `🤝 <b>ВЫКУП ПАРТНЁРА · ${escapeHtml(input.partnerName)}</b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
     `📦 Выкуплено: <b>${n} ${pluralizeGamepass(n)}</b>\n` +
     `💎 Сумма: <b>${fmtRobux(input.totalRobux)} R$</b> ≈ <b>${fmtUsdt(input.totalUsdt)} USDT</b>\n` +
-    `💱 Курс: <b>${input.rate} USDT / 1000 R$</b>\n` +
+    `💱 ${itemRates.length > 1 ? "Курсы заказов" : "Курс"}: <b>${rateLabel} USDT / 1000 R$</b>\n` +
     `👛 Остаток баланса: <b>${fmtUsdt(input.balanceUsdt)} USDT</b>\n` +
     failLine +
     operatorLine +

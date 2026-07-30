@@ -5,7 +5,7 @@ import { haptic } from "../haptics";
 import { toast } from "../Toast";
 import CreateManualModal from "../CreateManualModal";
 import { groupPartnerLedgerEntries, type PartnerLedgerRow } from "@/lib/partner-ledger";
-import { computePartnerSettlement, type PartnerRateBasisValue } from "@/lib/partner-economics";
+import { computePartnerSettlement, partnerOrderRateUsdtPer1000, type PartnerRateBasisValue } from "@/lib/partner-economics";
 /** Неоплаченный прямой заказ — исключается из всех путей выкупа (П5). */
 import { isUnpaidDirect } from "@/lib/buyout-queue";
 import { ChevronRight, CircleAlert, Droplets, History, KeyRound, MoreHorizontal, RefreshCw, Search, ShoppingBag } from "lucide-react";
@@ -50,6 +50,7 @@ interface PartnerSheetRaw {
   rowHash?: string;
   contentHash?: string;
   sheetPriceRobux?: number | null;
+  sheetRateUsdtPer1000?: number | null;
   priceMismatch?: boolean;
   closedFromSheet?: boolean;
   importedDoneFromSheet?: boolean;
@@ -2390,7 +2391,7 @@ function fmtUsdt(value: number | null | undefined) {
 function partnerTaskCostUsdt(
   priceRobux: number | null | undefined,
   rate: number,
-  rateBasis: PartnerRateBasisValue = "NET",
+  rateBasis: PartnerRateBasisValue = "DIRTY",
   robloxFeePct = 30,
 ) {
   if (!priceRobux) return 0;
@@ -2401,6 +2402,10 @@ function partnerTaskCostUsdt(
     rateBasis,
     robloxFeePct,
   }).revenueUsdt;
+}
+
+function partnerTaskRate(task: Pick<PartnerTask, "sheetRaw">, fallbackRate: number) {
+  return partnerOrderRateUsdtPer1000(task.sheetRaw, fallbackRate);
 }
 
 function fmtSyncAgo(value: string | null | undefined) {
@@ -2472,7 +2477,8 @@ function PartnerTaskRow({
   const canClose = task.status !== "DONE" && task.status !== "CANCELLED" && task.status !== "PURCHASING";
   const title = task.sellerName || task.robloxUsername || (task.gamepassId ? `ГП ${task.gamepassId}` : "Геймпасс");
   const price = task.priceRobux ?? task.purchasePriceRobux;
-  const costUsdt = partnerTaskCostUsdt(price, rateUsdtPer1000, rateBasis, robloxFeePct);
+  const taskRate = partnerTaskRate(task, rateUsdtPer1000);
+  const costUsdt = partnerTaskCostUsdt(price, taskRate, rateBasis, robloxFeePct);
   const googleRow = task.externalSource === "GOOGLE_SHEETS" && task.sheetRaw?.sheetTitle && task.sheetRaw?.rowNumber
     ? `${task.sheetRaw.sheetTitle}:${task.sheetRaw.rowNumber}`
     : null;
@@ -2555,7 +2561,7 @@ function PartnerTaskRow({
           </div>
           {price != null && (
             <div style={{ marginTop: 3, fontSize: 14, color: C.textTertiary, fontWeight: 700, ...tabular }}>
-              {fmtUsdt(costUsdt)}
+              {fmtUsdt(costUsdt)} · курс {fmtRate(taskRate)}
             </div>
           )}
           <div style={{ marginTop: 4 }}>
@@ -2624,7 +2630,7 @@ function PartnerMismatchConfirm({ task, rate, rateBasis, robloxFeePct, busy, onC
 }) {
   const gpPrice = task.priceRobux ?? task.purchasePriceRobux ?? 0;
   const sheetPrice = task.sheetRaw?.sheetPriceRobux ?? null;
-  const costUsdt = partnerTaskCostUsdt(gpPrice, rate, rateBasis, robloxFeePct);
+  const costUsdt = partnerTaskCostUsdt(gpPrice, partnerTaskRate(task, rate), rateBasis, robloxFeePct);
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
       onClick={e => { if (e.target === e.currentTarget && !busy) onCancel(); }}>
@@ -2687,7 +2693,7 @@ function buildPartnerBuyoutPlan(
   const waiting: PartnerTask[] = [];
   for (const t of ready) {
     const price = t.priceRobux ?? t.purchasePriceRobux ?? 0;
-    const cost = partnerTaskCostUsdt(price, rateUsdtPer1000, rateBasis, robloxFeePct);
+    const cost = partnerTaskCostUsdt(price, partnerTaskRate(t, rateUsdtPer1000), rateBasis, robloxFeePct);
     if (usdt + cost <= balanceUsdt) {
       selected.push(t);
       usdt += cost;
@@ -2952,7 +2958,7 @@ function PartnerRateSheet({ busy, currentRate, purchaseRate, rateBasis, robloxFe
           <span style={{ fontSize: 20, fontWeight: 700, color: C.textSecondary, ...tabular }}>{fmtRate(currentRate)}</span>
           <span style={{ fontSize: 20, fontWeight: 700, color: C.textTertiary }}> → </span>
           <span style={{ fontSize: 20, fontWeight: 700, color: C.accent, ...tabular }}>{fmtRate(parsed)}</span>
-          <div style={{ marginTop: 4, fontSize: 14, color: C.textSecondary }}>USDT / 1000 чистых R$</div>
+          <div style={{ marginTop: 4, fontSize: 14, color: C.textSecondary }}>USDT / 1000 R$ из таблицы</div>
         </div>
         <div style={{ background: tint(C.orange, 0.12), borderRadius: 10, padding: "10px 12px", marginBottom: 12, fontSize: 14, color: C.orange, lineHeight: 1.35 }}>
           Применится только к будущим выкупам. Уже выкупленные заказы зафиксированы по курсу на момент выкупа.
@@ -3347,14 +3353,14 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
     let ok = 0;
     const purchaseBatchId = globalThis.crypto.randomUUID();
     const rateVal = summary?.robuxRateUsdtPer1000 ?? state?.partner.robuxRateUsdtPer1000 ?? 5.3;
-    const basisVal = summary?.rateBasis ?? state?.partner.rateBasis ?? "NET";
+    const basisVal: PartnerRateBasisValue = "DIRTY";
     const feeVal = summary?.robloxFeePct ?? state?.partner.robloxFeePct ?? 30;
     try {
       for (let i = 0; i < queue.length; i++) {
         if (bulkStopRef.current) break;
         const t = queue[i];
         const price = t.priceRobux ?? t.purchasePriceRobux ?? 0;
-        const usdt = partnerTaskCostUsdt(price, rateVal, basisVal, feeVal);
+        const usdt = partnerTaskCostUsdt(price, partnerTaskRate(t, rateVal), basisVal, feeVal);
         if (i > 0) await new Promise(r => setTimeout(r, 2000 + Math.floor(Math.random() * 6000)));
         if (bulkStopRef.current) break;
         setBulkProgress({ done: i, total: queue.length, current: t.robloxUsername || `GP ${t.gamepassId}` });
@@ -3414,12 +3420,20 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
       const report = d.bulkDoneReport;
       if (report) {
         const rateVal = summary?.robuxRateUsdtPer1000 ?? state?.partner.robuxRateUsdtPer1000 ?? 5.3;
-        const basisVal = summary?.rateBasis ?? state?.partner.rateBasis ?? "NET";
+        const basisVal: PartnerRateBasisValue = "DIRTY";
         const feeVal = summary?.robloxFeePct ?? state?.partner.robloxFeePct ?? 30;
         const items: PartnerBatchItem[] = report.results.map((r: any) => {
           const task = (state?.tasks ?? []).find(t => t.id === r.taskId);
           const robux = task ? (task.priceRobux ?? task.purchasePriceRobux ?? 0) : 0;
-          return { taskId: r.taskId, gamepassId: task?.gamepassId ?? null, nick: task?.robloxUsername ?? null, robux, usdt: partnerTaskCostUsdt(robux, rateVal, basisVal, feeVal), ok: r.ok, reason: r.reason };
+          return {
+            taskId: r.taskId,
+            gamepassId: task?.gamepassId ?? null,
+            nick: task?.robloxUsername ?? null,
+            robux,
+            usdt: partnerTaskCostUsdt(robux, task ? partnerTaskRate(task, rateVal) : rateVal, basisVal, feeVal),
+            ok: r.ok,
+            reason: r.reason,
+          };
         });
         setBulkReport({ items, totalRobux: report.totalRobux, totalUsdt: report.totalUsdt, ok: report.ok, fail: report.fail });
         notifyBuyout(items.filter(x => x.ok).map(x => x.taskId), report.fail);
@@ -3441,7 +3455,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
   const summary = state?.summary;
   const rate = summary?.robuxRateUsdtPer1000 ?? state?.partner.robuxRateUsdtPer1000 ?? 5.3;
   const purchaseRate = summary?.purchaseRateUsdtPer1000 ?? state?.partner.purchaseRateUsdtPer1000 ?? 4.7;
-  const rateBasis = summary?.rateBasis ?? state?.partner.rateBasis ?? "NET";
+  const rateBasis: PartnerRateBasisValue = "DIRTY";
   const robloxFeePct = summary?.robloxFeePct ?? state?.partner.robloxFeePct ?? 30;
   const rateReport = state?.rateReport ?? [];
   const rateChanges = state?.rateChanges ?? [];
@@ -3583,7 +3597,7 @@ function PartnerAntonSection({ token, accountName }: { token: string; accountNam
             }}>
             <span style={{ fontSize: 15, color: C.textSecondary }}>Курс</span>
             <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-              <span style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary, ...tabular }}>{fmtRate(rate)} / 1000 {rateBasis === "NET" ? "чистых" : "грязных"} R$</span>
+              <span style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary, ...tabular }}>{fmtRate(rate)} / 1000 R$ из таблицы</span>
               <span style={{ fontSize: 15, fontWeight: 600, color: C.accent, flexShrink: 0 }}>Изменить ›</span>
             </span>
           </button>

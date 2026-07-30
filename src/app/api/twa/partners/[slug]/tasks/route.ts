@@ -27,6 +27,7 @@ import { notifyPartnerBuyout, type PartnerBuyoutNotifyItem } from "@/lib/partner
 import { requireAdmin, type AdminActor } from "@/lib/admin-access";
 import {
   computePartnerSettlement,
+  partnerOrderRateUsdtPer1000,
   partnerPolicyFrom,
   settlementLedgerData,
 } from "@/lib/partner-economics";
@@ -67,15 +68,16 @@ const GOOGLE_STATUS_ERROR = "ошибка";
 const GOOGLE_CANCELLED_COMMENT = "Отменено менеджером";
 const GOOGLE_MAX_SHEETS = 80;
 const GOOGLE_MAX_ROWS_PER_SHEET = 800;
-// П9 (2026-07-10): владелец удалил старый столбец B — актуальная структура листа:
-// A=ник, B=айди геймпасса, C=номинал грязными, D=статус заказа, E=комментарий.
-const SHEET_COL = { nickname: 0, gamepass: 1, amount: 2, status: 3, comment: 4 } as const;
+// Актуальная структура листа: A=ник, B=айди геймпасса, C=номинал грязными,
+// D=статус заказа, E=комментарий, F=курс конкретного заказа (USDT / 1000 R$ из C).
+const SHEET_COL = { nickname: 0, gamepass: 1, amount: 2, status: 3, comment: 4, rate: 5 } as const;
 const SHEET_GAMEPASS_LETTER = "B";
 const SHEET_AMOUNT_LETTER = "C";
 const SHEET_STATUS_LETTER = "D";
 const SHEET_COMMENT_LETTER = "E";
-const SHEET_READ_RANGE = `A:${SHEET_COMMENT_LETTER}`;
-const SHEET_CELL_COUNT = 5;
+const SHEET_RATE_LETTER = "F";
+const SHEET_READ_RANGE = `A:${SHEET_RATE_LETTER}`;
+const SHEET_CELL_COUNT = 6;
 const ACTIVE_TASK_STATUSES = ["NEW", "READY", "FAILED"] as const;
 // 5.8: выполненные строки лочатся addProtectedRange — в таблице работает Apps Script
 // против ручной смены статусов, но API-записи он не видит, поэтому защиту ставит бот.
@@ -266,18 +268,24 @@ function moneyCurrency(partner: Pick<Partner, "ledgerCurrency">) {
 
 function taskSettlement(robuxPrice: number, partner: Pick<Partner,
   "robuxRateUsdtPer1000" | "purchaseRateUsdtPer1000" | "rateBasis" | "robloxFeePct"
->) {
+>, sheetRaw?: unknown) {
   return computePartnerSettlement({
     grossRobux: robuxPrice,
-    ...partnerPolicyFrom(partner),
+    ...partnerPolicyFrom({
+      ...partner,
+      robuxRateUsdtPer1000: partnerOrderRateUsdtPer1000(sheetRaw, partner.robuxRateUsdtPer1000),
+      // Таблица Антона — денежный источник истины: SUMPRODUCT(C, F) / 1000.
+      // Комиссия Roblox нужна для аналитики net R$, но не уменьшает списание.
+      rateBasis: "DIRTY",
+    }),
   });
 }
 
 /** Amount debited from Anton, not our supplier cost. */
 function taskCostUsdt(robuxPrice: number, partner: Pick<Partner,
   "robuxRateUsdtPer1000" | "purchaseRateUsdtPer1000" | "rateBasis" | "robloxFeePct"
->) {
-  return taskSettlement(robuxPrice, partner).revenueUsdt;
+>, sheetRaw?: unknown) {
+  return taskSettlement(robuxPrice, partner, sheetRaw).revenueUsdt;
 }
 
 function normalizeImportHeader(value: string) {
@@ -366,12 +374,17 @@ function computeGoogleRowHash(cells: unknown[]) {
   return createHash("sha1").update(JSON.stringify(normalized)).digest("hex").slice(0, 16);
 }
 
-// Содержимое заказа = A:C (ник, ГП, номинал). D/E — статус и комментарий, их меняем и мы,
-// и Антон; для проверок «эта ли строка выкуплена» (B2) и «строку исправили» (C1) они не в счёт.
-const SHEET_CONTENT_CELLS = [SHEET_COL.nickname, SHEET_COL.gamepass, SHEET_COL.amount] as const;
+const SHEET_ORDER_KEY_CELLS = [SHEET_COL.nickname, SHEET_COL.gamepass, SHEET_COL.amount] as const;
+// Содержимое заказа = A:C + F (ник, ГП, номинал, индивидуальный курс). D/E — статус
+// и комментарий, их меняем и мы, и Антон; в идентичность денежного заказа они не входят.
+const SHEET_CONTENT_CELLS = [...SHEET_ORDER_KEY_CELLS, SHEET_COL.rate] as const;
 
 function normalizeContentCells(cells: unknown[]) {
   return SHEET_CONTENT_CELLS.map((i) => String(cells[i] ?? "").trim());
+}
+
+function normalizeOrderKeyCells(cells: unknown[]) {
+  return SHEET_ORDER_KEY_CELLS.map((i) => String(cells[i] ?? "").trim());
 }
 
 function computeGoogleRowContentHash(cells: unknown[]) {
@@ -393,6 +406,7 @@ function buildGoogleSheetRaw(input: {
   cells: unknown[];
   syncedBy?: string | null;
   sheetPriceRobux?: number | null;
+  sheetRateUsdtPer1000?: number | null;
   priceMismatch?: boolean;
 }) {
   return toJsonObject({
@@ -401,11 +415,14 @@ function buildGoogleSheetRaw(input: {
     sheetTitle: input.sheetTitle,
     sheetId: input.sheetId ?? null,
     rowNumber: input.rowNumber,
-    range: `${input.sheetTitle}!A${input.rowNumber}:${SHEET_COMMENT_LETTER}${input.rowNumber}`,
+    range: `${input.sheetTitle}!A${input.rowNumber}:${SHEET_RATE_LETTER}${input.rowNumber}`,
     cells: input.cells,
     rowHash: computeGoogleRowHash(input.cells),
     contentHash: computeGoogleRowContentHash(input.cells),
     sheetPriceRobux: input.sheetPriceRobux ?? null,
+    sheetRateUsdtPer1000: input.sheetRateUsdtPer1000
+      ?? parseImportNumber(input.cells[SHEET_COL.rate])
+      ?? null,
     priceMismatch: input.priceMismatch ?? false,
     syncedAt: new Date().toISOString(),
     syncedBy: input.syncedBy || null,
@@ -494,7 +511,7 @@ async function remapRenamedSheetTasks(input: {
         externalRowId: plan.nextRowId,
         sheetRaw: mergeTaskSheetRaw(task, {
           sheetTitle: plan.toSheetTitle,
-          range: `${plan.toSheetTitle}!A${plan.rowNumber}:${SHEET_COMMENT_LETTER}${plan.rowNumber}`,
+          range: `${plan.toSheetTitle}!A${plan.rowNumber}:${SHEET_RATE_LETTER}${plan.rowNumber}`,
           renamedFromSheetTitle: plan.fromSheetTitle,
           renamedAt: new Date().toISOString(),
         }),
@@ -1099,7 +1116,7 @@ type ReconcileOutcome = {
  */
 async function debitPartnerTaskFromSheet(
   partner: Partner,
-  task: Pick<PartnerBuyoutTask, "id" | "gamepassId">,
+  task: Pick<PartnerBuyoutTask, "id" | "gamepassId" | "sheetRaw">,
   priceRobux: number,
   user: PartnerOperator | null,
   reason: string,
@@ -1111,7 +1128,7 @@ async function debitPartnerTaskFromSheet(
   });
   if (existingBuyout) return 0;
 
-  const settlement = taskSettlement(priceRobux, partner);
+  const settlement = taskSettlement(priceRobux, partner, task.sheetRaw);
   const priceUsdt = settlement.revenueUsdt;
   if (priceUsdt <= 0) return 0;
   await prisma.partnerLedgerEntry.create({
@@ -1135,47 +1152,38 @@ async function debitPartnerTaskFromSheet(
 
 async function appendPartnerBuyoutBatch(input: {
   partner: Partner;
+  task: Pick<PartnerBuyoutTask, "id" | "gamepassId" | "sheetRaw">;
   batchId: string;
   priceRobux: number;
   purchaseAccountName: string;
   createdBy: string;
 }) {
-  const settlement = taskSettlement(input.priceRobux, input.partner);
+  const settlement = taskSettlement(input.priceRobux, input.partner, input.task.sheetRaw);
+  // One browser batch can contain several rates from Sheets column F. Persist
+  // one idempotent ledger row per task so every debit keeps its exact rate;
+  // the TWA still groups those rows by donor account for a compact history.
+  const ledgerBatchId = `${input.batchId}:task:${input.task.id}`;
   const ledger = await prisma.partnerLedgerEntry.upsert({
     where: {
-      partnerId_batchId: { partnerId: input.partner.id, batchId: input.batchId },
+      partnerId_batchId: { partnerId: input.partner.id, batchId: ledgerBatchId },
     },
     create: {
       partnerId: input.partner.id,
-      taskId: null,
+      taskId: input.task.id,
       type: "BUYOUT",
       amount: -settlement.revenueUsdt,
       currency: moneyCurrency(input.partner),
       ...settlementLedgerData(settlement),
       purchaseAccountName: input.purchaseAccountName,
-      batchId: input.batchId,
+      batchId: ledgerBatchId,
       itemCount: 1,
-      reference: `batch:${input.batchId}`,
-      comment: "Пачка партнёрского выкупа",
+      reference: input.task.gamepassId,
+      comment: `Заказ партнёрского выкупа · пачка ${input.batchId}`,
       createdBy: input.createdBy,
     },
-    update: {
-      amount: { decrement: settlement.revenueUsdt },
-      robuxAmount: { increment: input.priceRobux },
-      grossRobuxAmount: { increment: settlement.grossRobux },
-      netRobuxAmount: { increment: settlement.netRobux },
-      revenueUsdt: { increment: settlement.revenueUsdt },
-      expectedRevenueUsdt: { increment: settlement.expectedRevenueUsdt },
-      costUsdt: { increment: settlement.costUsdt },
-      profitUsdt: { increment: settlement.profitUsdt },
-      itemCount: { increment: 1 },
-    },
+    update: {},
   });
-  const comment = `Списано за пачку: ${Math.abs(ledger.amount).toFixed(2)} USDT (${ledger.itemCount} геймпассов · ${(ledger.grossRobuxAmount ?? ledger.robuxAmount ?? 0).toLocaleString("ru-RU")} грязных → ${(ledger.netRobuxAmount ?? 0).toLocaleString("ru-RU")} чистых R$)`;
-  return prisma.partnerLedgerEntry.update({
-    where: { id: ledger.id },
-    data: { comment },
-  });
+  return ledger;
 }
 
 /**
@@ -1339,6 +1347,30 @@ async function markDoneRowEdited(task: PartnerBuyoutTask, cells: unknown[], stat
   if (!storedHash || storedHash === currentHash) return false;
 
   const raw = isRecord(task.sheetRaw) ? task.sheetRaw : {};
+  const storedCells = Array.isArray(raw.cells) ? raw.cells : null;
+  const storedRate = Number(raw.sheetRateUsdtPer1000);
+  const currentRate = parseImportNumber(cells[SHEET_COL.rate]);
+  // Column F was added after some rows were already DONE. If A:C did not
+  // change, adopt the newly exposed rate as metadata without raising a false
+  // «изменено после выкупа» incident. Later F edits are detected normally.
+  if (storedCells
+    && (!Number.isFinite(storedRate) || storedRate <= 0)
+    && currentRate && currentRate > 0
+    && JSON.stringify(normalizeOrderKeyCells(storedCells)) === JSON.stringify(normalizeOrderKeyCells(cells))) {
+    await prisma.partnerBuyoutTask.update({
+      where: { id: task.id },
+      data: {
+        sheetRaw: mergeTaskSheetRaw(task, {
+          cells,
+          rowHash: computeGoogleRowHash(cells),
+          contentHash: currentHash,
+          sheetRateUsdtPer1000: currentRate,
+          syncedAt: new Date().toISOString(),
+        }),
+      },
+    });
+    return false;
+  }
   if (raw.editedAfterDoneHash === currentHash) return false;
   const prevEdited = isRecord(raw.editedAfterDone) ? raw.editedAfterDone : null;
   const before = prevEdited && Array.isArray(prevEdited.before)
@@ -1714,7 +1746,9 @@ async function syncPartnerGoogleSheets(partner: Partner, user: PartnerOperator |
         // это удаление заказа: задача уходит из TWA полностью. D=«готово» не трогаем
         // (операционная история); D=«ошибка» с 5.7 (A3) тоже удаляет задачу — раньше
         // очистка строки-ошибки оставляла вечную зомби-FAILED в активном списке.
-        const rowCleared = SHEET_CONTENT_CELLS
+        // F часто предзаполнен формулой курса даже в пустых шаблонных строках;
+        // пустоту заказа поэтому определяем только по A:C.
+        const rowCleared = SHEET_ORDER_KEY_CELLS
           .every((i) => String(cells[i] ?? "").trim() === "");
 
         // Trello 2026-07-13: externalRowId выкупленной строки — одноразовый.
@@ -2327,7 +2361,7 @@ async function getPartner(slug: string) {
       ledgerCurrency: DEFAULT_PARTNER_CURRENCY,
       robuxRateUsdtPer1000: DEFAULT_ANTON_RATE_USDT_PER_1000_R,
       purchaseRateUsdtPer1000: DEFAULT_ANTON_PURCHASE_RATE_USDT_PER_1000_R,
-      rateBasis: "NET",
+      rateBasis: "DIRTY",
       robloxFeePct: DEFAULT_PARTNER_ROBLOX_FEE_PCT,
       ...antonSheetConfig,
     },
@@ -2335,9 +2369,9 @@ async function getPartner(slug: string) {
 }
 
 /**
- * A modern BUYOUT ledger row represents a whole browser batch and deliberately
- * has no taskId. Hydrate its tasks before sending it to the TWA, so the ledger
- * can be navigated account → bought gamepasses rather than just account → sum.
+ * Legacy BUYOUT rows can represent a whole browser batch without taskId; hydrate
+ * those before returning the ledger. New rows already carry one task and its
+ * exact Sheets rate, but use the same account → gamepasses presentation.
  */
 async function attachPartnerLedgerTasks(
   partnerId: string,
@@ -2465,7 +2499,7 @@ async function loadPartnerState(partner: Partner) {
   const doneRobux = (doneWithPurchaseAgg._sum.purchasePriceRobux ?? 0) + (doneWithoutPurchaseAgg._sum.priceRobux ?? 0);
   const reservedUsdt = tasks
     .filter((task) => task.status === "READY" || task.status === "PURCHASING")
-    .reduce((sum, task) => sum + taskCostUsdt(getTaskPrice(task), partner), 0);
+    .reduce((sum, task) => sum + taskCostUsdt(getTaskPrice(task), partner, task.sheetRaw), 0);
   // Расхождение цены с 2026-07-10 переводит задачу в FAILED, поэтому FAILED тоже считаем.
   const mismatches = tasks
     .filter((task) => task.status !== "DONE" && task.status !== "CANCELLED"
@@ -2735,7 +2769,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (action === "set-rate") {
       const rate = Number(body.robuxRateUsdtPer1000 ?? partner.robuxRateUsdtPer1000);
       const purchaseRate = Number(body.purchaseRateUsdtPer1000 ?? partner.purchaseRateUsdtPer1000);
-      const rateBasis = body.rateBasis === "DIRTY" ? "DIRTY" : body.rateBasis === "NET" ? "NET" : partner.rateBasis;
+      // Для Антона формула зафиксирована таблицей: C (грязный номинал) × F / 1000.
+      const rateBasis = slug === "anton"
+        ? "DIRTY"
+        : body.rateBasis === "DIRTY" ? "DIRTY" : body.rateBasis === "NET" ? "NET" : partner.rateBasis;
       const robloxFeePct = Number(body.robloxFeePct ?? partner.robloxFeePct);
       if (!Number.isFinite(rate) || rate <= 0) {
         return json({ ok: false, error: "Курс продажи должен быть больше 0" }, 400);
@@ -2850,7 +2887,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       // Баланс НЕ блокирует ручное «Готово»: владелец разрешил уходить в минус —
       // ручной выкуп должен срабатывать всегда. Отрицательный баланс подсвечивается
       // в TWA и гасится пополнением.
-      const settlement = taskSettlement(priceRobux, partner);
+      const settlement = taskSettlement(priceRobux, partner, task.sheetRaw);
       const priceUsdt = settlement.revenueUsdt;
 
       const updatedTask = await prisma.partnerBuyoutTask.update({
@@ -2919,7 +2956,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           results.push({ taskId: task.id, ok: false, reason: "Нет цены" });
           continue;
         }
-        const priceUsdt = taskCostUsdt(priceRobux, partner);
+        const priceUsdt = taskCostUsdt(priceRobux, partner, task.sheetRaw);
 
         await prisma.partnerBuyoutTask.update({
           where: { id: task.id },
@@ -2935,6 +2972,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         if (priceUsdt > 0) {
           await appendPartnerBuyoutBatch({
             partner,
+            task,
             batchId,
             priceRobux,
             purchaseAccountName: accountName || "Массовая отметка",
@@ -3088,6 +3126,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       await appendPartnerBuyoutBatch({
         partner,
+        task: doneTask,
         batchId: purchaseBatchId,
         priceRobux: price,
         purchaseAccountName: settings.robloxAccountName || "cookie-аккаунт",
@@ -3137,12 +3176,14 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           purchaseRateUsdtPer1000: b?.purchaseRateUsdtPer1000 ?? partner.purchaseRateUsdtPer1000,
           rateBasis: b?.rateBasis ?? partner.rateBasis,
           robloxFeePct: b?.robloxFeePct ?? partner.robloxFeePct,
+          actualRevenueUsdt: b?.revenueUsdt ?? undefined,
         });
         return {
           nick: t.robloxUsername,
           gamepassId: t.gamepassId,
           robux,
           usdt: settlement.revenueUsdt,
+          rate: settlement.saleRateUsdtPer1000,
         };
       });
       const totalRobux = items.reduce((sum, it) => sum + it.robux, 0);

@@ -25,11 +25,15 @@ import { ESLint } from "eslint";
 // добавления NET/DIRTY-экономики в `BossrobuxScreen.tsx`. Новый admin client
 // имеет точечный disable для известного initial-load паттерна и baseline не растит.
 //
+// 2026-07-30 (1122 → 1122): состав debt снова не изменился; чтение курса заказа
+// из Sheets F и точная gross-формула сдвинули существующие строки предупреждений
+// в `BossrobuxScreen.tsx` и partner notification tests.
+//
 // Unlike --max-warnings, this has no spare capacity: adding, moving,
 // replacing or changing even one warning fails the gate. Reduce the baseline
 // only in a dedicated cleanup change after reviewing the full formatter output.
 const BASELINE_WARNING_COUNT = 1122;
-const BASELINE_SHA256 = "6005a077d61ede7218241471492014e6e74377530a40d2712ba0dd2891c5cfa3";
+const BASELINE_SHA256 = "4fed9f5004c8ba270facd9e3a122b1cac24ee4198212dcda7de0e831cc8fc0ba";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);

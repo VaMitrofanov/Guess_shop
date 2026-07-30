@@ -794,8 +794,9 @@ model PartnerBuyoutTask {
   @@index([purchaseBatchId])
 }
 
-/// Partner ledger in partner money. Anton uses USDT only; each BUYOUT row is one
-/// actual purchase batch aggregated from task R$ prices at the partner rate.
+/// Partner ledger in partner money. Anton uses USDT only. New Sheets BUYOUT rows
+/// are per task so each order preserves its own pinned rate; legacy rows may
+/// still aggregate a whole purchase batch.
 model PartnerLedgerEntry {
   id                  String             @id @default(cuid())
   partnerId           String
@@ -825,8 +826,8 @@ model PartnerLedgerEntry {
   /// Donor/cookie account used for the buyout. Null means a manual/Sheets fact.
   /// Kept on the ledger row so grouped history survives task deletion.
   purchaseAccountName String?
-  /// Durable id of a user-visible buyout batch. BUYOUT rows use it for atomic
-  /// aggregation; non-buyout ledger entries keep it null.
+  /// Durable idempotency key. New multi-rate batches suffix the user-visible
+  /// batch id with `:task:<taskId>`; legacy BUYOUT rows may use the bare batch id.
   batchId             String?
   itemCount           Int                @default(1)
   reference           String?

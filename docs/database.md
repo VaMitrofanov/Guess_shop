@@ -278,8 +278,11 @@ B2B/partner-ops контур для сторонних выкупов, перв�
 `Partner`: справочник партнёров (`slug`, `name`, `isActive`, `notes`). Для Антона добавлены
 денежные и Sheets-настройки: `ledgerCurrency=USDT`, `robuxRateUsdtPer1000` (продажа),
 `purchaseRateUsdtPer1000` (закупка), `rateBasis` (`DIRTY`/`NET`), `robloxFeePct`,
-`googleSheetId`, `googleSheetTab`, `googleSheetUrl`. Политика новых партий с 29.07.2026:
-`5.3 / 1000 NET`, закупка `4.7 / 1000 DIRTY`, комиссия `30%`.
+`googleSheetId`, `googleSheetTab`, `googleSheetUrl`. Политика новых партий с 30.07.2026
+повторяет формулу таблицы `SUMPRODUCT(C,F)/1000`: `rateBasis=DIRTY`, закупка
+`4.7 / 1000 DIRTY`, комиссия `30%` остаётся аналитикой net-объёма. Для Google Sheets
+конкретная ставка строки хранится в `PartnerBuyoutTask.sheetRaw.sheetRateUsdtPer1000`
+из колонки `F`; ставка `Partner.robuxRateUsdtPer1000` остаётся fallback.
 Боевой `googleSheetId` Антона: `1jzWZZ_AeM0IMyHaljaLBei0hu_zDwktiysbgGt324rs`; фиксированного
 `googleSheetTab` нет, потому что каждый лист таблицы соответствует новой дате.
 `GET /api/twa/partners/[slug]/tasks` синхронизирует `googleSheetId/googleSheetUrl` из env
@@ -303,7 +306,8 @@ B2B/partner-ops контур для сторонних выкупов, перв�
 серверно подтверждённый `RobloxPlusSubscription` 10%/20% с корректной арифметикой: Roblox
 субсидирует разницу, а `purchaseRobuxAmount` хранит фактическое списание buyer-price.
 Для Google Sheets `externalRowId` = `spreadsheetId:sheetTitle:rowNumber`; в `sheetRaw`
-сохраняются `spreadsheetId`, `sheetTitle`, `rowNumber`, `range`, исходные ячейки `A:F`, время
+сохраняются `spreadsheetId`, `sheetTitle`, `rowNumber`, `range`, исходные ячейки `A:F`,
+`sheetRateUsdtPer1000`, время
 sync и результат write-back (`writeBackAt` / `lastWriteBackError`), чтобы write-back и
 диагностика ошибок были воспроизводимыми.
 
@@ -321,13 +325,16 @@ sync и результат write-back (`writeBackAt` / `lastWriteBackError`), ч
 Типы `PartnerLedgerType`: `TOPUP` · `BUYOUT` · `ADJUSTMENT` · `REFUND`.
 `amount` хранится со знаком: пополнение положительное, выкуп отрицательный. API `Антон`
 считает баланс aggregate по USDT-ledger и блокирует повторное `BUYOUT`-списание по одной
-задаче. Для `NET` сначала считается `netRobuxAmount=floor(grossRobuxAmount×(1-fee))`,
-затем выручка Антона; себестоимость всегда считается от грязного объёма.
-С миграции `20260713_partner_sync_lease_ledger_v2` один фактический batch-выкуп хранится
-одной строкой: `batchId` — идемпотентный идентификатор запуска, `itemCount` — число
-успешных геймпассов, `robuxAmount`/`amount` — суммарные R$/USDT,
-`purchaseAccountName` — donor/cookie-аккаунт. Уникальность `(partnerId, batchId)` не даёт
-создать второе списание той же пачки; legacy BUYOUT получают `batchId=legacy:<id>`.
+задаче. Для Антона списание всегда считается от `grossRobuxAmount` по зафиксированной ставке
+строки; `netRobuxAmount=floor(grossRobuxAmount×(1-fee))` хранится только для аналитики.
+Суммы хранятся до 7 знаков после запятой, чтобы не накапливать отличие от `SUMPRODUCT` из-за
+построчного округления до центов; интерфейс и Telegram-карточка показывают 2 знака.
+С миграции `20260713_partner_sync_lease_ledger_v2` `batchId` — идемпотентный ключ списания,
+`robuxAmount`/`amount` — R$/USDT, `purchaseAccountName` — donor/cookie-аккаунт.
+С 30.07.2026 новые browser/bulk-пачки пишутся по одной строке на задачу с ключом
+`<purchaseBatchId>:task:<taskId>`: так одна пачка может содержать разные курсы из Sheets `F`
+без потери денежного snapshot. UI группирует эти строки по аккаунту; legacy BUYOUT остаются
+в прежнем агрегированном формате. Уникальность `(partnerId, batchId)` блокирует дубль.
 С миграции `20260711_partner_rate_history` (Этап 5.9) `BUYOUT`-записи дополнительно
 хранят `rateUsdtPer1000` (курс списания) и `robuxAmount` (грязные R$) структурно —
 отчёт «сколько куплено по какому курсу» строится `groupBy` по этим полям и не зависит

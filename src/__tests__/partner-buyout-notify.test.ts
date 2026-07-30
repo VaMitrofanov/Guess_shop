@@ -53,6 +53,22 @@ describe("buildPartnerBuyoutCard", () => {
     expect(card).not.toContain("Ошибок в пачке");
   });
 
+  it("shows the exact rate for each order when a batch mixes Sheets rates", () => {
+    const card = buildPartnerBuyoutCard({
+      partnerName: "Антон",
+      items: [item({ nick: "One", rate: 5.1 }), item({ nick: "Two", rate: 5.3 })],
+      totalRobux: 4000,
+      totalUsdt: 14.56,
+      balanceUsdt: 50,
+      rate: 5.3,
+      now: NOW,
+    });
+
+    expect(card).toContain("Курсы заказов: <b>5.1 / 5.3 USDT / 1000 R$</b>");
+    expect(card).toContain("• One · GP 12345 · 2 000 R$ · 5.1/1000");
+    expect(card).toContain("• Two · GP 12345 · 2 000 R$ · 5.3/1000");
+  });
+
   it("shows the failure count when the batch had errors", () => {
     const card = buildPartnerBuyoutCard({
       partnerName: "Антон",

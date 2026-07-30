@@ -19,8 +19,26 @@ export type PartnerSettlement = PartnerEconomicPolicy & {
   marginPct: number | null;
 };
 
+// Google Sheets keeps the partner balance below one cent. With a rate stored to
+// four decimals and an integer R$ amount, C * F / 1000 needs up to 7 decimals.
 export function roundPartnerMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+  return Math.round((value + Number.EPSILON) * 10_000_000) / 10_000_000;
+}
+
+/**
+ * Google Sheets may pin a sale rate for one partner order. Keep the parser
+ * shared by the API and both admin clients so previews and the final ledger
+ * debit cannot silently use different rates.
+ */
+export function partnerOrderRateUsdtPer1000(
+  sheetRaw: unknown,
+  fallbackRate: number,
+) {
+  if (sheetRaw && typeof sheetRaw === "object" && !Array.isArray(sheetRaw)) {
+    const value = Number((sheetRaw as Record<string, unknown>).sheetRateUsdtPer1000);
+    if (Number.isFinite(value) && value > 0 && value <= 1000) return value;
+  }
+  return fallbackRate;
 }
 
 export function partnerNetRobux(grossRobux: number, robloxFeePct: number) {
@@ -39,10 +57,9 @@ export function partnerPolicyValid(policy: PartnerEconomicPolicy) {
 /**
  * One immutable partner settlement.
  *
- * Anton's current contract is NET: he pays for the Robux that reach the seller,
- * while our supplier charges for the gross Robux spent by the donor. Historical
- * rows can stay DIRTY so the accounting snapshot describes what the old code
- * actually charged instead of silently rewriting the partner balance.
+ * The policy explicitly selects gross (DIRTY) or net (NET) billing. Historical
+ * rows keep their original basis so the accounting snapshot is never silently
+ * rewritten when the current partner policy changes.
  */
 export function computePartnerSettlement(input: PartnerEconomicPolicy & {
   grossRobux: number;

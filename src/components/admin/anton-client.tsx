@@ -6,7 +6,7 @@ import {
   FileUp, Play, Plus, RefreshCw, Save, WalletCards, XCircle,
 } from "lucide-react";
 
-import { computePartnerSettlement } from "@/lib/partner-economics";
+import { computePartnerSettlement, partnerOrderRateUsdtPer1000 } from "@/lib/partner-economics";
 import { cn } from "@/lib/utils";
 import styles from "./admin-shell.module.css";
 
@@ -22,7 +22,13 @@ type PartnerTask = {
   completedAt: string | null;
   createdAt: string;
   error: string | null;
-  sheetRaw?: { sheetTitle?: string; rowNumber?: number; priceMismatch?: boolean; conflict?: string } | null;
+  sheetRaw?: {
+    sheetTitle?: string;
+    rowNumber?: number;
+    priceMismatch?: boolean;
+    conflict?: string;
+    sheetRateUsdtPer1000?: number | null;
+  } | null;
 };
 
 type LedgerEntry = {
@@ -194,28 +200,30 @@ export default function AdminAntonClient() {
   const policy = state?.partner ?? {
     robuxRateUsdtPer1000: Number(saleRate) || 5.3,
     purchaseRateUsdtPer1000: Number(purchaseRate) || 4.7,
-    rateBasis: "NET" as const,
+    rateBasis: "DIRTY" as const,
     robloxFeePct: 30,
   };
   const preview = useMemo(() => computePartnerSettlement({
-    grossRobux: Math.ceil(1000 / (1 - policy.robloxFeePct / 100)),
+    grossRobux: 1000,
     saleRateUsdtPer1000: Number(saleRate) || policy.robuxRateUsdtPer1000,
     purchaseRateUsdtPer1000: Number(purchaseRate) || policy.purchaseRateUsdtPer1000,
-    rateBasis: "NET",
+    rateBasis: "DIRTY",
     robloxFeePct: policy.robloxFeePct,
   }), [policy.robloxFeePct, policy.purchaseRateUsdtPer1000, policy.robuxRateUsdtPer1000, purchaseRate, saleRate]);
 
   const activeTasks = (state?.tasks ?? []).filter((task) => !["DONE", "CANCELLED"].includes(task.status));
   const visibleTasks = activeTasks.length > 0 ? activeTasks : (state?.tasks ?? []).slice(0, 40);
   const selectedTasks = visibleTasks.filter((task) => selected.has(task.id));
-  const selectedGross = selectedTasks.reduce((sum, task) => sum + taskPrice(task), 0);
-  const selectedSettlement = selectedGross > 0 ? computePartnerSettlement({
-    grossRobux: selectedGross,
-    saleRateUsdtPer1000: policy.robuxRateUsdtPer1000,
+  const taskSettlement = (task: PartnerTask) => computePartnerSettlement({
+    grossRobux: taskPrice(task),
+    saleRateUsdtPer1000: partnerOrderRateUsdtPer1000(task.sheetRaw, policy.robuxRateUsdtPer1000),
     purchaseRateUsdtPer1000: policy.purchaseRateUsdtPer1000,
-    rateBasis: policy.rateBasis,
+    rateBasis: "DIRTY",
     robloxFeePct: policy.robloxFeePct,
-  }) : null;
+  });
+  const selectedUsdt = selectedTasks.reduce((sum, task) => {
+    return taskPrice(task) > 0 ? sum + taskSettlement(task).revenueUsdt : sum;
+  }, 0);
 
   if (!state && loading) return <div className={styles.empty}><LoaderCircle className={styles.spin} /> Загружаем партнёрский контур…</div>;
   if (!state) return <div className={styles.noteDanger}><AlertTriangle /><div><strong>Антон недоступен</strong><span>{error}</span><button onClick={load}>Повторить</button></div></div>;
@@ -228,7 +236,7 @@ export default function AdminAntonClient() {
       {preview.profitUsdt < 0 && (
         <div className={styles.noteDanger}>
           <AlertTriangle />
-          <div><strong>Новая партия убыточна по заданной формуле</strong><span>На 1000 чистых: выручка {money(preview.revenueUsdt)}, закупка {money(preview.costUsdt)}, результат {money(preview.profitUsdt)} ({preview.marginPct}%).</span></div>
+          <div><strong>Новая партия убыточна по заданной формуле</strong><span>На 1000 R$ из таблицы: выручка {money(preview.revenueUsdt)}, закупка {money(preview.costUsdt)}, результат {money(preview.profitUsdt)} ({preview.marginPct}%).</span></div>
         </div>
       )}
 
@@ -243,8 +251,8 @@ export default function AdminAntonClient() {
         </section>
         <section className={cn(styles.panel, styles.partnerPolicy)}>
           <div><span>Закупка / 1000 грязных</span><input value={purchaseRate} onChange={(event) => setPurchaseRate(event.target.value)} inputMode="decimal" /></div>
-          <div><span>Антон / 1000 чистых</span><input value={saleRate} onChange={(event) => setSaleRate(event.target.value)} inputMode="decimal" /></div>
-          <button disabled={loading} onClick={() => post("set-rate", { purchaseRateUsdtPer1000: Number(purchaseRate), robuxRateUsdtPer1000: Number(saleRate), rateBasis: "NET", robloxFeePct: 30 })}><Save size={15} /> Сохранить для будущих партий</button>
+          <div><span>Антон / 1000 R$ из таблицы</span><input value={saleRate} onChange={(event) => setSaleRate(event.target.value)} inputMode="decimal" /></div>
+          <button disabled={loading} onClick={() => post("set-rate", { purchaseRateUsdtPer1000: Number(purchaseRate), robuxRateUsdtPer1000: Number(saleRate), rateBasis: "DIRTY", robloxFeePct: 30 })}><Save size={15} /> Сохранить для будущих партий</button>
           <small>Смена ставки не переписывает завершённые ledger-записи.</small>
         </section>
       </div>
@@ -276,7 +284,7 @@ export default function AdminAntonClient() {
           <div className={styles.headerActions}>
             <button className={styles.secondaryButton} onClick={() => setSelected(new Set(visibleTasks.filter((task) => !["DONE", "CANCELLED"].includes(task.status)).map((task) => task.id)))}>Выбрать активные</button>
             <button className={styles.primaryButton} disabled={loading || selectedTasks.length === 0} onClick={async () => {
-              if (!window.confirm(`Отметить купленными ${selectedTasks.length} задач? С Антона спишется примерно ${money(selectedSettlement?.revenueUsdt)}.`)) return;
+              if (!window.confirm(`Отметить купленными ${selectedTasks.length} задач? С Антона спишется примерно ${money(selectedUsdt)}.`)) return;
               if (await post("mark-done-bulk", { taskIds: selectedTasks.map((task) => task.id), purchaseAccountName: "Веб-админка / вручную" })) setSelected(new Set());
             }}>Куплено ({selectedTasks.length})</button>
           </div>
@@ -286,13 +294,13 @@ export default function AdminAntonClient() {
             <thead><tr><th></th><th>Задача</th><th>Грязные → чистые</th><th>Списание / результат</th><th>Статус</th><th>Действия</th></tr></thead>
             <tbody>{visibleTasks.map((task) => {
               const gross = taskPrice(task);
-              const row = gross > 0 ? computePartnerSettlement({ grossRobux: gross, saleRateUsdtPer1000: policy.robuxRateUsdtPer1000, purchaseRateUsdtPer1000: policy.purchaseRateUsdtPer1000, rateBasis: policy.rateBasis, robloxFeePct: policy.robloxFeePct }) : null;
+              const row = gross > 0 ? taskSettlement(task) : null;
               const actionable = !["DONE", "CANCELLED", "PURCHASING"].includes(task.status);
               return <tr key={task.id}>
                 <td><input type="checkbox" checked={selected.has(task.id)} disabled={!actionable} onChange={(event) => setSelected((current) => { const next = new Set(current); if (event.target.checked) next.add(task.id); else next.delete(task.id); return next; })} /></td>
                 <td><span className={styles.tablePrimary}>{task.robloxUsername ?? `GP ${task.gamepassId ?? "—"}`}</span><span className={styles.tableSecondary}>{task.externalSource}{task.sheetRaw?.sheetTitle ? ` · ${task.sheetRaw.sheetTitle}:${task.sheetRaw.rowNumber}` : ""}{task.error ? ` · ${task.error}` : ""}</span></td>
                 <td><span className={styles.tablePrimary}>{robux(row?.grossRobux)}</span><span className={styles.tableSecondary}>→ {robux(row?.netRobux)} чистых</span></td>
-                <td><span className={styles.tablePrimary}>{money(row?.revenueUsdt)}</span><span className={styles.tableSecondary} style={{ color: row && row.profitUsdt < 0 ? "#ff7780" : undefined }}>{row ? `прибыль ${money(row.profitUsdt)}` : "нет цены"}</span></td>
+                <td><span className={styles.tablePrimary}>{money(row?.revenueUsdt)}</span><span className={styles.tableSecondary} style={{ color: row && row.profitUsdt < 0 ? "#ff7780" : undefined }}>{row ? `курс ${row.saleRateUsdtPer1000} · прибыль ${money(row.profitUsdt)}` : "нет цены"}</span></td>
                 <td><span className={cn(styles.status, statusTone(task.status))}>{task.status}</span></td>
                 <td><div className={styles.rowActions}>
                   <button title="Купить" disabled={loading || !["READY", "FAILED"].includes(task.status)} onClick={() => post("purchase-task", { taskId: task.id, purchaseBatchId: `web:${Date.now()}` })}><Play size={14} /></button>

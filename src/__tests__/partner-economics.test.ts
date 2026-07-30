@@ -1,25 +1,30 @@
 import {
   computePartnerSettlement,
   partnerNetRobux,
+  partnerOrderRateUsdtPer1000,
   partnerPolicyValid,
   settlementLedgerData,
 } from "@/lib/partner-economics";
 
 describe("partner economics", () => {
-  test("charges Anton for net Robux while supplier cost stays gross", () => {
-    const row = computePartnerSettlement({
-      grossRobux: 1429,
+  test("uses a per-order Sheets rate and falls back for legacy/manual tasks", () => {
+    expect(partnerOrderRateUsdtPer1000({ sheetRateUsdtPer1000: 5.7 }, 5.3)).toBe(5.7);
+    expect(partnerOrderRateUsdtPer1000({ sheetRateUsdtPer1000: null }, 5.3)).toBe(5.3);
+    expect(partnerOrderRateUsdtPer1000({ sheetRateUsdtPer1000: -1 }, 5.3)).toBe(5.3);
+  });
+
+  test("matches the Anton sheet formula SUMPRODUCT(C, F) / 1000", () => {
+    const rows = [6000, 1200, 90, 1000].map((grossRobux) => computePartnerSettlement({
+      grossRobux,
       saleRateUsdtPer1000: 5.3,
       purchaseRateUsdtPer1000: 4.7,
-      rateBasis: "NET",
+      rateBasis: "DIRTY",
       robloxFeePct: 30,
-    });
+    }));
 
-    expect(row.netRobux).toBe(1000);
-    expect(row.expectedRevenueUsdt).toBe(5.3);
-    expect(row.costUsdt).toBe(6.72);
-    expect(row.profitUsdt).toBe(-1.42);
-    expect(row.marginPct).toBe(-26.79);
+    expect(rows.map((row) => row.revenueUsdt)).toEqual([31.8, 6.36, 0.477, 5.3]);
+    expect(rows.reduce((sum, row) => sum + row.revenueUsdt, 0)).toBe(43.937);
+    expect(rows.reduce((sum, row) => sum + row.grossRobux, 0)).toBe(8290);
   });
 
   test("preserves the legacy dirty-basis calculation for history", () => {
