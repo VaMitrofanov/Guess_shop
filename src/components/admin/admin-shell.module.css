@@ -225,16 +225,16 @@
 .contactStack > a,
 .contactStack > span {
   align-items: center;
-  color: var(--rb-text);
+  color: var(--admin-text);
   display: flex;
   font-size: 12px;
   font-weight: 700;
   gap: 6px;
   text-decoration: none;
 }
-.contactStack > a:hover { color: var(--rb-accent); }
+.contactStack > a:hover { color: var(--admin-blue); }
 .contactStack svg { height: 13px; width: 13px; }
-.contactStack small { color: var(--rb-muted); font-size: 10px; font-weight: 600; }
+.contactStack small { color: var(--admin-muted); font-size: 10px; font-weight: 600; }
 
 .overviewGrid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, .75fr); gap: 15px; margin-top: 15px; }
 .panel { overflow: hidden; }
