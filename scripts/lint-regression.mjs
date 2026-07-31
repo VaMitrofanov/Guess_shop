@@ -33,11 +33,15 @@ import { ESLint } from "eslint";
 // предупреждений; новые hero/roadmap-узлы сдвинули существующие `no-img-element`
 // строки в `WBInstructionV2.tsx`. WB/BOT-сценарии и состав baseline не менялись.
 //
+// 2026-08-01 (1122 → 1122): скин витрины включён на WB/BOT-режимах инструкции.
+// Состав debt не изменился; сдвинулись строки существующих `no-img-element`
+// в `WBInstructionV2.tsx` (комментарии в CSS + блок channel-UI).
+//
 // Unlike --max-warnings, this has no spare capacity: adding, moving,
 // replacing or changing even one warning fails the gate. Reduce the baseline
 // only in a dedicated cleanup change after reviewing the full formatter output.
 const BASELINE_WARNING_COUNT = 1122;
-const BASELINE_SHA256 = "e4c3eb92dbd7debf66cfa8fb3ea4ad95c7d78e557626f85d7066b2ba944a881c";
+const BASELINE_SHA256 = "8246307885c88d1125dd198e3739927fab006406d60a4a352c111d670d66a52c";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);
