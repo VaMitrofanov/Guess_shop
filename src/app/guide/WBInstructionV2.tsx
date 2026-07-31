@@ -11,6 +11,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import VKAuthButton from "@/components/auth/VKAuthButton";
 import Navbar from "@/components/navbar";
+import Footer from "@/components/footer";
 import { getOrInitSessionId } from "@/lib/wb-session";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { gamepassPriceMatches, rankSellableGamepasses } from "@/lib/gamepass-search-view";
@@ -233,7 +234,7 @@ export default function WBInstructionV2({
   return (
     <>
       {isSite && <Navbar />}
-      <div className="wbi-root" ref={root}>
+      <div className={`wbi-root${isSite ? " wbi-site-mode" : ""}`} ref={root}>
         <style>{CSS}</style>
 
       <div className="wbi-bgfx"><div className="wbi-blob wbi-b1" /><div className="wbi-blob wbi-b2" /></div>
@@ -250,15 +251,15 @@ export default function WBInstructionV2({
             {onReset && (
               <button className="wbi-reset" onClick={onReset}>‹ Новый код</button>
             )}
-            <ThemeToggle compact />
+            {!isSite && <ThemeToggle compact />}
           </div>
         </div>
 
         {/* hero */}
         <div className="wbi-hero wbi-reveal">
-          <div className="wbi-kick">ПОЛУЧИ СВОИ ROBUX</div>
-          <h1 className="wbi-h1">Это <span className="wbi-g">проще</span><br />чем кажется</h1>
-          <p className="wbi-lead">Всего 9 шагов. Всё в браузере, ничего скачивать не нужно.</p>
+          <div className="wbi-kick">{isSite ? "ГЕЙМПАСС · ПОШАГОВО" : "ПОЛУЧИ СВОИ ROBUX"}</div>
+          <h1 className="wbi-h1">{isSite ? <>Robux.<br />Без лишней <span className="wbi-g">сложности.</span></> : <>Это <span className="wbi-g">проще</span><br />чем кажется</>}</h1>
+          <p className="wbi-lead">{isSite ? "Проведём через Creator Hub, рассчитаем точную цену и сразу найдём готовый геймпасс." : "Всего 9 шагов. Всё в браузере, ничего скачивать не нужно."}</p>
           <div className="wbi-chips">
             <div className="wbi-chip"><b>5–7 мин</b><span>ВРЕМЯ</span></div>
             <div className="wbi-chip"><b>Легко</b><span>СЛОЖНОСТЬ</span></div>
@@ -270,6 +271,20 @@ export default function WBInstructionV2({
             <div className="wbi-must-ft">⚠️ <b>«Managed pricing»</b> (региональные цены) автоматически меняет цену геймпасса — из-за этого мы <b>не сможем</b> его выкупить. Галочка должна быть <b>отключена</b>! У новых геймпассов она отключена по умолчанию, но обязательно проверь (шаг 7).</div>
           </div>
         </div>
+
+        {isSite && (
+          <div className="wbi-roadmap wbi-reveal" aria-label="Этапы инструкции">
+            <div className="wbi-roadmap-card">
+              <span>01—05</span><b>Создай</b><small>Открываем Creator Hub и делаем геймпасс</small>
+            </div>
+            <div className="wbi-roadmap-card wbi-roadmap-accent">
+              <span>06—07</span><b>Настрой</b><small>Ставим точную цену без региональных скидок</small>
+            </div>
+            <div className="wbi-roadmap-card wbi-roadmap-dark">
+              <span>08—09</span><b>Проверь</b><small>Находим геймпасс и переходим к оформлению</small>
+            </div>
+          </div>
+        )}
 
         {/* timeline */}
         <div className="wbi-tl">
@@ -627,6 +642,7 @@ export default function WBInstructionV2({
         <div className="wbi-note">Инструкция оформлена для мобильных устройств. Если что-то не получается — пиши менеджеру выше.</div>
       </div>
       </div>
+      {isSite && <Footer />}
     </>
   );
 }
@@ -840,7 +856,106 @@ const CSS = `
 :is(html[data-theme="light"]) .wbi-ok{color:#185f47;background:#e9f8f2;border-color:#87d7bb}
 :is(html[data-theme="light"]) .wbi-picked{background:#e8f8f1;border-color:#6ccaaa}
 :is(html[data-theme="light"]) .wbi-picked-h{color:#185f47}
-@media(max-width:480px){.wbi-tl{padding-left:42px}.wbi-dot{left:-42px;width:32px;height:32px}.wbi-tl::before{left:15px}}
+
+/* SITE mode deliberately reuses the storefront's visual language. WB and BOT
+   keep their compact, channel-specific presentation above. */
+.wbi-root.wbi-site-mode{--gold:var(--rb-accent);--gold2:var(--rb-accent);--grn:#45d6aa;--bg:var(--rb-bg);--panel:var(--rb-surface);--line:var(--rb-border);--txt:var(--rb-text);--mut:var(--rb-muted);background:
+ radial-gradient(circle at 82% 4%,rgba(117,86,232,.18),transparent 31rem),
+ radial-gradient(circle at 7% 38%,rgba(69,214,170,.08),transparent 26rem),var(--rb-bg);font-family:var(--font-geist-sans),ui-sans-serif,system-ui;overflow:clip}
+.wbi-site-mode .wbi-bgfx{position:absolute}.wbi-site-mode .wbi-blob{opacity:.08;filter:blur(110px)}
+.wbi-site-mode .wbi-wrap{max-width:1180px;padding:0 20px 104px}
+.wbi-site-mode .wbi-top{padding:28px 0 0;border:0;align-items:center}
+.wbi-site-mode .wbi-eye{display:inline-flex;align-items:center;gap:8px;width:max-content;padding:8px 12px;border:1px solid var(--rb-border);border-radius:999px;background:color-mix(in srgb,var(--rb-surface) 78%,transparent);color:var(--rb-accent);font-size:12px;letter-spacing:.12em}
+.wbi-site-mode .wbi-eye::before{content:"";width:7px;height:7px;border-radius:50%;background:#45d6aa;box-shadow:0 0 0 5px rgba(69,214,170,.11)}
+.wbi-site-mode .wbi-top-sub{margin:7px 0 0;color:var(--rb-muted);font-size:14px;font-weight:750}
+.wbi-site-mode .wbi-tag{padding:9px 13px;border-color:var(--rb-border);border-radius:11px;background:var(--rb-surface);color:var(--rb-text);font-size:13px;box-shadow:3px 3px 0 color-mix(in srgb,var(--rb-accent) 26%,transparent)}
+.wbi-site-mode .wbi-hero{min-height:520px;padding:58px 0 52px;display:grid;grid-template-columns:minmax(0,1.08fr) minmax(380px,.92fr);grid-template-rows:auto auto auto auto;align-content:center;align-items:center;column-gap:72px;text-align:left}
+.wbi-site-mode .wbi-kick{grid-column:1;grid-row:1;margin:0 0 18px;color:var(--rb-accent);font-size:13px;letter-spacing:.1em}
+.wbi-site-mode .wbi-h1{grid-column:1;grid-row:2;margin:0;color:var(--rb-text);font-family:var(--font-display),var(--font-geist-sans),sans-serif;font-size:clamp(48px,5.7vw,76px);font-weight:700;line-height:.96;letter-spacing:-.065em;text-transform:none}
+.wbi-site-mode .wbi-g{background:linear-gradient(100deg,#7556e8 5%,#9274f2 50%,#45d6aa 105%);-webkit-background-clip:text;background-clip:text;color:transparent;animation:none}
+.wbi-site-mode .wbi-lead{grid-column:1;grid-row:3;max-width:610px;margin:24px 0 0;color:var(--rb-muted);font-size:18px;line-height:1.65}
+.wbi-site-mode .wbi-chips{grid-column:1;grid-row:4;justify-content:flex-start;margin-top:27px;gap:9px}
+.wbi-site-mode .wbi-chip{min-width:108px;padding:13px 17px;align-items:flex-start;border-color:var(--rb-border);border-radius:14px;background:color-mix(in srgb,var(--rb-surface) 84%,transparent)}
+.wbi-site-mode .wbi-chip b{color:var(--rb-text);font-size:16px}.wbi-site-mode .wbi-chip span{color:var(--rb-muted);font-size:10px}
+.wbi-site-mode .wbi-must{grid-column:2;grid-row:1/5;max-width:none;margin:0;position:relative;overflow:hidden;padding:30px 30px 32px;border:1px solid rgba(255,255,255,.17);border-radius:26px;background:linear-gradient(145deg,#8063ed 0%,#6546d4 76%,#5b3bc9 100%);box-shadow:12px 12px 0 #45d6aa,0 30px 80px rgba(67,39,144,.25);color:#fff;transform:rotate(1.5deg)}
+.wbi-site-mode .wbi-must::after{content:"R$";position:absolute;right:-34px;bottom:-82px;color:rgba(255,255,255,.085);font-family:var(--font-display),sans-serif;font-size:190px;font-weight:700;letter-spacing:-.08em;transform:rotate(-8deg)}
+.wbi-site-mode .wbi-must-h,.wbi-site-mode .wbi-must-it,.wbi-site-mode .wbi-must-ft{position:relative;z-index:1}
+.wbi-site-mode .wbi-must-h{margin-bottom:15px;color:#cffff0;font-size:13px;letter-spacing:.09em}
+.wbi-site-mode .wbi-must-it{padding:16px 0;border-color:rgba(255,255,255,.18)}
+.wbi-site-mode .wbi-must-it .wbi-n{background:#45d6aa;border-color:#45d6aa;color:#173f34}
+.wbi-site-mode .wbi-must-it span,.wbi-site-mode .wbi-must-it b{color:#fff;font-size:17px}
+.wbi-site-mode .wbi-must-ft{margin-top:13px;padding:13px 14px;border:1px solid rgba(255,255,255,.17);border-radius:13px;background:rgba(24,14,62,.2);color:rgba(255,255,255,.84);font-size:14px;font-style:normal}
+.wbi-site-mode .wbi-must-ft b{color:#fff}
+.wbi-roadmap{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:0 0 78px}
+.wbi-roadmap-card{min-height:190px;padding:23px;display:flex;flex-direction:column;justify-content:flex-end;border:1px solid var(--rb-border);border-radius:22px;background:var(--rb-surface);color:var(--rb-text)}
+.wbi-roadmap-card span{margin-bottom:auto;color:var(--rb-accent);font-size:12px;font-weight:900;letter-spacing:.1em}.wbi-roadmap-card b{font-family:var(--font-display),sans-serif;font-size:25px;letter-spacing:-.045em}.wbi-roadmap-card small{margin-top:7px;color:var(--rb-muted);font-size:14px;line-height:1.45}
+.wbi-roadmap-accent{border-color:#7556e8;background:#7556e8;color:#fff}.wbi-roadmap-accent span{color:#cffff0}.wbi-roadmap-accent small{color:rgba(255,255,255,.76)}
+.wbi-roadmap-dark{border-color:#251b3f;background:#251b3f;color:#fff}.wbi-roadmap-dark span{color:#8cf0d0}.wbi-roadmap-dark small{color:rgba(255,255,255,.7)}
+.wbi-site-mode .wbi-tl{margin:0;padding:0}.wbi-site-mode .wbi-tl::before{display:none}
+.wbi-site-mode .wbi-step{margin:0 0 20px}
+.wbi-site-mode .wbi-dot{left:24px;top:24px;width:42px;height:42px;border:0;border-radius:13px;background:#7556e8;color:#fff;box-shadow:3px 3px 0 #45d6aa;font-size:14px;transform:rotate(-4deg)}
+.wbi-site-mode .wbi-card{min-height:156px;padding:31px 32px 31px 88px;border:1px solid var(--rb-border);border-radius:24px;background:color-mix(in srgb,var(--rb-surface) 94%,transparent);box-shadow:none;transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease}
+.wbi-site-mode .wbi-card:hover{border-color:color-mix(in srgb,var(--rb-accent) 45%,var(--rb-border));box-shadow:0 22px 60px rgba(54,35,91,.09);transform:translateY(-2px)}
+.wbi-site-mode .wbi-card.wbi-key,.wbi-site-mode .wbi-card.wbi-finish{border-color:color-mix(in srgb,var(--rb-accent) 55%,var(--rb-border));background:linear-gradient(145deg,color-mix(in srgb,var(--rb-accent-soft) 62%,var(--rb-surface)),var(--rb-surface) 64%);animation:none}
+.wbi-site-mode .wbi-step:has(.wbi-finish) .wbi-dot.wbi-pulse{background:#45d6aa;color:#173f34;animation:none}
+.wbi-site-mode .wbi-ttl{margin-bottom:8px;color:var(--rb-text);font-family:var(--font-display),var(--font-geist-sans),sans-serif;font-size:clamp(23px,2.4vw,30px);font-weight:700;line-height:1.15;letter-spacing:-.045em}
+.wbi-site-mode .wbi-t{color:var(--rb-muted);font-size:16px;line-height:1.65}
+.wbi-site-mode .wbi-card b,.wbi-site-mode .wbi-card strong{color:var(--rb-text)}
+@media(min-width:860px){.wbi-site-mode .wbi-cols.wbi-media{grid-template-columns:minmax(0,1fr) minmax(360px,.92fr);gap:34px}}
+.wbi-site-mode .wbi-quicknotes span,.wbi-site-mode .wbi-blist li{border-color:var(--rb-border);background:var(--rb-surface-2);color:var(--rb-muted)}
+.wbi-site-mode .wbi-ol li{border-bottom-color:color-mix(in srgb,var(--rb-border) 72%,transparent);color:var(--rb-muted)}
+.wbi-site-mode .wbi-ol li::before{border-color:color-mix(in srgb,var(--rb-accent) 48%,transparent);background:var(--rb-accent-soft);color:var(--rb-accent)}
+.wbi-site-mode .wbi-btnL{background:#7556e8;border-color:#7556e8;box-shadow:5px 5px 0 #45d6aa;font-size:16px}.wbi-site-mode .wbi-btnL:active{box-shadow:2px 2px 0 #45d6aa}
+.wbi-site-mode .wbi-figure img,.wbi-site-mode .wbi-figure video{border-color:var(--rb-border);border-radius:16px}.wbi-site-mode .wbi-anno{border-radius:16px}.wbi-site-mode .wbi-figure figcaption{border-left:0;border:1px solid color-mix(in srgb,#45d6aa 42%,var(--rb-border));border-radius:12px;background:color-mix(in srgb,#45d6aa 9%,var(--rb-surface));color:var(--rb-muted)}
+.wbi-site-mode .wbi-calc{max-width:390px;border:1px solid color-mix(in srgb,var(--rb-accent) 45%,var(--rb-border));border-radius:19px;background:var(--rb-surface-2);box-shadow:6px 6px 0 var(--rb-accent)}
+.wbi-site-mode .wbi-lbl,.wbi-site-mode .wbi-v{color:var(--rb-accent)}.wbi-site-mode .wbi-v{text-shadow:none}
+.wbi-site-mode .wbi-nomrow{color:var(--rb-muted)}.wbi-site-mode .wbi-input,.wbi-site-mode .wbi-sinput{border:1.5px solid var(--rb-border);background:var(--rb-surface);color:var(--rb-text)}
+.wbi-site-mode .wbi-checknote{color:var(--rb-muted)}
+:is(html[data-theme="light"]) .wbi-site-mode .wbi-checknote{color:#63333d}:is(html[data-theme="light"]) .wbi-site-mode .wbi-checknote b{color:#35171e}:is(html[data-theme="light"]) .wbi-site-mode .wbi-copyhint{color:#24775d}
+.wbi-site-mode .wbi-sinput:focus,.wbi-site-mode .wbi-input:focus{border-color:var(--rb-accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--rb-accent) 12%,transparent)}
+.wbi-site-mode .wbi-sbtn{background:#7556e8;border-color:#7556e8;color:#fff;box-shadow:3px 3px 0 #45d6aa}
+.wbi-site-mode .wbi-gpcard{background:var(--rb-surface);border-color:var(--rb-border)}
+.wbi-site-mode .wbi-icoTile{border-color:var(--rb-border);background:linear-gradient(145deg,var(--rb-accent-soft),var(--rb-surface));font-size:78px}
+.wbi-site-mode .wbi-cta{margin-top:54px;padding:40px;border:0;border-radius:26px;background:#251b3f;box-shadow:8px 8px 0 #7556e8}
+.wbi-site-mode .wbi-cta h3{margin:0;font-family:var(--font-display),sans-serif;font-size:clamp(25px,3vw,38px);letter-spacing:-.05em}.wbi-site-mode .wbi-cta .wbi-s{color:rgba(255,255,255,.68)}
+.wbi-site-mode .wbi-sitepay{background:#7556e8;box-shadow:4px 4px 0 #45d6aa}.wbi-site-mode .wbi-support{color:#cbbdff;border-color:rgba(203,189,255,.38)}
+.wbi-site-mode .wbi-note{margin-top:34px;color:var(--rb-muted);font-style:normal}
+.wbi-site-mode :is(a,button,[role="button"],input):focus-visible{outline:3px solid #45d6aa;outline-offset:3px}
+/* Светлая тема бьёт site-mode по специфичности: :is(html[data-theme="light"]) .x
+   это (0,2,1) против (0,2,0) у .wbi-site-mode .x. Из-за этого золотая легаси-карточка
+   и светлый .wbi-cta перекрывали фирменные фиолетово-мятные акценты, а в CTA
+   получался белый текст на светлом фоне. Возвращаем нужный вид на уровне (0,3,1). */
+:is(html[data-theme="light"]) .wbi-site-mode .wbi-must{border-color:rgba(255,255,255,.2);background:linear-gradient(145deg,#8063ed 0%,#6546d4 76%,#5b3bc9 100%);box-shadow:12px 12px 0 #45d6aa,0 26px 60px rgba(67,39,144,.17)}
+:is(html[data-theme="light"]) .wbi-site-mode .wbi-must-h{color:#e2fff7}
+:is(html[data-theme="light"]) .wbi-site-mode .wbi-must-it{border-top-color:rgba(255,255,255,.2)}
+:is(html[data-theme="light"]) .wbi-site-mode .wbi-must-it .wbi-n{color:#123c31;border-color:#45d6aa;background:#45d6aa}
+:is(html[data-theme="light"]) .wbi-site-mode .wbi-must-it span,
+:is(html[data-theme="light"]) .wbi-site-mode .wbi-must-it b,
+:is(html[data-theme="light"]) .wbi-site-mode .wbi-must-ft b{color:#fff}
+:is(html[data-theme="light"]) .wbi-site-mode .wbi-must-ft{color:rgba(255,255,255,.87);background:rgba(24,14,62,.24)}
+:is(html[data-theme="light"]) .wbi-site-mode .wbi-cta{background:#251b3f}
+/* .wbi-warn был описан только для тёмной темы: светло-золотой текст на почти
+   белом фоне не читался во всех режимах инструкции, не только в site-mode. */
+:is(html[data-theme="light"]) .wbi-warn{color:#7a4a06;background:rgba(245,158,11,.12);border-color:rgba(180,110,10,.32)}
+:is(html[data-theme="light"]) .wbi-warn b{color:#4d2f04}
+@media(max-width:900px){
+ .wbi-site-mode .wbi-hero{min-height:0;grid-template-columns:1fr;grid-template-rows:auto;padding:52px 0 42px;gap:0}
+ .wbi-site-mode .wbi-kick,.wbi-site-mode .wbi-h1,.wbi-site-mode .wbi-lead,.wbi-site-mode .wbi-chips,.wbi-site-mode .wbi-must{grid-column:1;grid-row:auto}
+ .wbi-site-mode .wbi-must{max-width:620px;margin:40px 8px 10px 0;transform:rotate(.7deg)}
+ .wbi-roadmap{margin-bottom:56px}
+}
+@media(max-width:680px){
+ .wbi-site-mode .wbi-wrap{padding-inline:14px;padding-bottom:78px}
+ .wbi-site-mode .wbi-top{padding-top:20px}.wbi-site-mode .wbi-eye{font-size:10px}.wbi-site-mode .wbi-tag{font-size:12px}
+ .wbi-site-mode .wbi-hero{padding-top:44px}.wbi-site-mode .wbi-h1{font-size:clamp(42px,13vw,60px)}.wbi-site-mode .wbi-lead{font-size:16px}
+ .wbi-site-mode .wbi-must{padding:24px 22px;box-shadow:7px 7px 0 #45d6aa}.wbi-site-mode .wbi-must-it span,.wbi-site-mode .wbi-must-it b{font-size:15px}
+ .wbi-roadmap{grid-template-columns:1fr;gap:9px}.wbi-roadmap-card{min-height:132px}.wbi-roadmap-card small{max-width:360px}
+ .wbi-site-mode .wbi-dot{left:18px;top:19px;width:36px;height:36px;border-radius:11px}
+ .wbi-site-mode .wbi-card{padding:68px 18px 22px;border-radius:20px}.wbi-site-mode .wbi-card:hover{transform:none}
+ .wbi-site-mode .wbi-ttl{font-size:24px}.wbi-site-mode .wbi-t{font-size:16px}
+ .wbi-site-mode .wbi-cta{padding:30px 20px;box-shadow:6px 6px 0 #7556e8}
+}
+@media(max-width:480px){.wbi-root:not(.wbi-site-mode) .wbi-tl{padding-left:42px}.wbi-root:not(.wbi-site-mode) .wbi-dot{left:-42px;width:32px;height:32px}.wbi-root:not(.wbi-site-mode) .wbi-tl::before{left:15px}}
 @media (prefers-reduced-motion: reduce){
  .wbi-blob,.wbi-g,.wbi-dot.wbi-pulse,.wbi-card.wbi-key,.wbi-figure.wbi-spot::after,.wbi-anno,.wbi-box.g,.wbi-box.g::after,.wbi-tip.g{animation:none !important}
  .wbi-reveal{opacity:1 !important;transform:none !important}

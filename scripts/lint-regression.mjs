@@ -29,11 +29,15 @@ import { ESLint } from "eslint";
 // из Sheets F и точная gross-формула сдвинули существующие строки предупреждений
 // в `BossrobuxScreen.tsx` и partner notification tests.
 //
+// 2026-07-31 (1122 → 1122): SITE-редизайн общей инструкции не добавил новых
+// предупреждений; новые hero/roadmap-узлы сдвинули существующие `no-img-element`
+// строки в `WBInstructionV2.tsx`. WB/BOT-сценарии и состав baseline не менялись.
+//
 // Unlike --max-warnings, this has no spare capacity: adding, moving,
 // replacing or changing even one warning fails the gate. Reduce the baseline
 // only in a dedicated cleanup change after reviewing the full formatter output.
 const BASELINE_WARNING_COUNT = 1122;
-const BASELINE_SHA256 = "4fed9f5004c8ba270facd9e3a122b1cac24ee4198212dcda7de0e831cc8fc0ba";
+const BASELINE_SHA256 = "e4c3eb92dbd7debf66cfa8fb3ea4ad95c7d78e557626f85d7066b2ba944a881c";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);
