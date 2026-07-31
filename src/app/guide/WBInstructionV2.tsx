@@ -941,8 +941,11 @@ const CSS = `
 .wbi-v3 .wbi-tg{min-height:60px;padding:0 24px;border:0;border-radius:14px;background:#229ed9;font-size:18px;font-weight:900;box-shadow:4px 4px 0 #45d6aa}
 .wbi-v3 .wbi-tg:hover{transform:translateY(-2px)}.wbi-v3 .wbi-tg:active{transform:translateY(1px)}
 .wbi-v3 .wbi-vkwrap{min-height:60px;padding:0 16px;border:0;border-radius:14px;background:#0a66e0;box-shadow:4px 4px 0 #45d6aa}
+/* «Вернуться в ВКонтакте» длиннее телеграмной подписи: при 300 px и 18 px она
+   переносилась на две строки. 330 px + 17 px дают одну строку с запасом ~35 px. */
+.wbi-v3 .wbi-tg,.wbi-v3 .wbi-vkwrap{max-width:330px}
 /* Второй селектор — фолбэк VKAuthButton при выключенном VK ID (там ссылка, не button). */
-.wbi-v3 .wbi-vkwrap button span,.wbi-v3 .wbi-vkwrap a{font-size:18px!important;font-weight:900!important;text-transform:none!important;letter-spacing:.3px!important}
+.wbi-v3 .wbi-vkwrap button span,.wbi-v3 .wbi-vkwrap a{font-size:17px!important;font-weight:900!important;text-transform:none!important;letter-spacing:.3px!important}
 .wbi-v3 .wbi-redirect,.wbi-v3 .wbi-directcta{border-radius:14px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.07);color:rgba(255,255,255,.82);font-size:15px}
 .wbi-v3 .wbi-redirect b,.wbi-v3 .wbi-directcta b{color:#fff}
 .wbi-v3 .wbi-directnote{border-radius:14px;border-color:color-mix(in srgb,#45d6aa 45%,var(--rb-border));background:color-mix(in srgb,#45d6aa 10%,var(--rb-surface));color:var(--rb-text)}
