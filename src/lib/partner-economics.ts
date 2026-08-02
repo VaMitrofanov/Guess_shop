@@ -19,6 +19,21 @@ export type PartnerSettlement = PartnerEconomicPolicy & {
   marginPct: number | null;
 };
 
+export type PartnerTaskEconomicSnapshot = PartnerSettlement & {
+  costBasis: PartnerCostBasisValue | null;
+  snapshotSource: "task" | "batch";
+};
+
+export type PartnerLedgerEconomicSource = {
+  taskId?: string | null;
+  rateUsdtPer1000?: number | null;
+  purchaseRateUsdtPer1000?: number | null;
+  rateBasis?: PartnerRateBasisValue | null;
+  costBasis?: PartnerCostBasisValue | null;
+  robloxFeePct?: number | null;
+  revenueUsdt?: number | null;
+};
+
 // Google Sheets keeps the partner balance below one cent. With a rate stored to
 // four decimals and an integer R$ amount, C * F / 1000 needs up to 7 decimals.
 export function roundPartnerMoney(value: number) {
@@ -94,6 +109,46 @@ export function computePartnerSettlement(input: PartnerEconomicPolicy & {
     costUsdt,
     profitUsdt,
     marginPct,
+  };
+}
+
+/**
+ * Reconstruct one task's historical economics from its immutable ledger row.
+ * Legacy browser batches have no taskId and contain a batch total, so their
+ * revenue is recomputed for the task while keeping the batch's pinned policy.
+ */
+export function partnerTaskEconomicSnapshot(
+  grossRobux: number,
+  source: PartnerLedgerEconomicSource,
+  fallbackFeePct: number,
+): PartnerTaskEconomicSnapshot | null {
+  const saleRate = Number(source.rateUsdtPer1000);
+  const purchaseRate = Number(source.purchaseRateUsdtPer1000);
+  const feePct = Number(source.robloxFeePct ?? fallbackFeePct);
+  const rateBasis = source.rateBasis ?? "DIRTY";
+  if (!Number.isFinite(saleRate) || saleRate <= 0
+    || !Number.isFinite(purchaseRate) || purchaseRate <= 0
+    || !Number.isFinite(feePct) || feePct < 0 || feePct >= 100
+    || (rateBasis !== "DIRTY" && rateBasis !== "NET")) {
+    return null;
+  }
+
+  const taskScopedRevenue = source.taskId && Number.isFinite(Number(source.revenueUsdt))
+    ? Number(source.revenueUsdt)
+    : undefined;
+  const settlement = computePartnerSettlement({
+    grossRobux,
+    saleRateUsdtPer1000: saleRate,
+    purchaseRateUsdtPer1000: purchaseRate,
+    rateBasis,
+    robloxFeePct: feePct,
+    actualRevenueUsdt: taskScopedRevenue,
+  });
+
+  return {
+    ...settlement,
+    costBasis: source.costBasis ?? null,
+    snapshotSource: source.taskId ? "task" : "batch",
   };
 }
 

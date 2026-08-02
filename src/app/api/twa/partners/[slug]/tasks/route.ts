@@ -27,6 +27,7 @@ import { notifyPartnerBuyout, type PartnerBuyoutNotifyItem } from "@/lib/partner
 import { requireAdmin, type AdminActor } from "@/lib/admin-access";
 import {
   computePartnerSettlement,
+  partnerTaskEconomicSnapshot,
   partnerOrderRateUsdtPer1000,
   partnerPolicyFrom,
   settlementLedgerData,
@@ -2414,6 +2415,52 @@ async function attachPartnerLedgerTasks(
   });
 }
 
+/**
+ * Project the immutable ledger policy back onto task rows. This is what keeps
+ * historical DONE rows stable in both the TWA and the web admin after a rate
+ * change. Legacy batch rows are reconstructed per task from the batch policy.
+ */
+async function decoratePartnerTasksWithEconomics(
+  partner: Partner,
+  tasks: PartnerBuyoutTask[],
+) {
+  const taskIds = tasks.map((task) => task.id);
+  const purchaseBatchIds = tasks.flatMap((task) => task.purchaseBatchId ? [task.purchaseBatchId] : []);
+  if (taskIds.length === 0 && purchaseBatchIds.length === 0) return tasks;
+
+  const entries = await prisma.partnerLedgerEntry.findMany({
+    where: {
+      partnerId: partner.id,
+      currency: moneyCurrency(partner),
+      type: "BUYOUT",
+      OR: [
+        ...(taskIds.length > 0 ? [{ taskId: { in: taskIds } }] : []),
+        ...(purchaseBatchIds.length > 0 ? [{ batchId: { in: purchaseBatchIds } }] : []),
+      ],
+    },
+    select: {
+      taskId: true,
+      batchId: true,
+      rateUsdtPer1000: true,
+      purchaseRateUsdtPer1000: true,
+      rateBasis: true,
+      costBasis: true,
+      robloxFeePct: true,
+      revenueUsdt: true,
+    },
+  });
+  const byTaskId = new Map(entries.flatMap((entry) => entry.taskId ? [[entry.taskId, entry] as const] : []));
+  const byBatchId = new Map(entries.flatMap((entry) => entry.batchId ? [[entry.batchId, entry] as const] : []));
+
+  return tasks.map((task) => {
+    const source = byTaskId.get(task.id)
+      ?? (task.purchaseBatchId ? byBatchId.get(task.purchaseBatchId) : undefined);
+    if (!source) return task;
+    const economicSnapshot = partnerTaskEconomicSnapshot(getTaskPrice(task), source, partner.robloxFeePct);
+    return economicSnapshot ? { ...task, economicSnapshot } : task;
+  });
+}
+
 async function loadPartnerState(partner: Partner) {
   const currency = moneyCurrency(partner);
   const [tasks, ledgerEntries, importRuns, balanceAgg, economicsAgg, spentAgg, statusGroups, doneWithPurchaseAgg, doneWithoutPurchaseAgg, rateGroups, rateChanges] = await Promise.all([
@@ -2525,9 +2572,10 @@ async function loadPartnerState(partner: Partner) {
     .sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1));
 
   const hydratedLedgerEntries = await attachPartnerLedgerTasks(partner.id, ledgerEntries);
+  const decoratedTasks = await decoratePartnerTasksWithEconomics(partner, tasks);
 
   return {
-    tasks,
+    tasks: decoratedTasks,
     ledgerEntries: hydratedLedgerEntries,
     importRuns,
     googleSync: {
@@ -2598,7 +2646,8 @@ async function loadPartnerView(partner: Partner, view: PartnerView, cursor: stri
   });
   const hasMore = rows.length > PARTNER_VIEW_PAGE_SIZE;
   const items = hasMore ? rows.slice(0, PARTNER_VIEW_PAGE_SIZE) : rows;
-  return { items, nextCursor: hasMore ? items.at(-1)?.id ?? null : null };
+  const decoratedItems = await decoratePartnerTasksWithEconomics(partner, items);
+  return { items: decoratedItems, nextCursor: hasMore ? items.at(-1)?.id ?? null : null };
 }
 
 async function getPartnerBalance(partner: Partner) {

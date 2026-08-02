@@ -5,7 +5,7 @@ import { haptic } from "../haptics";
 import { toast } from "../Toast";
 import CreateManualModal from "../CreateManualModal";
 import { groupPartnerLedgerEntries, type PartnerLedgerRow } from "@/lib/partner-ledger";
-import { computePartnerSettlement, partnerOrderRateUsdtPer1000, type PartnerRateBasisValue } from "@/lib/partner-economics";
+import { computePartnerSettlement, partnerOrderRateUsdtPer1000, type PartnerRateBasisValue, type PartnerTaskEconomicSnapshot } from "@/lib/partner-economics";
 /** Неоплаченный прямой заказ — исключается из всех путей выкупа (П5). */
 import { isUnpaidDirect } from "@/lib/buyout-queue";
 import { ChevronRight, CircleAlert, Droplets, History, KeyRound, MoreHorizontal, RefreshCw, Search, ShoppingBag } from "lucide-react";
@@ -96,6 +96,7 @@ interface PartnerTask {
   error: string | null;
   note: string | null;
   sheetRaw: PartnerSheetRaw | null;
+  economicSnapshot?: PartnerTaskEconomicSnapshot | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -2477,8 +2478,9 @@ function PartnerTaskRow({
   const canClose = task.status !== "DONE" && task.status !== "CANCELLED" && task.status !== "PURCHASING";
   const title = task.sellerName || task.robloxUsername || (task.gamepassId ? `ГП ${task.gamepassId}` : "Геймпасс");
   const price = task.priceRobux ?? task.purchasePriceRobux;
-  const taskRate = partnerTaskRate(task, rateUsdtPer1000);
-  const costUsdt = partnerTaskCostUsdt(price, taskRate, rateBasis, robloxFeePct);
+  const taskRate = task.economicSnapshot?.saleRateUsdtPer1000 ?? partnerTaskRate(task, rateUsdtPer1000);
+  const costUsdt = task.economicSnapshot?.revenueUsdt
+    ?? partnerTaskCostUsdt(price, taskRate, rateBasis, robloxFeePct);
   const googleRow = task.externalSource === "GOOGLE_SHEETS" && task.sheetRaw?.sheetTitle && task.sheetRaw?.rowNumber
     ? `${task.sheetRaw.sheetTitle}:${task.sheetRaw.rowNumber}`
     : null;

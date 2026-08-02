@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { C, RADIUS, SHADOW } from "./theme";
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -33,12 +34,15 @@ export function ToastHost() {
 
   if (items.length === 0) return null;
 
-  return (
+  // Bottom sheets are portalled to document.body. The TWA root uses
+  // `isolation: isolate`, so an in-root toast can never outstack that sheet,
+  // even with a much larger z-index. Portal the global notice to body too.
+  return createPortal(
     <div style={{
       position: "fixed", left: 0, right: 0,
       bottom: "calc(env(safe-area-inset-bottom) + 78px)",
       display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
-      zIndex: 2000, pointerEvents: "none", padding: "0 16px",
+      zIndex: 100, pointerEvents: "none", padding: "0 16px",
     }}>
       {items.map(t => {
         const color = t.tone === "success" ? C.green : t.tone === "error" ? C.red : C.textPrimary;
@@ -60,6 +64,7 @@ export function ToastHost() {
           </div>
         );
       })}
-    </div>
+    </div>,
+    document.body,
   );
 }

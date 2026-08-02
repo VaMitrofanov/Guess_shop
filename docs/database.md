@@ -355,6 +355,11 @@ sync и результат write-back (`writeBackAt` / `lastWriteBackError`), ч
 переписываются. Отмена ошибочного TOPUP создаёт идемпотентный `ADJUSTMENT` с
 `batchId=reversal:<originalId>` и сохраняет исходный факт.
 
+Проекция задач в TWA и веб-админке также читает этот immutable snapshot: для DONE-задачи
+курс продажи, закупка, база и прибыль берутся из её `BUYOUT`-записи, а не из текущей политики
+партнёра. Старые агрегированные batch-записи без `taskId` восстанавливаются по каждой задаче
+с pinned-политикой batch; сумма всего batch не используется как выручка одной строки.
+
 Та же миграция добавляет в `User` кэш публичного Roblox-профиля:
 `robloxUserId`, `robloxDisplayName`, `robloxAvatarUrl`, `robloxDescription`,
 `robloxAccountCreatedAt`, `robloxProfileSyncedAt`. Стабильный `robloxUserId` позволяет

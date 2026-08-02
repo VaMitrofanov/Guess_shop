@@ -6,7 +6,7 @@ import {
   FileUp, Play, Plus, RefreshCw, Save, WalletCards, XCircle,
 } from "lucide-react";
 
-import { computePartnerSettlement, partnerOrderRateUsdtPer1000 } from "@/lib/partner-economics";
+import { computePartnerSettlement, partnerOrderRateUsdtPer1000, type PartnerTaskEconomicSnapshot } from "@/lib/partner-economics";
 import { cn } from "@/lib/utils";
 import styles from "./admin-shell.module.css";
 
@@ -29,6 +29,7 @@ type PartnerTask = {
     conflict?: string;
     sheetRateUsdtPer1000?: number | null;
   } | null;
+  economicSnapshot?: PartnerTaskEconomicSnapshot | null;
 };
 
 type LedgerEntry = {
@@ -89,6 +90,18 @@ type AntonState = {
     rateBasis: "DIRTY" | "NET" | null;
     createdAt: string;
     createdBy: string | null;
+  }>;
+  rateReport: Array<{
+    rate: number | null;
+    purchaseRate: number | null;
+    rateBasis: "DIRTY" | "NET" | null;
+    buyouts: number;
+    totalRobux: number;
+    totalNetRobux: number;
+    totalUsdt: number;
+    revenueUsdt: number;
+    costUsdt: number | null;
+    profitUsdt: number | null;
   }>;
   googleSync: {
     configured: boolean;
@@ -214,7 +227,7 @@ export default function AdminAntonClient() {
   const activeTasks = (state?.tasks ?? []).filter((task) => !["DONE", "CANCELLED"].includes(task.status));
   const visibleTasks = activeTasks.length > 0 ? activeTasks : (state?.tasks ?? []).slice(0, 40);
   const selectedTasks = visibleTasks.filter((task) => selected.has(task.id));
-  const taskSettlement = (task: PartnerTask) => computePartnerSettlement({
+  const taskSettlement = (task: PartnerTask) => task.economicSnapshot ?? computePartnerSettlement({
     grossRobux: taskPrice(task),
     saleRateUsdtPer1000: partnerOrderRateUsdtPer1000(task.sheetRaw, policy.robuxRateUsdtPer1000),
     purchaseRateUsdtPer1000: policy.purchaseRateUsdtPer1000,
@@ -265,6 +278,38 @@ export default function AdminAntonClient() {
           { label: "Объём", value: robux(s.netRobux), note: `${robux(s.grossRobux)} грязных` },
         ].map((metric) => <article key={metric.label} className={styles.metricCard}><WalletCards className={styles.metricIcon} /><strong>{metric.value}</strong><span>{metric.label}</span><small>{metric.note}</small></article>)}
       </div>
+
+      <section className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <div><strong>История курсов</strong><span>ledger-снимки, без пересчёта завершённых заказов</span></div>
+        </div>
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <thead><tr><th>Курс Антона</th><th>Закупка</th><th>Формула</th><th>Выкуплено</th><th>Объём</th><th>Выручка</th><th>Себестоимость</th><th>Прибыль</th></tr></thead>
+            <tbody>{state.rateReport.length === 0 ? (
+              <tr><td colSpan={8}>История списаний пока пуста.</td></tr>
+            ) : state.rateReport.map((row) => (
+              <tr key={`${row.rate ?? "unknown"}:${row.purchaseRate ?? "unknown"}:${row.rateBasis ?? "unknown"}`}>
+                <td>{row.rate == null ? "не записан" : `${row.rate} USDT`}</td>
+                <td>{row.purchaseRate == null ? "—" : `${row.purchaseRate} USDT`}</td>
+                <td>{row.rateBasis === "NET" ? "чистые R$" : row.rateBasis === "DIRTY" ? "грязные R$" : "—"}</td>
+                <td>{row.buyouts}</td>
+                <td>{robux(row.totalRobux)}</td>
+                <td>{money(row.revenueUsdt)}</td>
+                <td>{money(row.costUsdt)}</td>
+                <td>{money(row.profitUsdt)}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+        {state.rateChanges.length > 0 && (
+          <div className={styles.panelNote}>
+            <strong>Изменения:</strong> {state.rateChanges.map((change, index) => (
+              <span key={change.id}>{index > 0 ? " · " : " "}{change.previousRate == null ? "—" : change.previousRate} → {change.rate} USDT / 1000 ({date(change.createdAt)})</span>
+            ))}
+          </div>
+        )}
+      </section>
 
       <section className={styles.panel}>
         <div className={styles.panelHeader}>

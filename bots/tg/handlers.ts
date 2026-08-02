@@ -564,6 +564,7 @@ export function registerStart(bot: Telegraf): void {
     // Must happen first so we always capture user identity even if they skip
     // the subscription step or close Telegram immediately after landing.
     let provisionalOrder: any = null;
+    let provisionalCreated = false;
     try {
       // Use the DB-cased wbCode.code (not the payload-cased `code`) so the
       // unique-where update can't silently miss a code stored in another case.
@@ -574,7 +575,7 @@ export function registerStart(bot: Telegraf): void {
           where: { code: wbCode.code },
           data: { userId: user.id, status: "CLAIMED", isUsed: false },
         });
-        return tx.wbOrder.create({
+        const createdOrder = await tx.wbOrder.create({
           data: {
             amount: totalAmount,
             gamepassUrl: null,
@@ -585,13 +586,18 @@ export function registerStart(bot: Telegraf): void {
             ...(user.robloxUsername ? { robloxUsername: user.robloxUsername } : {}),
           },
         });
+        provisionalCreated = true;
+        return createdOrder;
       });
     } catch (err) {
       console.error("[TG] Provisional order creation failed:", err);
     }
 
     // Admin notification — sent immediately so we have contact data regardless of sub gate
-    if (provisionalOrder && provisionalOrder.status === "AWAITING_GAMEPASS") {
+    // Telegram may redeliver /start or a customer can reopen the same deep link.
+    // The order is idempotent by wbCode, so the admin card must be too: notify
+    // only the transaction that created the provisional order, never a replay.
+    if (provisionalCreated && provisionalOrder?.status === "AWAITING_GAMEPASS") {
       try {
         const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name || "Пользователь");
         const dateStr = new Date().toLocaleString("ru-RU", {

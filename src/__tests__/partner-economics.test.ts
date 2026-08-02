@@ -3,6 +3,7 @@ import {
   partnerNetRobux,
   partnerOrderRateUsdtPer1000,
   partnerPolicyValid,
+  partnerTaskEconomicSnapshot,
   settlementLedgerData,
 } from "@/lib/partner-economics";
 
@@ -70,6 +71,39 @@ describe("partner economics", () => {
       costBasis: "RATE",
       rateBasis: "NET",
     });
+  });
+
+  test("keeps a 5.05 → 5.3 → 5.2 sequence separated per task", () => {
+    const snapshots = [5.05, 5.3, 5.2].map((rate, index) => partnerTaskEconomicSnapshot(1000, {
+      taskId: `task-${index}`,
+      rateUsdtPer1000: rate,
+      purchaseRateUsdtPer1000: 4.7,
+      rateBasis: "DIRTY",
+      costBasis: "RATE",
+      robloxFeePct: 30,
+      revenueUsdt: rate,
+    }, 30));
+
+    expect(snapshots.map((snapshot) => snapshot?.saleRateUsdtPer1000)).toEqual([5.05, 5.3, 5.2]);
+    expect(snapshots.map((snapshot) => snapshot?.revenueUsdt)).toEqual([5.05, 5.3, 5.2]);
+    expect(snapshots.map((snapshot) => snapshot?.costUsdt)).toEqual([4.7, 4.7, 4.7]);
+  });
+
+  test("reconstructs legacy aggregate batches per task, not from the batch total", () => {
+    const snapshot = partnerTaskEconomicSnapshot(643, {
+      rateUsdtPer1000: 5.05,
+      purchaseRateUsdtPer1000: 4.3,
+      rateBasis: "DIRTY",
+      costBasis: "ASSUMED",
+      robloxFeePct: 30,
+      // Legacy batch amount must not be reused as this task's revenue.
+      revenueUsdt: 123,
+    }, 30);
+
+    expect(snapshot?.snapshotSource).toBe("batch");
+    expect(snapshot?.revenueUsdt).toBeCloseTo(3.24715, 5);
+    expect(snapshot?.costUsdt).toBeCloseTo(2.7649, 5);
+    expect(snapshot?.profitUsdt).toBeCloseTo(0.48225, 5);
   });
 
   test("rejects impossible policy values", () => {
