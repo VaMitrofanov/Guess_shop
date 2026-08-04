@@ -1,7 +1,6 @@
 # `/admin`: ultra-review производительности и план оптимизации — 04.08.2026
 
-Статус: **утверждён и реализован 04–05.08.2026; production-приёмка фиксируется в этом
-документе после rollout**.
+Статус: **реализован и принят в production 05.08.2026**.
 
 ## Результат реализации
 
@@ -36,6 +35,29 @@ Production-canary обнаружил и закрыл cache-boundary регрес
 строку. Dashboard loaders теперь преобразуют aggregates в `number`, а даты/recent orders —
 в JSON-safe DTO **до** помещения в Next Data Cache. Регресс-тест проверяет строковые даты и
 полную JSON-сериализуемость dashboard result.
+
+### Production acceptance
+
+Финальный Web и Guide собраны из одного source fingerprint; storefront smoke — `15/15`,
+Web↔Guide corridor — `31/31`. После hotfix в runtime нет BigInt/Date/Prisma exceptions.
+Авторизованный Chrome подтвердил Dashboard, Orders, Users, Activity, Economics, Buyout и
+партнёра «Антон». Серверный Orders search нашёл заказ глубже прежнего окна 250 строк.
+
+| Route | Baseline 04.08 | Production after 05.08 | Вывод |
+|---|---:|---:|---|
+| Dashboard | полное открытие ~4.90 s | warm TTFB ~1.45 s; FCP 1.70–2.03 s | сильное улучшение, но цель warm p50 ≤1.2 s ещё не доказана |
+| Orders | полное открытие ~3.65 s | обычный TTFB 1.44 s; FCP 1.63 s | целевой first page достигнут; deep search 3.02 s TTFB |
+| Users | полное открытие ~9.35 s | warm TTFB 1.46–1.48 s; FCP 1.74–1.88 s | основной список достиг цели и больше не ждёт TG/VK |
+| Activity | полное открытие ~2.20 s | warm TTFB 1.41 s; FCP/LCP 1.62 s | warm budget достигнут; cold sample 2.61–2.99 s |
+| Economics | client waterfall после HTML | FCP 1.57 s | initial data server-first, экран прошёл |
+| Buyout | client waterfall и stale race | TTFB 1.44 s; FCP/LCP 1.63 s | server-first и fresh reload прошли |
+| «Антон» | client waterfall после hydration | TTFB 2.02 s; FCP/LCP 2.22 s | server-first прошёл; физический refactor отдельно |
+
+Это небольшой acceptance-срез, а не статистически устойчивый p50/p95 из 15 прогонов.
+`PerformanceSample` уже накапливает PII-free ряд; регулярный отчёт должен сравнивать хотя бы
+15 warm прогонов одной версии. Cold dashboard и Activity по-прежнему чувствительны к
+удалённой БД: апгрейд текущего VPS не исправит DB RTT, а решение о co-location БД/compute
+нужно принимать по накопленным TTFB и host saturation.
 
 Этот документ отвечает на три вопроса:
 
