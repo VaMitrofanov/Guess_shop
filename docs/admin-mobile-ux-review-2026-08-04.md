@@ -335,3 +335,22 @@ responsive table работает, но визуально не образует
   desktop-таблица осталась таблицей;
 - `npm run gates`: Web Jest `454/454`, bots `29/29`, TypeScript web/bots и lint — успешно;
 - `npm run build`: успешно на Next.js `16.2.2`.
+
+### Production acceptance typography pass
+
+- основной visual commit `d530a60`, mobile heading hotfix `c2c8b7f`, финальная
+  стабилизация timezone/hydration `d8da74e` отправлены в `main`;
+- все три автоматических Web rollout завершились; после финального переключения
+  RobloxBankWeb — `running:healthy`, очередь deployments пуста;
+- `430 × 932`, `/admin`: видимый `h1 «Главное»`, 8 recent-order cards, label
+  `12 px / rgb(169,171,184)`, value `15 px / rgb(246,246,250)`, desktop table скрыта,
+  bottom nav видима, horizontal overflow `0`;
+- `390 × 844`: `/admin`, Orders, Buyout, Economics, Activity, Users, Reviews, FAQ и Anton —
+  корректный `h1`, bottom nav и `overflowX = 0` на каждом маршруте;
+- чистая авторизованная браузерная сессия после финального rollout: site errors `[]`;
+- `1728 × 1117`: `h1 «Общий обзор»`, 8 KPI, desktop table и sidebar видимы; mobile cards
+  и bottom nav скрыты; horizontal overflow `0`;
+- финальные gates: Web Jest `454/454`, bots `29/29`, TypeScript web/bots, lint baseline
+  `1109` (`c0ff996c91fa`), Next.js production build — успешно;
+- public production smoke — `15/15`; покупка, удаление, refund и другие destructive
+  операции во время QA не выполнялись.
