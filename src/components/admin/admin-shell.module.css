@@ -760,7 +760,7 @@
   .dashboardDesktopHeader { display: none; }
   .dashboardMobileHeading { display: grid; gap: 3px; margin-bottom: 12px; padding-inline: 2px; }
   .dashboardMobileHeading span { color: var(--admin-mobile-label); font-size: 13px; font-weight: 700; }
-  .dashboardMobileHeading strong { color: white; font-size: 24px; line-height: 1.15; letter-spacing: -.03em; }
+  .dashboardMobileHeading h1 { margin: 0; color: white; font-size: 24px; line-height: 1.15; letter-spacing: -.03em; }
 
   .filters { flex-wrap: nowrap; align-items: center; gap: 7px; margin: 0 -14px 13px; padding: 0 14px 2px; overflow-x: auto; scrollbar-width: none; }
   .filters::-webkit-scrollbar, .toolbar::-webkit-scrollbar { display: none; }

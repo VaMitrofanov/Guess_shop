@@ -46,6 +46,7 @@ describe("мобильный контракт Control Center", () => {
   });
 
   it("собирает последние заказы в читаемые семантические карточки", () => {
+    expect(dashboard).toContain("<h1>Главное</h1>");
     expect(dashboard).toContain("styles.dashboardOrderList");
     expect(dashboard).toContain("styles.dashboardOrderFacts");
     expect(dashboard).toContain("adminOrderStatusLabel(order.status)");

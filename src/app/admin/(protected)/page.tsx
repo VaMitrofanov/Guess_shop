@@ -131,7 +131,7 @@ export default async function AdminDashboard() {
 
       <div className={cn(styles.dashboardMobileHeading, styles.mobileOnly)}>
         <span>Сегодня</span>
-        <strong>Главное</strong>
+        <h1>Главное</h1>
       </div>
 
       <section className={cn(styles.metricGrid, styles.desktopOnly)} aria-label="Основные показатели">

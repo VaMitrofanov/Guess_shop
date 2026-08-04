@@ -319,6 +319,8 @@ responsive table работает, но визуально не образует
 - app bar увеличен до 76 px плюс safe area, title — 19 px, Production — 12 px; bottom-nav
   получил 12 px labels и более контрастные inactive/active состояния;
 - четыре KPI и desktop `4 × 2` сохранены: это readability pass, а не изменение метрик.
+- mobile dashboard сохраняет единственный видимый `h1` («Главное»); production QA не
+  принимает экран, если desktop-only heading оказался единственным heading первого уровня.
 
 Локальная приёмка на реальных production-данных через временный read-only preview route
 (удалён до build):
