@@ -42,11 +42,15 @@ import { ESLint } from "eslint";
 // предупреждений стало на 13 меньше. Остальной сдвиг отпечатка — новые
 // data-label/подтверждения и mobile shell в admin-компонентах.
 //
+// 2026-08-04 (1109 → 1109): единый ADMIN_TIME_ZONE устранил hydration mismatch
+// дат в четырёх client-компонентах админки. Новых предупреждений нет; импорты
+// сдвинули только строки двух уже известных buyout useEffect warnings.
+//
 // Unlike --max-warnings, this has no spare capacity: adding, moving,
 // replacing or changing even one warning fails the gate. Reduce the baseline
 // only in a dedicated cleanup change after reviewing the full formatter output.
 const BASELINE_WARNING_COUNT = 1109;
-const BASELINE_SHA256 = "375cc094e022035b52efb90374c2c154de88e019fd645a849e0e5b5c974dbb79";
+const BASELINE_SHA256 = "c0ff996c91fa5b73505a23b3fec08bbee3417742e8bc62e6cec30da95a3991bc";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);

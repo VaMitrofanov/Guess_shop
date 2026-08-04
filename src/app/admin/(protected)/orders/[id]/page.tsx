@@ -4,13 +4,14 @@ import { notFound } from "next/navigation";
 import { getAdminOrderDetail } from "@/lib/admin-ecosystem";
 import OutboxReplayButton from "@/components/admin/outbox-replay-button";
 import styles from "@/components/admin/admin-shell.module.css";
+import { ADMIN_TIME_ZONE } from "@/lib/admin-time";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 function dateTime(value: Date | null | undefined) {
   if (!value) return "—";
-  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(value);
+  return new Intl.DateTimeFormat("ru-RU", { timeZone: ADMIN_TIME_ZONE, day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(value);
 }
 
 function money(value: number | null | undefined) {

@@ -6,6 +6,7 @@ import {
   RefreshCw, ShoppingBasket, SquareTerminal, TriangleAlert, Wallet, X,
 } from "lucide-react";
 import styles from "./admin-shell.module.css";
+import { ADMIN_TIME_ZONE } from "@/lib/admin-time";
 import { cn } from "@/lib/utils";
 import { bulkPause, shouldStopBatch, sleep, type BatchItem } from "@/lib/buyout-batch";
 
@@ -87,7 +88,7 @@ type RowState =
 
 const rbx = (n: number) => n.toLocaleString("ru-RU") + " R$";
 const dateTime = (iso: string) =>
-  new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+  new Intl.DateTimeFormat("ru-RU", { timeZone: ADMIN_TIME_ZONE, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 
 function waitLabel(hours: number) {
   if (hours < 1) return "только что";

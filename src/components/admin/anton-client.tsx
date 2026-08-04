@@ -9,6 +9,7 @@ import {
 import { computePartnerSettlement, partnerOrderRateUsdtPer1000, type PartnerTaskEconomicSnapshot } from "@/lib/partner-economics";
 import { cn } from "@/lib/utils";
 import styles from "./admin-shell.module.css";
+import { ADMIN_TIME_ZONE } from "@/lib/admin-time";
 
 type PartnerTask = {
   id: string;
@@ -116,7 +117,7 @@ const money = (value: number | null | undefined) => value == null
   ? "—"
   : `${value.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`;
 const robux = (value: number | null | undefined) => `${(value ?? 0).toLocaleString("ru-RU")} R$`;
-const date = (value: string | null) => value ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)) : "—";
+const date = (value: string | null) => value ? new Intl.DateTimeFormat("ru-RU", { timeZone: ADMIN_TIME_ZONE, dateStyle: "short", timeStyle: "short" }).format(new Date(value)) : "—";
 const taskPrice = (task: PartnerTask) => task.purchasePriceRobux ?? task.priceRobux ?? 0;
 
 function margin(profit: number | null, revenue: number) {

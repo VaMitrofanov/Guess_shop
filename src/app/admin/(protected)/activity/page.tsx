@@ -10,12 +10,13 @@ import {
 import { getAdminActivity, getAdminRuntimeState } from "@/lib/admin-ecosystem";
 import styles from "@/components/admin/admin-shell.module.css";
 import { cn } from "@/lib/utils";
+import { ADMIN_TIME_ZONE } from "@/lib/admin-time";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 function dateTime(value: string) {
-  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(value));
+  return new Intl.DateTimeFormat("ru-RU", { timeZone: ADMIN_TIME_ZONE, day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(value));
 }
 
 const ICONS = {

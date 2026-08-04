@@ -321,6 +321,8 @@ responsive table работает, но визуально не образует
 - четыре KPI и desktop `4 × 2` сохранены: это readability pass, а не изменение метрик.
 - mobile dashboard сохраняет единственный видимый `h1` («Главное»); production QA не
   принимает экран, если desktop-only heading оказался единственным heading первого уровня.
+- все admin dates используют `Europe/Moscow`, как боты и TWA: SSR и client hydration больше
+  не могут показать разные часы в одной карточке или вызвать text hydration mismatch.
 
 Локальная приёмка на реальных production-данных через временный read-only preview route
 (удалён до build):
@@ -331,5 +333,5 @@ responsive table работает, но визуально не образует
   помещается в header, fixed nav не скрывает рабочее действие после прокрутки;
 - `1728 × 1117`: sidebar и исходные восемь KPI сохранены, мобильная навигация скрыта,
   desktop-таблица осталась таблицей;
-- `npm run gates`: Web Jest `453/453`, bots `29/29`, TypeScript web/bots и lint — успешно;
+- `npm run gates`: Web Jest `454/454`, bots `29/29`, TypeScript web/bots и lint — успешно;
 - `npm run build`: успешно на Next.js `16.2.2`.

@@ -15,6 +15,7 @@ const reviews = read("components/admin/review-list.tsx");
 const faq = read("components/admin/faq-list.tsx");
 const dashboard = read("app/admin/(protected)/page.tsx");
 const orderPresentation = read("lib/admin-order-presentation.ts");
+const adminTime = read("lib/admin-time.ts");
 
 describe("мобильный контракт Control Center", () => {
   it("держит четыре стабильных пункта нижней навигации", () => {
@@ -55,6 +56,13 @@ describe("мобильный контракт Control Center", () => {
     expect(css).toMatch(/\.dashboardOrderFacts\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,minmax\(0,1fr\)\)/);
     expect(css).toContain("--admin-mobile-label: #a9abb8");
     expect(css).toMatch(/\.responsiveTable td::before\s*\{[^}]*text-transform:\s*none/);
+  });
+
+  it("не меняет даты после hydration из-за timezone браузера", () => {
+    expect(adminTime).toContain('ADMIN_TIME_ZONE = "Europe/Moscow"');
+    for (const source of [orders, buyout, economics, anton]) {
+      expect(source).toContain("ADMIN_TIME_ZONE");
+    }
   });
 
   it("не прячет CRUD-действия за hover и не вызывает системный confirm", () => {

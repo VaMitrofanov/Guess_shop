@@ -5,13 +5,14 @@ import Link from "next/link";
 import { Search } from "lucide-react";
 import type { AdminOrderRow } from "@/lib/admin-ecosystem";
 import { adminOrderStatusLabel } from "@/lib/admin-order-presentation";
+import { ADMIN_TIME_ZONE } from "@/lib/admin-time";
 import styles from "./admin-shell.module.css";
 import { cn } from "@/lib/utils";
 
 const FILTERS = ["ALL", "SITE", "WB", "DIRECT", "AVITO", "ERROR"] as const;
 
 function dateTime(value: string) {
-  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  return new Intl.DateTimeFormat("ru-RU", { timeZone: ADMIN_TIME_ZONE, day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
 function money(kopecks: number) {

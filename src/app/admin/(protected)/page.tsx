@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { getAdminDashboardData, getAdminRuntimeState } from "@/lib/admin-ecosystem";
 import { adminOrderStatusLabel, adminRobloxUsername } from "@/lib/admin-order-presentation";
+import { ADMIN_TIME_ZONE } from "@/lib/admin-time";
 import styles from "@/components/admin/admin-shell.module.css";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +31,7 @@ function money(kopecks: number) {
 
 function dateTime(value: string) {
   return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: ADMIN_TIME_ZONE,
     day: "2-digit",
     month: "short",
     hour: "2-digit",

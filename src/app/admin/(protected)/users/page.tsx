@@ -21,6 +21,7 @@ import {
 } from "@/lib/admin-audience";
 import styles from "@/components/admin/admin-shell.module.css";
 import { cn } from "@/lib/utils";
+import { ADMIN_TIME_ZONE } from "@/lib/admin-time";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -36,6 +37,7 @@ const FILTERS: Array<{ key: AdminAudienceFilter; label: string }> = [
 
 function date(value: string) {
   return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: ADMIN_TIME_ZONE,
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -44,6 +46,7 @@ function date(value: string) {
 
 function dateTime(value: string) {
   return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: ADMIN_TIME_ZONE,
     day: "2-digit",
     month: "short",
     hour: "2-digit",

@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { RotateCcw, TriangleAlert } from "lucide-react";
 import styles from "./admin-shell.module.css";
 import { cn } from "@/lib/utils";
+import { ADMIN_TIME_ZONE } from "@/lib/admin-time";
 import {
   DEFAULT_FEE_RATES, computeOrder, computeTotals, costKopFor, grossFor, ratesValid,
   type DirectEconomics, type EconomicsRates, type DirectEconomicsSource, type UsnMode,
@@ -37,7 +38,7 @@ const rubKop2 = (kop: number) =>
   (kop / 100).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ₽";
 const rbx = (n: number) => n.toLocaleString("ru-RU") + " R$";
 const shortDate = (iso: string) =>
-  new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit" }).format(new Date(iso));
+  new Intl.DateTimeFormat("ru-RU", { timeZone: ADMIN_TIME_ZONE, day: "2-digit", month: "2-digit", year: "2-digit" }).format(new Date(iso));
 
 function Row({ k, v, note }: { k: string; v: string; note?: string }) {
   return (
