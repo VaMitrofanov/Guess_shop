@@ -119,7 +119,7 @@ export default function AdminSidebar({ user }: { user: { name?: string | null; v
         <div className={styles.mobileBrandMark}><Shield aria-hidden="true" /></div>
         <div className={styles.mobileTitle}>
           <span>{current?.label ?? "Control Center"}</span>
-          <small><i /> production</small>
+          <small><i /> Production</small>
         </div>
         <button
           type="button"

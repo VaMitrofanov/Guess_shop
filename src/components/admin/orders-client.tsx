@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Search } from "lucide-react";
 import type { AdminOrderRow } from "@/lib/admin-ecosystem";
+import { adminOrderStatusLabel } from "@/lib/admin-order-presentation";
 import styles from "./admin-shell.module.css";
 import { cn } from "@/lib/utils";
 
@@ -49,7 +50,7 @@ export default function AdminOrdersClient({ initialOrders }: { initialOrders: Ad
   return (
     <>
       <div className={styles.filters}>
-        <label className={styles.search}><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Код, ник, клиент или email" /></label>
+        <label className={styles.search}><Search /><input aria-label="Поиск по коду, нику, клиенту или email" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Код, ник или клиент" /></label>
         {FILTERS.map((item) => <button key={item} type="button" onClick={() => setFilter(item)} className={cn(styles.filterButton, filter === item && styles.filterButtonActive)}>{item === "ALL" ? "Все" : item === "ERROR" ? "Внимание" : item}</button>)}
       </div>
       <section className={styles.panel}>
@@ -61,7 +62,7 @@ export default function AdminOrdersClient({ initialOrders }: { initialOrders: Ad
                 <tr key={order.id}>
                   <td data-label="Заказ"><Link className={styles.orderLink} href={`/admin/orders/${order.id}`}>{order.code}</Link><span className={styles.tableSecondary}>{order.robloxUsername ?? "Ник не указан"}</span></td>
                   <td data-label="Клиент"><span className={styles.tablePrimary}>{order.client.username ? `@${order.client.username}` : order.client.name ?? "Клиент"}</span><span className={styles.tableSecondary}>{order.client.email ?? "Без email"}</span></td>
-                  <td data-label="Источник"><span className={styles.tablePrimary}>{order.source}</span><span className={styles.tableSecondary}>{order.platform} · {order.status}</span></td>
+                  <td data-label="Источник"><span className={styles.tablePrimary}>{order.source}</span><span className={styles.tableSecondary}>{order.platform} · {adminOrderStatusLabel(order.status)}</span></td>
                   <td data-label="Сумма"><span className={styles.tablePrimary}>{order.amountRobux.toLocaleString("ru-RU")} R$</span><span className={styles.tableSecondary}>{order.payment ? money(order.payment.amountKopecks) : "—"}</span></td>
                   <td data-label="Платёж"><span className={cn(styles.status, paymentTone(order.payment?.status))}>{paymentLabel(order.payment?.status)}</span>{order.payment?.refundedAmountKopecks ? <span className={styles.tableSecondary}>возврат {money(order.payment.refundedAmountKopecks)}</span> : null}</td>
                   <td data-label="Обновлён">{dateTime(order.updatedAt)}</td>

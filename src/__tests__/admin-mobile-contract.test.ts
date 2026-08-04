@@ -14,6 +14,7 @@ const users = read("app/admin/(protected)/users/page.tsx");
 const reviews = read("components/admin/review-list.tsx");
 const faq = read("components/admin/faq-list.tsx");
 const dashboard = read("app/admin/(protected)/page.tsx");
+const orderPresentation = read("lib/admin-order-presentation.ts");
 
 describe("мобильный контракт Control Center", () => {
   it("держит четыре стабильных пункта нижней навигации", () => {
@@ -44,6 +45,17 @@ describe("мобильный контракт Control Center", () => {
     }
   });
 
+  it("собирает последние заказы в читаемые семантические карточки", () => {
+    expect(dashboard).toContain("styles.dashboardOrderList");
+    expect(dashboard).toContain("styles.dashboardOrderFacts");
+    expect(dashboard).toContain("adminOrderStatusLabel(order.status)");
+    expect(orderPresentation).toContain('PENDING: "В работе"');
+    expect(orderPresentation).toContain('COMPLETED: "Выполнен"');
+    expect(css).toMatch(/\.dashboardOrderFacts\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,minmax\(0,1fr\)\)/);
+    expect(css).toContain("--admin-mobile-label: #a9abb8");
+    expect(css).toMatch(/\.responsiveTable td::before\s*\{[^}]*text-transform:\s*none/);
+  });
+
   it("не прячет CRUD-действия за hover и не вызывает системный confirm", () => {
     expect(reviews).not.toContain("opacity-0");
     expect(faq).not.toContain("opacity-0");
@@ -53,7 +65,7 @@ describe("мобильный контракт Control Center", () => {
   });
 
   it("обеспечивает 44px для критичных мобильных действий", () => {
-    expect(css).toMatch(/\.mobileBottomLink\s*\{[\s\S]*?min-height:\s*54px/);
+    expect(css).toMatch(/\.mobileBottomLink\s*\{[\s\S]*?min-height:\s*58px/);
     expect(css).toMatch(/\.mobileMoreHeader button\s*\{[\s\S]*?width:\s*44px;\s*height:\s*44px/);
     expect(css).toMatch(/\.rowActions button\s*\{[\s\S]*?width:\s*44px;\s*height:\s*44px/);
   });

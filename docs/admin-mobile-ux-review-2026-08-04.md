@@ -294,3 +294,40 @@ Production rollout:
   покупка, mark-done и delete в production QA не вызывались;
 - public production smoke — `15/15`;
 - Trello: [SHIPPED-карточка веб-админки](https://trello.com/c/nY84HYaJ/70-shipped-%D0%B2%D0%B5%D0%B1-%D0%B0%D0%B4%D0%BC%D0%B8%D0%BD%D0%BA%D0%B0-mobile-first-control-center-%D0%B2-production).
+
+## 10. Повторный typography/readability pass — 04.08.2026
+
+После первого rollout реальный скриншот iPhone 14 Pro Max показал, что технически
+responsive table работает, но визуально не образует карточку: маленькие uppercase-labels
+стояли слева, значения — у противоположного края, а вложенные вторичные строки (ник,
+сырой enum статуса, рублёвый эквивалент) воспринимались как самостоятельные поля.
+Дополнительно `#74747b` и навигационный `#777780` были слишком близки к фону для
+операционного интерфейса.
+
+Согласованный и реализованный контракт:
+
+- мобильный dashboard больше не прогоняет «Последние заказы» через универсальный table-to-card;
+  для него есть отдельная семантическая карточка `article + header + dl + action`;
+- номер и локализованный статус находятся в одном header, покупатель занимает полную строку,
+  остальные пары идут сеткой `2 × N` строго как `dt → dd`;
+- raw-статусы `AWAITING_GAMEPASS/PENDING/COMPLETED/...` заменены на русские display labels;
+  сырое значение данных не меняется;
+- общие responsive tables также переведены с горизонтальной пары label/value на label над
+  value, без uppercase и с двумя колонками полей;
+- mobile использует системный стек iOS `-apple-system / SF Pro`, основной текст 15–16 px,
+  label 12 px `#a9abb8`, значение `#f6f6fa`, secondary `#c1c2cc`;
+- app bar увеличен до 76 px плюс safe area, title — 19 px, Production — 12 px; bottom-nav
+  получил 12 px labels и более контрастные inactive/active состояния;
+- четыре KPI и desktop `4 × 2` сохранены: это readability pass, а не изменение метрик.
+
+Локальная приёмка на реальных production-данных через временный read-only preview route
+(удалён до build):
+
+- `430 × 932`: 8 последних карточек, ширина первой 372 px, label `12 px / #a9abb8`,
+  value `15 px / #f6f6fa`, `scrollWidth - clientWidth = 0`;
+- `390 × 844`: dashboard и Orders без horizontal overflow, длинный статус «Нужен геймпасс»
+  помещается в header, fixed nav не скрывает рабочее действие после прокрутки;
+- `1728 × 1117`: sidebar и исходные восемь KPI сохранены, мобильная навигация скрыта,
+  desktop-таблица осталась таблицей;
+- `npm run gates`: Web Jest `453/453`, bots `29/29`, TypeScript web/bots и lint — успешно;
+- `npm run build`: успешно на Next.js `16.2.2`.

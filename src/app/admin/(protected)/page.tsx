@@ -13,6 +13,7 @@ import {
   Users,
 } from "lucide-react";
 import { getAdminDashboardData, getAdminRuntimeState } from "@/lib/admin-ecosystem";
+import { adminOrderStatusLabel, adminRobloxUsername } from "@/lib/admin-order-presentation";
 import styles from "@/components/admin/admin-shell.module.css";
 import { cn } from "@/lib/utils";
 
@@ -56,6 +57,12 @@ function paymentLabel(status: string | undefined) {
     REFUNDED: "Возвращён",
   };
   return labels[status] ?? status;
+}
+
+function orderStatusTone(status: string) {
+  if (status === "COMPLETED") return styles.dashboardOrderStatusSuccess;
+  if (["REJECTED", "ERROR"].includes(status)) return styles.dashboardOrderStatusDanger;
+  return styles.dashboardOrderStatusPending;
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -110,7 +117,7 @@ export default async function AdminDashboard() {
 
   return (
     <div className={styles.page}>
-      <header className={styles.pageHeader}>
+      <header className={cn(styles.pageHeader, styles.dashboardDesktopHeader)}>
         <div>
           <span className={styles.eyebrow}>RobloxBank Control Center · production</span>
           <h1>Общий обзор</h1>
@@ -121,6 +128,11 @@ export default async function AdminDashboard() {
           <Link className={styles.primaryButton} href="/admin/orders">Все заказы <ArrowUpRight size={15} /></Link>
         </div>
       </header>
+
+      <div className={cn(styles.dashboardMobileHeading, styles.mobileOnly)}>
+        <span>Сегодня</span>
+        <strong>Главное</strong>
+      </div>
 
       <section className={cn(styles.metricGrid, styles.desktopOnly)} aria-label="Основные показатели">
         {desktopCards.map(({ label, value, hint, icon: Icon }) => (
@@ -154,8 +166,8 @@ export default async function AdminDashboard() {
       <div className={styles.overviewGrid}>
         <section className={styles.panel}>
           <div className={styles.panelHeader}><strong>Последние заказы</strong><Link href="/admin/orders">Открыть все →</Link></div>
-          <div className={cn(styles.tableWrap, styles.responsiveTableWrap)}>
-            <table className={cn(styles.table, styles.responsiveTable)}>
+          <div className={cn(styles.tableWrap, styles.desktopOnly)}>
+            <table className={styles.table}>
               <thead><tr><th>Заказ</th><th>Канал</th><th>Сумма</th><th>Платёж</th><th>Создан</th></tr></thead>
               <tbody>
                 {recentOrders.map((order) => (
@@ -169,6 +181,46 @@ export default async function AdminDashboard() {
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className={cn(styles.dashboardOrderList, styles.mobileOnly)}>
+            {recentOrders.map((order) => (
+              <article className={styles.dashboardOrderCard} key={order.id}>
+                <header className={styles.dashboardOrderHeader}>
+                  <div>
+                    <span>Заказ</span>
+                    <Link className={styles.dashboardOrderCode} href={`/admin/orders/${order.id}`}>{order.code}</Link>
+                  </div>
+                  <span className={cn(styles.dashboardOrderStatus, orderStatusTone(order.status))}>
+                    <i aria-hidden="true" />{adminOrderStatusLabel(order.status)}
+                  </span>
+                </header>
+                <dl className={styles.dashboardOrderFacts}>
+                  <div className={styles.dashboardOrderWide}>
+                    <dt>Покупатель</dt>
+                    <dd>{adminRobloxUsername(order.robloxUsername)}</dd>
+                  </div>
+                  <div>
+                    <dt>Канал</dt>
+                    <dd>{order.source}</dd>
+                  </div>
+                  <div>
+                    <dt>Сумма</dt>
+                    <dd className={styles.dashboardOrderMoney}>{order.amountRobux.toLocaleString("ru-RU")} R$</dd>
+                  </div>
+                  <div>
+                    <dt>Платёж</dt>
+                    <dd>{paymentLabel(order.payment?.status)}</dd>
+                  </div>
+                  <div>
+                    <dt>Создан</dt>
+                    <dd>{dateTime(order.createdAt)}</dd>
+                  </div>
+                </dl>
+                <Link className={styles.dashboardOrderAction} href={`/admin/orders/${order.id}`}>
+                  Открыть заказ <ArrowUpRight aria-hidden="true" />
+                </Link>
+              </article>
+            ))}
           </div>
           {recentOrders.length === 0 && <div className={styles.empty}>Заказов пока нет</div>}
         </section>

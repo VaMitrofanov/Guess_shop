@@ -422,6 +422,14 @@ handle не считается ошибкой: пользователь мог �
 `src/app/admin/(protected)/page.tsx`, `src/app/admin/(protected)/users/page.tsx`.
 Контракты: `src/__tests__/admin-audience.test.ts` и `admin-ecosystem.test.ts`.
 
+**Mobile readability pass — реализован 04.08.2026.** Dashboard orders получили отдельную
+семантическую карточку вместо универсальной перестройки таблицы: status и code связаны в
+header, `dt/dd` идут явными парами, enum локализован общим
+`src/lib/admin-order-presentation.ts`. Общий responsive-table contract также показывает
+label над value без мелкого uppercase. Mobile app/bottom bars и вторичный текст переведены
+на контрастную iOS type scale; desktop `4 × 2` и табличный режим не менялись. Полная
+спецификация и замеры — `admin-mobile-ux-review-2026-08-04.md` §10.
+
 **Экономика — 🟢 сделано 29.07.2026** (вне очереди, по прямой просьбе владельца).
 `/admin/economics`: все не-WB заказы, робуксы, бонусы и **интерактивная формула** —
 курс ₽/$, ставка закупа $/1k и комиссия Roblox правятся прямо на экране, прайс тоже
