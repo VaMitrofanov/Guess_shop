@@ -87,7 +87,19 @@ export default async function AdminDashboard() {
     { label: "Все заказы", value: metrics.totalOrders.toLocaleString("ru-RU"), hint: `${metrics.orders30d} создано за 30 дней`, icon: Layers3 },
     { label: "Покупатели", value: metrics.uniqueBuyers.toLocaleString("ru-RU"), hint: `${metrics.repeatBuyers} повторных`, icon: Repeat2 },
   ];
-  const cards = [...primaryCards, ...secondaryCards];
+  // Desktop остаётся в исходном контракте 4 × 2: новый operational KPI
+  // «К выкупу» нужен в mobile first screen, но не должен раздувать нормальную
+  // desktop-сетку до третьего ряда с одной карточкой.
+  const desktopCards = [
+    primaryCards[0],
+    secondaryCards[0],
+    secondaryCards[1],
+    secondaryCards[2],
+    secondaryCards[3],
+    primaryCards[1],
+    secondaryCards[4],
+    primaryCards[3],
+  ];
 
   const attention = [
     { label: "Заказы с ошибкой", value: metrics.errorOrders, hint: "требуют решения менеджера" },
@@ -111,7 +123,7 @@ export default async function AdminDashboard() {
       </header>
 
       <section className={cn(styles.metricGrid, styles.desktopOnly)} aria-label="Основные показатели">
-        {cards.map(({ label, value, hint, icon: Icon }) => (
+        {desktopCards.map(({ label, value, hint, icon: Icon }) => (
           <article className={styles.metricCard} key={label}>
             <div className={styles.metricIcon}><Icon /></div>
             <strong>{value}</strong><span>{label}</span><small>{hint}</small>

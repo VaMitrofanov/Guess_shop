@@ -273,7 +273,9 @@ fallback-поверхностью согласно принятому плану
 Production QA первого rollout поймал desktop-регрессию: `.metricGrid` перебивал
 `.mobileOnly` с одинаковой специфичностью, и четыре mobile KPI повторно появлялись под
 desktop-сеткой. Контракт исправлен явными `display: none/grid !important` строго на
-mobile boundary и закреплён шестым Jest-тестом до финальной приёмки.
+mobile boundary и закреплён шестым Jest-тестом до финальной приёмки. Desktop также явно
+оставлен в исходном контракте `4 × 2`: mobile-only KPI «К выкупу» не создаёт девятую
+карточку и одинокий третий ряд на MacBook.
 
 После production rollout сюда добавляются commit/deploy fingerprint, авторизованный smoke
 и ссылка на Trello-карточку.

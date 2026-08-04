@@ -13,6 +13,7 @@ const anton = read("components/admin/anton-client.tsx");
 const users = read("app/admin/(protected)/users/page.tsx");
 const reviews = read("components/admin/review-list.tsx");
 const faq = read("components/admin/faq-list.tsx");
+const dashboard = read("app/admin/(protected)/page.tsx");
 
 describe("мобильный контракт Control Center", () => {
   it("держит четыре стабильных пункта нижней навигации", () => {
@@ -26,6 +27,8 @@ describe("мобильный контракт Control Center", () => {
   it("не показывает mobile-only KPI повторно на desktop", () => {
     expect(css).toMatch(/\.mobileOnly,\s*\n\.mobileList\s*\{\s*display:\s*none\s*!important;/);
     expect(css).toMatch(/\.mobileOnly, \.mobileList\s*\{\s*display:\s*grid\s*!important;/);
+    expect(dashboard).toContain("const desktopCards = [");
+    expect(dashboard).toContain("desktopCards.map");
   });
 
   it("учитывает обе safe-area и динамическую высоту iOS", () => {
