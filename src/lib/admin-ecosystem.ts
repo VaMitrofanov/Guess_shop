@@ -3,6 +3,7 @@ import "server-only";
 import { PaymentAttemptStatus, WbOrderStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { isSiteAcquiringEnabled, parseSiteAcquiringMode } from "@/lib/site-acquiring";
+import { buildTabWhere } from "@/lib/order-queue";
 
 const PAID_PAYMENT_STATUSES: PaymentAttemptStatus[] = [
   "CONFIRMED",
@@ -137,6 +138,7 @@ export async function getAdminDashboardData() {
     totalOrders,
     siteOrders,
     activeOrders,
+    buyoutOrders,
     created24h,
     completed24h,
     completedOrders,
@@ -160,6 +162,7 @@ export async function getAdminDashboardData() {
     prisma.wbOrder.count({ where: { isTest: false } }),
     prisma.wbOrder.count({ where: { isTest: false, orderSource: "SITE" } }),
     prisma.wbOrder.count({ where: { isTest: false, status: { in: ACTIVE_ORDER_STATUSES } } }),
+    prisma.wbOrder.count({ where: { isTest: false, ...buildTabWhere("BUYOUT") } }),
     prisma.wbOrder.count({ where: { isTest: false, createdAt: { gte: since24h } } }),
     prisma.wbOrder.count({ where: { isTest: false, completedAt: { gte: since24h } } }),
     prisma.wbOrder.count({ where: { isTest: false, status: "COMPLETED" } }),
@@ -230,6 +233,7 @@ export async function getAdminDashboardData() {
       totalOrders,
       siteOrders,
       activeOrders,
+      buyoutOrders,
       created24h,
       completed24h,
       completedOrders,

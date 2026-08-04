@@ -53,18 +53,18 @@ export default function AdminOrdersClient({ initialOrders }: { initialOrders: Ad
         {FILTERS.map((item) => <button key={item} type="button" onClick={() => setFilter(item)} className={cn(styles.filterButton, filter === item && styles.filterButtonActive)}>{item === "ALL" ? "Все" : item === "ERROR" ? "Внимание" : item}</button>)}
       </div>
       <section className={styles.panel}>
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
+        <div className={cn(styles.tableWrap, styles.responsiveTableWrap)}>
+          <table className={cn(styles.table, styles.responsiveTable)}>
             <thead><tr><th>Заказ</th><th>Клиент</th><th>Источник</th><th>Сумма</th><th>Платёж</th><th>Обновлён</th></tr></thead>
             <tbody>
               {orders.map((order) => (
                 <tr key={order.id}>
-                  <td><Link className={styles.orderLink} href={`/admin/orders/${order.id}`}>{order.code}</Link><span className={styles.tableSecondary}>{order.robloxUsername ?? "Ник не указан"}</span></td>
-                  <td><span className={styles.tablePrimary}>{order.client.username ? `@${order.client.username}` : order.client.name ?? "Клиент"}</span><span className={styles.tableSecondary}>{order.client.email ?? "Без email"}</span></td>
-                  <td><span className={styles.tablePrimary}>{order.source}</span><span className={styles.tableSecondary}>{order.platform} · {order.status}</span></td>
-                  <td><span className={styles.tablePrimary}>{order.amountRobux.toLocaleString("ru-RU")} R$</span><span className={styles.tableSecondary}>{order.payment ? money(order.payment.amountKopecks) : "—"}</span></td>
-                  <td><span className={cn(styles.status, paymentTone(order.payment?.status))}>{paymentLabel(order.payment?.status)}</span>{order.payment?.refundedAmountKopecks ? <span className={styles.tableSecondary}>возврат {money(order.payment.refundedAmountKopecks)}</span> : null}</td>
-                  <td>{dateTime(order.updatedAt)}</td>
+                  <td data-label="Заказ"><Link className={styles.orderLink} href={`/admin/orders/${order.id}`}>{order.code}</Link><span className={styles.tableSecondary}>{order.robloxUsername ?? "Ник не указан"}</span></td>
+                  <td data-label="Клиент"><span className={styles.tablePrimary}>{order.client.username ? `@${order.client.username}` : order.client.name ?? "Клиент"}</span><span className={styles.tableSecondary}>{order.client.email ?? "Без email"}</span></td>
+                  <td data-label="Источник"><span className={styles.tablePrimary}>{order.source}</span><span className={styles.tableSecondary}>{order.platform} · {order.status}</span></td>
+                  <td data-label="Сумма"><span className={styles.tablePrimary}>{order.amountRobux.toLocaleString("ru-RU")} R$</span><span className={styles.tableSecondary}>{order.payment ? money(order.payment.amountKopecks) : "—"}</span></td>
+                  <td data-label="Платёж"><span className={cn(styles.status, paymentTone(order.payment?.status))}>{paymentLabel(order.payment?.status)}</span>{order.payment?.refundedAmountKopecks ? <span className={styles.tableSecondary}>возврат {money(order.payment.refundedAmountKopecks)}</span> : null}</td>
+                  <td data-label="Обновлён">{dateTime(order.updatedAt)}</td>
                 </tr>
               ))}
             </tbody>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { RotateCcw, TriangleAlert } from "lucide-react";
 import styles from "./admin-shell.module.css";
 import { cn } from "@/lib/utils";
@@ -188,7 +188,14 @@ export default function AdminEconomicsClient() {
     [prices],
   );
 
-  if (loading) return <div className={styles.empty}>Загружаем экономику…</div>;
+  if (loading) return (
+    <div className={styles.loadingState} aria-live="polite" aria-busy="true">
+      <span>Загружаем экономику…</span>
+      <div className={styles.loadingHero} />
+      <div className={styles.loadingGrid}><i /><i /><i /><i /></div>
+      <div className={styles.loadingPanel} />
+    </div>
+  );
   if (failed || !data) return <div className={styles.empty}>Не удалось загрузить экономику</div>;
 
   const channels: (DirectEconomicsSource | "ALL")[] = [
@@ -292,8 +299,8 @@ export default function AdminEconomicsClient() {
             <div className={styles.panelHeader}>
               <strong>Заказы</strong><span>{rows.length}</span>
             </div>
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
+            <div className={cn(styles.tableWrap, styles.responsiveTableWrap)}>
+              <table className={cn(styles.table, styles.responsiveTable)}>
                 <thead>
                   <tr>
                     <th>Код</th><th>Канал</th>
@@ -312,30 +319,30 @@ export default function AdminEconomicsClient() {
                     const margin = o.revenueKopecks && o.revenueKopecks > 0 && r.profitKop != null
                       ? Math.round((r.profitKop / o.revenueKopecks) * 100) : null;
                     return (
-                      <>
+                      <Fragment key={o.id}>
                         <tr
-                          key={o.id} className={styles.expandRow}
+                          className={styles.expandRow}
                           onClick={() => setExpanded(open ? null : o.id)}
                         >
-                          <td>
+                          <td data-label="Код">
                             <span className={styles.tablePrimary}>{o.wbCode}</span>
                             <small className={styles.tableSecondary}>
                               {shortDate(o.completedAt ?? o.createdAt)} · {o.platform}
                             </small>
                           </td>
-                          <td>{SOURCE_LABEL[o.source]}</td>
-                          <td className={styles.numeric}>{o.robuxDelivered.toLocaleString("ru-RU")}</td>
-                          <td className={cn(styles.numeric, o.bonusRobux > 0 ? "" : styles.dim)}>
+                          <td data-label="Канал">{SOURCE_LABEL[o.source]}</td>
+                          <td data-label="Выдано" className={styles.numeric}>{o.robuxDelivered.toLocaleString("ru-RU")}</td>
+                          <td data-label="Бонус" className={cn(styles.numeric, o.bonusRobux > 0 ? "" : styles.dim)}>
                             {o.bonusRobux > 0 ? o.bonusRobux.toLocaleString("ru-RU") : "—"}
                           </td>
-                          <td className={styles.numeric}>
+                          <td data-label="Оплачено" className={styles.numeric}>
                             {o.revenueKopecks == null ? <span className={styles.dim}>цена ?</span> : rubKop(o.revenueKopecks)}
                           </td>
-                          <td className={styles.numeric}>{rubKop(r.costKop)}</td>
-                          <td className={cn(styles.numeric, r.profitKop == null ? styles.dim : r.profitKop >= 0 ? styles.good : styles.bad)}>
+                          <td data-label="Себест." className={styles.numeric}>{rubKop(r.costKop)}</td>
+                          <td data-label="Прибыль" className={cn(styles.numeric, r.profitKop == null ? styles.dim : r.profitKop >= 0 ? styles.good : styles.bad)}>
                             {r.profitKop == null ? "—" : rubKop(r.profitKop)}
                           </td>
-                          <td className={cn(styles.numeric, styles.dim)}>{margin == null ? "—" : `${margin}%`}</td>
+                          <td data-label="Маржа" className={cn(styles.numeric, styles.dim)}>{margin == null ? "—" : `${margin}%`}</td>
                         </tr>
                         {open && (
                           <tr key={`${o.id}-x`} className={styles.expandPanel}>
@@ -370,7 +377,7 @@ export default function AdminEconomicsClient() {
                             </td>
                           </tr>
                         )}
-                      </>
+                      </Fragment>
                     );
                   })}
                   {rows.length === 0 && <tr><td colSpan={8} className={styles.empty}>За этот период ничего нет</td></tr>}
@@ -488,8 +495,8 @@ export default function AdminEconomicsClient() {
             <div className={styles.panelHeader}>
               <strong>Наши цены</strong><span>маржа по пакам</span>
             </div>
-            <div className={styles.tableWrap}>
-              <table className={cn(styles.table, styles.compactTable)}>
+            <div className={cn(styles.tableWrap, styles.responsiveTableWrap)}>
+              <table className={cn(styles.table, styles.compactTable, styles.responsiveTable)}>
                 <thead>
                   <tr>
                     <th>Пак</th>
@@ -505,16 +512,16 @@ export default function AdminEconomicsClient() {
                     const profit = price - cost;
                     return (
                       <tr key={pack}>
-                        <td className={styles.tablePrimary}>{pack.toLocaleString("ru-RU")}</td>
-                        <td style={{ textAlign: "right" }}>
+                        <td data-label="Пак" className={styles.tablePrimary}>{pack.toLocaleString("ru-RU")}</td>
+                        <td data-label="Цена ₽" style={{ textAlign: "right" }}>
                           <input
                             className={styles.priceInput} type="number" step={10}
                             value={String(prices[pack] ?? 0)}
                             onChange={(e) => setPrice(pack, e.target.value)}
                           />
                         </td>
-                        <td className={cn(styles.numeric, profit >= 0 ? styles.good : styles.bad)}>{rubKop(profit)}</td>
-                        <td className={cn(styles.numeric, styles.dim)}>
+                        <td data-label="Прибыль" className={cn(styles.numeric, profit >= 0 ? styles.good : styles.bad)}>{rubKop(profit)}</td>
+                        <td data-label="Маржа" className={cn(styles.numeric, styles.dim)}>
                           {price > 0 ? `${Math.round((profit / price) * 100)}%` : "—"}
                         </td>
                       </tr>

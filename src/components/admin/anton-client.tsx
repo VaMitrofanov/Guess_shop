@@ -142,6 +142,7 @@ export default function AdminAntonClient() {
   const [topup, setTopup] = useState("");
   const [manualNick, setManualNick] = useState("");
   const [manualGp, setManualGp] = useState("");
+  const [bulkConfirming, setBulkConfirming] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -283,21 +284,21 @@ export default function AdminAntonClient() {
         <div className={styles.panelHeader}>
           <div><strong>История курсов</strong><span>ledger-снимки, без пересчёта завершённых заказов</span></div>
         </div>
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
+        <div className={cn(styles.tableWrap, styles.responsiveTableWrap)}>
+          <table className={cn(styles.table, styles.responsiveTable)}>
             <thead><tr><th>Курс Антона</th><th>Закупка</th><th>Формула</th><th>Выкуплено</th><th>Объём</th><th>Выручка</th><th>Себестоимость</th><th>Прибыль</th></tr></thead>
             <tbody>{state.rateReport.length === 0 ? (
               <tr><td colSpan={8}>История списаний пока пуста.</td></tr>
             ) : state.rateReport.map((row) => (
               <tr key={`${row.rate ?? "unknown"}:${row.purchaseRate ?? "unknown"}:${row.rateBasis ?? "unknown"}`}>
-                <td>{row.rate == null ? "не записан" : `${row.rate} USDT`}</td>
-                <td>{row.purchaseRate == null ? "—" : `${row.purchaseRate} USDT`}</td>
-                <td>{row.rateBasis === "NET" ? "чистые R$" : row.rateBasis === "DIRTY" ? "грязные R$" : "—"}</td>
-                <td>{row.buyouts}</td>
-                <td>{robux(row.totalRobux)}</td>
-                <td>{money(row.revenueUsdt)}</td>
-                <td>{money(row.costUsdt)}</td>
-                <td>{money(row.profitUsdt)}</td>
+                <td data-label="Курс Антона">{row.rate == null ? "не записан" : `${row.rate} USDT`}</td>
+                <td data-label="Закупка">{row.purchaseRate == null ? "—" : `${row.purchaseRate} USDT`}</td>
+                <td data-label="Формула">{row.rateBasis === "NET" ? "чистые R$" : row.rateBasis === "DIRTY" ? "грязные R$" : "—"}</td>
+                <td data-label="Выкуплено">{row.buyouts}</td>
+                <td data-label="Объём">{robux(row.totalRobux)}</td>
+                <td data-label="Выручка">{money(row.revenueUsdt)}</td>
+                <td data-label="Себестоимость">{money(row.costUsdt)}</td>
+                <td data-label="Прибыль">{money(row.profitUsdt)}</td>
               </tr>
             ))}</tbody>
           </table>
@@ -328,26 +329,38 @@ export default function AdminAntonClient() {
           <div><strong>Задачи</strong><span>{activeTasks.length > 0 ? `${activeTasks.length} активных` : `Активных нет · последние ${visibleTasks.length}`}</span></div>
           <div className={styles.headerActions}>
             <button className={styles.secondaryButton} onClick={() => setSelected(new Set(visibleTasks.filter((task) => !["DONE", "CANCELLED"].includes(task.status)).map((task) => task.id)))}>Выбрать активные</button>
-            <button className={styles.primaryButton} disabled={loading || selectedTasks.length === 0} onClick={async () => {
-              if (!window.confirm(`Отметить купленными ${selectedTasks.length} задач? С Антона спишется примерно ${money(selectedUsdt)}.`)) return;
-              if (await post("mark-done-bulk", { taskIds: selectedTasks.map((task) => task.id), purchaseAccountName: "Веб-админка / вручную" })) setSelected(new Set());
-            }}>Куплено ({selectedTasks.length})</button>
+            <button className={styles.primaryButton} disabled={loading || selectedTasks.length === 0} onClick={() => setBulkConfirming(true)}>Куплено ({selectedTasks.length})</button>
           </div>
         </div>
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
+        {bulkConfirming && (
+          <div className={styles.confirmBar} role="alert">
+            <AlertTriangle />
+            <div><strong>Подтвердите списание</strong><span>Отметить купленными {selectedTasks.length} задач и списать примерно {money(selectedUsdt)} с баланса Антона?</span></div>
+            <div className={styles.confirmBarActions}>
+              <button className={styles.secondaryButton} onClick={() => setBulkConfirming(false)}>Отмена</button>
+              <button className={styles.primaryButton} onClick={async () => {
+                if (await post("mark-done-bulk", { taskIds: selectedTasks.map((task) => task.id), purchaseAccountName: "Веб-админка / вручную" })) {
+                  setSelected(new Set());
+                  setBulkConfirming(false);
+                }
+              }}>Да, списать</button>
+            </div>
+          </div>
+        )}
+        <div className={cn(styles.tableWrap, styles.responsiveTableWrap)}>
+          <table className={cn(styles.table, styles.responsiveTable)}>
             <thead><tr><th></th><th>Задача</th><th>Грязные → чистые</th><th>Списание / результат</th><th>Статус</th><th>Действия</th></tr></thead>
             <tbody>{visibleTasks.map((task) => {
               const gross = taskPrice(task);
               const row = gross > 0 ? taskSettlement(task) : null;
               const actionable = !["DONE", "CANCELLED", "PURCHASING"].includes(task.status);
               return <tr key={task.id}>
-                <td><input type="checkbox" checked={selected.has(task.id)} disabled={!actionable} onChange={(event) => setSelected((current) => { const next = new Set(current); if (event.target.checked) next.add(task.id); else next.delete(task.id); return next; })} /></td>
-                <td><span className={styles.tablePrimary}>{task.robloxUsername ?? `GP ${task.gamepassId ?? "—"}`}</span><span className={styles.tableSecondary}>{task.externalSource}{task.sheetRaw?.sheetTitle ? ` · ${task.sheetRaw.sheetTitle}:${task.sheetRaw.rowNumber}` : ""}{task.error ? ` · ${task.error}` : ""}</span></td>
-                <td><span className={styles.tablePrimary}>{robux(row?.grossRobux)}</span><span className={styles.tableSecondary}>→ {robux(row?.netRobux)} чистых</span></td>
-                <td><span className={styles.tablePrimary}>{money(row?.revenueUsdt)}</span><span className={styles.tableSecondary} style={{ color: row && row.profitUsdt < 0 ? "#ff7780" : undefined }}>{row ? `курс ${row.saleRateUsdtPer1000} · прибыль ${money(row.profitUsdt)}` : "нет цены"}</span></td>
-                <td><span className={cn(styles.status, statusTone(task.status))}>{task.status}</span></td>
-                <td><div className={styles.rowActions}>
+                <td data-label="Выбрать"><input type="checkbox" checked={selected.has(task.id)} disabled={!actionable} onChange={(event) => setSelected((current) => { const next = new Set(current); if (event.target.checked) next.add(task.id); else next.delete(task.id); return next; })} /></td>
+                <td data-label="Задача"><span className={styles.tablePrimary}>{task.robloxUsername ?? `GP ${task.gamepassId ?? "—"}`}</span><span className={styles.tableSecondary}>{task.externalSource}{task.sheetRaw?.sheetTitle ? ` · ${task.sheetRaw.sheetTitle}:${task.sheetRaw.rowNumber}` : ""}{task.error ? ` · ${task.error}` : ""}</span></td>
+                <td data-label="Грязные → чистые"><span className={styles.tablePrimary}>{robux(row?.grossRobux)}</span><span className={styles.tableSecondary}>→ {robux(row?.netRobux)} чистых</span></td>
+                <td data-label="Списание"><span className={styles.tablePrimary}>{money(row?.revenueUsdt)}</span><span className={styles.tableSecondary} style={{ color: row && row.profitUsdt < 0 ? "#ff7780" : undefined }}>{row ? `курс ${row.saleRateUsdtPer1000} · прибыль ${money(row.profitUsdt)}` : "нет цены"}</span></td>
+                <td data-label="Статус"><span className={cn(styles.status, statusTone(task.status))}>{task.status}</span></td>
+                <td data-label="Действия"><div className={styles.rowActions}>
                   <button title="Купить" disabled={loading || !["READY", "FAILED"].includes(task.status)} onClick={() => post("purchase-task", { taskId: task.id, purchaseBatchId: `web:${Date.now()}` })}><Play size={14} /></button>
                   <button title="Отметить купленным" disabled={loading || !actionable} onClick={() => post("mark-done", { taskId: task.id, purchaseAccountName: "Веб-админка / вручную" })}><CheckCircle2 size={14} /></button>
                   <button title="Отменить" disabled={loading || !actionable} onClick={() => post("cancel-task", { taskId: task.id })}><XCircle size={14} /></button>

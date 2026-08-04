@@ -73,16 +73,21 @@ export default async function AdminDashboard() {
   ]);
   const maxSourceOrders = Math.max(1, ...sourceBreakdown.map((source) => source.orders));
 
-  const cards = [
+  const primaryCards = [
     { label: "Чистый оборот", value: money(metrics.netKopecks), hint: `${metrics.paidPayments} оплаченных чеков`, icon: CircleDollarSign },
+    { label: "Сейчас в работе", value: metrics.activeOrders.toLocaleString("ru-RU"), hint: "активные статусы", icon: Clock3 },
+    { label: "К выкупу", value: metrics.buyoutOrders.toLocaleString("ru-RU"), hint: "единая рабочая очередь", icon: ShoppingBag },
+    { label: "За 24 часа", value: metrics.created24h.toLocaleString("ru-RU"), hint: `${metrics.completed24h} завершено`, icon: ShoppingBag },
+  ];
+
+  const secondaryCards = [
     { label: "Средний оплаченный чек", value: money(metrics.averagePaidKopecks), hint: "до вычета возвратов", icon: CreditCard },
     { label: "Выполнено Robux", value: `${metrics.completedRobux.toLocaleString("ru-RU")} R$`, hint: `${metrics.completedOrders} заказов`, icon: PackageCheck },
     { label: "Профили", value: metrics.users.toLocaleString("ru-RU"), hint: `${metrics.users30d} новых за 30 дней`, icon: Users },
     { label: "Все заказы", value: metrics.totalOrders.toLocaleString("ru-RU"), hint: `${metrics.orders30d} создано за 30 дней`, icon: Layers3 },
-    { label: "Сейчас в работе", value: metrics.activeOrders.toLocaleString("ru-RU"), hint: "активные статусы", icon: Clock3 },
     { label: "Покупатели", value: metrics.uniqueBuyers.toLocaleString("ru-RU"), hint: `${metrics.repeatBuyers} повторных`, icon: Repeat2 },
-    { label: "За 24 часа", value: metrics.created24h.toLocaleString("ru-RU"), hint: `${metrics.completed24h} завершено`, icon: ShoppingBag },
   ];
+  const cards = [...primaryCards, ...secondaryCards];
 
   const attention = [
     { label: "Заказы с ошибкой", value: metrics.errorOrders, hint: "требуют решения менеджера" },
@@ -105,7 +110,7 @@ export default async function AdminDashboard() {
         </div>
       </header>
 
-      <section className={styles.metricGrid} aria-label="Основные показатели">
+      <section className={cn(styles.metricGrid, styles.desktopOnly)} aria-label="Основные показатели">
         {cards.map(({ label, value, hint, icon: Icon }) => (
           <article className={styles.metricCard} key={label}>
             <div className={styles.metricIcon}><Icon /></div>
@@ -114,20 +119,40 @@ export default async function AdminDashboard() {
         ))}
       </section>
 
+      <section className={cn(styles.metricGrid, styles.mobileOnly)} aria-label="Ключевые показатели">
+        {primaryCards.map(({ label, value, hint, icon: Icon }) => (
+          <article className={styles.metricCard} key={label}>
+            <div className={styles.metricIcon}><Icon /></div>
+            <strong>{value}</strong><span>{label}</span><small>{hint}</small>
+          </article>
+        ))}
+      </section>
+      <details className={cn(styles.mobileMetricsDetails, styles.mobileOnly)}>
+        <summary>Все показатели <span>{secondaryCards.length}</span></summary>
+        <div className={styles.metricGrid}>
+          {secondaryCards.map(({ label, value, hint, icon: Icon }) => (
+            <article className={styles.metricCard} key={label}>
+              <div className={styles.metricIcon}><Icon /></div>
+              <strong>{value}</strong><span>{label}</span><small>{hint}</small>
+            </article>
+          ))}
+        </div>
+      </details>
+
       <div className={styles.overviewGrid}>
         <section className={styles.panel}>
           <div className={styles.panelHeader}><strong>Последние заказы</strong><Link href="/admin/orders">Открыть все →</Link></div>
-          <div className={styles.tableWrap}>
-            <table className={styles.table}>
+          <div className={cn(styles.tableWrap, styles.responsiveTableWrap)}>
+            <table className={cn(styles.table, styles.responsiveTable)}>
               <thead><tr><th>Заказ</th><th>Канал</th><th>Сумма</th><th>Платёж</th><th>Создан</th></tr></thead>
               <tbody>
                 {recentOrders.map((order) => (
                   <tr key={order.id}>
-                    <td><Link className={styles.orderLink} href={`/admin/orders/${order.id}`}>{order.code}</Link><span className={styles.tableSecondary}>{order.robloxUsername ?? "Ник не указан"}</span></td>
-                    <td><span className={styles.tablePrimary}>{order.source}</span><span className={styles.tableSecondary}>{order.status}</span></td>
-                    <td><span className={styles.tablePrimary}>{order.amountRobux.toLocaleString("ru-RU")} R$</span><span className={styles.tableSecondary}>{order.payment ? money(order.payment.amountKopecks) : "—"}</span></td>
-                    <td><span className={styles.status}>{paymentLabel(order.payment?.status)}</span></td>
-                    <td>{dateTime(order.createdAt)}</td>
+                    <td data-label="Заказ"><Link className={styles.orderLink} href={`/admin/orders/${order.id}`}>{order.code}</Link><span className={styles.tableSecondary}>{order.robloxUsername ?? "Ник не указан"}</span></td>
+                    <td data-label="Канал"><span className={styles.tablePrimary}>{order.source}</span><span className={styles.tableSecondary}>{order.status}</span></td>
+                    <td data-label="Сумма"><span className={styles.tablePrimary}>{order.amountRobux.toLocaleString("ru-RU")} R$</span><span className={styles.tableSecondary}>{order.payment ? money(order.payment.amountKopecks) : "—"}</span></td>
+                    <td data-label="Платёж"><span className={styles.status}>{paymentLabel(order.payment?.status)}</span></td>
+                    <td data-label="Создан">{dateTime(order.createdAt)}</td>
                   </tr>
                 ))}
               </tbody>

@@ -110,7 +110,8 @@ describe("admin ecosystem", () => {
   });
 
   it("derives dashboard money, source, repeat-buyer and health metrics from production-shaped aggregates", async () => {
-    [641, 4, 75, 10, 8, 533, 403, 0].forEach((value) => db.wbOrder.count.mockResolvedValueOnce(value));
+    // total, site, active, buyout, created24h, completed24h, completed, 30d, errors
+    [641, 4, 75, 10, 10, 8, 533, 403, 0].forEach((value) => db.wbOrder.count.mockResolvedValueOnce(value));
     db.user.count.mockResolvedValueOnce(597).mockResolvedValueOnce(356);
     db.paymentAttempt.aggregate
       .mockResolvedValueOnce({ _sum: { amountKopecks: 16000, refundedAmountKopecks: 16000 }, _count: { _all: 1 } })
@@ -143,6 +144,7 @@ describe("admin ecosystem", () => {
     const dashboard = await getAdminDashboardData();
     expect(dashboard.metrics).toEqual(expect.objectContaining({
       totalOrders: 641,
+      buyoutOrders: 10,
       completedOrders: 533,
       netKopecks: 0,
       averagePaidKopecks: 16000,

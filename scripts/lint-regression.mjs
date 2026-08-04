@@ -37,11 +37,16 @@ import { ESLint } from "eslint";
 // Состав debt не изменился; сдвинулись строки существующих `no-img-element`
 // в `WBInstructionV2.tsx` (комментарии в CSS + блок channel-UI).
 //
+// 2026-08-04 (1122 → 1109): мобильный Control Center заменил legacy CRUD
+// отзывов/FAQ с `any` и неиспользуемыми импортами на типизированные карточки;
+// предупреждений стало на 13 меньше. Остальной сдвиг отпечатка — новые
+// data-label/подтверждения и mobile shell в admin-компонентах.
+//
 // Unlike --max-warnings, this has no spare capacity: adding, moving,
 // replacing or changing even one warning fails the gate. Reduce the baseline
 // only in a dedicated cleanup change after reviewing the full formatter output.
-const BASELINE_WARNING_COUNT = 1122;
-const BASELINE_SHA256 = "8246307885c88d1125dd198e3739927fab006406d60a4a352c111d670d66a52c";
+const BASELINE_WARNING_COUNT = 1109;
+const BASELINE_SHA256 = "375cc094e022035b52efb90374c2c154de88e019fd645a849e0e5b5c974dbb79";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);

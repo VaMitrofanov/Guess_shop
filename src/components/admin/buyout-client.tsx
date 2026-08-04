@@ -533,8 +533,8 @@ export default function AdminBuyoutClient() {
             )}
           </div>
 
-          <div className={styles.tableWrap}>
-            <table className={cn(styles.table, styles.compactTable)}>
+          <div className={cn(styles.tableWrap, styles.responsiveTableWrap)}>
+            <table className={cn(styles.table, styles.compactTable, styles.responsiveTable)}>
               <thead>
                 <tr>
                   {buyable && <th style={{ width: 30 }} />}
@@ -551,7 +551,7 @@ export default function AdminBuyoutClient() {
                   return (
                     <tr key={i.orderId} className={cn(isSelected && styles.rowSelected)}>
                       {buyable && (
-                        <td>
+                        <td data-label="Выбрать">
                           <input
                             type="checkbox" className={styles.checkbox}
                             checked={isSelected} disabled={running}
@@ -560,25 +560,25 @@ export default function AdminBuyoutClient() {
                           />
                         </td>
                       )}
-                      <td>
+                      <td data-label="Код">
                         <span className={cn(styles.tablePrimary, styles.nowrap)}>{i.wbCode}</span>
                         <small className={styles.tableSecondary}>{i.orderSource} · {i.status}</small>
                       </td>
-                      <td>
+                      <td data-label="ID геймпасса">
                         <a className={cn(styles.orderLink, styles.nowrap)} href={i.gamepassUrl || `https://www.roblox.com/game-pass/${i.gamepassId}`} target="_blank" rel="noreferrer">
                           {i.gamepassId} <ExternalLink size={12} style={{ display: "inline", verticalAlign: "-1px" }} />
                         </a>
                       </td>
-                      <td>{i.robloxUsername ?? <span className={styles.dim}>—</span>}</td>
-                      <td className={styles.numeric}>
+                      <td data-label="Ник">{i.robloxUsername ?? <span className={styles.dim}>—</span>}</td>
+                      <td data-label="Цена пасса" className={styles.numeric}>
                         <span className={styles.tablePrimary}>{i.expectedPrice.toLocaleString("ru-RU")}</span>
                         <small className={styles.tableSecondary}>номинал {i.amount.toLocaleString("ru-RU")}</small>
                       </td>
-                      <td className={cn(styles.numeric, i.waitingHours >= OVERDUE_HOURS && styles.bad)}>
+                      <td data-label="Ждёт" className={cn(styles.numeric, i.waitingHours >= OVERDUE_HOURS && styles.bad)}>
                         {waitLabel(i.waitingHours)}
                       </td>
                       {buyable && (
-                        <td className={styles.rowActions}>
+                        <td data-label="Действия" className={styles.rowActions}>
                           {state.kind === "buying" && <span className={styles.dim}><Loader2 className={styles.spin} /> покупаем…</span>}
                           {state.kind === "marking" && <span className={styles.dim}><Loader2 className={styles.spin} /> закрываем…</span>}
                           {state.kind === "done" && <span className={styles.good}><Check /> куплено, −{rbx(state.gross)}</span>}

@@ -68,10 +68,15 @@ const accountRow = (overrides: Record<string, unknown> = {}) => ({
 
 describe("customer Roblox account projection", () => {
   beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(now);
     jest.clearAllMocks();
     db.user.update.mockResolvedValue({});
     db.userRobloxAccount.upsert.mockResolvedValue(accountRow());
     db.$transaction.mockImplementation((input: unknown) => Array.isArray(input) ? Promise.all(input) : input);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   it("queries only this user's non-test paid or completed orders", async () => {

@@ -192,21 +192,21 @@ export default async function AdminUsersPage({
             </Link>
           ))}
         </nav>
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
+        <div className={cn(styles.tableWrap, styles.responsiveTableWrap)}>
+          <table className={cn(styles.table, styles.responsiveTable)}>
             <thead>
               <tr><th>Пользователь</th><th>Каналы</th><th>Контакт</th><th>Заказы</th><th>Создан</th></tr>
             </thead>
             <tbody>
               {users.map((user) => (
                 <tr key={user.id}>
-                  <td>
+                  <td data-label="Пользователь">
                     <span className={styles.tablePrimary}>{user.name || user.username || "Без имени"}</span>
                     <span className={styles.tableSecondary}>
                       {user.isAdmin ? <><ShieldCheck size={12} /> Администратор</> : "Клиент"}
                     </span>
                   </td>
-                  <td>
+                  <td data-label="Каналы">
                     <div className={styles.channelBadges}>
                       {user.channels.map((channel) => (
                         <ChannelBadge channel={channel} legacyOnly={user.legacyOnlyChannels.includes(channel as "TG" | "VK")} key={channel} />
@@ -214,7 +214,7 @@ export default async function AdminUsersPage({
                       {user.channels.length === 0 && <span className={styles.dim}>Без канала</span>}
                     </div>
                   </td>
-                  <td>
+                  <td data-label="Контакт">
                     <div className={styles.contactStack}>
                       {user.channelDetails.map((detail) => {
                         if (detail.channel === "EMAIL") {
@@ -234,8 +234,8 @@ export default async function AdminUsersPage({
                       {user.channelDetails.length === 0 && <span className={styles.dim}>—</span>}
                     </div>
                   </td>
-                  <td><span className={styles.tablePrimary}>{user.orders.toLocaleString("ru-RU")}</span></td>
-                  <td><span className={styles.tableSecondary}><CalendarDays size={12} /> {date(user.createdAt)}</span></td>
+                  <td data-label="Заказы"><span className={styles.tablePrimary}>{user.orders.toLocaleString("ru-RU")}</span></td>
+                  <td data-label="Создан"><span className={styles.tableSecondary}><CalendarDays size={12} /> {date(user.createdAt)}</span></td>
                 </tr>
               ))}
             </tbody>
