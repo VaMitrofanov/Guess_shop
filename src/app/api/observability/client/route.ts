@@ -1,6 +1,7 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { ClientSignalSchema, formatClientSignal } from "@/lib/client-observability";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
+import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
@@ -20,11 +21,31 @@ export async function POST(req: NextRequest) {
   const signal = parsed.data;
   const summary = formatClientSignal(signal);
 
-  after(() => {
+  after(async () => {
     // Client telemetry belongs in structured application logs. It is
     // intentionally never forwarded to the operational Telegram bot: noisy
     // browser errors/Web Vitals used to bury actionable order notifications.
     console.warn("[client-observability]", summary);
+    if (signal.route === "/admin" || signal.route.startsWith("/admin/")) {
+      await prisma.performanceSample.create({
+        data: signal.type === "web-vital"
+          ? {
+              surface: "admin-client",
+              route: signal.route,
+              metric: signal.name,
+              value: signal.value,
+              rating: signal.rating,
+            }
+          : {
+              surface: "admin-client",
+              route: signal.route,
+              metric: signal.kind,
+              fingerprint: signal.fingerprint,
+            },
+      }).catch((error: unknown) => {
+        console.error("[client-observability persistence]", error instanceof Error ? error.name : "unknown");
+      });
+    }
   });
 
   return NextResponse.json(

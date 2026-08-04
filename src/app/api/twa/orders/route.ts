@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
+import { after, NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-access";
 import { prisma } from "@/lib/prisma";
 import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing, notifyRegionalPriceNeeded } from "@/lib/twa-notify";
@@ -480,6 +481,14 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   if (!body?.action)
     return NextResponse.json({ error: "action required" }, { status: 400 });
+
+  // Инвалидация выполняется после mutation-response: команда не ждёт purge,
+  // но следующий dashboard/users read не остаётся на старом snapshot.
+  after(() => {
+    revalidateTag("admin-operational", "max");
+    revalidateTag("admin-finance", "max");
+    revalidateTag("admin-audience", "max");
+  });
 
   const { action, orderId, reason } = body;
 

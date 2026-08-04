@@ -6,6 +6,16 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
+function poolSize() {
+  // Read-only A/B 04.08: max=5 improved combined admin p50 from 469ms to
+  // 349ms and was more stable than max=6 (507ms outlier). Env remains the
+  // rollback/tuning lever; clamping prevents an accidental connection storm.
+  const configured = Number(process.env.DB_POOL_MAX ?? 5);
+  return Number.isInteger(configured) ? Math.min(10, Math.max(2, configured)) : 5;
+}
+
+export const databasePoolMax = poolSize();
+
 function buildPoolerUrl(raw: string): string {
   try {
     const u = new URL(raw);
@@ -18,7 +28,7 @@ function buildPoolerUrl(raw: string): string {
 
 const pool = new Pool({
   connectionString: buildPoolerUrl(process.env.DATABASE_URL ?? ""),
-  max: 3,
+  max: databasePoolMax,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 15_000,
 });
@@ -34,8 +44,8 @@ export const prisma =
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
-// Pre-warm all 3 pool connections on startup so the first real request
+// Pre-warm the configured pool on startup so the first real request
 // doesn't pay the TLS handshake + Neon auth cost (~1.5s per connection).
 if (!globalForPrisma.prisma) {
-  Promise.all([pool.query("SELECT 1"), pool.query("SELECT 1"), pool.query("SELECT 1")]).catch(() => {});
+  Promise.all(Array.from({ length: databasePoolMax }, () => pool.query("SELECT 1"))).catch(() => {});
 }

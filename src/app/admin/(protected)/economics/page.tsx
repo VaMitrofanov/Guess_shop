@@ -1,10 +1,12 @@
 import AdminEconomicsClient from "@/components/admin/economics-client";
 import styles from "@/components/admin/admin-shell.module.css";
+import { loadDirectEconomics } from "@/lib/direct-economics";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export default function AdminEconomicsPage() {
+export default async function AdminEconomicsPage() {
+  const initialData = await loadDirectEconomics();
   return (
     <div className={styles.page}>
       <header className={styles.pageHeader}>
@@ -17,7 +19,7 @@ export default function AdminEconomicsPage() {
           </p>
         </div>
       </header>
-      <AdminEconomicsClient />
+      <AdminEconomicsClient initialData={initialData} />
     </div>
   );
 }

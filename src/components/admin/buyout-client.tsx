@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   Check, CheckCheck, ClipboardCheck, Copy, Download, ExternalLink, Loader2,
   RefreshCw, ShoppingBasket, SquareTerminal, TriangleAlert, Wallet, X,
@@ -101,12 +101,12 @@ const OVERDUE_HOURS = 12;
 /** Выкуп идёт только с этих вкладок: остальные — не очередь на покупку. */
 const BUYABLE_TABS: readonly Tab[] = ["BUYOUT", "DIRECT", "WORK", "ATTENTION"];
 
-export default function AdminBuyoutClient() {
+export default function AdminBuyoutClient({ initialData }: { initialData: BuyoutData }) {
   const [tab, setTab] = useState<Tab>("BUYOUT");
-  const [data, setData] = useState<BuyoutData | null>(null);
+  const [data, setData] = useState<BuyoutData | null>(initialData);
   const [donor, setDonor] = useState<Donor | null>(null);
-  const [donorLoading, setDonorLoading] = useState(true);
-  const [loading, setLoading] = useState(true);
+  const [donorLoading, setDonorLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -117,23 +117,39 @@ export default function AdminBuyoutClient() {
   const [progress, setProgress] = useState<{ done: number; total: number; ok: number } | null>(null);
   const [report, setReport] = useState<{ ok: number; fail: number; gross: number; stopped: boolean; mode: "buy" | "mark" } | null>(null);
   const stopRef = useRef(false);
+  const loadRequestRef = useRef(0);
+  const loadAbortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async (nextTab: Tab) => {
+    const requestId = ++loadRequestRef.current;
+    loadAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
     setError(null);
     try {
-      const res = await fetch(`/api/admin/buyout?tab=${nextTab}`, { cache: "no-store" });
+      const res = await fetch(`/api/admin/buyout?tab=${nextTab}`, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setData(await res.json());
-    } catch {
-      setError("Не удалось загрузить очередь");
+      const nextData = await res.json();
+      if (requestId !== loadRequestRef.current) return;
+      setData(nextData);
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      if (requestId === loadRequestRef.current) setError("Не удалось загрузить очередь");
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestRef.current) setLoading(false);
+      if (loadAbortRef.current === controller) loadAbortRef.current = null;
     }
   }, []);
 
   const loadDonor = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/buyout/donor", { cache: "no-store" });
+      const res = await fetch("/api/admin/buyout/donor", {
+        cache: "no-store",
+        signal: AbortSignal.timeout(15_000),
+      });
       setDonor(res.ok ? await res.json() : null);
     } catch {
       setDonor(null);
@@ -142,10 +158,8 @@ export default function AdminBuyoutClient() {
     }
   }, []);
 
-  useEffect(() => { void load(tab); }, [load, tab]);
-  // Донор тянется один раз и по кнопке: серверный браузер отвечает до 70 с,
-  // и дёргать его на каждом переключении вкладки незачем.
-  useEffect(() => { void loadDonor(); }, [loadDonor]);
+  // Initial BUYOUT уже пришёл с server render. Донор проверяется только явно:
+  // внешний Roblox/browser path не участвует в скорости открытия экрана.
 
   /**
    * Смена очереди. Сброс выбора живёт здесь, а не в эффекте на `tab`: галочки
@@ -153,7 +167,7 @@ export default function AdminBuyoutClient() {
    * не синхронизация с внешним миром.
    */
   const changeTab = (next: Tab) => {
-    if (next === tab || running) return;
+    if (next === tab || running || loading) return;
     setTab(next);
     setLoading(true);
     setSelected(new Set());
@@ -479,7 +493,7 @@ export default function AdminBuyoutClient() {
             <div className={styles.toolbar}>
               {TABS.map((t) => (
                 <button
-                  key={t} type="button" disabled={running}
+                  key={t} type="button" disabled={running || loading}
                   className={cn(styles.chip, tab === t && styles.chipActive)}
                   onClick={() => changeTab(t)}
                 >

@@ -45,12 +45,17 @@ import { ESLint } from "eslint";
 // 2026-08-04 (1109 → 1109): единый ADMIN_TIME_ZONE устранил hydration mismatch
 // дат в четырёх client-компонентах админки. Новых предупреждений нет; импорты
 // сдвинули только строки двух уже известных buyout useEffect warnings.
+
+// 2026-08-04 (1109 → 1096): performance batch удалил мёртвые product CRUD и
+// фиксированный PageLoader, а Economics/Buyout/Anton получили server-first
+// initial data. Убраны 13 старых warning (включая initial-load effects), новых
+// предупреждений в затронутом admin-коде нет; полный formatter проверен.
 //
 // Unlike --max-warnings, this has no spare capacity: adding, moving,
 // replacing or changing even one warning fails the gate. Reduce the baseline
 // only in a dedicated cleanup change after reviewing the full formatter output.
-const BASELINE_WARNING_COUNT = 1109;
-const BASELINE_SHA256 = "c0ff996c91fa5b73505a23b3fec08bbee3417742e8bc62e6cec30da95a3991bc";
+const BASELINE_WARNING_COUNT = 1096;
+const BASELINE_SHA256 = "a4d190581ee55512bf8925e0f1f5fd8f2a8586822864f92c8c19cdc62494856d";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);

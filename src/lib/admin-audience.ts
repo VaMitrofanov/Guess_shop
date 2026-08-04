@@ -1,8 +1,10 @@
 import "server-only";
 
 import { UserIdentityProvider } from "@prisma/client";
+import { adminCache } from "@/lib/admin-cache";
 import { adminGrantFor } from "@/lib/admin-grant";
 import { prisma } from "@/lib/prisma";
+import { logAdminTiming } from "@/lib/admin-performance";
 
 export type AdminAudienceChannel = "TG" | "VK" | "EMAIL";
 export type AdminAudienceFilter = "all" | "tg" | "vk" | "email" | "multi" | "unlinked";
@@ -259,9 +261,9 @@ export async function getCommunityAudienceMetrics() {
   return Promise.all([readTelegramAudience(), readVkAudience()]);
 }
 
-export async function getAdminAudienceData() {
-  const [sourceUsers, communities] = await Promise.all([
-    prisma.user.findMany({
+const loadAdminAudienceUsers = adminCache(
+  async () => {
+    const sourceUsers = await prisma.user.findMany({
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
@@ -276,15 +278,81 @@ export async function getAdminAudienceData() {
         identities: { select: { provider: true, subject: true, metadata: true } },
         _count: { select: { wbOrders: { where: { isTest: false } } } },
       },
-    }),
-    getCommunityAudienceMetrics(),
-  ]);
+    });
+    return sourceUsers.map(toAdminAudienceUser);
+  },
+  ["admin-audience-users-v2"],
+  { tags: ["admin-audience"], revalidate: 60 },
+);
 
-  const users = sourceUsers.map(toAdminAudienceUser);
-  return {
-    users,
-    summary: summarizeAdminAudience(users),
-    communities,
+const loadCommunityAudienceSnapshot = adminCache(
+  async () => ({
+    communities: await getCommunityAudienceMetrics(),
     checkedAt: new Date().toISOString(),
+  }),
+  ["admin-community-audience-v2"],
+  { tags: ["admin-community"], revalidate: 300 },
+);
+
+function audienceCursor(user: AdminAudienceUser) {
+  return Buffer.from(JSON.stringify({ createdAt: user.createdAt, id: user.id })).toString("base64url");
+}
+
+function decodeAudienceCursor(raw: string | null | undefined) {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as {
+      createdAt?: unknown;
+      id?: unknown;
+    };
+    return typeof value.createdAt === "string" && typeof value.id === "string"
+      ? { createdAt: value.createdAt, id: value.id }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getCommunityAudienceSnapshot() {
+  return loadCommunityAudienceSnapshot();
+}
+
+export async function getAdminAudienceData(input: {
+  filter?: AdminAudienceFilter;
+  query?: string;
+  cursor?: string | null;
+  limit?: number;
+} = {}) {
+  const startedAt = performance.now();
+  const allUsers = await loadAdminAudienceUsers();
+  const filter = input.filter ?? "all";
+  const query = input.query?.trim().toLocaleLowerCase("ru-RU").slice(0, 120) ?? "";
+  const limit = Math.min(100, Math.max(10, input.limit ?? 50));
+  const cursor = decodeAudienceCursor(input.cursor);
+  let filtered = filterAdminAudienceUsers(allUsers, filter);
+  if (query) {
+    filtered = filtered.filter((user) => [
+      user.name,
+      user.username,
+      user.email,
+      ...user.channelDetails.flatMap((detail) => [detail.subject, detail.username]),
+    ].some((value) => value?.toLocaleLowerCase("ru-RU").includes(query)));
+  }
+  if (cursor) {
+    const index = filtered.findIndex((user) => user.createdAt === cursor.createdAt && user.id === cursor.id);
+    filtered = index >= 0 ? filtered.slice(index + 1) : [];
+  }
+
+  const users = filtered.slice(0, limit);
+  const hasMore = filtered.length > limit;
+  const last = users.at(-1);
+
+  const result = {
+    users,
+    summary: summarizeAdminAudience(allUsers),
+    total: filterAdminAudienceUsers(allUsers, filter).length,
+    nextCursor: hasMore && last ? audienceCursor(last) : null,
   };
+  logAdminTiming("users", startedAt, { returned: users.length, filtered: result.total });
+  return result;
 }

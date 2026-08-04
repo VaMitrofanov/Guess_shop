@@ -1,10 +1,12 @@
 import AdminBuyoutClient from "@/components/admin/buyout-client";
 import styles from "@/components/admin/admin-shell.module.css";
+import { loadAdminBuyoutData } from "@/lib/admin-buyout";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export default function AdminBuyoutPage() {
+export default async function AdminBuyoutPage() {
+  const initialData = await loadAdminBuyoutData("BUYOUT");
   return (
     <div className={styles.page}>
       <header className={styles.pageHeader}>
@@ -17,7 +19,7 @@ export default function AdminBuyoutPage() {
           </p>
         </div>
       </header>
-      <AdminBuyoutClient />
+      <AdminBuyoutClient initialData={initialData} />
     </div>
   );
 }

@@ -40,6 +40,7 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [twa-admin.md](twa-admin.md) | Единая admin-экосистема: desktop `/admin`, Telegram TWA, общий `WbOrder`, досье и журнал |
 | [admin-console-plan.md](admin-console-plan.md) | Переезд админки в веб: production-дашборд, TG/VK-аудитория, 9 разделов, вход трёх админов по Telegram, этапы A1–A8 |
 | [admin-mobile-ux-review-2026-08-04.md](admin-mobile-ux-review-2026-08-04.md) | Ультра-ревью и реализация mobile `/admin`: iPhone 14/15 Pro Max, mobile IA, app/bottom bars, карточные рабочие экраны, контрастная SF Pro type scale, семантические карточки заказов и фактическая приёмка |
+| [admin-performance-optimization-plan-2026-08-04.md](admin-performance-optimization-plan-2026-08-04.md) | Реализованное ускорение `/admin`: server/DB/browser baseline, исправленные P0 Economics, dashboard 23→4 чтения, server-first/cursor/cache/telemetry, production-гейты и архитектурный хвост |
 | [twa-design-redesign-plan.md](twa-design-redesign-plan.md) | Контракт редизайна TWA: навигация, поиск, compact cards/history, прибыль и Premium Calm для Аккаунта/Заказов |
 | [database.md](database.md) | Модели Prisma и статусы заказов/кодов |
 | [payments-and-kkt.md](payments-and-kkt.md) | Эквайринг, outbox worker, refund и ККТ test matrix |

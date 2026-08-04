@@ -49,19 +49,19 @@ function Row({ k, v, note }: { k: string; v: string; note?: string }) {
   );
 }
 
-export default function AdminEconomicsClient() {
-  const [data, setData] = useState<DirectEconomics | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [failed, setFailed] = useState(false);
+export default function AdminEconomicsClient({ initialData }: { initialData: DirectEconomics }) {
+  const [data] = useState(initialData);
 
-  const [usdStr, setUsdStr] = useState("");
-  const [rateStr, setRateStr] = useState("");
-  const [taxStr, setTaxStr] = useState("");
+  const [usdStr, setUsdStr] = useState(String(initialData.defaults.usdToRub));
+  const [rateStr, setRateStr] = useState(String(initialData.defaults.purchaseRateUsdPer1k ?? 4.3));
+  const [taxStr, setTaxStr] = useState(String(initialData.defaults.robloxTaxPct));
   const [acqStr, setAcqStr] = useState(String(DEFAULT_FEE_RATES.acquiringPct));
   const [recStr, setRecStr] = useState(String(DEFAULT_FEE_RATES.receiptPct));
   const [usnStr, setUsnStr] = useState(String(DEFAULT_FEE_RATES.usnPct));
   const [usnMode, setUsnMode] = useState<UsnMode>(DEFAULT_FEE_RATES.usnMode);
-  const [prices, setPrices] = useState<Record<number, number>>({});
+  const [prices, setPrices] = useState<Record<number, number>>(() =>
+    Object.fromEntries(Object.entries(initialData.prices).map(([key, value]) => [Number(key), value])),
+  );
 
   const [period, setPeriod] = useState(0);
   const [periodFrom, setPeriodFrom] = useState(0);
@@ -70,38 +70,27 @@ export default function AdminEconomicsClient() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
+  // Только локальный экспериментальный прайс читаем после hydration. Курсы
+  // всегда приходят из БД вместе с server render, поэтому старый браузер не
+  // может вернуть в production устаревшее значение.
   useEffect(() => {
-    let alive = true;
-    fetch("/api/admin/economics", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: DirectEconomics | null) => {
-        if (!alive) return;
-        if (!d) { setFailed(true); return; }
-        setData(d);
-        // Курсы всегда из базы, а НЕ из localStorage. Иначе браузер, открывший
-        // экран до смены курса, держал бы старое значение и кнопка «Сохранить
-        // курс в Настройки» вернула бы его в прод (ровно так курс 85 дважды
-        // откатывался на 77.99 29.07). Правки в полях живут в рамках сессии.
-        const saved = (k: string) => (typeof window === "undefined" ? null : localStorage.getItem(k));
-        setUsdStr(String(d.defaults.usdToRub));
-        setRateStr(String(d.defaults.purchaseRateUsdPer1k ?? 4.3));
-        setTaxStr(String(d.defaults.robloxTaxPct));
-        const base: Record<number, number> = {};
-        for (const [k, v] of Object.entries(d.prices)) base[Number(k)] = v;
-        const rawSaved = saved(LS_PRICES);
-        if (rawSaved) {
-          try {
-            const parsed = JSON.parse(rawSaved) as Record<string, number>;
-            for (const [k, v] of Object.entries(parsed)) {
-              if (Number.isFinite(Number(k)) && Number.isFinite(v)) base[Number(k)] = v;
-            }
-          } catch { /* мусор в localStorage — берём прайс из БД */ }
-        }
-        setPrices(base);
-      })
-      .catch(() => { if (alive) setFailed(true); })
-      .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
+    const rawSaved = localStorage.getItem(LS_PRICES);
+    if (!rawSaved) return;
+    try {
+      const parsed = JSON.parse(rawSaved) as Record<string, number>;
+      let active = true;
+      queueMicrotask(() => {
+        if (!active) return;
+        setPrices((current) => {
+          const next = { ...current };
+          for (const [key, value] of Object.entries(parsed)) {
+            if (Number.isFinite(Number(key)) && Number.isFinite(value)) next[Number(key)] = value;
+          }
+          return next;
+        });
+      });
+      return () => { active = false; };
+    } catch { /* мусор в localStorage — берём прайс из БД */ }
   }, []);
 
   const persist = useCallback((key: string, value: string) => {
@@ -157,7 +146,7 @@ export default function AdminEconomicsClient() {
     if (!valid || saving) return;
     setSaving(true);
     try {
-      const res = await fetch("/api/twa/settings", {
+      const res = await fetch("/api/admin/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ usdToRub: rates.usdToRub, purchaseRate: rates.rateUsdPer1k }),
@@ -188,16 +177,6 @@ export default function AdminEconomicsClient() {
     () => Object.keys(prices).map(Number).filter((n) => n > 0).sort((a, b) => a - b),
     [prices],
   );
-
-  if (loading) return (
-    <div className={styles.loadingState} aria-live="polite" aria-busy="true">
-      <span>Загружаем экономику…</span>
-      <div className={styles.loadingHero} />
-      <div className={styles.loadingGrid}><i /><i /><i /><i /></div>
-      <div className={styles.loadingPanel} />
-    </div>
-  );
-  if (failed || !data) return <div className={styles.empty}>Не удалось загрузить экономику</div>;
 
   const channels: (DirectEconomicsSource | "ALL")[] = [
     "ALL",

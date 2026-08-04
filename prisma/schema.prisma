@@ -669,6 +669,23 @@ model GlobalSettings {
   sbpQrBase64           String?
 }
 
+/// PII-free performance telemetry for protected operational surfaces.
+/// Client signals are sampled/deduplicated before insertion; raw cookies,
+/// identities, request payloads and query text are never stored here.
+model PerformanceSample {
+  id          String   @id @default(cuid())
+  surface     String
+  route       String
+  metric      String
+  value       Float?
+  rating      String?
+  fingerprint String?
+  createdAt   DateTime @default(now())
+
+  @@index([route, metric, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+}
+
 /// Durable record of a "Выкупить всё" batch — one row per bulk-buyout session.
 /// Lets the manager review what a donor account purchased in a single run.
 model PurchaseBatch {

@@ -15,6 +15,7 @@
     "lint:report": "eslint .",
     "test": "jest",
     "smoke:site": "node scripts/smoke-site.mjs",
+    "benchmark:admin": "node scripts/benchmark-admin.mjs",
     "rollout:site": "node scripts/site-acquiring-rollout.mjs",
     "postinstall": "prisma generate",
     "bot:tg": "npm --prefix bots/tg run dev",

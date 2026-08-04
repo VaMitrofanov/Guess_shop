@@ -1100,3 +1100,18 @@ quote, соответствие gross-цены, owner/sale-state и заказ �
 либо через BuildKit secret mounts и никогда не объявляются через `ARG`/`ENV` в Dockerfile.
 До миграции запрещено публиковать сырые debug-логи; при диагностике разрешены только
 отфильтрованные статус, этап, exit code и timestamps без command/build-argument payload.
+
+## Performance telemetry `/admin` — граница приватности (2026-08-04)
+
+Исторические browser timings нужны для доказуемого before/after, но сырой URL, сообщение
+ошибки или request payload могут содержать PII и операционные данные. Поэтому
+`/api/observability/client` сохраняет только allowlist-поля: surface, нормализованный
+`/admin` route без query, имя метрики, числовое значение, rating и необязательный
+необратимый технический fingerprint. Cookie, IP, user-agent, user/order IDs, stack trace,
+raw error и payload в `PerformanceSample` не пишутся.
+
+Admin settings/buyout/economics API проходят `requireAdmin` и отвечают `private, no-store`.
+Кэш dashboard/audience создаётся только внутри защищённого server path, содержит узкие DTO,
+а не Prisma-модели с password hash; operational TTL 10 s, finance/audience 60 s и community
+300 s ограничивают stale window. Основные admin/TWA mutation paths инвалидируют tags;
+внешние изменения всё равно сходятся по TTL.

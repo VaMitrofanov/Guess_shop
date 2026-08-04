@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import {
   CalendarDays,
   Database,
@@ -7,6 +8,7 @@ import {
   Mail,
   MessagesSquare,
   Repeat2,
+  Search,
   Send,
   ShieldCheck,
   ShoppingBag,
@@ -16,8 +18,8 @@ import {
 import {
   AdminAudienceChannel,
   AdminAudienceFilter,
-  filterAdminAudienceUsers,
   getAdminAudienceData,
+  getCommunityAudienceSnapshot,
 } from "@/lib/admin-audience";
 import styles from "@/components/admin/admin-shell.module.css";
 import { cn } from "@/lib/utils";
@@ -78,16 +80,63 @@ function filterCount(filter: AdminAudienceFilter, summary: Awaited<ReturnType<ty
   return summary.totalProfiles;
 }
 
+async function CommunityAudiencePanel() {
+  const data = await getCommunityAudienceSnapshot();
+  return (
+    <section className={styles.panel}>
+      <div className={styles.panelHeader}>
+        <strong>Публичные сообщества</strong>
+        <span>Сверено {dateTime(data.checkedAt)} · кэш до 5 минут</span>
+      </div>
+      <div className={styles.communityGrid}>
+        {data.communities.map((community) => (
+          <a className={styles.communityCard} href={community.href} target="_blank" rel="noreferrer" key={community.platform}>
+            <div className={cn(styles.communityIcon, community.platform === "TG" ? styles.metricIconTg : styles.metricIconVk)}>
+              {community.platform === "TG" ? <Send /> : <MessagesSquare />}
+            </div>
+            <div>
+              <span>{community.label}</span>
+              <strong>{community.members === null ? "—" : community.members.toLocaleString("ru-RU")}</strong>
+              <small>{community.members === null ? "API временно недоступен" : "участников / подписчиков"} · {community.handle}</small>
+            </div>
+            <ExternalLink />
+          </a>
+        ))}
+      </div>
+      <p className={styles.panelNote}>
+        Это размер публичных сообществ, а не число профилей в базе. Недоступность TG/VK API не блокирует список клиентов.
+      </p>
+    </section>
+  );
+}
+
+function usersHref(filter: AdminAudienceFilter, query: string, cursor?: string | null) {
+  const params = new URLSearchParams();
+  if (filter !== "all") params.set("channel", filter);
+  if (query) params.set("q", query);
+  if (cursor) params.set("cursor", cursor);
+  const suffix = params.toString();
+  return suffix ? `/admin/users?${suffix}` : "/admin/users";
+}
+
 export default async function AdminUsersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ channel?: string }>;
+  searchParams: Promise<{ channel?: string; q?: string; cursor?: string }>;
 }) {
-  const [{ channel }, data] = await Promise.all([searchParams, getAdminAudienceData()]);
+  const params = await searchParams;
+  const { channel } = params;
   const activeFilter = FILTERS.some((filter) => filter.key === channel)
     ? channel as AdminAudienceFilter
     : "all";
-  const users = filterAdminAudienceUsers(data.users, activeFilter);
+  const query = params.q?.trim().slice(0, 120) ?? "";
+  const data = await getAdminAudienceData({
+    filter: activeFilter,
+    query,
+    cursor: params.cursor,
+    limit: 50,
+  });
+  const users = data.users;
   const canonicalCoverage = data.summary.socialProfiles > 0
     ? Math.round((data.summary.canonicalSocialProfiles / data.summary.socialProfiles) * 100)
     : 100;
@@ -99,7 +148,7 @@ export default async function AdminUsersPage({
           <span className={styles.eyebrow}>CRM · профили, каналы и аудитория сообществ</span>
           <h1>Пользователи</h1>
           <p>
-            Профили в базе отделены от подписчиков Telegram/VK. Последняя живая сверка API: {dateTime(data.checkedAt)}.
+            Профили в базе отделены от подписчиков Telegram/VK. Список не ждёт внешние API и ищет по всей базе.
           </p>
         </div>
       </header>
@@ -132,30 +181,9 @@ export default async function AdminUsersPage({
       </section>
 
       <div className={styles.audienceOverviewGrid}>
-        <section className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <strong>Публичные сообщества</strong>
-            <span>Живые данные Telegram Bot API и VK API</span>
-          </div>
-          <div className={styles.communityGrid}>
-            {data.communities.map((community) => (
-              <a className={styles.communityCard} href={community.href} target="_blank" rel="noreferrer" key={community.platform}>
-                <div className={cn(styles.communityIcon, community.platform === "TG" ? styles.metricIconTg : styles.metricIconVk)}>
-                  {community.platform === "TG" ? <Send /> : <MessagesSquare />}
-                </div>
-                <div>
-                  <span>{community.label}</span>
-                  <strong>{community.members === null ? "—" : community.members.toLocaleString("ru-RU")}</strong>
-                  <small>{community.members === null ? "API временно недоступен" : "участников / подписчиков"} · {community.handle}</small>
-                </div>
-                <ExternalLink />
-              </a>
-            ))}
-          </div>
-          <p className={styles.panelNote}>
-            Это размер публичных сообществ, а не число профилей в базе: один человек может быть подписан, но ещё не пользоваться ботом — или наоборот.
-          </p>
-        </section>
+        <Suspense fallback={<section className={styles.panel}><div className={styles.empty}>Обновляем TG/VK-метрики отдельно…</div></section>}>
+          <CommunityAudiencePanel />
+        </Suspense>
 
         <section className={styles.panel}>
           <div className={styles.panelHeader}><strong>Качество клиентской базы</strong><span>Только production, тестовые заказы исключены</span></div>
@@ -182,13 +210,20 @@ export default async function AdminUsersPage({
       <section className={styles.panel} style={{ marginTop: 15 }}>
         <div className={styles.panelHeader}>
           <strong>Профили по каналам</strong>
-          <span>{users.length.toLocaleString("ru-RU")} в текущем срезе</span>
+          <span>{data.total.toLocaleString("ru-RU")} в сегменте · по 50</span>
+        </div>
+        <div className={styles.filters}>
+          <form className={styles.search} action="/admin/users" method="get">
+            <Search />
+            <input name="q" defaultValue={query} aria-label="Поиск пользователей" placeholder="Имя, email, TG/VK ID" />
+            {activeFilter !== "all" && <input type="hidden" name="channel" value={activeFilter} />}
+          </form>
         </div>
         <nav className={styles.segmentTabs} aria-label="Фильтр пользователей">
           {FILTERS.map((filter) => (
             <Link
               className={cn(styles.segmentTab, activeFilter === filter.key && styles.segmentTabActive)}
-              href={filter.key === "all" ? "/admin/users" : `/admin/users?channel=${filter.key}`}
+              href={usersHref(filter.key, query)}
               key={filter.key}
             >
               {filter.label}<b>{filterCount(filter.key, data.summary)}</b>
@@ -245,6 +280,12 @@ export default async function AdminUsersPage({
           </table>
         </div>
         {users.length === 0 && <div className={styles.empty}>В этом сегменте пока нет профилей.</div>}
+        {data.nextCursor && (
+          <div className={styles.panelHeader}>
+            <span>Показано {users.length} · есть ещё</span>
+            <Link href={usersHref(activeFilter, query, data.nextCursor)}>Следующие 50 →</Link>
+          </div>
+        )}
       </section>
     </div>
   );

@@ -75,16 +75,16 @@ async function browserServiceRequest<T extends { code?: string; reason?: string 
   }
 }
 
-let sessionInFlight: { cookie: string; promise: Promise<BrowserSessionResult> } | null = null;
+let sessionInFlight: { cookie: string; timeoutMs: number; promise: Promise<BrowserSessionResult> } | null = null;
 
-export function getBrowserSession(cookie: string): Promise<BrowserSessionResult> {
-  if (sessionInFlight?.cookie === cookie) return sessionInFlight.promise;
-  const promise = browserServiceRequest<BrowserSessionResult>("/session", { cookie }, 70_000)
+export function getBrowserSession(cookie: string, timeoutMs = 70_000): Promise<BrowserSessionResult> {
+  if (sessionInFlight?.cookie === cookie && sessionInFlight.timeoutMs === timeoutMs) return sessionInFlight.promise;
+  const promise = browserServiceRequest<BrowserSessionResult>("/session", { cookie }, timeoutMs)
     .then((result) => {
       if ("ok" in result && result.ok && result.session) return result;
       return { ok: false, code: result.code ?? "BROWSER_SERVICE_UNAVAILABLE", reason: result.reason };
     });
-  sessionInFlight = { cookie, promise };
+  sessionInFlight = { cookie, timeoutMs, promise };
   void promise.finally(() => {
     if (sessionInFlight?.promise === promise) sessionInFlight = null;
   });

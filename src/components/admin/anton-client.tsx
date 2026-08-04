@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   AlertTriangle, CheckCircle2, ExternalLink, FileSpreadsheet, LoaderCircle,
   FileUp, Play, Plus, RefreshCw, Save, WalletCards, XCircle,
@@ -52,7 +52,7 @@ type LedgerEntry = {
   createdAt: string;
 };
 
-type AntonState = {
+export type AntonState = {
   ok: boolean;
   partner: {
     id: string;
@@ -132,9 +132,9 @@ function statusTone(status: PartnerTask["status"]) {
   return "";
 }
 
-export default function AdminAntonClient() {
-  const [state, setState] = useState<AntonState | null>(null);
-  const [loading, setLoading] = useState(true);
+export default function AdminAntonClient({ initialState }: { initialState: AntonState }) {
+  const [state, setState] = useState<AntonState | null>(initialState);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -161,11 +161,6 @@ export default function AdminAntonClient() {
       setLoading(false);
     }
   }, []);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial authenticated resource load after hydration
-    void load();
-  }, [load]);
 
   const post = async (action: string, body: Record<string, unknown> = {}) => {
     setLoading(true);

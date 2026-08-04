@@ -7,7 +7,7 @@ import {
   RefreshCcw,
   ShoppingBag,
 } from "lucide-react";
-import { getAdminActivity, getAdminRuntimeState } from "@/lib/admin-ecosystem";
+import { getAdminActivityPage, getAdminRuntimeState } from "@/lib/admin-ecosystem";
 import styles from "@/components/admin/admin-shell.module.css";
 import { cn } from "@/lib/utils";
 import { ADMIN_TIME_ZONE } from "@/lib/admin-time";
@@ -27,8 +27,17 @@ const ICONS = {
   identity: GitMerge,
 };
 
-export default async function AdminActivityPage() {
-  const [activity, runtime] = await Promise.all([getAdminActivity(), Promise.resolve(getAdminRuntimeState())]);
+export default async function AdminActivityPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ cursor?: string }>;
+}) {
+  const params = await searchParams;
+  const [page, runtime] = await Promise.all([
+    getAdminActivityPage({ cursor: params.cursor, limit: 80 }),
+    Promise.resolve(getAdminRuntimeState()),
+  ]);
+  const activity = page.items;
   return (
     <div className={styles.page}>
       <header className={styles.pageHeader}>
@@ -65,6 +74,12 @@ export default async function AdminActivityPage() {
           })}
           {activity.length === 0 && <div className={styles.empty}>Событий пока нет. Они появятся после первого канонического SITE-платежа или операции identity.</div>}
         </div>
+        {page.nextCursor && (
+          <div className={styles.panelHeader}>
+            <span>Показано {activity.length} · есть более ранние</span>
+            <Link href={`/admin/activity?cursor=${encodeURIComponent(page.nextCursor)}`}>Следующие 80 →</Link>
+          </div>
+        )}
       </section>
     </div>
   );

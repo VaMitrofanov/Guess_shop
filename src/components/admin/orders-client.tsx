@@ -1,9 +1,6 @@
-"use client";
-
-import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Search } from "lucide-react";
-import type { AdminOrderRow } from "@/lib/admin-ecosystem";
+import type { AdminOrdersFilter, AdminOrdersPage } from "@/lib/admin-ecosystem";
 import { adminOrderStatusLabel } from "@/lib/admin-order-presentation";
 import { ADMIN_TIME_ZONE } from "@/lib/admin-time";
 import styles from "./admin-shell.module.css";
@@ -35,24 +32,35 @@ function paymentTone(status: string | undefined) {
   return "";
 }
 
-export default function AdminOrdersClient({ initialOrders }: { initialOrders: AdminOrderRow[] }) {
-  const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]>("ALL");
-  const normalized = query.trim().toLowerCase();
+function ordersHref(filter: AdminOrdersFilter, query: string, cursor?: string | null) {
+  const params = new URLSearchParams();
+  if (filter !== "ALL") params.set("source", filter);
+  if (query) params.set("q", query);
+  if (cursor) params.set("cursor", cursor);
+  const suffix = params.toString();
+  return suffix ? `/admin/orders?${suffix}` : "/admin/orders";
+}
 
-  const orders = useMemo(() => initialOrders.filter((order) => {
-    const matchesFilter = filter === "ALL" || (filter === "ERROR" ? order.attention : order.source === filter);
-    if (!matchesFilter) return false;
-    if (!normalized) return true;
-    return [order.code, order.publicOrderId, order.robloxUsername, order.client.name, order.client.username, order.client.email]
-      .filter(Boolean).some((value) => String(value).toLowerCase().includes(normalized));
-  }), [filter, initialOrders, normalized]);
+export default function AdminOrdersClient({
+  page,
+  query,
+  filter,
+}: {
+  page: AdminOrdersPage;
+  query: string;
+  filter: AdminOrdersFilter;
+}) {
+  const orders = page.orders;
 
   return (
     <>
       <div className={styles.filters}>
-        <label className={styles.search}><Search /><input aria-label="Поиск по коду, нику, клиенту или email" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Код, ник или клиент" /></label>
-        {FILTERS.map((item) => <button key={item} type="button" onClick={() => setFilter(item)} className={cn(styles.filterButton, filter === item && styles.filterButtonActive)}>{item === "ALL" ? "Все" : item === "ERROR" ? "Внимание" : item}</button>)}
+        <form className={styles.search} action="/admin/orders" method="get">
+          <Search />
+          <input aria-label="Поиск по коду, нику, клиенту или email" name="q" defaultValue={query} placeholder="Код, ник или клиент" />
+          {filter !== "ALL" && <input type="hidden" name="source" value={filter} />}
+        </form>
+        {FILTERS.map((item) => <Link key={item} href={ordersHref(item, query)} className={cn(styles.filterButton, filter === item && styles.filterButtonActive)}>{item === "ALL" ? "Все" : item === "ERROR" ? "Внимание" : item}</Link>)}
       </div>
       <section className={styles.panel}>
         <div className={cn(styles.tableWrap, styles.responsiveTableWrap)}>
@@ -73,7 +81,12 @@ export default function AdminOrdersClient({ initialOrders }: { initialOrders: Ad
           </table>
         </div>
         {orders.length === 0 && <div className={styles.empty}>По этому фильтру заказов нет</div>}
-        <div className={styles.panelHeader}><span>Показано {orders.length} из {initialOrders.length}</span><Link href="/twa" target="_blank">Открыть мобильную TWA →</Link></div>
+        <div className={styles.panelHeader}>
+          <span>Показано {orders.length}{page.nextCursor ? " · есть ещё" : " · конец выборки"}</span>
+          {page.nextCursor
+            ? <Link href={ordersHref(filter, query, page.nextCursor)}>Следующие 50 →</Link>
+            : <Link href="/twa" target="_blank">Открыть мобильную TWA →</Link>}
+        </div>
       </section>
     </>
   );

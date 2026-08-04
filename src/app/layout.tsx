@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Press_Start_2P, Unbounded } from "next/font/google";
 import "./globals.css";
 import SessionProvider from "@/components/session-provider";
-import { PageLoader } from "@/components/page-loader";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SiteObservability } from "@/components/site-observability";
 import { THEME_BOOT_SCRIPT } from "@/lib/theme-boot";
@@ -93,7 +92,6 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <ThemeProvider>
           <SessionProvider>
-            <PageLoader />
             <SiteObservability />
             {children}
           </SessionProvider>

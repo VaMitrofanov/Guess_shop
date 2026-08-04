@@ -408,6 +408,19 @@ Web-контейнер уже обновился, а БД ещё нет, `/api/t
 `WbProductCost`, `WbSettings` — часть старой e-commerce-модели и WB-аналитики. `Order`/`Product`
 относятся к спящему checkout-слою (см. [architecture.md](architecture.md#legacy)).
 
+## `PerformanceSample` — PII-free метрики `/admin` (2026-08-04)
+
+Модель хранит только технический ряд для сравнения производительности между deploy/restart:
+`surface`, нормализованный `route`, `metric`, числовое `value`, `rating`, необязательный
+технический `fingerprint` и `createdAt`. Индексы покрывают `(surface, route, metric,
+createdAt)` и время создания.
+
+Идентификаторы пользователей/заказов, URL query, cookie, IP, user-agent, request/response
+payload и тексты ошибок не сохраняются. Client endpoint принимает метрики только для
+нормализованных `/admin` routes и пишет строку после отправки ответа. Retention необходимо
+добавить отдельной миграцией/cron после накопления фактического объёма; до этого размер
+таблицы контролируется операционным мониторингом.
+
 ## Изменения 26.07.2026 (ultra-review)
 
 Миграция `20260726_ultra_review_fixes` (аддитивная, применена до деплоя):

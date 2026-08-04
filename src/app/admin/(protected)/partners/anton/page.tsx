@@ -1,10 +1,15 @@
-import AdminAntonClient from "@/components/admin/anton-client";
+import { notFound } from "next/navigation";
+import AdminAntonClient, { type AntonState } from "@/components/admin/anton-client";
 import styles from "@/components/admin/admin-shell.module.css";
+import { loadPartnerAdminInitialStateJson } from "@/app/api/twa/partners/[slug]/tasks/route";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export default function AdminAntonPage() {
+export default async function AdminAntonPage() {
+  const initialJson = await loadPartnerAdminInitialStateJson("anton");
+  if (!initialJson) notFound();
+  const initialState = JSON.parse(initialJson) as AntonState;
   return (
     <div className={styles.page}>
       <header className={styles.pageHeader}>
@@ -17,7 +22,7 @@ export default function AdminAntonPage() {
           </p>
         </div>
       </header>
-      <AdminAntonClient />
+      <AdminAntonClient initialState={initialState} />
     </div>
   );
 }

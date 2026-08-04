@@ -32,7 +32,8 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const browser = await getBrowserSession(cookie);
+  // Это диагностический widget, а не purchase path: не держим UI до 70 секунд.
+  const browser = await getBrowserSession(cookie, 12_000);
 
   return NextResponse.json({
     hasCookie: true,
@@ -42,5 +43,5 @@ export async function GET(req: NextRequest) {
     accountId: browser.session?.accountId ?? null,
     balance: browser.session?.balance ?? null,
     problem: browser.ok ? null : browserFailureMessage(browser.reason, browser.code),
-  });
+  }, { headers: { "Cache-Control": "private, no-store" } });
 }

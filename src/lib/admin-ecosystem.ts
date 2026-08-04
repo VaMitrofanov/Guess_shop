@@ -1,24 +1,10 @@
 import "server-only";
 
-import { PaymentAttemptStatus, WbOrderStatus } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { adminCache } from "@/lib/admin-cache";
+import { logAdminTiming } from "@/lib/admin-performance";
 import { isSiteAcquiringEnabled, parseSiteAcquiringMode } from "@/lib/site-acquiring";
-import { buildTabWhere } from "@/lib/order-queue";
-
-const PAID_PAYMENT_STATUSES: PaymentAttemptStatus[] = [
-  "CONFIRMED",
-  "PARTIALLY_REFUNDED",
-  "REFUNDED",
-];
-
-const OPEN_PAYMENT_STATUSES: PaymentAttemptStatus[] = ["CREATED", "INITIATED", "AUTHORIZED"];
-const ACTIVE_ORDER_STATUSES: WbOrderStatus[] = [
-  "AWAITING_PAYMENT",
-  "PAYMENT_PENDING",
-  "AWAITING_GAMEPASS",
-  "PENDING",
-  "IN_PROGRESS",
-];
 
 function iso(value: Date | null | undefined) {
   return value?.toISOString() ?? null;
@@ -50,6 +36,13 @@ export type AdminOrderRow = {
     updatedAt: string;
   } | null;
   attention: boolean;
+};
+
+export type AdminOrdersFilter = "ALL" | "SITE" | "WB" | "DIRECT" | "AVITO" | "ERROR";
+
+export type AdminOrdersPage = {
+  orders: AdminOrderRow[];
+  nextCursor: string | null;
 };
 
 function serializeOrder(order: {
@@ -122,148 +115,339 @@ const orderListInclude = {
 export async function getAdminOrders(limit = 250): Promise<AdminOrderRow[]> {
   const orders = await prisma.wbOrder.findMany({
     where: { isTest: false },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit,
     include: orderListInclude,
   });
   return orders.map(serializeOrder);
 }
 
-export async function getAdminDashboardData() {
+function encodeOrderCursor(value: { createdAt: Date; id: string }) {
+  return Buffer.from(JSON.stringify({ createdAt: value.createdAt.toISOString(), id: value.id }))
+    .toString("base64url");
+}
+
+function decodeOrderCursor(raw: string | null | undefined) {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as {
+      createdAt?: unknown;
+      id?: unknown;
+    };
+    if (typeof value.createdAt !== "string" || typeof value.id !== "string") return null;
+    const createdAt = new Date(value.createdAt);
+    if (!Number.isFinite(createdAt.getTime()) || !/^[a-z0-9_-]{8,40}$/i.test(value.id)) return null;
+    return { createdAt, id: value.id };
+  } catch {
+    return null;
+  }
+}
+
+export async function getAdminOrdersPage(input: {
+  query?: string;
+  filter?: AdminOrdersFilter;
+  cursor?: string | null;
+  limit?: number;
+} = {}): Promise<AdminOrdersPage> {
+  const query = input.query?.trim().slice(0, 120) ?? "";
+  const filter = input.filter ?? "ALL";
+  const cursor = decodeOrderCursor(input.cursor);
+  const limit = Math.min(100, Math.max(10, input.limit ?? 50));
+  const clauses: Prisma.WbOrderWhereInput[] = [{ isTest: false }];
+
+  if (["SITE", "WB", "DIRECT", "AVITO"].includes(filter)) {
+    clauses.push({ orderSource: filter as "SITE" | "WB" | "DIRECT" | "AVITO" });
+  } else if (filter === "ERROR") {
+    clauses.push({
+      OR: [
+        { status: "ERROR" },
+        { paymentAttempts: { some: { status: "FAILED" } } },
+        { orderSource: "SITE", status: "PENDING", paidAt: null },
+      ],
+    });
+  }
+
+  if (query) {
+    clauses.push({
+      OR: [
+        { wbCode: { contains: query, mode: "insensitive" } },
+        { publicOrderId: { contains: query, mode: "insensitive" } },
+        { robloxUsername: { contains: query, mode: "insensitive" } },
+        { probableNick: { contains: query, mode: "insensitive" } },
+        { user: { is: { name: { contains: query, mode: "insensitive" } } } },
+        { user: { is: { username: { contains: query, mode: "insensitive" } } } },
+        { user: { is: { email: { contains: query, mode: "insensitive" } } } },
+      ],
+    });
+  }
+
+  if (cursor) {
+    clauses.push({
+      OR: [
+        { createdAt: { lt: cursor.createdAt } },
+        { createdAt: cursor.createdAt, id: { lt: cursor.id } },
+      ],
+    });
+  }
+
+  const rows = await prisma.wbOrder.findMany({
+    where: { AND: clauses },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    include: orderListInclude,
+  });
+  const hasMore = rows.length > limit;
+  const visible = rows.slice(0, limit);
+  const last = visible.at(-1);
+  return {
+    orders: visible.map(serializeOrder),
+    nextCursor: hasMore && last ? encodeOrderCursor(last) : null,
+  };
+}
+
+type OperationalSnapshotRow = {
+  totalOrders: bigint;
+  activeOrders: bigint;
+  buyoutOrders: bigint;
+  created24h: bigint;
+  completed24h: bigint;
+  errorOrders: bigint;
+  users: bigint;
+  users30d: bigint;
+  openPayments: bigint;
+  deadOutbox: bigint;
+  pendingOutbox: bigint;
+  unknownRefunds: bigint;
+  uniqueBuyers: bigint;
+  repeatBuyers: bigint;
+  availableCodes: bigint;
+  reservedCodes: bigint;
+};
+
+type FinanceSnapshotRow = {
+  completedOrders: bigint;
+  orders30d: bigint;
+  completedRobux: bigint;
+  paidPayments: bigint;
+  grossKopecks: bigint;
+  refundedKopecks: bigint;
+  paidPayments30d: bigint;
+  grossKopecks30d: bigint;
+  refundedKopecks30d: bigint;
+  source: string | null;
+  sourceOrders: bigint | null;
+  sourceRobux: bigint | null;
+};
+
+async function queryDashboardOperational() {
   const now = new Date();
   const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
   const since30d = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const rows = await prisma.$queryRaw<OperationalSnapshotRow[]>(Prisma.sql`
+    WITH order_stats AS (
+      SELECT
+        COUNT(*) AS "totalOrders",
+        COUNT(*) FILTER (WHERE "status"::text IN ('AWAITING_PAYMENT', 'PAYMENT_PENDING', 'AWAITING_GAMEPASS', 'PENDING', 'IN_PROGRESS')) AS "activeOrders",
+        COUNT(*) FILTER (
+          WHERE "isFavorite" = false
+            AND "orderSource"::text <> 'AVITO'
+            AND NOT ("isDirectOrder" = true AND "paidAt" IS NULL)
+            AND (
+              "status"::text IN ('PENDING', 'IN_PROGRESS')
+              OR ("status"::text = 'ERROR' AND "buyoutErrorCode" IN ('REGIONAL_PRICE', 'ROBLOX_PLUS_FLOW'))
+            )
+        ) AS "buyoutOrders",
+        COUNT(*) FILTER (WHERE "createdAt" >= ${since24h}) AS "created24h",
+        COUNT(*) FILTER (WHERE "completedAt" >= ${since24h}) AS "completed24h",
+        COUNT(*) FILTER (WHERE "status"::text = 'ERROR') AS "errorOrders"
+      FROM "WbOrder"
+      WHERE "isTest" = false
+    ),
+    buyer_stats AS (
+      SELECT COUNT(*) AS "uniqueBuyers", COUNT(*) FILTER (WHERE orders > 1) AS "repeatBuyers"
+      FROM (
+        SELECT "userId", COUNT(*) AS orders
+        FROM "WbOrder"
+        WHERE "isTest" = false
+        GROUP BY "userId"
+      ) buyers
+    ),
+    user_stats AS (
+      SELECT COUNT(*) AS users, COUNT(*) FILTER (WHERE "createdAt" >= ${since30d}) AS "users30d"
+      FROM "User"
+    ),
+    payment_stats AS (
+      SELECT COUNT(*) FILTER (WHERE p."status"::text IN ('CREATED', 'INITIATED', 'AUTHORIZED')) AS "openPayments"
+      FROM "PaymentAttempt" p
+      JOIN "WbOrder" o ON o.id = p."orderId"
+      WHERE o."isTest" = false
+    ),
+    outbox_stats AS (
+      SELECT
+        COUNT(*) FILTER (WHERE "status"::text = 'DEAD') AS "deadOutbox",
+        COUNT(*) FILTER (WHERE "status"::text IN ('PENDING', 'PROCESSING')) AS "pendingOutbox"
+      FROM "OutboxMessage"
+    ),
+    refund_stats AS (
+      SELECT COUNT(*) FILTER (WHERE r."status"::text = 'SUBMIT_UNKNOWN') AS "unknownRefunds"
+      FROM "PaymentRefund" r
+      JOIN "PaymentAttempt" p ON p.id = r."paymentAttemptId"
+      JOIN "WbOrder" o ON o.id = p."orderId"
+      WHERE o."isTest" = false
+    ),
+    code_stats AS (
+      SELECT
+        COUNT(*) FILTER (WHERE "status"::text = 'AVAILABLE') AS "availableCodes",
+        COUNT(*) FILTER (WHERE "status"::text = 'RESERVED') AS "reservedCodes"
+      FROM "WbCode"
+    )
+    SELECT os.*, bs.*, us.*, ps.*, outs.*, rs.*, cs.*
+    FROM order_stats os
+    CROSS JOIN buyer_stats bs
+    CROSS JOIN user_stats us
+    CROSS JOIN payment_stats ps
+    CROSS JOIN outbox_stats outs
+    CROSS JOIN refund_stats rs
+    CROSS JOIN code_stats cs
+  `);
+  return rows[0];
+}
 
-  const [
-    totalOrders,
-    siteOrders,
-    activeOrders,
-    buyoutOrders,
-    created24h,
-    completed24h,
-    completedOrders,
-    orders30d,
-    errorOrders,
-    users,
-    users30d,
-    paymentTotals,
-    paymentTotals30d,
-    openPayments,
-    deadOutbox,
-    pendingOutbox,
-    unknownRefunds,
-    recentRows,
-    completedRobux,
-    sourceRows,
-    customerOrderCounts,
-    codeRows,
-    heartbeatRows,
-  ] = await Promise.all([
-    prisma.wbOrder.count({ where: { isTest: false } }),
-    prisma.wbOrder.count({ where: { isTest: false, orderSource: "SITE" } }),
-    prisma.wbOrder.count({ where: { isTest: false, status: { in: ACTIVE_ORDER_STATUSES } } }),
-    prisma.wbOrder.count({ where: { isTest: false, ...buildTabWhere("BUYOUT") } }),
-    prisma.wbOrder.count({ where: { isTest: false, createdAt: { gte: since24h } } }),
-    prisma.wbOrder.count({ where: { isTest: false, completedAt: { gte: since24h } } }),
-    prisma.wbOrder.count({ where: { isTest: false, status: "COMPLETED" } }),
-    prisma.wbOrder.count({ where: { isTest: false, createdAt: { gte: since30d } } }),
-    prisma.wbOrder.count({ where: { isTest: false, status: "ERROR" } }),
-    prisma.user.count(),
-    prisma.user.count({ where: { createdAt: { gte: since30d } } }),
-    prisma.paymentAttempt.aggregate({
-      where: { status: { in: PAID_PAYMENT_STATUSES }, order: { isTest: false } },
-      _sum: { amountKopecks: true, refundedAmountKopecks: true },
-      _count: { _all: true },
-    }),
-    prisma.paymentAttempt.aggregate({
-      where: {
-        status: { in: PAID_PAYMENT_STATUSES },
-        finalizedAt: { gte: since30d },
-        order: { isTest: false },
-      },
-      _sum: { amountKopecks: true, refundedAmountKopecks: true },
-      _count: { _all: true },
-    }),
-    prisma.paymentAttempt.count({ where: { status: { in: OPEN_PAYMENT_STATUSES }, order: { isTest: false } } }),
-    prisma.outboxMessage.count({ where: { status: "DEAD" } }),
-    prisma.outboxMessage.count({ where: { status: { in: ["PENDING", "PROCESSING"] } } }),
-    prisma.paymentRefund.count({
-      where: { status: "SUBMIT_UNKNOWN", paymentAttempt: { order: { isTest: false } } },
-    }),
-    prisma.wbOrder.findMany({
-      where: { isTest: false },
-      orderBy: { createdAt: "desc" },
-      take: 8,
-      include: orderListInclude,
-    }),
-    prisma.wbOrder.aggregate({
-      where: { isTest: false, status: "COMPLETED" },
-      _sum: { amount: true },
-    }),
-    prisma.wbOrder.groupBy({
-      by: ["orderSource"],
-      where: { isTest: false },
-      _count: { _all: true },
-      _sum: { amount: true },
-    }),
-    prisma.wbOrder.groupBy({
-      by: ["userId"],
-      where: { isTest: false },
-      _count: { _all: true },
-    }),
-    prisma.wbCode.groupBy({
-      by: ["status"],
-      _count: { _all: true },
-    }),
-    prisma.serviceHeartbeat.findMany({
-      orderBy: { lastSeenAt: "desc" },
-      take: 6,
-      select: { serviceKey: true, status: true, lastSeenAt: true, lastAlertAt: true },
-    }),
+async function queryDashboardFinance() {
+  const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  return prisma.$queryRaw<FinanceSnapshotRow[]>(Prisma.sql`
+    WITH order_stats AS (
+      SELECT
+        COUNT(*) FILTER (WHERE "status"::text = 'COMPLETED') AS "completedOrders",
+        COUNT(*) FILTER (WHERE "createdAt" >= ${since30d}) AS "orders30d",
+        COALESCE(SUM("amount") FILTER (WHERE "status"::text = 'COMPLETED'), 0) AS "completedRobux"
+      FROM "WbOrder"
+      WHERE "isTest" = false
+    ),
+    payment_stats AS (
+      SELECT
+        COUNT(*) AS "paidPayments",
+        COALESCE(SUM(p."amountKopecks"), 0) AS "grossKopecks",
+        COALESCE(SUM(p."refundedAmountKopecks"), 0) AS "refundedKopecks",
+        COUNT(*) FILTER (WHERE p."finalizedAt" >= ${since30d}) AS "paidPayments30d",
+        COALESCE(SUM(p."amountKopecks") FILTER (WHERE p."finalizedAt" >= ${since30d}), 0) AS "grossKopecks30d",
+        COALESCE(SUM(p."refundedAmountKopecks") FILTER (WHERE p."finalizedAt" >= ${since30d}), 0) AS "refundedKopecks30d"
+      FROM "PaymentAttempt" p
+      JOIN "WbOrder" o ON o.id = p."orderId"
+      WHERE o."isTest" = false
+        AND p."status"::text IN ('CONFIRMED', 'PARTIALLY_REFUNDED', 'REFUNDED')
+    ),
+    source_rows AS (
+      SELECT "orderSource"::text AS source, COUNT(*) AS orders, COALESCE(SUM("amount"), 0) AS robux
+      FROM "WbOrder"
+      WHERE "isTest" = false
+      GROUP BY "orderSource"
+    )
+    SELECT
+      os.*,
+      ps.*,
+      sr.source,
+      sr.orders AS "sourceOrders",
+      sr.robux AS "sourceRobux"
+    FROM order_stats os
+    CROSS JOIN payment_stats ps
+    LEFT JOIN source_rows sr ON true
+  `);
+}
+
+const loadDashboardOperational = adminCache(
+  queryDashboardOperational,
+  ["admin-dashboard-operational-v2"],
+  { tags: ["admin-operational"], revalidate: 10 },
+);
+
+const loadDashboardFinance = adminCache(
+  queryDashboardFinance,
+  ["admin-dashboard-finance-v2"],
+  { tags: ["admin-finance"], revalidate: 60 },
+);
+
+const loadDashboardRecent = adminCache(
+  () => prisma.wbOrder.findMany({
+    where: { isTest: false },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: 8,
+    include: orderListInclude,
+  }),
+  ["admin-dashboard-recent-v2"],
+  { tags: ["admin-operational"], revalidate: 10 },
+);
+
+const loadDashboardHeartbeats = adminCache(
+  () => prisma.serviceHeartbeat.findMany({
+    orderBy: { lastSeenAt: "desc" },
+    take: 6,
+    select: { serviceKey: true, status: true, lastSeenAt: true, lastAlertAt: true },
+  }),
+  ["admin-dashboard-heartbeats-v2"],
+  { tags: ["admin-operational"], revalidate: 10 },
+);
+
+export async function getAdminDashboardData() {
+  const startedAt = performance.now();
+  const now = new Date();
+  const [operational, financeRows, recentRows, heartbeatRows] = await Promise.all([
+    loadDashboardOperational(),
+    loadDashboardFinance(),
+    loadDashboardRecent(),
+    loadDashboardHeartbeats(),
   ]);
+  if (!operational || financeRows.length === 0) {
+    throw new Error("Admin dashboard aggregate returned no rows");
+  }
 
-  const grossKopecks = paymentTotals._sum.amountKopecks ?? 0;
-  const refundedKopecks = paymentTotals._sum.refundedAmountKopecks ?? 0;
-  const grossKopecks30d = paymentTotals30d._sum.amountKopecks ?? 0;
-  const refundedKopecks30d = paymentTotals30d._sum.refundedAmountKopecks ?? 0;
-  const codeCounts = Object.fromEntries(codeRows.map((row) => [row.status, row._count._all]));
+  const finance = financeRows[0];
+  const totalOrders = Number(operational.totalOrders);
+  const paidPayments = Number(finance.paidPayments);
+  const grossKopecks = Number(finance.grossKopecks);
+  const refundedKopecks = Number(finance.refundedKopecks);
+  const grossKopecks30d = Number(finance.grossKopecks30d);
+  const refundedKopecks30d = Number(finance.refundedKopecks30d);
 
-  return {
+  const result = {
     metrics: {
       totalOrders,
-      siteOrders,
-      activeOrders,
-      buyoutOrders,
-      created24h,
-      completed24h,
-      completedOrders,
-      orders30d,
-      users,
-      users30d,
-      uniqueBuyers: customerOrderCounts.length,
-      repeatBuyers: customerOrderCounts.filter((row) => row._count._all > 1).length,
-      paidPayments: paymentTotals._count._all,
-      averagePaidKopecks: paymentTotals._count._all > 0 ? Math.round(grossKopecks / paymentTotals._count._all) : 0,
+      activeOrders: Number(operational.activeOrders),
+      buyoutOrders: Number(operational.buyoutOrders),
+      created24h: Number(operational.created24h),
+      completed24h: Number(operational.completed24h),
+      completedOrders: Number(finance.completedOrders),
+      orders30d: Number(finance.orders30d),
+      users: Number(operational.users),
+      users30d: Number(operational.users30d),
+      uniqueBuyers: Number(operational.uniqueBuyers),
+      repeatBuyers: Number(operational.repeatBuyers),
+      paidPayments,
+      averagePaidKopecks: paidPayments > 0 ? Math.round(grossKopecks / paidPayments) : 0,
       grossKopecks,
       refundedKopecks,
       netKopecks: grossKopecks - refundedKopecks,
-      paidPayments30d: paymentTotals30d._count._all,
+      paidPayments30d: Number(finance.paidPayments30d),
       grossKopecks30d,
       refundedKopecks30d,
       netKopecks30d: grossKopecks30d - refundedKopecks30d,
-      completedRobux: completedRobux._sum.amount ?? 0,
-      attention: errorOrders + deadOutbox + unknownRefunds,
-      errorOrders,
-      openPayments,
-      deadOutbox,
-      pendingOutbox,
-      unknownRefunds,
-      availableCodes: codeCounts.AVAILABLE ?? 0,
-      reservedCodes: codeCounts.RESERVED ?? 0,
-      claimedCodes: codeCounts.CLAIMED ?? 0,
+      completedRobux: Number(finance.completedRobux),
+      attention: Number(operational.errorOrders + operational.deadOutbox + operational.unknownRefunds),
+      errorOrders: Number(operational.errorOrders),
+      openPayments: Number(operational.openPayments),
+      deadOutbox: Number(operational.deadOutbox),
+      pendingOutbox: Number(operational.pendingOutbox),
+      unknownRefunds: Number(operational.unknownRefunds),
+      availableCodes: Number(operational.availableCodes),
+      reservedCodes: Number(operational.reservedCodes),
     },
-    sourceBreakdown: sourceRows
-      .map((row) => ({ source: row.orderSource, orders: row._count._all, robux: row._sum.amount ?? 0 }))
+    sourceBreakdown: financeRows
+      .filter((row) => row.source !== null)
+      .map((row) => ({
+        source: row.source as string,
+        orders: Number(row.sourceOrders ?? 0),
+        robux: Number(row.sourceRobux ?? 0),
+      }))
       .sort((a, b) => b.orders - a.orders),
     heartbeats: heartbeatRows.map((row) => ({
       service: row.serviceKey,
@@ -274,6 +458,8 @@ export async function getAdminDashboardData() {
     })),
     recentOrders: recentRows.map(serializeOrder),
   };
+  logAdminTiming("dashboard", startedAt, { coldQueryBudget: 4 });
+  return result;
 }
 
 export type AdminActivityItem = {
@@ -301,9 +487,26 @@ function eventPresentation(type: string): Pick<AdminActivityItem, "kind" | "tone
   return { kind: "order", tone: "neutral", title: "Событие заказа" };
 }
 
-export async function getAdminActivity(limit = 180): Promise<AdminActivityItem[]> {
+function decodeActivityCursor(raw: string | null | undefined) {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as {
+      createdAt?: unknown;
+      id?: unknown;
+    };
+    if (typeof value.createdAt !== "string" || typeof value.id !== "string") return null;
+    const createdAt = new Date(value.createdAt);
+    return Number.isFinite(createdAt.getTime()) ? { createdAt, id: value.id } : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getAdminActivity(limit = 180, cursorRaw?: string | null): Promise<AdminActivityItem[]> {
+  const cursor = decodeActivityCursor(cursorRaw);
   const [events, outbox, refunds, merges] = await Promise.all([
     prisma.orderEvent.findMany({
+      where: cursor ? { createdAt: { lte: cursor.createdAt } } : undefined,
       orderBy: { createdAt: "desc" },
       take: limit,
       select: {
@@ -314,6 +517,7 @@ export async function getAdminActivity(limit = 180): Promise<AdminActivityItem[]
       },
     }),
     prisma.outboxMessage.findMany({
+      where: cursor ? { updatedAt: { lte: cursor.createdAt } } : undefined,
       orderBy: { updatedAt: "desc" },
       take: limit,
       select: {
@@ -327,6 +531,7 @@ export async function getAdminActivity(limit = 180): Promise<AdminActivityItem[]
       },
     }),
     prisma.paymentRefund.findMany({
+      where: cursor ? { updatedAt: { lte: cursor.createdAt } } : undefined,
       orderBy: { updatedAt: "desc" },
       take: limit,
       select: {
@@ -339,6 +544,7 @@ export async function getAdminActivity(limit = 180): Promise<AdminActivityItem[]
       },
     }),
     prisma.accountMergeAudit.findMany({
+      where: cursor ? { updatedAt: { lte: cursor.createdAt } } : undefined,
       orderBy: { updatedAt: "desc" },
       take: Math.min(limit, 80),
       select: { id: true, status: true, createdAt: true, updatedAt: true },
@@ -399,8 +605,25 @@ export async function getAdminActivity(limit = 180): Promise<AdminActivityItem[]
   }
 
   return items
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id.localeCompare(a.id))
+    .filter((item) => !cursor
+      || Date.parse(item.createdAt) < cursor.createdAt.getTime()
+      || (Date.parse(item.createdAt) === cursor.createdAt.getTime() && item.id < cursor.id))
     .slice(0, limit);
+}
+
+export async function getAdminActivityPage(input: { cursor?: string | null; limit?: number } = {}) {
+  const limit = Math.min(100, Math.max(20, input.limit ?? 80));
+  const fetched = await getAdminActivity(limit + 1, input.cursor);
+  const hasMore = fetched.length > limit;
+  const items = fetched.slice(0, limit);
+  const last = items.at(-1);
+  return {
+    items,
+    nextCursor: hasMore && last
+      ? Buffer.from(JSON.stringify({ createdAt: last.createdAt, id: last.id })).toString("base64url")
+      : null,
+  };
 }
 
 export function getAdminRuntimeState() {
@@ -422,11 +645,38 @@ export function getAdminRuntimeState() {
 export async function getAdminOrderDetail(id: string) {
   return prisma.wbOrder.findUnique({
     where: { id },
-    include: {
+    select: {
+      id: true,
+      isTest: true,
+      wbCode: true,
+      publicOrderId: true,
+      orderSource: true,
+      platform: true,
+      status: true,
+      amount: true,
+      robloxUsername: true,
+      probableNick: true,
+      gamepassUrl: true,
+      pendingAt: true,
+      completedAt: true,
+      createdAt: true,
+      receiptEmail: true,
+      paymentAmountKopecks: true,
+      saleAmountKopecks: true,
+      purchaseCostKopecks: true,
+      profitKopecks: true,
+      purchaserUsername: true,
+      adminNote: true,
       user: {
-        include: {
+        select: {
+          name: true,
+          username: true,
+          email: true,
+          tgId: true,
+          vkId: true,
+          balance: true,
           identities: {
-            select: { provider: true, subject: true, verifiedAt: true, createdAt: true },
+            select: { provider: true, verifiedAt: true },
           },
         },
       },
@@ -444,12 +694,35 @@ export async function getAdminOrderDetail(id: string) {
       },
       paymentAttempts: {
         orderBy: { createdAt: "desc" },
-        include: { refunds: { orderBy: { createdAt: "desc" } } },
+        select: {
+          status: true,
+          provider: true,
+          paymentId: true,
+          amountKopecks: true,
+          refundedAmountKopecks: true,
+          initiatedAt: true,
+          finalizedAt: true,
+          refunds: {
+            orderBy: { createdAt: "desc" },
+            select: {
+              id: true,
+              status: true,
+              amountKopecks: true,
+              reason: true,
+              createdAt: true,
+            },
+          },
+        },
       },
       events: {
         orderBy: { createdAt: "desc" },
         take: 100,
-        include: { outbox: true },
+        select: {
+          id: true,
+          type: true,
+          createdAt: true,
+          outbox: { select: { id: true, topic: true, status: true, attempts: true } },
+        },
       },
     },
   });

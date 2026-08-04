@@ -8,8 +8,16 @@ import { loadDirectEconomics } from "@/lib/direct-economics";
  * `requireAdmin`, принимающий и сессию, и Bearer-пропуск (A1).
  */
 export async function GET(req: NextRequest) {
+  const startedAt = performance.now();
   if (!await requireAdmin(req)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  return NextResponse.json(await loadDirectEconomics());
+  const authMs = performance.now() - startedAt;
+  const data = await loadDirectEconomics();
+  return NextResponse.json(data, {
+    headers: {
+      "Cache-Control": "private, no-store",
+      "Server-Timing": `auth;dur=${authMs.toFixed(1)}, data;dur=${(performance.now() - startedAt - authMs).toFixed(1)}`,
+    },
+  });
 }

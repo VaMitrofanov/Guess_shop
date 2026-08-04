@@ -3,6 +3,25 @@
 `/twa` — панель менеджера внутри Telegram. Целевые устройства: iPhone 14/15 Pro Max +
 MacBook 16". Дизайн — iOS-эстетика, минимальный контентный шрифт 14px.
 
+## Ускорение desktop `/admin` — 04–05.08.2026
+
+Performance-релиз устраняет задержки от сетевых волн до удалённой БД, не меняя VPS:
+
+- dashboard консолидирован с 23 Prisma operations до четырёх cold-miss чтений;
+- Orders, Users и Activity получили server-side search/cursor pagination (`50/50/80`);
+- основной Users больше не ждёт Telegram/VK: community metrics живут в отдельном Suspense;
+- Economics, Buyout и партнёр «Антон» получают initial state в Server Component, без
+  обязательного `useEffect → API → DB` после hydration;
+- Buyout отменяет устаревший tab-request и не запускает donor-проверку без явного действия;
+- operational/finance/community данные имеют TTL `10/60/300 s`; изменения заказов,
+  настроек и outbox инвалидируют соответствующие tags;
+- web Economics сохраняет настройки через `/api/admin/settings` с `requireAdmin`; TWA
+  endpoint сохраняет собственную строгую identity-проверку;
+- route-level loading/error boundaries заменили искусственный глобальный loader на 1.5 s.
+
+Подробные baseline, cache/security contract, гейты и отложенный архитектурный хвост —
+[в performance-плане](admin-performance-optimization-plan-2026-08-04.md).
+
 ## Единая admin-экосистема — 18.07.2026
 
 Desktop `/admin` и Telegram `/twa` больше не считаются двумя независимыми админками. Они

@@ -2612,6 +2612,18 @@ async function loadPartnerState(partner: Partner) {
   };
 }
 
+/**
+ * Server Component entry point for desktop admin. It reuses the canonical
+ * partner query without a hydrate-then-GET waterfall. JSON serialization
+ * keeps Date fields identical to the HTTP adapter's ISO-string contract.
+ */
+export async function loadPartnerAdminInitialStateJson(slug: string): Promise<string | null> {
+  const partner = await getPartner(slug);
+  if (!partner) return null;
+  const state = await loadPartnerState(partner);
+  return JSON.stringify({ ok: true, partner, syncScheduled: false, ...state });
+}
+
 const PARTNER_VIEW_PAGE_SIZE = 30;
 type PartnerView = "ledger" | "history" | "tasks";
 

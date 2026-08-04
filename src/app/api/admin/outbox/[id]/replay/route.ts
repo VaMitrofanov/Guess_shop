@@ -1,3 +1,4 @@
+import { revalidateTag } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { resolveAdminFromSession } from "@/lib/admin-access";
@@ -23,6 +24,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   try {
     const result = await requestOutboxReplay({ outboxId: id, requestedBy: admin.userId, ...parsed.data });
+    revalidateTag("admin-operational", "max");
     return NextResponse.json({ success: true, alreadyExists: result.kind === "existing", outbox: result.outbox }, { status: 202 });
   } catch (error) {
     if (error instanceof OutboxReplayError) {

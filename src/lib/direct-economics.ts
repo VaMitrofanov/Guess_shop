@@ -29,12 +29,13 @@ export type { DirectEconomics, DirectEconomicsSource, EconomicsOrder } from "@/l
    показывал, где цифра из снапшота, а где восстановлена.
    ───────────────────────────────────────────────────────────────────────── */
 
-// Хвост режем, чтобы запрос не деградировал с ростом заказов. Экран фильтрует
-// период на клиенте — при таких объёмах это дешевле повторного запроса.
+// Берём newest-first и одну дополнительную строку, чтобы честно сообщить UI,
+// что история продолжается. Старый asc+take оставлял в выборке самые старые
+// 2000 строк и после роста молча скрывал новые финансовые операции.
 const MAX_ORDERS = 2000;
 
 export async function loadDirectEconomics(): Promise<DirectEconomics> {
-  const orders = await prisma.wbOrder.findMany({
+  const fetchedOrders = await prisma.wbOrder.findMany({
     where: { isTest: false, status: "COMPLETED", orderSource: { in: [...DIRECT_ECONOMICS_SOURCES] } },
     select: {
       id: true, wbCode: true, orderSource: true, platform: true, userId: true,
@@ -43,9 +44,11 @@ export async function loadDirectEconomics(): Promise<DirectEconomics> {
       purchaseRobuxAmount: true, purchaseRateUsdPer1k: true, purchaseUsdToRub: true,
       bonusAppliedRobux: true, paidAt: true, createdAt: true, completedAt: true,
     },
-    orderBy: { createdAt: "asc" },
-    take: MAX_ORDERS,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: MAX_ORDERS + 1,
   });
+  const truncated = fetchedOrders.length > MAX_ORDERS;
+  const orders = fetchedOrders.slice(0, MAX_ORDERS);
 
   const orderIds = orders.map((o) => o.id);
   const userIds = [...new Set(orders.map((o) => o.userId))];
@@ -153,6 +156,6 @@ export async function loadDirectEconomics(): Promise<DirectEconomics> {
       robloxTaxPct: 30,
     },
     prices: DIRECT_PRICES,
-    truncated: orders.length === MAX_ORDERS,
+    truncated,
   };
 }

@@ -1,6 +1,8 @@
 jest.mock("server-only", () => ({}), { virtual: true });
+jest.mock("@/lib/admin-cache", () => ({ adminCache: (fn: unknown) => fn }));
 jest.mock("@/lib/prisma", () => ({
   prisma: {
+    $queryRaw: jest.fn(),
     wbOrder: { findMany: jest.fn(), count: jest.fn(), findUnique: jest.fn(), aggregate: jest.fn(), groupBy: jest.fn() },
     user: { count: jest.fn() },
     paymentAttempt: { aggregate: jest.fn(), count: jest.fn() },
@@ -14,9 +16,10 @@ jest.mock("@/lib/prisma", () => ({
 }));
 
 import { prisma } from "@/lib/prisma";
-import { getAdminActivity, getAdminDashboardData, getAdminOrders, getAdminRuntimeState } from "@/lib/admin-ecosystem";
+import { getAdminActivity, getAdminDashboardData, getAdminOrders, getAdminOrdersPage, getAdminRuntimeState } from "@/lib/admin-ecosystem";
 
 const db = prisma as unknown as {
+  $queryRaw: jest.Mock;
   wbOrder: { findMany: jest.Mock; count: jest.Mock; aggregate: jest.Mock; groupBy: jest.Mock };
   user: { count: jest.Mock };
   paymentAttempt: { aggregate: jest.Mock; count: jest.Mock };
@@ -74,6 +77,47 @@ describe("admin ecosystem", () => {
     })]);
   });
 
+  it("uses a bounded stable cursor and searches the full order data source", async () => {
+    const source = Array.from({ length: 51 }, (_, index) => ({
+      id: `order-${String(index).padStart(4, "0")}`,
+      wbCode: `CODE${index}`,
+      publicOrderId: `RB-${index}`,
+      orderSource: "SITE",
+      platform: "WEB",
+      status: "PENDING",
+      amount: 100,
+      robloxUsername: `Builder${index}`,
+      probableNick: null,
+      createdAt: new Date(1_800_000_000_000 - index * 1000),
+      updatedAt: new Date(1_800_000_000_000 - index * 1000),
+      paidAt: null,
+      completedAt: null,
+      user: { name: "Client", username: "client", email: "client@example.test" },
+      paymentAttempts: [],
+    }));
+    db.wbOrder.findMany.mockResolvedValue(source);
+
+    const first = await getAdminOrdersPage({ query: "Builder", filter: "SITE", limit: 50 });
+    expect(first.orders).toHaveLength(50);
+    expect(first.nextCursor).toEqual(expect.any(String));
+    expect(db.wbOrder.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      take: 51,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      where: { AND: expect.arrayContaining([
+        { isTest: false },
+        { orderSource: "SITE" },
+        expect.objectContaining({ OR: expect.any(Array) }),
+      ]) },
+    }));
+
+    db.wbOrder.findMany.mockResolvedValue([]);
+    await getAdminOrdersPage({ cursor: first.nextCursor, limit: 50 });
+    const secondWhere = db.wbOrder.findMany.mock.calls.at(-1)?.[0].where;
+    expect(secondWhere.AND).toEqual(expect.arrayContaining([
+      expect.objectContaining({ OR: expect.any(Array) }),
+    ]));
+  });
+
   it("merges payment, outbox, refund and identity logs by time", async () => {
     db.orderEvent.findMany.mockResolvedValue([{
       id: "event-1", type: "PAYMENT_CONFIRMED", createdAt: new Date("2026-07-18T10:00:00Z"),
@@ -110,30 +154,57 @@ describe("admin ecosystem", () => {
   });
 
   it("derives dashboard money, source, repeat-buyer and health metrics from production-shaped aggregates", async () => {
-    // total, site, active, buyout, created24h, completed24h, completed, 30d, errors
-    [641, 4, 75, 10, 10, 8, 533, 403, 0].forEach((value) => db.wbOrder.count.mockResolvedValueOnce(value));
-    db.user.count.mockResolvedValueOnce(597).mockResolvedValueOnce(356);
-    db.paymentAttempt.aggregate
-      .mockResolvedValueOnce({ _sum: { amountKopecks: 16000, refundedAmountKopecks: 16000 }, _count: { _all: 1 } })
-      .mockResolvedValueOnce({ _sum: { amountKopecks: 16000, refundedAmountKopecks: 16000 }, _count: { _all: 1 } });
-    db.paymentAttempt.count.mockResolvedValue(0);
-    db.outboxMessage.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
-    db.paymentRefund.count.mockResolvedValue(0);
-    db.wbOrder.findMany.mockResolvedValue([]);
-    db.wbOrder.aggregate.mockResolvedValue({ _sum: { amount: 488821 } });
-    db.wbOrder.groupBy
+    const n = (value: number) => BigInt(value);
+    db.$queryRaw
+      .mockResolvedValueOnce([{
+        totalOrders: n(641),
+        activeOrders: n(75),
+        buyoutOrders: n(10),
+        created24h: n(10),
+        completed24h: n(8),
+        errorOrders: n(0),
+        users: n(597),
+        users30d: n(356),
+        openPayments: n(0),
+        deadOutbox: n(0),
+        pendingOutbox: n(0),
+        unknownRefunds: n(0),
+        uniqueBuyers: n(2),
+        repeatBuyers: n(1),
+        availableCodes: n(740),
+        reservedCodes: n(30),
+      }])
       .mockResolvedValueOnce([
-        { orderSource: "WB", _count: { _all: 587 }, _sum: { amount: 450000 } },
-        { orderSource: "SITE", _count: { _all: 4 }, _sum: { amount: 3200 } },
-      ])
-      .mockResolvedValueOnce([
-        { userId: "user-1", _count: { _all: 3 } },
-        { userId: "user-2", _count: { _all: 1 } },
+        {
+          completedOrders: n(533),
+          orders30d: n(403),
+          completedRobux: n(488821),
+          paidPayments: n(1),
+          grossKopecks: n(16000),
+          refundedKopecks: n(16000),
+          paidPayments30d: n(1),
+          grossKopecks30d: n(16000),
+          refundedKopecks30d: n(16000),
+          source: "WB",
+          sourceOrders: n(587),
+          sourceRobux: n(450000),
+        },
+        {
+          completedOrders: n(533),
+          orders30d: n(403),
+          completedRobux: n(488821),
+          paidPayments: n(1),
+          grossKopecks: n(16000),
+          refundedKopecks: n(16000),
+          paidPayments30d: n(1),
+          grossKopecks30d: n(16000),
+          refundedKopecks30d: n(16000),
+          source: "SITE",
+          sourceOrders: n(4),
+          sourceRobux: n(3200),
+        },
       ]);
-    db.wbCode.groupBy.mockResolvedValue([
-      { status: "AVAILABLE", _count: { _all: 740 } },
-      { status: "RESERVED", _count: { _all: 30 } },
-    ]);
+    db.wbOrder.findMany.mockResolvedValue([]);
     db.serviceHeartbeat.findMany.mockResolvedValue([{
       serviceKey: "tg-payment-outbox",
       status: "HEALTHY",
