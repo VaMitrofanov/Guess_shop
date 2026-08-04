@@ -23,6 +23,11 @@ describe("мобильный контракт Control Center", () => {
     expect(sidebar).toContain('aria-label="Основная навигация"');
   });
 
+  it("не показывает mobile-only KPI повторно на desktop", () => {
+    expect(css).toMatch(/\.mobileOnly,\s*\n\.mobileList\s*\{\s*display:\s*none\s*!important;/);
+    expect(css).toMatch(/\.mobileOnly, \.mobileList\s*\{\s*display:\s*grid\s*!important;/);
+  });
+
   it("учитывает обе safe-area и динамическую высоту iOS", () => {
     expect(css).toContain("env(safe-area-inset-top)");
     expect(css).toContain("env(safe-area-inset-bottom)");

@@ -31,9 +31,9 @@
 
 .mobileTopbar,
 .mobileBottomNav,
-.mobileMoreBackdrop,
+.mobileMoreBackdrop { display: none; }
 .mobileOnly,
-.mobileList { display: none; }
+.mobileList { display: none !important; }
 
 .sidebar {
   position: sticky;
@@ -678,7 +678,7 @@
   .sidebar { display: none; }
   .main { overflow: visible; }
   .desktopOnly { display: none !important; }
-  .mobileOnly, .mobileList { display: grid; }
+  .mobileOnly, .mobileList { display: grid !important; }
   .mobileMetricsDetails > summary { display: flex; }
 
   .mobileTopbar {

@@ -270,5 +270,10 @@ fallback-поверхностью согласно принятому плану
 - временный mock route после проверки удалён и в релиз не входит;
 - destructive actions во время QA не выполнялись.
 
+Production QA первого rollout поймал desktop-регрессию: `.metricGrid` перебивал
+`.mobileOnly` с одинаковой специфичностью, и четыре mobile KPI повторно появлялись под
+desktop-сеткой. Контракт исправлен явными `display: none/grid !important` строго на
+mobile boundary и закреплён шестым Jest-тестом до финальной приёмки.
+
 После production rollout сюда добавляются commit/deploy fingerprint, авторизованный smoke
 и ссылка на Trello-карточку.
