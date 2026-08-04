@@ -226,5 +226,7 @@ describe("admin ecosystem", () => {
     }));
     expect(dashboard.sourceBreakdown[0]).toEqual({ source: "WB", orders: 587, robux: 450000 });
     expect(dashboard.heartbeats[0]).toEqual(expect.objectContaining({ service: "tg-payment-outbox", status: "HEALTHY" }));
+    expect(dashboard.heartbeats[0].lastSeenAt).toEqual(expect.any(String));
+    expect(() => JSON.stringify(dashboard)).not.toThrow();
   });
 });

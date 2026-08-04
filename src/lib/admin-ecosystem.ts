@@ -239,6 +239,45 @@ type FinanceSnapshotRow = {
   sourceRobux: bigint | null;
 };
 
+type OperationalSnapshot = { [Key in keyof OperationalSnapshotRow]: number };
+type FinanceSnapshot = {
+  completedOrders: number;
+  orders30d: number;
+  completedRobux: number;
+  paidPayments: number;
+  grossKopecks: number;
+  refundedKopecks: number;
+  paidPayments30d: number;
+  grossKopecks30d: number;
+  refundedKopecks30d: number;
+  source: string | null;
+  sourceOrders: number;
+  sourceRobux: number;
+};
+
+function serializeOperationalSnapshot(row: OperationalSnapshotRow): OperationalSnapshot {
+  return Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [key, Number(value)]),
+  ) as OperationalSnapshot;
+}
+
+function serializeFinanceSnapshot(row: FinanceSnapshotRow): FinanceSnapshot {
+  return {
+    completedOrders: Number(row.completedOrders),
+    orders30d: Number(row.orders30d),
+    completedRobux: Number(row.completedRobux),
+    paidPayments: Number(row.paidPayments),
+    grossKopecks: Number(row.grossKopecks),
+    refundedKopecks: Number(row.refundedKopecks),
+    paidPayments30d: Number(row.paidPayments30d),
+    grossKopecks30d: Number(row.grossKopecks30d),
+    refundedKopecks30d: Number(row.refundedKopecks30d),
+    source: row.source,
+    sourceOrders: Number(row.sourceOrders ?? 0),
+    sourceRobux: Number(row.sourceRobux ?? 0),
+  };
+}
+
 async function queryDashboardOperational() {
   const now = new Date();
   const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -310,12 +349,12 @@ async function queryDashboardOperational() {
     CROSS JOIN refund_stats rs
     CROSS JOIN code_stats cs
   `);
-  return rows[0];
+  return rows[0] ? serializeOperationalSnapshot(rows[0]) : null;
 }
 
 async function queryDashboardFinance() {
   const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  return prisma.$queryRaw<FinanceSnapshotRow[]>(Prisma.sql`
+  const rows = await prisma.$queryRaw<FinanceSnapshotRow[]>(Prisma.sql`
     WITH order_stats AS (
       SELECT
         COUNT(*) FILTER (WHERE "status"::text = 'COMPLETED') AS "completedOrders",
@@ -353,6 +392,7 @@ async function queryDashboardFinance() {
     CROSS JOIN payment_stats ps
     LEFT JOIN source_rows sr ON true
   `);
+  return rows.map(serializeFinanceSnapshot);
 }
 
 const loadDashboardOperational = adminCache(
@@ -368,22 +408,33 @@ const loadDashboardFinance = adminCache(
 );
 
 const loadDashboardRecent = adminCache(
-  () => prisma.wbOrder.findMany({
-    where: { isTest: false },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: 8,
-    include: orderListInclude,
-  }),
+  async () => {
+    const rows = await prisma.wbOrder.findMany({
+      where: { isTest: false },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 8,
+      include: orderListInclude,
+    });
+    return rows.map(serializeOrder);
+  },
   ["admin-dashboard-recent-v2"],
   { tags: ["admin-operational"], revalidate: 10 },
 );
 
 const loadDashboardHeartbeats = adminCache(
-  () => prisma.serviceHeartbeat.findMany({
-    orderBy: { lastSeenAt: "desc" },
-    take: 6,
-    select: { serviceKey: true, status: true, lastSeenAt: true, lastAlertAt: true },
-  }),
+  async () => {
+    const rows = await prisma.serviceHeartbeat.findMany({
+      orderBy: { lastSeenAt: "desc" },
+      take: 6,
+      select: { serviceKey: true, status: true, lastSeenAt: true, lastAlertAt: true },
+    });
+    return rows.map((row) => ({
+      serviceKey: row.serviceKey,
+      status: row.status,
+      lastSeenAt: row.lastSeenAt.toISOString(),
+      lastAlertAt: iso(row.lastAlertAt),
+    }));
+  },
   ["admin-dashboard-heartbeats-v2"],
   { tags: ["admin-operational"], revalidate: 10 },
 );
@@ -402,61 +453,61 @@ export async function getAdminDashboardData() {
   }
 
   const finance = financeRows[0];
-  const totalOrders = Number(operational.totalOrders);
-  const paidPayments = Number(finance.paidPayments);
-  const grossKopecks = Number(finance.grossKopecks);
-  const refundedKopecks = Number(finance.refundedKopecks);
-  const grossKopecks30d = Number(finance.grossKopecks30d);
-  const refundedKopecks30d = Number(finance.refundedKopecks30d);
+  const totalOrders = operational.totalOrders;
+  const paidPayments = finance.paidPayments;
+  const grossKopecks = finance.grossKopecks;
+  const refundedKopecks = finance.refundedKopecks;
+  const grossKopecks30d = finance.grossKopecks30d;
+  const refundedKopecks30d = finance.refundedKopecks30d;
 
   const result = {
     metrics: {
       totalOrders,
-      activeOrders: Number(operational.activeOrders),
-      buyoutOrders: Number(operational.buyoutOrders),
-      created24h: Number(operational.created24h),
-      completed24h: Number(operational.completed24h),
-      completedOrders: Number(finance.completedOrders),
-      orders30d: Number(finance.orders30d),
-      users: Number(operational.users),
-      users30d: Number(operational.users30d),
-      uniqueBuyers: Number(operational.uniqueBuyers),
-      repeatBuyers: Number(operational.repeatBuyers),
+      activeOrders: operational.activeOrders,
+      buyoutOrders: operational.buyoutOrders,
+      created24h: operational.created24h,
+      completed24h: operational.completed24h,
+      completedOrders: finance.completedOrders,
+      orders30d: finance.orders30d,
+      users: operational.users,
+      users30d: operational.users30d,
+      uniqueBuyers: operational.uniqueBuyers,
+      repeatBuyers: operational.repeatBuyers,
       paidPayments,
       averagePaidKopecks: paidPayments > 0 ? Math.round(grossKopecks / paidPayments) : 0,
       grossKopecks,
       refundedKopecks,
       netKopecks: grossKopecks - refundedKopecks,
-      paidPayments30d: Number(finance.paidPayments30d),
+      paidPayments30d: finance.paidPayments30d,
       grossKopecks30d,
       refundedKopecks30d,
       netKopecks30d: grossKopecks30d - refundedKopecks30d,
-      completedRobux: Number(finance.completedRobux),
-      attention: Number(operational.errorOrders + operational.deadOutbox + operational.unknownRefunds),
-      errorOrders: Number(operational.errorOrders),
-      openPayments: Number(operational.openPayments),
-      deadOutbox: Number(operational.deadOutbox),
-      pendingOutbox: Number(operational.pendingOutbox),
-      unknownRefunds: Number(operational.unknownRefunds),
-      availableCodes: Number(operational.availableCodes),
-      reservedCodes: Number(operational.reservedCodes),
+      completedRobux: finance.completedRobux,
+      attention: operational.errorOrders + operational.deadOutbox + operational.unknownRefunds,
+      errorOrders: operational.errorOrders,
+      openPayments: operational.openPayments,
+      deadOutbox: operational.deadOutbox,
+      pendingOutbox: operational.pendingOutbox,
+      unknownRefunds: operational.unknownRefunds,
+      availableCodes: operational.availableCodes,
+      reservedCodes: operational.reservedCodes,
     },
     sourceBreakdown: financeRows
       .filter((row) => row.source !== null)
       .map((row) => ({
         source: row.source as string,
-        orders: Number(row.sourceOrders ?? 0),
-        robux: Number(row.sourceRobux ?? 0),
+        orders: row.sourceOrders,
+        robux: row.sourceRobux,
       }))
       .sort((a, b) => b.orders - a.orders),
     heartbeats: heartbeatRows.map((row) => ({
       service: row.serviceKey,
       status: row.status,
-      lastSeenAt: row.lastSeenAt.toISOString(),
-      lastAlertAt: iso(row.lastAlertAt),
-      ageSeconds: Math.max(0, Math.floor((now.getTime() - row.lastSeenAt.getTime()) / 1000)),
+      lastSeenAt: row.lastSeenAt,
+      lastAlertAt: row.lastAlertAt,
+      ageSeconds: Math.max(0, Math.floor((now.getTime() - Date.parse(row.lastSeenAt)) / 1000)),
     })),
-    recentOrders: recentRows.map(serializeOrder),
+    recentOrders: recentRows,
   };
   logAdminTiming("dashboard", startedAt, { coldQueryBudget: 4 });
   return result;

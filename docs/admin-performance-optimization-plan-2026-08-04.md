@@ -31,6 +31,12 @@ Buyout и Economics завершилась примерно за `1.15 s`; dashb
 переход всего приложения на Cache Components и last-known donor snapshot. Эти задачи не
 нужны для удаления initial waterfall и затрагивают более рискованный денежный контур.
 
+Production-canary обнаружил и закрыл cache-boundary регрессию до завершения приёмки:
+`unstable_cache` не сериализует Prisma `bigint`, а при cache hit восстанавливает `Date` как
+строку. Dashboard loaders теперь преобразуют aggregates в `number`, а даты/recent orders —
+в JSON-safe DTO **до** помещения в Next Data Cache. Регресс-тест проверяет строковые даты и
+полную JSON-сериализуемость dashboard result.
+
 Этот документ отвечает на три вопроса:
 
 1. почему desktop `/admin` местами открывается 4–9 секунд;
