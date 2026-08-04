@@ -264,7 +264,7 @@ fallback-поверхностью согласно принятому плану
 
 - `npm run build` — успешно на Next.js `16.2.2`;
 - `npm run lint` — успешно; baseline legacy warnings уменьшен `1122 → 1109`;
-- `src/__tests__/admin-mobile-contract.test.ts` — `5/5`;
+- `src/__tests__/admin-mobile-contract.test.ts` — `6/6`;
 - browser QA с теми же production-компонентами/CSS и mock-данными: `430 × 932`,
   `390 × 844`, `1728 × 1117`; dashboard, card rows и sheet «Ещё» визуально приняты;
 - временный mock route после проверки удалён и в релиз не входит;
@@ -277,5 +277,20 @@ mobile boundary и закреплён шестым Jest-тестом до фин
 оставлен в исходном контракте `4 × 2`: mobile-only KPI «К выкупу» не создаёт девятую
 карточку и одинокий третий ряд на MacBook.
 
-После production rollout сюда добавляются commit/deploy fingerprint, авторизованный smoke
-и ссылка на Trello-карточку.
+Production rollout:
+
+- feature commit `1d75fe0`, desktop visibility hotfix `e9f7e61`, финальное сохранение
+  исходной desktop-сетки `4 × 2` — commit `3eeccc6`;
+- Coolify deployment `wjhps6rgvqm3u6imeyviuo2c` завершён со статусом `finished` для
+  `3eeccc684048c085dcad6729171ba8d0884d5cee`;
+- Web после rollout — `running:healthy`, очередь deployments пуста;
+- авторизованный production smoke `430 × 932`: Dashboard, Orders, Buyout, Economics,
+  Activity, Users, Reviews, FAQ, Anton и dossier заказа — H1, mobile navigation и данные
+  доступны, server/client error не обнаружены;
+- `390 × 844`: Orders показывает card rows и fixed bottom navigation без скрытых рабочих
+  действий; `1728 × 1117`: mobile navigation отсутствует, ровно восемь KPI в `4 × 2`,
+  таблицы и sidebar сохранены;
+- create-dialog Review и sheet «Ещё» проверены без записи; destructive operations,
+  покупка, mark-done и delete в production QA не вызывались;
+- public production smoke — `15/15`;
+- Trello: [SHIPPED-карточка веб-админки](https://trello.com/c/nY84HYaJ/70-shipped-%D0%B2%D0%B5%D0%B1-%D0%B0%D0%B4%D0%BC%D0%B8%D0%BD%D0%BA%D0%B0-mobile-first-control-center-%D0%B2-production).
