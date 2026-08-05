@@ -169,7 +169,12 @@ robloxUsername, userId+createdAt).
 
 ### `GlobalSettings` (id=`global`)
 Настройки выкупа: `robloxCookie` (`.ROBLOSECURITY` донора), `robloxCookieUpdatedAt`,
-`robloxAccountName` (ник донора), `purchaseRate` ($ за 1000 R$), `usdToRub`.
+`robloxAccountName` (ник донора), `purchaseRate` ($ за 1000 грязных R$), `usdToRub`.
+`gamepassTargetMarginPct` — nullable целевая чистая маржа калькулятора Game Pass в процентах
+от платежа покупателя (migration `20260806_gamepass_margin_calculator`). Legacy `NULL` не
+означает нулевую маржу: `/admin/economics` выводит её из текущего прайса 1000 R$ до первого
+явного сохранения. Поле управляет рекомендацией калькулятора и само по себе не меняет
+опубликованную `PricingPolicy`/`PriceQuote`.
 Аккаунт-приёмник слива («мой акк»): `drainCookie`, `drainCookieUpdatedAt`, `drainAccountName`,
 `drainGamepassId` (геймпасс, чью цену меняем). `drainProductId` (`Int`) — **legacy, больше не
 пишется**: у современных геймпассов ProductId > INT32 (2.1 млрд) → запись падала с

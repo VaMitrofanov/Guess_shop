@@ -168,6 +168,13 @@ describe("эквайринг и налог", () => {
     expect(t.profitKop).toBe(t.grossProfitKop - t.acquiringKop - t.usnKop);
   });
 
+  it("what-if итог по прайсу тоже вычитает комиссии и налог", () => {
+    const rows = [computeOrder(order({ robuxDelivered: 200 }), FEES, PRICES)];
+    const t = computeTotals(rows);
+    expect(t.modelProfitKop).toBe(rows[0].modelProfitKop);
+    expect(t.modelProfitKop).toBeLessThan(t.modelRevenueKop - t.costKop);
+  });
+
   it("нулевые ставки комиссий оставляют формулу прежней", () => {
     const withFees = computeOrder(order(), RATES, PRICES);
     expect(withFees.acquiringKop).toBe(0);

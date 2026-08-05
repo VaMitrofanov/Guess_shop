@@ -458,6 +458,31 @@
 }
 .rateInput:focus { border-color: rgba(157,132,255,.45); box-shadow: 0 0 0 3px rgba(139,114,255,.09); }
 
+.calculatorResultGrid {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px;
+  padding: 0 18px 14px;
+}
+.calculatorResultGrid > div {
+  min-width: 0; padding: 13px; border: 1px solid rgba(255,255,255,.07);
+  border-radius: 13px; background: rgba(255,255,255,.03);
+}
+.calculatorResultGrid span,
+.calculatorResultGrid small { display: block; color: var(--admin-muted); font-size: 11.5px; }
+.calculatorResultGrid strong {
+  display: block; margin: 5px 0 3px; overflow-wrap: anywhere;
+  color: var(--admin-text); font-size: 19px; font-variant-numeric: tabular-nums;
+}
+.calculatorResultGrid strong.good { color: #63dda0; }
+.calculatorResultGrid strong.bad { color: #ff7780; }
+.calculatorBreakdown {
+  display: grid; gap: 8px; margin: 0 18px 12px; padding: 13px 15px;
+  border-radius: 12px; background: rgba(255,255,255,.035);
+}
+.calculatorBreakdown > div { display: flex; justify-content: space-between; gap: 14px; font-size: 13px; }
+.calculatorBreakdown span { color: var(--admin-muted); }
+.calculatorBreakdown b { text-align: right; font-variant-numeric: tabular-nums; }
+.calculatorNote { margin: 0; padding: 0 18px 18px; color: #85858d; font-size: 12px; line-height: 1.55; }
+
 .formulaBox {
   margin: 0 18px 18px; padding: 13px 16px; border-radius: 12px;
   color: var(--admin-muted); background: rgba(255,255,255,.035);
@@ -878,6 +903,9 @@
   .numeric { text-align: right; }
   .priceInput { width: 104px; }
   .rateGrid { padding: 14px; }
+  .calculatorResultGrid { grid-template-columns: minmax(0,1fr); padding: 0 14px 14px; }
+  .calculatorBreakdown { margin: 0 14px 12px; }
+  .calculatorNote { padding: 0 14px 16px; }
   .formulaBox { margin: 0 14px 14px; }
   .hero { padding: 17px; }
   .hero strong { font-size: 31px; }

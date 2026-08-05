@@ -629,6 +629,10 @@ model GlobalSettings {
   usdToRub              Float
   /// Manual purchase rate in USD per 1000 R$ — set by admin via bot/TWA.
   purchaseRate          Float?
+  /// Target net-profit margin for the admin Game Pass price calculator.
+  /// NULL on legacy rows: the loader derives the current 1000 R$ pack margin
+  /// until an admin explicitly saves the calculator settings.
+  gamepassTargetMarginPct Float?
   lastUpdated           DateTime  @updatedAt
   autoBuyEnabled        Boolean   @default(false)
   autoBuyRate           Float     @default(4.0)

@@ -6,7 +6,8 @@ import styles from "./admin-shell.module.css";
 import { cn } from "@/lib/utils";
 import { ADMIN_TIME_ZONE } from "@/lib/admin-time";
 import {
-  DEFAULT_FEE_RATES, computeOrder, computeTotals, costKopFor, grossFor, ratesValid,
+  DEFAULT_FEE_RATES, computeOrder, computeTotals, costKopFor, grossFor,
+  priceForTargetMargin, quoteGamepassPayment, ratesValid,
   type DirectEconomics, type EconomicsRates, type DirectEconomicsSource, type UsnMode,
 } from "@/lib/economics-model";
 
@@ -36,6 +37,8 @@ const rub = (n: number) => Math.round(n).toLocaleString("ru-RU") + " ₽";
 const rubKop = (kop: number) => rub(kop / 100);
 const rubKop2 = (kop: number) =>
   (kop / 100).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ₽";
+const pct = (value: number) =>
+  value.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
 const rbx = (n: number) => n.toLocaleString("ru-RU") + " R$";
 const shortDate = (iso: string) =>
   new Intl.DateTimeFormat("ru-RU", { timeZone: ADMIN_TIME_ZONE, day: "2-digit", month: "2-digit", year: "2-digit" }).format(new Date(iso));
@@ -51,9 +54,15 @@ function Row({ k, v, note }: { k: string; v: string; note?: string }) {
 
 export default function AdminEconomicsClient({ initialData }: { initialData: DirectEconomics }) {
   const [data] = useState(initialData);
+  const [savedConfig, setSavedConfig] = useState({
+    usdToRub: initialData.defaults.usdToRub,
+    rateUsdPer1k: initialData.defaults.purchaseRateUsdPer1k ?? 4.3,
+    targetMarginPct: initialData.defaults.targetMarginPct,
+  });
 
   const [usdStr, setUsdStr] = useState(String(initialData.defaults.usdToRub));
   const [rateStr, setRateStr] = useState(String(initialData.defaults.purchaseRateUsdPer1k ?? 4.3));
+  const [targetMarginStr, setTargetMarginStr] = useState(String(initialData.defaults.targetMarginPct));
   const [taxStr, setTaxStr] = useState(String(initialData.defaults.robloxTaxPct));
   const [acqStr, setAcqStr] = useState(String(DEFAULT_FEE_RATES.acquiringPct));
   const [recStr, setRecStr] = useState(String(DEFAULT_FEE_RATES.receiptPct));
@@ -62,6 +71,8 @@ export default function AdminEconomicsClient({ initialData }: { initialData: Dir
   const [prices, setPrices] = useState<Record<number, number>>(() =>
     Object.fromEntries(Object.entries(initialData.prices).map(([key, value]) => [Number(key), value])),
   );
+  const [calcRobuxStr, setCalcRobuxStr] = useState("1000");
+  const [calcPaymentStr, setCalcPaymentStr] = useState(String(initialData.prices["1000"] ?? 0));
 
   const [period, setPeriod] = useState(0);
   const [periodFrom, setPeriodFrom] = useState(0);
@@ -117,12 +128,25 @@ export default function AdminEconomicsClient({ initialData }: { initialData: Dir
   const rates: EconomicsRates = useMemo(
     () => ({
       usdToRub: Number(usdStr), rateUsdPer1k: Number(rateStr), taxPct: Number(taxStr),
-      acquiringPct: Number(acqStr), receiptPct: Number(recStr),
+      acquiringPct: Number(acqStr), acquiringMinKopecks: DEFAULT_FEE_RATES.acquiringMinKopecks,
+      receiptPct: Number(recStr),
       usnPct: Number(usnStr), usnMode,
     }),
     [usdStr, rateStr, taxStr, acqStr, recStr, usnStr, usnMode],
   );
   const valid = ratesValid(rates);
+  const targetMarginPct = Number(targetMarginStr);
+  const targetValid = Number.isFinite(targetMarginPct) && targetMarginPct >= 0 && targetMarginPct <= 90;
+  const calcNetRobux = Math.round(Number(calcRobuxStr));
+  const calcPaymentKopecks = Math.round(Number(calcPaymentStr) * 100);
+  const currentQuote = useMemo(
+    () => quoteGamepassPayment(calcNetRobux, calcPaymentKopecks, rates),
+    [calcNetRobux, calcPaymentKopecks, rates],
+  );
+  const recommendedQuote = useMemo(
+    () => targetValid ? priceForTargetMargin(calcNetRobux, targetMarginPct, rates) : null,
+    [calcNetRobux, targetMarginPct, rates, targetValid],
+  );
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -131,8 +155,9 @@ export default function AdminEconomicsClient({ initialData }: { initialData: Dir
 
   const reset = () => {
     if (!data) return;
-    setUsd(String(data.defaults.usdToRub));
-    setRate(String(data.defaults.purchaseRateUsdPer1k ?? 4.3));
+    setUsd(String(savedConfig.usdToRub));
+    setRate(String(savedConfig.rateUsdPer1k));
+    setTargetMarginStr(String(savedConfig.targetMarginPct));
     setTax(String(data.defaults.robloxTaxPct));
     resetFees();
     const base: Record<number, number> = {};
@@ -143,16 +168,29 @@ export default function AdminEconomicsClient({ initialData }: { initialData: Dir
   };
 
   const saveRates = async () => {
-    if (!valid || saving) return;
+    if (!valid || !targetValid || saving) return;
     setSaving(true);
     try {
       const res = await fetch("/api/admin/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ usdToRub: rates.usdToRub, purchaseRate: rates.rateUsdPer1k }),
+        body: JSON.stringify({
+          usdToRub: rates.usdToRub,
+          purchaseRate: rates.rateUsdPer1k,
+          gamepassTargetMarginPct: targetMarginPct,
+        }),
       });
       const body = await res.json().catch(() => ({}));
-      showToast(res.ok ? "Курс сохранён — новые выкупы считаются по нему" : (body.error ?? "Не удалось сохранить"));
+      if (res.ok) {
+        setSavedConfig({
+          usdToRub: Number(body.usdToRub ?? rates.usdToRub),
+          rateUsdPer1k: Number(body.purchaseRate ?? rates.rateUsdPer1k),
+          targetMarginPct: Number(body.gamepassTargetMarginPct ?? targetMarginPct),
+        });
+      }
+      showToast(res.ok
+        ? "Курсы и целевая маржа сохранены"
+        : (body.error ?? "Не удалось сохранить"));
     } catch {
       showToast("Сеть недоступна");
     } finally {
@@ -185,8 +223,9 @@ export default function AdminEconomicsClient({ initialData }: { initialData: Dir
   // Кнопка записи активна только когда значение реально отличается от базы:
   // случайный клик не должен возвращать в прод то, что уже там стоит.
   const rateChanged =
-    rates.usdToRub !== data.defaults.usdToRub ||
-    rates.rateUsdPer1k !== (data.defaults.purchaseRateUsdPer1k ?? 4.3);
+    rates.usdToRub !== savedConfig.usdToRub ||
+    rates.rateUsdPer1k !== savedConfig.rateUsdPer1k ||
+    targetMarginPct !== savedConfig.targetMarginPct;
   const snapshotDrift = totals.snapshotCount > 0 && Math.abs(totals.snapshotCostKop - totals.knownCostKop) >= 100;
   const noRevenue = totals.orders - totals.withRevenue;
 
@@ -371,6 +410,79 @@ export default function AdminEconomicsClient({ initialData }: { initialData: Dir
         <div className={styles.stack}>
           <section className={styles.panel}>
             <div className={styles.panelHeader}>
+              <strong>Калькулятор Game Pass</strong><span>цена при фиксированной марже</span>
+            </div>
+            <div className={styles.rateGrid}>
+              <div className={styles.rateField}>
+                <label htmlFor="gamepass-net">Клиент получает</label>
+                <input
+                  id="gamepass-net" className={styles.rateInput} type="number" min={1} step={1}
+                  value={calcRobuxStr} onChange={(event) => setCalcRobuxStr(event.target.value)}
+                />
+                <small>чистых R$ после Roblox</small>
+              </div>
+              <div className={styles.rateField}>
+                <label htmlFor="gamepass-current-price">Текущая цена</label>
+                <input
+                  id="gamepass-current-price" className={styles.rateInput} type="number" min={1} step={1}
+                  value={calcPaymentStr} onChange={(event) => setCalcPaymentStr(event.target.value)}
+                />
+                <small>₽ отправляет покупатель</small>
+              </div>
+              <div className={styles.rateField}>
+                <label htmlFor="gamepass-margin">Целевая маржа</label>
+                <input
+                  id="gamepass-margin" className={styles.rateInput} type="number" min={0} max={90} step={0.1}
+                  value={targetMarginStr} onChange={(event) => setTargetMarginStr(event.target.value)}
+                />
+                <small>% от денег покупателя</small>
+              </div>
+            </div>
+
+            {currentQuote && recommendedQuote ? (
+              <>
+                <div className={styles.calculatorResultGrid}>
+                  <div>
+                    <span>Прибыль сейчас</span>
+                    <strong className={currentQuote.profitKopecks >= 0 ? styles.good : styles.bad}>
+                      {rubKop2(currentQuote.profitKopecks)}
+                    </strong>
+                    <small>{pct(currentQuote.marginPct)} от платежа</small>
+                  </div>
+                  <div>
+                    <span>Новая цена покупателю</span>
+                    <strong>{rubKop2(recommendedQuote.buyerPaymentKopecks)}</strong>
+                    <small>не ниже {pct(targetMarginPct)} маржи</small>
+                  </div>
+                  <div>
+                    <span>Цена Game Pass</span>
+                    <strong>{rbx(recommendedQuote.grossRobux)}</strong>
+                    <small>Roblox удержит {rbx(recommendedQuote.robloxCommissionRobux)}</small>
+                  </div>
+                </div>
+                <div className={styles.calculatorBreakdown}>
+                  <Row k="Платёж покупателя" v={rubKop2(recommendedQuote.buyerPaymentKopecks)} />
+                  <Row k={`Себестоимость (${recommendedQuote.grossRobux} R$ грязными)`} v={`−${rubKop2(recommendedQuote.purchaseCostKopecks)}`} />
+                  <Row k={`Эквайринг max(3,49 ₽; ${rates.acquiringPct}%) + «Чеки» ${rates.receiptPct}%`} v={`−${rubKop2(recommendedQuote.acquiringKopecks)}`} />
+                  <Row k={`Налог УСН (${rates.usnPct}%)`} v={`−${rubKop2(recommendedQuote.usnKopecks)}`} />
+                  <Row k="Чистая прибыль" v={`${rubKop2(recommendedQuote.profitKopecks)} · ${pct(recommendedQuote.marginPct)}`} />
+                </div>
+                <p className={styles.calculatorNote}>
+                  При смене ₽/$ или $/1000 R$ новая цена пересчитывается автоматически,
+                  а целевая маржа остаётся прежней. Рекомендация не публикует прайс в бот и на сайт автоматически.
+                </p>
+              </>
+            ) : (
+              <div className={styles.formulaBox}>
+                <span className={styles.bad}>
+                  Проверьте сумму, курсы и целевую маржу: с этими значениями цену рассчитать нельзя.
+                </span>
+              </div>
+            )}
+          </section>
+
+          <section className={styles.panel}>
+            <div className={styles.panelHeader}>
               <strong>Формула</strong>
               <button type="button" className={styles.ghostButton} onClick={reset}>
                 <RotateCcw /> Сброс
@@ -435,7 +547,7 @@ export default function AdminEconomicsClient({ initialData }: { initialData: Dir
                 <>
                   <div>грязные R$ = выдано ÷ {(1 - rates.taxPct / 100).toFixed(2)}</div>
                   <div>себестоимость = грязные ÷ 1000 × {rates.rateUsdPer1k} $ × {rates.usdToRub} ₽</div>
-                  <div>эквайринг = платёж × {(rates.acquiringPct + rates.receiptPct).toFixed(1)}% <span style={{ opacity: .7 }}>({rates.acquiringPct}% + {rates.receiptPct}% «Чеки»)</span></div>
+                  <div>эквайринг = max(3,49 ₽; платёж × {rates.acquiringPct}%) + «Чеки» {rates.receiptPct}%</div>
                   <div>
                     налог = {rates.usnMode === "income"
                       ? <>выручка × {rates.usnPct}%</>
@@ -452,16 +564,16 @@ export default function AdminEconomicsClient({ initialData }: { initialData: Dir
 
             <div style={{ padding: "0 18px 18px" }}>
               <p style={{ margin: "0 0 10px", color: "var(--admin-muted)", fontSize: 12.5, lineHeight: 1.5 }}>
-                В Настройках сейчас: {data.defaults.usdToRub} ₽/$
-                {data.defaults.purchaseRateUsdPer1k !== null && <> и {data.defaults.purchaseRateUsdPer1k} $/1k</>} —
-                этим считаются снапшоты новых выкупов.
+                В Настройках сейчас: {savedConfig.usdToRub} ₽/$, {savedConfig.rateUsdPer1k} $/1k
+                и маржа {pct(savedConfig.targetMarginPct)}. Курсы используются в снапшотах новых выкупов,
+                маржа — в калькуляторе цены.
               </p>
               {rateChanged ? (
                 <button
                   type="button" className={styles.primaryButton} style={{ width: "100%" }}
-                  onClick={saveRates} disabled={!valid || saving}
+                  onClick={saveRates} disabled={!valid || !targetValid || saving}
                 >
-                  {saving ? "Сохраняю…" : `Записать ${rates.usdToRub} ₽/$ в Настройки`}
+                  {saving ? "Сохраняю…" : "Сохранить курсы и маржу"}
                 </button>
               ) : (
                 <button type="button" className={styles.ghostButton} style={{ width: "100%" }} disabled>
@@ -473,7 +585,7 @@ export default function AdminEconomicsClient({ initialData }: { initialData: Dir
 
           <section className={styles.panel}>
             <div className={styles.panelHeader}>
-              <strong>Наши цены</strong><span>маржа по пакам</span>
+              <strong>Наши цены</strong><span>после комиссий и налогов</span>
             </div>
             <div className={cn(styles.tableWrap, styles.responsiveTableWrap)}>
               <table className={cn(styles.table, styles.compactTable, styles.responsiveTable)}>
@@ -481,15 +593,17 @@ export default function AdminEconomicsClient({ initialData }: { initialData: Dir
                   <tr>
                     <th>Пак</th>
                     <th style={{ textAlign: "right" }}>Цена ₽</th>
-                    <th style={{ textAlign: "right" }}>Прибыль</th>
                     <th style={{ textAlign: "right" }}>Маржа</th>
+                    <th style={{ textAlign: "right" }}>Новая ₽</th>
                   </tr>
                 </thead>
                 <tbody>
                   {valid && packs.map((pack) => {
-                    const cost = costKopFor(grossFor(pack, rates), rates);
                     const price = (prices[pack] ?? 0) * 100;
-                    const profit = price - cost;
+                    const current = quoteGamepassPayment(pack, price, rates);
+                    const recommended = targetValid
+                      ? priceForTargetMargin(pack, targetMarginPct, rates)
+                      : null;
                     return (
                       <tr key={pack}>
                         <td data-label="Пак" className={styles.tablePrimary}>{pack.toLocaleString("ru-RU")}</td>
@@ -500,9 +614,11 @@ export default function AdminEconomicsClient({ initialData }: { initialData: Dir
                             onChange={(e) => setPrice(pack, e.target.value)}
                           />
                         </td>
-                        <td data-label="Прибыль" className={cn(styles.numeric, profit >= 0 ? styles.good : styles.bad)}>{rubKop(profit)}</td>
                         <td data-label="Маржа" className={cn(styles.numeric, styles.dim)}>
-                          {price > 0 ? `${Math.round((profit / price) * 100)}%` : "—"}
+                          {current ? pct(current.marginPct) : "—"}
+                        </td>
+                        <td data-label="Новая ₽" className={cn(styles.numeric, styles.good)}>
+                          {recommended ? rubKop(recommended.buyerPaymentKopecks) : "—"}
                         </td>
                       </tr>
                     );

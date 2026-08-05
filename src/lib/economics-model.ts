@@ -1,4 +1,26 @@
 import { directPrice } from "@/lib/retail-pricing";
+export {
+  DEFAULT_FEE_RATES,
+  acquiringKopFor,
+  costKopFor,
+  grossFor,
+  priceForTargetMargin,
+  quoteGamepassPayment,
+  ratesValid,
+  usnKopFor,
+} from "@/lib/gamepass-pricing";
+export type {
+  GamepassPriceQuote,
+  GamepassPricingRates as EconomicsRates,
+  UsnMode,
+} from "@/lib/gamepass-pricing";
+import {
+  acquiringKopFor,
+  costKopFor,
+  grossFor,
+  usnKopFor,
+  type GamepassPricingRates as EconomicsRates,
+} from "@/lib/gamepass-pricing";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Модель экономики не-WB заказов: типы и чистые функции расчёта.
@@ -42,60 +64,17 @@ export interface EconomicsOrder {
 
 export interface DirectEconomics {
   orders: EconomicsOrder[];
-  defaults: { usdToRub: number; purchaseRateUsdPer1k: number | null; robloxTaxPct: number };
+  defaults: {
+    usdToRub: number;
+    purchaseRateUsdPer1k: number | null;
+    robloxTaxPct: number;
+    targetMarginPct: number;
+  };
   prices: Record<string, number>;
   truncated: boolean;
 }
 
 /* ── Модель: чистые функции, общие для TWA и веб-админки ──────────────────── */
-
-/** Режим УСН: от базы зависит, с чего берётся налог. */
-export type UsnMode = "income" | "income-minus-expenses";
-
-/**
- * Стартовые ставки платёжного контура.
- *
- * Владелец 30.07 зафиксировал консервативную ставку обычной оплаты 3.49% и
- * УСН «Доходы» 6%. Отдельные 1.5% «Чеков» не включаются без подтверждения,
- * что платный сервис действительно активен в кабинете Т-Банка.
- */
-export const DEFAULT_FEE_RATES = {
-  acquiringPct: 3.49,
-  receiptPct: 0,
-  usnPct: 6,
-  usnMode: "income" as UsnMode,
-};
-
-export interface EconomicsRates {
-  /** ₽ за 1 $. */
-  usdToRub: number;
-  /** $ за 1000 грязных R$. */
-  rateUsdPer1k: number;
-  /** Комиссия Roblox за геймпасс, %. */
-  taxPct: number;
-  /** Комиссия интернет-эквайринга, % от платежа. */
-  acquiringPct: number;
-  /** Сервис «Чеки» Т-Банка, % от платежа с чеком (docs/payments-and-kkt.md). */
-  receiptPct: number;
-  /** Ставка УСН, %. */
-  usnPct: number;
-  /** «Доходы» — налог с выручки; «Доходы − расходы» — с прибыли до налога. */
-  usnMode: UsnMode;
-}
-
-export const ratesValid = (r: EconomicsRates): boolean =>
-  r.usdToRub > 0 && r.rateUsdPer1k > 0 && r.taxPct >= 0 && r.taxPct < 100 &&
-  r.acquiringPct >= 0 && r.acquiringPct < 100 &&
-  r.receiptPct >= 0 && r.receiptPct < 100 &&
-  r.usnPct >= 0 && r.usnPct < 100;
-
-/** Цена геймпасса: чтобы клиент получил `net`, купить надо больше на комиссию. */
-export const grossFor = (net: number, r: EconomicsRates): number =>
-  ratesValid(r) && net > 0 ? Math.ceil(net / (1 - r.taxPct / 100)) : 0;
-
-/** Во сколько ₽ (в копейках) обошлись `gross` грязных робуксов. */
-export const costKopFor = (gross: number, r: EconomicsRates): number =>
-  ratesValid(r) ? Math.round((gross / 1000) * r.rateUsdPer1k * r.usdToRub * 100) : 0;
 
 /**
  * Цена по прайсу, ₽ в копейках. Нестандартные объёмы — по той же лесенке, что
@@ -127,20 +106,6 @@ export interface ComputedOrder {
   profitKop: number | null;
   modelRevenueKop: number;
   modelProfitKop: number;
-}
-
-/** Комиссии платёжного контура с суммы платежа. */
-export const acquiringKopFor = (revenueKop: number, r: EconomicsRates): number =>
-  ratesValid(r) ? Math.round((revenueKop * (r.acquiringPct + r.receiptPct)) / 100) : 0;
-
-/**
- * Налог УСН. При «Доходы» база — вся выручка; при «Доходы − расходы» — то, что
- * осталось после робуксов и комиссий, и отрицательная база налога не создаёт.
- */
-export function usnKopFor(revenueKop: number, expensesKop: number, r: EconomicsRates): number {
-  if (!ratesValid(r)) return 0;
-  const base = r.usnMode === "income" ? revenueKop : Math.max(0, revenueKop - expensesKop);
-  return Math.round((base * r.usnPct) / 100);
 }
 
 export function computeOrder(
@@ -223,6 +188,7 @@ export function computeTotals(rows: ComputedOrder[]): EconomicsTotals {
     t.costKop += r.costKop;
     t.bonusCostKop += r.bonusCostKop;
     t.modelRevenueKop += r.modelRevenueKop;
+    t.modelProfitKop += r.modelProfitKop;
     if (r.order.revenueKopecks != null) {
       t.withRevenue += 1;
       t.revenueKop += r.order.revenueKopecks;
@@ -240,6 +206,5 @@ export function computeTotals(rows: ComputedOrder[]): EconomicsTotals {
   t.grossProfitKop = t.revenueKop - t.knownCostKop;
   t.profitKop = t.grossProfitKop - t.acquiringKop - t.usnKop;
   t.marginPct = t.revenueKop > 0 ? Math.round((t.profitKop / t.revenueKop) * 100) : null;
-  t.modelProfitKop = t.modelRevenueKop - t.costKop;
   return t;
 }

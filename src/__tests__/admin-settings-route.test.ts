@@ -33,6 +33,7 @@ describe("admin settings web adapter", () => {
     (updateAdminSettings as jest.Mock).mockResolvedValue({
       purchaseRate: 4.7,
       usdToRub: 92,
+      gamepassTargetMarginPct: 40.45,
       autoBuyEnabled: false,
       autoBuyRate: 4,
     });

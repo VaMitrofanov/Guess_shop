@@ -25,14 +25,22 @@ describe("admin settings service", () => {
   afterEach(() => jest.clearAllMocks());
 
   it("parses strict rate changes and rejects boolean coercion", () => {
-    expect(parseAdminSettingsUpdate({ usdToRub: "91.5", purchaseRate: 4.7 })).toEqual({
+    expect(parseAdminSettingsUpdate({
+      usdToRub: "91.5",
+      purchaseRate: 4.7,
+      gamepassTargetMarginPct: 40.45,
+    })).toEqual({
       usdToRub: 91.5,
       purchaseRate: 4.7,
+      gamepassTargetMarginPct: 40.45,
     });
     expect(() => parseAdminSettingsUpdate({ autoBuyEnabled: "false" })).toThrow(
       AdminSettingsValidationError,
     );
     expect(() => parseAdminSettingsUpdate({ purchaseRate: 0 })).toThrow("purchaseRate out of range");
+    expect(() => parseAdminSettingsUpdate({ gamepassTargetMarginPct: 91 })).toThrow(
+      "gamepassTargetMarginPct out of range",
+    );
   });
 
   it("returns safe defaults without a settings row", async () => {
@@ -43,6 +51,7 @@ describe("admin settings service", () => {
     await expect(loadAdminSettingsOverview()).resolves.toEqual({
       purchaseRate: null,
       usdToRub: 90,
+      gamepassTargetMarginPct: null,
       autoBuyEnabled: false,
       autoBuyRate: 4,
       bestRate: null,
@@ -54,6 +63,7 @@ describe("admin settings service", () => {
     db.globalSettings.upsert.mockResolvedValue({
       purchaseRate: 4.7,
       usdToRub: 92,
+      gamepassTargetMarginPct: 40.45,
       autoBuyEnabled: false,
       autoBuyRate: 4,
     });
@@ -61,6 +71,7 @@ describe("admin settings service", () => {
     await expect(updateAdminSettings({ purchaseRate: 4.7, usdToRub: 92 })).resolves.toEqual({
       purchaseRate: 4.7,
       usdToRub: 92,
+      gamepassTargetMarginPct: 40.45,
       autoBuyEnabled: false,
       autoBuyRate: 4,
     });

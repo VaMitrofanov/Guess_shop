@@ -113,6 +113,8 @@ src/
     roblox.ts                    Roblox API для сайта (4 эндпоинта details)
     roblox-buyout.ts             shared resolve/purchase helper для retail и B2B
     retail-pricing.ts            web-facade общего TG/VK/Web price policy
+    gamepass-pricing.ts          чистая gross/cost/fees/tax/margin формула + target-price solver
+    economics-model.ts           агрегация фактических и what-if прямых заказов
     price-quote.ts               calculation + persistence краткой котировки
     canonical-web-order.ts       quote/gamepass invariants + atomic order foundation
     payment-notification.ts      разрешённые монотонные переходы платежа

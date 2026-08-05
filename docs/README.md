@@ -37,7 +37,7 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [design-rework-concept.html](design-rework-concept.html) | Интерактивный визуальный концепт глобального реворка главной и mobile-first WB guide |
 | [twa-ux-v3-concept.html](twa-ux-v3-concept.html) | Визуальный концепт TWA v3: два варианта Главной, умная выдача и foreground bottom sheet |
 | [bots.md](bots.md) | TG- и VK-боты: активация, приём геймпасса, прямые заказы, поддержка, отзывы |
-| [twa-admin.md](twa-admin.md) | Единая admin-экосистема: desktop `/admin`, Telegram TWA, общий `WbOrder`, досье и журнал |
+| [twa-admin.md](twa-admin.md) | Единая admin-экосистема: desktop `/admin`, Telegram TWA, общий `WbOrder`, досье, журнал и Game Pass-калькулятор фиксированной маржи |
 | [admin-console-plan.md](admin-console-plan.md) | Переезд админки в веб: production-дашборд, TG/VK-аудитория, 9 разделов, вход трёх админов по Telegram, этапы A1–A8 |
 | [admin-mobile-ux-review-2026-08-04.md](admin-mobile-ux-review-2026-08-04.md) | Ультра-ревью и реализация mobile `/admin`: iPhone 14/15 Pro Max, mobile IA, app/bottom bars, карточные рабочие экраны, контрастная SF Pro type scale, семантические карточки заказов и фактическая приёмка |
 | [admin-performance-optimization-plan-2026-08-04.md](admin-performance-optimization-plan-2026-08-04.md) | Реализованное ускорение `/admin`: server/DB/browser baseline, исправленные P0 Economics, dashboard 23→4 чтения, server-first/cursor/cache/telemetry, production-гейты и архитектурный хвост |

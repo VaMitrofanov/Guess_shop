@@ -6,7 +6,7 @@ jest.mock("@/lib/prisma", () => ({
     globalSettings: { findUnique: jest.fn() },
   },
 }));
-jest.mock("@/lib/retail-pricing", () => ({ DIRECT_PRICES: { 100: 144 } }));
+jest.mock("@/lib/retail-pricing", () => ({ DIRECT_PRICES: { 100: 144, 1000: 995 } }));
 
 import { prisma } from "@/lib/prisma";
 import { loadDirectEconomics } from "@/lib/direct-economics";
@@ -47,7 +47,11 @@ describe("direct economics loader", () => {
     db.wbOrder.findMany.mockResolvedValue(Array.from({ length: 2001 }, (_, index) => order(index)));
     db.bonusLedger.findMany.mockResolvedValue([]);
     db.directIntent.findMany.mockResolvedValue([]);
-    db.globalSettings.findUnique.mockResolvedValue({ purchaseRate: 4.7, usdToRub: 92 });
+    db.globalSettings.findUnique.mockResolvedValue({
+      purchaseRate: 4.7,
+      usdToRub: 92,
+      gamepassTargetMarginPct: null,
+    });
 
     const result = await loadDirectEconomics();
 
@@ -59,5 +63,6 @@ describe("direct economics loader", () => {
     expect(result.orders[0].id).toBe("order-0000");
     expect(result.orders.at(-1)?.id).toBe("order-1999");
     expect(result.truncated).toBe(true);
+    expect(result.defaults.targetMarginPct).toBe(28.4);
   });
 });

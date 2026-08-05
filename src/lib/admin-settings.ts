@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 export type AdminSettingsUpdate = {
   purchaseRate?: number | null;
   usdToRub?: number;
+  gamepassTargetMarginPct?: number;
   autoBuyEnabled?: boolean;
   autoBuyRate?: number;
 };
@@ -12,6 +13,7 @@ export type AdminSettingsUpdate = {
 export type AdminSettingsPayload = {
   purchaseRate: number | null;
   usdToRub: number;
+  gamepassTargetMarginPct: number | null;
   autoBuyEnabled: boolean;
   autoBuyRate: number;
 };
@@ -24,6 +26,7 @@ export type AdminSettingsOverview = AdminSettingsPayload & {
 const DEFAULTS: AdminSettingsPayload = {
   purchaseRate: null,
   usdToRub: 90,
+  gamepassTargetMarginPct: null,
   autoBuyEnabled: false,
   autoBuyRate: 4,
 };
@@ -64,6 +67,14 @@ export function parseAdminSettingsUpdate(input: unknown): AdminSettingsUpdate {
   const usdToRub = optionalNumber(body, "usdToRub", { minExclusive: 0, max: 500 });
   if (typeof usdToRub === "number") update.usdToRub = usdToRub;
 
+  const gamepassTargetMarginPct = optionalNumber(body, "gamepassTargetMarginPct", {
+    minInclusive: 0,
+    max: 90,
+  });
+  if (typeof gamepassTargetMarginPct === "number") {
+    update.gamepassTargetMarginPct = gamepassTargetMarginPct;
+  }
+
   if ("autoBuyEnabled" in body) {
     if (typeof body.autoBuyEnabled !== "boolean") {
       throw new AdminSettingsValidationError("autoBuyEnabled must be boolean");
@@ -84,6 +95,8 @@ function serializeSettings(settings: AdminSettingsPayload | null): AdminSettings
   return {
     purchaseRate: settings?.purchaseRate ?? DEFAULTS.purchaseRate,
     usdToRub: settings?.usdToRub ?? DEFAULTS.usdToRub,
+    gamepassTargetMarginPct:
+      settings?.gamepassTargetMarginPct ?? DEFAULTS.gamepassTargetMarginPct,
     autoBuyEnabled: settings?.autoBuyEnabled ?? DEFAULTS.autoBuyEnabled,
     autoBuyRate: settings?.autoBuyRate ?? DEFAULTS.autoBuyRate,
   };
@@ -93,7 +106,13 @@ export async function loadAdminSettingsOverview(): Promise<AdminSettingsOverview
   const [settings, bestRate, pendingOrders] = await Promise.all([
     prisma.globalSettings.findUnique({
       where: { id: "global" },
-      select: { purchaseRate: true, usdToRub: true, autoBuyEnabled: true, autoBuyRate: true },
+      select: {
+        purchaseRate: true,
+        usdToRub: true,
+        gamepassTargetMarginPct: true,
+        autoBuyEnabled: true,
+        autoBuyRate: true,
+      },
     }),
     prisma.marketRate.findFirst({
       orderBy: { rateUSD: "asc" },
@@ -116,7 +135,13 @@ export async function updateAdminSettings(input: unknown): Promise<AdminSettings
     where: { id: "global" },
     update,
     create: { id: "global", ...DEFAULTS, ...update },
-    select: { purchaseRate: true, usdToRub: true, autoBuyEnabled: true, autoBuyRate: true },
+    select: {
+      purchaseRate: true,
+      usdToRub: true,
+      gamepassTargetMarginPct: true,
+      autoBuyEnabled: true,
+      autoBuyRate: true,
+    },
   });
   return serializeSettings(settings);
 }

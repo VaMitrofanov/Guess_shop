@@ -1,10 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { DIRECT_PRICES } from "@/lib/retail-pricing";
 import {
+  DEFAULT_FEE_RATES,
   DIRECT_ECONOMICS_SOURCES,
   type BonusSource, type DirectEconomics, type DirectEconomicsSource,
   type EconomicsOrder, type RevenueSource,
 } from "@/lib/economics-model";
+import { quoteGamepassPayment } from "@/lib/gamepass-pricing";
 
 export type { DirectEconomics, DirectEconomicsSource, EconomicsOrder } from "@/lib/economics-model";
 
@@ -65,7 +67,7 @@ export async function loadDirectEconomics(): Promise<DirectEconomics> {
     }),
     prisma.globalSettings.findUnique({
       where: { id: "global" },
-      select: { purchaseRate: true, usdToRub: true },
+      select: { purchaseRate: true, usdToRub: true, gamepassTargetMarginPct: true },
     }),
   ]);
 
@@ -144,6 +146,21 @@ export async function loadDirectEconomics(): Promise<DirectEconomics> {
     };
   });
 
+  const usdToRub = settings?.usdToRub ?? 90;
+  const purchaseRateUsdPer1k = settings?.purchaseRate ?? null;
+  const referenceQuote = quoteGamepassPayment(1000, (DIRECT_PRICES[1000] ?? 0) * 100, {
+    usdToRub,
+    rateUsdPer1k: purchaseRateUsdPer1k ?? 4.3,
+    taxPct: 30,
+    ...DEFAULT_FEE_RATES,
+  });
+  // Legacy rows do not have a saved target. Preserve the current 1000 R$ pack
+  // margin (rounded down, so the first recommendation never raises price only
+  // because of decimal rounding) until the admin explicitly saves it.
+  const derivedTargetMarginPct = referenceQuote
+    ? Math.floor(referenceQuote.marginPct * 100) / 100
+    : 30;
+
   return {
     orders: rows,
     // Стартовые значения интерактивной формулы. Это то, чем сейчас считаются
@@ -151,9 +168,10 @@ export async function loadDirectEconomics(): Promise<DirectEconomics> {
     // если закупаем дороже, цифры в экране разойдутся со снапшотами — экран
     // показывает это расхождение отдельной плашкой.
     defaults: {
-      usdToRub: settings?.usdToRub ?? 90,
-      purchaseRateUsdPer1k: settings?.purchaseRate ?? null,
+      usdToRub,
+      purchaseRateUsdPer1k,
       robloxTaxPct: 30,
+      targetMarginPct: settings?.gamepassTargetMarginPct ?? derivedTargetMarginPct,
     },
     prices: DIRECT_PRICES,
     truncated,
