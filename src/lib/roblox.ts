@@ -6,16 +6,28 @@
 const UA = "Mozilla/5.0 (compatible; RobloxBank/1.0; +https://robloxbank.ru)";
 const TIMEOUT_MS = 8_000;
 
-function rFetch(url: string, init: RequestInit = {}) {
-  return fetch(url, {
-    ...init,
-    headers: {
-      "User-Agent": UA,
-      "Accept": "application/json",
-      ...(init.headers ?? {}),
-    },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+async function rFetch(url: string, init: RequestInit = {}) {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        ...init,
+        cache: init.cache ?? "no-store",
+        headers: {
+          "User-Agent": UA,
+          "Accept": "application/json",
+          ...(init.headers ?? {}),
+        },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      if (response.status !== 429 && response.status < 500) return response;
+      lastError = new Error(`Roblox HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 150));
+  }
+  throw lastError instanceof Error ? lastError : new Error("Roblox request failed");
 }
 
 export async function getRobloxUser(username: string) {
@@ -43,6 +55,61 @@ export async function getRobloxUserById(userId: string) {
     console.error("[Roblox] getRobloxUserById:", error);
     return null;
   }
+}
+
+export async function getRobloxAvatar(userId: string | number) {
+  try {
+    const res = await rFetch(
+      `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=true`,
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.data?.[0]?.imageUrl ?? null;
+  } catch (error) {
+    console.error("[Roblox] getRobloxAvatar:", error);
+    return null;
+  }
+}
+
+export type RobloxPublicProfile = {
+  id: string;
+  username: string;
+  displayName: string;
+  description: string | null;
+  createdAt: string | null;
+  avatarUrl: string | null;
+  profileUrl: string;
+};
+
+async function hydrateRobloxPublicProfile(user: Record<string, unknown>): Promise<RobloxPublicProfile | null> {
+  const id = String(user.id ?? "").trim();
+  const username = String(user.name ?? user.requestedName ?? "").trim();
+  if (!id || !username) return null;
+  const avatarUrl = await getRobloxAvatar(id);
+  return {
+    id,
+    username,
+    displayName: String(user.displayName ?? username),
+    description: typeof user.description === "string" ? user.description : null,
+    createdAt: typeof user.created === "string" ? user.created : null,
+    avatarUrl,
+    profileUrl: `https://www.roblox.com/users/${encodeURIComponent(id)}/profile`,
+  };
+}
+
+/** Public profile only: no visitor cookie, Roblox password or private inventory. */
+export async function getRobloxPublicProfile(username: string): Promise<RobloxPublicProfile | null> {
+  const basic = await getRobloxUser(username);
+  if (!basic?.id) return null;
+  const detailed = await getRobloxUserById(String(basic.id));
+  return hydrateRobloxPublicProfile((detailed ?? basic) as Record<string, unknown>);
+}
+
+/** Stable-ID refresh survives a Roblox username change. */
+export async function getRobloxPublicProfileById(userId: string): Promise<RobloxPublicProfile | null> {
+  const detailed = await getRobloxUserById(userId);
+  if (!detailed) return null;
+  return hydrateRobloxPublicProfile(detailed as Record<string, unknown>);
 }
 
 export async function getGamepassDetails(gamepassId: string) {
@@ -137,6 +204,7 @@ export async function getGamepassById(gamepassId: string) {
       id:          gamepassId,
       name:        details.name,
       price:       details.price,
+      creatorId:   details.creatorId,
       image:       imageUrl,
       creatorName,
     };
@@ -153,7 +221,7 @@ export async function getUserGames(username: string) {
     if (!user) return [];
 
     const res = await rFetch(
-      `https://games.roblox.com/v2/users/${user.id}/games?accessFilter=Public&limit=25&sortOrder=Desc`
+      `https://games.roblox.com/v2/users/${user.id}/games?accessFilter=Public&limit=50&sortOrder=Desc`
     );
     if (!res.ok) return [];
 
@@ -187,7 +255,7 @@ export async function getUserGames(username: string) {
 export async function getUniverseGamepasses(universeId: string) {
   try {
     const res = await rFetch(
-      `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes?passView=Full&pageSize=50`
+      `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes?passView=Full&pageSize=100`
     );
     if (!res.ok) return [];
 
@@ -220,16 +288,14 @@ export async function getUniverseGamepasses(universeId: string) {
   }
 }
 
-export async function getUserGamepasses(username: string) {
+export async function getUserGamepasses(username: string, resolvedUserId?: string | number) {
   try {
-    const user = await getRobloxUser(username);
-    if (!user) return [];
-
-    const userId = user.id;
+    const userId = resolvedUserId ?? (await getRobloxUser(username))?.id;
+    if (!userId) return [];
 
     // 1. Fetch user's public games
     const gamesRes = await rFetch(
-      `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=10`
+      `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=50`
     );
     if (!gamesRes.ok) return [];
 
@@ -237,15 +303,16 @@ export async function getUserGamepasses(username: string) {
     const universes: any[] = gamesData.data ?? [];
     if (universes.length === 0) return [];
 
-    // 2. Fetch gamepasses for each universe in parallel
+    // 2. Fetch gamepasses for each universe in parallel, carrying placeId along
     const passPromises = universes.map(async (game: any) => {
+      const placeId: number = game.rootPlaceId ?? game.rootPlace?.id ?? 0;
       try {
         const res = await rFetch(
-          `https://apis.roblox.com/game-passes/v1/universes/${game.id}/game-passes?passView=Full&pageSize=30`
+          `https://apis.roblox.com/game-passes/v1/universes/${game.id}/game-passes?passView=Full&pageSize=100`
         );
         if (!res.ok) return [];
         const data = await res.json();
-        return data.gamePasses ?? [];
+        return (data.gamePasses ?? []).map((gp: any) => ({ ...gp, _placeId: placeId }));
       } catch {
         return [];
       }
@@ -265,17 +332,68 @@ export async function getUserGamepasses(username: string) {
     );
 
     return allGamepasses.map((gp: any) => ({
-      id:        gp.id,
-      name:      gp.name ?? gp.displayName,
-      price:     gp.price ?? 0,
-      productId: gp.productId,
-      image:     thumbMap[gp.id]
+      id:         gp.id,
+      name:       gp.name ?? gp.displayName,
+      price:      gp.price ?? 0,
+      productId:  gp.productId ?? 0,
+      placeId:    gp._placeId ?? 0,
+      sellerName: gp.creator?.name ?? username,
+      isForSale:  gp.isForSale ?? false,
+      image:      thumbMap[gp.id]
         ?? `https://www.roblox.com/asset-thumbnail/image?assetId=${gp.id}&width=150&height=150&format=png`,
     }));
   } catch (error) {
     console.error("[Roblox] getUserGamepasses:", error);
     return [];
   }
+}
+
+type CheckoutGamepass = {
+  id: string;
+  name: string;
+  price: number;
+  creatorId: number;
+  isActive: boolean;
+};
+
+type ListedGamepass = {
+  id: string | number;
+  name?: string;
+  price?: number;
+  isForSale?: boolean;
+};
+
+/**
+ * Resolves a pass immediately before a web payment is created.
+ *
+ * Roblox's item-detail endpoints are intermittently unavailable from some
+ * server IP ranges, while the public universe listing used by the checkout
+ * search still returns the same pass. A successful fallback is deliberately
+ * restricted to the requested Roblox owner's current public pass list, so it
+ * cannot weaken the ownership, sale-state or price checks in the order guard.
+ */
+export async function getCheckoutGamepassDetails(
+  gamepassId: string,
+  owner: { id: string | number; username: string },
+  dependencies: {
+    getDirect?: (id: string) => Promise<CheckoutGamepass | null>;
+    listOwned?: (username: string, userId: string | number) => Promise<ListedGamepass[]>;
+  } = {},
+): Promise<CheckoutGamepass | null> {
+  const direct = await (dependencies.getDirect ?? getGamepassDetails)(gamepassId);
+  if (direct) return direct;
+
+  const ownedPasses = await (dependencies.listOwned ?? getUserGamepasses)(owner.username, owner.id);
+  const listedPass = ownedPasses.find((pass) => String(pass.id) === String(gamepassId));
+  if (!listedPass) return null;
+
+  return {
+    id: String(listedPass.id),
+    name: listedPass.name ?? "Gamepass",
+    price: Number(listedPass.price ?? 0),
+    creatorId: Number(owner.id),
+    isActive: listedPass.isForSale === true,
+  };
 }
 
 export async function verifyUserGamepass(username: string, gamepassId: string, _requiredRobux: number) {

@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { securityHeaders } from "./next-security";
 
 const nextConfig: NextConfig = {
   // ──────────────────────────────────────────────────────────────────────────
@@ -7,6 +8,8 @@ const nextConfig: NextConfig = {
   // Coolify/Docker/PM2 on Ubuntu VPS without changes.
   // ──────────────────────────────────────────────────────────────────────────
   output: "standalone",
+  poweredByHeader: false,
+  headers: securityHeaders,
 
   // ──────────────────────────────────────────────────────────────────────────
   // Production hardening for the 4 GB / 2-core deploy host (Coolify on
@@ -51,6 +54,10 @@ const nextConfig: NextConfig = {
   images: {
     formats: ["image/webp"],
     minimumCacheTTL: 60 * 60 * 24, // 24h — Robux store assets rarely change
+    remotePatterns: [
+      { protocol: "https", hostname: "tr.rbxcdn.com", pathname: "/**" },
+      { protocol: "https", hostname: "www.roblox.com", pathname: "/asset-thumbnail/**" },
+    ],
   },
 
   // ──────────────────────────────────────────────────────────────────────────

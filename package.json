@@ -9,17 +9,29 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "npm run lint:critical && npm run lint:regression",
+    "lint:critical": "eslint --max-warnings 0 'src/app/api/orders/**/*.{ts,tsx}' 'src/app/api/webhooks/tinkoff/**/*.{ts,tsx}' 'src/app/api/pricing/**/*.{ts,tsx}' 'src/app/api/acquiring/**/*.{ts,tsx}' 'src/app/api/account/**/*.{ts,tsx}' 'src/app/api/auth/register/**/*.{ts,tsx}' src/app/api/health/workers/route.ts src/app/api/internal/worker-alert/route.ts src/app/checkout/page.tsx src/app/register/page.tsx src/app/login/page.tsx src/instrumentation.ts src/lib/account-session.ts src/lib/auth-navigation.ts src/lib/bonus-ledger.ts src/lib/canonical-web-order.ts src/lib/email-account-lifecycle.ts src/lib/mailer.ts src/lib/payment-init-retry.ts src/lib/payment-notification.ts src/lib/site-acquiring.ts src/lib/telegram.ts src/lib/tinkoff.ts src/lib/web-order-benefits.ts src/lib/worker-watchdog.ts bots/shared/payment-outbox.ts bots/shared/worker-heartbeat.ts bots/shared/payment-worker-watchdog.ts scripts/site-acquiring-rollout.mjs",
+    "lint:regression": "node scripts/lint-regression.mjs",
+    "lint:report": "eslint .",
     "test": "jest",
+    "smoke:site": "node scripts/smoke-site.mjs",
+    "benchmark:admin": "node scripts/benchmark-admin.mjs",
+    "calc:gamepass": "node --import tsx scripts/gamepass-price-calculator.ts",
+    "rollout:site": "node scripts/site-acquiring-rollout.mjs",
     "postinstall": "prisma generate",
     "bot:tg": "npm --prefix bots/tg run dev",
     "bot:vk": "npm --prefix bots/vk run dev",
-    "dev:reset-test": "node scripts/reset-test-code.mjs"
+    "dev:reset-test": "node scripts/reset-test-code.mjs",
+    "bots:tsc": "tsc --noEmit -p bots/tsconfig.json",
+    "test:bots": "jest --config jest.bots.config.js",
+    "gates": "npm run lint && tsc --noEmit && npm run bots:tsc && npm test && npm run test:bots"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
+    "@babel/runtime": "^7.29.7",
     "@prisma/adapter-pg": "^7.6.0",
     "@prisma/client": "^7.7.0",
+    "@vkid/sdk": "^2.6.6",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "dotenv": "^17.3.1",
@@ -27,12 +39,15 @@
     "lucide-react": "^1.7.0",
     "next": "16.2.2",
     "next-auth": "^5.0.0-beta.30",
+    "nodemailer": "9.0.3",
     "pg": "^8.12.0",
+    "puppeteer-core": "25.3.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "recharts": "^3.8.1",
     "tailwind-merge": "^3.5.0",
     "ws": "^8.20.0",
+    "xlsx": "^0.18.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -40,6 +55,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^20",
+    "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.11.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
@@ -54,5 +70,8 @@
   },
   "prisma": {
     "seed": "node prisma/seed.js"
+  },
+  "overrides": {
+    "nodemailer": "9.0.3"
   }
 }

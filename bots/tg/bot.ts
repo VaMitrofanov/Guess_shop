@@ -36,13 +36,34 @@ import {
   registerCallbacks,
   registerAdmin,
   registerChatMember,
+  setupBotProfile,
 } from "./handlers";
 import { registerAdminHubs, setupMenuButton } from "./admin";
+import { startReviewReminderCron } from "./crons";
+import { notifyBotError } from "../shared/admin";
+import { syncTelegramActor } from "../shared/user-profile-sync";
 
 const token = process.env.TG_TOKEN;
 if (!token) throw new Error("[TG] TG_TOKEN is not set");
 
 export const bot = new Telegraf(token);
+
+// Telegram supplies `ctx.from` on every private update. Sync at most once per
+// actor per process/6h; profile persistence stays off the reply critical path.
+bot.use(async (ctx, next) => {
+  await next();
+  if (ctx.from) void syncTelegramActor(ctx.from);
+});
+
+bot.catch((err: any, ctx: any) => {
+  console.error("[TG] Unhandled error:", err);
+  // Юзер получает «Произошла ошибка» → админы должны узнать сразу.
+  const uid = ctx?.from?.id;
+  if (uid) notifyBotError({ platform: "TG", userId: uid, err }).catch(() => {});
+  try {
+    ctx?.reply?.("⚠️ Произошла ошибка. Попробуй ещё раз или напиши /start");
+  } catch {}
+});
 
 // Register all handlers (order matters: admin hubs → commands → callbacks → text → photo)
 // Admin hubs must be registered FIRST so their text interceptors (search, codes, rate)
@@ -87,6 +108,9 @@ if (disablePolling) {
   });
   // Set Menu Button (left of input) for each admin — opens TWA dashboard directly
   setupMenuButton(bot).catch((err: Error) => console.error("[TG] setChatMenuButton failed:", err));
+  // Public profile (description + command menu) — once, on the polling instance.
+  setupBotProfile(bot).catch((err: Error) => console.error("[TG] setupBotProfile failed:", err));
+  startReviewReminderCron(bot);
   console.log("[TG] Bot started ✅ (polling)");
   const adminIds = process.env.ADMIN_IDS ?? process.env.TG_CHAT_ID ?? "";
   if (!adminIds.trim()) {

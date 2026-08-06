@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!/.env.example
 
 # vercel
 .vercel
@@ -44,8 +45,25 @@ next-env.d.ts
 
 # claude code
 .claude/
+.agent/
+
+# operational / internal docs — repo is PUBLIC, these hold infra access
+# (SSH hosts, Coolify UUIDs, deploy topology). Public-safe docs live in /docs.
+# PLAN-*.md hold internal automation plans (account-draining etc.) — keep local.
+/HANDOFF.md
+/PLAN.md
+/PLAN-*.md
 
 # scratch / temp files
 /scratch/
+/test-results/
 *.tmp
 _write_test_ok
+# U13: артефакты сборки и macOS, случайно попадавшие в публичный репозиторий
+tsconfig.tsbuildinfo
+.DS_Store
+
+# local ops — не для публичного репо (личные пути/ID бизнес-таблиц, старые ассеты)
+/scripts/update_sheets.py
+/scripts/broadcast-photos/
+/data/

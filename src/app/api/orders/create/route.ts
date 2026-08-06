@@ -1,219 +1,315 @@
+import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
-import { initTinkoffPayment } from "@/lib/tinkoff";
-import { getRobloxUser } from "@/lib/roblox";
-import { getStorefrontPricing } from "@/lib/pricing";
 import { auth } from "@/auth";
+import {
+  createCanonicalWebOrder,
+  validateCheckoutGamepass,
+  validateCheckoutQuote,
+  WebOrderError,
+} from "@/lib/canonical-web-order";
+import { prisma } from "@/lib/prisma";
+import { clientIp, rateLimit } from "@/lib/rate-limit";
+import { getCheckoutGamepassDetails, getRobloxUser } from "@/lib/roblox";
+import { initCanonicalTinkoffPayment } from "@/lib/tinkoff";
+import { siteAcquiringDecision } from "@/lib/site-acquiring";
+import { revertWebOrderBenefits } from "@/lib/web-order-benefits";
+import {
+  createPaymentRetry,
+  isLivePaymentAttempt,
+  PaymentRetryError,
+} from "@/lib/payment-init-retry";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Current public-offer version stamp.
- *
- * Update this string EVERY time the legal copy at /legal/offer changes
- * materially (not for typos). The value is persisted on every Order so we
- * can prove which exact revision the user accepted in case of a dispute.
- *
- * Format: ISO date — matches the `lastUpdated` line at the top of the
- * offer page, which is what the user actually sees.
- */
-const TERMS_VERSION = "2026-04-28";
-
 const CreateOrderSchema = z.object({
-  username: z.string().min(1),
-  amountRobux: z.number().int().min(100),
-  productId: z.string().optional(),
-  method: z.string().default("Gamepass"),
-  gamepassId: z.string().optional(),
-  /**
-   * Mandatory acceptance of the public offer + privacy policy.
-   *
-   * `z.literal(true)` rejects anything that isn't exactly `true` — guards
-   * against the front-end forgetting the field, sending `"true"` as a
-   * string, or sending `false`. The check below short-circuits with 400
-   * before any DB write or Tinkoff call happens.
-   */
-  agreedToTerms: z.literal(true, {
-    error: "Необходимо согласие с офертой и политикой конфиденциальности",
-  }),
-  /**
-   * Optional client-generated idempotency key (UUID v4 recommended).
-   *
-   * If provided, the server will return the existing order rather than
-   * creating a duplicate. This prevents double charges from double-clicks
-   * or network retries. The client should generate a fresh UUID per
-   * user-initiated checkout attempt and reuse it on retries.
-   *
-   * Stored in the Order.externalId field (no schema migration required).
-   */
-  idempotencyKey: z.string().uuid().optional(),
+  quoteId: z.string().cuid(),
+  username: z.string().trim().min(3).max(20),
+  gamepassId: z.string().regex(/^\d+$/),
+  receiptEmail: z.email().max(254),
+  agreedToTerms: z.literal(true),
+  idempotencyKey: z.uuid(),
 });
 
 /**
- * Resolve the originating client IP for audit logging.
- *
- * Order of precedence (matches what's typically configured in Vercel /
- * Coolify-Caddy / nginx-proxy):
- *   1. `x-forwarded-for` — comma-separated list, first entry is the real
- *      client. Trimmed defensively because some proxies emit whitespace.
- *   2. `x-real-ip`       — single value set by nginx/Caddy when XFF isn't
- *      present.
- *   3. `cf-connecting-ip` — Cloudflare-specific header, the only reliable
- *      source when traffic enters via the CF tunnel from the X280.
- *   4. `null`            — record explicitly that we couldn't determine
- *      the IP, rather than logging a misleading "127.0.0.1".
- *
- * Note: NextRequest.ip is null in Node runtime — it only resolves on the
- * Edge runtime, which we're not using here (Prisma needs Node). So we
- * read the headers ourselves.
+ * U9: адрес согласия с офертой берётся тем же `clientIp()`, что и лимиты —
+ * второй локальной реализации (доверявшей подделываемому левому hop'у) больше нет.
  */
-function resolveClientIp(req: NextRequest): string | null {
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) {
-    const first = xff.split(",")[0]?.trim();
-    if (first) return first;
+function consentIp(req: NextRequest): string | null {
+  const ip = clientIp(req);
+  return ip === "unknown" ? null : ip;
+}
+
+async function initializePayment(input: {
+  orderId: string;
+  publicOrderId: string;
+  providerOrderId: string;
+  attemptId: string;
+  amountKopecks: number;
+  receiptEmail: string;
+  statusToken: string;
+}) {
+  let payment: Awaited<ReturnType<typeof initCanonicalTinkoffPayment>>;
+  try {
+    payment = await initCanonicalTinkoffPayment({
+      publicOrderId: input.publicOrderId,
+      providerOrderId: input.providerOrderId,
+      amountKopecks: input.amountKopecks,
+      receiptEmail: input.receiptEmail,
+      description: `Заказ ${input.publicOrderId}`,
+      statusToken: input.statusToken,
+    });
+  } catch (providerError) {
+    const errorHash = crypto.createHash("sha256").update(String(providerError)).digest("hex");
+    await prisma.$transaction([
+      prisma.paymentAttempt.update({
+        where: { id: input.attemptId },
+        data: { status: "FAILED", rawEventHash: errorHash, finalizedAt: new Date() },
+      }),
+      prisma.orderEvent.create({
+        data: {
+          orderId: input.orderId,
+          type: "PAYMENT_INIT_FAILED",
+          idempotencyKey: `payment-init-failed:${input.attemptId}`,
+          payload: { paymentAttemptId: input.attemptId, errorHash },
+        },
+      }),
+    ]);
+    try {
+      await revertWebOrderBenefits(input.orderId, "PAYMENT_INIT_FAILED");
+    } catch (revertError) {
+      console.error("[orders/create] benefits revert failed", { orderId: input.orderId, revertError });
+    }
+    console.error("[orders/create] T-Bank Init failed", { orderId: input.publicOrderId, errorHash });
+    throw providerError;
   }
-  const real = req.headers.get("x-real-ip");
-  if (real) return real.trim();
-  const cf = req.headers.get("cf-connecting-ip");
-  if (cf) return cf.trim();
-  return null;
+
+  // Persist the provider identifiers first. If the secondary order/audit write
+  // fails, the payment link remains safely reusable instead of being marked
+  // FAILED and allowing a duplicate provider attempt.
+  await prisma.paymentAttempt.update({
+    where: { id: input.attemptId },
+    data: {
+      paymentId: payment.paymentId,
+      paymentUrl: payment.paymentUrl,
+      status: "INITIATED",
+      initiatedAt: new Date(),
+    },
+  });
+  try {
+    await prisma.$transaction([
+      prisma.wbOrder.update({ where: { id: input.orderId }, data: { status: "PAYMENT_PENDING" } }),
+      prisma.orderEvent.create({
+        data: {
+          orderId: input.orderId,
+          type: "PAYMENT_INITIATED",
+          idempotencyKey: `payment-initiated:${input.attemptId}`,
+          payload: { paymentAttemptId: input.attemptId, provider: "TBANK", providerOrderId: input.providerOrderId },
+        },
+      }),
+    ]);
+  } catch (auditError) {
+    console.error("[orders/create] payment durable, secondary audit update failed", {
+      orderId: input.publicOrderId,
+      attemptId: input.attemptId,
+      auditError,
+    });
+  }
+  return { paymentUrl: payment.paymentUrl };
 }
 
 export async function POST(req: NextRequest) {
+  const { ok, retryAfter } = rateLimit(`checkout:${clientIp(req)}`, 5, 1 / 30);
+  if (!ok) {
+    return NextResponse.json(
+      { error: "Слишком много попыток оплаты. Попробуйте через минуту." },
+      { status: 429, headers: { "retry-after": String(retryAfter) } },
+    );
+  }
+
+  const parsed = CreateOrderSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    const termsIssue = parsed.error.issues.some((issue) => issue.path.includes("agreedToTerms"));
+    return NextResponse.json({
+      error: termsIssue
+        ? "Необходимо согласие с офертой и политикой конфиденциальности"
+        : "Некорректные параметры заказа",
+      details: parsed.error.issues,
+    }, { status: 400 });
+  }
+
+  const session = await auth();
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  if (!userId) {
+    return NextResponse.json(
+      { error: "Войдите или зарегистрируйтесь, затем обновите цену." },
+      { status: 401 },
+    );
+  }
+
+  // Authorization and rollout eligibility are enforced here even if the UI is
+  // bypassed. Webhook, refund and outbox processing deliberately do not depend
+  // on this gate, so already accepted money keeps moving when the kill switch
+  // is turned off.
+  if (!siteAcquiringDecision({ userId }).eligible) {
+    return NextResponse.json(
+      { error: "Оплата на сайте пока закрыта или доступна ограниченной группе." },
+      { status: 503, headers: { "retry-after": "3600" } },
+    );
+  }
+
+  const input = parsed.data;
   try {
-    const session = await auth();
-    const body = await req.json();
-    const validated = CreateOrderSchema.safeParse(body);
-
-    if (!validated.success) {
-      // Surface the first error verbatim so the front-end can display the
-      // exact reason — particularly for the consent guard, where the
-      // distinction between "missing field" and "unchecked" matters.
-      const firstIssue = validated.error.issues[0];
-      const message =
-        firstIssue?.path.includes("agreedToTerms")
-          ? "Необходимо согласие с офертой и политикой конфиденциальности"
-          : firstIssue?.message ?? "Некорректные параметры заказа";
-
-      return NextResponse.json(
-        { error: message, details: validated.error.issues },
-        { status: 400 },
-      );
-    }
-
-    const {
-      username,
-      amountRobux,
-      productId,
-      method,
-      gamepassId,
-      idempotencyKey,
-    } = validated.data;
-
-    // ── Idempotency guard ─────────────────────────────────────────────────────
-    // If the client sent a key we've already processed, return the existing
-    // order instead of creating a duplicate. Protects against double-clicks and
-    // network-level retries that would otherwise trigger two Tinkoff charges.
-    if (idempotencyKey) {
-      const existing = await prisma.order.findFirst({
-        where:  { externalId: idempotencyKey },
-        select: { id: true, paymentUrl: true, status: true },
-      });
-      if (existing) {
-        console.log(
-          `[orders/create] Idempotency hit for key=${idempotencyKey}, ` +
-          `returning existing order ${existing.id}`
-        );
+    // A 5xx response makes the browser rotate its request key. The consumed
+    // quote still identifies the same canonical order, so a rotated key can
+    // resume it instead of failing forever with QUOTE_UNAVAILABLE.
+    const existing = await prisma.wbOrder.findFirst({
+      where: {
+        OR: [
+          { webIdempotencyKey: input.idempotencyKey },
+          { priceQuoteId: input.quoteId },
+        ],
+      },
+      select: {
+        id: true,
+        userId: true,
+        publicOrderId: true,
+        robloxUsername: true,
+        gamepassId: true,
+        amount: true,
+        paidAt: true,
+        paymentAttempts: {
+          orderBy: { createdAt: "desc" },
+          select: { status: true, paymentUrl: true, createdAt: true },
+        },
+      },
+    });
+    if (existing) {
+      if (existing.userId !== userId) return NextResponse.json({ error: "Заказ не найден" }, { status: 404 });
+      const live = existing.paymentAttempts.find((attempt) => isLivePaymentAttempt(attempt.status, attempt.createdAt));
+      if (live?.paymentUrl && (live.status === "INITIATED" || live.status === "AUTHORIZED")) {
         return NextResponse.json({
-          success:      true,
-          orderId:      existing.id,
-          paymentUrl:   existing.paymentUrl,
+          success: true,
+          orderId: existing.publicOrderId,
+          paymentUrl: live.paymentUrl,
           alreadyExists: true,
         });
       }
-    }
-
-    // Acceptance evidence triple. Captured here, on the server, BEFORE any
-    // external call — so even if the rest of the flow fails (Tinkoff down,
-    // Roblox API rejects), we still know who accepted what and when, in
-    // case the user later disputes the consent itself.
-    const termsAcceptedAt = new Date();
-    const termsIpAddress = resolveClientIp(req);
-
-    // 1. Verify user exists on Roblox
-    const robloxUser = await getRobloxUser(username);
-    if (!robloxUser) {
-      return NextResponse.json({ error: "Roblox user not found" }, { status: 404 });
-    }
-
-    // 2. Calculate price dynamically
-    let amountRUB = 0;
-    const finalProductId = productId || null;
-
-    if (productId) {
-      // Fixed-price product from catalog
-      const product = await prisma.product.findUnique({ where: { id: productId } });
-      if (!product || !product.isActive) {
-        return NextResponse.json({ error: "Product not found or inactive" }, { status: 404 });
+      if (live || existing.paidAt) {
+        return NextResponse.json({ error: "Платёж уже обрабатывается" }, { status: 409 });
       }
-      amountRUB = product.rubPrice;
-    } else {
-      // Dynamic pricing from market rates (includes Roblox 30% tax + margins)
-      const pricing = await getStorefrontPricing();
-      amountRUB = Math.round(amountRobux * pricing.finalRubPerRobux);
-    }
+      if (
+        existing.gamepassId !== input.gamepassId ||
+        existing.robloxUsername?.toLowerCase() !== input.username.toLowerCase()
+      ) {
+        return NextResponse.json({ error: "Данные сохранённого заказа изменились. Создайте новый заказ." }, { status: 409 });
+      }
 
-    // 3. Create the order in DB. The terms-acceptance triple is written
-    //    atomically with the rest of the row — there is no window in
-    //    which an Order exists without its consent record.
-    //    externalId is used as the idempotency key storage (nullable String,
-    //    no schema migration required).
-    const order = await prisma.order.create({
-      data: {
-        userId: (session?.user as { id?: string } | undefined)?.id ?? null,
-        customerRobloxUser: username,
-        amountRobux,
-        amountRUB,
-        status: "PENDING",
-        method,
-        gamepassId,
-        productId: finalProductId || "default-calc",
-        termsAcceptedAt,
-        termsVersion: TERMS_VERSION,
-        termsIpAddress,
-        externalId: idempotencyKey ?? null,
-      },
-    });
-
-    // 4. Initialize Tinkoff payment
-    const payment = await initTinkoffPayment(order.id, amountRUB, "customer@example.com");
-
-    if (!payment.Success) {
-      await prisma.order.update({ where: { id: order.id }, data: { status: "FAILED" } });
-      return NextResponse.json(
-        { error: "Payment initialization failed", details: payment.Message },
-        { status: 500 },
+      const robloxUser = await getRobloxUser(input.username);
+      if (!robloxUser) return NextResponse.json({ error: "Roblox-пользователь не найден" }, { status: 404 });
+      const gamepass = await getCheckoutGamepassDetails(input.gamepassId, {
+        id: robloxUser.id,
+        username: String(robloxUser.name ?? input.username),
+      });
+      if (!gamepass) return NextResponse.json({ error: "Геймпасс не найден" }, { status: 404 });
+      validateCheckoutGamepass(
+        { requestedRobux: existing.amount, bonusRobux: 0 },
+        gamepass,
+        Number(robloxUser.id),
       );
+
+      const retry = await createPaymentRetry({
+        orderId: existing.id,
+        idempotencyKey: input.idempotencyKey,
+        receiptEmail: input.receiptEmail.toLowerCase(),
+      });
+      try {
+        const payment = await initializePayment({
+          orderId: existing.id,
+          publicOrderId: retry.publicOrderId,
+          providerOrderId: retry.providerOrderId,
+          attemptId: retry.attempt.id,
+          amountKopecks: retry.attempt.amountKopecks,
+          receiptEmail: input.receiptEmail.toLowerCase(),
+          statusToken: retry.statusToken,
+        });
+        return NextResponse.json({
+          success: true,
+          orderId: retry.publicOrderId,
+          statusToken: retry.statusToken,
+          paymentUrl: payment.paymentUrl,
+          retried: true,
+          attemptNumber: retry.attemptNumber,
+        }, { status: 201 });
+      } catch {
+        return NextResponse.json({
+          error: "Банк временно не создал платёж. Нажмите «Оплатить» ещё раз — заказ сохранён.",
+          retryable: true,
+        }, { status: 502 });
+      }
     }
 
-    // 5. Save payment details and return URL
-    const updatedOrder = await prisma.order.update({
-      where: { id: order.id },
-      data: {
-        tinkoffPaymentID: payment.PaymentId,
-        paymentUrl: payment.PaymentURL,
-      },
+    const quote = await prisma.priceQuote.findUnique({
+      where: { id: input.quoteId },
+      include: { policy: { select: { version: true } } },
+    });
+    const checkedQuote = validateCheckoutQuote(quote, userId);
+
+    const robloxUser = await getRobloxUser(input.username);
+    if (!robloxUser) return NextResponse.json({ error: "Roblox-пользователь не найден" }, { status: 404 });
+    const gamepass = await getCheckoutGamepassDetails(input.gamepassId, {
+      id: robloxUser.id,
+      username: String(robloxUser.name ?? input.username),
+    });
+    if (!gamepass) return NextResponse.json({ error: "Геймпасс не найден" }, { status: 404 });
+    validateCheckoutGamepass(checkedQuote, gamepass, Number(robloxUser.id));
+
+    const created = await createCanonicalWebOrder({
+      quote: checkedQuote,
+      userId,
+      username: String(robloxUser.name ?? input.username),
+      gamepassId: input.gamepassId,
+      receiptEmail: input.receiptEmail.toLowerCase(),
+      idempotencyKey: input.idempotencyKey,
+      termsIpAddress: consentIp(req),
+      termsUserAgent: req.headers.get("user-agent"),
     });
 
-    return NextResponse.json({
-      success: true,
-      orderId: updatedOrder.id,
-      paymentUrl: payment.PaymentURL,
-    });
+    try {
+      const payment = await initializePayment({
+        orderId: created.order.id,
+        publicOrderId: created.order.publicOrderId!,
+        providerOrderId: created.attempt.publicOrderId,
+        attemptId: created.attempt.id,
+        amountKopecks: created.attempt.amountKopecks,
+        receiptEmail: input.receiptEmail.toLowerCase(),
+        statusToken: created.statusToken,
+      });
+      return NextResponse.json({
+        success: true,
+        orderId: created.order.publicOrderId,
+        statusToken: created.statusToken,
+        paymentUrl: payment.paymentUrl,
+      }, { status: 201 });
+    } catch {
+      return NextResponse.json({
+        error: "Банк временно не создал платёж. Нажмите «Оплатить» ещё раз — заказ сохранён.",
+        retryable: true,
+      }, { status: 502 });
+    }
   } catch (error) {
-    console.error("Order Creation Error:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    if (error instanceof WebOrderError) {
+      const status = error.code.startsWith("GAMEPASS_") ? 409 : 400;
+      return NextResponse.json({ error: error.message, code: error.code }, { status });
+    }
+    if (error instanceof PaymentRetryError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return NextResponse.json({ error: "Этот запрос уже обрабатывается" }, { status: 409 });
+    }
+    console.error("[orders/create] canonical order failed", error);
+    return NextResponse.json({ error: "Не удалось создать заказ" }, { status: 500 });
   }
 }

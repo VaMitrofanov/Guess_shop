@@ -1,0 +1,13 @@
+.page{min-height:100dvh;display:grid;place-items:center;padding:max(28px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) max(28px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left));background:radial-gradient(circle at 50% 12%,color-mix(in srgb,var(--rb-accent) 16%,transparent),transparent 34rem),var(--rb-bg);color:var(--rb-text)}
+.card{width:min(680px,100%);padding:clamp(28px,7vw,58px);border:1px solid var(--rb-border);border-radius:32px;background:color-mix(in srgb,var(--rb-surface) 96%,transparent);box-shadow:0 30px 90px rgba(42,27,76,.14);text-align:center}
+.code{width:82px;height:82px;margin:0 auto 22px;display:grid;place-items:center;border:2px solid var(--rb-text);border-radius:25px;background:var(--rb-accent);color:#fff;font-family:var(--font-display),sans-serif;font-size:24px;font-weight:900;box-shadow:6px 6px 0 #45d6aa;transform:rotate(-4deg)}
+.kicker{display:block;margin-bottom:10px;color:var(--rb-accent);font-size:13px;font-weight:950;letter-spacing:.1em;text-transform:uppercase}
+.title{margin:0;font-family:var(--font-display),sans-serif;font-size:clamp(32px,8vw,56px);line-height:1.02;letter-spacing:-.055em}
+.text{max-width:510px;margin:20px auto 0;color:var(--rb-muted);font-size:17px;line-height:1.65}
+.actions{display:flex;flex-wrap:wrap;justify-content:center;gap:12px;margin-top:30px}
+.primary,.secondary{min-height:50px;padding:0 20px;display:inline-flex;align-items:center;justify-content:center;border-radius:14px;font-size:15px;font-weight:900;text-decoration:none;cursor:pointer}
+.primary{border:0;background:var(--rb-strong);color:#fff;box-shadow:4px 4px 0 #45d6aa}
+.secondary{border:1px solid var(--rb-border);background:var(--rb-surface-2);color:var(--rb-text)}
+.detail{margin:24px 0 0;color:var(--rb-muted);font-size:14px}
+@media(max-width:520px){.actions{display:grid}.primary,.secondary{width:100%}.card{border-radius:24px}}
+@media(prefers-reduced-motion:no-preference){.code{animation:float-code 3.8s ease-in-out infinite}@keyframes float-code{50%{transform:rotate(2deg) translateY(-7px)}}}

@@ -1,0 +1,287 @@
+.page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  color: #251b3f;
+  background:
+    radial-gradient(circle at 78% 5%, rgba(117, 86, 232, .13), transparent 28rem),
+    linear-gradient(180deg, #fbfaff 0%, #f5f2ff 54%, #fbfaff 100%);
+}
+
+.hero {
+  position: relative;
+  width: min(1240px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 82px 0 72px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.06fr) minmax(390px, .94fr);
+  gap: 72px;
+  align-items: center;
+}
+
+.heroGlow { position:absolute; inset:1% -9% auto auto; width:560px; height:610px; border-radius:72px; background:radial-gradient(circle at 50% 46%,rgba(117,86,232,.12),rgba(69,214,170,.04) 43%,transparent 70%); pointer-events:none; }
+.vaultBackdrop { position:absolute; z-index:0; right:230px; top:-6px; width:530px; height:530px; opacity:.16; transform:rotate(7deg); pointer-events:none; }
+.vaultDoor { position:absolute; inset:0; border:28px solid #7556e8; border-radius:50%; background:radial-gradient(circle at 50% 50%,rgba(69,214,170,.12),transparent 52%); box-shadow:inset 0 0 0 18px #251b3f,0 0 0 9px rgba(69,214,170,.7),0 28px 80px rgba(117,86,232,.2); }
+.vaultDoor::before { content:""; position:absolute; inset:70px; border:9px solid #7556e8; border-radius:50%; }
+.vaultBolts i { position:absolute; left:50%; top:50%; width:20px; height:20px; margin:-10px; border-radius:50%; background:#251b3f; transform:rotate(calc(var(--i, 0) * 45deg)) translateY(-218px); }
+.vaultBolts i:nth-child(1){--i:0}.vaultBolts i:nth-child(2){--i:1}.vaultBolts i:nth-child(3){--i:2}.vaultBolts i:nth-child(4){--i:3}.vaultBolts i:nth-child(5){--i:4}.vaultBolts i:nth-child(6){--i:5}.vaultBolts i:nth-child(7){--i:6}.vaultBolts i:nth-child(8){--i:7}
+.vaultWheel { position:absolute; left:50%; top:50%; width:144px; height:144px; margin:-72px; display:grid; place-items:center; border:14px solid #251b3f; border-radius:50%; color:#251b3f; font-family:var(--font-display),sans-serif; font-size:44px; font-weight:950; animation:vaultTurn 12s cubic-bezier(.65,0,.35,1) infinite; }
+.vaultWheel::before,.vaultWheel::after { content:""; position:absolute; width:210px; height:14px; border-radius:99px; background:#251b3f; }
+.vaultWheel::after { transform:rotate(90deg); }
+.vaultWheel span { position:relative; z-index:1; padding:8px; background:#fbfaff; border-radius:13px; }
+@keyframes vaultTurn { 0%,22%,100%{transform:rotate(0)} 38%,62%{transform:rotate(28deg)} 78%{transform:rotate(-8deg)} }
+.heroCopy,.calculatorWrap,.methodDeck { position: relative; z-index: 1; min-width: 0; max-width: 100%; }
+.eyebrow { display: inline-flex; align-items: center; gap: 10px; padding: 9px 13px; border: 1px solid #ded7f6; border-radius: 999px; background: rgba(255,255,255,.76); color: #6751b9; font-size: 13px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.statusDot { width: 8px; height: 8px; border-radius: 50%; background: #45d6aa; box-shadow: 0 0 0 5px rgba(69,214,170,.15); }
+.title { margin: 26px 0 24px; font-family: var(--font-display), var(--font-geist-sans), sans-serif; font-size: clamp(50px, 6.5vw, 88px); line-height: .98; letter-spacing: -.075em; font-weight: 700; }
+.title span { position: relative; display: inline; background: linear-gradient(90deg,#7556e8,#5e83ee); background-clip: text; color: transparent; }
+.lead { max-width: 590px; color: #6f6782; font-size: 18px; line-height: 1.65; font-weight: 500; }
+.heroActions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 30px; }
+.primaryAction { min-height: 52px; display: inline-flex; align-items: center; justify-content: center; gap: 10px; border-radius: 13px; padding: 0 20px; background: #7556e8; color: white; box-shadow: 4px 4px 0 #251b3f; font-size: 15px; font-weight: 800; transition: transform .2s ease, box-shadow .2s ease; }
+.primaryAction:hover { transform: translateY(-2px); }
+/* D4: тихий вход в блок кодов — ссылка, а не кнопка. Покупка кодов не
+   включена, поэтому на первом экране не должно быть ничего, похожего на
+   активную кнопку покупки. */
+.heroTextLink { min-height: 52px; display: inline-flex; align-items: center; gap: 8px; padding: 0 6px; color: #6751b9; font-size: 15px; font-weight: 800; text-decoration: underline; text-underline-offset: 4px; }
+.heroTextLink:hover { color: #7556e8; }
+.heroFacts { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 24px; color: #756e86; font-size: 14px; font-weight: 700; }
+.heroFacts span { display: flex; align-items: center; gap: 7px; }
+
+.methodDeck { display: flex; flex-direction: column; gap: 14px; transform: rotate(1deg); }
+/* D4: крупная карточка первого экрана — геймпасс (способ, который работает),
+   коды съехали в компактную строку-тизер ниже. */
+.gamepassHeroCard { position: relative; overflow: hidden; display:block; padding: 27px; border: 1px solid rgba(255,255,255,.2); border-radius: 28px; background: linear-gradient(145deg,#2e2052 0%,#7556e8 58%,#5b82ed 100%); color: white; box-shadow: 12px 12px 0 #45d6aa,0 28px 70px rgba(54,35,91,.2); transition: transform .2s ease, box-shadow .2s ease; }
+.gamepassHeroCard:hover { transform: translateY(-3px); box-shadow: 12px 15px 0 #45d6aa,0 30px 76px rgba(54,35,91,.24); }
+.gamepassHeroCard::after { content:"R$"; position:absolute; right:-32px; top:52px; color:rgba(255,255,255,.08); font-family:var(--font-display),sans-serif; font-size:170px; font-weight:900; transform:rotate(-8deg); }
+.methodTopline,.methodFooter { position:relative; z-index:1; display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.methodTopline>span { display:inline-flex; align-items:center; gap:7px; color:#aaf3dc; font-size:13px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
+.methodTopline small { color:rgba(255,255,255,.72); font-size:14px; font-weight:800; }
+.methodCopy { position:relative; z-index:1; margin:28px 0 22px; display:flex; align-items:center; gap:14px; }
+.methodIcon { width:50px; height:50px; flex:0 0 auto; display:grid; place-items:center; border-radius:15px; background:#45d6aa; color:#173f34; }
+.methodCopy p { margin:0 0 2px; color:#d9d0ff; font-size:15px; font-weight:800; }
+.methodCopy h2 { margin:0; font-size:clamp(28px,3vw,38px); line-height:1; letter-spacing:-.05em; }
+.methodPoints { position:relative; z-index:1; margin:0 0 22px; padding:0; display:grid; gap:9px; list-style:none; }
+.methodPoints li { display:flex; align-items:center; gap:9px; color:rgba(255,255,255,.88); font-size:15px; font-weight:700; line-height:1.35; }
+.methodPoints svg { flex:0 0 auto; color:#8cf0d0; }
+.methodFooter { font-size:15px; font-weight:800; }
+.methodFooter span { display:flex; align-items:center; gap:7px; color:#d9fff3; }
+.methodFooter strong { display:inline-flex; align-items:center; gap:8px; font-size:19px; }
+.codeTeaser { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:13px; padding:14px 16px; border:1px dashed #cfc6ea; border-radius:18px; background:rgba(255,255,255,.76); color:#251b3f; }
+.codeTeaserIcon { width:38px; height:38px; flex:0 0 auto; display:grid; place-items:center; border-radius:12px; background:#ece7ff; color:#7556e8; }
+.codeTeaser p { min-width:0; margin:0; }
+.codeTeaser strong,.codeTeaser small { display:block; }
+.codeTeaser strong { font-size:15px; }
+.codeTeaser small { margin-top:1px; color:#6e657f; font-size:14px; font-weight:700; }
+.codeTeaser a { color:#7556e8; font-size:14px; font-weight:900; white-space:nowrap; text-decoration:underline; text-underline-offset:3px; }
+
+.calculator { position: relative; max-width: 100%; padding: 28px; border: 1px solid #cfc6ee; border-radius: 26px; background: rgba(255,255,255,.95); box-shadow: 12px 12px 0 #251b3f, 0 26px 70px rgba(54,35,91,.12); transform: rotate(1deg); }
+.calculatorBadge { position: absolute; right: 24px; top: -15px; padding: 7px 12px; border: 1px solid #251b3f; border-radius: 999px; background: #7556e8; color: white; font-size: 13px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.calculatorHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 24px; }
+.calculatorHead span { color: #7b728e; font-size: 15px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.calculatorHead h2 { margin: 4px 0 0; font-size: 22px; line-height: 1.2; letter-spacing: -.035em; }
+.rateState { display: flex; align-items: center; gap: 6px; color: #408f77; font-size: 15px; font-weight: 800; white-space: nowrap; }
+.rateState i { width: 7px; height: 7px; background: #45d6aa; border-radius: 50%; }
+.fieldLabel { display: flex; justify-content: space-between; margin-bottom: 8px; color: #736b85; font-size: 16px; font-weight: 800; }
+.amountField { display: flex; align-items: center; gap: 10px; min-height: 66px; padding: 0 14px 0 17px; border: 1.5px solid #bdb1e7; border-radius: 15px; background: #f5f2ff; }
+.amountField input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: #251b3f; font-size: 28px; font-weight: 800; }
+.amountField span { padding: 7px 9px; border-radius: 9px; background: #45d6aa; color: #15382e; font-size: 14px; font-weight: 900; }
+.packGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-top: 9px; }
+.pack,.packActive { min-height: 48px; border: 1px solid #ded8f1; border-radius: 10px; background: white; color: #5d5570; font-size: 15px; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 4px; cursor: pointer; }
+.packActive { background: #251b3f; border-color: #251b3f; color: white; }
+.priceSummary { margin-top: 20px; padding: 15px 16px; border-radius: 15px; background: #f3f0fa; }
+.priceSummary div { display: flex; justify-content: space-between; gap: 16px; margin: 10px 0; color: #746c85; font-size: 16px; }
+.priceSummary strong { color: #3d3551; text-align: right; }
+.priceSummary .total { margin-top: 12px; padding-top: 12px; border-top: 1px solid #dcd5ec; color: #251b3f; font-size: 15px; font-weight: 800; }
+.priceSummary .total strong { color: #7556e8; font-size: 18px; }
+.tierNote { margin: 10px 0 0; color: #8b8499; text-align: center; font-size: 15px; }
+.nicknameLabel { display:block; margin:18px 0 8px; color:#655b79; font-size:16px; font-weight:900; }
+.nicknameField { min-height:60px; display:flex; align-items:center; gap:11px; padding:0 15px; border:2px solid #cfc6e9; border-radius:14px; background:#fff; color:#7556e8; transition:border-color .2s,box-shadow .2s; }
+.nicknameField:focus-within { border-color:#7556e8; box-shadow:0 0 0 4px rgba(117,86,232,.12); }
+.nicknameFieldReady { border-color:#45b994; }
+.nicknameField input { min-width:0; width:100%; border:0; outline:0; background:transparent; color:#251b3f; font-size:18px; font-weight:800; scroll-margin-block:24px 180px; }
+.nicknameField input::placeholder { color:#9e96aa; }
+.nicknameNote { margin:8px 0 0; color:#7a718b; font-size:15px; line-height:1.45; }
+.robloxLookup { min-width:0; margin-top:12px; padding:12px; display:flex; align-items:center; gap:11px; border:1px solid #d8d0ea; border-radius:14px; background:#f8f6fd; color:#665b78; }
+.robloxLookup>div { min-width:0; flex:1; }.robloxLookup strong,.robloxLookup small { display:block; }.robloxLookup strong { overflow:hidden; color:#302746; font-size:15px; text-overflow:ellipsis; white-space:nowrap; }.robloxLookup small { margin-top:3px; font-size:14px; line-height:1.35; }
+.lookupAvatar,.lookupIcon { width:42px; height:42px; flex:0 0 auto; display:grid; place-items:center; overflow:hidden; border-radius:13px; background:#e7e1fb; color:#7556e8; }.lookupAvatar img { width:100%; height:100%; object-fit:cover; }.lookupSpin { animation:lookupSpin .8s linear infinite; }@keyframes lookupSpin{to{transform:rotate(360deg)}}
+.checkoutAction,.checkoutActionDisabled { width:100%; min-height:60px; margin-top:16px; display:flex; align-items:center; justify-content:center; gap:9px; border-radius:13px; background:#7556e8; color:white; font-size:17px; font-weight:900; box-shadow:4px 4px 0 #251b3f; transition:transform .2s ease; }
+.checkoutActionDisabled { background:#d9d4e4; color:#8b8397; box-shadow:none; cursor:not-allowed; }
+.checkoutAction:hover { transform: translateY(-2px); }
+.lookupGuideLink { display:block; margin-top:12px; color:#7556e8; font-size:14px; font-weight:850; line-height:1.4; text-align:center; text-decoration:underline; text-underline-offset:3px; }
+.securityNote { margin: 14px 0 0; display: flex; align-items: center; justify-content: center; gap: 6px; color: #8b8499; font-size: 15px; }
+
+.productsSection { width:min(1180px,calc(100% - 40px)); margin:0 auto; padding:100px 0 24px; scroll-margin-top:88px; }
+/* D4: калькулятор (работающий способ) идёт первым и получает больше места;
+   витрина кодов — справа, как анонс. */
+.productsGrid { display:grid; grid-template-columns:minmax(420px,1.04fr) minmax(0,.96fr); gap:28px; align-items:start; }
+.codesStore { position:relative; overflow:hidden; min-height:100%; padding:30px; border:1px solid #bfb0eb; border-radius:28px; background:linear-gradient(160deg,#f1edff 0%,#fff 52%,#e8fff7 100%); box-shadow:9px 9px 0 #7556e8; }
+.codesStore::after { content:""; position:absolute; width:240px; height:240px; right:-100px; bottom:-110px; border:42px solid rgba(69,214,170,.13); border-radius:50%; }
+.codesStoreHead { position:relative; z-index:1; display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:13px; }
+.codesIcon { width:50px; height:50px; display:grid; place-items:center; border-radius:15px; background:#251b3f; color:#8cf0d0; }
+.codesStoreHead h3 { margin:0; font-size:25px; letter-spacing:-.045em; }
+.soonBadge { padding:7px 9px; border:1px solid #251b3f; border-radius:8px; background:#e9e3ff; color:#4c3a8c; font-size:12px; font-weight:950; letter-spacing:.1em; }
+.codesIntro { position:relative; z-index:1; margin:18px 0; color:#6b627e; font-size:16px; line-height:1.55; }
+.codesGrid { position:relative; z-index:1; display:grid; grid-template-columns:repeat(3,1fr); gap:9px; }
+.codePack { position:relative; min-height:66px; padding:13px; display:flex; flex-direction:column; justify-content:center; border:1px solid #dcd5ec; border-radius:15px; background:rgba(255,255,255,.82); }
+.codePack strong { display:block; color:#251b3f; font-size:18px; letter-spacing:-.03em; }
+.codePack strong span { color:#7556e8; font-size:14px; }
+/* D4: ни кнопки, ни цены — только честное состояние товара и ссылка на
+   способ, который работает прямо сейчас. */
+.codesStatus { position:relative; z-index:1; margin:18px 0 0; color:#6b627e; font-size:15px; line-height:1.5; }
+.codesStatus a { color:#7556e8; font-weight:900; text-decoration:underline; text-underline-offset:3px; }
+.gamepassLabel { margin:0 12px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.gamepassLabel span { display:flex; align-items:center; gap:7px; color:#7556e8; font-size:14px; font-weight:900; text-transform:uppercase; letter-spacing:.06em; }
+.gamepassLabel small { color:#6e657f; font-size:14px; font-weight:800; }
+
+.assuranceStrip { width: min(1240px, calc(100% - 40px)); margin: 0 auto; padding: 18px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; border: 1px solid #e0daf2; border-radius: 20px; background: rgba(255,255,255,.7); }
+.assuranceItem { display: flex; gap: 11px; align-items: center; padding: 12px; }
+.assuranceIcon { width: 38px; height: 38px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 12px; background: #ece7ff; color: #7556e8; }
+.assuranceItem strong,.assuranceItem small { display: block; }
+.assuranceItem strong { font-size: 16px; }
+.assuranceItem small { margin-top: 3px; color: #81798f; font-size: 15px; line-height: 1.45; }
+
+.section,.controlSection { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 100px 0; }
+.sectionHeading { display: flex; align-items: flex-end; justify-content: space-between; gap: 40px; margin-bottom: 38px; }
+.sectionHeading h2,.controlCard h2,.bottomCta h2 { margin: 9px 0 0; font-family: var(--font-display), sans-serif; font-size: clamp(34px, 4.5vw, 54px); line-height: 1.05; letter-spacing: -.055em; }
+.sectionHeading p { max-width: 440px; margin: 0; color: #786f8c; font-size: 17px; line-height: 1.65; }
+.sectionKicker { color: #7556e8; font-size: 15px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.stepsGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.stepCard { min-height: 290px; padding: 24px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid #dbd4ed; border-radius: 22px; background: #fff; transition: transform .2s ease, border-color .2s ease; }
+.stepCard:nth-child(2) { background: #7556e8; color: white; border-color: #7556e8; }
+.stepCard:nth-child(3) { background: #251b3f; color: white; border-color: #251b3f; }
+.stepCard:hover { transform: translateY(-4px); }
+.stepTop { display: flex; justify-content: space-between; align-items: flex-start; font-size: 13px; font-weight: 900; letter-spacing: .06em; }
+.stepIcon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 13px; background: #eee9ff; color: #7556e8; }
+.stepCard:nth-child(2) .stepIcon,.stepCard:nth-child(3) .stepIcon { background: rgba(255,255,255,.13); color: #8cf0d0; }
+.stepProgress { height: 3px; margin: 22px 0; overflow: hidden; border-radius: 99px; background: rgba(104,93,127,.15); }
+.stepProgress i { display: block; height: 100%; background: #45d6aa; }
+.stepCard h3 { margin: 0 0 11px; font-size: 24px; letter-spacing: -.04em; }
+.stepCard p { margin: 0; color: #7a7289; font-size: 17px; line-height: 1.6; }
+.stepCard:nth-child(2) p,.stepCard:nth-child(3) p { color: rgba(255,255,255,.72); }
+.stepCard a { margin-top: 18px; display: inline-flex; align-items: center; gap: 7px; color: white; font-size: 14px; font-weight: 800; }
+
+.controlSection { padding-top: 0; }
+.controlCard { position: relative; overflow: hidden; padding: 44px; display: grid; grid-template-columns: 1.1fr .9fr; gap: 60px; align-items: center; border-radius: 28px; background: #e9e3ff; }
+.controlCard::after { content: "R$"; position: absolute; right: -28px; bottom: -105px; font-family: var(--font-display), sans-serif; font-size: 250px; color: rgba(117,86,232,.075); transform: rotate(-8deg); }
+.controlCard p { max-width: 540px; color: #6c6381; font-size: 17px; line-height: 1.65; }
+.orderWidget { position: relative; z-index: 1; padding: 22px; border: 1px solid #c9bdeb; border-radius: 19px; background: rgba(255,255,255,.88); box-shadow: 8px 8px 0 #7556e8; }
+.orderWidgets { position:relative; z-index:1; display:flex; flex-direction:column; gap:18px; }
+.orderWidgetTop { display: flex; flex-direction: column; gap: 5px; }
+.orderWidgetTop span { color: #847b96; font-size: 13px; font-weight: 800; text-transform: uppercase; }
+.orderWidgetTop strong { font-size: 15px; }
+.orderTrack { display: grid; grid-template-columns: repeat(4,1fr); gap: 4px; margin: 20px 0 9px; }
+.orderTrack i { height: 6px; border-radius: 99px; background: #ddd6ec; }
+.orderTrack i:nth-child(-n+2) { background: #45d6aa; }
+.orderTrack .current { background: #7556e8; }
+.orderLabels { display: flex; justify-content: space-between; color: #82798f; font-size: 13px; font-weight: 700; }
+.bottomCta { width: min(1180px, calc(100% - 40px)); margin: 0 auto 54px; padding: 38px 42px; display: flex; align-items: center; justify-content: space-between; gap: 30px; border-radius: 26px; background: #251b3f; color: white; }
+.bottomCta h2 { font-size: clamp(28px,3.5vw,42px); }
+.bottomActions { display:flex; align-items:center; gap:16px; }
+.bottomTextLink { color:#cfc3ff; font-size:15px; font-weight:800; text-decoration:underline; text-underline-offset:4px; white-space:nowrap; }
+.bottomTextLink:hover { color:#fff; }
+
+@media (max-width: 980px) {
+  .hero { grid-template-columns: minmax(0, 1fr); gap: 54px; }
+  .methodDeck,.calculatorWrap { max-width: 620px; }
+  .assuranceStrip { grid-template-columns: repeat(2,1fr); }
+  .controlCard { grid-template-columns: 1fr; }
+  .productsGrid { grid-template-columns:1fr; }
+}
+
+@media (max-width: 720px) {
+  .hero { width: min(620px, calc(100% - 28px)); padding: 54px 0; }
+  .vaultBackdrop { right:-225px; top:105px; opacity:.12; }
+  .title { font-size: clamp(42px,13vw,62px); }
+  .lead { font-size: 17px; }
+  .heroActions { flex-direction: column; }
+  .primaryAction,.heroTextLink { width: 100%; justify-content: center; }
+  .methodDeck { transform:none; }
+  .gamepassHeroCard { padding:22px; box-shadow:7px 7px 0 #45d6aa; }
+  .calculator { padding: 22px; transform: none; box-shadow: 7px 7px 0 #251b3f; }
+  .calculatorHead { flex-direction: column; }
+  .packGrid { grid-template-columns: repeat(2,1fr); }
+  .assuranceStrip { width: calc(100% - 28px); grid-template-columns: 1fr; }
+  .section,.controlSection,.productsSection { width: calc(100% - 28px); padding: 72px 0; }
+  .sectionHeading { align-items: flex-start; flex-direction: column; }
+  .codesStore { padding:22px; box-shadow:6px 6px 0 #7556e8; }
+  /* На 390 px заголовок из трёх слов зажимался между иконкой и бейджем и
+     разваливался на три строки — разводим их по двум рядам. */
+  .codesStoreHead { grid-template-columns:auto auto; justify-content:space-between; row-gap:14px; }
+  .codesIcon { grid-area:1/1; }
+  .soonBadge { grid-area:1/2; justify-self:end; }
+  .codesStoreHead h3 { grid-area:2/1/2/3; font-size:23px; }
+  .codesGrid { grid-template-columns:repeat(2,1fr); }
+  .codesPromise { grid-template-columns:1fr; }
+  .stepsGrid { grid-template-columns: 1fr; }
+  .stepCard { min-height: 250px; }
+  .controlCard { padding: 28px 22px; gap: 34px; }
+  .bottomCta { width: calc(100% - 28px); padding: 30px 22px; align-items: flex-start; flex-direction: column; }
+  .bottomActions { width:100%; flex-direction:column; }
+}
+
+:global(html[data-theme="dark"]) .page {
+  color: #f4f0ff;
+  background:
+    radial-gradient(circle at 78% 5%, rgba(117, 86, 232, .22), transparent 30rem),
+    linear-gradient(180deg, #0b0912 0%, #100c19 54%, #0b0912 100%);
+}
+:global(html[data-theme="dark"]) .eyebrow,
+:global(html[data-theme="dark"]) .calculator,
+:global(html[data-theme="dark"]) .assuranceStrip,
+:global(html[data-theme="dark"]) .stepCard,
+:global(html[data-theme="dark"]) .codeTeaser,
+:global(html[data-theme="dark"]) .codesStore,
+:global(html[data-theme="dark"]) .orderWidget {
+  border-color: #352b48;
+  background: rgba(22, 17, 33, .9);
+}
+:global(html[data-theme="dark"]) .calculator { box-shadow: 12px 12px 0 #7556e8, 0 28px 70px rgba(0,0,0,.34); }
+:global(html[data-theme="dark"]) .vaultDoor { box-shadow:inset 0 0 0 18px #0b0912,0 0 0 9px rgba(69,214,170,.7),0 28px 80px rgba(117,86,232,.34); }
+:global(html[data-theme="dark"]) .vaultWheel { border-color:#f4f0ff; color:#f4f0ff; }
+:global(html[data-theme="dark"]) .vaultWheel::before,
+:global(html[data-theme="dark"]) .vaultWheel::after { background:#f4f0ff; }
+:global(html[data-theme="dark"]) .vaultWheel span { background:#151120; }
+:global(html[data-theme="dark"]) .amountField,
+:global(html[data-theme="dark"]) .pack,
+:global(html[data-theme="dark"]) .priceSummary,
+:global(html[data-theme="dark"]) .nicknameField,
+:global(html[data-theme="dark"]) .robloxLookup,
+:global(html[data-theme="dark"]) .codePack { border-color: #3a304b; background: #100d18; }
+:global(html[data-theme="dark"]) .amountField input,
+:global(html[data-theme="dark"]) .pack,
+:global(html[data-theme="dark"]) .priceSummary strong,
+:global(html[data-theme="dark"]) .nicknameField input,
+:global(html[data-theme="dark"]) .robloxLookup strong,
+:global(html[data-theme="dark"]) .codeTeaser,
+:global(html[data-theme="dark"]) .codePack strong,
+:global(html[data-theme="dark"]) .orderWidget { color: #f4f0ff; }
+:global(html[data-theme="dark"]) .lead,
+:global(html[data-theme="dark"]) .heroFacts,
+:global(html[data-theme="dark"]) .assuranceItem small,
+:global(html[data-theme="dark"]) .sectionHeading p,
+:global(html[data-theme="dark"]) .codesIntro,
+:global(html[data-theme="dark"]) .codesStatus,
+:global(html[data-theme="dark"]) .codeTeaser small,
+:global(html[data-theme="dark"]) .stepCard p,
+:global(html[data-theme="dark"]) .controlCard p,
+:global(html[data-theme="dark"]) .orderLabels { color: #aaa3b8; }
+/* D4/D9: тизер и статус кодов в тёмной теме — акцент из токена, а не
+   литеральный #7556e8 (в тёмной теме он не проходит AA). */
+:global(html[data-theme="dark"]) .heroTextLink,
+:global(html[data-theme="dark"]) .codeTeaser a,
+:global(html[data-theme="dark"]) .codesStatus a { color: var(--rb-accent); }
+:global(html[data-theme="dark"]) .codeTeaserIcon { background: rgba(117,86,232,.18); color: var(--rb-accent); }
+:global(html[data-theme="dark"]) .soonBadge { border-color: #3a304b; background: rgba(117,86,232,.16); color: #cbb9ff; }
+:global(html[data-theme="dark"]) .controlCard { background: linear-gradient(135deg,#211831,#171020); }
+:global(html[data-theme="dark"]) .bottomCta { background: #7556e8; }
+:global(html[data-theme="dark"]) .bottomCta .sectionKicker { color: #bff5e4; }
+/* D5: единый видимый фокус для всего кликабельного на витрине — карточка
+   геймпасса теперь ссылка, и её обязательно должно быть видно с клавиатуры. */
+.primaryAction:focus-visible,
+.heroTextLink:focus-visible,
+.gamepassHeroCard:focus-visible,
+.codeTeaser a:focus-visible,
+.codesStatus a:focus-visible,
+.stepCard a:focus-visible,
+.bottomTextLink:focus-visible { outline: 3px solid #45d6aa; outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .vaultWheel { animation:none; } .gamepassHeroCard,.primaryAction { transition:none; } }
