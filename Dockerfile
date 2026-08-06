@@ -104,11 +104,17 @@ RUN apt-get update -y \
     && apt-get install -y --no-install-recommends openssl ca-certificates wget \
     && rm -rf /var/lib/apt/lists/*
 
+# T-Bank uses certificates signed by the Russian Trusted Root CA (MinDigital),
+# which is not in the default Debian CA bundle.
+COPY certs/russian-trusted-ca.pem /usr/local/share/ca-certificates/russian-trusted-ca.crt
+RUN update-ca-certificates
+
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
     HOSTNAME=0.0.0.0 \
-    NODE_OPTIONS="--max-old-space-size=512"
+    NODE_OPTIONS="--max-old-space-size=512" \
+    NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/russian-trusted-ca.crt
 
 # Non-root user — security hardening + Coolify volume permissions sanity.
 RUN groupadd --system --gid 1001 nodejs \
