@@ -22,6 +22,23 @@
 
 ## <a name="twa-auth"></a>Известные риски
 
+### 35. T-Bank перешёл на российские SSL-сертификаты (Минцифры) — ✅ ЗАКРЫТО 2026-08-06
+
+`securepay.tinkoff.ru` стал отдавать SSL-сертификат, подписанный **Russian Trusted Root CA**
+(Минцифры РФ), вместо глобально доверенного CA (DigiCert и т.п.). Docker-образ на
+`node:22-bookworm-slim` не содержит этот корневой CA в стандартном Debian CA bundle →
+**все** вызовы `Init` (и, следовательно, все платежи на сайте) падали с
+`SSL: self-signed certificate in certificate chain`.
+
+Инцидент обнаружен 06.08 по жалобе клиента (@SonyaSyperKotik, 144 ₽ / 100 R$). Заказы
+создавались (`WEB-1F5CEAA355D1202CAC42`, `WEB-925E954B37950EE0EC0C`), но `PaymentURL` не
+возвращалась — клиент видел «Банк временно не создал платёж».
+
+**Фикс (`d06a41e`):** Russian Trusted Root CA + Sub CA добавлены в образ
+(`certs/russian-trusted-ca.pem` → `COPY` + `update-ca-certificates`), для Node.js `fetch`
+установлена `NODE_EXTRA_CA_CERTS`. На 27.07 T-Bank ещё использовал глобальные CA (E2E на
+160 ₽ прошёл), переход произошёл между 27.07 и 06.08.
+
 ### 28. Приложение отвечает на двух хостах (`robloxbank.ru` и `www.`) — ✅ ЗАКРЫТО 2026-07-28
 
 Оба хоста отдают приложение напрямую, без 301. При этом в production

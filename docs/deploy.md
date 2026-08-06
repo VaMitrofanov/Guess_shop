@@ -163,6 +163,26 @@ webhook на стороне GitHub (Settings → Webhooks → Recent Deliveries)
 сбой: пока webhook не починен, **штатный путь выката — сначала проверка `ls-remote` +
 пустой список деплоев, потом `--force-web`**, а не ожидание автодеплоя.
 
+### Russian Trusted Root CA в Docker-образе (06.08.2026)
+
+T-Bank (`securepay.tinkoff.ru`) перешёл на сертификаты, подписанные **Russian Trusted Root CA**
+(Минцифры РФ). Этот CA отсутствует в стандартном Debian CA bundle (`ca-certificates`),
+поэтому Node.js `fetch` и системный `curl` внутри контейнера не могут установить TLS-соединение
+с API платёжного шлюза.
+
+Сертификаты (Root + Sub CA) лежат в `certs/russian-trusted-ca.pem` и устанавливаются в
+runner-стадии `Dockerfile`:
+
+```dockerfile
+COPY certs/russian-trusted-ca.pem /usr/local/share/ca-certificates/russian-trusted-ca.crt
+RUN update-ca-certificates
+```
+
+Дополнительно установлен `NODE_EXTRA_CA_CERTS` для Node.js `fetch` (undici). Если T-Bank
+вернётся на глобальный CA — сертификат можно убрать, лишних side-effect от его присутствия нет.
+
+Root CA действует до 2032-02-27, Sub CA — до 2029-07-19.
+
 ### Один скрипт вместо ручного шага (26.07.2026, ultra-review U5)
 
 Ручной шаг «не забудь Guide» регулярно забывался: 25.07 прод обслуживал точку входа с
