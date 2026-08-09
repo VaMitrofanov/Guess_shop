@@ -110,6 +110,35 @@ describe("неизвестный топик", () => {
   });
 });
 
+describe("payment.confirmed reconciliation", () => {
+  it("помечает ручной перевод как оплату из ручного перевода", async () => {
+    state.order = baseOrder({
+      status: "PENDING",
+      orderSource: "DIRECT",
+      paymentAttempts: [{ provider: "MANUAL_TRANSFER", amountKopecks: 160_00, refundedAmountKopecks: 0, status: "CONFIRMED" }],
+    });
+
+    await dispatch({ topic: "payment.confirmed", payload: { orderId: ORDER_ID } }, bot);
+
+    expect(sent[0].text).toContain("ОПЛАТА ИЗ РУЧНОГО ПЕРЕВОДА ПОДТВЕРЖДЕНА");
+    expect(customerMessages).toHaveLength(1);
+  });
+
+  it("не обещает выкуп и поднимает тревогу, если льготы не удалось зарезервировать", async () => {
+    state.order = baseOrder({ status: "ERROR" });
+
+    await dispatch({
+      topic: "payment.confirmed",
+      payload: { orderId: ORDER_ID, needsReconciliation: true },
+    }, bot);
+
+    expect(sent[0].text).toContain("НУЖНА СВЕРКА ЛЬГОТ");
+    expect(sent[0].text).toContain("не выкупать");
+    expect(customerMessages[0]).toContain("вручную сверяем");
+    expect(customerMessages[0]).not.toContain("появился в работе");
+  });
+});
+
 describe("контракт: эмитируемые топики ⊆ обрабатываемые", () => {
   function sourceFiles(dir: string): string[] {
     const out: string[] = [];
@@ -145,7 +174,7 @@ describe("контракт: эмитируемые топики ⊆ обраба
     // Защита от «тест ничего не нашёл и поэтому зелёный»: все три известных
     // топика обязаны быть обнаружены, иначе сломался сам детектор.
     expect([...emitted].sort()).toEqual(
-      expect.arrayContaining(["payment.confirmed", "payment.refund.recorded", "web.order.created"]),
+      expect.arrayContaining(["bot.order.created", "payment.confirmed", "payment.refund.recorded", "web.order.created"]),
     );
 
     const unhandled = [...emitted].filter((topic) => !HANDLED_TOPICS.has(topic));

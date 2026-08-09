@@ -32,6 +32,7 @@ export type VKState =
   | { type: "AWAITING_DIRECT_NICK_INPUT"; } & DirectFlowData
   | { type: "AWAITING_DIRECT_GAMEPASS";   robloxUsername: string } & DirectFlowData
   | { type: "AWAITING_DIRECT_SUMMARY";    robloxUsername: string; gamepassId: string; gamepassUrl: string; gamepassName: string; gamepassRobux?: number } & DirectFlowData
+  | { type: "AWAITING_DIRECT_RECEIPT"; intentId: string; method: "SITE" | "BOT_ACQUIRING" | "MANUAL_TRANSFER" }
   | { type: "AWAITING_DIRECT_PAYMENT"; orderId: string }
   | { type: "AWAITING_ROBLOX_NICK";    wbCode: string; denomination: number }
   | { type: "AWAITING_NICK_EDIT" };

@@ -1,5 +1,15 @@
 # RobloxBank — документация
 
+> **Payment reliability + bot hybrid checkout release candidate 09.08.2026:** закрыты P0 late-payment после
+> автоотмены и critical dependency advisories; ручной выкуп подтверждён владельцем как
+> штатный режим. Реализованы T-Bank `GetState → Cancel`, атомарная late-payment обработка,
+> Next/Auth/Prisma upgrade, замена SheetJS и CI. До production deploy старые две пары
+> `REJECTED + INITIATED` остаются на автоматическую сверку новым worker. TG/VK теперь
+> предлагают готовую оплату на сайте, эквайринг в боте или manual transfer без ожидания
+> реквизитов от менеджера. Начинать с
+> [system-audit-2026-08-09.md](system-audit-2026-08-09.md), затем сверять
+> [launch-roadmap.md](launch-roadmap.md).
+
 **Wave 2 release candidate 28.07:** до трёх безопасных повторов bank Init на один заказ,
 синхронизация суммы/pass, автовход после регистрации, profile-prefill email чека,
 retry/exact-ID fallback для Roblox lookup и независимый VK-side watchdog TG payment-outbox.
@@ -44,11 +54,12 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [twa-design-redesign-plan.md](twa-design-redesign-plan.md) | Контракт редизайна TWA: навигация, поиск, compact cards/history, прибыль и Premium Calm для Аккаунта/Заказов |
 | [database.md](database.md) | Модели Prisma и статусы заказов/кодов |
 | [payments-and-kkt.md](payments-and-kkt.md) | Эквайринг, outbox worker, refund и ККТ test matrix |
-| [bot-acquiring-plan.md](bot-acquiring-plan.md) | Перенос официальной платёжки Т‑Банка в TG/VK-ботов вместо ручного СБП-QR: что переиспользуется, четыре препятствия (чек, метка источника, оферта, авторизация бота), шаги Б1–Б9 |
+| [bot-acquiring-plan.md](bot-acquiring-plan.md) | Hybrid checkout прямых заказов в TG/VK: основной `PaymentURL` Т‑Банка + автоматический fallback по защищённым реквизитам, UX, state machine, ККТ-граница и поэтапный rollout |
 | [deploy.md](deploy.md) | Как деплоится каждый сервис (без секретов) |
 | [security.md](security.md) | Модель угроз, известные риски, что проверять перед прод-изменениями |
 | [ultra-review-2026-07-25.md](ultra-review-2026-07-25.md) | Сплошное ревью кода 25.07: 18 находок (P0 — обход входа в TWA и обход rate-limit), план фикса и приёмка по каждой, порядок волн |
 | [ultra-review-2026-07-28.md](ultra-review-2026-07-28.md) | Ревью перед открытием сайта 28.07: безопасность/работоспособность/мобильный дизайн, 6 блокеров запуска и детальный план реализации по волнам 0–5 |
+| [system-audit-2026-08-09.md](system-audit-2026-08-09.md) | Production-аудит и remediation 09.08: payment reconciliation, ручной fulfillment, dependency/XLSX/TLS fixes, CI и результаты тестов |
 | [trello-workflow.md](trello-workflow.md) | Правила работы с Trello: понятные карточки, техническая расшифровка и статусы |
 | [roblox-plus-buyout-plan.md](roblox-plus-buyout-plan.md) | Транспорт выкупа ГП: почему серверный fetch не проходит chef, браузерный скрипт покупки и его гарды; Roblox Plus 10–20% — классификация и пачка |
 

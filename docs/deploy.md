@@ -257,6 +257,10 @@ OpenGraph и корректный maintenance-ответ.
 > упал в проде 2026-07-04 (`auto-workers.ts` не попал в образ). `bots/shared/` копируется
 > целиком — общий код туда добавлять безопасно.
 
+Оба bot-образа копируют собственные `package-lock.json` и устанавливают зависимости через
+`npm ci`; обновление bot `package.json` без соответствующего lockfile должно ломать сборку,
+а не тихо собирать другой transitive graph.
+
 ## Env-переменные (имена, без значений)
 
 Добавлены 26.07.2026 (ultra-review):
@@ -297,12 +301,11 @@ eligibility. Allowlist — comma-separated internal `User.id`; percentage — ц
 Сначала задаётся mode/allowlist при master `false`, затем один последовательный deploy;
 master включается отдельным изменением только перед allowlist E2E.
 
-При `TBANK_DIAGNOSTIC_JSON_LOGS=true` канонический `Init` пишет в stderr одну JSON-строку
-`event=tbank.init.exchange` с точным URL, headers, request body и HTTP response. Запись
-содержит рассчитанный одноразовый `Token`, email чека и bearer token в callback URL, поэтому
-она доступна только инфраструктурным операторам и не должна пересылаться никому, кроме
-поддержки Т‑Банка по защищённому каналу. `Password`/`SecretKey` в запись не попадают.
-После controlled E2E переменную удалить/переключить в `false` и перезапустить Web.
+При `TBANK_DIAGNOSTIC_JSON_LOGS=true` канонический `Init` пишет в stderr одну JSON-строку;
+email, provider Token, PaymentURL и bearer query `token` в ней маскируются. Флаг всё равно
+разрешён только на controlled E2E. Запись `event=tbank.init.exchange` сохраняет URL, headers,
+структуру request и HTTP response без чувствительных значений. После controlled E2E
+переменную удалить/переключить в `false` и перезапустить Web.
 
 `BOOTSTRAP_ADMIN_EMAIL` + `BOOTSTRAP_ADMIN_PASSWORD` — опциональная **одноразовая** пара
 только для `prisma db seed` на новом окружении. Обе задаются вместе, пароль — от 16 символов,
@@ -316,6 +319,8 @@ master включается отдельным изменением только
 **TG-бот:** `DATABASE_URL`, `TG_TOKEN`, `TG_CHANNEL_ID` (опц., гейт подписки), `ADMIN_IDS`,
 `NEXT_PUBLIC_APP_URL` (или server-only `WEB_BASE_URL`) для callback bot-assisted web-login,
 `VALIDATOR_SOURCE_URL`, `VALIDATOR_KEY`, health-мониторинг (`HETZNER_API_TOKEN`, `VDSINA_*`).
+Для payment reconciliation worker обязательны те же `TINKOFF_TERMINAL_KEY` и
+`TINKOFF_SECRET_KEY`, что у Web; без них sweep fail-closed и не меняет заказ/льготы.
 
 **VK-бот:** `DATABASE_URL`, `VK_TOKEN`, `VK_GROUP_ID`, `ADMIN_IDS`, `VALIDATOR_SOURCE_URL`,
 `VALIDATOR_KEY`, `TG_TOKEN` (уведомления менеджерам идут через Telegram).
@@ -324,9 +329,9 @@ master включается отдельным изменением только
 администраторам подтверждения ручных TWA-выкупов, TG — ручных покупок и auto-worker.
 Значение — список Telegram ID через запятую; cookie и токены в эти уведомления не входят.
 
-TG-сервис также является единственным payment outbox worker. После deploy в логах обязательна
+TG-сервис также является единственным payment outbox/reconciliation worker. После deploy в логах обязательна
 строка `[PaymentOutbox] Worker started`; `DATABASE_URL`, `TG_TOKEN` и `ADMIN_IDS` нужны ему для
-claim/delivery/dead-letter alerts. Не запускай второй polling TG instance без отдельной проверки
+claim/delivery/dead-letter alerts, а T‑Bank credentials — для `GetState`/`Cancel`. Не запускай второй polling TG instance без отдельной проверки
 atomic claim и Telegram polling topology.
 
 Миграция `20260728_wave2_launch_readiness` применена к production 28.07 после проверенного
@@ -347,6 +352,28 @@ Production acceptance 28.07: controlled stop заморозил heartbeat, по�
 перевёл его в `STALE`, Web/SMTP подтвердил доставку и сохранил ненулевой `lastAlertAt`;
 владелец подтвердил письмо скриншотом. После запуска TG heartbeat стал fresh, watchdog —
 `HEALTHY`, recovery доставлен, просроченный backlog остался 0.
+
+Hybrid checkout ботов требует отдельный `BOT_PAYMENT_API_SECRET` не короче 32 символов,
+одинаковый на Web, TG и VK. TG/VK вызывают `WEB_BASE_URL/api/internal/bot-payments`; Web
+единственный хранит `MANUAL_TRANSFER_BANK/RECIPIENT/PHONE/CONFIG_VERSION`. Значения
+реквизитов запрещено выводить через Coolify API в лог/отчёт. После изменения secret нужно
+перезапустить все три сервиса: несовпадение fail-closed даёт 401 и не потребляет intent.
+Production smoke проверяет 401 без подписи и отсутствие реквизитов в публичных ответах;
+живой create допускается только как неоплаченная сессия владельца и не включает списание.
+
+Конфигурация ставится без копирования значений в терминальный вывод:
+
+```bash
+npm run rollout:bot-payments
+```
+
+Скрипт требует Coolify API URL/token и UUID Web/TG/VK, а также четыре
+`MANUAL_TRANSFER_*` значения в окружении оператора. Он повторно использует уже установленный
+Web secret либо генерирует новый, атомарными bulk-upsert синхронизирует Web/TG/VK, копирует
+T‑Bank credentials только из Web в TG для reconciliation-worker и затем сравнивает значения
+read-after-write. В stdout попадают только названия ключей и короткий fingerprint secret.
+Явный `BOT_PAYMENT_API_SECRET` в окружении означает осознанную ротацию: все три сервиса нужно
+после неё передеплоить вместе.
 
 Поэтапное включение выполняется отдельными командами и с окном наблюдения между ними:
 

@@ -8,7 +8,10 @@ import {
   paymentTransitionAllowed,
 } from "@/lib/payment-notification";
 import { verifyTinkoffSignature } from "@/lib/tinkoff";
-import { revertWebOrderBenefits } from "@/lib/web-order-benefits";
+import {
+  reserveLatePaymentBenefitsTx,
+  revertWebOrderBenefits,
+} from "@/lib/web-order-benefits";
 import { CREATED_ATTEMPT_STALE_MS } from "@/lib/payment-init-retry";
 
 export const dynamic = "force-dynamic";
@@ -106,10 +109,45 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      let needsBenefitReconciliation = false;
       if (nextStatus === "CONFIRMED") {
+        const currentOrder = await tx.wbOrder.findUnique({
+          where: { id: attempt.order.id },
+          select: {
+            id: true,
+            userId: true,
+            status: true,
+            priceQuoteId: true,
+            publicOrderId: true,
+            bonusAppliedRobux: true,
+            discountAppliedKopecks: true,
+            benefitsRevertedAt: true,
+            benefitsRevision: true,
+            orderSource: true,
+          },
+        });
+        if (!currentOrder) throw new Error("payment order disappeared");
+        const reservation = await reserveLatePaymentBenefitsTx(tx, currentOrder, attempt.id);
+        needsBenefitReconciliation = !reservation.reserved;
         await tx.wbOrder.update({
           where: { id: attempt.order.id },
-          data: { status: "PENDING", paidAt: new Date(), pendingAt: new Date() },
+          data: currentOrder.status === "COMPLETED"
+            ? { paidAt: new Date() }
+            : reservation.reserved
+              ? {
+                  status: "PENDING",
+                  paidAt: new Date(),
+                  pendingAt: new Date(),
+                  rejectionReason: null,
+                  ...(currentOrder.benefitsRevertedAt
+                    ? { benefitsRevertedAt: null, benefitsRevision: reservation.revision }
+                    : {}),
+                }
+              : {
+                  status: "ERROR",
+                  paidAt: new Date(),
+                  rejectionReason: "Оплата подтверждена после автоотмены; льготы требуют ручной сверки",
+                },
         });
       } else if (paymentClosesUnfulfilledOrder(nextStatus, attempt.order.status)) {
         // A late callback from an older provider attempt must not reject an
@@ -148,7 +186,12 @@ export async function POST(req: NextRequest) {
           orderId: attempt.order.id,
           type: `PAYMENT_${nextStatus}`,
           idempotencyKey: eventKey,
-          payload: { paymentAttemptId: attempt.id, provider: "TBANK", eventHash },
+          payload: {
+            paymentAttemptId: attempt.id,
+            provider: "TBANK",
+            eventHash,
+            ...(nextStatus === "CONFIRMED" ? { needsReconciliation: needsBenefitReconciliation } : {}),
+          },
         },
       });
       if (nextStatus === "CONFIRMED" || nextStatus === "PARTIALLY_REFUNDED" || nextStatus === "REFUNDED") {
@@ -159,6 +202,7 @@ export async function POST(req: NextRequest) {
             payload: {
               orderId: attempt.order.id,
               paymentAttemptId: attempt.id,
+              ...(nextStatus === "CONFIRMED" ? { needsReconciliation: needsBenefitReconciliation } : {}),
               ...(refundNotification ? { refundedAmountKopecks, needsReconciliation: submittedRefunds.length === 0 } : {}),
             },
           },

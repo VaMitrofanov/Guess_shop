@@ -28,7 +28,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       paymentAttempts: {
         orderBy: { createdAt: "desc" },
         take: 1,
-        select: { status: true },
+        select: { status: true, provider: true, paymentUrl: true },
       },
     },
   });
@@ -46,6 +46,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     orderId: order.publicOrderId,
     status: order.status,
     paymentStatus: order.paymentAttempts[0]?.status ?? null,
+    paymentProvider: order.paymentAttempts[0]?.provider ?? null,
+    paymentUrl: order.paymentAttempts[0]?.paymentUrl ?? null,
     amountRobux: order.amount,
     amountKopecks: order.paymentAmountKopecks,
     createdAt: order.createdAt,

@@ -44,8 +44,13 @@ VK link/unlink и recovery-console остаются следующими инк�
 на УСН 6% и `max(3,49 ₽; 3,49%)`, а клиент видит фактические ₽/R$. Серверный `PriceQuote` хранит итог в
 копейках и одноразово потребляется новым `WbOrder(SITE/WEB)`. `PaymentAttempt`, `OrderEvent`
 и `OutboxMessage` образуют durable payment boundary; TG-сервис исполняет outbox с retry/dead-letter,
-а refund имеет отдельный идемпотентный audit. Production Init закрыт kill-switch до внешних
-launch-gates. ЛК читает `WbOrder` всех источников (legacy-таблица `Order` удалена 26.07),
+а refund имеет отдельный идемпотентный audit. Тот же TG-процесс выполняет provider
+reconciliation старых SITE-attempts: `GetState` → terminal transition либо `Cancel`, и только
+после терминального результата возвращает зарезервированные льготы. Поздний `CONFIRMED`
+атомарно повторно резервирует уже возвращённые bonus/discount; при конфликте платёж не
+теряется, но заказ блокируется в `ERROR` с admin alert и не попадает в выкуп. Production Init
+закрыт kill-switch до внешних launch-gates. ЛК читает `WbOrder` всех источников
+(legacy-таблица `Order` удалена 26.07),
 bonus balance и предлагает TG link только внутри fresh-auth window.
 ЛК хранит несколько публичных Roblox-профилей в `UserRobloxAccount`; поля Roblox на `User`
 остаются совместимым зеркалом выбранной записи. Список проектируется только из собственных
@@ -166,6 +171,16 @@ prisma/schema.prisma    схема БД
   Короткие ключи в `bots/shared/admin.ts` (`crn:`, `xrn:`, `rr:`). Считай длину при добавлении.
 - **Робуксы.** `amount` в БД = **чистые** робуксы (что получает продавец).
   **Грязные** (номинал геймпасса) = `Math.ceil(amount / 0.7)` — Roblox забирает 30%.
+
+### Bot hybrid checkout (09.08.2026)
+
+TG/VK не создают provider payment локально. После `DirectIntent` они подписывают точное
+тело запроса отдельным HMAC-secret и вызывают Web `/api/internal/bot-payments`. Web сверяет
+platform actor, CAS-потребляет intent и serializable-транзакцией создаёт `WbOrder(DIRECT)`,
+benefit ledger, `PaymentAttempt`, consent, event и outbox. SITE-представление ведёт на
+защищённый `/payment/status`; BOT_ACQUIRING отдаёт тот же T‑Bank `PaymentURL`; manual
+возвращает env-реквизиты и оставляет подтверждение менеджеру. Поэтому сайт, оба бота,
+webhook и worker используют одну платёжную модель и одну очередь выкупа.
 
 ## <a name="legacy"></a>Переход от legacy checkout
 

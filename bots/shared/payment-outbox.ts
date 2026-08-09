@@ -19,6 +19,11 @@ function payloadOrderId(payload: unknown) {
   return typeof value === "string" ? value : "";
 }
 
+function payloadFlag(payload: unknown, key: string) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+  return (payload as Record<string, unknown>)[key] === true;
+}
+
 const MAX_ATTEMPTS = 8;
 const LEASE_MS = 5 * 60_000;
 const POLL_MS = 15_000;
@@ -36,6 +41,7 @@ export const HANDLED_TOPICS = new Set([
   "payment.confirmed",
   "payment.refund.recorded",
   "web.order.created",
+  "bot.order.created",
 ]);
 
 /**
@@ -93,7 +99,7 @@ export async function dispatch(message: OutboxMessageLike, bot: TelegramSender) 
   if (adminIds.length === 0) throw new Error("ADMIN_IDS/TG_CHAT_ID is not configured");
 
   let adminText: string;
-  if (message.topic === "web.order.created") {
+  if (message.topic === "web.order.created" || message.topic === "bot.order.created") {
     // Заказ создан, деньги ещё не приняты. Клиенту здесь не пишем: он прямо
     // сейчас на странице оплаты, сообщение «заказ создан» только помешает.
     // Пока сообщение лежало в очереди, заказ мог уже оплатиться или отмениться —
@@ -101,19 +107,34 @@ export async function dispatch(message: OutboxMessageLike, bot: TelegramSender) 
     if (!AWAITING_PAYMENT_STATUSES.has(order.status)) return;
     const kopecks = order.paymentAmountKopecks ?? payment?.amountKopecks ?? 0;
     adminText =
-      `🆕 <b>ЗАКАЗ С САЙТА СОЗДАН</b>\n` +
+      `🆕 <b>${message.topic === "bot.order.created" ? "ЗАКАЗ ИЗ БОТА СОЗДАН" : "ЗАКАЗ С САЙТА СОЗДАН"}</b>\n` +
       `Заказ: <code>${escapeHtml(order.publicOrderId ?? order.wbCode)}</code>\n` +
       `Сумма: <b>${(kopecks / 100).toFixed(2)} ₽</b> · <b>${order.amount} R$</b>\n` +
       `Ник: ${escapeHtml(order.robloxUsername ?? "—")}\n` +
       `Статус: ожидает оплаты`;
   } else if (message.topic === "payment.confirmed") {
-    adminText =
-      `💳 <b>ОПЛАТА С САЙТА ПОДТВЕРЖДЕНА</b>\n` +
-      `Заказ: <code>${escapeHtml(order.publicOrderId ?? order.wbCode)}</code>\n` +
-      `Сумма: <b>${((payment?.amountKopecks ?? 0) / 100).toFixed(2)} ₽</b>\n` +
-      `Robux: <b>${order.amount} R$</b>\n` +
-      `Статус: ожидает выкупа`;
-    await notifyCustomer(order.user, "✅ <b>Оплата подтверждена.</b> Заказ появился в работе — статус можно смотреть в личном кабинете.", bot);
+    const needsReconciliation = payloadFlag(message.payload, "needsReconciliation") || order.status === "ERROR";
+    const paymentOrigin = payment?.provider === "MANUAL_TRANSFER"
+      ? "РУЧНОГО ПЕРЕВОДА"
+      : order.orderSource === "DIRECT" ? "БОТА" : "САЙТА";
+    adminText = needsReconciliation
+      ? `🚨 <b>ОПЛАТА ПОДТВЕРЖДЕНА — НУЖНА СВЕРКА ЛЬГОТ</b>\n` +
+        `Заказ: <code>${escapeHtml(order.publicOrderId ?? order.wbCode)}</code>\n` +
+        `Сумма: <b>${((payment?.amountKopecks ?? 0) / 100).toFixed(2)} ₽</b>\n` +
+        `Robux: <b>${order.amount} R$</b>\n` +
+        `Статус: ERROR, не выкупать до ручной сверки`
+      : `💳 <b>ОПЛАТА ИЗ ${paymentOrigin} ПОДТВЕРЖДЕНА</b>\n` +
+        `Заказ: <code>${escapeHtml(order.publicOrderId ?? order.wbCode)}</code>\n` +
+        `Сумма: <b>${((payment?.amountKopecks ?? 0) / 100).toFixed(2)} ₽</b>\n` +
+        `Robux: <b>${order.amount} R$</b>\n` +
+        `Статус: ожидает выкупа`;
+    await notifyCustomer(
+      order.user,
+      needsReconciliation
+        ? "✅ <b>Оплата подтверждена.</b> Мы вручную сверяем детали заказа; поддержка сообщит, когда он перейдёт в работу."
+        : "✅ <b>Оплата подтверждена.</b> Заказ появился в работе — статус можно смотреть в личном кабинете.",
+      bot,
+    );
   } else if (message.topic === "payment.refund.recorded") {
     adminText =
       `↩️ <b>ВОЗВРАТ ПОДТВЕРЖДЕН БАНКОМ</b>\n` +

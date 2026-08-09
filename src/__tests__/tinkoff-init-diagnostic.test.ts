@@ -39,7 +39,7 @@ describe("T-Bank Init diagnostic JSON", () => {
     jest.restoreAllMocks();
   });
 
-  it("writes one exact JSON exchange without Password or SecretKey", async () => {
+  it("writes a useful JSON exchange without secrets, email or bearer URLs", async () => {
     configureEnv(true);
     global.fetch = jest.fn().mockResolvedValue(new Response(JSON.stringify({
       Success: false,
@@ -71,9 +71,9 @@ describe("T-Bank Init diagnostic JSON", () => {
           TerminalKey: "terminal",
           Amount: 1_000,
           OrderId: "WEB-DIAGNOSTIC",
-          DATA: { Email: "owner@example.com" },
-          Receipt: { Email: "owner@example.com" },
-          Token: expect.stringMatching(/^[a-f0-9]{64}$/),
+          DATA: { Email: "[REDACTED]" },
+          Receipt: { Email: "[REDACTED]" },
+          Token: "[REDACTED]",
         },
       },
       response: {
@@ -85,6 +85,8 @@ describe("T-Bank Init diagnostic JSON", () => {
     expect(record.request.body).not.toHaveProperty("Password");
     expect(record.request.body).not.toHaveProperty("SecretKey");
     expect(serialized).not.toContain("super-secret-that-must-not-be-logged");
+    expect(serialized).not.toContain("owner@example.com");
+    expect(serialized).not.toContain("order-status-secret");
   });
 
   it("stays silent when the temporary diagnostic flag is disabled", async () => {

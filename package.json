@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "npm run lint:critical && npm run lint:regression",
-    "lint:critical": "eslint --max-warnings 0 'src/app/api/orders/**/*.{ts,tsx}' 'src/app/api/webhooks/tinkoff/**/*.{ts,tsx}' 'src/app/api/pricing/**/*.{ts,tsx}' 'src/app/api/acquiring/**/*.{ts,tsx}' 'src/app/api/account/**/*.{ts,tsx}' 'src/app/api/auth/register/**/*.{ts,tsx}' src/app/api/health/workers/route.ts src/app/api/internal/worker-alert/route.ts src/app/checkout/page.tsx src/app/register/page.tsx src/app/login/page.tsx src/instrumentation.ts src/lib/account-session.ts src/lib/auth-navigation.ts src/lib/bonus-ledger.ts src/lib/canonical-web-order.ts src/lib/email-account-lifecycle.ts src/lib/mailer.ts src/lib/payment-init-retry.ts src/lib/payment-notification.ts src/lib/site-acquiring.ts src/lib/telegram.ts src/lib/tinkoff.ts src/lib/web-order-benefits.ts src/lib/worker-watchdog.ts bots/shared/payment-outbox.ts bots/shared/worker-heartbeat.ts bots/shared/payment-worker-watchdog.ts scripts/site-acquiring-rollout.mjs",
+    "lint:critical": "eslint --max-warnings 0 'src/app/api/orders/**/*.{ts,tsx}' 'src/app/api/webhooks/tinkoff/**/*.{ts,tsx}' 'src/app/api/pricing/**/*.{ts,tsx}' 'src/app/api/acquiring/**/*.{ts,tsx}' 'src/app/api/account/**/*.{ts,tsx}' 'src/app/api/auth/register/**/*.{ts,tsx}' src/app/api/health/workers/route.ts src/app/api/internal/worker-alert/route.ts src/app/api/internal/bot-payments/route.ts src/app/checkout/page.tsx src/app/register/page.tsx src/app/login/page.tsx src/instrumentation.ts src/lib/account-session.ts src/lib/auth-navigation.ts src/lib/bonus-ledger.ts src/lib/bot-payment-auth.ts src/lib/canonical-bot-order.ts src/lib/canonical-web-order.ts src/lib/email-account-lifecycle.ts src/lib/mailer.ts src/lib/payment-init-retry.ts src/lib/payment-notification.ts src/lib/site-acquiring.ts src/lib/telegram.ts src/lib/tinkoff.ts src/lib/web-order-benefits.ts src/lib/worker-watchdog.ts bots/shared/bot-payment-api.ts bots/shared/order-benefits.ts bots/shared/payment-outbox.ts bots/shared/payment-worker-watchdog.ts bots/shared/tbank-payment.ts bots/shared/worker-heartbeat.ts scripts/site-acquiring-rollout.mjs scripts/bot-payment-env-rollout.mjs",
     "lint:regression": "node scripts/lint-regression.mjs",
     "lint:report": "eslint .",
     "test": "jest",
@@ -18,6 +18,7 @@
     "benchmark:admin": "node scripts/benchmark-admin.mjs",
     "calc:gamepass": "node --import tsx scripts/gamepass-price-calculator.ts",
     "rollout:site": "node scripts/site-acquiring-rollout.mjs",
+    "rollout:bot-payments": "node scripts/bot-payment-env-rollout.mjs",
     "postinstall": "prisma generate",
     "bot:tg": "npm --prefix bots/tg run dev",
     "bot:vk": "npm --prefix bots/vk run dev",
@@ -27,18 +28,19 @@
     "gates": "npm run lint && tsc --noEmit && npm run bots:tsc && npm test && npm run test:bots"
   },
   "dependencies": {
-    "@auth/prisma-adapter": "^2.11.1",
+    "@auth/prisma-adapter": "^2.11.3",
     "@babel/runtime": "^7.29.7",
-    "@prisma/adapter-pg": "^7.6.0",
-    "@prisma/client": "^7.7.0",
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
     "@vkid/sdk": "^2.6.6",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "dotenv": "^17.3.1",
+    "exceljs": "^4.4.0",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.7.0",
-    "next": "16.2.2",
-    "next-auth": "^5.0.0-beta.30",
+    "next": "16.3.0",
+    "next-auth": "5.0.0-beta.32",
     "nodemailer": "9.0.3",
     "pg": "^8.12.0",
     "puppeteer-core": "25.3.0",
@@ -47,7 +49,6 @@
     "recharts": "^3.8.1",
     "tailwind-merge": "^3.5.0",
     "ws": "^8.20.0",
-    "xlsx": "^0.18.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -60,18 +61,22 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.2",
+    "eslint-config-next": "16.3.0",
     "jest": "^30.3.0",
-    "prisma": "^7.7.0",
+    "prisma": "^7.9.1",
     "tailwindcss": "^4",
     "ts-jest": "^29.4.9",
-    "tsx": "^4.19.2",
+    "tsx": "^4.23.11",
     "typescript": "^5"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
   },
   "overrides": {
-    "nodemailer": "9.0.3"
+    "nodemailer": "9.0.3",
+    "minimatch@3.1.5": {
+      "brace-expansion": "1.1.18"
+    },
+    "uuid@8.3.2": "11.1.1"
   }
 }

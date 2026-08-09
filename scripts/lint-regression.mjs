@@ -50,12 +50,26 @@ import { ESLint } from "eslint";
 // фиксированный PageLoader, а Economics/Buyout/Anton получили server-first
 // initial data. Убраны 13 старых warning (включая initial-load effects), новых
 // предупреждений в затронутом admin-коде нет; полный formatter проверен.
+
+// 2026-08-09 (1096 → 1088): payment reliability batch включил bot-side
+// order-benefits в zero-warning critical corridor (совместимый Prisma boundary
+// имеет локальный documented disable), удалил stale dependency в WB search и
+// мёртвую cache-invalidation заглушку. После Next 16.3/Auth/Prisma upgrade и
+// замены SheetJS полный formatter проверен: новых warning-классов нет.
+//
+// 2026-08-09 (1088 → 1085): bot hybrid checkout удалил три ставших мёртвыми
+// legacy-импорта из TG/VK handlers. Новые HMAC/payment domain и route-файлы
+// проходят scoped ESLint без warnings; остальной сдвиг — номера строк handlers.
+//
+// 2026-08-09 (1085 → 1084): canonical manual confirmation теперь уведомляет
+// клиента только через durable outbox. Удалён второй прямой DB lookup через
+// legacy `any`; остальные изменения fingerprint — сдвиг строк payment handlers.
 //
 // Unlike --max-warnings, this has no spare capacity: adding, moving,
 // replacing or changing even one warning fails the gate. Reduce the baseline
 // only in a dedicated cleanup change after reviewing the full formatter output.
-const BASELINE_WARNING_COUNT = 1096;
-const BASELINE_SHA256 = "a4d190581ee55512bf8925e0f1f5fd8f2a8586822864f92c8c19cdc62494856d";
+const BASELINE_WARNING_COUNT = 1084;
+const BASELINE_SHA256 = "bb77faa4913abee26df0379f4216e76b9e12f68dc7e8d504721ae6e4b284afab";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);

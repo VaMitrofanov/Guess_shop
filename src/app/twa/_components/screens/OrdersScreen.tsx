@@ -2102,15 +2102,11 @@ export default function OrdersScreen({
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ action: "toggle-favorite", orderId: order.id }),
       });
-      cachedCountsInvalidate();
+      onActionDone?.();
     } catch {
       setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, isFavorite: wasFav } : o));
     }
-  }, [token, filter, isAttentionView]);
-
-  function cachedCountsInvalidate() {
-    // force refresh on next tab switch
-  }
+  }, [token, filter, isAttentionView, onActionDone]);
 
   const handlePurchaseDone = useCallback((order: Order) => {
     const fromTab = orderToTab(order);

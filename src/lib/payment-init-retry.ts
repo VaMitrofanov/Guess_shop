@@ -48,10 +48,11 @@ export async function createPaymentRetry(input: {
   orderId: string;
   idempotencyKey: string;
   receiptEmail: string;
+  statusToken?: string;
   now?: Date;
 }) {
   const now = input.now ?? new Date();
-  const rawStatusToken = createStatusToken();
+  const rawStatusToken = input.statusToken ?? createStatusToken();
 
   const result = await prisma.$transaction(async (tx) => {
     const order = await tx.wbOrder.findUnique({
@@ -65,6 +66,7 @@ export async function createPaymentRetry(input: {
         discountAppliedKopecks: true,
         benefitsRevertedAt: true,
         benefitsRevision: true,
+        orderSource: true,
         paymentAttempts: {
           orderBy: { createdAt: "asc" },
           select: { id: true, status: true, paymentUrl: true, createdAt: true },
@@ -105,9 +107,13 @@ export async function createPaymentRetry(input: {
         const bonus = await applyBonusDeltaTx(tx, {
           userId: order.userId,
           deltaRobux: -bonusRobux,
-          reason: BONUS_REASONS.WEB_ORDER_REDEMPTION,
+          reason: order.orderSource === "DIRECT"
+            ? BONUS_REASONS.DIRECT_ORDER_REDEMPTION
+            : BONUS_REASONS.WEB_ORDER_REDEMPTION,
           referenceId: order.id,
-          idempotencyKey: webOrderBonusRetryKey(order.id, nextRevision),
+          idempotencyKey: order.orderSource === "DIRECT"
+            ? `direct-order-bonus-retry:${order.id}:${nextRevision}`
+            : webOrderBonusRetryKey(order.id, nextRevision),
           metadata: { orderId: order.id, attemptNumber, revision: nextRevision } as Prisma.InputJsonValue,
         });
         if (!bonus.applied && bonus.reason === "insufficient") {

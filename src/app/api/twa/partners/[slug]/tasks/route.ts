@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "crypto";
 
 import { after, NextRequest, NextResponse } from "next/server";
-import * as XLSX from "xlsx";
 
 import { Prisma, type Partner, type PartnerBuyoutTask } from "@prisma/client";
 
@@ -23,6 +22,7 @@ import {
   type GoogleSheetsValueUpdate,
 } from "@/lib/google-sheets";
 import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepass, resolveGamepassForBuyer, type PurchaseResult } from "@/lib/roblox-buyout";
+import { PartnerXlsxParseError, parsePartnerXlsxRows } from "@/lib/partner-xlsx";
 import { notifyPartnerBuyout, type PartnerBuyoutNotifyItem } from "@/lib/partner-buyout-notify";
 import { requireAdmin, type AdminActor } from "@/lib/admin-access";
 import {
@@ -620,19 +620,13 @@ function toJsonObject(value: unknown) {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonObject;
 }
 
-function parsePartnerXlsx(buffer: Buffer) {
-  const workbook = XLSX.read(buffer, { type: "buffer" });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) throw new BuyoutError("В XLSX нет листов", 400);
-
-  const sheet = workbook.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-    defval: null,
-    raw: true,
-  });
-
-  if (rows.length > MAX_XLSX_ROWS) {
-    throw new BuyoutError(`Слишком много строк: максимум ${MAX_XLSX_ROWS}`, 400);
+async function parsePartnerXlsx(buffer: Buffer) {
+  let rows: Record<string, unknown>[];
+  try {
+    rows = await parsePartnerXlsxRows(buffer, MAX_XLSX_ROWS);
+  } catch (error) {
+    if (error instanceof PartnerXlsxParseError) throw new BuyoutError(error.message, 400);
+    throw error;
   }
 
   return rows
@@ -723,7 +717,7 @@ async function importPartnerXlsx(partner: Partner, user: PartnerOperator, file: 
   if (!file.name.toLowerCase().endsWith(".xlsx")) throw new BuyoutError("Поддерживается только .xlsx", 400);
   if (file.size > MAX_XLSX_BYTES) throw new BuyoutError("XLSX слишком большой: максимум 5 MB", 400);
 
-  const rows = parsePartnerXlsx(Buffer.from(await file.arrayBuffer()));
+  const rows = await parsePartnerXlsx(Buffer.from(await file.arrayBuffer()));
   const result: PartnerImportResult = {
     totalRows: rows.length,
     created: 0,

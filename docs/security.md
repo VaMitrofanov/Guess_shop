@@ -130,7 +130,7 @@ fail-closed понижается до `USER`. Тесты: `src/__tests__/admin-g
 Осталось за владельцем: подтвердить почту break-glass-аккаунта (`emailVerifiedAt` пуст) и
 сменить его пароль; задать `ADMIN_BREAKGLASS_EMAILS` в Coolify **до** деплоя.
 
-### 32. Оплата прямых заказов в ботах идёт мимо ККТ — MEDIUM, 🔴 ОТКРЫТО (2026-07-28)
+### 32. Оплата прямых заказов в ботах / manual transfer — HIGH, 🟡 ТЕХНИЧЕСКИ МИТИГИРОВАНО (2026-08-09)
 
 Прямые заказы в TG/VK оплачиваются переводом по статическому СБП-QR
 (`bots/shared/sbp.ts`): покупатель шлёт **скриншот**, админ сверяет его глазами и вручную
@@ -145,11 +145,29 @@ fail-closed понижается до `USER`. Тесты: `src/__tests__/admin-g
 Побочно: подтверждение оплаты держится на визуальной проверке скриншота — подделать его
 существенно проще, чем подписанный callback банка.
 
-**Что делать:** перевести прямые заказы на тот же `Init`/`PaymentURL`, что и сайт —
-[bot-acquiring-plan.md](bot-acquiring-plan.md). Ключевое препятствие: чеку нужен email или
-телефон, а из 589 клиентов ботов контакт для чека есть у нуля. До реализации СБП-QR
-остаётся, но новых нефискальных каналов открывать нельзя. Гейт B2 (письменная категория от
-Т‑Банка) распространяется и на ботов.
+**Реализовано 09.08:** hybrid checkout — готовая страница сайта и кнопка в боте используют
+один `TBANK` attempt/`PaymentURL`; signed webhook подтверждает оплату. Bot→Web запрос
+подписан отдельным HMAC-secret с timestamp window, actor/intent ownership сверяется по БД,
+intent потребляется CAS, сумма и льготы не принимаются из callback. Status link содержит
+opaque bearer token, в БД только hash. Manual path получает `MANUAL_TRANSFER` attempt;
+proof никогда не подтверждает его автоматически, а `pay_ok` отказывает для TBANK.
+
+Provider Init защищён отдельным DB single-flight claim: повторный тап или replay не вызывает
+второй запрос в банк. После полученного provider success локальная ошибка сохранения не
+переводит attempt в `FAILED` и не компенсирует льготы; состояние остаётся live и требует
+reconciliation. Просроченный intent отдельно фиксируется `EXPIRED` после rollback основной
+serializable-транзакции.
+
+Raw реквизиты находятся только в Web runtime env и возвращаются официальному боту по HMAC;
+в order сохраняется лишь config version. SITE/BOT и manual нельзя создать параллельно для
+одного intent. Скриншот recovery выбирает только manual/legacy attempt. Согласие с текущей
+версией оферты/политики фиксируется на заказе и в append-only `ConsentEvidence`.
+
+**Открытая граница:** автоматическая отправка реквизитов не создаёт фискальный чек. До
+production-эксплуатации fallback бухгалтер/владелец должны подтвердить допустимость получателя,
+кассовый контур, доставку чека и возвратный чек. Raw реквизиты разрешены только в secret
+env/HANDOFF, запрещены в Git/Trello/log/public API. Полный threat model и rollout —
+[bot-acquiring-plan.md](bot-acquiring-plan.md).
 
 ### 30. Служебные bearer-роуты без лимитов — 🟡 ЧАСТИЧНО ЗАКРЫТО (2026-07-28)
 
@@ -164,18 +182,17 @@ fail-closed понижается до `USER`. Тесты: `src/__tests__/admin-g
 **Осталось:** `rateLimit` по IP на оба роута и удаление ссылки на `/admin/login` со страницы
 входа клиента. См. §3 S5–S6 и волну 4.
 
-### 31. Мёртвый `initTinkoffPayment` и диагностический JSON-лог `Init` — LOW, 🔴 ОТКРЫТО (2026-07-28)
+### 31. Мёртвый payment path и чувствительный диагностический лог — LOW, ✅ ЗАКРЫТО (2026-08-09)
 
-`src/lib/tinkoff.ts:49` — легаси-инициализация платежа **без** `NotificationURL` и `Receipt`,
-с рублями вместо копеек. Не вызывается ниоткуда, но пока экспортируется — любой будущий вызов
-создаст нефискализированный платёж, о котором мы не узнаем.
+Опасный legacy-path инициализации без `NotificationURL`/`Receipt` и с рублями вместо копеек
+удалён 09.08. Канонический `Init` остаётся единственной точкой создания SITE-платежа.
 
-Рядом — `logTinkoffInitExchange`: печатает точный body `Init`, включая `receiptEmail` и
-**bearer-токен статуса заказа** внутри callback-URL. В production `TBANK_DIAGNOSTIC_JSON_LOGS`
-корректно `false` ✅, но в preview-scope `true`.
+Рядом `logTinkoffInitExchange` исторически печатал точный body `Init`, включая email,
+provider Token, PaymentURL и **bearer-токен статуса заказа** внутри callback-URL.
 
-**Что делать:** удалить обе конструкции после закрытия кейса Т‑Банка; если диагностика
-остаётся — маскировать `token=` перед записью и выключить флаг в preview. См. §3 S3–S4.
+Лог сохранён для поддержки, но теперь рекурсивно маскирует email, provider Token,
+Password/SecretKey, PaymentURL и query-параметр `token`; regression test запрещает появление
+исходных email/status bearer. Флаг по-прежнему должен быть выключен вне controlled E2E.
 
 ### 1. TWA auth fallback (Path 2) — ✅ ЗАКРЫТО 2026-07-26
 `src/app/api/twa/auth/route.ts`: если запрос без `initData`, роут доверяет `userId` из тела
@@ -1011,10 +1028,9 @@ Password рабочего терминала был опубликован в о
 в чатах/скриншотах. Верификация должна выводить только факт совпадения/длину, не значение.
 
 Для одного повторного E2E допускается временный `TBANK_DIAGNOSTIC_JSON_LOGS=true`. Он пишет
-полный `Init` request/response для поддержки, но никогда не включает Password/SecretKey.
-Запись всё равно чувствительна: содержит email, provider Token и bearer token callback URL.
-Доступ — только инфраструктурным операторам; передача — только поддержке Т‑Банка; после
-теста флаг выключается и Web перезапускается. Постоянное полное payment-логирование запрещено.
+структурированный `Init` request/response для поддержки, но маскирует Password/SecretKey,
+email, provider Token, PaymentURL и bearer token callback URL. После теста флаг всё равно
+выключается и Web перезапускается. Постоянное полное payment-логирование запрещено.
 
 ## Полный refund не закрывал очередь выкупа — HIGH, ИСПРАВЛЕНО (2026-07-27)
 
@@ -1132,3 +1148,51 @@ Admin settings/buyout/economics API проходят `requireAdmin` и отве�
 а не Prisma-модели с password hash; operational TTL 10 s, finance/audience 60 s и community
 300 s ограничивают stale window. Основные admin/TWA mutation paths инвалидируют tags;
 внешние изменения всё равно сходятся по TTL.
+
+## Late payment после автоотмены — CRITICAL, ✅ ЗАКРЫТО В КОДЕ (2026-08-09)
+
+На момент аудита SITE-заказ автоматически отменялся через два часа, после чего бонус/скидка
+возвращались, но provider attempt оставался `INITIATED`. В production обнаружены две такие
+пары; поздний signed `CONFIRMED` мог вернуть заказ в `PENDING` без повторного резерва льгот.
+
+Исправление: bot worker сверяет `GetState`, stale provider-сессию закрывает через `Cancel`
+без refund Amount и только после terminal state возвращает benefits. Старые terminal-order +
+live-attempt входят в ту же выборку. Поздний `CONFIRMED` в webhook/GetState атомарно
+повторно резервирует льготы; если guarded debit невозможен, заказ получает `ERROR`, outbox
+поднимает отдельную admin-тревогу и выкуп блокируется. Несовпадение PaymentId/OrderId/Amount
+и network/provider error fail-closed. Покрыто unit/integration regression tests.
+
+Операционный остаток до deploy: две ранее найденные production-пары будут обработаны первым
+проходом нового worker; до этого их provider state не изменён этим кодовым batch.
+
+## Production dependency advisories — CRITICAL, ✅ ЗАКРЫТО (2026-08-09)
+
+Исходный снимок `npm audit --omit=dev` содержал 14 advisories, включая 2 critical:
+`next@16.2.2`, `next-auth@5.0.0-beta.31`, `@auth/core@0.41.2` и `xlsx@0.18.5`.
+Ключевые записи:
+
+- [Auth.js configuration error fail-open](https://github.com/advisories/GHSA-8fpg-xm3f-6cx3);
+- [Auth.js Unicode email normalization bypass](https://github.com/advisories/GHSA-7rqj-j65f-68wh);
+- [Auth.js malformed Bearer DoS](https://github.com/advisories/GHSA-xmf8-cvqr-rfgj);
+- Next.js 16.2.2 попадает в несколько middleware/proxy bypass, DoS и SSRF ranges;
+- SheetJS prototype pollution/ReDoS; у npm-пакета нет fix.
+
+Обновлено: Next `16.3.0`, next-auth `5.0.0-beta.32`, `@auth/prisma-adapter 2.11.3`,
+Prisma `7.9.1`. `xlsx` полностью удалён; admin XLSX import использует ExcelJS с лимитом
+5 MB/300 строк и игнорированием styles/drawings/hyperlinks/validation nodes. Точечные
+transitive overrides закрепляют patched `uuid` и `brace-expansion`. И полный `npm audit`,
+и `npm audit --omit=dev` возвращают 0 advisories. Отдельные lockfile TG/VK также обновлены
+до Prisma 7.9.1/tsx 4.23.11 и проходят полный audit с нулём advisories; CI проверяет все три
+dependency-графа, а не только корень.
+
+## Будущее ослабление PostgreSQL TLS — MEDIUM, ✅ ЗАКРЫТО (2026-08-09)
+
+Исходный production build предупреждал: текущие `pg/pg-connection-string` трактуют
+`sslmode=require` как `verify-full`, но следующая major-версия перейдёт к более слабой
+libpq-семантике. До обновления `pg` закрепить в production DSN явный
+`sslmode=verify-full` и проверить совместимость сертификата/hostname Neon. Не использовать
+`uselibpqcompat=true&sslmode=require`, если ослабление проверки не принято отдельно.
+
+Web pool, bot pool и Prisma CLI теперь нормализуют legacy `sslmode=require` в явный
+`sslmode=verify-full`; `.env.example` сразу задаёт строгий режим. Prisma validate/build
+проходят без прежнего TLS warning.

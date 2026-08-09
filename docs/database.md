@@ -155,8 +155,9 @@ robloxUsername, userId+createdAt).
 
 ### `DirectIntent` — намерение прямого заказа
 Создаётся только когда есть реквизиты (сумма/бонус/скидка/ник/gamepass). Статус
-`DirectIntentStatus`: `PENDING` (ждёт менеджера, живёт 24 ч) → `CONSUMED` (превращён в
-`WbOrder` `DIR-…` через QR/реквизиты — из TG-карточки или TWA-вкладки «Прямой») /
+`DirectIntentStatus`: `PENDING` (ждёт выбора оплаты, живёт 24 ч) → `CONSUMED` (атомарно
+превращён в `WbOrder` `DIR-…` через Bot→Web hybrid checkout; legacy TG/TWA действия
+используют тот же compare-and-set) /
 `CANCELLED` (отклонён) / `EXPIRED` (>24 ч, авто). Предотвращает «мёртвые» полу-заказы.
 
 С 24.07.2026 менеджер может создать прямой заказ вручную из TWA → Orders → «Прямой» → «+».
@@ -261,6 +262,13 @@ audit-event и outbox.
   `nextAttemptAt`, `lockedAt`, `lastError`). TG-service worker реализует lease, capped
   exponential retry и dead-letter alert; детали — `payments-and-kkt.md`.
 
+С 09.08 direct bot order использует ту же модель без новой таблицы: уникальный
+`webIdempotencyKey=direct-intent:<id>`, opaque `BOT-…` public ID, status-token hash,
+receipt email и consent fields находятся в `WbOrder`. Эквайринг создаёт
+`PaymentAttempt.provider=TBANK`, перевод — `MANUAL_TRANSFER`; у manual `paymentId/paymentUrl`
+пусты, а config version хранится безопасной меткой в `paymentDetails`. Полные реквизиты в
+БД заказа не копируются.
+
 Checkout принимает только `quoteId`: сервер повторно проверяет ownership/TTL/status/version,
 Roblox owner, sale-state и точную gross-цену. Создание SITE-order пока требует verified
 web-сессию; гостевой verified email/magic-link остаётся отдельным инкрементом. Боевой Init
@@ -269,7 +277,13 @@ fail-closed за `SITE_ACQUIRING_ENABLED=false` и обязательными К
 `BonusLedger` в той же транзакции; одноразовый `rubleDiscount` обнуляется там же. Поэтому две
 параллельные quotes не могут потратить одну льготу дважды. При неопределённом результате Init
 льгота остаётся привязанной к сохранённому заказу до reconciliation/cancel, а не возвращается
-автоматически с риском двойного расхода.
+автоматически с риском двойного расхода. Фоновый sweep сверяет старые provider attempts через
+T‑Bank `GetState`: терминальный отказ закрывает attempt и только затем возвращает льготы,
+`CONFIRMED` проводит тот же durable event/outbox path, а незавершённый платёж сначала
+отменяется через `Cancel`. Если поздняя подтверждённая оплата пришла после уже проведённой
+компенсации, бонус и скидка повторно резервируются одной guarded-транзакцией. Недостаток
+баланса не скрывается: платёж остаётся подтверждённым, заказ получает `ERROR`, а outbox
+требует ручной reconciliation и не разрешает выкуп.
 
 ### `PurchaseBatch`
 Durable-запись одной пачки «Выкупить всё»: `accountName` (донор), `startedAt`/`finishedAt`,

@@ -32,6 +32,8 @@ type OrderSnapshot = {
   orderId: string;
   status: string;
   paymentStatus: string | null;
+  paymentProvider: string | null;
+  paymentUrl: string | null;
   amountRobux: number;
   amountKopecks: number | null;
   createdAt: string;
@@ -39,6 +41,8 @@ type OrderSnapshot = {
 
 const FAILED_ORDER = new Set(["REJECTED", "ERROR"]);
 const FAILED_PAYMENT = new Set(["REJECTED", "CANCELED", "FAILED"]);
+const PAYMENT_POLL_INTERVAL_MS = 5_000;
+const PAYMENT_AUTO_POLL_MAX_MS = 10 * 60_000;
 
 function formatMoney(kopecks: number | null | undefined) {
   return typeof kopecks === "number"
@@ -87,9 +91,12 @@ function StatusContent() {
   useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
+    const startedAt = Date.now();
     const poll = async () => {
       const terminal = await load();
-      if (!cancelled && !terminal) timer = window.setTimeout(poll, 5_000);
+      if (!cancelled && !terminal && Date.now() - startedAt < PAYMENT_AUTO_POLL_MAX_MS) {
+        timer = window.setTimeout(poll, document.hidden ? 15_000 : PAYMENT_POLL_INTERVAL_MS);
+      }
     };
     void poll();
     return () => { cancelled = true; if (timer) window.clearTimeout(timer); };
@@ -164,11 +171,18 @@ function StatusContent() {
           {snapshot && <dl className={styles.orderSummary}>
             <div><dt>Заказ</dt><dd>{snapshot.orderId}</dd></div>
             <div><dt>Получишь</dt><dd>{snapshot.amountRobux.toLocaleString("ru-RU")} R$</dd></div>
-            <div><dt>Оплачено</dt><dd>{formatMoney(snapshot.amountKopecks)}</dd></div>
+            <div><dt>{phase > 0 ? "Оплачено" : "К оплате"}</dt><dd>{formatMoney(snapshot.amountKopecks)}</dd></div>
           </dl>}
         </header>
 
         {loadError && <div className={styles.networkNotice} role="alert"><CircleAlert size={19} /><span><strong>{loadError === "not-found" ? "Заказ недоступен по этой ссылке" : "Не удалось обновить статус"}</strong><small>{loadError === "not-found" ? "Войди в аккаунт владельца или открой полную секретную ссылку после оплаты." : "Проверь интернет. Последние загруженные данные остались на экране."}</small></span>{loadError === "network" && <button type="button" onClick={() => { setLoading(true); setRefreshNonce((value) => value + 1); }}><RotateCcw size={16} /> Повторить</button>}</div>}
+
+        {snapshot?.paymentUrl && phase === 0 && !failed && (
+          <section className={styles.checkoutAction} aria-label="Оплата заказа">
+            <div><strong>Всё уже заполнено</strong><span>Ник, геймпасс, сумма и email для чека сохранены. Осталось подтвердить оплату в защищённой форме Т‑Банка.</span></div>
+            <a href={snapshot.paymentUrl} rel="nofollow"><ShieldCheck size={18} /> Оплатить {formatMoney(snapshot.amountKopecks)}</a>
+          </section>
+        )}
 
         <div className={styles.contentGrid}>
           <section className={styles.timelineCard} aria-label="Этапы заказа">

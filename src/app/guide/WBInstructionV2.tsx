@@ -173,7 +173,7 @@ export default function WBInstructionV2({
     } finally {
       setSearching(false);
     }
-  }, [nick, expectedPrice, isSite]);
+  }, [nick, expectedPrice, isSite, code]);
 
   // Which channel did the user pick earlier (TG/VK)? Drives the single CTA button
   // at the bottom. orderPlaced = the order is already materialised (site one-tap

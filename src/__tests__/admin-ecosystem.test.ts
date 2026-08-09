@@ -172,7 +172,8 @@ describe("admin ecosystem", () => {
         uniqueBuyers: n(2),
         repeatBuyers: n(1),
         availableCodes: n(740),
-        reservedCodes: n(30),
+        reservedCodes: n(1),
+        expiredReservedCodes: n(29),
       }])
       .mockResolvedValueOnce([
         {
@@ -223,6 +224,8 @@ describe("admin ecosystem", () => {
       uniqueBuyers: 2,
       repeatBuyers: 1,
       availableCodes: 740,
+      reservedCodes: 1,
+      expiredReservedCodes: 29,
     }));
     expect(dashboard.sourceBreakdown[0]).toEqual({ source: "WB", orders: 587, robux: 450000 });
     expect(dashboard.heartbeats[0]).toEqual(expect.objectContaining({ service: "tg-payment-outbox", status: "HEALTHY" }));

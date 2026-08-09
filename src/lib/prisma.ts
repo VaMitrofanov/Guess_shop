@@ -19,9 +19,11 @@ export const databasePoolMax = poolSize();
 function buildPoolerUrl(raw: string): string {
   try {
     const u = new URL(raw);
-    if (u.hostname.includes("-pooler.")) return raw;
-    u.hostname = u.hostname.replace(/^(ep-[^.]+)(\.)/,  "$1-pooler$2");
+    if (!u.hostname.includes("-pooler.")) {
+      u.hostname = u.hostname.replace(/^(ep-[^.]+)(\.)/,  "$1-pooler$2");
+    }
     u.searchParams.delete("channel_binding");
+    if (u.searchParams.get("sslmode") === "require") u.searchParams.set("sslmode", "verify-full");
     return u.toString();
   } catch { return raw; }
 }

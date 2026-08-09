@@ -523,12 +523,18 @@ export function startReviewReminderCron(bot: Telegraf): void {
     );
   }, 10 * 60 * 1000); // every 10 min
 
-  // U3: брошенные без оплаты web-заказы — авто-отмена + возврат бонуса/скидки.
-  // Каждые 15 минут; без этого крона накопленное клиента сгорало молча.
+  // Брошенные web-заказы: GetState → при необходимости Cancel → только затем
+  // авто-отмена и возврат bonus/discount. Каждые 15 минут.
   const runStaleSweep = () =>
     sweepStaleWebOrders()
-      .then(({ swept, reverted }) => {
-        if (swept > 0) console.log(`[StaleWebOrders] отменено ${swept}, компенсировано ${reverted}`);
+      .then(({ scanned, swept, reverted, reconciled, manual, deferred }) => {
+        if (scanned > 0) {
+          console.log(
+            `[StaleWebOrders] проверено ${scanned}, закрыто ${swept}, ` +
+            `компенсировано ${reverted}, оплачено ${reconciled}, ` +
+            `ручная сверка ${manual}, отложено ${deferred}`,
+          );
+        }
       })
       .catch((err) => console.error("[StaleWebOrders] error:", err));
 

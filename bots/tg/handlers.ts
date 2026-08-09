@@ -11,8 +11,8 @@ import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, vkSendPhoto, stripHtml, tgSend, escapeHtml } from "../shared/notify";
 import { getSbpQrBuffer } from "../shared/sbp";
-import { sendAdminOrderCard, sendAdminReviewCard, notifySupportShown, notifyUserHurdle, notifyAdminsRetailBuyout, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminIntentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, formatUserHandle, formatUserHandleHtml, orderCode } from "../shared/admin";
-import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
+import { sendAdminReviewCard, notifySupportShown, notifyUserHurdle, notifyAdminsRetailBuyout, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, formatUserHandleHtml, orderCode } from "../shared/admin";
+import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingDirectPaymentEmail, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
 import { getGamepassDetails, getGamepassProductInfo, purchaseGamepassVerified, getRobuxBalance, resetPurchaseCsrf } from "../shared/roblox";
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "../shared/roblox-purchase-script";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
@@ -29,6 +29,7 @@ import { buildAdminKeyboard } from "./admin";
 import { buildOrderProfitSnapshot } from "../shared/order-profit";
 import { buildTelegramWebLoginUrl, parseTelegramWebLoginStart } from "../shared/telegram-web-login";
 import { browserFailureMessage, getBrowserSession, isBrowserInfrastructureFailure } from "../shared/browser-purchase";
+import { createBotPayment, type BotPaymentMethod } from "../shared/bot-payment-api";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,68 @@ function menuReplyKb() {
 function fmtRub(n: number): string {
   if (n >= 1000) return `${Math.floor(n / 1000)} ${String(n % 1000).padStart(3, "0")} ₽`;
   return `${n} ₽`;
+}
+
+const RECEIPT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function botPaymentChoiceKb(intentId: string) {
+  const base = (process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru").replace(/\/$/, "");
+  return Markup.inlineKeyboard([
+    [Markup.button.callback("🌐 Оплатить на сайте", CB.directPaySite(intentId))],
+    [Markup.button.callback("🏦 Эквайринг в боте", CB.directPayBank(intentId))],
+    [Markup.button.callback("💳 Перевод по реквизитам", CB.directPayManual(intentId))],
+    [Markup.button.url("Оферта", `${base}/legal/offer`), Markup.button.url("Политика", `${base}/legal/policy`)],
+    [Markup.button.callback("❌ Отменить", CB.userCancelIntent(intentId))],
+  ]);
+}
+
+async function completeTelegramBotPayment(ctx: any, intentId: string, method: BotPaymentMethod, receiptEmail: string) {
+  const result = await createBotPayment({
+    intentId,
+    method,
+    receiptEmail: receiptEmail.toLowerCase(),
+    platform: "TG",
+    subject: String(ctx.from.id),
+  });
+  const amount = fmtRub(result.amountKopecks / 100);
+  if (method === "MANUAL_TRANSFER" && result.manual) {
+    pendingPaymentScreenshot.set(ctx.from.id, result.orderId);
+    await ctx.reply(
+      `💳 <b>Перевод по реквизитам</b>\n\n` +
+      `Банк: <b>${escapeHtml(result.manual.bank)}</b>\n` +
+      `Получатель: <b>${escapeHtml(result.manual.recipient)}</b>\n` +
+      `Телефон: <code>${escapeHtml(result.manual.phone)}</code>\n` +
+      `Сумма: <b>${amount}</b>\n\n` +
+      `Переведи точную сумму и пришли сюда скриншот чека фотографией. Менеджер подтвердит оплату вручную.`,
+      { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.url("📊 Статус заказа", result.statusUrl)]]) },
+    );
+  } else if (method === "SITE") {
+    await ctx.reply(
+      `🌐 <b>Оплатить на сайте будет удобнее</b>\n\nВсё уже подгружено: заказ, геймпасс, сумма ${amount} и email для чека. Открой страницу — останется только нажать «Оплатить».`,
+      { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.url("🌐 Открыть готовый заказ", result.statusUrl)]]) },
+    );
+  } else {
+    await ctx.reply(
+      `🏦 <b>Оплата через Т‑Банк</b>\n\nСумма: <b>${amount}</b>. Оплата подтверждается автоматически — скриншот не нужен.`,
+      { parse_mode: "HTML", ...Markup.inlineKeyboard([
+        [Markup.button.url("🔐 Оплатить в Т‑Банке", result.paymentUrl!)],
+        [Markup.button.url("📊 Статус на сайте", result.statusUrl)],
+      ]) },
+    );
+  }
+}
+
+async function startTelegramBotPayment(ctx: any, intentId: string, method: BotPaymentMethod) {
+  const user = await (db as any).user.findUnique({ where: { tgId: String(ctx.from.id) }, select: { email: true } });
+  if (user?.email) {
+    await completeTelegramBotPayment(ctx, intentId, method, user.email);
+    return;
+  }
+  pendingDirectPaymentEmail.set(ctx.from.id, { intentId, method });
+  await ctx.reply(
+    `🧾 <b>Email для электронного чека</b>\n\nПришли email одним сообщением. После этого подготовлю оплату автоматически.\n\nПродолжая, ты принимаешь оферту и политику конфиденциальности.`,
+    { parse_mode: "HTML" },
+  );
 }
 
 /** Visual step indicator: ● ● ○ ○ ○  Шаг 2 · Подтверждение */
@@ -1512,6 +1575,7 @@ export function registerText(bot: Telegraf): void {
       pendingLink.delete(ctx.from.id);
       pendingRobloxNick.delete(ctx.from.id);
       pendingDirectFlow.delete(ctx.from.id);
+      pendingDirectPaymentEmail.delete(ctx.from.id);
       pendingNickEdit.delete(ctx.from.id);
       pendingPaymentScreenshot.delete(ctx.from.id);
       pendingReview.delete(ctx.from.id);
@@ -1628,6 +1692,23 @@ export function registerText(bot: Telegraf): void {
         } catch { }
       }
       await ctx.reply(`✅ Реквизиты отправлены пользователю (заказ <code>${dirOrder.wbCode}</code>)`, { parse_mode: "HTML" });
+      return;
+    }
+
+    // 1b. USER DIRECT ORDER — custom amount input OR nick input
+    const paymentEmail = pendingDirectPaymentEmail.get(ctx.from.id);
+    if (!isAdmin && paymentEmail) {
+      if (!RECEIPT_EMAIL_RE.test(text) || text.length > 254) {
+        await ctx.reply("⚠️ Не похоже на email. Проверь адрес и пришли ещё раз, например: name@example.com");
+        return;
+      }
+      pendingDirectPaymentEmail.delete(ctx.from.id);
+      try {
+        await completeTelegramBotPayment(ctx, paymentEmail.intentId, paymentEmail.method, text);
+      } catch (error) {
+        console.error("[TG] bot payment create failed:", error);
+        await ctx.reply(`❌ ${escapeHtml(error instanceof Error ? error.message : "Не удалось подготовить оплату")}. Нажми способ оплаты ещё раз.`, { parse_mode: "HTML" });
+      }
       return;
     }
 
@@ -3044,7 +3125,14 @@ export function registerPhoto(bot: Telegraf): void {
     // 0b. DB recovery: bot restarted while user was in PAYMENT_PENDING state
     {
       const pendingPayOrder = await (db as any).wbOrder.findFirst({
-        where: { userId: user.id, status: "PAYMENT_PENDING" },
+        where: {
+          userId: user.id,
+          status: "PAYMENT_PENDING",
+          OR: [
+            { paymentAttempts: { some: { provider: "MANUAL_TRANSFER", status: "INITIATED" } } },
+            { paymentAttempts: { none: {} } },
+          ],
+        },
         orderBy: { createdAt: "desc" },
       });
       if (pendingPayOrder) {
@@ -4330,7 +4418,25 @@ export function registerCallbacks(bot: Telegraf): void {
       return;
     }
 
-    // dir_submit: user confirms the full intent → save to DB, notify admins
+    // Customer chooses one of the three automated payment paths.
+    if (data.startsWith("dps:") || data.startsWith("dpb:") || data.startsWith("dpm:")) {
+      const intentId = data.slice(4);
+      const method: BotPaymentMethod = data.startsWith("dps:")
+        ? "SITE"
+        : data.startsWith("dpb:") ? "BOT_ACQUIRING" : "MANUAL_TRANSFER";
+      try {
+        await startTelegramBotPayment(ctx, intentId, method);
+      } catch (error) {
+        console.error("[TG] payment choice failed:", error);
+        await ctx.reply(`❌ ${escapeHtml(error instanceof Error ? error.message : "Не удалось подготовить оплату")}. Попробуй другой способ или повтори позже.`, {
+          parse_mode: "HTML",
+          ...botPaymentChoiceKb(intentId),
+        });
+      }
+      return;
+    }
+
+    // dir_submit: user confirms the full intent → save to DB and choose payment
     if (data === CB.directSubmit) {
       const flow = pendingDirectFlow.get(ctx.from.id);
       if (!flow || flow.step !== "summary" || !flow.gamepassId || !flow.robloxUsername) {
@@ -4359,11 +4465,8 @@ export function registerCallbacks(bot: Telegraf): void {
         try {
           await ctx.editMessageText(
             `⏳ У тебя уже есть активная заявка на <b>${existingIntent.totalAmount} R$</b>.\n\n` +
-            `Дождись реквизитов от менеджера или отмени заявку.`,
-            { parse_mode: "HTML", ...Markup.inlineKeyboard([
-              [Markup.button.callback("❌ Отменить заявку", CB.userCancelIntent(existingIntent.id))],
-              [Markup.button.callback("📊 Статус заказа", CB.refreshStatus)],
-            ]) }
+            `Выбери, как оплатить: на готовой странице сайта, через Т‑Банк здесь или переводом по реквизитам.`,
+            { parse_mode: "HTML", ...botPaymentChoiceKb(existingIntent.id) }
           );
         } catch { }
         return;
@@ -4376,7 +4479,7 @@ export function registerCallbacks(bot: Telegraf): void {
         try {
           await ctx.editMessageText(
             `⏳ У тебя уже есть активный заказ на <b>${existingOrder.amount} R$</b>.\n\n` +
-            `Дождись реквизитов от менеджера, а затем оформи новый.`,
+            `Заверши или дождись обработки текущей оплаты, а затем оформи новый.`,
             { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("📊 Статус заказа", CB.refreshStatus)]]) }
           );
         } catch { }
@@ -4406,45 +4509,27 @@ export function registerCallbacks(bot: Telegraf): void {
         return;
       }
 
-      const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name || "Пользователь");
-      const prevOrdersCount = await (db as any).wbOrder.count({
-        where: { userId: dirUser.id, status: "COMPLETED" },
-      });
+      await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(
+        id,
+        `🔷 <b>Новая заявка · клиент выбирает оплату</b>\n` +
+        `Канал: TG · Ник: <b>${escapeHtml(flow.robloxUsername!)}</b> · ${flow.totalAmount} R$ · ${fmtRub(flow.rublePrice!)}`,
+      )));
 
-      await sendAdminIntentCard({
-        intentId:            intent.id,
-        userId:              dirUser.id,
-        amount:              flow.amount!,
-        bonus:               flow.bonus ?? 0,
-        totalAmount:         flow.totalAmount!,
-        rublePrice:          flow.rublePrice!,
-        robloxUsername:       flow.robloxUsername!,
-        gamepassUrl:         flow.gamepassUrl!,
-        gamepassName:        flow.gamepassName,
-        gamepassRobux:       flow.gamepassRobux,
-        userDisplay:         `${tgDisplay} (ID: ${ctx.from.id})`,
-        tgId,
-        platform:            "TG",
-        createdAt:           intent.createdAt,
-        previousOrdersCount: prevOrdersCount,
-      });
-
-      const intentKb = Markup.inlineKeyboard([
-        [Markup.button.callback("❌ Отменить заявку", CB.userCancelIntent(intent.id))],
-        [Markup.button.callback("📊 Проверить статус", CB.refreshStatus)],
-        [faqBtn()],
-      ]);
+      const receiptLine = dirUser.email
+        ? `\n🧾 Чек: <b>${escapeHtml(dirUser.email)}</b>`
+        : `\n🧾 Перед оплатой попрошу email для чека.`;
       const intentMsg =
-        `✅ <b>Заявка отправлена!</b>\n\n` +
+        `✅ <b>Заказ подготовлен</b>\n\n` +
         `📦 ${flow.totalAmount} R$ → <b>${escapeHtml(flow.robloxUsername!)}</b>\n` +
-        `💰 К оплате: <b>${fmtRub(flow.rublePrice!)}</b>\n\n` +
-        `⏱ Менеджер пришлёт реквизиты — обычно в течение 5 минут.\nОжидай сообщения 👇`;
+        `💰 К оплате: <b>${fmtRub(flow.rublePrice!)}</b>${receiptLine}\n\n` +
+        `🌐 На сайте удобнее: всё уже будет заполнено. Но можно остаться здесь — оплатить через Т‑Банк или переводом по реквизитам.\n\n` +
+        `Нажимая способ оплаты, ты принимаешь оферту и политику конфиденциальности.`;
       try {
-        await ctx.editMessageText(intentMsg, { parse_mode: "HTML", ...intentKb });
+        await ctx.editMessageText(intentMsg, { parse_mode: "HTML", ...botPaymentChoiceKb(intent.id) });
       } catch {
-        await ctx.reply(intentMsg, { parse_mode: "HTML", ...intentKb });
+        await ctx.reply(intentMsg, { parse_mode: "HTML", ...botPaymentChoiceKb(intent.id) });
       }
-      await ctx.answerCbQuery("✅ Заявка отправлена!").catch(() => {});
+      await ctx.answerCbQuery("✅ Выбери способ оплаты").catch(() => {});
       return;
     }
 
@@ -4478,6 +4563,7 @@ export function registerCallbacks(bot: Telegraf): void {
         ADMIN_IDS.map(id => tgSend(id, `❌ Заявка ${escapeHtml(intent.robloxUsername)} · ${intent.totalAmount} R$ отменена покупателем.`))
       );
       await ctx.answerCbQuery("Заявка отменена").catch(() => {});
+      pendingDirectPaymentEmail.delete(ctx.from.id);
       return;
     }
 
@@ -4722,6 +4808,11 @@ export function registerCallbacks(bot: Telegraf): void {
       let newOrder: any;
       try {
         newOrder = await (db as any).$transaction(async (tx: any) => {
+          const consumed = await tx.directIntent.updateMany({
+            where: { id: intentId, status: "PENDING" },
+            data: { status: "CONSUMED" },
+          });
+          if (consumed.count !== 1) throw new Error("intent already consumed");
           const ord = await tx.wbOrder.create({
             data: {
               amount:        intent.totalAmount,
@@ -4742,11 +4833,10 @@ export function registerCallbacks(bot: Telegraf): void {
               gamepassId: extractGamepassId(intent.gamepassUrl),
             },
           });
-          await tx.directIntent.update({ where: { id: intentId }, data: { status: "CONSUMED" } });
           // U4: списание бонуса — через единую точку (`increment` + запись в
           // `BonusLedger`), а не `balance = 0` без следа в журнале.
           if (intent.bonus > 0) {
-            await applyBonusDeltaTx(tx, {
+            const bonusApplied = await applyBonusDeltaTx(tx, {
               userId: intent.userId,
               deltaRobux: -intent.bonus,
               reason: BONUS_REASONS.DIRECT_ORDER_REDEMPTION,
@@ -4754,13 +4844,18 @@ export function registerCallbacks(bot: Telegraf): void {
               idempotencyKey: directOrderBonusKey(ord.id),
               metadata: { intentId, wbCode: dirCode },
             });
+            if (!bonusApplied) throw new Error("bonus balance changed");
             await tx.user.update({
               where: { id: intent.userId },
               data: { reviewBonusGrantedAt: null, bonusExpiresAt: null, reviewReminderLevel: 0 },
             });
           }
-          if (intent.user.rubleDiscount > 0) {
-            await tx.user.update({ where: { id: intent.userId }, data: { rubleDiscount: 0 } });
+          if (intent.rubleDiscount > 0) {
+            const discountApplied = await tx.user.updateMany({
+              where: { id: intent.userId, rubleDiscount: { gte: intent.rubleDiscount } },
+              data: { rubleDiscount: { decrement: intent.rubleDiscount } },
+            });
+            if (discountApplied.count !== 1) throw new Error("discount changed");
           }
           return ord;
         });
@@ -4817,6 +4912,11 @@ export function registerCallbacks(bot: Telegraf): void {
       let newOrder: any;
       try {
         newOrder = await (db as any).$transaction(async (tx: any) => {
+          const consumed = await tx.directIntent.updateMany({
+            where: { id: intentId, status: "PENDING" },
+            data: { status: "CONSUMED" },
+          });
+          if (consumed.count !== 1) throw new Error("intent already consumed");
           const ord = await tx.wbOrder.create({
             data: {
               amount:        intent.totalAmount,
@@ -4835,9 +4935,8 @@ export function registerCallbacks(bot: Telegraf): void {
               gamepassId: extractGamepassId(intent.gamepassUrl),
             },
           });
-          await tx.directIntent.update({ where: { id: intentId }, data: { status: "CONSUMED" } });
           if (intent.bonus > 0) {
-            await applyBonusDeltaTx(tx, {
+            const bonusApplied = await applyBonusDeltaTx(tx, {
               userId: intent.userId,
               deltaRobux: -intent.bonus,
               reason: BONUS_REASONS.DIRECT_ORDER_REDEMPTION,
@@ -4845,13 +4944,18 @@ export function registerCallbacks(bot: Telegraf): void {
               idempotencyKey: directOrderBonusKey(ord.id),
               metadata: { intentId, wbCode: dirCode },
             });
+            if (!bonusApplied) throw new Error("bonus balance changed");
             await tx.user.update({
               where: { id: intent.userId },
               data: { reviewBonusGrantedAt: null, bonusExpiresAt: null, reviewReminderLevel: 0 },
             });
           }
-          if (intent.user.rubleDiscount > 0) {
-            await tx.user.update({ where: { id: intent.userId }, data: { rubleDiscount: 0 } });
+          if (intent.rubleDiscount > 0) {
+            const discountApplied = await tx.user.updateMany({
+              where: { id: intent.userId, rubleDiscount: { gte: intent.rubleDiscount } },
+              data: { rubleDiscount: { decrement: intent.rubleDiscount } },
+            });
+            if (discountApplied.count !== 1) throw new Error("discount changed");
           }
           return ord;
         });
@@ -4904,23 +5008,52 @@ export function registerCallbacks(bot: Telegraf): void {
         await ctx.answerCbQuery("Оплата уже обработана").catch(() => {});
         return;
       }
+      const payOkAttempt = await (db as any).paymentAttempt.findFirst({
+        where: { orderId: payOkOrderId },
+        orderBy: { createdAt: "desc" },
+      });
+      if (payOkAttempt && payOkAttempt.provider !== "MANUAL_TRANSFER") {
+        await ctx.answerCbQuery("Эквайринг подтверждает оплату автоматически").catch(() => {});
+        return;
+      }
       // New flow: gamepassUrl already filled from intent → skip AWAITING_GAMEPASS
       if (payOkOrder.gamepassUrl) {
-        await (db as any).wbOrder.update({
-          where: { id: payOkOrderId },
-          data: { status: "PENDING", pendingAt: new Date(), paidAt: new Date() },
-        });
-        const payOkUser = await (db as any).user.findUnique({ where: { id: payOkUserId } });
-        if (payOkUser?.tgId) {
-          try {
-            await bot.telegram.sendMessage(payOkUser.tgId,
-              `✅ <b>Оплата подтверждена!</b>\n\nТвой заказ принят в работу. Робуксы будут выкуплены в ближайшее время — уведомим сразу 🙏`,
-              { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.callback("📊 Проверить статус", CB.refreshStatus)], [faqBtn()]]) }
-            );
-          } catch { }
-        } else if (payOkUser?.vkId) {
-          try { await vkSend(payOkUser.vkId, `✅ Оплата подтверждена!\n\nТвой заказ принят в работу. Робуксы будут выкуплены в ближайшее время — уведомим сразу 🙏`); } catch { }
+        const confirmedAt = new Date();
+        if (payOkAttempt) {
+          await (db as any).$transaction(async (tx: any) => {
+            const attemptChanged = await tx.paymentAttempt.updateMany({
+              where: { id: payOkAttempt.id, provider: "MANUAL_TRANSFER", status: "INITIATED" },
+              data: { status: "CONFIRMED", finalizedAt: confirmedAt },
+            });
+            if (attemptChanged.count !== 1) throw new Error("manual payment already processed");
+            await tx.wbOrder.update({
+              where: { id: payOkOrderId },
+              data: { status: "PENDING", pendingAt: confirmedAt, paidAt: confirmedAt },
+            });
+            const event = await tx.orderEvent.create({
+              data: {
+                orderId: payOkOrderId,
+                type: "MANUAL_PAYMENT_CONFIRMED",
+                idempotencyKey: `manual-payment-confirmed:${payOkAttempt.id}`,
+                payload: { paymentAttemptId: payOkAttempt.id, adminId },
+              },
+            });
+            await tx.outboxMessage.create({
+              data: {
+                eventId: event.id,
+                topic: "payment.confirmed",
+                payload: { orderId: payOkOrderId, paymentAttemptId: payOkAttempt.id, provider: "MANUAL_TRANSFER" },
+              },
+            });
+          });
+        } else {
+          await (db as any).wbOrder.update({
+            where: { id: payOkOrderId },
+            data: { status: "PENDING", pendingAt: confirmedAt, paidAt: confirmedAt },
+          });
         }
+        // The durable outbox is the only customer notification path for the
+        // canonical manual flow. Sending here as well creates duplicate messages.
       } else {
         // Legacy flow: no gamepassUrl → need user to create gamepass
         await (db as any).wbOrder.update({
@@ -4977,7 +5110,7 @@ export function registerCallbacks(bot: Telegraf): void {
       const payNoUser = await (db as any).user.findUnique({ where: { id: payNoUserId } });
       if (payNoUser?.tgId) {
         pendingPaymentScreenshot.set(parseInt(payNoUser.tgId), payNoOrderId);
-        const detailsLine = payNoOrder?.paymentDetails
+        const detailsLine = payNoOrder?.paymentDetails && !payNoOrder.paymentDetails.startsWith("MANUAL_TRANSFER:")
           ? `\n\n💳 Реквизиты:\n<code>${payNoOrder.paymentDetails}</code>\n`
           : "";
         try {
@@ -4991,7 +5124,7 @@ export function registerCallbacks(bot: Telegraf): void {
           );
         } catch { }
       } else if (payNoUser?.vkId) {
-        const detailsLine = payNoOrder?.paymentDetails
+        const detailsLine = payNoOrder?.paymentDetails && !payNoOrder.paymentDetails.startsWith("MANUAL_TRANSFER:")
           ? `\n\n💳 Реквизиты:\n${payNoOrder.paymentDetails}\n`
           : "";
         try {

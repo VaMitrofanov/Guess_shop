@@ -44,60 +44,6 @@ export function buildTinkoffToken(params: Record<string, unknown>, secretKey: st
   return crypto.createHash("sha256").update(concatenated, "utf8").digest("hex");
 }
 
-// ── Init payment ─────────────────────────────────────────────────────────────
-
-export async function initTinkoffPayment(
-  orderId: string,
-  amount: number,
-  customerEmail?: string
-): Promise<{ Success: boolean; PaymentId: string; PaymentURL: string; Message: string }> {
-  const terminalKey = getRequiredEnv("TINKOFF_TERMINAL_KEY");
-  const secretKey   = getRequiredEnv("TINKOFF_SECRET_KEY");
-
-  // Tinkoff uses kopecks (amount × 100)
-  const tinkoffAmount = Math.round(amount * 100);
-
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru";
-
-  const params: Record<string, unknown> = {
-    TerminalKey: terminalKey,
-    Amount:      tinkoffAmount,
-    OrderId:     orderId,
-    Description: `Покупка Robux — заказ ${orderId}`,
-    SuccessURL:  `${appUrl}/payment/status?orderId=${orderId}&result=success`,
-    FailURL:     `${appUrl}/payment/status?orderId=${orderId}&result=fail`,
-    ...(customerEmail ? { Email: customerEmail } : {}),
-  };
-
-  // Compute and attach token
-  const token = buildTinkoffToken(params, secretKey);
-  const body  = { ...params, Token: token };
-
-  const res = await fetch("https://securepay.tinkoff.ru/v2/Init", {
-    method:  "POST",
-    headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify(body),
-    signal:  AbortSignal.timeout(10_000),
-  });
-
-  if (!res.ok) {
-    throw new Error(`[Tinkoff] Init failed with HTTP ${res.status}`);
-  }
-
-  const data = await res.json();
-
-  if (!data.Success) {
-    throw new Error(`[Tinkoff] Init error: ${data.Message ?? "Unknown"}`);
-  }
-
-  return {
-    Success:    true,
-    PaymentId:  String(data.PaymentId),
-    PaymentURL: data.PaymentURL,
-    Message:    "OK",
-  };
-}
-
 export type CanonicalPaymentInit = {
   /** Stable customer-facing order ID used by our status page. */
   publicOrderId: string;
@@ -120,14 +66,38 @@ function diagnosticJsonLogsEnabled() {
   return process.env.TBANK_DIAGNOSTIC_JSON_LOGS === "true";
 }
 
-/**
- * Temporary support diagnostic. The exact Init body is intentionally logged,
- * including its one-request Token and callback URLs, so T-Bank can reproduce
- * signature validation. Password/SecretKey never enter the record.
- *
- * Keep TBANK_DIAGNOSTIC_JSON_LOGS disabled outside a controlled E2E: the body
- * contains the receipt email and an order-status bearer token in callback URLs.
- */
+const DIAGNOSTIC_REDACTED_KEYS = new Set([
+  "Email",
+  "PaymentURL",
+  "Password",
+  "SecretKey",
+  "Token",
+]);
+
+function sanitizeDiagnosticValue(value: unknown, key?: string): unknown {
+  if (key && DIAGNOSTIC_REDACTED_KEYS.has(key)) return "[REDACTED]";
+  if (Array.isArray(value)) return value.map((item) => sanitizeDiagnosticValue(item));
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .map(([nestedKey, nestedValue]) => [nestedKey, sanitizeDiagnosticValue(nestedValue, nestedKey)]),
+    );
+  }
+  if (typeof value === "string" && /(?:^|[?&])token=/i.test(value)) {
+    try {
+      const url = new URL(value);
+      for (const parameter of [...url.searchParams.keys()]) {
+        if (parameter.toLowerCase() === "token") url.searchParams.set(parameter, "[REDACTED]");
+      }
+      return url.toString();
+    } catch {
+      return value.replace(/([?&]token=)[^&#]*/gi, "$1[REDACTED]");
+    }
+  }
+  return value;
+}
+
+/** Temporary support diagnostic with credentials, PII and bearer URLs removed. */
 function logTinkoffInitExchange(
   requestBody: Record<string, unknown>,
   response: TinkoffInitDiagnosticResponse,
@@ -141,9 +111,9 @@ function logTinkoffInitExchange(
       method: "POST",
       url: TINKOFF_INIT_ENDPOINT,
       headers: { "Content-Type": "application/json" },
-      body: requestBody,
+      body: sanitizeDiagnosticValue(requestBody),
     },
-    response,
+    response: sanitizeDiagnosticValue(response),
   }));
 }
 

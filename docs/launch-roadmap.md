@@ -4,11 +4,24 @@
 > дальше». Все остальные планы — детализация отдельных участков, ссылки на них ниже.
 > Если документы противоречат друг другу, прав этот.
 >
-> Обновлено: **29.07.2026**.
+> Обновлено: **09.08.2026**.
 
 ---
 
 ## 1. Где мы сейчас
+
+> **Payment reliability batch 09.08 реализован и проходит локальные гейты.** Автоотмена
+> теперь делает `GetState`, при необходимости `Cancel`, и возвращает benefits только после
+> terminal provider state. Поздний `CONFIRMED` атомарно резервирует льготы либо ставит
+> `ERROR` с тревогой и не допускает выкуп. Владелец подтвердил ручной выкуп как штатный,
+> поэтому недоступность browser automation не является stop-gate. До deploy две старые
+> production-пары `REJECTED + INITIATED` ещё не обработаны новым worker. Полный отчёт:
+> [system-audit-2026-08-09.md](system-audit-2026-08-09.md).
+
+> **Bot hybrid checkout 09.08 реализован, deploy выполняется в этой сессии:** TG/VK после
+> DirectIntent предлагают prefilled сайт, эквайринг в боте и manual transfer. Один HMAC-
+> защищённый Web service создаёт canonical order/attempt/consent/outbox; реквизиты не
+> зашиты в репозиторий. Детали и residual ККТ-риск: [bot-acquiring-plan.md](bot-acquiring-plan.md).
 
 **Сайт `robloxbank.ru` и оплата публично открыты** (`SITE_ACQUIRING_ENABLED=true`,
 `mode=on`). Официальный эквайринг Т‑Банка подключён, боевой payment/refund E2E пройден
@@ -43,6 +56,23 @@
 - Рассинхрон Roblox смягчён retry временных API-сбоев и exact-ID fallback из главной.
 - QA: критический lint = 0 warnings; старый долг 1123 warnings защищён точным fingerprint;
   TypeScript web+боты чистый; Jest 386/386 + 21/21; production build зелёный.
+
+### Payment reliability 09.08 (release candidate, deploy ⏳)
+
+- T-Bank reconciliation worker каждые 15 минут проверяет старые SITE attempts через
+  `GetState`; `NEW`/`AUTHORIZED` и промежуточные stale-сессии сначала закрывает `Cancel`.
+- `REJECTED + INITIATED/AUTHORIZED` старого формата входят в выборку и автоматически
+  сходятся после deploy; при сетевой/неизвестной ошибке система fail-closed и не возвращает
+  льготы.
+- Webhook и worker одинаково трактуют поздний `CONFIRMED`: бонус и рублёвая скидка
+  резервируются одним guarded update. При изменившемся балансе заказ становится `ERROR`,
+  клиенту не обещается выкуп, админы получают отдельную тревогу.
+- Next `16.3.0`, next-auth `5.0.0-beta.32`, Prisma `7.9.1`; `xlsx` удалён, admin import
+  использует ограниченный ExcelJS parser. Полный `npm audit` root/TG/VK — 0 advisories.
+- CI запускает Prisma validate, gates и build. Локально после hybrid checkout: web 502/502,
+  bots 46/46,
+  Prisma valid, production build и smoke 15/15 зелёные; legacy lint baseline снижен
+  1096 → 1088.
 
 ### Выкат 28.07 (ночь): вход в админку из интерфейса
 
@@ -246,14 +276,14 @@ D4 (тизер кодов вместо главного CTA), D5 (кликабе
 | # | Задача | Заметка |
 |---|---|---|
 | S2 🟡 | Enforce строгой CSP | **Замер на проде 28.07: на главной 17 inline-скриптов, хешем закрыт только наш boot-скрипт, остальные 16 генерирует Next.js.** Хешами их не закрыть — нужен nonce-based CSP (`nonce` в заголовке + проброс в Next). Это не «включить флаг», а отдельная задача. Плюс ≥3 суток отчётов `[csp-report]` с реального трафика (iPhone Safari, Android Chrome, TG WebView, VK WebView). Откат — одна правка `next-security.ts` |
-| S3 ⚪ | Удалить мёртвый `initTinkoffPayment` | Без `NotificationURL` и `Receipt` — будущий вызов создал бы нефискализированный платёж |
-| S4 ⚪ | Удалить диагностический JSON-лог `Init` | Или маскировать `token=` в callback-URL |
+| S3 ✅ | Удалить мёртвый `initTinkoffPayment` | Удалён 09.08; канонический `Init` остался единственной точкой создания SITE-платежа |
+| S4 ✅ | Безопасный диагностический JSON-лог `Init` | Email, provider Token, PaymentURL и callback bearer маскируются; флаг только для controlled E2E |
 | S5 ⚪ | `rateLimit` на `/api/admin/diag` и `/api/admin/wb-codes` | 10 запросов / 5 мин по IP |
 | S6 ⚪ | Убрать ссылку на `/admin/login` с `/login` | |
 | S7 ⚪ | HSTS `includeSubDomains` | `preload` — только после проверки всех поддоменов |
 | S8 ⚪ | Задокументировать ограничение лимитера | Web нельзя масштабировать без переезда rate-limit в Redis |
 | F8 🟡 | Клиент с одним email не получает уведомлений | Письма на «оплата подтверждена» и «заказ выполнен» |
-| F9 ⚪ | Поздняя оплата после авто-отмены отдаёт бонус дважды | Проверять `benefitsRevertedAt` в ветке `CONFIRMED` |
+| F9 ✅ | Поздняя оплата после авто-отмены отдаёт бонус дважды | Guarded повторный резерв bonus/discount; конфликт → `ERROR` + ручной reconciliation без выкупа |
 | F10 ⚪ | Нет разбора `SUBMIT_UNKNOWN` возвратов | Сумма зарезервирована навсегда; нужен экран сверки |
 | F11 ⚪ | `/payment/status` опрашивает вечно | Бэкофф + пауза по `visibilitychange` |
 | D10 🟡👤 | Платёжные логотипы нарисованы вручную | Взять официальный кит Т‑Банка; репозиторий публичный — ассеты не коммитить |
@@ -317,7 +347,7 @@ D4 (тизер кодов вместо главного CTA), D5 (кликабе
 | Эквайринг, outbox, возвраты, ККТ-матрица | [payments-and-kkt.md](payments-and-kkt.md) |
 | Официальная платёжка Т‑Банка в TG/VK-ботах вместо СБП-QR | [bot-acquiring-plan.md](bot-acquiring-plan.md) |
 | Переезд админки в веб, три админа, вход по Telegram | [admin-console-plan.md](admin-console-plan.md) |
-| Модель угроз и реестр рисков (№1–31) | [security.md](security.md) |
+| Модель угроз и реестр рисков (№1–32) | [security.md](security.md) |
 | ЛК, email/TG/VK identity, доставка почты | [auth-account-readiness-plan.md](auth-account-readiness-plan.md), [email-setup.md](email-setup.md) |
 | WB-гейт, `/guide`, Guide-контейнер | [corridor-and-site.md](corridor-and-site.md) |
 | Боты TG и VK | [bots.md](bots.md) |
@@ -332,7 +362,7 @@ D4 (тизер кодов вместо главного CTA), D5 (кликабе
 | Направление | Документ | Состояние |
 |---|---|---|
 | Админка на сайте (9 разделов, 3 админа по Telegram) | [admin-console-plan.md](admin-console-plan.md) | **A1 в проде и подтверждён живым прогоном 28.07** (`71162d4`). Хвосты: вход двух остальных админов, `ADMIN_BREAKGLASS_EMAILS` на новую почту. A2+ — после открытия сайта |
-| Официальная оплата Т‑Банка в TG/VK-ботах | [bot-acquiring-plan.md](bot-acquiring-plan.md) | **отложено владельцем 28.07** — сначала запуск сайта. План готов, ждёт О1–О4 |
+| Hybrid-оплата TG/VK: T‑Bank + автоматические реквизиты | [bot-acquiring-plan.md](bot-acquiring-plan.md) | **решение принято 09.08, реализация не начата**. Основной способ — acquiring; manual fallback ждёт решения по ККТ/получателю; rollout TG → VK |
 | Коды активации Roblox (новый товар) | [roblox-codes-plan.md](roblox-codes-plan.md) | этапы K0–K9 не начаты; на витрине только тизер |
 | B2B-контур «Антон» | [b2b-saas.md](b2b-saas.md) | работает; этапы 5.10–5.11 ждут утверждения |
 | Транспорт выкупа геймпассов | [roblox-plus-buyout-plan.md](roblox-plus-buyout-plan.md) | ручной выкуп; автовыкуп открыт |

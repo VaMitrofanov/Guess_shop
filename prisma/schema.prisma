@@ -16,73 +16,73 @@ datasource db {
 }
 
 model User {
-  id                   String              @id @default(cuid())
-  vkId                 String?             @unique
-  tgId                 String?             @unique
-  email                String?             @unique
-  emailVerifiedAt      DateTime?
-  password             String?
-  name                 String?
-  username             String?
-  image                String?
-  robloxUsername       String?
+  id                     String              @id @default(cuid())
+  vkId                   String?             @unique
+  tgId                   String?             @unique
+  email                  String?             @unique
+  emailVerifiedAt        DateTime?
+  password               String?
+  name                   String?
+  username               String?
+  image                  String?
+  robloxUsername         String?
   /// Public Roblox profile resolved server-side from robloxUsername. The ID is
   /// stable across Roblox username changes; these fields are a stale-safe cache,
   /// not proof that the visitor owns the Roblox account.
-  robloxUserId         String?
-  robloxDisplayName    String?
-  robloxAvatarUrl      String?
-  robloxDescription    String?
+  robloxUserId           String?
+  robloxDisplayName      String?
+  robloxAvatarUrl        String?
+  robloxDescription      String?
   robloxAccountCreatedAt DateTime?
-  robloxProfileSyncedAt DateTime?
-  balance              Int                 @default(0)
-  bonusExpiresAt       DateTime?
-  rubleDiscount        Int                 @default(0)
-  promoExpiresAt       DateTime?
-  promoSentAt          DateTime?
-  role                 String              @default("USER")
-  sessionVersion       Int                 @default(0)
-  reviewBonusClaimed   Boolean             @default(false)
-  reviewBonusGrantedAt DateTime?
-  reviewReminderLevel  Int                 @default(0)
-  wbCodes              WbCode[]
-  wbOrders             WbOrder[]
-  directIntents        DirectIntent[]
-  identities           UserIdentity[]
-  bonusLedgerEntries   BonusLedger[]
-  priceQuotes          PriceQuote[]
-  emailActionTokens    EmailActionToken[]
-  consentEvidences     ConsentEvidence[]
-  robloxAccounts       UserRobloxAccount[]
-  mergeSources         AccountMergeAudit[] @relation("AccountMergeSource")
-  mergeTargets         AccountMergeAudit[] @relation("AccountMergeTarget")
-  createdAt            DateTime            @default(now())
-  updatedAt            DateTime            @updatedAt
+  robloxProfileSyncedAt  DateTime?
+  balance                Int                 @default(0)
+  bonusExpiresAt         DateTime?
+  rubleDiscount          Int                 @default(0)
+  promoExpiresAt         DateTime?
+  promoSentAt            DateTime?
+  role                   String              @default("USER")
+  sessionVersion         Int                 @default(0)
+  reviewBonusClaimed     Boolean             @default(false)
+  reviewBonusGrantedAt   DateTime?
+  reviewReminderLevel    Int                 @default(0)
+  wbCodes                WbCode[]
+  wbOrders               WbOrder[]
+  directIntents          DirectIntent[]
+  identities             UserIdentity[]
+  bonusLedgerEntries     BonusLedger[]
+  priceQuotes            PriceQuote[]
+  emailActionTokens      EmailActionToken[]
+  consentEvidences       ConsentEvidence[]
+  robloxAccounts         UserRobloxAccount[]
+  mergeSources           AccountMergeAudit[] @relation("AccountMergeSource")
+  mergeTargets           AccountMergeAudit[] @relation("AccountMergeTarget")
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
 }
 
 /// Roblox identities known to one RobloxBank customer. ORDER_HISTORY means
 /// the username appeared in this user's own paid or completed order; it is a
 /// checkout association, not cryptographic proof of Roblox ownership.
 model UserRobloxAccount {
-  id                     String              @id @default(cuid())
-  userId                 String
-  user                   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  robloxUserId           String?
-  username               String
-  usernameNormalized     String
-  displayName            String?
-  avatarUrl              String?
-  description            String?
-  accountCreatedAt       DateTime?
-  profileSyncedAt        DateTime?
-  source                 RobloxAccountSource
-  orderCount             Int                 @default(0)
-  firstOrderAt           DateTime?
-  lastOrderAt            DateTime?
-  selectedAt             DateTime?
-  hiddenAt               DateTime?
-  createdAt              DateTime            @default(now())
-  updatedAt              DateTime            @updatedAt
+  id                 String              @id @default(cuid())
+  userId             String
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  robloxUserId       String?
+  username           String
+  usernameNormalized String
+  displayName        String?
+  avatarUrl          String?
+  description        String?
+  accountCreatedAt   DateTime?
+  profileSyncedAt    DateTime?
+  source             RobloxAccountSource
+  orderCount         Int                 @default(0)
+  firstOrderAt       DateTime?
+  lastOrderAt        DateTime?
+  selectedAt         DateTime?
+  hiddenAt           DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
   @@unique([userId, usernameNormalized])
   @@index([userId, hiddenAt, selectedAt(sort: Desc)])
@@ -506,12 +506,12 @@ model PaymentAttempt {
 /// inspected by the web process. Alert timestamps provide cross-instance
 /// deduplication when more than one web container is running.
 model ServiceHeartbeat {
-  serviceKey  String   @id
+  serviceKey  String    @id
   lastSeenAt  DateTime
-  status      String   @default("UNKNOWN")
+  status      String    @default("UNKNOWN")
   lastAlertAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([lastSeenAt])
 }
@@ -625,52 +625,52 @@ model RateSnapshot {
 /// Global system settings — single-row config table.
 /// Always upsert with id = "global".
 model GlobalSettings {
-  id                    String    @id @default("global")
-  usdToRub              Float
+  id                      String    @id @default("global")
+  usdToRub                Float
   /// Manual purchase rate in USD per 1000 R$ — set by admin via bot/TWA.
-  purchaseRate          Float?
+  purchaseRate            Float?
   /// Target net-profit margin for the admin Game Pass price calculator.
   /// NULL on legacy rows: the loader derives the current 1000 R$ pack margin
   /// until an admin explicitly saves the calculator settings.
   gamepassTargetMarginPct Float?
-  lastUpdated           DateTime  @updatedAt
-  autoBuyEnabled        Boolean   @default(false)
-  autoBuyRate           Float     @default(4.0)
-  robloxCookie          String?
-  robloxCookieUpdatedAt DateTime?
-  robloxAccountName     String?
+  lastUpdated             DateTime  @updatedAt
+  autoBuyEnabled          Boolean   @default(false)
+  autoBuyRate             Float     @default(4.0)
+  robloxCookie            String?
+  robloxCookieUpdatedAt   DateTime?
+  robloxAccountName       String?
   // ── Drain target account ("my account" — leftover donor balance flows here) ──
   // Bot is always logged into this account; the "Слив" feature reprices a
   // gamepass on it, then the donor account buys it to consolidate the remainder.
-  drainCookie           String?
-  drainCookieUpdatedAt  DateTime?
-  drainAccountName      String?
+  drainCookie             String?
+  drainCookieUpdatedAt    DateTime?
+  drainAccountName        String?
   /// Gamepass ID on the drain account whose price we set to the donor's balance.
-  drainGamepassId       String?
+  drainGamepassId         String?
   /// (unused) Legacy cache of the drain gamepass ProductId. No longer written:
   /// modern Roblox ProductIds exceed INT32 (this column is INTEGER), and the
   /// drain flow re-fetches product-info live, so nothing needs to persist here.
   /// Kept to avoid a drift-only migration against prod.
-  drainProductId        Int?
+  drainProductId          Int?
   // ── Auto-buyout worker (+1) ──────────────────────────────────────────────
   // Buys new PENDING orders automatically until the donor balance hits the
   // drain threshold, then alerts admins. Kill-switch defaults OFF.
-  autoBuyoutEnabled     Boolean   @default(false)
-  autoBuyoutThreshold   Int       @default(150) // R$ — stop buying at/below this, leftover goes to drain
-  autoBuyoutMaxPerTick  Int       @default(5) // cap purchases per tick (blast-radius guard)
-  autoBuyoutBelowSince  DateTime? // when balance first went ≤ threshold (alert dedup)
+  autoBuyoutEnabled       Boolean   @default(false)
+  autoBuyoutThreshold     Int       @default(150) // R$ — stop buying at/below this, leftover goes to drain
+  autoBuyoutMaxPerTick    Int       @default(5) // cap purchases per tick (blast-radius guard)
+  autoBuyoutBelowSince    DateTime? // when balance first went ≤ threshold (alert dedup)
   // ── Auto-drain worker (+5.G.3) ───────────────────────────────────────────
   // Когда баланс донора падает ниже минимальной цены выкупа (143 R$ грязными),
   // воркер сливает остаток в приёмник сам. Kill-switch, default OFF.
-  autoDrainEnabled      Boolean   @default(false)
+  autoDrainEnabled        Boolean   @default(false)
   // ── GP-watcher (+3) ──────────────────────────────────────────────────────
-  gpWatchEnabled        Boolean   @default(false) // kill-switch for the probable-nick gamepass watcher
+  gpWatchEnabled          Boolean   @default(false) // kill-switch for the probable-nick gamepass watcher
   /// Who the watcher tells about a found gamepass: "admin" | "customer" | "both".
   /// "both" keeps the customer auto-ping AND gives managers full visibility.
-  gpWatchNotify         String    @default("both")
+  gpWatchNotify           String    @default("both")
   /// СБП-QR прямых заказов: base64-картинка (приватно в БД — репо публичный).
   /// Читают боты (bots/shared/sbp.ts) и TWA (/api/twa/intents → отправка, /api/sbp-qr).
-  sbpQrBase64           String?
+  sbpQrBase64             String?
 }
 
 /// PII-free performance telemetry for protected operational surfaces.
@@ -729,53 +729,53 @@ model DrainEvent {
 /// B2B partner account. Partner buyouts deliberately live outside WbOrder:
 /// partner tasks are not WB customer orders and have separate money/accounting.
 model Partner {
-  id                   String               @id @default(cuid())
-  slug                 String               @unique
-  name                 String
-  isActive             Boolean              @default(true)
-  notes                String?
+  id                      String               @id @default(cuid())
+  slug                    String               @unique
+  name                    String
+  isActive                Boolean              @default(true)
+  notes                   String?
   /// Money ledger currency for this partner. Anton uses USDT only.
-  ledgerCurrency       String               @default("USDT")
+  ledgerCurrency          String               @default("USDT")
   /// Partner-specific sale rate in USDT per 1000 R$. `rateBasis` defines
   /// whether it is quoted against the gross gamepass price or the net payout.
-  robuxRateUsdtPer1000 Float                @default(5.3)
+  robuxRateUsdtPer1000    Float                @default(5.3)
   /// Supplier rate paid by us for 1000 dirty R$.
-  purchaseRateUsdtPer1000 Float             @default(4.7)
-  rateBasis             PartnerRateBasis    @default(NET)
-  robloxFeePct          Float               @default(30)
+  purchaseRateUsdtPer1000 Float                @default(4.7)
+  rateBasis               PartnerRateBasis     @default(NET)
+  robloxFeePct            Float                @default(30)
   /// Google Sheets source config for future sync/write-back. Values are not
   /// secrets, but sheet URLs/IDs should still be treated as operational config.
-  googleSheetId        String?
-  googleSheetTab       String?
-  googleSheetUrl       String?
+  googleSheetId           String?
+  googleSheetTab          String?
+  googleSheetUrl          String?
   /// Cross-process lease for Google Sheets sync. Force/manual and background
   /// syncs share it so two web instances cannot import the same row at once.
-  googleSyncLeaseId    String?
-  googleSyncLeaseAt    DateTime?
-  tasks                PartnerBuyoutTask[]
-  ledgerEntries        PartnerLedgerEntry[]
-  importRuns           PartnerImportRun[]
-  rateChanges          PartnerRateChange[]
-  createdAt            DateTime             @default(now())
-  updatedAt            DateTime             @updatedAt
+  googleSyncLeaseId       String?
+  googleSyncLeaseAt       DateTime?
+  tasks                   PartnerBuyoutTask[]
+  ledgerEntries           PartnerLedgerEntry[]
+  importRuns              PartnerImportRun[]
+  rateChanges             PartnerRateChange[]
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
 }
 
 /// Journal of partner rate changes (USDT per 1000 R$). Written by set-rate so
 /// reports can show when each rate was active and who changed it. Buyout ledger
 /// entries additionally pin the rate used at debit time (rateUsdtPer1000).
 model PartnerRateChange {
-  id           String   @id @default(cuid())
-  partnerId    String
-  partner      Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
-  rate         Float
-  previousRate Float?
+  id                   String            @id @default(cuid())
+  partnerId            String
+  partner              Partner           @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  rate                 Float
+  previousRate         Float?
   purchaseRate         Float?
   previousPurchaseRate Float?
   rateBasis            PartnerRateBasis?
   previousRateBasis    PartnerRateBasis?
   robloxFeePct         Float?
-  createdBy    String?
-  createdAt    DateTime @default(now())
+  createdBy            String?
+  createdAt            DateTime          @default(now())
 
   @@index([partnerId, createdAt(sort: Desc)])
 }
@@ -819,42 +819,42 @@ model PartnerBuyoutTask {
 /// are per task so each order preserves its own pinned rate; legacy rows may
 /// still aggregate a whole purchase batch.
 model PartnerLedgerEntry {
-  id                  String             @id @default(cuid())
-  partnerId           String
-  partner             Partner            @relation(fields: [partnerId], references: [id], onDelete: Cascade)
-  taskId              String?
-  task                PartnerBuyoutTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  type                PartnerLedgerType
-  amount              Float
-  currency            String             @default("USDT")
+  id                      String             @id @default(cuid())
+  partnerId               String
+  partner                 Partner            @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  taskId                  String?
+  task                    PartnerBuyoutTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  type                    PartnerLedgerType
+  amount                  Float
+  currency                String             @default("USDT")
   /// Rate (USDT per 1000 R$) the debit was computed with. Structured copy of what
   /// the comment says, so per-rate reports do not parse comment strings.
-  rateUsdtPer1000     Float?
+  rateUsdtPer1000         Float?
   /// Immutable economics snapshot. Historical entries are backfilled as
   /// ASSUMED and are never silently rewritten when the current policy changes.
   purchaseRateUsdtPer1000 Float?
-  rateBasis            PartnerRateBasis?
-  costBasis            PartnerCostBasis?
-  robloxFeePct         Float?
-  grossRobuxAmount     Int?
-  netRobuxAmount       Int?
-  revenueUsdt          Float?
-  expectedRevenueUsdt  Float?
-  costUsdt             Float?
-  profitUsdt           Float?
+  rateBasis               PartnerRateBasis?
+  costBasis               PartnerCostBasis?
+  robloxFeePct            Float?
+  grossRobuxAmount        Int?
+  netRobuxAmount          Int?
+  revenueUsdt             Float?
+  expectedRevenueUsdt     Float?
+  costUsdt                Float?
+  profitUsdt              Float?
   /// Dirty R$ amount behind a BUYOUT debit; survives task deletion (taskId SetNull).
-  robuxAmount         Int?
+  robuxAmount             Int?
   /// Donor/cookie account used for the buyout. Null means a manual/Sheets fact.
   /// Kept on the ledger row so grouped history survives task deletion.
-  purchaseAccountName String?
+  purchaseAccountName     String?
   /// Durable idempotency key. New multi-rate batches suffix the user-visible
   /// batch id with `:task:<taskId>`; legacy BUYOUT rows may use the bare batch id.
-  batchId             String?
-  itemCount           Int                @default(1)
-  reference           String?
-  comment             String?
-  createdBy           String?
-  createdAt           DateTime           @default(now())
+  batchId                 String?
+  itemCount               Int                @default(1)
+  reference               String?
+  comment                 String?
+  createdBy               String?
+  createdAt               DateTime           @default(now())
 
   @@unique([partnerId, batchId])
   @@index([partnerId, createdAt(sort: Desc)])

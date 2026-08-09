@@ -11,8 +11,8 @@
 
 import type { MessageContext } from "vk-io";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
-import { sendAdminOrderCard, sendAdminReviewCard, sendAdminDirectOrderCard, sendAdminPaymentCard, sendAdminIntentCard, notifySupportShown, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, CB } from "../shared/admin";
-import { vkGetName, tgSend, vkSend, escapeHtml } from "../shared/notify";
+import { sendAdminOrderCard, sendAdminReviewCard, sendAdminPaymentCard, notifySupportShown, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE } from "../shared/admin";
+import { vkGetName, tgSend, escapeHtml } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
 import { getGamepassDetails, getGamepassProductInfo } from "../shared/roblox";
@@ -22,7 +22,8 @@ import { noteProbableNick } from "../shared/nick";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
-import { vkActor } from "../shared/ownership";
+import { assertOwnsIntent, vkActor } from "../shared/ownership";
+import { createBotPayment, type BotPaymentMethod } from "../shared/bot-payment-api";
 
 // VK API instance injected from bot.ts to avoid circular import.
 let _vkApi: any = null;
@@ -157,6 +158,69 @@ function buildVkEditInPlace(ctx: MessageContext, vkUserId: number, sentMsg: any)
 function fmtRub(n: number): string {
   if (n >= 1000) return `${Math.floor(n / 1000)} ${String(n % 1000).padStart(3, "0")} ₽`;
   return `${n} ₽`;
+}
+
+const RECEIPT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function vkPaymentChoiceKb(intentId: string) {
+  const base = (process.env.NEXT_PUBLIC_APP_URL ?? "https://robloxbank.ru").replace(/\/$/, "");
+  return Keyboard.builder()
+    .textButton({ label: "🌐 На сайте", payload: { command: "direct_pay", method: "SITE", intentId }, color: "positive" }).row()
+    .textButton({ label: "🏦 Эквайринг здесь", payload: { command: "direct_pay", method: "BOT_ACQUIRING", intentId }, color: "primary" }).row()
+    .textButton({ label: "💳 По реквизитам", payload: { command: "direct_pay", method: "MANUAL_TRANSFER", intentId }, color: "secondary" }).row()
+    .urlButton({ label: "Оферта", url: `${base}/legal/offer` })
+    .urlButton({ label: "Политика", url: `${base}/legal/policy` }).row()
+    .textButton({ label: "❌ Отменить", payload: { command: "direct_cancel_intent", intentId }, color: "negative" })
+    .inline();
+}
+
+async function completeVkBotPayment(ctx: MessageContext, vkUserId: number, intentId: string, method: BotPaymentMethod, receiptEmail: string) {
+  const result = await createBotPayment({
+    intentId,
+    method,
+    receiptEmail: receiptEmail.toLowerCase(),
+    platform: "VK",
+    subject: String(vkUserId),
+  });
+  const amount = fmtRub(result.amountKopecks / 100);
+  const kb = Keyboard.builder();
+  if (method === "MANUAL_TRANSFER" && result.manual) {
+    setState(vkUserId, { type: "AWAITING_DIRECT_PAYMENT", orderId: result.orderId });
+    kb.urlButton({ label: "📊 Статус заказа", url: result.statusUrl });
+    await ctx.reply({
+      message:
+        `💳 Перевод по реквизитам\n\n` +
+        `Банк: ${result.manual.bank}\nПолучатель: ${result.manual.recipient}\n` +
+        `Телефон: ${result.manual.phone}\nСумма: ${amount}\n\n` +
+        `Переведи точную сумму и пришли сюда скриншот чека фотографией. Менеджер подтвердит оплату вручную.`,
+      keyboard: kb.inline(),
+    });
+  } else if (method === "SITE") {
+    clearState(vkUserId);
+    kb.urlButton({ label: "🌐 Открыть готовый заказ", url: result.statusUrl });
+    await ctx.reply({
+      message: `🌐 Оплатить на сайте будет удобнее\n\nВсё уже подгружено: заказ, геймпасс, сумма ${amount} и email для чека. Останется только нажать «Оплатить».`,
+      keyboard: kb.inline(),
+    });
+  } else {
+    clearState(vkUserId);
+    kb.urlButton({ label: "🔐 Оплатить в Т‑Банке", url: result.paymentUrl! }).row();
+    kb.urlButton({ label: "📊 Статус на сайте", url: result.statusUrl });
+    await ctx.reply({
+      message: `🏦 Оплата через Т‑Банк\n\nСумма: ${amount}. Статус подтверждается автоматически — скриншот не нужен.`,
+      keyboard: kb.inline(),
+    });
+  }
+}
+
+async function startVkBotPayment(ctx: MessageContext, vkUserId: number, intentId: string, method: BotPaymentMethod) {
+  const user = await (db as any).user.findUnique({ where: { vkId: String(vkUserId) }, select: { email: true } });
+  if (user?.email) {
+    await completeVkBotPayment(ctx, vkUserId, intentId, method, user.email);
+    return;
+  }
+  setState(vkUserId, { type: "AWAITING_DIRECT_RECEIPT", intentId, method });
+  await ctx.reply("🧾 Email для электронного чека\n\nПришли email одним сообщением. После этого подготовлю оплату автоматически.\n\nПродолжая, ты принимаешь оферту и политику конфиденциальности.");
 }
 
 /** Visual step indicator (plain text for VK).
@@ -1215,13 +1279,35 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     await handleVkDirectSubmit(ctx, vkUserId);
     return;
   }
-  if (msgPayload?.command === "direct_cancel_intent" && msgPayload?.intentId) {
+  if (msgPayload?.command === "direct_pay" && msgPayload?.intentId && msgPayload?.method) {
     const intentId = String(msgPayload.intentId);
-    const intent = await (db as any).directIntent.findUnique({ where: { id: intentId } });
-    if (!intent || intent.status !== "PENDING") {
-      await ctx.reply("Заявка уже обработана.");
+    const method = String(msgPayload.method) as BotPaymentMethod;
+    if (!["SITE", "BOT_ACQUIRING", "MANUAL_TRANSFER"].includes(method)) {
+      await ctx.reply("Некорректный способ оплаты.");
       return;
     }
+    try {
+      await startVkBotPayment(ctx, vkUserId, intentId, method);
+    } catch (error) {
+      console.error("[VK] payment choice failed:", error);
+      await ctx.reply({
+        message: `❌ ${error instanceof Error ? error.message : "Не удалось подготовить оплату"}. Попробуй ещё раз.`,
+        keyboard: vkPaymentChoiceKb(intentId),
+      });
+    }
+    return;
+  }
+  if (msgPayload?.command === "direct_cancel_intent" && msgPayload?.intentId) {
+    const intentId = String(msgPayload.intentId);
+    const owned = await assertOwnsIntent<{
+      status: string; robloxUsername: string; totalAmount: number;
+    }>(vkActor(vkUserId), intentId, { status: true, robloxUsername: true, totalAmount: true });
+    if (!owned.ok) {
+      await ctx.reply(owned.reason === "forbidden" ? "⛔ Эта заявка не твоя." : "Заявка уже обработана.");
+      return;
+    }
+    const intent = owned.entity;
+    if (intent.status !== "PENDING") { await ctx.reply("Заявка уже обработана."); return; }
     await (db as any).directIntent.update({ where: { id: intentId }, data: { status: "CANCELLED" } });
     const kb = Keyboard.builder();
     kb.textButton({ label: "💎 Заказать снова", payload: { command: "start_direct" }, color: "positive" });
@@ -1328,6 +1414,26 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   }
 
   // ── Direct order amount input ──────────────────────────────────────────────
+  if (state?.type === "AWAITING_DIRECT_RECEIPT") {
+    if (!RECEIPT_EMAIL_RE.test(text) || text.length > 254) {
+      await ctx.reply("⚠️ Не похоже на email. Проверь адрес и пришли ещё раз, например: name@example.com");
+      return;
+    }
+    const paymentState = state;
+    clearState(vkUserId);
+    try {
+      await completeVkBotPayment(ctx, vkUserId, paymentState.intentId, paymentState.method, text);
+    } catch (error) {
+      console.error("[VK] bot payment create failed:", error);
+      await ctx.reply({
+        message: `❌ ${error instanceof Error ? error.message : "Не удалось подготовить оплату"}. Выбери способ ещё раз.`,
+        keyboard: vkPaymentChoiceKb(paymentState.intentId),
+      });
+    }
+    return;
+  }
+
+  // ── Direct order amount input ──────────────────────────────────────────────
   if (state?.type === "AWAITING_DIRECT_AMOUNT") {
     await handleDirectAmountInput(ctx, vkUserId, text);
     return;
@@ -1390,7 +1496,15 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       const payOrder = state?.type === "AWAITING_DIRECT_PAYMENT"
         ? await (db as any).wbOrder.findUnique({ where: { id: state.orderId } })
         : await (db as any).wbOrder.findFirst({
-            where: { userId: photoUser.id, status: "PAYMENT_PENDING", isDirectOrder: true },
+            where: {
+              userId: photoUser.id,
+              status: "PAYMENT_PENDING",
+              isDirectOrder: true,
+              OR: [
+                { paymentAttempts: { some: { provider: "MANUAL_TRANSFER", status: "INITIATED" } } },
+                { paymentAttempts: { none: {} } },
+              ],
+            },
             orderBy: { createdAt: "desc" },
           });
       if (payOrder?.status === "PAYMENT_PENDING") {
@@ -2810,9 +2924,10 @@ async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Prom
     where: { userId: user.id, status: "PENDING" },
   });
   if (existingIntent) {
-    const kb = Keyboard.builder();
-    kb.textButton({ label: "❌ Отменить заявку", payload: { command: "direct_cancel_intent", intentId: existingIntent.id }, color: "negative" });
-    await ctx.reply({ message: `⏳ У тебя уже есть активная заявка на ${existingIntent.totalAmount} R$.\n\nДождись реквизитов от менеджера или отмени заявку.`, keyboard: kb.inline() });
+    await ctx.reply({
+      message: `⏳ У тебя уже есть активная заявка на ${existingIntent.totalAmount} R$.\n\nВыбери, как оплатить: на готовой странице сайта, через Т‑Банк здесь или переводом по реквизитам.`,
+      keyboard: vkPaymentChoiceKb(existingIntent.id),
+    });
     return;
   }
   const existingOrder = await (db as any).wbOrder.findFirst({
@@ -2820,7 +2935,7 @@ async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Prom
   });
   if (existingOrder) {
     await ctx.reply({
-      message: `⏳ У тебя уже есть активный заказ на ${existingOrder.amount} R$.\n\nДождись реквизитов от менеджера, а затем оформи новый.`,
+      message: `⏳ У тебя уже есть активный заказ на ${existingOrder.amount} R$.\n\nЗаверши или дождись обработки текущей оплаты, а затем оформи новый.`,
       keyboard: vkFaqKb(),
     });
     return;
@@ -2848,41 +2963,23 @@ async function handleVkDirectSubmit(ctx: MessageContext, vkUserId: number): Prom
     return;
   }
 
-  const vkName = user.name ?? await vkGetName(vkUserId);
-  const prevOrdersCount = await (db as any).wbOrder.count({
-    where: { userId: user.id, status: "COMPLETED" },
-  });
+  await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(
+    id,
+    `🔷 <b>Новая заявка · клиент выбирает оплату</b>\n` +
+    `Канал: VK · Ник: <b>${escapeHtml(state.robloxUsername)}</b> · ${state.totalAmount} R$ · ${fmtRub(state.rublePrice)}`,
+  )));
 
-  try {
-    await sendAdminIntentCard({
-      intentId:            intent.id,
-      userId:              user.id,
-      amount:              state.amount,
-      bonus:               state.bonus,
-      totalAmount:         state.totalAmount,
-      rublePrice:          state.rublePrice,
-      robloxUsername:       state.robloxUsername,
-      gamepassUrl:         state.gamepassUrl,
-      gamepassName:        state.gamepassName,
-      gamepassRobux:       state.gamepassRobux,
-      userDisplay:         `${vkUserDisplay(vkName, vkUserId)} (VK ID: ${vkUserId})`,
-      platform:            "VK",
-      createdAt:           intent.createdAt,
-      previousOrdersCount: prevOrdersCount,
-    });
-  } catch (err) {
-    console.error("[VK] sendAdminIntentCard failed:", err);
-  }
-
-  const kb = Keyboard.builder();
-  kb.textButton({ label: "❌ Отменить заявку", payload: { command: "direct_cancel_intent", intentId: intent.id }, color: "negative" });
+  const receiptLine = user.email
+    ? `\n🧾 Чек: ${user.email}`
+    : `\n🧾 Перед оплатой попрошу email для чека.`;
   await ctx.reply({
     message:
-      `✅ Заявка отправлена!\n\n` +
+      `✅ Заказ подготовлен\n\n` +
       `📦 ${state.totalAmount} R$ → ${state.robloxUsername}\n` +
-      `💰 К оплате: ${fmtRub(state.rublePrice)}\n\n` +
-      `⏱ Менеджер пришлёт реквизиты — обычно в течение 5 минут.\nОжидай сообщения 👇`,
-    keyboard: kb.inline(),
+      `💰 К оплате: ${fmtRub(state.rublePrice)}${receiptLine}\n\n` +
+      `🌐 На сайте удобнее: всё уже будет заполнено. Но можно остаться здесь — оплатить через Т‑Банк или переводом по реквизитам.\n\n` +
+      `Нажимая способ оплаты, ты принимаешь оферту и политику конфиденциальности.`,
+    keyboard: vkPaymentChoiceKb(intent.id),
   });
 
   console.log(`[VK] DirectIntent created: ${intent.id} vkUserId=${vkUserId} amount=${state.totalAmount}`);

@@ -222,6 +222,7 @@ type OperationalSnapshotRow = {
   repeatBuyers: bigint;
   availableCodes: bigint;
   reservedCodes: bigint;
+  expiredReservedCodes: bigint;
 };
 
 type FinanceSnapshotRow = {
@@ -337,7 +338,12 @@ async function queryDashboardOperational() {
     code_stats AS (
       SELECT
         COUNT(*) FILTER (WHERE "status"::text = 'AVAILABLE') AS "availableCodes",
-        COUNT(*) FILTER (WHERE "status"::text = 'RESERVED') AS "reservedCodes"
+        COUNT(*) FILTER (
+          WHERE "status"::text = 'RESERVED' AND "reservedUntil" > NOW()
+        ) AS "reservedCodes",
+        COUNT(*) FILTER (
+          WHERE "status"::text = 'RESERVED' AND ("reservedUntil" IS NULL OR "reservedUntil" <= NOW())
+        ) AS "expiredReservedCodes"
       FROM "WbCode"
     )
     SELECT os.*, bs.*, us.*, ps.*, outs.*, rs.*, cs.*
@@ -491,6 +497,7 @@ export async function getAdminDashboardData() {
       unknownRefunds: operational.unknownRefunds,
       availableCodes: operational.availableCodes,
       reservedCodes: operational.reservedCodes,
+      expiredReservedCodes: operational.expiredReservedCodes,
     },
     sourceBreakdown: financeRows
       .filter((row) => row.source !== null)

@@ -28,11 +28,11 @@ RUN apt-get update -y \
 
 ENV NODE_OPTIONS="--max-old-space-size=512"
 
-COPY bots/tg/package.json ./package.json
+COPY bots/tg/package.json bots/tg/package-lock.json ./
 COPY prisma ./prisma
 
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install --include=dev --no-audit --no-fund --prefer-offline --ignore-scripts
+    npm ci --include=dev --no-audit --no-fund --prefer-offline --ignore-scripts
 
 RUN npx prisma generate --schema ./prisma/schema.prisma
 

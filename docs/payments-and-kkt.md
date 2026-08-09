@@ -1,5 +1,29 @@
 # Платежи, возвраты и ККТ
 
+## Payment reliability 09.08.2026 — lifecycle P0 закрыт в release candidate
+
+- Public acquiring работает в `mode=on`; свежий `Init` создан 09.08. Последний фактически
+  подтверждённый платёж после SSL-фикса — 06.08. Invalid webhook signature возвращает 401,
+  worker heartbeat свежий, overdue/dead outbox отсутствует, все 15 сообщений доставлены.
+- Новый `sweepStaleWebOrders()` сначала вызывает provider `GetState`. Незавершённая stale-
+  сессия закрывается через `Cancel`; bonus/discount возвращаются только после подтверждённого
+  `CANCELED/REVERSED/REJECTED/expired` результата. Ошибка банка оставляет заказ на следующую
+  сверку без финансовой компенсации — fail-closed.
+- Выборка включает старые `REJECTED/ERROR + INITIATED/AUTHORIZED`, поэтому две найденные
+  production-пары автоматически сойдутся после deploy. `CONFIRMED` из `GetState` создаёт
+  тот же durable event/outbox, что и webhook.
+- Поздний `CONFIRMED` атомарно повторно резервирует возвращённые льготы. Если пользователь
+  уже потратил бонус/скидку, платёж фиксируется, но заказ получает `ERROR`, не попадает в
+  выкуп, клиент получает нейтральное сообщение, а админы — тревогу «не выкупать».
+- Владелец подтвердил ручной выкуп как текущий штатный процесс. Browser automation и
+  `autoBuyoutEnabled=false` поэтому не являются платежным stop-gate; backlog обслуживается
+  вручную.
+- Regression coverage: GetState identity/amount, Cancel без refund Amount, stale cancel,
+  late CONFIRMED с benefits, fail-closed insufficient benefits и outbox alert.
+
+Полный снимок и порядок исправления:
+[system-audit-2026-08-09.md](system-audit-2026-08-09.md).
+
 ## Wave 2 reliability update 28.07.2026 (release candidate)
 
 - Канонический SITE-заказ допускает максимум три `PaymentAttempt`. Provider `OrderId`
@@ -65,9 +89,9 @@ launch-gate. Они остаются открытыми рисками; этот
   участвуют в подписи. Подменять ими `TerminalKey` нельзя: API использует только пару
   `TerminalKey` + Password из технических настроек конкретного рабочего терминала.
 - Для следующей попытки добавлен временный `TBANK_DIAGNOSTIC_JSON_LOGS=true`: один exchange
-  пишется одной JSON-строкой с точными request/response, включая рассчитанный `Token`, но
-  без Password/SecretKey. Режим нужен только для controlled E2E и выключается сразу после
-  приёмки, так как полный запрос содержит email и защищённые callback URL.
+  пишется одной JSON-строкой; с 09.08 email, provider Token, PaymentURL, Password/SecretKey
+  и bearer query `token` маскируются. Режим всё равно нужен только для controlled E2E и
+  выключается сразу после приёмки.
 - **Credential retest 27.07.2026:** после исправления регистрозависимого символа в Password
   полный канонический production `Init` с `Receipt`, `DATA` и callback URL прошёл:
   `Success=true`, `ErrorCode=0`, банк выдал `PaymentId` и `PaymentURL`, статус `NEW`.
@@ -112,21 +136,27 @@ launch-gate. Они остаются открытыми рисками; этот
   `AUTHORIZED`, `CONFIRMED` или `PARTIALLY_REFUNDED`, чтобы legacy/manual order не выглядел
   как оплаченный при рассинхроне.
 
-## Прямые заказы в ботах пока вне эквайринга (28.07.2026)
+## Прямые заказы в ботах: hybrid checkout реализован (09.08.2026)
 
-Оплата прямых заказов в TG/VK по-прежнему идёт **статическим СБП-QR со скриншотом**:
-эти переводы проходят **мимо ККТ**, чек по ним не формируется. Замер 28.07: из 34 прямых
-заказов завершены 3, на шаге оплаты застряли 9.
+После `DirectIntent` покупатель выбирает: prefilled оплату на сайте, тот же эквайринг
+Т‑Банка в боте либо manual transfer. Первые два варианта создают один
+`PaymentAttempt(provider=TBANK)` и используют общий `Init`/signed webhook/outbox/retry;
+скриншот не нужен. Страница статуса по secret bearer token показывает уже сохранённые
+заказ, сумму и единственную кнопку оплаты.
 
-Перенос официальной платёжки Т‑Банка в ботов технически недорог — `Init` уже отдаёт
-`PaymentURL`, а webhook, возвраты и outbox не зависят от источника заказа. Препятствия — не
-в платёжном ядре: у 589 клиентов ботов нет ни одного email (чеку нужен email или телефон),
-`createCanonicalWebOrder` жёстко проставляет `WEB`/`SITE`, согласие с офертой собирается
-только на сайте, а `POST /api/orders/create` требует сессию next-auth.
+Перед вызовом банка Web атомарно claims `CREATED → INITIATED` вместе с переводом заказа в
+`PAYMENT_PENDING`. Это single-flight против двойного тапа/HMAC replay. Если provider уже
+вернул success, а локальная запись ответа не сохранилась, система fail-closed оставляет
+attempt live для reconciliation и не возвращает bonus/discount как при настоящем Init fail.
 
-План, оценка и открытые вопросы владельца — [bot-acquiring-plan.md](bot-acquiring-plan.md).
-Реализация не начата; общий гейт B2 (письменная категория от Т‑Банка) распространяется и на
-ботов.
+Manual fallback создаёт `PaymentAttempt(provider=MANUAL_TRANSFER, INITIATED)`. Реквизиты
+приходят только из Web runtime env по HMAC-аутентифицированному запросу, а в order хранится
+лишь config version. Proof не меняет paid-state. Защищённый `pay_ok` требует manual provider
+и атомарно пишет attempt `CONFIRMED`, `paidAt/status`, event и outbox. Это не автоматизирует
+ККТ: кассовый чек по переводу и допустимость получателя остаются ответственностью
+владельца/бухгалтера. Полный контракт — [bot-acquiring-plan.md](bot-acquiring-plan.md).
+Клиентское подтверждение в canonical manual flow доставляет только outbox, без второго
+прямого сообщения из admin callback.
 
 ## Решение владельца по схеме (16.07.2026; уточнение 30.07)
 

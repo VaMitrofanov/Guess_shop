@@ -118,6 +118,11 @@ export async function POST(req: NextRequest) {
   let newOrder: any;
   try {
     newOrder = await (prisma as any).$transaction(async (tx: any) => {
+      const consumed = await tx.directIntent.updateMany({
+        where: { id: intentId, status: "PENDING" },
+        data: { status: "CONSUMED" },
+      });
+      if (consumed.count !== 1) throw new Error("intent already consumed");
       const ord = await tx.wbOrder.create({
         data: {
           amount:         intent.totalAmount,
@@ -140,12 +145,11 @@ export async function POST(req: NextRequest) {
           gamepassId: intent.gamepassUrl ? parseGamepassId(intent.gamepassUrl) : null,
         },
       });
-      await tx.directIntent.update({ where: { id: intentId }, data: { status: "CONSUMED" } });
       if (intent.bonus > 0) {
         // Списание бонуса — только через единую точку (`BonusLedger`), как в
         // TG-обработчике. Прежний `balance = 0` обнулял баланс мимо журнала:
         // движение бонуса нигде не оставалось, и сверка журнал↔баланс расходилась.
-        await applyBonusDeltaTx(tx, {
+        const bonusApplied = await applyBonusDeltaTx(tx, {
           userId: intent.userId,
           deltaRobux: -intent.bonus,
           reason: BONUS_REASONS.DIRECT_ORDER_REDEMPTION,
@@ -153,13 +157,20 @@ export async function POST(req: NextRequest) {
           idempotencyKey: directOrderBonusKey(ord.id),
           metadata: { intentId, wbCode: dirCode, via: "twa" },
         });
+        if (!bonusApplied.applied && bonusApplied.reason === "insufficient") {
+          throw new Error("bonus balance changed");
+        }
         await tx.user.update({
           where: { id: intent.userId },
           data: { reviewBonusGrantedAt: null, bonusExpiresAt: null, reviewReminderLevel: 0 },
         });
       }
-      if (intent.user.rubleDiscount > 0) {
-        await tx.user.update({ where: { id: intent.userId }, data: { rubleDiscount: 0 } });
+      if (intent.rubleDiscount > 0) {
+        const discountApplied = await tx.user.updateMany({
+          where: { id: intent.userId, rubleDiscount: { gte: intent.rubleDiscount } },
+          data: { rubleDiscount: { decrement: intent.rubleDiscount } },
+        });
+        if (discountApplied.count !== 1) throw new Error("discount changed");
       }
       return ord;
     });

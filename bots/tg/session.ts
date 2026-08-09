@@ -60,6 +60,12 @@ export const pendingPaymentDetails = new Map<number, string>();
  * Key: user tgId (number) → WbOrder.id
  */
 export const pendingPaymentScreenshot = new Map<number, string>();
+
+/** Customer is entering the fiscal-receipt email after choosing a bot payment route. */
+export const pendingDirectPaymentEmail = new Map<number, {
+  intentId: string;
+  method: "SITE" | "BOT_ACQUIRING" | "MANUAL_TRANSFER";
+}>();
 /**
  * Admins currently writing a rejection reason for an order.
  * Key: Admin Telegram ID → WbOrder.id

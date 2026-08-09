@@ -20,13 +20,23 @@ import { Prisma, PrismaClient, UserIdentityProvider } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 
+function verifiedDatabaseUrl(raw: string) {
+  try {
+    const url = new URL(raw);
+    if (url.searchParams.get("sslmode") === "require") url.searchParams.set("sslmode", "verify-full");
+    return url.toString();
+  } catch {
+    return raw;
+  }
+}
+
 function createBotClient(): PrismaClient {
   if (!process.env.DATABASE_URL) {
     throw new Error("[bots/db] DATABASE_URL is not set");
   }
 
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: verifiedDatabaseUrl(process.env.DATABASE_URL),
     // Keep the pool small — bots are long-lived and Neon free tier has low connection limits.
     max: 3,
     idleTimeoutMillis:    30_000,

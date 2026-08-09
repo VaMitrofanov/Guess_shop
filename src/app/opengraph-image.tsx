@@ -1,9 +1,8 @@
 import { ImageResponse } from "next/og";
 
 // Auto-served at /opengraph-image for link previews (og:image + twitter:image).
-// Same runtime/font approach as apple-icon.tsx — only built-in divs and system
-// fonts, no external assets, so it renders on the self-hosted (non-Vercel) deploy.
-export const runtime = "edge";
+// Only built-in divs and system fonts: Next can generate this statically during
+// build on the self-hosted deploy, without the deprecated Edge runtime.
 export const alt = "Roblox Bank — купить Robux за рубли";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";

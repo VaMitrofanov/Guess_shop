@@ -26,6 +26,81 @@ export type RevertResult =
 
 const REVERTABLE_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "REJECTED"] as const;
 
+export type LatePaymentBenefitOrder = {
+  id: string;
+  userId: string;
+  priceQuoteId: string | null;
+  publicOrderId: string | null;
+  bonusAppliedRobux: number | null;
+  discountAppliedKopecks: number | null;
+  benefitsRevertedAt: Date | null;
+  benefitsRevision: number;
+  orderSource: string;
+};
+
+export type LatePaymentBenefitResult =
+  | { reserved: true; revision: number }
+  | { reserved: false; reason: "benefits_changed" };
+
+/**
+ * Поздний CONFIRMED может прийти после прежней автоотмены, когда льготы уже
+ * вернулись пользователю. Повторное списание бонуса и скидки выполняется одним
+ * guarded update внутри той же serializable-транзакции, что и статус платежа.
+ * Если льгот уже не хватает, деньги всё равно фиксируются как полученные, но
+ * заказ уходит в ERROR для ручной сверки и не попадает в очередь выкупа.
+ */
+export async function reserveLatePaymentBenefitsTx(
+  tx: Prisma.TransactionClient,
+  order: LatePaymentBenefitOrder,
+  paymentAttemptId: string,
+): Promise<LatePaymentBenefitResult> {
+  if (!order.benefitsRevertedAt) return { reserved: true, revision: order.benefitsRevision };
+
+  const bonusRobux = order.bonusAppliedRobux ?? 0;
+  const discountKopecks = order.discountAppliedKopecks ?? 0;
+  const discountRubles = discountKopecks / 100;
+  const nextRevision = order.benefitsRevision + 1;
+
+  if (bonusRobux > 0 || discountKopecks > 0) {
+    const guarded = await tx.user.updateMany({
+      where: {
+        id: order.userId,
+        ...(bonusRobux > 0 ? { balance: { gte: bonusRobux } } : {}),
+        ...(discountKopecks > 0 ? { rubleDiscount: { gte: discountRubles } } : {}),
+      },
+      data: {
+        ...(bonusRobux > 0 ? { balance: { decrement: bonusRobux } } : {}),
+        ...(discountKopecks > 0 ? { rubleDiscount: { decrement: discountRubles } } : {}),
+      },
+    });
+    if (guarded.count !== 1) return { reserved: false, reason: "benefits_changed" };
+  }
+
+  if (bonusRobux > 0) {
+    const after = await tx.user.findUnique({ where: { id: order.userId }, select: { balance: true } });
+    await tx.bonusLedger.create({
+      data: {
+        userId: order.userId,
+        deltaRobux: -bonusRobux,
+        balanceAfter: after?.balance ?? 0,
+        reason: order.orderSource === "DIRECT"
+          ? BONUS_REASONS.DIRECT_ORDER_REDEMPTION
+          : BONUS_REASONS.WEB_ORDER_REDEMPTION,
+        referenceId: order.priceQuoteId ?? order.id,
+        idempotencyKey: `web-order-bonus-late-payment:${paymentAttemptId}`,
+        metadata: {
+          orderId: order.id,
+          publicOrderId: order.publicOrderId,
+          paymentAttemptId,
+          revision: nextRevision,
+        } as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  return { reserved: true, revision: nextRevision };
+}
+
 export async function revertWebOrderBenefits(
   orderId: string,
   reason: RevertReason,
@@ -45,6 +120,7 @@ export async function revertWebOrderBenefits(
         discountAppliedKopecks: true,
         benefitsRevertedAt: true,
         benefitsRevision: true,
+        orderSource: true,
       },
     });
     if (!order) return { reverted: false, reason: "not_found" as const };
@@ -69,9 +145,13 @@ export async function revertWebOrderBenefits(
       await applyBonusDeltaTx(tx, {
         userId: order.userId,
         deltaRobux: bonusRobux,
-        reason: BONUS_REASONS.WEB_ORDER_REDEMPTION_REVERSED,
+        reason: order.orderSource === "DIRECT"
+          ? BONUS_REASONS.DIRECT_ORDER_REDEMPTION_REVERSED
+          : BONUS_REASONS.WEB_ORDER_REDEMPTION_REVERSED,
         referenceId: referenceKey,
-        idempotencyKey: webOrderBonusRevisionRevertKey(referenceKey, order.benefitsRevision),
+        idempotencyKey: order.orderSource === "DIRECT"
+          ? `direct-order-bonus-revert:${order.id}:${order.benefitsRevision}`
+          : webOrderBonusRevisionRevertKey(referenceKey, order.benefitsRevision),
         metadata: {
           orderId: order.id,
           publicOrderId: order.publicOrderId,

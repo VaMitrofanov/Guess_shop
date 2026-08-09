@@ -263,7 +263,8 @@ export default async function AdminDashboard() {
           <div className={styles.panelHeader}><strong>Операционный запас</strong><span>БД прямо сейчас</span></div>
           <div className={styles.resourceGrid}>
             <div><span>Доступные WB-коды</span><strong className={metrics.availableCodes > 100 ? styles.healthGood : styles.healthWarn}>{metrics.availableCodes}</strong></div>
-            <div><span>Зарезервировано</span><strong>{metrics.reservedCodes}</strong></div>
+            <div><span>Резерв активен</span><strong>{metrics.reservedCodes}</strong></div>
+            <div><span>Резерв истёк</span><strong className={metrics.expiredReservedCodes === 0 ? styles.healthGood : styles.healthWarn}>{metrics.expiredReservedCodes}</strong></div>
             <div><span>Активная outbox</span><strong className={metrics.pendingOutbox === 0 ? styles.healthGood : styles.healthWarn}>{metrics.pendingOutbox}</strong></div>
             <div><span>Эквайринг</span><strong className={runtime.acquiring === "off" ? styles.healthWarn : styles.healthGood}>{runtime.acquiring}</strong></div>
           </div>
