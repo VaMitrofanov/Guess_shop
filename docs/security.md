@@ -1164,8 +1164,10 @@ live-attempt входят в ту же выборку. Поздний `CONFIRMED
 
 Первый production-проход 09.08 корректно нашёл две исторические пары, но оставил их
 fail-closed: TG-образ не содержал Russian Trusted Root CA и `GetState` вернул `fetch failed`.
-CA и `NODE_EXTRA_CA_CERTS` добавлены в TG так же, как ранее в Web; отдельный Docker-контракт
-не даст снова выпустить reconciliation worker без нужного trust chain.
+Первый hotfix поместил CA только в промежуточную `deps` stage: runtime probe честно показал
+`NODE_EXTRA_CA_CERTS ... No such file` и `SELF_SIGNED_CERT_IN_CHAIN`. Исправление переносит
+COPY/update-ca в финальную `runner` stage; Docker-контракт теперь отдельно извлекает и
+проверяет именно runner-секцию.
 
 ## Production dependency advisories — CRITICAL, ✅ ЗАКРЫТО (2026-08-09)
 

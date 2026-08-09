@@ -26,11 +26,6 @@ RUN apt-get update -y \
     && apt-get install -y --no-install-recommends openssl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# GetState/Cancel use the same T-Bank endpoint as Web Init. Its certificate
-# chain is signed by the Russian Trusted Root CA, absent from Debian by default.
-COPY certs/russian-trusted-ca.pem /usr/local/share/ca-certificates/russian-trusted-ca.crt
-RUN update-ca-certificates
-
 ENV NODE_OPTIONS="--max-old-space-size=512"
 
 COPY bots/tg/package.json bots/tg/package-lock.json ./
@@ -51,6 +46,12 @@ WORKDIR /app
 RUN apt-get update -y \
     && apt-get install -y --no-install-recommends openssl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# GetState/Cancel use the same T-Bank endpoint as Web Init. Its certificate
+# chain is signed by the Russian Trusted Root CA, absent from Debian by default.
+# This must live in runner: files copied into the deps stage do not survive.
+COPY certs/russian-trusted-ca.pem /usr/local/share/ca-certificates/russian-trusted-ca.crt
+RUN update-ca-certificates
 
 # Build-time defaults only.
 #

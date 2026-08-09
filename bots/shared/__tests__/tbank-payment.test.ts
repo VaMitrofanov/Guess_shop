@@ -24,8 +24,11 @@ afterAll(() => { process.env = originalEnv; });
 describe("T-Bank reconciliation adapter", () => {
   it("ships the same Russian CA in the TG reconciliation image as Web Init", () => {
     const dockerfile = readFileSync(resolve(__dirname, "../../tg/Dockerfile"), "utf8");
-    expect(dockerfile).toContain("COPY certs/russian-trusted-ca.pem");
-    expect(dockerfile).toContain("NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/russian-trusted-ca.crt");
+    const runner = dockerfile.split("FROM node:${NODE_VERSION} AS runner")[1];
+    expect(runner).toBeDefined();
+    expect(runner).toContain("COPY certs/russian-trusted-ca.pem");
+    expect(runner).toContain("RUN update-ca-certificates");
+    expect(runner).toContain("NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/russian-trusted-ca.crt");
   });
 
   it("validates GetState identity and amount", async () => {
