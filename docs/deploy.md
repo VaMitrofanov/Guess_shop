@@ -183,6 +183,10 @@ RUN update-ca-certificates
 
 Root CA действует до 2032-02-27, Sub CA — до 2029-07-19.
 
+**09.08.2026:** тот же CA обязателен в `bots/tg/Dockerfile`. TG — единственный
+`GetState/Cancel` reconciliation worker; без `NODE_EXTRA_CA_CERTS` он находил stale
+платежи, но оставлял их fail-closed с `fetch failed`. Docker-контракт закреплён bot-тестом.
+
 ### Один скрипт вместо ручного шага (26.07.2026, ultra-review U5)
 
 Ручной шаг «не забудь Guide» регулярно забывался: 25.07 прод обслуживал точку входа с

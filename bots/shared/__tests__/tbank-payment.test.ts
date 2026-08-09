@@ -1,4 +1,6 @@
 import { PaymentAttemptStatus } from "@prisma/client";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   cancelTbankPaymentSession,
   getTbankPaymentState,
@@ -20,6 +22,12 @@ beforeEach(() => {
 afterAll(() => { process.env = originalEnv; });
 
 describe("T-Bank reconciliation adapter", () => {
+  it("ships the same Russian CA in the TG reconciliation image as Web Init", () => {
+    const dockerfile = readFileSync(resolve(__dirname, "../../tg/Dockerfile"), "utf8");
+    expect(dockerfile).toContain("COPY certs/russian-trusted-ca.pem");
+    expect(dockerfile).toContain("NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/russian-trusted-ca.crt");
+  });
+
   it("validates GetState identity and amount", async () => {
     jest.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({
       Success: true,
