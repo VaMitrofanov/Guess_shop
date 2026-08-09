@@ -1,6 +1,6 @@
 # Платежи, возвраты и ККТ
 
-## Payment reliability 09.08.2026 — lifecycle P0 закрыт в release candidate
+## Payment reliability 09.08.2026 — lifecycle P0 закрыт в production
 
 - Public acquiring работает в `mode=on`; свежий `Init` создан 09.08. Последний фактически
   подтверждённый платёж после SSL-фикса — 06.08. Invalid webhook signature возвращает 401,
@@ -9,9 +9,10 @@
   сессия закрывается через `Cancel`; bonus/discount возвращаются только после подтверждённого
   `CANCELED/REVERSED/REJECTED/expired` результата. Ошибка банка оставляет заказ на следующую
   сверку без финансовой компенсации — fail-closed.
-- Выборка включает старые `REJECTED/ERROR + INITIATED/AUTHORIZED`, поэтому две найденные
-  production-пары автоматически сойдутся после deploy. `CONFIRMED` из `GetState` создаёт
-  тот же durable event/outbox, что и webhook.
+- Выборка включает старые `REJECTED/ERROR + INITIATED/AUTHORIZED`. Production sweep после
+  установки Russian CA в TG runner закрыл две найденные пары как `CANCELED` и `REJECTED`;
+  повторной компенсации не было, terminal order + live attempt = 0. `CONFIRMED` из
+  `GetState` создаёт тот же durable event/outbox, что и webhook.
 - Поздний `CONFIRMED` атомарно повторно резервирует возвращённые льготы. Если пользователь
   уже потратил бонус/скидку, платёж фиксируется, но заказ получает `ERROR`, не попадает в
   выкуп, клиент получает нейтральное сообщение, а админы — тревогу «не выкупать».
@@ -19,7 +20,7 @@
   `autoBuyoutEnabled=false` поэтому не являются платежным stop-gate; backlog обслуживается
   вручную.
 - Regression coverage: GetState identity/amount, Cancel без refund Amount, stale cancel,
-  late CONFIRMED с benefits, fail-closed insufficient benefits и outbox alert.
+  late CONFIRMED с benefits, fail-closed insufficient benefits, TG runner CA и outbox alert.
 
 Полный снимок и порядок исправления:
 [system-audit-2026-08-09.md](system-audit-2026-08-09.md).

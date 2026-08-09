@@ -57,22 +57,22 @@
 - QA: критический lint = 0 warnings; старый долг 1123 warnings защищён точным fingerprint;
   TypeScript web+боты чистый; Jest 386/386 + 21/21; production build зелёный.
 
-### Payment reliability 09.08 (release candidate, deploy ⏳)
+### Payment reliability + bot checkout 09.08 (production ✅)
 
 - T-Bank reconciliation worker каждые 15 минут проверяет старые SITE attempts через
   `GetState`; `NEW`/`AUTHORIZED` и промежуточные stale-сессии сначала закрывает `Cancel`.
 - `REJECTED + INITIATED/AUTHORIZED` старого формата входят в выборку и автоматически
   сходятся после deploy; при сетевой/неизвестной ошибке система fail-closed и не возвращает
-  льготы.
+  льготы. Production sweep закрыл обе найденные пары без повторной компенсации.
 - Webhook и worker одинаково трактуют поздний `CONFIRMED`: бонус и рублёвая скидка
   резервируются одним guarded update. При изменившемся балансе заказ становится `ERROR`,
   клиенту не обещается выкуп, админы получают отдельную тревогу.
 - Next `16.3.0`, next-auth `5.0.0-beta.32`, Prisma `7.9.1`; `xlsx` удалён, admin import
   использует ограниченный ExcelJS parser. Полный `npm audit` root/TG/VK — 0 advisories.
 - CI запускает Prisma validate, gates и build. Локально после hybrid checkout: web 502/502,
-  bots 46/46,
+  bots 47/47,
   Prisma valid, production build и smoke 15/15 зелёные; legacy lint baseline снижен
-  1096 → 1088.
+  1096 → 1084. Production corridor 30/30, Web/Guide fingerprint совпадает, worker healthy.
 
 ### Выкат 28.07 (ночь): вход в админку из интерфейса
 

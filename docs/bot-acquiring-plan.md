@@ -176,3 +176,17 @@ T‑Bank credentials остаются только у Web и reconciliation work
 - автоматическая фискализация manual transfer и task «чек сформирован»;
 - полноценный Telegram/VK E2E harness; production acceptance реальным аккаунтом остаётся
   ручным, потому что автоматический тест не должен писать клиентам или списывать деньги.
+
+## Production acceptance 09.08.2026
+
+- local gates: web 502/502, bots 47/47, оба TypeScript, lint/Prisma/build green;
+- npm audit root/TG/VK: 0 vulnerabilities;
+- storefront 15/15, corridor 30/30, Web/Guide fingerprint совпадает;
+- unsigned Bot→Web = 401, signed unknown intent = 404, manual-details leak = false;
+- TG/VK startup подтверждён; worker fresh/healthy, overdue outbox 0;
+- T‑Bank TLS из TG runner проверен напрямую; stale sweep закрыл две исторические provider-
+  сессии без повторного возврата льгот, live terminal-order attempts = 0;
+- Trello: `[SHIPPED][P1] Оплата в ботах: сайт + эквайринг + реквизиты`.
+
+Реальный платёж, refund/OFD и фискализация manual transfer не симулировались и не
+объявляются пройденными: это отдельные controlled acceptance actions.

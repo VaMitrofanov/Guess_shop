@@ -1169,6 +1169,10 @@ fail-closed: TG-образ не содержал Russian Trusted Root CA и `Get
 COPY/update-ca в финальную `runner` stage; Docker-контракт теперь отдельно извлекает и
 проверяет именно runner-секцию.
 
+Финальная production-проверка: TLS probe из TG runner проходит; sweep закрыл обе
+исторические попытки (`CANCELED`/`REJECTED`), повторно не компенсировал льготы, terminal
+orders с live T‑Bank attempt = 0.
+
 ## Production dependency advisories — CRITICAL, ✅ ЗАКРЫТО (2026-08-09)
 
 Исходный снимок `npm audit --omit=dev` содержал 14 advisories, включая 2 critical:

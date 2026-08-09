@@ -2,8 +2,9 @@
 
 ## Результат remediation 09.08
 
-Найденные P0/P1 исправлены в release candidate; production deploy и контролируемая денежная
-приёмка ещё не выполнялись:
+Найденные P0/P1 исправлены и развёрнуты в production. Основной release — `10a4941`,
+финальный TG trust-chain hotfix — `3145204`. Контролируемая денежная/ОФД-приёмка не
+выполнялась:
 
 - stale SITE-платежи теперь сверяются через T‑Bank `GetState`, незавершённые попытки
   отменяются через `Cancel`, а льготы возвращаются только после terminal provider status;
@@ -18,10 +19,10 @@
   legacy payment initializer удалён.
 
 Локальная приёмка после payment reliability + hybrid bot checkout: web **502/502**,
-bots **46/46**, оба TypeScript,
+bots **47/47**, оба TypeScript,
 critical/full baseline lint, production build Next.js **16.3.0** — зелёные; полный lint
-fingerprint уменьшен **1096 → 1088**. Prisma schema valid, локальный production smoke
-**15/15**, оба npm audit — **0 vulnerabilities**. Ручной выкуп принят владельцем как штатный
+fingerprint уменьшен **1096 → 1084**. Prisma schema valid, production smoke
+**15/15 + 30/30**, три npm audit — **0 vulnerabilities**. Ручной выкуп принят владельцем как штатный
 режим и поэтому недоступность browser purchase service больше не считается блокером приёма
 оплаты.
 
@@ -41,6 +42,22 @@ provider и атомарно пишет confirmed/event/outbox. Legacy TG/TWA co
 retry/benefits и stale-direct regressions. Детали —
 [bot-acquiring-plan.md](bot-acquiring-plan.md). ККТ/допустимость получателя manual transfer
 остаются осознанным внешним риском, который код не может закрыть.
+
+### Production acceptance 09.08
+
+- Web/Guide развёрнуты на release `10a4941`, их source fingerprint совпадает;
+  TG/VK — на финальном bot hotfix `3145204`, очередь deployment пуста.
+- Storefront smoke **15/15**, corridor **30/30**, Prisma **46/46 migrations current**.
+- Bot payment API без HMAC возвращает 401; корректно подписанный запрос к неизвестному
+  intent возвращает ownership-safe 404; manual details в обоих ответах отсутствуют.
+- TG/VK startup подтверждён runtime-логами; payment worker heartbeat `fresh`, watchdog
+  `HEALTHY`, overdue outbox 0; в БД 17/17 outbox сообщений `DELIVERED`.
+- Первый stale sweep выявил отсутствующий Russian CA в TG runner. Runtime probe локализовал
+  `SELF_SIGNED_CERT_IN_CHAIN`; после hotfix TLS probe проходит. Следующий sweep закрыл обе
+  исторические сессии (`CANCELED` и `REJECTED`), не вернул льготы повторно (`reverted=0`),
+  terminal orders с live T‑Bank attempt теперь **0**.
+- Trello-карточка переведена в `SHIPPED`; реальные деньги, ОФД/refund и бухгалтерская
+  приёмка manual fallback оставлены открытыми явно.
 
 ## Вердикт на момент исходного аудита
 
@@ -84,7 +101,7 @@ retry/benefits и stale-direct regressions. Детали —
 
 ## Находки
 
-### P0. Автоотмена оставляет банковский платёж активным — ✅ закрыто в release candidate
+### P0. Автоотмена оставляет банковский платёж активным — ✅ закрыто в production
 
 `sweepStaleWebOrders()` отменяет `AWAITING_PAYMENT/PAYMENT_PENDING` через 2 часа и сразу
 возвращает benefit reservation. Однако `isLivePaymentAttempt()` считает `INITIATED` и
@@ -101,9 +118,9 @@ Production-снимок подтвердил две записи:
 возвращённый бонус/скидка повторно не резервируется. Это одновременно риск позднего
 списания, неожиданного «воскрешения» заказа и двойной выгоды.
 
-**Реализовано:** `GetState`/`Cancel`, terminal-only compensation, атомарный late-payment
-guard, fail-closed reconciliation alert и regression suite. Две исторические production
-попытки будут обработаны worker после deploy; до него их по-прежнему нужно сверить вручную.
+**Реализовано и принято:** `GetState`/`Cancel`, terminal-only compensation, атомарный
+late-payment guard, fail-closed reconciliation alert и regression suite. Production worker
+закрыл обе исторические попытки; live-attempt при terminal order = 0.
 
 ### Operational. Ручной выкуп принят владельцем
 
