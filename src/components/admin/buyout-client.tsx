@@ -116,6 +116,12 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
   const [confirming, setConfirming] = useState<null | "buy" | "mark">(null);
   const [progress, setProgress] = useState<{ done: number; total: number; ok: number } | null>(null);
   const [report, setReport] = useState<{ ok: number; fail: number; gross: number; stopped: boolean; mode: "buy" | "mark" } | null>(null);
+  const [scriptModal, setScriptModal] = useState<{
+    script: string; name: string; price: number; base: number;
+    creatorName: string; gamepassId: string; pageUrl: string;
+    wbCode: string;
+  } | null>(null);
+  const [scriptCopied, setScriptCopied] = useState(false);
   const stopRef = useRef(false);
   const loadRequestRef = useRef(0);
   const loadAbortRef = useRef<AbortController | null>(null);
@@ -257,12 +263,31 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
         setRowState((s) => ({ ...s, [item.orderId]: { kind: "failed", reason: d?.error ?? `HTTP ${res.status}` } }));
         return;
       }
-      await navigator.clipboard.writeText(d.script);
       setRowState((s) => ({ ...s, [item.orderId]: { kind: "idle" } }));
-      setCopied(`script:${item.orderId}`);
-      setTimeout(() => setCopied((c) => (c === `script:${item.orderId}` ? null : c)), 2200);
+      setScriptModal({
+        script: d.script,
+        name: d.name ?? "Game Pass",
+        price: d.price ?? item.expectedPrice,
+        base: d.base ?? item.amount,
+        creatorName: d.creatorName ?? "—",
+        gamepassId: d.gamepassId ?? item.gamepassId,
+        pageUrl: d.pageUrl ?? `https://www.roblox.com/game-pass/${item.gamepassId}`,
+        wbCode: item.wbCode,
+      });
+      setScriptCopied(false);
     } catch {
       setRowState((s) => ({ ...s, [item.orderId]: { kind: "failed", reason: "ошибка сети" } }));
+    }
+  };
+
+  const copyScriptToClipboard = async () => {
+    if (!scriptModal) return;
+    try {
+      await navigator.clipboard.writeText(scriptModal.script);
+      setScriptCopied(true);
+      setTimeout(() => setScriptCopied(false), 2200);
+    } catch {
+      setError("Буфер обмена недоступен");
     }
   };
 
@@ -453,6 +478,56 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
 
   return (
     <div className={styles.stack}>
+      {scriptModal && (
+        <div className={styles.modalBackdrop} onMouseDown={(e) => e.target === e.currentTarget && setScriptModal(null)}>
+          <section className={styles.modalSheet} role="dialog" aria-modal="true" style={{ width: "min(720px, 100%)" }}>
+            <button onClick={() => setScriptModal(null)} className={styles.modalClose} aria-label="Закрыть"><X /></button>
+            <span className={styles.modalKicker}>Скрипт покупки</span>
+            <h2 style={{ margin: "5px 52px 16px 0" }}>{scriptModal.name}</h2>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 18 }}>
+              <div>
+                <span style={{ color: "var(--admin-muted)", fontSize: 11, fontWeight: 760, textTransform: "uppercase", letterSpacing: ".05em" }}>Код</span>
+                <div style={{ fontWeight: 600, marginTop: 3 }}>{scriptModal.wbCode}</div>
+              </div>
+              <div>
+                <span style={{ color: "var(--admin-muted)", fontSize: 11, fontWeight: 760, textTransform: "uppercase", letterSpacing: ".05em" }}>Цена</span>
+                <div style={{ fontWeight: 600, marginTop: 3 }}>{rbx(scriptModal.price)}</div>
+              </div>
+              <div>
+                <span style={{ color: "var(--admin-muted)", fontSize: 11, fontWeight: 760, textTransform: "uppercase", letterSpacing: ".05em" }}>Продавец</span>
+                <div style={{ fontWeight: 600, marginTop: 3 }}>{scriptModal.creatorName}</div>
+              </div>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <a
+                href={scriptModal.pageUrl} target="_blank" rel="noreferrer"
+                style={{ color: "#9d8cff", fontSize: 13, fontWeight: 600 }}
+              >
+                Открыть страницу геймпасса <ExternalLink size={12} style={{ display: "inline", verticalAlign: "-1px" }} />
+              </a>
+            </div>
+            <div style={{ position: "relative" }}>
+              <textarea
+                className={styles.copyArea}
+                readOnly value={scriptModal.script} spellCheck={false}
+                style={{ minHeight: 180, fontSize: 11.5, fontFamily: "monospace", lineHeight: 1.5 }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+              <button type="button" className={styles.buyButton} style={{ flex: 1 }} onClick={() => void copyScriptToClipboard()}>
+                {scriptCopied ? <ClipboardCheck /> : <Copy />}
+                {scriptCopied ? "Скопировано" : "Скопировать скрипт"}
+              </button>
+              <button type="button" className={styles.ghostButton} onClick={() => setScriptModal(null)}>Закрыть</button>
+            </div>
+            <p style={{ margin: "12px 0 0", color: "var(--admin-muted)", fontSize: 12, lineHeight: 1.5 }}>
+              Открой страницу геймпасса в браузере донора, нажми F12 → Console, вставь скрипт и нажми Enter.
+              Скрипт проверит аккаунт, цену и продавца перед покупкой.
+            </p>
+          </section>
+        </div>
+      )}
+
       {error && (
         <div className={styles.noteWarn}><TriangleAlert /><div>{error}</div></div>
       )}

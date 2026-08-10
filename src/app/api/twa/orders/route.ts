@@ -4,7 +4,7 @@ import { requireAdmin } from "@/lib/admin-access";
 import { prisma } from "@/lib/prisma";
 import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing, notifyRegionalPriceNeeded } from "@/lib/twa-notify";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
-import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepassForBuyer, verifyGamepassOwnership, type ResolvedGamepass } from "@/lib/roblox-buyout";
+import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepass, resolveGamepassForBuyer, verifyGamepassOwnership, type ResolvedGamepass } from "@/lib/roblox-buyout";
 import { browserFailureMessage, isBrowserInfrastructureFailure } from "@/lib/browser-purchase";
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "@/lib/roblox-purchase-script";
 import { BUYOUT_ERROR_LEGACY_PURCHASE_FLOW, BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, checkGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
@@ -1343,15 +1343,36 @@ export async function POST(req: NextRequest) {
 
     const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
     const donorCookie = settings?.robloxCookie as string | null | undefined;
-    if (!donorCookie)
-      return NextResponse.json({ error: "Cookie не задан. Добавь его в TWA → Аккаунт → 🔑" }, { status: 400 });
 
     let info: ResolvedGamepass;
-    try {
-      info = await resolveGamepassForBuyer(gpId, donorCookie);
-    } catch (err) {
-      const status = err instanceof BuyoutError ? err.status : 502;
-      return NextResponse.json({ error: err instanceof Error ? err.message : "Не удалось получить персональную цену Roblox" }, { status });
+    let browserFallback = false;
+
+    if (donorCookie) {
+      try {
+        info = await resolveGamepassForBuyer(gpId, donorCookie);
+      } catch (err) {
+        if (err instanceof BuyoutError && err.status >= 500) {
+          // Browser service down — fall back to public API
+          try {
+            info = await resolveGamepass(gpId);
+            browserFallback = true;
+          } catch (fallbackErr) {
+            const status = fallbackErr instanceof BuyoutError ? fallbackErr.status : 502;
+            return NextResponse.json({ error: fallbackErr instanceof Error ? fallbackErr.message : "Не удалось получить данные геймпасса" }, { status });
+          }
+        } else {
+          const status = err instanceof BuyoutError ? err.status : 502;
+          return NextResponse.json({ error: err instanceof Error ? err.message : "Не удалось получить персональную цену Roblox" }, { status });
+        }
+      }
+    } else {
+      try {
+        info = await resolveGamepass(gpId);
+        browserFallback = true;
+      } catch (err) {
+        const status = err instanceof BuyoutError ? err.status : 502;
+        return NextResponse.json({ error: err instanceof Error ? err.message : "Не удалось получить данные геймпасса" }, { status });
+      }
     }
 
     const price = info.price;
@@ -1378,13 +1399,6 @@ export async function POST(req: NextRequest) {
         { status: 409 },
       );
 
-    // В скрипт зашита ожидаемая по номиналу цена (не live): даже скопированный
-    // заранее скрипт откажется покупать, если цена пасса уже не ровно ожидаемая.
-    // buyerUserId — [АККАУНТ-СТОП]: скрипт не сработает в чужой сессии, где залогинен
-    // не донор, а личный аккаунт менеджера.
-    if (!info.buyerAccountId) {
-      return NextResponse.json({ error: "Не удалось подтвердить аккаунт донора в серверном браузере" }, { status: 503 });
-    }
     const script = buildGamepassPurchaseScript({
       gamepassId: gpId,
       productId: info.productId,
@@ -1397,6 +1411,7 @@ export async function POST(req: NextRequest) {
       ok: true, script, name, price, base, creatorName,
       isForSale, isManagedPricing, gamepassId: gpId,
       pageUrl: gamepassPageUrl(gpId),
+      browserFallback,
     });
   }
 
