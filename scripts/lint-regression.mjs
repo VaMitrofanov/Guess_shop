@@ -64,12 +64,18 @@ import { ESLint } from "eslint";
 // 2026-08-09 (1085 → 1084): canonical manual confirmation теперь уведомляет
 // клиента только через durable outbox. Удалён второй прямой DB lookup через
 // legacy `any`; остальные изменения fingerprint — сдвиг строк payment handlers.
+
+// 2026-08-11 (1084 → 1084): DBS-worker подключён к существующему TG cron,
+// из-за чего сдвинулись номера строк его legacy warnings. Новый WB delivery
+// corridor отдельно проходит `lint:critical` с max-warnings=0; состав и число
+// общего legacy debt не изменились. Обязательный donor-account guard также
+// сдвинул только существующие warning-строки большого TWA orders route.
 //
 // Unlike --max-warnings, this has no spare capacity: adding, moving,
 // replacing or changing even one warning fails the gate. Reduce the baseline
 // only in a dedicated cleanup change after reviewing the full formatter output.
 const BASELINE_WARNING_COUNT = 1084;
-const BASELINE_SHA256 = "bb77faa4913abee26df0379f4216e76b9e12f68dc7e8d504721ae6e4b284afab";
+const BASELINE_SHA256 = "7d31815ba5d799ac83b3fee3fb7ccd91a29cd207d601061a15bb5ea8f9565305";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);

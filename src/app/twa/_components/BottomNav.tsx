@@ -7,6 +7,7 @@ import {
   Ellipsis,
   House,
   Settings,
+  Truck,
   Warehouse,
   Wallet,
   X,
@@ -14,7 +15,7 @@ import {
 import { haptic } from "./haptics";
 import { C } from "./theme";
 
-type Screen = "dashboard" | "orders" | "wb" | "account" | "settings" | "system" | "economics";
+type Screen = "dashboard" | "orders" | "wb" | "delivery" | "account" | "settings" | "system" | "economics";
 
 const MAIN_TABS = [
   { id: "dashboard" as const, label: "Главная", Icon: House },
@@ -32,7 +33,7 @@ export default function BottomNav({
   ordersBadge?: number;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
-  const moreActive = active === "wb" || active === "settings" || active === "system" || active === "economics";
+  const moreActive = active === "wb" || active === "delivery" || active === "settings" || active === "system" || active === "economics";
 
   function navigate(screen: Screen) {
     if (screen !== active) haptic.select();
@@ -61,6 +62,11 @@ export default function BottomNav({
           <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("economics")}>
             <span className="twa-more-icon"><Wallet size={19} /></span>
             <span><strong>Экономика</strong><small>Прямые заказы, робуксы и бонусы</small></span>
+            <span aria-hidden="true">›</span>
+          </button>
+          <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("delivery")}>
+            <span className="twa-more-icon"><Truck size={19} /></span>
+            <span><strong>WB Доставка</strong><small>DBS-заказы, чаты и коды выдачи</small></span>
             <span aria-hidden="true">›</span>
           </button>
           <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("wb")}>

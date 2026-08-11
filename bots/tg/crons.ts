@@ -13,6 +13,7 @@ import { startAutoWorkers } from "./auto-workers";
 import { startPaymentOutboxWorker } from "../shared/payment-outbox";
 import { sweepStaleWebOrders } from "../shared/order-benefits";
 import { runRetention } from "../shared/retention";
+import { startWbDeliveryWorker } from "../shared/wb-delivery-sync";
 
 // Одно место правды о бонусе — review-eligibility.ts (Ф3, 2026-07-12).
 const BONUS_AMOUNT = REVIEW_BONUS_AMOUNT;
@@ -559,6 +560,7 @@ export function startReviewReminderCron(bot: Telegraf): void {
   // Auto-buyout (+1) + GP-watcher (+3) — both kill-switched OFF by default.
   startAutoWorkers(bot);
   startPaymentOutboxWorker(bot);
+  const wbDbsStarted = startWbDeliveryWorker(db);
 
   console.log("[ReviewReminder] Cron started ✅");
   console.log("[StockAlert] Cron started ✅");
@@ -566,4 +568,5 @@ export function startReviewReminderCron(bot: Telegraf): void {
   console.log("[UnlockPush] Cron started ✅");
   console.log("[StaleWebOrders] Cron started ✅");
   console.log("[Retention] Cron started ✅");
+  console.log(`[WbDbsSync] Worker ${wbDbsStarted ? "started ✅" : "disabled"}`);
 }

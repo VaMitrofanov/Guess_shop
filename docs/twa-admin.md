@@ -253,6 +253,27 @@ AVITO требует цену продажи в рублях. DIRECT перен�
 | `EconomicsScreen` | «Экономика»: все не-WB заказы, робуксы, бонусы и интерактивная формула себестоимости (см. ниже) |
 | `ReviewsScreen`, `SettingsScreen`, `SystemScreen` | отзывы, настройки, health |
 
+## «WB Доставка» для DBS (реализовано 11.08.2026)
+
+Новый DBS-контур не добавлен в текущий `OrdersScreen` как ещё один фильтр: marketplace
+delivery имеет собственные WB/chat/gate statuses и только затем связывается с внутренним
+`WbOrder`. TWA → «Ещё → WB Доставка» даёт mobile urgent/active/done очереди, delivery
+window, безопасный transcript, следующий разрешённый action, atomic generated `WbCode`,
+резервный шестизначный ввод и защищённые `confirm/deliver/receive`.
+
+Desktop `/admin/wildberries/delivery` даёт двухпанельный Control Center: метрики/флаги,
+поиск/фильтры, stage rail, buyer-chat, product mapping, audit timeline и reconciliation.
+Обе поверхности используют один `wb-delivery-workflow` service и одну state machine;
+desktop не получает обходных mutation-действий. Код получения покупателя
+маскируется, не возвращается в list API и очищается после использования. До canary chat
+send и WB mutations выключены feature flags.
+
+Для приёмки без внешних эффектов кнопка «Тестовый заказ» создаёт `isTest=true`: запрос кода,
+ответ покупателя, выпуск/отправка гейта, confirm/deliver/receive меняют только DB-состояния.
+
+Полный UX, DTO, actions, stop conditions и Definition of Done:
+[wb-dbs-delivery-plan.md](wb-dbs-delivery-plan.md).
+
 ## Возврат SITE-платежа
 
 У карточки `SITE` с payment status `CONFIRMED/PARTIALLY_REFUNDED` есть действие

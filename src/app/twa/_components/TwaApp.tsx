@@ -9,6 +9,7 @@ import { haptic } from "./haptics";
 const Dashboard       = dynamic(() => import("./screens/Dashboard"),      { ssr: false, loading: () => <ScreenSkeleton /> });
 const OrdersScreen    = dynamic(() => import("./screens/OrdersScreen"),   { ssr: false, loading: () => <ScreenSkeleton /> });
 const WbScreen        = dynamic(() => import("./screens/WbScreen"),       { ssr: false, loading: () => <ScreenSkeleton /> });
+const WbDeliveryScreen = dynamic(() => import("./screens/WbDeliveryScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
 const AccountScreen   = dynamic(() => import("./screens/BossrobuxScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
 const SettingsScreen  = dynamic(() => import("./screens/SettingsScreen"), { ssr: false, loading: () => <ScreenSkeleton /> });
 const SystemScreen    = dynamic(() => import("./screens/SystemScreen"),   { ssr: false, loading: () => <ScreenSkeleton /> });
@@ -49,12 +50,13 @@ declare global {
   }
 }
 
-type Screen = "dashboard" | "orders" | "wb" | "account" | "settings" | "system" | "economics";
+type Screen = "dashboard" | "orders" | "wb" | "delivery" | "account" | "settings" | "system" | "economics";
 
 const SCREEN_TITLES: Record<Screen, string> = {
   dashboard:  "Главная",
   orders:     "Заказы",
   wb:         "Wildberries",
+  delivery:   "WB Доставка",
   account:    "Аккаунт",
   settings:   "Настройки",
   system:     "Система",
@@ -65,6 +67,7 @@ const SCREEN_TITLES: Record<Screen, string> = {
 // The title bar shows a back chevron to the parent instead of the date.
 const SCREEN_PARENT: Partial<Record<Screen, Screen>> = {
   system: "settings",
+  delivery: "wb",
 };
 
 export default function TwaApp() {
@@ -343,6 +346,7 @@ export default function TwaApp() {
         />}
         {screen === "orders"     && <OrdersScreen   {...sp} onActionDone={refreshBadge} initialQuery={orderQueryPreload} initialTab={ordersTabPreload} onInitialQueryConsumed={() => { setOrderQueryPreload(""); setOrdersTabPreload(""); }} />}
         {screen === "wb"         && <WbScreen       {...sp} initialTab={wbTabPreload} />}
+        {screen === "delivery"   && <WbDeliveryScreen {...sp} />}
         {screen === "account"    && <AccountScreen  {...sp} onOpenErrors={() => { setOrdersTabPreload("ERROR"); setScreen("orders"); }} />}
         {screen === "settings"   && <SettingsScreen  {...sp} onNavigate={(s) => setScreen(s as Screen)} />}
         {screen === "system"     && <SystemScreen    {...sp} />}

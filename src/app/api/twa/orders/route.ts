@@ -1400,6 +1400,14 @@ export async function POST(req: NextRequest) {
         { status: 409 },
       );
 
+    // Donor identity is part of the single-egress guard: a script without the
+    // verified buyer account could execute in an unrelated Roblox tab.
+    if (!info.buyerAccountId)
+      return NextResponse.json(
+        { error: "Не удалось подтвердить аккаунт донора — скрипт не выдан" },
+        { status: 503 },
+      );
+
     const script = buildGamepassPurchaseScript({
       gamepassId: gpId,
       productId: info.productId,

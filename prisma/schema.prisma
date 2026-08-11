@@ -321,6 +321,23 @@ enum WbCodeStatus {
   CLAIMED
 }
 
+enum WbMarketplaceChatState {
+  WAITING_BUYER_CHAT
+  READY
+  CODE_REQUESTED
+  REQUEST_SEND_UNKNOWN
+  CODE_RECEIVED
+}
+
+enum WbMarketplaceGateState {
+  NOT_ISSUED
+  ISSUED
+  SENDING
+  SENT
+  SEND_UNKNOWN
+  REVOKED
+}
+
 enum PartnerTaskStatus {
   NEW
   READY
@@ -913,31 +930,168 @@ model WbSettings {
 
 /// Activation codes printed on Wildberries card inserts.
 model WbCode {
-  id                 String       @id @default(cuid())
-  code               String       @unique
+  id                 String              @id @default(cuid())
+  code               String              @unique
   denomination       Int
-  status             WbCodeStatus @default(AVAILABLE)
+  status             WbCodeStatus        @default(AVAILABLE)
   sessionId          String?
   reservedUntil      DateTime?
-  isUsed             Boolean      @default(false)
+  isUsed             Boolean             @default(false)
   usedAt             DateTime?
   batch              String?
-  isTest             Boolean      @default(false)
-  reviewBonusClaimed Boolean      @default(false)
+  isTest             Boolean             @default(false)
+  reviewBonusClaimed Boolean             @default(false)
   userId             String?
-  user               User?        @relation(fields: [userId], references: [id])
+  user               User?               @relation(fields: [userId], references: [id])
   /// Gamepass the user picked on the website Step-7 search (one-tap handoff to bot).
   selectedGamepassId String?
   /// Roblox nick the user searched with on the website (also seeds WbOrder.robloxUsername).
   robloxNick         String?
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
+  /// Optional origin for dynamically issued DBS codes. The foreign key lives
+  /// on WbMarketplaceOrder so legacy physical codes need no backfill.
+  marketplaceOrder   WbMarketplaceOrder?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
   @@index([code])
   @@index([status])
   @@index([sessionId])
   @@index([denomination])
   @@index([userId])
+}
+
+/// Wildberries marketplace assembly order. This is deliberately separate from
+/// WbOrder, which is the internal Roblox/Game Pass fulfillment order.
+model WbMarketplaceOrder {
+  id                   String                 @id @default(cuid())
+  wbOrderId            String                 @unique
+  fulfillmentModel     String                 @default("DBS")
+  rid                  String?                @unique
+  orderUid             String?
+  groupId              String?
+  nmId                 Int
+  vendorCode           String?
+  article              String?
+  denominationSnapshot Int?
+  priceKopecks         Int?
+  finalPriceKopecks    Int?
+  currencyCode         Int?
+  deliveryFrom         DateTime?
+  deliveryTo           DateTime?
+  requiredMeta         Json?
+  supplierStatus       String                 @default("new")
+  wbStatus             String                 @default("waiting")
+  chatState            WbMarketplaceChatState @default(WAITING_BUYER_CHAT)
+  gateState            WbMarketplaceGateState @default(NOT_ISSUED)
+  wbCodeId             String?                @unique
+  wbCode               WbCode?                @relation(fields: [wbCodeId], references: [id], onDelete: SetNull)
+  lastErrorCode        String?
+  isTest               Boolean                @default(false)
+  firstSeenAt          DateTime               @default(now())
+  lastSeenAt           DateTime               @default(now())
+  completedAt          DateTime?
+  cancelledAt          DateTime?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  chats                WbBuyerChat[]
+  chatEvents           WbBuyerChatEvent[]
+  deliverySecret       WbDeliverySecret?
+  events               WbMarketplaceEvent[]
+
+  @@index([supplierStatus, updatedAt(sort: Desc)])
+  @@index([wbStatus, updatedAt(sort: Desc)])
+  @@index([chatState, gateState, updatedAt(sort: Desc)])
+  @@index([nmId, createdAt(sort: Desc)])
+  @@index([isTest, deliveryTo])
+}
+
+/// WB buyer chat metadata. replySign is encrypted as a single versioned
+/// envelope and never returned to client DTOs.
+model WbBuyerChat {
+  chatId             String              @id
+  marketplaceOrderId String?
+  marketplaceOrder   WbMarketplaceOrder? @relation(fields: [marketplaceOrderId], references: [id], onDelete: SetNull)
+  replySignEncrypted String?
+  lastEventAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  events             WbBuyerChatEvent[]
+
+  @@index([marketplaceOrderId, lastEventAt(sort: Desc)])
+  @@index([lastEventAt(sort: Desc)])
+}
+
+/// Redacted, deduplicated event from WB buyer chat. Delivery and activation
+/// codes are masked before persistence; only safe attachment metadata remains.
+model WbBuyerChatEvent {
+  id                   String              @id @default(cuid())
+  wbEventId            String              @unique
+  chatId               String
+  chat                 WbBuyerChat         @relation(fields: [chatId], references: [chatId], onDelete: Cascade)
+  marketplaceOrderId   String?
+  marketplaceOrder     WbMarketplaceOrder? @relation(fields: [marketplaceOrderId], references: [id], onDelete: SetNull)
+  eventType            String
+  sender               String
+  textRedacted         String?
+  containsDeliveryCode Boolean             @default(false)
+  isNewChat            Boolean             @default(false)
+  sentAt               DateTime
+  attachmentsMeta      Json?
+  createdAt            DateTime            @default(now())
+
+  @@index([chatId, sentAt(sort: Desc)])
+  @@index([marketplaceOrderId, sentAt(sort: Desc)])
+}
+
+/// Short-lived encrypted WB confirmation code. Plaintext exists only inside
+/// the receive action and is purged immediately after a confirmed outcome.
+model WbDeliverySecret {
+  marketplaceOrderId String             @id
+  marketplaceOrder   WbMarketplaceOrder @relation(fields: [marketplaceOrderId], references: [id], onDelete: Cascade)
+  encryptedValue     String
+  codeHmac           String
+  keyVersion         String             @default("v1")
+  receivedAt         DateTime           @default(now())
+  expiresAt          DateTime
+  consumedAt         DateTime?
+  failedAttempts     Int                @default(0)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([expiresAt, consumedAt])
+}
+
+/// Persistent pagination cursor and cross-process lease for DBS/chat sync.
+model WbSyncCursor {
+  stream        String    @id
+  cursor        String?
+  leaseId       String?
+  leaseUntil    DateTime?
+  lastAttemptAt DateTime?
+  lastSuccessAt DateTime?
+  lastErrorCode String?
+  metadata      Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([leaseUntil])
+  @@index([lastSuccessAt])
+}
+
+/// Append-only safe audit for operator and worker transitions. Payload is
+/// intentionally PII/secret-free and contract-tested as such.
+model WbMarketplaceEvent {
+  id                 String             @id @default(cuid())
+  marketplaceOrderId String
+  marketplaceOrder   WbMarketplaceOrder @relation(fields: [marketplaceOrderId], references: [id], onDelete: Cascade)
+  type               String
+  idempotencyKey     String             @unique
+  actor              String
+  payload            Json
+  createdAt          DateTime           @default(now())
+
+  @@index([marketplaceOrderId, createdAt(sort: Desc)])
+  @@index([type, createdAt(sort: Desc)])
 }
 
 /// Pre-order intent for direct purchases. Persisted to DB so it survives bot restarts.

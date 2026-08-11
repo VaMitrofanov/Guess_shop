@@ -616,6 +616,28 @@ TG-уведомление «КОД АКТИВИРОВАН (сайт → VK)»), 
 Детальная модель, stop conditions и DoD:
 [site-launch-implementation-plan.md](site-launch-implementation-plan.md#4-wb-выдача-на-сайте-без-потери-аудитории).
 
+### Generated-код для DBS-доставки (реализовано 11.08.2026)
+
+DBS меняет происхождение кода, но не должен форкать гейт. После того как покупатель прислал
+в WB-чат код получения, backend атомарно создаёт связанный `WbCode` с номиналом
+из snapshot товара и отправляет покупателю общую ссылку `/guide?source=wb` плюс код отдельной
+строкой. Дальше работают текущие `POST /api/wb-code`, TG/VK handoff, инструкция и
+`WbOrder` pipeline.
+
+Код получения WB нельзя подставлять в WBGate или URL. Первый релиз также не кладёт generated
+activation code в query string: покупатель получает ссылку и вводит код сам. Будущий
+one-click handoff допустим только через opaque одноразовый token, hash которого хранится на
+сервере. Выдача кода должна быть durable до вызова WB `receive`; иначе заказ может стать
+`sold` без доступного клиенту fulfillment.
+
+Live-проверка подтвердила связь DBS order ↔ buyer chat по `rid/srid`, а production-код
+выпускает связанный `WbCode` только после зашифрованного delivery code. Покупателю уходит
+`/guide?source=wb&skip=1` и код отдельной строкой; текущий гейт, TG/VK, группа и Roblox flow работают без
+отдельного DBS-форка. Transcript маскирует delivery и activation code.
+
+Официальный API стабильно отвечает только в уже созданный покупателем чат. Полная архитектура TWA/desktop,
+state machine и rollout: [wb-dbs-delivery-plan.md](wb-dbs-delivery-plan.md).
+
 ## TG-уведомления при VK-логине на сайте (`src/auth.ts`, провайдер `vk-id`)
 
 Каждый успешный VK ID-логин на сайте шлёт карточку во все `TG_CHAT_ID`. Какая карточка —

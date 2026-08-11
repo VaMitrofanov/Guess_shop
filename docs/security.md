@@ -22,6 +22,47 @@
 
 ## <a name="twa-auth"></a>Известные риски
 
+### <a name="wb-dbs-delivery-code"></a>36. WB DBS: код получения, buyer-chat и широкий RW-токен — P0, 🟡 CONTROLLED ROLLOUT (2026-08-11)
+
+Новый courier/DBS flow просит покупателя прислать в WB-чат код подтверждения получения, а
+затем использует его в Marketplace API. Этот код — одноразовый credential с денежным и
+операционным эффектом: успешный `receive` переводит заказ в полученный/проданный независимо
+от того, завершил ли RobloxBank внутренний Game Pass fulfillment.
+
+**Риск:** утечка кода в лог, URL, transcript или telemetry; подстановка кода от другого
+заказа; повторный/преждевременный `receive`; WB `sold`, но generated activation code не
+создан или не доставлен; duplicate chat message после timeout; раскрытие `replySign`, ФИО,
+телефона или адреса; компрометация текущего широкого production RW-токена затрагивает сразу
+несколько категорий WB API.
+
+**Обязательные меры до canary:** отдельные scoped Marketplace/Chat tokens; сохранение нового
+DBS из `/orders/new` до любых status mutations; корреляция только по `rid`; atomic один
+marketplace order → один `WbCode`; номинал только из server-side product snapshot; код
+получения в short-lived AES-GCM/KMS secret с HMAC, маской, TTL ≤24 ч и очисткой после
+использования; запрет секретов/PII в logs, URL, Trello, analytics и client DTO; `receive`
+только после `gateState=SENT`, повторной проверки WB status, явного admin confirm и
+append-only audit; проверка каждого `results[]` bulk-ответа; mutation kill-switch на
+`401/403`; постоянная очередь `WB_RECEIVED && internal != COMPLETED`.
+
+**Реализовано:** отдельные marketplace/chat/cursor/secret/audit модели; AES-256-GCM с
+purpose-bound AAD и HMAC; redaction до persistence; TTL 24 ч и purge; `rid`-only correlation;
+DB lease/cursor/heartbeat; tolerant contracts; atomic один DBS → один `WbCode`;
+origin/auth/rate-limit; live status recheck перед receive; partial bulk result check;
+unknown-outcome stop state; secret purge после успеха; синтетический E2E без WB writes.
+Read-only TG sync включается отдельно, live chat/status flags остаются OFF до canary.
+
+POST-действия desktop-админки дополнительно требуют JSON, `Sec-Fetch-Site: same-origin`
+(когда заголовок доступен) и точное совпадение `Origin` со строгим allowlist публичных
+доменов/настроенного app origin. Проверка учитывает reverse proxy: внутренний container
+origin не является единственным допустимым адресом. TWA использует отдельную
+Bearer-аутентификацию и тот же rate limit/role guard.
+
+Открытый риск: production пока использует legacy широкий `WB_API_TOKEN` как fallback;
+отдельные scoped Marketplace/Chat tokens остаются обязательным hardening до массового
+rollout. Создать чат продавцом стабильный официальный API пока не позволяет: UI обязан показывать
+manual fallback, а не вызывать отозванный endpoint. Полная реализация и stop conditions:
+[wb-dbs-delivery-plan.md](wb-dbs-delivery-plan.md).
+
 ### 35. T-Bank перешёл на российские SSL-сертификаты (Минцифры) — ✅ ЗАКРЫТО 2026-08-06
 
 `securepay.tinkoff.ru` стал отдавать SSL-сертификат, подписанный **Russian Trusted Root CA**
@@ -690,7 +731,9 @@ deploy-инвариант — `docs/deploy.md`.
 Дополнительный donor guard: buyer-specific preflight возвращает account ID вместе с
 gamepass-данными. Ручной скрипт не может быть выдан с пустым `buyerUserId`, а фоновые
 воркеры при недоступной/невалидной session переходят в 15-минутный backoff вместо частых
-повторов с той же cookie.
+повторов с той же cookie. 11.08.2026 source-contract обнаружил, что fallback-ветка TWA
+`purchase-script` потеряла явную проверку `buyerAccountId`; guard восстановлен до deploy и
+закреплён полным `donor-single-egress` suite 14/14.
 
 ### 20. Email account lifecycle и доказательство consent — 🟡 КОД ГОТОВ / SMTP ACCEPTANCE (2026-07-18)
 

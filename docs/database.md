@@ -109,6 +109,26 @@ CSV: обязательный заголовок с `code`, `denomination` и о
 > каждого кода в БД отдельным запросом после загрузки. `load-wb-codes.js` оставлен заглушкой,
 > которая падает и отправляет к `push-wb-codes.js`.
 
+### Marketplace-модели WB DBS (реализованы 11.08.2026)
+
+Заказ WB с доставкой продавцом — не `WbOrder`: существующая модель описывает внутренний
+Roblox/Game Pass fulfillment. Миграция `20260811_wb_dbs_delivery` добавила отдельные
+`WbMarketplaceOrder`, `WbBuyerChat`, `WbBuyerChatEvent`, `WbDeliverySecret`, `WbSyncCursor`
+и append-only `WbMarketplaceEvent` без переписывания legacy-строк.
+
+`WbMarketplaceOrder.wbOrderId` хранится строкой (WB отдаёт `int64`), `rid` используется для
+точной привязки chat event, а номинал фиксируется snapshot-ом из
+`WbProductCost.denomination`. `WbCode` и `WbOrder` получают nullable unique relation к
+marketplace order. Один DBS-заказ может выпустить ровно один generated code; повтор action
+обязан вернуть существующую связь.
+
+Код получения покупателя хранится отдельно как short-lived AES-GCM envelope + HMAC/TTL, в
+chat event остаётся только маска. `replySign` тоже server-side encrypted; адрес/телефон не
+сохраняются. После успешного receive envelope заменяется на `PURGED`, а просроченный secret
+до выпуска гейта удаляется. `WbSyncCursor` хранит cursor и cross-process lease;
+`ServiceHeartbeat(serviceKey=wb-dbs-sync)` — liveness. Детальные поля и state axes:
+[wb-dbs-delivery-plan.md](wb-dbs-delivery-plan.md#5-предлагаемая-модель-данных).
+
 ### `WbOrder` — заказы на выкуп
 Ключевые поля: `amount` (**чистые** R$), `gamepassUrl`, `status` (`WbOrderStatus`),
 `platform` (`TG`/`VK`/`WEB`), `wbCode` (**@unique** — один заказ на код/публичный WEB-id), `userId`,

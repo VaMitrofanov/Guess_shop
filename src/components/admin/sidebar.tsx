@@ -16,6 +16,7 @@ import {
   ShoppingBasket,
   ShoppingCart,
   Smartphone,
+  Truck,
   Users,
   Wallet,
   X,
@@ -31,6 +32,7 @@ const PRIMARY_NAV = [
 ];
 
 const SECONDARY_NAV = [
+  { href: "/admin/wildberries/delivery", icon: Truck, label: "WB Доставка" },
   { href: "/admin/economics", icon: Wallet, label: "Экономика" },
   { href: "/admin/partners/anton", icon: Handshake, label: "Антон" },
   { href: "/admin/activity", icon: Activity, label: "Журнал" },

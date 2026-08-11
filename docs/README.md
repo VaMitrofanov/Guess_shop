@@ -1,5 +1,13 @@
 # RobloxBank — документация
 
+> **WB DBS delivery release 11.08.2026:** живой API подтвердил новый заказ
+> `deliveryType=dbs`, точную связь заказа с чатом по `rid/srid`, чтение/ответ в существующий
+> чат и завершение через код получения. Реализованы read-only worker, отдельные desktop/TWA
+> рабочие места, зашифрованный short-lived код, generated `WbCode`, чат и защищённые
+> `confirm/deliver/receive`. Миграция применена; реальные chat/status mutations остаются
+> OFF до canary. Архитектура и acceptance —
+> [wb-dbs-delivery-plan.md](wb-dbs-delivery-plan.md).
+
 > **Payment reliability + bot hybrid checkout release candidate 09.08.2026:** закрыты P0 late-payment после
 > автоотмены и critical dependency advisories; ручной выкуп подтверждён владельцем как
 > штатный режим. Реализованы T-Bank `GetState → Cancel`, атомарная late-payment обработка,
@@ -38,6 +46,7 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [architecture.md](architecture.md) | Обзор системы, стек, три канала как единая экосистема, поток данных |
 | [b2b-saas.md](b2b-saas.md) | Партнёрский контур `Антон`: TWA + `/admin`, Google Sheets/XLSX, USDT-ledger, NET/DIRTY-экономика и прибыль |
 | [corridor-and-site.md](corridor-and-site.md) | WB-гейт, сайт `/guide`, API коридора, восстановление сессии |
+| [wb-dbs-delivery-plan.md](wb-dbs-delivery-plan.md) | **Новый DBS-коридор**: WB-заказ → чат → код получения → generated гейт-код → TWA/desktop → текущий TG/VK fulfillment; API, данные, безопасность, rollout и DoD |
 | [site-acquiring-master-plan.md](site-acquiring-master-plan.md) | Ультра-ревью `robloxbank.ru`, P0-блокеры эквайринга, единые цена/identity/orders, дизайн и поэтапный launch plan |
 | [site-launch-implementation-plan.md](site-launch-implementation-plan.md) | Согласуемый план 18.07: baseline, обязательная регистрация перед оплатой, полноценный ЛК, controlled rollout, WB→сайт→бот/группа и боевой E2E |
 | [auth-account-readiness-plan.md](auth-account-readiness-plan.md) | ЛК/login/register и email/TG/VK identity: Brevo SMTP в production, Gmail verification и Mail.ru delivery приняты; Yandex остаётся отдельной проверкой |
