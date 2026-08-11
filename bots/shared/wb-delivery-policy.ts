@@ -21,6 +21,18 @@ export type WbDeliveryPolicyOrder = {
   hasLiveSecret?: boolean;
 };
 
+export function wbMarketplaceTerminalFlags(
+  supplierStatus: string | undefined,
+  wbStatus: string | undefined,
+  fromCompletedFeed = false,
+) {
+  const combined = `${supplierStatus ?? ""} ${wbStatus ?? ""}`;
+  return {
+    cancelled: /cancel|reject/i.test(combined),
+    completed: fromCompletedFeed || /sold|receive|complete/i.test(combined),
+  };
+}
+
 export function wbDeliveryStage(order: WbDeliveryPolicyOrder): WbDeliveryStage {
   if (order.cancelledAt) return "cancelled";
   if (order.completedAt || /sold|receive|complete/i.test(order.supplierStatus)) return "complete";

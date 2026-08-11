@@ -23,6 +23,7 @@ import {
   wbDeliveryCryptoReady,
   wbSecretHmac,
 } from "./wb-delivery-crypto";
+import { wbMarketplaceTerminalFlags } from "./wb-delivery-policy";
 
 const WORKER_STREAM = "wb-dbs-worker";
 const EVENTS_STREAM = "wb-buyer-chat-events";
@@ -65,14 +66,6 @@ function safeErrorCode(error: unknown): string {
   const prismaCode = (error as { code?: unknown } | null)?.code;
   if (typeof prismaCode === "string") return `DB_${prismaCode}`.slice(0, 160);
   return "INTERNAL_SYNC_ERROR";
-}
-
-function isCancelled(supplierStatus: string | undefined, wbStatus: string | undefined): boolean {
-  return /cancel|reject/i.test(`${supplierStatus ?? ""} ${wbStatus ?? ""}`);
-}
-
-function isCompleted(supplierStatus: string | undefined, wbStatus: string | undefined): boolean {
-  return /sold|receive|complete/i.test(`${supplierStatus ?? ""} ${wbStatus ?? ""}`);
 }
 
 function orderAmounts(order: WbDbsOrder) {
@@ -163,8 +156,11 @@ async function upsertMarketplaceOrder(
   const window = deliveryWindow(dates);
   const amounts = orderAmounts(order);
   const now = new Date();
-  const cancelled = isCancelled(order.supplierStatus, order.wbStatus);
-  const completed = isCompleted(order.supplierStatus, order.wbStatus);
+  const { cancelled, completed } = wbMarketplaceTerminalFlags(
+    order.supplierStatus,
+    order.wbStatus,
+    source === "completed",
+  );
   const lastErrorCode = product?.denomination ? null : "MISSING_DENOMINATION";
   const shared = {
     fulfillmentModel: "DBS",
@@ -365,8 +361,7 @@ async function syncStatuses(db: Db, out: WbDeliverySyncResult) {
     for (const status of response.orders) {
       const match = chunk.find((row: { wbOrderId: string }) => row.wbOrderId === status.orderId);
       if (!match) continue;
-      const cancelled = isCancelled(status.supplierStatus, status.wbStatus);
-      const completed = isCompleted(status.supplierStatus, status.wbStatus);
+      const { cancelled, completed } = wbMarketplaceTerminalFlags(status.supplierStatus, status.wbStatus);
       await db.wbMarketplaceOrder.update({
         where: { id: match.id },
         data: {

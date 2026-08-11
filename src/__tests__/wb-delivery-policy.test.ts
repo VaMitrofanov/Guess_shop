@@ -1,6 +1,7 @@
 import {
   canIssueWbGate,
   canReceiveWbOrder,
+  wbMarketplaceTerminalFlags,
   wbDeliveryStage,
   type WbDeliveryPolicyOrder,
 } from "../../bots/shared/wb-delivery-policy";
@@ -20,6 +21,17 @@ function order(overrides: Partial<WbDeliveryPolicyOrder> = {}): WbDeliveryPolicy
 }
 
 describe("WB DBS fail-closed policy", () => {
+  it("marks every completed-feed order terminal even when WB omits status fields", () => {
+    expect(wbMarketplaceTerminalFlags(undefined, undefined, true)).toEqual({
+      cancelled: false,
+      completed: true,
+    });
+    expect(wbMarketplaceTerminalFlags("deliver", "waiting")).toEqual({
+      cancelled: false,
+      completed: false,
+    });
+  });
+
   it("does not issue a gate before an encrypted delivery code exists", () => {
     expect(canIssueWbGate(order({ chatState: "CODE_RECEIVED" }))).toBe(false);
     expect(canIssueWbGate(order({ chatState: "CODE_RECEIVED", hasLiveSecret: true }))).toBe(true);
