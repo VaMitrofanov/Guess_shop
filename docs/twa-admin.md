@@ -271,6 +271,12 @@ send и WB mutations выключены feature flags.
 Для приёмки без внешних эффектов кнопка «Тестовый заказ» создаёт `isTest=true`: запрос кода,
 ответ покупателя, выпуск/отправка гейта, confirm/deliver/receive меняют только DB-состояния.
 
+Production desktop-приёмка 12.08 прошла весь synthetic flow до `receive/sold`: код
+получения не появился в UI/transcript, activation code маскируется в чате, а secret после
+успеха отображается как «Использован · удалён». Прямой `/twa` без Telegram `initData`
+намеренно fail-closed; mobile visual/action acceptance выполняется владельцем через
+«Ещё → WB Доставка» внутри бота, без debug-auth или browser bypass.
+
 Полный UX, DTO, actions, stop conditions и Definition of Done:
 [wb-dbs-delivery-plan.md](wb-dbs-delivery-plan.md).
 

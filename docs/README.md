@@ -1,11 +1,13 @@
 # RobloxBank — документация
 
-> **WB DBS delivery release 11.08.2026:** живой API подтвердил новый заказ
+> **WB DBS delivery production shadow 12.08.2026:** живой API подтвердил новый заказ
 > `deliveryType=dbs`, точную связь заказа с чатом по `rid/srid`, чтение/ответ в существующий
 > чат и завершение через код получения. Реализованы read-only worker, отдельные desktop/TWA
 > рабочие места, зашифрованный short-lived код, generated `WbCode`, чат и защищённые
-> `confirm/deliver/receive`. Миграция применена; реальные chat/status mutations остаются
-> OFF до canary. Архитектура и acceptance —
+> `confirm/deliver/receive`. Миграция и production-код развёрнуты; worker heartbeat и
+> status/chat cursors healthy, desktop synthetic E2E дошёл до `receive/sold` и purge
+> секрета. Реальные chat/status mutations остаются OFF до scoped-токенов, 24-часового
+> shadow и canary. Архитектура и acceptance —
 > [wb-dbs-delivery-plan.md](wb-dbs-delivery-plan.md).
 
 > **Payment reliability + bot hybrid checkout release candidate 09.08.2026:** закрыты P0 late-payment после

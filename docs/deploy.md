@@ -62,6 +62,22 @@ destructive changes/существующие таблицы, только пос
 После применения проверять `migrate status` и сам API. 2026-07-09 этот порядок использован для
 трёх partner-миграций; прод-БД после этого показывает `Database schema is up to date`.
 
+### WB DBS production shadow (12.08.2026)
+
+Для `20260811_wb_dbs_delivery` порядок строгий: backup → `migrate status` → аудит additive
+SQL → `migrate deploy` → Web/TG/VK. Один и тот же 32-byte `WB_DELIVERY_ENCRYPTION_KEY`
+должен быть в Web и TG, но значение никогда не выводится. TG запускает только read-only
+sync через `WB_DBS_SYNC_ENABLED=true`; `WB_CHAT_SEND_ENABLED` и
+`WB_DBS_MUTATIONS_ENABLED` на Web остаются `false` до canary. Marketplace и Chat должны
+получить отдельные scoped tokens до включения live mutations; legacy `WB_API_TOKEN` —
+только временный fallback shadow-периода.
+
+После любого WB DBS release дождаться webhook-сборок Web/TG/VK, затем последовательно
+пересобрать Guide и прогнать `smoke-site` + `node scripts/smoke-corridor.mjs`. Даже если
+файлы гейта не менялись явно, общий release fingerprint Web/Guide обязан совпасть.
+Дополнительные acceptance-гейты: anonymous `401` новых API, свежий `wb-dbs-sync`
+heartbeat, `wb-dbs-statuses`/chat cursors без error и synthetic `isTest` flow без WB writes.
+
 > ⚠️ Миграция `20260712_identity_quote_foundation` должна быть применена **до** деплоя Web,
 > содержащего `src/auth.ts` с `UserIdentity`: иначе VK-вход fail-closed, а `/api/pricing/quote`
 > отдаёт `503`. Она additive: создаёт identity/ledger/policy/quote-таблицы, backfill-ит только

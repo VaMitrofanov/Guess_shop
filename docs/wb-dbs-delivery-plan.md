@@ -1,7 +1,8 @@
 # WB DBS: чат → код получения → RobloxBank-гейт
 
-Статус на 11.08.2026: **этапы 0–4 реализованы, migration применена, read-only worker готов к
-production shadow sync; live chat/status mutations оставлены OFF до canary**. Документ описывает новый контур заказов Wildberries
+Статус на 12.08.2026: **этапы 0–4 реализованы и развёрнуты в production shadow; migration
+применена, read-only worker healthy, live chat/status mutations оставлены OFF до canary**.
+Документ описывает новый контур заказов Wildberries
 с доставкой продавцом (`deliveryType=dbs`). Текущий FBS-монитор и текущие физические
 `WbCode` не покрывают этот сценарий.
 
@@ -357,6 +358,22 @@ worker продолжает тот же заказ, не создавая нов
 - внутренний заказ не `COMPLETED` дольше принятого SLA.
 
 ## 13. Этапы реализации
+
+### Production acceptance 12.08.2026
+
+- additive migration применена после backup; Prisma migration status актуален;
+- Web/TG/VK развёрнуты, Guide синхронизируется после Web и проверяется release fingerprint;
+- read-only worker импортировал реальный DBS и buyer-chat, heartbeat/cursors стали
+  `HEALTHY/OK`; фактический `errors: null` в `status/info` закреплён tolerant regression;
+- завершённый feed/status помечается terminal и не остаётся в активной очереди;
+- desktop production synthetic E2E прошёл
+  `request → encrypted code → issue gate → send → confirm → deliver → receive/sold`;
+  transcript скрыл оба кода, delivery secret после успеха заменён на `PURGED`;
+- anonymous admin/TWA API возвращают `401`, desktop page перенаправляет на admin login;
+- обычный mobile browser без Telegram `initData` получает fail-closed «Доступ запрещён»;
+  визуальная TWA-приёмка владельцем выполняется только из Telegram;
+- `WB_CHAT_SEND_ENABLED=false` и `WB_DBS_MUTATIONS_ENABLED=false`; scoped Marketplace/Chat
+  tokens, 24 часа shadow и один согласованный live canary остаются незакрытыми gate этапа 5.
 
 Текущее покрытие: foundation, shadow sync, ручной чат, atomic gate issuance и protected
 receive реализованы. Синтетический production-safe E2E доступен из TWA/desktop. Этап 5
