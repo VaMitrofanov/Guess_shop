@@ -18,6 +18,21 @@ import { adminGrantFor, loadAdminCandidate } from "@/lib/admin-grant";
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+const recentLoginNotifs = new Map<string, number>();
+const LOGIN_NOTIF_DEDUP_MS = 5 * 60 * 1000;
+function shouldSendLoginNotif(vkId: string): boolean {
+  const now = Date.now();
+  const last = recentLoginNotifs.get(vkId);
+  if (last && now - last < LOGIN_NOTIF_DEDUP_MS) return false;
+  recentLoginNotifs.set(vkId, now);
+  if (recentLoginNotifs.size > 500) {
+    for (const [k, t] of recentLoginNotifs) {
+      if (now - t > LOGIN_NOTIF_DEDUP_MS) recentLoginNotifs.delete(k);
+    }
+  }
+  return true;
+}
+
 // ── Startup-time env validation ────────────────────────────────────────────
 // NextAuth produces a generic "Server error - Configuration" page when
 // required env vars are missing. Logging at module init makes the root
@@ -297,7 +312,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               process.env.TG_CHAT_ID?.split(",").map((id) => id.trim()).filter(Boolean) ?? [],
             )];
             if (tgToken && tgChatIds.length > 0) {
-              let msg: string;
+              let msg: string | null = null;
               let reply_markup: unknown = undefined;
               // Send the order card ONLY for a genuinely active activation:
               // the code exists and the order is still awaiting a gamepass.
@@ -331,16 +346,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                     [{ text: "📊 Открыть в дашборде", web_app: { url: twaUrl } }],
                   ],
                 };
-              } else {
+              } else if (shouldSendLoginNotif(vkId)) {
                 const isNew = user.createdAt.getTime() === user.updatedAt.getTime();
                 msg =
                   `${isNew ? "🆕 <b>Новый пользователь</b>" : "🔑 <b>Вход</b>"}\n` +
                   `👤 ${escapeHtml(name)}\n` +
                   `🆔 VK ID: <code>${vkId}</code>`;
               }
-              await Promise.all(
-                tgChatIds.map((chatId) => sendTelegramMessage(tgToken, chatId, msg, reply_markup ? { reply_markup } : undefined))
-              );
+              if (msg) {
+                await Promise.all(
+                  tgChatIds.map((chatId) => sendTelegramMessage(tgToken, chatId, msg!, reply_markup ? { reply_markup } : undefined))
+                );
+              }
             }
           } catch (tgErr) {
             console.error("[auth] Telegram notification failed:", tgErr);

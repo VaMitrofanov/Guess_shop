@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, ExternalLink, Smartphone } from "lucide-react";
+import { ArrowLeft, ExternalLink, ShoppingBag, Smartphone } from "lucide-react";
 import { notFound } from "next/navigation";
 import { getAdminOrderDetail } from "@/lib/admin-ecosystem";
 import OutboxReplayButton from "@/components/admin/outbox-replay-button";
@@ -33,6 +33,11 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
   const payment = order.paymentAttempts[0];
   const clientLabel = order.user.username ? `@${order.user.username}` : order.user.name ?? "Клиент";
 
+  const policyVersion = order.priceQuote?.policyVersion ?? order.termsVersion ?? "Legacy";
+  const salePrice = order.priceQuote?.finalAmountKopecks ?? order.saleAmountKopecks;
+  const discountKopecks = order.priceQuote?.discountKopecks ?? order.discountAppliedKopecks;
+  const bonusRobux = order.priceQuote?.bonusRobux ?? order.bonusAppliedRobux;
+
   return (
     <div className={styles.page}>
       <header className={styles.pageHeader}>
@@ -43,6 +48,9 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
         </div>
         <div className={styles.headerActions}>
           {order.gamepassUrl && <a className={styles.secondaryButton} href={order.gamepassUrl} target="_blank" rel="noreferrer">Roblox <ExternalLink size={14} /></a>}
+          {order.gamepassId && order.status === "PENDING" && (
+            <Link className={styles.secondaryButton} href={`/twa?screen=account&buyout=${order.id}`} target="_blank"><ShoppingBag size={14} /> Выкупить</Link>
+          )}
           <Link className={styles.primaryButton} href={`/twa?q=${encodeURIComponent(order.wbCode)}`} target="_blank"><Smartphone size={15} /> Открыть в TWA</Link>
         </div>
       </header>
@@ -86,10 +94,11 @@ export default async function AdminOrderDetailPage({ params }: { params: Promise
 
         <section className={`${styles.panel} ${styles.detailPanel}`}>
           <h2>Котировка и экономика</h2><div className={styles.detailRows}>
-            <DetailRow label="Policy" value={order.priceQuote?.policyVersion ?? "Legacy"} />
-            <DetailRow label="Цена" value={money(order.priceQuote?.finalAmountKopecks ?? order.saleAmountKopecks)} />
-            <DetailRow label="Скидка" value={money(order.priceQuote?.discountKopecks)} />
-            <DetailRow label="Бонус" value={order.priceQuote ? `${order.priceQuote.bonusRobux} R$` : "—"} />
+            <DetailRow label="Policy" value={policyVersion} />
+            <DetailRow label="Цена" value={money(salePrice)} />
+            <DetailRow label="Скидка" value={discountKopecks ? money(discountKopecks) : "—"} />
+            <DetailRow label="Бонус" value={bonusRobux ? `${bonusRobux} R$` : "—"} />
+            {order.gamepassId && <DetailRow label="Gamepass ID" value={order.gamepassId} />}
             <DetailRow label="Себестоимость" value={money(order.purchaseCostKopecks)} />
             <DetailRow label="Прибыль" value={money(order.profitKopecks)} />
             <DetailRow label="Выкупил" value={order.purchaserUsername ?? "Не назначен"} />
