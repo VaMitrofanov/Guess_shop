@@ -98,6 +98,32 @@ ambient-подсветка, полупрозрачные слои, крупны�
 Контентный flex-child имеет `min-height: 0`, tab bar — `flex: 0 0 auto`; нижний отступ берёт
 максимум из browser safe-area и `--tg-content-safe-area-inset-bottom`.
 
+### Стабильный ввод на iOS Telegram — 12.08.2026
+
+Видео с реального iPhone выявило общий WebKit-баг: при фокусе на поле мельче `16px` iOS
+автоматически увеличивал весь WebView, а во время открытия/закрытия клавиатуры Telegram и
+`visualViewport` на несколько кадров отдавали разную высоту. Из-за этого интерфейс
+дёргался, оставался сдвинутым и мог показать светлый фон сайта под TWA.
+
+Исправление действует на весь `/twa`, включая поля в `document.body`-порталах:
+
+- все редактируемые `input`/`textarea`/`select` имеют computed font не меньше `16px`, поэтому
+  iOS не включает focus zoom; checkbox/radio/range/file не меняются;
+- `TwaViewportGuard` событийно синхронизирует `--twa-visual-height` по `visualViewport` на
+  resize/orientation/focus и повторяет замер только на двух кадрах стабилизации; фонового
+  polling нет;
+- document scroll заблокирован, рабочий scroll остаётся только внутри
+  `.twa-liquid-content`; после закрытия клавиатуры сбрасывается лишь случайный body-pan,
+  позиция внутренней ленты сохраняется;
+- fixed `.twa-route-host`, `html/body` и нативные header/background/bottom bar Telegram имеют
+  единый `#120f1c`, поэтому переходные кадры и overscroll не раскрывают светлую подложку.
+
+Regression-контракт: `src/__tests__/twa-ios-input-stability.test.ts`. Локальная mobile
+проверка `390×844 → 390×560` подтверждает синхронное изменение host/shell/CSS viewport,
+нулевой horizontal overflow и тёмный фон на полной и keyboard-sized высоте. Финальная
+приёмка focus/keyboard выполняется внутри Telegram на iPhone, потому что обычный браузер
+намеренно не получает TWA-сессию без подписанного `initData`.
+
 Глубокий редизайн реализован: TWA открывается с Главной, результат умного поиска появляется
 только после ввода, обычная карточка заказа трёхстрочная и раскрываемая, история плоская и
 постраничная, слив свёрнут в одну строку. Полный контракт и release gate — в

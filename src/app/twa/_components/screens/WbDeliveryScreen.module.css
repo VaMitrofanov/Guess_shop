@@ -50,7 +50,7 @@
 .mobileMessages p{font-size:13px;line-height:1.55}
 .mobileMessages span{font-size:10px}
 .mobileComposer{grid-template-columns:minmax(0,1fr) 44px}
-.mobileComposer textarea{font-size:13px;line-height:1.5}
+.mobileComposer textarea{font-size:16px;line-height:1.5}
 .mobileAudit>strong{font-size:11px}
 .mobileAudit p{font-size:12px;line-height:1.4}
 .mobileAudit small{font-size:10px}

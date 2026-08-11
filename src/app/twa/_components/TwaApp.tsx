@@ -38,6 +38,9 @@ declare global {
         colorScheme: "dark" | "light";
         themeParams: Record<string, string>;
         platform?: string;
+        setHeaderColor?: (color: string) => void;
+        setBackgroundColor?: (color: string) => void;
+        setBottomBarColor?: (color: string) => void;
         close: () => void;
         BackButton?: {
           show: () => void;
@@ -224,6 +227,13 @@ export default function TwaApp() {
       while (!cancelled && Date.now() < deadline) {
         const wa = window.Telegram?.WebApp;
         if (wa) {
+          // Keep Telegram's native chrome and the WebView underlay aligned
+          // with the TWA canvas during keyboard and sheet transitions. Color
+          // methods are isolated because older SDK versions may reject one of
+          // them; ready/expand must still run in that case.
+          try { wa.setHeaderColor?.(C.bg); } catch { /* unsupported SDK */ }
+          try { wa.setBackgroundColor?.(C.bg); } catch { /* unsupported SDK */ }
+          try { wa.setBottomBarColor?.(C.bg); } catch { /* unsupported SDK */ }
           try { wa.ready(); wa.expand(); } catch { /* SDK ещё гидрируется */ }
           return;
         }
