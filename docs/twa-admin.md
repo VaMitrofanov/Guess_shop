@@ -299,6 +299,15 @@ Polling работает только при `document.visibilityState=visible`,
 из WB — обычно ≤10 с (worker + UI poll), без постоянного full-list запроса и отдельной
 WebSocket-инфраструктуры.
 
+Production acceptance 12.08 (`6ce3c37`): Web и TG-worker развёрнуты вместе; worker после
+рестарта снова `HEALTHY`, desktop показывает `AUTO 5с`. Browser QA на 1695px и mobile
+breakpoint 390px не выявил горизонтального overflow; computed основной текст 15–16px,
+чат 13px/1.5. Полные gates: web 517/517, bots 47/47, TypeScript/lint/build green;
+storefront smoke 15/15, corridor 30/30, Web/Guide fingerprint совпадает. Анонимные detail
+GET для admin/TWA возвращают 401. Остаётся owner acceptance двух реальных поверхностей:
+открыть один заказ одновременно на desktop и в Telegram TWA и обменяться двумя
+несекретными тестовыми сообщениями.
+
 Readability-pass 12.08 поднял прежние 7–10px служебные подписи: desktop использует
 13–15px для основного текста, чат — 13px/1.55, кнопки — 12–14px и увеличенные hit areas;
 TWA использует 13–16px для основного контента, 11–12px только для вторичных меток и
