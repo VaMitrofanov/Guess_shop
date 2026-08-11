@@ -97,6 +97,11 @@ export type WbDeliveryOverview = {
   orders: WbDeliveryOrderDto[];
 };
 
+export type WbDeliveryOrderResponse = {
+  generatedAt: string;
+  order: WbDeliveryOrderDto;
+};
+
 export type WbDeliveryAction =
   | "sync"
   | "create_demo"

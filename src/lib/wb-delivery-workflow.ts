@@ -256,6 +256,23 @@ export async function loadWbDeliveryOverview(): Promise<WbDeliveryOverview> {
   };
 }
 
+export async function loadWbDeliveryOrder(orderId: string): Promise<WbDeliveryOrderDto | null> {
+  const order = await db.wbMarketplaceOrder.findUnique({
+    where: { id: orderId },
+    include: {
+      ...listOrderInclude,
+    },
+  });
+  if (!order) return null;
+  const fulfillment = order.wbCode?.code
+    ? await db.wbOrder.findUnique({
+      where: { wbCode: order.wbCode.code },
+      select: { status: true, platform: true, robloxUsername: true },
+    })
+    : null;
+  return toDto({ ...order, internalFulfillment: fulfillment });
+}
+
 async function getOrder(orderId: string | undefined) {
   if (!orderId) throw new WbDeliveryWorkflowError("Не выбран заказ", 400, "ORDER_REQUIRED");
   const order = await db.wbMarketplaceOrder.findUnique({
@@ -318,6 +335,37 @@ async function appendDemoChat(order: ActionOrder, sender: "buyer" | "seller" | "
   await db.wbBuyerChat.update({ where: { chatId: chat.chatId }, data: { lastEventAt: sentAt } });
 }
 
+async function appendOutboundMirror(order: ActionOrder, text: string) {
+  const chat = order.chats?.[0];
+  if (!chat) return;
+  const sentAt = new Date();
+  const textRedacted = redactWbChatText(text);
+  const providerEcho = await db.wbBuyerChatEvent.findFirst({
+    where: {
+      chatId: chat.chatId,
+      wbEventId: { not: { startsWith: "local:outbound:" } },
+      textRedacted,
+      sentAt: { gte: new Date(sentAt.getTime() - 2 * 60_000) },
+    },
+    select: { id: true },
+  });
+  if (!providerEcho) {
+    await db.wbBuyerChatEvent.create({
+      data: {
+        wbEventId: `local:outbound:${crypto.randomUUID()}`,
+        chatId: chat.chatId,
+        marketplaceOrderId: order.id,
+        eventType: "message",
+        sender: "seller",
+        textRedacted,
+        sentAt,
+        attachmentsMeta: { pendingProviderEcho: true },
+      },
+    });
+  }
+  await db.wbBuyerChat.update({ where: { chatId: chat.chatId }, data: { lastEventAt: sentAt } });
+}
+
 async function replySignFor(order: ActionOrder) {
   const chat = order.chats?.[0];
   if (!chat?.replySignEncrypted) {
@@ -352,6 +400,9 @@ async function sendText(order: ActionOrder, text: string, actor: string, kind: "
       unknown ? "SEND_OUTCOME_UNKNOWN" : "SEND_FAILED",
     );
   }
+  await appendOutboundMirror(order, text).catch(async () => {
+    await audit(order.id, "CHAT_MIRROR_FAILED", actor, { kind }).catch(() => {});
+  });
 }
 
 function requestCodeMessage() {

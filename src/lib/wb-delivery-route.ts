@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { requireAdmin, type AdminActor } from "@/lib/admin-access";
 import { rateLimit } from "@/lib/rate-limit";
 import {
+  loadWbDeliveryOrder,
   loadWbDeliveryOverview,
   performWbDeliveryAction,
   WbDeliveryWorkflowError,
@@ -40,6 +41,17 @@ export async function wbDeliveryGet(req: Request) {
   const actor = await requireAdmin(req);
   if (!actor) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
+    const orderId = new URL(req.url).searchParams.get("orderId");
+    if (orderId) {
+      if (!/^[a-z0-9_-]{1,80}$/i.test(orderId)) {
+        return NextResponse.json({ error: "Некорректный ID заказа", code: "VALIDATION_ERROR" }, { status: 400 });
+      }
+      const order = await loadWbDeliveryOrder(orderId);
+      if (!order) return NextResponse.json({ error: "Заказ не найден", code: "ORDER_NOT_FOUND" }, { status: 404 });
+      return NextResponse.json({ generatedAt: new Date().toISOString(), order }, {
+        headers: { "Cache-Control": "private, no-store" },
+      });
+    }
     return NextResponse.json(await loadWbDeliveryOverview(), {
       headers: { "Cache-Control": "private, no-store" },
     });

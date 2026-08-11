@@ -18,7 +18,8 @@ import {
   Sparkles,
   Truck,
 } from "lucide-react";
-import type { WbDeliveryAction, WbDeliveryOrderDto, WbDeliveryOverview } from "@/types/wb-delivery";
+import { useVisiblePolling } from "@/hooks/useVisiblePolling";
+import type { WbDeliveryAction, WbDeliveryOrderDto, WbDeliveryOrderResponse, WbDeliveryOverview } from "@/types/wb-delivery";
 import { haptic } from "../haptics";
 import { toast } from "../Toast";
 import css from "./WbDeliveryScreen.module.css";
@@ -72,11 +73,42 @@ export default function WbDeliveryScreen({ token }: { token: string }) {
     }
   }, [token]);
 
+  const loadSelected = useCallback(async (orderId: string) => {
+    try {
+      const response = await fetch(`/api/twa/wb-delivery?orderId=${encodeURIComponent(orderId)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      if (response.status === 404) {
+        await load(true);
+        return;
+      }
+      const body = await response.json() as WbDeliveryOrderResponse & { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Не удалось обновить чат");
+      setData((current) => {
+        if (!current) return current;
+        const index = current.orders.findIndex((order) => order.id === body.order.id);
+        if (index < 0) return current;
+        const orders = [...current.orders];
+        orders[index] = body.order;
+        return { ...current, generatedAt: body.generatedAt, orders };
+      });
+    } catch {
+      // Silent polling: the next cycle or a foreground resume retries automatically.
+    }
+  }, [load, token]);
+
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
-    const interval = window.setInterval(() => void load(true), 15_000);
-    return () => { window.clearTimeout(initial); window.clearInterval(interval); };
+    return () => window.clearTimeout(initial);
   }, [load]);
+
+  const pollOverview = useCallback(() => load(true), [load]);
+  const pollSelected = useCallback(async () => {
+    if (selectedId) await loadSelected(selectedId);
+  }, [loadSelected, selectedId]);
+  useVisiblePolling(pollOverview, 20_000);
+  useVisiblePolling(pollSelected, 5_000, Boolean(selectedId));
 
   async function act(action: WbDeliveryAction, order: WbDeliveryOrderDto | null, extra: Record<string, unknown> = {}) {
     if (["confirm", "deliver", "receive"].includes(action) && order && !order.isTest) {
@@ -182,7 +214,7 @@ function OrderDetail({ order, data, busy, manualCode, message, setManualCode, se
     <section className={css.infoGrid}><div><span>Код получения</span><strong>{order.deliveryCode.valid ? "Получен · скрыт" : order.deliveryCode.consumedAt ? "Удалён" : "Не получен"}</strong><small>{order.deliveryCode.expiresAt ? `до ${dateTime(order.deliveryCode.expiresAt)}` : "без секрета"}</small></div><div><span>Код гейта</span><strong>{order.activationCode ?? "Не выпущен"}</strong><small>{order.gateState}</small></div><div><span>Roblox-этап</span><strong>{order.fulfillment?.status ?? "Не начат"}</strong><small>{order.fulfillment?.robloxUsername ?? "нет ника"}</small></div><div><span>Доставка</span><strong>{order.deliveryTo ? dateTime(order.deliveryTo) : "Нет окна"}</strong><small>DBS courier</small></div></section>
     <section className={css.statusActions}><button disabled={!order.permissions.confirm || Boolean(busy)} onClick={() => onAction("confirm")}><Check /> Сборка</button><button disabled={!order.permissions.deliver || Boolean(busy)} onClick={() => onAction("deliver")}><Truck /> В доставку</button>{order.permissions.markGateSent && <button disabled={Boolean(busy)} onClick={() => window.confirm("Ссылка и код действительно отправлены вручную в кабинете WB?") && onAction("mark_gate_sent")}><Send /> Гейт отправлен вручную</button>}</section>
     <section className={css.mobileManual}><div><strong>Резервный ввод 6 цифр</strong><small>Не отображается после сохранения</small></div><div><input value={manualCode} onChange={(event) => setManualCode(event.target.value.replace(/\D/g, "").slice(0,6))} inputMode="numeric" autoComplete="off" maxLength={6} placeholder="••••••" /><button disabled={!order.permissions.saveDeliveryCode || manualCode.length !== 6 || Boolean(busy)} onClick={() => onAction("save_delivery_code", { code: manualCode })}>Сохранить</button></div></section>
-    <section className={css.mobileChat}><header><div><MessageCircle /><span><strong>Чат покупателя</strong><small>{order.chatReady ? "связь активна" : "ожидание чата"}</small></span></div><b>{order.chat.length}</b></header><div className={css.mobileMessages}>{[...order.chat].reverse().map((event) => <div key={event.id} className={event.direction === "seller" ? css.mobileOut : css.mobileIn}><p>{event.text || "Событие чата"}</p><span>{event.containsDeliveryCode && <ShieldCheck />} {dateTime(event.sentAt)}</span></div>)}</div><div className={css.mobileComposer}><textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={2} placeholder="Сообщение покупателю…" /><button disabled={!order.permissions.sendMessage || !message.trim() || Boolean(busy)} onClick={() => onAction("send_message", { message })}><Send /></button></div></section>
+    <section className={css.mobileChat}><header><div><MessageCircle /><span><strong>Чат покупателя</strong><small>{order.chatReady ? "автообновление каждые 5 с" : "ждём чат · автообновление включено"}</small></span></div><b>{order.chat.length}</b></header><div className={css.mobileMessages}>{[...order.chat].reverse().map((event) => <div key={event.id} className={event.direction === "seller" ? css.mobileOut : css.mobileIn}><p>{event.text || "Событие чата"}</p><span>{event.containsDeliveryCode && <ShieldCheck />} {dateTime(event.sentAt)}</span></div>)}</div><div className={css.mobileComposer}><textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={2} placeholder="Сообщение покупателю…" /><button disabled={!order.permissions.sendMessage || !message.trim() || Boolean(busy)} onClick={() => onAction("send_message", { message })}><Send /></button></div></section>
     <section className={css.mobileAudit}><strong>Хронология</strong>{order.audit.slice(0,8).map((event) => <div key={event.id}><span><Check /></span><p>{event.type}<small>{dateTime(event.createdAt)}</small></p></div>)}</section>
   </div>;
 }

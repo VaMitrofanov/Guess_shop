@@ -279,6 +279,21 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
       ? encryptWbSecret(event.replySign, "reply-sign")
       : undefined;
     const sentAt = eventSentAt(event);
+    const textRedacted = rawText ? redactWbChatText(rawText) : null;
+    const outboundMirror = !isBuyerSender(event.sender) && textRedacted
+      ? await db.wbBuyerChatEvent.findFirst({
+        where: {
+          chatId: event.chatID,
+          wbEventId: { startsWith: "local:outbound:" },
+          textRedacted,
+          sentAt: {
+            gte: new Date(sentAt.getTime() - 2 * 60_000),
+            lte: new Date(sentAt.getTime() + 2 * 60_000),
+          },
+        },
+        orderBy: { sentAt: "asc" },
+      })
+      : null;
 
     await db.wbBuyerChat.upsert({
       where: { chatId: event.chatID },
@@ -294,15 +309,14 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
         lastEventAt: sentAt,
       },
     });
-    await db.wbBuyerChatEvent.upsert({
-      where: { wbEventId: event.eventID },
-      create: {
+    const providerEvent = await db.wbBuyerChatEvent.findUnique({ where: { wbEventId: event.eventID } });
+    const eventData = {
         wbEventId: event.eventID,
         chatId: event.chatID,
         marketplaceOrderId: order?.id,
         eventType: event.eventType,
         sender: event.sender,
-        textRedacted: rawText ? redactWbChatText(rawText) : null,
+        textRedacted,
         containsDeliveryCode: Boolean(deliveryCode),
         isNewChat: event.isNewChat,
         sentAt,
@@ -311,9 +325,14 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
           files: event.message.attachments?.files.length ?? 0,
           images: event.message.attachments?.images.length ?? 0,
         },
-      },
-      update: {},
-    });
+      };
+    if (providerEvent) {
+      if (outboundMirror) await db.wbBuyerChatEvent.delete({ where: { id: outboundMirror.id } });
+    } else if (outboundMirror) {
+      await db.wbBuyerChatEvent.update({ where: { id: outboundMirror.id }, data: eventData });
+    } else {
+      await db.wbBuyerChatEvent.create({ data: eventData });
+    }
 
     if (order && order.chatState === "WAITING_BUYER_CHAT") {
       await db.wbMarketplaceOrder.update({ where: { id: order.id }, data: { chatState: "READY" } });

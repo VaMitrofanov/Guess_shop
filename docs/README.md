@@ -12,6 +12,8 @@
 > Кнопки desktop/TWA подключены к общему production workflow, не являются заглушками;
 > внешний chat/status write дополнительно закрыт feature flags. Readability-pass 12.08
 > увеличил основной текст, служебные подписи и интерактивные зоны обоих рабочих мест.
+> Открытый чат синхронизируется между desktop/TWA каждые 5 секунд облегчённым detail GET;
+> в фоне polling остановлен, а после возврата фокуса обновление выполняется сразу.
 
 > **Payment reliability + bot hybrid checkout release candidate 09.08.2026:** закрыты P0 late-payment после
 > автоотмены и critical dependency advisories; ручной выкуп подтверждён владельцем как

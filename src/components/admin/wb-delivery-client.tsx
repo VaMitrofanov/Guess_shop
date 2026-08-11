@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -28,8 +28,10 @@ import {
 import type {
   WbDeliveryAction,
   WbDeliveryOrderDto,
+  WbDeliveryOrderResponse,
   WbDeliveryOverview,
 } from "@/types/wb-delivery";
+import { useVisiblePolling } from "@/hooks/useVisiblePolling";
 import css from "./wb-delivery.module.css";
 
 const FILTERS = [
@@ -103,7 +105,7 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
   const [manualCode, setManualCode] = useState("");
   const [message, setMessage] = useState("");
 
-  async function refresh(silent = false) {
+  const refresh = useCallback(async (silent = false) => {
     if (!silent) setBusy("sync");
     try {
       const response = await fetch("/api/admin/wb-delivery", { cache: "no-store" });
@@ -116,12 +118,35 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
     } finally {
       if (!silent) setBusy(null);
     }
-  }
-
-  useEffect(() => {
-    const interval = window.setInterval(() => void refresh(true), 20_000);
-    return () => window.clearInterval(interval);
   }, []);
+
+  const refreshSelected = useCallback(async (orderId: string) => {
+    try {
+      const response = await fetch(`/api/admin/wb-delivery?orderId=${encodeURIComponent(orderId)}`, { cache: "no-store" });
+      if (response.status === 404) {
+        await refresh(true);
+        return;
+      }
+      const body = await response.json() as WbDeliveryOrderResponse & { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Не удалось обновить чат");
+      setData((current) => {
+        const index = current.orders.findIndex((order) => order.id === body.order.id);
+        if (index < 0) return current;
+        const orders = [...current.orders];
+        orders[index] = body.order;
+        return { ...current, generatedAt: body.generatedAt, orders };
+      });
+    } catch {
+      // Silent polling retries on the next cycle and immediately after focus returns.
+    }
+  }, [refresh]);
+
+  const pollOverview = useCallback(() => refresh(true), [refresh]);
+  const pollSelected = useCallback(async () => {
+    if (selectedId) await refreshSelected(selectedId);
+  }, [refreshSelected, selectedId]);
+  useVisiblePolling(pollOverview, 20_000);
+  useVisiblePolling(pollSelected, 5_000, Boolean(selectedId));
 
   async function act(action: WbDeliveryAction, extra: Record<string, unknown> = {}) {
     const order = data.orders.find((item) => item.id === selectedId);
@@ -268,7 +293,7 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
               </section>
 
               <aside className={css.chatPanel}>
-                <div className={css.chatHead}><div><span><UserRound /></span><div><strong>Чат покупателя</strong><small>{selected.chatReady ? "двусторонняя связь активна" : "покупатель ещё не открыл чат"}</small></div></div><span className={selected.chatReady ? css.online : css.offline}>{selected.chatReady ? "онлайн" : "ожидание"}</span></div>
+                <div className={css.chatHead}><div><span><UserRound /></span><div><strong>Чат покупателя</strong><small>{selected.chatReady ? "автообновление каждые 5 с" : "покупатель ещё не открыл чат"}</small></div></div><span className={selected.chatReady ? css.online : css.offline}>{selected.chatReady ? "AUTO 5с" : "ожидание"}</span></div>
                 <div className={css.messages}>
                   {[...selected.chat].reverse().map((event) => <div key={event.id} className={`${css.message} ${event.direction === "seller" ? css.messageOut : event.direction === "system" ? css.messageSystem : css.messageIn}`}><p>{event.text || "Служебное событие"}</p><span>{event.containsDeliveryCode && <><ShieldCheck /> код скрыт · </>}{dateTime(event.sentAt)}</span></div>)}
                   {!selected.chat.length && <div className={css.noMessages}><MessageCircle /><span>Сообщений пока нет</span></div>}
