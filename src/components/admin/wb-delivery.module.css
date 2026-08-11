@@ -42,3 +42,69 @@
 .spin { animation: spin .8s linear infinite; }@keyframes spin { to { transform:rotate(360deg); } }
 @media (max-width:1180px){.mainGrid{grid-template-columns:290px minmax(0,1fr)}.detailColumns{grid-template-columns:minmax(0,1fr)}.chatPanel{border-top:1px solid var(--line);border-left:0}.messages{height:280px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:767px){.workspace{gap:10px}.commandBar{align-items:stretch;flex-direction:column}.commandActions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.commandActions>a{display:none}.syncButton{grid-column:auto}.metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.metrics article{min-height:72px;padding:10px}.metrics article>span{width:33px;height:33px}.metrics strong{font-size:20px}.safetyStrip{grid-template-columns:auto 1fr}.flagStack{grid-column:1/-1}.mainGrid{min-height:0;display:block;border-radius:17px}.queue{border-right:0}.orderList{max-height:360px}.detail{border-top:1px solid var(--line)}.detailHeader{align-items:flex-start;flex-direction:column;padding:15px}.headerBadges{justify-content:flex-start}.rail{padding:12px 8px}.rail small{display:none}.detailColumns{display:block}.controlPanel{padding:13px}.statusCards{grid-template-columns:1fr}.providerActions{grid-template-columns:1fr}.chatPanel{border-top:1px solid var(--line)}.messages{height:300px}.notice{right:12px;left:12px;top:86px}.secureTag{display:none}}
+
+/* Readability pass: operational screens must stay legible during long support shifts. */
+.workspace { font-size: 15px; }
+.liveState strong { font-size: 16px; }
+.liveState small,
+.metrics small,
+.safetyStrip div > span { font-size: 13px; line-height: 1.45; }
+.ghostButton,
+.syncButton { min-height: 44px; font-size: 14px; }
+.safetyStrip strong { font-size: 14px; }
+.flagStack > span { font-size: 11px!important; }
+.queueHead strong { font-size: 18px; }
+.queueHead span { font-size: 12px; }
+.queueHead label { height: 42px; }
+.queueHead input { font-size: 14px; }
+.filters button { height: 34px; font-size: 12px; }
+.orderTop time { font-size: 12px; }
+.stagePill { min-height: 26px; font-size: 11px; }
+.orderCard > strong { font-size: 15px; }
+.orderCard > p { font-size: 13px; line-height: 1.4; }
+.orderMeta { font-size: 11px; }
+.emptyQueue strong,
+.noSelection strong { font-size: 15px; }
+.emptyQueue span,
+.noSelection span { font-size: 13px; line-height: 1.45; }
+.detailHeader h2 { font-size: 24px; }
+.detailHeader p { font-size: 13px; }
+.headerBadges span { min-height: 34px; font-size: 12px; }
+.rail > div > span { width: 27px; height: 27px; font-size: 11px; }
+.rail small { font-size: 11px; text-align: center; }
+.errorBanner strong { font-size: 14px; }
+.errorBanner span { font-size: 12px; line-height: 1.4; }
+.sectionTitle > div span { font-size: 11px; }
+.sectionTitle > div strong { font-size: 18px; }
+.secureTag { min-height: 30px; font-size: 11px; }
+.actionCard strong,
+.doneCard strong,
+.holdCard strong { font-size: 15px; }
+.actionCard p,
+.doneCard span,
+.holdCard span { font-size: 13px; line-height: 1.5; }
+.actionCard button { min-height: 40px; font-size: 13px; }
+.statusCards span { font-size: 11px; }
+.statusCards strong { font-size: 14px; }
+.statusCards small,
+.statusCards button { font-size: 11px; line-height: 1.4; }
+.manualBlock > div:first-child strong { font-size: 14px; }
+.manualBlock > div:first-child span { font-size: 12px; line-height: 1.4; }
+.manualBlock input { width: 128px; height: 40px; font-size: 14px; }
+.manualBlock button { min-height: 40px; font-size: 12px; }
+.providerActions button,
+.providerActions a { min-height: 42px; font-size: 12px; }
+.chatHead strong { font-size: 14px; }
+.chatHead small { font-size: 11px; }
+.online,
+.offline { font-size: 10px; }
+.messages { height: 400px; }
+.message p { font-size: 13px; line-height: 1.55; }
+.message > span { font-size: 10px; }
+.noMessages { font-size: 12px; }
+.composer textarea { font-size: 13px; line-height: 1.5; }
+.composer small { font-size: 10px; }
+.composer button { min-height: 38px; font-size: 12px; }
+.auditTrail > strong { font-size: 11px; }
+.auditTrail p { font-size: 12px; line-height: 1.4; }
+.auditTrail small { font-size: 10px; }

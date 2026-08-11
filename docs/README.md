@@ -9,6 +9,9 @@
 > секрета. Реальные chat/status mutations остаются OFF до scoped-токенов, 24-часового
 > shadow и canary. Архитектура и acceptance —
 > [wb-dbs-delivery-plan.md](wb-dbs-delivery-plan.md).
+> Кнопки desktop/TWA подключены к общему production workflow, не являются заглушками;
+> внешний chat/status write дополнительно закрыт feature flags. Readability-pass 12.08
+> увеличил основной текст, служебные подписи и интерактивные зоны обоих рабочих мест.
 
 > **Payment reliability + bot hybrid checkout release candidate 09.08.2026:** закрыты P0 late-payment после
 > автоотмены и critical dependency advisories; ручной выкуп подтверждён владельцем как
