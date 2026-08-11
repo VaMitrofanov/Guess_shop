@@ -8,6 +8,14 @@ import {
 } from "../../bots/shared/wb-delivery-contract";
 
 describe("WB DBS tolerant API contracts", () => {
+  it("normalizes successful status responses where WB returns errors=null", () => {
+    expect(WbStatusesResponseSchema.parse({
+      orders: [{ orderId: 123, supplierStatus: "new", wbStatus: "waiting", errors: null }],
+    })).toEqual({
+      orders: [{ orderId: "123", supplierStatus: "new", wbStatus: "waiting", errors: [] }],
+    });
+  });
+
   it("normalizes numeric and string order ids without dropping future fields", () => {
     const parsed = WbDbsOrdersResponseSchema.parse({
       orders: [{ id: 987654321, nmId: 123, rid: "rid-1", price: 149900, requiredMeta: ["imei"], future: true }],

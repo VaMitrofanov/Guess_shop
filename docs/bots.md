@@ -32,6 +32,9 @@ flow локально и не вызывает WB mutations.
 Полный API-контракт, state machine, privacy-границы и этапы:
 [wb-dbs-delivery-plan.md](wb-dbs-delivery-plan.md).
 
+Provider-поля-массивы нормализуют `null`/отсутствие в `[]`: первый production shadow-run
+подтвердил, что успешный `status/info` WB фактически возвращает `errors: null`.
+
 ## Аварийное объявление о недоступности выкупа
 
 Одноразовая рассылка запускается скриптом `scripts/broadcast-roblox-maintenance.mjs`.

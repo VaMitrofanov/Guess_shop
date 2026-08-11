@@ -3,6 +3,7 @@ import { z } from "zod";
 const WbId = z.union([z.string(), z.number()]).transform(String);
 const OptionalString = z.string().nullish().transform((value) => value ?? undefined);
 const OptionalNumber = z.number().nullish().transform((value) => value ?? undefined);
+const OptionalArray = <T extends z.ZodTypeAny>(item: T) => z.array(item).nullish().transform((value) => value ?? []);
 
 export const WbDbsOrderSchema = z.object({
   id: WbId,
@@ -12,7 +13,7 @@ export const WbDbsOrderSchema = z.object({
   article: OptionalString,
   rid: OptionalString,
   createdAt: OptionalString,
-  deliveryType: z.string().optional().default("dbs"),
+  deliveryType: z.string().nullish().transform((value) => value ?? "dbs"),
   nmId: z.number().int(),
   price: OptionalNumber,
   finalPrice: OptionalNumber,
@@ -20,35 +21,35 @@ export const WbDbsOrderSchema = z.object({
   convertedPrice: OptionalNumber,
   currencyCode: OptionalNumber,
   convertedCurrencyCode: OptionalNumber,
-  requiredMeta: z.array(z.string()).optional().default([]),
+  requiredMeta: OptionalArray(z.string()),
   supplierStatus: OptionalString,
   wbStatus: OptionalString,
 }).passthrough();
 
 export const WbDbsOrdersResponseSchema = z.object({
-  orders: z.array(WbDbsOrderSchema).optional().default([]),
-  next: z.union([z.string(), z.number()]).optional().transform((value) => value == null ? undefined : String(value)),
+  orders: OptionalArray(WbDbsOrderSchema),
+  next: z.union([z.string(), z.number()]).nullish().transform((value) => value == null ? undefined : String(value)),
 }).passthrough();
 
 export const WbDeliveryDatesResponseSchema = z.object({
-  orders: z.array(z.object({
+  orders: OptionalArray(z.object({
     id: WbId,
     dDate: OptionalString,
     dTimeFrom: OptionalString,
     dTimeTo: OptionalString,
-  }).passthrough()).optional().default([]),
+  }).passthrough()),
 }).passthrough();
 
 export const WbStatusesResponseSchema = z.object({
-  orders: z.array(z.object({
+  orders: OptionalArray(z.object({
     orderId: WbId,
     supplierStatus: OptionalString,
     wbStatus: OptionalString,
-    errors: z.array(z.object({
+    errors: OptionalArray(z.object({
       code: z.union([z.string(), z.number()]).optional(),
       detail: OptionalString,
-    }).passthrough()).optional().default([]),
-  }).passthrough()).optional().default([]),
+    }).passthrough()),
+  }).passthrough()),
 }).passthrough();
 
 const GoodCardSchema = z.object({
@@ -59,12 +60,12 @@ const GoodCardSchema = z.object({
 }).passthrough();
 
 export const WbChatsResponseSchema = z.object({
-  result: z.array(z.object({
+  result: OptionalArray(z.object({
     chatID: z.string(),
     replySign: OptionalString,
     goodCard: GoodCardSchema.optional(),
     lastMessage: z.object({ text: OptionalString }).passthrough().optional(),
-  }).passthrough()).optional().default([]),
+  }).passthrough()),
 }).passthrough();
 
 export const WbChatEventSchema = z.object({
@@ -76,8 +77,8 @@ export const WbChatEventSchema = z.object({
     text: OptionalString,
     attachments: z.object({
       goodCard: GoodCardSchema.optional(),
-      files: z.array(z.unknown()).optional().default([]),
-      images: z.array(z.unknown()).optional().default([]),
+      files: OptionalArray(z.unknown()),
+      images: OptionalArray(z.unknown()),
     }).passthrough().optional(),
   }).passthrough().optional().default({ text: undefined }),
   source: OptionalString,
@@ -89,26 +90,26 @@ export const WbChatEventSchema = z.object({
 
 export const WbChatEventsResponseSchema = z.object({
   result: z.object({
-    next: z.union([z.string(), z.number()]).optional().transform((value) => value == null ? undefined : String(value)),
+    next: z.union([z.string(), z.number()]).nullish().transform((value) => value == null ? undefined : String(value)),
     totalEvents: z.number().optional().default(0),
     newestEventTime: OptionalString,
     oldestEventTime: OptionalString,
-    events: z.array(WbChatEventSchema).optional().default([]),
+    events: OptionalArray(WbChatEventSchema),
   }).passthrough(),
 }).passthrough();
 
 const BulkResultSchema = z.object({
   orderId: WbId,
   isError: z.boolean().optional().default(false),
-  errors: z.array(z.object({
+  errors: OptionalArray(z.object({
     code: z.union([z.string(), z.number()]).optional(),
     detail: OptionalString,
-  }).passthrough()).optional().default([]),
+  }).passthrough()),
 }).passthrough();
 
 export const WbBulkMutationResponseSchema = z.object({
   requestId: OptionalString,
-  results: z.array(BulkResultSchema).optional().default([]),
+  results: OptionalArray(BulkResultSchema),
 }).passthrough();
 
 export type WbDbsOrder = z.infer<typeof WbDbsOrderSchema>;

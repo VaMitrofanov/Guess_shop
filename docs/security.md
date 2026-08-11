@@ -50,6 +50,8 @@ DB lease/cursor/heartbeat; tolerant contracts; atomic один DBS → один 
 origin/auth/rate-limit; live status recheck перед receive; partial bulk result check;
 unknown-outcome stop state; secret purge после успеха; синтетический E2E без WB writes.
 Read-only TG sync включается отдельно, live chat/status flags остаются OFF до canary.
+Первый shadow-run выявил и закрыл безопасный contract edge: успешный WB `status/info`
+возвращает `errors: null`; provider-массивы нормализуются до `[]`, regression покрыт.
 
 POST-действия desktop-админки дополнительно требуют JSON, `Sec-Fetch-Site: same-origin`
 (когда заголовок доступен) и точное совпадение `Origin` со строгим allowlist публичных
