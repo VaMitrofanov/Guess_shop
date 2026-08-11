@@ -124,6 +124,13 @@ Regression-контракт: `src/__tests__/twa-ios-input-stability.test.ts`. Л
 приёмка focus/keyboard выполняется внутри Telegram на iPhone, потому что обычный браузер
 намеренно не получает TWA-сессию без подписанного `initData`.
 
+Production acceptance 12.08 (`8825df6`): Web `running:healthy`, deployed CSS содержит
+route host/active, `16px!important` и visual-height guards. Живой `/twa` на `390×844` и
+keyboard-sized `390×560` сохранил точное совпадение host/shell/viewport, тёмные `html/body`
+без background image и `overflowX=0`. Полные gates: web 520/520, bots 47/47,
+TypeScript/lint/build green; storefront 15/15, corridor 30/30, Web/Guide fingerprint
+`59e328d2c237ea13`. Итог и owner-checklist записаны в Trello-карточке DBS-перехода.
+
 Глубокий редизайн реализован: TWA открывается с Главной, результат умного поиска появляется
 только после ввода, обычная карточка заказа трёхстрочная и раскрываемая, история плоская и
 постраничная, слив свёрнут в одну строку. Полный контракт и release gate — в
