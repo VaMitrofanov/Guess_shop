@@ -122,6 +122,11 @@ Roblox/Game Pass fulfillment. Миграция `20260811_wb_dbs_delivery` доб
 marketplace order. Один DBS-заказ может выпустить ровно один generated code; повтор action
 обязан вернуть существующую связь.
 
+Если WB перевыпустил карточку с новым `nmId`, worker сначала ищет exact `nmId`, затем
+доверенную строку каталога по exact article и его vendor-prefix до `/` (например,
+`800/1 → 800`). Артикул служит только ключом поиска: номинал никогда не парсится из него,
+а всегда читается из найденного `WbProductCost.denomination`.
+
 Код получения покупателя хранится отдельно как short-lived AES-GCM envelope + HMAC/TTL, в
 chat event остаётся только маска. `replySign` тоже server-side encrypted; адрес/телефон не
 сохраняются. После успешного receive envelope заменяется на `PURGED`, а просроченный secret

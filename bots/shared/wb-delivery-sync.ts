@@ -23,7 +23,7 @@ import {
   wbDeliveryCryptoReady,
   wbSecretHmac,
 } from "./wb-delivery-crypto";
-import { wbMarketplaceTerminalFlags } from "./wb-delivery-policy";
+import { wbMarketplaceTerminalFlags, wbProductVendorCandidates } from "./wb-delivery-policy";
 
 const WORKER_STREAM = "wb-dbs-worker";
 const EVENTS_STREAM = "wb-buyer-chat-events";
@@ -149,10 +149,19 @@ async function upsertMarketplaceOrder(
   dates?: { id: string; dDate: string | undefined; dTimeFrom: string | undefined; dTimeTo: string | undefined },
   source = "new",
 ) {
-  const product = await db.wbProductCost.findUnique({
+  const productByNmId = await db.wbProductCost.findUnique({
     where: { nmID: order.nmId },
     select: { denomination: true, vendorCode: true },
   });
+  const vendorCandidates = wbProductVendorCandidates(order.article);
+  const productByVendor = !productByNmId && vendorCandidates.length
+    ? await db.wbProductCost.findFirst({
+      where: { vendorCode: { in: vendorCandidates }, denomination: { not: null } },
+      orderBy: { updatedAt: "desc" },
+      select: { denomination: true, vendorCode: true },
+    })
+    : null;
+  const product = productByNmId ?? productByVendor;
   const window = deliveryWindow(dates);
   const amounts = orderAmounts(order);
   const now = new Date();

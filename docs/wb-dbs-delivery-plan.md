@@ -366,6 +366,8 @@ worker продолжает тот же заказ, не создавая нов
 - read-only worker импортировал реальный DBS и buyer-chat, heartbeat/cursors стали
   `HEALTHY/OK`; фактический `errors: null` в `status/info` закреплён tolerant regression;
 - завершённый feed/status помечается terminal и не остаётся в активной очереди;
+- replacement `nmId` сопоставляется с доверенным каталогом через vendor article-prefix;
+  номинал по-прежнему читается только из `WbProductCost`, а не из WB-поля;
 - desktop production synthetic E2E прошёл
   `request → encrypted code → issue gate → send → confirm → deliver → receive/sold`;
   transcript скрыл оба кода, delivery secret после успеха заменён на `PURGED`;

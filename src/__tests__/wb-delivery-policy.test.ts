@@ -2,6 +2,7 @@ import {
   canIssueWbGate,
   canReceiveWbOrder,
   wbMarketplaceTerminalFlags,
+  wbProductVendorCandidates,
   wbDeliveryStage,
   type WbDeliveryPolicyOrder,
 } from "../../bots/shared/wb-delivery-policy";
@@ -21,6 +22,12 @@ function order(overrides: Partial<WbDeliveryPolicyOrder> = {}): WbDeliveryPolicy
 }
 
 describe("WB DBS fail-closed policy", () => {
+  it("derives deterministic catalog lookup keys without deriving a denomination", () => {
+    expect(wbProductVendorCandidates("800/1")).toEqual(["800/1", "800"]);
+    expect(wbProductVendorCandidates(" 800 ")).toEqual(["800"]);
+    expect(wbProductVendorCandidates(undefined)).toEqual([]);
+  });
+
   it("marks every completed-feed order terminal even when WB omits status fields", () => {
     expect(wbMarketplaceTerminalFlags(undefined, undefined, true)).toEqual({
       cancelled: false,

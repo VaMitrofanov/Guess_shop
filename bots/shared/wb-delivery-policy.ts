@@ -33,6 +33,16 @@ export function wbMarketplaceTerminalFlags(
   };
 }
 
+/** WB can publish a replacement nmId while keeping a catalog vendor code such
+ * as `800/1`. Candidates are lookup keys only; denomination is still read from
+ * the trusted WbProductCost row. */
+export function wbProductVendorCandidates(article: string | undefined) {
+  const exact = article?.trim();
+  if (!exact) return [];
+  const base = exact.split("/", 1)[0]?.trim();
+  return [...new Set([exact, base].filter((value): value is string => Boolean(value)))];
+}
+
 export function wbDeliveryStage(order: WbDeliveryPolicyOrder): WbDeliveryStage {
   if (order.cancelledAt) return "cancelled";
   if (order.completedAt || /sold|receive|complete/i.test(order.supplierStatus)) return "complete";
