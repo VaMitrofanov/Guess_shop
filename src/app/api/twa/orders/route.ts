@@ -773,7 +773,8 @@ export async function POST(req: NextRequest) {
     if (q.length < 2) return NextResponse.json({ error: "Минимум 2 символа" }, { status: 400 });
 
     const clean = q.replace(/^@/, "");
-    const isNumeric = /^\d+$/.test(clean);
+    const idDigits = clean.replace(/^id/i, "");
+    const isNumeric = /^\d+$/.test(idDigits) && idDigits.length >= 4;
 
     const orClauses: any[] = [
       { username: { contains: clean, mode: "insensitive" } },
@@ -781,8 +782,8 @@ export async function POST(req: NextRequest) {
       { robloxUsername: { contains: clean, mode: "insensitive" } },
     ];
     if (isNumeric) {
-      orClauses.push({ tgId: clean });
-      orClauses.push({ vkId: clean });
+      orClauses.push({ tgId: idDigits });
+      orClauses.push({ vkId: idDigits });
     }
 
     const users = await (prisma as any).user.findMany({
