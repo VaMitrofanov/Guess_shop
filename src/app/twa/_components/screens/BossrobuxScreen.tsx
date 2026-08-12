@@ -18,6 +18,7 @@ interface AccountInfo {
   accountName:    string | null;
   accountId:      number | null;
   balance:        number | null;
+  browserUnavailable?: boolean;
 }
 
 interface GamepassItem {
@@ -4647,6 +4648,7 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
   );
 
   const cookieReady = info?.hasCookie && info?.cookieValid !== false;
+  const browserAvailable = cookieReady && !info?.browserUnavailable;
 
   return (
     <div className="twa-account-calm" style={{ padding: "10px 16px 32px", display: "flex", flexDirection: "column", gap: 12, overflowY: "auto", height: "100%" }}>
@@ -4930,7 +4932,9 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
 
           {!cookieReady && (
             <div style={{ marginTop: 8, padding: "0 4px", fontSize: 13, color: C.textTertiary }}>
-              🔑 Cookie не задан или истёк — поиск работает, выкуп недоступен
+              {info?.browserUnavailable
+                ? "⚠️ Браузерный сервис недоступен — поиск и баланс работают, автовыкуп временно недоступен"
+                : "🔑 Cookie не задан или истёк — поиск работает, выкуп недоступен"}
             </div>
           )}
         </section>
