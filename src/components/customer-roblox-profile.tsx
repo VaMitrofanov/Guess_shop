@@ -41,8 +41,8 @@ function profileDate(value: string | null) {
   return new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(new Date(value));
 }
 
-function profileAvatarSrc(robloxUserId: string | null | undefined) {
-  return robloxUserId ? `/api/roblox/avatar/${encodeURIComponent(robloxUserId)}` : null;
+function profileAvatarSrc(accountId: string | null | undefined) {
+  return accountId ? `/api/account/roblox-avatar/${encodeURIComponent(accountId)}` : null;
 }
 
 export default function CustomerRobloxProfileCard({
@@ -142,7 +142,7 @@ export default function CustomerRobloxProfileCard({
     : "/checkout";
   // The proxy streams the official image as-is. Next's production image
   // optimizer can fail before returning the image, so avatars bypass it.
-  const mainAvatarUrl = profileAvatarSrc(profile?.id);
+  const mainAvatarUrl = profileAvatarSrc(profile?.accountId);
   const visibleMainAvatarUrl = mainAvatarUrl && !failedAvatarUrls.has(mainAvatarUrl)
     ? mainAvatarUrl
     : null;
@@ -177,7 +177,7 @@ export default function CustomerRobloxProfileCard({
             <span>Аккаунт для покупки</span>
             <div>
               {payload.accounts.map((item) => {
-                const avatarUrl = profileAvatarSrc(item.id);
+                const avatarUrl = profileAvatarSrc(item.accountId);
                 const visibleAvatarUrl = avatarUrl && !failedAvatarUrls.has(avatarUrl) ? avatarUrl : null;
                 return (
                   <button

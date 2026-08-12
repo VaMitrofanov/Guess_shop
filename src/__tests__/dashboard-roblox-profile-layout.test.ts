@@ -31,7 +31,7 @@ describe("dashboard Roblox-first hero", () => {
   });
 
   it("uses the dedicated avatar proxy and falls back to an icon if it fails", () => {
-    expect(profile).toContain("/api/roblox/avatar/");
+    expect(profile).toContain("/api/account/roblox-avatar/");
     expect(profile).not.toContain("/_next/image");
     expect(profile).toContain("onError={() => markAvatarFailed(visibleMainAvatarUrl)}");
     expect(profile).toContain("onError={() => markAvatarFailed(visibleAvatarUrl)}");
