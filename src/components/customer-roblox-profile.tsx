@@ -54,6 +54,14 @@ export default function CustomerRobloxProfileCard({
   const [username, setUsername] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [failedAvatarUrls, setFailedAvatarUrls] = useState<Set<string>>(() => new Set());
+
+  const markAvatarFailed = (avatarUrl: string) => {
+    setFailedAvatarUrls((failed) => {
+      if (failed.has(avatarUrl)) return failed;
+      return new Set(failed).add(avatarUrl);
+    });
+  };
 
   const save = async () => {
     if (!username.trim() || busy) return;
@@ -128,6 +136,11 @@ export default function CustomerRobloxProfileCard({
   const checkoutHref = profile
     ? `/checkout?accountId=${encodeURIComponent(profile.accountId)}&username=${encodeURIComponent(profile.username)}`
     : "/checkout";
+  // Serve Roblox CDN images through Next's image endpoint. It is more reliable
+  // than a browser hotlink and keeps the avatar inside our CSP/cache boundary.
+  const mainAvatarUrl = profile?.avatarUrl && !failedAvatarUrls.has(profile.avatarUrl)
+    ? profile.avatarUrl
+    : null;
   return (
     <div className={styles.robloxHeroShell} aria-label="Профиль Roblox">
       <section className={styles.robloxHeroMain}>
@@ -137,8 +150,8 @@ export default function CustomerRobloxProfileCard({
         </span>
         <div className={styles.robloxHeroIdentity}>
           <span className={styles.robloxHeroAvatar}>
-            {profile?.avatarUrl
-              ? <Image src={profile.avatarUrl} width={108} height={108} alt={`Аватар ${profile.username}`} unoptimized />
+            {mainAvatarUrl
+              ? <Image src={mainAvatarUrl} width={108} height={108} alt={`Аватар ${profile!.username}`} onError={() => markAvatarFailed(mainAvatarUrl)} />
               : <UserRound size={42} />}
           </span>
           <div className={styles.robloxHeroCopy}>
@@ -158,21 +171,24 @@ export default function CustomerRobloxProfileCard({
           <div className={styles.robloxAccountSwitcher} aria-label="Roblox-аккаунты из ваших заказов">
             <span>Аккаунт для покупки</span>
             <div>
-              {payload.accounts.map((item) => (
-                <button
-                  key={item.accountId}
-                  type="button"
-                  className={item.selected ? styles.robloxAccountActive : styles.robloxAccountChoice}
-                  onClick={() => void selectAccount(item.accountId)}
-                  disabled={busy}
-                  aria-pressed={item.selected}
-                >
-                  {item.avatarUrl
-                    ? <Image src={item.avatarUrl} width={30} height={30} alt="" unoptimized />
-                    : <UserRound size={16} />}
-                  <span><strong>{item.displayName}</strong><small>@{item.username}</small></span>
-                </button>
-              ))}
+              {payload.accounts.map((item) => {
+                const avatarUrl = item.avatarUrl && !failedAvatarUrls.has(item.avatarUrl) ? item.avatarUrl : null;
+                return (
+                  <button
+                    key={item.accountId}
+                    type="button"
+                    className={item.selected ? styles.robloxAccountActive : styles.robloxAccountChoice}
+                    onClick={() => void selectAccount(item.accountId)}
+                    disabled={busy}
+                    aria-pressed={item.selected}
+                  >
+                    {avatarUrl
+                      ? <Image src={avatarUrl} width={30} height={30} alt="" onError={() => markAvatarFailed(avatarUrl)} />
+                      : <UserRound size={16} />}
+                    <span><strong>{item.displayName}</strong><small>@{item.username}</small></span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}

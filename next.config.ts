@@ -48,9 +48,8 @@ const nextConfig: NextConfig = {
     },
   },
 
-  // Image opt — keep defaults but disable the on-the-fly WebP/AVIF generator
-  // pipeline since the project ships pre-optimised assets and the generator
-  // alone can spike to 200+ MB RSS on small VPS instances.
+  // Keep remote image output bounded to WebP and cache it for 24 hours. Roblox
+  // avatars are proxied through this endpoint instead of fragile CDN hotlinks.
   images: {
     formats: ["image/webp"],
     minimumCacheTTL: 60 * 60 * 24, // 24h — Robux store assets rarely change
