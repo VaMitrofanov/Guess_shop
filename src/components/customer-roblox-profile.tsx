@@ -1,7 +1,7 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
+import Image from "next/image";
 import { useState } from "react";
 import {
   ArrowRight,
@@ -39,6 +39,10 @@ type CustomerRobloxProfileCardProps = {
 function profileDate(value: string | null) {
   if (!value) return null;
   return new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(new Date(value));
+}
+
+function profileAvatarSrc(robloxUserId: string | null | undefined) {
+  return robloxUserId ? `/api/roblox/avatar/${encodeURIComponent(robloxUserId)}` : null;
 }
 
 export default function CustomerRobloxProfileCard({
@@ -136,10 +140,11 @@ export default function CustomerRobloxProfileCard({
   const checkoutHref = profile
     ? `/checkout?accountId=${encodeURIComponent(profile.accountId)}&username=${encodeURIComponent(profile.username)}`
     : "/checkout";
-  // Serve Roblox CDN images through Next's image endpoint. It is more reliable
-  // than a browser hotlink and keeps the avatar inside our CSP/cache boundary.
-  const mainAvatarUrl = profile?.avatarUrl && !failedAvatarUrls.has(profile.avatarUrl)
-    ? profile.avatarUrl
+  // The proxy streams the official image as-is. Next's production image
+  // optimizer can fail before returning the image, so avatars bypass it.
+  const mainAvatarUrl = profileAvatarSrc(profile?.id);
+  const visibleMainAvatarUrl = mainAvatarUrl && !failedAvatarUrls.has(mainAvatarUrl)
+    ? mainAvatarUrl
     : null;
   return (
     <div className={styles.robloxHeroShell} aria-label="Профиль Roblox">
@@ -150,8 +155,8 @@ export default function CustomerRobloxProfileCard({
         </span>
         <div className={styles.robloxHeroIdentity}>
           <span className={styles.robloxHeroAvatar}>
-            {mainAvatarUrl
-              ? <Image src={mainAvatarUrl} width={108} height={108} alt={`Аватар ${profile!.username}`} onError={() => markAvatarFailed(mainAvatarUrl)} />
+            {visibleMainAvatarUrl
+              ? <Image src={visibleMainAvatarUrl} width={108} height={108} alt={`Аватар ${profile!.username}`} unoptimized onError={() => markAvatarFailed(visibleMainAvatarUrl)} />
               : <UserRound size={42} />}
           </span>
           <div className={styles.robloxHeroCopy}>
@@ -172,7 +177,8 @@ export default function CustomerRobloxProfileCard({
             <span>Аккаунт для покупки</span>
             <div>
               {payload.accounts.map((item) => {
-                const avatarUrl = item.avatarUrl && !failedAvatarUrls.has(item.avatarUrl) ? item.avatarUrl : null;
+                const avatarUrl = profileAvatarSrc(item.id);
+                const visibleAvatarUrl = avatarUrl && !failedAvatarUrls.has(avatarUrl) ? avatarUrl : null;
                 return (
                   <button
                     key={item.accountId}
@@ -182,8 +188,8 @@ export default function CustomerRobloxProfileCard({
                     disabled={busy}
                     aria-pressed={item.selected}
                   >
-                    {avatarUrl
-                      ? <Image src={avatarUrl} width={30} height={30} alt="" onError={() => markAvatarFailed(avatarUrl)} />
+                    {visibleAvatarUrl
+                      ? <Image src={visibleAvatarUrl} width={30} height={30} alt="" unoptimized onError={() => markAvatarFailed(visibleAvatarUrl)} />
                       : <UserRound size={16} />}
                     <span><strong>{item.displayName}</strong><small>@{item.username}</small></span>
                   </button>

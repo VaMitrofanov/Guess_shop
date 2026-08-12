@@ -30,10 +30,11 @@ describe("dashboard Roblox-first hero", () => {
     expect(profile).toContain("Добавить ник");
   });
 
-  it("proxies Roblox avatars and falls back to an icon if the CDN image fails", () => {
-    expect(profile).not.toContain("unoptimized");
-    expect(profile).toContain("onError={() => markAvatarFailed(mainAvatarUrl)}");
-    expect(profile).toContain("onError={() => markAvatarFailed(avatarUrl)}");
+  it("uses the dedicated avatar proxy and falls back to an icon if it fails", () => {
+    expect(profile).toContain("/api/roblox/avatar/");
+    expect(profile).not.toContain("/_next/image");
+    expect(profile).toContain("onError={() => markAvatarFailed(visibleMainAvatarUrl)}");
+    expect(profile).toContain("onError={() => markAvatarFailed(visibleAvatarUrl)}");
     expect(profile).toContain("<UserRound size={42} />");
   });
 
