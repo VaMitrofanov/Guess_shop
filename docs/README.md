@@ -1,5 +1,14 @@
 # RobloxBank — документация
 
+> **WB DBS delivery: admin visibility + auto-gate 14.08.2026:** DBS-раздел стал главным:
+> виджет на дашборде с live-метриками (active/waitingCode/codeReceived/readyReceive),
+> бейдж на «Ещё» в нижней панели, delivery code теперь расшифровывается и показывается
+> на экране заказа (убрано «Получен · скрыт»). TG-уведомления ADMIN_IDS при новом заказе,
+> сообщении покупателя и автозахвате кода. Авто-гейт (`WB_DBS_AUTO_GATE=true`): при
+> автозахвате 6-значного кода sync автоматически выпускает WbCode, отправляет ссылку
+> покупателю и уведомляет админа. Без флага — ручной режим с уведомлением.
+> Endpoint `/api/twa/wb-delivery/active-count` для лёгкого polling бейджа.
+
 > **WB DBS delivery production shadow 12.08.2026:** живой API подтвердил новый заказ
 > `deliveryType=dbs`, точную связь заказа с чатом по `rid/srid`, чтение/ответ в существующий
 > чат и завершение через код получения. Реализованы read-only worker, отдельные desktop/TWA
