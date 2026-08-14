@@ -27,10 +27,12 @@ export default function BottomNav({
   active,
   onChange,
   ordersBadge = 0,
+  dbsBadge = 0,
 }: {
   active: Screen;
   onChange: (screen: Screen) => void;
   ordersBadge?: number;
+  dbsBadge?: number;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const moreActive = active === "wb" || active === "delivery" || active === "settings" || active === "system" || active === "economics";
@@ -108,7 +110,10 @@ export default function BottomNav({
           aria-expanded={moreOpen}
           onClick={() => { haptic.select(); setMoreOpen(open => !open); }}
         >
-          <span className="twa-tab-icon"><Ellipsis size={22} /></span>
+          <span className="twa-tab-icon">
+            <Ellipsis size={22} />
+            {dbsBadge > 0 && <b style={{ background: C.accent }}>{dbsBadge > 99 ? "99+" : dbsBadge}</b>}
+          </span>
           <span>Ещё</span>
         </button>
       </nav>

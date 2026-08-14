@@ -70,7 +70,6 @@ const SCREEN_TITLES: Record<Screen, string> = {
 // The title bar shows a back chevron to the parent instead of the date.
 const SCREEN_PARENT: Partial<Record<Screen, Screen>> = {
   system: "settings",
-  delivery: "wb",
 };
 
 export default function TwaApp() {
@@ -84,6 +83,7 @@ export default function TwaApp() {
   });
   const [debugMsg,           setDebugMsg]           = useState("");
   const [ordersBadge,        setOrdersBadge]        = useState(0);
+  const [dbsBadge,            setDbsBadge]            = useState(0);
   // Pre-focus the Orders search when launched via admin notification deep-link.
   // Accepts either ?q=... in the URL (works with InlineKeyboardButton.web_app
   // URLs) or Telegram's start_param (works with Direct Link Apps via startapp).
@@ -252,6 +252,10 @@ export default function TwaApp() {
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setOrdersBadge(d.count ?? 0); })
       .catch(() => {});
+    fetch("/api/twa/wb-delivery/active-count", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setDbsBadge(d.count ?? 0); })
+      .catch(() => {});
   }, [token]);
 
   useEffect(() => {
@@ -353,6 +357,7 @@ export default function TwaApp() {
           onOpenOrders={(query, tab) => { setOrderQueryPreload(query ?? ""); setOrdersTabPreload(tab ?? ""); setScreen("orders"); }}
           onOpenAccount={() => setScreen("account")}
           onOpenInbox={() => { setWbTabPreload("reviews"); setScreen("wb"); }}
+          onOpenDelivery={() => setScreen("delivery")}
         />}
         {screen === "orders"     && <OrdersScreen   {...sp} onActionDone={refreshBadge} initialQuery={orderQueryPreload} initialTab={ordersTabPreload} onInitialQueryConsumed={() => { setOrderQueryPreload(""); setOrdersTabPreload(""); }} />}
         {screen === "wb"         && <WbScreen       {...sp} initialTab={wbTabPreload} />}
@@ -363,7 +368,7 @@ export default function TwaApp() {
         {screen === "economics"  && <EconomicsScreen {...sp} />}
       </div>
 
-      <BottomNav active={screen} onChange={setScreen} ordersBadge={ordersBadge} />
+      <BottomNav active={screen} onChange={setScreen} ordersBadge={ordersBadge} dbsBadge={dbsBadge} />
       <ToastHost />
     </div>
   );

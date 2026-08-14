@@ -156,6 +156,9 @@ function toDto(order: ListOrder): WbDeliveryOrderDto {
     deliveryCode: {
       present: Boolean(order.deliverySecret),
       valid: secretIsLive,
+      value: secretIsLive && order.deliverySecret
+        ? decryptWbSecret(order.deliverySecret.encryptedValue, "delivery-code")
+        : null,
       receivedAt: iso(order.deliverySecret?.receivedAt),
       expiresAt: iso(order.deliverySecret?.expiresAt),
       consumedAt: iso(order.deliverySecret?.consumedAt),

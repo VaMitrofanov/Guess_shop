@@ -1111,6 +1111,7 @@ html.twa-route-active [contenteditable="true"] {
 .twa-result-icon.is-link { color: #75d6ff; background: rgba(100,210,255,.14); }
 .twa-result-icon.is-error { color: #ff958c; background: rgba(255,69,58,.14); }
 .twa-result-icon.is-inbox { color: #ffd66b; background: rgba(255,190,50,.13); }
+.twa-result-icon.is-delivery { color: #7aefb2; background: rgba(52,199,89,.14); }
 .twa-dashboard-commands { margin-top: 2px; }
 .twa-dashboard-commands .twa-quick-glass { min-height: 112px; padding: 14px; }
 .twa-dashboard-commands .twa-quick-glass > span { margin-bottom: 8px; }

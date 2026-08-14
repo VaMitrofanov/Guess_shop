@@ -44,6 +44,7 @@ export type WbDeliveryOrderDto = {
   deliveryCode: {
     present: boolean;
     valid: boolean;
+    value: string | null;
     receivedAt: string | null;
     expiresAt: string | null;
     consumedAt: string | null;

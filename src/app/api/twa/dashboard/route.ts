@@ -31,7 +31,7 @@ async function getDonorSnapshot() {
 export async function GET(req: NextRequest) {
   if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const [stats, codes, attentionRows, firstError, feedback, donor] = await Promise.all([
+  const [stats, codes, attentionRows, firstError, feedback, donor, dbsMetrics] = await Promise.all([
     getStats30d(),
     prisma.wbCode.groupBy({ by: ["denomination"], _count: { _all: true }, where: { isUsed: false, isTest: false } }),
     // Очередь «К выкупу» = то же множество, что и вкладка BUYOUT в api/twa/orders:
@@ -69,6 +69,19 @@ export async function GET(req: NextRequest) {
     }),
     getFeedbackSummary(),
     getDonorSnapshot(),
+    prisma.$queryRawUnsafe<{ active: number; waitingCode: number; codeReceived: number; readyReceive: number }[]>(`
+      SELECT
+        COUNT(*) FILTER (WHERE "completedAt" IS NULL AND "cancelledAt" IS NULL)::int AS "active",
+        COUNT(*) FILTER (WHERE "completedAt" IS NULL AND "cancelledAt" IS NULL AND "chatState" = 'CODE_REQUESTED')::int AS "waitingCode",
+        COUNT(*) FILTER (WHERE "completedAt" IS NULL AND "cancelledAt" IS NULL AND "chatState" = 'CODE_RECEIVED')::int AS "codeReceived",
+        COUNT(*) FILTER (
+          WHERE "completedAt" IS NULL AND "cancelledAt" IS NULL
+            AND "gateState" = 'SENT'
+            AND "supplierStatus" ILIKE '%deliver%'
+        )::int AS "readyReceive"
+      FROM "WbMarketplaceOrder"
+      WHERE "isTest" = false
+    `),
   ]);
   const attention = attentionRows[0] ?? { buyout: 0, awaitingLink: 0, errors: 0, requiredRobux: 0, oldestAt: null };
 
@@ -119,6 +132,7 @@ export async function GET(req: NextRequest) {
     },
     donorCoverage,
     inbox,
+    dbs: dbsMetrics[0] ?? { active: 0, waitingCode: 0, codeReceived: 0, readyReceive: 0 },
     apiAvailable: !!stats,
     tokenPresent: !!(process.env.WB_API_TOKEN),
   });

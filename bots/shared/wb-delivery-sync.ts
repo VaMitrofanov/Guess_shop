@@ -7,6 +7,7 @@ import {
   fetchDbsDeliveryDates,
   fetchDbsStatuses,
   fetchNewDbsOrders,
+  sendBuyerChatMessage,
   WbDeliveryApiError,
 } from "./wb-delivery-api";
 import {
@@ -17,6 +18,7 @@ import {
   type WbDbsOrder,
 } from "./wb-delivery-contract";
 import {
+  decryptWbSecret,
   encryptWbSecret,
   extractDeliveryCode,
   redactWbChatText,
@@ -24,6 +26,7 @@ import {
   wbSecretHmac,
 } from "./wb-delivery-crypto";
 import { wbMarketplaceTerminalFlags, wbProductVendorCandidates } from "./wb-delivery-policy";
+import { notifyDbsNewOrder, notifyDbsBuyerMessage, notifyDbsCodeCaptured, notifyDbsAutoGateIssued } from "./wb-delivery-admin-notify";
 
 const WORKER_STREAM = "wb-dbs-worker";
 const EVENTS_STREAM = "wb-buyer-chat-events";
@@ -262,6 +265,92 @@ function isBuyerSender(sender: string) {
   return !/seller|supplier|manager/i.test(sender);
 }
 
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const GUIDE_ORIGIN = (process.env.NEXT_PUBLIC_APP_URL || "https://robloxbank.ru").replace(/\/$/, "");
+
+function generateActivationCode() {
+  let code = "";
+  for (let i = 0; i < 7; i += 1) code += CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)];
+  return code;
+}
+
+function gateMessage(code: string) {
+  return [
+    "Спасибо, код доставки получен. Теперь заберите товар через наш защищённый WB-гейт:",
+    `${GUIDE_ORIGIN}/guide?source=wb&skip=1`,
+    `Ваш код активации: ${code}`,
+    "Дальше выберите Telegram или VK, вступите в группу и следуйте инструкции по Roblox.",
+  ].join("\n\n");
+}
+
+async function tryAutoGate(
+  db: Db,
+  orderId: string,
+  wbOrderId: string,
+) {
+  if (process.env.WB_DBS_AUTO_GATE !== "true") return;
+  if (process.env.WB_CHAT_SEND_ENABLED !== "true") return;
+
+  const order = await db.wbMarketplaceOrder.findUnique({
+    where: { id: orderId },
+    include: {
+      wbCode: true,
+      chats: { orderBy: { lastEventAt: "desc" as const }, take: 1 },
+    },
+  });
+  if (!order || order.completedAt || order.cancelledAt) return;
+  if (order.wbCode) return;
+  if (!order.denominationSnapshot) return;
+
+  const chat = order.chats?.[0];
+  if (!chat?.replySignEncrypted) return;
+
+  let activationCode: string | null = null;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const candidate = generateActivationCode();
+    try {
+      const created = await db.wbCode.create({
+        data: {
+          code: candidate,
+          denomination: order.denominationSnapshot,
+          isTest: order.isTest,
+          batch: `DBS-AUTO-${new Date().toISOString().slice(0, 7)}`,
+        },
+      });
+      activationCode = created.code;
+      await db.wbMarketplaceOrder.update({
+        where: { id: orderId },
+        data: { wbCodeId: created.id, gateState: "ISSUED" },
+      });
+      break;
+    } catch (e) {
+      if ((e as { code?: string }).code !== "P2002") throw e;
+    }
+  }
+  if (!activationCode) return;
+
+  try {
+    const replySign = decryptWbSecret(chat.replySignEncrypted, "reply-sign");
+    if (!order.isTest) {
+      await sendBuyerChatMessage(replySign, gateMessage(activationCode));
+    }
+    await db.wbMarketplaceOrder.update({
+      where: { id: orderId },
+      data: { gateState: "SENT", lastErrorCode: null },
+    });
+    await audit(db, orderId, "AUTO_GATE_ISSUED_AND_SENT", `auto-gate:${orderId}:${activationCode}`, {
+      activationCode,
+      isTest: order.isTest,
+    });
+    notifyDbsAutoGateIssued(wbOrderId, activationCode);
+  } catch (e) {
+    console.error(`[WbDbsSync] auto-gate send failed for ${wbOrderId}:`, e);
+    await audit(db, orderId, "AUTO_GATE_SEND_FAILED", `auto-gate-fail:${orderId}`, {
+      error: String(e),
+    }).catch(() => {});
+  }
+}
+
 async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
   const cursor = await db.wbSyncCursor.findUnique({ where: { stream: EVENTS_STREAM } });
   const response = await fetchBuyerChatEvents(cursor?.cursor ?? undefined);
@@ -326,12 +415,17 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
           images: event.message.attachments?.images.length ?? 0,
         },
       };
+    const isNewEvent = !providerEvent && !outboundMirror;
     if (providerEvent) {
       if (outboundMirror) await db.wbBuyerChatEvent.delete({ where: { id: outboundMirror.id } });
     } else if (outboundMirror) {
       await db.wbBuyerChatEvent.update({ where: { id: outboundMirror.id }, data: eventData });
     } else {
       await db.wbBuyerChatEvent.create({ data: eventData });
+    }
+
+    if (isNewEvent && isBuyerSender(event.sender) && order && rawText && !order.completedAt && !order.cancelledAt) {
+      notifyDbsBuyerMessage(order.wbOrderId, event.sender, rawText);
     }
 
     if (order && order.chatState === "WAITING_BUYER_CHAT") {
@@ -365,7 +459,9 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
         chatId: event.chatID,
         receivedAt: sentAt.toISOString(),
       });
+      notifyDbsCodeCaptured(order.wbOrderId);
       out.capturedCodes += 1;
+      await tryAutoGate(db, order.id, order.wbOrderId);
     }
     out.chatEvents += 1;
   }
@@ -462,7 +558,11 @@ export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {
     const datesResponse = await fetchDbsDeliveryDates(response.orders.map((order) => order.id));
     const dates = new Map(datesResponse.orders.map((row) => [row.id, row]));
     for (const order of response.orders) {
-      await upsertMarketplaceOrder(db, order, dates.get(order.id), "new");
+      const existed = await db.wbMarketplaceOrder.findUnique({ where: { wbOrderId: order.id }, select: { id: true } });
+      const record = await upsertMarketplaceOrder(db, order, dates.get(order.id), "new");
+      if (!existed) {
+        notifyDbsNewOrder(order.id, record.denominationSnapshot, record.finalPriceKopecks);
+      }
       out.newOrders += 1;
     }
 

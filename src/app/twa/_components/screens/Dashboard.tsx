@@ -17,6 +17,7 @@ import {
   Search,
   ShieldCheck,
   ShoppingBag,
+  Truck,
   TriangleAlert,
   UserRound,
   X,
@@ -49,6 +50,7 @@ interface DashData {
     shortfall: number | null;
   };
   inbox: { available: boolean; feedbacks: number; questions: number; total: number };
+  dbs: { active: number; waitingCode: number; codeReceived: number; readyReceive: number };
   apiAvailable: boolean;
   tokenPresent?: boolean;
 }
@@ -496,11 +498,13 @@ export default function Dashboard({
   onOpenOrders,
   onOpenAccount,
   onOpenInbox,
+  onOpenDelivery,
 }: {
   token: string;
   onOpenOrders?: (query?: string, tab?: OrdersTab) => void;
   onOpenAccount?: () => void;
   onOpenInbox?: () => void;
+  onOpenDelivery?: () => void;
 }) {
   const [data, setData] = useState<DashData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -577,6 +581,11 @@ export default function Dashboard({
         <button type="button" className="twa-inset-row twa-press-sm" onClick={() => { haptic.select(); onOpenInbox?.(); }}>
           <span className="twa-result-icon is-inbox"><MessageCircleQuestion size={21} /></span><div><strong>Ответить {data.inbox.total} {plural(data.inbox.total, "клиенту", "клиентам", "клиентам")}</strong><small>{data.inbox.feedbacks} {plural(data.inbox.feedbacks, "отзыв", "отзыва", "отзывов")} · {data.inbox.questions} {plural(data.inbox.questions, "вопрос", "вопроса", "вопросов")}</small></div><ChevronRight size={20} />
         </button>
+        {data.dbs.active > 0 && (
+          <button type="button" className="twa-inset-row twa-press-sm" onClick={() => { haptic.select(); onOpenDelivery?.(); }}>
+            <span className="twa-result-icon is-delivery"><Truck size={21} /></span><div><strong>DBS доставка · {data.dbs.active} {plural(data.dbs.active, "заказ", "заказа", "заказов")}</strong><small>{data.dbs.waitingCode > 0 ? `${data.dbs.waitingCode} ждут код` : ""}{data.dbs.waitingCode > 0 && data.dbs.codeReceived > 0 ? " · " : ""}{data.dbs.codeReceived > 0 ? `${data.dbs.codeReceived} код получен` : ""}{(data.dbs.waitingCode > 0 || data.dbs.codeReceived > 0) && data.dbs.readyReceive > 0 ? " · " : ""}{data.dbs.readyReceive > 0 ? `${data.dbs.readyReceive} к завершению` : ""}{!data.dbs.waitingCode && !data.dbs.codeReceived && !data.dbs.readyReceive ? "в процессе" : ""}</small></div><ChevronRight size={20} />
+          </button>
+        )}
       </div>
 
       <div className="twa-quick-grid twa-dashboard-commands">
