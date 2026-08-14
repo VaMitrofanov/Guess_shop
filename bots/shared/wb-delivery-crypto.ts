@@ -71,12 +71,10 @@ export function extractDeliveryCode(text: string): string | null {
   return /^\d{6}$/.test(code) ? code : null;
 }
 
-/** Redact before DB persistence. The raw WB confirmation code and our own
- * seven-character activation code must not survive in chat history. */
+/** Redact before DB persistence. Our seven-character activation code must not
+ * survive in chat history — delivery codes are stored encrypted separately. */
 export function redactWbChatText(text: string): string {
-  DELIVERY_CODE_RE.lastIndex = 0;
   return text
-    .replace(DELIVERY_CODE_RE, "••••••")
     .replace(ACTIVATION_CODE_RE, (_whole, prefix: string) => `${prefix}•••••••`)
     .slice(0, 2_000);
 }
