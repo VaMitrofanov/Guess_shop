@@ -110,7 +110,10 @@ export function isWbBuyerUnserved(order: WbDeliveryPolicyOrder): boolean {
   return Boolean(
     order.completedAt &&
     !order.cancelledAt &&
-    order.gateState === "NOT_ISSUED" &&
+    // Only SENT means the buyer actually holds a code. Anything earlier —
+    // including a code we just minted — still leaves them empty-handed, so
+    // issuing the gate must not be what switches this off.
+    order.gateState !== "SENT" &&
     order.hasLiveSecret,
   );
 }

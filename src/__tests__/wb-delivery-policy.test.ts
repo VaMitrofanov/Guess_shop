@@ -98,6 +98,22 @@ describe("WB DBS fail-closed policy", () => {
     expect(wbDeliveryStage(closedUnserved)).toBe("attention");
   });
 
+  /** Regression: issuing the gate flipped gateState to ISSUED, which used to
+   * clear the unserved flag and disable the very button that sends it — the
+   * operator ended up holding a minted code with no way to deliver it. */
+  it("stays unserved after the gate is minted but before it is sent", () => {
+    const base = {
+      completedAt: new Date(),
+      supplierStatus: "receive",
+      chatState: "CODE_RECEIVED" as const,
+      hasLiveSecret: true,
+    };
+    for (const gateState of ["NOT_ISSUED", "ISSUED", "SENDING", "SEND_UNKNOWN"]) {
+      expect(isWbBuyerUnserved(order({ ...base, gateState }))).toBe(true);
+    }
+    expect(isWbBuyerUnserved(order({ ...base, gateState: "SENT" }))).toBe(false);
+  });
+
   it("treats an order we completed ourselves as finished, not unserved", () => {
     // Our own receive purges the secret and the gate was already sent.
     const served = order({
