@@ -19,6 +19,7 @@ import { getGamepassDetails, getGamepassProductInfo } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { enforceVkInlineKbLimits } from "../shared/vk-kb";
 import { noteProbableNick } from "../shared/nick";
+import { resolveWbOrderSource } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
@@ -1774,6 +1775,7 @@ async function handleRefActivation(
           platform: "VK",
           userId: user.id,
           wbCode: wbCode.code,
+          orderSource: await resolveWbOrderSource(tx, wbCode.code),
           ...(user.robloxUsername ? { robloxUsername: user.robloxUsername } : {}),
         },
       });
@@ -2097,6 +2099,7 @@ async function handleGamepassLink(
             platform:    "VK",
             userId:      user.id,
             wbCode,
+            orderSource: await resolveWbOrderSource(tx, wbCode),
             ...(validatedCreator ? { robloxUsername: validatedCreator } : {}),
           },
         });

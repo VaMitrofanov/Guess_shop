@@ -6,7 +6,7 @@ import { ADMIN_TIME_ZONE } from "@/lib/admin-time";
 import styles from "./admin-shell.module.css";
 import { cn } from "@/lib/utils";
 
-const FILTERS = ["ALL", "SITE", "WB", "DIRECT", "AVITO", "ERROR"] as const;
+const FILTERS = ["ALL", "SITE", "WB", "WB_DBS", "DIRECT", "AVITO", "ERROR"] as const;
 
 function dateTime(value: string) {
   return new Intl.DateTimeFormat("ru-RU", { timeZone: ADMIN_TIME_ZONE, day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value));

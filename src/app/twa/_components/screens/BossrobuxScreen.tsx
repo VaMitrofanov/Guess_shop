@@ -830,7 +830,7 @@ interface TxOrder {
   purchaserUsername: string | null;
   wbCode: string;
   isDirectOrder: boolean;
-  orderSource: "WB" | "DIRECT" | "AVITO" | "MANUAL" | "SITE";
+  orderSource: "WB" | "WB_DBS" | "DIRECT" | "AVITO" | "MANUAL" | "SITE";
   createdAt: string;
   updatedAt: string;
   saleAmountKopecks: number | null;
@@ -839,7 +839,7 @@ interface TxOrder {
   user: { tgId: string | null; vkId: string | null; name: string | null; username: string | null };
 }
 
-type TxSourceFilter = "ALL" | "WB" | "DIRECT" | "AVITO" | "MANUAL" | "SITE";
+type TxSourceFilter = "ALL" | "WB" | "WB_DBS" | "DIRECT" | "AVITO" | "MANUAL" | "SITE";
 const TX_SOURCE_CHIPS: { id: TxSourceFilter; label: string; color: string }[] = [
   { id: "ALL",    label: "Все",     color: C.textPrimary },
   { id: "WB",     label: "WB",      color: C.green },
@@ -849,6 +849,7 @@ const TX_SOURCE_CHIPS: { id: TxSourceFilter; label: string; color: string }[] = 
 
 const TX_SOURCE_BADGE: Record<string, { label: string; color: string }> = {
   WB:     { label: "WB",     color: C.green },
+  WB_DBS: { label: "WB DBS", color: C.accent },
   DIRECT: { label: "Прямой", color: C.blue },
   SITE:   { label: "Сайт",   color: C.blue },
   AVITO:  { label: "Авито",  color: C.orange },

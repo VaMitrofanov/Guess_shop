@@ -41,7 +41,7 @@ interface Order {
   /** П3: клиент ответил «❌ Не мой ник» на GP-watch-пинг — дожимать вручную. */
   gpWatchDeclinedAt: string | null;
   purchaserUsername: string | null;
-  orderSource: "WB" | "DIRECT" | "AVITO" | "MANUAL" | "SITE";
+  orderSource: "WB" | "WB_DBS" | "DIRECT" | "AVITO" | "MANUAL" | "SITE";
   reviewStatus: "PENDING" | "SUBMITTED" | null;
   userOrderNumber: number | null;
   userOrderTotal: number | null;
@@ -1021,10 +1021,11 @@ function RebindModal({ order, token, onDone, onClose }: {
 }
 
 /* ───────────── DONE tab: accordion grouped by purchaserUsername ───────────── */
-type SourceFilter = "ALL" | "WB" | "DIRECT" | "AVITO" | "MANUAL" | "SITE";
+type SourceFilter = "ALL" | "WB" | "WB_DBS" | "DIRECT" | "AVITO" | "MANUAL" | "SITE";
 const SOURCE_CHIPS: { id: SourceFilter; label: string; color: string }[] = [
   { id: "ALL",    label: "Все",     color: C.textPrimary },
   { id: "WB",     label: "WB",      color: C.green },
+  { id: "WB_DBS", label: "WB DBS",  color: C.accent },
   { id: "DIRECT", label: "Прямой",  color: C.blue },
   { id: "SITE",   label: "Сайт",    color: C.blue },
   { id: "AVITO",  label: "Авито",   color: C.orange },
@@ -1033,6 +1034,7 @@ const SOURCE_CHIPS: { id: SourceFilter; label: string; color: string }[] = [
 
 const SOURCE_BADGE_META: Record<string, { label: string; color: string }> = {
   WB:     { label: "WB",     color: C.green },
+  WB_DBS: { label: "WB DBS", color: C.accent },
   DIRECT: { label: "Прямой", color: C.blue },
   SITE:   { label: "Сайт",   color: C.blue },
   AVITO:  { label: "Авито",  color: C.orange },
@@ -1069,7 +1071,7 @@ function buildDoneGroups(orders: Order[], sourceFilter: SourceFilter): DoneGroup
 }
 
 function countBySource(orders: Order[]): Record<SourceFilter, number> {
-  const c: Record<string, number> = { ALL: orders.length, WB: 0, DIRECT: 0, AVITO: 0, MANUAL: 0 };
+  const c: Record<string, number> = { ALL: orders.length, WB: 0, WB_DBS: 0, DIRECT: 0, AVITO: 0, MANUAL: 0 };
   for (const o of orders) c[o.orderSource] = (c[o.orderSource] ?? 0) + 1;
   return c as Record<SourceFilter, number>;
 }

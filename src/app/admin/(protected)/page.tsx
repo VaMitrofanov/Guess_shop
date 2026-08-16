@@ -69,6 +69,7 @@ function orderStatusTone(status: string) {
 
 const SOURCE_LABELS: Record<string, string> = {
   WB: "Wildberries",
+  WB_DBS: "Wildberries DBS",
   DIRECT: "Прямые",
   AVITO: "Авито",
   MANUAL: "Ручные",

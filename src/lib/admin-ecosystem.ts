@@ -38,7 +38,7 @@ export type AdminOrderRow = {
   attention: boolean;
 };
 
-export type AdminOrdersFilter = "ALL" | "SITE" | "WB" | "DIRECT" | "AVITO" | "ERROR";
+export type AdminOrdersFilter = "ALL" | "SITE" | "WB" | "WB_DBS" | "DIRECT" | "AVITO" | "ERROR";
 
 export type AdminOrdersPage = {
   orders: AdminOrderRow[];
@@ -155,8 +155,8 @@ export async function getAdminOrdersPage(input: {
   const limit = Math.min(100, Math.max(10, input.limit ?? 50));
   const clauses: Prisma.WbOrderWhereInput[] = [{ isTest: false }];
 
-  if (["SITE", "WB", "DIRECT", "AVITO"].includes(filter)) {
-    clauses.push({ orderSource: filter as "SITE" | "WB" | "DIRECT" | "AVITO" });
+  if (["SITE", "WB", "WB_DBS", "DIRECT", "AVITO"].includes(filter)) {
+    clauses.push({ orderSource: filter as "SITE" | "WB" | "WB_DBS" | "DIRECT" | "AVITO" });
   } else if (filter === "ERROR") {
     clauses.push({
       OR: [

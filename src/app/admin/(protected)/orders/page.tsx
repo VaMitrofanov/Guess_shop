@@ -5,7 +5,7 @@ import styles from "@/components/admin/admin-shell.module.css";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const FILTERS = new Set<AdminOrdersFilter>(["ALL", "SITE", "WB", "DIRECT", "AVITO", "ERROR"]);
+const FILTERS = new Set<AdminOrdersFilter>(["ALL", "SITE", "WB", "WB_DBS", "DIRECT", "AVITO", "ERROR"]);
 
 export default async function AdminOrdersPage({
   searchParams,

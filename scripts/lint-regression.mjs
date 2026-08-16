@@ -71,11 +71,20 @@ import { ESLint } from "eslint";
 // общего legacy debt не изменились. Обязательный donor-account guard также
 // сдвинул только существующие warning-строки большого TWA orders route.
 //
+// 2026-08-16 (1084 → 1086): the recorded 1084 was already stale — a clean
+// checkout of `main` at `ae59a3e` measures 1086, so the two extra warnings come
+// from the DBS admin-visibility batch (`74ae55b`…`ae59a3e`), which changed the
+// gate's inputs without re-recording them. Verified by lint-diffing this branch
+// against a stashed working tree: the per-file/per-rule multiset is byte-for-byte
+// identical, so the WB_DBS order source adds zero debt. Its own new files
+// (`wb-order-source.ts`, `wb-activation-code.ts` and their tests) are clean; the
+// rest of the fingerprint shift is line numbers in the files it touched.
+//
 // Unlike --max-warnings, this has no spare capacity: adding, moving,
 // replacing or changing even one warning fails the gate. Reduce the baseline
 // only in a dedicated cleanup change after reviewing the full formatter output.
-const BASELINE_WARNING_COUNT = 1084;
-const BASELINE_SHA256 = "7d31815ba5d799ac83b3fee3fb7ccd91a29cd207d601061a15bb5ea8f9565305";
+const BASELINE_WARNING_COUNT = 1086;
+const BASELINE_SHA256 = "01427cc32d18a087d9c837cf463b491f940c07a9a90752c7aa37666db4c80295";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);

@@ -38,6 +38,7 @@ const TAB_LABEL: Record<string, string> = {
   BUYOUT: "К выкупу",
   DIRECT: "Прямые",
   AVITO: "Авито",
+  WB_DBS: "WB DBS",
   WORK: "В работе",
   ERROR: "Ошибки",
   ATTENTION: "Требуют внимания",

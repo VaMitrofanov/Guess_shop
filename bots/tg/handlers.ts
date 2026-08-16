@@ -17,6 +17,7 @@ import { getGamepassDetails, getGamepassProductInfo, purchaseGamepassVerified, g
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "../shared/roblox-purchase-script";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { noteProbableNick } from "../shared/nick";
+import { resolveWbOrderSource } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { buildCompletedMessages, robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
 import { formatOrderAge } from "../shared/order-age";
@@ -646,6 +647,7 @@ export function registerStart(bot: Telegraf): void {
             platform: "TG",
             userId: user.id,
             wbCode: wbCode.code,
+            orderSource: await resolveWbOrderSource(tx, wbCode.code),
             ...(user.robloxUsername ? { robloxUsername: user.robloxUsername } : {}),
           },
         });
@@ -2621,6 +2623,7 @@ async function processGamepassSubmission(
               platform: "TG",
               userId: user.id,
               wbCode: state.wbCode,
+              orderSource: await resolveWbOrderSource(tx, state.wbCode),
               ...(validatedCreator ? { robloxUsername: validatedCreator } : {}),
             },
           });
@@ -3007,6 +3010,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
           platform: "TG",
           userId: user.id,
           wbCode: wbCode.code,
+          orderSource: await resolveWbOrderSource(tx, wbCode.code),
         },
       });
       provisionalCreated = true;

@@ -57,7 +57,7 @@ type DashboardOrder = {
   displayId: string;
   publicOrderId: string | null;
   kind: CustomerOrderKind;
-  source: "SITE" | "WB" | "DIRECT" | "AVITO" | "MANUAL";
+  source: "SITE" | "WB" | "WB_DBS" | "DIRECT" | "AVITO" | "MANUAL";
   createdAt: Date;
   status: string;
   amountRobux: number;
@@ -109,6 +109,7 @@ function sourceLabel(source: DashboardOrder["source"]) {
   const labels: Record<DashboardOrder["source"], string> = {
     SITE: "Сайт",
     WB: "Wildberries",
+    WB_DBS: "Wildberries (доставка)",
     DIRECT: "Прямой заказ",
     AVITO: "Avito",
     MANUAL: "Менеджер",
