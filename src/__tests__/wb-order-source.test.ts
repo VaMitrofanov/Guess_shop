@@ -1,4 +1,10 @@
-import { resolveWbOrderSource } from "../../bots/shared/wb-order-source";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { resolveWbOrderSource, wbDbsBadgeLine, wbOrderSourceLabel } from "../../bots/shared/wb-order-source";
+
+function read(relative: string) {
+  return readFileSync(resolve(__dirname, "../..", relative), "utf8");
+}
 
 function tx(marketplaceOrder: { id: string } | null, fail = false) {
   return {
@@ -34,5 +40,34 @@ describe("WB order source resolution", () => {
       where: { wbCode: { code: "QUN5YFZ" } },
       select: { id: true },
     });
+  });
+});
+
+describe("DBS visibility in admin cards", () => {
+  it("puts the source ahead of the platform, which is only where they chatted", () => {
+    expect(wbOrderSourceLabel("TG", "WB_DBS")).toBe("WB DBS → TG");
+    expect(wbOrderSourceLabel("VK", "WB_DBS")).toBe("WB DBS → VK");
+    expect(wbOrderSourceLabel("TG", "WB")).toBe("TG");
+    expect(wbOrderSourceLabel("TG", null)).toBe("TG");
+  });
+
+  it("adds a standalone badge only for DBS", () => {
+    expect(wbDbsBadgeLine("WB_DBS")).toContain("WB DBS");
+    expect(wbDbsBadgeLine("WB")).toBe("");
+    expect(wbDbsBadgeLine(null)).toBe("");
+  });
+
+  /** Every admin surface must show it, or the orders blend together again. */
+  it("is rendered on every order card and new-client notification", () => {
+    for (const file of ["bots/shared/admin.ts", "bots/tg/handlers.ts", "bots/tg/admin/hub-orders.ts"]) {
+      expect(read(file)).toContain("wbOrderSourceLabel(order.platform");
+    }
+    for (const file of ["bots/tg/handlers.ts", "bots/vk/handlers.ts"]) {
+      expect(read(file)).toContain("wbDbsBadgeLine(");
+    }
+    // No card may print the bare platform as the source any more.
+    for (const file of ["bots/shared/admin.ts", "bots/tg/handlers.ts", "bots/tg/admin/hub-orders.ts"]) {
+      expect(read(file)).not.toMatch(/Источник: <b>\$\{(order\.platform|pe)\}/);
+    }
   });
 });

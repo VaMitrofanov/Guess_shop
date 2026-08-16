@@ -11,6 +11,7 @@ import { tgSend, tgSendPhoto, escapeHtml } from "./notify";
 import { db } from "./db";
 import { directPrice } from "./retail-pricing";
 import { formatOrderAge } from "./order-age";
+import { resolveWbOrderSource, wbOrderSourceLabel } from "./wb-order-source";
 import { twaLaunchUrl } from "./twa-link";
 export {
   BONUS_MIN_PACK,
@@ -464,6 +465,8 @@ export interface OrderCardPayload {
   amount:              number;
   gamepassUrl:         string;
   platform:            "TG" | "VK";
+  /** `WbOrder.orderSource`; resolved from the code when the caller omits it. */
+  orderSource?:        string | null;
   wbCode:              string;
   userDisplay:         string; // e.g. "@username" or "VK: https://vk.com/id123"
   createdAt?:          Date;
@@ -532,6 +535,7 @@ export interface PaymentScreenshotCardPayload {
  * Each admin gets an independent message with [✅ ВЫКУПЛЕНО] / [❌ ОШИБКА] buttons.
  */
 export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void> {
+  const orderSource = order.orderSource ?? await resolveWbOrderSource(db, order.wbCode);
   const passPrice = Math.ceil(order.amount / 0.7);
 
   const dateStr = order.createdAt 
@@ -572,7 +576,7 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
     replacedLine +
     webOneTapLine +
     loyaltyLine +
-    `${platformEmoji} Источник: <b>${order.platform}</b>\n` +
+    `${platformEmoji} Источник: <b>${wbOrderSourceLabel(order.platform, orderSource)}</b>\n` +
     `📅 Время: <b>${dateStr}</b>\n` +
     `⏳ Возраст заказа: <b>${age}</b>\n` +
     `👤 Юзер: ${order.userDisplay}\n` +

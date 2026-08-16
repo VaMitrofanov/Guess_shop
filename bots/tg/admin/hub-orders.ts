@@ -7,6 +7,7 @@
  */
 
 import { Markup, type Telegraf, type Context } from "telegraf";
+import { wbOrderSourceLabel } from "../../shared/wb-order-source";
 import { db } from "../../shared/db";
 import { CB, ADMIN_IDS, formatUserHandle } from "../../shared/admin";
 import { sendOrEditWidget, editWidget } from "./widgets";
@@ -199,7 +200,7 @@ export async function renderExtendedCard(order: any) {
     `━━━━━━━━━━━━━━━━\n` +
     directLine +
     loyaltyLine +
-    `${pe} Источник: <b>${order.platform}</b>\n` +
+    `${pe} Источник: <b>${wbOrderSourceLabel(order.platform, order.orderSource)}</b>\n` +
     `📅 Время: <b>${dateStr}</b>\n` +
     `⏱ Ожидание: <b>${wait}</b>\n` +
     `👤 Юзер: ${userLabel}\n` +

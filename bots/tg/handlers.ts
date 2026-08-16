@@ -17,7 +17,7 @@ import { getGamepassDetails, getGamepassProductInfo, purchaseGamepassVerified, g
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "../shared/roblox-purchase-script";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { noteProbableNick } from "../shared/nick";
-import { resolveWbOrderSource } from "../shared/wb-order-source";
+import { resolveWbOrderSource, wbDbsBadgeLine, wbOrderSourceLabel } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { buildCompletedMessages, robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
 import { formatOrderAge } from "../shared/order-age";
@@ -672,6 +672,7 @@ export function registerStart(bot: Telegraf): void {
         const notifyText =
           `📥 <b>НОВЫЙ КЛИЕНТ</b>\n` +
           `━━━━━━━━━━━━━━━━\n` +
+          wbDbsBadgeLine(provisionalOrder?.orderSource) +
           (isGuideMode ? `📖 Режим: <b>Инструкция</b>\n` : ``) +
           `📅 Время: <b>${dateStr}</b>\n` +
           `👤 Юзер: <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a> (ID: ${ctx.from.id})\n` +
@@ -2852,7 +2853,7 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
     webOneTapLine +
     directTag +
     loyaltyLine +
-    `${platformEmoji} Источник: <b>${order.platform}</b>\n` +
+    `${platformEmoji} Источник: <b>${wbOrderSourceLabel(order.platform, order.orderSource)}</b>\n` +
     (dateStr ? `📅 Время: <b>${dateStr}</b>\n` : "") +
     (order.createdAt ? `⏳ Возраст заказа: <b>${formatOrderAge(order.createdAt)}</b>\n` : "") +
     `👤 Юзер: ${userLabel}\n` +
@@ -3029,6 +3030,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
       const notifyText =
         `📥 <b>НОВЫЙ КЛИЕНТ</b>\n` +
         `━━━━━━━━━━━━━━━━\n` +
+        wbDbsBadgeLine(await resolveWbOrderSource(db, wbCode.code)) +
         `📅 Время: <b>${dateStr}</b>\n` +
         `👤 Юзер: <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a> (ID: ${ctx.from.id})\n` +
         `💎 Сумма: <b>${totalAmount} R$</b> (Геймпасс: ${passPrice} R$)\n` +

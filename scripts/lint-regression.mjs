@@ -80,11 +80,16 @@ import { ESLint } from "eslint";
 // (`wb-order-source.ts`, `wb-activation-code.ts` and their tests) are clean; the
 // rest of the fingerprint shift is line numbers in the files it touched.
 //
+// 2026-08-17 (1086 → 1086): состав и число legacy debt не изменились; отпечаток
+// сдвинулся только из-за новых строк в admin/TG/VK карточках заказа, куда добавлена
+// пометка источника WB DBS, и в worker'е DBS. Новые файлы проходят scoped ESLint
+// без warnings.
+//
 // Unlike --max-warnings, this has no spare capacity: adding, moving,
 // replacing or changing even one warning fails the gate. Reduce the baseline
 // only in a dedicated cleanup change after reviewing the full formatter output.
 const BASELINE_WARNING_COUNT = 1086;
-const BASELINE_SHA256 = "01427cc32d18a087d9c837cf463b491f940c07a9a90752c7aa37666db4c80295";
+const BASELINE_SHA256 = "d3ee89167d3bcd333e92fbef47436f0f6a73f15812aa7fb0b37e241449a22c18";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);

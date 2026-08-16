@@ -19,7 +19,7 @@ import { getGamepassDetails, getGamepassProductInfo } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { enforceVkInlineKbLimits } from "../shared/vk-kb";
 import { noteProbableNick } from "../shared/nick";
-import { resolveWbOrderSource } from "../shared/wb-order-source";
+import { resolveWbOrderSource, wbDbsBadgeLine } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
@@ -1794,6 +1794,7 @@ async function handleRefActivation(
       const notifyText =
         `📥 <b>НОВЫЙ КЛИЕНТ</b>\n` +
         `━━━━━━━━━━━━━━━━\n` +
+        wbDbsBadgeLine(await resolveWbOrderSource(db, wbCode.code)) +
         (isGuideMode ? `📖 Режим: <b>Инструкция</b>\n` : ``) +
         `📅 Время: <b>${dateStr}</b>\n` +
         `👤 Юзер: <a href="https://vk.com/id${vkUserId}">${escapeHtml(fullName)}</a> (VK ID: ${vkUserId})\n` +

@@ -13,6 +13,18 @@ type MinimalTx = {
   };
 };
 
+/** Admin cards showed only the platform ("Источник: TG"), which is where the
+ * buyer chatted, not where the sale came from — DBS orders were indistinguishable
+ * from ordinary WB ones at a glance. */
+export function wbOrderSourceLabel(platform: string, orderSource?: string | null): string {
+  return orderSource === "WB_DBS" ? `WB DBS → ${platform}` : platform;
+}
+
+/** Standalone line for cards that list fields rather than a single source. */
+export function wbDbsBadgeLine(orderSource?: string | null): string {
+  return orderSource === "WB_DBS" ? "🚚 <b>WB DBS</b> — доставка WB, час на закрытие\n" : "";
+}
+
 /** Never throws: a lookup failure must not block order creation, and WB is the
  * safe default because it is what every historical code already is. */
 export async function resolveWbOrderSource(tx: unknown, code: string): Promise<WbOrderSource> {
