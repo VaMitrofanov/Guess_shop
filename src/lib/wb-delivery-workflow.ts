@@ -29,6 +29,7 @@ import {
 import {
   canIssueWbGate,
   canReceiveWbOrder,
+  wbDeliverySecretIsLive,
   wbDeliveryStage,
 } from "../../bots/shared/wb-delivery-policy";
 import { runWbDeliverySync } from "../../bots/shared/wb-delivery-sync";
@@ -65,6 +66,7 @@ export const WbDeliveryActionSchema = z.object({
     "sync",
     "create_demo",
     "request_code",
+    "remind_code",
     "save_delivery_code",
     "simulate_buyer_code",
     "issue_gate",
@@ -76,7 +78,7 @@ export const WbDeliveryActionSchema = z.object({
     "receive",
   ]),
   orderId: z.string().min(1).max(80).optional(),
-  code: z.string().trim().regex(/^\d{6}$/).optional(),
+  code: z.string().trim().regex(/^\d{5,6}$/).optional(),
   message: z.string().trim().min(1).max(1_000).optional(),
 });
 
@@ -101,12 +103,7 @@ function iso(value: Date | null | undefined) {
 }
 
 function liveSecret(secret: ActionOrder["deliverySecret"]) {
-  return Boolean(
-    secret &&
-    !secret.consumedAt &&
-    secret.encryptedValue !== "PURGED" &&
-    secret.expiresAt.getTime() > Date.now(),
-  );
+  return wbDeliverySecretIsLive(secret);
 }
 
 function gateUrl(code: string | null | undefined) {
@@ -121,6 +118,25 @@ function direction(sender: string): "buyer" | "seller" | "system" {
   return "buyer";
 }
 
+/** Every disabled button must say why. Without this the console silently stops
+ * responding and the operator cannot tell a policy gate from an outage. */
+function blockedReason(order: ListOrder, chatReady: boolean, terminal: boolean): string | null {
+  if (terminal) return null;
+  if (!chatReady) return "Покупатель ещё не открыл чат по этому заказу — WB не даёт писать первым.";
+  if (order.lastErrorCode) {
+    return `Последнее действие завершилось с ошибкой ${order.lastErrorCode}. Синхронизируйте заказ и сверьте кабинет WB.`;
+  }
+  if (!order.isTest && !flag("WB_CHAT_SEND_ENABLED")) {
+    return "Отправка сообщений в WB выключена флагом WB_CHAT_SEND_ENABLED — включите его в Coolify на Web и TG.";
+  }
+  if (!order.isTest && !flag("WB_DBS_MUTATIONS_ENABLED")) {
+    return "Смена статусов WB выключена флагом WB_DBS_MUTATIONS_ENABLED — включите его в Coolify на Web и TG.";
+  }
+  if (!wbDeliveryCryptoReady()) return "Не настроен WB_DELIVERY_ENCRYPTION_KEY — код доставки негде хранить.";
+  if (!order.denominationSnapshot) return "Для товара не найден номинал в каталоге — гейт выпустить нельзя.";
+  return null;
+}
+
 function toDto(order: ListOrder): WbDeliveryOrderDto {
   const secretIsLive = liveSecret(order.deliverySecret);
   const policyOrder = { ...order, hasLiveSecret: secretIsLive };
@@ -129,6 +145,8 @@ function toDto(order: ListOrder): WbDeliveryOrderDto {
   const stage = wbDeliveryStage(policyOrder);
   const chatReady = Boolean(chat?.replySignEncrypted || order.isTest);
   const terminal = Boolean(order.completedAt || order.cancelledAt);
+  const awaitingCode = !terminal && chatReady && !secretIsLive && !order.lastErrorCode;
+  const alreadyAsked = order.chatState === "CODE_REQUESTED" || order.chatState === "REQUEST_SEND_UNKNOWN";
   return {
     id: order.id,
     wbOrderId: order.wbOrderId,
@@ -166,8 +184,10 @@ function toDto(order: ListOrder): WbDeliveryOrderDto {
     activationCode,
     gateUrl: gateUrl(activationCode),
     fulfillment: order.internalFulfillment ?? null,
+    blockedReason: blockedReason(order, chatReady, terminal),
     permissions: {
-      requestCode: !terminal && chatReady && !secretIsLive && order.chatState !== "REQUEST_SEND_UNKNOWN" && !order.lastErrorCode,
+      requestCode: awaitingCode && !alreadyAsked,
+      remindCode: awaitingCode && alreadyAsked,
       saveDeliveryCode: !terminal && chatReady && wbDeliveryCryptoReady(),
       issueGate: canIssueWbGate(policyOrder),
       sendGate: !terminal && chatReady && order.gateState === "ISSUED" && Boolean(activationCode),
@@ -408,12 +428,16 @@ async function sendText(order: ActionOrder, text: string, actor: string, kind: "
   });
 }
 
+/** Owner-approved wording (16.08.2026). Keep it byte-identical to what is sent
+ * by hand from the WB seller cabinet so buyers never see two different scripts. */
 function requestCodeMessage() {
   return [
-    "Здравствуйте! Чтобы завершить заказ с курьерской доставкой, откройте этот заказ в приложении Wildberries.",
-    "Пришлите сюда одним сообщением 6-значный код получения, который показан в заказе.",
-    "Код нужен только для завершения именно этого заказа — не публикуйте его в других чатах.",
-  ].join("\n\n");
+    "Здравствуйте! Для успешного получения заказа просим прислать 5-6-значный код доставки,"
+    + " расположенный в разделе \"Доставки\" приложения Wildberries, рядом с QR-кодом.",
+    "Код необходимо направить в этот чат.",
+    "Доставка заказов осуществляется Онлайн через этот чат, без необходимости физической доставки,"
+    + " курьера Вам ждать не нужно",
+  ].join("\n");
 }
 
 function gateMessage(code: string) {
@@ -614,14 +638,21 @@ export async function performWbDeliveryAction(
   if (input.action === "create_demo") return createDemo(actor);
 
   const order = await getOrder(input.orderId);
-  if (input.action === "request_code") {
+  if (input.action === "request_code" || input.action === "remind_code") {
     await sendText(order, requestCodeMessage(), actor, "request");
     await db.wbMarketplaceOrder.update({
       where: { id: order.id },
       data: { chatState: "CODE_REQUESTED", lastErrorCode: null },
     });
-    await audit(order.id, "DELIVERY_CODE_REQUESTED", actor, { isTest: order.isTest });
-    return { ok: true, message: "Инструкция с запросом кода отправлена", orderId: order.id };
+    await audit(order.id, "DELIVERY_CODE_REQUESTED", actor, {
+      isTest: order.isTest,
+      repeat: input.action === "remind_code",
+    });
+    return {
+      ok: true,
+      message: input.action === "remind_code" ? "Запрос кода отправлен повторно" : "Инструкция с запросом кода отправлена",
+      orderId: order.id,
+    };
   }
   if (input.action === "save_delivery_code") {
     if (!input.code) throw new WbDeliveryWorkflowError("Введите 6-значный код", 400, "CODE_REQUIRED");

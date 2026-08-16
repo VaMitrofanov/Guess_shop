@@ -229,7 +229,9 @@ export async function vkSendPhoto(
 
     // 2. multipart upload of the raw bytes
     const fd = new FormData();
-    fd.append("photo", new Blob([photo], { type: "image/jpeg" }), "qr.jpg");
+    // A Node Buffer can sit on a SharedArrayBuffer, which BlobPart rejects; the
+    // copy into a plain Uint8Array keeps the bytes and satisfies the DOM type.
+    fd.append("photo", new Blob([new Uint8Array(photo)], { type: "image/jpeg" }), "qr.jpg");
     const upRes = await fetch(uploadUrl, { method: "POST", body: fd });
     const up = (await upRes.json()) as any;
     if (!up?.photo) throw new Error("upload failed: " + JSON.stringify(up));

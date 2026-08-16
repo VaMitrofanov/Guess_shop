@@ -66,6 +66,12 @@ const AUDIT_LABEL: Record<string, string> = {
   WB_DELIVER_SUCCEEDED: "Заказ передан в доставку",
   WB_RECEIVE_SUCCEEDED: "Выдача завершена",
   CHAT_MESSAGE_SENT: "Сообщение отправлено",
+  GATE_SEND_STARTED: "Началась отправка гейта",
+  GATE_MANUALLY_MARKED_SENT: "Гейт отмечен отправленным вручную",
+  AUTO_GATE_ISSUED_AND_SENT: "Авто-гейт выпущен и отправлен",
+  CHAT_SEND_FAILED: "WB отклонил отправку",
+  WB_STATUS_MUTATION_FAILED: "WB отклонил смену статуса",
+  DELIVERY_CODE_EXPIRED: "Код получения истёк",
 };
 
 function money(value: number | null) {
@@ -84,6 +90,19 @@ function filterOrder(order: WbDeliveryOrderDto, filter: typeof FILTERS[number][0
   if (filter === "attention") return order.stage === "attention";
   if (filter === "ready") return order.stage === "ready_receive";
   return !order.completedAt && !order.cancelledAt;
+}
+
+/** Both status buttons are gated on what WB itself reports, so an operator who
+ * already advanced the order in the seller cabinet needs to see that, not a
+ * dead button. */
+function statusHint(order: WbDeliveryOrderDto, action: "confirm" | "deliver") {
+  if (order.permissions[action]) return undefined;
+  if (order.completedAt || order.cancelledAt) return "Заказ уже закрыт.";
+  if (order.blockedReason) return order.blockedReason;
+  if (action === "confirm") return `WB уже держит заказ в статусе «${order.supplierStatus}» — сборка подтверждена.`;
+  return /deliver|receive|sold/i.test(order.supplierStatus)
+    ? `WB уже держит заказ в статусе «${order.supplierStatus}».`
+    : "Сначала подтвердите сборку — WB принимает «в доставку» только после confirm.";
 }
 
 function stageIndex(order: WbDeliveryOrderDto) {
@@ -220,6 +239,20 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
         </div>
       </section>
 
+      {(!data.environment.chatSendEnabled || !data.environment.mutationsEnabled) && (
+        <div className={css.errorBanner}>
+          <AlertTriangle />
+          <div>
+            <strong>Внешние действия WB выключены</strong>
+            <span>
+              {!data.environment.chatSendEnabled && "Сообщения покупателю не уйдут (WB_CHAT_SEND_ENABLED=false). "}
+              {!data.environment.mutationsEnabled && "Сборка, доставка и завершение заказа недоступны (WB_DBS_MUTATIONS_ENABLED=false). "}
+              Флаги живут в Coolify на Web и TG; тестовые заказы работают в обход них.
+            </span>
+          </div>
+        </div>
+      )}
+
       {notice && <div className={`${css.notice} ${notice.tone === "ok" ? css.noticeOk : css.noticeError}`}><span>{notice.tone === "ok" ? <Check /> : <AlertTriangle />}</span>{notice.text}<button onClick={() => setNotice(null)} aria-label="Закрыть"><X /></button></div>}
 
       <section className={css.mainGrid}>
@@ -256,13 +289,15 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
             </div>
 
             {selected.lastErrorCode && <div className={css.errorBanner}><AlertTriangle /><div><strong>Операция остановлена</strong><span>{selected.lastErrorCode}. Сначала синхронизируйте заказ и проверьте фактический статус в кабинете WB.</span></div></div>}
+            {!selected.lastErrorCode && selected.blockedReason && <div className={css.holdCard}><AlertTriangle /><div><strong>Действия по заказу недоступны</strong><span>{selected.blockedReason}</span></div></div>}
 
             <div className={css.detailColumns}>
               <section className={css.controlPanel}>
                 <div className={css.sectionTitle}><div><span>Командный центр</span><strong>Следующее действие</strong></div><span className={css.secureTag}><ShieldCheck /> без показа кода</span></div>
 
                 <div className={css.nextAction}>
-                  {selected.permissions.requestCode && <ActionCard icon={<MessageCircle />} title="Запросить код доставки" text="Покупатель получит короткую инструкцию, где найти 6 цифр." button="Отправить инструкцию" busy={busy === "request_code"} onClick={() => void act("request_code")} />}
+                  {selected.permissions.requestCode && <ActionCard icon={<MessageCircle />} title="Запросить код доставки" text="Покупатель получит инструкцию, где найти 5–6 цифр рядом с QR-кодом." button="Отправить инструкцию" busy={busy === "request_code"} onClick={() => void act("request_code")} />}
+                  {selected.permissions.remindCode && <ActionCard icon={<Clock3 />} title="Запрос уже отправлен" text="Ждём код от покупателя — он подхватится автоматически. Можно напомнить тем же текстом." button="Напомнить о коде" busy={busy === "remind_code"} onClick={() => void act("remind_code")} />}
                   {selected.permissions.simulateBuyerCode && <ActionCard icon={<Sparkles />} title="Имитировать ответ покупателя" text="Система создаст и тут же зашифрует тестовый код. Внешних вызовов не будет." button="Покупатель прислал код" busy={busy === "simulate_buyer_code"} onClick={() => void act("simulate_buyer_code")} />}
                   {selected.permissions.issueGate && <ActionCard icon={<KeyRound />} title="Выпустить персональный WB-гейт" text={`Номинал ${selected.denomination} R$ и связь с заказом будут зафиксированы навсегда.`} button="Выпустить код" busy={busy === "issue_gate"} onClick={() => void act("issue_gate")} />}
                   {selected.permissions.sendGate && <ActionCard icon={<Send />} title="Отправить ссылку и код" text="Покупатель получит готовую ссылку на гейт и свой 7-значный код." button="Отправить покупателю" busy={busy === "send_gate"} onClick={() => void act("send_gate")} />}
@@ -279,13 +314,13 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
                 </div>
 
                 <div className={css.manualBlock}>
-                  <div><strong>Резервный ввод кода</strong><span>Если событие чата задержалось, введите 6 цифр вручную. После отправки поле очищается.</span></div>
-                  <div><input inputMode="numeric" autoComplete="off" maxLength={6} value={manualCode} onChange={(event) => setManualCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6 цифр" aria-label="Код доставки WB" /><button disabled={!selected.permissions.saveDeliveryCode || manualCode.length !== 6 || Boolean(busy)} onClick={() => void act("save_delivery_code", { code: manualCode })}>Сохранить безопасно</button></div>
+                  <div><strong>Резервный ввод кода</strong><span>Если событие чата задержалось, введите 5–6 цифр вручную. После отправки поле очищается.</span></div>
+                  <div><input inputMode="numeric" autoComplete="off" maxLength={6} value={manualCode} onChange={(event) => setManualCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="5–6 цифр" aria-label="Код доставки WB" /><button disabled={!selected.permissions.saveDeliveryCode || manualCode.length < 5 || Boolean(busy)} onClick={() => void act("save_delivery_code", { code: manualCode })}>Сохранить безопасно</button></div>
                 </div>
 
                 <div className={css.providerActions}>
-                  <button disabled={!selected.permissions.confirm || Boolean(busy)} onClick={() => void act("confirm")}><Check /> Подтвердить сборку</button>
-                  <button disabled={!selected.permissions.deliver || Boolean(busy)} onClick={() => void act("deliver")}><Truck /> Передать в доставку</button>
+                  <button title={statusHint(selected, "confirm")} disabled={!selected.permissions.confirm || Boolean(busy)} onClick={() => void act("confirm")}><Check /> Подтвердить сборку</button>
+                  <button title={statusHint(selected, "deliver")} disabled={!selected.permissions.deliver || Boolean(busy)} onClick={() => void act("deliver")}><Truck /> Передать в доставку</button>
                   {selected.permissions.markGateSent
                     ? <button disabled={Boolean(busy)} onClick={() => window.confirm("Вы действительно отправили покупателю ссылку и код вручную в кабинете WB?") && void act("mark_gate_sent")}><Send /> Отметить отправленным</button>
                     : <a href={selected.gateUrl ?? "#"} target="_blank" aria-disabled={!selected.gateUrl}><Link2 /> Проверить гейт <ArrowUpRight /></a>}

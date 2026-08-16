@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 const ENVELOPE_VERSION = "v1";
-const DELIVERY_CODE_RE = /(?<!\d)(\d(?:[\s-]?\d){5})(?!\d)/g;
+const DELIVERY_CODE_RE = /(?<!\d)(\d(?:[\s-]?\d){4,5})(?!\d)/g;
 const ACTIVATION_CODE_RE = /(код(?:\s+активации)?\s*[:—-]?\s*)([A-Z0-9]{7})(?![A-Z0-9])/gi;
 
 function decodeKey(raw = process.env.WB_DELIVERY_ENCRYPTION_KEY ?? ""): Buffer {
@@ -63,12 +63,18 @@ export function wbSecretHmac(value: string, purpose: "delivery-code" | "reply-si
     .digest("hex");
 }
 
+/** WB prints a five- or six-digit delivery code next to the buyer's QR. Six
+ * digits are specific enough to read out of any sentence; five digits collide
+ * with order numbers and prices, so they only count when the buyer sent nothing
+ * but the code. */
 export function extractDeliveryCode(text: string): string | null {
   DELIVERY_CODE_RE.lastIndex = 0;
-  const match = DELIVERY_CODE_RE.exec(text);
-  if (!match) return null;
-  const code = match[1].replace(/\D/g, "");
-  return /^\d{6}$/.test(code) ? code : null;
+  const candidates = [...text.matchAll(DELIVERY_CODE_RE)].map((match) => match[1].replace(/\D/g, ""));
+  const sixDigit = candidates.find((code) => code.length === 6);
+  if (sixDigit) return sixDigit;
+  const fiveDigit = candidates.find((code) => code.length === 5);
+  if (fiveDigit && text.replace(/[\s\-.,!?:;()]/g, "") === fiveDigit) return fiveDigit;
+  return null;
 }
 
 /** Redact before DB persistence. Our seven-character activation code must not

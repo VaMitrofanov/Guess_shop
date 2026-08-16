@@ -31,7 +31,7 @@ export function notifyDbsCodeCaptured(wbOrderId: string) {
   broadcast(
     `🔑 <b>DBS: код доставки получен</b>\n` +
     `WB #${escapeHtml(wbOrderId)}\n` +
-    `Покупатель прислал 6-значный код — можно выпускать гейт`,
+    `Покупатель прислал код доставки — можно выпускать гейт`,
   );
 }
 

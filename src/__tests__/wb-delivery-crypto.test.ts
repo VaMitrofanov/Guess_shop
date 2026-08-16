@@ -40,12 +40,26 @@ describe("WB delivery secret boundary", () => {
     expect(first).not.toBe(wbSecretHmac("123457", "delivery-code"));
   });
 
-  it("extracts spaced or dashed six digits and redacts both secret classes", () => {
+  it("extracts spaced or dashed six digits", () => {
     expect(extractDeliveryCode("Код 12-34-56, спасибо")).toBe("123456");
     expect(extractDeliveryCode("Код 1 2 3 4 5 6")).toBe("123456");
+    expect(extractDeliveryCode("995757")).toBe("995757");
+    expect(extractDeliveryCode("нет цифр")).toBeNull();
+  });
+
+  it("accepts a five-digit code only when the buyer sent nothing else", () => {
+    expect(extractDeliveryCode("12345")).toBe("12345");
+    expect(extractDeliveryCode(" 12345. ")).toBe("12345");
+    expect(extractDeliveryCode("мой заказ 12345 когда приедет?")).toBeNull();
+    expect(extractDeliveryCode("Код 12345 и заказ 987654")).toBe("987654");
+  });
+
+  /** Owner decision 15.08.2026: the delivery code stays readable in the chat
+   * transcript so operators can reconcile with the WB cabinet. Only our own
+   * seven-character activation code must never survive there. */
+  it("redacts the activation code but keeps the buyer's delivery code readable", () => {
     const safe = redactWbChatText("Получение 123456. Код активации: ABC1234");
-    expect(safe).toBe("Получение ••••••. Код активации: •••••••");
-    expect(safe).not.toContain("123456");
+    expect(safe).toBe("Получение 123456. Код активации: •••••••");
     expect(safe).not.toContain("ABC1234");
   });
 });

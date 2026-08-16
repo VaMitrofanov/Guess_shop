@@ -25,7 +25,12 @@ import {
   wbDeliveryCryptoReady,
   wbSecretHmac,
 } from "./wb-delivery-crypto";
-import { wbMarketplaceTerminalFlags, wbProductVendorCandidates } from "./wb-delivery-policy";
+import {
+  canCaptureDeliveryCode,
+  shouldMarkCodeRequested,
+  wbMarketplaceTerminalFlags,
+  wbProductVendorCandidates,
+} from "./wb-delivery-policy";
 import { notifyDbsNewOrder, notifyDbsBuyerMessage, notifyDbsCodeCaptured, notifyDbsAutoGateIssued } from "./wb-delivery-admin-notify";
 
 const WORKER_STREAM = "wb-dbs-worker";
@@ -351,6 +356,104 @@ async function tryAutoGate(
   }
 }
 
+type CaptureTarget = {
+  id: string;
+  wbOrderId: string;
+  completedAt: Date | null;
+  cancelledAt: Date | null;
+};
+
+/** The operator may answer the buyer straight from the WB seller cabinet. Any
+ * outbound message means the conversation has started, so the console must stop
+ * offering "send the instruction" as the next step. */
+async function markCodeRequested(db: Db, order: CaptureTarget & { chatState: string }, eventId: string) {
+  if (order.completedAt || order.cancelledAt) return;
+  if (!shouldMarkCodeRequested(order.chatState)) return;
+  const moved = await db.wbMarketplaceOrder.updateMany({
+    where: { id: order.id, chatState: { in: ["WAITING_BUYER_CHAT", "READY"] } },
+    data: { chatState: "CODE_REQUESTED" },
+  });
+  if (moved.count !== 1) return;
+  await audit(db, order.id, "DELIVERY_CODE_REQUESTED", `seller-message:${eventId}`, { source: "wb-seller-cabinet" });
+}
+
+/** Capture is deliberately independent of `chatState`: the request may have been
+ * sent from the WB cabinet, so the buyer's code must land whatever our own state
+ * machine believes. A live secret is never overwritten. */
+async function captureDeliveryCode(
+  db: Db,
+  order: CaptureTarget,
+  code: string,
+  receivedAt: Date,
+  idempotencyKey: string,
+  chatId: string,
+): Promise<boolean> {
+  if (!wbDeliveryCryptoReady()) return false;
+  const existing = await db.wbDeliverySecret.findUnique({ where: { marketplaceOrderId: order.id } });
+  if (!canCaptureDeliveryCode(order, existing)) return false;
+  const expiresAt = new Date(receivedAt.getTime() + 24 * 60 * 60 * 1_000);
+  if (expiresAt.getTime() <= Date.now()) return false;
+  const secret = {
+    encryptedValue: encryptWbSecret(code, "delivery-code"),
+    codeHmac: wbSecretHmac(code, "delivery-code"),
+    receivedAt,
+    expiresAt,
+  };
+  await db.wbDeliverySecret.upsert({
+    where: { marketplaceOrderId: order.id },
+    create: { marketplaceOrderId: order.id, ...secret },
+    update: { ...secret, consumedAt: null, failedAttempts: 0 },
+  });
+  await db.wbMarketplaceOrder.update({
+    where: { id: order.id },
+    data: { chatState: "CODE_RECEIVED", lastErrorCode: null },
+  });
+  await audit(db, order.id, "DELIVERY_CODE_CAPTURED", idempotencyKey, {
+    chatId,
+    receivedAt: receivedAt.toISOString(),
+  });
+  notifyDbsCodeCaptured(order.wbOrderId);
+  await tryAutoGate(db, order.id, order.wbOrderId);
+  return true;
+}
+
+/** Safety net for codes that arrived while capture was broken or before the
+ * order was linked to its chat: the events cursor has already moved past them,
+ * so they would otherwise never be replayed. */
+async function backfillDeliveryCodes(db: Db, out: WbDeliverySyncResult) {
+  if (!wbDeliveryCryptoReady()) return;
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1_000);
+  const stuck = await db.wbMarketplaceOrder.findMany({
+    where: {
+      completedAt: null,
+      cancelledAt: null,
+      isTest: false,
+      firstSeenAt: { gte: since },
+      deliverySecret: { is: null },
+    },
+    select: { id: true, wbOrderId: true, completedAt: true, cancelledAt: true },
+    take: 50,
+  });
+  for (const order of stuck) {
+    const events = await db.wbBuyerChatEvent.findMany({
+      where: {
+        marketplaceOrderId: order.id,
+        containsDeliveryCode: true,
+        sentAt: { gte: since },
+      },
+      orderBy: { sentAt: "desc" },
+      take: 5,
+    });
+    for (const event of events) {
+      const code = extractDeliveryCode(event.textRedacted ?? "");
+      if (!code) continue;
+      const captured = await captureDeliveryCode(db, order, code, event.sentAt, `delivery-code:${event.wbEventId}`, event.chatId);
+      if (captured) out.capturedCodes += 1;
+      break;
+    }
+  }
+}
+
 async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
   const cursor = await db.wbSyncCursor.findUnique({ where: { stream: EVENTS_STREAM } });
   const response = await fetchBuyerChatEvents(cursor?.cursor ?? undefined);
@@ -431,37 +534,12 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
     if (order && order.chatState === "WAITING_BUYER_CHAT") {
       await db.wbMarketplaceOrder.update({ where: { id: order.id }, data: { chatState: "READY" } });
     }
-    const awaitingDeliveryCode = order?.chatState === "CODE_REQUESTED" || order?.chatState === "REQUEST_SEND_UNKNOWN";
-    if (order && awaitingDeliveryCode && deliveryCode && wbDeliveryCryptoReady() && !order.completedAt && !order.cancelledAt) {
-      await db.wbDeliverySecret.upsert({
-        where: { marketplaceOrderId: order.id },
-        create: {
-          marketplaceOrderId: order.id,
-          encryptedValue: encryptWbSecret(deliveryCode, "delivery-code"),
-          codeHmac: wbSecretHmac(deliveryCode, "delivery-code"),
-          receivedAt: sentAt,
-          expiresAt: new Date(sentAt.getTime() + 24 * 60 * 60 * 1_000),
-        },
-        update: {
-          encryptedValue: encryptWbSecret(deliveryCode, "delivery-code"),
-          codeHmac: wbSecretHmac(deliveryCode, "delivery-code"),
-          receivedAt: sentAt,
-          expiresAt: new Date(sentAt.getTime() + 24 * 60 * 60 * 1_000),
-          consumedAt: null,
-          failedAttempts: 0,
-        },
-      });
-      await db.wbMarketplaceOrder.update({
-        where: { id: order.id },
-        data: { chatState: "CODE_RECEIVED", lastErrorCode: null },
-      });
-      await audit(db, order.id, "DELIVERY_CODE_CAPTURED", `delivery-code:${event.eventID}`, {
-        chatId: event.chatID,
-        receivedAt: sentAt.toISOString(),
-      });
-      notifyDbsCodeCaptured(order.wbOrderId);
-      out.capturedCodes += 1;
-      await tryAutoGate(db, order.id, order.wbOrderId);
+    if (isNewEvent && order && !isBuyerSender(event.sender)) {
+      await markCodeRequested(db, order, event.eventID);
+    }
+    if (order && deliveryCode && !order.completedAt && !order.cancelledAt) {
+      const captured = await captureDeliveryCode(db, order, deliveryCode, sentAt, `delivery-code:${event.eventID}`, event.chatID);
+      if (captured) out.capturedCodes += 1;
     }
     out.chatEvents += 1;
   }
@@ -568,6 +646,7 @@ export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {
 
     if (await streamDue(db, CHATS_STREAM, 60_000, force)) await syncChatDirectory(db, out);
     await syncChatEvents(db, out);
+    await backfillDeliveryCodes(db, out);
     if (await streamDue(db, STATUSES_STREAM, 60_000, force)) await syncStatuses(db, out);
     if (await streamDue(db, COMPLETED_STREAM, 5 * 60_000, force)) await syncCompleted(db, out);
 

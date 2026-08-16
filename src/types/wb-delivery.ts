@@ -56,8 +56,12 @@ export type WbDeliveryOrderDto = {
     platform: string | null;
     robloxUsername: string | null;
   } | null;
+  /** Human-readable reason the next provider action is unavailable, or null
+   * when nothing blocks it. Rendered verbatim by both consoles. */
+  blockedReason: string | null;
   permissions: {
     requestCode: boolean;
+    remindCode: boolean;
     saveDeliveryCode: boolean;
     issueGate: boolean;
     sendGate: boolean;
@@ -107,6 +111,7 @@ export type WbDeliveryAction =
   | "sync"
   | "create_demo"
   | "request_code"
+  | "remind_code"
   | "save_delivery_code"
   | "simulate_buyer_code"
   | "issue_gate"

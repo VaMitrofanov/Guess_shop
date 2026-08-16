@@ -60,6 +60,41 @@ export function wbDeliveryStage(order: WbDeliveryPolicyOrder): WbDeliveryStage {
   return "new";
 }
 
+export type WbDeliverySecretState = {
+  consumedAt?: Date | null;
+  encryptedValue: string;
+  expiresAt: Date;
+} | null | undefined;
+
+/** A secret is usable only while it is unconsumed, unpurged and inside its TTL.
+ * Every surface must agree on this or the console offers actions WB will reject. */
+export function wbDeliverySecretIsLive(secret: WbDeliverySecretState, now = new Date()): boolean {
+  return Boolean(
+    secret &&
+    !secret.consumedAt &&
+    secret.encryptedValue !== "PURGED" &&
+    secret.expiresAt.getTime() > now.getTime(),
+  );
+}
+
+/** Capture must not depend on `chatState`: the operator may have asked for the
+ * code straight from the WB seller cabinet, which never touches our state
+ * machine. The only real guards are a closed order and a still-usable secret. */
+export function canCaptureDeliveryCode(
+  order: Pick<WbDeliveryPolicyOrder, "completedAt" | "cancelledAt">,
+  secret: WbDeliverySecretState,
+  now = new Date(),
+): boolean {
+  if (order.completedAt || order.cancelledAt) return false;
+  return !wbDeliverySecretIsLive(secret, now);
+}
+
+/** Any outbound message means the conversation has started, so the console must
+ * stop presenting "send the instruction" as the next step. */
+export function shouldMarkCodeRequested(chatState: string): boolean {
+  return chatState === "WAITING_BUYER_CHAT" || chatState === "READY";
+}
+
 export function canIssueWbGate(order: WbDeliveryPolicyOrder): boolean {
   return Boolean(
     !order.completedAt &&

@@ -67,10 +67,26 @@ destructive changes/существующие таблицы, только пос
 Для `20260811_wb_dbs_delivery` порядок строгий: backup → `migrate status` → аудит additive
 SQL → `migrate deploy` → Web/TG/VK. Один и тот же 32-byte `WB_DELIVERY_ENCRYPTION_KEY`
 должен быть в Web и TG, но значение никогда не выводится. TG запускает только read-only
-sync через `WB_DBS_SYNC_ENABLED=true`; `WB_CHAT_SEND_ENABLED` и
-`WB_DBS_MUTATIONS_ENABLED` на Web остаются `false` до canary. Marketplace и Chat должны
+sync через `WB_DBS_SYNC_ENABLED=true`. Marketplace и Chat должны
 получить отдельные scoped tokens до включения live mutations; legacy `WB_API_TOKEN` —
 только временный fallback shadow-периода.
+
+### WB DBS live-режим (16.08.2026)
+
+Shadow закрыт: на первом реальном заказе `WB_CHAT_SEND_ENABLED=true` и
+`WB_DBS_MUTATIONS_ENABLED=true` заведены **и на Web, и на TG** (Web обслуживает кнопки
+админки и TWA, TG — worker и авто-гейт). Значения читаются в рантайме, поэтому после
+правки env нужен redeploy сервиса, а не только рестарт контейнера.
+
+| Флаг | Где | Что ломается при `false` |
+|------|-----|--------------------------|
+| `WB_CHAT_SEND_ENABLED` | Web + TG | Любая отправка в чат WB: запрос кода, гейт, свободное сообщение (409 `..._OFF`) |
+| `WB_DBS_MUTATIONS_ENABLED` | Web + TG | `confirm` / `deliver` / `receive` (409 `..._OFF`) |
+| `WB_DBS_AUTO_GATE` | TG | Не задан ⇒ ручной режим: код ловится сам, гейт выпускает оператор |
+
+Оба флага не действуют на `isTest`-заказы — демо-сценарий работает в обход них, поэтому
+зелёный демо-прогон **не доказывает**, что реальный заказ поедет. Проверять только на
+реальной карточке или сверкой env.
 
 После любого WB DBS release дождаться webhook-сборок Web/TG/VK, затем последовательно
 пересобрать Guide и прогнать `smoke-site` + `node scripts/smoke-corridor.mjs`. Даже если
