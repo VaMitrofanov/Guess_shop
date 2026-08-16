@@ -56,6 +56,9 @@ export type WbDeliveryOrderDto = {
     platform: string | null;
     robloxUsername: string | null;
   } | null;
+  /** WB closed the order but the buyer never received a gate code — money
+   * settled, nothing delivered. The loudest state the console can show. */
+  unserved: boolean;
   /** Human-readable reason the next provider action is unavailable, or null
    * when nothing blocks it. Rendered verbatim by both consoles. */
   blockedReason: string | null;

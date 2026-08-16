@@ -45,6 +45,9 @@ export function wbProductVendorCandidates(article: string | undefined) {
 
 export function wbDeliveryStage(order: WbDeliveryPolicyOrder): WbDeliveryStage {
   if (order.cancelledAt) return "cancelled";
+  // Closed at WB but never handed the buyer a gate — the loudest state we have,
+  // because the money is settled and the customer is still empty-handed.
+  if (isWbBuyerUnserved(order)) return "attention";
   if (order.completedAt || /sold|receive|complete/i.test(order.supplierStatus)) return "complete";
   if (order.lastErrorCode) return "attention";
   if (
@@ -95,9 +98,25 @@ export function shouldMarkCodeRequested(chatState: string): boolean {
   return chatState === "WAITING_BUYER_CHAT" || chatState === "READY";
 }
 
+/** A WB order can reach `receive/sold` without us: the operator can close it
+ * from the seller cabinet. That settles the marketplace transaction, never our
+ * obligation to hand over the Robux, so a closed order whose gate was never
+ * issued is an unserved buyer, not a finished one.
+ *
+ * `hasLiveSecret` is what separates the two. Our own `receive` purges the
+ * secret on success, so an order we completed can never match; only one closed
+ * behind our back still carries a usable code. */
+export function isWbBuyerUnserved(order: WbDeliveryPolicyOrder): boolean {
+  return Boolean(
+    order.completedAt &&
+    !order.cancelledAt &&
+    order.gateState === "NOT_ISSUED" &&
+    order.hasLiveSecret,
+  );
+}
+
 export function canIssueWbGate(order: WbDeliveryPolicyOrder): boolean {
   return Boolean(
-    !order.completedAt &&
     !order.cancelledAt &&
     !order.lastErrorCode &&
     order.chatState === "CODE_RECEIVED" &&

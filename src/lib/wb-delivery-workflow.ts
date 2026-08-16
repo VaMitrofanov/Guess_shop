@@ -29,6 +29,7 @@ import {
 import {
   canIssueWbGate,
   canReceiveWbOrder,
+  isWbBuyerUnserved,
   wbDeliverySecretIsLive,
   wbDeliveryStage,
 } from "../../bots/shared/wb-delivery-policy";
@@ -120,7 +121,10 @@ function direction(sender: string): "buyer" | "seller" | "system" {
 
 /** Every disabled button must say why. Without this the console silently stops
  * responding and the operator cannot tell a policy gate from an outage. */
-function blockedReason(order: ListOrder, chatReady: boolean, terminal: boolean): string | null {
+function blockedReason(order: ListOrder, chatReady: boolean, terminal: boolean, unserved: boolean): string | null {
+  if (unserved) {
+    return "Заказ закрыт на WB, но покупатель так и не получил код гейта. Выпустите код и отправьте его в чат — деньги уже приняты.";
+  }
   if (terminal) return null;
   if (!chatReady) return "Покупатель ещё не открыл чат по этому заказу — WB не даёт писать первым.";
   if (order.lastErrorCode) {
@@ -147,6 +151,12 @@ function toDto(order: ListOrder): WbDeliveryOrderDto {
   const terminal = Boolean(order.completedAt || order.cancelledAt);
   const awaitingCode = !terminal && chatReady && !secretIsLive && !order.lastErrorCode;
   const alreadyAsked = order.chatState === "CODE_REQUESTED" || order.chatState === "REQUEST_SEND_UNKNOWN";
+  // Closing the WB order settles the marketplace side; it does not end our
+  // delivery. Gate issuance, gate delivery and plain support replies stay open
+  // until the buyer actually holds a code — they are gated on cancellation, not
+  // completion. Only the WB status mutations themselves stay strictly terminal.
+  const unserved = isWbBuyerUnserved(policyOrder);
+  const deliverable = !order.cancelledAt && chatReady && (!terminal || unserved);
   return {
     id: order.id,
     wbOrderId: order.wbOrderId,
@@ -184,18 +194,21 @@ function toDto(order: ListOrder): WbDeliveryOrderDto {
     activationCode,
     gateUrl: gateUrl(activationCode),
     fulfillment: order.internalFulfillment ?? null,
-    blockedReason: blockedReason(order, chatReady, terminal),
+    unserved,
+    blockedReason: blockedReason(order, chatReady, terminal, unserved),
     permissions: {
       requestCode: awaitingCode && !alreadyAsked,
       remindCode: awaitingCode && alreadyAsked,
       saveDeliveryCode: !terminal && chatReady && wbDeliveryCryptoReady(),
       issueGate: canIssueWbGate(policyOrder),
-      sendGate: !terminal && chatReady && order.gateState === "ISSUED" && Boolean(activationCode),
-      markGateSent: !terminal && ["ISSUED", "SENDING", "SEND_UNKNOWN"].includes(order.gateState) && Boolean(activationCode),
+      sendGate: deliverable && order.gateState === "ISSUED" && Boolean(activationCode),
+      markGateSent: !order.cancelledAt && ["ISSUED", "SENDING", "SEND_UNKNOWN"].includes(order.gateState) && Boolean(activationCode),
       confirm: !terminal && !order.lastErrorCode && !/confirm|deliver|sold|receive/i.test(order.supplierStatus),
       deliver: !terminal && !order.lastErrorCode && /confirm/i.test(order.supplierStatus),
       receive: canReceiveWbOrder(policyOrder),
-      sendMessage: !terminal && chatReady && !order.lastErrorCode,
+      // Support matters most exactly when an order has gone wrong, so replying
+      // stays available for as long as WB keeps the chat open.
+      sendMessage: !order.cancelledAt && chatReady && !order.lastErrorCode,
       simulateBuyerCode: order.isTest && !terminal && !secretIsLive,
     },
     chat: (chat?.events ?? []).map((event) => ({

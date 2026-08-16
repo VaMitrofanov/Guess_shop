@@ -2,6 +2,7 @@ import {
   canCaptureDeliveryCode,
   canIssueWbGate,
   canReceiveWbOrder,
+  isWbBuyerUnserved,
   shouldMarkCodeRequested,
   wbDeliverySecretIsLive,
   wbMarketplaceTerminalFlags,
@@ -80,6 +81,56 @@ describe("WB DBS fail-closed policy", () => {
     expect(shouldMarkCodeRequested("CODE_REQUESTED")).toBe(false);
     expect(shouldMarkCodeRequested("CODE_RECEIVED")).toBe(false);
     expect(shouldMarkCodeRequested("REQUEST_SEND_UNKNOWN")).toBe(false);
+  });
+
+  /** Regression for 16.08.2026: WB order 5507223980 was closed from the seller
+   * cabinet before the gate was issued. Completion settles the marketplace side
+   * only — the buyer had paid and held nothing. */
+  it("keeps the gate issuable when WB closed an order we never served", () => {
+    const closedUnserved = order({
+      completedAt: new Date(),
+      supplierStatus: "receive",
+      chatState: "CODE_RECEIVED",
+      hasLiveSecret: true,
+    });
+    expect(isWbBuyerUnserved(closedUnserved)).toBe(true);
+    expect(canIssueWbGate(closedUnserved)).toBe(true);
+    expect(wbDeliveryStage(closedUnserved)).toBe("attention");
+  });
+
+  it("treats an order we completed ourselves as finished, not unserved", () => {
+    // Our own receive purges the secret and the gate was already sent.
+    const served = order({
+      completedAt: new Date(),
+      supplierStatus: "receive",
+      chatState: "CODE_RECEIVED",
+      gateState: "SENT",
+      hasLiveSecret: false,
+    });
+    expect(isWbBuyerUnserved(served)).toBe(false);
+    expect(canIssueWbGate(served)).toBe(false);
+    expect(wbDeliveryStage(served)).toBe("complete");
+  });
+
+  it("never revives a cancelled order", () => {
+    const cancelled = order({
+      completedAt: new Date(),
+      cancelledAt: new Date(),
+      chatState: "CODE_RECEIVED",
+      hasLiveSecret: true,
+    });
+    expect(isWbBuyerUnserved(cancelled)).toBe(false);
+    expect(canIssueWbGate(cancelled)).toBe(false);
+    expect(wbDeliveryStage(cancelled)).toBe("cancelled");
+  });
+
+  it("still refuses receive on an order WB already closed", () => {
+    expect(canReceiveWbOrder(order({
+      completedAt: new Date(),
+      supplierStatus: "deliver",
+      gateState: "SENT",
+      hasLiveSecret: true,
+    }))).toBe(false);
   });
 
   it("prioritizes terminal and attention states", () => {

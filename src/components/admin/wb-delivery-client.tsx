@@ -289,7 +289,8 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
             </div>
 
             {selected.lastErrorCode && <div className={css.errorBanner}><AlertTriangle /><div><strong>Операция остановлена</strong><span>{selected.lastErrorCode}. Сначала синхронизируйте заказ и проверьте фактический статус в кабинете WB.</span></div></div>}
-            {!selected.lastErrorCode && selected.blockedReason && <div className={css.holdCard}><AlertTriangle /><div><strong>Действия по заказу недоступны</strong><span>{selected.blockedReason}</span></div></div>}
+            {selected.unserved && <div className={css.errorBanner}><AlertTriangle /><div><strong>Покупатель не получил код</strong><span>{selected.blockedReason}</span></div></div>}
+            {!selected.unserved && !selected.lastErrorCode && selected.blockedReason && <div className={css.holdCard}><AlertTriangle /><div><strong>Действия по заказу недоступны</strong><span>{selected.blockedReason}</span></div></div>}
 
             <div className={css.detailColumns}>
               <section className={css.controlPanel}>
@@ -302,7 +303,7 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
                   {selected.permissions.issueGate && <ActionCard icon={<KeyRound />} title="Выпустить персональный WB-гейт" text={`Номинал ${selected.denomination} R$ и связь с заказом будут зафиксированы навсегда.`} button="Выпустить код" busy={busy === "issue_gate"} onClick={() => void act("issue_gate")} />}
                   {selected.permissions.sendGate && <ActionCard icon={<Send />} title="Отправить ссылку и код" text="Покупатель получит готовую ссылку на гейт и свой 7-значный код." button="Отправить покупателю" busy={busy === "send_gate"} onClick={() => void act("send_gate")} />}
                   {selected.permissions.receive && <ActionCard icon={<PackageCheck />} title="Завершить выдачу на WB" text="Зашифрованный код будет отправлен в WB один раз и сразу удалён после успеха." button="Завершить заказ" danger busy={busy === "receive"} onClick={() => void act("receive")} />}
-                  {selected.stage === "complete" && <div className={css.doneCard}><CheckCircle2 /><div><strong>Заказ полностью завершён</strong><span>WB подтвердил выдачу, секретный код очищен.</span></div></div>}
+                  {selected.stage === "complete" && !selected.unserved && <div className={css.doneCard}><CheckCircle2 /><div><strong>Заказ полностью завершён</strong><span>WB подтвердил выдачу, секретный код очищен.</span></div></div>}
                   {selected.stage === "attention" && <div className={css.holdCard}><AlertTriangle /><div><strong>Нужна ручная сверка</strong><span>Не повторяйте последнее действие вслепую. Нажмите «Синхронизировать» и сверьте кабинет WB.</span></div></div>}
                 </div>
 
