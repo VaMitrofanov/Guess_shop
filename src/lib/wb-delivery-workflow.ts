@@ -80,7 +80,7 @@ export const WbDeliveryActionSchema = z.object({
     "receive",
   ]),
   orderId: z.string().min(1).max(80).optional(),
-  code: z.string().trim().regex(/^\d{5,6}$/).optional(),
+  code: z.string().trim().regex(/^\d{5,7}$/).optional(),
   message: z.string().trim().min(1).max(1_000).optional(),
 });
 

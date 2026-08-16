@@ -114,8 +114,7 @@ describe("WB DBS fail-closed policy", () => {
     expect(isWbBuyerUnserved(order({ ...base, gateState: "SENT" }))).toBe(false);
   });
 
-  it("treats an order we completed ourselves as finished, not unserved", () => {
-    // Our own receive purges the secret and the gate was already sent.
+  it("treats a delivered gate as finished, however the order was closed", () => {
     const served = order({
       completedAt: new Date(),
       supplierStatus: "receive",
@@ -126,6 +125,37 @@ describe("WB DBS fail-closed policy", () => {
     expect(isWbBuyerUnserved(served)).toBe(false);
     expect(canIssueWbGate(served)).toBe(false);
     expect(wbDeliveryStage(served)).toBe("complete");
+  });
+
+  /** Regression 17.08.2026: WB requires the seller to close the delivery, so
+   * order 5508218105 was closed with no delivery code ever captured. Tying the
+   * unserved flag to a live secret made the console call that buyer "served"
+   * and refuse to mint their gate. */
+  it("serves a buyer whose order closed without a delivery code", () => {
+    const closedNoCode = order({
+      completedAt: new Date(),
+      supplierStatus: "receive",
+      chatState: "CODE_REQUESTED",
+      gateState: "NOT_ISSUED",
+      hasLiveSecret: false,
+    });
+    expect(isWbBuyerUnserved(closedNoCode)).toBe(true);
+    expect(canIssueWbGate(closedNoCode)).toBe(true);
+    expect(wbDeliveryStage(closedNoCode)).toBe("attention");
+  });
+
+  /** Before the order closes the code is still the argument to our own receive
+   * call, so it stays a precondition. */
+  it("still requires the code while the order is open", () => {
+    const open = order({ chatState: "CODE_REQUESTED", hasLiveSecret: false });
+    expect(canIssueWbGate(open)).toBe(false);
+    expect(canIssueWbGate(order({ chatState: "CODE_RECEIVED", hasLiveSecret: true }))).toBe(true);
+  });
+
+  it("never mints a second gate for the same order", () => {
+    for (const gateState of ["ISSUED", "SENDING", "SENT", "SEND_UNKNOWN"]) {
+      expect(canIssueWbGate(order({ completedAt: new Date(), gateState }))).toBe(false);
+    }
   });
 
   it("never revives a cancelled order", () => {
@@ -150,8 +180,12 @@ describe("WB DBS fail-closed policy", () => {
   });
 
   it("prioritizes terminal and attention states", () => {
-    expect(wbDeliveryStage(order({ completedAt: new Date() }))).toBe("complete");
+    // A completed order only reads as done once the gate actually went out;
+    // closing the WB delivery is the seller's obligation, not proof of delivery.
+    expect(wbDeliveryStage(order({ completedAt: new Date(), gateState: "SENT" }))).toBe("complete");
+    expect(wbDeliveryStage(order({ completedAt: new Date() }))).toBe("attention");
     expect(wbDeliveryStage(order({ cancelledAt: new Date() }))).toBe("cancelled");
+    expect(wbDeliveryStage(order({ cancelledAt: new Date(), completedAt: new Date() }))).toBe("cancelled");
     expect(wbDeliveryStage(order({ lastErrorCode: "MISSING_DENOMINATION" }))).toBe("attention");
   });
 

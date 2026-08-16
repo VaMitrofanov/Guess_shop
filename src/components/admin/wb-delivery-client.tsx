@@ -315,8 +315,8 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
                 </div>
 
                 <div className={css.manualBlock}>
-                  <div><strong>Резервный ввод кода</strong><span>Если событие чата задержалось, введите 5–6 цифр вручную. После отправки поле очищается.</span></div>
-                  <div><input inputMode="numeric" autoComplete="off" maxLength={6} value={manualCode} onChange={(event) => setManualCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="5–6 цифр" aria-label="Код доставки WB" /><button disabled={!selected.permissions.saveDeliveryCode || manualCode.length < 5 || Boolean(busy)} onClick={() => void act("save_delivery_code", { code: manualCode })}>Сохранить безопасно</button></div>
+                  <div><strong>Резервный ввод кода</strong><span>Если событие чата задержалось, введите 5–7 цифр вручную. После отправки поле очищается.</span></div>
+                  <div><input inputMode="numeric" autoComplete="off" maxLength={7} value={manualCode} onChange={(event) => setManualCode(event.target.value.replace(/\D/g, "").slice(0, 7))} placeholder="5–7 цифр" aria-label="Код доставки WB" /><button disabled={!selected.permissions.saveDeliveryCode || manualCode.length < 5 || Boolean(busy)} onClick={() => void act("save_delivery_code", { code: manualCode })}>Сохранить безопасно</button></div>
                 </div>
 
                 <div className={css.providerActions}>

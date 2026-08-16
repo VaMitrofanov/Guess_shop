@@ -110,23 +110,22 @@ export function isWbBuyerUnserved(order: WbDeliveryPolicyOrder): boolean {
   return Boolean(
     order.completedAt &&
     !order.cancelledAt &&
-    // Only SENT means the buyer actually holds a code. Anything earlier —
-    // including a code we just minted — still leaves them empty-handed, so
-    // issuing the gate must not be what switches this off.
-    order.gateState !== "SENT" &&
-    order.hasLiveSecret,
+    // Only SENT means the buyer actually holds a code. Anything earlier — even
+    // a code we just minted — still leaves them empty-handed, so neither
+    // issuing the gate nor closing the WB order may switch this off.
+    order.gateState !== "SENT",
   );
 }
 
+/** The delivery code is not a licence to serve the buyer — it is the argument
+ * to our own `receive` call. Wildberries requires the seller to close the
+ * delivery, so once the order is closed the code has no remaining job and must
+ * not gate anything. Before that, we still need it, so it stays required. */
 export function canIssueWbGate(order: WbDeliveryPolicyOrder): boolean {
-  return Boolean(
-    !order.cancelledAt &&
-    !order.lastErrorCode &&
-    order.chatState === "CODE_RECEIVED" &&
-    order.denominationSnapshot &&
-    order.gateState === "NOT_ISSUED" &&
-    order.hasLiveSecret,
-  );
+  if (order.cancelledAt || order.lastErrorCode) return false;
+  if (!order.denominationSnapshot || order.gateState !== "NOT_ISSUED") return false;
+  if (order.completedAt) return true;
+  return order.chatState === "CODE_RECEIVED" && Boolean(order.hasLiveSecret);
 }
 
 export function canReceiveWbOrder(order: WbDeliveryPolicyOrder): boolean {
