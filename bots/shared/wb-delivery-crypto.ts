@@ -1,7 +1,10 @@
 import crypto from "node:crypto";
 
 const ENVELOPE_VERSION = "v1";
-const DELIVERY_CODE_RE = /(?<!\d)(\d(?:[\s-]?\d){4,5})(?!\d)/g;
+const DELIVERY_CODE_RE = /(?<!\d)(\d(?:[\s-]?\d){4,6})(?!\d)/g;
+/** The buyer naming it themselves ("код 7760778") removes the ambiguity that
+ * makes a bare five- or seven-digit run untrustworthy in prose. */
+const LABELLED_CODE_RE = /код\D{0,20}?(?<!\d)(\d(?:[\s-]?\d){4,6})(?!\d)/gi;
 const ACTIVATION_CODE_RE = /(код(?:\s+активации)?\s*[:—-]?\s*)([A-Z0-9]{7})(?![A-Z0-9])/gi;
 /** The gate link carries the same activation code as a query param, which the
  * prose pattern above cannot see. Without this the code would survive in the
@@ -67,18 +70,27 @@ export function wbSecretHmac(value: string, purpose: "delivery-code" | "reply-si
     .digest("hex");
 }
 
-/** WB prints a five- or six-digit delivery code next to the buyer's QR. Six
- * digits are specific enough to read out of any sentence; five digits collide
- * with order numbers and prices, so they only count when the buyer sent nothing
- * but the code. */
+/** WB has shipped delivery codes of five, six and seven digits, so length alone
+ * cannot decide what is a code. Context does:
+ *
+ *  - a message that is nothing but a number is unambiguous at any of those
+ *    lengths — the buyer was asked for a code and answered with one;
+ *  - inside a sentence, only six digits are specific enough to trust blindly;
+ *  - anything else needs the buyer to actually call it a code.
+ *
+ * Order numbers, prices and phone fragments all live in prose, which is exactly
+ * where this stays strict. */
 export function extractDeliveryCode(text: string): string | null {
+  const bare = text.replace(/[\s\-.,!?:;()"'«»]/g, "");
+  if (/^\d{5,7}$/.test(bare)) return bare;
+
+  LABELLED_CODE_RE.lastIndex = 0;
+  const labelled = LABELLED_CODE_RE.exec(text);
+  if (labelled) return labelled[1].replace(/\D/g, "");
+
   DELIVERY_CODE_RE.lastIndex = 0;
   const candidates = [...text.matchAll(DELIVERY_CODE_RE)].map((match) => match[1].replace(/\D/g, ""));
-  const sixDigit = candidates.find((code) => code.length === 6);
-  if (sixDigit) return sixDigit;
-  const fiveDigit = candidates.find((code) => code.length === 5);
-  if (fiveDigit && text.replace(/[\s\-.,!?:;()]/g, "") === fiveDigit) return fiveDigit;
-  return null;
+  return candidates.find((code) => code.length === 6) ?? null;
 }
 
 /** Redact before DB persistence. Our seven-character activation code must not

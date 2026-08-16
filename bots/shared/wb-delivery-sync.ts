@@ -422,20 +422,27 @@ async function backfillDeliveryCodes(db: Db, out: WbDeliverySyncResult) {
     take: 50,
   });
   for (const order of stuck) {
+    // Deliberately ignores the stored `containsDeliveryCode` flag: it caches a
+    // decision made by whichever extractor ran at insert time, so a message we
+    // once failed to recognise would stay invisible forever. Re-reading the text
+    // is what lets an extractor fix reach codes that already arrived.
     const events = await db.wbBuyerChatEvent.findMany({
-      where: {
-        marketplaceOrderId: order.id,
-        containsDeliveryCode: true,
-        sentAt: { gte: since },
-      },
+      where: { marketplaceOrderId: order.id, sentAt: { gte: since } },
       orderBy: { sentAt: "desc" },
-      take: 5,
+      take: 20,
     });
     for (const event of events) {
+      if (!isBuyerSender(event.sender)) continue;
       const code = extractDeliveryCode(event.textRedacted ?? "");
       if (!code) continue;
       const captured = await captureDeliveryCode(db, order, code, event.sentAt, `delivery-code:${event.wbEventId}`, event.chatId);
-      if (captured) out.capturedCodes += 1;
+      if (captured) {
+        out.capturedCodes += 1;
+        await db.wbBuyerChatEvent.update({
+          where: { id: event.id },
+          data: { containsDeliveryCode: true },
+        }).catch(() => {});
+      }
       break;
     }
   }

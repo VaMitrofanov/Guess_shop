@@ -47,11 +47,29 @@ describe("WB delivery secret boundary", () => {
     expect(extractDeliveryCode("нет цифр")).toBeNull();
   });
 
-  it("accepts a five-digit code only when the buyer sent nothing else", () => {
+  /** WB has shipped five-, six- and seven-digit codes. A message that is only a
+   * number answers the question we just asked, whatever its length. */
+  it("accepts a bare number of any WB code length", () => {
     expect(extractDeliveryCode("12345")).toBe("12345");
     expect(extractDeliveryCode(" 12345. ")).toBe("12345");
+    // Regression 16.08.2026: order 5508218105, buyer replied with seven digits
+    // and the code was silently dropped.
+    expect(extractDeliveryCode("7760778")).toBe("7760778");
+    expect(extractDeliveryCode("776-07-78")).toBe("7760778");
+    expect(extractDeliveryCode("1234")).toBeNull();
+    expect(extractDeliveryCode("12345678")).toBeNull();
+  });
+
+  it("stays strict about loose numbers inside a sentence", () => {
     expect(extractDeliveryCode("мой заказ 12345 когда приедет?")).toBeNull();
-    expect(extractDeliveryCode("Код 12345 и заказ 987654")).toBe("987654");
+    expect(extractDeliveryCode("жду уже 7760778 секунд")).toBeNull();
+    expect(extractDeliveryCode("Код 12345 и заказ 987654")).toBe("12345");
+  });
+
+  it("trusts any WB length when the buyer names it a code", () => {
+    expect(extractDeliveryCode("код 7760778")).toBe("7760778");
+    expect(extractDeliveryCode("Код доставки: 77607")).toBe("77607");
+    expect(extractDeliveryCode("вот код — 776 07 78, спасибо")).toBe("7760778");
   });
 
   /** Owner decision 15.08.2026: the delivery code stays readable in the chat
