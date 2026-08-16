@@ -69,6 +69,7 @@ export type WbDeliveryOrderDto = {
     issueGate: boolean;
     sendGate: boolean;
     markGateSent: boolean;
+    markServedExternally: boolean;
     confirm: boolean;
     deliver: boolean;
     receive: boolean;
@@ -120,6 +121,7 @@ export type WbDeliveryAction =
   | "issue_gate"
   | "send_gate"
   | "mark_gate_sent"
+  | "mark_served_externally"
   | "send_message"
   | "confirm"
   | "deliver"

@@ -38,6 +38,7 @@ const FILTERS = [
   ["active", "В работе"],
   ["attention", "Внимание"],
   ["ready", "Можно завершить"],
+  ["in_bot", "В боте"],
   ["complete", "Готово"],
   ["all", "Все"],
 ] as const;
@@ -51,6 +52,7 @@ const STAGE_LABEL: Record<WbDeliveryOrderDto["stage"], string> = {
   gate_ready: "Гейт готов",
   link_sent: "Ссылка отправлена",
   ready_receive: "Можно завершить",
+  in_bot: "Оформляется в боте",
   complete: "Завершён",
   cancelled: "Отменён",
 };
@@ -72,6 +74,7 @@ const AUDIT_LABEL: Record<string, string> = {
   CHAT_SEND_FAILED: "WB отклонил отправку",
   WB_STATUS_MUTATION_FAILED: "WB отклонил смену статуса",
   DELIVERY_CODE_EXPIRED: "Код получения истёк",
+  GATE_SERVED_EXTERNALLY: "Отмечен как выданный вне системы",
 };
 
 function money(value: number | null) {
@@ -87,9 +90,10 @@ function dateTime(value: string | null) {
 function filterOrder(order: WbDeliveryOrderDto, filter: typeof FILTERS[number][0]) {
   if (filter === "all") return true;
   if (filter === "complete") return order.stage === "complete" || order.stage === "cancelled";
+  if (filter === "in_bot") return order.stage === "in_bot";
   if (filter === "attention") return order.stage === "attention";
   if (filter === "ready") return order.stage === "ready_receive";
-  return !order.completedAt && !order.cancelledAt;
+  return (!order.completedAt && !order.cancelledAt) || order.stage === "in_bot";
 }
 
 /** Both status buttons are gated on what WB itself reports, so an operator who
@@ -322,6 +326,7 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
                 <div className={css.providerActions}>
                   <button title={statusHint(selected, "confirm")} disabled={!selected.permissions.confirm || Boolean(busy)} onClick={() => void act("confirm")}><Check /> Подтвердить сборку</button>
                   <button title={statusHint(selected, "deliver")} disabled={!selected.permissions.deliver || Boolean(busy)} onClick={() => void act("deliver")}><Truck /> Передать в доставку</button>
+                  {selected.permissions.markServedExternally && <button title="Заказ был выдан покупателю другим способом или закрыт до появления этого раздела" disabled={Boolean(busy)} onClick={() => window.confirm("Покупатель по этому заказу уже получил свой товар вне этой системы?") && void act("mark_served_externally")}><Check /> Выдано вне системы</button>}
                   {selected.permissions.markGateSent
                     ? <button disabled={Boolean(busy)} onClick={() => window.confirm("Вы действительно отправили покупателю ссылку и код вручную в кабинете WB?") && void act("mark_gate_sent")}><Send /> Отметить отправленным</button>
                     : <a href={selected.gateUrl ?? "#"} target="_blank" aria-disabled={!selected.gateUrl}><Link2 /> Проверить гейт <ArrowUpRight /></a>}

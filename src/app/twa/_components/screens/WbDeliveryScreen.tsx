@@ -33,6 +33,7 @@ const LABEL: Record<WbDeliveryOrderDto["stage"], string> = {
   gate_ready: "Гейт готов",
   link_sent: "Ссылка отправлена",
   ready_receive: "Можно завершить",
+  in_bot: "В нашем боте",
   complete: "Завершён",
   cancelled: "Отменён",
 };
@@ -141,9 +142,9 @@ export default function WbDeliveryScreen({ token }: { token: string }) {
 
   const orders = useMemo(() => {
     const all = data?.orders ?? [];
-    if (tab === "done") return all.filter((order) => order.completedAt || order.cancelledAt);
+    if (tab === "done") return all.filter((order) => (order.completedAt || order.cancelledAt) && order.stage !== "in_bot");
     if (tab === "urgent") return all.filter((order) => ["attention", "code_received", "gate_ready", "ready_receive"].includes(order.stage));
-    return all.filter((order) => !order.completedAt && !order.cancelledAt);
+    return all.filter((order) => (!order.completedAt && !order.cancelledAt) || order.stage === "in_bot");
   }, [data?.orders, tab]);
   const selected = data?.orders.find((order) => order.id === selectedId) ?? null;
 
@@ -216,7 +217,7 @@ function OrderDetail({ order, data, busy, manualCode, message, setManualCode, se
     {next && <section className={`${css.nextCard} ${next.action === "receive" ? css.nextDanger : ""}`}><span>{next.icon}</span><div><strong>{next.title}</strong><p>{next.text}</p><button disabled={Boolean(busy)} onClick={() => onAction(next.action)}>{busy === next.action ? <Loader2 className={css.spin} /> : <ChevronRight />}{next.button}</button></div></section>}
     {order.stage === "complete" && !order.unserved && <div className={css.completeCard}><CheckCircle2 /><div><strong>Заказ завершён</strong><span>Код получения удалён, цифровая выдача продолжается по обычному сценарию.</span></div></div>}
     <section className={css.infoGrid}><div><span>Код получения</span><strong>{order.deliveryCode.valid ? (order.deliveryCode.value ?? "Получен") : order.deliveryCode.consumedAt ? "Удалён" : "Не получен"}</strong><small>{order.deliveryCode.expiresAt ? `до ${dateTime(order.deliveryCode.expiresAt)}` : "без секрета"}</small></div><div><span>Код гейта</span><strong>{order.activationCode ?? "Не выпущен"}</strong><small>{order.gateState}</small></div><div><span>Roblox-этап</span><strong>{order.fulfillment?.status ?? "Не начат"}</strong><small>{order.fulfillment?.robloxUsername ?? "нет ника"}</small></div><div><span>Доставка</span><strong>{order.deliveryTo ? dateTime(order.deliveryTo) : "Нет окна"}</strong><small>DBS courier</small></div></section>
-    <section className={css.statusActions}><button disabled={!order.permissions.confirm || Boolean(busy)} onClick={() => onAction("confirm")}><Check /> Сборка</button><button disabled={!order.permissions.deliver || Boolean(busy)} onClick={() => onAction("deliver")}><Truck /> В доставку</button>{order.permissions.markGateSent && <button disabled={Boolean(busy)} onClick={() => window.confirm("Ссылка и код действительно отправлены вручную в кабинете WB?") && onAction("mark_gate_sent")}><Send /> Гейт отправлен вручную</button>}</section>
+    <section className={css.statusActions}><button disabled={!order.permissions.confirm || Boolean(busy)} onClick={() => onAction("confirm")}><Check /> Сборка</button><button disabled={!order.permissions.deliver || Boolean(busy)} onClick={() => onAction("deliver")}><Truck /> В доставку</button>{order.permissions.markServedExternally && <button disabled={Boolean(busy)} onClick={() => window.confirm("Покупатель уже получил товар вне этой системы?") && onAction("mark_served_externally")}><Check /> Выдано вне системы</button>}{order.permissions.markGateSent && <button disabled={Boolean(busy)} onClick={() => window.confirm("Ссылка и код действительно отправлены вручную в кабинете WB?") && onAction("mark_gate_sent")}><Send /> Гейт отправлен вручную</button>}</section>
     <section className={css.mobileManual}><div><strong>Резервный ввод 5–7 цифр</strong><small>Код отобразится после сохранения</small></div><div><input value={manualCode} onChange={(event) => setManualCode(event.target.value.replace(/\D/g, "").slice(0,7))} inputMode="numeric" autoComplete="off" maxLength={7} placeholder="123456" /><button disabled={!order.permissions.saveDeliveryCode || manualCode.length < 5 || Boolean(busy)} onClick={() => onAction("save_delivery_code", { code: manualCode })}>Сохранить</button></div></section>
     <section className={css.mobileChat}><header><div><MessageCircle /><span><strong>Чат покупателя</strong><small>{order.chatReady ? "автообновление каждые 5 с" : "ждём чат · автообновление включено"}</small></span></div><b>{order.chat.length}</b></header><div className={css.mobileMessages}>{[...order.chat].reverse().map((event) => <div key={event.id} className={event.direction === "seller" ? css.mobileOut : css.mobileIn}><p>{event.text || "Событие чата"}</p><span>{event.containsDeliveryCode && <ShieldCheck />} {dateTime(event.sentAt)}</span></div>)}</div><div className={css.mobileComposer}><textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={2} placeholder="Сообщение покупателю…" /><button disabled={!order.permissions.sendMessage || !message.trim() || Boolean(busy)} onClick={() => onAction("send_message", { message })}><Send /></button></div></section>
     <section className={css.mobileAudit}><strong>Хронология</strong>{order.audit.slice(0,8).map((event) => <div key={event.id}><span><Check /></span><p>{event.type}<small>{dateTime(event.createdAt)}</small></p></div>)}</section>

@@ -121,6 +121,7 @@ describe("WB DBS fail-closed policy", () => {
       chatState: "CODE_RECEIVED",
       gateState: "SENT",
       hasLiveSecret: false,
+      internalStatus: "COMPLETED",
     });
     expect(isWbBuyerUnserved(served)).toBe(false);
     expect(canIssueWbGate(served)).toBe(false);
@@ -150,6 +151,31 @@ describe("WB DBS fail-closed policy", () => {
     const open = order({ chatState: "CODE_REQUESTED", hasLiveSecret: false });
     expect(canIssueWbGate(open)).toBe(false);
     expect(canIssueWbGate(order({ chatState: "CODE_RECEIVED", hasLiveSecret: true }))).toBe(true);
+  });
+
+  /** Orders settled before this system existed must be closable without
+   * pretending a code was minted, or they flag forever. */
+  it("closes the obligation when an operator records an outside handover", () => {
+    const settled = order({
+      completedAt: new Date(),
+      supplierStatus: "receive",
+      gateState: "SERVED_EXTERNALLY",
+    });
+    expect(isWbBuyerUnserved(settled)).toBe(false);
+    expect(canIssueWbGate(settled)).toBe(false);
+    expect(wbDeliveryStage(settled)).toBe("complete");
+  });
+
+  /** The WB side can be closed while our own funnel is still running: the buyer
+   * still has to activate the code, give a nick and confirm a game pass. */
+  it("shows a delivered gate as in-bot until our own order finishes", () => {
+    const sent = order({ completedAt: new Date(), supplierStatus: "receive", gateState: "SENT" });
+    expect(wbDeliveryStage(sent)).toBe("in_bot");
+    expect(wbDeliveryStage({ ...sent, internalStatus: "AWAITING_GAMEPASS" })).toBe("in_bot");
+    expect(wbDeliveryStage({ ...sent, internalStatus: "PENDING" })).toBe("in_bot");
+    expect(wbDeliveryStage({ ...sent, internalStatus: "COMPLETED" })).toBe("complete");
+    expect(wbDeliveryStage({ ...sent, internalStatus: "REJECTED" })).toBe("complete");
+    expect(isWbBuyerUnserved(sent)).toBe(false);
   });
 
   it("never mints a second gate for the same order", () => {
@@ -182,7 +208,9 @@ describe("WB DBS fail-closed policy", () => {
   it("prioritizes terminal and attention states", () => {
     // A completed order only reads as done once the gate actually went out;
     // closing the WB delivery is the seller's obligation, not proof of delivery.
-    expect(wbDeliveryStage(order({ completedAt: new Date(), gateState: "SENT" }))).toBe("complete");
+    expect(wbDeliveryStage(order({ completedAt: new Date(), gateState: "SENT", internalStatus: "COMPLETED" }))).toBe("complete");
+    // Gate out, buyer not through our funnel yet — work in progress, not done.
+    expect(wbDeliveryStage(order({ completedAt: new Date(), gateState: "SENT" }))).toBe("in_bot");
     expect(wbDeliveryStage(order({ completedAt: new Date() }))).toBe("attention");
     expect(wbDeliveryStage(order({ cancelledAt: new Date() }))).toBe("cancelled");
     expect(wbDeliveryStage(order({ cancelledAt: new Date(), completedAt: new Date() }))).toBe("cancelled");

@@ -340,6 +340,10 @@ enum WbMarketplaceGateState {
   SENT
   SEND_UNKNOWN
   REVOKED
+  /// Settled outside this system — an order fulfilled before the DBS gate
+  /// existed, or handed over by other means. Closes the obligation without
+  /// pretending a code was minted and sent.
+  SERVED_EXTERNALLY
 }
 
 enum PartnerTaskStatus {

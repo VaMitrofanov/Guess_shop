@@ -31,6 +31,7 @@ import {
   canReceiveWbOrder,
   isWbBuyerUnserved,
   wbDeliverySecretIsLive,
+  wbGateDelivered,
   wbDeliveryStage,
 } from "../../bots/shared/wb-delivery-policy";
 import { runWbDeliverySync } from "../../bots/shared/wb-delivery-sync";
@@ -74,6 +75,7 @@ export const WbDeliveryActionSchema = z.object({
     "issue_gate",
     "send_gate",
     "mark_gate_sent",
+    "mark_served_externally",
     "send_message",
     "confirm",
     "deliver",
@@ -142,7 +144,11 @@ function blockedReason(order: ListOrder, chatReady: boolean, terminal: boolean, 
 
 function toDto(order: ListOrder): WbDeliveryOrderDto {
   const secretIsLive = liveSecret(order.deliverySecret);
-  const policyOrder = { ...order, hasLiveSecret: secretIsLive };
+  const policyOrder = {
+    ...order,
+    hasLiveSecret: secretIsLive,
+    internalStatus: order.internalFulfillment?.status ?? null,
+  };
   const chat = order.chats?.[0] ?? null;
   const activationCode = order.wbCode?.code ?? null;
   const stage = wbDeliveryStage(policyOrder);
@@ -202,6 +208,9 @@ function toDto(order: ListOrder): WbDeliveryOrderDto {
       issueGate: canIssueWbGate(policyOrder),
       sendGate: deliverable && order.gateState === "ISSUED" && Boolean(activationCode),
       markGateSent: !order.cancelledAt && ["ISSUED", "SENDING", "SEND_UNKNOWN"].includes(order.gateState) && Boolean(activationCode),
+      // Escape hatch for orders settled before this system existed, or by
+      // other means: closes the obligation without faking a minted code.
+      markServedExternally: unserved,
       confirm: !terminal && !order.lastErrorCode && !/confirm|deliver|sold|receive/i.test(order.supplierStatus),
       deliver: !terminal && !order.lastErrorCode && /confirm/i.test(order.supplierStatus),
       receive: canReceiveWbOrder(policyOrder),
@@ -694,6 +703,18 @@ export async function performWbDeliveryAction(
     await db.wbMarketplaceOrder.update({ where: { id: order.id }, data: { gateState: "SENT", lastErrorCode: null } });
     await audit(order.id, "GATE_LINK_SENT", actor, { isTest: order.isTest });
     return { ok: true, message: "Ссылка и код отправлены покупателю", orderId: order.id };
+  }
+  if (input.action === "mark_served_externally") {
+    if (wbGateDelivered(order.gateState)) {
+      throw new WbDeliveryWorkflowError("По заказу уже отмечена выдача", 409, "ALREADY_DELIVERED");
+    }
+    if (order.cancelledAt) throw new WbDeliveryWorkflowError("Заказ отменён", 409, "ORDER_CANCELLED");
+    await db.wbMarketplaceOrder.update({
+      where: { id: order.id },
+      data: { gateState: "SERVED_EXTERNALLY", lastErrorCode: null },
+    });
+    await audit(order.id, "GATE_SERVED_EXTERNALLY", actor, { isTest: order.isTest });
+    return { ok: true, message: "Заказ закрыт как выданный вне системы", orderId: order.id };
   }
   if (input.action === "mark_gate_sent") {
     if (!order.wbCode || !["ISSUED", "SENDING", "SEND_UNKNOWN"].includes(order.gateState)) {
