@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { generateWbActivationCode } from "./wb-activation-code";
+import { wbGateMessage } from "./wb-gate-link";
 import {
   fetchBuyerChatEvents,
   fetchBuyerChats,
@@ -273,15 +274,6 @@ function isBuyerSender(sender: string) {
 
 const GUIDE_ORIGIN = (process.env.NEXT_PUBLIC_APP_URL || "https://robloxbank.ru").replace(/\/$/, "");
 
-function gateMessage(code: string) {
-  return [
-    "Спасибо, код доставки получен. Теперь заберите товар через наш защищённый WB-гейт:",
-    `${GUIDE_ORIGIN}/guide?source=wb&skip=1`,
-    `Ваш код активации: ${code}`,
-    "Дальше выберите Telegram или VK, вступите в группу и следуйте инструкции по Roblox.",
-  ].join("\n\n");
-}
-
 async function tryAutoGate(
   db: Db,
   orderId: string,
@@ -331,7 +323,7 @@ async function tryAutoGate(
   try {
     const replySign = decryptWbSecret(chat.replySignEncrypted, "reply-sign");
     if (!order.isTest) {
-      await sendBuyerChatMessage(replySign, gateMessage(activationCode));
+      await sendBuyerChatMessage(replySign, wbGateMessage(activationCode, order.denominationSnapshot, GUIDE_ORIGIN));
     }
     await db.wbMarketplaceOrder.update({
       where: { id: orderId },

@@ -3,6 +3,10 @@ import crypto from "node:crypto";
 const ENVELOPE_VERSION = "v1";
 const DELIVERY_CODE_RE = /(?<!\d)(\d(?:[\s-]?\d){4,5})(?!\d)/g;
 const ACTIVATION_CODE_RE = /(код(?:\s+активации)?\s*[:—-]?\s*)([A-Z0-9]{7})(?![A-Z0-9])/gi;
+/** The gate link carries the same activation code as a query param, which the
+ * prose pattern above cannot see. Without this the code would survive in the
+ * stored transcript inside the URL. */
+const ACTIVATION_CODE_URL_RE = /(\bcode=)([A-Z0-9]{7})(?![A-Z0-9])/gi;
 
 function decodeKey(raw = process.env.WB_DELIVERY_ENCRYPTION_KEY ?? ""): Buffer {
   const value = raw.trim().replace(/^['"`]|['"`]$/g, "");
@@ -82,6 +86,7 @@ export function extractDeliveryCode(text: string): string | null {
 export function redactWbChatText(text: string): string {
   return text
     .replace(ACTIVATION_CODE_RE, (_whole, prefix: string) => `${prefix}•••••••`)
+    .replace(ACTIVATION_CODE_URL_RE, (_whole, prefix: string) => `${prefix}•••••••`)
     .slice(0, 2_000);
 }
 

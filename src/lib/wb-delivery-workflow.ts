@@ -35,6 +35,7 @@ import {
 } from "../../bots/shared/wb-delivery-policy";
 import { runWbDeliverySync } from "../../bots/shared/wb-delivery-sync";
 import { generateWbActivationCode } from "../../bots/shared/wb-activation-code";
+import { wbGateMessage, wbGateUrl } from "../../bots/shared/wb-gate-link";
 
 const db = prisma;
 const GUIDE_ORIGIN = (process.env.NEXT_PUBLIC_APP_URL || "https://robloxbank.ru").replace(/\/$/, "");
@@ -108,9 +109,7 @@ function liveSecret(secret: ActionOrder["deliverySecret"]) {
 }
 
 function gateUrl(code: string | null | undefined) {
-  return code
-    ? `${GUIDE_ORIGIN}/guide?source=wb&skip=1`
-    : null;
+  return code ? wbGateUrl(code, GUIDE_ORIGIN) : null;
 }
 
 function direction(sender: string): "buyer" | "seller" | "system" {
@@ -453,14 +452,6 @@ function requestCodeMessage() {
   ].join("\n");
 }
 
-function gateMessage(code: string) {
-  return [
-    "Спасибо, код доставки получен. Теперь заберите товар через наш защищённый WB-гейт:",
-    gateUrl(code)!,
-    `Ваш код активации: ${code}`,
-    "Дальше выберите Telegram или VK, вступите в группу и следуйте инструкции по Roblox.",
-  ].join("\n\n");
-}
 
 async function createUniqueCode(tx: Prisma.TransactionClient, denomination: number, isTest: boolean) {
   for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -706,7 +697,12 @@ export async function performWbDeliveryAction(
       throw new WbDeliveryWorkflowError("Отправка уже выполняется другим оператором", 409, "GATE_SEND_CONFLICT");
     }
     await audit(order.id, "GATE_SEND_STARTED", actor, { isTest: order.isTest });
-    await sendText(order, gateMessage(order.wbCode.code), actor, "gate");
+    await sendText(
+      order,
+      wbGateMessage(order.wbCode.code, order.denominationSnapshot, GUIDE_ORIGIN),
+      actor,
+      "gate",
+    );
     await db.wbMarketplaceOrder.update({ where: { id: order.id }, data: { gateState: "SENT", lastErrorCode: null } });
     await audit(order.id, "GATE_LINK_SENT", actor, { isTest: order.isTest });
     return { ok: true, message: "Ссылка и код отправлены покупателю", orderId: order.id };
