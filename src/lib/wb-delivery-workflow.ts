@@ -67,11 +67,9 @@ type ActionOrder = Prisma.WbMarketplaceOrderGetPayload<{ include: typeof actionO
 export const WbDeliveryActionSchema = z.object({
   action: z.enum([
     "sync",
-    "create_demo",
     "request_code",
     "remind_code",
     "save_delivery_code",
-    "simulate_buyer_code",
     "issue_gate",
     "send_gate",
     "mark_gate_sent",
@@ -179,7 +177,6 @@ function toDto(order: ListOrder): WbDeliveryOrderDto {
     gateState: order.gateState,
     stage,
     lastErrorCode: order.lastErrorCode,
-    isTest: order.isTest,
     firstSeenAt: order.firstSeenAt.toISOString(),
     updatedAt: order.updatedAt.toISOString(),
     completedAt: iso(order.completedAt),
@@ -217,7 +214,6 @@ function toDto(order: ListOrder): WbDeliveryOrderDto {
       // Support matters most exactly when an order has gone wrong, so replying
       // stays available for as long as WB keeps the chat open.
       sendMessage: !order.cancelledAt && chatReady && !order.lastErrorCode,
-      simulateBuyerCode: order.isTest && !terminal && !secretIsLive,
     },
     chat: (chat?.events ?? []).map((event) => ({
       id: event.id,
@@ -241,6 +237,9 @@ function toDto(order: ListOrder): WbDeliveryOrderDto {
 
 async function loadOrders() {
   const orders = await db.wbMarketplaceOrder.findMany({
+    // Synthetic rows bypass both live flags and the WB chat entirely, so they
+    // prove nothing about the real flow while sitting next to real money.
+    where: { isTest: false },
     orderBy: [{ completedAt: "asc" }, { cancelledAt: "asc" }, { updatedAt: "desc" }],
     take: 150,
     include: {
@@ -469,50 +468,6 @@ async function createUniqueCode(tx: Prisma.TransactionClient, denomination: numb
   throw new WbDeliveryWorkflowError("Не удалось выпустить уникальный код", 503, "CODE_EXHAUSTED");
 }
 
-async function createDemo(actor: string): Promise<WbDeliveryActionResponse> {
-  const product = await db.wbProductCost.findFirst({
-    where: { denomination: { not: null } },
-    orderBy: { updatedAt: "desc" },
-  });
-  const suffix = crypto.randomUUID().slice(0, 8);
-  const now = new Date();
-  const order = await db.wbMarketplaceOrder.create({
-    data: {
-      wbOrderId: `DEMO-${suffix}`,
-      rid: `demo-rid-${suffix}`,
-      nmId: product?.nmID ?? 0,
-      vendorCode: product?.vendorCode ?? "DEMO-DBS",
-      denominationSnapshot: product?.denomination ?? 500,
-      priceKopecks: 149_900,
-      finalPriceKopecks: 149_900,
-      deliveryFrom: now,
-      deliveryTo: new Date(now.getTime() + 2 * 60 * 60 * 1_000),
-      supplierStatus: "new",
-      wbStatus: "waiting",
-      chatState: "READY",
-      isTest: true,
-    },
-  });
-  const chatId = `demo-chat-${suffix}`;
-  await db.wbBuyerChat.create({
-    data: { chatId, marketplaceOrderId: order.id, lastEventAt: now },
-  });
-  await db.wbBuyerChatEvent.create({
-    data: {
-      wbEventId: `demo-event-${suffix}`,
-      chatId,
-      marketplaceOrderId: order.id,
-      eventType: "message",
-      sender: "buyer",
-      textRedacted: "Здравствуйте! Подскажите, как получить заказ?",
-      sentAt: now,
-      attachmentsMeta: {},
-    },
-  });
-  await audit(order.id, "DEMO_CREATED", actor, { safe: true });
-  return { ok: true, message: "Тестовый DBS-заказ создан", orderId: order.id };
-}
-
 async function saveDeliveryCode(order: ActionOrder, code: string, actor: string, source: "manual" | "demo") {
   requireCrypto();
   if (order.completedAt || order.cancelledAt) {
@@ -630,7 +585,6 @@ export async function performWbDeliveryAction(
     if (sync.errorCode) throw new WbDeliveryWorkflowError(`Синхронизация остановлена: ${sync.errorCode}`, 502, sync.errorCode);
     return { ok: true, message: "Данные WB синхронизированы", sync };
   }
-  if (input.action === "create_demo") return createDemo(actor);
 
   const order = await getOrder(input.orderId);
   if (input.action === "request_code" || input.action === "remind_code") {
@@ -653,12 +607,6 @@ export async function performWbDeliveryAction(
     if (!input.code) throw new WbDeliveryWorkflowError("Введите 6-значный код", 400, "CODE_REQUIRED");
     await saveDeliveryCode(order, input.code, actor, "manual");
     return { ok: true, message: "Код доставки сохранён и скрыт", orderId: order.id };
-  }
-  if (input.action === "simulate_buyer_code") {
-    if (!order.isTest) throw new WbDeliveryWorkflowError("Имитация доступна только тестовому заказу", 409, "LIVE_ORDER_FORBIDDEN");
-    const code = String(crypto.randomInt(100_000, 1_000_000));
-    await saveDeliveryCode(order, code, actor, "demo");
-    return { ok: true, message: "Тестовый покупатель прислал код", orderId: order.id };
   }
   if (input.action === "issue_gate") {
     if (!canIssueWbGate({ ...order, hasLiveSecret: liveSecret(order.deliverySecret) })) {

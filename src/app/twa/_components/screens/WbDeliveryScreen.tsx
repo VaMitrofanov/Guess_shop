@@ -15,7 +15,6 @@ import {
   RefreshCw,
   Send,
   ShieldCheck,
-  Sparkles,
   Truck,
 } from "lucide-react";
 import { useVisiblePolling } from "@/hooks/useVisiblePolling";
@@ -112,7 +111,7 @@ export default function WbDeliveryScreen({ token }: { token: string }) {
   useVisiblePolling(pollSelected, 5_000, Boolean(selectedId));
 
   async function act(action: WbDeliveryAction, order: WbDeliveryOrderDto | null, extra: Record<string, unknown> = {}) {
-    if (["confirm", "deliver", "receive"].includes(action) && order && !order.isTest) {
+    if (["confirm", "deliver", "receive"].includes(action) && order) {
       const label = action === "receive" ? "завершить реальный заказ кодом покупателя" : action === "deliver" ? "передать реальный заказ в доставку" : "подтвердить сборку реального заказа";
       if (!window.confirm(`${label}?`)) return;
     }
@@ -165,16 +164,15 @@ export default function WbDeliveryScreen({ token }: { token: string }) {
 
       <section className={css.toolbar}>
         <div>{([ ["urgent", "Срочные"], ["active", "В работе"], ["done", "Готово"] ] as const).map(([id,label]) => <button key={id} className={tab === id ? css.tabActive : ""} onClick={() => { haptic.select(); setTab(id); }}>{label}{id === "urgent" && data.metrics.attention + data.metrics.codeReceived + data.metrics.readyReceive > 0 ? <b>{data.metrics.attention + data.metrics.codeReceived + data.metrics.readyReceive}</b> : null}</button>)}</div>
-        <button className={css.demoButton} onClick={() => void act("create_demo", null)} disabled={Boolean(busy)}><Sparkles /> Тест</button>
       </section>
 
       <div className={css.orderList}>
         {orders.map((order) => <button type="button" key={order.id} className={`${css.orderCard} ${css[`stage_${order.stage}`]}`} onClick={() => { haptic.impact("light"); setSelectedId(order.id); }}>
-          <div className={css.cardTop}><span>{order.isTest && <Sparkles />} {LABEL[order.stage]}</span><time>{dateTime(order.updatedAt)}</time></div>
+          <div className={css.cardTop}><span>{LABEL[order.stage]}</span><time>{dateTime(order.updatedAt)}</time></div>
           <div className={css.cardMain}><span className={css.cardIcon}>{order.stage === "ready_receive" ? <PackageCheck /> : order.stage === "code_received" ? <KeyRound /> : <Truck />}</span><div><strong>WB #{order.wbOrderId}</strong><p>{order.denomination ? `${order.denomination.toLocaleString("ru-RU")} R$` : "нет номинала"} · {money(order.finalPriceKopecks)}</p></div><ChevronRight /></div>
           <div className={css.cardFooter}><span><MessageCircle /> {order.chatReady ? "чат открыт" : "ждём чат"}</span><span><Clock3 /> {order.deliveryTo ? `до ${dateTime(order.deliveryTo)}` : "без окна"}</span></div>
         </button>)}
-        {!orders.length && <div className={css.empty}><Truck /><strong>{tab === "urgent" ? "Срочных заказов нет" : "В этой очереди пусто"}</strong><span>Создайте тестовый DBS-заказ, чтобы пройти весь сценарий.</span><button onClick={() => void act("create_demo", null)}><Sparkles /> Создать тест</button></div>}
+        {!orders.length && <div className={css.empty}><Truck /><strong>{tab === "urgent" ? "Срочных заказов нет" : "В этой очереди пусто"}</strong><span>Здесь только реальные заказы WB.</span></div>}
       </div>
     </div>
   );
@@ -195,9 +193,7 @@ function OrderDetail({ order, data, busy, manualCode, message, setManualCode, se
     ? { action: "request_code" as const, icon: <MessageCircle />, title: "Запросить код доставки", text: "Покупатель получит инструкцию в чат WB", button: "Отправить инструкцию" }
     : order.permissions.remindCode
       ? { action: "remind_code" as const, icon: <Clock3 />, title: "Ждём код покупателя", text: "Запрос уже отправлен, код подхватится сам", button: "Напомнить о коде" }
-    : order.permissions.simulateBuyerCode
-      ? { action: "simulate_buyer_code" as const, icon: <Sparkles />, title: "Ответ тестового покупателя", text: "Сымитируем безопасное получение 6 цифр", button: "Покупатель прислал код" }
-      : order.permissions.issueGate
+    : order.permissions.issueGate
         ? { action: "issue_gate" as const, icon: <KeyRound />, title: "Выпустить WB-гейт", text: `Персональный код на ${order.denomination} R$`, button: "Выпустить код" }
         : order.permissions.sendGate
           ? { action: "send_gate" as const, icon: <Send />, title: "Отправить гейт", text: "Ссылка и код уйдут в чат покупателя", button: "Отправить покупателю" }
@@ -207,7 +203,7 @@ function OrderDetail({ order, data, busy, manualCode, message, setManualCode, se
   return <div className={css.detailScreen}>
     <button type="button" className={css.back} onClick={onBack}><ChevronLeft /> Очередь</button>
     <section className={css.detailHero}>
-      <div><span className={`${css.detailStage} ${css[`stage_${order.stage}`]}`}>{order.isTest && <Sparkles />} {LABEL[order.stage]}</span><h2>WB #{order.wbOrderId}</h2><p>{order.denomination ?? "—"} R$ · {money(order.finalPriceKopecks)} · {order.vendorCode ?? `nmID ${order.nmId}`}</p></div>
+      <div><span className={`${css.detailStage} ${css[`stage_${order.stage}`]}`}>{LABEL[order.stage]}</span><h2>WB #{order.wbOrderId}</h2><p>{order.denomination ?? "—"} R$ · {money(order.finalPriceKopecks)} · {order.vendorCode ?? `nmID ${order.nmId}`}</p></div>
       <div className={css.detailStatus}><span>WB</span><strong>{order.supplierStatus}</strong><small>{order.wbStatus}</small></div>
     </section>
     <div className={css.mobileFlags}><span className={data.environment.cryptoReady ? css.flagOn : css.flagOff}>шифрование</span><span className={data.environment.chatSendEnabled ? css.flagOn : css.flagOff}>чат {data.environment.chatSendEnabled ? "on" : "off"}</span><span className={data.environment.mutationsEnabled ? css.flagOn : css.flagOff}>WB {data.environment.mutationsEnabled ? "on" : "off"}</span></div>

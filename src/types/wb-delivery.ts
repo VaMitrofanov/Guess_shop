@@ -34,7 +34,6 @@ export type WbDeliveryOrderDto = {
   gateState: string;
   stage: WbDeliveryStage;
   lastErrorCode: string | null;
-  isTest: boolean;
   firstSeenAt: string;
   updatedAt: string;
   completedAt: string | null;
@@ -74,7 +73,6 @@ export type WbDeliveryOrderDto = {
     deliver: boolean;
     receive: boolean;
     sendMessage: boolean;
-    simulateBuyerCode: boolean;
   };
   chat: WbDeliveryChatEventDto[];
   audit: WbDeliveryAuditDto[];
@@ -113,11 +111,9 @@ export type WbDeliveryOrderResponse = {
 
 export type WbDeliveryAction =
   | "sync"
-  | "create_demo"
   | "request_code"
   | "remind_code"
   | "save_delivery_code"
-  | "simulate_buyer_code"
   | "issue_gate"
   | "send_gate"
   | "mark_gate_sent"

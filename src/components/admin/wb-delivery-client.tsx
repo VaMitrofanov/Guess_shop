@@ -20,7 +20,6 @@ import {
   Search,
   Send,
   ShieldCheck,
-  Sparkles,
   Truck,
   UserRound,
   X,
@@ -173,7 +172,7 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
 
   async function act(action: WbDeliveryAction, extra: Record<string, unknown> = {}) {
     const order = data.orders.find((item) => item.id === selectedId);
-    if (["confirm", "deliver", "receive"].includes(action) && order && !order.isTest) {
+    if (["confirm", "deliver", "receive"].includes(action) && order) {
       const label = action === "receive" ? "завершить выдачу кодом покупателя" : action === "deliver" ? "перевести заказ в доставку" : "подтвердить сборку";
       if (!window.confirm(`Подтвердите действие с реальным заказом WB: ${label}?`)) return;
     }
@@ -183,7 +182,7 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
       const response = await fetch("/api/admin/wb-delivery", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, ...(action !== "sync" && action !== "create_demo" ? { orderId: selectedId } : {}), ...extra }),
+        body: JSON.stringify({ action, ...(action !== "sync" ? { orderId: selectedId } : {}), ...extra }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Действие не выполнено");
@@ -221,7 +220,6 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
         </div>
         <div className={css.commandActions}>
           <a href="https://seller.wildberries.ru/" target="_blank" rel="noreferrer" className={css.ghostButton}>Кабинет WB <ExternalLink /></a>
-          <button type="button" className={css.ghostButton} disabled={Boolean(busy)} onClick={() => void act("create_demo")}><Sparkles /> Тестовый заказ</button>
           <button type="button" className={css.syncButton} disabled={Boolean(busy)} onClick={() => void act("sync")}><RefreshCw className={busy === "sync" ? css.spin : ""} /> Синхронизировать</button>
         </div>
       </section>
@@ -271,13 +269,13 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
           <div className={css.orderList}>
             {visible.map((order) => (
               <button key={order.id} type="button" className={`${css.orderCard} ${selected?.id === order.id ? css.orderCardActive : ""}`} onClick={() => setSelectedId(order.id)}>
-                <div className={css.orderTop}><span className={`${css.stagePill} ${css[`stage_${order.stage}`]}`}>{order.isTest && <Sparkles />} {STAGE_LABEL[order.stage]}</span><time>{dateTime(order.updatedAt)}</time></div>
+                <div className={css.orderTop}><span className={`${css.stagePill} ${css[`stage_${order.stage}`]}`}>{STAGE_LABEL[order.stage]}</span><time>{dateTime(order.updatedAt)}</time></div>
                 <strong>WB #{order.wbOrderId}</strong>
                 <p>{order.denomination ? `${order.denomination.toLocaleString("ru-RU")} R$` : "Номинал не настроен"} · {money(order.finalPriceKopecks)}</p>
                 <div className={css.orderMeta}><span><MessageCircle /> {order.chatReady ? "чат" : "нет чата"}</span><span><Clock3 /> {order.deliveryTo ? dateTime(order.deliveryTo) : "окно не пришло"}</span><ChevronRight /></div>
               </button>
             ))}
-            {!visible.length && <div className={css.emptyQueue}><CircleDot /><strong>Здесь пока пусто</strong><span>Смените фильтр или создайте тестовый заказ.</span></div>}
+            {!visible.length && <div className={css.emptyQueue}><CircleDot /><strong>Здесь пока пусто</strong><span>Смените фильтр — здесь только реальные заказы WB.</span></div>}
           </div>
         </aside>
 
@@ -285,7 +283,7 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
           <main className={css.detail}>
             <header className={css.detailHeader}>
               <div><span className={`${css.stagePill} ${css[`stage_${selected.stage}`]}`}>{STAGE_LABEL[selected.stage]}</span><h2>Заказ #{selected.wbOrderId}</h2><p>{selected.vendorCode ?? `nmID ${selected.nmId}`} · {selected.denomination ? `${selected.denomination} R$` : "номинал не найден"} · {money(selected.finalPriceKopecks)}</p></div>
-              <div className={css.headerBadges}>{selected.isTest && <span><Sparkles /> Тест без WB</span>}<span><Truck /> DBS courier</span></div>
+              <div className={css.headerBadges}><span><Truck /> DBS courier</span></div>
             </header>
 
             <div className={css.rail} aria-label="Этапы заказа">
@@ -303,7 +301,6 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
                 <div className={css.nextAction}>
                   {selected.permissions.requestCode && <ActionCard icon={<MessageCircle />} title="Запросить код доставки" text="Покупатель получит инструкцию, где найти 5–6 цифр рядом с QR-кодом." button="Отправить инструкцию" busy={busy === "request_code"} onClick={() => void act("request_code")} />}
                   {selected.permissions.remindCode && <ActionCard icon={<Clock3 />} title="Запрос уже отправлен" text="Ждём код от покупателя — он подхватится автоматически. Можно напомнить тем же текстом." button="Напомнить о коде" busy={busy === "remind_code"} onClick={() => void act("remind_code")} />}
-                  {selected.permissions.simulateBuyerCode && <ActionCard icon={<Sparkles />} title="Имитировать ответ покупателя" text="Система создаст и тут же зашифрует тестовый код. Внешних вызовов не будет." button="Покупатель прислал код" busy={busy === "simulate_buyer_code"} onClick={() => void act("simulate_buyer_code")} />}
                   {selected.permissions.issueGate && <ActionCard icon={<KeyRound />} title="Выпустить персональный WB-гейт" text={`Номинал ${selected.denomination} R$ и связь с заказом будут зафиксированы навсегда.`} button="Выпустить код" busy={busy === "issue_gate"} onClick={() => void act("issue_gate")} />}
                   {selected.permissions.sendGate && <ActionCard icon={<Send />} title="Отправить ссылку и код" text="Покупатель получит готовую ссылку на гейт и свой 7-значный код." button="Отправить покупателю" busy={busy === "send_gate"} onClick={() => void act("send_gate")} />}
                   {selected.permissions.receive && <ActionCard icon={<PackageCheck />} title="Завершить выдачу на WB" text="Зашифрованный код будет отправлен в WB один раз и сразу удалён после успеха." button="Завершить заказ" danger busy={busy === "receive"} onClick={() => void act("receive")} />}
