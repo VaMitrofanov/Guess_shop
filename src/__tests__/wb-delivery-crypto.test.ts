@@ -57,6 +57,14 @@ describe("WB delivery secret boundary", () => {
   /** Owner decision 15.08.2026: the delivery code stays readable in the chat
    * transcript so operators can reconcile with the WB cabinet. Only our own
    * seven-character activation code must never survive there. */
+  /** Regression: WB echoed our gate message back with CRLF, so the exact-text
+   * match that reconciles the local preview with the provider event missed and
+   * the operator saw the same outgoing message twice. */
+  it("canonicalises newlines so an echoed message matches our own copy", () => {
+    expect(redactWbChatText("строка\r\nвторая\rтретья")).toBe("строка\nвторая\nтретья");
+    expect(redactWbChatText("Код: ABC1234\r\nдальше")).toBe(redactWbChatText("Код: ABC1234\nдальше"));
+  });
+
   it("redacts the activation code but keeps the buyer's delivery code readable", () => {
     const safe = redactWbChatText("Получение 123456. Код активации: ABC1234");
     expect(safe).toBe("Получение 123456. Код активации: •••••••");

@@ -85,6 +85,10 @@ export function extractDeliveryCode(text: string): string | null {
  * survive in chat history — delivery codes are stored encrypted separately. */
 export function redactWbChatText(text: string): string {
   return text
+    // WB echoes our own message back with CRLF newlines. Outbound de-duplication
+    // compares the stored text, so without canonical newlines our local preview
+    // and the provider echo never match and the operator sees it twice.
+    .replace(/\r\n?/g, "\n")
     .replace(ACTIVATION_CODE_RE, (_whole, prefix: string) => `${prefix}•••••••`)
     .replace(ACTIVATION_CODE_URL_RE, (_whole, prefix: string) => `${prefix}•••••••`)
     .slice(0, 2_000);
