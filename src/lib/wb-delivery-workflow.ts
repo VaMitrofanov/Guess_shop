@@ -33,9 +33,9 @@ import {
   wbDeliveryStage,
 } from "../../bots/shared/wb-delivery-policy";
 import { runWbDeliverySync } from "../../bots/shared/wb-delivery-sync";
+import { generateWbActivationCode } from "../../bots/shared/wb-activation-code";
 
 const db = prisma;
-const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const GUIDE_ORIGIN = (process.env.NEXT_PUBLIC_APP_URL || "https://robloxbank.ru").replace(/\/$/, "");
 
 const listOrderInclude = Prisma.validator<Prisma.WbMarketplaceOrderInclude>()({
@@ -449,15 +449,9 @@ function gateMessage(code: string) {
   ].join("\n\n");
 }
 
-function generateActivationCode() {
-  let code = "";
-  for (let i = 0; i < 7; i += 1) code += CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)];
-  return code;
-}
-
 async function createUniqueCode(tx: Prisma.TransactionClient, denomination: number, isTest: boolean) {
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const code = generateActivationCode();
+    const code = generateWbActivationCode();
     try {
       return await tx.wbCode.create({
         data: {

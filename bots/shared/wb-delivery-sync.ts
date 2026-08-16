@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
+import { generateWbActivationCode } from "./wb-activation-code";
 import {
   fetchBuyerChatEvents,
   fetchBuyerChats,
@@ -270,14 +271,7 @@ function isBuyerSender(sender: string) {
   return !/seller|supplier|manager/i.test(sender);
 }
 
-const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const GUIDE_ORIGIN = (process.env.NEXT_PUBLIC_APP_URL || "https://robloxbank.ru").replace(/\/$/, "");
-
-function generateActivationCode() {
-  let code = "";
-  for (let i = 0; i < 7; i += 1) code += CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)];
-  return code;
-}
 
 function gateMessage(code: string) {
   return [
@@ -312,7 +306,7 @@ async function tryAutoGate(
 
   let activationCode: string | null = null;
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const candidate = generateActivationCode();
+    const candidate = generateWbActivationCode();
     try {
       const created = await db.wbCode.create({
         data: {
