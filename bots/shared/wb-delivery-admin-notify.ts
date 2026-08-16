@@ -35,6 +35,14 @@ export function notifyDbsCodeCaptured(wbOrderId: string) {
   );
 }
 
+export function notifyDbsAutoReplySent(wbOrderId: string) {
+  broadcast(
+    `🤖 <b>DBS: автоответ отправлен</b>\n` +
+    `WB #${escapeHtml(wbOrderId)}\n` +
+    `Покупателю ушёл запрос кода доставки — ждём ответ`,
+  );
+}
+
 export function notifyDbsAutoGateIssued(wbOrderId: string, activationCode: string) {
   broadcast(
     `🤖 <b>DBS: авто-гейт выпущен и отправлен</b>\n` +

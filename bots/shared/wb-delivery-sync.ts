@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { generateWbActivationCode } from "./wb-activation-code";
-import { wbGateMessage } from "./wb-gate-link";
+import { wbCodeRequestMessage, wbGateMessage } from "./wb-gate-link";
 import {
   fetchBuyerChatEvents,
   fetchBuyerChats,
@@ -30,10 +30,11 @@ import {
 import {
   canCaptureDeliveryCode,
   shouldMarkCodeRequested,
+  wbDeliverySecretIsLive,
   wbMarketplaceTerminalFlags,
   wbProductVendorCandidates,
 } from "./wb-delivery-policy";
-import { notifyDbsNewOrder, notifyDbsBuyerMessage, notifyDbsCodeCaptured, notifyDbsAutoGateIssued } from "./wb-delivery-admin-notify";
+import { notifyDbsNewOrder, notifyDbsBuyerMessage, notifyDbsCodeCaptured, notifyDbsAutoGateIssued, notifyDbsAutoReplySent } from "./wb-delivery-admin-notify";
 
 const WORKER_STREAM = "wb-dbs-worker";
 const EVENTS_STREAM = "wb-buyer-chat-events";
@@ -440,6 +441,63 @@ async function backfillDeliveryCodes(db: Db, out: WbDeliverySyncResult) {
   }
 }
 
+/** WB has no seller-first chat API, so the buyer's own first message is the
+ * only moment we may greet them. Answering it by hand costs the buyer minutes
+ * of waiting for exactly the same canned text every time.
+ *
+ * Exactly-once is enforced by claiming `chatState` with a CAS *before* sending:
+ * whoever moves the order out of READY owns the send. A failed send leaves the
+ * claim in place and records an error rather than retrying — a duplicate
+ * greeting is worse than a missing one, and the console still offers
+ * «Напомнить о коде». */
+async function tryAutoRequestCode(
+  db: Db,
+  order: { id: string; wbOrderId: string; isTest: boolean; denominationSnapshot: number | null; lastErrorCode: string | null },
+) {
+  if (process.env.WB_DBS_AUTO_REPLY !== "true") return;
+  if (process.env.WB_CHAT_SEND_ENABLED !== "true") return;
+  if (order.isTest || order.lastErrorCode) return;
+
+  const fresh = await db.wbMarketplaceOrder.findUnique({
+    where: { id: order.id },
+    include: {
+      deliverySecret: true,
+      chats: { orderBy: { lastEventAt: "desc" as const }, take: 1 },
+    },
+  });
+  if (!fresh || fresh.completedAt || fresh.cancelledAt || fresh.lastErrorCode) return;
+  // The buyer may have opened with the code itself — never ask for what we hold.
+  if (wbDeliverySecretIsLive(fresh.deliverySecret)) return;
+  const chat = fresh.chats?.[0];
+  if (!chat?.replySignEncrypted) return;
+
+  const claimed = await db.wbMarketplaceOrder.updateMany({
+    where: { id: order.id, chatState: { in: ["WAITING_BUYER_CHAT", "READY"] } },
+    data: { chatState: "CODE_REQUESTED" },
+  });
+  if (claimed.count !== 1) return;
+
+  try {
+    await sendBuyerChatMessage(decryptWbSecret(chat.replySignEncrypted, "reply-sign"), wbCodeRequestMessage());
+    await audit(db, order.id, "DELIVERY_CODE_REQUESTED", `auto-request:${order.id}`, { source: "auto-reply" });
+    notifyDbsAutoReplySent(order.wbOrderId);
+  } catch (error) {
+    const unknown = error instanceof WbDeliveryApiError && error.outcomeUnknown;
+    await db.wbMarketplaceOrder.update({
+      where: { id: order.id },
+      data: {
+        chatState: unknown ? "REQUEST_SEND_UNKNOWN" : "CODE_REQUESTED",
+        lastErrorCode: unknown ? "AUTO_REQUEST_SEND_OUTCOME_UNKNOWN" : "AUTO_REQUEST_SEND_FAILED",
+      },
+    }).catch(() => {});
+    await audit(db, order.id, "CHAT_SEND_FAILED", `auto-request-fail:${order.id}`, {
+      kind: "auto-request",
+      outcomeUnknown: unknown,
+    }).catch(() => {});
+    console.error(`[WbDbsSync] auto-reply failed for ${order.wbOrderId}:`, error);
+  }
+}
+
 async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
   const cursor = await db.wbSyncCursor.findUnique({ where: { stream: EVENTS_STREAM } });
   const response = await fetchBuyerChatEvents(cursor?.cursor ?? undefined);
@@ -526,6 +584,11 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
     if (order && deliveryCode && !order.completedAt && !order.cancelledAt) {
       const captured = await captureDeliveryCode(db, order, deliveryCode, sentAt, `delivery-code:${event.eventID}`, event.chatID);
       if (captured) out.capturedCodes += 1;
+    }
+    // Runs after capture so an opening message that already carries the code
+    // never triggers a request for it.
+    if (isNewEvent && order && isBuyerSender(event.sender) && !order.completedAt && !order.cancelledAt) {
+      await tryAutoRequestCode(db, order);
     }
     out.chatEvents += 1;
   }

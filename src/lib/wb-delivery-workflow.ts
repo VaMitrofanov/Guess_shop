@@ -35,7 +35,7 @@ import {
 } from "../../bots/shared/wb-delivery-policy";
 import { runWbDeliverySync } from "../../bots/shared/wb-delivery-sync";
 import { generateWbActivationCode } from "../../bots/shared/wb-activation-code";
-import { wbGateMessage, wbGateUrl } from "../../bots/shared/wb-gate-link";
+import { wbCodeRequestMessage, wbGateMessage, wbGateUrl } from "../../bots/shared/wb-gate-link";
 
 const db = prisma;
 const GUIDE_ORIGIN = (process.env.NEXT_PUBLIC_APP_URL || "https://robloxbank.ru").replace(/\/$/, "");
@@ -440,18 +440,6 @@ async function sendText(order: ActionOrder, text: string, actor: string, kind: "
   });
 }
 
-/** Owner-approved wording (16.08.2026). Keep it byte-identical to what is sent
- * by hand from the WB seller cabinet so buyers never see two different scripts. */
-function requestCodeMessage() {
-  return [
-    "Здравствуйте! Для успешного получения заказа просим прислать 5-6-значный код доставки,"
-    + " расположенный в разделе \"Доставки\" приложения Wildberries, рядом с QR-кодом.",
-    "Код необходимо направить в этот чат.",
-    "Доставка заказов осуществляется Онлайн через этот чат, без необходимости физической доставки,"
-    + " курьера Вам ждать не нужно",
-  ].join("\n");
-}
-
 
 async function createUniqueCode(tx: Prisma.TransactionClient, denomination: number, isTest: boolean) {
   for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -637,7 +625,7 @@ export async function performWbDeliveryAction(
 
   const order = await getOrder(input.orderId);
   if (input.action === "request_code" || input.action === "remind_code") {
-    await sendText(order, requestCodeMessage(), actor, "request");
+    await sendText(order, wbCodeRequestMessage(), actor, "request");
     await db.wbMarketplaceOrder.update({
       where: { id: order.id },
       data: { chatState: "CODE_REQUESTED", lastErrorCode: null },
