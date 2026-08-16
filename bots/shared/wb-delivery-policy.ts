@@ -151,12 +151,16 @@ export function canIssueWbGate(order: WbDeliveryPolicyOrder): boolean {
   return order.chatState === "CODE_RECEIVED" && Boolean(order.hasLiveSecret);
 }
 
+/** WB gives roughly an hour from the buyer handing over their code to close the
+ * delivery, and that deadline cannot be recovered from. Sending the gate can be
+ * retried forever — we keep the chat and the code — so closing must never wait
+ * on it. A gate that has not gone out is caught by `isWbBuyerUnserved`, which
+ * puts the order in front of the operator until it does. */
 export function canReceiveWbOrder(order: WbDeliveryPolicyOrder): boolean {
   return Boolean(
     !order.completedAt &&
     !order.cancelledAt &&
     !order.lastErrorCode &&
-    order.gateState === "SENT" &&
     order.hasLiveSecret &&
     /deliver/i.test(order.supplierStatus),
   );

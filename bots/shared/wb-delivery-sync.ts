@@ -3,12 +3,14 @@ import type { PrismaClient } from "@prisma/client";
 import { generateWbActivationCode } from "./wb-activation-code";
 import { wbCodeRequestMessage, wbGateMessage } from "./wb-gate-link";
 import {
+  assertBulkOrderSucceeded,
   fetchBuyerChatEvents,
   fetchBuyerChats,
   fetchCompletedDbsOrders,
   fetchDbsDeliveryDates,
   fetchDbsStatuses,
   fetchNewDbsOrders,
+  receiveDbsOrder,
   sendBuyerChatMessage,
   WbDeliveryApiError,
 } from "./wb-delivery-api";
@@ -29,12 +31,13 @@ import {
 } from "./wb-delivery-crypto";
 import {
   canCaptureDeliveryCode,
+  canReceiveWbOrder,
   shouldMarkCodeRequested,
   wbDeliverySecretIsLive,
   wbMarketplaceTerminalFlags,
   wbProductVendorCandidates,
 } from "./wb-delivery-policy";
-import { notifyDbsNewOrder, notifyDbsBuyerMessage, notifyDbsCodeCaptured, notifyDbsAutoGateIssued, notifyDbsAutoReplySent } from "./wb-delivery-admin-notify";
+import { notifyDbsNewOrder, notifyDbsBuyerMessage, notifyDbsCodeCaptured, notifyDbsAutoGateIssued, notifyDbsAutoReplySent, notifyDbsAutoReceived, notifyDbsAutoReceiveFailed } from "./wb-delivery-admin-notify";
 
 const WORKER_STREAM = "wb-dbs-worker";
 const EVENTS_STREAM = "wb-buyer-chat-events";
@@ -275,6 +278,69 @@ function isBuyerSender(sender: string) {
 
 const GUIDE_ORIGIN = (process.env.NEXT_PUBLIC_APP_URL || "https://robloxbank.ru").replace(/\/$/, "");
 
+/** Hands the buyer's own code straight back to WB so the delivery closes itself.
+ *
+ * This runs the moment the code lands, before the gate is even minted: WB gives
+ * roughly an hour from that message to close the delivery, and a blown window
+ * cannot be recovered. Sending the gate can be retried indefinitely — we keep
+ * the chat and the code — and an order whose gate never went out is held in
+ * front of the operator by `isWbBuyerUnserved`.
+ *
+ * Fail-closed on every error: the WB order simply stays open, which the
+ * operator can always finish by hand inside the remaining window. */
+async function tryAutoReceive(db: Db, orderId: string, wbOrderId: string) {
+  if (process.env.WB_DBS_AUTO_RECEIVE !== "true") return;
+  if (process.env.WB_DBS_MUTATIONS_ENABLED !== "true") return;
+
+  const order = await db.wbMarketplaceOrder.findUnique({
+    where: { id: orderId },
+    include: { deliverySecret: true },
+  });
+  if (!order || order.isTest) return;
+  if (!canReceiveWbOrder({ ...order, hasLiveSecret: wbDeliverySecretIsLive(order.deliverySecret) })) return;
+  if (!order.deliverySecret) return;
+
+  try {
+    // WB must still agree the order is out for delivery; its own view wins.
+    const fresh = await fetchDbsStatuses([order.wbOrderId]);
+    const status = fresh.orders.find((row) => row.orderId === order.wbOrderId);
+    if (!status || !/deliver/i.test(status.supplierStatus ?? "")) return;
+
+    const code = decryptWbSecret(order.deliverySecret.encryptedValue, "delivery-code");
+    assertBulkOrderSucceeded(await receiveDbsOrder(order.wbOrderId, code), order.wbOrderId);
+
+    const now = new Date();
+    await db.$transaction(async (tx) => {
+      await tx.wbMarketplaceOrder.update({
+        where: { id: orderId },
+        data: { supplierStatus: "receive", wbStatus: "sold", completedAt: now, lastErrorCode: null },
+      });
+      await tx.wbDeliverySecret.update({
+        where: { marketplaceOrderId: orderId },
+        data: { encryptedValue: "PURGED", consumedAt: now },
+      });
+    });
+    await audit(db, orderId, "WB_RECEIVE_SUCCEEDED", `auto-receive:${orderId}`, { source: "auto-receive" });
+    notifyDbsAutoReceived(wbOrderId);
+  } catch (error) {
+    const unknown = error instanceof WbDeliveryApiError && error.outcomeUnknown;
+    await db.wbMarketplaceOrder.update({
+      where: { id: orderId },
+      data: { lastErrorCode: unknown ? "AUTO_RECEIVE_OUTCOME_UNKNOWN" : "AUTO_RECEIVE_FAILED" },
+    }).catch(() => {});
+    await db.wbDeliverySecret.update({
+      where: { marketplaceOrderId: orderId },
+      data: { failedAttempts: { increment: 1 } },
+    }).catch(() => {});
+    await audit(db, orderId, "WB_STATUS_MUTATION_FAILED", `auto-receive-fail:${orderId}`, {
+      action: "receive",
+      outcomeUnknown: unknown,
+    }).catch(() => {});
+    console.error(`[WbDbsSync] auto-receive failed for ${wbOrderId}:`, error);
+    notifyDbsAutoReceiveFailed(wbOrderId, unknown);
+  }
+}
+
 async function tryAutoGate(
   db: Db,
   orderId: string,
@@ -290,7 +356,9 @@ async function tryAutoGate(
       chats: { orderBy: { lastEventAt: "desc" as const }, take: 1 },
     },
   });
-  if (!order || order.completedAt || order.cancelledAt) return;
+  // `completedAt` is expected here: the delivery is closed first to beat WB's
+  // one-hour window, and the buyer still has to receive their code.
+  if (!order || order.cancelledAt) return;
   if (order.wbCode) return;
   if (!order.denominationSnapshot) return;
 
@@ -400,6 +468,10 @@ async function captureDeliveryCode(
     receivedAt: receivedAt.toISOString(),
   });
   notifyDbsCodeCaptured(order.wbOrderId);
+  // Order matters: WB's one-hour window is the only deadline we cannot
+  // recover from, so the delivery is closed before anything else. Sending
+  // the gate is retryable and stays visible via `isWbBuyerUnserved`.
+  await tryAutoReceive(db, order.id, order.wbOrderId);
   await tryAutoGate(db, order.id, order.wbOrderId);
   return true;
 }

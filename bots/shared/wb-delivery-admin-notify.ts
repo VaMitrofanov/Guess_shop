@@ -43,6 +43,24 @@ export function notifyDbsAutoReplySent(wbOrderId: string) {
   );
 }
 
+export function notifyDbsAutoReceived(wbOrderId: string) {
+  broadcast(
+    `✅ <b>DBS: доставка закрыта автоматически</b>\n` +
+    `WB #${escapeHtml(wbOrderId)}\n` +
+    `Код покупателя отправлен в WB, секрет удалён. Заказ теперь в нашем боте.`,
+  );
+}
+
+export function notifyDbsAutoReceiveFailed(wbOrderId: string, outcomeUnknown: boolean) {
+  broadcast(
+    `⚠️ <b>DBS: не удалось закрыть доставку</b>\n` +
+    `WB #${escapeHtml(wbOrderId)}\n` +
+    (outcomeUnknown
+      ? `WB не подтвердил результат — <b>сверьте кабинет</b> перед повтором.`
+      : `WB отклонил код. Гейт покупателю уже отправлен, закройте доставку вручную.`),
+  );
+}
+
 export function notifyDbsAutoGateIssued(wbOrderId: string, activationCode: string) {
   broadcast(
     `🤖 <b>DBS: авто-гейт выпущен и отправлен</b>\n` +
