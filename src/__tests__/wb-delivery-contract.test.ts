@@ -55,6 +55,20 @@ describe("WB DBS tolerant API contracts", () => {
     expect(parsed.orders.map(wbBuyerName)).toEqual(["Иван", "Пётр", "Анна", "Мария", undefined]);
   });
 
+  /** Observed on live orders 19.08.2026: WB serves `firstName: ""` rather than
+   * omitting the field. `??` stops at an empty string, so the populated
+   * `fullName` next to it would have been thrown away. */
+  it("falls through empty name fields instead of stopping at the first one", () => {
+    const { orders } = WbDbsClientResponseSchema.parse({
+      orders: [
+        { orderID: 1, firstName: "", fullName: "Иван Иванов" },
+        { orderID: 2, firstName: "   ", fio: "Пётр Петров" },
+        { orderID: 3, firstName: "", fullName: "" },
+      ],
+    });
+    expect(orders.map(wbBuyerName)).toEqual(["Иван", "Пётр", undefined]);
+  });
+
   /** Verified against the live endpoint on 19.08.2026: WB returns `orderID`,
    * `firstName`, `fullName` alongside `phone`, `replacementPhone`, `phoneCode`,
    * `additionalPhones` and `additionalPhoneCodes`. None of the phone fields may

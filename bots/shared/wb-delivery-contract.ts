@@ -79,15 +79,19 @@ export function wbClientOrderId(row: WbDbsClient): string | undefined {
   return row.orderID ?? row.orderId;
 }
 
-/** Picks the shortest usable human name and trims it to a first name.
- * The console needs just enough to match a WB chat to a bot conversation, so a
- * full passport-style FIO is narrowed to its first token. */
+/** Picks the first usable human name and trims it to a single token. The console
+ * needs just enough to match a WB chat to a bot conversation, so a passport-style
+ * FIO is narrowed to its first word.
+ *
+ * The fallback chain tests for emptiness, not for null: WB serves `firstName: ""`
+ * alongside a populated `fullName` on real orders, and `??` would have stopped at
+ * the empty string and reported no name at all. */
 export function wbBuyerName(row: WbDbsClient): string | undefined {
-  const raw = row.firstName ?? row.name ?? row.fullName ?? row.fio;
-  const trimmed = raw?.trim();
-  if (!trimmed) return undefined;
-  const first = trimmed.split(/\s+/)[0];
-  return first.slice(0, 60) || undefined;
+  for (const candidate of [row.firstName, row.name, row.fullName, row.fio]) {
+    const first = candidate?.trim().split(/\s+/)[0];
+    if (first) return first.slice(0, 60);
+  }
+  return undefined;
 }
 
 const GoodCardSchema = z.object({
