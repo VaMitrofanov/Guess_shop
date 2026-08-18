@@ -12,6 +12,7 @@ import { allowPasswordSignIn } from "@/lib/auth-throttle";
 import { clientIp } from "@/lib/rate-limit";
 import { consumeTelegramWebLoginChallenge } from "@/lib/telegram-web-login";
 import { adminGrantFor, loadAdminCandidate } from "@/lib/admin-grant";
+import { resolveWbOrderSource } from "../bots/shared/wb-order-source";
 
 // VK display names are user-controlled and embedded into Telegram HTML
 // notifications — unescaped "<" breaks the whole message (silently lost).
@@ -281,6 +282,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           // Create the provisional order here so admin sees a full card
           // immediately. The VK bot's handleRefActivation checks for existing
           // orders and skips creation if one already exists.
+          //
+          // A DBS buyer reaches the gate from the WB chat link, so this login
+          // usually wins the race against the bot — which means `orderSource`
+          // has to be resolved HERE too. Without it the order silently kept the
+          // schema default `WB` and the admin card lost the DBS origin (order
+          // 5508907054 / code ZM4XAW3, 16.08).
           let provisionalOrder: any = null;
           if (wbCode && wbCode.length === 7 && wbCodeRecord && !wbCodeClaimedByOther) {
             try {
@@ -294,6 +301,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                     platform: "VK",
                     userId: user.id,
                     wbCode,
+                    orderSource: await resolveWbOrderSource(prisma, wbCode),
                   } as any,
                 });
               } else {

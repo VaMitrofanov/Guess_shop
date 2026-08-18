@@ -70,4 +70,22 @@ describe("DBS visibility in admin cards", () => {
       expect(read(file)).not.toMatch(/Источник: <b>\$\{(order\.platform|pe)\}/);
     }
   });
+
+  /** A DBS buyer opens the gate from the WB chat link, so the site's VK login
+   * usually creates the order before the bot ever sees the code. Any creation
+   * path that forgets to classify the source silently keeps the schema default
+   * `WB` — that is how order 5508907054 (code ZM4XAW3) lost its DBS origin. */
+  it("classifies the source at every order creation in the corridor", () => {
+    for (const file of ["src/auth.ts", "bots/tg/handlers.ts", "bots/vk/handlers.ts"]) {
+      const source = read(file);
+      const creations = [...source.matchAll(/wbOrder\.create\(\{/g)];
+      expect(creations.length).toBeGreaterThan(0);
+      for (const creation of creations) {
+        const start = creation.index ?? 0;
+        const next = source.indexOf("wbOrder.create({", start + 1);
+        const block = source.slice(start, next < 0 ? start + 1200 : Math.min(next, start + 1200));
+        expect(block).toMatch(/orderSource:/);
+      }
+    }
+  });
 });

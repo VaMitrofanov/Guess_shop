@@ -85,11 +85,16 @@ import { ESLint } from "eslint";
 // пометка источника WB DBS, и в worker'е DBS. Новые файлы проходят scoped ESLint
 // без warnings.
 //
+// 2026-08-17 (1086 → 1086): состав и число legacy debt не изменились. Отпечаток
+// сдвинулся только из-за строк в `src/auth.ts`: провизорный заказ VK-входа теперь
+// сам определяет `orderSource` (иначе DBS-заказ молча оставался `WB`). Новый код
+// и `WbDeliveryScreen` проходят scoped ESLint без warnings.
+//
 // Unlike --max-warnings, this has no spare capacity: adding, moving,
 // replacing or changing even one warning fails the gate. Reduce the baseline
 // only in a dedicated cleanup change after reviewing the full formatter output.
 const BASELINE_WARNING_COUNT = 1086;
-const BASELINE_SHA256 = "d3ee89167d3bcd333e92fbef47436f0f6a73f15812aa7fb0b37e241449a22c18";
+const BASELINE_SHA256 = "b9cd3d797e114dcc8e472634b23cb2e0ef2c6a5a6416cf18d98dccc9237a052c";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);
