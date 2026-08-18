@@ -5,6 +5,7 @@ import BottomNav from "./BottomNav";
 import { ToastHost } from "./Toast";
 import { C } from "./theme";
 import { haptic } from "./haptics";
+import type { WbDeliveryFocus } from "./screens/WbDeliveryScreen";
 
 const Dashboard       = dynamic(() => import("./screens/Dashboard"),      { ssr: false, loading: () => <ScreenSkeleton /> });
 const OrdersScreen    = dynamic(() => import("./screens/OrdersScreen"),   { ssr: false, loading: () => <ScreenSkeleton /> });
@@ -96,6 +97,7 @@ export default function TwaApp() {
   // Ф2: виджет «Ошибки» дашборда «Свои» открывает Заказы сразу на вкладке ERROR.
   const [ordersTabPreload,   setOrdersTabPreload]   = useState<string>("");
   const [wbTabPreload,       setWbTabPreload]       = useState<"analytics" | "reviews">("analytics");
+  const [deliveryFocusPreload, setDeliveryFocusPreload] = useState<WbDeliveryFocus | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -357,11 +359,11 @@ export default function TwaApp() {
           onOpenOrders={(query, tab) => { setOrderQueryPreload(query ?? ""); setOrdersTabPreload(tab ?? ""); setScreen("orders"); }}
           onOpenAccount={() => setScreen("account")}
           onOpenInbox={() => { setWbTabPreload("reviews"); setScreen("wb"); }}
-          onOpenDelivery={() => setScreen("delivery")}
+          onOpenDelivery={(focus) => { setDeliveryFocusPreload(focus ?? null); setScreen("delivery"); }}
         />}
         {screen === "orders"     && <OrdersScreen   {...sp} onActionDone={refreshBadge} initialQuery={orderQueryPreload} initialTab={ordersTabPreload} onInitialQueryConsumed={() => { setOrderQueryPreload(""); setOrdersTabPreload(""); }} />}
         {screen === "wb"         && <WbScreen       {...sp} initialTab={wbTabPreload} />}
-        {screen === "delivery"   && <WbDeliveryScreen {...sp} />}
+        {screen === "delivery"   && <WbDeliveryScreen {...sp} initialFocus={deliveryFocusPreload} />}
         {screen === "account"    && <AccountScreen  {...sp} onOpenErrors={() => { setOrdersTabPreload("ERROR"); setScreen("orders"); }} />}
         {screen === "settings"   && <SettingsScreen  {...sp} onNavigate={(s) => setScreen(s as Screen)} />}
         {screen === "system"     && <SystemScreen    {...sp} />}

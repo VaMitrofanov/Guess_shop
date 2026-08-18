@@ -25,6 +25,7 @@ import {
 import BottomSheet from "../BottomSheet";
 import { C } from "../theme";
 import { haptic } from "../haptics";
+import type { WbDeliveryFocus } from "./WbDeliveryScreen";
 
 type OrdersTab = "BUYOUT" | "AWAITING_LINK" | "ERROR" | "NEW";
 
@@ -504,7 +505,7 @@ export default function Dashboard({
   onOpenOrders?: (query?: string, tab?: OrdersTab) => void;
   onOpenAccount?: () => void;
   onOpenInbox?: () => void;
-  onOpenDelivery?: () => void;
+  onOpenDelivery?: (focus?: WbDeliveryFocus | null) => void;
 }) {
   const [data, setData] = useState<DashData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -547,6 +548,21 @@ export default function Dashboard({
     onOpenOrders?.(query, tab);
   }
 
+  // The widget names one queue, so the tap has to land in that queue — sending
+  // every tap to the default tab meant "3 ждут код" opened a list without them.
+  const dbsFocus: WbDeliveryFocus | null = data.dbs.readyReceive > 0
+    ? "readyReceive"
+    : data.dbs.codeReceived > 0
+      ? "attention"
+      : data.dbs.waitingCode > 0
+        ? "waitingCode"
+        : null;
+  const dbsSummary = [
+    data.dbs.waitingCode > 0 ? `${data.dbs.waitingCode} ждут код` : null,
+    data.dbs.codeReceived > 0 ? `${data.dbs.codeReceived} код получен` : null,
+    data.dbs.readyReceive > 0 ? `${data.dbs.readyReceive} закрыть на WB` : null,
+  ].filter(Boolean).join(" · ") || (data.dbs.active > 0 ? "в процессе" : "новых заказов нет");
+
   return (
     <div className="twa-liquid-dashboard twa-fade-in">
       <SmartSearch token={token} onOpenOrder={query => onOpenOrders?.(query)} onOpenAccount={() => onOpenAccount?.()} />
@@ -575,17 +591,19 @@ export default function Dashboard({
         <button type="button" className="twa-inset-row twa-press-sm" onClick={() => openOrders("AWAITING_LINK")}>
           <span className="twa-result-icon is-link"><Link2 size={21} /></span><div><strong>Запросить {data.attention.awaitingLink} {plural(data.attention.awaitingLink, "ссылку", "ссылки", "ссылок")}</strong><small>Клиенты без подтверждённого геймпасса</small></div><ChevronRight size={20} />
         </button>
+        {/* WB DBS is where money arrives, so it outranks the error queue. Each
+            sub-count opens the queue it names instead of the default tab. */}
+        <button type="button" className="twa-inset-row twa-press-sm" onClick={() => { haptic.select(); onOpenDelivery?.(dbsFocus); }}>
+          <span className="twa-result-icon is-delivery"><Truck size={21} /></span>
+          <div><strong>WB DBS · {data.dbs.active} {plural(data.dbs.active, "заказ", "заказа", "заказов")}</strong><small>{dbsSummary}</small></div>
+          <ChevronRight size={20} />
+        </button>
         <button type="button" className="twa-inset-row twa-press-sm" onClick={() => openOrders("ERROR")}>
           <span className="twa-result-icon is-error"><TriangleAlert size={21} /></span><div><strong>Исправить {data.attention.errors} {plural(data.attention.errors, "ошибку", "ошибки", "ошибок")}</strong><small>{data.attention.firstError ?? "Активных ошибок нет"}</small></div><ChevronRight size={20} />
         </button>
         <button type="button" className="twa-inset-row twa-press-sm" onClick={() => { haptic.select(); onOpenInbox?.(); }}>
           <span className="twa-result-icon is-inbox"><MessageCircleQuestion size={21} /></span><div><strong>Ответить {data.inbox.total} {plural(data.inbox.total, "клиенту", "клиентам", "клиентам")}</strong><small>{data.inbox.feedbacks} {plural(data.inbox.feedbacks, "отзыв", "отзыва", "отзывов")} · {data.inbox.questions} {plural(data.inbox.questions, "вопрос", "вопроса", "вопросов")}</small></div><ChevronRight size={20} />
         </button>
-        {data.dbs.active > 0 && (
-          <button type="button" className="twa-inset-row twa-press-sm" onClick={() => { haptic.select(); onOpenDelivery?.(); }}>
-            <span className="twa-result-icon is-delivery"><Truck size={21} /></span><div><strong>DBS доставка · {data.dbs.active} {plural(data.dbs.active, "заказ", "заказа", "заказов")}</strong><small>{data.dbs.waitingCode > 0 ? `${data.dbs.waitingCode} ждут код` : ""}{data.dbs.waitingCode > 0 && data.dbs.codeReceived > 0 ? " · " : ""}{data.dbs.codeReceived > 0 ? `${data.dbs.codeReceived} код получен` : ""}{(data.dbs.waitingCode > 0 || data.dbs.codeReceived > 0) && data.dbs.readyReceive > 0 ? " · " : ""}{data.dbs.readyReceive > 0 ? `${data.dbs.readyReceive} к завершению` : ""}{!data.dbs.waitingCode && !data.dbs.codeReceived && !data.dbs.readyReceive ? "в процессе" : ""}</small></div><ChevronRight size={20} />
-          </button>
-        )}
       </div>
 
       <div className="twa-quick-grid twa-dashboard-commands">
