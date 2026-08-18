@@ -1,8 +1,11 @@
 import {
   deliveryWindow,
+  wbBuyerName,
+  wbClientOrderId,
   WbBulkMutationResponseSchema,
   WbChatEventsResponseSchema,
   WbChatsResponseSchema,
+  WbDbsClientResponseSchema,
   WbDbsOrdersResponseSchema,
   WbStatusesResponseSchema,
 } from "../../bots/shared/wb-delivery-contract";
@@ -33,6 +36,45 @@ describe("WB DBS tolerant API contracts", () => {
     expect(chats.result[0].goodCard?.rid).toBe("rid-1");
     expect(events.result.next).toBe("42");
     expect(events.result.events[0].message.text).toBe("123456");
+  });
+
+  /** WB has shipped several spellings of the client payload, and an operator
+   * matching a WB chat to a bot conversation only needs a first name. Phone and
+   * address are not in the schema at all: what is never parsed cannot leak. */
+  it("reads a buyer name from every spelling WB has shipped", () => {
+    const parsed = WbDbsClientResponseSchema.parse({
+      orders: [
+        { orderID: 1, firstName: "Иван" },
+        { orderId: "2", fullName: "Пётр Петров" },
+        { orderID: 3, fio: "Анна Сергеевна Иванова" },
+        { orderID: 4, name: "Мария", phone: 79001234567, fullAddress: "секрет" },
+        { orderID: 5 },
+      ],
+    });
+    expect(parsed.orders.map(wbClientOrderId)).toEqual(["1", "2", "3", "4", "5"]);
+    expect(parsed.orders.map(wbBuyerName)).toEqual(["Иван", "Пётр", "Анна", "Мария", undefined]);
+  });
+
+  /** Verified against the live endpoint on 19.08.2026: WB returns `orderID`,
+   * `firstName`, `fullName` alongside `phone`, `replacementPhone`, `phoneCode`,
+   * `additionalPhones` and `additionalPhoneCodes`. None of the phone fields may
+   * survive parsing — this schema strips instead of passing through. */
+  it("drops every phone field WB sends alongside the name", () => {
+    const [buyer] = WbDbsClientResponseSchema.parse({
+      orders: [{
+        orderID: 7,
+        firstName: "Иван",
+        fullName: "Иван Иванов",
+        phone: "79001234567",
+        replacementPhone: "79007654321",
+        phoneCode: 7,
+        additionalPhones: ["79001112233"],
+        additionalPhoneCodes: [7],
+      }],
+    }).orders;
+    expect(wbBuyerName(buyer)).toBe("Иван");
+    expect(Object.keys(buyer).sort()).toEqual(["firstName", "fullName", "orderID"]);
+    expect(JSON.stringify(buyer)).not.toMatch(/7900/);
   });
 
   it("parses bulk/status results and computes the Moscow delivery window", () => {

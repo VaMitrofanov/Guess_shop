@@ -25,7 +25,60 @@ export type WbDeliveryPolicyOrder = {
   /** `WbOrder.status` for the code we issued, or null while the buyer has not
    * activated it yet. Only meaningful once the gate has gone out. */
   internalStatus?: string | null;
+  /** Roblox nick on the internal order. Separates "still reading the
+   * instruction" from "told us who to deliver to" inside the same status. */
+  internalRobloxUsername?: string | null;
 };
+
+/** Where the buyer actually stands inside our own funnel once the gate is out.
+ * `in_bot` on its own is too coarse to act on: an order waiting for a nick and
+ * an order waiting for Robux need different people. */
+export type WbFunnelStep =
+  | "not_activated"
+  | "instruction"
+  | "nick_given"
+  | "ready_buyout"
+  | "buying"
+  | "done"
+  | "rejected"
+  | "failed"
+  | "awaiting_payment";
+
+/** Gate states where a redeemable code exists in the wild. */
+const GATE_MINTED = new Set(["ISSUED", "SENDING", "SENT", "SEND_UNKNOWN"]);
+
+/** Internal statuses that mean our funnel is over, one way or another. */
+const FUNNEL_FINISHED = new Set(["COMPLETED", "REJECTED"]);
+
+export function wbFunnelStep(order: WbDeliveryPolicyOrder): WbFunnelStep {
+  switch (order.internalStatus) {
+    case "COMPLETED": return "done";
+    case "REJECTED": return "rejected";
+    case "ERROR": return "failed";
+    case "IN_PROGRESS": return "buying";
+    case "PENDING": return "ready_buyout";
+    case "AWAITING_PAYMENT":
+    case "PAYMENT_PENDING": return "awaiting_payment";
+    case "AWAITING_GAMEPASS":
+      return order.internalRobloxUsername ? "nick_given" : "instruction";
+    default:
+      // No internal order at all: the code is minted but nobody has opened it.
+      return "not_activated";
+  }
+}
+
+/** A buyer who cancels on WB gets their money back, but a gate code we already
+ * minted stays redeemable until an operator rejects the internal order. Filing
+ * those away with the other cancellations would hand out free Robux, so they
+ * stay in the queue. Once our own funnel is finished — bought or rejected —
+ * there is nothing left to act on and the order goes quiet. */
+export function wbCancelledCodeAtRisk(order: WbDeliveryPolicyOrder): boolean {
+  return Boolean(
+    order.cancelledAt &&
+    GATE_MINTED.has(order.gateState) &&
+    !FUNNEL_FINISHED.has(order.internalStatus ?? ""),
+  );
+}
 
 /** Both states mean the buyer's obligation is closed: either we sent a code, or
  * an operator recorded that the order was settled outside this system. */
@@ -58,7 +111,10 @@ export function wbProductVendorCandidates(article: string | undefined) {
 }
 
 export function wbDeliveryStage(order: WbDeliveryPolicyOrder): WbDeliveryStage {
-  if (order.cancelledAt) return "cancelled";
+  // A cancelled order is dead weight in the console — unless we already minted
+  // a code for it, in which case the buyer has their money back and a working
+  // gate, and that has to stay in front of someone.
+  if (order.cancelledAt) return wbCancelledCodeAtRisk(order) ? "attention" : "cancelled";
   // Closed at WB but never handed the buyer a gate — the loudest state we have,
   // because the money is settled and the customer is still empty-handed.
   if (isWbBuyerUnserved(order)) return "attention";

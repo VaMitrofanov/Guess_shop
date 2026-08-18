@@ -52,6 +52,44 @@ export const WbStatusesResponseSchema = z.object({
   }).passthrough()),
 }).passthrough();
 
+/** Buyer identity for a DBS order. WB has shipped several spellings of the name
+ * field, so each is optional and read through `wbBuyerName`.
+ *
+ * This is the one schema in this file that deliberately does NOT passthrough.
+ * The live payload also carries `phone`, `replacementPhone`, `phoneCode`,
+ * `additionalPhones` and `additionalPhoneCodes`; a digital handover never needs
+ * any of it. Stripping at the parse boundary means that data never reaches our
+ * memory, logs or error payloads at all — the strongest form of "we don't keep
+ * it" (docs/wb-dbs-delivery-plan.md §5, §11). */
+export const WbDbsClientResponseSchema = z.object({
+  orders: OptionalArray(z.object({
+    orderID: WbId.optional(),
+    orderId: WbId.optional(),
+    firstName: OptionalString,
+    fullName: OptionalString,
+    fio: OptionalString,
+    name: OptionalString,
+  })),
+}).passthrough();
+
+export type WbDbsClient = z.infer<typeof WbDbsClientResponseSchema>["orders"][number];
+
+/** WB order IDs arrive as `orderID` or `orderId` depending on the endpoint. */
+export function wbClientOrderId(row: WbDbsClient): string | undefined {
+  return row.orderID ?? row.orderId;
+}
+
+/** Picks the shortest usable human name and trims it to a first name.
+ * The console needs just enough to match a WB chat to a bot conversation, so a
+ * full passport-style FIO is narrowed to its first token. */
+export function wbBuyerName(row: WbDbsClient): string | undefined {
+  const raw = row.firstName ?? row.name ?? row.fullName ?? row.fio;
+  const trimmed = raw?.trim();
+  if (!trimmed) return undefined;
+  const first = trimmed.split(/\s+/)[0];
+  return first.slice(0, 60) || undefined;
+}
+
 const GoodCardSchema = z.object({
   rid: OptionalString,
   nmID: OptionalNumber,

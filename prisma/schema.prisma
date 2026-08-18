@@ -984,6 +984,11 @@ model WbMarketplaceOrder {
   priceKopecks         Int?
   finalPriceKopecks    Int?
   currencyCode         Int?
+  /// Buyer's first name from the DBS client endpoint, kept so an operator can
+  /// match a WB chat to a bot conversation without comparing order numbers.
+  /// Deliberately the only piece of buyer identity we store: no phone, no
+  /// address, no full FIO. See docs/wb-dbs-delivery-plan.md §5.
+  buyerName            String?
   deliveryFrom         DateTime?
   deliveryTo           DateTime?
   requiredMeta         Json?

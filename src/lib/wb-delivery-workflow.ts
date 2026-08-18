@@ -30,18 +30,31 @@ import {
   canIssueWbGate,
   canReceiveWbOrder,
   isWbBuyerUnserved,
+  wbCancelledCodeAtRisk,
   wbDeliverySecretIsLive,
+  wbFunnelStep,
   wbGateDelivered,
   wbDeliveryStage,
 } from "../../bots/shared/wb-delivery-policy";
 import { runWbDeliverySync } from "../../bots/shared/wb-delivery-sync";
 import { generateWbActivationCode } from "../../bots/shared/wb-activation-code";
 import { wbCodeRequestMessage, wbGateMessage, wbGateUrl } from "../../bots/shared/wb-gate-link";
+import { WB_TERMINAL_STAGES, WB_URGENT_STAGES } from "@/lib/wb-delivery-labels";
 
 const db = prisma;
 const GUIDE_ORIGIN = (process.env.NEXT_PUBLIC_APP_URL || "https://robloxbank.ru").replace(/\/$/, "");
 
+/** The queue renders a dozen scalar fields per order. Loading the full chat and
+ * audit trail for every row cost up to 150×160 joined rows on a poll that runs
+ * every 20 seconds, so the list keeps only what it draws; the detail view asks
+ * for the rest one order at a time. */
 const listOrderInclude = Prisma.validator<Prisma.WbMarketplaceOrderInclude>()({
+  wbCode: { select: { code: true, denomination: true, status: true } },
+  deliverySecret: true,
+  chats: { orderBy: { lastEventAt: "desc" }, take: 1 },
+});
+
+const detailOrderInclude = Prisma.validator<Prisma.WbMarketplaceOrderInclude>()({
   wbCode: { select: { code: true, denomination: true, status: true } },
   deliverySecret: true,
   chats: {
@@ -59,9 +72,17 @@ const actionOrderInclude = Prisma.validator<Prisma.WbMarketplaceOrderInclude>()(
 });
 
 type InternalFulfillment = { status: string; platform: string | null; robloxUsername: string | null };
-type ListOrder = Prisma.WbMarketplaceOrderGetPayload<{ include: typeof listOrderInclude }> & {
-  internalFulfillment: InternalFulfillment | null;
-};
+type DetailOrder = Prisma.WbMarketplaceOrderGetPayload<{ include: typeof detailOrderInclude }>;
+type DetailChat = DetailOrder["chats"][number];
+/** One DTO builder serves both queries, so the parts only the detail view loads
+ * are optional here and render as empty for a list row. */
+type ListOrder =
+  & Omit<DetailOrder, "chats" | "events">
+  & {
+    chats: Array<Omit<DetailChat, "events"> & { events?: DetailChat["events"] }>;
+    events?: DetailOrder["events"];
+    internalFulfillment: InternalFulfillment | null;
+  };
 type ActionOrder = Prisma.WbMarketplaceOrderGetPayload<{ include: typeof actionOrderInclude }>;
 
 export const WbDeliveryActionSchema = z.object({
@@ -121,6 +142,9 @@ function direction(sender: string): "buyer" | "seller" | "system" {
 /** Every disabled button must say why. Without this the console silently stops
  * responding and the operator cannot tell a policy gate from an outage. */
 function blockedReason(order: ListOrder, chatReady: boolean, terminal: boolean, unserved: boolean): string | null {
+  if (wbCancelledCodeAtRisk({ ...order, internalStatus: order.internalFulfillment?.status ?? null })) {
+    return "Покупатель отменил заказ на WB и получил деньги обратно, но выпущенный код ещё не потрачен. Отклоните внутренний заказ во вкладке «Заказы», иначе робуксы уйдут бесплатно.";
+  }
   if (unserved) {
     return "Заказ закрыт на WB, но покупатель так и не получил код гейта. Выпустите код и отправьте его в чат — деньги уже приняты.";
   }
@@ -140,12 +164,17 @@ function blockedReason(order: ListOrder, chatReady: boolean, terminal: boolean, 
   return null;
 }
 
-function toDto(order: ListOrder): WbDeliveryOrderDto {
+/** The delivery code is a single-use, high-risk credential. It is the argument
+ * to our own `receive` call, not something the queue needs, so it is decrypted
+ * only for a single explicitly opened order — never for a list of 150 shipped
+ * on a 20-second poll (docs/wb-dbs-delivery-plan.md §5, §11). */
+function toDto(order: ListOrder, { revealSecret = false } = {}): WbDeliveryOrderDto {
   const secretIsLive = liveSecret(order.deliverySecret);
   const policyOrder = {
     ...order,
     hasLiveSecret: secretIsLive,
     internalStatus: order.internalFulfillment?.status ?? null,
+    internalRobloxUsername: order.internalFulfillment?.robloxUsername ?? null,
   };
   const chat = order.chats?.[0] ?? null;
   const activationCode = order.wbCode?.code ?? null;
@@ -166,6 +195,8 @@ function toDto(order: ListOrder): WbDeliveryOrderDto {
     rid: order.rid,
     nmId: order.nmId,
     vendorCode: order.vendorCode,
+    buyerName: order.buyerName,
+    funnelStep: wbFunnelStep(policyOrder),
     denomination: order.denominationSnapshot,
     priceKopecks: order.priceKopecks,
     finalPriceKopecks: order.finalPriceKopecks,
@@ -186,7 +217,7 @@ function toDto(order: ListOrder): WbDeliveryOrderDto {
     deliveryCode: {
       present: Boolean(order.deliverySecret),
       valid: secretIsLive,
-      value: secretIsLive && order.deliverySecret
+      value: revealSecret && secretIsLive && order.deliverySecret
         ? decryptWbSecret(order.deliverySecret.encryptedValue, "delivery-code")
         : null,
       receivedAt: iso(order.deliverySecret?.receivedAt),
@@ -222,6 +253,9 @@ function toDto(order: ListOrder): WbDeliveryOrderDto {
       containsDeliveryCode: event.containsDeliveryCode,
       sentAt: event.sentAt.toISOString(),
       direction: direction(event.sender),
+      // Our own optimistic mirror: WB has not echoed this message back yet, so
+      // the operator must not read it as confirmed delivery to the buyer.
+      pending: event.wbEventId.startsWith("local:outbound:"),
     })),
     audit: (order.events ?? []).map((event) => ({
       id: event.id,
@@ -239,8 +273,21 @@ async function loadOrders() {
   const orders = await db.wbMarketplaceOrder.findMany({
     // Synthetic rows bypass both live flags and the WB chat entirely, so they
     // prove nothing about the real flow while sitting next to real money.
-    where: { isTest: false },
-    orderBy: [{ completedAt: "asc" }, { cancelledAt: "asc" }, { updatedAt: "desc" }],
+    //
+    // A buyer's own cancellation is dead weight: the money went back and there
+    // is nothing to do. The exception is a cancellation that still carries a
+    // minted code — that one is money at risk and is kept, then surfaced as
+    // `attention` by `wbCancelledCodeAtRisk`.
+    where: {
+      isTest: false,
+      OR: [
+        { cancelledAt: null },
+        { cancelledAt: { not: null }, gateState: { in: ["ISSUED", "SENDING", "SENT", "SEND_UNKNOWN"] } },
+      ],
+    },
+    // Postgres sorts NULLs last on ASC, so ordering by `completedAt` alone put
+    // every finished order above the live queue. Open work comes first.
+    orderBy: [{ completedAt: { sort: "asc", nulls: "first" } }, { updatedAt: "desc" }],
     take: 150,
     include: {
       ...listOrderInclude,
@@ -270,7 +317,7 @@ export async function loadWbDeliveryOverview(): Promise<WbDeliveryOverview> {
     db.serviceHeartbeat.findUnique({ where: { serviceKey: "wb-dbs-sync" } }),
     db.wbSyncCursor.findUnique({ where: { stream: "wb-dbs-worker" } }),
   ]);
-  const dtos: WbDeliveryOrderDto[] = orders.map(toDto);
+  const dtos: WbDeliveryOrderDto[] = orders.map((order) => toDto(order));
   const api = wbDeliveryApiReadiness();
   return {
     generatedAt: new Date().toISOString(),
@@ -287,12 +334,17 @@ export async function loadWbDeliveryOverview(): Promise<WbDeliveryOverview> {
       workerLastSeenAt: iso(heartbeat?.lastSeenAt),
       workerError: workerCursor?.lastErrorCode ?? null,
     },
+    // Every counter is derived from `stage`, the same axis the console filters
+    // on. Mixing in raw timestamps is what made the hero number and the tab of
+    // the same name show different orders.
     metrics: {
-      active: dtos.filter((order) => !order.completedAt && !order.cancelledAt).length,
+      active: dtos.filter((order) => !WB_TERMINAL_STAGES.includes(order.stage)).length,
+      urgent: dtos.filter((order) => WB_URGENT_STAGES.includes(order.stage)).length,
       attention: dtos.filter((order) => order.stage === "attention").length,
       waitingCode: dtos.filter((order) => order.stage === "waiting_code").length,
       codeReceived: dtos.filter((order) => order.stage === "code_received").length,
       readyReceive: dtos.filter((order) => order.stage === "ready_receive").length,
+      inBot: dtos.filter((order) => order.stage === "in_bot").length,
       completed: dtos.filter((order) => order.stage === "complete").length,
     },
     orders: dtos,
@@ -303,7 +355,7 @@ export async function loadWbDeliveryOrder(orderId: string): Promise<WbDeliveryOr
   const order = await db.wbMarketplaceOrder.findUnique({
     where: { id: orderId },
     include: {
-      ...listOrderInclude,
+      ...detailOrderInclude,
     },
   });
   if (!order) return null;
@@ -313,7 +365,10 @@ export async function loadWbDeliveryOrder(orderId: string): Promise<WbDeliveryOr
       select: { status: true, platform: true, robloxUsername: true },
     })
     : null;
-  return toDto({ ...order, internalFulfillment: fulfillment });
+  // One order, opened deliberately by a named admin: this is the only place the
+  // operator can read the delivery code, which they need when WB rejects our
+  // own `receive` and the order has to be closed by hand in the seller cabinet.
+  return toDto({ ...order, internalFulfillment: fulfillment }, { revealSecret: true });
 }
 
 async function getOrder(orderId: string | undefined) {

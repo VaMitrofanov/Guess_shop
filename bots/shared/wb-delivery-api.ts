@@ -3,6 +3,7 @@ import {
   WbBulkMutationResponseSchema,
   WbChatEventsResponseSchema,
   WbChatsResponseSchema,
+  WbDbsClientResponseSchema,
   WbDbsOrdersResponseSchema,
   WbDeliveryDatesResponseSchema,
   WbStatusesResponseSchema,
@@ -112,6 +113,19 @@ export async function fetchDbsDeliveryDates(orderIds: string[]) {
     "marketplace",
     `${MARKETPLACE_BASE}/api/v3/dbs/orders/delivery-date`,
     WbDeliveryDatesResponseSchema,
+    jsonBody({ orders: orderIds.map(Number) }),
+  );
+}
+
+/** Buyer identity for DBS orders. WB only serves this after `confirm`, and it
+ * is best-effort by design: a missing name costs the operator a nicer label,
+ * never the order. */
+export async function fetchDbsClients(orderIds: string[]) {
+  if (orderIds.length === 0) return { orders: [] };
+  return requestJson(
+    "marketplace",
+    `${MARKETPLACE_BASE}/api/v3/dbs/orders/client`,
+    WbDbsClientResponseSchema,
     jsonBody({ orders: orderIds.map(Number) }),
   );
 }

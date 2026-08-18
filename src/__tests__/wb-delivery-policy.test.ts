@@ -4,12 +4,22 @@ import {
   canReceiveWbOrder,
   isWbBuyerUnserved,
   shouldMarkCodeRequested,
+  wbCancelledCodeAtRisk,
   wbDeliverySecretIsLive,
+  wbFunnelStep,
   wbMarketplaceTerminalFlags,
   wbProductVendorCandidates,
   wbDeliveryStage,
   type WbDeliveryPolicyOrder,
 } from "../../bots/shared/wb-delivery-policy";
+import {
+  WB_FUNNEL_LABEL,
+  WB_QUEUE_SECTIONS,
+  WB_STAGE_LABEL,
+  WB_TERMINAL_STAGES,
+  WB_URGENT_STAGES,
+  wbAuditLabel,
+} from "@/lib/wb-delivery-labels";
 
 function order(overrides: Partial<WbDeliveryPolicyOrder> = {}): WbDeliveryPolicyOrder {
   return {
@@ -223,5 +233,108 @@ describe("WB DBS fail-closed policy", () => {
     expect(wbDeliveryStage(order({ chatState: "CODE_RECEIVED", hasLiveSecret: true }))).toBe("code_received");
     expect(wbDeliveryStage(order({ chatState: "CODE_RECEIVED", hasLiveSecret: true, gateState: "ISSUED" }))).toBe("gate_ready");
     expect(wbDeliveryStage(order({ chatState: "CODE_RECEIVED", hasLiveSecret: true, gateState: "SENT", supplierStatus: "deliver" }))).toBe("ready_receive");
+  });
+});
+
+/** A buyer cancelling on WB gets their money back. Everything about that order
+ * is dead weight in the console — except a code we already minted, which stays
+ * redeemable and would hand out Robux for free. */
+describe("WB DBS cancellations", () => {
+  const cancelled = (overrides: Partial<WbDeliveryPolicyOrder> = {}) => order({
+    cancelledAt: new Date(),
+    supplierStatus: "cancel",
+    ...overrides,
+  });
+
+  it("files away a cancellation that never got a code", () => {
+    expect(wbCancelledCodeAtRisk(cancelled())).toBe(false);
+    expect(wbDeliveryStage(cancelled())).toBe("cancelled");
+  });
+
+  it("keeps a cancellation whose minted code is still spendable", () => {
+    for (const gateState of ["ISSUED", "SENDING", "SENT", "SEND_UNKNOWN"]) {
+      expect(wbCancelledCodeAtRisk(cancelled({ gateState }))).toBe(true);
+      expect(wbDeliveryStage(cancelled({ gateState }))).toBe("attention");
+    }
+  });
+
+  it("lets go once our own funnel has finished either way", () => {
+    for (const internalStatus of ["COMPLETED", "REJECTED"]) {
+      expect(wbCancelledCodeAtRisk(cancelled({ gateState: "SENT", internalStatus }))).toBe(false);
+      expect(wbDeliveryStage(cancelled({ gateState: "SENT", internalStatus }))).toBe("cancelled");
+    }
+  });
+
+  it("still holds an order the buyer is actively walking through", () => {
+    for (const internalStatus of ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"]) {
+      expect(wbCancelledCodeAtRisk(cancelled({ gateState: "SENT", internalStatus }))).toBe(true);
+    }
+  });
+
+  it("never revives a cancelled order into an issuable one", () => {
+    expect(canIssueWbGate(cancelled({ gateState: "ISSUED" }))).toBe(false);
+    expect(canReceiveWbOrder(cancelled({ gateState: "SENT", hasLiveSecret: true, supplierStatus: "deliver" }))).toBe(false);
+  });
+});
+
+/** «В нашем боте» covered five different situations that need different people.
+ * The funnel step is what the console actually shows now. */
+describe("WB DBS buyer funnel", () => {
+  it("separates a buyer reading the instruction from one who gave a nick", () => {
+    expect(wbFunnelStep(order({ internalStatus: "AWAITING_GAMEPASS" }))).toBe("instruction");
+    expect(wbFunnelStep(order({ internalStatus: "AWAITING_GAMEPASS", internalRobloxUsername: "nick" }))).toBe("nick_given");
+  });
+
+  it("maps every internal status to a step an operator can act on", () => {
+    expect(wbFunnelStep(order({ internalStatus: null }))).toBe("not_activated");
+    expect(wbFunnelStep(order({ internalStatus: "PENDING" }))).toBe("ready_buyout");
+    expect(wbFunnelStep(order({ internalStatus: "IN_PROGRESS" }))).toBe("buying");
+    expect(wbFunnelStep(order({ internalStatus: "COMPLETED" }))).toBe("done");
+    expect(wbFunnelStep(order({ internalStatus: "REJECTED" }))).toBe("rejected");
+    expect(wbFunnelStep(order({ internalStatus: "ERROR" }))).toBe("failed");
+  });
+
+  it("labels every step it can produce", () => {
+    const statuses = [null, "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR", "AWAITING_PAYMENT", "PAYMENT_PENDING"];
+    for (const internalStatus of statuses) {
+      expect(WB_FUNNEL_LABEL[wbFunnelStep(order({ internalStatus }))]).toBeTruthy();
+    }
+  });
+});
+
+/** The console filters on `stage` and nothing else. Mixing in raw timestamps is
+ * what let an unserved buyer — money taken, nothing delivered — sit in the
+ * «Готово» tab alongside genuinely finished orders. */
+describe("WB DBS console vocabulary", () => {
+  it("never files an unserved buyer as done", () => {
+    const unserved = order({ completedAt: new Date(), supplierStatus: "receive" });
+    expect(wbDeliveryStage(unserved)).toBe("attention");
+    expect(WB_TERMINAL_STAGES).not.toContain(wbDeliveryStage(unserved));
+    expect(WB_URGENT_STAGES).toContain(wbDeliveryStage(unserved));
+  });
+
+  it("keeps the urgent set disjoint from the terminal set", () => {
+    for (const stage of WB_URGENT_STAGES) expect(WB_TERMINAL_STAGES).not.toContain(stage);
+  });
+
+  it("labels every stage the policy can return", () => {
+    for (const stage of Object.keys(WB_STAGE_LABEL) as (keyof typeof WB_STAGE_LABEL)[]) {
+      expect(WB_STAGE_LABEL[stage]).toBeTruthy();
+    }
+  });
+
+  it("never shows a raw enum in the timeline", () => {
+    expect(wbAuditLabel("GATE_CODE_ISSUED")).toBe("Выпущен код гейта");
+    expect(wbAuditLabel("SOMETHING_NEW_ENTIRELY")).not.toMatch(/_/);
+  });
+
+  /** A stage missing from the grouping would disappear from «В работе»
+   * entirely: the tab renders sections, not the flat list. */
+  it("routes every working stage into exactly one section", () => {
+    const working = (Object.keys(WB_STAGE_LABEL) as (keyof typeof WB_STAGE_LABEL)[])
+      .filter((stage) => !WB_TERMINAL_STAGES.includes(stage));
+    const sectioned = WB_QUEUE_SECTIONS.flatMap((section) => [...section.stages]);
+    expect([...sectioned].sort()).toEqual([...working].sort());
+    expect(new Set(sectioned).size).toBe(sectioned.length);
   });
 });

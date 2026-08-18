@@ -7,6 +7,7 @@ import {
   fetchBuyerChatEvents,
   fetchBuyerChats,
   fetchCompletedDbsOrders,
+  fetchDbsClients,
   fetchDbsDeliveryDates,
   fetchDbsStatuses,
   fetchNewDbsOrders,
@@ -17,6 +18,8 @@ import {
 import {
   deliveryWindow,
   safeDate,
+  wbBuyerName,
+  wbClientOrderId,
   type WbChat,
   type WbChatEvent,
   type WbDbsOrder,
@@ -44,6 +47,7 @@ const EVENTS_STREAM = "wb-buyer-chat-events";
 const CHATS_STREAM = "wb-buyer-chats";
 const STATUSES_STREAM = "wb-dbs-statuses";
 const COMPLETED_STREAM = "wb-dbs-completed";
+const CLIENTS_STREAM = "wb-dbs-clients";
 const HEARTBEAT_KEY = "wb-dbs-sync";
 const LEASE_MS = 45_000;
 
@@ -57,6 +61,7 @@ export type WbDeliverySyncResult = {
   chats: number;
   chatEvents: number;
   capturedCodes: number;
+  buyerNames: number;
   errorCode: string | null;
 };
 
@@ -69,6 +74,7 @@ function result(acquired = false): WbDeliverySyncResult {
     chats: 0,
     chatEvents: 0,
     capturedCodes: 0,
+    buyerNames: 0,
     errorCode: null,
   };
 }
@@ -679,6 +685,35 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
   });
 }
 
+/** Puts a human name on every open order so an operator can tie the WB chat to
+ * the conversation in our own bot. Best-effort throughout: WB only serves this
+ * after `confirm`, so a miss is normal and must never set `lastErrorCode` or
+ * stop the cycle. Only orders still missing a name are ever asked for. */
+async function syncBuyerNames(db: Db, out: WbDeliverySyncResult) {
+  const nameless = await db.wbMarketplaceOrder.findMany({
+    where: { isTest: false, cancelledAt: null, buyerName: null },
+    select: { id: true, wbOrderId: true },
+    orderBy: { firstSeenAt: "desc" },
+    take: 100,
+  });
+  if (!nameless.length) return;
+  for (let offset = 0; offset < nameless.length; offset += 50) {
+    const chunk = nameless.slice(offset, offset + 50);
+    const response = await fetchDbsClients(chunk.map((row) => row.wbOrderId));
+    for (const row of response.orders) {
+      const wbOrderId = wbClientOrderId(row);
+      const name = wbBuyerName(row);
+      if (!wbOrderId || !name) continue;
+      const match = chunk.find((candidate) => candidate.wbOrderId === wbOrderId);
+      if (!match) continue;
+      await db.wbMarketplaceOrder.update({ where: { id: match.id }, data: { buyerName: name } });
+      await audit(db, match.id, "BUYER_NAME_RESOLVED", `buyer-name:${match.id}`, { hasName: true });
+      out.buyerNames += 1;
+    }
+  }
+  await touchCursor(db, CLIENTS_STREAM, { lastAttemptAt: new Date(), lastSuccessAt: new Date(), lastErrorCode: null });
+}
+
 async function syncStatuses(db: Db, out: WbDeliverySyncResult) {
   const active = await db.wbMarketplaceOrder.findMany({
     where: { isTest: false, completedAt: null, cancelledAt: null },
@@ -777,6 +812,13 @@ export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {
     await backfillDeliveryCodes(db, out);
     if (await streamDue(db, STATUSES_STREAM, 60_000, force)) await syncStatuses(db, out);
     if (await streamDue(db, COMPLETED_STREAM, 5 * 60_000, force)) await syncCompleted(db, out);
+    // A nicer label is never worth a failed cycle: WB serves buyer data only
+    // after `confirm`, so misses are routine and stay out of the error path.
+    if (await streamDue(db, CLIENTS_STREAM, 60_000, force)) {
+      await syncBuyerNames(db, out).catch((error) => {
+        console.error(`[WbDbsSync] buyer names skipped: ${safeErrorCode(error)}`);
+      });
+    }
 
     await db.serviceHeartbeat.upsert({
       where: { serviceKey: HEARTBEAT_KEY },

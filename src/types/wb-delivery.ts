@@ -1,4 +1,4 @@
-import type { WbDeliveryStage } from "../../bots/shared/wb-delivery-policy";
+import type { WbDeliveryStage, WbFunnelStep } from "../../bots/shared/wb-delivery-policy";
 
 export type WbDeliveryChatEventDto = {
   id: string;
@@ -7,6 +7,8 @@ export type WbDeliveryChatEventDto = {
   containsDeliveryCode: boolean;
   sentAt: string;
   direction: "buyer" | "seller" | "system";
+  /** Locally mirrored, not yet echoed back by WB. */
+  pending: boolean;
 };
 
 export type WbDeliveryAuditDto = {
@@ -23,6 +25,12 @@ export type WbDeliveryOrderDto = {
   rid: string | null;
   nmId: number;
   vendorCode: string | null;
+  /** Buyer's first name from the WB DBS client endpoint, or null while WB has
+   * not served it. The only buyer identity this system stores. */
+  buyerName: string | null;
+  /** Where the buyer stands in our own funnel once the gate is out — the detail
+   * the single `in_bot` stage used to hide. */
+  funnelStep: WbFunnelStep;
   denomination: number | null;
   priceKopecks: number | null;
   finalPriceKopecks: number | null;
@@ -43,6 +51,7 @@ export type WbDeliveryOrderDto = {
   deliveryCode: {
     present: boolean;
     valid: boolean;
+    /** Plaintext only on the single-order response; always null in the list. */
     value: string | null;
     receivedAt: string | null;
     expiresAt: string | null;
@@ -93,12 +102,15 @@ export type WbDeliveryOverview = {
     workerLastSeenAt: string | null;
     workerError: string | null;
   };
+  /** All derived from `stage`, so a counter and the queue it opens always agree. */
   metrics: {
     active: number;
+    urgent: number;
     attention: number;
     waitingCode: number;
     codeReceived: number;
     readyReceive: number;
+    inBot: number;
     completed: number;
   };
   orders: WbDeliveryOrderDto[];
