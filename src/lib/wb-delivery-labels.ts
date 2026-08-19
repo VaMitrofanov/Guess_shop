@@ -109,9 +109,15 @@ export const WB_SUPPLIER_STATUS_LABEL: Record<string, string> = {
   cancel: "Отменён",
   canceled: "Отменён",
   cancel_client: "Отменён покупателем",
-  declined_by_client: "Отклонён покупателем",
+  canceled_by_client: "Отменён покупателем",
+  declined_by_client: "Отказ при получении",
+  // WB's own wording for "the courier could not reach the buyer".
+  cancel_missed_call: "Отменён: не дозвонились",
+  canceled_by_missed_call: "Отменён: не дозвонились",
+  defect: "Брак",
   reject: "Отклонён",
   complete: "Завершён",
+  completed: "Завершён",
   waiting: "Ожидает",
   sorted: "Отсортирован",
   ready_for_pickup: "Готов к выдаче",
@@ -137,6 +143,8 @@ const AUDIT_LABEL: Record<string, string> = {
   CHAT_SEND_FAILED: "WB отклонил отправку",
   CHAT_MIRROR_FAILED: "Сообщение не отражено в истории",
   BUYER_NAME_RESOLVED: "Имя покупателя получено",
+  WB_ORDER_CANCELLED: "WB отменил заказ",
+  INTERNAL_ORDER_CREATED: "Заказ на выкуп создан вручную",
 };
 
 /** Never show a raw enum to the operator; an unmapped type degrades to readable

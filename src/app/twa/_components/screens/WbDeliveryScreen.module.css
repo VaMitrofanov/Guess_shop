@@ -140,3 +140,32 @@
 .mobileAudit small{font-size:12px}
 .toolbar button{font-size:13px}
 .toolbar button b{font-size:11px}
+
+/* Manual buyout creation — the door for orders whose game pass search failed.
+   Sizes follow the readability pass: 16px inputs so iOS never zooms on focus. */
+.buyoutSection{margin-top:9px;padding:13px;border:1px solid rgba(167,139,250,.28);border-radius:18px;background:linear-gradient(140deg,rgba(78,58,128,.42),rgba(41,34,57,.66))}
+.buyoutSection header{display:grid;grid-template-columns:34px minmax(0,1fr);align-items:center;gap:10px}
+.buyoutSection header>svg{width:34px;height:34px;padding:8px;border-radius:11px;color:#e2d8ff;background:rgba(167,139,250,.18)}
+.buyoutSection header strong,.buyoutSection header small{display:block}
+.buyoutSection header strong{font-size:14px}
+.buyoutSection header small{margin-top:3px;color:#aaa4b8;font-size:12px;line-height:1.4}
+.buyoutRow{display:grid;grid-template-columns:minmax(0,1fr) 46px;gap:6px;margin-top:11px}
+.buyoutRow input{min-width:0;height:44px;padding:0 12px;border:1px solid rgba(255,255,255,.12);border-radius:11px;outline:0;color:#fff;background:rgba(255,255,255,.05);font-size:16px}
+.buyoutRow button{display:grid;place-items:center;border:0;border-radius:11px;color:#fff;background:rgba(141,110,233,.5)}
+.buyoutRow button:disabled{opacity:.3}
+.buyoutRow svg{width:17px}
+.buyoutFacts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:9px}
+.buyoutFacts>div{min-height:70px;padding:9px;border:1px solid rgba(255,255,255,.09);border-radius:13px;background:rgba(41,34,57,.55)}
+.buyoutFacts span,.buyoutFacts strong,.buyoutFacts small{display:block}
+.buyoutFacts span{color:#777181;font-size:11px}
+.buyoutFacts strong{margin-top:5px;overflow-wrap:anywhere;font-size:14px}
+.buyoutFacts small{margin-top:3px;color:#716b7b;font-size:11px}
+.buyoutFacts input{width:100%;margin-top:5px;height:36px;padding:0 9px;border:1px solid rgba(255,255,255,.12);border-radius:9px;outline:0;color:#fff;background:rgba(255,255,255,.06);font-size:16px}
+.buyoutOk{color:#61de87}
+.buyoutBad{color:#ff827a}
+.buyoutError{display:flex;align-items:flex-start;gap:6px;margin:9px 0 0;padding:9px 10px;border-radius:11px;color:#ff9a94;background:rgba(255,69,58,.09);font-size:12px;line-height:1.45}
+.buyoutError svg{flex:none;width:14px;margin-top:1px}
+.buyoutGo{width:100%;min-height:44px;display:flex;align-items:center;justify-content:center;gap:6px;margin-top:10px;border:0;border-radius:12px;color:#fff;background:#8d6ee9;font-size:14px;font-weight:800}
+.buyoutGo:disabled{opacity:.3}
+.buyoutGo svg{width:15px}
+.buyoutForce{width:100%;min-height:40px;margin-top:7px;border:1px solid rgba(255,69,58,.25);border-radius:12px;color:#ff9a94;background:rgba(255,69,58,.09);font-size:12px;font-weight:750}

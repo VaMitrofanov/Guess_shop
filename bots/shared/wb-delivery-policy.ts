@@ -50,6 +50,44 @@ const GATE_MINTED = new Set(["ISSUED", "SENDING", "SENT", "SEND_UNKNOWN"]);
 /** Internal statuses that mean our funnel is over, one way or another. */
 const FUNNEL_FINISHED = new Set(["COMPLETED", "REJECTED"]);
 
+/** Internal statuses where a WB cancellation can be mirrored automatically:
+ * nothing has been bought yet, so closing the order costs nobody anything.
+ *
+ * `IN_PROGRESS` and `ERROR` are deliberately absent — a purchase may already be
+ * in flight or half-done, and robux we have actually spent is a decision for a
+ * person. Those stay in the console as `attention` instead. */
+const INTERNAL_SAFE_TO_REJECT = new Set([
+  "AWAITING_GAMEPASS",
+  "PENDING",
+  "AWAITING_PAYMENT",
+  "PAYMENT_PENDING",
+]);
+
+export function canAutoRejectInternalOrder(internalStatus: string | null | undefined): boolean {
+  return INTERNAL_SAFE_TO_REJECT.has(internalStatus ?? "");
+}
+
+/** Whether an operator may open a buyout order for this DBS order by hand.
+ *
+ * The gate code is the join key — `WbOrder.wbCode` is unique and every corridor
+ * surface looks the order up by it — so a gate that was never minted has
+ * nothing to hang a buyout on, and one that already has an internal order must
+ * not get a second. Cancelled orders are excluded outright: the buyer's money
+ * has gone back. */
+export function canCreateInternalOrder(order: {
+  cancelledAt?: Date | string | null;
+  gateState: string;
+  activationCode?: string | null;
+  internalStatus?: string | null;
+}): boolean {
+  return Boolean(
+    !order.cancelledAt &&
+    order.activationCode &&
+    GATE_MINTED.has(order.gateState) &&
+    !order.internalStatus,
+  );
+}
+
 export function wbFunnelStep(order: WbDeliveryPolicyOrder): WbFunnelStep {
   switch (order.internalStatus) {
     case "COMPLETED": return "done";
@@ -88,15 +126,28 @@ export function wbGateDelivered(gateState: string): boolean {
   return GATE_DELIVERED.has(gateState);
 }
 
+/** Terminal state is read from WB's own status words and from nothing else.
+ *
+ * It used to accept a `fromCompletedFeed` flag that stamped "completed" on
+ * every row of `/api/v3/dbs/orders`. That feed is not a list of completed
+ * orders — it is every order in the window, and it carries no status fields at
+ * all — so orders the buyer had refused were filed as finished. Worse, once
+ * `completedAt` was set the status poller skipped the order forever, which is
+ * why a cancellation that arrived afterwards could never be seen.
+ *
+ * A cancellation always outranks a completion: `receive/canceled` is a return —
+ * the money went back, and the order is not finished business. */
 export function wbMarketplaceTerminalFlags(
   supplierStatus: string | undefined,
   wbStatus: string | undefined,
-  fromCompletedFeed = false,
 ) {
   const combined = `${supplierStatus ?? ""} ${wbStatus ?? ""}`;
+  // `declin` catches `declined_by_client` — a refusal at the door, which WB
+  // leaves sitting in `supplierStatus: new` and which no other word here matches.
+  const cancelled = /cancel|reject|declin|defect|refus/i.test(combined);
   return {
-    cancelled: /cancel|reject/i.test(combined),
-    completed: fromCompletedFeed || /sold|receive|complete/i.test(combined),
+    cancelled,
+    completed: !cancelled && /sold|receive|complete/i.test(combined),
   };
 }
 

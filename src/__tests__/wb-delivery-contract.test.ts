@@ -1,6 +1,7 @@
 import {
   deliveryWindow,
   wbBuyerName,
+  wbChatClientName,
   wbClientOrderId,
   WbBulkMutationResponseSchema,
   WbChatEventsResponseSchema,
@@ -89,6 +90,31 @@ describe("WB DBS tolerant API contracts", () => {
     expect(wbBuyerName(buyer)).toBe("Иван");
     expect(Object.keys(buyer).sort()).toEqual(["firstName", "fullName", "orderID"]);
     expect(JSON.stringify(buyer)).not.toMatch(/7900/);
+  });
+
+  /** The definitive source of a buyer's name. Probed live on 19.08.2026: the
+   * DBS client endpoint answered `firstName: ""` and `fullName: ""` for every
+   * open order while the chat endpoints carried the real name on both the
+   * directory row and every event — which is why the console showed nothing but
+   * «WB #5508870842» for all 41 orders. */
+  it("reads the buyer name WB publishes on the chat, not on the order", () => {
+    const chats = WbChatsResponseSchema.parse({
+      result: [
+        { chatID: "chat-1", clientName: "Анна", goodCard: { rid: "rid-1" } },
+        { chatID: "chat-2", clientName: "Мария Петровна Сидорова" },
+        { chatID: "chat-3" },
+        { chatID: "chat-4", clientName: "  " },
+        // WB has served placeholders where a name should be; neither is a name.
+        { chatID: "chat-5", clientName: "+7 926 000-00-00" },
+        { chatID: "chat-6", clientName: "—" },
+      ],
+    });
+    expect(chats.result.map(wbChatClientName)).toEqual(["Анна", "Мария", undefined, undefined, undefined, undefined]);
+
+    const events = WbChatEventsResponseSchema.parse({
+      result: { events: [{ chatID: "chat-1", eventID: "e1", sender: "client", clientName: "Юлия", message: { text: "привет" } }] },
+    });
+    expect(wbChatClientName(events.result.events[0])).toBe("Юлия");
   });
 
   it("parses bulk/status results and computes the Moscow delivery window", () => {

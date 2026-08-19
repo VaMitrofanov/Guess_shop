@@ -108,3 +108,34 @@
 .auditTrail > strong { font-size: 11px; }
 .auditTrail p { font-size: 12px; line-height: 1.4; }
 .auditTrail small { font-size: 10px; }
+
+/* Manual buyout creation: the door for orders whose game pass search failed.
+   Deliberately loud — a wrong pass here spends robux on the wrong person. */
+.badText { color: #ff8f8f; }
+.buyoutBlock { margin-top: 10px; padding: 13px; border: 1px solid rgba(129,102,231,.28); border-radius: 13px; background: rgba(116,89,218,.07); }
+.buyoutHead { display: grid; grid-template-columns: 30px minmax(0,1fr); gap: 9px; }
+.buyoutHead > span { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; color: #c4b6ff; background: rgba(139,114,255,.15); }
+.buyoutHead svg { width: 15px; }
+.buyoutHead strong { display: block; font-size: 14px; }
+.buyoutHead > div > span { display: block; margin-top: 3px; color: #8a8a95; font-size: 12px; line-height: 1.45; }
+.buyoutHead b { color: #c4b6ff; }
+.buyoutInputs { display: flex; gap: 6px; margin-top: 10px; }
+.buyoutInputs input { flex: 1; min-width: 0; height: 40px; padding: 0 11px; border: 1px solid var(--line); border-radius: 9px; outline: 0; color: white; background: rgba(255,255,255,.04); font-size: 14px; }
+.buyoutInputs button { min-height: 40px; display: flex; align-items: center; gap: 5px; padding: 0 12px; border: 0; border-radius: 9px; color: #ddd7ff; background: rgba(130,103,235,.2); font-size: 12px; font-weight: 800; cursor: pointer; white-space: nowrap; }
+.buyoutInputs button:disabled { opacity: .35; cursor: not-allowed; }
+.buyoutInputs svg { width: 13px; }
+.buyoutPreview { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; margin-top: 10px; }
+.buyoutPreview > div { padding: 9px 10px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255,255,255,.025); }
+.buyoutPreview span, .buyoutPreview strong, .buyoutPreview small { display: block; }
+.buyoutPreview span { color: #777782; font-size: 11px; }
+.buyoutPreview strong { margin-top: 5px; overflow-wrap: anywhere; font-size: 14px; }
+.buyoutPreview small { margin-top: 4px; color: #6f6f79; font-size: 11px; }
+.buyoutPreview input { width: 100%; margin-top: 5px; height: 32px; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px; outline: 0; color: white; background: rgba(255,255,255,.05); font-size: 14px; }
+.buyoutError { display: flex; align-items: flex-start; gap: 6px; margin-top: 9px; padding: 9px 10px; border-radius: 10px; color: #ffb3b3; background: rgba(255,90,90,.1); font-size: 12px; line-height: 1.45; }
+.buyoutError svg { flex: none; width: 14px; margin-top: 1px; }
+.buyoutActions { display: flex; gap: 6px; margin-top: 10px; }
+.buyoutActions button { min-height: 42px; display: flex; align-items: center; justify-content: center; gap: 6px; flex: 1; border: 0; border-radius: 10px; color: white; background: #6f58d9; font-size: 13px; font-weight: 800; cursor: pointer; }
+.buyoutActions button:disabled { opacity: .32; cursor: not-allowed; }
+.buyoutActions svg { width: 14px; }
+.buyoutForce { flex: 0 0 auto!important; padding: 0 12px; color: #ffb3b3!important; background: rgba(255,90,90,.12)!important; }
+@media (max-width:767px){ .buyoutPreview { grid-template-columns: 1fr; } .buyoutInputs { flex-direction: column; } .buyoutActions { flex-direction: column; } }

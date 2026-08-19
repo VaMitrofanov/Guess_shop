@@ -79,19 +79,41 @@ export function wbClientOrderId(row: WbDbsClient): string | undefined {
   return row.orderID ?? row.orderId;
 }
 
-/** Picks the first usable human name and trims it to a single token. The console
- * needs just enough to match a WB chat to a bot conversation, so a passport-style
- * FIO is narrowed to its first word.
+/** Narrows any WB spelling of a name to the single token the console shows.
+ * A passport-style FIO is cut to its first word, and anything that is only
+ * punctuation or digits (WB has served `"-"` and phone-like strings) is
+ * rejected so the queue never renders a name that is not one. */
+export function wbNormalizeBuyerName(raw: string | undefined | null): string | undefined {
+  const first = raw?.trim().split(/\s+/)[0];
+  if (!first) return undefined;
+  // A name has to contain at least one letter; `+7 926…` and `—` are not names.
+  if (!/\p{L}/u.test(first)) return undefined;
+  return first.slice(0, 60);
+}
+
+/** Picks the first usable human name from the DBS *client* endpoint.
  *
  * The fallback chain tests for emptiness, not for null: WB serves `firstName: ""`
  * alongside a populated `fullName` on real orders, and `??` would have stopped at
- * the empty string and reported no name at all. */
+ * the empty string and reported no name at all.
+ *
+ * In practice this endpoint has never served a name on a live DBS order — it
+ * answers with phones and empty strings — so it is only the fallback behind
+ * `wbChatClientName`, which reads the name WB does publish. */
 export function wbBuyerName(row: WbDbsClient): string | undefined {
   for (const candidate of [row.firstName, row.name, row.fullName, row.fio]) {
-    const first = candidate?.trim().split(/\s+/)[0];
-    if (first) return first.slice(0, 60);
+    const name = wbNormalizeBuyerName(candidate);
+    if (name) return name;
   }
   return undefined;
+}
+
+/** The buyer's name as WB itself shows it above the chat. Both the chat
+ * directory and every chat event carry `clientName`, which is what makes an
+ * order recognisable next to a WB conversation — the marketplace order number
+ * never was. */
+export function wbChatClientName(row: { clientName?: string | undefined }): string | undefined {
+  return wbNormalizeBuyerName(row.clientName);
 }
 
 const GoodCardSchema = z.object({
@@ -105,6 +127,10 @@ export const WbChatsResponseSchema = z.object({
   result: OptionalArray(z.object({
     chatID: z.string(),
     replySign: OptionalString,
+    /** The name WB itself prints above the conversation in the seller cabinet.
+     * This — not the DBS client endpoint — is where a buyer's name actually
+     * comes from; see `wbChatClientName`. */
+    clientName: OptionalString,
     goodCard: GoodCardSchema.optional(),
     lastMessage: z.object({ text: OptionalString }).passthrough().optional(),
   }).passthrough()),
@@ -127,6 +153,7 @@ export const WbChatEventSchema = z.object({
   addTimestamp: z.number().optional(),
   addTime: OptionalString,
   replySign: OptionalString,
+  clientName: OptionalString,
   sender: z.string().optional().default("unknown"),
 }).passthrough();
 

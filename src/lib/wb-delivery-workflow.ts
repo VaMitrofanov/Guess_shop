@@ -27,6 +27,7 @@ import {
   wbSecretHmac,
 } from "../../bots/shared/wb-delivery-crypto";
 import {
+  canCreateInternalOrder,
   canIssueWbGate,
   canReceiveWbOrder,
   isWbBuyerUnserved,
@@ -36,6 +37,8 @@ import {
   wbGateDelivered,
   wbDeliveryStage,
 } from "../../bots/shared/wb-delivery-policy";
+import { BuyoutError, resolveGamepass } from "@/lib/roblox-buyout";
+import { checkGamepassPrice, expectedGamepassPrice } from "@/lib/purchase-guard";
 import { runWbDeliverySync } from "../../bots/shared/wb-delivery-sync";
 import { generateWbActivationCode } from "../../bots/shared/wb-activation-code";
 import { wbCodeRequestMessage, wbGateMessage, wbGateUrl } from "../../bots/shared/wb-gate-link";
@@ -99,10 +102,18 @@ export const WbDeliveryActionSchema = z.object({
     "confirm",
     "deliver",
     "receive",
+    "preview_gamepass",
+    "create_internal_order",
   ]),
   orderId: z.string().min(1).max(80).optional(),
   code: z.string().trim().regex(/^\d{5,7}$/).optional(),
   message: z.string().trim().min(1).max(1_000).optional(),
+  /** Game pass link or bare numeric id for the manual buyout order. */
+  gamepass: z.string().trim().min(1).max(200).optional(),
+  /** Overrides the pass owner when the buyer bought from someone else's pass. */
+  robloxUsername: z.string().trim().max(60).optional(),
+  /** Operator confirmed a price or duplicate warning and wants it anyway. */
+  force: z.boolean().optional(),
 });
 
 export type WbDeliveryActionInput = z.infer<typeof WbDeliveryActionSchema>;
@@ -239,6 +250,14 @@ function toDto(order: ListOrder, { revealSecret = false } = {}): WbDeliveryOrder
       // Escape hatch for orders settled before this system existed, or by
       // other means: closes the obligation without faking a minted code.
       markServedExternally: unserved,
+      // Game pass search does not always find the buyer's pass, so the operator
+      // needs the same "create it by hand" door the ordinary WB queue has.
+      createInternalOrder: canCreateInternalOrder({
+        cancelledAt: order.cancelledAt,
+        gateState: order.gateState,
+        activationCode,
+        internalStatus: order.internalFulfillment?.status ?? null,
+      }),
       confirm: !terminal && !order.lastErrorCode && !/confirm|deliver|sold|receive/i.test(order.supplierStatus),
       deliver: !terminal && !order.lastErrorCode && /confirm/i.test(order.supplierStatus),
       receive: canReceiveWbOrder(policyOrder),
@@ -557,6 +576,159 @@ async function saveDeliveryCode(order: ActionOrder, code: string, actor: string,
   await audit(order.id, "DELIVERY_CODE_CAPTURED", actor, { source, receivedAt: now.toISOString() });
 }
 
+/** Everything the console needs to show before an operator commits to opening a
+ * buyout order by hand: who owns the pass, what Roblox charges for it, and what
+ * this denomination is supposed to cost. */
+async function previewGamepass(order: ActionOrder, raw: string) {
+  const denomination = order.denominationSnapshot;
+  let pass;
+  try {
+    pass = await resolveGamepass(raw);
+  } catch (error) {
+    throw new WbDeliveryWorkflowError(
+      error instanceof BuyoutError ? error.message : "Не удалось прочитать геймпасс",
+      400,
+      "GAMEPASS_UNRESOLVED",
+    );
+  }
+  const price = checkGamepassPrice(denomination ?? 0, pass.price, pass.basePriceInRobux);
+  const duplicate = await db.wbOrder.findFirst({
+    where: {
+      isTest: false,
+      gamepassId: String(pass.gamepassId),
+      status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { wbCode: true, status: true, orderSource: true },
+  });
+  return {
+    gamepassId: String(pass.gamepassId),
+    gamepassUrl: `https://www.roblox.com/game-pass/${pass.gamepassId}`,
+    name: pass.name,
+    robloxUsername: pass.sellerName,
+    price: pass.price,
+    basePrice: pass.basePriceInRobux,
+    isForSale: pass.isForSale,
+    denomination,
+    expectedPrice: denomination ? expectedGamepassPrice(denomination) : null,
+    priceOk: Boolean(denomination) && price.ok,
+    duplicate: duplicate ? { wbCode: duplicate.wbCode, status: duplicate.status, orderSource: duplicate.orderSource } : null,
+  };
+}
+
+/** Opens the ordinary buyout order for a DBS sale by hand.
+ *
+ * The buyer normally does this themselves by activating the gate code in the
+ * bot; when game pass search cannot find their pass, the operator has to. The
+ * result is deliberately an ordinary `WbOrder` keyed on the same gate code —
+ * `orderSource: WB_DBS` is the only difference — so it lands in the same buyout
+ * queue, guards and accounting as every other order rather than in a parallel
+ * flow that has to be maintained twice. */
+async function createInternalOrder(
+  order: ActionOrder,
+  actor: string,
+  input: { gamepass: string; robloxUsername?: string; force?: boolean },
+): Promise<WbDeliveryActionResponse> {
+  const activationCode = order.wbCode?.code ?? null;
+  const existing = activationCode
+    ? await db.wbOrder.findUnique({ where: { wbCode: activationCode }, select: { status: true } })
+    : null;
+  if (!canCreateInternalOrder({
+    cancelledAt: order.cancelledAt,
+    gateState: order.gateState,
+    activationCode,
+    internalStatus: existing?.status ?? null,
+  })) {
+    throw new WbDeliveryWorkflowError(
+      order.cancelledAt
+        ? "Заказ отменён на WB — выкуп по нему открывать нельзя"
+        : existing
+          ? `По коду ${activationCode} уже есть заказ (${existing.status})`
+          : "Сначала выпустите и отправьте покупателю код гейта — заказ на выкуп привязывается к нему",
+      409,
+      "CREATE_PRECONDITION",
+    );
+  }
+  const denomination = order.denominationSnapshot;
+  if (!denomination) {
+    throw new WbDeliveryWorkflowError("Для товара не настроен номинал — сумма заказа неизвестна", 409, "MISSING_DENOMINATION");
+  }
+
+  const preview = await previewGamepass(order, input.gamepass);
+  if (!preview.isForSale && !input.force) {
+    throw new WbDeliveryWorkflowError("Геймпасс снят с продажи — выкупить его нельзя", 409, "GAMEPASS_NOT_FOR_SALE");
+  }
+  if (!preview.priceOk && !input.force) {
+    throw new WbDeliveryWorkflowError(
+      `Цена геймпасса ${preview.price} R$ не сходится с номиналом ${denomination} R$ (ожидается ${preview.expectedPrice} R$). Проверьте пасс или подтвердите создание принудительно.`,
+      409,
+      "PRICE_MISMATCH",
+    );
+  }
+  if (preview.duplicate && !input.force) {
+    throw new WbDeliveryWorkflowError(
+      `На этот геймпасс уже есть активный заказ ${preview.duplicate.wbCode} (${preview.duplicate.status})`,
+      409,
+      "GAMEPASS_DUPLICATE",
+    );
+  }
+
+  const nick = (input.robloxUsername || preview.robloxUsername || "").trim().replace(/^@/, "") || null;
+  const stamp = new Date().toISOString().slice(0, 10);
+  const mark = `[DBS MANUAL ${stamp} от ${actor}] заказ WB #${order.wbOrderId}, геймпасс добавлен вручную из раздела DBS`;
+
+  const created = await db.$transaction(async (tx) => {
+    const wbOrder = await tx.wbOrder.create({
+      data: {
+        amount: denomination,
+        gamepassUrl: preview.gamepassUrl,
+        gamepassId: preview.gamepassId,
+        robloxUsername: nick,
+        status: "PENDING",
+        // The buyer talked to us in the WB chat, not in a messenger of ours;
+        // TG is the platform every service-owned order already uses.
+        platform: "TG",
+        wbCode: activationCode!,
+        orderSource: "WB_DBS",
+        adminNote: mark,
+        pendingAt: new Date(),
+        saleAmountKopecks: order.finalPriceKopecks ?? order.priceKopecks ?? undefined,
+        user: order.wbCode?.userId
+          ? { connect: { id: order.wbCode.userId } }
+          : { connectOrCreate: { where: { tgId: "admin" }, create: { tgId: "admin", name: "Admin (DBS)" } } },
+      },
+    });
+    // Parity with a real activation: the code is spent and cannot be redeemed
+    // a second time by the buyer who still has it in their WB chat.
+    await tx.wbCode.update({
+      where: { id: order.wbCodeId! },
+      data: {
+        isUsed: true,
+        status: "CLAIMED",
+        usedAt: new Date(),
+        ...(nick ? { robloxNick: nick } : {}),
+        selectedGamepassId: preview.gamepassId,
+      },
+    });
+    return wbOrder;
+  });
+
+  await audit(order.id, "INTERNAL_ORDER_CREATED", actor, {
+    activationCode,
+    gamepassId: preview.gamepassId,
+    robloxUsername: nick,
+    denomination,
+    livePrice: preview.price,
+    forced: Boolean(input.force),
+  });
+  return {
+    ok: true,
+    message: `Заказ на выкуп ${activationCode} создан: ${nick ?? "без ника"} · ${denomination} R$ · геймпасс ${preview.gamepassId}`,
+    orderId: order.id,
+    internalOrderId: created.id,
+  };
+}
+
 async function mutateStatus(
   order: ActionOrder,
   actor: string,
@@ -726,6 +898,18 @@ export async function performWbDeliveryAction(
     await db.wbMarketplaceOrder.update({ where: { id: order.id }, data: { gateState: "SENT", lastErrorCode: null } });
     await audit(order.id, "GATE_MANUALLY_MARKED_SENT", actor, { isTest: order.isTest });
     return { ok: true, message: "Ручная отправка зафиксирована в аудите", orderId: order.id };
+  }
+  if (input.action === "preview_gamepass") {
+    if (!input.gamepass) throw new WbDeliveryWorkflowError("Укажите ссылку или ID геймпасса", 400, "GAMEPASS_REQUIRED");
+    return { ok: true, message: "Геймпасс найден", orderId: order.id, preview: await previewGamepass(order, input.gamepass) };
+  }
+  if (input.action === "create_internal_order") {
+    if (!input.gamepass) throw new WbDeliveryWorkflowError("Укажите ссылку или ID геймпасса", 400, "GAMEPASS_REQUIRED");
+    return createInternalOrder(order, actor, {
+      gamepass: input.gamepass,
+      robloxUsername: input.robloxUsername,
+      force: input.force,
+    });
   }
   if (input.action === "send_message") {
     if (!input.message) throw new WbDeliveryWorkflowError("Введите сообщение", 400, "MESSAGE_REQUIRED");

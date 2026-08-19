@@ -78,6 +78,9 @@ export type WbDeliveryOrderDto = {
     sendGate: boolean;
     markGateSent: boolean;
     markServedExternally: boolean;
+    /** The gate code exists but nobody activated it, so an operator may open
+     * the buyout order by hand. */
+    createInternalOrder: boolean;
     confirm: boolean;
     deliver: boolean;
     receive: boolean;
@@ -133,11 +136,34 @@ export type WbDeliveryAction =
   | "send_message"
   | "confirm"
   | "deliver"
-  | "receive";
+  | "receive"
+  | "preview_gamepass"
+  | "create_internal_order";
+
+/** What the console learned about a game pass before an operator commits to
+ * opening a buyout order on it. */
+export type WbGamepassPreview = {
+  gamepassId: string;
+  gamepassUrl: string;
+  name: string;
+  /** Owner of the pass — the Roblox nick the buyout will be delivered to. */
+  robloxUsername: string;
+  price: number;
+  basePrice: number;
+  isForSale: boolean;
+  denomination: number | null;
+  /** What this denomination should cost at our 70% rate. */
+  expectedPrice: number | null;
+  priceOk: boolean;
+  duplicate: { wbCode: string; status: string; orderSource: string } | null;
+};
 
 export type WbDeliveryActionResponse = {
   ok: true;
   message: string;
   orderId?: string;
   sync?: Record<string, unknown>;
+  preview?: WbGamepassPreview;
+  /** Id of the freshly created buyout order, for a direct jump to «Заказы». */
+  internalOrderId?: string;
 };

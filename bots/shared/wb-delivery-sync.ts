@@ -19,6 +19,7 @@ import {
   deliveryWindow,
   safeDate,
   wbBuyerName,
+  wbChatClientName,
   wbClientOrderId,
   type WbChat,
   type WbChatEvent,
@@ -33,6 +34,7 @@ import {
   wbSecretHmac,
 } from "./wb-delivery-crypto";
 import {
+  canAutoRejectInternalOrder,
   canCaptureDeliveryCode,
   canReceiveWbOrder,
   shouldMarkCodeRequested,
@@ -40,16 +42,20 @@ import {
   wbMarketplaceTerminalFlags,
   wbProductVendorCandidates,
 } from "./wb-delivery-policy";
-import { notifyDbsNewOrder, notifyDbsBuyerMessage, notifyDbsCodeCaptured, notifyDbsAutoGateIssued, notifyDbsAutoReplySent, notifyDbsAutoReceived, notifyDbsAutoReceiveFailed } from "./wb-delivery-admin-notify";
+import { notifyDbsNewOrder, notifyDbsBuyerMessage, notifyDbsCodeCaptured, notifyDbsAutoGateIssued, notifyDbsAutoReplySent, notifyDbsAutoReceived, notifyDbsAutoReceiveFailed, notifyDbsOrderCancelled } from "./wb-delivery-admin-notify";
 
 const WORKER_STREAM = "wb-dbs-worker";
 const EVENTS_STREAM = "wb-buyer-chat-events";
 const CHATS_STREAM = "wb-buyer-chats";
 const STATUSES_STREAM = "wb-dbs-statuses";
+const RECHECK_STREAM = "wb-dbs-closed-recheck";
 const COMPLETED_STREAM = "wb-dbs-completed";
 const CLIENTS_STREAM = "wb-dbs-clients";
 const HEARTBEAT_KEY = "wb-dbs-sync";
 const LEASE_MS = 45_000;
+/** How far back a closed order is still re-checked for a late cancellation or
+ * return. WB refunds land within days, and the window bounds the poll cost. */
+const CLOSED_RECHECK_DAYS = 14;
 
 type Db = PrismaClient;
 
@@ -62,6 +68,8 @@ export type WbDeliverySyncResult = {
   chatEvents: number;
   capturedCodes: number;
   buyerNames: number;
+  /** Orders WB cancelled since the previous cycle, mirrored into our own side. */
+  cancellations: number;
   errorCode: string | null;
 };
 
@@ -75,6 +83,7 @@ function result(acquired = false): WbDeliverySyncResult {
     chatEvents: 0,
     capturedCodes: 0,
     buyerNames: 0,
+    cancellations: 0,
     errorCode: null,
   };
 }
@@ -185,13 +194,17 @@ async function upsertMarketplaceOrder(
   const window = deliveryWindow(dates);
   const amounts = orderAmounts(order);
   const now = new Date();
-  const { cancelled, completed } = wbMarketplaceTerminalFlags(
-    order.supplierStatus,
-    order.wbStatus,
-    source === "completed",
-  );
+  const { cancelled, completed } = wbMarketplaceTerminalFlags(order.supplierStatus, order.wbStatus);
   const lastErrorCode = product?.denomination ? null : "MISSING_DENOMINATION";
-  const shared = {
+  // The order *card* endpoints (`/orders/new`, `/orders`) describe the goods,
+  // not the state: `/orders` omits `supplierStatus` and `wbStatus` entirely.
+  // Writing a placeholder there overwrote the real status the poller had
+  // fetched, so status is only ever written when WB actually sent one.
+  const wbSaidStatus = {
+    ...(order.supplierStatus ? { supplierStatus: order.supplierStatus } : {}),
+    ...(order.wbStatus ? { wbStatus: order.wbStatus } : {}),
+  };
+  const goods = {
     fulfillmentModel: "DBS",
     rid: order.rid,
     orderUid: order.orderUid,
@@ -205,22 +218,30 @@ async function upsertMarketplaceOrder(
     deliveryFrom: window.from,
     deliveryTo: window.to,
     requiredMeta: order.requiredMeta,
-    supplierStatus: order.supplierStatus ?? (source === "completed" ? "completed" : "new"),
-    wbStatus: order.wbStatus ?? (source === "completed" ? "completed" : "waiting"),
     lastErrorCode,
     lastSeenAt: now,
-    completedAt: completed ? now : undefined,
-    cancelledAt: cancelled ? now : undefined,
   };
   const record = await db.wbMarketplaceOrder.upsert({
     where: { wbOrderId: order.id },
-    create: { wbOrderId: order.id, ...shared },
-    update: shared,
+    create: {
+      wbOrderId: order.id,
+      ...goods,
+      supplierStatus: order.supplierStatus ?? "new",
+      wbStatus: order.wbStatus ?? "waiting",
+      completedAt: completed ? now : undefined,
+      cancelledAt: cancelled ? now : undefined,
+    },
+    update: {
+      ...goods,
+      ...wbSaidStatus,
+      ...(cancelled ? { cancelledAt: now, completedAt: null } : {}),
+      ...(completed ? { completedAt: now } : {}),
+    },
   });
   await audit(db, record.id, "ORDER_SYNCED", `order:${order.id}:${source}`, {
     source,
-    supplierStatus: shared.supplierStatus,
-    wbStatus: shared.wbStatus,
+    supplierStatus: record.supplierStatus,
+    wbStatus: record.wbStatus,
     mapped: Boolean(product?.denomination),
   });
   return record;
@@ -231,6 +252,26 @@ function chatOrderWhere(chat: WbChat) {
   return rid ? { rid } : null;
 }
 
+/** WB publishes the buyer's name on the chat, never on the DBS order. Storing
+ * it the moment it appears is what lets an operator recognise the order that
+ * matches a WB conversation instead of comparing eight-digit numbers.
+ *
+ * Written once and never overwritten: a name already on the order was seen
+ * earlier and is just as good, and re-writing it on every cycle would churn
+ * `updatedAt` and reshuffle the queue. */
+async function rememberBuyerName(
+  db: Db,
+  order: { id: string; buyerName: string | null },
+  clientName: string | undefined,
+  out: WbDeliverySyncResult,
+) {
+  if (!clientName || order.buyerName) return;
+  await db.wbMarketplaceOrder.update({ where: { id: order.id }, data: { buyerName: clientName } });
+  order.buyerName = clientName;
+  await audit(db, order.id, "BUYER_NAME_RESOLVED", `buyer-name:${order.id}`, { source: "chat" }).catch(() => {});
+  out.buyerNames += 1;
+}
+
 async function syncChatDirectory(db: Db, out: WbDeliverySyncResult) {
   const response = await fetchBuyerChats();
   for (const chat of response.result) {
@@ -238,6 +279,7 @@ async function syncChatDirectory(db: Db, out: WbDeliverySyncResult) {
     const order = orderWhere
       ? await db.wbMarketplaceOrder.findUnique({ where: orderWhere })
       : null;
+    if (order) await rememberBuyerName(db, order, wbChatClientName(chat), out);
     const replySignEncrypted = chat.replySign && wbDeliveryCryptoReady()
       ? encryptWbSecret(chat.replySign, "reply-sign")
       : undefined;
@@ -656,8 +698,10 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
       await db.wbBuyerChatEvent.create({ data: eventData });
     }
 
+    if (order) await rememberBuyerName(db, order, wbChatClientName(event), out);
+
     if (isNewEvent && isBuyerSender(event.sender) && order && rawText && !order.completedAt && !order.cancelledAt) {
-      notifyDbsBuyerMessage(order.wbOrderId, event.sender, rawText);
+      notifyDbsBuyerMessage(order.wbOrderId, order.buyerName, rawText);
     }
 
     if (order && order.chatState === "WAITING_BUYER_CHAT") {
@@ -714,34 +758,136 @@ async function syncBuyerNames(db: Db, out: WbDeliverySyncResult) {
   await touchCursor(db, CLIENTS_STREAM, { lastAttemptAt: new Date(), lastSuccessAt: new Date(), lastErrorCode: null });
 }
 
+type StatusTarget = {
+  id: string;
+  wbOrderId: string;
+  cancelledAt: Date | null;
+  completedAt: Date | null;
+};
+
+const STATUS_TARGET_SELECT = {
+  id: true,
+  wbOrderId: true,
+  cancelledAt: true,
+  completedAt: true,
+} as const;
+
+/** Writes one WB status verdict onto our own order and mirrors a cancellation
+ * into the rest of the system exactly once. */
+async function applyWbStatus(
+  db: Db,
+  order: StatusTarget,
+  status: { supplierStatus?: string; wbStatus?: string; errors: Array<{ code?: string | number }> },
+  out: WbDeliverySyncResult,
+) {
+  const { cancelled, completed } = wbMarketplaceTerminalFlags(status.supplierStatus, status.wbStatus);
+  const now = new Date();
+  await db.wbMarketplaceOrder.update({
+    where: { id: order.id },
+    data: {
+      supplierStatus: status.supplierStatus,
+      wbStatus: status.wbStatus,
+      // Both timestamps keep the moment they were first observed, so a status
+      // poll running every minute does not keep re-dating a closed order.
+      cancelledAt: cancelled ? order.cancelledAt ?? now : undefined,
+      // A cancellation retracts an earlier completion. Without this the order
+      // stays filed under "Готово" while WB has already refunded the buyer.
+      completedAt: cancelled ? null : completed ? order.completedAt ?? now : undefined,
+      lastSeenAt: now,
+      lastErrorCode: status.errors[0]?.code ? `WB_${status.errors[0].code}` : undefined,
+    },
+  });
+  out.statuses += 1;
+  if (cancelled && !order.cancelledAt) {
+    out.cancellations += 1;
+    await propagateCancellation(db, order.id, order.wbOrderId, `${status.supplierStatus ?? ""}/${status.wbStatus ?? ""}`);
+  }
+}
+
+async function fetchAndApplyStatuses(db: Db, targets: StatusTarget[], out: WbDeliverySyncResult) {
+  for (let offset = 0; offset < targets.length; offset += 100) {
+    const chunk = targets.slice(offset, offset + 100);
+    const response = await fetchDbsStatuses(chunk.map((row) => row.wbOrderId));
+    for (const status of response.orders) {
+      const match = chunk.find((row) => row.wbOrderId === status.orderId);
+      if (match) await applyWbStatus(db, match, status, out);
+    }
+  }
+}
+
+/** A WB cancellation refunds the buyer, so anything we opened on the back of
+ * that order has to close too — otherwise the buyout queue keeps a job nobody
+ * is paying for, which is exactly how cancelled orders became dead weight.
+ *
+ * Only orders that have cost us nothing yet are closed automatically; a
+ * purchase in flight or already made is left alone and stays visible in the
+ * console as `attention` for a human to settle. Either way the admins hear
+ * about it, because a refund on a delivered order is never routine. */
+async function propagateCancellation(db: Db, orderId: string, wbOrderId: string, wbStatus: string) {
+  const order = await db.wbMarketplaceOrder.findUnique({
+    where: { id: orderId },
+    include: { wbCode: { select: { code: true } } },
+  });
+  const code = order?.wbCode?.code ?? null;
+  const internal = code
+    ? await db.wbOrder.findUnique({
+      where: { wbCode: code },
+      select: { id: true, status: true, adminNote: true, robloxUsername: true },
+    })
+    : null;
+
+  let outcome: "rejected" | "needs_human" | "no_internal_order" = "no_internal_order";
+  if (internal && !["COMPLETED", "REJECTED"].includes(internal.status)) {
+    if (canAutoRejectInternalOrder(internal.status)) {
+      const mark = `[WB ОТМЕНА ${new Date().toISOString().slice(0, 10)}] заказ WB #${wbOrderId} отменён (${wbStatus}) — выкуп закрыт автоматически`;
+      await db.wbOrder.update({
+        where: { id: internal.id },
+        data: {
+          status: "REJECTED",
+          rejectionReason: `Заказ WB #${wbOrderId} отменён на Wildberries (${wbStatus})`,
+          adminNote: internal.adminNote ? `${mark}\n${internal.adminNote}`.slice(0, 2_000) : mark,
+        },
+      });
+      outcome = "rejected";
+    } else {
+      outcome = "needs_human";
+    }
+  }
+
+  await audit(db, orderId, "WB_ORDER_CANCELLED", `wb-cancelled:${orderId}`, {
+    wbStatus,
+    activationCode: code,
+    internalStatus: internal?.status ?? null,
+    outcome,
+  }).catch(() => {});
+  notifyDbsOrderCancelled(wbOrderId, wbStatus, code, internal?.status ?? null, outcome);
+}
+
 async function syncStatuses(db: Db, out: WbDeliverySyncResult) {
   const active = await db.wbMarketplaceOrder.findMany({
     where: { isTest: false, completedAt: null, cancelledAt: null },
-    select: { id: true, wbOrderId: true },
+    select: STATUS_TARGET_SELECT,
     take: 1000,
   });
-  for (let offset = 0; offset < active.length; offset += 100) {
-    const chunk = active.slice(offset, offset + 100);
-    const response = await fetchDbsStatuses(chunk.map((row: { wbOrderId: string }) => row.wbOrderId));
-    for (const status of response.orders) {
-      const match = chunk.find((row: { wbOrderId: string }) => row.wbOrderId === status.orderId);
-      if (!match) continue;
-      const { cancelled, completed } = wbMarketplaceTerminalFlags(status.supplierStatus, status.wbStatus);
-      await db.wbMarketplaceOrder.update({
-        where: { id: match.id },
-        data: {
-          supplierStatus: status.supplierStatus,
-          wbStatus: status.wbStatus,
-          cancelledAt: cancelled ? new Date() : undefined,
-          completedAt: completed ? new Date() : undefined,
-          lastSeenAt: new Date(),
-          lastErrorCode: status.errors[0]?.code ? `WB_${status.errors[0].code}` : undefined,
-        },
-      });
-      out.statuses += 1;
-    }
-  }
+  await fetchAndApplyStatuses(db, active, out);
   await touchCursor(db, STATUSES_STREAM, { lastAttemptAt: new Date(), lastSuccessAt: new Date(), lastErrorCode: null });
+}
+
+/** Closing an order is not the end of its story: WB reports returns and
+ * refusals as a status change on an order it had already handed over
+ * (`receive/canceled`), and a buyer can decline at the door long after we filed
+ * the order away. The open-order poll can never see those, because it only
+ * looks at orders with no `completedAt`. */
+async function recheckClosedOrders(db: Db, out: WbDeliverySyncResult) {
+  const since = new Date(Date.now() - CLOSED_RECHECK_DAYS * 24 * 60 * 60 * 1_000);
+  const closed = await db.wbMarketplaceOrder.findMany({
+    where: { isTest: false, cancelledAt: null, completedAt: { gte: since } },
+    select: STATUS_TARGET_SELECT,
+    orderBy: { completedAt: "desc" },
+    take: 300,
+  });
+  await fetchAndApplyStatuses(db, closed, out);
+  await touchCursor(db, RECHECK_STREAM, { lastAttemptAt: new Date(), lastSuccessAt: new Date(), lastErrorCode: null });
 }
 
 async function syncCompleted(db: Db, out: WbDeliverySyncResult) {
@@ -811,6 +957,9 @@ export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {
     await syncChatEvents(db, out);
     await backfillDeliveryCodes(db, out);
     if (await streamDue(db, STATUSES_STREAM, 60_000, force)) await syncStatuses(db, out);
+    // Returns and refusals arrive on orders we already closed, so the finished
+    // pile is swept on its own slower cadence.
+    if (await streamDue(db, RECHECK_STREAM, 10 * 60_000, force)) await recheckClosedOrders(db, out);
     if (await streamDue(db, COMPLETED_STREAM, 5 * 60_000, force)) await syncCompleted(db, out);
     // A nicer label is never worth a failed cycle: WB serves buyer data only
     // after `confirm`, so misses are routine and stay out of the error path.

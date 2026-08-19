@@ -4,6 +4,8 @@ import {
   canReceiveWbOrder,
   isWbBuyerUnserved,
   shouldMarkCodeRequested,
+  canAutoRejectInternalOrder,
+  canCreateInternalOrder,
   wbCancelledCodeAtRisk,
   wbDeliverySecretIsLive,
   wbFunnelStep,
@@ -42,15 +44,59 @@ describe("WB DBS fail-closed policy", () => {
     expect(wbProductVendorCandidates(undefined)).toEqual([]);
   });
 
-  it("marks every completed-feed order terminal even when WB omits status fields", () => {
-    expect(wbMarketplaceTerminalFlags(undefined, undefined, true)).toEqual({
+  it("never invents a terminal state WB did not report", () => {
+    // `/api/v3/dbs/orders` omits both status fields, and it lists every order in
+    // the window — not just finished ones. Treating membership as completion is
+    // what filed refused orders as done and froze them out of the status poll.
+    expect(wbMarketplaceTerminalFlags(undefined, undefined)).toEqual({
       cancelled: false,
-      completed: true,
+      completed: false,
     });
     expect(wbMarketplaceTerminalFlags("deliver", "waiting")).toEqual({
       cancelled: false,
       completed: false,
     });
+    expect(wbMarketplaceTerminalFlags("receive", "sold")).toEqual({
+      cancelled: false,
+      completed: true,
+    });
+  });
+
+  it("lets a cancellation outrank a completion WB already reported", () => {
+    // A return: WB handed the order over and then took the money back. Filing
+    // this as complete leaves an active buyout order nobody is paying for.
+    expect(wbMarketplaceTerminalFlags("receive", "canceled")).toEqual({
+      cancelled: true,
+      completed: false,
+    });
+    // Refused at the door — WB leaves `supplierStatus` on `new`, so the word
+    // that carries the cancellation is in `wbStatus` alone.
+    expect(wbMarketplaceTerminalFlags("new", "declined_by_client")).toEqual({
+      cancelled: true,
+      completed: false,
+    });
+    expect(wbMarketplaceTerminalFlags("cancel_missed_call", "canceled_by_missed_call")).toEqual({
+      cancelled: true,
+      completed: false,
+    });
+  });
+
+  it("opens manual buyout creation only for a minted, unclaimed gate", () => {
+    const base = { cancelledAt: null, gateState: "SENT", activationCode: "CAA4BR9", internalStatus: null };
+    expect(canCreateInternalOrder(base)).toBe(true);
+    expect(canCreateInternalOrder({ ...base, gateState: "NOT_ISSUED", activationCode: null })).toBe(false);
+    expect(canCreateInternalOrder({ ...base, internalStatus: "AWAITING_GAMEPASS" })).toBe(false);
+    expect(canCreateInternalOrder({ ...base, cancelledAt: new Date() })).toBe(false);
+  });
+
+  it("mirrors a WB cancellation only onto buyouts that have cost nothing yet", () => {
+    expect(canAutoRejectInternalOrder("AWAITING_GAMEPASS")).toBe(true);
+    expect(canAutoRejectInternalOrder("PENDING")).toBe(true);
+    // Robux may already be spent — that is a decision for a person.
+    expect(canAutoRejectInternalOrder("IN_PROGRESS")).toBe(false);
+    expect(canAutoRejectInternalOrder("ERROR")).toBe(false);
+    expect(canAutoRejectInternalOrder("COMPLETED")).toBe(false);
+    expect(canAutoRejectInternalOrder(null)).toBe(false);
   });
 
   it("does not issue a gate before an encrypted delivery code exists", () => {

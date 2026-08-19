@@ -11,6 +11,7 @@ import {
   Clipboard,
   Clock3,
   ExternalLink,
+  Gamepad2,
   KeyRound,
   Link2,
   Loader2,
@@ -29,6 +30,7 @@ import type {
   WbDeliveryOrderDto,
   WbDeliveryOrderResponse,
   WbDeliveryOverview,
+  WbGamepassPreview,
 } from "@/types/wb-delivery";
 import { useVisiblePolling } from "@/hooks/useVisiblePolling";
 import {
@@ -147,6 +149,17 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
   useVisiblePolling(pollOverview, 20_000);
   useVisiblePolling(pollSelected, 5_000, Boolean(selectedId));
 
+  const post = useCallback(async (action: WbDeliveryAction, orderId: string, extra: Record<string, unknown>) => {
+    const response = await fetch("/api/admin/wb-delivery", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...(action !== "sync" ? { orderId } : {}), ...extra }),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error ?? "Действие не выполнено");
+    return body as { message: string; orderId?: string; preview?: WbGamepassPreview };
+  }, []);
+
   async function act(action: WbDeliveryAction, extra: Record<string, unknown> = {}) {
     const order = data.orders.find((item) => item.id === selectedId);
     if (["confirm", "deliver", "receive"].includes(action) && order) {
@@ -156,13 +169,7 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
     setBusy(action);
     setNotice(null);
     try {
-      const response = await fetch("/api/admin/wb-delivery", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, ...(action !== "sync" ? { orderId: selectedId } : {}), ...extra }),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Действие не выполнено");
+      const body = await post(action, selectedId, extra);
       if (body.orderId) setSelectedId(body.orderId);
       setManualCode("");
       if (action === "send_message") setMessage("");
@@ -294,6 +301,16 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
                   <div><span>Покупатель в боте</span><strong>{WB_FUNNEL_LABEL[selected.funnelStep]}</strong><small>{selected.fulfillment?.robloxUsername ?? "ник ещё не получен"}</small></div>
                 </div>
 
+                {selected.permissions.createInternalOrder && (
+                  <BuyoutBlock
+                    key={selected.id}
+                    order={selected}
+                    onPreview={(gamepass) => post("preview_gamepass", selected.id, { gamepass })}
+                    onCreate={(gamepass, robloxUsername, force) => post("create_internal_order", selected.id, { gamepass, robloxUsername, force })}
+                    onDone={async (text) => { setNotice({ tone: "ok", text }); await refresh(true); }}
+                  />
+                )}
+
                 <div className={css.manualBlock}>
                   <div><strong>Резервный ввод кода</strong><span>Если событие чата задержалось, введите 5–7 цифр вручную. После отправки поле очищается.</span></div>
                   <div><input inputMode="numeric" autoComplete="off" maxLength={7} value={manualCode} onChange={(event) => setManualCode(event.target.value.replace(/\D/g, "").slice(0, 7))} placeholder="5–7 цифр" aria-label="Код доставки WB" /><button disabled={!selected.permissions.saveDeliveryCode || manualCode.length < 5 || Boolean(busy)} onClick={() => void act("save_delivery_code", { code: manualCode })}>Сохранить безопасно</button></div>
@@ -328,4 +345,104 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
 
 function ActionCard({ icon, title, text, button, onClick, busy, danger = false }: { icon: React.ReactNode; title: string; text: string; button: string; onClick: () => void; busy: boolean; danger?: boolean }) {
   return <div className={`${css.actionCard} ${danger ? css.actionDanger : ""}`}><span>{icon}</span><div><strong>{title}</strong><p>{text}</p><button disabled={busy} onClick={onClick}>{busy ? <Loader2 className={css.spin} /> : <ChevronRight />}{button}</button></div></div>;
+}
+
+/** Game pass search does not always find the buyer's pass, so an order that
+ * would normally open itself when the buyer activates the gate has to be opened
+ * by hand. The pass is resolved first and shown in full — owner, live price and
+ * what this denomination is supposed to cost — because a wrong pass here buys
+ * somebody else's robux at our expense. */
+function BuyoutBlock({ order, onPreview, onCreate, onDone }: {
+  order: WbDeliveryOrderDto;
+  onPreview: (gamepass: string) => Promise<{ preview?: WbGamepassPreview }>;
+  onCreate: (gamepass: string, robloxUsername: string | undefined, force: boolean) => Promise<{ message: string }>;
+  onDone: (message: string) => Promise<void>;
+}) {
+  const [gamepass, setGamepass] = useState("");
+  const [nick, setNick] = useState("");
+  const [preview, setPreview] = useState<WbGamepassPreview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"preview" | "create" | null>(null);
+  // A warning the operator has already read; the next click may override it.
+  const [blocked, setBlocked] = useState(false);
+
+  /** Editing the pass invalidates everything read back about the old one — an
+   * override must never carry over to a pass the operator has not checked. */
+  function editGamepass(value: string) {
+    setGamepass(value);
+    setPreview(null);
+    setError(null);
+    setBlocked(false);
+  }
+
+  async function check() {
+    setBusy("preview");
+    setError(null);
+    try {
+      const body = await onPreview(gamepass.trim());
+      setPreview(body.preview ?? null);
+      if (body.preview && !nick) setNick(body.preview.robloxUsername);
+    } catch (e) {
+      setPreview(null);
+      setError(e instanceof Error ? e.message : "Геймпасс не найден");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function create(force: boolean) {
+    setBusy("create");
+    setError(null);
+    try {
+      const body = await onCreate(gamepass.trim(), nick.trim() || undefined, force);
+      setGamepass("");
+      setNick("");
+      await onDone(body.message);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Заказ не создан");
+      setBlocked(true);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className={css.buyoutBlock}>
+      <div className={css.buyoutHead}>
+        <span><Gamepad2 /></span>
+        <div>
+          <strong>Создать заказ на выкуп вручную</strong>
+          <span>Покупатель не активировал код <b>{order.activationCode}</b>. Вставьте ссылку или ID геймпасса — заказ уйдёт в общую очередь выкупа с пометкой DBS.</span>
+        </div>
+      </div>
+      <div className={css.buyoutInputs}>
+        <input value={gamepass} onChange={(event) => editGamepass(event.target.value)} placeholder="roblox.com/game-pass/… или ID" aria-label="Геймпасс" />
+        <button type="button" disabled={!gamepass.trim() || Boolean(busy)} onClick={() => void check()}>{busy === "preview" ? <Loader2 className={css.spin} /> : <Search />} Проверить</button>
+      </div>
+      {preview && (
+        <div className={css.buyoutPreview}>
+          <div><span>Геймпасс</span><strong>{preview.name}</strong></div>
+          <div><span>Ник Roblox</span><input value={nick} onChange={(event) => setNick(event.target.value)} aria-label="Ник Roblox" /></div>
+          <div><span>Цена пасса</span><strong className={preview.priceOk ? css.goodText : css.badText}>{preview.price.toLocaleString("ru-RU")} R$</strong><small>{preview.expectedPrice ? `ожидается ${preview.expectedPrice.toLocaleString("ru-RU")} R$ за ${preview.denomination} R$` : "номинал не настроен"}</small></div>
+          <div><span>Продаётся</span><strong className={preview.isForSale ? css.goodText : css.badText}>{preview.isForSale ? "да" : "нет"}</strong>{preview.duplicate ? <small className={css.badText}>уже есть заказ {preview.duplicate.wbCode}</small> : null}</div>
+        </div>
+      )}
+      {error && <div className={css.buyoutError}><AlertTriangle /> {error}</div>}
+      <div className={css.buyoutActions}>
+        <button type="button" disabled={!preview || Boolean(busy)} onClick={() => void create(false)}>
+          {busy === "create" ? <Loader2 className={css.spin} /> : <Check />} Создать заказ на выкуп
+        </button>
+        {blocked && preview && (
+          <button
+            type="button"
+            className={css.buyoutForce}
+            disabled={Boolean(busy)}
+            onClick={() => window.confirm("Создать заказ, несмотря на предупреждение? Проверьте цену и продавца — выкуп пойдёт по этим данным.") && void create(true)}
+          >
+            Всё равно создать
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }

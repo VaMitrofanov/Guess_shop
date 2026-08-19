@@ -18,12 +18,37 @@ export function notifyDbsNewOrder(wbOrderId: string, denomination: number | null
   broadcast(`📦 <b>DBS: новый заказ</b>\nWB #${escapeHtml(wbOrderId)}${denomLine}${priceLine}`);
 }
 
-export function notifyDbsBuyerMessage(wbOrderId: string, senderName: string, textPreview: string) {
+export function notifyDbsBuyerMessage(wbOrderId: string, buyerName: string | null, textPreview: string) {
   const preview = textPreview.length > 120 ? textPreview.slice(0, 117) + "…" : textPreview;
+  const who = buyerName ? `${escapeHtml(buyerName)} · WB #${escapeHtml(wbOrderId)}` : `WB #${escapeHtml(wbOrderId)}`;
   broadcast(
     `💬 <b>DBS: сообщение покупателя</b>\n` +
-    `WB #${escapeHtml(wbOrderId)}\n` +
+    `${who}\n` +
     `<i>${escapeHtml(preview)}</i>`,
+  );
+}
+
+/** A WB cancellation is never routine: the buyer's money went back, and
+ * whatever we opened on the back of that order has to stop. The message says
+ * plainly what was done automatically and what still needs a person. */
+export function notifyDbsOrderCancelled(
+  wbOrderId: string,
+  wbStatus: string,
+  activationCode: string | null,
+  internalStatus: string | null,
+  outcome: "rejected" | "needs_human" | "no_internal_order",
+) {
+  const tail = outcome === "rejected"
+    ? `Заказ на выкуп <code>${escapeHtml(activationCode ?? "")}</code> закрыт автоматически (был ${escapeHtml(internalStatus ?? "—")}).`
+    : outcome === "needs_human"
+      ? `⚠️ Заказ на выкуп <code>${escapeHtml(activationCode ?? "")}</code> в статусе <b>${escapeHtml(internalStatus ?? "—")}</b> — робуксы могли уже уйти. Разберите вручную во вкладке «Заказы».`
+      : activationCode
+        ? `Гейт <code>${escapeHtml(activationCode)}</code> был выдан, но покупатель его не активировал — заказ остаётся в разделе DBS как «Нужна проверка».`
+        : `Гейт не выпускался — делать ничего не нужно.`;
+  broadcast(
+    `🚫 <b>DBS: заказ отменён на WB</b>\n` +
+    `WB #${escapeHtml(wbOrderId)} · <i>${escapeHtml(wbStatus)}</i>\n` +
+    tail,
   );
 }
 
