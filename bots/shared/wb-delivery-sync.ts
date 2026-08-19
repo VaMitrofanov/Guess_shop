@@ -761,6 +761,8 @@ async function syncBuyerNames(db: Db, out: WbDeliverySyncResult) {
 type StatusTarget = {
   id: string;
   wbOrderId: string;
+  supplierStatus: string;
+  wbStatus: string;
   cancelledAt: Date | null;
   completedAt: Date | null;
 };
@@ -768,6 +770,8 @@ type StatusTarget = {
 const STATUS_TARGET_SELECT = {
   id: true,
   wbOrderId: true,
+  supplierStatus: true,
+  wbStatus: true,
   cancelledAt: true,
   completedAt: true,
 } as const;
@@ -782,6 +786,18 @@ async function applyWbStatus(
 ) {
   const { cancelled, completed } = wbMarketplaceTerminalFlags(status.supplierStatus, status.wbStatus);
   const now = new Date();
+  const errorCode = status.errors[0]?.code ? `WB_${status.errors[0].code}` : undefined;
+  // Most polls find nothing new. Writing anyway would bump `updatedAt` on every
+  // cycle, and the queue is sorted by it — the list would reshuffle under the
+  // operator's cursor once a minute for no reason.
+  const settled =
+    (!status.supplierStatus || status.supplierStatus === order.supplierStatus) &&
+    (!status.wbStatus || status.wbStatus === order.wbStatus) &&
+    cancelled === Boolean(order.cancelledAt) &&
+    (cancelled ? !order.completedAt : completed === Boolean(order.completedAt)) &&
+    !errorCode;
+  if (settled) return;
+
   await db.wbMarketplaceOrder.update({
     where: { id: order.id },
     data: {
@@ -794,7 +810,7 @@ async function applyWbStatus(
       // stays filed under "Готово" while WB has already refunded the buyer.
       completedAt: cancelled ? null : completed ? order.completedAt ?? now : undefined,
       lastSeenAt: now,
-      lastErrorCode: status.errors[0]?.code ? `WB_${status.errors[0].code}` : undefined,
+      lastErrorCode: errorCode,
     },
   });
   out.statuses += 1;
@@ -877,13 +893,21 @@ async function syncStatuses(db: Db, out: WbDeliverySyncResult) {
  * refusals as a status change on an order it had already handed over
  * (`receive/canceled`), and a buyer can decline at the door long after we filed
  * the order away. The open-order poll can never see those, because it only
- * looks at orders with no `completedAt`. */
+ * looks at orders with no `completedAt`.
+ *
+ * Cancelled orders are swept too. They are already terminal, but their stored
+ * status text can be stale — an order cancelled on WB while our own row still
+ * read `completed` showed «Отменён» and «Завершён» side by side. `applyWbStatus`
+ * writes nothing once a row agrees with WB, so re-reading them is free. */
 async function recheckClosedOrders(db: Db, out: WbDeliverySyncResult) {
   const since = new Date(Date.now() - CLOSED_RECHECK_DAYS * 24 * 60 * 60 * 1_000);
   const closed = await db.wbMarketplaceOrder.findMany({
-    where: { isTest: false, cancelledAt: null, completedAt: { gte: since } },
+    where: {
+      isTest: false,
+      OR: [{ completedAt: { gte: since } }, { cancelledAt: { gte: since } }],
+    },
     select: STATUS_TARGET_SELECT,
-    orderBy: { completedAt: "desc" },
+    orderBy: { lastSeenAt: "desc" },
     take: 300,
   });
   await fetchAndApplyStatuses(db, closed, out);
