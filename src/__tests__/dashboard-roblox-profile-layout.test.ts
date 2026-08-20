@@ -30,12 +30,24 @@ describe("dashboard Roblox-first hero", () => {
     expect(profile).toContain("Добавить ник");
   });
 
-  it("uses the dedicated avatar proxy and falls back to an icon if it fails", () => {
-    expect(profile).toContain("/api/account/roblox-avatar/");
+  // Аватар обязан грузиться БРАУЗЕРОМ. С RF-хоста `tr.rbxcdn.com` не резолвится
+  // (CNAME обрывается на `trns1.rbxcdn.com` без A-записи), поэтому любой путь,
+  // который тянет картинку с нашей стороны, обречён: оптимизатор Next отдаёт
+  // 500, а прежний прокси `/api/account/roblox-avatar/` — 502. У покупателя тот
+  // же адрес резолвится, и картинка приходит.
+  it("loads the avatar in the browser and falls back to an icon if it fails", () => {
+    expect(profile).toContain("unoptimized");
     expect(profile).not.toContain("/_next/image");
+    expect(profile).not.toContain("/api/account/roblox-avatar/");
     expect(profile).toContain("onError={() => markAvatarFailed(visibleMainAvatarUrl)}");
     expect(profile).toContain("onError={() => markAvatarFailed(visibleAvatarUrl)}");
     expect(profile).toContain("<UserRound size={42} />");
+  });
+
+  it("checkout carries the same rule on every Roblox image", () => {
+    const checkout = readFileSync(path.join(ROOT, "src/app/checkout/page.tsx"), "utf8");
+    const optimized = checkout.match(/<Image (?![^>]*unoptimized)[^>]*>/g) ?? [];
+    expect(optimized).toEqual([]);
   });
 
   it("protects long Roblox names from horizontal overflow on mobile", () => {

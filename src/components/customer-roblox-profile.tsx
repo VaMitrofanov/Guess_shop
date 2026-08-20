@@ -41,8 +41,8 @@ function profileDate(value: string | null) {
   return new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(new Date(value));
 }
 
-function profileAvatarSrc(accountId: string | null | undefined) {
-  return accountId ? `/api/account/roblox-avatar/${encodeURIComponent(accountId)}` : null;
+function profileAvatarSrc(avatarUrl: string | null | undefined) {
+  return avatarUrl || null;
 }
 
 export default function CustomerRobloxProfileCard({
@@ -140,9 +140,11 @@ export default function CustomerRobloxProfileCard({
   const checkoutHref = profile
     ? `/checkout?accountId=${encodeURIComponent(profile.accountId)}&username=${encodeURIComponent(profile.username)}`
     : "/checkout";
-  // The proxy streams the official image as-is. Next's production image
-  // optimizer can fail before returning the image, so avatars bypass it.
-  const mainAvatarUrl = profileAvatarSrc(profile?.accountId);
+  // Картинку тянет браузер, а не мы. `tr.rbxcdn.com` с RF-хоста не резолвится
+  // вовсе — CNAME обрывается на `trns1.rbxcdn.com` без A-записи, — так что и
+  // оптимизатор Next (500), и прежний серверный прокси (502) были обречены.
+  // У покупателя тот же адрес резолвится нормально.
+  const mainAvatarUrl = profileAvatarSrc(profile?.avatarUrl);
   const visibleMainAvatarUrl = mainAvatarUrl && !failedAvatarUrls.has(mainAvatarUrl)
     ? mainAvatarUrl
     : null;
@@ -177,7 +179,7 @@ export default function CustomerRobloxProfileCard({
             <span>Аккаунт для покупки</span>
             <div>
               {payload.accounts.map((item) => {
-                const avatarUrl = profileAvatarSrc(item.accountId);
+                const avatarUrl = profileAvatarSrc(item.avatarUrl);
                 const visibleAvatarUrl = avatarUrl && !failedAvatarUrls.has(avatarUrl) ? avatarUrl : null;
                 return (
                   <button

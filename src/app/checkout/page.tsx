@@ -2,6 +2,14 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+// Каждая картинка Roblox на этой странице отдаётся браузеру как есть
+// (`unoptimized`), и это не украшение, а единственный рабочий вариант.
+// Оптимизатор Next тянет исходник СО СВОЕЙ стороны, а `tr.rbxcdn.com` с
+// RF-хоста не резолвится вообще: цепочка CNAME обрывается на `trns1.rbxcdn.com`
+// без A-записи, и запрос падает с `ENOTFOUND` → `/_next/image` отдаёт 500.
+// У браузера покупателя тот же адрес резолвится нормально, поэтому картинку
+// грузит он. По той же причине не работал и серверный прокси-роут
+// `/api/account/roblox-avatar/` — он делал ровно тот же обречённый fetch.
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import {
@@ -563,7 +571,7 @@ function CheckoutContent() {
             <div className={styles.quickProfileHead}>
               <span className={styles.quickAvatar}>
                 {(account?.avatarUrl || selectedKnownAccount?.avatarUrl)
-                  ? <Image src={(account?.avatarUrl || selectedKnownAccount?.avatarUrl)!} width={84} height={84} alt={`Аватар ${username}`} />
+                  ? <Image src={(account?.avatarUrl || selectedKnownAccount?.avatarUrl)!} width={84} height={84} alt={`Аватар ${username}`} unoptimized />
                   : <UserRound size={31} />}
               </span>
               <div>
@@ -584,7 +592,7 @@ function CheckoutContent() {
                     disabled={profileBusy}
                     aria-pressed={item.accountId === selectedKnownAccountId}
                   >
-                    {item.avatarUrl ? <Image src={item.avatarUrl} width={30} height={30} alt="" /> : <UserRound size={16} />}
+                    {item.avatarUrl ? <Image src={item.avatarUrl} width={30} height={30} alt="" unoptimized /> : <UserRound size={16} />}
                     <span><strong>{item.displayName}</strong><small>@{item.username}</small></span>
                   </button>
                 ))}
@@ -721,7 +729,7 @@ function CheckoutContent() {
               </div>
               <p className={styles.helper}>По нику проверяем все публичные игры автоматически. По ссылке или ID — сразу открываем нужный геймпасс.</p>
               {username && !searching && <div className={styles.accountChip}>
-                <span className={styles.accountAvatar}>{account?.avatarUrl ? <Image src={account.avatarUrl} width={150} height={150} alt={`Аватар ${username}`} /> : username.slice(0,1).toUpperCase()}</span>
+                <span className={styles.accountAvatar}>{account?.avatarUrl ? <Image src={account.avatarUrl} width={150} height={150} alt={`Аватар ${username}`} unoptimized /> : username.slice(0,1).toUpperCase()}</span>
                 <div><small>Аккаунт найден</small><strong>{account?.displayName || username}</strong>{account?.displayName && account.displayName !== username && <em>@{username}</em>}</div><Check size={18} />
               </div>}
             </div>
@@ -736,7 +744,7 @@ function CheckoutContent() {
                       const active = String(selectedPass?.id ?? "") === String(pass.id);
                       const passRobux = robuxForGamepassPrice(Number(pass.price));
                       return <button type="button" key={String(pass.id)} onClick={() => selectPass(pass)} className={active ? styles.passSelected : styles.passCard}>
-                        <span className={styles.passImage}>{pass.image ? <Image src={pass.image} width={150} height={150} alt="" /> : <WalletCards size={22} />}</span>
+                        <span className={styles.passImage}>{pass.image ? <Image src={pass.image} width={150} height={150} alt="" unoptimized /> : <WalletCards size={22} />}</span>
                         <span className={styles.passInfo}><strong>{pass.name}</strong><small>Цена пасса · {Number(pass.price).toLocaleString("ru-RU")} R$</small><em className={matches ? styles.priceOk : passRobux ? styles.priceAlternative : styles.priceWrong}>{matches ? `Получишь ${robux.toLocaleString("ru-RU")} R$` : passRobux ? `Купить ${passRobux.toLocaleString("ru-RU")} R$ через этот пасс` : "Вне доступного диапазона"}</em></span>
                         {active && <Check size={19} />}
                       </button>;
@@ -769,12 +777,12 @@ function CheckoutContent() {
             <div className={styles.panelHeading}><span className={styles.panelIcon}><Check size={21} /></span><div><span>Заказ готов</span><h2>Проверь данные</h2></div></div>
             <div className={styles.confirmPair}>
               <div className={styles.confirmIdentity}>
-                <span className={styles.confirmAvatar}>{account?.avatarUrl ? <Image src={account.avatarUrl} width={150} height={150} alt={`Аватар ${username}`} /> : <UserRound size={25} />}</span>
+                <span className={styles.confirmAvatar}>{account?.avatarUrl ? <Image src={account.avatarUrl} width={150} height={150} alt={`Аватар ${username}`} unoptimized /> : <UserRound size={25} />}</span>
                 <div><small>Roblox-аккаунт</small><strong>{account?.displayName || username}</strong><span>@{username}</span></div>
               </div>
               <ArrowRight className={styles.confirmArrow} size={22} aria-hidden="true" />
               <div className={styles.confirmIdentity}>
-                <span className={styles.passImage}>{selectedPass?.image ? <Image src={selectedPass.image} width={150} height={150} alt={`Геймпасс ${selectedPass.name}`} /> : <WalletCards size={22} />}</span>
+                <span className={styles.passImage}>{selectedPass?.image ? <Image src={selectedPass.image} width={150} height={150} alt={`Геймпасс ${selectedPass.name}`} unoptimized /> : <WalletCards size={22} />}</span>
                 <div><small>Геймпасс для покупки</small><strong>{selectedPass?.name}</strong><span>{selectedPass?.price.toLocaleString("ru-RU")} R$ · ID {selectedPass?.id}</span></div>
               </div>
             </div>
