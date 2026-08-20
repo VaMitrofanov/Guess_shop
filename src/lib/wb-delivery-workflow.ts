@@ -925,7 +925,16 @@ export async function performWbDeliveryAction(
   const input = parsed.data;
   if (input.action === "sync") {
     const sync = await runWbDeliverySync(prisma, { force: true });
-    if (sync.errorCode) throw new WbDeliveryWorkflowError(`Синхронизация остановлена: ${sync.errorCode}`, 502, sync.errorCode);
+    // Цикл больше не «всё или ничего»: WB — это два независимых сервиса, и
+    // упавший чат не отменяет работу с заказами. Поэтому ошибка здесь означает
+    // «часть шагов не прошла», а не «ничего не сделано».
+    if (sync.errorCode) {
+      throw new WbDeliveryWorkflowError(
+        `Синхронизация прошла частично: ${sync.errorCode}. Остальные шаги выполнены — проверьте, отвечает ли WB.`,
+        502,
+        sync.errorCode,
+      );
+    }
     return { ok: true, message: "Данные WB синхронизированы", sync };
   }
 

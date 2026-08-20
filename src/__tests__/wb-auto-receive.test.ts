@@ -94,7 +94,7 @@ describe("automatic WB delivery close", () => {
     expect(retrySweep).toContain("consumedAt: null");
     expect(retrySweep).toContain("WB_RECEIVE_MAX_ATTEMPTS");
     // Wired into the cycle, not just defined.
-    expect(worker).toContain("await retryAutoReceive(db)");
+    expect(worker).toContain('await step("auto-receive", () => retryAutoReceive(db))');
   });
 
   /** Every skip used to be a bare `return`: no audit row, no message, and from
@@ -119,7 +119,26 @@ describe("automatic WB delivery close", () => {
     expect(autoShip).toContain("cancelledAt: null");
     // Runs before the retry sweep: an order already in `deliver` is one the
     // buyer's code can close on arrival.
-    expect(worker.indexOf("await tryAutoShip(db, out)")).toBeLessThan(worker.indexOf("await retryAutoReceive(db)"));
+    const cycle = worker.slice(worker.indexOf("export async function runWbDeliverySync"));
+    expect(cycle.indexOf('await step("auto-ship"')).toBeLessThan(cycle.indexOf('await step("auto-receive"'));
+  });
+
+  /** WB — это два независимых сервиса, и 20.08 лёг только чат: 500 на
+   * `/seller/chats`, 504 на `/seller/events`, при этом marketplace отвечал 200.
+   * Цикл был «всё или ничего», поэтому вместе с чатом переставали работать и
+   * опрос статусов, и автоперевод в доставку, и автозакрытие — то есть падение
+   * необязательного сервиса съедало единственный дедлайн, который не отыграть. */
+  it("keeps closing deliveries when WB's chat service is down", () => {
+    const cycle = worker.slice(worker.indexOf("export async function runWbDeliverySync"));
+    // Каждый шаг изолирован общим хелпером, а не голым await.
+    expect(cycle).toContain('await step("chat-events"');
+    expect(cycle).toContain('await step("auto-ship"');
+    expect(cycle).toContain('await step("auto-receive"');
+    // Обязательства перед WB идут после чата — и обязаны выполняться, даже
+    // когда чат уже упал.
+    expect(cycle.indexOf('await step("auto-ship"')).toBeGreaterThan(cycle.indexOf('await step("chat-events"'));
+    // Частичный отказ виден: «здоров» ставится только когда не упало ничего.
+    expect(cycle).toContain("failures.length ? `DEGRADED:");
   });
 
   it("purges the buyer's code in the same transaction that closes the order", () => {

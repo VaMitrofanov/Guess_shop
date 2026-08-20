@@ -1361,45 +1361,90 @@ async function remindUnopenedGates(db: Db, out: WbDeliverySyncResult) {
 
 /** Read-only WB synchronization. It never confirms, delivers, receives or sends
  * a buyer message; all provider mutations remain explicit operator actions. */
+/** Один цикл синхронизации.
+ *
+ * Каждый шаг изолирован. Раньше цикл был «всё или ничего», и это ровно та же
+ * ошибка, что и `lastErrorCode` внутри отдельного заказа, только уровнем выше:
+ * контур ходит в **два независимых сервиса WB** — `marketplace-api` (заказы,
+ * статусы, смена статуса) и `buyer-chat-api` (чат покупателя). Когда 20.08 лёг
+ * чат (500 на `/seller/chats`, 504 на `/seller/events`), исключение из
+ * `syncChatEvents` обрывало цикл до всего остального — и вместе с чатом
+ * переставали работать опрос статусов, автоперевод в доставку и автозакрытие,
+ * хотя marketplace в это время отвечал 200.
+ *
+ * Теперь падение одного шага записывается на его собственный курсор и цикл идёт
+ * дальше. `errorCode` в результате остаётся — консоль по-прежнему покажет
+ * оператору, что чат недоступен, — но работа, которая от чата не зависит, уже
+ * сделана. */
 export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {}): Promise<WbDeliverySyncResult> {
   const out = result();
   let leaseId: string | null = null;
+  const failures: string[] = [];
+
+  /** Выполняет шаг, не давая ему уронить остальные. */
+  const step = async (name: string, run: () => Promise<void>, stream?: string) => {
+    try {
+      await run();
+    } catch (error) {
+      const code = safeErrorCode(error);
+      failures.push(`${name}:${code}`);
+      out.errorCode ??= code;
+      console.error(`[WbDbsSync] ${name} failed: ${code}`);
+      if (stream) {
+        await touchCursor(db, stream, { lastAttemptAt: new Date(), lastErrorCode: code }).catch(() => {});
+      }
+    }
+  };
+
   try {
     leaseId = await acquireLease(db);
     if (!leaseId) return out;
     out.acquired = true;
     const force = options.force === true;
 
-    await purgeExpiredDeliverySecrets(db);
+    await step("purge", () => purgeExpiredDeliverySecrets(db));
 
-    const response = await fetchNewDbsOrders();
-    const datesResponse = await fetchDbsDeliveryDates(response.orders.map((order) => order.id));
-    const dates = new Map(datesResponse.orders.map((row) => [row.id, row]));
-    for (const order of response.orders) {
-      const existed = await db.wbMarketplaceOrder.findUnique({ where: { wbOrderId: order.id }, select: { id: true } });
-      const record = await upsertMarketplaceOrder(db, order, dates.get(order.id), "new");
-      if (!existed) {
-        // Карточка заказа заменяет прежнее отдельное «новый заказ»: дальше она
-        // же будет обновляться на каждом шаге вместо новых сообщений.
-        await refreshDbsCard(db, record.id).catch(() => {});
+    await step("new-orders", async () => {
+      const response = await fetchNewDbsOrders();
+      const datesResponse = await fetchDbsDeliveryDates(response.orders.map((order) => order.id));
+      const dates = new Map(datesResponse.orders.map((row) => [row.id, row]));
+      for (const order of response.orders) {
+        const existed = await db.wbMarketplaceOrder.findUnique({ where: { wbOrderId: order.id }, select: { id: true } });
+        const record = await upsertMarketplaceOrder(db, order, dates.get(order.id), "new");
+        if (!existed) {
+          // Карточка заказа заменяет прежнее отдельное «новый заказ»: дальше она
+          // же будет обновляться на каждом шаге вместо новых сообщений.
+          await refreshDbsCard(db, record.id).catch(() => {});
+        }
+        out.newOrders += 1;
       }
-      out.newOrders += 1;
-    }
+    });
 
-    if (await streamDue(db, CHATS_STREAM, 60_000, force)) await syncChatDirectory(db, out);
-    await syncChatEvents(db, out);
-    await backfillDeliveryCodes(db, out);
-    // Ladder first: an order already in `deliver` is one the buyer's code can
-    // close on arrival, which is the whole point of doing this automatically.
-    await tryAutoShip(db, out);
-    // Then pick up anything whose single chance at capture time was lost.
-    await retryAutoReceive(db);
-    await alertStuckDeliveries(db);
-    if (await streamDue(db, STATUSES_STREAM, 60_000, force)) await syncStatuses(db, out);
+    // ── Чат покупателя: buyer-chat-api ────────────────────────────────────
+    if (await streamDue(db, CHATS_STREAM, 60_000, force)) {
+      await step("chat-directory", () => syncChatDirectory(db, out), CHATS_STREAM);
+    }
+    await step("chat-events", () => syncChatEvents(db, out), EVENTS_STREAM);
+    await step("backfill-codes", () => backfillDeliveryCodes(db, out));
+
+    // ── Обязательства перед WB: marketplace-api ───────────────────────────
+    // Всё ниже не зависит от чата и обязано идти, даже если чат недоступен:
+    // окно на закрытие доставки — единственный дедлайн, который не отыграть.
+    await step("auto-ship", () => tryAutoShip(db, out));
+    await step("auto-receive", () => retryAutoReceive(db));
+    await step("stuck-alert", () => alertStuckDeliveries(db));
+
+    if (await streamDue(db, STATUSES_STREAM, 60_000, force)) {
+      await step("statuses", () => syncStatuses(db, out), STATUSES_STREAM);
+    }
     // Returns and refusals arrive on orders we already closed, so the finished
     // pile is swept on its own slower cadence.
-    if (await streamDue(db, RECHECK_STREAM, 10 * 60_000, force)) await recheckClosedOrders(db, out);
-    if (await streamDue(db, COMPLETED_STREAM, 5 * 60_000, force)) await syncCompleted(db, out);
+    if (await streamDue(db, RECHECK_STREAM, 10 * 60_000, force)) {
+      await step("closed-recheck", () => recheckClosedOrders(db, out), RECHECK_STREAM);
+    }
+    if (await streamDue(db, COMPLETED_STREAM, 5 * 60_000, force)) {
+      await step("completed", () => syncCompleted(db, out), COMPLETED_STREAM);
+    }
     // A nicer label is never worth a failed cycle: WB serves buyer data only
     // after `confirm`, so misses are routine and stay out of the error path.
     if (await streamDue(db, CLIENTS_STREAM, 60_000, force)) {
@@ -1415,12 +1460,15 @@ export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {
       await touchCursor(db, REMINDERS_STREAM, { lastAttemptAt: new Date(), lastSuccessAt: new Date() });
     }
 
+    // «Здоров» — только когда действительно всё прошло. Частичный отказ виден
+    // и по статусу, и по составу: оператору важно, ЧТО именно не работает.
+    const status = failures.length ? `DEGRADED:${failures[0]}`.slice(0, 160) : "HEALTHY";
     await db.serviceHeartbeat.upsert({
       where: { serviceKey: HEARTBEAT_KEY },
-      create: { serviceKey: HEARTBEAT_KEY, lastSeenAt: new Date(), status: "HEALTHY" },
-      update: { lastSeenAt: new Date(), status: "HEALTHY" },
+      create: { serviceKey: HEARTBEAT_KEY, lastSeenAt: new Date(), status },
+      update: { lastSeenAt: new Date(), status },
     });
-    await releaseLease(db, leaseId, null);
+    await releaseLease(db, leaseId, failures.length ? out.errorCode : null);
     return out;
   } catch (error) {
     const errorCode = safeErrorCode(error);
