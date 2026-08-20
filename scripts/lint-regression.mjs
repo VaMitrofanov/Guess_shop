@@ -102,8 +102,16 @@ import { ESLint } from "eslint";
 // сдвинулся только из-за смещения существующих строк в `tg/handlers.ts`,
 // `vk/handlers.ts`, `GuideClient.tsx` и `WBInstructionV2.tsx`.
 //
-const BASELINE_WARNING_COUNT = 1086;
-const BASELINE_SHA256 = "9a866f65f73535a00629412db44f1ce232b6597af940229b8b6f55238405b4f1";
+// 2026-08-20 (1086 → 1084): скидка 60 ₽ переехала из двух копий в общий модуль
+// `bots/shared/direct-discount.ts`, типизированный против `PrismaClient`. Обе
+// прежние точки начисления писали `(db as any).user.update` / `(prisma as any)
+// .user.update` — ровно эти два предупреждения и ушли. Новых нет: сверено
+// полным lint-diff рабочего дерева против stash — множество warning совпадает
+// строка в строку, кроме этих двух. Остальной сдвиг отпечатка — смещение строк
+// в `bots/shared/notify.ts`, `bridge.ts` и `wb-delivery-sync.ts`, куда легли
+// дедуп живой карточки и `tgDelete`.
+const BASELINE_WARNING_COUNT = 1084;
+const BASELINE_SHA256 = "2bdbbdbe009a6a094c946730699ba71458908bd22d5810b56ae0186f027b81e4";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);

@@ -55,6 +55,7 @@ import {
   notifyDbsDeliveryStuck,
   notifyDbsGateNotOpened,
   pushDbsCard,
+  renderDbsCard,
   type DbsCardState,
 } from "./wb-delivery-admin-notify";
 import { mskTime } from "./notify-format";
@@ -355,6 +356,20 @@ function isBuyerSender(sender: string) {
   return !/seller|supplier|manager/i.test(sender);
 }
 
+/** Сообщение, в котором нет ничего, кроме кода доставки.
+ *
+ * Такое сообщение целиком обрабатывает автоматика: код захватывается,
+ * доставка закрывается, гейт уходит — оператору делать нечего, и в живой
+ * карточке всё это уже видно строкой «код получен». Отдельное «сообщение
+ * покупателя» на него было шумом ровно там, где заказ идёт лучше всего.
+ *
+ * Если рядом с цифрами написано хоть слово — «а куда его вводить?» — это уже
+ * вопрос человеку, и уведомление уходит как обычно. */
+function isNothingButDeliveryCode(rawText: string, deliveryCode: string | null): boolean {
+  if (!deliveryCode) return false;
+  return !/\p{L}/u.test(rawText);
+}
+
 const GUIDE_ORIGIN = (process.env.NEXT_PUBLIC_APP_URL || "https://robloxbank.ru").replace(/\/$/, "");
 
 /** Подписи этапов для живой карточки. Берутся из аудита — он и так пишет
@@ -417,13 +432,24 @@ async function refreshDbsCard(db: Db, orderId: string) {
   const existing = order.adminCardMessages && typeof order.adminCardMessages === "object" && !Array.isArray(order.adminCardMessages)
     ? order.adminCardMessages as Record<string, number>
     : null;
+
+  // Один захваченный код вызывает refresh трижды за секунду — из auto-receive,
+  // из auto-gate и из самого захвата. Два последних вызова видят то же самое
+  // состояние, и пересылать по ним карточку незачем: если id сообщения по
+  // какой-то причине не сохранился, каждый такой вызов превращается в дубль.
+  const hash = dbsCardHash(renderDbsCard(state));
+  if (order.adminCardHash === hash && existing && Object.keys(existing).length) return;
+
   const updated = await pushDbsCard(state, existing);
-  if (JSON.stringify(updated) !== JSON.stringify(existing ?? {})) {
-    await db.wbMarketplaceOrder.update({
-      where: { id: orderId },
-      data: { adminCardMessages: updated },
-    }).catch(() => {});
-  }
+  await db.wbMarketplaceOrder.update({
+    where: { id: orderId },
+    data: { adminCardMessages: updated, adminCardHash: hash },
+  }).catch(() => {});
+}
+
+/** Короткий отпечаток текста карточки. Не крипто — только «изменилось или нет». */
+function dbsCardHash(text: string): string {
+  return crypto.createHash("sha256").update(text).digest("base64url").slice(0, 22);
 }
 
 /** Заголовок карточки: маркер, что произошло и что дальше. Порядок проверок
@@ -995,7 +1021,12 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
 
     if (order) await rememberBuyerName(db, order, wbChatClientName(event), out);
 
-    if (isNewEvent && isBuyerSender(event.sender) && order && rawText && !order.completedAt && !order.cancelledAt) {
+    // Код доставки — не «сообщение покупателя»: его целиком обрабатывает
+    // автоматика, оператору делать по нему нечего, а в карточке он и так виден
+    // строкой «код получен». Отдельное уведомление на него было чистым шумом
+    // ровно там, где заказ идёт лучше всего.
+    if (isNewEvent && isBuyerSender(event.sender) && order && rawText
+      && !isNothingButDeliveryCode(rawText, deliveryCode) && !order.completedAt && !order.cancelledAt) {
       notifyDbsBuyerMessage(order.wbOrderId, order.buyerName, rawText);
     }
 

@@ -11,6 +11,7 @@ import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { vkSend, vkSendPhoto, stripHtml, tgSend, escapeHtml } from "../shared/notify";
 import { getSbpQrBuffer } from "../shared/sbp";
+import { grantDirectDiscountOnCompletion } from "../shared/direct-discount";
 import { sendAdminReviewCard, notifySupportShown, notifyUserHurdle, notifyAdminsRetailBuyout, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, formatUserHandleHtml, orderCode } from "../shared/admin";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingDirectPaymentEmail, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
 import { getGamepassDetails, getGamepassProductInfo, purchaseGamepassVerified, getRobuxBalance, resetPurchaseCsrf } from "../shared/roblox";
@@ -5620,15 +5621,20 @@ export async function notifyUserCompleted(
     ? await (db as any).wbCode.findFirst({ where: { code: order.wbCode }, select: { reviewBonusClaimed: true } })
     : null;
 
-  // Post-purchase discount: direct orders < 500 R$ get 60₽ off next order
-  const discountGranted = isDirectOrder && amount < 500;
-  if (discountGranted) {
-    try {
-      await (db as any).user.update({ where: { id: user.id }, data: { rubleDiscount: 60 } });
-    } catch (err) {
-      console.error("[TG] Failed to set rubleDiscount:", err);
-    }
-  }
+  // Скидка 60 ₽ на вторую прямую покупку. Правило целиком — в
+  // bots/shared/direct-discount.ts; здесь только его вызов, чтобы бот и веб
+  // не могли разойтись (раньше это были две одинаковые копии, и обе были не тем
+  // правилом, которое имел в виду владелец).
+  const discount = await grantDirectDiscountOnCompletion(db, {
+    userId: user.id,
+    orderId,
+    amount,
+    isDirectOrder,
+  }).catch((err) => {
+    console.error("[TG] Failed to grant the direct discount:", err);
+    return { granted: false as const, reason: "not_direct" as const };
+  });
+  const discountGranted = discount.granted;
 
   const m = buildCompletedMessages({
     isDirectOrder,

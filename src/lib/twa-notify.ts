@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { grantDirectDiscountOnCompletion } from "../../bots/shared/direct-discount";
 
 interface UserRef {
   id: string;
@@ -100,7 +101,8 @@ interface CompletedMessagesInput {
   bonusBalance: number;
   /** WbCode этого заказа существует и reviewBonusClaimed=false (WB-код, отзыв ещё не оплачен). */
   codeUnclaimed: boolean;
-  /** DIR <500 R$ — начислена скидка 60 ₽ (сайд-эффект на вызывающей стороне). */
+  /** Скидка 60 ₽ действительно начислена этим завершением (правило —
+   *  bots/shared/direct-discount.ts, один раз за всё время). */
   discountGranted: boolean;
 }
 
@@ -208,16 +210,19 @@ export async function notifyOrderCompleted(
     ? await (prisma as any).wbCode.findFirst({ where: { code: order.wbCode }, select: { reviewBonusClaimed: true } })
     : null;
 
-  // Скидка 60 ₽ за DIR <500 — как в ботах (notifyUserCompleted); раньше
-  // TWA-путь её не начислял и клиенты одного продукта получали разные условия.
-  const discountGranted = isDirectOrder && amount < 500;
-  if (discountGranted) {
-    try {
-      await (prisma as any).user.update({ where: { id: user.id }, data: { rubleDiscount: 60 } });
-    } catch (err) {
-      console.warn("[twa-notify] failed to set rubleDiscount:", err);
-    }
-  }
+  // Скидка 60 ₽ на вторую прямую покупку — общая политика с ботами
+  // (bots/shared/direct-discount.ts). Здесь была вторая копия правила; копии
+  // расходятся, а эта ещё и начисляла скидку по кругу.
+  const discount = await grantDirectDiscountOnCompletion(prisma, {
+    userId: user.id,
+    orderId,
+    amount,
+    isDirectOrder,
+  }).catch((err) => {
+    console.warn("[twa-notify] failed to grant the direct discount:", err);
+    return { granted: false as const, reason: "not_direct" as const };
+  });
+  const discountGranted = discount.granted;
 
   const m = buildCompletedMessages({
     isDirectOrder,

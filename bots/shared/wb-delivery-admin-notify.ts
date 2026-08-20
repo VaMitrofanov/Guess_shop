@@ -1,4 +1,4 @@
-import { tgSend, tgEdit, escapeHtml } from "./notify";
+import { tgSend, tgEdit, tgDelete, tgMessageId, escapeHtml } from "./notify";
 import {
   denomLine,
   formatAdminNotice,
@@ -21,17 +21,11 @@ function broadcast(notice: AdminNotice) {
   void Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text, { parse_mode: "HTML" })));
 }
 
-export function notifyDbsNewOrder(wbOrderId: string, denomination: number | null, priceKopecks: number | null) {
-  broadcast({
-    marker: "progress",
-    zone: "DBS",
-    title: "заказ принят",
-    lines: [wbOrderRef(wbOrderId, [denomLine(denomination, priceKopecks)])],
-    next: denomination
-      ? "автозапрос кода доставки, как только покупатель откроет чат"
-      : "<b>номинал не найден в каталоге</b> — гейт по этому заказу выпустить нельзя",
-  });
-}
+// Отдельных сообщений на «заказ принят», «ушёл автозапрос», «доставка закрыта»
+// и «гейт отправлен» больше нет: это ровно те четыре шага, которые складывались
+// в кашу из пяти сообщений на заказ. Все они видны в живой карточке
+// (`pushDbsCard`), которая переписывает саму себя. Отдельным сообщением уходит
+// только то, что требует человека — редактирование в Telegram не даёт звука.
 
 export function notifyDbsBuyerMessage(wbOrderId: string, buyerName: string | null, textPreview: string) {
   const preview = textPreview.length > 120 ? textPreview.slice(0, 117) + "…" : textPreview;
@@ -117,26 +111,6 @@ export function notifyDbsCodeCaptured(wbOrderId: string, skip: AutoReceiveSkip =
   });
 }
 
-export function notifyDbsAutoReplySent(wbOrderId: string) {
-  broadcast({
-    marker: "waiting",
-    zone: "DBS",
-    title: "ждём код доставки",
-    lines: [wbOrderRef(wbOrderId)],
-    next: "покупателю ушёл автозапрос — он пришлёт 5–6 цифр в чат WB",
-  });
-}
-
-export function notifyDbsAutoReceived(wbOrderId: string) {
-  broadcast({
-    marker: "done",
-    zone: "DBS",
-    title: "доставка закрыта",
-    lines: [wbOrderRef(wbOrderId)],
-    next: "комиссия зафиксирована по минимуму, секрет удалён",
-  });
-}
-
 export function notifyDbsAutoReceiveFailed(wbOrderId: string, outcomeUnknown: boolean) {
   broadcast({
     marker: "urgent",
@@ -146,16 +120,6 @@ export function notifyDbsAutoReceiveFailed(wbOrderId: string, outcomeUnknown: bo
     next: outcomeUnknown
       ? "<b>сверить кабинет WB перед повтором</b> — исход неизвестен, повторять вслепую нельзя"
       : "<b>закрыть доставку вручную в кабинете WB</b> — гейт покупателю уже отправлен",
-  });
-}
-
-export function notifyDbsAutoGateIssued(wbOrderId: string, activationCode: string) {
-  broadcast({
-    marker: "done",
-    zone: "DBS",
-    title: "гейт отправлен покупателю",
-    lines: [wbOrderRef(wbOrderId, [`код <code>${escapeHtml(activationCode)}</code>`])],
-    next: "покупатель активирует код в боте — дальше обычная очередь выкупа",
   });
 }
 
@@ -271,7 +235,12 @@ export function renderDbsCard(state: DbsCardState): string {
 }
 
 /** Пишет или обновляет карточку у каждого админа.
- * Возвращает новую карту `{ adminId: messageId }` для сохранения на заказе. */
+ * Возвращает новую карту `{ adminId: messageId }` для сохранения на заказе.
+ *
+ * Если Telegram отказался редактировать — сообщение действительно исчезло —
+ * старая карточка удаляется перед отправкой новой. Иначе в чате копится хвост
+ * из устаревших состояний одного и того же заказа: ровно то, что владелец
+ * увидел 20.08 (три карточки по заказу 5536525331 подряд). */
 export async function pushDbsCard(
   state: DbsCardState,
   existing: Record<string, number> | null,
@@ -281,10 +250,13 @@ export async function pushDbsCard(
   const next: Record<string, number> = { ...(existing ?? {}) };
   await Promise.allSettled(ADMIN_IDS.map(async (id) => {
     const known = next[id];
-    if (known && await tgEdit(id, known, text, { parse_mode: "HTML" })) return;
-    const sent = await tgSend(id, text, { parse_mode: "HTML" }) as { result?: { message_id?: number } };
-    const messageId = sent?.result?.message_id;
-    if (typeof messageId === "number") next[id] = messageId;
+    if (known) {
+      if (await tgEdit(id, known, text, { parse_mode: "HTML" })) return;
+      await tgDelete(id, known);
+      delete next[id];
+    }
+    const messageId = tgMessageId(await tgSend(id, text, { parse_mode: "HTML" }));
+    if (messageId !== null) next[id] = messageId;
   }));
   return next;
 }

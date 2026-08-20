@@ -11,6 +11,27 @@ function tgUrl(method: string): string {
   return `https://api.telegram.org/bot${process.env.TG_TOKEN}/${method}`;
 }
 
+/** Telegram's own envelope, plus the shape the SG bridge wraps a refusal in. */
+type TelegramReply = {
+  ok?: boolean;
+  description?: string;
+  result?: { message_id?: number } | null;
+  detail?: { description?: string } | null;
+};
+
+function telegramDescription(body: TelegramReply): string {
+  return body.description ?? body.detail?.description ?? "";
+}
+
+/** The id of a message we just sent, when the transport gave us one.
+ *
+ * Anything that wants to edit its own message later needs this; the bridge used
+ * to drop it, so callers silently lost the handle and re-sent instead. */
+export function tgMessageId(sent: unknown): number | null {
+  const id = (sent as TelegramReply | null)?.result?.message_id;
+  return typeof id === "number" ? id : null;
+}
+
 /** Send a text message to a Telegram chat. Returns the sent message object. */
 export async function tgSend(
   chatId: string | number,
@@ -103,11 +124,51 @@ export async function tgEdit(
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(15_000),
       });
-    const body = await res.json().catch(() => ({})) as { ok?: boolean };
-    return body.ok === true;
+    const body = await res.json().catch(() => ({})) as TelegramReply;
+    if (body.ok === true) return true;
+    // Telegram answers an edit that changes nothing with HTTP 400 "message is
+    // not modified". The message already says exactly this, which is the
+    // outcome we wanted — reading it as failure is what made the caller send a
+    // second identical card. The bridge answers this case as success already;
+    // this covers the direct path.
+    return /message is not modified/i.test(telegramDescription(body));
   } catch (err) {
     console.warn("[notify] tgEdit error:", err instanceof Error ? err.message : err);
     return false;
+  }
+}
+
+/** Remove a message we sent earlier.
+ *
+ * Used when a card has to be re-created — the old one is deleted rather than
+ * left behind, so the chat holds one card per order and not a trail of stale
+ * ones. Never throws: a card that cannot be cleaned up is not worth failing a
+ * sync cycle over. */
+export async function tgDelete(chatId: string | number, messageId: number): Promise<void> {
+  const bridgeUrl = process.env.VALIDATOR_SOURCE_URL?.trim();
+  const validatorKey = process.env.VALIDATOR_KEY?.trim();
+  const payload = { chat_id: chatId, message_id: messageId };
+  try {
+    if (bridgeUrl) {
+      await fetch(`${bridgeUrl}/tg-proxy`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(validatorKey ? { "x-validator-key": validatorKey } : {}),
+        },
+        body: JSON.stringify({ token: process.env.TG_TOKEN, method: "deleteMessage", ...payload }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      return;
+    }
+    await fetch(tgUrl("deleteMessage"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (err) {
+    console.warn("[notify] tgDelete error:", err instanceof Error ? err.message : err);
   }
 }
 

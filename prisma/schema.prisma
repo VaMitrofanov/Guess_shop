@@ -38,6 +38,12 @@ model User {
   balance                Int                 @default(0)
   bonusExpiresAt         DateTime?
   rubleDiscount          Int                 @default(0)
+  /// When the one-time 60 ₽ "second direct purchase" discount was granted.
+  /// The grant is once per lifetime, so this is the idempotency key: without
+  /// it the rule re-fired on every completed direct order under 500 R$ and one
+  /// customer bought five packs at 84 ₽ instead of 144 ₽.
+  /// See `bots/shared/direct-discount.ts`.
+  directDiscountGrantedAt DateTime?
   promoExpiresAt         DateTime?
   promoSentAt            DateTime?
   role                   String              @default("USER")
@@ -1013,6 +1019,11 @@ model WbMarketplaceOrder {
   /// admin gets per DBS order. Editing that message replaces the four or five
   /// separate notifications the chain used to send.
   adminCardMessages    Json?
+  /// Hash of the card text last pushed. A step that changes nothing an admin
+  /// can see — three refreshes fire within one second of a captured code — is
+  /// then not pushed at all, so an unreachable message id can never turn a
+  /// no-op refresh into a duplicate card.
+  adminCardHash        String?
   isTest               Boolean                @default(false)
   firstSeenAt          DateTime               @default(now())
   lastSeenAt           DateTime               @default(now())

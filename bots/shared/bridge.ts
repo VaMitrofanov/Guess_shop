@@ -22,10 +22,34 @@
 import * as http from "http";
 import { getGamepassDetailsDirect, getUserGamepasses, getGamepassForPurchase } from "./roblox";
 
+/** What the bridge hands back to the caller after a Telegram call.
+ *
+ * Read-only community methods return their data verbatim — that is the whole
+ * point of the call. Sends return one field: `message_id`. It is a handle, not
+ * payload — but without it a caller can never edit what it sent, and that is
+ * exactly how one DBS order came to produce three identical admin cards: the
+ * live card looked up an id it had no way of learning, found none, and sent a
+ * fresh message every time. Message text, chat and sender stay off the wire. */
 export function telegramProxySuccessPayload(method: string, result: unknown) {
-  return method === "getChat" || method === "getChatMemberCount"
-    ? { ok: true, result }
-    : { ok: true };
+  if (method === "getChat" || method === "getChatMemberCount") return { ok: true, result };
+  if (method === "sendMessage" || method === "sendPhoto") {
+    const messageId = (result as { message_id?: unknown } | null)?.message_id;
+    if (typeof messageId === "number") return { ok: true, result: { message_id: messageId } };
+  }
+  return { ok: true };
+}
+
+/** Telegram refuses an edit whose text is identical to what the message already
+ * shows. For a card that is success — the card is correct — but it arrives as
+ * HTTP 400, and a caller that reads it as failure falls back to sending, which
+ * is the duplicate. Answered as success so it never becomes one.
+ *
+ * Deliberately narrow: "message to edit not found" stays a failure, because
+ * there the message really is gone and the caller does need to send a new one. */
+function isBenignTelegramRefusal(status: number, description: string): boolean {
+  if (status !== 400) return false;
+  return /message is not modified/i.test(description)
+    || /message to delete not found/i.test(description);
 }
 
 // Allow overriding port via env for cases where 3000 is already in use
@@ -134,6 +158,10 @@ export function startBridgeServer(): http.Server {
           const desc = tgBody.description ?? "";
           if (tgRes.status === 400 && desc.includes("chat not found")) {
             respond(200, { ok: true, warning: "chat_not_found" });
+            return;
+          }
+          if (isBenignTelegramRefusal(tgRes.status, desc)) {
+            respond(200, { ok: true, warning: "no_change" });
             return;
           }
           console.error(
