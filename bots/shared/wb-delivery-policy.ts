@@ -28,6 +28,10 @@ export type WbDeliveryPolicyOrder = {
   /** Roblox nick on the internal order. Separates "still reading the
    * instruction" from "told us who to deliver to" inside the same status. */
   internalRobloxUsername?: string | null;
+  /** How many times WB has already rejected this delivery code. Bounds the
+   * automatic retry without permanently disabling it the way `lastErrorCode`
+   * did. */
+  secretFailedAttempts?: number | null;
 };
 
 /** Where the buyer actually stands inside our own funnel once the gate is out.
@@ -262,13 +266,36 @@ export function canIssueWbGate(order: WbDeliveryPolicyOrder): boolean {
  * delivery, and that deadline cannot be recovered from. Sending the gate can be
  * retried forever — we keep the chat and the code — so closing must never wait
  * on it. A gate that has not gone out is caught by `isWbBuyerUnserved`, which
- * puts the order in front of the operator until it does. */
+ * puts the order in front of the operator until it does.
+ *
+ * `lastErrorCode` used to be a precondition here and it was a one-way ticket:
+ * nothing clears the field automatically, so a chat outage or an expired secret
+ * silently disabled closing for that order forever. Retries are now bounded by
+ * `failedAttempts` on the secret instead — a counter that only the thing it
+ * guards can increment (docs/wb-dbs-review-2026-08-20.md, F2). */
+export const WB_RECEIVE_MAX_ATTEMPTS = 3;
+
 export function canReceiveWbOrder(order: WbDeliveryPolicyOrder): boolean {
   return Boolean(
     !order.completedAt &&
     !order.cancelledAt &&
-    !order.lastErrorCode &&
     order.hasLiveSecret &&
+    (order.secretFailedAttempts ?? 0) < WB_RECEIVE_MAX_ATTEMPTS &&
     /deliver/i.test(order.supplierStatus),
   );
+}
+
+/** Which WB status mutation moves this order one step closer to being closable.
+ *
+ * Nothing in the system used to do this at all: `confirm` and `deliver` were
+ * manual buttons, so an order only became receivable if an operator happened to
+ * push it through the seller cabinet before the buyer sent their code. Once the
+ * auto-reply cut the buyer's response time to minutes, they stopped winning
+ * that race — which is the whole of F1. */
+export function wbAutoShipAction(supplierStatus: string): "confirm" | "deliver" | null {
+  if (/cancel|reject|declin|defect|refus|receive|sold|complete/i.test(supplierStatus)) return null;
+  if (/deliver/i.test(supplierStatus)) return null;
+  if (/confirm/i.test(supplierStatus)) return "deliver";
+  if (/^new$/i.test(supplierStatus.trim())) return "confirm";
+  return null;
 }

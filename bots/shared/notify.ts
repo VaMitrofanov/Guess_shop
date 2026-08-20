@@ -61,6 +61,56 @@ export async function tgSend(
 }
 
 /** Send a photo to a Telegram chat (accepts file_id or HTTPS URL). */
+/** Edit a message we sent earlier, in place.
+ *
+ * A DBS order used to produce four or five separate admin messages as it moved;
+ * ten orders a day buried the queue in fifty. One card per order, rewritten as
+ * the order advances, keeps the whole chain to a single readable message.
+ *
+ * Returns false when Telegram refuses — most often because the text is
+ * unchanged or the message is too old to edit — so the caller can fall back to
+ * sending a fresh one. */
+export async function tgEdit(
+  chatId: string | number,
+  messageId: number,
+  text: string,
+  extra: Record<string, unknown> = {}
+): Promise<boolean> {
+  const bridgeUrl = process.env.VALIDATOR_SOURCE_URL?.trim();
+  const validatorKey = process.env.VALIDATOR_KEY?.trim();
+  const payload = {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    parse_mode: "HTML",
+    disable_web_page_preview: true,
+    ...extra,
+  };
+  try {
+    const res = bridgeUrl
+      ? await fetch(`${bridgeUrl}/tg-proxy`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(validatorKey ? { "x-validator-key": validatorKey } : {}),
+        },
+        body: JSON.stringify({ token: process.env.TG_TOKEN, method: "editMessageText", ...payload }),
+        signal: AbortSignal.timeout(15_000),
+      })
+      : await fetch(tgUrl("editMessageText"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(15_000),
+      });
+    const body = await res.json().catch(() => ({})) as { ok?: boolean };
+    return body.ok === true;
+  } catch (err) {
+    console.warn("[notify] tgEdit error:", err instanceof Error ? err.message : err);
+    return false;
+  }
+}
+
 export async function tgSendPhoto(
   chatId: string | number,
   photo: string,

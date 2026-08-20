@@ -2044,13 +2044,26 @@ const WBG_CSS = `
 .wbg-help-t{display:flex;flex-direction:column;line-height:1.25}
 .wbg-help-t b{font-size:13.5px;color:var(--rb-text);font-weight:800}
 .wbg-help-t span{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;font-weight:700}
-@media(max-width:900px){.wbg-stage{grid-template-columns:1fr;gap:32px;max-width:620px}.wbg-welcome{text-align:center}.wbg-badge{margin-inline:auto}.wbg-welcome>p{margin-inline:auto}}
+@media(max-width:900px){.wbg-stage{grid-template-columns:1fr;gap:32px;max-width:620px}.wbg-welcome{text-align:center}.wbg-badge{margin-inline:auto}.wbg-welcome>p{margin-inline:auto}.wbg-prefilled .wbg-welcome h1,.wbg-prefilled .wbg-welcome .wbg-flow{display:none}.wbg-prefilled .wbg-welcome{padding:0}.wbg-stage.wbg-prefilled{gap:20px}}
 @media(max-width:520px){.wbg-welcome h1{font-size:42px}.wbg-welcome>p{font-size:18px}.wbg-flow{grid-template-columns:1fr}.wbg-flow div{display:flex;align-items:center;gap:8px}.wbg-flow span{margin-top:0}.wbg-card{box-shadow:6px 6px 0 var(--rb-strong)}.wbg-code-callout{right:6px;font-size:11px}.wbg-input{font-size:27px;min-height:68px}}
 @media(prefers-reduced-motion:reduce){.wbg-code-focus::before,.wbg-code-focus::after,.wbg-code-callout{animation:none}}
 `;
 
-function WBGate() {
-  const [code, setCode] = useState("");
+/** Экран кода и мессенджера.
+ *
+ * Это же и есть экран контакта: единственные пути дальше — Telegram и
+ * ВКонтакте, кнопки «продолжить без привязки» здесь нет и не должно быть
+ * (решение владельца О4). Мессенджер и так обязателен, чтобы довести заказ до
+ * конца — шаги 05–06 инструкции требуют прислать ссылку на геймпасс в бота, —
+ * так что экран не добавляет требование, а переносит его в начало пути, где от
+ * него есть польза: если покупатель застрянет, нам будет куда написать.
+ *
+ * `initialCode` приходит из ссылки в чате WB — покупатель его не вводил, и
+ * просить «введи код сюда» было бы враньём. */
+function WBGate({ initialCode = "", initialDenomination = 0 }: { initialCode?: string; initialDenomination?: number } = {}) {
+  const [code, setCode] = useState(initialCode);
+  /** Код подставлен ссылкой: шаг 1 уже пройден, и весь экран — про контакт. */
+  const prefilled = Boolean(initialCode);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [quickTarget, setQuickTarget] = useState<"tg" | "vk" | null>(null);
@@ -2121,14 +2134,16 @@ function WBGate() {
       <div className="flex-1 flex items-center justify-center px-4 py-10 sm:py-16 bg-[var(--rb-bg)] relative overflow-hidden">
         <div className="pointer-events-none absolute -left-48 top-0 h-[560px] w-[560px] rounded-full bg-[#45d6aa]/10 blur-[100px]" />
         <div className="pointer-events-none absolute -right-40 bottom-0 h-[520px] w-[520px] rounded-full bg-[#7556e8]/15 blur-[100px]" />
-        <div className="wbg-root wbg-stage animate-in fade-in zoom-in">
+        <div className={`wbg-root wbg-stage animate-in fade-in zoom-in${prefilled ? " wbg-prefilled" : ""}`}>
           <style>{WBG_CSS}</style>
           <section className="wbg-welcome animate-in fade-in animate-delay-100">
-            <div className="wbg-badge"><ShoppingBag className="w-4 h-4" /> Покупка на Wildberries подтверждена</div>
+            <div className="wbg-badge"><ShoppingBag className="w-4 h-4" /> {prefilled ? "Заказ найден — код подставлен" : "Покупка на Wildberries подтверждена"}</div>
             <h1>Спасибо<br />за покупку.<br /><span>Robux уже близко.</span></h1>
-            <p>Активируй код с карточки и выбери удобный мессенджер. Бот сохранит заказ, покажет инструкцию и сообщит, когда всё готово.</p>
+            <p>{prefilled
+              ? "Остался один шаг — выбери мессенджер. Бот привяжет заказ, откроет инструкцию и будет присылать статус. Без этого мы не сможем связаться с тобой, если что-то пойдёт не так."
+              : "Активируй код с карточки и выбери удобный мессенджер. Бот сохранит заказ, покажет инструкцию и сообщит, когда всё готово."}</p>
             <div className="wbg-flow" aria-label="Что будет дальше">
-              <div><b>01 · Код</b><span>7 символов с карточки</span></div>
+              <div><b>01 · Код</b><span>{prefilled ? "уже подставлен" : "7 символов с карточки"}</span></div>
               <div><b>02 · Бот</b><span>Telegram или VK</span></div>
               <div><b>03 · Robux</b><span>Статус всегда под рукой</span></div>
             </div>
@@ -2142,8 +2157,10 @@ function WBGate() {
                 <Ticket className="w-7 h-7" style={{ color: "#f0c040" }} />
               </div>
               <div className="wbg-eye">Wildberries × RobloxBank</div>
-              <h1 className="wbg-h1">Спасибо за&nbsp;покупку!</h1>
-              <p className="wbg-lead">Два шага — и робуксы у тебя. Это займёт пару минут.</p>
+              <h1 className="wbg-h1">{prefilled ? "Куда прислать заказ?" : "Спасибо за\u00a0покупку!"}</h1>
+              <p className="wbg-lead">{prefilled
+                ? `Выбери мессенджер — там откроется инструкция${initialDenomination ? ` и твои ${initialDenomination.toLocaleString("ru-RU")} R$` : ""}. Займёт пару минут.`
+                : "Два шага — и робуксы у тебя. Это займёт пару минут."}</p>
             </div>
 
             <div className="wbg-hr" style={{ margin: "22px 0" }} />
@@ -2152,7 +2169,7 @@ function WBGate() {
               {/* ── Step 1 — code ─────────────────────────────────── */}
               <div className="wbg-step-h">
                 <span className={`wbg-dot${codeReady ? " done" : ""}`} aria-hidden>{codeReady ? "✓" : "1"}</span>
-                <span className="wbg-ttl">Код с карточки</span>
+                <span className="wbg-ttl">{prefilled ? "Твой код заказа" : "Код с карточки"}</span>
               </div>
               <div className="wbg-code-focus">
                 {!codeReady && <span className="wbg-code-callout">Введи код сюда</span>}
@@ -2165,14 +2182,14 @@ function WBGate() {
                   placeholder="ABC1234"
                   autoComplete="off"
                   autoCapitalize="characters"
-                  autoFocus
+                  autoFocus={!prefilled}
                   spellCheck={false}
                   className={`wbg-input${codeReady ? " ready" : ""}`}
                   aria-label="Уникальный код с карточки"
                 />
               </div>
               <div className="wbg-meta">
-                <span>7 символов с обратной стороны карточки</span>
+                <span>{prefilled ? "Код из чата Wildberries — вводить ничего не нужно" : "7 символов с обратной стороны карточки"}</span>
                 <span className={`wbg-count${codeReady ? " ready" : ""}`}>{code.length}/7</span>
               </div>
 
@@ -2204,7 +2221,7 @@ function WBGate() {
               <div className={`wbg-step2${codeReady ? "" : " locked"}`} style={{ marginTop: 26 }}>
                 <div className="wbg-step-h">
                   <span className="wbg-dot" aria-hidden>2</span>
-                  <span className="wbg-ttl">Твой бот для заказов и робуксов</span>
+                  <span className="wbg-ttl">{prefilled ? "Куда присылать статус заказа" : "Твой бот для заказов и робуксов"}</span>
                 </div>
                 <p className="wbg-t">
                   Выбери мессенджер — бот проведёт по шагам, примет геймпасс и будет присылать статус. В следующий раз можно заказать прямо в нём — быстрее и без карты WB.
@@ -2279,8 +2296,8 @@ function WBGate() {
           <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer" className="wbg-help">
             <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: "#aab1c0" }} />
             <span className="wbg-help-t">
-              <span>Возникли трудности?</span>
-              <b>Написать живому менеджеру → @RobloxBank_PA</b>
+              <span>Нет ни Telegram, ни ВКонтакте? Напиши нам — оформим вручную</span>
+              <b>Живой менеджер → @RobloxBank_PA или прямо в чат Wildberries по заказу</b>
             </span>
             <ExternalLink className="w-4 h-4 flex-shrink-0" style={{ marginLeft: "auto", color: "#71798c" }} />
           </a>
@@ -2825,6 +2842,9 @@ export default function GuideClient({
   );
   const [denomination, setDenomination] = useState<number>(directInstruction ? (testNom && testNom > 0 ? testNom : 1000) : 0);
   const [activeCode, setActiveCode] = useState<string>(testMode ? "TESTDEV" : "");
+  /** Код из ссылки, который покупатель не вводил руками: гейт подставляет его
+   * сам и просит только выбрать мессенджер. */
+  const [prefilledCode, setPrefilledCode] = useState<string>("");
   const [isRestoring, setIsRestoring] = useState(isWB && !directInstruction);
 
   useEffect(() => {
@@ -2846,11 +2866,22 @@ export default function GuideClient({
           setActiveCode(codeToCheck);
           setPhase("instruction");
         } else if (statusRes.ok && !statusData.claimed && wbCodeFromUrl && statusData.denomination) {
-          // Code exists but not yet claimed — timing race (user opened link before bot finished)
-          // Show instruction anyway; the denomination is on the physical card so it's not secret
+          // Код есть, но за ним ещё нет ни Telegram, ни ВКонтакте.
+          //
+          // Раньше здесь инструкция открывалась всё равно — «гонка, пользователь
+          // успел раньше бота». Для карточных кодов это и правда гонка, а для
+          // DBS — нормальное состояние: код выпускает наш же воркер и присылает
+          // ссылку в чат WB, так что непривязанным он бывает всегда. В итоге
+          // покупатель проходил девять шагов инструкции, вводил ник и выбирал
+          // геймпасс, и только в самом конце оставлял контакт — а до тех пор
+          // связаться с ним было нельзя ничем, кроме чата WB.
+          //
+          // Экран гейта и есть экран контакта: код там уже подставлен, а дальше
+          // ведут только Telegram и ВКонтакте. Инструкция открывается, когда
+          // мессенджер выбран (`claimed`), и это проверяет опрос ниже.
           setDenomination(statusData.denomination);
-          setActiveCode(codeToCheck);
-          setPhase("instruction");
+          setPrefilledCode(codeToCheck);
+          setPhase("gate");
         }
         // If not claimed and no wbCodeFromUrl: stay in gate
       } catch {
@@ -2867,8 +2898,38 @@ export default function GuideClient({
     clearWBSession();
     setDenomination(0);
     setActiveCode("");
+    setPrefilledCode("");
     setPhase("gate");
   };
+
+  /** Покупатель уходит в Telegram или ВКонтакте и возвращается на эту же
+   * вкладку. Опрос замечает, что бот забрал код, и открывает инструкцию сам —
+   * без второй ссылки и без «нажмите здесь, чтобы продолжить». */
+  useEffect(() => {
+    if (phase !== "gate" || !prefilledCode) return;
+    let stopped = false;
+    const check = async () => {
+      if (document.visibilityState === "hidden") return;
+      try {
+        const res = await fetch(`/api/wb-code?code=${encodeURIComponent(prefilledCode)}`);
+        const data = await res.json().catch(() => ({}));
+        if (!stopped && res.ok && data.claimed) {
+          setDenomination(data.denomination ?? 0);
+          setActiveCode(prefilledCode);
+          setPhase("instruction");
+        }
+      } catch {
+        // Сеть моргнула — следующий тик попробует снова.
+      }
+    };
+    const timer = setInterval(check, 4_000);
+    window.addEventListener("focus", check);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      window.removeEventListener("focus", check);
+    };
+  }, [phase, prefilledCode]);
 
   if (isRestoring) {
     // Этот экран — SSR-разметка: если JS-чанки не догрузились (обрывы сети у
@@ -2937,7 +2998,7 @@ export default function GuideClient({
 
   if (phase === "gate") {
     return (
-      <WBGate />
+      <WBGate initialCode={prefilledCode} initialDenomination={denomination} />
     );
   }
 

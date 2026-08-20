@@ -1,9 +1,11 @@
 import crypto from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { generateWbActivationCode } from "./wb-activation-code";
-import { wbCodeRequestMessage, wbGateMessage } from "./wb-gate-link";
+import { wbCodeRequestMessage, wbGateMessage, wbGateReminderMessage } from "./wb-gate-link";
 import {
   assertBulkOrderSucceeded,
+  confirmDbsOrder,
+  deliverDbsOrder,
   fetchBuyerChatEvents,
   fetchBuyerChats,
   fetchCompletedDbsOrders,
@@ -38,11 +40,24 @@ import {
   canCaptureDeliveryCode,
   canReceiveWbOrder,
   shouldMarkCodeRequested,
+  wbAutoShipAction,
   wbDeliverySecretIsLive,
+  wbGateDelivered,
   wbMarketplaceTerminalFlags,
   wbProductVendorCandidates,
+  WB_RECEIVE_MAX_ATTEMPTS,
 } from "./wb-delivery-policy";
-import { notifyDbsNewOrder, notifyDbsBuyerMessage, notifyDbsCodeCaptured, notifyDbsAutoGateIssued, notifyDbsAutoReplySent, notifyDbsAutoReceived, notifyDbsAutoReceiveFailed, notifyDbsOrderCancelled } from "./wb-delivery-admin-notify";
+import {
+  notifyDbsBuyerMessage,
+  notifyDbsCodeCaptured,
+  notifyDbsAutoReceiveFailed,
+  notifyDbsOrderCancelled,
+  notifyDbsDeliveryStuck,
+  notifyDbsGateNotOpened,
+  pushDbsCard,
+  type DbsCardState,
+} from "./wb-delivery-admin-notify";
+import { mskTime } from "./notify-format";
 
 const WORKER_STREAM = "wb-dbs-worker";
 const EVENTS_STREAM = "wb-buyer-chat-events";
@@ -51,11 +66,21 @@ const STATUSES_STREAM = "wb-dbs-statuses";
 const RECHECK_STREAM = "wb-dbs-closed-recheck";
 const COMPLETED_STREAM = "wb-dbs-completed";
 const CLIENTS_STREAM = "wb-dbs-clients";
+const REMINDERS_STREAM = "wb-dbs-gate-reminders";
 const HEARTBEAT_KEY = "wb-dbs-sync";
 const LEASE_MS = 45_000;
 /** How far back a closed order is still re-checked for a late cancellation or
  * return. WB refunds land within days, and the window bounds the poll cost. */
 const CLOSED_RECHECK_DAYS = 14;
+/** How long a held delivery code may sit unclosed before the operator is told.
+ * WB's own window is about an hour, so this leaves room to act on the alert. */
+const STUCK_DELIVERY_ALERT_MS = 20 * 60_000;
+/** Э7: when a buyer who received a gate link still has not opened it. Two
+ * nudges, then the order is the operator's problem rather than the bot's. */
+const GATE_REMINDERS = [
+  { level: 1, afterMs: 3 * 60 * 60_000 },
+  { level: 2, afterMs: 24 * 60 * 60_000 },
+] as const;
 
 type Db = PrismaClient;
 
@@ -70,6 +95,10 @@ export type WbDeliverySyncResult = {
   buyerNames: number;
   /** Orders WB cancelled since the previous cycle, mirrored into our own side. */
   cancellations: number;
+  /** Orders pushed one step along WB's `new → confirm → deliver` ladder. */
+  shipped: number;
+  /** Nudges sent to buyers who never opened their gate link. */
+  gateReminders: number;
   errorCode: string | null;
 };
 
@@ -84,6 +113,8 @@ function result(acquired = false): WbDeliverySyncResult {
     capturedCodes: 0,
     buyerNames: 0,
     cancellations: 0,
+    shipped: 0,
+    gateReminders: 0,
     errorCode: null,
   };
 }
@@ -326,6 +357,126 @@ function isBuyerSender(sender: string) {
 
 const GUIDE_ORIGIN = (process.env.NEXT_PUBLIC_APP_URL || "https://robloxbank.ru").replace(/\/$/, "");
 
+/** Подписи этапов для живой карточки. Берутся из аудита — он и так пишет
+ * каждый шаг, так что второй источник правды заводить не нужно. */
+const CARD_STEP: Record<string, string> = {
+  ORDER_SYNCED: "заказ принят",
+  DELIVERY_CODE_REQUESTED: "запрошен код доставки",
+  DELIVERY_CODE_CAPTURED: "код получен",
+  WB_CONFIRM_SUCCEEDED: "передан на сборку",
+  WB_DELIVER_SUCCEEDED: "передан в доставку",
+  WB_RECEIVE_SUCCEEDED: "доставка закрыта",
+  AUTO_GATE_ISSUED_AND_SENT: "гейт отправлен",
+  GATE_CODE_ISSUED: "гейт выпущен",
+  GATE_LINK_SENT: "гейт отправлен",
+  GATE_REMINDER_SENT: "напоминание покупателю",
+  GATE_SERVED_EXTERNALLY: "выдан вне системы",
+  INTERNAL_ORDER_CREATED: "выкуп открыт вручную",
+  BUYER_LINKED: "покупатель привязан",
+  WB_ORDER_CANCELLED: "отменён на WB",
+};
+
+/** Одна живая карточка на заказ (Э5-B).
+ *
+ * Состояние выводится из строки заказа, а не из того, кто её вызвал: карточка
+ * не может разойтись с реальностью, даже если какой-то переход прошёл мимо
+ * уведомления.
+ *
+ * Отдельные сообщения при этом никуда не делись — но только громкие.
+ * Редактирование сообщения в Telegram **не даёт уведомления**, поэтому всё,
+ * что требует человека, обязано приходить отдельным сообщением, а карточка
+ * остаётся местом, где видно текущее состояние без листания. */
+async function refreshDbsCard(db: Db, orderId: string) {
+  const order = await db.wbMarketplaceOrder.findUnique({
+    where: { id: orderId },
+    include: {
+      wbCode: { select: { code: true } },
+      deliverySecret: { select: { consumedAt: true, encryptedValue: true, expiresAt: true } },
+      events: { orderBy: { createdAt: "asc" }, take: 40 },
+    },
+  });
+  if (!order || order.isTest) return;
+
+  const hasLiveSecret = wbDeliverySecretIsLive(order.deliverySecret);
+  const state: DbsCardState = {
+    wbOrderId: order.wbOrderId,
+    buyerName: order.buyerName,
+    denomination: order.denominationSnapshot,
+    priceKopecks: order.finalPriceKopecks ?? order.priceKopecks,
+    activationCode: order.wbCode?.code ?? null,
+    ...dbsCardHeadline(order, hasLiveSecret),
+    timeline: order.events
+      .filter((event) => CARD_STEP[event.type])
+      .map((event) => `${mskTime(event.createdAt)}  ${CARD_STEP[event.type]}`)
+      // Один и тот же шаг может записаться дважды (например, повторный запрос
+      // кода) — в карточке это шум, а не информация.
+      .filter((row, index, all) => all.indexOf(row) === index)
+      .slice(-8),
+  };
+
+  const existing = order.adminCardMessages && typeof order.adminCardMessages === "object" && !Array.isArray(order.adminCardMessages)
+    ? order.adminCardMessages as Record<string, number>
+    : null;
+  const updated = await pushDbsCard(state, existing);
+  if (JSON.stringify(updated) !== JSON.stringify(existing ?? {})) {
+    await db.wbMarketplaceOrder.update({
+      where: { id: orderId },
+      data: { adminCardMessages: updated },
+    }).catch(() => {});
+  }
+}
+
+/** Заголовок карточки: маркер, что произошло и что дальше. Порядок проверок
+ * повторяет `wbDeliveryStage`, чтобы карточка и консоль никогда не расходились
+ * в оценке одного и того же заказа. */
+function dbsCardHeadline(
+  order: { cancelledAt: Date | null; completedAt: Date | null; lastErrorCode: string | null; gateState: string; chatState: string; supplierStatus: string; denominationSnapshot: number | null },
+  hasLiveSecret: boolean,
+): Pick<DbsCardState, "marker" | "title" | "next"> {
+  if (order.cancelledAt) {
+    return { marker: "cancelled", title: "отменён на WB", next: "деньги вернулись покупателю" };
+  }
+  if (!order.denominationSnapshot) {
+    return { marker: "urgent", title: "номинал не найден", next: "добавить товар в каталог — иначе гейт не выпустить" };
+  }
+  if (order.lastErrorCode) {
+    return { marker: "urgent", title: `ошибка ${order.lastErrorCode}`, next: "сверить кабинет WB и синхронизировать заказ" };
+  }
+  if (wbGateDelivered(order.gateState) && order.completedAt) {
+    return { marker: "done", title: "доставка закрыта, гейт отправлен", next: "покупатель активирует код в боте" };
+  }
+  if (wbGateDelivered(order.gateState)) {
+    return { marker: "progress", title: "гейт отправлен", next: "закрываю доставку на WB" };
+  }
+  if (order.completedAt) {
+    return { marker: "urgent", title: "закрыт на WB, но гейт не выдан", next: "<b>выпустить и отправить код</b> — деньги уже приняты" };
+  }
+  if (hasLiveSecret) {
+    return { marker: "progress", title: "код получен", next: "закрываю доставку и отправляю гейт" };
+  }
+  if (order.chatState === "CODE_REQUESTED" || order.chatState === "REQUEST_SEND_UNKNOWN") {
+    return { marker: "waiting", title: "ждём код доставки", next: "покупатель пришлёт 5–6 цифр в чат WB" };
+  }
+  if (order.chatState === "READY") {
+    return { marker: "waiting", title: "чат открыт", next: "автозапрос кода доставки" };
+  }
+  return { marker: "progress", title: "заказ принят", next: "ждём, когда покупатель откроет чат WB" };
+}
+
+/** Why a closing attempt did not happen. `null` means it ran.
+ *
+ * These used to be bare `return`s, which is exactly how F1 stayed invisible for
+ * days: the delivery quietly failed to close, no audit row, no message, and
+ * from the outside indistinguishable from a notification that never arrived. */
+export type AutoReceiveSkip =
+  | "flag_off"
+  | "test_order"
+  | "no_secret"
+  | "already_closed"
+  | "too_many_attempts"
+  | "wb_not_in_delivery"
+  | null;
+
 /** Hands the buyer's own code straight back to WB so the delivery closes itself.
  *
  * This runs the moment the code lands, before the gate is even minted: WB gives
@@ -335,24 +486,36 @@ const GUIDE_ORIGIN = (process.env.NEXT_PUBLIC_APP_URL || "https://robloxbank.ru"
  * front of the operator by `isWbBuyerUnserved`.
  *
  * Fail-closed on every error: the WB order simply stays open, which the
- * operator can always finish by hand inside the remaining window. */
-async function tryAutoReceive(db: Db, orderId: string, wbOrderId: string) {
-  if (process.env.WB_DBS_AUTO_RECEIVE !== "true") return;
-  if (process.env.WB_DBS_MUTATIONS_ENABLED !== "true") return;
+ * operator can always finish by hand inside the remaining window. A skip is now
+ * reported back to the caller so it can say so out loud. */
+async function tryAutoReceive(db: Db, orderId: string, wbOrderId: string): Promise<AutoReceiveSkip> {
+  if (process.env.WB_DBS_AUTO_RECEIVE !== "true") return "flag_off";
+  if (process.env.WB_DBS_MUTATIONS_ENABLED !== "true") return "flag_off";
 
   const order = await db.wbMarketplaceOrder.findUnique({
     where: { id: orderId },
     include: { deliverySecret: true },
   });
-  if (!order || order.isTest) return;
-  if (!canReceiveWbOrder({ ...order, hasLiveSecret: wbDeliverySecretIsLive(order.deliverySecret) })) return;
-  if (!order.deliverySecret) return;
+  if (!order) return "no_secret";
+  if (order.isTest) return "test_order";
+  if (!order.deliverySecret) return "no_secret";
+  if (order.completedAt || order.cancelledAt) return "already_closed";
+  if (order.deliverySecret.failedAttempts >= WB_RECEIVE_MAX_ATTEMPTS) return "too_many_attempts";
+  if (!canReceiveWbOrder({
+    ...order,
+    hasLiveSecret: wbDeliverySecretIsLive(order.deliverySecret),
+    secretFailedAttempts: order.deliverySecret.failedAttempts,
+  })) {
+    // The only remaining precondition is WB's own status. Before auto-ship
+    // existed this was the common case and the one nobody could see.
+    return "wb_not_in_delivery";
+  }
 
   try {
     // WB must still agree the order is out for delivery; its own view wins.
     const fresh = await fetchDbsStatuses([order.wbOrderId]);
     const status = fresh.orders.find((row) => row.orderId === order.wbOrderId);
-    if (!status || !/deliver/i.test(status.supplierStatus ?? "")) return;
+    if (!status || !/deliver/i.test(status.supplierStatus ?? "")) return "wb_not_in_delivery";
 
     const code = decryptWbSecret(order.deliverySecret.encryptedValue, "delivery-code");
     assertBulkOrderSucceeded(await receiveDbsOrder(order.wbOrderId, code), order.wbOrderId);
@@ -369,7 +532,8 @@ async function tryAutoReceive(db: Db, orderId: string, wbOrderId: string) {
       });
     });
     await audit(db, orderId, "WB_RECEIVE_SUCCEEDED", `auto-receive:${orderId}`, { source: "auto-receive" });
-    notifyDbsAutoReceived(wbOrderId);
+    await refreshDbsCard(db, orderId).catch(() => {});
+    return null;
   } catch (error) {
     const unknown = error instanceof WbDeliveryApiError && error.outcomeUnknown;
     await db.wbMarketplaceOrder.update({
@@ -386,6 +550,129 @@ async function tryAutoReceive(db: Db, orderId: string, wbOrderId: string) {
     }).catch(() => {});
     console.error(`[WbDbsSync] auto-receive failed for ${wbOrderId}:`, error);
     notifyDbsAutoReceiveFailed(wbOrderId, unknown);
+    await refreshDbsCard(db, orderId).catch(() => {});
+    return null;
+  }
+}
+
+/** Closing the delivery used to get exactly one attempt, taken at the instant
+ * the buyer's code arrived. If the order had not reached `deliver` yet — the
+ * normal case once the auto-reply cut buyer response time to minutes — that
+ * single chance was spent and never retried.
+ *
+ * This sweep gives every order holding a usable code another go on each cycle,
+ * so a race lost at capture time costs seconds, not the whole WB window. */
+async function retryAutoReceive(db: Db) {
+  if (process.env.WB_DBS_AUTO_RECEIVE !== "true") return;
+  if (process.env.WB_DBS_MUTATIONS_ENABLED !== "true") return;
+  const pending = await db.wbMarketplaceOrder.findMany({
+    where: {
+      isTest: false,
+      completedAt: null,
+      cancelledAt: null,
+      deliverySecret: {
+        is: {
+          consumedAt: null,
+          expiresAt: { gt: new Date() },
+          failedAttempts: { lt: WB_RECEIVE_MAX_ATTEMPTS },
+        },
+      },
+    },
+    select: { id: true, wbOrderId: true },
+    take: 25,
+  });
+  for (const order of pending) {
+    await tryAutoReceive(db, order.id, order.wbOrderId);
+  }
+}
+
+/** Walks DBS orders through WB's own `new → confirm → deliver` ladder.
+ *
+ * Nothing did this before: both mutations were manual buttons, so an order only
+ * became closable if an operator happened to push it through the seller cabinet
+ * first. For a digital handover there is nothing to assemble and nothing to
+ * hand a courier — the two statuses are pure bookkeeping standing between us
+ * and a closed delivery, and every minute they cost is WB commission.
+ *
+ * Fail-open per order: one rejection is recorded and the sweep moves on, so a
+ * single bad order never stalls the queue behind it. */
+async function tryAutoShip(db: Db, out: WbDeliverySyncResult) {
+  if (process.env.WB_DBS_AUTO_SHIP !== "true") return;
+  if (process.env.WB_DBS_MUTATIONS_ENABLED !== "true") return;
+
+  const open = await db.wbMarketplaceOrder.findMany({
+    where: {
+      isTest: false,
+      completedAt: null,
+      cancelledAt: null,
+      denominationSnapshot: { not: null },
+      supplierStatus: { in: ["new", "confirm"] },
+    },
+    select: { id: true, wbOrderId: true, supplierStatus: true },
+    orderBy: { firstSeenAt: "asc" },
+    take: 25,
+  });
+
+  for (const order of open) {
+    const action = wbAutoShipAction(order.supplierStatus);
+    if (!action) continue;
+    try {
+      const response = action === "confirm"
+        ? await confirmDbsOrder(order.wbOrderId)
+        : await deliverDbsOrder(order.wbOrderId);
+      assertBulkOrderSucceeded(response, order.wbOrderId);
+      await db.wbMarketplaceOrder.update({
+        where: { id: order.id },
+        data: { supplierStatus: action === "confirm" ? "confirm" : "deliver", lastErrorCode: null },
+      });
+      await audit(db, order.id, `WB_${action.toUpperCase()}_SUCCEEDED`, `auto-ship:${order.id}:${action}`, {
+        source: "auto-ship",
+      });
+      out.shipped += 1;
+      await refreshDbsCard(db, order.id).catch(() => {});
+    } catch (error) {
+      // WB rejects `confirm` on an order it has already advanced elsewhere, and
+      // that is not a fault — the next status poll will simply agree with WB.
+      await audit(db, order.id, "WB_AUTO_SHIP_FAILED", `auto-ship-fail:${order.id}:${action}:${Date.now()}`, {
+        action,
+        error: safeErrorCode(error),
+      }).catch(() => {});
+      console.error(`[WbDbsSync] auto-ship ${action} failed for ${order.wbOrderId}:`, safeErrorCode(error));
+    }
+  }
+}
+
+/** WB gives roughly an hour from the buyer's code to close the delivery, and a
+ * blown window costs real commission. When automation has not managed it in
+ * time, the operator has to hear about it once — loudly, with the deadline. */
+async function alertStuckDeliveries(db: Db) {
+  const cutoff = new Date(Date.now() - STUCK_DELIVERY_ALERT_MS);
+  const stuck = await db.wbMarketplaceOrder.findMany({
+    where: {
+      isTest: false,
+      completedAt: null,
+      cancelledAt: null,
+      deliveryAlertedAt: null,
+      deliverySecret: { is: { consumedAt: null, receivedAt: { lt: cutoff }, expiresAt: { gt: new Date() } } },
+    },
+    select: {
+      id: true,
+      wbOrderId: true,
+      supplierStatus: true,
+      deliverySecret: { select: { receivedAt: true } },
+    },
+    take: 10,
+  });
+  for (const order of stuck) {
+    await db.wbMarketplaceOrder.update({
+      where: { id: order.id },
+      data: { deliveryAlertedAt: new Date() },
+    });
+    notifyDbsDeliveryStuck(
+      order.wbOrderId,
+      order.supplierStatus,
+      order.deliverySecret?.receivedAt ?? new Date(),
+    );
   }
 }
 
@@ -444,13 +731,13 @@ async function tryAutoGate(
     }
     await db.wbMarketplaceOrder.update({
       where: { id: orderId },
-      data: { gateState: "SENT", lastErrorCode: null },
+      data: { gateState: "SENT", lastErrorCode: null, gateSentAt: new Date() },
     });
     await audit(db, orderId, "AUTO_GATE_ISSUED_AND_SENT", `auto-gate:${orderId}:${activationCode}`, {
       activationCode,
       isTest: order.isTest,
     });
-    notifyDbsAutoGateIssued(wbOrderId, activationCode);
+    await refreshDbsCard(db, orderId).catch(() => {});
   } catch (e) {
     console.error(`[WbDbsSync] auto-gate send failed for ${wbOrderId}:`, e);
     await audit(db, orderId, "AUTO_GATE_SEND_FAILED", `auto-gate-fail:${orderId}`, {
@@ -515,12 +802,20 @@ async function captureDeliveryCode(
     chatId,
     receivedAt: receivedAt.toISOString(),
   });
-  notifyDbsCodeCaptured(order.wbOrderId);
   // Order matters: WB's one-hour window is the only deadline we cannot
   // recover from, so the delivery is closed before anything else. Sending
   // the gate is retryable and stays visible via `isWbBuyerUnserved`.
-  await tryAutoReceive(db, order.id, order.wbOrderId);
+  const skip = await tryAutoReceive(db, order.id, order.wbOrderId);
   await tryAutoGate(db, order.id, order.wbOrderId);
+  // The notification is sent *after* the attempt so it can say what actually
+  // happened. It used to fire first and claim "можно выпускать гейт" — advice
+  // for a step the worker had already taken, next to a closing that had
+  // silently not happened (F9, F10).
+  await refreshDbsCard(db, order.id).catch(() => {});
+  // Тихий успех живёт только в карточке. Отдельным сообщением уходит лишь то,
+  // что требует человека: редактирование сообщения в Telegram не даёт
+  // уведомления, и пропуск закрытия обязан прозвенеть.
+  if (skip) notifyDbsCodeCaptured(order.wbOrderId, skip);
   return true;
 }
 
@@ -607,7 +902,7 @@ async function tryAutoRequestCode(
   try {
     await sendBuyerChatMessage(decryptWbSecret(chat.replySignEncrypted, "reply-sign"), wbCodeRequestMessage());
     await audit(db, order.id, "DELIVERY_CODE_REQUESTED", `auto-request:${order.id}`, { source: "auto-reply" });
-    notifyDbsAutoReplySent(order.wbOrderId);
+    await refreshDbsCard(db, order.id).catch(() => {});
   } catch (error) {
     const unknown = error instanceof WbDeliveryApiError && error.outcomeUnknown;
     await db.wbMarketplaceOrder.update({
@@ -810,7 +1105,11 @@ async function applyWbStatus(
       // stays filed under "Готово" while WB has already refunded the buyer.
       completedAt: cancelled ? null : completed ? order.completedAt ?? now : undefined,
       lastSeenAt: now,
-      lastErrorCode: errorCode,
+      // A healthy poll clears the field. Passing `undefined` — which is what
+      // this did — means "leave it alone" to Prisma, so a stale error survived
+      // forever and, while closing was gated on it, disabled the order's
+      // automation for good (F2).
+      lastErrorCode: errorCode ?? null,
     },
   });
   out.statuses += 1;
@@ -877,6 +1176,7 @@ async function propagateCancellation(db: Db, orderId: string, wbOrderId: string,
     outcome,
   }).catch(() => {});
   notifyDbsOrderCancelled(wbOrderId, wbStatus, code, internal?.status ?? null, outcome);
+  await refreshDbsCard(db, orderId).catch(() => {});
 }
 
 async function syncStatuses(db: Db, out: WbDeliverySyncResult) {
@@ -930,25 +1230,132 @@ async function syncCompleted(db: Db, out: WbDeliverySyncResult) {
   await touchCursor(db, COMPLETED_STREAM, { lastAttemptAt: new Date(), lastSuccessAt: new Date(), lastErrorCode: null });
 }
 
+/** Expiry blanks the code but keeps the row.
+ *
+ * Two bugs lived here. It stamped `DELIVERY_CODE_EXPIRED` on *any* order whose
+ * secret aged out, including ones already closed and settled — those then
+ * surfaced as `attention` and, while `lastErrorCode` still gated closing,
+ * disabled automation for them permanently (F5 + F2).
+ *
+ * And it deleted the row outright, taking `codeHmac` with it. That hash is how
+ * a buyer who types their WB delivery code into our bot gets recognised instead
+ * of being told "no active orders", so it is kept for a week — long enough for
+ * the manual branch to be useful — while the code itself is destroyed on time. */
 async function purgeExpiredDeliverySecrets(db: Db) {
   const expired = await db.wbDeliverySecret.findMany({
-    where: { expiresAt: { lt: new Date() }, consumedAt: null },
-    select: { marketplaceOrderId: true, marketplaceOrder: { select: { gateState: true } } },
+    where: {
+      expiresAt: { lt: new Date() },
+      consumedAt: null,
+      encryptedValue: { not: "PURGED" },
+    },
+    select: {
+      marketplaceOrderId: true,
+      marketplaceOrder: { select: { gateState: true, completedAt: true, cancelledAt: true } },
+    },
     take: 200,
   });
   for (const secret of expired) {
+    const settled = Boolean(secret.marketplaceOrder.completedAt || secret.marketplaceOrder.cancelledAt);
     await db.$transaction([
-      db.wbDeliverySecret.delete({ where: { marketplaceOrderId: secret.marketplaceOrderId } }),
+      db.wbDeliverySecret.update({
+        where: { marketplaceOrderId: secret.marketplaceOrderId },
+        data: { encryptedValue: "PURGED" },
+      }),
       db.wbMarketplaceOrder.update({
         where: { id: secret.marketplaceOrderId },
-        data: secret.marketplaceOrder.gateState === "NOT_ISSUED"
-          ? { chatState: "READY", lastErrorCode: null }
-          : { lastErrorCode: "DELIVERY_CODE_EXPIRED" },
+        data: settled
+          // Nothing is owed on a closed order, so an expired code is a
+          // non-event. Saying otherwise cried wolf on every finished sale.
+          ? {}
+          : secret.marketplaceOrder.gateState === "NOT_ISSUED"
+            ? { chatState: "READY", lastErrorCode: null }
+            : { lastErrorCode: "DELIVERY_CODE_EXPIRED" },
       }),
     ]);
     await audit(db, secret.marketplaceOrderId, "DELIVERY_CODE_EXPIRED", `delivery-code-expired:${secret.marketplaceOrderId}`, {
       purged: true,
+      settled,
     });
+  }
+  // The hash outlives the code but not by much: a week covers every realistic
+  // "the buyer wrote to us the next day" case and nothing beyond it.
+  await db.wbDeliverySecret.deleteMany({
+    where: { expiresAt: { lt: new Date(Date.now() - 7 * 24 * 60 * 60_000) } },
+  });
+}
+
+/** Э7: a gate link nobody opened is a paid order we never delivered.
+ *
+ * Five of the first thirty-six codes were never opened — 14 % of paid orders
+ * sitting silent, with no nudge of any kind. Two reminders, three hours and a
+ * day out, then it stops and the order belongs to a person. */
+async function remindUnopenedGates(db: Db, out: WbDeliverySyncResult) {
+  if (process.env.WB_DBS_GATE_REMINDERS !== "true") return;
+  if (process.env.WB_CHAT_SEND_ENABLED !== "true") return;
+
+  const oldest = GATE_REMINDERS[0].afterMs;
+  const candidates = await db.wbMarketplaceOrder.findMany({
+    where: {
+      isTest: false,
+      cancelledAt: null,
+      gateState: "SENT",
+      gateReminderLevel: { lt: GATE_REMINDERS[GATE_REMINDERS.length - 1].level },
+      gateSentAt: { not: null, lt: new Date(Date.now() - oldest) },
+    },
+    select: {
+      id: true,
+      wbOrderId: true,
+      gateSentAt: true,
+      gateReminderLevel: true,
+      denominationSnapshot: true,
+      wbCode: { select: { code: true } },
+      chats: { orderBy: { lastEventAt: "desc" as const }, take: 1 },
+    },
+    take: 20,
+  });
+
+  for (const order of candidates) {
+    const activationCode = order.wbCode?.code;
+    if (!activationCode || !order.gateSentAt) continue;
+    // Опоздавших не будим: заказ, который покупатель уже открыл, из выборки
+    // убирает наличие внутреннего заказа по этому коду.
+    const internal = await db.wbOrder.findUnique({ where: { wbCode: activationCode }, select: { id: true } });
+    if (internal) {
+      await db.wbMarketplaceOrder.update({
+        where: { id: order.id },
+        data: { gateReminderLevel: GATE_REMINDERS[GATE_REMINDERS.length - 1].level },
+      });
+      continue;
+    }
+    const age = Date.now() - order.gateSentAt.getTime();
+    const due = GATE_REMINDERS.filter((r) => age >= r.afterMs && r.level > order.gateReminderLevel).at(-1);
+    if (!due) continue;
+    const chat = order.chats?.[0];
+    if (!chat?.replySignEncrypted) continue;
+
+    // Claim the level before sending: a duplicate nudge is worse than a missing
+    // one, and the same CAS rule already guards the auto-reply.
+    const claimed = await db.wbMarketplaceOrder.updateMany({
+      where: { id: order.id, gateReminderLevel: order.gateReminderLevel },
+      data: { gateReminderLevel: due.level },
+    });
+    if (claimed.count !== 1) continue;
+
+    try {
+      await sendBuyerChatMessage(
+        decryptWbSecret(chat.replySignEncrypted, "reply-sign"),
+        wbGateReminderMessage(activationCode, order.denominationSnapshot, due.level, GUIDE_ORIGIN),
+      );
+      await audit(db, order.id, "GATE_REMINDER_SENT", `gate-reminder:${order.id}:${due.level}`, {
+        level: due.level,
+      });
+      out.gateReminders += 1;
+      if (due.level === GATE_REMINDERS[GATE_REMINDERS.length - 1].level) {
+        notifyDbsGateNotOpened(order.wbOrderId, activationCode, order.denominationSnapshot);
+      }
+    } catch (error) {
+      console.error(`[WbDbsSync] gate reminder failed for ${order.wbOrderId}:`, safeErrorCode(error));
+    }
   }
 }
 
@@ -972,7 +1379,9 @@ export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {
       const existed = await db.wbMarketplaceOrder.findUnique({ where: { wbOrderId: order.id }, select: { id: true } });
       const record = await upsertMarketplaceOrder(db, order, dates.get(order.id), "new");
       if (!existed) {
-        notifyDbsNewOrder(order.id, record.denominationSnapshot, record.finalPriceKopecks);
+        // Карточка заказа заменяет прежнее отдельное «новый заказ»: дальше она
+        // же будет обновляться на каждом шаге вместо новых сообщений.
+        await refreshDbsCard(db, record.id).catch(() => {});
       }
       out.newOrders += 1;
     }
@@ -980,6 +1389,12 @@ export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {
     if (await streamDue(db, CHATS_STREAM, 60_000, force)) await syncChatDirectory(db, out);
     await syncChatEvents(db, out);
     await backfillDeliveryCodes(db, out);
+    // Ladder first: an order already in `deliver` is one the buyer's code can
+    // close on arrival, which is the whole point of doing this automatically.
+    await tryAutoShip(db, out);
+    // Then pick up anything whose single chance at capture time was lost.
+    await retryAutoReceive(db);
+    await alertStuckDeliveries(db);
     if (await streamDue(db, STATUSES_STREAM, 60_000, force)) await syncStatuses(db, out);
     // Returns and refusals arrive on orders we already closed, so the finished
     // pile is swept on its own slower cadence.
@@ -991,6 +1406,13 @@ export async function runWbDeliverySync(db: Db, options: { force?: boolean } = {
       await syncBuyerNames(db, out).catch((error) => {
         console.error(`[WbDbsSync] buyer names skipped: ${safeErrorCode(error)}`);
       });
+    }
+    // Nudging a silent buyer is never urgent and never worth a failed cycle.
+    if (await streamDue(db, REMINDERS_STREAM, 10 * 60_000, force)) {
+      await remindUnopenedGates(db, out).catch((error) => {
+        console.error(`[WbDbsSync] gate reminders skipped: ${safeErrorCode(error)}`);
+      });
+      await touchCursor(db, REMINDERS_STREAM, { lastAttemptAt: new Date(), lastSuccessAt: new Date() });
     }
 
     await db.serviceHeartbeat.upsert({

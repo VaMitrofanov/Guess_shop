@@ -30,6 +30,7 @@ import {
   canCreateInternalOrder,
   canIssueWbGate,
   canReceiveWbOrder,
+  WB_RECEIVE_MAX_ATTEMPTS,
   isWbBuyerUnserved,
   wbCancelledCodeAtRisk,
   wbDeliverySecretIsLive,
@@ -42,6 +43,8 @@ import { checkGamepassPrice, expectedGamepassPrice } from "@/lib/purchase-guard"
 import { runWbDeliverySync } from "../../bots/shared/wb-delivery-sync";
 import { generateWbActivationCode } from "../../bots/shared/wb-activation-code";
 import { wbCodeRequestMessage, wbGateMessage, wbGateUrl } from "../../bots/shared/wb-gate-link";
+import { isServiceOwned, linkWbOrderToBuyer, resolveBuyerUser } from "../../bots/shared/wb-buyer-link";
+import { notifyDbsBuyerUnlinked } from "../../bots/shared/wb-delivery-admin-notify";
 import { WB_TERMINAL_STAGES, WB_URGENT_STAGES } from "@/lib/wb-delivery-labels";
 
 const db = prisma;
@@ -74,7 +77,24 @@ const actionOrderInclude = Prisma.validator<Prisma.WbMarketplaceOrderInclude>()(
   chats: { orderBy: { lastEventAt: "desc" }, take: 1 },
 });
 
-type InternalFulfillment = { status: string; platform: string | null; robloxUsername: string | null };
+type InternalFulfillment = {
+  status: string;
+  platform: string | null;
+  robloxUsername: string | null;
+  /** `false` пока заказ висит на служебном аккаунте — покупатель не найден. */
+  buyerLinked?: boolean;
+  /** `@username`, `tg:123` или `vk:123` — то, чем оператор может воспользоваться. */
+  buyerHandle?: string | null;
+};
+
+/** Ярлык покупателя для консоли: то, по чему оператор может его найти. */
+function buyerHandle(user: { tgId: string | null; vkId: string | null; username: string | null; name: string | null } | null) {
+  if (!user || isServiceOwned(user)) return null;
+  if (user.username) return `@${user.username}`;
+  if (user.tgId) return `tg:${user.tgId}`;
+  if (user.vkId) return `vk:${user.vkId}`;
+  return user.name;
+}
 type DetailOrder = Prisma.WbMarketplaceOrderGetPayload<{ include: typeof detailOrderInclude }>;
 type DetailChat = DetailOrder["chats"][number];
 /** One DTO builder serves both queries, so the parts only the detail view loads
@@ -98,6 +118,7 @@ export const WbDeliveryActionSchema = z.object({
     "send_gate",
     "mark_gate_sent",
     "mark_served_externally",
+    "link_buyer",
     "send_message",
     "confirm",
     "deliver",
@@ -112,6 +133,8 @@ export const WbDeliveryActionSchema = z.object({
   gamepass: z.string().trim().min(1).max(200).optional(),
   /** Overrides the pass owner when the buyer bought from someone else's pass. */
   robloxUsername: z.string().trim().max(60).optional(),
+  /** `@username`, Telegram id or VK id of the real buyer, for `link_buyer`. */
+  buyer: z.string().trim().min(1).max(80).optional(),
   /** Operator confirmed a price or duplicate warning and wants it anyway. */
   force: z.boolean().optional(),
 });
@@ -184,6 +207,9 @@ function toDto(order: ListOrder, { revealSecret = false } = {}): WbDeliveryOrder
   const policyOrder = {
     ...order,
     hasLiveSecret: secretIsLive,
+    // Same bound the worker uses: after three WB rejections closing stops being
+    // offered automatically and becomes a job for the seller cabinet.
+    secretFailedAttempts: order.deliverySecret?.failedAttempts ?? 0,
     internalStatus: order.internalFulfillment?.status ?? null,
     internalRobloxUsername: order.internalFulfillment?.robloxUsername ?? null,
   };
@@ -250,6 +276,9 @@ function toDto(order: ListOrder, { revealSecret = false } = {}): WbDeliveryOrder
       // Escape hatch for orders settled before this system existed, or by
       // other means: closes the obligation without faking a minted code.
       markServedExternally: unserved,
+      // Пока выкуп висит на служебном аккаунте, покупатель не получает ничего —
+      // оператор должен иметь возможность привязать его в один клик (F3).
+      linkBuyer: Boolean(activationCode) && order.internalFulfillment?.buyerLinked === false,
       // Game pass search does not always find the buyer's pass, so the operator
       // needs the same "create it by hand" door the ordinary WB queue has.
       createInternalOrder: canCreateInternalOrder({
@@ -316,13 +345,23 @@ async function loadOrders() {
   const fulfillmentRows = codes.length
     ? await db.wbOrder.findMany({
       where: { wbCode: { in: codes } },
-      select: { wbCode: true, status: true, platform: true, robloxUsername: true },
+      select: {
+        wbCode: true,
+        status: true,
+        platform: true,
+        robloxUsername: true,
+        // Кто на самом деле стоит за заказом. Служебный `admin` означает, что
+        // покупатель нам неизвестен и уведомления ему не дойдут (F3).
+        user: { select: { tgId: true, vkId: true, username: true, name: true } },
+      },
     })
     : [];
   const fulfillment = new Map<string, InternalFulfillment>(fulfillmentRows.map((row) => [row.wbCode, {
     status: row.status,
     platform: row.platform,
     robloxUsername: row.robloxUsername,
+    buyerLinked: !isServiceOwned(row.user),
+    buyerHandle: buyerHandle(row.user),
   }]));
   return orders.map((order) => ({
     ...order,
@@ -381,13 +420,29 @@ export async function loadWbDeliveryOrder(orderId: string): Promise<WbDeliveryOr
   const fulfillment = order.wbCode?.code
     ? await db.wbOrder.findUnique({
       where: { wbCode: order.wbCode.code },
-      select: { status: true, platform: true, robloxUsername: true },
+      select: {
+        status: true,
+        platform: true,
+        robloxUsername: true,
+        user: { select: { tgId: true, vkId: true, username: true, name: true } },
+      },
     })
     : null;
   // One order, opened deliberately by a named admin: this is the only place the
   // operator can read the delivery code, which they need when WB rejects our
   // own `receive` and the order has to be closed by hand in the seller cabinet.
-  return toDto({ ...order, internalFulfillment: fulfillment }, { revealSecret: true });
+  return toDto({
+    ...order,
+    internalFulfillment: fulfillment
+      ? {
+        status: fulfillment.status,
+        platform: fulfillment.platform,
+        robloxUsername: fulfillment.robloxUsername,
+        buyerLinked: !isServiceOwned(fulfillment.user),
+        buyerHandle: buyerHandle(fulfillment.user),
+      }
+      : null,
+  }, { revealSecret: true });
 }
 
 async function getOrder(orderId: string | undefined) {
@@ -721,6 +776,12 @@ async function createInternalOrder(
     livePrice: preview.price,
     forced: Boolean(input.force),
   });
+  // Пока код не активирован, `wbCode.userId` пуст, и заказ уезжает на
+  // служебный аккаунт. Раньше это происходило молча — и покупатель просто
+  // переставал получать что-либо (F3). Теперь об этом говорят вслух.
+  if (!order.wbCode?.userId) {
+    notifyDbsBuyerUnlinked(order.wbOrderId, activationCode!);
+  }
   return {
     ok: true,
     message: `Заказ на выкуп ${activationCode} создан: ${nick ?? "без ника"} · ${denomination} R$ · геймпасс ${preview.gamepassId}`,
@@ -739,8 +800,18 @@ async function mutateStatus(
   if (action === "deliver" && !/confirm/i.test(order.supplierStatus)) {
     throw new WbDeliveryWorkflowError("Сначала подтвердите сборку заказа", 409, "CONFIRM_REQUIRED");
   }
-  if (action === "receive" && !canReceiveWbOrder({ ...order, hasLiveSecret: liveSecret(order.deliverySecret) })) {
-    throw new WbDeliveryWorkflowError("Для завершения нужны: статус «в доставке», отправленный гейт и действующий код", 409, "RECEIVE_PRECONDITION");
+  if (action === "receive" && !canReceiveWbOrder({
+    ...order,
+    hasLiveSecret: liveSecret(order.deliverySecret),
+    secretFailedAttempts: order.deliverySecret?.failedAttempts ?? 0,
+  })) {
+    throw new WbDeliveryWorkflowError(
+      (order.deliverySecret?.failedAttempts ?? 0) >= WB_RECEIVE_MAX_ATTEMPTS
+        ? "WB трижды отклонил этот код — закройте доставку вручную в кабинете WB"
+        : "Для завершения нужны статус «в доставке» и действующий код доставки",
+      409,
+      "RECEIVE_PRECONDITION",
+    );
   }
 
   try {
@@ -800,6 +871,51 @@ async function mutateStatus(
   };
 }
 
+/** Перевешивает заказ со служебного аккаунта на настоящего покупателя.
+ *
+ * Нужно, пока покупатель не пришёл по своему коду сам: выкуп, открытый
+ * оператором вручную, иначе висит на `Admin` и человек не получает ни
+ * уведомлений, ни «Мой заказ» (F3). Оператор вставляет `@username`, Telegram id
+ * или ссылку VK — то, что у него под рукой. */
+async function linkBuyer(order: ActionOrder, actor: string, raw: string): Promise<WbDeliveryActionResponse> {
+  const activationCode = order.wbCode?.code;
+  if (!activationCode) {
+    throw new WbDeliveryWorkflowError("Гейт по этому заказу ещё не выпущен — привязывать нечего", 409, "GATE_NOT_ISSUED");
+  }
+  if (!raw.trim()) {
+    throw new WbDeliveryWorkflowError("Укажите @username, Telegram ID или ссылку VK покупателя", 400, "BUYER_REQUIRED");
+  }
+  const user = await resolveBuyerUser(db, raw);
+  if (!user) {
+    throw new WbDeliveryWorkflowError(
+      `Пользователь «${raw}» не найден. Он должен хотя бы раз написать боту — только тогда у него появляется аккаунт.`,
+      404,
+      "BUYER_NOT_FOUND",
+    );
+  }
+  const result = await linkWbOrderToBuyer(db, activationCode, user.id, actor);
+  if (!result.ok) {
+    throw new WbDeliveryWorkflowError(
+      result.reason === "owned_by_other"
+        ? "Этот заказ уже принадлежит другому покупателю — перепривязка отклонена"
+        : result.reason === "user_not_found"
+          ? "Пользователь не найден"
+          : "Заказ по этому коду не найден",
+      409,
+      result.reason.toUpperCase(),
+    );
+  }
+  if (result.alreadyLinked) {
+    return { ok: true, message: `Заказ уже привязан к ${result.display}`, orderId: order.id };
+  }
+  await audit(order.id, "BUYER_LINKED", actor, { activationCode, userId: result.userId });
+  return {
+    ok: true,
+    message: `Покупатель ${result.display} привязан к заказу ${activationCode} — теперь он получает уведомления`,
+    orderId: order.id,
+  };
+}
+
 export async function performWbDeliveryAction(
   actor: string,
   rawInput: unknown,
@@ -834,6 +950,9 @@ export async function performWbDeliveryAction(
     if (!input.code) throw new WbDeliveryWorkflowError("Введите 6-значный код", 400, "CODE_REQUIRED");
     await saveDeliveryCode(order, input.code, actor, "manual");
     return { ok: true, message: "Код доставки сохранён и скрыт", orderId: order.id };
+  }
+  if (input.action === "link_buyer") {
+    return linkBuyer(order, actor, input.buyer ?? "");
   }
   if (input.action === "issue_gate") {
     if (!canIssueWbGate({ ...order, hasLiveSecret: liveSecret(order.deliverySecret) })) {
@@ -875,7 +994,10 @@ export async function performWbDeliveryAction(
       actor,
       "gate",
     );
-    await db.wbMarketplaceOrder.update({ where: { id: order.id }, data: { gateState: "SENT", lastErrorCode: null } });
+    await db.wbMarketplaceOrder.update({
+      where: { id: order.id },
+      data: { gateState: "SENT", lastErrorCode: null, gateSentAt: new Date() },
+    });
     await audit(order.id, "GATE_LINK_SENT", actor, { isTest: order.isTest });
     return { ok: true, message: "Ссылка и код отправлены покупателю", orderId: order.id };
   }
@@ -895,7 +1017,10 @@ export async function performWbDeliveryAction(
     if (!order.wbCode || !["ISSUED", "SENDING", "SEND_UNKNOWN"].includes(order.gateState)) {
       throw new WbDeliveryWorkflowError("Сначала выпустите уникальный код гейта", 409, "GATE_NOT_ISSUED");
     }
-    await db.wbMarketplaceOrder.update({ where: { id: order.id }, data: { gateState: "SENT", lastErrorCode: null } });
+    await db.wbMarketplaceOrder.update({
+      where: { id: order.id },
+      data: { gateState: "SENT", lastErrorCode: null, gateSentAt: new Date() },
+    });
     await audit(order.id, "GATE_MANUALLY_MARKED_SENT", actor, { isTest: order.isTest });
     return { ok: true, message: "Ручная отправка зафиксирована в аудите", orderId: order.id };
   }

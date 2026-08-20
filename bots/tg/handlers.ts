@@ -31,6 +31,14 @@ import { buildOrderProfitSnapshot } from "../shared/order-profit";
 import { buildTelegramWebLoginUrl, parseTelegramWebLoginStart } from "../shared/telegram-web-login";
 import { browserFailureMessage, getBrowserSession, isBrowserInfrastructureFailure } from "../shared/browser-purchase";
 import { createBotPayment, type BotPaymentMethod } from "../shared/bot-payment-api";
+import {
+  allowDeliveryCodeAttempt,
+  findDbsOrderByDeliveryCode,
+  isServiceOwned,
+  linkWbOrderToBuyer,
+} from "../shared/wb-buyer-link";
+import { notifyDbsBuyerFoundLate } from "../shared/wb-delivery-admin-notify";
+import { wbGateUrl } from "../shared/wb-gate-link";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -629,12 +637,36 @@ export function registerStart(bot: Telegraf): void {
     // the subscription step or close Telegram immediately after landing.
     let provisionalOrder: any = null;
     let provisionalCreated = false;
+    /** Заказ существовал и висел на служебном аккаунте — мы его перевесили. */
+    let adoptedExistingOrder = false;
     try {
       // Use the DB-cased wbCode.code (not the payload-cased `code`) so the
       // unique-where update can't silently miss a code stored in another case.
       provisionalOrder = await (db as any).$transaction(async (tx: any) => {
-        const existingOrder = await tx.wbOrder.findUnique({ where: { wbCode: wbCode.code } });
-        if (existingOrder) return existingOrder; // re-activation — order already exists
+        const existingOrder = await tx.wbOrder.findUnique({
+          where: { wbCode: wbCode.code },
+          include: { user: { select: { tgId: true } } },
+        });
+        if (existingOrder) {
+          // Заказ уже есть — обычно потому, что оператор открыл выкуп вручную
+          // из консоли DBS, пока покупатель ещё не пришёл. Такой заказ висит на
+          // служебном `admin`, и раньше приход настоящего человека ничего не
+          // менял: `return existingOrder` оставлял владельца прежним, и клиент
+          // так и не получал ни уведомлений, ни «Мой заказ» (F3).
+          if (isServiceOwned(existingOrder.user)) {
+            await tx.wbOrder.update({
+              where: { id: existingOrder.id },
+              data: {
+                userId: user.id,
+                adminNote: `[ПРИВЯЗКА ${new Date().toISOString().slice(0, 10)} авто] покупатель пришёл по коду сам`
+                  + (existingOrder.adminNote ? `\n${existingOrder.adminNote}` : ""),
+              },
+            });
+            await tx.wbCode.update({ where: { code: wbCode.code }, data: { userId: user.id } });
+            adoptedExistingOrder = true;
+          }
+          return existingOrder; // re-activation — order already exists
+        }
         await tx.wbCode.update({
           where: { code: wbCode.code },
           data: { userId: user.id, status: "CLAIMED", isUsed: false },
@@ -662,6 +694,16 @@ export function registerStart(bot: Telegraf): void {
     // Telegram may redeliver /start or a customer can reopen the same deep link.
     // The order is idempotent by wbCode, so the admin card must be too: notify
     // only the transaction that created the provisional order, never a replay.
+    if (adoptedExistingOrder) {
+      const who = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name || `tg:${tgId}`);
+      await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(
+        id,
+        `🟢 <b>DBS · покупатель нашёлся сам</b>\n` +
+        `Код <code>${escapeHtml(code)}</code> · ${who}\n` +
+        `Дальше: заказ перевешен со служебного аккаунта, уведомления теперь дойдут`,
+      )));
+    }
+
     if (provisionalCreated && provisionalOrder?.status === "AWAITING_GAMEPASS") {
       try {
         const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name || "Пользователь");
@@ -1926,6 +1968,14 @@ export function registerText(bot: Telegraf): void {
           return;
         }
 
+        // Покупателю в чате WB только что сказали «пришлите код» — и часть людей
+        // присылает именно тот код, код доставки Wildberries, сюда. Раньше это
+        // был тупик «нет активных заявок»; между тем у нас лежит точный ключ
+        // поиска по этому коду (F14).
+        if (!state && /^\d{5,6}$/.test(text)) {
+          if (await handleWbDeliveryCodeEntry(ctx, tgId, text)) return;
+        }
+
         if (!state) {
           // User may have clicked "📸 Оставить отзыв" and typed instead of sending a photo
           if (pendingReview.has(ctx.from.id)) {
@@ -2940,6 +2990,88 @@ async function handleAdminSearch(ctx: any, query: string) {
 // WB code direct text entry — user typed the code manually (e.g. after getting
 // stuck due to a prior error or losing the deep link)
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** Покупатель прислал в бота код доставки Wildberries вместо нашего кода.
+ *
+ * Внутри трёхчасового окна (решение владельца О5) заказ привязывается сам и
+ * человек сразу видит свой статус. За пределами окна бот **не привязывает**:
+ * зовёт оператора и отвечает ровно тем же текстом, что и при промахе, — иначе
+ * по разнице ответов можно перебирать пятизначный код.
+ *
+ * Возвращает `true`, если сообщение обработано. */
+type DeliveryCodeCtx = {
+  reply: (text: string, extra?: Record<string, unknown>) => Promise<unknown>;
+  from?: { username?: string; first_name?: string; last_name?: string };
+};
+
+async function handleWbDeliveryCodeEntry(ctx: DeliveryCodeCtx, tgId: string, code: string): Promise<boolean> {
+  if (!allowDeliveryCodeAttempt(`tg:${tgId}`)) return false;
+  const match = await findDbsOrderByDeliveryCode(db, code);
+
+  // Один и тот же ответ при промахе и при «нашли, но окно закрыто».
+  const askSupport = async () => {
+    await ctx.reply(
+      "Похоже, это код доставки Wildberries, а не код для активации.\n\n" +
+      "Я передал его менеджеру — он найдёт ваш заказ и ответит здесь.\n\n" +
+      "🔑 Если у вас есть наш семизначный код из чата WB — пришлите его сюда, и заказ откроется сразу.",
+      { parse_mode: "HTML", ...Markup.inlineKeyboard([[Markup.button.url("💬 Написать менеджеру", SUPPORT_URL)]]) },
+    );
+  };
+
+  if (!match || match.alreadyOwned) {
+    if (!match) return false;
+    await askSupport();
+    return true;
+  }
+
+  if (!match.withinAutoWindow) {
+    await askSupport();
+    notifyDbsBuyerFoundLate(
+      match.wbOrderId,
+      match.activationCode,
+      ctx.from?.username ? `@${ctx.from.username}` : `tg:${tgId}`,
+      Math.round((Date.now() - match.receivedAt.getTime()) / 3_600_000),
+    );
+    return true;
+  }
+
+  if (!match.activationCode) {
+    await askSupport();
+    return true;
+  }
+
+  // Внутри окна: заводим пользователя, если его ещё нет, и привязываем.
+  let user = await db.user.findUnique({ where: { tgId } });
+  if (!user) {
+    user = await db.user.create({
+      data: {
+        tgId,
+        name: [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ") || null,
+        username: ctx.from?.username ?? null,
+      },
+    });
+  }
+  const linked = await linkWbOrderToBuyer(db, match.activationCode, user.id, `tg:${tgId}`);
+  if (!linked.ok) {
+    await askSupport();
+    return true;
+  }
+  // Заказа на выкуп может ещё не быть — тогда это обычная активация гейта.
+  await ctx.reply(
+    `✅ Нашёл ваш заказ по коду доставки!\n\n` +
+    `🔑 Ваш код активации: <code>${escapeHtml(match.activationCode)}</code>\n\n` +
+    `Отправьте его мне сообщением — и я открою вашу персональную инструкцию.`,
+    {
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+      ...Markup.inlineKeyboard([
+        [Markup.button.url("📖 ОТКРЫТЬ ИНСТРУКЦИЮ", wbGateUrl(match.activationCode, "https://robloxbank.ru"))],
+        [Markup.button.callback("📊 Мой заказ", CB.refreshStatus)],
+      ]),
+    },
+  );
+  return true;
+}
 
 async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text: string): Promise<void> {
   const codeInput = text.toUpperCase();

@@ -63,6 +63,10 @@ export type WbDeliveryOrderDto = {
     status: string;
     platform: string | null;
     robloxUsername: string | null;
+    /** `false`, пока за заказом стоит служебный аккаунт, а не человек. */
+    buyerLinked?: boolean;
+    /** `@username` / `tg:…` / `vk:…` — то, чем оператор может воспользоваться. */
+    buyerHandle?: string | null;
   } | null;
   /** WB closed the order but the buyer never received a gate code — money
    * settled, nothing delivered. The loudest state the console can show. */
@@ -78,6 +82,9 @@ export type WbDeliveryOrderDto = {
     sendGate: boolean;
     markGateSent: boolean;
     markServedExternally: boolean;
+    /** Выкуп открыт вручную и висит на служебном аккаунте — покупателя надо
+     * привязать, иначе он не получит ни уведомлений, ни «Мой заказ». */
+    linkBuyer: boolean;
     /** The gate code exists but nobody activated it, so an operator may open
      * the buyout order by hand. */
     createInternalOrder: boolean;
@@ -133,6 +140,7 @@ export type WbDeliveryAction =
   | "send_gate"
   | "mark_gate_sent"
   | "mark_served_externally"
+  | "link_buyer"
   | "send_message"
   | "confirm"
   | "deliver"

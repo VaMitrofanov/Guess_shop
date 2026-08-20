@@ -12,6 +12,8 @@ import {
   wbMarketplaceTerminalFlags,
   wbProductVendorCandidates,
   wbDeliveryStage,
+  wbAutoShipAction,
+  WB_RECEIVE_MAX_ATTEMPTS,
   type WbDeliveryPolicyOrder,
 } from "../../bots/shared/wb-delivery-policy";
 import {
@@ -104,11 +106,35 @@ describe("WB DBS fail-closed policy", () => {
     expect(canIssueWbGate(order({ chatState: "CODE_RECEIVED", hasLiveSecret: true }))).toBe(true);
   });
 
-  it("only permits receive after link sent, deliver status and live secret", () => {
+  it("only permits receive with a live secret and WB's own delivery status", () => {
     const base = order({ chatState: "CODE_RECEIVED", gateState: "SENT", hasLiveSecret: true });
     expect(canReceiveWbOrder(base)).toBe(false);
     expect(canReceiveWbOrder({ ...base, supplierStatus: "deliver" })).toBe(true);
-    expect(canReceiveWbOrder({ ...base, supplierStatus: "deliver", lastErrorCode: "OUTCOME_UNKNOWN" })).toBe(false);
+  });
+
+  /** `lastErrorCode` was a one-way ticket: nothing clears it automatically, so a
+   * chat outage or an expired secret disabled closing for that order forever —
+   * and closing is the one deadline WB does not give back. Retries are bounded
+   * by the secret's own failure counter instead, which only WB rejecting the
+   * code can raise (docs/wb-dbs-review-2026-08-20.md, F2). */
+  it("is not disabled forever by an unrelated error, but stops after three WB rejections", () => {
+    const base = order({ chatState: "CODE_RECEIVED", gateState: "SENT", hasLiveSecret: true, supplierStatus: "deliver" });
+    expect(canReceiveWbOrder({ ...base, lastErrorCode: "GATE_SEND_FAILED" })).toBe(true);
+    expect(canReceiveWbOrder({ ...base, secretFailedAttempts: 2 })).toBe(true);
+    expect(canReceiveWbOrder({ ...base, secretFailedAttempts: WB_RECEIVE_MAX_ATTEMPTS })).toBe(false);
+  });
+
+  /** F1: nothing used to walk a DBS order along WB's own status ladder, so
+   * closing only worked when an operator had pushed it through the seller
+   * cabinet before the buyer answered. */
+  it("walks new → confirm → deliver and stops at anything terminal", () => {
+    expect(wbAutoShipAction("new")).toBe("confirm");
+    expect(wbAutoShipAction("confirm")).toBe("deliver");
+    expect(wbAutoShipAction("deliver")).toBeNull();
+    expect(wbAutoShipAction("receive")).toBeNull();
+    expect(wbAutoShipAction("sold")).toBeNull();
+    expect(wbAutoShipAction("canceled")).toBeNull();
+    expect(wbAutoShipAction("declined_by_client")).toBeNull();
   });
 
   it("treats consumed, purged and expired secrets as unusable", () => {

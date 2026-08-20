@@ -93,8 +93,17 @@ import { ESLint } from "eslint";
 // Unlike --max-warnings, this has no spare capacity: adding, moving,
 // replacing or changing even one warning fails the gate. Reduce the baseline
 // only in a dedicated cleanup change after reviewing the full formatter output.
+// 2026-08-20 (1086 → 1086): доводка раздела DBS — автозакрытие доставки,
+// привязка покупателя, экран контакта в гейте, живая карточка в админке.
+// Состав debt не изменился и ни одного нового предупреждения не добавлено:
+// новые модули (`wb-buyer-link.ts`, `notify-format.ts`) типизированы целиком,
+// в ботах вместо привычного `db as any` использован готовый `PrismaClient`, а
+// контексты обработчиков описаны структурными типами вместо `any`. Отпечаток
+// сдвинулся только из-за смещения существующих строк в `tg/handlers.ts`,
+// `vk/handlers.ts`, `GuideClient.tsx` и `WBInstructionV2.tsx`.
+//
 const BASELINE_WARNING_COUNT = 1086;
-const BASELINE_SHA256 = "b9cd3d797e114dcc8e472634b23cb2e0ef2c6a5a6416cf18d98dccc9237a052c";
+const BASELINE_SHA256 = "9a866f65f73535a00629412db44f1ce232b6597af940229b8b6f55238405b4f1";
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(["."]);

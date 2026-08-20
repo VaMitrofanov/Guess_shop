@@ -25,6 +25,14 @@ import { robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
 import { confirmGpWatch, declineGpWatch } from "../shared/gp-watch-confirm";
 import { assertOwnsIntent, vkActor } from "../shared/ownership";
 import { createBotPayment, type BotPaymentMethod } from "../shared/bot-payment-api";
+import {
+  allowDeliveryCodeAttempt,
+  findDbsOrderByDeliveryCode,
+  isServiceOwned,
+  linkWbOrderToBuyer,
+} from "../shared/wb-buyer-link";
+import { notifyDbsBuyerFoundLate } from "../shared/wb-delivery-admin-notify";
+import { wbGateUrl } from "../shared/wb-gate-link";
 
 // VK API instance injected from bot.ts to avoid circular import.
 let _vkApi: any = null;
@@ -1759,10 +1767,32 @@ async function handleRefActivation(
   // ── Provisional order: claim code + notify admins BEFORE subscription gate ──
   // Mirrors TG flow — user identity is captured even if they skip the sub check.
   let provisionalCreated = false;
+  /** Заказ существовал и висел на служебном аккаунте — мы его перевесили. */
+  let adoptedExistingOrder = false;
   try {
     await (db as any).$transaction(async (tx: any) => {
-      const existingOrder = await tx.wbOrder.findUnique({ where: { wbCode: wbCode.code } });
-      if (existingOrder) return;
+      const existingOrder = await tx.wbOrder.findUnique({
+        where: { wbCode: wbCode.code },
+        include: { user: { select: { tgId: true } } },
+      });
+      if (existingOrder) {
+        // Зеркало TG: выкуп, открытый оператором из консоли DBS, висит на
+        // служебном аккаунте. Приход настоящего покупателя должен его забрать,
+        // иначе человек так и не получит ни уведомлений, ни «Мой заказ» (F3).
+        if (isServiceOwned(existingOrder.user)) {
+          await tx.wbOrder.update({
+            where: { id: existingOrder.id },
+            data: {
+              userId: user.id,
+              adminNote: `[ПРИВЯЗКА ${new Date().toISOString().slice(0, 10)} авто] покупатель пришёл по коду сам (VK)`
+                + (existingOrder.adminNote ? `\n${existingOrder.adminNote}` : ""),
+            },
+          });
+          await tx.wbCode.update({ where: { code: wbCode.code }, data: { userId: user.id } });
+          adoptedExistingOrder = true;
+        }
+        return;
+      }
       await tx.wbCode.update({
         where: { code: wbCode.code },
         data: { userId: user.id, status: "CLAIMED", isUsed: false },
@@ -1783,6 +1813,15 @@ async function handleRefActivation(
     });
   } catch (err) {
     console.error("[VK] Provisional order creation failed:", err);
+  }
+
+  if (adoptedExistingOrder) {
+    await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(
+      id,
+      `🟢 <b>DBS · покупатель нашёлся сам</b>\n` +
+      `Код <code>${escapeHtml(wbCode.code)}</code> · vk:${vkUserId}\n` +
+      `Дальше: заказ перевешен со служебного аккаунта, уведомления теперь дойдут`,
+    )));
   }
 
   if (provisionalCreated) {
@@ -3347,6 +3386,61 @@ async function sendVkBuyerMenu(ctx: MessageContext, vkUserId: number): Promise<v
   await ctx.reply({ message: "⚙️ Настройки:", keyboard: nickKb.inline() });
 }
 
+/** Зеркало TG-ветки: покупатель прислал код доставки Wildberries вместо нашего.
+ *
+ * Внутри трёхчасового окна (О5) заказ привязывается сам; за пределами — бот
+ * зовёт оператора и отвечает ровно тем же текстом, что и при промахе, чтобы по
+ * разнице ответов нельзя было перебирать пятизначный код. */
+type VkDeliveryCodeCtx = { reply: (text: string) => Promise<unknown> };
+
+async function handleVkDeliveryCodeEntry(ctx: VkDeliveryCodeCtx, vkUserId: number, code: string): Promise<boolean> {
+  if (!allowDeliveryCodeAttempt(`vk:${vkUserId}`)) return false;
+  const match = await findDbsOrderByDeliveryCode(db, code);
+
+  const askSupport = async () => {
+    await ctx.reply(
+      "Похоже, это код доставки Wildberries, а не код для активации.\n\n" +
+      "Я передал его менеджеру — он найдёт ваш заказ и ответит здесь.\n\n" +
+      "🔑 Если у вас есть наш семизначный код из чата WB — пришлите его сюда, и заказ откроется сразу.",
+    );
+  };
+
+  if (!match || match.alreadyOwned) {
+    if (!match) return false;
+    await askSupport();
+    return true;
+  }
+  if (!match.withinAutoWindow || !match.activationCode) {
+    await askSupport();
+    if (match.activationCode) {
+      notifyDbsBuyerFoundLate(
+        match.wbOrderId,
+        match.activationCode,
+        `vk:${vkUserId}`,
+        Math.round((Date.now() - match.receivedAt.getTime()) / 3_600_000),
+      );
+    }
+    return true;
+  }
+
+  let user = await db.user.findFirst({ where: { vkId: String(vkUserId) } });
+  if (!user) {
+    user = await db.user.create({ data: { vkId: String(vkUserId), name: await vkGetName(vkUserId) } });
+  }
+  const linked = await linkWbOrderToBuyer(db, match.activationCode, user.id, `vk:${vkUserId}`);
+  if (!linked.ok) {
+    await askSupport();
+    return true;
+  }
+  await ctx.reply(
+    `✅ Нашёл ваш заказ по коду доставки!\n\n` +
+    `🔑 Ваш код активации: ${match.activationCode}\n\n` +
+    `Отправьте его мне сообщением — и я открою вашу персональную инструкцию.\n` +
+    wbGateUrl(match.activationCode, "https://robloxbank.ru"),
+  );
+  return true;
+}
+
 async function handleIdleMessage(
   ctx: MessageContext,
   vkUserId: number,
@@ -3381,6 +3475,13 @@ async function handleIdleMessage(
       await sendVkSubPrompt(ctx, null);
       return;
     }
+  }
+
+  // Покупателю в чате WB велели «прислать код», и часть людей присылает код
+  // доставки Wildberries сюда. Раньше это был тупик; у нас есть точный ключ
+  // поиска по нему (F14). Зеркало TG-ветки.
+  if (/^\d{5,6}$/.test(trimmedIdle)) {
+    if (await handleVkDeliveryCodeEntry(ctx, vkUserId, trimmedIdle)) return;
   }
 
   // ── PRIORITY 1: Direct WB code entry (7 alphanumeric chars, at least one letter) ──

@@ -999,6 +999,20 @@ model WbMarketplaceOrder {
   wbCodeId             String?                @unique
   wbCode               WbCode?                @relation(fields: [wbCodeId], references: [id], onDelete: SetNull)
   lastErrorCode        String?
+  /// When the gate link actually reached the buyer. Э7 schedules its two
+  /// reminders off this, and deriving it from the audit trail every cycle cost
+  /// a scan of every event row per open order.
+  gateSentAt           DateTime?
+  /// How many "you have not opened your code yet" nudges already went out
+  /// (0, 1, 2). Capped so a silent buyer is never spammed.
+  gateReminderLevel    Int                    @default(0)
+  /// Dedupe for the "WB's closing window is running out" alert: it is a
+  /// once-per-order shout, not a per-cycle one.
+  deliveryAlertedAt    DateTime?
+  /// `{ "<adminTgId>": <messageId> }` for the single live status card each
+  /// admin gets per DBS order. Editing that message replaces the four or five
+  /// separate notifications the chain used to send.
+  adminCardMessages    Json?
   isTest               Boolean                @default(false)
   firstSeenAt          DateTime               @default(now())
   lastSeenAt           DateTime               @default(now())
@@ -1072,6 +1086,10 @@ model WbDeliverySecret {
   updatedAt          DateTime           @updatedAt
 
   @@index([expiresAt, consumedAt])
+  /// Lets a buyer who types their WB delivery code into our bot be recognised
+  /// by exact keyed-hash match instead of being told "no active orders".
+  /// See docs/wb-dbs-review-2026-08-20.md §7 (О5) for the rate limits.
+  @@index([codeHmac])
 }
 
 /// Persistent pagination cursor and cross-process lease for DBS/chat sync.

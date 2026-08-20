@@ -77,6 +77,7 @@ VK-бота, создаёт геймпасс в Roblox, менеджер его 
 | [b2b-saas.md](b2b-saas.md) | Партнёрский контур `Антон`: TWA + `/admin`, Google Sheets/XLSX, USDT-ledger, NET/DIRTY-экономика и прибыль |
 | [corridor-and-site.md](corridor-and-site.md) | WB-гейт, сайт `/guide`, API коридора, восстановление сессии |
 | [wb-dbs-delivery-plan.md](wb-dbs-delivery-plan.md) | **Новый DBS-коридор**: WB-заказ → чат → код получения → generated гейт-код → TWA/desktop → текущий TG/VK fulfillment; API, данные, безопасность, rollout и DoD |
+| [wb-dbs-review-2026-08-20.md](wb-dbs-review-2026-08-20.md) | **Ревью раздела DBS (20.08.2026)**: почему перестало срабатывать авто-закрытие доставки, самовозобновляющаяся скидка 60 ₽, привязка покупателя, контакты до инструкции, язык уведомлений; план Э1–Э8 и решения владельца |
 | [site-acquiring-master-plan.md](site-acquiring-master-plan.md) | Ультра-ревью `robloxbank.ru`, P0-блокеры эквайринга, единые цена/identity/orders, дизайн и поэтапный launch plan |
 | [site-launch-implementation-plan.md](site-launch-implementation-plan.md) | Согласуемый план 18.07: baseline, обязательная регистрация перед оплатой, полноценный ЛК, controlled rollout, WB→сайт→бот/группа и боевой E2E |
 | [auth-account-readiness-plan.md](auth-account-readiness-plan.md) | ЛК/login/register и email/TG/VK identity: Brevo SMTP в production, Gmail verification и Mail.ru delivery приняты; Yandex остаётся отдельной проверкой |

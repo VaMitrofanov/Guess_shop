@@ -635,6 +635,28 @@ export default function WBInstructionV2({
             <div className="wbi-redirect">↩︎ Возвращаем тебя в {channel === "VK" ? "ВКонтакте" : "Telegram"}… Если не открылось — нажми кнопку выше.</div>
           )}
 
+          {/* Самая частая точка залипания на этом экране: покупатель уверен, что
+              геймпасс создал, а поиск его не находит — почти всегда потому, что
+              плейс закрыт настройками. В боте этот разбор написан давно, а на
+              странице его не было, и человек просто ждал: один такой случай
+              стоил пяти с половиной часов переписки в чате WB за два дня.
+              Кнопки «проверить ещё раз» здесь быть не может — поиск живёт в
+              боте, а кнопка-обманка хуже честной ссылки (решение владельца). */}
+          {!orderPlaced && !picked && (
+            <details className="wbi-gphelp">
+              <summary>🙈 Не видим твой геймпасс?</summary>
+              <ul>
+                <li>Плейс закрыт настройками приватности — открой его и сделай Public</li>
+                <li>Пасс создан, но не выставлен на продажу (For Sale)</li>
+                <li>Цена пасса должна быть ровно <b>{calcPrice(nomDefault)} R$</b> — иначе выкуп не сойдётся</li>
+                <li>После изменения настроек Roblox обновляет витрину не мгновенно — подожди пару минут</li>
+              </ul>
+              <a href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer">
+                Не помогло? Пиши в поддержку — разберёмся вместе →
+              </a>
+            </details>
+          )}
+
           <div className="wbi-directcta">💎 В боте можно <b>купить Robux напрямую</b> — без карты WB, быстрее и выгоднее</div>
 
           {testMode && (
@@ -835,6 +857,14 @@ const CSS = `
 .wbi-redirect{margin-top:14px;font-size:13.5px;line-height:1.5;color:#bcd9ff;background:rgba(61,139,255,.10);border:1px solid rgba(61,139,255,.34);border-radius:11px;padding:10px 13px;text-align:center}
 .wbi-directcta{margin-top:16px;font-size:14.5px;line-height:1.5;color:#bff3d6;background:rgba(0,224,138,.08);border:1px solid rgba(0,224,138,.32);border-radius:11px;padding:11px 14px}
 .wbi-directcta b{color:#fff}
+.wbi-gphelp{margin-top:16px;text-align:left;border:1px solid rgba(255,171,65,.3);border-radius:11px;background:rgba(255,171,65,.07)}
+.wbi-gphelp summary{padding:11px 14px;font-size:15px;font-weight:800;color:#ffc98a;cursor:pointer;list-style:none}
+.wbi-gphelp summary::-webkit-details-marker{display:none}
+.wbi-gphelp summary::after{content:"⌄";float:right;transition:transform .18s ease}
+.wbi-gphelp[open] summary::after{transform:rotate(180deg)}
+.wbi-gphelp ul{margin:0;padding:0 14px 4px 32px;color:#e3d6c4;font-size:14.5px;line-height:1.55}
+.wbi-gphelp li{margin:6px 0}
+.wbi-gphelp > a{display:inline-block;margin:6px 14px 14px;font-size:15px;color:#ffc98a;text-decoration:none;border-bottom:1px solid rgba(255,201,138,.36)}
 .wbi-support{display:inline-block;margin-top:22px;font-size:16px;color:var(--gold);text-decoration:none;border-bottom:1px solid rgba(201,168,76,.3)}
 .wbi-note{font-size:14px;color:#858da0;text-align:center;margin-top:26px;font-style:italic}
 .wbi-reveal{opacity:0;transform:translateY(26px);transition:opacity .65s cubic-bezier(.2,.7,.2,1),transform .65s cubic-bezier(.2,.7,.2,1)}

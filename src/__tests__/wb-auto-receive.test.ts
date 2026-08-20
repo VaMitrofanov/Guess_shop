@@ -5,7 +5,15 @@ import { canReceiveWbOrder } from "../../bots/shared/wb-delivery-policy";
 const worker = readFileSync(resolve(__dirname, "../../bots/shared/wb-delivery-sync.ts"), "utf8");
 const autoReceive = worker.slice(
   worker.indexOf("async function tryAutoReceive"),
-  worker.indexOf("async function tryAutoGate"),
+  worker.indexOf("async function retryAutoReceive"),
+);
+const retrySweep = worker.slice(
+  worker.indexOf("async function retryAutoReceive"),
+  worker.indexOf("async function tryAutoShip"),
+);
+const autoShip = worker.slice(
+  worker.indexOf("async function tryAutoShip"),
+  worker.indexOf("async function alertStuckDeliveries"),
 );
 
 describe("automatic WB delivery close", () => {
@@ -18,9 +26,9 @@ describe("automatic WB delivery close", () => {
    * from, so closing the delivery must not queue behind anything. Sending the
    * gate is retryable and stays visible via isWbBuyerUnserved. */
   it("closes the delivery before the gate is minted", () => {
-    const capture = worker.slice(worker.indexOf("notifyDbsCodeCaptured(order.wbOrderId)"));
-    const receive = capture.indexOf("tryAutoReceive(");
-    const gate = capture.indexOf("tryAutoGate(");
+    const capture = worker.slice(worker.indexOf("async function captureDeliveryCode"));
+    const receive = capture.indexOf("await tryAutoReceive(");
+    const gate = capture.indexOf("await tryAutoGate(");
     expect(receive).toBeGreaterThan(-1);
     expect(gate).toBeGreaterThan(receive);
   });
@@ -73,7 +81,45 @@ describe("automatic WB delivery close", () => {
     expect(autoReceive).toContain("AUTO_RECEIVE_FAILED");
     expect(autoReceive).toContain("AUTO_RECEIVE_OUTCOME_UNKNOWN");
     expect(autoReceive).toContain("notifyDbsAutoReceiveFailed");
-    expect(autoReceive).not.toMatch(/retry|while\s*\(/i);
+    // No loop inside a single attempt: bounded repetition is the sweep's job.
+    expect(autoReceive).not.toMatch(/while\s*\(|for\s*\(/);
+  });
+
+  /** F1: the attempt used to be one-shot, taken at the instant the code landed.
+   * If the order had not reached `deliver` yet — the normal case once the
+   * auto-reply cut buyer response time to minutes — that single chance was
+   * spent and never retried. */
+  it("retries on every cycle instead of getting one shot at capture time", () => {
+    expect(retrySweep).toContain("tryAutoReceive(");
+    expect(retrySweep).toContain("consumedAt: null");
+    expect(retrySweep).toContain("WB_RECEIVE_MAX_ATTEMPTS");
+    // Wired into the cycle, not just defined.
+    expect(worker).toContain("await retryAutoReceive(db)");
+  });
+
+  /** Every skip used to be a bare `return`: no audit row, no message, and from
+   * the outside indistinguishable from a notification that never arrived. */
+  it("names the reason it skipped instead of returning silently", () => {
+    for (const reason of ["flag_off", "no_secret", "already_closed", "too_many_attempts", "wb_not_in_delivery"]) {
+      expect(autoReceive).toContain(`"${reason}"`);
+    }
+    expect(worker).toContain("if (skip) notifyDbsCodeCaptured(order.wbOrderId, skip)");
+  });
+
+  /** Nothing walked a DBS order along WB's own ladder, so closing only worked
+   * when a human had pushed it through the seller cabinet first. */
+  it("moves the order to `deliver` itself, behind its own flag", () => {
+    expect(autoShip).toContain('process.env.WB_DBS_AUTO_SHIP !== "true"');
+    expect(autoShip).toContain('process.env.WB_DBS_MUTATIONS_ENABLED !== "true"');
+    expect(autoShip).toContain("confirmDbsOrder");
+    expect(autoShip).toContain("deliverDbsOrder");
+    expect(autoShip).toContain("wbAutoShipAction");
+    // Never touches an order that is already settled one way or another.
+    expect(autoShip).toContain("completedAt: null");
+    expect(autoShip).toContain("cancelledAt: null");
+    // Runs before the retry sweep: an order already in `deliver` is one the
+    // buyer's code can close on arrival.
+    expect(worker.indexOf("await tryAutoShip(db, out)")).toBeLessThan(worker.indexOf("await retryAutoReceive(db)"));
   });
 
   it("purges the buyer's code in the same transaction that closes the order", () => {

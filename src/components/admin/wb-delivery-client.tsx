@@ -34,12 +34,16 @@ import type {
 } from "@/types/wb-delivery";
 import { useVisiblePolling } from "@/hooks/useVisiblePolling";
 import {
+  WB_FUNNEL_HINT,
   WB_FUNNEL_LABEL,
+  WB_QUEUE_SECTIONS,
   WB_STAGE_LABEL,
+  WB_TERMINAL_STAGES,
   wbAuditLabel,
   wbGateStateLabel,
   wbSupplierStatusLabel,
 } from "@/lib/wb-delivery-labels";
+import type { WbDeliveryStage } from "../../../bots/shared/wb-delivery-policy";
 import css from "./wb-delivery.module.css";
 
 const FILTERS = [
@@ -50,6 +54,28 @@ const FILTERS = [
   ["complete", "Готово"],
   ["all", "Все"],
 ] as const;
+
+/** Полоса этапов в карточке.
+ *
+ * Раньше это был каскад `if`, который не знал `attention`, `in_bot` и
+ * `cancelled` — все три падали в `0`, и заказ, который давно у покупателя в
+ * боте, показывал прогресс в самом начале (F7). Карта покрывает каждую стадию,
+ * так что новая стадия не может молча свалиться в «Заказ». */
+const STAGE_STEP: Record<WbDeliveryStage, number> = {
+  new: 0,
+  chat_ready: 1,
+  waiting_code: 1,
+  code_received: 2,
+  gate_ready: 3,
+  link_sent: 4,
+  ready_receive: 4,
+  in_bot: 4,
+  complete: 5,
+  cancelled: 5,
+  // «Нужна проверка» — это не место в цепочке, а сход с неё. Показываем
+  // последний достоверно пройденный шаг, а не выдуманный прогресс.
+  attention: 4,
+};
 
 /** Wording lives in one module so the desktop journal and the TWA queue cannot
  * drift into describing the same state with two different words. */
@@ -65,13 +91,20 @@ function dateTime(value: string | null) {
   return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
+/** Каждый фильтр читает ту же ось `stage`, что и счётчики над ним.
+ *
+ * «В работе» раньше фильтровал по таймстампам (`!completedAt && !cancelledAt`),
+ * а хиро-цифра считала по стадиям. Заказ в стадии `attention` из-за
+ * `isWbBuyerUnserved` имеет `completedAt` — он попадал в цифру и выпадал из
+ * списка, то есть самое громкое состояние контура было не видно на вкладке по
+ * умолчанию (F6). */
 function filterOrder(order: WbDeliveryOrderDto, filter: typeof FILTERS[number][0]) {
   if (filter === "all") return true;
-  if (filter === "complete") return order.stage === "complete" || order.stage === "cancelled";
+  if (filter === "complete") return WB_TERMINAL_STAGES.includes(order.stage);
   if (filter === "in_bot") return order.stage === "in_bot";
   if (filter === "attention") return order.stage === "attention";
   if (filter === "ready") return order.stage === "ready_receive";
-  return (!order.completedAt && !order.cancelledAt) || order.stage === "in_bot";
+  return !WB_TERMINAL_STAGES.includes(order.stage);
 }
 
 /** Both status buttons are gated on what WB itself reports, so an operator who
@@ -88,12 +121,7 @@ function statusHint(order: WbDeliveryOrderDto, action: "confirm" | "deliver") {
 }
 
 function stageIndex(order: WbDeliveryOrderDto) {
-  if (order.stage === "complete") return 5;
-  if (["ready_receive", "link_sent"].includes(order.stage)) return 4;
-  if (["gate_ready"].includes(order.stage)) return 3;
-  if (["code_received"].includes(order.stage)) return 2;
-  if (["waiting_code", "chat_ready"].includes(order.stage)) return 1;
-  return 0;
+  return STAGE_STEP[order.stage] ?? 0;
 }
 
 export default function WbDeliveryClient({ initialData }: { initialData: WbDeliveryOverview }) {
@@ -197,6 +225,31 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
   const selected = data.orders.find((order) => order.id === selectedId) ?? visible[0] ?? null;
   const step = selected ? stageIndex(selected) : 0;
 
+  /** «В работе» плоским списком не читается: заказ, ждущий геймпасса от
+   * покупателя, выглядит так же, как тот, что ждёт нашего собственного
+   * закрытия. Группировка по тому, чей сейчас ход, — та же, что уже работает в
+   * мобильной консоли, чтобы обе поверхности показывали одну структуру (F8). */
+  const sections = useMemo(() => {
+    if (filter !== "active") return [];
+    return WB_QUEUE_SECTIONS
+      .map((section) => ({ ...section, orders: visible.filter((order) => (section.stages as readonly string[]).includes(order.stage)) }))
+      .filter((section) => section.orders.length > 0);
+  }, [filter, visible]);
+
+  const renderOrderCard = (order: WbDeliveryOrderDto) => (
+    <button key={order.id} type="button" className={`${css.orderCard} ${selected?.id === order.id ? css.orderCardActive : ""}`} onClick={() => setSelectedId(order.id)}>
+      <div className={css.orderTop}><span className={`${css.stagePill} ${css[`stage_${order.stage}`]}`}>{STAGE_LABEL[order.stage]}</span><time>{dateTime(order.updatedAt)}</time></div>
+      <strong>{order.buyerName ? `${order.buyerName} · #${order.wbOrderId}` : `WB #${order.wbOrderId}`}</strong>
+      <p>{order.denomination ? `${order.denomination.toLocaleString("ru-RU")} R$` : "Номинал не настроен"} · {money(order.finalPriceKopecks)}</p>
+      <div className={css.orderMeta}>
+        <span><MessageCircle /> {order.chatReady ? "чат" : "нет чата"}</span>
+        <span><UserRound /> {order.fulfillment?.robloxUsername ?? WB_FUNNEL_LABEL[order.funnelStep]}</span>
+        {order.permissions.linkBuyer && <span className={css.unlinkedChip}>без покупателя</span>}
+        <ChevronRight />
+      </div>
+    </button>
+  );
+
   return (
     <div className={css.workspace}>
       <section className={css.commandBar}>
@@ -211,6 +264,7 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
       </section>
 
       <section className={css.metrics}>
+        <article className={data.metrics.attention ? css.readyMetric : ""}><span><AlertTriangle /></span><div><strong>{data.metrics.attention}</strong><small>нужна проверка</small></div></article>
         <article><span><Truck /></span><div><strong>{data.metrics.active}</strong><small>активных DBS</small></div></article>
         <article><span><MessageCircle /></span><div><strong>{data.metrics.waitingCode}</strong><small>ждут код покупателя</small></div></article>
         <article><span><KeyRound /></span><div><strong>{data.metrics.codeReceived}</strong><small>код уже получен</small></div></article>
@@ -253,14 +307,13 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
             {FILTERS.map(([id, label]) => <button key={id} className={filter === id ? css.activeFilter : ""} onClick={() => setFilter(id)}>{label}</button>)}
           </div>
           <div className={css.orderList}>
-            {visible.map((order) => (
-              <button key={order.id} type="button" className={`${css.orderCard} ${selected?.id === order.id ? css.orderCardActive : ""}`} onClick={() => setSelectedId(order.id)}>
-                <div className={css.orderTop}><span className={`${css.stagePill} ${css[`stage_${order.stage}`]}`}>{STAGE_LABEL[order.stage]}</span><time>{dateTime(order.updatedAt)}</time></div>
-                <strong>{order.buyerName ? `${order.buyerName} · #${order.wbOrderId}` : `WB #${order.wbOrderId}`}</strong>
-                <p>{order.denomination ? `${order.denomination.toLocaleString("ru-RU")} R$` : "Номинал не настроен"} · {money(order.finalPriceKopecks)}</p>
-                <div className={css.orderMeta}><span><MessageCircle /> {order.chatReady ? "чат" : "нет чата"}</span><span><UserRound /> {order.fulfillment?.robloxUsername ?? WB_FUNNEL_LABEL[order.funnelStep]}</span><ChevronRight /></div>
-              </button>
+            {sections.map((section) => (
+              <div key={section.id} className={css.queueSection}>
+                <div className={css.queueSectionHead}><strong>{section.title}</strong><span>{section.hint}</span><b>{section.orders.length}</b></div>
+                {section.orders.map(renderOrderCard)}
+              </div>
             ))}
+            {!sections.length && !!visible.length && visible.map(renderOrderCard)}
             {!visible.length && <div className={css.emptyQueue}><CircleDot /><strong>Здесь пока пусто</strong><span>Смените фильтр — здесь только реальные заказы WB.</span></div>}
           </div>
         </aside>
@@ -298,7 +351,8 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
                   <div><span>Код доставки</span><strong className={selected.deliveryCode.valid ? css.goodText : ""}>{selected.deliveryCode.valid ? "Получен · скрыт" : selected.deliveryCode.consumedAt ? "Использован · удалён" : "Не получен"}</strong><small>{selected.deliveryCode.expiresAt ? `действует до ${dateTime(selected.deliveryCode.expiresAt)}` : "в базе нет открытого секрета"}</small></div>
                   <div><span>Персональный гейт</span><strong>{selected.activationCode ?? "Не выпущен"}</strong>{selected.gateUrl ? <button onClick={() => void navigator.clipboard.writeText(selected.gateUrl!)}><Clipboard /> Копировать ссылку</button> : <small>{wbGateStateLabel(selected.gateState)}</small>}</div>
                   <div><span>Статусы WB</span><strong>{wbSupplierStatusLabel(selected.supplierStatus)} · {wbSupplierStatusLabel(selected.wbStatus)}</strong><small>обновляются из Marketplace API</small></div>
-                  <div><span>Покупатель в боте</span><strong>{WB_FUNNEL_LABEL[selected.funnelStep]}</strong><small>{selected.fulfillment?.robloxUsername ?? "ник ещё не получен"}</small></div>
+                  <div><span>Покупатель в боте</span><strong>{WB_FUNNEL_LABEL[selected.funnelStep]}</strong><small>{WB_FUNNEL_HINT[selected.funnelStep] ?? selected.fulfillment?.robloxUsername ?? "ник ещё не получен"}</small></div>
+                  <div><span>Контакт покупателя</span><strong className={selected.fulfillment?.buyerLinked === false ? css.badText : ""}>{selected.fulfillment?.buyerHandle ?? (selected.fulfillment ? "не привязан" : "заказа ещё нет")}</strong><small>{selected.fulfillment?.buyerLinked === false ? "уведомления до него не дойдут" : selected.fulfillment?.platform ?? "—"}</small></div>
                 </div>
 
                 {selected.permissions.createInternalOrder && (
@@ -308,6 +362,15 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
                     onPreview={(gamepass) => post("preview_gamepass", selected.id, { gamepass })}
                     onCreate={(gamepass, robloxUsername, force) => post("create_internal_order", selected.id, { gamepass, robloxUsername, force })}
                     onDone={async (text) => { setNotice({ tone: "ok", text }); await refresh(true); }}
+                  />
+                )}
+
+                {selected.permissions.linkBuyer && (
+                  <LinkBuyerBlock
+                    key={`link-${selected.id}`}
+                    activationCode={selected.activationCode}
+                    busy={Boolean(busy)}
+                    onLink={(buyer) => act("link_buyer", { buyer })}
                   />
                 )}
 
@@ -339,6 +402,41 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
           </main>
         ) : <div className={css.noSelection}><Truck /><strong>Выберите заказ</strong><span>Здесь появятся чат, этапы и безопасные действия.</span></div>}
       </section>
+    </div>
+  );
+}
+
+/** Выкуп, открытый вручную, висит на служебном аккаунте: гейт-код к моменту
+ * создания ещё не активирован, владельца у него нет. Покупатель после этого не
+ * получает ни уведомлений, ни «Мой заказ» — пока оператор не свяжет его руками
+ * (F3). Принимает то, что у оператора под рукой: @username, Telegram ID или
+ * ссылку VK. */
+function LinkBuyerBlock({ activationCode, busy, onLink }: {
+  activationCode: string | null;
+  busy: boolean;
+  onLink: (buyer: string) => Promise<void>;
+}) {
+  const [buyer, setBuyer] = useState("");
+  return (
+    <div className={css.manualBlock}>
+      <div>
+        <strong>Покупатель не привязан</strong>
+        <span>Заказ <b>{activationCode}</b> открыт вручную и числится за служебным аккаунтом — уведомления о выкупе до покупателя не дойдут. Вставьте @username, Telegram ID или ссылку VK.</span>
+      </div>
+      <div>
+        <input
+          value={buyer}
+          onChange={(event) => setBuyer(event.target.value)}
+          placeholder="@username, 6669690346 или vk.com/id123"
+          aria-label="Контакт покупателя"
+        />
+        <button
+          disabled={!buyer.trim() || busy}
+          onClick={() => void onLink(buyer.trim()).then(() => setBuyer(""))}
+        >
+          Привязать
+        </button>
+      </div>
     </div>
   );
 }

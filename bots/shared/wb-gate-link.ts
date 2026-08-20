@@ -51,3 +51,30 @@ export function wbGateMessage(code: string, denomination: number | null, origin?
     "На этой странице будет вся дальнейшая инструкция — нужно будет указать ник Roblox, куда зачислить Robux.",
   ].join("\n\n");
 }
+
+/** Nudge for a buyer whose gate link is still unopened.
+ *
+ * Two of them go out — three hours and a day after the link — and then it
+ * stops: a silent buyer gets help, not pestering. Same rule as the gate message
+ * itself, no messenger is named; WB penalises sellers for steering buyers off
+ * the platform, and the page introduces the next step by itself. */
+export function wbGateReminderMessage(
+  code: string,
+  denomination: number | null,
+  level: number,
+  origin?: string,
+): string {
+  const amount = denomination ? `${denomination.toLocaleString("ru-RU")} R$` : "ваш номинал";
+  const opening = level === 1
+    ? `Напоминаем: ваши ${amount} ждут получения.`
+    : `Ваши ${amount} всё ещё не получены — заказ открыт, забрать можно в любой момент.`;
+  return [
+    opening,
+    "Откройте ссылку — код уже подставлен, вводить его вручную не нужно:",
+    wbGateUrl(code, origin),
+    `Если ссылка не открылась, перейдите на ${wbGuideFallbackUrl(origin)} и введите код: ${code}`,
+    level === 1
+      ? "На странице будет вся инструкция — нужно указать ник Roblox, куда зачислить Robux."
+      : "Если что-то не получается — напишите прямо в этот чат, поможем и разберёмся вместе.",
+  ].join("\n\n");
+}
