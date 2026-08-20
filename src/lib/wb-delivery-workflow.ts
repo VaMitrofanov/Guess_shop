@@ -30,6 +30,7 @@ import {
   canCreateInternalOrder,
   canIssueWbGate,
   canReceiveWbOrder,
+  canSendWbGate,
   WB_RECEIVE_MAX_ATTEMPTS,
   isWbBuyerUnserved,
   wbCancelledCodeAtRisk,
@@ -184,8 +185,14 @@ function blockedReason(order: ListOrder, chatReady: boolean, terminal: boolean, 
   }
   if (terminal) return null;
   if (!chatReady) return "Покупатель ещё не открыл чат по этому заказу — WB не даёт писать первым.";
+  if (order.lastErrorCode === "DELIVERY_CODE_REJECTED") {
+    return "WB отклонил код доставки покупателя. Покупателя попросили прислать код заново; гейт уйдёт сам, как только доставка закроется. Если код верный — закройте доставку вручную в кабинете WB.";
+  }
   if (order.lastErrorCode) {
     return `Последнее действие завершилось с ошибкой ${order.lastErrorCode}. Синхронизируйте заказ и сверьте кабинет WB.`;
+  }
+  if (order.gateState === "ISSUED" && !canSendWbGate(order)) {
+    return "Гейт выпущен, но покупателю не уйдёт, пока доставка не закрыта на WB: сообщение начинается словами «Заказ подтверждён». Закройте доставку кнопкой «Завершить».";
   }
   if (!order.isTest && !flag("WB_CHAT_SEND_ENABLED")) {
     return "Отправка сообщений в WB выключена флагом WB_CHAT_SEND_ENABLED — включите его в Coolify на Web и TG.";
@@ -271,7 +278,9 @@ function toDto(order: ListOrder, { revealSecret = false } = {}): WbDeliveryOrder
       remindCode: awaitingCode && alreadyAsked,
       saveDeliveryCode: !terminal && chatReady && wbDeliveryCryptoReady(),
       issueGate: canIssueWbGate(policyOrder),
-      sendGate: deliverable && order.gateState === "ISSUED" && Boolean(activationCode),
+      // Кнопка гаснет, пока доставка не закрыта: правило одно и для воркера, и
+      // для оператора — «Заказ подтверждён» подтверждает WB, а не мы.
+      sendGate: deliverable && canSendWbGate(order) && order.gateState === "ISSUED" && Boolean(activationCode),
       markGateSent: !order.cancelledAt && ["ISSUED", "SENDING", "SEND_UNKNOWN"].includes(order.gateState) && Boolean(activationCode),
       // Escape hatch for orders settled before this system existed, or by
       // other means: closes the obligation without faking a minted code.
@@ -291,8 +300,11 @@ function toDto(order: ListOrder, { revealSecret = false } = {}): WbDeliveryOrder
       deliver: !terminal && !order.lastErrorCode && /confirm/i.test(order.supplierStatus),
       receive: canReceiveWbOrder(policyOrder),
       // Support matters most exactly when an order has gone wrong, so replying
-      // stays available for as long as WB keeps the chat open.
-      sendMessage: !order.cancelledAt && chatReady && !order.lastErrorCode,
+      // stays available for as long as WB keeps the chat open. `lastErrorCode`
+      // used to be part of this and contradicted the whole point: a rejected
+      // delivery code sets it, and «разобраться» with the buyer starts with
+      // writing to them.
+      sendMessage: !order.cancelledAt && chatReady,
     },
     chat: (chat?.events ?? []).map((event) => ({
       id: event.id,
@@ -807,7 +819,7 @@ async function mutateStatus(
   })) {
     throw new WbDeliveryWorkflowError(
       (order.deliverySecret?.failedAttempts ?? 0) >= WB_RECEIVE_MAX_ATTEMPTS
-        ? "WB трижды отклонил этот код — закройте доставку вручную в кабинете WB"
+        ? `WB отклонил этот код ${WB_RECEIVE_MAX_ATTEMPTS} раз — запросите у покупателя новый код или закройте доставку вручную в кабинете WB`
         : "Для завершения нужны статус «в доставке» и действующий код доставки",
       409,
       "RECEIVE_PRECONDITION",
@@ -988,6 +1000,16 @@ export async function performWbDeliveryAction(
   if (input.action === "send_gate") {
     if (!order.wbCode || order.gateState !== "ISSUED") {
       throw new WbDeliveryWorkflowError("Сначала выпустите уникальный код гейта", 409, "GATE_NOT_ISSUED");
+    }
+    // То же правило, что и у воркера: сообщение покупателю начинается словами
+    // «Заказ подтверждён», а подтверждает заказ не наша кнопка, а WB. Пока
+    // доставка не закрыта, отправлять его нельзя ни автоматом, ни руками.
+    if (!canSendWbGate(order)) {
+      throw new WbDeliveryWorkflowError(
+        "Сначала закройте доставку на WB — «Завершить» здесь или в кабинете WB. Покупателю нельзя писать «заказ подтверждён», пока WB не принял код доставки.",
+        409,
+        "DELIVERY_NOT_CLOSED",
+      );
     }
     const claimed = await db.wbMarketplaceOrder.updateMany({
       where: { id: order.id, gateState: "ISSUED" },

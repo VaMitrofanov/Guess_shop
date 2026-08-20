@@ -273,7 +273,43 @@ export function canIssueWbGate(order: WbDeliveryPolicyOrder): boolean {
  * silently disabled closing for that order forever. Retries are now bounded by
  * `failedAttempts` on the secret instead — a counter that only the thing it
  * guards can increment (docs/wb-dbs-review-2026-08-20.md, F2). */
-export const WB_RECEIVE_MAX_ATTEMPTS = 3;
+export const WB_RECEIVE_MAX_ATTEMPTS = 8;
+
+/** Пауза между попытками закрыть доставку.
+ *
+ * Без неё бюджет попыток сгорал за секунды: цикл идёт раз в 5 с, поэтому три
+ * попытки заканчивались через 10 с после прихода кода (заказ 5540950769,
+ * 20.08). А WB — по наблюдению владельца — «ужасно лагает»: тот самый код
+ * прошёл позже, вручную. Верный код обязан пережить лаг WB, поэтому попытки
+ * растянуты на минуты, а не на секунды: восемь попыток по минуте — это восемь
+ * минут внутри часового окна WB, и только после них код считается неверным. */
+export const WB_RECEIVE_RETRY_INTERVAL_MS = 60_000;
+
+/** Момент, раньше которого секрет трогать не надо: попытка была слишком
+ * недавно. Считается по `updatedAt` секрета — строку трогают только захват кода
+ * и неудачная попытка, так что это ровно «когда мы последний раз пробовали». */
+export function wbReceiveRetryCutoff(now = new Date()): Date {
+  return new Date(now.getTime() - WB_RECEIVE_RETRY_INTERVAL_MS);
+}
+
+/** Гейт уходит покупателю только за закрытой доставкой.
+ *
+ * 20.08 покупатель прислал код, WB его отклонил — и через секунду получил
+ * «Заказ подтверждён» со ссылкой на получение. Порядок обратный тому, который
+ * нужен: сначала WB принимает код и доставка закрывается, и только потом
+ * покупатель получает свой код гейта. Случайный набор цифр в чате не должен
+ * открывать выдачу.
+ *
+ * Тестовый заказ не ходит в WB вообще, поэтому для него условие снято — иначе
+ * демо-прогон невозможен. */
+export function canSendWbGate(order: {
+  completedAt?: Date | string | null;
+  cancelledAt?: Date | string | null;
+  isTest?: boolean;
+}): boolean {
+  if (order.cancelledAt) return false;
+  return Boolean(order.completedAt || order.isTest);
+}
 
 export function canReceiveWbOrder(order: WbDeliveryPolicyOrder): boolean {
   return Boolean(

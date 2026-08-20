@@ -82,11 +82,19 @@ const SKIP_REASON: Record<Exclude<AutoReceiveSkip, null>, { marker: "action" | "
   already_closed: { marker: "action", text: "заказ уже закрыт на WB — проверить кабинет" },
   too_many_attempts: {
     marker: "urgent",
-    text: "WB трижды отклонил код — <b>закрыть доставку вручную в кабинете WB</b>",
+    text: "WB отклонил код на всех попытках — <b>закрыть доставку вручную в кабинете WB</b>, гейт покупателю ещё не ушёл",
   },
   wb_not_in_delivery: {
     marker: "action",
     text: "WB ещё не перевёл заказ в доставку — закрытие повторится само на следующем цикле",
+  },
+  wb_rejected: {
+    marker: "urgent",
+    text: "WB отклонил код — повторим ещё несколько раз с паузой; гейт покупателю не уйдёт, пока доставка не закрыта",
+  },
+  wb_unknown: {
+    marker: "urgent",
+    text: "<b>исход неизвестен — сверить кабинет WB</b>, повторять вслепую нельзя",
   },
 };
 
@@ -111,15 +119,31 @@ export function notifyDbsCodeCaptured(wbOrderId: string, skip: AutoReceiveSkip =
   });
 }
 
-export function notifyDbsAutoReceiveFailed(wbOrderId: string, outcomeUnknown: boolean) {
+export function notifyDbsAutoReceiveFailed(wbOrderId: string, outcomeUnknown: boolean, providerCode?: string) {
   broadcast({
     marker: "urgent",
     zone: "DBS",
     title: "WB не принял код доставки",
-    lines: [wbOrderRef(wbOrderId)],
+    lines: [wbOrderRef(wbOrderId, [providerCode ? `ответ WB: <code>${escapeHtml(providerCode)}</code>` : null])],
     next: outcomeUnknown
       ? "<b>сверить кабинет WB перед повтором</b> — исход неизвестен, повторять вслепую нельзя"
-      : "<b>закрыть доставку вручную в кабинете WB</b> — гейт покупателю уже отправлен",
+      // Гейт больше не уходит вперёд закрытия: покупателю ничего не обещано, и
+      // он получит свой код сам, как только доставка закроется.
+      : "повторим с паузой; если не пройдёт — <b>закрыть доставку вручную в кабинете WB</b>. Гейт покупателю не отправлен",
+  });
+}
+
+/** Код отклонён на всех попытках: дальше без покупателя или без человека не
+ * обойтись. Отдельным сообщением, потому что живая карточка не звенит. */
+export function notifyDbsCodeRejected(wbOrderId: string, askedBuyer: boolean) {
+  broadcast({
+    marker: "urgent",
+    zone: "DBS",
+    title: "код доставки не подошёл",
+    lines: [wbOrderRef(wbOrderId)],
+    next: askedBuyer
+      ? "покупателя попросили прислать код заново — гейт придержан до закрытия доставки"
+      : "<b>разобраться вручную</b>: просить код заново больше не будем, покупатель без выдачи",
   });
 }
 

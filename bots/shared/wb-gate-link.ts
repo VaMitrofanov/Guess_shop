@@ -39,6 +39,11 @@ export function wbCodeRequestMessage(): string {
  * Shared by the console action and the auto-gate worker so the two can never
  * drift into telling buyers different things.
  *
+ * Sent only once the delivery is actually closed on WB — the words "заказ
+ * подтверждён" are a statement about WB's own state, and on 20.08 they went out
+ * on an order WB had just rejected. `tryAutoGate` and the console action both
+ * enforce that now; this text may be trusted to mean it.
+ *
  * Deliberately names no messenger: Wildberries penalises sellers for steering
  * buyers to outside platforms, so the page itself introduces the next step. */
 export function wbGateMessage(code: string, denomination: number | null, origin?: string): string {
@@ -48,7 +53,27 @@ export function wbGateMessage(code: string, denomination: number | null, origin?
     "Откройте ссылку — код уже подставлен, вводить его вручную не нужно:",
     wbGateUrl(code, origin),
     `Если ссылка не открылась, перейдите на ${wbGuideFallbackUrl(origin)} и введите код: ${code}`,
-    "На этой странице будет вся дальнейшая инструкция — нужно будет указать ник Roblox, куда зачислить Robux.",
+    // Геймпасс назван прямо здесь: до страницы покупатель доходит с уже
+    // сложившимся ожиданием «сейчас просто скажу ник», а без геймпасса
+    // зачислить Robux физически нельзя — это половина инструкции.
+    "На этой странице будет вся дальнейшая инструкция: указать ник Roblox, куда зачислить Robux,"
+    + " и создать геймпасс по инструкции — именно через него приходят Robux.",
+  ].join("\n\n");
+}
+
+/** WB отклонил код, который прислал покупатель.
+ *
+ * Отдельное сообщение вместо гейта: пока доставка не закрыта, писать «заказ
+ * подтверждён» нельзя (20.08 именно так и произошло — WB отклонил код, а
+ * покупатель получил подтверждение и ссылку). Просим прислать код заново и
+ * называем, где он лежит, — чаще всего присылают номер заказа или случайные
+ * цифры. */
+export function wbCodeRetryMessage(): string {
+  return [
+    "К сожалению, этот код доставки не подошёл — Wildberries его не принял.",
+    "Пожалуйста, проверьте и пришлите код ещё раз: это 5-6 цифр в приложении Wildberries,"
+    + " раздел \"Доставки\", рядом с QR-кодом вашего заказа.",
+    "Как только код подойдёт, сразу пришлём ссылку на получение — заказ никуда не денется.",
   ].join("\n\n");
 }
 
@@ -74,7 +99,8 @@ export function wbGateReminderMessage(
     wbGateUrl(code, origin),
     `Если ссылка не открылась, перейдите на ${wbGuideFallbackUrl(origin)} и введите код: ${code}`,
     level === 1
-      ? "На странице будет вся инструкция — нужно указать ник Roblox, куда зачислить Robux."
+      ? "На странице будет вся инструкция: указать ник Roblox, куда зачислить Robux,"
+        + " и создать геймпасс по инструкции — именно через него приходят Robux."
       : "Если что-то не получается — напишите прямо в этот чат, поможем и разберёмся вместе.",
   ].join("\n\n");
 }

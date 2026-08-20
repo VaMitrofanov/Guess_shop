@@ -127,6 +127,7 @@ const AUDIT_LABEL: Record<string, string> = {
   ORDER_SYNCED: "Заказ синхронизирован",
   DELIVERY_CODE_REQUESTED: "Запрошен код получения",
   DELIVERY_CODE_CAPTURED: "Код получения принят",
+  DELIVERY_CODE_REJECTED: "WB отклонил код — просим у покупателя новый",
   DELIVERY_CODE_EXPIRED: "Код получения истёк",
   GATE_CODE_ISSUED: "Выпущен код гейта",
   GATE_SEND_STARTED: "Началась отправка гейта",

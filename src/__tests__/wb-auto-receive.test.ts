@@ -1,15 +1,21 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { canReceiveWbOrder } from "../../bots/shared/wb-delivery-policy";
+import {
+  canReceiveWbOrder,
+  canSendWbGate,
+  wbReceiveRetryCutoff,
+  WB_RECEIVE_MAX_ATTEMPTS,
+  WB_RECEIVE_RETRY_INTERVAL_MS,
+} from "../../bots/shared/wb-delivery-policy";
 
 const worker = readFileSync(resolve(__dirname, "../../bots/shared/wb-delivery-sync.ts"), "utf8");
 const autoReceive = worker.slice(
   worker.indexOf("async function tryAutoReceive"),
-  worker.indexOf("async function retryAutoReceive"),
+  worker.indexOf("async function askBuyerForAnotherCode"),
 );
 const retrySweep = worker.slice(
   worker.indexOf("async function retryAutoReceive"),
-  worker.indexOf("async function tryAutoShip"),
+  worker.indexOf("async function dispatchGatesForClosedOrders"),
 );
 const autoShip = worker.slice(
   worker.indexOf("async function tryAutoShip"),
@@ -23,8 +29,7 @@ describe("automatic WB delivery close", () => {
   });
 
   /** WB's one-hour window is the only deadline here that cannot be recovered
-   * from, so closing the delivery must not queue behind anything. Sending the
-   * gate is retryable and stays visible via isWbBuyerUnserved. */
+   * from, so closing the delivery must not queue behind anything. */
   it("closes the delivery before the gate is minted", () => {
     const capture = worker.slice(worker.indexOf("async function captureDeliveryCode"));
     const receive = capture.indexOf("await tryAutoReceive(");
@@ -33,12 +38,81 @@ describe("automatic WB delivery close", () => {
     expect(gate).toBeGreaterThan(receive);
   });
 
-  /** Closing the order sets completedAt, and the buyer still needs their code. */
-  it("still sends the gate after the order has been closed", () => {
+  /** 20.08, заказ 5540950769: покупатель прислал код, WB отклонил его — и через
+   * секунду покупатель получил «Заказ подтверждён» со ссылкой на получение.
+   * Гейт обязан ждать закрытия доставки, иначе случайный набор цифр в чате
+   * открывает выдачу. */
+  it("hands out the gate only once the delivery is actually closed", () => {
+    const capture = worker.slice(worker.indexOf("async function captureDeliveryCode"));
+    // Не «не упало», а «закрыто»: исход попытки теперь возвращается явно.
+    expect(capture).toContain("const { closed, skip } = await tryAutoReceive(");
+    expect(capture).toContain("if (closed) await tryAutoGate(");
+    // И сама отправка проверяет это ещё раз — её зовёт не только захват кода.
     const gate = worker.slice(worker.indexOf("async function tryAutoGate"));
     const guard = gate.slice(0, gate.indexOf("if (order.wbCode) return;"));
-    expect(guard).toContain("order.cancelledAt");
-    expect(guard).not.toContain("order.completedAt");
+    expect(guard).toContain("if (!canSendWbGate(order)) return;");
+    expect(canSendWbGate({ completedAt: null, cancelledAt: null })).toBe(false);
+    expect(canSendWbGate({ completedAt: new Date(), cancelledAt: null })).toBe(true);
+    // Тестовый заказ не ходит в WB вообще — иначе демо-прогон невозможен.
+    expect(canSendWbGate({ completedAt: null, cancelledAt: null, isTest: true })).toBe(true);
+    // Отменённый заказ не выдаётся никогда: деньги вернулись покупателю.
+    expect(canSendWbGate({ completedAt: new Date(), cancelledAt: new Date() })).toBe(false);
+  });
+
+  /** Закрытие может случиться позже прихода кода — WB лагает, или оператор
+   * закрывает заказ руками в кабинете. Покупателю всё равно нужно выдать код,
+   * и делать это должен воркер, а не человек. */
+  it("comes back for orders closed after the code arrived", () => {
+    const sweep = worker.slice(
+      worker.indexOf("async function dispatchGatesForClosedOrders"),
+      worker.indexOf("/** Walks DBS orders through WB's own"),
+    );
+    expect(sweep).toContain('process.env.WB_DBS_AUTO_GATE !== "true"');
+    expect(sweep).toContain('process.env.WB_CHAT_SEND_ENABLED !== "true"');
+    expect(sweep).toContain('gateState: "NOT_ISSUED"');
+    expect(sweep).toContain("completedAt: { gte:");
+    expect(sweep).toContain("tryAutoGate(");
+    // В цикле — строго после закрытия доставки.
+    const cycle = worker.slice(worker.indexOf("export async function runWbDeliverySync"));
+    expect(cycle).toContain('await step("auto-gate", () => dispatchGatesForClosedOrders(db))');
+    expect(cycle.indexOf('await step("auto-gate"')).toBeGreaterThan(cycle.indexOf('await step("auto-receive"'));
+  });
+
+  /** Бюджет попыток сгорал за десять секунд — цикл идёт раз в 5 с, — а тот
+   * самый код 20.08 прошёл позже. Верный код обязан пережить лаг WB. */
+  it("spaces the retries out instead of burning them in ten seconds", () => {
+    expect(WB_RECEIVE_RETRY_INTERVAL_MS).toBeGreaterThanOrEqual(60_000);
+    expect(WB_RECEIVE_MAX_ATTEMPTS * WB_RECEIVE_RETRY_INTERVAL_MS).toBeGreaterThanOrEqual(5 * 60_000);
+    // ...и остаётся внутри часового окна WB.
+    expect(WB_RECEIVE_MAX_ATTEMPTS * WB_RECEIVE_RETRY_INTERVAL_MS).toBeLessThan(60 * 60_000);
+    expect(retrySweep).toContain("updatedAt: { lt: wbReceiveRetryCutoff() }");
+    // Секрет, тронутый только что, в выборку не попадает; тронутый минуту назад — попадает.
+    const now = new Date("2026-08-21T10:00:00Z");
+    expect(wbReceiveRetryCutoff(now).getTime()).toBe(now.getTime() - WB_RECEIVE_RETRY_INTERVAL_MS);
+    expect(wbReceiveRetryCutoff(now).getTime()).toBeLessThan(now.getTime());
+  });
+
+  /** Все попытки исчерпаны, а отказ был внятным — значит код не тот. Просим у
+   * покупателя новый вместо молчания, и освобождаем место под него: живой
+   * секрет не даёт `canCaptureDeliveryCode` сохранить следующий код. */
+  it("asks the buyer for another code instead of leaving them with nothing", () => {
+    const ask = worker.slice(
+      worker.indexOf("async function askBuyerForAnotherCode"),
+      worker.indexOf("/** Closing the delivery used to get exactly one attempt"),
+    );
+    expect(autoReceive).toContain("askBuyerForAnotherCode(db, orderId, wbOrderId)");
+    // Только на внятный отказ: на «исход неизвестен» покупателю не пишут.
+    expect(autoReceive).toContain("if (exhausted && !unknown)");
+    expect(autoReceive).toContain("const exhausted = attempt >= WB_RECEIVE_MAX_ATTEMPTS;");
+    // И оператора не будят на каждой из восьми попыток — только первая и последняя.
+    expect(autoReceive).toContain("} else if (attempt <= 1 || exhausted) {");
+    // CAS решает, кто пишет покупателю — дубля просьбы быть не может.
+    expect(ask).toContain('chatState: "CODE_RECEIVED"');
+    expect(ask).toContain('chatState: "CODE_REQUESTED", lastErrorCode: "DELIVERY_CODE_REJECTED"');
+    expect(ask).toContain('encryptedValue: "PURGED"');
+    expect(ask).toContain("wbCodeRetryMessage()");
+    expect(ask).toContain("MAX_CODE_RETRY_REQUESTS");
+    expect(ask).toContain("notifyDbsCodeRejected");
   });
 
   it("refuses to close without a live code from the buyer", () => {
