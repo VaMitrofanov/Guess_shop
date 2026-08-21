@@ -3,7 +3,11 @@ import { resolve } from "node:path";
 import {
   canReceiveWbOrder,
   canSendWbGate,
+  wbAutoReceiveWithinWindow,
+  wbOrderAgeHours,
+  wbOrderPlacedAt,
   wbReceiveRetryCutoff,
+  WB_AUTO_RECEIVE_ORDER_AGE_MS,
   WB_RECEIVE_MAX_ATTEMPTS,
   WB_RECEIVE_RETRY_INTERVAL_MS,
 } from "../../bots/shared/wb-delivery-policy";
@@ -174,10 +178,10 @@ describe("automatic WB delivery close", () => {
   /** Every skip used to be a bare `return`: no audit row, no message, and from
    * the outside indistinguishable from a notification that never arrived. */
   it("names the reason it skipped instead of returning silently", () => {
-    for (const reason of ["flag_off", "no_secret", "already_closed", "too_many_attempts", "wb_not_in_delivery"]) {
+    for (const reason of ["flag_off", "no_secret", "already_closed", "too_many_attempts", "wb_not_in_delivery", "order_too_old"]) {
       expect(autoReceive).toContain(`"${reason}"`);
     }
-    expect(worker).toContain("if (skip) notifyDbsCodeCaptured(order.wbOrderId, skip)");
+    expect(worker).toContain("notifyDbsCodeCaptured(order.wbOrderId, skip");
   });
 
   /** Nothing walked a DBS order along WB's own ladder, so closing only worked
@@ -219,5 +223,83 @@ describe("automatic WB delivery close", () => {
     const tx = autoReceive.slice(autoReceive.indexOf("db.$transaction"));
     expect(tx).toContain('completedAt: now');
     expect(tx).toContain('encryptedValue: "PURGED"');
+  });
+});
+
+/** Решение владельца 21.08.2026. Заказ 5508870842 пролежал без кода пять дней,
+ * покупатель в это время жаловался в чат — и код, присланный на пятый день,
+ * закрыл бы доставку так же молча и мгновенно, как код на первой минуте.
+ * Внутри четырёх часов это правильное поведение; дальше решает человек. */
+describe("four-hour auto-close window", () => {
+  const HOUR = 60 * 60_000;
+  const placed = new Date("2026-08-16T12:00:00Z");
+
+  it("is four hours from when the order was placed", () => {
+    expect(WB_AUTO_RECEIVE_ORDER_AGE_MS).toBe(4 * HOUR);
+  });
+
+  it("closes on codes that arrive inside the window", () => {
+    const order = { wbCreatedAt: placed, firstSeenAt: placed };
+    expect(wbAutoReceiveWithinWindow(order, placed)).toBe(true);
+    expect(wbAutoReceiveWithinWindow(order, new Date(placed.getTime() + 3.9 * HOUR))).toBe(true);
+    expect(wbAutoReceiveWithinWindow(order, new Date(placed.getTime() + 4 * HOUR))).toBe(true);
+  });
+
+  it("hands the decision to a person once the window has passed", () => {
+    const order = { wbCreatedAt: placed, firstSeenAt: placed };
+    expect(wbAutoReceiveWithinWindow(order, new Date(placed.getTime() + 4 * HOUR + 1))).toBe(false);
+    expect(wbAutoReceiveWithinWindow(order, new Date(placed.getTime() + 5 * 24 * HOUR))).toBe(false);
+  });
+
+  /** Окно считается от прихода кода, а не от «сейчас»: код, принятый на третьем
+   * часу, обязан пережить лаг WB и восемь минут ретраев, а не быть брошенным на
+   * четвёртом часу посреди уже начатого закрытия. */
+  it("lets a code accepted inside the window finish its retries afterwards", () => {
+    const order = { wbCreatedAt: placed, firstSeenAt: placed };
+    const received = new Date(placed.getTime() + 3.99 * HOUR);
+    expect(wbAutoReceiveWithinWindow(order, received)).toBe(true);
+  });
+
+  /** `firstSeenAt` — это когда заказ увидел воркер. После простоя воркера он
+   * показал бы многодневный заказ свежим, поэтому слово WB главнее. */
+  it("prefers WB's own creation time over when the worker noticed the order", () => {
+    const noticedLate = { wbCreatedAt: placed, firstSeenAt: new Date(placed.getTime() + 20 * HOUR) };
+    expect(wbOrderPlacedAt(noticedLate)).toEqual(placed);
+    expect(wbAutoReceiveWithinWindow(noticedLate, new Date(placed.getTime() + 20 * HOUR))).toBe(false);
+    // Заказы, заведённые до появления колонки, считаются от `firstSeenAt`.
+    expect(wbOrderPlacedAt({ wbCreatedAt: null, firstSeenAt: placed })).toEqual(placed);
+  });
+
+  it("reports the order's age for the operator's message", () => {
+    const order = { wbCreatedAt: placed, firstSeenAt: placed };
+    expect(wbOrderAgeHours(order, new Date(placed.getTime() + 5 * HOUR))).toBe(5);
+    expect(wbOrderAgeHours(order, placed)).toBe(0);
+  });
+
+  it("is wired into the closing attempt, ahead of any call to WB", () => {
+    expect(autoReceive).toContain("wbAutoReceiveWithinWindow(order, order.deliverySecret.receivedAt)");
+    expect(autoReceive.indexOf("wbAutoReceiveWithinWindow")).toBeLessThan(autoReceive.indexOf("receiveDbsOrder"));
+  });
+
+  /** Уведомление без кода бесполезно: закрыть доставку в кабинете WB оператор
+   * может только кодом покупателя, а в чате WB он замаскирован. */
+  it("puts the delivery code itself in the operator's message", () => {
+    const capture = worker.slice(
+      worker.indexOf("async function captureDeliveryCode"),
+      worker.indexOf("async function backfillDeliveryCodes"),
+    );
+    expect(capture).toContain('skip === "order_too_old"');
+    expect(capture).toContain("deliveryCode: code");
+    expect(capture).toContain("ageHours: wbOrderAgeHours(order, receivedAt)");
+  });
+
+  /** Придержанный заказ не «застрял» — он ждёт человека по правилу, и второе
+   * сообщение, толкающее закрыть доставку, противоречило бы первому. */
+  it("does not also shout that the delivery is stuck", () => {
+    const stuck = worker.slice(
+      worker.indexOf("async function alertStuckDeliveries"),
+      worker.indexOf("async function tryAutoGate"),
+    );
+    expect(stuck).toContain("if (receivedAt && !wbAutoReceiveWithinWindow(order, receivedAt)) continue;");
   });
 });

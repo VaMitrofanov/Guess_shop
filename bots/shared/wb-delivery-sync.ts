@@ -41,10 +41,12 @@ import {
   canReceiveWbOrder,
   canSendWbGate,
   shouldMarkCodeRequested,
+  wbAutoReceiveWithinWindow,
   wbAutoShipAction,
   wbDeliverySecretIsLive,
   wbGateDelivered,
   wbMarketplaceTerminalFlags,
+  wbOrderAgeHours,
   wbProductVendorCandidates,
   wbReceiveRetryCutoff,
   WB_RECEIVE_MAX_ATTEMPTS,
@@ -239,6 +241,14 @@ async function upsertMarketplaceOrder(
     ...(order.supplierStatus ? { supplierStatus: order.supplierStatus } : {}),
     ...(order.wbStatus ? { wbStatus: order.wbStatus } : {}),
   };
+  // `createdAt` несёт только карточка заказа; фиды статусов и завершённых его
+  // не отдают. Пустое значение обязано ничего не трогать — иначе каждый опрос
+  // статусов стирал бы момент оформления, от которого считается окно
+  // автозакрытия, и старый заказ снова выглядел бы свежим.
+  const wbCreated = order.createdAt ? new Date(order.createdAt) : null;
+  const wbSaidCreatedAt = wbCreated && !Number.isNaN(wbCreated.getTime())
+    ? { wbCreatedAt: wbCreated }
+    : {};
   const goods = {
     fulfillmentModel: "DBS",
     rid: order.rid,
@@ -261,6 +271,7 @@ async function upsertMarketplaceOrder(
     create: {
       wbOrderId: order.id,
       ...goods,
+      ...wbSaidCreatedAt,
       supplierStatus: order.supplierStatus ?? "new",
       wbStatus: order.wbStatus ?? "waiting",
       completedAt: completed ? now : undefined,
@@ -269,6 +280,7 @@ async function upsertMarketplaceOrder(
     update: {
       ...goods,
       ...wbSaidStatus,
+      ...wbSaidCreatedAt,
       ...(cancelled ? { cancelledAt: now, completedAt: null } : {}),
       ...(completed ? { completedAt: now } : {}),
     },
@@ -410,7 +422,7 @@ async function refreshDbsCard(db: Db, orderId: string) {
     where: { id: orderId },
     include: {
       wbCode: { select: { code: true } },
-      deliverySecret: { select: { consumedAt: true, encryptedValue: true, expiresAt: true } },
+      deliverySecret: { select: { consumedAt: true, encryptedValue: true, expiresAt: true, receivedAt: true } },
       events: { orderBy: { createdAt: "asc" }, take: 40 },
     },
   });
@@ -423,7 +435,7 @@ async function refreshDbsCard(db: Db, orderId: string) {
     denomination: order.denominationSnapshot,
     priceKopecks: order.finalPriceKopecks ?? order.priceKopecks,
     activationCode: order.wbCode?.code ?? null,
-    ...dbsCardHeadline(order, hasLiveSecret),
+    ...dbsCardHeadline(order, hasLiveSecret, order.deliverySecret?.receivedAt ?? null),
     timeline: order.events
       .filter((event) => CARD_STEP[event.type])
       .map((event) => `${mskTime(event.createdAt)}  ${CARD_STEP[event.type]}`)
@@ -460,8 +472,19 @@ function dbsCardHash(text: string): string {
  * повторяет `wbDeliveryStage`, чтобы карточка и консоль никогда не расходились
  * в оценке одного и того же заказа. */
 function dbsCardHeadline(
-  order: { cancelledAt: Date | null; completedAt: Date | null; lastErrorCode: string | null; gateState: string; chatState: string; supplierStatus: string; denominationSnapshot: number | null },
+  order: {
+    cancelledAt: Date | null;
+    completedAt: Date | null;
+    lastErrorCode: string | null;
+    gateState: string;
+    chatState: string;
+    supplierStatus: string;
+    denominationSnapshot: number | null;
+    wbCreatedAt: Date | null;
+    firstSeenAt: Date;
+  },
   hasLiveSecret: boolean,
+  codeReceivedAt: Date | null,
 ): Pick<DbsCardState, "marker" | "title" | "next"> {
   if (order.cancelledAt) {
     return { marker: "cancelled", title: "отменён на WB", next: "деньги вернулись покупателю" };
@@ -491,6 +514,15 @@ function dbsCardHeadline(
     return { marker: "urgent", title: "закрыт на WB, но гейт не выдан", next: "<b>выпустить и отправить код</b> — деньги уже приняты" };
   }
   if (hasLiveSecret) {
+    // Заказ старше окна: бот держит доставку намеренно, и карточка обязана
+    // говорить это прямо — иначе оператор ждёт закрытия, которого не будет.
+    if (codeReceivedAt && !wbAutoReceiveWithinWindow(order, codeReceivedAt)) {
+      return {
+        marker: "urgent",
+        title: "код получен, доставка НЕ закрыта",
+        next: `<b>решать вручную</b>: заказу ${wbOrderAgeHours(order, codeReceivedAt)} ч — закрыть доставку в кабинете WB или отклонить`,
+      };
+    }
     return { marker: "progress", title: "код получен", next: "закрываю доставку на WB — гейт уйдёт сразу после этого" };
   }
   if (order.chatState === "CODE_REQUESTED" || order.chatState === "REQUEST_SEND_UNKNOWN") {
@@ -513,6 +545,8 @@ export type AutoReceiveSkip =
   | "no_secret"
   | "already_closed"
   | "too_many_attempts"
+  /** Заказ старше окна автозакрытия — доставку закрывает человек. */
+  | "order_too_old"
   | "wb_not_in_delivery"
   /** WB прямо отклонил код — скорее всего покупатель прислал не то. */
   | "wb_rejected"
@@ -557,6 +591,12 @@ async function tryAutoReceive(db: Db, orderId: string, wbOrderId: string): Promi
   // Заказ уже закрыт — своим ли `receive`, или руками в кабинете WB. Обязательство
   // перед покупателем от этого не исчезает: гейт по такому заказу отдавать можно.
   if (order.completedAt) return { closed: true, skip: null };
+  // Старше окна — код у нас есть, но доставку закрывает человек. Это решение
+  // владельца, а не оптимизация: заказ, который лежит без кода четвёртый час,
+  // уже разбирают руками, и «закрыть или отклонить» — часть того разбора.
+  if (!wbAutoReceiveWithinWindow(order, order.deliverySecret.receivedAt)) {
+    return { closed: false, skip: "order_too_old" };
+  }
   if (order.deliverySecret.failedAttempts >= WB_RECEIVE_MAX_ATTEMPTS) {
     return { closed: false, skip: "too_many_attempts" };
   }
@@ -824,7 +864,11 @@ async function tryAutoShip(db: Db, out: WbDeliverySyncResult) {
 
 /** WB gives roughly an hour from the buyer's code to close the delivery, and a
  * blown window costs real commission. When automation has not managed it in
- * time, the operator has to hear about it once — loudly, with the deadline. */
+ * time, the operator has to hear about it once — loudly, with the deadline.
+ *
+ * An order held back by the four-hour rule is deliberately not closed, so it is
+ * not stuck. It already got its own message, with the code, at capture; this
+ * one would contradict it by pushing the operator to close. */
 async function alertStuckDeliveries(db: Db) {
   const cutoff = new Date(Date.now() - STUCK_DELIVERY_ALERT_MS);
   const stuck = await db.wbMarketplaceOrder.findMany({
@@ -839,11 +883,15 @@ async function alertStuckDeliveries(db: Db) {
       id: true,
       wbOrderId: true,
       supplierStatus: true,
+      wbCreatedAt: true,
+      firstSeenAt: true,
       deliverySecret: { select: { receivedAt: true } },
     },
     take: 10,
   });
   for (const order of stuck) {
+    const receivedAt = order.deliverySecret?.receivedAt;
+    if (receivedAt && !wbAutoReceiveWithinWindow(order, receivedAt)) continue;
     await db.wbMarketplaceOrder.update({
       where: { id: order.id },
       data: { deliveryAlertedAt: new Date() },
@@ -935,6 +983,10 @@ type CaptureTarget = {
   wbOrderId: string;
   completedAt: Date | null;
   cancelledAt: Date | null;
+  /** Момент оформления заказа: по нему считается окно автозакрытия и возраст
+   * в уведомлении оператору. */
+  wbCreatedAt: Date | null;
+  firstSeenAt: Date;
 };
 
 /** The operator may answer the buyer straight from the WB seller cabinet. Any
@@ -1001,7 +1053,13 @@ async function captureDeliveryCode(
   // Тихий успех живёт только в карточке. Отдельным сообщением уходит лишь то,
   // что требует человека: редактирование сообщения в Telegram не даёт
   // уведомления, и пропуск закрытия обязан прозвенеть.
-  if (skip) notifyDbsCodeCaptured(order.wbOrderId, skip);
+  if (skip) {
+    notifyDbsCodeCaptured(order.wbOrderId, skip, skip === "order_too_old"
+      // Код в сообщении — это и есть смысл уведомления: решение принимает
+      // человек, а закрыть доставку в кабинете WB без кода он не сможет.
+      ? { deliveryCode: code, ageHours: wbOrderAgeHours(order, receivedAt) }
+      : undefined);
+  }
   return true;
 }
 
@@ -1019,7 +1077,14 @@ async function backfillDeliveryCodes(db: Db, out: WbDeliverySyncResult) {
       firstSeenAt: { gte: since },
       deliverySecret: { is: null },
     },
-    select: { id: true, wbOrderId: true, completedAt: true, cancelledAt: true },
+    select: {
+      id: true,
+      wbOrderId: true,
+      completedAt: true,
+      cancelledAt: true,
+      wbCreatedAt: true,
+      firstSeenAt: true,
+    },
     take: 50,
   });
   for (const order of stuck) {

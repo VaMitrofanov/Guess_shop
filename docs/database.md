@@ -116,6 +116,12 @@ Roblox/Game Pass fulfillment. Миграция `20260811_wb_dbs_delivery` доб
 `WbMarketplaceOrder`, `WbBuyerChat`, `WbBuyerChatEvent`, `WbDeliverySecret`, `WbSyncCursor`
 и append-only `WbMarketplaceEvent` без переписывания legacy-строк.
 
+`WbMarketplaceOrder.wbCreatedAt` — момент оформления заказа по версии WB (`createdAt` из
+карточки заказа). Пишется только из карточки: фиды статусов и завершённых его не несут, и
+пустое значение колонку не трогает. От неё считается четырёхчасовое окно автозакрытия
+доставки; при `NULL` (заказы до миграции `20260821_wb_dbs_auto_receive_window`) действует
+fallback на `firstSeenAt`.
+
 `WbMarketplaceOrder.wbOrderId` хранится строкой (WB отдаёт `int64`), `rid` используется для
 точной привязки chat event, а номинал фиксируется snapshot-ом из
 `WbProductCost.denomination`. `WbCode` и `WbOrder` получают nullable unique relation к

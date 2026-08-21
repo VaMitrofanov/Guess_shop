@@ -84,6 +84,11 @@ const SKIP_REASON: Record<Exclude<AutoReceiveSkip, null>, { marker: "action" | "
     marker: "urgent",
     text: "WB отклонил код на всех попытках — <b>закрыть доставку вручную в кабинете WB</b>, гейт покупателю ещё не ушёл",
   },
+  // Запасной текст: обычный путь для этого пропуска — ветка с самим кодом ниже.
+  order_too_old: {
+    marker: "urgent",
+    text: "заказ старше четырёх часов — <b>решение за оператором</b>: закрыть доставку в кабинете WB или отклонить",
+  },
   wb_not_in_delivery: {
     marker: "action",
     text: "WB ещё не перевёл заказ в доставку — закрытие повторится само на следующем цикле",
@@ -98,7 +103,32 @@ const SKIP_REASON: Record<Exclude<AutoReceiveSkip, null>, { marker: "action" | "
   },
 };
 
-export function notifyDbsCodeCaptured(wbOrderId: string, skip: AutoReceiveSkip = null) {
+/** Заказ старше окна автозакрытия: бот не тронул доставку и отдаёт решение
+ * человеку. Код доставки идёт прямо в сообщении — без него оператор не закроет
+ * заказ в кабинете WB, а идти за ним в консоль в пределах часового окна WB
+ * значит терять то самое время, ради которого уведомление и существует. */
+export type HeldDeliveryCode = { deliveryCode: string; ageHours: number };
+
+export function notifyDbsCodeCaptured(
+  wbOrderId: string,
+  skip: AutoReceiveSkip = null,
+  held?: HeldDeliveryCode,
+) {
+  if (skip === "order_too_old" && held) {
+    broadcast({
+      marker: "urgent",
+      zone: "DBS",
+      title: "код доставки получен — решение за вами",
+      lines: [
+        wbOrderRef(wbOrderId),
+        `Код доставки: <code>${escapeHtml(held.deliveryCode)}</code>`,
+        `Заказ оформлен <b>${held.ageHours} ч</b> назад — автозакрытие не применяется`,
+      ],
+      next: "закрыть доставку этим кодом (кабинет WB или консоль DBS) — или отклонить. " +
+        "Гейт покупателю уйдёт сам, как только доставка закроется",
+    });
+    return;
+  }
   if (!skip) {
     broadcast({
       marker: "progress",

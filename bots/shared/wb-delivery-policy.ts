@@ -275,6 +275,51 @@ export function canIssueWbGate(order: WbDeliveryPolicyOrder): boolean {
  * guards can increment (docs/wb-dbs-review-2026-08-20.md, F2). */
 export const WB_RECEIVE_MAX_ATTEMPTS = 8;
 
+/** Сколько времени с момента оформления заказа доставку закрывает бот сам.
+ *
+ * Решение владельца (21.08.2026): четыре часа. Внутри окна код покупателя —
+ * обычный ход заказа, и закрывать надо немедленно: WB даёт на закрытие около
+ * часа с момента прихода кода, и это единственный дедлайн, который не отыграть.
+ * За окном заказ уже живёт своей жизнью — покупатель успел пожаловаться, заказ
+ * мог поехать в отказ, — и «закрыть или отклонить» решает человек. Бот в этом
+ * случае делает ровно одно: приносит код доставки в админку. */
+export const WB_AUTO_RECEIVE_ORDER_AGE_MS = 4 * 60 * 60_000;
+
+export type WbOrderPlacement = {
+  /** Слово самого WB о том, когда заказ оформлен. */
+  wbCreatedAt?: Date | string | null;
+  /** Когда заказ увидел воркер. Fallback для заказов, заведённых до появления
+   * колонки: обычно расходится с `wbCreatedAt` на секунды. */
+  firstSeenAt: Date | string;
+};
+
+export function wbOrderPlacedAt(order: WbOrderPlacement): Date {
+  return new Date(order.wbCreatedAt ?? order.firstSeenAt);
+}
+
+/** Разрешено ли боту закрывать эту доставку самому.
+ *
+ * Окно считается от прихода кода, а не от «сейчас». Код, принятый на третьем
+ * часу, обязан пережить лаг WB и восемь минут ретраев — иначе на четвёртом часу
+ * бот молча бросил бы заказ, за который уже взялся, ровно в тот момент, когда
+ * никто этого не ждёт. */
+export function wbAutoReceiveWithinWindow(
+  order: WbOrderPlacement,
+  codeReceivedAt: Date | string,
+): boolean {
+  const placed = wbOrderPlacedAt(order).getTime();
+  const received = new Date(codeReceivedAt).getTime();
+  if (Number.isNaN(placed) || Number.isNaN(received)) return false;
+  return received - placed <= WB_AUTO_RECEIVE_ORDER_AGE_MS;
+}
+
+/** Возраст заказа в часах на момент прихода кода — для текста уведомления. */
+export function wbOrderAgeHours(order: WbOrderPlacement, at: Date | string = new Date()): number {
+  const placed = wbOrderPlacedAt(order).getTime();
+  if (Number.isNaN(placed)) return 0;
+  return Math.max(0, Math.round((new Date(at).getTime() - placed) / 3_600_000));
+}
+
 /** Пауза между попытками закрыть доставку.
  *
  * Без неё бюджет попыток сгорал за секунды: цикл идёт раз в 5 с, поэтому три

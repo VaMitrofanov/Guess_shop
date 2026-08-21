@@ -997,6 +997,10 @@ model WbMarketplaceOrder {
   buyerName            String?
   deliveryFrom         DateTime?
   deliveryTo           DateTime?
+  /// When Wildberries says the buyer placed the order. `firstSeenAt` is only
+  /// when our worker noticed it, so a worker outage would make an old order
+  /// look brand new — and the four-hour auto-close window is decided on this.
+  wbCreatedAt          DateTime?
   requiredMeta         Json?
   supplierStatus       String                 @default("new")
   wbStatus             String                 @default("waiting")
