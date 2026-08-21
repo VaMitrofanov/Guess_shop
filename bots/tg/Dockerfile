@@ -28,11 +28,11 @@ RUN apt-get update -y \
 
 ENV NODE_OPTIONS="--max-old-space-size=512"
 
-COPY bots/tg/package.json ./package.json
+COPY bots/tg/package.json bots/tg/package-lock.json ./
 COPY prisma ./prisma
 
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install --include=dev --no-audit --no-fund --prefer-offline --ignore-scripts
+    npm ci --include=dev --no-audit --no-fund --prefer-offline --ignore-scripts
 
 RUN npx prisma generate --schema ./prisma/schema.prisma
 
@@ -47,6 +47,12 @@ RUN apt-get update -y \
     && apt-get install -y --no-install-recommends openssl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# GetState/Cancel use the same T-Bank endpoint as Web Init. Its certificate
+# chain is signed by the Russian Trusted Root CA, absent from Debian by default.
+# This must live in runner: files copied into the deps stage do not survive.
+COPY certs/russian-trusted-ca.pem /usr/local/share/ca-certificates/russian-trusted-ca.crt
+RUN update-ca-certificates
+
 # Build-time defaults only.
 #
 # Coolify injects DATABASE_URL, TG_TOKEN, ADMIN_IDS, TG_CHAT_ID, TG_CHANNEL_ID
@@ -60,6 +66,7 @@ RUN apt-get update -y \
 # /home/botuser` at runtime.
 ENV NODE_ENV=production \
     NODE_OPTIONS="--max-old-space-size=256" \
+    NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/russian-trusted-ca.crt \
     HOME=/home/botuser \
     NPM_CONFIG_CACHE=/home/botuser/.npm
 
@@ -78,12 +85,17 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/prisma       ./prisma
 COPY --from=deps /app/package.json ./package.json
 
-COPY bots/shared            ./bots/shared
-COPY bots/tg/bot.ts         ./bots/tg/bot.ts
-COPY bots/tg/handlers.ts    ./bots/tg/handlers.ts
-COPY bots/tg/session.ts     ./bots/tg/session.ts
-COPY bots/tg/admin          ./bots/tg/admin
-COPY bots/tsconfig.json     ./bots/tsconfig.json
+# ⚠️ Sources are copied file-by-file: a new .ts file in bots/tg/ MUST be added
+# here, or the container crash-loops at startup with MODULE_NOT_FOUND while the
+# image still builds green (tsx resolves imports only at runtime).
+COPY bots/shared              ./bots/shared
+COPY bots/tg/bot.ts           ./bots/tg/bot.ts
+COPY bots/tg/handlers.ts      ./bots/tg/handlers.ts
+COPY bots/tg/session.ts       ./bots/tg/session.ts
+COPY bots/tg/crons.ts         ./bots/tg/crons.ts
+COPY bots/tg/auto-workers.ts  ./bots/tg/auto-workers.ts
+COPY bots/tg/admin            ./bots/tg/admin
+COPY bots/tsconfig.json       ./bots/tsconfig.json
 
 # Explicit ownership transfer for the entire app tree AFTER all COPYs.
 # /home/botuser is also handed over so HOME-rooted writes (npm cache, prisma

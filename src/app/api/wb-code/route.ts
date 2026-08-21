@@ -1,10 +1,27 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { PrismaClientWithWb } from "@/types/prisma-wb";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 const db = prisma as unknown as PrismaClientWithWb;
 
+// Per-IP throttle on code reservation/status (risk #2). A real WB customer
+// enters one code; these limits are generous for that but choke brute-force
+// scanning of the code space.
+function limited(request: Request, capacity: number, refillPerSec: number) {
+  const ip = clientIp(request);
+  const { ok, retryAfter } = rateLimit(`wb-code:${ip}`, capacity, refillPerSec);
+  if (ok) return null;
+  console.warn(`[wb-code] rate-limited ip=${ip} retryAfter=${retryAfter}s`);
+  return NextResponse.json(
+    { error: "Слишком много запросов. Попробуйте через минуту." },
+    { status: 429, headers: { "retry-after": String(retryAfter) } }
+  );
+}
+
 export async function POST(request: Request) {
+  const rl = limited(request, 10, 0.2); // burst 10, then 1 per 5s
+  if (rl) return rl;
   try {
     const body = await request.json();
     const rawCode: string = (body?.code ?? "").toString().trim().toUpperCase();
@@ -56,22 +73,14 @@ export async function POST(request: Request) {
           });
           return { wbCode: updated };
         } else {
-          // Different session.
-          if (wbCode.reservedUntil && wbCode.reservedUntil > now) {
-            // Hijack the session: since the user knows the physical code, we transfer the reservation.
-            const updated = await tx.wbCode.update({
-              where: { id: wbCode.id },
-              data: { sessionId: sessionId, reservedUntil: reserveTime },
-            });
-            return { wbCode: updated };
-          } else {
-            // Reservation expired, claim it
-            const updated = await tx.wbCode.update({
-              where: { id: wbCode.id },
-              data: { sessionId: sessionId, reservedUntil: reserveTime },
-            });
-            return { wbCode: updated };
-          }
+          // Different session — transfer the reservation regardless of expiry:
+          // the user holds the physical card, so they win (active reservation
+          // gets hijacked; expired one is simply re-claimed).
+          const updated = await tx.wbCode.update({
+            where: { id: wbCode.id },
+            data: { sessionId: sessionId, reservedUntil: reserveTime },
+          });
+          return { wbCode: updated };
         }
       }
 
@@ -106,6 +115,8 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const rl = limited(request, 20, 0.5); // burst 20, then 1 per 2s (status polling)
+  if (rl) return rl;
   const url = new URL(request.url);
   const code = url.searchParams.get("code")?.trim().toUpperCase();
   if (!code || code.length !== 7) {
@@ -121,7 +132,28 @@ export async function GET(request: Request) {
     }
     // Code is "activated" if userId is set (by TG or VK) OR status is CLAIMED
     const claimed = !!(wbCode.userId || wbCode.status === "CLAIMED");
-    return NextResponse.json({ claimed, denomination: wbCode.denomination });
+
+    // The provisional order tells us which channel the user picked (TG/VK) and
+    // how far the order has progressed — the instruction page uses this to show
+    // a single channel CTA and to reflect "order already placed".
+    let platform: string | null = null;
+    let orderStatus: string | null = null;
+    let robloxUsername: string | null = null;
+    try {
+      const order = await (db as any).wbOrder.findFirst({
+        where: { wbCode: { equals: code, mode: "insensitive" } },
+        select: { platform: true, status: true, robloxUsername: true },
+      });
+      if (order) {
+        platform = order.platform ?? null;
+        orderStatus = order.status ?? null;
+        robloxUsername = order.robloxUsername ?? null;
+      }
+    } catch {
+      /* non-fatal — CTA falls back to showing both channels */
+    }
+
+    return NextResponse.json({ claimed, denomination: wbCode.denomination, platform, orderStatus, robloxUsername });
   } catch (err) {
     console.error("[wb-code GET] error:", err);
     return NextResponse.json({ error: "Server error" }, { status: 500 });

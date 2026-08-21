@@ -16,83 +16,313 @@ datasource db {
 }
 
 model User {
-  id                 String    @id @default(cuid())
-  vkId               String?   @unique
-  tgId               String?   @unique
-  email              String?   @unique
-  password           String?
-  name               String?
-  image              String?
-  balance            Int       @default(0)
-  role               String    @default("USER")
-  reviewBonusClaimed Boolean   @default(false)
-  orders             Order[]
-  wbCodes            WbCode[]
-  wbOrders           WbOrder[]
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  id                     String              @id @default(cuid())
+  vkId                   String?             @unique
+  tgId                   String?             @unique
+  email                  String?             @unique
+  emailVerifiedAt        DateTime?
+  password               String?
+  name                   String?
+  username               String?
+  image                  String?
+  robloxUsername         String?
+  /// Public Roblox profile resolved server-side from robloxUsername. The ID is
+  /// stable across Roblox username changes; these fields are a stale-safe cache,
+  /// not proof that the visitor owns the Roblox account.
+  robloxUserId           String?
+  robloxDisplayName      String?
+  robloxAvatarUrl        String?
+  robloxDescription      String?
+  robloxAccountCreatedAt DateTime?
+  robloxProfileSyncedAt  DateTime?
+  balance                Int                 @default(0)
+  bonusExpiresAt         DateTime?
+  rubleDiscount          Int                 @default(0)
+  /// When the one-time 60 ₽ "second direct purchase" discount was granted.
+  /// The grant is once per lifetime, so this is the idempotency key: without
+  /// it the rule re-fired on every completed direct order under 500 R$ and one
+  /// customer bought five packs at 84 ₽ instead of 144 ₽.
+  /// See `bots/shared/direct-discount.ts`.
+  directDiscountGrantedAt DateTime?
+  promoExpiresAt         DateTime?
+  promoSentAt            DateTime?
+  role                   String              @default("USER")
+  sessionVersion         Int                 @default(0)
+  reviewBonusClaimed     Boolean             @default(false)
+  reviewBonusGrantedAt   DateTime?
+  reviewReminderLevel    Int                 @default(0)
+  wbCodes                WbCode[]
+  wbOrders               WbOrder[]
+  directIntents          DirectIntent[]
+  identities             UserIdentity[]
+  bonusLedgerEntries     BonusLedger[]
+  priceQuotes            PriceQuote[]
+  emailActionTokens      EmailActionToken[]
+  consentEvidences       ConsentEvidence[]
+  robloxAccounts         UserRobloxAccount[]
+  mergeSources           AccountMergeAudit[] @relation("AccountMergeSource")
+  mergeTargets           AccountMergeAudit[] @relation("AccountMergeTarget")
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
 }
 
-model Product {
-  id          String   @id @default(cuid())
-  name        String
-  robuxAmount Int
-  rubPrice    Float
-  type        String
-  isActive    Boolean  @default(true)
-  orders      Order[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+/// Roblox identities known to one RobloxBank customer. ORDER_HISTORY means
+/// the username appeared in this user's own paid or completed order; it is a
+/// checkout association, not cryptographic proof of Roblox ownership.
+model UserRobloxAccount {
+  id                 String              @id @default(cuid())
+  userId             String
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  robloxUserId       String?
+  username           String
+  usernameNormalized String
+  displayName        String?
+  avatarUrl          String?
+  description        String?
+  accountCreatedAt   DateTime?
+  profileSyncedAt    DateTime?
+  source             RobloxAccountSource
+  orderCount         Int                 @default(0)
+  firstOrderAt       DateTime?
+  lastOrderAt        DateTime?
+  selectedAt         DateTime?
+  hiddenAt           DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@unique([userId, usernameNormalized])
+  @@index([userId, hiddenAt, selectedAt(sort: Desc)])
+  @@index([userId, robloxUserId])
 }
 
-enum OrderStatus {
-  PENDING
-  PAID
-  FULFILLED
-  FAILED
+enum EmailActionPurpose {
+  VERIFY_EMAIL
+  RESET_PASSWORD
 }
 
-model Order {
-  id                 String      @id @default(cuid())
+/// Single-use email lifecycle token. Only the SHA-256 digest is persisted;
+/// the bearer value exists solely in the email link and is never logged.
+model EmailActionToken {
+  id         String             @id @default(cuid())
+  userId     String
+  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose    EmailActionPurpose
+  tokenHash  String             @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime           @default(now())
+
+  @@index([userId, purpose, createdAt(sort: Desc)])
+  @@index([expiresAt])
+}
+
+/// Append-only evidence of an explicit customer consent. Raw IP addresses and
+/// user-agent strings are intentionally not stored; ipHash is keyed server-side.
+model ConsentEvidence {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type            String
+  documentVersion String
+  source          String
+  ipHash          String?
+  /// U9: IP подделывается и меняется у мобильных операторов — храним ещё и
+  /// клиента, и релиз, на котором согласие было принято.
+  userAgent       String?
+  deploymentId    String?
+  acceptedAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  @@index([userId, acceptedAt(sort: Desc)])
+  @@index([type, documentVersion])
+}
+
+/// A server-verified external identity. Legacy `tgId`/`vkId`/`email` remain
+/// during the transition, but no new feature should use an unverified client
+/// claim as an account key.
+model UserIdentity {
+  id         String               @id @default(cuid())
+  provider   UserIdentityProvider
+  subject    String
+  userId     String
+  user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verifiedAt DateTime             @default(now())
+  metadata   Json?
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+
+  @@unique([provider, subject])
+  @@unique([userId, provider])
+  @@index([userId])
+}
+
+enum UserIdentityProvider {
+  TG
+  VK
+  EMAIL
+}
+
+/// One-time bridge between the public site and @RobloxBankBot. The raw state
+/// never reaches the database: only its SHA-256 digest is stored. A challenge
+/// is short-lived and consumed atomically before a Telegram identity may log
+/// in or be linked to an existing web account.
+model TelegramWebLoginChallenge {
+  stateHash    String    @id
+  mode         String
+  targetUserId String?
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([expiresAt])
+  @@index([targetUserId, createdAt(sort: Desc)])
+}
+
+/// Append-only bonus history. `User.balance` remains a fast cached balance;
+/// each future mutation must also write exactly one idempotent ledger entry.
+model BonusLedger {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deltaRobux     Int
+  balanceAfter   Int
+  reason         String
+  referenceId    String?
+  idempotencyKey String   @unique
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([referenceId])
+}
+
+/// Explicit record of a manual, step-up-authenticated profile merge. The
+/// actual merge workflow is added separately; this table makes it auditable.
+model AccountMergeAudit {
+  id           String    @id @default(cuid())
+  sourceUserId String
+  sourceUser   User      @relation("AccountMergeSource", fields: [sourceUserId], references: [id])
+  targetUserId String
+  targetUser   User      @relation("AccountMergeTarget", fields: [targetUserId], references: [id])
+  status       String    @default("PENDING")
+  evidence     Json
+  result       Json?
+  rolledBackAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([sourceUserId, createdAt(sort: Desc)])
+  @@index([targetUserId, createdAt(sort: Desc)])
+}
+
+/// A versioned policy is the database record selected by a quote. The
+/// deterministic calculation itself lives in bots/shared/retail-pricing.ts.
+model PricingPolicy {
+  id         String       @id @default(cuid())
+  version    String       @unique
+  definition Json
+  isActive   Boolean      @default(false)
+  validFrom  DateTime     @default(now())
+  validUntil DateTime?
+  createdBy  String?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  quotes     PriceQuote[]
+
+  @@index([isActive, validFrom])
+}
+
+enum PriceQuoteStatus {
+  ACTIVE
+  CONSUMED
+  EXPIRED
+  VOID
+}
+
+/// A short-lived server quote. Monetary values are always integer kopecks;
+/// `requestedRobux` and `bonusRobux` are integer R$ values.
+model PriceQuote {
+  id                 String           @id @default(cuid())
   userId             String?
-  user               User?       @relation(fields: [userId], references: [id])
-  customerRobloxUser String
-  productId          String
-  product            Product     @relation(fields: [productId], references: [id])
-  amountRUB          Float
-  amountRobux        Int
-  tinkoffPaymentID   String?     @unique
-  paymentUrl         String?
-  status             OrderStatus @default(PENDING)
-  botStatus          String?
-  externalId         String?
-  gamepassId         String?
-  method             String
+  user               User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  policyId           String
+  policy             PricingPolicy    @relation(fields: [policyId], references: [id])
+  policyVersion      String
+  requestedRobux     Int
+  bonusRobux         Int              @default(0)
+  baseAmountKopecks  Int
+  discountKopecks    Int              @default(0)
+  finalAmountKopecks Int
+  status             PriceQuoteStatus @default(ACTIVE)
+  expiresAt          DateTime
+  consumedAt         DateTime?
+  contextHash        String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  webOrder           WbOrder?
 
-  // ── Acceptance of public offer (ст. 437–438 ГК РФ + ФЗ-152) ─────────────
-  // Captured server-side at the moment /api/orders/create accepts the
-  // request, so the timestamp/IP/version triple is independent of anything
-  // the client could forge after the fact. Nullable for backwards-compat
-  // with rows created before this migration.
-  termsAcceptedAt    DateTime?
-  termsVersion       String?
-  termsIpAddress     String?
-
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
+  @@index([userId, status, expiresAt])
+  @@index([policyId, createdAt(sort: Desc)])
 }
 
 enum Platform {
   VK
   TG
+  WEB
+}
+
+enum RobloxAccountSource {
+  ORDER_HISTORY
+  MANUAL
 }
 
 enum WbOrderStatus {
+  AWAITING_PAYMENT
+  PAYMENT_PENDING
   AWAITING_GAMEPASS
   PENDING
   IN_PROGRESS
   COMPLETED
   REJECTED
+  ERROR
+}
+
+enum DirectIntentStatus {
+  PENDING
+  CONSUMED
+  CANCELLED
+  EXPIRED
+}
+
+enum OrderSource {
+  WB
+  /// Wildberries DBS: the activation code was generated by the courier-delivery
+  /// gate rather than printed on a physical card. Same corridor, different
+  /// origin and different accounting.
+  WB_DBS
+  DIRECT
+  AVITO
+  MANUAL
+  SITE
+}
+
+enum PaymentAttemptStatus {
+  CREATED
+  INITIATED
+  AUTHORIZED
+  CONFIRMED
+  REJECTED
+  CANCELED
+  FAILED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  DELIVERED
+  DEAD
 }
 
 enum WbCodeStatus {
@@ -101,26 +331,276 @@ enum WbCodeStatus {
   CLAIMED
 }
 
+enum WbMarketplaceChatState {
+  WAITING_BUYER_CHAT
+  READY
+  CODE_REQUESTED
+  REQUEST_SEND_UNKNOWN
+  CODE_RECEIVED
+}
+
+enum WbMarketplaceGateState {
+  NOT_ISSUED
+  ISSUED
+  SENDING
+  SENT
+  SEND_UNKNOWN
+  REVOKED
+  /// Settled outside this system — an order fulfilled before the DBS gate
+  /// existed, or handed over by other means. Closes the obligation without
+  /// pretending a code was minted and sent.
+  SERVED_EXTERNALLY
+}
+
+enum PartnerTaskStatus {
+  NEW
+  READY
+  PURCHASING
+  DONE
+  FAILED
+  CANCELLED
+}
+
+enum PartnerLedgerType {
+  TOPUP
+  BUYOUT
+  ADJUSTMENT
+  REFUND
+}
+
+enum PartnerExternalSource {
+  MANUAL
+  GOOGLE_SHEETS
+  XLSX_UPLOAD
+}
+
+/// Which Robux amount a partner's sale rate is quoted against.
+enum PartnerRateBasis {
+  DIRTY
+  NET
+}
+
+/// Provenance of the supplier cost pinned to a partner settlement.
+enum PartnerCostBasis {
+  ASSUMED
+  RATE
+  ACTUAL
+  MANUAL
+}
+
 /// WB withdrawal order: tracks gamepass link submissions from WB card buyers.
 model WbOrder {
-  id              String        @id @default(cuid())
-  amount          Int
-  gamepassUrl     String?
-  status          WbOrderStatus @default(PENDING)
-  platform        Platform
-  userId          String
-  user            User          @relation(fields: [userId], references: [id])
-  wbCode          String        @unique
-  adminId         String?
-  rejectionReason String?
-  /// Snapshot of the purchase rate (R$/₽) at the time of fulfillment.
-  /// Allows accurate historical profit calculations.
-  purchaseRate    Float?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id                     String           @id @default(cuid())
+  amount                 Int
+  gamepassUrl            String?
+  /// U18: числовой ID геймпасса, извлечённый из `gamepassUrl` при записи.
+  /// Раньше поиск шёл по `gamepassUrl contains '/<id>'` — полное сканирование
+  /// таблицы на каждом поиске и перед каждой покупкой.
+  gamepassId             String?
+  status                 WbOrderStatus    @default(PENDING)
+  platform               Platform
+  userId                 String
+  user                   User             @relation(fields: [userId], references: [id])
+  wbCode                 String           @unique
+  /// Canonical web-checkout fields. Nullable for historical WB/bot orders.
+  priceQuoteId           String?          @unique
+  priceQuote             PriceQuote?      @relation(fields: [priceQuoteId], references: [id])
+  publicOrderId          String?          @unique
+  statusTokenHash        String?          @unique
+  paymentAmountKopecks   Int?
+  receiptEmail           String?
+  termsAcceptedAt        DateTime?
+  termsVersion           String?
+  termsIpAddress         String?
+  /// U9: IP сам по себе слабое доказательство согласия — фиксируем и клиента.
+  termsUserAgent         String?
+  /// U3: фактически применённые бонус и скидка. Раньше `rubleDiscount`
+  /// обнулялся «в никуда» и восстановить его при неудачной оплате было нечем.
+  bonusAppliedRobux      Int?
+  discountAppliedKopecks Int?
+  /// U3: компенсация бонуса/скидки уже проведена (защита от двойного возврата
+  /// на стыке webhook / catch-ветки Init / крона протухших заказов).
+  benefitsRevertedAt     DateTime?
+  /// Monotonic reservation cycle for bonus/discount compensation. A bank-init
+  /// retry re-reserves the same benefits and increments this value, so every
+  /// later compensation has its own idempotency key.
+  benefitsRevision       Int              @default(0)
+  webIdempotencyKey      String?          @unique
+  adminId                String?
+  rejectionReason        String?
+  /// Legacy alias: snapshot of the purchase rate in USD per 1000 R$.
+  purchaseRate           Float?
+  /// Immutable money snapshots for exact DIRECT/AVITO history.
+  saleAmountKopecks      Int?
+  purchaseRobuxAmount    Int?
+  purchaseRateUsdPer1k   Float?
+  purchaseUsdToRub       Float?
+  purchaseCostKopecks    Int?
+  profitKopecks          Int?
+  isDirectOrder          Boolean          @default(false)
+  orderSource            OrderSource      @default(WB)
+  isTest                 Boolean          @default(false)
+  paymentDetails         String?
+  robloxUsername         String?
+  /// Free-text admin note (current status / problem) — admin-only, shown in the
+  /// TWA order card. Never surfaced to the customer.
+  adminNote              String?
+  /// Structured reason for status=ERROR in the buyout pipeline. First value:
+  /// REGIONAL_PRICE — donor sees a managed/regional price and no safe
+  /// full-price replacement gamepass was found for this Roblox username.
+  buyoutErrorCode        String?
+  pendingAt              DateTime?
+  takenAt                DateTime?
+  remindersSent          Int              @default(0)
+  isFavorite             Boolean          @default(false)
+  /// Roblox username of the cookie account that purchased this gamepass.
+  purchaserUsername      String?
+  /// When the customer's payment for a direct order was confirmed (pay_ok).
+  /// Unpaid DIR orders (isDirectOrder && paidAt == null) are excluded from
+  /// every buyout path: TWA queue, purchase actions, auto-buyout worker.
+  paidAt                 DateTime?
+  /// Probable Roblox nick captured "in pencil" before the customer sent a
+  /// gamepass (nick search / failed validation / site / VK backfill). Mirrors
+  /// the [НИК?] adminNote history but structured, so the GP-watcher (+3) can
+  /// query it without parsing free text. Last confirmed-shape nick wins; NOT
+  /// authoritative (never promoted to robloxUsername until the user confirms).
+  probableNick           String?
+  probableNickAt         DateTime?
+  /// GP-watcher bookkeeping: throttle checks and dedup "gamepass found" pings.
+  gpWatchLastCheckAt     DateTime?
+  gpWatchNotifiedPassId  String?
+  /// П3: customer tapped «❌ Не мой ник» on the GP-watch ping. Surfaces a badge
+  /// in TWA («кого дожимать вручную»); cleared when a new probable nick arrives.
+  gpWatchDeclinedAt      DateTime?
+  /// Ф6.3: момент фактического выкупа (перехода в COMPLETED) — базис таймера
+  /// разблокировки робуксов Roblox (completedAt + 5 дней). Ставится во ВСЕХ
+  /// путях COMPLETED; у старых заказов NULL — крон разблокировки их не трогает.
+  completedAt            DateTime?
+  /// Ф6.3: уровень пуша о разблокировке робуксов (0 = не слали,
+  /// 1 = день 5 «уже могли разблокироваться», 2 = день 7 «точно разблокированы»).
+  robuxUnlockRemindLevel Int              @default(0)
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  paymentAttempts        PaymentAttempt[]
+  events                 OrderEvent[]
 
   @@index([userId])
   @@index([status])
+  @@index([status, buyoutErrorCode])
+  // Main TWA Orders listing — sort by createdAt desc within a status chip.
+  @@index([status, createdAt(sort: Desc)])
+  // Identity-cluster numbering in /api/twa/orders + GP-by-nick search.
+  @@index([robloxUsername])
+  // Per-user history (BossRobux + analytics).
+  @@index([userId, createdAt(sort: Desc)])
+  // Favorites filter — fast lookup of starred orders.
+  @@index([isFavorite, createdAt(sort: Desc)])
+  // Grouping completed orders by cookie account.
+  @@index([purchaserUsername])
+  // Filter by order source (WB/DIRECT/AVITO/MANUAL).
+  @@index([orderSource])
+  @@index([publicOrderId])
+  // GP-watcher (+3) selection: AWAITING orders that carry a probable nick.
+  @@index([status, probableNick])
+  // U18: точный поиск заказа по геймпассу (TWA-поиск + гард перед покупкой).
+  @@index([gamepassId])
+}
+
+/// One provider-side payment initialization/charge lifecycle. The amount and
+/// merchant order id are immutable snapshots used to verify notifications.
+model PaymentAttempt {
+  id                    String               @id @default(cuid())
+  orderId               String
+  order                 WbOrder              @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  provider              String
+  publicOrderId         String               @unique
+  paymentId             String?              @unique
+  amountKopecks         Int
+  status                PaymentAttemptStatus @default(CREATED)
+  idempotencyKey        String               @unique
+  paymentUrl            String?
+  rawEventHash          String?
+  /// Cumulative amount acknowledged as refunded by provider notifications.
+  /// Integer kopecks; never inferred from the order state alone.
+  refundedAmountKopecks Int                  @default(0)
+  initiatedAt           DateTime?
+  finalizedAt           DateTime?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  refunds               PaymentRefund[]
+
+  @@index([orderId, createdAt(sort: Desc)])
+  @@index([provider, status, updatedAt])
+}
+
+/// Durable liveness signal written by a worker process and independently
+/// inspected by the web process. Alert timestamps provide cross-instance
+/// deduplication when more than one web container is running.
+model ServiceHeartbeat {
+  serviceKey  String    @id
+  lastSeenAt  DateTime
+  status      String    @default("UNKNOWN")
+  lastAlertAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([lastSeenAt])
+}
+
+/// Idempotent operator request to T-Bank Cancel. The row is created before the
+/// network call so two taps can never issue two refunds. A SUBMIT_UNKNOWN row
+/// must be reconciled with the provider instead of being blindly retried.
+model PaymentRefund {
+  id               String         @id @default(cuid())
+  paymentAttemptId String
+  paymentAttempt   PaymentAttempt @relation(fields: [paymentAttemptId], references: [id], onDelete: Restrict)
+  idempotencyKey   String         @unique
+  amountKopecks    Int
+  reason           String?
+  status           String         @default("PENDING")
+  providerStatus   String?
+  responseHash     String?
+  requestedBy      String
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([paymentAttemptId, createdAt(sort: Desc)])
+  @@index([status, updatedAt])
+}
+
+/// Immutable domain/audit event. Provider event hashes make webhook retries
+/// idempotent without storing the raw payload (which may contain PII).
+model OrderEvent {
+  id             String         @id @default(cuid())
+  orderId        String
+  order          WbOrder        @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  type           String
+  idempotencyKey String         @unique
+  payload        Json
+  createdAt      DateTime       @default(now())
+  outbox         OutboxMessage?
+
+  @@index([orderId, createdAt])
+}
+
+/// Durable handoff to fulfillment/notifications. Workers claim PENDING rows,
+/// retry with backoff and move exhausted messages to DEAD for investigation.
+model OutboxMessage {
+  id            String       @id @default(cuid())
+  eventId       String       @unique
+  event         OrderEvent   @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  topic         String
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  attempts      Int          @default(0)
+  nextAttemptAt DateTime     @default(now())
+  lastError     String?
+  lockedAt      DateTime?
+  deliveredAt   DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([status, nextAttemptAt])
 }
 
 model FAQ {
@@ -176,13 +656,265 @@ model RateSnapshot {
 /// Global system settings — single-row config table.
 /// Always upsert with id = "global".
 model GlobalSettings {
-  id           String   @id @default("global")
-  usdToRub     Float
-  /// Manual purchase rate in ₽ per R$ — set by admin via bot.
-  purchaseRate Float?
-  lastUpdated  DateTime @updatedAt
-  autoBuyEnabled Boolean  @default(false)
-  autoBuyRate    Float    @default(4.0)
+  id                      String    @id @default("global")
+  usdToRub                Float
+  /// Manual purchase rate in USD per 1000 R$ — set by admin via bot/TWA.
+  purchaseRate            Float?
+  /// Target net-profit margin for the admin Game Pass price calculator.
+  /// NULL on legacy rows: the loader derives the current 1000 R$ pack margin
+  /// until an admin explicitly saves the calculator settings.
+  gamepassTargetMarginPct Float?
+  lastUpdated             DateTime  @updatedAt
+  autoBuyEnabled          Boolean   @default(false)
+  autoBuyRate             Float     @default(4.0)
+  robloxCookie            String?
+  robloxCookieUpdatedAt   DateTime?
+  robloxAccountName       String?
+  // ── Drain target account ("my account" — leftover donor balance flows here) ──
+  // Bot is always logged into this account; the "Слив" feature reprices a
+  // gamepass on it, then the donor account buys it to consolidate the remainder.
+  drainCookie             String?
+  drainCookieUpdatedAt    DateTime?
+  drainAccountName        String?
+  /// Gamepass ID on the drain account whose price we set to the donor's balance.
+  drainGamepassId         String?
+  /// (unused) Legacy cache of the drain gamepass ProductId. No longer written:
+  /// modern Roblox ProductIds exceed INT32 (this column is INTEGER), and the
+  /// drain flow re-fetches product-info live, so nothing needs to persist here.
+  /// Kept to avoid a drift-only migration against prod.
+  drainProductId          Int?
+  // ── Auto-buyout worker (+1) ──────────────────────────────────────────────
+  // Buys new PENDING orders automatically until the donor balance hits the
+  // drain threshold, then alerts admins. Kill-switch defaults OFF.
+  autoBuyoutEnabled       Boolean   @default(false)
+  autoBuyoutThreshold     Int       @default(150) // R$ — stop buying at/below this, leftover goes to drain
+  autoBuyoutMaxPerTick    Int       @default(5) // cap purchases per tick (blast-radius guard)
+  autoBuyoutBelowSince    DateTime? // when balance first went ≤ threshold (alert dedup)
+  // ── Auto-drain worker (+5.G.3) ───────────────────────────────────────────
+  // Когда баланс донора падает ниже минимальной цены выкупа (143 R$ грязными),
+  // воркер сливает остаток в приёмник сам. Kill-switch, default OFF.
+  autoDrainEnabled        Boolean   @default(false)
+  // ── GP-watcher (+3) ──────────────────────────────────────────────────────
+  gpWatchEnabled          Boolean   @default(false) // kill-switch for the probable-nick gamepass watcher
+  /// Who the watcher tells about a found gamepass: "admin" | "customer" | "both".
+  /// "both" keeps the customer auto-ping AND gives managers full visibility.
+  gpWatchNotify           String    @default("both")
+  /// СБП-QR прямых заказов: base64-картинка (приватно в БД — репо публичный).
+  /// Читают боты (bots/shared/sbp.ts) и TWA (/api/twa/intents → отправка, /api/sbp-qr).
+  sbpQrBase64             String?
+}
+
+/// PII-free performance telemetry for protected operational surfaces.
+/// Client signals are sampled/deduplicated before insertion; raw cookies,
+/// identities, request payloads and query text are never stored here.
+model PerformanceSample {
+  id          String   @id @default(cuid())
+  surface     String
+  route       String
+  metric      String
+  value       Float?
+  rating      String?
+  fingerprint String?
+  createdAt   DateTime @default(now())
+
+  @@index([route, metric, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+}
+
+/// Durable record of a "Выкупить всё" batch — one row per bulk-buyout session.
+/// Lets the manager review what a donor account purchased in a single run.
+model PurchaseBatch {
+  id          String    @id @default(cuid())
+  /// Roblox username of the donor (cookie) account used for this batch.
+  accountName String?
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+  /// Total dirty R$ actually spent (sum of ceil(amount/0.7) for successes).
+  totalGross  Int       @default(0)
+  okCount     Int       @default(0)
+  failCount   Int       @default(0)
+  /// [{ orderId, nick, wbCode, gross, ok, reason }]
+  items       Json
+
+  @@index([startedAt(sort: Desc)])
+}
+
+/// Учёт сливов остатка донора в приёмник (PLAN +5.G.2). Раньше успешный слив
+/// нигде не записывался — в истории трат аккаунтов его не было видно.
+model DrainEvent {
+  id         String   @id @default(cuid())
+  /// Roblox-ник донора (кто платил остатком).
+  donorName  String?
+  /// Roblox-ник приёмника (куда слили).
+  drainName  String?
+  /// Слитая сумма, R$ (грязными — цена геймпасса приёмника).
+  amount     Int
+  gamepassId String?
+  /// "manual" (кнопка 💧 в TWA) | "auto" (автослив-воркер).
+  source     String   @default("manual")
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+}
+
+/// B2B partner account. Partner buyouts deliberately live outside WbOrder:
+/// partner tasks are not WB customer orders and have separate money/accounting.
+model Partner {
+  id                      String               @id @default(cuid())
+  slug                    String               @unique
+  name                    String
+  isActive                Boolean              @default(true)
+  notes                   String?
+  /// Money ledger currency for this partner. Anton uses USDT only.
+  ledgerCurrency          String               @default("USDT")
+  /// Partner-specific sale rate in USDT per 1000 R$. `rateBasis` defines
+  /// whether it is quoted against the gross gamepass price or the net payout.
+  robuxRateUsdtPer1000    Float                @default(5.3)
+  /// Supplier rate paid by us for 1000 dirty R$.
+  purchaseRateUsdtPer1000 Float                @default(4.7)
+  rateBasis               PartnerRateBasis     @default(NET)
+  robloxFeePct            Float                @default(30)
+  /// Google Sheets source config for future sync/write-back. Values are not
+  /// secrets, but sheet URLs/IDs should still be treated as operational config.
+  googleSheetId           String?
+  googleSheetTab          String?
+  googleSheetUrl          String?
+  /// Cross-process lease for Google Sheets sync. Force/manual and background
+  /// syncs share it so two web instances cannot import the same row at once.
+  googleSyncLeaseId       String?
+  googleSyncLeaseAt       DateTime?
+  tasks                   PartnerBuyoutTask[]
+  ledgerEntries           PartnerLedgerEntry[]
+  importRuns              PartnerImportRun[]
+  rateChanges             PartnerRateChange[]
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+}
+
+/// Journal of partner rate changes (USDT per 1000 R$). Written by set-rate so
+/// reports can show when each rate was active and who changed it. Buyout ledger
+/// entries additionally pin the rate used at debit time (rateUsdtPer1000).
+model PartnerRateChange {
+  id                   String            @id @default(cuid())
+  partnerId            String
+  partner              Partner           @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  rate                 Float
+  previousRate         Float?
+  purchaseRate         Float?
+  previousPurchaseRate Float?
+  rateBasis            PartnerRateBasis?
+  previousRateBasis    PartnerRateBasis?
+  robloxFeePct         Float?
+  createdBy            String?
+  createdAt            DateTime          @default(now())
+
+  @@index([partnerId, createdAt(sort: Desc)])
+}
+
+/// One partner gamepass to buy out. For Anton MVP this is created manually or
+/// imported from XLSX in TWA; Google Sheets sync will reuse
+/// externalSource/externalRowId later.
+model PartnerBuyoutTask {
+  id                  String                @id @default(cuid())
+  partnerId           String
+  partner             Partner               @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  externalRowId       String?
+  externalSource      PartnerExternalSource @default(MANUAL)
+  status              PartnerTaskStatus     @default(NEW)
+  robloxUsername      String?
+  gamepassId          String?
+  gamepassUrl         String?
+  productId           String?
+  sellerId            String?
+  sellerName          String?
+  priceRobux          Int?
+  purchasePriceRobux  Int?
+  sheetRaw            Json?
+  purchaseAccountName String?
+  purchaseBatchId     String?
+  completedAt         DateTime?
+  error               String?
+  note                String?
+  ledgerEntries       PartnerLedgerEntry[]
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  @@unique([partnerId, externalSource, externalRowId])
+  @@index([partnerId, status])
+  @@index([partnerId, updatedAt(sort: Desc)])
+  @@index([gamepassId])
+  @@index([purchaseBatchId])
+}
+
+/// Partner ledger in partner money. Anton uses USDT only. New Sheets BUYOUT rows
+/// are per task so each order preserves its own pinned rate; legacy rows may
+/// still aggregate a whole purchase batch.
+model PartnerLedgerEntry {
+  id                      String             @id @default(cuid())
+  partnerId               String
+  partner                 Partner            @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  taskId                  String?
+  task                    PartnerBuyoutTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  type                    PartnerLedgerType
+  amount                  Float
+  currency                String             @default("USDT")
+  /// Rate (USDT per 1000 R$) the debit was computed with. Structured copy of what
+  /// the comment says, so per-rate reports do not parse comment strings.
+  rateUsdtPer1000         Float?
+  /// Immutable economics snapshot. Historical entries are backfilled as
+  /// ASSUMED and are never silently rewritten when the current policy changes.
+  purchaseRateUsdtPer1000 Float?
+  rateBasis               PartnerRateBasis?
+  costBasis               PartnerCostBasis?
+  robloxFeePct            Float?
+  grossRobuxAmount        Int?
+  netRobuxAmount          Int?
+  revenueUsdt             Float?
+  expectedRevenueUsdt     Float?
+  costUsdt                Float?
+  profitUsdt              Float?
+  /// Dirty R$ amount behind a BUYOUT debit; survives task deletion (taskId SetNull).
+  robuxAmount             Int?
+  /// Donor/cookie account used for the buyout. Null means a manual/Sheets fact.
+  /// Kept on the ledger row so grouped history survives task deletion.
+  purchaseAccountName     String?
+  /// Durable idempotency key. New multi-rate batches suffix the user-visible
+  /// batch id with `:task:<taskId>`; legacy BUYOUT rows may use the bare batch id.
+  batchId                 String?
+  itemCount               Int                @default(1)
+  reference               String?
+  comment                 String?
+  createdBy               String?
+  createdAt               DateTime           @default(now())
+
+  @@unique([partnerId, batchId])
+  @@index([partnerId, createdAt(sort: Desc)])
+  @@index([taskId])
+}
+
+/// Journal of server-side partner imports/syncs. Google Sheets sync writes one
+/// run per attempt so TWA can show the last result and ops can inspect failures.
+model PartnerImportRun {
+  id            String                @id @default(cuid())
+  partnerId     String
+  partner       Partner               @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  source        PartnerExternalSource
+  status        String                @default("RUNNING")
+  spreadsheetId String?
+  sheetCount    Int                   @default(0)
+  rowCount      Int                   @default(0)
+  createdCount  Int                   @default(0)
+  updatedCount  Int                   @default(0)
+  failedCount   Int                   @default(0)
+  skippedCount  Int                   @default(0)
+  diagnostics   Json?
+  error         String?
+  startedAt     DateTime              @default(now())
+  finishedAt    DateTime?
+  createdBy     String?
+
+  @@index([partnerId, startedAt(sort: Desc)])
+  @@index([partnerId, source, status])
 }
 
 /// Cost basis for WB products — used for unit economics calculation.
@@ -192,44 +924,240 @@ model WbProductCost {
   // No separate @unique or @@index needed.
   nmID          Int      @id
   vendorCode    String
-  costPrice     Int      @default(0)   // Purchase/production cost in RUB
+  costPrice     Int      @default(0) // Purchase/production cost in RUB
   wbCommission  Float    @default(0.245) // WB commission rate (0–1), e.g. 0.245 = 24.5%
-  logisticsCost Float    @default(87.5)  // Per-unit WB logistics cost in RUB
-  taxRate       Float    @default(0.07)  // Simplified tax rate (0–1)
-  denomination  Int?                     // Robux denomination (300, 500, 800, etc.)
-  adCostPerUnit Float    @default(0)     // Advertising cost per unit (₽)
+  logisticsCost Float    @default(87.5) // Per-unit WB logistics cost in RUB
+  taxRate       Float    @default(0.07) // Simplified tax rate (0–1)
+  denomination  Int? // Robux denomination (300, 500, 800, etc.)
+  adCostPerUnit Float    @default(0) // Advertising cost per unit (₽)
   updatedAt     DateTime @updatedAt
 }
 
 /// Global Wildberries unit economics settings (singleton, id=1).
 model WbSettings {
   id                 Int       @id @default(1)
-  kursRb             Float     @default(4)    // закупочный курс (руб. за единицу)
-  kursUsd            Float     @default(75)   // курс USD/RUB
+  kursRb             Float     @default(4) // закупочный курс (руб. за единицу)
+  kursUsd            Float     @default(75) // курс USD/RUB
   fixedCost          Float     @default(87.5) // фиксированные затраты на единицу (₽)
-  lastAdAttributedAt DateTime?               // дата последнего атрибутирования рекламы к заказу
+  lastAdAttributedAt DateTime? // дата последнего атрибутирования рекламы к заказу
 }
 
 /// Activation codes printed on Wildberries card inserts.
 model WbCode {
-  id                 String       @id @default(cuid())
-  code               String       @unique
+  id                 String              @id @default(cuid())
+  code               String              @unique
   denomination       Int
-  status             WbCodeStatus @default(AVAILABLE)
+  status             WbCodeStatus        @default(AVAILABLE)
   sessionId          String?
   reservedUntil      DateTime?
-  isUsed             Boolean      @default(false)
+  isUsed             Boolean             @default(false)
   usedAt             DateTime?
   batch              String?
-  reviewBonusClaimed Boolean      @default(false)
+  isTest             Boolean             @default(false)
+  reviewBonusClaimed Boolean             @default(false)
   userId             String?
-  user               User?        @relation(fields: [userId], references: [id])
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
+  user               User?               @relation(fields: [userId], references: [id])
+  /// Gamepass the user picked on the website Step-7 search (one-tap handoff to bot).
+  selectedGamepassId String?
+  /// Roblox nick the user searched with on the website (also seeds WbOrder.robloxUsername).
+  robloxNick         String?
+  /// Optional origin for dynamically issued DBS codes. The foreign key lives
+  /// on WbMarketplaceOrder so legacy physical codes need no backfill.
+  marketplaceOrder   WbMarketplaceOrder?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
   @@index([code])
   @@index([status])
   @@index([sessionId])
   @@index([denomination])
   @@index([userId])
+}
+
+/// Wildberries marketplace assembly order. This is deliberately separate from
+/// WbOrder, which is the internal Roblox/Game Pass fulfillment order.
+model WbMarketplaceOrder {
+  id                   String                 @id @default(cuid())
+  wbOrderId            String                 @unique
+  fulfillmentModel     String                 @default("DBS")
+  rid                  String?                @unique
+  orderUid             String?
+  groupId              String?
+  nmId                 Int
+  vendorCode           String?
+  article              String?
+  denominationSnapshot Int?
+  priceKopecks         Int?
+  finalPriceKopecks    Int?
+  currencyCode         Int?
+  /// Buyer's first name from the DBS client endpoint, kept so an operator can
+  /// match a WB chat to a bot conversation without comparing order numbers.
+  /// Deliberately the only piece of buyer identity we store: no phone, no
+  /// address, no full FIO. See docs/wb-dbs-delivery-plan.md §5.
+  buyerName            String?
+  deliveryFrom         DateTime?
+  deliveryTo           DateTime?
+  /// When Wildberries says the buyer placed the order. `firstSeenAt` is only
+  /// when our worker noticed it, so a worker outage would make an old order
+  /// look brand new — and the four-hour auto-close window is decided on this.
+  wbCreatedAt          DateTime?
+  requiredMeta         Json?
+  supplierStatus       String                 @default("new")
+  wbStatus             String                 @default("waiting")
+  chatState            WbMarketplaceChatState @default(WAITING_BUYER_CHAT)
+  gateState            WbMarketplaceGateState @default(NOT_ISSUED)
+  wbCodeId             String?                @unique
+  wbCode               WbCode?                @relation(fields: [wbCodeId], references: [id], onDelete: SetNull)
+  lastErrorCode        String?
+  /// When the gate link actually reached the buyer. Э7 schedules its two
+  /// reminders off this, and deriving it from the audit trail every cycle cost
+  /// a scan of every event row per open order.
+  gateSentAt           DateTime?
+  /// How many "you have not opened your code yet" nudges already went out
+  /// (0, 1, 2). Capped so a silent buyer is never spammed.
+  gateReminderLevel    Int                    @default(0)
+  /// Dedupe for the "WB's closing window is running out" alert: it is a
+  /// once-per-order shout, not a per-cycle one.
+  deliveryAlertedAt    DateTime?
+  /// `{ "<adminTgId>": <messageId> }` for the single live status card each
+  /// admin gets per DBS order. Editing that message replaces the four or five
+  /// separate notifications the chain used to send.
+  adminCardMessages    Json?
+  /// Hash of the card text last pushed. A step that changes nothing an admin
+  /// can see — three refreshes fire within one second of a captured code — is
+  /// then not pushed at all, so an unreachable message id can never turn a
+  /// no-op refresh into a duplicate card.
+  adminCardHash        String?
+  isTest               Boolean                @default(false)
+  firstSeenAt          DateTime               @default(now())
+  lastSeenAt           DateTime               @default(now())
+  completedAt          DateTime?
+  cancelledAt          DateTime?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  chats                WbBuyerChat[]
+  chatEvents           WbBuyerChatEvent[]
+  deliverySecret       WbDeliverySecret?
+  events               WbMarketplaceEvent[]
+
+  @@index([supplierStatus, updatedAt(sort: Desc)])
+  @@index([wbStatus, updatedAt(sort: Desc)])
+  @@index([chatState, gateState, updatedAt(sort: Desc)])
+  @@index([nmId, createdAt(sort: Desc)])
+  @@index([isTest, deliveryTo])
+}
+
+/// WB buyer chat metadata. replySign is encrypted as a single versioned
+/// envelope and never returned to client DTOs.
+model WbBuyerChat {
+  chatId             String              @id
+  marketplaceOrderId String?
+  marketplaceOrder   WbMarketplaceOrder? @relation(fields: [marketplaceOrderId], references: [id], onDelete: SetNull)
+  replySignEncrypted String?
+  lastEventAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  events             WbBuyerChatEvent[]
+
+  @@index([marketplaceOrderId, lastEventAt(sort: Desc)])
+  @@index([lastEventAt(sort: Desc)])
+}
+
+/// Redacted, deduplicated event from WB buyer chat. Delivery and activation
+/// codes are masked before persistence; only safe attachment metadata remains.
+model WbBuyerChatEvent {
+  id                   String              @id @default(cuid())
+  wbEventId            String              @unique
+  chatId               String
+  chat                 WbBuyerChat         @relation(fields: [chatId], references: [chatId], onDelete: Cascade)
+  marketplaceOrderId   String?
+  marketplaceOrder     WbMarketplaceOrder? @relation(fields: [marketplaceOrderId], references: [id], onDelete: SetNull)
+  eventType            String
+  sender               String
+  textRedacted         String?
+  containsDeliveryCode Boolean             @default(false)
+  isNewChat            Boolean             @default(false)
+  sentAt               DateTime
+  attachmentsMeta      Json?
+  createdAt            DateTime            @default(now())
+
+  @@index([chatId, sentAt(sort: Desc)])
+  @@index([marketplaceOrderId, sentAt(sort: Desc)])
+}
+
+/// Short-lived encrypted WB confirmation code. Plaintext exists only inside
+/// the receive action and is purged immediately after a confirmed outcome.
+model WbDeliverySecret {
+  marketplaceOrderId String             @id
+  marketplaceOrder   WbMarketplaceOrder @relation(fields: [marketplaceOrderId], references: [id], onDelete: Cascade)
+  encryptedValue     String
+  codeHmac           String
+  keyVersion         String             @default("v1")
+  receivedAt         DateTime           @default(now())
+  expiresAt          DateTime
+  consumedAt         DateTime?
+  failedAttempts     Int                @default(0)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([expiresAt, consumedAt])
+  /// Lets a buyer who types their WB delivery code into our bot be recognised
+  /// by exact keyed-hash match instead of being told "no active orders".
+  /// See docs/wb-dbs-review-2026-08-20.md §7 (О5) for the rate limits.
+  @@index([codeHmac])
+}
+
+/// Persistent pagination cursor and cross-process lease for DBS/chat sync.
+model WbSyncCursor {
+  stream        String    @id
+  cursor        String?
+  leaseId       String?
+  leaseUntil    DateTime?
+  lastAttemptAt DateTime?
+  lastSuccessAt DateTime?
+  lastErrorCode String?
+  metadata      Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([leaseUntil])
+  @@index([lastSuccessAt])
+}
+
+/// Append-only safe audit for operator and worker transitions. Payload is
+/// intentionally PII/secret-free and contract-tested as such.
+model WbMarketplaceEvent {
+  id                 String             @id @default(cuid())
+  marketplaceOrderId String
+  marketplaceOrder   WbMarketplaceOrder @relation(fields: [marketplaceOrderId], references: [id], onDelete: Cascade)
+  type               String
+  idempotencyKey     String             @unique
+  actor              String
+  payload            Json
+  createdAt          DateTime           @default(now())
+
+  @@index([marketplaceOrderId, createdAt(sort: Desc)])
+  @@index([type, createdAt(sort: Desc)])
+}
+
+/// Pre-order intent for direct purchases. Persisted to DB so it survives bot restarts.
+/// WbOrder is only created when admin sends payment details (consuming the intent).
+model DirectIntent {
+  id             String             @id @default(cuid())
+  userId         String
+  user           User               @relation(fields: [userId], references: [id])
+  amount         Int
+  bonus          Int                @default(0)
+  totalAmount    Int
+  rubleDiscount  Int                @default(0)
+  rublePrice     Int
+  robloxUsername String
+  gamepassId     String
+  gamepassUrl    String
+  platform       Platform
+  status         DirectIntentStatus @default(PENDING)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([userId, status])
 }

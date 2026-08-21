@@ -20,7 +20,37 @@
  */
 
 import * as http from "http";
-import { getGamepassDetailsDirect } from "./roblox";
+import { getGamepassDetailsDirect, getUserGamepasses, getGamepassForPurchase } from "./roblox";
+
+/** What the bridge hands back to the caller after a Telegram call.
+ *
+ * Read-only community methods return their data verbatim — that is the whole
+ * point of the call. Sends return one field: `message_id`. It is a handle, not
+ * payload — but without it a caller can never edit what it sent, and that is
+ * exactly how one DBS order came to produce three identical admin cards: the
+ * live card looked up an id it had no way of learning, found none, and sent a
+ * fresh message every time. Message text, chat and sender stay off the wire. */
+export function telegramProxySuccessPayload(method: string, result: unknown) {
+  if (method === "getChat" || method === "getChatMemberCount") return { ok: true, result };
+  if (method === "sendMessage" || method === "sendPhoto") {
+    const messageId = (result as { message_id?: unknown } | null)?.message_id;
+    if (typeof messageId === "number") return { ok: true, result: { message_id: messageId } };
+  }
+  return { ok: true };
+}
+
+/** Telegram refuses an edit whose text is identical to what the message already
+ * shows. For a card that is success — the card is correct — but it arrives as
+ * HTTP 400, and a caller that reads it as failure falls back to sending, which
+ * is the duplicate. Answered as success so it never becomes one.
+ *
+ * Deliberately narrow: "message to edit not found" stays a failure, because
+ * there the message really is gone and the caller does need to send a new one. */
+function isBenignTelegramRefusal(status: number, description: string): boolean {
+  if (status !== 400) return false;
+  return /message is not modified/i.test(description)
+    || /message to delete not found/i.test(description);
+}
 
 // Allow overriding port via env for cases where 3000 is already in use
 const BRIDGE_PORT = parseInt(process.env.VALIDATOR_PORT ?? "3000", 10);
@@ -48,10 +78,12 @@ export function startBridgeServer(): http.Server {
     }
 
     // ── Route dispatcher ────────────────────────────────────────────────────
-    const isCheckPass = req.method === "GET"  && url.pathname === "/check-pass";
-    const isTgProxy   = req.method === "POST" && url.pathname === "/tg-proxy";
+    const isCheckPass        = req.method === "GET"  && url.pathname === "/check-pass";
+    const isTgProxy          = req.method === "POST" && url.pathname === "/tg-proxy";
+    const isSearchGamepasses = req.method === "POST" && url.pathname === "/search-gamepasses";
+    const isGamepassById     = req.method === "GET"  && url.pathname === "/gamepass-by-id";
 
-    if (!isCheckPass && !isTgProxy) {
+    if (!isCheckPass && !isTgProxy && !isSearchGamepasses && !isGamepassById) {
       respond(404, { ok: false, error: "not_found" });
       return;
     }
@@ -70,7 +102,8 @@ export function startBridgeServer(): http.Server {
     }
 
     // ── POST /tg-proxy ──────────────────────────────────────────────────────
-    // Accepts any Telegram Bot API call. Required fields: token, chat_id.
+    // Accepts any Telegram Bot API call. Required field: chat_id. The bot token
+    // stays on the SG bridge and is never accepted from callers.
     // Optional 'method' overrides the TG method (default: auto-detect).
     // All other fields are forwarded verbatim (text, photo, caption,
     // reply_markup, inline_keyboard, etc.).
@@ -89,7 +122,7 @@ export function startBridgeServer(): http.Server {
         return;
       }
 
-      const { method: tgMethod, chat_id, ...rest } = body as any;
+      const { method: tgMethod, chat_id, ...rest } = body;
       const token = process.env.TG_TOKEN;
       if (!token || !chat_id) {
         respond(400, { ok: false, error: "missing_fields" });
@@ -119,12 +152,16 @@ export function startBridgeServer(): http.Server {
             body:    JSON.stringify({ parse_mode: "HTML", ...rest, chat_id }),
           }
         );
-        const tgBody = await tgRes.json();
+        const tgBody = await tgRes.json() as { description?: string; result?: unknown };
         if (!tgRes.ok) {
           // Suppress "chat not found" noise from stale admin IDs
-          const desc: string = (tgBody as any)?.description ?? "";
+          const desc = tgBody.description ?? "";
           if (tgRes.status === 400 && desc.includes("chat not found")) {
             respond(200, { ok: true, warning: "chat_not_found" });
+            return;
+          }
+          if (isBenignTelegramRefusal(tgRes.status, desc)) {
+            respond(200, { ok: true, warning: "no_change" });
             return;
           }
           console.error(
@@ -136,10 +173,66 @@ export function startBridgeServer(): http.Server {
           return;
         }
         console.log(`[Bridge/tg-proxy] → chat_id=${chat_id} method=${resolvedMethod} delivered`);
-        respond(200, { ok: true });
+        // Read-only calls power server-side operational metrics on the RF Web
+        // host, which cannot reach api.telegram.org directly. Do not widen the
+        // response for send methods: message/chat payloads are unnecessary there.
+        respond(200, telegramProxySuccessPayload(resolvedMethod, tgBody.result));
       } catch (err: any) {
         console.error("[Bridge/tg-proxy] fetch failed:", err?.message ?? err);
         respond(502, { ok: false, error: "tg_unreachable" });
+      }
+      return;
+    }
+
+    // ── POST /search-gamepasses ─────────────────────────────────────────────
+    if (isSearchGamepasses) {
+      let body: Record<string, unknown>;
+      try {
+        const raw = await new Promise<string>((resolve, reject) => {
+          let data = "";
+          req.on("data", (chunk) => { data += chunk; });
+          req.on("end",  () => resolve(data));
+          req.on("error", reject);
+        });
+        body = JSON.parse(raw);
+      } catch {
+        respond(400, { ok: false, error: "bad_request" });
+        return;
+      }
+
+      const username = typeof body.username === "string" ? body.username.trim() : "";
+      if (!username) {
+        respond(400, { ok: false, error: "missing_username" });
+        return;
+      }
+
+      console.log(`[Bridge] → Searching gamepasses for username="${username}"`);
+      try {
+        const gamepasses = await getUserGamepasses(username);
+        console.log(`[Bridge] ← "${username}": ${gamepasses.length} gamepass(es)`);
+        respond(200, { ok: true, gamepasses });
+      } catch (err: any) {
+        console.error(`[Bridge] search-gamepasses error for "${username}":`, err?.message ?? err);
+        respond(500, { ok: false, error: "server_error" });
+      }
+      return;
+    }
+
+    // ── GET /gamepass-by-id ─────────────────────────────────────────────────
+    if (isGamepassById) {
+      const gpId = url.searchParams.get("id") ?? "";
+      if (!gpId || !/^\d{1,20}$/.test(gpId)) {
+        respond(400, { ok: false, error: "invalid_id" });
+        return;
+      }
+      console.log(`[Bridge] → Lookup gamepass-by-id id=${gpId}`);
+      try {
+        const gp = await getGamepassForPurchase(gpId);
+        console.log(`[Bridge] ← id=${gpId}: ${gp ? `"${gp.name}" ${gp.robux}R$` : "not found"}`);
+        respond(200, { ok: true, gamepass: gp });
+      } catch (err: any) {
+        console.error(`[Bridge] gamepass-by-id error for id=${gpId}:`, err?.message ?? err);
+        respond(500, { ok: false, error: "server_error" });
       }
       return;
     }

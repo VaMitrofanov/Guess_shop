@@ -40,18 +40,16 @@ RUN apt-get update -y \
 # Cap install-time memory — `prisma generate` spawns its own node process.
 ENV NODE_OPTIONS="--max-old-space-size=512"
 
-# Copy bot manifest first for max layer-cache reuse.
-COPY bots/vk/package.json ./package.json
+# Copy bot manifests first for max layer-cache reuse and reproducible installs.
+COPY bots/vk/package.json bots/vk/package-lock.json ./
 
 # Copy the shared Prisma schema *before* install so we can run `prisma
 # generate` deterministically inside the image (matches the schema we just
 # committed, not whatever was on the dev machine).
 COPY prisma ./prisma
 
-# `npm install` (not `ci`) — the per-bot lockfile may not yet be committed
-# on first deploy. Switch to `npm ci` once bots/vk/package-lock.json lands.
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install --include=dev --no-audit --no-fund --prefer-offline --ignore-scripts
+    npm ci --include=dev --no-audit --no-fund --prefer-offline --ignore-scripts
 
 # Generate the Prisma client against the *image's* schema path. The
 # bot script's relative path (../../prisma) is meant for local dev; here
