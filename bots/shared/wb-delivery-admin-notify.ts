@@ -109,6 +109,11 @@ const SKIP_REASON: Record<Exclude<AutoReceiveSkip, null>, { marker: "action" | "
  * значит терять то самое время, ради которого уведомление и существует. */
 export type HeldDeliveryCode = { deliveryCode: string; ageHours: number };
 
+/** «121 ч» заставляет оператора делить в уме под часовым окном WB. */
+function ageLabel(hours: number): string {
+  return hours < 48 ? `${hours} ч` : `${Math.round(hours / 24)} сут`;
+}
+
 export function notifyDbsCodeCaptured(
   wbOrderId: string,
   skip: AutoReceiveSkip = null,
@@ -122,7 +127,7 @@ export function notifyDbsCodeCaptured(
       lines: [
         wbOrderRef(wbOrderId),
         `Код доставки: <code>${escapeHtml(held.deliveryCode)}</code>`,
-        `Заказ оформлен <b>${held.ageHours} ч</b> назад — автозакрытие не применяется`,
+        `Заказ оформлен <b>${ageLabel(held.ageHours)}</b> назад — автозакрытие не применяется`,
       ],
       next: "закрыть доставку этим кодом (кабинет WB или консоль DBS) — или отклонить. " +
         "Гейт покупателю уйдёт сам, как только доставка закроется",
