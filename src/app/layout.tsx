@@ -4,6 +4,7 @@ import "./globals.css";
 import SessionProvider from "@/components/session-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SiteObservability } from "@/components/site-observability";
+import VKAuthCallback from "@/components/auth/VKAuthCallback";
 import { THEME_BOOT_SCRIPT } from "@/lib/theme-boot";
 
 const geistSans = Geist({
@@ -93,6 +94,10 @@ export default function RootLayout({
         <ThemeProvider>
           <SessionProvider>
             <SiteObservability />
+            {/* Возврат из VK ID приходит на корень сайта. Если окно осталось
+                одно, довести вход больше некому — компонент делает это сам.
+                На страницах без параметров возврата не рендерит ничего. */}
+            <VKAuthCallback />
             {children}
           </SessionProvider>
         </ThemeProvider>

@@ -2036,6 +2036,10 @@ const WBG_CSS = `
 .wbg-foot{text-align:center;font-size:12.5px;color:#71798c;margin-top:16px}
 .wbg-vkauth{display:flex;flex-direction:column;gap:8px}
 .wbg-vkauth p{font-size:13px;color:#7fb0ff;font-weight:700;text-align:center;margin:0}
+.wbg-vkstall{display:flex;flex-direction:column;gap:6px;margin-top:10px;padding:12px 14px;border:1px solid rgba(127,176,255,.35);border-radius:12px;background:rgba(127,176,255,.08);text-align:center}
+.wbg-vkstall b{font-size:14px;color:#e9e4ff}
+.wbg-vkstall span{font-size:13px;color:#b8b0c5;line-height:1.5}
+.wbg-vkstall a{margin-top:4px;font-size:15px;font-weight:800;color:#7fb0ff;text-decoration:none}
 .wbg-vkwrap{border:1px solid rgba(10,102,224,.5);background:rgba(10,102,224,.1);border-radius:14px;padding:12px;display:flex;align-items:center;justify-content:center;min-height:62px}
 .wbg-trust{display:flex;flex-wrap:wrap;justify-content:center;gap:7px 18px;margin-top:18px}
 .wbg-trust span{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--mut);font-weight:600}
@@ -2080,7 +2084,17 @@ function WBGate({ initialCode = "", initialDenomination = 0 }: { initialCode?: s
   const [quickTarget, setQuickTarget] = useState<"tg" | "vk" | null>(null);
   const [showVkAuth, setShowVkAuth] = useState(false);
   const [vkAuthCode, setVkAuthCode] = useState("");
+  /** VK ID открыт, но заказ так и не поехал — показываем прямой путь в диалог. */
+  const [vkStalled, setVkStalled] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Сорок секунд — заведомо больше, чем нужно на живой вход через VK ID, и
+  // заведомо меньше, чем терпение человека на экране, где ничего не происходит.
+  useEffect(() => {
+    if (!showVkAuth) { setVkStalled(false); return; }
+    const timer = setTimeout(() => setVkStalled(true), 40_000);
+    return () => clearTimeout(timer);
+  }, [showVkAuth]);
 
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 7);
@@ -2280,6 +2294,29 @@ function WBGate({ initialCode = "", initialDenomination = 0 }: { initialCode?: s
                       <div className="wbg-vkwrap">
                         <VKAuthButton mode="order" wbCode={vkAuthCode} />
                       </div>
+                      {/* Страховка на случай, когда окно VK ID не вернулось.
+                          Покупателю, который уже заплатил на Wildberries, нельзя
+                          оставаться на экране, где «ничего не происходит», —
+                          21.08 такой человек ушёл бродить по сайту и упёрся в
+                          оплату. Прямой диалог сообщества с `?ref=` доводит
+                          заказ и без VK ID: привязка случится на первом
+                          сообщении боту, как в Telegram. */}
+                      {vkStalled && (
+                        <div className="wbg-vkstall">
+                          <b>Окно ВКонтакте не вернулось?</b>
+                          <span>Ничего не потерялось — открой диалог, заказ продолжится там.</span>
+                          <a
+                            // `vkAuthCode` как есть, с префиксом GD: ровно то же
+                            // значение, что подставляет VKAuthButton в штатном
+                            // пути. Префикс снимают и бот, и `src/auth.ts`.
+                            href={`https://vk.me/club237309399?ref=${encodeURIComponent(vkAuthCode)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            Открыть диалог ВКонтакте →
+                          </a>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
