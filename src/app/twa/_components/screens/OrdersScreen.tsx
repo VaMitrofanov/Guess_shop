@@ -1235,7 +1235,11 @@ function OrderCard({
   // Редактирование за клиента (номинал/ник/ГП) — любой источник, не только Авито.
   const isEditable = ["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED"].includes(order.status);
   const payment = order.paymentAttempts?.[0];
-  const canRefund = order.orderSource === "SITE" && !!payment &&
+  // Возврат — любому заказу с подтверждённым платежом T-Bank, а не только
+  // SITE: с эквайрингом в ботах (orderSource=DIRECT) деньги приходят тем же
+  // терминалом, и кнопки для них не было — возврат пришлось бы делать мимо
+  // аудита. Условие = ровно предусловие POST /api/twa/payments/refund.
+  const canRefund = !!payment &&
     ["CONFIRMED", "PARTIALLY_REFUNDED"].includes(payment.status) &&
     payment.refundedAmountKopecks < payment.amountKopecks;
 

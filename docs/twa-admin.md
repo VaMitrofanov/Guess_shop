@@ -364,14 +364,21 @@ Production desktop-приёмка 12.08 прошла весь synthetic flow д�
 Полный UX, DTO, actions, stop conditions и Definition of Done:
 [wb-dbs-delivery-plan.md](wb-dbs-delivery-plan.md).
 
-## Возврат SITE-платежа
+## Возврат платежа T-Bank
 
-У карточки `SITE` с payment status `CONFIRMED/PARTIALLY_REFUNDED` есть действие
+У карточки с payment status `CONFIRMED/PARTIALLY_REFUNDED` есть действие
 `↩️ Оформить возврат`. Менеджер вводит сумму до оставшегося paid balance и причину, затем
 подтверждает системный dialog. UI генерирует UUID и вызывает `/api/twa/payments/refund`;
 успешная отправка ещё не равна завершению — карточка/клиент получают итог только после
 подписанного callback банка. `SUBMIT_UNKNOWN` повторно не нажимать: сначала сверить операцию
 в кабинете Т-Банка. Полный контракт и matrix — `payments-and-kkt.md`.
+
+✅ **21.08.2026 кнопка расширена с `SITE` на любой источник.** Роут возврата никогда не
+смотрел на `orderSource` — ограничение жило только в `canRefund` (`OrdersScreen.tsx`). После
+включения эквайринга в ботах платежи `orderSource=DIRECT` приходят тем же терминалом, но
+кнопки у их карточек не было: на момент правки в БД было 8 подтверждённых DIRECT-платежей,
+недоступных для возврата из админки. Теперь условие кнопки = ровно предусловие роута
+(есть `PaymentAttempt` в `CONFIRMED/PARTIALLY_REFUNDED` с непокрытым остатком).
 
 ## Вкладки заказов (`OrdersScreen` + `api/twa/orders`)
 
