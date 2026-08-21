@@ -46,10 +46,16 @@ export function wbCodeRequestMessage(): string {
  *
  * Deliberately names no messenger: Wildberries penalises sellers for steering
  * buyers to outside platforms, so the page itself introduces the next step. */
-export function wbGateMessage(code: string, denomination: number | null, origin?: string): string {
+export function wbGateMessage(
+  code: string,
+  denomination: number | null,
+  origin?: string,
+  sibling?: WbOrderSibling | null,
+): string {
   const amount = denomination ? `${denomination.toLocaleString("ru-RU")} R$` : "ваш номинал";
   return [
     `Спасибо, код доставки получен! Заказ подтверждён, ${amount} готовы к зачислению.`,
+    ...wbSiblingLines(sibling),
     "Откройте ссылку — код уже подставлен, вводить его вручную не нужно:",
     wbGateUrl(code, origin),
     `Если ссылка не открылась, перейдите на ${wbGuideFallbackUrl(origin)} и введите код: ${code}`,
@@ -59,6 +65,46 @@ export function wbGateMessage(code: string, denomination: number | null, origin?
     "На этой странице будет вся дальнейшая инструкция: указать ник Roblox, куда зачислить Robux,"
     + " и создать геймпасс по инструкции — именно через него приходят Robux.",
   ].join("\n\n");
+}
+
+/** Одна покупка на Wildberries может содержать несколько наших карточек: WB
+ * заводит на каждую отдельный заказ и отдельный чат, а `orderUid` у них общий.
+ * Позиция считается по нему. */
+export type WbOrderSibling = { index: number; total: number };
+
+/** Позиция заказа среди своих же — по возрастанию `wbOrderId`, потому что WB
+ * нумерует заказы одной покупки подряд, и покупатель видит их в том же порядке.
+ * `wbOrderId` — строка (int64 не переживает JSON), поэтому сначала по длине,
+ * иначе «9» окажется после «10». Одиночный заказ позиции не имеет: сообщение о
+ * нескольких заказах не должно появляться там, где заказ один. */
+export function wbSiblingPosition(
+  wbOrderId: string,
+  siblings: { wbOrderId: string }[],
+): WbOrderSibling | null {
+  if (siblings.length < 2) return null;
+  const ordered = siblings
+    .map((s) => s.wbOrderId)
+    .sort((a, b) => a.length - b.length || a.localeCompare(b));
+  const index = ordered.indexOf(wbOrderId);
+  if (index < 0) return null;
+  return { index: index + 1, total: ordered.length };
+}
+
+/** Покупателю двух карточек нужно сказать вслух, что заказа два и они не
+ * связаны.
+ *
+ * 21.08 покупательница взяла две карточки на два аккаунта Roblox, оформила
+ * первую и написала: «во втором чате висит ник из первого заказа, как оформить
+ * второй». Ссылки в обоих чатах выглядели одинаково, и ничто в тексте не
+ * намекало, что ник указывается для каждого заказа свой. */
+function wbSiblingLines(sibling?: WbOrderSibling | null): string[] {
+  if (!sibling || sibling.total < 2) return [];
+  return [
+    `Это заказ ${sibling.index} из ${sibling.total} в вашей покупке. Заказы независимы:`
+    + " у каждого свой код и свой ник Roblox, и робуксы придут на тот аккаунт, который вы укажете"
+    + " именно по этому коду. Ссылка ниже — только для этого заказа; остальные оформляются"
+    + " по ссылкам из своих чатов.",
+  ];
 }
 
 /** WB отклонил код, который прислал покупатель.
@@ -88,6 +134,7 @@ export function wbGateReminderMessage(
   denomination: number | null,
   level: number,
   origin?: string,
+  sibling?: WbOrderSibling | null,
 ): string {
   const amount = denomination ? `${denomination.toLocaleString("ru-RU")} R$` : "ваш номинал";
   const opening = level === 1
@@ -95,6 +142,7 @@ export function wbGateReminderMessage(
     : `Ваши ${amount} всё ещё не получены — заказ открыт, забрать можно в любой момент.`;
   return [
     opening,
+    ...wbSiblingLines(sibling),
     "Откройте ссылку — код уже подставлен, вводить его вручную не нужно:",
     wbGateUrl(code, origin),
     `Если ссылка не открылась, перейдите на ${wbGuideFallbackUrl(origin)} и введите код: ${code}`,

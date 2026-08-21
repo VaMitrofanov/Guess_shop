@@ -43,7 +43,7 @@ import { BuyoutError, resolveGamepass } from "@/lib/roblox-buyout";
 import { checkGamepassPrice, expectedGamepassPrice } from "@/lib/purchase-guard";
 import { runWbDeliverySync } from "../../bots/shared/wb-delivery-sync";
 import { generateWbActivationCode } from "../../bots/shared/wb-activation-code";
-import { wbCodeRequestMessage, wbGateMessage, wbGateUrl } from "../../bots/shared/wb-gate-link";
+import { wbCodeRequestMessage, wbGateMessage, wbGateUrl, wbSiblingPosition } from "../../bots/shared/wb-gate-link";
 import { isServiceOwned, linkWbOrderToBuyer, resolveBuyerUser } from "../../bots/shared/wb-buyer-link";
 import { notifyDbsBuyerUnlinked } from "../../bots/shared/wb-delivery-admin-notify";
 import { WB_TERMINAL_STAGES, WB_URGENT_STAGES } from "@/lib/wb-delivery-labels";
@@ -467,6 +467,22 @@ async function getOrder(orderId: string | undefined) {
   });
   if (!order) throw new WbDeliveryWorkflowError("Заказ не найден", 404, "ORDER_NOT_FOUND");
   return order;
+}
+
+/** Зеркало `loadOrderSibling` воркера: в одной покупке WB бывает несколько наших
+ * карточек, и покупателю про это надо сказать в самом гейте — иначе второй заказ
+ * читается как «уже оформлен» (кейс 21.08). `orderUid` общий у всей корзины. */
+async function orderSiblingFor(order: { wbOrderId: string; orderUid: string | null }) {
+  if (!order.orderUid) return null;
+  try {
+    const siblings = await db.wbMarketplaceOrder.findMany({
+      where: { orderUid: order.orderUid },
+      select: { wbOrderId: true },
+    });
+    return wbSiblingPosition(order.wbOrderId, siblings);
+  } catch {
+    return null;
+  }
 }
 
 async function audit(orderId: string, type: string, actor: string, payload: Record<string, unknown> = {}) {
@@ -1021,7 +1037,7 @@ export async function performWbDeliveryAction(
     await audit(order.id, "GATE_SEND_STARTED", actor, { isTest: order.isTest });
     await sendText(
       order,
-      wbGateMessage(order.wbCode.code, order.denominationSnapshot, GUIDE_ORIGIN),
+      wbGateMessage(order.wbCode.code, order.denominationSnapshot, GUIDE_ORIGIN, await orderSiblingFor(order)),
       actor,
       "gate",
     );

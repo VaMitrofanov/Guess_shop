@@ -1402,6 +1402,29 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     await handleGpPick(ctx, vkUserId, msgPayload.passId);
     return;
   }
+  // ── 📦 Несколько живых заказов у одного покупателя: выбор и возврат к списку ──
+  if (msgPayload?.command === "order_pick" && typeof msgPayload.code === "string") {
+    await handleOrderPick(ctx, vkUserId, msgPayload.code);
+    return;
+  }
+  if (msgPayload?.command === "orders_list") {
+    const listUser = await (db as any).user.findUnique({
+      where: { vkId: String(vkUserId) },
+      select: { id: true },
+    });
+    const orders = listUser ? await findActiveOrders(listUser.id) : [];
+    if (orders.length === 0) {
+      await ctx.reply("Активных заказов нет. Есть код с карточки WB? Напиши его сюда.");
+      return;
+    }
+    if (orders.length === 1) {
+      await handleOrderPick(ctx, vkUserId, orders[0].wbCode);
+      return;
+    }
+    clearState(vkUserId);
+    await replyOrderPicker(ctx, orders);
+    return;
+  }
   // П2 (стейл-стейт): стейты, привязанные к заказу, могли отстать от БД —
   // gpw_ok, attach из TWA или выкуп уже перевели заказ дальше, а Map-стейт
   // остался и съедал любой текст формат-ошибкой (кейс DCTAKAJ: «❤️❤️» →
@@ -1806,7 +1829,9 @@ async function handleRefActivation(
           userId: user.id,
           wbCode: wbCode.code,
           orderSource: await resolveWbOrderSource(tx, wbCode.code),
-          ...(user.robloxUsername ? { robloxUsername: user.robloxUsername } : {}),
+          // Ник сюда НЕ подставляется — зеркало TG. `robloxUsername` означает
+          // «робуксы придут на этот аккаунт», а у покупателя двух карточек
+          // второй заказ обычно для другого аккаунта Roblox (кейс 21.08).
         },
       });
       provisionalCreated = true;
@@ -1860,9 +1885,18 @@ async function handleRefActivation(
   const vkGuideUrl = `https://robloxbank.ru/guide?source=wb&skip=1&code=${code}`;
   // One-tap: gamepass already picked on the website → offer confirm.
   if (await vkOfferPreselectedGamepass(ctx, code, passPrice, vkGuideUrl)) return;
-  // Returning user with saved nick — show it and offer auto-search
-  const vkSavedNick = user.robloxUsername;
+  // Returning user with saved nick — show it and offer auto-search.
+  //
+  // Только когда заказ один. Вторая карточка почти всегда берётся на другой
+  // аккаунт Roblox, и кнопка «✅ Найти у <прошлый ник>» толкает оформить её на
+  // тот же — ровно то, на что пожаловалась покупательница 21.08.
+  const vkParallelOrders = await findActiveOrders(user.id);
+  const vkMultiOrder = vkParallelOrders.length > 1;
+  const vkSavedNick = vkMultiOrder ? null : user.robloxUsername;
   const vkNickLine = vkSavedNick ? `\n🎮 Ник: ${vkSavedNick}` : "";
+  const vkMultiLine = vkMultiOrder
+    ? `\n\n📦 Активных заказов: ${vkParallelOrders.length} — они независимы. Для этого кода укажи ник Roblox, на который придут робуксы именно по нему.`
+    : "";
   const kb = Keyboard.builder()
     .urlButton({ label: "📖 ОТКРЫТЬ ИНСТРУКЦИЮ", url: vkGuideUrl })
     .row();
@@ -1873,12 +1907,16 @@ async function handleRefActivation(
   } else {
     kb.textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" });
   }
+  if (vkMultiOrder) {
+    kb.row().textButton({ label: "📦 Мои заказы", payload: { command: "orders_list" }, color: "secondary" });
+  }
   await ctx.reply({
     message:
       greetLine + `\n` +
       `✅ Код ${code} активирован · номинал ${totalAmount} R$ → геймпасс ${passPrice} R$${vkNickLine}\n\n` +
-      `📖 Открой инструкцию по кнопке ниже — она проведёт тебя по шагам. Заказ оформляется прямо там 👇`,
-    keyboard: kb.inline(),
+      `📖 Открой инструкцию по кнопке ниже — она проведёт тебя по шагам. Заказ оформляется прямо там 👇` +
+      vkMultiLine,
+    keyboard: enforceVkInlineKbLimits(kb.inline(), "vk-code-activated"),
   });
 }
 
@@ -2276,23 +2314,28 @@ async function handleFindGpStart(ctx: MessageContext, vkUserId: number): Promise
     await ctx.reply("Сессия истекла — напиши «Начать», чтобы продолжить.");
     return;
   }
-  const order = await (db as any).wbOrder.findFirst({
-    where: { userId: user.id, status: { in: VK_CHANGEABLE_ORDER_STATUSES } },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!order) {
+  const working = await resolveWorkingOrder(vkUserId, user.id);
+  if (!working) {
     await ctx.reply("У тебя сейчас нет активного заказа. Введи код WB чтобы начать.");
     return;
   }
+  if ("choose" in working) {
+    await replyOrderPicker(ctx, working.choose);
+    return;
+  }
+  const order = working.order;
   setState(vkUserId, {
     type: "AWAITING_ROBLOX_NICK",
     wbCode: order.wbCode,
     denomination: order.amount,
   });
   const passPrice = Math.ceil(order.amount / 0.7);
+  // Код в тексте — не украшение: у покупателя нескольких карточек это
+  // единственный способ убедиться, что ник уйдёт в тот заказ, который он выбрал.
+  const forOrder = String(order.wbCode).startsWith("DIR-") ? "" : ` для заказа ${order.wbCode}`;
   await ctx.reply(
-    `🔎 Введи свой ник в Roblox (то, как ты заходишь в игру).\n\n` +
-    `Я найду все твои геймпассы за ${passPrice} R$ — и предложу выбрать нужный.\n` +
+    `🔎 Введи ник Roblox${forOrder} — то, как ты заходишь в игру.\n\n` +
+    `Я найду все геймпассы за ${passPrice} R$ — и предложу выбрать нужный.\n` +
     `Если передумал — пришли ссылку на геймпасс как обычно.`
   );
 }
@@ -2306,14 +2349,16 @@ async function handleFindGpSaved(ctx: MessageContext, vkUserId: number): Promise
     await handleFindGpStart(ctx, vkUserId);
     return;
   }
-  const order = await (db as any).wbOrder.findFirst({
-    where: { userId: user.id, status: { in: VK_CHANGEABLE_ORDER_STATUSES } },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!order) {
+  const working = await resolveWorkingOrder(vkUserId, user.id);
+  if (!working) {
     await ctx.reply("У тебя сейчас нет активного заказа. Введи код WB чтобы начать.");
     return;
   }
+  if ("choose" in working) {
+    await replyOrderPicker(ctx, working.choose);
+    return;
+  }
+  const order = working.order;
   setState(vkUserId, {
     type: "AWAITING_ROBLOX_NICK",
     wbCode: order.wbCode,
@@ -2338,14 +2383,16 @@ async function handleFindGpRecheck(ctx: MessageContext, vkUserId: number): Promi
     await ctx.reply("Сессия истекла — напиши «Начать», чтобы продолжить.");
     return;
   }
-  const order = await (db as any).wbOrder.findFirst({
-    where: { userId: user.id, status: { in: VK_CHANGEABLE_ORDER_STATUSES } },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!order) {
+  const working = await resolveWorkingOrder(vkUserId, user.id);
+  if (!working) {
     await ctx.reply("У тебя сейчас нет активного заказа. Введи код WB чтобы начать.");
     return;
   }
+  if ("choose" in working) {
+    await replyOrderPicker(ctx, working.choose);
+    return;
+  }
+  const order = working.order;
   const nick = order.probableNick ?? order.robloxUsername ?? user.robloxUsername;
   if (!nick) {
     await handleFindGpStart(ctx, vkUserId);
@@ -2374,14 +2421,16 @@ async function handleChangeNick(ctx: MessageContext, vkUserId: number): Promise<
     await ctx.reply("Сессия истекла — напиши «Начать», чтобы продолжить.");
     return;
   }
-  const order = await (db as any).wbOrder.findFirst({
-    where: { userId: user.id, status: { in: VK_CHANGEABLE_ORDER_STATUSES }, isDirectOrder: false },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!order) {
+  const working = await resolveWorkingOrder(vkUserId, user.id, { wbOnly: true });
+  if (!working) {
     await ctx.reply("Нет заказа, который можно изменить.");
     return;
   }
+  if ("choose" in working) {
+    await replyOrderPicker(ctx, working.choose);
+    return;
+  }
+  const order = working.order;
   setState(vkUserId, {
     type: "AWAITING_ROBLOX_NICK",
     wbCode: order.wbCode,
@@ -2568,14 +2617,18 @@ async function handleGpPick(
     await ctx.reply("Сессия истекла — напиши «Начать».");
     return;
   }
-  const order = await (db as any).wbOrder.findFirst({
-    where: { userId: user.id, status: { in: VK_CHANGEABLE_ORDER_STATUSES } },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!order) {
+  const working = await resolveWorkingOrder(vkUserId, user.id);
+  if (!working) {
     await ctx.reply("У тебя сейчас нет активного заказа.");
     return;
   }
+  if ("choose" in working) {
+    // Стейт отвалился, а заказов несколько — угадывать нельзя: выкуп ушёл бы
+    // не в тот заказ. Просим выбрать явно.
+    await replyOrderPicker(ctx, working.choose);
+    return;
+  }
+  const order = working.order;
   setState(vkUserId, {
     type: "AWAITING_LINK",
     wbCode: order.wbCode,
@@ -2583,6 +2636,44 @@ async function handleGpPick(
   });
   const url = `https://www.roblox.com/game-pass/${passId}`;
   await handleGamepassLink(ctx, vkUserId, url, order.wbCode, order.amount);
+}
+
+/** Покупатель выбрал, с каким из своих заказов работает. Выбор ложится в стейт,
+ * и дальше ник и геймпасс уходят именно в него. */
+async function handleOrderPick(ctx: MessageContext, vkUserId: number, code: string): Promise<void> {
+  const user = await (db as any).user.findUnique({
+    where: { vkId: String(vkUserId) },
+    select: { id: true },
+  });
+  const order = user
+    ? await (db as any).wbOrder.findFirst({
+        where: { userId: user.id, wbCode: code, status: { in: VK_ACTIVE_STATUSES } },
+      })
+    : null;
+  if (!order) {
+    await ctx.reply("Этот заказ уже не активен. Напиши «статус», чтобы увидеть актуальные.");
+    return;
+  }
+  setState(vkUserId, { type: "AWAITING_LINK", wbCode: order.wbCode, denomination: order.amount });
+  const passPrice = Math.ceil(order.amount / 0.7);
+  const guideUrl = String(order.wbCode).startsWith("DIR-")
+    ? `https://robloxbank.ru/guide?source=direct`
+    : `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}`;
+  const nick = order.robloxUsername ?? order.probableNick;
+  await ctx.reply({
+    message:
+      `📦 Работаем с заказом ${order.wbCode} · ${order.amount} R$ → геймпасс ${passPrice} R$\n` +
+      (nick ? `🎮 Ник: ${nick}\n` : `🎮 Ник ещё не указан — робуксы придут на тот аккаунт, который назовёшь здесь.\n`) +
+      `📊 Статус: ${VK_STATUS_LABEL[order.status] ?? order.status}\n\n` +
+      `📖 Инструкция по этому заказу: ${guideUrl}`,
+    keyboard: Keyboard.builder()
+      .urlButton({ label: "📖 ОТКРЫТЬ ИНСТРУКЦИЮ", url: guideUrl })
+      .row()
+      .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+      .row()
+      .textButton({ label: "📦 Другой заказ", payload: { command: "orders_list" }, color: "secondary" })
+      .inline(),
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3230,6 +3321,77 @@ const VK_STATUS_LABEL: Record<string, string> = {
 // Statuses where the user may still re-pick their nick / gamepass (not yet bought).
 const VK_CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "REJECTED"];
 
+/** Зеркало TG. Клавиатура VK жёстче (≤10 кнопок, ≤6 рядов), поэтому список
+ * короче: четыре заказа + «Моё меню» укладываются с запасом. */
+const VK_ORDER_PICKER_LIMIT = 4;
+
+/** Все живые заказы покупателя, свежие сверху. Одна покупка WB может содержать
+ * несколько наших карточек — по карточке на получателя. */
+async function findActiveOrders(userId: string): Promise<any[]> {
+  return (db as any).wbOrder.findMany({
+    where: { userId, status: { in: VK_ACTIVE_STATUSES } },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+function orderPickerLabel(order: any): string {
+  const who = order.robloxUsername ?? order.probableNick;
+  const code = String(order.wbCode).startsWith("DIR-") ? "Прямой" : order.wbCode;
+  return `${code} · ${order.amount} R$${who ? ` · ${who}` : " · ник не указан"}`;
+}
+
+/**
+ * Заказ, с которым покупатель работает прямо сейчас: закреплённый в стейте код →
+ * единственный кандидат → просьба выбрать. Раньше все ветки брали «самый свежий
+ * изменяемый заказ», и у покупателя двух карточек геймпасс второго заказа мог
+ * уйти в первый.
+ */
+async function resolveWorkingOrder(
+  vkUserId: number,
+  userId: string,
+  opts: { wbOnly?: boolean } = {},
+): Promise<{ order: any } | { choose: any[] } | null> {
+  const orders = await (db as any).wbOrder.findMany({
+    where: {
+      userId,
+      status: { in: VK_CHANGEABLE_ORDER_STATUSES },
+      ...(opts.wbOnly ? { isDirectOrder: false } : {}),
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  if (orders.length === 0) return null;
+  const state = getState(vkUserId);
+  const pinned = state && (state.type === "AWAITING_ROBLOX_NICK" || state.type === "AWAITING_LINK")
+    ? state.wbCode
+    : null;
+  const pinnedOrder = pinned ? orders.find((o: any) => o.wbCode === pinned) : undefined;
+  if (pinnedOrder) return { order: pinnedOrder };
+  if (orders.length === 1) return { order: orders[0] };
+  return { choose: orders };
+}
+
+/** Экран «какой из заказов?» — один и тот же для «Начать», статуса и ветки ника. */
+async function replyOrderPicker(ctx: MessageContext, orders: any[]): Promise<void> {
+  const shown = orders.slice(0, VK_ORDER_PICKER_LIMIT);
+  const rest = orders.length - shown.length;
+  const kb = Keyboard.builder();
+  for (const o of shown) {
+    kb.textButton({ label: orderPickerLabel(o), payload: { command: "order_pick", code: o.wbCode }, color: "primary" }).row();
+  }
+  kb.textButton({ label: "👤 Моё меню", payload: { command: "menu" }, color: "secondary" });
+  await ctx.reply({
+    message:
+      `📦 Активных заказов: ${orders.length} — они независимы: у каждого свой код, ` +
+      `свой ник Roblox и свой геймпасс.\n\n` +
+      shown.map((o, i) => `${i + 1}. ${orderPickerLabel(o)}`).join("\n") +
+      (rest > 0 ? `\n…и ещё ${rest}` : "") +
+      `\n\nВыбери, с каким работаем 👇`,
+    // 5 рядов при лимите 6 — но пикер строится из данных, так что рубеж лишним
+    // не бывает: переполнение клавиатуры VK отвергает целиком (P0 04.07).
+    keyboard: enforceVkInlineKbLimits(kb.inline(), "vk-order-picker"),
+  });
+}
+
 // Ф7 (2026-07-12): нейтральная нота вместо прежнего алармистского баннера
 // «Roblox ввёл ограничения… 1–3 дня». Зеркало — bots/tg/handlers.ts.
 const BUYOUT_ETA_NOTE = `\n\n⏱ Выкупаем в течение суток — обычно быстрее. Иногда чуть дольше — уведомим сразу, как выкупим.`;
@@ -3563,7 +3725,16 @@ async function handleIdleMessage(
       return;
     }
 
-    const order = await findRelevantOrder(user.id);
+    // Несколько живых заказов у одного человека — норма (две карточки WB, два
+    // аккаунта Roblox). Без явного выбора статус показывал только самый свежий,
+    // и второй заказ для покупателя просто не существовал.
+    const activeOrders = await findActiveOrders(user.id);
+    if (activeOrders.length > 1) {
+      await replyOrderPicker(ctx, activeOrders);
+      return;
+    }
+
+    const order = activeOrders[0] ?? await findRelevantOrder(user.id);
 
     if (!order) {
       await ctx.reply("У тебя пока нет заказов.\n\nЕсть код с WB-карты? Напиши его прямо сюда.\nНужна помощь? Напиши прямо сюда — ответим здесь 👇 Если удобнее в Telegram: https://t.me/RobloxBank_PA");

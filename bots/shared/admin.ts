@@ -430,6 +430,11 @@ export const CB = {
 
   // User actions
   refreshStatus: "refresh_status",
+  /** Покупатель с несколькими активными заказами выбирает, с каким работает.
+   * Код 7 символов → ≤11 b. */
+  orderPick:     (wbCode: string) => `ord:${wbCode}`,
+  /** Вернуться к списку своих активных заказов. */
+  ordersList:    "orders_list",
   reviewHint:    "review_hint",
   buyerMenu:     "menu",                                     // buyer mini-profile hub
 

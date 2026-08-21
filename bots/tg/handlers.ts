@@ -442,10 +442,24 @@ export function registerStart(bot: Telegraf): void {
       if (!isAdmin) {
         const startUser = await (db as any).user.findUnique({ where: { tgId } });
         if (startUser) {
-          const awaitingOrder = await (db as any).wbOrder.findFirst({
+          const awaitingOrders = await (db as any).wbOrder.findMany({
             where: { userId: startUser.id, status: "AWAITING_GAMEPASS" },
             orderBy: { createdAt: "desc" },
           });
+          // Две карточки — два незаконченных заказа. Раньше приветствие молча
+          // брало свежий и закрепляло его в сессии: ник, введённый после этого,
+          // уходил не в тот заказ.
+          if (awaitingOrders.length > 1) {
+            pendingLink.delete(ctx.from.id);
+            const picker = buildOrderPicker(awaitingOrders);
+            await ctx.reply(picker.text, {
+              parse_mode: "HTML",
+              link_preview_options: { is_disabled: true },
+              ...picker.keyboard,
+            });
+            return;
+          }
+          const awaitingOrder = awaitingOrders[0];
           if (awaitingOrder) {
             const passPrice = Math.ceil(awaitingOrder.amount / 0.7);
             const isDirect = (awaitingOrder.wbCode as string).startsWith("DIR-");
@@ -681,7 +695,11 @@ export function registerStart(bot: Telegraf): void {
             userId: user.id,
             wbCode: wbCode.code,
             orderSource: await resolveWbOrderSource(tx, wbCode.code),
-            ...(user.robloxUsername ? { robloxUsername: user.robloxUsername } : {}),
+            // Ник сюда НЕ подставляется. `robloxUsername` — это «робуксы придут
+            // на этот аккаунт», и заполнять его прошлой покупкой нельзя: у
+            // покупателя двух карточек второй заказ обычно для другого аккаунта
+            // Roblox, и карточка заказа врала бы про получателя (кейс 21.08). Прошлый
+            // ник остаётся подсказкой в кнопке — там его видно и можно сменить.
           },
         });
         provisionalCreated = true;
@@ -777,9 +795,19 @@ export function registerStart(bot: Telegraf): void {
     // confirm instead of the standard "напиши ник" welcome.
     if (!isAdmin && await offerPreselectedGamepass(ctx, code, passPrice, guideUrl)) return;
 
-    // Returning user with a saved nick — offer auto-search shortcut
-    const savedNick = user.robloxUsername;
+    // Returning user with a saved nick — offer auto-search shortcut.
+    //
+    // Но только когда заказ у человека один. Вторая карточка почти всегда берётся
+    // на другой аккаунт Roblox, и зелёная кнопка «✅ Найти геймпассы у <прошлый
+    // ник>» толкает оформить её на тот же — ровно то, на что пожаловалась
+    // покупательница 21.08. При нескольких живых заказах ник спрашиваем заново.
+    const parallelOrders = await findActiveOrders(user.id);
+    const multiOrder = parallelOrders.length > 1;
+    const savedNick = multiOrder ? null : user.robloxUsername;
     const nickLine = savedNick ? `\n🎮 Ник: <b>${escapeHtml(savedNick)}</b>` : "";
+    const multiOrderLine = multiOrder
+      ? `\n\n📦 Активных заказов: <b>${parallelOrders.length}</b> — они <b>независимы</b>. Для этого кода укажи ник Roblox, на который придут робуксы именно по нему.`
+      : "";
     const clientInline = !isAdmin
       ? Markup.inlineKeyboard([
           [Markup.button.url("📖 ОТКРЫТЬ ИНСТРУКЦИЮ", guideUrl)],
@@ -787,12 +815,14 @@ export function registerStart(bot: Telegraf): void {
             ? [[Markup.button.callback(`✅ Найти геймпассы у ${savedNick}`, CB.findGpSaved)],
                [Markup.button.callback("🔎 Другой ник", CB.findGpStart)]]
             : [[Markup.button.callback("🔎 Ввести ник Roblox", CB.findGpStart)]]),
+          ...(multiOrder ? [[Markup.button.callback("📦 Мои заказы", CB.ordersList)]] : []),
         ])
       : {};
     await ctx.reply(
       `${greetLine}\n` +
       `✅ Код <b>${code}</b> активирован · номинал <b>${wbCode.denomination} R$</b> → геймпасс <b>${passPrice} R$</b>${nickLine}\n\n` +
-      `📖 Открой <b>инструкцию</b> по кнопке ниже — она проведёт тебя по шагам. Заказ оформляется прямо там 👇`,
+      `📖 Открой <b>инструкцию</b> по кнопке ниже — она проведёт тебя по шагам. Заказ оформляется прямо там 👇` +
+      multiOrderLine,
       {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
@@ -1291,6 +1321,71 @@ async function findRelevantOrder(userId: string): Promise<any | null> {
 // (paid is final; rejected has its own "fix link" resubmit flow).
 const CHANGEABLE_ORDER_STATUSES = ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "REJECTED"];
 
+/** Сколько заказов показываем списком. Больше — уже не выбор, а простыня;
+ * остальные всё равно доступны по коду. */
+const ORDER_PICKER_LIMIT = 5;
+
+/** Все живые заказы покупателя, свежие сверху.
+ *
+ * Одна покупка на WB может содержать несколько наших карточек — по карточке на
+ * получателя, — и тогда у человека одновременно два независимых заказа с
+ * разными никами. Пока бот умел показывать только один, второй был невидим. */
+async function findActiveOrders(userId: string): Promise<any[]> {
+  return (db as any).wbOrder.findMany({
+    where: { userId, status: { in: ACTIVE_STATUSES } },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+/** Строка заказа в списке выбора: код, номинал и получатель (если уже известен). */
+function orderPickerLabel(order: any): string {
+  const who = order.robloxUsername ?? order.probableNick;
+  const code = String(order.wbCode).startsWith("DIR-") ? "Прямой" : order.wbCode;
+  return `${code} · ${order.amount} R$${who ? ` · ${who}` : " · ник не указан"}`;
+}
+
+/**
+ * Заказ, с которым покупатель работает прямо сейчас.
+ *
+ * До этого каждая ветка ника и геймпасса брала «самый свежий изменяемый заказ».
+ * У покупателя двух карточек это значило, что геймпасс второго заказа мог
+ * улететь в первый. Порядок теперь такой: закреплённый в сессии код →
+ * единственный кандидат → просьба выбрать.
+ */
+async function resolveWorkingOrder(
+  tgIdNum: number,
+  userId: string,
+): Promise<{ order: any } | { choose: any[] } | null> {
+  const orders = await (db as any).wbOrder.findMany({
+    where: { userId, status: { in: CHANGEABLE_ORDER_STATUSES } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (orders.length === 0) return null;
+  const pinned = pendingRobloxNick.get(tgIdNum)?.wbCode ?? pendingLink.get(tgIdNum)?.wbCode;
+  const pinnedOrder = pinned ? orders.find((o: any) => o.wbCode === pinned) : undefined;
+  if (pinnedOrder) return { order: pinnedOrder };
+  if (orders.length === 1) return { order: orders[0] };
+  return { choose: orders };
+}
+
+/** Экран «какой из заказов?». Один и тот же для /start, «Мой заказ» и ветки ника. */
+function buildOrderPicker(orders: any[]): StatusMessage {
+  const shown = orders.slice(0, ORDER_PICKER_LIMIT);
+  const rest = orders.length - shown.length;
+  const lines = shown.map((o, i) => `${i + 1}. <b>${orderPickerLabel(o)}</b>`).join("\n");
+  return {
+    text:
+      `📦 Активных заказов: <b>${orders.length}</b> — они независимы: у каждого свой код, ` +
+      `свой ник Roblox и свой геймпасс.\n\n${lines}\n\n` +
+      (rest > 0 ? `…и ещё ${rest}. ` : "") +
+      `Выбери, с каким работаем 👇`,
+    keyboard: Markup.inlineKeyboard([
+      ...shown.map((o) => [Markup.button.callback(orderPickerLabel(o), CB.orderPick(o.wbCode))]),
+      [Markup.button.callback("👤 В моё меню", CB.buyerMenu)],
+    ]),
+  };
+}
+
 // Ф7 (2026-07-12): нейтральная нота вместо прежнего алармистского баннера
 // «Roblox ввёл ограничения… 1–3 дня». Зеркало — bots/vk/handlers.ts.
 const BUYOUT_ETA_NOTE = `\n\n⏱ <i>Выкупаем в течение суток — обычно быстрее. Иногда чуть дольше — уведомим сразу, как выкупим.</i>`;
@@ -1313,7 +1408,7 @@ function pendingStage(createdAt: Date | string): { label: string; note: string }
 }
 
 /** Builds /status text + keyboard. Shows support button when PENDING > 60 min. */
-async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
+async function buildStatusMessage(tgId: string, focusCode?: string): Promise<StatusMessage> {
   const refreshRow = [Markup.button.callback("🔄 Обновить", CB.refreshStatus)];
   // Back to the buyer's home hub — always offered so the user never dead-ends.
   const menuRow = [Markup.button.callback("👤 В моё меню", CB.buyerMenu)];
@@ -1333,7 +1428,19 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     };
   }
 
-  const order = await findRelevantOrder(user.id);
+  // Несколько живых заказов у одного человека — норма (две карточки WB на два
+  // аккаунта Roblox). Без явного выбора карточка показывала только самый свежий,
+  // и второй заказ для покупателя просто не существовал.
+  const activeOrders = await findActiveOrders(user.id);
+  const focused = focusCode ? activeOrders.find((o: any) => o.wbCode === focusCode) : undefined;
+  // Протухший focusCode (заказ уже выкуплен) не должен молча подсунуть соседний.
+  if (activeOrders.length > 1 && !focused) return buildOrderPicker(activeOrders);
+  const siblingCount = activeOrders.length > 1 ? activeOrders.length : 0;
+  const otherOrdersRow = siblingCount
+    ? [[Markup.button.callback(`📦 Другие заказы (${siblingCount - 1})`, CB.ordersList)]]
+    : [];
+
+  const order = focused ?? (activeOrders.length === 1 ? activeOrders[0] : await findRelevantOrder(user.id));
 
   if (!order) {
     return {
@@ -1494,6 +1601,13 @@ async function buildStatusMessage(tgId: string): Promise<StatusMessage> {
     keyboard = Markup.inlineKeyboard(canChangeNick
       ? [refreshRow, changeNickRow, [faqBtn()], menuRow]
       : [refreshRow, [faqBtn()], menuRow]);
+  }
+
+  // Переключатель между заказами живёт над «В моё меню» и добавляется здесь
+  // одним местом: ветвей клавиатуры шесть, и в каждой он бы разъехался.
+  if (otherOrdersRow.length) {
+    const rows = keyboard.reply_markup.inline_keyboard;
+    rows.splice(Math.max(0, rows.length - 1), 0, ...otherOrdersRow);
   }
 
   return { text, keyboard };
@@ -3787,11 +3901,8 @@ export function registerCallbacks(bot: Telegraf): void {
         await ctx.answerCbQuery("Сессия истекла — напиши /start").catch(() => {});
         return;
       }
-      const order = await (db as any).wbOrder.findFirst({
-        where: { userId: user.id, status: { in: CHANGEABLE_ORDER_STATUSES } },
-        orderBy: { createdAt: "desc" },
-      });
-      if (!order) {
+      const working = await resolveWorkingOrder(tgIdNum, user.id);
+      if (!working) {
         await ctx.answerCbQuery("Активного заказа нет").catch(() => {});
         await ctx.reply(
           "У тебя сейчас нет активного заказа. Введи код WB чтобы начать.",
@@ -3799,6 +3910,13 @@ export function registerCallbacks(bot: Telegraf): void {
         );
         return;
       }
+      if ("choose" in working) {
+        await ctx.answerCbQuery("Сначала выбери заказ").catch(() => {});
+        const picker = buildOrderPicker(working.choose);
+        await ctx.reply(picker.text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...picker.keyboard });
+        return;
+      }
+      const order = working.order;
       const state: LinkState = { wbCode: order.wbCode, denomination: order.amount };
 
       if (data === CB.findGpRetry) {
@@ -3835,15 +3953,18 @@ export function registerCallbacks(bot: Telegraf): void {
         await ctx.answerCbQuery("Ник не найден — введи вручную").catch(() => {});
         return;
       }
-      const order = await (db as any).wbOrder.findFirst({
-        where: { userId: user.id, status: { in: CHANGEABLE_ORDER_STATUSES } },
-        orderBy: { createdAt: "desc" },
-      });
-      if (!order) {
+      const working = await resolveWorkingOrder(tgIdNum, user.id);
+      if (!working) {
         await ctx.answerCbQuery("Активного заказа нет").catch(() => {});
         return;
       }
-      const state: LinkState = { wbCode: order.wbCode, denomination: order.amount };
+      if ("choose" in working) {
+        await ctx.answerCbQuery("Сначала выбери заказ").catch(() => {});
+        const picker = buildOrderPicker(working.choose);
+        await ctx.reply(picker.text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...picker.keyboard });
+        return;
+      }
+      const state: LinkState = { wbCode: working.order.wbCode, denomination: working.order.amount };
       pendingLink.set(tgIdNum, state);
       pendingRobloxNick.set(tgIdNum, state);
       await ctx.answerCbQuery("Ищу…").catch(() => {});
@@ -3870,15 +3991,20 @@ export function registerCallbacks(bot: Telegraf): void {
       // Re-derive state from the active order — pendingRobloxNick may have expired
       // if the user took >n minutes to pick. Includes PENDING/IN_PROGRESS so a
       // "change nick" re-pick on an already-placed order also resolves here.
-      const order = await (db as any).wbOrder.findFirst({
-        where: { userId: user.id, status: { in: CHANGEABLE_ORDER_STATUSES } },
-        orderBy: { createdAt: "desc" },
-      });
-      if (!order) {
+      const working = await resolveWorkingOrder(tgIdNum, user.id);
+      if (!working) {
         await ctx.answerCbQuery("Активного заказа нет").catch(() => {});
         return;
       }
-      const state: LinkState = { wbCode: order.wbCode, denomination: order.amount };
+      if ("choose" in working) {
+        // Сессия отвалилась, а заказов несколько — угадывать нельзя: выкуп
+        // ушёл бы не в тот заказ. Просим выбрать явно.
+        await ctx.answerCbQuery("Сначала выбери заказ").catch(() => {});
+        const picker = buildOrderPicker(working.choose);
+        await ctx.reply(picker.text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...picker.keyboard });
+        return;
+      }
+      const state: LinkState = { wbCode: working.order.wbCode, denomination: working.order.amount };
       pendingLink.set(tgIdNum, state);
       pendingRobloxNick.delete(tgIdNum);
       await ctx.answerCbQuery("Проверяю…").catch(() => {});
@@ -5565,9 +5691,55 @@ export function registerCallbacks(bot: Telegraf): void {
       return;
     }
 
+    // ── 📦 ord:<code> — покупатель выбрал, с каким из своих заказов работает ──
+    // Выбор закрепляется в сессии, и дальше ник и геймпасс уходят именно в него:
+    // до этого каждая ветка брала «самый свежий заказ», и геймпасс второго
+    // заказа мог уйти в первый.
+    if (data.startsWith("ord:")) {
+      const pickedCode = data.slice("ord:".length);
+      const pickUser = await (db as any).user.findUnique({ where: { tgId: adminId }, select: { id: true } });
+      const pickedOrder = pickUser
+        ? await (db as any).wbOrder.findFirst({
+            where: { userId: pickUser.id, wbCode: pickedCode, status: { in: ACTIVE_STATUSES } },
+          })
+        : null;
+      if (!pickedOrder) {
+        await ctx.answerCbQuery("Заказ уже не активен — обнови список").catch(() => {});
+        return;
+      }
+      pendingLink.set(ctx.from.id, { wbCode: pickedOrder.wbCode, denomination: pickedOrder.amount });
+      pendingRobloxNick.delete(ctx.from.id);
+      await ctx.answerCbQuery(`Заказ ${pickedCode}`).catch(() => {});
+      const { text, keyboard } = await buildStatusMessage(adminId, pickedCode);
+      await ctx.reply(text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...keyboard });
+      return;
+    }
+
+    // ── 📦 orders_list — вернуться к списку своих заказов ────────────────
+    if (data === CB.ordersList) {
+      const listUser = await (db as any).user.findUnique({ where: { tgId: adminId }, select: { id: true } });
+      const orders = listUser ? await findActiveOrders(listUser.id) : [];
+      await ctx.answerCbQuery().catch(() => {});
+      if (orders.length === 0) {
+        await ctx.reply("Активных заказов нет. Есть код с карточки WB? Напиши его сюда.");
+        return;
+      }
+      if (orders.length === 1) {
+        const { text, keyboard } = await buildStatusMessage(adminId, orders[0].wbCode);
+        await ctx.reply(text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...keyboard });
+        return;
+      }
+      pendingLink.delete(ctx.from.id);
+      const picker = buildOrderPicker(orders);
+      await ctx.reply(picker.text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...picker.keyboard });
+      return;
+    }
+
     // ── 🔄 refresh_status: user refresh ──────────────────────────────────
     if (data === CB.refreshStatus) {
-      const { text, keyboard } = await buildStatusMessage(adminId);
+      // Обновление не должно перебрасывать на другой заказ: если покупатель
+      // выбрал один из нескольких, обновляем именно его.
+      const { text, keyboard } = await buildStatusMessage(adminId, pendingLink.get(ctx.from.id)?.wbCode);
       try {
         await ctx.editMessageText(text, {
           parse_mode: "HTML",

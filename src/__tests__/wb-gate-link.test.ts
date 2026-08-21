@@ -6,6 +6,7 @@ import {
   wbGateReminderMessage,
   wbGateUrl,
   wbGuideFallbackUrl,
+  wbSiblingPosition,
 } from "../../bots/shared/wb-gate-link";
 import { redactWbChatText } from "../../bots/shared/wb-delivery-crypto";
 
@@ -74,6 +75,57 @@ describe("WB gate link handed to the buyer", () => {
     expect(retry).not.toMatch(/подтверждён/i);
     expect(retry).not.toContain("robloxbank.ru");
     expect(retry).not.toMatch(/telegram|телеграм|вконтакте|\bvk\b/i);
+  });
+
+  /** 21.08: покупательница взяла две карточки двум детям, оформила первую и
+   * написала «во втором чате висит ник первого ребёнка». Сообщения в обоих
+   * чатах были байт-в-байт одинаковыми, и ничто не говорило, что заказа два и
+   * ник у каждого свой. */
+  it("tells a buyer of several cards that the orders are independent", () => {
+    const message = wbGateMessage("QUN5YFZ", 500, undefined, { index: 2, total: 2 });
+    expect(message).toContain("заказ 2 из 2");
+    expect(message).toMatch(/независим/i);
+    expect(message).toMatch(/свой ник Roblox/);
+    // Подсказка не отменяет остального: ссылка и ручной фолбэк на месте.
+    expect(message).toContain("https://robloxbank.ru/guide?source=wb&skip=1&code=QUN5YFZ");
+    expect(message).toContain("введите код: QUN5YFZ");
+    // И по-прежнему не уводит с площадки.
+    expect(message).not.toMatch(/telegram|телеграм|вконтакте|\bvk\b/i);
+  });
+
+  it("says nothing about siblings when the buyer has a single order", () => {
+    for (const sibling of [undefined, null, { index: 1, total: 1 }]) {
+      expect(wbGateMessage("QUN5YFZ", 500, undefined, sibling)).not.toMatch(/из \d+ в вашей покупке/);
+    }
+    expect(wbGateReminderMessage("QUN5YFZ", 500, 1)).not.toMatch(/из \d+ в вашей покупке/);
+  });
+
+  /** Напоминание про неоткрытую ссылку адресовано ровно тому покупателю,
+   * который завис на второй карточке, — подсказка нужна и там. */
+  it("repeats the multi-order hint in the reminder", () => {
+    expect(wbGateReminderMessage("QUN5YFZ", 500, 1, undefined, { index: 1, total: 2 }))
+      .toContain("заказ 1 из 2");
+  });
+
+  describe("позиция заказа внутри одной покупки", () => {
+    /** `orderUid` общий у всей корзины WB, `wbOrderId` идут подряд. */
+    it("numbers siblings in the order the buyer sees them", () => {
+      const siblings = [{ wbOrderId: "5547803029" }, { wbOrderId: "5547803025" }];
+      expect(wbSiblingPosition("5547803025", siblings)).toEqual({ index: 1, total: 2 });
+      expect(wbSiblingPosition("5547803029", siblings)).toEqual({ index: 2, total: 2 });
+    });
+
+    /** ID заказа WB — строка (int64 не переживает JSON), поэтому лексикографика
+     * без учёта длины поставила бы «9» после «10». */
+    it("sorts numerically despite the ids being strings", () => {
+      const siblings = [{ wbOrderId: "10" }, { wbOrderId: "9" }];
+      expect(wbSiblingPosition("9", siblings)).toEqual({ index: 1, total: 2 });
+    });
+
+    it("stays silent for a lone order or an unknown id", () => {
+      expect(wbSiblingPosition("1", [{ wbOrderId: "1" }])).toBeNull();
+      expect(wbSiblingPosition("3", [{ wbOrderId: "1" }, { wbOrderId: "2" }])).toBeNull();
+    });
   });
 
   /** Our seven-character activation code must not survive in the stored

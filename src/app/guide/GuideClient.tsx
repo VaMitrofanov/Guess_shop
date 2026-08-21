@@ -2049,6 +2049,17 @@ const WBG_CSS = `
 @media(prefers-reduced-motion:reduce){.wbg-code-focus::before,.wbg-code-focus::after,.wbg-code-callout{animation:none}}
 `;
 
+/** Одно место, где «текущий код» записывается на клиенте.
+ *
+ * Их два — localStorage-сессия (восстановление страницы) и cookie `wb_code`
+ * (её читает VKAuthButton, чтобы понять, к какому заказу привязывать вход). У
+ * покупателя нескольких карточек они обязаны переезжать вместе: разъехавшись,
+ * они открывают один заказ и привязывают другой. */
+function persistWbCodeSession(denomination: number, code: string): void {
+  saveWBSession(denomination, code);
+  document.cookie = `wb_code=${code}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax; Secure`;
+}
+
 /** Экран кода и мессенджера.
  *
  * Это же и есть экран контакта: единственные пути дальше — Telegram и
@@ -2089,9 +2100,7 @@ function WBGate({ initialCode = "", initialDenomination = 0 }: { initialCode?: s
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data?.error ?? "Ошибка отправки");
     const denomination: number = data.denomination ?? 0;
-    saveWBSession(denomination, code);
-    // Cookie is needed by VKAuthButton (order mode) for ref code resolution.
-    document.cookie = `wb_code=${code}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax; Secure`;
+    persistWbCodeSession(denomination, code);
     return denomination;
   };
 
@@ -2853,7 +2862,15 @@ export default function GuideClient({
       const saved = loadWBSession();
       // wbCodeFromUrl is passed by the bot link (?code=...) — works even in Telegram WebView
       // where localStorage is isolated from the regular browser session.
-      const codeToCheck = saved?.code || wbCodeFromUrl;
+      //
+      // Ссылка адресует КОНКРЕТНЫЙ заказ, сохранённая сессия — тот, что открывали
+      // прошлый раз (живёт 7 дней). Пока приоритет был у сессии, покупатель двух
+      // карточек не мог открыть вторую: ссылка из второго чата WB показывала
+      // первый заказ вместе с ником из первого заказа (кейс 21.08, заказы
+      // 5547803025/5547803029). Код из ссылки всегда главнее, а разошедшаяся
+      // сессия стирается, чтобы не всплыть на следующем заходе без `?code`.
+      const codeToCheck = wbCodeFromUrl || saved?.code;
+      if (wbCodeFromUrl && saved?.code && saved.code !== wbCodeFromUrl) clearWBSession();
       if (!codeToCheck) {
         setIsRestoring(false);
         return;
@@ -2862,9 +2879,18 @@ export default function GuideClient({
         const statusRes = await fetch(`/api/wb-code?code=${encodeURIComponent(codeToCheck)}`);
         const statusData = await statusRes.json().catch(() => ({}));
         if (statusRes.ok && statusData.claimed) {
-          setDenomination(statusData.denomination ?? saved?.denomination ?? 0);
+          // Фолбэк на номинал из сессии — только если открываем именно её заказ:
+          // у второй карточки номинал может быть другим, и подставить чужой
+          // значит показать неверную цену геймпасса.
+          const savedDenom = saved?.code === codeToCheck ? saved?.denomination : undefined;
+          const denom = statusData.denomination ?? savedDenom ?? 0;
+          setDenomination(denom);
           setActiveCode(codeToCheck);
           setPhase("instruction");
+          // Сессия и cookie переезжают на открытый сейчас заказ: следующий заход
+          // без `?code` (или кнопка ВКонтакте, которая читает cookie `wb_code`)
+          // должен продолжать его, а не предыдущий.
+          if (denom > 0) persistWbCodeSession(denom, codeToCheck);
         } else if (statusRes.ok && !statusData.claimed && wbCodeFromUrl && statusData.denomination) {
           // Код есть, но за ним ещё нет ни Telegram, ни ВКонтакте.
           //

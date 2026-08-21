@@ -1,7 +1,14 @@
 import crypto from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { generateWbActivationCode } from "./wb-activation-code";
-import { wbCodeRequestMessage, wbCodeRetryMessage, wbGateMessage, wbGateReminderMessage } from "./wb-gate-link";
+import {
+  wbCodeRequestMessage,
+  wbCodeRetryMessage,
+  wbGateMessage,
+  wbGateReminderMessage,
+  wbSiblingPosition,
+  type WbOrderSibling,
+} from "./wb-gate-link";
 import {
   assertBulkOrderSucceeded,
   confirmDbsOrder,
@@ -904,6 +911,28 @@ async function alertStuckDeliveries(db: Db) {
   }
 }
 
+/** Сколько наших карточек в одной покупке и какая из них эта.
+ *
+ * `orderUid` общий у всех заказов одной корзины WB (`rid` = `<uid>.0.<n>`), так
+ * что группировка не гадает по имени, времени и сумме. Без `orderUid` (старые
+ * или неполные записи) считаем заказ одиночным — молчание лучше, чем «заказ 1
+ * из 1». */
+async function loadOrderSibling(
+  db: Db,
+  order: { wbOrderId: string; orderUid: string | null },
+): Promise<WbOrderSibling | null> {
+  if (!order.orderUid) return null;
+  try {
+    const siblings = await db.wbMarketplaceOrder.findMany({
+      where: { orderUid: order.orderUid },
+      select: { wbOrderId: true },
+    });
+    return wbSiblingPosition(order.wbOrderId, siblings);
+  } catch {
+    return null; // подсказка необязательна — она не должна ронять выдачу кода
+  }
+}
+
 async function tryAutoGate(
   db: Db,
   orderId: string,
@@ -959,7 +988,10 @@ async function tryAutoGate(
   try {
     const replySign = decryptWbSecret(chat.replySignEncrypted, "reply-sign");
     if (!order.isTest) {
-      await sendBuyerChatMessage(replySign, wbGateMessage(activationCode, order.denominationSnapshot, GUIDE_ORIGIN));
+      await sendBuyerChatMessage(
+        replySign,
+        wbGateMessage(activationCode, order.denominationSnapshot, GUIDE_ORIGIN, await loadOrderSibling(db, order)),
+      );
     }
     await db.wbMarketplaceOrder.update({
       where: { id: orderId },
@@ -1561,6 +1593,7 @@ async function remindUnopenedGates(db: Db, out: WbDeliverySyncResult) {
     select: {
       id: true,
       wbOrderId: true,
+      orderUid: true,
       gateSentAt: true,
       gateReminderLevel: true,
       denominationSnapshot: true,
@@ -1600,7 +1633,13 @@ async function remindUnopenedGates(db: Db, out: WbDeliverySyncResult) {
     try {
       await sendBuyerChatMessage(
         decryptWbSecret(chat.replySignEncrypted, "reply-sign"),
-        wbGateReminderMessage(activationCode, order.denominationSnapshot, due.level, GUIDE_ORIGIN),
+        wbGateReminderMessage(
+          activationCode,
+          order.denominationSnapshot,
+          due.level,
+          GUIDE_ORIGIN,
+          await loadOrderSibling(db, order),
+        ),
       );
       await audit(db, order.id, "GATE_REMINDER_SENT", `gate-reminder:${order.id}:${due.level}`, {
         level: due.level,

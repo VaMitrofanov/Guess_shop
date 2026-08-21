@@ -440,9 +440,21 @@ export default function WBInstructionV2({
                 <div className="wbi-picked" style={{ marginTop: 12 }}>
                   <div className="wbi-picked-h">🎮 Робуксы придут на ник:</div>
                   <div className="wbi-picked-b" style={{ fontSize: "1.3em" }}><b>{robloxUsername}</b></div>
+                  {mode === "WB" && code && (
+                    <div className="wbi-shint" style={{ marginTop: 8 }}>🔑 Заказ по коду <b>{code}</b></div>
+                  )}
                   <div className="wbi-shint" style={{ marginTop: 8 }}>
                     Статус и уведомления — в боте. Не меняй цену и не удаляй геймпасс до сообщения «всё готово».
                   </div>
+                  {/* Покупателю нескольких карточек надо сказать вслух, что этот
+                      экран — про ОДИН заказ. Иначе «уже оформлено на такой-то
+                      ник» читается как «остальные оформить нельзя» (кейс 21.08). */}
+                  {mode === "WB" && (
+                    <div className="wbi-shint" style={{ marginTop: 8 }}>
+                      📦 Купили несколько карточек? Заказы независимы: у каждого <b>свой код и свой ник</b>.
+                      Откройте ссылку из <b>того чата Wildberries</b>, где пришёл нужный код, и укажите ник там.
+                    </div>
+                  )}
                   <button className="wbi-relink" style={{ color: "#e74c3c", borderColor: "#e74c3c", marginTop: 12 }} onClick={() => { setIsReEntry(false); setOrderPlaced(false); setPicked(null); setRobloxUsername(null); }}>
                     ⚠️ Ошибся с ником? Изменить заказ
                   </button>
