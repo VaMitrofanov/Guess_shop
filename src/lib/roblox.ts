@@ -114,6 +114,33 @@ export async function getRobloxPublicProfileById(userId: string): Promise<Roblox
 
 export async function getGamepassDetails(gamepassId: string) {
   try {
+    // Attempt 0: product-info — ЕДИНСТВЕННЫЙ живой источник по одному пассу.
+    //
+    // Проверено с прод-хоста 24.08.2026 на живом геймпассе: `game-passes/v1/
+    // game-passes/<id>` → 404, `economy…/details` → 404, `catalog/items/details`
+    // → 403 «XSRF token invalid», `api.roblox.com/marketplace` мёртв давно.
+    // Из-за этого поиск по НИКУ работал (он ходит в другой эндпоинт —
+    // `universes/<id>/game-passes`), а поиск по ССЫЛКЕ/ID молча отдавал пусто,
+    // и серверная ре-валидация в select-gamepass всё время шла по ветке
+    // «Roblox недоступен». Этот эндпоинт отдаёт всё нужное разом, включая имя
+    // владельца — второй запрос за ником больше не нужен. Тот же эндпоинт
+    // использует бот (`getGamepassProductInfo`).
+    const res0 = await rFetch(`https://apis.roblox.com/game-passes/v1/game-passes/${gamepassId}/product-info`);
+    if (res0.ok) {
+      const d = await res0.json();
+      if (d?.TargetId) {
+        return {
+          id:          String(d.TargetId),
+          name:        d.Name ?? "Gamepass",
+          // У снятого с продажи пасса PriceInRobux = null.
+          price:       d.PriceInRobux ?? 0,
+          creatorId:   d.Creator?.Id ?? d.Creator?.CreatorTargetId ?? 0,
+          creatorName: typeof d.Creator?.Name === "string" ? d.Creator.Name : undefined,
+          isActive:    d.IsForSale !== false,
+        };
+      }
+    }
+
     // Attempt 1: modern game-passes API
     const res1 = await rFetch(`https://apis.roblox.com/game-passes/v1/game-passes/${gamepassId}`);
     if (res1.ok) {
@@ -123,6 +150,7 @@ export async function getGamepassDetails(gamepassId: string) {
         name:      d.name ?? d.displayName ?? "Gamepass",
         price:     d.price ?? 0,
         creatorId: d.sellerId ?? d.creatorId ?? 0,
+        creatorName: undefined as string | undefined,
         isActive:  d.isForSale !== false,
       };
     }
@@ -136,6 +164,7 @@ export async function getGamepassDetails(gamepassId: string) {
         name:      d.Name ?? "Gamepass",
         price:     d.PriceInRobux ?? 0,
         creatorId: d.Creator?.Id ?? 0,
+        creatorName: typeof d.Creator?.Name === "string" ? d.Creator.Name : undefined,
         isActive:  d.IsForSale ?? false,
       };
     }
@@ -155,6 +184,7 @@ export async function getGamepassDetails(gamepassId: string) {
           name:      item.name ?? "Gamepass",
           price:     item.lowestPrice ?? item.price ?? 0,
           creatorId: item.creatorTargetId ?? 0,
+          creatorName: typeof item.creatorName === "string" ? item.creatorName : undefined,
           isActive:  item.itemStatus !== "Offsale",
         };
       }
@@ -172,12 +202,13 @@ export async function getGamepassDetails(gamepassId: string) {
           name:      d.Name ?? "Gamepass",
           price:     d.PriceInRobux ?? 0,
           creatorId: d.Creator?.Id ?? 0,
+          creatorName: typeof d.Creator?.Name === "string" ? d.Creator.Name : undefined,
           isActive:  d.IsForSale ?? false,
         };
       }
     }
 
-    console.warn(`[Roblox] getGamepassDetails: all 4 APIs failed for id=${gamepassId}`);
+    console.warn(`[Roblox] getGamepassDetails: all 5 APIs failed for id=${gamepassId}`);
     return null;
   } catch (error) {
     console.error("[Roblox] getGamepassDetails:", error);
@@ -190,15 +221,17 @@ export async function getGamepassById(gamepassId: string) {
     const details = await getGamepassDetails(gamepassId);
     if (!details) return null;
 
+    // product-info уже принёс имя владельца — добираем его отдельным запросом
+    // только когда пасс пришёл из фолбэк-ветки без `creatorName`.
     const [thumbRes, creator] = await Promise.all([
       rFetch(`https://thumbnails.roblox.com/v1/game-passes?gamePassIds=${gamepassId}&size=150x150&format=Png&isCircular=false`),
-      getRobloxUserById(String(details.creatorId)),
+      details.creatorName ? Promise.resolve(null) : getRobloxUserById(String(details.creatorId)),
     ]);
 
     const thumbData  = thumbRes.ok ? await thumbRes.json() : { data: [] };
     const imageUrl   = thumbData.data?.[0]?.imageUrl
       ?? `https://www.roblox.com/asset-thumbnail/image?assetId=${gamepassId}&width=150&height=150&format=png`;
-    const creatorName = creator?.name ?? creator?.requestedName ?? String(details.creatorId);
+    const creatorName = details.creatorName ?? creator?.name ?? creator?.requestedName ?? String(details.creatorId);
 
     return {
       id:          gamepassId,

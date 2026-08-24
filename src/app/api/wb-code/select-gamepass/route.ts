@@ -102,9 +102,13 @@ export async function POST(request: Request) {
     // может не быть вовсе — тогда это единственный источник. Если и Roblox молчит
     // (details === null), остаётся напечатанный ник; без обоих оформлять нечего.
     let nick = rawNick;
-    if (details?.creatorId) {
-      const creator = await getRobloxUserById(String(details.creatorId));
-      const creatorName = (creator?.name ?? "").trim();
+    if (details) {
+      // product-info отдаёт имя владельца вместе с пассом; отдельный запрос
+      // нужен только фолбэк-веткам getGamepassDetails, где имени нет.
+      let creatorName = (details.creatorName ?? "").trim();
+      if (!creatorName && details.creatorId) {
+        creatorName = ((await getRobloxUserById(String(details.creatorId)))?.name ?? "").trim();
+      }
       if (NICK_RE.test(creatorName)) nick = creatorName;
     }
     if (!NICK_RE.test(nick)) {
