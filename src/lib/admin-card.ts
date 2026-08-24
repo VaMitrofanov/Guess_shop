@@ -12,7 +12,9 @@ import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
  *
  * Used when an order is materialised straight from the website nick-search
  * (one-tap) — the card carries a 🌐 marker so the manager knows the customer
- * picked their gamepass on the site, not in the bot.
+ * picked their gamepass on the site, not in the bot. Когда поиск по нику не
+ * нашёл геймпасс и покупатель вставил ссылку руками, маркер меняется на 🔗:
+ * такой заказ стоит глянуть глазами — плейс у него, скорее всего, скрытый.
  */
 
 function escapeHtml(s: string): string {
@@ -29,6 +31,8 @@ export interface WebOrderCard {
   creatorName?: string;
   previousOrderCount?: number;
   createdAt: Date | string;
+  /** Покупатель вставил ссылку/ID геймпасса руками — поиск по нику его не нашёл. */
+  manualLink?: boolean;
 }
 
 export function buildWebOrderCardText(order: WebOrderCard, now: Date | number = Date.now()): string {
@@ -53,7 +57,9 @@ export function buildWebOrderCardText(order: WebOrderCard, now: Date | number = 
   return (
     `📦 <b>ЗАКАЗ <code>${order.wbCode}</code></b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
-    `🌐 <b>ONE-TAP С САЙТА</b>\n` +
+    (order.manualLink
+      ? `🔗 <b>ССЫЛКА ВРУЧНУЮ С САЙТА</b> — поиск по нику не нашёл геймпасс\n`
+      : `🌐 <b>ONE-TAP С САЙТА</b>\n`) +
     loyaltyLine +
     `${platformEmoji} Источник: <b>${order.platform} (сайт)</b>\n` +
     `📅 Время: <b>${dateStr}</b>\n` +

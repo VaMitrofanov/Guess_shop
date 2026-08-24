@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getGamepassDetails } from "@/lib/roblox";
+import { getGamepassDetails, getRobloxUserById } from "@/lib/roblox";
 import { sendWebOrderCard } from "@/lib/admin-card";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 
@@ -44,7 +44,10 @@ export async function POST(request: Request) {
     const body = await request.json();
     const rawCode: string = (body?.code ?? "").toString().trim().toUpperCase();
     const gamepassId: string = (body?.gamepassId ?? "").toString().trim();
-    const nick: string = (body?.nick ?? "").toString().trim().replace(/^@/, "");
+    const rawNick: string = (body?.nick ?? "").toString().trim().replace(/^@/, "");
+    // Ручной ввод ссылки: покупатель попал сюда, потому что поиск по нику ничего
+    // не нашёл — ник он мог не вводить вовсе. Метка нужна и карточке админа.
+    const manualLink: boolean = body?.manualLink === true;
 
     if (!/^[A-Z0-9]{7}$/.test(rawCode)) {
       return NextResponse.json({ error: "Некорректный код" }, { status: 400 });
@@ -52,7 +55,7 @@ export async function POST(request: Request) {
     if (!/^\d{1,20}$/.test(gamepassId)) {
       return NextResponse.json({ error: "Некорректный gamepassId" }, { status: 400 });
     }
-    if (!NICK_RE.test(nick)) {
+    if (rawNick && !NICK_RE.test(rawNick)) {
       return NextResponse.json({ error: "Некорректный ник Roblox" }, { status: 400 });
     }
 
@@ -91,6 +94,24 @@ export async function POST(request: Request) {
           { status: 422 },
         );
       }
+    }
+
+    // ── 2b. Ник получателя ────────────────────────────────────────────────────
+    // Робуксы уходят создателю геймпасса, поэтому владелец пасса по данным
+    // Roblox точнее того, что напечатал покупатель. При ручном вводе ссылки ника
+    // может не быть вовсе — тогда это единственный источник. Если и Roblox молчит
+    // (details === null), остаётся напечатанный ник; без обоих оформлять нечего.
+    let nick = rawNick;
+    if (details?.creatorId) {
+      const creator = await getRobloxUserById(String(details.creatorId));
+      const creatorName = (creator?.name ?? "").trim();
+      if (NICK_RE.test(creatorName)) nick = creatorName;
+    }
+    if (!NICK_RE.test(nick)) {
+      return NextResponse.json(
+        { error: "Не удалось определить ник владельца геймпасса", code: "NO_NICK" },
+        { status: 422 },
+      );
     }
 
     const gamepassUrl = `https://www.roblox.com/game-pass/${gamepassId}`;
@@ -181,6 +202,7 @@ export async function POST(request: Request) {
         creatorName: nick,
         previousOrderCount,
         createdAt: order.createdAt,
+        manualLink,
       });
     } catch (cardErr) {
       console.error("[wb-code/select-gamepass] admin card failed:", cardErr);

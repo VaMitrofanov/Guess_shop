@@ -207,6 +207,10 @@ export async function getGamepassById(gamepassId: string) {
       creatorId:   details.creatorId,
       image:       imageUrl,
       creatorName,
+      // Ручной ввод ссылки должен уметь сказать «пасс снят с продажи» вместо
+      // молчаливого «не подходит»: `isActive` — единственный признак продажи,
+      // который отдают все четыре источника в getGamepassDetails.
+      isForSale:   details.isActive !== false,
     };
   } catch (error) {
     console.error("[Roblox] getGamepassById:", error);

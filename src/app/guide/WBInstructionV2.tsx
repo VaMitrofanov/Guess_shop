@@ -19,6 +19,7 @@ import Footer from "@/components/footer";
 import { getOrInitSessionId } from "@/lib/wb-session";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { gamepassPriceMatches, rankSellableGamepasses } from "@/lib/gamepass-search-view";
+import { parseGamepassRef, parseGamepassUrl } from "@/lib/gamepass-id";
 import { CUSTOM_MAX, CUSTOM_MIN } from "@/lib/retail-pricing";
 
 const RATE = 0.7; // Roblox keeps 30%
@@ -40,6 +41,8 @@ interface Pass {
   sellerName: string;
   isForSale: boolean;
   image: string;
+  /** Приходит только из прямого поиска по ссылке/ID — ник владельца геймпасса. */
+  creatorName?: string;
 }
 
 type SearchView =
@@ -48,6 +51,16 @@ type SearchView =
   | { kind: "no_gamepasses"; nick: string }
   | { kind: "wrong_price"; nick: string; passes: Pass[] }
   | { kind: "matches"; nick: string; passes: Pass[] };
+
+/**
+ * Превью геймпасса. Картинка живёт на CDN Roblox и меняется на каждый пасс, так
+ * что `next/image` здесь не применим — превью рисует обычный `<img>`.
+ * Отдельный компонент, чтобы это исключение было ровно одно на файл.
+ */
+function GpThumb({ src }: { src: string }) {
+  // eslint-disable-next-line @next/next/no-img-element -- remote Roblox CDN thumbnail
+  return <img className="wbi-gpthumb" src={src} alt="" loading="lazy" />;
+}
 
 // ─── Lazy, on-screen-only video ────────────────────────────────────────────────
 function LazyVideo({ src, poster, alt }: { src: string; poster: string; alt?: string }) {
@@ -141,16 +154,77 @@ export default function WBInstructionV2({
   const [searchErr, setSearchErr] = useState<string | null>(null);
   const [view, setView] = useState<SearchView>({ kind: "idle" });
   const [picked, setPicked] = useState<{ id: string; name: string; price: number } | null>(null);
+  // Ник получателя, с которым заказ реально ушёл. При ручном вводе ссылки он
+  // берётся у владельца геймпасса и может отличаться от набранного в поле.
+  const [pickedNick, setPickedNick] = useState<string | null>(null);
+  // Сервер отвечает 422 (цена/снят с продажи) — раньше эти ответы молча
+  // терялись, и карточка навсегда застывала на «⏳ Оформляем твой заказ…».
+  const [pickErr, setPickErr] = useState<string | null>(null);
+
+  // ── Запасной вход: ссылка на геймпасс вместо поиска по нику ───────────────
+  // Поиск живёт на публичных списках Roblox (`accessFilter=Public` + перебор
+  // игр) и регулярно молчит при живом геймпассе: скрытый плейс (треть
+  // застрявших заказов по разбору 22.08), только что созданный пасс, лаг API.
+  // Ссылку на свой геймпасс покупатель при этом видит в браузере.
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualRef, setManualRef] = useState("");
+  const [manualBusy, setManualBusy] = useState(false);
+  const [manualErr, setManualErr] = useState<string | null>(null);
+  const [manualPass, setManualPass] = useState<(Pass & { isPriceMatch: boolean }) | null>(null);
+
+  const runManualLookup = useCallback(async (rawInput?: string) => {
+    const raw = (rawInput ?? manualRef).trim();
+    const id = parseGamepassRef(raw);
+    setManualPass(null);
+    if (!id) {
+      setManualErr("Не похоже на ссылку или номер геймпасса. Скопируй адрес страницы геймпасса целиком — например roblox.com/game-pass/1234567.");
+      return;
+    }
+    setManualErr(null);
+    setManualBusy(true);
+    try {
+      const res = await fetch(`/api/roblox/gamepasses?query=${encodeURIComponent(id)}${code ? `&code=${encodeURIComponent(code)}` : ""}`);
+      const data = await res.json();
+      const gp = (data?.gamepasses ?? [])[0] as Pass | undefined;
+      if (!data?.success || !gp) {
+        setManualErr("Не нашли такой геймпасс на Roblox. Проверь, что ссылка ведёт на сам Game Pass (а не на игру) и что он опубликован.");
+        return;
+      }
+      setManualPass({ ...gp, isPriceMatch: gamepassPriceMatches(gp.price, expectedPrice, isSite ? 0 : undefined) });
+    } catch {
+      setManualErr("Не удалось связаться с Roblox. Попробуй ещё раз через минуту.");
+    } finally {
+      setManualBusy(false);
+    }
+  }, [manualRef, code, expectedPrice, isSite]);
 
   const runSearch = useCallback(async () => {
-    const n = nick.trim().replace(/^@/, "");
+    const raw = nick.trim();
+    // Вставили ссылку в поле ника — это не опечатка, а готовый ответ: у человека
+    // уже есть всё, что нам нужно. Раньше это упиралось в «Ник Roblox: 3–20
+    // символов», хотя рядом лежал прямой путь к заказу.
+    if (parseGamepassUrl(raw)) {
+      setSearchErr(null);
+      setView({ kind: "idle" });
+      setPicked(null);
+      setPickErr(null);
+      setManualOpen(true);
+      setManualRef(raw);
+      // Ссылка переезжает в своё поле целиком: два одинаковых инпута подряд
+      // читаются как сбой, а поле ника должно остаться полем ника.
+      setNick("");
+      await runManualLookup(raw);
+      return;
+    }
+    const n = raw.replace(/^@/, "");
     if (!NICK_RE.test(n)) {
-      setSearchErr("Ник Roblox: 3–20 символов — латинские буквы, цифры или _");
+      setSearchErr("Ник Roblox: 3–20 символов — латинские буквы, цифры или _. Или вставь сюда ссылку на геймпасс.");
       setView({ kind: "idle" });
       return;
     }
     setSearchErr(null);
     setPicked(null);
+    setPickErr(null);
     setView({ kind: "idle" });
     setSearching(true);
     try {
@@ -173,7 +247,7 @@ export default function WBInstructionV2({
     } finally {
       setSearching(false);
     }
-  }, [nick, expectedPrice, isSite, code]);
+  }, [nick, expectedPrice, isSite, code, runManualLookup]);
 
   // Which channel did the user pick earlier (TG/VK)? Drives the single CTA button
   // at the bottom. orderPlaced = the order is already materialised (site one-tap
@@ -216,9 +290,23 @@ export default function WBInstructionV2({
     return () => clearTimeout(t);
   }, [redirecting, returnHref]);
 
-  const pick = useCallback(async (p: Pass, searchedNick: string) => {
+  const pick = useCallback(async (p: Pass, searchedNick: string, opts: { manualLink?: boolean } = {}) => {
+    // Робуксы уходят создателю геймпасса, поэтому при ручном вводе ссылки его
+    // ник (пришёл вместе с пассом) точнее набранного в поле — им и оформляем.
+    const creator = (p.creatorName ?? "").trim();
+    const recipient = NICK_RE.test(creator) ? creator : searchedNick.trim().replace(/^@/, "");
     setPicked({ id: String(p.id), name: p.name, price: p.price });
-    if (isSite) return;
+    setPickedNick(NICK_RE.test(recipient) ? recipient : null);
+    setPickErr(null);
+    if (isSite) {
+      // Оформление на сайте требует ник в ссылке на /checkout — без него
+      // следующий экран не соберётся, честнее сказать об этом здесь.
+      if (!NICK_RE.test(recipient)) {
+        setPickErr("Не удалось определить ник владельца геймпасса. Впиши свой ник Roblox в поле выше и нажми «Найти».");
+        setPicked(null);
+      }
+      return;
+    }
     // Materialise the order on the server (promote provisional → PENDING + fire
     // the admin card). Advisory/idempotent — the bot one-tap stays a fallback.
     // Skipped in test/preview or without a code.
@@ -227,11 +315,31 @@ export default function WBInstructionV2({
         const res = await fetch("/api/wb-code/select-gamepass", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code, gamepassId: String(p.id), nick: searchedNick }),
+          body: JSON.stringify({
+            code,
+            gamepassId: String(p.id),
+            nick: NICK_RE.test(recipient) ? recipient : "",
+            manualLink: opts.manualLink === true,
+          }),
         });
         const data = await res.json().catch(() => ({}));
-        if (res.ok && (data?.ordered || data?.alreadyOrdered)) setOrderPlaced(true);
-      } catch { /* non-blocking: bot nick-search remains as fallback */ }
+        if (res.ok && (data?.ordered || data?.alreadyOrdered)) {
+          setOrderPlaced(true);
+          return;
+        }
+        // Отказ сервера (цена, снят с продажи, ник не определён) больше не
+        // прячется: без этого карточка навсегда зависала на «⏳ Оформляем…».
+        setPickErr(
+          typeof data?.error === "string" && data.error
+            ? data.error
+            : "Не удалось оформить заказ по этому геймпассу. Проверь цену и то, что он выставлен на продажу.",
+        );
+        setPicked(null);
+      } catch {
+        // Сеть отвалилась — заказ можно дооформить в боте, там тот же геймпасс.
+        setPickErr("Не удалось связаться с сервером. Попробуй ещё раз — или пришли ссылку на геймпасс прямо в бот.");
+        setPicked(null);
+      }
     }
   }, [code, isSite, testMode]);
 
@@ -476,12 +584,12 @@ export default function WBInstructionV2({
                 <input
                   className="wbi-sinput"
                   type="text"
-                  placeholder="Ник Roblox — сюда придут робуксы"
+                  placeholder="Ник Roblox или ссылка на геймпасс"
                   value={nick}
                   onChange={(e) => setNick(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }}
                   autoCapitalize="off" autoCorrect="off" spellCheck={false}
-                  aria-label="Ник Roblox — аккаунт получателя робуксов"
+                  aria-label="Ник Roblox — аккаунт получателя робуксов, либо ссылка на геймпасс"
                 />
                 <button className="wbi-sbtn" onClick={runSearch} disabled={searching}>
                   {searching ? "Ищем…" : "🔎 Найти"}
@@ -494,12 +602,15 @@ export default function WBInstructionV2({
               {view.kind === "user_not_found" && (
                 <div className="wbi-warn" style={{ marginTop: 12 }}>
                   🤷 Пользователя <b>{view.nick}</b> нет на Roblox. Скорее всего опечатка — скопируй ник прямо со страницы профиля и попробуй снова.
+                  <br />Либо вставь <b>ссылку на сам геймпасс</b> — этого тоже достаточно 👇
                 </div>
               )}
 
               {view.kind === "no_gamepasses" && (
                 <div className="wbi-warn" style={{ marginTop: 12 }}>
-                  🙈 У <b>{view.nick}</b> не нашли геймпассов на продажу. Скорее всего пасс ещё не создан или не выставлен на продажу — вернись к шагам <b>3–7</b>, затем нажми «Найти» снова.
+                  🙈 У <b>{view.nick}</b> не нашли геймпассов на продажу.
+                  <br /><br />✅ <b>Геймпасс уже создан?</b> Поиск иногда его не видит — например, когда плейс скрыт. Вставь <b>ссылку на геймпасс</b> ниже, и мы оформим заказ по ней 👇
+                  <br /><br />⚠️ Ещё не создан — вернись к шагам <b>3–7</b>, затем нажми «Найти» снова.
                 </div>
               )}
 
@@ -514,7 +625,7 @@ export default function WBInstructionV2({
                       </div>
                     ))}
                   </div>
-                  <div className="wbi-shint">Нужен геймпасс ровно на <b>{expectedPrice} R$</b> — поправь цену (шаг <b>7</b>) и нажми «Найти» снова.</div>
+                  <div className="wbi-shint">Нужен геймпасс ровно на <b>{expectedPrice} R$</b> — поправь цену (шаг <b>7</b>) и нажми «Найти» снова. Нужный геймпасс есть, но его нет в списке? Вставь <b>ссылку</b> на него ниже.</div>
                 </div>
               )}
 
@@ -533,6 +644,89 @@ export default function WBInstructionV2({
                 </div>
               )}
 
+              {/* ── Запасной вход: ссылка на геймпасс ──────────────────────
+                  Раскрыт сам, когда поиск по нику зашёл в тупик; в остальное
+                  время — тихая ссылка под результатами, чтобы не спорить с
+                  основным сценарием. */}
+              {!picked && (() => {
+                const deadEnd = view.kind === "user_not_found" || view.kind === "no_gamepasses" || view.kind === "wrong_price";
+                if (!manualOpen && !deadEnd) {
+                  return (
+                    <button className="wbi-manualtoggle" onClick={() => setManualOpen(true)}>
+                      🔗 Не находит геймпасс? Вставить ссылку вручную
+                    </button>
+                  );
+                }
+                return (
+                  <div className="wbi-manual">
+                    <div className="wbi-manual-h">🔗 Ссылка на геймпасс</div>
+                    <div className="wbi-shint" style={{ marginTop: 0 }}>
+                      Открой геймпасс в браузере (Creator Hub → <b>Creations</b> → игра → <b>Passes</b> → нажми на пасс) и скопируй адрес.
+                      Подойдёт и просто <b>номер</b> геймпасса.
+                    </div>
+                    <div className="wbi-srow" style={{ marginTop: 10 }}>
+                      <input
+                        className="wbi-sinput"
+                        type="text"
+                        placeholder="https://www.roblox.com/game-pass/…"
+                        value={manualRef}
+                        onChange={(e) => setManualRef(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") runManualLookup(); }}
+                        autoCapitalize="off" autoCorrect="off" spellCheck={false}
+                        aria-label="Ссылка на геймпасс или его номер"
+                      />
+                      <button className="wbi-sbtn" onClick={() => runManualLookup()} disabled={manualBusy}>
+                        {manualBusy ? "Проверяем…" : "✓ Проверить"}
+                      </button>
+                    </div>
+
+                    {manualErr && <div className="wbi-warn" style={{ marginTop: 10 }}>{manualErr}</div>}
+
+                    {manualPass && (() => {
+                      // Одна карточка на все три исхода — берётся она или нет,
+                      // решают цена и «выставлен на продажу»; отказ объясняем
+                      // словами, чтобы человек знал, что именно чинить.
+                      const offsale = manualPass.isForSale === false;
+                      const ready = !offsale && manualPass.isPriceMatch;
+                      const thumb = <GpThumb src={manualPass.image} />;
+                      const meta = <div className="wbi-gpmeta"><b>{manualPass.name}</b><span>{manualPass.price} R$</span></div>;
+                      return (
+                        <div style={{ marginTop: 10 }}>
+                          {offsale && (
+                            <div className="wbi-warn">
+                              ⚠️ Геймпасс найден, но он <b>не выставлен на продажу</b>. Включи <b>Item for sale</b> (шаг <b>7</b>) и нажми «Проверить» снова.
+                            </div>
+                          )}
+                          {!offsale && !manualPass.isPriceMatch && (
+                            <div className="wbi-warn">
+                              ⚠️ Цена геймпасса <b>{manualPass.price} R$</b>, а нужна ровно <b>{expectedPrice} R$</b>. Поправь цену (шаг <b>7</b>) и нажми «Проверить» снова.
+                            </div>
+                          )}
+                          {ready && (
+                            <div className="wbi-ok">🎯 Нашли геймпасс по ссылке{manualPass.creatorName ? <> — владелец <b>{manualPass.creatorName}</b></> : null}. Это он?</div>
+                          )}
+                          <div className="wbi-gplist">
+                            {ready ? (
+                              <button className="wbi-gpcard pick" onClick={() => pick(manualPass, manualPass.creatorName ?? nick.trim(), { manualLink: true })}>
+                                {thumb}{meta}
+                                <span className="wbi-pickbadge">Это мой ✓</span>
+                              </button>
+                            ) : (
+                              <div className="wbi-gpcard dim">{thumb}{meta}</div>
+                            )}
+                          </div>
+                          {ready && (
+                            <div className="wbi-shint">💡 Робуксы придут на аккаунт <b>владельца этого геймпасса</b> — проверь, что это твой аккаунт.</div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                );
+              })()}
+
+              {pickErr && <div className="wbi-warn" style={{ marginTop: 12 }}>{pickErr}</div>}
+
               {picked && (
                 <div className="wbi-picked">
                   <div className="wbi-picked-h">{isSite ? "✅ ГЕЙМПАСС ВЫБРАН" : orderPlaced ? "✅ ЗАКАЗ ОФОРМЛЕН" : "⏳ ОФОРМЛЯЕМ ЗАКАЗ…"}</div>
@@ -544,7 +738,7 @@ export default function WBInstructionV2({
                       ? "Готово! Сейчас вернём тебя в бота — там статус заказа и уведомления. Если не открылось автоматически — нажми кнопку ниже 👇"
                       : "Оформляем твой заказ, подожди немного — затем сами вернём тебя в бота 👌"}
                   </div>
-                  <button className="wbi-relink" onClick={() => { setPicked(null); setOrderPlaced(false); }}>Выбрать другой</button>
+                  <button className="wbi-relink" onClick={() => { setPicked(null); setPickedNick(null); setPickErr(null); setManualPass(null); setOrderPlaced(false); }}>Выбрать другой</button>
                 </div>
               )}
             </div>}
@@ -589,7 +783,7 @@ export default function WBInstructionV2({
             {picked ? (
               <a
                 className="wbi-sitepay"
-                href={`/checkout?amount=${nom}&username=${encodeURIComponent(nick.trim().replace(/^@/, ""))}&gamepassId=${encodeURIComponent(picked.id)}`}
+                href={`/checkout?amount=${nom}&username=${encodeURIComponent(pickedNick ?? nick.trim().replace(/^@/, ""))}&gamepassId=${encodeURIComponent(picked.id)}`}
               >
                 Перейти к оформлению →
               </a>
@@ -845,6 +1039,12 @@ const CSS = `
 .wbi-picked-h{font-size:14px;font-weight:850;letter-spacing:1.2px;color:#a3f3d2}
 .wbi-picked-b{font-size:21px;color:#fff;font-weight:800;margin-top:6px}
 .wbi-relink{margin-top:14px;font-size:14.5px;color:var(--gold);background:transparent;border:1px solid rgba(201,168,76,.3);border-radius:8px;padding:8px 14px;cursor:pointer}
+/* Запасной вход «вставить ссылку»: тихая ссылка, пока поиск по нику
+   работает, и раскрытая панель — как только он зашёл в тупик. */
+.wbi-manualtoggle{display:block;width:100%;margin-top:12px;padding:11px 14px;font-size:15px;font-weight:700;text-align:left;color:var(--mut);background:transparent;border:1px dashed var(--line);border-radius:11px;cursor:pointer;transition:color .2s,border-color .2s}
+.wbi-manualtoggle:hover{color:var(--txt);border-color:var(--gold2)}
+.wbi-manual{margin-top:14px;padding:15px;border:1px solid var(--line);border-radius:13px;background:rgba(255,255,255,.02)}
+.wbi-manual-h{font-size:14px;font-weight:850;letter-spacing:.9px;color:var(--gold2);margin-bottom:8px}
 .wbi-relink:hover{border-color:rgba(201,168,76,.7)}
 .wbi-blist{list-style:none;margin:10px 0 4px;padding:0;display:flex;flex-direction:column;gap:10px}
 .wbi-blist li{position:relative;padding:11px 14px;font-size:15.5px;line-height:1.5;color:#c3c9d4;border:1px solid var(--line);background:rgba(255,255,255,.02);border-radius:11px}
@@ -966,6 +1166,10 @@ const CSS = `
 .wbi-v3 .wbi-sinput:focus,.wbi-v3 .wbi-input:focus{border-color:var(--rb-accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--rb-accent) 12%,transparent)}
 .wbi-v3 .wbi-sbtn{background:#7556e8;border-color:#7556e8;color:#fff;box-shadow:3px 3px 0 #45d6aa}
 .wbi-v3 .wbi-gpcard{background:var(--rb-surface);border-color:var(--rb-border)}
+.wbi-v3 .wbi-manual{border-color:var(--rb-border);border-radius:16px;background:var(--rb-surface-2)}
+.wbi-v3 .wbi-manual-h{color:var(--rb-accent)}
+.wbi-v3 .wbi-manualtoggle{border-color:var(--rb-border);border-radius:14px;color:var(--rb-muted)}
+.wbi-v3 .wbi-manualtoggle:hover{color:var(--rb-text);border-color:color-mix(in srgb,var(--rb-accent) 55%,var(--rb-border))}
 .wbi-v3 .wbi-icoTile{border-color:var(--rb-border);background:linear-gradient(145deg,var(--rb-accent-soft),var(--rb-surface));font-size:78px}
 .wbi-v3 .wbi-cta{margin-top:54px;padding:40px;border:0;border-radius:26px;background:#251b3f;box-shadow:8px 8px 0 #7556e8}
 .wbi-v3 .wbi-cta h3{margin:0;font-family:var(--font-display),sans-serif;font-size:clamp(25px,3vw,38px);letter-spacing:-.05em}.wbi-v3 .wbi-cta .wbi-s{color:rgba(255,255,255,.68)}

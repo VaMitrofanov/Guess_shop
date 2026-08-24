@@ -17,6 +17,7 @@ import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
 import { getGamepassDetails, getGamepassProductInfo } from "../shared/roblox";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
+import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { enforceVkInlineKbLimits } from "../shared/vk-kb";
 import { noteProbableNick } from "../shared/nick";
 import { resolveWbOrderSource, wbDbsBadgeLine } from "../shared/wb-order-source";
@@ -308,18 +309,15 @@ export function initVkHandlers(vkInstance: any): void {
 }
 
 /**
- * Extract a Roblox game-pass ID from user input.
- * Accepts:
+ * Extract a Roblox game-pass ID from user input — единый разбор с сайтом
+ * (`bots/shared/gamepass-id.ts`). Accepts:
  *   - Pure numeric ID:           "12345678"
  *   - Standard URL:              "https://www.roblox.com/game-pass/12345678/..."
  *   - Creator dashboard URL:     "https://create.roblox.com/dashboard/creations/passes/12345678/..."
  * Returns the ID string, or null if nothing was recognised.
  */
 function extractPassId(input: string): string | null {
-  const s = input.trim();
-  if (/^\d+$/.test(s)) return s;
-  const m = s.match(/(?:game-pass|passes)\/(\d+)/i);
-  return m ? m[1] : null;
+  return parseGamepassRef(input);
 }
 
 // ── DB-based state recovery ───────────────────────────────────────────────────
@@ -1388,6 +1386,11 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
     await handleFindGpSaved(ctx, vkUserId);
     return;
   }
+  // ── 🔗 Поиск по нику не нашёл — принимаем ссылку на геймпасс ─────────────
+  if (msgPayload?.command === "send_gp_link") {
+    await handleSendGpLink(ctx, vkUserId);
+    return;
+  }
   // ── 🔎 Re-check the nick the user already entered (probableNick) ──────────
   if (msgPayload?.command === "find_gp_recheck") {
     await handleFindGpRecheck(ctx, vkUserId);
@@ -1441,7 +1444,9 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
       await handleRobloxNickInput(ctx, vkUserId, text, state.wbCode, state.denomination);
       return;
     }
-    await handleGamepassLink(ctx, vkUserId, text, state.wbCode, state.denomination);
+    await handleGamepassLink(ctx, vkUserId, text, state.wbCode, state.denomination, {
+      viaManualLink: state.viaManualLink,
+    });
     return;
   }
 
@@ -1484,12 +1489,20 @@ export async function handleMessage(ctx: MessageContext): Promise<void> {
   }
   // AWAITING_DIRECT_NICK_INPUT: user is typing a Roblox nick for the new direct flow
   if (state?.type === "AWAITING_DIRECT_NICK_INPUT") {
+    // Ссылка вместо ника — тот же запасной вход, что и в WB-коридоре:
+    // поиск по нику не видит пасс в скрытом плейсе, а ссылка на него есть.
+    // Только ссылочные формы — голое число здесь всё ещё ник.
+    const dirPassId = parseGamepassUrl(text);
+    if (dirPassId) {
+      await handleVkDirectGamepassLink(ctx, vkUserId, dirPassId);
+      return;
+    }
     const nick = text.replace(/^@/, "").trim();
     if (!ROBLOX_NICK_RE.test(nick)) {
       const kb = Keyboard.builder();
       kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
       kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
-      await ctx.reply({ message: "⚠️ Ник Roblox: 3–20 символов (буквы, цифры, _). Попробуй ещё раз:", keyboard: kb.inline() });
+      await ctx.reply({ message: "⚠️ Ник Roblox: 3–20 символов (буквы, цифры, _). Или пришли ссылку на геймпасс — тоже подойдёт:", keyboard: kb.inline() });
       return;
     }
     await handleVkDirectNickResolved(ctx, vkUserId, nick);
@@ -1929,7 +1942,8 @@ async function handleGamepassLink(
   vkUserId: number,
   input: string,
   wbCode: string,
-  denomination: number
+  denomination: number,
+  opts: { viaManualLink?: boolean } = {},
 ): Promise<void> {
   const passId = extractPassId(input);
 
@@ -1945,12 +1959,16 @@ async function handleGamepassLink(
     await ctx.reply({
       message:
         "⚠️ Не удалось распознать.\n\n" +
-        "Напиши свой ник в Roblox (латиница, 3–20 символов) — найду геймпасс сам.\n\n" +
+        "Подойдёт любое из двух:\n" +
+        "• свой ник в Roblox (латиница, 3–20 символов) — найду геймпасс сам;\n" +
+        "• ссылка на геймпасс или его номер — оформлю прямо по ней.\n\n" +
         "📖 Как создать геймпасс и найти ник — в инструкции:",
       keyboard: Keyboard.builder()
         .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: fmtGuideUrl })
         .row()
         .textButton({ label: "🔎 Ввести ник Roblox", payload: { command: "find_gp_start" }, color: "primary" })
+        .row()
+        .textButton({ label: GP_LINK_LABEL, payload: { command: "send_gp_link" }, color: "secondary" })
         .inline(),
     });
     return;
@@ -2292,6 +2310,7 @@ async function handleGamepassLink(
     creatorName:         validatedCreator ?? undefined,
     isAgeRestricted:     gamepassInfo.isAgeRestricted ?? false,
     viaWebOneTap,
+    viaManualLink:       opts.viaManualLink === true,
     replacedGamepassUrl: replacedGamepassUrl ?? undefined,
   });
 }
@@ -2303,6 +2322,64 @@ async function handleGamepassLink(
 // ROBLOX_NICK_RE now imported from shared/admin
 /** Max gamepass matches we show as inline buttons. */
 const MAX_PICK_BUTTONS = 5;
+
+/**
+ * Запасной вход в заказ, когда поиск по нику ничего не нашёл.
+ *
+ * Поиск живёт на публичных списках Roblox (`accessFilter=Public` + перебор игр)
+ * и регулярно молчит при живом геймпассе: скрытый плейс (треть застрявших
+ * заказов по разбору 22.08), только что созданный пасс, лаг API. Ссылку на свой
+ * геймпасс покупатель при этом видит в браузере — она и становится входом.
+ * Бот всегда умел принимать ссылку, но на тупиковых ветках об этом не говорил.
+ */
+const GP_LINK_LABEL = "🔗 Прислать ссылку на геймпасс";
+
+/** Текст-подсказка, откуда взять ссылку. Общий для всех точек входа. */
+const GP_LINK_PROMPT =
+  "🔗 Пришли ссылку на свой геймпасс — одним сообщением.\n\n" +
+  "Где её взять:\n" +
+  "1. Creator Hub → Creations → твоя игра → Passes\n" +
+  "2. Нажми на геймпасс — он откроется в браузере\n" +
+  "3. Скопируй адрес из адресной строки и пришли сюда\n\n" +
+  "Подойдёт любой вид: roblox.com/game-pass/1234567, ссылка из Creator Hub или просто номер геймпасса.\n\n" +
+  "Так заказ оформится, даже если плейс скрыт и поиск по нику пасс не видит.";
+
+/** «🔗 Прислать ссылку» — переводим в AWAITING_LINK и объясняем, где её взять. */
+async function handleSendGpLink(ctx: MessageContext, vkUserId: number): Promise<void> {
+  const user = await db.user.findUnique({
+    where: { vkId: String(vkUserId) },
+    select: { id: true },
+  });
+  if (!user) {
+    await ctx.reply("Сессия истекла — напиши «Начать», чтобы продолжить.");
+    return;
+  }
+  const working = await resolveWorkingOrder(vkUserId, user.id);
+  if (!working) {
+    await ctx.reply("У тебя сейчас нет активного заказа. Введи код WB чтобы начать.");
+    return;
+  }
+  if ("choose" in working) {
+    await replyOrderPicker(ctx, working.choose);
+    return;
+  }
+  const order = working.order;
+  setState(vkUserId, {
+    type: "AWAITING_LINK",
+    wbCode: order.wbCode,
+    denomination: order.amount,
+    viaManualLink: true,
+  });
+  const passPrice = Math.ceil(order.amount / 0.7);
+  await ctx.reply({
+    message: GP_LINK_PROMPT + `\n\n📌 Цена геймпасса должна быть ровно ${passPrice} R$.`,
+    keyboard: Keyboard.builder()
+      .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: `https://robloxbank.ru/guide?source=wb&skip=1&code=${order.wbCode}` })
+      .row()
+      .textButton({ label: "🔎 Лучше поиск по нику", payload: { command: "find_gp_start" }, color: "secondary" })
+      .inline(),
+  });
+}
 
 /** "🔎 Найти по моему нику" tap — set state and ask for the nick. */
 async function handleFindGpStart(ctx: MessageContext, vkUserId: number): Promise<void> {
@@ -2456,13 +2533,29 @@ async function handleRobloxNickInput(
   wbCode: string,
   denomination: number,
 ): Promise<void> {
+  // Мы сами предлагаем «не нашли — пришли ссылку», и часть покупателей
+  // присылает ссылку, не дожидаясь кнопки. Раньше на это отвечало «⚠️ Ник не
+  // похож на ник Roblox» — тупик ровно там, где у человека уже есть всё, что
+  // нам нужно. Ссылка/ID уходит в тот же канонический разбор геймпасса.
+  // Только ссылочные формы: поле подписано «ник», а чисто цифровой ник Roblox
+  // проходит ROBLOX_NICK_RE — голое число обязано остаться ником.
+  if (parseGamepassUrl(raw)) {
+    setState(vkUserId, { type: "AWAITING_LINK", wbCode, denomination, viaManualLink: true });
+    await handleGamepassLink(ctx, vkUserId, raw, wbCode, denomination, { viaManualLink: true });
+    return;
+  }
+
   const nick = raw.trim().replace(/^@/, "");
   if (!ROBLOX_NICK_RE.test(nick)) {
-    await ctx.reply(
-      "⚠️ Ник не похож на ник Roblox.\n\n" +
-      "Должно быть 3–20 символов: буквы, цифры или подчёркивание. " +
-      "Например: lokomotiv_2018"
-    );
+    await ctx.reply({
+      message:
+        "⚠️ Ник не похож на ник Roblox.\n\n" +
+        "Должно быть 3–20 символов: буквы, цифры или подчёркивание. Например: lokomotiv_2018\n\n" +
+        "Если под рукой есть ссылка на сам геймпасс — пришли её, этого тоже достаточно.",
+      keyboard: Keyboard.builder()
+        .textButton({ label: GP_LINK_LABEL, payload: { command: "send_gp_link" }, color: "primary" })
+        .inline(),
+    });
     return;
   }
 
@@ -2487,6 +2580,8 @@ async function handleRobloxNickInput(
         .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: downGuideUrl })
         .row()
         .textButton({ label: "🔎 Попробовать ещё раз", payload: { command: "find_gp_recheck" }, color: "primary" })
+        .row()
+        .textButton({ label: GP_LINK_LABEL, payload: { command: "send_gp_link" }, color: "secondary" })
         .inline(),
     });
     return;
@@ -2515,6 +2610,8 @@ async function handleRobloxNickInput(
         .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: guideUrl })
         .row()
         .textButton({ label: "🔎 Попробовать ещё раз", payload: { command: "find_gp_start" }, color: "primary" })
+        .row()
+        .textButton({ label: GP_LINK_LABEL, payload: { command: "send_gp_link" }, color: "secondary" })
         .inline(),
     });
     return;
@@ -2526,9 +2623,13 @@ async function handleRobloxNickInput(
       message:
         `🙈 У ${nick} не нашли публичных геймпассов.\n\n` +
         `Скорее всего геймпасс ещё не создан, не выставлен на продажу или плейс закрыт.\n\n` +
-        `⚠️ Пройди инструкцию — там по шагам: создание, разблокировка, правильная цена ${expectedPrice} R$:\n` +
+        `✅ Геймпасс уже создан? Тогда просто пришли ссылку на него — оформим заказ по ссылке, ` +
+        `даже если плейс скрыт и поиск по нику его не видит.\n\n` +
+        `⚠️ Ещё не создан — пройди инструкцию: там по шагам создание, разблокировка и правильная цена ${expectedPrice} R$:\n` +
         `👉 ${guideUrl}`,
       keyboard: Keyboard.builder()
+        .textButton({ label: GP_LINK_LABEL, payload: { command: "send_gp_link" }, color: "positive" })
+        .row()
         .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: guideUrl })
         .row()
         .textButton({ label: "🔎 Уже сделал — проверить", payload: { command: "find_gp_recheck" }, color: "primary" })
@@ -2550,13 +2651,16 @@ async function handleRobloxNickInput(
       message:
         `У ${nick} нашли геймпассы, но ни один не за ${expectedPrice} R$:\n\n` +
         `${listLines}\n\n` +
-        `Нужен геймпасс ровно на ${expectedPrice} R$. Как исправить — в инструкции:`,
+        `Нужен геймпасс ровно на ${expectedPrice} R$. Как исправить — в инструкции.\n\n` +
+        `Нужный геймпасс есть, но его нет в списке выше? Пришли ссылку на него — заберём по ссылке.`,
       keyboard: Keyboard.builder()
         .urlButton({ label: "📖 ИНСТРУКЦИЯ", url: guideUrl })
         .row()
         .textButton({ label: "🔎 Уже исправил — проверить", payload: { command: "find_gp_recheck" }, color: "primary" })
         .row()
         .textButton({ label: "✏️ Поменять ник", payload: { command: "find_gp_start" }, color: "secondary" })
+        .row()
+        .textButton({ label: GP_LINK_LABEL, payload: { command: "send_gp_link" }, color: "secondary" })
         .inline(),
     });
     return;
@@ -2852,6 +2956,76 @@ async function showVkNickStep(ctx: MessageContext, vkUserId: number, flowData: {
   }
 }
 
+/**
+ * Прямой заказ: покупатель прислал ссылку (или ID) геймпасса вместо ника.
+ *
+ * Та же дыра, что и в WB-коридоре: поиск по нику опирается на публичные списки
+ * Roblox и молчит при скрытом плейсе или свежем пассе, а шаг «ник» отвечал на
+ * ссылку формат-ошибкой. Ник получателя берём у владельца геймпасса — он
+ * надёжнее набранного вручную.
+ */
+async function handleVkDirectGamepassLink(ctx: MessageContext, vkUserId: number, passId: string): Promise<void> {
+  const state = getState(vkUserId);
+  if (!state || (state.type !== "AWAITING_DIRECT_NICK" && state.type !== "AWAITING_DIRECT_NICK_INPUT")) return;
+
+  const passPrice = Math.ceil(state.totalAmount / 0.7);
+  const flowData = { amount: state.amount, totalAmount: state.totalAmount, bonus: state.bonus, rubleDiscount: state.rubleDiscount, rublePrice: state.rublePrice, hasBonusStep: state.hasBonusStep };
+
+  const checkingMsg = await ctx.reply("⏳ Проверяем геймпасс по ссылке…");
+  const showResult = buildVkEditInPlace(ctx, vkUserId, checkingMsg);
+  const backKb = () => {
+    const kb = Keyboard.builder();
+    kb.urlButton({ label: "📖 Инструкция", url: "https://robloxbank.ru/guide?source=direct" });
+    kb.row();
+    kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
+    kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
+    return kb.inline();
+  };
+
+  const gp = await getGamepassDetails(passId).catch(() => null);
+  setState(vkUserId, { type: "AWAITING_DIRECT_NICK_INPUT", ...flowData });
+
+  if (!gp || gp.validationSkipped) {
+    await showResult({
+      message: "⚠️ Не удалось проверить геймпасс — Roblox сейчас не отвечает.\n\nПодожди минуту и пришли ссылку (или свой ник) ещё раз:",
+      keyboard: backKb(),
+    });
+    return;
+  }
+  if (!gp.isActive) {
+    await showResult({
+      message: `⚠️ Геймпасс ${gp.name} не выставлен на продажу.\n\nВключи Item for sale и пришли ссылку ещё раз:`,
+      keyboard: backKb(),
+    });
+    return;
+  }
+  if (Math.abs(gp.price - passPrice) > 2) {
+    await showResult({
+      message: `⚠️ Цена геймпасса ${gp.price} R$, а нужна ровно ${passPrice} R$.\n\nПоправь цену (не забудь выключить Managed pricing) и пришли ссылку ещё раз:`,
+      keyboard: backKb(),
+    });
+    return;
+  }
+  if (!gp.creatorName) {
+    await showResult({
+      message: "⚠️ Геймпасс найден, но не удалось определить его владельца.\n\nПришли, пожалуйста, свой ник Roblox — на него придут робуксы:",
+      keyboard: backKb(),
+    });
+    return;
+  }
+
+  const owner = gp.creatorName;
+  await db.user.updateMany({ where: { vkId: String(vkUserId) }, data: { robloxUsername: owner } });
+  const gamepassUrl = `https://www.roblox.com/game-pass/${passId}`;
+  setState(vkUserId, {
+    type: "AWAITING_DIRECT_SUMMARY",
+    robloxUsername: owner,
+    gamepassId: passId, gamepassUrl, gamepassName: gp.name, gamepassRobux: gp.price,
+    ...flowData,
+  });
+  await showVkSummary(ctx, { ...flowData }, owner, passId, gp.price, gp.name, showResult);
+}
+
 async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number, nick: string): Promise<void> {
   const state = getState(vkUserId);
   if (!state || (state.type !== "AWAITING_DIRECT_NICK" && state.type !== "AWAITING_DIRECT_NICK_INPUT")) return;
@@ -2892,7 +3066,7 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
     const kb = Keyboard.builder();
     kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
     kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
-    await showResult({ message: `❌ Пользователь ${nick} не найден на Roblox.\n\nПроверь написание и отправь ещё раз:`, keyboard: kb.inline() });
+    await showResult({ message: `❌ Пользователь ${nick} не найден на Roblox.\n\nПроверь написание и отправь ещё раз — или пришли ссылку на геймпасс, этого тоже достаточно:`, keyboard: kb.inline() });
     return;
   }
   if (result.status === "no_gamepasses") {
@@ -2904,7 +3078,14 @@ async function handleVkDirectNickResolved(ctx: MessageContext, vkUserId: number,
     kb.row();
     kb.textButton({ label: "◀️ Назад", payload: { command: "direct_back" }, color: "secondary" });
     kb.textButton({ label: "❌ Отменить", payload: { command: "direct_cancel" }, color: "negative" });
-    await showResult({ message: `⚠️ У ${nick} нет геймпассов на продаже.\n\nСоздай геймпасс по инструкции и отправь ник ещё раз:`, keyboard: kb.inline() });
+    await showResult({
+      message:
+        `⚠️ У ${nick} не нашли геймпассов на продаже.\n\n` +
+        `✅ Геймпасс уже создан? Поиск иногда его не видит — например, когда плейс скрыт. ` +
+        `Пришли ссылку на геймпасс, и мы оформим заказ по ней.\n\n` +
+        `⚠️ Ещё не создан — сделай по инструкции и отправь ник ещё раз:`,
+      keyboard: kb.inline(),
+    });
     return;
   }
 

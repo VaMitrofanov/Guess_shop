@@ -445,6 +445,9 @@ export const CB = {
   findGpStart:   "find_gp",                                  // 7 b
   findGpRetry:   "find_gp_retry",                            // 13 b
   findGpSaved:   "find_gp_saved",                            // 13 b
+  // Запасной вход, когда поиск по нику ничего не нашёл: покупатель присылает
+  // ссылку (или ID) самого геймпасса. Ставит pendingLink и ждёт текст.
+  sendGpLink:    "send_gp_link",                             // 12 b
   // Гейт подписки: «✅ Я подписался — продолжить» (фолбэк, если chat_member
   // не пришёл или юзер подписался раньше, чем нажал ссылку) — PLAN +5.D.
   subRecheck:    "sub_recheck",                              // 11 b
@@ -484,6 +487,8 @@ export interface OrderCardPayload {
   isAgeRestricted?:    boolean;
   /** true when the customer picked this gamepass via the website nick-search (one-tap). */
   viaWebOneTap?:       boolean;
+  /** true when the customer pasted the gamepass link/ID because the nick search found nothing. */
+  viaManualLink?:      boolean;
   /** Old gamepassUrl when the user swapped the pass on an already-queued order (🔁 marker). */
   replacedGamepassUrl?: string;
 }
@@ -565,6 +570,11 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   const ageRestrictLine = order.isAgeRestricted ? `🔞 <b>Игра 18+ — выкуп вручную</b>\n`           : "";
 
   const webOneTapLine = order.viaWebOneTap ? `🌐 <b>ONE-TAP С САЙТА</b>\n` : "";
+  // Поиск по нику пасс не увидел, покупатель прислал ссылку сам — почти всегда
+  // это скрытый плейс. Заказ штатный, но менеджеру стоит глянуть глазами.
+  const manualLinkLine = order.viaManualLink
+    ? `🔗 <b>ССЫЛКА ВРУЧНУЮ</b> — поиск по нику не нашёл геймпасс\n`
+    : "";
 
   // The user swapped the pass on an already-queued order — not a new order.
   const replacedLine = order.replacedGamepassUrl
@@ -580,6 +590,7 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
     `━━━━━━━━━━━━━━━━\n` +
     replacedLine +
     webOneTapLine +
+    manualLinkLine +
     loyaltyLine +
     `${platformEmoji} Источник: <b>${wbOrderSourceLabel(order.platform, orderSource)}</b>\n` +
     `📅 Время: <b>${dateStr}</b>\n` +

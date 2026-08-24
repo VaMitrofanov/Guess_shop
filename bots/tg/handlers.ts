@@ -17,6 +17,7 @@ import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pen
 import { getGamepassDetails, getGamepassProductInfo, purchaseGamepassVerified, getRobuxBalance, resetPurchaseCsrf } from "../shared/roblox";
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "../shared/roblox-purchase-script";
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
+import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { noteProbableNick } from "../shared/nick";
 import { resolveWbOrderSource, wbDbsBadgeLine, wbOrderSourceLabel } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
@@ -311,18 +312,15 @@ function clearFailCounts(userId: number): void {
 // ── Gamepass ID extractor ─────────────────────────────────────────────────────
 
 /**
- * Extract a Roblox game-pass ID from user input.
- * Accepts:
+ * Extract a Roblox game-pass ID from user input — единый разбор с сайтом
+ * (`bots/shared/gamepass-id.ts`). Accepts:
  *   - Pure numeric ID:           "12345678"
  *   - Standard URL:              "https://www.roblox.com/game-pass/12345678/..."
  *   - Creator dashboard URL:     "https://create.roblox.com/dashboard/creations/passes/12345678/..."
  * Returns the ID string, or null if nothing was recognised.
  */
 function extractPassId(input: string): string | null {
-  const s = input.trim();
-  if (/^\d+$/.test(s)) return s;
-  const m = s.match(/(?:game-pass|passes)\/(\d+)/i);
-  return m ? m[1] : null;
+  return parseGamepassRef(input);
 }
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
@@ -1039,7 +1037,8 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
   if (result.status === "user_not_found") {
     flow.step = "nick_input";
     await showResult(
-      `❌ Пользователь <b>${escapeHtml(nick)}</b> не найден на Roblox.\n\nПроверь написание и отправь ещё раз:`,
+      `❌ Пользователь <b>${escapeHtml(nick)}</b> не найден на Roblox.\n\n` +
+      `Проверь написание и отправь ещё раз — или пришли <b>ссылку на геймпасс</b>, этого тоже достаточно:`,
       { parse_mode: "HTML", ...Markup.inlineKeyboard([
         [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
       ]) }
@@ -1049,8 +1048,10 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
   if (result.status === "no_gamepasses") {
     flow.step = "nick_input";
     await showResult(
-      `⚠️ У <b>${escapeHtml(nick)}</b> нет геймпассов на продаже.\n\n` +
-      `Создай геймпасс по инструкции и отправь ник ещё раз:`,
+      `⚠️ У <b>${escapeHtml(nick)}</b> не нашли геймпассов на продаже.\n\n` +
+      `✅ Геймпасс уже создан? Поиск иногда его не видит — например, когда плейс скрыт. ` +
+      `Пришли <b>ссылку на геймпасс</b>, и мы оформим заказ по ней.\n\n` +
+      `⚠️ Ещё не создан — сделай по инструкции и отправь ник ещё раз:`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
@@ -1112,6 +1113,96 @@ async function handleDirectNickResolved(bot: Telegraf, ctx: any, nick: string): 
     `${gpHeader}\n\n🎫 Геймпассы <b>${escapeHtml(nick)}</b> — выбери для заказа:`,
     { parse_mode: "HTML", ...Markup.inlineKeyboard(btns) }
   );
+}
+
+/**
+ * Минимум Telegraf-контекста, который нужен ветке ручной ссылки: ответить,
+ * отредактировать «⏳ Проверяем…» и узнать, кто и где пишет.
+ */
+type DirectLinkCtx = {
+  from: { id: number };
+  chat: { id: number };
+  reply: (text: string, extra?: Record<string, unknown>) => Promise<{ message_id: number }>;
+  telegram: {
+    editMessageText: (chatId: number, messageId: number, inlineId: undefined, text: string, extra?: Record<string, unknown>) => Promise<unknown>;
+    deleteMessage: (chatId: number, messageId: number) => Promise<unknown>;
+  };
+};
+
+/**
+ * Прямой заказ: покупатель прислал ссылку (или ID) геймпасса вместо ника.
+ *
+ * Та же дыра, что и в WB-коридоре: поиск по нику опирается на публичные списки
+ * Roblox и молчит при скрытом плейсе или свежем пассе, а шаг «ник» отвечал на
+ * ссылку формат-ошибкой. Ссылку разбираем сами: ник получателя берём у
+ * владельца геймпасса — он надёжнее набранного вручную.
+ */
+async function handleDirectGamepassLink(ctx: DirectLinkCtx, passId: string): Promise<void> {
+  const flow = pendingDirectFlow.get(ctx.from.id);
+  if (!flow || !flow.passPrice) return;
+
+  const checkingMsg = await ctx.reply("⏳ Проверяем геймпасс по ссылке…");
+  const showResult = async (text: string, extra: Record<string, unknown>): Promise<void> => {
+    try {
+      await ctx.telegram.editMessageText(ctx.chat.id, checkingMsg.message_id, undefined, text, extra);
+    } catch {
+      try { await ctx.telegram.deleteMessage(ctx.chat.id, checkingMsg.message_id); } catch {}
+      await ctx.reply(text, extra);
+    }
+  };
+  const backKb = Markup.inlineKeyboard([
+    [Markup.button.url("📖 Инструкция", "https://robloxbank.ru/guide?source=direct")],
+    [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
+  ]);
+
+  const gp = await getGamepassDetails(passId).catch(() => null);
+  flow.step = "nick_input";
+
+  if (!gp || gp.validationSkipped) {
+    await showResult(
+      "⚠️ Не удалось проверить геймпасс — Roblox сейчас не отвечает.\n\n" +
+      "Подожди минуту и пришли ссылку (или свой ник) ещё раз:",
+      { parse_mode: "HTML", ...backKb }
+    );
+    return;
+  }
+  if (!gp.isActive) {
+    await showResult(
+      `⚠️ Геймпасс <b>${escapeHtml(gp.name)}</b> не выставлен на продажу.\n\n` +
+      `Включи <b>Item for sale</b> и пришли ссылку ещё раз:`,
+      { parse_mode: "HTML", ...backKb }
+    );
+    return;
+  }
+  if (Math.abs(gp.price - flow.passPrice) > 2) {
+    await showResult(
+      `⚠️ Цена геймпасса <b>${gp.price} R$</b>, а нужна ровно <b>${flow.passPrice} R$</b>.\n\n` +
+      `Поправь цену (не забудь выключить <b>Managed pricing</b>) и пришли ссылку ещё раз:`,
+      { parse_mode: "HTML", ...backKb }
+    );
+    return;
+  }
+
+  const owner = gp.creatorName ?? flow.robloxUsername;
+  if (!owner) {
+    await showResult(
+      "⚠️ Геймпасс найден, но не удалось определить его владельца.\n\n" +
+      "Пришли, пожалуйста, свой <b>ник Roblox</b> — на него придут робуксы:",
+      { parse_mode: "HTML", ...backKb }
+    );
+    return;
+  }
+
+  flow.robloxUsername = owner;
+  flow.gamepassId = passId;
+  flow.gamepassUrl = `https://www.roblox.com/game-pass/${passId}`;
+  flow.gamepassName = gp.name;
+  flow.gamepassRobux = gp.price;
+  flow.step = "summary";
+  if (gp.creatorName) {
+    await db.user.updateMany({ where: { tgId: String(ctx.from.id) }, data: { robloxUsername: gp.creatorName } });
+  }
+  await showSummary(ctx, flow, gp.price, gp.name, { chatId: ctx.chat.id, messageId: checkingMsg.message_id });
 }
 
 /**
@@ -1888,9 +1979,17 @@ export function registerText(bot: Telegraf): void {
         return;
       }
       if (dirFlow.step === "nick_input") {
+        // Ссылка вместо ника — тот же запасной вход, что и в WB-коридоре:
+        // поиск по нику не видит пасс в скрытом плейсе, а ссылка на него есть.
+        // Только ссылочные формы — голое число здесь всё ещё ник.
+        const dirPassId = parseGamepassUrl(text);
+        if (dirPassId) {
+          await handleDirectGamepassLink(ctx, dirPassId);
+          return;
+        }
         const nick = text.replace(/^@/, "").trim();
         if (!ROBLOX_NICK_RE.test(nick)) {
-          await ctx.reply("⚠️ Ник Roblox: 3–20 символов (буквы, цифры, _). Попробуй ещё раз:", {
+          await ctx.reply("⚠️ Ник Roblox: 3–20 символов (буквы, цифры, _). Или пришли ссылку на геймпасс — тоже подойдёт:", {
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([
               [Markup.button.callback("◀️ Назад", CB.directBack), Markup.button.callback("❌ Отменить", CB.directCancel)],
@@ -2135,21 +2234,50 @@ export function registerText(bot: Telegraf): void {
         : `https://robloxbank.ru/guide?source=wb&skip=1&code=${state.wbCode}`;
       const formatHint =
         "⚠️ Не удалось распознать.\n\n" +
-        "Напиши свой <b>ник в Roblox</b> (латиница, 3–20 символов) — найду геймпасс сам.\n\n" +
+        "Подойдёт любое из двух:\n" +
+        "• свой <b>ник в Roblox</b> (латиница, 3–20 символов) — найду геймпасс сам;\n" +
+        "• <b>ссылка на геймпасс</b> или его номер — оформлю прямо по ней.\n\n" +
         "📖 Как создать геймпасс и найти ник — в инструкции:";
       const formatKb = [
         [Markup.button.url("📖 ИНСТРУКЦИЯ", fmtGuideUrl)],
         [Markup.button.callback("🔎 Найти по моему нику Roblox", CB.findGpStart)],
+        [gpLinkBtn()],
       ];
       await ctx.reply(formatHint, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...Markup.inlineKeyboard(formatKb) });
       return;
     }
 
-    await processGamepassSubmission(bot, ctx, state, passId);
+    await processGamepassSubmission(bot, ctx, state, passId, { viaManualLink: state.viaManualLink });
   });
 }
 
 /* ─────────────────────── Find-by-nick search (item 7) ────────────────────── */
+
+/**
+ * Запасной вход в заказ, когда поиск по нику ничего не нашёл.
+ *
+ * Поиск живёт на публичных списках Roblox (`accessFilter=Public` + перебор игр),
+ * и они регулярно молчат при живом геймпассе: скрытый плейс (треть застрявших
+ * заказов по разбору 22.08), только что созданный пасс, лаг API. Ссылку на свой
+ * геймпасс покупатель при этом видит в браузере — она и становится входом.
+ * Бот и так умеет принимать ссылку (processGamepassSubmission), но раньше
+ * НИГДЕ об этом не говорил на тупиковых ветках — человек упирался в
+ * «пройди инструкцию ещё раз» и уходил.
+ */
+function gpLinkBtn() {
+  return Markup.button.callback("🔗 Прислать ссылку на геймпасс", CB.sendGpLink);
+}
+
+/** Текст-подсказка, откуда взять ссылку. Общий для всех точек входа. */
+const GP_LINK_PROMPT =
+  "🔗 Пришли <b>ссылку на свой геймпасс</b> — одним сообщением.\n\n" +
+  "Где её взять:\n" +
+  "1. Creator Hub → <b>Creations</b> → твоя игра → <b>Passes</b>\n" +
+  "2. Нажми на геймпасс — он откроется в браузере\n" +
+  "3. Скопируй адрес из адресной строки и пришли сюда\n\n" +
+  "Подойдёт любой вид: <code>roblox.com/game-pass/1234567</code>, ссылка из Creator Hub " +
+  "или просто <b>номер</b> геймпасса.\n\n" +
+  "Так заказ оформится, даже если плейс скрыт и поиск по нику пасс не видит.";
 
 /** Max gamepass matches we show as inline buttons. */
 const MAX_PICK_BUTTONS = 5;
@@ -2307,13 +2435,28 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
   const state = pendingRobloxNick.get(tgIdNum);
   if (!state) return;
 
+  // Мы сами предлагаем «не нашли — пришли ссылку», и часть покупателей
+  // присылает ссылку, не дожидаясь кнопки. Раньше на это отвечало «⚠️ Ник не
+  // похож на ник Roblox» — тупик ровно там, где у человека уже есть всё, что
+  // нам нужно. Ссылка/ID уходит в тот же канонический разбор геймпасса.
+  // Только ссылочные формы: поле подписано «ник», а чисто цифровой ник Roblox
+  // проходит ROBLOX_NICK_RE — голое число обязано остаться ником.
+  const pastedPassId = parseGamepassUrl(raw);
+  if (pastedPassId) {
+    pendingRobloxNick.delete(tgIdNum);
+    pendingLink.set(tgIdNum, { ...state, viaManualLink: true });
+    await processGamepassSubmission(bot, ctx, state, pastedPassId, { viaManualLink: true });
+    return;
+  }
+
   const nick = raw.trim().replace(/^@/, "");
   if (!ROBLOX_NICK_RE.test(nick)) {
     await ctx.reply(
       "⚠️ Ник не похож на ник Roblox.\n\n" +
       "Должно быть 3–20 символов: буквы, цифры или подчёркивание. " +
-      "Например: <code>lokomotiv_2018</code>",
-      { parse_mode: "HTML" }
+      "Например: <code>lokomotiv_2018</code>\n\n" +
+      "Если под рукой есть <b>ссылка на сам геймпасс</b> — пришли её, этого тоже достаточно.",
+      { parse_mode: "HTML", ...Markup.inlineKeyboard([[gpLinkBtn()]]) }
     );
     return;
   }
@@ -2357,6 +2500,7 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
         ...Markup.inlineKeyboard([
           [Markup.button.url("📖 ИНСТРУКЦИЯ", downGuideUrl)],
           [Markup.button.callback("🔎 Попробовать ещё раз", CB.findGpRetry)],
+          [gpLinkBtn()],
         ]),
       }
     );
@@ -2388,6 +2532,7 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
           [Markup.button.url("📖 ИНСТРУКЦИЯ", guideUrl)],
           // Опечатка → нужен НОВЫЙ ввод (findGpStart), а не перепроверка того же ника
           [Markup.button.callback("🔎 Ввести ник ещё раз", CB.findGpStart)],
+          [gpLinkBtn()],
         ]),
       }
     );
@@ -2401,12 +2546,15 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
     await showResult(
       `🙈 У <b>${nick}</b> не нашли публичных геймпассов.\n\n` +
       `Скорее всего геймпасс ещё не создан, не выставлен на продажу или плейс закрыт.\n\n` +
-      `⚠️ <b>Пройди инструкцию</b> — там по шагам: создание, разблокировка, правильная цена <b>${expectedPrice} R$</b>:\n` +
+      `✅ <b>Геймпасс уже создан?</b> Тогда просто пришли <b>ссылку на него</b> — оформим заказ по ссылке, ` +
+      `даже если плейс скрыт и поиск по нику его не видит.\n\n` +
+      `⚠️ Ещё не создан — <b>пройди инструкцию</b>: там по шагам создание, разблокировка и правильная цена <b>${expectedPrice} R$</b>:\n` +
       `👉 ${guideUrl}`,
       {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
         ...Markup.inlineKeyboard([
+          [gpLinkBtn()],
           [Markup.button.url("📖 ИНСТРУКЦИЯ", guideUrl)],
           [Markup.button.callback("🔎 Уже сделал — проверить", CB.findGpRetry)],
           [Markup.button.callback("✏️ Поменять ник", CB.findGpStart)],
@@ -2428,7 +2576,8 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
       `У <b>${nick}</b> нашли геймпассы, но ни один не за <b>${expectedPrice} R$</b>:\n\n` +
       `${listLines}\n\n` +
       `Нужен геймпасс ровно на <b>${expectedPrice} R$</b>. Как исправить — в инструкции:\n` +
-      `👉 ${guideUrl}`,
+      `👉 ${guideUrl}\n\n` +
+      `Нужный геймпасс есть, но его нет в списке выше? Пришли <b>ссылку</b> на него — заберём по ссылке.`,
       {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
@@ -2436,6 +2585,7 @@ async function handleRobloxNickInput(bot: Telegraf, ctx: any, raw: string): Prom
           [Markup.button.url("📖 ИНСТРУКЦИЯ", guideUrl)],
           [Markup.button.callback("🔎 Уже исправил — проверить", CB.findGpRetry)],
           [Markup.button.callback("✏️ Поменять ник", CB.findGpStart)],
+          [gpLinkBtn()],
         ]),
       }
     );
@@ -2500,6 +2650,7 @@ async function processGamepassSubmission(
   ctx: any,
   state: LinkState,
   passId: string,
+  opts: { viaManualLink?: boolean } = {},
 ): Promise<void> {
     const expectedPrice = Math.ceil(state.denomination / 0.7);
 
@@ -2923,7 +3074,7 @@ async function processGamepassSubmission(
         include: { user: true }
       });
       if (fullOrder) {
-        const { text: cardText, buildReplyMarkup } = await renderOrderCard(fullOrder, validatedCreator ?? undefined, gamepassInfo.isAgeRestricted, replacedGamepassUrl ?? undefined);
+        const { text: cardText, buildReplyMarkup } = await renderOrderCard(fullOrder, validatedCreator ?? undefined, gamepassInfo.isAgeRestricted, replacedGamepassUrl ?? undefined, opts.viaManualLink);
         for (const adminId of ADMIN_IDS) {
           try {
             await bot.telegram.sendMessage(adminId, cardText, {
@@ -2943,7 +3094,7 @@ async function processGamepassSubmission(
  * Universal renderer for the admin order card.
  * Returns text and reply_markup ready for ctx.reply or edit.
  */
-async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted?: boolean, replacedGamepassUrl?: string) {
+async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted?: boolean, replacedGamepassUrl?: string, viaManualLink?: boolean) {
   const passPrice = Math.ceil(order.amount / 0.7);
   const statusLabels: any = {
     AWAITING_GAMEPASS: "⌛ Ожидаем геймпасс",
@@ -3002,6 +3153,12 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
     (order.gamepassUrl ?? "").includes(String(wbCode.selectedGamepassId));
   const webOneTapLine = pickedOnSite ? `🌐 <b>ONE-TAP С САЙТА</b>\n` : "";
 
+  // Поиск по нику пасс не увидел, покупатель прислал ссылку сам — почти всегда
+  // это скрытый плейс. Заказ штатный, но менеджеру стоит глянуть глазами.
+  const manualLinkLine = viaManualLink
+    ? `🔗 <b>ССЫЛКА ВРУЧНУЮ</b> — поиск по нику не нашёл геймпасс\n`
+    : "";
+
   // The user swapped the pass on an already-queued order — not a new order.
   const replacedLine = replacedGamepassUrl
     ? (() => {
@@ -3016,6 +3173,7 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
     `━━━━━━━━━━━━━━━━\n` +
     replacedLine +
     webOneTapLine +
+    manualLinkLine +
     directTag +
     loyaltyLine +
     `${platformEmoji} Источник: <b>${wbOrderSourceLabel(order.platform, order.orderSource)}</b>\n` +
@@ -3938,6 +4096,51 @@ export function registerCallbacks(bot: Telegraf): void {
         `Я найду все твои геймпассы за <b>${passPrice} R$</b> — и предложу выбрать нужный.\n` +
         `<i>Если передумал — пришли ссылку на геймпасс как обычно.</i>`,
         { parse_mode: "HTML" }
+      );
+      return;
+    }
+
+    // ── 🔗 send_gp_link: поиск по нику не нашёл — принимаем ссылку ───────
+    // Ставим pendingLink (не pendingRobloxNick): следующий текст пойдёт в
+    // разбор геймпасса. Ник при этом всё равно принимается — обе ветки живут
+    // в одном текст-хендлере, так что «передумал, вот ник» не ломается.
+    if (data === CB.sendGpLink) {
+      const tgIdNum = ctx.from.id;
+      const user = await db.user.findUnique({
+        where: { tgId: String(tgIdNum) },
+        select: { id: true },
+      });
+      if (!user) {
+        await ctx.answerCbQuery("Сессия истекла — напиши /start").catch(() => {});
+        return;
+      }
+      const working = await resolveWorkingOrder(tgIdNum, user.id);
+      if (!working) {
+        await ctx.answerCbQuery("Активного заказа нет").catch(() => {});
+        await ctx.reply("У тебя сейчас нет активного заказа. Введи код WB чтобы начать.", { parse_mode: "HTML" });
+        return;
+      }
+      if ("choose" in working) {
+        await ctx.answerCbQuery("Сначала выбери заказ").catch(() => {});
+        const picker = buildOrderPicker(working.choose);
+        await ctx.reply(picker.text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...picker.keyboard });
+        return;
+      }
+      const linkState: LinkState = { wbCode: working.order.wbCode, denomination: working.order.amount, viaManualLink: true };
+      pendingRobloxNick.delete(tgIdNum);
+      pendingLink.set(tgIdNum, linkState);
+      const linkPassPrice = Math.ceil(working.order.amount / 0.7);
+      await ctx.answerCbQuery().catch(() => {});
+      await ctx.reply(
+        GP_LINK_PROMPT + `\n\n📌 Цена геймпасса должна быть ровно <b>${linkPassPrice} R$</b>.`,
+        {
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+          ...Markup.inlineKeyboard([
+            [Markup.button.url("📖 ИНСТРУКЦИЯ", `https://robloxbank.ru/guide?source=wb&skip=1&code=${working.order.wbCode}`)],
+            [Markup.button.callback("🔎 Лучше поиск по нику", CB.findGpStart)],
+          ]),
+        }
       );
       return;
     }

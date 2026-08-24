@@ -24,7 +24,10 @@ interface DirectFlowData {
 }
 
 export type VKState =
-  | { type: "AWAITING_LINK";           wbCode: string; denomination: number }
+  // viaManualLink: покупателя привёл сюда провалившийся поиск по нику (кнопка
+  // «🔗 Прислать ссылку» или ссылка, присланная вместо ника). Метка едет в
+  // карточку админа — такой заказ почти всегда про скрытый плейс.
+  | { type: "AWAITING_LINK";           wbCode: string; denomination: number; viaManualLink?: boolean }
   | { type: "AWAITING_REVIEW";         orderId: string }
   | { type: "AWAITING_DIRECT_AMOUNT" }
   | { type: "AWAITING_DIRECT_CONFIRM" } & DirectFlowData
