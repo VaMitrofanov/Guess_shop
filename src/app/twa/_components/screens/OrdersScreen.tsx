@@ -2760,11 +2760,11 @@ export default function OrdersScreen({
   );
 }
 
-/* ───────────── Direct intents («⏳ Ожидаем реквизиты») ─────────────
-   Заявки прямых заказов из ботов до отправки реквизитов. Кнопки = TG-карточке
-   заявки: 📷 QR (СБП) / 💳 Реквизиты текстом / ❌ Отклонить. После QR или
-   реквизитов заявка превращается в заказ DIR-… (PAYMENT_PENDING) и появляется
-   в списке вкладки «Прямой» штатно. */
+/* ───────────── Direct intents («⏳ Выбирают оплату») ─────────────
+   Заявки прямых заказов из ботов. Клиент видит три кнопки: сайт / эквайринг /
+   реквизиты. Пока он не выбрал, заявка висит здесь. Админ может проактивно
+   отправить QR (СБП) или реквизиты текстом, либо отклонить. После выбора
+   заявка превращается в заказ DIR-… (PAYMENT_PENDING/AWAITING_PAYMENT). */
 function IntentCard({ intent, token, qrConfigured, onGone }: {
   intent: Intent;
   token: string;
@@ -2985,7 +2985,7 @@ function IntentsSection({ token, intents, qrConfigured, loading, onIntentGone }:
     <div style={{ padding: "12px 16px 0", display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 2px" }}>
         <span style={{ fontSize: 14, fontWeight: 600, color: C.blue, whiteSpace: "nowrap" }}>
-          ⏳ Заявки · ожидают реквизиты ({intents.length})
+          ⏳ Заявки · выбирают оплату ({intents.length})
         </span>
         <div style={{ flex: 1, height: 1, background: C.hairline }} />
       </div>

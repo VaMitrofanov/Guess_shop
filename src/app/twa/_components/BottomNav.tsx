@@ -20,7 +20,7 @@ type Screen = "dashboard" | "orders" | "wb" | "delivery" | "account" | "settings
 const MAIN_TABS = [
   { id: "dashboard" as const, label: "Главная", Icon: House },
   { id: "orders" as const, label: "Заказы", Icon: ClipboardList },
-  { id: "wb" as const, label: "WB", Icon: Warehouse },
+  { id: "delivery" as const, label: "Доставка", Icon: Truck },
 ];
 
 export default function BottomNav({
@@ -35,7 +35,7 @@ export default function BottomNav({
   dbsBadge?: number;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
-  const moreActive = active === "account" || active === "delivery" || active === "settings" || active === "system" || active === "economics";
+  const moreActive = active === "account" || active === "wb" || active === "settings" || active === "system" || active === "economics";
 
   function navigate(screen: Screen) {
     if (screen !== active) haptic.select();
@@ -66,9 +66,9 @@ export default function BottomNav({
             <span><strong>Экономика</strong><small>Прямые заказы, робуксы и бонусы</small></span>
             <span aria-hidden="true">›</span>
           </button>
-          <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("delivery")}>
-            <span className="twa-more-icon"><Truck size={19} /></span>
-            <span><strong>WB Доставка</strong><small>DBS-заказы, чаты и коды выдачи</small></span>
+          <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("wb")}>
+            <span className="twa-more-icon"><Warehouse size={19} /></span>
+            <span><strong>Wildberries</strong><small>Аналитика, склад и коды</small></span>
             <span aria-hidden="true">›</span>
           </button>
           <button type="button" className="twa-more-row twa-press-sm" onClick={() => navigate("account")}>
