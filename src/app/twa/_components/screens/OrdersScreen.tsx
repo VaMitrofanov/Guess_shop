@@ -1754,6 +1754,205 @@ function isWorkOrder(order: Order): boolean {
   return order.status === "AWAITING_GAMEPASS" && new Date(order.createdAt).getTime() <= cutoff;
 }
 
+/* ───────────── Search S2: SpotlightCard — full order detail inline ───────────── */
+function SpotlightCard({
+  order, token, onRunAction, onPurchaseDone, onSaveNote, onToggleFavorite, onMoved,
+}: {
+  order: Order;
+  token: string;
+  onRunAction: (action: string, reason?: string) => Promise<ActionResult>;
+  onPurchaseDone: () => void;
+  onSaveNote: (note: string) => Promise<ActionResult>;
+  onToggleFavorite: () => void;
+  onMoved: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const platform = order.user.tgId ? "tg" : order.user.vkId ? "vk" : "—";
+  const shortName = userShortName(order.user);
+  const dirtyAmount = Math.ceil(order.amount / 0.7);
+  const tabBadge = orderTabBadge(order);
+  const canBuyout = ["PENDING", "IN_PROGRESS"].includes(order.status) && !!order.gamepassUrl;
+  const isError = order.status === "ERROR" && !!order.gamepassUrl;
+  const showActions = canBuyout || isError;
+
+  async function doPurchase() {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "purchase", orderId: order.id }),
+      });
+      const d = await r.json();
+      if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
+      if (d.success) { haptic.notify("success"); toast(`✅ ${d.msg}`, "success"); onPurchaseDone(); }
+      else { haptic.notify("error"); toast(`❌ ${d.msg}`, "error"); }
+    } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
+    finally { setLoading(false); }
+  }
+
+  const cellLabel: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: C.textTertiary, textTransform: "uppercase", letterSpacing: 0.5 };
+  const cellVal: React.CSSProperties = { fontSize: 15, fontWeight: 600, color: C.textPrimary, marginTop: 2 };
+
+  return (
+    <div style={{
+      padding: 16, background: C.card, borderRadius: 16,
+      border: `1px solid ${C.accent}22`, boxShadow: SHADOW.card,
+      display: "flex", flexDirection: "column", gap: 12,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, color: C.accent, letterSpacing: 1.5 }}>
+          {order.wbCode}
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {tabBadge && (
+            <span style={{ fontSize: 13, fontWeight: 700, color: tabBadge.color, background: `${tabBadge.color}1c`, padding: "5px 12px", borderRadius: 8 }}>
+              {tabBadge.label}
+            </span>
+          )}
+          <button className="twa-press-sm" onClick={() => { haptic.impact("light"); onToggleFavorite(); }}
+            style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 20, padding: "2px 4px", opacity: order.isFavorite ? 1 : 0.35 }}>
+            {order.isFavorite ? "★" : "☆"}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div>
+          <div style={cellLabel}>Ник Roblox</div>
+          <div style={cellVal}>{order.robloxUsername ?? order.probableNick ?? "—"}</div>
+        </div>
+        <div>
+          <div style={cellLabel}>Сумма</div>
+          <div style={{ ...cellVal, ...tabular }}>
+            {dirtyAmount.toLocaleString("ru-RU")} R$
+            <span style={{ fontSize: 13, color: C.textTertiary, marginLeft: 4 }}>({order.amount.toLocaleString("ru-RU")})</span>
+          </div>
+        </div>
+        <div>
+          <div style={cellLabel}>Клиент</div>
+          <span onClick={() => { haptic.impact("light"); openContact(order.user); }}
+            style={{ ...cellVal, color: "#7ec5ff", cursor: "pointer", display: "block" }}>
+            <span style={{
+              fontSize: 11, fontWeight: 800, color: "#fff",
+              background: platform === "tg" ? "#229ED9" : platform === "vk" ? "#0077FF" : C.elevated,
+              borderRadius: 4, padding: "2px 5px", marginRight: 6,
+            }}>{platform === "tg" ? "T" : platform === "vk" ? "V" : "—"}</span>
+            {shortName}
+          </span>
+        </div>
+        <div>
+          <div style={cellLabel}>Возраст</div>
+          <div style={{ ...cellVal, color: ageColor(order.createdAt), ...tabular }}>{fmtAge(order.createdAt)}</div>
+        </div>
+        {order.gamepassUrl && (
+          <div style={{ gridColumn: "1 / 3" }}>
+            <div style={cellLabel}>Геймпасс</div>
+            <a href={order.gamepassUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+              style={{ fontSize: 14, color: C.blue, fontWeight: 500, marginTop: 2, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {order.gamepassUrl.replace(/^https?:\/\/(www\.)?/, "").slice(0, 50)}
+            </a>
+          </div>
+        )}
+        <div>
+          <div style={cellLabel}>Источник</div>
+          <div style={{ ...cellVal, fontWeight: 500 }}>{SOURCE_BADGE_META[order.orderSource]?.label ?? order.orderSource}</div>
+        </div>
+        {order.pendingAt && ["PENDING", "IN_PROGRESS"].includes(order.status) && (
+          <div>
+            <div style={cellLabel}>В очереди</div>
+            <div style={{ ...cellVal, color: ageColor(order.pendingAt), ...tabular }}>{fmtAge(order.pendingAt)}</div>
+          </div>
+        )}
+      </div>
+
+      <div style={{ paddingTop: 4 }}>
+        <NotesEditor order={order} onSave={onSaveNote} />
+      </div>
+
+      {showActions && (
+        <div style={{ display: "flex", gap: 8, paddingTop: 8, borderTop: `1px solid ${C.hairline}` }}>
+          <button className="twa-press" onClick={doPurchase} disabled={loading}
+            style={{ flex: 2, padding: 13, border: "none", borderRadius: 12, background: "rgba(48,209,88,0.14)", color: C.green, fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+            {loading ? "⏳…" : isError ? "Повторить выкуп" : "Выкупить"}
+          </button>
+          <button className="twa-press" onClick={() => onRunAction("complete")} disabled={loading}
+            style={{ flex: 1, padding: 13, border: "none", borderRadius: 12, background: "rgba(10,132,255,0.12)", color: C.blue, fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+            Выкуплено
+          </button>
+          <button className="twa-press" onClick={() => onRunAction("reject")} disabled={loading}
+            style={{ width: 44, flexShrink: 0, padding: "13px 0", border: `1px solid ${C.red}55`, borderRadius: 12, background: "transparent", color: C.red, fontSize: 18, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+            ✕
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ───────────── Search S1: ProfileCard — user info above their orders ───────────── */
+function SearchProfileCard({ user, orders }: {
+  user: Order["user"];
+  orders: Order[];
+}) {
+  const platform = user.tgId ? "tg" : user.vkId ? "vk" : "—";
+  const shortName = userShortName(user);
+  const totalR = orders.reduce((s, o) => s + o.amount, 0);
+  const oldest = orders.reduce((min, o) => {
+    const t = new Date(o.createdAt).getTime();
+    return t < min ? t : min;
+  }, Date.now());
+
+  return (
+    <div style={{
+      padding: 14, background: C.card, borderRadius: 14,
+      boxShadow: SHADOW.card,
+      display: "flex", flexDirection: "column", gap: 10,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{
+          width: 42, height: 42, borderRadius: 12,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 14, fontWeight: 800, color: "#fff", flexShrink: 0,
+          background: platform === "tg" ? "#229ED9" : platform === "vk" ? "#0077FF" : C.elevated,
+        }}>
+          {platform === "tg" ? "T" : platform === "vk" ? "V" : "—"}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 17, fontWeight: 700, color: C.textPrimary,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {shortName}
+          </div>
+          <div style={{ fontSize: 13, color: C.textSecondary, display: "flex", alignItems: "center", gap: 8 }}>
+            <span>{platform === "tg" ? "Telegram" : platform === "vk" ? "VK" : "—"}</span>
+            <span style={{ color: C.green }}>· {orders.length} {pluralOrders(orders.length).split(" ").pop()}</span>
+          </div>
+        </div>
+        <button
+          className="twa-press-sm"
+          onClick={() => { haptic.impact("light"); openContact(user); }}
+          style={{
+            padding: "8px 14px", borderRadius: 10, border: "none",
+            background: `${C.blue}22`, color: C.blue,
+            fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer",
+          }}
+        >
+          Написать
+        </button>
+      </div>
+      <div style={{ display: "flex", gap: 16, fontSize: 13, color: C.textSecondary, paddingTop: 6, borderTop: `1px solid ${C.hairline}` }}>
+        <span>Всего <span style={{ fontWeight: 700, color: C.textPrimary, ...tabular }}>{totalR.toLocaleString("ru-RU")} R$</span></span>
+        <span>Клиент с <span style={{ fontWeight: 700, color: C.textPrimary }}>
+          {new Date(oldest).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
+        </span></span>
+      </div>
+    </div>
+  );
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
    Main screen
    ───────────────────────────────────────────────────────────────────────── */
@@ -1777,6 +1976,7 @@ export default function OrdersScreen({
   const [createOpen, setCreateOpen] = useState(false);
   const [createMode, setCreateMode] = useState<"manual" | "direct">("manual");
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [dashExpanded, setDashExpanded] = useState(false);
   useEffect(() => {
     if (initialQuery || initialTab) onInitialQueryConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2169,6 +2369,14 @@ export default function OrdersScreen({
 
   const activeMode = filter === "ALL" ? "all" : filter === "DONE" ? "history" : "work";
 
+  const searchMode = useMemo<"spotlight" | "profile" | "list">(() => {
+    if (!query || allOrders.length === 0) return "list";
+    if (allOrders.length === 1 && allOrders[0].wbCode.toUpperCase() === query.toUpperCase()) return "spotlight";
+    const uid = allOrders[0].user.tgId ?? allOrders[0].user.vkId;
+    if (uid && allOrders.every(o => (o.user.tgId ?? o.user.vkId) === uid)) return "profile";
+    return "list";
+  }, [query, allOrders]);
+
   return (
     <div className="twa-orders-shell" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: "transparent" }}>
 
@@ -2189,72 +2397,142 @@ export default function OrdersScreen({
           </button>
         </div>
 
-        <div className="twa-orders-modes" role="tablist" aria-label="Режим заказов">
-          {ORDER_MODES.map(mode => (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeMode === mode.id}
-              key={mode.id}
-              className={`twa-press-sm${activeMode === mode.id ? " is-active" : ""}`}
-              onClick={() => { haptic.select(); setFilter(mode.filter); setAllView("list"); }}
-            >
-              <strong>{mode.label}</strong>
-              <span>{data?.counts?.[mode.countKey] ?? 0}</span>
-            </button>
-          ))}
+        {/* Segmented control */}
+        <div style={{
+          display: "flex", background: "rgba(118,118,128,0.18)",
+          borderRadius: 10, padding: 2, margin: "0 16px",
+        }}>
+          {ORDER_MODES.map(mode => {
+            const isSel = activeMode === mode.id;
+            return (
+              <button
+                key={mode.id}
+                type="button"
+                className="twa-press-sm"
+                onClick={() => { haptic.select(); setFilter(mode.filter); setAllView("list"); }}
+                style={{
+                  flex: 1, padding: "8px 0", borderRadius: 8, border: "none",
+                  background: isSel ? C.card : "transparent",
+                  color: isSel ? C.textPrimary : C.textSecondary,
+                  fontSize: 14, fontWeight: 600, fontFamily: "inherit",
+                  textAlign: "center", cursor: "pointer",
+                  boxShadow: isSel ? "0 1px 3px rgba(0,0,0,0.2)" : "none",
+                  transition: "all 0.15s",
+                }}
+              >
+                {mode.label} · {data?.counts?.[mode.countKey] ?? 0}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="twa-orders-status-strip twa-no-scrollbar">
-          {(["BUYOUT", "AWAITING_LINK", "ERROR", "REJECTED"] as FilterTab[]).map(id => (
-            <button
-              type="button"
-              key={id}
-              className={`twa-press-sm${filter === id ? " is-active" : ""}`}
-              onClick={() => { haptic.select(); setFilter(id); }}
-            >
-              <i style={{ background: TAB_META[id].color }} />
-              <span>{TAB_META[id].label}</span>
-              <b>{data?.counts?.[id] ?? 0}</b>
-            </button>
-          ))}
-          <button type="button" className="twa-orders-filter-trigger twa-press-sm" onClick={() => setFiltersOpen(true)}>
-            Фильтры{WORK_FILTERS.has(filter) && filter !== "WORK" && !["BUYOUT", "AWAITING_LINK", "ERROR"].includes(filter) ? " · 1" : ""}
-          </button>
-        </div>
-      </div>
-
-      {filtersOpen && (
-        <div className="twa-filter-sheet-layer" role="presentation" onClick={() => setFiltersOpen(false)}>
-          <section className="twa-filter-sheet twa-fade-up" role="dialog" aria-modal="true" aria-label="Фильтры заказов" onClick={event => event.stopPropagation()}>
-            <div className="twa-filter-sheet-head"><div><small>Заказы</small><strong>Фильтры</strong></div><button type="button" className="twa-icon-button twa-press-sm" onClick={() => setFiltersOpen(false)}>×</button></div>
-            <div className="twa-filter-options">
-              <button type="button" className={filter === "WORK" ? "is-active" : ""} onClick={() => { setFilter("WORK"); setFiltersOpen(false); }}><span>Все в работе</span><b>{data?.counts?.WORK ?? 0}</b></button>
-              {FILTERS.filter(item => item.id !== "DONE").map(item => {
-                const count = (data?.counts?.[item.id] ?? 0) + (item.id === "DIRECT" ? (data?.counts?.INTENTS ?? 0) : 0);
-                return <button type="button" key={item.id} className={filter === item.id ? "is-active" : ""} onClick={() => { haptic.select(); setFilter(item.id); setFiltersOpen(false); }}><span>{TAB_META[item.id].label}</span><b>{count}</b></button>;
+        {/* Pill filters */}
+        {filter !== "DONE" && !query && (() => {
+          const modeDefault: FilterTab = activeMode === "all" ? "ALL" : "WORK";
+          const pillDefs: { id: FilterTab; label: string; color: string }[] = [
+            { id: modeDefault, label: "Всё", color: C.textPrimary },
+            ...FILTERS
+              .filter(f => activeMode === "work" ? f.id !== "DONE" && f.id !== "REJECTED" : f.id !== "DONE")
+              .map(f => ({ id: f.id, label: TAB_META[f.id].label, color: TAB_META[f.id].color })),
+          ];
+          return (
+            <div className="twa-no-scrollbar" style={{
+              display: "flex", gap: 6, padding: "0 16px",
+              overflowX: "auto",
+            }}>
+              {pillDefs.map(pill => {
+                const count = (data?.counts?.[pill.id] ?? 0) + (pill.id === "DIRECT" ? (data?.counts?.INTENTS ?? 0) : 0);
+                const isActive = !isAttentionView && filter === pill.id;
+                return (
+                  <button
+                    key={pill.id}
+                    type="button"
+                    className="twa-press-sm"
+                    onClick={() => { haptic.select(); setFilter(pill.id); setAllView("list"); }}
+                    style={{
+                      flexShrink: 0, padding: "7px 13px", borderRadius: 999, border: "none",
+                      background: isActive ? `${pill.color}2a` : "rgba(255,255,255,0.06)",
+                      color: isActive ? pill.color : C.textSecondary,
+                      fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+                      display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
+                    }}
+                  >
+                    {pill.id !== modeDefault && (
+                      <i style={{ width: 5, height: 5, borderRadius: "50%", background: pill.color, flexShrink: 0 }} />
+                    )}
+                    {pill.label}
+                    {count > 0 && <span style={{ ...tabular, opacity: 0.7 }}>{count}</span>}
+                  </button>
+                );
               })}
+              {(data?.counts?.["ATTENTION"] ?? 0) > 0 && (
+                <button
+                  type="button"
+                  className="twa-press-sm"
+                  onClick={() => { haptic.select(); setFilter("ALL"); setAllView("attention"); }}
+                  style={{
+                    flexShrink: 0, padding: "7px 13px", borderRadius: 999, border: "none",
+                    background: isAttentionView ? `${C.orange}2a` : "rgba(255,255,255,0.06)",
+                    color: isAttentionView ? C.orange : C.textSecondary,
+                    fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+                    display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
+                  }}
+                >
+                  ⚠ Внимание
+                  <span style={{ ...tabular, opacity: 0.7 }}>{data?.counts?.["ATTENTION"] ?? 0}</span>
+                </button>
+              )}
             </div>
-          </section>
-        </div>
-      )}
+          );
+        })()}
+      </div>
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
         {/* Mini-dashboard: суммы и возраст очередей. «В работе» — три рабочие
             категории (контракт WORK), «Все» — полная сетка, внутри категории —
             её карточка. Скроллится вместе с лентой, высоту тулбара не отбирает. */}
-        {data?.sums && !query && (filter === "WORK" || filter === "ALL") && !isAttentionView && (
-          <div style={{ paddingTop: 10, paddingBottom: 2 }}>
-            <MiniDashboard
-              counts={data.counts}
-              sums={data.sums}
-              oldest={data.oldest}
-              onTap={setFilter}
-              groups={filter === "WORK" ? DASHBOARD_GROUPS.filter(g => WORK_DASHBOARD_KEYS.has(g.key)) : DASHBOARD_GROUPS}
-            />
-          </div>
-        )}
+        {data?.sums && !query && (filter === "WORK" || filter === "ALL") && !isAttentionView && (() => {
+          const groups = filter === "WORK" ? DASHBOARD_GROUPS.filter(g => WORK_DASHBOARD_KEYS.has(g.key)) : DASHBOARD_GROUPS;
+          const visible = groups.filter(g => (data.counts[g.filter] ?? 0) > 0);
+          if (visible.length === 0) return null;
+          return (
+            <div style={{ padding: "10px 16px 2px" }}>
+              <div
+                onClick={() => { haptic.impact("light"); setDashExpanded(v => !v); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 12,
+                  padding: "10px 14px", cursor: "pointer",
+                  background: "rgba(255,255,255,0.04)",
+                  borderRadius: dashExpanded ? "12px 12px 0 0" : 12,
+                  transition: "border-radius 0.15s",
+                }}
+              >
+                {visible.map(g => (
+                  <span key={g.key} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 14, fontWeight: 600, color: g.color, ...tabular }}>
+                    <i style={{ width: 7, height: 7, borderRadius: "50%", background: g.color, flexShrink: 0 }} />
+                    {data.counts[g.filter] ?? 0}
+                  </span>
+                ))}
+                <span style={{
+                  marginLeft: "auto", color: C.accent, fontSize: 12, fontWeight: 600,
+                  flexShrink: 0,
+                }}>
+                  {dashExpanded ? "Свернуть ↑" : "Подробнее ↓"}
+                </span>
+              </div>
+              {dashExpanded && (
+                <MiniDashboard
+                  counts={data.counts}
+                  sums={data.sums}
+                  oldest={data.oldest}
+                  onTap={(f) => { setFilter(f); setDashExpanded(false); }}
+                  groups={groups}
+                />
+              )}
+            </div>
+          );
+        })()}
         {data?.sums && !query && (filter === "BUYOUT" || filter === "AWAITING_LINK") && (
           <div style={{ paddingTop: 10, paddingBottom: 2 }}>
             <MiniDashboard
@@ -2317,23 +2595,32 @@ export default function OrdersScreen({
             {(query || isAttentionView || filter === "DONE") && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 2px" }}>
               <span style={{ fontSize: 14, color: C.textSecondary, letterSpacing: 0.1 }}>
                 {isAttentionView && "⚠ "}{summaryText}
+                {query && searchMode === "spotlight" && (
+                  <span style={{ color: C.textTertiary }}> · точное совпадение по коду WB</span>
+                )}
+                {query && searchMode === "profile" && (
+                  <span style={{ color: C.textTertiary }}> · {allOrders.length} {pluralOrders(allOrders.length).split(" ").pop()} у 1 клиента</span>
+                )}
               </span>
-              {filter === "ALL" && !query && (
-                <button
-                  className="twa-press-sm"
-                  onClick={() => { haptic.select(); setAllView(v => v === "attention" ? "list" : "attention"); }}
-                  style={{
-                    background: "transparent", border: "none", cursor: "pointer",
-                    color: C.accent, fontSize: 14, fontWeight: 600,
-                    padding: "4px 2px", flexShrink: 0, whiteSpace: "nowrap",
-                  }}
-                >
-                  {allView === "attention"
-                    ? "Все заказы →"
-                    : `⚠ Внимание${(data?.counts?.["ATTENTION"] ?? 0) > 0 ? ` (${data?.counts?.["ATTENTION"]})` : ""}`}
-                </button>
-              )}
             </div>}
+
+            {/* S2: Spotlight — точное совпадение по WB-коду */}
+            {query && searchMode === "spotlight" && allOrders[0] && (
+              <SpotlightCard
+                order={allOrders[0]}
+                token={token}
+                onRunAction={(action, reason) => runAction(allOrders[0], action, reason)}
+                onPurchaseDone={() => handlePurchaseDone(allOrders[0])}
+                onSaveNote={(note) => saveNote(allOrders[0].id, note)}
+                onToggleFavorite={() => toggleFavorite(allOrders[0])}
+                onMoved={() => handleMoved(allOrders[0])}
+              />
+            )}
+
+            {/* S1: Profile card — все заказы одного клиента */}
+            {query && searchMode === "profile" && allOrders.length > 0 && (
+              <SearchProfileCard user={allOrders[0].user} orders={allOrders} />
+            )}
 
             {filter === "DONE" ? (
               <>
@@ -2393,7 +2680,7 @@ export default function OrdersScreen({
                 ))}
               </>
 
-            ) : (
+            ) : searchMode === "spotlight" ? null : (
               allOrders.map((order, idx) => (
                 <Fragment key={order.id}>
                   {filter === "AWAITING_LINK" && !query && idx === AWAITING_LINK_HEAD && (
