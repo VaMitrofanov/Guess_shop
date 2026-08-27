@@ -109,6 +109,10 @@ production smoke и проверка одной новой оплаты на у�
 - `bots/shared/gamepass-search.ts` — `searchGamepassesByNick` → union `user_not_found /
   no_gamepasses / ok`. Поиск: до 150 публичных игр (cursor-pagination, limit=50 × 3 стр),
   до 100 геймпассов на игру. Фильтр `isForSale !== false` (не strict `=== true`).
+  **Ходит не напрямую, а через `searchGamepassesByNickRouted`** (мост первым, прямой путь
+  фолбэком): с российского хоста API-хосты Roblox недостижимы по TCP, и прямой вызов там
+  означал полторы минуты ожидания и ответ `user_not_found` про существующий аккаунт —
+  см. [corridor-and-site.md](corridor-and-site.md#roblox-недоступен-с-российского-хоста--весь-поиск-идёт-через-мост-28082026).
 - Сессии — **in-memory** (`session.ts`): `pendingLink`, `pendingRobloxNick`,
   `pendingDirectFlow`, `pendingNickEdit`, `pendingReview`, `pendingPaymentScreenshot` и т.д.
   После рестарта восстанавливаются из БД (см. ниже).

@@ -4,8 +4,12 @@
  * Runs on the Singapore instance. Accepts Roblox gamepass validation requests
  * from Russia-based bots that cannot reach Roblox APIs directly.
  *
- * Endpoint:
- *   GET /check-pass?id=<ASSET_ID>
+ * Endpoints:
+ *   GET  /check-pass?id=<ASSET_ID>
+ *   GET  /gamepass-by-id?id=<ASSET_ID>
+ *   GET  /roblox-user?username=<NICK> | ?userId=<ID>
+ *   POST /search-gamepasses  { username }
+ *   POST /tg-proxy
  *   Header: x-validator-key: <VALIDATOR_KEY>
  *
  * Response:
@@ -20,7 +24,12 @@
  */
 
 import * as http from "http";
-import { getGamepassDetailsDirect, getUserGamepasses, getGamepassForPurchase } from "./roblox";
+import {
+  getGamepassDetailsDirect,
+  getGamepassForPurchase,
+  getRobloxUserProfileDirect,
+  searchGamepassesByNickDirect,
+} from "./roblox";
 
 /** What the bridge hands back to the caller after a Telegram call.
  *
@@ -82,8 +91,9 @@ export function startBridgeServer(): http.Server {
     const isTgProxy          = req.method === "POST" && url.pathname === "/tg-proxy";
     const isSearchGamepasses = req.method === "POST" && url.pathname === "/search-gamepasses";
     const isGamepassById     = req.method === "GET"  && url.pathname === "/gamepass-by-id";
+    const isRobloxUser       = req.method === "GET"  && url.pathname === "/roblox-user";
 
-    if (!isCheckPass && !isTgProxy && !isSearchGamepasses && !isGamepassById) {
+    if (!isCheckPass && !isTgProxy && !isSearchGamepasses && !isGamepassById && !isRobloxUser) {
       respond(404, { ok: false, error: "not_found" });
       return;
     }
@@ -208,11 +218,42 @@ export function startBridgeServer(): http.Server {
 
       console.log(`[Bridge] → Searching gamepasses for username="${username}"`);
       try {
-        const gamepasses = await getUserGamepasses(username);
-        console.log(`[Bridge] ← "${username}": ${gamepasses.length} gamepass(es)`);
-        respond(200, { ok: true, gamepasses });
+        const { account, gamepasses } = await searchGamepassesByNickDirect(username);
+        console.log(
+          `[Bridge] ← "${username}": ` +
+          (account ? `id=${account.id}, ${gamepasses.length} gamepass(es)` : "no such Roblox account")
+        );
+        // `gamepasses` stays the first field older callers read. `account` and
+        // `userExists` are additive: a caller on the RF side needs them to tell
+        // a mistyped nick from a real account whose place is hidden, and to draw
+        // the account card without a second Roblox round trip it cannot make.
+        respond(200, { ok: true, gamepasses, userExists: account !== null, account });
       } catch (err: any) {
         console.error(`[Bridge] search-gamepasses error for "${username}":`, err?.message ?? err);
+        respond(500, { ok: false, error: "server_error" });
+      }
+      return;
+    }
+
+    // ── GET /roblox-user ────────────────────────────────────────────────────
+    // Account card (id, canonical nick, display name, headshot) by nick or id.
+    if (isRobloxUser) {
+      const username = (url.searchParams.get("username") ?? "").trim();
+      const userId   = (url.searchParams.get("userId") ?? "").trim();
+      if (!username && !userId) {
+        respond(400, { ok: false, error: "missing_username" });
+        return;
+      }
+      if (userId && !/^\d{1,20}$/.test(userId)) {
+        respond(400, { ok: false, error: "invalid_id" });
+        return;
+      }
+      try {
+        const user = await getRobloxUserProfileDirect(userId ? { userId } : { username });
+        console.log(`[Bridge] ← roblox-user ${userId || username}: ${user ? user.name : "not found"}`);
+        respond(200, { ok: true, user });
+      } catch (err: any) {
+        console.error(`[Bridge] roblox-user error for "${userId || username}":`, err?.message ?? err);
         respond(500, { ok: false, error: "server_error" });
       }
       return;
@@ -227,9 +268,17 @@ export function startBridgeServer(): http.Server {
       }
       console.log(`[Bridge] → Lookup gamepass-by-id id=${gpId}`);
       try {
-        const gp = await getGamepassForPurchase(gpId);
+        // Two different questions, asked together because the caller behind the
+        // bridge needs both and cannot ask Roblox itself: the universe walk
+        // gives placeId/productId/thumbnail for a buyout, product-info gives
+        // sale state and owner id — the pair the manual-link entry checks before
+        // it lets a buyer pay. `details` is additive; `gamepass` is unchanged.
+        const [gp, details] = await Promise.all([
+          getGamepassForPurchase(gpId),
+          getGamepassDetailsDirect(gpId).catch(() => null),
+        ]);
         console.log(`[Bridge] ← id=${gpId}: ${gp ? `"${gp.name}" ${gp.robux}R$` : "not found"}`);
-        respond(200, { ok: true, gamepass: gp });
+        respond(200, { ok: true, gamepass: gp, details });
       } catch (err: any) {
         console.error(`[Bridge] gamepass-by-id error for id=${gpId}:`, err?.message ?? err);
         respond(500, { ok: false, error: "server_error" });

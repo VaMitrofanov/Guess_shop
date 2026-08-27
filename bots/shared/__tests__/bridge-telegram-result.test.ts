@@ -1,7 +1,8 @@
 jest.mock("../roblox", () => ({
   getGamepassDetailsDirect: jest.fn(),
-  getUserGamepasses: jest.fn(),
   getGamepassForPurchase: jest.fn(),
+  getRobloxUserProfileDirect: jest.fn(),
+  searchGamepassesByNickDirect: jest.fn(),
 }));
 
 import { telegramProxySuccessPayload } from "../bridge";

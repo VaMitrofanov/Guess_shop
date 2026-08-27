@@ -19,6 +19,7 @@ import {
   Check,
   CircleAlert,
   Gamepad2,
+  Link2,
   Loader2,
   Plus,
   ReceiptText,
@@ -36,6 +37,7 @@ import {
   rankSellableGamepasses,
   robuxForGamepassPrice,
 } from "@/lib/gamepass-search-view";
+import { parseGamepassRef } from "@/lib/gamepass-id";
 import styles from "./checkout.module.css";
 
 const MIN_ROBUX = 100;
@@ -124,6 +126,19 @@ function CheckoutContent() {
   // про конкретного пользователя, и для гостя он всегда false.
   const [acquiringAccepting, setAcquiringAccepting] = useState(true);
   const [error, setError] = useState("");
+  // ── Запасной вход: ссылка или ID геймпасса ────────────────────────────────
+  // Поиск по нику стоит на публичных списках Roblox (`accessFilter=Public` +
+  // обход игр), и они молчат при живом геймпассе чаще, чем кажется: скрытый
+  // плейс (треть застрявших заказов по разбору 22.08), только что созданный
+  // пасс, лаг API. Ссылку на свой геймпасс покупатель при этом видит в
+  // браузере — она и есть второй вход в тот же заказ.
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualRef, setManualRef] = useState("");
+  const [manualBusy, setManualBusy] = useState(false);
+  const [manualErr, setManualErr] = useState("");
+  const [manualPass, setManualPass] = useState<RobloxPass | null>(null);
+  /** Поиск по нику уже отработал и ничего не дал — открываем запасной вход сами. */
+  const [nickDeadEnd, setNickDeadEnd] = useState(false);
   const idempotencyKey = useRef(crypto.randomUUID());
 
   const customerRate = quote
@@ -187,6 +202,9 @@ function CheckoutContent() {
     setQuote(null);
     setQuoteLoading(false);
     setAccount(null);
+    setNickDeadEnd(false);
+    setManualPass(null);
+    setManualErr("");
     try {
       const res = await fetch(`/api/roblox/gamepasses?query=${encodeURIComponent(normalized)}`);
       const data = await res.json();
@@ -219,9 +237,13 @@ function CheckoutContent() {
           if (autoSelectMatching) setQuoteLoading(true);
         }
         if (ranked.length === 0) {
+          // Тупик поиска по нику — единственное место, где запасной вход нужен
+          // прямо сейчас, поэтому он раскрывается сам, а не прячется за ссылкой.
+          setNickDeadEnd(true);
+          setManualOpen(true);
           setError(data.userExists === false
-            ? "Такого пользователя Roblox не нашли. Проверь ник."
-            : "Аккаунт найден, но геймпассов на продажу пока нет. Создай пасс по инструкции и повтори поиск.");
+            ? "Такого пользователя Roblox не нашли. Проверь ник — или вставь ссылку на геймпасс ниже."
+            : "Аккаунт найден, но геймпассов на продажу не видно. Так бывает, когда плейс скрыт: вставь ссылку на геймпасс ниже — этого достаточно.");
         }
       } else if (!silent || res.ok) {
         setError(data.error || "Не удалось проверить геймпассы. Попробуй ещё раз.");
@@ -316,40 +338,75 @@ function CheckoutContent() {
     return () => controller.abort();
   }, [repeatBuyerFlow, robux, selectedPass, selectedPriceMatches]);
 
-  const isDirectQuery = (value: string) => {
-    const query = value.trim();
-    return /^\d+$/.test(query) || /game-pass(?:es)?\/\d+/i.test(query) || /catalog\/\d+/i.test(query) || /library\/\d+/i.test(query);
+  /**
+   * Проверка одной конкретной ссылки/ID. В отличие от поиска по нику ответ
+   * ровно один, поэтому и рисуется он одной карточкой — вместе с причиной,
+   * если пасс взять нельзя: молчаливо неактивная кнопка «Продолжить» и была
+   * тем тупиком, из-за которого покупатель уходил.
+   */
+  const runManualLookup = async (rawInput?: string) => {
+    const raw = (rawInput ?? manualRef).trim();
+    const id = parseGamepassRef(raw);
+    setManualPass(null);
+    if (!id) {
+      setManualErr("Не похоже на ссылку или номер геймпасса. Скопируй адрес страницы геймпасса целиком — например roblox.com/game-pass/1234567.");
+      return;
+    }
+    setManualErr("");
+    setManualBusy(true);
+    try {
+      const res = await fetch(`/api/roblox/gamepasses?query=${encodeURIComponent(id)}`);
+      const data = await res.json();
+      const found = (data?.gamepasses ?? [])[0] as RobloxPass | undefined;
+      if (!res.ok || !data?.success || !found) {
+        setManualErr("Не нашли такой геймпасс на Roblox. Проверь, что ссылка ведёт на сам Game Pass, а не на игру, и что он опубликован.");
+        return;
+      }
+      setManualPass(found);
+    } catch {
+      setManualErr("Не удалось связаться с Roblox. Попробуй ещё раз через минуту.");
+    } finally {
+      setManualBusy(false);
+    }
+  };
+
+  /**
+   * Робуксы уходят ВЛАДЕЛЬЦУ геймпасса, поэтому ник заказа берём у самого пасса,
+   * а не у того, что покупатель набрал в поиске: при ручном вводе ссылки он мог
+   * не набирать ничего. Тот же ник потом проверяет гард заказа на сервере.
+   */
+  const acceptManualPass = (pass: RobloxPass) => {
+    const owner = (pass.creatorName || pass.sellerName || "").trim();
+    if (owner) {
+      setUsername(owner);
+      setSearchQuery(owner);
+      setAccount(null);
+    }
+    setGamepasses([pass]);
+    selectPass(pass);
   };
 
   const handleSearch = async () => {
     const query = searchQuery.trim();
     if (!query) return;
-    if (!isDirectQuery(query)) {
-      await lookupUsername(query);
+    // Ссылку вставили в поле ника — это не опечатка, а готовый ответ. Ссылка
+    // переезжает в своё поле целиком: два одинаковых инпута подряд читаются
+    // как сбой, а поле ника должно остаться полем ника.
+    if (parseGamepassRef(query)) {
+      setError("");
+      setGamepasses([]);
+      setSelectedPass(null);
+      setQuote(null);
+      setAccount(null);
+      setUsername("");
+      setSearchQuery("");
+      setNickDeadEnd(false);
+      setManualOpen(true);
+      setManualRef(query);
+      await runManualLookup(query);
       return;
     }
-    setSearching(true);
-    setError("");
-    setGamepasses([]);
-    setSelectedPass(null);
-    setAccount(null);
-    setUsername("");
-    try {
-      const res = await fetch(`/api/roblox/gamepasses?query=${encodeURIComponent(query)}`);
-      const data = await res.json();
-      if (res.ok && data.success && data.gamepasses?.length > 0) {
-        setGamepasses(data.gamepasses);
-        const found = data.gamepasses[0] as RobloxPass;
-        setSelectedPass(found);
-        if (found.creatorName || found.sellerName) setUsername(found.creatorName || found.sellerName || "");
-      } else {
-        setError("Геймпасс не найден. Проверь ссылку или ID.");
-      }
-    } catch {
-      setError("Не удалось найти геймпасс. Попробуй ещё раз.");
-    } finally {
-      setSearching(false);
-    }
+    await lookupUsername(query);
   };
 
   const applyProfilePayload = (body: { profile?: CustomerRobloxProfileLike | null; accounts?: CustomerRobloxProfileLike[] }) => {
@@ -750,6 +807,87 @@ function CheckoutContent() {
                       </button>;
                     })}
                   </div>
+              </div>
+            )}
+
+            {/* ── Запасной вход: ссылка или ID геймпасса ──────────────────
+                Раскрыт сам, когда поиск по нику зашёл в тупик; в остальное
+                время — тихая ссылка под результатами, чтобы не спорить с
+                основным сценарием. */}
+            {!manualOpen && !nickDeadEnd ? (
+              <button type="button" className={styles.manualToggle} onClick={() => setManualOpen(true)}>
+                <Link2 size={17} /> Не находит геймпасс? Вставить ссылку или ID вручную
+              </button>
+            ) : (
+              <div className={styles.panel}>
+                <div className={styles.panelHeading}>
+                  <span className={styles.panelIcon}><Link2 size={21} /></span>
+                  <div><span>Запасной вход</span><h2>Ссылка на геймпасс</h2></div>
+                </div>
+                <p className={styles.resultLead}>
+                  Открой геймпасс в браузере (Creator Hub → <b>Creations</b> → игра → <b>Passes</b> → нажми на пасс) и скопируй адрес. Подойдёт и просто <b>номер</b> геймпасса.
+                </p>
+                <div className={styles.searchRow}>
+                  <div className={styles.searchField}>
+                    <Link2 size={19} />
+                    <input
+                      value={manualRef}
+                      onChange={(event) => setManualRef(event.target.value)}
+                      onKeyDown={(event) => { if (event.key === "Enter") void runManualLookup(); }}
+                      placeholder="https://www.roblox.com/game-pass/…"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      aria-label="Ссылка на геймпасс или его номер"
+                    />
+                  </div>
+                  <button type="button" onClick={() => void runManualLookup()} disabled={manualBusy || !manualRef.trim()}>
+                    {manualBusy ? <Loader2 size={19} className={styles.spin} /> : <Check size={18} />} Проверить
+                  </button>
+                </div>
+
+                {manualErr && <div className={styles.manualWarn} role="alert"><CircleAlert size={18} /><span>{manualErr}</span></div>}
+
+                {manualPass && (() => {
+                  // Одна карточка на все исходы. Взять пасс мешают ровно две
+                  // вещи — он снят с продажи или его цена не сводится ни к
+                  // какому заказу; обе называем словами, чтобы человек знал,
+                  // что именно править, а не гадал над серой кнопкой.
+                  const offsale = manualPass.isForSale === false;
+                  const passRobux = robuxForGamepassPrice(Number(manualPass.price));
+                  const matches = gamepassPriceMatches(Number(manualPass.price), expectedPassPrice);
+                  const ready = !offsale && (matches || passRobux !== null);
+                  const owner = manualPass.creatorName || manualPass.sellerName || "";
+                  return (
+                    <div className={styles.manualResult}>
+                      {offsale && (
+                        <div className={styles.manualWarn}><CircleAlert size={18} /><span>Геймпасс найден, но он <b>не выставлен на продажу</b>. Включи <b>Item for sale</b> на его странице и нажми «Проверить» снова.</span></div>
+                      )}
+                      {!offsale && !matches && passRobux === null && (
+                        <div className={styles.manualWarn}><CircleAlert size={18} /><span>Цена пасса <b>{Number(manualPass.price).toLocaleString("ru-RU")} R$</b> вне диапазона заказа ({MIN_ROBUX.toLocaleString("ru-RU")}–{MAX_ROBUX.toLocaleString("ru-RU")} R$). Поставь <b>{expectedPassPrice.toLocaleString("ru-RU")} R$</b> и нажми «Проверить» снова.</span></div>
+                      )}
+                      {ready && owner && (
+                        <div className={styles.manualOk}><BadgeCheck size={18} /><span>Владелец пасса — <b>{owner}</b>. Робуксы придут именно на этот аккаунт.</span></div>
+                      )}
+                      <button
+                        type="button"
+                        className={String(selectedPass?.id ?? "") === String(manualPass.id) ? styles.passSelected : styles.passCard}
+                        onClick={() => acceptManualPass(manualPass)}
+                        disabled={!ready}
+                      >
+                        <span className={styles.passImage}>{manualPass.image ? <Image src={manualPass.image} width={150} height={150} alt="" unoptimized /> : <WalletCards size={22} />}</span>
+                        <span className={styles.passInfo}>
+                          <strong>{manualPass.name}</strong>
+                          <small>Цена пасса · {Number(manualPass.price).toLocaleString("ru-RU")} R$</small>
+                          <em className={matches ? styles.priceOk : passRobux ? styles.priceAlternative : styles.priceWrong}>
+                            {matches ? `Получишь ${robux.toLocaleString("ru-RU")} R$` : passRobux ? `Купить ${passRobux.toLocaleString("ru-RU")} R$ через этот пасс` : "Вне доступного диапазона"}
+                          </em>
+                        </span>
+                        {String(selectedPass?.id ?? "") === String(manualPass.id) && <Check size={19} />}
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 

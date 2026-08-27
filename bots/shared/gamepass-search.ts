@@ -8,10 +8,10 @@
  * neither could fix their problem.
  *
  * This module:
- *   1. Resolves the username → userId via `resolveRobloxUserId`, so we can
- *      detect "no such user on Roblox" separately.
- *   2. Lists every for-sale gamepass across all the user's public games via
- *      `listForSaleGamepasses`, with no price-based filtering.
+ *   1. Resolves the username → account (id, canonical nick, headshot), so we
+ *      can detect "no such user on Roblox" separately.
+ *   2. Lists every for-sale gamepass across all the user's public games,
+ *      with no price-based filtering.
  *   3. Tags each result with `isPriceMatch` (|robux − expectedPrice| ≤ 2),
  *      so the caller renders the matching/non-matching split.
  *
@@ -20,8 +20,7 @@
  */
 
 import {
-  resolveRobloxUserId,
-  listForSaleGamepasses,
+  searchGamepassesByNickRouted,
   type GamepassSearchResult,
 } from "./roblox";
 
@@ -42,12 +41,16 @@ export async function searchGamepassesByNick(
   nick: string,
   expectedPrice: number,
 ): Promise<GamepassSearchOutcome> {
-  const userId = await resolveRobloxUserId(nick);
-  if (!userId) {
+  // Routed, not direct: from the Russian host Roblox's API edge is unreachable,
+  // and a direct call there answers "user_not_found" for every nick after a
+  // ~90 s retry budget. `searchGamepassesByNickRouted` prefers the bridge and
+  // only falls back to direct calls where Roblox is actually reachable.
+  const { account, gamepasses: raw } = await searchGamepassesByNickRouted(nick);
+  if (!account) {
     return { status: "user_not_found", nick, expectedPrice };
   }
+  const userId = Number(account.id);
 
-  const raw = await listForSaleGamepasses(userId, nick);
   if (raw.length === 0) {
     return { status: "no_gamepasses", nick, expectedPrice, userId };
   }

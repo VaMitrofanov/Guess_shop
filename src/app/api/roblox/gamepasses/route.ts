@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRobloxAvatar, getUserGamepasses, getRobloxUser } from "@/lib/roblox";
+import { searchGamepassesByNick } from "@/lib/roblox";
 import { noteProbableNickByCode } from "@/lib/capture-nick";
 import { parseGamepassRef } from "@/lib/gamepass-id";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
@@ -48,8 +48,11 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Username lookup ──────────────────────────────────────────────
-    const user = await getRobloxUser(q);
-    if (!user) {
+    // Один поход наружу отдаёт и аккаунт, и пассы. `userExists` отделяет
+    // опечатку в нике от «аккаунт есть, но пассов не видно» — вторую страница
+    // лечит ручным вводом ссылки, первую нет.
+    const { userExists, account, gamepasses } = await searchGamepassesByNick(q);
+    if (!userExists) {
       return NextResponse.json({
         success: true,
         gamepasses: [],
@@ -59,39 +62,17 @@ export async function GET(req: NextRequest) {
         account: null,
       });
     }
-    const [gamepasses, avatarUrl] = await Promise.all([
-      getUserGamepasses(user.name ?? q, user.id),
-      getRobloxAvatar(user.id),
-    ]);
-    const account = {
-      id: String(user.id),
-      username: user.name ?? q,
-      displayName: user.displayName ?? user.name ?? q,
-      avatarUrl,
-    };
-    if (gamepasses.length > 0) {
-      if (wbCode) await noteProbableNickByCode(wbCode, q, "site-search");
-      return NextResponse.json({
-        success: true,
-        gamepasses,
-        isDirect: false,
-        detectedUsername: account.username,
-        userExists: true,
-        account,
-      });
-    }
-    // Empty — distinguish "no such user on Roblox" (likely a typo) from
-    // "user exists but has no public for-sale gamepasses" (place closed / not
-    // created). Mirrors the bot's searchGamepassesByNick branching. We only pay
-    // for this extra resolve when the fast path returned nothing.
     if (wbCode) await noteProbableNickByCode(wbCode, q, "site-search");
+    // Аккаунт может не приехать (мост без `/roblox-user`), а пассы — приехать.
+    // Ветка «пользователя нет» тут была бы ложью: страница просто рисуется без
+    // карточки аккаунта, а имя берётся из того, что нашлось.
     return NextResponse.json({
       success: true,
-      gamepasses: [],
+      gamepasses,
       isDirect: false,
-      detectedUsername: account.username,
+      detectedUsername: account?.username ?? q,
       userExists: true,
-      account,
+      account: account ?? null,
     });
   } catch (error) {
     console.error("[Gamepasses API] Error:", error);

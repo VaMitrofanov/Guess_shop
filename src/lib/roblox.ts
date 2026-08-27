@@ -1,7 +1,22 @@
 /**
  * Roblox API integration utilities.
  * All requests include User-Agent to avoid 403 blocks from server-side fetches.
+ *
+ * Порядок источников: сначала сингапурский мост (`VALIDATOR_SOURCE_URL`), потом
+ * прямые запросы. С российского хоста прямой путь до API-хостов Roblox не
+ * работает вообще — подробности и симптомы в `src/lib/roblox-bridge.ts`. Там,
+ * где моста нет (локальная разработка, SG-хосты, тесты), всё идёт как раньше.
  */
+
+import {
+  bridgeConfigured,
+  bridgeGamepassById,
+  bridgeGamepassDetails,
+  bridgeRobloxUser,
+  bridgeSearchGamepasses,
+  type BridgeAccount,
+  type BridgePass,
+} from "./roblox-bridge";
 
 const UA = "Mozilla/5.0 (compatible; RobloxBank/1.0; +https://robloxbank.ru)";
 const TIMEOUT_MS = 8_000;
@@ -30,7 +45,32 @@ async function rFetch(url: string, init: RequestInit = {}) {
   throw lastError instanceof Error ? lastError : new Error("Roblox request failed");
 }
 
+/**
+ * Мост отдаёт нормализованный профиль, а вызывающий код здесь исторически
+ * читает сырой ответ Roblox (`name`/`displayName`/`id`). Приводим к нему, чтобы
+ * переключение источника не потребовало трогать ни один вызов.
+ */
+function toRobloxUserShape(account: BridgeAccount) {
+  return {
+    id: Number(account.id),
+    name: account.name,
+    displayName: account.displayName,
+    requestedName: account.name,
+    avatarUrl: account.avatarUrl,
+    description: account.description ?? null,
+    created: account.created ?? null,
+  };
+}
+
 export async function getRobloxUser(username: string) {
+  if (bridgeConfigured()) {
+    const viaBridge = await bridgeRobloxUser({ username });
+    if (viaBridge) return toRobloxUserShape(viaBridge);
+  }
+  return getRobloxUserDirect(username);
+}
+
+async function getRobloxUserDirect(username: string) {
   try {
     const res = await rFetch("https://users.roblox.com/v1/usernames/users", {
       method: "POST",
@@ -47,6 +87,10 @@ export async function getRobloxUser(username: string) {
 }
 
 export async function getRobloxUserById(userId: string) {
+  if (bridgeConfigured()) {
+    const viaBridge = await bridgeRobloxUser({ userId });
+    if (viaBridge) return toRobloxUserShape(viaBridge);
+  }
   try {
     const res = await rFetch(`https://users.roblox.com/v1/users/${userId}`);
     if (!res.ok) return null;
@@ -58,6 +102,14 @@ export async function getRobloxUserById(userId: string) {
 }
 
 export async function getRobloxAvatar(userId: string | number) {
+  if (bridgeConfigured()) {
+    const viaBridge = await bridgeRobloxUser({ userId });
+    if (viaBridge) return viaBridge.avatarUrl;
+  }
+  return getRobloxAvatarDirect(userId);
+}
+
+async function getRobloxAvatarDirect(userId: string | number): Promise<string | null> {
   try {
     const res = await rFetch(
       `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=true`,
@@ -113,6 +165,19 @@ export async function getRobloxPublicProfileById(userId: string): Promise<Roblox
 }
 
 export async function getGamepassDetails(gamepassId: string) {
+  if (bridgeConfigured()) {
+    const viaBridge = await bridgeGamepassDetails(gamepassId);
+    if (viaBridge) {
+      return {
+        id:          String(viaBridge.id ?? gamepassId),
+        name:        viaBridge.name ?? "Gamepass",
+        price:       viaBridge.price ?? 0,
+        creatorId:   viaBridge.creatorId ?? 0,
+        creatorName: viaBridge.creatorName,
+        isActive:    viaBridge.isActive !== false,
+      };
+    }
+  }
   try {
     // Attempt 0: product-info — ЕДИНСТВЕННЫЙ живой источник по одному пассу.
     //
@@ -217,6 +282,25 @@ export async function getGamepassDetails(gamepassId: string) {
 }
 
 export async function getGamepassById(gamepassId: string) {
+  if (bridgeConfigured()) {
+    const viaBridge = await bridgeGamepassById(gamepassId);
+    // Владелец и состояние продажи живут в `details`, а картинка и placeId — в
+    // `pass`. Без `details` карточку не собрать: сайт обязан показать «снят с
+    // продажи» вместо тихого «не подходит», а гард заказа — сверить владельца.
+    if (viaBridge?.details) {
+      const { pass, details } = viaBridge;
+      return {
+        id:          gamepassId,
+        name:        details.name ?? pass?.name ?? "Gamepass",
+        price:       details.price ?? pass?.robux ?? 0,
+        creatorId:   details.creatorId ?? 0,
+        image:       pass?.image
+          ?? `https://www.roblox.com/asset-thumbnail/image?assetId=${gamepassId}&width=150&height=150&format=png`,
+        creatorName: details.creatorName ?? pass?.sellerName ?? String(details.creatorId ?? ""),
+        isForSale:   details.isActive !== false,
+      };
+    }
+  }
   try {
     const details = await getGamepassDetails(gamepassId);
     if (!details) return null;
@@ -326,6 +410,14 @@ export async function getUniverseGamepasses(universeId: string) {
 }
 
 export async function getUserGamepasses(username: string, resolvedUserId?: string | number) {
+  if (bridgeConfigured()) {
+    const viaBridge = await bridgeSearchGamepasses(username);
+    if (viaBridge) return viaBridge.gamepasses.map((pass) => toSitePassShape(pass, username));
+  }
+  return getUserGamepassesDirect(username, resolvedUserId);
+}
+
+async function getUserGamepassesDirect(username: string, resolvedUserId?: string | number) {
   try {
     const userId = resolvedUserId ?? (await getRobloxUser(username))?.id;
     if (!userId) return [];
@@ -383,6 +475,88 @@ export async function getUserGamepasses(username: string, resolvedUserId?: strin
     console.error("[Roblox] getUserGamepasses:", error);
     return [];
   }
+}
+
+/**
+ * Мост отдаёт пасс в терминах бота (`gamepassId`/`robux`), витрина читает свои
+ * (`id`/`price`). Одна точка перевода на оба вызова, чтобы поля не разъехались.
+ *
+ * `isForSale: true` не догадка: мост отдаёт только продающиеся платные пассы —
+ * тем же правилом, что и `rankSellableGamepasses` на витрине.
+ */
+function toSitePassShape(pass: BridgePass, fallbackSeller: string) {
+  return {
+    id:         pass.gamepassId,
+    name:       pass.name,
+    price:      pass.robux,
+    productId:  pass.productId ?? 0,
+    placeId:    pass.placeId ?? 0,
+    sellerName: pass.sellerName || fallbackSeller,
+    isForSale:  true,
+    image:      pass.image
+      ?? `https://www.roblox.com/asset-thumbnail/image?assetId=${pass.gamepassId}&width=150&height=150&format=png`,
+  };
+}
+
+export type NickSearchResult = {
+  /** `false` — Roblox ответил, что такого ника нет. Опечатка покупателя. */
+  userExists: boolean;
+  account: { id: string; username: string; displayName: string; avatarUrl: string | null } | null;
+  gamepasses: Awaited<ReturnType<typeof getUserGamepasses>>;
+};
+
+/**
+ * Поиск по нику одним походом наружу.
+ *
+ * Раньше страница резолвила аккаунт, потом отдельно тянула пассы, потом ещё
+ * аватар — три круга по одному и тому же маршруту. Через мост это три RTT, а
+ * при недоступном Roblox — три полных бюджета ретраев подряд, и покупатель
+ * ждал десятки секунд ради ответа «не нашли».
+ *
+ * Разделение `userExists` и пустого списка держим намеренно: «такого ника нет»
+ * покупатель чинит опечаткой, а «аккаунт есть, пассов не видно» — вставкой
+ * ссылки на геймпасс, потому что это, как правило, скрытый плейс.
+ */
+export async function searchGamepassesByNick(nick: string): Promise<NickSearchResult> {
+  const username = nick.trim();
+  if (bridgeConfigured()) {
+    const viaBridge = await bridgeSearchGamepasses(username);
+    if (viaBridge) {
+      // `account` приходит только от моста, знающего про `/roblox-user`. Старый
+      // мост отдаёт один список пассов — и он сам по себе доказывает, что
+      // аккаунт есть. Требовать здесь карточку аккаунта значило бы отвечать
+      // «такого ника нет» на успешный поиск, пока выкатка идёт не в том порядке.
+      const account = viaBridge.account;
+      return {
+        userExists: viaBridge.userExists,
+        account: account
+          ? { id: account.id, username: account.name, displayName: account.displayName, avatarUrl: account.avatarUrl }
+          : null,
+        gamepasses: viaBridge.gamepasses.map((pass) => toSitePassShape(pass, username)),
+      };
+    }
+  }
+
+  // Сюда попадаем либо без моста, либо когда он уже не ответил — второй раз
+  // стучаться в него на каждом из трёх вызовов значит утроить ожидание ровно
+  // в тот момент, когда покупатель и так ждёт дольше всего.
+  const user = await getRobloxUserDirect(username);
+  if (!user?.id) return { userExists: false, account: null, gamepasses: [] };
+  const resolvedName = String(user.name ?? username);
+  const [gamepasses, avatarUrl] = await Promise.all([
+    getUserGamepassesDirect(resolvedName, user.id),
+    getRobloxAvatarDirect(user.id),
+  ]);
+  return {
+    userExists: true,
+    account: {
+      id: String(user.id),
+      username: resolvedName,
+      displayName: String(user.displayName ?? resolvedName),
+      avatarUrl,
+    },
+    gamepasses,
+  };
 }
 
 type CheckoutGamepass = {

@@ -155,3 +155,13 @@
 :global(html[data-theme="dark"]) .paymentNotice { border-color:#68562b; background:#27200f; color:#f2d98e; }
 :global(html[data-theme="dark"]) .paymentMethods { border-color:#352b48; }
 :global(html[data-theme="dark"]) .authGate { border-color:#3a304b; background:#151120; }:global(html[data-theme="dark"]) .authGate p { color:#aaa3b8; }
+.manualToggle { width:max-content; max-width:100%; display:flex; align-items:center; gap:7px; padding:13px 15px; border:1px dashed #cfc4ee; border-radius:14px; background:#fbfaff; color:#7556e8; font-size:15px; font-weight:850; text-align:left; cursor:pointer; }
+.manualToggle:hover { border-color:#a78cf8; background:#f4f0ff; }
+.manualToggle svg { flex:0 0 auto; }
+.manualResult { margin-top:14px; display:flex; flex-direction:column; gap:10px; }
+.manualWarn,.manualOk { display:flex; align-items:flex-start; gap:9px; margin-top:12px; padding:13px 14px; border-radius:14px; font-size:15px; font-weight:750; line-height:1.5; }
+.manualResult .manualWarn,.manualResult .manualOk { margin-top:0; }
+.manualWarn { border:1px solid #ead8a2; background:#fff9e8; color:#725b20; }
+.manualOk { border:1px solid #a7e9d5; background:#e5faf3; color:#2d6b58; }
+.manualWarn svg,.manualOk svg { flex:0 0 auto; margin-top:2px; }
+.manualResult .passCard:disabled,.manualResult .passSelected:disabled { opacity:.55; cursor:not-allowed; }

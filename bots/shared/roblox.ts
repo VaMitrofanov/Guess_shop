@@ -760,6 +760,93 @@ export async function resolveRobloxUserId(username: string): Promise<number | nu
   }
 }
 
+export interface RobloxUserProfile {
+  id:          string;
+  name:        string;
+  displayName: string;
+  avatarUrl:   string | null;
+  /** Только из `users/v1/users/<id>` — при резолве по нику Roblox их не отдаёт. */
+  description?: string | null;
+  created?:     string | null;
+}
+
+/**
+ * Resolve a Roblox account to the card the site shows above the pass list:
+ * id, canonical name, display name and headshot.
+ *
+ * Always hits Roblox directly — this is the primitive the bridge itself runs,
+ * so it must never route back through `VALIDATOR_SOURCE_URL`.
+ */
+export async function getRobloxUserProfileDirect(
+  ref: { username?: string; userId?: string | number },
+): Promise<RobloxUserProfile | null> {
+  try {
+    let id = ref.userId != null ? String(ref.userId).trim() : "";
+    let name = "";
+    let displayName = "";
+    let description: string | null = null;
+    let created: string | null = null;
+
+    if (!id) {
+      const username = (ref.username ?? "").trim();
+      if (!username) return null;
+      const uRes = await rFetch("https://users.roblox.com/v1/usernames/users", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ usernames: [username], excludeBannedUsers: true }),
+      });
+      if (!uRes.ok) return null;
+      const uData: any = await uRes.json().catch(() => null);
+      const hit = uData?.data?.[0];
+      if (!hit?.id) return null;
+      id          = String(hit.id);
+      name        = String(hit.name ?? username);
+      displayName = String(hit.displayName ?? name);
+    } else {
+      const dRes = await rFetch(`https://users.roblox.com/v1/users/${encodeURIComponent(id)}`);
+      if (!dRes.ok) return null;
+      const dData: any = await dRes.json().catch(() => null);
+      if (!dData?.id) return null;
+      name        = String(dData.name ?? "");
+      displayName = String(dData.displayName ?? name);
+      description = typeof dData.description === "string" ? dData.description : null;
+      created     = typeof dData.created === "string" ? dData.created : null;
+      if (!name) return null;
+    }
+
+    const tRes = await rFetch(
+      `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${id}&size=150x150&format=Png&isCircular=true`
+    ).catch(() => null);
+    const tData: any = tRes?.ok ? await tRes.json().catch(() => null) : null;
+
+    return { id, name, displayName, description, created, avatarUrl: tData?.data?.[0]?.imageUrl ?? null };
+  } catch (err: any) {
+    console.error("[Roblox/bots] getRobloxUserProfileDirect:", err?.message ?? err);
+    return null;
+  }
+}
+
+export interface NickSearchPayload {
+  /** null → Roblox says there is no such account (or it is banned). */
+  account:    RobloxUserProfile | null;
+  gamepasses: GamepassSearchResult[];
+}
+
+/**
+ * One round trip behind the bridge's `/search-gamepasses`: resolve the account
+ * and list its for-sale passes, keeping the two answers apart.
+ *
+ * The split matters — "no such nick" is the buyer's typo to fix, while "account
+ * found, no passes" is the hidden-place case that the manual link entry exists
+ * for. Collapsing both into an empty list is what sent buyers into a dead end.
+ */
+export async function searchGamepassesByNickDirect(username: string): Promise<NickSearchPayload> {
+  const account = await getRobloxUserProfileDirect({ username });
+  if (!account) return { account: null, gamepasses: [] };
+  const gamepasses = await listForSaleGamepasses(Number(account.id), account.name);
+  return { account, gamepasses };
+}
+
 /**
  * Fetch every for-sale gamepass across a userId's public games. Returns an
  * empty array when the user has no public games, or none of their games
@@ -840,6 +927,70 @@ export async function listForSaleGamepasses(
       image:      thumbMap[gp.id]
         ?? `https://www.roblox.com/asset-thumbnail/image?assetId=${gp.id}&width=150&height=150&format=png`,
     }));
+}
+
+/**
+ * Nickname search as the bots actually run it.
+ *
+ * Roblox's API hosts (`users`/`games`/`apis`/`thumbnails`.roblox.com) all live
+ * on Roblox's own edge network, and TCP to it is blackholed from the Russian
+ * host. Every direct attempt burns the full retry budget and then reports the
+ * one thing that is certainly wrong — "no such nick" — while the buyer waits
+ * a minute and a half for it. So when the bridge is configured we ask it first
+ * and keep the direct path as the fallback for hosts that can reach Roblox.
+ */
+export async function searchGamepassesByNickRouted(username: string): Promise<NickSearchPayload> {
+  const bridgeUrl = process.env.VALIDATOR_SOURCE_URL?.trim();
+  if (bridgeUrl) {
+    const viaBridge = await searchViaBridge(username, bridgeUrl, process.env.VALIDATOR_KEY?.trim());
+    if (viaBridge !== BRIDGE_UNAVAILABLE) return viaBridge;
+    console.warn(`[Roblox/bots] Bridge unavailable for nick search "${username}" — falling back to direct`);
+  }
+  return searchGamepassesByNickDirect(username);
+}
+
+async function searchViaBridge(
+  username: string,
+  bridgeUrl: string,
+  bridgeKey: string | undefined,
+): Promise<NickSearchPayload | typeof BRIDGE_UNAVAILABLE> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20_000);
+  try {
+    const res = await fetch(`${bridgeUrl.replace(/\/+$/, "")}/search-gamepasses`, {
+      method:  "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept":       "application/json",
+        ...(bridgeKey ? { "x-validator-key": bridgeKey } : {}),
+      },
+      body:   JSON.stringify({ username }),
+      signal: controller.signal,
+    });
+    if (res.status === 401) {
+      console.error("[Roblox/bots] Bridge returned 401 on search — check VALIDATOR_KEY on both sides");
+      return BRIDGE_UNAVAILABLE;
+    }
+    const body: any = await res.json().catch(() => null);
+    if (!body?.ok) {
+      console.warn(`[Roblox/bots] Bridge non-ok search for "${username}": HTTP ${res.status} — ${body?.error ?? "unknown"}`);
+      return BRIDGE_UNAVAILABLE;
+    }
+    const gamepasses: GamepassSearchResult[] = Array.isArray(body.gamepasses) ? body.gamepasses : [];
+    // An older bridge answers without `account`/`userExists`. Passes on the wire
+    // prove the account exists; nothing on the wire is genuinely ambiguous, and
+    // reporting "account exists" there keeps the buyer pointed at the manual
+    // link entry instead of at a nick that may be spelled perfectly well.
+    const account = (body.account ?? null) as RobloxUserProfile | null;
+    const userExists = typeof body.userExists === "boolean" ? body.userExists : true;
+    if (!userExists) return { account: null, gamepasses: [] };
+    return { account, gamepasses };
+  } catch (err: any) {
+    console.warn(`[Roblox/bots] Bridge unreachable for nick search "${username}": ${err?.message ?? err}`);
+    return BRIDGE_UNAVAILABLE;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function getUserGamepasses(username: string): Promise<GamepassSearchResult[]> {
