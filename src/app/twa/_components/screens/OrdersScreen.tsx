@@ -1387,6 +1387,7 @@ function SplitPartsBlock({ parts, orderAmount, orderId, token, onChanged }: {
   parts: SplitPart[]; orderAmount: number; orderId: string; token: string; onChanged: () => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const ordered = [...parts].sort((a, b) => a.position - b.position);
 
   // Ручная отметка: выкупили пасс руками, вне нашей кнопки. Клиенту НИЧЕГО не
@@ -1489,14 +1490,30 @@ function SplitPartsBlock({ parts, orderAmount, orderId, token, onChanged }: {
               }}>
                 {p.amount.toLocaleString("ru-RU")} R$
               </span>
-              <a
-                href={`https://www.roblox.com/game-pass/${p.gamepassId}`}
-                target="_blank" rel="noreferrer"
-                onClick={e => e.stopPropagation()}
-                style={{ fontSize: 12, color: C.blue, textDecoration: "none", fontVariantNumeric: "tabular-nums" }}
+              {/* ID копируется по тапу, а не открывает Roblox: выкуп идёт
+                  вставкой ID в донорский аккаунт, и это то действие, которое
+                  здесь совершают каждый раз. Ссылка на пасс открывается из
+                  общей строки заказа выше. */}
+              <button
+                className="twa-press-sm"
+                onClick={e => {
+                  e.stopPropagation();
+                  copyText(p.gamepassId);
+                  haptic.impact("light");
+                  setCopiedId(p.gamepassId);
+                  setTimeout(() => setCopiedId(c => (c === p.gamepassId ? null : c)), 1400);
+                  toast(`ID ${p.gamepassId} скопирован`, "success");
+                }}
+                style={{
+                  padding: "3px 7px", marginLeft: -3, borderRadius: 7, border: "none", cursor: "pointer",
+                  background: copiedId === p.gamepassId ? `${C.green}26` : "transparent",
+                  color: copiedId === p.gamepassId ? C.green : C.blue,
+                  fontSize: 12, fontWeight: 600, fontFamily: "inherit",
+                  fontVariantNumeric: "tabular-nums",
+                }}
               >
-                {p.gamepassId}
-              </a>
+                {copiedId === p.gamepassId ? "✓ скопирован" : p.gamepassId}
+              </button>
               <span style={{ marginLeft: "auto", fontSize: 12, color: bought ? C.green : C.textTertiary, fontVariantNumeric: "tabular-nums" }}>
                 {bought ? `−${(p.chargedPrice ?? 0).toLocaleString("ru-RU")} R$` : `ждёт ${Math.ceil(p.amount / 0.7).toLocaleString("ru-RU")} R$`}
               </span>
