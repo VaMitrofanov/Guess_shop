@@ -111,7 +111,9 @@ production smoke и проверка одной новой оплаты на у�
   до 100 геймпассов на игру. Фильтр `isForSale !== false` (не strict `=== true`).
   **Ходит не напрямую, а через `searchGamepassesByNickRouted`** (мост первым, прямой путь
   фолбэком): с российского хоста API-хосты Roblox недостижимы по TCP, и прямой вызов там
-  означал полторы минуты ожидания и ответ `user_not_found` про существующий аккаунт —
+  означал ~90 с ожидания и ответ `user_not_found` про существующий аккаунт. Это касалось
+  **ВК-бота** (он на RF); ТГ-бот на SG не ломался, и расхождение двух ботов — сигнал искать
+  сеть, а не код. После перевода на мост оба отвечают за ~1 с —
   см. [corridor-and-site.md](corridor-and-site.md#roblox-недоступен-с-российского-хоста--весь-поиск-идёт-через-мост-28082026).
 - Сессии — **in-memory** (`session.ts`): `pendingLink`, `pendingRobloxNick`,
   `pendingDirectFlow`, `pendingNickEdit`, `pendingReview`, `pendingPaymentScreenshot` и т.д.
