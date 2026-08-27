@@ -1,0 +1,67 @@
+import { readFileSync } from "fs";
+import path from "path";
+
+const ROOT = path.join(__dirname, "..", "..");
+const route = readFileSync(path.join(ROOT, "src/app/api/twa/orders/route.ts"), "utf8");
+const screen = readFileSync(path.join(ROOT, "src/app/twa/_components/screens/OrdersScreen.tsx"), "utf8");
+const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf8");
+
+/**
+ * Разбиение заменяет собой прайс-гард заказа, поэтому его контракт — это
+ * контракт денег. Эти проверки держат ровно те места, где ошибка стоит робуксов.
+ */
+describe("контракт разбитого выкупа", () => {
+  it("прайс-гард сверяется с номиналом ЧАСТИ, а не заказа", () => {
+    // Сверка с order.amount означала бы, что пасс за 1429 никогда не пройдёт
+    // в заказ на 3000 — то есть разбиение не работает вовсе.
+    expect(route).toContain("checkGamepassPrice(guardAmount, price, base)");
+    expect(route).toContain("const guardAmount = activePart ? activePart.amount : order.amount");
+  });
+
+  it("инвариант суммы перечитывается перед каждой покупкой, а не только при записи", () => {
+    // Части могли отредактировать между привязкой и выкупом.
+    expect(route).toContain("assertSplitCoversOrder(splitParts, order.amount)");
+  });
+
+  it("часть отмечается купленной ДО закрытия заказа", () => {
+    // Робуксы уже списаны: упасть между покупкой и записью можно, и тогда
+    // повторное нажатие обязано увидеть, что часть оплачена.
+    const markIdx = route.indexOf("purchasedAt: new Date()");
+    const completeIdx = route.indexOf('status: "COMPLETED", buyoutErrorCode: null, purchaseRate: currentRate, purchaserUsername');
+    expect(markIdx).toBeGreaterThan(-1);
+    expect(completeIdx).toBeGreaterThan(-1);
+    expect(markIdx).toBeLessThan(completeIdx);
+  });
+
+  it("заказ закрывается только когда куплены все части", () => {
+    expect(route).toContain("if (!splitIsComplete(fresh))");
+    expect(route).toContain('status: "IN_PROGRESS"');
+  });
+
+  it("себестоимость считается по сумме списаний, а не по последнему", () => {
+    expect(route).toContain("splitChargedTotal(");
+    expect(route).toContain("buildOrderProfitSnapshot(order, settings ?? {}, totalCharged)");
+  });
+
+  it("автозамена при региональной цене ищет пасс под номинал части", () => {
+    expect(route).toContain("findFullPriceReplacement(order, cookie, gpId, guardAmount)");
+    // И не должна попасть в соседнюю часть того же заказа.
+    expect(route).toContain("wbOrderGamepass.findMany");
+  });
+
+  it("состав нельзя менять после частичного выкупа", () => {
+    expect(route).toContain("splitParts.some((p) => p.purchasedAt)");
+  });
+
+  it("карточка показывает прогресс, а кнопка называет номер части", () => {
+    expect(screen).toContain("SplitPartsBlock");
+    expect(screen).toContain("выкуплено");
+    expect(screen).toContain("Выкупить часть ");
+    // Промежуточный успех не должен читаться как «заказ закрыт».
+    expect(screen).toContain("d.splitDone === false");
+  });
+
+  it("один пасс не может стоять в двух частях одного заказа", () => {
+    expect(schema).toContain("@@unique([orderId, gamepassId])");
+  });
+});

@@ -15,6 +15,17 @@ import { generateDirectCode } from "@/lib/twa-direct";
 import { directPrice } from "@/lib/retail-pricing";
 import { PAID_BUYOUT_SCOPE, PAID_BUYOUT_SQL } from "@/lib/buyout-queue";
 import {
+  assertSplitCoversOrder,
+  buildSplitParts,
+  describeSplitProgress,
+  nextUnpurchasedPart,
+  partPriceMatches,
+  splitChargedTotal,
+  splitIsComplete,
+  SplitError,
+  type StoredPart,
+} from "@/lib/order-gamepass-split";
+import {
   ATTENTION_BUYOUT_HOURS, ATTENTION_LINK_DAYS, NEW_CUTOFF_HOURS,
   buildTabWhere, isGamepassExportTab, loadGamepassExport, orderByForTab,
   type FilterTab,
@@ -87,27 +98,47 @@ async function findFullPriceReplacement(
   order: any,
   cookie: string,
   currentGpId: string,
+  // У разбитого заказа замену ищем под номинал ЧАСТИ, а не всего заказа:
+  // иначе на месте пасса за 1429 окажется пасс за 4286 и покупатель получит
+  // втрое больше оплаченного.
+  expectedAmount: number = order.amount,
 ): Promise<{ info: ResolvedGamepass; resolvedName: string } | null> {
   const nick = order.robloxUsername ?? order.probableNick;
   if (!nick) return null;
   const found = await searchForSalePassesByNick(nick).catch(() => null);
   if (!found || found.status !== "ok") return null;
 
-  const expected = Math.ceil(order.amount / 0.7);
+  const expected = Math.ceil(expectedAmount / 0.7);
   const plausible = found.passes.filter((pass) =>
     String(pass.gamepassId) !== currentGpId && Math.abs(pass.price - expected) <= 2,
   );
   if (plausible.length === 0) return null;
 
-  const referenced = await (prisma as any).wbOrder.findMany({
-    where: {
-      id: { not: order.id },
-      status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"] },
-      gamepassUrl: { not: null },
-    },
-    select: { gamepassUrl: true },
-  });
-  const usedIds = new Set<string>(referenced.map((row: any) => gpIdOf(row.gamepassUrl)).filter(Boolean));
+  const [referenced, splitReferenced] = await Promise.all([
+    (prisma as any).wbOrder.findMany({
+      where: {
+        id: { not: order.id },
+        status: { in: ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"] },
+        gamepassUrl: { not: null },
+      },
+      select: { gamepassUrl: true },
+    }),
+    // Части разбитых заказов — включая ДРУГИЕ части этого же заказа: замена,
+    // совпавшая с соседней частью, означала бы покупку одного пасса дважды.
+    (prisma as any).wbOrderGamepass.findMany({
+      where: {
+        OR: [
+          { orderId: order.id },
+          { order: { status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR"] } } },
+        ],
+      },
+      select: { gamepassId: true },
+    }),
+  ]);
+  const usedIds = new Set<string>([
+    ...referenced.map((row: any) => gpIdOf(row.gamepassUrl)).filter(Boolean),
+    ...splitReferenced.map((row: any) => String(row.gamepassId)),
+  ]);
 
   for (const pass of plausible) {
     const passId = String(pass.gamepassId);
@@ -206,6 +237,12 @@ export async function GET(req: NextRequest) {
     paymentAttempts: {
       orderBy: { createdAt: "desc" as const }, take: 1,
       select: { status: true, amountKopecks: true, refundedAmountKopecks: true },
+    },
+    // Части разбитого выкупа: карточка обязана показывать, сколько уже куплено,
+    // иначе «выкуплено 1 из 3» выглядит как незакрытый заказ без объяснения.
+    splitGamepasses: {
+      orderBy: { position: "asc" as const },
+      select: { id: true, gamepassId: true, amount: true, position: true, chargedPrice: true, purchasedAt: true },
     },
   };
 
@@ -891,9 +928,15 @@ export async function POST(req: NextRequest) {
 
   const order = await (prisma as any).wbOrder.findUnique({
     where: { id: orderId },
-    include: { user: { select: { id: true, tgId: true, vkId: true, username: true } } },
+    include: {
+      user: { select: { id: true, tgId: true, vkId: true, username: true } },
+      // Части разбитого выкупа. Пусто у обычного заказа — тогда всё работает
+      // по единственному `gamepassId`, как и раньше.
+      splitGamepasses: { orderBy: { position: "asc" } },
+    },
   });
   if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
+  const splitParts: StoredPart[] = order.splitGamepasses ?? [];
 
   // П5 (PLAN «+7»): неоплаченный прямой заказ не должен доходить до выкупа
   // ни одним путём — робуксы донора тратятся только после подтверждения оплаты.
@@ -1059,9 +1102,34 @@ export async function POST(req: NextRequest) {
     if (!["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status))
       return NextResponse.json({ error: "Order must be PENDING, IN_PROGRESS or ERROR" }, { status: 400 });
 
-    const gpMatch = order.gamepassUrl?.match(/game-pass(?:es)?\/(\d+)/);
-    if (!gpMatch) return NextResponse.json({ error: "No gamepass URL" }, { status: 400 });
-    let gpId = gpMatch[1];
+    // ── Разбитый заказ: покупаем ТЕКУЩУЮ часть ──────────────────────────────
+    // Инвариант суммы перечитывается здесь заново: между привязкой и выкупом
+    // части могли отредактировать, а разошедшаяся сумма означает, что
+    // покупатель получит не то количество робуксов, за которое заплатил.
+    const activePart = splitParts.length > 0 ? nextUnpurchasedPart(splitParts) : null;
+    if (splitParts.length > 0) {
+      try {
+        assertSplitCoversOrder(splitParts, order.amount);
+      } catch (err) {
+        return NextResponse.json(
+          { error: err instanceof SplitError ? err.message : "Разбиение повреждено" },
+          { status: 409 },
+        );
+      }
+      if (!activePart)
+        return NextResponse.json({ error: "Все части уже выкуплены — обнови список" }, { status: 409 });
+    }
+    /** Номинал, под который проверяется цена: у разбитого заказа — часть. */
+    const guardAmount = activePart ? activePart.amount : order.amount;
+
+    let gpId: string;
+    if (activePart) {
+      gpId = activePart.gamepassId;
+    } else {
+      const gpMatch = order.gamepassUrl?.match(/game-pass(?:es)?\/(\d+)/);
+      if (!gpMatch) return NextResponse.json({ error: "No gamepass URL" }, { status: 400 });
+      gpId = gpMatch[1];
+    }
 
     const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
     const cookie = settings?.robloxCookie;
@@ -1085,7 +1153,7 @@ export async function POST(req: NextRequest) {
     const unsafeBuyerPrice = info.hasUnsafeBuyerPrice;
     if (unsafeBuyerPrice) {
       const original = info;
-      const replacement = await findFullPriceReplacement(order, cookie, gpId);
+      const replacement = await findFullPriceReplacement(order, cookie, gpId, guardAmount);
       if (!replacement) {
         const wasRegional = order.buyoutErrorCode === BUYOUT_ERROR_REGIONAL_PRICE;
         const line = `[РЕГ-ЦЕНА ${stamp}] GP ${gpId}: донор ${original.price} R$, база ${original.basePriceInRobux} R$; полная замена по нику не найдена`;
@@ -1109,6 +1177,14 @@ export async function POST(req: NextRequest) {
 
       gpId = String(replacement.info.gamepassId);
       info = replacement.info;
+      // У разбитого заказа заменяется КОНКРЕТНАЯ часть; `gamepassUrl` заказа
+      // просто следует за текущей частью, как и везде в этом коде.
+      if (activePart) {
+        await (prisma as any).wbOrderGamepass.update({
+          where: { id: activePart.id },
+          data: { gamepassId: gpId, gamepassUrl: `https://www.roblox.com/game-pass/${gpId}` },
+        });
+      }
       await (prisma as any).wbOrder.update({
         where: { id: orderId },
         data: {
@@ -1142,11 +1218,12 @@ export async function POST(req: NextRequest) {
     // по цене, ожидаемой из номинала заказа. Раньше покупали по live-цене без
     // сверки — клиент, поднявший цену пасса после приёма ботом, получал больше.
     // Статус заказа НЕ меняем: это проблема строки, не «ошибка выкупа».
-    const { ok: priceOk, expected } = checkGamepassPrice(order.amount, price, base);
+    const { ok: priceOk, expected } = checkGamepassPrice(guardAmount, price, base);
     if (!priceOk) {
-      await appendAdminNote(orderId, `[ЦЕНА-СТОП ${stamp}] пасс ${price} R$ ≠ ожид ${expected} R$ — выкуп заблокирован`);
+      const scope = activePart ? `часть ${activePart.position + 1} на ${guardAmount} R$` : `номинал ${order.amount}`;
+      await appendAdminNote(orderId, `[ЦЕНА-СТОП ${stamp}] пасс ${price} R$ ≠ ожид ${expected} R$ (${scope}) — выкуп заблокирован`);
       return NextResponse.json({ ok: true, success: false,
-        msg: `⛔ Цена пасса ${price} R$ ≠ ожидаемой ${expected} R$ (номинал ${order.amount}). Выкуп заблокирован — нужен пасс ровно за ${expected} R$.` });
+        msg: `⛔ Цена пасса ${price} R$ ≠ ожидаемой ${expected} R$ (${scope}). Выкуп заблокирован — нужен пасс ровно за ${expected} R$.` });
     }
     // ПРОДАВЕЦ-СТОП: подтверждённый ник заказа должен совпадать с создателем
     // пасса (перенос seller-check из автовыкупа — ловит подменённый ГП).
@@ -1167,7 +1244,70 @@ export async function POST(req: NextRequest) {
       const currentRate = settings?.purchaseRate ?? null;
       const purchaserUsername = settings?.robloxAccountName ?? null;
       const chargedPrice = Number(purchaseResult.price ?? price);
-      const money = buildOrderProfitSnapshot(order, settings ?? {}, chargedPrice);
+
+      // ── Разбитый заказ: закрылась часть ───────────────────────────────────
+      // Робуксы уже списаны, поэтому отметка части идёт ПЕРВОЙ и отдельно от
+      // закрытия заказа: упасть между покупкой и записью можно, и тогда
+      // повторное нажатие обязано увидеть, что эта часть уже оплачена.
+      if (activePart) {
+        await (prisma as any).wbOrderGamepass.update({
+          where: { id: activePart.id },
+          data: { gamepassId: gpId, chargedPrice, purchasedAt: new Date() },
+        });
+        const fresh: StoredPart[] = await (prisma as any).wbOrderGamepass.findMany({
+          where: { orderId },
+          orderBy: { position: "asc" },
+        });
+        const nextPart = nextUnpurchasedPart(fresh);
+        const progress = describeSplitProgress(fresh);
+        await appendAdminNote(
+          orderId,
+          `[РАЗБИВКА ${stamp}] часть ${activePart.position + 1}/${fresh.length}: GP ${gpId} за ${chargedPrice} R$ (${progress})`,
+        );
+
+        if (!splitIsComplete(fresh)) {
+          // Заказ остаётся в очереди: покупатель не получил всё оплаченное,
+          // и уведомлять его об исполнении рано.
+          await (prisma as any).wbOrder.update({
+            where: { id: orderId },
+            data: {
+              gamepassUrl: nextPart ? `https://www.roblox.com/game-pass/${nextPart.gamepassId}` : order.gamepassUrl,
+              status: "IN_PROGRESS",
+              buyoutErrorCode: null,
+            },
+          });
+          cachedCounts = null;
+          await notifyRetailBuyoutAdmins({
+            source: "twa-order",
+            wbCode: order.wbCode,
+            gamepassId: gpId,
+            amount: activePart.amount,
+            chargedPrice,
+            donorName: purchaserUsername,
+            sellerName: creatorName,
+            balance: purchaseResult.balance,
+          }).catch((err) => console.warn("[twa/orders] admin buyout notification failed:", err));
+          return NextResponse.json({
+            ok: true,
+            success: true,
+            splitProgress: progress,
+            splitDone: false,
+            nextGamepassId: nextPart?.gamepassId ?? null,
+            chargedPrice,
+            basePrice: base,
+            balance: purchaseResult.balance,
+            msg: `Часть ${progress} куплена за ${chargedPrice} R$. Осталось ${fresh.length - fresh.filter((p) => p.purchasedAt).length} — нажми «Выкупить» ещё раз.`,
+          });
+        }
+      }
+
+      // Себестоимость заказа — сумма всех списаний, а не последнее из них.
+      const totalCharged = activePart
+        ? splitChargedTotal(
+            await (prisma as any).wbOrderGamepass.findMany({ where: { orderId }, select: { chargedPrice: true, purchasedAt: true } }),
+          )
+        : chargedPrice;
+      const money = buildOrderProfitSnapshot(order, settings ?? {}, totalCharged);
       await (prisma as any).wbOrder.updateMany({
         where: { id: orderId, status: { in: ["PENDING", "IN_PROGRESS", "ERROR"] } },
         data: { status: "COMPLETED", buyoutErrorCode: null, purchaseRate: currentRate, purchaserUsername, completedAt: new Date(), ...(money ?? {}) },
@@ -1179,7 +1319,7 @@ export async function POST(req: NextRequest) {
         wbCode: order.wbCode,
         gamepassId: gpId,
         amount: order.amount,
-        chargedPrice,
+        chargedPrice: totalCharged,
         donorName: purchaserUsername,
         sellerName: creatorName,
         balance: purchaseResult.balance,
@@ -1187,8 +1327,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         ok: true,
         success: true,
+        ...(activePart ? { splitProgress: describeSplitProgress(splitParts), splitDone: true } : {}),
         robloxPlusDiscountPercent: info.robloxPlusDiscountPercent,
-        chargedPrice,
+        chargedPrice: totalCharged,
         basePrice: base,
         balance: purchaseResult.balance,
         msg: purchaseResult.msg,
@@ -1464,6 +1605,179 @@ export async function POST(req: NextRequest) {
       wbCode: order.wbCode,
       notified,
     });
+  }
+
+  // Кандидаты для разбиения: пассы ника заказа с их номиналом «нетто».
+  // Админ тыкает по найденным пассам, а не переписывает ID руками — ошибиться
+  // в двадцатизначном числе проще, чем кажется.
+  if (action === "split-candidates") {
+    const nick = order.robloxUsername ?? order.probableNick;
+    if (!nick) return NextResponse.json({ error: "У заказа нет ника Roblox" }, { status: 400 });
+    const found = await searchForSalePassesByNick(nick).catch(() => null);
+    if (!found || found.status !== "ok")
+      return NextResponse.json({ ok: true, nick, passes: [], reason: found?.status ?? "unreachable" });
+
+    const usedByOthers = await (prisma as any).wbOrder.findMany({
+      where: {
+        id: { not: orderId },
+        isTest: false,
+        status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "AWAITING_PAYMENT", "PAYMENT_PENDING"] },
+        gamepassId: { in: found.passes.map((p: any) => String(p.gamepassId)) },
+      },
+      select: { gamepassId: true, wbCode: true },
+    });
+    const busy = new Map<string, string>(usedByOthers.map((r: any) => [String(r.gamepassId), r.wbCode]));
+
+    return NextResponse.json({
+      ok: true,
+      nick,
+      passes: found.passes.map((p: any) => ({
+        gamepassId: String(p.gamepassId),
+        name: p.name,
+        price: p.price,
+        // Номинал, который закрывает этот пасс: обратная сторона ceil(x/0.7).
+        amount: Math.floor(Number(p.price) * 7 / 10),
+        busyWith: busy.get(String(p.gamepassId)) ?? null,
+      })),
+    });
+  }
+
+  // ── Разбиение выкупа: несколько геймпассов на один заказ ──────────────────
+  // Покупателю бывает удобнее выставить три пасса по 1000 вместо одного на
+  // 3000 — а прайс-гард сверяет цену с номиналом ЗАКАЗА, и такой заказ не
+  // выкупить вообще. Здесь у каждой части свой номинал, и гард смотрит на него.
+  if (action === "set-gamepass-split") {
+    if (unpaidDirect) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
+
+    const SPLITTABLE = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING", "IN_PROGRESS"];
+    if (!SPLITTABLE.includes(order.status))
+      return NextResponse.json({ error: `Нельзя разбить заказ в статусе ${order.status}` }, { status: 400 });
+    // Уже купленную часть нельзя ни выбросить, ни переоценить: робуксы списаны.
+    if (splitParts.some((p) => p.purchasedAt))
+      return NextResponse.json(
+        { error: `Часть заказа уже выкуплена (${describeSplitProgress(splitParts)}) — сначала сними разбиение через «Снять разбиение»` },
+        { status: 409 },
+      );
+
+    let parts;
+    try {
+      parts = buildSplitParts(body.parts, order.amount);
+    } catch (err) {
+      if (err instanceof SplitError) return NextResponse.json({ error: err.message }, { status: 400 });
+      throw err;
+    }
+
+    // ── Проверка каждой части на живом Roblox ────────────────────────────────
+    // Ровно те же три вопроса, что задаёт обычный выкуп, только про часть:
+    // пасс продаётся, принадлежит нику заказа, стоит ровно `ceil(amount/0.7)`.
+    // Без этого разбиение стало бы дырой в обход прайс-гарда.
+    const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
+    const cookie = settings?.robloxCookie;
+    const checked: { gamepassId: string; amount: number; name: string; price: number }[] = [];
+    for (const part of parts) {
+      let info: ResolvedGamepass;
+      try {
+        info = cookie
+          ? await resolveGamepassForBuyer(part.gamepassId, cookie)
+          : await resolveGamepass(part.gamepassId);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Roblox не ответил";
+        return NextResponse.json({ error: `Геймпасс ${part.gamepassId}: ${msg}` }, { status: 502 });
+      }
+      if (!info.isForSale)
+        return NextResponse.json({ error: `Геймпасс ${part.gamepassId} не выставлен на продажу` }, { status: 409 });
+
+      const { ok, expected } = partPriceMatches(part, info.price, info.basePriceInRobux);
+      if (!ok)
+        return NextResponse.json({
+          error: `Геймпасс ${part.gamepassId}: цена ${info.basePriceInRobux ?? info.price} R$ ≠ ожидаемой ${expected} R$ для части на ${part.amount} R$`,
+        }, { status: 409 });
+
+      if (!sellerMatchesOrder(order.robloxUsername, info.sellerName))
+        return NextResponse.json({
+          error: `Геймпасс ${part.gamepassId} принадлежит ${info.sellerName}, а заказ на ${order.robloxUsername}`,
+        }, { status: 409 });
+
+      checked.push({ gamepassId: part.gamepassId, amount: part.amount, name: info.name ?? "Gamepass", price: info.price });
+    }
+
+    // Чужой заказ на том же пассе — это гонка за один и тот же геймпасс:
+    // кто выкупит первым, второй получит AlreadyOwned и списание впустую.
+    const foreign = await (prisma as any).wbOrder.findFirst({
+      where: {
+        id: { not: orderId },
+        isTest: false,
+        status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "AWAITING_PAYMENT", "PAYMENT_PENDING"] },
+        gamepassId: { in: parts.map((p) => p.gamepassId) },
+      },
+      select: { wbCode: true, gamepassId: true },
+    });
+    if (foreign)
+      return NextResponse.json(
+        { error: `Геймпасс ${foreign.gamepassId} уже привязан к заказу ${foreign.wbCode}` },
+        { status: 409 },
+      );
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    const line = `[РАЗБИВКА ${stamp}] ${parts.length} ч.: ` +
+      checked.map((c) => `${c.gamepassId} (${c.amount} R$ / ${c.price} R$)`).join(", ");
+
+    await (prisma as any).$transaction([
+      (prisma as any).wbOrderGamepass.deleteMany({ where: { orderId } }),
+      (prisma as any).wbOrderGamepass.createMany({
+        data: parts.map((p) => ({
+          orderId,
+          gamepassId: p.gamepassId,
+          gamepassUrl: p.gamepassUrl,
+          amount: p.amount,
+          position: p.position,
+        })),
+      }),
+      // Легаси-поле продолжает указывать на ТЕКУЩУЮ часть. Так весь остальной
+      // код — очередь, поиск, уведомления, скрипт покупки — работает без правок
+      // и видит ровно тот пасс, который покупается прямо сейчас.
+      (prisma as any).wbOrder.update({
+        where: { id: orderId },
+        data: {
+          gamepassUrl: parts[0].gamepassUrl,
+          status: "PENDING",
+          pendingAt: order.status === "PENDING" ? order.pendingAt : new Date(),
+          rejectionReason: null,
+          buyoutErrorCode: null,
+          adminNote: ((order.adminNote ? order.adminNote + "\n" : "") + line).slice(0, 2000),
+        },
+      }),
+    ]);
+    cachedCounts = null;
+
+    return NextResponse.json({
+      ok: true,
+      wbCode: order.wbCode,
+      parts: checked,
+      total: checked.reduce((sum, c) => sum + c.amount, 0),
+    });
+  }
+
+  if (action === "clear-gamepass-split") {
+    if (splitParts.length === 0)
+      return NextResponse.json({ error: "У заказа нет разбиения" }, { status: 400 });
+    // Снятие разбиения после частичного выкупа теряет след уже списанных
+    // робуксов, поэтому оно только явное и с отметкой в заметке.
+    const purchased = splitParts.filter((p) => p.purchasedAt);
+    const stamp = new Date().toISOString().slice(0, 10);
+    const line = purchased.length
+      ? `[РАЗБИВКА-СНЯТА ${stamp}] было куплено ${describeSplitProgress(splitParts)} на ${splitChargedTotal(splitParts)} R$ — сверь вручную`
+      : `[РАЗБИВКА-СНЯТА ${stamp}] ничего не куплено`;
+
+    await (prisma as any).$transaction([
+      (prisma as any).wbOrderGamepass.deleteMany({ where: { orderId } }),
+      (prisma as any).wbOrder.update({
+        where: { id: orderId },
+        data: { adminNote: ((order.adminNote ? order.adminNote + "\n" : "") + line).slice(0, 2000) },
+      }),
+    ]);
+    cachedCounts = null;
+    return NextResponse.json({ ok: true, hadPurchased: purchased.length });
   }
 
   if (action === "rebind-order") {

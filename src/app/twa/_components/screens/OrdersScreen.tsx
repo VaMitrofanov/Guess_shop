@@ -15,10 +15,22 @@ type FilterTab = "WORK" | "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR
 // старых (см. fetchAwaitingLinkHybrid в api/twa/orders). Здесь — для разделителя.
 const AWAITING_LINK_HEAD = 5;
 
+/** Часть разбитого выкупа: заказ закрывается несколькими геймпассами. */
+interface SplitPart {
+  id: string;
+  gamepassId: string;
+  amount: number;
+  position: number;
+  chargedPrice: number | null;
+  purchasedAt: string | null;
+}
+
 interface Order {
   id: string;
   amount: number;
   gamepassUrl: string | null;
+  /** Пусто у обычного заказа — тогда работает единственный `gamepassUrl`. */
+  splitGamepasses?: SplitPart[];
   status: OrderStatus;
   platform: string;
   wbCode: string;
@@ -553,7 +565,10 @@ function ActionPanel({
       if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
       if (d.success) {
         haptic.notify("success");
-        toast(`✅ ${d.msg}`, "success");
+        // У разбитого заказа успех бывает промежуточным: часть куплена, заказ
+        // ещё открыт. Тост обязан это различать, иначе «✅» читается как
+        // «заказ закрыт», и следующую часть никто не выкупит.
+        toast(d.splitDone === false ? `🧩 ${d.msg}` : `✅ ${d.msg}`, "success");
         onPurchaseDone?.();
       } else {
         haptic.notify("error");
@@ -564,7 +579,9 @@ function ActionPanel({
   }
 
   const showError = currentTab !== "ERROR";
-  const hasGamepass = !!order.gamepassUrl;
+  const split = order.splitGamepasses ?? [];
+  const splitDone = split.filter(p => p.purchasedAt).length;
+  const hasGamepass = !!order.gamepassUrl || split.length > 0;
 
   // Прямой заказ до подтверждения оплаты: выкупать/завершать нечего (сервер
   // отвергнет), оплату подтверждает скриншот в боте. Доступна только отмена.
@@ -599,7 +616,13 @@ function ActionPanel({
       {hasGamepass && (
         <button className="twa-press" onClick={doPurchase} disabled={loading}
           style={{ flex: 2, padding: "14px", border: "none", borderRadius: 12, background: "rgba(48,209,88,0.14)", color: "#30d158", fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
-          {loading ? "⏳…" : isError ? "Повторить выкуп" : "Выкупить"}
+          {loading
+            ? "⏳…"
+            : split.length > 0
+              // Кнопка называет, что именно произойдёт по нажатию: покупается
+              // одна часть, а не весь заказ.
+              ? `Выкупить часть ${Math.min(splitDone + 1, split.length)}/${split.length}`
+              : isError ? "Повторить выкуп" : "Выкупить"}
         </button>
       )}
       {showError && (
@@ -1159,6 +1182,277 @@ function DoneAccordion({ group, token, onRunAction, onSaveNote, onPurchaseDone, 
   );
 }
 
+/* ───────────── Разбиение выкупа: выбор пассов ─────────────
+   Админ отмечает пассы покупателя, сумма номиналов должна сойтись с заказом.
+   Номинал берётся из цены самого пасса (floor(price·0.7)), а не вводится
+   руками: набранное число, разошедшееся с реальной ценой, сервер всё равно
+   отвергнет прайс-гардом — лучше не давать его набрать. */
+function SplitModal({ order, token, onDone, onClose }: {
+  order: Order; token: string; onDone: () => void; onClose: () => void;
+}) {
+  type Candidate = { gamepassId: string; name: string; price: number; amount: number; busyWith: string | null };
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [nick, setNick] = useState<string | null>(null);
+  const [passes, setPasses] = useState<Candidate[]>([]);
+  const [chosen, setChosen] = useState<string[]>(() => (order.splitGamepasses ?? []).map(p => p.gamepassId));
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch("/api/twa/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action: "split-candidates", orderId: order.id }),
+        });
+        const d = await r.json().catch(() => null);
+        if (!alive) return;
+        if (!r.ok) { toast(d?.error ?? "Не нашли геймпассы", "error"); return; }
+        setNick(d.nick ?? null);
+        setPasses(d.passes ?? []);
+      } catch { if (alive) toast("Ошибка сети", "error"); }
+      finally { if (alive) setLoading(false); }
+    })();
+    return () => { alive = false; };
+  }, [order.id, token]);
+
+  const byId = new Map(passes.map(p => [p.gamepassId, p]));
+  const picked = chosen.map(id => byId.get(id)).filter(Boolean) as Candidate[];
+  const sum = picked.reduce((acc, p) => acc + p.amount, 0);
+  const diff = sum - order.amount;
+  const canSave = picked.length >= 2 && diff === 0 && !saving;
+
+  function toggle(id: string) {
+    haptic.select();
+    setChosen(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
+
+  async function save() {
+    if (!canSave) return;
+    setSaving(true);
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          action: "set-gamepass-split",
+          orderId: order.id,
+          parts: picked.map(p => ({ gamepassId: p.gamepassId, amount: p.amount })),
+        }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok) { haptic.notify("error"); toast(d?.error ?? "Ошибка", "error"); return; }
+      haptic.notify("success");
+      toast(`🧩 Разбит на ${picked.length} — выкупай по частям`, "success");
+      onDone();
+      onClose();
+    } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
+    finally { setSaving(false); }
+  }
+
+  async function clearSplit() {
+    setSaving(true);
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "clear-gamepass-split", orderId: order.id }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok) { haptic.notify("error"); toast(d?.error ?? "Ошибка", "error"); return; }
+      toast("Разбиение снято", "success");
+      onDone(); onClose();
+    } catch { toast("Ошибка сети", "error"); }
+    finally { setSaving(false); }
+  }
+
+  const hasPurchased = (order.splitGamepasses ?? []).some(p => p.purchasedAt);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+      onClick={e => { if (e.target === e.currentTarget && !saving) onClose(); }}>
+      <div style={{ background: C.card, borderRadius: 18, width: "100%", maxWidth: 400, maxHeight: "84vh", display: "flex", flexDirection: "column" }}>
+        <div style={{ padding: "18px 20px 10px" }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#e5e5ea" }}>🧩 Разбить выкуп</div>
+          <div style={{ fontSize: 13, color: C.textTertiary, marginTop: 4 }}>
+            Заказ на <b style={{ color: C.textSecondary }}>{order.amount.toLocaleString("ru-RU")} R$</b>
+            {nick ? <> · пассы <b style={{ color: C.textSecondary }}>{nick}</b></> : null}
+          </div>
+        </div>
+
+        {hasPurchased && (
+          <div style={{ margin: "0 20px 10px", padding: "10px 12px", borderRadius: 10, background: `${C.yellow}14`, color: C.yellow, fontSize: 13, fontWeight: 600 }}>
+            Часть уже выкуплена — менять состав нельзя, только снять разбиение целиком.
+          </div>
+        )}
+
+        <div style={{ overflowY: "auto", flex: 1, padding: "0 20px" }}>
+          {loading ? (
+            <div style={{ padding: 24, textAlign: "center", color: C.textTertiary, fontSize: 15 }}>Ищу геймпассы…</div>
+          ) : passes.length === 0 ? (
+            <div style={{ padding: 24, textAlign: "center", color: C.textTertiary, fontSize: 14 }}>
+              У этого ника не нашли пассов на продажу
+            </div>
+          ) : passes.map(p => {
+            const on = chosen.includes(p.gamepassId);
+            const order_ = chosen.indexOf(p.gamepassId);
+            const blocked = !!p.busyWith || hasPurchased;
+            return (
+              <button key={p.gamepassId} className="twa-press"
+                onClick={() => !blocked && toggle(p.gamepassId)}
+                disabled={blocked}
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", gap: 10, textAlign: "left",
+                  padding: "10px 12px", marginBottom: 6, borderRadius: 12, cursor: blocked ? "not-allowed" : "pointer",
+                  background: on ? `${C.accent}22` : C.elevated,
+                  border: `1px solid ${on ? C.accent : "transparent"}`,
+                  opacity: blocked ? 0.45 : 1,
+                }}>
+                <span style={{
+                  width: 22, height: 22, flexShrink: 0, borderRadius: 7, display: "grid", placeItems: "center",
+                  background: on ? C.accent : "transparent", border: on ? "none" : `1px solid ${C.border}`,
+                  color: "#fff", fontSize: 12, fontWeight: 800,
+                }}>{on ? order_ + 1 : ""}</span>
+                <span style={{ minWidth: 0, flex: 1 }}>
+                  <span style={{ display: "block", fontSize: 14, fontWeight: 600, color: "#e5e5ea", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                  <span style={{ display: "block", fontSize: 12, color: C.textTertiary, fontVariantNumeric: "tabular-nums" }}>
+                    пасс {p.price.toLocaleString("ru-RU")} R$ · {p.gamepassId}
+                    {p.busyWith ? ` · занят ${p.busyWith}` : ""}
+                  </span>
+                </span>
+                <span style={{ fontSize: 14, fontWeight: 800, color: on ? C.accent : C.textSecondary, fontVariantNumeric: "tabular-nums" }}>
+                  {p.amount.toLocaleString("ru-RU")}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Итог: сумма обязана сойтись точно — сервер допуска не даёт. */}
+        <div style={{ padding: "12px 20px", borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 14, fontVariantNumeric: "tabular-nums" }}>
+            <span style={{ color: C.textTertiary }}>Выбрано {picked.length}:</span>
+            <b style={{ color: diff === 0 && picked.length >= 2 ? C.green : C.textSecondary }}>{sum.toLocaleString("ru-RU")} R$</b>
+            <span style={{ color: C.textTertiary }}>из {order.amount.toLocaleString("ru-RU")} R$</span>
+            {diff !== 0 && picked.length > 0 && (
+              <span style={{ marginLeft: "auto", color: C.orange, fontWeight: 700 }}>
+                {diff > 0 ? `лишние ${diff}` : `не хватает ${-diff}`} R$
+              </span>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {(order.splitGamepasses ?? []).length > 0 && (
+              <button className="twa-press" onClick={clearSplit} disabled={saving}
+                style={{ padding: "13px 14px", borderRadius: 12, border: `1px solid ${C.red}55`, background: "transparent", color: C.red, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                Снять
+              </button>
+            )}
+            <button className="twa-press" onClick={save} disabled={!canSave}
+              style={{ flex: 1, padding: "13px", borderRadius: 12, border: "none", background: canSave ? C.accent : C.elevated, color: canSave ? "#fff" : C.textTertiary, fontSize: 15, fontWeight: 700, cursor: canSave ? "pointer" : "not-allowed" }}>
+              {saving ? "…" : picked.length < 2 ? "Выбери минимум 2" : diff !== 0 ? "Сумма не сходится" : `Разбить на ${picked.length}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ───────────── Разбитый выкуп: части и прогресс ─────────────
+   Заказ закрывается несколькими геймпассами, и покупка идёт по одной части за
+   нажатие. Карточка обязана отвечать на три вопроса сразу: сколько частей уже
+   куплено, какая покупается следующей и сходится ли сумма частей с номиналом
+   заказа — расхождение суммы сервер не пропустит, и узнать об этом лучше здесь,
+   чем по красной ошибке после нажатия «Выкупить». */
+function SplitPartsBlock({ parts, orderAmount }: { parts: SplitPart[]; orderAmount: number }) {
+  const ordered = [...parts].sort((a, b) => a.position - b.position);
+  const done = ordered.filter(p => p.purchasedAt);
+  const nextIdx = ordered.findIndex(p => !p.purchasedAt);
+  const sum = ordered.reduce((acc, p) => acc + p.amount, 0);
+  const spent = done.reduce((acc, p) => acc + (p.chargedPrice ?? 0), 0);
+  const mismatch = sum !== orderAmount;
+  const allDone = done.length === ordered.length;
+
+  return (
+    <div style={{
+      margin: "8px 0 2px", padding: "10px 12px", borderRadius: 12,
+      background: C.elevated, border: `1px solid ${allDone ? `${C.green}44` : C.border}`,
+      display: "flex", flexDirection: "column", gap: 8,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 14 }}>🧩</span>
+        <span style={{ fontSize: 14, fontWeight: 700, color: "#e5e5ea" }}>
+          Разбит на {ordered.length} {ordered.length === 1 ? "пасс" : ordered.length < 5 ? "пасса" : "пассов"}
+        </span>
+        <span style={{
+          marginLeft: "auto", padding: "2px 8px", borderRadius: 999, fontSize: 12, fontWeight: 800,
+          background: allDone ? `${C.green}22` : `${C.blue}1f`,
+          color: allDone ? C.green : C.blue,
+          fontVariantNumeric: "tabular-nums",
+        }}>
+          {done.length}/{ordered.length} выкуплено
+        </span>
+      </div>
+
+      {/* Полоса прогресса: сегмент на часть — видно с одного взгляда. */}
+      <div style={{ display: "flex", gap: 3 }}>
+        {ordered.map((p, i) => (
+          <div key={p.id} style={{
+            flex: p.amount, height: 4, borderRadius: 2,
+            background: p.purchasedAt ? C.green : i === nextIdx ? `${C.blue}88` : C.border,
+          }} />
+        ))}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {ordered.map((p, i) => {
+          const isNext = i === nextIdx;
+          const bought = !!p.purchasedAt;
+          return (
+            <div key={p.id} style={{
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "6px 8px", borderRadius: 9,
+              background: isNext ? `${C.blue}12` : "transparent",
+              border: isNext ? `1px solid ${C.blue}44` : "1px solid transparent",
+            }}>
+              <span style={{ fontSize: 13, width: 16, flexShrink: 0 }}>{bought ? "✅" : isNext ? "▶️" : "⏳"}</span>
+              <span style={{
+                fontSize: 13, fontWeight: 700, color: bought ? C.textTertiary : "#e5e5ea",
+                fontVariantNumeric: "tabular-nums", minWidth: 66,
+              }}>
+                {p.amount.toLocaleString("ru-RU")} R$
+              </span>
+              <a
+                href={`https://www.roblox.com/game-pass/${p.gamepassId}`}
+                target="_blank" rel="noreferrer"
+                onClick={e => e.stopPropagation()}
+                style={{ fontSize: 12, color: C.blue, textDecoration: "none", fontVariantNumeric: "tabular-nums" }}
+              >
+                {p.gamepassId}
+              </a>
+              <span style={{ marginLeft: "auto", fontSize: 12, color: bought ? C.green : C.textTertiary, fontVariantNumeric: "tabular-nums" }}>
+                {bought ? `−${(p.chargedPrice ?? 0).toLocaleString("ru-RU")} R$` : `ждёт ${Math.ceil(p.amount / 0.7).toLocaleString("ru-RU")} R$`}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: C.textTertiary, fontVariantNumeric: "tabular-nums" }}>
+        <span>Сумма частей: <b style={{ color: mismatch ? C.red : C.textSecondary }}>{sum.toLocaleString("ru-RU")} R$</b> из {orderAmount.toLocaleString("ru-RU")} R$</span>
+        {spent > 0 && <span>Списано: <b style={{ color: C.textSecondary }}>{spent.toLocaleString("ru-RU")} R$</b></span>}
+      </div>
+
+      {mismatch && (
+        <div style={{ fontSize: 12, fontWeight: 700, color: C.red }}>
+          ⚠️ Сумма частей ≠ номиналу заказа — сервер заблокирует выкуп, поправь разбиение
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ───────────── OrderCard — compact layout ───────────── */
 function OrderCard({
   order, token, currentTab, exiting, onRunAction, onSaveNote, onPurchaseDone, onToggleFavorite, onMoved, live,
@@ -1177,6 +1471,7 @@ function OrderCard({
 }) {
   const [moveOpen, setMoveOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [splitOpen, setSplitOpen] = useState(false);
   const [rebindOpen, setRebindOpen] = useState(false);
   const [refundOpen, setRefundOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -1214,6 +1509,7 @@ function OrderCard({
   const platform: "tg" | "vk" | "—" = order.user.tgId ? "tg" : order.user.vkId ? "vk" : "—";
   const shortName = userShortName(order.user);
   const passId = extractGamepassId(order.gamepassUrl);
+  const split = order.splitGamepasses ?? [];
 
   // В «Требуют внимания» карточка ведёт себя как в родной вкладке заказа:
   // те же кнопки действий и формат суммы, что видел бы менеджер в BUYOUT/ERROR/….
@@ -1234,6 +1530,10 @@ function OrderCard({
   const showMoveBtn = viewTab === "AWAITING_LINK" || viewTab === "FAVORITES" || viewTab === "ERROR" || viewTab === "REJECTED" || (currentTab === "ALL" && order.status === "REJECTED");
   // Редактирование за клиента (номинал/ник/ГП) — любой источник, не только Авито.
   const isEditable = ["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED"].includes(order.status);
+  // Разбить можно всё, что ещё не закрыто и уже знает ник — именно ник даёт
+  // список пассов покупателя, из которых собираются части.
+  const isSplittable = ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "ERROR"].includes(order.status)
+    && !!(order.robloxUsername || order.probableNick);
   const payment = order.paymentAttempts?.[0];
   // Возврат — любому заказу с подтверждённым платежом T-Bank, а не только
   // SITE: с эквайрингом в ботах (orderSource=DIRECT) деньги приходят тем же
@@ -1412,7 +1712,11 @@ function OrderCard({
             <span style={{ fontSize: 13, color: C.textTertiary }}> · вероятный ник</span>
           </DataRow>
         )}
-        {order.gamepassUrl && (
+        {/* Разбитый выкуп: список частей вместо одной ссылки. Без него
+            «выкуплено 1 из 3» выглядит как зависший заказ без объяснения. */}
+        {split.length > 0 ? (
+          <SplitPartsBlock parts={split} orderAmount={order.amount} />
+        ) : order.gamepassUrl && (
           <DataRow icon="🔗" copyText={order.gamepassUrl}>
             <span style={{ color: C.blue }}>{order.gamepassUrl.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}</span>
           </DataRow>
@@ -1614,6 +1918,28 @@ function OrderCard({
           token={token}
           onDone={() => { setEditOpen(false); onMoved(); }}
           onClose={() => setEditOpen(false)}
+        />
+      )}
+
+      {/* Разбиение выкупа: три пасса по 1000 вместо одного на 3000 */}
+      {isSplittable && !splitOpen && (
+        <div style={{ padding: "0 14px 6px" }}>
+          <button className="twa-press-sm" onClick={e => { e.stopPropagation(); setSplitOpen(true); }}
+            style={{
+              width: "100%", padding: "10px", borderRadius: 10, border: `1px solid ${C.accent}55`,
+              background: "transparent", color: C.accent, fontSize: 14, fontWeight: 600, cursor: "pointer",
+            }}>
+            {split.length > 0 ? `🧩 Разбиение · ${split.filter(p => p.purchasedAt).length}/${split.length}` : "🧩 Разбить на несколько пассов"}
+          </button>
+        </div>
+      )}
+
+      {splitOpen && (
+        <SplitModal
+          order={order}
+          token={token}
+          onDone={() => { setSplitOpen(false); onMoved(); }}
+          onClose={() => setSplitOpen(false)}
         />
       )}
 

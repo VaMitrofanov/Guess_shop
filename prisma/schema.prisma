@@ -16,54 +16,54 @@ datasource db {
 }
 
 model User {
-  id                     String              @id @default(cuid())
-  vkId                   String?             @unique
-  tgId                   String?             @unique
-  email                  String?             @unique
-  emailVerifiedAt        DateTime?
-  password               String?
-  name                   String?
-  username               String?
-  image                  String?
-  robloxUsername         String?
+  id                      String              @id @default(cuid())
+  vkId                    String?             @unique
+  tgId                    String?             @unique
+  email                   String?             @unique
+  emailVerifiedAt         DateTime?
+  password                String?
+  name                    String?
+  username                String?
+  image                   String?
+  robloxUsername          String?
   /// Public Roblox profile resolved server-side from robloxUsername. The ID is
   /// stable across Roblox username changes; these fields are a stale-safe cache,
   /// not proof that the visitor owns the Roblox account.
-  robloxUserId           String?
-  robloxDisplayName      String?
-  robloxAvatarUrl        String?
-  robloxDescription      String?
-  robloxAccountCreatedAt DateTime?
-  robloxProfileSyncedAt  DateTime?
-  balance                Int                 @default(0)
-  bonusExpiresAt         DateTime?
-  rubleDiscount          Int                 @default(0)
+  robloxUserId            String?
+  robloxDisplayName       String?
+  robloxAvatarUrl         String?
+  robloxDescription       String?
+  robloxAccountCreatedAt  DateTime?
+  robloxProfileSyncedAt   DateTime?
+  balance                 Int                 @default(0)
+  bonusExpiresAt          DateTime?
+  rubleDiscount           Int                 @default(0)
   /// When the one-time 60 ₽ "second direct purchase" discount was granted.
   /// The grant is once per lifetime, so this is the idempotency key: without
   /// it the rule re-fired on every completed direct order under 500 R$ and one
   /// customer bought five packs at 84 ₽ instead of 144 ₽.
   /// See `bots/shared/direct-discount.ts`.
   directDiscountGrantedAt DateTime?
-  promoExpiresAt         DateTime?
-  promoSentAt            DateTime?
-  role                   String              @default("USER")
-  sessionVersion         Int                 @default(0)
-  reviewBonusClaimed     Boolean             @default(false)
-  reviewBonusGrantedAt   DateTime?
-  reviewReminderLevel    Int                 @default(0)
-  wbCodes                WbCode[]
-  wbOrders               WbOrder[]
-  directIntents          DirectIntent[]
-  identities             UserIdentity[]
-  bonusLedgerEntries     BonusLedger[]
-  priceQuotes            PriceQuote[]
-  emailActionTokens      EmailActionToken[]
-  consentEvidences       ConsentEvidence[]
-  robloxAccounts         UserRobloxAccount[]
-  mergeSources           AccountMergeAudit[] @relation("AccountMergeSource")
-  mergeTargets           AccountMergeAudit[] @relation("AccountMergeTarget")
-  createdAt              DateTime            @default(now())
-  updatedAt              DateTime            @updatedAt
+  promoExpiresAt          DateTime?
+  promoSentAt             DateTime?
+  role                    String              @default("USER")
+  sessionVersion          Int                 @default(0)
+  reviewBonusClaimed      Boolean             @default(false)
+  reviewBonusGrantedAt    DateTime?
+  reviewReminderLevel     Int                 @default(0)
+  wbCodes                 WbCode[]
+  wbOrders                WbOrder[]
+  directIntents           DirectIntent[]
+  identities              UserIdentity[]
+  bonusLedgerEntries      BonusLedger[]
+  priceQuotes             PriceQuote[]
+  emailActionTokens       EmailActionToken[]
+  consentEvidences        ConsentEvidence[]
+  robloxAccounts          UserRobloxAccount[]
+  mergeSources            AccountMergeAudit[] @relation("AccountMergeSource")
+  mergeTargets            AccountMergeAudit[] @relation("AccountMergeTarget")
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
 }
 
 /// Roblox identities known to one RobloxBank customer. ORDER_HISTORY means
@@ -390,23 +390,23 @@ enum PartnerCostBasis {
 
 /// WB withdrawal order: tracks gamepass link submissions from WB card buyers.
 model WbOrder {
-  id                     String           @id @default(cuid())
+  id                     String            @id @default(cuid())
   amount                 Int
   gamepassUrl            String?
   /// U18: числовой ID геймпасса, извлечённый из `gamepassUrl` при записи.
   /// Раньше поиск шёл по `gamepassUrl contains '/<id>'` — полное сканирование
   /// таблицы на каждом поиске и перед каждой покупкой.
   gamepassId             String?
-  status                 WbOrderStatus    @default(PENDING)
+  status                 WbOrderStatus     @default(PENDING)
   platform               Platform
   userId                 String
-  user                   User             @relation(fields: [userId], references: [id])
-  wbCode                 String           @unique
+  user                   User              @relation(fields: [userId], references: [id])
+  wbCode                 String            @unique
   /// Canonical web-checkout fields. Nullable for historical WB/bot orders.
-  priceQuoteId           String?          @unique
-  priceQuote             PriceQuote?      @relation(fields: [priceQuoteId], references: [id])
-  publicOrderId          String?          @unique
-  statusTokenHash        String?          @unique
+  priceQuoteId           String?           @unique
+  priceQuote             PriceQuote?       @relation(fields: [priceQuoteId], references: [id])
+  publicOrderId          String?           @unique
+  statusTokenHash        String?           @unique
   paymentAmountKopecks   Int?
   receiptEmail           String?
   termsAcceptedAt        DateTime?
@@ -424,8 +424,8 @@ model WbOrder {
   /// Monotonic reservation cycle for bonus/discount compensation. A bank-init
   /// retry re-reserves the same benefits and increments this value, so every
   /// later compensation has its own idempotency key.
-  benefitsRevision       Int              @default(0)
-  webIdempotencyKey      String?          @unique
+  benefitsRevision       Int               @default(0)
+  webIdempotencyKey      String?           @unique
   adminId                String?
   rejectionReason        String?
   /// Legacy alias: snapshot of the purchase rate in USD per 1000 R$.
@@ -437,9 +437,9 @@ model WbOrder {
   purchaseUsdToRub       Float?
   purchaseCostKopecks    Int?
   profitKopecks          Int?
-  isDirectOrder          Boolean          @default(false)
-  orderSource            OrderSource      @default(WB)
-  isTest                 Boolean          @default(false)
+  isDirectOrder          Boolean           @default(false)
+  orderSource            OrderSource       @default(WB)
+  isTest                 Boolean           @default(false)
   paymentDetails         String?
   robloxUsername         String?
   /// Free-text admin note (current status / problem) — admin-only, shown in the
@@ -451,8 +451,8 @@ model WbOrder {
   buyoutErrorCode        String?
   pendingAt              DateTime?
   takenAt                DateTime?
-  remindersSent          Int              @default(0)
-  isFavorite             Boolean          @default(false)
+  remindersSent          Int               @default(0)
+  isFavorite             Boolean           @default(false)
   /// Roblox username of the cookie account that purchased this gamepass.
   purchaserUsername      String?
   /// When the customer's payment for a direct order was confirmed (pay_ok).
@@ -478,11 +478,14 @@ model WbOrder {
   completedAt            DateTime?
   /// Ф6.3: уровень пуша о разблокировке робуксов (0 = не слали,
   /// 1 = день 5 «уже могли разблокироваться», 2 = день 7 «точно разблокированы»).
-  robuxUnlockRemindLevel Int              @default(0)
-  createdAt              DateTime         @default(now())
-  updatedAt              DateTime         @updatedAt
+  robuxUnlockRemindLevel Int               @default(0)
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
   paymentAttempts        PaymentAttempt[]
   events                 OrderEvent[]
+  /// Разбиение выкупа на несколько геймпассов (см. WbOrderGamepass).
+  /// Пусто у обычного заказа — тогда работает единственный `gamepassId`.
+  splitGamepasses        WbOrderGamepass[]
 
   @@index([userId])
   @@index([status])
@@ -503,6 +506,40 @@ model WbOrder {
   // GP-watcher (+3) selection: AWAITING orders that carry a probable nick.
   @@index([status, probableNick])
   // U18: точный поиск заказа по геймпассу (TWA-поиск + гард перед покупкой).
+  @@index([gamepassId])
+}
+
+/// Одна часть разбитого выкупа: заказ закрывается несколькими геймпассами.
+///
+/// Зачем: покупателю бывает удобнее (или он уже успел) выставить несколько
+/// пассов помельче вместо одного на весь номинал — три по 1000 R$ вместо
+/// одного на 3000. Гард выкупа сверяет цену пасса с номиналом ЗАКАЗА, поэтому
+/// без этой таблицы такой заказ выкупить нельзя вообще: каждый пасс выглядит
+/// как «цена не та». Здесь у каждой части свой номинал, и гард сверяется с ним.
+///
+/// Инвариант: сумма `amount` всех частей заказа равна `WbOrder.amount`.
+/// Он проверяется при записи разбиения и повторно перед каждой покупкой —
+/// на случай, если часть отредактировали между привязкой и выкупом.
+model WbOrderGamepass {
+  id           String    @id @default(cuid())
+  orderId      String
+  order        WbOrder   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  gamepassId   String
+  gamepassUrl  String
+  /// Номинал робуксов, который закрывает эта часть.
+  amount       Int
+  /// Порядок покупки: части выкупаются последовательно, сверху вниз.
+  position     Int
+  /// Фактическое списание Roblox. NULL — часть ещё не куплена.
+  chargedPrice Int?
+  purchasedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  /// Один и тот же пасс дважды в одном заказе — это удвоенное списание,
+  /// а со второго раза ещё и AlreadyOwned.
+  @@unique([orderId, gamepassId])
+  @@index([orderId, position])
   @@index([gamepassId])
 }
 
