@@ -1697,6 +1697,27 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // ── След покупателя: что он вводил и присылал ────────────────────────────
+  // Читается при разборе спора («я такой ник не указывал»), поэтому грузится
+  // по запросу, а не в общий список — там это лишний вес на каждой карточке.
+  if (action === "order-audit") {
+    const events = await (prisma as any).orderEvent.findMany({
+      where: { orderId, type: { in: ["AUDIT_NICK_ENTERED", "AUDIT_GAMEPASS_SUBMITTED"] } },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, type: true, payload: true, createdAt: true },
+    });
+    return NextResponse.json({
+      ok: true,
+      wbCode: order.wbCode,
+      createdAt: order.createdAt,
+      // Подтверждённый ник и выкупленный пасс — вторая половина доказательства:
+      // их пишет Roblox, а не покупатель.
+      confirmedNick: order.robloxUsername,
+      gamepassId: order.gamepassId,
+      events,
+    });
+  }
+
   // Кандидаты для разбиения: пассы ника заказа с их номиналом «нетто».
   // Админ тыкает по найденным пассам, а не переписывает ID руками — ошибиться
   // в двадцатизначном числе проще, чем кажется.

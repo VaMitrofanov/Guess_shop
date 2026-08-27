@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { auditNickEntered, type OrderAuditClient } from "@/lib/order-audit";
 
 /**
  * Early Roblox-nick capture → order NOTES (web side; mirrors `bots/shared/nick.ts`).
@@ -20,6 +21,16 @@ export async function noteProbableNickByCode(wbCode: string, rawNick: string, so
   const nick = rawNick.trim().replace(/^@/, "");
   const code = wbCode.trim().toUpperCase();
   if (!NICK_RE.test(nick) || !/^[A-Z0-9]{7}$/.test(code)) return;
+
+  // Аудит — первым и независимо от дедупликации заметки ниже (см. разбор
+  // спора в `bots/shared/order-audit.ts`).
+  void auditNickEntered(prisma as unknown as OrderAuditClient, {
+    nick,
+    via: source,
+    wbCode: code,
+    robloxKnows: true,
+  });
+
   try {
     const order = await (prisma as any).wbOrder.findFirst({
       where: { wbCode: { equals: code, mode: "insensitive" }, status: { not: "COMPLETED" } },

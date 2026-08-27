@@ -19,6 +19,7 @@ import { buildGamepassPurchaseScript, gamepassPageUrl } from "../shared/roblox-p
 import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/gamepass-search";
 import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { noteProbableNick } from "../shared/nick";
+import { auditGamepassSubmitted, type OrderAuditClient } from "../shared/order-audit";
 import { resolveWbOrderSource, wbDbsBadgeLine, wbOrderSourceLabel } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { buildCompletedMessages, robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
@@ -3024,6 +3025,18 @@ async function processGamepassSubmission(
     if (validatedCreator) {
       try { await (db as any).user.update({ where: { tgId: String(ctx.from.id) }, data: { robloxUsername: validatedCreator } }); } catch {}
     }
+
+    // Аудит: что именно прислал покупатель и кому принадлежит этот пасс по
+    // данным Roblox. Робуксы уходят создателю пасса, поэтому адрес назначения
+    // выбирается присланным геймпассом, а не словами — это и есть та запись,
+    // которой не хватило в споре 28.08 по `CEALJKV`.
+    void auditGamepassSubmitted(db as unknown as OrderAuditClient, {
+      gamepassId: String(passId),
+      via: "link",
+      wbCode: state.wbCode,
+      creatorName: validatedCreator,
+      price: validatedPrice,
+    });
 
     const creatorLine = validatedCreator ? `👤 Создатель: ${escapeHtml(validatedCreator)}\n` : "";
     const priceLine = validatedPrice != null ? `💰 Цена: ${validatedPrice} R$\n` : "";

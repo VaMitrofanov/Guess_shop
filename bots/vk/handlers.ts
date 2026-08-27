@@ -20,6 +20,7 @@ import { searchGamepassesByNick, type GamepassSearchOutcome } from "../shared/ga
 import { parseGamepassRef, parseGamepassUrl } from "../shared/gamepass-id";
 import { enforceVkInlineKbLimits } from "../shared/vk-kb";
 import { noteProbableNick } from "../shared/nick";
+import { auditGamepassSubmitted, type OrderAuditClient } from "../shared/order-audit";
 import { resolveWbOrderSource, wbDbsBadgeLine } from "../shared/wb-order-source";
 import { resolveReviewEligibility, reviewIneligibleMessage, REVIEW_BONUS_AMOUNT, REVIEW_BONUS_EXPIRY_DAYS } from "../shared/review-eligibility";
 import { robuxUnlockDate, fmtDateRu } from "../shared/completed-messages";
@@ -2241,6 +2242,15 @@ async function handleGamepassLink(
   if (validatedCreator) {
     try { await (db as any).user.update({ where: { vkId: String(vkUserId) }, data: { robloxUsername: validatedCreator } }); } catch {}
   }
+
+  // Аудит присланного геймпасса — зеркало TG, см. `bots/shared/order-audit.ts`.
+  void auditGamepassSubmitted(db as unknown as OrderAuditClient, {
+    gamepassId: String(passId),
+    via: "link",
+    wbCode,
+    creatorName: validatedCreator,
+    price: validatedPrice,
+  });
 
   const creatorLine = validatedCreator ? `\n👤 Создатель: ${validatedCreator}` : "";
   const priceLine = validatedPrice != null ? `\n💰 Цена: ${validatedPrice} R$` : "";

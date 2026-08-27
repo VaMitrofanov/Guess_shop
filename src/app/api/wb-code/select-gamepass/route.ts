@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getGamepassDetails, getRobloxUserById } from "@/lib/roblox";
 import { sendWebOrderCard } from "@/lib/admin-card";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
+import { auditGamepassSubmitted, type OrderAuditClient } from "@/lib/order-audit";
 
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
 
@@ -95,6 +96,17 @@ export async function POST(request: Request) {
         );
       }
     }
+
+    // Аудит: покупатель выбрал этот пасс на сайте. `details.creatorName` —
+    // ответ Roblox о владельце, а не то, что человек набрал; робуксы уйдут
+    // именно ему. Запись независима от того, чем закончится оформление ниже.
+    void auditGamepassSubmitted(prisma as unknown as OrderAuditClient, {
+      gamepassId,
+      via: manualLink ? "site-manual-link" : "site-one-tap",
+      wbCode: rawCode,
+      creatorName: details?.creatorName ?? null,
+      price: details?.price ?? null,
+    });
 
     // ── 2b. Ник получателя ────────────────────────────────────────────────────
     // Робуксы уходят создателю геймпасса, поэтому владелец пасса по данным

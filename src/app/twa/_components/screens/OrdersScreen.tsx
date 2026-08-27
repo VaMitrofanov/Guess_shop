@@ -1200,6 +1200,108 @@ function DoneAccordion({ group, token, onRunAction, onSaveNote, onPurchaseDone, 
   );
 }
 
+/* ───────────── След покупателя ─────────────
+   Разбор спора: клиент говорит «я такой ник не указывал». Здесь видно, что он
+   вводил и присылал, с точным временем — плюс подтверждённый ник и владелец
+   выкупленного пасса, которые пишет Roblox, а не покупатель. */
+function AuditTrail({ order, token }: { order: Order; token: string }) {
+  type AuditEvent = { id: string; type: string; payload: Record<string, unknown>; createdAt: string };
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<{ events: AuditEvent[]; confirmedNick: string | null } | null>(null);
+
+  async function load() {
+    setOpen(true);
+    if (data || loading) return;
+    setLoading(true);
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "order-audit", orderId: order.id }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok) { toast(d?.error ?? "Не удалось загрузить след", "error"); return; }
+      setData({ events: d.events ?? [], confirmedNick: d.confirmedNick ?? null });
+    } catch { toast("Ошибка сети", "error"); }
+    finally { setLoading(false); }
+  }
+
+  const fmt = (iso: string) => new Date(iso).toLocaleString("ru-RU", {
+    day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+    timeZone: "Europe/Moscow",
+  });
+
+  if (!open) {
+    return (
+      <div style={{ padding: "0 14px 6px" }}>
+        <button className="twa-press-sm" onClick={e => { e.stopPropagation(); haptic.select(); void load(); }}
+          style={{
+            width: "100%", padding: "10px", borderRadius: 10, border: `1px solid ${C.border}`,
+            background: "transparent", color: C.textSecondary, fontSize: 14, fontWeight: 600, cursor: "pointer",
+          }}>
+          🧾 Что клиент вводил и присылал
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: "0 14px 8px" }} onClick={e => e.stopPropagation()}>
+      <div style={{ padding: "12px 13px", borderRadius: 12, background: C.elevated, border: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 9 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#e5e5ea" }}>🧾 След покупателя</span>
+          <button className="twa-press-sm" onClick={() => setOpen(false)}
+            style={{ marginLeft: "auto", border: "none", background: "transparent", color: C.textTertiary, fontSize: 13, cursor: "pointer" }}>
+            свернуть
+          </button>
+        </div>
+
+        {loading && <div style={{ fontSize: 13, color: C.textTertiary }}>Загружаю…</div>}
+
+        {!loading && data && data.events.length === 0 && (
+          <div style={{ fontSize: 12.5, lineHeight: 1.5, color: C.textTertiary }}>
+            Записей нет — заказ старше, чем сам механизм (введён 28.08.2026).
+            Косвенные доказательства: подтверждённый ник и владелец выкупленного пасса ниже.
+          </div>
+        )}
+
+        {!loading && data && data.events.map(e => {
+          const p = e.payload ?? {};
+          const isNick = e.type === "AUDIT_NICK_ENTERED";
+          const subject = String(isNick ? p.nick ?? "" : p.gamepassId ?? "");
+          return (
+            <div key={e.id} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 13 }}>
+              <span style={{ flexShrink: 0 }}>{isNick ? "⌨️" : "🎮"}</span>
+              <span style={{ minWidth: 0, flex: 1 }}>
+                <b style={{ color: "#e5e5ea", wordBreak: "break-all" }}>{subject}</b>
+                <span style={{ color: C.textTertiary }}>
+                  {isNick ? " — ввёл ник" : " — прислал геймпасс"}
+                  {p.creatorName ? <> · владелец по Roblox <b style={{ color: C.textSecondary }}>{String(p.creatorName)}</b></> : null}
+                  {p.price ? ` · ${Number(p.price).toLocaleString("ru-RU")} R$` : ""}
+                  {p.via ? ` · ${String(p.via)}` : ""}
+                </span>
+              </span>
+              <span style={{ flexShrink: 0, fontSize: 11.5, color: C.textTertiary, fontVariantNumeric: "tabular-nums" }}>
+                {fmt(e.createdAt)}
+              </span>
+            </div>
+          );
+        })}
+
+        {!loading && data && (
+          <div style={{ paddingTop: 8, borderTop: `1px solid ${C.border}`, fontSize: 12.5, lineHeight: 1.5, color: C.textTertiary }}>
+            {/* Вторая половина доказательства: эти два поля заполняет Roblox,
+                а не покупатель — напечатать в них что-либо невозможно. */}
+            Подтверждённый ник заказа: <b style={{ color: C.textSecondary }}>{data.confirmedNick ?? "—"}</b>.
+            Он записан из ответа Roblox о владельце присланного геймпасса, и робуксы уходят именно ему.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ───────────── Разбиение выкупа: выбор пассов ─────────────
    Админ отмечает пассы покупателя, сумма номиналов должна сойтись с заказом.
    Номинал берётся из цены самого пасса (floor(price·0.7)), а не вводится
@@ -2011,6 +2113,8 @@ function OrderCard({
           onClose={() => setEditOpen(false)}
         />
       )}
+
+      <AuditTrail order={order} token={token} />
 
       {/* Разбиение выкупа: три пасса по 1000 вместо одного на 3000 */}
       {isSplittable && !splitOpen && (

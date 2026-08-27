@@ -16,6 +16,7 @@
  * Best-effort — never throws into the calling flow.
  */
 import { db } from "./db";
+import { auditNickEntered, type OrderAuditClient } from "./order-audit";
 
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
 
@@ -31,6 +32,17 @@ export async function noteProbableNick(opts: {
 
   const code = opts.wbCode?.trim();
   if (!code || code.startsWith("DIR-") || code.startsWith("AV-")) return;
+
+  // Аудит пишется ПЕРВЫМ и не зависит от дедупликации заметки ниже. Заметка
+  // намеренно молчит, когда ник совпал с подтверждённым или уже записан, — а в
+  // споре 28.08 по `CEALJKV` именно этот случай и оказался главным: прямой
+  // записи «ввела такой-то ник тогда-то» не осталось вовсе.
+  void auditNickEntered(db as unknown as OrderAuditClient, {
+    nick,
+    via: opts.source,
+    wbCode: code,
+    robloxKnows: true,
+  });
 
   try {
     const order = await (db as any).wbOrder.findFirst({
