@@ -64,4 +64,40 @@ describe("контракт разбитого выкупа", () => {
   it("один пасс не может стоять в двух частях одного заказа", () => {
     expect(schema).toContain("@@unique([orderId, gamepassId])");
   });
+
+  it("бейдж «цена ≠ номиналу» сверяет ТЕКУЩУЮ часть с её номиналом", () => {
+    // Иначе на каждом разбитом заказе висела бы ложная тревога: пасс за
+    // 1429 R$ в заказе на 3000 — это норма, а не расхождение.
+    expect(route).toContain("const activePart = parts.find((p) => !p.purchasedAt) ?? null");
+    expect(route).toContain("Math.ceil((activePart ? activePart.amount : o.amount) / 0.7)");
+  });
+
+  it("ручная отметка части НЕ уведомляет клиента", () => {
+    const markStart = route.indexOf('if (action === "mark-split-part")');
+    expect(markStart).toBeGreaterThan(-1);
+    const markEnd = route.indexOf('if (action === "reject")', markStart);
+    const markBlock = route.slice(markStart, markEnd > markStart ? markEnd : markStart + 4000);
+    // Клиент получил не весь заказ — «заказ выполнен» было бы неправдой.
+    expect(markBlock).not.toContain("notifyOrderCompleted");
+  });
+
+  it("уведомление клиенту шлёт только закрытие всего заказа", () => {
+    const completeStart = route.indexOf('if (action === "complete")');
+    const completeEnd = route.indexOf('if (action === "mark-split-part")', completeStart);
+    expect(route.slice(completeStart, completeEnd)).toContain("notifyOrderCompleted");
+  });
+
+  it("ручное «Выкуплено» закрывает и оставшиеся части", () => {
+    // Иначе карточка COMPLETED показывала бы «1/3» и вводила в заблуждение.
+    expect(route).toContain('wbOrderGamepass.updateMany({\n            where: { orderId, purchasedAt: null }');
+  });
+
+  it("когда все части отмечены, кнопка выкупа не предлагает купить купленное", () => {
+    expect(screen).toContain("splitAllDone");
+    expect(screen).toContain("&& !splitAllDone");
+  });
+
+  it("карточка объясняет разницу между галочкой и «Выкуплено»", () => {
+    expect(screen).toContain("клиенту ничего не уходит");
+  });
 });

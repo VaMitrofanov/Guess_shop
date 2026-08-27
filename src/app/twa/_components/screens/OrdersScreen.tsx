@@ -581,7 +581,11 @@ function ActionPanel({
   const showError = currentTab !== "ERROR";
   const split = order.splitGamepasses ?? [];
   const splitDone = split.filter(p => p.purchasedAt).length;
-  const hasGamepass = !!order.gamepassUrl || split.length > 0;
+  const splitAllDone = split.length > 0 && splitDone === split.length;
+  // Все части закрыты — покупать больше нечего, остаётся «Выкуплено».
+  // Кнопка «Выкупить часть 3/3» на этом месте предлагала бы купить уже
+  // купленное; сервер такой вызов отвергает, но приглашать к нему не нужно.
+  const hasGamepass = (!!order.gamepassUrl || split.length > 0) && !splitAllDone;
 
   // Прямой заказ до подтверждения оплаты: выкупать/завершать нечего (сервер
   // отвергнет), оплату подтверждает скриншот в боте. Доступна только отмена.
@@ -625,6 +629,15 @@ function ActionPanel({
               : isError ? "Повторить выкуп" : "Выкупить"}
         </button>
       )}
+      {splitAllDone && (
+        <span style={{
+          flex: 2, display: "flex", alignItems: "center", justifyContent: "center",
+          padding: "14px", borderRadius: 12, background: `${C.green}1f`, color: C.green,
+          fontSize: 14, fontWeight: 700, textAlign: "center",
+        }}>
+          Все {split.length} части отмечены
+        </span>
+      )}
       {showError && (
         <button className="twa-press" onClick={() => doAction("set-error")} disabled={loading}
           style={{ flex: 1, padding: "14px", border: "none", borderRadius: 12, background: "rgba(255,149,0,0.12)", color: C.orange, fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
@@ -632,7 +645,12 @@ function ActionPanel({
         </button>
       )}
       <button className="twa-press" onClick={() => doAction("complete")} disabled={loading}
-        style={{ flex: 1, padding: "14px", border: "none", borderRadius: 12, background: "rgba(10,132,255,0.12)", color: C.blue, fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+        style={{
+          flex: splitAllDone ? 2 : 1, padding: "14px", border: "none", borderRadius: 12,
+          background: splitAllDone ? "rgba(48,209,88,0.22)" : "rgba(10,132,255,0.12)",
+          color: splitAllDone ? C.green : C.blue,
+          fontSize: 15, fontWeight: splitAllDone ? 700 : 600, cursor: "pointer", opacity: loading ? 0.5 : 1,
+        }}>
         Выкуплено
       </button>
       <button className="twa-press" onClick={() => doAction("reject")} disabled={loading}
@@ -1365,8 +1383,38 @@ function SplitModal({ order, token, onDone, onClose }: {
    куплено, какая покупается следующей и сходится ли сумма частей с номиналом
    заказа — расхождение суммы сервер не пропустит, и узнать об этом лучше здесь,
    чем по красной ошибке после нажатия «Выкупить». */
-function SplitPartsBlock({ parts, orderAmount }: { parts: SplitPart[]; orderAmount: number }) {
+function SplitPartsBlock({ parts, orderAmount, orderId, token, onChanged }: {
+  parts: SplitPart[]; orderAmount: number; orderId: string; token: string; onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
   const ordered = [...parts].sort((a, b) => a.position - b.position);
+
+  // Ручная отметка: выкупили пасс руками, вне нашей кнопки. Клиенту НИЧЕГО не
+  // уходит — он получил не весь заказ; уведомление шлёт только «Выкуплено».
+  async function toggle(part: SplitPart) {
+    if (busy) return;
+    setBusy(part.id);
+    haptic.select();
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          action: "mark-split-part", orderId, partId: part.id, purchased: !part.purchasedAt,
+        }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok) { haptic.notify("error"); toast(d?.error ?? "Ошибка", "error"); return; }
+      toast(
+        d.allDone
+          ? `🧩 ${d.progress} — все части отмечены. Нажми «Выкуплено», чтобы закрыть заказ и уведомить клиента`
+          : `🧩 ${d.progress}`,
+        d.allDone ? "success" : "default",
+      );
+      onChanged();
+    } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
+    finally { setBusy(null); }
+  }
   const done = ordered.filter(p => p.purchasedAt);
   const nextIdx = ordered.findIndex(p => !p.purchasedAt);
   const sum = ordered.reduce((acc, p) => acc + p.amount, 0);
@@ -1416,7 +1464,25 @@ function SplitPartsBlock({ parts, orderAmount }: { parts: SplitPart[]; orderAmou
               background: isNext ? `${C.blue}12` : "transparent",
               border: isNext ? `1px solid ${C.blue}44` : "1px solid transparent",
             }}>
-              <span style={{ fontSize: 13, width: 16, flexShrink: 0 }}>{bought ? "✅" : isNext ? "▶️" : "⏳"}</span>
+              {/* Хитбокс намеренно крупный: пальцем по списку на телефоне
+                  попасть в 16 px нельзя, а цена промаха — отметка не той части. */}
+              <button
+                className="twa-press-sm"
+                onClick={e => { e.stopPropagation(); toggle(p); }}
+                disabled={busy !== null}
+                aria-label={bought ? `Снять отметку выкупа с части ${i + 1}` : `Отметить часть ${i + 1} выкупленной`}
+                style={{
+                  width: 30, height: 30, flexShrink: 0, marginLeft: -4,
+                  display: "grid", placeItems: "center",
+                  borderRadius: 9, cursor: busy ? "wait" : "pointer",
+                  border: bought ? "none" : `1.5px solid ${isNext ? C.blue : C.border}`,
+                  background: bought ? C.green : "transparent",
+                  color: "#fff", fontSize: 15, lineHeight: 1,
+                  opacity: busy === p.id ? 0.5 : 1,
+                }}
+              >
+                {bought ? "✓" : ""}
+              </button>
               <span style={{
                 fontSize: 13, fontWeight: 700, color: bought ? C.textTertiary : "#e5e5ea",
                 fontVariantNumeric: "tabular-nums", minWidth: 66,
@@ -1449,6 +1515,14 @@ function SplitPartsBlock({ parts, orderAmount }: { parts: SplitPart[]; orderAmou
           ⚠️ Сумма частей ≠ номиналу заказа — сервер заблокирует выкуп, поправь разбиение
         </div>
       )}
+
+      {/* Разница между галочкой и «Выкуплено» — это разница между «мы видим» и
+          «клиент знает». Её нужно назвать прямо, иначе её узнают методом проб. */}
+      <div style={{ fontSize: 11.5, lineHeight: 1.45, color: C.textTertiary }}>
+        {allDone
+          ? "Все части отмечены. Клиент узнает только после «Выкуплено»."
+          : "Галочка — отметка для нас, клиенту ничего не уходит. Уведомление шлёт «Выкуплено»."}
+      </div>
     </div>
   );
 }
@@ -1715,7 +1789,7 @@ function OrderCard({
         {/* Разбитый выкуп: список частей вместо одной ссылки. Без него
             «выкуплено 1 из 3» выглядит как зависший заказ без объяснения. */}
         {split.length > 0 ? (
-          <SplitPartsBlock parts={split} orderAmount={order.amount} />
+          <SplitPartsBlock parts={split} orderAmount={order.amount} orderId={order.id} token={token} onChanged={onMoved} />
         ) : order.gamepassUrl && (
           <DataRow icon="🔗" copyText={order.gamepassUrl}>
             <span style={{ color: C.blue }}>{order.gamepassUrl.replace(/^https?:\/\/(www\.)?/, "").slice(0, 40)}</span>

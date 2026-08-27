@@ -877,7 +877,13 @@ export async function POST(req: NextRequest) {
 
     const checkOrders: any[] = await (prisma as any).wbOrder.findMany({
       where: { id: { in: ids } },
-      select: { id: true, amount: true, gamepassUrl: true, wbCode: true },
+      select: {
+        id: true, amount: true, gamepassUrl: true, wbCode: true,
+        // У разбитого заказа сверять текущий пасс с номиналом ВСЕГО заказа
+        // нельзя: пасс за 1429 R$ в заказе на 3000 — это норма, а бейдж
+        // «цена ≠ номиналу» на каждой такой карточке был бы ложной тревогой.
+        splitGamepasses: { orderBy: { position: "asc" }, select: { gamepassId: true, amount: true, purchasedAt: true } },
+      },
     });
 
     const gpIds = [...new Set(checkOrders.map((o) => gpIdOf(o.gamepassUrl)).filter(Boolean))] as string[];
@@ -903,9 +909,14 @@ export async function POST(req: NextRequest) {
     // for the actual purchase flow. Previous version held the SG single-flight
     // lock for every order here, blocking concurrent purchase requests.
     for (const o of checkOrders) {
-      const gpId = gpIdOf(o.gamepassUrl);
+      // Проверяем ту часть, которая покупается сейчас, и сверяем её с ЕЁ
+      // номиналом. Сумма частей уже сходится с заказом — это отдельный
+      // инвариант, и его нарушение показывает блок разбиения, а не этот бейдж.
+      const parts: { gamepassId: string; amount: number; purchasedAt: Date | null }[] = o.splitGamepasses ?? [];
+      const activePart = parts.find((p) => !p.purchasedAt) ?? null;
+      const gpId = activePart ? activePart.gamepassId : gpIdOf(o.gamepassUrl);
       if (!gpId) continue;
-      const expected = Math.ceil(o.amount / 0.7);
+      const expected = Math.ceil((activePart ? activePart.amount : o.amount) / 0.7);
       const publicInfo = await getGpInfoCached(gpId);
       const reusedCode = reusedBy.get(gpId);
       const basePrice = publicInfo?.price ?? null;
@@ -1073,15 +1084,94 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Order must be PENDING, IN_PROGRESS or ERROR" }, { status: 400 });
     const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
     const currentRate = settings?.purchaseRate ?? null;
-    const purchaseRobux = Math.ceil(order.amount / 0.7);
+    // У разбитого заказа себестоимость — сумма списаний по частям. Считать её
+    // от номинала заказа значило бы записать в прибыль выдуманное число: три
+    // пасса по 1429 стоят 4287, а ceil(3000/0.7) = 4286.
+    const purchaseRobux = splitParts.length > 0
+      ? splitParts.reduce((sum, p) => sum + (Number(p.chargedPrice) || Math.ceil(p.amount / 0.7)), 0)
+      : Math.ceil(order.amount / 0.7);
     const money = buildOrderProfitSnapshot(order, settings ?? {}, purchaseRobux);
-    await (prisma as any).wbOrder.update({
-      where: { id: orderId },
-      data:  { status: "COMPLETED", buyoutErrorCode: null, purchaseRate: currentRate, completedAt: new Date(), ...(money ?? {}) },
-    });
+    await (prisma as any).$transaction([
+      (prisma as any).wbOrder.update({
+        where: { id: orderId },
+        data:  { status: "COMPLETED", buyoutErrorCode: null, purchaseRate: currentRate, completedAt: new Date(), ...(money ?? {}) },
+      }),
+      // Ручное «Выкуплено» закрывает и оставшиеся части: заказ не может быть
+      // выполнен, пока в нём висят невыкупленные куски — иначе карточка
+      // COMPLETED показывала бы «1/3» и вводила в заблуждение.
+      ...(splitParts.length > 0
+        ? [(prisma as any).wbOrderGamepass.updateMany({
+            where: { orderId, purchasedAt: null },
+            data: { purchasedAt: new Date() },
+          })]
+        : []),
+    ]);
     cachedCounts = null;
+    // Уведомление клиенту уходит ТОЛЬКО здесь — при закрытии всего заказа.
+    // Отметка отдельной части (`mark-split-part`) клиенту не видна: он получил
+    // не всё, за что заплатил, и «заказ выполнен» было бы неправдой.
     notifyOrderCompleted(order.user, orderId, order.amount, order.isDirectOrder).catch(() => {});
     return NextResponse.json({ ok: true });
+  }
+
+  // ── Ручная отметка части: выкупили руками, вне нашей кнопки ───────────────
+  // Клиенту НИЧЕГО не уходит: он получил не весь заказ. Это внутренний
+  // визуал — чтобы было видно, какие пассы уже взяты, и не взять их дважды.
+  if (action === "mark-split-part") {
+    if (unpaidDirect) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
+    const partId = String(body.partId ?? "");
+    const part = splitParts.find((p) => p.id === partId);
+    if (!part) return NextResponse.json({ error: "Часть не найдена" }, { status: 404 });
+
+    const markPurchased = body.purchased !== false;
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    if (markPurchased) {
+      // Цену списания при ручной покупке никто не сообщает — записываем
+      // ожидаемую по номиналу части и помечаем в заметке, что она расчётная.
+      const assumed = Math.ceil(part.amount / 0.7);
+      await (prisma as any).wbOrderGamepass.update({
+        where: { id: part.id },
+        data: { purchasedAt: new Date(), chargedPrice: part.chargedPrice ?? assumed },
+      });
+      await appendAdminNote(
+        orderId,
+        `[РАЗБИВКА-РУЧНАЯ ${stamp}] часть ${part.position + 1}: GP ${part.gamepassId} отмечена выкупленной (${assumed} R$ расчётно)`,
+      );
+    } else {
+      await (prisma as any).wbOrderGamepass.update({
+        where: { id: part.id },
+        data: { purchasedAt: null, chargedPrice: null },
+      });
+      await appendAdminNote(
+        orderId,
+        `[РАЗБИВКА-РУЧНАЯ ${stamp}] часть ${part.position + 1}: GP ${part.gamepassId} снята отметка выкупа`,
+      );
+    }
+
+    const fresh: StoredPart[] = await (prisma as any).wbOrderGamepass.findMany({
+      where: { orderId },
+      orderBy: { position: "asc" },
+    });
+    const nextPart = nextUnpurchasedPart(fresh);
+    // `gamepassUrl` заказа всегда смотрит на текущую часть — от этого зависят
+    // очередь, живая проверка цены и скрипт покупки.
+    if (nextPart) {
+      await (prisma as any).wbOrder.update({
+        where: { id: orderId },
+        data: { gamepassUrl: `https://www.roblox.com/game-pass/${nextPart.gamepassId}` },
+      });
+    }
+    cachedCounts = null;
+
+    return NextResponse.json({
+      ok: true,
+      progress: describeSplitProgress(fresh),
+      allDone: splitIsComplete(fresh),
+      // Заказ намеренно НЕ закрывается сам: закрытие шлёт клиенту уведомление,
+      // и решение «всё выдано» остаётся явным нажатием «Выкуплено».
+      parts: fresh.map((p) => ({ id: p.id, purchasedAt: p.purchasedAt })),
+    });
   }
 
   if (action === "reject") {
