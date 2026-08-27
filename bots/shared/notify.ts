@@ -172,40 +172,57 @@ export async function tgDelete(chatId: string | number, messageId: number): Prom
   }
 }
 
+/**
+ * Отправка фото админам. Возвращает, дошло ли — и это не косметика.
+ *
+ * Раньше функция была `Promise<void>`, глотала сетевую ошибку в `.catch` и
+ * **не смотрела на ответ вообще**. Telegram не умеет забрать фото по чужой
+ * ссылке (истёкший URL VK CDN, недоступный хост) и отвечает 400 — а вызывающий
+ * код видел успех. Вместе с `Promise.allSettled` в `sendAdminReviewCard` это
+ * давало разбор 28.08: покупательница получила «✅ Отзыв получен», админам не
+ * ушло ничего, ни одной строки в логах, и бонус ей никто не начислил.
+ * Провал обязан быть слышным — иначе на него нельзя ответить фолбэком.
+ */
 export async function tgSendPhoto(
   chatId: string | number,
   photo: string,
   caption: string,
   extra: Record<string, unknown> = {}
-): Promise<void> {
+): Promise<boolean> {
   const bridgeUrl    = process.env.VALIDATOR_SOURCE_URL?.trim();
   const validatorKey = process.env.VALIDATOR_KEY?.trim();
+  const payload = { chat_id: chatId, photo, caption, parse_mode: "HTML", ...extra };
 
-  if (bridgeUrl) {
-    // Route through bridge — method auto-detected as 'sendPhoto' by the bridge
-    await fetch(`${bridgeUrl}/tg-proxy`, {
-      method:  "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(validatorKey ? { "x-validator-key": validatorKey } : {}),
-      },
-      body: JSON.stringify({
-        token:      process.env.TG_TOKEN,
-        chat_id:    chatId,
-        photo,
-        caption,
-        parse_mode: "HTML",
-        ...extra,
-      }),
-    }).catch((err) => console.warn("[notify] tgSendPhoto bridge error:", err?.message));
-    return;
+  try {
+    const res = bridgeUrl
+      // Метод мост определяет сам по наличию `photo`.
+      ? await fetch(`${bridgeUrl}/tg-proxy`, {
+        method:  "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(validatorKey ? { "x-validator-key": validatorKey } : {}),
+        },
+        body: JSON.stringify({ token: process.env.TG_TOKEN, ...payload }),
+        signal: AbortSignal.timeout(20_000),
+      })
+      : await fetch(tgUrl("sendPhoto"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(20_000),
+      });
+
+    const body = await res.json().catch(() => ({})) as TelegramReply;
+    if (body.ok === true) return true;
+    console.warn(
+      `[notify] tgSendPhoto не доставлено chat_id=${chatId}: HTTP ${res.status} — ` +
+      (telegramDescription(body) || JSON.stringify(body).slice(0, 200)),
+    );
+    return false;
+  } catch (err) {
+    console.warn("[notify] tgSendPhoto error:", err instanceof Error ? err.message : err);
+    return false;
   }
-
-  await fetch(tgUrl("sendPhoto"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, photo, caption, parse_mode: "HTML", ...extra }),
-  });
 }
 
 // ── VK ────────────────────────────────────────────────────────────────────────

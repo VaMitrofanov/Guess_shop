@@ -747,7 +747,55 @@ export async function sendAdminIntentCard(payload: DirectIntentCardPayload): Pro
 }
 
 /**
+ * Разослать админам карточку со скриншотом — и знать, дошла ли она.
+ *
+ * Общий отправитель для карточек отзыва и оплаты: обе рассылались через
+ * `Promise.allSettled` без разбора результатов, то есть «успешно» при любом
+ * исходе, включая полный провал. Скриншот оплаты потерять дороже, чем отзыв:
+ * человек уже заплатил, и его заказ просто зависает.
+ *
+ * Фолбэк текстом обязателен: Telegram не всегда может забрать фото по ссылке
+ * (истёкший URL VK CDN), и тогда карточка уходит текстом **с теми же
+ * кнопками** — решение принимается нажатием на них.
+ *
+ * Возвращает число админов, до которых дошло.
+ */
+async function broadcastPhotoCard(
+  photo: string,
+  caption: string,
+  reply_markup: unknown,
+  what: string,
+): Promise<number> {
+  const results = await Promise.all(
+    ADMIN_IDS.map(async (id) => {
+      if (await tgSendPhoto(id, photo, caption, { reply_markup })) return true;
+      try {
+        // URL экранируем: в ссылках VK CDN есть `&`, и на нём Telegram роняет
+        // разбор HTML целиком — фолбэк молча повторил бы исходную поломку.
+        const sent = await tgSend(
+          id,
+          `${caption}\n\n⚠️ Фото не удалось приложить — открой по ссылке:\n${escapeHtml(photo)}`,
+          { reply_markup },
+        );
+        return sent?.ok === true;
+      } catch (err) {
+        console.warn(`[admin] текстовый фолбэк (${what}) не ушёл:`, err instanceof Error ? err.message : err);
+        return false;
+      }
+    }),
+  );
+  const delivered = results.filter(Boolean).length;
+  if (delivered < ADMIN_IDS.length) {
+    console.warn(`[admin] карточка «${what}» дошла до ${delivered}/${ADMIN_IDS.length} админов`);
+  }
+  return delivered;
+}
+
+/**
  * Send a payment screenshot card to all admins for confirmation.
+ *
+ * Бросает, если не дошло ни до кого: клиент уже заплатил, и молча потерянный
+ * скриншот оставляет его заказ висеть без объяснений.
  */
 export async function sendAdminPaymentCard(payload: PaymentScreenshotCardPayload): Promise<void> {
   const code = await orderCode(payload.orderId);
@@ -765,17 +813,47 @@ export async function sendAdminPaymentCard(payload: PaymentScreenshotCardPayload
     ]],
   };
 
-  await Promise.allSettled(
-    ADMIN_IDS.map((id) =>
-      tgSendPhoto(id, payload.photoFileId, caption, { reply_markup })
-    )
-  );
+  const delivered = await broadcastPhotoCard(payload.photoFileId, caption, reply_markup, "скрин оплаты");
+  if (delivered === 0) {
+    throw new Error(`payment card undelivered: 0/${ADMIN_IDS.length} admins`);
+  }
 }
 
 /**
  * Broadcast a review-screenshot card to all Telegram admins.
  * Admin chooses [🎁 Начислить +100 R$] or [❌ Отклонить].
  */
+/**
+ * Карточка отзыва админам. Бросает, если не дошла НИ ДО КОГО.
+ *
+ * Раньше здесь стоял `Promise.allSettled` без разбора результатов — он не
+ * отклоняется никогда, поэтому `catch` у вызывающего был мёртвым кодом, а
+ * `tgSendPhoto` вдобавок не смотрел на ответ Telegram. Разбор 28.08:
+ * покупательница получила «✅ Отзыв получен», админам не ушло ничего, в логах
+ * пусто, бонус +100 R$ ей никто не начислил. Отзыв — это деньги клиенту, и
+ * потерять его молча нельзя.
+ *
+ * Фолбэк встроен здесь, а не у вызывающего: Telegram регулярно не может забрать
+ * фото по чужой ссылке (истёкший URL VK CDN), и тогда карточка обязана уйти
+ * текстом — **с теми же кнопками**, потому что начисление бонуса делается
+ * нажатием на них. Голое текстовое предупреждение без кнопок превращает
+ * начисление в ручную работу.
+ */
+/** След в заказе о непойманном отзыве — читается глазами в карточке TWA. */
+async function stampUndeliveredReview(payload: ReviewCardPayload): Promise<void> {
+  const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+  const line = `[ОТЗЫВ-НЕ-ДОШЁЛ ${stamp}] ${payload.userDisplay} прислал скрин, карточка админам не ушла. Фото: ${payload.photoSource}`;
+  const order = await (db as any).wbOrder.findUnique({
+    where: { id: payload.orderId },
+    select: { adminNote: true },
+  });
+  if (!order) return;
+  await (db as any).wbOrder.update({
+    where: { id: payload.orderId },
+    data: { adminNote: ((order.adminNote ? order.adminNote + "\n" : "") + line).slice(0, 2000) },
+  });
+}
+
 export async function sendAdminReviewCard(payload: ReviewCardPayload): Promise<void> {
   const code = await orderCode(payload.orderId);
   const caption =
@@ -790,9 +868,13 @@ export async function sendAdminReviewCard(payload: ReviewCardPayload): Promise<v
     ]],
   };
 
-  await Promise.allSettled(
-    ADMIN_IDS.map((id) =>
-      tgSendPhoto(id, payload.photoSource, caption, { reply_markup })
-    )
-  );
+  const delivered = await broadcastPhotoCard(payload.photoSource, caption, reply_markup, "скрин отзыва");
+  if (delivered === 0) {
+    // Последний рубеж: Telegram может быть недоступен целиком, и тогда любое
+    // уведомление бессмысленно. След в заказе переживёт это — по нему отзыв
+    // найдут и начислят бонус вручную (`scripts/credit-review-bonus.mjs`).
+    await stampUndeliveredReview(payload).catch((err) =>
+      console.error("[admin] не удалось записать след о потерянном отзыве:", err));
+    throw new Error(`review card undelivered: 0/${ADMIN_IDS.length} admins`);
+  }
 }
