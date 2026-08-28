@@ -307,7 +307,10 @@ audit-event и outbox.
   callback не хранится: остаётся SHA-256.
 - `PaymentRefund` — идемпотентный операторский запрос полного/частичного возврата; создаётся
   до provider call и различает `SUBMITTED`, `CONFIRMED`, `SUBMIT_UNKNOWN`.
-- `OrderEvent` — append-only события с уникальным idempotency key.
+- `OrderEvent` — append-only события с уникальным idempotency key. С 28.08.2026 сюда же
+  пишется след покупателя для разбора споров: `AUDIT_NICK_ENTERED` и
+  `AUDIT_GAMEPASS_SUBMITTED` (ключ `audit:<тип>:<orderId>:<ник|ID пасса>`, владелец пасса — по
+  ответу Roblox); см. [twa-admin.md](twa-admin.md).
 - `OutboxMessage` — durable-доставка (`PENDING/PROCESSING/DELIVERED/DEAD`, attempts,
   `nextAttemptAt`, `lockedAt`, `lastError`). TG-service worker реализует lease, capped
   exponential retry и dead-letter alert; детали — `payments-and-kkt.md`.
