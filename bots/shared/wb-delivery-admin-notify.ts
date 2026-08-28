@@ -82,7 +82,7 @@ const SKIP_REASON: Record<Exclude<AutoReceiveSkip, null>, { marker: "action" | "
   already_closed: { marker: "action", text: "заказ уже закрыт на WB — проверить кабинет" },
   too_many_attempts: {
     marker: "urgent",
-    text: "WB отклонил код на всех попытках — <b>закрыть доставку вручную в кабинете WB</b>, гейт покупателю ещё не ушёл",
+    text: "WB отклонял код все 6 часов расписания — <b>закрыть доставку вручную в кабинете WB</b>, гейт покупателю ещё не ушёл",
   },
   // Запасной текст: обычный путь для этого пропуска — ветка с самим кодом ниже.
   order_too_old: {
@@ -95,7 +95,7 @@ const SKIP_REASON: Record<Exclude<AutoReceiveSkip, null>, { marker: "action" | "
   },
   wb_rejected: {
     marker: "urgent",
-    text: "WB отклонил код — повторим ещё несколько раз с паузой; гейт покупателю не уйдёт, пока доставка не закрыта",
+    text: "WB отклонил код — повторяем по расписанию до 6 ч (1–2–3–5 мин, дальше 10–20–30 мин и час); гейт покупателю не уйдёт, пока доставка не закрыта",
   },
   wb_unknown: {
     marker: "urgent",
@@ -154,7 +154,12 @@ export function notifyDbsCodeCaptured(
   });
 }
 
-export function notifyDbsAutoReceiveFailed(wbOrderId: string, outcomeUnknown: boolean, providerCode?: string) {
+export function notifyDbsAutoReceiveFailed(
+  wbOrderId: string,
+  outcomeUnknown: boolean,
+  providerCode?: string,
+  nextTryAt?: Date | null,
+) {
   broadcast({
     marker: "urgent",
     zone: "DBS",
@@ -163,8 +168,30 @@ export function notifyDbsAutoReceiveFailed(wbOrderId: string, outcomeUnknown: bo
     next: outcomeUnknown
       ? "<b>сверить кабинет WB перед повтором</b> — исход неизвестен, повторять вслепую нельзя"
       // Гейт больше не уходит вперёд закрытия: покупателю ничего не обещано, и
-      // он получит свой код сам, как только доставка закроется.
-      : "повторим с паузой; если не пройдёт — <b>закрыть доставку вручную в кабинете WB</b>. Гейт покупателю не отправлен",
+      // он получит свой код сам, как только доставка закроется. Срок следующей
+      // попытки — чтобы «повторим» не читалось как «когда-нибудь»: расписание
+      // тянется до шести часов, и вмешиваться руками раньше времени не нужно.
+      : `повторяем по расписанию${nextTryAt ? `, следующая попытка ~${mskTime(nextTryAt)} МСК` : ""}`
+        + " — до 6 ч с прихода кода. Гейт покупателю не отправлен;"
+        + " закрыть доставку вручную в кабинете WB можно в любой момент, гейт уйдёт сам",
+  });
+}
+
+/** Середина расписания: код всё ещё у нас, повторы идут, покупателя попросили
+ * перепроверить цифры. Не «urgent» — вмешательство здесь не требуется, но знать
+ * о том, что покупателю ушло сообщение, оператор обязан. */
+export function notifyDbsCodeRecheck(wbOrderId: string, askedBuyer: boolean, nextTryAt: Date | null) {
+  broadcast({
+    marker: "action",
+    zone: "DBS",
+    title: "WB тянет с кодом — продолжаем повторы",
+    lines: [
+      wbOrderRef(wbOrderId),
+      nextTryAt ? `Следующая попытка ~<b>${mskTime(nextTryAt)}</b> МСК` : "Расписание повторов заканчивается",
+    ],
+    next: askedBuyer
+      ? "покупателя попросили перепроверить код; код остаётся у нас, повторы идут сами"
+      : "<b>сообщение покупателю не ушло</b> — проверить чат WB; повторы идут сами",
   });
 }
 
@@ -185,16 +212,19 @@ export function notifyDbsCodeRejected(wbOrderId: string, askedBuyer: boolean) {
 /** WB даёт около часа на закрытие доставки с момента прихода кода. Пропущенное
  * окно не отыгрывается, поэтому это единственное сообщение, которое кричит. */
 export function notifyDbsDeliveryStuck(wbOrderId: string, supplierStatus: string, codeReceivedAt: Date) {
-  const deadline = new Date(codeReceivedAt.getTime() + 60 * 60_000);
   broadcast({
     marker: "urgent",
     zone: "DBS",
-    title: "доставка не закрыта, окно WB истекает",
+    title: "доставка не закрыта двадцать минут",
     lines: [
       wbOrderRef(wbOrderId, [`WB держит статус «${escapeHtml(supplierStatus)}»`]),
-      `Код у нас с ${mskTime(codeReceivedAt)} МСК, окно примерно до <b>${mskTime(deadline)}</b> МСК`,
+      // Про «окно примерно до +1 ч» здесь больше не пишем: 22.08 заказ
+      // 5550714937 закрылся тем же кодом через 3 ч 56 мин, и ложный дедлайн
+      // толкал закрывать наугад там, где достаточно подождать.
+      `Код у нас с <b>${mskTime(codeReceivedAt)}</b> МСК, повторы идут сами до 6 ч`,
     ],
-    next: "<b>кабинет WB → «Передать в доставку»</b>, затем закрыть заказ — или сделать это из консоли DBS",
+    next: "ждать повторов не обязательно: <b>кабинет WB → «Передать в доставку»</b>, затем закрыть заказ"
+      + " — или сделать это из консоли DBS. Гейт покупателю уйдёт сам, как только доставка закроется",
   });
 }
 

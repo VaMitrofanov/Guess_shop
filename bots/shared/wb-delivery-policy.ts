@@ -202,6 +202,8 @@ export type WbDeliverySecretState = {
   consumedAt?: Date | null;
   encryptedValue: string;
   expiresAt: Date;
+  /** Сколько раз WB уже отказал по этому коду. Решает, можно ли его заменить. */
+  failedAttempts?: number | null;
 } | null | undefined;
 
 /** A secret is usable only while it is unconsumed, unpurged and inside its TTL.
@@ -224,7 +226,13 @@ export function canCaptureDeliveryCode(
   now = new Date(),
 ): boolean {
   if (order.completedAt || order.cancelledAt) return false;
-  return !wbDeliverySecretIsLive(secret, now);
+  if (!wbDeliverySecretIsLive(secret, now)) return true;
+  // Живой код, который WB уже отклонил, заменить можно — и нужно. Повторы по
+  // расписанию длятся часами, и раньше всё это время исправленный код из чата
+  // падал в пустоту: `canCapture` видел живой секрет и молча отказывал. До
+  // первого отказа замена по-прежнему запрещена, иначе любые цифры в чате
+  // затрут код, которым мы прямо сейчас закрываем доставку.
+  return (secret?.failedAttempts ?? 0) > 0;
 }
 
 /** Any outbound message means the conversation has started, so the console must
@@ -262,6 +270,30 @@ export function canIssueWbGate(order: WbDeliveryPolicyOrder): boolean {
   return order.chatState === "CODE_RECEIVED" && Boolean(order.hasLiveSecret);
 }
 
+/** Пауза после N-й неудачной попытки закрыть доставку, в минутах.
+ *
+ * Первые попытки идут почти подряд — это ловит короткий лаг WB. Дальше паузы
+ * растут, потому что лаг WB бывает длинным: 22.08 заказ `5550714937` получил
+ * восемь отказов `409` за восемь минут, после чего код считался неверным и
+ * стирался, — а ровно тот же код прошёл вручную из кабинета через **3 ч 56 мин**
+ * (решение владельца 22.08: повторять «через 10–20–30 минут», а не сдаваться на
+ * восьмой минуте). Код, который WB примет через час, не должен быть выброшен
+ * через восемь минут.
+ *
+ * Расписание от первой неудачи: 1, 2, 3, 5, 8, 13, 23, 43 мин, 1 ч 13, 1 ч 58,
+ * 2 ч 58, 3 ч 58, 4 ч 58, 5 ч 58 — пятнадцать попыток внутри горизонта. */
+export const WB_RECEIVE_RETRY_DELAYS_MIN = [1, 1, 1, 2, 3, 5, 10, 20, 30, 45, 60, 60, 60, 60] as const;
+
+/** Дальше этого срока с момента прихода кода повторять уже некуда: заказ давно
+ * разбирает человек, а покупатель ждёт ответа, а не тишины. */
+export const WB_RECEIVE_RETRY_HORIZON_MS = 6 * 60 * 60_000;
+
+/** После стольких отказов покупателя просят перепроверить код — но повторы при
+ * этом не прекращаются и код не стирается. Восемь минут (шестая попытка) — это
+ * примерно столько, сколько человек готов молча ждать, и одновременно достаточно
+ * долго, чтобы не дёргать его из-за секундного лага WB. */
+export const WB_RECEIVE_RECHECK_AFTER_ATTEMPTS = 6;
+
 /** WB gives roughly an hour from the buyer handing over their code to close the
  * delivery, and that deadline cannot be recovered from. Sending the gate can be
  * retried forever — we keep the chat and the code — so closing must never wait
@@ -273,7 +305,7 @@ export function canIssueWbGate(order: WbDeliveryPolicyOrder): boolean {
  * silently disabled closing for that order forever. Retries are now bounded by
  * `failedAttempts` on the secret instead — a counter that only the thing it
  * guards can increment (docs/wb-dbs-review-2026-08-20.md, F2). */
-export const WB_RECEIVE_MAX_ATTEMPTS = 8;
+export const WB_RECEIVE_MAX_ATTEMPTS = WB_RECEIVE_RETRY_DELAYS_MIN.length + 1;
 
 /** Сколько времени с момента оформления заказа доставку закрывает бот сам.
  *
@@ -320,21 +352,56 @@ export function wbOrderAgeHours(order: WbOrderPlacement, at: Date | string = new
   return Math.max(0, Math.round((new Date(at).getTime() - placed) / 3_600_000));
 }
 
-/** Пауза между попытками закрыть доставку.
+/** Самая короткая пауза расписания.
  *
- * Без неё бюджет попыток сгорал за секунды: цикл идёт раз в 5 с, поэтому три
+ * Без паузы бюджет попыток сгорал за секунды: цикл идёт раз в 5 с, поэтому три
  * попытки заканчивались через 10 с после прихода кода (заказ 5540950769,
- * 20.08). А WB — по наблюдению владельца — «ужасно лагает»: тот самый код
- * прошёл позже, вручную. Верный код обязан пережить лаг WB, поэтому попытки
- * растянуты на минуты, а не на секунды: восемь попыток по минуте — это восемь
- * минут внутри часового окна WB, и только после них код считается неверным. */
-export const WB_RECEIVE_RETRY_INTERVAL_MS = 60_000;
+ * 20.08). Точную паузу считает `wbReceiveRetryDue`; эта константа нужна только
+ * как грубый предфильтр выборки в БД, где расписание выразить нечем. */
+export const WB_RECEIVE_RETRY_INTERVAL_MS = Math.min(...WB_RECEIVE_RETRY_DELAYS_MIN) * 60_000;
 
-/** Момент, раньше которого секрет трогать не надо: попытка была слишком
- * недавно. Считается по `updatedAt` секрета — строку трогают только захват кода
- * и неудачная попытка, так что это ровно «когда мы последний раз пробовали». */
+/** Момент, раньше которого секрет трогать не надо ни при каком расписании.
+ * Считается по `updatedAt` секрета — строку трогают только захват кода и
+ * неудачная попытка, так что это ровно «когда мы последний раз пробовали». */
 export function wbReceiveRetryCutoff(now = new Date()): Date {
   return new Date(now.getTime() - WB_RECEIVE_RETRY_INTERVAL_MS);
+}
+
+export type WbReceiveRetryState = {
+  failedAttempts: number;
+  /** Когда пробовали в прошлый раз: строку секрета трогают только захват и отказ. */
+  updatedAt: Date | string;
+  /** Когда код пришёл от покупателя — от него считается горизонт повторов. */
+  receivedAt: Date | string;
+};
+
+/** Пауза перед следующей попыткой. `null` — расписание кончилось. */
+export function wbReceiveRetryDelayMs(failedAttempts: number): number | null {
+  if (failedAttempts < 1) return 0;
+  const minutes = WB_RECEIVE_RETRY_DELAYS_MIN[failedAttempts - 1];
+  return minutes === undefined ? null : minutes * 60_000;
+}
+
+/** Когда наступит следующая попытка. `null` — её не будет. */
+export function wbReceiveRetryDueAt(secret: WbReceiveRetryState): Date | null {
+  const delay = wbReceiveRetryDelayMs(secret.failedAttempts);
+  if (delay === null) return null;
+  return new Date(new Date(secret.updatedAt).getTime() + delay);
+}
+
+/** Повторять больше нечем: расписание исчерпано или истёк горизонт. Только
+ * после этого код считается неверным — и только тогда его можно стирать. */
+export function wbReceiveRetriesExhausted(secret: WbReceiveRetryState, now = new Date()): boolean {
+  if (secret.failedAttempts >= WB_RECEIVE_MAX_ATTEMPTS) return true;
+  if (wbReceiveRetryDelayMs(secret.failedAttempts) === null) return true;
+  return new Date(secret.receivedAt).getTime() + WB_RECEIVE_RETRY_HORIZON_MS <= now.getTime();
+}
+
+/** Пора пробовать снова. */
+export function wbReceiveRetryDue(secret: WbReceiveRetryState, now = new Date()): boolean {
+  if (wbReceiveRetriesExhausted(secret, now)) return false;
+  const due = wbReceiveRetryDueAt(secret);
+  return due !== null && due.getTime() <= now.getTime();
 }
 
 /** Гейт уходит покупателю только за закрытой доставкой.

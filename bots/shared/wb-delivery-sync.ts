@@ -3,6 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import { generateWbActivationCode } from "./wb-activation-code";
 import {
   wbCodeRequestMessage,
+  wbCodeRecheckMessage,
   wbCodeRetryMessage,
   wbGateMessage,
   wbGateReminderMessage,
@@ -56,11 +57,17 @@ import {
   wbOrderAgeHours,
   wbProductVendorCandidates,
   wbReceiveRetryCutoff,
+  wbReceiveRetryDue,
+  wbReceiveRetryDueAt,
+  wbReceiveRetriesExhausted,
   WB_RECEIVE_MAX_ATTEMPTS,
+  WB_RECEIVE_RECHECK_AFTER_ATTEMPTS,
+  WB_RECEIVE_RETRY_HORIZON_MS,
 } from "./wb-delivery-policy";
 import {
   notifyDbsBuyerMessage,
   notifyDbsCodeCaptured,
+  notifyDbsCodeRecheck,
   notifyDbsCodeRejected,
   notifyDbsAutoReceiveFailed,
   notifyDbsOrderCancelled,
@@ -604,7 +611,7 @@ async function tryAutoReceive(db: Db, orderId: string, wbOrderId: string): Promi
   if (!wbAutoReceiveWithinWindow(order, order.deliverySecret.receivedAt)) {
     return { closed: false, skip: "order_too_old" };
   }
-  if (order.deliverySecret.failedAttempts >= WB_RECEIVE_MAX_ATTEMPTS) {
+  if (wbReceiveRetriesExhausted(order.deliverySecret)) {
     return { closed: false, skip: "too_many_attempts" };
   }
   if (!canReceiveWbOrder({
@@ -667,35 +674,106 @@ async function tryAutoReceive(db: Db, orderId: string, wbOrderId: string): Promi
     }).catch(() => {});
     console.error(`[WbDbsSync] auto-receive failed for ${wbOrderId} (${providerCode}):`, error);
     const attempt = attempts?.failedAttempts ?? 0;
-    const exhausted = attempt >= WB_RECEIVE_MAX_ATTEMPTS;
-    // Бюджет попыток исчерпан, а отказ был внятным — значит код, вероятнее
-    // всего, не тот. Просим у покупателя новый вместо молчания.
+    const retryState = {
+      failedAttempts: attempt,
+      updatedAt: new Date(),
+      receivedAt: order.deliverySecret.receivedAt,
+    };
+    const exhausted = wbReceiveRetriesExhausted(retryState);
+    // Расписание кончилось, а отказ был внятным — только теперь код считается
+    // неверным. Раньше это случалось на восьмой минуте, и код стирался, хотя WB
+    // принимал его часом позже (заказ 5550714937, 22.08).
     if (exhausted && !unknown) {
       await askBuyerForAnotherCode(db, orderId, wbOrderId).catch((e) => {
         console.error(`[WbDbsSync] code retry request failed for ${wbOrderId}:`, safeErrorCode(e));
       });
+    } else if (!unknown && attempt === WB_RECEIVE_RECHECK_AFTER_ATTEMPTS) {
+      // Середина расписания: покупателя просят перепроверить код, но повторы
+      // продолжаются и код остаётся у нас. Опечатку исправит только он, а лаг
+      // WB переживём мы — сообщение обязано не выглядеть тупиком.
+      await askBuyerToRecheckCode(db, orderId, wbOrderId, wbReceiveRetryDueAt(retryState)).catch((e) => {
+        console.error(`[WbDbsSync] code recheck request failed for ${wbOrderId}:`, safeErrorCode(e));
+      });
     } else if (attempt <= 1 || exhausted) {
-      // Кричим на первой попытке и на последней. Восемь попыток по минуте — это
-      // восемь одинаковых сообщений подряд, а промежуточные и так видны в
+      // Кричим на первой попытке и на последней. Пятнадцать попыток — это
+      // пятнадцать одинаковых сообщений подряд, а промежуточные и так видны в
       // карточке: шум ровно там, где нужна ясность.
-      notifyDbsAutoReceiveFailed(wbOrderId, unknown, providerCode);
+      notifyDbsAutoReceiveFailed(wbOrderId, unknown, providerCode, wbReceiveRetryDueAt(retryState));
     }
     await refreshDbsCard(db, orderId).catch(() => {});
     return { closed: false, skip: unknown ? "wb_unknown" : "wb_rejected" };
   }
 }
 
+/** Покупателя просят перепроверить код, не прекращая повторы.
+ *
+ * Ровно одно такое сообщение на заказ, и claim идёт через уникальный ключ
+ * аудита: `audit()` делает upsert и об уже существующей строке не сообщает, а
+ * два сообщения подряд об одном и том же — худшее, что можно прислать человеку,
+ * который и так не понимает, что происходит.
+ *
+ * Секрет остаётся живым: расписание повторов продолжает работать, а
+ * `canCaptureDeliveryCode` теперь пропускает замену кода, по которому уже был
+ * отказ, — так что исправленный код из чата не потеряется. */
+async function askBuyerToRecheckCode(
+  db: Db,
+  orderId: string,
+  wbOrderId: string,
+  nextTryAt: Date | null,
+) {
+  const order = await db.wbMarketplaceOrder.findUnique({
+    where: { id: orderId },
+    include: { chats: { orderBy: { lastEventAt: "desc" as const }, take: 1 } },
+  });
+  if (!order || order.completedAt || order.cancelledAt) return;
+
+  try {
+    await db.wbMarketplaceEvent.create({
+      data: {
+        marketplaceOrderId: orderId,
+        type: "DELIVERY_CODE_RECHECK_ASKED",
+        idempotencyKey: `code-recheck:${orderId}`,
+        actor: "wb-sync",
+        payload: { attempts: WB_RECEIVE_RECHECK_AFTER_ATTEMPTS, nextTryAt: nextTryAt?.toISOString() ?? null },
+      },
+    });
+  } catch (error) {
+    // P2002 — просьба уже уходила, это штатный выход. Любая другая ошибка тоже
+    // не повод писать покупателю вслепую: без записи в аудите дубль ничем не
+    // остановить.
+    if ((error as { code?: string }).code !== "P2002") {
+      console.error(`[WbDbsSync] recheck claim failed for ${wbOrderId}:`, safeErrorCode(error));
+    }
+    return;
+  }
+
+  const chat = order.chats?.[0];
+  const canAsk = !order.isTest
+    && process.env.WB_CHAT_SEND_ENABLED === "true"
+    && Boolean(chat?.replySignEncrypted);
+  let asked = canAsk;
+  if (canAsk && chat?.replySignEncrypted) {
+    try {
+      await sendBuyerChatMessage(decryptWbSecret(chat.replySignEncrypted, "reply-sign"), wbCodeRecheckMessage());
+    } catch (error) {
+      asked = false;
+      console.error(`[WbDbsSync] code recheck message failed for ${wbOrderId}:`, safeErrorCode(error));
+    }
+  }
+  notifyDbsCodeRecheck(wbOrderId, asked, nextTryAt);
+}
+
 /** Сколько раз подряд мы готовы просить у покупателя другой код доставки.
  * Дальше это уже не «опечатка», а разговор, который ведёт человек. */
 const MAX_CODE_RETRY_REQUESTS = 2;
 
-/** WB отклонил код столько раз, что дело не в лагах WB.
+/** Расписание повторов пройдено целиком — шесть часов и пятнадцать попыток, —
+ * а WB так и не принял код. Вот теперь дело не в лагах WB.
  *
- * Что здесь важно по порядку: сначала снимается секрет — пока он «живой»,
- * `canCaptureDeliveryCode` не даст сохранить следующий код, и покупатель мог бы
- * прислать верный код в пустоту. Затем `chatState` возвращается в
- * `CODE_REQUESTED` через CAS: кто перевёл состояние — тот и пишет покупателю,
- * поэтому дубля просьбы быть не может. */
+ * Что здесь важно по порядку: сначала снимается секрет — иначе истёкшее
+ * расписание навсегда осталось бы с непригодным кодом, — затем `chatState`
+ * возвращается в `CODE_REQUESTED` через CAS: кто перевёл состояние, тот и пишет
+ * покупателю, поэтому дубля просьбы быть не может. */
 async function askBuyerForAnotherCode(db: Db, orderId: string, wbOrderId: string) {
   const asked = await db.wbMarketplaceEvent.count({
     where: { marketplaceOrderId: orderId, type: "DELIVERY_CODE_REJECTED" },
@@ -751,14 +829,18 @@ async function askBuyerForAnotherCode(db: Db, orderId: string, wbOrderId: string
  * This sweep gives every order holding a usable code another go, so a race lost
  * at capture time costs seconds, not the whole WB window.
  *
- * The attempts are spaced. Unspaced, the 5-second cycle burned the whole budget
- * within ten seconds of the code arriving (order 5540950769, 20.08) — and WB
- * lags: that very code went through later, by hand. Retrying a valid code has
- * to outlive a WB hiccup, so `updatedAt` on the secret — touched only by a
- * capture or a failed attempt — holds the sweep back a minute between tries. */
+ * Паузы между попытками растут по расписанию (`WB_RECEIVE_RETRY_DELAYS_MIN`):
+ * первые попытки почти подряд, дальше 10, 20, 30, 45 минут и час — до шести
+ * часов с прихода кода. Причина в живом заказе `5550714937` (22.08): восемь
+ * отказов `409` за восемь минут, код признан неверным и стёрт, — а тот же самый
+ * код прошёл вручную через 3 ч 56 мин.
+ *
+ * Расписание нельзя выразить в `where`, поэтому выборка идёт грубым фильтром по
+ * минимальной паузе, а точный срок считает `wbReceiveRetryDue` уже в памяти. */
 async function retryAutoReceive(db: Db) {
   if (process.env.WB_DBS_AUTO_RECEIVE !== "true") return;
   if (process.env.WB_DBS_MUTATIONS_ENABLED !== "true") return;
+  const now = new Date();
   const pending = await db.wbMarketplaceOrder.findMany({
     where: {
       isTest: false,
@@ -767,16 +849,25 @@ async function retryAutoReceive(db: Db) {
       deliverySecret: {
         is: {
           consumedAt: null,
-          expiresAt: { gt: new Date() },
+          expiresAt: { gt: now },
           failedAttempts: { lt: WB_RECEIVE_MAX_ATTEMPTS },
-          updatedAt: { lt: wbReceiveRetryCutoff() },
+          updatedAt: { lt: wbReceiveRetryCutoff(now) },
+          receivedAt: { gt: new Date(now.getTime() - WB_RECEIVE_RETRY_HORIZON_MS) },
         },
       },
     },
-    select: { id: true, wbOrderId: true },
-    take: 25,
+    select: {
+      id: true,
+      wbOrderId: true,
+      deliverySecret: { select: { failedAttempts: true, updatedAt: true, receivedAt: true } },
+    },
+    orderBy: { firstSeenAt: "asc" },
+    take: 100,
   });
-  for (const order of pending) {
+  const due = pending
+    .filter((order) => order.deliverySecret && wbReceiveRetryDue(order.deliverySecret, now))
+    .slice(0, 25);
+  for (const order of due) {
     await tryAutoReceive(db, order.id, order.wbOrderId);
   }
 }

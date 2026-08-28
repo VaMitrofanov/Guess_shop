@@ -1,21 +1,31 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  canCaptureDeliveryCode,
   canReceiveWbOrder,
   canSendWbGate,
   wbAutoReceiveWithinWindow,
   wbOrderAgeHours,
   wbOrderPlacedAt,
   wbReceiveRetryCutoff,
+  wbReceiveRetryDue,
+  wbReceiveRetriesExhausted,
   WB_AUTO_RECEIVE_ORDER_AGE_MS,
   WB_RECEIVE_MAX_ATTEMPTS,
+  WB_RECEIVE_RECHECK_AFTER_ATTEMPTS,
+  WB_RECEIVE_RETRY_DELAYS_MIN,
+  WB_RECEIVE_RETRY_HORIZON_MS,
   WB_RECEIVE_RETRY_INTERVAL_MS,
 } from "../../bots/shared/wb-delivery-policy";
 
 const worker = readFileSync(resolve(__dirname, "../../bots/shared/wb-delivery-sync.ts"), "utf8");
 const autoReceive = worker.slice(
   worker.indexOf("async function tryAutoReceive"),
-  worker.indexOf("async function askBuyerForAnotherCode"),
+  worker.indexOf("async function askBuyerToRecheckCode"),
+);
+const recheck = worker.slice(
+  worker.indexOf("async function askBuyerToRecheckCode"),
+  worker.indexOf("const MAX_CODE_RETRY_REQUESTS"),
 );
 const retrySweep = worker.slice(
   worker.indexOf("async function retryAutoReceive"),
@@ -82,33 +92,65 @@ describe("automatic WB delivery close", () => {
     expect(cycle.indexOf('await step("auto-gate"')).toBeGreaterThan(cycle.indexOf('await step("auto-receive"'));
   });
 
-  /** Бюджет попыток сгорал за десять секунд — цикл идёт раз в 5 с, — а тот
-   * самый код 20.08 прошёл позже. Верный код обязан пережить лаг WB. */
-  it("spaces the retries out instead of burning them in ten seconds", () => {
+  /** 22.08, заказ 5550714937: восемь отказов `409` за восемь минут, код признан
+   * неверным и стёрт — а ровно тот же код прошёл вручную из кабинета через
+   * 3 ч 56 мин. Решение владельца: повторять «через 10–20–30 минут», а не
+   * сдаваться на восьмой минуте. */
+  it("retries for hours, because WB accepts the same code later", () => {
     expect(WB_RECEIVE_RETRY_INTERVAL_MS).toBeGreaterThanOrEqual(60_000);
-    expect(WB_RECEIVE_MAX_ATTEMPTS * WB_RECEIVE_RETRY_INTERVAL_MS).toBeGreaterThanOrEqual(5 * 60_000);
-    // ...и остаётся внутри часового окна WB.
-    expect(WB_RECEIVE_MAX_ATTEMPTS * WB_RECEIVE_RETRY_INTERVAL_MS).toBeLessThan(60 * 60_000);
-    expect(retrySweep).toContain("updatedAt: { lt: wbReceiveRetryCutoff() }");
-    // Секрет, тронутый только что, в выборку не попадает; тронутый минуту назад — попадает.
+    // Первые попытки подряд — короткий лаг WB стоит секунд, а не получаса.
+    expect(WB_RECEIVE_RETRY_DELAYS_MIN.slice(0, 3)).toEqual([1, 1, 1]);
+    // ...а дальше именно те паузы, которые назвал владелец.
+    expect(WB_RECEIVE_RETRY_DELAYS_MIN).toEqual(expect.arrayContaining([10, 20, 30]));
+    // Расписание целиком заведомо переживает четырёхчасовой лаг WB.
+    const scheduleMs = WB_RECEIVE_RETRY_DELAYS_MIN.reduce((sum, min) => sum + min * 60_000, 0);
+    expect(scheduleMs).toBeGreaterThan(4 * 60 * 60_000);
+    expect(WB_RECEIVE_RETRY_HORIZON_MS).toBeGreaterThanOrEqual(scheduleMs);
+    expect(WB_RECEIVE_MAX_ATTEMPTS).toBe(WB_RECEIVE_RETRY_DELAYS_MIN.length + 1);
+
+    // Выборка — грубая (расписание в `where` не выразить), точный срок считает
+    // `wbReceiveRetryDue` уже в памяти, иначе паузы существуют только на бумаге.
+    expect(retrySweep).toContain("updatedAt: { lt: wbReceiveRetryCutoff(now) }");
+    expect(retrySweep).toContain("wbReceiveRetryDue(order.deliverySecret, now)");
+    expect(retrySweep).toContain("receivedAt: { gt: new Date(now.getTime() - WB_RECEIVE_RETRY_HORIZON_MS) }");
+
     const now = new Date("2026-08-21T10:00:00Z");
     expect(wbReceiveRetryCutoff(now).getTime()).toBe(now.getTime() - WB_RECEIVE_RETRY_INTERVAL_MS);
-    expect(wbReceiveRetryCutoff(now).getTime()).toBeLessThan(now.getTime());
+
+    // Пауза растёт с номером попытки, а не стоит на месте.
+    const receivedAt = new Date("2026-08-21T09:00:00Z");
+    const after = (failedAttempts: number, minutesAgo: number) => wbReceiveRetryDue(
+      { failedAttempts, updatedAt: new Date(now.getTime() - minutesAgo * 60_000), receivedAt },
+      now,
+    );
+    expect(after(1, 0)).toBe(false);   // только что пробовали
+    expect(after(1, 2)).toBe(true);    // минута прошла
+    expect(after(7, 5)).toBe(false);   // седьмой отказ ждёт двадцать минут
+    expect(after(7, 25)).toBe(true);
+    // Горизонт: код, пришедший семь часов назад, не повторяем вообще.
+    expect(wbReceiveRetryDue(
+      { failedAttempts: 3, updatedAt: new Date(now.getTime() - 60 * 60_000), receivedAt: new Date(now.getTime() - 7 * 60 * 60_000) },
+      now,
+    )).toBe(false);
+    expect(wbReceiveRetriesExhausted({ failedAttempts: WB_RECEIVE_MAX_ATTEMPTS, updatedAt: now, receivedAt }, now)).toBe(true);
   });
 
-  /** Все попытки исчерпаны, а отказ был внятным — значит код не тот. Просим у
-   * покупателя новый вместо молчания, и освобождаем место под него: живой
-   * секрет не даёт `canCaptureDeliveryCode` сохранить следующий код. */
-  it("asks the buyer for another code instead of leaving them with nothing", () => {
+  /** Расписание пройдено целиком, а отказ был внятным — только теперь код
+   * считается неверным. Просим у покупателя новый вместо молчания и освобождаем
+   * место под него: живой секрет не даёт `canCaptureDeliveryCode` сохранить
+   * следующий код. */
+  it("gives up on the code only after the whole schedule is spent", () => {
     const ask = worker.slice(
       worker.indexOf("async function askBuyerForAnotherCode"),
-      worker.indexOf("/** Closing the delivery used to get exactly one attempt"),
+      worker.indexOf("async function retryAutoReceive"),
     );
     expect(autoReceive).toContain("askBuyerForAnotherCode(db, orderId, wbOrderId)");
     // Только на внятный отказ: на «исход неизвестен» покупателю не пишут.
     expect(autoReceive).toContain("if (exhausted && !unknown)");
-    expect(autoReceive).toContain("const exhausted = attempt >= WB_RECEIVE_MAX_ATTEMPTS;");
-    // И оператора не будят на каждой из восьми попыток — только первая и последняя.
+    // Сдаёмся по расписанию и горизонту, а не по счётчику попыток в отрыве от времени.
+    expect(autoReceive).toContain("const exhausted = wbReceiveRetriesExhausted(retryState);");
+    expect(autoReceive).toContain("receivedAt: order.deliverySecret.receivedAt,");
+    // И оператора не будят на каждой из пятнадцати попыток — только первая и последняя.
     expect(autoReceive).toContain("} else if (attempt <= 1 || exhausted) {");
     // CAS решает, кто пишет покупателю — дубля просьбы быть не может.
     expect(ask).toContain('chatState: "CODE_RECEIVED"');
@@ -117,6 +159,36 @@ describe("automatic WB delivery close", () => {
     expect(ask).toContain("wbCodeRetryMessage()");
     expect(ask).toContain("MAX_CODE_RETRY_REQUESTS");
     expect(ask).toContain("notifyDbsCodeRejected");
+  });
+
+  /** Середина расписания: покупателю говорят, что происходит, но код остаётся у
+   * нас и повторы продолжаются. Сообщение-тупик через восемь минут отправляло
+   * человека в поддержку и в отзыв, пока код был ещё вполне рабочим. */
+  it("tells the buyer we are still trying without throwing their code away", () => {
+    expect(autoReceive).toContain("attempt === WB_RECEIVE_RECHECK_AFTER_ATTEMPTS");
+    expect(autoReceive).toContain("askBuyerToRecheckCode(db, orderId, wbOrderId, wbReceiveRetryDueAt(retryState))");
+    expect(WB_RECEIVE_RECHECK_AFTER_ATTEMPTS).toBeLessThan(WB_RECEIVE_MAX_ATTEMPTS);
+    // Код не стирается и состояние чата не откатывается — иначе повторы мертвы.
+    expect(recheck).not.toContain('encryptedValue: "PURGED"');
+    expect(recheck).not.toContain('chatState: "CODE_REQUESTED"');
+    expect(recheck).toContain("wbCodeRecheckMessage()");
+    // Ровно одно такое сообщение на заказ: claim через уникальный ключ аудита,
+    // потому что `audit()` делает upsert и о дубле не сообщает.
+    expect(recheck).toContain('idempotencyKey: `code-recheck:${orderId}`');
+    expect(recheck).toContain("wbMarketplaceEvent.create");
+    expect(recheck).toContain("notifyDbsCodeRecheck");
+  });
+
+  /** Пока мы часами повторяем отклонённый код, исправленный код из чата обязан
+   * его заменить — иначе покупатель, сделавший ровно то, о чём его попросили,
+   * пишет в пустоту. */
+  it("lets a corrected code replace one WB has already rejected", () => {
+    const live = { encryptedValue: "v1:delivery-code:x", expiresAt: new Date(Date.now() + 60_000) };
+    const open = { completedAt: null, cancelledAt: null };
+    expect(canCaptureDeliveryCode(open, { ...live, failedAttempts: 0 })).toBe(false);
+    expect(canCaptureDeliveryCode(open, { ...live, failedAttempts: 1 })).toBe(true);
+    // Закрытый заказ не принимает код ни при каких попытках.
+    expect(canCaptureDeliveryCode({ completedAt: new Date(), cancelledAt: null }, { ...live, failedAttempts: 3 })).toBe(false);
   });
 
   it("refuses to close without a live code from the buyer", () => {

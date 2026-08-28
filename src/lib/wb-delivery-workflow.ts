@@ -835,7 +835,7 @@ async function mutateStatus(
   })) {
     throw new WbDeliveryWorkflowError(
       (order.deliverySecret?.failedAttempts ?? 0) >= WB_RECEIVE_MAX_ATTEMPTS
-        ? `WB отклонил этот код ${WB_RECEIVE_MAX_ATTEMPTS} раз — запросите у покупателя новый код или закройте доставку вручную в кабинете WB`
+        ? `WB отклонил этот код ${WB_RECEIVE_MAX_ATTEMPTS} раз за 6 часов — запросите у покупателя новый код или закройте доставку вручную в кабинете WB`
         : "Для завершения нужны статус «в доставке» и действующий код доставки",
       409,
       "RECEIVE_PRECONDITION",
