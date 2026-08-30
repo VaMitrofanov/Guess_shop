@@ -16,6 +16,7 @@ export {
   UNHOLD_NOTE_MARK,
   activeHoldCodes,
   assertOrderNotHeld,
+  hasHoldNoteFor,
   heldCustomerFor,
   heldRefusal,
   holdByCode,

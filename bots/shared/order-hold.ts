@@ -94,6 +94,42 @@ export function holdNoteLine(reason: string, actor: string): string {
   return `${HOLD_NOTE_MARK} ${stamp()} · ${actor}] ${reason}`;
 }
 
+/**
+ * Уже есть строка заморозки с этой причиной?
+ *
+ * Штамп меняется каждую минуту, поэтому сравнивать целые строки бесполезно —
+ * сравниваем причину внутри строки заморозки. Нужно, если заказ помечается
+ * повторно при живой заморозке: заметка не должна расти на строку за раз.
+ */
+export function hasHoldNoteFor(note: string | null | undefined, reason: string): boolean {
+  if (!note) return false;
+  return note
+    .split("\n")
+    .some((line) => line.startsWith(HOLD_NOTE_MARK) && line.endsWith(`] ${reason}`));
+}
+
+/**
+ * Проставить заморозку на заказ. Общая точка для крон-свипа и гарда выкупа —
+ * оба сажают на заказ заморозку, поставленную на код раньше него.
+ */
+export async function stampHoldOnOrder(
+  db: any,
+  order: { id: string; adminNote: string | null },
+  hold: { reason: string; createdBy: string },
+): Promise<void> {
+  await db.wbOrder.update({
+    where: { id: order.id },
+    data: {
+      heldAt: new Date(),
+      heldReason: hold.reason,
+      heldBy: hold.createdBy,
+      ...(hasHoldNoteFor(order.adminNote, hold.reason)
+        ? {}
+        : { adminNote: prependNote(order.adminNote, holdNoteLine(hold.reason, hold.createdBy)) }),
+    },
+  });
+}
+
 export function unholdNoteLine(actor: string): string {
   return `${UNHOLD_NOTE_MARK} ${stamp()} · ${actor}] заморозка снята`;
 }
@@ -219,13 +255,8 @@ export async function assertOrderNotHeld(
   });
   if (!hold || hold.releasedAt) return { held: false };
 
-  await db.wbOrder.update({
-    where: { id: order.id },
-    data: {
-      heldAt: new Date(), heldReason: hold.reason, heldBy: hold.createdBy,
-      adminNote: prependNote(order.adminNote, holdNoteLine(hold.reason, hold.createdBy)),
-    },
-  }).catch(() => { /* пометка — не повод пропустить блокировку */ });
+  await stampHoldOnOrder(db, order, hold)
+    .catch(() => { /* пометка — не повод пропустить блокировку */ });
 
   return { held: true, reason: hold.reason, message: heldRefusal(hold.reason) };
 }
@@ -252,13 +283,7 @@ export async function sweepPendingHolds(db: any): Promise<number> {
       select: { id: true, adminNote: true, heldAt: true },
     });
     if (!order || order.heldAt) continue;
-    await db.wbOrder.update({
-      where: { id: order.id },
-      data: {
-        heldAt: new Date(), heldReason: hold.reason, heldBy: hold.createdBy,
-        adminNote: prependNote(order.adminNote, holdNoteLine(hold.reason, hold.createdBy)),
-      },
-    });
+    await stampHoldOnOrder(db, order, hold);
     applied++;
   }
   return applied;

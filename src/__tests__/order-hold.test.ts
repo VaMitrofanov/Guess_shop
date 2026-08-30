@@ -11,7 +11,7 @@ import { join } from "path";
 import { buildTabWhere, orderByForTab, type FilterTab } from "@/lib/order-queue";
 import {
   HOLD_NOTE_MARK, NOT_HELD, NOT_HELD_SQL, UNHOLD_NOTE_MARK,
-  heldRefusal, normalizeHoldCode, normalizeHoldReason, parseAdminNote,
+  hasHoldNoteFor, heldRefusal, normalizeHoldCode, normalizeHoldReason, parseAdminNote,
 } from "@/lib/order-hold";
 
 const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
@@ -198,5 +198,36 @@ describe("разбор заметки", () => {
   it("пустая заметка — пустая история", () => {
     expect(parseAdminNote(null)).toEqual([]);
     expect(parseAdminNote("  \n \n ")).toEqual([]);
+  });
+});
+
+describe("повторная пометка не растит заметку", () => {
+  // Найдено живой проверкой в проде 30.08: если `heldAt` снят, а заморозка
+  // активна, крон-свип помечает заказ заново — и раньше дописывал строку на
+  // каждый проход. Штамп меняется каждую минуту, поэтому сравнивать целые
+  // строки бесполезно; сравниваем причину внутри строки заморозки.
+  const note = `${HOLD_NOTE_MARK} 30.08, 12:41 · Вадим] 1 звезда на WB\nPENDING→ERROR`;
+
+  it("та же причина распознаётся под другим штампом", () => {
+    expect(hasHoldNoteFor(note, "1 звезда на WB")).toBe(true);
+  });
+
+  it("другая причина — новая строка", () => {
+    expect(hasHoldNoteFor(note, "фрод")).toBe(false);
+  });
+
+  it("пустая заметка — писать можно", () => {
+    expect(hasHoldNoteFor(null, "1 звезда на WB")).toBe(false);
+  });
+
+  it("свип и гард выкупа ходят через общую точку", () => {
+    const core = read("bots/shared/order-hold.ts");
+    const sweep = core.slice(core.indexOf("export async function sweepPendingHolds"));
+    expect(sweep).toContain("stampHoldOnOrder");
+    const assert = core.slice(
+      core.indexOf("export async function assertOrderNotHeld"),
+      core.indexOf("export async function sweepPendingHolds"),
+    );
+    expect(assert).toContain("stampHoldOnOrder");
   });
 });
