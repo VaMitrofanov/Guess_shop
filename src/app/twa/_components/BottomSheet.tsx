@@ -36,6 +36,20 @@ export default function BottomSheet({
   const sheetRef = useRef<HTMLElement | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
 
+  /* Последний `onClose` — через ref, а сам эффект зависит ТОЛЬКО от `open`.
+   *
+   * Потребители передают инлайновую стрелку (`onClose={() => setX(null)}`), то
+   * есть новую функцию на каждый рендер. Пока эффект зависел от `onClose`, он
+   * на каждом рендере разбирался и собирался заново — а в его уборке стоит
+   * `returnFocusRef.current?.focus()`. В шторке-просмотре это было незаметно:
+   * она перерисовывается редко. В шторке с формой рендер идёт на КАЖДОЕ нажатие
+   * клавиши, поэтому каждый введённый символ выбивал фокус из поля, ронял
+   * клавиатуру и мигал кнопкой «назад» Telegram. Ref разрывает эту связь и
+   * оставляет ловушку фокуса, BackButton и блокировку скролла собранными один
+   * раз на открытие. */
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
+
   useEffect(() => {
     if (!open) return;
 
@@ -44,7 +58,7 @@ export default function BottomSheet({
     document.body.style.overflow = "hidden";
 
     const telegramBack = window.Telegram?.WebApp?.BackButton;
-    const close = () => onClose();
+    const close = () => onCloseRef.current();
     telegramBack?.show();
     telegramBack?.onClick(close);
 
@@ -52,7 +66,7 @@ export default function BottomSheet({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab" || !sheetRef.current) return;
@@ -83,7 +97,7 @@ export default function BottomSheet({
       telegramBack?.hide();
       returnFocusRef.current?.focus();
     };
-  }, [onClose, open]);
+  }, [open]);
 
   if (!open || typeof document === "undefined") return null;
 

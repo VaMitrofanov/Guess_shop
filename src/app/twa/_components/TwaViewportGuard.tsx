@@ -20,6 +20,9 @@ export default function TwaViewportGuard() {
     const visualViewport = window.visualViewport;
     let animationFrame = 0;
     const settleTimers = new Set<number>();
+    // Последнее записанное значение отступа под клавиатуру. Нужно, чтобы не
+    // перезаписывать переменную из-за дрожания в пару пикселей.
+    let lastInset = -1;
 
     root.classList.add(ACTIVE_CLASS);
     body.classList.add(ACTIVE_CLASS);
@@ -38,11 +41,20 @@ export default function TwaViewportGuard() {
            клавиатуру, и экран «дёргается». Разница двух окон и есть высота
            клавиатуры; ею подпирается нижний отступ слоя со шторкой. */
         const layout = window.innerHeight;
-        const inset = visualViewport
+        const raw = visualViewport
           ? Math.max(0, Math.round(layout - visualViewport.height - visualViewport.offsetTop))
           : 0;
         // Мелкие расхождения на 1–2 px бывают и без клавиатуры — не двигаем из-за них.
-        root.style.setProperty("--twa-keyboard-inset", `${inset > 24 ? inset : 0}px`);
+        const inset = raw > 24 ? raw : 0;
+        /* Пишем, только когда отступ реально изменился.
+           `visualViewport.scroll` срабатывает и на микро-панораме во время
+           набора текста, а на слое со шторкой висит `transition: padding-bottom`
+           — от каждой перезаписи он дёргался бы заново. Порог в 8 px пропускает
+           появление и скрытие клавиатуры и глушит дрожание. */
+        if (lastInset < 0 || Math.abs(inset - lastInset) > 8) {
+          lastInset = inset;
+          root.style.setProperty("--twa-keyboard-inset", `${inset}px`);
+        }
       });
     };
 
