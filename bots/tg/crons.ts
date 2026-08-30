@@ -12,6 +12,7 @@ import { ROBUX_UNLOCK_DAYS, robuxUnlockDate, fmtDateRu } from "../shared/complet
 import { startAutoWorkers } from "./auto-workers";
 import { startPaymentOutboxWorker } from "../shared/payment-outbox";
 import { sweepStaleWebOrders } from "../shared/order-benefits";
+import { sweepPendingHolds } from "../shared/order-hold";
 import { runRetention } from "../shared/retention";
 import { startWbDeliveryWorker } from "../shared/wb-delivery-sync";
 
@@ -557,6 +558,21 @@ export function startReviewReminderCron(bot: Telegraf): void {
   setTimeout(runRetentionJob, 120_000); // 2 мин после старта
   setInterval(runRetentionJob, 24 * 60 * 60 * 1000);
 
+  // ❄️ Заморозка, поставленная на КОД до создания заказа (случай 84CR7UZ),
+  // садится на заказ, как только бот его создаст. Свип покрывает все 11 мест,
+  // где рождается WbOrder, не трогая ни одно из них. Безопасность траты он не
+  // обеспечивает — её держит assertOrderNotHeld прямо в путях выкупа; свип
+  // отвечает за то, чтобы заказ ВЫГЛЯДЕЛ замороженным в ленте.
+  const runHoldSweep = () =>
+    sweepPendingHolds(db)
+      .then((applied) => {
+        if (applied > 0) console.log(`[OrderHold] заморозка применена к ${applied} новым заказам`);
+      })
+      .catch((err) => console.error("[OrderHold] error:", err));
+
+  setTimeout(runHoldSweep, 20_000); // 20 с после старта
+  setInterval(runHoldSweep, 60 * 1000); // каждую минуту
+
   // Auto-buyout (+1) + GP-watcher (+3) — both kill-switched OFF by default.
   startAutoWorkers(bot);
   startPaymentOutboxWorker(bot);
@@ -568,5 +584,6 @@ export function startReviewReminderCron(bot: Telegraf): void {
   console.log("[UnlockPush] Cron started ✅");
   console.log("[StaleWebOrders] Cron started ✅");
   console.log("[Retention] Cron started ✅");
+  console.log("[OrderHold] Cron started ✅");
   console.log(`[WbDbsSync] Worker ${wbDbsStarted ? "started ✅" : "disabled"}`);
 }

@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { PAID_BUYOUT_SCOPE } from "@/lib/buyout-queue";
+import { NOT_HELD } from "@/lib/order-hold";
 import { BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, expectedGamepassPrice } from "@/lib/purchase-guard";
 import { parseGamepassId } from "@/lib/roblox-buyout";
 
@@ -16,7 +17,14 @@ import { parseGamepassId } from "@/lib/roblox-buyout";
 
 export type FilterTab =
   | "WORK" | "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW"
-  | "ERROR" | "AWAITING_LINK" | "DONE" | "REJECTED" | "FAVORITES" | "ATTENTION";
+  | "ERROR" | "AWAITING_LINK" | "DONE" | "REJECTED" | "FAVORITES" | "ATTENTION"
+  | "HELD";
+
+/* Заморозка — не двенадцатый статус, а фильтр по одному полю: логика вкладок
+   не размножается. Замороженный заказ уходит из ВСЕХ рабочих вкладок в свою,
+   чтобы не попасть в выкуп по инерции. `NOT_HELD` подмешан ниже в каждую
+   рабочую ветку; `order-hold.test.ts` следит, чтобы новая вкладка его не
+   забыла. «Все» намеренно показывает и замороженные — там они с бейджем ❄️. */
 
 /** Сколько часов заказ считается «новым» и не попадает в «ждут ссылку». */
 export const NEW_CUTOFF_HOURS = 40;
@@ -31,6 +39,7 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
     case "WORK":
       return {
         isFavorite: false,
+        ...NOT_HELD,
         OR: [
           { status: "ERROR" },
           { status: { in: ["PENDING", "IN_PROGRESS"] }, ...PAID_BUYOUT_SCOPE, orderSource: { not: "AVITO" } },
@@ -42,6 +51,7 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
     case "BUYOUT":
       return {
         ...PAID_BUYOUT_SCOPE,
+        ...NOT_HELD,
         orderSource: { not: "AVITO" },
         isFavorite: false,
         OR: [
@@ -50,26 +60,30 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
         ],
       };
     case "DIRECT":
-      return { isDirectOrder: true, status: { in: ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING", "ERROR"] }, isFavorite: false };
+      return { isDirectOrder: true, status: { in: ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING", "ERROR"] }, isFavorite: false, ...NOT_HELD };
     case "AVITO":
-      return { orderSource: "AVITO", status: { in: ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "ERROR"] }, isFavorite: false };
+      return { orderSource: "AVITO", status: { in: ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "ERROR"] }, isFavorite: false, ...NOT_HELD };
     case "NEW":
-      return { status: "AWAITING_GAMEPASS", createdAt: { gt: cutoff }, isFavorite: false };
+      return { status: "AWAITING_GAMEPASS", createdAt: { gt: cutoff }, isFavorite: false, ...NOT_HELD };
     case "ERROR":
-      return { status: "ERROR", isFavorite: false };
+      return { status: "ERROR", isFavorite: false, ...NOT_HELD };
     case "AWAITING_LINK":
-      return { status: "AWAITING_GAMEPASS", createdAt: { lte: cutoff }, isFavorite: false };
+      return { status: "AWAITING_GAMEPASS", createdAt: { lte: cutoff }, isFavorite: false, ...NOT_HELD };
     case "DONE":
       return { status: "COMPLETED" };
     case "REJECTED":
       return { status: "REJECTED" };
     case "FAVORITES":
       return { isFavorite: true };
+    // Единственная вкладка, где замороженные ЕСТЬ и где они одни.
+    case "HELD":
+      return { heldAt: { not: null } };
     case "ATTENTION": {
       const buyoutOverdue = new Date(Date.now() - ATTENTION_BUYOUT_HOURS * 3600_000);
       const linkOverdue = new Date(Date.now() - ATTENTION_LINK_DAYS * 24 * 3600_000);
       return {
         isFavorite: false,
+        ...NOT_HELD,
         OR: [
           { status: "ERROR" },
           { status: { in: ["PENDING", "IN_PROGRESS"] }, ...PAID_BUYOUT_SCOPE, orderSource: { not: "AVITO" }, pendingAt: { lte: buyoutOverdue } },
@@ -89,6 +103,8 @@ export function orderByForTab(
   if (tab === "WORK") return [{ updatedAt: "desc" }, { createdAt: "desc" }];
   if (tab === "BUYOUT" || tab === "DIRECT" || tab === "AVITO") return [{ pendingAt: "asc" }, { createdAt: "asc" }];
   if (tab === "ERROR" || tab === "AWAITING_LINK" || tab === "ATTENTION") return { createdAt: "asc" };
+  // Свежая заморозка сверху: её причину чаще всего и уточняют.
+  if (tab === "HELD") return { heldAt: "desc" };
   return { createdAt: "desc" };
 }
 

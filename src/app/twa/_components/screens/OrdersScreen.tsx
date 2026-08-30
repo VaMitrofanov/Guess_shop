@@ -6,10 +6,14 @@ import BottomSheet from "../BottomSheet";
 import { toast } from "../Toast";
 import CreateManualModal, { type RebindUser } from "../CreateManualModal";
 import { isUnpaidDirect } from "@/lib/buyout-queue";
+import { HOLD_PRESETS, parseAdminNote } from "@/lib/order-hold";
+
+/** ❄️ Цвет заморозки. Живёт в теме — здесь только короткий псевдоним. */
+const ICE = C.ice;
 
 type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED" | "ERROR";
 // ATTENTION — не чип, а серверная выборка «Требуют внимания» для вкладки «Все».
-type FilterTab = "WORK" | "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "REJECTED" | "FAVORITES" | "ATTENTION";
+type FilterTab = "WORK" | "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "REJECTED" | "FAVORITES" | "ATTENTION" | "HELD";
 
 // «Ждут ссылку»: сервер отдаёт первые N — самые свежие, дальше хвост от самых
 // старых (см. fetchAwaitingLinkHybrid в api/twa/orders). Здесь — для разделителя.
@@ -37,6 +41,10 @@ interface Order {
   rejectionReason: string | null;
   adminNote: string | null;
   buyoutErrorCode: string | null;
+  /** ❄️ Заморозка: «не выкупать, но и не удалять». Признак ПОВЕРХ статуса. */
+  heldAt: string | null;
+  heldReason: string | null;
+  heldBy: string | null;
   isDirectOrder: boolean;
   isFavorite: boolean;
   paymentDetails: string | null;
@@ -129,10 +137,12 @@ const TAB_META: Record<FilterTab, { label: string; color: string }> = {
   REJECTED:      { label: "Отменены",        color: C.red },
   FAVORITES:     { label: "Избранное",      color: "#ffd60a" },
   ATTENTION:     { label: "Требуют внимания", color: C.orange },
+  HELD:          { label: "Заморожены",      color: ICE },
 };
 
 const FILTERS: { id: FilterTab }[] = [
   { id: "BUYOUT" },
+  { id: "HELD" },
   { id: "DIRECT" },
   { id: "AVITO" },
   { id: "NEW" },
@@ -149,7 +159,7 @@ const ORDER_MODES: { id: "work" | "all" | "history"; label: string; filter: Filt
   { id: "history", label: "История", filter: "DONE", countKey: "DONE" },
 ];
 
-const WORK_FILTERS = new Set<FilterTab>(["WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "REJECTED", "FAVORITES", "ATTENTION"]);
+const WORK_FILTERS = new Set<FilterTab>(["WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "REJECTED", "FAVORITES", "ATTENTION", "HELD"]);
 /* Очереди, где выгрузка ID геймпассов имеет смысл: заказ уже с геймпассом и ждёт выкупа.
    Список синхронен `GAMEPASS_EXPORT_TABS` в `api/twa/orders`. */
 const EXPORTABLE_TABS = new Set<FilterTab>(["BUYOUT", "DIRECT", "AVITO", "WORK", "ERROR", "ATTENTION"]);
@@ -159,6 +169,9 @@ function orderTabBadge(order: Order): { label: string; color: string } | null {
   const cutoff = Date.now() - 40 * 3600_000;
   const created = new Date(order.createdAt).getTime();
 
+  // ❄️ Заморозка бьёт все остальные бейджи: это единственное, что определяет,
+  // можно ли с заказом вообще что-то делать.
+  if (order.heldAt) return { label: "❄️ Заморожен", color: ICE };
   if (order.isFavorite) return { label: "Избранное", color: "#ffd60a" };
   if (order.status === "COMPLETED") return { label: "Готово", color: C.green };
   if (order.status === "REJECTED") return { label: "Отменено", color: C.red };
@@ -456,6 +469,7 @@ function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) =
   const [note, setNote] = useState(order.adminNote ?? "");
   const [saving, setSaving] = useState(false);
   const [flash, setFlash] = useState(false);
+  const [editing, setEditing] = useState(false);
   const lastSaved = useRef(order.adminNote ?? "");
   useEffect(() => {
     if ((order.adminNote ?? "") !== lastSaved.current) {
@@ -479,6 +493,11 @@ function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) =
   }
 
   const hasNote = !!(order.adminNote && order.adminNote.trim());
+  /* Заметка была одним жёлтым полем, где всё равнозначно: и «PENDING→ERROR»,
+     и причина, по которой заказ нельзя трогать. Строки давно размечены
+     маркерами ([РЕГ-ЦЕНА, [НИК?, [ПЕРЕНОС, [ЗАМОРОЗКА) — их просто не
+     показывали отдельно. Новых полей в БД для этого не понадобилось. */
+  const history = useMemo(() => parseAdminNote(order.adminNote), [order.adminNote]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -488,21 +507,77 @@ function NotesEditor({ order, onSave }: { order: Order; onSave: (note: string) =
         </span>
         {flash && <span style={{ fontSize: 14, color: C.green, fontWeight: 600 }}>✓</span>}
       </div>
-      <textarea
-        value={note}
-        onChange={e => setNote(e.target.value)}
-        onBlur={commit}
-        onClick={e => e.stopPropagation()}
-        placeholder="Заметка…"
-        rows={2}
-        style={{
-          background: hasNote ? `${C.yellow}14` : "rgba(255,255,255,0.06)",
-          border: hasNote ? `1px solid ${C.yellow}40` : "1px solid transparent",
-          borderRadius: 10, color: C.textPrimary, fontSize: 15, lineHeight: 1.4,
-          padding: "10px 12px", resize: "vertical", outline: "none",
-          width: "100%", boxSizing: "border-box", fontFamily: "inherit",
-        }}
-      />
+
+      {history.length > 0 && (
+        <div style={{
+          display: "flex", flexDirection: "column", borderRadius: 10, overflow: "hidden",
+          background: `${C.yellow}14`, border: `1px solid ${C.yellow}40`,
+        }}>
+          {history.map((line, i) => {
+            const frozen = line.kind === "hold";
+            return (
+              <div key={i} style={{
+                padding: "9px 12px",
+                borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,0.07)",
+                ...(frozen ? { background: `${ICE}21`, borderLeft: `3px solid ${ICE}` } : {}),
+              }}>
+                {line.tag && (
+                  <span style={{
+                    display: "block", marginBottom: 2, fontFamily: MONO, fontSize: 11,
+                    letterSpacing: ".03em",
+                    color: frozen ? ICE : C.textTertiary,
+                    fontWeight: frozen ? 600 : 400,
+                  }}>
+                    {line.tag}
+                  </span>
+                )}
+                <span style={{
+                  fontSize: 14, lineHeight: 1.45,
+                  color: frozen ? C.textPrimary : C.textSecondary,
+                  fontWeight: frozen ? 600 : 400,
+                }}>
+                  {line.text}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Текстовое поле правит заметку ЦЕЛИКОМ (семантика `set-note` не
+          менялась), поэтому при непустой истории оно свёрнуто: иначе те же
+          строки показывались бы дважды — разобранными и сырым текстом. */}
+      {history.length > 0 && !editing && (
+        <button
+          className="twa-press-sm"
+          onClick={e => { e.stopPropagation(); setEditing(true); }}
+          style={{
+            alignSelf: "flex-start", padding: "6px 12px", borderRadius: 8,
+            border: `1px dashed ${C.border}`, background: "transparent",
+            color: C.textTertiary, fontSize: 13, fontWeight: 600, cursor: "pointer",
+          }}
+        >
+          ✎ Править текстом
+        </button>
+      )}
+
+      {(history.length === 0 || editing) && (
+        <textarea
+          value={note}
+          onChange={e => setNote(e.target.value)}
+          onBlur={commit}
+          onClick={e => e.stopPropagation()}
+          placeholder="Заметка…"
+          rows={history.length > 0 ? 5 : 2}
+          style={{
+            background: hasNote ? `${C.yellow}14` : "rgba(255,255,255,0.06)",
+            border: hasNote ? `1px solid ${C.yellow}40` : "1px solid transparent",
+            borderRadius: 10, color: C.textPrimary, fontSize: 15, lineHeight: 1.4,
+            padding: "10px 12px", resize: "vertical", outline: "none",
+            width: "100%", boxSizing: "border-box", fontFamily: "inherit",
+          }}
+        />
+      )}
       {dirty && (
         <button
           className="twa-press"
@@ -538,7 +613,9 @@ function ActionPanel({
     currentTab === "BUYOUT" ||
     currentTab === "DIRECT" ||
     currentTab === "AVITO" ||
-    currentTab === "ERROR";
+    currentTab === "ERROR" ||
+    // ❄️ В своём разделе панель нужна ради одной кнопки — «Разморозить».
+    currentTab === "HELD";
 
   if (!showPanel) return null;
 
@@ -586,6 +663,25 @@ function ActionPanel({
   // Кнопка «Выкупить часть 3/3» на этом месте предлагала бы купить уже
   // купленное; сервер такой вызов отвергает, но приглашать к нему не нужно.
   const hasGamepass = (!!order.gamepassUrl || split.length > 0) && !splitAllDone;
+
+  /* ❄️ Замороженный заказ: кнопок выкупа НЕТ вовсе — не «серые и неактивные»,
+     которые можно продавить двойным тапом, а физически отсутствующие. Сервер
+     всё равно откажет (assertOrderNotHeld), но предлагать нажать то, что
+     заведомо не сработает, — это те же грабли, только вежливые. */
+  if (order.heldAt) {
+    return (
+      <div style={{ display: "flex", gap: 8, padding: "12px 16px 16px" }}>
+        <button className="twa-press" onClick={() => doAction("unhold")} disabled={loading}
+          style={{ flex: 1, padding: "14px", border: "none", borderRadius: 12, background: `${ICE}2e`, color: ICE, fontSize: 15, fontWeight: 700, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+          {loading ? "⏳…" : "❄ Разморозить"}
+        </button>
+        <button className="twa-press" onClick={() => doAction("reject")} disabled={loading}
+          style={{ width: 44, flexShrink: 0, padding: "14px 0", border: `1px solid ${C.red}55`, borderRadius: 12, background: "transparent", color: C.red, fontSize: 18, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+          ✕
+        </button>
+      </div>
+    );
+  }
 
   // Прямой заказ до подтверждения оплаты: выкупать/завершать нечего (сервер
   // отвергнет), оплату подтверждает скриншот в боте. Доступна только отмена.
@@ -747,6 +843,96 @@ function MoveToModal({ order, token, currentTab, onDone, onClose }: {
         <button className="twa-press" onClick={submit} disabled={loading || !target || !note.trim()}
           style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: C.accent, color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading || !target || !note.trim() ? 0.5 : 1 }}>
           {loading ? "…" : "Перевести"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ───────────── ❄️ HoldModal — заморозка заказа ─────────────
+   Причина обязательна: через месяц «почему нельзя выкупать» не вспомнит никто,
+   а заморозка без причины неотличима от забытого заказа. Четыре заготовки
+   закрывают почти всё; текст можно дописать руками. */
+function HoldModal({ order, onHold, onClose }: {
+  order: Order;
+  onHold: (reason: string) => Promise<ActionResult>;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function submit() {
+    const text = reason.trim();
+    if (!text) { toast("Причина обязательна", "error"); return; }
+    setLoading(true);
+    const res = await onHold(text);
+    setLoading(false);
+    if (res.ok) onClose();
+    else toast(res.error ?? "Ошибка", "error");
+  }
+
+  return (
+    <div onClick={e => e.stopPropagation()} style={{
+      padding: "12px 14px 14px",
+      borderTop: `1px solid ${C.hairline}`,
+      background: "rgba(0,0,0,0.15)",
+      display: "flex", flexDirection: "column", gap: 10,
+    }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: ICE }}>❄️ Заморозить заказ</div>
+      <div style={{ fontSize: 13, color: C.textSecondary, fontFamily: MONO }}>
+        {order.wbCode} · {order.robloxUsername ?? order.probableNick ?? "ник не указан"} · {order.amount.toLocaleString("ru-RU")} R$
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+        {HOLD_PRESETS.map(preset => (
+          <button key={preset} className="twa-press-sm" onClick={() => setReason(preset)}
+            style={{
+              padding: "8px 13px", borderRadius: 999, cursor: "pointer",
+              border: reason === preset ? `1px solid ${ICE}66` : "1px solid transparent",
+              background: reason === preset ? `${ICE}29` : "rgba(255,255,255,0.08)",
+              color: reason === preset ? ICE : C.textSecondary,
+              fontSize: 13, fontWeight: 600,
+            }}>
+            {preset}
+          </button>
+        ))}
+      </div>
+
+      <textarea
+        placeholder="Причина (обязательно)…"
+        value={reason}
+        onChange={e => setReason(e.target.value)}
+        rows={2}
+        style={{
+          background: "rgba(255,255,255,0.06)", border: `1px solid ${C.border}`, borderRadius: 10,
+          color: C.textPrimary, fontSize: 15, lineHeight: 1.4,
+          padding: "10px 12px", resize: "none", outline: "none",
+          width: "100%", boxSizing: "border-box", fontFamily: "inherit",
+        }}
+      />
+
+      <div style={{
+        display: "flex", gap: 9, padding: "11px 13px", borderRadius: 11,
+        background: `${C.accent}1a`, border: `1px solid ${C.accent}42`,
+        fontSize: 13, lineHeight: 1.45, color: C.textSecondary,
+      }}>
+        <span>💡</span>
+        <span>
+          Заказ останется на месте и никуда не пропадёт. Он выключается из{" "}
+          <b style={{ color: C.accent }}>автовыкупа</b>,{" "}
+          <b style={{ color: C.accent }}>очереди «К выкупу»</b> и{" "}
+          <b style={{ color: C.accent }}>ручной покупки</b> — до разморозки.
+        </span>
+      </div>
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="twa-press" onClick={onClose}
+          style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
+          Отмена
+        </button>
+        <button className="twa-press" onClick={submit} disabled={loading || !reason.trim()}
+          style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: ICE, color: "#0b1620", fontSize: 15, fontWeight: 700, cursor: "pointer", opacity: loading || !reason.trim() ? 0.5 : 1 }}>
+          {loading ? "…" : "Заморозить"}
         </button>
       </div>
     </div>
@@ -1663,6 +1849,7 @@ function OrderCard({
   live?: GpLiveInfo;
 }) {
   const [moveOpen, setMoveOpen] = useState(false);
+  const [holdOpen, setHoldOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
   const [rebindOpen, setRebindOpen] = useState(false);
@@ -1854,6 +2041,21 @@ function OrderCard({
               );
             })()}
           </div>
+          {/* ❄️ Вход в заморозку — рядом со звездой: оба «признака поверх
+              статуса», и оба должны быть доступны из любой вкладки. */}
+          {!order.heldAt && (
+            <button
+              className="twa-press-sm"
+              aria-label="Заморозить заказ"
+              onClick={e => { e.stopPropagation(); haptic.impact("light"); setHoldOpen(true); }}
+              style={{
+                background: "transparent", border: "none", cursor: "pointer",
+                fontSize: 19, padding: "4px 4px", flexShrink: 0, opacity: 0.35,
+              }}
+            >
+              ❄️
+            </button>
+          )}
           <button
             className="twa-press-sm"
             onClick={e => { e.stopPropagation(); haptic.impact("light"); onToggleFavorite(); }}
@@ -1891,6 +2093,29 @@ function OrderCard({
           )}
         </div>
       </div>
+
+      {/* ❄️ Плашка заморозки — ПЕРЕД всеми полями.
+          Раньше причину «почему нельзя трогать» приходилось вычитывать из
+          заметки наравне со служебным логом; здесь она первое, что видно. */}
+      {order.heldAt && (
+        <div style={{
+          display: "flex", gap: 11, margin: "4px 16px 2px", padding: "13px 14px",
+          borderRadius: 14, background: `${ICE}1a`, border: `1px solid ${ICE}57`,
+        }}>
+          <span style={{ fontSize: 19, lineHeight: 1.2 }}>❄️</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+            <strong style={{ fontSize: 14, fontWeight: 700, color: ICE, letterSpacing: ".01em" }}>
+              ЗАМОРОЖЕН — НЕ ВЫКУПАТЬ
+            </strong>
+            <span style={{ fontSize: 15, color: C.textPrimary, lineHeight: 1.4 }}>
+              {order.heldReason || "причина не указана"}
+            </span>
+            <span style={{ fontSize: 11, color: C.textTertiary, fontFamily: MONO }}>
+              {order.heldBy ?? "—"} · {fmtAge(order.heldAt)} назад
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Data rows */}
       <div style={{ padding: "6px 16px 12px" }}>
@@ -2082,6 +2307,14 @@ function OrderCard({
         </div>
       )}
 
+      {holdOpen && (
+        <HoldModal
+          order={order}
+          onHold={(reason) => onRunAction("hold", reason)}
+          onClose={() => setHoldOpen(false)}
+        />
+      )}
+
       {moveOpen && (
         <MoveToModal
           order={order}
@@ -2255,6 +2488,8 @@ function shiftSums(sums: Record<string, number>, fromTab: string, toTab: string,
 function orderToTab(order: Order): FilterTab {
   const cutoff = Date.now() - 40 * 3600_000;
   const created = new Date(order.createdAt).getTime();
+  // ❄️ Замороженный ушёл из всех рабочих вкладок — счётчики двигаются отсюда.
+  if (order.heldAt) return "HELD";
   if (order.isFavorite) return "FAVORITES";
   if (order.status === "COMPLETED") return "DONE";
   if (order.status === "REJECTED") return "REJECTED";
@@ -2658,6 +2893,38 @@ export default function OrdersScreen({
   }, [data, page, loadingMore, loading, loadMore]);
 
   const runAction = useCallback(async (order: Order, action: string, reason?: string): Promise<ActionResult> => {
+    /* ❄️ Заморозка идёт мимо оптимистичной машинки ниже: она не меняет статус,
+       а ставит признак поверх него. Ветка отдельная, чтобы `shiftCounts` не
+       двигал заказ между статусными вкладками, которых он не покидал. */
+    if (action === "hold" || action === "unhold") {
+      haptic.impact("light");
+      try {
+        const r = await fetch("/api/twa/orders", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ action, orderId: order.id, ...(reason ? { reason } : {}) }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { haptic.notify("error"); return { ok: false, error: d.error ?? "Ошибка" }; }
+        const held = action === "hold";
+        setAllOrders(prev => prev.map(o => o.id === order.id
+          ? {
+              ...o,
+              heldAt: held ? new Date().toISOString() : null,
+              heldReason: held ? (reason ?? null) : null,
+              heldBy: held ? (o.heldBy ?? "я") : null,
+            }
+          : o));
+        haptic.notify("success");
+        toast(held ? "❄️ Заморожен" : "Разморожен", "success");
+        onActionDone?.();
+        return { ok: true };
+      } catch {
+        haptic.notify("error");
+        return { ok: false, error: "Ошибка сети" };
+      }
+    }
+
     const fromTab = orderToTab(order);
     let toTab: FilterTab | null = null;
     let newStatus: OrderStatus | null = null;
@@ -3655,6 +3922,7 @@ function EmptyState({ filter, query, attention, onShowAll }: {
     REJECTED: "Нет отменённых заказов",
     FAVORITES: "Нет избранных",
     ATTENTION: "Ничего не требует внимания",
+    HELD: "Замороженных заказов нет",
   };
   return (
     <div style={{ padding: 48, textAlign: "center", color: C.textSecondary }}>

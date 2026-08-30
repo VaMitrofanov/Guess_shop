@@ -29,6 +29,7 @@ import {
   getRobuxBalance,
 } from "../shared/roblox";
 import { searchGamepassesByNick } from "../shared/gamepass-search";
+import { NOT_HELD, activeHoldCodes, assertOrderNotHeld } from "../shared/order-hold";
 import { runDrain, drainAuthedUser, drainUserGamepasses } from "../shared/drain";
 import { notifyUserCompleted } from "./handlers";
 import { buildOrderProfitSnapshot } from "../shared/order-profit";
@@ -121,16 +122,31 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
     const orders = await (db as any).wbOrder.findMany({
       // Пояс+подтяжки (П5): неоплаченный DIR в PENDING оказаться не должен
       // (guard'ы в TWA), но даже если окажется — автовыкуп его не тронет.
-      where: { status: "PENDING", isTest: false, NOT: { isDirectOrder: true, paidAt: null } },
+      // ❄️ heldAt — то же самое для заморозки: «не выкупать, но и не удалять».
+      where: { status: "PENDING", isTest: false, ...NOT_HELD, NOT: { isDirectOrder: true, paidAt: null } },
       orderBy: { pendingAt: "asc" },
       take: maxPerTick + autobuySkip.size, // headroom so skipped ones don't starve the tick
       include: { user: { select: { id: true, tgId: true, vkId: true } } },
     });
 
+    // Второй рубеж заморозки. `heldAt` выше не видит заказ, который бот только
+    // что создал по заранее замороженному коду, а крон-свип ещё не пометил, —
+    // окно небольшое, но именно в нём тратятся чужие робуксы. `OrderHold` знает
+    // про заморозку с момента её постановки, без всякого свипа.
+    const heldCodes = await activeHoldCodes(db, orders.map((o: { wbCode: string }) => o.wbCode))
+      .catch(() => new Set<string>());
+
     let bought = 0;
     for (const order of orders) {
       if (bought >= maxPerTick) break;
       if (autobuySkip.has(order.id)) continue;
+      if (heldCodes.has(order.wbCode)) {
+        autobuySkip.add(order.id);
+        // Заодно проставляет заморозку на сам заказ — дальше он виден в ленте
+        // как замороженный, а не как «почему-то не выкупается».
+        await assertOrderNotHeld(db, order.id).catch(() => {});
+        continue;
+      }
 
       const gpId = gpMatch(order.gamepassUrl);
       if (!gpId) continue;

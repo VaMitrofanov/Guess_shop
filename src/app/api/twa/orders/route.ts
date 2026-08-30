@@ -30,6 +30,9 @@ import {
   buildTabWhere, isGamepassExportTab, loadGamepassExport, orderByForTab,
   type FilterTab,
 } from "@/lib/order-queue";
+import {
+  NOT_HELD_SQL, assertOrderNotHeld, heldRefusal, holdByCode, normalizeHoldCode, releaseByCode,
+} from "@/lib/order-hold";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
@@ -190,7 +193,7 @@ export async function GET(req: NextRequest) {
   const lite        = searchParams.get("lite") === "1";
   const sourceFilter = searchParams.get("source") as string | null;
 
-  const isVirtualTab = ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION"].includes(tab);
+  const isVirtualTab = ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD"].includes(tab);
   const tabWhere = isVirtualTab
     ? buildTabWhere(tab as FilterTab)
     : (VALID_STATUSES.includes(tab as any) ? { status: tab } : {});
@@ -279,33 +282,35 @@ export async function GET(req: NextRequest) {
           }).catch(() => 0);
           const rows: any[] = await (prisma as any).$queryRawUnsafe(`
             SELECT
-              COUNT(*) FILTER (WHERE "isFavorite" = false AND (
+              COUNT(*) FILTER (WHERE "isFavorite" = false AND ${NOT_HELD_SQL} AND (
                 status = 'ERROR'
                 OR (status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL} AND "orderSource" != 'AVITO')
                 OR (status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours')
               ))::int AS "WORK",
               COUNT(*)::int AS "ALL",
-              COUNT(*) FILTER (WHERE ${PAID_BUYOUT_SQL} AND "orderSource" != 'AVITO' AND "isFavorite" = false AND (status IN ('PENDING','IN_PROGRESS') OR (status = 'ERROR' AND "buyoutErrorCode" IN ('REGIONAL_PRICE','ROBLOX_PLUS_FLOW'))))::int AS "BUYOUT",
-              COUNT(*) FILTER (WHERE "isDirectOrder" = true AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false)::int AS "DIRECT",
-              COUNT(*) FILTER (WHERE "orderSource" = 'AVITO' AND status IN ('PENDING','IN_PROGRESS','AWAITING_GAMEPASS','ERROR') AND "isFavorite" = false)::int AS "AVITO",
-              COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "NEW",
-              COUNT(*) FILTER (WHERE status = 'ERROR' AND "isFavorite" = false)::int AS "ERROR",
-              COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "AWAITING_LINK",
+              COUNT(*) FILTER (WHERE ${PAID_BUYOUT_SQL} AND ${NOT_HELD_SQL} AND "orderSource" != 'AVITO' AND "isFavorite" = false AND (status IN ('PENDING','IN_PROGRESS') OR (status = 'ERROR' AND "buyoutErrorCode" IN ('REGIONAL_PRICE','ROBLOX_PLUS_FLOW'))))::int AS "BUYOUT",
+              COUNT(*) FILTER (WHERE "isDirectOrder" = true AND ${NOT_HELD_SQL} AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false)::int AS "DIRECT",
+              COUNT(*) FILTER (WHERE "orderSource" = 'AVITO' AND ${NOT_HELD_SQL} AND status IN ('PENDING','IN_PROGRESS','AWAITING_GAMEPASS','ERROR') AND "isFavorite" = false)::int AS "AVITO",
+              COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "NEW",
+              COUNT(*) FILTER (WHERE status = 'ERROR' AND ${NOT_HELD_SQL} AND "isFavorite" = false)::int AS "ERROR",
+              COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "AWAITING_LINK",
               COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS "DONE",
               COUNT(*) FILTER (WHERE status = 'REJECTED')::int AS "REJECTED",
               COUNT(*) FILTER (WHERE "isFavorite" = true)::int AS "FAVORITES",
-              COUNT(*) FILTER (WHERE "isFavorite" = false AND (
+              COUNT(*) FILTER (WHERE "isFavorite" = false AND ${NOT_HELD_SQL} AND (
                 status = 'ERROR'
                 OR (status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL} AND "orderSource" != 'AVITO' AND "pendingAt" <= NOW() - INTERVAL '${ATTENTION_BUYOUT_HOURS} hours')
                 OR ("isDirectOrder" = true AND status IN ('AWAITING_PAYMENT','PAYMENT_PENDING'))
                 OR (status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${ATTENTION_LINK_DAYS} days')
               ))::int AS "ATTENTION",
+              COUNT(*) FILTER (WHERE "heldAt" IS NOT NULL)::int AS "HELD",
               COALESCE(SUM(amount) FILTER (WHERE ${PAID_BUYOUT_SQL} AND "orderSource" != 'AVITO' AND "isFavorite" = false AND (status IN ('PENDING','IN_PROGRESS') OR (status = 'ERROR' AND "buyoutErrorCode" IN ('REGIONAL_PRICE','ROBLOX_PLUS_FLOW')))), 0)::int AS "SUM_BUYOUT",
               COALESCE(SUM(amount) FILTER (WHERE "isDirectOrder" = true AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_DIRECT",
               COALESCE(SUM(amount) FILTER (WHERE "orderSource" = 'AVITO' AND status IN ('PENDING','IN_PROGRESS','AWAITING_GAMEPASS','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_AVITO",
               COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "isFavorite" = false), 0)::int AS "SUM_AWAITING_LINK",
               COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false), 0)::int AS "SUM_NEW",
-              COALESCE(SUM(amount) FILTER (WHERE status = 'ERROR' AND "isFavorite" = false), 0)::int AS "SUM_ERROR",
+              COALESCE(SUM(amount) FILTER (WHERE status = 'ERROR' AND ${NOT_HELD_SQL} AND "isFavorite" = false), 0)::int AS "SUM_ERROR",
+              COALESCE(SUM(amount) FILTER (WHERE "heldAt" IS NOT NULL), 0)::int AS "SUM_HELD",
               MIN("pendingAt") FILTER (WHERE status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL} AND "orderSource" != 'AVITO' AND "isFavorite" = false) AS "OLDEST_BUYOUT",
               MIN("createdAt") FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false) AS "OLDEST_AWAITING_LINK"
             FROM "WbOrder"
@@ -314,10 +319,10 @@ export async function GET(req: NextRequest) {
           const r = rows[0] ?? {};
           const counts: Record<string, number> = {};
           const sums: Record<string, number> = {};
-          for (const k of ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION"] as const)
+          for (const k of ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD"] as const)
             counts[k] = Number(r[k] ?? 0);
           counts["INTENTS"] = await intentsPromise;
-          for (const k of ["BUYOUT", "DIRECT", "AVITO", "AWAITING_LINK", "NEW", "ERROR"] as const)
+          for (const k of ["BUYOUT", "DIRECT", "AVITO", "AWAITING_LINK", "NEW", "ERROR", "HELD"] as const)
             sums[k] = Number(r[`SUM_${k}`] ?? 0);
           const oldest: Record<string, string | null> = {
             BUYOUT: r["OLDEST_BUYOUT"] ? new Date(r["OLDEST_BUYOUT"]).toISOString() : null,
@@ -934,6 +939,52 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ results });
   }
 
+  /* ── ❄️ Заморозка ────────────────────────────────────────────────────────
+     Стоит ДО проверки `orderId`, потому что ключ заморозки — код, а не заказ:
+     код выдаётся покупателю раньше, чем бот создаёт заказ (случай 84CR7UZ —
+     код на руках, заказа ещё нет, а выкупать его уже нельзя). Карточка шлёт
+     `orderId`, поиск по коду — `wbCode`; резолвим то, что пришло.
+     ──────────────────────────────────────────────────────────────────────── */
+  if (action === "hold" || action === "unhold") {
+    let wbCode = normalizeHoldCode(body.wbCode);
+    if (!wbCode && orderId) {
+      const target = await (prisma as any).wbOrder.findUnique({
+        where: { id: orderId }, select: { wbCode: true },
+      });
+      if (!target) return NextResponse.json({ error: "Order not found" }, { status: 404 });
+      wbCode = target.wbCode;
+    }
+    if (!wbCode) return NextResponse.json({ error: "Нужен код заказа" }, { status: 400 });
+
+    const result = action === "hold"
+      ? await holdByCode(prisma, { wbCode, reason: String(body.reason ?? ""), actor: actor.displayName })
+      : await releaseByCode(prisma, { wbCode, actor: actor.displayName });
+
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
+    cachedCounts = null;
+    return NextResponse.json({ ok: true, wbCode, awaitingOrder: result.awaitingOrder ?? false });
+  }
+
+  /** Состояние заморозки по коду — для поиска по коду, у которого нет заказа. */
+  if (action === "hold-status") {
+    const wbCode = normalizeHoldCode(body.wbCode);
+    if (!wbCode) return NextResponse.json({ error: "Нужен код" }, { status: 400 });
+    const [hold, existing, code] = await Promise.all([
+      (prisma as any).orderHold.findUnique({ where: { wbCode } }),
+      (prisma as any).wbOrder.findUnique({ where: { wbCode }, select: { id: true } }),
+      (prisma as any).wbCode.findUnique({ where: { code: wbCode }, select: { denomination: true, status: true } }),
+    ]);
+    return NextResponse.json({
+      wbCode,
+      hasOrder: !!existing,
+      denomination: code?.denomination ?? null,
+      codeStatus: code?.status ?? null,
+      hold: hold && !hold.releasedAt
+        ? { reason: hold.reason, createdBy: hold.createdBy, createdAt: hold.createdAt }
+        : null,
+    });
+  }
+
   if (!orderId)
     return NextResponse.json({ error: "orderId required" }, { status: 400 });
 
@@ -984,6 +1035,10 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "restore-to-buyout") {
+    // ❄️ Ровно та ловушка, ради которой заморозка и заводилась: раньше одно
+    // нажатие «Вернуть к выкупу» отправляло заказ обратно в PENDING.
+    if (order.heldAt)
+      return NextResponse.json({ error: heldRefusal(order.heldReason) }, { status: 409 });
     const recovery = buildRestoreToBuyoutData(order, actor.displayName);
     if (!recovery.ok) {
       return NextResponse.json({ error: recovery.error }, { status: recovery.status });
@@ -1003,6 +1058,11 @@ export async function POST(req: NextRequest) {
     const target = body.target as string;
     const note = typeof body.note === "string" ? body.note.trim() : "";
     if (!note) return NextResponse.json({ error: "Заметка обязательна при переводе" }, { status: 400 });
+
+    // ❄️ Перенос в «К выкупу» / «Готово» — такой же путь в очередь, как
+    // «Вернуть к выкупу». Разморозка должна быть осознанным отдельным шагом.
+    if (order.heldAt && target !== "FAVORITES")
+      return NextResponse.json({ error: heldRefusal(order.heldReason) }, { status: 409 });
 
     // «Избранное» — не статус, а флаг: заказ остаётся в своём статусе.
     if (target === "FAVORITES") {
@@ -1191,6 +1251,12 @@ export async function POST(req: NextRequest) {
     if (unpaidDirect) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
     if (!["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status))
       return NextResponse.json({ error: "Order must be PENDING, IN_PROGRESS or ERROR" }, { status: 400 });
+
+    // ❄️ Гард заморозки — до всякого похода в Roblox и до списания робуксов.
+    // Читает не только `heldAt` заказа, но и `OrderHold`: заказ мог родиться по
+    // заранее замороженному коду за минуту до того, как крон-свип его пометил.
+    const heldCheck = await assertOrderNotHeld(prisma, orderId);
+    if (heldCheck.held) return NextResponse.json({ error: heldCheck.message }, { status: 409 });
 
     // ── Разбитый заказ: покупаем ТЕКУЩУЮ часть ──────────────────────────────
     // Инвариант суммы перечитывается здесь заново: между привязкой и выкупом

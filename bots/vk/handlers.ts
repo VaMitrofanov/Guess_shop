@@ -123,6 +123,9 @@ async function triggerSupport(ctx: any, vkUserId: number, ctxKey: string): Promi
   // fires on real tap (via payload callback), so this is a true SOS.
   await notifySupportShown({
     platform: "VK", userDisplay: `vk.com/id${vkUserId} (${escapeHtml(firstName)})`,
+    // ❄️ vkId — по нему алерт узнаёт замороженного клиента (в TG эту роль
+    // играет tgId; без него VK-обращение приходило бы без признака).
+    vkId: String(vkUserId),
     contextKey: ctxKey, wbCode, denomination: denom,
   });
   pauseSupport(vkUserId); // bot goes quiet so it won't interrupt the live chat

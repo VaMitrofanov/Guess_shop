@@ -13,6 +13,7 @@ import { vkSend, vkSendPhoto, stripHtml, tgSend, escapeHtml } from "../shared/no
 import { getSbpQrBuffer } from "../shared/sbp";
 import { grantDirectDiscountOnCompletion } from "../shared/direct-discount";
 import { sendAdminReviewCard, notifySupportShown, notifyUserHurdle, notifyAdminsRetailBuyout, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, formatUserHandleHtml, orderCode } from "../shared/admin";
+import { assertOrderNotHeld } from "../shared/order-hold";
 import { pendingLink, pendingReview, pendingRejectionReason, linkFailCounts, pendingDirectFlow, pendingDirectPaymentEmail, pendingNickEdit, pendingPaymentDetails, pendingPaymentScreenshot, pendingRobloxNick, type LinkFailState, type DirectFlowState, type LinkState } from "./session";
 import { getGamepassDetails, getGamepassProductInfo, purchaseGamepassVerified, getRobuxBalance, resetPurchaseCsrf } from "../shared/roblox";
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "../shared/roblox-purchase-script";
@@ -4422,6 +4423,15 @@ export function registerCallbacks(bot: Telegraf): void {
         if (!order) { await ctx.answerCbQuery("⚠️ Заказ не найден").catch(() => {}); return; }
         if (!["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status)) {
           await ctx.answerCbQuery("⚠️ Заказ уже обработан").catch(() => {});
+          return;
+        }
+
+        // ❄️ Тот же гард, что в TWA и в автовыкупе. Стоит до product-info, а не
+        // после: замороженный заказ не должен даже ходить в Roblox.
+        const hold = await assertOrderNotHeld(db, orderId);
+        if (hold.held) {
+          await ctx.answerCbQuery("❄️ Заказ заморожен").catch(() => {});
+          await ctx.reply(hold.message);
           return;
         }
 

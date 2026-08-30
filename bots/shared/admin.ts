@@ -12,6 +12,7 @@ import { db } from "./db";
 import { directPrice } from "./retail-pricing";
 import { formatOrderAge } from "./order-age";
 import { resolveWbOrderSource, wbOrderSourceLabel } from "./wb-order-source";
+import { heldCustomerFor } from "./order-hold";
 import { twaLaunchUrl } from "./twa-link";
 export {
   BONUS_MIN_PACK,
@@ -92,9 +93,37 @@ export interface SupportAlertPayload {
   platform:     "TG" | "VK";
   userDisplay:  string;
   tgId?:        string;
+  /** Нужен, чтобы опознать замороженного клиента, пишущего из VK. */
+  vkId?:        string;
   contextKey:   string;
   wbCode?:      string;
   denomination?: number;
+}
+
+/**
+ * ❄️ Шапка алерта для замороженного клиента.
+ *
+ * Алерт в админ-чат приходил и раньше, но человек с заморозкой был в нём
+ * неотличим от обычного покупателя: менеджер начинал отвечать «сейчас выкупим»
+ * по заказу, который выкупать нельзя. Признак должен стоять ДО всех полей.
+ *
+ * Никогда не бросает и не пустая проверка не блокирует сам алерт: сообщение в
+ * поддержку важнее, чем пометка в нём (см. `heldCustomerFor`).
+ */
+async function heldHeaderFor(p: SupportAlertPayload): Promise<{ head: string; block: string }> {
+  const held = await heldCustomerFor(db, { tgId: p.tgId, vkId: p.vkId });
+  if (!held) return { head: "", block: "" };
+
+  const codes = held.codes.map((c) => `<code>${escapeHtml(c)}</code>`).join(", ");
+  return {
+    head:
+      `⛔️ <b>ПИШЕТ ЗАМОРОЖЕННЫЙ КЛИЕНТ</b>\n` +
+      `━━━━━━━━━━━━━━━━\n`,
+    block:
+      `❄️ <b>Заморожен:</b> ${escapeHtml(held.reason)}\n` +
+      `❄️ Коды: ${codes}\n` +
+      `━━━━━━━━━━━━━━━━\n`,
+  };
 }
 
 export async function sendAdminSupportAlert(p: SupportAlertPayload): Promise<void> {
@@ -108,10 +137,11 @@ export async function sendAdminSupportAlert(p: SupportAlertPayload): Promise<voi
   const now = new Date().toLocaleString("ru-RU", {
     timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit",
   });
+  const held = await heldHeaderFor(p);
 
   const text =
-    `🆘 <b>ОБРАЩЕНИЕ В ПОДДЕРЖКУ</b>\n` +
-    `━━━━━━━━━━━━━━━━\n` +
+    (held.head || `🆘 <b>ОБРАЩЕНИЕ В ПОДДЕРЖКУ</b>\n━━━━━━━━━━━━━━━━\n`) +
+    held.block +
     `${p.platform === "TG" ? "📱" : "📘"} Платформа: <b>${p.platform}</b>\n` +
     `👤 Юзер: ${p.userDisplay}\n` +
     codeLine +
@@ -171,7 +201,14 @@ export async function notifyUserHurdle(p: SupportAlertPayload): Promise<void> {
   const time = new Date().toLocaleString("ru-RU", {
     timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit",
   });
-  const text = `👀 ${p.userDisplay} застрял: <i>${label}</i>${codePart} · ${time}`;
+  // ❄️ Тупик замороженного клиента — это не «человеку нужна помощь», а «сейчас
+  // он придёт в поддержку по заказу, который выкупать нельзя». Одной строкой,
+  // но с явным признаком: тихий 👀 тут проходит мимо глаз.
+  const held = await heldCustomerFor(db, { tgId: p.tgId, vkId: p.vkId });
+  const text = held
+    ? `⛔️ <b>ЗАМОРОЖЕННЫЙ</b> ${p.userDisplay} застрял: <i>${label}</i>${codePart} · ${time}\n` +
+      `❄️ ${escapeHtml(held.reason)}`
+    : `👀 ${p.userDisplay} застрял: <i>${label}</i>${codePart} · ${time}`;
   await Promise.allSettled(ADMIN_IDS.map(id => tgSend(id, text)));
 }
 
@@ -206,8 +243,16 @@ export async function notifyBotError(p: {
     const time = new Date().toLocaleString("ru-RU", {
       timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit",
     });
+    // ❄️ Тот же признак, что и в алертах поддержки: упавший бот у замороженного
+    // клиента — это ещё и «сейчас он напишет менеджеру».
+    const held = await heldCustomerFor(db, {
+      tgId: p.platform === "TG" ? String(p.userId) : null,
+      vkId: p.platform === "VK" ? String(p.userId) : null,
+    });
+    const heldLine = held ? `❄️ <b>ЗАМОРОЖЕН:</b> ${escapeHtml(held.reason)}\n` : "";
     const text =
       `🚨 <b>${p.platform}-бот упал на сообщении</b>\n` +
+      heldLine +
       `👤 ${userRef} получил «Произошла ошибка»\n` +
       `<code>${escapeHtml(firstLine)}</code> · ${time} МСК`;
     await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text)));
