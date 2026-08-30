@@ -3,7 +3,7 @@ import { C, MONO, SHADOW, tabular, tint } from "../theme";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { haptic } from "../haptics";
 import { toast } from "../Toast";
-import CreateManualModal from "../CreateManualModal";
+import OrderSheet from "../OrderSheet";
 import { groupPartnerLedgerEntries, type PartnerLedgerRow } from "@/lib/partner-ledger";
 import { computePartnerSettlement, partnerOrderRateUsdtPer1000, type PartnerRateBasisValue, type PartnerTaskEconomicSnapshot } from "@/lib/partner-economics";
 /** Неоплаченный прямой заказ — исключается из всех путей выкупа (П5). */
@@ -423,7 +423,7 @@ function GamepassCard({
   onCreateAvito?: () => void;
   creatingAvito?: boolean;
   onAttach?: () => void;
-  /** ➕ Создать ручной заказ с этим геймпассом (CreateManualModal). */
+  /** ➕ Создать ручной заказ с этим геймпассом (OrderSheet). */
   onCreateOrder?: () => void;
   /** Cookie не задан/истёк: поиск работает, выкуп — нет. */
   buyDisabled?: boolean;
@@ -5012,7 +5012,7 @@ export default function BossrobuxScreen({ token, onOpenErrors }: { token: string
 
       {/* ➕ Ручной заказ из результата поиска (общая модалка с Orders) */}
       {manualGp && (
-        <CreateManualModal
+        <OrderSheet
           token={token}
           initialGamepassUrl={`https://www.roblox.com/game-pass/${manualGp.gamepassId}`}
           initialNick={manualGp.sellerName}

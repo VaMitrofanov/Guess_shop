@@ -13,7 +13,7 @@ import { appendOrderAudit, buildRestoreToBuyoutData } from "@/lib/order-recovery
 import { notifyRetailBuyoutAdmins } from "@/lib/buyout-admin-notify";
 import { generateDirectCode } from "@/lib/twa-direct";
 import { directPrice } from "@/lib/retail-pricing";
-import { PAID_BUYOUT_SCOPE, PAID_BUYOUT_SQL } from "@/lib/buyout-queue";
+import { PAID_BUYOUT_SCOPE, PAID_BUYOUT_SQL, isUnpaidDirect } from "@/lib/buyout-queue";
 import {
   assertSplitCoversOrder,
   buildSplitParts,
@@ -608,6 +608,43 @@ export async function POST(req: NextRequest) {
   if (action === "manual-validate") {
     const out: any = {};
 
+    /* Совпадение — это не ошибка, а развилка.
+       Форма создания и форма правки — одни и те же поля с разными правами, и
+       когда введённое уже принадлежит живому заказу, единственное разумное
+       продолжение — открыть его. Раньше сервер сообщал о совпадении текстом
+       («по коду уже есть заказ»), из которого нельзя было никуда пойти:
+       закрывай форму, ищи заказ в списке, открывай правку. Отдаём сам заказ —
+       ровно те поля, которые нужны шапке-цели, чтобы переключиться без второго
+       запроса. Решение остаётся за человеком: сервер не выбирает за него. */
+    const MATCH_SELECT = {
+      id: true, wbCode: true, status: true, amount: true, robloxUsername: true,
+      gamepassUrl: true, isDirectOrder: true, paidAt: true,
+      heldAt: true, heldReason: true, createdAt: true, pendingAt: true,
+      user: { select: { tgId: true, vkId: true, username: true, name: true } },
+    } as const;
+
+    const toMatch = (row: any) => row && ({
+      orderId: row.id,
+      wbCode: row.wbCode,
+      status: row.status,
+      amount: row.amount,
+      robloxUsername: row.robloxUsername,
+      gamepassUrl: row.gamepassUrl,
+      isDirectOrder: row.isDirectOrder,
+      // Неоплаченный прямой правится, но в очередь выкупа не идёт — форма
+      // обязана сказать об этом до нажатия, а не после отказа сервера.
+      unpaidDirect: isUnpaidDirect(row),
+      heldAt: row.heldAt ? row.heldAt.toISOString() : null,
+      heldReason: row.heldReason ?? null,
+      // `edit-order` живёт только в этих статусах — не даём форме предложить
+      // правку там, где сервер откажет.
+      editable: ["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED"].includes(row.status),
+      client: row.user?.username ? `@${row.user.username}`
+        : row.user?.name ?? (row.user?.tgId ? `TG ${row.user.tgId}` : row.user?.vkId ? `VK ${row.user.vkId}` : null),
+      createdAt: row.createdAt?.toISOString() ?? null,
+      pendingAt: row.pendingAt?.toISOString() ?? null,
+    });
+
     const rawCode = String(body.wbCode ?? "").trim().toUpperCase();
     if (rawCode) {
       if (!/^[A-Z0-9]{7}$/.test(rawCode)) {
@@ -625,10 +662,14 @@ export async function POST(req: NextRequest) {
         else {
           const orderOnCode = await (prisma as any).wbOrder.findFirst({
             where: { wbCode: rawCode },
-            select: { status: true },
+            select: MATCH_SELECT,
           });
           if (orderOnCode) {
-            out.code = { ok: false, error: `По коду уже есть заказ (${orderOnCode.status}) — используй 📎/rebind` };
+            out.code = {
+              ok: false,
+              error: `По коду уже есть заказ (${orderOnCode.status})`,
+              existing: toMatch(orderOnCode),
+            };
           } else {
             out.code = { ok: true, denomination: codeRow.denomination, claimedBy: codeRow.user ?? null };
           }
@@ -646,7 +687,7 @@ export async function POST(req: NextRequest) {
       const candidates = await (prisma as any).wbOrder.findMany({
         where: { isTest: false, status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS"] }, gamepassUrl: { contains: `/${gpId}` } },
         orderBy: { createdAt: "desc" }, take: 5,
-        select: { wbCode: true, status: true, gamepassUrl: true },
+        select: MATCH_SELECT,
       });
       const existing = candidates.find((o: any) => gpIdOf(o.gamepassUrl) === gpId);
       // Продавец vs ник: числится ли пасс среди for-sale пассов этого ника.
@@ -663,8 +704,24 @@ export async function POST(req: NextRequest) {
         expected,
         priceMismatch: expected != null && info?.price != null && Math.abs(info.price - expected) > 2,
         sellerMatch,
-        existing: existing ? { wbCode: existing.wbCode, status: existing.status } : null,
+        existing: existing ? toMatch(existing) : null,
       };
+    }
+
+    /* Ник — не ключ: у одного ника легко несколько заказов, и подставлять
+       «тот самый» нельзя. Отдаём список, выбор делает человек. */
+    const nickRaw = String(body.robloxUsername ?? "").trim().replace(/^@/, "");
+    if (nickRaw.length >= 3) {
+      const byNick = await (prisma as any).wbOrder.findMany({
+        where: {
+          isTest: false,
+          robloxUsername: { equals: nickRaw, mode: "insensitive" },
+          status: { in: ["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "AWAITING_PAYMENT", "PAYMENT_PENDING"] },
+        },
+        orderBy: { createdAt: "desc" }, take: 5,
+        select: MATCH_SELECT,
+      });
+      if (byNick.length > 0) out.nick = { matches: byNick.map(toMatch) };
     }
 
     return NextResponse.json(out);
@@ -1561,6 +1618,14 @@ export async function POST(req: NextRequest) {
   // Заметка правится в NotesEditor карточки; изменения аудируются в adminNote.
   if (action === "edit-order") {
     if (unpaidDirect) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
+    // ❄️ Раньше гарда здесь не было, и он не был нужен: правку открывала только
+    // кнопка на карточке, а у замороженного заказа карточка кнопок выкупа не
+    // показывает. С 31.08 лист заказа умеет переключаться в правку по введённому
+    // коду — замороженный заказ стал достижим из формы создания, и правка без
+    // гарда была бы чёрным ходом мимо заморозки: поправил ник с геймпассом, и
+    // заказ снова выглядит рабочим. Разморозка обязана быть отдельным шагом.
+    if (order.heldAt)
+      return NextResponse.json({ error: heldRefusal(order.heldReason) }, { status: 409 });
     if (!["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED"].includes(order.status))
       return NextResponse.json({ error: "Нельзя редактировать в этом статусе" }, { status: 400 });
 

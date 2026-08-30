@@ -63,6 +63,15 @@ describe("сырые SQL-счётчики зеркалят buildTabWhere", () =>
     expect(occurrences.length).toBeGreaterThanOrEqual(WORK_TABS.length);
   });
 
+  it("правка заказа тоже под гардом", () => {
+    // Лист заказа умеет переключаться в правку по введённому коду, поэтому
+    // замороженный заказ достижим из формы создания. Без гарда правка была бы
+    // обходом заморозки: поправил ник с геймпассом — заказ снова рабочий.
+    const editBlock = route.slice(route.indexOf('action === "edit-order"'));
+    expect(editBlock.slice(0, 1200)).toContain("order.heldAt");
+    expect(editBlock.slice(0, 1200)).toContain("heldRefusal");
+  });
+
   it("счётчик «Заморожены» существует", () => {
     expect(route).toContain(`COUNT(*) FILTER (WHERE "heldAt" IS NOT NULL)::int AS "HELD"`);
   });

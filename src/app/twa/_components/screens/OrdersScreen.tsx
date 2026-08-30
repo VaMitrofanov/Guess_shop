@@ -5,7 +5,7 @@ import { ageColor, fmtAge } from "../age";
 import { haptic } from "../haptics";
 import BottomSheet from "../BottomSheet";
 import { toast } from "../Toast";
-import CreateManualModal, { type RebindUser } from "../CreateManualModal";
+import OrderSheet, { type MatchedOrder, type RebindUser } from "../OrderSheet";
 import { isUnpaidDirect } from "@/lib/buyout-queue";
 import { HOLD_PRESETS, parseAdminNote } from "@/lib/order-hold";
 
@@ -963,102 +963,6 @@ function HoldModal({ order, onHold, onClose }: {
   );
 }
 
-/* ───────────── Edit Order Modal — правка номинала/ника/ГП за клиента ───────────── */
-function EditOrderModal({ order, token, onDone, onClose }: {
-  order: Order; token: string; onDone: () => void; onClose: () => void;
-}) {
-  const [amount, setAmount] = useState(String(order.amount));
-  const [gpInput, setGpInput] = useState(order.gamepassUrl ?? "");
-  const [nick, setNick] = useState(order.robloxUsername ?? "");
-  // Дедуп ГП: сервер вернул 409 + existing — просим подтвердить force-сохранение.
-  const [dup, setDup] = useState<{ wbCode: string; status: string } | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const amt = parseInt(amount, 10) || 0;
-  // Прайс-гард пропустит выкуп только по этой цене — показываем сразу.
-  const expected = amt > 0 ? Math.ceil(amt / 0.7) : 0;
-  const dirty =
-    (!order.isDirectOrder && amt !== order.amount) ||
-    gpInput.trim() !== (order.gamepassUrl ?? "") ||
-    nick.trim() !== (order.robloxUsername ?? "");
-
-  async function submit(force = false) {
-    if (!order.isDirectOrder && (!amt || amt < 1)) { toast("Укажи номинал R$", "error"); return; }
-    setLoading(true);
-    try {
-      const payload: any = {
-        action: "edit-order", orderId: order.id,
-        gamepassUrl: gpInput.trim(),
-        robloxUsername: nick.trim(),
-      };
-      if (!order.isDirectOrder) payload.amount = amt;
-      if (force) payload.force = true;
-      const r = await fetch("/api/twa/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(payload),
-      });
-      const d = await r.json();
-      if (r.status === 409 && d.existing) { haptic.notify("warning"); setDup(d.existing); return; }
-      if (!r.ok) { toast(d.error ?? "Ошибка", "error"); return; }
-      haptic.notify("success");
-      toast("Сохранено", "success");
-      onDone();
-    } catch { toast("Ошибка сети", "error"); }
-    finally { setLoading(false); }
-  }
-
-  const inputStyle: React.CSSProperties = {
-    width: "100%", background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 10,
-    color: "#fff", fontSize: 15, padding: "10px 12px", outline: "none",
-    fontFamily: "inherit", boxSizing: "border-box",
-  };
-
-  return (
-    <div onClick={e => e.stopPropagation()} style={{
-      padding: "12px 14px 14px",
-      borderTop: `1px solid ${C.hairline}`,
-      background: "rgba(0,0,0,0.15)",
-      display: "flex", flexDirection: "column", gap: 8,
-    }}>
-      <div style={{ fontSize: 14, fontWeight: 600, color: C.orange }}>✏️ Редактировать заказ</div>
-      {order.isDirectOrder ? (
-        <div style={{ fontSize: 14, color: C.textTertiary }}>
-          Номинал {order.amount.toLocaleString("ru-RU")} R$ привязан к оплате — правь ник/геймпасс
-        </div>
-      ) : (
-        <>
-          <input value={amount} onChange={e => setAmount(e.target.value.replace(/\D/g, ""))} placeholder="Номинал R$" inputMode="numeric"
-            style={inputStyle} />
-          {expected > 0 && (
-            <div style={{ fontSize: 14, color: C.textTertiary }}>
-              → выкуп пройдёт только с пассом за <span style={{ color: C.textSecondary, fontWeight: 600 }}>{expected.toLocaleString("ru-RU")} R$</span>
-            </div>
-          )}
-        </>
-      )}
-      <input value={gpInput} onChange={e => { setGpInput(e.target.value); setDup(null); }} placeholder="ID или URL геймпасса (пусто — снять)"
-        style={inputStyle} />
-      <input value={nick} onChange={e => setNick(e.target.value)} placeholder="Ник Roblox (продавец пасса)"
-        style={inputStyle} />
-      {dup && (
-        <div style={{ fontSize: 14, fontWeight: 600, color: C.orange }}>
-          ⚠️ Этот геймпасс уже в заказе {dup.wbCode} ({dup.status}) — сохранить всё равно?
-        </div>
-      )}
-      <div style={{ display: "flex", gap: 8 }}>
-        <button className="twa-press" onClick={onClose}
-          style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
-          Отмена
-        </button>
-        <button className="twa-press" onClick={() => submit(!!dup)} disabled={loading || !dirty}
-          style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: dup ? C.red : C.orange, color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading || !dirty ? 0.5 : 1 }}>
-          {loading ? "…" : dup ? "Сохранить всё равно" : "Сохранить"}
-        </button>
-      </div>
-    </div>
-  );
-}
 
 function RefundModal({ order, token, onDone, onClose }: { order: Order; token: string; onDone: () => void; onClose: () => void }) {
   const payment = order.paymentAttempts?.[0];
@@ -1099,7 +1003,7 @@ function RefundModal({ order, token, onDone, onClose }: { order: Order; token: s
 }
 
 /* ───────────── RebindModal ───────────── */
-// RebindUser — общий тип, живёт в CreateManualModal (модалка тоже ищет клиентов).
+// RebindUser — общий тип, живёт в OrderSheet (модалка тоже ищет клиентов).
 function RebindModal({ order, token, onDone, onClose }: {
   order: Order; token: string; onDone: () => void; onClose: () => void;
 }) {
@@ -2372,10 +2276,13 @@ function OrderCard({
         </div>
       )}
 
+      {/* Тот же лист заказа, что и при создании, только с целью «правлю этот».
+          Две формы с одинаковыми полями разошлись бы снова: в правке не было
+          ни поиска пассов, ни живой проверки цены, хотя в создании они есть. */}
       {editOpen && (
-        <EditOrderModal
-          order={order}
+        <OrderSheet
           token={token}
+          initialTarget={orderToTarget(order)}
           onDone={() => { setEditOpen(false); onMoved(); }}
           onClose={() => setEditOpen(false)}
         />
@@ -3670,7 +3577,7 @@ export default function OrdersScreen({
 
       {/* П4: модалка ручного создания заказа */}
       {createOpen && (
-        <CreateManualModal
+        <OrderSheet
           token={token}
           mode={createMode}
           initialGamepassUrl={createPrefill?.url}
@@ -3930,6 +3837,29 @@ function IntentsSection({ token, intents, qrConfigured, loading, onIntentGone }:
       ))}
     </div>
   );
+}
+
+/** Карточка ленты → цель для `OrderSheet`. Форма получает ровно то же, что ей
+    отдаёт `manual-validate` при совпадении, поэтому путь «открыл ✏️» и путь
+    «ввёл код в форме создания» приводят к одному состоянию. */
+function orderToTarget(order: Order): MatchedOrder {
+  return {
+    orderId: order.id,
+    wbCode: order.wbCode,
+    status: order.status,
+    amount: order.amount,
+    robloxUsername: order.robloxUsername,
+    gamepassUrl: order.gamepassUrl,
+    isDirectOrder: order.isDirectOrder,
+    unpaidDirect: isUnpaidDirect(order),
+    heldAt: order.heldAt,
+    heldReason: order.heldReason,
+    editable: ["PENDING", "AWAITING_GAMEPASS", "ERROR", "REJECTED"].includes(order.status),
+    client: order.user.username ? `@${order.user.username}`
+      : order.user.name ?? (order.user.tgId ? `TG ${order.user.tgId}` : order.user.vkId ? `VK ${order.user.vkId}` : null),
+    createdAt: order.createdAt,
+    pendingAt: order.pendingAt,
+  };
 }
 
 /* ───────────── MiniDashboard — summary-карточки в Premium Calm стиле ───────────── */
