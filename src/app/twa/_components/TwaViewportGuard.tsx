@@ -20,43 +20,72 @@ export default function TwaViewportGuard() {
     const visualViewport = window.visualViewport;
     let animationFrame = 0;
     const settleTimers = new Set<number>();
-    // Последнее записанное значение отступа под клавиатуру. Нужно, чтобы не
-    // перезаписывать переменную из-за дрожания в пару пикселей.
+    // Последние записанные значения. Нужны, чтобы не перезаписывать переменные
+    // из-за дрожания в пару пикселей.
     let lastInset = -1;
+    let lastHeight = -1;
+    // Мерить ли в ближайшем кадре высоту (панорама её не меняет — см. ниже).
+    let heightPending = false;
 
     root.classList.add(ACTIVE_CLASS);
     body.classList.add(ACTIVE_CLASS);
 
-    const syncViewport = () => {
-      cancelAnimationFrame(animationFrame);
-      animationFrame = requestAnimationFrame(() => {
+    const measure = () => {
+      animationFrame = 0;
+
+      /* Высота визуального окна. Ею заданы `height` всего стеклянного корпуса и
+         `max-height` шторки, на которой висит `transition: max-height` — то есть
+         КАЖДАЯ запись перезапускает анимацию геометрии поверх слоёв с блюром.
+         31.08.2026: на 10 символов приходилось 10 записей, и набор в форме
+         заказа «лагал и вылетал». Порог в 2 px глушит субпиксельное дрожание
+         iOS и пропускает то, ради чего переменная заведена: клавиатуру и
+         телеграмовскую шапку. Заниженная на пару пикселей высота не видна —
+         под корпусом тот же фон. */
+      if (heightPending) {
+        heightPending = false;
         const height = visualViewport?.height ?? window.innerHeight;
         if (Number.isFinite(height) && height > 0) {
           // Round up so fractional device pixels cannot reveal a one-pixel strip.
-          root.style.setProperty("--twa-visual-height", `${Math.ceil(height)}px`);
+          const rounded = Math.ceil(height);
+          if (lastHeight < 0 || Math.abs(rounded - lastHeight) > 2) {
+            lastHeight = rounded;
+            root.style.setProperty("--twa-visual-height", `${rounded}px`);
+          }
         }
-        /* Сколько снизу занимает клавиатура.
-           `position: fixed` считается от МАКЕТНОГО окна, а клавиатура ужимает
-           только визуальное — поэтому шторка, прижатая к низу, уезжает под
-           клавиатуру, и экран «дёргается». Разница двух окон и есть высота
-           клавиатуры; ею подпирается нижний отступ слоя со шторкой. */
-        const layout = window.innerHeight;
-        const raw = visualViewport
-          ? Math.max(0, Math.round(layout - visualViewport.height - visualViewport.offsetTop))
-          : 0;
-        // Мелкие расхождения на 1–2 px бывают и без клавиатуры — не двигаем из-за них.
-        const inset = raw > 24 ? raw : 0;
-        /* Пишем, только когда отступ реально изменился.
-           `visualViewport.scroll` срабатывает и на микро-панораме во время
-           набора текста, а на слое со шторкой висит `transition: padding-bottom`
-           — от каждой перезаписи он дёргался бы заново. Порог в 8 px пропускает
-           появление и скрытие клавиатуры и глушит дрожание. */
-        if (lastInset < 0 || Math.abs(inset - lastInset) > 8) {
-          lastInset = inset;
-          root.style.setProperty("--twa-keyboard-inset", `${inset}px`);
-        }
-      });
+      }
+
+      /* Сколько снизу занимает клавиатура.
+         `position: fixed` считается от МАКЕТНОГО окна, а клавиатура ужимает
+         только визуальное — поэтому шторка, прижатая к низу, уезжает под
+         клавиатуру, и экран «дёргается». Разница двух окон и есть высота
+         клавиатуры; ею подпирается нижний отступ слоя со шторкой. */
+      const layout = window.innerHeight;
+      const raw = visualViewport
+        ? Math.max(0, Math.round(layout - visualViewport.height - visualViewport.offsetTop))
+        : 0;
+      // Мелкие расхождения на 1–2 px бывают и без клавиатуры — не двигаем из-за них.
+      const inset = raw > 24 ? raw : 0;
+      /* Пишем, только когда отступ реально изменился.
+         `visualViewport.scroll` срабатывает и на микро-панораме во время
+         набора текста, а на слое со шторкой висит `transition: padding-bottom`
+         — от каждой перезаписи он дёргался бы заново. Порог в 8 px пропускает
+         появление и скрытие клавиатуры и глушит дрожание. */
+      if (lastInset < 0 || Math.abs(inset - lastInset) > 8) {
+        lastInset = inset;
+        root.style.setProperty("--twa-keyboard-inset", `${inset}px`);
+      }
     };
+
+    /** `withHeight: false` — панорама: сдвиг окна, а не смена его высоты. */
+    const syncViewport = (withHeight = true) => {
+      if (withHeight) heightPending = true;
+      if (animationFrame) return;
+      animationFrame = requestAnimationFrame(measure);
+    };
+
+    // Панорама во время набора меняет только `offsetTop`, а не высоту окна:
+    // мерить высоту на каждый `scroll` не нужно, а вредно — см. `measure`.
+    const syncOffsetOnly = () => syncViewport(false);
 
     const scheduleSettle = () => {
       syncViewport();
@@ -86,7 +115,7 @@ export default function TwaViewportGuard() {
 
     syncViewport();
     visualViewport?.addEventListener("resize", scheduleSettle);
-    visualViewport?.addEventListener("scroll", syncViewport);
+    visualViewport?.addEventListener("scroll", syncOffsetOnly);
     window.addEventListener("resize", scheduleSettle);
     window.addEventListener("orientationchange", scheduleSettle);
     document.addEventListener("focusin", scheduleSettle);
@@ -96,7 +125,7 @@ export default function TwaViewportGuard() {
       cancelAnimationFrame(animationFrame);
       settleTimers.forEach(timer => window.clearTimeout(timer));
       visualViewport?.removeEventListener("resize", scheduleSettle);
-      visualViewport?.removeEventListener("scroll", syncViewport);
+      visualViewport?.removeEventListener("scroll", syncOffsetOnly);
       window.removeEventListener("resize", scheduleSettle);
       window.removeEventListener("orientationchange", scheduleSettle);
       document.removeEventListener("focusin", scheduleSettle);

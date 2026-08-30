@@ -777,6 +777,14 @@ html.twa-route-active [contenteditable="true"] {
 .twa-form-sheet {
   max-height: min(88dvh, calc(var(--twa-visual-height, var(--tg-viewport-height, 100dvh)) - 24px));
 }
+/* Геометрию формы двигает КЛАВИАТУРА, а не жест. Пока эти два перехода тут
+   висели, каждая правка высоты окна запускала 250-мс анимацию высоты шторки и
+   200-мс анимацию отступа слоя — прямо под пальцем, поверх слоёв с блюром, и
+   встречно тому, как iOS сам подкручивает страницу к полю. Плавность нужна
+   карточке заказа, которую разворачивают жестом (`.twa-order-sheet`), а форме
+   нужно попасть на новое место мгновенно. Анимация появления не тронута. */
+.twa-form-sheet { transition: none; }
+.twa-sheet-layer:has(.twa-form-sheet) { transition: none; }
 .twa-form-sheet .twa-sheet-scroll { padding-bottom: 6px; }
 /* Поле, к которому подъехала клавиатура, не должно упираться в край. */
 .twa-form-sheet input,
