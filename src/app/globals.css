@@ -727,14 +727,24 @@ html.twa-route-active [contenteditable="true"] {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  padding: 10px 10px max(10px, env(safe-area-inset-bottom, 0px));
+  /* Клавиатура подпирает слой снизу: `fixed` считается от макетного окна, и без
+     этого отступа шторка с полями уезжает под клавиатуру. Переменную пишет
+     TwaViewportGuard, вне TWA она просто ноль. */
+  padding: 10px 10px calc(max(10px, env(safe-area-inset-bottom, 0px)) + var(--twa-keyboard-inset, 0px));
+  transition: padding-bottom .2s cubic-bezier(.22,1,.36,1);
   background: rgba(3,0,12,.66);
   -webkit-backdrop-filter: blur(5px);
   backdrop-filter: blur(5px);
 }
 .twa-sheet {
   width: min(560px, 100%);
-  max-height: min(76dvh, calc(var(--tg-viewport-height, 100dvh) - 52px));
+  /* `--twa-visual-height` — единственная величина, которая УМЕНЬШАЕТСЯ вместе с
+     клавиатурой (её пишет TwaViewportGuard из visualViewport). `dvh` и
+     `--tg-viewport-height` про клавиатуру не знают, поэтому шторка с полями
+     оставалась во весь экран, iOS начинал панорамировать документ, и экран
+     «дёргался и улетал» при фокусе. Порядок в `min()` держит прежнее поведение,
+     когда переменной ещё нет. */
+  max-height: min(76dvh, calc(var(--twa-visual-height, var(--tg-viewport-height, 100dvh)) - 52px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -749,7 +759,7 @@ html.twa-route-active [contenteditable="true"] {
   transition: max-height .25s cubic-bezier(.22,1,.36,1);
 }
 .twa-sheet button, .twa-sheet input, .twa-sheet textarea { font-family: inherit; }
-.twa-sheet.is-expanded { max-height: calc(var(--tg-viewport-height, 100dvh) - 20px); }
+.twa-sheet.is-expanded { max-height: calc(var(--twa-visual-height, var(--tg-viewport-height, 100dvh)) - 20px); }
 .twa-sheet-handle-zone { flex: 0 0 auto; display: grid; place-items: center; height: 26px; }
 .twa-sheet-handle { width: 44px; height: 14px; padding: 0; border: 0; background: transparent; }
 .twa-sheet-handle::after { content: ""; display: block; width: 36px; height: 4px; margin: auto; border-radius: 999px; background: rgba(255,255,255,.28); }
@@ -758,8 +768,24 @@ html.twa-route-active [contenteditable="true"] {
 .twa-sheet-footer > button { width: 100%; min-height: 56px; }
 @keyframes twa-sheet-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
 .twa-order-sheet {
-  max-height: min(72dvh, calc(var(--tg-viewport-height, 100dvh) - 84px));
+  max-height: min(72dvh, calc(var(--twa-visual-height, var(--tg-viewport-height, 100dvh)) - 84px));
 }
+
+/* Лист заказа: длинная форма, которую заполняют с клавиатурой на экране.
+   Ей нужно больше высоты, чем карточке-просмотру, и запас снизу, чтобы
+   последнее поле не прилипало к закреплённым кнопкам. */
+.twa-form-sheet {
+  max-height: min(88dvh, calc(var(--twa-visual-height, var(--tg-viewport-height, 100dvh)) - 24px));
+}
+.twa-form-sheet .twa-sheet-scroll { padding-bottom: 6px; }
+/* Поле, к которому подъехала клавиатура, не должно упираться в край. */
+.twa-form-sheet input,
+.twa-form-sheet textarea { scroll-margin: 14px 0 18px; }
+/* Страховка от возврата зума: ниже 16px iOS зумит страницу при фокусе, и после
+   зума геометрия шторки уезжает. `!important` здесь осознан — поля формы
+   стилизуются инлайном, и без него правило просто не применится. */
+.twa-form-sheet input,
+.twa-form-sheet textarea { font-size: max(16px, 1rem) !important; }
 .twa-order-sheet .twa-compact-order {
   position: relative;
   min-height: 92px;

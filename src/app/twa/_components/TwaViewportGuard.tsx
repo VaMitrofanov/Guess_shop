@@ -32,6 +32,17 @@ export default function TwaViewportGuard() {
           // Round up so fractional device pixels cannot reveal a one-pixel strip.
           root.style.setProperty("--twa-visual-height", `${Math.ceil(height)}px`);
         }
+        /* Сколько снизу занимает клавиатура.
+           `position: fixed` считается от МАКЕТНОГО окна, а клавиатура ужимает
+           только визуальное — поэтому шторка, прижатая к низу, уезжает под
+           клавиатуру, и экран «дёргается». Разница двух окон и есть высота
+           клавиатуры; ею подпирается нижний отступ слоя со шторкой. */
+        const layout = window.innerHeight;
+        const inset = visualViewport
+          ? Math.max(0, Math.round(layout - visualViewport.height - visualViewport.offsetTop))
+          : 0;
+        // Мелкие расхождения на 1–2 px бывают и без клавиатуры — не двигаем из-за них.
+        root.style.setProperty("--twa-keyboard-inset", `${inset > 24 ? inset : 0}px`);
       });
     };
 
@@ -81,6 +92,7 @@ export default function TwaViewportGuard() {
       root.classList.remove(ACTIVE_CLASS);
       body.classList.remove(ACTIVE_CLASS);
       root.style.removeProperty("--twa-visual-height");
+      root.style.removeProperty("--twa-keyboard-inset");
     };
   }, []);
 

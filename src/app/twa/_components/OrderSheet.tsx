@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { C, MONO } from "./theme";
 import { haptic } from "./haptics";
 import { toast } from "./Toast";
+import BottomSheet from "./BottomSheet";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    OrderSheet — один лист заказа: и создание, и правка.
@@ -104,9 +105,11 @@ function statusMeta(status: string) {
   return STATUS_LABEL[status] ?? { label: status, color: C.textSecondary };
 }
 
+/* 16px — не вкусовщина: ниже этого порога iOS зумит страницу при фокусе, а
+   после зума геометрия шторки уезжает и экран «дёргается». */
 const inputStyle: React.CSSProperties = {
   width: "100%", background: C.elevated, border: "none", borderRadius: 10,
-  color: "#fff", fontSize: 15, padding: "11px 12px", outline: "none",
+  color: "#fff", fontSize: 16, padding: "12px", outline: "none",
   fontFamily: "inherit", boxSizing: "border-box",
 };
 
@@ -156,7 +159,9 @@ function MatchCard({ found, title, tone, children }: {
   const border = tone === "warn" ? "rgba(255,159,10,0.3)" : "rgba(10,132,255,0.3)";
   const bg = tone === "warn" ? "rgba(255,159,10,0.09)" : "rgba(10,132,255,0.09)";
   return (
-    <div style={{ border: `1px solid ${border}`, background: bg, borderRadius: 13, padding: "10px 11px" }}>
+    /* Совпадение приходит через 500 мс после ввода и раздвигает шторку. Без
+       проявления это читается как рывок; с ним — как ответ формы. */
+    <div className="twa-fade-up" style={{ border: `1px solid ${border}`, background: bg, borderRadius: 13, padding: "10px 11px" }}>
       <div style={{ fontSize: 13, fontWeight: 700, color: tone === "warn" ? C.orange : C.blue }}>{title}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 6, flexWrap: "wrap" }}>
         <span style={{ fontFamily: MONO, fontSize: 13, fontWeight: 700, color: C.textPrimary }}>{found.wbCode}</span>
@@ -489,23 +494,55 @@ export default function OrderSheet({
     <div style={{ fontSize: 13, color, lineHeight: 1.35 }}>{text}</div>
   );
 
-  return (
-    <div
-      style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-      onClick={e => { if (e.target === e.currentTarget && !busy) onClose(); }}
-    >
-      <div style={{
-        background: C.card, borderRadius: 18, width: "100%", maxWidth: 400, maxHeight: "88vh",
-        display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
-      }}>
-        <div style={{ padding: "16px 20px 4px", flexShrink: 0 }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: "#e5e5ea" }}>
-            {editing ? "Заказ" : isDirect ? "🔷 Прямой заказ" : "➕ Новый заказ"}
-          </div>
+  /* Кнопки живут в закреплённом футере шторки: при открытой клавиатуре они
+     остаются на экране, а не уезжают вместе с прокруткой полей. */
+  const footer = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="twa-press" onClick={onClose} disabled={busy}
+          style={{ flex: 1, minHeight: 48, borderRadius: 12, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
+          Отмена
+        </button>
+        <button className="twa-press"
+          onClick={() => editing ? void saveEdit(!!dup) : void create(!!dup)}
+          disabled={!canSubmit}
+          style={{
+            flex: 2, minHeight: 48, borderRadius: 12, border: "none",
+            background: dup ? C.orange : editing ? C.blue : C.accent, color: "#fff",
+            fontSize: 15, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+            opacity: canSubmit ? 1 : 0.45,
+          }}>
+          {busy ? "…"
+            : dup ? (editing ? "Сохранить всё равно" : "Создать всё равно")
+              : editing
+                ? (editChanges.length ? `Сохранить · ${editChanges.join(", ")}` : "Сохранить")
+                : isDirect ? "Создать и поставить на выкуп" : "Создать заказ"}
+        </button>
+      </div>
+      {/* Кнопка объясняет, почему она серая: раньше она просто гасла. */}
+      {!canSubmit && !busy && (
+        <div style={{ fontSize: 11.5, color: C.textTertiary, textAlign: "center" }}>
+          {frozen ? "заказ заморожен — сначала сними заморозку"
+            : editing ? "измени номинал, ник или геймпасс"
+              : `не хватает: ${missing.join(", ")}`}
+        </div>
+      )}
+    </div>
+  );
 
-          {/* Шапка-цель: что именно делает лист прямо сейчас. */}
+  return (
+    <BottomSheet
+      open
+      onClose={() => { if (!busy) onClose(); }}
+      ariaLabel={editing ? "Правка заказа" : "Новый заказ"}
+      className="twa-form-sheet"
+      footer={footer}
+    >
+      <div style={{ padding: "0 16px 4px", display: "flex", flexDirection: "column", gap: 11 }}>
+          {/* Шапка-цель — единственный заголовок листа. Раньше над ней стоял
+              ещё и «＋ Новый заказ», и одно и то же было написано дважды. */}
           <div style={{
-            display: "flex", alignItems: "center", gap: 8, marginTop: 8,
+            display: "flex", alignItems: "center", gap: 8,
             padding: "8px 11px", borderRadius: 11, fontSize: 12.5,
             background: frozen ? "rgba(100,210,255,0.12)" : editing ? "rgba(10,132,255,0.14)" : "rgba(255,255,255,0.05)",
             border: `1px solid ${frozen ? "rgba(100,210,255,0.3)" : editing ? "rgba(10,132,255,0.32)" : "transparent"}`,
@@ -532,15 +569,12 @@ export default function OrderSheet({
           </div>
 
           {!editing && (
-            <div style={{ fontSize: 12.5, color: C.textTertiary, marginTop: 7, lineHeight: 1.35 }}>
+            <div style={{ fontSize: 12.5, color: C.textTertiary, lineHeight: 1.35 }}>
               {isDirect
                 ? "Найди геймпасс по нику и выбери юзера, с которым общался."
                 : "Введи код, ник или ссылку. Если это уже существующий заказ — предложу открыть его."}
             </div>
           )}
-        </div>
-
-        <div style={{ padding: "12px 20px 8px", display: "flex", flexDirection: "column", gap: 11, overflowY: "auto" }}>
 
           {/* ❄️ Заморозка бьёт всё: правка выключена целиком. Иначе форма стала
               бы чёрным ходом мимо заморозки — поправил ник, и заказ снова
@@ -604,7 +638,7 @@ export default function OrderSheet({
 
           {/* Ник — не ключ: совпадений может быть несколько, поэтому список. */}
           {nickMatches.length > 0 && (
-            <div style={{ border: "1px solid rgba(10,132,255,0.3)", background: "rgba(10,132,255,0.09)", borderRadius: 13, padding: "10px 11px" }}>
+            <div className="twa-fade-up" style={{ border: "1px solid rgba(10,132,255,0.3)", background: "rgba(10,132,255,0.09)", borderRadius: 13, padding: "10px 11px" }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: C.blue }}>
                 У ника {nickMatches.length === 1 ? "есть заказ" : `${nickMatches.length} заказа`}
               </div>
@@ -733,7 +767,7 @@ export default function OrderSheet({
                 </button>
               )}
               {newClientOpen && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "10px 11px", borderRadius: 12, background: "rgba(167,139,250,0.09)", border: `1px solid ${C.accent}44` }}>
+                <div className="twa-fade-up" style={{ display: "flex", flexDirection: "column", gap: 6, padding: "10px 11px", borderRadius: 12, background: "rgba(167,139,250,0.09)", border: `1px solid ${C.accent}44` }}>
                   <div style={{ fontSize: 12.5, color: C.textSecondary, lineHeight: 1.35 }}>
                     Заказ без клиента вешается на служебного юзера — уведомления такому «клиенту» не уйдут.
                   </div>
@@ -896,7 +930,9 @@ export default function OrderSheet({
                 {gpState.sellerMatch === false && warn("⚠️ Пасс не найден среди for-sale пассов этого ника")}
               </div>
             )}
-            {checking && <div style={{ fontSize: 12, color: C.textTertiary }}>Проверяю…</div>}
+            {/* Место под строку проверки зарезервировано: иначе она появляется и
+                исчезает на каждом нажатии клавиши и трясёт всю шторку. */}
+            <div style={{ minHeight: 15, fontSize: 12, color: C.textTertiary }}>{checking ? "Проверяю…" : ""}</div>
             {isDirect && !editing && selectedDirectPass && (
               <div style={{ fontSize: 13, color: C.green }}>
                 ✓ Клиенту: <b>{amount} R$</b> · цена пасса {selectedDirectPass.price.toLocaleString("ru-RU")} R$
@@ -923,40 +959,7 @@ export default function OrderSheet({
               Нажми «{editing ? "Сохранить всё равно" : "Создать всё равно"}», если это осознанный повтор.
             </div>
           )}
-        </div>
-
-        <div style={{ padding: "10px 20px 18px", display: "flex", flexDirection: "column", gap: 7, flexShrink: 0 }}>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="twa-press" onClick={onClose} disabled={busy}
-              style={{ flex: 1, padding: "13px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
-              Отмена
-            </button>
-            <button className="twa-press"
-              onClick={() => editing ? void saveEdit(!!dup) : void create(!!dup)}
-              disabled={!canSubmit}
-              style={{
-                flex: 2, padding: "13px", borderRadius: 10, border: "none",
-                background: dup ? C.orange : editing ? C.blue : C.accent, color: "#fff",
-                fontSize: 15, fontWeight: 600, cursor: "pointer",
-                opacity: canSubmit ? 1 : 0.45,
-              }}>
-              {busy ? "…"
-                : dup ? (editing ? "Сохранить всё равно" : "Создать всё равно")
-                  : editing
-                    ? (editChanges.length ? `Сохранить · ${editChanges.join(", ")}` : "Сохранить")
-                    : isDirect ? "Создать и поставить на выкуп" : "Создать заказ"}
-            </button>
-          </div>
-          {/* Кнопка объясняет, почему она серая: раньше она просто гасла. */}
-          {!canSubmit && !busy && (
-            <div style={{ fontSize: 11.5, color: C.textTertiary, textAlign: "center" }}>
-              {frozen ? "заказ заморожен — сначала сними заморозку"
-                : editing ? "измени номинал, ник или геймпасс"
-                  : `не хватает: ${missing.join(", ")}`}
-            </div>
-          )}
-        </div>
       </div>
-    </div>
+    </BottomSheet>
   );
 }
