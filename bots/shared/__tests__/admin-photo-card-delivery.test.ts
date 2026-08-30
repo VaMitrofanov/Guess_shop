@@ -119,3 +119,43 @@ describe("доставка карточки со скриншотом", () => {
     await expect(sendAdminReviewCard(review)).rejects.toThrow(/undelivered/);
   });
 });
+
+/**
+ * Вторая половина той же истории: карточка дошла, решение принято, а экран
+ * промолчал.
+ *
+ * `editMessageCaption` работает только с медиа. Когда карточка ушла текстовым
+ * фолбэком (Telegram не забрал фото по ссылке VK CDN), правка падала, ошибку
+ * глотал `catch {}` — и админ видел ту же карточку с теми же кнопками. Заказ
+ * FJEXSA5, 30.08.2026: бонус +100 R$ начислен и записан в леджер, на экране не
+ * изменилось ничего.
+ *
+ * Тест смотрит на исходник: вернуть `editMessageCaption` в обработчик решения —
+ * значит вернуть и баг, а поймать его можно только руками на живом фолбэке.
+ */
+describe("решение по карточке видно на экране", () => {
+  const handlers = require("node:fs").readFileSync(
+    require("node:path").join(process.cwd(), "bots/tg/handlers.ts"), "utf8");
+
+  it("обработчики решений закрывают карточку через closeAdminCard", () => {
+    for (const marker of ["payOkCaption", "❌ Оплата отклонена", "🎁 Бонус начислен"]) {
+      const line = handlers.split("\n").find((l: string) => l.includes(marker) && l.includes("closeAdminCard"))
+        ?? handlers.split("\n").find((l: string) => l.includes(marker));
+      expect(line).toBeDefined();
+    }
+    expect(handlers).toContain("await closeAdminCard(ctx, payOkCaption)");
+  });
+
+  it("прямого editMessageCaption в обработчиках решений не осталось", () => {
+    // Единственное допустимое место — сам `closeAdminCard`, где выбор между
+    // подписью и текстом делается осознанно.
+    const uses = handlers.split("\n").filter((l: string) => l.includes("ctx.editMessageCaption("));
+    expect(uses).toHaveLength(1);
+  });
+
+  it("closeAdminCard снимает кнопки — повторное нажатие ничего не меняет", () => {
+    const body = handlers.slice(handlers.indexOf("async function closeAdminCard"));
+    expect(body.slice(0, 1400)).toContain("inline_keyboard: [] as unknown[]");
+    expect(body.slice(0, 1400)).toContain("editMessageText");
+  });
+});

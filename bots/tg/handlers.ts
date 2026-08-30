@@ -3861,6 +3861,42 @@ export function registerAdmin(bot: Telegraf): void {
 // showAdminCodes) have been moved to admin/hub-*.ts modules.
 
 /** Helper to perform rejection logic for both text and button callbacks */
+/**
+ * Закрыть карточку админа: заменить её текст принятым решением и убрать кнопки.
+ *
+ * Карточка со скриншотом уходит **фото ИЛИ текстом**: Telegram регулярно не
+ * может забрать фото по ссылке VK CDN, и тогда `broadcastPhotoCard` отправляет
+ * тот же текст с теми же кнопками (`bots/shared/admin.ts`). А
+ * `editMessageCaption` работает только с медиа — на текстовом фолбэке он падал,
+ * ошибку глотал `catch {}`, и карточка внешне не менялась: бонус начислен, а на
+ * экране всё те же кнопки. Второе нажатие отвечало «уже начислено» и выглядело
+ * как поломка (заказ FJEXSA5, 30.08.2026 — деньги ушли, экран промолчал).
+ *
+ * Кнопки снимаем всегда: решение принято, повторное нажатие ничего не меняет и
+ * только пугает. Если правка не прошла (старое сообщение, гонка двух админов) —
+ * снимаем хотя бы клавиатуру, чтобы карточка не выглядела активной.
+ */
+async function closeAdminCard(ctx: any, html: string): Promise<void> {
+  const asPhoto = Array.isArray(ctx.callbackQuery?.message?.photo)
+    && ctx.callbackQuery.message.photo.length > 0;
+  const noKeyboard = { inline_keyboard: [] as unknown[] };
+  try {
+    if (asPhoto) {
+      await ctx.editMessageCaption(html, { parse_mode: "HTML", reply_markup: noKeyboard });
+    } else {
+      await ctx.editMessageText(html, {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        reply_markup: noKeyboard,
+      });
+    }
+  } catch (err) {
+    console.warn("[admin-card] решение не удалось записать в карточку:",
+      err instanceof Error ? err.message : err);
+    await ctx.editMessageReplyMarkup(noKeyboard).catch(() => {});
+  }
+}
+
 async function performAdminReject(bot: Telegraf, ctx: any, orderId: string, reason: string) {
   const tgId = String(ctx.from.id);
   const displayReason = reason.trim() || "не указана";
@@ -5588,7 +5624,7 @@ export function registerCallbacks(bot: Telegraf): void {
         }
       }
       const payOkCaption = `✅ Оплата принята — ${adminTag}\nЗаказ <code>${payOkOrder.wbCode}</code> · ${payOkOrder.amount} R$`;
-      try { await ctx.editMessageCaption(payOkCaption, { parse_mode: "HTML" }); } catch { }
+      await closeAdminCard(ctx, payOkCaption);
       await ctx.answerCbQuery("✅ Оплата подтверждена").catch(() => {});
       return;
     }
@@ -5626,7 +5662,7 @@ export function registerCallbacks(bot: Telegraf): void {
           );
         } catch { }
       }
-      try { await ctx.editMessageCaption(`❌ Оплата отклонена — ${adminTag}`, { parse_mode: "HTML" }); } catch { }
+      await closeAdminCard(ctx, `❌ Оплата отклонена — ${adminTag}`);
       await ctx.answerCbQuery("Отклонено").catch(() => {});
       return;
     }
@@ -5753,6 +5789,10 @@ export function registerCallbacks(bot: Telegraf): void {
       });
 
       if (!paid) {
+        // Карточку всё равно закрываем: бонус за этот отзыв уже отдан, и
+        // живые кнопки на ней означают только «нажми ещё раз, чтобы снова
+        // ничего не произошло».
+        await closeAdminCard(ctx, `🎁 Бонус за отзыв уже был начислен ранее\nЗаказ <code>${(await orderCode(orderId)) ?? "?"}</code>`);
         await ctx.answerCbQuery("✅ Бонус уже начислен ранее").catch(() => {});
         return;
       }
@@ -5787,7 +5827,7 @@ export function registerCallbacks(bot: Telegraf): void {
       }
 
       const caption = `🎁 Бонус начислен — ${adminTag}\nЗаказ <code>${(await orderCode(orderId)) ?? "?"}</code>`;
-      try { await ctx.editMessageCaption(caption, { parse_mode: "HTML" }); } catch { }
+      await closeAdminCard(ctx, caption);
       await ctx.answerCbQuery("+100 R$ начислено").catch(() => {});
       return;
     }
