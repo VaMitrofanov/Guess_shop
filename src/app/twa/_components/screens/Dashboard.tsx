@@ -314,10 +314,16 @@ export default function Dashboard({
           </button>
         )}
 
+        {/* Когда висяки вынесены наверх, здесь остаётся живая часть очереди:
+            повторять «из них N висяков» второй строкой подряд незачем. */}
         {awaitingLink.total > 0 && (
           <button type="button" className="twa-quiet-row twa-press-sm" onClick={() => openOrders("AWAITING_LINK")}>
             <Clock3 size={16} />
-            <span>{awaitingLink.total} ждут ссылку{awaitingLink.stale > 0 ? ` · из них ${awaitingLink.stale} висяки` : ""}</span>
+            <span>
+              {awaitingLink.stale > 0
+                ? `Ещё ${awaitingLink.total - awaitingLink.stale} ждут ссылку · вся очередь ${awaitingLink.total}`
+                : `${awaitingLink.total} ждут ссылку · старейшая ${fmtAge(awaitingLink.oldestAt)}`}
+            </span>
             <ChevronRight size={17} />
           </button>
         )}
@@ -325,7 +331,12 @@ export default function Dashboard({
         {held.count > 0 && (
           <button type="button" className="twa-quiet-row is-ice twa-press-sm" onClick={() => openOrders("HELD")}>
             <Snowflake size={16} />
-            <span>{held.count} {plural(held.count, "заказ заморожен", "заказа заморожены", "заказов заморожены")} · {held.codes.join(", ")}</span>
+            {/* Кодов приходит не больше четырёх — строка на телефоне всё равно
+                не покажет больше. Хвост называем числом, а не молча режем. */}
+            <span>
+              {held.count} {plural(held.count, "заказ заморожен", "заказа заморожены", "заказов заморожены")} · {held.codes.join(", ")}
+              {held.count > held.codes.length && ` и ещё ${held.count - held.codes.length}`}
+            </span>
             <ChevronRight size={17} />
           </button>
         )}
