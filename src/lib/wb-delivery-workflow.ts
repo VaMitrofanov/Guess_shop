@@ -39,6 +39,7 @@ import {
   wbFunnelStep,
   wbGateDelivered,
   wbDeliveryStage,
+  wbMarketplaceTerminalFlags,
 } from "../../bots/shared/wb-delivery-policy";
 import { BuyoutError, resolveGamepass } from "@/lib/roblox-buyout";
 import { checkGamepassPrice, expectedGamepassPrice } from "@/lib/purchase-guard";
@@ -51,6 +52,25 @@ import { WB_QUEUE_SECTIONS, WB_STAGE_LABEL, WB_TERMINAL_STAGES, WB_URGENT_STAGES
 
 const db = prisma;
 const GUIDE_ORIGIN = (process.env.NEXT_PUBLIC_APP_URL || "https://robloxbank.ru").replace(/\/$/, "");
+
+/**
+ * На той же витрине WB продаётся не только коридор робуксов.
+ *
+ * Артикул `800code` — это продажа самих кодов активации: покупателю не нужен ни
+ * геймпасс, ни наш гейт, и выпустить гейт для него физически нельзя
+ * (`canIssueWbGate` отказывает без номинала). Такие заказы закрывались на WB
+ * как положено, но консоль всё равно поднимала их в «Нужна проверка» —
+ * `isWbBuyerUnserved` видит закрытый заказ без выданного гейта и не знает, что
+ * гейта здесь и не должно быть. Три вечных красных карточки, по которым нечего
+ * делать, — и доверие к разделу заканчивается.
+ *
+ * Признак принадлежности к коридору — номинал из каталога `WbProductCost`
+ * (`800code` в нём нет и не будет). Тот же предикат уже стоит в авто-гейте и
+ * авто-отгрузке (`bots/shared/wb-delivery-sync.ts`), так что консоль наконец
+ * смотрит на тот же набор заказов, что и воркеры. Строки в БД остаются: это
+ * настоящие продажи, они нужны в учёте, просто не в этом разделе.
+ */
+const NON_CORRIDOR_EXCLUDED = { denominationSnapshot: { not: null } } as const;
 
 /** The queue renders a dozen scalar fields per order. Loading the full chat and
  * audit trail for every row cost up to 150×160 joined rows on a poll that runs
@@ -341,6 +361,7 @@ async function loadOrders() {
     // `attention` by `wbCancelledCodeAtRisk`.
     where: {
       isTest: false,
+      ...NON_CORRIDOR_EXCLUDED,
       OR: [
         { cancelledAt: null },
         { cancelledAt: { not: null }, gateState: { in: ["ISSUED", "SENDING", "SENT", "SEND_UNKNOWN"] } },
@@ -436,6 +457,7 @@ export async function loadWbDeliveryQueueSnapshot(): Promise<WbDeliveryQueueSnap
   const orders = await db.wbMarketplaceOrder.findMany({
     where: {
       isTest: false,
+      ...NON_CORRIDOR_EXCLUDED,
       OR: [
         { cancelledAt: null },
         { cancelledAt: { not: null }, gateState: { in: ["ISSUED", "SENDING", "SENT", "SEND_UNKNOWN"] } },
@@ -443,7 +465,7 @@ export async function loadWbDeliveryQueueSnapshot(): Promise<WbDeliveryQueueSnap
     },
     select: {
       completedAt: true, cancelledAt: true, lastErrorCode: true,
-      chatState: true, gateState: true, supplierStatus: true,
+      chatState: true, gateState: true, supplierStatus: true, wbStatus: true,
       wbCreatedAt: true, firstSeenAt: true,
       wbCode: { select: { code: true } },
       deliverySecret: { select: { consumedAt: true, encryptedValue: true, expiresAt: true, failedAttempts: true } },
@@ -473,6 +495,9 @@ export async function loadWbDeliveryQueueSnapshot(): Promise<WbDeliveryQueueSnap
           internalStatus: row?.status ?? null,
           internalRobloxUsername: row?.robloxUsername ?? null,
         }),
+        // Закрыта ли доставка — вопрос к WB, а не к нашей воронке. Заказ «в
+        // нашем боте» доставку не держит: гейт до её закрытия не уходит.
+        closedAtWb: wbMarketplaceTerminalFlags(order.supplierStatus, order.wbStatus).completed,
         since: order.wbCreatedAt ?? order.firstSeenAt,
       };
     })
@@ -482,9 +507,16 @@ export async function loadWbDeliveryQueueSnapshot(): Promise<WbDeliveryQueueSnap
     ? iso(rows.reduce((min, row) => (row.since < min.since ? row : min)).since)
     : null;
 
+  const unclosed = open.filter((row) => !row.closedAtWb);
+  const needsUs = open.filter((row) => (WB_URGENT_STAGES as readonly string[]).includes(row.stage));
+
   return {
     open: open.length,
-    oldestAt: oldestOf(open),
+    unclosed: unclosed.length,
+    unclosedOldestAt: oldestOf(unclosed),
+    needsUs: needsUs.length,
+    needsUsOldestAt: oldestOf(needsUs),
+    inBot: open.filter((row) => row.stage === "in_bot" || row.stage === "link_sent").length,
     sections: WB_QUEUE_SECTIONS.map((section) => {
       const rows = open.filter((row) => (section.stages as readonly string[]).includes(row.stage));
       return { id: section.id, title: section.title, count: rows.length, oldestAt: oldestOf(rows) };

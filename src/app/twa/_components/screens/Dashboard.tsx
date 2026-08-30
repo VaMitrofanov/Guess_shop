@@ -48,7 +48,11 @@ interface Lane {
 
 interface DbsSnapshot {
   open: number;
-  oldestAt: string | null;
+  unclosed: number;
+  unclosedOldestAt: string | null;
+  needsUs: number;
+  needsUsOldestAt: string | null;
+  inBot: number;
   sections: { id: string; title: string; count: number; oldestAt: string | null }[];
   stages: { stage: string; label: string; count: number; oldestAt: string | null }[];
 }
@@ -137,6 +141,11 @@ export default function Dashboard({
   const { buyout, errors, awaitingLink, held, inbox, dbs } = data;
   const totalCodes = data.codes.reduce((sum, code) => sum + code.count, 0);
   const activeLanes = buyout.lanes.filter(lane => lane.orders > 0);
+  // «В боте» — не задача: покупатель уже с кодом идёт по нашей воронке, а
+  // доставка WB к этому моменту закрыта (иначе гейт бы не ушёл). Решения
+  // требует только незакрытая доставка или ход за нами.
+  const dbsNeedsDecision = Boolean(dbs && (dbs.unclosed > 0 || dbs.needsUs > 0));
+  const dbsOldest = dbs?.unclosed ? dbs.unclosedOldestAt : dbs?.needsUsOldestAt ?? null;
 
   function openOrders(tab: OrdersTab) {
     haptic.select();
@@ -240,18 +249,27 @@ export default function Dashboard({
       </section>
 
       {/* ── Требует решения ──────────────────────────────────────────────── */}
-      {(dbs?.open || errors.count > 0 || inbox.total > 0) ? (
+      {(dbsNeedsDecision || errors.count > 0 || inbox.total > 0) ? (
         <>
           <div className="twa-section-label">Требует решения</div>
           <div className="twa-inset-group twa-action-list">
-            {dbs && dbs.open > 0 && (
+            {/* Незакрытая доставка бьёт всё остальное: там висят деньги WB.
+                Если доставка закрыта, но ход за нами (проверка, полученный код,
+                готовый гейт) — говорим об этом, а не о доставке. */}
+            {dbs && dbsNeedsDecision && (
               <button type="button" className="twa-inset-row twa-press-sm" onClick={() => { haptic.select(); onOpenDelivery?.(null); }}>
                 <span className="twa-result-icon is-delivery"><Truck size={21} /></span>
                 <div>
-                  <strong>WB Доставка · {dbs.open} без закрытой доставки</strong>
+                  <strong>
+                    {dbs.unclosed > 0
+                      ? `WB Доставка · ${dbs.unclosed} не ${plural(dbs.unclosed, "закрыт", "закрыты", "закрыты")} на WB`
+                      : `WB Доставка · ${dbs.needsUs} ${plural(dbs.needsUs, "ждёт", "ждут", "ждут")} нашего хода`}
+                  </strong>
                   <small>
-                    {dbs.sections.filter(section => section.count > 0).map(section => `${section.title} ${section.count}`).join(" · ") || "в работе"}
-                    {dbs.oldestAt && <> · старейший <b style={{ color: ageColor(dbs.oldestAt) }}>{fmtAge(dbs.oldestAt)}</b></>}
+                    {dbs.stages
+                      .filter(stage => stage.stage !== "in_bot" && stage.stage !== "link_sent")
+                      .map(stage => `${stage.label} ${stage.count}`).join(" · ") || "в работе"}
+                    {dbsOldest && <> · старейший <b style={{ color: ageColor(dbsOldest) }}>{fmtAge(dbsOldest)}</b></>}
                   </small>
                 </div>
                 <ChevronRight size={20} />
@@ -303,6 +321,16 @@ export default function Dashboard({
 
       {/* ── Тихие строки: видно, что есть, но это не невыполненная задача ─── */}
       <div className="twa-quiet-rows">
+        {/* Код у покупателя, доставка закрыта, он идёт по нашей воронке.
+            Это ход покупателя, а не наш — в «Требует решения» ему не место. */}
+        {dbs && dbs.inBot > 0 && (
+          <button type="button" className="twa-quiet-row twa-press-sm" onClick={() => { haptic.select(); onOpenDelivery?.("inBot"); }}>
+            <Truck size={16} />
+            <span>{dbs.inBot} в боте · код выдан, доставка закрыта</span>
+            <ChevronRight size={17} />
+          </button>
+        )}
+
         {awaitingLink.stale > 0 && (
           <button type="button" className="twa-quiet-row is-loud twa-press-sm" onClick={() => openOrders("STALE_LINK")}>
             <Clock3 size={16} />

@@ -11,8 +11,11 @@ export async function GET(req: NextRequest) {
   if (cached && Date.now() - cached.ts < TTL) {
     return NextResponse.json({ count: cached.count });
   }
+  // `denominationSnapshot` — тот же признак «наш коридор», что в консоли
+  // доставки и в воркерах: продажа самих кодов активации (`800code`) гейта не
+  // требует и в бейдж попадать не должна.
   const count = await prisma.wbMarketplaceOrder.count({
-    where: { isTest: false, completedAt: null, cancelledAt: null },
+    where: { isTest: false, completedAt: null, cancelledAt: null, denominationSnapshot: { not: null } },
   });
   cached = { count, ts: Date.now() };
   return NextResponse.json({ count });
