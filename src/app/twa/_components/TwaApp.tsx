@@ -96,8 +96,15 @@ export default function TwaApp() {
   });
   // Ф2: виджет «Ошибки» дашборда «Свои» открывает Заказы сразу на вкладке ERROR.
   const [ordersTabPreload,   setOrdersTabPreload]   = useState<string>("");
+  // «Новый заказ» на главной раньше вёл на вкладку NEW (лента заказов, ждущих
+  // ссылку) — экран менялся, ничего не происходило. Теперь тот же тап открывает
+  // форму создания, которая уже живёт в Заказах.
+  const [ordersCreatePreload, setOrdersCreatePreload] = useState<"manual" | "direct" | null>(null);
   const [wbTabPreload,       setWbTabPreload]       = useState<"analytics" | "reviews">("analytics");
   const [deliveryFocusPreload, setDeliveryFocusPreload] = useState<WbDeliveryFocus | null>(null);
+  // Заказ DBS, найденный из общего поиска в «Заказах», открывается на своём
+  // экране с тем же запросом — иначе его пришлось бы вводить второй раз.
+  const [deliveryQueryPreload, setDeliveryQueryPreload] = useState<string>("");
 
   useEffect(() => {
     let cancelled = false;
@@ -357,13 +364,13 @@ export default function TwaApp() {
       <div className="twa-liquid-content" style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
         {screen === "dashboard"  && <Dashboard      {...sp}
           onOpenOrders={(query, tab) => { setOrderQueryPreload(query ?? ""); setOrdersTabPreload(tab ?? ""); setScreen("orders"); }}
-          onOpenAccount={() => setScreen("account")}
           onOpenInbox={() => { setWbTabPreload("reviews"); setScreen("wb"); }}
-          onOpenDelivery={(focus) => { setDeliveryFocusPreload(focus ?? null); setScreen("delivery"); }}
+          onOpenDelivery={(focus) => { setDeliveryFocusPreload(focus ?? null); setDeliveryQueryPreload(""); setScreen("delivery"); }}
+          onCreateOrder={(mode) => { setOrdersCreatePreload(mode); setScreen("orders"); }}
         />}
-        {screen === "orders"     && <OrdersScreen   {...sp} onActionDone={refreshBadge} initialQuery={orderQueryPreload} initialTab={ordersTabPreload} onInitialQueryConsumed={() => { setOrderQueryPreload(""); setOrdersTabPreload(""); }} />}
+        {screen === "orders"     && <OrdersScreen   {...sp} onActionDone={refreshBadge} initialQuery={orderQueryPreload} initialTab={ordersTabPreload} initialCreate={ordersCreatePreload} onInitialQueryConsumed={() => { setOrderQueryPreload(""); setOrdersTabPreload(""); setOrdersCreatePreload(null); }} onOpenDelivery={(q) => { setDeliveryQueryPreload(q); setDeliveryFocusPreload(null); setScreen("delivery"); }} />}
         {screen === "wb"         && <WbScreen       {...sp} initialTab={wbTabPreload} />}
-        {screen === "delivery"   && <WbDeliveryScreen {...sp} initialFocus={deliveryFocusPreload} />}
+        {screen === "delivery"   && <WbDeliveryScreen {...sp} initialFocus={deliveryFocusPreload} initialQuery={deliveryQueryPreload} />}
         {screen === "account"    && <AccountScreen  {...sp} onOpenErrors={() => { setOrdersTabPreload("ERROR"); setScreen("orders"); }} />}
         {screen === "settings"   && <SettingsScreen  {...sp} onNavigate={(s) => setScreen(s as Screen)} />}
         {screen === "system"     && <SystemScreen    {...sp} />}

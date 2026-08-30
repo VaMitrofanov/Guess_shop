@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { PAID_BUYOUT_SCOPE } from "@/lib/buyout-queue";
-import { NOT_HELD } from "@/lib/order-hold";
+import { PAID_BUYOUT_SCOPE, PAID_BUYOUT_SQL } from "@/lib/buyout-queue";
+import { NOT_HELD, NOT_HELD_SQL } from "@/lib/order-hold";
 import { BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, expectedGamepassPrice } from "@/lib/purchase-guard";
 import { parseGamepassId } from "@/lib/roblox-buyout";
 
@@ -17,7 +17,7 @@ import { parseGamepassId } from "@/lib/roblox-buyout";
 
 export type FilterTab =
   | "WORK" | "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW"
-  | "ERROR" | "AWAITING_LINK" | "DONE" | "REJECTED" | "FAVORITES" | "ATTENTION"
+  | "ERROR" | "AWAITING_LINK" | "STALE_LINK" | "DONE" | "REJECTED" | "FAVORITES" | "ATTENTION"
   | "HELD";
 
 /* Заморозка — не двенадцатый статус, а фильтр по одному полю: логика вкладок
@@ -32,6 +32,50 @@ export const NEW_CUTOFF_HOURS = 40;
 export const ATTENTION_BUYOUT_HOURS = 12;
 /** Столько дней ждём ссылку, прежде чем поднять тревогу. */
 export const ATTENTION_LINK_DAYS = 5;
+/**
+ * После стольких дней «ждёт ссылку» превращается в висяк.
+ *
+ * Бот шлёт покупателю три напоминания — 3 ч, 24 ч, 72 ч (`AWAITING_SCHEDULE` в
+ * `bots/tg/crons.ts`), и на этом замолкает навсегда. Дальше очередь копит
+ * заказы, по которым уже никто ничего не сделает, и они утяжеляют «Ждут
+ * ссылку» ровно настолько, чтобы туда перестали заглядывать. Две недели —
+ * вдвое больше, чем нужно последнему напоминанию, чтобы сработать.
+ */
+export const STALE_LINK_DAYS = 14;
+
+/**
+ * Ветка `BUYOUT` из `buildTabWhere`, но для сырых SQL-счётчиков.
+ *
+ * До 30.08.2026 главная и вкладка «К выкупу» считали очередь по-разному: вкладка
+ * включала починимые `ERROR` (рег. цена, Roblox+), дашборд — нет, и два экрана
+ * показывали разные числа без всякой причины. Предикат живёт здесь ровно затем,
+ * чтобы третьего варианта не появилось.
+ */
+export const BUYOUT_QUEUE_SQL = `
+  ${PAID_BUYOUT_SQL}
+  AND ${NOT_HELD_SQL}
+  AND "orderSource" <> 'AVITO'
+  AND "isFavorite" = false
+  AND (
+    status IN ('PENDING','IN_PROGRESS')
+    OR (status = 'ERROR' AND "buyoutErrorCode" IN ('${BUYOUT_ERROR_REGIONAL_PRICE}','${BUYOUT_ERROR_ROBLOX_PLUS_FLOW}'))
+  )
+`;
+
+/**
+ * Откуда пришёл заказ в очереди выкупа — три взаимоисключающие полосы.
+ *
+ * `SITE` и `DIRECT` — обе «прямые» (сайт создаёт заказ с `isDirectOrder = true`),
+ * поэтому ось — `isDirectOrder`, а не перечисление источников: новый прямой
+ * канал попадёт в свою полосу сам. `AVITO` в очередь выкупа не входит вовсе.
+ */
+export const BUYOUT_LANE_SQL = `
+  CASE
+    WHEN "orderSource" = 'WB_DBS' THEN 'WB_DBS'
+    WHEN "isDirectOrder" = true THEN 'DIRECT'
+    ELSE 'WB'
+  END
+`;
 
 export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
   const cutoff = new Date(Date.now() - NEW_CUTOFF_HOURS * 3600_000);
@@ -69,6 +113,15 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
       return { status: "ERROR", isFavorite: false, ...NOT_HELD };
     case "AWAITING_LINK":
       return { status: "AWAITING_GAMEPASS", createdAt: { lte: cutoff }, isFavorite: false, ...NOT_HELD };
+    // Подмножество «Ждут ссылку», а не отдельная сущность: те же заказы, по
+    // которым бот уже отмолчал все три напоминания.
+    case "STALE_LINK":
+      return {
+        status: "AWAITING_GAMEPASS",
+        createdAt: { lte: new Date(Date.now() - STALE_LINK_DAYS * 24 * 3600_000) },
+        isFavorite: false,
+        ...NOT_HELD,
+      };
     case "DONE":
       return { status: "COMPLETED" };
     case "REJECTED":
@@ -102,7 +155,7 @@ export function orderByForTab(
 ): Prisma.WbOrderOrderByWithRelationInput | Prisma.WbOrderOrderByWithRelationInput[] {
   if (tab === "WORK") return [{ updatedAt: "desc" }, { createdAt: "desc" }];
   if (tab === "BUYOUT" || tab === "DIRECT" || tab === "AVITO") return [{ pendingAt: "asc" }, { createdAt: "asc" }];
-  if (tab === "ERROR" || tab === "AWAITING_LINK" || tab === "ATTENTION") return { createdAt: "asc" };
+  if (tab === "ERROR" || tab === "AWAITING_LINK" || tab === "STALE_LINK" || tab === "ATTENTION") return { createdAt: "asc" };
   // Свежая заморозка сверху: её причину чаще всего и уточняют.
   if (tab === "HELD") return { heldAt: "desc" };
   return { createdAt: "desc" };

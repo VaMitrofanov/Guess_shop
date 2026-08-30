@@ -18,7 +18,7 @@ const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
 
 /** Вкладки, из которых замороженный заказ обязан исчезнуть. */
 const WORK_TABS: FilterTab[] = [
-  "WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "ATTENTION",
+  "WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "ATTENTION",
 ];
 
 describe("границы очередей", () => {
@@ -53,7 +53,7 @@ describe("сырые SQL-счётчики зеркалят buildTabWhere", () =>
   });
 
   it("рабочие счётчики фильтруют заморозку", () => {
-    for (const tab of ["WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "ATTENTION"]) {
+    for (const tab of ["WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "ATTENTION"]) {
       const line = route.split("\n").find((l) => l.includes(`AS "${tab}"`) || l.includes(`))::int AS "${tab}"`));
       expect(line).toBeDefined();
     }

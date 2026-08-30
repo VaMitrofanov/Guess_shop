@@ -74,13 +74,15 @@ const FOCUS: Record<WbDeliveryFocus, { label: string; empty: string; match: (ord
   inBot:        { label: "В нашем боте",   empty: "В боте сейчас пусто",    match: (order) => order.stage === "in_bot" },
 };
 
-export default function WbDeliveryScreen({ token, initialFocus }: { token: string; initialFocus?: WbDeliveryFocus | null }) {
+export default function WbDeliveryScreen({ token, initialFocus, initialQuery }: { token: string; initialFocus?: WbDeliveryFocus | null; initialQuery?: string }) {
   const [data, setData] = useState<WbDeliveryOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<WbDeliveryAction | null>(null);
-  const [tab, setTab] = useState<"urgent" | "active" | "done">(initialFocus ? "active" : "urgent");
+  // Пришли по найденному заказу — «Срочные» его почти наверняка не содержат,
+  // и поиск выглядел бы пустым. Показываем весь список.
+  const [tab, setTab] = useState<"urgent" | "active" | "done">(initialFocus || initialQuery ? "active" : "urgent");
   const [focus, setFocus] = useState<WbDeliveryFocus | null>(initialFocus ?? null);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery ?? "");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [manualCode, setManualCode] = useState("");
   const [message, setMessage] = useState("");

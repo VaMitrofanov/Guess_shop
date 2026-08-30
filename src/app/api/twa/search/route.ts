@@ -66,6 +66,27 @@ export async function GET(req: NextRequest) {
     clauses.push({ gamepassId: digits });
   }
 
+  // Заказы DBS живут в своей таблице и до 30.08.2026 искались только со своего
+  // экрана: номер `#31401299` и имя покупателя из чата WB не находились больше
+  // ниоткуда. Поиск один на приложение — значит и они в нём.
+  const dbsPromise = prisma.wbMarketplaceOrder.findMany({
+    where: {
+      isTest: false,
+      OR: [
+        ...(digits.length >= 3 ? [{ wbOrderId: { contains: digits } }] : []),
+        { buyerName: { contains: clean, mode: "insensitive" as const } },
+        { wbCode: { code: { contains: query.toUpperCase() } } },
+      ],
+    },
+    orderBy: { firstSeenAt: "desc" },
+    take: 5,
+    select: {
+      id: true, wbOrderId: true, buyerName: true, supplierStatus: true,
+      denominationSnapshot: true, completedAt: true, cancelledAt: true,
+      wbCode: { select: { code: true } },
+    },
+  }).catch(() => []);
+
   const ordersPromise = prisma.wbOrder.findMany({
     where: { isTest: false, OR: clauses },
     orderBy: { createdAt: "desc" },
@@ -107,7 +128,7 @@ export async function GET(req: NextRequest) {
     }
   })();
 
-  const [orders, gamepasses] = await Promise.all([ordersPromise, livePromise]);
+  const [orders, gamepasses, dbs] = await Promise.all([ordersPromise, livePromise, dbsPromise]);
   const matchedOrders = orders.map(order => ({
     ...order,
     source: "db" as const,
@@ -117,7 +138,21 @@ export async function GET(req: NextRequest) {
     query,
     orders: matchedOrders,
     gamepasses: gamepasses.map(pass => ({ ...pass, source: "live" as const })),
-    counts: { all: matchedOrders.length + gamepasses.length, orders: matchedOrders.length, gamepasses: gamepasses.length },
+    dbs: dbs.map(order => ({
+      id: order.id,
+      wbOrderId: order.wbOrderId,
+      buyerName: order.buyerName,
+      supplierStatus: order.supplierStatus,
+      denomination: order.denominationSnapshot,
+      code: order.wbCode?.code ?? null,
+      closed: Boolean(order.completedAt || order.cancelledAt),
+    })),
+    counts: {
+      all: matchedOrders.length + gamepasses.length + dbs.length,
+      orders: matchedOrders.length,
+      gamepasses: gamepasses.length,
+      dbs: dbs.length,
+    },
     partialErrors,
   });
 }

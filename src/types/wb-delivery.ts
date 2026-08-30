@@ -126,6 +126,25 @@ export type WbDeliveryOverview = {
   orders: WbDeliveryOrderDto[];
 };
 
+/**
+ * Срез очереди DBS для главной: «сколько висит без закрытой доставки и на каком
+ * этапе». Считается тем же `wbDeliveryStage`, что и консоль доставки, но без
+ * чатов, аудита и расшифровки секретов — экран показывает числа, а не заказы.
+ *
+ * «Без закрытой доставки» = этап не `complete` и не `cancelled`: доставку
+ * закрывает наш вызов `receive`, и до него обязательство перед покупателем
+ * висит независимо от того, что показывает кабинет WB.
+ */
+export type WbDeliveryQueueSnapshot = {
+  open: number;
+  /** Самый старый открытый заказ — по времени заказа у WB, не по нашему первому взгляду. */
+  oldestAt: string | null;
+  /** Кто должен следующий ход: `ours` / `buyer` / `bot` (WB_QUEUE_SECTIONS). */
+  sections: { id: string; title: string; count: number; oldestAt: string | null }[];
+  /** Этапы внутри «Наш ход» — по ним и открывается нужная очередь. */
+  stages: { stage: string; label: string; count: number; oldestAt: string | null }[];
+};
+
 export type WbDeliveryOrderResponse = {
   generatedAt: string;
   order: WbDeliveryOrderDto;

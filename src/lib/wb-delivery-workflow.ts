@@ -8,6 +8,7 @@ import type {
   WbDeliveryActionResponse,
   WbDeliveryOrderDto,
   WbDeliveryOverview,
+  WbDeliveryQueueSnapshot,
 } from "@/types/wb-delivery";
 import {
   assertBulkOrderSucceeded,
@@ -46,7 +47,7 @@ import { generateWbActivationCode } from "../../bots/shared/wb-activation-code";
 import { wbCodeRequestMessage, wbGateMessage, wbGateUrl, wbSiblingPosition } from "../../bots/shared/wb-gate-link";
 import { isServiceOwned, linkWbOrderToBuyer, resolveBuyerUser } from "../../bots/shared/wb-buyer-link";
 import { notifyDbsBuyerUnlinked } from "../../bots/shared/wb-delivery-admin-notify";
-import { WB_TERMINAL_STAGES, WB_URGENT_STAGES } from "@/lib/wb-delivery-labels";
+import { WB_QUEUE_SECTIONS, WB_STAGE_LABEL, WB_TERMINAL_STAGES, WB_URGENT_STAGES } from "@/lib/wb-delivery-labels";
 
 const db = prisma;
 const GUIDE_ORIGIN = (process.env.NEXT_PUBLIC_APP_URL || "https://robloxbank.ru").replace(/\/$/, "");
@@ -418,6 +419,82 @@ export async function loadWbDeliveryOverview(): Promise<WbDeliveryOverview> {
       completed: dtos.filter((order) => order.stage === "complete").length,
     },
     orders: dtos,
+  };
+}
+
+/**
+ * Лёгкий срез очереди DBS для главной.
+ *
+ * Отдельная функция, а не `loadWbDeliveryOverview()`: тот тянет 150 заказов с
+ * чатами и аудитом ради списка, а главной нужны только числа. Но этап считает
+ * тот же `wbDeliveryStage` — счётчик на главной и очередь, которую он
+ * открывает, обязаны говорить об одном и том же (ровно тем и болел прежний
+ * сырой SQL в `api/twa/dashboard`: он читал `chatState`/`gateState` напрямую и
+ * не знал ни про живой секрет, ни про внутренний заказ).
+ */
+export async function loadWbDeliveryQueueSnapshot(): Promise<WbDeliveryQueueSnapshot> {
+  const orders = await db.wbMarketplaceOrder.findMany({
+    where: {
+      isTest: false,
+      OR: [
+        { cancelledAt: null },
+        { cancelledAt: { not: null }, gateState: { in: ["ISSUED", "SENDING", "SENT", "SEND_UNKNOWN"] } },
+      ],
+    },
+    select: {
+      completedAt: true, cancelledAt: true, lastErrorCode: true,
+      chatState: true, gateState: true, supplierStatus: true,
+      wbCreatedAt: true, firstSeenAt: true,
+      wbCode: { select: { code: true } },
+      deliverySecret: { select: { consumedAt: true, encryptedValue: true, expiresAt: true, failedAttempts: true } },
+    },
+    take: 300,
+  });
+
+  const codes = orders.flatMap((order) => order.wbCode?.code ? [order.wbCode.code] : []);
+  const internal = codes.length
+    ? new Map((await db.wbOrder.findMany({
+      where: { wbCode: { in: codes } },
+      select: { wbCode: true, status: true, robloxUsername: true },
+    })).map((row) => [row.wbCode, row]))
+    : new Map();
+
+  // Возраст считаем от времени заказа у WB: `firstSeenAt` — это когда его
+  // заметил наш воркер, и после простоя воркера старый заказ выглядел бы
+  // новорождённым (та же причина, по которой на нём не строят авто-закрытие).
+  const open = orders
+    .map((order) => {
+      const row = order.wbCode?.code ? internal.get(order.wbCode.code) : null;
+      return {
+        stage: wbDeliveryStage({
+          ...order,
+          hasLiveSecret: wbDeliverySecretIsLive(order.deliverySecret),
+          secretFailedAttempts: order.deliverySecret?.failedAttempts ?? 0,
+          internalStatus: row?.status ?? null,
+          internalRobloxUsername: row?.robloxUsername ?? null,
+        }),
+        since: order.wbCreatedAt ?? order.firstSeenAt,
+      };
+    })
+    .filter((row) => !WB_TERMINAL_STAGES.includes(row.stage));
+
+  const oldestOf = (rows: { since: Date }[]) => rows.length
+    ? iso(rows.reduce((min, row) => (row.since < min.since ? row : min)).since)
+    : null;
+
+  return {
+    open: open.length,
+    oldestAt: oldestOf(open),
+    sections: WB_QUEUE_SECTIONS.map((section) => {
+      const rows = open.filter((row) => (section.stages as readonly string[]).includes(row.stage));
+      return { id: section.id, title: section.title, count: rows.length, oldestAt: oldestOf(rows) };
+    }),
+    stages: (Object.keys(WB_STAGE_LABEL) as (keyof typeof WB_STAGE_LABEL)[])
+      .map((stage) => {
+        const rows = open.filter((row) => row.stage === stage);
+        return { stage, label: WB_STAGE_LABEL[stage], count: rows.length, oldestAt: oldestOf(rows) };
+      })
+      .filter((row) => row.count > 0),
   };
 }
 

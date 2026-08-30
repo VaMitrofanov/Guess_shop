@@ -1,6 +1,7 @@
 "use client";
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { C, SHADOW, tabular, MONO } from "../theme";
+import { ageColor, fmtAge } from "../age";
 import { haptic } from "../haptics";
 import BottomSheet from "../BottomSheet";
 import { toast } from "../Toast";
@@ -13,7 +14,11 @@ const ICE = C.ice;
 
 type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED" | "ERROR";
 // ATTENTION — не чип, а серверная выборка «Требуют внимания» для вкладки «Все».
-type FilterTab = "WORK" | "ALL" | "BUYOUT" | "DIRECT" | "AVITO" | "NEW" | "ERROR" | "AWAITING_LINK" | "DONE" | "REJECTED" | "FAVORITES" | "ATTENTION" | "HELD";
+/* Список вкладок — из `@/lib/order-queue`, где живут их границы. Копия здесь
+   уже один раз разошлась с сервером; `import type` стирается при компиляции,
+   поэтому prisma в клиентский бандл не попадает (значение отсюда импортировать
+   нельзя). */
+import type { FilterTab } from "@/lib/order-queue";
 
 // «Ждут ссылку»: сервер отдаёт первые N — самые свежие, дальше хвост от самых
 // старых (см. fetchAwaitingLinkHybrid в api/twa/orders). Здесь — для разделителя.
@@ -27,6 +32,30 @@ interface SplitPart {
   position: number;
   chargedPrice: number | null;
   purchasedAt: string | null;
+}
+
+/** Живая часть поиска: Roblox отвечает медленнее БД, поэтому приходит отдельно. */
+interface LiveGamepass {
+  gamepassId: number;
+  name: string;
+  price: number;
+  sellerName: string | null;
+  isForSale: boolean;
+  matchReason: string;
+}
+interface LiveDbsOrder {
+  id: string;
+  wbOrderId: string;
+  buyerName: string | null;
+  supplierStatus: string;
+  denomination: number | null;
+  code: string | null;
+  closed: boolean;
+}
+interface LiveSearch {
+  gamepasses: LiveGamepass[];
+  dbs: LiveDbsOrder[];
+  partialErrors: string[];
 }
 
 interface Order {
@@ -55,6 +84,8 @@ interface Order {
   /** Оплата прямого заказа подтверждена. null у прямого = вне очереди выкупа. */
   paidAt: string | null;
   takenAt: string | null;
+  /** Сколько напоминаний «создай геймпасс» бот уже отправил (0…3, потолок). */
+  remindersSent?: number | null;
   robloxUsername: string | null;
   probableNick: string | null;
   gpWatchNotifiedPassId: string | null;
@@ -133,6 +164,7 @@ const TAB_META: Record<FilterTab, { label: string; color: string }> = {
   NEW:           { label: "Новые",          color: C.accent },
   ERROR:         { label: "Ошибка",         color: C.red },
   AWAITING_LINK: { label: "Ждут ссылку",    color: C.yellow },
+  STALE_LINK:    { label: "Висяки",          color: C.orange },
   DONE:          { label: "Готово",          color: C.green },
   REJECTED:      { label: "Отменены",        color: C.red },
   FAVORITES:     { label: "Избранное",      color: "#ffd60a" },
@@ -140,6 +172,10 @@ const TAB_META: Record<FilterTab, { label: string; color: string }> = {
   HELD:          { label: "Заморожены",      color: ICE },
 };
 
+/* Авито здесь нет: канал закрыт, и чип с нулём занимал место в ряду, который
+   и так не влезает в экран. Вкладка жива и показывается сама, пока в ней
+   остаются заказы (`SELF_RETIRING_FILTERS`) — старые заказы не должны стать
+   недостижимыми из-за того, что мы перестали продавать. */
 const FILTERS: { id: FilterTab }[] = [
   { id: "BUYOUT" },
   { id: "HELD" },
@@ -148,10 +184,15 @@ const FILTERS: { id: FilterTab }[] = [
   { id: "NEW" },
   { id: "ERROR" },
   { id: "AWAITING_LINK" },
+  { id: "STALE_LINK" },
   { id: "DONE" },
   { id: "REJECTED" },
   { id: "FAVORITES" },
 ];
+
+/** Чипы, которые исчезают из ряда при нулевом счётчике вместо того, чтобы
+    занимать место навсегда. */
+const SELF_RETIRING_FILTERS = new Set<FilterTab>(["AVITO", "STALE_LINK", "HELD"]);
 
 const ORDER_MODES: { id: "work" | "all" | "history"; label: string; filter: FilterTab; countKey: FilterTab }[] = [
   { id: "work", label: "В работе", filter: "WORK", countKey: "WORK" },
@@ -159,7 +200,7 @@ const ORDER_MODES: { id: "work" | "all" | "history"; label: string; filter: Filt
   { id: "history", label: "История", filter: "DONE", countKey: "DONE" },
 ];
 
-const WORK_FILTERS = new Set<FilterTab>(["WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "REJECTED", "FAVORITES", "ATTENTION", "HELD"]);
+const WORK_FILTERS = new Set<FilterTab>(["WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "REJECTED", "FAVORITES", "ATTENTION", "HELD"]);
 /* Очереди, где выгрузка ID геймпассов имеет смысл: заказ уже с геймпассом и ждёт выкупа.
    Список синхронен `GAMEPASS_EXPORT_TABS` в `api/twa/orders`. */
 const EXPORTABLE_TABS = new Set<FilterTab>(["BUYOUT", "DIRECT", "AVITO", "WORK", "ERROR", "ATTENTION"]);
@@ -187,23 +228,6 @@ function orderTabBadge(order: Order): { label: string; color: string } | null {
 }
 
 /* ───────────── Time formatting ───────────── */
-function fmtAge(iso: string): string {
-  const mins = (Date.now() - new Date(iso).getTime()) / 60000;
-  if (mins < 1) return "< 1 мин";
-  if (mins < 60) return `${Math.round(mins)} мин`;
-  const h = Math.floor(mins / 60);
-  const d = Math.floor(h / 24);
-  if (d === 0) return `${h}ч`;
-  const rem = h % 24;
-  return rem > 0 ? `${d}д ${rem}ч` : `${d}д`;
-}
-function ageColor(iso: string): string {
-  const mins = (Date.now() - new Date(iso).getTime()) / 60000;
-  if (mins < 120) return C.green;
-  if (mins < 720) return C.yellow;
-  if (mins < 1440) return C.orange;
-  return C.red;
-}
 
 function fallbackCopy(text: string) {
   const el = document.createElement("textarea");
@@ -2081,6 +2105,16 @@ function OrderCard({
               🛒 {fmtAge(order.pendingAt!)}
             </span>
           )}
+          {/* Бот шлёт три напоминания (3 ч / 24 ч / 72 ч) и замолкает навсегда.
+              «3/3» значит, что автоматика своё отработала и дальше заказ либо
+              дожимают руками, либо он висяк — раньше это было видно только в БД. */}
+          {order.status === "AWAITING_GAMEPASS" && (order.remindersSent ?? 0) > 0 && (
+            <span
+              title="Напоминаний отправлено"
+              style={{ fontSize: 14, fontWeight: 600, color: (order.remindersSent ?? 0) >= 3 ? C.orange : C.textTertiary, ...tabular }}>
+              🔔 {order.remindersSent}/3
+            </span>
+          )}
           <span style={{ fontSize: 14, color: C.textTertiary }}>—</span>
           <span style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, ...tabular }}>
             {displayAmount.toLocaleString("ru-RU")}
@@ -2713,13 +2747,17 @@ function SearchProfileCard({ user, orders }: {
    Main screen
    ───────────────────────────────────────────────────────────────────────── */
 export default function OrdersScreen({
-  token, onActionDone, initialQuery, initialTab, onInitialQueryConsumed,
+  token, onActionDone, initialQuery, initialTab, initialCreate, onInitialQueryConsumed, onOpenDelivery,
 }: {
   token: string;
   onActionDone?: () => void;
   initialQuery?: string;
+  /** Найденный заказ DBS открывается на своём экране — с тем же запросом. */
+  onOpenDelivery?: (query: string) => void;
   /** Ф2: открыть сразу на вкладке (виджет «Ошибки» дашборда «Свои» → ERROR). */
   initialTab?: string;
+  /** «Новый заказ» с главной: открыть форму создания сразу, а не вкладку NEW. */
+  initialCreate?: "manual" | "direct" | null;
   onInitialQueryConsumed?: () => void;
 }) {
   const [filter, setFilter] = useState<FilterTab>(initialQuery ? "ALL" : (initialTab as FilterTab) || "WORK");
@@ -2729,12 +2767,22 @@ export default function OrdersScreen({
   const [allView, setAllView] = useState<"attention" | "list">("list");
   // П4: модалка «➕ Создать заказ» (ручной заказ целиком из TWA).
   const [exportOpen, setExportOpen] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createMode, setCreateMode] = useState<"manual" | "direct">("manual");
+  const [createOpen, setCreateOpen] = useState(!!initialCreate);
+  const [createMode, setCreateMode] = useState<"manual" | "direct">(initialCreate === "direct" ? "direct" : "manual");
+  // Предзаполнение формы создания из найденного геймпасса: «нашёл пасс ника —
+  // сразу завёл на него заказ», без переписывания ссылки руками.
+  const [createPrefill, setCreatePrefill] = useState<{ url?: string; nick?: string; amount?: number } | null>(null);
+  // Живой поиск по Roblox и по заказам DBS. Раньше это жило на главной в
+  // отдельной шторке-досье, где с результатом нельзя было ничего сделать;
+  // теперь оно приходит в ту же ленту, где у заказа есть все кнопки.
+  const [live, setLive] = useState<LiveSearch | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [dashExpanded, setDashExpanded] = useState(false);
+  // Виджеты очередей открыты по умолчанию: это первое, зачем сюда заходят
+  // (сколько к выкупу, на сколько робуксов, сколько ждёт старейший). «Свернуть»
+  // остаётся — но сворачивание не запоминается, каждый вход начинается с фактов.
+  const [dashExpanded, setDashExpanded] = useState(true);
   useEffect(() => {
-    if (initialQuery || initialTab) onInitialQueryConsumed?.();
+    if (initialQuery || initialTab || initialCreate) onInitialQueryConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [data, setData] = useState<OrdersData | null>(null);
@@ -2812,6 +2860,29 @@ export default function OrdersScreen({
   useEffect(() => {
     if (filter === "DIRECT" && !query) fetchIntents();
   }, [filter, query, fetchIntents]);
+
+  // Живой поиск (Roblox + заказы DBS) идёт своим запросом и своим темпом:
+  // Roblox отвечает секундами, а лента заказов обязана появиться сразу.
+  useEffect(() => {
+    const value = query.trim();
+    if (value.length < 3) { setLive(null); return; }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/twa/search?q=${encodeURIComponent(value)}`, {
+          headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
+        });
+        if (!response.ok) return;
+        const payload = await response.json();
+        setLive({
+          gamepasses: payload.gamepasses ?? [],
+          dbs: payload.dbs ?? [],
+          partialErrors: payload.partialErrors ?? [],
+        });
+      } catch { /* отменённый или упавший live-поиск ленту не ломает */ }
+    }, 420);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [query, token]);
 
   const handleIntentGone = useCallback((id: string, result: "consumed" | "rejected") => {
     setIntents(prev => prev.filter(i => i.id !== id));
@@ -3221,6 +3292,11 @@ export default function OrdersScreen({
             { id: modeDefault, label: "Всё", color: C.textPrimary },
             ...FILTERS
               .filter(f => activeMode === "work" ? f.id !== "DONE" && f.id !== "REJECTED" : f.id !== "DONE")
+              // Пустой чип уходит из ряда, но не из приложения: вкладка
+              // остаётся доступной, как только в ней снова что-то появится.
+              // Активный чип не прячем даже пустым — иначе экран прыгает
+              // под пальцем ровно в тот момент, когда очередь дочищена.
+              .filter(f => !SELF_RETIRING_FILTERS.has(f.id) || filter === f.id || (data?.counts?.[f.id] ?? 0) > 0)
               .map(f => ({ id: f.id, label: TAB_META[f.id].label, color: TAB_META[f.id].color })),
           ];
           return (
@@ -3314,7 +3390,7 @@ export default function OrdersScreen({
                   counts={data.counts}
                   sums={data.sums}
                   oldest={data.oldest}
-                  onTap={(f) => { setFilter(f); setDashExpanded(false); }}
+                  onTap={(f) => setFilter(f)}
                   groups={groups}
                 />
               )}
@@ -3409,6 +3485,68 @@ export default function OrdersScreen({
             {query && searchMode === "profile" && allOrders.length > 0 && (
               <SearchProfileCard user={allOrders[0].user} orders={allOrders} />
             )}
+
+            {/* Заказы WB Доставки — из другой таблицы, поэтому отдельной секцией.
+                Тап уводит на экран доставки с тем же запросом: действия DBS
+                живут там и дублировать их здесь нельзя. */}
+            {query && live && live.dbs.length > 0 && (
+              <div className="twa-live-group">
+                <span>WB Доставка · {live.dbs.length}</span>
+                {live.dbs.map(order => (
+                  <button
+                    key={order.id}
+                    type="button"
+                    className="twa-live-row twa-press-sm"
+                    onClick={() => { haptic.select(); onOpenDelivery?.(query); }}
+                  >
+                    <b>{order.buyerName ?? `WB #${order.wbOrderId}`}</b>
+                    <small>
+                      #{order.wbOrderId}
+                      {order.denomination ? ` · ${order.denomination} R$` : ""}
+                      {order.code ? ` · ${order.code}` : ""}
+                      {order.closed ? " · закрыт" : ` · ${order.supplierStatus}`}
+                    </small>
+                    <span>›</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* For-sale геймпассы ника прямо из Roblox. На главной этот же
+                список был тупиком — тап уводил на экран Аккаунта и там ничего
+                не делал. Здесь он открывает форму заказа уже заполненной. */}
+            {query && live && live.gamepasses.length > 0 && (
+              <div className="twa-live-group">
+                <span>Геймпассы Roblox · {live.gamepasses.length}</span>
+                {live.gamepasses.map(pass => (
+                  <div key={pass.gamepassId} className="twa-live-row is-static">
+                    <b>{pass.name}</b>
+                    <small>ID {pass.gamepassId} · {pass.price.toLocaleString("ru-RU")} R$ · {pass.sellerName ?? "Roblox"}</small>
+                    <button
+                      type="button"
+                      className="twa-live-cta twa-press-sm"
+                      onClick={() => {
+                        haptic.impact("light");
+                        setCreatePrefill({
+                          url: `https://www.roblox.com/game-pass/${pass.gamepassId}`,
+                          nick: pass.sellerName ?? undefined,
+                          // Клиенту уходит 70% цены пасса — та же формула, что в
+                          // «Поиск и выкуп»; менеджер может поправить в форме.
+                          amount: Math.floor(pass.price * 0.7),
+                        });
+                        setCreateMode("manual");
+                        setCreateOpen(true);
+                      }}
+                    >
+                      Создать заказ
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {query && live?.partialErrors.map(error => (
+              <div key={error} className="twa-live-note">{error}</div>
+            ))}
 
             {filter === "DONE" ? (
               <>
@@ -3535,9 +3673,13 @@ export default function OrdersScreen({
         <CreateManualModal
           token={token}
           mode={createMode}
-          onClose={() => setCreateOpen(false)}
+          initialGamepassUrl={createPrefill?.url}
+          initialNick={createPrefill?.nick}
+          initialAmount={createPrefill?.amount}
+          onClose={() => { setCreateOpen(false); setCreatePrefill(null); }}
           onDone={() => {
             setCreateOpen(false);
+            setCreatePrefill(null);
             setPage(1);
             fetchOrders(serverTab, query, 1, false);
             onActionDone?.();
@@ -3814,7 +3956,10 @@ const DASHBOARD_GROUPS: { key: string; label: string; sumKey: string; filter: Fi
   { key: "buyout", label: "К выкупу",    sumKey: "BUYOUT",        filter: "BUYOUT",        color: C.green,  mode: "grossClean", oldestKey: "BUYOUT" },
   { key: "link",   label: "Ждут ссылку", sumKey: "AWAITING_LINK", filter: "AWAITING_LINK", color: C.yellow, mode: "cleanGross", oldestKey: "AWAITING_LINK" },
   { key: "direct", label: "Прямой",      sumKey: "DIRECT",        filter: "DIRECT",        color: C.blue,   mode: "grossOnly" },
-  { key: "avito",  label: "Авито",       sumKey: "AVITO",         filter: "AVITO",         color: C.orange, mode: "grossOnly" },
+  // Место Авито занял живой сюжет: заказы, по которым бот отмолчал все три
+  // напоминания и ссылку уже не пришлют. Пустая категория карточку не рисует,
+  // поэтому она видна ровно тогда, когда есть о чём говорить.
+  { key: "stale",  label: "Висяки",      sumKey: "STALE_LINK",    filter: "STALE_LINK",    color: C.orange, mode: "cleanGross", oldestKey: "STALE_LINK" },
   { key: "new",    label: "Новые",       sumKey: "NEW",           filter: "NEW",           color: C.accent, mode: "cleanGross" },
   { key: "error",  label: "Ошибка",      sumKey: "ERROR",         filter: "ERROR",         color: C.red,    mode: "grossClean" },
 ];
@@ -3918,6 +4063,7 @@ function EmptyState({ filter, query, attention, onShowAll }: {
     NEW: "Нет новых заказов",
     ERROR: "Нет ошибок",
     AWAITING_LINK: "Все оформили заказы",
+    STALE_LINK: "Висяков нет — очередь ссылок живая",
     DONE: "Нет выкупленных заказов",
     REJECTED: "Нет отменённых заказов",
     FAVORITES: "Нет избранных",

@@ -26,7 +26,7 @@ import {
   type StoredPart,
 } from "@/lib/order-gamepass-split";
 import {
-  ATTENTION_BUYOUT_HOURS, ATTENTION_LINK_DAYS, NEW_CUTOFF_HOURS,
+  ATTENTION_BUYOUT_HOURS, ATTENTION_LINK_DAYS, NEW_CUTOFF_HOURS, STALE_LINK_DAYS,
   buildTabWhere, isGamepassExportTab, loadGamepassExport, orderByForTab,
   type FilterTab,
 } from "@/lib/order-queue";
@@ -193,7 +193,7 @@ export async function GET(req: NextRequest) {
   const lite        = searchParams.get("lite") === "1";
   const sourceFilter = searchParams.get("source") as string | null;
 
-  const isVirtualTab = ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD"].includes(tab);
+  const isVirtualTab = ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD"].includes(tab);
   const tabWhere = isVirtualTab
     ? buildTabWhere(tab as FilterTab)
     : (VALID_STATUSES.includes(tab as any) ? { status: tab } : {});
@@ -294,6 +294,7 @@ export async function GET(req: NextRequest) {
               COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "NEW",
               COUNT(*) FILTER (WHERE status = 'ERROR' AND ${NOT_HELD_SQL} AND "isFavorite" = false)::int AS "ERROR",
               COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false)::int AS "AWAITING_LINK",
+              COUNT(*) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "createdAt" <= NOW() - INTERVAL '${STALE_LINK_DAYS} days' AND "isFavorite" = false)::int AS "STALE_LINK",
               COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS "DONE",
               COUNT(*) FILTER (WHERE status = 'REJECTED')::int AS "REJECTED",
               COUNT(*) FILTER (WHERE "isFavorite" = true)::int AS "FAVORITES",
@@ -308,25 +309,28 @@ export async function GET(req: NextRequest) {
               COALESCE(SUM(amount) FILTER (WHERE "isDirectOrder" = true AND status IN ('PENDING','IN_PROGRESS','AWAITING_PAYMENT','PAYMENT_PENDING','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_DIRECT",
               COALESCE(SUM(amount) FILTER (WHERE "orderSource" = 'AVITO' AND status IN ('PENDING','IN_PROGRESS','AWAITING_GAMEPASS','ERROR') AND "isFavorite" = false), 0)::int AS "SUM_AVITO",
               COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "isFavorite" = false), 0)::int AS "SUM_AWAITING_LINK",
+              COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND ${NOT_HELD_SQL} AND "createdAt" <= NOW() - INTERVAL '${STALE_LINK_DAYS} days' AND "isFavorite" = false), 0)::int AS "SUM_STALE_LINK",
               COALESCE(SUM(amount) FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" > NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false), 0)::int AS "SUM_NEW",
               COALESCE(SUM(amount) FILTER (WHERE status = 'ERROR' AND ${NOT_HELD_SQL} AND "isFavorite" = false), 0)::int AS "SUM_ERROR",
               COALESCE(SUM(amount) FILTER (WHERE "heldAt" IS NOT NULL), 0)::int AS "SUM_HELD",
               MIN("pendingAt") FILTER (WHERE status IN ('PENDING','IN_PROGRESS') AND ${PAID_BUYOUT_SQL} AND "orderSource" != 'AVITO' AND "isFavorite" = false) AS "OLDEST_BUYOUT",
-              MIN("createdAt") FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false) AS "OLDEST_AWAITING_LINK"
+              MIN("createdAt") FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${NEW_CUTOFF_HOURS} hours' AND "isFavorite" = false) AS "OLDEST_AWAITING_LINK",
+              MIN("createdAt") FILTER (WHERE status = 'AWAITING_GAMEPASS' AND "createdAt" <= NOW() - INTERVAL '${STALE_LINK_DAYS} days' AND "isFavorite" = false) AS "OLDEST_STALE_LINK"
             FROM "WbOrder"
             WHERE "isTest" = false
           `);
           const r = rows[0] ?? {};
           const counts: Record<string, number> = {};
           const sums: Record<string, number> = {};
-          for (const k of ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD"] as const)
+          for (const k of ["WORK", "ALL", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "DONE", "REJECTED", "FAVORITES", "ATTENTION", "HELD"] as const)
             counts[k] = Number(r[k] ?? 0);
           counts["INTENTS"] = await intentsPromise;
-          for (const k of ["BUYOUT", "DIRECT", "AVITO", "AWAITING_LINK", "NEW", "ERROR", "HELD"] as const)
+          for (const k of ["BUYOUT", "DIRECT", "AVITO", "AWAITING_LINK", "STALE_LINK", "NEW", "ERROR", "HELD"] as const)
             sums[k] = Number(r[`SUM_${k}`] ?? 0);
           const oldest: Record<string, string | null> = {
             BUYOUT: r["OLDEST_BUYOUT"] ? new Date(r["OLDEST_BUYOUT"]).toISOString() : null,
             AWAITING_LINK: r["OLDEST_AWAITING_LINK"] ? new Date(r["OLDEST_AWAITING_LINK"]).toISOString() : null,
+            STALE_LINK: r["OLDEST_STALE_LINK"] ? new Date(r["OLDEST_STALE_LINK"]).toISOString() : null,
           };
           cachedCounts = { data: counts, sums, oldest, ts: Date.now() };
           return { total: tabTotal(tab, counts), counts, sums, oldest };

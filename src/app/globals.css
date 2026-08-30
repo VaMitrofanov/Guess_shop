@@ -898,7 +898,6 @@ html.twa-route-active [contenteditable="true"] {
   gap: 13px;
   padding: 14px 16px 28px;
 }
-.twa-smart-search { position: relative; z-index: 3; }
 .twa-search-field {
   min-height: 49px;
   display: flex;
@@ -913,7 +912,6 @@ html.twa-route-active [contenteditable="true"] {
   -webkit-backdrop-filter: blur(14px) saturate(1.12);
   backdrop-filter: blur(14px) saturate(1.12);
 }
-.twa-smart-search.is-active .twa-search-field { border-color: rgba(167,139,250,.34); }
 .twa-search-field input {
   min-width: 0;
   flex: 1;
@@ -928,19 +926,7 @@ html.twa-route-active [contenteditable="true"] {
   width: 24px; height: 24px; display: grid; place-items: center; padding: 0;
   border: 0; border-radius: 50%; background: rgba(255,255,255,.13); color: #aaa4b8;
 }
-.twa-search-spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.16); border-top-color: #a78bfa; border-radius: 50%; animation: twa-spin .7s linear infinite; }
 @keyframes twa-spin { to { transform: rotate(360deg); } }
-.twa-search-results, .twa-intelligence {
-  margin-top: 10px;
-  overflow: hidden;
-  border: 1px solid rgba(255,255,255,.11);
-  border-radius: 20px;
-  background: rgba(31,25,45,.90);
-  box-shadow: 0 22px 50px rgba(3,0,12,.32), 0 1px 0 rgba(255,255,255,.06) inset;
-  -webkit-backdrop-filter: blur(22px) saturate(1.22);
-  backdrop-filter: blur(22px) saturate(1.22);
-}
-.twa-result-group > span { display: block; padding: 12px 14px 5px; color: #777181; font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
 .twa-result-row, .twa-inset-row {
   width: 100%; min-height: 56px; display: flex; align-items: center; gap: 11px;
   padding: 10px 13px; border: 0; border-bottom: 1px solid rgba(255,255,255,.08);
@@ -952,22 +938,6 @@ html.twa-route-active [contenteditable="true"] {
 .twa-result-row small, .twa-inset-row small { overflow: hidden; color: #aaa4b8; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .twa-result-icon { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 11px; color: #d8ccff; background: rgba(167,139,250,.17); }
 .twa-search-empty, .twa-search-loading { padding: 20px 14px; color: #aaa4b8; font-size: 14px; text-align: center; }
-.twa-search-partial { padding: 8px 14px; border-top: 1px solid rgba(255,255,255,.07); color: #ffd60a; font-size: 12px; }
-.twa-intelligence { padding: 14px; }
-.twa-intelligence-head, .twa-intelligence-person { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.twa-intelligence-head > div, .twa-intelligence-person > div { min-width: 0; display: flex; flex-direction: column; }
-.twa-intelligence-head span { color: #aaa4b8; font-size: 11px; font-weight: 650; text-transform: uppercase; }
-.twa-intelligence-head strong { margin-top: 2px; font-size: 17px; }
-.twa-intelligence-person { margin-top: 15px; align-items: flex-end; }
-.twa-intelligence-person strong { overflow: hidden; font-size: 22px; text-overflow: ellipsis; white-space: nowrap; }
-.twa-intelligence-person span { color: #aaa4b8; font-size: 13px; }
-.twa-intelligence-person > b { color: #c6b5ff; font-size: 20px; white-space: nowrap; }
-.twa-money-triplet { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin: 14px 0; }
-.twa-money-triplet span { min-width: 0; padding: 10px; border-radius: 13px; background: rgba(255,255,255,.055); }
-.twa-money-triplet small, .twa-money-triplet b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.twa-money-triplet small { color: #777181; font-size: 10px; }
-.twa-money-triplet b { margin-top: 2px; font-size: 13px; }
-.twa-intelligence-warning { display: flex; align-items: flex-start; gap: 7px; margin: 8px 0; padding: 9px 10px; border-radius: 12px; background: rgba(255,159,10,.10); color: #ff9f0a; font-size: 12px; }
 .twa-inset-group { overflow: hidden; border: 1px solid rgba(255,255,255,.09); border-radius: 18px; background: rgba(41,34,57,.56); }
 .twa-inset-row > span:first-child:not(.twa-result-icon) { width: 72px; flex: 0 0 auto; color: #aaa4b8; font-size: 12px; }
 .twa-primary-row { width: 100%; min-height: 45px; display: flex; align-items: center; justify-content: center; gap: 5px; margin-top: 12px; border: 0; border-radius: 14px; background: #a78bfa; color: #fff; font-size: 15px; font-weight: 700; }
@@ -1051,57 +1021,7 @@ html.twa-route-active [contenteditable="true"] {
   height: 100%;
   background: linear-gradient(165deg, transparent 46%, rgba(167,139,250,.9) 48%, rgba(167,139,250,.9) 51%, transparent 53%);
   clip-path: polygon(0 80%, 14% 66%, 28% 70%, 42% 42%, 57% 50%, 70% 27%, 82% 35%, 100% 8%, 100% 16%, 82% 43%, 70% 35%, 57% 58%, 42% 50%, 28% 78%, 14% 74%, 0 88%);
-}
-.twa-quick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
-.twa-quick-glass {
-  min-width: 0;
-  padding: 12px;
-  border: 1px solid rgba(255,255,255,.10);
-  border-radius: 18px;
-  background: rgba(41,34,57,.64);
-  color: #f7f5ff;
-  text-align: left;
-  box-shadow: 0 1px 0 rgba(255,255,255,.05) inset;
-}
-.twa-quick-glass > span {
-  width: 31px;
-  height: 31px;
-  display: grid;
-  place-items: center;
-  margin-bottom: 10px;
-  border-radius: 10px;
-  color: #d8ccff;
-  background: rgba(167,139,250,.18);
-}
-.twa-quick-glass small,
-.twa-quick-glass strong,
-.twa-quick-glass em { display: block; }
-.twa-quick-glass small { color: #aaa4b8; font-size: 12px; }
-.twa-quick-glass strong { margin-top: 1px; font-size: 23px; line-height: 1.1; font-variant-numeric: tabular-nums; }
-.twa-quick-glass em { margin-top: 2px; color: #777181; font-size: 11px; font-style: normal; }
-.twa-dashboard-section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 2px 0; }
-.twa-dashboard-section-title button { border: 0; background: none; color: #a78bfa; font-size: 13px; }
-
-/* TWA v3 — Balanced Compact Action Center. */
-.twa-action-hero {
-  padding: 18px;
-  border: 1px solid rgba(190,172,255,.20);
-  border-radius: 25px;
-  background: radial-gradient(circle at 82% 0, rgba(167,139,250,.22), transparent 44%), linear-gradient(145deg, rgba(73,57,100,.78), rgba(35,28,50,.84));
-  box-shadow: 0 1px 0 rgba(255,255,255,.10) inset, 0 22px 56px rgba(3,0,12,.24);
-}
-.twa-action-hero-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #d6ccef; font-size: 16px; }
-.twa-action-hero-head > span { font-weight: 700; }
-.twa-action-hero-head > b { color: #aaa4b8; font-size: 14px; font-weight: 600; }
-.twa-action-hero > strong { display: block; margin: 5px 0 11px; font-size: 46px; line-height: 1; letter-spacing: -.055em; font-variant-numeric: tabular-nums; }
-.twa-action-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.twa-action-metrics button { min-width: 0; min-height: 58px; display: flex; flex-direction: column; justify-content: center; padding: 8px 9px; border: 1px solid rgba(255,255,255,.08); border-radius: 14px; background: rgba(255,255,255,.055); color: #f7f5ff; text-align: left; }
-.twa-action-metrics small { color: #bdb6c8; font-size: 14px; line-height: 1.15; white-space: normal; }
-.twa-action-metrics b { margin-top: 2px; font-size: 23px; line-height: 1; font-variant-numeric: tabular-nums; }
-.twa-liquid-dashboard .twa-dashboard-section-title { padding: 11px 2px 2px 13px; position: relative; }
-.twa-liquid-dashboard .twa-dashboard-section-title::before { content: ""; position: absolute; left: 1px; width: 4px; height: 25px; border-radius: 999px; background: #a78bfa; box-shadow: 0 0 16px rgba(167,139,250,.52); }
-.twa-liquid-dashboard .twa-dashboard-section-title > strong { font-size: 31px; line-height: 1.05; letter-spacing: -.035em; }
-.twa-liquid-dashboard .twa-dashboard-section-title button { min-height: 44px; font-size: 16px; font-weight: 600; }
+}/* TWA v3 — Balanced Compact Action Center. */
 .twa-action-list { border-color: rgba(255,255,255,.13); box-shadow: 0 18px 42px rgba(3,0,12,.18), 0 1px 0 rgba(255,255,255,.05) inset; }
 .twa-liquid-dashboard .twa-action-list .twa-inset-row { min-height: 94px; padding: 13px 14px; gap: 13px; }
 .twa-liquid-dashboard .twa-action-list .twa-inset-row strong { overflow: visible; font-size: 23px; line-height: 1.12; text-overflow: clip; white-space: normal; }
@@ -1112,114 +1032,146 @@ html.twa-route-active [contenteditable="true"] {
 .twa-result-icon.is-error { color: #ff958c; background: rgba(255,69,58,.14); }
 .twa-result-icon.is-inbox { color: #ffd66b; background: rgba(255,190,50,.13); }
 .twa-result-icon.is-delivery { color: #7aefb2; background: rgba(52,199,89,.14); }
-.twa-dashboard-commands { margin-top: 2px; }
-.twa-dashboard-commands .twa-quick-glass { min-height: 112px; padding: 14px; }
-.twa-dashboard-commands .twa-quick-glass > span { margin-bottom: 8px; }
-.twa-dashboard-commands .twa-quick-glass strong { font-size: 23px; white-space: normal; }
-.twa-dashboard-commands .twa-quick-glass small { margin-top: 3px; font-size: 16px; line-height: 1.2; }
-.twa-dashboard-commands button:disabled { opacity: .66; }
-.twa-week-summary .twa-inset-row { min-height: 76px; }
-.twa-week-summary .twa-inset-row strong { font-size: 21px; white-space: normal; }
-.twa-week-summary .twa-inset-row small { font-size: 15px; white-space: normal; }
 .is-spinning { animation: twa-spin .8s linear infinite; }
 
-.twa-search-chips { display: flex; gap: 7px; overflow-x: auto; padding: 10px 1px 0; scrollbar-width: none; }
-.twa-search-chips::-webkit-scrollbar { display: none; }
-.twa-search-chips button { min-height: 42px; flex: 0 0 auto; padding: 0 13px; border: 1px solid rgba(255,255,255,.10); border-radius: 999px; background: rgba(41,34,57,.62); color: #aaa4b8; font-size: 15px; font-weight: 650; }
-.twa-search-chips button[aria-pressed="true"] { border-color: rgba(167,139,250,.34); background: rgba(167,139,250,.20); color: #f7f5ff; }
-.twa-search-chips b { margin-left: 4px; color: #d8ccff; font-size: 14px; }
-.twa-smart-search .twa-search-results { max-height: min(58dvh, 520px); overflow-y: auto; }
-.twa-smart-search .twa-result-group > span { padding: 14px 14px 7px; font-size: 14px; }
-.twa-smart-search .twa-result-row { min-height: 92px; padding: 13px 14px; }
-.twa-smart-search .twa-result-row strong { overflow: visible; font-size: 23px; line-height: 1.12; text-overflow: clip; white-space: normal; }
-.twa-smart-search .twa-result-row small { overflow: visible; font-size: 16px; line-height: 1.25; text-overflow: clip; white-space: normal; }
-.twa-smart-search .twa-result-icon { width: 42px; height: 42px; }
-.twa-smart-search .twa-search-partial { padding: 12px 14px; font-size: 15px; line-height: 1.3; }
-.twa-search-sheet { width: min(560px, 100%); }
-.twa-search-preview { padding: 15px 18px 22px; }
-.twa-search-preview-kicker { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #aaa4b8; font-size: 14px; }
-.twa-search-preview-kicker b { padding: 4px 9px; border-radius: 999px; background: rgba(167,139,250,.18); color: #d8ccff; font-size: 14px; }
-.twa-search-preview > strong { display: block; overflow-wrap: anywhere; margin-top: 16px; font-size: 29px; line-height: 1.08; letter-spacing: -.035em; }
-.twa-search-preview-amount { margin-top: 4px; color: #c6b5ff; font-size: 46px; font-weight: 760; line-height: 1; letter-spacing: -.05em; }
-.twa-search-preview-amount small { font-size: 21px; letter-spacing: 0; }
-.twa-search-preview-client { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 18px; color: #e9e5f2; font-size: 18px; }
-.twa-search-preview-client span { min-width: 0; overflow-wrap: anywhere; }
-.twa-search-preview-client code { color: #b9a6ff; font-size: 16px; font-weight: 700; }
-.twa-search-preview-status { display: flex; align-items: center; gap: 8px; margin-top: 15px; padding: 12px; border-radius: 14px; background: rgba(48,209,88,.10); color: #62df82; font-size: 16px; font-weight: 700; }
-.twa-search-preview-status.is-error { background: rgba(255,69,58,.11); color: #ff8178; }
-.twa-search-dossier { padding: 0 14px 18px; color: #f7f5ff; }
-.twa-dossier-hero { padding: 2px 2px 15px; border-bottom: 1px solid rgba(255,255,255,.10); }
-.twa-dossier-kicker, .twa-dossier-summary, .twa-dossier-section-head, .twa-dossier-note > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.twa-dossier-kicker { color: #a7a0b3; font-size: 12px; font-weight: 670; letter-spacing: .035em; text-transform: uppercase; }
-.twa-dossier-kicker b { flex: 0 0 auto; padding: 4px 7px; border-radius: 999px; font-size: 10px; letter-spacing: .045em; }
-.twa-dossier-kicker .is-ready { background: rgba(48,209,88,.13); color: #68df86; }
-.twa-dossier-kicker .is-partial { background: rgba(255,159,10,.14); color: #ffbd61; }
-.twa-dossier-code-row { display: flex; align-items: center; gap: 9px; margin-top: 10px; }
-.twa-dossier-code-row > strong { overflow-wrap: anywhere; font-size: 22px; font-weight: 780; letter-spacing: -.025em; line-height: 1.05; font-variant-numeric: tabular-nums; }
-.twa-dossier-summary { margin-top: 11px; }
-.twa-dossier-summary > div { min-width: 0; display: grid; gap: 2px; }
-.twa-dossier-summary span { color: #aaa4b8; font-size: 12px; font-weight: 600; }
-.twa-dossier-summary strong { overflow-wrap: anywhere; font-size: 15px; line-height: 1.2; }
-.twa-dossier-summary > b { flex: 0 0 auto; color: #cbbaff; font-size: 21px; font-weight: 780; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
-.twa-dossier-summary > b small { font-size: 13px; letter-spacing: 0; }
-.twa-dossier-section { margin-top: 10px; padding: 13px; border: 1px solid rgba(255,255,255,.09); border-radius: 18px; background: rgba(255,255,255,.035); }
-.twa-dossier-section-head { align-items: flex-start; color: #a9a2b6; font-size: 12px; line-height: 1.2; }
-.twa-dossier-section-head > span { display: flex; align-items: center; gap: 6px; color: #d7d1e3; font-weight: 700; }
-.twa-dossier-section-head > small { max-width: 52%; color: #a9a2b6; font-size: 11px; text-align: right; overflow-wrap: anywhere; }
-.twa-dossier-value { display: grid; gap: 3px; margin-top: 10px; }
-.twa-dossier-value strong { overflow-wrap: anywhere; font-size: 17px; line-height: 1.16; letter-spacing: -.015em; }
-.twa-dossier-value span { color: #aaa4b8; font-size: 13px; overflow-wrap: anywhere; }
-.twa-dossier-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
-.twa-dossier-action { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 10px; border: 1px solid rgba(190,169,255,.18); border-radius: 10px; background: rgba(167,139,250,.11); color: #dcd1ff; font: 680 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-decoration: none; cursor: pointer; overflow-wrap: anywhere; }
-.twa-dossier-action:active { transform: scale(.98); background: rgba(167,139,250,.22); }
-.twa-dossier-action.is-compact { min-height: 30px; padding: 6px 8px; font-size: 11px; }
-.twa-dossier-finances { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 11px; }
-.twa-dossier-finances > div { min-width: 0; display: grid; gap: 4px; padding: 9px 8px; border-radius: 12px; background: rgba(0,0,0,.13); }
-.twa-dossier-finances small { color: #9e97aa; font-size: 10px; }
-.twa-dossier-finances strong { overflow-wrap: anywhere; color: #f2eff8; font-size: 13px; font-variant-numeric: tabular-nums; }
-.twa-dossier-finances .is-negative strong { color: #ff9b95; }
-.twa-dossier-facts { display: grid; gap: 0; margin-top: 8px; }
-.twa-dossier-facts > div, .twa-dossier-related { min-height: 42px; display: grid; align-content: center; gap: 2px; padding: 8px 0; border-top: 1px solid rgba(255,255,255,.075); background: transparent; color: #f7f5ff; text-align: left; }
-.twa-dossier-facts > div:first-child { border-top: 0; }
-.twa-dossier-facts span { color: #aaa4b8; font-size: 11px; }
-.twa-dossier-facts strong { overflow-wrap: anywhere; font-size: 13px; line-height: 1.2; font-weight: 650; }
-.twa-dossier-facts small { color: #8f889d; font-size: 11px; }
-.twa-dossier-related { width: 100%; border-right: 0; border-left: 0; cursor: pointer; }
-.twa-dossier-related strong { display: flex; align-items: center; justify-content: space-between; gap: 7px; color: #d8ccff; }
-.twa-dossier-note { margin-top: 10px; padding: 13px; border: 1px solid rgba(255,188,70,.16); border-radius: 16px; background: rgba(255,188,70,.06); }
-.twa-dossier-note span { color: #ffd283; font-size: 12px; font-weight: 700; }
-.twa-dossier-note p { margin: 9px 0 0; color: #d7d1e3; font-size: 13px; line-height: 1.42; white-space: pre-wrap; overflow-wrap: anywhere; }
-.twa-search-dossier .twa-intelligence-warning, .twa-dossier-partial { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; padding: 10px 11px; border-radius: 13px; color: #ffc36e; background: rgba(255,159,10,.09); font-size: 12px; line-height: 1.3; }
-.twa-dossier-partial { color: #d7c9ff; background: rgba(167,139,250,.10); }
-.twa-dossier-management { border-color: rgba(167,139,250,.19); background: linear-gradient(140deg, rgba(167,139,250,.10), rgba(255,255,255,.035)); }
-.twa-dossier-manage-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 11px; }
-.twa-dossier-manage-action { min-height: 38px; padding: 8px; border: 1px solid rgba(255,255,255,.11); border-radius: 11px; background: rgba(0,0,0,.13); color: #ded9e9; font: 700 12px/1.15 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; cursor: pointer; }
-.twa-dossier-manage-action:active, .twa-dossier-move-targets button:active { transform: scale(.98); }
-.twa-dossier-manage-action:disabled { opacity: .52; cursor: default; }
-.twa-dossier-manage-action.is-success { border-color: rgba(48,209,88,.30); background: rgba(48,209,88,.13); color: #6ee58d; }
-.twa-dossier-manage-action.is-warning { border-color: rgba(255,159,10,.30); background: rgba(255,159,10,.12); color: #ffc36e; }
-.twa-dossier-manage-action.is-quiet { color: #cfc0ff; }
-.twa-dossier-move-form { display: grid; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.09); }
-.twa-dossier-move-targets { display: flex; flex-wrap: wrap; gap: 6px; }
-.twa-dossier-move-targets button { min-height: 31px; padding: 6px 9px; border: 1px solid rgba(255,255,255,.11); border-radius: 999px; background: rgba(0,0,0,.14); color: #bdb6ca; font: 650 11px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; cursor: pointer; }
-.twa-dossier-move-targets button.is-selected { border-color: rgba(190,169,255,.48); background: rgba(167,139,250,.21); color: #f2eff8; }
-.twa-dossier-move-form textarea { width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid rgba(255,255,255,.10); border-radius: 11px; outline: 0; background: rgba(0,0,0,.16); color: #f7f5ff; padding: 9px 10px; font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-.twa-dossier-move-form textarea::placeholder { color: #8f889d; }
-.twa-dossier-move-submit { min-height: 37px; border: 0; border-radius: 11px; background: #a78bfa; color: #201934; font: 750 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; cursor: pointer; }
-.twa-dossier-move-submit:disabled { opacity: .55; cursor: default; }
-.twa-dossier-action-result { margin-top: 9px; color: #6ee58d; font-size: 12px; line-height: 1.3; }
-.twa-dossier-action-result.is-error { color: #ff9b95; }
+/* ── Главная: касса выкупа (30.08.2026) ──────────────────────────────────────
+   Экран строится вокруг одной цифры — грязных робуксов очереди. Чистые стоят
+   рядом мелко: обе нужны, но соревноваться им нельзя, иначе главное число
+   перестаёт читаться с одного взгляда.
+   ────────────────────────────────────────────────────────────────────────── */
+.twa-home-search input { font-size: 16px; }
+.twa-home-search-go {
+  flex: 0 0 auto; width: auto !important; height: 32px !important; padding: 0 12px;
+  border-radius: 999px !important; background: #a78bfa !important; color: #1c1430 !important;
+  font: 700 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.twa-till {
+  display: flex; flex-direction: column;
+  padding: 15px 16px 14px;
+  border: 1px solid rgba(120,220,150,.20);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 88% -10%, rgba(48,209,88,.16), transparent 52%),
+    linear-gradient(150deg, rgba(58,68,58,.52), rgba(35,28,50,.86));
+  box-shadow: 0 1px 0 rgba(255,255,255,.09) inset, 0 22px 56px rgba(3,0,12,.24);
+}
+.twa-till-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.twa-till-head > span { color: #7ce69a; font-size: 12px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.twa-till-head > div { display: flex; align-items: center; gap: 8px; }
+.twa-till-head b { color: #aaa4b8; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.twa-till-refresh {
+  width: 32px; height: 32px; flex: 0 0 auto; display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: rgba(255,255,255,.09); color: #d8d3e4;
+}
+.twa-till-refresh:disabled { opacity: .55; }
+
+.twa-till-figure {
+  display: block; width: 100%; margin-top: 7px; padding: 0;
+  border: 0; background: transparent; color: #f7f5ff; text-align: left;
+}
+.twa-till-figure > strong {
+  display: block; font-size: 44px; line-height: 1; font-weight: 800;
+  letter-spacing: -.055em; font-variant-numeric: tabular-nums;
+}
+.twa-till-figure > strong small { margin-left: 6px; font-size: 19px; font-weight: 700; letter-spacing: 0; color: #a8f0be; }
+.twa-till-figure > span { display: block; margin-top: 5px; color: #aaa4b8; font-size: 14px; }
+.twa-till-figure > span b { color: #e9e5f2; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.twa-till-age { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 11px; font-size: 13px; }
+.twa-till-age b { font-weight: 700; font-variant-numeric: tabular-nums; }
+.twa-till-age span { color: #aaa4b8; font-variant-numeric: tabular-nums; }
+.twa-till-empty { margin-top: 10px; color: #aaa4b8; font-size: 14px; }
+
+/* Ширина сегмента = доля робуксов. Минимальная ширина — чтобы одинокий
+   прямой заказ не превращался в невидимую нитку. */
+.twa-lane-bar { display: flex; gap: 3px; height: 9px; margin-top: 14px; }
+.twa-lane-bar i { display: block; min-width: 12px; border-radius: 3px; }
+
+.twa-lane-rows { display: flex; flex-direction: column; margin-top: 6px; }
+.twa-lane-row {
+  width: 100%; min-height: 44px; display: flex; align-items: center; gap: 9px;
+  padding: 9px 2px; border: 0; border-bottom: 1px solid rgba(255,255,255,.07);
+  background: transparent; color: #f7f5ff; text-align: left; font-family: inherit;
+}
+.twa-lane-row:last-child { border-bottom: 0; }
+.twa-lane-row > i { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; }
+.twa-lane-name { min-width: 0; overflow: hidden; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.twa-lane-count {
+  flex: 0 0 auto; min-width: 24px; padding: 2px 7px; border-radius: 999px;
+  background: rgba(255,255,255,.09); color: #cfc9dc;
+  font-size: 12px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums;
+}
+.twa-lane-age { flex: 0 0 auto; margin-left: auto; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.twa-lane-sum { flex: 0 0 auto; min-width: 62px; font-size: 16px; font-weight: 700; letter-spacing: -.02em; text-align: right; font-variant-numeric: tabular-nums; }
+
+.twa-section-label { padding: 6px 4px 0; color: #777181; font-size: 12px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+
+.twa-stage-strip { display: flex; gap: 7px; overflow-x: auto; padding: 2px 1px; }
+.twa-stage-chip {
+  flex: 0 0 auto; min-height: 38px; display: flex; align-items: center; gap: 6px;
+  padding: 0 12px; border: 1px solid rgba(255,255,255,.10); border-radius: 999px;
+  background: rgba(41,34,57,.62); color: #aaa4b8; font-size: 13px; font-weight: 600; font-family: inherit;
+}
+.twa-stage-chip b { color: #f7f5ff; font-size: 14px; font-variant-numeric: tabular-nums; }
+.twa-stage-chip em { font-size: 12px; font-style: normal; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* Тихие строки: их задача — быть видимыми, но не выглядеть невыполненной
+   работой. Исключение — `is-loud`: висяки уже никто не разберёт сам. */
+.twa-quiet-rows { display: flex; flex-direction: column; gap: 7px; margin-top: 2px; }
+.twa-quiet-row {
+  width: 100%; min-height: 44px; display: flex; align-items: center; gap: 10px;
+  padding: 10px 13px; border: 1px solid rgba(255,255,255,.07); border-radius: 15px;
+  background: rgba(255,255,255,.035); color: #aaa4b8;
+  font-size: 14px; font-family: inherit; text-align: left;
+}
+.twa-quiet-row > span { min-width: 0; flex: 1; }
+.twa-quiet-row > svg:first-child { flex: 0 0 auto; }
+.twa-quiet-row.is-ice { color: #8fdcff; border-color: rgba(100,210,255,.18); background: rgba(100,210,255,.07); }
+.twa-quiet-row.is-loud {
+  align-items: flex-start; color: #ffc36e;
+  border-color: rgba(255,159,10,.26); background: rgba(255,159,10,.09);
+}
+.twa-quiet-row.is-loud b { color: #ffd08f; font-weight: 700; }
+.twa-quiet-row.is-loud small { display: block; margin-top: 2px; color: #b7a894; font-size: 12px; line-height: 1.3; }
+.twa-quiet-row.is-loud > svg:first-child { margin-top: 2px; }
+
+.twa-home-footer { padding: 4px 4px 0; color: #6a6478; font-size: 12px; line-height: 1.4; font-variant-numeric: tabular-nums; }
+
+/* ── Живая часть поиска в «Заказах»: Roblox и заказы WB Доставки ─────────────
+   Секции намеренно не похожи на карточку заказа: это не заказ, и кнопки
+   заказа к ним не применимы. У каждой ровно один выход — туда, где с
+   найденным можно что-то сделать.
+   ────────────────────────────────────────────────────────────────────────── */
+.twa-live-group {
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 16px;
+  background: rgba(41,34,57,.5);
+}
+.twa-live-group > span {
+  display: block; padding: 10px 13px 6px;
+  color: #777181; font-size: 11px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase;
+}
+.twa-live-row {
+  width: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 2px 9px;
+  padding: 10px 13px; border: 0; border-top: 1px solid rgba(255,255,255,.07);
+  background: transparent; color: #f7f5ff; text-align: left; font-family: inherit;
+}
+.twa-live-row b { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.twa-live-row small { flex: 1 0 100%; color: #aaa4b8; font-size: 12px; }
+.twa-live-row > span:last-child { flex: 0 0 auto; color: #777181; font-size: 17px; }
+.twa-live-cta {
+  flex: 0 0 auto; min-height: 32px; padding: 0 12px; border: 0; border-radius: 999px;
+  background: rgba(48,209,88,.16); color: #6ee58d;
+  font: 700 12.5px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.twa-live-note { padding: 8px 13px; color: #ffd60a; font-size: 12px; }
 
 @media (max-width: 370px) {
-  .twa-action-hero > strong { font-size: 42px; }
-  .twa-action-metrics small { font-size: 13px; }
-  .twa-liquid-dashboard .twa-action-list .twa-inset-row strong,
-  .twa-smart-search .twa-result-row strong { font-size: 21px; }
-  .twa-dossier-section { padding: 12px; }
-  .twa-dossier-summary > b { font-size: 19px; }
-  .twa-dossier-finances { gap: 5px; }
-  .twa-dossier-finances > div { padding: 8px 6px; }
-  .twa-dossier-finances strong { font-size: 12px; }
+  .twa-liquid-dashboard .twa-action-list .twa-inset-row strong { font-size: 21px; }
+  .twa-till-figure > strong { font-size: 38px; }
+  .twa-lane-row { gap: 7px; }
 }
 .twa-next-action {
   width: 100%;
