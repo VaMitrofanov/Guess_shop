@@ -54,7 +54,7 @@ export interface MatchedOrder {
 }
 
 interface ManualValidation {
-  code?: { ok: boolean; error?: string; denomination?: number; claimedBy?: RebindUser | null; existing?: MatchedOrder | null };
+  code?: { ok: boolean; error?: string; denomination?: number; claimedBy?: RebindUser | null; existing?: MatchedOrder | null; frozen?: boolean };
   gamepass?: {
     error?: string;
     gamepassId?: string;
@@ -66,6 +66,17 @@ interface ManualValidation {
     existing?: MatchedOrder | null;
   };
   nick?: { matches?: MatchedOrder[] };
+  wbOrder?: {
+    wbOrderId?: string;
+    buyerName?: string | null;
+    denomination?: number | null;
+    priceKopecks?: number | null;
+    supplierStatus?: string;
+    gateCode?: string | null;
+    cancelled?: boolean;
+    error?: string;
+    existing?: MatchedOrder | null;
+  };
 }
 
 /** Результат поиска геймпассов по нику внутри листа. */
@@ -164,7 +175,7 @@ function MatchCard({ found, title, tone, children }: {
 }
 
 export default function OrderSheet({
-  token, onDone, onClose, initialGamepassUrl, initialNick, initialAmount, mode = "manual", initialTarget,
+  token, onDone, onClose, initialGamepassUrl, initialNick, initialAmount, mode = "manual", initialTarget, initialWbOrderId,
 }: {
   token: string;
   onDone: () => void;
@@ -175,6 +186,8 @@ export default function OrderSheet({
   mode?: CreateOrderMode;
   /** Открыть сразу в правке — из ✏️ на карточке заказа. */
   initialTarget?: MatchedOrder | null;
+  /** Открыть с подставленным номером заказа WB — из консоли доставки. */
+  initialWbOrderId?: string;
 }) {
   const isDirect = mode === "direct";
 
@@ -187,6 +200,13 @@ export default function OrderSheet({
   const [nick, setNick] = useState(initialNick ?? "");
   const [gpInput, setGpInput] = useState(initialGamepassUrl ?? "");
   const [note, setNote] = useState("");
+  /** Номер заказа WB/DBS: четвёртый способ назвать тот же заказ. */
+  const [wbOrderId, setWbOrderId] = useState(initialWbOrderId ?? "");
+  /** Форма заведения клиента, которого нет в базе. */
+  const [newClientOpen, setNewClientOpen] = useState(false);
+  const [newTg, setNewTg] = useState("");
+  const [newVk, setNewVk] = useState("");
+  const [newName, setNewName] = useState("");
   const [notify, setNotify] = useState(true);
   const [client, setClient] = useState<RebindUser | null>(null);
   const [clientQuery, setClientQuery] = useState("");
@@ -260,7 +280,8 @@ export default function OrderSheet({
     const gpTrim = gpInput.trim();
     const nickTrim = nick.trim();
     setDup(null);
-    if (!codeTrim && !gpTrim && nickTrim.length < 3) { setValid({}); return; }
+    const wbTrim = wbOrderId.replace(/\D/g, "");
+    if (!codeTrim && !gpTrim && !wbTrim && nickTrim.length < 3) { setValid({}); return; }
     clearTimeout(validateDebounce.current);
     validateDebounce.current = setTimeout(async () => {
       setChecking(true);
@@ -269,7 +290,7 @@ export default function OrderSheet({
           method: "POST", headers,
           body: JSON.stringify({
             action: "manual-validate",
-            wbCode: codeTrim, gamepassUrl: gpTrim,
+            wbCode: codeTrim, gamepassUrl: gpTrim, wbOrderId: wbTrim,
             robloxUsername: nickTrim, amount: Number(amount) || undefined,
           }),
         });
@@ -280,11 +301,14 @@ export default function OrderSheet({
     }, 500);
     return () => clearTimeout(validateDebounce.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wbCode, gpInput, nick, amount, token]);
+  }, [wbCode, gpInput, nick, amount, wbOrderId, token]);
 
   const codeState = wbCode.trim() ? valid.code : undefined;
   const gpState = gpInput.trim() ? valid.gamepass : undefined;
-  const effAmount = codeState?.ok && codeState.denomination ? codeState.denomination : (Number(amount) || null);
+  const wbState = wbOrderId.replace(/\D/g, "") ? valid.wbOrder : undefined;
+  // Номинал знает тот, кто назвал заказ: карточка доставки, код с карты или
+  // менеджер руками — в таком порядке, потому что именно так его знает сервер.
+  const effAmount = wbState?.denomination ?? (codeState?.ok && codeState.denomination ? codeState.denomination : (Number(amount) || null));
   const expectedPrice = effAmount ? Math.ceil(effAmount / 0.7) : null;
 
   /* ── Совпадения, которые показываем как развилку ───────────────────────── */
@@ -294,7 +318,9 @@ export default function OrderSheet({
     && gpState.existing.orderId !== target?.orderId
     && !ignored.has(`gp:${gpState.existing.orderId}`)
     ? gpState.existing : null;
-  const nickMatches = !editing && !codeMatch && !gpMatch
+  const wbOrderMatch = !editing && valid.wbOrder?.existing && !ignored.has(`wb:${valid.wbOrder.existing.orderId}`)
+    ? valid.wbOrder.existing : null;
+  const nickMatches = !editing && !codeMatch && !gpMatch && !wbOrderMatch
     ? (valid.nick?.matches ?? []).filter(m => !ignored.has(`nick:${m.orderId}`))
     : [];
 
@@ -318,8 +344,9 @@ export default function OrderSheet({
       if (!nick.trim()) missing.push("ник");
       if (!selectedDirectPass) missing.push("геймпасс");
     } else {
-      if (!effAmount) missing.push("номинал или код");
-      if (wbCode.trim() && codeState?.ok !== true) missing.push("рабочий код");
+      if (!effAmount) missing.push("номинал, код или номер заказа WB");
+      if (wbCode.trim() && codeState?.ok !== true && !codeState?.existing) missing.push("рабочий код");
+      if (wbState?.error) missing.push("рабочий номер заказа WB");
     }
     if (gpInput.trim() && gpState?.error) missing.push("верная ссылка на геймпасс");
   }
@@ -332,6 +359,30 @@ export default function OrderSheet({
     const platform = u.tgId ? "TG" : u.vkId ? "VK" : "—";
     const name = u.username ? `@${u.username}` : u.name || u.tgId || u.vkId || u.id.slice(-6);
     return { platform, name };
+  }
+
+  /** Завести клиента, которого нет в базе. Без этого заказ вешался на служебного
+      `admin`, и уведомления такому «клиенту» уже не уходили никогда. */
+  async function createClient() {
+    const tg = newTg.replace(/\D/g, "");
+    const vk = newVk.replace(/\D/g, "");
+    if (!tg && !vk) { toast("Нужен Telegram ID или VK ID", "error"); return; }
+    setBusy(true);
+    haptic.impact("light");
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST", headers,
+        body: JSON.stringify({ action: "create-client", tgId: tg || undefined, vkId: vk || undefined, name: newName.trim() || undefined }),
+      });
+      const d = await r.json();
+      if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Не удалось создать клиента", "error"); return; }
+      haptic.notify("success");
+      setClient(d.user);
+      setNewClientOpen(false);
+      setNewTg(""); setNewVk(""); setNewName("");
+      toast(d.existed ? "Клиент уже был в базе — привязал" : "Клиент заведён", "success");
+    } catch { toast("Ошибка сети", "error"); }
+    finally { setBusy(false); }
   }
 
   async function searchPassesByNick() {
@@ -409,6 +460,7 @@ export default function OrderSheet({
           action: "create-manual",
           direct: isDirect,
           wbCode: wbCode.trim() || undefined,
+          wbOrderId: wbOrderId.replace(/\D/g, "") || undefined,
           amount: Number(amount) || undefined,
           clientUserId: client?.id ?? undefined,
           robloxUsername: nick.trim() || undefined,
@@ -582,6 +634,41 @@ export default function OrderSheet({
             </div>
           )}
 
+          {/* Номер заказа WB / DBS — четвёртый вход в тот же заказ. Связь идёт
+              через код гейта, поэтому номер просто разворачивается в него. */}
+          {!editing && !isDirect && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <input
+                value={wbOrderId}
+                onChange={e => setWbOrderId(e.target.value.replace(/\D/g, "").slice(0, 12))}
+                placeholder="Номер заказа WB / DBS (опц.)"
+                inputMode="numeric"
+                style={{ ...inputStyle, fontFamily: MONO }}
+              />
+              {valid.wbOrder?.error && !valid.wbOrder.existing && warn(`✖ ${valid.wbOrder.error}`, C.red)}
+              {valid.wbOrder && !valid.wbOrder.error && valid.wbOrder.gateCode && (
+                <div style={{ fontSize: 13, color: C.green, lineHeight: 1.35 }}>
+                  ✓ {valid.wbOrder.buyerName ?? "покупатель без имени"} · номинал <b>{valid.wbOrder.denomination} R$</b>
+                  <span style={{ color: C.textTertiary }}> · код <b style={{ fontFamily: MONO }}>{valid.wbOrder.gateCode}</b></span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* По номеру заказа WB нашёлся уже созданный заказ на выкуп. */}
+          {wbOrderMatch && (
+            <MatchCard found={wbOrderMatch} tone="warn" title={`По заказу WB #${wbOrderId} выкуп уже открыт`}>
+              <ActionRow
+                icon="✎" tone="primary"
+                label={wbOrderMatch.editable ? "Править этот заказ" : "Правка недоступна в этом статусе"}
+                disabled={!wbOrderMatch.editable}
+                onClick={() => switchToOrder(wbOrderMatch)}
+              />
+              <ActionRow icon="＋" label="Всё равно создать новый"
+                onClick={() => ignoreMatch(`wb:${wbOrderMatch.orderId}`)} />
+            </MatchCard>
+          )}
+
           {/* Код ВБ. В правке — ключ заказа, менять нечем. */}
           {editing && target ? (
             <div style={lockedStyle}>
@@ -597,7 +684,7 @@ export default function OrderSheet({
                 autoCapitalize="characters" autoCorrect="off" spellCheck={false}
                 style={{ ...inputStyle, fontFamily: MONO, letterSpacing: 2 }}
               />
-              {codeState && !codeState.ok && !codeState.existing && warn(`✖ ${codeState.error}`, C.red)}
+              {codeState && !codeState.ok && !codeState.existing && warn(`✖ ${codeState.error}`, codeState.frozen ? C.ice : C.red)}
               {codeState?.ok && (
                 <div style={{ fontSize: 13, color: C.green }}>
                   ✓ Номинал <b>{codeState.denomination} R$</b>
@@ -636,6 +723,44 @@ export default function OrderSheet({
                 style={inputStyle}
               />
               {searching && <div style={{ fontSize: 13, color: C.textTertiary }}>Поиск…</div>}
+              {!newClientOpen && (
+                <button type="button" className="twa-press-sm" onClick={() => { haptic.select(); setNewClientOpen(true); }}
+                  style={{
+                    alignSelf: "flex-start", background: "transparent", border: "none", padding: "2px 0",
+                    color: C.accent, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                  }}>
+                  ＋ Клиента нет в базе — завести по TG / VK ID
+                </button>
+              )}
+              {newClientOpen && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "10px 11px", borderRadius: 12, background: "rgba(167,139,250,0.09)", border: `1px solid ${C.accent}44` }}>
+                  <div style={{ fontSize: 12.5, color: C.textSecondary, lineHeight: 1.35 }}>
+                    Заказ без клиента вешается на служебного юзера — уведомления такому «клиенту» не уйдут.
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input value={newTg} onChange={e => setNewTg(e.target.value.replace(/\D/g, ""))}
+                      placeholder="Telegram ID" inputMode="numeric" style={{ ...inputStyle, fontFamily: MONO }} />
+                    <input value={newVk} onChange={e => setNewVk(e.target.value.replace(/\D/g, ""))}
+                      placeholder="VK ID" inputMode="numeric" style={{ ...inputStyle, fontFamily: MONO }} />
+                  </div>
+                  <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Имя (опц.)" style={inputStyle} />
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button type="button" className="twa-press-sm" onClick={() => { setNewClientOpen(false); }}
+                      style={{ flex: 1, padding: "9px", borderRadius: 9, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                      Отмена
+                    </button>
+                    <button type="button" className="twa-press-sm" onClick={() => void createClient()}
+                      disabled={busy || (!newTg && !newVk)}
+                      style={{
+                        flex: 2, padding: "9px", borderRadius: 9, border: "none", background: C.accent, color: "#fff",
+                        fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                        opacity: busy || (!newTg && !newVk) ? 0.45 : 1,
+                      }}>
+                      Завести клиента
+                    </button>
+                  </div>
+                </div>
+              )}
               {clientResults.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 150, overflowY: "auto" }}>
                   {clientResults.map(u => {
@@ -666,7 +791,7 @@ export default function OrderSheet({
           )}
 
           {/* Номинал. У прямого привязан к оплате — сервер откажет, поэтому замок. */}
-          {(editing ? !target?.isDirectOrder : !isDirect && !codeState?.ok) ? (
+          {(editing ? !target?.isDirectOrder : !isDirect && !codeState?.ok && !wbState?.denomination) ? (
             <input
               value={amount}
               onChange={e => setAmount(e.target.value.replace(/\D/g, ""))}

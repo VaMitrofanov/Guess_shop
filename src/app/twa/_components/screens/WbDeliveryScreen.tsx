@@ -37,6 +37,7 @@ import {
 } from "@/lib/wb-delivery-labels";
 import BottomSheet from "../BottomSheet";
 import { haptic } from "../haptics";
+import OrderSheet from "../OrderSheet";
 import { toast } from "../Toast";
 import css from "./WbDeliveryScreen.module.css";
 
@@ -87,6 +88,8 @@ export default function WbDeliveryScreen({ token, initialFocus, initialQuery }: 
   const [manualCode, setManualCode] = useState("");
   const [message, setMessage] = useState("");
   const [confirming, setConfirming] = useState<{ action: WbDeliveryAction; title: string; body: string; cta: string; facts: [string, string][] } | null>(null);
+  /** Номер заказа WB, под который открыт общий лист заказа. */
+  const [sheetFor, setSheetFor] = useState<string | null>(null);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -223,6 +226,7 @@ export default function WbDeliveryScreen({ token, initialFocus, initialQuery }: 
         onConfirm={setConfirming}
         post={post}
         onCreated={async (text) => { toast(text, "success"); haptic.notify("success"); await loadSelected(selected.id); }}
+        onOpenSheet={(wbOrderId) => setSheetFor(wbOrderId)}
       />
       <ConfirmSheet
         request={confirming}
@@ -230,6 +234,14 @@ export default function WbDeliveryScreen({ token, initialFocus, initialQuery }: 
         onClose={() => setConfirming(null)}
         onConfirm={(action) => { setConfirming(null); void act(action, selected); }}
       />
+      {sheetFor && (
+        <OrderSheet
+          token={token}
+          initialWbOrderId={sheetFor}
+          onClose={() => setSheetFor(null)}
+          onDone={async () => { setSheetFor(null); await loadSelected(selected.id); }}
+        />
+      )}
     </>;
   }
 
@@ -351,7 +363,7 @@ function ConfirmSheet({ request, busy, onClose, onConfirm }: {
   );
 }
 
-function OrderDetail({ order, data, busy, manualCode, message, setManualCode, setMessage, onBack, onAction, onConfirm, post, onCreated }: {
+function OrderDetail({ order, data, busy, manualCode, message, setManualCode, setMessage, onBack, onAction, onConfirm, post, onCreated, onOpenSheet }: {
   order: WbDeliveryOrderDto;
   data: WbDeliveryOverview;
   busy: WbDeliveryAction | null;
@@ -364,6 +376,7 @@ function OrderDetail({ order, data, busy, manualCode, message, setManualCode, se
   onConfirm: (request: { action: WbDeliveryAction; title: string; body: string; cta: string; facts: [string, string][] }) => void;
   post: (action: WbDeliveryAction, orderId: string | null, extra?: Record<string, unknown>) => Promise<{ message: string; preview?: WbGamepassPreview }>;
   onCreated: (message: string) => Promise<void>;
+  onOpenSheet: (wbOrderId: string) => void;
 }) {
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const [codeShown, setCodeShown] = useState(false);
@@ -452,14 +465,16 @@ function OrderDetail({ order, data, busy, manualCode, message, setManualCode, se
       {order.permissions.markGateSent && <button disabled={Boolean(busy)} onClick={() => onConfirm({ action: "mark_gate_sent", title: "Гейт отправлен вручную?", body: "Отметьте только если ссылка и код действительно ушли покупателю из кабинета WB.", cta: "Зафиксировать", facts: [["Код гейта", order.activationCode ?? "—"], ["Заказ WB", `#${order.wbOrderId}`]] })}><Send /> Гейт отправлен вручную</button>}
     </section>
 
+    {/* Заказ на выкуп заводится ТЕМ ЖЕ листом, что и везде: своя форма здесь
+        означала бы третье место, где создаётся заказ, со своими полями и своими
+        правилами. Номер заказа WB лист разворачивает в код гейта сам и ставит
+        источник WB_DBS — руками ничего переносить не надо. */}
     {order.permissions.createInternalOrder && (
-      <BuyoutSection
-        key={order.id}
-        order={order}
-        onPreview={(gamepass) => post("preview_gamepass", order.id, { gamepass })}
-        onCreate={(gamepass, robloxUsername, force) => post("create_internal_order", order.id, { gamepass, robloxUsername, force })}
-        onDone={onCreated}
-      />
+      <section className={css.statusActions}>
+        <button onClick={() => { haptic.impact("light"); onOpenSheet(order.wbOrderId); }}>
+          <Check /> Открыть заказ на выкуп
+        </button>
+      </section>
     )}
 
     <section className={css.mobileManual}><div><strong>Резервный ввод 5–7 цифр</strong><small>Если событие чата задержалось</small></div><div><input value={manualCode} onChange={(event) => setManualCode(event.target.value.replace(/\D/g, "").slice(0,7))} inputMode="numeric" autoComplete="off" maxLength={7} placeholder="123456" /><button disabled={!order.permissions.saveDeliveryCode || manualCode.length < 5 || Boolean(busy)} onClick={() => onAction("save_delivery_code", { code: manualCode })}>Сохранить</button></div></section>
@@ -474,92 +489,6 @@ function OrderDetail({ order, data, busy, manualCode, message, setManualCode, se
   </div>;
 }
 
-/** The mobile twin of the desktop buyout block. Game pass search misses often
- * enough that an operator on a phone needs the same door: paste the pass, read
- * back who owns it and what it costs, create the ordinary buyout order. */
-function BuyoutSection({ order, onPreview, onCreate, onDone }: {
-  order: WbDeliveryOrderDto;
-  onPreview: (gamepass: string) => Promise<{ preview?: WbGamepassPreview }>;
-  onCreate: (gamepass: string, robloxUsername: string | undefined, force: boolean) => Promise<{ message: string }>;
-  onDone: (message: string) => Promise<void>;
-}) {
-  const [gamepass, setGamepass] = useState("");
-  const [nick, setNick] = useState("");
-  const [preview, setPreview] = useState<WbGamepassPreview | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"preview" | "create" | null>(null);
-  const [blocked, setBlocked] = useState(false);
-
-  /** Editing the pass invalidates everything read back about the old one — an
-   * override must never carry over to a pass the operator has not checked. */
-  function editGamepass(value: string) {
-    setGamepass(value);
-    setPreview(null);
-    setError(null);
-    setBlocked(false);
-  }
-
-  async function check() {
-    setBusy("preview");
-    setError(null);
-    try {
-      const body = await onPreview(gamepass.trim());
-      setPreview(body.preview ?? null);
-      if (body.preview && !nick) setNick(body.preview.robloxUsername);
-      haptic.notify("success");
-    } catch (e) {
-      setPreview(null);
-      setError(e instanceof Error ? e.message : "Геймпасс не найден");
-      haptic.notify("error");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function create(force: boolean) {
-    setBusy("create");
-    setError(null);
-    try {
-      const body = await onCreate(gamepass.trim(), nick.trim() || undefined, force);
-      setGamepass("");
-      setNick("");
-      await onDone(body.message);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Заказ не создан");
-      setBlocked(true);
-      haptic.notify("error");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  return (
-    <section className={css.buyoutSection}>
-      <header><Gamepad2 /><div><strong>Создать заказ на выкуп</strong><small>Код {order.activationCode} не активирован — добавьте геймпасс вручную</small></div></header>
-      <div className={css.buyoutRow}>
-        <input value={gamepass} onChange={(event) => editGamepass(event.target.value)} placeholder="Ссылка или ID геймпасса" inputMode="url" autoComplete="off" aria-label="Геймпасс" />
-        <button type="button" disabled={!gamepass.trim() || Boolean(busy)} onClick={() => void check()}>{busy === "preview" ? <Loader2 className={css.spin} /> : <Search />}</button>
-      </div>
-      {preview && (
-        <div className={css.buyoutFacts}>
-          <div><span>Геймпасс</span><strong>{preview.name}</strong></div>
-          <div><span>Ник Roblox</span><input value={nick} onChange={(event) => setNick(event.target.value)} autoComplete="off" aria-label="Ник Roblox" /></div>
-          <div><span>Цена</span><strong className={preview.priceOk ? css.buyoutOk : css.buyoutBad}>{preview.price.toLocaleString("ru-RU")} R$</strong><small>{preview.expectedPrice ? `ждём ${preview.expectedPrice.toLocaleString("ru-RU")} R$` : "нет номинала"}</small></div>
-          <div><span>Продаётся</span><strong className={preview.isForSale ? css.buyoutOk : css.buyoutBad}>{preview.isForSale ? "да" : "нет"}</strong>{preview.duplicate ? <small className={css.buyoutBad}>дубль {preview.duplicate.wbCode}</small> : null}</div>
-        </div>
-      )}
-      {error && <p className={css.buyoutError}><AlertTriangle /> {error}</p>}
-      <button type="button" className={css.buyoutGo} disabled={!preview || Boolean(busy)} onClick={() => void create(false)}>
-        {busy === "create" ? <Loader2 className={css.spin} /> : <Check />} Создать заказ
-      </button>
-      {blocked && preview && (
-        <button type="button" className={css.buyoutForce} disabled={Boolean(busy)} onClick={() => void create(true)}>
-          Всё равно создать — я проверил цену и продавца
-        </button>
-      )}
-    </section>
-  );
-}
 
 function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);

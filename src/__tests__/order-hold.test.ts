@@ -63,6 +63,18 @@ describe("сырые SQL-счётчики зеркалят buildTabWhere", () =>
     expect(occurrences.length).toBeGreaterThanOrEqual(WORK_TABS.length);
   });
 
+  it("создание заказа на замороженном коде отклоняется", () => {
+    // Случай 84CR7UZ: код у покупателя, заказа ещё нет, выкупать нельзя. Форма
+    // научилась разворачивать номер заказа WB в код гейта, поэтому завести
+    // заказ на замороженном коде стало на один тап проще, чем раньше.
+    const createBlock = route.slice(
+      route.indexOf('action === "create-manual"'),
+      route.indexOf('action === "create-client"'),
+    );
+    expect(createBlock).toContain("orderHold.findUnique");
+    expect(createBlock).toContain("heldRefusal");
+  });
+
   it("правка заказа тоже под гардом", () => {
     // Лист заказа умеет переключаться в правку по введённому коду, поэтому
     // замороженный заказ достижим из формы создания. Без гарда правка была бы

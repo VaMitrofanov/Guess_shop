@@ -33,6 +33,7 @@ import {
 import {
   NOT_HELD_SQL, assertOrderNotHeld, heldRefusal, holdByCode, normalizeHoldCode, releaseByCode,
 } from "@/lib/order-hold";
+import { resolveWbOrderSource } from "../../../../../bots/shared/wb-order-source";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
 type OrderStatus = typeof VALID_STATUSES[number];
@@ -664,12 +665,19 @@ export async function POST(req: NextRequest) {
             where: { wbCode: rawCode },
             select: MATCH_SELECT,
           });
+          const holdOnCode = await (prisma as any).orderHold.findUnique({
+            where: { wbCode: rawCode }, select: { reason: true, releasedAt: true },
+          });
           if (orderOnCode) {
             out.code = {
               ok: false,
               error: `По коду уже есть заказ (${orderOnCode.status})`,
               existing: toMatch(orderOnCode),
             };
+          } else if (holdOnCode && !holdOnCode.releasedAt) {
+            // Заморозка на коде без заказа: сказать об этом надо до нажатия,
+            // а не отказом сервера после.
+            out.code = { ok: false, error: `❄️ Код заморожен: ${holdOnCode.reason}`, frozen: true };
           } else {
             out.code = { ok: true, denomination: codeRow.denomination, claimedBy: codeRow.user ?? null };
           }
@@ -706,6 +714,46 @@ export async function POST(req: NextRequest) {
         sellerMatch,
         existing: existing ? toMatch(existing) : null,
       };
+    }
+
+    /* Номер заказа WB — четвёртый вход в тот же заказ.
+       Раньше вписать его было некуда, и ручной заказ не связывался с карточкой
+       доставки: связь идёт через код гейта (`WbMarketplaceOrder.wbCode` →
+       `WbOrder.wbCode`), а код надо было сначала где-то найти глазами. */
+    const wbOrderIdRaw = String(body.wbOrderId ?? "").replace(/\D/g, "");
+    if (wbOrderIdRaw.length >= 5) {
+      const mp = await (prisma as any).wbMarketplaceOrder.findUnique({
+        where: { wbOrderId: wbOrderIdRaw },
+        select: {
+          id: true, wbOrderId: true, buyerName: true, denominationSnapshot: true,
+          finalPriceKopecks: true, priceKopecks: true, supplierStatus: true,
+          gateState: true, cancelledAt: true,
+          wbCode: { select: { code: true } },
+        },
+      });
+      if (!mp) {
+        out.wbOrder = { error: `Заказ WB #${wbOrderIdRaw} не найден` };
+      } else {
+        const gateCode = mp.wbCode?.code ?? null;
+        const onCode = gateCode
+          ? await (prisma as any).wbOrder.findUnique({ where: { wbCode: gateCode }, select: MATCH_SELECT })
+          : null;
+        out.wbOrder = {
+          wbOrderId: mp.wbOrderId,
+          buyerName: mp.buyerName,
+          denomination: mp.denominationSnapshot,
+          priceKopecks: mp.finalPriceKopecks ?? mp.priceKopecks,
+          supplierStatus: mp.supplierStatus,
+          gateCode,
+          cancelled: Boolean(mp.cancelledAt),
+          // Заказ на выкуп вешается на код гейта — без него вешать не на что.
+          error: mp.cancelledAt ? "Заказ отменён на WB — выкуп по нему открывать нельзя"
+            : !gateCode ? "Код гейта ещё не выпущен — сначала выдайте его покупателю"
+              : !mp.denominationSnapshot ? "У товара нет номинала в каталоге — сумма заказа неизвестна"
+                : undefined,
+          existing: onCode ? toMatch(onCode) : null,
+        };
+      }
     }
 
     /* Ник — не ключ: у одного ника легко несколько заказов, и подставлять
@@ -745,26 +793,69 @@ export async function POST(req: NextRequest) {
     if (isDirect && !nick)
       return NextResponse.json({ error: "Укажи ник Roblox и найди его геймпасс" }, { status: 400 });
 
-    // 1) Код ВБ (опционален): существует, не тест, заказа по нему нет.
-    let codeRow: any = null;
-    if (rawCode) {
-      if (!/^[A-Z0-9]{7}$/.test(rawCode))
-        return NextResponse.json({ error: "Код — 7 символов A-Z/0-9" }, { status: 400 });
-      codeRow = await (prisma as any).wbCode.findUnique({
-        where: { code: rawCode },
-        select: { id: true, denomination: true, isTest: true, usedAt: true },
+    /* 0) Номер заказа WB (опционален) — четвёртый способ назвать тот же заказ.
+       Связь коридора идёт через код гейта, поэтому номер просто разворачивается
+       в него: дальше заказ создаётся ровно так же, как по коду с карты. Все
+       предусловия — те же, что у создания из консоли доставки (`create_internal_order`):
+       не отменён, гейт выпущен, номинал известен, заказа по коду ещё нет. */
+    let marketplace: any = null;
+    const wbOrderIdRaw = String(body.wbOrderId ?? "").replace(/\D/g, "");
+    if (wbOrderIdRaw) {
+      if (isDirect)
+        return NextResponse.json({ error: "Прямой заказ не связан с заказом WB" }, { status: 400 });
+      marketplace = await (prisma as any).wbMarketplaceOrder.findUnique({
+        where: { wbOrderId: wbOrderIdRaw },
+        select: {
+          id: true, wbOrderId: true, denominationSnapshot: true, cancelledAt: true,
+          finalPriceKopecks: true, priceKopecks: true, wbCodeId: true,
+          wbCode: { select: { code: true } },
+        },
       });
-      if (!codeRow) return NextResponse.json({ error: `Код ${rawCode} не найден` }, { status: 400 });
-      if (codeRow.isTest) return NextResponse.json({ error: `Код ${rawCode} — тестовый` }, { status: 400 });
-      const orderOnCode = await (prisma as any).wbOrder.findFirst({
-        where: { wbCode: rawCode }, select: { status: true },
-      });
-      if (orderOnCode)
-        return NextResponse.json({ error: `По коду ${rawCode} уже есть заказ (${orderOnCode.status})` }, { status: 409 });
+      if (!marketplace)
+        return NextResponse.json({ error: `Заказ WB #${wbOrderIdRaw} не найден` }, { status: 400 });
+      if (marketplace.cancelledAt)
+        return NextResponse.json({ error: "Заказ отменён на WB — выкуп по нему открывать нельзя" }, { status: 409 });
+      if (!marketplace.wbCode?.code)
+        return NextResponse.json({ error: "Код гейта ещё не выпущен — заказ на выкуп привязывается к нему" }, { status: 409 });
+      if (!marketplace.denominationSnapshot)
+        return NextResponse.json({ error: "У товара нет номинала в каталоге — сумма заказа неизвестна" }, { status: 409 });
+      if (rawCode && rawCode !== marketplace.wbCode.code)
+        return NextResponse.json({ error: `Заказ WB #${wbOrderIdRaw} выдан по коду ${marketplace.wbCode.code}, а в поле кода другой` }, { status: 400 });
     }
 
-    // 2) Номинал: из кода или руками.
-    let amount = codeRow?.denomination ?? Number(body.amount);
+    // 1) Код ВБ (опционален): существует, не тест, заказа по нему нет.
+    let codeRow: any = null;
+    if (rawCode || marketplace) {
+      const codeToUse = rawCode ?? marketplace.wbCode.code;
+      if (!/^[A-Z0-9]{7}$/.test(codeToUse))
+        return NextResponse.json({ error: "Код — 7 символов A-Z/0-9" }, { status: 400 });
+      codeRow = await (prisma as any).wbCode.findUnique({
+        where: { code: codeToUse },
+        select: { id: true, denomination: true, isTest: true, usedAt: true },
+      });
+      if (!codeRow) return NextResponse.json({ error: `Код ${codeToUse} не найден` }, { status: 400 });
+      if (codeRow.isTest) return NextResponse.json({ error: `Код ${codeToUse} — тестовый` }, { status: 400 });
+      const orderOnCode = await (prisma as any).wbOrder.findFirst({
+        where: { wbCode: codeToUse }, select: { status: true },
+      });
+      if (orderOnCode)
+        return NextResponse.json({ error: `По коду ${codeToUse} уже есть заказ (${orderOnCode.status})` }, { status: 409 });
+      /* ❄️ Заморозка ставится НА КОД и живёт до создания заказа — ровно ради
+         случая 84CR7UZ: код у покупателя на руках, заказа ещё нет, выкупать
+         нельзя. Крон-свип пометил бы созданный заказ через минуту, но создать
+         его молча и увидеть заморозку постфактум — не то же самое, что не
+         создать. Отказываем сразу. */
+      const holdOnCode = await (prisma as any).orderHold.findUnique({
+        where: { wbCode: codeToUse },
+        select: { reason: true, releasedAt: true },
+      });
+      if (holdOnCode && !holdOnCode.releasedAt)
+        return NextResponse.json({ error: heldRefusal(holdOnCode.reason) }, { status: 409 });
+      codeRow.code = codeToUse;
+    }
+
+    // 2) Номинал: из карточки доставки (DBS), из кода или руками.
+    let amount = marketplace?.denominationSnapshot ?? codeRow?.denomination ?? Number(body.amount);
     if (!isDirect && (!amount || !Number.isFinite(amount) || amount < 1))
       return NextResponse.json({ error: "Укажи код ВБ или номинал в R$" }, { status: 400 });
 
@@ -813,7 +904,7 @@ export async function POST(req: NextRequest) {
     const gamepassUrl = gpId ? `https://www.roblox.com/game-pass/${gpId}` : null;
     const code = isDirect
       ? generateDirectCode()
-      : rawCode ?? `MN-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+      : codeRow?.code ?? rawCode ?? `MN-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
     const stamp = new Date().toISOString().slice(0, 10);
     const manualMark = `[MANUAL${isDirect ? " DIRECT" : ""} ${stamp} от ${actor.displayName}]`;
     const platform = client?.vkId && !client?.tgId ? "VK" : "TG";
@@ -828,9 +919,16 @@ export async function POST(req: NextRequest) {
           platform,
           wbCode: code,
           isDirectOrder: isDirect,
-          orderSource: isDirect ? "DIRECT" : "MANUAL",
+          // Источник — не хардкод. Код гейта DBS выглядит как обычный WB-код, и
+          // заказ, созданный по нему руками, раньше уезжал как `MANUAL`: та же
+          // ошибка, что 17.08 записала DBS-заказ как `WB`. `resolveWbOrderSource`
+          // смотрит, есть ли за кодом заказ маркетплейса, и никогда не бросает.
+          orderSource: isDirect ? "DIRECT" : await resolveWbOrderSource(tx, code),
           adminNote: noteText ? `${manualMark} ${noteText}` : manualMark,
           pendingAt: gamepassUrl ? new Date() : null,
+          // Сколько покупатель реально заплатил на WB — иначе прибыль по
+          // такому заказу не посчитать, а он ничем не отличается от обычного.
+          ...(marketplace ? { saleAmountKopecks: marketplace.finalPriceKopecks ?? marketplace.priceKopecks ?? undefined } : {}),
           ...(isDirect ? {
             // Админский ручной direct считается подтверждённым: он сразу
             // проходит DIR-гейт и попадает в рабочую очередь выкупа.
@@ -857,6 +955,20 @@ export async function POST(req: NextRequest) {
           },
         });
       }
+      // След в таймлайне карточки доставки: с точки зрения DBS это то же
+      // событие, что и «создать заказ на выкуп» из консоли, и оператор должен
+      // видеть его там, независимо от того, из какой формы заказ завели.
+      if (marketplace) {
+        await tx.wbMarketplaceEvent.create({
+          data: {
+            marketplaceOrderId: marketplace.id,
+            type: "INTERNAL_ORDER_CREATED",
+            idempotencyKey: `internal-order:${marketplace.id}:${order.id}`,
+            actor: actor.displayName,
+            payload: { activationCode: code, gamepassId: gpId, robloxUsername: nick, denomination: amount, via: "order-sheet" },
+          },
+        }).catch(() => { /* след не должен отменять созданный заказ */ });
+      }
       return order;
     });
 
@@ -868,6 +980,41 @@ export async function POST(req: NextRequest) {
 
     cachedCounts = null;
     return NextResponse.json({ ok: true, order: created, notified });
+  }
+
+  /* Завести клиента руками.
+     До 31.08.2026 поле «Клиент» умело только искать по базе. Человек написал в
+     чат WB или пришёл из другого канала, в нашей базе его нет — и заказ было
+     не к кому привязать: он вешался на служебного `tgId: "admin"`, то есть
+     уведомления ему уже не уйдут никогда. Идемпотентно: если такой tgId/vkId
+     уже есть, возвращаем существующего, а не плодим второго. */
+  if (action === "create-client") {
+    const tgId = String(body.tgId ?? "").replace(/\D/g, "") || null;
+    const vkId = String(body.vkId ?? "").replace(/\D/g, "") || null;
+    const username = String(body.username ?? "").trim().replace(/^@/, "") || null;
+    const name = String(body.name ?? "").trim() || null;
+
+    if (!tgId && !vkId)
+      return NextResponse.json({ error: "Нужен Telegram ID или VK ID — по нику клиента не создать" }, { status: 400 });
+    if (tgId && tgId.length < 5)
+      return NextResponse.json({ error: "Telegram ID — минимум 5 цифр" }, { status: 400 });
+    if (vkId && vkId.length < 3)
+      return NextResponse.json({ error: "VK ID — минимум 3 цифры" }, { status: 400 });
+
+    const found = await (prisma as any).user.findFirst({
+      where: { OR: [...(tgId ? [{ tgId }] : []), ...(vkId ? [{ vkId }] : [])] },
+      select: { id: true, tgId: true, vkId: true, name: true, username: true, robloxUsername: true },
+    });
+    if (found) return NextResponse.json({ ok: true, user: found, existed: true });
+
+    const created = await (prisma as any).user.create({
+      data: {
+        tgId, vkId, username,
+        name: name ?? `Клиент ${tgId ?? vkId}`,
+      },
+      select: { id: true, tgId: true, vkId: true, name: true, username: true, robloxUsername: true },
+    });
+    return NextResponse.json({ ok: true, user: created, existed: false });
   }
 
   // Не требует orderId — клиент шлёт только { action, query }.
