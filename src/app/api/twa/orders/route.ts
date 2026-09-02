@@ -33,6 +33,9 @@ import {
 import {
   NOT_HELD_SQL, assertOrderNotHeld, heldRefusal, holdByCode, normalizeHoldCode, releaseByCode,
 } from "@/lib/order-hold";
+import {
+  buildNarrowWhere, isNarrowed, loadOrderSlices, parseNarrow, type OrderSlicesPayload,
+} from "@/lib/order-slices";
 import { resolveWbOrderSource } from "../../../../../bots/shared/wb-order-source";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
@@ -48,6 +51,8 @@ let cachedCounts: {
   data: Record<string, number>;
   sums: Record<string, number>;
   oldest: Record<string, string | null>;
+  /** Шапка среза: деньги, полосы, препятствия, возраст, «сегодня». */
+  slices: OrderSlicesPayload;
   ts: number;
 } | null = null;
 const COUNT_CACHE_TTL = 30_000;
@@ -228,9 +233,15 @@ export async function GET(req: NextRequest) {
   const sourceWhere = sourceFilter && ["WB", "DIRECT", "AVITO", "MANUAL", "SITE"].includes(sourceFilter)
     ? { orderSource: sourceFilter }
     : {};
+  // Сужение из шапки среза: тап по полосе источника, корзине возраста,
+  // причине-препятствию или номиналу. Это фильтр поверх среза, а не другой
+  // срез — границы вкладки (`tabWhere`) остаются в силе.
+  const narrow = parseNarrow(searchParams);
+  const narrowed = isNarrowed(narrow);
+  const narrowWhere = narrowed && isVirtualTab ? buildNarrowWhere(tab as FilterTab, narrow) : {};
   const where = q
-    ? { AND: [notTest, tabWhere, sourceWhere, searchWhere] }
-    : { ...notTest, ...tabWhere, ...sourceWhere };
+    ? { AND: [notTest, tabWhere, sourceWhere, narrowWhere, searchWhere] }
+    : { AND: [notTest, tabWhere, sourceWhere, narrowWhere] };
 
   const take = skipCounts ? limit + 1 : limit;
   const userInclude = {
@@ -268,14 +279,26 @@ export async function GET(req: NextRequest) {
     counts: null as Record<string, number> | null,
     sums: null as Record<string, number> | null,
     oldest: null as Record<string, string | null> | null,
+    slices: null as OrderSlicesPayload | null,
   };
   const countsPromise = skipCounts
     ? Promise.resolve(emptyCounts)
     : (async () => {
         if (!q) {
+          // Сужение режет ленту, но не чипы: счётчики срезов остаются полными
+          // (иначе тап по полосе «DBS 4» обнулял бы число, по которому в неё
+          // и зашли), а `total` обязан считать именно суженную выборку —
+          // на нём стоит пагинация.
+          const narrowTotal = narrowed
+            ? await (prisma as any).wbOrder.count({ where })
+            : null;
           if (cachedCounts && Date.now() - cachedCounts.ts < COUNT_CACHE_TTL) {
-            return { total: tabTotal(tab, cachedCounts.data), counts: cachedCounts.data, sums: cachedCounts.sums, oldest: cachedCounts.oldest };
+            return { total: narrowTotal ?? tabTotal(tab, cachedCounts.data), counts: cachedCounts.data, sums: cachedCounts.sums, oldest: cachedCounts.oldest, slices: cachedCounts.slices };
           }
+          // Шапка среза идёт тем же кэшем, что и счётчики: оба читают ту же
+          // таблицу тем же предикатом, и разъехавшийся TTL означал бы «14» в
+          // чипе против «13 заказов» в шапке под ним.
+          const slicesPromise = loadOrderSlices();
           // Заявки прямых заказов (DirectIntent, «ожидаем реквизиты») живут 24ч;
           // бейдж вкладки «Прямой» = заказы + заявки (клиент складывает сам).
           const intentsPromise: Promise<number> = (prisma as any).directIntent.count({
@@ -333,14 +356,15 @@ export async function GET(req: NextRequest) {
             AWAITING_LINK: r["OLDEST_AWAITING_LINK"] ? new Date(r["OLDEST_AWAITING_LINK"]).toISOString() : null,
             STALE_LINK: r["OLDEST_STALE_LINK"] ? new Date(r["OLDEST_STALE_LINK"]).toISOString() : null,
           };
-          cachedCounts = { data: counts, sums, oldest, ts: Date.now() };
-          return { total: tabTotal(tab, counts), counts, sums, oldest };
+          const slices = await slicesPromise;
+          cachedCounts = { data: counts, sums, oldest, slices, ts: Date.now() };
+          return { total: narrowTotal ?? tabTotal(tab, counts), counts, sums, oldest, slices };
         }
         const cnt = await (prisma as any).wbOrder.count({ where });
         return { ...emptyCounts, total: cnt };
       })();
 
-  const [rawOrders, { total, counts, sums, oldest }] = await Promise.all([ordersPromise, countsPromise]);
+  const [rawOrders, { total, counts, sums, oldest, slices }] = await Promise.all([ordersPromise, countsPromise]);
   const hasMore = skipCounts && rawOrders.length > limit;
   const orders = hasMore ? rawOrders.slice(0, limit) : rawOrders;
   const finalTotal = skipCounts
@@ -450,7 +474,7 @@ export async function GET(req: NextRequest) {
         _count: { profitKopecks: true },
       })
     : null;
-  return NextResponse.json({ orders, total: finalTotal, counts, sums, oldest, profitSummary, page, pages });
+  return NextResponse.json({ orders, total: finalTotal, counts, sums, oldest, slices, profitSummary, page, pages });
 }
 
 function tabTotal(tab: string, counts: Record<string, number>): number {

@@ -1,5 +1,6 @@
 "use client";
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { RefreshCw } from "lucide-react";
 import { C, SHADOW, tabular, MONO } from "../theme";
 import { ageColor, fmtAge } from "../age";
 import { haptic } from "../haptics";
@@ -19,6 +20,7 @@ type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" 
    поэтому prisma в клиентский бандл не попадает (значение отсюда импортировать
    нельзя). */
 import type { FilterTab } from "@/lib/order-queue";
+import type { LaneId, OrderNarrow, OrderSlice, OrderSlicesPayload, SliceKey } from "@/lib/order-slices";
 
 // «Ждут ссылку»: сервер отдаёт первые N — самые свежие, дальше хвост от самых
 // старых (см. fetchAwaitingLinkHybrid в api/twa/orders). Здесь — для разделителя.
@@ -135,6 +137,8 @@ interface OrdersData {
   counts: Record<string, number>;
   sums?: Record<string, number> | null;
   oldest?: Record<string, string | null> | null;
+  /** Шапка среза: деньги, полосы источников, препятствия, возраст, «сегодня». */
+  slices?: OrderSlicesPayload | null;
   page: number;
   pages: number;
 }
@@ -172,35 +176,38 @@ const TAB_META: Record<FilterTab, { label: string; color: string }> = {
   HELD:          { label: "Заморожены",      color: ICE },
 };
 
-/* Авито здесь нет: канал закрыт, и чип с нулём занимал место в ряду, который
-   и так не влезает в экран. Вкладка жива и показывается сама, пока в ней
-   остаются заказы (`SELF_RETIRING_FILTERS`) — старые заказы не должны стать
-   недостижимыми из-за того, что мы перестали продавать. */
-const FILTERS: { id: FilterTab }[] = [
-  { id: "BUYOUT" },
-  { id: "HELD" },
-  { id: "DIRECT" },
-  { id: "AVITO" },
-  { id: "NEW" },
-  { id: "ERROR" },
-  { id: "AWAITING_LINK" },
-  { id: "STALE_LINK" },
-  { id: "DONE" },
-  { id: "REJECTED" },
-  { id: "FAVORITES" },
+/* ── Срезы ───────────────────────────────────────────────────────────────────
+   Срез — это не статус в базе, а работа: что вы собираетесь с этими заказами
+   делать. Поэтому они названы глаголом и стоят одним рядом.
+
+   Раньше здесь было три этажа навигации: сегмент «В работе / Все / История»,
+   ряд из одиннадцати чипов и мини-дашборд с виджетами — вместе они занимали
+   треть экрана и заставляли выбирать, ещё не начав работать. Всё, что не
+   является ежедневной работой, уехало в шторку «Фильтры»; ни одна вкладка не
+   исчезла, и новых статусов БД срезы не заводят.
+   ────────────────────────────────────────────────────────────────────────── */
+const SLICES: { id: SliceKey; label: string; till: string; color: string }[] = [
+  { id: "BUYOUT",        label: "Выкупить", till: "К выкупу",    color: C.green },
+  { id: "ERROR",         label: "Починить", till: "Ошибки",      color: C.red },
+  { id: "AWAITING_LINK", label: "Дожать",   till: "Ждут ссылку", color: C.yellow },
+  { id: "DONE",          label: "История",  till: "История",     color: C.accent },
 ];
 
-/** Чипы, которые исчезают из ряда при нулевом счётчике вместо того, чтобы
-    занимать место навсегда. */
-const SELF_RETIRING_FILTERS = new Set<FilterTab>(["AVITO", "STALE_LINK", "HELD"]);
+const SLICE_IDS = new Set<string>(SLICES.map(s => s.id));
 
-const ORDER_MODES: { id: "work" | "all" | "history"; label: string; filter: FilterTab; countKey: FilterTab }[] = [
-  { id: "work", label: "В работе", filter: "WORK", countKey: "WORK" },
-  { id: "all", label: "Все", filter: "ALL", countKey: "ALL" },
-  { id: "history", label: "История", filter: "DONE", countKey: "DONE" },
+/* Что уехало в шторку «Фильтры»: всё, что не является ежедневной работой. */
+/* «Требуют внимания» в списке нет: это не вкладка, а серверная подборка внутри
+   «Все», и своей строкой она стояла бы в шторке дважды. Её строка — отдельная,
+   ниже. */
+const SHEET_FILTERS: FilterTab[] = [
+  "ALL", "WORK", "NEW", "DIRECT", "AVITO", "FAVORITES", "REJECTED", "HELD", "STALE_LINK",
 ];
 
-const WORK_FILTERS = new Set<FilterTab>(["WORK", "BUYOUT", "DIRECT", "AVITO", "NEW", "ERROR", "AWAITING_LINK", "STALE_LINK", "REJECTED", "FAVORITES", "ATTENTION", "HELD"]);
+const LANE_META: Record<LaneId, { label: string; color: string }> = {
+  WB:     { label: "ВБ",     color: C.green },
+  WB_DBS: { label: "DBS",    color: C.blue },
+  DIRECT: { label: "Прямые", color: C.accent },
+};
 /* Очереди, где выгрузка ID геймпассов имеет смысл: заказ уже с геймпассом и ждёт выкупа.
    Список синхронен `GAMEPASS_EXPORT_TABS` в `api/twa/orders`. */
 const EXPORTABLE_TABS = new Set<FilterTab>(["BUYOUT", "DIRECT", "AVITO", "WORK", "ERROR", "ATTENTION"]);
@@ -224,6 +231,81 @@ function orderTabBadge(order: Order): { label: string; color: string } | null {
   if (order.status === "AWAITING_GAMEPASS" && created > cutoff) return { label: "Новые", color: C.accent };
   if (order.status === "AWAITING_GAMEPASS" && created <= cutoff) return { label: "Ждут ссылку", color: C.yellow };
   if (["PENDING", "IN_PROGRESS"].includes(order.status)) return { label: "К выкупу", color: C.green };
+  return null;
+}
+
+/* ── Главное действие карточки ───────────────────────────────────────────────
+   Одна цель на карточку, видимая прямо из ленты: цикл выкупа — «скопировал ID
+   → купил в доноре → отметил Выкуплено», и второй шаг обязан быть в один тап.
+
+   Функция чистая и одна на все срезы: подпись определяется СОСТОЯНИЕМ заказа,
+   а не вкладкой, на которой он показан. Иначе один и тот же заказ предлагал бы
+   в «Выкупить» и в «Все» разные кнопки — и однажды не ту.
+   ────────────────────────────────────────────────────────────────────────── */
+type CardActionTone = "green" | "blue" | "ice";
+interface CardAction {
+  /** `contact` открывает диалог с клиентом, остальное — POST в /api/twa/orders. */
+  kind: "action" | "contact";
+  action?: string;
+  icon: string;
+  label: string;
+  tone: CardActionTone;
+}
+
+function primaryActionFor(order: Order): CardAction | null {
+  // ❄️ Заморозка бьёт статус: у замороженного заказа кнопок выкупа нет вовсе,
+  // единственный выход — снять заморозку.
+  if (order.heldAt) return { kind: "action", action: "unhold", icon: "❄", label: "Разморозить", tone: "ice" };
+  if (order.status === "COMPLETED" || order.status === "REJECTED") return null;
+  // Прямой заказ до подтверждения оплаты: выкупать и закрывать нечего.
+  if (order.status === "AWAITING_PAYMENT" || order.status === "PAYMENT_PENDING") return null;
+
+  const split = order.splitGamepasses ?? [];
+  const hasGamepass = !!order.gamepassUrl || split.length > 0;
+
+  if (order.status === "ERROR") {
+    return hasGamepass
+      ? { kind: "action", action: "restore-to-buyout", icon: "↩", label: "Вернуть", tone: "blue" }
+      : null;
+  }
+  if (order.status === "AWAITING_GAMEPASS") {
+    return { kind: "contact", icon: "✉", label: "Написать", tone: "blue" };
+  }
+  // PENDING / IN_PROGRESS. У разбитого заказа «Выкуплено» появляется только
+  // когда закрыта последняя часть: раньше него оно означало бы «закрыть заказ,
+  // купив не всё», и клиент получил бы меньше оплаченного.
+  if (split.length > 0 && split.some(part => !part.purchasedAt)) return null;
+  if (!hasGamepass) return null;
+  return { kind: "action", action: "complete", icon: "✓", label: "Выкуплено", tone: "green" };
+}
+
+/* ── Строка-флаг карточки ────────────────────────────────────────────────────
+   Появляется только когда есть что сказать, и красится по смыслу: зелёная —
+   пасс проверен и годен, оранжевая — цена разошлась с номиналом, красная —
+   выкупать нельзя (пасс снят, рег. цена, клиент недостижим).
+
+   Порядок веток = порядок срочности. Он важнее полноты: строка одна, и если
+   пасс снят с продажи, а бот вдобавок не достучался в VK, менеджеру нужно
+   узнать про пасс — второе он увидит в досье.
+   ────────────────────────────────────────────────────────────────────────── */
+function cardFlag(order: Order, live: GpLiveInfo | undefined, reminders: number): { text: string; color: string } | null {
+  if (order.heldAt) return { text: `❄️ ${order.heldReason ?? "заморожен — не выкупать"}`, color: ICE };
+  if (order.buyoutErrorCode === "REGIONAL_PRICE")
+    return { text: "🌍 рег. цена на доноре — замена по нику не найдена", color: C.red };
+  if (live?.isForSale === false) return { text: "⛔ геймпасс снят с продажи", color: C.red };
+  if (live?.priceMismatch && live.livePrice != null)
+    return { text: `⚠ цена пасса ${live.livePrice.toLocaleString("ru-RU")} R$ ≠ ${live.expected.toLocaleString("ru-RU")} R$`, color: C.orange };
+  if (order.gpWatchDeclinedAt && order.status === "AWAITING_GAMEPASS" && !order.robloxUsername)
+    return { text: "❌ клиент отклонил найденный ник", color: C.red };
+  if (order.vkUnreachable === true && order.user.vkId)
+    return { text: "🚫 бот не может написать в VK — только с личного", color: C.red };
+  if (order.status === "AWAITING_GAMEPASS" && reminders >= 3)
+    return { text: "Бот отмолчал все три напоминания — дожимать вручную", color: C.textTertiary };
+  if (order.status === "ERROR") return { text: "Заказ требует исправления", color: C.red };
+  // Зелёная строка — не украшение: она значит «живая проверка прошла», и без
+  // самой проверки её быть не должно.
+  if (live && live.isForSale === true && !live.priceMismatch && ["PENDING", "IN_PROGRESS"].includes(order.status))
+    return { text: "✓ пасс продаётся, цена сходится", color: C.green };
   return null;
 }
 
@@ -1760,6 +1842,169 @@ function SplitPartsBlock({ parts, orderAmount, orderId, token, onChanged }: {
   );
 }
 
+/* ── ✕ RejectModal — отмена заказа с причиной ────────────────────────────────
+   Причина не формальность: она уходит клиенту сообщением и остаётся в
+   карточке. «Не указана» в переписке с покупателем читается как «нас
+   отшили», поэтому поле обязательное, а заготовки закрывают частые случаи.
+   ────────────────────────────────────────────────────────────────────────── */
+const REJECT_PRESETS = [
+  "Не прислал ссылку на геймпасс",
+  "Клиент отказался",
+  "Дубль заказа",
+  "Оплата не подтвердилась",
+];
+
+function RejectModal({ order, onReject, onClose }: {
+  order: Order;
+  onReject: (reason: string) => Promise<ActionResult>;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function submit() {
+    const text = reason.trim();
+    if (!text) { toast("Причина обязательна", "error"); return; }
+    setLoading(true);
+    const res = await onReject(text);
+    setLoading(false);
+    if (res.ok) onClose();
+    else toast(res.error ?? "Ошибка", "error");
+  }
+
+  return (
+    <div onClick={e => e.stopPropagation()} style={{
+      padding: "12px 14px 14px", borderTop: `1px solid ${C.hairline}`,
+      background: "rgba(0,0,0,0.15)", display: "flex", flexDirection: "column", gap: 10,
+    }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: C.red }}>✕ Отменить заказ</div>
+      <div style={{ fontSize: 13, color: C.textSecondary, fontFamily: MONO }}>
+        {order.wbCode} · {order.robloxUsername ?? order.probableNick ?? "ник не указан"} · {order.amount.toLocaleString("ru-RU")} R$
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+        {REJECT_PRESETS.map(preset => (
+          <button key={preset} className="twa-press-sm" onClick={() => setReason(preset)}
+            style={{
+              padding: "8px 13px", borderRadius: 999, cursor: "pointer",
+              border: reason === preset ? `1px solid ${C.red}66` : "1px solid transparent",
+              background: reason === preset ? `${C.red}29` : "rgba(255,255,255,0.08)",
+              color: reason === preset ? C.red : C.textSecondary, fontSize: 13, fontWeight: 600,
+            }}>
+            {preset}
+          </button>
+        ))}
+      </div>
+      <textarea
+        placeholder="Причина (уйдёт клиенту)…"
+        value={reason}
+        onChange={e => setReason(e.target.value)}
+        rows={2}
+        style={{
+          background: "rgba(255,255,255,0.06)", border: `1px solid ${C.border}`, borderRadius: 10,
+          color: C.textPrimary, fontSize: 15, lineHeight: 1.4, padding: "10px 12px",
+          resize: "none", outline: "none", width: "100%", boxSizing: "border-box", fontFamily: "inherit",
+        }}
+      />
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="twa-press" onClick={onClose}
+          style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: C.elevated, color: C.textSecondary, fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
+          Назад
+        </button>
+        <button className="twa-press" onClick={submit} disabled={loading || !reason.trim()}
+          style={{ flex: 2, padding: "12px", borderRadius: 10, border: "none", background: C.red, color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", opacity: loading || !reason.trim() ? 0.5 : 1 }}>
+          {loading ? "…" : "Отменить заказ"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Меню «···» ──────────────────────────────────────────────────────────────
+   Четыре группы, отсортированные по частоте. Меню не заменяет формы, а
+   доводит до них: «Редактировать» открывает тот же лист заказа, что и
+   создание, «Разбить» — то же разбиение. Автовыкуп донором понижен в «редко»
+   осознанно: выкуп сейчас ручной, и кнопка, тратящая робуксы, не должна
+   стоять рядом с копированием ID.
+   ────────────────────────────────────────────────────────────────────────── */
+type MenuAction =
+  | "edit" | "split" | "rebind" | "move"
+  | "error" | "hold" | "unhold" | "favorite" | "reject"
+  | "purchase" | "refund" | "trace";
+
+function OrderMenuSheet({
+  open, order, passId, splitIds, grossAmount, canEdit, canSplit, canRefund, canMove, canPurchase, busy,
+  onClose, onCopy, onPick,
+}: {
+  open: boolean;
+  order: Order;
+  passId: string | null;
+  splitIds: string[];
+  grossAmount: number;
+  canEdit: boolean;
+  canSplit: boolean;
+  canRefund: boolean;
+  canMove: boolean;
+  canPurchase: boolean;
+  busy: boolean;
+  onClose: () => void;
+  onCopy: (text: string, label: string) => void;
+  onPick: (id: MenuAction) => void;
+}) {
+  const nick = order.robloxUsername ?? order.probableNick ?? null;
+  const gamepassLink = passId ? `https://www.roblox.com/game-pass/${passId}` : null;
+  // «Всё одной строкой» — чтобы не делать три тапа подряд, когда выкупаешь пачкой.
+  const oneLine = [passId, `${grossAmount} R$`, nick].filter(Boolean).join(" · ");
+  const row = (id: MenuAction, icon: string, label: string, hint?: string, tone?: "red" | "dim") => (
+    <button key={id} type="button" className={`twa-oc-menu-row twa-press-sm${tone === "red" ? " is-red" : tone === "dim" ? " is-dim" : ""}`}
+      disabled={busy} onClick={() => { haptic.select(); onPick(id); }}>
+      <span>{icon}</span><span>{label}</span>{hint && <em>{hint}</em>}
+    </button>
+  );
+  const copyRow = (icon: string, label: string, text: string, hint?: string) => (
+    <button type="button" className="twa-oc-menu-row twa-press-sm"
+      onClick={() => { onCopy(text, `${label} скопирован${label.endsWith("а") ? "а" : ""}`); onClose(); }}>
+      <span>{icon}</span><span>{label}</span>{hint && <em>{hint}</em>}
+    </button>
+  );
+
+  return (
+    <BottomSheet open={open} onClose={onClose} ariaLabel={`Меню заказа ${order.wbCode}`} className="twa-filter-sheet">
+      <div className="twa-oc-menu-head">
+        <span>📦</span>
+        <b>{order.wbCode}</b>
+        <em>{[nick, `${grossAmount.toLocaleString("ru-RU")} R$`].filter(Boolean).join(" · ")}</em>
+      </div>
+
+      <div className="twa-oc-menu-group">Скопировать</div>
+      {gamepassLink && copyRow("⧉", "Ссылку на геймпасс", gamepassLink, `game-pass/${passId}`)}
+      {splitIds.length > 1 && copyRow("⧉", "ID всех частей", splitIds.join("\n"), `${splitIds.length} шт.`)}
+      {nick && copyRow("⧉", "Ник Roblox", nick, nick)}
+      {oneLine && copyRow("⧉", "Всё одной строкой", oneLine, "для донора")}
+
+      <div className="twa-oc-menu-group">Правка</div>
+      {canEdit && row("edit", "✏️", "Редактировать заказ")}
+      {canSplit && row("split", "🧩", "Разбить на несколько пассов",
+        splitIds.length > 0 ? `${order.splitGamepasses?.filter(p => p.purchasedAt).length ?? 0}/${splitIds.length}` : undefined)}
+      {["AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "ERROR", "REJECTED"].includes(order.status) && row("rebind", "🔄", "Перепривязать к клиенту")}
+      {canMove && row("move", "↪", "Переместить в другой раздел")}
+
+      <div className="twa-oc-menu-group">Статус</div>
+      {order.status !== "ERROR" && !order.heldAt && !["COMPLETED", "REJECTED"].includes(order.status) && row("error", "⚠️", "Пометить ошибкой")}
+      {order.heldAt
+        ? row("unhold", "❄️", "Разморозить", order.heldReason ?? undefined)
+        : !["COMPLETED", "REJECTED"].includes(order.status) && row("hold", "❄️", "Заморозить — не выкупать")}
+      {row("favorite", order.isFavorite ? "★" : "☆", order.isFavorite ? "Убрать из избранного" : "В избранное")}
+      {["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "AWAITING_PAYMENT", "PAYMENT_PENDING", "ERROR"].includes(order.status)
+        && row("reject", "✕", "Отменить заказ", undefined, "red")}
+
+      <div className="twa-oc-menu-group">Редко</div>
+      {canPurchase && row("purchase", "🛒", "Выкупить автоматом (донор)", undefined, "dim")}
+      {canRefund && row("refund", "↩️", "Оформить возврат", "T-Bank", "dim")}
+      {row("trace", "🕵", "След покупателя", undefined, "dim")}
+    </BottomSheet>
+  );
+}
+
 /* ───────────── OrderCard — compact layout ───────────── */
 function OrderCard({
   order, token, currentTab, exiting, onRunAction, onSaveNote, onPurchaseDone, onToggleFavorite, onMoved, live,
@@ -1782,8 +2027,13 @@ function OrderCard({
   const [splitOpen, setSplitOpen] = useState(false);
   const [rebindOpen, setRebindOpen] = useState(false);
   const [refundOpen, setRefundOpen] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [sheetExpanded, setSheetExpanded] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  /** Какая из двух кнопок копирования только что сработала — для галочки. */
+  const [copied, setCopied] = useState<"code" | "pass" | null>(null);
+  const [primaryBusy, setPrimaryBusy] = useState(false);
   // GP-watch: локально трекаем «клиент оповещён об этом ГП» — сервер после
   // «Оповестить» отдаёт свежий passId, перезагрузка вкладки не нужна.
   const [gpwPassId, setGpwPassId] = useState<string | null>(order.gpWatchNotifiedPassId);
@@ -1810,6 +2060,35 @@ function OrderCard({
       }
     } catch { toast("Ошибка сети", "error"); }
     finally { setGpwLoading(false); }
+  }
+
+  /* Автовыкуп донором. Живёт в меню, в группе «редко»: сейчас выкуп ручной,
+     но сама механика рабочая, и прятать её насовсем — значит однажды искать
+     её в git. Разбитый заказ покупается по одной части за нажатие, поэтому
+     успех бывает промежуточным — тост обязан это различать, иначе «✅»
+     читается как «заказ закрыт» и следующую часть никто не выкупит. */
+  async function runPurchase() {
+    if (primaryBusy) return;
+    setPrimaryBusy(true);
+    haptic.impact("light");
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "purchase", orderId: order.id }),
+      });
+      const d = await r.json();
+      if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
+      if (d.success) {
+        haptic.notify("success");
+        toast(d.splitDone === false ? `🧩 ${d.msg}` : `✅ ${d.msg}`, "success");
+        onPurchaseDone?.();
+      } else {
+        haptic.notify("error");
+        toast(`❌ ${d.msg}`, "error");
+      }
+    } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
+    finally { setPrimaryBusy(false); }
   }
 
   const showGpWatch = order.status === "AWAITING_GAMEPASS" && !!order.probableNick && !order.robloxUsername;
@@ -1856,57 +2135,184 @@ function OrderCard({
   // (since it entered PENDING). pendingAt is set when the gamepass link arrives.
   const inBuyoutQueue = !!order.pendingAt && ["PENDING", "IN_PROGRESS"].includes(order.status);
 
+  /* ── Четыре строки и три крупные цели ────────────────────────────────────
+     Карточка обслуживает ручной цикл выкупа: скопировал ID → купил в доноре →
+     отметил «Выкуплено». Всё, что в нём нужно, лежит на поверхности; всё
+     остальное — на один тап глубже, в меню «···» и в досье.
+
+     Ряд действий видим ВСЕГДА, а не раскрывается по тапу: очередь выкупа
+     бывает на девяносто заказов, и «+1 тап на каждый» — это девяносто лишних
+     жестов за проход. Цена решения — на экран влезает пять карточек вместо
+     семи; она заплачена сознательно.
+
+     Строки не переезжают между состояниями: меняются только главное действие и
+     строка-флаг. Заказ, найденный глазом на одном месте, там же и остаётся.
+     ────────────────────────────────────────────────────────────────────── */
+  const splitIds = split.map(part => part.gamepassId);
+  const isDoneState = order.status === "COMPLETED" || order.status === "REJECTED";
+  const railColor = order.heldAt ? ICE : order.status === "ERROR" ? C.red : null;
+  const primary = primaryActionFor(order);
+  const reminders = order.remindersSent ?? 0;
+  const showBell = order.status === "AWAITING_GAMEPASS" && reminders > 0;
+  // Ник жёлтым, если он вероятный, а не подтверждённый: выкупать по нему —
+  // это ставка, и цвет обязан сказать об этом до нажатия.
+  const nick = order.robloxUsername ?? order.probableNick ?? null;
+  const nickIsGuess = !order.robloxUsername && !!order.probableNick;
+  const flag = cardFlag(order, live, reminders);
+
+  /* Кнопка копирования показывает то, что вставляется в донора. Если пасса
+     нет — вставлять нечего, и на её месте стоит вход в поиск пасса по нику. */
+  const copySlot: { text: string; label: string; hint?: boolean } | null =
+    splitIds.length > 0 ? { text: splitIds.join("\n"), label: `${splitIds.length} ID пассов` }
+      : passId ? { text: passId, label: passId }
+        : showGpWatch ? { text: "", label: "Найти ГП по нику", hint: true }
+          : null;
+
+  async function runPrimary() {
+    if (!primary || primaryBusy) return;
+    if (primary.kind === "contact") { haptic.impact("light"); openContact(order.user); return; }
+    setPrimaryBusy(true);
+    haptic.impact("light");
+    try { await onRunAction(primary.action!); } finally { setPrimaryBusy(false); }
+  }
+
+  function copyAnd(text: string, mark: "code" | "pass", toastText: string) {
+    copyText(text);
+    haptic.impact("light");
+    setCopied(mark);
+    setTimeout(() => setCopied(c => (c === mark ? null : c)), 1400);
+    toast(toastText, "success");
+  }
+
   // Компактная сводка используется дважды: строкой в ленте и шапкой detail-sheet.
   // Сам sheet рендерится порталом в body: position:fixed внутри iOS-скролла ленты
   // глючит (containing block + layout shift), карточка «вылезала на весь экран».
   const compactSummary = (
     <>
-        <span className="twa-compact-order-top">
-          <b style={{ color: tabBadge?.color ?? SOURCE_BADGE_META[order.orderSource]?.color ?? C.accent }}>
-            {tabBadge?.label ?? SOURCE_BADGE_META[order.orderSource]?.label ?? order.orderSource}
-          </b>
-          <small>{fmtAge(timeRef)}</small>
-          <i>{expanded ? "⌃" : "⌄"}</i>
-        </span>
-        <span className="twa-compact-order-main">
-          <strong>{order.robloxUsername ?? order.probableNick ?? "Ник не указан"}</strong>
-          <b>{displayAmount.toLocaleString("ru-RU")} <small>R$</small></b>
-        </span>
-        <span className="twa-compact-order-meta">
-          <span>{shortName}</span>
-          <code>{order.wbCode}</code>
-          {showCleanHint && <span>{order.amount.toLocaleString("ru-RU")} чистыми</span>}
-        </span>
-        {(live?.priceMismatch || live?.isForSale === false || order.vkUnreachable || order.gpWatchDeclinedAt || order.status === "ERROR") && (
-          <span className="twa-compact-warning">
-            {order.buyoutErrorCode === "REGIONAL_PRICE" ? "Рег. цена — полная замена ГП не найдена" :
-              live?.priceMismatch ? `Цена пасса ${live.livePrice} R$ ≠ ${live.expected} R$` :
-              live?.isForSale === false ? "Геймпасс снят с продажи" :
-                order.vkUnreachable ? "VK недоступен — написать вручную" :
-                  order.gpWatchDeclinedAt ? "Клиент отклонил найденный ник" : "Заказ требует исправления"}
-          </span>
-        )}
+      <span className="twa-oc-top">
+        <b style={{ color: tabBadge?.color ?? SOURCE_BADGE_META[order.orderSource]?.color ?? C.accent }}>
+          {tabBadge?.label ?? SOURCE_BADGE_META[order.orderSource]?.label ?? order.orderSource}
+        </b>
+        <small style={{ color: isDoneState ? C.textTertiary : ageColor(timeRef) }}>{fmtAge(timeRef)}</small>
+        {showBell && <span className="twa-oc-bell">🔔 {reminders}/3</span>}
+        {/* Код ВБ — якорь заказа: его называют в чате и по нему ищут. Крупный,
+            всегда на одном месте, тап копирует. */}
+        <button
+          type="button"
+          className={`twa-oc-code twa-press-sm${copied === "code" ? " is-done" : ""}`}
+          aria-label={`Скопировать код ${order.wbCode}`}
+          onClick={e => { e.stopPropagation(); copyAnd(order.wbCode, "code", `Код ${order.wbCode} скопирован`); }}
+        >
+          {order.wbCode}<i>{copied === "code" ? "✓" : "⧉"}</i>
+        </button>
+        <i className="twa-oc-chev">{expanded ? "⌃" : "⌄"}</i>
+      </span>
+      <span className="twa-oc-main">
+        <strong style={nickIsGuess ? { color: C.yellow } : undefined}>{nick ?? "Ник не указан"}</strong>
+        <b>{displayAmount.toLocaleString("ru-RU")}<small>R$</small></b>
+      </span>
+      <span className="twa-oc-meta">
+        {showCleanHint && <span>{order.amount.toLocaleString("ru-RU")} чистыми</span>}
+        {nickIsGuess && <span>вероятный ник</span>}
+        {order.status === "COMPLETED" && <span>выкуп: {order.purchaserUsername ?? "вручную"}</span>}
+        <span>{shortName}</span>
+      </span>
+      {flag && <span className="twa-oc-flag" style={{ color: flag.color }}>{flag.text}</span>}
     </>
   );
 
   return (
     <>
-    <article className={`twa-glass-order${exiting ? " twa-card-exit" : ""}`} style={{
-      background: C.card,
-      borderRadius: 16,
-      overflow: "hidden",
-      boxShadow: SHADOW.card,
-      position: "relative",
-    }}>
-      <button
-        type="button"
-        className="twa-compact-order twa-press-sm"
+    <article
+      className={`twa-glass-order${exiting ? " twa-card-exit" : ""}${railColor ? " has-rail" : ""}${isDoneState ? " is-done-state" : ""}`}
+      style={{ background: C.card, borderRadius: 16, overflow: "hidden", boxShadow: SHADOW.card, position: "relative" }}
+    >
+      {railColor && <span className="twa-oc-rail" style={{ background: railColor }} />}
+      {/* Тело карточки — не <button>: внутри живут свои кнопки (код, действия),
+          а кнопка в кнопке — невалидная разметка, которую Safari разбирает
+          по-своему. role+onKeyDown сохраняют клавиатуру. */}
+      <div
+        role="button"
+        tabIndex={0}
+        className="twa-oc-open twa-press-sm"
         aria-expanded={expanded}
         onClick={() => { haptic.select(); setExpanded(value => !value); }}
+        onKeyDown={e => {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); haptic.select(); setExpanded(v => !v); }
+        }}
       >
         {compactSummary}
-      </button>
+      </div>
+
+      {/* Три цели: главное действие · ID пасса · «···». Ни одной ниже 36 px. */}
+      <div className="twa-oc-acts">
+        {primary && (
+          <button type="button" className={`twa-oc-prim twa-press-sm${primary.tone === "blue" ? " is-blue" : primary.tone === "ice" ? " is-ice" : ""}`}
+            disabled={primaryBusy} onClick={e => { e.stopPropagation(); void runPrimary(); }}>
+            <i>{primary.icon}</i>{primaryBusy ? "…" : primary.label}
+          </button>
+        )}
+        {copySlot ? (
+          <button
+            type="button"
+            className={`twa-oc-copy twa-press-sm${copySlot.hint ? " is-hint" : ""}${copied === "pass" ? " is-done" : ""}`}
+            disabled={gpwLoading}
+            onClick={e => {
+              e.stopPropagation();
+              if (copySlot.hint) { void gpwNotify(); return; }
+              copyAnd(copySlot.text, "pass", splitIds.length > 0 ? `${splitIds.length} ID скопированы` : "ID пасса скопирован");
+            }}
+          >
+            <i>{copySlot.hint ? "👁" : copied === "pass" ? "✓" : "⧉"}</i>
+            <span>{copySlot.hint && gpwLoading ? "Ищу ГП…" : copySlot.label}</span>
+          </button>
+        ) : <span style={{ flex: 1 }} />}
+        <button type="button" className="twa-oc-more twa-press-sm" aria-label="Меню заказа"
+          onClick={e => { e.stopPropagation(); haptic.select(); setMenuOpen(true); }}>
+          ···
+        </button>
+      </div>
     </article>
+
+    {/* Меню «···» — всё, что делается с заказом и не входит в ежедневный цикл
+        выкупа. Формы оно не дублирует, а ОТКРЫВАЕТ существующие: правка,
+        разбиение, перепривязка и заморозка живут в досье, и меню доводит туда
+        одним тапом — двух форм с одинаковыми полями в этом экране уже было
+        достаточно. */}
+    <OrderMenuSheet
+      open={menuOpen}
+      order={order}
+      passId={passId}
+      splitIds={splitIds}
+      grossAmount={dirtyAmount}
+      canEdit={isEditable}
+      canSplit={isSplittable}
+      canRefund={canRefund}
+      canMove={showMoveBtn}
+      canPurchase={!order.heldAt && ["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status) && (!!order.gamepassUrl || split.length > 0)}
+      busy={primaryBusy}
+      onClose={() => setMenuOpen(false)}
+      onCopy={(text, label) => copyAnd(text, "pass", label)}
+      onPick={id => {
+        setMenuOpen(false);
+        // Формы досье: открываем сам лист и нужную форму в нём.
+        const inSheet = (fn: () => void) => { setExpanded(true); fn(); };
+        switch (id) {
+          case "edit":     inSheet(() => setEditOpen(true)); break;
+          case "split":    inSheet(() => setSplitOpen(true)); break;
+          case "rebind":   inSheet(() => setRebindOpen(true)); break;
+          case "move":     inSheet(() => setMoveOpen(true)); break;
+          case "hold":     inSheet(() => setHoldOpen(true)); break;
+          case "refund":   inSheet(() => setRefundOpen(true)); break;
+          case "reject":   inSheet(() => setRejectOpen(true)); break;
+          case "trace":    setExpanded(true); break;
+          case "favorite": onToggleFavorite(); break;
+          case "error":    void onRunAction("set-error"); break;
+          case "unhold":   void onRunAction("unhold"); break;
+          case "purchase": void runPurchase(); break;
+        }
+      }}
+    />
 
     <BottomSheet
       open={expanded}
@@ -1917,14 +2323,15 @@ function OrderCard({
       expanded={sheetExpanded}
       onExpandedChange={setSheetExpanded}
     >
-      <button
-        type="button"
-        className="twa-compact-order twa-press-sm"
-        aria-expanded={expanded}
+      <div
+        role="button"
+        tabIndex={0}
+        className="twa-oc-open twa-press-sm"
         onClick={() => { haptic.select(); setExpanded(false); }}
+        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(false); } }}
       >
         {compactSummary}
-      </button>
+      </div>
       <>
       {/* Header: platform badge + nick + star */}
       <div style={{ padding: "14px 16px 0", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -2250,6 +2657,14 @@ function OrderCard({
           order={order}
           onHold={(reason) => onRunAction("hold", reason)}
           onClose={() => setHoldOpen(false)}
+        />
+      )}
+
+      {rejectOpen && (
+        <RejectModal
+          order={order}
+          onReject={(reason) => onRunAction("reject", reason)}
+          onClose={() => setRejectOpen(false)}
         />
       )}
 
@@ -2667,7 +3082,10 @@ export default function OrdersScreen({
   initialCreate?: "manual" | "direct" | null;
   onInitialQueryConsumed?: () => void;
 }) {
-  const [filter, setFilter] = useState<FilterTab>(initialQuery ? "ALL" : (initialTab as FilterTab) || "WORK");
+  // Экран открывается на «Выкупить»: это очередь, ради которой сюда заходят.
+  // Прежний дефолт «В работе» был мешком из трёх разных работ и первым делом
+  // требовал выбрать, чем заняться, — сегмента, который это позволял, больше нет.
+  const [filter, setFilter] = useState<FilterTab>(initialQuery ? "ALL" : (initialTab as FilterTab) || "BUYOUT");
   const [query, setQuery] = useState(initialQuery ?? "");
   // Вкладка «Все»: по умолчанию хронологическая лента (новые сверху),
   // подборка «Требуют внимания» — по кнопке «⚠ Внимание (N)» (решение 2026-07-06).
@@ -2684,10 +3102,14 @@ export default function OrdersScreen({
   // теперь оно приходит в ту же ленту, где у заказа есть все кнопки.
   const [live, setLive] = useState<LiveSearch | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  // Виджеты очередей открыты по умолчанию: это первое, зачем сюда заходят
-  // (сколько к выкупу, на сколько робуксов, сколько ждёт старейший). «Свернуть»
-  // остаётся — но сворачивание не запоминается, каждый вход начинается с фактов.
-  const [dashExpanded, setDashExpanded] = useState(true);
+  // Сужение ленты по строке шапки среза: полоса источника, корзина возраста,
+  // причина-препятствие, номинал. Живёт до смены среза — иначе тап по «DBS 4»
+  // тихо переезжал бы в следующий срез и там показывал пустую ленту.
+  const [narrow, setNarrow] = useState<OrderNarrow>({});
+  // Шапка среза свёрнута? Помним по срезу: в «Выкупить» её открывают каждый
+  // раз, в «Историю» заходят за лентой.
+  const [tillCollapsed, setTillCollapsed] = useState<Record<string, boolean>>({});
+  const [tillAt, setTillAt] = useState<number | null>(null);
   useEffect(() => {
     if (initialQuery || initialTab || initialCreate) onInitialQueryConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2700,6 +3122,8 @@ export default function OrdersScreen({
   const [exiting, setExiting] = useState<Set<string>>(new Set());
   const [doneSourceFilter, setDoneSourceFilter] = useState<SourceFilter>("ALL");
   const reqIdRef = useRef(0);
+  const narrowRef = useRef<OrderNarrow>({});
+  narrowRef.current = narrow;
 
   // Заявки прямых заказов (DirectIntent) — видны на вкладке «Прямой».
   const [intents, setIntents] = useState<Intent[]>([]);
@@ -2728,13 +3152,22 @@ export default function OrdersScreen({
       if (q) params.set("q", q);
       if (append) params.set("skipCounts", "1");
       params.set("lite", "1");
+      // Сужение уходит на сервер, а не фильтрует загруженную страницу: лента
+      // приходит по 20 заказов, и «оставить в ленте DBS» по странице означало
+      // бы «оставить в первых двадцати».
+      const n = narrowRef.current;
+      if (n.lane) params.set("lane", n.lane);
+      if (n.age) params.set("age", n.age);
+      if (n.amount) params.set("amount", String(n.amount));
+      if (n.blocked) params.set("blocked", n.blocked);
       const res = await fetch(`/api/twa/orders?${params}`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok || reqId !== reqIdRef.current) return;
       const d: OrdersData = await res.json();
       if (reqId !== reqIdRef.current) return;
       // append-страницы идут с skipCounts=1 (counts/sums/oldest = null) — сохраняем прежние.
-      setData(prev => append && prev ? { ...d, counts: prev.counts, sums: prev.sums, oldest: prev.oldest } : d);
+      setData(prev => append && prev ? { ...d, counts: prev.counts, sums: prev.sums, oldest: prev.oldest, slices: prev.slices } : d);
       setAllOrders(prev => append ? [...prev, ...applyCache(d.orders)] : applyCache(d.orders));
+      if (!append) setTillAt(Date.now());
     } finally {
       if (reqId === reqIdRef.current) {
         setLoading(false);
@@ -2745,12 +3178,53 @@ export default function OrdersScreen({
 
   const isAttentionView = filter === "ALL" && !query && allView === "attention";
   const serverTab: FilterTab = isAttentionView ? "ATTENTION" : filter;
+  const narrowKey = `${narrow.lane ?? ""}|${narrow.age ?? ""}|${narrow.amount ?? ""}|${narrow.blocked ?? ""}`;
+
+  /* Срез, в котором мы стоим. Фильтр из шторки срезом не является: ряд тогда
+     стоит без выделения, а активен чип «Фильтры» — так видно, что лента
+     показывает не ежедневную работу. */
+  const sliceId: SliceKey | null = SLICE_IDS.has(filter) && !isAttentionView ? (filter as SliceKey) : null;
+  const sheetFilterOn = sliceId === null;
+  const slicePayload = data?.slices ?? null;
+  const activeSlice = sliceId && slicePayload ? slicePayload.slices[sliceId] : null;
+
+  /* Снятие сужения. Подпись называет то, по чему сузили, а не «фильтр»: через
+     минуту после тапа никто не помнит, какая именно строка шапки была нажата. */
+  const narrowChips = useMemo(() => {
+    const out: { key: keyof OrderNarrow; label: string }[] = [];
+    if (narrow.lane) out.push({ key: "lane", label: LANE_META[narrow.lane].label });
+    if (narrow.amount) out.push({ key: "amount", label: `${narrow.amount} R$` });
+    if (narrow.blocked) out.push({
+      key: "blocked",
+      label: narrow.blocked === "regional" ? "рег. цена" : narrow.blocked === "split" ? "разбитые" : "без пасса",
+    });
+    if (narrow.age && activeSlice) {
+      const bucket = activeSlice.age.buckets.find(b => b.id === narrow.age);
+      if (bucket) out.push({ key: "age", label: bucket.label });
+    }
+    return out;
+  }, [narrow, activeSlice]);
+
+  const sliceRowRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const active = sliceRowRef.current?.querySelector<HTMLElement>(".twa-slice-tab.is-on");
+    active?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [sliceId]);
+
+  const selectSlice = useCallback((next: FilterTab) => {
+    setFilter(next);
+    setAllView("list");
+    setNarrow({});
+  }, []);
 
   useEffect(() => {
     setPage(1);
     setAllOrders([]);
     fetchOrders(serverTab, query, 1, false);
-  }, [serverTab, query, fetchOrders]);
+    // narrowKey — та же выборка другим предикатом: перезапрос обязателен, но
+    // сам объект `narrow` в зависимости класть нельзя (новая ссылка каждый рендер).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverTab, query, narrowKey, fetchOrders]);
 
   const fetchIntents = useCallback(async () => {
     setIntentsLoading(true);
@@ -3133,8 +3607,6 @@ export default function OrdersScreen({
     return `${meta.label} · ${data.total}`;
   }, [data, query, filter, isAttentionView]);
 
-  const activeMode = filter === "ALL" ? "all" : filter === "DONE" ? "history" : "work";
-
   const searchMode = useMemo<"spotlight" | "profile" | "list">(() => {
     if (!query || allOrders.length === 0) return "list";
     if (allOrders.length === 1 && allOrders[0].wbCode.toUpperCase() === query.toUpperCase()) return "spotlight";
@@ -3163,160 +3635,87 @@ export default function OrdersScreen({
           </button>
         </div>
 
-        {/* Segmented control */}
-        <div style={{
-          display: "flex", background: "rgba(118,118,128,0.18)",
-          borderRadius: 10, padding: 2, margin: "0 16px",
-        }}>
-          {ORDER_MODES.map(mode => {
-            const isSel = activeMode === mode.id;
-            return (
-              <button
-                key={mode.id}
-                type="button"
-                className="twa-press-sm"
-                onClick={() => { haptic.select(); setFilter(mode.filter); setAllView("list"); }}
-                style={{
-                  flex: 1, padding: "8px 0", borderRadius: 8, border: "none",
-                  background: isSel ? C.card : "transparent",
-                  color: isSel ? C.textPrimary : C.textSecondary,
-                  fontSize: 14, fontWeight: 600, fontFamily: "inherit",
-                  textAlign: "center", cursor: "pointer",
-                  boxShadow: isSel ? "0 1px 3px rgba(0,0,0,0.2)" : "none",
-                  transition: "all 0.15s",
-                }}
-              >
-                {mode.label} · {data?.counts?.[mode.countKey] ?? 0}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Pill filters */}
-        {filter !== "DONE" && !query && (() => {
-          const modeDefault: FilterTab = activeMode === "all" ? "ALL" : "WORK";
-          const pillDefs: { id: FilterTab; label: string; color: string }[] = [
-            { id: modeDefault, label: "Всё", color: C.textPrimary },
-            ...FILTERS
-              .filter(f => activeMode === "work" ? f.id !== "DONE" && f.id !== "REJECTED" : f.id !== "DONE")
-              // Пустой чип уходит из ряда, но не из приложения: вкладка
-              // остаётся доступной, как только в ней снова что-то появится.
-              // Активный чип не прячем даже пустым — иначе экран прыгает
-              // под пальцем ровно в тот момент, когда очередь дочищена.
-              .filter(f => !SELF_RETIRING_FILTERS.has(f.id) || filter === f.id || (data?.counts?.[f.id] ?? 0) > 0)
-              .map(f => ({ id: f.id, label: TAB_META[f.id].label, color: TAB_META[f.id].color })),
-          ];
-          return (
-            <div className="twa-no-scrollbar" style={{
-              display: "flex", gap: 6, padding: "0 16px",
-              overflowX: "auto",
-            }}>
-              {pillDefs.map(pill => {
-                const count = (data?.counts?.[pill.id] ?? 0) + (pill.id === "DIRECT" ? (data?.counts?.INTENTS ?? 0) : 0);
-                const isActive = !isAttentionView && filter === pill.id;
-                return (
-                  <button
-                    key={pill.id}
-                    type="button"
-                    className="twa-press-sm"
-                    onClick={() => { haptic.select(); setFilter(pill.id); setAllView("list"); }}
-                    style={{
-                      flexShrink: 0, padding: "7px 13px", borderRadius: 999, border: "none",
-                      background: isActive ? `${pill.color}2a` : "rgba(255,255,255,0.06)",
-                      color: isActive ? pill.color : C.textSecondary,
-                      fontSize: 13, fontWeight: 600, fontFamily: "inherit",
-                      display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
-                    }}
-                  >
-                    {pill.id !== modeDefault && (
-                      <i style={{ width: 5, height: 5, borderRadius: "50%", background: pill.color, flexShrink: 0 }} />
-                    )}
-                    {pill.label}
-                    {count > 0 && <span style={{ ...tabular, opacity: 0.7 }}>{count}</span>}
-                  </button>
-                );
-              })}
-              {(data?.counts?.["ATTENTION"] ?? 0) > 0 && (
+        {/* Один ряд срезов вместо трёх этажей навигации. Срез назван глаголом:
+            что вы собираетесь с этими заказами делать. Пустой срез из ряда
+            уходит, но остаётся доступен из «Фильтров» — дочищенная очередь не
+            должна делать старые заказы недостижимыми. Активный срез не прячем
+            даже пустым: иначе экран прыгает под пальцем ровно в тот момент,
+            когда работа закончена. */}
+        {!query && (
+          <div className="twa-slice-row">
+            <div className="twa-slice-scroll twa-no-scrollbar" ref={sliceRowRef}>
+            {SLICES.filter(s => s.id === sliceId || (data?.counts?.[s.id] ?? 0) > 0 || !data).map(s => {
+              const isOn = sliceId === s.id;
+              return (
                 <button
+                  key={s.id}
                   type="button"
-                  className="twa-press-sm"
-                  onClick={() => { haptic.select(); setFilter("ALL"); setAllView("attention"); }}
-                  style={{
-                    flexShrink: 0, padding: "7px 13px", borderRadius: 999, border: "none",
-                    background: isAttentionView ? `${C.orange}2a` : "rgba(255,255,255,0.06)",
-                    color: isAttentionView ? C.orange : C.textSecondary,
-                    fontSize: 13, fontWeight: 600, fontFamily: "inherit",
-                    display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
-                  }}
+                  className={`twa-slice-tab twa-press-sm${isOn ? " is-on" : ""}`}
+                  style={isOn ? { background: `${s.color}2a`, color: s.color } : undefined}
+                  onClick={() => { haptic.select(); selectSlice(s.id as FilterTab); }}
                 >
-                  ⚠ Внимание
-                  <span style={{ ...tabular, opacity: 0.7 }}>{data?.counts?.["ATTENTION"] ?? 0}</span>
+                  <i style={{ background: s.color }} />
+                  {s.label}
+                  <b>{data?.counts?.[s.id] ?? 0}</b>
                 </button>
-              )}
+              );
+            })}
             </div>
-          );
-        })()}
+            <button
+              type="button"
+              className={`twa-slice-tab twa-slice-filters twa-press-sm${sheetFilterOn ? " is-on" : ""}`}
+              onClick={() => { haptic.select(); setFiltersOpen(true); }}
+            >
+              Фильтры{sheetFilterOn && <b>1</b>}
+            </button>
+          </div>
+        )}
+
+        {/* Сужение из шапки среза — строкой под срезами: видно, что лента
+            показывает не весь срез, и снимается одним тапом. */}
+        {narrowChips.length > 0 && (
+          <div className="twa-slice-narrow">
+            {narrowChips.map(chip => (
+              <button key={chip.key} type="button" className="twa-press-sm"
+                onClick={() => { haptic.select(); setNarrow(n => ({ ...n, [chip.key]: null })); }}>
+                {chip.label}<i>✕</i>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" as any }}>
-        {/* Mini-dashboard: суммы и возраст очередей. «В работе» — три рабочие
-            категории (контракт WORK), «Все» — полная сетка, внутри категории —
-            её карточка. Скроллится вместе с лентой, высоту тулбара не отбирает. */}
-        {data?.sums && !query && (filter === "WORK" || filter === "ALL") && !isAttentionView && (() => {
-          const groups = filter === "WORK" ? DASHBOARD_GROUPS.filter(g => WORK_DASHBOARD_KEYS.has(g.key)) : DASHBOARD_GROUPS;
-          const visible = groups.filter(g => (data.counts[g.filter] ?? 0) > 0);
-          if (visible.length === 0) return null;
-          return (
-            <div style={{ padding: "10px 16px 2px" }}>
-              <div
-                onClick={() => { haptic.impact("light"); setDashExpanded(v => !v); }}
-                style={{
-                  display: "flex", alignItems: "center", gap: 12,
-                  padding: "10px 14px", cursor: "pointer",
-                  background: "rgba(255,255,255,0.04)",
-                  borderRadius: dashExpanded ? "12px 12px 0 0" : 12,
-                  transition: "border-radius 0.15s",
-                }}
-              >
-                {visible.map(g => (
-                  <span key={g.key} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 14, fontWeight: 600, color: g.color, ...tabular }}>
-                    <i style={{ width: 7, height: 7, borderRadius: "50%", background: g.color, flexShrink: 0 }} />
-                    {data.counts[g.filter] ?? 0}
-                  </span>
-                ))}
-                <span style={{
-                  marginLeft: "auto", color: C.accent, fontSize: 12, fontWeight: 600,
-                  flexShrink: 0,
-                }}>
-                  {dashExpanded ? "Свернуть ↑" : "Подробнее ↓"}
-                </span>
-              </div>
-              {dashExpanded && (
-                <MiniDashboard
-                  counts={data.counts}
-                  sums={data.sums}
-                  oldest={data.oldest}
-                  onTap={(f) => setFilter(f)}
-                  groups={groups}
-                />
-              )}
-            </div>
-          );
-        })()}
-        {data?.sums && !query && (filter === "BUYOUT" || filter === "AWAITING_LINK") && (
-          <div style={{ paddingTop: 10, paddingBottom: 2 }}>
-            <MiniDashboard
-              counts={data.counts}
-              sums={data.sums}
-              oldest={data.oldest}
-              groups={DASHBOARD_GROUPS.filter(g => g.filter === filter)}
+        {/* Шапка среза: сводка того среза, в котором вы стоите. Скроллится
+            вместе с лентой — высоту тулбара не отбирает; при поиске её нет
+            вовсе: ищут конкретный заказ, а не разбирают очередь. */}
+        {activeSlice && slicePayload && !query && !isAttentionView && (
+          <div style={{ padding: "10px 0 2px" }}>
+            <SliceTill
+              slice={activeSlice}
+              tab={filter}
+              label={SLICES.find(s => s.id === activeSlice.key)?.till ?? ""}
+              counts={data?.counts ?? {}}
+              today={slicePayload.today}
+              narrow={narrow}
+              onNarrow={patch => setNarrow(n => ({ ...n, ...patch }))}
+              onExport={EXPORTABLE_TABS.has(filter) ? () => setExportOpen(true) : undefined}
+              exportable={EXPORTABLE_TABS.has(filter)}
+              collapsed={!!tillCollapsed[activeSlice.key]}
+              onToggleCollapsed={() => setTillCollapsed(v => ({ ...v, [activeSlice.key]: !v[activeSlice.key] }))}
+              onRefresh={() => { setPage(1); void fetchOrders(serverTab, query, 1, false); }}
+              refreshing={loading}
+              updatedAt={tillAt}
+              onFindOldest={() => { haptic.select(); setNarrow({ age: activeSlice.age.buckets[activeSlice.age.buckets.length - 1]?.id ?? null }); }}
             />
           </div>
         )}
 
-        {/* Выкуп пока ручной: список ID геймпассов очереди нужен пачкой, а не по одному. */}
-        {!query && EXPORTABLE_TABS.has(filter) && (
+        {/* Выкуп пока ручной: список ID геймпассов очереди нужен пачкой, а не по
+            одному. У срезов кнопка живёт в подвале шапки; здесь она остаётся
+            для вкладок из шторки фильтров, где шапки нет. */}
+        {!query && !activeSlice && EXPORTABLE_TABS.has(filter) && (
           <div style={{ padding: "10px 16px 0" }}>
             <button
               type="button"
@@ -3564,6 +3963,18 @@ export default function OrdersScreen({
           </div>
         )}
       </div>
+
+      {/* Шторка «Фильтры»: всё, что не является ежедневной работой. Ни одна
+          вкладка из старого ряда чипов не исчезла — она переехала сюда. */}
+      <FiltersSheet
+        open={filtersOpen}
+        active={sliceId === null ? filter : null}
+        attention={isAttentionView}
+        counts={data?.counts ?? {}}
+        onPick={tab => { setFiltersOpen(false); selectSlice(tab); }}
+        onAttention={() => { setFiltersOpen(false); setFilter("ALL"); setAllView("attention"); setNarrow({}); }}
+        onClose={() => setFiltersOpen(false)}
+      />
 
       {/* Выгрузка ID геймпассов текущей очереди (ручной выкуп) */}
       {exportOpen && (
@@ -3862,12 +4273,78 @@ function orderToTarget(order: Order): MatchedOrder {
   };
 }
 
-/* ───────────── MiniDashboard — summary-карточки в Premium Calm стиле ───────────── */
+/* ── Шторка «Фильтры» ────────────────────────────────────────────────────────
+   Один ряд срезов покрывает ежедневную работу; всё остальное живёт здесь и
+   доступно в один тап. Список намеренно полный: вкладка, у которой сегодня
+   ноль заказов, из ряда уходит, но из приложения — нет.
+   ────────────────────────────────────────────────────────────────────────── */
+function FiltersSheet({ open, active, attention, counts, onPick, onAttention, onClose }: {
+  open: boolean;
+  /** Активный фильтр из шторки; null — мы стоим в срезе. */
+  active: FilterTab | null;
+  attention: boolean;
+  counts: Record<string, number>;
+  onPick: (tab: FilterTab) => void;
+  onAttention: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <BottomSheet open={open} onClose={onClose} ariaLabel="Фильтры заказов" className="twa-filter-sheet">
+      <div className="twa-oc-menu-group">Разделы</div>
+      {SHEET_FILTERS.map(id => {
+        const meta = TAB_META[id];
+        const count = (counts[id] ?? 0) + (id === "DIRECT" ? (counts.INTENTS ?? 0) : 0);
+        return (
+          <button
+            key={id}
+            type="button"
+            className={`twa-oc-menu-row twa-press-sm${active === id && !attention ? " is-on" : ""}`}
+            style={active === id && !attention ? { background: `${meta.color}1f`, color: meta.color } : undefined}
+            onClick={() => { haptic.select(); onPick(id); }}
+          >
+            <span><i style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: meta.color }} /></span>
+            <span>{meta.label}</span>
+            <em>{count}</em>
+          </button>
+        );
+      })}
+      {(counts.ATTENTION ?? 0) > 0 && (
+        <button
+          type="button"
+          className="twa-oc-menu-row twa-press-sm"
+          style={attention ? { background: `${C.orange}1f`, color: C.orange } : undefined}
+          onClick={() => { haptic.select(); onAttention(); }}
+        >
+          <span>⚠</span>
+          <span>Требуют внимания</span>
+          <em>{counts.ATTENTION ?? 0}</em>
+        </button>
+      )}
+    </BottomSheet>
+  );
+}
+
+/* ── Шапка среза ─────────────────────────────────────────────────────────────
+   Сводка того среза, в котором вы стоите, на языке кассы главной. Пять полок
+   сверху вниз по убыванию срочности: деньги → откуда → что мешает → что горит
+   → как идёт день. Каждая строка кликабельна и сужает ленту под собой.
+
+   Числа приходят с сервера (`/api/twa/orders` → `slices`), а не считаются по
+   загруженной странице: лента идёт по 20 заказов, и сумма по странице врала бы
+   ровно на длинной очереди — там, где на неё и смотрят.
+   ────────────────────────────────────────────────────────────────────────── */
 function fmtRobux(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 10_000) return `${(n / 1_000).toFixed(0)}K`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toLocaleString("ru-RU");
+}
+
+function plural(n: number, one: string, few: string, many: string): string {
+  const mod100 = Math.abs(n) % 100;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  const d = mod100 % 10;
+  return d === 1 ? one : d >= 2 && d <= 4 ? few : many;
 }
 
 function pluralOrders(n: number): string {
@@ -3877,72 +4354,241 @@ function pluralOrders(n: number): string {
   return d === 1 ? "заказ" : d >= 2 && d <= 4 ? "заказа" : "заказов";
 }
 
-// Режим суммы: amount в БД — чистые R$ (клиенту), грязные = ceil(amount / 0.7)
-// (цена геймпасса, что спишется с донора). Крупная цифра — то, чем оперирует
-// менеджер в этой категории; в скобках — второе значение (grossOnly — без скобок).
-type DashSumMode = "grossClean" | "cleanGross" | "grossOnly";
+const TILL_TONE: Record<SliceKey, string> = {
+  BUYOUT: "",
+  ERROR: " is-red",
+  AWAITING_LINK: " is-amber",
+  DONE: " is-quiet",
+};
 
-const DASHBOARD_GROUPS: { key: string; label: string; sumKey: string; filter: FilterTab; color: string; mode: DashSumMode; oldestKey?: string }[] = [
-  { key: "buyout", label: "К выкупу",    sumKey: "BUYOUT",        filter: "BUYOUT",        color: C.green,  mode: "grossClean", oldestKey: "BUYOUT" },
-  { key: "link",   label: "Ждут ссылку", sumKey: "AWAITING_LINK", filter: "AWAITING_LINK", color: C.yellow, mode: "cleanGross", oldestKey: "AWAITING_LINK" },
-  { key: "direct", label: "Прямой",      sumKey: "DIRECT",        filter: "DIRECT",        color: C.blue,   mode: "grossOnly" },
-  // Место Авито занял живой сюжет: заказы, по которым бот отмолчал все три
-  // напоминания и ссылку уже не пришлют. Пустая категория карточку не рисует,
-  // поэтому она видна ровно тогда, когда есть о чём говорить.
-  { key: "stale",  label: "Висяки",      sumKey: "STALE_LINK",    filter: "STALE_LINK",    color: C.orange, mode: "cleanGross", oldestKey: "STALE_LINK" },
-  { key: "new",    label: "Новые",       sumKey: "NEW",           filter: "NEW",           color: C.accent, mode: "cleanGross" },
-  { key: "error",  label: "Ошибка",      sumKey: "ERROR",         filter: "ERROR",         color: C.red,    mode: "grossClean" },
-];
-// «В работе» показывает ровно видимый контракт WORK: выкуп + старые ссылки + ошибки.
-const WORK_DASHBOARD_KEYS = new Set(["buyout", "link", "error"]);
+/** Цвет корзины возраста: первые две спокойные, последние две — тревожные. */
+const AGE_BUCKET_COLOR = [C.green, C.green, C.orange, C.red];
 
-function MiniDashboard({ counts, sums, oldest, onTap, groups = DASHBOARD_GROUPS }: {
+function SliceTill({
+  slice, tab, label, counts, today, narrow, onNarrow, onExport, exportable,
+  collapsed, onToggleCollapsed, onRefresh, refreshing, updatedAt, onFindOldest,
+}: {
+  slice: OrderSlice;
+  tab: FilterTab;
+  label: string;
   counts: Record<string, number>;
-  sums: Record<string, number>;
-  oldest?: Record<string, string | null> | null;
-  onTap?: (filter: FilterTab) => void;
-  groups?: typeof DASHBOARD_GROUPS;
+  today: OrderSlicesPayload["today"];
+  narrow: OrderNarrow;
+  onNarrow: (patch: OrderNarrow) => void;
+  onExport?: () => void;
+  exportable: boolean;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+  onRefresh: () => void;
+  refreshing: boolean;
+  updatedAt: number | null;
+  onFindOldest: () => void;
 }) {
-  const visible = groups.filter(g => (counts[g.filter] ?? 0) > 0);
-  if (visible.length === 0) return null;
+  const isLink = slice.key === "AWAITING_LINK";
+  const isDone = slice.key === "DONE";
+  const count = counts[tab] ?? slice.orders;
+
+  const lanes = slice.lanes.filter(lane => lane.orders > 0);
+  const blockers: { id: "regional" | "split" | "nogp"; tone: string; text: string }[] = [];
+  if (slice.blocked.regional > 0)
+    blockers.push({ id: "regional", tone: "is-red", text: `⛔ ${slice.blocked.regional} рег. цена на доноре` });
+  if (slice.blocked.splitPartial > 0)
+    blockers.push({ id: "split", tone: "is-mute", text: `🧩 ${slice.blocked.splitPartial} разбит — куплены не все части` });
+  if (slice.blocked.noGamepass > 0)
+    blockers.push({ id: "nogp", tone: "is-amber", text: `👁 ${slice.blocked.noGamepass} без геймпасса` });
+
+  const ageMax = Math.max(1, ...slice.age.buckets.map(b => b.count));
+  const queueDelta = today.done - today.arrived;
 
   return (
-    <div className={`twa-dash-grid${visible.length === 1 ? " is-single" : ""}`}>
-      {visible.map(g => {
-        const count = counts[g.filter] ?? 0;
-        const cleanRobux = sums[g.sumKey] ?? 0;
-        const grossRobux = Math.ceil(cleanRobux / 0.7);
-        const primary = g.mode === "cleanGross" ? cleanRobux : grossRobux;
-        const secondary = g.mode === "grossClean" ? cleanRobux : g.mode === "cleanGross" ? grossRobux : null;
-        const oldestIso = g.oldestKey ? (oldest?.[g.oldestKey] ?? null) : null;
+    <section className={`twa-slice-till${TILL_TONE[slice.key]}${collapsed ? " is-collapsed" : ""}`}>
+      <header className="twa-slice-head">
+        <button type="button" className="twa-slice-head-main twa-press-sm" onClick={onToggleCollapsed}>
+          <span>{label}</span>
+          <b>{count} {pluralOrders(count)}</b>
+          {updatedAt && <em>обновлено {new Date(updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</em>}
+        </button>
+        <button
+          type="button"
+          className="twa-till-refresh twa-press-sm"
+          aria-label="Обновить сводку"
+          disabled={refreshing}
+          onClick={e => { e.stopPropagation(); haptic.select(); onRefresh(); }}
+        >
+          <RefreshCw size={15} className={refreshing ? "is-spinning" : ""} />
+        </button>
+      </header>
 
-        const body = (
-          <>
-            <span className="twa-dash-label"><i style={{ background: g.color }} />{g.label}</span>
-            <span className="twa-dash-value">
-              {fmtRobux(primary)}<small>R$</small>
-              {secondary !== null && <em>({fmtRobux(secondary)})</em>}
-            </span>
-            <span className="twa-dash-meta">
-              <span>{count} {pluralOrders(count)}</span>
-              {oldestIso && <b title="Старейший в очереди" style={{ color: ageColor(oldestIso) }}>ждёт {fmtAge(oldestIso)}</b>}
-            </span>
-          </>
-        );
+      {collapsed ? null : (
+        <>
+          {/* 1. Деньги. Крупно — грязные: столько спишется с донора. */}
+          {isDone ? (
+            <div className="twa-slice-figure">
+              <strong>{today.done}<small>выкуплено</small></strong>
+              <span>сегодня на <b>{today.doneSum.toLocaleString("ru-RU")} R$</b> чистыми</span>
+            </div>
+          ) : isLink ? (
+            <div className="twa-slice-figure">
+              <strong>{slice.stale}<small>{plural(slice.stale, "висяк", "висяка", "висяков")}</small></strong>
+              <span>
+                из <b>{slice.orders}</b> ждущих ссылку
+                {slice.silent > 0 && <> · <b>{slice.silent}</b> бот отмолчал 3/3</>}
+              </span>
+            </div>
+          ) : (
+            <div className="twa-slice-figure">
+              <strong>{slice.gross.toLocaleString("ru-RU")}<small>R$</small></strong>
+              <span>грязными · <b>{slice.clean.toLocaleString("ru-RU")} R$</b> чистыми клиенту</span>
+            </div>
+          )}
 
-        return onTap ? (
-          <button key={g.key} type="button" className="twa-dash-card twa-press-sm"
-            onClick={() => { haptic.impact("light"); onTap(g.filter); }}>
-            {body}
-          </button>
-        ) : (
-          <div key={g.key} className="twa-dash-card" style={{ cursor: "default" }}>{body}</div>
-        );
-      })}
-    </div>
+          {/* 2. Откуда очередь. Ширина сегмента — доля робуксов, а не заказов. */}
+          {lanes.length > 0 && (
+            <>
+              <div className="twa-lane-bar" aria-hidden="true">
+                {lanes.map(lane => (
+                  <i key={lane.id} style={{ flexGrow: Math.max(lane.gross, 1), background: LANE_META[lane.id].color, opacity: narrow.lane && narrow.lane !== lane.id ? 0.3 : 1 }} />
+                ))}
+              </div>
+              <div className="twa-slice-legend">
+                {lanes.map(lane => (
+                  <button
+                    key={lane.id}
+                    type="button"
+                    className={`twa-slice-chip twa-press-sm${narrow.lane === lane.id ? " is-on" : ""}`}
+                    onClick={() => { haptic.select(); onNarrow({ lane: narrow.lane === lane.id ? null : lane.id }); }}
+                  >
+                    <i style={{ background: LANE_META[lane.id].color }} />
+                    {LANE_META[lane.id].label}
+                    <b>{lane.orders}</b>
+                    <em>{lane.gross.toLocaleString("ru-RU")} R$</em>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* 3. Что мешает выкупить прямо сейчас. */}
+          {!isDone && !isLink && slice.orders > 0 && (
+            <div className="twa-slice-shelf">
+              <div className="twa-slice-line">
+                <span className="k">Готовы сейчас</span>
+                <span className="v">{slice.ready}<small>из {slice.orders}</small></span>
+                {blockers.length === 0 && <span className="tail">ничего не держит</span>}
+              </div>
+              {blockers.length > 0 && (
+                <div className="twa-slice-flags">
+                  {blockers.map(b => (
+                    <button
+                      key={b.id}
+                      type="button"
+                      className={`twa-slice-flag ${b.tone} twa-press-sm${narrow.blocked === b.id ? " is-on" : ""}`}
+                      onClick={() => { haptic.select(); onNarrow({ blocked: narrow.blocked === b.id ? null : b.id }); }}
+                    >{b.text}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* «Починить» — вместо препятствий причины: почти всё чинится кнопкой. */}
+          {slice.key === "ERROR" && slice.reasons.length > 0 && (
+            <div className="twa-slice-shelf">
+              <div className="twa-slice-line">
+                <span className="k">Причины</span>
+                <span className="v">{slice.exportable}<small>чинятся возвратом</small></span>
+              </div>
+              <div className="twa-slice-flags">
+                {slice.reasons.map(reason => (
+                  <span key={reason.id} className="twa-slice-flag is-mute">{reason.label} {reason.count}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 4. Что горит: четыре корзины возраста и старейший заказ. */}
+          {!isDone && slice.age.buckets.some(b => b.count > 0) && (
+            <div className="twa-slice-shelf">
+              <div className="twa-slice-line">
+                <span className="k">Возраст</span>
+                <span className="v" style={{ color: slice.age.overdue > 0 ? C.orange : undefined }}>
+                  {slice.age.overdue}<small>{isLink ? "ждут > недели" : "ждут > 12 ч"}</small>
+                </span>
+                {slice.age.oldestCode && (
+                  // Код и возраст переносятся ОДНИМ куском: разорванные, они
+                  // оставляли висящую точку-разделитель в конце строки.
+                  <button type="button" className="tail twa-press-sm" onClick={() => { haptic.select(); onFindOldest(); }}>
+                    старейший{" "}
+                    <b style={{ whiteSpace: "nowrap", color: ageColor(slice.age.oldestAt) }}>
+                      {slice.age.oldestCode} · {fmtAge(slice.age.oldestAt)}
+                    </b>
+                  </button>
+                )}
+              </div>
+              <div className="twa-slice-hist">
+                {slice.age.buckets.map((bucket, i) => (
+                  <button
+                    key={bucket.id}
+                    type="button"
+                    className={`twa-press-sm${narrow.age === bucket.id ? " is-on" : ""}`}
+                    disabled={bucket.count === 0}
+                    onClick={() => { haptic.select(); onNarrow({ age: narrow.age === bucket.id ? null : bucket.id }); }}
+                  >
+                    <b>{bucket.count}</b>
+                    <i style={{ height: Math.max(3, Math.round((bucket.count / ageMax) * 26)), background: `${AGE_BUCKET_COLOR[i]}b3` }} />
+                    <em>{bucket.label}</em>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 5. Как идёт день: выкуплено против пришедшего и знак очереди.
+              Только у очереди выкупа: `today` считает выкупленное и пришедшее
+              в ОЧЕРЕДЬ, и под «Дожать» эта полка отвечала бы на вопрос,
+              которого там никто не задаёт. */}
+          {slice.key === "BUYOUT" && (
+            <div className="twa-slice-shelf">
+              <div className="twa-slice-line">
+                <span className="k">Сегодня</span>
+                <span className="v">{today.done}<small>выкуплено на {today.doneSum.toLocaleString("ru-RU")} R$</small></span>
+                <span className="tail" style={{ color: queueDelta >= 0 ? C.green : C.orange }}>
+                  очередь {queueDelta > 0 ? `−${queueDelta}` : queueDelta === 0 ? "вровень" : `+${-queueDelta}`}
+                </span>
+              </div>
+              <div className="twa-slice-foot"><span>пришло <b>{today.arrived}</b></span></div>
+            </div>
+          )}
+
+          {/* Подвал: номиналы очереди и выгрузка ID пачкой — при ручном выкупе
+              список ID нужен целиком, а не по одному из карточек. */}
+          {(slice.nominals.length > 0 || exportable) && (
+            <div className="twa-slice-foot is-bordered">
+              {slice.nominals.length > 0 && (
+                <span>
+                  Номиналы:{" "}
+                  {slice.nominals.map(n => (
+                    <button
+                      key={n.amount}
+                      type="button"
+                      className={`twa-slice-nominal twa-press-sm${narrow.amount === n.amount ? " is-on" : ""}`}
+                      onClick={() => { haptic.select(); onNarrow({ amount: narrow.amount === n.amount ? null : n.amount }); }}
+                    >{n.amount}×{n.count}</button>
+                  ))}
+                </span>
+              )}
+              {exportable && onExport && (
+                <button type="button" className="twa-slice-export twa-press-sm" onClick={() => { haptic.impact("light"); onExport(); }}>
+                  ⇩ Выгрузить ID <b>{slice.exportable}</b>
+                </button>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }
-
 function EmptyState({ filter, query, attention, onShowAll }: {
   filter: FilterTab;
   query: string;
