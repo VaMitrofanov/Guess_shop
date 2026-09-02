@@ -2003,6 +2003,35 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  /* ── Лента событий заказа (В3, досье веб-админки) ──────────────────────────
+     Одна лента на автоматику и людей: `OrderEvent` — это то, что сделала
+     система, `adminNote` — то, что дописывали руками (`appendOrderAudit`).
+     При трёх админах это главный ответ на «почему заказ в таком виде»,
+     поэтому строки заметки отдаются вместе с событиями, а не отдельно. */
+  if (action === "order-events") {
+    const events = await (prisma as any).orderEvent.findMany({
+      where: { orderId },
+      orderBy: { createdAt: "desc" },
+      take: 40,
+      select: { id: true, type: true, payload: true, createdAt: true },
+    });
+    return NextResponse.json({
+      ok: true,
+      events,
+      // Ручной след: строки вида «[ВОЗВРАТ 2026-09-03 от Дью] …».
+      noteLines: (order.adminNote ?? "")
+        .split("\n")
+        .map((line: string) => line.trim())
+        .filter(Boolean),
+      createdAt: order.createdAt,
+      pendingAt: order.pendingAt,
+      completedAt: order.completedAt ?? null,
+      heldAt: order.heldAt,
+      heldReason: order.heldReason,
+      heldBy: order.heldBy,
+    });
+  }
+
   // ── След покупателя: что он вводил и присылал ────────────────────────────
   // Читается при разборе спора («я такой ник не указывал»), поэтому грузится
   // по запросу, а не в общий список — там это лишний вес на каждой карточке.

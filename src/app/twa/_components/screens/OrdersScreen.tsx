@@ -8,10 +8,24 @@ import BottomSheet from "../BottomSheet";
 import { toast } from "../Toast";
 import OrderSheet, { type MatchedOrder, type RebindUser } from "../OrderSheet";
 import { isUnpaidDirect } from "@/lib/buyout-queue";
+import {
+  orderBadge as sharedOrderBadge,
+  orderFlag as sharedOrderFlag,
+  primaryActionFor as sharedPrimaryAction,
+  type Tone,
+} from "@/lib/order-presentation";
 import { HOLD_PRESETS, parseAdminNote } from "@/lib/order-hold";
 
 /** ❄️ Цвет заморозки. Живёт в теме — здесь только короткий псевдоним. */
 const ICE = C.ice;
+
+/* Тон приходит из общего `order-presentation`: правило «какой бейдж, какое
+   действие, что во флаге» одно на TWA и сайт, а красит его каждый экран своей
+   палитрой. Здесь — тёмная палитра TWA. */
+const TONE: Record<Tone, string> = {
+  green: C.green, yellow: C.yellow, orange: C.orange, red: C.red,
+  blue: C.blue, ice: ICE, accent: C.accent, muted: C.textTertiary,
+};
 
 type OrderStatus = "AWAITING_PAYMENT" | "PAYMENT_PENDING" | "AWAITING_GAMEPASS" | "PENDING" | "IN_PROGRESS" | "COMPLETED" | "REJECTED" | "ERROR";
 // ATTENTION — не чип, а серверная выборка «Требуют внимания» для вкладки «Все».
@@ -214,24 +228,8 @@ const EXPORTABLE_TABS = new Set<FilterTab>(["BUYOUT", "DIRECT", "AVITO", "WORK",
 const COUNTABLE_EXPORT_TABS = new Set<FilterTab>(["BUYOUT", "DIRECT", "AVITO"]);
 
 function orderTabBadge(order: Order): { label: string; color: string } | null {
-  const cutoff = Date.now() - 40 * 3600_000;
-  const created = new Date(order.createdAt).getTime();
-
-  // ❄️ Заморозка бьёт все остальные бейджи: это единственное, что определяет,
-  // можно ли с заказом вообще что-то делать.
-  if (order.heldAt) return { label: "❄️ Заморожен", color: ICE };
-  if (order.isFavorite) return { label: "Избранное", color: "#ffd60a" };
-  if (order.status === "COMPLETED") return { label: "Готово", color: C.green };
-  if (order.status === "REJECTED") return { label: "Отменено", color: C.red };
-  if (order.status === "ERROR") return { label: "Ошибка", color: C.red };
-  if (order.orderSource === "AVITO" && ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "ERROR"].includes(order.status))
-    return { label: "Авито", color: C.orange };
-  if (order.isDirectOrder && ["PENDING", "IN_PROGRESS", "AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status))
-    return { label: "Прямой", color: C.blue };
-  if (order.status === "AWAITING_GAMEPASS" && created > cutoff) return { label: "Новые", color: C.accent };
-  if (order.status === "AWAITING_GAMEPASS" && created <= cutoff) return { label: "Ждут ссылку", color: C.yellow };
-  if (["PENDING", "IN_PROGRESS"].includes(order.status)) return { label: "К выкупу", color: C.green };
-  return null;
+  const badge = sharedOrderBadge(order as never);
+  return badge ? { label: badge.label, color: TONE[badge.tone] } : null;
 }
 
 /* ── Главное действие карточки ───────────────────────────────────────────────
@@ -253,30 +251,8 @@ interface CardAction {
 }
 
 function primaryActionFor(order: Order): CardAction | null {
-  // ❄️ Заморозка бьёт статус: у замороженного заказа кнопок выкупа нет вовсе,
-  // единственный выход — снять заморозку.
-  if (order.heldAt) return { kind: "action", action: "unhold", icon: "❄", label: "Разморозить", tone: "ice" };
-  if (order.status === "COMPLETED" || order.status === "REJECTED") return null;
-  // Прямой заказ до подтверждения оплаты: выкупать и закрывать нечего.
-  if (order.status === "AWAITING_PAYMENT" || order.status === "PAYMENT_PENDING") return null;
-
-  const split = order.splitGamepasses ?? [];
-  const hasGamepass = !!order.gamepassUrl || split.length > 0;
-
-  if (order.status === "ERROR") {
-    return hasGamepass
-      ? { kind: "action", action: "restore-to-buyout", icon: "↩", label: "Вернуть", tone: "blue" }
-      : null;
-  }
-  if (order.status === "AWAITING_GAMEPASS") {
-    return { kind: "contact", icon: "✉", label: "Написать", tone: "blue" };
-  }
-  // PENDING / IN_PROGRESS. У разбитого заказа «Выкуплено» появляется только
-  // когда закрыта последняя часть: раньше него оно означало бы «закрыть заказ,
-  // купив не всё», и клиент получил бы меньше оплаченного.
-  if (split.length > 0 && split.some(part => !part.purchasedAt)) return null;
-  if (!hasGamepass) return null;
-  return { kind: "action", action: "complete", icon: "✓", label: "Выкуплено", tone: "green" };
+  const action = sharedPrimaryAction(order as never);
+  return action ? { ...action, tone: action.tone as CardActionTone } : null;
 }
 
 /* ── Строка-флаг карточки ────────────────────────────────────────────────────
@@ -289,24 +265,8 @@ function primaryActionFor(order: Order): CardAction | null {
    узнать про пасс — второе он увидит в досье.
    ────────────────────────────────────────────────────────────────────────── */
 function cardFlag(order: Order, live: GpLiveInfo | undefined, reminders: number): { text: string; color: string } | null {
-  if (order.heldAt) return { text: `❄️ ${order.heldReason ?? "заморожен — не выкупать"}`, color: ICE };
-  if (order.buyoutErrorCode === "REGIONAL_PRICE")
-    return { text: "🌍 рег. цена на доноре — замена по нику не найдена", color: C.red };
-  if (live?.isForSale === false) return { text: "⛔ геймпасс снят с продажи", color: C.red };
-  if (live?.priceMismatch && live.livePrice != null)
-    return { text: `⚠ цена пасса ${live.livePrice.toLocaleString("ru-RU")} R$ ≠ ${live.expected.toLocaleString("ru-RU")} R$`, color: C.orange };
-  if (order.gpWatchDeclinedAt && order.status === "AWAITING_GAMEPASS" && !order.robloxUsername)
-    return { text: "❌ клиент отклонил найденный ник", color: C.red };
-  if (order.vkUnreachable === true && order.user.vkId)
-    return { text: "🚫 бот не может написать в VK — только с личного", color: C.red };
-  if (order.status === "AWAITING_GAMEPASS" && reminders >= 3)
-    return { text: "Бот отмолчал все три напоминания — дожимать вручную", color: C.textTertiary };
-  if (order.status === "ERROR") return { text: "Заказ требует исправления", color: C.red };
-  // Зелёная строка — не украшение: она значит «живая проверка прошла», и без
-  // самой проверки её быть не должно.
-  if (live && live.isForSale === true && !live.priceMismatch && ["PENDING", "IN_PROGRESS"].includes(order.status))
-    return { text: "✓ пасс продаётся, цена сходится", color: C.green };
-  return null;
+  const flag = sharedOrderFlag(order as never, live, reminders);
+  return flag ? { text: flag.text, color: TONE[flag.tone] } : null;
 }
 
 /* ───────────── Time formatting ───────────── */

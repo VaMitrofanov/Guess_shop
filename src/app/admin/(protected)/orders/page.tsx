@@ -1,33 +1,46 @@
-import AdminOrdersClient from "@/components/admin/orders-client";
-import { getAdminOrdersPage, type AdminOrdersFilter } from "@/lib/admin-ecosystem";
-import styles from "@/components/admin/admin-shell.module.css";
+import OrdersWorkspace from "@/components/admin/orders/orders-workspace";
+import { SLICE_KEYS } from "@/lib/order-slices";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const FILTERS = new Set<AdminOrdersFilter>(["ALL", "SITE", "WB", "WB_DBS", "DIRECT", "AVITO", "ERROR"]);
+/** Срезы ряда + всё, что доступно из шторки фильтров. */
+const ALLOWED_SLICES = new Set<string>([
+  ...SLICE_KEYS,
+  "ALL", "WORK", "NEW", "DIRECT", "AVITO", "FAVORITES", "ATTENTION", "STALE_LINK", "HELD", "REJECTED",
+]);
 
+/**
+ * Заказы — рабочее место, а не страница-таблица: состояние живёт в адресе,
+ * поэтому серверный компонент только разбирает ссылку и отдаёт её экрану.
+ * Старые ссылки вида `?source=WB&q=…` продолжают работать: источник
+ * разворачивается в срез «Все» с поисковым запросом.
+ */
 export default async function AdminOrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; source?: string; cursor?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const filter = FILTERS.has(params.source as AdminOrdersFilter)
-    ? params.source as AdminOrdersFilter
-    : "ALL";
-  const query = params.q?.trim().slice(0, 120) ?? "";
-  const page = await getAdminOrdersPage({ query, filter, cursor: params.cursor, limit: 50 });
+  const pick = (key: string): string => {
+    const value = params[key];
+    return (Array.isArray(value) ? value[0] : value) ?? "";
+  };
+
+  const requested = pick("slice").toUpperCase();
+  const legacySource = pick("source").toUpperCase();
+  const slice = ALLOWED_SLICES.has(requested)
+    ? requested
+    : legacySource && legacySource !== "ALL"
+      ? "ALL"
+      : "BUYOUT";
+
   return (
-    <div className={styles.page}>
-      <header className={styles.pageHeader}>
-        <div>
-          <span className={styles.eyebrow}>Единая очередь · Web + TWA</span>
-          <h1>Заказы</h1>
-          <p>Канонические заказы SITE, WB, TG, VK, Avito и ручного контура — с поиском по всей базе.</p>
-        </div>
-      </header>
-      <AdminOrdersClient page={page} query={query} filter={filter} />
-    </div>
+    <OrdersWorkspace
+      initialSlice={slice}
+      initialMode={pick("mode") === "table" ? "table" : "split"}
+      initialOrderId={/^[a-z0-9_-]{8,40}$/i.test(pick("order")) ? pick("order") : null}
+      initialQuery={pick("q").slice(0, 120)}
+    />
   );
 }

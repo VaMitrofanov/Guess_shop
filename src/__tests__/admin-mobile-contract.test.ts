@@ -6,7 +6,8 @@ const read = (file: string) => readFileSync(path.join(root, file), "utf8");
 
 const sidebar = read("components/admin/sidebar.tsx");
 const css = read("components/admin/admin-shell.module.css");
-const orders = read("components/admin/orders-client.tsx");
+const ordersWorkspace = read("components/admin/orders/orders-workspace.tsx");
+const ordersCss = read("components/admin/orders/orders.module.css");
 const buyout = read("components/admin/buyout-client.tsx");
 const economics = read("components/admin/economics-client.tsx");
 const anton = read("components/admin/anton-client.tsx");
@@ -40,10 +41,29 @@ describe("мобильный контракт Control Center", () => {
   });
 
   it("не оставляет рабочие таблицы горизонтальными на телефоне", () => {
-    for (const source of [orders, buyout, economics, anton, users]) {
+    for (const source of [buyout, economics, anton, users]) {
       expect(source).toContain("styles.responsiveTable");
       expect(source).toContain("data-label=");
     }
+  });
+
+  /* «Заказы» с В1 живут не таблицей: на телефоне те же данные показываются
+     карточками, а режим «Таблица» просто не существует — переключатель скрыт,
+     чтобы не предлагать тупик. */
+  it("на телефоне отдаёт заказы карточками, а не горизонтальной таблицей", () => {
+    expect(ordersWorkspace).toContain("styles.cards");
+    expect(ordersWorkspace).toContain("QueueCard");
+    expect(ordersCss).toMatch(/@media \(max-width: 767px\)[\s\S]*?\.thead \{ display: none; \}/);
+    expect(ordersCss).toMatch(/@media \(max-width: 767px\)[\s\S]*?\.seg, \.barDesktopOnly \{ display: none; \}/);
+  });
+
+  /* Панель пачки обязана быть видна всегда: `sticky` внутри длинной ленты
+     уезжала за нижний край экрана — выделил семь заказов и не увидел, чем с
+     ними работать. На телефоне она поднята над нижней навигацией. */
+  it("не прячет панель пачки ни под нижнюю навигацию, ни за край ленты", () => {
+    expect(ordersCss).toMatch(/\.bulk \{[\s\S]*?position: fixed/);
+    expect(ordersCss).toMatch(/bottom: calc\(70px \+ env\(safe-area-inset-bottom\)\)/);
+    expect(ordersCss).toMatch(/\.toast \{[\s\S]*?position: fixed/);
   });
 
   it("собирает последние заказы в читаемые семантические карточки", () => {
@@ -60,7 +80,7 @@ describe("мобильный контракт Control Center", () => {
 
   it("не меняет даты после hydration из-за timezone браузера", () => {
     expect(adminTime).toContain('ADMIN_TIME_ZONE = "Europe/Moscow"');
-    for (const source of [orders, buyout, economics, anton]) {
+    for (const source of [buyout, economics, anton]) {
       expect(source).toContain("ADMIN_TIME_ZONE");
     }
   });
