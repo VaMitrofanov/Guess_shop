@@ -13,6 +13,7 @@ import { clientIp } from "@/lib/rate-limit";
 import { consumeTelegramWebLoginChallenge } from "@/lib/telegram-web-login";
 import { adminGrantFor, loadAdminCandidate } from "@/lib/admin-grant";
 import { resolveWbOrderSource } from "../bots/shared/wb-order-source";
+import { noteDbsBuyerSignedIn } from "../bots/shared/wb-delivery-sync";
 
 // VK display names are user-controlled and embedded into Telegram HTML
 // notifications — unescaped "<" breaks the whole message (silently lost).
@@ -331,7 +332,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               const isActiveActivation =
                 wbCode && wbCode.length === 7 && !!wbCodeRecord &&
                 !!provisionalOrder && provisionalOrder.status === "AWAITING_GAMEPASS";
-              if (isActiveActivation) {
+              // DBS-заказ уже ведёт живую карточку в админке. Вход на сайт для
+              // него — шаг воронки, а не задача: он уходит строкой в таймлайн
+              // той же карточки, и третьего сообщения об одном заказе больше
+              // нет (скрин владельца, 01.09.2026).
+              const foldedIntoDbsCard = isActiveActivation
+                ? await noteDbsBuyerSignedIn(prisma, wbCode!, "VK").catch(() => false)
+                : false;
+              if (isActiveActivation && !foldedIntoDbsCard) {
                 const denomination = wbCodeRecord?.denomination ?? 0;
                 const passPrice    = denomination > 0 ? Math.ceil(denomination / 0.7) : null;
                 const dateStr = new Date().toLocaleString("ru-RU", {

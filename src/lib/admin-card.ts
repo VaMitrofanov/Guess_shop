@@ -1,5 +1,7 @@
 import { formatOrderAge } from "@/lib/order-age";
+import { prisma } from "@/lib/prisma";
 import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
+import { resolveWbOrderRef } from "../../bots/shared/wb-order-source";
 
 /**
  * Web-side admin order card.
@@ -35,7 +37,11 @@ export interface WebOrderCard {
   manualLink?: boolean;
 }
 
-export function buildWebOrderCardText(order: WebOrderCard, now: Date | number = Date.now()): string {
+export function buildWebOrderCardText(
+  order: WebOrderCard,
+  now: Date | number = Date.now(),
+  wbOrderId: string | null = null,
+): string {
   const passPrice = Math.ceil(order.amount / 0.7);
   const dateStr =
     new Date(order.createdAt).toLocaleString("ru-RU", {
@@ -54,9 +60,13 @@ export function buildWebOrderCardText(order: WebOrderCard, now: Date | number = 
     ? `🎮 Создатель ГП: <b>${escapeHtml(order.creatorName)}</b>\n`
     : "";
 
+  // Единая шапка: тот же порядок ключей, что в живой карточке DBS.
+  const refLine = wbOrderId ? `WB #${wbOrderId} · <b>${order.amount} R$</b>\n` : "";
+
   return (
     `📦 <b>ЗАКАЗ <code>${order.wbCode}</code></b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
+    refLine +
     (order.manualLink
       ? `🔗 <b>ССЫЛКА ВРУЧНУЮ С САЙТА</b> — поиск по нику не нашёл геймпасс\n`
       : `🌐 <b>ONE-TAP С САЙТА</b>\n`) +
@@ -85,7 +95,8 @@ export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {
     return;
   }
 
-  const text = buildWebOrderCardText(order);
+  const wbRef = await resolveWbOrderRef(prisma, order.wbCode);
+  const text = buildWebOrderCardText(order, Date.now(), wbRef.wbOrderId);
 
   const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(order.wbCode)}`;
   const reply_markup = {
@@ -98,5 +109,12 @@ export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {
     ],
   };
 
-  await Promise.allSettled(adminIds.map((id) => sendTelegramMessage(token, id, text, { reply_markup })));
+  // Ответ на живую карточку DBS — карточка выкупа встаёт в ветку заказа.
+  await Promise.allSettled(adminIds.map((id) => {
+    const rootId = wbRef.cardMessages?.[id];
+    return sendTelegramMessage(token, id, text, {
+      reply_markup,
+      ...(rootId ? { reply_to_message_id: rootId, allow_sending_without_reply: true } : {}),
+    });
+  }));
 }

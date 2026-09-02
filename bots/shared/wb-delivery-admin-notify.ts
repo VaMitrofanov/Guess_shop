@@ -3,7 +3,7 @@ import {
   denomLine,
   formatAdminNotice,
   mskTime,
-  wbOrderRef,
+  orderRef,
   type AdminNotice,
 } from "./notify-format";
 import type { AutoReceiveSkip } from "./wb-delivery-sync";
@@ -15,10 +15,49 @@ const ADMIN_IDS: string[] = [...new Set(
     .filter(Boolean),
 )];
 
-function broadcast(notice: AdminNotice) {
+/**
+ * Всё, что нужно сообщению, чтобы выглядеть частью того же заказа, что и живая
+ * карточка: ключи для шапки и id самой карточки у каждого админа — корень ветки.
+ *
+ * Раньше уведомления знали только `wbOrderId`, поэтому карточка входа на сайт
+ * (её ключ — код гейта) и сообщения DBS (их ключ — номер WB) не пересекались
+ * ни одним полем.
+ */
+export type DbsRef = {
+  wbOrderId: string;
+  code?: string | null;
+  denomination?: number | null;
+  priceKopecks?: number | null;
+  buyerName?: string | null;
+  /** `{ "<adminTgId>": <messageId> }` живой карточки заказа. */
+  cardMessages?: Record<string, number> | null;
+};
+
+/**
+ * Сообщение о заказе уходит ответом на его живую карточку: Telegram рисует
+ * цитату сверху, и три сообщения об одном заказе перестают читаться как три
+ * разных дела, а тап по цитате прыгает на карточку.
+ *
+ * `allow_sending_without_reply` обязателен: карточку могли удалить или
+ * переслать заново (`pushDbsCard` так и делает, когда Telegram отказался
+ * редактировать), и на исчезнувший корень Telegram ответил бы отказом —
+ * уведомление о деньгах не имеет права потеряться из-за оформления.
+ */
+function threadTo(ref: DbsRef | null | undefined, adminId: string): Record<string, unknown> {
+  const rootId = ref?.cardMessages?.[adminId];
+  return rootId ? { reply_to_message_id: rootId, allow_sending_without_reply: true } : {};
+}
+
+/** Шапка заказа для сообщения — тот же формат, что и в живой карточке. */
+function refLine(ref: DbsRef, extra?: Array<string | null | undefined | false>): string {
+  return orderRef(ref, extra);
+}
+
+function broadcast(notice: AdminNotice, ref?: DbsRef | null) {
   if (!ADMIN_IDS.length) return;
   const text = formatAdminNotice(notice);
-  void Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text, { parse_mode: "HTML" })));
+  void Promise.allSettled(ADMIN_IDS.map((id) =>
+    tgSend(id, text, { parse_mode: "HTML", ...threadTo(ref, id) })));
 }
 
 // Отдельных сообщений на «заказ принят», «ушёл автозапрос», «доставка закрыта»
@@ -27,29 +66,26 @@ function broadcast(notice: AdminNotice) {
 // (`pushDbsCard`), которая переписывает саму себя. Отдельным сообщением уходит
 // только то, что требует человека — редактирование в Telegram не даёт звука.
 
-export function notifyDbsBuyerMessage(wbOrderId: string, buyerName: string | null, textPreview: string) {
+export function notifyDbsBuyerMessage(ref: DbsRef, textPreview: string) {
   const preview = textPreview.length > 120 ? textPreview.slice(0, 117) + "…" : textPreview;
   broadcast({
     marker: "action",
     zone: "DBS",
     title: "сообщение покупателя",
-    lines: [
-      wbOrderRef(wbOrderId, [buyerName ? escapeHtml(buyerName) : null]),
-      `<i>${escapeHtml(preview)}</i>`,
-    ],
+    lines: [refLine(ref), `<i>${escapeHtml(preview)}</i>`],
     next: "ответить из консоли DBS или из кабинета WB",
-  });
+  }, ref);
 }
 
 /** A WB cancellation is never routine: the buyer's money went back, and
  * whatever we opened on the back of that order has to stop. */
 export function notifyDbsOrderCancelled(
-  wbOrderId: string,
+  ref: DbsRef,
   wbStatus: string,
-  activationCode: string | null,
   internalStatus: string | null,
   outcome: "rejected" | "needs_human" | "no_internal_order",
 ) {
+  const activationCode = ref.code ?? null;
   const code = activationCode ? `<code>${escapeHtml(activationCode)}</code>` : "—";
   const next = outcome === "rejected"
     ? `выкуп ${code} закрыт автоматически (был ${escapeHtml(internalStatus ?? "—")}) — делать ничего не нужно`
@@ -62,9 +98,9 @@ export function notifyDbsOrderCancelled(
     marker: outcome === "needs_human" ? "urgent" : "cancelled",
     zone: "DBS",
     title: "заказ отменён на WB",
-    lines: [wbOrderRef(wbOrderId, [`<i>${escapeHtml(wbStatus)}</i>`])],
+    lines: [refLine(ref, [`<i>${escapeHtml(wbStatus)}</i>`])],
     next,
-  });
+  }, ref);
 }
 
 /** Почему закрытие доставки не состоялось — человеческим языком.
@@ -115,7 +151,7 @@ function ageLabel(hours: number): string {
 }
 
 export function notifyDbsCodeCaptured(
-  wbOrderId: string,
+  ref: DbsRef,
   skip: AutoReceiveSkip = null,
   held?: HeldDeliveryCode,
 ) {
@@ -125,13 +161,13 @@ export function notifyDbsCodeCaptured(
       zone: "DBS",
       title: "код доставки получен — решение за вами",
       lines: [
-        wbOrderRef(wbOrderId),
+        refLine(ref),
         `Код доставки: <code>${escapeHtml(held.deliveryCode)}</code>`,
         `Заказ оформлен <b>${ageLabel(held.ageHours)}</b> назад — автозакрытие не применяется`,
       ],
       next: "закрыть доставку этим кодом (кабинет WB или консоль DBS) — или отклонить. " +
         "Гейт покупателю уйдёт сам, как только доставка закроется",
-    });
+    }, ref);
     return;
   }
   if (!skip) {
@@ -139,9 +175,9 @@ export function notifyDbsCodeCaptured(
       marker: "progress",
       zone: "DBS",
       title: "код доставки получен",
-      lines: [wbOrderRef(wbOrderId)],
+      lines: [refLine(ref)],
       next: "закрываю доставку на WB и отправляю гейт",
-    });
+    }, ref);
     return;
   }
   const reason = SKIP_REASON[skip];
@@ -149,13 +185,13 @@ export function notifyDbsCodeCaptured(
     marker: reason.marker,
     zone: "DBS",
     title: "код получен, но доставка не закрыта",
-    lines: [wbOrderRef(wbOrderId)],
+    lines: [refLine(ref)],
     next: reason.text,
-  });
+  }, ref);
 }
 
 export function notifyDbsAutoReceiveFailed(
-  wbOrderId: string,
+  ref: DbsRef,
   outcomeUnknown: boolean,
   providerCode?: string,
   nextTryAt?: Date | null,
@@ -164,7 +200,7 @@ export function notifyDbsAutoReceiveFailed(
     marker: "urgent",
     zone: "DBS",
     title: "WB не принял код доставки",
-    lines: [wbOrderRef(wbOrderId, [providerCode ? `ответ WB: <code>${escapeHtml(providerCode)}</code>` : null])],
+    lines: [refLine(ref, [providerCode ? `ответ WB: <code>${escapeHtml(providerCode)}</code>` : null])],
     next: outcomeUnknown
       ? "<b>сверить кабинет WB перед повтором</b> — исход неизвестен, повторять вслепую нельзя"
       // Гейт больше не уходит вперёд закрытия: покупателю ничего не обещано, и
@@ -174,50 +210,50 @@ export function notifyDbsAutoReceiveFailed(
       : `повторяем по расписанию${nextTryAt ? `, следующая попытка ~${mskTime(nextTryAt)} МСК` : ""}`
         + " — до 6 ч с прихода кода. Гейт покупателю не отправлен;"
         + " закрыть доставку вручную в кабинете WB можно в любой момент, гейт уйдёт сам",
-  });
+  }, ref);
 }
 
 /** Середина расписания: код всё ещё у нас, повторы идут, покупателя попросили
  * перепроверить цифры. Не «urgent» — вмешательство здесь не требуется, но знать
  * о том, что покупателю ушло сообщение, оператор обязан. */
-export function notifyDbsCodeRecheck(wbOrderId: string, askedBuyer: boolean, nextTryAt: Date | null) {
+export function notifyDbsCodeRecheck(ref: DbsRef, askedBuyer: boolean, nextTryAt: Date | null) {
   broadcast({
     marker: "action",
     zone: "DBS",
     title: "WB тянет с кодом — продолжаем повторы",
     lines: [
-      wbOrderRef(wbOrderId),
+      refLine(ref),
       nextTryAt ? `Следующая попытка ~<b>${mskTime(nextTryAt)}</b> МСК` : "Расписание повторов заканчивается",
     ],
     next: askedBuyer
       ? "покупателя попросили перепроверить код; код остаётся у нас, повторы идут сами"
       : "<b>сообщение покупателю не ушло</b> — проверить чат WB; повторы идут сами",
-  });
+  }, ref);
 }
 
 /** Код отклонён на всех попытках: дальше без покупателя или без человека не
  * обойтись. Отдельным сообщением, потому что живая карточка не звенит. */
-export function notifyDbsCodeRejected(wbOrderId: string, askedBuyer: boolean) {
+export function notifyDbsCodeRejected(ref: DbsRef, askedBuyer: boolean) {
   broadcast({
     marker: "urgent",
     zone: "DBS",
     title: "код доставки не подошёл",
-    lines: [wbOrderRef(wbOrderId)],
+    lines: [refLine(ref)],
     next: askedBuyer
       ? "покупателя попросили прислать код заново — гейт придержан до закрытия доставки"
       : "<b>разобраться вручную</b>: просить код заново больше не будем, покупатель без выдачи",
-  });
+  }, ref);
 }
 
 /** WB даёт около часа на закрытие доставки с момента прихода кода. Пропущенное
  * окно не отыгрывается, поэтому это единственное сообщение, которое кричит. */
-export function notifyDbsDeliveryStuck(wbOrderId: string, supplierStatus: string, codeReceivedAt: Date) {
+export function notifyDbsDeliveryStuck(ref: DbsRef, supplierStatus: string, codeReceivedAt: Date) {
   broadcast({
     marker: "urgent",
     zone: "DBS",
     title: "доставка не закрыта двадцать минут",
     lines: [
-      wbOrderRef(wbOrderId, [`WB держит статус «${escapeHtml(supplierStatus)}»`]),
+      refLine(ref, [`WB держит статус «${escapeHtml(supplierStatus)}»`]),
       // Про «окно примерно до +1 ч» здесь больше не пишем: 22.08 заказ
       // 5550714937 закрылся тем же кодом через 3 ч 56 мин, и ложный дедлайн
       // толкал закрывать наугад там, где достаточно подождать.
@@ -225,54 +261,46 @@ export function notifyDbsDeliveryStuck(wbOrderId: string, supplierStatus: string
     ],
     next: "ждать повторов не обязательно: <b>кабинет WB → «Передать в доставку»</b>, затем закрыть заказ"
       + " — или сделать это из консоли DBS. Гейт покупателю уйдёт сам, как только доставка закроется",
-  });
+  }, ref);
 }
 
 /** Э7: покупатель получил ссылку и не открыл её даже через сутки. Деньги
  * приняты, товар не выдан — дальше это работа человека, а не бота. */
-export function notifyDbsGateNotOpened(wbOrderId: string, activationCode: string, denomination: number | null) {
+export function notifyDbsGateNotOpened(ref: DbsRef) {
   broadcast({
     marker: "action",
     zone: "DBS",
     title: "покупатель не открыл свой код",
-    lines: [
-      wbOrderRef(wbOrderId, [`код <code>${escapeHtml(activationCode)}</code>`, denomLine(denomination)]),
-      "Два напоминания в чат WB отправлены, ответа нет",
-    ],
+    lines: [refLine(ref), "Два напоминания в чат WB отправлены, ответа нет"],
     next: "написать покупателю лично или открыть выкуп вручную из консоли DBS",
-  });
+  }, ref);
 }
 
 /** Э2: покупатель прислал в бота код доставки WB позже трёхчасового окна
  * автопривязки. Сам бот его не привязывает — по решению владельца это делает
  * человек, и вот его пинг. */
-export function notifyDbsBuyerFoundLate(
-  wbOrderId: string,
-  activationCode: string | null,
-  who: string,
-  hoursAgo: number,
-) {
+export function notifyDbsBuyerFoundLate(ref: DbsRef, who: string, hoursAgo: number) {
   broadcast({
     marker: "action",
     zone: "DBS",
     title: "покупатель нашёлся сам, нужна привязка",
     lines: [
-      wbOrderRef(wbOrderId, [activationCode ? `код <code>${escapeHtml(activationCode)}</code>` : null]),
+      refLine(ref),
       `Прислал свой код доставки в бота: ${who} (заказ получен ${hoursAgo} ч назад)`,
     ],
     next: "консоль DBS → «Привязать покупателя» — окно автопривязки в 3 часа уже прошло",
-  });
+  }, ref);
 }
 
 /** Э2: заказ на выкуп открыт вручную и висит на служебном аккаунте. */
-export function notifyDbsBuyerUnlinked(wbOrderId: string, activationCode: string) {
+export function notifyDbsBuyerUnlinked(ref: DbsRef) {
   broadcast({
     marker: "action",
     zone: "DBS",
     title: "выкуп открыт, но покупатель не привязан",
-    lines: [wbOrderRef(wbOrderId, [`код <code>${escapeHtml(activationCode)}</code>`])],
+    lines: [refLine(ref)],
     next: "покупатель не получит уведомлений — привязать его в консоли DBS, когда он напишет",
-  });
+  }, ref);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -306,12 +334,17 @@ export function renderDbsCard(state: DbsCardState): string {
     marker: state.marker,
     zone: "DBS",
     title: state.title,
+    // Шапка карточки и шапка любого сообщения о заказе — одна и та же строка:
+    // код гейта переехал в неё из отдельной строки «Код гейта: …», чтобы у
+    // карточки и у ответов в ветке совпадал каждый ключ, а не только номер WB.
     lines: [
-      wbOrderRef(state.wbOrderId, [
-        denomLine(state.denomination, state.priceKopecks),
-        state.buyerName ? escapeHtml(state.buyerName) : null,
-      ]),
-      state.activationCode ? `Код гейта: <code>${escapeHtml(state.activationCode)}</code>` : null,
+      orderRef({
+        wbOrderId: state.wbOrderId,
+        code: state.activationCode,
+        denomination: state.denomination,
+        priceKopecks: state.priceKopecks,
+        buyerName: state.buyerName,
+      }),
     ],
     next: state.next,
   });

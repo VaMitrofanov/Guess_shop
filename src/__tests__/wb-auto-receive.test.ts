@@ -253,7 +253,7 @@ describe("automatic WB delivery close", () => {
     for (const reason of ["flag_off", "no_secret", "already_closed", "too_many_attempts", "wb_not_in_delivery", "order_too_old"]) {
       expect(autoReceive).toContain(`"${reason}"`);
     }
-    expect(worker).toContain("notifyDbsCodeCaptured(order.wbOrderId, skip");
+    expect(worker).toContain("notifyDbsCodeCaptured(await dbsRef(db, order.id, order.wbOrderId), skip");
   });
 
   /** Nothing walked a DBS order along WB's own ladder, so closing only worked

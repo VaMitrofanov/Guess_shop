@@ -38,7 +38,7 @@ describe("WB order source resolution", () => {
     await resolveWbOrderSource(client, "QUN5YFZ");
     expect(client.wbMarketplaceOrder.findFirst).toHaveBeenCalledWith({
       where: { wbCode: { code: "QUN5YFZ" } },
-      select: { id: true },
+      select: { wbOrderId: true, adminCardMessages: true },
     });
   });
 });

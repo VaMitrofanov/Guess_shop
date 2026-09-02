@@ -43,7 +43,7 @@ import {
 } from "../../bots/shared/wb-delivery-policy";
 import { BuyoutError, resolveGamepass } from "@/lib/roblox-buyout";
 import { checkGamepassPrice, expectedGamepassPrice } from "@/lib/purchase-guard";
-import { runWbDeliverySync } from "../../bots/shared/wb-delivery-sync";
+import { dbsRef, runWbDeliverySync } from "../../bots/shared/wb-delivery-sync";
 import { generateWbActivationCode } from "../../bots/shared/wb-activation-code";
 import { wbCodeRequestMessage, wbGateMessage, wbGateUrl, wbSiblingPosition } from "../../bots/shared/wb-gate-link";
 import { isServiceOwned, linkWbOrderToBuyer, resolveBuyerUser } from "../../bots/shared/wb-buyer-link";
@@ -917,7 +917,7 @@ async function createInternalOrder(
   // служебный аккаунт. Раньше это происходило молча — и покупатель просто
   // переставал получать что-либо (F3). Теперь об этом говорят вслух.
   if (!order.wbCode?.userId) {
-    notifyDbsBuyerUnlinked(order.wbOrderId, activationCode!);
+    notifyDbsBuyerUnlinked(await dbsRef(db, order.id, order.wbOrderId));
   }
   return {
     ok: true,

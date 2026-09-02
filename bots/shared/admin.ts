@@ -11,7 +11,7 @@ import { tgSend, tgSendPhoto, escapeHtml } from "./notify";
 import { db } from "./db";
 import { directPrice } from "./retail-pricing";
 import { formatOrderAge } from "./order-age";
-import { resolveWbOrderSource, wbOrderSourceLabel } from "./wb-order-source";
+import { resolveWbOrderRef, wbOrderSourceLabel } from "./wb-order-source";
 import { heldCustomerFor } from "./order-hold";
 import { twaLaunchUrl } from "./twa-link";
 export {
@@ -590,7 +590,11 @@ export interface PaymentScreenshotCardPayload {
  * Each admin gets an independent message with [✅ ВЫКУПЛЕНО] / [❌ ОШИБКА] buttons.
  */
 export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void> {
-  const orderSource = order.orderSource ?? await resolveWbOrderSource(db, order.wbCode);
+  // Одним запросом: откуда продажа, номер заказа на WB и id живой карточки DBS
+  // у каждого админа. Номер WB нужен шапке, id карточки — ветке: без них
+  // карточка выкупа выглядела отдельным делом, хотя это тот же самый заказ.
+  const wbRef = await resolveWbOrderRef(db, order.wbCode);
+  const orderSource = order.orderSource ?? wbRef.source;
   const passPrice = Math.ceil(order.amount / 0.7);
 
   const dateStr = order.createdAt 
@@ -630,9 +634,16 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
     : "";
 
   // Header identifier = код (ВБ / DIR- / AV-), не внутренний номер заказа.
+  // Единая шапка: тот же порядок ключей, что в живой карточке DBS и во всех
+  // сообщениях о заказе — номер WB, код гейта, сумма, покупатель.
+  const refLine = wbRef.wbOrderId
+    ? `WB #${wbRef.wbOrderId} · <b>${order.amount} R$</b>\n`
+    : "";
+
   const text =
     `📦 <b>ЗАКАЗ <code>${order.wbCode}</code></b>\n` +
     `━━━━━━━━━━━━━━━━\n` +
+    refLine +
     replacedLine +
     webOneTapLine +
     manualLinkLine +
@@ -671,8 +682,17 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
     ],
   });
 
+  // Ответ на живую карточку DBS: Telegram рисует цитату сверху, и карточка
+  // выкупа читается как продолжение того же заказа, а не как новое дело.
+  // `allow_sending_without_reply` — карточку могли удалить или переслать заново.
   await Promise.allSettled(
-    ADMIN_IDS.map((id) => tgSend(id, text, { reply_markup: reply_markup(id) }))
+    ADMIN_IDS.map((id) => {
+      const rootId = wbRef.cardMessages?.[id];
+      return tgSend(id, text, {
+        reply_markup: reply_markup(id),
+        ...(rootId ? { reply_to_message_id: rootId, allow_sending_without_reply: true } : {}),
+      });
+    })
   );
 }
 

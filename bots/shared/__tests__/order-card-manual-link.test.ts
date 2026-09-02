@@ -21,6 +21,7 @@ jest.mock("../notify", () => ({
 }));
 jest.mock("../db", () => ({ db: {} }));
 jest.mock("../wb-order-source", () => ({
+  resolveWbOrderRef: async () => ({ source: "WB_DBS", wbOrderId: "5638591741", cardMessages: null }),
   resolveWbOrderSource: async () => "WB_DBS",
   wbOrderSourceLabel: () => "WB DBS",
 }));

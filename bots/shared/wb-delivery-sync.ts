@@ -76,6 +76,7 @@ import {
   pushDbsCard,
   renderDbsCard,
   type DbsCardState,
+  type DbsRef,
 } from "./wb-delivery-admin-notify";
 import { mskTime } from "./notify-format";
 
@@ -221,6 +222,49 @@ async function audit(
     create: { marketplaceOrderId, type, idempotencyKey, actor: "wb-sync", payload },
     update: {},
   });
+}
+
+/** Ссылка на заказ для уведомления: ключи единой шапки плюс id живой карточки
+ * у каждого админа — то, к чему сообщение пришивается ответом.
+ *
+ * Один маленький запрос на уведомление: уведомления редки (все тихие шаги
+ * живут в самой карточке), а без id карточки ветка не собирается.
+ * Не бросает никогда — сообщение о деньгах важнее своего оформления. */
+const DBS_REF_SELECT = {
+  wbOrderId: true,
+  buyerName: true,
+  denominationSnapshot: true,
+  priceKopecks: true,
+  finalPriceKopecks: true,
+  adminCardMessages: true,
+  wbCode: { select: { code: true } },
+} as const;
+
+/** `adminCardMessages` — свободный JSON, поэтому форма проверяется на входе. */
+function cardMessagesOf(raw: unknown): Record<string, number> | null {
+  return raw && typeof raw === "object" && !Array.isArray(raw)
+    ? raw as Record<string, number>
+    : null;
+}
+
+export async function dbsRef(db: Db, orderId: string, fallbackWbOrderId: string): Promise<DbsRef> {
+  try {
+    const row = await db.wbMarketplaceOrder.findUnique({
+      where: { id: orderId },
+      select: DBS_REF_SELECT,
+    });
+    if (!row) return { wbOrderId: fallbackWbOrderId };
+    return {
+      wbOrderId: row.wbOrderId,
+      code: row.wbCode?.code ?? null,
+      denomination: row.denominationSnapshot,
+      priceKopecks: row.finalPriceKopecks ?? row.priceKopecks,
+      buyerName: row.buyerName,
+      cardMessages: cardMessagesOf(row.adminCardMessages),
+    };
+  } catch {
+    return { wbOrderId: fallbackWbOrderId };
+  }
 }
 
 async function upsertMarketplaceOrder(
@@ -418,8 +462,19 @@ const CARD_STEP: Record<string, string> = {
   GATE_SERVED_EXTERNALLY: "выдан вне системы",
   INTERNAL_ORDER_CREATED: "выкуп открыт вручную",
   BUYER_LINKED: "покупатель привязан",
+  BUYER_SIGNED_IN: "вошёл на сайт",
   WB_ORDER_CANCELLED: "отменён на WB",
 };
+
+/** Подпись этапа. У входа на сайт важен канал — «вошёл на сайт (VK)»: по нему
+ * оператор понимает, в каком боте искать покупателя. */
+function cardStepLabel(event: { type: string; payload: unknown }): string | null {
+  const base = CARD_STEP[event.type];
+  if (!base) return null;
+  if (event.type !== "BUYER_SIGNED_IN") return base;
+  const channel = (event.payload as { channel?: string } | null)?.channel;
+  return channel ? `${base} (${channel})` : base;
+}
 
 /** Одна живая карточка на заказ (Э5-B).
  *
@@ -431,7 +486,7 @@ const CARD_STEP: Record<string, string> = {
  * Редактирование сообщения в Telegram **не даёт уведомления**, поэтому всё,
  * что требует человека, обязано приходить отдельным сообщением, а карточка
  * остаётся местом, где видно текущее состояние без листания. */
-async function refreshDbsCard(db: Db, orderId: string) {
+export async function refreshDbsCard(db: Db, orderId: string) {
   const order = await db.wbMarketplaceOrder.findUnique({
     where: { id: orderId },
     include: {
@@ -451,17 +506,16 @@ async function refreshDbsCard(db: Db, orderId: string) {
     activationCode: order.wbCode?.code ?? null,
     ...dbsCardHeadline(order, hasLiveSecret, order.deliverySecret?.receivedAt ?? null),
     timeline: order.events
-      .filter((event) => CARD_STEP[event.type])
-      .map((event) => `${mskTime(event.createdAt)}  ${CARD_STEP[event.type]}`)
+      .map((event) => ({ at: event.createdAt, label: cardStepLabel(event) }))
+      .filter((row): row is { at: Date; label: string } => Boolean(row.label))
+      .map((row) => `${mskTime(row.at)}  ${row.label}`)
       // Один и тот же шаг может записаться дважды (например, повторный запрос
       // кода) — в карточке это шум, а не информация.
       .filter((row, index, all) => all.indexOf(row) === index)
       .slice(-8),
   };
 
-  const existing = order.adminCardMessages && typeof order.adminCardMessages === "object" && !Array.isArray(order.adminCardMessages)
-    ? order.adminCardMessages as Record<string, number>
-    : null;
+  const existing = cardMessagesOf(order.adminCardMessages);
 
   // Один захваченный код вызывает refresh трижды за секунду — из auto-receive,
   // из auto-gate и из самого захвата. Два последних вызова видят то же самое
@@ -475,6 +529,38 @@ async function refreshDbsCard(db: Db, orderId: string) {
     where: { id: orderId },
     data: { adminCardMessages: updated, adminCardHash: hash },
   }).catch(() => {});
+}
+
+/**
+ * Покупатель дошёл по гейт-ссылке до сайта и вошёл.
+ *
+ * Раньше на это уходила отдельная карточка «📦 ЗАКАЗ …» — третье сообщение об
+ * одном и том же заказе, да ещё и единственное, которое не знало номера WB
+ * (скрин владельца, 01.09.2026). Для DBS-заказа это не задача, а шаг воронки,
+ * и место ему — в таймлайне живой карточки.
+ *
+ * Ключ идемпотентности один на заказ: повторные входы таймлайн не засоряют.
+ * Возвращает true, если заказ действительно DBS и шаг записан, — тогда
+ * отдельную карточку слать не нужно.
+ */
+export async function noteDbsBuyerSignedIn(
+  db: Db,
+  activationCode: string,
+  channel: string,
+): Promise<boolean> {
+  try {
+    const order = await db.wbMarketplaceOrder.findFirst({
+      where: { wbCode: { code: activationCode } },
+      select: { id: true, isTest: true },
+    });
+    if (!order || order.isTest) return false;
+    await audit(db, order.id, "BUYER_SIGNED_IN", `buyer-signed-in:${order.id}`, { channel });
+    await refreshDbsCard(db, order.id);
+    return true;
+  } catch (error) {
+    console.error("[WbDbsSync] buyer sign-in note failed:", safeErrorCode(error));
+    return false;
+  }
 }
 
 /** Короткий отпечаток текста карточки. Не крипто — только «изменилось или нет». */
@@ -698,7 +784,7 @@ async function tryAutoReceive(db: Db, orderId: string, wbOrderId: string): Promi
       // Кричим на первой попытке и на последней. Пятнадцать попыток — это
       // пятнадцать одинаковых сообщений подряд, а промежуточные и так видны в
       // карточке: шум ровно там, где нужна ясность.
-      notifyDbsAutoReceiveFailed(wbOrderId, unknown, providerCode, wbReceiveRetryDueAt(retryState));
+      notifyDbsAutoReceiveFailed(await dbsRef(db, orderId, wbOrderId), unknown, providerCode, wbReceiveRetryDueAt(retryState));
     }
     await refreshDbsCard(db, orderId).catch(() => {});
     return { closed: false, skip: unknown ? "wb_unknown" : "wb_rejected" };
@@ -760,7 +846,7 @@ async function askBuyerToRecheckCode(
       console.error(`[WbDbsSync] code recheck message failed for ${wbOrderId}:`, safeErrorCode(error));
     }
   }
-  notifyDbsCodeRecheck(wbOrderId, asked, nextTryAt);
+  notifyDbsCodeRecheck(await dbsRef(db, orderId, wbOrderId), asked, nextTryAt);
 }
 
 /** Сколько раз подряд мы готовы просить у покупателя другой код доставки.
@@ -818,7 +904,7 @@ async function askBuyerForAnotherCode(db: Db, orderId: string, wbOrderId: string
   }
   // Уведомление уходит в любом случае: это единственный громкий сигнал о том,
   // что покупатель остался без выдачи, а карточка звука не даёт.
-  notifyDbsCodeRejected(wbOrderId, asking);
+  notifyDbsCodeRejected(await dbsRef(db, orderId, wbOrderId), asking);
 }
 
 /** Closing the delivery used to get exactly one attempt, taken at the instant
@@ -995,7 +1081,7 @@ async function alertStuckDeliveries(db: Db) {
       data: { deliveryAlertedAt: new Date() },
     });
     notifyDbsDeliveryStuck(
-      order.wbOrderId,
+      await dbsRef(db, order.id, order.wbOrderId),
       order.supplierStatus,
       order.deliverySecret?.receivedAt ?? new Date(),
     );
@@ -1177,7 +1263,7 @@ async function captureDeliveryCode(
   // что требует человека: редактирование сообщения в Telegram не даёт
   // уведомления, и пропуск закрытия обязан прозвенеть.
   if (skip) {
-    notifyDbsCodeCaptured(order.wbOrderId, skip, skip === "order_too_old"
+    notifyDbsCodeCaptured(await dbsRef(db, order.id, order.wbOrderId), skip, skip === "order_too_old"
       // Код в сообщении — это и есть смысл уведомления: решение принимает
       // человек, а закрыть доставку в кабинете WB без кода он не сможет.
       ? { deliveryCode: code, ageHours: wbOrderAgeHours(order, receivedAt) }
@@ -1375,7 +1461,7 @@ async function syncChatEvents(db: Db, out: WbDeliverySyncResult) {
     // ровно там, где заказ идёт лучше всего.
     if (isNewEvent && isBuyerSender(event.sender) && order && rawText
       && !isNothingButDeliveryCode(rawText, deliveryCode) && !order.completedAt && !order.cancelledAt) {
-      notifyDbsBuyerMessage(order.wbOrderId, order.buyerName, rawText);
+      notifyDbsBuyerMessage(await dbsRef(db, order.id, order.wbOrderId), rawText);
     }
 
     if (order && order.chatState === "WAITING_BUYER_CHAT") {
@@ -1554,7 +1640,7 @@ async function propagateCancellation(db: Db, orderId: string, wbOrderId: string,
     internalStatus: internal?.status ?? null,
     outcome,
   }).catch(() => {});
-  notifyDbsOrderCancelled(wbOrderId, wbStatus, code, internal?.status ?? null, outcome);
+  notifyDbsOrderCancelled(await dbsRef(db, orderId, wbOrderId), wbStatus, internal?.status ?? null, outcome);
   await refreshDbsCard(db, orderId).catch(() => {});
 }
 
@@ -1737,7 +1823,7 @@ async function remindUnopenedGates(db: Db, out: WbDeliverySyncResult) {
       });
       out.gateReminders += 1;
       if (due.level === GATE_REMINDERS[GATE_REMINDERS.length - 1].level) {
-        notifyDbsGateNotOpened(order.wbOrderId, activationCode, order.denominationSnapshot);
+        notifyDbsGateNotOpened(await dbsRef(db, order.id, order.wbOrderId));
       }
     } catch (error) {
       console.error(`[WbDbsSync] gate reminder failed for ${order.wbOrderId}:`, safeErrorCode(error));

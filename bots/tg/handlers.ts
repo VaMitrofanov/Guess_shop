@@ -42,6 +42,7 @@ import {
   linkWbOrderToBuyer,
 } from "../shared/wb-buyer-link";
 import { notifyDbsBuyerFoundLate } from "../shared/wb-delivery-admin-notify";
+import { dbsRef, noteDbsBuyerSignedIn } from "../shared/wb-delivery-sync";
 import { wbGateUrl } from "../shared/wb-gate-link";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -723,7 +724,13 @@ export function registerStart(bot: Telegraf): void {
       )));
     }
 
-    if (provisionalCreated && provisionalOrder?.status === "AWAITING_GAMEPASS") {
+    // DBS-заказ уже ведёт живую карточку: активация кода для него — шаг
+    // воронки, а не задача, и уходит строкой в её таймлайн вместо второго
+    // сообщения об одном и том же заказе.
+    const foldedIntoDbsCard = provisionalCreated
+      ? await noteDbsBuyerSignedIn(db, code, "TG").catch(() => false)
+      : false;
+    if (provisionalCreated && !foldedIntoDbsCard && provisionalOrder?.status === "AWAITING_GAMEPASS") {
       try {
         const tgDisplay = ctx.from.username ? `@${ctx.from.username}` : escapeHtml(ctx.from.first_name || "Пользователь");
         const dateStr = new Date().toLocaleString("ru-RU", {
@@ -3314,8 +3321,7 @@ async function handleWbDeliveryCodeEntry(ctx: DeliveryCodeCtx, tgId: string, cod
   if (!match.withinAutoWindow) {
     await askSupport();
     notifyDbsBuyerFoundLate(
-      match.wbOrderId,
-      match.activationCode,
+      await dbsRef(db, match.marketplaceOrderId, match.wbOrderId),
       ctx.from?.username ? `@${ctx.from.username}` : `tg:${tgId}`,
       Math.round((Date.now() - match.receivedAt.getTime()) / 3_600_000),
     );

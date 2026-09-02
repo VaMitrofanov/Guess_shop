@@ -10,7 +10,11 @@ describe("TWA and admin notification regressions", () => {
 
     expect(source).toContain("let provisionalCreated = false;");
     expect(source).toContain("provisionalCreated = true;");
-    expect(source).toContain('if (provisionalCreated && provisionalOrder?.status === "AWAITING_GAMEPASS")');
+    // К идемпотентности добавился второй гард: у DBS-заказа активация кода
+    // уходит строкой в таймлайн живой карточки, а не вторым сообщением о том
+    // же заказе (единая нить заказа, 02.09.2026).
+    expect(source).toContain('if (provisionalCreated && !foldedIntoDbsCard && provisionalOrder?.status === "AWAITING_GAMEPASS")');
+    expect(source).toContain('noteDbsBuyerSignedIn(db, code, "TG")');
   });
 
   test("toast is portalled above the order bottom sheet", () => {

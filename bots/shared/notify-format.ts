@@ -64,10 +64,37 @@ export function formatAdminNotice(notice: AdminNotice): string {
   return [head, ...body, ...tail].join("\n");
 }
 
-/** Ярлык «WB #12345» одной строкой — самый частый первый факт в зоне DBS. */
-export function wbOrderRef(wbOrderId: string, extra?: Array<string | null | undefined | false>): string {
-  const parts = [`WB #${escapeHtml(wbOrderId)}`, ...(extra ?? []).filter((p): p is string => Boolean(p))];
-  return parts.join(" · ");
+/**
+ * Единая шапка заказа: одна строка, один порядок полей, во всех сообщениях.
+ *
+ * До этого об одном заказе приходило три сообщения с тремя разными первыми
+ * строками: живая карточка DBS и сообщение покупателя знали номер WB, а
+ * карточка входа на сайт — только код гейта. Общего ключа не было ни одного,
+ * и связать их глазом было нечем (скрин владельца, 01.09.2026).
+ *
+ * Теперь ключей всегда два — номер заказа WB и код гейта, — и стоят они в
+ * одном и том же месте. Код в `<code>`: тап по нему копирует.
+ */
+export type OrderRefParts = {
+  wbOrderId?: string | null;
+  /** Код гейта (он же код ВБ): ZZF7T5B. */
+  code?: string | null;
+  denomination?: number | null;
+  priceKopecks?: number | null;
+  buyerName?: string | null;
+};
+
+export function orderRef(
+  parts: OrderRefParts,
+  extra?: Array<string | null | undefined | false>,
+): string {
+  return [
+    parts.wbOrderId ? `WB #${escapeHtml(parts.wbOrderId)}` : null,
+    parts.code ? `<code>${escapeHtml(parts.code)}</code>` : null,
+    denomLine(parts.denomination, parts.priceKopecks),
+    parts.buyerName ? escapeHtml(parts.buyerName) : null,
+    ...(extra ?? []),
+  ].filter((part): part is string => Boolean(part)).join(" · ");
 }
 
 /** Деньги и номинал в одном формате во всех сообщениях. */

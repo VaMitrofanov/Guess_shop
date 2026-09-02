@@ -34,6 +34,7 @@ import {
   linkWbOrderToBuyer,
 } from "../shared/wb-buyer-link";
 import { notifyDbsBuyerFoundLate } from "../shared/wb-delivery-admin-notify";
+import { dbsRef, noteDbsBuyerSignedIn } from "../shared/wb-delivery-sync";
 import { wbGateUrl } from "../shared/wb-gate-link";
 
 // VK API instance injected from bot.ts to avoid circular import.
@@ -1866,7 +1867,14 @@ async function handleRefActivation(
     )));
   }
 
-  if (provisionalCreated) {
+  // DBS-заказ уже ведёт живую карточку: активация кода для него — шаг воронки,
+  // а не задача, и уходит строкой в её таймлайн вместо второго сообщения об
+  // одном и том же заказе.
+  const foldedIntoDbsCard = provisionalCreated
+    ? await noteDbsBuyerSignedIn(db, wbCode.code, "VK").catch(() => false)
+    : false;
+
+  if (provisionalCreated && !foldedIntoDbsCard) {
     try {
       const dateStr = new Date().toLocaleString("ru-RU", {
         timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
@@ -3770,8 +3778,7 @@ async function handleVkDeliveryCodeEntry(ctx: VkDeliveryCodeCtx, vkUserId: numbe
     await askSupport();
     if (match.activationCode) {
       notifyDbsBuyerFoundLate(
-        match.wbOrderId,
-        match.activationCode,
+        await dbsRef(db, match.marketplaceOrderId, match.wbOrderId),
         `vk:${vkUserId}`,
         Math.round((Date.now() - match.receivedAt.getTime()) / 3_600_000),
       );
