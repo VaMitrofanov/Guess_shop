@@ -13,7 +13,7 @@ import { clientIp } from "@/lib/rate-limit";
 import { consumeTelegramWebLoginChallenge } from "@/lib/telegram-web-login";
 import { adminGrantFor, loadAdminCandidate } from "@/lib/admin-grant";
 import { resolveWbOrderSource } from "../bots/shared/wb-order-source";
-import { noteDbsBuyerSignedIn } from "../bots/shared/wb-delivery-sync";
+import { noteDbsBuyerSignedIn } from "../bots/shared/wb-dbs-thread";
 
 // VK display names are user-controlled and embedded into Telegram HTML
 // notifications — unescaped "<" breaks the whole message (silently lost).

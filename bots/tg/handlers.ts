@@ -42,7 +42,7 @@ import {
   linkWbOrderToBuyer,
 } from "../shared/wb-buyer-link";
 import { notifyDbsBuyerFoundLate } from "../shared/wb-delivery-admin-notify";
-import { dbsRef, noteDbsBuyerSignedIn } from "../shared/wb-delivery-sync";
+import { dbsRef, noteDbsBuyerSignedIn } from "../shared/wb-dbs-thread";
 import { wbGateUrl } from "../shared/wb-gate-link";
 
 // ── Constants ─────────────────────────────────────────────────────────────────

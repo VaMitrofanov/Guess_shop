@@ -43,7 +43,8 @@ import {
 } from "../../bots/shared/wb-delivery-policy";
 import { BuyoutError, resolveGamepass } from "@/lib/roblox-buyout";
 import { checkGamepassPrice, expectedGamepassPrice } from "@/lib/purchase-guard";
-import { dbsRef, runWbDeliverySync } from "../../bots/shared/wb-delivery-sync";
+import { runWbDeliverySync } from "../../bots/shared/wb-delivery-sync";
+import { dbsRef } from "../../bots/shared/wb-dbs-thread";
 import { generateWbActivationCode } from "../../bots/shared/wb-activation-code";
 import { wbCodeRequestMessage, wbGateMessage, wbGateUrl, wbSiblingPosition } from "../../bots/shared/wb-gate-link";
 import { isServiceOwned, linkWbOrderToBuyer, resolveBuyerUser } from "../../bots/shared/wb-buyer-link";
