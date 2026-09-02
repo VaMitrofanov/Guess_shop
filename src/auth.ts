@@ -3,7 +3,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
-import { sendTelegramMessage } from "@/lib/telegram";
+import { sendTelegramMessageId } from "@/lib/telegram";
 import { verifyVkIdUser } from "@/lib/vk-id";
 import { findOrCreateVerifiedIdentity } from "@/lib/user-identity";
 import { verifyTelegramLogin } from "@/lib/telegram-login";
@@ -14,6 +14,7 @@ import { consumeTelegramWebLoginChallenge } from "@/lib/telegram-web-login";
 import { adminGrantFor, loadAdminCandidate } from "@/lib/admin-grant";
 import { resolveWbOrderSource } from "../bots/shared/wb-order-source";
 import { noteDbsBuyerSignedIn } from "../bots/shared/wb-dbs-thread";
+import { recordOrderCardRoot } from "../bots/shared/order-thread";
 
 // VK display names are user-controlled and embedded into Telegram HTML
 // notifications — unescaped "<" breaks the whole message (silently lost).
@@ -370,9 +371,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                   `🆔 VK ID: <code>${vkId}</code>`;
               }
               if (msg) {
-                await Promise.all(
-                  tgChatIds.map((chatId) => sendTelegramMessage(tgToken, chatId, msg!, reply_markup ? { reply_markup } : undefined))
+                const sentIds = await Promise.all(
+                  tgChatIds.map((chatId) => sendTelegramMessageId(tgToken, chatId, msg!, reply_markup ? { reply_markup } : undefined))
                 );
+                // Карточка активации — КОРЕНЬ ветки обычного WB-заказа: карточка
+                // выкупа («⏳ В обработке» с кнопками) придёт ответом на неё, а не
+                // вторым отдельным делом об одном и том же коде. У DBS-заказа
+                // корень свой — живая карточка, и сюда мы просто не доходим.
+                if (isActiveActivation && !foldedIntoDbsCard && provisionalOrder?.id) {
+                  await recordOrderCardRoot(
+                    prisma,
+                    provisionalOrder.id,
+                    Object.fromEntries(tgChatIds.map((chatId, index) => [chatId, sentIds[index]])),
+                  );
+                }
               }
             }
           } catch (tgErr) {

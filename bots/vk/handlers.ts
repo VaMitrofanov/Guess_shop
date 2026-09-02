@@ -12,7 +12,7 @@
 import type { MessageContext } from "vk-io";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
 import { sendAdminOrderCard, sendAdminReviewCard, sendAdminPaymentCard, notifySupportShown, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE } from "../shared/admin";
-import { vkGetName, tgSend, escapeHtml } from "../shared/notify";
+import { vkGetName, tgSend, tgMessageId, escapeHtml } from "../shared/notify";
 import { getState, setState, clearState } from "./session";
 import { Keyboard } from "vk-io";
 import { getGamepassDetails, getGamepassProductInfo } from "../shared/roblox";
@@ -35,6 +35,7 @@ import {
 } from "../shared/wb-buyer-link";
 import { notifyDbsBuyerFoundLate } from "../shared/wb-delivery-admin-notify";
 import { dbsRef, noteDbsBuyerSignedIn } from "../shared/wb-dbs-thread";
+import { recordOrderCardRoot } from "../shared/order-thread";
 import { wbGateUrl } from "../shared/wb-gate-link";
 
 // VK API instance injected from bot.ts to avoid circular import.
@@ -1808,6 +1809,7 @@ async function handleRefActivation(
   // ── Provisional order: claim code + notify admins BEFORE subscription gate ──
   // Mirrors TG flow — user identity is captured even if they skip the sub check.
   let provisionalCreated = false;
+  let provisionalOrderId: string | null = null;
   /** Заказ существовал и висел на служебном аккаунте — мы его перевесили. */
   let adoptedExistingOrder = false;
   try {
@@ -1838,7 +1840,7 @@ async function handleRefActivation(
         where: { code: wbCode.code },
         data: { userId: user.id, status: "CLAIMED", isUsed: false },
       });
-      await tx.wbOrder.create({
+      const created = await tx.wbOrder.create({
         data: {
           amount: totalAmount,
           gamepassUrl: null,
@@ -1852,6 +1854,7 @@ async function handleRefActivation(
           // второй заказ обычно для другого аккаунта Roblox (кейс 21.08).
         },
       });
+      provisionalOrderId = created.id;
       provisionalCreated = true;
     });
   } catch (err) {
@@ -1895,7 +1898,17 @@ async function handleRefActivation(
         ...ADMIN_IDS,
         ...((process.env.TG_CHAT_ID ?? "").split(",").map((s) => s.trim()).filter((s) => s && !ADMIN_IDS.includes(s))),
       ];
-      await Promise.allSettled(chatIds.map((id) => tgSend(id, notifyText)));
+      // Карточка активации — КОРЕНЬ ветки обычного WB-заказа: карточка выкупа
+      // придёт ответом на неё, а не вторым отдельным делом об одном коде.
+      const sent = await Promise.allSettled(chatIds.map((id) => tgSend(id, notifyText)));
+      if (provisionalOrderId) {
+        await recordOrderCardRoot(db, provisionalOrderId, Object.fromEntries(
+          chatIds.map((id, index) => {
+            const result = sent[index];
+            return [id, result.status === "fulfilled" ? tgMessageId(result.value) : null];
+          }),
+        ));
+      }
     } catch (err) {
       console.error("[VK] Admin provisional notify error:", err);
     }

@@ -2,6 +2,7 @@ import { formatOrderAge } from "@/lib/order-age";
 import { prisma } from "@/lib/prisma";
 import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
 import { resolveWbOrderRef } from "../../bots/shared/wb-order-source";
+import { orderCardRoots } from "../../bots/shared/order-thread";
 
 /**
  * Web-side admin order card.
@@ -96,6 +97,9 @@ export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {
   }
 
   const wbRef = await resolveWbOrderRef(prisma, order.wbCode);
+  // У DBS-заказа корень ветки — живая карточка; у обычного WB-заказа её нет, и
+  // корнем становится карточка активации кода («⌛ Ожидаем ссылку»).
+  const threadRoots = wbRef.cardMessages ? null : await orderCardRoots(prisma, order.wbCode);
   const text = buildWebOrderCardText(order, Date.now(), wbRef.wbOrderId);
 
   const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(order.wbCode)}`;
@@ -109,9 +113,9 @@ export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {
     ],
   };
 
-  // Ответ на живую карточку DBS — карточка выкупа встаёт в ветку заказа.
+  // Ответ на корень ветки — карточка выкупа встаёт в ту же нить заказа.
   await Promise.allSettled(adminIds.map((id) => {
-    const rootId = wbRef.cardMessages?.[id];
+    const rootId = wbRef.cardMessages?.[id] ?? threadRoots?.[id];
     return sendTelegramMessage(token, id, text, {
       reply_markup,
       ...(rootId ? { reply_to_message_id: rootId, allow_sending_without_reply: true } : {}),

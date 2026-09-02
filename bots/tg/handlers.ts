@@ -9,7 +9,7 @@ import { Telegraf, Markup } from "telegraf";
 // telegraf/types re-exports the full typegram surface (official subpath export)
 import type { User as TGUser } from "telegraf/types";
 import { db, getCustomerStatus, getGreeting, getIdleGreeting } from "../shared/db";
-import { vkSend, vkSendPhoto, stripHtml, tgSend, escapeHtml } from "../shared/notify";
+import { vkSend, vkSendPhoto, stripHtml, tgSend, tgMessageId, escapeHtml } from "../shared/notify";
 import { getSbpQrBuffer } from "../shared/sbp";
 import { grantDirectDiscountOnCompletion } from "../shared/direct-discount";
 import { sendAdminReviewCard, notifySupportShown, notifyUserHurdle, notifyAdminsRetailBuyout, sendAdminPaymentCard, CB, ADMIN_IDS, DIRECT_PACKS, directPrice, customRate, BONUS_MIN_PACK, CUSTOM_MIN, CUSTOM_MAX, ROBLOX_NICK_RE, generateDirectCode, formatUserHandleHtml, orderCode } from "../shared/admin";
@@ -43,6 +43,7 @@ import {
 } from "../shared/wb-buyer-link";
 import { notifyDbsBuyerFoundLate } from "../shared/wb-delivery-admin-notify";
 import { dbsRef, noteDbsBuyerSignedIn } from "../shared/wb-dbs-thread";
+import { recordOrderCardRoot } from "../shared/order-thread";
 import { wbGateUrl } from "../shared/wb-gate-link";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -748,21 +749,30 @@ export function registerStart(bot: Telegraf): void {
           `🔑 Код ВБ: <code>${code}</code>\n` +
           `📊 Статус: ⌛ Ожидаем ссылку на геймпасс`;
 
+        // Карточка активации — КОРЕНЬ ветки обычного WB-заказа: карточка выкупа
+        // придёт ответом на неё, а не вторым отдельным делом об одном коде.
+        const roots: Record<string, number> = {};
         for (const adminId of ADMIN_IDS) {
           try {
-            await bot.telegram.sendMessage(adminId, notifyText, {
+            const sent = await bot.telegram.sendMessage(adminId, notifyText, {
               parse_mode: "HTML",
               link_preview_options: { is_disabled: true },
             });
+            if (sent?.message_id) roots[adminId] = sent.message_id;
           } catch { /* non-fatal */ }
         }
 
         const tgChatId = process.env.TG_CHAT_ID?.split(",")[0]?.trim();
         if (tgChatId && !ADMIN_IDS.includes(tgChatId)) {
-          await tgSend(tgChatId, notifyText).catch((e) =>
-            console.warn("[TG] provisional notify to TG_CHAT_ID failed:", e?.message)
-          );
+          const sent = await tgSend(tgChatId, notifyText).catch((e) => {
+            console.warn("[TG] provisional notify to TG_CHAT_ID failed:", e?.message);
+            return null;
+          });
+          const id = tgMessageId(sent);
+          if (id) roots[tgChatId] = id;
         }
+
+        if (provisionalOrder?.id) await recordOrderCardRoot(db, provisionalOrder.id, roots);
       } catch (err) {
         console.error("[TG] Admin provisional notify error:", err);
       }
@@ -3420,6 +3430,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
   // ── Provisional order: claim code + notify admins BEFORE subscription gate ──
   // Mirrors registerStart — user identity is captured even if they bail at the sub step.
   let provisionalCreated = false;
+  let provisionalOrderId: string | null = null;
   try {
     await (db as any).$transaction(async (tx: any) => {
       const existingOrder = await tx.wbOrder.findUnique({ where: { wbCode: wbCode.code } });
@@ -3428,7 +3439,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
         where: { code: wbCode.code },
         data: { userId: user.id, status: "CLAIMED", isUsed: false },
       });
-      await tx.wbOrder.create({
+      const created = await tx.wbOrder.create({
         data: {
           amount: totalAmount,
           gamepassUrl: null,
@@ -3439,6 +3450,7 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
           orderSource: await resolveWbOrderSource(tx, wbCode.code),
         },
       });
+      provisionalOrderId = created.id;
       provisionalCreated = true;
     });
   } catch (err) {
@@ -3466,9 +3478,19 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
         ...ADMIN_IDS,
         ...((process.env.TG_CHAT_ID ?? "").split(",").map((s) => s.trim()).filter((s) => s && !ADMIN_IDS.includes(s))),
       ];
-      await Promise.allSettled(
+      // Карточка активации — КОРЕНЬ ветки обычного WB-заказа: карточка выкупа
+      // придёт ответом на неё, а не вторым отдельным делом об одном коде.
+      const sent = await Promise.allSettled(
         chatIds.map((id) => tgSend(id, notifyText))
       );
+      if (provisionalOrderId) {
+        await recordOrderCardRoot(db, provisionalOrderId, Object.fromEntries(
+          chatIds.map((id, index) => {
+            const result = sent[index];
+            return [id, result.status === "fulfilled" ? tgMessageId(result.value) : null];
+          }),
+        ));
+      }
     } catch (err) {
       console.error("[TG] Text-entry admin notify error:", err);
     }

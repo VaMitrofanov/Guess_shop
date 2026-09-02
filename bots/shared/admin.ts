@@ -12,6 +12,7 @@ import { db } from "./db";
 import { directPrice } from "./retail-pricing";
 import { formatOrderAge } from "./order-age";
 import { resolveWbOrderRef, wbOrderSourceLabel } from "./wb-order-source";
+import { orderCardRoots } from "./order-thread";
 import { heldCustomerFor } from "./order-hold";
 import { twaLaunchUrl } from "./twa-link";
 export {
@@ -594,6 +595,9 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   // у каждого админа. Номер WB нужен шапке, id карточки — ветке: без них
   // карточка выкупа выглядела отдельным делом, хотя это тот же самый заказ.
   const wbRef = await resolveWbOrderRef(db, order.wbCode);
+  // У DBS-заказа корень ветки — живая карточка; у обычного WB-заказа её нет, и
+  // корнем становится карточка активации кода («⌛ Ожидаем ссылку»).
+  const threadRoots = wbRef.cardMessages ? null : await orderCardRoots(db, order.wbCode);
   const orderSource = order.orderSource ?? wbRef.source;
   const passPrice = Math.ceil(order.amount / 0.7);
 
@@ -687,7 +691,7 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
   // `allow_sending_without_reply` — карточку могли удалить или переслать заново.
   await Promise.allSettled(
     ADMIN_IDS.map((id) => {
-      const rootId = wbRef.cardMessages?.[id];
+      const rootId = wbRef.cardMessages?.[id] ?? threadRoots?.[id];
       return tgSend(id, text, {
         reply_markup: reply_markup(id),
         ...(rootId ? { reply_to_message_id: rootId, allow_sending_without_reply: true } : {}),
