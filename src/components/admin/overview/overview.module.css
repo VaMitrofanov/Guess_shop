@@ -1,0 +1,413 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   «Обзор» — начало смены (этап Г2).
+
+   Один крупный кегль на весь экран, и он принадлежит робуксам к выкупу: это
+   ответ на вопрос, ради которого экран открывают. Дальше плотность растёт, а
+   размер падает — витрина внизу набрана тем же кеглем, что подписи.
+
+   Цвета — те же, что в «Заказах» (`--o-*`): «годен / внимание / стоп» обязаны
+   значить одно и то же на двух экранах, иначе красный на обзоре и красный в
+   очереди читаются как два разных красных.
+
+   Устройства те же: MacBook Pro 16″ (страница не центрируется в 1440) и
+   iPhone Pro Max (одна колонка, кнопки во всю ширину, safe-area снизу).
+   ───────────────────────────────────────────────────────────────────────── */
+
+.screen {
+  --o-green: #40d47e;
+  --o-yellow: #ffd60a;
+  --o-orange: #ff9f0a;
+  --o-red: #ff6b60;
+  --o-blue: #7d9cff;
+  --o-ice: #64d2ff;
+  --o-accent: #a78bfa;
+  --o-muted: #8e8e97;
+  --o-line: rgba(255, 255, 255, .085);
+  --o-line-2: rgba(255, 255, 255, .15);
+  --o-surface: rgba(255, 255, 255, .03);
+
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px clamp(14px, 2vw, 26px) 44px;
+  font-size: 14px;
+}
+.screen button { text-align: left; font: inherit; color: inherit; }
+
+.toneGreen { color: var(--o-green); }
+.toneYellow { color: var(--o-yellow); }
+.toneOrange { color: var(--o-orange); }
+.toneRed { color: var(--o-red); }
+.toneBlue { color: var(--o-blue); }
+.toneIce { color: var(--o-ice); }
+.toneAccent { color: var(--o-accent); }
+.toneMuted { color: var(--o-muted); }
+
+.num { font-variant-numeric: tabular-nums; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  letter-spacing: .05em;
+  color: #cdbcff;
+}
+
+/* ── Шапка ───────────────────────────────────────────────────────────────── */
+
+.head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: var(--o-muted);
+  font-size: 12.5px;
+}
+.head h1 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: #b9b9c2;
+}
+.head b { color: #c6c6cf; font-weight: 650; }
+.head .spacer { margin-left: auto; }
+.refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--o-line);
+  border-radius: 10px;
+  color: #a9a9b2;
+  background: var(--o-surface);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.refresh:hover { color: #fff; border-color: var(--o-line-2); }
+.refresh svg { transition: transform .4s ease; }
+.spinning svg { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Ответ ───────────────────────────────────────────────────────────────── */
+
+.hero {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: clamp(16px, 2.4vw, 34px);
+  padding: 20px 4px 22px;
+  border-top: 1px solid var(--o-line-2);
+  border-bottom: 1px solid var(--o-line);
+}
+.heroFig { min-width: 0; }
+.heroFig strong {
+  display: block;
+  font-size: clamp(46px, 6.4vw, 72px);
+  font-weight: 750;
+  letter-spacing: -.05em;
+  line-height: .92;
+  font-variant-numeric: tabular-nums;
+}
+.heroFig strong small {
+  margin-left: 9px;
+  font-size: .28em;
+  font-weight: 650;
+  letter-spacing: 0;
+  color: var(--o-muted);
+}
+.heroFig span {
+  display: block;
+  margin-top: 10px;
+  color: var(--o-muted);
+  font-size: 13.5px;
+}
+.heroFig span b { color: #e6e6ea; font-weight: 650; }
+.heroRule { width: 1px; align-self: stretch; background: var(--o-line); }
+.heroSide { display: flex; flex-direction: column; gap: 9px; }
+.heroCount { font-size: 27px; font-weight: 730; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.heroCount small { margin-left: 6px; font-size: 13px; font-weight: 650; color: var(--o-muted); letter-spacing: 0; }
+.ageChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 13px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, .05);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.ageChip small { color: var(--o-muted); font-weight: 600; }
+.ageChipHot { background: rgba(255, 107, 96, .14); }
+.heroActs { margin-left: auto; display: flex; flex-wrap: wrap; gap: 9px; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--o-line-2);
+  border-radius: 11px;
+  color: #d2d2d9;
+  background: rgba(255, 255, 255, .045);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.btn:hover { color: #fff; border-color: rgba(255, 255, 255, .26); }
+.btn:disabled { opacity: .45; pointer-events: none; }
+.btnPrimary {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(135deg, #8c73ff, #587dff);
+  box-shadow: 0 8px 22px -10px rgba(86, 99, 235, .8);
+}
+.btnPrimary:hover { color: #fff; }
+.btnGood { color: #b6f0cd; border-color: rgba(64, 212, 126, .34); background: rgba(64, 212, 126, .12); }
+.btnGood:hover { color: #dcffe9; border-color: rgba(64, 212, 126, .5); }
+.btnSm { min-height: 27px; padding: 0 10px; font-size: 12px; border-radius: 9px; }
+
+/* ── Секции ──────────────────────────────────────────────────────────────── */
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 6px;
+}
+.sectionHead h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: #79797f;
+}
+.sectionHead .note { color: var(--o-muted); font-size: 12.5px; }
+.sectionHead .spacer { margin-left: auto; }
+
+.seg { display: flex; border: 1px solid var(--o-line); border-radius: 10px; overflow: hidden; }
+.seg button {
+  min-height: 30px;
+  padding: 0 11px;
+  color: #9a9aa2;
+  background: var(--o-surface);
+  font-size: 12.5px;
+  font-weight: 650;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.seg button + button { border-left: 1px solid var(--o-line); }
+.segOn { color: #cdbcff; background: rgba(139, 114, 255, .16); }
+
+/* ── Старейшие заказы в дорожке выкупа ──────────────────────────────────── */
+
+.oldest { display: flex; flex-direction: column; gap: 2px; }
+.oldestRow {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 46px 48px 28px;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .028);
+  font-size: 12.5px;
+}
+.oldestRow:hover { background: rgba(255, 255, 255, .05); }
+.oldestRowBusy { opacity: .45; pointer-events: none; }
+.oldestRow .nick { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c6c6ce; font-weight: 600; }
+.oldestRow .amount { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.oldestRow .age { text-align: right; font-weight: 650; font-variant-numeric: tabular-nums; }
+.tick {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(64, 212, 126, .3);
+  border-radius: 8px;
+  color: #7de3a6;
+  background: rgba(64, 212, 126, .1);
+}
+.tick:hover { background: rgba(64, 212, 126, .2); color: #d6ffe6; }
+
+/* ── Дорожки ─────────────────────────────────────────────────────────────── */
+
+.lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(258px, 1fr)); gap: 11px; }
+.lane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 15px 13px;
+  border: 1px solid var(--o-line);
+  border-radius: 15px;
+  background: var(--o-surface);
+}
+.laneHot { border-color: rgba(255, 107, 96, .26); }
+.laneHead { display: flex; align-items: center; gap: 8px; }
+.laneHead i { width: 7px; height: 7px; border-radius: 50%; flex: none; background: currentColor; }
+.laneHead strong { flex: 1; font-size: 13.5px; font-weight: 700; color: #f0f0f4; }
+.laneHead b { font-size: 20px; font-weight: 750; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.laneMeta { display: flex; flex-wrap: wrap; gap: 3px 11px; color: var(--o-muted); font-size: 12.5px; }
+.laneMeta b { color: #e4e4e8; font-weight: 650; font-variant-numeric: tabular-nums; }
+.laneRows { display: flex; flex-direction: column; gap: 1px; }
+.laneRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 7px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .028);
+  font-size: 12px;
+  color: #bcbcc4;
+}
+.laneRow b { margin-left: auto; color: #e8e8ec; font-weight: 700; font-variant-numeric: tabular-nums; }
+.laneFoot { display: flex; align-items: center; gap: 9px; margin-top: auto; }
+.laneFoot .note { color: var(--o-muted); font-size: 12px; }
+
+.calmRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px dashed var(--o-line);
+  border-radius: 12px;
+  color: var(--o-muted);
+  font-size: 13px;
+}
+
+/* ── Пока вас не было ────────────────────────────────────────────────────── */
+
+.diff { border: 1px solid var(--o-line); border-radius: 15px; overflow: hidden; }
+.diffHead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 11px 15px;
+  border-bottom: 1px solid var(--o-line);
+  background: rgba(255, 255, 255, .025);
+}
+.diffHead strong { font-size: 13px; font-weight: 700; }
+.diffHead span { color: var(--o-muted); font-size: 12.5px; }
+.diffHead .spacer { margin-left: auto; }
+.diffRow {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 10px 15px;
+  border-top: 1px solid rgba(255, 255, 255, .045);
+  font-size: 13.5px;
+}
+.diffRow:first-child { border-top: 0; }
+.diffRow .d {
+  width: 54px;
+  flex: none;
+  text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 700;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.diffRow .t { flex: 1; min-width: 0; }
+.diffRow .t small { display: block; margin-top: 1px; color: var(--o-muted); font-size: 12.5px; }
+.diffEmpty { padding: 18px 15px; color: var(--o-muted); font-size: 13px; text-align: center; }
+
+/* ── Тихая строка и витрина ──────────────────────────────────────────────── */
+
+.strip { border: 1px solid var(--o-line); border-radius: 12px; background: rgba(255, 255, 255, .022); }
+.stripWarn { border-color: rgba(255, 159, 10, .28); background: rgba(255, 159, 10, .06); }
+.strip summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 15px;
+  font-size: 13px;
+  color: #a8a8b1;
+}
+.strip summary::-webkit-details-marker { display: none; }
+.strip summary .spacer { margin-left: auto; }
+.strip summary .chev { color: var(--o-muted); transition: transform .18s ease; }
+.strip[open] summary .chev { transform: rotate(90deg); }
+.stripBody {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  padding: 0 15px 14px;
+  color: var(--o-muted);
+  font-size: 12.5px;
+}
+.stripBody b { color: #e6e6ea; font-weight: 650; font-variant-numeric: tabular-nums; }
+
+.showcase {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px clamp(14px, 2vw, 26px);
+  padding: 13px 15px;
+  border: 1px solid var(--o-line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .022);
+  color: var(--o-muted);
+  font-size: 12.5px;
+}
+.showcase b { color: #e6e6ea; font-weight: 650; font-variant-numeric: tabular-nums; }
+.showcase svg { flex: none; }
+.sparkNote { font-size: 11.5px; line-height: 1.35; color: #75757d; }
+.showcase .spacer { margin-left: auto; }
+.showLink { color: #b3a4f0; font-size: 12.5px; font-weight: 650; }
+.showLink:hover { color: #d6cbff; }
+
+/* ── Тост ────────────────────────────────────────────────────────────────── */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  z-index: 60;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  max-width: min(560px, calc(100vw - 28px));
+  padding: 11px 16px;
+  border: 1px solid var(--o-line-2);
+  border-radius: 13px;
+  background: rgba(24, 24, 29, .96);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 18px 44px -18px rgba(0, 0, 0, .9);
+  font-size: 13.5px;
+  color: #eaeaef;
+}
+.toastError { border-color: rgba(255, 107, 96, .4); color: #ffb3ac; }
+
+/* ── Загрузка ────────────────────────────────────────────────────────────── */
+
+.skeleton { border-radius: 15px; background: rgba(255, 255, 255, .045); }
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton { animation: pulse 1.5s ease-in-out infinite; }
+}
+@keyframes pulse { 0%, 100% { opacity: .5; } 50% { opacity: .85; } }
+
+/* ── Телефон ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 780px) {
+  .screen { padding: 14px 14px calc(96px + env(safe-area-inset-bottom)); gap: 13px; }
+  .hero { flex-direction: column; align-items: flex-start; gap: 14px; padding: 16px 0 18px; }
+  .heroRule { display: none; }
+  .heroActs { margin-left: 0; width: 100%; }
+  .heroActs .btn { flex: 1; }
+  .lanes { grid-template-columns: minmax(0, 1fr); }
+  .oldestRow { grid-template-columns: 64px minmax(0, 1fr) 46px 44px; padding: 4px 6px; }
+  /* «Выкуплено» — критичное действие: на телефоне палец, а не курсор. */
+  .tick { width: 44px; height: 44px; }
+  .oldestRow .age { display: none; }
+  .btn { min-height: 44px; }
+  .btnSm { min-height: 36px; }
+  .diffRow .d { width: 44px; }
+  .showcase .spacer { display: none; }
+}

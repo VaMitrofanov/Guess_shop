@@ -451,6 +451,30 @@
 .rateField { display: grid; gap: 6px; }
 .rateField label { color: var(--admin-muted); font-size: 12px; font-weight: 700; }
 .rateField small { color: #74747b; font-size: 11.5px; }
+/* ── Набор под баланс выкупного аккаунта ──────────────────────────────────────
+   Выкуп идёт с мелких аккаунтов под фиксированное пополнение, поэтому строка
+   ввода стоит НАД списком, а не в подвале: закупщик сначала называет аккаунт,
+   и только потом смотрит, что в него легло. */
+.balanceBar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px;
+}
+.balanceBar label { color: var(--admin-muted); font-size: 13px; font-weight: 700; }
+.balanceInput {
+  height: 34px; width: 108px; padding: 0 11px; border: 1px solid var(--admin-line);
+  border-radius: 10px; color: var(--admin-text); background: rgba(255,255,255,.045);
+  font: inherit; font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; outline: none;
+}
+.balanceInput:focus { border-color: rgba(157,132,255,.45); box-shadow: 0 0 0 3px rgba(139,114,255,.09); }
+.balanceUnit { margin-left: -3px; color: var(--admin-muted); font-size: 13px; font-weight: 700; }
+.balanceCount { color: var(--admin-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.balanceCount b { color: var(--admin-text); font-weight: 700; }
+
+@media (max-width: 767px) {
+  /* На телефоне iOS зумит поле с кеглем меньше 16px. */
+  .balanceInput { font-size: 16px; height: 44px; flex: 1; min-width: 120px; }
+  .balanceBar label { width: 100%; }
+}
+
 .rateInput {
   height: 42px; width: 100%; padding: 0 13px; border: 1px solid var(--admin-line);
   border-radius: 11px; color: var(--admin-text); background: rgba(255,255,255,.045);

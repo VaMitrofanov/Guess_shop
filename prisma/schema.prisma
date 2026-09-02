@@ -612,6 +612,31 @@ model PaymentAttempt {
 /// Durable liveness signal written by a worker process and independently
 /// inspected by the web process. Alert timestamps provide cross-instance
 /// deduplication when more than one web container is running.
+/// Кто из админов когда последний раз открывал консоль — ключ «Пока вас не
+/// было» на «Обзоре» и будущая отметка «в работе у другого админа».
+///
+/// Ключ — Telegram ID, тот же, под которым пишутся все админские действия и
+/// который проверяет `ADMIN_IDS`: второго списка админов не заводим.
+///
+/// Два поля времени, а не одно. `lastSeenAt` — последний удар пульса, он
+/// двигается на каждой загрузке. `windowStartAt` — начало окна «пока вас не
+/// было», и оно НЕ двигается, пока админ сидит на месте: иначе три обновления
+/// страницы подряд схлопнули бы окно в минуту и съели весь диф.
+model AdminPresence {
+  telegramId     String    @id
+  displayName    String?
+  lastSeenAt     DateTime
+  windowStartAt  DateTime
+  /// Заказ, который админ разбирает прямо сейчас (следующий шаг — защита от
+  /// двойного выкупа при трёх админах).
+  currentOrderId String?
+  currentOrderAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([lastSeenAt])
+}
+
 model ServiceHeartbeat {
   serviceKey  String    @id
   lastSeenAt  DateTime

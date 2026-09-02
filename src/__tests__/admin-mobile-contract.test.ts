@@ -14,7 +14,9 @@ const anton = read("components/admin/anton-client.tsx");
 const users = read("app/admin/(protected)/users/page.tsx");
 const reviews = read("components/admin/review-list.tsx");
 const faq = read("components/admin/faq-list.tsx");
-const dashboard = read("app/admin/(protected)/page.tsx");
+const overview = read("components/admin/overview/overview-screen.tsx");
+const overviewCss = read("components/admin/overview/overview.module.css");
+const overviewPage = read("app/admin/(protected)/page.tsx");
 const orderPresentation = read("lib/admin-order-presentation.ts");
 const adminTime = read("lib/admin-time.ts");
 
@@ -30,8 +32,14 @@ describe("мобильный контракт Control Center", () => {
   it("не показывает mobile-only KPI повторно на desktop", () => {
     expect(css).toMatch(/\.mobileOnly,\s*\n\.mobileList\s*\{\s*display:\s*none\s*!important;/);
     expect(css).toMatch(/\.mobileOnly, \.mobileList\s*\{\s*display:\s*grid\s*!important;/);
-    expect(dashboard).toContain("const desktopCards = [");
-    expect(dashboard).toContain("desktopCards.map");
+  });
+
+  /* С Г2 «Обзор» не дублирует KPI двумя сетками: у него одна колонка данных,
+     которая на телефоне просто разворачивается вертикально. */
+  it("на телефоне разворачивает «Обзор» в одну колонку, а не сжимает сетку", () => {
+    expect(overviewCss).toMatch(/@media \(max-width: 780px\)[\s\S]*?\.lanes \{ grid-template-columns: minmax\(0, 1fr\); \}/);
+    expect(overviewCss).toMatch(/@media \(max-width: 780px\)[\s\S]*?\.hero \{ flex-direction: column;/);
+    expect(overviewCss).toContain("calc(96px + env(safe-area-inset-bottom))");
   });
 
   it("учитывает обе safe-area и динамическую высоту iOS", () => {
@@ -66,14 +74,15 @@ describe("мобильный контракт Control Center", () => {
     expect(ordersCss).toMatch(/\.toast \{[\s\S]*?position: fixed/);
   });
 
-  it("собирает последние заказы в читаемые семантические карточки", () => {
-    expect(dashboard).toContain("<h1>Главное</h1>");
-    expect(dashboard).toContain("styles.dashboardOrderList");
-    expect(dashboard).toContain("styles.dashboardOrderFacts");
-    expect(dashboard).toContain("adminOrderStatusLabel(order.status)");
+  /* «Последние заказы» с Г2 на «Обзоре» нет вовсе: это были первые пять строк
+     /admin/orders, из которых нельзя было ничего сделать. Вместо них — очередь,
+     нарезанная под выкупной аккаунт, и по ней можно работать прямо с обзора. */
+  it("даёт на «Обзоре» работу, а не копию ленты заказов", () => {
+    expect(overview).toContain("styles.oldest");
+    expect(overview).toContain('action: "complete"');
+    expect(overview).not.toContain("Последние заказы");
     expect(orderPresentation).toContain('PENDING: "В работе"');
     expect(orderPresentation).toContain('COMPLETED: "Выполнен"');
-    expect(css).toMatch(/\.dashboardOrderFacts\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,minmax\(0,1fr\)\)/);
     expect(css).toContain("--admin-mobile-label: #a9abb8");
     expect(css).toMatch(/\.responsiveTable td::before\s*\{[^}]*text-transform:\s*none/);
   });
@@ -97,5 +106,9 @@ describe("мобильный контракт Control Center", () => {
     expect(css).toMatch(/\.mobileBottomLink\s*\{[\s\S]*?min-height:\s*58px/);
     expect(css).toMatch(/\.mobileMoreHeader button\s*\{[\s\S]*?width:\s*44px;\s*height:\s*44px/);
     expect(css).toMatch(/\.rowActions button\s*\{[\s\S]*?width:\s*44px;\s*height:\s*44px/);
+    // «Выкуплено» прямо с обзора — критичное действие, и на телефоне по нему
+    // попадают пальцем: 26px кнопки хватало только курсору.
+    expect(overviewCss).toMatch(/@media \(max-width: 780px\)[\s\S]*?\.tick \{ width: 44px; height: 44px; \}/);
+    expect(overviewPage).toContain("touchAdminPresence");
   });
 });

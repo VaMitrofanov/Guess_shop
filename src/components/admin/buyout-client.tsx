@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check, CheckCheck, ClipboardCheck, Copy, Download, ExternalLink, Loader2,
   RefreshCw, ShoppingBasket, SquareTerminal, TriangleAlert, Wallet, X,
 } from "lucide-react";
 import styles from "./admin-shell.module.css";
 import { ADMIN_TIME_ZONE } from "@/lib/admin-time";
+import { BALANCE_PRESETS, fitToBalance } from "@/lib/buyout-packing";
 import { cn } from "@/lib/utils";
 import { bulkPause, shouldStopBatch, sleep, type BatchItem } from "@/lib/buyout-batch";
 
@@ -88,6 +89,15 @@ type RowState =
   | { kind: "failed"; reason: string };
 
 const rbx = (n: number) => n.toLocaleString("ru-RU") + " R$";
+
+function plural(count: number, one: string, few: string, many: string) {
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
 const dateTime = (iso: string) =>
   new Intl.DateTimeFormat("ru-RU", { timeZone: ADMIN_TIME_ZONE, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 
@@ -112,6 +122,8 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
   const [copied, setCopied] = useState<string | null>(null);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  /** Баланс выкупного аккаунта. Типовое пополнение — 2 000 R$ (см. buyout-packing). */
+  const [balance, setBalance] = useState<number>(BALANCE_PRESETS[0]);
   const [rowState, setRowState] = useState<Record<string, RowState>>({});
   const [running, setRunning] = useState(false);
   const [confirming, setConfirming] = useState<null | "buy" | "mark">(null);
@@ -224,6 +236,10 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
     [items, selected],
   );
   const selectedGross = selectedItems.reduce((s, i) => s + i.expectedPrice, 0);
+  /** Копируем ВЫБРАННОЕ: закупщику нужен набор под конкретный аккаунт, а не
+   *  вся очередь. ID — для скрипта, ссылки — чтобы открыть пасс руками. */
+  const selectedIds = selectedItems.map((i) => i.gamepassId).join("\n");
+  const selectedLinks = selectedItems.map((i) => i.gamepassUrl).join("\n");
   const shortfall = donor?.balance != null ? selectedGross - donor.balance : null;
 
   const toggle = (orderId: string) => {
@@ -234,21 +250,32 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
       return next;
     });
   };
-  const selectAll = () => setSelected(new Set(items.map((i) => i.orderId)));
-  const selectNone = () => setSelected(new Set());
-  /** Набрать сверху вниз столько, сколько помещается в баланс донора. */
-  const selectAffordable = () => {
-    const budget = donor?.balance ?? 0;
-    const next = new Set<string>();
-    let spent = 0;
-    for (const i of items) {
-      if (spent + i.expectedPrice > budget) continue;
-      next.add(i.orderId);
-      spent += i.expectedPrice;
-    }
-    setSelected(next);
+  /* ── Набор под баланс аккаунта ──────────────────────────────────────────
+     Выкуп идёт с мелких аккаунтов под фиксированное пополнение, поэтому
+     закупщику нужен не «весь список», а «что положить вот в этот аккаунт».
+     Баланс вводится руками: живой баланс донора отдельная история и он часто
+     недоступен, а нарезать список надо всё равно. Введённое значение
+     запоминается в браузере — типовое пополнение не меняется от смены к смене. */
+  const fit = useMemo(
+    () => fitToBalance(items, Number.isFinite(balance) && balance > 0 ? balance : 0),
+    [items, balance],
+  );
+
+  const pickForBalance = () => {
+    if (!(balance > 0)) { setError("Укажите баланс аккаунта в робуксах"); return; }
+    setSelected(new Set(fit.picked.map((i) => i.orderId)));
+    try { localStorage.setItem("rb.buyout.balance", String(balance)); } catch { /* приватный режим */ }
   };
 
+  useEffect(() => {
+    try {
+      const saved = Number(localStorage.getItem("rb.buyout.balance"));
+      if (Number.isFinite(saved) && saved > 0) setBalance(saved);
+    } catch { /* приватный режим — остаёмся на значении по умолчанию */ }
+  }, []);
+
+  const selectAll = () => setSelected(new Set(items.map((i) => i.orderId)));
+  const selectNone = () => setSelected(new Set());
   // ── Скрипт покупки ──────────────────────────────────────────────────────────
 
   const copyScript = async (item: ExportItem) => {
@@ -598,15 +625,80 @@ export default function AdminBuyoutClient({ initialData }: { initialData: Buyout
             </div>
 
             {buyable && items.length > 0 && (
-              <div className={styles.toolbar}>
-                <button type="button" className={styles.ghostButton} onClick={selectAll} disabled={running}>Выбрать все</button>
-                <button
-                  type="button" className={styles.ghostButton} onClick={selectAffordable}
-                  disabled={running || donor?.balance == null}
-                  title={donor?.balance == null ? "Баланс донора неизвестен" : undefined}
-                >Сколько влезает в баланс</button>
-                <button type="button" className={styles.ghostButton} onClick={selectNone} disabled={running || selected.size === 0}>Снять выбор</button>
-              </div>
+              <>
+                <div className={styles.balanceBar}>
+                  <label htmlFor="account-balance">Баланс аккаунта</label>
+                  <input
+                    id="account-balance"
+                    className={styles.balanceInput}
+                    type="number" min={1} step={100} inputMode="numeric"
+                    value={Number.isFinite(balance) ? balance : ""}
+                    onChange={(event) => setBalance(Number(event.target.value))}
+                    onKeyDown={(event) => { if (event.key === "Enter") pickForBalance(); }}
+                    disabled={running}
+                    aria-label="Баланс выкупного аккаунта в робуксах"
+                  />
+                  <span className={styles.balanceUnit}>R$</span>
+                  {BALANCE_PRESETS.map((preset) => (
+                    <button
+                      key={preset} type="button" disabled={running}
+                      className={cn(styles.chip, balance === preset && styles.chipActive)}
+                      onClick={() => setBalance(preset)}
+                    >{preset.toLocaleString("ru-RU")}</button>
+                  ))}
+                  <button type="button" className={styles.primaryButton} onClick={pickForBalance} disabled={running || !(balance > 0)}>
+                    Набрать под баланс
+                  </button>
+                  {donor?.balance != null && (
+                    <button
+                      type="button" className={styles.ghostButton} disabled={running}
+                      onClick={() => setBalance(donor.balance as number)}
+                      title="Подставить живой баланс донора"
+                    >Донор: {rbx(donor.balance)}</button>
+                  )}
+                </div>
+
+                {balance > 0 && (
+                  <div className={styles.noteInfo} style={{ marginBottom: 14 }}>
+                    <Wallet />
+                    <div>
+                      В аккаунт на <b>{rbx(balance)}</b>{" "}
+                      {plural(fit.picked.length, "помещается", "помещаются", "помещаются")}{" "}
+                      <b>{fit.picked.length}</b> {plural(fit.picked.length, "заказ", "заказа", "заказов")} на{" "}
+                      <b>{rbx(fit.gross)}</b> — самые старые первыми; остаток <b>{rbx(fit.left)}</b>.
+                      {fit.moreAccounts > 0 && (
+                        <> На всю очередь нужно ещё <b>{fit.moreAccounts}</b>{" "}
+                          {plural(fit.moreAccounts, "такой же", "таких же", "таких же")}.</>
+                      )}
+                      {fit.unfit.length > 0 && (
+                        <> <b>{fit.unfit.length}</b>{" "}
+                          {plural(fit.unfit.length, "не влезает", "не влезают", "не влезают")} в этот баланс вовсе
+                          (нужен аккаунт крупнее):{" "}
+                          {fit.unfit.slice(0, 6).map((i) => `${i.wbCode} — ${rbx(i.expectedPrice)}`).join(", ")}
+                          {fit.unfit.length > 6 && ` и ещё ${fit.unfit.length - 6}`}.
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div className={styles.toolbar}>
+                  <button type="button" className={styles.ghostButton} onClick={selectAll} disabled={running}>Выбрать все</button>
+                  <button type="button" className={styles.ghostButton} onClick={selectNone} disabled={running || selected.size === 0}>Снять выбор</button>
+                  <div className={styles.toolbarSpacer} />
+                  <span className={styles.balanceCount}>
+                    {selected.size > 0 ? <>выбрано <b>{selected.size}</b> · <b>{rbx(selectedGross)}</b></> : "ничего не выбрано"}
+                  </span>
+                  <button type="button" className={styles.ghostButton} onClick={() => copy(selectedIds, "sel-ids")} disabled={!selected.size}>
+                    {copied === "sel-ids" ? <ClipboardCheck /> : <Copy />}
+                    {copied === "sel-ids" ? "Скопировано" : "ID выбранных"}
+                  </button>
+                  <button type="button" className={styles.ghostButton} onClick={() => copy(selectedLinks, "sel-links")} disabled={!selected.size}>
+                    {copied === "sel-links" ? <ClipboardCheck /> : <Copy />}
+                    {copied === "sel-links" ? "Скопировано" : "Ссылки на ГП"}
+                  </button>
+                </div>
+              </>
             )}
 
             {data && (data.export.skippedNoGamepass > 0 || data.export.skippedUnpaid > 0 || data.export.truncated) && (
