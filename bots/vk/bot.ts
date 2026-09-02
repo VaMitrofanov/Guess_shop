@@ -53,7 +53,16 @@ vk.updates.on("message_new", async (ctx) => {
     console.error("[VK] Unhandled error in message_new:", err);
     if (!ctx.isOutbox) {
       // Юзер получает «Произошла ошибка» → админы должны узнать сразу.
-      notifyBotError({ platform: "VK", userId: ctx.senderId, err }).catch(() => {});
+      // Текст сообщения — часть улики: без него ветку, на которой упало, не
+      // воспроизвести (разбор 02.09.2026 встал ровно на этом).
+      notifyBotError({
+        platform: "VK",
+        userId: ctx.senderId,
+        err,
+        input: (ctx as any)?.text ?? (ctx as any)?.messagePayload
+          ? String((ctx as any)?.text ?? JSON.stringify((ctx as any)?.messagePayload))
+          : null,
+      }).catch(() => {});
       try {
         await ctx.reply("⚠️ Произошла ошибка. Попробуй ещё раз или напиши нам: https://t.me/RobloxBank_PA");
       } catch {}

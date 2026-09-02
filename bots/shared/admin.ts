@@ -15,6 +15,7 @@ import { resolveWbOrderRef, wbOrderSourceLabel } from "./wb-order-source";
 import { orderCardRoots } from "./order-thread";
 import { heldCustomerFor } from "./order-hold";
 import { twaLaunchUrl } from "./twa-link";
+import { formatAdminNotice, mskTime, orderRef } from "./notify-format";
 export {
   BONUS_MIN_PACK,
   CUSTOM_MAX,
@@ -111,44 +112,40 @@ export interface SupportAlertPayload {
  * Никогда не бросает и не пустая проверка не блокирует сам алерт: сообщение в
  * поддержку важнее, чем пометка в нём (см. `heldCustomerFor`).
  */
-async function heldHeaderFor(p: SupportAlertPayload): Promise<{ head: string; block: string }> {
+/** ❄️ Строка заморозки для алертов поддержки: человек с заморозкой должен быть
+ *  отличим от обычного покупателя ДО того, как менеджер начнёт отвечать
+ *  «сейчас выкупим» по заказу, который выкупать нельзя. */
+async function heldLinesFor(p: SupportAlertPayload): Promise<string[]> {
   const held = await heldCustomerFor(db, { tgId: p.tgId, vkId: p.vkId });
-  if (!held) return { head: "", block: "" };
-
+  if (!held) return [];
   const codes = held.codes.map((c) => `<code>${escapeHtml(c)}</code>`).join(", ");
-  return {
-    head:
-      `⛔️ <b>ПИШЕТ ЗАМОРОЖЕННЫЙ КЛИЕНТ</b>\n` +
-      `━━━━━━━━━━━━━━━━\n`,
-    block:
-      `❄️ <b>Заморожен:</b> ${escapeHtml(held.reason)}\n` +
-      `❄️ Коды: ${codes}\n` +
-      `━━━━━━━━━━━━━━━━\n`,
-  };
+  return [`❄️ <b>Заморожен:</b> ${escapeHtml(held.reason)}`, `❄️ Коды: ${codes}`];
 }
 
 export async function sendAdminSupportAlert(p: SupportAlertPayload): Promise<void> {
-  const label   = SUPPORT_CONTEXT_LABELS[p.contextKey] ?? p.contextKey;
-  const codeLine = p.wbCode
-    ? `🔑 Код: <code>${p.wbCode}</code>${p.denomination ? ` · ${p.denomination} R$` : ""}\n`
-    : "";
-  const linkLine = p.platform === "TG" && p.tgId
-    ? `\n<a href="tg://user?id=${p.tgId}">💬 Написать пользователю</a>`
-    : "";
-  const now = new Date().toLocaleString("ru-RU", {
-    timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit",
-  });
-  const held = await heldHeaderFor(p);
+  const label = SUPPORT_CONTEXT_LABELS[p.contextKey] ?? p.contextKey;
+  const heldLines = await heldLinesFor(p);
+  const frozen = heldLines.length > 0;
 
-  const text =
-    (held.head || `🆘 <b>ОБРАЩЕНИЕ В ПОДДЕРЖКУ</b>\n━━━━━━━━━━━━━━━━\n`) +
-    held.block +
-    `${p.platform === "TG" ? "📱" : "📘"} Платформа: <b>${p.platform}</b>\n` +
-    `👤 Юзер: ${p.userDisplay}\n` +
-    codeLine +
-    `📍 Причина: <b>${label}</b>\n` +
-    `⏰ ${now} МСК` +
-    linkLine;
+  const text = formatAdminNotice({
+    // Замороженный в поддержке — не «человеку нужна помощь», а «сейчас пойдёт
+    // разговор по заказу, который выкупать нельзя»: это красный, не оранжевый.
+    marker: frozen ? "urgent" : "action",
+    zone: "ПОДДЕРЖКА",
+    title: frozen ? "пишет ЗАМОРОЖЕННЫЙ клиент" : "обращение в поддержку",
+    lines: [
+      orderRef({ code: p.wbCode ?? null, denomination: p.denomination ?? null }, [
+        p.userDisplay,
+        `${p.platform}`,
+        mskTime(new Date()),
+      ]),
+      ...heldLines,
+      `📍 Причина: <b>${label}</b>`,
+    ],
+    next: p.platform === "TG" && p.tgId
+      ? `<a href="tg://user?id=${p.tgId}">написать пользователю</a>`
+      : "ответить из чата платформы",
+  });
 
   await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text)));
 }
@@ -196,20 +193,27 @@ export async function notifyUserHurdle(p: SupportAlertPayload): Promise<void> {
   cleanupSupportAlertSeen(now);
 
   const label = SUPPORT_CONTEXT_LABELS[p.contextKey] ?? p.contextKey;
-  const codePart = p.wbCode
-    ? ` · 🔑 <code>${p.wbCode}</code>${p.denomination ? ` (${p.denomination} R$)` : ""}`
-    : "";
-  const time = new Date().toLocaleString("ru-RU", {
-    timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit",
-  });
   // ❄️ Тупик замороженного клиента — это не «человеку нужна помощь», а «сейчас
-  // он придёт в поддержку по заказу, который выкупать нельзя». Одной строкой,
-  // но с явным признаком: тихий 👀 тут проходит мимо глаз.
+  // он придёт в поддержку по заказу, который выкупать нельзя».
   const held = await heldCustomerFor(db, { tgId: p.tgId, vkId: p.vkId });
-  const text = held
-    ? `⛔️ <b>ЗАМОРОЖЕННЫЙ</b> ${p.userDisplay} застрял: <i>${label}</i>${codePart} · ${time}\n` +
-      `❄️ ${escapeHtml(held.reason)}`
-    : `👀 ${p.userDisplay} застрял: <i>${label}</i>${codePart} · ${time}`;
+  const text = formatAdminNotice({
+    // Мяч на стороне клиента: он ещё не попросил помощи, мы только видим тупик.
+    marker: held ? "urgent" : "waiting",
+    zone: "ПОДДЕРЖКА",
+    title: held ? "ЗАМОРОЖЕННЫЙ застрял" : "клиент застрял",
+    lines: [
+      orderRef({ code: p.wbCode ?? null, denomination: p.denomination ?? null }, [
+        p.userDisplay,
+        `${p.platform}`,
+        mskTime(new Date()),
+      ]),
+      held ? `❄️ ${escapeHtml(held.reason)}` : null,
+      `📍 Этап: <b>${label}</b>`,
+    ],
+    next: held
+      ? "не обещать выкуп — заказ заморожен"
+      : "ничего, если сам справится; кнопка поддержки у него уже есть",
+  });
   await Promise.allSettled(ADMIN_IDS.map(id => tgSend(id, text)));
 }
 
@@ -223,10 +227,45 @@ export async function notifyUserHurdle(p: SupportAlertPayload): Promise<void> {
 const botErrorSeen = new Map<string, number>();
 const BOT_ERROR_TTL_MS = 10 * 60 * 1000;
 
+/**
+ * Где именно упало — первый кадр НАШЕГО стека.
+ *
+ * 02.09.2026 покупательница получила «Произошла ошибка», а алерт сказал ровно
+ * `Code №10 — Internal server error`: это слова VK, а не наш вызов. Логи
+ * контейнера к моменту разбора уже уехали вместе с раскаткой, и починить стало
+ * нечего — не потому, что баг сложный, а потому что алерт не назвал место.
+ *
+ * Берём первый кадр из `bots/` или `src/`: библиотечные кадры (vk-io, node)
+ * пропускаем — они одинаковы у всех падений и ничего не различают.
+ */
+function ourStackFrame(err: unknown): string | null {
+  const stack = (err as { stack?: unknown } | null)?.stack;
+  if (typeof stack !== "string") return null;
+  for (const raw of stack.split("\n").slice(1)) {
+    const line = raw.trim();
+    if (!/[/\\](bots|src)[/\\]/.test(line)) continue;
+    if (/node_modules/.test(line)) continue;
+    // «at handleMessage (/app/bots/vk/handlers.ts:1904:11)» → «handlers.ts:1904 · handleMessage»
+    const m = line.match(/at\s+(?:async\s+)?([^\s(]+)?\s*\(?.*[/\\]([\w.-]+):(\d+):\d+\)?/);
+    if (!m) continue;
+    const [, fn, file, lineNo] = m;
+    return fn && fn !== "<anonymous>" ? `${file}:${lineNo} · ${fn}` : `${file}:${lineNo}`;
+  }
+  return null;
+}
+
+/** Метод внешнего API, если ошибка пришла от него (vk-io кладёт его в `method`). */
+function apiMethodOf(err: unknown): string | null {
+  const method = (err as { method?: unknown } | null)?.method;
+  return typeof method === "string" && method ? method : null;
+}
+
 export async function notifyBotError(p: {
   platform: "TG" | "VK";
   userId: string | number;
   err: unknown;
+  /** Что юзер прислал, когда упало, — без этого ветку не воспроизвести. */
+  input?: string | null;
 }): Promise<void> {
   try {
     const firstLine = String((p.err as any)?.message ?? p.err).split("\n")[0].slice(0, 200);
@@ -250,12 +289,26 @@ export async function notifyBotError(p: {
       tgId: p.platform === "TG" ? String(p.userId) : null,
       vkId: p.platform === "VK" ? String(p.userId) : null,
     });
-    const heldLine = held ? `❄️ <b>ЗАМОРОЖЕН:</b> ${escapeHtml(held.reason)}\n` : "";
-    const text =
-      `🚨 <b>${p.platform}-бот упал на сообщении</b>\n` +
-      heldLine +
-      `👤 ${userRef} получил «Произошла ошибка»\n` +
-      `<code>${escapeHtml(firstLine)}</code> · ${time} МСК`;
+    const where = ourStackFrame(p.err);
+    const method = apiMethodOf(p.err);
+    const input = p.input?.trim()
+      ? `💬 Прислал: <i>${escapeHtml(p.input.trim().slice(0, 120))}</i>`
+      : null;
+    const text = formatAdminNotice({
+      marker: "urgent",
+      zone: "СИСТЕМА",
+      title: `${p.platform}-бот упал на сообщении`,
+      lines: [
+        `${userRef} · ${time} МСК`,
+        held ? `❄️ <b>ЗАМОРОЖЕН:</b> ${escapeHtml(held.reason)}` : null,
+        input,
+        `<code>${escapeHtml(firstLine)}</code>`,
+        // Место падения важнее текста ошибки: текст обычно чужой, место — наше.
+        where ? `📍 ${escapeHtml(where)}` : null,
+        method ? `🛰 API: <code>${escapeHtml(method)}</code>` : null,
+      ],
+      next: "юзер получил «Произошла ошибка» — написать ему и проверить ветку",
+    });
     await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text)));
   } catch (alertErr) {
     console.error("[admin] notifyBotError failed:", alertErr);
@@ -286,12 +339,17 @@ export async function notifyAdminsRetailBuyout(input: RetailBuyoutAdminAlert): P
   const balanceLine = Number.isFinite(input.balance)
     ? `\nОстаток: <b>${Number(input.balance).toLocaleString("ru-RU")} R$</b>`
     : "";
-  const text =
-    `✅ <b>Выкуп подтверждён</b> · Telegram\n` +
-    `Заказ: <code>${escapeHtml(input.wbCode)}</code>\n` +
-    `Геймпасс: <code>${escapeHtml(input.gamepassId)}</code>\n` +
-    `Списано: <b>${input.chargedPrice.toLocaleString("ru-RU")} R$</b>` +
-    donorLine + balanceLine;
+  const text = formatAdminNotice({
+    marker: "done",
+    zone: "ВЫКУП",
+    title: "выкуп подтверждён",
+    lines: [
+      orderRef({ code: input.wbCode }, [`геймпасс <code>${escapeHtml(input.gamepassId)}</code>`]),
+      `💸 Списано: <b>${input.chargedPrice.toLocaleString("ru-RU")} R$</b>` + donorLine.replace("\n", " · ") + balanceLine.replace("\n", " · "),
+      `📱 Источник: Telegram`,
+    ],
+    next: null,
+  });
   await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text, { parse_mode: "HTML" })));
 }
 
@@ -637,35 +695,45 @@ export async function sendAdminOrderCard(order: OrderCardPayload): Promise<void>
       })()
     : "";
 
-  // Header identifier = код (ВБ / DIR- / AV-), не внутренний номер заказа.
-  // Единая шапка: тот же порядок ключей, что в живой карточке DBS и во всех
-  // сообщениях о заказе — номер WB, код гейта, сумма, покупатель.
-  const refLine = wbRef.wbOrderId
-    ? `WB #${wbRef.wbOrderId} · <b>${order.amount} R$</b>\n`
-    : "";
+  // Единая шапка: тот же значок срочности, та же зона и тот же порядок ключей,
+  // что во всех остальных сообщениях админам. Заказ, готовый к выкупу, — это
+  // ручное действие, поэтому «action», а не «progress».
+  const passIdLine = (() => {
+    const m = order.gamepassUrl.match(/game-pass(?:es)?\/(\d+)/);
+    return m ? `🎫 Pass ID: <code>${m[1]}</code>` : null;
+  })();
 
-  const text =
-    `📦 <b>ЗАКАЗ <code>${order.wbCode}</code></b>\n` +
-    `━━━━━━━━━━━━━━━━\n` +
-    refLine +
-    replacedLine +
-    webOneTapLine +
-    manualLinkLine +
-    loyaltyLine +
-    `${platformEmoji} Источник: <b>${wbOrderSourceLabel(order.platform, orderSource)}</b>\n` +
-    `📅 Время: <b>${dateStr}</b>\n` +
-    `⏳ Возраст заказа: <b>${age}</b>\n` +
-    `👤 Юзер: ${order.userDisplay}\n` +
-    bonusLine +
-    creatorLine +
-    ageRestrictLine +
-    `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
-    `📊 Статус: ⏳ В обработке\n\n` +
-    `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>` +
-    (() => {
-      const m = order.gamepassUrl.match(/game-pass(?:es)?\/(\d+)/);
-      return m ? `\n🎫 Pass ID: <code>${m[1]}</code>` : "";
-    })();
+  const text = formatAdminNotice({
+    marker: order.isAgeRestricted ? "urgent" : "action",
+    zone: orderSource === "WB_DBS" ? "DBS" : orderSource === "DIRECT" ? "ПРЯМОЙ" : "WB",
+    title: order.replacedGamepassUrl ? "заменён геймпасс" : "заказ ждёт выкупа",
+    lines: [
+      orderRef({
+        wbOrderId: wbRef.wbOrderId,
+        code: order.wbCode,
+        denomination: order.amount,
+        buyerName: null,
+      }, [`геймпасс ${passPrice} R$`]),
+      // Плашки-исключения идут ДО полей: они меняют то, как читать всё ниже.
+      replacedLine.trim() || null,
+      webOneTapLine.trim() || null,
+      manualLinkLine.trim() || null,
+      loyaltyLine.trim() || null,
+      ageRestrictLine.trim() || null,
+      `${platformEmoji} Источник: <b>${wbOrderSourceLabel(order.platform, orderSource)}</b>`,
+      `👤 Юзер: ${order.userDisplay}`,
+      creatorLine.trim() || null,
+      bonusLine.trim() || null,
+      `📅 Время: <b>${dateStr}</b>`,
+      // Возраст — отдельной строкой: у недельного заказа это и есть тревога.
+      `⏳ Возраст заказа: <b>${age}</b>`,
+      `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>`,
+      passIdLine,
+    ],
+    next: order.isAgeRestricted
+      ? "игра 18+ — выкупать только вручную"
+      : "скопировать Pass ID, купить в доноре и нажать «ВЫКУПЛЕНО»",
+  });
 
   // One-tap deep-link into the TWA Orders screen, prefocused on this order
   // (?q=<код> — TWA search matches wbCode). web_app inline buttons launch the
@@ -723,16 +791,20 @@ export async function sendAdminDirectOrderCard(payload: DirectOrderCardPayload):
   const paidRobux = payload.amount - payload.bonusApplied;
   const rublePrice = directPrice(paidRobux);
 
-  const text =
-    `🔷 <b>ПРЯМОЙ ЗАКАЗ${code ? ` <code>${code}</code>` : ""}</b>\n` +
-    `━━━━━━━━━━━━━━━━\n` +
-    loyaltyLine +
-    `📅 Время: <b>${dateStr}</b>\n` +
-    `👤 Юзер: ${payload.userDisplay}\n` +
-    bonusLine +
-    `💰 К оплате: <b>${rublePrice} ₽</b>\n` +
-    `💎 Выдать: <b>${payload.amount} R$</b> (Геймпасс: ${Math.ceil(payload.amount / 0.7)} R$)\n` +
-    `📊 Статус: ⏳ Ожидаем реквизиты`;
+  const text = formatAdminNotice({
+    marker: "action",
+    zone: "ПРЯМОЙ",
+    title: "новый заказ — ждёт реквизиты",
+    lines: [
+      orderRef({ code, denomination: payload.amount }, [`геймпасс ${Math.ceil(payload.amount / 0.7)} R$`]),
+      loyaltyLine.trim() || null,
+      `👤 Юзер: ${payload.userDisplay}`,
+      bonusLine.trim() || null,
+      `💰 К оплате: <b>${rublePrice} ₽</b>`,
+      `📅 ${dateStr}`,
+    ],
+    next: "отправить QR или реквизиты кнопкой ниже",
+  });
 
   const twaQuery = { q: code ?? payload.orderId.slice(-6) };
   const reply_markup = (adminId: string) => ({
@@ -784,19 +856,26 @@ export async function sendAdminIntentCard(payload: DirectIntentCardPayload): Pro
   const gpName = payload.gamepassName ? ` · "${escapeHtml(payload.gamepassName)}"` : "";
 
   // Заявка (intent) кода не имеет — идентификатор для менеджера: ник + сумма.
-  const text =
-    `🔷 <b>ЗАЯВКА · ${escapeHtml(payload.robloxUsername)} · ${payload.totalAmount} R$</b>\n` +
-    `━━━━━━━━━━━━━━━━\n` +
-    loyaltyLine +
-    `📅 Время: <b>${dateStr}</b>\n` +
-    `👤 Юзер: ${payload.userDisplay}\n` +
-    bonusLine +
-    `🎮 Ник: <b>${escapeHtml(payload.robloxUsername)}</b>\n` +
-    `🎫 Геймпасс: <b>${actualPassPrice} R$</b>${priceMismatch}${gpName}\n` +
-    `🔗 <a href="${payload.gamepassUrl}">Открыть Gamepass</a>\n` +
-    `💰 К оплате: <b>${payload.rublePrice} ₽</b>\n` +
-    `💎 Выдать: <b>${payload.totalAmount} R$</b>\n` +
-    `📊 Статус: ⏳ Ожидаем реквизиты`;
+  const text = formatAdminNotice({
+    // Цена пасса разошлась с номиналом — это уже не рутина: отправив реквизиты,
+    // мы согласимся выкупить не то, за что человек заплатит.
+    marker: priceMismatch ? "urgent" : "action",
+    zone: "ПРЯМОЙ",
+    title: "заявка — ждёт реквизиты",
+    lines: [
+      orderRef({ denomination: payload.totalAmount }, [escapeHtml(payload.robloxUsername)]),
+      loyaltyLine.trim() || null,
+      `👤 Юзер: ${payload.userDisplay}`,
+      bonusLine.trim() || null,
+      `🎫 Геймпасс: <b>${actualPassPrice} R$</b>${priceMismatch}${gpName}`,
+      `🔗 <a href="${payload.gamepassUrl}">Открыть Gamepass</a>`,
+      `💰 К оплате: <b>${payload.rublePrice} ₽</b>`,
+      `📅 ${dateStr}`,
+    ],
+    next: priceMismatch
+      ? "цена пасса не сходится с номиналом — разобраться ДО отправки реквизитов"
+      : "отправить QR или реквизиты кнопкой ниже",
+  });
 
   const reply_markup = {
     inline_keyboard: [
@@ -868,12 +947,15 @@ async function broadcastPhotoCard(
  */
 export async function sendAdminPaymentCard(payload: PaymentScreenshotCardPayload): Promise<void> {
   const code = await orderCode(payload.orderId);
-  const amountLine = payload.amount ? `💎 Сумма: <b>${payload.amount} R$</b>\n` : "";
-  const caption =
-    `💳 <b>Скриншот оплаты</b>\n` +
-    (code ? `Заказ <code>${code}</code>\n` : "") +
-    amountLine +
-    `Юзер: ${payload.userDisplay}`;
+  const caption = formatAdminNotice({
+    marker: "action",
+    zone: "ПРЯМОЙ",
+    title: "скриншот оплаты",
+    lines: [
+      orderRef({ code, denomination: payload.amount ?? null }, [payload.userDisplay]),
+    ],
+    next: "сверить сумму и нажать «Оплата принята»",
+  });
 
   const reply_markup = {
     inline_keyboard: [[
@@ -925,10 +1007,13 @@ async function stampUndeliveredReview(payload: ReviewCardPayload): Promise<void>
 
 export async function sendAdminReviewCard(payload: ReviewCardPayload): Promise<void> {
   const code = await orderCode(payload.orderId);
-  const caption =
-    `📸 <b>Скриншот отзыва</b>\n` +
-    (code ? `Заказ <code>${code}</code>\n` : "") +
-    `Юзер: ${payload.userDisplay}`;
+  const caption = formatAdminNotice({
+    marker: "action",
+    zone: "ОТЗЫВ",
+    title: "скриншот отзыва",
+    lines: [orderRef({ code }, [payload.userDisplay])],
+    next: "проверить скрин и начислить +100 R$",
+  });
 
   const reply_markup = {
     inline_keyboard: [[

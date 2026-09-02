@@ -1,4 +1,5 @@
 import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
+import { formatAdminNotice } from "../../bots/shared/notify-format";
 
 /**
  * Admin notification for a partner (B2B) buyout.
@@ -102,19 +103,25 @@ export function buildPartnerBuyoutCard(input: PartnerBuyoutCardInput): string {
     ? String(input.rate)
     : itemRates.join(" / ");
 
-  return (
-    `🤝 <b>ВЫКУП ПАРТНЁРА · ${escapeHtml(input.partnerName)}</b>\n` +
-    `━━━━━━━━━━━━━━━━\n` +
-    `📦 Выкуплено: <b>${n} ${pluralizeGamepass(n)}</b>\n` +
-    `💎 Сумма: <b>${fmtRobux(input.totalRobux)} R$</b> ≈ <b>${fmtUsdt(input.totalUsdt)} USDT</b>\n` +
-    `💱 ${itemRates.length > 1 ? "Курсы заказов" : "Курс"}: <b>${rateLabel} USDT / 1000 R$</b>\n` +
-    `👛 Остаток баланса: <b>${fmtUsdt(input.balanceUsdt)} USDT</b>\n` +
-    failLine +
-    operatorLine +
-    (lines.length ? `\n${lines.join("\n")}\n` : "") +
-    (moreLine ? `${moreLine}\n` : "") +
-    `\n⏰ ${dateStr}`
-  );
+  // Единый язык уведомлений админам. Выкуп состоялся — 🟢; но если в пачке были
+  // ошибки, это уже не отчёт, а работа: значок обязан это показывать.
+  const failed = Boolean(input.failCount && input.failCount > 0);
+  return formatAdminNotice({
+    marker: failed ? "action" : "done",
+    zone: "ВЫКУП",
+    title: `партнёр ${escapeHtml(input.partnerName)}`,
+    lines: [
+      `📦 Выкуплено: <b>${n} ${pluralizeGamepass(n)}</b> · <b>${fmtRobux(input.totalRobux)} R$</b> ≈ <b>${fmtUsdt(input.totalUsdt)} USDT</b>`,
+      `💱 ${itemRates.length > 1 ? "Курсы заказов" : "Курс"}: <b>${rateLabel} USDT / 1000 R$</b>`,
+      `👛 Остаток баланса: <b>${fmtUsdt(input.balanceUsdt)} USDT</b>`,
+      failLine.trim() || null,
+      operatorLine.trim() || null,
+      lines.length ? lines.join("\n") : null,
+      moreLine,
+      `⏰ ${dateStr}`,
+    ],
+    next: failed ? "разобрать ошибки пачки — часть геймпассов не выкуплена" : null,
+  });
 }
 
 /**

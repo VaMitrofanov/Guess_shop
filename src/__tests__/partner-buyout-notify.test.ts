@@ -40,7 +40,7 @@ describe("buildPartnerBuyoutCard", () => {
       now: NOW,
     });
 
-    expect(card).toContain("ВЫКУП ПАРТНЁРА · Антон");
+    expect(card).toContain("ВЫКУП · партнёр Антон");
     expect(card).toContain("Выкуплено: <b>2 геймпасса</b>");
     expect(card).toContain("25.25 USDT");
     expect(card).toContain("Курс: <b>5.05 USDT / 1000 R$</b>");
@@ -150,7 +150,7 @@ describe("notifyPartnerBuyout (broadcast fan-out)", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0].body).toContain("111"); // chat_id of first admin
     expect(calls[1].body).toContain("222"); // chat_id of second admin
-    expect(calls[0].body).toContain("ВЫКУП ПАРТНЁРА");
+    expect(calls[0].body).toContain("ВЫКУП · партнёр");
   });
 
   it("no-ops safely when no admins are configured", async () => {

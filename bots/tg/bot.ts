@@ -59,7 +59,10 @@ bot.catch((err: any, ctx: any) => {
   console.error("[TG] Unhandled error:", err);
   // Юзер получает «Произошла ошибка» → админы должны узнать сразу.
   const uid = ctx?.from?.id;
-  if (uid) notifyBotError({ platform: "TG", userId: uid, err }).catch(() => {});
+  // Текст сообщения (или payload нажатой кнопки) — часть улики: без него
+  // ветку, на которой упало, не воспроизвести.
+  const input = ctx?.message?.text ?? ctx?.callbackQuery?.data ?? null;
+  if (uid) notifyBotError({ platform: "TG", userId: uid, err, input }).catch(() => {});
   try {
     ctx?.reply?.("⚠️ Произошла ошибка. Попробуй ещё раз или напиши /start");
   } catch {}

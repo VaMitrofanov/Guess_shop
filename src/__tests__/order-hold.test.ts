@@ -150,7 +150,11 @@ describe("алерт поддержки помечает замороженно�
   const admin = read("bots/shared/admin.ts");
 
   it("SOS-обращение получает красную шапку", () => {
-    expect(admin).toContain("ПИШЕТ ЗАМОРОЖЕННЫЙ КЛИЕНТ");
+    // Единый язык уведомлений: шапку рисует marker "urgent" (🔴), а не своя
+    // строка-баннер. Проверяем и признак, и то, что он поднимает срочность.
+    const sos = admin.slice(admin.indexOf("export async function sendAdminSupportAlert"));
+    expect(sos).toContain("пишет ЗАМОРОЖЕННЫЙ клиент");
+    expect(sos).toContain('frozen ? "urgent"');
     expect(admin).toContain("heldCustomerFor");
   });
 

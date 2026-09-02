@@ -44,6 +44,7 @@ import {
 import { notifyDbsBuyerFoundLate } from "../shared/wb-delivery-admin-notify";
 import { dbsRef, noteDbsBuyerSignedIn } from "../shared/wb-dbs-thread";
 import { recordOrderCardRoot } from "../shared/order-thread";
+import { formatAdminNotice, orderRef } from "../shared/notify-format";
 import { wbGateUrl } from "../shared/wb-gate-link";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -738,16 +739,22 @@ export function registerStart(bot: Telegraf): void {
           timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
           year: "numeric", hour: "2-digit", minute: "2-digit",
         }) + " МСК";
-        const notifyText =
-          `📥 <b>НОВЫЙ КЛИЕНТ</b>\n` +
-          `━━━━━━━━━━━━━━━━\n` +
-          wbDbsBadgeLine(provisionalOrder?.orderSource) +
-          (isGuideMode ? `📖 Режим: <b>Инструкция</b>\n` : ``) +
-          `📅 Время: <b>${dateStr}</b>\n` +
-          `👤 Юзер: <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a> (ID: ${ctx.from.id})\n` +
-          `💎 Сумма: <b>${totalAmount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
-          `🔑 Код ВБ: <code>${code}</code>\n` +
-          `📊 Статус: ⌛ Ожидаем ссылку на геймпасс`;
+        // Единый язык уведомлений админам. Мяч на стороне покупателя — он ушёл
+        // создавать геймпасс, делать нечего: 🟡 «waiting».
+        const notifyText = formatAdminNotice({
+          marker: "waiting",
+          zone: provisionalOrder?.orderSource === "WB_DBS" ? "DBS" : "WB",
+          title: "код активирован — ждём геймпасс",
+          lines: [
+            orderRef({ code, denomination: totalAmount }, [`геймпасс ${passPrice} R$`]),
+            wbDbsBadgeLine(provisionalOrder?.orderSource).trim() || null,
+            isGuideMode ? `📖 Режим: <b>Инструкция</b>` : null,
+            `📱 Источник: <b>TG</b>`,
+            `👤 Юзер: <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a> (ID: ${ctx.from.id})`,
+            `📅 ${dateStr}`,
+          ],
+          next: "покупатель присылает ссылку на геймпасс — бот напомнит трижды",
+        });
 
         // Карточка активации — КОРЕНЬ ветки обычного WB-заказа: карточка выкупа
         // придёт ответом на неё, а не вторым отдельным делом об одном коде.
@@ -3198,26 +3205,43 @@ async function renderOrderCard(order: any, creatorName?: string, isAgeRestricted
       })()
     : "";
 
-  // Header identifier = код (ВБ / DIR- / AV-), не внутренний номер заказа.
-  const text =
-    `📦 <b>ЗАКАЗ <code>${order.wbCode}</code></b>\n` +
-    `━━━━━━━━━━━━━━━━\n` +
-    replacedLine +
-    webOneTapLine +
-    manualLinkLine +
-    directTag +
-    loyaltyLine +
-    `${platformEmoji} Источник: <b>${wbOrderSourceLabel(order.platform, order.orderSource)}</b>\n` +
-    (dateStr ? `📅 Время: <b>${dateStr}</b>\n` : "") +
-    (order.createdAt ? `⏳ Возраст заказа: <b>${formatOrderAge(order.createdAt)}</b>\n` : "") +
-    `👤 Юзер: ${userLabel}\n` +
-    bonusLine +
-    gpCreatorLine +
-    ageRestrictLine +
-    (order.isDirectOrder ? `` : reviewLine) +
-    `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
-    `📊 Статус: <b>${statusLabels[order.status] || order.status}</b>${reasonLine}` +
-    (order.gamepassUrl ? `\n\n🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>` : ``);
+  // Единый язык уведомлений админам (`bots/shared/notify-format.ts`): та же
+  // шапка и тот же ключ заказа, что у карточки из `sendAdminOrderCard` и у
+  // сообщений DBS. Ключ заказа стоит первой строкой, поэтому сообщения об
+  // одном заказе узнаются глазом даже без ветки.
+  const waitingBuyout = order.status === "PENDING" || order.status === "IN_PROGRESS";
+  const text = formatAdminNotice({
+    marker: isAgeRestricted ? "urgent"
+      : order.status === "COMPLETED" ? "done"
+      : order.status === "REJECTED" ? "cancelled"
+      : waitingBuyout ? "action"
+      : "waiting",
+    zone: order.orderSource === "WB_DBS" ? "DBS" : order.isDirectOrder ? "ПРЯМОЙ" : "WB",
+    title: replacedGamepassUrl ? "заменён геймпасс"
+      : waitingBuyout ? "заказ ждёт выкупа"
+      : `заказ · ${String(statusLabels[order.status] || order.status).toLowerCase()}`,
+    lines: [
+      orderRef({ code: order.wbCode, denomination: order.amount }, [`геймпасс ${passPrice} R$`]),
+      replacedLine.trim() || null,
+      webOneTapLine.trim() || null,
+      manualLinkLine.trim() || null,
+      directTag.trim() || null,
+      loyaltyLine.trim() || null,
+      ageRestrictLine.trim() || null,
+      `${platformEmoji} Источник: <b>${wbOrderSourceLabel(order.platform, order.orderSource)}</b>`,
+      `👤 Юзер: ${userLabel}`,
+      gpCreatorLine.trim() || null,
+      bonusLine.trim() || null,
+      order.isDirectOrder ? null : (reviewLine.trim() || null),
+      dateStr ? `📅 Время: <b>${dateStr}</b>` : null,
+      order.createdAt ? `⏳ Возраст заказа: <b>${formatOrderAge(order.createdAt)}</b>` : null,
+      `📊 Статус: <b>${statusLabels[order.status] || order.status}</b>${reasonLine}`,
+      order.gamepassUrl ? `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>` : null,
+    ],
+    next: isAgeRestricted ? "игра 18+ — выкупать только вручную"
+      : waitingBuyout ? "купить геймпасс в доноре и нажать «ВЫКУПЛЕНО»"
+      : null,
+  });
 
   // Action buttons for PENDING and IN_PROGRESS orders, plus a one-tap deep-link
   // into the TWA Orders screen prefocused on this order (?q=<код> — TWA ищет
@@ -3464,15 +3488,20 @@ async function handleWbCodeTextEntry(bot: Telegraf, ctx: any, tgId: string, text
         timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
         year: "numeric", hour: "2-digit", minute: "2-digit",
       }) + " МСК";
-      const notifyText =
-        `📥 <b>НОВЫЙ КЛИЕНТ</b>\n` +
-        `━━━━━━━━━━━━━━━━\n` +
-        wbDbsBadgeLine(await resolveWbOrderSource(db, wbCode.code)) +
-        `📅 Время: <b>${dateStr}</b>\n` +
-        `👤 Юзер: <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a> (ID: ${ctx.from.id})\n` +
-        `💎 Сумма: <b>${totalAmount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
-        `🔑 Код ВБ: <code>${codeInput}</code>\n` +
-        `📊 Статус: ⌛ Ожидаем ссылку на геймпасс`;
+      const notifySource = await resolveWbOrderSource(db, wbCode.code);
+      const notifyText = formatAdminNotice({
+        marker: "waiting",
+        zone: notifySource === "WB_DBS" ? "DBS" : "WB",
+        title: "код активирован — ждём геймпасс",
+        lines: [
+          orderRef({ code: codeInput, denomination: totalAmount }, [`геймпасс ${passPrice} R$`]),
+          wbDbsBadgeLine(notifySource).trim() || null,
+          `📱 Источник: <b>TG</b>`,
+          `👤 Юзер: <a href="tg://user?id=${ctx.from.id}">${tgDisplay}</a> (ID: ${ctx.from.id})`,
+          `📅 ${dateStr}`,
+        ],
+        next: "покупатель присылает ссылку на геймпасс — бот напомнит трижды",
+      });
 
       const chatIds = [
         ...ADMIN_IDS,

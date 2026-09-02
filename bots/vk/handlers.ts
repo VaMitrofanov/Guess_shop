@@ -36,6 +36,7 @@ import {
 import { notifyDbsBuyerFoundLate } from "../shared/wb-delivery-admin-notify";
 import { dbsRef, noteDbsBuyerSignedIn } from "../shared/wb-dbs-thread";
 import { recordOrderCardRoot } from "../shared/order-thread";
+import { formatAdminNotice, orderRef } from "../shared/notify-format";
 import { wbGateUrl } from "../shared/wb-gate-link";
 
 // VK API instance injected from bot.ts to avoid circular import.
@@ -1883,16 +1884,22 @@ async function handleRefActivation(
         timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
         year: "numeric", hour: "2-digit", minute: "2-digit",
       }) + " МСК";
-      const notifyText =
-        `📥 <b>НОВЫЙ КЛИЕНТ</b>\n` +
-        `━━━━━━━━━━━━━━━━\n` +
-        wbDbsBadgeLine(await resolveWbOrderSource(db, wbCode.code)) +
-        (isGuideMode ? `📖 Режим: <b>Инструкция</b>\n` : ``) +
-        `📅 Время: <b>${dateStr}</b>\n` +
-        `👤 Юзер: <a href="https://vk.com/id${vkUserId}">${escapeHtml(fullName)}</a> (VK ID: ${vkUserId})\n` +
-        `💎 Сумма: <b>${totalAmount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
-        `🔑 Код ВБ: <code>${code}</code>\n` +
-        `📊 Статус: ⌛ Ожидаем ссылку на геймпасс`;
+      const notifySource = await resolveWbOrderSource(db, wbCode.code);
+      // Единый язык уведомлений админам. Мяч на стороне покупателя: 🟡 «waiting».
+      const notifyText = formatAdminNotice({
+        marker: "waiting",
+        zone: notifySource === "WB_DBS" ? "DBS" : "WB",
+        title: "код активирован — ждём геймпасс",
+        lines: [
+          orderRef({ code, denomination: totalAmount }, [`геймпасс ${passPrice} R$`]),
+          wbDbsBadgeLine(notifySource).trim() || null,
+          isGuideMode ? `📖 Режим: <b>Инструкция</b>` : null,
+          `📘 Источник: <b>VK</b>`,
+          `👤 Юзер: <a href="https://vk.com/id${vkUserId}">${escapeHtml(fullName)}</a> (VK ID: ${vkUserId})`,
+          `📅 ${dateStr}`,
+        ],
+        next: "покупатель присылает ссылку на геймпасс — бот напомнит трижды",
+      });
 
       const chatIds = [
         ...ADMIN_IDS,

@@ -15,6 +15,7 @@ import { adminGrantFor, loadAdminCandidate } from "@/lib/admin-grant";
 import { resolveWbOrderSource } from "../bots/shared/wb-order-source";
 import { noteDbsBuyerSignedIn } from "../bots/shared/wb-dbs-thread";
 import { recordOrderCardRoot } from "../bots/shared/order-thread";
+import { formatAdminNotice, orderRef } from "../bots/shared/notify-format";
 
 // VK display names are user-controlled and embedded into Telegram HTML
 // notifications — unescaped "<" breaks the whole message (silently lost).
@@ -347,16 +348,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                   timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit",
                   year: "numeric", hour: "2-digit", minute: "2-digit",
                 }) + " МСК";
-                // Заголовок = код ВБ (номера заказов убраны — C2, 2026-07-03).
-                msg =
-                  `📦 <b>ЗАКАЗ <code>${wbCode}</code></b>\n` +
-                  `━━━━━━━━━━━━━━━━\n` +
-                  (isGuideMode ? `📖 Режим: <b>Инструкция</b>\n` : ``) +
-                  `📘 Источник: <b>VK (сайт)</b>\n` +
-                  `📅 Время: <b>${dateStr}</b>\n` +
-                  `👤 Юзер: <a href="https://vk.com/id${vkId}">${escapeHtml(name)}</a>\n` +
-                  (denomination > 0 ? `💎 Сумма: <b>${denomination} R$</b>${passPrice ? ` (Геймпасс: ${passPrice} R$)` : ""}\n` : ``) +
-                  `📊 Статус: ⌛ Ожидаем ссылку на геймпасс`;
+                // Единый язык уведомлений админам. Мяч на стороне покупателя —
+                // он ушёл создавать геймпасс, делать нечего: 🟡 «waiting».
+                msg = formatAdminNotice({
+                  marker: "waiting",
+                  zone: "САЙТ",
+                  title: "код активирован — ждём геймпасс",
+                  lines: [
+                    orderRef({ code: wbCode, denomination: denomination > 0 ? denomination : null },
+                      passPrice ? [`геймпасс ${passPrice} R$`] : []),
+                    isGuideMode ? `📖 Режим: <b>Инструкция</b>` : null,
+                    `📘 Источник: <b>VK (сайт)</b>`,
+                    `👤 Юзер: <a href="https://vk.com/id${vkId}">${escapeHtml(name)}</a>`,
+                    `📅 ${dateStr}`,
+                  ],
+                  next: "покупатель присылает ссылку на геймпасс — бот напомнит трижды",
+                });
                 const twaUrl = `https://robloxbank.ru/twa?q=${encodeURIComponent(wbCode!)}`;
                 reply_markup = {
                   inline_keyboard: [

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
 import { resolveWbOrderRef } from "../../bots/shared/wb-order-source";
 import { orderCardRoots } from "../../bots/shared/order-thread";
+import { formatAdminNotice, orderRef } from "../../bots/shared/notify-format";
 
 /**
  * Web-side admin order card.
@@ -61,30 +62,36 @@ export function buildWebOrderCardText(
     ? `🎮 Создатель ГП: <b>${escapeHtml(order.creatorName)}</b>\n`
     : "";
 
-  // Единая шапка: тот же порядок ключей, что в живой карточке DBS.
-  const refLine = wbOrderId ? `WB #${wbOrderId} · <b>${order.amount} R$</b>\n` : "";
+  const passIdLine = (() => {
+    const m = order.gamepassUrl.match(/game-pass(?:es)?\/(\d+)/);
+    return m ? `🎫 Pass ID: <code>${m[1]}</code>` : null;
+  })();
 
-  return (
-    `📦 <b>ЗАКАЗ <code>${order.wbCode}</code></b>\n` +
-    `━━━━━━━━━━━━━━━━\n` +
-    refLine +
-    (order.manualLink
-      ? `🔗 <b>ССЫЛКА ВРУЧНУЮ С САЙТА</b> — поиск по нику не нашёл геймпасс\n`
-      : `🌐 <b>ONE-TAP С САЙТА</b>\n`) +
-    loyaltyLine +
-    `${platformEmoji} Источник: <b>${order.platform} (сайт)</b>\n` +
-    `📅 Время: <b>${dateStr}</b>\n` +
-    `⏳ Возраст заказа: <b>${formatOrderAge(order.createdAt, now)}</b>\n` +
-    `👤 Юзер: ${order.userDisplay}\n` +
-    creatorLine +
-    `💎 Сумма: <b>${order.amount} R$</b> (Геймпасс: ${passPrice} R$)\n` +
-    `📊 Статус: ⏳ В обработке\n\n` +
-    `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>` +
-    (() => {
-      const m = order.gamepassUrl.match(/game-pass(?:es)?\/(\d+)/);
-      return m ? `\n🎫 Pass ID: <code>${m[1]}</code>` : "";
-    })()
-  );
+  // Единый язык уведомлений админам — тот же, что у карточки из ботов
+  // (`sendAdminOrderCard`) и у сообщений DBS. Заказ готов к выкупу, это ручное
+  // действие: 🟠 «action».
+  return formatAdminNotice({
+    marker: "action",
+    zone: "WB",
+    title: "заказ ждёт выкупа",
+    lines: [
+      orderRef({ wbOrderId, code: order.wbCode, denomination: order.amount }, [`геймпасс ${passPrice} R$`]),
+      order.manualLink
+        ? `🔗 <b>ССЫЛКА ВРУЧНУЮ С САЙТА</b> — поиск по нику не нашёл геймпасс`
+        : `🌐 <b>ONE-TAP С САЙТА</b>`,
+      loyaltyLine.trim() || null,
+      `${platformEmoji} Источник: <b>${order.platform} (сайт)</b>`,
+      `👤 Юзер: ${order.userDisplay}`,
+      creatorLine.trim() || null,
+      `📅 Время: <b>${dateStr}</b>`,
+      // Возраст — отдельной строкой: у недельного заказа это и есть тревога,
+      // и в хвосте строки с датой её глаз пропускает.
+      `⏳ Возраст заказа: <b>${formatOrderAge(order.createdAt, now)}</b>`,
+      `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>`,
+      passIdLine,
+    ],
+    next: "скопировать Pass ID, купить в доноре и нажать «ВЫКУПЛЕНО»",
+  });
 }
 
 export async function sendWebOrderCard(order: WebOrderCard): Promise<void> {

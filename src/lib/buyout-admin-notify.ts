@@ -1,4 +1,5 @@
 import { sendTelegramMessage, telegramAdminRecipients } from "@/lib/telegram";
+import { formatAdminNotice, orderRef } from "../../bots/shared/notify-format";
 
 export type RetailBuyoutSource = "twa-order" | "twa-account";
 
@@ -31,16 +32,25 @@ export function buildRetailBuyoutAdminCard(input: RetailBuyoutAdminInput): strin
     ? `\nОстаток: <b>${Number(input.balance).toLocaleString("ru-RU")} R$</b>`
     : "";
 
-  return (
-    `✅ <b>Выкуп подтверждён</b> · ${source}` +
-    orderLine +
-    `\nГеймпасс: <code>${escapeHtml(input.gamepassId)}</code>` +
-    sellerLine +
-    amountLine +
-    `\nСписано: <b>${Number(input.chargedPrice).toLocaleString("ru-RU")} R$</b>` +
-    donorLine +
-    balanceLine
-  );
+  // Единый язык уведомлений админам (`bots/shared/notify-format.ts`): значок
+  // кодирует срочность, зона — тему, «Дальше:» — что делать. Выкуп уже
+  // состоялся, делать нечего — поэтому 🟢 и без хвоста.
+  return formatAdminNotice({
+    marker: "done",
+    zone: "ВЫКУП",
+    title: "выкуп подтверждён",
+    lines: [
+      orderRef(
+        { code: input.wbCode ?? null, denomination: Number.isFinite(input.amount) ? Number(input.amount) : null },
+        [`геймпасс <code>${escapeHtml(input.gamepassId)}</code>`],
+      ),
+      `💸 Списано: <b>${Number(input.chargedPrice).toLocaleString("ru-RU")} R$</b>`
+        + donorLine.replace("\n", " · ") + balanceLine.replace("\n", " · "),
+      sellerLine.trim() ? sellerLine.replace("\n", "") : null,
+      `📊 Источник: ${source}`,
+    ],
+    next: null,
+  });
 }
 
 /** Broadcast a confirmed TWA buyout to every configured Telegram admin. */

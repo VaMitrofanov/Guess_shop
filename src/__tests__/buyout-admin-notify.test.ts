@@ -24,7 +24,7 @@ describe("buyout admin notifications", () => {
       balance: 3285,
     });
 
-    expect(text).toContain("Выкуп подтверждён");
+    expect(text).toContain("ВЫКУП · выкуп подтверждён");
     expect(text).toContain("TWA · заказ");
     expect(text).toContain("715 R$");
     expect(text).toContain("3 285 R$");
