@@ -122,10 +122,171 @@ async function heldLinesFor(p: SupportAlertPayload): Promise<string[]> {
   return [`❄️ <b>Заморожен:</b> ${escapeHtml(held.reason)}`, `❄️ Коды: ${codes}`];
 }
 
+/* ── Что за заказ у человека, который зовёт поддержку ────────────────────────
+   Алерт называл код, номинал и причину, по которой человек нажал кнопку, —
+   и на этом заканчивался. Дальше владелец шёл искать заказ руками: открыть
+   дашборд, найти код, посмотреть статус, посчитать, сколько он висит, и только
+   после этого понять, о чём вообще разговор. На «Заказ долго в обработке» это
+   три-четыре минуты до первого слова клиенту.
+
+   Поэтому алерт сам договаривает: в каком заказ статусе, сколько ждёт, что его
+   держит и какой это заказ по счёту у клиента. Ровно те факты, за которыми
+   пришлось бы идти, — не пересказ карточки.
+
+   Ничего не бросает: сообщение в поддержку важнее, чем справка внутри него
+   (то же правило, что и у `heldLinesFor`).
+   ────────────────────────────────────────────────────────────────────────── */
+
+const SUPPORT_STATUS_LABELS: Record<string, string> = {
+  AWAITING_PAYMENT:  "ждёт оплаты",
+  PAYMENT_PENDING:   "оплата в обработке",
+  AWAITING_GAMEPASS: "ждёт ссылку на геймпасс",
+  PENDING:           "в очереди на выкуп",
+  IN_PROGRESS:       "выкупается",
+  COMPLETED:         "выкуплен",
+  REJECTED:          "отклонён",
+  ERROR:             "ошибка выкупа",
+};
+
+/** Коды `buyoutErrorCode` человеческим языком; незнакомый показываем как есть. */
+const BUYOUT_ERROR_LABELS: Record<string, string> = {
+  REGIONAL_PRICE:       "у донора региональная цена, замены по нику нет",
+  ROBLOX_PLUS_FLOW:     "донор в потоке Roblox+",
+  LEGACY_PURCHASE_FLOW: "старый поток покупки",
+};
+
+const SUPPORT_ORDER_SELECT = {
+  id: true, wbCode: true, amount: true, status: true, platform: true, orderSource: true,
+  isDirectOrder: true, paidAt: true, gamepassId: true, gamepassUrl: true,
+  robloxUsername: true, probableNick: true, remindersSent: true, buyoutErrorCode: true,
+  rejectionReason: true, adminNote: true, userId: true,
+  createdAt: true, pendingAt: true, completedAt: true,
+  splitGamepasses: { select: { purchasedAt: true } },
+} as const;
+
+/** Последняя строка заметки: там лежит то, что делали с заказом последним. */
+function lastNoteLine(note: string | null | undefined): string | null {
+  const lines = (note ?? "").split("\n").map((line) => line.trim()).filter(Boolean);
+  const last = lines[lines.length - 1];
+  if (!last) return null;
+  return last.length > 140 ? `${last.slice(0, 137)}…` : last;
+}
+
+/** Строка «что держит заказ» — по одной ветке на статус, без домыслов. */
+function blockerLine(order: any): string | null {
+  const parts: string[] = [];
+  switch (order.status) {
+    case "AWAITING_GAMEPASS": {
+      const nick = order.robloxUsername ?? order.probableNick;
+      parts.push("🧩 Пасса нет");
+      parts.push(nick
+        ? `ник ${order.robloxUsername ? "" : "под вопросом "}<code>${escapeHtml(String(nick))}</code>`
+        : "ник не назван");
+      const sent = Number(order.remindersSent ?? 0);
+      parts.push(sent >= 3 ? `напоминаний ${sent} — бот замолчал` : `напоминаний ${sent} из 3`);
+      break;
+    }
+    case "PENDING":
+    case "IN_PROGRESS": {
+      const split: { purchasedAt: Date | null }[] = order.splitGamepasses ?? [];
+      if (split.length > 0) {
+        const bought = split.filter((part) => part.purchasedAt).length;
+        parts.push(`🧩 Разбит: выкуплено ${bought} из ${split.length}`);
+      } else if (order.gamepassId) {
+        parts.push(`🧩 Пасс <code>${escapeHtml(String(order.gamepassId))}</code>`);
+      } else {
+        parts.push("🧩 Пасса нет — выкупать нечего");
+      }
+      if (order.pendingAt) parts.push(`в очереди ${formatOrderAge(order.pendingAt)}`);
+      break;
+    }
+    case "ERROR": {
+      const code = order.buyoutErrorCode as string | null;
+      parts.push(`⛔ Выкуп встал${code ? `: ${BUYOUT_ERROR_LABELS[code] ?? escapeHtml(code)}` : ""}`);
+      break;
+    }
+    case "AWAITING_PAYMENT":
+    case "PAYMENT_PENDING":
+      parts.push("💳 Деньги за прямой заказ не подтверждены");
+      break;
+    case "COMPLETED":
+      // Самый частый разговор «долго в обработке» — про уже выкупленный заказ:
+      // робуксы у Roblox лежат под замком пять дней, и это не наша задержка.
+      parts.push(order.completedAt
+        ? `✅ Выкуплен, прошло ${formatOrderAge(order.completedAt)}`
+        : "✅ Выкуплен");
+      break;
+    case "REJECTED":
+      parts.push(`⛔ Отклонён${order.rejectionReason ? `: ${escapeHtml(String(order.rejectionReason))}` : ""}`);
+      break;
+    default:
+      break;
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+interface SupportOrderBrief {
+  lines: string[];
+  /** Код найденного заказа — шапка алерта берёт его, если бот не передал свой. */
+  code: string | null;
+  denomination: number | null;
+}
+
+const NO_BRIEF: SupportOrderBrief = { lines: [], code: null, denomination: null };
+
+async function supportOrderBrief(p: SupportAlertPayload): Promise<SupportOrderBrief> {
+  try {
+    let order: any = p.wbCode
+      ? await (db as any).wbOrder.findUnique({ where: { wbCode: p.wbCode }, select: SUPPORT_ORDER_SELECT })
+      : null;
+
+    // Бот шлёт код не всегда (общий вопрос, обращение из меню) — тогда берём
+    // последний тронутый заказ этого же человека: разговор почти всегда о нём.
+    if (!order) {
+      const userWhere = p.tgId ? { tgId: String(p.tgId) } : p.vkId ? { vkId: String(p.vkId) } : null;
+      if (!userWhere) return NO_BRIEF;
+      const user = await (db as any).user.findUnique({ where: userWhere, select: { id: true } });
+      if (!user) return NO_BRIEF;
+      order = await (db as any).wbOrder.findFirst({
+        where: { userId: user.id, isTest: false },
+        orderBy: { updatedAt: "desc" },
+        select: SUPPORT_ORDER_SELECT,
+      });
+    }
+    if (!order) return NO_BRIEF;
+
+    const ordersTotal: number = await (db as any).wbOrder
+      .count({ where: { userId: order.userId, isTest: false } })
+      .catch(() => 0);
+
+    const status = SUPPORT_STATUS_LABELS[order.status] ?? String(order.status);
+    // Полосу называем только у DBS: там у разговора другие сроки и другой чат.
+    // У обычного WB-заказа источник совпал бы с платформой из шапки — шум.
+    const lane = order.orderSource === "WB_DBS" ? " · 🚚 WB DBS" : "";
+    const lines: string[] = [
+      `📦 Заказ: <b>${status}</b> · возраст ${formatOrderAge(order.createdAt)}${lane}`,
+    ];
+    const blocker = blockerLine(order);
+    if (blocker) lines.push(blocker);
+    if (ordersTotal > 1) lines.push(`👤 ${ordersTotal}-й заказ этого клиента`);
+    const note = lastNoteLine(order.adminNote);
+    if (note) lines.push(`📝 ${escapeHtml(note)}`);
+
+    return { lines, code: order.wbCode ?? null, denomination: order.amount ?? null };
+  } catch (error) {
+    console.warn("[admin] supportOrderBrief failed:", (error as Error)?.message ?? error);
+    return NO_BRIEF;
+  }
+}
+
 export async function sendAdminSupportAlert(p: SupportAlertPayload): Promise<void> {
   const label = SUPPORT_CONTEXT_LABELS[p.contextKey] ?? p.contextKey;
-  const heldLines = await heldLinesFor(p);
+  const [heldLines, brief] = await Promise.all([heldLinesFor(p), supportOrderBrief(p)]);
   const frozen = heldLines.length > 0;
+  // Код в шапке — тот, по которому собрана справка: иначе строка ссылалась бы
+  // на один заказ, а «📦 Заказ: …» под ней — на другой.
+  const code = p.wbCode ?? brief.code;
+  const denomination = p.denomination ?? brief.denomination;
 
   const text = formatAdminNotice({
     // Замороженный в поддержке — не «человеку нужна помощь», а «сейчас пойдёт
@@ -134,20 +295,29 @@ export async function sendAdminSupportAlert(p: SupportAlertPayload): Promise<voi
     zone: "ПОДДЕРЖКА",
     title: frozen ? "пишет ЗАМОРОЖЕННЫЙ клиент" : "обращение в поддержку",
     lines: [
-      orderRef({ code: p.wbCode ?? null, denomination: p.denomination ?? null }, [
+      orderRef({ code, denomination }, [
         p.userDisplay,
         `${p.platform}`,
         mskTime(new Date()),
       ]),
       ...heldLines,
       `📍 Причина: <b>${label}</b>`,
+      // Справка по заказу идёт ПОСЛЕ причины: сначала «с чем пришли», потом
+      // «что на самом деле с заказом». В таком порядке их и читают.
+      ...brief.lines,
     ],
     next: p.platform === "TG" && p.tgId
       ? `<a href="tg://user?id=${p.tgId}">написать пользователю</a>`
       : "ответить из чата платформы",
   });
 
-  await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text)));
+  // Кнопка ведёт в дашборд, уже наведённый на этот заказ: последний шаг, ради
+  // которого иначе пришлось бы копировать код и искать его руками.
+  const reply_markup = (adminId: string) => (code
+    ? { inline_keyboard: [[{ text: "📊 Открыть заказ", web_app: { url: twaLaunchUrl(adminId, { q: code }) } }]] }
+    : undefined);
+
+  await Promise.allSettled(ADMIN_IDS.map((id) => tgSend(id, text, { reply_markup: reply_markup(id) })));
 }
 
 /** Public support contact. Used as the final URL the bot hands the user after

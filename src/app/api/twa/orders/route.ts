@@ -478,21 +478,29 @@ export async function GET(req: NextRequest) {
       if (o.user?.vkId)       pageVkIds.add(String(o.user.vkId));
       if (o.robloxUsername)   pageRobloxNicks.add(String(o.robloxUsername));
     }
-    const clusterOrClauses: any[] = [];
-    if (pageTgIds.size      > 0) clusterOrClauses.push({ user: { tgId: { in: [...pageTgIds] } } });
-    if (pageVkIds.size      > 0) clusterOrClauses.push({ user: { vkId: { in: [...pageVkIds] } } });
-    if (pageRobloxNicks.size > 0) clusterOrClauses.push({ robloxUsername: { in: [...pageRobloxNicks] } });
-
     const completedWbOrders = orders.filter((o: any) => o.status === "COMPLETED" && !o.isDirectOrder);
     const wbCodeValues     = completedWbOrders.map((o: any) => o.wbCode as string);
     const uniqueUserIds    = [...new Set<string>(completedWbOrders.map((o: any) => o.userId as string))];
 
     const [clusterOrders, codeRecords, firstOrderRows] = await Promise.all([
-      clusterOrClauses.length > 0
-        ? (prisma as any).wbOrder.findMany({
-            where: { OR: clusterOrClauses },
-            select: { createdAt: true, robloxUsername: true, user: { select: { tgId: true, vkId: true } } },
-          })
+      // «Заказ №N из M» у покупателя — один заход в базу, а не два.
+      // Через Prisma это `findMany` с вложенным `user`, и вложенность стоит
+      // ОТДЕЛЬНОГО запроса за пользователями: с базой в Сингапуре это лишние
+      // ~210 мс на каждой загрузке ленты. Здесь нужен ровно джойн, поэтому он
+      // и написан джойном; фильтр тот же самый — TG, VK или ник со страницы.
+      pageTgIds.size > 0 || pageVkIds.size > 0 || pageRobloxNicks.size > 0
+        ? (prisma as any).$queryRaw`
+            SELECT o."createdAt", o."robloxUsername", u."tgId", u."vkId"
+            FROM "WbOrder" o
+            LEFT JOIN "User" u ON u."id" = o."userId"
+            WHERE u."tgId" = ANY(${[...pageTgIds]}::text[])
+               OR u."vkId" = ANY(${[...pageVkIds]}::text[])
+               OR o."robloxUsername" = ANY(${[...pageRobloxNicks]}::text[])
+          `.then((rows: any[]) => rows.map((r) => ({
+            createdAt: r.createdAt,
+            robloxUsername: r.robloxUsername,
+            user: { tgId: r.tgId, vkId: r.vkId },
+          })))
         : [],
       completedWbOrders.length > 0
         ? (prisma as any).wbCode.findMany({
@@ -1257,6 +1265,7 @@ export async function POST(req: NextRequest) {
     // Live-check uses public product-info only — browser service is reserved
     // for the actual purchase flow. Previous version held the SG single-flight
     // lock for every order here, blocking concurrent purchase requests.
+    const checks: { order: any; gpId: string; expected: number }[] = [];
     for (const o of checkOrders) {
       // Проверяем ту часть, которая покупается сейчас, и сверяем её с ЕЁ
       // номиналом. Сумма частей уже сходится с заказом — это отдельный
@@ -1265,8 +1274,26 @@ export async function POST(req: NextRequest) {
       const activePart = parts.find((p) => !p.purchasedAt) ?? null;
       const gpId = activePart ? activePart.gamepassId : gpIdOf(o.gamepassUrl);
       if (!gpId) continue;
-      const expected = Math.ceil((activePart ? activePart.amount : o.amount) / 0.7);
-      const publicInfo = await getGpInfoCached(gpId);
+      checks.push({ order: o, gpId, expected: Math.ceil((activePart ? activePart.amount : o.amount) / 0.7) });
+    }
+
+    /* Пассы спрашиваем у Roblox ВМЕСТЕ, а не по очереди.
+       Проверка идёт на всю страницу ленты — до 30 заказов, — и очередь из
+       тридцати запросов подряд складывалась в те же тридцать задержек: 5,7 с
+       на живых данных 04.09.2026, а на молчащем Roblox (шесть секунд таймаута
+       на хост) — минуты. Одинаковые пассы спрашиваются один раз, окно в 8
+       держит нагрузку на Roblox в тех же рамках, что и раньше. */
+    const uniqueGpIds = [...new Set(checks.map((c) => c.gpId))];
+    const infoByGpId = new Map<string, { price: number | null; isForSale: boolean } | null>();
+    const GP_INFO_CONCURRENCY = 8;
+    for (let i = 0; i < uniqueGpIds.length; i += GP_INFO_CONCURRENCY) {
+      const window = uniqueGpIds.slice(i, i + GP_INFO_CONCURRENCY);
+      const infos = await Promise.all(window.map((id) => getGpInfoCached(id)));
+      window.forEach((id, index) => infoByGpId.set(id, infos[index]));
+    }
+
+    for (const { order: o, gpId, expected } of checks) {
+      const publicInfo = infoByGpId.get(gpId) ?? null;
       const reusedCode = reusedBy.get(gpId);
       const basePrice = publicInfo?.price ?? null;
       results[o.id] = {

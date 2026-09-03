@@ -446,18 +446,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (typeof token.sessionVersion !== "number") {
           token.invalidated = true;
         } else {
-          const current = await prisma.user.findUnique({
-            where: { id: String(token.id) },
-            select: { sessionVersion: true },
-          });
-          if (!current || current.sessionVersion !== token.sessionVersion) token.invalidated = true;
-        }
-        // A0.2 (этап A1): раньше `role` записывалась в токен один раз при входе
-        // и больше не сверялась, поэтому снятие админа не действовало до
-        // перелогина. Теперь роль выводится заново на каждом обновлении токена
-        // — рядом с уже выполняемым запросом за `sessionVersion`.
-        if (!token.invalidated) {
-          token.role = await deriveSessionRole(String(token.id), token.role as string | undefined);
+          // Отзыв сессии и вывод роли читают ОДНУ И ТУ ЖЕ строку пользователя,
+          // поэтому и заход в базу у них один: до 04.09.2026 это были два
+          // запроса подряд (а `loadAdminCandidate` внутри — ещё и два своих),
+          // и с базой в Сингапуре каждый стоил ~210 мс на каждом запросе к
+          // админке. Проверка при этом та же самая — ничего не ослаблено.
+          const current = await loadAdminCandidate(String(token.id));
+          if (!current || current.sessionVersion !== token.sessionVersion) {
+            token.invalidated = true;
+          } else {
+            // A0.2 (этап A1): раньше `role` записывалась в токен один раз при
+            // входе и больше не сверялась, поэтому снятие админа не действовало
+            // до перелогина. Теперь роль выводится заново на каждом обновлении
+            // токена — из той же самой строки.
+            token.role = adminGrantFor(current) ? "ADMIN" : "USER";
+          }
         }
       }
       return token;

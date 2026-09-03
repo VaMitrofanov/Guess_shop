@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { isAdminTelegramId, isBreakGlassEmail } from "@/lib/admin-roster";
 
@@ -21,6 +22,9 @@ export type AdminCandidate = {
   telegramSubjects: string[];
 };
 
+/** То же плюс поле, которым `src/auth.ts` отзывает сессию. */
+export type AdminCandidateRecord = AdminCandidate & { sessionVersion: number };
+
 /**
  * Порядок намеренный: сначала Telegram (основной путь), потом запасной вход.
  *
@@ -37,20 +41,58 @@ export function adminGrantFor(user: AdminCandidate): AdminGrant | null {
   return null;
 }
 
-/** Подтягивает из базы ровно то, что нужно `adminGrantFor`. */
-export async function loadAdminCandidate(userId: string): Promise<AdminCandidate | null> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      email: true,
-      role: true,
-      identities: { where: { provider: "TG" }, select: { subject: true } },
-    },
-  });
-  if (!user) return null;
-  return {
-    email: user.email,
-    role: user.role,
-    telegramSubjects: user.identities.map((identity) => identity.subject),
-  };
+/* ─────────────────────────────────────────────────────────────────────────────
+   Одна строка — один заход в базу.
+
+   База живёт в Сингапуре, приложение — в России: каждый round-trip стоит
+   ~210 мс независимо от того, насколько лёгкий запрос. Поэтому цена гейта
+   меряется не сложностью SQL, а числом обращений.
+
+   До 04.09.2026 их было пять на КАЖДЫЙ запрос админки: `jwt`-callback читал
+   `sessionVersion` (1) и выводил роль через `loadAdminCandidate` (2 — Prisma
+   разворачивает `include` в отдельный запрос за личностями), а следом
+   `resolveAdminFromSession` звал `loadAdminCandidate` второй раз (ещё 2).
+   Секунда уходила ещё до того, как роут начинал свою работу, и её платили и
+   страница, и каждый её `fetch`, и `/api/auth/session`.
+
+   Теперь заход один: личности приходят подзапросом в той же строке, а
+   `cache()` (React) склеивает повторные вызовы внутри одного запроса — тот
+   самый приём, который Next советует для DAL. Проверка при этом осталась
+   ЖИВОЙ: состав `ADMIN_IDS` и `sessionVersion` по-прежнему сверяются на каждом
+   запросе, ничего не кэшируется между запросами.
+   ───────────────────────────────────────────────────────────────────────── */
+
+interface CandidateRow {
+  email: string | null;
+  role: string;
+  sessionVersion: number;
+  telegramSubjects: string[] | null;
 }
+
+/** Подтягивает из базы ровно то, что нужно `adminGrantFor` — за один заход. */
+export const loadAdminCandidate = cache(
+  async (userId: string): Promise<AdminCandidateRecord | null> => {
+    const rows = await prisma.$queryRaw<CandidateRow[]>`
+      SELECT
+        u."email",
+        u."role",
+        u."sessionVersion",
+        (
+          SELECT array_agg(i."subject")
+          FROM "UserIdentity" i
+          WHERE i."userId" = u."id" AND i."provider" = 'TG'
+        ) AS "telegramSubjects"
+      FROM "User" u
+      WHERE u."id" = ${userId}
+      LIMIT 1
+    `;
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      email: row.email,
+      role: row.role,
+      sessionVersion: Number(row.sessionVersion),
+      telegramSubjects: row.telegramSubjects ?? [],
+    };
+  },
+);

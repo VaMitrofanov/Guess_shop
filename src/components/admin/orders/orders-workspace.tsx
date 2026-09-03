@@ -225,7 +225,13 @@ export default function OrdersWorkspace({
 
   // Поиск набирается, а не отправляется: запрос уходит через паузу, чтобы
   // очередь не дёргалась на каждой букве.
+  //
+  // На первом рендере эффект молчит: срез уже загрузил ту же самую ленту
+  // строкой выше, и до 04.09.2026 открытие «Заказов» уходило в базу ДВАЖДЫ —
+  // два одинаковых запроса по ~2 с каждый, второй только затирал первый.
+  const searchPrimed = useRef(false);
   useEffect(() => {
+    if (!searchPrimed.current) { searchPrimed.current = true; return; }
     const id = setTimeout(() => { void load(1, false); }, 320);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
