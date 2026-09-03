@@ -154,7 +154,9 @@ export default function OverviewScreen({
     [data.queue, bought],
   );
 
-  const complete = useCallback(async (order: OverviewQueueOrder) => {
+  // Структурный минимум вместо `OverviewQueueOrder`: то же действие вызывает и
+  // блок «Первым делом», а у его строк своя форма.
+  const complete = useCallback(async (order: { id: string; wbCode: string }) => {
     setBusy(prev => new Set(prev).add(order.id));
     const result = await post({ action: "complete", orderId: order.id });
     setBusy(prev => { const next = new Set(prev); next.delete(order.id); return next; });
@@ -166,7 +168,7 @@ export default function OverviewScreen({
     return true;
   }, [showToast]);
 
-  const completeOne = useCallback(async (order: OverviewQueueOrder) => {
+  const completeOne = useCallback(async (order: { id: string; wbCode: string; amount: number }) => {
     if (await complete(order)) {
       showToast(`✓ ${order.wbCode} выкуплен · ${num(order.amount)} R$ клиенту`);
     }
@@ -180,6 +182,7 @@ export default function OverviewScreen({
     showToast(`⧉ ID в буфере: ${ids.length}`);
   }, [showToast]);
 
+  const firstInLine = (data.firstInLine?.rows ?? []).filter(order => !bought.has(order.id));
   const oldest = queue.slice(0, OLDEST_SHOWN);
   const buyout = data.slices.slices.BUYOUT;
   const errors = data.slices.slices.ERROR;
@@ -243,6 +246,61 @@ export default function OverviewScreen({
         </div>
       </section>
 
+      {/* ── 1.5. ⚡ Первым делом ────────────────────────────────────────────
+          Два случая, которые выкупаются не по возрасту: поднятые руками и
+          прямые (за них клиент заплатил лично и ждёт лично). В общей очереди
+          они стоят наверху, но там же стоит и просто самый старый — без
+          отдельной полосы «подняли» и «прямой» неотличимы от «давно висит».
+          Пусто — блока нет вовсе: чинить в нём нечего. */}
+      {firstInLine.length > 0 && (
+        <section className={styles.first} aria-label="Выкупать первым делом">
+          <div className={styles.firstHead}>
+            ⚡ Первым делом
+            <span className={styles.note}>
+              {data.firstInLine!.pinned > 0 && <>подняты вручную: <b>{data.firstInLine!.pinned}</b></>}
+              {data.firstInLine!.pinned > 0 && data.firstInLine!.direct > 0 && " · "}
+              {data.firstInLine!.direct > 0 && <>прямых: <b>{data.firstInLine!.direct}</b></>}
+            </span>
+            <span className={styles.spacer} />
+            <span className={styles.note}><b>{num(data.firstInLine!.gross)}</b> R$ грязными</span>
+          </div>
+          <div className={styles.firstRows}>
+            {firstInLine.map(order => (
+              <div
+                className={cn(styles.firstRow, busy.has(order.id) && styles.firstRowBusy)}
+                key={order.id}
+              >
+                <span className={cn(
+                  styles.firstWhy,
+                  order.reason === "pinned" ? styles.firstWhyPinned : styles.firstWhyDirect,
+                )}>
+                  {order.reason === "pinned" ? "⚡ поднят" : "Прямой"}
+                </span>
+                <Link className={styles.code} href={`/admin/orders?slice=BUYOUT&order=${order.id}`}>
+                  {order.wbCode}
+                </Link>
+                <span className={styles.nick} title={order.robloxUsername ?? undefined}>
+                  {order.robloxUsername ?? "Ник не указан"}
+                </span>
+                <span className={styles.amount} title={`${num(order.gross)} грязными → ${num(order.amount)} R$ клиенту`}>
+                  {num(order.gross)} R$
+                </span>
+                <span className={cn(styles.age, TONE_CLASS[ageTone(order.since)])}>{fmtAge(order.since)}</span>
+                <button
+                  type="button"
+                  className={styles.tick}
+                  title={`Выкуплено · ${order.wbCode}`}
+                  aria-label={`Отметить выкупленным заказ ${order.wbCode}`}
+                  onClick={() => void completeOne(order)}
+                >
+                  <Check size={14} aria-hidden="true" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* ── 2. Дорожки работы ──────────────────────────────────────────────── */}
       <div className={styles.sectionHead}><h2>Дорожки</h2></div>
       <div className={styles.lanes}>
@@ -279,6 +337,9 @@ export default function OverviewScreen({
                   key={order.id}
                 >
                   <Link className={styles.code} href={`/admin/orders?slice=BUYOUT&order=${order.id}`}>
+                    {/* ⚡ Поднятый руками стоит первым и здесь — без метки его
+                        не отличить от просто самого старого. */}
+                    {order.priority && <i className={styles.prio} title="Выкупать первым">⚡</i>}
                     {order.wbCode}
                   </Link>
                   <span className={styles.nick} title={order.robloxUsername ?? undefined}>

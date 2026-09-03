@@ -124,7 +124,11 @@ export async function runAutoBuyoutTick(bot: Telegraf): Promise<void> {
       // (guard'ы в TWA), но даже если окажется — автовыкуп его не тронет.
       // ❄️ heldAt — то же самое для заморозки: «не выкупать, но и не удалять».
       where: { status: "PENDING", isTest: false, ...NOT_HELD, NOT: { isDirectOrder: true, paidAt: null } },
-      orderBy: { pendingAt: "asc" },
+      // Ручной приоритет («⚡ Вперёд очереди» в админке) бьёт возраст и здесь:
+      // иначе поднятый заказ стоял бы первым на всех экранах, а автовыкуп
+      // молча брал бы старейший. `nulls: "last"` обязателен — в Postgres у
+      // DESC по умолчанию NULLS FIRST, и без него наверх уехала бы вся очередь.
+      orderBy: [{ priorityAt: { sort: "desc", nulls: "last" } }, { pendingAt: "asc" }],
       take: maxPerTick + autobuySkip.size, // headroom so skipped ones don't starve the tick
       include: { user: { select: { id: true, tgId: true, vkId: true } } },
     });

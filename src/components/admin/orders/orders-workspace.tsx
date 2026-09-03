@@ -393,6 +393,28 @@ export default function OrdersWorkspace({
     });
   }, [run]);
 
+  /* ⚡ «Вперёд очереди». Порядок в ленте — это порядок работы, и до сих пор он
+     целиком определялся возрастом. Кнопка не меняет ни статус, ни срез: заказ
+     остаётся там же и просто уезжает наверх — на всех поверхностях сразу
+     (лента телефона, обзор, выгрузка ID закупщику, автовыкуп бота). */
+  const togglePriority = useCallback(async (order: AdminOrder) => {
+    const on = !order.priorityAt;
+    const ok = await run(order, { action: "set-priority", priority: on }, {
+      label: on ? `⚡ ${order.wbCode} — выкупать первым` : `${order.wbCode} вернулся в общую очередь`,
+      inverse: { action: "set-priority", priority: !on },
+      patch: { priorityAt: on ? new Date().toISOString() : null },
+    });
+    // Поднятый заказ обязан оказаться наверху немедленно: перезагрузка страницы
+    // вернёт ровно этот порядок, и ждать её, чтобы увидеть результат, незачем.
+    if (ok && on) {
+      setOrders(prev => {
+        const target = prev.find(o => o.id === order.id);
+        return target ? [{ ...target, priorityAt: new Date().toISOString() }, ...prev.filter(o => o.id !== order.id)] : prev;
+      });
+      setCursor(0);
+    }
+  }, [run]);
+
   const cancelOrder = useCallback(async (order: AdminOrder) => {
     const reason = await askFor({
       title: `Отменить заказ ${order.wbCode}`,
@@ -638,6 +660,7 @@ export default function OrdersWorkspace({
       if (key === "r" && cursorOrder?.status === "ERROR") { event.preventDefault(); void restore(cursorOrder); return; }
       if (key === "f" && cursorOrder) { event.preventDefault(); void toggleHold(cursorOrder); return; }
       if (key === "e" && cursorOrder) { event.preventDefault(); void setError(cursorOrder); return; }
+      if (key === "p" && cursorOrder) { event.preventDefault(); void togglePriority(cursorOrder); return; }
       if (key === "s" && cursorOrder) {
         event.preventDefault();
         if (SPLITTABLE.includes(cursorOrder.status)) setSplitId(cursorOrder.id);
@@ -664,7 +687,7 @@ export default function OrdersWorkspace({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [orders, cursor, cursorOrder, openId, selected, ask, paletteOpen, filtersOpen, helpOpen, createOpen, splitId,
-      complete, restore, toggleHold, setError, toggleSelect, showToast, router]);
+      complete, restore, toggleHold, setError, togglePriority, toggleSelect, showToast, router]);
 
   // Курсор клавиатуры не должен уезжать за экран.
   useEffect(() => {
@@ -827,6 +850,7 @@ export default function OrdersWorkspace({
                   onSelect={toggleSelect}
                   onOpen={() => { setCursor(index); setOpenId(order.id); setMode("split"); }}
                   onPrimary={() => void runPrimary(order)}
+                  onPriority={() => void togglePriority(order)}
                   onCopyIds={() => {
                     const ids = gamepassIdsOf(order);
                     if (ids.length === 0) { showToast({ text: "У заказа нет геймпасса", error: true }); return; }
@@ -850,6 +874,7 @@ export default function OrdersWorkspace({
                     leaving={leaving.has(order.id)}
                     onOpen={() => { setCursor(index); setOpenId(order.id); setMode("split"); }}
                     onPrimary={() => void runPrimary(order)}
+                    onPriority={() => void togglePriority(order)}
                   />
                 ))}
               </div>
@@ -873,6 +898,7 @@ export default function OrdersWorkspace({
             onHold={() => void toggleHold(openOrder)}
             onError={() => void setError(openOrder)}
             onFavorite={() => void toggleFavorite(openOrder)}
+            onPriority={() => void togglePriority(openOrder)}
             onCancel={() => void cancelOrder(openOrder)}
             onSplit={() => setSplitId(openOrder.id)}
             onToast={(text, error) => showToast({ text, error })}
@@ -989,6 +1015,7 @@ export default function OrdersWorkspace({
                 ["⌘ ↵", "отметить выкупленным"],
                 ["R", "вернуть к выкупу"],
                 ["E", "пометить ошибкой"],
+                ["P", "⚡ вперёд очереди / обратно"],
                 ["F", "заморозить / разморозить"],
                 ["S", "разбить выкуп на несколько пассов"],
                 ["C", "скопировать ID геймпасса"],
@@ -1046,6 +1073,7 @@ export default function OrdersWorkspace({
               if (ids.length > 0) { copyText(ids.join("\n")); showToast({ text: `⧉ ${ids.join(", ")}` }); }
             }
             if (command === "split" && cursorOrder) setSplitId(cursorOrder.id);
+            if (command === "priority" && cursorOrder) await togglePriority(cursorOrder);
             if (command === "help") setHelpOpen(true);
           }}
         />
@@ -1179,7 +1207,7 @@ function SliceStrip({
 /* ── Строка таблицы ───────────────────────────────────────────────────────── */
 
 function OrderRow({
-  order, index, live, selected, cursor, open, busy, leaving, onSelect, onOpen, onPrimary, onCopyIds,
+  order, index, live, selected, cursor, open, busy, leaving, onSelect, onOpen, onPrimary, onPriority, onCopyIds,
 }: {
   order: AdminOrder;
   index: number;
@@ -1192,6 +1220,7 @@ function OrderRow({
   onSelect: (order: AdminOrder, index: number, range: boolean) => void;
   onOpen: () => void;
   onPrimary: () => void;
+  onPriority: () => void;
   onCopyIds: () => void;
 }) {
   const lane = laneOf(order);
@@ -1206,6 +1235,7 @@ function OrderRow({
       data-order-index={index}
       className={[
         styles.row,
+        order.priorityAt ? styles.rowPriority : "",
         selected ? styles.rowSelected : "",
         cursor ? styles.rowCursor : "",
         open ? styles.rowOpen : "",
@@ -1224,7 +1254,12 @@ function OrderRow({
         ✓
       </button>
       <span className={styles.lane} style={{ color: TONE_COLOR[LANE_META[lane].tone] }}>{LANE_META[lane].label}</span>
-      <button type="button" className={styles.code} onClick={onOpen}>{order.wbCode}</button>
+      <button type="button" className={styles.code} onClick={onOpen}>
+        {/* ⚡ стоит у кода, а не в конце строки: место в очереди — свойство
+            заказа, и искать его глазами по правому краю неудобно. */}
+        {order.priorityAt && <i className={styles.prio} title="Выкупать первым">⚡</i>}
+        {order.wbCode}
+      </button>
       <button type="button" className={`${styles.nick} ${!order.robloxUsername && order.probableNick ? styles.nickProbable : ""}`} onClick={onOpen}>
         {order.robloxUsername ?? order.probableNick ?? "ник не указан"}
       </button>
@@ -1249,6 +1284,17 @@ function OrderRow({
         {(ids || parts.length > 0) && (
           <button type="button" className={`${styles.mini} ${styles.miniQuiet}`} onClick={onCopyIds} aria-label="Скопировать ID геймпасса">⧉</button>
         )}
+        {!isHeld(order) && (
+          <button
+            type="button"
+            className={`${styles.mini} ${order.priorityAt ? styles.miniPrio : styles.miniQuiet}`}
+            onClick={onPriority}
+            title={order.priorityAt ? "Вернуть в общую очередь (P)" : "Выкупать первым (P)"}
+            aria-label={order.priorityAt ? "Вернуть в общую очередь" : "Выкупать первым"}
+          >
+            ⚡
+          </button>
+        )}
         <button type="button" className={`${styles.mini} ${styles.miniQuiet}`} onClick={onOpen} aria-label="Открыть досье">›</button>
       </span>
     </div>
@@ -1258,7 +1304,7 @@ function OrderRow({
 /* ── Карточка очереди ─────────────────────────────────────────────────────── */
 
 function QueueCard({
-  order, index, live, selected, cursor, open, busy, leaving, onOpen, onPrimary,
+  order, index, live, selected, cursor, open, busy, leaving, onOpen, onPrimary, onPriority,
 }: {
   order: AdminOrder;
   index: number;
@@ -1270,6 +1316,7 @@ function QueueCard({
   leaving: boolean;
   onOpen: () => void;
   onPrimary: () => void;
+  onPriority: () => void;
 }) {
   const lane = laneOf(order);
   const badge = orderBadge(order);
@@ -1282,6 +1329,7 @@ function QueueCard({
       data-order-index={index}
       className={[
         styles.card,
+        order.priorityAt ? styles.cardPriority : "",
         selected ? styles.cardSelected : "",
         cursor ? styles.cardCursor : "",
         open ? styles.cardOpen : "",
@@ -1291,6 +1339,7 @@ function QueueCard({
     >
       <button type="button" className={styles.cardTop} onClick={onOpen} style={{ width: "100%" }}>
         <span style={{ color: TONE_COLOR[LANE_META[lane].tone] }}>{LANE_META[lane].label}</span>
+        {order.priorityAt && <span className={styles.prioTag}>⚡ первый</span>}
         <span className={styles.age} style={{ color: TONE_COLOR[ageTone(basis)] }}>{fmtAge(basis)}</span>
         {badge && <span style={{ color: TONE_COLOR[badge.tone] }}>{badge.label}</span>}
         <span className={styles.code} style={{ marginLeft: "auto" }}>{order.wbCode}</span>
@@ -1306,16 +1355,30 @@ function QueueCard({
         <span>{clientLabel(order)}</span>
         {flag && <span className={styles.flag} style={{ color: TONE_COLOR[flag.tone] }}>{flag.text}</span>}
       </div>
-      {action && (
+      {/* Ряд действий рисуется и без главного действия: «⚡ вперёд очереди»
+          нужно ровно там, где заказ ничем не закрыть прямо сейчас. */}
+      {(action || !isHeld(order)) && (
         <div className={styles.cardActions}>
-          <button
-            type="button"
-            className={`${styles.mini} ${action.tone === "green" ? styles.miniPrimary : action.tone === "ice" ? styles.miniIce : styles.miniBlue}`}
-            onClick={onPrimary}
-          >
-            {action.icon} {action.label}
-          </button>
+          {action && (
+            <button
+              type="button"
+              className={`${styles.mini} ${action.tone === "green" ? styles.miniPrimary : action.tone === "ice" ? styles.miniIce : styles.miniBlue}`}
+              onClick={onPrimary}
+            >
+              {action.icon} {action.label}
+            </button>
+          )}
           <button type="button" className={styles.mini} onClick={onOpen}>Досье</button>
+          {!isHeld(order) && (
+            <button
+              type="button"
+              className={`${styles.mini} ${order.priorityAt ? styles.miniPrio : ""}`}
+              onClick={onPriority}
+              title={order.priorityAt ? "Вернуть в общую очередь" : "Выкупать первым"}
+            >
+              ⚡
+            </button>
+          )}
         </div>
       )}
     </div>

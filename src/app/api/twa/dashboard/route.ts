@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { getBrowserSession } from "@/lib/browser-purchase";
 import { BUYOUT_LANE_SQL, BUYOUT_QUEUE_SQL, ATTENTION_BUYOUT_HOURS, NEW_CUTOFF_HOURS, STALE_LINK_DAYS } from "@/lib/order-queue";
 import { NOT_HELD_SQL } from "@/lib/order-hold";
+import { loadFirstInLine } from "@/lib/first-in-line";
 import { loadWbDeliveryQueueSnapshot } from "@/lib/wb-delivery-workflow";
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -68,7 +69,7 @@ export async function GET(req: NextRequest) {
 
   const withDonor = req.nextUrl.searchParams.get("donor") === "1";
 
-  const [stats, codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, feedback, donor, dbs] = await Promise.all([
+  const [stats, codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, feedback, donor, dbs, firstInLine] = await Promise.all([
     getStats30d(),
     prisma.wbCode.groupBy({ by: ["denomination"], _count: { _all: true }, where: { isUsed: false, isTest: false } }),
 
@@ -132,6 +133,10 @@ export async function GET(req: NextRequest) {
     getFeedbackSummary(),
     withDonor ? getDonorSnapshot() : Promise.resolve({ available: false, accountName: null, balance: null }),
     loadWbDeliveryQueueSnapshot().catch(() => null),
+    // ⚡ Первым делом: поднятые руками и прямые заказы. Тот же загрузчик, что у
+    // «Обзора» на сайте — иначе две главные показывали бы разные списки того,
+    // что «выкупать первым».
+    loadFirstInLine().catch(() => null),
   ]);
 
   const LANES = ["WB", "WB_DBS", "DIRECT"] as const;
@@ -219,6 +224,7 @@ export async function GET(req: NextRequest) {
       count: heldCount,
       codes: heldOrders.map(order => order.wbCode),
     },
+    firstInLine,
     donorCoverage,
     inbox,
     dbs,

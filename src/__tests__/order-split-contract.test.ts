@@ -52,6 +52,61 @@ describe("контракт разбитого выкупа", () => {
     expect(route).toContain("wbOrderGamepass.findMany");
   });
 
+  /* ── Привязка не зависит от браузера выкупа ───────────────────────────────
+     03.09.2026: заказ на 2000 не разбивался вовсе — `set-gamepass-split`
+     спрашивал пасс только у серверного браузера, а тот лежал, и операция
+     падала с «Браузерный сервис выкупа недоступен». Разбиение не тратит
+     робуксы: оно записывает, чем закрывается заказ. Ронять его из-за упавшего
+     браузера — терять работу админа, ничего не выигрывая в безопасности.
+     ──────────────────────────────────────────────────────────────────────── */
+  describe("привязка переживает упавший браузер выкупа", () => {
+    it("у донора спрашивают первым, но не единственным", () => {
+      expect(route).toContain("async function resolveGamepassForBinding(");
+      const binding = route.slice(route.indexOf("async function resolveGamepassForBinding("));
+      const body = binding.slice(0, 2600);
+      expect(body).toContain("resolveGamepassForBuyer(gamepassId, cookie)");
+      // Публичная карточка идёт через мост: с российского хоста прямой путь
+      // до API Roblox не работает вовсе.
+      expect(body).toContain("getGamepassById(gamepassId)");
+    });
+
+    it("у каждого источника есть бюджет — модалка не висит минуту", () => {
+      // preflight браузера ждёт до 70 с; без бюджета лежащий браузер держал бы
+      // разбиение на каждый уникальный пасс.
+      expect(route).toContain("BINDING_DONOR_BUDGET_MS");
+      expect(route).toContain("BINDING_PUBLIC_BUDGET_MS");
+      expect(route).toContain("function withBudget<T>");
+    });
+
+    it("не ответил никто — разбиение всё равно записано, но со следом", () => {
+      const handler = route.slice(route.indexOf('if (action === "set-gamepass-split")'));
+      const block = handler.slice(0, 8000);
+      expect(block).toContain("const unverified: string[] = []");
+      expect(block).toContain("БЕЗ ПРОВЕРКИ");
+      // И экран обязан сказать это вслух, а не показать обычное «готово».
+      expect(block).toContain("warning: unverified.length");
+      expect(screen).toContain("d?.warning");
+      expect(deskDialog).toContain("data?.warning");
+    });
+
+    it("ответивший источник по-прежнему может ЗАПРЕТИТЬ разбиение", () => {
+      // Деградация касается только молчания Roblox. Если пасс снят с продажи,
+      // стоит не столько или принадлежит чужому нику — это отказ, как и был.
+      const handler = route.slice(route.indexOf('if (action === "set-gamepass-split")'));
+      const block = handler.slice(0, 6000);
+      expect(block).toContain("не выставлен на продажу");
+      expect(block).toContain("partPriceMatches(part, info.price, info.basePrice)");
+      expect(block).toContain("sellerMatchesOrder(order.robloxUsername, info.sellerName)");
+    });
+
+    it("деньги стережёт покупка, а не привязка", () => {
+      // Ровно то, что делает деградацию безопасной: перед списанием робуксов
+      // цена и продавец проверяются заново.
+      expect(route).toContain("checkGamepassPrice(guardAmount, price, base)");
+      expect(route).toContain("sellerMatchesOrder(order.robloxUsername, creatorName)");
+    });
+  });
+
   it("состав нельзя менять после частичного выкупа", () => {
     expect(route).toContain("splitParts.some((p) => p.purchasedAt)");
   });

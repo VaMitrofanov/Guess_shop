@@ -4,7 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { adminCache } from "@/lib/admin-cache";
 import { getAdminDashboardData, getAdminRuntimeState } from "@/lib/admin-ecosystem";
 import { loadOrderSlices, moscowDayStartUtc } from "@/lib/order-slices";
-import { BUYOUT_QUEUE_SQL } from "@/lib/order-queue";
+import { BUYOUT_QUEUE_SQL, DIRECT_ORDER_SQL, PRIORITY_ORDER_SQL } from "@/lib/order-queue";
+import { loadFirstInLine } from "@/lib/first-in-line";
 import { loadWbDeliveryQueueSnapshot } from "@/lib/wb-delivery-workflow";
 import type {
   AdminOverview,
@@ -57,7 +58,9 @@ function num(value: unknown): number {
  * Предикат — общий `BUYOUT_QUEUE_SQL`, а не своя копия условий: строка,
  * выкупленная с обзора, обязана быть той же строкой, что во вкладке
  * «Выкупить». Порядок — от старейшего: смена начинается с того, кто ждёт
- * дольше всех, а не с того, кто дешевле.
+ * дольше всех, а не с того, кто дешевле. Выше возраста — только приоритет:
+ * поднятый кнопкой «⚡ Вперёд очереди» и прямой заказ (за него клиент заплатил
+ * лично и ждёт лично). Тот же порядок, что в ленте «Выкупить».
  */
 const loadQueueHead = adminCache(
   async (): Promise<{ rows: OverviewQueueOrder[]; total: number }> => {
@@ -73,6 +76,7 @@ const loadQueueHead = adminCache(
       gamepassUrl: string | null;
       splitTotal: number;
       splitDone: number;
+      priorityAt: Date | null;
     }>>(`
       SELECT
         o."id",
@@ -89,7 +93,8 @@ const loadQueueHead = adminCache(
         o."gamepassId",
         o."gamepassUrl",
         COALESCE(g."total", 0)::int AS "splitTotal",
-        COALESCE(g."done", 0)::int AS "splitDone"
+        COALESCE(g."done", 0)::int AS "splitDone",
+        o."priorityAt"
       FROM "WbOrder" o
       LEFT JOIN (
         SELECT "orderId",
@@ -98,7 +103,7 @@ const loadQueueHead = adminCache(
         FROM "WbOrderGamepass" GROUP BY "orderId"
       ) g ON g."orderId" = o."id"
       WHERE o."isTest" = false AND ${BUYOUT_QUEUE_SQL}
-      ORDER BY COALESCE(o."pendingAt", o."createdAt") ASC
+      ORDER BY o.${PRIORITY_ORDER_SQL}, o.${DIRECT_ORDER_SQL}, COALESCE(o."pendingAt", o."createdAt") ASC
       LIMIT ${OVERVIEW_QUEUE_HEAD}
     `);
 
@@ -120,6 +125,7 @@ const loadQueueHead = adminCache(
         gamepassUrl: row.gamepassUrl,
         splitTotal: row.splitTotal,
         splitDone: row.splitDone,
+        priority: row.priorityAt != null,
       })),
       total: num(total[0]?.n),
     };
@@ -300,10 +306,13 @@ export async function loadOverviewDiff(since: Date): Promise<OverviewDiff> {
 }
 
 export async function getAdminOverview(since: Date): Promise<AdminOverview> {
-  const [slices, dbs, queue, held, health, dashboard, daily, showcase30d] = await Promise.all([
+  const [slices, dbs, queue, firstInLine, held, health, dashboard, daily, showcase30d] = await Promise.all([
     loadOrderSlices(),
     loadWbDeliveryQueueSnapshot().catch(() => null),
     loadQueueHead(),
+    // Кэшировать нельзя: блок «Первым делом» — это ответ на нажатие ⚡ пять
+    // секунд назад, и 30-секундный кэш выглядел бы как «кнопка не сработала».
+    loadFirstInLine().catch(() => null),
     loadHeld(),
     loadHealth(),
     getAdminDashboardData(),
@@ -323,6 +332,7 @@ export async function getAdminOverview(since: Date): Promise<AdminOverview> {
     dbs,
     queue: queue.rows,
     queueTotal: queue.total,
+    firstInLine,
     held,
     diff,
     health: {

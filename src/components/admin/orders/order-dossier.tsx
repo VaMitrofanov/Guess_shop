@@ -35,7 +35,7 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 export default function OrderDossier({
-  order, live, onClose, onPrimary, onHold, onError, onFavorite, onCancel, onSplit, onToast, onChanged,
+  order, live, onClose, onPrimary, onHold, onError, onFavorite, onPriority, onCancel, onSplit, onToast, onChanged,
 }: {
   order: AdminOrder;
   live?: LiveCheck;
@@ -44,6 +44,7 @@ export default function OrderDossier({
   onHold: () => void;
   onError: () => void;
   onFavorite: () => void;
+  onPriority: () => void;
   onCancel: () => void;
   onSplit: () => void;
   onToast: (text: string, error?: boolean) => void;
@@ -153,6 +154,13 @@ export default function OrderDossier({
             {order.heldAt ? "❄ Разморозить" : "❄ Заморозить"} <kbd>F</kbd>
           </button>
           <button type="button" className={styles.btn} onClick={onFavorite}>{order.isFavorite ? "★ Из избранного" : "★ В избранное"}</button>
+          {/* ⚡ Место в очереди. У замороженного заказа очереди нет — кнопки
+              тоже: сервер такой заказ поднимать откажется. */}
+          {!order.heldAt && (
+            <button type="button" className={`${styles.btn} ${order.priorityAt ? styles.btnPrio : ""}`} onClick={onPriority}>
+              {order.priorityAt ? "⚡ Вернуть в очередь" : "⚡ Вперёд очереди"} <kbd>P</kbd>
+            </button>
+          )}
           {SPLITTABLE.includes(order.status) && (
             <button type="button" className={styles.btn} onClick={onSplit}>
               🧩 {parts.length > 0 ? `Разбивка ${parts.filter(part => part.purchasedAt).length}/${parts.length}` : "Разбить выкуп"} <kbd>S</kbd>
@@ -176,6 +184,12 @@ export default function OrderDossier({
       <div className={styles.dossierBody}>
         {tab === "overview" && (
           <>
+            {order.priorityAt && (
+              <div className={`${styles.box} ${styles.boxPrio}`}>
+                <div className={styles.boxHead}>⚡ Выкупать первым<em>{order.priorityBy ?? ""}</em></div>
+                <div>Поднят наверх очереди {fmtAge(order.priorityAt)} назад — на всех экранах и в выгрузке ID.</div>
+              </div>
+            )}
             {order.heldAt && (
               <div className={`${styles.box} ${styles.boxIce}`}>
                 <div className={styles.boxHead}>❄️ Заморожен<em>{order.heldBy ?? ""}</em></div>

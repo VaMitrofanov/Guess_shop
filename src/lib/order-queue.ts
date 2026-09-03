@@ -150,16 +150,67 @@ export function buildTabWhere(tab: FilterTab): Prisma.WbOrderWhereInput {
   }
 }
 
+/* ── Ручной приоритет ────────────────────────────────────────────────────────
+   «Этот выкупать первым» — исключение из сортировки по возрасту, поднятое
+   руками. Правило живёт здесь одной строкой, потому что очередь читают четыре
+   разных места (лента TWA, лента сайта, выгрузка ID закупщику, автовыкуп в
+   боте), и разъехавшийся приоритет означал бы, что поднятый заказ виден
+   наверху на телефоне и не виден в выгрузке.
+
+   `nulls: "last"` обязателен и не является украшением: в Postgres у `DESC`
+   по умолчанию NULLS FIRST, то есть без него наверх уехали бы РОВНО ВСЕ
+   неприоритетные заказы. Зеркало для сырого SQL — `PRIORITY_ORDER_SQL`.
+   ────────────────────────────────────────────────────────────────────────── */
+export const PRIORITY_ORDER_BY = { priorityAt: { sort: "desc", nulls: "last" } } as const;
+
+/** То же правило для `$queryRaw`: подставляется первым в `ORDER BY`. */
+export const PRIORITY_ORDER_SQL = `"priorityAt" DESC NULLS LAST`;
+
+/**
+ * Прямой заказ идёт раньше вебешного той же давности.
+ *
+ * Это не «ещё одна сортировка», а то же правило приоритета, только постоянное:
+ * за прямой заказ клиент заплатил деньгами напрямую и ждёт лично, а не через
+ * карту WB, которую он купил заранее. В очереди прямых единицы, поэтому цена
+ * решения — сдвиг WB-заказов на один-два места, а не перестройка очереди.
+ */
+export const DIRECT_ORDER_BY = { isDirectOrder: "desc" } as const;
+export const DIRECT_ORDER_SQL = `"isDirectOrder" DESC`;
+
+/** Порядок блока «Первым делом» на обеих главных: ⚡ → прямые → возраст. */
+export const FIRST_IN_LINE_ORDER_SQL =
+  `${PRIORITY_ORDER_SQL}, ${DIRECT_ORDER_SQL}, COALESCE("pendingAt", "createdAt") ASC`;
+
+/** Срезы, где место в списке означает очередь работы, а не историю. */
+const PRIORITY_TABS: readonly FilterTab[] = [
+  "WORK", "BUYOUT", "DIRECT", "AVITO", "ERROR", "ATTENTION", "AWAITING_LINK", "STALE_LINK",
+];
+
 export function orderByForTab(
   tab: FilterTab,
 ): Prisma.WbOrderOrderByWithRelationInput | Prisma.WbOrderOrderByWithRelationInput[] {
-  if (tab === "WORK") return [{ updatedAt: "desc" }, { createdAt: "desc" }];
-  if (tab === "BUYOUT" || tab === "DIRECT" || tab === "AVITO") return [{ pendingAt: "asc" }, { createdAt: "asc" }];
-  if (tab === "ERROR" || tab === "AWAITING_LINK" || tab === "STALE_LINK" || tab === "ATTENTION") return { createdAt: "asc" };
-  // Свежая заморозка сверху: её причину чаще всего и уточняют.
-  if (tab === "HELD") return { heldAt: "desc" };
-  return { createdAt: "desc" };
+  const base: Prisma.WbOrderOrderByWithRelationInput[] =
+    tab === "WORK" ? [{ updatedAt: "desc" }, { createdAt: "desc" }]
+    // «К выкупу» — единственная очередь, где прямые обгоняют по определению:
+    // это общий список, в котором они иначе тонут среди WB-заказов. Во вкладках
+    // «Прямой» и «Авито» ось не нужна (там один тип), в остальных — не про выкуп.
+    : tab === "BUYOUT" ? [DIRECT_ORDER_BY as Prisma.WbOrderOrderByWithRelationInput, { pendingAt: "asc" }, { createdAt: "asc" }]
+    : tab === "DIRECT" || tab === "AVITO" ? [{ pendingAt: "asc" }, { createdAt: "asc" }]
+    : tab === "ERROR" || tab === "AWAITING_LINK" || tab === "STALE_LINK" || tab === "ATTENTION" ? [{ createdAt: "asc" }]
+    // Свежая заморозка сверху: её причину чаще всего и уточняют.
+    : tab === "HELD" ? [{ heldAt: "desc" }]
+    : [{ createdAt: "desc" }];
+
+  // В «Готово», «Отменённых» и «Избранном» приоритет ничего не значит: там
+  // не работают, там смотрят историю.
+  return PRIORITY_TABS.includes(tab)
+    ? [PRIORITY_ORDER_BY as unknown as Prisma.WbOrderOrderByWithRelationInput, ...base]
+    : base;
 }
+
+/** Заказ поднят наверх очереди руками. */
+export const isPrioritized = (order: { priorityAt?: Date | string | null }): boolean =>
+  order.priorityAt != null;
 
 /* ── Выгрузка ID геймпассов ──────────────────────────────────────────────────
    Пока выкупаем вручную, закупщику нужен весь список ID сразу, а не копирование

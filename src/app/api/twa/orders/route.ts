@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/admin-access";
 import { prisma } from "@/lib/prisma";
 import { notifyOrderCompleted, notifyOrderRejected, notifyRebind, notifyGamepassAttached, notifyGpWatchPing, notifyRegionalPriceNeeded } from "@/lib/twa-notify";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
+import { getGamepassById } from "@/lib/roblox";
 import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepass, resolveGamepassForBuyer, verifyGamepassOwnership, type ResolvedGamepass } from "@/lib/roblox-buyout";
 import { browserFailureMessage, isBrowserInfrastructureFailure } from "@/lib/browser-purchase";
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "@/lib/roblox-purchase-script";
@@ -86,6 +87,97 @@ async function getGpInfoCached(gpId: string): Promise<{ price: number | null; is
     } catch { /* try next */ }
   }
   return null;
+}
+
+/* ── Данные пасса для ПРИВЯЗКИ (не для покупки) ──────────────────────────────
+   Привязать разбиение и выкупить его — разные по цене ошибки, и источник
+   данных у них поэтому разный.
+
+   03.09.2026: разбиение спрашивало пасс только у серверного браузера
+   (`resolveGamepassForBuyer`), а тот лежал — и вся операция падала с «Браузерный
+   сервис выкупа недоступен». При этом разбиение НИЧЕГО не тратит: оно лишь
+   записывает, какими пассами закрывается заказ. Деньги стережёт покупка, и она
+   заново спрашивает донорскую цену и заново прогоняет ЦЕНА-СТОП и ПРОДАВЕЦ-СТОП
+   прямо перед списанием — то есть уронить привязку из-за упавшего браузера
+   значит потерять работу админа, ничего не выиграв в безопасности.
+
+   Порядок источников: донорская цена (она точнее — видит региональную), потом
+   публичная карточка через мост (`getGamepassById`; с российского хоста прямой
+   путь до Roblox не работает вовсе, см. `roblox-bridge.ts`). Если не ответил
+   никто — `info: null`, и вызывающий сам решает, что делать с непроверенной
+   частью.
+   ────────────────────────────────────────────────────────────────────────── */
+interface BindingInfo {
+  name: string;
+  /** Цена, которую платит донор (у неё бывает региональная скидка). */
+  price: number;
+  /** Цена продавца — по ней и сверяется номинал части. */
+  basePrice: number | null;
+  sellerName: string | null;
+  isForSale: boolean;
+}
+
+/** Сколько ждём каждый источник: разбиение — операция «на глазах», не крон. */
+const BINDING_DONOR_BUDGET_MS = 20_000;
+const BINDING_PUBLIC_BUDGET_MS = 15_000;
+
+/** Ждать ответ не дольше бюджета; провал и таймаут неразличимы — оба `null`. */
+function withBudget<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      () => { clearTimeout(timer); resolve(null); },
+    );
+  });
+}
+
+async function resolveGamepassForBinding(
+  gamepassId: string,
+  cookie: string | null | undefined,
+): Promise<{ info: BindingInfo | null; reason: string | null }> {
+  let reason: string | null = null;
+  if (cookie) {
+    // Бюджет здесь не роскошь: preflight серверного браузера ждёт ответа до
+    // 70 секунд, и лежащий браузер иначе держал бы модалку разбиения минуту
+    // на каждый уникальный пасс.
+    const donor = await withBudget(
+      resolveGamepassForBuyer(gamepassId, cookie).then(
+        (value) => ({ value, error: null as string | null }),
+        (err: unknown) => ({ value: null, error: err instanceof Error ? err.message : "Roblox не ответил" }),
+      ),
+      BINDING_DONOR_BUDGET_MS,
+    );
+    if (donor?.value) {
+      const info = donor.value;
+      return {
+        info: {
+          name: info.name ?? "Gamepass",
+          price: info.price,
+          basePrice: info.basePriceInRobux ?? info.price,
+          sellerName: info.sellerName,
+          isForSale: info.isForSale,
+        },
+        reason: null,
+      };
+    }
+    reason = donor?.error ?? "донор не ответил вовремя";
+  }
+
+  const publicInfo = await withBudget(getGamepassById(gamepassId), BINDING_PUBLIC_BUDGET_MS);
+  if (publicInfo) {
+    return {
+      info: {
+        name: publicInfo.name ?? "Gamepass",
+        price: publicInfo.price,
+        basePrice: publicInfo.price,
+        sellerName: publicInfo.creatorName ?? null,
+        isForSale: publicInfo.isForSale !== false,
+      },
+      reason: null,
+    };
+  }
+  return { info: null, reason: reason ?? "Roblox не ответил ни через донора, ни публично" };
 }
 
 // Дописать аудит-строку к adminNote (обрезка до 2000, как в attach-gamepass);
@@ -270,7 +362,9 @@ export async function GET(req: NextRequest) {
     // и ранжируем по серьёзности уже в памяти.
     ordersPromise = (prisma as any).wbOrder
       .findMany({ where, orderBy, take: ATTENTION_TAKE, include: userInclude })
-      .then((rows: any[]) => rows.sort((a, b) => attentionRank(a) - attentionRank(b)));
+      // Ручной приоритет выше серьёзности: его для того и ставят руками.
+      .then((rows: any[]) => rows.sort((a, b) =>
+        (a.priorityAt ? 0 : 1) - (b.priorityAt ? 0 : 1) || attentionRank(a) - attentionRank(b)));
   } else if (tab === "AWAITING_LINK" && !q) {
     ordersPromise = fetchAwaitingLinkHybrid(where, skip, take, userInclude);
   } else {
@@ -488,20 +582,34 @@ function tabTotal(tab: string, counts: Record<string, number>): number {
 // остальные от самых старых (asc). Собирается на сервере, чтобы порядок
 // переживал пагинацию; окно страницы [skip, skip+take) режется по обеим частям.
 async function fetchAwaitingLinkHybrid(where: any, skip: number, take: number, include: any): Promise<any[]> {
-  const head: any[] = await (prisma as any).wbOrder.findMany({
-    where, orderBy: { createdAt: "desc" }, take: AWAITING_LINK_HEAD, include,
+  // ⚡ Поднятые руками идут перед всем остальным. Эта вкладка собирается не
+  // одним `orderBy`, а склейкой «свежие сверху + хвост от старых», поэтому
+  // приоритет приходится вносить сюда явно — иначе он работал бы во всех
+  // очередях, кроме этой, и правило «поднятый заказ первый» стало бы ложью.
+  const pinned: any[] = await (prisma as any).wbOrder.findMany({
+    where: { ...where, priorityAt: { not: null } },
+    orderBy: { priorityAt: "desc" },
+    take: AWAITING_LINK_HEAD,
+    include,
   });
-  const headSlice = head.slice(skip, skip + take);
-  const tailTake = take - headSlice.length;
-  if (tailTake <= 0) return headSlice;
+  const head: any[] = await (prisma as any).wbOrder.findMany({
+    where: pinned.length > 0 ? { ...where, id: { notIn: pinned.map(p => p.id) } } : where,
+    orderBy: { createdAt: "desc" },
+    take: AWAITING_LINK_HEAD,
+    include,
+  });
+  const prefix = [...pinned, ...head];
+  const prefixSlice = prefix.slice(skip, skip + take);
+  const tailTake = take - prefixSlice.length;
+  if (tailTake <= 0) return prefixSlice;
   const tail: any[] = await (prisma as any).wbOrder.findMany({
-    where: { ...where, id: { notIn: head.map(h => h.id) } },
+    where: { ...where, id: { notIn: prefix.map(h => h.id) } },
     orderBy: { createdAt: "asc" },
-    skip: Math.max(0, skip - head.length),
+    skip: Math.max(0, skip - prefix.length),
     take: tailTake,
     include,
   });
-  return [...headSlice, ...tail];
+  return [...prefixSlice, ...tail];
 }
 
 async function enrichVkUsers(orders: any[]) {
@@ -1256,6 +1364,36 @@ export async function POST(req: NextRequest) {
     });
     cachedCounts = null;
     return NextResponse.json({ ok: true, isFavorite: !order.isFavorite });
+  }
+
+  /* ── «⚡ Вперёд очереди»: ручной приоритет ────────────────────────────────
+     Очередь выкупа стоит по возрасту, и это правильный порядок по умолчанию.
+     Исключение — заказ, который надо закрыть вне очереди (доплата, спор на WB,
+     обещанный срок): до сих пор он жил в голове владельца и искался по коду.
+
+     Признак поверх статуса, как заморозка: заказ никуда не переезжает, меняется
+     только его место в сортировке (`orderByForTab`, голова обзора, выгрузка ID
+     закупщику, автовыкуп бота — все читают `priorityAt`). Хранится момент
+     нажатия, поэтому среди нескольких поднятых первым идёт поднятый последним.
+     ──────────────────────────────────────────────────────────────────────── */
+  if (action === "set-priority") {
+    // ❄️ Замороженный заказ выключен из очередей целиком — поднимать в них
+    // нечего, и «подняли, но он всё равно не выкупается» было бы враньём.
+    if (order.heldAt) return NextResponse.json({ error: heldRefusal(order.heldReason) }, { status: 409 });
+    // В «Готово» и «Отменено» порядок ничего не значит: там смотрят историю.
+    const QUEUEABLE = ["PENDING", "IN_PROGRESS", "ERROR", "AWAITING_GAMEPASS", "AWAITING_PAYMENT", "PAYMENT_PENDING"];
+    if (!QUEUEABLE.includes(order.status))
+      return NextResponse.json({ error: `Заказ в статусе ${order.status} не стоит в очереди — поднимать нечего` }, { status: 400 });
+
+    const on = body.priority !== false;
+    await (prisma as any).wbOrder.update({
+      where: { id: orderId },
+      data: on
+        ? { priorityAt: new Date(), priorityBy: actor.displayName }
+        : { priorityAt: null, priorityBy: null },
+    });
+    cachedCounts = null;
+    return NextResponse.json({ ok: true, priority: on, wbCode: order.wbCode });
   }
 
   if (action === "set-error") {
@@ -2119,35 +2257,38 @@ export async function POST(req: NextRequest) {
     // ── Проверка каждой части на живом Roblox ────────────────────────────────
     // Ровно те же три вопроса, что задаёт обычный выкуп, только про часть:
     // пасс продаётся, принадлежит нику заказа, стоит ровно `ceil(amount/0.7)`.
-    // Без этого разбиение стало бы дырой в обход прайс-гарда. Повторы одного
-    // пасса законны и проверяются на общих основаниях: цена у него одна, значит
-    // и номинал у всех его частей одинаковый — `buildSplitParts` это уже сверил.
+    // Повторы одного пасса законны и проверяются на общих основаниях: цена у
+    // него одна, значит и номинал у всех его частей одинаковый —
+    // `buildSplitParts` это уже сверил.
     const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
     const cookie = settings?.robloxCookie;
-    const checked: { gamepassId: string; amount: number; name: string; price: number }[] = [];
+    const checked: { gamepassId: string; amount: number; name: string; price: number | null }[] = [];
+    /** Части, про которые Roblox не ответил вообще ни по одному источнику. */
+    const unverified: string[] = [];
+    let unverifiedReason = "";
     // Один пасс может стоять в нескольких частях (у покупателя один пасс на
     // 1000, а заказ на 2000) — Roblox о нём спрашиваем один раз.
-    const resolved = new Map<string, ResolvedGamepass>();
+    const resolved = new Map<string, BindingInfo | null>();
     for (const part of parts) {
-      let info: ResolvedGamepass | undefined = resolved.get(part.gamepassId);
-      if (!info) {
-        try {
-          info = cookie
-            ? await resolveGamepassForBuyer(part.gamepassId, cookie)
-            : await resolveGamepass(part.gamepassId);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "Roblox не ответил";
-          return NextResponse.json({ error: `Геймпасс ${part.gamepassId}: ${msg}` }, { status: 502 });
-        }
+      let info: BindingInfo | null | undefined = resolved.get(part.gamepassId);
+      if (info === undefined) {
+        const attempt = await resolveGamepassForBinding(part.gamepassId, cookie);
+        info = attempt.info;
+        if (!info && attempt.reason) unverifiedReason = attempt.reason;
         resolved.set(part.gamepassId, info);
+      }
+      if (!info) {
+        if (!unverified.includes(part.gamepassId)) unverified.push(part.gamepassId);
+        checked.push({ gamepassId: part.gamepassId, amount: part.amount, name: "?", price: null });
+        continue;
       }
       if (!info.isForSale)
         return NextResponse.json({ error: `Геймпасс ${part.gamepassId} не выставлен на продажу` }, { status: 409 });
 
-      const { ok, expected } = partPriceMatches(part, info.price, info.basePriceInRobux);
+      const { ok, expected } = partPriceMatches(part, info.price, info.basePrice);
       if (!ok)
         return NextResponse.json({
-          error: `Геймпасс ${part.gamepassId}: цена ${info.basePriceInRobux ?? info.price} R$ ≠ ожидаемой ${expected} R$ для части на ${part.amount} R$`,
+          error: `Геймпасс ${part.gamepassId}: цена ${info.basePrice ?? info.price} R$ ≠ ожидаемой ${expected} R$ для части на ${part.amount} R$`,
         }, { status: 409 });
 
       if (!sellerMatchesOrder(order.robloxUsername, info.sellerName))
@@ -2155,7 +2296,7 @@ export async function POST(req: NextRequest) {
           error: `Геймпасс ${part.gamepassId} принадлежит ${info.sellerName}, а заказ на ${order.robloxUsername}`,
         }, { status: 409 });
 
-      checked.push({ gamepassId: part.gamepassId, amount: part.amount, name: info.name ?? "Gamepass", price: info.price });
+      checked.push({ gamepassId: part.gamepassId, amount: part.amount, name: info.name, price: info.price });
     }
 
     // Чужой заказ на том же пассе — это гонка за один и тот же геймпасс:
@@ -2182,9 +2323,15 @@ export async function POST(req: NextRequest) {
       parts.map((p) => [p.gamepassId, parts.filter((q) => q.gamepassId === p.gamepassId).length]),
     )].filter(([, n]) => n > 1);
     const line = `[РАЗБИВКА ${stamp}] ${parts.length} ч.: ` +
-      checked.map((c) => `${c.gamepassId} (${c.amount} R$ / ${c.price} R$)`).join(", ") +
+      checked.map((c) => `${c.gamepassId} (${c.amount} R$ / ${c.price ?? "цена ?"} R$)`).join(", ") +
       (repeats.length
         ? ` · повторы: ${repeats.map(([id, n]) => `${id} ×${n}`).join(", ")} — каждый с ДРУГОГО донора`
+        : "") +
+      // След обязателен: разбиение записано без подтверждения от Roblox, и
+      // единственная проверка цены и продавца у этих частей теперь — та, что
+      // сработает перед списанием робуксов.
+      (unverified.length
+        ? ` · БЕЗ ПРОВЕРКИ ${unverified.join(", ")} (${unverifiedReason}) — цену и продавца сверит выкуп`
         : "");
 
     await (prisma as any).$transaction([
@@ -2220,6 +2367,12 @@ export async function POST(req: NextRequest) {
       wbCode: order.wbCode,
       parts: checked,
       total: checked.reduce((sum, c) => sum + c.amount, 0),
+      // Экран обязан сказать это вслух: разбиение записано, но пассы никто не
+      // подтвердил. Молчаливое «готово» выглядело бы как обычная проверенная
+      // привязка.
+      warning: unverified.length
+        ? `Roblox не ответил про ${unverified.join(", ")} (${unverifiedReason}). Разбиение записано без проверки цены и продавца — их сверит выкуп.`
+        : null,
     });
   }
 

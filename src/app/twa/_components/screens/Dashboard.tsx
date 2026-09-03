@@ -16,6 +16,7 @@ import {
 import { C } from "../theme";
 import { ageColor, fmtAge } from "../age";
 import { haptic } from "../haptics";
+import type { FirstInLine } from "@/types/first-in-line";
 import type { WbDeliveryFocus } from "./WbDeliveryScreen";
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -66,6 +67,8 @@ interface DashData {
   errors: { count: number; oldestAt: string | null; first: string | null };
   awaitingLink: { total: number; stale: number; remindersDone: number; oldestAt: string | null; staleOldestAt: string | null };
   held: { count: number; codes: string[] };
+  /** ⚡ Первым делом: поднятые руками и прямые заказы. */
+  firstInLine: FirstInLine | null;
   inbox: { available: boolean; feedbacks: number; questions: number; total: number };
   dbs: DbsSnapshot | null;
   apiAvailable: boolean;
@@ -141,6 +144,7 @@ export default function Dashboard({
   const { buyout, errors, awaitingLink, held, inbox, dbs } = data;
   const totalCodes = data.codes.reduce((sum, code) => sum + code.count, 0);
   const activeLanes = buyout.lanes.filter(lane => lane.orders > 0);
+  const firstInLine = data.firstInLine?.rows ?? [];
   // «В боте» — не задача: покупатель уже с кодом идёт по нашей воронке, а
   // доставка WB к этому моменту закрыта (иначе гейт бы не ушёл). Решения
   // требует только незакрытая доставка или ход за нами.
@@ -247,6 +251,37 @@ export default function Dashboard({
 
         {buyout.orders === 0 && <div className="twa-till-empty">Очередь выкупа пуста</div>}
       </section>
+
+      {/* ── ⚡ Первым делом ───────────────────────────────────────────────
+          Поднятые кнопкой заказы и прямые. В очереди они и так наверху, но
+          наверху же стоит просто самый старый — без отдельного блока «подняли»
+          и «прямой» на главной не видно вовсе. Пусто — блока нет. */}
+      {firstInLine.length > 0 && (
+        <section className="twa-first">
+          <div className="twa-first-head">
+            <span>⚡ Первым делом</span>
+            <em>{robux(data.firstInLine!.gross)} R$ грязными</em>
+          </div>
+          {firstInLine.map(order => (
+            <button
+              key={order.id}
+              type="button"
+              className="twa-first-row twa-press-sm"
+              onClick={() => { haptic.select(); onOpenOrders?.(order.wbCode); }}
+            >
+              <span className={`twa-first-why ${order.reason === "pinned" ? "is-pinned" : "is-direct"}`}>
+                {order.reason === "pinned" ? "⚡" : "Прямой"}
+              </span>
+              <span className="twa-first-main">
+                <strong>{order.wbCode}</strong>
+                <small>{order.robloxUsername ?? "ник не указан"}</small>
+              </span>
+              <b className="twa-first-sum">{robux(order.gross)}</b>
+              <span className="twa-first-age" style={{ color: ageColor(order.since) }}>{fmtAge(order.since)}</span>
+            </button>
+          ))}
+        </section>
+      )}
 
       {/* ── Требует решения ──────────────────────────────────────────────── */}
       {(dbsNeedsDecision || errors.count > 0 || inbox.total > 0) ? (

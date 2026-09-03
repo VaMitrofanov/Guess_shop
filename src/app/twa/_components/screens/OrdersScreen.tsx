@@ -91,6 +91,9 @@ interface Order {
   heldAt: string | null;
   heldReason: string | null;
   heldBy: string | null;
+  /** ⚡ Поднят руками наверх очереди («выкупать первым»). Тоже поверх статуса. */
+  priorityAt?: string | null;
+  priorityBy?: string | null;
   isDirectOrder: boolean;
   isFavorite: boolean;
   paymentDetails: string | null;
@@ -1543,7 +1546,11 @@ function SplitModal({ order, token, onDone, onClose }: {
       const d = await r.json().catch(() => null);
       if (!r.ok) { haptic.notify("error"); toast(d?.error ?? "Ошибка", "error"); return; }
       haptic.notify("success");
-      toast(`🧩 Разбит на ${picked.length} — выкупай по частям`, "success");
+      // Сервер мог записать разбиение, не сумев подтвердить пассы у Roblox
+      // (лежит браузер выкупа и мост). Молчать об этом нельзя: цену и продавца
+      // у таких частей проверит только сам выкуп.
+      if (d?.warning) toast(`🧩 Разбит на ${picked.length}. ${d.warning}`, "error");
+      else toast(`🧩 Разбит на ${picked.length} — выкупай по частям`, "success");
       onDone();
       onClose();
     } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
@@ -1960,11 +1967,11 @@ function RejectModal({ order, onReject, onClose }: {
    ────────────────────────────────────────────────────────────────────────── */
 type MenuAction =
   | "edit" | "split" | "rebind" | "move"
-  | "error" | "hold" | "unhold" | "favorite" | "reject"
+  | "error" | "hold" | "unhold" | "favorite" | "priority" | "reject"
   | "purchase" | "refund" | "trace";
 
 function OrderMenuSheet({
-  open, order, passId, splitIds, grossAmount, canEdit, canSplit, canRefund, canMove, canPurchase, busy,
+  open, order, passId, splitIds, grossAmount, canEdit, canSplit, canRefund, canMove, canPurchase, canPrioritize, busy,
   onClose, onCopy, onPick,
 }: {
   open: boolean;
@@ -1977,6 +1984,7 @@ function OrderMenuSheet({
   canRefund: boolean;
   canMove: boolean;
   canPurchase: boolean;
+  canPrioritize: boolean;
   busy: boolean;
   onClose: () => void;
   onCopy: (text: string, label: string) => void;
@@ -2026,6 +2034,10 @@ function OrderMenuSheet({
         ? row("unhold", "❄️", "Разморозить", order.heldReason ?? undefined)
         : !["COMPLETED", "REJECTED"].includes(order.status) && row("hold", "❄️", "Заморозить — не выкупать")}
       {row("favorite", order.isFavorite ? "★" : "☆", order.isFavorite ? "Убрать из избранного" : "В избранное")}
+      {/* ⚡ Место в очереди — такой же признак поверх статуса, как заморозка:
+          заказ никуда не переезжает, он просто выкупается первым. */}
+      {canPrioritize && row("priority", "⚡", order.priorityAt ? "Убрать из первых" : "Вперёд очереди",
+        order.priorityAt ? "сейчас первый" : "выкупать первым")}
       {["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "AWAITING_PAYMENT", "PAYMENT_PENDING", "ERROR"].includes(order.status)
         && row("reject", "✕", "Отменить заказ", undefined, "red")}
 
@@ -2039,7 +2051,7 @@ function OrderMenuSheet({
 
 /* ───────────── OrderCard — compact layout ───────────── */
 function OrderCard({
-  order, token, currentTab, exiting, onRunAction, onSaveNote, onPurchaseDone, onToggleFavorite, onMoved, live,
+  order, token, currentTab, exiting, onRunAction, onSaveNote, onPurchaseDone, onToggleFavorite, onTogglePriority, onMoved, live,
 }: {
   order: Order;
   token: string;
@@ -2049,6 +2061,8 @@ function OrderCard({
   onSaveNote: (note: string) => Promise<ActionResult>;
   onPurchaseDone?: () => void;
   onToggleFavorite: () => void;
+  /** Нет у закрытых заказов: в «Готово» очереди нет и поднимать нечего. */
+  onTogglePriority?: () => void;
   onMoved: () => void;
   /** Прайс-гард (Ш4): живая цена ГП — бейдж расхождения с номиналом. */
   live?: GpLiveInfo;
@@ -2153,6 +2167,10 @@ function OrderCard({
   // список пассов покупателя, из которых собираются части.
   const isSplittable = ["PENDING", "IN_PROGRESS", "AWAITING_GAMEPASS", "ERROR"].includes(order.status)
     && !!(order.robloxUsername || order.probableNick);
+  // ⚡ Поднять можно то, что стоит в очереди. Замороженный заказ выключен из
+  // очередей целиком — «подняли, но не выкупается» было бы враньём.
+  const canPrioritize = !!onTogglePriority && !order.heldAt
+    && ["PENDING", "IN_PROGRESS", "ERROR", "AWAITING_GAMEPASS", "AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status);
   const payment = order.paymentAttempts?.[0];
   // Возврат — любому заказу с подтверждённым платежом T-Bank, а не только
   // SITE: с эквайрингом в ботах (orderSource=DIRECT) деньги приходят тем же
@@ -2227,6 +2245,10 @@ function OrderCard({
         </b>
         <small style={{ color: isDoneState ? C.textTertiary : ageColor(timeRef) }}>{fmtAge(timeRef)}</small>
         {showBell && <span className="twa-oc-bell">🔔 {reminders}/3</span>}
+        {/* ⚡ виден прямо в ленте: иначе «подняли наверх» проверяется только
+            тем, что заказ оказался сверху, — а это же место занимает и просто
+            самый старый. */}
+        {order.priorityAt && <span className="twa-oc-prio" title="Выкупать первым">⚡ первый</span>}
         {/* Код ВБ — якорь заказа: его называют в чате и по нему ищут. Крупный,
             всегда на одном месте, тап копирует. */}
         <button
@@ -2322,6 +2344,7 @@ function OrderCard({
       canRefund={canRefund}
       canMove={showMoveBtn}
       canPurchase={!order.heldAt && ["PENDING", "IN_PROGRESS", "ERROR"].includes(order.status) && (!!order.gamepassUrl || split.length > 0)}
+      canPrioritize={canPrioritize}
       busy={primaryBusy}
       onClose={() => setMenuOpen(false)}
       onCopy={(text, label) => copyAnd(text, "pass", label)}
@@ -2339,6 +2362,7 @@ function OrderCard({
           case "reject":   inSheet(() => setRejectOpen(true)); break;
           case "trace":    setExpanded(true); break;
           case "favorite": onToggleFavorite(); break;
+          case "priority": onTogglePriority?.(); break;
           case "error":    void onRunAction("set-error"); break;
           case "unhold":   void onRunAction("unhold"); break;
           case "purchase": void runPurchase(); break;
@@ -3586,6 +3610,44 @@ export default function OrdersScreen({
     }
   }, [token, filter, isAttentionView, onActionDone]);
 
+  /* ⚡ «Вперёд очереди». Признак поверх статуса, как заморозка: заказ никуда не
+     переезжает, меняется только его место в сортировке. Поэтому счётчики вкладок
+     не трогаем — двигаем саму карточку, чтобы поднятие было видно сразу, а не
+     после следующей загрузки списка (сервер вернёт ровно этот же порядок). */
+  const togglePriority = useCallback(async (order: Order) => {
+    const on = !order.priorityAt;
+    haptic.impact("medium");
+    const stamp = new Date().toISOString();
+    setAllOrders(prev => {
+      const patched = prev.map(o => (o.id === order.id ? { ...o, priorityAt: on ? stamp : null } : o));
+      if (!on) return patched;
+      const target = patched.find(o => o.id === order.id);
+      return target ? [target, ...patched.filter(o => o.id !== order.id)] : patched;
+    });
+
+    try {
+      const r = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set-priority", orderId: order.id, priority: on }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setAllOrders(prev => prev.map(o => (o.id === order.id ? { ...o, priorityAt: order.priorityAt ?? null } : o)));
+        haptic.notify("error");
+        toast(d.error ?? "Ошибка", "error");
+        return;
+      }
+      haptic.notify("success");
+      toast(on ? `⚡ ${order.wbCode} — выкупать первым` : `${order.wbCode} вернулся в общую очередь`, "success");
+      onActionDone?.();
+    } catch {
+      setAllOrders(prev => prev.map(o => (o.id === order.id ? { ...o, priorityAt: order.priorityAt ?? null } : o)));
+      haptic.notify("error");
+      toast("Ошибка сети", "error");
+    }
+  }, [token, onActionDone]);
+
   const handlePurchaseDone = useCallback((order: Order) => {
     const fromTab = orderToTab(order);
     setAllOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: "COMPLETED" as any } : o));
@@ -3966,6 +4028,7 @@ export default function OrdersScreen({
                     onSaveNote={(note) => saveNote(order.id, note)}
                     onPurchaseDone={() => handlePurchaseDone(order)}
                     onToggleFavorite={() => toggleFavorite(order)}
+                    onTogglePriority={() => togglePriority(order)}
                     onMoved={() => handleMoved(order)}
                   />
                 </Fragment>

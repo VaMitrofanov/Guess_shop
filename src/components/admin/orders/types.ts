@@ -18,6 +18,9 @@ export interface AdminOrder {
   heldAt: string | null;
   heldReason: string | null;
   heldBy: string | null;
+  /** ⚡ Поднят руками наверх очереди («выкупать первым»). Поверх статуса. */
+  priorityAt?: string | null;
+  priorityBy?: string | null;
   isDirectOrder: boolean;
   isFavorite: boolean;
   paidAt: string | null;

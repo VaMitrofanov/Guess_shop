@@ -137,11 +137,15 @@ export default function SplitDialog({
     if (!canSave) return;
     setSaving(true);
     try {
-      await post({
+      const data = await post({
         action: "set-gamepass-split",
         parts: picked.map(c => ({ gamepassId: c.gamepassId, amount: c.amount })),
       });
-      onToast(`🧩 Разбит на ${picked.length} — выкупай по частям`);
+      // Разбиение могло записаться без подтверждения пассов у Roblox (лежит
+      // браузер выкупа и мост). Это не отказ, но и не обычное «готово»: цену и
+      // продавца у таких частей проверит только сам выкуп.
+      if (data?.warning) onToast(`🧩 Разбит на ${picked.length}. ${data.warning}`, true);
+      else onToast(`🧩 Разбит на ${picked.length} — выкупай по частям`);
       onChanged();
       onClose();
     } catch (error) {

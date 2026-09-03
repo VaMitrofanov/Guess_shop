@@ -1,3 +1,4 @@
+import type { FirstInLine } from "@/types/first-in-line";
 import type { OrderSlicesPayload } from "@/lib/order-slices";
 import type { WbDeliveryQueueSnapshot } from "@/types/wb-delivery";
 
@@ -23,6 +24,8 @@ export interface OverviewQueueOrder {
   /** Части разбитого заказа: сколько всего и сколько уже выкуплено. */
   splitTotal: number;
   splitDone: number;
+  /** Поднят руками наверх очереди («выкупать первым»). */
+  priority: boolean;
 }
 
 export interface OverviewDiff {
@@ -62,6 +65,8 @@ export interface AdminOverview {
   queue: OverviewQueueOrder[];
   /** Сколько заказов в очереди всего — голова может быть её частью. */
   queueTotal: number;
+  /** «Первым делом»: поднятые руками ⚡ и прямые заказы. `null` — запрос упал. */
+  firstInLine: FirstInLine | null;
   held: { count: number; codes: string[] };
   diff: OverviewDiff;
   health: OverviewHealth;

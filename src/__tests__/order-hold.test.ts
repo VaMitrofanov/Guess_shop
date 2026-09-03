@@ -37,7 +37,9 @@ describe("границы очередей", () => {
   });
 
   it("свежая заморозка сверху", () => {
-    expect(orderByForTab("HELD")).toEqual({ heldAt: "desc" });
+    // Массив, а не объект: с 03.09 порядок собирается списком ключей —
+    // у рабочих очередей первым идёт ручной приоритет (order-priority.test).
+    expect(orderByForTab("HELD")).toEqual([{ heldAt: "desc" }]);
   });
 });
 

@@ -262,6 +262,28 @@
 .rowBusy { opacity: .5; pointer-events: none; }
 .rowLeaving { opacity: 0; transform: translateX(14px); transition: opacity .18s ease, transform .18s ease; }
 
+/* ── ⚡ Вперёд очереди ───────────────────────────────────────────────────────
+   Поднятый заказ обязан быть узнаваем в ленте с одного взгляда: он стоит там
+   же, где стоял бы самый старый, и без метки эти два случая неразличимы.
+   Жёлтая полоса слева — тот же приём, что у замороженного (лента читается
+   краем глаза), но своим цветом: заморозка ледяная, приоритет жёлтый.
+   ────────────────────────────────────────────────────────────────────────── */
+/* Полоса рисуется псевдоэлементом, а не `box-shadow`: тень слева уже занята
+   курсором клавиатуры (`.rowCursor` / `.cardCursor`), и одно перебило бы
+   другое — поднятый заказ под курсором терял бы либо метку, либо курсор. */
+.rowPriority::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--o-yellow); border-radius: 0 2px 2px 0; pointer-events: none;
+}
+/* У карточки полоса не нужна — у неё есть рамка, и жёлтой рамки достаточно;
+   3 px у скруглённого угла выглядели бы обрезком. */
+.cardPriority { border-color: rgba(255, 214, 10, .42); }
+.prio { margin-right: 5px; font-style: normal; color: var(--o-yellow); }
+.prioTag {
+  color: var(--o-yellow); font-size: 11px; font-weight: 700; letter-spacing: .01em; white-space: nowrap;
+}
+.miniPrio { color: #ffe58a; border-color: rgba(255, 214, 10, .35); background: rgba(255, 214, 10, .14); }
+
 .check {
   width: 17px;
   height: 17px;
@@ -412,6 +434,7 @@
 .btnPrimary { color: #fff; border-color: transparent; background: linear-gradient(135deg, #8c73ff, #587dff); }
 .btnPrimary kbd { color: rgba(255, 255, 255, .7); }
 .btnGreen { color: #bff5d3; border-color: rgba(64, 212, 126, .32); background: rgba(64, 212, 126, .15); }
+.btnPrio { color: #ffe58a; border-color: rgba(255, 214, 10, .35); background: rgba(255, 214, 10, .14); }
 .btnMono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 500; letter-spacing: .04em; }
 
 .tabs { display: flex; gap: 18px; margin-top: 14px; padding: 0 clamp(14px, 2vw, 22px); border-bottom: 1px solid var(--o-line); overflow-x: auto; scrollbar-width: none; }
@@ -431,6 +454,7 @@
 .boxHead em { margin-left: auto; font-style: normal; font-size: 12px; font-weight: 650; letter-spacing: 0; text-transform: none; }
 .boxRed { border-color: rgba(255, 107, 96, .3); background: rgba(255, 107, 96, .07); }
 .boxIce { border-color: rgba(100, 210, 255, .28); background: rgba(100, 210, 255, .06); }
+.boxPrio { border-color: rgba(255, 214, 10, .3); background: rgba(255, 214, 10, .07); }
 
 .events { display: flex; flex-direction: column; }
 .event { display: grid; grid-template-columns: 92px 12px minmax(0, 1fr); gap: 10px; padding: 6px 0; font-size: 13px; }
