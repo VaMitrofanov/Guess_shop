@@ -52,6 +52,10 @@ export interface MatchedOrder {
   client: string | null;
   createdAt: string | null;
   pendingAt: string | null;
+  /** Заметка целиком: правится только человеческая часть, аудит сохраняется. */
+  adminNote?: string | null;
+  /** Источник заказа — тоже поле карточки, а не отдельная операция. */
+  orderSource?: string | null;
 }
 
 interface ManualValidation {
@@ -100,6 +104,27 @@ const STATUS_LABEL: Record<string, { label: string; color: string }> = {
   AWAITING_PAYMENT: { label: "Ждёт оплату",  color: C.blue },
   PAYMENT_PENDING:  { label: "Ждёт оплату",  color: C.blue },
 };
+
+/** Человеческая часть заметки: машинные строки начинаются с `[МЕТКА]`.
+ *  Правило общее с сайтом и с блоком «Первым делом» — иначе одно и то же поле
+ *  на телефоне и на сайте показывало бы разный текст. */
+function humanNoteOf(note: string | null | undefined): string {
+  return (note ?? "")
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith("["))
+    .join(" · ");
+}
+
+/** Источники заказа для правки. `WB_DBS` обязателен: заказ из доставки иначе
+ *  «чинился» на неверный источник. */
+const SOURCE_OPTIONS = [
+  ["WB", "Wildberries"],
+  ["WB_DBS", "WB DBS"],
+  ["DIRECT", "Прямой"],
+  ["AVITO", "Авито"],
+  ["MANUAL", "Ручной"],
+] as const;
 
 function statusMeta(status: string) {
   return STATUS_LABEL[status] ?? { label: status, color: C.textSecondary };
@@ -204,7 +229,7 @@ export default function OrderSheet({
   const [amount, setAmount] = useState(initialAmount ? String(initialAmount) : "");
   const [nick, setNick] = useState(initialNick ?? "");
   const [gpInput, setGpInput] = useState(initialGamepassUrl ?? "");
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(humanNoteOf(initialTarget?.adminNote));
   /** Номер заказа WB/DBS: четвёртый способ назвать тот же заказ. */
   const [wbOrderId, setWbOrderId] = useState(initialWbOrderId ?? "");
   /** Форма заведения клиента, которого нет в базе. */
@@ -224,6 +249,8 @@ export default function OrderSheet({
   const [selectedDirectPass, setSelectedDirectPass] = useState<FoundPass | null>(null);
   const [gpSearching, setGpSearching] = useState(false);
   const [gpSearchMsg, setGpSearchMsg] = useState("");
+  /** Источник заказа в режиме правки (в создании он выводится из кода). */
+  const [source, setSource] = useState<string>(initialTarget?.orderSource ?? "WB");
   const [dup, setDup] = useState<{ wbCode: string; status: string } | null>(null);
   /** Совпадения, которые менеджер осознанно проигнорировал: «всё равно создать». */
   const [ignored, setIgnored] = useState<Set<string>>(new Set());
@@ -236,6 +263,8 @@ export default function OrderSheet({
   function switchToOrder(found: MatchedOrder) {
     haptic.impact("light");
     setTarget(found);
+    setNote(humanNoteOf(found.adminNote));
+    setSource(found.orderSource ?? "WB");
     setWbCode("");
     setAmount(String(found.amount));
     setNick(found.robloxUsername ?? "");
@@ -334,12 +363,16 @@ export default function OrderSheet({
   const dirtyEdit = editing && !!target && (
     (!target.isDirectOrder && (Number(amount) || 0) !== target.amount) ||
     gpInput.trim() !== (target.gamepassUrl ?? "") ||
-    nick.trim() !== (target.robloxUsername ?? "")
+    nick.trim() !== (target.robloxUsername ?? "") ||
+    note.trim() !== humanNoteOf(target.adminNote) ||
+    source !== (target.orderSource ?? "WB")
   );
   const editChanges = editing && target ? [
     !target.isDirectOrder && (Number(amount) || 0) !== target.amount ? "номинал" : null,
     nick.trim() !== (target.robloxUsername ?? "") ? "ник" : null,
     gpInput.trim() !== (target.gamepassUrl ?? "") ? "геймпасс" : null,
+    note.trim() !== humanNoteOf(target.adminNote) ? "заметка" : null,
+    source !== (target.orderSource ?? "WB") ? "источник" : null,
   ].filter(Boolean) as string[] : [];
 
   const missing: string[] = [];
@@ -440,6 +473,10 @@ export default function OrderSheet({
         action: "edit-order", orderId: target.orderId,
         gamepassUrl: gpInput.trim(),
         robloxUsername: nick.trim(),
+        // Заметка и источник правятся тем же запросом: две правки одного
+        // заказа двумя вызовами дают две строки аудита и шанс забыть вторую.
+        note: note.trim(),
+        orderSource: source,
       };
       if (!target.isDirectOrder) payload.amount = Number(amount) || 0;
       if (force) payload.force = true;
@@ -940,9 +977,46 @@ export default function OrderSheet({
             )}
           </div>
 
-          {/* Заметка и уведомление — только при создании. */}
-          {!editing && (
-            <input value={note} onChange={e => setNote(e.target.value)} placeholder="Заметка (опц.)" style={inputStyle} />
+          {/* Заметка есть и в правке: карточка заказа правится одним окном, а
+              не «поля здесь, заметка в другом месте». Машинный аудит при этом
+              сохраняется — сервер получает только человеческую часть. */}
+          <input
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            disabled={frozen}
+            placeholder={editing ? "Заметка: зачем правим, что не так" : "Заметка (опц.)"}
+            style={{ ...inputStyle, opacity: frozen ? 0.5 : 1 }}
+          />
+          {editing && humanNoteOf(target?.adminNote) !== (target?.adminNote ?? "").trim() && (
+            <div style={{ fontSize: 12, color: C.textTertiary, marginTop: -4 }}>
+              Машинный аудит заметки сохранится
+            </div>
+          )}
+
+          {/* Источник — поле карточки, а не отдельная операция. */}
+          {editing && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontSize: 12, color: C.textTertiary }}>Источник заказа</span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {SOURCE_OPTIONS.map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className="twa-press-sm"
+                    disabled={frozen}
+                    onClick={() => { haptic.select(); setSource(id); }}
+                    style={{
+                      padding: "8px 12px", borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: "pointer",
+                      border: `1px solid ${source === id ? C.accent : "transparent"}`,
+                      background: source === id ? `${C.accent}22` : C.elevated,
+                      color: source === id ? C.accent : C.textSecondary,
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
           {!editing && !isDirect && client && (
             <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", userSelect: "none" }}>

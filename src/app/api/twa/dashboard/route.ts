@@ -7,6 +7,9 @@ import { BUYOUT_LANE_SQL, BUYOUT_QUEUE_SQL, ATTENTION_BUYOUT_HOURS, NEW_CUTOFF_H
 import { NOT_HELD_SQL } from "@/lib/order-hold";
 import { loadFirstInLine } from "@/lib/first-in-line";
 import { loadWbDeliveryQueueSnapshot } from "@/lib/wb-delivery-workflow";
+import { loadOverviewDiff } from "@/lib/admin-overview";
+import { loadOverviewFeed } from "@/lib/overview-feed";
+import { touchAdminPresence } from "@/lib/admin-presence";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Главная TWA отвечает на один вопрос: что выкупать сейчас и сколько это стоит.
@@ -65,11 +68,31 @@ async function getDonorSnapshot() {
 }
 
 export async function GET(req: NextRequest) {
-  if (!await extractTwaUser(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const twaUser = await extractTwaUser(req);
+  if (!twaUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const withDonor = req.nextUrl.searchParams.get("donor") === "1";
 
-  const [stats, codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, feedback, donor, dbs, firstInLine] = await Promise.all([
+  /* ── Смена: «Пока вас не было» ──────────────────────────────────────────
+     Отметка присутствия ставится РОВНО ОДИН РАЗ — на первой загрузке экрана,
+     когда клиент ещё не знает своего окна. Дальше он присылает `shiftSince`
+     сам, и живой опрос раз в 30 секунд окно не двигает: иначе блок схлопывался
+     бы в ноль ровно тогда, когда его читают (та же причина, что на сайте).
+     Пропуск TWA выдаётся только Telegram-админу из `ADMIN_IDS`, поэтому
+     присутствие пишется на тот же Telegram ID, что и на сайте: заходы с
+     телефона и с ноутбука — это одна смена одного человека. */
+  const sinceParam = req.nextUrl.searchParams.get("shiftSince");
+  const sinceDate = sinceParam ? new Date(sinceParam) : null;
+  const shiftWindow = sinceDate && Number.isFinite(sinceDate.getTime())
+    ? { windowStartAt: sinceDate, firstVisit: false }
+    : await touchAdminPresence({
+      via: "telegram",
+      telegramId: String(twaUser.userId),
+      userId: null,
+      displayName: twaUser.firstName || `TG ${twaUser.userId}`,
+    }).catch(() => null);
+
+  const [stats, codes, laneRows, linkRows, errorRows, firstError, heldCount, heldOrders, feedback, donor, dbs, firstInLine, shiftData] = await Promise.all([
     getStats30d(),
     prisma.wbCode.groupBy({ by: ["denomination"], _count: { _all: true }, where: { isUsed: false, isTest: false } }),
 
@@ -137,6 +160,16 @@ export async function GET(req: NextRequest) {
     // «Обзора» на сайте — иначе две главные показывали бы разные списки того,
     // что «выкупать первым».
     loadFirstInLine().catch(() => null),
+
+    // Смена: диф и лента считаются теми же загрузчиками, что на сайте. Телефон
+    // и ноутбук обязаны показывать одну и ту же смену — расхождение здесь
+    // читалось бы как «на сайте видно больше».
+    shiftWindow
+      ? Promise.all([
+        loadOverviewDiff(shiftWindow.windowStartAt).catch(() => null),
+        loadOverviewFeed(shiftWindow.windowStartAt).catch(() => []),
+      ])
+      : Promise.resolve(null),
   ]);
 
   const LANES = ["WB", "WB_DBS", "DIRECT"] as const;
@@ -159,6 +192,21 @@ export async function GET(req: NextRequest) {
 
   const link = linkRows[0] ?? { total: 0, stale: 0, remindersDone: 0, oldestAt: null, staleOldestAt: null };
   const errors = errorRows[0] ?? { count: 0, oldestAt: null };
+
+  const [shiftDiff, shiftFeed] = shiftData ?? [null, []];
+  if (shiftDiff) {
+    // Очередь «было → стало» знает не диф, а срез очереди: здесь он уже посчитан.
+    shiftDiff.queueNow = sum(lane => lane.orders);
+    shiftDiff.queueBefore = Math.max(0, shiftDiff.queueNow + shiftDiff.done - shiftDiff.queued);
+  }
+  const shift = shiftWindow && shiftDiff
+    ? {
+      since: shiftWindow.windowStartAt.toISOString(),
+      firstVisit: shiftWindow.firstVisit,
+      diff: shiftDiff,
+      feed: shiftFeed,
+    }
+    : null;
 
   const todayStr = new Date().toISOString().split("T")[0];
   const weekAgo  = Date.now() - 7 * 864e5;
@@ -225,6 +273,7 @@ export async function GET(req: NextRequest) {
       codes: heldOrders.map(order => order.wbCode),
     },
     firstInLine,
+    shift,
     donorCoverage,
     inbox,
     dbs,

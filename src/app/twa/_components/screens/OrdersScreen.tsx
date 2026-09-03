@@ -4239,6 +4239,8 @@ function orderToTarget(order: Order): MatchedOrder {
       : order.user.name ?? (order.user.tgId ? `TG ${order.user.tgId}` : order.user.vkId ? `VK ${order.user.vkId}` : null),
     createdAt: order.createdAt,
     pendingAt: order.pendingAt,
+    adminNote: order.adminNote,
+    orderSource: order.orderSource,
   };
 }
 

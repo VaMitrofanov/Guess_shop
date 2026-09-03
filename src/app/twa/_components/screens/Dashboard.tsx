@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronRight,
   CircleAlert,
@@ -17,6 +17,7 @@ import { C } from "../theme";
 import { ageColor, fmtAge } from "../age";
 import { haptic } from "../haptics";
 import type { FirstInLine } from "@/types/first-in-line";
+import type { OverviewDiff, OverviewFeedRow } from "@/types/admin-overview";
 import type { WbDeliveryQueueSnapshot } from "@/types/wb-delivery";
 import type { WbDeliveryFocus } from "./WbDeliveryScreen";
 
@@ -64,6 +65,8 @@ interface DashData {
   /** ⚡ Первым делом: поднятые руками и прямые заказы. */
   firstInLine: FirstInLine | null;
   inbox: { available: boolean; feedbacks: number; questions: number; total: number };
+  /** Смена: что случилось с прошлого захода этого админа. `null` — окно не собралось. */
+  shift: { since: string; firstVisit: boolean; diff: OverviewDiff; feed: OverviewFeedRow[] } | null;
   dbs: DbsSnapshot | null;
   apiAvailable: boolean;
   tokenPresent?: boolean;
@@ -75,6 +78,9 @@ const LANE_META: Record<Lane["id"], { label: string; color: string }> = {
   WB_DBS: { label: "WB DBS",      color: C.blue },
   DIRECT: { label: "Прямые",      color: C.accent },
 };
+
+/** Как часто главная обновляется сама, пока экран на виду (решение О4). */
+const LIVE_POLL_MS = 30_000;
 
 /** Этап DBS → вкладка очереди доставки, которую открывает тап по нему. */
 const STAGE_FOCUS: Record<string, WbDeliveryFocus> = {
@@ -118,12 +124,28 @@ export default function Dashboard({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
+  /** Когда данные последний раз пришли с сервера — из этого «живая · N с». */
+  const [syncedAt, setSyncedAt] = useState(() => Date.now());
+  const [liveAge, setLiveAge] = useState(0);
+  /* Окно смены держит клиент: сервер ставит отметку присутствия только на
+     первой загрузке, а живой опрос присылает окно обратно. Иначе обновление
+     раз в 30 секунд схлопывало бы «Пока вас не было» в ноль. */
+  const shiftSince = useRef<string | null>(null);
 
   const load = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
     try {
-      const response = await fetch("/api/twa/dashboard", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
-      if (response.ok) setData(await response.json() as DashData);
+      const url = shiftSince.current
+        ? `/api/twa/dashboard?shiftSince=${encodeURIComponent(shiftSince.current)}`
+        : "/api/twa/dashboard";
+      const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
+      if (response.ok) {
+        const next = await response.json() as DashData;
+        if (next.shift?.since) shiftSince.current = next.shift.since;
+        setData(next);
+        setSyncedAt(Date.now());
+        setLiveAge(0);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -131,6 +153,24 @@ export default function Dashboard({
   }, [token]);
 
   useEffect(() => { void load(); }, [load]);
+
+  /* Живое обновление — раз в 30 секунд и только пока экран на виду (решение О4
+     от 03.09.2026). Свёрнутое приложение сервер не дёргает. */
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  useEffect(() => {
+    const tick = window.setInterval(() => {
+      setLiveAge(Math.round((Date.now() - syncedAt) / 1000));
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - syncedAt < LIVE_POLL_MS) return;
+      void loadRef.current(false);
+    }, 1000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && Date.now() - syncedAt >= LIVE_POLL_MS) void loadRef.current(false);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { window.clearInterval(tick); document.removeEventListener("visibilitychange", onVisible); };
+  }, [syncedAt]);
 
   if (loading) return <Skeleton />;
   if (!data) return <ErrorState onRetry={() => void load(true)} />;
@@ -286,7 +326,14 @@ export default function Dashboard({
                 Если доставка закрыта, но ход за нами (проверка, полученный код,
                 готовый гейт) — говорим об этом, а не о доставке. */}
             {dbs && dbsNeedsDecision && (
-              <button type="button" className="twa-inset-row twa-press-sm" onClick={() => { haptic.select(); onOpenDelivery?.(null); }}>
+              /* Ведём в ту очередь, о которой строка и говорит: «наш ход» — в
+                 «Закрыть на WB», ожидание покупателя — в «Ждут код». Общий
+                 список заставлял искать те же два заказа глазами. */
+              <button
+                type="button"
+                className="twa-inset-row twa-press-sm"
+                onClick={() => { haptic.select(); onOpenDelivery?.(dbs.needsUs > 0 ? "readyReceive" : "waitingCode"); }}
+              >
                 <span className="twa-result-icon is-delivery"><Truck size={21} /></span>
                 <div>
                   {/* Заголовок называет того, за кем ход: «закрыть на WB» в
@@ -426,6 +473,13 @@ export default function Dashboard({
         )}
       </div>
 
+      {/* ── Пока вас не было ──────────────────────────────────────────────
+          Тот же блок, что на сайте, в формате телефона: две вкладки вместо
+          трёх (нити на 390 px читаются хуже ленты) и никаких таблиц. Окно —
+          от прошлого захода ЭТОГО админа, общее с сайтом: заход с ноутбука и
+          с телефона — одна смена одного человека. */}
+      {data.shift && <ShiftBlock shift={data.shift} dbs={dbs} stale={awaitingLink.stale} liveAge={liveAge} />}
+
       <button type="button" className="twa-primary-row twa-press" onClick={() => { haptic.select(); onCreateOrder?.("manual"); }}>
         <Plus size={19} /> Новый заказ
       </button>
@@ -434,6 +488,207 @@ export default function Dashboard({
         Неделя · {rub(data.week.sum)} · {data.week.orders} {plural(data.week.orders, "заказ", "заказа", "заказов")} · {totalCodes} WB-{plural(totalCodes, "код", "кода", "кодов")} на складе
       </div>
     </div>
+  );
+}
+
+/** «13 ч 51 мин» — сколько админа не было. */
+function awayLabel(sinceIso: string): string {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(sinceIso).getTime()) / 60_000));
+  if (mins < 60) return `${mins} мин`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return mins % 60 === 0 ? `${hours} ч` : `${hours} ч ${mins % 60} мин`;
+  const days = Math.floor(hours / 24);
+  return `${days} ${plural(days, "день", "дня", "дней")}`;
+}
+
+function hhmm(iso: string) {
+  return new Intl.DateTimeFormat("ru-RU", { timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+}
+
+/** Кто сделал ход: значок и цвет те же, что в ленте на сайте. */
+const ACTOR: Record<OverviewFeedRow["actor"], { mark: string; color: string }> = {
+  us:    { mark: "М",  color: C.green },
+  buyer: { mark: "П",  color: C.blue },
+  bot:   { mark: "Б",  color: C.accent },
+  wb:    { mark: "WB", color: C.yellow },
+};
+
+/* ── «Пока вас не было» на телефоне ───────────────────────────────────────
+   Главная TWA отвечала только на «что выкупать сейчас». Второй вопрос смены —
+   «что случилось, пока меня не было» — жил только на сайте, и админ с телефона
+   его не видел вовсе. Здесь тот же диф и та же лента, но в формате телефона:
+   итог тремя числами, очаги застрявшего строками и лента с временем. */
+function ShiftBlock({
+  shift, dbs, stale, liveAge,
+}: {
+  shift: NonNullable<DashData["shift"]>;
+  dbs: DbsSnapshot | null;
+  stale: number;
+  liveAge: number;
+}) {
+  const [tab, setTab] = useState<"sum" | "feed">("sum");
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const { diff, feed } = shift;
+  const queueDelta = diff.queueBefore - diff.queueNow;
+
+  const stuck: { key: string; icon: string; text: string; hint: string }[] = [];
+  if (dbs && dbs.unclosed > 0) {
+    stuck.push({
+      key: "dbs",
+      icon: "⏰",
+      text: `${dbs.unclosed} ${plural(dbs.unclosed, "заказ WB ждёт", "заказа WB ждут", "заказов WB ждут")} закрытия доставки`,
+      hint: dbs.overdue > 0 ? `${dbs.overdue} просрочено по сроку WB` : "ход за покупателем — ждём код",
+    });
+  }
+  if (dbs && dbs.funnel.notActivated > 0) {
+    stuck.push({
+      key: "gate",
+      icon: "📮",
+      text: `${dbs.funnel.notActivated} ${plural(dbs.funnel.notActivated, "код не открыт", "кода не открыты", "кодов не открыты")}`,
+      hint: dbs.funnel.notActivatedOldestAt ? `старейшему ${fmtAge(dbs.funnel.notActivatedOldestAt)}` : "напоминания кончились",
+    });
+  }
+  if (stale > 0) {
+    stuck.push({
+      key: "stale",
+      icon: "🧷",
+      text: `${stale} ${plural(stale, "висяк", "висяка", "висяков")} без ссылки`,
+      hint: "дольше двух недель · бот отмолчал",
+    });
+  }
+
+  return (
+    <section className="twa-shift">
+      <div className="twa-shift-head">
+        <span>Пока вас не было</span>
+        <em>{shift.firstVisit ? "первый заход · сутки" : awayLabel(diff.since)}</em>
+        <b className="twa-shift-live">● {liveAge < 60 ? `${liveAge} с` : `${Math.floor(liveAge / 60)} мин`}</b>
+      </div>
+
+      <div className="twa-shift-tabs">
+        <button type="button" className={tab === "sum" ? "is-on" : ""} onClick={() => { haptic.select(); setTab("sum"); }}>Сводка</button>
+        <button type="button" className={tab === "feed" ? "is-on" : ""} onClick={() => { haptic.select(); setTab("feed"); }}>Лента</button>
+      </div>
+
+      {tab === "sum" ? (
+        <>
+          <div className="twa-shift-tiles">
+            <div>
+              <span>Очередь</span>
+              <strong>
+                {robux(diff.queueBefore)} → {robux(diff.queueNow)}
+                {queueDelta !== 0 && (
+                  <i style={{ color: queueDelta > 0 ? C.green : C.orange }}>
+                    {queueDelta > 0 ? `−${queueDelta}` : `+${-queueDelta}`}
+                  </i>
+                )}
+              </strong>
+            </div>
+            <div>
+              <span>Ушло с доноров</span>
+              <strong>{robux(diff.doneGross)}<small>R$</small></strong>
+            </div>
+            <div>
+              <span>Пришло</span>
+              <strong>{robux(diff.paymentsRubles)}<small>₽</small></strong>
+            </div>
+          </div>
+
+          {diff.done > 0 && (
+            <div className="twa-shift-row">
+              <i style={{ color: C.green }}>✓</i>
+              <span>
+                <b>{diff.done} {plural(diff.done, "заказ выкуплен", "заказа выкуплено", "заказов выкуплено")}</b> · {robux(diff.doneClean)} R$ клиентам
+                <small>{diff.doneCodes.slice(0, 4).join(" · ")}{diff.doneCodes.length > 4 ? ` и ещё ${diff.doneCodes.length - 4}` : ""}</small>
+              </span>
+              {diff.doneFirstAt && diff.doneLastAt && <time>{hhmm(diff.doneFirstAt)}→{hhmm(diff.doneLastAt)}</time>}
+            </div>
+          )}
+
+          {diff.arrived > 0 && (
+            <div className="twa-shift-row">
+              <i style={{ color: C.blue }}>+</i>
+              <span>
+                <b>{diff.arrived} {plural(diff.arrived, "заказ", "заказа", "заказов")}</b> пришло
+                <small>
+                  {[diff.arrivedDbs > 0 ? `DBS ${diff.arrivedDbs}` : null, diff.arrivedDirect > 0 ? `прямых ${diff.arrivedDirect}` : null]
+                    .filter(Boolean).join(" · ") || "в работе"}
+                  {diff.queued > 0 && ` · в очередь встали ${diff.queued}`}
+                </small>
+              </span>
+            </div>
+          )}
+
+          {diff.funnelEvents > 0 && (
+            <div className="twa-shift-row">
+              <i style={{ color: C.textTertiary }}>⚙</i>
+              <span>
+                <b>{[
+                  diff.funnelNicks > 0 ? `${diff.funnelNicks} ${plural(diff.funnelNicks, "ник", "ника", "ников")}` : null,
+                  diff.funnelPasses > 0 ? `${diff.funnelPasses} ${plural(diff.funnelPasses, "пасс", "пасса", "пассов")}` : null,
+                ].filter(Boolean).join(" и ")}</b> прислали покупатели
+                <small>воронка прошла сама</small>
+              </span>
+            </div>
+          )}
+
+          {stuck.length > 0 && (
+            <>
+              <div className="twa-shift-key">Не сдвинулось · {stuck.length}</div>
+              {stuck.map(item => (
+                <div className="twa-shift-row is-alert" key={item.key}>
+                  <i>{item.icon}</i>
+                  <span><b>{item.text}</b><small>{item.hint}</small></span>
+                </div>
+              ))}
+            </>
+          )}
+
+          {diff.errors === 0 && diff.wbCancelled === 0 && (
+            <div className="twa-shift-row">
+              <i style={{ color: C.green }}>✓</i>
+              <span>Ошибок выкупа нет · отмен WB нет</span>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="twa-shift-feed">
+          {feed.length === 0 && <div className="twa-shift-empty">За окно не случилось ничего</div>}
+          {feed.map(row => {
+            const actor = ACTOR[row.actor];
+            if (row.group) {
+              const open = openGroup === row.id;
+              return (
+                <div key={row.id}>
+                  <button type="button" className="twa-shift-fold twa-press-sm" onClick={() => { haptic.select(); setOpenGroup(open ? null : row.id); }}>
+                    <span>{open ? "▾" : "▸"}</span>
+                    <b>{row.text}</b>
+                    <time>{hhmm(row.group.items[row.group.items.length - 1].at)}→{hhmm(row.group.items[0].at)}</time>
+                  </button>
+                  {open && (
+                    <div className="twa-shift-group">
+                      {row.group.items.map(item => (
+                        <span key={`${row.id}:${item.code}:${item.at}`}><b>{hhmm(item.at)}</b> {item.code}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+            return (
+              <div className="twa-shift-event" key={row.id}>
+                <time>{hhmm(row.at)}</time>
+                <i style={{ background: `${actor.color}26`, color: actor.color }}>{actor.mark}</i>
+                <span>
+                  {row.code && <b>{row.code}</b>} {row.text}
+                  {row.sub && <small>{row.sub}</small>}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -43,6 +43,20 @@ import css from "./WbDeliveryScreen.module.css";
 
 export type WbDeliveryFocus = "waitingCode" | "readyReceive" | "attention" | "inBot" | "notActivated";
 
+/** Срок WB словами: «истёк 2 д назад» / «через 54 мин». Это обещание, данное
+ *  покупателю Wildberries, а не возраст заказа — по нему WB отменяет заказ. */
+function dueLabel(iso: string | null): { text: string; overdue: boolean } | null {
+  if (!iso) return null;
+  const diff = Date.parse(iso) - Date.now();
+  const mins = Math.round(Math.abs(diff) / 60_000);
+  const body = mins < 60
+    ? `${mins} мин`
+    : mins < 1440
+      ? `${Math.floor(mins / 60)} ч`
+      : `${Math.floor(mins / 1440)} д`;
+  return { text: diff >= 0 ? `срок WB через ${body}` : `срок WB истёк ${body} назад`, overdue: diff < 0 };
+}
+
 function dateTime(value: string | null) {
   if (!value) return "—";
   return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
@@ -314,6 +328,7 @@ export default function WbDeliveryScreen({ token, initialFocus, initialQuery }: 
 
 function OrderRow({ order, onOpen }: { order: WbDeliveryOrderDto; onOpen: () => void }) {
   const hint = WB_FUNNEL_HINT[order.funnelStep];
+  const due = dueLabel(order.deliveryTo);
   return (
     <button type="button" className={`${css.orderCard} ${css[`stage_${order.stage}`] ?? ""}`} onClick={onOpen}>
       <div className={css.cardTop}><span>{orderSubtitle(order)}</span><time>{dateTime(order.updatedAt)}</time></div>
@@ -321,7 +336,12 @@ function OrderRow({ order, onOpen }: { order: WbDeliveryOrderDto; onOpen: () => 
         <span className={css.cardIcon}>{order.stage === "ready_receive" ? <PackageCheck /> : order.stage === "code_received" ? <KeyRound /> : order.buyerName ? <UserRound /> : <Truck />}</span>
         <div>
           <strong>{orderTitle(order)}</strong>
-          <p>{order.denomination ? `${order.denomination.toLocaleString("ru-RU")} R$` : "нет номинала"}</p>
+          <p>
+            {order.denomination ? `${order.denomination.toLocaleString("ru-RU")} R$` : "нет номинала"}
+            {/* Срок показываем только пока доставка не закрыта: у закрытой он
+                уже неважен, а красная строка на ней читалась бы как проблема. */}
+            {!order.completedAt && due && <> · <b style={{ color: due.overdue ? "#ff8c84" : "#ffbe5c" }}>{due.text}</b></>}
+          </p>
         </div>
         <ChevronRight />
       </div>
@@ -420,6 +440,7 @@ function OrderDetail({ order, data, busy, manualCode, message, setManualCode, se
       facts: [
         ["Покупатель", order.buyerName ?? "имя не пришло"],
         ["Заказ WB", `#${order.wbOrderId}`],
+        ["Срок WB", dueLabel(order.deliveryTo)?.text ?? "не указан"],
         ["Номинал", order.denomination ? `${order.denomination.toLocaleString("ru-RU")} R$` : "не настроен"],
         ["Статус WB", wbSupplierStatusLabel(order.supplierStatus)],
         ["Код гейта", order.activationCode ?? "ещё не выпущен"],
