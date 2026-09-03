@@ -8,7 +8,7 @@ import { getGamepassById } from "@/lib/roblox";
 import { BuyoutError, parseGamepassId, purchaseGamepassWithCookie, resolveGamepass, resolveGamepassForBuyer, verifyGamepassOwnership, type ResolvedGamepass } from "@/lib/roblox-buyout";
 import { browserFailureMessage, isBrowserInfrastructureFailure } from "@/lib/browser-purchase";
 import { buildGamepassPurchaseScript, gamepassPageUrl } from "@/lib/roblox-purchase-script";
-import { BUYOUT_ERROR_LEGACY_PURCHASE_FLOW, BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, checkGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
+import { BUYOUT_ERROR_LEGACY_PURCHASE_FLOW, BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, PRICE_TOL, checkGamepassPrice, expectedGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
 import { appendOrderAudit, buildRestoreToBuyoutData } from "@/lib/order-recovery";
 import { recordOrderStatusChange } from "@/lib/order-status-event";
@@ -1981,6 +1981,8 @@ export async function POST(req: NextRequest) {
 
     const data: any = {};
     const changes: string[] = [];
+    /** ID пасса, который ставит эта правка — нужен следу «цена-стоп обойдён». */
+    let attachedGamepassId: string | null = null;
 
     if (body.amount !== undefined) {
       const amt = Number(body.amount);
@@ -2022,6 +2024,7 @@ export async function POST(req: NextRequest) {
             }, { status: 409 });
         }
         data.gamepassUrl = gpId ? `https://www.roblox.com/game-pass/${gpId}` : null;
+        attachedGamepassId = gpId ?? null;
         data.buyoutErrorCode = null;
         changes.push(gpId ? `ГП ${oldId ?? "—"}→${gpId}` : `ГП ${oldId} снят`);
         // Переходы статуса — паритет с edit-avito: появился пасс → в очередь,
@@ -2068,6 +2071,22 @@ export async function POST(req: NextRequest) {
     await (prisma as any).wbOrder.update({ where: { id: orderId }, data });
     const stamp = new Date().toISOString().slice(0, 10);
     await appendAdminNote(orderId, `[EDIT ${stamp} от ${actor.displayName}] ${changes.join(", ")}`);
+
+    /* Пасс не по номиналу поставлен осознанно (решение владельца 04.09.2026).
+       Карточка спрашивает подтверждение и присылает увиденную цену — след
+       остаётся здесь, потому что заметку заказа пишет сервер, а не клиент.
+       Гард выкупа это НЕ отменяет: покупка на такой цене всё равно встанет,
+       и заказ будет ждать решения уже на выкупе, а не молча уедет мимо денег. */
+    if (attachedGamepassId && body.priceAck !== undefined) {
+      const seen = Number(body.priceAck);
+      const expected = expectedGamepassPrice(data.amount ?? order.amount);
+      if (Number.isFinite(seen) && seen > 0 && Math.abs(seen - expected) > PRICE_TOL) {
+        await appendAdminNote(
+          orderId,
+          `[ЦЕНА-СТОП ОБОЙДЁН ${stamp} от ${actor.displayName}] пасс ${attachedGamepassId} — ${seen} R$ при ожидаемых ${expected} R$`,
+        );
+      }
+    }
 
     /* Появившийся пасс — то же событие, что и `attach-gamepass`, и клиент
        обязан узнать о нём так же: до 03.09 правка молча ставила заказ в
@@ -2302,6 +2321,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       nick,
+      // Имя, которым ответил Roblox: в заказе может лежать другой регистр или
+      // старый ник, а список подписан аккаунтом, где пассы реально лежат.
+      resolvedName: found.resolvedName ?? nick,
       passes: found.passes.map((p: any) => ({
         gamepassId: String(p.gamepassId),
         name: p.name,

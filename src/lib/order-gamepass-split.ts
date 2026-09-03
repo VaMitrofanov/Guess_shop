@@ -216,6 +216,51 @@ export function planSplitFor(
   });
 }
 
+/**
+ * Номиналы, которыми заказ РЕАЛЬНО можно закрыть в составе разбивки.
+ *
+ * Нужен карточке заказа: «всё, что дешевле номинала» — плохой ответ на вопрос
+ * «годится ли этот пасс». На заказе 1200 при пассах 1000/500/35 не собирается
+ * ничего, и предлагать их значит звать оператора в окно, где он упрётся в
+ * «точной суммы не собрать». Здесь тот же размен, что и в `planSplitFor`:
+ * номинал годится, если ОСТАТОК после него набирается точно и всё вместе
+ * укладывается в потолок частей.
+ */
+export function splitUsableAmounts(
+  orderAmount: number,
+  candidates: readonly { amount: number }[],
+  maxParts: number = MAX_SPLIT_PARTS,
+): Set<number> {
+  const usable = new Set<number>();
+  if (!Number.isInteger(orderAmount) || orderAmount <= 0 || orderAmount > 200_000) return usable;
+
+  const amounts = [...new Set(
+    candidates
+      .map((c) => Math.trunc(Number(c.amount)))
+      .filter((a) => Number.isFinite(a) && a >= MIN_SPLIT_PART_ROBUX && a <= orderAmount),
+  )];
+  if (amounts.length === 0) return usable;
+
+  const best = new Array<number>(orderAmount + 1).fill(Infinity);
+  best[0] = 0;
+  for (let v = 1; v <= orderAmount; v++) {
+    for (const a of amounts) {
+      if (a > v) continue;
+      const next = best[v - a] + 1;
+      if (next < best[v]) best[v] = next;
+    }
+  }
+
+  for (const a of amounts) {
+    const rest = orderAmount - a;
+    // Разбиение имеет смысл от двух частей: пасс ровно под номинал — это не
+    // «часть», а обычный выкуп, и он живёт в своей группе.
+    if (rest <= 0) continue;
+    if (Number.isFinite(best[rest]) && best[rest] + 1 <= maxParts) usable.add(a);
+  }
+  return usable;
+}
+
 export type StoredPart = {
   id: string;
   gamepassId: string;

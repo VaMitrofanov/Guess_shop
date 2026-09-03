@@ -106,6 +106,8 @@ export default function OrdersWorkspace({
   const [createOpen, setCreateOpen] = useState(false);
   /** Заказ, у которого открыт лист разбиения (id, а не объект: список перезагружается). */
   const [splitId, setSplitId] = useState<string | null>(null);
+  /** Пасс, с которым открыли разбиение из списка пассов ника в досье. */
+  const [splitSeed, setSplitSeed] = useState<string | null>(null);
   /** Заказ, у которого открыт универсальный редактор. Тоже по id: после
    *  сохранения лента перечитывается, и объект из старого массива устарел. */
   const [editId, setEditId] = useState<string | null>(initialEdit ? initialOrderId : null);
@@ -940,7 +942,7 @@ export default function OrdersWorkspace({
             onFavorite={() => void toggleFavorite(openOrder)}
             onPriority={() => void togglePriority(openOrder)}
             onCancel={() => void cancelOrder(openOrder)}
-            onSplit={() => setSplitId(openOrder.id)}
+            onSplit={(preselect) => { setSplitSeed(preselect ?? null); setSplitId(openOrder.id); }}
             onEdit={() => setEditId(openOrder.id)}
             onToast={(text, error) => showToast({ text, error })}
             onChanged={() => void load(1, false)}
@@ -1091,7 +1093,8 @@ export default function OrdersWorkspace({
       {splitOrder && (
         <SplitDialog
           order={splitOrder}
-          onClose={() => setSplitId(null)}
+          preselect={splitSeed}
+          onClose={() => { setSplitId(null); setSplitSeed(null); }}
           onChanged={() => void load(1, false)}
           onToast={(text, error) => showToast({ text, error })}
         />

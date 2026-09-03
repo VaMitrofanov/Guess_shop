@@ -456,6 +456,47 @@
 .boxIce { border-color: rgba(100, 210, 255, .28); background: rgba(100, 210, 255, .06); }
 .boxPrio { border-color: rgba(255, 214, 10, .3); background: rgba(255, 214, 10, .07); }
 
+/* ── «Другие пассы на аккаунте»: вторичный блок карточки заказа ─────────────
+   Список пассов ника — не факты заказа, а витрина, из которой заказ можно
+   починить, поэтому он отбит вниз тёмной полосой и приглушён. Без этого
+   карточка превращалась в список пассов: семь строк с кнопками перевешивают
+   всё, ради чего досье открывают.
+   ────────────────────────────────────────────────────────────────────────── */
+.btnSm { min-height: 28px; padding: 0 10px; border: 1px solid var(--o-line); border-radius: 8px;
+         background: var(--o-surface); color: inherit; font: inherit; font-size: 12.5px; cursor: pointer; }
+.btnSm:hover { border-color: var(--o-line-2); background: var(--o-surface-2); }
+.btnSm:disabled { opacity: .45; cursor: default; }
+.btnGreenSm { color: #bff5d3; border-color: rgba(64, 212, 126, .3); background: rgba(64, 212, 126, .13); }
+
+.gpMoreBar { display: flex; gap: 7px; margin-top: 11px; flex-wrap: wrap; }
+.gpMore { margin: 12px -15px -13px; padding: 11px 15px 13px; border-top: 1px solid var(--o-line);
+          background: rgba(0, 0, 0, .3); border-radius: 0 0 13px 13px; }
+.gpMoreHead { display: flex; align-items: center; gap: 6px; color: #6c6c75; font-size: 10.5px;
+              font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.gpMoreHead b { color: #9a9aa3; }
+.gpMoreTools { margin-left: auto; letter-spacing: 0; text-transform: none; }
+.gpMoreTools button { border: 0; background: none; color: #61616a; font: inherit; font-size: 11.5px; cursor: pointer; }
+.gpMoreTools button:hover { color: #9a9aa3; }
+.gpGroup { margin-top: 10px; color: #61616a; font-size: 11.5px; }
+.gpRow { display: grid; grid-template-columns: minmax(0, 1fr) 84px 132px; align-items: center; gap: 12px;
+         margin: 0 -8px; padding: 6px 8px; border-radius: 9px; }
+.gpRow:hover { background: rgba(255, 255, 255, .035); }
+.gpRowOff .gpName, .gpRowOff .gpPrice { color: #6a6a73; }
+.gpName { min-width: 0; display: flex; align-items: baseline; gap: 8px; font-size: 13.5px;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gpId { flex: 0 0 auto; border: 0; padding: 0; background: none; cursor: pointer;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: #5f5f68; }
+.gpId:hover { color: #b9aaff; }
+/* Занятость — предупреждение, а не цифра: живёт рядом с именем, чтобы не
+   ломать колонку цены переносом на три строки. */
+.gpBusy { flex: 0 0 auto; font-style: normal; font-size: 11.5px; color: #c9a86a; }
+.gpPrice { text-align: right; font-variant-numeric: tabular-nums; font-size: 13.5px; color: #d8d6df; }
+.gpAct { display: flex; justify-content: flex-end; }
+.gpFold { margin-top: 9px; border: 0; padding: 0; background: none; color: #7a7a84; font: inherit;
+          font-size: 12.5px; cursor: pointer; }
+.gpFold:hover { color: #b8b8c2; }
+.gpEmpty { margin-top: 9px; color: #61616a; font-size: 12.5px; line-height: 1.5; }
+
 .events { display: flex; flex-direction: column; }
 .event { display: grid; grid-template-columns: 92px 12px minmax(0, 1fr); gap: 10px; padding: 6px 0; font-size: 13px; }
 .eventTime { color: var(--o-muted); font-variant-numeric: tabular-nums; font-size: 12.5px; }

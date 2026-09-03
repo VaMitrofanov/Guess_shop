@@ -8,6 +8,8 @@ import BottomSheet from "../BottomSheet";
 import { toast } from "../Toast";
 import { copyText } from "../clipboard";
 import OrderSheet, { type MatchedOrder, type RebindUser } from "../OrderSheet";
+import NickGamepasses from "../NickGamepasses";
+import { parseGamepassRef } from "@/lib/gamepass-id";
 import { isUnpaidDirect } from "@/lib/buyout-queue";
 import {
   orderBadge as sharedOrderBadge,
@@ -1447,15 +1449,21 @@ function AuditTrail({ order, token }: { order: Order; token: string }) {
    нужны две одинаковые части. Каждый повтор выкупается с ДРУГОГО донора (в
    очереди аккаунты по 2-3 тысячи, заказ и так растаскивается по ним) — иначе
    второй раз Roblox ответит AlreadyOwned. Об этом предупреждает плашка. */
-function SplitModal({ order, token, onDone, onClose }: {
+function SplitModal({ order, token, onDone, onClose, preselect = null }: {
   order: Order; token: string; onDone: () => void; onClose: () => void;
+  /** Пасс, выбранный ещё до открытия — из списка пассов ника в карточке.
+   *  Добавляется к уже собранным частям, а не заменяет их. */
+  preselect?: string | null;
 }) {
   type Candidate = { gamepassId: string; name: string; price: number; amount: number; busyWith: string | null };
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [nick, setNick] = useState<string | null>(null);
   const [passes, setPasses] = useState<Candidate[]>([]);
-  const [chosen, setChosen] = useState<string[]>(() => (order.splitGamepasses ?? []).map(p => p.gamepassId));
+  const [chosen, setChosen] = useState<string[]>(() => [
+    ...(order.splitGamepasses ?? []).map(p => p.gamepassId),
+    ...(preselect ? [String(preselect)] : []),
+  ]);
 
   useEffect(() => {
     let alive = true;
@@ -2045,6 +2053,8 @@ function OrderCard({
   const [holdOpen, setHoldOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
+  /** Пасс, выбранный в списке пассов ника до открытия разбиения. */
+  const [splitSeed, setSplitSeed] = useState<string | null>(null);
   const [rebindOpen, setRebindOpen] = useState(false);
   const [refundOpen, setRefundOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -2735,6 +2745,24 @@ function OrderCard({
 
       <AuditTrail order={order} token={token} />
 
+      {/* Чем ещё можно закрыть заказ: пассы того же ника. Вторичный блок —
+          грузится по кнопке и свёрнут, пока его не позвали. */}
+      {isEditable && !!(order.robloxUsername || order.probableNick) && !splitOpen && (
+        <div style={{ padding: "0 14px 6px" }}>
+          <NickGamepasses
+            orderId={order.id}
+            wbCode={order.wbCode}
+            orderAmount={order.amount}
+            currentId={parseGamepassRef(order.gamepassUrl)}
+            parts={split}
+            splittable={isSplittable}
+            token={token}
+            onChanged={onMoved}
+            onSplitWith={(gamepassId) => { setSplitSeed(gamepassId); setSplitOpen(true); }}
+          />
+        </div>
+      )}
+
       {/* Разбиение выкупа: три пасса по 1000 вместо одного на 3000 */}
       {isSplittable && !splitOpen && (
         <div style={{ padding: "0 14px 6px" }}>
@@ -2752,8 +2780,9 @@ function OrderCard({
         <SplitModal
           order={order}
           token={token}
-          onDone={() => { setSplitOpen(false); onMoved(); }}
-          onClose={() => setSplitOpen(false)}
+          preselect={splitSeed}
+          onDone={() => { setSplitOpen(false); setSplitSeed(null); onMoved(); }}
+          onClose={() => { setSplitOpen(false); setSplitSeed(null); }}
         />
       )}
 

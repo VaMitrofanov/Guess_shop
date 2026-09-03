@@ -1240,6 +1240,64 @@ html.twa-route-active [contenteditable="true"] {
   background: rgba(48,209,88,.14); color: #30d158;
 }
 
+/* ── «Другие пассы на аккаунте» (карточка заказа) ───────────────────────────
+   Зеркало блока из досье сайта. Вторичный по виду намеренно: это не факты
+   заказа, а витрина, из которой заказ можно починить. Строка на телефоне
+   двухэтажная — имя с ID слева, цена с действием справа: в одну линию на
+   390 px не влезает даже имя пасса.
+   ────────────────────────────────────────────────────────────────────────── */
+.twa-gp-more-open {
+  width: 100%; min-height: 38px; padding: 9px 10px; border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px; background: rgba(255,255,255,.04); color: #c8c4d4;
+  font-family: inherit; font-size: 13.5px; font-weight: 600;
+}
+.twa-gp-more-open:disabled { opacity: .5; }
+.twa-gp-more {
+  padding: 10px 11px 11px; border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px; background: rgba(0,0,0,.28);
+}
+.twa-gp-more-head { display: flex; align-items: center; gap: 8px; }
+/* Заглавные и разрядку гасим явно: они наследуются от шапки карточки, и
+   «…НА АККАУНТЕ BAIZH…» обрезало ровно ник, ради которого подпись и нужна. */
+.twa-gp-more-head > span {
+  min-width: 0; flex: 1; color: #8b8797; font-size: 12px; font-weight: 600;
+  text-transform: none; letter-spacing: normal;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.twa-gp-more-head > button {
+  flex: 0 0 auto; min-height: 26px; padding: 0 8px; border: 1px solid rgba(255,255,255,.1);
+  border-radius: 8px; background: transparent; color: #8b8797; font-family: inherit; font-size: 12px;
+}
+.twa-gp-group { margin-top: 10px; color: #6f6b7a; font-size: 12px; }
+.twa-gp-row {
+  display: flex; align-items: center; gap: 10px; padding: 7px 0;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+}
+.twa-gp-row:last-of-type { border-bottom: 0; }
+.twa-gp-row.is-off { opacity: .62; }
+.twa-gp-name { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.twa-gp-name > b { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.twa-gp-name > small {
+  color: #6f6b7a; font-size: 11.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Занятость — предупреждение, а не цифра: живёт у ID, чтобы не растить
+   колонку цены переносом на три строки. */
+.twa-gp-name em { font-style: normal; font-family: inherit; color: #c9a86a; }
+.twa-gp-right { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+.twa-gp-right > b { font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.twa-gp-btn {
+  min-height: 30px; padding: 0 10px; border: 1px solid rgba(255,255,255,.11); border-radius: 9px;
+  background: rgba(255,255,255,.05); color: #ded9ea; font-family: inherit; font-size: 12.5px; font-weight: 600;
+}
+.twa-gp-btn.is-go { color: #bff5d3; border-color: rgba(48,209,88,.35); background: rgba(48,209,88,.14); }
+.twa-gp-btn:disabled { opacity: .45; }
+.twa-gp-fold {
+  margin-top: 10px; border: 0; padding: 0; background: none; color: #8b8797;
+  font-family: inherit; font-size: 12.5px;
+}
+.twa-gp-note { margin-top: 9px; color: #6f6b7a; font-size: 12.5px; line-height: 1.5; }
+
 .twa-section-label { padding: 6px 4px 0; color: #777181; font-size: 12px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
 
 .twa-stage-strip { display: flex; gap: 7px; overflow-x: auto; padding: 2px 1px; }

@@ -36,12 +36,18 @@ interface Candidate {
 }
 
 export default function SplitDialog({
-  order, onClose, onChanged, onToast,
+  order, onClose, onChanged, onToast, preselect = null,
 }: {
   order: AdminOrder;
   onClose: () => void;
   onChanged: () => void;
   onToast: (text: string, error?: boolean) => void;
+  /**
+   * Пасс, выбранный ещё до открытия окна — из списка пассов ника в досье.
+   * Он добавляется к уже собранным частям, а не заменяет их: разбивку
+   * собирают по одной части, и «пришёл с пассом» — это ещё одна часть.
+   */
+  preselect?: string | null;
 }) {
   const parts = useMemo(() => order.splitGamepasses ?? [], [order.splitGamepasses]);
   const [loading, setLoading] = useState(true);
@@ -49,7 +55,10 @@ export default function SplitDialog({
   const [nick, setNick] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   /** Упорядоченный мультимножество ID: порядок = порядок выкупа. */
-  const [chosen, setChosen] = useState<string[]>(() => parts.map(part => String(part.gamepassId)));
+  const [chosen, setChosen] = useState<string[]>(() => [
+    ...parts.map(part => String(part.gamepassId)),
+    ...(preselect ? [String(preselect)] : []),
+  ]);
 
   /** Хотя бы одна часть выкуплена — состав трогать нельзя, робуксы списаны. */
   const hasPurchased = parts.some(part => part.purchasedAt);

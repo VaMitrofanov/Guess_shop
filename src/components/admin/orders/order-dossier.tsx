@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ageBasis, ageTone, fmtAge, grossOf, laneOf, LANE_META, orderBadge, orderFlag, primaryActionFor,
 } from "@/lib/order-presentation";
+import { classifyGamepasses, type FitPass, type GamepassFitGroups, type PickerPass } from "@/lib/gamepass-fit";
 import { AdminOrder, LiveCheck, TONE_COLOR, clientLabel, contactHref, copyText, gamepassIdOf, gamepassIdsOf, num, rub } from "./types";
 import styles from "./orders.module.css";
 
@@ -46,7 +47,8 @@ export default function OrderDossier({
   onFavorite: () => void;
   onPriority: () => void;
   onCancel: () => void;
-  onSplit: () => void;
+  /** `preselect` — пасс, с которым открыть разбиение уже выбранным. */
+  onSplit: (preselect?: string) => void;
   onEdit: () => void;
   onToast: (text: string, error?: boolean) => void;
   onChanged: () => void;
@@ -57,8 +59,21 @@ export default function OrderDossier({
   const [audit, setAudit] = useState<any | null>(null);
   const [note, setNote] = useState(order.adminNote ?? "");
   const [savingNote, setSavingNote] = useState(false);
+  /* Пассы ника — не часть карточки, а ответ на вопрос «чем ещё закрыть».
+     Поэтому грузятся по кнопке: поиск ходит в Roblox через мост и занимает
+     секунды, а открывают досье в основном не за этим. */
+  const [picker, setPicker] = useState<{ nick: string; passes: PickerPass[] } | null>(null);
+  const [pickerBusy, setPickerBusy] = useState(false);
+  const [pickerNote, setPickerNote] = useState<string | null>(null);
+  const [showRest, setShowRest] = useState(false);
+  const [attaching, setAttaching] = useState<string | null>(null);
 
-  useEffect(() => { setTab("overview"); setEvents(null); setAudit(null); setNote(order.adminNote ?? ""); }, [order.id, order.adminNote]);
+  useEffect(() => {
+    setTab("overview"); setEvents(null); setAudit(null); setNote(order.adminNote ?? "");
+    // Список принадлежит заказу: при переходе на соседний он обязан исчезнуть,
+    // иначе пассы чужого ника выглядят как пассы этого.
+    setPicker(null); setPickerNote(null); setShowRest(false);
+  }, [order.id, order.adminNote]);
 
   const post = useCallback(async (payload: Record<string, unknown>) => {
     const res = await fetch("/api/admin/orders", {
@@ -108,6 +123,54 @@ export default function OrderDossier({
       onChanged();
     } catch (error) { onToast((error as Error).message, true); }
     finally { setSavingNote(false); }
+  }
+
+  /** Пассы ника: тот же `split-candidates`, что кормит окно разбиения. */
+  const loadPicker = useCallback(async () => {
+    setPickerBusy(true);
+    try {
+      const data = await post({ action: "split-candidates" });
+      setPicker({ nick: data.resolvedName ?? data.nick ?? "", passes: data.passes ?? [] });
+      setPickerNote(
+        (data.passes ?? []).length > 0
+          ? null
+          : data.reason === "user_not_found"
+            ? "Roblox не знает такого ника — проверьте написание в «Правке»."
+            // Треть застрявших заказов — скрытый плейс: аккаунт есть, пассы не
+            // видны никакому поиску. Повторять поиск бесполезно, лечит ссылка.
+            : "Аккаунт есть, а публичных пассов не видно — обычно это скрытый плейс. Вставьте ссылку на пасс через «Правку», она работает и по скрытому.",
+      );
+    } catch (error) { onToast((error as Error).message, true); }
+    finally { setPickerBusy(false); }
+  }, [post, onToast]);
+
+  /**
+   * Поставить пасс на заказ. Идёт тем же `edit-order`, что и «Правка», —
+   * значит те же гарды: заморозка, статус, дедуп по чужому активному заказу.
+   * `priceAck` присылается только для осознанной постановки не по номиналу и
+   * оставляет след в заметке; гард выкупа при этом никуда не девается.
+   */
+  async function attachPass(pass: FitPass) {
+    const expected = grossOf(order.amount);
+    if (pass.kind !== "order") {
+      const ok = window.confirm(
+        `${pass.name} стоит ${num(pass.price)} R$, а заказу нужен пасс за ${num(expected)} R$.\n\n`
+        + "Поставить всё равно? Гард выкупа остановит покупку — заказ встанет уже на выкупе, "
+        + "а в заметке останется след «ЦЕНА-СТОП ОБОЙДЁН».",
+      );
+      if (!ok) return;
+    }
+    setAttaching(pass.gamepassId);
+    try {
+      await post({
+        action: "edit-order",
+        gamepassUrl: pass.gamepassId,
+        ...(pass.kind === "order" ? {} : { priceAck: pass.price }),
+      });
+      onToast(`Пасс ${pass.gamepassId} на заказе ${order.wbCode}`);
+      onChanged();
+    } catch (error) { onToast((error as Error).message, true); }
+    finally { setAttaching(null); }
   }
 
   async function markPart(partId: string, purchased: boolean) {
@@ -166,7 +229,7 @@ export default function OrderDossier({
             </button>
           )}
           {SPLITTABLE.includes(order.status) && (
-            <button type="button" className={styles.btn} onClick={onSplit}>
+            <button type="button" className={styles.btn} onClick={() => onSplit()}>
               🧩 {parts.length > 0 ? `Разбивка ${parts.filter(part => part.purchasedAt).length}/${parts.length}` : "Разбить выкуп"} <kbd>S</kbd>
             </button>
           )}
@@ -257,6 +320,37 @@ export default function OrderDossier({
                 </div>
               ) : null}
               {flag && <div style={{ marginTop: 9, color: TONE_COLOR[flag.tone], fontSize: 13.5 }}>{flag.text}</div>}
+
+              {/* ── Чем ещё можно закрыть заказ ──────────────────────────────
+                  Кнопка, а не автозагрузка: поиск ходит в Roblox через мост,
+                  а досье открывают в основном не за пассами. */}
+              <div className={styles.gpMoreBar}>
+                <button type="button" className={styles.btnSm} onClick={() => (picker ? setPicker(null) : void loadPicker())} disabled={pickerBusy}>
+                  {pickerBusy ? "Ищем пассы…" : picker ? "Скрыть пассы ника" : "Ещё пассы ника"}
+                </button>
+              </div>
+
+              {picker && (
+                <GamepassPicker
+                  groups={classifyGamepasses({
+                    passes: picker.passes,
+                    orderAmount: order.amount,
+                    currentId: singleId,
+                    parts,
+                  })}
+                  nick={picker.nick}
+                  expected={grossOf(order.amount)}
+                  emptyNote={pickerNote}
+                  busyId={attaching}
+                  splittable={SPLITTABLE.includes(order.status)}
+                  showRest={showRest}
+                  onToggleRest={() => setShowRest(value => !value)}
+                  onRefresh={() => void loadPicker()}
+                  onAttach={pass => void attachPass(pass)}
+                  onSplitWith={pass => onSplit(pass.gamepassId)}
+                  onCopy={id => { copyText(id); onToast(`⧉ ${id}`); }}
+                />
+              )}
             </div>
 
             <div className={styles.box}>
@@ -341,5 +435,120 @@ export default function OrderDossier({
         )}
       </div>
     </aside>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   «Другие пассы на аккаунте» — вторичный блок карточки.
+
+   Он отбит вниз, приглушён и подписан ником аккаунта намеренно: это не факты
+   заказа, а витрина, из которой заказ можно починить. Строки сгруппированы по
+   единственному вопросу, ради которого сюда смотрят: закроет ли этот пасс
+   заказ, годится ли в разбивку, или он тут просто есть. Хвост «цена не
+   сходится» свёрнут — в развёрнутом виде семь строк превращают карточку в
+   список пассов, а не в заказ.
+   ───────────────────────────────────────────────────────────────────────── */
+function GamepassPicker({
+  groups, nick, expected, emptyNote, busyId, splittable, showRest, onToggleRest, onRefresh, onAttach, onSplitWith, onCopy,
+}: {
+  groups: GamepassFitGroups;
+  nick: string;
+  expected: number;
+  emptyNote: string | null;
+  busyId: string | null;
+  splittable: boolean;
+  showRest: boolean;
+  onToggleRest: () => void;
+  onRefresh: () => void;
+  onAttach: (pass: FitPass) => void;
+  onSplitWith: (pass: FitPass) => void;
+  onCopy: (id: string) => void;
+}) {
+  /** Показанных строк: пасс, который уже на заказе, живёт в карточке выше. */
+  const listed = groups.order.length + groups.part.length + groups.rest.length;
+
+  const row = (pass: FitPass, action: React.ReactNode) => (
+    <div className={`${styles.gpRow} ${pass.kind === "order" || pass.kind === "part" ? "" : styles.gpRowOff}`} key={pass.gamepassId}>
+      <span className={styles.gpName}>
+        {pass.name}
+        <button
+          type="button"
+          className={styles.gpId}
+          onClick={() => onCopy(pass.gamepassId)}
+          title="Скопировать ID"
+        >{pass.gamepassId}</button>
+        {pass.busyWith && <em className={styles.gpBusy}>занят заказом {pass.busyWith}</em>}
+      </span>
+      <span className={styles.gpPrice}>{num(pass.price)} R$</span>
+      <span className={styles.gpAct}>{action}</span>
+    </div>
+  );
+
+  return (
+    <div className={styles.gpMore}>
+      <div className={styles.gpMoreHead}>
+        Другие пассы на аккаунте <b>{nick || "—"}</b>
+        {listed > 0 && <> · {listed}</>}
+        <span className={styles.gpMoreTools}>
+          <button type="button" onClick={onRefresh}>⟳ обновить</button>
+        </span>
+      </div>
+
+      {groups.total === 0 && <div className={styles.gpEmpty}>{emptyNote ?? "Пассов не нашлось."}</div>}
+
+      {groups.order.length > 0 && (
+        <>
+          <div className={styles.gpGroup}>подходят под номинал заказа · {num(expected)} R$</div>
+          {groups.order.map(pass => row(pass, (
+            <button type="button" className={`${styles.btnSm} ${styles.btnGreenSm}`} disabled={busyId === pass.gamepassId} onClick={() => onAttach(pass)}>
+              {busyId === pass.gamepassId ? "Ставим…" : "Поставить"}
+            </button>
+          )))}
+        </>
+      )}
+
+      {groups.part.length > 0 && splittable && (
+        <>
+          <div className={styles.gpGroup}>
+            {groups.part.some(pass => pass.partAmount) ? "закрывают незакрытую часть" : "закрывают часть — если разбивать заказ"}
+          </div>
+          {groups.part.map(pass => row(pass, (
+            <button type="button" className={styles.btnSm} onClick={() => onSplitWith(pass)}>
+              В разбивку{pass.partAmount ? ` · ${num(pass.partAmount)}` : ""}
+            </button>
+          )))}
+        </>
+      )}
+
+      {/* Разбивать нельзя (заказ закрыт, часть уже выкуплена) — тогда «часть»
+          не действие, а справка: строки уезжают в общий хвост. */}
+      {(groups.rest.length > 0 || (groups.part.length > 0 && !splittable)) && (
+        <>
+          {/* Подпись группы не исчезает при разворачивании: без неё строки
+              внизу выглядят продолжением «частей», а это ровно те пассы,
+              которыми заказ закрывать нельзя. */}
+          <button type="button" className={styles.gpFold} onClick={onToggleRest}>
+            {showRest
+              ? "цена не сходится · ⌃ свернуть"
+              : `⌄ ещё ${groups.rest.length + (splittable ? 0 : groups.part.length)} — цена не сходится`}
+          </button>
+          {showRest && (
+            <>
+              {!splittable && groups.part.map(pass => row(pass, (
+                <button type="button" className={styles.btnSm} disabled={busyId === pass.gamepassId} onClick={() => onAttach(pass)}>Поставить…</button>
+              )))}
+              {groups.rest.map(pass => row(pass, pass.busyWith ? null : (
+                <button type="button" className={styles.btnSm} disabled={busyId === pass.gamepassId} onClick={() => onAttach(pass)}>
+                  {busyId === pass.gamepassId ? "Ставим…" : "Поставить…"}
+                </button>
+              )))}
+              <div className={styles.gpEmpty}>
+                «Поставить…» спросит подтверждение: цена не сходится с номиналом. Гард выкупа всё равно остановит покупку — заказ встанет уже на выкупе.
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
   );
 }
