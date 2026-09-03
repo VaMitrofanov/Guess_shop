@@ -275,8 +275,9 @@
 .firstRows { display: flex; flex-direction: column; gap: 3px; }
 .firstRow {
   display: grid;
-  /* Колонка кода — под самый длинный: DIR-9F922067 у прямых заказов. */
-  grid-template-columns: 78px 104px minmax(0, 1fr) 78px 52px 28px;
+  /* Колонка кода — под самый длинный: DIR-9F922067 у прямых заказов.
+     Последние две — «скопировать ID» и «выкуплено»: типовой шаг смены целиком. */
+  grid-template-columns: 78px 104px minmax(0, 1fr) 78px 52px 34px 28px;
   align-items: center;
   gap: 8px;
   padding: 6px;
@@ -302,10 +303,42 @@
 .firstRow .nick { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c6c6ce; font-weight: 600; }
 .firstRow .amount { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
 .firstRow .age { text-align: right; font-weight: 650; font-variant-numeric: tabular-nums; }
+/* Копирование ID — тихая кнопка: её жмут часто, но она не решение, а перенос
+   в буфер. Поэтому без заливки, в отличие от зелёного «выкуплено» рядом. */
+.firstCopy {
+  min-width: 30px;
+  height: 26px;
+  padding: 0 5px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--o-line);
+  border-radius: 8px;
+  color: #b9b9c2;
+  background: rgba(255, 255, 255, .03);
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.firstCopy:hover:not(:disabled) { border-color: var(--o-line-2); color: #fff; background: rgba(255, 255, 255, .07); }
+.firstCopy:disabled { opacity: .3; }
+.firstCopyAll {
+  min-height: 24px;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 214, 10, .3);
+  border-radius: 8px;
+  color: #ffe58a;
+  background: rgba(255, 214, 10, .1);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+.firstCopyAll:hover { background: rgba(255, 214, 10, .18); color: #fff5cf; }
 
 @media (max-width: 720px) {
   /* На телефоне «почему» и возраст важнее ника — колонку с ником сжимаем. */
-  .firstRow { grid-template-columns: 74px 104px minmax(0, 1fr) 46px 28px; }
+  .firstRow { grid-template-columns: 74px 104px minmax(0, 1fr) 46px 34px 28px; }
   .firstRow .nick { display: none; }
 }
 

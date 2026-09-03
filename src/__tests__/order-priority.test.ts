@@ -128,6 +128,22 @@ describe("«Первым делом» на обеих главных", () => {
     expect(twa).toContain('order.reason === "pinned"');
   });
 
+  it("выгрузка ID: вся пачка и каждый заказ отдельно", () => {
+    const overview = read("src/components/admin/overview/overview-screen.tsx");
+    expect(overview).toContain("copyFirstIds(firstInLine,");
+    expect(overview).toContain("copyFirstIds([order],");
+  });
+
+  it("у разбитого заказа копируются ВСЕ невыкупленные части", () => {
+    // Одна строка списка = одна покупка только у неразбитого заказа; у
+    // разбитого их столько, сколько частей осталось, и повтор пасса не
+    // схлопывается — это две покупки с разных доноров.
+    expect(lib).toContain("purchasedAt: null");
+    expect(lib).toContain("bucket.push(part.gamepassId)");
+    const overview = read("src/components/admin/overview/overview-screen.tsx");
+    expect(overview).toContain("orders.flatMap(order => order.gamepassIds)");
+  });
+
   it("тип для клиента лежит вне server-only модуля", () => {
     // Иначе клиентский бандл потянул бы за собой Prisma.
     expect(read("src/types/first-in-line.ts")).not.toContain('import "server-only"');

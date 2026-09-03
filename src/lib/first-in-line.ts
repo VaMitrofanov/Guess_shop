@@ -66,6 +66,24 @@ export async function loadFirstInLine(limit: number = FIRST_IN_LINE_LIMIT): Prom
     `),
   ]);
 
+  // Части разбитых заказов — отдельным запросом и только НЕвыкупленные: в буфер
+  // донору должно попасть то, что ещё покупать, а не история заказа.
+  const parts = rows.length > 0
+    ? await prisma.wbOrderGamepass.findMany({
+        where: { orderId: { in: rows.map((row) => row.id) }, purchasedAt: null },
+        orderBy: { position: "asc" },
+        select: { orderId: true, gamepassId: true },
+      })
+    : [];
+  const partsByOrder = new Map<string, string[]>();
+  for (const part of parts) {
+    const bucket = partsByOrder.get(part.orderId);
+    // Повтор одного пасса НЕ схлопывается: две части на одном пассе — это две
+    // покупки с разных доноров, и в списке их должно быть две.
+    if (bucket) bucket.push(part.gamepassId);
+    else partsByOrder.set(part.orderId, [part.gamepassId]);
+  }
+
   const summary = totals[0] ?? { total: 0, pinned: 0, direct: 0, gross: 0 };
   return {
     rows: rows.map((row) => ({
@@ -78,6 +96,9 @@ export async function loadFirstInLine(limit: number = FIRST_IN_LINE_LIMIT): Prom
       status: row.status,
       since: row.since.toISOString(),
       gamepassId: row.gamepassId,
+      // Легаси-поле заказа указывает на ТЕКУЩУЮ часть, поэтому оно же и
+      // единственный ID у неразбитого заказа.
+      gamepassIds: partsByOrder.get(row.id) ?? (row.gamepassId ? [row.gamepassId] : []),
       // Поднятый руками прямой заказ — всё-таки поднятый: ⚡ важнее полосы.
       reason: row.priorityAt ? "pinned" : "direct",
     })),

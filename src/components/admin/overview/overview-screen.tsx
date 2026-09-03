@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { fmtAge, ageTone, type Tone } from "@/lib/order-presentation";
 import type { AdminOverview, OverviewQueueOrder } from "@/types/admin-overview";
+import type { FirstInLineOrder } from "@/types/first-in-line";
 import styles from "./overview.module.css";
 import { cn } from "@/lib/utils";
 
@@ -182,6 +183,23 @@ export default function OverviewScreen({
     showToast(`⧉ ID в буфере: ${ids.length}`);
   }, [showToast]);
 
+  /* ID пассов из «Первым делом» — то, что вставляют в донора.
+     У разбитого заказа их несколько (все невыкупленные части), поэтому это
+     `flatMap`, а не `map`: одна строка списка может дать две покупки. */
+  const copyFirstIds = useCallback((orders: FirstInLineOrder[], label: string) => {
+    const ids = orders.flatMap(order => order.gamepassIds);
+    if (ids.length === 0) { showToast(`${label}: пассов ещё нет`, true); return; }
+    copyText(ids.join("\n"));
+    // Заказов и ID может быть разное количество — говорим оба числа, иначе
+    // «скопировано 3» на двух заказах выглядит ошибкой.
+    const skipped = orders.filter(order => order.gamepassIds.length === 0).length;
+    showToast(
+      `⧉ ${label}: ${ids.length} ID` +
+      (ids.length !== orders.length ? ` из ${orders.length} заказов` : "") +
+      (skipped > 0 ? ` · без пасса: ${skipped}` : ""),
+    );
+  }, [showToast]);
+
   const firstInLine = (data.firstInLine?.rows ?? []).filter(order => !bought.has(order.id));
   const oldest = queue.slice(0, OLDEST_SHOWN);
   const buyout = data.slices.slices.BUYOUT;
@@ -263,6 +281,16 @@ export default function OverviewScreen({
             </span>
             <span className={styles.spacer} />
             <span className={styles.note}><b>{num(data.firstInLine!.gross)}</b> R$ грязными</span>
+            {/* Выгрузка всей пачки: типовой шаг — скопировал ID, вставил в
+                донора, вернулся отмечать. Ради него незачем уходить в «Заказы». */}
+            <button
+              type="button"
+              className={styles.firstCopyAll}
+              onClick={() => copyFirstIds(firstInLine, "первым делом")}
+              title="Скопировать ID геймпассов всей пачки"
+            >
+              ⧉ ID · {firstInLine.reduce((sum, order) => sum + order.gamepassIds.length, 0)}
+            </button>
           </div>
           <div className={styles.firstRows}>
             {firstInLine.map(order => (
@@ -286,6 +314,19 @@ export default function OverviewScreen({
                   {num(order.gross)} R$
                 </span>
                 <span className={cn(styles.age, TONE_CLASS[ageTone(order.since)])}>{fmtAge(order.since)}</span>
+                <button
+                  type="button"
+                  className={styles.firstCopy}
+                  onClick={() => copyFirstIds([order], order.wbCode)}
+                  disabled={order.gamepassIds.length === 0}
+                  title={order.gamepassIds.length > 1
+                    ? `Скопировать ${order.gamepassIds.length} ID частей · ${order.wbCode}`
+                    : `Скопировать ID геймпасса · ${order.wbCode}`}
+                  aria-label={`Скопировать ID геймпасса заказа ${order.wbCode}`}
+                >
+                  {/* Число рисуем только у разбитого: у обычного «⧉ 1» — шум. */}
+                  ⧉{order.gamepassIds.length > 1 ? ` ${order.gamepassIds.length}` : ""}
+                </button>
                 <button
                   type="button"
                   className={styles.tick}
