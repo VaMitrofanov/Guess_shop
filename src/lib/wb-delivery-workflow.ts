@@ -467,6 +467,27 @@ export const WB_CODE_ASK_DAILY_LIMIT = 3;
  * не знал ни про живой секрет, ни про внутренний заказ).
  */
 export async function loadWbDeliveryQueueSnapshot(): Promise<WbDeliveryQueueSnapshot> {
+  /* Пульс синка и «сколько это обычно занимает» ни от чего в этой функции не
+     зависят — они спрашиваются здесь только потому, что показываются рядом.
+     Запускаем их сразу, а ждём в самом конце: до 04.09.2026 они стояли пятой
+     волной запросов подряд, и с базой в Сингапуре (210 мс за round-trip) это
+     была лишняя пятая часть секунды на КАЖДОМ открытии «Обзора». */
+  const sideDataPromise = Promise.all([
+    db.serviceHeartbeat.findUnique({
+      where: { serviceKey: WB_DBS_SYNC_SERVICE },
+      select: { status: true, lastSeenAt: true },
+    }).catch(() => null),
+    // Ориентир «сколько это обычно занимает»: без него «висит 2 дня» не с чем
+    // сравнить. Считается по закрытым за сутки, средним, а не медианой —
+    // заказов единицы, и медиана на пяти строках ничего не уточняет.
+    db.$queryRaw<Array<{ n: number; avg: number | null }>>`
+      SELECT COUNT(*)::int AS n,
+             AVG(EXTRACT(EPOCH FROM ("completedAt" - COALESCE("wbCreatedAt", "firstSeenAt"))) / 60) AS avg
+        FROM "WbMarketplaceOrder"
+       WHERE "isTest" = false AND "completedAt" > NOW() - INTERVAL '24 hours'
+    `.catch(() => []),
+  ]);
+
   const orders = await db.wbMarketplaceOrder.findMany({
     where: {
       isTest: false,
@@ -589,21 +610,7 @@ export async function loadWbDeliveryQueueSnapshot(): Promise<WbDeliveryQueueSnap
     (row) => row.funnelStep === "not_activated" && row.gateSentAt != null,
   );
 
-  const [syncBeat, closedToday] = await Promise.all([
-    db.serviceHeartbeat.findUnique({
-      where: { serviceKey: WB_DBS_SYNC_SERVICE },
-      select: { status: true, lastSeenAt: true },
-    }).catch(() => null),
-    // Ориентир «сколько это обычно занимает»: без него «висит 2 дня» не с чем
-    // сравнить. Считается по закрытым за сутки, средним, а не медианой —
-    // заказов единицы, и медиана на пяти строках ничего не уточняет.
-    db.$queryRaw<Array<{ n: number; avg: number | null }>>`
-      SELECT COUNT(*)::int AS n,
-             AVG(EXTRACT(EPOCH FROM ("completedAt" - COALESCE("wbCreatedAt", "firstSeenAt"))) / 60) AS avg
-        FROM "WbMarketplaceOrder"
-       WHERE "isTest" = false AND "completedAt" > NOW() - INTERVAL '24 hours'
-    `.catch(() => []),
-  ]);
+  const [syncBeat, closedToday] = await sideDataPromise;
 
   const closedRow = closedToday[0] ?? { n: 0, avg: null };
 

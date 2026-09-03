@@ -23,8 +23,14 @@ export default async function AdminOverviewPage() {
   const admin = await resolveAdminFromSession();
   if (!admin) redirect("/admin/login");
 
-  const presence = await touchAdminPresence(admin);
-  const overview = await getAdminOverview(presence.windowStartAt);
+  /* Отметка присутствия — два запроса подряд (прочитать прошлый заход,
+     записать нынешний), и до 04.09.2026 она держала ВЕСЬ экран: девять из
+     одиннадцати загрузок про окно ничего не знают, но ждали его. С базой в
+     Сингапуре это стоило ~0,4 с на каждом открытии смены. Отдаём обещание —
+     ждут его только диф и лента, остальное стартует сразу. */
+  const presencePromise = touchAdminPresence(admin);
+  const overview = await getAdminOverview(presencePromise.then((p) => p.windowStartAt));
+  const presence = await presencePromise;
 
   return (
     <OverviewScreen

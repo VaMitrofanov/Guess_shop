@@ -334,8 +334,24 @@ export async function loadOverviewDiff(since: Date): Promise<OverviewDiff> {
   };
 }
 
-export async function getAdminOverview(since: Date): Promise<AdminOverview> {
-  const [slices, dbs, queue, firstInLine, held, health, dashboard, daily, showcase30d] = await Promise.all([
+/* ─────────────────────────────────────────────────────────────────────────────
+   Одиннадцать загрузок — ОДНА волна.
+
+   До 04.09.2026 экран собирался в три захода подряд: сначала отметка
+   присутствия в `page.tsx`, потом девять загрузок, потом ещё две. Каждый заход
+   ждал предыдущего целиком, хотя зависимость между ними ровно одна — и та не
+   по данным, а по присваиванию: `diff.queueNow` берётся из `slices` уже ПОСЛЕ
+   того, как обе загрузки закончились.
+
+   С базой в Сингапуре (210 мс за round-trip, см. performance-план) каждая
+   лишняя волна — это не «чуть медленнее», а честная секунда: `/admin`
+   открывался 3,5 с против 0,5 с у «Заказов». Поэтому `since` принимается и
+   обещанием: отметка присутствия (два запроса) больше не держит девять
+   загрузок, которые про неё ничего не знают.
+   ───────────────────────────────────────────────────────────────────────── */
+export async function getAdminOverview(since: Date | Promise<Date>): Promise<AdminOverview> {
+  const sincePromise = Promise.resolve(since);
+  const [slices, dbs, queue, firstInLine, held, health, dashboard, daily, showcase30d, diff, feed] = await Promise.all([
     loadOrderSlices(),
     loadWbDeliveryQueueSnapshot().catch(() => null),
     loadQueueHead(),
@@ -347,12 +363,10 @@ export async function getAdminOverview(since: Date): Promise<AdminOverview> {
     getAdminDashboardData(),
     loadDaily(),
     loadShowcase30d(),
-  ]);
-  const [diff, feed] = await Promise.all([
-    loadOverviewDiff(since),
+    sincePromise.then((from) => loadOverviewDiff(from)),
     // Лента не кэшируется по той же причине, что «Первым делом»: она и есть
     // ответ на «что случилось минуту назад».
-    loadOverviewFeed(since).catch(() => []),
+    sincePromise.then((from) => loadOverviewFeed(from)).catch(() => [] as Awaited<ReturnType<typeof loadOverviewFeed>>),
   ]);
   const runtime = getAdminRuntimeState();
 
