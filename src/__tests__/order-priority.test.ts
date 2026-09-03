@@ -144,6 +144,21 @@ describe("«Первым делом» на обеих главных", () => {
     expect(overview).toContain("orders.flatMap(order => order.gamepassIds)");
   });
 
+  it("заметка из блока НЕ затирает машинный аудит заметки", () => {
+    // Заметка заказа — два разных содержимого в одном поле: аудит выкупа
+    // (`[РАЗБИВКА …]`, `[ЦЕНА-СТОП …]`) и текст админа. Узкое поле на дашборде
+    // правит только второе, иначе строка «доплата» стёрла бы историю.
+    const route = read("src/app/api/twa/orders/route.ts");
+    const handler = route.slice(route.indexOf('if (action === "set-note")'));
+    const block = handler.slice(0, 1600);
+    expect(block).toContain("body.keepTags === true");
+    expect(block).toContain('line.startsWith("[")');
+    const overview = read("src/components/admin/overview/overview-screen.tsx");
+    expect(overview).toContain('action: "set-note", orderId: order.id, note: next, keepTags: true');
+    // И показывается ровно то, что уйдёт в сохранение.
+    expect(read("src/lib/first-in-line.ts")).toContain("function humanNote(");
+  });
+
   it("тип для клиента лежит вне server-only модуля", () => {
     // Иначе клиентский бандл потянул бы за собой Prisma.
     expect(read("src/types/first-in-line.ts")).not.toContain('import "server-only"');

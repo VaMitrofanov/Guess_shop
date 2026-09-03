@@ -275,12 +275,13 @@
 .firstRows { display: flex; flex-direction: column; gap: 3px; }
 .firstRow {
   display: grid;
-  /* Колонка кода — под самый длинный: DIR-9F922067 у прямых заказов.
+  /* Колонка кода — под самый длинный: DIR-9F922067 у прямых заказов. Середину
+     занимает заметка: раньше там была пустота на треть ширины экрана.
      Последние две — «скопировать ID» и «выкуплено»: типовой шаг смены целиком. */
-  grid-template-columns: 78px 104px minmax(0, 1fr) 78px 52px 34px 28px;
+  grid-template-columns: 78px 104px 132px minmax(0, 1fr) 84px 52px 76px 34px;
   align-items: center;
   gap: 8px;
-  padding: 6px;
+  padding: 5px 6px;
   border-radius: 9px;
   background: rgba(255, 255, 255, .03);
   font-size: 12.5px;
@@ -306,9 +307,12 @@
 /* Копирование ID — тихая кнопка: её жмут часто, но она не решение, а перенос
    в буфер. Поэтому без заливки, в отличие от зелёного «выкуплено» рядом. */
 .firstCopy {
-  min-width: 30px;
-  height: 26px;
-  padding: 0 5px;
+  min-width: 72px;
+  height: 30px;
+  padding: 0 8px;
+  /* Без nowrap «⧉ ID · 2» у разбитого заказа ломался на две строки и распирал
+     строку по высоте — соседние строки переставали быть одинаковыми. */
+  white-space: nowrap;
   display: grid;
   place-items: center;
   border: 1px solid var(--o-line);
@@ -321,6 +325,45 @@
 }
 .firstCopy:hover:not(:disabled) { border-color: var(--o-line-2); color: #fff; background: rgba(255, 255, 255, .07); }
 .firstCopy:disabled { opacity: .3; }
+/* Заметка: «почему этот заказ первым». В покое — обычный текст, по клику —
+   поле. Пустая подписана бледным «+ заметка», иначе её никто не найдёт. */
+.firstNote {
+  min-width: 0;
+  min-height: 26px;
+  padding: 3px 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #c9c9d2;
+  background: transparent;
+  font-size: 12.5px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.firstNote:hover { border-color: var(--o-line); background: rgba(255, 255, 255, .04); }
+.firstNoteEmpty { color: #6e6e77; }
+.firstNoteInput {
+  width: 100%;
+  min-height: 26px;
+  padding: 3px 7px;
+  border: 1px solid rgba(255, 214, 10, .45);
+  border-radius: 7px;
+  color: #fff;
+  background: rgba(0, 0, 0, .35);
+  font: inherit;
+  font-size: 12.5px;
+}
+.firstNoteInput:focus { outline: none; border-color: var(--o-yellow); }
+
+/* Щель и рамка перед «выкуплено»: рядом стоит безобидное копирование, которое
+   жмут в десять раз чаще, а это действие необратимо и пишет клиенту. */
+.firstTick {
+  width: 30px;
+  height: 30px;
+  margin-left: 6px;
+}
+
 .firstCopyAll {
   min-height: 24px;
   padding: 0 9px;
@@ -338,8 +381,10 @@
 
 @media (max-width: 720px) {
   /* На телефоне «почему» и возраст важнее ника — колонку с ником сжимаем. */
-  .firstRow { grid-template-columns: 74px 104px minmax(0, 1fr) 46px 34px 28px; }
-  .firstRow .nick { display: none; }
+  /* На узком экране ник и заметка не помещаются рядом — заметка важнее: она
+     объясняет, почему заказ вообще тут. */
+  .firstRow { grid-template-columns: 74px 104px minmax(0, 1fr) 46px 72px 32px; }
+  .firstRow .nick, .firstRow .amount { display: none; }
 }
 
 /* ── Дорожки ─────────────────────────────────────────────────────────────── */

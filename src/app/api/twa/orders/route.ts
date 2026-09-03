@@ -1350,6 +1350,27 @@ export async function POST(req: NextRequest) {
 
   if (action === "set-note") {
     const note = typeof body.note === "string" ? body.note.trim().slice(0, 2000) : "";
+
+    /* `keepTags` — правка ТОЛЬКО человеческой части заметки.
+       Заметка заказа — это две разные вещи в одном поле: машинный аудит
+       (`[РАЗБИВКА …]`, `[ЦЕНА-СТОП …]`, `[НИК? …]`) и текст, который админ
+       пишет себе. Полный редактор в досье правит всё сразу и знает, что делает;
+       узкое поле на дашборде — нет, и без этого флага одна строка «доплата»
+       стёрла бы всю историю выкупа. Машинные строки узнаются по `[МЕТКА]` в
+       начале — тот же признак, по которому их разбирает `parseAdminNote`. */
+    if (body.keepTags === true) {
+      const tagged = (order.adminNote ?? "")
+        .split("\n")
+        .map((line: string) => line.trim())
+        .filter((line: string) => line.startsWith("["));
+      const merged = [...tagged, ...(note ? [note] : [])].join("\n").slice(0, 2000);
+      await (prisma as any).wbOrder.update({
+        where: { id: orderId },
+        data:  { adminNote: merged || null },
+      });
+      return NextResponse.json({ ok: true, note: merged || null });
+    }
+
     await (prisma as any).wbOrder.update({
       where: { id: orderId },
       data:  { adminNote: note || null },

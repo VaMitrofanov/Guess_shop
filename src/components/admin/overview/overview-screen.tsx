@@ -183,6 +183,29 @@ export default function OverviewScreen({
     showToast(`⧉ ID в буфере: ${ids.length}`);
   }, [showToast]);
 
+  /* Заметка прямо в блоке: «почему этот заказ тут». Раньше ради строчки текста
+     надо было уходить в досье, а середина строки при этом пустовала.
+     `keepTags` на сервере бережёт машинный аудит заметки — узкое поле правит
+     только человеческую часть. */
+  const [noteEdit, setNoteEdit] = useState<{ id: string; value: string } | null>(null);
+  const [noteSaving, setNoteSaving] = useState<string | null>(null);
+
+  const saveNote = useCallback(async (order: FirstInLineOrder, value: string) => {
+    const next = value.trim();
+    setNoteEdit(null);
+    if (next === (order.note ?? "")) return;
+    setNoteSaving(order.id);
+    const result = await post({ action: "set-note", orderId: order.id, note: next, keepTags: true });
+    setNoteSaving(null);
+    if (!result.ok) { showToast(`${order.wbCode}: ${result.error}`, true); return; }
+    // Правим строку на месте: перезагрузка обзора сбросила бы фокус и прокрутку.
+    setData(prev => (prev.firstInLine
+      ? { ...prev, firstInLine: { ...prev.firstInLine, rows: prev.firstInLine.rows.map(row => (
+          row.id === order.id ? { ...row, note: next || null } : row)) } }
+      : prev));
+    showToast(next ? `✎ ${order.wbCode}: заметка сохранена` : `✎ ${order.wbCode}: заметка снята`);
+  }, [showToast]);
+
   /* ID пассов из «Первым делом» — то, что вставляют в донора.
      У разбитого заказа их несколько (все невыкупленные части), поэтому это
      `flatMap`, а не `map`: одна строка списка может дать две покупки. */
@@ -310,6 +333,35 @@ export default function OverviewScreen({
                 <span className={styles.nick} title={order.robloxUsername ?? undefined}>
                   {order.robloxUsername ?? "Ник не указан"}
                 </span>
+                {/* Заметка занимает середину строки — раньше там была пустота.
+                    Поле однострочное: сюда пишут «доплата», «спор на WB»,
+                    «обещал к вечеру», а не историю заказа. */}
+                {noteEdit?.id === order.id ? (
+                  <input
+                    autoFocus
+                    className={styles.firstNoteInput}
+                    value={noteEdit.value}
+                    maxLength={200}
+                    placeholder="Почему этот заказ первым…"
+                    onChange={event => setNoteEdit({ id: order.id, value: event.target.value })}
+                    onBlur={() => void saveNote(order, noteEdit.value)}
+                    onKeyDown={event => {
+                      if (event.key === "Enter") { event.preventDefault(); void saveNote(order, noteEdit.value); }
+                      // Esc отменяет правку целиком: строка возвращается к тому,
+                      // что было, а не сохраняет наполовину набранное.
+                      if (event.key === "Escape") { event.preventDefault(); setNoteEdit(null); }
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className={cn(styles.firstNote, !order.note && styles.firstNoteEmpty)}
+                    onClick={() => setNoteEdit({ id: order.id, value: order.note ?? "" })}
+                    title={order.note ?? "Добавить заметку"}
+                  >
+                    {noteSaving === order.id ? "сохраняю…" : order.note ?? "+ заметка"}
+                  </button>
+                )}
                 <span className={styles.amount} title={`${num(order.gross)} грязными → ${num(order.amount)} R$ клиенту`}>
                   {num(order.gross)} R$
                 </span>
@@ -325,16 +377,19 @@ export default function OverviewScreen({
                   aria-label={`Скопировать ID геймпасса заказа ${order.wbCode}`}
                 >
                   {/* Число рисуем только у разбитого: у обычного «⧉ 1» — шум. */}
-                  ⧉{order.gamepassIds.length > 1 ? ` ${order.gamepassIds.length}` : ""}
+                  ⧉ ID{order.gamepassIds.length > 1 ? ` · ${order.gamepassIds.length}` : ""}
                 </button>
+                {/* «Выкуплено» отделено щелью и рамкой намеренно: оно
+                    необратимо и шлёт клиенту сообщение, а соседняя кнопка —
+                    безобидное копирование, которое жмут в десять раз чаще. */}
                 <button
                   type="button"
-                  className={styles.tick}
-                  title={`Выкуплено · ${order.wbCode}`}
+                  className={cn(styles.tick, styles.firstTick)}
+                  title={`Выкуплено · ${order.wbCode} · клиенту уйдёт сообщение`}
                   aria-label={`Отметить выкупленным заказ ${order.wbCode}`}
                   onClick={() => void completeOne(order)}
                 >
-                  <Check size={14} aria-hidden="true" />
+                  <Check size={15} aria-hidden="true" />
                 </button>
               </div>
             ))}

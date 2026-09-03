@@ -28,6 +28,21 @@ export const FIRST_IN_LINE_LIMIT = 6;
 
 export type { FirstInLine, FirstInLineOrder } from "@/types/first-in-line";
 
+/**
+ * Человеческая часть заметки: всё, кроме машинных строк аудита.
+ *
+ * Склейка через « · », а не перенос: строка блока одна, и то, что показано,
+ * обязано совпадать с тем, что уйдёт в сохранение — иначе правка молча
+ * перепишет текст, которого админ не видел.
+ */
+function humanNote(note: string | null): string | null {
+  const human = (note ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("["));
+  return human.length > 0 ? human.join(" · ") : null;
+}
+
 export async function loadFirstInLine(limit: number = FIRST_IN_LINE_LIMIT): Promise<FirstInLine> {
   const scope = `"isTest" = false AND ${BUYOUT_QUEUE_SQL} AND ("priorityAt" IS NOT NULL OR "isDirectOrder" = true)`;
 
@@ -42,13 +57,15 @@ export async function loadFirstInLine(limit: number = FIRST_IN_LINE_LIMIT): Prom
       since: Date;
       gamepassId: string | null;
       priorityAt: Date | null;
+      adminNote: string | null;
     }>>(`
       SELECT "id", "wbCode", "robloxUsername", "amount",
              ${BUYOUT_LANE_SQL} AS "lane",
              "status",
              COALESCE("pendingAt", "createdAt") AS "since",
              "gamepassId",
-             "priorityAt"
+             "priorityAt",
+             "adminNote"
         FROM "WbOrder"
        WHERE ${scope}
        ORDER BY ${FIRST_IN_LINE_ORDER_SQL}
@@ -99,6 +116,9 @@ export async function loadFirstInLine(limit: number = FIRST_IN_LINE_LIMIT): Prom
       // Легаси-поле заказа указывает на ТЕКУЩУЮ часть, поэтому оно же и
       // единственный ID у неразбитого заказа.
       gamepassIds: partsByOrder.get(row.id) ?? (row.gamepassId ? [row.gamepassId] : []),
+      // Машинные строки аудита начинаются с `[МЕТКА]` — на дашборде нужна
+      // только та часть, которую писал человек.
+      note: humanNote(row.adminNote),
       // Поднятый руками прямой заказ — всё-таки поднятый: ⚡ важнее полосы.
       reason: row.priorityAt ? "pinned" : "direct",
     })),
