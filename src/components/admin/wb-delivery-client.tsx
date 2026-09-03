@@ -51,6 +51,12 @@ const FILTERS = [
   ["attention", "Внимание"],
   ["ready", "Можно завершить"],
   ["in_bot", "В боте"],
+  /* «Не открыли» — решение О6 от 03.09.2026. Гейт ушёл, деньги WB получены, а
+     код никто не активировал: напоминания бота кончились (2 из 2), и дальше
+     заказ не двигается сам никогда. Внутри «В боте» это было неотличимо от
+     покупателя, который просто читает инструкцию, — то есть потери лежали в
+     числе, означающем «идёт своим ходом». */
+  ["not_activated", "Не открыли"],
   ["complete", "Готово"],
   ["all", "Все"],
 ] as const;
@@ -81,10 +87,10 @@ const STAGE_STEP: Record<WbDeliveryStage, number> = {
  * drift into describing the same state with two different words. */
 const STAGE_LABEL = WB_STAGE_LABEL;
 
-function money(value: number | null) {
-  if (value == null) return "—";
-  return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB" }).format(value / 100);
-}
+/* Рублей в консоли доставки нет намеренно (решение О6 от 03.09.2026): цена
+   заказа в нашей базе — снимок с момента синка, и со сводкой в кабинете WB он
+   не сходится (скидки, компенсации, возвраты считаются на стороне WB). Деньги
+   смотрят в кабинете, здесь — обязательства: номинал, срок и этап. */
 
 function dateTime(value: string | null) {
   if (!value) return "—";
@@ -101,6 +107,8 @@ function dateTime(value: string | null) {
 function filterOrder(order: WbDeliveryOrderDto, filter: typeof FILTERS[number][0]) {
   if (filter === "all") return true;
   if (filter === "complete") return WB_TERMINAL_STAGES.includes(order.stage);
+  // Гейт выпущен и отправлен, а внутреннего заказа по коду так и нет.
+  if (filter === "not_activated") return order.funnelStep === "not_activated" && order.gateState !== "NOT_ISSUED";
   if (filter === "in_bot") return order.stage === "in_bot";
   if (filter === "attention") return order.stage === "attention";
   if (filter === "ready") return order.stage === "ready_receive";
@@ -124,10 +132,20 @@ function stageIndex(order: WbDeliveryOrderDto) {
   return STAGE_STEP[order.stage] ?? 0;
 }
 
-export default function WbDeliveryClient({ initialData }: { initialData: WbDeliveryOverview }) {
+export default function WbDeliveryClient({
+  initialData, initialFilter, initialOrderId,
+}: {
+  initialData: WbDeliveryOverview;
+  /** Срез из ссылки: «Обзор» приводит сюда конкретную работу. */
+  initialFilter?: typeof FILTERS[number][0];
+  initialOrderId?: string;
+}) {
   const [data, setData] = useState(initialData);
-  const [selectedId, setSelectedId] = useState(initialData.orders[0]?.id ?? "");
-  const [filter, setFilter] = useState<typeof FILTERS[number][0]>("active");
+  const [selectedId, setSelectedId] = useState(
+    (initialOrderId && initialData.orders.some((order) => order.id === initialOrderId) ? initialOrderId : null)
+    ?? initialData.orders[0]?.id ?? "",
+  );
+  const [filter, setFilter] = useState<typeof FILTERS[number][0]>(initialFilter ?? "active");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<WbDeliveryAction | null>(null);
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
@@ -240,7 +258,7 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
     <button key={order.id} type="button" className={`${css.orderCard} ${selected?.id === order.id ? css.orderCardActive : ""}`} onClick={() => setSelectedId(order.id)}>
       <div className={css.orderTop}><span className={`${css.stagePill} ${css[`stage_${order.stage}`]}`}>{STAGE_LABEL[order.stage]}</span><time>{dateTime(order.updatedAt)}</time></div>
       <strong>{order.buyerName ? `${order.buyerName} · #${order.wbOrderId}` : `WB #${order.wbOrderId}`}</strong>
-      <p>{order.denomination ? `${order.denomination.toLocaleString("ru-RU")} R$` : "Номинал не настроен"} · {money(order.finalPriceKopecks)}</p>
+      <p>{order.denomination ? `${order.denomination.toLocaleString("ru-RU")} R$` : "Номинал не настроен"}</p>
       <div className={css.orderMeta}>
         <span><MessageCircle /> {order.chatReady ? "чат" : "нет чата"}</span>
         <span><UserRound /> {order.fulfillment?.robloxUsername ?? WB_FUNNEL_LABEL[order.funnelStep]}</span>
@@ -321,7 +339,7 @@ export default function WbDeliveryClient({ initialData }: { initialData: WbDeliv
         {selected ? (
           <main className={css.detail}>
             <header className={css.detailHeader}>
-              <div><span className={`${css.stagePill} ${css[`stage_${selected.stage}`]}`}>{STAGE_LABEL[selected.stage]}</span><h2>{selected.buyerName ? `${selected.buyerName} · заказ #${selected.wbOrderId}` : `Заказ #${selected.wbOrderId}`}</h2><p>{selected.vendorCode ?? `nmID ${selected.nmId}`} · {selected.denomination ? `${selected.denomination} R$` : "номинал не найден"} · {money(selected.finalPriceKopecks)}</p></div>
+              <div><span className={`${css.stagePill} ${css[`stage_${selected.stage}`]}`}>{STAGE_LABEL[selected.stage]}</span><h2>{selected.buyerName ? `${selected.buyerName} · заказ #${selected.wbOrderId}` : `Заказ #${selected.wbOrderId}`}</h2><p>{selected.vendorCode ?? `nmID ${selected.nmId}`} · {selected.denomination ? `${selected.denomination} R$` : "номинал не найден"}</p></div>
               <div className={css.headerBadges}><span><Truck /> WB DBS</span></div>
             </header>
 

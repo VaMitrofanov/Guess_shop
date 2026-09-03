@@ -6,6 +6,7 @@ import { getAdminDashboardData, getAdminRuntimeState } from "@/lib/admin-ecosyst
 import { loadOrderSlices, moscowDayStartUtc } from "@/lib/order-slices";
 import { BUYOUT_QUEUE_SQL, DIRECT_ORDER_SQL, PRIORITY_ORDER_SQL } from "@/lib/order-queue";
 import { loadFirstInLine } from "@/lib/first-in-line";
+import { loadOverviewFeed } from "@/lib/overview-feed";
 import { loadWbDeliveryQueueSnapshot } from "@/lib/wb-delivery-workflow";
 import type {
   AdminOverview,
@@ -251,7 +252,7 @@ const loadDaily = adminCache(
 export async function loadOverviewDiff(since: Date): Promise<OverviewDiff> {
   const at = `TIMESTAMP '${since.toISOString().slice(0, 19).replace("T", " ")}'`;
 
-  const [orderRows, queuedRows, cancelled, payments, funnel] = await Promise.all([
+  const [orderRows, queuedRows, doneRows, cancelled, payments, funnelRows] = await Promise.all([
     prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(`
       SELECT
         COUNT(*) FILTER (WHERE "createdAt" >= ${at})::int AS "arrived",
@@ -259,6 +260,11 @@ export async function loadOverviewDiff(since: Date): Promise<OverviewDiff> {
         COUNT(*) FILTER (WHERE "createdAt" >= ${at} AND "isDirectOrder" = true)::int AS "arrivedDirect",
         COUNT(*) FILTER (WHERE "completedAt" >= ${at})::int AS "done",
         COALESCE(SUM(amount) FILTER (WHERE "completedAt" >= ${at}), 0)::int AS "doneClean",
+        -- Грязные считаются по КАЖДОМУ заказу: ceil(amount / 0.7) у каждого
+        -- своё, и делить общую сумму значило бы записать в расход не то число.
+        COALESCE(SUM(CEIL(amount / 0.7)) FILTER (WHERE "completedAt" >= ${at}), 0)::int AS "doneGross",
+        MIN("completedAt") FILTER (WHERE "completedAt" >= ${at}) AS "doneFirstAt",
+        MAX("completedAt") FILTER (WHERE "completedAt" >= ${at}) AS "doneLastAt",
         COUNT(*) FILTER (WHERE status = 'ERROR' AND "updatedAt" >= ${at})::int AS "errors",
         COUNT(*) FILTER (WHERE status = 'REJECTED' AND "updatedAt" >= ${at})::int AS "rejected"
       FROM "WbOrder" WHERE "isTest" = false
@@ -270,22 +276,36 @@ export async function loadOverviewDiff(since: Date): Promise<OverviewDiff> {
       WHERE "isTest" = false AND "pendingAt" >= ${at}
       ORDER BY "pendingAt" DESC LIMIT 8
     `),
+    // Коды выкупленных: пачку смена узнаёт поимённо, а не числом «10».
+    prisma.$queryRawUnsafe<Array<{ wbCode: string }>>(`
+      SELECT "wbCode" FROM "WbOrder"
+      WHERE "isTest" = false AND "completedAt" >= ${at}
+      ORDER BY "completedAt" DESC LIMIT 12
+    `),
     prisma.wbMarketplaceOrder.count({ where: { isTest: false, cancelledAt: { gte: since } } }),
     prisma.paymentAttempt.aggregate({
       where: { status: "CONFIRMED", finalizedAt: { gte: since } },
       _count: { _all: true },
       _sum: { amountKopecks: true },
     }),
-    prisma.orderEvent.count({
+    // Ники и пассы врозь: «4 события воронки» не говорит, дошло ли дело до
+    // геймпасса, а именно он двигает заказ в очередь выкупа.
+    prisma.orderEvent.groupBy({
+      by: ["type"],
       where: {
         createdAt: { gte: since },
         type: { in: ["AUDIT_NICK_ENTERED", "AUDIT_GAMEPASS_SUBMITTED"] },
       },
+      _count: { _all: true },
     }),
   ]);
 
   const r = orderRows[0] ?? {};
   const queuedCodes = queuedRows.map((row) => row.wbCode);
+  const countOf = (type: string) =>
+    funnelRows.find((row) => row.type === type)?._count._all ?? 0;
+  const nicks = countOf("AUDIT_NICK_ENTERED");
+  const passes = countOf("AUDIT_GAMEPASS_SUBMITTED");
 
   return {
     since: since.toISOString(),
@@ -294,6 +314,10 @@ export async function loadOverviewDiff(since: Date): Promise<OverviewDiff> {
     arrivedDirect: num(r.arrivedDirect),
     done: num(r.done),
     doneClean: num(r.doneClean),
+    doneGross: num(r.doneGross),
+    doneCodes: doneRows.map((row) => row.wbCode),
+    doneFirstAt: r.doneFirstAt ? new Date(r.doneFirstAt as string).toISOString() : null,
+    doneLastAt: r.doneLastAt ? new Date(r.doneLastAt as string).toISOString() : null,
     queued: queuedCodes.length,
     queuedCodes,
     errors: num(r.errors),
@@ -301,7 +325,12 @@ export async function loadOverviewDiff(since: Date): Promise<OverviewDiff> {
     wbCancelled: cancelled,
     paymentsConfirmed: payments._count._all,
     paymentsRubles: Math.round((payments._sum.amountKopecks ?? 0) / 100),
-    funnelEvents: funnel,
+    funnelEvents: nicks + passes,
+    funnelNicks: nicks,
+    funnelPasses: passes,
+    // Очередь считает вызывающий: «сколько сейчас» знает нарезка, а не диф.
+    queueNow: 0,
+    queueBefore: 0,
   };
 }
 
@@ -319,8 +348,20 @@ export async function getAdminOverview(since: Date): Promise<AdminOverview> {
     loadDaily(),
     loadShowcase30d(),
   ]);
-  const diff = await loadOverviewDiff(since);
+  const [diff, feed] = await Promise.all([
+    loadOverviewDiff(since),
+    // Лента не кэшируется по той же причине, что «Первым делом»: она и есть
+    // ответ на «что случилось минуту назад».
+    loadOverviewFeed(since).catch(() => []),
+  ]);
   const runtime = getAdminRuntimeState();
+
+  /* Очередь «было → стало» — единственное число, которое отвечает, полегчало
+     ли за смену. Считается из того, что уже посчитано: сколько стоит сейчас,
+     плюс выкупленное за окно, минус вставшее в очередь за окно. */
+  const queueNow = slices.slices.BUYOUT?.orders ?? 0;
+  diff.queueNow = queueNow;
+  diff.queueBefore = Math.max(0, queueNow + diff.done - diff.queued);
 
   const staleHeartbeat = health.heartbeats.some(
     (beat) => beat.status !== "HEALTHY" || beat.ageSeconds > HEARTBEAT_STALE_SECONDS,
@@ -333,6 +374,7 @@ export async function getAdminOverview(since: Date): Promise<AdminOverview> {
     queue: queue.rows,
     queueTotal: queue.total,
     firstInLine,
+    feed,
     held,
     diff,
     health: {

@@ -11,6 +11,7 @@ import { buildGamepassPurchaseScript, gamepassPageUrl } from "@/lib/roblox-purch
 import { BUYOUT_ERROR_LEGACY_PURCHASE_FLOW, BUYOUT_ERROR_REGIONAL_PRICE, BUYOUT_ERROR_ROBLOX_PLUS_FLOW, checkGamepassPrice, sellerMatchesOrder } from "@/lib/purchase-guard";
 import { buildOrderProfitSnapshot } from "@/lib/order-profit";
 import { appendOrderAudit, buildRestoreToBuyoutData } from "@/lib/order-recovery";
+import { recordOrderStatusChange } from "@/lib/order-status-event";
 import { notifyRetailBuyoutAdmins } from "@/lib/buyout-admin-notify";
 import { generateDirectCode } from "@/lib/twa-direct";
 import { directPrice } from "@/lib/retail-pricing";
@@ -821,7 +822,7 @@ export async function POST(req: NextRequest) {
     }
 
     const gpRaw = String(body.gamepassUrl ?? "").trim();
-    const gpId = gpRaw.match(/game-pass(?:es)?\/(\d+)/)?.[1] ?? (/^\d{6,}$/.test(gpRaw) ? gpRaw : null);
+    const gpId = gpRaw.match(/game-pass(?:es)?\/(\d+)/)?.[1] ?? (/^\d{4,}$/.test(gpRaw) ? gpRaw : null);
     if (gpRaw && !gpId) out.gamepass = { error: "Нужна ссылка roblox.com/game-pass/<id> или ID" };
     else if (gpId) {
       const amount = Number(body.amount) || out.code?.denomination || 0;
@@ -1006,7 +1007,7 @@ export async function POST(req: NextRequest) {
 
     // 4) Геймпасс (опционален): дедуп как в create-avito (force обходит).
     const gpRaw = String(body.gamepassUrl ?? "").trim();
-    const gpId = gpRaw.match(/game-pass(?:es)?\/(\d+)/)?.[1] ?? (/^\d{6,}$/.test(gpRaw) ? gpRaw : null);
+    const gpId = gpRaw.match(/game-pass(?:es)?\/(\d+)/)?.[1] ?? (/^\d{4,}$/.test(gpRaw) ? gpRaw : null);
     if (gpRaw && !gpId)
       return NextResponse.json({ error: "Геймпасс: нужна ссылка roblox.com/game-pass/<id> или ID" }, { status: 400 });
 
@@ -1424,6 +1425,10 @@ export async function POST(req: NextRequest) {
       where: { id: orderId },
       data:  { status: "ERROR" },
     });
+    await recordOrderStatusChange({
+      orderId, from: order.status, to: "ERROR", actor: `admin:${actor.displayName}`,
+      extra: { wbCode: order.wbCode },
+    });
     cachedCounts = null;
     return NextResponse.json({ ok: true });
   }
@@ -1444,6 +1449,10 @@ export async function POST(req: NextRequest) {
     if (restored.count !== 1) {
       return NextResponse.json({ error: "Заказ уже перемещён другим администратором" }, { status: 409 });
     }
+    await recordOrderStatusChange({
+      orderId, from: order.status, to: "PENDING", actor: `admin:${actor.displayName}`,
+      extra: { wbCode: order.wbCode, why: "restore-to-buyout" },
+    });
     cachedCounts = null;
     return NextResponse.json({ ok: true, status: "PENDING" });
   }
@@ -1560,6 +1569,10 @@ export async function POST(req: NextRequest) {
           })]
         : []),
     ]);
+    await recordOrderStatusChange({
+      orderId, from: order.status, to: "COMPLETED", actor: `admin:${actor.displayName}`,
+      extra: { wbCode: order.wbCode, amount: order.amount, gross: purchaseRobux },
+    });
     cachedCounts = null;
     // Уведомление клиенту уходит ТОЛЬКО здесь — при закрытии всего заказа.
     // Отметка отдельной части (`mark-split-part`) клиенту не видна: он получил
@@ -1635,6 +1648,10 @@ export async function POST(req: NextRequest) {
     await (prisma as any).wbOrder.update({
       where: { id: orderId },
       data:  { status: "REJECTED", buyoutErrorCode: null, rejectionReason },
+    });
+    await recordOrderStatusChange({
+      orderId, from: order.status, to: "REJECTED", actor: `admin:${actor.displayName}`,
+      reason: rejectionReason, extra: { wbCode: order.wbCode },
     });
     cachedCounts = null;
     notifyOrderRejected(order.user, order.wbCode, rejectionReason, order.amount).catch(() => {});
@@ -1984,7 +2001,7 @@ export async function POST(req: NextRequest) {
 
     if (body.gamepassUrl !== undefined) {
       const raw = String(body.gamepassUrl ?? "").trim();
-      const gpId = raw.match(/game-pass(?:es)?\/(\d+)/)?.[1] ?? (/^\d{6,}$/.test(raw) ? raw : null);
+      const gpId = raw.match(/game-pass(?:es)?\/(\d+)/)?.[1] ?? (/^\d{4,}$/.test(raw) ? raw : null);
       if (raw && !gpId)
         return NextResponse.json({ error: "Геймпасс: нужна ссылка roblox.com/game-pass/<id> или ID" }, { status: 400 });
       const oldId = gpIdOf(order.gamepassUrl);
@@ -2014,14 +2031,60 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    /* Источник заказа — тоже поле карточки, а не отдельная операция.
+       `WB_DBS` в списке обязателен: заказ, приехавший из доставки, отличается
+       от обычного вебешного полосой очереди и правилами уведомлений, и
+       «поправить источник» без него значило бы «поправить на неверный». */
+    if (body.orderSource !== undefined) {
+      const src = String(body.orderSource ?? "");
+      if (!["WB", "WB_DBS", "DIRECT", "AVITO", "MANUAL"].includes(src))
+        return NextResponse.json({ error: "Неизвестный источник заказа" }, { status: 400 });
+      if (src !== order.orderSource) {
+        data.orderSource = src;
+        changes.push(`источник ${order.orderSource}→${src}`);
+      }
+    }
+
+    /* Заметка правится ЗДЕСЬ же, человеческой частью: редактор карточки — одно
+       окно на все поля, и «сохранил поля, а заметку забыл вторым запросом» —
+       это ровно та потеря, из-за которой правки делали в двух местах.
+       Машинный аудит сохраняется, как в `set-note` с `keepTags`. */
+    let noteAfter: string | null | undefined;
+    if (typeof body.note === "string") {
+      const next = body.note.trim().slice(0, 2000);
+      const lines = (order.adminNote ?? "").split("\n").map((line: string) => line.trim());
+      const humanBefore = lines.filter((line: string) => line && !line.startsWith("[")).join(" · ");
+      if (next !== humanBefore) {
+        const tagged = lines.filter((line: string) => line.startsWith("["));
+        noteAfter = [...tagged, ...(next ? [next] : [])].join("\n").slice(0, 2000) || null;
+        data.adminNote = noteAfter;
+        changes.push(next ? "заметка" : "заметка снята");
+      }
+    }
+
     if (Object.keys(data).length === 0)
       return NextResponse.json({ error: "Нет изменений" }, { status: 400 });
 
     await (prisma as any).wbOrder.update({ where: { id: orderId }, data });
     const stamp = new Date().toISOString().slice(0, 10);
     await appendAdminNote(orderId, `[EDIT ${stamp} от ${actor.displayName}] ${changes.join(", ")}`);
+
+    /* Появившийся пасс — то же событие, что и `attach-gamepass`, и клиент
+       обязан узнать о нём так же: до 03.09 правка молча ставила заказ в
+       очередь, а привязка из формы создания о ней сообщала. Два разных
+       поведения на одно и то же действие — хуже любого из них. */
+    let notified: string | null = null;
+    if (data.status === "PENDING" && data.gamepassUrl) {
+      notified = await notifyGamepassAttached(order.user, order.wbCode).catch(() => null);
+    }
+    if (data.status && data.status !== order.status) {
+      await recordOrderStatusChange({
+        orderId, from: order.status, to: String(data.status), actor: `admin:${actor.displayName}`,
+        extra: { wbCode: order.wbCode, why: "edit-order", changes },
+      });
+    }
     cachedCounts = null;
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, changes, notified, note: noteAfter });
   }
 
   if (action === "set-source") {

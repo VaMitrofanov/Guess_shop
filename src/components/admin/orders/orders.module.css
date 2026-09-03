@@ -560,7 +560,8 @@
 .ask { width: min(460px, 100%); padding: 20px; border: 1px solid var(--o-line-2); border-radius: 18px; background: rgba(24, 24, 29, .98); box-shadow: 0 30px 80px rgba(0, 0, 0, .6); }
 .ask h3 { margin: 0 0 6px; font-size: 18px; letter-spacing: -.02em; }
 .ask p { margin: 0 0 14px; color: var(--o-muted); font-size: 13.5px; }
-.ask input, .ask textarea { width: 100%; min-height: 40px; padding: 9px 12px; border: 1px solid var(--o-line); border-radius: 11px; background: rgba(0, 0, 0, .25); color: #fff; font: inherit; }
+.ask input, .ask textarea, .ask select { width: 100%; min-height: 40px; padding: 9px 12px; border: 1px solid var(--o-line); border-radius: 11px; background: rgba(0, 0, 0, .25); color: #fff; font: inherit; }
+.ask textarea { resize: vertical; }
 .askActions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 
 /* ── Разбиение выкупа (десктоп) ──────────────────────────────────────────

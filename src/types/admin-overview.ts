@@ -35,6 +35,13 @@ export interface OverviewDiff {
   arrivedDirect: number;
   done: number;
   doneClean: number;
+  /** Грязные робуксы, списанные с выкупных аккаунтов за окно. */
+  doneGross: number;
+  /** Коды выкупленных — пачка называется поимённо, а не числом. */
+  doneCodes: string[];
+  /** Когда пачка выкупа началась и кончилась. */
+  doneFirstAt: string | null;
+  doneLastAt: string | null;
   queued: number;
   queuedCodes: string[];
   errors: number;
@@ -43,6 +50,31 @@ export interface OverviewDiff {
   paymentsConfirmed: number;
   paymentsRubles: number;
   funnelEvents: number;
+  funnelNicks: number;
+  funnelPasses: number;
+  /** Очередь выкупа: сколько было на начало окна и сколько стало.
+   *  Единственное число, которое отвечает «полегчало или нет». */
+  queueNow: number;
+  queueBefore: number;
+}
+
+/** Кто сделал ход — из этого складывается смысл строки ленты. */
+export type OverviewFeedActor = "us" | "buyer" | "bot" | "wb";
+
+export interface OverviewFeedRow {
+  id: string;
+  at: string;
+  actor: OverviewFeedActor;
+  /** Заголовок строки. */
+  text: string;
+  /** Пояснение под ним. */
+  sub?: string | null;
+  /** Код заказа (WB-код, DIR-…, или номер заказа WB для DBS). */
+  code?: string | null;
+  /** Внутренний заказ — для ссылки в «Заказы». */
+  orderId?: string | null;
+  /** Свёрнутая пачка одинаковых событий: сколько и какие. */
+  group?: { count: number; items: { at: string; code: string }[] } | null;
 }
 
 export interface OverviewHealth {
@@ -67,6 +99,8 @@ export interface AdminOverview {
   queueTotal: number;
   /** «Первым делом»: поднятые руками ⚡ и прямые заказы. `null` — запрос упал. */
   firstInLine: FirstInLine | null;
+  /** Лента смены: что происходило в окне дифа, по времени. */
+  feed: OverviewFeedRow[];
   held: { count: number; codes: string[] };
   diff: OverviewDiff;
   health: OverviewHealth;

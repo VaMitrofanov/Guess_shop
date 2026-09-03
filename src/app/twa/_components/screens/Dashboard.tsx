@@ -17,6 +17,7 @@ import { C } from "../theme";
 import { ageColor, fmtAge } from "../age";
 import { haptic } from "../haptics";
 import type { FirstInLine } from "@/types/first-in-line";
+import type { WbDeliveryQueueSnapshot } from "@/types/wb-delivery";
 import type { WbDeliveryFocus } from "./WbDeliveryScreen";
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -47,16 +48,9 @@ interface Lane {
   oldestAt: string | null;
 }
 
-interface DbsSnapshot {
-  open: number;
-  unclosed: number;
-  unclosedOldestAt: string | null;
-  needsUs: number;
-  needsUsOldestAt: string | null;
-  inBot: number;
-  sections: { id: string; title: string; count: number; oldestAt: string | null }[];
-  stages: { stage: string; label: string; count: number; oldestAt: string | null }[];
-}
+/* Срез доставки — общий тип с сервером и с сайтом: своя копия интерфейса уже
+   один раз разошлась с сервером и показывала на главной не то, что в консоли. */
+type DbsSnapshot = WbDeliveryQueueSnapshot;
 
 interface DashData {
   today: { orders: number; sum: number; sales: number };
@@ -295,15 +289,23 @@ export default function Dashboard({
               <button type="button" className="twa-inset-row twa-press-sm" onClick={() => { haptic.select(); onOpenDelivery?.(null); }}>
                 <span className="twa-result-icon is-delivery"><Truck size={21} /></span>
                 <div>
+                  {/* Заголовок называет того, за кем ход: «закрыть на WB» в
+                      момент, когда заказ ждёт код от покупателя, звало нас на
+                      работу, которой нет. */}
                   <strong>
-                    {dbs.unclosed > 0
-                      ? `WB Доставка · ${dbs.unclosed} не ${plural(dbs.unclosed, "закрыт", "закрыты", "закрыты")} на WB`
-                      : `WB Доставка · ${dbs.needsUs} ${plural(dbs.needsUs, "ждёт", "ждут", "ждут")} нашего хода`}
+                    {dbs.needsUs > 0
+                      ? `WB Доставка · ${dbs.needsUs} ${plural(dbs.needsUs, "ждёт", "ждут", "ждут")} нашего хода`
+                      : dbs.unclosed > 0
+                        ? `WB Доставка · ${dbs.unclosed} ${plural(dbs.unclosed, "ждёт", "ждут", "ждут")} покупателя`
+                        : "WB Доставка"}
                   </strong>
                   <small>
                     {dbs.stages
                       .filter(stage => stage.stage !== "in_bot" && stage.stage !== "link_sent")
                       .map(stage => `${stage.label} ${stage.count}`).join(" · ") || "в работе"}
+                    {/* Срок WB — не возраст заказа: по нему заказ отменяют. */}
+                    {dbs.overdue > 0 && <> · <b style={{ color: C.red }}>{dbs.overdue} просрочено по сроку WB</b></>}
+                    {dbs.overdue === 0 && dbs.dueSoon > 0 && <> · <b style={{ color: C.orange }}>{dbs.dueSoon} истекает за 4 ч</b></>}
                     {dbsOldest && <> · старейший <b style={{ color: ageColor(dbsOldest) }}>{fmtAge(dbsOldest)}</b></>}
                   </small>
                 </div>
@@ -361,7 +363,26 @@ export default function Dashboard({
         {dbs && dbs.inBot > 0 && (
           <button type="button" className="twa-quiet-row twa-press-sm" onClick={() => { haptic.select(); onOpenDelivery?.("inBot"); }}>
             <Truck size={16} />
-            <span>{dbs.inBot} в боте · код выдан, доставка закрыта</span>
+            <span>
+              {dbs.inBot} в боте · код выдан, доставка закрыта
+              {dbs.funnel.readyBuyout > 0 && ` · ${dbs.funnel.readyBuyout} уже в очереди выкупа`}
+            </span>
+            <ChevronRight size={17} />
+          </button>
+        )}
+
+        {/* Гейт ушёл, код не открыт: сам такой заказ не сдвинется никогда —
+            напоминания бота кончились. Внутри «в боте» это было незаметно. */}
+        {dbs && dbs.funnel.notActivated > 0 && (
+          <button type="button" className="twa-quiet-row is-loud twa-press-sm" onClick={() => { haptic.select(); onOpenDelivery?.("notActivated"); }}>
+            <CircleAlert size={16} />
+            <span>
+              <b>{dbs.funnel.notActivated} {plural(dbs.funnel.notActivated, "код не открыт", "кода не открыты", "кодов не открыты")}</b> покупателями
+              <small>
+                {dbs.funnel.notActivatedNudged > 0 && `напоминания кончились у ${dbs.funnel.notActivatedNudged}`}
+                {dbs.funnel.notActivatedOldestAt && ` · старейшему ${fmtAge(dbs.funnel.notActivatedOldestAt)}`}
+              </small>
+            </span>
             <ChevronRight size={17} />
           </button>
         )}

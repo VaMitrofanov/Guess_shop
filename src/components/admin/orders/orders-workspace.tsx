@@ -30,6 +30,7 @@ import type { OrderSlice, OrderSlicesPayload, SliceKey } from "@/lib/order-slice
 import OrderDossier from "./order-dossier";
 import CommandPalette from "./command-palette";
 import NewOrderDialog from "./new-order-dialog";
+import OrderEditor from "./order-editor";
 import SplitDialog from "./split-dialog";
 import {
   AdminOrder, EXTRA_TABS, LiveCheck, Narrow, num, OrdersResponse,
@@ -48,6 +49,8 @@ export interface WorkspaceProps {
   initialMode: "table" | "split";
   initialOrderId: string | null;
   initialQuery: string;
+  /** `?edit=1` — открыть правку заказа сразу: этой ссылкой её зовёт «Обзор». */
+  initialEdit?: boolean;
 }
 
 type Mode = "table" | "split";
@@ -69,7 +72,7 @@ interface Toast {
 }
 
 export default function OrdersWorkspace({
-  initialSlice, initialMode, initialOrderId, initialQuery,
+  initialSlice, initialMode, initialOrderId, initialQuery, initialEdit,
 }: WorkspaceProps) {
   const router = useRouter();
 
@@ -103,6 +106,9 @@ export default function OrdersWorkspace({
   const [createOpen, setCreateOpen] = useState(false);
   /** Заказ, у которого открыт лист разбиения (id, а не объект: список перезагружается). */
   const [splitId, setSplitId] = useState<string | null>(null);
+  /** Заказ, у которого открыт универсальный редактор. Тоже по id: после
+   *  сохранения лента перечитывается, и объект из старого массива устарел. */
+  const [editId, setEditId] = useState<string | null>(initialEdit ? initialOrderId : null);
   const [isPhone, setIsPhone] = useState(false);
 
   useEffect(() => {
@@ -118,8 +124,19 @@ export default function OrdersWorkspace({
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestSeq = useRef(0);
 
-  const openOrder = useMemo(() => orders.find(o => o.id === openId) ?? null, [orders, openId]);
-  const splitOrder = useMemo(() => orders.find(o => o.id === splitId) ?? null, [orders, splitId]);
+  /* Заказ, пришедший ссылкой, может лежать не на первой странице среза —
+     в «Ждут ссылку» их 111. Досье и правка по адресу молча не открывались:
+     обе брали заказ только из загруженной ленты. Догружаем такой заказ
+     отдельно и держим рядом с лентой. */
+  const [pinned, setPinned] = useState<AdminOrder | null>(null);
+
+  const findOrder = useCallback(
+    (id: string | null) => (id ? orders.find(o => o.id === id) ?? (pinned?.id === id ? pinned : null) : null),
+    [orders, pinned],
+  );
+  const openOrder = useMemo(() => findOrder(openId), [findOrder, openId]);
+  const splitOrder = useMemo(() => findOrder(splitId), [findOrder, splitId]);
+  const editOrder = useMemo(() => findOrder(editId), [findOrder, editId]);
   const cursorOrder = orders[cursor] ?? null;
   const currentSlice: OrderSlice | null =
     slices && (slices.slices as Record<string, OrderSlice>)[slice] ? (slices.slices as Record<string, OrderSlice>)[slice] : null;
@@ -227,6 +244,24 @@ export default function OrdersWorkspace({
     const suffix = params.toString();
     window.history.replaceState(null, "", suffix ? `/admin/orders?${suffix}` : "/admin/orders");
   }, [slice, mode, openId, query, narrow]);
+
+  useEffect(() => {
+    const wanted = editId ?? openId ?? splitId;
+    if (!wanted || orders.some(o => o.id === wanted) || pinned?.id === wanted) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        // Поиск по `id` уже умеет роут (`endsWith`), отдельная дверь не нужна.
+        const params = new URLSearchParams({ status: "ALL", q: wanted, limit: "5", skipCounts: "1" });
+        const res = await fetch(`/api/admin/orders?${params}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as OrdersResponse;
+        const found = data.orders.find(o => o.id === wanted) ?? null;
+        if (!cancelled && found) setPinned(found);
+      } catch { /* не нашли — диалог просто не откроется, лента цела */ }
+    })();
+    return () => { cancelled = true; };
+  }, [editId, openId, splitId, orders, pinned]);
 
   /* ── Живая проверка пассов ────────────────────────────────────────────── */
 
@@ -596,7 +631,9 @@ export default function OrdersWorkspace({
         setPaletteOpen(open => !open);
         return;
       }
-      if (typing || ask || paletteOpen || splitId) return;
+      // Редактор ловит Esc и ⌘↵ сам: пока он открыт, горячие клавиши ленты
+      // молчат, иначе «e» в поле ника помечала бы заказ ошибкой.
+      if (typing || ask || paletteOpen || splitId || editId) return;
 
       if (meta && event.key.toLowerCase() === "z") {
         if (undoRef.current) { event.preventDefault(); undoRef.current(); }
@@ -657,6 +694,8 @@ export default function OrdersWorkspace({
       }
 
       const key = event.key.toLowerCase();
+      // `I` — правка (Изменить). `E` занята «пометить ошибкой», и путать их нельзя.
+      if (key === "i" && cursorOrder) { event.preventDefault(); setEditId(cursorOrder.id); return; }
       if (key === "r" && cursorOrder?.status === "ERROR") { event.preventDefault(); void restore(cursorOrder); return; }
       if (key === "f" && cursorOrder) { event.preventDefault(); void toggleHold(cursorOrder); return; }
       if (key === "e" && cursorOrder) { event.preventDefault(); void setError(cursorOrder); return; }
@@ -686,7 +725,7 @@ export default function OrdersWorkspace({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [orders, cursor, cursorOrder, openId, selected, ask, paletteOpen, filtersOpen, helpOpen, createOpen, splitId,
+  }, [orders, cursor, cursorOrder, openId, selected, ask, paletteOpen, filtersOpen, helpOpen, createOpen, splitId, editId,
       complete, restore, toggleHold, setError, togglePriority, toggleSelect, showToast, router]);
 
   // Курсор клавиатуры не должен уезжать за экран.
@@ -851,6 +890,7 @@ export default function OrdersWorkspace({
                   onOpen={() => { setCursor(index); setOpenId(order.id); setMode("split"); }}
                   onPrimary={() => void runPrimary(order)}
                   onPriority={() => void togglePriority(order)}
+                  onEdit={() => { setCursor(index); setEditId(order.id); }}
                   onCopyIds={() => {
                     const ids = gamepassIdsOf(order);
                     if (ids.length === 0) { showToast({ text: "У заказа нет геймпасса", error: true }); return; }
@@ -901,6 +941,7 @@ export default function OrdersWorkspace({
             onPriority={() => void togglePriority(openOrder)}
             onCancel={() => void cancelOrder(openOrder)}
             onSplit={() => setSplitId(openOrder.id)}
+            onEdit={() => setEditId(openOrder.id)}
             onToast={(text, error) => showToast({ text, error })}
             onChanged={() => void load(1, false)}
           />
@@ -1056,6 +1097,23 @@ export default function OrdersWorkspace({
         />
       )}
 
+      {editOrder && (
+        <OrderEditor
+          order={editOrder}
+          onClose={() => setEditId(null)}
+          onSaved={({ changes, notified }) => {
+            setEditId(null);
+            showToast({
+              text: `${editOrder.wbCode}: ${changes.join(", ") || "сохранено"}`
+                + (notified ? ` · клиент оповещён (${notified.toUpperCase()})` : ""),
+            });
+            void load(1, false);
+            void refreshCounts();
+          }}
+          onToast={(text, error) => showToast({ text, error })}
+        />
+      )}
+
       {paletteOpen && (
         <CommandPalette
           slice={slice}
@@ -1073,6 +1131,7 @@ export default function OrdersWorkspace({
               if (ids.length > 0) { copyText(ids.join("\n")); showToast({ text: `⧉ ${ids.join(", ")}` }); }
             }
             if (command === "split" && cursorOrder) setSplitId(cursorOrder.id);
+            if (command === "edit" && cursorOrder) setEditId(cursorOrder.id);
             if (command === "priority" && cursorOrder) await togglePriority(cursorOrder);
             if (command === "help") setHelpOpen(true);
           }}
@@ -1207,7 +1266,7 @@ function SliceStrip({
 /* ── Строка таблицы ───────────────────────────────────────────────────────── */
 
 function OrderRow({
-  order, index, live, selected, cursor, open, busy, leaving, onSelect, onOpen, onPrimary, onPriority, onCopyIds,
+  order, index, live, selected, cursor, open, busy, leaving, onSelect, onOpen, onPrimary, onPriority, onCopyIds, onEdit,
 }: {
   order: AdminOrder;
   index: number;
@@ -1222,6 +1281,7 @@ function OrderRow({
   onPrimary: () => void;
   onPriority: () => void;
   onCopyIds: () => void;
+  onEdit: () => void;
 }) {
   const lane = laneOf(order);
   const flag = orderFlag(order, live, order.remindersSent ?? 0, { splitProgress: true });
@@ -1295,6 +1355,17 @@ function OrderRow({
             ⚡
           </button>
         )}
+        {/* ✎ — правка. Стоит в каждой строке намеренно: дописать ник или ID
+            пасса приходится чаще, чем открывать досье. */}
+        <button
+          type="button"
+          className={`${styles.mini} ${styles.miniQuiet}`}
+          onClick={onEdit}
+          title="Правка: ник, геймпасс, номинал, заметка (I)"
+          aria-label={`Править заказ ${order.wbCode}`}
+        >
+          ✎
+        </button>
         <button type="button" className={`${styles.mini} ${styles.miniQuiet}`} onClick={onOpen} aria-label="Открыть досье">›</button>
       </span>
     </div>

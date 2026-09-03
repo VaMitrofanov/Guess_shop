@@ -444,6 +444,18 @@ export async function loadWbDeliveryOverview(): Promise<WbDeliveryOverview> {
   };
 }
 
+/** Порог «срок вот-вот»: столько же, сколько окно авто-закрытия доставки. */
+const WB_DUE_SOON_MS = 4 * 3600_000;
+
+/** Сколько заказов дорожка называет по имени. Больше — это уже очередь. */
+const WB_NAMED_LIMIT = 3;
+
+/** Ключ пульса синка DBS: числа дорожки — снимок именно этого воркера. */
+const WB_DBS_SYNC_SERVICE = "wb-dbs-sync";
+
+/** Сколько раз в сутки можно попросить у покупателя код получения (О7). */
+export const WB_CODE_ASK_DAILY_LIMIT = 3;
+
 /**
  * Лёгкий срез очереди DBS для главной.
  *
@@ -465,6 +477,13 @@ export async function loadWbDeliveryQueueSnapshot(): Promise<WbDeliveryQueueSnap
       ],
     },
     select: {
+      id: true,
+      wbOrderId: true,
+      buyerName: true,
+      deliveryTo: true,
+      denominationSnapshot: true,
+      gateSentAt: true,
+      gateReminderLevel: true,
       completedAt: true, cancelledAt: true, lastErrorCode: true,
       chatState: true, gateState: true, supplierStatus: true, wbStatus: true,
       wbCreatedAt: true, firstSeenAt: true,
@@ -488,14 +507,26 @@ export async function loadWbDeliveryQueueSnapshot(): Promise<WbDeliveryQueueSnap
   const open = orders
     .map((order) => {
       const row = order.wbCode?.code ? internal.get(order.wbCode.code) : null;
+      const policyOrder = {
+        ...order,
+        hasLiveSecret: wbDeliverySecretIsLive(order.deliverySecret),
+        secretFailedAttempts: order.deliverySecret?.failedAttempts ?? 0,
+        internalStatus: row?.status ?? null,
+        internalRobloxUsername: row?.robloxUsername ?? null,
+      };
       return {
-        stage: wbDeliveryStage({
-          ...order,
-          hasLiveSecret: wbDeliverySecretIsLive(order.deliverySecret),
-          secretFailedAttempts: order.deliverySecret?.failedAttempts ?? 0,
-          internalStatus: row?.status ?? null,
-          internalRobloxUsername: row?.robloxUsername ?? null,
-        }),
+        id: order.id,
+        wbOrderId: order.wbOrderId,
+        buyerName: order.buyerName,
+        deliveryTo: order.deliveryTo,
+        gateSentAt: order.gateSentAt,
+        gateReminderLevel: order.gateReminderLevel,
+        chatState: order.chatState,
+        stage: wbDeliveryStage(policyOrder),
+        // Где покупатель внутри НАШЕЙ воронки после ухода гейта. Одно число
+        // «в боте» скрывало три разных состояния — и одно из них не процесс,
+        // а потери: код ушёл и не открыт.
+        funnelStep: wbFunnelStep(policyOrder),
         // Закрыта ли доставка — вопрос к WB, а не к нашей воронке. Заказ «в
         // нашем боте» доставку не держит: гейт до её закрытия не уходит.
         closedAtWb: wbMarketplaceTerminalFlags(order.supplierStatus, order.wbStatus).completed,
@@ -510,6 +541,71 @@ export async function loadWbDeliveryQueueSnapshot(): Promise<WbDeliveryQueueSnap
 
   const unclosed = open.filter((row) => !row.closedAtWb);
   const needsUs = open.filter((row) => (WB_URGENT_STAGES as readonly string[]).includes(row.stage));
+
+  const now = Date.now();
+  /* Срок WB — обещание покупателю, а не наш возраст заказа. Просрочка считается
+     только по НЕЗАКРЫТЫМ: у закрытой доставки срок уже неважен. */
+  const withDue = unclosed.filter((row) => row.deliveryTo);
+  const overdue = withDue.filter((row) => row.deliveryTo!.getTime() < now);
+  const dueSoon = withDue.filter(
+    (row) => row.deliveryTo!.getTime() >= now && row.deliveryTo!.getTime() - now <= WB_DUE_SOON_MS,
+  );
+  const nextDue = withDue
+    .filter((row) => row.deliveryTo!.getTime() >= now)
+    .sort((a, b) => a.deliveryTo!.getTime() - b.deliveryTo!.getTime())[0] ?? null;
+
+  /* Поимённо — то, где ход не за ботом: сначала наш ход, потом просроченные,
+     потом остальные незакрытые. Три строки, потому что это дорожка на главной,
+     а не очередь: очередь живёт в консоли доставки. */
+  const namedPool = [...open]
+    .filter((row) => !row.closedAtWb || (WB_URGENT_STAGES as readonly string[]).includes(row.stage))
+    .sort((a, b) => {
+      const urgentA = (WB_URGENT_STAGES as readonly string[]).includes(a.stage) ? 0 : 1;
+      const urgentB = (WB_URGENT_STAGES as readonly string[]).includes(b.stage) ? 0 : 1;
+      if (urgentA !== urgentB) return urgentA - urgentB;
+      const dueA = a.deliveryTo?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      const dueB = b.deliveryTo?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      if (dueA !== dueB) return dueA - dueB;
+      return a.since.getTime() - b.since.getTime();
+    })
+    .slice(0, WB_NAMED_LIMIT);
+
+  // Сколько раз просили код получения — из аудита заказа. Запрос один на всю
+  // тройку: у дорожки не может быть N+1 по каждой строке.
+  const askCounts = namedPool.length
+    ? await db.wbMarketplaceEvent.groupBy({
+      by: ["marketplaceOrderId"],
+      where: {
+        marketplaceOrderId: { in: namedPool.map((row) => row.id) },
+        type: { in: ["DELIVERY_CODE_REQUESTED", "DELIVERY_CODE_RECHECK_ASKED"] },
+      },
+      _count: { _all: true },
+      _max: { createdAt: true },
+    })
+    : [];
+  const askByOrder = new Map(askCounts.map((row) => [row.marketplaceOrderId, row]));
+
+  const notActivated = open.filter(
+    (row) => row.funnelStep === "not_activated" && row.gateSentAt != null,
+  );
+
+  const [syncBeat, closedToday] = await Promise.all([
+    db.serviceHeartbeat.findUnique({
+      where: { serviceKey: WB_DBS_SYNC_SERVICE },
+      select: { status: true, lastSeenAt: true },
+    }).catch(() => null),
+    // Ориентир «сколько это обычно занимает»: без него «висит 2 дня» не с чем
+    // сравнить. Считается по закрытым за сутки, средним, а не медианой —
+    // заказов единицы, и медиана на пяти строках ничего не уточняет.
+    db.$queryRaw<Array<{ n: number; avg: number | null }>>`
+      SELECT COUNT(*)::int AS n,
+             AVG(EXTRACT(EPOCH FROM ("completedAt" - COALESCE("wbCreatedAt", "firstSeenAt"))) / 60) AS avg
+        FROM "WbMarketplaceOrder"
+       WHERE "isTest" = false AND "completedAt" > NOW() - INTERVAL '24 hours'
+    `.catch(() => []),
+  ]);
+
+  const closedRow = closedToday[0] ?? { n: 0, avg: null };
 
   return {
     open: open.length,
@@ -528,6 +624,51 @@ export async function loadWbDeliveryQueueSnapshot(): Promise<WbDeliveryQueueSnap
         return { stage, label: WB_STAGE_LABEL[stage], count: rows.length, oldestAt: oldestOf(rows) };
       })
       .filter((row) => row.count > 0),
+
+    overdue: overdue.length,
+    dueSoon: dueSoon.length,
+    nextDueAt: iso(nextDue?.deliveryTo ?? null),
+
+    named: namedPool.map((row) => {
+      const ask = askByOrder.get(row.id);
+      return {
+        id: row.id,
+        wbOrderId: row.wbOrderId,
+        buyerName: row.buyerName,
+        stage: row.stage,
+        stageLabel: WB_STAGE_LABEL[row.stage],
+        since: row.since.toISOString(),
+        deliveryTo: iso(row.deliveryTo),
+        asked: ask?._count._all ?? 0,
+        lastAskAt: iso(ask?._max.createdAt ?? null),
+        // Правило то же, что в DTO: напомнить можно, когда код ждём и уже
+        // просили. Первый запрос — это `request_code`, он живёт в консоли.
+        canRemind: row.stage === "waiting_code" && (ask?._count._all ?? 0) > 0,
+      };
+    }),
+
+    funnel: {
+      instruction: open.filter((row) => row.funnelStep === "instruction").length,
+      nickGiven: open.filter((row) => row.funnelStep === "nick_given").length,
+      readyBuyout: open.filter((row) => row.funnelStep === "ready_buyout" || row.funnelStep === "buying").length,
+      notActivated: notActivated.length,
+      notActivatedOldestAt: notActivated.length
+        ? iso(notActivated.reduce((min, row) => (row.gateSentAt! < min.gateSentAt! ? row : min)).gateSentAt)
+        : null,
+      notActivatedNudged: notActivated.filter((row) => row.gateReminderLevel >= 2).length,
+    },
+
+    sync: syncBeat
+      ? {
+        status: syncBeat.status,
+        ageSeconds: Math.max(0, Math.floor((now - syncBeat.lastSeenAt.getTime()) / 1000)),
+      }
+      : null,
+
+    closedToday: {
+      count: Number(closedRow.n ?? 0),
+      avgMinutes: closedRow.avg == null ? null : Math.round(Number(closedRow.avg)),
+    },
   };
 }
 
@@ -1078,6 +1219,27 @@ export async function performWbDeliveryAction(
 
   const order = await getOrder(input.orderId);
   if (input.action === "request_code" || input.action === "remind_code") {
+    /* Потолок напоминаний — решение О7 от 03.09.2026.
+       Кнопка «Напомнить» появилась на главной, а оттуда её жмут между делом и
+       по нескольку раз: покупатель молчит, и «спросить ещё раз» кажется
+       бесплатным. Для нас — да, для него это чужие сообщения в чате WB, за
+       которые ставят одну звезду. Три обращения в сутки на заказ — это уже
+       настойчиво; четвёртое отказываем текстом, а не молча. */
+    const asked24h = await db.wbMarketplaceEvent.count({
+      where: {
+        marketplaceOrderId: order.id,
+        type: { in: ["DELIVERY_CODE_REQUESTED", "DELIVERY_CODE_RECHECK_ASKED"] },
+        createdAt: { gte: new Date(Date.now() - 86_400_000) },
+      },
+    });
+    if (asked24h >= WB_CODE_ASK_DAILY_LIMIT) {
+      throw new WbDeliveryWorkflowError(
+        `Код уже просили ${asked24h} ${asked24h === 1 ? "раз" : "раза"} за сутки — больше нельзя. `
+        + "Покупателю пишет ещё и сам WB; если он молчит сутки, заказ разбирают вручную, а не ещё одним сообщением.",
+        429,
+        "ASK_LIMIT_REACHED",
+      );
+    }
     await sendText(order, wbCodeRequestMessage(), actor, "request");
     await db.wbMarketplaceOrder.update({
       where: { id: order.id },
@@ -1089,7 +1251,9 @@ export async function performWbDeliveryAction(
     });
     return {
       ok: true,
-      message: input.action === "remind_code" ? "Запрос кода отправлен повторно" : "Инструкция с запросом кода отправлена",
+      message: input.action === "remind_code"
+        ? `Напомнили про код · ${asked24h + 1} из ${WB_CODE_ASK_DAILY_LIMIT} за сутки`
+        : "Инструкция с запросом кода отправлена",
       orderId: order.id,
     };
   }

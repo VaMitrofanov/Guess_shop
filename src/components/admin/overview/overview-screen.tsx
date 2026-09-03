@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowUpRight,
@@ -15,7 +15,7 @@ import {
   Truck,
 } from "lucide-react";
 import { fmtAge, ageTone, type Tone } from "@/lib/order-presentation";
-import type { AdminOverview, OverviewQueueOrder } from "@/types/admin-overview";
+import type { AdminOverview, OverviewFeedRow, OverviewQueueOrder } from "@/types/admin-overview";
 import type { FirstInLineOrder } from "@/types/first-in-line";
 import styles from "./overview.module.css";
 import { cn } from "@/lib/utils";
@@ -56,6 +56,9 @@ const LANE_LABEL: Record<OverviewQueueOrder["lane"], string> = {
 
 const num = (value: number) => value.toLocaleString("ru-RU");
 
+/** Как часто обновляется живая лента, пока вкладка на экране (решение О4). */
+const LIVE_POLL_MS = 30_000;
+
 /** Сколько старейших заказов показывать в дорожке выкупа.
  *
  *  Три — не круглое число, а высота: дорожки стоят в один ряд, и пятью строками
@@ -80,6 +83,18 @@ function awayLabel(sinceIso: string): string {
   if (hours < 24) return mins % 60 === 0 ? `${hours} ч` : `${hours} ч ${mins % 60} мин`;
   const days = Math.floor(hours / 24);
   return `${days} ${plural(days, "день", "дня", "дней")}`;
+}
+
+/** «через 54 мин» / «2 д 19 ч назад» — срок WB словами. */
+function dueLabel(iso: string): string {
+  const diff = Date.parse(iso) - Date.now();
+  const mins = Math.round(Math.abs(diff) / 60_000);
+  const body = mins < 60
+    ? `${mins} мин`
+    : mins < 1440
+      ? `${Math.floor(mins / 60)} ч${mins % 60 ? ` ${mins % 60} мин` : ""}`
+      : `${Math.floor(mins / 1440)} ${plural(Math.floor(mins / 1440), "день", "дня", "дней")}`;
+  return diff >= 0 ? `через ${body}` : `${body} назад`;
 }
 
 function moscowNow(iso: string) {
@@ -136,19 +151,52 @@ export default function OverviewScreen({
     window.setTimeout(() => setToast(null), 4200);
   }, []);
 
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
+  /** Когда данные последний раз пришли с сервера — из этого «живая · N с». */
+  const [syncedAt, setSyncedAt] = useState(() => Date.now());
+  const [liveAge, setLiveAge] = useState(0);
+
+  const refresh = useCallback(async (silent = false) => {
+    if (!silent) setRefreshing(true);
     try {
       const res = await fetch(`/api/admin/overview?since=${encodeURIComponent(since)}`, { cache: "no-store" });
       if (!res.ok) throw new Error(`Сервер ответил ${res.status}`);
       setData(await res.json() as AdminOverview);
-      setBought(new Set());
+      setSyncedAt(Date.now());
+      setLiveAge(0);
+      if (!silent) setBought(new Set());
     } catch (error) {
-      showToast((error as Error).message, true);
+      // Тихий круг молчит: сеть моргнула — экран просто останется прежним, а
+      // «живая · N с» сама покажет, что данные стареют.
+      if (!silent) showToast((error as Error).message, true);
     } finally {
-      setRefreshing(false);
+      if (!silent) setRefreshing(false);
     }
   }, [since, showToast]);
+
+  /* Живой опрос — решение О4 от 03.09.2026: раз в 30 секунд и ТОЛЬКО пока
+     вкладка на экране. Фоновая вкладка не должна дёргать сервер: админов трое,
+     и три забытых вкладки — это три бессмысленных запроса в минуту круглые
+     сутки. Окно дифа при этом не двигается: его держит отметка присутствия,
+     которая ставится на загрузке страницы, а не на этом запросе. */
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  useEffect(() => {
+    const tick = window.setInterval(() => {
+      setLiveAge(Math.round((Date.now() - syncedAt) / 1000));
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - syncedAt < LIVE_POLL_MS) return;
+      void refreshRef.current(true);
+    }, 1000);
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - syncedAt >= LIVE_POLL_MS) void refreshRef.current(true);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(tick);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [syncedAt]);
 
   const queue = useMemo(
     () => data.queue.filter(order => !bought.has(order.id)),
@@ -206,6 +254,33 @@ export default function OverviewScreen({
     showToast(next ? `✎ ${order.wbCode}: заметка сохранена` : `✎ ${order.wbCode}: заметка снята`);
   }, [showToast]);
 
+  /* Напоминание про код доставки прямо с обзора (решение О7 от 03.09.2026).
+     Кнопка отправляет покупателю сообщение в чат WB, поэтому она спрашивает
+     подтверждение и показывает, что именно уйдёт. Потолок — три обращения в
+     сутки на заказ — стоит на сервере, а не здесь: с телефона и из консоли
+     доставки жмут ту же кнопку. */
+  const [remindAsk, setRemindAsk] = useState<string | null>(null);
+
+  const remindCode = useCallback(async (row: { id: string; wbOrderId: string }) => {
+    setRemindAsk(null);
+    setBusy(prev => new Set(prev).add(row.id));
+    try {
+      const res = await fetch("/api/admin/wb-delivery", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "remind_code", orderId: row.id }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) { showToast(`WB #${row.wbOrderId}: ${payload?.error ?? `сервер ответил ${res.status}`}`, true); return; }
+      showToast(`🔔 WB #${row.wbOrderId}: ${payload?.message ?? "напомнили про код"}`);
+      void refresh();
+    } catch (error) {
+      showToast((error as Error).message, true);
+    } finally {
+      setBusy(prev => { const next = new Set(prev); next.delete(row.id); return next; });
+    }
+  }, [refresh, showToast]);
+
   /* ID пассов из «Первым делом» — то, что вставляют в донора.
      У разбитого заказа их несколько (все невыкупленные части), поэтому это
      `flatMap`, а не `map`: одна строка списка может дать две покупки. */
@@ -233,6 +308,18 @@ export default function OverviewScreen({
   // Ход за нами и незакрытая доставка — две разные работы, но обе наши.
   const dbsPending = dbs ? (dbs.needsUs > 0 ? dbs.needsUs : dbs.unclosed) : 0;
   const dbsOldest = dbs ? (dbs.needsUs > 0 ? dbs.needsUsOldestAt : dbs.unclosedOldestAt) : null;
+  /* Кто должен следующий ход. «Закрыть на WB» пишем только когда закрывать
+     действительно нам: у незакрытой доставки, которая ждёт код покупателя, ход
+     не наш, и звать в неё работой — врать. */
+  const dbsMoveLabel = !dbs || dbsPending === 0
+    ? "всё закрыто"
+    : dbs.needsUs > 0
+      ? "наш ход"
+      : dbs.sections.find(section => section.id === "buyer")?.count
+        ? "ход за покупателем"
+        : "закрыть на WB";
+  /* Пульс синка: 6 минут — тот же порог, что у тихой строки экрана. */
+  const syncStale = !dbs?.sync || dbs.sync.ageSeconds > 360 || dbs.sync.status !== "HEALTHY";
   const hot = buyout.age.overdue > 0;
 
   return (
@@ -478,33 +565,139 @@ export default function OverviewScreen({
           <article className={cn(styles.lane, dbsPending > 0 && styles.laneHot)}>
             <header className={cn(styles.laneHead, dbsPending > 0 ? styles.toneOrange : styles.toneMuted)}>
               <i aria-hidden="true" />
-              {/* Незакрытая доставка — тоже наш ход, просто другой: «наш ход 0»
-                  рядом с «2 не закрыты на WB» читалось как «всё в порядке». */}
-              <strong>WB Доставка · {dbs.needsUs > 0 ? "наш ход" : "закрыть на WB"}</strong>
+              {/* Заголовок называет того, за кем ход, а не работу вообще: до
+                  03.09 он писал «закрыть на WB · 2» ровно тогда, когда закрыть
+                  их было нельзя — оба заказа ждали код от покупателя. */}
+              <strong>WB Доставка · {dbsMoveLabel}</strong>
               <b>{dbsPending}</b>
             </header>
+
             <div className={styles.laneMeta}>
               {dbs.needsUs > 0 && dbs.unclosed > 0 && (
                 <span className={styles.toneRed}><b>{dbs.unclosed}</b> не закрыты на WB</span>
+              )}
+              {/* Срок WB — не наш возраст заказа: по нему WB отменяет заказ и
+                  снижает рейтинг, и решение принимается именно по нему. */}
+              {dbs.overdue > 0 && (
+                <span className={styles.toneRed}><b>{dbs.overdue}</b> просрочено по сроку WB</span>
+              )}
+              {dbs.overdue === 0 && dbs.dueSoon > 0 && (
+                <span className={styles.toneOrange}><b>{dbs.dueSoon}</b> истекает в ближайшие 4 ч</span>
+              )}
+              {dbs.overdue === 0 && dbs.dueSoon === 0 && dbs.nextDueAt && (
+                <span>ближайший срок <b>{dueLabel(dbs.nextDueAt)}</b></span>
               )}
               {dbsOldest && (
                 <span>старейший <b className={TONE_CLASS[ageTone(dbsOldest)]}>{fmtAge(dbsOldest)}</b></span>
               )}
             </div>
-            <div className={styles.laneRows}>
-              {dbs.stages
-                .filter(stage => stage.stage !== "in_bot" && stage.stage !== "link_sent")
-                .slice(0, 4)
-                .map(stage => (
-                  <div className={styles.laneRow} key={stage.stage}>
-                    <span>{stage.label}</span>
-                    <b>{stage.count}</b>
-                  </div>
-                ))}
-            </div>
+
+            {/* Поимённо: до трёх заказов, где ход не за ботом. Числа «Ждём код 2»
+                не говорили ни кто это, ни сколько раз мы уже спрашивали. */}
+            {dbs.named.length > 0 && (
+              <div className={styles.dbsNamed}>
+                {dbs.named.map(row => {
+                  const overdue = row.deliveryTo ? Date.parse(row.deliveryTo) < Date.now() : false;
+                  return (
+                    <div className={cn(styles.dbsRow, overdue && styles.dbsRowHot)} key={row.id}>
+                      <div className={styles.dbsRowTop}>
+                        <Link className={styles.code} href={`/admin/wildberries/delivery?order=${row.id}`}>
+                          {row.wbOrderId}
+                        </Link>
+                        <span className={styles.note}>{row.buyerName ?? "имя не пришло"}</span>
+                        <span className={styles.spacer} />
+                        <span className={cn(styles.note, styles.dbsStage)}>{row.stageLabel}</span>
+                      </div>
+                      <div className={styles.dbsRowWhy}>
+                        {row.deliveryTo && (
+                          <b className={overdue ? styles.toneRed : styles.toneOrange}>
+                            {overdue ? `срок WB истёк ${dueLabel(row.deliveryTo)}` : `срок WB ${dueLabel(row.deliveryTo)}`}
+                          </b>
+                        )}
+                        <small>
+                          {row.asked > 0
+                            ? `код просили ${row.asked} ${plural(row.asked, "раз", "раза", "раз")}${row.lastAskAt ? `, последний ${fmtAge(row.lastAskAt)} назад` : ""} · автонапоминаний нет`
+                            : "код ещё не просили"}
+                        </small>
+                      </div>
+                      {row.canRemind && (
+                        remindAsk === row.id ? (
+                          <div className={styles.dbsAsk}>
+                            <span>Отправить в чат WB просьбу прислать код доставки?</span>
+                            <button
+                              type="button"
+                              className={cn(styles.btn, styles.btnSm, styles.btnPrimary)}
+                              disabled={busy.has(row.id)}
+                              onClick={() => void remindCode(row)}
+                            >
+                              Отправить
+                            </button>
+                            <button type="button" className={cn(styles.btn, styles.btnSm)} onClick={() => setRemindAsk(null)}>
+                              Отмена
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className={cn(styles.btn, styles.btnSm, styles.dbsRemind)}
+                            onClick={() => setRemindAsk(row.id)}
+                          >
+                            🔔 Напомнить
+                          </button>
+                        )
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* «в боте N» — три разные вещи в одном числе: читают инструкцию,
+                стоят в очереди выкупа и НЕ открыли код вовсе. Третье — не
+                процесс, а потери, и в тихой строке ему было не место. */}
+            {dbs.inBot > 0 && (
+              <>
+                <div className={styles.dbsSplit} aria-hidden="true">
+                  {dbs.funnel.instruction > 0 && <i style={{ flexGrow: dbs.funnel.instruction, background: "var(--o-blue)" }} />}
+                  {dbs.funnel.nickGiven > 0 && <i style={{ flexGrow: dbs.funnel.nickGiven, background: "var(--o-ice)" }} />}
+                  {dbs.funnel.readyBuyout > 0 && <i style={{ flexGrow: dbs.funnel.readyBuyout, background: "var(--o-green)" }} />}
+                  {dbs.funnel.notActivated > 0 && <i style={{ flexGrow: dbs.funnel.notActivated, background: "var(--o-red)" }} />}
+                </div>
+                <div className={styles.dbsLegend}>
+                  {dbs.funnel.instruction > 0 && <span><i style={{ background: "var(--o-blue)" }} />читают инструкцию <b>{dbs.funnel.instruction}</b></span>}
+                  {dbs.funnel.nickGiven > 0 && <span><i style={{ background: "var(--o-ice)" }} />ждём геймпасс <b>{dbs.funnel.nickGiven}</b></span>}
+                  {dbs.funnel.readyBuyout > 0 && <span><i style={{ background: "var(--o-green)" }} />в очереди выкупа <b>{dbs.funnel.readyBuyout}</b></span>}
+                  {dbs.funnel.notActivated > 0 && <span><i style={{ background: "var(--o-red)" }} />код не открыт <b>{dbs.funnel.notActivated}</b></span>}
+                </div>
+              </>
+            )}
+
+            {dbs.funnel.notActivated > 0 && (
+              <Link className={cn(styles.laneRow, styles.dbsLost)} href="/admin/wildberries/delivery?focus=notActivated">
+                <span>
+                  {dbs.funnel.notActivated} {plural(dbs.funnel.notActivated, "код не открыт", "кода не открыты", "кодов не открыты")}
+                  {dbs.funnel.notActivatedOldestAt && ` · старейшему ${fmtAge(dbs.funnel.notActivatedOldestAt)}`}
+                </span>
+                <b>{dbs.funnel.notActivatedNudged > 0 ? `напоминания кончились у ${dbs.funnel.notActivatedNudged}` : "разобрать"}</b>
+              </Link>
+            )}
+
             <footer className={styles.laneFoot}>
               <Link className={cn(styles.btn, styles.btnSm)} href="/admin/wildberries/delivery">Открыть доставку</Link>
-              <span className={styles.note}>в боте {dbs.inBot}</span>
+              {dbs.closedToday.count > 0 && (
+                <span className={styles.note}>
+                  за сутки закрыто {dbs.closedToday.count}
+                  {dbs.closedToday.avgMinutes != null && ` · обычно ${dbs.closedToday.avgMinutes} мин`}
+                </span>
+              )}
+              {/* Пульс синка: все числа дорожки — снимок воркера, и молчащий
+                  воркер рисует спокойную дорожку вместо вчерашнего дня. */}
+              <span className={cn(styles.dbsSync, syncStale && styles.dbsSyncStale)} title="Пульс воркера wb-dbs-sync">
+                <i />
+                {dbs.sync
+                  ? syncStale ? `синк молчит ${Math.floor(dbs.sync.ageSeconds / 60)} мин` : `синк ${dbs.sync.ageSeconds} с`
+                  : "синк не отвечал"}
+              </span>
             </footer>
           </article>
         )}
@@ -575,7 +768,7 @@ export default function OverviewScreen({
       )}
 
       {/* ── 3. Пока вас не было ────────────────────────────────────────────── */}
-      <DiffPanel diff={data.diff} firstVisit={firstVisit} />
+      <DiffPanel data={data} firstVisit={firstVisit} liveAgeSeconds={liveAge} onRefresh={() => void refresh()} />
 
       {/* ── 4. Тихая строка ────────────────────────────────────────────────── */}
       <HealthStrip health={data.health} />
@@ -594,86 +787,351 @@ export default function OverviewScreen({
 
 /* ── Пока вас не было ─────────────────────────────────────────────────────── */
 
-function DiffPanel({ diff, firstVisit }: { diff: AdminOverview["diff"]; firstVisit: boolean }) {
-  const rows: { key: string; value: string; tone?: Tone; title: string; hint?: string }[] = [];
+type DiffTab = "sum" | "feed" | "threads";
 
-  if (diff.arrived > 0) {
-    const parts = [
-      diff.arrivedDbs > 0 ? `DBS ${diff.arrivedDbs}` : null,
-      diff.arrivedDirect > 0 ? `прямых ${diff.arrivedDirect}` : null,
-    ].filter(Boolean);
-    rows.push({
-      key: "arrived",
-      value: `+${diff.arrived}`,
-      tone: "green",
-      title: `${plural(diff.arrived, "заказ пришёл", "заказа пришло", "заказов пришло")}`,
-      hint: parts.length > 0 ? `из них ${parts.join(" · ")}` : undefined,
-    });
-  }
-  if (diff.done > 0) {
-    rows.push({
-      key: "done",
-      value: String(diff.done),
-      tone: "green",
-      title: `выкуплено · ${num(diff.doneClean)} R$ клиентам`,
-    });
-  }
-  if (diff.queued > 0) {
-    rows.push({
-      key: "queued",
-      value: `+${diff.queued}`,
-      tone: "blue",
-      title: "встали в очередь выкупа",
-      hint: diff.queuedCodes.join(" · "),
-    });
-  }
-  if (diff.errors > 0) {
-    rows.push({ key: "errors", value: String(diff.errors), tone: "red", title: "ушли в ошибку выкупа" });
-  }
-  if (diff.wbCancelled > 0) {
-    rows.push({ key: "cancel", value: String(diff.wbCancelled), tone: "red", title: "отменил Wildberries" });
-  }
-  if (diff.rejected > 0) {
-    rows.push({ key: "rejected", value: String(diff.rejected), tone: "orange", title: "отклонено" });
-  }
-  if (diff.paymentsConfirmed > 0) {
-    rows.push({
-      key: "pay",
-      value: String(diff.paymentsConfirmed),
-      tone: "green",
-      title: `оплат подтверждено · ${num(diff.paymentsRubles)} ₽`,
-    });
-  }
-  if (diff.funnelEvents > 0) {
-    rows.push({
-      key: "funnel",
-      value: String(diff.funnelEvents),
-      tone: "muted",
-      title: "ников и геймпассов принято от покупателей",
-      hint: "воронка бота идёт сама — вмешательство не нужно",
-    });
-  }
+/** Кто сделал ход — значок и цвет одинаковы во всех вкладках блока. */
+const ACTOR_META: Record<OverviewFeedRow["actor"], { mark: string; cls: string; title: string }> = {
+  us:    { mark: "М", cls: styles.actorUs,    title: "мы" },
+  buyer: { mark: "П", cls: styles.actorBuyer, title: "покупатель" },
+  bot:   { mark: "Б", cls: styles.actorBot,   title: "бот" },
+  wb:    { mark: "WB", cls: styles.actorWb,   title: "Wildberries" },
+};
+
+function hhmm(iso: string) {
+  return new Intl.DateTimeFormat("ru-RU", { timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+}
+
+/** «42 мин» / «1 ч 11 мин» — длительность нити. */
+function spanLabel(fromIso: string, toIso: string) {
+  const mins = Math.max(0, Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 60_000));
+  if (mins < 60) return `${mins} мин`;
+  const hours = Math.floor(mins / 60);
+  return mins % 60 === 0 ? `${hours} ч` : `${hours} ч ${mins % 60} мин`;
+}
+
+/* ── Пока вас не было ─────────────────────────────────────────────────────
+   Блок отвечал на «что случилось» пятью строками 13-м кеглем. Смена начинается
+   с двух других вопросов, и оба он молчал: **полегчало ли** (очередь была 19,
+   стала 11) и **что застряло** — застрявшее событий не порождает и потому в
+   дифе невидимо. Плюс ни одного времени: десять выкупов пачкой за 42 минуты и
+   десять за ночь выглядели одинаково.
+
+   Отсюда три вкладки: сводка (итог смены), лента (когда именно) и нити (что
+   происходило с конкретным заказом). Лента живая — опрос идёт, пока вкладка
+   браузера открыта; окно дифа при этом не двигается, его держит отметка
+   присутствия на сервере. */
+function DiffPanel({
+  data, firstVisit, liveAgeSeconds, onRefresh,
+}: {
+  data: AdminOverview;
+  firstVisit: boolean;
+  liveAgeSeconds: number;
+  onRefresh: () => void;
+}) {
+  const [tab, setTab] = useState<DiffTab>("sum");
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
+
+  const diff = data.diff;
+  const feed = data.feed ?? [];
+  const dbs = data.dbs;
+  const link = data.slices.slices.AWAITING_LINK;
+
+  /* Нити: те же события, сгруппированные по заказу. Одна нить — это история
+     «что с ним происходило», и она отвечает на вопрос, которого нет ни у
+     сводки, ни у ленты: сколько заказ шёл от шага к шагу. */
+  const threads = useMemo(() => {
+    const byCode = new Map<string, OverviewFeedRow[]>();
+    for (const row of feed) {
+      if (row.group) {
+        for (const item of row.group.items) {
+          const list = byCode.get(item.code) ?? [];
+          list.push({ ...row, id: `${row.id}:${item.code}`, at: item.at, text: "выкуплен", code: item.code, group: null });
+          byCode.set(item.code, list);
+        }
+        continue;
+      }
+      if (!row.code) continue;
+      const list = byCode.get(row.code) ?? [];
+      list.push(row);
+      byCode.set(row.code, list);
+    }
+    return [...byCode.entries()]
+      .map(([code, rows]) => {
+        const sorted = [...rows].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+        return { code, rows: sorted, orderId: sorted.find(row => row.orderId)?.orderId ?? null };
+      })
+      .filter(thread => thread.rows.length > 1)
+      .sort((a, b) => Date.parse(b.rows[b.rows.length - 1].at) - Date.parse(a.rows[a.rows.length - 1].at))
+      .slice(0, 8);
+  }, [feed]);
+
+  const queueDelta = diff.queueBefore - diff.queueNow;
+  const stuck = [
+    dbs && dbs.unclosed > 0
+      ? {
+        key: "dbs",
+        icon: "⏰",
+        title: `${dbs.unclosed} ${plural(dbs.unclosed, "заказ WB ждёт", "заказа WB ждут", "заказов WB ждут")} закрытия доставки`,
+        hint: dbs.overdue > 0
+          ? `${dbs.overdue} ${plural(dbs.overdue, "просрочен", "просрочены", "просрочены")} по сроку WB · автонапоминаний на код нет`
+          : "ход за покупателем — ждём код получения",
+        href: "/admin/wildberries/delivery",
+        label: "Доставка →",
+      }
+      : null,
+    dbs && dbs.funnel.notActivated > 0
+      ? {
+        key: "gate",
+        icon: "📮",
+        title: `${dbs.funnel.notActivated} ${plural(dbs.funnel.notActivated, "код не открыт", "кода не открыты", "кодов не открыты")} покупателями`,
+        hint: [
+          dbs.funnel.notActivatedNudged > 0 ? `напоминания кончились у ${dbs.funnel.notActivatedNudged}` : null,
+          dbs.funnel.notActivatedOldestAt ? `старейшему ${fmtAge(dbs.funnel.notActivatedOldestAt)}` : null,
+        ].filter(Boolean).join(" · "),
+        href: "/admin/wildberries/delivery?focus=notActivated",
+        label: "Разобрать",
+      }
+      : null,
+    link.stale > 0
+      ? {
+        key: "stale",
+        icon: "🧷",
+        title: `${link.stale} ${plural(link.stale, "висяк", "висяка", "висяков")} без ссылки дольше двух недель`,
+        hint: `из ${link.orders} ждущих ссылку · бот молчит после трёх напоминаний`,
+        href: "/admin/orders?slice=STALE_LINK",
+        label: "Висяки →",
+      }
+      : null,
+  ].filter(Boolean) as { key: string; icon: string; title: string; hint: string; href: string; label: string }[];
+
+  const calm = [
+    diff.errors === 0 ? "ошибок выкупа нет" : null,
+    diff.wbCancelled === 0 ? "отмен WB нет" : null,
+    diff.rejected === 0 ? "отказов нет" : null,
+  ].filter(Boolean).join(" · ");
 
   return (
     <section className={styles.diff} aria-label="Что изменилось">
       <header className={styles.diffHead}>
         <strong>Пока вас не было</strong>
-        <span>
-          {firstVisit ? "первый заход · показываем сутки" : `с прошлого захода · ${awayLabel(diff.since)}`}
+        <span className={styles.diffWindow}>
+          {firstVisit
+            ? "первый заход · показываем сутки"
+            : `${awayLabel(diff.since)} · с ${hhmm(diff.since)} до ${hhmm(data.now)} МСК`}
         </span>
+        <span className={styles.spacer} />
+        {/* Лента живая ровно пока вкладка на экране: фоновая вкладка не должна
+            дёргать сервер, а вернувшийся админ обязан увидеть свежее. */}
+        <button type="button" className={styles.diffLive} onClick={onRefresh} title="Обновить сейчас">
+          <i /> живая · {liveAgeSeconds < 60 ? `${liveAgeSeconds} с` : `${Math.floor(liveAgeSeconds / 60)} мин`}
+        </button>
+        <div className={styles.diffTabs} role="tablist" aria-label="Вид блока">
+          <button type="button" role="tab" aria-selected={tab === "sum"} onClick={() => setTab("sum")}>Сводка</button>
+          <button type="button" role="tab" aria-selected={tab === "feed"} onClick={() => setTab("feed")}>Лента</button>
+          <button type="button" role="tab" aria-selected={tab === "threads"} onClick={() => setTab("threads")}>По заказам</button>
+        </div>
       </header>
-      {rows.length === 0 ? (
-        <div className={styles.diffEmpty}>Ничего не изменилось</div>
-      ) : (
-        rows.map(row => (
-          <div className={styles.diffRow} key={row.key}>
-            <span className={cn(styles.d, TONE_CLASS[row.tone ?? "muted"])}>{row.value}</span>
-            <span className={styles.t}>
-              <strong>{row.title}</strong>
-              {row.hint && <small>{row.hint}</small>}
-            </span>
+
+      {tab === "sum" && (
+        <>
+          <div className={styles.diffTiles}>
+            <div className={styles.diffTile}>
+              <span>Очередь выкупа</span>
+              <strong>
+                {num(diff.queueBefore)} <em>→</em> {num(diff.queueNow)}
+                {queueDelta !== 0 && (
+                  <b className={queueDelta > 0 ? styles.toneGreen : styles.toneOrange}>
+                    {queueDelta > 0 ? `−${queueDelta}` : `+${-queueDelta}`}
+                  </b>
+                )}
+              </strong>
+              <small>
+                осталось <b>{num(data.slices.slices.BUYOUT.gross)} R$</b> грязными
+                {data.slices.slices.BUYOUT.age.oldestAt && <> · старейшему <b>{fmtAge(data.slices.slices.BUYOUT.age.oldestAt)}</b></>}
+              </small>
+            </div>
+            <div className={styles.diffTile}>
+              <span>Ушло с доноров</span>
+              <strong>{num(diff.doneGross)} <em>R$</em></strong>
+              <small>
+                {diff.done > 0
+                  ? <>клиентам зачислено <b>{num(diff.doneClean)} R$</b> · {diff.done} {plural(diff.done, "заказ", "заказа", "заказов")}</>
+                  : "за окно не выкупали"}
+              </small>
+            </div>
+            <div className={styles.diffTile}>
+              <span>Пришло денег</span>
+              <strong>{num(diff.paymentsRubles)} <em>₽</em></strong>
+              <small>
+                {diff.paymentsConfirmed > 0
+                  ? <>{diff.paymentsConfirmed} {plural(diff.paymentsConfirmed, "оплата", "оплаты", "оплат")} подтверждено</>
+                  : "оплат не было"}
+              </small>
+            </div>
           </div>
-        ))
+
+          <div className={styles.diffGroups}>
+            {diff.done > 0 && (
+              <>
+                <div className={styles.diffGroupKey}>Сделано</div>
+                <div className={styles.diffLine}>
+                  <i className={styles.toneGreen}>✓</i>
+                  <span>
+                    <b>{diff.done} {plural(diff.done, "заказ выкуплен", "заказа выкуплено", "заказов выкуплено")}</b> · {num(diff.doneClean)} R$ клиентам
+                    <small>{diff.doneCodes.slice(0, 6).join(" · ")}{diff.doneCodes.length > 6 ? ` и ещё ${diff.doneCodes.length - 6}` : ""}</small>
+                  </span>
+                  {diff.doneFirstAt && diff.doneLastAt && (
+                    <time>{hhmm(diff.doneFirstAt)} → {hhmm(diff.doneLastAt)}</time>
+                  )}
+                  <button
+                    type="button"
+                    className={cn(styles.btn, styles.btnSm)}
+                    onClick={() => copyText(diff.doneCodes.join("\n"))}
+                  >
+                    ⧉ коды
+                  </button>
+                </div>
+              </>
+            )}
+
+            {diff.arrived > 0 && (
+              <>
+                <div className={styles.diffGroupKey}>Пришло</div>
+                <div className={styles.diffLine}>
+                  <i className={styles.toneBlue}>+</i>
+                  <span>
+                    <b>{diff.arrived} {plural(diff.arrived, "заказ", "заказа", "заказов")}</b>
+                    {diff.arrivedDbs > 0 && ` · DBS ${diff.arrivedDbs}`}
+                    {diff.arrivedDirect > 0 && ` · прямых ${diff.arrivedDirect}`}
+                    {diff.queued > 0 && <small>в очередь встали {diff.queued}: {diff.queuedCodes.join(" · ")}</small>}
+                  </span>
+                </div>
+              </>
+            )}
+
+            {(diff.funnelEvents > 0 || diff.paymentsConfirmed > 0) && (
+              <>
+                <div className={styles.diffGroupKey}>Само, без нас</div>
+                <div className={styles.diffLine}>
+                  <i className={styles.toneMuted}>⚙</i>
+                  <span>
+                    {[
+                      diff.funnelNicks > 0 ? `${diff.funnelNicks} ${plural(diff.funnelNicks, "ник", "ника", "ников")}` : null,
+                      diff.funnelPasses > 0 ? `${diff.funnelPasses} ${plural(diff.funnelPasses, "геймпасс", "геймпасса", "геймпассов")}` : null,
+                    ].filter(Boolean).join(" и ") || "воронка"}
+                    {" "}прислали покупатели
+                    <small>вмешательства не потребовалось</small>
+                  </span>
+                </div>
+              </>
+            )}
+
+            {stuck.length > 0 && (
+              <>
+                <div className={cn(styles.diffGroupKey, styles.toneRed)}>
+                  Не сдвинулось · {stuck.length} {plural(stuck.length, "очаг", "очага", "очагов")}
+                </div>
+                {stuck.map(item => (
+                  <div className={cn(styles.diffLine, styles.diffLineAlert)} key={item.key}>
+                    <i>{item.icon}</i>
+                    <span><b>{item.title}</b>{item.hint && <small>{item.hint}</small>}</span>
+                    <Link className={cn(styles.btn, styles.btnSm)} href={item.href}>{item.label}</Link>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {calm && (
+              <>
+                <div className={styles.diffGroupKey}>Тихо</div>
+                <div className={styles.diffLine}>
+                  <i className={styles.toneGreen}>✓</i>
+                  <span>
+                    {calm}
+                    {data.held.count === 0 ? " · заморозок нет" : ` · заморожено ${data.held.count}`}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        </>
+      )}
+
+      {tab === "feed" && (
+        <div className={styles.feed}>
+          {feed.length === 0 && <div className={styles.diffEmpty}>За окно не случилось ничего</div>}
+          {feed.map(row => {
+            const actor = ACTOR_META[row.actor];
+            if (row.group) {
+              const open = openGroup === row.id;
+              return (
+                <div key={row.id}>
+                  <button
+                    type="button"
+                    className={styles.feedFold}
+                    aria-expanded={open}
+                    onClick={() => setOpenGroup(open ? null : row.id)}
+                  >
+                    <span className={cn(styles.feedChev, open && styles.feedChevOpen)}>▸</span>
+                    <span><b>{row.text}</b></span>
+                    <time>
+                      {hhmm(row.group.items[row.group.items.length - 1].at)} → {hhmm(row.group.items[0].at)}
+                    </time>
+                  </button>
+                  {open && (
+                    <div className={styles.feedGroupBody}>
+                      {row.group.items.map(item => (
+                        <span key={`${row.id}:${item.code}:${item.at}`}><b>{hhmm(item.at)}</b> {item.code}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+            return (
+              <div className={styles.feedRow} key={row.id}>
+                <time>{hhmm(row.at)}</time>
+                <span className={cn(styles.actor, actor.cls)} title={actor.title}>{actor.mark}</span>
+                <span>
+                  {row.code && (
+                    row.orderId
+                      ? <Link className={styles.code} href={`/admin/orders?order=${row.orderId}`}>{row.code}</Link>
+                      : <span className={styles.code}>{row.code}</span>
+                  )}
+                  {" "}{row.text}
+                  {row.sub && <small>{row.sub}</small>}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === "threads" && (
+        <div className={styles.threads}>
+          {threads.length === 0 && <div className={styles.diffEmpty}>Пока ни у одного заказа не набралось истории за окно</div>}
+          {threads.map(thread => (
+            <div className={styles.thread} key={thread.code}>
+              <div className={styles.threadHead}>
+                {thread.orderId
+                  ? <Link className={styles.code} href={`/admin/orders?order=${thread.orderId}`}>{thread.code}</Link>
+                  : <span className={styles.code}>{thread.code}</span>}
+                <span className={styles.note}>{thread.rows.length} {plural(thread.rows.length, "шаг", "шага", "шагов")}</span>
+                <span className={styles.spacer} />
+                <span className={styles.note}>
+                  {spanLabel(thread.rows[0].at, thread.rows[thread.rows.length - 1].at)}
+                </span>
+              </div>
+              <div className={styles.threadSteps}>
+                {thread.rows.map(row => (
+                  <span className={styles.threadStep} key={row.id}>
+                    {row.text}<em>{hhmm(row.at)}</em>
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </section>
   );

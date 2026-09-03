@@ -41,17 +41,16 @@ import OrderSheet from "../OrderSheet";
 import { toast } from "../Toast";
 import css from "./WbDeliveryScreen.module.css";
 
-export type WbDeliveryFocus = "waitingCode" | "readyReceive" | "attention" | "inBot";
+export type WbDeliveryFocus = "waitingCode" | "readyReceive" | "attention" | "inBot" | "notActivated";
 
 function dateTime(value: string | null) {
   if (!value) return "—";
   return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
-function money(value: number | null) {
-  if (value == null) return "—";
-  return `${Math.round(value / 100).toLocaleString("ru-RU")} ₽`;
-}
+/* Рублей в доставке нет намеренно (решение О6 от 03.09.2026): цена в нашей
+   базе — снимок с момента синка и с кабинетом WB не сходится. Деньги смотрят
+   там, здесь — обязательства: номинал, срок и этап. */
 
 /** How the operator refers to an order out loud. The WB number is the fallback
  * only when WB has not served a name yet. */
@@ -73,6 +72,13 @@ const FOCUS: Record<WbDeliveryFocus, { label: string; empty: string; match: (ord
   waitingCode:  { label: "Ждут код",       empty: "Никто не ждёт код",      match: (order) => order.stage === "waiting_code" },
   readyReceive: { label: "Закрыть на WB",  empty: "Закрывать сейчас нечего", match: (order) => order.stage === "ready_receive" },
   inBot:        { label: "В нашем боте",   empty: "В боте сейчас пусто",    match: (order) => order.stage === "in_bot" },
+  /* Гейт ушёл, а код не открыт: внутри «В боте» это выглядело как обычный ход
+     воронки, хотя сам он никуда не сдвинется — напоминания кончились. */
+  notActivated: {
+    label: "Не открыли код",
+    empty: "Все выданные коды открыты",
+    match: (order) => order.funnelStep === "not_activated" && order.gateState !== "NOT_ISSUED",
+  },
 };
 
 export default function WbDeliveryScreen({ token, initialFocus, initialQuery }: { token: string; initialFocus?: WbDeliveryFocus | null; initialQuery?: string }) {
@@ -315,7 +321,7 @@ function OrderRow({ order, onOpen }: { order: WbDeliveryOrderDto; onOpen: () => 
         <span className={css.cardIcon}>{order.stage === "ready_receive" ? <PackageCheck /> : order.stage === "code_received" ? <KeyRound /> : order.buyerName ? <UserRound /> : <Truck />}</span>
         <div>
           <strong>{orderTitle(order)}</strong>
-          <p>{order.denomination ? `${order.denomination.toLocaleString("ru-RU")} R$` : "нет номинала"} · {money(order.finalPriceKopecks)}</p>
+          <p>{order.denomination ? `${order.denomination.toLocaleString("ru-RU")} R$` : "нет номинала"}</p>
         </div>
         <ChevronRight />
       </div>
@@ -428,7 +434,7 @@ function OrderDetail({ order, data, busy, manualCode, message, setManualCode, se
       <div>
         <span className={`${css.detailStage} ${css[`stage_${order.stage}`] ?? ""}`}>{orderSubtitle(order)}</span>
         <h2>{order.buyerName ?? `WB #${order.wbOrderId}`}</h2>
-        <p>{order.buyerName ? `WB #${order.wbOrderId} · ` : ""}{order.denomination ?? "—"} R$ · {money(order.finalPriceKopecks)} · {order.vendorCode ?? `nmID ${order.nmId}`}</p>
+        <p>{order.buyerName ? `WB #${order.wbOrderId} · ` : ""}{order.denomination ?? "—"} R$ · {order.vendorCode ?? `nmID ${order.nmId}`}</p>
       </div>
       <div className={css.detailStatus}><span>WB</span><strong>{wbSupplierStatusLabel(order.supplierStatus)}</strong><small>{wbSupplierStatusLabel(order.wbStatus)}</small></div>
     </section>

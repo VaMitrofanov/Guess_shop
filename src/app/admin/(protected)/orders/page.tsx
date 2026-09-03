@@ -41,6 +41,7 @@ export default async function AdminOrdersPage({
       initialMode={pick("mode") === "table" ? "table" : "split"}
       initialOrderId={/^[a-z0-9_-]{8,40}$/i.test(pick("order")) ? pick("order") : null}
       initialQuery={pick("q").slice(0, 120)}
+      initialEdit={pick("edit") === "1"}
     />
   );
 }

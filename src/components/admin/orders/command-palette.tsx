@@ -15,7 +15,7 @@ import { fmtAge, grossOf } from "@/lib/order-presentation";
 import { AdminOrder, SLICE_META, gamepassIdsOf, num } from "./types";
 import styles from "./orders.module.css";
 
-type Command = "export" | "complete" | "hold" | "copy-id" | "split" | "priority" | "help";
+type Command = "export" | "complete" | "hold" | "copy-id" | "split" | "edit" | "priority" | "help";
 
 interface Row {
   id: string;
@@ -81,6 +81,7 @@ export default function CommandPalette({
       if (ids.length > 0) list.push({ id: "cmd-copy", label: `⧉ Скопировать ID геймпасса ${cursorOrder.wbCode}`, hint: "C", run: () => void onCommand("copy-id") });
       list.push({ id: "cmd-hold", label: cursorOrder.heldAt ? `❄ Разморозить ${cursorOrder.wbCode}` : `❄ Заморозить ${cursorOrder.wbCode}`, hint: "F", run: () => void onCommand("hold") });
       list.push({ id: "cmd-split", label: `🧩 Разбить выкуп ${cursorOrder.wbCode} на несколько пассов`, hint: "S", run: () => void onCommand("split") });
+      list.push({ id: "cmd-edit", label: `✎ Правка ${cursorOrder.wbCode} — ник, геймпасс, номинал, заметка`, hint: "I", run: () => void onCommand("edit") });
       if (!cursorOrder.heldAt) {
         list.push({
           id: "cmd-priority",

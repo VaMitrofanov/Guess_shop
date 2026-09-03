@@ -152,6 +152,54 @@ export type WbDeliveryQueueSnapshot = {
   sections: { id: string; title: string; count: number; oldestAt: string | null }[];
   /** Этапы очереди — по ним и открывается нужная вкладка доставки. */
   stages: { stage: string; label: string; count: number; oldestAt: string | null }[];
+
+  /* ── Срок WB ─────────────────────────────────────────────────────────────
+     `deliveryTo` — обещание покупателю, данное Wildberries, а не наш возраст
+     заказа. Возраст «2 д 22 ч» и «просрочено на 2 д 19 ч» — разные числа, и
+     решение принимается по второму. Денег здесь нет намеренно (решение О6):
+     цена в нашей базе — снимок синка и с кабинетом WB не сходится. */
+  overdue: number;
+  dueSoon: number;
+  /** Ближайший срок среди незакрытых — по нему считается «через сколько». */
+  nextDueAt: string | null;
+
+  /** Поимённо то, что требует хода: не больше трёх строк — это дорожка, не очередь. */
+  named: {
+    id: string;
+    wbOrderId: string;
+    buyerName: string | null;
+    stage: string;
+    stageLabel: string;
+    since: string;
+    deliveryTo: string | null;
+    /** Сколько раз просили код получения и когда в последний раз. */
+    asked: number;
+    lastAskAt: string | null;
+    /** Можно ли напомнить прямо отсюда (`permissions.remindCode`). */
+    canRemind: boolean;
+  }[];
+
+  /** Разложение «в боте»: одно число скрывало три разные вещи. */
+  funnel: {
+    /** Код открыт, ник ещё не назван — читает инструкцию. */
+    instruction: number;
+    /** Ник назван, ждём геймпасс. */
+    nickGiven: number;
+    /** Пасс есть — стоит в очереди выкупа. */
+    readyBuyout: number;
+    /** Гейт ушёл, а код никто не открыл: это не процесс, а потери. */
+    notActivated: number;
+    /** Самая старая неоткрытая отправка гейта. */
+    notActivatedOldestAt: string | null;
+    /** Сколько из неоткрытых уже получили оба напоминания. */
+    notActivatedNudged: number;
+  };
+
+  /** Жив ли синк: все числа дорожки — снимок воркера. */
+  sync: { status: string; ageSeconds: number } | null;
+
+  /** Ориентир «сколько это обычно занимает»: закрыто за сутки и средний путь. */
+  closedToday: { count: number; avgMinutes: number | null };
 };
 
 export type WbDeliveryOrderResponse = {

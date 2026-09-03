@@ -35,7 +35,7 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 export default function OrderDossier({
-  order, live, onClose, onPrimary, onHold, onError, onFavorite, onPriority, onCancel, onSplit, onToast, onChanged,
+  order, live, onClose, onPrimary, onHold, onError, onFavorite, onPriority, onCancel, onSplit, onEdit, onToast, onChanged,
 }: {
   order: AdminOrder;
   live?: LiveCheck;
@@ -47,6 +47,7 @@ export default function OrderDossier({
   onPriority: () => void;
   onCancel: () => void;
   onSplit: () => void;
+  onEdit: () => void;
   onToast: (text: string, error?: boolean) => void;
   onChanged: () => void;
 }) {
@@ -150,6 +151,9 @@ export default function OrderDossier({
               ⧉ {ids.length > 1 ? `${ids.length} ID пассов` : ids[0]} <kbd>C</kbd>
             </button>
           )}
+          {/* Правка — рядом с главным действием: чаще всего в досье приходят
+              именно дописать ник или ID пасса, которого не нашёл поиск. */}
+          <button type="button" className={styles.btn} onClick={onEdit}>✎ Правка <kbd>I</kbd></button>
           <button type="button" className={styles.btn} onClick={onHold}>
             {order.heldAt ? "❄ Разморозить" : "❄ Заморозить"} <kbd>F</kbd>
           </button>
@@ -219,7 +223,15 @@ export default function OrderDossier({
                   {live.isForSale === false ? "снят с продажи" : live.priceMismatch ? `цена ${num(live.livePrice ?? 0)} R$` : "продаётся, цена сходится"}
                 </em>}
               </div>
-              {ids.length === 0 && <div style={{ color: "var(--o-muted)" }}>Пасса нет — выкупать нечего. Дожимайте покупателя или найдите пасс по нику.</div>}
+              {ids.length === 0 && (
+                <div style={{ color: "var(--o-muted)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  Пасса нет — выкупать нечего.
+                  {/* Раньше здесь был только совет «найдите пасс по нику», и
+                      когда поиск Roblox молчал, работа вставала: вписать ID
+                      руками было неоткуда. */}
+                  <button type="button" className={`${styles.btn} ${styles.btnPrimary}`} onClick={onEdit}>✎ Привязать геймпасс руками</button>
+                </div>
+              )}
               {parts.length > 0 ? (
                 <div style={{ display: "grid", gap: 7 }}>
                   {parts.map(part => (

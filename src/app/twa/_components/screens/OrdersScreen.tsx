@@ -2922,143 +2922,6 @@ function isWorkOrder(order: Order): boolean {
   return order.status === "AWAITING_GAMEPASS" && new Date(order.createdAt).getTime() <= cutoff;
 }
 
-/* ───────────── Search S2: SpotlightCard — full order detail inline ───────────── */
-function SpotlightCard({
-  order, token, onRunAction, onPurchaseDone, onSaveNote, onToggleFavorite, onMoved,
-}: {
-  order: Order;
-  token: string;
-  onRunAction: (action: string, reason?: string) => Promise<ActionResult>;
-  onPurchaseDone: () => void;
-  onSaveNote: (note: string) => Promise<ActionResult>;
-  onToggleFavorite: () => void;
-  onMoved: () => void;
-}) {
-  const [loading, setLoading] = useState(false);
-  const platform = order.user.tgId ? "tg" : order.user.vkId ? "vk" : "—";
-  const shortName = userShortName(order.user);
-  const dirtyAmount = Math.ceil(order.amount / 0.7);
-  const tabBadge = orderTabBadge(order);
-  const canBuyout = ["PENDING", "IN_PROGRESS"].includes(order.status) && !!order.gamepassUrl;
-  const isError = order.status === "ERROR" && !!order.gamepassUrl;
-  const showActions = canBuyout || isError;
-
-  async function doPurchase() {
-    if (loading) return;
-    setLoading(true);
-    try {
-      const r = await fetch("/api/twa/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ action: "purchase", orderId: order.id }),
-      });
-      const d = await r.json();
-      if (!r.ok) { haptic.notify("error"); toast(d.error ?? "Ошибка", "error"); return; }
-      if (d.success) { haptic.notify("success"); toast(`✅ ${d.msg}`, "success"); onPurchaseDone(); }
-      else { haptic.notify("error"); toast(`❌ ${d.msg}`, "error"); }
-    } catch { haptic.notify("error"); toast("Ошибка сети", "error"); }
-    finally { setLoading(false); }
-  }
-
-  const cellLabel: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: C.textTertiary, textTransform: "uppercase", letterSpacing: 0.5 };
-  const cellVal: React.CSSProperties = { fontSize: 15, fontWeight: 600, color: C.textPrimary, marginTop: 2 };
-
-  return (
-    <div style={{
-      padding: 16, background: C.card, borderRadius: 16,
-      border: `1px solid ${C.accent}22`, boxShadow: SHADOW.card,
-      display: "flex", flexDirection: "column", gap: 12,
-    }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, color: C.accent, letterSpacing: 1.5 }}>
-          {order.wbCode}
-        </span>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {tabBadge && (
-            <span style={{ fontSize: 13, fontWeight: 700, color: tabBadge.color, background: `${tabBadge.color}1c`, padding: "5px 12px", borderRadius: 8 }}>
-              {tabBadge.label}
-            </span>
-          )}
-          <button className="twa-press-sm" onClick={() => { haptic.impact("light"); onToggleFavorite(); }}
-            style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 20, padding: "2px 4px", opacity: order.isFavorite ? 1 : 0.35 }}>
-            {order.isFavorite ? "★" : "☆"}
-          </button>
-        </div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <div>
-          <div style={cellLabel}>Ник Roblox</div>
-          <div style={cellVal}>{order.robloxUsername ?? order.probableNick ?? "—"}</div>
-        </div>
-        <div>
-          <div style={cellLabel}>Сумма</div>
-          <div style={{ ...cellVal, ...tabular }}>
-            {dirtyAmount.toLocaleString("ru-RU")} R$
-            <span style={{ fontSize: 13, color: C.textTertiary, marginLeft: 4 }}>({order.amount.toLocaleString("ru-RU")})</span>
-          </div>
-        </div>
-        <div>
-          <div style={cellLabel}>Клиент</div>
-          <span onClick={() => { haptic.impact("light"); openContact(order.user); }}
-            style={{ ...cellVal, color: "#7ec5ff", cursor: "pointer", display: "block" }}>
-            <span style={{
-              fontSize: 11, fontWeight: 800, color: "#fff",
-              background: platform === "tg" ? "#229ED9" : platform === "vk" ? "#0077FF" : C.elevated,
-              borderRadius: 4, padding: "2px 5px", marginRight: 6,
-            }}>{platform === "tg" ? "T" : platform === "vk" ? "V" : "—"}</span>
-            {shortName}
-          </span>
-        </div>
-        <div>
-          <div style={cellLabel}>Возраст</div>
-          <div style={{ ...cellVal, color: ageColor(order.createdAt), ...tabular }}>{fmtAge(order.createdAt)}</div>
-        </div>
-        {order.gamepassUrl && (
-          <div style={{ gridColumn: "1 / 3" }}>
-            <div style={cellLabel}>Геймпасс</div>
-            <a href={order.gamepassUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
-              style={{ fontSize: 14, color: C.blue, fontWeight: 500, marginTop: 2, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {order.gamepassUrl.replace(/^https?:\/\/(www\.)?/, "").slice(0, 50)}
-            </a>
-          </div>
-        )}
-        <div>
-          <div style={cellLabel}>Источник</div>
-          <div style={{ ...cellVal, fontWeight: 500 }}>{SOURCE_BADGE_META[order.orderSource]?.label ?? order.orderSource}</div>
-        </div>
-        {order.pendingAt && ["PENDING", "IN_PROGRESS"].includes(order.status) && (
-          <div>
-            <div style={cellLabel}>В очереди</div>
-            <div style={{ ...cellVal, color: ageColor(order.pendingAt), ...tabular }}>{fmtAge(order.pendingAt)}</div>
-          </div>
-        )}
-      </div>
-
-      <div style={{ paddingTop: 4 }}>
-        <NotesEditor order={order} onSave={onSaveNote} />
-      </div>
-
-      {showActions && (
-        <div style={{ display: "flex", gap: 8, paddingTop: 8, borderTop: `1px solid ${C.hairline}` }}>
-          <button className="twa-press" onClick={doPurchase} disabled={loading}
-            style={{ flex: 2, padding: 13, border: "none", borderRadius: 12, background: "rgba(48,209,88,0.14)", color: C.green, fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
-            {loading ? "⏳…" : isError ? "Повторить выкуп" : "Выкупить"}
-          </button>
-          <button className="twa-press" onClick={() => onRunAction("complete")} disabled={loading}
-            style={{ flex: 1, padding: 13, border: "none", borderRadius: 12, background: "rgba(10,132,255,0.12)", color: C.blue, fontSize: 15, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
-            Выкуплено
-          </button>
-          <button className="twa-press" onClick={() => onRunAction("reject")} disabled={loading}
-            style={{ width: 44, flexShrink: 0, padding: "13px 0", border: `1px solid ${C.red}55`, borderRadius: 12, background: "transparent", color: C.red, fontSize: 18, cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
-            ✕
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ───────────── Search S1: ProfileCard — user info above their orders ───────────── */
 function SearchProfileCard({ user, orders }: {
   user: Order["user"];
@@ -3868,15 +3731,26 @@ export default function OrdersScreen({
               </span>
             </div>}
 
-            {/* S2: Spotlight — точное совпадение по WB-коду */}
+            {/* S2: Spotlight — точное совпадение по WB-коду.
+                Это ТА ЖЕ карточка, что в ленте, а не своя (03.09.2026). Своя
+                была единственной карточкой приложения без меню «···»: найдя
+                заказ по коду, его нельзя было ни поправить, ни разбить, ни
+                заморозить, ни скопировать ID пасса — зато самая крупная кнопка
+                тратила робуксы донора, а крестик рядом отменял заказ без
+                причины. Вкладку берём по самому заказу, чтобы карточка
+                выглядела ровно так же, как в своём разделе. */}
             {query && searchMode === "spotlight" && allOrders[0] && (
-              <SpotlightCard
+              <OrderCard
                 order={allOrders[0]}
                 token={token}
+                currentTab={orderToTab(allOrders[0])}
+                live={liveMap[allOrders[0].id]}
+                exiting={exiting.has(allOrders[0].id)}
                 onRunAction={(action, reason) => runAction(allOrders[0], action, reason)}
                 onPurchaseDone={() => handlePurchaseDone(allOrders[0])}
                 onSaveNote={(note) => saveNote(allOrders[0].id, note)}
                 onToggleFavorite={() => toggleFavorite(allOrders[0])}
+                onTogglePriority={() => togglePriority(allOrders[0])}
                 onMoved={() => handleMoved(allOrders[0])}
               />
             )}
