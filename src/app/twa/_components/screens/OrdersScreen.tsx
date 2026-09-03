@@ -6,6 +6,7 @@ import { ageColor, fmtAge } from "../age";
 import { haptic } from "../haptics";
 import BottomSheet from "../BottomSheet";
 import { toast } from "../Toast";
+import { copyText } from "../clipboard";
 import OrderSheet, { type MatchedOrder, type RebindUser } from "../OrderSheet";
 import { isUnpaidDirect } from "@/lib/buyout-queue";
 import {
@@ -274,33 +275,6 @@ function cardFlag(order: Order, live: GpLiveInfo | undefined, reminders: number)
 }
 
 /* ───────────── Time formatting ───────────── */
-
-function fallbackCopy(text: string) {
-  const el = document.createElement("textarea");
-  el.value = text;
-  el.setAttribute("readonly", "");
-  el.style.position = "fixed";
-  el.style.left = "-9999px";
-  el.style.top = "-9999px";
-  el.style.opacity = "0";
-  document.body.appendChild(el);
-  el.focus();
-  el.select();
-  try { document.execCommand("copy"); } catch {}
-  document.body.removeChild(el);
-}
-
-function copyText(text: string) {
-  if (typeof window !== "undefined" && (window as any).Telegram?.WebApp) {
-    fallbackCopy(text);
-    return;
-  }
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
-    return;
-  }
-  fallbackCopy(text);
-}
 
 function CopyBtn({ text, label }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);

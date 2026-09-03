@@ -39,6 +39,7 @@ import BottomSheet from "../BottomSheet";
 import { haptic } from "../haptics";
 import OrderSheet from "../OrderSheet";
 import { toast } from "../Toast";
+import { copyText } from "../clipboard";
 import css from "./WbDeliveryScreen.module.css";
 
 export type WbDeliveryFocus = "waitingCode" | "readyReceive" | "attention" | "inBot" | "notActivated";
@@ -523,15 +524,14 @@ function CopyButton({ value, label }: { value: string; label: string }) {
     <button
       type="button"
       className={css.revealButton}
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(value);
-          haptic.notify("success");
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1_600);
-        } catch {
-          toast("Буфер обмена недоступен", "error");
-        }
+      /* Через общий `copyText`, а не `navigator.clipboard`: внутри WebView
+         Telegram тот молча отклоняется, и кнопка рапортовала «Скопировано»
+         при пустом буфере — ровно на коде доставки, который несут в кабинет. */
+      onClick={() => {
+        copyText(value);
+        haptic.notify("success");
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1_600);
       }}
     >
       <Clipboard />{copied ? "Скопировано" : label}

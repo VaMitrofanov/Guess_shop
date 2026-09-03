@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Check,
   ChevronRight,
   CircleAlert,
+  Copy,
   MessageCircleQuestion,
   Plus,
   RefreshCw,
@@ -16,7 +18,9 @@ import {
 import { C } from "../theme";
 import { ageColor, fmtAge } from "../age";
 import { haptic } from "../haptics";
-import type { FirstInLine } from "@/types/first-in-line";
+import { toast } from "../Toast";
+import { copyText } from "../clipboard";
+import type { FirstInLine, FirstInLineOrder } from "@/types/first-in-line";
 import type { OverviewDiff, OverviewFeedRow } from "@/types/admin-overview";
 import type { WbDeliveryQueueSnapshot } from "@/types/wb-delivery";
 import type { WbDeliveryFocus } from "./WbDeliveryScreen";
@@ -172,13 +176,106 @@ export default function Dashboard({
     return () => { window.clearInterval(tick); document.removeEventListener("visibilitychange", onVisible); };
   }, [syncedAt]);
 
+  /* ── Работа прямо из «Первым делом» ────────────────────────────────────
+     Типовой шаг смены — скопировал ID, вставил в донора, вернулся отметить
+     «выкуплено». На ноутбуке он уже делается из блока; на телефоне за теми же
+     двумя действиями приходилось уходить в «Заказы» и искать там строку,
+     которая только что была на экране. */
+  const [bought, setBought] = useState<Set<string>>(() => new Set());
+  const [busy, setBusy] = useState<Set<string>>(() => new Set());
+  const [noteEdit, setNoteEditState] = useState<{ id: string; value: string } | null>(null);
+  const [noteSaving, setNoteSaving] = useState<string | null>(null);
+  /* Зеркало правки в ref: поле сохраняется по blur, а Esc снимает правку и тем
+     же движением убирает поле с экрана — без зеркала «отменил» и «ушёл из
+     поля» приходят в одном порядке и Esc всё равно сохранял бы набранное. */
+  const noteEditRef = useRef<{ id: string; value: string } | null>(null);
+  const setNoteEdit = useCallback((next: { id: string; value: string } | null) => {
+    noteEditRef.current = next;
+    setNoteEditState(next);
+  }, []);
+
+  const post = useCallback(async (payload: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const response = await fetch("/api/twa/orders", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) return { ok: false, error: body?.error ?? `сервер ответил ${response.status}` };
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+  }, [token]);
+
+  /* ID пассов пачкой и построчно. `flatMap`, а не `map`: у разбитого заказа их
+     несколько, и повтор одного пасса не схлопывается — две части на одном
+     пассе это две покупки с РАЗНЫХ доноров, и в буфере их должно быть две. */
+  const copyFirstIds = useCallback((orders: FirstInLineOrder[], label: string) => {
+    const ids = orders.flatMap(order => order.gamepassIds);
+    if (ids.length === 0) { haptic.notify("error"); toast(`${label}: пассов ещё нет`, "error"); return; }
+    copyText(ids.join("\n"));
+    haptic.impact("light");
+    // Заказов и ID может быть разное количество — говорим оба числа, иначе
+    // «скопировано 3» на двух заказах выглядит ошибкой.
+    const skipped = orders.filter(order => order.gamepassIds.length === 0).length;
+    toast(
+      `⧉ ${label}: ${ids.length} ID`
+      + (ids.length !== orders.length ? ` из ${orders.length} заказов` : "")
+      + (skipped > 0 ? ` · без пасса: ${skipped}` : ""),
+      "success",
+    );
+  }, []);
+
+  /* Заметка правится прямо в строке. `keepTags` бережёт машинный аудит
+     (`[РАЗБИВКА …]`, `[ЦЕНА-СТОП …]`): в узкое поле он не показывается, и без
+     флага сохранение стёрло бы то, чего админ не видел. */
+  const saveNote = useCallback(async (order: FirstInLineOrder, value: string) => {
+    const next = value.trim();
+    setNoteEdit(null);
+    if (next === (order.note ?? "")) return;
+    setNoteSaving(order.id);
+    const result = await post({ action: "set-note", orderId: order.id, note: next, keepTags: true });
+    setNoteSaving(null);
+    if (!result.ok) { haptic.notify("error"); toast(`${order.wbCode}: ${result.error}`, "error"); return; }
+    // Правим строку на месте: перезагрузка главной сбросила бы прокрутку.
+    setData(prev => (prev?.firstInLine
+      ? { ...prev, firstInLine: { ...prev.firstInLine, rows: prev.firstInLine.rows.map(row => (
+          row.id === order.id ? { ...row, note: next || null } : row)) } }
+      : prev));
+    haptic.notify("success");
+    toast(next ? `✎ ${order.wbCode}: заметка сохранена` : `✎ ${order.wbCode}: заметка снята`, "success");
+  }, [post, setNoteEdit]);
+
+  /* «Выкуплено» здесь — то же необратимое действие, что и в «Заказах»: клиенту
+     уходит сообщение, обратного хода нет. Поэтому кнопка отделена щелью от
+     безобидного копирования, которое жмут в десять раз чаще. */
+  const completeOne = useCallback(async (order: FirstInLineOrder) => {
+    setBusy(prev => new Set(prev).add(order.id));
+    haptic.impact("medium");
+    const result = await post({ action: "complete", orderId: order.id });
+    setBusy(prev => { const next = new Set(prev); next.delete(order.id); return next; });
+    if (!result.ok) { haptic.notify("error"); toast(`${order.wbCode}: ${result.error}`, "error"); return; }
+    setBought(prev => new Set(prev).add(order.id));
+    haptic.notify("success");
+    toast(`✓ ${order.wbCode} выкуплен · ${robux(order.amount)} R$ клиенту`, "success");
+  }, [post]);
+
   if (loading) return <Skeleton />;
   if (!data) return <ErrorState onRetry={() => void load(true)} />;
 
   const { buyout, errors, awaitingLink, held, inbox, dbs } = data;
   const totalCodes = data.codes.reduce((sum, code) => sum + code.count, 0);
   const activeLanes = buyout.lanes.filter(lane => lane.orders > 0);
-  const firstInLine = data.firstInLine?.rows ?? [];
+  // Отмеченные выкупленными уходят из блока сразу: живой опрос подтвердит их
+  // уход через полминуты, а строка «выкупи меня» всё это время висела бы.
+  const firstInLine = (data.firstInLine?.rows ?? []).filter(order => !bought.has(order.id));
+  const firstInLineIds = firstInLine.reduce((sum, order) => sum + order.gamepassIds.length, 0);
+  // Грязные считаются на ВСЕ такие заказы, а показанных строк может быть
+  // меньше — поэтому вычитаем только что выкупленные, а не суммируем видимые.
+  const firstInLineGross = (data.firstInLine?.rows ?? [])
+    .reduce((sum, order) => (bought.has(order.id) ? sum - order.gross : sum), data.firstInLine?.gross ?? 0);
   // «В боте» — не задача: покупатель уже с кодом идёт по нашей воронке, а
   // доставка WB к этому моменту закрыта (иначе гейт бы не ушёл). Решения
   // требует только незакрытая доставка или ход за нами.
@@ -294,25 +391,89 @@ export default function Dashboard({
         <section className="twa-first">
           <div className="twa-first-head">
             <span>⚡ Первым делом</span>
-            <em>{robux(data.firstInLine!.gross)} R$ грязными</em>
+            <em>{robux(firstInLineGross)} R$ грязными</em>
+            {/* Выгрузка всей пачки: за ID больше незачем уходить в «Заказы». */}
+            <button
+              type="button"
+              className="twa-first-copy-all twa-press-sm"
+              onClick={() => copyFirstIds(firstInLine, "первым делом")}
+              aria-label="Скопировать ID геймпассов всей пачки"
+            >
+              <Copy size={13} />ID · {firstInLineIds}
+            </button>
           </div>
           {firstInLine.map(order => (
-            <button
-              key={order.id}
-              type="button"
-              className="twa-first-row twa-press-sm"
-              onClick={() => { haptic.select(); onOpenOrders?.(order.wbCode); }}
-            >
-              <span className={`twa-first-why ${order.reason === "pinned" ? "is-pinned" : "is-direct"}`}>
-                {order.reason === "pinned" ? "⚡" : "Прямой"}
-              </span>
-              <span className="twa-first-main">
-                <strong>{order.wbCode}</strong>
-                <small>{order.robloxUsername ?? "ник не указан"}</small>
-              </span>
-              <b className="twa-first-sum">{robux(order.gross)}</b>
-              <span className="twa-first-age" style={{ color: ageColor(order.since) }}>{fmtAge(order.since)}</span>
-            </button>
+            <div key={order.id} className={`twa-first-row${busy.has(order.id) ? " is-busy" : ""}`}>
+              <button
+                type="button"
+                className="twa-first-open twa-press-sm"
+                onClick={() => { haptic.select(); onOpenOrders?.(order.wbCode); }}
+              >
+                <span className={`twa-first-why ${order.reason === "pinned" ? "is-pinned" : "is-direct"}`}>
+                  {order.reason === "pinned" ? "⚡" : "Прямой"}
+                </span>
+                <span className="twa-first-main">
+                  <strong>{order.wbCode}</strong>
+                  <small>{order.robloxUsername ?? "ник не указан"}</small>
+                </span>
+                <b className="twa-first-sum">{robux(order.gross)}</b>
+                <span className="twa-first-age" style={{ color: ageColor(order.since) }}>{fmtAge(order.since)}</span>
+              </button>
+
+              {/* Вторая строка — работа по заказу: зачем он тут (заметка) и два
+                  действия смены. На телефоне она отдельной строкой, а не в
+                  середине первой: там на 390 px не помещается даже ник. */}
+              <div className="twa-first-tools">
+                {noteEdit?.id === order.id ? (
+                  <input
+                    autoFocus
+                    className="twa-first-note-input"
+                    value={noteEdit.value}
+                    maxLength={200}
+                    placeholder="Почему этот заказ первым…"
+                    enterKeyHint="done"
+                    onChange={event => setNoteEdit({ id: order.id, value: event.target.value })}
+                    onBlur={() => {
+                      const edit = noteEditRef.current;
+                      if (edit?.id === order.id) void saveNote(order, edit.value);
+                    }}
+                    onKeyDown={event => {
+                      if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); }
+                      // Esc отменяет правку целиком: строка возвращается к тому,
+                      // что было, а не сохраняет наполовину набранное.
+                      if (event.key === "Escape") { event.preventDefault(); setNoteEdit(null); }
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className={`twa-first-note twa-press-sm${order.note ? "" : " is-empty"}`}
+                    onClick={() => { haptic.select(); setNoteEdit({ id: order.id, value: order.note ?? "" }); }}
+                  >
+                    {noteSaving === order.id ? "сохраняю…" : order.note ?? "+ заметка"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="twa-first-copy twa-press-sm"
+                  onClick={() => copyFirstIds([order], order.wbCode)}
+                  disabled={order.gamepassIds.length === 0}
+                  aria-label={`Скопировать ID геймпасса заказа ${order.wbCode}`}
+                >
+                  {/* Число рисуем только у разбитого: у обычного «· 1» — шум. */}
+                  <Copy size={13} />ID{order.gamepassIds.length > 1 ? ` · ${order.gamepassIds.length}` : ""}
+                </button>
+                <button
+                  type="button"
+                  className="twa-first-tick twa-press-sm"
+                  disabled={busy.has(order.id)}
+                  aria-label={`Отметить выкупленным заказ ${order.wbCode}`}
+                  onClick={() => void completeOne(order)}
+                >
+                  <Check size={16} />
+                </button>
+              </div>
+            </div>
           ))}
         </section>
       )}

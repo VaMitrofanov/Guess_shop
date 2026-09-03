@@ -299,6 +299,11 @@ export default function OverviewScreen({
   }, [showToast]);
 
   const firstInLine = (data.firstInLine?.rows ?? []).filter(order => !bought.has(order.id));
+  // Грязные считаются на ВСЕ такие заказы, а показанных строк может быть
+  // меньше — поэтому вычитаем только что выкупленные, а не суммируем видимые:
+  // иначе шапка продолжала просить деньги за строку, которая уже ушла.
+  const firstInLineGross = (data.firstInLine?.rows ?? [])
+    .reduce((sum, order) => (bought.has(order.id) ? sum - order.gross : sum), data.firstInLine?.gross ?? 0);
   const oldest = queue.slice(0, OLDEST_SHOWN);
   const buyout = data.slices.slices.BUYOUT;
   const errors = data.slices.slices.ERROR;
@@ -390,7 +395,7 @@ export default function OverviewScreen({
               {data.firstInLine!.direct > 0 && <>прямых: <b>{data.firstInLine!.direct}</b></>}
             </span>
             <span className={styles.spacer} />
-            <span className={styles.note}><b>{num(data.firstInLine!.gross)}</b> R$ грязными</span>
+            <span className={styles.note}><b>{num(firstInLineGross)}</b> R$ грязными</span>
             {/* Выгрузка всей пачки: типовой шаг — скопировал ID, вставил в
                 донора, вернулся отмечать. Ради него незачем уходить в «Заказы». */}
             <button
