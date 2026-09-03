@@ -49,7 +49,17 @@ function readsSession(pathname: string | null): boolean {
 export default function SessionProvider({ children }: { children: React.ReactNode }) {
   const live = readsSession(usePathname());
   return (
-    <NextAuthSessionProvider key={live ? "live" : "silent"} session={live ? undefined : null}>
+    <NextAuthSessionProvider
+      key={live ? "live" : "silent"}
+      session={live ? undefined : null}
+      /* Возврат фокуса во вкладку по умолчанию перечитывает сессию — и на
+         витрине это чистая трата: `jwt`-callback обновляет в токене только
+         `role` и `invalidated`, а `Navbar` из всей сессии читает ровно их
+         («вошёл» и «админ»). То есть запрос ходит в базу, чтобы нарисовать те
+         же две ссылки. Вход и выход в соседней вкладке этим НЕ ломаются: их
+         разносит BroadcastChannel, отдельным слушателем. */
+      refetchOnWindowFocus={false}
+    >
       {children}
     </NextAuthSessionProvider>
   );
