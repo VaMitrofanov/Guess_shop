@@ -18,6 +18,9 @@ type Tab = "overview" | "events" | "payment" | "audit";
 
 interface EventRow { id: string; type: string; payload: unknown; createdAt: string }
 
+/** Статусы, в которых сервер разрешает менять разбиение (`set-gamepass-split`). */
+const SPLITTABLE = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING", "IN_PROGRESS"];
+
 const EVENT_LABELS: Record<string, string> = {
   ORDER_CREATED: "Заказ создан",
   ORDER_PAID: "Оплата подтверждена",
@@ -32,7 +35,7 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 export default function OrderDossier({
-  order, live, onClose, onPrimary, onHold, onError, onFavorite, onCancel, onToast, onChanged,
+  order, live, onClose, onPrimary, onHold, onError, onFavorite, onCancel, onSplit, onToast, onChanged,
 }: {
   order: AdminOrder;
   live?: LiveCheck;
@@ -42,6 +45,7 @@ export default function OrderDossier({
   onError: () => void;
   onFavorite: () => void;
   onCancel: () => void;
+  onSplit: () => void;
   onToast: (text: string, error?: boolean) => void;
   onChanged: () => void;
 }) {
@@ -149,6 +153,11 @@ export default function OrderDossier({
             {order.heldAt ? "❄ Разморозить" : "❄ Заморозить"} <kbd>F</kbd>
           </button>
           <button type="button" className={styles.btn} onClick={onFavorite}>{order.isFavorite ? "★ Из избранного" : "★ В избранное"}</button>
+          {SPLITTABLE.includes(order.status) && (
+            <button type="button" className={styles.btn} onClick={onSplit}>
+              🧩 {parts.length > 0 ? `Разбивка ${parts.filter(part => part.purchasedAt).length}/${parts.length}` : "Разбить выкуп"} <kbd>S</kbd>
+            </button>
+          )}
           {["PENDING", "IN_PROGRESS"].includes(order.status) && (
             <button type="button" className={styles.btn} onClick={onError}>⚠ Пометить ошибкой <kbd>E</kbd></button>
           )}

@@ -7,6 +7,7 @@ import {
   splitChargedTotal,
   partPriceMatches,
   parseSplitGamepassId,
+  planSplitFor,
   SplitError,
   MAX_SPLIT_PARTS,
 } from "@/lib/order-gamepass-split";
@@ -39,11 +40,24 @@ describe("разбиение выкупа на несколько геймпас
     expect(() => buildSplitParts(three1k, 3001)).toThrow(/не хватает 1 R\$/);
   });
 
-  it("один пасс дважды — отказ: это двойное списание и AlreadyOwned со второго раза", () => {
+  it("один пасс дважды — РАЗРЕШЕНО: у покупателя один пасс на 1000, а заказ на 2000", () => {
+    // Части выкупаются разными донорами, поэтому AlreadyOwned не возникает.
+    // Единственное, что запрещено, — повтор с другим номиналом: цена у пасса одна.
+    const parts = buildSplitParts(
+      [{ gamepassId: "111222333", amount: 1000 }, { gamepassId: "111222333", amount: 1000 }],
+      2000,
+    );
+    expect(parts).toHaveLength(2);
+    expect(parts.map((p) => p.gamepassId)).toEqual(["111222333", "111222333"]);
+    expect(parts.map((p) => p.position)).toEqual([0, 1]);
+    expect(parts.map((p) => p.expectedPrice)).toEqual([1429, 1429]);
+  });
+
+  it("тот же пасс с разными номиналами — отказ: цена у пасса одна", () => {
     expect(() => buildSplitParts(
-      [{ gamepassId: "111222333", amount: 1500 }, { gamepassId: "111222333", amount: 1500 }],
-      3000,
-    )).toThrow(/указан дважды/);
+      [{ gamepassId: "111222333", amount: 1500 }, { gamepassId: "111222333", amount: 500 }],
+      2000,
+    )).toThrow(/разными номиналами/);
   });
 
   it("одна часть — не разбиение, а обычная привязка", () => {
@@ -58,6 +72,59 @@ describe("разбиение выкупа на несколько геймпас
       [{ gamepassId: "111222333", amount: 2 }, { gamepassId: "444555666", amount: 2998 }],
       3000,
     )).toThrow(/номинал/);
+  });
+
+  describe("подбор разбивки под номинал (десктоп: «Набрать под заказ»)", () => {
+    // Живая витрина Kirka1931 из заказа DIR-9F922067.
+    const kirka = [
+      { gamepassId: "1948929625", amount: 1000 },
+      { gamepassId: "1951197545", amount: 2000 },
+      { gamepassId: "1806254971", amount: 802 },
+      { gamepassId: "1769521354", amount: 499 },
+    ];
+
+    it("заказ на 2000 при единственном пассе на 1000 — две одинаковые части", () => {
+      // Пасс на 2000 закрыл бы заказ одной частью, но одна часть — не разбиение.
+      const plan = planSplitFor(2000, kirka);
+      expect(plan).toEqual([
+        { gamepassId: "1948929625", amount: 1000 },
+        { gamepassId: "1948929625", amount: 1000 },
+      ]);
+    });
+
+    it("одинаковые номиналы раздаются по РАЗНЫМ пассам, пока разные есть", () => {
+      const plan = planSplitFor(2000, [
+        { gamepassId: "111111111", amount: 1000 },
+        { gamepassId: "222222222", amount: 1000 },
+      ]);
+      expect(plan?.map((p) => p.gamepassId)).toEqual(["111111111", "222222222"]);
+    });
+
+    it("точная сумма или ничего — «почти сошлось» не возвращается", () => {
+      expect(planSplitFor(1500, [{ gamepassId: "111111111", amount: 700 }])).toBeNull();
+      expect(planSplitFor(3000, [])).toBeNull();
+    });
+
+    it("складывает разные номиналы, когда одним не набрать", () => {
+      const plan = planSplitFor(1301, kirka);
+      // 802 + 499 — единственная точная комбинация; крупная часть первой.
+      expect(plan).toEqual([
+        { gamepassId: "1806254971", amount: 802 },
+        { gamepassId: "1769521354", amount: 499 },
+      ]);
+    });
+
+    it("подобранное разбиение проходит buildSplitParts как есть", () => {
+      const plan = planSplitFor(2000, kirka);
+      expect(() => buildSplitParts(plan, 2000)).not.toThrow();
+    });
+
+    it("не собирает разбивку длиннее лимита частей", () => {
+      // 10 частей по 100 — ровно предел; 11 уже нет.
+      const only100 = [{ gamepassId: "111111111", amount: 100 }];
+      expect(planSplitFor(1000, only100)).toHaveLength(MAX_SPLIT_PARTS);
+      expect(planSplitFor(1100, only100)).toBeNull();
+    });
   });
 
   it("принимает и ID, и ссылку — админ копирует то, что под рукой", () => {

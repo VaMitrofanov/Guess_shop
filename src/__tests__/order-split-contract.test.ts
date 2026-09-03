@@ -5,6 +5,9 @@ const ROOT = path.join(__dirname, "..", "..");
 const route = readFileSync(path.join(ROOT, "src/app/api/twa/orders/route.ts"), "utf8");
 const screen = readFileSync(path.join(ROOT, "src/app/twa/_components/screens/OrdersScreen.tsx"), "utf8");
 const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf8");
+const deskDialog = readFileSync(path.join(ROOT, "src/components/admin/orders/split-dialog.tsx"), "utf8");
+const deskWorkspace = readFileSync(path.join(ROOT, "src/components/admin/orders/orders-workspace.tsx"), "utf8");
+const deskDossier = readFileSync(path.join(ROOT, "src/components/admin/orders/order-dossier.tsx"), "utf8");
 
 /**
  * Разбиение заменяет собой прайс-гард заказа, поэтому его контракт — это
@@ -61,8 +64,46 @@ describe("контракт разбитого выкупа", () => {
     expect(screen).toContain("d.splitDone === false");
   });
 
-  it("один пасс не может стоять в двух частях одного заказа", () => {
-    expect(schema).toContain("@@unique([orderId, gamepassId])");
+  it("один пасс МОЖЕТ стоять в нескольких частях — уникальности в схеме нет", () => {
+    // Заказ на 2000 при единственном выставленном пассе на 1000 закрывается
+    // двумя одинаковыми частями с РАЗНЫХ доноров. Вернувшийся @@unique снова
+    // сделал бы такой заказ неразбиваемым вовсе.
+    expect(schema).not.toContain("@@unique([orderId, gamepassId])");
+    // Но исполнение ручное, и модалка обязана об этом предупреждать.
+    expect(screen).toContain("AlreadyOwned");
+  });
+
+  describe("разбиение на сайте", () => {
+    it("лист есть и доступен из досье, клавиатуры и палитры", () => {
+      expect(deskWorkspace).toContain("SplitDialog");
+      expect(deskDossier).toContain("Разбить выкуп");
+      // Клавиша S и команда палитры — иначе лист есть, но до него не дойти.
+      expect(deskWorkspace).toContain('key === "s"');
+      expect(deskWorkspace).toContain('command === "split"');
+    });
+
+    it("сохраняет тем же контрактом, что и телефон", () => {
+      expect(deskDialog).toContain('action: "set-gamepass-split"');
+      expect(deskDialog).toContain('action: "split-candidates"');
+      expect(deskDialog).toContain('action: "clear-gamepass-split"');
+      // Сумма обязана сойтись и частей должно быть от двух — те же ворота.
+      expect(deskDialog).toContain("picked.length >= 2 && diff === 0");
+    });
+
+    it("подбор идёт через общее правило, а не своей арифметикой", () => {
+      // Вторая копия размена разошлась бы с сервером на первом же 802+499.
+      expect(deskDialog).toContain("planSplitFor");
+      expect(deskDialog).toContain("MAX_SPLIT_PARTS");
+    });
+
+    it("предупреждает про донора при повторе пасса", () => {
+      expect(deskDialog).toContain("AlreadyOwned");
+    });
+
+    it("состав после частичного выкупа не редактируется", () => {
+      expect(deskDialog).toContain("hasPurchased");
+      expect(deskDialog).toContain("!hasPurchased && picked.length >= 2");
+    });
   });
 
   it("бейдж «цена ≠ номиналу» сверяет ТЕКУЩУЮ часть с её номиналом", () => {

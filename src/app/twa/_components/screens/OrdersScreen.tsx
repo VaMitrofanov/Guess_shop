@@ -15,6 +15,7 @@ import {
   type Tone,
 } from "@/lib/order-presentation";
 import { HOLD_PRESETS, parseAdminNote } from "@/lib/order-hold";
+import { MAX_SPLIT_PARTS } from "@/lib/order-gamepass-split";
 
 /** ❄️ Цвет заморозки. Живёт в теме — здесь только короткий псевдоним. */
 const ICE = C.ice;
@@ -1459,10 +1460,16 @@ function AuditTrail({ order, token }: { order: Order; token: string }) {
 }
 
 /* ───────────── Разбиение выкупа: выбор пассов ─────────────
-   Админ отмечает пассы покупателя, сумма номиналов должна сойтись с заказом.
+   Админ набирает пассы покупателя, сумма номиналов должна сойтись с заказом.
    Номинал берётся из цены самого пасса (floor(price·0.7)), а не вводится
    руками: набранное число, разошедшееся с реальной ценой, сервер всё равно
-   отвергнет прайс-гардом — лучше не давать его набрать. */
+   отвергнет прайс-гардом — лучше не давать его набрать.
+
+   Это НЕ чекбоксы, а счётчики: один и тот же пасс берётся сколько нужно раз.
+   Живой случай — заказ на 2000, а у покупателя выставлен один пасс на 1000:
+   нужны две одинаковые части. Каждый повтор выкупается с ДРУГОГО донора (в
+   очереди аккаунты по 2-3 тысячи, заказ и так растаскивается по ним) — иначе
+   второй раз Roblox ответит AlreadyOwned. Об этом предупреждает плашка. */
 function SplitModal({ order, token, onDone, onClose }: {
   order: Order; token: string; onDone: () => void; onClose: () => void;
 }) {
@@ -1498,10 +1505,26 @@ function SplitModal({ order, token, onDone, onClose }: {
   const sum = picked.reduce((acc, p) => acc + p.amount, 0);
   const diff = sum - order.amount;
   const canSave = picked.length >= 2 && diff === 0 && !saving;
+  /** Пассы, взятые больше одного раза: их нельзя выкупать одним донором. */
+  const repeated = [...new Set(chosen)].filter(id => chosen.filter(x => x === id).length > 1);
 
-  function toggle(id: string) {
+  /** Тап по пассу добавляет ЕЩЁ одну часть на нём — повторы разрешены. */
+  function add(id: string) {
+    if (chosen.length >= MAX_SPLIT_PARTS) {
+      toast(`Максимум ${MAX_SPLIT_PARTS} частей на заказ`, "error");
+      return;
+    }
     haptic.select();
-    setChosen(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    setChosen(prev => [...prev, id]);
+  }
+
+  /** Минус снимает ПОСЛЕДНЮЮ часть этого пасса, а не все сразу. */
+  function removeOne(id: string) {
+    haptic.select();
+    setChosen(prev => {
+      const last = prev.lastIndexOf(id);
+      return last < 0 ? prev : [...prev.slice(0, last), ...prev.slice(last + 1)];
+    });
   }
 
   async function save() {
@@ -1555,11 +1578,27 @@ function SplitModal({ order, token, onDone, onClose }: {
             Заказ на <b style={{ color: C.textSecondary }}>{order.amount.toLocaleString("ru-RU")} R$</b>
             {nick ? <> · пассы <b style={{ color: C.textSecondary }}>{nick}</b></> : null}
           </div>
+          {!hasPurchased && (
+            <div style={{ fontSize: 12, color: C.textTertiary, marginTop: 6, lineHeight: 1.35 }}>
+              Тап по пассу добавляет часть. Один и тот же пасс можно взять
+              несколько раз — «−» убирает одну.
+            </div>
+          )}
         </div>
 
         {hasPurchased && (
           <div style={{ margin: "0 20px 10px", padding: "10px 12px", borderRadius: 10, background: `${C.yellow}14`, color: C.yellow, fontSize: 13, fontWeight: 600 }}>
             Часть уже выкуплена — менять состав нельзя, только снять разбиение целиком.
+          </div>
+        )}
+
+        {/* Повтор законен, но исполняется руками: тот же донор второй раз
+            получит AlreadyOwned и спишет робуксы впустую. */}
+        {repeated.length > 0 && !hasPurchased && (
+          <div style={{ margin: "0 20px 10px", padding: "10px 12px", borderRadius: 10, background: `${C.orange}14`, color: C.orange, fontSize: 12.5, fontWeight: 600, lineHeight: 1.4 }}>
+            Пасс взят несколько раз ({repeated.map(id => `${id} ×${chosen.filter(x => x === id).length}`).join(", ")}).
+            Каждый повтор выкупай с <b>другого донора</b> — тому же аккаунту Roblox
+            ответит AlreadyOwned.
           </div>
         )}
 
@@ -1571,48 +1610,81 @@ function SplitModal({ order, token, onDone, onClose }: {
               У этого ника не нашли пассов на продажу
             </div>
           ) : passes.map(p => {
-            const on = chosen.includes(p.gamepassId);
-            const order_ = chosen.indexOf(p.gamepassId);
+            const count = chosen.filter(x => x === p.gamepassId).length;
+            const on = count > 0;
             const blocked = !!p.busyWith || hasPurchased;
+            const canAdd = !blocked && chosen.length < MAX_SPLIT_PARTS;
             return (
-              <button key={p.gamepassId} className="twa-press"
-                onClick={() => !blocked && toggle(p.gamepassId)}
-                disabled={blocked}
-                style={{
-                  width: "100%", display: "flex", alignItems: "center", gap: 10, textAlign: "left",
-                  padding: "10px 12px", marginBottom: 6, borderRadius: 12, cursor: blocked ? "not-allowed" : "pointer",
-                  background: on ? `${C.accent}22` : C.elevated,
-                  border: `1px solid ${on ? C.accent : "transparent"}`,
-                  opacity: blocked ? 0.45 : 1,
-                }}>
-                <span style={{
-                  width: 22, height: 22, flexShrink: 0, borderRadius: 7, display: "grid", placeItems: "center",
-                  background: on ? C.accent : "transparent", border: on ? "none" : `1px solid ${C.border}`,
-                  color: "#fff", fontSize: 12, fontWeight: 800,
-                }}>{on ? order_ + 1 : ""}</span>
-                <span style={{ minWidth: 0, flex: 1 }}>
-                  <span style={{ display: "block", fontSize: 14, fontWeight: 600, color: "#e5e5ea", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                  <span style={{ display: "block", fontSize: 12, color: C.textTertiary, fontVariantNumeric: "tabular-nums" }}>
-                    пасс {p.price.toLocaleString("ru-RU")} R$ · {p.gamepassId}
-                    {p.busyWith ? ` · занят ${p.busyWith}` : ""}
+              <div key={p.gamepassId} style={{
+                display: "flex", alignItems: "stretch", marginBottom: 6, borderRadius: 12,
+                background: on ? `${C.accent}22` : C.elevated,
+                border: `1px solid ${on ? C.accent : "transparent"}`,
+                opacity: blocked ? 0.45 : 1,
+              }}>
+                {/* Тело строки = «плюс». Отдельной кнопки «+» нет намеренно:
+                    палец на телефоне попадает в строку, а не в 30 px. */}
+                <button className="twa-press"
+                  onClick={() => canAdd && add(p.gamepassId)}
+                  disabled={!canAdd}
+                  aria-label={`Добавить часть на ${p.amount} R$ — ${p.name}`}
+                  style={{
+                    flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, textAlign: "left",
+                    padding: on ? "10px 4px 10px 12px" : "10px 12px",
+                    background: "transparent", border: "none", borderRadius: 12,
+                    cursor: canAdd ? "pointer" : "not-allowed",
+                  }}>
+                  <span style={{
+                    width: on ? undefined : 22, minWidth: on ? 28 : undefined, height: 22,
+                    padding: on ? "0 6px" : 0, flexShrink: 0, borderRadius: 7,
+                    display: "grid", placeItems: "center",
+                    background: on ? C.accent : "transparent", border: on ? "none" : `1px solid ${C.border}`,
+                    color: "#fff", fontSize: 12, fontWeight: 800, fontVariantNumeric: "tabular-nums",
+                  }}>{on ? `×${count}` : ""}</span>
+                  <span style={{ minWidth: 0, flex: 1 }}>
+                    <span style={{ display: "block", fontSize: 14, fontWeight: 600, color: "#e5e5ea", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                    <span style={{
+                      display: "block", fontSize: 12, color: C.textTertiary, fontVariantNumeric: "tabular-nums",
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>
+                      {/* Без слова «пасс»: в списке пассов оно лишнее, а места
+                          не хватало ровно на ID — то, что отсюда копируют. */}
+                      {p.price.toLocaleString("ru-RU")} R$ · {p.gamepassId}
+                      {p.busyWith ? ` · занят ${p.busyWith}` : ""}
+                    </span>
                   </span>
-                </span>
-                <span style={{ fontSize: 14, fontWeight: 800, color: on ? C.accent : C.textSecondary, fontVariantNumeric: "tabular-nums" }}>
-                  {p.amount.toLocaleString("ru-RU")}
-                </span>
-              </button>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: on ? C.accent : C.textSecondary, fontVariantNumeric: "tabular-nums" }}>
+                    {count > 1 ? `${(p.amount * count).toLocaleString("ru-RU")}` : p.amount.toLocaleString("ru-RU")}
+                  </span>
+                </button>
+                {on && !hasPurchased && (
+                  <span style={{ display: "grid", placeItems: "center", padding: "0 8px 0 2px", flexShrink: 0 }}>
+                    <button className="twa-press-sm"
+                      onClick={() => removeOne(p.gamepassId)}
+                      aria-label={`Убрать одну часть — ${p.name}`}
+                      style={{
+                        width: 30, height: 30, display: "grid", placeItems: "center",
+                        border: "none", borderRadius: 999, cursor: "pointer",
+                        background: "rgba(255,255,255,0.08)",
+                        color: "#e5e5ea", fontSize: 19, fontWeight: 700, lineHeight: 1, paddingBottom: 2,
+                      }}>−</button>
+                  </span>
+                )}
+              </div>
             );
           })}
         </div>
 
         {/* Итог: сумма обязана сойтись точно — сервер допуска не даёт. */}
         <div style={{ padding: "12px 20px", borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 14, fontVariantNumeric: "tabular-nums" }}>
-            <span style={{ color: C.textTertiary }}>Выбрано {picked.length}:</span>
-            <b style={{ color: diff === 0 && picked.length >= 2 ? C.green : C.textSecondary }}>{sum.toLocaleString("ru-RU")} R$</b>
-            <span style={{ color: C.textTertiary }}>из {order.amount.toLocaleString("ru-RU")} R$</span>
+          {/* nowrap на каждой части: без него «не хватает» вытесняло строку в
+              перенос ПОСРЕДИ фразы — «Выбрано» и «1:» оказывались на разных
+              этажах. Переносится теперь целыми смысловыми кусками. */}
+          <div style={{ display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: "2px 8px", fontSize: 14, fontVariantNumeric: "tabular-nums" }}>
+            <span style={{ color: C.textTertiary, whiteSpace: "nowrap" }}>Выбрано {picked.length}:</span>
+            <b style={{ color: diff === 0 && picked.length >= 2 ? C.green : C.textSecondary, whiteSpace: "nowrap" }}>{sum.toLocaleString("ru-RU")} R$</b>
+            <span style={{ color: C.textTertiary, whiteSpace: "nowrap" }}>из {order.amount.toLocaleString("ru-RU")} R$</span>
             {diff !== 0 && picked.length > 0 && (
-              <span style={{ marginLeft: "auto", color: C.orange, fontWeight: 700 }}>
+              <span style={{ marginLeft: "auto", color: C.orange, fontWeight: 700, whiteSpace: "nowrap" }}>
                 {diff > 0 ? `лишние ${diff}` : `не хватает ${-diff}`} R$
               </span>
             )}

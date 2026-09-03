@@ -12,6 +12,14 @@
  * между этими моментами часть могли отредактировать, а разошедшаяся сумма
  * означает, что покупатель получит не то количество робуксов, за которое
  * заплатил. Ослаблять его нельзя: именно он заменяет собой прайс-гард заказа.
+ *
+ * **Один и тот же пасс может стоять в нескольких частях.** У покупателя часто
+ * выставлен один пасс на 1000, а заказ — на 2000: тогда две части ссылаются на
+ * один `gamepassId`. Это законно, потому что части покупаются РАЗНЫМИ донорами
+ * (в очереди аккаунты по 2-3 тысячи, и заказ и так растаскивается по ним).
+ * Ограничение здесь одно: номинал у повторов обязан совпадать — цена у пасса
+ * одна. Ответственность «второй раз — с другого донора» лежит на админе, и об
+ * этом прямо предупреждает модалка: тот же донор получит `AlreadyOwned`.
  */
 
 import { expectedGamepassPrice, PRICE_TOL } from "./purchase-guard";
@@ -66,7 +74,8 @@ export function buildSplitParts(input: unknown, orderAmount: number): SplitPart[
   }
 
   const parts: SplitPart[] = [];
-  const seen = new Set<string>();
+  /** Номинал, с которым этот пасс уже встречался: цена у пасса одна. */
+  const amountById = new Map<string, number>();
 
   input.forEach((raw, index) => {
     const item = (raw ?? {}) as Record<string, unknown>;
@@ -74,17 +83,21 @@ export function buildSplitParts(input: unknown, orderAmount: number): SplitPart[
     if (!gamepassId) {
       throw new SplitError(`Часть ${index + 1}: не разобрали ID геймпасса`);
     }
-    if (seen.has(gamepassId)) {
-      // Один пасс дважды — это двойное списание, а со второго раза Roblox
-      // ответит AlreadyOwned, и мы спишем деньги ни за что.
-      throw new SplitError(`Геймпасс ${gamepassId} указан дважды`);
-    }
-    seen.add(gamepassId);
 
     const amount = Math.trunc(Number(item.amount));
     if (!Number.isFinite(amount) || amount < MIN_SPLIT_PART_ROBUX) {
       throw new SplitError(`Часть ${index + 1}: номинал должен быть целым числом от ${MIN_SPLIT_PART_ROBUX} R$`);
     }
+
+    // Один пасс может закрыть несколько частей — но с ОДНИМ номиналом: цена у
+    // пасса одна, и часть с другим номиналом не прошла бы прайс-гард.
+    const known = amountById.get(gamepassId);
+    if (known !== undefined && known !== amount) {
+      throw new SplitError(
+        `Геймпасс ${gamepassId} указан с разными номиналами (${known} и ${amount} R$) — у пасса одна цена`,
+      );
+    }
+    amountById.set(gamepassId, amount);
 
     parts.push({
       gamepassId,
@@ -128,6 +141,79 @@ export function suggestEqualSplit(orderAmount: number, count: number): number[] 
   const parts = Array<number>(count).fill(base);
   parts[0] += orderAmount - base * count;
   return parts;
+}
+
+/**
+ * Подбор разбивки под номинал заказа из того, что у покупателя выставлено.
+ *
+ * Живой случай: заказ на 2000, а пассы у покупателя — 1000, 2000, 802 и 499.
+ * Собрать 2000 можно только двумя частями по 1000 на ОДНОМ пассе, и руками это
+ * неочевидно. Задача — размен без остатка минимальным числом частей (пасс можно
+ * брать сколько угодно раз), поэтому считается ДП, а не жадностью: жадность на
+ * номиналах вроде 802/499 промахивается мимо точной суммы, а допуска здесь нет.
+ *
+ * Одинаковые номиналы раздаются по РАЗНЫМ пассам, пока разные есть: два пасса
+ * по 1000 лучше, чем один и тот же дважды — меньше возни с донорами.
+ *
+ * Возвращает `null`, если точной суммы не собрать (или нужно больше
+ * `maxParts` частей) — «почти сошлось» тут хуже, чем честное «не собрать».
+ */
+export function planSplitFor(
+  orderAmount: number,
+  candidates: readonly { gamepassId: string; amount: number }[],
+  maxParts: number = MAX_SPLIT_PARTS,
+): SplitPartInput[] | null {
+  // Потолок от зависания на мусорном вводе: реальные номиналы — тысячи.
+  if (!Number.isInteger(orderAmount) || orderAmount <= 0 || orderAmount > 200_000) return null;
+
+  const idsByAmount = new Map<number, string[]>();
+  for (const c of candidates) {
+    const amount = Math.trunc(Number(c.amount));
+    if (!Number.isFinite(amount) || amount < MIN_SPLIT_PART_ROBUX || amount > orderAmount) continue;
+    const bucket = idsByAmount.get(amount);
+    if (bucket) bucket.push(String(c.gamepassId));
+    else idsByAmount.set(amount, [String(c.gamepassId)]);
+  }
+  const amounts = [...idsByAmount.keys()];
+  if (amounts.length === 0) return null;
+
+  // best[v] — минимум частей, которыми набирается ровно v; from[v] — последняя.
+  const best = new Array<number>(orderAmount + 1).fill(Infinity);
+  const from = new Array<number>(orderAmount + 1).fill(0);
+  best[0] = 0;
+  for (let v = 1; v <= orderAmount; v++) {
+    for (const a of amounts) {
+      if (a > v) continue;
+      const candidate = best[v - a] + 1;
+      if (candidate < best[v]) { best[v] = candidate; from[v] = a; }
+    }
+  }
+
+  // Разбиение имеет смысл от двух частей, поэтому одну часть отщепляем явно:
+  // на заказе 2000 при пассе на 2000 иначе вышло бы «разбиение» из одной части.
+  let firstAmount = 0;
+  let bestTotal = Infinity;
+  for (const a of amounts) {
+    const rest = orderAmount - a;
+    if (rest <= 0 || !Number.isFinite(best[rest])) continue;
+    const total = best[rest] + 1;
+    if (total < bestTotal) { bestTotal = total; firstAmount = a; }
+  }
+  if (!Number.isFinite(bestTotal) || bestTotal > maxParts) return null;
+
+  const picked: number[] = [firstAmount];
+  for (let rest = orderAmount - firstAmount; rest > 0; rest -= from[rest]) picked.push(from[rest]);
+
+  // Крупные части первыми: их выкупать дороже, и срываться лучше на мелкой.
+  picked.sort((a, b) => b - a);
+
+  const cursor = new Map<number, number>();
+  return picked.map((amount) => {
+    const pool = idsByAmount.get(amount) ?? [];
+    const index = cursor.get(amount) ?? 0;
+    cursor.set(amount, index + 1);
+    return { gamepassId: pool[index % pool.length], amount };
+  });
 }
 
 export type StoredPart = {

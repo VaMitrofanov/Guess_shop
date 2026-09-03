@@ -30,6 +30,7 @@ import type { OrderSlice, OrderSlicesPayload, SliceKey } from "@/lib/order-slice
 import OrderDossier from "./order-dossier";
 import CommandPalette from "./command-palette";
 import NewOrderDialog from "./new-order-dialog";
+import SplitDialog from "./split-dialog";
 import {
   AdminOrder, EXTRA_TABS, LiveCheck, Narrow, num, OrdersResponse,
   SLICE_META, TONE_COLOR, clientLabel, contactHref, copyText, gamepassIdOf, gamepassIdsOf,
@@ -37,6 +38,8 @@ import {
 import styles from "./orders.module.css";
 
 const PAGE_SIZE = 50;
+/** Статусы, в которых сервер разрешает менять разбиение (`set-gamepass-split`). */
+const SPLITTABLE = ["AWAITING_GAMEPASS", "REJECTED", "ERROR", "PENDING", "IN_PROGRESS"];
 /** Живая проверка пасса идёт пачками по 30 — столько принимает роут. */
 const LIVE_CHECK_BATCH = 30;
 
@@ -98,6 +101,8 @@ export default function OrdersWorkspace({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  /** Заказ, у которого открыт лист разбиения (id, а не объект: список перезагружается). */
+  const [splitId, setSplitId] = useState<string | null>(null);
   const [isPhone, setIsPhone] = useState(false);
 
   useEffect(() => {
@@ -114,6 +119,7 @@ export default function OrdersWorkspace({
   const requestSeq = useRef(0);
 
   const openOrder = useMemo(() => orders.find(o => o.id === openId) ?? null, [orders, openId]);
+  const splitOrder = useMemo(() => orders.find(o => o.id === splitId) ?? null, [orders, splitId]);
   const cursorOrder = orders[cursor] ?? null;
   const currentSlice: OrderSlice | null =
     slices && (slices.slices as Record<string, OrderSlice>)[slice] ? (slices.slices as Record<string, OrderSlice>)[slice] : null;
@@ -568,7 +574,7 @@ export default function OrdersWorkspace({
         setPaletteOpen(open => !open);
         return;
       }
-      if (typing || ask || paletteOpen) return;
+      if (typing || ask || paletteOpen || splitId) return;
 
       if (meta && event.key.toLowerCase() === "z") {
         if (undoRef.current) { event.preventDefault(); undoRef.current(); }
@@ -632,6 +638,12 @@ export default function OrdersWorkspace({
       if (key === "r" && cursorOrder?.status === "ERROR") { event.preventDefault(); void restore(cursorOrder); return; }
       if (key === "f" && cursorOrder) { event.preventDefault(); void toggleHold(cursorOrder); return; }
       if (key === "e" && cursorOrder) { event.preventDefault(); void setError(cursorOrder); return; }
+      if (key === "s" && cursorOrder) {
+        event.preventDefault();
+        if (SPLITTABLE.includes(cursorOrder.status)) setSplitId(cursorOrder.id);
+        else showToast({ text: `Заказ в статусе ${cursorOrder.status} не разбить`, error: true });
+        return;
+      }
       if (key === "c" && cursorOrder) {
         event.preventDefault();
         if (event.shiftKey) { copyText(cursorOrder.wbCode); showToast({ text: `⧉ ${cursorOrder.wbCode}` }); return; }
@@ -651,7 +663,7 @@ export default function OrdersWorkspace({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [orders, cursor, cursorOrder, openId, selected, ask, paletteOpen, filtersOpen, helpOpen, createOpen,
+  }, [orders, cursor, cursorOrder, openId, selected, ask, paletteOpen, filtersOpen, helpOpen, createOpen, splitId,
       complete, restore, toggleHold, setError, toggleSelect, showToast, router]);
 
   // Курсор клавиатуры не должен уезжать за экран.
@@ -862,6 +874,7 @@ export default function OrdersWorkspace({
             onError={() => void setError(openOrder)}
             onFavorite={() => void toggleFavorite(openOrder)}
             onCancel={() => void cancelOrder(openOrder)}
+            onSplit={() => setSplitId(openOrder.id)}
             onToast={(text, error) => showToast({ text, error })}
             onChanged={() => void load(1, false)}
           />
@@ -977,6 +990,7 @@ export default function OrdersWorkspace({
                 ["R", "вернуть к выкупу"],
                 ["E", "пометить ошибкой"],
                 ["F", "заморозить / разморозить"],
+                ["S", "разбить выкуп на несколько пассов"],
                 ["C", "скопировать ID геймпасса"],
                 ["⇧ C", "скопировать код ВБ"],
                 ["⌘ Z", "отменить последнее действие"],
@@ -1006,6 +1020,15 @@ export default function OrdersWorkspace({
         />
       )}
 
+      {splitOrder && (
+        <SplitDialog
+          order={splitOrder}
+          onClose={() => setSplitId(null)}
+          onChanged={() => void load(1, false)}
+          onToast={(text, error) => showToast({ text, error })}
+        />
+      )}
+
       {paletteOpen && (
         <CommandPalette
           slice={slice}
@@ -1022,6 +1045,7 @@ export default function OrdersWorkspace({
               const ids = gamepassIdsOf(cursorOrder);
               if (ids.length > 0) { copyText(ids.join("\n")); showToast({ text: `⧉ ${ids.join(", ")}` }); }
             }
+            if (command === "split" && cursorOrder) setSplitId(cursorOrder.id);
             if (command === "help") setHelpOpen(true);
           }}
         />

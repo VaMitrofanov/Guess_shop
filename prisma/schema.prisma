@@ -575,9 +575,9 @@ model WbOrderGamepass {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  /// Один и тот же пасс дважды в одном заказе — это удвоенное списание,
-  /// а со второго раза ещё и AlreadyOwned.
-  @@unique([orderId, gamepassId])
+  /// Один и тот же пасс намеренно МОЖЕТ стоять в нескольких частях: у
+  /// покупателя один пасс на 1000, а заказ на 2000. Части покупаются разными
+  /// донорами, поэтому AlreadyOwned не возникает; уникальности здесь нет.
   @@index([orderId, position])
   @@index([gamepassId])
 }

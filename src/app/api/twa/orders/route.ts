@@ -132,8 +132,11 @@ async function findFullPriceReplacement(
       },
       select: { gamepassUrl: true },
     }),
-    // Части разбитых заказов — включая ДРУГИЕ части этого же заказа: замена,
-    // совпавшая с соседней частью, означала бы покупку одного пасса дважды.
+    // Части разбитых заказов — включая ДРУГИЕ части этого же заказа. Повтор
+    // пасса в разбиении admin ставит осознанно и разводит по донорам; замена
+    // же выбирается автоматом, и совпади она с соседней частью — один донор
+    // получил бы тот же пасс дважды и AlreadyOwned. Поэтому автозамена сюда
+    // не смотрит.
     (prisma as any).wbOrderGamepass.findMany({
       where: {
         OR: [
@@ -2116,19 +2119,27 @@ export async function POST(req: NextRequest) {
     // ── Проверка каждой части на живом Roblox ────────────────────────────────
     // Ровно те же три вопроса, что задаёт обычный выкуп, только про часть:
     // пасс продаётся, принадлежит нику заказа, стоит ровно `ceil(amount/0.7)`.
-    // Без этого разбиение стало бы дырой в обход прайс-гарда.
+    // Без этого разбиение стало бы дырой в обход прайс-гарда. Повторы одного
+    // пасса законны и проверяются на общих основаниях: цена у него одна, значит
+    // и номинал у всех его частей одинаковый — `buildSplitParts` это уже сверил.
     const settings = await (prisma as any).globalSettings.findUnique({ where: { id: "global" } });
     const cookie = settings?.robloxCookie;
     const checked: { gamepassId: string; amount: number; name: string; price: number }[] = [];
+    // Один пасс может стоять в нескольких частях (у покупателя один пасс на
+    // 1000, а заказ на 2000) — Roblox о нём спрашиваем один раз.
+    const resolved = new Map<string, ResolvedGamepass>();
     for (const part of parts) {
-      let info: ResolvedGamepass;
-      try {
-        info = cookie
-          ? await resolveGamepassForBuyer(part.gamepassId, cookie)
-          : await resolveGamepass(part.gamepassId);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Roblox не ответил";
-        return NextResponse.json({ error: `Геймпасс ${part.gamepassId}: ${msg}` }, { status: 502 });
+      let info: ResolvedGamepass | undefined = resolved.get(part.gamepassId);
+      if (!info) {
+        try {
+          info = cookie
+            ? await resolveGamepassForBuyer(part.gamepassId, cookie)
+            : await resolveGamepass(part.gamepassId);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Roblox не ответил";
+          return NextResponse.json({ error: `Геймпасс ${part.gamepassId}: ${msg}` }, { status: 502 });
+        }
+        resolved.set(part.gamepassId, info);
       }
       if (!info.isForSale)
         return NextResponse.json({ error: `Геймпасс ${part.gamepassId} не выставлен на продажу` }, { status: 409 });
@@ -2165,8 +2176,16 @@ export async function POST(req: NextRequest) {
       );
 
     const stamp = new Date().toISOString().slice(0, 10);
+    // Повтор пасса — не ошибка, но след о нём в заметке нужен: следующую такую
+    // часть обязан выкупать ДРУГОЙ донор, иначе Roblox ответит AlreadyOwned.
+    const repeats = [...new Map(
+      parts.map((p) => [p.gamepassId, parts.filter((q) => q.gamepassId === p.gamepassId).length]),
+    )].filter(([, n]) => n > 1);
     const line = `[РАЗБИВКА ${stamp}] ${parts.length} ч.: ` +
-      checked.map((c) => `${c.gamepassId} (${c.amount} R$ / ${c.price} R$)`).join(", ");
+      checked.map((c) => `${c.gamepassId} (${c.amount} R$ / ${c.price} R$)`).join(", ") +
+      (repeats.length
+        ? ` · повторы: ${repeats.map(([id, n]) => `${id} ×${n}`).join(", ")} — каждый с ДРУГОГО донора`
+        : "");
 
     await (prisma as any).$transaction([
       (prisma as any).wbOrderGamepass.deleteMany({ where: { orderId } }),
