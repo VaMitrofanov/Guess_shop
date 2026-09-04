@@ -248,7 +248,7 @@ export default async function DashboardPage() {
   const latestActive = orders.find((order) => customerOrderStatus(order.kind, order.status).active);
   const latestActiveProgress = latestActive ? customerOrderProgress(latestActive.kind, latestActive.status) : 0;
   const latestActiveHref = latestActive?.status === "AWAITING_GAMEPASS"
-    ? `/guide?source=site&amount=${latestActive.amountRobux}&username=${encodeURIComponent(latestActive.customer ?? "")}`
+    ? `/guide?source=site&flow=order&amount=${latestActive.amountRobux}&username=${encodeURIComponent(latestActive.customer ?? "")}`
     : latestActive ? orderHref(latestActive) : null;
 
   // После A1 админа делает не `User.role`, а проверенная TG-личность из
@@ -309,7 +309,7 @@ export default async function DashboardPage() {
                 {notices.map((notice) => {
                   const relatedOrder = notice.orderId ? orders.find((order) => order.id === notice.orderId) : null;
                   const href = relatedOrder?.status === "AWAITING_GAMEPASS"
-                    ? `/guide?source=site&amount=${relatedOrder.amountRobux}&username=${encodeURIComponent(relatedOrder.customer ?? "")}`
+                    ? `/guide?source=site&flow=order&amount=${relatedOrder.amountRobux}&username=${encodeURIComponent(relatedOrder.customer ?? "")}`
                     : relatedOrder ? orderHref(relatedOrder) : notice.id === "identity" ? "#identity-settings" : null;
                   const NoticeIcon = notice.tone === "danger" ? XCircle : notice.tone === "waiting" ? Clock : notice.tone === "success" ? CheckCircle2 : Radio;
                   const content = <><span className={`${styles.noticeIcon} ${styles[`tone_${notice.tone}`]}`}><NoticeIcon size={18} /></span><span><strong>{notice.title}</strong><small>{notice.text}</small></span>{href && <ChevronRight size={18} className={styles.noticeArrow} />}</>;

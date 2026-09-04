@@ -3,6 +3,9 @@ import { prisma } from "@/lib/prisma";
 import { getGamepassDetails, getRobloxUserById } from "@/lib/roblox";
 import { sendWebOrderCard } from "@/lib/admin-card";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
+import { buildSplitParts, type SplitPart } from "@/lib/order-gamepass-split";
+import { MAX_AUTO_PARTS } from "@/lib/gamepass-plan";
+import { PRICE_TOL, expectedGamepassPrice } from "@/lib/purchase-guard";
 import { auditGamepassSubmitted, type OrderAuditClient } from "@/lib/order-audit";
 
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
@@ -49,6 +52,10 @@ export async function POST(request: Request) {
     // Ручной ввод ссылки: покупатель попал сюда, потому что поиск по нику ничего
     // не нашёл — ник он мог не вводить вовсе. Метка нужна и карточке админа.
     const manualLink: boolean = body?.manualLink === true;
+    // Набор частей приходит, когда заказ закрывается несколькими пассами: пара
+    // под номинал 2000 или размен по тому, что у покупателя уже выставлено.
+    // Пустой/одиночный набор — это обычный заказ, ветка ниже его не трогает.
+    const rawParts: unknown = body?.parts;
 
     if (!/^[A-Z0-9]{7}$/.test(rawCode)) {
       return NextResponse.json({ error: "Некорректный код" }, { status: 400 });
@@ -79,10 +86,60 @@ export async function POST(request: Request) {
 
     const expectedPrice = wbCode.denomination > 0 ? Math.ceil(wbCode.denomination / 0.7) : 0;
 
+    // ── 1b. Разбивка: сумма частей обязана точно совпасть с номиналом ─────────
+    // Проверку делает `buildSplitParts` — тот же инвариант, что у админской
+    // разбивки, и ослаблять его нельзя: разошедшаяся сумма означает, что
+    // покупатель получит не то количество робуксов, за которое заплатил.
+    let splitParts: SplitPart[] | null = null;
+    if (Array.isArray(rawParts) && rawParts.length > 1) {
+      if (rawParts.length > MAX_AUTO_PARTS) {
+        return NextResponse.json(
+          { error: `Заказ можно закрыть максимум ${MAX_AUTO_PARTS} геймпассами`, code: "TOO_MANY_PARTS" },
+          { status: 422 },
+        );
+      }
+      try {
+        splitParts = buildSplitParts(rawParts, wbCode.denomination);
+      } catch (splitErr) {
+        return NextResponse.json(
+          { error: splitErr instanceof Error ? splitErr.message : "Не разобрали разбивку", code: "BAD_SPLIT" },
+          { status: 422 },
+        );
+      }
+      if (splitParts[0].gamepassId !== gamepassId) {
+        return NextResponse.json(
+          { error: "Первая часть должна совпадать с выбранным геймпассом", code: "BAD_SPLIT" },
+          { status: 422 },
+        );
+      }
+      // Живая цена каждого пасса сверяется с номиналом ЕГО части, а не заказа:
+      // на разбитом заказе прайс-гард заказа не применим по построению.
+      const uniqueIds = [...new Set(splitParts.map((part) => part.gamepassId))];
+      const live = new Map<string, Awaited<ReturnType<typeof getGamepassDetails>>>();
+      for (const id of uniqueIds) live.set(id, await getGamepassDetails(id));
+      for (const part of splitParts) {
+        const info = live.get(part.gamepassId);
+        if (!info) continue; // Roblox молчит — та же логика, что у одиночного пасса
+        if (info.isActive === false) {
+          return NextResponse.json(
+            { error: `Геймпасс ${part.gamepassId} не выставлен на продажу`, code: "NOT_FOR_SALE" },
+            { status: 422 },
+          );
+        }
+        const want = expectedGamepassPrice(part.amount);
+        if (Math.abs((info.price ?? 0) - want) > PRICE_TOL) {
+          return NextResponse.json(
+            { error: `Цена геймпасса ${part.gamepassId} должна быть ${want} R$`, code: "WRONG_PRICE", expectedPrice: want },
+            { status: 422 },
+          );
+        }
+      }
+    }
+
     // ── 2. Server-side re-validation of the picked gamepass ───────────────────
     // null → Roblox unreachable → skip (parity with bot's validationSkipped).
     const details = await getGamepassDetails(gamepassId);
-    if (details) {
+    if (details && !splitParts) {
       if (details.isActive === false) {
         return NextResponse.json(
           { error: "Геймпасс не выставлен на продажу", code: "NOT_FOR_SALE" },
@@ -174,6 +231,20 @@ export async function POST(request: Request) {
         where: { id: wbCode.id },
         data: { isUsed: true, usedAt: new Date() },
       });
+      if (splitParts) {
+        // Перезаписываем набор целиком: повторное оформление того же кода не
+        // должно оставлять хвост от прошлой попытки.
+        await tx.wbOrderGamepass.deleteMany({ where: { orderId: order.id } });
+        await tx.wbOrderGamepass.createMany({
+          data: splitParts.map((part) => ({
+            orderId: order.id,
+            gamepassId: part.gamepassId,
+            gamepassUrl: part.gamepassUrl,
+            amount: part.amount,
+            position: part.position,
+          })),
+        });
+      }
       // amount/userId/platform are unchanged by the promote — reuse `order`.
       return { order, alreadyOrdered: false };
     });
@@ -219,6 +290,7 @@ export async function POST(request: Request) {
         previousOrderCount,
         createdAt: order.createdAt,
         manualLink,
+        splitParts: splitParts?.map((part) => ({ gamepassId: part.gamepassId, amount: part.amount })),
       });
     } catch (cardErr) {
       console.error("[wb-code/select-gamepass] admin card failed:", cardErr);

@@ -12,11 +12,11 @@ export const metadata: Metadata = {
 };
 
 interface GuidPageProps {
-  searchParams: Promise<{ source?: string; skip?: string; code?: string; test?: string; nom?: string; preview?: string; amount?: string; username?: string }>;
+  searchParams: Promise<{ source?: string; skip?: string; code?: string; test?: string; nom?: string; preview?: string; amount?: string; username?: string; flow?: string }>;
 }
 
 export default async function GuidePage({ searchParams }: GuidPageProps) {
-  const { source, skip, code, test, nom, preview, amount, username } = await searchParams;
+  const { source, skip, code, test, nom, preview, amount, username, flow } = await searchParams;
   const isWB = source === "wb";
   const skipGate = isWB && !!skip;
   // code passed by TG/VK bot so the instruction page opens even in Telegram's WebView
@@ -35,6 +35,10 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
   const previewMode = isWB && preview === "1";
   const testNom = nom ? Math.max(0, parseInt(nom, 10) || 0) : undefined;
   const siteAmount = Math.min(CUSTOM_MAX, Math.max(CUSTOM_MIN, parseInt(amount ?? "1000", 10) || 1000));
+  // `flow=order` несут только ссылки из покупки (калькулятор, оформление, личный
+  // кабинет). «Инструкция» из меню, футера и главной его не несёт — там человек
+  // просто читает, и проверять у него нечего.
+  const orderFlow = flow === "order";
 
   return (
     <>
@@ -55,6 +59,7 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
         testNom={testNom}
         initialAmount={siteAmount}
         initialUsername={username ?? ""}
+        orderFlow={orderFlow}
       />
     </>
   );

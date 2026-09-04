@@ -88,7 +88,7 @@ export default function Calculator() {
 
   const matchingPasses = currentLookup.passes?.filter((pass) => gamepassPriceMatches(Number(pass.price), grossPassPrice(amount))) ?? [];
   const checkoutHref = `/checkout?amount=${amount || 1000}&username=${encodeURIComponent(normalizedUsername)}${matchingPasses.length === 1 ? `&gamepassId=${matchingPasses[0].id}` : ""}`;
-  const guideHref = `/guide?source=site&amount=${amount || 1000}&username=${encodeURIComponent(normalizedUsername)}`;
+  const guideHref = `/guide?source=site&flow=order&amount=${amount || 1000}&username=${encodeURIComponent(normalizedUsername)}`;
   const needsGuide = currentLookup.status === "not-found" || currentLookup.status === "no-passes" || currentLookup.status === "error";
 
   return (

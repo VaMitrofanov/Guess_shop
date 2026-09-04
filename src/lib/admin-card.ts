@@ -37,6 +37,12 @@ export interface WebOrderCard {
   createdAt: Date | string;
   /** Покупатель вставил ссылку/ID геймпасса руками — поиск по нику его не нашёл. */
   manualLink?: boolean;
+  /**
+   * Заказ закрывается несколькими пассами. Админу это надо видеть в первой же
+   * строке: цена одного пасса в шапке к такому заказу не относится, а части
+   * покупаются РАЗНЫМИ донорами.
+   */
+  splitParts?: { gamepassId: string; amount: number }[];
 }
 
 export function buildWebOrderCardText(
@@ -62,6 +68,15 @@ export function buildWebOrderCardText(
     ? `🎮 Создатель ГП: <b>${escapeHtml(order.creatorName)}</b>\n`
     : "";
 
+  const parts = order.splitParts ?? [];
+  const splitLines = parts.length > 1
+    ? [
+        `🧩 <b>РАЗБИВКА: ${parts.length} ${parts.length === 1 ? "часть" : parts.length < 5 ? "части" : "частей"}</b> — каждую покупать с ОТДЕЛЬНОГО донора`,
+        ...parts.map((part, index) =>
+          `   ${index + 1}. <code>${part.gamepassId}</code> · ${part.amount} R$ · пасс ${Math.ceil(part.amount / 0.7)} R$`),
+      ]
+    : [];
+
   const passIdLine = (() => {
     const m = order.gamepassUrl.match(/game-pass(?:es)?\/(\d+)/);
     return m ? `🎫 Pass ID: <code>${m[1]}</code>` : null;
@@ -75,7 +90,10 @@ export function buildWebOrderCardText(
     zone: "WB",
     title: "заказ ждёт выкупа",
     lines: [
-      orderRef({ wbOrderId, code: order.wbCode, denomination: order.amount }, [`геймпасс ${passPrice} R$`]),
+      orderRef(
+        { wbOrderId, code: order.wbCode, denomination: order.amount },
+        [parts.length > 1 ? `${parts.length} пасса на ${passPrice} R$ суммарно` : `геймпасс ${passPrice} R$`],
+      ),
       order.manualLink
         ? `🔗 <b>ССЫЛКА ВРУЧНУЮ С САЙТА</b> — поиск по нику не нашёл геймпасс`
         : `🌐 <b>ONE-TAP С САЙТА</b>`,
@@ -87,10 +105,13 @@ export function buildWebOrderCardText(
       // Возраст — отдельной строкой: у недельного заказа это и есть тревога,
       // и в хвосте строки с датой её глаз пропускает.
       `⏳ Возраст заказа: <b>${formatOrderAge(order.createdAt, now)}</b>`,
+      ...splitLines,
       `🔗 <a href="${order.gamepassUrl}">Открыть Gamepass</a>`,
-      passIdLine,
+      parts.length > 1 ? null : passIdLine,
     ],
-    next: "скопировать Pass ID, купить в доноре и нажать «ВЫКУПЛЕНО»",
+    next: parts.length > 1
+      ? "выкупить части с разных доноров (карточка заказа ведёт по одной) и нажать «ВЫКУПЛЕНО»"
+      : "скопировать Pass ID, купить в доноре и нажать «ВЫКУПЛЕНО»",
   });
 }
 

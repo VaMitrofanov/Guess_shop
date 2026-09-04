@@ -13,6 +13,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import VKAuthButton from "@/components/auth/VKAuthButton";
 import WBInstructionV2 from "./WBInstructionV2";
+import GamepassCheck from "./GamepassCheck";
 // Visual components imported directly. None of them tug in heavy deps now
 // (three.js was dropped in favour of CSS gradients), so dynamic chunk
 // splitting just adds round-trips and deploy fragility for zero kB win.
@@ -2868,6 +2869,7 @@ export default function GuideClient({
   testNom,
   initialAmount = 1000,
   initialUsername = "",
+  orderFlow = false,
 }: {
   isWB: boolean;
   guideMode?: "WB" | "SITE" | "BOT";
@@ -2878,6 +2880,8 @@ export default function GuideClient({
   testNom?: number;
   initialAmount?: number;
   initialUsername?: string;
+  /** Человек пришёл с заказом (оформляет покупку), а не просто читает инструкцию. */
+  orderFlow?: boolean;
 }) {
   // Both modes open the instruction directly (no gate/intro/bot/DB/session).
   // Difference: testMode renders the Telegram/VK buttons inert (silent QA),
@@ -3065,14 +3069,28 @@ export default function GuideClient({
     );
   }
 
+  // Кто пришёл С ЗАКАЗОМ — тому сначала проверка аккаунта: у половины нужный
+  // пасс уже выставлен, и создавать ничего не надо. Кто просто открыл
+  // «Инструкцию» из меню — тому пошаговая страница: проверять нечего.
   if (isWB) {
     return (
-      <WBInstructionV2
-        denomination={denomination}
-        code={activeCode}
+      <GamepassCheck
+        mode="WB"
+        amount={denomination || 1000}
+        code={activeCode || undefined}
         onReset={directInstruction ? undefined : handleWBReset}
         testMode={testMode}
-        mode="WB"
+      />
+    );
+  }
+
+  if (guideMode === "BOT" || orderFlow) {
+    return (
+      <GamepassCheck
+        mode={guideMode === "BOT" ? "BOT" : "SITE"}
+        amount={guideMode === "SITE" ? initialAmount : denomination || 1000}
+        code={activeCode || undefined}
+        initialUsername={initialUsername}
       />
     );
   }

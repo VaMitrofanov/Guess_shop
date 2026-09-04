@@ -701,7 +701,7 @@ function CheckoutContent() {
                 <strong>{searching ? "Ищем подходящий геймпасс…" : selectedPass && selectedPriceMatches ? "Геймпасс выбран автоматически" : "Подходящий геймпасс пока не найден"}</strong>
                 <small>{selectedPass && selectedPriceMatches ? `${selectedPass.name} · ${Number(selectedPass.price).toLocaleString("ru-RU")} R$` : "Создай геймпасс по инструкции — повторно вводить ник не потребуется."}</small>
               </span>
-              {!searching && (!selectedPass || !selectedPriceMatches) && <Link href={`/guide?source=site&amount=${robux}&username=${encodeURIComponent(username)}`}>Инструкция</Link>}
+              {!searching && (!selectedPass || !selectedPriceMatches) && <Link href={`/guide?source=site&flow=order&amount=${robux}&username=${encodeURIComponent(username)}`}>Инструкция</Link>}
             </div>
 
             <div className={styles.quickReceipt}>
@@ -891,7 +891,7 @@ function CheckoutContent() {
               </div>
             )}
 
-            {error && <div className={styles.errorBox} role="alert"><CircleAlert size={20} /><span>{error}<Link href={`/guide?source=site&amount=${robux}&username=${encodeURIComponent(username || searchQuery.trim())}`}>Открыть пошаговую инструкцию →</Link></span></div>}
+            {error && <div className={styles.errorBox} role="alert"><CircleAlert size={20} /><span>{error}<Link href={`/guide?source=site&flow=order&amount=${robux}&username=${encodeURIComponent(username || searchQuery.trim())}`}>Открыть пошаговую инструкцию →</Link></span></div>}
           </section>
 
           <aside className={styles.summaryCard}>
@@ -905,7 +905,7 @@ function CheckoutContent() {
             </div>
             <div className={styles.safeNote}><ShieldCheck size={19} /><span><strong>Пароль не нужен</strong><small>Покупаем только выбранный геймпасс.</small></span></div>
             <button type="button" className={styles.primaryButton} disabled={!selectedPass || !selectedPriceMatches || quoteLoading} onClick={() => void prepareConfirmation()}>{quoteLoading ? <Loader2 size={19} className={styles.spin} /> : <>Продолжить <ArrowRight size={18} /></>}</button>
-            <Link href={`/guide?source=site&amount=${robux}&username=${encodeURIComponent(username || searchQuery.trim())}`} className={styles.guideLink}>Нужна инструкция по геймпассу?</Link>
+            <Link href={`/guide?source=site&flow=order&amount=${robux}&username=${encodeURIComponent(username || searchQuery.trim())}`} className={styles.guideLink}>Нужна инструкция по геймпассу?</Link>
           </aside>
         </div>
       ) : (
