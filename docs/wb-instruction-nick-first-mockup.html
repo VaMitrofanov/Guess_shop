@@ -470,6 +470,7 @@ code{font-family:"Geist Mono",monospace;font-size:.92em;padding:1px 6px;border-r
 .watch-ex .rline{margin:0;background:var(--surface-2)}
 
 /* Анимация проверки — три строки, только opacity/transform */
+#guideWrap{scroll-margin-top:96px}
 .scan{scroll-margin-top:96px;margin:0 0 26px;padding:26px 28px;border-radius:24px;border:1px solid color-mix(in srgb,var(--accent) 45%,var(--border));
   background:var(--surface);box-shadow:8px 8px 0 var(--accent)}
 .scan-h{display:flex;align-items:center;gap:16px}
@@ -922,7 +923,6 @@ code{font-family:"Geist Mono",monospace;font-size:.92em;padding:1px 6px;border-r
       <p id="recheckP">Нажми — мы заново посмотрим твой аккаунт и, если всё на месте, сразу оформим заказ. Ничего вводить снова не нужно.</p>
       <div class="row">
         <button type="button" class="bigbtn mint" id="recheckBtn">🔄 Проверить мой аккаунт</button>
-        <button type="button" class="ghostbtn">Не получается — написать в поддержку</button>
       </div>
     </section>
   </div>
@@ -945,7 +945,8 @@ code{font-family:"Geist Mono",monospace;font-size:.92em;padding:1px 6px;border-r
     </div>
   </div>
 
-  <p class="footnote">Мокап. Экраны Roblox — настоящие скриншоты боевой инструкции.</p>
+  <p class="footnote">Совсем не выходит? <a href="#" style="color:inherit;text-decoration:underline;text-underline-offset:3px">Напиши живому менеджеру</a> — разберёмся вместе.</p>
+  <p class="footnote" style="margin-top:10px;opacity:.6">Мокап. Экраны Roblox — настоящие скриншоты боевой инструкции.</p>
 </main>
 <script>
 (function () {
@@ -1031,7 +1032,7 @@ code{font-family:"Geist Mono",monospace;font-size:.92em;padding:1px 6px;border-r
             row("1715", "todo", null, "Пасс на 1715 R$", 1715, "его нужно создать — инструкция ниже", 1200, "создать", "todo", true)
           ],
           total: ["Собрано из 2000", "800 R$", true],
-          actions: [["ghost", "Не хочу возиться — напишу в поддержку"]],
+          actions: [["primary", "📖 Как создать пасс ↓"]],
           have: [["1143", "Пасс «Cool» · 1143 R$", "даёт 800 R$", "bolt"]],
           need: [[1715, 1200]]
         },
@@ -1044,7 +1045,7 @@ code{font-family:"Geist Mono",monospace;font-size:.92em;padding:1px 6px;border-r
             row("715", "todo", null, "Пасс на 715 R$", 715, "создать — инструкция ниже", 500, "создать", "todo", true)
           ],
           total: ["Собрано из 2000", "0 R$", true],
-          actions: [],
+          actions: [["primary", "📖 Как создать оба пасса ↓"]],
           have: [], need: [[2143, 1500], [715, 500]]
         }
       }
@@ -1083,7 +1084,7 @@ code{font-family:"Geist Mono",monospace;font-size:.92em;padding:1px 6px;border-r
             row("429", "todo", null, "Пасс на 429 R$", 429, "его нужно создать — инструкция ниже", 300, "создать", "todo", true)
           ],
           total: ["Собрано из 1000", "700 R$", true],
-          actions: [["ghost", "Не хочу возиться — напишу в поддержку"]],
+          actions: [["primary", "📖 Как создать пасс ↓"]],
           have: [["1000", "Пасс «Cool» · 1000 R$", "даёт 700 R$", "bolt"]],
           need: [[429, 300]]
         },
@@ -1093,7 +1094,7 @@ code{font-family:"Geist Mono",monospace;font-size:.92em;padding:1px 6px;border-r
           s: "На аккаунте нет геймпассов, выставленных на продажу. Нужен один пасс на <b>1429</b> R$ — с него на руки придёт 1000.",
           rows: [row("1429", "todo", null, "Пасс на 1429 R$", 1429, "создать — инструкция ниже", 1000, "создать", "todo", true)],
           total: ["Собрано из 1000", "0 R$", true],
-          actions: [],
+          actions: [["primary", "📖 Как создать пасс ↓"]],
           have: [], need: [[1429, 1000]]
         }
       }
@@ -1232,6 +1233,12 @@ code{font-family:"Geist Mono",monospace;font-size:.92em;padding:1px 6px;border-r
         b.addEventListener("click", function () { state = "start"; render(); });
       } else if (a[1].indexOf("ровные") > -1) {
         b.addEventListener("click", function () { state = "none"; render(); });
+      } else if (a[1].indexOf("Как создать") > -1) {
+        // Поддержка тут стояла кнопкой — на неё жали раньше, чем пробовали
+        // сделать пасс. Теперь главное действие ведёт в инструкцию.
+        b.addEventListener("click", function () {
+          $("guideWrap").scrollIntoView({ behavior: "smooth", block: "start" });
+        });
       }
       acts.appendChild(b);
     });

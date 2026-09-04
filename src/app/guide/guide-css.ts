@@ -453,6 +453,9 @@ export const GUIDE_CSS = `
 .wbi-bigbtn:disabled{opacity:.6;cursor:default}
 .wbi-ghostbtn{appearance:none;cursor:pointer;font:inherit;font-size:15px;font-weight:700;color:var(--rb-muted);background:transparent;border:1px solid var(--rb-border);border-radius:12px;padding:14px 18px}
 .wbi-ghostbtn:hover{color:var(--rb-text);border-color:color-mix(in srgb,var(--rb-accent) 55%,var(--rb-border))}
+.wbi-supportlink{color:var(--rb-muted);text-decoration:underline;text-underline-offset:3px}
+.wbi-supportlink:hover{color:var(--rb-text)}
+.wbi-sechead{scroll-margin-top:16px}
 .wbi-peek{margin-top:18px;width:100%;appearance:none;cursor:pointer;font:inherit;font-size:15.5px;font-weight:700;text-align:left;padding:15px 17px;border-radius:14px;border:1px dashed var(--rb-border);background:transparent;color:var(--rb-muted)}
 .wbi-peek:hover{color:var(--rb-text);border-color:color-mix(in srgb,var(--rb-accent) 55%,var(--rb-border));background:var(--rb-surface-2)}
 .wbi-rescue{margin:0 0 26px;padding:26px 28px;border-radius:24px;border:2px solid #d79b28;background:rgba(215,155,40,.1);box-shadow:8px 8px 0 #d79b28}
