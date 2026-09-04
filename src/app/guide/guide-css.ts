@@ -456,6 +456,23 @@ export const GUIDE_CSS = `
 .wbi-supportlink{color:var(--rb-muted);text-decoration:underline;text-underline-offset:3px}
 .wbi-supportlink:hover{color:var(--rb-text)}
 .wbi-sechead{scroll-margin-top:16px}
+/* Развилка после проверки: две честные дороги вместо одной кнопки */
+.wbi-choice{margin-top:20px;padding:16px 17px 17px;border-radius:18px;border:1px solid var(--rb-border);background:var(--rb-surface-2)}
+.wbi-choice-h{font-size:12px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--rb-muted);margin-bottom:12px}
+.wbi-choice-row{display:grid;gap:10px}
+@media(min-width:760px){.wbi-choice-row{grid-template-columns:1fr 1fr}}
+.wbi-choice-b{display:flex;align-items:center;gap:13px;width:100%;text-align:left;appearance:none;cursor:pointer;font:inherit;
+  padding:15px 16px;border-radius:15px;border:1.5px solid var(--rb-border);background:var(--rb-surface);
+  transition:transform .12s,border-color .2s,box-shadow .2s}
+.wbi-choice-b:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--rb-accent) 60%,var(--rb-border));box-shadow:0 10px 26px rgba(54,35,91,.12)}
+.wbi-choice-b:first-child{border-color:color-mix(in srgb,var(--rb-accent) 55%,var(--rb-border));box-shadow:4px 4px 0 var(--rb-accent)}
+.wbi-choice-b:first-child:hover{box-shadow:4px 4px 0 var(--rb-accent),0 10px 26px rgba(54,35,91,.12)}
+.wbi-choice-b .i{flex:0 0 auto;width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;background:var(--rb-surface-2);border:1px solid var(--rb-border)}
+.wbi-choice-b .m{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.wbi-choice-b .t{font-size:16.5px;font-weight:800;color:var(--rb-text)}
+.wbi-choice-b .s{font-size:14px;line-height:1.4;color:var(--rb-muted)}
+.wbi-choice-b .a{flex:0 0 auto;font-size:18px;font-weight:900;color:var(--rb-accent)}
+.wbi-rescue{scroll-margin-top:16px}
 .wbi-peek{margin-top:18px;width:100%;appearance:none;cursor:pointer;font:inherit;font-size:15.5px;font-weight:700;text-align:left;padding:15px 17px;border-radius:14px;border:1px dashed var(--rb-border);background:transparent;color:var(--rb-muted)}
 .wbi-peek:hover{color:var(--rb-text);border-color:color-mix(in srgb,var(--rb-accent) 55%,var(--rb-border));background:var(--rb-surface-2)}
 .wbi-rescue{margin:0 0 26px;padding:26px 28px;border-radius:24px;border:2px solid #d79b28;background:rgba(215,155,40,.1);box-shadow:8px 8px 0 #d79b28}

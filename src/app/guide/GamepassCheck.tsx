@@ -90,6 +90,7 @@ export default function GamepassCheck({
   const scanRef = useRef<HTMLDivElement | null>(null);
   const resultRef = useRef<HTMLDivElement | null>(null);
   const stepsRef = useRef<HTMLDivElement | null>(null);
+  const rescueRef = useRef<HTMLElement | null>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   useEffect(() => () => { timers.current.forEach(clearTimeout); }, []);
 
@@ -382,6 +383,7 @@ export default function GamepassCheck({
                 onPeek={() => setPeek((v) => !v)}
                 onConfirm={confirm}
                 onOpenGuide={() => stepsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                onOpenRescue={() => rescueRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
                 onChangeNick={() => { setPhase("entry"); setPlan(null); setAccount(null); setTouched(false); }}
               />
             </div>
@@ -389,7 +391,7 @@ export default function GamepassCheck({
 
           {/* ── Запасной вход по ссылке — ровно там, где поиск подвёл ───── */}
           {phase === "result" && plan && toCreate.length > 0 && !orderPlaced && (
-            <section className="wbi-rescue">
+            <section className="wbi-rescue" ref={rescueRef}>
               <span className="k">🔗 Пасс есть, а мы его не видим</span>
               <h3>{plan.kind === "empty" ? "Уверен, что геймпасс уже создан? Дай на него ссылку" : "Есть ещё один пасс, которого мы не увидели? Дай ссылку"}</h3>
               <p>Так бывает: если игра скрыта из поиска или пасс создан только что, наш поиск по нику его не находит — <b>а по прямой ссылке находит всегда</b>. Это быстрее, чем создавать пасс заново.</p>
@@ -504,7 +506,7 @@ function toOwned(gp: Record<string, unknown>): OwnedPass {
 const TONE: Record<CheckPlan["kind"], string> = { ready: "ok", assembled: "mix", build: "half", empty: "none" };
 
 function ResultCard({
-  plan, amount, account, nick, orderPlaced, confirming, confirmErr, isSite, peek, onPeek, onConfirm, onChangeNick, onOpenGuide,
+  plan, amount, account, nick, orderPlaced, confirming, confirmErr, isSite, peek, onPeek, onConfirm, onChangeNick, onOpenGuide, onOpenRescue,
 }: {
   plan: CheckPlan;
   amount: number;
@@ -519,6 +521,7 @@ function ResultCard({
   onConfirm: () => void;
   onChangeNick: () => void;
   onOpenGuide: () => void;
+  onOpenRescue: () => void;
 }) {
   const covered = coveredRobux(plan);
   const done = plan.kind === "ready" || plan.kind === "assembled";
@@ -585,11 +588,26 @@ function ResultCard({
       {confirmErr && <div className="wbi-warn" style={{ marginTop: 14 }}>{confirmErr}</div>}
 
       {!done && !orderPlaced && (
-        <div className="wbi-actions">
-          <button className="wbi-bigbtn" onClick={onOpenGuide}>
-            📖 {create.length > 1 ? "Как создать оба пасса" : "Как создать пасс"} ↓
-          </button>
-          <button className="wbi-ghostbtn" onClick={onChangeNick}>Это не мой аккаунт</button>
+        <div className="wbi-choice">
+          <div className="wbi-choice-h">Что делаем дальше?</div>
+          <div className="wbi-choice-row">
+            <button className="wbi-choice-b" onClick={onOpenGuide}>
+              <span className="i">📖</span>
+              <span className="m">
+                <span className="t">{create.length > 1 ? "Создать оба пасса" : "Создать пасс"}</span>
+                <span className="s">Пошагово, со скриншотами — 5–7 минут</span>
+              </span>
+              <span className="a" aria-hidden="true">↓</span>
+            </button>
+            <button className="wbi-choice-b" onClick={onOpenRescue}>
+              <span className="i">🔗</span>
+              <span className="m">
+                <span className="t">Пасс уже есть</span>
+                <span className="s">Дай ссылку — поиск видит не все пассы</span>
+              </span>
+              <span className="a" aria-hidden="true">↓</span>
+            </button>
+          </div>
         </div>
       )}
 
