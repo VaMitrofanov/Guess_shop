@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { guideStepCount } from "@/app/guide/guide-steps";
 import {
   platformFromUserAgent,
   platformFromBrowser,
@@ -42,12 +43,20 @@ describe("инструкция: ярлык через поиск Creator Hub", (
     expect(s).toMatch(/<Step n="4" cls="wbi-key">/);
     expect(s).not.toContain('<Step n="6"');
     expect(s).not.toContain('<Step n="7"');
-    // Финиш на пошаговой странице продолжает нумерацию инструкции.
+    // Финиш на пошаговой странице продолжает нумерацию инструкции и СЧИТАЕТСЯ
+    // от неё: вбитые руками номера — ровно то, что разъезжается при пересборке.
     const page = read("src/app/guide/WBInstructionV2.tsx");
-    expect(page).toContain('<Step n="5" pulse cls="wbi-key wbi-finish">');
-    expect(page).toContain('<Step n="6">');
+    expect(page).toContain("guideStepCount(createTargets) + 1");
+    expect(page).toContain('<Step n={String(finishStep)} pulse cls="wbi-key wbi-finish">');
+    expect(page).toContain("<Step n={String(finishStep + 1)}>");
     // Ссылок на «шаг 7» после пересборки остаться не должно.
     expect(page).not.toMatch(/шаг[а-я]* <b>7<\/b>/);
+  });
+
+  test("счётчик шагов знает про пару пассов", () => {
+    const one = [{ price: 1429, amount: 1000 }];
+    expect(guideStepCount(one)).toBe(4);
+    expect(guideStepCount([...one, { price: 715, amount: 500 }])).toBe(5);
   });
 
   test("кадры под устройство доезжают до всех трёх поверхностей", () => {

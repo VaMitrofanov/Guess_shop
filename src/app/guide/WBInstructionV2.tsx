@@ -22,7 +22,7 @@ import { gamepassPriceMatches, rankSellableGamepasses } from "@/lib/gamepass-sea
 import { parseGamepassRef, parseGamepassUrl } from "@/lib/gamepass-id";
 import { CUSTOM_MAX, CUSTOM_MIN } from "@/lib/retail-pricing";
 import { GUIDE_CSS } from "./guide-css";
-import GuideSteps, { Step } from "./guide-steps";
+import GuideSteps, { Step, guideStepCount } from "./guide-steps";
 import type { GuidePlatform } from "@/lib/device-platform";
 
 const RATE = 0.7; // Roblox keeps 30%
@@ -108,6 +108,13 @@ export default function WBInstructionV2({
   // WB is fixed by the activated card. SITE/BOT can edit the desired amount at
   // the calculation step, therefore their expected gamepass price follows `nom`.
   const expectedPrice = calcPrice(mode === "WB" ? nomDefault : nom);
+  /** Что именно предлагаем создать. Здесь всегда один пасс: разбивку на два
+   *  показывает проверка аккаунта, а не страница для читателя. */
+  const createTargets = [{ price: expectedPrice, amount: mode === "WB" ? nomDefault : nom }];
+  /** Шаги «найди пасс» и «зачем бот» идут ПОСЛЕ инструкции и продолжают её
+   *  нумерацию. Считаем от самой инструкции, чтобы при её пересборке номера
+   *  не разъехались молча. */
+  const finishStep = guideStepCount(createTargets) + 1;
   const [nick, setNick] = useState(initialUsername.trim().replace(/^@/, ""));
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState<string | null>(null);
@@ -360,7 +367,7 @@ export default function WBInstructionV2({
         <div className="wbi-tl">
 
           <GuideSteps
-            targets={[{ price: expectedPrice, amount: mode === "WB" ? nomDefault : nom }]}
+            targets={createTargets}
             mode={mode}
             initialPlatform={initialPlatform}
             nomRow={
@@ -369,7 +376,7 @@ export default function WBInstructionV2({
             }
           />
 
-          <Step n="5" pulse cls="wbi-key wbi-finish">
+          <Step n={String(finishStep)} pulse cls="wbi-key wbi-finish">
             {isReEntry && robloxUsername ? (
               <>
                 <div className="wbi-kbadge" style={{ background: "linear-gradient(135deg,#1a7a3a,#2ecc71)" }}>✅ ЗАКАЗ ОФОРМЛЕН</div>
@@ -573,7 +580,7 @@ export default function WBInstructionV2({
             </div>}
           </Step>
 
-          <Step n="6">
+          <Step n={String(finishStep + 1)}>
             {isSite ? (
               <div className="wbi-cols wbi-media wbi-rev">
                 <div><div className="wbi-ttl">Проверь и перейди к оплате</div>
@@ -617,7 +624,7 @@ export default function WBInstructionV2({
                 Перейти к оформлению →
               </a>
             ) : (
-              <span className="wbi-sitepay disabled" aria-disabled="true">Выбери геймпасс на шаге 5</span>
+              <span className="wbi-sitepay disabled" aria-disabled="true">Выбери геймпасс на шаге {finishStep}</span>
             )}
             <a className="wbi-support" href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer">Остались вопросы? Написать живому менеджеру →</a>
           </div>
