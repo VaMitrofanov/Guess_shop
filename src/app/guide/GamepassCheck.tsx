@@ -209,12 +209,21 @@ export default function GamepassCheck({
         setManualErr("Не нашли пасс с таким номером. Проверь, что взял его из колонки Pass ID, а не номер игры.");
         return;
       }
+      // Робуксы уходят ВЛАДЕЛЬЦУ пасса, а не тому, кого назвал покупатель.
+      // Вставленный чужой номер (или свой, но от другого аккаунта) иначе тихо
+      // уехал бы в заказ и оставил человека без робуксов.
+      const owner = typeof gp.creatorName === "string" ? gp.creatorName.trim() : "";
+      const claimed = (account?.username ?? nick).trim();
+      if (owner && claimed && owner.toLowerCase() !== claimed.toLowerCase()) {
+        setManualErr(`Этот пасс принадлежит аккаунту ${owner}, а робуксы ты просишь на ${claimed}. Робуксы придут владельцу пасса — проверь номер или вернись и смени ник.`);
+        return;
+      }
       const pass = toOwned(gp);
       const next = [...owned.filter((p) => p.gamepassId !== pass.gamepassId), pass];
       replan(next);
-      if (!account && typeof gp.creatorName === "string" && NICK_RE.test(gp.creatorName)) {
-        setNick(gp.creatorName);
-        setAccount({ id: "", username: gp.creatorName, avatarUrl: null });
+      if (!account && owner && NICK_RE.test(owner)) {
+        setNick(owner);
+        setAccount({ id: "", username: owner, avatarUrl: null });
       }
       setManualRef("");
       setPhase("result");
@@ -224,7 +233,7 @@ export default function GamepassCheck({
     } finally {
       setManualBusy(false);
     }
-  }, [manualRef, code, owned, account, replan]);
+  }, [manualRef, code, owned, account, nick, replan]);
 
   const confirm = useCallback(async () => {
     if (!plan || (plan.kind !== "ready" && plan.kind !== "assembled")) return;

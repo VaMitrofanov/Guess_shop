@@ -488,6 +488,10 @@ export const GUIDE_CSS = `
 .wbi-path b{white-space:nowrap}
 .wbi-rescue .wbi-shot{max-width:none;margin:12px 0 0}
 .wbi-rescue .wbi-figure{max-width:none}
+/* Плашка «ROBLOX · CREATOR HUB» садится в правый верхний угол любой фигуры и
+   на этом скрине накрывает ровно то, что обведено — заголовок колонки Pass ID.
+   Здесь она и не нужна: строка пути прямо над скрином называет Creator Hub. */
+.wbi-rescue .wbi-figure::before{content:none}
 .wbi-rescue .wbi-figure figcaption{margin-top:9px;font-size:14px}
 .wbi-sechead{display:flex;align-items:center;gap:14px;margin:0 0 18px}
 .wbi-sechead b{font-family:var(--font-display),sans-serif;font-size:13px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--rb-muted)}

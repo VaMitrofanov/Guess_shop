@@ -178,7 +178,24 @@ export async function POST(request: Request) {
       if (!creatorName && details.creatorId) {
         creatorName = ((await getRobloxUserById(String(details.creatorId)))?.name ?? "").trim();
       }
-      if (NICK_RE.test(creatorName)) nick = creatorName;
+      if (NICK_RE.test(creatorName)) {
+        // Имя владельца ПЕРЕБИВАЛО названный ник молча. При ручном вводе Pass ID
+        // это значило: вставил чужой номер — заказ тихо уехал постороннему
+        // человеку, а покупатель остался без робуксов и без объяснения.
+        // Перебиваем только когда своего ника нет (вход по одной ссылке);
+        // расхождение — отказ, потому что расходятся ПОЛУЧАТЕЛИ робуксов.
+        if (NICK_RE.test(rawNick) && rawNick.toLowerCase() !== creatorName.toLowerCase()) {
+          return NextResponse.json(
+            {
+              error: `Этот геймпасс принадлежит аккаунту ${creatorName}, а робуксы заказаны на ${rawNick}. Робуксы придут владельцу пасса — проверь номер пасса или ник.`,
+              code: "OWNER_MISMATCH",
+              owner: creatorName,
+            },
+            { status: 422 },
+          );
+        }
+        nick = creatorName;
+      }
     }
     if (!NICK_RE.test(nick)) {
       return NextResponse.json(
