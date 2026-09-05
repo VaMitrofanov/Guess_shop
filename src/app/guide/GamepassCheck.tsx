@@ -174,11 +174,29 @@ export default function GamepassCheck({
     }
   }, [nick, code, replan]);
 
-  /** Запасной вход: пасс есть, но поиск по нику его не видит (скрытый плейс, свежий пасс). */
+  /**
+   * Запасной вход: пасс есть, но поиск по нику его не видит (скрытый плейс, свежий пасс).
+   *
+   * Просим **Pass ID**, а не ссылку: публичной ссылки у скрытого плейса может не
+   * быть вовсе, а Pass ID лежит отдельной колонкой в таблице Passes и копируется
+   * кнопкой `Copy Pass ID` — это одно движение вместо разбора адресной строки.
+   * Вставленный адрес принимаем по-прежнему, но двух видов путаницы ждём заранее:
+   * адрес СПИСКА пассов (`/monetization/passes` — номера в нём нет) и номер ИГРЫ
+   * (он идёт после `/experiences/`).
+   */
   const runManual = useCallback(async () => {
-    const id = parseGamepassRef(manualRef.trim());
+    const raw = manualRef.trim();
+    const id = parseGamepassRef(raw);
     if (!id) {
-      setManualErr("Не похоже на ссылку или номер геймпасса. Скопируй адрес страницы пасса целиком.");
+      setManualErr(
+        /^\d+$/.test(raw)
+          ? `В Pass ID 9–10 цифр, а здесь ${raw.length}. Похоже, это цена или номинал — Pass ID стоит в отдельной колонке, справа от названия пасса.`
+          : /passes\b/i.test(raw)
+            ? "Это адрес страницы, а не номер. Pass ID стоит отдельной колонкой в таблице Passes — скопируй число оттуда."
+            : /experiences?\/\d+/i.test(raw)
+              ? "Это номер игры, а не пасса. Нужное число — в колонке Pass ID, напротив названия пасса."
+              : "Не похоже на Pass ID. Это число из колонки Pass ID — 9–10 цифр, без пробелов.",
+      );
       return;
     }
     setManualErr(null);
@@ -188,7 +206,7 @@ export default function GamepassCheck({
       const data = await res.json();
       const gp = (data?.gamepasses ?? [])[0] as Record<string, unknown> | undefined;
       if (!data?.success || !gp) {
-        setManualErr("Не нашли такой геймпасс. Проверь, что ссылка ведёт на сам Game Pass, а не на игру.");
+        setManualErr("Не нашли пасс с таким номером. Проверь, что взял его из колонки Pass ID, а не номер игры.");
         return;
       }
       const pass = toOwned(gp);
@@ -200,6 +218,7 @@ export default function GamepassCheck({
       }
       setManualRef("");
       setPhase("result");
+      requestAnimationFrame(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
     } catch {
       setManualErr("Не удалось связаться с Roblox. Попробуй ещё раз через минуту.");
     } finally {
@@ -389,30 +408,39 @@ export default function GamepassCheck({
             </div>
           )}
 
-          {/* ── Запасной вход по ссылке — ровно там, где поиск подвёл ───── */}
+          {/* ── Запасной вход по Pass ID — ровно там, где поиск подвёл ──── */}
           {phase === "result" && plan && toCreate.length > 0 && !orderPlaced && (
             <section className="wbi-rescue" ref={rescueRef}>
-              <span className="k">🔗 Пасс есть, а мы его не видим</span>
-              <h3>{plan.kind === "empty" ? "Уверен, что геймпасс уже создан? Дай на него ссылку" : "Есть ещё один пасс, которого мы не увидели? Дай ссылку"}</h3>
-              <p>Так бывает: если игра скрыта из поиска или пасс создан только что, наш поиск по нику его не находит — <b>а по прямой ссылке находит всегда</b>. Это быстрее, чем создавать пасс заново.</p>
+              <span className="k">🔢 Пасс уже создан?</span>
+              <h3>{plan.kind === "empty" ? "Вставь его Pass ID — найдём даже скрытый" : "Есть ещё один пасс? Вставь его Pass ID"}</h3>
+              <p>Если игра скрыта из поиска или пасс создан только что, по нику мы его не находим — <b>по Pass ID находим всегда</b>.</p>
               <div className="wbi-srow">
                 <input
                   className="wbi-sinput"
                   type="text"
-                  placeholder="https://www.roblox.com/game-pass/1234567"
-                  aria-label="Ссылка на геймпасс"
+                  placeholder="Например: 1969680833"
+                  aria-label="Pass ID геймпасса"
                   value={manualRef}
                   onChange={(e) => setManualRef(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") runManual(); }}
                   autoCapitalize="off" autoCorrect="off" spellCheck={false}
                 />
                 <button className="wbi-sbtn" onClick={runManual} disabled={manualBusy}>
-                  {manualBusy ? "Проверяем…" : "Проверить ссылку"}
+                  {manualBusy ? "Ищем…" : "Найти пасс"}
                 </button>
               </div>
               {manualErr && <div className="wbi-warn" style={{ marginTop: 12 }}>{manualErr}</div>}
               <div className="wbi-how">
-                <b>Где взять ссылку:</b> Creator Hub → <b>Creations</b> → твоя игра → <b>Passes</b> → нажми на пасс → скопируй адрес из строки браузера. Подойдёт и просто номер пасса.
+                <b>Где взять Pass ID:</b>
+                <span className="wbi-path">Creator Hub → твоя игра → <b>Monetization</b> → <b>Passes</b> → колонка <b>Pass ID</b>.</span>
+                <figure className="wbi-figure wbi-shot">
+                  <span className="wbi-anno">
+                    <img src="/guide/wb-passid.png" alt="Таблица Passes в Creator Hub: колонка Pass ID и кнопка Copy Pass ID" loading="lazy" decoding="async" />
+                    <span className="wbi-box y" style={{ left: "59.5%", top: "5.9%", width: "11%", height: "8.2%" }} />
+                    <span className="wbi-box g nodot" style={{ left: "59.5%", top: "22.4%", width: "19%", height: "11.7%" }} />
+                  </span>
+                  <figcaption>Число из колонки <b>Pass ID</b> (синяя рамка) — его и вставь. Рядом есть кнопка <b>Copy Pass ID</b>.</figcaption>
+                </figure>
               </div>
             </section>
           )}

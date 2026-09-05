@@ -26,11 +26,47 @@ describe("gamepass reference parsing", () => {
     expect(parseGamepassRef("1784555857")).toBe("1784555857");
   });
 
+  /**
+   * Голое число проверяется на правдоподобие длиной. Без этого «715» уходило в
+   * Roblox как Pass ID: в лучшем случае пустой ответ, в худшем — ЧУЖОЙ пасс,
+   * чьим владельцем мы пометили бы заказ. Пассы, которые создают сейчас, — это
+   * 10 цифр; всё, что короче семи, у покупателя означает цену или номинал.
+   */
+  test.each(["322", "715", "500", "77", "12345", "123456", "1234567890123"])(
+    "«%s» — не Pass ID, а цена/номинал/обрывок",
+    (input) => {
+      expect(parseGamepassRef(input)).toBeNull();
+      expect(mirror.parseGamepassRef(input)).toBeNull();
+    },
+  );
+
+  test.each(["1969680833", "1784555857", "12345678"])("«%s» — правдоподобный Pass ID", (input) => {
+    expect(parseGamepassRef(input)).toBe(input);
+    expect(mirror.parseGamepassRef(input)).toBe(input);
+  });
+
   test("ник и мусор не притворяются геймпассом", () => {
     expect(parseGamepassRef("lokomotiv_2018")).toBeNull();
     expect(parseGamepassRef("https://www.roblox.com/games/920587237/Adopt-Me")).toBeNull();
     expect(parseGamepassRef("")).toBeNull();
     expect(parseGamepassRef(null)).toBeNull();
+  });
+
+  /**
+   * Блок «Пасс уже создан?» просит Pass ID, но принимает и вставленный адрес.
+   * Адреса Creator Hub при этом асимметричны: страница самого пасса номер
+   * содержит, страница СПИСКА пассов — нет. Разница видна только здесь, поэтому
+   * держим её тестом: иначе «можно вставить и адрес» тихо станет пустым отказом.
+   */
+  test("адрес страницы пасса даёт номер, адрес списка — нет", () => {
+    const passPage = "https://create.roblox.com/dashboard/creations/experiences/10302269431/passes/1969680833/configure";
+    const listPage = "https://create.roblox.com/dashboard/creations/experiences/10302269431/monetization/passes?tab=Creations";
+    expect(parseGamepassRef(passPage)).toBe("1969680833");
+    expect(mirror.parseGamepassRef(passPage)).toBe("1969680833");
+    expect(parseGamepassRef(listPage)).toBeNull();
+    expect(mirror.parseGamepassRef(listPage)).toBeNull();
+    // Номер ИГРЫ стоит рядом, после /experiences/, и не должен подменять пасс.
+    expect(parseGamepassRef("https://create.roblox.com/dashboard/creations/experiences/10302269431")).toBeNull();
   });
 
   test("extractGamepassId остаётся узким разбором для колонки БД", () => {

@@ -101,6 +101,7 @@ export const GUIDE_CSS = `
 .wbi-box.pill{border-radius:999px}
 .wbi-box.g{border-color:#335fff;box-shadow:0 0 0 1px rgba(0,0,0,.45),0 0 16px rgba(51,95,255,.58);animation:wbi-target-pulse 2.2s ease-in-out infinite}
 .wbi-box.g::after{content:'';position:absolute;left:50%;top:50%;width:18px;height:18px;border:3px solid #fff;border-radius:50%;background:rgba(51,95,255,.82);box-shadow:0 0 0 7px rgba(51,95,255,.2),0 3px 12px rgba(0,0,0,.35);transform:translate(-50%,-50%);animation:wbi-roblox-tap 2.2s cubic-bezier(.22,1,.36,1) infinite}
+.wbi-box.g.nodot::after{content:none}
 .wbi-box.y{border-color:#f2c14e;box-shadow:0 0 0 1px rgba(0,0,0,.4),0 0 16px rgba(242,193,78,.45)}
 .wbi-tip{position:absolute;transform:translate(-50%,-50%);z-index:3;pointer-events:none;line-height:1;font-weight:850;letter-spacing:.3px;white-space:nowrap;font-size:clamp(13px,2.7cqw,17px);padding:.46em .66em;border-radius:7px;box-shadow:0 3px 10px rgba(0,0,0,.4)}
 .wbi-tip.g{background:#335fff;color:#fff;animation:wbi-tip-float 2.2s ease-in-out infinite}
@@ -481,6 +482,13 @@ export const GUIDE_CSS = `
 .wbi-rescue p{margin:10px 0 0;font-size:16px;line-height:1.6;color:var(--rb-text);opacity:.88;max-width:62ch}
 .wbi-rescue .wbi-srow{margin-top:18px}
 .wbi-rescue .wbi-how{margin-top:14px;padding:14px 16px;border-radius:14px;background:var(--rb-surface);border:1px solid #d79b28;font-size:15px;line-height:1.6;color:var(--rb-text)}
+.wbi-rescue .wbi-how code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;word-break:break-all;background:var(--rb-surface-2);border-radius:6px;padding:1px 5px}
+/* Мини-инструкция внутри карточки: путь строкой + один размеченный скрин. */
+.wbi-path{display:block;margin-top:9px;font-size:14.5px;line-height:1.7}
+.wbi-path b{white-space:nowrap}
+.wbi-rescue .wbi-shot{max-width:none;margin:12px 0 0}
+.wbi-rescue .wbi-figure{max-width:none}
+.wbi-rescue .wbi-figure figcaption{margin-top:9px;font-size:14px}
 .wbi-sechead{display:flex;align-items:center;gap:14px;margin:0 0 18px}
 .wbi-sechead b{font-family:var(--font-display),sans-serif;font-size:13px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--rb-muted)}
 .wbi-sechead::after{content:"";flex:1;height:1px;background:var(--rb-border)}
