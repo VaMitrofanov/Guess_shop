@@ -38,6 +38,7 @@ import {
 import {
   buildNarrowWhere, isNarrowed, loadOrderSlices, parseNarrow, type OrderSlicesPayload,
 } from "@/lib/order-slices";
+import { gateCodesForWbOrderNumber } from "@/lib/wb-order-number-search";
 import { resolveWbOrderSource } from "../../../../../bots/shared/wb-order-source";
 
 const VALID_STATUSES = ["AWAITING_PAYMENT", "PAYMENT_PENDING", "AWAITING_GAMEPASS", "PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED", "ERROR"] as const;
@@ -327,6 +328,13 @@ export async function GET(req: NextRequest) {
       orClauses.push({ user: { vkId: { contains: qDigits } } });
       // U18: цифровой запрос — это ID геймпасса, ищем по индексу.
       orClauses.push({ gamepassId: qDigits });
+      /* …а ещё это может быть номер заказа WB — то, чем покупатель называет
+         свой заказ в чате. У `WbOrder` такого поля нет, связь идёт через код
+         гейта, поэтому номер разворачивается в коды одним запросом к таблице
+         доставки. Без этого поиск по `5674129925` находил строку доставки и
+         ноль заказов (разбор 05.09.2026). */
+      const dbsCodes = await gateCodesForWbOrderNumber(qDigits);
+      if (dbsCodes.length) orClauses.push({ wbCode: { in: dbsCodes } });
     }
     searchWhere = { OR: orClauses };
   }
@@ -2252,6 +2260,14 @@ export async function POST(req: NextRequest) {
   if (action === "attach-gamepass") {
     // attach переводит заказ в PENDING (очередь выкупа) — для неоплаченного DIR закрыто.
     if (unpaidDirect) return NextResponse.json({ error: UNPAID_DIR_ERROR }, { status: 409 });
+    /* ❄️ Заморозка. Привязка ставит заказ в очередь выкупа — то самое, что
+       заморозка запрещает; без гарда она была чёрным ходом: вставил ссылку, и
+       заказ снова выглядит рабочим (та же дыра, что закрыли у `edit-order`
+       31.08). Читаем `OrderHold`, а не только `heldAt`: заморозка ставится по
+       КОДУ и может быть старше самого заказа, а крон-свип помечает его не
+       мгновенно. Интерфейс кнопку уже прячет — здесь стоит запрет. */
+    const attachHeld = await assertOrderNotHeld(prisma, orderId);
+    if (attachHeld.held) return NextResponse.json({ error: attachHeld.message }, { status: 409 });
     const raw = String(body.gamepassId ?? "").trim();
     const idMatch = raw.match(/game-pass(?:es)?\/(\d+)/i) ?? raw.match(/^(\d+)$/);
     if (!idMatch)

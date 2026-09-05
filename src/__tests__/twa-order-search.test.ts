@@ -46,6 +46,39 @@ describe("Поиск в ленте заказов идёт по всей баз�
   });
 });
 
+describe("Номер заказа WB ведёт к самому заказу", () => {
+  /* У `WbOrder` нет поля с номером WB, связь идёт через код гейта. Из-за этого
+     поиск по `5674129925` находил строку доставки и НОЛЬ заказов — номер,
+     которым покупатель называет заказ в чате WB, не приводил к карточке, где с
+     этим заказом работают. */
+  const helper = readFileSync(
+    join(process.cwd(), "src/lib/wb-order-number-search.ts"),
+    "utf8",
+  );
+
+  it("номер разворачивается в коды гейта одним запросом", () => {
+    expect(helper).toContain("where: { wbOrderId: { contains: digits } }");
+    expect(helper).toContain("select: { wbCode: { select: { code: true } } }");
+  });
+
+  it("порог — пять цифр: короткий фрагмент притянул бы чужие заказы", () => {
+    expect(helper).toContain("WB_ORDER_NUMBER_MIN_DIGITS = 5");
+    expect(helper).toContain("digits.length >= WB_ORDER_NUMBER_MIN_DIGITS");
+  });
+
+  it("осечка таблицы доставки не ломает поиск по остальным ключам", () => {
+    expect(helper).toContain("Возвращает пустой массив на любой осечке");
+    expect(helper.slice(helper.indexOf("gateCodesForWbOrderNumber"))).toContain("return [];");
+  });
+
+  it("обе половины поиска зовут один и тот же хелпер", () => {
+    expect(ordersRoute).toContain("await gateCodesForWbOrderNumber(qDigits)");
+    expect(ordersRoute).toContain("orClauses.push({ wbCode: { in: dbsCodes } })");
+    expect(searchRoute).toContain("await gateCodesForWbOrderNumber(digits)");
+    expect(searchRoute).toContain("clauses.push({ wbCode: { in: dbsCodes } })");
+  });
+});
+
 describe("Найденное показывается даже при пустой ленте", () => {
   it("живая выдача вынесена из ветки со списком", () => {
     expect(screen).toContain("const liveResults = query ? (");

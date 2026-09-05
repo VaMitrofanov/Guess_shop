@@ -120,6 +120,21 @@ describe("гарды выкупа", () => {
     expect(guard).toBeLessThan(spend);
   });
 
+  it("привязка ссылки не ставит замороженный в очередь", () => {
+    /* Дыра, найденная 05.09.2026 при разборе правки заказа: `attach-gamepass`
+       переводит заказ в PENDING — ровно то, что заморозка запрещает, — но
+       гарда не имел. Интерфейс кнопку прячет; запрет обязан быть на сервере,
+       потому что действие вызывается запросом, а не только кнопкой.
+       Проверяем `assertOrderNotHeld`, а не `order.heldAt`: заморозка ставится
+       по КОДУ и бывает старше заказа. */
+    const route = read("src/app/api/twa/orders/route.ts");
+    const attach = route.slice(route.indexOf('if (action === "attach-gamepass")'));
+    const guard = attach.indexOf("assertOrderNotHeld");
+    const queue = attach.indexOf('status: "PENDING"');
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(queue);
+  });
+
   it("«Вернуть к выкупу» и «Перенести» не поднимают замороженный", () => {
     // Та самая ловушка «Ошибки»: одно нажатие возвращало заказ в PENDING.
     const route = read("src/app/api/twa/orders/route.ts");

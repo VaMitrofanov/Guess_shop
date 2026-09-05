@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { searchForSalePassesByNick } from "@/lib/roblox-gamepass-search";
 import type { Prisma } from "@prisma/client";
 import { getOrderMatchReason } from "@/lib/twa-search-match";
+import { gateCodesForWbOrderNumber } from "@/lib/wb-order-number-search";
 
 interface RobloxProductInfo {
   Name?: string;
@@ -93,6 +94,12 @@ export async function GET(req: NextRequest) {
     clauses.push({ user: { vkId: { contains: digits } } });
     // U18: цифровой запрос ищем по индексируемому gamepassId.
     clauses.push({ gamepassId: digits });
+    // Номер заказа WB → код гейта → заказ на выкуп. Строку доставки этот роут
+    // и так находил; не хватало самого заказа, ради которого сюда идут.
+    if (wantDb) {
+      const dbsCodes = await gateCodesForWbOrderNumber(digits);
+      if (dbsCodes.length) clauses.push({ wbCode: { in: dbsCodes } });
+    }
   }
 
   // Заказы DBS живут в своей таблице и до 30.08.2026 искались только со своего
