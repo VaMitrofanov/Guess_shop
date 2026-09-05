@@ -35,6 +35,7 @@ import {
 } from "@/lib/gamepass-plan";
 import { GUIDE_CSS } from "./guide-css";
 import GuideSteps from "./guide-steps";
+import type { GuidePlatform } from "@/lib/device-platform";
 
 const NICK_RE = /^[A-Za-z0-9_]{3,20}$/;
 const VK_RETURN_HREF = "https://vk.me/club237309399";
@@ -52,6 +53,7 @@ export default function GamepassCheck({
   initialUsername = "",
   testMode = false,
   onReset,
+  initialPlatform = "mobile",
 }: {
   mode: "WB" | "SITE" | "BOT";
   amount: number;
@@ -59,6 +61,8 @@ export default function GamepassCheck({
   initialUsername?: string;
   testMode?: boolean;
   onReset?: () => void;
+  /** Догадка сервера «телефон или компьютер» — только для кадров инструкции. */
+  initialPlatform?: GuidePlatform;
 }) {
   const router = useRouter();
   const isSite = mode === "SITE";
@@ -469,7 +473,7 @@ export default function GamepassCheck({
               )}
               <Goals plan={plan} toCreate={stepTargets} reference={toCreate.length === 0} />
               <div className="wbi-tl">
-                <GuideSteps targets={stepTargets} mode={mode} />
+                <GuideSteps targets={stepTargets} mode={mode} initialPlatform={initialPlatform} />
               </div>
               <section className="wbi-recheck">
                 <h3>{toCreate.length === 0 ? "Что-то поменял?" : "Сделал? Проверим ещё раз"}</h3>
@@ -569,7 +573,7 @@ function ResultCard({
     ready: { k: "✅ всё уже готово", h: "Создавать ничего не нужно", s: <>У тебя уже выставлены геймпассы с нужными ценами. Мы подставили их сами — остаётся подтвердить.</> },
     assembled: { k: "🧩 собрали из твоих", h: "Ровных пассов нет — собрали из того, что есть", s: <>Твои цены складываются в <b>ровно {amount.toLocaleString("ru-RU")} R$</b> без остатка. Один и тот же пасс можно купить несколько раз: части выкупаются с разных аккаунтов.</> },
     build: { k: "➕ достроим одним пассом", h: "Почти сходится — нужен ещё один пасс", s: <>То, что уже выставлено, закрывает <b>{covered.toLocaleString("ru-RU")} R$</b>. Точной суммы из этого не собрать, поэтому создай <b>один</b> пасс — инструкция ниже показывает ровно его.</> },
-    empty: { k: "🆕 пассов не нашли", h: "Сделаем с нуля — это 5–7 минут", s: <>На аккаунте нет геймпассов, выставленных на продажу. Ниже — что именно создать.</> },
+    empty: { k: "🆕 пассов не нашли", h: "Сделаем с нуля — это 3–5 минут", s: <>На аккаунте нет геймпассов, выставленных на продажу. Ниже — что именно создать.</> },
   }[plan.kind];
 
   return (
@@ -632,7 +636,7 @@ function ResultCard({
               <span className="i">📖</span>
               <span className="m">
                 <span className="t">{create.length > 1 ? "Создать оба пасса" : "Создать пасс"}</span>
-                <span className="s">Пошагово, со скриншотами — 5–7 минут</span>
+                <span className="s">Пошагово, со скриншотами — 3–5 минут</span>
               </span>
               <span className="a" aria-hidden="true">↓</span>
             </button>

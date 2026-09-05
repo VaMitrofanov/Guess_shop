@@ -1,5 +1,7 @@
 import { Metadata } from "next";
+import { headers } from "next/headers";
 import GuideClient from "./GuideClient";
+import { platformFromUserAgent } from "@/lib/device-platform";
 import { CUSTOM_MAX, CUSTOM_MIN } from "@/lib/retail-pricing";
 
 export const metadata: Metadata = {
@@ -17,6 +19,11 @@ interface GuidPageProps {
 
 export default async function GuidePage({ searchParams }: GuidPageProps) {
   const { source, skip, code, test, nom, preview, amount, username, flow } = await searchParams;
+  // Телефон или компьютер: вход в Creator Hub на них разный, и кадры инструкции
+  // тоже. Догадка приходит в первом HTML, чтобы страница не мигала после
+  // гидратации; в браузере она уточняется, а переключатель её перекрывает.
+  // Страница и так динамическая (ждёт searchParams) — заголовки бесплатны.
+  const initialPlatform = platformFromUserAgent((await headers()).get("user-agent"));
   const isWB = source === "wb";
   const skipGate = isWB && !!skip;
   // code passed by TG/VK bot so the instruction page opens even in Telegram's WebView
@@ -60,6 +67,7 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
         initialAmount={siteAmount}
         initialUsername={username ?? ""}
         orderFlow={orderFlow}
+        initialPlatform={initialPlatform}
       />
     </>
   );

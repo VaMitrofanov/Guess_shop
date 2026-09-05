@@ -13,6 +13,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import VKAuthButton from "@/components/auth/VKAuthButton";
 import WBInstructionV2 from "./WBInstructionV2";
+import type { GuidePlatform } from "@/lib/device-platform";
 import GamepassCheck from "./GamepassCheck";
 // Visual components imported directly. None of them tug in heavy deps now
 // (three.js was dropped in favour of CSS gradients), so dynamic chunk
@@ -2870,6 +2871,7 @@ export default function GuideClient({
   initialAmount = 1000,
   initialUsername = "",
   orderFlow = false,
+  initialPlatform = "mobile",
 }: {
   isWB: boolean;
   guideMode?: "WB" | "SITE" | "BOT";
@@ -2882,6 +2884,8 @@ export default function GuideClient({
   initialUsername?: string;
   /** Человек пришёл с заказом (оформляет покупку), а не просто читает инструкцию. */
   orderFlow?: boolean;
+  /** «Телефон или компьютер» по User-Agent — влияет только на кадры инструкции. */
+  initialPlatform?: GuidePlatform;
 }) {
   // Both modes open the instruction directly (no gate/intro/bot/DB/session).
   // Difference: testMode renders the Telegram/VK buttons inert (silent QA),
@@ -3080,6 +3084,7 @@ export default function GuideClient({
         code={activeCode || undefined}
         onReset={directInstruction ? undefined : handleWBReset}
         testMode={testMode}
+        initialPlatform={initialPlatform}
       />
     );
   }
@@ -3091,6 +3096,7 @@ export default function GuideClient({
         amount={guideMode === "SITE" ? initialAmount : denomination || 1000}
         code={activeCode || undefined}
         initialUsername={initialUsername}
+        initialPlatform={initialPlatform}
       />
     );
   }
@@ -3101,6 +3107,7 @@ export default function GuideClient({
       initialUsername={initialUsername}
       code={activeCode || undefined}
       mode={guideMode}
+      initialPlatform={initialPlatform}
     />
   );
 }

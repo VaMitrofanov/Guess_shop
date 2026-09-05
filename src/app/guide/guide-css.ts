@@ -347,6 +347,29 @@ export const GUIDE_CSS = `
 }
 /* 480px-правила легаси-таймлайна удалены вместе с легаси-скином: .wbi-v3
    теперь на всех режимах, дот и карточка позиционируются блоком 680px. */
+
+/* ── Переключатель «Телефон / Компьютер» ─────────────────────────────────
+   Вход в Creator Hub на телефоне и на компьютере разный, поэтому шаги
+   показывают разные кадры. Догадку делает сервер по User-Agent, а этот
+   переключатель — последнее слово человека (см. src/lib/device-platform.ts). */
+.wbi-devbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 20px}
+.wbi-seg{display:inline-flex;gap:3px;padding:3px;border:1px solid var(--rb-border);border-radius:14px;background:var(--rb-surface-2)}
+.wbi-seg button{appearance:none;border:0;cursor:pointer;font:inherit;font-size:15px;font-weight:800;color:var(--rb-muted);background:transparent;padding:10px 18px;border-radius:11px;display:flex;align-items:center;gap:7px;transition:background .16s ease,color .16s ease}
+.wbi-seg button[aria-pressed="true"]{background:var(--rb-surface);color:var(--rb-text);box-shadow:0 1px 3px rgba(0,0,0,.22)}
+.wbi-seg button:focus-visible{outline:3px solid var(--rb-accent);outline-offset:2px}
+.wbi-devhint{font-size:14px;color:var(--rb-muted)}
+@media(max-width:560px){.wbi-devbar{gap:9px}.wbi-seg{width:100%}.wbi-seg button{flex:1;justify-content:center;padding:11px 10px}.wbi-devhint{font-size:13px}}
+
+/* Кадры с компьютера широкие — им тесно в 440/660px, отведённых вертикальным. */
+.wbi-figure.wbi-wide{width:100%;max-width:880px;margin:18px auto 0}
+
+/* Длинный путь до формы — на случай, когда поиск не отдаёт «Create Pass». */
+.wbi-longway{margin-top:16px}
+.wbi-longway .wbi-ol{margin:10px 0 14px;color:var(--rb-muted)}
+.wbi-longway .wbi-ol b{color:var(--rb-text)}
+.wbi-longway .wbi-figure{max-width:none}
+.wbi-longway .wbi-thumbrow{margin-top:0}
+
 @media (prefers-reduced-motion: reduce){
  .wbi-blob,.wbi-g,.wbi-dot.wbi-pulse,.wbi-card.wbi-key,.wbi-figure.wbi-spot::after,.wbi-anno,.wbi-box.g,.wbi-box.g::after,.wbi-tip.g{animation:none !important}
  .wbi-reveal{opacity:1 !important;transform:none !important}

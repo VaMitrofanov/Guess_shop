@@ -23,6 +23,7 @@ import { parseGamepassRef, parseGamepassUrl } from "@/lib/gamepass-id";
 import { CUSTOM_MAX, CUSTOM_MIN } from "@/lib/retail-pricing";
 import { GUIDE_CSS } from "./guide-css";
 import GuideSteps, { Step } from "./guide-steps";
+import type { GuidePlatform } from "@/lib/device-platform";
 
 const RATE = 0.7; // Roblox keeps 30%
 const calcPrice = (n: number) => (n > 0 ? Math.ceil(n / RATE) : 0);
@@ -92,7 +93,8 @@ export default function WBInstructionV2({
   onReset,
   testMode = false,
   mode = "WB",
-}: { denomination?: number; initialUsername?: string; code?: string; onReset?: () => void; testMode?: boolean; mode?: "WB" | "SITE" | "BOT" }) {
+  initialPlatform = "mobile",
+}: { denomination?: number; initialUsername?: string; code?: string; onReset?: () => void; testMode?: boolean; mode?: "WB" | "SITE" | "BOT"; initialPlatform?: GuidePlatform }) {
   const nomDefault = denomination && denomination > 0 ? denomination : 1000;
   const isSite = mode === "SITE";
   const [nom, setNom] = useState<number>(nomDefault);
@@ -336,21 +338,21 @@ export default function WBInstructionV2({
           </div>
           <div className="wbi-must">
             <div className="wbi-must-h">✅ ВСЁ ПРОЩЕ, ЧЕМ РАНЬШЕ</div>
-            <div className="wbi-must-it"><span className="wbi-n">1</span><span>Создай геймпасс, поставь <b>точную цену</b> и убедись, что <b>«Managed pricing» отключён</b> (шаг 7).</span></div>
-            <div className="wbi-must-ft">⚠️ <b>«Managed pricing»</b> (региональные цены) автоматически меняет цену геймпасса — из-за этого мы <b>не сможем</b> его выкупить. Галочка должна быть <b>отключена</b>! У новых геймпассов она отключена по умолчанию, но обязательно проверь (шаг 7).</div>
+            <div className="wbi-must-it"><span className="wbi-n">1</span><span>Создай геймпасс, поставь <b>точную цену</b> и убедись, что <b>«Managed pricing» отключён</b> (шаг 4).</span></div>
+            <div className="wbi-must-ft">⚠️ <b>«Managed pricing»</b> (региональные цены) автоматически меняет цену геймпасса — из-за этого мы <b>не сможем</b> его выкупить. Галочка должна быть <b>отключена</b>! У новых геймпассов она отключена по умолчанию, но обязательно проверь (шаг 4).</div>
           </div>
         </div>
 
         {/* Обзор этапов — часть общего дизайна инструкции (все три режима). */}
         <div className="wbi-roadmap wbi-reveal" aria-label="Этапы инструкции">
           <div className="wbi-roadmap-card">
-            <span>01—05</span><b>Создай</b><small>Открываем Creator Hub и делаем геймпасс</small>
+            <span>01—03</span><b>Создай</b><small>Находим форму пасса через поиск и создаём его</small>
           </div>
           <div className="wbi-roadmap-card wbi-roadmap-accent">
-            <span>06—07</span><b>Настрой</b><small>Ставим точную цену без региональных скидок</small>
+            <span>04</span><b>Настрой</b><small>Ставим точную цену без региональных скидок</small>
           </div>
           <div className="wbi-roadmap-card wbi-roadmap-dark">
-            <span>08—09</span><b>Проверь</b><small>{isSite ? "Находим геймпасс и переходим к оформлению" : "Находим геймпасс и оформляем заказ"}</small>
+            <span>05—06</span><b>Проверь</b><small>{isSite ? "Находим геймпасс и переходим к оформлению" : "Находим геймпасс и оформляем заказ"}</small>
           </div>
         </div>
 
@@ -360,13 +362,14 @@ export default function WBInstructionV2({
           <GuideSteps
             targets={[{ price: expectedPrice, amount: mode === "WB" ? nomDefault : nom }]}
             mode={mode}
+            initialPlatform={initialPlatform}
             nomRow={
               <div className="wbi-nomrow">{mode === "WB" ? "Номинал твоей карты" : "Сколько R$ ты получаешь"}:{mode === "WB" ? <strong> {nomDefault.toLocaleString("ru-RU")} R$</strong> : <><input className="wbi-input" type="number" min={CUSTOM_MIN} max={CUSTOM_MAX} inputMode="numeric" value={nom}
                 onChange={(e) => { setNom(Math.min(CUSTOM_MAX, Math.max(CUSTOM_MIN, parseInt(e.target.value || String(CUSTOM_MIN), 10)))); setPicked(null); setView({ kind: "idle" }); }} /> R$</>}</div>
             }
           />
 
-          <Step n="8" pulse cls="wbi-key wbi-finish">
+          <Step n="5" pulse cls="wbi-key wbi-finish">
             {isReEntry && robloxUsername ? (
               <>
                 <div className="wbi-kbadge" style={{ background: "linear-gradient(135deg,#1a7a3a,#2ecc71)" }}>✅ ЗАКАЗ ОФОРМЛЕН</div>
@@ -436,7 +439,7 @@ export default function WBInstructionV2({
                 <div className="wbi-warn" style={{ marginTop: 12 }}>
                   🙈 У <b>{view.nick}</b> не нашли геймпассов на продажу.
                   <br /><br />✅ <b>Геймпасс уже создан?</b> Поиск иногда его не видит — например, когда плейс скрыт. Вставь <b>ссылку на геймпасс</b> ниже, и мы оформим заказ по ней 👇
-                  <br /><br />⚠️ Ещё не создан — вернись к шагам <b>3–7</b>, затем нажми «Найти» снова.
+                  <br /><br />⚠️ Ещё не создан — вернись к шагам <b>2–4</b>, затем нажми «Найти» снова.
                 </div>
               )}
 
@@ -451,7 +454,7 @@ export default function WBInstructionV2({
                       </div>
                     ))}
                   </div>
-                  <div className="wbi-shint">Нужен геймпасс ровно на <b>{expectedPrice} R$</b> — поправь цену (шаг <b>7</b>) и нажми «Найти» снова. Нужный геймпасс есть, но его нет в списке? Вставь <b>ссылку</b> на него ниже.</div>
+                  <div className="wbi-shint">Нужен геймпасс ровно на <b>{expectedPrice} R$</b> — поправь цену (шаг <b>4</b>) и нажми «Найти» снова. Нужный геймпасс есть, но его нет в списке? Вставь <b>ссылку</b> на него ниже.</div>
                 </div>
               )}
 
@@ -520,12 +523,12 @@ export default function WBInstructionV2({
                         <div style={{ marginTop: 10 }}>
                           {offsale && (
                             <div className="wbi-warn">
-                              ⚠️ Геймпасс найден, но он <b>не выставлен на продажу</b>. Включи <b>Item for sale</b> (шаг <b>7</b>) и нажми «Проверить» снова.
+                              ⚠️ Геймпасс найден, но он <b>не выставлен на продажу</b>. Включи <b>Item for sale</b> (шаг <b>4</b>) и нажми «Проверить» снова.
                             </div>
                           )}
                           {!offsale && !manualPass.isPriceMatch && (
                             <div className="wbi-warn">
-                              ⚠️ Цена геймпасса <b>{manualPass.price} R$</b>, а нужна ровно <b>{expectedPrice} R$</b>. Поправь цену (шаг <b>7</b>) и нажми «Проверить» снова.
+                              ⚠️ Цена геймпасса <b>{manualPass.price} R$</b>, а нужна ровно <b>{expectedPrice} R$</b>. Поправь цену (шаг <b>4</b>) и нажми «Проверить» снова.
                             </div>
                           )}
                           {ready && (
@@ -570,7 +573,7 @@ export default function WBInstructionV2({
             </div>}
           </Step>
 
-          <Step n="9">
+          <Step n="6">
             {isSite ? (
               <div className="wbi-cols wbi-media wbi-rev">
                 <div><div className="wbi-ttl">Проверь и перейди к оплате</div>
@@ -614,7 +617,7 @@ export default function WBInstructionV2({
                 Перейти к оформлению →
               </a>
             ) : (
-              <span className="wbi-sitepay disabled" aria-disabled="true">Выбери геймпасс на шаге 8</span>
+              <span className="wbi-sitepay disabled" aria-disabled="true">Выбери геймпасс на шаге 5</span>
             )}
             <a className="wbi-support" href="https://t.me/RobloxBank_PA" target="_blank" rel="noopener noreferrer">Остались вопросы? Написать живому менеджеру →</a>
           </div>
