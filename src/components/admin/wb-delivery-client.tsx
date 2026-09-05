@@ -1,0 +1,564 @@
+"use client";
+
+import { useCallback, useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  ArrowUpRight,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  CircleDot,
+  Clipboard,
+  Clock3,
+  ExternalLink,
+  Gamepad2,
+  KeyRound,
+  Link2,
+  Loader2,
+  MessageCircle,
+  PackageCheck,
+  RefreshCw,
+  Search,
+  Send,
+  ShieldCheck,
+  Truck,
+  UserRound,
+  X,
+} from "lucide-react";
+import type {
+  WbDeliveryAction,
+  WbDeliveryOrderDto,
+  WbDeliveryOrderResponse,
+  WbDeliveryOverview,
+  WbGamepassPreview,
+} from "@/types/wb-delivery";
+import { useVisiblePolling } from "@/hooks/useVisiblePolling";
+import {
+  WB_FUNNEL_HINT,
+  WB_FUNNEL_LABEL,
+  WB_QUEUE_SECTIONS,
+  WB_STAGE_LABEL,
+  WB_TERMINAL_STAGES,
+  wbAuditLabel,
+  wbGateStateLabel,
+  wbSupplierStatusLabel,
+} from "@/lib/wb-delivery-labels";
+import type { WbDeliveryStage } from "../../../bots/shared/wb-delivery-policy";
+import css from "./wb-delivery.module.css";
+
+const FILTERS = [
+  ["active", "В работе"],
+  ["attention", "Внимание"],
+  ["ready", "Можно завершить"],
+  ["in_bot", "В боте"],
+  /* «Не открыли» — решение О6 от 03.09.2026. Гейт ушёл, деньги WB получены, а
+     код никто не активировал: напоминания бота кончились (2 из 2), и дальше
+     заказ не двигается сам никогда. Внутри «В боте» это было неотличимо от
+     покупателя, который просто читает инструкцию, — то есть потери лежали в
+     числе, означающем «идёт своим ходом». */
+  ["not_activated", "Не открыли"],
+  ["complete", "Готово"],
+  ["all", "Все"],
+] as const;
+
+/** Полоса этапов в карточке.
+ *
+ * Раньше это был каскад `if`, который не знал `attention`, `in_bot` и
+ * `cancelled` — все три падали в `0`, и заказ, который давно у покупателя в
+ * боте, показывал прогресс в самом начале (F7). Карта покрывает каждую стадию,
+ * так что новая стадия не может молча свалиться в «Заказ». */
+const STAGE_STEP: Record<WbDeliveryStage, number> = {
+  new: 0,
+  chat_ready: 1,
+  waiting_code: 1,
+  code_received: 2,
+  gate_ready: 3,
+  link_sent: 4,
+  ready_receive: 4,
+  in_bot: 4,
+  complete: 5,
+  cancelled: 5,
+  // «Нужна проверка» — это не место в цепочке, а сход с неё. Показываем
+  // последний достоверно пройденный шаг, а не выдуманный прогресс.
+  attention: 4,
+};
+
+/** Wording lives in one module so the desktop journal and the TWA queue cannot
+ * drift into describing the same state with two different words. */
+const STAGE_LABEL = WB_STAGE_LABEL;
+
+/* Рублей в консоли доставки нет намеренно (решение О6 от 03.09.2026): цена
+   заказа в нашей базе — снимок с момента синка, и со сводкой в кабинете WB он
+   не сходится (скидки, компенсации, возвраты считаются на стороне WB). Деньги
+   смотрят в кабинете, здесь — обязательства: номинал, срок и этап. */
+
+function dateTime(value: string | null) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+}
+
+/** Каждый фильтр читает ту же ось `stage`, что и счётчики над ним.
+ *
+ * «В работе» раньше фильтровал по таймстампам (`!completedAt && !cancelledAt`),
+ * а хиро-цифра считала по стадиям. Заказ в стадии `attention` из-за
+ * `isWbBuyerUnserved` имеет `completedAt` — он попадал в цифру и выпадал из
+ * списка, то есть самое громкое состояние контура было не видно на вкладке по
+ * умолчанию (F6). */
+function filterOrder(order: WbDeliveryOrderDto, filter: typeof FILTERS[number][0]) {
+  if (filter === "all") return true;
+  if (filter === "complete") return WB_TERMINAL_STAGES.includes(order.stage);
+  // Гейт выпущен и отправлен, а внутреннего заказа по коду так и нет.
+  if (filter === "not_activated") return order.funnelStep === "not_activated" && order.gateState !== "NOT_ISSUED";
+  if (filter === "in_bot") return order.stage === "in_bot";
+  if (filter === "attention") return order.stage === "attention";
+  if (filter === "ready") return order.stage === "ready_receive";
+  return !WB_TERMINAL_STAGES.includes(order.stage);
+}
+
+/** Both status buttons are gated on what WB itself reports, so an operator who
+ * already advanced the order in the seller cabinet needs to see that, not a
+ * dead button. */
+function statusHint(order: WbDeliveryOrderDto, action: "confirm" | "deliver") {
+  if (order.permissions[action]) return undefined;
+  if (order.completedAt || order.cancelledAt) return "Заказ уже закрыт.";
+  if (order.blockedReason) return order.blockedReason;
+  if (action === "confirm") return `WB уже держит заказ в статусе «${order.supplierStatus}» — сборка подтверждена.`;
+  return /deliver|receive|sold/i.test(order.supplierStatus)
+    ? `WB уже держит заказ в статусе «${order.supplierStatus}».`
+    : "Сначала подтвердите сборку — WB принимает «в доставку» только после confirm.";
+}
+
+function stageIndex(order: WbDeliveryOrderDto) {
+  return STAGE_STEP[order.stage] ?? 0;
+}
+
+export default function WbDeliveryClient({
+  initialData, initialFilter, initialOrderId,
+}: {
+  initialData: WbDeliveryOverview;
+  /** Срез из ссылки: «Обзор» приводит сюда конкретную работу. */
+  initialFilter?: typeof FILTERS[number][0];
+  initialOrderId?: string;
+}) {
+  const [data, setData] = useState(initialData);
+  const [selectedId, setSelectedId] = useState(
+    (initialOrderId && initialData.orders.some((order) => order.id === initialOrderId) ? initialOrderId : null)
+    ?? initialData.orders[0]?.id ?? "",
+  );
+  const [filter, setFilter] = useState<typeof FILTERS[number][0]>(initialFilter ?? "active");
+  const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState<WbDeliveryAction | null>(null);
+  const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  const [manualCode, setManualCode] = useState("");
+  const [message, setMessage] = useState("");
+
+  const refresh = useCallback(async (silent = false) => {
+    if (!silent) setBusy("sync");
+    try {
+      const response = await fetch("/api/admin/wb-delivery", { cache: "no-store" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Не удалось обновить очередь");
+      setData(body);
+      setSelectedId((current) => body.orders.some((order: WbDeliveryOrderDto) => order.id === current) ? current : body.orders[0]?.id ?? "");
+    } catch (error) {
+      if (!silent) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Ошибка обновления" });
+    } finally {
+      if (!silent) setBusy(null);
+    }
+  }, []);
+
+  const refreshSelected = useCallback(async (orderId: string) => {
+    try {
+      const response = await fetch(`/api/admin/wb-delivery?orderId=${encodeURIComponent(orderId)}`, { cache: "no-store" });
+      if (response.status === 404) {
+        await refresh(true);
+        return;
+      }
+      const body = await response.json() as WbDeliveryOrderResponse & { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Не удалось обновить чат");
+      setData((current) => {
+        const index = current.orders.findIndex((order) => order.id === body.order.id);
+        if (index < 0) return current;
+        const orders = [...current.orders];
+        orders[index] = body.order;
+        return { ...current, generatedAt: body.generatedAt, orders };
+      });
+    } catch {
+      // Silent polling retries on the next cycle and immediately after focus returns.
+    }
+  }, [refresh]);
+
+  const pollOverview = useCallback(() => refresh(true), [refresh]);
+  const pollSelected = useCallback(async () => {
+    if (selectedId) await refreshSelected(selectedId);
+  }, [refreshSelected, selectedId]);
+  useVisiblePolling(pollOverview, 20_000);
+  useVisiblePolling(pollSelected, 5_000, Boolean(selectedId));
+
+  const post = useCallback(async (action: WbDeliveryAction, orderId: string, extra: Record<string, unknown>) => {
+    const response = await fetch("/api/admin/wb-delivery", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...(action !== "sync" ? { orderId } : {}), ...extra }),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error ?? "Действие не выполнено");
+    return body as { message: string; orderId?: string; preview?: WbGamepassPreview };
+  }, []);
+
+  async function act(action: WbDeliveryAction, extra: Record<string, unknown> = {}) {
+    const order = data.orders.find((item) => item.id === selectedId);
+    if (["confirm", "deliver", "receive"].includes(action) && order) {
+      const label = action === "receive" ? "завершить выдачу кодом покупателя" : action === "deliver" ? "перевести заказ в доставку" : "подтвердить сборку";
+      if (!window.confirm(`Подтвердите действие с реальным заказом WB: ${label}?`)) return;
+    }
+    setBusy(action);
+    setNotice(null);
+    try {
+      const body = await post(action, selectedId, extra);
+      if (body.orderId) setSelectedId(body.orderId);
+      setManualCode("");
+      if (action === "send_message") setMessage("");
+      setNotice({ tone: "ok", text: body.message });
+      await refresh(true);
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Действие не выполнено" });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return data.orders.filter((order) => filterOrder(order, filter)).filter((order) => !needle || [
+      order.wbOrderId,
+      order.buyerName,
+      order.vendorCode,
+      String(order.nmId),
+      String(order.denomination ?? ""),
+      order.activationCode,
+      order.fulfillment?.robloxUsername,
+    ].some((value) => value?.toLowerCase().includes(needle)));
+  }, [data.orders, filter, query]);
+  const selected = data.orders.find((order) => order.id === selectedId) ?? visible[0] ?? null;
+  const step = selected ? stageIndex(selected) : 0;
+
+  /** «В работе» плоским списком не читается: заказ, ждущий геймпасса от
+   * покупателя, выглядит так же, как тот, что ждёт нашего собственного
+   * закрытия. Группировка по тому, чей сейчас ход, — та же, что уже работает в
+   * мобильной консоли, чтобы обе поверхности показывали одну структуру (F8). */
+  const sections = useMemo(() => {
+    if (filter !== "active") return [];
+    return WB_QUEUE_SECTIONS
+      .map((section) => ({ ...section, orders: visible.filter((order) => (section.stages as readonly string[]).includes(order.stage)) }))
+      .filter((section) => section.orders.length > 0);
+  }, [filter, visible]);
+
+  const renderOrderCard = (order: WbDeliveryOrderDto) => (
+    <button key={order.id} type="button" className={`${css.orderCard} ${selected?.id === order.id ? css.orderCardActive : ""}`} onClick={() => setSelectedId(order.id)}>
+      <div className={css.orderTop}><span className={`${css.stagePill} ${css[`stage_${order.stage}`]}`}>{STAGE_LABEL[order.stage]}</span><time>{dateTime(order.updatedAt)}</time></div>
+      <strong>{order.buyerName ? `${order.buyerName} · #${order.wbOrderId}` : `WB #${order.wbOrderId}`}</strong>
+      <p>{order.denomination ? `${order.denomination.toLocaleString("ru-RU")} R$` : "Номинал не настроен"}</p>
+      <div className={css.orderMeta}>
+        <span><MessageCircle /> {order.chatReady ? "чат" : "нет чата"}</span>
+        <span><UserRound /> {order.fulfillment?.robloxUsername ?? WB_FUNNEL_LABEL[order.funnelStep]}</span>
+        {order.permissions.linkBuyer && <span className={css.unlinkedChip}>без покупателя</span>}
+        <ChevronRight />
+      </div>
+    </button>
+  );
+
+  return (
+    <div className={css.workspace}>
+      <section className={css.commandBar}>
+        <div className={css.liveState}>
+          <span className={data.environment.workerStatus === "HEALTHY" ? css.liveDot : css.warnDot} />
+          <div><strong>{data.environment.workerStatus === "HEALTHY" ? "Контур на связи" : "Контур требует проверки"}</strong><small>{data.environment.workerLastSeenAt ? `Последний цикл ${dateTime(data.environment.workerLastSeenAt)}` : "Синхронизация ещё не запускалась"}</small></div>
+        </div>
+        <div className={css.commandActions}>
+          <a href="https://seller.wildberries.ru/" target="_blank" rel="noreferrer" className={css.ghostButton}>Кабинет WB <ExternalLink /></a>
+          <button type="button" className={css.syncButton} disabled={Boolean(busy)} onClick={() => void act("sync")}><RefreshCw className={busy === "sync" ? css.spin : ""} /> Синхронизировать</button>
+        </div>
+      </section>
+
+      <section className={css.metrics}>
+        <article className={data.metrics.attention ? css.readyMetric : ""}><span><AlertTriangle /></span><div><strong>{data.metrics.attention}</strong><small>нужна проверка</small></div></article>
+        <article><span><Truck /></span><div><strong>{data.metrics.active}</strong><small>активных DBS</small></div></article>
+        <article><span><MessageCircle /></span><div><strong>{data.metrics.waitingCode}</strong><small>ждут код покупателя</small></div></article>
+        <article><span><KeyRound /></span><div><strong>{data.metrics.codeReceived}</strong><small>код уже получен</small></div></article>
+        <article className={data.metrics.readyReceive ? css.readyMetric : ""}><span><PackageCheck /></span><div><strong>{data.metrics.readyReceive}</strong><small>можно завершить</small></div></article>
+      </section>
+
+      <section className={css.safetyStrip}>
+        <ShieldCheck />
+        <div><strong>Код получения защищён</strong><span>Он не показывается в интерфейсе, логах или истории чата и удаляется сразу после успешного завершения.</span></div>
+        <div className={css.flagStack}>
+          <span className={data.environment.cryptoReady ? css.flagOk : css.flagOff}>Шифрование</span>
+          <span className={data.environment.chatSendEnabled ? css.flagOk : css.flagOff}>Чат {data.environment.chatSendEnabled ? "ON" : "OFF"}</span>
+          <span className={data.environment.mutationsEnabled ? css.flagOk : css.flagOff}>Статусы {data.environment.mutationsEnabled ? "ON" : "OFF"}</span>
+        </div>
+      </section>
+
+      {(!data.environment.chatSendEnabled || !data.environment.mutationsEnabled) && (
+        <div className={css.errorBanner}>
+          <AlertTriangle />
+          <div>
+            <strong>Внешние действия WB выключены</strong>
+            <span>
+              {!data.environment.chatSendEnabled && "Сообщения покупателю не уйдут (WB_CHAT_SEND_ENABLED=false). "}
+              {!data.environment.mutationsEnabled && "Сборка, доставка и завершение заказа недоступны (WB_DBS_MUTATIONS_ENABLED=false). "}
+              Флаги живут в Coolify на Web и TG; тестовые заказы работают в обход них.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {notice && <div className={`${css.notice} ${notice.tone === "ok" ? css.noticeOk : css.noticeError}`}><span>{notice.tone === "ok" ? <Check /> : <AlertTriangle />}</span>{notice.text}<button onClick={() => setNotice(null)} aria-label="Закрыть"><X /></button></div>}
+
+      <section className={css.mainGrid}>
+        <aside className={css.queue}>
+          <div className={css.queueHead}>
+            <div><strong>Очередь</strong><span>{visible.length} заказов</span></div>
+            <label><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Имя, ID, артикул, код, ник" /></label>
+          </div>
+          <div className={css.filters}>
+            {FILTERS.map(([id, label]) => <button key={id} className={filter === id ? css.activeFilter : ""} onClick={() => setFilter(id)}>{label}</button>)}
+          </div>
+          <div className={css.orderList}>
+            {sections.map((section) => (
+              <div key={section.id} className={css.queueSection}>
+                <div className={css.queueSectionHead}><strong>{section.title}</strong><span>{section.hint}</span><b>{section.orders.length}</b></div>
+                {section.orders.map(renderOrderCard)}
+              </div>
+            ))}
+            {!sections.length && !!visible.length && visible.map(renderOrderCard)}
+            {!visible.length && <div className={css.emptyQueue}><CircleDot /><strong>Здесь пока пусто</strong><span>Смените фильтр — здесь только реальные заказы WB.</span></div>}
+          </div>
+        </aside>
+
+        {selected ? (
+          <main className={css.detail}>
+            <header className={css.detailHeader}>
+              <div><span className={`${css.stagePill} ${css[`stage_${selected.stage}`]}`}>{STAGE_LABEL[selected.stage]}</span><h2>{selected.buyerName ? `${selected.buyerName} · заказ #${selected.wbOrderId}` : `Заказ #${selected.wbOrderId}`}</h2><p>{selected.vendorCode ?? `nmID ${selected.nmId}`} · {selected.denomination ? `${selected.denomination} R$` : "номинал не найден"}</p></div>
+              <div className={css.headerBadges}><span><Truck /> WB DBS</span></div>
+            </header>
+
+            <div className={css.rail} aria-label="Этапы заказа">
+              {["Заказ", "Запрос кода", "Код получен", "Гейт", "Выдача", "Готово"].map((label, index) => <div key={label} className={index <= step ? css.railDone : ""}><span>{index < step ? <Check /> : index + 1}</span><small>{label}</small></div>)}
+            </div>
+
+            {selected.lastErrorCode && <div className={css.errorBanner}><AlertTriangle /><div><strong>Операция остановлена</strong><span>{selected.lastErrorCode}. Сначала синхронизируйте заказ и проверьте фактический статус в кабинете WB.</span></div></div>}
+            {selected.unserved && <div className={css.errorBanner}><AlertTriangle /><div><strong>Покупатель не получил код</strong><span>{selected.blockedReason}</span></div></div>}
+            {!selected.unserved && !selected.lastErrorCode && selected.blockedReason && <div className={css.holdCard}><AlertTriangle /><div><strong>Действия по заказу недоступны</strong><span>{selected.blockedReason}</span></div></div>}
+
+            <div className={css.detailColumns}>
+              <section className={css.controlPanel}>
+                <div className={css.sectionTitle}><div><span>Командный центр</span><strong>Следующее действие</strong></div><span className={css.secureTag}><ShieldCheck /> без показа кода</span></div>
+
+                <div className={css.nextAction}>
+                  {selected.permissions.requestCode && <ActionCard icon={<MessageCircle />} title="Запросить код доставки" text="Покупатель получит инструкцию, где найти 5–6 цифр рядом с QR-кодом." button="Отправить инструкцию" busy={busy === "request_code"} onClick={() => void act("request_code")} />}
+                  {selected.permissions.remindCode && <ActionCard icon={<Clock3 />} title="Запрос уже отправлен" text="Ждём код от покупателя — он подхватится автоматически. Можно напомнить тем же текстом." button="Напомнить о коде" busy={busy === "remind_code"} onClick={() => void act("remind_code")} />}
+                  {selected.permissions.issueGate && <ActionCard icon={<KeyRound />} title="Выпустить персональный WB-гейт" text={`Номинал ${selected.denomination} R$ и связь с заказом будут зафиксированы навсегда.`} button="Выпустить код" busy={busy === "issue_gate"} onClick={() => void act("issue_gate")} />}
+                  {selected.permissions.sendGate && <ActionCard icon={<Send />} title="Отправить ссылку и код" text="Покупатель получит готовую ссылку на гейт и свой 7-значный код." button="Отправить покупателю" busy={busy === "send_gate"} onClick={() => void act("send_gate")} />}
+                  {selected.permissions.receive && <ActionCard icon={<PackageCheck />} title="Завершить выдачу на WB" text="Зашифрованный код будет отправлен в WB один раз и сразу удалён после успеха." button="Завершить заказ" danger busy={busy === "receive"} onClick={() => void act("receive")} />}
+                  {selected.stage === "complete" && !selected.unserved && <div className={css.doneCard}><CheckCircle2 /><div><strong>Заказ полностью завершён</strong><span>WB подтвердил выдачу, секретный код очищен.</span></div></div>}
+                  {selected.stage === "attention" && <div className={css.holdCard}><AlertTriangle /><div><strong>Нужна ручная сверка</strong><span>Не повторяйте последнее действие вслепую. Нажмите «Синхронизировать» и сверьте кабинет WB.</span></div></div>}
+                </div>
+
+                <div className={css.statusCards}>
+                  <div><span>Код доставки</span><strong className={selected.deliveryCode.valid ? css.goodText : ""}>{selected.deliveryCode.valid ? "Получен · скрыт" : selected.deliveryCode.consumedAt ? "Использован · удалён" : "Не получен"}</strong><small>{selected.deliveryCode.expiresAt ? `действует до ${dateTime(selected.deliveryCode.expiresAt)}` : "в базе нет открытого секрета"}</small></div>
+                  <div><span>Персональный гейт</span><strong>{selected.activationCode ?? "Не выпущен"}</strong>{selected.gateUrl ? <button onClick={() => void navigator.clipboard.writeText(selected.gateUrl!)}><Clipboard /> Копировать ссылку</button> : <small>{wbGateStateLabel(selected.gateState)}</small>}</div>
+                  <div><span>Статусы WB</span><strong>{wbSupplierStatusLabel(selected.supplierStatus)} · {wbSupplierStatusLabel(selected.wbStatus)}</strong><small>обновляются из Marketplace API</small></div>
+                  <div><span>Покупатель в боте</span><strong>{WB_FUNNEL_LABEL[selected.funnelStep]}</strong><small>{WB_FUNNEL_HINT[selected.funnelStep] ?? selected.fulfillment?.robloxUsername ?? "ник ещё не получен"}</small></div>
+                  <div><span>Контакт покупателя</span><strong className={selected.fulfillment?.buyerLinked === false ? css.badText : ""}>{selected.fulfillment?.buyerHandle ?? (selected.fulfillment ? "не привязан" : "заказа ещё нет")}</strong><small>{selected.fulfillment?.buyerLinked === false ? "уведомления до него не дойдут" : selected.fulfillment?.platform ?? "—"}</small></div>
+                </div>
+
+                {selected.permissions.createInternalOrder && (
+                  <BuyoutBlock
+                    key={selected.id}
+                    order={selected}
+                    onPreview={(gamepass) => post("preview_gamepass", selected.id, { gamepass })}
+                    onCreate={(gamepass, robloxUsername, force) => post("create_internal_order", selected.id, { gamepass, robloxUsername, force })}
+                    onDone={async (text) => { setNotice({ tone: "ok", text }); await refresh(true); }}
+                  />
+                )}
+
+                {selected.permissions.linkBuyer && (
+                  <LinkBuyerBlock
+                    key={`link-${selected.id}`}
+                    activationCode={selected.activationCode}
+                    busy={Boolean(busy)}
+                    onLink={(buyer) => act("link_buyer", { buyer })}
+                  />
+                )}
+
+                <div className={css.manualBlock}>
+                  <div><strong>Резервный ввод кода</strong><span>Если событие чата задержалось, введите 5–7 цифр вручную. После отправки поле очищается.</span></div>
+                  <div><input inputMode="numeric" autoComplete="off" maxLength={7} value={manualCode} onChange={(event) => setManualCode(event.target.value.replace(/\D/g, "").slice(0, 7))} placeholder="5–7 цифр" aria-label="Код доставки WB" /><button disabled={!selected.permissions.saveDeliveryCode || manualCode.length < 5 || Boolean(busy)} onClick={() => void act("save_delivery_code", { code: manualCode })}>Сохранить безопасно</button></div>
+                </div>
+
+                <div className={css.providerActions}>
+                  <button title={statusHint(selected, "confirm")} disabled={!selected.permissions.confirm || Boolean(busy)} onClick={() => void act("confirm")}><Check /> Подтвердить сборку</button>
+                  <button title={statusHint(selected, "deliver")} disabled={!selected.permissions.deliver || Boolean(busy)} onClick={() => void act("deliver")}><Truck /> Передать в доставку</button>
+                  {selected.permissions.markServedExternally && <button title="Заказ был выдан покупателю другим способом или закрыт до появления этого раздела" disabled={Boolean(busy)} onClick={() => window.confirm("Покупатель по этому заказу уже получил свой товар вне этой системы?") && void act("mark_served_externally")}><Check /> Выдано вне системы</button>}
+                  {selected.permissions.markGateSent
+                    ? <button disabled={Boolean(busy)} onClick={() => window.confirm("Вы действительно отправили покупателю ссылку и код вручную в кабинете WB?") && void act("mark_gate_sent")}><Send /> Отметить отправленным</button>
+                    : <a href={selected.gateUrl ?? "#"} target="_blank" aria-disabled={!selected.gateUrl}><Link2 /> Проверить гейт <ArrowUpRight /></a>}
+                </div>
+              </section>
+
+              <aside className={css.chatPanel}>
+                <div className={css.chatHead}><div><span><UserRound /></span><div><strong>Чат покупателя</strong><small>{selected.chatReady ? "автообновление каждые 5 с" : "покупатель ещё не открыл чат"}</small></div></div><span className={selected.chatReady ? css.online : css.offline}>{selected.chatReady ? "AUTO 5с" : "ожидание"}</span></div>
+                <div className={css.messages}>
+                  {[...selected.chat].reverse().map((event) => <div key={event.id} className={`${css.message} ${event.direction === "seller" ? css.messageOut : event.direction === "system" ? css.messageSystem : css.messageIn}`}><p>{event.text || "Служебное событие"}</p><span>{event.containsDeliveryCode && <><ShieldCheck /> код скрыт · </>}{dateTime(event.sentAt)}</span></div>)}
+                  {!selected.chat.length && <div className={css.noMessages}><MessageCircle /><span>Сообщений пока нет</span></div>}
+                </div>
+                <div className={css.composer}><textarea rows={3} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Написать покупателю…" /><div><small>До 1 000 символов</small><button disabled={!selected.permissions.sendMessage || !message.trim() || Boolean(busy)} onClick={() => void act("send_message", { message })}>{busy === "send_message" ? <Loader2 className={css.spin} /> : <Send />} Отправить</button></div></div>
+                <div className={css.auditTrail}><strong>История процесса</strong>{selected.audit.slice(0, 8).map((event) => <div key={event.id}><span><Check /></span><p>{wbAuditLabel(event.type)}<small>{dateTime(event.createdAt)} · {event.actor}</small></p></div>)}</div>
+              </aside>
+            </div>
+          </main>
+        ) : <div className={css.noSelection}><Truck /><strong>Выберите заказ</strong><span>Здесь появятся чат, этапы и безопасные действия.</span></div>}
+      </section>
+    </div>
+  );
+}
+
+/** Выкуп, открытый вручную, висит на служебном аккаунте: гейт-код к моменту
+ * создания ещё не активирован, владельца у него нет. Покупатель после этого не
+ * получает ни уведомлений, ни «Мой заказ» — пока оператор не свяжет его руками
+ * (F3). Принимает то, что у оператора под рукой: @username, Telegram ID или
+ * ссылку VK. */
+function LinkBuyerBlock({ activationCode, busy, onLink }: {
+  activationCode: string | null;
+  busy: boolean;
+  onLink: (buyer: string) => Promise<void>;
+}) {
+  const [buyer, setBuyer] = useState("");
+  return (
+    <div className={css.manualBlock}>
+      <div>
+        <strong>Покупатель не привязан</strong>
+        <span>Заказ <b>{activationCode}</b> открыт вручную и числится за служебным аккаунтом — уведомления о выкупе до покупателя не дойдут. Вставьте @username, Telegram ID или ссылку VK.</span>
+      </div>
+      <div>
+        <input
+          value={buyer}
+          onChange={(event) => setBuyer(event.target.value)}
+          placeholder="@username, 6669690346 или vk.com/id123"
+          aria-label="Контакт покупателя"
+        />
+        <button
+          disabled={!buyer.trim() || busy}
+          onClick={() => void onLink(buyer.trim()).then(() => setBuyer(""))}
+        >
+          Привязать
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ActionCard({ icon, title, text, button, onClick, busy, danger = false }: { icon: React.ReactNode; title: string; text: string; button: string; onClick: () => void; busy: boolean; danger?: boolean }) {
+  return <div className={`${css.actionCard} ${danger ? css.actionDanger : ""}`}><span>{icon}</span><div><strong>{title}</strong><p>{text}</p><button disabled={busy} onClick={onClick}>{busy ? <Loader2 className={css.spin} /> : <ChevronRight />}{button}</button></div></div>;
+}
+
+/** Game pass search does not always find the buyer's pass, so an order that
+ * would normally open itself when the buyer activates the gate has to be opened
+ * by hand. The pass is resolved first and shown in full — owner, live price and
+ * what this denomination is supposed to cost — because a wrong pass here buys
+ * somebody else's robux at our expense. */
+function BuyoutBlock({ order, onPreview, onCreate, onDone }: {
+  order: WbDeliveryOrderDto;
+  onPreview: (gamepass: string) => Promise<{ preview?: WbGamepassPreview }>;
+  onCreate: (gamepass: string, robloxUsername: string | undefined, force: boolean) => Promise<{ message: string }>;
+  onDone: (message: string) => Promise<void>;
+}) {
+  const [gamepass, setGamepass] = useState("");
+  const [nick, setNick] = useState("");
+  const [preview, setPreview] = useState<WbGamepassPreview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"preview" | "create" | null>(null);
+  // A warning the operator has already read; the next click may override it.
+  const [blocked, setBlocked] = useState(false);
+
+  /** Editing the pass invalidates everything read back about the old one — an
+   * override must never carry over to a pass the operator has not checked. */
+  function editGamepass(value: string) {
+    setGamepass(value);
+    setPreview(null);
+    setError(null);
+    setBlocked(false);
+  }
+
+  async function check() {
+    setBusy("preview");
+    setError(null);
+    try {
+      const body = await onPreview(gamepass.trim());
+      setPreview(body.preview ?? null);
+      if (body.preview && !nick) setNick(body.preview.robloxUsername);
+    } catch (e) {
+      setPreview(null);
+      setError(e instanceof Error ? e.message : "Геймпасс не найден");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function create(force: boolean) {
+    setBusy("create");
+    setError(null);
+    try {
+      const body = await onCreate(gamepass.trim(), nick.trim() || undefined, force);
+      setGamepass("");
+      setNick("");
+      await onDone(body.message);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Заказ не создан");
+      setBlocked(true);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className={css.buyoutBlock}>
+      <div className={css.buyoutHead}>
+        <span><Gamepad2 /></span>
+        <div>
+          <strong>Создать заказ на выкуп вручную</strong>
+          <span>Покупатель не активировал код <b>{order.activationCode}</b>. Вставьте ссылку или ID геймпасса — заказ уйдёт в общую очередь выкупа с пометкой DBS.</span>
+        </div>
+      </div>
+      <div className={css.buyoutInputs}>
+        <input value={gamepass} onChange={(event) => editGamepass(event.target.value)} placeholder="roblox.com/game-pass/… или ID" aria-label="Геймпасс" />
+        <button type="button" disabled={!gamepass.trim() || Boolean(busy)} onClick={() => void check()}>{busy === "preview" ? <Loader2 className={css.spin} /> : <Search />} Проверить</button>
+      </div>
+      {preview && (
+        <div className={css.buyoutPreview}>
+          <div><span>Геймпасс</span><strong>{preview.name}</strong></div>
+          <div><span>Ник Roblox</span><input value={nick} onChange={(event) => setNick(event.target.value)} aria-label="Ник Roblox" /></div>
+          <div><span>Цена пасса</span><strong className={preview.priceOk ? css.goodText : css.badText}>{preview.price.toLocaleString("ru-RU")} R$</strong><small>{preview.expectedPrice ? `ожидается ${preview.expectedPrice.toLocaleString("ru-RU")} R$ за ${preview.denomination} R$` : "номинал не настроен"}</small></div>
+          <div><span>Продаётся</span><strong className={preview.isForSale ? css.goodText : css.badText}>{preview.isForSale ? "да" : "нет"}</strong>{preview.duplicate ? <small className={css.badText}>уже есть заказ {preview.duplicate.wbCode}</small> : null}</div>
+        </div>
+      )}
+      {error && <div className={css.buyoutError}><AlertTriangle /> {error}</div>}
+      <div className={css.buyoutActions}>
+        <button type="button" disabled={!preview || Boolean(busy)} onClick={() => void create(false)}>
+          {busy === "create" ? <Loader2 className={css.spin} /> : <Check />} Создать заказ на выкуп
+        </button>
+        {blocked && preview && (
+          <button
+            type="button"
+            className={css.buyoutForce}
+            disabled={Boolean(busy)}
+            onClick={() => window.confirm("Создать заказ, несмотря на предупреждение? Проверьте цену и продавца — выкуп пойдёт по этим данным.") && void create(true)}
+          >
+            Всё равно создать
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}

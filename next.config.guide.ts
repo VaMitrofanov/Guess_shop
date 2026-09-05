@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
+import { securityHeaders } from "./next-security";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  poweredByHeader: false,
+  headers: securityHeaders,
 
   // Isolates static chunks from the Main site.
   // Browser requests: /_next-guide/_next/static/...
@@ -25,6 +28,10 @@ const nextConfig: NextConfig = {
   images: {
     formats: ["image/webp"],
     minimumCacheTTL: 60 * 60 * 24,
+    remotePatterns: [
+      { protocol: "https", hostname: "tr.rbxcdn.com", pathname: "/**" },
+      { protocol: "https", hostname: "www.roblox.com", pathname: "/asset-thumbnail/**" },
+    ],
   },
 
   typescript: {

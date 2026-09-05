@@ -1,4 +1,5 @@
 "use client";
+import { C } from "../theme";
 import { useEffect, useState } from "react";
 
 interface StockItem {
@@ -18,11 +19,6 @@ interface GoodItem {
   price: number; discount: number; discountedPrice: number;
 }
 
-const C = {
-  card: "#2c2c2e", elevated: "#3a3a3c", border: "#3a3a3c",
-  accent: "#bf5af2", green: "#30d158", red: "#ff453a", yellow: "#ffd60a",
-  sec: "#8e8e93", muted: "#48484a",
-};
 
 function runwayInfo(d: number): { color: string; label: string } {
   if (d > 998) return { color: C.green,  label: "∞" };
@@ -54,7 +50,7 @@ function StocksContent({ data }: { data: StockItem[] }) {
             { label: "← Возвраты",  val: fromClient,  color: C.red     },
           ].map(c => (
             <div key={c.label}>
-              <div style={{ fontSize: 11, color: C.sec, marginBottom: 4 }}>{c.label}</div>
+              <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 4 }}>{c.label}</div>
               <div style={{ fontSize: 20, fontWeight: 700, color: c.color }}>{c.val}</div>
             </div>
           ))}
@@ -69,14 +65,14 @@ function StocksContent({ data }: { data: StockItem[] }) {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
               <div>
                 <div style={{ fontWeight: 600, fontSize: 16 }}>{s.article} R$</div>
-                <div style={{ fontSize: 12, color: C.sec, marginTop: 3 }}>
+                <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 3 }}>
                   {s.price > 0 ? `${s.price.toLocaleString("ru-RU")} ₽  ·  ` : ""}
                   ср/д: {s.avgDailySales} шт
                 </div>
               </div>
               <div style={{ textAlign: "right" as const }}>
                 <div style={{ fontSize: 24, fontWeight: 700 }}>{s.quantity}</div>
-                <div style={{ fontSize: 11, color: C.sec }}>шт</div>
+                <div style={{ fontSize: 11, color: C.textSecondary }}>шт</div>
               </div>
             </div>
 
@@ -85,11 +81,11 @@ function StocksContent({ data }: { data: StockItem[] }) {
             </div>
 
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 7, fontSize: 12 }}>
-              <span style={{ color: C.sec }}>
+              <span style={{ color: C.textSecondary }}>
                 Запас: <span style={{ color: r.color, fontWeight: 600 }}>{r.label}</span>
               </span>
               {(s.inWayToClient > 0 || s.inWayFromClient > 0) && (
-                <span style={{ color: C.sec }}>
+                <span style={{ color: C.textSecondary }}>
                   {s.inWayToClient   > 0 ? `✈️ ${s.inWayToClient}`   : ""}
                   {s.inWayFromClient > 0 ? ` 🔄 ${s.inWayFromClient}` : ""}
                 </span>
@@ -114,7 +110,7 @@ function SuppliesContent({ token }: { token: string }) {
 
   if (loading) return <Skeleton />;
   if (!data || data.length === 0) return (
-    <div style={{ padding: 40, textAlign: "center" as const, color: C.sec, fontSize: 14 }}>
+    <div style={{ padding: 40, textAlign: "center" as const, color: C.textSecondary, fontSize: 14 }}>
       Нет поставок
     </div>
   );
@@ -126,7 +122,7 @@ function SuppliesContent({ token }: { token: string }) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
             <div>
               <div style={{ fontWeight: 600, fontSize: 15 }}>{s.name || s.id}</div>
-              {s.name && <div style={{ fontSize: 12, color: C.sec, marginTop: 2 }}>ID: {s.id}</div>}
+              {s.name && <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 2 }}>ID: {s.id}</div>}
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: s.done ? C.green : C.yellow }}>
@@ -135,7 +131,7 @@ function SuppliesContent({ token }: { token: string }) {
               <span style={{ fontSize: 11, color: C.muted }}>{cargoLabel(s.cargoType)}</span>
             </div>
           </div>
-          <div style={{ fontSize: 12, color: C.sec }}>
+          <div style={{ fontSize: 12, color: C.textSecondary }}>
             Создана: {new Date(s.createdAt).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
             {s.closedAt && (
               <span>
@@ -161,7 +157,7 @@ function PricesContent({ token }: { token: string }) {
 
   if (loading) return <Skeleton />;
   if (!data || data.length === 0) return (
-    <div style={{ padding: 40, textAlign: "center" as const, color: C.sec, fontSize: 14 }}>
+    <div style={{ padding: 40, textAlign: "center" as const, color: C.textSecondary, fontSize: 14 }}>
       Нет данных
     </div>
   );
@@ -204,7 +200,7 @@ export default function StocksScreen({ token }: { token: string }) {
               flex: 1, padding: "8px 0", borderRadius: 8, border: "none", cursor: "pointer",
               fontSize: 13, fontWeight: tab === t ? 600 : 400,
               background: tab === t ? C.elevated : "none",
-              color: tab === t ? "#fff" : C.sec,
+              color: tab === t ? "#fff" : C.textSecondary,
             }}>
               {t === "stocks" ? "Склад" : t === "supplies" ? "Поставки" : "Цены"}
             </button>

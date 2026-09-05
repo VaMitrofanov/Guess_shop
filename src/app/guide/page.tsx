@@ -1,23 +1,51 @@
 import { Metadata } from "next";
+import { headers } from "next/headers";
 import GuideClient from "./GuideClient";
+import { platformFromUserAgent } from "@/lib/device-platform";
+import { CUSTOM_MAX, CUSTOM_MIN } from "@/lib/retail-pricing";
 
 export const metadata: Metadata = {
   title: "Инструкция по созданию геймпасса | Roblox Bank",
   description:
     "Пошаговая инструкция по созданию геймпасса в Roblox для получения Robux",
+  // D11: страница открывается с разными query (source/amount/code), контент
+  // при этом один — canonical сводит их к одному адресу на apex.
+  alternates: { canonical: "/guide" },
 };
 
 interface GuidPageProps {
-  searchParams: Promise<{ source?: string; skip?: string; code?: string }>;
+  searchParams: Promise<{ source?: string; skip?: string; code?: string; test?: string; nom?: string; preview?: string; amount?: string; username?: string; flow?: string }>;
 }
 
 export default async function GuidePage({ searchParams }: GuidPageProps) {
-  const { source, skip, code } = await searchParams;
+  const { source, skip, code, test, nom, preview, amount, username, flow } = await searchParams;
+  // Телефон или компьютер: вход в Creator Hub на них разный, и кадры инструкции
+  // тоже. Догадка приходит в первом HTML, чтобы страница не мигала после
+  // гидратации; в браузере она уточняется, а переключатель её перекрывает.
+  // Страница и так динамическая (ждёт searchParams) — заголовки бесплатны.
+  const initialPlatform = platformFromUserAgent((await headers()).get("user-agent"));
   const isWB = source === "wb";
   const skipGate = isWB && !!skip;
   // code passed by TG/VK bot so the instruction page opens even in Telegram's WebView
   // (which has a separate localStorage from the regular browser)
   const wbCodeFromUrl = skipGate && code ? code.trim().toUpperCase() : undefined;
+  // Silent QA preview of the instruction (no reservation, no bot, no admin alert):
+  //   /guide?source=wb&test=1[&nom=1000]   or   /guide?source=wb&code=TESTDEV
+  const codeUp = code?.trim().toUpperCase();
+  const testMode = isWB && (test === "1" || codeUp === "TESTDEV");
+  // Permanent "just show me the instruction" link (Traefik only forwards
+  // Path(/guide)&Query(source=wb) to the guide service, so this must live on the
+  // /guide route — a nested /guide/preview path never reaches the container).
+  // Opens the real instruction directly (no gate/intro/bot/DB) with WORKING
+  // Telegram/VK buttons (unlike test=1, where they are inert):
+  //   /guide?source=wb&preview=1[&nom=1000]
+  const previewMode = isWB && preview === "1";
+  const testNom = nom ? Math.max(0, parseInt(nom, 10) || 0) : undefined;
+  const siteAmount = Math.min(CUSTOM_MAX, Math.max(CUSTOM_MIN, parseInt(amount ?? "1000", 10) || 1000));
+  // `flow=order` несут только ссылки из покупки (калькулятор, оформление, личный
+  // кабинет). «Инструкция» из меню, футера и главной его не несёт — там человек
+  // просто читает, и проверять у него нечего.
+  const orderFlow = flow === "order";
 
   return (
     <>
@@ -28,7 +56,19 @@ export default async function GuidePage({ searchParams }: GuidPageProps) {
         style={{ display: "none" }}
         aria-hidden="true"
       />
-      <GuideClient isWB={isWB} skipGate={skipGate} wbCodeFromUrl={wbCodeFromUrl} />
+      <GuideClient
+        isWB={isWB}
+        guideMode={source === "direct" ? "BOT" : isWB ? "WB" : "SITE"}
+        skipGate={skipGate}
+        wbCodeFromUrl={wbCodeFromUrl}
+        testMode={testMode}
+        previewMode={previewMode}
+        testNom={testNom}
+        initialAmount={siteAmount}
+        initialUsername={username ?? ""}
+        orderFlow={orderFlow}
+        initialPlatform={initialPlatform}
+      />
     </>
   );
 }
