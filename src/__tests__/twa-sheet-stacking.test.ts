@@ -64,3 +64,27 @@ describe("Ссылку на геймпасс можно вставить рук�
     expect(screen).toContain('action: "manual-validate", gamepassUrl: raw, amount: order.amount');
   });
 });
+
+/* Форма правки, открытая пустой, обещала стереть заказ: `dirtyEdit` считал
+   номинал и геймпасс изменёнными, а «Сохранить» уходило с `amount: 0` и пустой
+   ссылкой (сервер заворачивал по `amount > 0`, а у прямого заказа номинал не
+   шлётся вовсе — там правка молча снимала пасс и ник). Видно это стало только
+   после того, как форму перестало прятать под карточкой. */
+describe("Правка открывается значениями заказа", () => {
+  const sheet = readFileSync(
+    join(process.cwd(), "src/app/twa/_components/OrderSheet.tsx"),
+    "utf8",
+  );
+
+  it("номинал, ник и геймпасс подставляются из цели правки", () => {
+    expect(sheet).toContain("initialTarget ? String(initialTarget.amount) : initialAmount");
+    expect(sheet).toContain("useState(initialTarget?.robloxUsername ?? initialNick ?? \"\")");
+    expect(sheet).toContain("useState(initialTarget?.gamepassUrl ?? initialGamepassUrl ?? \"\")");
+  });
+
+  it("карточка отдаёт форме все три поля", () => {
+    for (const field of ["amount: order.amount", "robloxUsername: order.robloxUsername", "gamepassUrl: order.gamepassUrl"]) {
+      expect(screen).toContain(field);
+    }
+  });
+});

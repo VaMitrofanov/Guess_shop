@@ -226,9 +226,19 @@ export default function OrderSheet({
   const editing = target !== null;
 
   const [wbCode, setWbCode] = useState("");
-  const [amount, setAmount] = useState(initialAmount ? String(initialAmount) : "");
-  const [nick, setNick] = useState(initialNick ?? "");
-  const [gpInput, setGpInput] = useState(initialGamepassUrl ?? "");
+  /* В правке поля стартуют ЗНАЧЕНИЯМИ ЗАКАЗА, а не пустыми.
+     Пустой формой правка выглядела как «сотри всё»: `dirtyEdit` сразу считал
+     номинал и геймпасс изменёнными, кнопка обещала «Сохранить · номинал,
+     геймпасс», а запрос уходил с `amount: 0` и пустой ссылкой. Сервер
+     заворачивал его по `amount > 0` (у прямого заказа номинал не шлётся вовсе —
+     там правка молча снимала пасс и ник). На телефоне этого никто не видел:
+     до 05.09 форма открывалась под карточкой. Те же значения подставляет
+     `switchToOrder` — расходиться им нельзя. */
+  const [amount, setAmount] = useState(
+    initialTarget ? String(initialTarget.amount) : initialAmount ? String(initialAmount) : "",
+  );
+  const [nick, setNick] = useState(initialTarget?.robloxUsername ?? initialNick ?? "");
+  const [gpInput, setGpInput] = useState(initialTarget?.gamepassUrl ?? initialGamepassUrl ?? "");
   const [note, setNote] = useState(humanNoteOf(initialTarget?.adminNote));
   /** Номер заказа WB/DBS: четвёртый способ назвать тот же заказ. */
   const [wbOrderId, setWbOrderId] = useState(initialWbOrderId ?? "");
